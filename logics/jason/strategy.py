@@ -20,6 +20,7 @@ def run_portfolio_backtest(
     core_start_date: Optional[pd.Timestamp] = None,
     top_n: int = 10,
     date_range: Optional[List[str]] = None,
+    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     공유 현금 Top-N 포트폴리오를 시뮬레이션합니다.
@@ -27,8 +28,15 @@ def run_portfolio_backtest(
     """
     # Fetch all series
     data = {}
-    for tkr, _ in pairs:
-        df = fetch_ohlcv(tkr, months_range=months_range, date_range=date_range)
+    tickers_to_process = [p[0] for p in pairs]
+
+    for tkr in tickers_to_process:
+        df = None
+        if prefetched_data and tkr in prefetched_data:
+            df = prefetched_data[tkr]
+        else:
+            df = fetch_ohlcv(tkr, months_range=months_range, date_range=date_range)
+
         if df is None or len(df) < 25:
             continue
         close = df['Close']
@@ -67,12 +75,12 @@ def run_portfolio_backtest(
     # Settings
     sell_thr = float(getattr(jason_settings, 'SELL_SUM_THRESHOLD', -3.0))
     buy_thr = float(getattr(jason_settings, 'BUY_SUM_THRESHOLD', 3.0))
-    stop_loss = getattr(jason_settings, 'HOLDING_STOP_LOSS_PCT', None)
+    stop_loss = getattr(global_settings, 'HOLDING_STOP_LOSS_PCT', None)
     cooldown_days = int(getattr(global_settings, 'COOLDOWN_DAYS', 0))
-    big_drop_pct = float(getattr(global_settings, 'BIG_DROP_PCT', -10.0)) # 이 부분은 global_settings를 사용하는 것이 맞습니다.
-    big_drop_block_days = int(getattr(global_settings, 'BIG_DROP_SELL_BLOCK_DAYS', 5))
+    big_drop_pct = float(getattr(jason_settings, 'BIG_DROP_PCT', -10.0))
+    big_drop_block_days = int(getattr(jason_settings, 'BIG_DROP_SELL_BLOCK_DAYS', 5))
     min_pos_pct = float(getattr(global_settings, 'MIN_POSITION_PCT', 0.10))
-    max_pos_pct = float(getattr(global_settings, 'MAX_POSITION_PCT', 0.15))
+    max_pos_pct = float(getattr(global_settings, 'MAX_POSITION_PCT', 0.20))
     trim_on = bool(getattr(global_settings, 'ENABLE_MAX_POSITION_TRIM', True))
 
     # State
@@ -239,7 +247,7 @@ def run_single_ticker_backtest(
     # Settings
     sell_thr = float(getattr(jason_settings, 'SELL_SUM_THRESHOLD', -3.0))
     buy_thr = float(getattr(jason_settings, 'BUY_SUM_THRESHOLD', 3.0))
-    stop_loss = getattr(jason_settings, 'HOLDING_STOP_LOSS_PCT', None)
+    stop_loss = getattr(global_settings, 'HOLDING_STOP_LOSS_PCT', None)
     cooldown_days = int(getattr(global_settings, 'COOLDOWN_DAYS', 0))
     try:
         st_p = int(getattr(jason_settings, 'ST_ATR_PERIOD', 14))
@@ -268,8 +276,8 @@ def run_single_ticker_backtest(
 
         # Big drop sell block rule
         try:
-            big_drop_pct = float(getattr(global_settings, 'BIG_DROP_PCT', -10.0))
-            big_drop_block_days = int(getattr(global_settings, 'BIG_DROP_SELL_BLOCK_DAYS', 5))
+            big_drop_pct = float(getattr(jason_settings, 'BIG_DROP_PCT', -10.0))
+            big_drop_block_days = int(getattr(jason_settings, 'BIG_DROP_SELL_BLOCK_DAYS', 5))
             c_prev = float(close.iloc[i-1]) if i - 1 >= 0 else None
             if c_prev and c_prev > 0:
                 day_chg_pct = (c0 / c_prev - 1.0) * 100.0

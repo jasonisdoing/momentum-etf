@@ -6,6 +6,7 @@ import pandas as pd
 from typing import Optional, List, Tuple, Dict
 from math import ceil
 
+import settings as global_settings
 from . import settings as seykota_settings
 from utils.data_loader import fetch_ohlcv, get_today_str
 
@@ -17,6 +18,7 @@ def run_portfolio_backtest(
     core_start_date: Optional[pd.Timestamp] = None,
     top_n: int = 10,
     date_range: Optional[List[str]] = None,
+    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     Simulates a Top-N portfolio using a moving average crossover strategy.
@@ -24,16 +26,23 @@ def run_portfolio_backtest(
     # Settings
     fast_ma_period = int(getattr(seykota_settings, 'SEYKOTA_FAST_MA', 50))
     slow_ma_period = int(getattr(seykota_settings, 'SEYKOTA_SLOW_MA', 150))
-    stop_loss = getattr(seykota_settings, 'SEYKOTA_STOP_LOSS_PCT', None)
-    cooldown_days = int(getattr(seykota_settings, 'COOLDOWN_DAYS', 0))
-    min_pos_pct = float(getattr(seykota_settings, 'MIN_POSITION_PCT', 0.10))
-    max_pos_pct = float(getattr(seykota_settings, 'MAX_POSITION_PCT', 0.20))
-    trim_on = bool(getattr(seykota_settings, 'ENABLE_MAX_POSITION_TRIM', True))
+    stop_loss = getattr(global_settings, 'HOLDING_STOP_LOSS_PCT', None)
+    cooldown_days = int(getattr(global_settings, 'COOLDOWN_DAYS', 0))
+    min_pos_pct = float(getattr(global_settings, 'MIN_POSITION_PCT', 0.10))
+    max_pos_pct = float(getattr(global_settings, 'MAX_POSITION_PCT', 0.20))
+    trim_on = bool(getattr(global_settings, 'ENABLE_MAX_POSITION_TRIM', True))
 
     # Fetch all series and precompute indicators
     data = {}
-    for tkr, _ in pairs:
-        df = fetch_ohlcv(tkr, months_range=months_range, date_range=date_range)
+    tickers_to_process = [p[0] for p in pairs]
+
+    for tkr in tickers_to_process:
+        df = None
+        if prefetched_data and tkr in prefetched_data:
+            df = prefetched_data[tkr]
+        else:
+            df = fetch_ohlcv(tkr, months_range=months_range, date_range=date_range)
+
         if df is None or len(df) < slow_ma_period:
             continue
         
@@ -58,25 +67,33 @@ def run_portfolio_backtest(
     if common_index is None or len(common_index) < slow_ma_period:
         return {}
 
-    # Apply core_start_date and MA warmup period
+    # Apply core_start_date
     if core_start_date is not None:
         common_index = common_index[common_index >= core_start_date]
     
-    # Ensure enough data for the longest MA
-    warmup_start_index = common_index.searchsorted(common_index[0] + pd.DateOffset(days=slow_ma_period))
-    if warmup_start_index >= len(common_index):
+    # Ensure enough data for the longest MA warmup period
+    if common_index.empty:
         return {}
-    common_index = common_index[warmup_start_index:]
 
     # State
     state = {tkr: {'shares': 0, 'avg_cost': 0.0, 'buy_block_until': -1, 'sell_block_until': -1} for tkr in data.keys()}
     cash = float(initial_capital)
     out_rows = {tkr: [] for tkr in data.keys()}
     out_cash = []
+    first_ticker = next(iter(data)) # For checking warmup status
 
     # Main loop
     for i, dt in enumerate(common_index):
         today_prices = {tkr: float(d['close'].loc[dt]) for tkr, d in data.items() if dt in d['close'].index}
+        
+        # Warm-up check: If the slow MA is not yet calculated, skip trading.
+        if pd.isna(data[first_ticker]['slow_ma'].get(dt)):
+            for tkr in data.keys():
+                s = state[tkr]
+                price = today_prices.get(tkr)
+                out_rows[tkr].append({'date': dt, 'price': price, 'shares': s['shares'], 'pv': s['shares'] * (price or 0), 'decision': 'WAIT', 'avg_cost': s['avg_cost'], 'trade_amount': 0.0, 'trade_profit': 0.0, 'trade_pl_pct': 0.0, 'note': '웜업 기간', 'p1': 0, 'p2': 0, 's2_sum': 0, 'st_dir': 0})
+            out_cash.append({'date': dt, 'price': 1.0, 'cash': cash, 'shares': 0, 'pv': cash, 'decision': 'HOLD'})
+            continue
         
         # Sells & Trims
         equity = cash + sum(s['shares'] * today_prices.get(tkr, 0) for tkr, s in state.items())
@@ -186,8 +203,8 @@ def run_single_ticker_backtest(
     # Settings
     fast_ma_period = int(getattr(seykota_settings, 'SEYKOTA_FAST_MA', 50))
     slow_ma_period = int(getattr(seykota_settings, 'SEYKOTA_SLOW_MA', 150))
-    stop_loss = getattr(seykota_settings, 'SEYKOTA_STOP_LOSS_PCT', None)
-    cooldown_days = int(getattr(seykota_settings, 'COOLDOWN_DAYS', 0))
+    stop_loss = getattr(global_settings, 'HOLDING_STOP_LOSS_PCT', None)
+    cooldown_days = int(getattr(global_settings, 'COOLDOWN_DAYS', 0))
 
     if df is None:
         df = fetch_ohlcv(ticker, months_range=months_range, date_range=date_range)
@@ -198,10 +215,10 @@ def run_single_ticker_backtest(
     fast_ma = close.rolling(window=fast_ma_period).mean()
     slow_ma = close.rolling(window=slow_ma_period).mean()
 
-    start_i = slow_ma_period
+    loop_start_index = 0
     if core_start_date is not None:
         try:
-            start_i = max(start_i, df.index.searchsorted(core_start_date, side='left'))
+            loop_start_index = df.index.searchsorted(core_start_date, side='left')
         except Exception:
             pass
 
@@ -213,10 +230,15 @@ def run_single_ticker_backtest(
     sell_block_until = -1
 
     rows = []
-    for i in range(start_i, len(df)):
+    for i in range(loop_start_index, len(df)):
         price = float(close.iloc[i])
         decision, trade_amount, trade_profit, trade_pl_pct = None, 0.0, 0.0, 0.0
 
+        # Warm-up check: If the slow MA is not yet calculated, skip trading.
+        if pd.isna(slow_ma.iloc[i]):
+            rows.append({'date': df.index[i], 'price': price, 'cash': cash, 'shares': shares, 'pv': cash + shares * price, 'decision': 'WAIT', 'avg_cost': avg_cost, 'trade_amount': 0.0, 'trade_profit': 0.0, 'trade_pl_pct': 0.0, 'note': '웜업 기간', 'p1': 0, 'p2': 0, 's2_sum': 0, 'st_dir': 0})
+            continue
+        
         # Sell/Cut logic
         if shares > 0 and i >= sell_block_until:
             hold_ret = (price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0

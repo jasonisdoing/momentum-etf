@@ -154,10 +154,15 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
         try:
             # 패키지 기반 전략(e.g., logics/jason/strategy.py)을 먼저 시도
             strategy_module = importlib.import_module(f"logics.{strategy_name}.strategy")
+            try:
+                strategy_settings_module = importlib.import_module(f"logics.{strategy_name}.settings")
+            except ImportError:
+                strategy_settings_module = None
         except ImportError:
             try:
                 # 단일 파일 기반 전략(e.g., logics/my_strategy.py)으로 폴백
                 strategy_module = importlib.import_module(f"logics.{strategy_name}")
+                strategy_settings_module = None
             except ImportError:
                 print(f"오류: '{strategy_name}' 전략을 찾을 수 없습니다. logics/{strategy_name}/strategy.py 또는 logics/{strategy_name}.py 파일을 확인해주세요.")
                 return
@@ -171,8 +176,38 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
             return
         
         print(f"[settings] INITIAL_CAPITAL={int(initial_capital):,}원 | 기간={period_label}")
+        
+        # 1. 모든 티커의 원본 데이터를 로드합니다.
+        from utils.data_loader import fetch_ohlcv
+        raw_data_by_ticker: Dict[str, pd.DataFrame] = {}
+        for ticker, name in pairs:
+            df = fetch_ohlcv(ticker, months_range=months_range, date_range=test_date_range)
+            if df is not None and not df.empty:
+                raw_data_by_ticker[ticker] = df
+        
+        # 2. 모든 종목에 대한 공통 거래일을 계산합니다.
+        common_index = None
+        for df in raw_data_by_ticker.values():
+            common_index = df.index if common_index is None else common_index.intersection(df.index)
 
-        # Fetch and simulate per ticker or portfolio
+        if common_index is None or common_index.empty:
+            if not quiet: print("오류: 모든 종목에 걸쳐 공통된 거래일이 없습니다.")
+            return None
+
+        # 3. 공통 시작일이 요청된 시작일을 만족하는지 확인합니다.
+        actual_start_date = common_index[0]
+        if core_start_dt and actual_start_date > core_start_dt:
+            if not quiet:
+                late_tickers = {tkr: df.index[0] for tkr, df in raw_data_by_ticker.items() if not df.index.empty and df.index[0] > core_start_dt}
+                print(f"\n오류: '{strategy_name}' 전략의 백테스트를 중단합니다.")
+                print(f"      요청된 시작일 '{core_start_dt.strftime('%Y-%m-%d')}'보다 실제 가능한 시작일 '{actual_start_date.strftime('%Y-%m-%d')}'이 늦습니다.")
+                if late_tickers:
+                    print(f"      원인으로 추정되는 종목:")
+                    for tkr, s_date in sorted(late_tickers.items(), key=lambda item: item[1]):
+                         print(f"      - {tkr} (데이터 시작일: {s_date.strftime('%Y-%m-%d')})")
+            return None
+
+        # 4. 미리 로드한 데이터를 사용하여 시뮬레이션을 실행합니다.
         per_ticker_ts: Dict[str, pd.DataFrame] = {}
         name_by_ticker: Dict[str, str] = {t: n for t, n in pairs}
         portfolio_topn = int(getattr(settings, 'PORTFOLIO_TOPN', 0) or 0)
@@ -180,23 +215,26 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
             per_ticker_ts = run_portfolio_backtest(
                 pairs, months_range=months_range, initial_capital=initial_capital,
                 core_start_date=core_start_dt, top_n=portfolio_topn,
-                date_range=test_date_range
+                date_range=test_date_range, prefetched_data=raw_data_by_ticker
             ) or {}
             if 'CASH' in per_ticker_ts:
                 name_by_ticker['CASH'] = '현금'
         else:
             # 종목별 고정 자본 방식: 전체 자본을 종목 수로 나눔
             capital_per_ticker = initial_capital / len(pairs) if pairs else 0
-            for ticker, name in pairs:
+            for ticker, _ in pairs:
+                df_ticker = raw_data_by_ticker.get(ticker)
+                if df_ticker is None:
+                    continue
                 ts = run_single_ticker_backtest(
-                    ticker, df=None, months_range=months_range,
+                    ticker, df=df_ticker, months_range=months_range,
                     initial_capital=capital_per_ticker, core_start_date=core_start_dt, date_range=test_date_range
                 )
                 if not ts.empty:
                     per_ticker_ts[ticker] = ts
 
         if not per_ticker_ts:
-            print('시뮬레이션할 유효한 데이터가 없습니다.')
+            if not quiet: print('시뮬레이션할 유효한 데이터가 없습니다.')
             return
 
         # Align on common dates across all tickers (intersection)
@@ -277,7 +315,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                     disp_price = price_today
                     disp_shares = shares
                     trade_amount = float(row.get('trade_amount', 0.0))
-                    amount = trade_amount if decision in ('BUY','SELL','CUT','TRIM','SELL_TRIM') else (shares * price_today)
+                    amount = trade_amount if decision in ('BUY','SELL','CUT','TRIM') else (shares * price_today)
                     try:
                         price_prev = float(ts.loc[prev_dt]['price']) if (prev_dt is not None and prev_dt in ts.index) else None
                     except Exception:
@@ -288,8 +326,8 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                     if portfolio_topn > 0 and tkr == 'CASH':
                         disp_price, disp_shares, amount = 1, 1, total_cash
                         w = (total_cash / total_value * 100.0) if total_value > 0 else 0.0
-                    prof = float(row.get('trade_profit', 0.0)) if decision in ('SELL','CUT','TRIM','SELL_TRIM') else 0.0
-                    plpct = float(row.get('trade_pl_pct', 0.0)) if decision in ('SELL','CUT','TRIM','SELL_TRIM') else 0.0
+                    prof = float(row.get('trade_profit', 0.0)) if decision in ('SELL','CUT','TRIM') else 0.0
+                    plpct = float(row.get('trade_pl_pct', 0.0)) if decision in ('SELL','CUT','TRIM') else 0.0
                     avg_cost = float(row.get('avg_cost', 0.0)) if row.get('avg_cost', None) is not None else 0.0
                     hold_ret_str = f"{(price_today / avg_cost - 1.0) * 100.0:+.1f}%" if shares > 0 and avg_cost > 0 else "-"
                     p1, p2, ssum = row.get('p1'), row.get('p2'), row.get('s2_sum')
@@ -298,9 +336,9 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                         try: return f"{float(x):+,.1f}%"
                         except Exception: return "-"
                     st_str = '+1' if stv > 0 else ('-1' if stv < 0 else '0')
-                    display_status = 'TRIM' if decision == 'SELL_TRIM' else decision
+                    display_status = decision
                     phrase = ''
-                    if decision in ('BUY', 'SELL', 'CUT', 'TRIM', 'SELL_TRIM') and amount and price_today:
+                    if decision in ('BUY', 'SELL', 'CUT', 'TRIM') and amount and price_today:
                         qty_calc = int(float(amount) // float(price_today)) if float(price_today) > 0 else 0
                         if decision == 'BUY':
                             phrase = f"매수 {qty_calc}주 @ {int(round(price_today)):,}"
@@ -378,11 +416,57 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                 "cumulative_return_pct": (final_value / initial_capital - 1) * 100 if initial_capital > 0 else 0
             }
 
+            # 월별/연간 수익률 계산
+            if portfolio_values:
+                pv_series = pd.Series(portfolio_values, index=pd.to_datetime(portfolio_dates))
+                # 수익률 계산을 위해 시작점에 초기 자본을 추가
+                start_row = pd.Series([initial_capital], index=[start_date - pd.Timedelta(days=1)])
+                pv_series_with_start = pd.concat([start_row, pv_series])
+
+                # 월별 수익률
+                monthly_returns = pv_series_with_start.resample('ME').last().pct_change().dropna()
+                summary['monthly_returns'] = monthly_returns
+
+                # 월별 누적 수익률
+                eom_pv = pv_series.resample('ME').last()
+                monthly_cum_returns = (eom_pv / initial_capital - 1).ffill()
+                summary['monthly_cum_returns'] = monthly_cum_returns
+
+                # 연간 수익률
+                yearly_returns = pv_series_with_start.resample('YE').last().pct_change().dropna()
+                summary['yearly_returns'] = yearly_returns
+
             return_value = summary
 
-            if quiet:
-                pass  # Just return the summary
-            else:
+            # 종목별 성과 계산
+            ticker_summaries = []
+            for tkr, ts in per_ticker_ts.items():
+                if tkr == 'CASH':
+                    continue
+
+                trades = ts[ts['decision'].isin(['SELL', 'CUT', 'TRIM'])]
+                total_trades = len(trades)
+
+                if total_trades > 0:
+                    winning_trades = len(trades[trades['trade_profit'] > 0])
+                    win_rate = (winning_trades / total_trades) * 100.0
+                    total_profit = trades['trade_profit'].sum()
+                    avg_profit = total_profit / total_trades
+                else:
+                    win_rate = 0.0
+                    total_profit = 0.0
+                    avg_profit = 0.0
+                
+                ticker_summaries.append({
+                    'ticker': tkr,
+                    'name': name_by_ticker.get(tkr, ''),
+                    'total_trades': total_trades,
+                    'win_rate': win_rate,
+                    'total_profit': total_profit,
+                    'avg_profit': avg_profit,
+                })
+
+            if not quiet:
                 sys.stdout = _orig_stdout # Print summary to original stdout
                 print("\n" + "="*30 + f"\n 백테스트 결과 요약 ({strategy_name}) ".center(30, "=") + "\n" + "="*30)
                 print(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({years:.2f} 년)")
@@ -392,6 +476,68 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                 print(f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}%")
                 print(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
                 print("="*30)
+
+                # 월별 성과 요약 테이블 출력
+                if 'monthly_returns' in summary and not summary['monthly_returns'].empty:
+                    print("\n" + "="*30 + f"\n 월별 성과 요약 ".center(30, "=") + "\n" + "="*30)
+                    print("(괄호 안은 누적 수익률)")
+                    
+                    monthly_returns = summary['monthly_returns']
+                    yearly_returns = summary['yearly_returns']
+                    monthly_cum_returns = summary.get('monthly_cum_returns')
+
+                    pivot_df = monthly_returns.mul(100).to_frame('return').pivot_table(
+                        index=monthly_returns.index.year,
+                        columns=monthly_returns.index.month,
+                        values='return'
+                    )
+
+                    if not yearly_returns.empty:
+                        yearly_series = yearly_returns.mul(100)
+                        yearly_series.index = yearly_series.index.year
+                        pivot_df['연간'] = yearly_series
+                    # If yearly_returns is empty, the '연간' column will not be added, and .get() will return None later.
+
+                    cum_pivot_df = None
+                    if monthly_cum_returns is not None and not monthly_cum_returns.empty:
+                        cum_pivot_df = monthly_cum_returns.mul(100).to_frame('cum_return').pivot_table(
+                            index=monthly_cum_returns.index.year,
+                            columns=monthly_cum_returns.index.month,
+                            values='cum_return'
+                        )
+                    
+                    headers = ["연도"] + [f'{m}월' for m in range(1, 13)] + ["연간"]
+                    rows_data = []
+                    for year, row in pivot_df.iterrows():
+                        row_data = [str(year)]
+                        for month in range(1, 13):
+                            val = row.get(month)
+                            if pd.notna(val):
+                                cell_str = f"{val:+.2f}%"
+                                if cum_pivot_df is not None and year in cum_pivot_df.index and month in cum_pivot_df.columns and pd.notna(cum_pivot_df.loc[year, month]):
+                                    cum_val = cum_pivot_df.loc[year, month]
+                                    cell_str += f" ({cum_val:+.2f}%)"
+                                row_data.append(cell_str)
+                            else:
+                                row_data.append("-")
+                        yearly_val = row.get('연간')
+                        row_data.append(f"{yearly_val:+.2f}%" if pd.notna(yearly_val) else "-")
+                        rows_data.append(row_data)
+                    aligns = ['left'] + ['right'] * (len(headers) - 1)
+                    print("\n".join(render_table_eaw(headers, rows_data, aligns)))
+
+                # 종목별 성과 요약 테이블 출력
+                if ticker_summaries:
+                    print("\n" + "="*30 + f"\n 종목별 성과 요약 ".center(30, "=") + "\n" + "="*30)
+                    headers = ["티커", "종목명", "거래횟수", "승률", "총손익", "평균손익"]
+                    
+                    sorted_summaries = sorted(ticker_summaries, key=lambda x: x['total_profit'], reverse=True)
+                    
+                    rows = [[s['ticker'], s['name'], f"{s['total_trades']}회", f"{s['win_rate']:.1f}%", _fmt_money_kr(s['total_profit']), _fmt_money_kr(s['avg_profit'])] for s in sorted_summaries]
+                    
+                    aligns = ['right', 'left', 'right', 'right', 'right', 'right']
+                    table_lines = render_table_eaw(headers, rows, aligns)
+                    print("\n".join(table_lines))
 
     finally:
         # Restore stdout and close file

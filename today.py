@@ -201,9 +201,9 @@ def main(portfolio_path: Optional[str] = None):
     # Decide next action per ticker
     sell_thr = float(getattr(jason_settings, 'SELL_SUM_THRESHOLD', -3.0))
     buy_thr = float(getattr(jason_settings, 'BUY_SUM_THRESHOLD', 3.0))
-    stop_loss = getattr(jason_settings, 'HOLDING_STOP_LOSS_PCT', None)
-    max_pos = float(getattr(global_settings, 'MAX_POSITION_PCT', 1.0))
-    min_pos = float(getattr(global_settings, 'MIN_POSITION_PCT', 0.0))
+    stop_loss = getattr(global_settings, 'HOLDING_STOP_LOSS_PCT', None)
+    max_pos = float(getattr(global_settings, 'MAX_POSITION_PCT', 0.20))
+    min_pos = float(getattr(global_settings, 'MIN_POSITION_PCT', 0.10))
 
     actions = []  # (notional, row)
     for tkr, name in pairs:
