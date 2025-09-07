@@ -11,11 +11,22 @@ import settings
 # New structure imports
 from utils.data_loader import read_tickers_file, read_holdings_file, fetch_ohlcv
 from utils.indicators import supertrend_direction
-from utils.report import fmt_manwon as fmt_money_uk, render_table_eaw
+from utils.report import render_table_eaw
 try:
     from pykrx import stock as _stock
 except Exception:
     _stock = None
+
+def _fmt_money_kr(v: float) -> str:
+    """금액을 '억'과 '만원' 단위의 한글 문자열로 포맷합니다."""
+    if v is None:
+        return "-"
+    man = int(round(v / 10_000))
+    if man >= 10_000:
+        uk = man // 10_000
+        rem = man % 10_000
+        return f"{uk}억 {rem:,}만원" if rem > 0 else f"{uk}억"
+    return f"{man:,}만원"
 
 
 def load_portfolio_data(portfolio_path: Optional[str] = None, data_dir: str = 'data') -> Optional[Dict]:
@@ -182,8 +193,8 @@ def main(portfolio_path: Optional[str] = None):
     total_cash = float(init_cap) - float(total_holdings)
     total_value = total_holdings + max(0.0, total_cash)
     header_line = (
-        f"{day_label} {label_date_str} - 보유종목 {held_count}"
-        f" 잔액(보유+현금): {fmt_money_uk(total_value)} (보유 {fmt_money_uk(total_holdings)} + 현금 {fmt_money_uk(total_cash)})"
+        f"{day_label} {label_date_str} - 보유종목 {held_count} "
+        f"잔액(보유+현금): {_fmt_money_kr(total_value)} (보유 {_fmt_money_kr(total_holdings)} + 현금 {_fmt_money_kr(total_cash)})"
     )
 
     # Decide next action per ticker
@@ -263,7 +274,7 @@ def main(portfolio_path: Optional[str] = None):
             f"{int(round(price)):,}",
             f"{day_ret:+.1f}%",
             f"{sh:,}",
-            fmt_money_uk(amount),
+            _fmt_money_kr(amount),
             (f"{hold_ret:+.1f}%" if hold_ret is not None else '-'),
             f"{(amount/total_value*100.0) if total_value>0 else 0.0:.0f}%",
             f"{p1:+.1f}%",

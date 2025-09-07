@@ -69,14 +69,17 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 - 표: 액션의 예상 체결금액(notional) 내림차순 정렬. 상태(SELL/CUT/TRIM/BUY/HOLD/WAIT), 비중, 1주/2주/합계, ST, 문구(사유) 표시
 
 2) 백테스트 로그 생성
+ 
+과거 구간에 대해 백테스트를 실행합니다.
 
-설정 범위(MONTHS_RANGE)의 과거 구간에 대해 종목별 데일리 시뮬레이션을 수행하고, 날짜별 헤더 + 종목 표를 출력합니다.
+    # 특정 전략(예: jason)의 상세 백테스트 실행
+    python main.py --test jason
 
+    # 'jason'과 'dummy' 전략의 성과 요약 비교
     python main.py --test
 
-- 출력: `logs/test.log`
-- 사용 파일: tickers.txt
-- 로직: `core/backtester.py` 또는 `core/portfolio.py`의 로직 사용 (매수/매도/손절/쿨다운/급락 매도금지 적용)
+- 상세 백테스트 실행 시: `logs/test.log`에 일별 상세 로그가 기록됩니다.
+- 요약 비교 실행 시: 두 전략의 최종 성과(CAGR, MDD 등)만 간략히 표로 보여줍니다.
 
 3) 웹앱 실행
 

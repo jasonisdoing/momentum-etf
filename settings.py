@@ -10,11 +10,8 @@ SHOW_LOGS = False
 # 백테스트 기본값
 INITIAL_CAPITAL = 100_000_000  # 1억
 
-# 데이터 조회 구간(달 단위, 과거 기준 오프셋)
-# 튠용: 과거 36개월 전부터 12개월 전까지
-TUNE_MONTHS_RANGE = [12,0]
 # 실행용: 과거 12개월 전부터 현재(0개월)까지
-MONTHS_RANGE = [12, 0]
+MONTHS_RANGE = [8, 0]
 
 
 # 매도 조건 임계값(%) — 1~3주 수익률 합계가 이 값보다 작으면 전량 매도
@@ -47,13 +44,13 @@ BIG_DROP_SELL_BLOCK_DAYS = 5
 # 포트폴리오 Top-N 모드 설정
 # 전체 자본(INITIAL_CAPITAL)을 신호가 좋은 상위 N개 종목에 투자합니다.
 # 0이면 비활성(기존: 종목별 고정 자본 방식)
-PORTFOLIO_TOPN = 20
+PORTFOLIO_TOPN = 10
 
 # 포지션 최대 비중(포트폴리오 모드)
 # 한 종목이 포트폴리오에서 차지할 수 있는 최대 비중(0.0~1.0)
 # 예: 0.1 = 10% (기본값)
 MIN_POSITION_PCT = 0.10
-MAX_POSITION_PCT = 0.15
+MAX_POSITION_PCT = 0.20
 
 # 최대 비중 초과 시 부분매도 허용 여부(포트폴리오 모드)
 # True이면 MAX_POSITION_PCT를 초과한 보유분을 당일 부분매도로 상한까지만 줄입니다.

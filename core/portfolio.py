@@ -7,7 +7,7 @@ import pandas as pd
 from typing import Optional, List, Tuple, Dict
 
 
-def portfolio_topn_series(
+def run_portfolio_backtest(
     pairs: List[Tuple[str, str]],
     months_range: Optional[List[int]] = None,
     initial_capital: float = 100_000_000.0,

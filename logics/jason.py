@@ -12,7 +12,7 @@ from utils.data_loader import fetch_ohlcv, get_today_str
 from utils.indicators import supertrend_direction
 
 
-def portfolio_topn_series(
+def run_portfolio_backtest(
     pairs: List[Tuple[str, str]],
     months_range: Optional[List[int]] = None,
     initial_capital: float = 100_000_000.0,
@@ -226,7 +226,7 @@ def portfolio_topn_series(
     return result
 
 
-def simple_daily_series(
+def run_single_ticker_backtest(
     ticker: str,
     df: Optional[pd.DataFrame] = None,
     months_range: Optional[List[int]] = None,
