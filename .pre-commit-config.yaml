@@ -1,0 +1,20 @@
+# /.pre-commit-config.yaml
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+    -   id: trailing-whitespace  # 끝 공백 제거
+    -   id: end-of-file-fixer    # 파일 끝에 한 줄 추가
+    -   id: check-yaml           # YAML 파일 문법 검사
+-   repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+    -   id: black
+-   repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+    -   id: isort
+-   repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+    -   id: flake8
