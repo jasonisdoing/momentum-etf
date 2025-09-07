@@ -1,15 +1,8 @@
 [tool.black]
 # black의 기본 줄 길이는 88자입니다.
-line-length = 88
+line-length = 100
 # target-version = ['py312'] # 특정 파이썬 버전에 맞출 경우
 
 [tool.isort]
 # isort의 프로필을 black과 호환되도록 설정합니다.
 profile = "black"
-
-[tool.flake8]
-# flake8도 black의 줄 길이에 맞춰줍니다.
-max-line-length = 88
-# black과 충돌하거나, 불필요한 일부 경고는 무시하도록 설정합니다.
-# E203: 슬라이싱(:) 앞의 공백, W503: 연산자 앞 줄바꿈, E501: 줄 길이(black이 처리)
-ignore = "E203, W503, E501"
