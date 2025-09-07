@@ -16,7 +16,6 @@ def run_portfolio_backtest(
     initial_capital: float = 100_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
     top_n: int = 10,
-    initial_positions: Optional[dict] = None,
     date_range: Optional[List[str]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """

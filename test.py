@@ -156,7 +156,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
             strategy_module = importlib.import_module(f"logics.{strategy_name}.strategy")
         except ImportError:
             try:
-                # 단일 파일 기반 전략(e.g., logics/dummy.py)으로 폴백
+                # 단일 파일 기반 전략(e.g., logics/my_strategy.py)으로 폴백
                 strategy_module = importlib.import_module(f"logics.{strategy_name}")
             except ImportError:
                 print(f"오류: '{strategy_name}' 전략을 찾을 수 없습니다. logics/{strategy_name}/strategy.py 또는 logics/{strategy_name}.py 파일을 확인해주세요.")
@@ -179,7 +179,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
         if portfolio_topn > 0:
             per_ticker_ts = run_portfolio_backtest(
                 pairs, months_range=months_range, initial_capital=initial_capital,
-                core_start_date=core_start_dt, top_n=portfolio_topn, initial_positions=init_positions,
+                core_start_date=core_start_dt, top_n=portfolio_topn,
                 date_range=test_date_range
             ) or {}
             if 'CASH' in per_ticker_ts:

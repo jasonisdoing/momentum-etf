@@ -77,7 +77,7 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
     # 특정 전략(예: jason)의 상세 백테스트 실행
     python main.py --test jason
 
-    # 'jason'과 'dummy' 전략의 성과 요약 비교
+    # 'jason'과 'seykota' 전략의 성과 요약 비교
     python main.py --test
 
 - 상세 백테스트 실행 시: `logs/test.log`에 일별 상세 로그가 기록됩니다.
