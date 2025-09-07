@@ -4,6 +4,7 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 from typing import Dict, Tuple, List, Optional
 import json
 import os
+import glob
 import pandas as pd
 
 import settings
@@ -17,31 +18,64 @@ except Exception:
     _stock = None
 
 
-def load_initial_capital(path: str = 'data/data.json') -> float:
-    """Load initial capital preferring the latest equity_by_date entry from data/data.json.
-    Fallback to data.json.initial_capital, then settings.INITIAL_CAPITAL.
+def load_portfolio_data(portfolio_path: Optional[str] = None, data_dir: str = 'data') -> Optional[Dict]:
     """
+    지정된 포트폴리오 스냅샷 파일 또는 최신 파일을 로드합니다.
+    파일을 성공적으로 로드하면 'total_equity', 'holdings' 등이 포함된 딕셔너리를 반환합니다.
+    """
+    filepath_to_load = None
+    if portfolio_path:
+        if os.path.exists(portfolio_path):
+            filepath_to_load = portfolio_path
+        else:
+            print(f"경고: 지정된 포트폴리오 파일 '{portfolio_path}'를 찾을 수 없습니다.")
+            return None
+    else:
+        # 최신 파일 찾기
+        try:
+            portfolio_files = glob.glob(os.path.join(data_dir, 'portfolio_*.json'))
+            if not portfolio_files:
+                return None
+            
+            latest_date = None
+            for f_path in portfolio_files:
+                try:
+                    fname = os.path.basename(f_path)
+                    date_str = fname.replace('portfolio_', '').replace('.json', '')
+                    current_date = pd.to_datetime(date_str)
+                    if latest_date is None or current_date > latest_date:
+                        latest_date = current_date
+                        filepath_to_load = f_path
+                except ValueError:
+                    continue
+        except Exception:
+            return None
+
+    if not filepath_to_load:
+        return None
+
     try:
-        if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8') as f:
-                obj = json.load(f)
-                # Prefer latest equity_by_date value if available
-                eq = obj.get('equity_by_date')
-                if isinstance(eq, dict) and eq:
-                    try:
-                        # keys are dates like 'YYYY-MM-DD'
-                        latest_key = max(eq.keys(), key=lambda k: pd.to_datetime(k))
-                        v = eq.get(latest_key)
-                        if v is not None:
-                            return float(v)
-                    except Exception:
-                        pass
-                v = obj.get('initial_capital')
-                if v is not None:
-                    return float(v)
-    except Exception:
-        pass
-    return float(getattr(settings, 'INITIAL_CAPITAL', 100_000_000.0))
+        with open(filepath_to_load, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        holdings_list = data.get('holdings', [])
+        holdings_dict = {
+            item['ticker']: {
+                'name': item.get('name', ''),
+                'shares': item.get('shares', 0),
+                'avg_cost': item.get('avg_cost', 0.0)
+            } for item in holdings_list if item.get('ticker')
+        }
+
+        return {
+            'date': data.get('date'),
+            'total_equity': data.get('total_equity'),
+            'holdings': holdings_dict,
+            'filepath': filepath_to_load
+        }
+    except Exception as e:
+        print(f"오류: 포트폴리오 파일 '{filepath_to_load}' 로드 중 오류 발생: {e}")
+        return None
 
 
 def build_pairs_with_holdings(pairs: List[Tuple[str, str]], holdings: dict) -> List[Tuple[str, str]]:
@@ -54,9 +88,19 @@ def build_pairs_with_holdings(pairs: List[Tuple[str, str]], holdings: dict) -> L
     return [(t, out_map.get(t, '')) for t in out_map.keys()]
 
 
-def main():
-    # Load holdings (snapshot)
-    holdings = read_holdings_file('data/holdings.csv') if os.path.exists('data/holdings.csv') else {}
+def main(portfolio_path: Optional[str] = None):
+    # Load initial state from portfolio file.
+    portfolio_data = load_portfolio_data(portfolio_path)
+
+    if not portfolio_data:
+        print("오류: 포트폴리오 파일(portfolio_*.json)을 찾을 수 없습니다. --portfolio 옵션으로 파일을 지정하거나 data/ 폴더에 파일을 위치시켜주세요.")
+        print("웹 UI(web_app.py)를 실행하여 새 포트폴리오를 생성할 수 있습니다.")
+        return
+
+    print(f"포트폴리오 파일 '{os.path.basename(portfolio_data['filepath'])}'을(를) 기준으로 오늘의 액션을 계산합니다.")
+    holdings = portfolio_data.get('holdings', {})
+    init_cap = float(portfolio_data.get('total_equity', 0.0))
+    # Build a complete list of tickers from tickers.txt and current holdings
     pairs = build_pairs_with_holdings(read_tickers_file('data/tickers.txt'), holdings)
     if not pairs:
         print('티커를 찾을 수 없습니다. data/tickers.txt 파일을 채워주세요.')
@@ -133,23 +177,8 @@ def main():
     denom = int(getattr(settings, 'PORTFOLIO_TOPN', 10))
     # Count held tickers from holdings snapshot
     held_count = sum(1 for v in holdings.values() if int((v or {}).get('shares') or 0) > 0)
-    # Ensure data.json has equity value for the target trading day; abort otherwise
-    label_date_str = pd.to_datetime(label_date).strftime('%Y-%m-%d')
-    eq_map = {}
-    data_json_path = 'data/data.json'
-    try:
-        if os.path.exists(data_json_path):
-            with open(data_json_path,'r',encoding='utf-8') as f:
-                obj = json.load(f)
-                if isinstance(obj.get('equity_by_date'), dict):
-                    eq_map = obj['equity_by_date']
-    except Exception:
-        eq_map = {}
-    if label_date_str not in eq_map or eq_map.get(label_date_str) in (None, ''):
-        print(f"경고: {data_json_path}의 equity_by_date에 {label_date_str} 평가금액이 없습니다. 실행을 중단합니다.")
-        return
 
-    init_cap = float(eq_map[label_date_str])
+    label_date_str = pd.to_datetime(label_date).strftime('%Y-%m-%d')
     total_cash = float(init_cap) - float(total_holdings)
     total_value = total_holdings + max(0.0, total_cash)
     header_line = (

@@ -3,6 +3,8 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 import os
 import importlib
+import glob
+import json
 import sys
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
@@ -14,24 +16,81 @@ from utils.data_loader import read_tickers_file, read_holdings_file
 from utils.report import render_table_eaw
 
 
-def main(strategy_name: str = 'jason'):
+def load_portfolio_data(portfolio_path: Optional[str] = None, data_dir: str = 'data') -> Optional[Dict]:
+    """
+    지정된 포트폴리오 스냅샷 파일 또는 최신 파일을 로드합니다.
+    파일을 성공적으로 로드하면 'total_equity', 'holdings' 등이 포함된 딕셔너리를 반환합니다.
+    """
+    filepath_to_load = None
+    if portfolio_path:
+        if os.path.exists(portfolio_path):
+            filepath_to_load = portfolio_path
+        else:
+            print(f"경고: 지정된 포트폴리오 파일 '{portfolio_path}'를 찾을 수 없습니다.")
+            return None
+    else:
+        # 최신 파일 찾기
+        try:
+            portfolio_files = glob.glob(os.path.join(data_dir, 'portfolio_*.json'))
+            if not portfolio_files:
+                return None
+            
+            latest_date = None
+            for f_path in portfolio_files:
+                try:
+                    fname = os.path.basename(f_path)
+                    date_str = fname.replace('portfolio_', '').replace('.json', '')
+                    current_date = pd.to_datetime(date_str)
+                    if latest_date is None or current_date > latest_date:
+                        latest_date = current_date
+                        filepath_to_load = f_path
+                except ValueError:
+                    continue
+        except Exception:
+            return None
+
+    if not filepath_to_load:
+        return None
+
+    try:
+        with open(filepath_to_load, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        holdings_list = data.get('holdings', [])
+        holdings_dict = {
+            item['ticker']: {
+                'name': item.get('name', ''),
+                'shares': item.get('shares', 0),
+                'avg_cost': item.get('avg_cost', 0.0)
+            } for item in holdings_list if item.get('ticker')
+        }
+
+        return {
+            'date': data.get('date'),
+            'total_equity': data.get('total_equity'),
+            'holdings': holdings_dict,
+            'filepath': filepath_to_load
+        }
+    except Exception as e:
+        print(f"오류: 포트폴리오 파일 '{filepath_to_load}' 로드 중 오류 발생: {e}")
+        return None
+
+
+def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None):
     pairs = read_tickers_file('data/tickers.txt')
     if not pairs:
         print('data/tickers.txt 파일이 비어있거나 없습니다.')
         return
 
-    initial_capital = float(getattr(settings, 'INITIAL_CAPITAL', 1_000_000.0))
     months_range = getattr(settings, 'MONTHS_RANGE', [12, 0])
 
-    # Determine core start date label (without warmup)
-    try:
-        from datetime import datetime as _dt
-        now = pd.to_datetime(_dt.now().strftime('%Y%m%d'))
-        core_start_dt = now - pd.DateOffset(months=int(months_range[0]))
-        period_label = f"{int(months_range[0])}개월~{'현재' if int(months_range[1])==0 else str(int(months_range[1]))+'개월'}"
-    except Exception:
-        core_start_dt = None
-        period_label = str(months_range)
+    # Load initial state from portfolio file.
+    portfolio_data = load_portfolio_data(portfolio_path)
+
+    if not portfolio_data:
+        print("오류: 포트폴리오 파일(portfolio_*.json)을 찾을 수 없습니다. --portfolio 옵션으로 파일을 지정하거나 data/ 폴더에 파일을 위치시켜주세요.")
+        print("웹 UI(web_app.py)를 실행하여 새 포트폴리오를 생성할 수 있습니다.")
+        return
 
     # Setup tee to also write console output into logs/test.log
     log_dir = 'logs'
@@ -55,6 +114,19 @@ def main(strategy_name: str = 'jason'):
 
     log_f = open(log_path, 'w', encoding='utf-8')
     # Header in log
+    print(f"포트폴리오 파일 '{os.path.basename(portfolio_data['filepath'])}'을(를) 사용합니다.")
+    initial_capital = float(portfolio_data.get('total_equity', 0.0))
+    init_positions = portfolio_data.get('holdings', {})
+    portfolio_date_str = portfolio_data.get('date')
+
+    if portfolio_date_str:
+        core_start_dt = pd.to_datetime(portfolio_date_str)
+        period_label = f"{portfolio_date_str} 부터"
+        print(f"백테스트 시작 기준일이 포트폴리오 날짜({portfolio_date_str})로 설정됩니다.")
+    else:
+        core_start_dt = (pd.Timestamp.now() - pd.DateOffset(months=int(months_range[0]))).normalize()
+        period_label = f"{int(months_range[0])}개월~{'현재' if int(months_range[1])==0 else str(int(months_range[1]))+'개월'}"
+
     log_f.write(f"# 시작 {datetime.now().isoformat()} | MONTHS_RANGE={months_range} | 초기자본={int(initial_capital):,}\n")
     log_f.flush()
     _orig_stdout = sys.stdout
@@ -79,11 +151,6 @@ def main(strategy_name: str = 'jason'):
     name_by_ticker: Dict[str, str] = {t: n for t, n in pairs}
     portfolio_topn = int(getattr(settings, 'PORTFOLIO_TOPN', 0) or 0)
     if portfolio_topn > 0:
-        # Optional: load initial holdings if provided
-        try:
-            init_positions = read_holdings_file('data/holdings.csv')
-        except Exception:
-            init_positions = None
         per_ticker_ts = portfolio_topn_series(
             pairs,
             months_range=months_range,

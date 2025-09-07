@@ -4,8 +4,8 @@ data/
 # Log Data
 logs/
 
-# 개인 파일
-jason.txt
+# 메모 파일
+memo.txt
 
 # Python
 __pycache__/
