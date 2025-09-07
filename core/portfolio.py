@@ -17,7 +17,7 @@ def run_portfolio_backtest(
 ) -> Dict[str, pd.DataFrame]:
     """
     공유 현금 Top-N 포트폴리오를 시뮬레이션합니다.
-    이 함수는 logics 폴더의 전략 파일로 이전되었습니다.
+    이 함수는 logics/{strategy_name}/strategy.py 파일로 이전되었습니다.
     test.py에서 --strategy 플래그를 사용하여 전략을 지정하세요.
     """
-    raise NotImplementedError("핵심 로직은 logics/{strategy_name}.py 파일로 이전되었습니다. test.py를 통해 실행하세요.")
+    raise NotImplementedError("핵심 로직은 logics/{strategy_name}/strategy.py 파일로 이전되었습니다. test.py를 통해 실행하세요.")

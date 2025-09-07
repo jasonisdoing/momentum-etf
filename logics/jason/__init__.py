@@ -7,7 +7,8 @@ import pandas as pd
 from typing import Optional, List, Tuple, Dict
 from math import ceil
 
-import settings
+import settings as global_settings
+from . import settings as jason_settings
 from utils.data_loader import fetch_ohlcv, get_today_str
 from utils.indicators import supertrend_direction
 
@@ -36,8 +37,8 @@ def run_portfolio_backtest(
         p2 = (close.shift(5) / close.shift(10) - 1.0).fillna(0.0).round(3) * 100
         s2 = p1 + p2
         try:
-            st_p = int(getattr(settings, 'ST_ATR_PERIOD', 14))
-            st_m = float(getattr(settings, 'ST_ATR_MULTIPLIER', 3.0))
+            st_p = int(getattr(jason_settings, 'ST_ATR_PERIOD', 14))
+            st_m = float(getattr(jason_settings, 'ST_ATR_MULTIPLIER', 3.0))
         except Exception:
             st_p, st_m = 14, 3.0
         st_dir = supertrend_direction(df, st_p, st_m) if len(df) > max(2, st_p) else None
@@ -70,15 +71,15 @@ def run_portfolio_backtest(
         return {}
 
     # Settings
-    sell_thr = float(getattr(settings, 'SELL_SUM_THRESHOLD', -3.0))
-    buy_thr = float(getattr(settings, 'BUY_SUM_THRESHOLD', 3.0))
-    stop_loss = getattr(settings, 'HOLDING_STOP_LOSS_PCT', None)
-    cooldown_days = int(getattr(settings, 'COOLDOWN_DAYS', 0))
-    big_drop_pct = float(getattr(settings, 'BIG_DROP_PCT', -10.0))
-    big_drop_block_days = int(getattr(settings, 'BIG_DROP_SELL_BLOCK_DAYS', 5))
-    min_pos_pct = float(getattr(settings, 'MIN_POSITION_PCT', 0.10))
-    max_pos_pct = float(getattr(settings, 'MAX_POSITION_PCT', 0.15))
-    trim_on = bool(getattr(settings, 'ENABLE_MAX_POSITION_TRIM', True))
+    sell_thr = float(getattr(jason_settings, 'SELL_SUM_THRESHOLD', -3.0))
+    buy_thr = float(getattr(jason_settings, 'BUY_SUM_THRESHOLD', 3.0))
+    stop_loss = getattr(jason_settings, 'HOLDING_STOP_LOSS_PCT', None)
+    cooldown_days = int(getattr(global_settings, 'COOLDOWN_DAYS', 0))
+    big_drop_pct = float(getattr(global_settings, 'BIG_DROP_PCT', -10.0))
+    big_drop_block_days = int(getattr(global_settings, 'BIG_DROP_SELL_BLOCK_DAYS', 5))
+    min_pos_pct = float(getattr(global_settings, 'MIN_POSITION_PCT', 0.10))
+    max_pos_pct = float(getattr(global_settings, 'MAX_POSITION_PCT', 0.15))
+    trim_on = bool(getattr(global_settings, 'ENABLE_MAX_POSITION_TRIM', True))
 
     # State
     state = {tkr: {'shares': 0, 'avg_cost': 0.0, 'buy_block_until': -1, 'sell_block_until': -1} for tkr in data.keys()}
@@ -260,13 +261,13 @@ def run_single_ticker_backtest(
             pass
 
     # Settings
-    sell_thr = float(getattr(settings, 'SELL_SUM_THRESHOLD', -3.0))
-    buy_thr = float(getattr(settings, 'BUY_SUM_THRESHOLD', 3.0))
-    stop_loss = getattr(settings, 'HOLDING_STOP_LOSS_PCT', None)
-    cooldown_days = int(getattr(settings, 'COOLDOWN_DAYS', 0))
+    sell_thr = float(getattr(jason_settings, 'SELL_SUM_THRESHOLD', -3.0))
+    buy_thr = float(getattr(jason_settings, 'BUY_SUM_THRESHOLD', 3.0))
+    stop_loss = getattr(jason_settings, 'HOLDING_STOP_LOSS_PCT', None)
+    cooldown_days = int(getattr(global_settings, 'COOLDOWN_DAYS', 0))
     try:
-        st_p = int(getattr(settings, 'ST_ATR_PERIOD', 14))
-        st_m = float(getattr(settings, 'ST_ATR_MULTIPLIER', 3.0))
+        st_p = int(getattr(jason_settings, 'ST_ATR_PERIOD', 14))
+        st_m = float(getattr(jason_settings, 'ST_ATR_MULTIPLIER', 3.0))
     except Exception:
         st_p, st_m = 14, 3.0
     st_dir = supertrend_direction(df, st_p, st_m) if len(df) > max(2, st_p) else None
@@ -291,8 +292,8 @@ def run_single_ticker_backtest(
 
         # Big drop sell block rule
         try:
-            big_drop_pct = float(getattr(settings, 'BIG_DROP_PCT', -10.0))
-            big_drop_block_days = int(getattr(settings, 'BIG_DROP_SELL_BLOCK_DAYS', 5))
+            big_drop_pct = float(getattr(global_settings, 'BIG_DROP_PCT', -10.0))
+            big_drop_block_days = int(getattr(global_settings, 'BIG_DROP_SELL_BLOCK_DAYS', 5))
             c_prev = float(close.iloc[i-1]) if i - 1 >= 0 else None
             if c_prev and c_prev > 0:
                 day_chg_pct = (c0 / c_prev - 1.0) * 100.0

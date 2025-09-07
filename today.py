@@ -7,7 +7,8 @@ import os
 import glob
 import pandas as pd
 
-import settings
+import settings as global_settings
+from logics.jason import settings as jason_settings
 # New structure imports
 from utils.data_loader import read_tickers_file, read_holdings_file, fetch_ohlcv
 from utils.indicators import supertrend_direction
@@ -136,7 +137,7 @@ def main(portfolio_path: Optional[str] = None):
         s2 = p1 + p2
         # ST direction
         try:
-            st_dir = supertrend_direction(df, int(getattr(settings,'ST_ATR_PERIOD',14)), float(getattr(settings,'ST_ATR_MULTIPLIER',3.0)))
+            st_dir = supertrend_direction(df, int(getattr(jason_settings,'ST_ATR_PERIOD',14)), float(getattr(jason_settings,'ST_ATR_MULTIPLIER',3.0)))
             stv = int(st_dir.iloc[-1]) if len(st_dir)>0 else 0
         except Exception:
             stv = 0
@@ -185,7 +186,7 @@ def main(portfolio_path: Optional[str] = None):
             label_date = pd.to_datetime(dt)
         day_label = '다음 거래일'
 
-    denom = int(getattr(settings, 'PORTFOLIO_TOPN', 10))
+    denom = int(getattr(global_settings, 'PORTFOLIO_TOPN', 10))
     # Count held tickers from holdings snapshot
     held_count = sum(1 for v in holdings.values() if int((v or {}).get('shares') or 0) > 0)
 
@@ -198,11 +199,11 @@ def main(portfolio_path: Optional[str] = None):
     )
 
     # Decide next action per ticker
-    sell_thr = float(getattr(settings, 'SELL_SUM_THRESHOLD', -3.0))
-    buy_thr = float(getattr(settings, 'BUY_SUM_THRESHOLD', 3.0))
-    stop_loss = getattr(settings, 'HOLDING_STOP_LOSS_PCT', None)
-    max_pos = float(getattr(settings, 'MAX_POSITION_PCT', 1.0))
-    min_pos = float(getattr(settings, 'MIN_POSITION_PCT', 0.0))
+    sell_thr = float(getattr(jason_settings, 'SELL_SUM_THRESHOLD', -3.0))
+    buy_thr = float(getattr(jason_settings, 'BUY_SUM_THRESHOLD', 3.0))
+    stop_loss = getattr(jason_settings, 'HOLDING_STOP_LOSS_PCT', None)
+    max_pos = float(getattr(global_settings, 'MAX_POSITION_PCT', 1.0))
+    min_pos = float(getattr(global_settings, 'MIN_POSITION_PCT', 0.0))
 
     actions = []  # (notional, row)
     for tkr, name in pairs:

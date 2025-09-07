@@ -121,6 +121,8 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                     for s in self.streams:
                         try: s.flush()
                         except Exception: pass
+                def close(self):
+                    pass
             log_f = open(log_path, 'w', encoding='utf-8')
             sys.stdout = _Tee(sys.stdout, log_f)
         else:
@@ -133,12 +135,22 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
 
         # 전략 모듈 로드
         try:
-            strategy_module = importlib.import_module(f"logics.{strategy_name}")
+            # 패키지 기반 전략(e.g., logics/jason/strategy.py)을 먼저 시도
+            strategy_module = importlib.import_module(f"logics.{strategy_name}.strategy")
+        except ImportError:
+            try:
+                # 단일 파일 기반 전략(e.g., logics/dummy.py)으로 폴백
+                strategy_module = importlib.import_module(f"logics.{strategy_name}")
+            except ImportError:
+                print(f"오류: '{strategy_name}' 전략을 찾을 수 없습니다. logics/{strategy_name}/strategy.py 또는 logics/{strategy_name}.py 파일을 확인해주세요.")
+                return
+
+        try:
             run_portfolio_backtest = getattr(strategy_module, 'run_portfolio_backtest')
             run_single_ticker_backtest = getattr(strategy_module, 'run_single_ticker_backtest')
             print(f"[{strategy_name} 전략]을 사용하여 백테스트를 실행합니다.")
-        except (ImportError, AttributeError):
-            print(f"오류: '{strategy_name}' 전략을 찾을 수 없거나, logics/{strategy_name}.py 파일에 필요한 함수가 없습니다.")
+        except AttributeError:
+            print(f"오류: '{strategy_name}' 전략 모듈에 run_portfolio_backtest 또는 run_single_ticker_backtest 함수가 없습니다.")
             return
 
         print(f"[settings] INITIAL_CAPITAL={int(initial_capital):,}원, MONTHS_RANGE={months_range} | {period_label}")

@@ -40,13 +40,15 @@ def main():
 
         if args.test == '__COMPARE__':
             # `python main.py --test`
-            print("전략 비교 백테스트를 실행합니다: 'jason' vs 'dummy'")
+            print("전략 비교 백테스트를 실행합니다: 'jason' vs 'seykota' vs 'dummy'")
             jason_results = run_test(strategy_name='jason', portfolio_path=args.portfolio, quiet=True)
             print("'jason' 전략 백테스트 완료.")
+            seykota_results = run_test(strategy_name='seykota', portfolio_path=args.portfolio, quiet=True)
+            print("'seykota' 전략 백테스트 완료.")
             dummy_results = run_test(strategy_name='dummy', portfolio_path=args.portfolio, quiet=True)
             print("'dummy' 전략 백테스트 완료.")
 
-            all_results = [res for res in [jason_results, dummy_results] if res]
+            all_results = [res for res in [jason_results, seykota_results, dummy_results] if res]
             if not all_results:
                 print("\n비교할 결과가 없습니다.")
                 return

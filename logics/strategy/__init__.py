@@ -1,4 +1,3 @@
-0,0 @@
 """
 Strategy: 'seykota'
 Ed Seykota-style trend-following strategy using moving average crossovers.

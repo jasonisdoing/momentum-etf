@@ -12,10 +12,11 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
   - `holdings.csv`: 현재 보유 현황. 웹앱에서 작성/저장. (포맷: `ticker,name,shares,amount`)
   - `data.json`: 웹앱에서 사용하는 데이터 저장소 (예: 평가금액).
 - `core/`: 핵심 엔진
-  - `backtester.py`: 개별 종목 백테스팅 실행기.
-  - `portfolio.py`: 포트폴리오 백테스팅 실행기.
-- `logics/`: 매매 전략(로직) 정의
-  - `jason.py`: 현재 기본 전략을 정의하기 위한 파일 (현재는 core에 로직 통합).
+  - `backtester.py`: (사용되지 않음) 개별 종목 백테스팅 실행기.
+  - `portfolio.py`: (사용되지 않음) 포트폴리오 백테스팅 실행기.
+- `logics/`: 매매 전략(로직) 정의. 각 전략은 자체 폴더를 가집니다.
+  - `<strategy_name>/strategy.py`: 전략의 핵심 백테스팅 로직.
+  - `<strategy_name>/settings.py`: 해당 전략에만 사용되는 파라미터.
 - `utils/`: 공용 유틸리티 함수
   - `data_loader.py`: 데이터 로딩 및 API 호출.
   - `indicators.py`: 보조지표 계산 (SuperTrend 등).
@@ -24,14 +25,15 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 - `test.py`: 과거 구간 백테스트 실행 및 `logs/test.log` 생성.
 - `today.py`: 당일/익일 매매 액션 계산 및 `logs/today.log` 생성.
 - `web_app.py`: Streamlit 기반 웹 UI.
-- `settings.py`: 전략 파라미터 및 전역 설정.
+- `settings.py`: 모든 전략에 공통으로 적용되는 전역 설정.
 
 전략(Strategy) 구조
 -------------------
 
-현재 핵심 매매 로직은 `core/backtester.py`와 `core/portfolio.py`에 통합되어 있습니다. 이 로직은 `settings.py` 파일의 파라미터를 통해 제어됩니다.
-
-향후 여러 전략을 지원하도록 확장할 경우, `logics/` 디렉터리 아래에 새로운 전략 파일을 추가하고 `main.py`에서 이를 선택적으로 로드하도록 수정할 수 있습니다.
+각 투자 전략은 `logics/` 디렉토리 아래에 자체 폴더로 구성됩니다. 예를 들어, `jason` 전략은 `logics/jason/` 폴더에 위치합니다.
+- `logics/jason/strategy.py`: `jason` 전략의 매수/매도 로직을 구현합니다.
+- `logics/jason/settings.py`: `jason` 전략에만 사용되는 파라미터(예: `SELL_SUM_THRESHOLD`)를 정의합니다.
+- `settings.py`: 모든 전략에 공통으로 적용되는 파라미터(예: `INITIAL_CAPITAL`, `PORTFOLIO_TOPN`)를 정의합니다.
 
 설치 및 준비
 ------------
