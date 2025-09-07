@@ -23,22 +23,33 @@ def get_today_str() -> str:
     return datetime.now().strftime('%Y%m%d')
 
 
-def fetch_ohlcv(ticker: str, months_back: int = None, months_range: Optional[List[int]] = None) -> Optional[pd.DataFrame]:
+def fetch_ohlcv(ticker: str, months_back: int = None, months_range: Optional[List[int]] = None, date_range: Optional[List[str]] = None) -> Optional[pd.DataFrame]:
     """pykrx를 통해 OHLCV 데이터를 조회합니다."""
     if _stock is None:
         return None
-    now = pd.to_datetime(get_today_str())
-    if months_range is not None and len(months_range) == 2:
-        start_off, end_off = months_range
-        start_dt_core = now - pd.DateOffset(months=int(start_off))
-        end_dt = now - pd.DateOffset(months=int(end_off))
-        # Warmup: 코어 시작일보다 4주 앞서서 데이터를 가져옴
-        start_dt = start_dt_core - pd.DateOffset(weeks=4)
+
+    if date_range and len(date_range) == 2:
+        try:
+            start_dt_core = pd.to_datetime(date_range[0])
+            end_dt = pd.to_datetime(date_range[1])
+            # Warmup: 코어 시작일보다 4주(28일) 앞서서 데이터를 가져옴
+            start_dt = start_dt_core - pd.DateOffset(days=28)
+        except (ValueError, TypeError):
+            logging.getLogger(__name__).error(f"잘못된 date_range 형식: {date_range}. 'YYYY-MM-DD' 형식을 사용해야 합니다.")
+            return None
     else:
-        if months_back is None:
-            months_back = 12
-        start_dt = now - pd.DateOffset(months=int(months_back))
-        end_dt = now
+        now = pd.to_datetime(get_today_str())
+        if months_range is not None and len(months_range) == 2:
+            start_off, end_off = months_range
+            start_dt_core = now - pd.DateOffset(months=int(start_off))
+            end_dt = now - pd.DateOffset(months=int(end_off))
+            # Warmup: 코어 시작일보다 4주(28일) 앞서서 데이터를 가져옴
+            start_dt = start_dt_core - pd.DateOffset(days=28)
+        else:
+            if months_back is None:
+                months_back = 12
+            start_dt = now - pd.DateOffset(months=int(months_back))
+            end_dt = now
     
     if start_dt > end_dt:
         start_dt, end_dt = end_dt, start_dt

@@ -6,7 +6,7 @@ import pandas as pd
 from typing import Optional, List, Tuple, Dict
 from math import ceil
 
-import settings
+from . import settings as seykota_settings
 from utils.data_loader import fetch_ohlcv, get_today_str
 
 
@@ -17,23 +17,24 @@ def run_portfolio_backtest(
     core_start_date: Optional[pd.Timestamp] = None,
     top_n: int = 10,
     initial_positions: Optional[dict] = None,
+    date_range: Optional[List[str]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     Simulates a Top-N portfolio using a moving average crossover strategy.
     """
     # Settings
-    fast_ma_period = int(getattr(settings, 'SEYKOTA_FAST_MA', 50))
-    slow_ma_period = int(getattr(settings, 'SEYKOTA_SLOW_MA', 150))
-    stop_loss = getattr(settings, 'SEYKOTA_STOP_LOSS_PCT', None)
-    cooldown_days = int(getattr(settings, 'COOLDOWN_DAYS', 0))
-    min_pos_pct = float(getattr(settings, 'MIN_POSITION_PCT', 0.10))
-    max_pos_pct = float(getattr(settings, 'MAX_POSITION_PCT', 0.15))
-    trim_on = bool(getattr(settings, 'ENABLE_MAX_POSITION_TRIM', True))
+    fast_ma_period = int(getattr(seykota_settings, 'SEYKOTA_FAST_MA', 50))
+    slow_ma_period = int(getattr(seykota_settings, 'SEYKOTA_SLOW_MA', 150))
+    stop_loss = getattr(seykota_settings, 'SEYKOTA_STOP_LOSS_PCT', None)
+    cooldown_days = int(getattr(seykota_settings, 'COOLDOWN_DAYS', 0))
+    min_pos_pct = float(getattr(seykota_settings, 'MIN_POSITION_PCT', 0.10))
+    max_pos_pct = float(getattr(seykota_settings, 'MAX_POSITION_PCT', 0.20))
+    trim_on = bool(getattr(seykota_settings, 'ENABLE_MAX_POSITION_TRIM', True))
 
     # Fetch all series and precompute indicators
     data = {}
     for tkr, _ in pairs:
-        df = fetch_ohlcv(tkr, months_range=months_range)
+        df = fetch_ohlcv(tkr, months_range=months_range, date_range=date_range)
         if df is None or len(df) < slow_ma_period:
             continue
         
@@ -59,12 +60,6 @@ def run_portfolio_backtest(
         return {}
 
     # Apply core_start_date and MA warmup period
-    if core_start_date is None and months_range is not None:
-        try:
-            now = pd.to_datetime(get_today_str())
-            core_start_date = now - pd.DateOffset(months=int(months_range[0]))
-        except Exception:
-            core_start_date = None
     if core_start_date is not None:
         common_index = common_index[common_index >= core_start_date]
     
@@ -184,18 +179,19 @@ def run_single_ticker_backtest(
     months_range: Optional[List[int]] = None,
     initial_capital: float = 1_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
+    date_range: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
     Simulates a single ticker backtest using a moving average crossover strategy.
     """
     # Settings
-    fast_ma_period = int(getattr(settings, 'SEYKOTA_FAST_MA', 50))
-    slow_ma_period = int(getattr(settings, 'SEYKOTA_SLOW_MA', 150))
-    stop_loss = getattr(settings, 'SEYKOTA_STOP_LOSS_PCT', None)
-    cooldown_days = int(getattr(settings, 'COOLDOWN_DAYS', 0))
+    fast_ma_period = int(getattr(seykota_settings, 'SEYKOTA_FAST_MA', 50))
+    slow_ma_period = int(getattr(seykota_settings, 'SEYKOTA_SLOW_MA', 150))
+    stop_loss = getattr(seykota_settings, 'SEYKOTA_STOP_LOSS_PCT', None)
+    cooldown_days = int(getattr(seykota_settings, 'COOLDOWN_DAYS', 0))
 
     if df is None:
-        df = fetch_ohlcv(ticker, months_range=months_range)
+        df = fetch_ohlcv(ticker, months_range=months_range, date_range=date_range)
     if df is None or len(df) < slow_ma_period:
         return pd.DataFrame()
 

@@ -56,7 +56,7 @@ def main():
             headers = ["전략", "기간", "CAGR (연간 복리 성장률)", "MDD (최대 낙폭)", "누적수익률", "최종자산"]
             rows = [[r['strategy'], f"{r['start_date']}~{r['end_date']}", f"{r['cagr_pct']:.2f}%", f"-{r['mdd_pct']:.2f}%", f"{r['cumulative_return_pct']:.2f}%", _fmt_money_kr(r['final_value'])] for r in all_results]
             aligns = ['left', 'left', 'right', 'right', 'right', 'right']
-            table_lines = render_table_eaw(headers, rows, aligns, amb_wide=bool(getattr(settings, 'EAW_AMBIGUOUS_AS_WIDE', True)))
+            table_lines = render_table_eaw(headers, rows, aligns)
             
             initial_capital = all_results[0]['initial_capital']
 

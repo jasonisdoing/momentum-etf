@@ -297,8 +297,7 @@ def main(portfolio_path: Optional[str] = None):
     aligns = ['right','right','left','center','left','right','right','right','right','right','right','right','right','right','right','center','left']
     
     # Render table for both console and log file
-    amb_wide_console = bool(getattr(settings, 'EAW_AMBIGUOUS_AS_WIDE', True))
-    table_lines = render_table_eaw(headers, rows_sorted, aligns, amb_wide=amb_wide_console)
+    table_lines = render_table_eaw(headers, rows_sorted, aligns)
 
     log_dir = 'logs'
     os.makedirs(log_dir, exist_ok=True)

@@ -97,10 +97,27 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
     # portfolio_path 인자는 무시됩니다.
     initial_capital = float(getattr(settings, 'INITIAL_CAPITAL', 100_000_000))
     init_positions = {}  # 백테스트는 보유 종목 없이 시작
-    months_range = getattr(settings, 'MONTHS_RANGE', [12, 0])
-    core_start_dt = (pd.Timestamp.now() - pd.DateOffset(months=int(months_range[0]))).normalize()
-    period_label = f"{int(months_range[0])}개월~{'현재' if int(months_range[1])==0 else str(int(months_range[1]))+'개월'}"
 
+    # 기간 설정 로직
+    test_date_range = getattr(settings, 'TEST_DATE_RANGE', None)
+    months_range = None
+    core_start_dt = None
+    period_label = ""
+
+    if test_date_range and len(test_date_range) == 2:
+        try:
+            core_start_dt = pd.to_datetime(test_date_range[0])
+            core_end_dt = pd.to_datetime(test_date_range[1])
+            period_label = f"{core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')}"
+        except (ValueError, TypeError):
+            print("오류: settings.py의 TEST_DATE_RANGE 형식이 잘못되었습니다. ['YYYY-MM-DD', 'YYYY-MM-DD'] 형식으로 지정해주세요.")
+            test_date_range = None # Invalidate
+    
+    if not test_date_range:
+        months_range = getattr(settings, 'MONTHS_RANGE', [12, 0]) # Fallback
+        core_start_dt = (pd.Timestamp.now() - pd.DateOffset(months=int(months_range[0]))).normalize()
+        period_label = f"{int(months_range[0])}개월~{'현재' if int(months_range[1])==0 else str(int(months_range[1]))+'개월'}"
+    
     _orig_stdout = sys.stdout
     log_f = None
     return_value = None
@@ -131,7 +148,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
         # Header in log
         print(f"백테스트를 `settings.py` 설정으로 실행합니다.")
         if log_f:
-            log_f.write(f"# 시작 {datetime.now().isoformat()} | MONTHS_RANGE={months_range} | 초기자본={int(initial_capital):,}\n")
+            log_f.write(f"# 시작 {datetime.now().isoformat()} | 기간={period_label} | 초기자본={int(initial_capital):,}\n")
 
         # 전략 모듈 로드
         try:
@@ -152,8 +169,8 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
         except AttributeError:
             print(f"오류: '{strategy_name}' 전략 모듈에 run_portfolio_backtest 또는 run_single_ticker_backtest 함수가 없습니다.")
             return
-
-        print(f"[settings] INITIAL_CAPITAL={int(initial_capital):,}원, MONTHS_RANGE={months_range} | {period_label}")
+        
+        print(f"[settings] INITIAL_CAPITAL={int(initial_capital):,}원 | 기간={period_label}")
 
         # Fetch and simulate per ticker or portfolio
         per_ticker_ts: Dict[str, pd.DataFrame] = {}
@@ -163,6 +180,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
             per_ticker_ts = run_portfolio_backtest(
                 pairs, months_range=months_range, initial_capital=initial_capital,
                 core_start_date=core_start_dt, top_n=portfolio_topn, initial_positions=init_positions,
+                date_range=test_date_range
             ) or {}
             if 'CASH' in per_ticker_ts:
                 name_by_ticker['CASH'] = '현금'
@@ -172,7 +190,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
             for ticker, name in pairs:
                 ts = run_single_ticker_backtest(
                     ticker, df=None, months_range=months_range,
-                    initial_capital=capital_per_ticker, core_start_date=core_start_dt,
+                    initial_capital=capital_per_ticker, core_start_date=core_start_dt, date_range=test_date_range
                 )
                 if not ts.empty:
                     per_ticker_ts[ticker] = ts
@@ -321,15 +339,13 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                 aligns = ['right','right','left','center','left','right','right','right','right','right','right','right','right','right','right','center','left']
                 str_rows = [[str(c) for c in row] for row in rows]
 
-                amb_wide_console = bool(getattr(settings, 'EAW_AMBIGUOUS_AS_WIDE', True))
-                lines_console = render_table_eaw(headers, str_rows, aligns, amb_wide=amb_wide_console)
-                lines_log = render_table_eaw(headers, str_rows, aligns, amb_wide=False)
+                table_lines = render_table_eaw(headers, str_rows, aligns)
 
-                for ln in lines_console:
+                for ln in table_lines:
                     try: _orig_stdout.write(ln + "\n")
                     except Exception: pass
                 if log_f:
-                    for ln in lines_log:
+                    for ln in table_lines:
                         try: log_f.write(ln + "\n")
                         except Exception: pass
                 print()

@@ -35,8 +35,7 @@ def color_pct_1d(x: float) -> str:
 def render_table_eaw(
     headers: List[str],
     rows: List[List[str]],
-    aligns: List[str],
-    amb_wide: bool = True
+    aligns: List[str]
 ) -> List[str]:
     """
     리스트의 리스트를 너비를 인식하는 ASCII 테이블 문자열로 렌더링합니다.
@@ -59,7 +58,8 @@ def render_table_eaw(
         w = 0
         for ch in s:
             eaw = east_asian_width(ch)
-            if eaw in ('W', 'F') or (amb_wide and eaw == 'A'):
+            # Ambiguous('A') 문자를 Wide로 처리하여 대부분의 현대 터미널에서 정렬이 깨지지 않도록 함
+            if eaw in ('W', 'F', 'A'):
                 w += 2
             else:
                 w += 1

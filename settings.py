@@ -10,5 +10,5 @@ SHOW_LOGS = False
 # 백테스트 기본값
 INITIAL_CAPITAL = 100_000_000  # 1억
 
-# 실행용: 과거 12개월 전부터 현재(0개월)까지
-MONTHS_RANGE = [8, 0]
+# 백테스트 기간 설정. ['YYYY-MM-DD', 'YYYY-MM-DD'] 형식으로 지정합니다.
+TEST_DATE_RANGE = ["2025-01-01", "2025-09-05"]
