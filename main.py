@@ -33,6 +33,16 @@ def main():
 
     args = parser.parse_args()
 
+    # 프로그램 시작 시점에 pykrx 종속성 확인
+    import settings
+    ticker_universe_mode = getattr(settings, 'TICKER_UNIVERSE_MODE', 'STATIC')
+    if ticker_universe_mode != 'STATIC':
+        from utils.data_loader import is_pykrx_available
+        if not is_pykrx_available():
+            print(f"\n오류: 동적 유니버스 모드({ticker_universe_mode})는 'pykrx' 라이브러리가 필요합니다.")
+            print("      'pip install pykrx'로 설치하거나, settings.py에서 TICKER_UNIVERSE_MODE를 'STATIC'으로 변경해주세요.")
+            sys.exit(1)
+
     if args.test is not None:
         from test import main as run_test
         from utils.report import render_table_eaw

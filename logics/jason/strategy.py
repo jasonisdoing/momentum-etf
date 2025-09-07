@@ -21,6 +21,7 @@ def run_portfolio_backtest(
     top_n: int = 10,
     date_range: Optional[List[str]] = None,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    ticker_universe_mode: str = 'STATIC',
 ) -> Dict[str, pd.DataFrame]:
     """
     공유 현금 Top-N 포트폴리오를 시뮬레이션합니다.
@@ -77,6 +78,7 @@ def run_portfolio_backtest(
     buy_thr = float(getattr(jason_settings, 'BUY_SUM_THRESHOLD', 3.0))
     stop_loss = getattr(global_settings, 'HOLDING_STOP_LOSS_PCT', None)
     cooldown_days = int(getattr(global_settings, 'COOLDOWN_DAYS', 0))
+    top_performers_count = getattr(global_settings, 'TOP_PERFORMERS_COUNT', 10)
     big_drop_pct = float(getattr(jason_settings, 'BIG_DROP_PCT', -10.0))
     big_drop_block_days = int(getattr(jason_settings, 'BIG_DROP_SELL_BLOCK_DAYS', 5))
     min_pos_pct = float(getattr(global_settings, 'MIN_POSITION_PCT', 0.10))
@@ -89,60 +91,81 @@ def run_portfolio_backtest(
     out_rows = {tkr: [] for tkr in data.keys()}
     out_cash = []
 
+    active_universe = list(data.keys())
+
     # Main loop
     for i, dt in enumerate(common_index):
+        # DYNAMIC UNIVERSE REBALANCING
+        if ticker_universe_mode == 'DYNAMIC_WEEKLY' and dt.dayofweek == 0: # Monday
+            perf_cands = []
+            for tkr, d in data.items():
+                pos = d['close'].index.get_loc(dt)
+                if pos >= 5:
+                    c0 = d['close'].iloc[pos]
+                    c5 = d['close'].iloc[pos-5]
+                    if c5 > 0:
+                        ret = (c0 / c5 - 1.0)
+                        perf_cands.append((ret, tkr))
+            
+            perf_cands.sort(reverse=True)
+            new_universe_tickers = [p[1] for p in perf_cands[:top_performers_count]]
+            held_tickers = [tkr for tkr, s in state.items() if s['shares'] > 0]
+            active_universe = list(set(new_universe_tickers) | set(held_tickers))
+
         today_prices = {tkr: float(d['close'].loc[dt]) for tkr, d in data.items() if dt in d['close'].index}
         
         # 1. Big drop detection
-        for tkr, d in data.items():
+        for tkr in active_universe:
+            if tkr not in data: continue
+            d = data[tkr]
             pos = d['close'].index.get_loc(dt)
             if pos > 0:
                 c0, c_prev = float(d['close'].iloc[pos]), float(d['close'].iloc[pos-1])
                 if c_prev > 0 and (c0 / c_prev - 1.0) * 100.0 <= big_drop_pct:
                     state[tkr]['sell_block_until'] = max(state[tkr]['sell_block_until'], i + big_drop_block_days)
 
-        # 2. Sells & Trims
+        # 2. Sells, Trims and State Recording
         equity = cash + sum(s['shares'] * today_prices.get(tkr, 0) for tkr, s in state.items())
+
         for tkr, d in data.items():
             s, price = state[tkr], today_prices.get(tkr)
-
             decision, trade_amount, trade_profit, trade_pl_pct = None, 0.0, 0.0, 0.0
 
-            # 매도/부분매도 로직은 보유 중이고 거래 가능한 종목에 대해서만 실행
-            if s['shares'] > 0 and price is not None and i >= s['sell_block_until']:
-                hold_ret = (price / s['avg_cost'] - 1.0) * 100.0 if s['avg_cost'] > 0 else 0.0
+            # Sell/Trim logic only applies to tickers in the active universe
+            if tkr in active_universe:
+                if s['shares'] > 0 and price is not None and i >= s['sell_block_until']:
+                    hold_ret = (price / s['avg_cost'] - 1.0) * 100.0 if s['avg_cost'] > 0 else 0.0
 
-                # 매도/손절 조건
-                if stop_loss is not None and hold_ret <= float(stop_loss):
-                    decision = 'CUT'
-                elif (d['s2'].loc[dt] + hold_ret) < sell_thr:
-                    decision = 'SELL'
+                    # Sell/Cut conditions
+                    if stop_loss is not None and hold_ret <= float(stop_loss):
+                        decision = 'CUT'
+                    elif (d['s2'].loc[dt] + hold_ret) < sell_thr:
+                        decision = 'SELL'
 
-                if decision:
-                    qty = s['shares']
-                    trade_amount = qty * price
-                    if s['avg_cost'] > 0:
-                        trade_profit = (price - s['avg_cost']) * qty
-                        trade_pl_pct = hold_ret
-                    cash += trade_amount
-                    s['shares'], s['avg_cost'] = 0, 0.0
-                    if cooldown_days > 0: s['buy_block_until'] = i + cooldown_days
-                
-                # 부분매도(Trim) 조건
-                elif trim_on and max_pos_pct < 1.0:
-                    curr_val, cap_val = s['shares'] * price, max_pos_pct * equity
-                    if curr_val > cap_val and price > 0:
-                        sell_qty = min(s['shares'], int((curr_val - cap_val) // price))
-                        if sell_qty > 0:
-                            decision, trade_amount = 'TRIM', sell_qty * price
-                            cash += trade_amount
-                            s['shares'] -= sell_qty
-                            if s['avg_cost'] > 0:
-                                trade_profit = (price - s['avg_cost']) * sell_qty
-                                trade_pl_pct = hold_ret
-                            if cooldown_days > 0: s['buy_block_until'] = i + cooldown_days
-            
-            # Record daily state for this ticker
+                    if decision:
+                        qty = s['shares']
+                        trade_amount = qty * price
+                        if s['avg_cost'] > 0:
+                            trade_profit = (price - s['avg_cost']) * qty
+                            trade_pl_pct = hold_ret
+                        cash += trade_amount
+                        s['shares'], s['avg_cost'] = 0, 0.0
+                        if cooldown_days > 0: s['buy_block_until'] = i + cooldown_days
+                    
+                    # Trim condition
+                    elif trim_on and max_pos_pct < 1.0:
+                        curr_val, cap_val = s['shares'] * price, max_pos_pct * equity
+                        if curr_val > cap_val and price > 0:
+                            sell_qty = min(s['shares'], int((curr_val - cap_val) // price))
+                            if sell_qty > 0:
+                                decision, trade_amount = 'TRIM', sell_qty * price
+                                cash += trade_amount
+                                s['shares'] -= sell_qty
+                                if s['avg_cost'] > 0:
+                                    trade_profit = (price - s['avg_cost']) * sell_qty
+                                    trade_pl_pct = hold_ret
+                                if cooldown_days > 0: s['buy_block_until'] = i + cooldown_days
+
             decision_out = decision if decision else ('HOLD' if s['shares'] > 0 else 'WAIT')
             note = ''
             if decision_out in ('WAIT', 'HOLD'):
@@ -162,7 +185,8 @@ def run_portfolio_backtest(
         slots_to_fill = max(0, top_n - held_count)
         if slots_to_fill > 0 and cash > 0:
             cands = []
-            for tkr, d in data.items():
+            for tkr in active_universe:
+                d = data.get(tkr)
                 s = state[tkr]
                 if s['shares'] == 0 and i >= s['buy_block_until']:
                     s2_val = d['s2'].loc[dt]

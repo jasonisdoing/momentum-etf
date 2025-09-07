@@ -19,6 +19,7 @@ def run_portfolio_backtest(
     top_n: int = 10,
     date_range: Optional[List[str]] = None,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    ticker_universe_mode: str = 'STATIC',
 ) -> Dict[str, pd.DataFrame]:
     """
     Simulates a Top-N portfolio using a moving average crossover strategy.
@@ -27,6 +28,7 @@ def run_portfolio_backtest(
     fast_ma_period = int(getattr(seykota_settings, 'SEYKOTA_FAST_MA', 50))
     slow_ma_period = int(getattr(seykota_settings, 'SEYKOTA_SLOW_MA', 150))
     stop_loss = getattr(global_settings, 'HOLDING_STOP_LOSS_PCT', None)
+    top_performers_count = getattr(global_settings, 'TOP_PERFORMERS_COUNT', 10)
     cooldown_days = int(getattr(global_settings, 'COOLDOWN_DAYS', 0))
     min_pos_pct = float(getattr(global_settings, 'MIN_POSITION_PCT', 0.10))
     max_pos_pct = float(getattr(global_settings, 'MAX_POSITION_PCT', 0.20))
@@ -81,9 +83,24 @@ def run_portfolio_backtest(
     out_rows = {tkr: [] for tkr in data.keys()}
     out_cash = []
     first_ticker = next(iter(data)) # For checking warmup status
+    active_universe = list(data.keys())
 
     # Main loop
     for i, dt in enumerate(common_index):
+        # DYNAMIC UNIVERSE REBALANCING
+        if ticker_universe_mode == 'DYNAMIC_WEEKLY' and dt.dayofweek == 0: # Monday
+            perf_cands = []
+            for tkr, d in data.items():
+                if dt in d['ma_score'].index:
+                    score = d['ma_score'].loc[dt]
+                    if pd.notna(score):
+                        perf_cands.append((score, tkr))
+            
+            perf_cands.sort(reverse=True)
+            new_universe_tickers = [p[1] for p in perf_cands[:top_performers_count]]
+            held_tickers = [tkr for tkr, s in state.items() if s['shares'] > 0]
+            active_universe = list(set(new_universe_tickers) | set(held_tickers))
+
         today_prices = {tkr: float(d['close'].loc[dt]) for tkr, d in data.items() if dt in d['close'].index}
         
         # Warm-up check: If the slow MA is not yet calculated, skip trading.
@@ -95,43 +112,45 @@ def run_portfolio_backtest(
             out_cash.append({'date': dt, 'price': 1.0, 'cash': cash, 'shares': 0, 'pv': cash, 'decision': 'HOLD'})
             continue
         
-        # Sells & Trims
+        # Sells, Trims and State Recording
         equity = cash + sum(s['shares'] * today_prices.get(tkr, 0) for tkr, s in state.items())
+
         for tkr, d in data.items():
             s, price = state[tkr], today_prices.get(tkr)
             decision, trade_amount, trade_profit, trade_pl_pct = None, 0.0, 0.0, 0.0
 
-            if s['shares'] > 0 and price is not None and i >= s['sell_block_until']:
-                hold_ret = (price / s['avg_cost'] - 1.0) * 100.0 if s['avg_cost'] > 0 else 0.0
+            if tkr in active_universe:
+                if s['shares'] > 0 and price is not None and i >= s['sell_block_until']:
+                    hold_ret = (price / s['avg_cost'] - 1.0) * 100.0 if s['avg_cost'] > 0 else 0.0
 
-                if stop_loss is not None and hold_ret <= float(stop_loss):
-                    decision = 'CUT'
-                elif d['fast_ma'].loc[dt] < d['slow_ma'].loc[dt]:
-                    decision = 'SELL'
+                    if stop_loss is not None and hold_ret <= float(stop_loss):
+                        decision = 'CUT'
+                    elif d['fast_ma'].loc[dt] < d['slow_ma'].loc[dt]:
+                        decision = 'SELL'
 
-                if decision:
-                    qty = s['shares']
-                    trade_amount = qty * price
-                    if s['avg_cost'] > 0:
-                        trade_profit = (price - s['avg_cost']) * qty
-                        trade_pl_pct = hold_ret
-                    cash += trade_amount
-                    s['shares'], s['avg_cost'] = 0, 0.0
-                    if cooldown_days > 0: s['buy_block_until'] = i + cooldown_days
-                
-                elif trim_on and max_pos_pct < 1.0:
-                    curr_val, cap_val = s['shares'] * price, max_pos_pct * equity
-                    if curr_val > cap_val and price > 0:
-                        sell_qty = min(s['shares'], int((curr_val - cap_val) // price))
-                        if sell_qty > 0:
-                            decision, trade_amount = 'TRIM', sell_qty * price
-                            cash += trade_amount
-                            s['shares'] -= sell_qty
-                            if s['avg_cost'] > 0:
-                                trade_profit = (price - s['avg_cost']) * sell_qty
-                                trade_pl_pct = hold_ret
-                            if cooldown_days > 0: s['buy_block_until'] = i + cooldown_days
-            
+                    if decision:
+                        qty = s['shares']
+                        trade_amount = qty * price
+                        if s['avg_cost'] > 0:
+                            trade_profit = (price - s['avg_cost']) * qty
+                            trade_pl_pct = hold_ret
+                        cash += trade_amount
+                        s['shares'], s['avg_cost'] = 0, 0.0
+                        if cooldown_days > 0: s['buy_block_until'] = i + cooldown_days
+                    
+                    elif trim_on and max_pos_pct < 1.0:
+                        curr_val, cap_val = s['shares'] * price, max_pos_pct * equity
+                        if curr_val > cap_val and price > 0:
+                            sell_qty = min(s['shares'], int((curr_val - cap_val) // price))
+                            if sell_qty > 0:
+                                decision, trade_amount = 'TRIM', sell_qty * price
+                                cash += trade_amount
+                                s['shares'] -= sell_qty
+                                if s['avg_cost'] > 0:
+                                    trade_profit = (price - s['avg_cost']) * sell_qty
+                                    trade_pl_pct = hold_ret
+                                if cooldown_days > 0: s['buy_block_until'] = i + cooldown_days
+
             decision_out = decision if decision else ('HOLD' if s['shares'] > 0 else 'WAIT')
             out_rows[tkr].append({
                 'date': dt, 'price': price, 'shares': s['shares'], 'pv': s['shares'] * (price or 0),
@@ -145,7 +164,8 @@ def run_portfolio_backtest(
         slots_to_fill = max(0, top_n - held_count)
         if slots_to_fill > 0 and cash > 0:
             cands = []
-            for tkr, d in data.items():
+            for tkr in active_universe:
+                d = data.get(tkr)
                 s = state[tkr]
                 if s['shares'] == 0 and i >= s['buy_block_until']:
                     if d['fast_ma'].loc[dt] > d['slow_ma'].loc[dt]:

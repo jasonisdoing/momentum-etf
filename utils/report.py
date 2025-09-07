@@ -66,19 +66,20 @@ def render_table_eaw(
         return w
 
     def _pad(s: str, width: int, align: str) -> str:
-        s_clean = _clean(s)
+        s_str = str(s)
+        s_clean = _clean(s_str)
         dw = _disp_width_eaw(s_clean)
         if dw >= width:
-            return s
+            return s_str
         pad = width - dw
         if align == 'right':
-            return ' ' * pad + s
+            return ' ' * pad + s_str
         elif align == 'center':
             left = pad // 2
             right = pad - left
-            return ' ' * left + s + ' ' * right
+            return ' ' * left + s_str + ' ' * right
         else: # left
-            return s + ' ' * pad
+            return s_str + ' ' * pad
 
     widths = [max(_disp_width_eaw(v) for v in [headers[j]] + [r[j] for r in rows]) for j in range(len(headers))]
 
