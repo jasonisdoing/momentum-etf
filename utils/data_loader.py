@@ -23,19 +23,6 @@ def get_today_str() -> str:
     """오늘 날짜를 'YYYYMMDD' 형식의 문자열로 반환합니다."""
     return datetime.now().strftime('%Y%m%d')
 
-def fetch_top_performers(ref_date: pd.Timestamp, count: int) -> List[Tuple[str, str]]:
-    """(사용되지 않음) 상위 수익률 주식 종목을 조회합니다."""
-    # 이 함수는 현재 사용되지 않지만, 혹시 모를 경우를 위해 남겨둡니다.
-    # ETF 버전은 fetch_top_performing_etfs를 사용하세요.
-    if not is_pykrx_available():
-        logging.getLogger(__name__).error("pykrx가 설치되지 않아 동적 티커 선택을 사용할 수 없습니다.")
-        return []
-    try:
-        # ... (implementation can be left as is or updated)
-        return []
-    except Exception:
-        return []
-
 
 def fetch_ohlcv(ticker: str, months_back: int = None, months_range: Optional[List[int]] = None, date_range: Optional[List[str]] = None) -> Optional[pd.DataFrame]:
     """pykrx를 통해 OHLCV 데이터를 조회합니다."""
@@ -67,18 +54,36 @@ def fetch_ohlcv(ticker: str, months_back: int = None, months_range: Optional[Lis
     
     if start_dt > end_dt:
         start_dt, end_dt = end_dt, start_dt
-    start = start_dt.strftime('%Y%m%d')
-    end = end_dt.strftime('%Y%m%d')
-    try:
-        df = _stock.get_market_ohlcv_by_date(start, end, ticker)
-        if df is None or len(df) == 0:
-            return None
-        return df.rename(columns={
-            '시가': 'Open', '고가': 'High', '저가': 'Low', '종가': 'Close', '거래량': 'Volume'
-        })
-    except Exception as e:
-        logging.getLogger(__name__).exception(f'{ticker} 조회 실패: {e}')
+
+    # pykrx API 안정성을 위해 긴 기간 조회 시 1년 단위로 나누어 요청합니다.
+    all_dfs = []
+    current_start = start_dt
+    while current_start <= end_dt:
+        current_end = min(current_start + pd.DateOffset(years=1) - pd.DateOffset(days=1), end_dt)
+        start_str = current_start.strftime('%Y%m%d')
+        end_str = current_end.strftime('%Y%m%d')
+        
+        try:
+            df_part = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
+            if df_part is not None and not df_part.empty:
+                all_dfs.append(df_part)
+        except Exception as e:
+            # 특정 기간 조회 실패 시 경고만 하고 계속 진행
+            logging.getLogger(__name__).warning(f'{ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류 발생: {e}')
+        
+        current_start += pd.DateOffset(years=1)
+
+    if not all_dfs:
         return None
+
+    # 조회된 모든 데이터프레임을 하나로 합칩니다.
+    full_df = pd.concat(all_dfs)
+    # 중복된 인덱스(날짜)가 있을 경우 첫 번째 데이터만 남깁니다.
+    full_df = full_df[~full_df.index.duplicated(keep='first')]
+    
+    return full_df.rename(columns={
+        '시가': 'Open', '고가': 'High', '저가': 'Low', '종가': 'Close', '거래량': 'Volume'
+    })
 
 
 def read_tickers_file(path: str = 'tickers.txt') -> List[Tuple[str, str]]:
@@ -101,62 +106,3 @@ def read_tickers_file(path: str = 'tickers.txt') -> List[Tuple[str, str]]:
     except FileNotFoundError:
         logging.getLogger(__name__).error(f'{path} 파일을 찾을 수 없습니다.')
     return items
-
-
-def read_holdings_file(path: str = 'data/holdings.csv') -> dict:
-    """holdings.csv 파일에서 보유 현황을 읽어옵니다."""
-    res = {}
-    if not os.path.exists(path):
-        return res
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if not row:
-                    continue
-                tkr = (row[0] or '').strip()
-                if not tkr or tkr.startswith('#'):
-                    continue
-                
-                def _to_float(x):
-                    try:
-                        s = str(x).replace(',', '').strip()
-                        return float(s) if s != '' else None
-                    except Exception: return None
-                def _to_int(x):
-                    try:
-                        v = _to_float(x)
-                        return int(v) if v is not None else None
-                    except Exception: return None
-
-                shares = _to_int(row[2] if len(row) > 2 else None) # New: ticker,name,shares,amount
-                avg_cost = _to_float(row[3] if len(row) > 3 else None)
-                if shares is None or shares <= 0:
-                    shares = _to_int(row[1] if len(row) > 1 else None) # Old: ticker,shares,avg_cost
-                    avg_cost = _to_float(row[2] if len(row) > 2 else None)
-
-                if shares is not None and shares > 0:
-                    res[tkr] = {"shares": int(shares), "avg_cost": avg_cost}
-        if res:
-            return res
-    except Exception:
-        pass
-    # Fallback for legacy TSV/whitespace format
-    with open(path, 'r', encoding='utf-8') as f:
-        for line in f:
-            s = line.strip()
-            if not s or s.startswith('#'): continue
-            parts = [p.strip() for p in s.replace('\t', ',').split(',') if p.strip()]
-            if len(parts) < 2: parts = s.split()
-            if len(parts) < 2: continue
-            tkr = parts[0]
-            try:
-                sh = int(float(parts[1]))
-            except Exception: continue
-            ac = None
-            if len(parts) >= 3:
-                try:
-                    ac = float(parts[2])
-                except Exception: ac = None
-            res[tkr] = {"shares": int(sh), "avg_cost": ac}
-    return res

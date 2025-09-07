@@ -12,86 +12,13 @@ from typing import Dict, List, Tuple, Optional
 import pandas as pd
 
 import settings
-from utils.data_loader import read_tickers_file, read_holdings_file
-from utils.report import render_table_eaw
-
-
-def load_portfolio_data(portfolio_path: Optional[str] = None, data_dir: str = 'data') -> Optional[Dict]:
-    """
-    지정된 포트폴리오 스냅샷 파일 또는 최신 파일을 로드합니다.
-    파일을 성공적으로 로드하면 'total_equity', 'holdings' 등이 포함된 딕셔너리를 반환합니다.
-    """
-    filepath_to_load = None
-    if portfolio_path:
-        if os.path.exists(portfolio_path):
-            filepath_to_load = portfolio_path
-        else:
-            print(f"경고: 지정된 포트폴리오 파일 '{portfolio_path}'를 찾을 수 없습니다.")
-            return None
-    else:
-        # 최신 파일 찾기
-        try:
-            portfolio_files = glob.glob(os.path.join(data_dir, 'portfolio_*.json'))
-            if not portfolio_files:
-                return None
-            
-            latest_date = None
-            for f_path in portfolio_files:
-                try:
-                    fname = os.path.basename(f_path)
-                    date_str = fname.replace('portfolio_', '').replace('.json', '')
-                    current_date = pd.to_datetime(date_str)
-                    if latest_date is None or current_date > latest_date:
-                        latest_date = current_date
-                        filepath_to_load = f_path
-                except ValueError:
-                    continue
-        except Exception:
-            return None
-
-    if not filepath_to_load:
-        return None
-
-    try:
-        with open(filepath_to_load, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        holdings_list = data.get('holdings', [])
-        holdings_dict = {
-            item['ticker']: {
-                'name': item.get('name', ''),
-                'shares': item.get('shares', 0),
-                'avg_cost': item.get('avg_cost', 0.0)
-            } for item in holdings_list if item.get('ticker')
-        }
-
-        return {
-            'date': data.get('date'),
-            'total_equity': data.get('total_equity'),
-            'holdings': holdings_dict,
-            'filepath': filepath_to_load
-        }
-    except Exception as e:
-        print(f"오류: 포트폴리오 파일 '{filepath_to_load}' 로드 중 오류 발생: {e}")
-        return None
-
-def _fmt_money_kr(v: float) -> str:
-    """금액을 '억'과 '만원' 단위의 한글 문자열로 포맷합니다."""
-    if v is None:
-        return "-"
-    man = int(round(v / 10_000))
-    if man >= 10_000:
-        uk = man // 10_000
-        rem = man % 10_000
-        return f"{uk}억 {rem:,}만원" if rem > 0 else f"{uk}억"
-    return f"{man:,}만원"
-
+from utils.data_loader import read_tickers_file
+from utils.report import render_table_eaw, format_kr_money
 
 def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, quiet: bool = False):
     # --test 실행 시 포트폴리오 파일을 사용하지 않고 settings.py의 설정을 사용합니다.
     # portfolio_path 인자는 무시됩니다.
     initial_capital = float(getattr(settings, 'INITIAL_CAPITAL', 100_000_000))
-    init_positions = {}  # 백테스트는 보유 종목 없이 시작
 
     # 기간 설정 로직
     test_date_range = getattr(settings, 'TEST_DATE_RANGE', None)
@@ -132,8 +59,9 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
             # Setup tee to also write console output into logs/test.log
             log_dir = 'logs'
             os.makedirs(log_dir, exist_ok=True)
-            log_path = os.path.join(log_dir, 'test.log')
-            class _Tee:
+            log_path = os.path.join(log_dir, f'test_{strategy_name}.log')
+            class ConsoleAndFileLogger:
+                """콘솔과 파일에 동시에 로그를 기록하는 클래스."""
                 def __init__(self, *streams): self.streams = streams
                 def write(self, data):
                     for s in self.streams:
@@ -144,9 +72,10 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                         try: s.flush()
                         except Exception: pass
                 def close(self):
+                    # sys.stdout은 닫지 않도록 처리
                     pass
             log_f = open(log_path, 'w', encoding='utf-8')
-            sys.stdout = _Tee(sys.stdout, log_f)
+            sys.stdout = ConsoleAndFileLogger(sys.stdout, log_f)
         else:
             sys.stdout = open(os.devnull, 'w')
 
@@ -190,6 +119,30 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
             if df is not None and not df.empty:
                 raw_data_by_ticker[ticker] = df
         
+        # 요청된 시작일에 데이터가 없는 종목을 필터링합니다.
+        if core_start_dt and raw_data_by_ticker:
+            original_pairs_map = {t: n for t, n in pairs}
+            valid_data_by_ticker = {}
+            excluded_tickers = {}
+
+            for tkr, df in raw_data_by_ticker.items():
+                if df.index[0] <= core_start_dt:
+                    valid_data_by_ticker[tkr] = df
+                else:
+                    excluded_tickers[tkr] = df.index[0]
+            
+            if excluded_tickers and not quiet:
+                print(f"\n참고: 요청된 시작일({core_start_dt.strftime('%Y-%m-%d')})에 데이터가 없는 {len(excluded_tickers)}개 종목을 이번 백테스트에서 제외합니다.")
+                for tkr, s_date in sorted(excluded_tickers.items(), key=lambda item: item[1]):
+                    print(f"      - 제외: {tkr} {original_pairs_map.get(tkr, '')} (데이터 시작일: {s_date.strftime('%Y-%m-%d')})")
+            
+            raw_data_by_ticker = valid_data_by_ticker
+            pairs = [(tkr, original_pairs_map.get(tkr, '')) for tkr in raw_data_by_ticker.keys()]
+
+            if not raw_data_by_ticker:
+                print("오류: 요청된 기간에 데이터를 가진 종목이 하나도 없습니다.")
+                return None
+
         # 2. 모든 종목에 대한 공통 거래일을 계산합니다.
         common_index = None
         for df in raw_data_by_ticker.values():
@@ -197,19 +150,6 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
 
         if common_index is None or common_index.empty:
             if not quiet: print("오류: 모든 종목에 걸쳐 공통된 거래일이 없습니다.")
-            return None
-
-        # 3. 공통 시작일이 요청된 시작일을 만족하는지 확인합니다.
-        actual_start_date = common_index[0]
-        if core_start_dt and actual_start_date > core_start_dt:
-            if not quiet:
-                late_tickers = {tkr: df.index[0] for tkr, df in raw_data_by_ticker.items() if not df.index.empty and df.index[0] > core_start_dt}
-                print(f"\n오류: '{strategy_name}' 전략의 백테스트를 중단합니다.")
-                print(f"      요청된 시작일 '{core_start_dt.strftime('%Y-%m-%d')}'보다 실제 가능한 시작일 '{actual_start_date.strftime('%Y-%m-%d')}'이 늦습니다.")
-                if late_tickers:
-                    print(f"      원인으로 추정되는 종목:")
-                    for tkr, s_date in sorted(late_tickers.items(), key=lambda item: item[1]):
-                         print(f"      - {tkr} (데이터 시작일: {s_date.strftime('%Y-%m-%d')})")
             return None
 
         # 4. 미리 로드한 데이터를 사용하여 시뮬레이션을 실행합니다.
@@ -298,7 +238,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                 denom = portfolio_topn if portfolio_topn > 0 else total_cnt
                 date_str = pd.to_datetime(dt).strftime('%Y-%m-%d')
                 print(
-                    f"{date_str} - 보유종목 {held_count}/{denom} 잔액(보유+현금): {_fmt_money_kr(total_value)} (보유 {_fmt_money_kr(total_holdings)} + 현금 {_fmt_money_kr(total_cash)}) "
+                    f"{date_str} - 보유종목 {held_count}/{denom} 잔액(보유+현금): {format_kr_money(total_value)} (보유 {format_kr_money(total_holdings)} + 현금 {format_kr_money(total_cash)}) "
                     f"금일 수익률 {day_ret_pct:+.1f}%, 누적 수익률 {cum_ret_pct:+.1f}%"
                 )
 
@@ -349,7 +289,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                             phrase = f"매수 {qty_calc}주 @ {int(round(price_today)):,}"
                         else:
                             tag = '이익실현' if decision == 'SELL' else ('손절' if decision == 'CUT' else '부분매도')
-                            phrase = f"{tag} {qty_calc}주 @ {int(round(price_today)):,} 수익 {_fmt_money_kr(prof)} 손익률 {f'{plpct:+.1f}%'}"
+                            phrase = f"{tag} {qty_calc}주 @ {int(round(price_today)):,} 수익 {format_kr_money(prof)} 손익률 {f'{plpct:+.1f}%'}"
                     elif decision in ('WAIT','HOLD'):
                         phrase = str(row.get('note', '') or '')
                     if tkr not in buy_date_by_ticker:
@@ -368,7 +308,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                     hd = hold_days_by_ticker.get(tkr, 0)
                     rows.append([
                         0, tkr, name, display_status, bd_str, f"{hd}", f"{int(round(disp_price)):,}",
-                        f"{tkr_day_ret:+.1f}%", f"{disp_shares:,}", _fmt_money_kr(amount),
+                        f"{tkr_day_ret:+.1f}%", f"{disp_shares:,}", format_kr_money(amount),
                         hold_ret_str, f"{w:.0f}%", (_fmt_pct(p1) if p1 is not None else "-"),
                         (_fmt_pct(p2) if p2 is not None else "-"), (_fmt_pct(ssum) if ssum is not None else "-"),
                         st_str, phrase, _status_rank(decision), -w
@@ -382,15 +322,8 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                 aligns = ['right','right','left','center','left','right','right','right','right','right','right','right','right','right','right','center','left']
                 str_rows = [[str(c) for c in row] for row in rows]
 
-                table_lines = render_table_eaw(headers, str_rows, aligns)
-
-                for ln in table_lines:
-                    try: _orig_stdout.write(ln + "\n")
-                    except Exception: pass
-                if log_f:
-                    for ln in table_lines:
-                        try: log_f.write(ln + "\n")
-                        except Exception: pass
+                # 일별 상세 테이블을 콘솔과 로그 파일에 모두 출력합니다.
+                print("\n".join(render_table_eaw(headers, str_rows, aligns)))
                 print()
 
             prev_dt = dt
@@ -414,16 +347,37 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
             if years > 0 and initial_capital > 0:
                 cagr = ((final_value / initial_capital) ** (1 / years)) - 1
 
+            # Sharpe Ratio 계산
+            pv_series = pd.Series(portfolio_values, index=pd.to_datetime(portfolio_dates))
+            daily_returns = pv_series.pct_change().dropna()
+            
+            sharpe_ratio = 0
+            # 일일 수익률이 있을 경우에만 계산
+            if not daily_returns.empty and daily_returns.std() > 0:
+                # 연간 252 거래일로 가정
+                sharpe_ratio = (daily_returns.mean() / daily_returns.std()) * (252 ** 0.5)
+
+            # Sortino Ratio 계산 (하락 위험만 고려)
+            downside_returns = daily_returns[daily_returns < 0]
+            sortino_ratio = 0
+            if not downside_returns.empty:
+                downside_deviation = downside_returns.std()
+                if downside_deviation > 0:
+                    sortino_ratio = (daily_returns.mean() / downside_deviation) * (252 ** 0.5)
+
+            # Calmar Ratio 계산 (CAGR / MDD)
+            calmar_ratio = (cagr * 100) / (max_drawdown * 100) if max_drawdown > 0 else 0
+
             summary = {
                 "strategy": strategy_name, "start_date": start_date.strftime('%Y-%m-%d'),
                 "end_date": end_date.strftime('%Y-%m-%d'), "initial_capital": initial_capital,
                 "final_value": final_value, "cagr_pct": cagr * 100, "mdd_pct": max_drawdown * 100,
+                "sharpe_ratio": sharpe_ratio, "sortino_ratio": sortino_ratio, "calmar_ratio": calmar_ratio,
                 "cumulative_return_pct": (final_value / initial_capital - 1) * 100 if initial_capital > 0 else 0
             }
 
             # 월별/연간 수익률 계산
             if portfolio_values:
-                pv_series = pd.Series(portfolio_values, index=pd.to_datetime(portfolio_dates))
                 # 수익률 계산을 위해 시작점에 초기 자본을 추가
                 start_row = pd.Series([initial_capital], index=[start_date - pd.Timedelta(days=1)])
                 pv_series_with_start = pd.concat([start_row, pv_series])
@@ -465,21 +419,26 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                     })
 
             if not quiet:
-                sys.stdout = _orig_stdout # Print summary to original stdout
                 print("\n" + "="*30 + f"\n 백테스트 결과 요약 ({strategy_name}) ".center(30, "=") + "\n" + "="*30)
                 print(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({years:.2f} 년)")
-                print(f"| 초기 자본: {_fmt_money_kr(summary['initial_capital'])}")
-                print(f"| 최종 자산: {_fmt_money_kr(summary['final_value'])}")
+                print(f"| 초기 자본: {format_kr_money(summary['initial_capital'])}")
+                print(f"| 최종 자산: {format_kr_money(summary['final_value'])}")
                 print(f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}%")
                 print(f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}%")
                 print(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
+                print(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
+                print(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")
+                print(f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}")
                 print("="*30)
+                print("\n[지표 설명]")
+                print("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
+                print("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
+                print("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
 
                 # 월별 성과 요약 테이블 출력
                 if 'monthly_returns' in summary and not summary['monthly_returns'].empty:
                     print("\n" + "="*30 + f"\n 월별 성과 요약 ".center(30, "=") + "\n" + "="*30)
-                    print("(괄호 안은 누적 수익률)")
-                    
+
                     monthly_returns = summary['monthly_returns']
                     yearly_returns = summary['yearly_returns']
                     monthly_cum_returns = summary.get('monthly_cum_returns')
@@ -507,20 +466,33 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                     headers = ["연도"] + [f'{m}월' for m in range(1, 13)] + ["연간"]
                     rows_data = []
                     for year, row in pivot_df.iterrows():
-                        row_data = [str(year)]
+                        # 월간 수익률 행
+                        monthly_row_data = [str(year)]
                         for month in range(1, 13):
                             val = row.get(month)
-                            if pd.notna(val):
-                                cell_str = f"{val:+.2f}%"
-                                if cum_pivot_df is not None and year in cum_pivot_df.index and month in cum_pivot_df.columns and pd.notna(cum_pivot_df.loc[year, month]):
-                                    cum_val = cum_pivot_df.loc[year, month]
-                                    cell_str += f" ({cum_val:+.2f}%)"
-                                row_data.append(cell_str)
-                            else:
-                                row_data.append("-")
+                            monthly_row_data.append(f"{val:+.2f}%" if pd.notna(val) else "-")
+                        
                         yearly_val = row.get('연간')
-                        row_data.append(f"{yearly_val:+.2f}%" if pd.notna(yearly_val) else "-")
-                        rows_data.append(row_data)
+                        monthly_row_data.append(f"{yearly_val:+.2f}%" if pd.notna(yearly_val) else "-")
+                        rows_data.append(monthly_row_data)
+
+                        # 누적 수익률 행
+                        if cum_pivot_df is not None and year in cum_pivot_df.index:
+                            cum_row = cum_pivot_df.loc[year]
+                            cum_row_data = ["  (누적)"]
+                            for month in range(1, 13):
+                                cum_val = cum_row.get(month)
+                                cum_row_data.append(f"{cum_val:+.2f}%" if pd.notna(cum_val) else "-")
+                            
+                            # 연말 누적 수익률을 찾습니다.
+                            last_valid_month_index = cum_row.last_valid_index()
+                            if last_valid_month_index is not None:
+                                cum_annual_val = cum_row[last_valid_month_index]
+                                cum_row_data.append(f"{cum_annual_val:+.2f}%")
+                            else:
+                                cum_row_data.append("-")
+                            rows_data.append(cum_row_data)
+
                     aligns = ['left'] + ['right'] * (len(headers) - 1)
                     print("\n".join(render_table_eaw(headers, rows_data, aligns)))
 
@@ -531,7 +503,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                     
                     sorted_summaries = sorted(ticker_summaries, key=lambda x: x['total_profit'], reverse=True)
                     
-                    rows = [[s['ticker'], s['name'], f"{s['total_trades']}회", f"{s['win_rate']:.1f}%", _fmt_money_kr(s['total_profit']), _fmt_money_kr(s['avg_profit'])] for s in sorted_summaries]
+                    rows = [[s['ticker'], s['name'], f"{s['total_trades']}회", f"{s['win_rate']:.1f}%", format_kr_money(s['total_profit']), format_kr_money(s['avg_profit'])] for s in sorted_summaries]
                     
                     aligns = ['right', 'left', 'right', 'right', 'right', 'right']
                     table_lines = render_table_eaw(headers, rows, aligns)

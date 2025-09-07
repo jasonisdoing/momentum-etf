@@ -11,18 +11,19 @@ SHOW_LOGS = False
 INITIAL_CAPITAL = 100_000_000  # 1억
 
 # 백테스트 기간 설정. ['YYYY-MM-DD', 'YYYY-MM-DD'] 형식으로 지정합니다.
-TEST_DATE_RANGE = ["2025-01-01", "2025-09-05"]
+TEST_DATE_RANGE = ["2024-09-01", "2025-09-07"]
 
 # --- 포트폴리오 공통 설정 ---
 
 # 포트폴리오 Top-N 모드 설정
 # 전체 자본(INITIAL_CAPITAL)을 신호가 좋은 상위 N개 종목에 투자합니다.
 # 0이면 비활성(개별 종목 고정 자본 방식)
+# 종목은 30~50개 사이 유지하면 좋다.
 PORTFOLIO_TOPN =10
 
 # 포지션 최소/최대 비중 (포트폴리오 모드)
 MIN_POSITION_PCT = 0.10
-MAX_POSITION_PCT = 0.99
+MAX_POSITION_PCT = 0.20
 
 # 최대 비중 초과 시 부분매도 허용 여부 (포트폴리오 모드)
 # True이면 MAX_POSITION_PCT를 초과한 보유분을 당일 부분매도로 상한까지만 줄입니다.

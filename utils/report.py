@@ -3,34 +3,19 @@
 """
 
 from typing import List
+import re
+from unicodedata import east_asian_width, normalize
 
-def fmt_manwon(v: float) -> str:
-    """float 값을 '만원' 단위의 문자열로 포맷합니다."""
-    return f"{int(round(v/10_000)):,}만원"
-
-def fmt_signed_pct_1d(x: float) -> str:
-    """float 값을 부호가 있는 소수점 1자리 퍼센트 문자열로 포맷합니다."""
-    v = round(float(x), 1)
-    if v > 0:
-        s = f"+{v:.1f}%"
-    elif v < 0:
-        s = f"{v:.1f}%"
-    else:
-        s = "-0.0%"
-    # 한 자릿수일 때 정렬을 위해 앞에 공백 추가
-    if abs(v) < 10.0:
-        s = " " + s
-    return s
-
-def color_pct_1d(x: float) -> str:
-    """float 값을 ANSI 터미널용 색상이 포함된 퍼센트 문자열로 포맷합니다."""
-    red = "\x1b[31m"
-    blue = "\x1b[34m"
-    reset = "\x1b[0m"
-    s = fmt_signed_pct_1d(x)
-    v = round(float(x), 1)
-    return f"{red}{s}{reset}" if v > 0 else f"{blue}{s}{reset}"
-
+def format_kr_money(value: float) -> str:
+    """금액을 '억'과 '만원' 단위의 한글 문자열로 포맷합니다."""
+    if value is None:
+        return "-"
+    man = int(round(value / 10_000))
+    if man >= 10_000:
+        uk = man // 10_000
+        rem = man % 10_000
+        return f"{uk}억 {rem:,}만원" if rem > 0 else f"{uk}억"
+    return f"{man:,}만원"
 
 def render_table_eaw(
     headers: List[str],
@@ -38,11 +23,8 @@ def render_table_eaw(
     aligns: List[str]
 ) -> List[str]:
     """
-    리스트의 리스트를 너비를 인식하는 ASCII 테이블 문자열로 렌더링합니다.
-    동아시아 문자를 처리합니다.
+    동아시아 문자 너비를 고려하여 리스트 데이터를 ASCII 테이블 문자열로 렌더링합니다.
     """
-    from unicodedata import east_asian_width, normalize
-    import re
 
     _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -54,11 +36,16 @@ def render_table_eaw(
         return s
 
     def _disp_width_eaw(s: str) -> int:
+        """동아시아 문자를 포함한 문자열의 실제 터미널 출력 너비를 계산합니다."""
         s = _clean(s)
         w = 0
         for ch in s:
+            # 박스 드로잉 문자는 터미널에서 넓게 렌더링되는 경우가 많습니다.
+            if '\u2500' <= ch <= '\u257f':
+                w += 2
+                continue
             eaw = east_asian_width(ch)
-            # Ambiguous('A') 문자를 Wide로 처리하여 대부분의 현대 터미널에서 정렬이 깨지지 않도록 함
+            # 'Ambiguous'(A) 문자를 Wide로 처리하여 대부분의 터미널에서 정렬이 깨지지 않도록 합니다.
             if eaw in ('W', 'F', 'A'):
                 w += 2
             else:
@@ -66,6 +53,7 @@ def render_table_eaw(
         return w
 
     def _pad(s: str, width: int, align: str) -> str:
+        """주어진 너비와 정렬에 맞게 문자열에 패딩을 추가합니다."""
         s_str = str(s)
         s_clean = _clean(s_str)
         dw = _disp_width_eaw(s_clean)
