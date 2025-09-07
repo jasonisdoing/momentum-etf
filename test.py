@@ -2,6 +2,7 @@ import warnings
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 import os
+import importlib
 import sys
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
@@ -9,14 +10,11 @@ from typing import Dict, List, Tuple, Optional
 import pandas as pd
 
 import settings
-# New structure imports
 from utils.data_loader import read_tickers_file, read_holdings_file
-from core.backtester import simple_daily_series
 from utils.report import render_table_eaw
-from core.portfolio import portfolio_topn_series
 
 
-def main():
+def main(strategy_name: str = 'jason'):
     pairs = read_tickers_file('data/tickers.txt')
     if not pairs:
         print('data/tickers.txt 파일이 비어있거나 없습니다.')
@@ -61,6 +59,18 @@ def main():
     log_f.flush()
     _orig_stdout = sys.stdout
     sys.stdout = _Tee(sys.stdout, log_f)
+
+    # 전략 모듈 로드
+    try:
+        strategy_module = importlib.import_module(f"logics.{strategy_name}")
+        portfolio_topn_series = getattr(strategy_module, 'portfolio_topn_series')
+        simple_daily_series = getattr(strategy_module, 'simple_daily_series')
+        print(f"[{strategy_name} 전략]을 사용하여 백테스트를 실행합니다.")
+    except (ImportError, AttributeError):
+        print(f"오류: '{strategy_name}' 전략을 찾을 수 없거나, logics/{strategy_name}.py 파일에 portfolio_topn_series 또는 simple_daily_series 함수가 없습니다.")
+        log_f.close()
+        sys.stdout = _orig_stdout
+        return
 
     print(f"[settings] INITIAL_CAPITAL={int(initial_capital):,}원, MONTHS_RANGE={months_range} | {period_label}")
 

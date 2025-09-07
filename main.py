@@ -17,12 +17,13 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--test', action='store_true', help='백테스터(test.py)를 실행합니다')
     group.add_argument('--today', action='store_true', help='오늘의 액션 플랜(today.py)을 실행합니다')
+    parser.add_argument('--strategy', type=str, default='jason', help='사용할 전략의 이름을 지정합니다 (기본값: jason).')
 
     args = parser.parse_args()
 
     if args.test:
         from test import main as run_test
-        run_test()
+        run_test(strategy_name=args.strategy)
     elif args.today:
         from today import main as run_today
         run_today()
