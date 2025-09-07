@@ -1,6 +1,9 @@
 # User Data
 data/
 
+# Log Data
+logs/
+
 # 개인 파일
 jason.txt
 
