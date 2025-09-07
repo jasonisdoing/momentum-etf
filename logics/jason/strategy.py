@@ -88,14 +88,27 @@ def run_portfolio_backtest(
     if union_index.empty:
         return {}
 
-    # Settings
-    sell_thr = float(getattr(jason_settings, "SELL_SUM_THRESHOLD", -3.0))
-    buy_thr = float(getattr(jason_settings, "BUY_SUM_THRESHOLD", 3.0))
-    stop_loss = getattr(global_settings, "HOLDING_STOP_LOSS_PCT", None)
-    cooldown_days = int(getattr(global_settings, "COOLDOWN_DAYS", 0))
-    min_pos_pct = float(getattr(global_settings, "MIN_POSITION_PCT", 0.10))
-    max_pos_pct = float(getattr(global_settings, "MAX_POSITION_PCT", 0.20))
-    trim_on = bool(getattr(global_settings, "ENABLE_MAX_POSITION_TRIM", True))
+    try:
+        # Settings
+        # 전략 고유 설정
+        sell_thr = float(jason_settings.SELL_SUM_THRESHOLD)
+        buy_thr = float(jason_settings.BUY_SUM_THRESHOLD)
+    except AttributeError as e:
+        raise AttributeError(
+            f"'{e.name}' 설정이 logics/jason/settings.py 파일에 반드시 정의되어야 합니다."
+        ) from e
+
+    try:
+        # 전역 설정
+        stop_loss = global_settings.HOLDING_STOP_LOSS_PCT
+        cooldown_days = int(global_settings.COOLDOWN_DAYS)
+        min_pos_pct = float(global_settings.MIN_POSITION_PCT)
+        max_pos_pct = float(global_settings.MAX_POSITION_PCT)
+        trim_on = bool(global_settings.ENABLE_MAX_POSITION_TRIM)
+    except AttributeError as e:
+        raise AttributeError(
+            f"'{e.name}' 설정이 전역 settings.py 파일에 반드시 정의되어야 합니다."
+        ) from e
 
     # State
     state = {
@@ -350,16 +363,27 @@ def run_single_ticker_backtest(
         except Exception:
             pass
 
-    # Settings
-    sell_thr = float(getattr(jason_settings, "SELL_SUM_THRESHOLD", -3.0))
-    buy_thr = float(getattr(jason_settings, "BUY_SUM_THRESHOLD", 3.0))
-    stop_loss = getattr(global_settings, "HOLDING_STOP_LOSS_PCT", None)
-    cooldown_days = int(getattr(global_settings, "COOLDOWN_DAYS", 0))
     try:
-        st_p = int(getattr(jason_settings, "ST_ATR_PERIOD", 14))
-        st_m = float(getattr(jason_settings, "ST_ATR_MULTIPLIER", 3.0))
-    except Exception:
-        st_p, st_m = 14, 3.0
+        # Settings
+        # 전략 고유 설정
+        sell_thr = float(jason_settings.SELL_SUM_THRESHOLD)
+        buy_thr = float(jason_settings.BUY_SUM_THRESHOLD)
+        st_p = int(jason_settings.ST_ATR_PERIOD)
+        st_m = float(jason_settings.ST_ATR_MULTIPLIER)
+    except AttributeError as e:
+        raise AttributeError(
+            f"'{e.name}' 설정이 logics/jason/settings.py 파일에 반드시 정의되어야 합니다."
+        ) from e
+
+    try:
+        # 전역 설정
+        stop_loss = global_settings.HOLDING_STOP_LOSS_PCT
+        cooldown_days = int(global_settings.COOLDOWN_DAYS)
+    except AttributeError as e:
+        raise AttributeError(
+            f"'{e.name}' 설정이 전역 settings.py 파일에 반드시 정의되어야 합니다."
+        ) from e
+
     st_dir = supertrend_direction(df, st_p, st_m) if len(df) > max(2, st_p) else None
 
     # State

@@ -110,10 +110,6 @@ def main(
         try:
             # 패키지 기반 전략(e.g., logics/jason/strategy.py)을 먼저 시도
             strategy_module = importlib.import_module(f"logics.{strategy_name}.strategy")
-            try:
-                importlib.import_module(f"logics.{strategy_name}.settings")
-            except ImportError:
-                pass  # 전략별 설정 파일은 선택 사항
         except ImportError:
             try:
                 # 단일 파일 기반 전략(e.g., logics/my_strategy.py)으로 폴백
@@ -139,6 +135,7 @@ def main(
         # 시뮬레이션 실행
         per_ticker_ts: Dict[str, pd.DataFrame] = {}
         name_by_ticker: Dict[str, str] = {t: n for t, n in pairs}
+        # 전역 설정에서 PORTFOLIO_TOPN을 가져옵니다.
         portfolio_topn = int(getattr(settings, "PORTFOLIO_TOPN", 0) or 0)
         if portfolio_topn > 0:
             per_ticker_ts = (
@@ -267,6 +264,8 @@ def main(
                     signal_headers = ["1주수익", "2주수익", "모멘텀점수", "ST"]
                 elif strategy_name == "seykota":
                     signal_headers = ["단기MA", "장기MA", "MA스코어", "필터"]
+                elif strategy_name == "donchian":
+                    signal_headers = ["이평선(값)", "이평선(기간)", "이격도", "-"]
                 else:
                     signal_headers = ["신호1", "신호2", "점수", "필터"]
 
@@ -288,10 +287,7 @@ def main(
                 headers.extend(signal_headers)
                 headers.append("문구")
 
-                def _status_rank(s: str) -> int:
-                    s = (s or "").upper()
-                    return 0 if s == "HOLD" else 1
-
+                actions = []
                 for tkr, ts in per_ticker_ts.items():
                     row = ts.loc[dt]
                     name = name_by_ticker.get(tkr, "")
@@ -364,6 +360,12 @@ def main(
                         s2_str = f"{int(s2):,}" if pd.notna(s2) else "-"
                         score_str = f"{float(score):+,.2f}%" if pd.notna(score) else "-"
                         filter_str = "-"  # seykota는 필터를 사용하지 않음
+                    elif strategy_name == "donchian":
+                        s1_str = f"{int(s1):,}" if pd.notna(s1) else "-"  # 이평선(값)
+                        s2_str = f"{int(s2):,}" if pd.notna(s2) else "-"  # 이평선(기간)
+                        score_str = f"{float(score):+,.2f}%" if pd.notna(score) else "-"  # 이격도
+                        filter_str = "-"
+
                     else:  # 일반적인 폴백
                         s1_str, s2_str, score_str, filter_str = "-", "-", "-", "-"
 
@@ -376,7 +378,7 @@ def main(
                             else 0
                         )
                         if decision == "BUY":
-                            phrase = f"매수 {qty_calc}주 @ {int(round(price_today)):,}"
+                            phrase = f"매수 {qty_calc}주 @ {int(round(price_today)):,} ({format_kr_money(amount)})"
                         else:
                             # 결정 코드에 따라 상세한 사유를 생성합니다.
                             if decision == "SELL_MOMENTUM":
@@ -389,8 +391,7 @@ def main(
                                 tag = "비중조절"
                             else:  # 이전 버전 호환용
                                 tag = "매도"
-                            phrase = f"{tag} {qty_calc}주 @ {int(round(price_today)):,} "
-                            f"수익 {format_kr_money(prof)} 손익률 {f'{plpct:+.1f}%'}"
+                            phrase = f"{tag} {qty_calc}주 @ {int(round(price_today)):,} 수익 {format_kr_money(prof)} 손익률 {f'{plpct:+.1f}%'}"
                     elif decision in ("WAIT", "HOLD"):
                         phrase = str(row.get("note", "") or "")
                     if tkr not in buy_date_by_ticker:
@@ -407,35 +408,40 @@ def main(
                     bd = buy_date_by_ticker.get(tkr)
                     bd_str = pd.to_datetime(bd).strftime("%Y-%m-%d") if bd is not None else "-"
                     hd = hold_days_by_ticker.get(tkr, 0)
-                    rows.append(
-                        [
-                            0,
-                            tkr,
-                            name,
-                            display_status,
-                            bd_str,
-                            f"{hd}",
-                            f"{int(round(disp_price)):,}",
-                            f"{tkr_day_ret:+.1f}%",
-                            f"{disp_shares:,}",
-                            format_kr_money(amount),
-                            hold_ret_str,
-                            f"{w:.0f}%",
-                            s1_str,
-                            s2_str,
-                            score_str,
-                            filter_str,
-                            phrase,
-                            _status_rank(decision),
-                            -w,
-                        ]
-                    )
+                    current_row = [
+                        0,
+                        tkr,
+                        name,
+                        display_status,
+                        bd_str,
+                        f"{hd}",
+                        f"{int(round(disp_price)):,}",
+                        f"{tkr_day_ret:+.1f}%",
+                        f"{disp_shares:,}",
+                        format_kr_money(amount),
+                        hold_ret_str,
+                        f"{w:.0f}%",
+                        s1_str,
+                        s2_str,
+                        score_str,
+                        filter_str,
+                        phrase,
+                    ]
+                    actions.append((decision, w, score, tkr, current_row))
 
-                rows.sort(key=lambda r: (r[-2], r[-1], r[1]))
-                for idx, r in enumerate(rows, 1):
-                    r[0] = idx
-                    del r[-1]
-                    del r[-1]
+                def sort_key(action_tuple):
+                    state, weight, score, tkr, _ = action_tuple
+                    is_hold = 1 if state == "HOLD" else 2
+                    is_wait = 1 if state == "WAIT" else 0
+                    sort_value = -score if pd.notna(score) and state == "WAIT" else -weight
+                    return (is_hold, is_wait, sort_value, tkr)
+
+                actions.sort(key=sort_key)
+
+                rows_sorted = []
+                for idx, (_, _, _, _, row) in enumerate(actions, 1):
+                    row[0] = idx
+                    rows_sorted.append(row)
 
                 aligns = [
                     "right",
@@ -456,7 +462,7 @@ def main(
                     "center",
                     "left",
                 ]
-                str_rows = [[str(c) for c in row] for row in rows]
+                str_rows = [[str(c) for c in row] for row in rows_sorted]
 
                 # 일별 상세 테이블을 콘솔과 로그 파일에 모두 출력합니다.
                 print("\n".join(render_table_eaw(headers, str_rows, aligns)))

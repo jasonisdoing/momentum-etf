@@ -124,8 +124,7 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
         return
 
     print(
-        f"포트폴리오 파일 '{os.path.basename(portfolio_data['filepath'])}'을(를) "
-        "기준으로 오늘의 액션을 계산합니다."
+        f"포트폴리오 파일 '{os.path.basename(portfolio_data['filepath'])}'을(를) 기준으로 오늘의 액션을 계산합니다."
     )
     holdings = portfolio_data.get("holdings", {})
     init_cap = float(portfolio_data.get("total_equity", 0.0))
@@ -142,7 +141,6 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
         return
 
     # Fetch recent data for signals
-    rows = []
     total_holdings = 0.0
     datestamps = []
     data_by_tkr = {}
@@ -221,6 +219,38 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
                 "shares": sh,
                 "avg_cost": ac,
             }
+    elif strategy_name == "donchian":
+        ma_period = int(getattr(strategy_settings, "DONCHIAN_MA_PERIOD", 20))
+        required_months = (ma_period // 22) + 2
+
+        for tkr, _ in pairs:
+            df = fetch_ohlcv(tkr, months_range=[required_months, 0])
+            if df is None or len(df) < ma_period:
+                continue
+            close = df["Close"]
+            ma = close.rolling(window=ma_period).mean()
+
+            c0 = close.iloc[-1]
+            if pd.isna(c0):
+                continue
+            c0 = float(c0)
+            m = ma.iloc[-1]
+
+            ma_score = (c0 / m - 1.0) * 100.0 if m > 0 and not pd.isna(m) else 0.0
+
+            sh = int((holdings.get(tkr) or {}).get("shares") or 0)
+            ac = float((holdings.get(tkr) or {}).get("avg_cost") or 0.0)
+            total_holdings += sh * c0
+            datestamps.append(df.index[-1])
+            data_by_tkr[tkr] = {
+                "price": c0,
+                "s1": m,  # 이동평균 (값)
+                "s2": ma_period,  # 이동평균 (기간)
+                "score": ma_score,  # 이격도
+                "filter": None,
+                "shares": sh,
+                "avg_cost": ac,
+            }
     else:
         print(f"오류: '{strategy_name}' 전략에 대한 'today' 로직이 구현되지 않았습니다.")
         return
@@ -254,7 +284,15 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
         day_label = "다음 거래일"
         label_date = next_trading_day
 
-    denom = int(getattr(global_settings, "PORTFOLIO_TOPN", 10))
+    try:
+        denom = int(global_settings.PORTFOLIO_TOPN)
+        stop_loss = global_settings.HOLDING_STOP_LOSS_PCT
+        max_pos = float(global_settings.MAX_POSITION_PCT)
+        min_pos = float(global_settings.MIN_POSITION_PCT)
+    except AttributeError as e:
+        print(f"오류: '{e.name}' 설정이 전역 settings.py 파일에 반드시 정의되어야 합니다.")
+        return
+
     # Count held tickers from holdings snapshot
     held_count = sum(1 for v in holdings.values() if int((v or {}).get("shares") or 0) > 0)
 
@@ -263,16 +301,10 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
     total_value = total_holdings + max(0.0, total_cash)
     header_line = (
         f"{day_label} {label_date_str} - 보유종목 {held_count} "
-        f"잔액(보유+현금): {format_kr_money(total_value)} "
-        f"(보유 {format_kr_money(total_holdings)} + 현금 {format_kr_money(total_cash)})"
+        f"잔액(보유+현금): {format_kr_money(total_value)} (보유 {format_kr_money(total_holdings)} + 현금 {format_kr_money(total_cash)})"
     )
 
-    # Decide next action per ticker
-    stop_loss = getattr(global_settings, "HOLDING_STOP_LOSS_PCT", None)
-    max_pos = float(getattr(global_settings, "MAX_POSITION_PCT", 0.20))
-    min_pos = float(getattr(global_settings, "MIN_POSITION_PCT", 0.10))
-
-    actions = []  # (notional, score, row)
+    actions = []  # (state, weight, score, tkr, row)
     for tkr, name in pairs:
         d = data_by_tkr.get(tkr)
         if not d:
@@ -299,16 +331,14 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
                     state = "TRIM_REBALANCE"  # 결정 코드
                     notional = qty * price
                     prof = (price - ac) * qty if ac > 0 else 0.0
-                    phrase = f"비중조절 {qty}주 @ {int(round(price)):,} "
-                    f"수익 {format_kr_money(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+                    phrase = f"비중조절 {qty}주 @ {int(round(price)):,} 수익 {format_kr_money(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
             # CUT stop loss
             elif stop_loss is not None and ac > 0 and hold_ret <= float(stop_loss):
                 state = "CUT_STOPLOSS"  # 결정 코드
                 qty = sh
                 notional = qty * price
                 prof = (price - ac) * qty if ac > 0 else 0.0
-                phrase = f"가격기반손절 {qty}주 @ {int(round(price)):,} "
-                f"수익 {format_kr_money(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+                phrase = f"가격기반손절 {qty}주 @ {int(round(price)):,} 수익 {format_kr_money(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
         # --- 전략별 매수/매도 로직 ---
         if state == "HOLD":  # 아직 매도 결정이 내려지지 않은 경우
@@ -331,6 +361,15 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
                     prof = (price - ac) * qty if ac > 0 else 0.0
                     tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"
                     phrase = f"{tag} {qty}주 @ {int(round(price)):,} 수익 {format_kr_money(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+            elif strategy_name == "donchian":
+                price, ma, period = d["price"], d["s1"], d["s2"]
+                if sh > 0 and not pd.isna(price) and not pd.isna(ma) and price < ma:
+                    state = "SELL_TREND"  # 결정 코드
+                    qty = sh
+                    notional = qty * price
+                    prof = (price - ac) * qty if ac > 0 else 0.0
+                    tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"
+                    phrase = f"{tag} {qty}주 @ {int(round(price)):,} 수익 {format_kr_money(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
         elif state == "WAIT":  # 아직 보유하지 않은 경우
             buy_signal = False
@@ -347,6 +386,11 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
                 if not pd.isna(fast_ma) and not pd.isna(slow_ma) and fast_ma > slow_ma:
                     buy_signal = True
                     buy_phrase = f"골든크로스 ({fast_ma:.0f}>{slow_ma:.0f})"
+            elif strategy_name == "donchian":
+                price, ma, period = d["price"], d["s1"], d["s2"]
+                if not pd.isna(price) and not pd.isna(ma) and price > ma:
+                    buy_signal = True
+                    buy_phrase = f"추세진입 ({int(price):,}>{int(ma):,}, MA={period})"
 
             if buy_signal:
                 reason_suffix = f" ({buy_phrase})"
@@ -366,7 +410,10 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
                         qty = req_qty
                         state = "BUY"
                         notional = qty * price
-                        phrase = f"매수 {qty}주 @ {int(round(price)):,}" + reason_suffix
+                        phrase = (
+                            f"매수 {qty}주 @ {int(round(price)):,} ({format_kr_money(notional)})"
+                            + reason_suffix
+                        )
                     else:
                         phrase = ("현금 부족" if total_cash < need else "상한 제한") + reason_suffix
                 else:
@@ -390,45 +437,61 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
             s2_str = f"{d['s2']:.0f}" if not pd.isna(d["s2"]) else "-"
             score_str = f"{d['score']:+.2f}%"
             filter_str = "-"
+        elif strategy_name == "donchian":
+            s1_str = f"{d['s1']:.0f}" if not pd.isna(d["s1"]) else "-"  # 이평선(값)
+            s2_str = f"{int(d['s2'])}" if not pd.isna(d["s2"]) else "-"  # 이평선(기간)
+            score_str = f"{d['score']:+.2f}%" if not pd.isna(d["score"]) else "-"  # 이격도
+            filter_str = "-"
+
         else:
             s1_str, s2_str, score_str, filter_str = "-", "-", "-", "-"
 
         position_weight_pct = (amount / total_value) * 100.0 if total_value > 0 else 0.0
-        rows.append(
-            [
-                0,
-                tkr,
-                name,
-                state,
-                "-",
-                "0",
-                f"{int(round(price)):,}",
-                f"{day_ret:+.1f}%",
-                f"{sh:,}",
-                format_kr_money(amount),
-                f"{hold_ret:+.1f}%" if hold_ret is not None else "-",
-                f"{position_weight_pct:.0f}%",
-                s1_str,
-                s2_str,
-                score_str,
-                filter_str,
-                phrase,
-            ]
-        )
-        actions.append((notional, score, rows[-1]))
+        current_row = [
+            0,
+            tkr,
+            name,
+            state,
+            "-",
+            "0",
+            f"{int(round(price)):,}",
+            f"{day_ret:+.1f}%",
+            f"{sh:,}",
+            format_kr_money(amount),
+            f"{hold_ret:+.1f}%" if hold_ret is not None else "-",
+            f"{position_weight_pct:.0f}%",
+            s1_str,
+            s2_str,
+            score_str,
+            filter_str,
+            phrase,
+        ]
+        actions.append((state, position_weight_pct, score, tkr, current_row))
 
-    # Sort by score for seykota, or by notional for others
-    if strategy_name in ["jason", "seykota"]:
-        # jason, seykota 전략은 점수가 높은 순으로 정렬
-        actions.sort(key=lambda x: x[1], reverse=True)
-    else:
-        # 기본 정렬: 거래금액(notional)이 높은 순
-        actions.sort(key=lambda x: x[0], reverse=True)
+    # 정렬: 1.HOLD 우선, 2.기타(비중순), 3.WAIT(점수순), 4.티커
+    def sort_key(action_tuple):
+        state, weight, score, tkr, _ = action_tuple
+        is_hold = 1 if state == "HOLD" else 2
+        is_wait = 1 if state == "WAIT" else 0
+        sort_value = -score if state == "WAIT" else -weight
+        return (is_hold, is_wait, sort_value, tkr)
+
+    actions.sort(key=sort_key)
 
     rows_sorted = []
-    for i, (_, _, row) in enumerate(actions, 1):
+    for i, (_, _, _, _, row) in enumerate(actions, 1):
         row[0] = i
         rows_sorted.append(row)
+
+    # 전략에 따라 동적으로 헤더를 설정합니다.
+    if strategy_name == "jason":
+        signal_headers = ["1주수익", "2주수익", "모멘텀점수", "ST"]
+    elif strategy_name == "seykota":
+        signal_headers = ["단기MA", "장기MA", "MA스코어", "필터"]
+    elif strategy_name == "donchian":
+        signal_headers = ["이평선(값)", "이평선(기간)", "이격도", "-"]
+    else:
+        signal_headers = ["신호1", "신호2", "점수", "필터"]
 
     headers = [
         "#",
@@ -443,12 +506,10 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
         "금액",
         "누적수익률",
         "비중",
-        "신호1",
-        "신호2",
-        "점수",
-        "필터",
-        "문구",
     ]
+    headers.extend(signal_headers)
+    headers.append("문구")
+
     aligns = [
         "right",
         "right",
