@@ -12,7 +12,6 @@ from . import settings as jason_settings
 from utils.data_loader import fetch_ohlcv, get_today_str
 from utils.indicators import supertrend_direction
 
-
 def run_portfolio_backtest(
     pairs: List[Tuple[str, str]],
     months_range: Optional[List[int]] = None,
@@ -20,8 +19,7 @@ def run_portfolio_backtest(
     core_start_date: Optional[pd.Timestamp] = None,
     top_n: int = 10,
     date_range: Optional[List[str]] = None,
-    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
-    ticker_universe_mode: str = 'STATIC',
+    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None
 ) -> Dict[str, pd.DataFrame]:
     """
     공유 현금 Top-N 포트폴리오를 시뮬레이션합니다.
@@ -78,7 +76,6 @@ def run_portfolio_backtest(
     buy_thr = float(getattr(jason_settings, 'BUY_SUM_THRESHOLD', 3.0))
     stop_loss = getattr(global_settings, 'HOLDING_STOP_LOSS_PCT', None)
     cooldown_days = int(getattr(global_settings, 'COOLDOWN_DAYS', 0))
-    top_performers_count = getattr(global_settings, 'TOP_PERFORMERS_COUNT', 10)
     big_drop_pct = float(getattr(jason_settings, 'BIG_DROP_PCT', -10.0))
     big_drop_block_days = int(getattr(jason_settings, 'BIG_DROP_SELL_BLOCK_DAYS', 5))
     min_pos_pct = float(getattr(global_settings, 'MIN_POSITION_PCT', 0.10))
@@ -91,27 +88,10 @@ def run_portfolio_backtest(
     out_rows = {tkr: [] for tkr in data.keys()}
     out_cash = []
 
-    active_universe = list(data.keys())
+    active_universe = list(data.keys()) # In static mode, the universe is fixed.
 
     # Main loop
     for i, dt in enumerate(common_index):
-        # DYNAMIC UNIVERSE REBALANCING
-        if ticker_universe_mode == 'DYNAMIC_WEEKLY' and dt.dayofweek == 0: # Monday
-            perf_cands = []
-            for tkr, d in data.items():
-                pos = d['close'].index.get_loc(dt)
-                if pos >= 5:
-                    c0 = d['close'].iloc[pos]
-                    c5 = d['close'].iloc[pos-5]
-                    if c5 > 0:
-                        ret = (c0 / c5 - 1.0)
-                        perf_cands.append((ret, tkr))
-            
-            perf_cands.sort(reverse=True)
-            new_universe_tickers = [p[1] for p in perf_cands[:top_performers_count]]
-            held_tickers = [tkr for tkr, s in state.items() if s['shares'] > 0]
-            active_universe = list(set(new_universe_tickers) | set(held_tickers))
-
         today_prices = {tkr: float(d['close'].loc[dt]) for tkr, d in data.items() if dt in d['close'].index}
         
         # 1. Big drop detection
@@ -199,6 +179,7 @@ def run_portfolio_backtest(
             for k in range(min(slots_to_fill, len(cands))):
                 if cash <= 0: break
                 _, tkr = cands[k]
+
                 price = today_prices.get(tkr)
                 if not price: continue
 

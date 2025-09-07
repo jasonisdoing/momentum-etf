@@ -13,16 +13,6 @@ INITIAL_CAPITAL = 100_000_000  # 1억
 # 백테스트 기간 설정. ['YYYY-MM-DD', 'YYYY-MM-DD'] 형식으로 지정합니다.
 TEST_DATE_RANGE = ["2025-01-01", "2025-09-05"]
 
-# --- 티커 선택 설정 ---
-# 'STATIC': data/tickers.txt 파일의 고정된 종목 사용
-# 'DYNAMIC_WEEKLY': 매주 월요일, 시가총액 상위 Pool 내에서 주간 수익률 상위 종목으로 유니버스 교체
-TICKER_UNIVERSE_MODE = 'DYNAMIC_WEEKLY'
-
-# 동적 유니버스 모드에서 사용할 시가총액 상위 종목 수 (데이터 사전 로딩용)
-DYNAMIC_UNIVERSE_POOL_SIZE = 100
-EXCLUDE_KEWORDS = ['레버리지', '인버스']
-TOP_PERFORMERS_COUNT = 10
-
 # --- 포트폴리오 공통 설정 ---
 
 # 포트폴리오 Top-N 모드 설정

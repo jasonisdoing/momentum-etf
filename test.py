@@ -114,33 +114,13 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
         period_label = f"{int(months_range[0])}개월~{'현재' if int(months_range[1])==0 else str(int(months_range[1]))+'개월'}"
 
     # 티커 목록 결정
-    ticker_universe_mode = getattr(settings, 'TICKER_UNIVERSE_MODE', 'STATIC')
-
-    if ticker_universe_mode != 'STATIC' and core_start_dt > pd.Timestamp.now():
-        print(f"\n오류: 동적 유니버스 모드({ticker_universe_mode})는 미래 날짜에 대한 백테스트를 지원하지 않습니다.")
-        print(f"      백테스트 시작일({core_start_dt.strftime('%Y-%m-%d')})이 현재보다 미래입니다.")
-        print(f"      settings.py에서 TICKER_UNIVERSE_MODE를 'STATIC'으로 변경하거나, TEST_DATE_RANGE를 과거로 설정해주세요.")
-        return
-
-    if ticker_universe_mode == 'DYNAMIC_WEEKLY':
-        from utils.data_loader import fetch_top_etfs_for_pool
-        pool_size = getattr(settings, 'DYNAMIC_UNIVERSE_POOL_SIZE', 200)
-        # 백테스트 시작일 직전의 데이터를 기준으로 티커 풀 선택
-        ref_date_for_pool = core_start_dt - pd.Timedelta(days=1)
-        if not quiet:
-            print(f"\n[동적 유니버스] {ref_date_for_pool.strftime('%Y-%m-%d')} 기준 ETF 중에서 거래대금 상위 {pool_size}개 종목을 풀(Pool)로 사용합니다.")
-        pairs = fetch_top_etfs_for_pool(ref_date=ref_date_for_pool, count=pool_size)
-    else:
-        if not quiet:
-            print(f"\n[고정 유니버스] data/tickers.txt 파일의 종목을 사용합니다.")
-        pairs = read_tickers_file('data/tickers.txt')
+    if not quiet:
+        print(f"\n[고정 유니버스] data/tickers.txt 파일의 종목을 사용합니다.")
+    pairs = read_tickers_file('data/tickers.txt')
 
     if not pairs:
         print('오류: 백테스트에 사용할 티커를 찾을 수 없습니다.')
-        if ticker_universe_mode != 'STATIC':
-            print('      pykrx API 문제 또는 해당 기간에 데이터가 부족할 수 있습니다.')
-        else:
-            print('      data/tickers.txt 파일이 비어있거나 존재하지 않을 수 있습니다.')
+        print('      data/tickers.txt 파일이 비어있거나 존재하지 않을 수 있습니다.')
         return
     
     _orig_stdout = sys.stdout
@@ -239,8 +219,7 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
         if portfolio_topn > 0:
             per_ticker_ts = run_portfolio_backtest(
                 pairs, months_range=months_range, initial_capital=initial_capital,
-                core_start_date=core_start_dt, top_n=portfolio_topn, 
-                ticker_universe_mode=ticker_universe_mode,
+                core_start_date=core_start_dt, top_n=portfolio_topn,
                 date_range=test_date_range, prefetched_data=raw_data_by_ticker
             ) or {}
             if 'CASH' in per_ticker_ts:
@@ -473,24 +452,17 @@ def main(strategy_name: str = 'jason', portfolio_path: Optional[str] = None, qui
                 trades = ts[ts['decision'].isin(['SELL', 'CUT', 'TRIM'])]
                 total_trades = len(trades)
 
+                # 거래가 있는 종목만 요약에 포함
                 if total_trades > 0:
                     winning_trades = len(trades[trades['trade_profit'] > 0])
                     win_rate = (winning_trades / total_trades) * 100.0
                     total_profit = trades['trade_profit'].sum()
                     avg_profit = total_profit / total_trades
-                else:
-                    win_rate = 0.0
-                    total_profit = 0.0
-                    avg_profit = 0.0
-                
-                ticker_summaries.append({
-                    'ticker': tkr,
-                    'name': name_by_ticker.get(tkr, ''),
-                    'total_trades': total_trades,
-                    'win_rate': win_rate,
-                    'total_profit': total_profit,
-                    'avg_profit': avg_profit,
-                })
+                    ticker_summaries.append({
+                        'ticker': tkr, 'name': name_by_ticker.get(tkr, ''),
+                        'total_trades': total_trades, 'win_rate': win_rate,
+                        'total_profit': total_profit, 'avg_profit': avg_profit,
+                    })
 
             if not quiet:
                 sys.stdout = _orig_stdout # Print summary to original stdout

@@ -5,6 +5,7 @@ from typing import Dict, Tuple, List, Optional
 import json
 import os
 import glob
+import re
 import pandas as pd
 
 import settings as global_settings
@@ -114,27 +115,14 @@ def main(portfolio_path: Optional[str] = None):
     init_cap = float(portfolio_data.get('total_equity', 0.0))
 
     # 티커 목록 결정
-    ticker_universe_mode = getattr(global_settings, 'TICKER_UNIVERSE_MODE', 'STATIC')
-    if ticker_universe_mode == 'DYNAMIC_WEEKLY':
-        from utils.data_loader import fetch_top_performing_etfs
-        count = getattr(global_settings, 'TOP_PERFORMERS_COUNT', 10) # DYNAMIC_WEEKLY지만 여기서는 일회성으로 사용
-        ref_date = pd.Timestamp.now().normalize()
-        print(f"\n[동적 유니버스] {ref_date.strftime('%Y-%m-%d')} 기준 주간 수익률 상위 {count}개 ETF를 사용합니다.")
-        dynamic_pairs = fetch_top_performing_etfs(ref_date=ref_date, count=count)
-        # 동적으로 선택된 티커와 현재 보유 종목을 합쳐서 전체 유니버스 구성
-        pairs = build_pairs_with_holdings(dynamic_pairs, holdings)
-    else:
-        print(f"\n[고정 유니버스] data/tickers.txt 파일의 종목을 사용합니다.")
-        # tickers.txt와 현재 보유 종목을 합쳐서 전체 유니버스 구성
-        static_pairs = read_tickers_file('data/tickers.txt')
-        pairs = build_pairs_with_holdings(static_pairs, holdings)
+    print(f"\n[고정 유니버스] data/tickers.txt 파일의 종목을 사용합니다.")
+    # tickers.txt와 현재 보유 종목을 합쳐서 전체 유니버스 구성
+    static_pairs = read_tickers_file('data/tickers.txt')
+    pairs = build_pairs_with_holdings(static_pairs, holdings)
 
     if not pairs:
         print('오류: 투자 대상 티커를 찾을 수 없습니다.')
-        if ticker_universe_mode != 'STATIC':
-            print('      pykrx API 문제 또는 해당 기간에 데이터가 부족할 수 있습니다.')
-        else:
-            print('      data/tickers.txt 파일이 비어있거나 존재하지 않을 수 있습니다.')
+        print('      data/tickers.txt 파일이 비어있거나 존재하지 않을 수 있습니다.')
         return
 
     # Fetch recent data for signals
