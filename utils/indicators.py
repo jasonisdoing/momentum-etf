@@ -1,0 +1,46 @@
+"""
+보조지표 계산 함수 모음 (e.g., SuperTrend, EMA, etc.)
+"""
+import pandas as pd
+
+def supertrend_direction(df: pd.DataFrame, period: int, multiplier: float) -> pd.Series:
+    """SuperTrend 방향을 계산합니다. (+1: 상향, -1: 하향)"""
+    high = df['High']
+    low = df['Low']
+    close = df['Close']
+    hl2 = (high + low) / 2.0
+
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(window=period).mean()
+
+    upperband = hl2 + multiplier * atr
+    lowerband = hl2 - multiplier * atr
+
+    st = pd.Series(index=df.index, dtype=float)
+    direction = pd.Series(index=df.index, dtype=float)
+
+    for i in range(len(df)):
+        if i == 0:
+            st.iloc[i] = upperband.iloc[i]
+            direction.iloc[i] = -1
+            continue
+        prev_st = st.iloc[i-1]
+        prev_dir = direction.iloc[i-1]
+        curr_close = close.iloc[i]
+
+        if curr_close > prev_st:
+            direction.iloc[i] = 1
+        elif curr_close < prev_st:
+            direction.iloc[i] = -1
+        else:
+            direction.iloc[i] = prev_dir
+
+        if direction.iloc[i] == 1:
+            st.iloc[i] = max(lowerband.iloc[i], prev_st if prev_dir == 1 else lowerband.iloc[i])
+        else:
+            st.iloc[i] = min(upperband.iloc[i], prev_st if prev_dir == -1 else upperband.iloc[i])
+
+    return direction.fillna(-1).astype(int)

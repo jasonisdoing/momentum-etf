@@ -1,0 +1,11 @@
+# User Data
+data/
+
+# 개인 파일
+jason.txt
+
+# Python
+__pycache__/
+.venv/
+venv/
+*.pyc

@@ -1,0 +1,276 @@
+import warnings
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+
+from typing import Dict, Tuple, List, Optional
+import json
+import os
+import pandas as pd
+
+import settings
+# New structure imports
+from utils.data_loader import read_tickers_file, read_holdings_file, fetch_ohlcv
+from utils.indicators import supertrend_direction
+from utils.report import fmt_manwon as fmt_money_uk, render_table_eaw
+try:
+    from pykrx import stock as _stock
+except Exception:
+    _stock = None
+
+
+def load_initial_capital(path: str = 'data/data.json') -> float:
+    """Load initial capital preferring the latest equity_by_date entry from data/data.json.
+    Fallback to data.json.initial_capital, then settings.INITIAL_CAPITAL.
+    """
+    try:
+        if os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as f:
+                obj = json.load(f)
+                # Prefer latest equity_by_date value if available
+                eq = obj.get('equity_by_date')
+                if isinstance(eq, dict) and eq:
+                    try:
+                        # keys are dates like 'YYYY-MM-DD'
+                        latest_key = max(eq.keys(), key=lambda k: pd.to_datetime(k))
+                        v = eq.get(latest_key)
+                        if v is not None:
+                            return float(v)
+                    except Exception:
+                        pass
+                v = obj.get('initial_capital')
+                if v is not None:
+                    return float(v)
+    except Exception:
+        pass
+    return float(getattr(settings, 'INITIAL_CAPITAL', 100_000_000.0))
+
+
+def build_pairs_with_holdings(pairs: List[Tuple[str, str]], holdings: dict) -> List[Tuple[str, str]]:
+    name_map = {t: n for t, n in pairs if n}
+    out_map = {t: n for t, n in pairs}
+    # If holdings has tickers not in pairs, add with blank name
+    for tkr in holdings.keys():
+        if tkr not in out_map:
+            out_map[tkr] = name_map.get(tkr, '')
+    return [(t, out_map.get(t, '')) for t in out_map.keys()]
+
+
+def main():
+    # Load holdings (snapshot)
+    holdings = read_holdings_file('data/holdings.csv') if os.path.exists('data/holdings.csv') else {}
+    pairs = build_pairs_with_holdings(read_tickers_file('data/tickers.txt'), holdings)
+    if not pairs:
+        print('티커를 찾을 수 없습니다. data/tickers.txt 파일을 채워주세요.')
+        return
+
+    # Fetch recent data for signals
+    rows = []
+    total_holdings = 0.0
+    datestamps = []
+    data_by_tkr = {}
+    for tkr, _ in pairs:
+        df = fetch_ohlcv(tkr, months_range=[1,0])
+        if df is None or len(df) < 11:
+            continue
+        close = df['Close']
+        i = len(close) - 1
+        c0 = float(close.iloc[i])
+        c5 = float(close.iloc[i-5]) if i-5 >= 0 else c0
+        c10 = float(close.iloc[i-10]) if i-10 >= 0 else (c5 if i-5>=0 else c0)
+        p1 = round(((c0/c5)-1.0)*100.0, 1) if c5>0 else 0.0
+        p2 = round(((c5/c10)-1.0)*100.0, 1) if c10>0 else 0.0
+        s2 = p1 + p2
+        # ST direction
+        try:
+            st_dir = supertrend_direction(df, int(getattr(settings,'ST_ATR_PERIOD',14)), float(getattr(settings,'ST_ATR_MULTIPLIER',3.0)))
+            stv = int(st_dir.iloc[-1]) if len(st_dir)>0 else 0
+        except Exception:
+            stv = 0
+        sh = int((holdings.get(tkr) or {}).get('shares') or 0)
+        ac = float((holdings.get(tkr) or {}).get('avg_cost') or 0.0)
+        total_holdings += sh * c0
+        datestamps.append(df.index[-1])
+        data_by_tkr[tkr] = {
+            'price': c0,
+            'p1': p1,
+            'p2': p2,
+            's2': s2,
+            'st': stv,
+            'shares': sh,
+            'avg_cost': ac,
+        }
+
+    dt = max(datestamps) if datestamps else pd.Timestamp.now()
+    # Determine trading-calendar-based label/date via pykrx
+    ref_ticker = next(iter(data_by_tkr.keys())) if data_by_tkr else None
+    def is_trading_day(d: pd.Timestamp) -> bool:
+        if _stock is None or ref_ticker is None:
+            # Fallback: assume trading day only if equals last data date
+            return d.date() == pd.to_datetime(dt).date()
+        try:
+            s = d.strftime('%Y%m%d')
+            df = _stock.get_market_ohlcv_by_date(s, s, ref_ticker)
+            return df is not None and len(df) > 0
+        except Exception:
+            return False
+    # Decide label and date to display
+    today_cal = pd.Timestamp.now().normalize()
+    if is_trading_day(today_cal):
+        day_label = '오늘'
+        label_date = today_cal
+    else:
+        # find next trading day within next 14 calendar days
+        nd = today_cal + pd.Timedelta(days=1)
+        for _ in range(14):
+            if is_trading_day(nd):
+                label_date = nd
+                break
+            nd += pd.Timedelta(days=1)
+        else:
+            # fallback to last data date
+            label_date = pd.to_datetime(dt)
+        day_label = '다음 거래일'
+
+    denom = int(getattr(settings, 'PORTFOLIO_TOPN', 10))
+    # Count held tickers from holdings snapshot
+    held_count = sum(1 for v in holdings.values() if int((v or {}).get('shares') or 0) > 0)
+    # Ensure data.json has equity value for the target trading day; abort otherwise
+    label_date_str = pd.to_datetime(label_date).strftime('%Y-%m-%d')
+    eq_map = {}
+    data_json_path = 'data/data.json'
+    try:
+        if os.path.exists(data_json_path):
+            with open(data_json_path,'r',encoding='utf-8') as f:
+                obj = json.load(f)
+                if isinstance(obj.get('equity_by_date'), dict):
+                    eq_map = obj['equity_by_date']
+    except Exception:
+        eq_map = {}
+    if label_date_str not in eq_map or eq_map.get(label_date_str) in (None, ''):
+        print(f"경고: {data_json_path}의 equity_by_date에 {label_date_str} 평가금액이 없습니다. 실행을 중단합니다.")
+        return
+
+    init_cap = float(eq_map[label_date_str])
+    total_cash = float(init_cap) - float(total_holdings)
+    total_value = total_holdings + max(0.0, total_cash)
+    header_line = (
+        f"{day_label} {label_date_str} - 보유종목 {held_count}"
+        f" 잔액(보유+현금): {fmt_money_uk(total_value)} (보유 {fmt_money_uk(total_holdings)} + 현금 {fmt_money_uk(total_cash)})"
+    )
+
+    # Decide next action per ticker
+    sell_thr = float(getattr(settings, 'SELL_SUM_THRESHOLD', -3.0))
+    buy_thr = float(getattr(settings, 'BUY_SUM_THRESHOLD', 3.0))
+    stop_loss = getattr(settings, 'HOLDING_STOP_LOSS_PCT', None)
+    max_pos = float(getattr(settings, 'MAX_POSITION_PCT', 1.0))
+    min_pos = float(getattr(settings, 'MIN_POSITION_PCT', 0.0))
+
+    actions = []  # (notional, row)
+    for tkr, name in pairs:
+        d = data_by_tkr.get(tkr)
+        if not d:
+            continue
+        price = d['price']
+        sh = int(d['shares'])
+        ac = float(d['avg_cost'] or 0.0)
+        p1 = d['p1']; p2 = d['p2']; s2 = d['s2']; stv = int(d['st'])
+        state = 'HOLD' if sh>0 else 'WAIT'
+        phrase = ''
+        qty = 0
+        notional = 0.0
+        # Current holding return
+        hold_ret = ((price/ac)-1.0)*100.0 if (sh>0 and ac>0) else None
+        # TRIM if exceeding cap
+        equity = total_value
+        curr_val = sh * price
+        cap_val = max_pos * equity
+        if sh>0 and curr_val > cap_val and price>0:
+            to_sell_val = curr_val - cap_val
+            qty = int(to_sell_val // price)
+            if qty>0:
+                state = 'TRIM'
+                notional = qty * price
+                phrase = f"부분매도 {qty}주 @ {int(round(price)):,}"
+        # CUT stop loss
+        elif sh>0 and stop_loss is not None and ac>0:
+            curr_hold = ((price/ac)-1.0)*100.0
+            if curr_hold <= float(stop_loss):
+                state = 'CUT'
+                qty = sh
+                notional = qty * price
+                phrase = f"손절 {qty}주 @ {int(round(price)):,}"
+        # SELL if s2 + hold_ret < thr
+        elif sh>0 and ac>0 and hold_ret is not None and (s2 + hold_ret) < sell_thr:
+            state = 'SELL'
+            qty = sh
+            notional = qty * price
+            phrase = f"이익실현 {qty}주 @ {int(round(price)):,}"
+        # BUY if eligible and cash allows reaching MIN position
+        elif sh==0 and s2>buy_thr and stv>0 and price>0:
+            equity = total_value
+            min_val = min_pos * equity
+            cap_val = max_pos * equity
+            need = max(0.0, min_val - 0.0)
+            budget_cap = max(0.0, cap_val - 0.0)
+            budget = min(total_cash, budget_cap)
+            from math import ceil
+            req_qty = int(ceil(need / price)) if price>0 else 0
+            if req_qty>0 and (req_qty*price) <= budget:
+                qty = req_qty
+                state = 'BUY'
+                notional = qty * price
+                phrase = f"매수 {qty}주 @ {int(round(price)):,}"
+            else:
+                phrase = '현금 부족' if total_cash < need else ('상한 제한' if budget_cap < need else '')
+
+        amount = sh * price
+        day_ret = 0.0  # not computed in light mode consistently per ticker
+        rows.append([
+            0,
+            tkr,
+            name,
+            state,
+            '-',
+            '0',
+            f"{int(round(price)):,}",
+            f"{day_ret:+.1f}%",
+            f"{sh:,}",
+            fmt_money_uk(amount),
+            (f"{hold_ret:+.1f}%" if hold_ret is not None else '-'),
+            f"{(amount/total_value*100.0) if total_value>0 else 0.0:.0f}%",
+            f"{p1:+.1f}%",
+            f"{p2:+.1f}%",
+            f"{s2:+.1f}%",
+            ('+1' if stv>0 else ('-1' if stv<0 else '0')),
+            phrase,
+        ])
+        actions.append((notional, rows[-1]))
+
+    # Sort by action notional desc, then by amount desc
+    actions.sort(key=lambda x: x[0], reverse=True)
+    rows_sorted = []
+    for i, (_, row) in enumerate(actions, 1):
+        row[0] = i
+        rows_sorted.append(row)
+
+    headers = ['#','티커','이름','상태','매수일','보유일','현재가','일간수익률','보유수량','금액','누적수익률','비중','1주','2주','합계','ST','문구']
+    aligns = ['right','right','left','center','left','right','right','right','right','right','right','right','right','right','right','center','left']
+    
+    # Render table for both console and log file
+    amb_wide_console = bool(getattr(settings, 'EAW_AMBIGUOUS_AS_WIDE', True))
+    table_lines = render_table_eaw(headers, rows_sorted, aligns, amb_wide=amb_wide_console)
+
+    log_dir = 'logs'
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, 'today.log')
+    try:
+        with open(log_path, 'w', encoding='utf-8') as f:
+            f.write(header_line + "\n\n")
+            f.write("\n".join(table_lines) + "\n")
+    except Exception:
+        pass
+    print(header_line)
+    print("\n".join(table_lines))
+
+
+if __name__ == '__main__':
+    main()
