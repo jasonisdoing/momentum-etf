@@ -1,7 +1,19 @@
+import glob
+import os
+
 import pandas as pd
 import streamlit as st
 
-from today import generate_action_plan
+import settings as global_settings
+from status import generate_action_plan
+
+
+@st.cache_data(ttl=3600)
+def get_cached_action_plan(strategy_name: str, country: str, portfolio_path: str):
+    """캐시된 액션 플랜 데이터를 가져옵니다. 1시간 동안 캐시됩니다."""
+    return generate_action_plan(
+        strategy_name=strategy_name, country=country, portfolio_path=portfolio_path
+    )
 
 
 def style_returns(val: str) -> str:
@@ -22,54 +34,109 @@ def style_returns(val: str) -> str:
     return f"color: {color}"
 
 
-def display_strategy_plan(strategy_name: str):
-    """지정된 전략의 액션 플랜을 가져와 Streamlit UI에 표시합니다."""
-    with st.spinner(f"'{strategy_name}' 전략 데이터를 분석하고 있습니다..."):
-        result = generate_action_plan(strategy_name=strategy_name)
+def display_strategy_plan(
+    strategy_name: str, country: str, portfolio_path: str, date_str: str
+):
+    """지정된 전략, 국가, 포트폴리오 파일의 액션 플랜을 가져와 Streamlit UI에 표시합니다."""
+    spinner_message = f"'{date_str}' 기준 전략 데이터를 분석하고 있습니다..."
+    with st.spinner(spinner_message):
+        result = get_cached_action_plan(
+            strategy_name=strategy_name, country=country, portfolio_path=portfolio_path
+        )
 
     if result:
         header_line, headers, rows = result
 
         st.info(header_line)
 
-        # DataFrame 생성
         df = pd.DataFrame(rows, columns=headers)
-        # '#' 열을 인덱스로 사용합니다.
         if "#" in df.columns:
             df = df.set_index("#")
 
-        # 스타일을 적용할 열 목록
         style_cols = ["일간수익률", "누적수익률"]
-
-        # 데이터프레임 스타일러 객체 생성
         styler = df.style
 
-        # 지정된 열에 스타일 함수를 적용합니다.
         for col in style_cols:
             if col in df.columns:
                 styler = styler.map(style_returns, subset=[col])
 
-        # 스타일이 적용된 데이터프레임을 출력합니다.
-        st.dataframe(styler, use_container_width=True)
+        num_rows_to_display = min(len(df), 20)
+        height = (num_rows_to_display + 1) * 35 + 3  # 3px for border
+
+        st.dataframe(
+            styler,
+            use_container_width=True,
+            height=height,
+            column_config={
+                "문구": st.column_config.TextColumn(
+                    "문구", width="large", help="매매 결정에 대한 상세 설명입니다."
+                )
+            },
+        )
 
     else:
         st.error(
-            f"'{strategy_name}' 전략의 액션 플랜을 생성하는 데 실패했습니다. 콘솔 로그를 확인해주세요."
+            f"'{date_str}' 기준 '{strategy_name}' ({country.upper()}) 전략의 액션 플랜을 생성하는 데 실패했습니다. 콘솔 로그를 확인해주세요."
         )
 
 
 def main():
-    """MomentumPilot 오늘의 액션 플랜 웹 UI를 렌더링합니다."""
-    st.set_page_config(page_title="MomentumPilot Today", layout="wide")
-    st.title("MomentumPilot - 오늘의 액션 플랜")
+    """MomentumPilot 오늘의 현황 웹 UI를 렌더링합니다."""
+    st.set_page_config(page_title="MomentumPilot Status", layout="wide")
+    st.title("MomentumPilot - 오늘의 현황")
 
-    # 각 전략을 탭으로 표시합니다.
-    strategies = ["jason", "seykota", "donchian"]
-    tabs = st.tabs(strategies)
+    countries = ["kor", "aus"]
+    country_options = [f"[{c.upper()}]" for c in countries]
 
-    for tab, strategy_name in zip(tabs, strategies):
-        with tab:
-            display_strategy_plan(strategy_name)
+    # 1. 국가 선택을 위한 탭 생성
+    country_tabs = st.tabs(country_options)
+
+    for i, country_code in enumerate(countries):
+        with country_tabs[i]:
+            # 2. 국가 코드에 맞는 전략 가져오기
+            if country_code == "kor":
+                strategy_name = global_settings.KOR_STRATEGY
+            else:  # aus
+                strategy_name = global_settings.AUS_STRATEGY
+
+            # 3. 해당 국가의 모든 포트폴리오 파일 검색
+            data_dir = f"data/{country_code}"
+            portfolio_files = glob.glob(os.path.join(data_dir, "portfolio_*.json"))
+
+            if not portfolio_files:
+                st.warning(f"'{data_dir}'에서 포트폴리오 파일(portfolio_*.json)을 찾을 수 없습니다.")
+                continue
+
+            # 4. 파일명에서 날짜를 추출하고, 날짜를 기준으로 내림차순 정렬
+            date_path_map = {}
+            for f_path in portfolio_files:
+                try:
+                    fname = os.path.basename(f_path)
+                    date_str = fname.replace("portfolio_", "").replace(".json", "")
+                    pd.to_datetime(date_str)  # 날짜 형식 유효성 검사
+                    date_path_map[date_str] = f_path
+                except ValueError:
+                    continue  # 유효하지 않은 날짜 형식의 파일은 건너뜀
+
+            if not date_path_map:
+                st.warning(f"'{data_dir}'에서 유효한 날짜 형식의 포트폴리오 파일을 찾을 수 없습니다.")
+                continue
+
+            sorted_dates = sorted(date_path_map.keys(), reverse=True)
+
+            # 5. 날짜별 탭 생성
+            date_tabs = st.tabs(sorted_dates)
+
+            # 6. 각 탭에 해당 날짜의 데이터 표시
+            for j, date_str in enumerate(sorted_dates):
+                with date_tabs[j]:
+                    portfolio_path = date_path_map[date_str]
+                    display_strategy_plan(
+                        strategy_name=strategy_name,
+                        country=country_code,
+                        portfolio_path=portfolio_path,
+                        date_str=date_str,
+                    )
 
 
 if __name__ == "__main__":

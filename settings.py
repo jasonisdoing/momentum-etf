@@ -2,6 +2,12 @@ import warnings
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
+# 웹앱에서 이용하는 전략
+KOR_STRATEGY = "donchian"
+AUS_STRATEGY = "donchian"
+
+KOR_INITIAL_CAPITAL = 180_000_000  # 1억 8천만원
+AUS_INITIAL_CAPITAL = 71_000_000  # 7100만원
 
 # 백테스트 기본값
 INITIAL_CAPITAL = 100_000_000  # 1억

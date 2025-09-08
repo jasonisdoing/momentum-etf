@@ -8,7 +8,8 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from utils.report import format_kr_money
+from utils.data_loader import fetch_yfinance_name
+from utils.report import format_aud_money, format_kr_money
 
 try:
     from pykrx import stock as _stock
@@ -39,9 +40,10 @@ def get_latest_trading_day(
     return None
 
 
-def convert_raw_to_json():
-    """'data/portfolio_raw.txt' 파일을 읽어 'portfolio_YYYY-MM-DD.json' 파일로 변환합니다."""
-    raw_path = "data/portfolio_raw.txt"
+def _convert_for_country(country: str):
+    """지정된 단일 국가에 대해 포트폴리오 변환을 수행합니다."""
+    data_dir = f"data/{country}"
+    raw_path = os.path.join(data_dir, "portfolio_raw.txt")
 
     if not os.path.exists(raw_path):
         print(f"오류: '{raw_path}' 파일이 없습니다.")
@@ -67,23 +69,39 @@ def convert_raw_to_json():
         if not line or line.startswith("#"):
             continue
 
-        parts = line.split()
-        if len(parts) < 4:  # 최소 4개 요소: 티커, 이름(1단어 이상), 수량, 매수단가
-            print(f"경고: 잘못된 형식의 행입니다. 건너뜁니다: '{line}'")
-            continue
-
         try:
-            ticker = parts[0]
-            avg_cost_str = parts[-1]
-            shares_str = parts[-2]
-            name = " ".join(parts[1:-2])
+            if country == "aus":
+                parts = line.strip().split("\t")
+                if len(parts) != 4:
+                    print(f"경고: 호주 형식이 잘못된 행입니다 (탭으로 4개 요소 필요). 건너뜁니다: '{line}'")
+                    continue
+                ticker, name, shares_str, avg_cost_str = parts
+                shares = int(shares_str.replace(",", ""))
+                avg_cost = float(avg_cost_str.replace("A$", "").replace(",", ""))
+            else:  # kor
+                parts = line.split()
+                if len(parts) < 3:
+                    print(f"경고: 한국 형식이 잘못된 행입니다. 건너뜁니다: '{line}'")
+                    continue
+                ticker = parts[0]
+                avg_cost_str = parts[-1]
+                shares_str = parts[-2]
+                if len(parts) >= 4:
+                    name = " ".join(parts[1:-2])
+                else:
+                    name = ""
+                shares = int(shares_str.replace(",", ""))
+                avg_cost = float(avg_cost_str.replace("원", "").replace(",", ""))
 
-            shares = int(shares_str.replace(",", ""))
-            avg_cost = float(avg_cost_str.replace(",", "").replace("원", ""))
+            if not name and country == "aus":
+                name = fetch_yfinance_name(ticker)
 
-            if not (len(ticker) == 6 and ticker.isdigit()):
-                print(f"경고: 잘못된 티커 형식입니다. 건너뜁니다: '{line}'")
-                continue
+            # 국가별 티커 형식 검증
+            if country == "kor":
+                if not (len(ticker) == 6 and ticker.isdigit()):
+                    print(f"경고: 한국 시장의 잘못된 티커 형식입니다. 건너뜁니다: '{line}'")
+                    continue
+
             holdings.append(
                 {"ticker": ticker, "name": name, "shares": shares, "avg_cost": avg_cost}
             )
@@ -99,11 +117,12 @@ def convert_raw_to_json():
     archive_date_str = archive_date.strftime("%Y-%m-%d")
 
     output_filename = f"portfolio_{archive_date_str}.json"
-    output_path = os.path.join("data", output_filename)
+    output_path = os.path.join(data_dir, output_filename)
 
-    # 기존 파일이 있으면 total_equity 값을 보존하고, 없으면 0으로 초기화합니다.
+    # 기존 파일이 있으면 값을 보존하고, 없으면 0으로 초기화합니다.
     total_equity = 0
     had_equity_before = False
+    international_shares = {"value": 0.0, "change_pct": 0.0}
     if os.path.exists(output_path):
         try:
             with open(output_path, "r", encoding="utf-8") as f:
@@ -112,11 +131,20 @@ def convert_raw_to_json():
             if "total_equity" in existing_data and isinstance(
                 existing_data["total_equity"], (int, float)
             ):
-                total_equity = int(existing_data["total_equity"])
+                total_equity = float(existing_data["total_equity"])
                 had_equity_before = True
-                print(
-                    f"-> 기존 파일 '{output_path}'에서 총평가액({format_kr_money(total_equity)})을 보존합니다."
+                equity_str = (
+                    format_aud_money(total_equity)
+                    if country == "aus"
+                    else format_kr_money(total_equity)
                 )
+                print(
+                    f"-> 기존 파일 '{output_path}'에서 총평가액({equity_str})을 보존합니다."
+                )
+            # 호주 포트폴리오의 경우 international_shares 정보도 보존합니다.
+            if country == "aus" and "international_shares" in existing_data:
+                international_shares = existing_data["international_shares"]
+
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             # 기존 파일 파싱에 실패하면 경고 후 0으로 초기화합니다.
             print(
@@ -125,26 +153,50 @@ def convert_raw_to_json():
             total_equity = 0
             had_equity_before = False
 
-    portfolio_archive = {
-        "date": archive_date_str,
-        "total_equity": total_equity,
-        "holdings": holdings,
-    }
+    portfolio_archive = {"date": archive_date_str, "total_equity": total_equity}
+
+    # 호주 포트폴리오에만 international_shares 필드를 추가합니다.
+    if country == "aus":
+        portfolio_archive["international_shares"] = international_shares
+
+    portfolio_archive["holdings"] = holdings
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(portfolio_archive, f, ensure_ascii=False, indent=2)
         f.write("\n")
 
+    # 국가별로 다른 포맷터 사용
+    money_formatter = format_aud_money if country == "aus" else format_kr_money
+
     print(f"성공: '{raw_path}' -> '{output_path}' 변환 완료.")
     print(f" - 보유종목 수: {len(holdings)}")
-    print(f" - 보유금액: {format_kr_money(total_holding_value)}")
+    print(f" - 보유금액: {money_formatter(total_holding_value)}")
     if had_equity_before:
         print(
-            f"-> 확인: 현재 총평가액은 {format_kr_money(total_equity)} 입니다. 변경이 필요하면 '{output_path}' 파일을 직접 수정해주세요."
+            f"-> 확인: 현재 총평가액은 {money_formatter(total_equity)} 입니다. 변경이 필요하면 '{output_path}' 파일을 직접 수정해주세요."
         )
     else:
         print(f"-> 중요: 생성된 '{output_path}' 파일을 열어 'total_equity' 값을 직접 수정해주세요.")
 
 
+def main():
+    """data/ 폴더 아래의 모든 국가 디렉토리에 대해 포트폴리오 변환을 실행합니다."""
+    data_dir = "data"
+    try:
+        countries = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
+    except FileNotFoundError:
+        print(f"오류: '{data_dir}' 디렉토리를 찾을 수 없습니다.")
+        return
+
+    if not countries:
+        print(f"오류: '{data_dir}' 디렉토리에서 국가 폴더(kor, aus 등)를 찾을 수 없습니다.")
+        return
+
+    print(f"발견된 국가: {', '.join(countries)}. 모든 국가의 포트폴리오를 변환합니다.")
+
+    for country in sorted(countries):
+        print(f"\n--- [{country.upper()}] 포트폴리오 변환 시작 ---")
+        _convert_for_country(country)
+
 if __name__ == "__main__":
-    convert_raw_to_json()
+    main()

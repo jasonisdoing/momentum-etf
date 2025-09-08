@@ -22,6 +22,7 @@ def run_portfolio_backtest(
     core_start_date: Optional[pd.Timestamp] = None,
     top_n: int = 10,
     date_range: Optional[List[str]] = None,
+    country: str = "kor",
 ) -> Dict[str, pd.DataFrame]:
     """
     'jason' 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
@@ -44,11 +45,19 @@ def run_portfolio_backtest(
         adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
 
     for tkr in tickers_to_process:
-        df = fetch_ohlcv(tkr, date_range=adjusted_date_range)
+        df = fetch_ohlcv(tkr, country=country, date_range=adjusted_date_range)
+
+        # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
+        # 컬럼을 단순화하고 중복을 제거합니다.
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            df = df.loc[:, ~df.columns.duplicated()]
 
         if df is None or len(df) < 25:
             continue
         close = df["Close"]
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
         # 모멘텀 점수 계산을 위한 수익률 사전 계산
         return_1w = (close / close.shift(5) - 1.0).fillna(0.0).round(3) * 100
         return_2w = (close.shift(5) / close.shift(10) - 1.0).fillna(0.0).round(3) * 100
@@ -360,13 +369,22 @@ def run_single_ticker_backtest(
     initial_capital: float = 1_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
     date_range: Optional[List[str]] = None,
+    country: str = "kor",
 ) -> pd.DataFrame:
     """
     단일 종목에 대해 'jason' 전략 백테스트를 실행합니다.
     """
     if df is None:
         # 단일 테스트는 웜업 조정 없이 그대로 사용
-        df = fetch_ohlcv(ticker, months_range=months_range, date_range=date_range)
+        df = fetch_ohlcv(
+            ticker, country=country, months_range=months_range, date_range=date_range
+        )
+
+    # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
+    # 컬럼을 단순화하고 중복을 제거합니다.
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+        df = df.loc[:, ~df.columns.duplicated()]
     if df is None or len(df) < 25:
         return pd.DataFrame(
             columns=["price", "cash", "shares", "pv", "decision"],
@@ -374,6 +392,8 @@ def run_single_ticker_backtest(
         )
 
     close = df["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
 
     # 웜업 기간을 고려하여 실제 시작 인덱스를 결정합니다.
     start_i = 20

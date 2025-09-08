@@ -10,13 +10,14 @@ import pandas as pd
 
 import settings
 from utils.data_loader import read_tickers_file
-from utils.report import format_kr_money, render_table_eaw
+from utils.report import format_aud_money, format_kr_money, render_table_eaw
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 
 def main(
     strategy_name: str = "jason",
+    country: str = "kor",
     quiet: bool = False,
 ):
     """
@@ -24,6 +25,15 @@ def main(
     `quiet=True` 모드에서는 로그를 출력하지 않고 최종 요약만 반환합니다.
     """
     initial_capital = float(getattr(settings, "INITIAL_CAPITAL", 100_000_000))
+
+    # 국가별로 다른 포맷터 사용
+    if country == "aus":
+        money_formatter = format_aud_money
+        price_formatter = format_aud_money
+    else:
+        # 원화(KRW) 형식으로 가격을 포맷합니다.
+        money_formatter = format_kr_money
+        price_formatter = lambda p: f"{int(round(p)):,}"
 
     # 기간 설정 로직
     test_date_range = getattr(settings, "TEST_DATE_RANGE", None)
@@ -53,12 +63,12 @@ def main(
 
     # 티커 목록 결정
     if not quiet:
-        print("\n[고정 유니버스] data/tickers.txt 파일의 종목을 사용합니다.")
-    pairs = read_tickers_file("data/tickers.txt")
+        print(f"\n[고정 유니버스] data/{country}/tickers.txt 파일의 종목을 사용합니다.")
+    pairs = read_tickers_file(f"data/{country}/tickers.txt", country=country)
 
     if not pairs:
         print("오류: 백테스트에 사용할 티커를 찾을 수 없습니다.")
-        print("      data/tickers.txt 파일이 비어있거나 존재하지 않을 수 있습니다.")
+        print(f"      data/{country}/tickers.txt 파일이 비어있거나 존재하지 않을 수 있습니다.")
         return
 
     logger = logging.getLogger("backtester")
@@ -75,7 +85,7 @@ def main(
         # 파일 핸들러 설정
         log_dir = "logs"
         os.makedirs(log_dir, exist_ok=True)
-        log_path = os.path.join(log_dir, f"test_{strategy_name}.log")
+        log_path = os.path.join(log_dir, f"test_{country}_{strategy_name}.log")
         file_handler = logging.FileHandler(log_path, "w", encoding="utf-8")
         file_handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(file_handler)
@@ -132,6 +142,7 @@ def main(
                     core_start_date=core_start_dt,
                     top_n=portfolio_topn,
                     date_range=test_date_range,
+                    country=country,
                 )
                 or {}
             )
@@ -143,7 +154,9 @@ def main(
 
             raw_data_by_ticker: Dict[str, pd.DataFrame] = {}
             for ticker, name in pairs:
-                df = fetch_ohlcv(ticker, months_range=months_range, date_range=test_date_range)
+                df = fetch_ohlcv(
+                    ticker, country=country, months_range=months_range, date_range=test_date_range
+                )
                 if df is not None and not df.empty:
                     raw_data_by_ticker[ticker] = df
 
@@ -160,6 +173,7 @@ def main(
                     initial_capital=capital_per_ticker,
                     core_start_date=core_start_dt,
                     date_range=test_date_range,
+                    country=country,
                 )
                 if not ts.empty:
                     time_series_by_ticker[ticker] = ts
@@ -239,8 +253,8 @@ def main(
                 logger.info(
                     (  # noqa: T201
                         f"{date_str} - 보유종목 {held_count}/{denom} "
-                        f"잔액(보유+현금): {format_kr_money(total_value)} "
-                        f"(보유 {format_kr_money(total_holdings)} + 현금 {format_kr_money(total_cash)}) "
+                        f"잔액(보유+현금): {money_formatter(total_value)} "
+                        f"(보유 {money_formatter(total_holdings)} + 현금 {money_formatter(total_cash)}) "
                         f"금일 수익률 {day_ret_pct:+.1f}%, 누적 수익률 {cum_ret_pct:+.1f}%"
                     )
                 )
@@ -251,7 +265,7 @@ def main(
                 elif strategy_name == "seykota":
                     signal_headers = ["단기MA", "장기MA", "MA스코어", "필터"]
                 elif strategy_name == "donchian":
-                    signal_headers = ["이평선(값)", "이평선(기간)", "이격도", "신호지속일"]
+                    signal_headers = ["이평선(값)", "고점대비", "이격도", "신호지속일"]
                 else:
                     signal_headers = ["신호1", "신호2", "점수", "필터"]
 
@@ -348,7 +362,7 @@ def main(
                         filter_str = "-"  # seykota는 필터를 사용하지 않음
                     elif strategy_name == "donchian":
                         s1_str = f"{int(s1):,}" if pd.notna(s1) else "-"  # 이평선(값)
-                        s2_str = f"{int(s2):,}" if pd.notna(s2) else "-"  # 이평선(기간)
+                        s2_str = f"{float(s2):.1f}%" if pd.notna(s2) else "-"  # 고점대비
                         score_str = f"{float(score):+,.2f}%" if pd.notna(score) else "-"  # 이격도
                         filter_str = f"{int(filter_val)}일" if pd.notna(filter_val) else "-"
 
@@ -364,7 +378,7 @@ def main(
                             else 0
                         )
                         if decision == "BUY":
-                            phrase = f"매수 {qty_calc}주 @ {int(round(price_today)):,} ({format_kr_money(amount)})"
+                            phrase = f"매수 {qty_calc}주 @ {price_formatter(price_today)} ({money_formatter(amount)})"
                         else:
                             # 결정 코드에 따라 상세한 사유를 생성합니다.
                             if decision == "SELL_MOMENTUM":
@@ -377,7 +391,7 @@ def main(
                                 tag = "비중조절"
                             else:  # 이전 버전 호환용
                                 tag = "매도"
-                            phrase = f"{tag} {qty_calc}주 @ {int(round(price_today)):,} 수익 {format_kr_money(prof)} 손익률 {f'{plpct:+.1f}%'}"
+                            phrase = f"{tag} {qty_calc}주 @ {price_formatter(price_today)} 수익 {money_formatter(prof)} 손익률 {f'{plpct:+.1f}%'}"
                     elif decision in ("WAIT", "HOLD"):
                         phrase = str(row.get("note", "") or "")
                     if tkr not in buy_date_by_ticker:
@@ -401,10 +415,10 @@ def main(
                         display_status,
                         bd_str,
                         f"{hd}",
-                        f"{int(round(disp_price)):,}",
+                        price_formatter(disp_price),
                         f"{tkr_day_ret:+.1f}%",
                         f"{disp_shares:,}",
-                        format_kr_money(amount),
+                        money_formatter(amount),
                         hold_ret_str,
                         f"{w:.0f}%",
                         s1_str,
@@ -572,8 +586,8 @@ def main(
                 logger.info(
                     f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({years:.2f} 년)"
                 )
-                logger.info(f"| 초기 자본: {format_kr_money(summary['initial_capital'])}")
-                logger.info(f"| 최종 자산: {format_kr_money(summary['final_value'])}")
+                logger.info(f"| 초기 자본: {money_formatter(summary['initial_capital'])}")
+                logger.info(f"| 최종 자산: {money_formatter(summary['final_value'])}")
                 logger.info(f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}%")
                 logger.info(f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}%")
                 logger.info(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
@@ -691,8 +705,8 @@ def main(
                             s["name"],
                             f"{s['total_trades']}회",
                             f"{s['win_rate']:.1f}%",
-                            format_kr_money(s["total_profit"]),
-                            format_kr_money(s["avg_profit"]),
+                            money_formatter(s["total_profit"]),
+                            money_formatter(s["avg_profit"]),
                         ]
                         for s in sorted_summaries
                     ]

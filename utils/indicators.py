@@ -5,9 +5,18 @@ import pandas as pd
 
 def supertrend_direction(df: pd.DataFrame, period: int, multiplier: float) -> pd.Series:
     """SuperTrend 방향을 계산합니다. (+1: 상향, -1: 하향)"""
-    high = df['High']
-    low = df['Low']
-    close = df['Close']
+    high = df["High"]
+    if isinstance(high, pd.DataFrame):
+        high = high.iloc[:, 0]
+
+    low = df["Low"]
+    if isinstance(low, pd.DataFrame):
+        low = low.iloc[:, 0]
+
+    close = df["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+
     hl2 = (high + low) / 2.0
 
     tr1 = high - low

@@ -25,7 +25,7 @@ def run_backtest_worker(params: tuple) -> tuple:
     seykota_settings.SEYKOTA_FAST_MA = fast_ma
     seykota_settings.SEYKOTA_SLOW_MA = slow_ma
 
-    result = run_test(strategy_name="seykota", quiet=True)
+    result = run_test(strategy_name="seykota", country="kor", quiet=True)
     return fast_ma, slow_ma, result
 
 

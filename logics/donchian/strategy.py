@@ -21,6 +21,7 @@ def run_portfolio_backtest(
     core_start_date: Optional[pd.Timestamp] = None,
     top_n: int = 10,
     date_range: Optional[List[str]] = None,
+    country: str = "kor",
 ) -> Dict[str, pd.DataFrame]:
     """
     단일 이동평균선 교차 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
@@ -61,11 +62,19 @@ def run_portfolio_backtest(
     tickers_to_process = [p[0] for p in ticker_name_pairs]
 
     for tkr in tickers_to_process:
-        df = fetch_ohlcv(tkr, date_range=adjusted_date_range)
+        df = fetch_ohlcv(tkr, country=country, date_range=adjusted_date_range)
+
+        # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
+        # 컬럼을 단순화하고 중복을 제거합니다.
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            df = df.loc[:, ~df.columns.duplicated()]
         if df is None or len(df) < ma_period:
             continue
 
         close = df["Close"]
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
         ma = close.rolling(window=ma_period).mean()
         ma_score = (close / ma - 1.0) * 100.0 if ma is not None else 0.0
 
@@ -111,6 +120,7 @@ def run_portfolio_backtest(
             "avg_cost": 0.0,
             "buy_block_until": -1,
             "sell_block_until": -1,
+            "peak_high_since_buy": 0.0,
         }
         for tkr in data.keys()
     }
@@ -126,6 +136,11 @@ def run_portfolio_backtest(
             for tkr, d in data.items()
             if dt in d["close"].index
         }
+        today_highs = {
+            tkr: float(d["df"]["High"].loc[dt]) if pd.notna(d["df"]["High"].loc[dt]) else None
+            for tkr, d in data.items()
+            if dt in d["df"].index
+        }
 
         # 현재 총 보유 자산 가치를 계산합니다.
         current_holdings_value = 0
@@ -140,6 +155,7 @@ def run_portfolio_backtest(
 
         for tkr, d in data.items():
             ticker_state, price = state[tkr], today_prices.get(tkr)
+            today_high = today_highs.get(tkr)
             decision, trade_amount, trade_profit, trade_pl_pct = None, 0.0, 0.0, 0.0
 
             is_ticker_warming_up = tkr not in tickers_available_today or pd.isna(d["ma"].get(dt))
@@ -171,6 +187,7 @@ def run_portfolio_backtest(
                             trade_pl_pct = hold_ret
                         cash += trade_amount
                         ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
+                        ticker_state["peak_high_since_buy"] = 0.0
                         if cooldown_days > 0:
                             ticker_state["buy_block_until"] = i + cooldown_days
 
@@ -190,6 +207,16 @@ def run_portfolio_backtest(
                                     trade_pl_pct = hold_ret
                                 if cooldown_days > 0:
                                     ticker_state["buy_block_until"] = i + cooldown_days
+
+            # 보유 종목의 고점 대비 하락률 계산
+            drawdown_from_peak = None
+            if ticker_state["shares"] > 0 and pd.notna(price) and pd.notna(today_high):
+                # 최고가 업데이트
+                ticker_state["peak_high_since_buy"] = max(
+                    ticker_state["peak_high_since_buy"], today_high
+                )
+                if ticker_state["peak_high_since_buy"] > 0:
+                    drawdown_from_peak = ((price / ticker_state["peak_high_since_buy"]) - 1.0) * 100.0
 
             decision_out = (
                 decision if decision else ("HOLD" if ticker_state["shares"] > 0 else "WAIT")
@@ -216,8 +243,8 @@ def run_portfolio_backtest(
                         "trade_profit": trade_profit,
                         "trade_pl_pct": trade_pl_pct,
                         "note": note,
-                        "signal1": d["ma"].get(dt),
-                        "signal2": ma_period,
+                        "signal1": d["ma"].get(dt),  # 이평선(값)
+                        "signal2": drawdown_from_peak,  # 고점대비
                         "score": d["ma_score"].loc[dt],
                         "filter": d["buy_signal_days"].get(dt),
                     }
@@ -236,8 +263,8 @@ def run_portfolio_backtest(
                         "trade_profit": 0.0,
                         "trade_pl_pct": 0.0,
                         "note": "데이터 없음",
-                        "signal1": None,
-                        "signal2": ma_period,
+                        "signal1": None,  # 이평선(값)
+                        "signal2": None,  # 고점대비
                         "score": None,
                         "filter": None,
                     }
@@ -270,7 +297,8 @@ def run_portfolio_backtest(
                 _, tkr = buy_candidates[k]
 
                 price = today_prices.get(tkr)
-                if pd.isna(price):
+                today_high = today_highs.get(tkr)
+                if pd.isna(price) or pd.isna(today_high):
                     continue
 
                 equity = cash + current_holdings_value
@@ -288,6 +316,7 @@ def run_portfolio_backtest(
                 cash -= trade_amount
                 ticker_state["shares"] += req_qty
                 ticker_state["avg_cost"] = price
+                ticker_state["peak_high_since_buy"] = today_high
                 if cooldown_days > 0:
                     ticker_state["sell_block_until"] = max(
                         ticker_state["sell_block_until"], i + cooldown_days
@@ -343,6 +372,7 @@ def run_single_ticker_backtest(
     initial_capital: float = 1_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
     date_range: Optional[List[str]] = None,
+    country: str = "kor",
 ) -> pd.DataFrame:
     """
     단일 종목에 대해 이동평균선 교차 전략 백테스트를 실행합니다.
@@ -366,11 +396,19 @@ def run_single_ticker_backtest(
         ) from e
 
     if df is None:
-        df = fetch_ohlcv(ticker, date_range=date_range)
+        df = fetch_ohlcv(ticker, country=country, date_range=date_range)
+
+    # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
+    # 컬럼을 단순화하고 중복을 제거합니다.
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+        df = df.loc[:, ~df.columns.duplicated()]
     if df is None or df.empty or len(df) < ma_period:
         return pd.DataFrame()
 
     close = df["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
     ma = close.rolling(window=ma_period).mean()
 
     buy_signal_active = close > ma
@@ -393,13 +431,16 @@ def run_single_ticker_backtest(
     avg_cost = 0.0
     buy_block_until = -1
     sell_block_until = -1
+    peak_high_since_buy = 0.0
 
     rows = []
     for i in range(loop_start_index, len(df)):
         price_val = close.iloc[i]
-        if pd.isna(price_val):
+        high_val = df["High"].iloc[i]
+        if pd.isna(price_val) or pd.isna(high_val):
             continue
         price = float(price_val)
+        high_today = float(high_val)
         decision, trade_amount, trade_profit, trade_pl_pct = None, 0.0, 0.0, 0.0
 
         ma_today = ma.iloc[i]
@@ -419,7 +460,7 @@ def run_single_ticker_backtest(
                     "trade_pl_pct": 0.0,
                     "note": "웜업 기간",
                     "signal1": ma_today,
-                    "signal2": ma_period,
+                    "signal2": None,
                     "score": None,
                     "filter": buy_signal_days.iloc[i],
                 }
@@ -440,6 +481,7 @@ def run_single_ticker_backtest(
                     trade_pl_pct = hold_ret
                 cash += trade_amount
                 shares, avg_cost = 0, 0.0
+                peak_high_since_buy = 0.0
                 if cooldown_days > 0:
                     buy_block_until = i + cooldown_days
 
@@ -451,12 +493,20 @@ def run_single_ticker_backtest(
                     trade_amount = buy_qty * price
                     cash -= trade_amount
                     avg_cost, shares = price, buy_qty
+                    peak_high_since_buy = high_today
                     decision = "BUY"
                     if cooldown_days > 0:
                         sell_block_until = i + cooldown_days
 
         if decision is None:
             decision = "HOLD" if shares > 0 else "WAIT"
+
+        # 보유 종목의 고점 대비 하락률 계산
+        drawdown_from_peak = None
+        if shares > 0:
+            peak_high_since_buy = max(peak_high_since_buy, high_today)
+            if peak_high_since_buy > 0:
+                drawdown_from_peak = ((price / peak_high_since_buy) - 1.0) * 100.0
 
         rows.append(
             {
@@ -472,7 +522,7 @@ def run_single_ticker_backtest(
                 "trade_pl_pct": trade_pl_pct,
                 "note": "",
                 "signal1": ma_today,
-                "signal2": ma_period,
+                "signal2": drawdown_from_peak,
                 "score": ((price / ma_today - 1.0) * 100.0 if ma_today > 0 else 0.0),
                 "filter": buy_signal_days.iloc[i],
             }

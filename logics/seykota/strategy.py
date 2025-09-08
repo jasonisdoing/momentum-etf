@@ -21,6 +21,7 @@ def run_portfolio_backtest(
     core_start_date: Optional[pd.Timestamp] = None,
     top_n: int = 10,
     date_range: Optional[List[str]] = None,
+    country: str = "kor",
 ) -> Dict[str, pd.DataFrame]:
     """
     이동평균선 교차 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
@@ -63,12 +64,20 @@ def run_portfolio_backtest(
     tickers_to_process = [p[0] for p in ticker_name_pairs]
 
     for tkr in tickers_to_process:
-        df = fetch_ohlcv(tkr, date_range=adjusted_date_range)
+        df = fetch_ohlcv(tkr, country=country, date_range=adjusted_date_range)
+
+        # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
+        # 컬럼을 단순화하고 중복을 제거합니다.
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            df = df.loc[:, ~df.columns.duplicated()]
 
         if df is None or len(df) < slow_ma_period:
             continue
 
         close = df["Close"]
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
         fast_ma = close.rolling(window=fast_ma_period).mean()
         slow_ma = close.rolling(window=slow_ma_period).mean()
         ma_score = (fast_ma / slow_ma - 1.0).fillna(0.0)
@@ -351,6 +360,7 @@ def run_single_ticker_backtest(
     initial_capital: float = 1_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
     date_range: Optional[List[str]] = None,
+    country: str = "kor",
 ) -> pd.DataFrame:
     """
     단일 종목에 대해 이동평균선 교차 전략 백테스트를 실행합니다.
@@ -374,11 +384,19 @@ def run_single_ticker_backtest(
         ) from e
 
     if df is None:
-        df = fetch_ohlcv(ticker, date_range=date_range)
+        df = fetch_ohlcv(ticker, country=country, date_range=date_range)
+
+    # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
+    # 컬럼을 단순화하고 중복을 제거합니다.
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+        df = df.loc[:, ~df.columns.duplicated()]
     if df is None or len(df) < slow_ma_period:
         return pd.DataFrame()
 
     close = df["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
     fast_ma = close.rolling(window=fast_ma_period).mean()
     slow_ma = close.rolling(window=slow_ma_period).mean()
 
