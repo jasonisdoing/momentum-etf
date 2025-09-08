@@ -6,3 +6,4 @@
 # Richard Donchian-style trend-following
 # 가격이 이동평균선 위에 있으면 매수, 아래에 있으면 매도합니다.
 DONCHIAN_MA_PERIOD = 15
+DONCHIAN_ENTRY_DELAY_DAYS = 0  # 이동평균선 돌파 후 진입 대기일. 0이면 즉시 진입.

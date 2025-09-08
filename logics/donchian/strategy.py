@@ -29,6 +29,7 @@ def run_portfolio_backtest(
     try:
         # 전략 고유 설정
         ma_period = int(donchian_settings.DONCHIAN_MA_PERIOD)
+        entry_delay_days = int(getattr(donchian_settings, "DONCHIAN_ENTRY_DELAY_DAYS", 0))
     except AttributeError as e:
         raise AttributeError(
             f"'{e.name}' 설정이 logics/donchian/settings.py 파일에 반드시 정의되어야 합니다."
@@ -68,11 +69,20 @@ def run_portfolio_backtest(
         ma = close.rolling(window=ma_period).mean()
         ma_score = (close / ma - 1.0) * 100.0 if ma is not None else 0.0
 
+        buy_signal_active = close > ma
+        buy_signal_days = (
+            buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum())
+            .cumsum()
+            .fillna(0)
+            .astype(int)
+        )
+
         data[tkr] = {
             "df": df,
             "close": df["Close"],
             "ma": ma,
             "ma_score": ma_score,
+            "buy_signal_days": buy_signal_days,
         }
 
     if not data:
@@ -193,10 +203,10 @@ def run_portfolio_backtest(
                         "trade_profit": trade_profit,
                         "trade_pl_pct": trade_pl_pct,
                         "note": note,
-                        "signal1": d["ma"].loc[dt],
-                        "signal2": None,
+                        "signal1": d["ma"].get(dt),
+                        "signal2": ma_period,
                         "score": d["ma_score"].loc[dt],
-                        "filter": None,
+                        "filter": d["buy_signal_days"].get(dt),
                     }
                 )
             else:
@@ -212,9 +222,9 @@ def run_portfolio_backtest(
                         "trade_profit": 0.0,
                         "trade_pl_pct": 0.0,
                         "note": "데이터 없음",
-                        "signal1": 0,
-                        "signal2": None,
-                        "score": 0,
+                        "signal1": None,
+                        "signal2": ma_period,
+                        "score": None,
                         "filter": None,
                     }
                 )
@@ -227,18 +237,15 @@ def run_portfolio_backtest(
             for tkr in tickers_available_today:
                 d = data.get(tkr)
                 s = state[tkr]
-                price_cand = today_prices.get(tkr)
+                buy_signal_days_today = d["buy_signal_days"].get(dt, 0)
 
-                ma_cand = d["ma"].get(dt)
                 if (
                     s["shares"] == 0
                     and i >= s["buy_block_until"]
-                    and pd.notna(ma_cand)
-                    and pd.notna(price_cand)
+                    and buy_signal_days_today > entry_delay_days
                 ):
-                    if price_cand > ma_cand:
-                        score_cand = d["ma_score"].get(dt, 0.0)
-                        cands.append((score_cand, tkr))
+                    score_cand = d["ma_score"].get(dt, 0.0)
+                    cands.append((score_cand, tkr))
 
             cands.sort(reverse=True)
 
@@ -285,10 +292,9 @@ def run_portfolio_backtest(
                 s = state[tkr]
                 if s["shares"] == 0:
                     d = data.get(tkr)
-                    price = today_prices.get(tkr)
-                    ma_note = d["ma"].get(dt)
+                    buy_signal_days_today = d["buy_signal_days"].get(dt, 0)
 
-                    if pd.notna(ma_note) and pd.notna(price) and price > ma_note:
+                    if buy_signal_days_today > entry_delay_days:
                         if out_rows[tkr] and out_rows[tkr][-1]["date"] == dt:
                             note = "포트폴리오 가득 참" if slots_to_fill <= 0 else "현금 부족"
                             out_rows[tkr][-1]["note"] = note
@@ -327,6 +333,7 @@ def run_single_ticker_backtest(
     try:
         # 전략 고유 설정
         ma_period = int(donchian_settings.DONCHIAN_MA_PERIOD)
+        entry_delay_days = int(getattr(donchian_settings, "DONCHIAN_ENTRY_DELAY_DAYS", 0))
     except AttributeError as e:
         raise AttributeError(
             f"'{e.name}' 설정이 logics/donchian/settings.py 파일에 반드시 정의되어야 합니다."
@@ -348,6 +355,14 @@ def run_single_ticker_backtest(
 
     close = df["Close"]
     ma = close.rolling(window=ma_period).mean()
+
+    buy_signal_active = close > ma
+    buy_signal_days = (
+        buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum())
+        .cumsum()
+        .fillna(0)
+        .astype(int)
+    )
 
     loop_start_index = 0
     if core_start_date is not None:
@@ -386,10 +401,10 @@ def run_single_ticker_backtest(
                     "trade_profit": 0.0,
                     "trade_pl_pct": 0.0,
                     "note": "웜업 기간",
-                    "signal1": None,
-                    "signal2": None,
+                    "signal1": ma_today,
+                    "signal2": ma_period,
                     "score": None,
-                    "filter": None,
+                    "filter": buy_signal_days.iloc[i],
                 }
             )
             continue
@@ -412,7 +427,8 @@ def run_single_ticker_backtest(
                     buy_block_until = i + cooldown_days
 
         if decision is None and shares == 0 and i >= buy_block_until:
-            if price > ma_today:
+            buy_signal_days_today = buy_signal_days.iloc[i]
+            if buy_signal_days_today > entry_delay_days:
                 buy_qty = int(cash // price)
                 if buy_qty > 0:
                     trade_amount = buy_qty * price
@@ -439,9 +455,9 @@ def run_single_ticker_backtest(
                 "trade_pl_pct": trade_pl_pct,
                 "note": "",
                 "signal1": ma_today,
-                "signal2": None,
+                "signal2": ma_period,
                 "score": ((price / ma_today - 1.0) * 100.0 if ma_today > 0 else 0.0),
-                "filter": None,
+                "filter": buy_signal_days.iloc[i],
             }
         )
 

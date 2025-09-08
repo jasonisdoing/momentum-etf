@@ -8,6 +8,14 @@ from typing import List, Optional, Tuple
 
 import pandas as pd
 
+# 웹 스크레이핑을 위한 라이브러리
+try:
+    import requests
+    from bs4 import BeautifulSoup
+except ImportError:
+    requests = None
+    BeautifulSoup = None
+
 # pykrx가 설치되지 않았을 경우를 대비한 예외 처리
 try:
     from pykrx import stock as _stock
@@ -119,3 +127,32 @@ def read_tickers_file(path: str = "tickers.txt") -> List[Tuple[str, str]]:
     except FileNotFoundError:
         logging.getLogger(__name__).error(f"{path} 파일을 찾을 수 없습니다.")
     return items
+
+
+def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
+    """
+    네이버 금융 웹 스크레이핑을 통해 종목의 실시간 현재가를 가져옵니다.
+    주의: 이 방법은 웹페이지 구조 변경에 취약하며, 비공식적인 방법입니다.
+    """
+    if not requests or not BeautifulSoup:
+        return None
+
+    try:
+        url = f"https://finance.naver.com/item/sise.naver?code={ticker}"
+        # 네이버의 차단을 피하기 위해 브라우저처럼 보이는 User-Agent를 설정합니다.
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()  # HTTP 오류 발생 시 예외 발생
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        # 현재가를 담고 있는 HTML 요소를 id를 통해 찾습니다.
+        price_element = soup.select_one("#_nowVal")
+
+        if price_element:
+            price_str = price_element.get_text().replace(",", "")
+            return float(price_str)
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"{ticker}의 실시간 가격 조회 중 오류 발생: {e}")
+    return None

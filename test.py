@@ -265,7 +265,7 @@ def main(
                 elif strategy_name == "seykota":
                     signal_headers = ["단기MA", "장기MA", "MA스코어", "필터"]
                 elif strategy_name == "donchian":
-                    signal_headers = ["이평선(값)", "이평선(기간)", "이격도", "-"]
+                    signal_headers = ["이평선(값)", "이평선(기간)", "이격도", "신호지속일"]
                 else:
                     signal_headers = ["신호1", "신호2", "점수", "필터"]
 
@@ -364,7 +364,7 @@ def main(
                         s1_str = f"{int(s1):,}" if pd.notna(s1) else "-"  # 이평선(값)
                         s2_str = f"{int(s2):,}" if pd.notna(s2) else "-"  # 이평선(기간)
                         score_str = f"{float(score):+,.2f}%" if pd.notna(score) else "-"  # 이격도
-                        filter_str = "-"
+                        filter_str = f"{int(filter_val)}일" if pd.notna(filter_val) else "-"
 
                     else:  # 일반적인 폴백
                         s1_str, s2_str, score_str, filter_str = "-", "-", "-", "-"

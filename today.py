@@ -3,14 +3,20 @@ import importlib
 import json
 import os
 import warnings
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
 import settings as global_settings
 
+try:
+    import pytz
+except ImportError:
+    pytz = None
+
 # New structure imports
-from utils.data_loader import fetch_ohlcv, read_tickers_file
+from utils.data_loader import fetch_naver_realtime_price, fetch_ohlcv, read_tickers_file
 from utils.indicators import supertrend_direction
 from utils.report import format_kr_money, render_table_eaw
 
@@ -20,6 +26,31 @@ try:
     from pykrx import stock as _stock
 except Exception:
     _stock = None
+
+
+def is_market_open() -> bool:
+    """
+    한국 주식 시장이 현재 개장 시간인지 확인합니다. (KST, 09:00-15:30, 주말 제외)
+    정확한 공휴일은 반영하지 않으며, 시간과 요일만으로 판단합니다.
+    """
+    if not pytz:
+        return False  # pytz 없으면 안전하게 False 반환
+
+    try:
+        kst = pytz.timezone("Asia/Seoul")
+        now_kst = datetime.now(kst)
+
+        # 주말(토, 일) 확인
+        if now_kst.weekday() >= 5:
+            return False
+
+        # 개장 시간 확인 (09:00 ~ 15:30)
+        market_open_time = now_kst.replace(hour=9, minute=0, second=0, microsecond=0).time()
+        market_close_time = now_kst.replace(hour=15, minute=30, second=0, microsecond=0).time()
+
+        return market_open_time <= now_kst.time() <= market_close_time
+    except Exception:
+        return False  # 오류 발생 시 안전하게 False 반환
 
 
 def load_portfolio_data(
@@ -86,6 +117,58 @@ def load_portfolio_data(
         return None
 
 
+def calculate_consecutive_holding_info(
+    held_tickers: List[str], data_dir: str = "data"
+) -> Dict[str, Dict]:
+    """
+    과거 포트폴리오 파일들을 스캔하여 각 티커의 연속 보유 기간 정보를 계산합니다.
+    'buy_date' (연속 보유 시작일)을 포함한 딕셔너리를 반환합니다.
+    """
+    holding_info = {tkr: {"buy_date": None} for tkr in held_tickers}
+    if not held_tickers:
+        return holding_info
+
+    try:
+        portfolio_files = glob.glob(os.path.join(data_dir, "portfolio_*.json"))
+        if not portfolio_files:
+            return holding_info
+
+        sorted_files = []
+        for f_path in portfolio_files:
+            try:
+                fname = os.path.basename(f_path)
+                date_str = fname.replace("portfolio_", "").replace(".json", "")
+                file_date = pd.to_datetime(date_str)
+                sorted_files.append((file_date, f_path))
+            except ValueError:
+                continue
+
+        if not sorted_files:
+            return holding_info
+
+        sorted_files.sort(key=lambda x: x[0], reverse=True)
+
+        for tkr in held_tickers:
+            consecutive_buy_date = None
+            for file_date, f_path in sorted_files:
+                with open(f_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                holdings_in_file = {
+                    item.get("ticker")
+                    for item in data.get("holdings", [])
+                    if int(item.get("shares", 0)) > 0
+                }
+                if tkr in holdings_in_file:
+                    consecutive_buy_date = file_date
+                else:
+                    break  # 연속 보유가 끊겼으므로 중단
+            if consecutive_buy_date:
+                holding_info[tkr]["buy_date"] = consecutive_buy_date
+    except Exception as e:
+        print(f"-> 경고: 보유일 자동 계산 중 오류 발생: {e}")
+    return holding_info
+
+
 def build_pairs_with_holdings(
     pairs: List[Tuple[str, str]], holdings: dict
 ) -> List[Tuple[str, str]]:
@@ -100,6 +183,10 @@ def build_pairs_with_holdings(
 
 def main(strategy_name: str, portfolio_path: Optional[str] = None):
     print(f"'{strategy_name}' 전략을 사용하여 오늘의 액션 플랜을 생성합니다.")
+
+    market_is_open = is_market_open()
+    if market_is_open:
+        print("-> 장중입니다. 네이버 금융에서 실시간 시세를 가져옵니다 (비공식, 지연 가능).")
 
     # 전략별 설정 로드
     try:
@@ -129,6 +216,11 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
     holdings = portfolio_data.get("holdings", {})
     init_cap = float(portfolio_data.get("total_equity", 0.0))
 
+    # 보유 기간 자동 계산
+    held_tickers = [tkr for tkr, v in holdings.items() if int((v or {}).get("shares") or 0) > 0]
+    consecutive_holding_info = calculate_consecutive_holding_info(held_tickers)
+    print("-> 과거 포트폴리오 파일을 기반으로 보유 기간을 자동 계산했습니다.")
+
     # 티커 목록 결정
     print("\n[고정 유니버스] data/tickers.txt 파일의 종목을 사용합니다.")
     # tickers.txt와 현재 보유 종목을 합쳐서 전체 유니버스 구성
@@ -152,11 +244,27 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
             if df is None or len(df) < 11:
                 continue
             close = df["Close"]
-            i = len(close) - 1
-            c0 = close.iloc[i]
+
+            # 실시간 가격 조회 시도 (장중일 경우)
+            realtime_price = None
+            if market_is_open:
+                realtime_price = fetch_naver_realtime_price(tkr)
+
+            # 실시간 가격이 없으면 pykrx의 최신 종가를 사용
+            c0 = realtime_price if realtime_price else close.iloc[-1]
             if pd.isna(c0):
-                continue  # Skip if latest price is NaN
+                continue
+
             c0 = float(c0)
+
+            # 전일 종가 가져오기
+            prev_close = 0.0
+            if len(close) >= 2:
+                prev_close_val = close.iloc[-2]
+                if pd.notna(prev_close_val):
+                    prev_close = float(prev_close_val)
+            i = len(close) - 1
+
             c5 = float(close.iloc[i - 5]) if i - 5 >= 0 else c0
             c10 = float(close.iloc[i - 10]) if i - 10 >= 0 else (c5 if i - 5 >= 0 else c0)
             p1 = round(((c0 / c5) - 1.0) * 100.0, 1) if c5 > 0 else 0.0
@@ -177,6 +285,7 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
             datestamps.append(df.index[-1])
             data_by_tkr[tkr] = {
                 "price": c0,
+                "prev_close": prev_close,
                 "s1": p1,
                 "s2": p2,
                 "score": s2,
@@ -198,10 +307,24 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
             fast_ma = close.rolling(window=fast_ma_period).mean()
             slow_ma = close.rolling(window=slow_ma_period).mean()
 
-            c0 = close.iloc[-1]
+            # 실시간 가격 조회 시도 (장중일 경우)
+            realtime_price = None
+            if market_is_open:
+                realtime_price = fetch_naver_realtime_price(tkr)
+
+            # 실시간 가격이 없으면 pykrx의 최신 종가를 사용
+            c0 = realtime_price if realtime_price else close.iloc[-1]
             if pd.isna(c0):
-                continue  # Skip if latest price is NaN
+                continue
             c0 = float(c0)
+
+            # 전일 종가 가져오기
+            prev_close = 0.0
+            if len(close) >= 2:
+                prev_close_val = close.iloc[-2]
+                if pd.notna(prev_close_val):
+                    prev_close = float(prev_close_val)
+
             fm = fast_ma.iloc[-1]
             sm = slow_ma.iloc[-1]
             ma_score = (fm / sm - 1.0) * 100.0 if sm > 0 and not pd.isna(sm) else 0.0
@@ -212,6 +335,7 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
             datestamps.append(df.index[-1])
             data_by_tkr[tkr] = {
                 "price": c0,
+                "prev_close": prev_close,
                 "s1": fm,
                 "s2": sm,
                 "score": ma_score,
@@ -221,22 +345,48 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
             }
     elif strategy_name == "donchian":
         ma_period = int(getattr(strategy_settings, "DONCHIAN_MA_PERIOD", 20))
-        required_months = (ma_period // 22) + 2
+        entry_delay_days = int(getattr(strategy_settings, "DONCHIAN_ENTRY_DELAY_DAYS", 0))
+        required_days = ma_period + entry_delay_days + 5  # 버퍼 추가
+        required_months = (required_days // 22) + 2
 
         for tkr, _ in pairs:
-            df = fetch_ohlcv(tkr, months_range=[required_months, 0])
+            df = fetch_ohlcv(tkr, months_range=[required_months, 0])  # 더 많은 데이터 요청
             if df is None or len(df) < ma_period:
                 continue
             close = df["Close"]
             ma = close.rolling(window=ma_period).mean()
 
-            c0 = close.iloc[-1]
+            # 실시간 가격 조회 시도 (장중일 경우)
+            realtime_price = None
+            if market_is_open:
+                realtime_price = fetch_naver_realtime_price(tkr)
+
+            # 실시간 가격이 없으면 pykrx의 최신 종가를 사용
+            c0 = realtime_price if realtime_price else close.iloc[-1]
             if pd.isna(c0):
                 continue
             c0 = float(c0)
+
+            # 전일 종가 가져오기
+            prev_close = 0.0
+            if len(close) >= 2:
+                prev_close_val = close.iloc[-2]
+                if pd.notna(prev_close_val):
+                    prev_close = float(prev_close_val)
+
             m = ma.iloc[-1]
 
             ma_score = (c0 / m - 1.0) * 100.0 if m > 0 and not pd.isna(m) else 0.0
+
+            # 이동평균 돌파 후 연속된 일수 계산
+            buy_signal_active = close > ma
+            buy_signal_days = (
+                buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum())
+                .cumsum()
+                .fillna(0)
+                .astype(int)
+            )
+            buy_signal_days_today = buy_signal_days.iloc[-1] if not buy_signal_days.empty else 0
 
             sh = int((holdings.get(tkr) or {}).get("shares") or 0)
             ac = float((holdings.get(tkr) or {}).get("avg_cost") or 0.0)
@@ -244,10 +394,11 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
             datestamps.append(df.index[-1])
             data_by_tkr[tkr] = {
                 "price": c0,
+                "prev_close": prev_close,
                 "s1": m,  # 이동평균 (값)
                 "s2": ma_period,  # 이동평균 (기간)
                 "score": ma_score,  # 이격도
-                "filter": None,
+                "filter": buy_signal_days_today,  # 신호 지속일
                 "shares": sh,
                 "avg_cost": ac,
             }
@@ -313,6 +464,27 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
         score = d.get("score", 0.0)
         sh = int(d["shares"])
         ac = float(d["avg_cost"] or 0.0)
+
+        # 자동 계산된 보유종목의 매수일과 보유일
+        consecutive_info = consecutive_holding_info.get(tkr)
+        buy_date = consecutive_info.get("buy_date") if consecutive_info else None
+        holding_days = 0
+        if sh > 0 and buy_date:
+            try:
+                # 거래일 기준으로 보유일수 계산
+                if _stock and ref_ticker_for_cal and buy_date <= label_date:
+                    df_days = _stock.get_market_ohlcv_by_date(
+                        buy_date.strftime("%Y%m%d"),
+                        label_date.strftime("%Y%m%d"),
+                        ref_ticker_for_cal,
+                    )
+                    holding_days = len(df_days)
+                else:
+                    # pykrx 사용 불가 시, 단순 일수 차이로 계산 (1을 더해 보유일수 개념으로)
+                    holding_days = (label_date - buy_date).days + 1
+            except Exception:
+                holding_days = 0  # fallback
+
         state = "HOLD" if sh > 0 else "WAIT"
         phrase = ""
         qty = 0
@@ -388,9 +560,11 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
                     buy_phrase = f"골든크로스 ({fast_ma:.0f}>{slow_ma:.0f})"
             elif strategy_name == "donchian":
                 price, ma, period = d["price"], d["s1"], d["s2"]
-                if not pd.isna(price) and not pd.isna(ma) and price > ma:
+                buy_signal_days_today = d["filter"]
+                entry_delay_days = int(getattr(strategy_settings, "DONCHIAN_ENTRY_DELAY_DAYS", 0))
+                if buy_signal_days_today > entry_delay_days:
                     buy_signal = True
-                    buy_phrase = f"추세진입 ({int(price):,}>{int(ma):,}, MA={period})"
+                    buy_phrase = f"추세진입 ({buy_signal_days_today}일째, MA={period})"
 
             if buy_signal:
                 reason_suffix = f" ({buy_phrase})"
@@ -420,7 +594,12 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
                     phrase = "가격 정보 없음" + reason_suffix
 
         amount = sh * price if pd.notna(price) else 0.0
-        day_ret = 0.0  # not computed in light mode consistently per ticker
+        # 일간 수익률 계산
+        prev_close = d.get("prev_close")
+        day_ret_str = "-"
+        if prev_close is not None and prev_close > 0 and pd.notna(price):
+            day_ret = ((price / prev_close) - 1.0) * 100.0
+            day_ret_str = f"{day_ret:+.1f}%"
 
         # 테이블 출력용 신호 포맷팅
         if strategy_name == "jason":
@@ -441,10 +620,13 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
             s1_str = f"{d['s1']:.0f}" if not pd.isna(d["s1"]) else "-"  # 이평선(값)
             s2_str = f"{int(d['s2'])}" if not pd.isna(d["s2"]) else "-"  # 이평선(기간)
             score_str = f"{d['score']:+.2f}%" if not pd.isna(d["score"]) else "-"  # 이격도
-            filter_str = "-"
+            filter_str = f"{d['filter']}일" if d.get("filter") is not None else "-"
 
         else:
             s1_str, s2_str, score_str, filter_str = "-", "-", "-", "-"
+
+        buy_date_display = buy_date.strftime("%Y-%m-%d") if buy_date else "-"
+        holding_days_display = str(holding_days) if holding_days > 0 else "-"
 
         position_weight_pct = (amount / total_value) * 100.0 if total_value > 0 else 0.0
         current_row = [
@@ -452,10 +634,10 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
             tkr,
             name,
             state,
-            "-",
-            "0",
+            buy_date_display,
+            holding_days_display,
             f"{int(round(price)):,}",
-            f"{day_ret:+.1f}%",
+            day_ret_str,
             f"{sh:,}",
             format_kr_money(amount),
             f"{hold_ret:+.1f}%" if hold_ret is not None else "-",
@@ -468,13 +650,15 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
         ]
         actions.append((state, position_weight_pct, score, tkr, current_row))
 
-    # 정렬: 1.HOLD 우선, 2.기타(비중순), 3.WAIT(점수순), 4.티커
+    # 정렬: 전략별 점수(우선순위)가 높은 순으로 정렬
     def sort_key(action_tuple):
-        state, weight, score, tkr, _ = action_tuple
-        is_hold = 1 if state == "HOLD" else 2
-        is_wait = 1 if state == "WAIT" else 0
-        sort_value = -score if state == "WAIT" else -weight
-        return (is_hold, is_wait, sort_value, tkr)
+        _, _, score, tkr, _ = action_tuple
+
+        # 1. 점수가 높은 순서대로 정렬 (NaN 값은 가장 낮은 우선순위로 처리)
+        sort_score = -score if pd.notna(score) else float("inf")
+
+        # 2. 점수가 같을 경우 티커 이름으로 정렬
+        return (sort_score, tkr)
 
     actions.sort(key=sort_key)
 
@@ -489,7 +673,7 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
     elif strategy_name == "seykota":
         signal_headers = ["단기MA", "장기MA", "MA스코어", "필터"]
     elif strategy_name == "donchian":
-        signal_headers = ["이평선(값)", "이평선(기간)", "이격도", "-"]
+        signal_headers = ["이평선(값)", "이평선(기간)", "이격도", "신호지속일"]
     else:
         signal_headers = ["신호1", "신호2", "점수", "필터"]
 

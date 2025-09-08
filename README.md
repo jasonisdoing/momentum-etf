@@ -7,8 +7,9 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 ---------------------
 
 - `data/`: 사용자 데이터 폴더
-  - `tickers.txt`: 운용/시뮬레이션 대상 티커 목록. (포맷: `티커 이름`)
-  - `portfolio_YYYY-MM-DD.json`: 특정 날짜의 포트폴리오 스냅샷(평가금액, 보유종목). 웹 UI를 통해 생성/저장됩니다.
+  - `tickers.txt`: 운용/시뮬레이션 대상 티커 목록. (포맷: `티커 이름`).
+  - `portfolio_raw.txt`: 사용자가 직접 관리하는 포트폴리오 원본 파일.
+  - `portfolio_YYYY-MM-DD.json`: `convert_portfolio.py`를 통해 생성되는 포트폴리오 스냅샷.
 - `core/`: 핵심 엔진
   - `backtester.py`: (사용되지 않음) 개별 종목 백테스팅 실행기.
   - `portfolio.py`: (사용되지 않음) 포트폴리오 백테스팅 실행기.
@@ -23,7 +24,7 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 - `test.py`: 과거 구간 백테스트 실행 및 `logs/test.log` 생성.
 - `today.py`: 당일/익일 매매 액션 계산 및 `logs/today.log` 생성.
 - `tune_seykota.py`: `seykota` 전략의 파라미터를 최적화하는 스크립트.
-- `web_app.py`: Streamlit 기반 웹 UI.
+- `convert_portfolio.py`: `portfolio_raw.txt`를 `portfolio_YYYY-MM-DD.json` 형식으로 변환합니다.
 - `settings.py`: 모든 전략에 공통으로 적용되는 전역 설정.
 
 전략(Strategy) 구조
@@ -45,17 +46,25 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 
 2) 라이브러리 설치
 
-    pip install pandas streamlit pykrx tqdm
+    pip install pandas pykrx tqdm requests beautifulsoup4
 
 3) 파일 준비
 
 - `data/tickers.txt`에 운용 티커/명칭을 한 줄씩 등록합니다.
-- (권장) `web_app.py`를 실행하여 초기 포트폴리오(`portfolio_YYYY-MM-DD.json`)를 생성합니다. 이 파일에는 평가금액과 현재 보유 종목 정보가 포함됩니다.
+- `data/portfolio_raw.txt` 파일을 생성하고, 보유 종목 정보를 입력합니다. `convert_portfolio.py` 실행 후 생성된 `.json` 파일에서 총평가액을 직접 수정해야 합니다. (자세한 형식은 아래 '데이터 파일 포맷' 참조)
 
 실행 방법
 --------
 
-1) 오늘/다음 거래일 액션 산출
+1) 포트폴리오 원본 파일 변환 (필요시)
+
+`data/portfolio_raw.txt` 파일의 내용을 시스템이 사용하는 `portfolio_YYYY-MM-DD.json` 형식으로 변환합니다.
+
+    python convert_portfolio.py
+
+- `data/portfolio_raw.txt` 파일이 없으면 예시 파일이 생성됩니다.
+
+2) 오늘/다음 거래일 액션 산출
 
 경량 모드로, 과거 시뮬레이션 없이 “현재 보유 + 오늘 신호”를 바탕으로 다음 거래일에 해야 할 액션을 제안합니다.
 
@@ -68,7 +77,7 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 - 사전 조건: `data/portfolio_YYYY-MM-DD.json` 파일에 해당 거래일의 평가금액과 보유종목이 있어야 합니다.
 - 표: `jason`, `seykota` 전략은 신호 점수가 높은 순으로 정렬됩니다. 상태(SELL/CUT/TRIM/BUY/HOLD/WAIT), 비중, 전략별 신호, 문구(사유) 등을 표시합니다.
 
-2) 백테스트 로그 생성
+3) 백테스트 로그 생성
 
 과거 구간에 대해 백테스트를 실행합니다.
 
@@ -81,7 +90,7 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 - 상세 백테스트 실행 시: `logs/test_전략이름.log` (예: `logs/test_jason.log`)에 일별 상세 로그가 기록됩니다.
 - 요약 비교 실행 시: 두 전략의 최종 성과(CAGR, MDD 등)만 간략히 표로 보여줍니다.
 
-3) 전략 파라미터 튜닝 (예: seykota)
+4) 전략 파라미터 튜닝 (예: seykota)
 
 `tune_seykota.py` 스크립트를 실행하여 `seykota` 전략의 최적 이동평균 기간을 찾습니다.
 
@@ -90,18 +99,6 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 - 주의: 매우 많은 조합을 테스트하므로 실행에 오랜 시간이 걸릴 수 있습니다.
 - 스크립트 내에서 테스트할 파라미터 범위를 조절할 수 있습니다.
 - 최종적으로 최고 CAGR, 최저 MDD, 최고 Calmar Ratio(위험 조정 수익률)를 기록한 파라미터와 성과를 각각 출력합니다.
-
-4) 웹앱 실행
-
-평가금액/보유 입력을 브라우저에서 편하게 관리합니다.
-
-    streamlit run web_app.py
-
-- 상단: 평가금액(원) 입력.
-- 보유 입력(수동) 테이블
-  - 티커 입력 시 `data/tickers.txt`를 참조하여 명칭 자동 채움(포커스 아웃 시 반영)
-  - 수량(정수), 매수단가(원) 입력.
-  - '포트폴리오 스냅샷 저장' 버튼 클릭 시, 입력된 평가금액과 보유 종목 정보가 `data/portfolio_YYYY-MM-DD.json` 파일로 저장됩니다.
 
 전략/로직 요약
 -------------
@@ -145,7 +142,17 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 --------------
 
 - `data/tickers.txt`: 예) `449450 PLUS K방산` (공백/탭/콤마 구분 허용)
-- `data/portfolio_YYYY-MM-DD.json`: 웹 UI에서 저장되는 포트폴리오 스냅샷.
+- `data/portfolio_raw.txt`: 사용자가 직접 관리하는 포트폴리오 원본 파일.
+  ```
+  # 총평가액 (주석이 아닌 첫 번째 줄에 숫자만 입력)
+  100000000
+
+  # 보유종목 (티커 수량 매수단가)
+  # 각 종목은 한 줄에 하나씩 입력합니다.
+  005930 10 75000
+  000660 5 120000
+  ```
+- `data/portfolio_YYYY-MM-DD.json`: `convert_portfolio.py`로 생성되는 포트폴리오 스냅샷.
   ```json
   {
     "date": "2024-05-24",
@@ -166,4 +173,5 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 
 - today.py는 pykrx를 이용하여 거래일 판정을 수행합니다(네트워크 필요). pykrx/API 오류 시 휴장 판단이 달라질 수 있습니다.
 - today.py 경량 모드는 “내일 할 일” 계산에 특화되어 있습니다.
+- today.py는 장중 실행 시, 네이버 금융 웹 스크레이핑을 통해 실시간 가격을 가져오려고 시도합니다. 이 기능은 네이버 웹사이트 구조 변경 시 동작하지 않을 수 있으며, 비공식적인 방법이므로 안정성을 보장하지 않습니다.
 - 모든 결과는 참고용이며, 실거래 적용 전 리스크/수수료/세금/체결 슬리피지 등을 반드시 반영해 재검증하세요.
