@@ -5,10 +5,11 @@ from typing import Optional
 
 import pandas as pd
 
-from utils.report import format_kr_money
-
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from utils.report import format_kr_money
+
 try:
     from pykrx import stock as _stock
 except Exception:
@@ -18,7 +19,7 @@ except Exception:
 def get_latest_trading_day(
     ref_date: pd.Timestamp, ref_ticker: str = "005930"
 ) -> Optional[pd.Timestamp]:
-    """주어진 기준일 또는 그 이전의 가장 가까운 거래일을 찾습니다."""
+    """주어진 날짜 또는 그 이전의 가장 가까운 거래일을 찾습니다."""
     if _stock is None:
         print(
             "경고: pykrx가 설치되지 않아 정확한 거래일 확인이 어렵습니다. 오늘 날짜를 기준으로 진행합니다."
@@ -45,7 +46,7 @@ def convert_raw_to_json():
     if not os.path.exists(raw_path):
         print(f"오류: '{raw_path}' 파일이 없습니다.")
         sample_content = """# 보유종목 (티커 이름 수량 매수단가)
-# 각 종목은 한 줄에 하나씩 입력합니다.
+# 각 종목은 한 줄에 하나씩 공백으로 구분하여 입력합니다.
 # 이름에 공백이 포함될 수 있으며, 가격에 쉼표(,)나 '원'이 포함되어도 괜찮습니다.
 # 예시:
 # 005930 삼성전자 10 75000
@@ -67,7 +68,7 @@ def convert_raw_to_json():
             continue
 
         parts = line.split()
-        if len(parts) < 4:  # 티커, 이름(최소 1단어), 수량, 매수단가
+        if len(parts) < 4:  # 최소 4개 요소: 티커, 이름(1단어 이상), 수량, 매수단가
             print(f"경고: 잘못된 형식의 행입니다. 건너뜁니다: '{line}'")
             continue
 
@@ -80,7 +81,7 @@ def convert_raw_to_json():
             shares = int(shares_str.replace(",", ""))
             avg_cost = float(avg_cost_str.replace(",", "").replace("원", ""))
 
-            if len(ticker) != 6 or not ticker.isdigit():
+            if not (len(ticker) == 6 and ticker.isdigit()):
                 print(f"경고: 잘못된 티커 형식입니다. 건너뜁니다: '{line}'")
                 continue
             holdings.append(
@@ -100,13 +101,14 @@ def convert_raw_to_json():
     output_filename = f"portfolio_{archive_date_str}.json"
     output_path = os.path.join("data", output_filename)
 
-    # 기존 파일이 있으면 total_equity 값을 읽어오고, 없으면 0으로 초기화합니다.
+    # 기존 파일이 있으면 total_equity 값을 보존하고, 없으면 0으로 초기화합니다.
     total_equity = 0
     had_equity_before = False
     if os.path.exists(output_path):
         try:
             with open(output_path, "r", encoding="utf-8") as f:
                 existing_data = json.load(f)
+            # 기존 파일에 total_equity 값이 있고, 숫자 형식인 경우에만 값을 읽어옵니다.
             if "total_equity" in existing_data and isinstance(
                 existing_data["total_equity"], (int, float)
             ):
@@ -116,6 +118,7 @@ def convert_raw_to_json():
                     f"-> 기존 파일 '{output_path}'에서 총평가액({format_kr_money(total_equity)})을 보존합니다."
                 )
         except (json.JSONDecodeError, ValueError, TypeError) as e:
+            # 기존 파일 파싱에 실패하면 경고 후 0으로 초기화합니다.
             print(
                 f"-> 경고: 기존 파일 '{output_path}'에서 총평가액을 읽는 중 오류 발생. 0으로 설정합니다. ({e})"
             )

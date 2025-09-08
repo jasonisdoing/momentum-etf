@@ -1,7 +1,6 @@
 """
-Strategy: 'jason'
-SuperTrend-based momentum strategy.
-이 파일은 'jason' 전략의 핵심 로직을 포함합니다.
+전략: 'jason'
+모멘텀 점수와 슈퍼트렌드 지표를 사용하는 전략입니다.
 """
 
 from math import ceil
@@ -17,7 +16,7 @@ from . import settings as jason_settings
 
 
 def run_portfolio_backtest(
-    pairs: List[Tuple[str, str]],
+    ticker_name_pairs: List[Tuple[str, str]],
     months_range: Optional[List[int]] = None,
     initial_capital: float = 100_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
@@ -25,12 +24,11 @@ def run_portfolio_backtest(
     date_range: Optional[List[str]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
-    공유 현금 Top-N 포트폴리오를 시뮬레이션합니다.
-    (core.portfolio.portfolio_topn_series에서 이동)
+    'jason' 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
     """
     # Fetch all series
     data = {}
-    tickers_to_process = [p[0] for p in pairs]
+    tickers_to_process = [p[0] for p in ticker_name_pairs]
 
     # --- 데이터 로딩 및 지표 계산 ---
     # 웜업 기간(슈퍼트렌드 기간 + 수익률 계산 기간)을 포함하여 시작일을 계산합니다.
@@ -46,28 +44,28 @@ def run_portfolio_backtest(
         adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
 
     for tkr in tickers_to_process:
-        df = fetch_ohlcv(tkr, months_range=months_range, date_range=adjusted_date_range)
+        df = fetch_ohlcv(tkr, date_range=adjusted_date_range)
 
         if df is None or len(df) < 25:
             continue
         close = df["Close"]
-        # Precompute diagnostics
-        p1 = (close / close.shift(5) - 1.0).fillna(0.0).round(3) * 100
-        p2 = (close.shift(5) / close.shift(10) - 1.0).fillna(0.0).round(3) * 100
-        s2 = p1 + p2
+        # 모멘텀 점수 계산을 위한 수익률 사전 계산
+        return_1w = (close / close.shift(5) - 1.0).fillna(0.0).round(3) * 100
+        return_2w = (close.shift(5) / close.shift(10) - 1.0).fillna(0.0).round(3) * 100
+        momentum_score = return_1w + return_2w
         try:
             st_p = int(getattr(jason_settings, "ST_ATR_PERIOD", 14))
             st_m = float(getattr(jason_settings, "ST_ATR_MULTIPLIER", 3.0))
         except Exception:
             st_p, st_m = 14, 3.0
-        st_dir = supertrend_direction(df, st_p, st_m) if len(df) > max(2, st_p) else None
+        supertrend = supertrend_direction(df, st_p, st_m) if len(df) > max(2, st_p) else None
         data[tkr] = {
             "df": df,
             "close": close,
-            "p1": p1,
-            "p2": p2,
-            "s2": s2,
-            "st_dir": st_dir if st_dir is not None else pd.Series(0, index=df.index),
+            "return_1w": return_1w,
+            "return_2w": return_2w,
+            "momentum_score": momentum_score,
+            "supertrend": supertrend if supertrend is not None else pd.Series(0, index=df.index),
         }
 
     if not data:
@@ -110,7 +108,7 @@ def run_portfolio_backtest(
             f"'{e.name}' 설정이 전역 settings.py 파일에 반드시 정의되어야 합니다."
         ) from e
 
-    # State
+    # 시뮬레이션 상태 변수 초기화
     state = {
         tkr: {
             "shares": 0,
@@ -124,6 +122,7 @@ def run_portfolio_backtest(
     out_rows = {tkr: [] for tkr in data.keys()}
     out_cash = []
 
+    # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     for i, dt in enumerate(union_index):
         tickers_available_today = [tkr for tkr, d in data.items() if dt in d["df"].index]
         today_prices = {
@@ -132,7 +131,7 @@ def run_portfolio_backtest(
             if dt in d["close"].index
         }
 
-        # Calculate current holdings value once per day
+        # 현재 총 보유 자산 가치를 하루에 한 번 계산합니다.
         current_holdings_value = 0
         for tkr_h, s_h in state.items():
             if s_h["shares"] > 0:
@@ -140,61 +139,75 @@ def run_portfolio_backtest(
                 if pd.notna(price_h):
                     current_holdings_value += s_h["shares"] * price_h
 
-        # 2. Sells, Trims and State Recording
+        # 총 평가금액(현금 + 주식)을 계산합니다.
         equity = cash + current_holdings_value
 
         for tkr, d in data.items():
-            s, price = state[tkr], today_prices.get(tkr)
+            ticker_state, price = state[tkr], today_prices.get(tkr)
             decision, trade_amount, trade_profit, trade_pl_pct = None, 0.0, 0.0, 0.0
 
-            # Sell/Trim logic only applies to tickers in the active universe
-            if (
-                tkr in tickers_available_today
-            ):  # 이 조건은 이미 루프 시작에서 확인되지만, 명확성을 위해 유지
-                if s["shares"] > 0 and pd.notna(price) and i >= s["sell_block_until"]:
-                    hold_ret = (price / s["avg_cost"] - 1.0) * 100.0 if s["avg_cost"] > 0 else 0.0
+            # 매도/비중축소 로직은 활성 유니버스에 있는 티커에만 적용됩니다.
+            if tkr in tickers_available_today:
+                if (
+                    ticker_state["shares"] > 0
+                    and pd.notna(price)
+                    and i >= ticker_state["sell_block_until"]
+                ):
+                    hold_ret = (
+                        (price / ticker_state["avg_cost"] - 1.0) * 100.0
+                        if ticker_state["avg_cost"] > 0
+                        else 0.0
+                    )
 
-                    # Sell/Cut conditions
+                    # 매도/손절 조건
                     if stop_loss is not None and hold_ret <= float(stop_loss):
                         decision = "CUT_STOPLOSS"
-                    elif dt in d["s2"].index and (d["s2"].loc[dt] + hold_ret) < sell_thr:
+                    elif (
+                        dt in d["momentum_score"].index
+                        and (d["momentum_score"].loc[dt] + hold_ret) < sell_thr
+                    ):
                         decision = "SELL_MOMENTUM"
 
+                    # 매도 결정이 내려졌을 경우, 상태를 업데이트합니다.
                     if decision:
-                        qty = s["shares"]
+                        qty = ticker_state["shares"]
                         trade_amount = qty * price
-                        if s["avg_cost"] > 0:
-                            trade_profit = (price - s["avg_cost"]) * qty
+                        if ticker_state["avg_cost"] > 0:
+                            trade_profit = (price - ticker_state["avg_cost"]) * qty
                             trade_pl_pct = hold_ret
                         cash += trade_amount
-                        s["shares"], s["avg_cost"] = 0, 0.0
+                        ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
                         if cooldown_days > 0:
-                            s["buy_block_until"] = i + cooldown_days
+                            ticker_state["buy_block_until"] = i + cooldown_days
 
-                    # Trim condition
+                    # 최대 비중 초과 시 리밸런싱(부분 매도)
                     elif trim_on and max_pos_pct < 1.0:
-                        curr_val, cap_val = s["shares"] * price, max_pos_pct * equity
+                        curr_val, cap_val = ticker_state["shares"] * price, max_pos_pct * equity
                         if curr_val > cap_val and price > 0:
-                            sell_qty = min(s["shares"], int((curr_val - cap_val) // price))
+                            sell_qty = min(
+                                ticker_state["shares"], int((curr_val - cap_val) // price)
+                            )
                             if sell_qty > 0:
                                 decision, trade_amount = (
                                     "TRIM_REBALANCE",
                                     sell_qty * price,
                                 )
                                 cash += trade_amount
-                                s["shares"] -= sell_qty
-                                if s["avg_cost"] > 0:
-                                    trade_profit = (price - s["avg_cost"]) * sell_qty
+                                ticker_state["shares"] -= sell_qty
+                                if ticker_state["avg_cost"] > 0:
+                                    trade_profit = (price - ticker_state["avg_cost"]) * sell_qty
                                     trade_pl_pct = hold_ret
                                 if cooldown_days > 0:
-                                    s["buy_block_until"] = i + cooldown_days
+                                    ticker_state["buy_block_until"] = i + cooldown_days
 
-            decision_out = decision if decision else ("HOLD" if s["shares"] > 0 else "WAIT")
+            decision_out = (
+                decision if decision else ("HOLD" if ticker_state["shares"] > 0 else "WAIT")
+            )
             note = ""
             if decision_out in ("WAIT", "HOLD"):
-                if s["shares"] > 0 and i < s["sell_block_until"]:
+                if ticker_state["shares"] > 0 and i < ticker_state["sell_block_until"]:
                     note = "매도 쿨다운"
-                elif s["shares"] == 0 and i < s["buy_block_until"]:
+                elif ticker_state["shares"] == 0 and i < ticker_state["buy_block_until"]:
                     note = "매수 쿨다운"
 
             # 해당 날짜에 데이터가 있는 경우에만 지표를 기록합니다.
@@ -203,18 +216,20 @@ def run_portfolio_backtest(
                     {
                         "date": dt,
                         "price": price,
-                        "shares": s["shares"],
-                        "pv": s["shares"] * (price if pd.notna(price) else 0),
+                        "shares": ticker_state["shares"],
+                        "pv": ticker_state["shares"] * (price if pd.notna(price) else 0),
                         "decision": decision_out,
-                        "avg_cost": s["avg_cost"],
+                        "avg_cost": ticker_state["avg_cost"],
                         "trade_amount": trade_amount,
                         "trade_profit": trade_profit,
                         "trade_pl_pct": trade_pl_pct,
                         "note": note,
-                        "signal1": d["p1"].loc[dt],
-                        "signal2": d["p2"].loc[dt],
-                        "score": d["s2"].loc[dt],
-                        "filter": (int(d["st_dir"].loc[dt]) if dt in d["st_dir"].index else 0),
+                        "signal1": d["return_1w"].loc[dt],
+                        "signal2": d["return_2w"].loc[dt],
+                        "score": d["momentum_score"].loc[dt],
+                        "filter": (
+                            int(d["supertrend"].loc[dt]) if dt in d["supertrend"].index else 0
+                        ),
                     }
                 )
             else:
@@ -222,11 +237,12 @@ def run_portfolio_backtest(
                 out_rows[tkr].append(
                     {
                         "date": dt,
-                        "price": s["avg_cost"],
-                        "shares": s["shares"],
-                        "pv": s["shares"] * (s["avg_cost"] if pd.notna(s["avg_cost"]) else 0),
-                        "decision": "HOLD" if s["shares"] > 0 else "WAIT",
-                        "avg_cost": s["avg_cost"],
+                        "price": ticker_state["avg_cost"],
+                        "shares": ticker_state["shares"],
+                        "pv": ticker_state["shares"]
+                        * (ticker_state["avg_cost"] if pd.notna(ticker_state["avg_cost"]) else 0),
+                        "decision": "HOLD" if ticker_state["shares"] > 0 else "WAIT",
+                        "avg_cost": ticker_state["avg_cost"],
                         "trade_amount": 0.0,
                         "trade_profit": 0.0,
                         "trade_pl_pct": 0.0,
@@ -238,26 +254,31 @@ def run_portfolio_backtest(
                     }
                 )
 
-        # 3. Buys
+        # 매수 로직
         held_count = sum(1 for s in state.values() if s["shares"] > 0)
         slots_to_fill = max(0, top_n - held_count)
         if slots_to_fill > 0 and cash > 0:  # 매수 여력 있을 때
-            cands = []
+            buy_candidates = []
             for tkr in tickers_available_today:  # 오늘 거래 가능한 종목 중에서만 후보 선정
                 d = data.get(tkr)
-                s = state[tkr]
-                if s["shares"] == 0 and i >= s["buy_block_until"] and dt in d["s2"].index:
-                    s2_val = d["s2"].loc[dt]
-                    st_val = int(d["st_dir"].loc[dt]) if dt in d["st_dir"].index else -1
-                    if s2_val > buy_thr and st_val > 0:
-                        cands.append((s2_val, tkr))
+                ticker_state = state[tkr]
+                if (
+                    ticker_state["shares"] == 0
+                    and i >= ticker_state["buy_block_until"]
+                    and dt in d["momentum_score"].index
+                ):
+                    score_val = d["momentum_score"].loc[dt]
+                    st_val = int(d["supertrend"].loc[dt]) if dt in d["supertrend"].index else -1
+                    if score_val > buy_thr and st_val > 0:
+                        buy_candidates.append((score_val, tkr))
 
-            cands.sort(reverse=True)
+            buy_candidates.sort(reverse=True)
 
-            for k in range(min(slots_to_fill, len(cands))):
+            # 점수가 높은 순으로 매수 후보를 선정하여 매수합니다.
+            for k in range(min(slots_to_fill, len(buy_candidates))):
                 if cash <= 0:
                     break
-                _, tkr = cands[k]
+                _, tkr = buy_candidates[k]
 
                 price = today_prices.get(tkr)
                 if pd.isna(price):
@@ -275,12 +296,14 @@ def run_portfolio_backtest(
                 if trade_amount > cash:
                     continue
 
-                s = state[tkr]
+                ticker_state = state[tkr]
                 cash -= trade_amount
-                s["shares"] += req_qty
-                s["avg_cost"] = price  # Simple avg_cost for new position
+                ticker_state["shares"] += req_qty
+                ticker_state["avg_cost"] = price
                 if cooldown_days > 0:
-                    s["sell_block_until"] = max(s["sell_block_until"], i + cooldown_days)
+                    ticker_state["sell_block_until"] = max(
+                        ticker_state["sell_block_until"], i + cooldown_days
+                    )
 
                 # Update today's row for the bought ticker
                 if out_rows[tkr] and out_rows[tkr][-1]["date"] == dt:
@@ -289,9 +312,9 @@ def run_portfolio_backtest(
                         {
                             "decision": "BUY",
                             "trade_amount": trade_amount,
-                            "shares": s["shares"],
-                            "pv": s["shares"] * price,
-                            "avg_cost": s["avg_cost"],
+                            "shares": ticker_state["shares"],
+                            "pv": ticker_state["shares"] * price,
+                            "avg_cost": ticker_state["avg_cost"],
                         }
                     )
                 else:  # Should not happen if sell logic ran first
@@ -299,10 +322,10 @@ def run_portfolio_backtest(
         else:  # 매수 여력 없을 때 (포트폴리오 가득 참 또는 현금 부족)
             # 매수 신호가 있었으나 무시된 종목에 사유를 기록
             for tkr in tickers_available_today:  # 오늘 거래 가능한 종목 중에서만 확인
-                s = state[tkr]
-                if s["shares"] == 0:  # 비보유 종목 중에서
+                ticker_state = state[tkr]
+                if ticker_state["shares"] == 0:  # 비보유 종목 중에서
                     d = data.get(tkr)
-                    if dt in d["s2"].index and d["s2"].loc[dt] > buy_thr:
+                    if dt in d["momentum_score"].index and d["momentum_score"].loc[dt] > buy_thr:
                         # 오늘 날짜의 기록을 찾아 'note' 업데이트
                         if out_rows[tkr] and out_rows[tkr][-1]["date"] == dt:
                             note = "포트폴리오 가득 참" if slots_to_fill <= 0 else "현금 부족"
@@ -320,7 +343,7 @@ def run_portfolio_backtest(
             }
         )
 
-    # Build DataFrames
+    # 결과 데이터프레임 생성
     result = {}
     for tkr, rows in out_rows.items():
         if rows:
@@ -339,13 +362,11 @@ def run_single_ticker_backtest(
     date_range: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
-    개별 종목에 대한 일별 시뮬레이션 상태를 반환합니다.
-    (core.backtester.simple_daily_series에서 이동)
+    단일 종목에 대해 'jason' 전략 백테스트를 실행합니다.
     """
     if df is None:
-        df = fetch_ohlcv(
-            ticker, months_range=months_range, date_range=date_range
-        )  # 단일 테스트는 웜업 조정 없이 그대로 사용
+        # 단일 테스트는 웜업 조정 없이 그대로 사용
+        df = fetch_ohlcv(ticker, months_range=months_range, date_range=date_range)
     if df is None or len(df) < 25:
         return pd.DataFrame(
             columns=["price", "cash", "shares", "pv", "decision"],
@@ -354,7 +375,7 @@ def run_single_ticker_backtest(
 
     close = df["Close"]
 
-    # Determine start index respecting the core start date (after warmup)
+    # 웜업 기간을 고려하여 실제 시작 인덱스를 결정합니다.
     start_i = 20
     if core_start_date is not None:
         try:
@@ -386,7 +407,7 @@ def run_single_ticker_backtest(
 
     st_dir = supertrend_direction(df, st_p, st_m) if len(df) > max(2, st_p) else None
 
-    # State
+    # 시뮬레이션 상태 변수 초기화
     cash = float(initial_capital)
     shares = 0
     avg_cost = 0.0
@@ -401,11 +422,11 @@ def run_single_ticker_backtest(
         c0 = float(c0_val)
         c5 = float(close.iloc[i - 5])
         c10 = float(close.iloc[i - 10])
-        r21 = (c5 / c10 - 1.0) if c10 > 0 else 0.0
-        r10 = (c0 / c5 - 1.0) if c5 > 0 else 0.0
-        p1 = round(r10 * 100, 1)
-        p2 = round(r21 * 100, 1)
-        s2_sum = p1 + p2
+        return_1w_val = (c0 / c5 - 1.0) if c5 > 0 else 0.0
+        return_2w_val = (c5 / c10 - 1.0) if c10 > 0 else 0.0
+        return_1w = round(return_1w_val * 100, 1)
+        return_2w = round(return_2w_val * 100, 1)
+        momentum_score = return_1w + return_2w
 
         decision = None
         trade_amount = 0.0
@@ -413,14 +434,14 @@ def run_single_ticker_backtest(
         trade_pl_pct = 0.0
         reason_block = None
 
-        # Sell/Cut logic
+        # 매도/손절 로직
         if shares > 0 and i >= sell_block_until:
             curr_hold_ret = (c0 - avg_cost) / avg_cost * 100.0 if avg_cost > 0 else 0.0
-            # 1) Stop loss
+            # 1) 손절매
             if stop_loss is not None and curr_hold_ret <= float(stop_loss):
                 decision = "CUT_STOPLOSS"
-            # 2) Sum threshold
-            elif (s2_sum + curr_hold_ret) < sell_thr:
+            # 2) 모멘텀 소진
+            elif (momentum_score + curr_hold_ret) < sell_thr:
                 decision = "SELL_MOMENTUM"
 
             if decision in ("CUT_STOPLOSS", "SELL_MOMENTUM"):
@@ -435,8 +456,8 @@ def run_single_ticker_backtest(
                 if cooldown_days > 0:
                     buy_block_until = i + cooldown_days
 
-        # Buy logic
-        if decision is None and shares == 0 and i >= buy_block_until and s2_sum > buy_thr:
+        # 매수 로직
+        if decision is None and shares == 0 and i >= buy_block_until and momentum_score > buy_thr:
             if st_dir is not None and int(st_dir.iloc[i]) <= 0:
                 reason_block = "ST_DOWN"
             if reason_block is None:
@@ -481,9 +502,9 @@ def run_single_ticker_backtest(
                 "trade_profit": trade_profit,
                 "trade_pl_pct": trade_pl_pct,
                 "note": note_txt,
-                "signal1": p1,
-                "signal2": p2,
-                "score": s2_sum,
+                "signal1": return_1w,
+                "signal2": return_2w,
+                "score": momentum_score,
                 "filter": int(st_dir.iloc[i]) if st_dir is not None else 0,
             }
         )

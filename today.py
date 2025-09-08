@@ -181,7 +181,10 @@ def build_pairs_with_holdings(
     return [(t, out_map.get(t, "")) for t in out_map.keys()]
 
 
-def main(strategy_name: str, portfolio_path: Optional[str] = None):
+def generate_action_plan(
+    strategy_name: str, portfolio_path: Optional[str] = None
+) -> Optional[Tuple[str, List[str], List[List[str]]]]:
+    """지정된 전략에 대한 오늘의 액션 플랜 데이터를 생성하여 반환합니다."""
     print(f"'{strategy_name}' 전략을 사용하여 오늘의 액션 플랜을 생성합니다.")
 
     market_is_open = is_market_open()
@@ -207,7 +210,7 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
             "오류: 포트폴리오 파일(portfolio_*.json)을 찾을 수 없습니다. "
             "--portfolio 옵션으로 파일을 지정하거나 data/ 폴더에 파일을 위치시켜주세요."
         )
-        print("웹 UI(web_app.py)를 실행하여 새 포트폴리오를 생성할 수 있습니다.")
+        print("`convert_portfolio.py`를 실행하여 새 포트폴리오를 생성할 수 있습니다.")
         return
 
     print(
@@ -694,40 +697,21 @@ def main(strategy_name: str, portfolio_path: Optional[str] = None):
     headers.extend(signal_headers)
     headers.append("문구")
 
-    aligns = [
-        "right",
-        "right",
-        "left",
-        "center",
-        "left",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "center",
-        "left",
-    ]
+    return (header_line, headers, rows_sorted)
 
-    # Render table for both console and log file
-    table_lines = render_table_eaw(headers, rows_sorted, aligns)
 
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f"today_{strategy_name}.log")
-    try:
-        with open(log_path, "w", encoding="utf-8") as f:
-            f.write(header_line + "\n\n")
-            f.write("\n".join(table_lines) + "\n")
-    except Exception:
-        pass
-    print(header_line)
-    print("\n".join(table_lines))
+def main(strategy_name: str, portfolio_path: Optional[str] = None):
+    """CLI에서 오늘의 액션 플랜을 실행하고 결과를 출력/저장합니다."""
+    result = generate_action_plan(strategy_name, portfolio_path)
+
+    if result:
+        header_line, headers, rows_sorted = result
+
+        # 콘솔과 로그 파일에 테이블 렌더링
+        table_lines = render_table_eaw(headers, rows_sorted, aligns=None)
+
+        print("\n" + header_line)
+        print("\n".join(table_lines))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 """
-MomentumPilot 프로젝트 메인 실행 파일.
+MomentumPilot 프로젝트의 메인 실행 파일입니다.
 """
 
 import argparse
@@ -7,7 +7,7 @@ import os
 import sys
 import warnings
 
-# Add project root to the Python path
+# 프로젝트 루트를 Python 경로에 추가합니다.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
@@ -44,7 +44,7 @@ def main():
         import pandas as pd
 
         import settings
-        from utils.report import format_kr_money, render_table_eaw
+        from utils.report import generate_strategy_comparison_report
 
         if args.test == "__COMPARE__":
             # `python main.py --test`
@@ -55,9 +55,7 @@ def main():
 
             all_results = []
             for strategy in strategies_to_compare:
-                results = run_test(
-                    strategy_name=strategy, portfolio_path=args.portfolio, quiet=True
-                )
+                results = run_test(strategy_name=strategy, quiet=True)
                 if results:
                     all_results.append(results)
                 print(f"'{strategy}' 전략 백테스트 완료.")
@@ -76,174 +74,13 @@ def main():
                 except Exception:
                     pass  # Ignore parsing errors, just provide the generic message
                 return
-
-            headers = [
-                "전략",
-                "기간",
-                "CAGR",
-                "MDD",
-                "Sharpe",
-                "Sortino",
-                "Calmar",
-                "누적수익률",
-                "최종자산",
-            ]
-            rows = [
-                [
-                    r["strategy"],
-                    f"{r['start_date']}~{r['end_date']}",
-                    f"{r['cagr_pct']:.2f}%",
-                    f"-{r['mdd_pct']:.2f}%",
-                    f"{r.get('sharpe_ratio', 0.0):.2f}",
-                    f"{r.get('sortino_ratio', 0.0):.2f}",
-                    f"{r.get('calmar_ratio', 0.0):.2f}",
-                    f"{r['cumulative_return_pct']:.2f}%",
-                    format_kr_money(r["final_value"]),
-                ]
-                for r in all_results
-            ]
-            aligns = ["left", "left", "right", "right", "right", "right", "right", "right", "right"]
-            table_lines = render_table_eaw(headers, rows, aligns)
-
-            initial_capital = all_results[0]["initial_capital"]
-
-            print(
-                "\n" + "=" * 30 + "\n" + " 전략 비교 결과 요약 ".center(30, "=") + "\n" + "=" * 30
-            )
-            print(f"(초기 자본: {format_kr_money(initial_capital)})")
-            print("\n".join(table_lines))
-
-            print("\n[지표 설명]")
-            print("  - CAGR: 연간 복리 성장률")
-            print("  - MDD: 최대 낙폭 (고점 대비 최대 하락률)")
-            print(
-                "  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수)."
-            )
-            print(
-                "  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수)."
-            )
-            print(
-                "  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양"
-                "호, >3 우수)."
-            )
-
-            # 월별 성과 비교
-            all_monthly_returns = {
-                res["strategy"]: res["monthly_returns"]
-                for res in all_results
-                if "monthly_returns" in res and not res["monthly_returns"].empty
-            }
-            all_yearly_returns = {
-                res["strategy"]: res["yearly_returns"]
-                for res in all_results
-                if "yearly_returns" in res and not res["yearly_returns"].empty
-            }
-            all_monthly_cum_returns = {
-                res["strategy"]: res["monthly_cum_returns"]
-                for res in all_results
-                if "monthly_cum_returns" in res and not res["monthly_cum_returns"].empty
-            }
-
-            if all_monthly_returns:
-                monthly_df_check = pd.DataFrame(all_monthly_returns)
-                if monthly_df_check.empty:
-                    print("\n월별 수익률 데이터가 없어 비교를 건너뜁니다.")
-                else:
-                    print(
-                        "\n"
-                        + "=" * 30
-                        + "\n"
-                        + " 월별 성과 비교 ".center(30, "=")
-                        + "\n"
-                        + "=" * 30
-                    )
-
-                    monthly_df = monthly_df_check.mul(100)
-                    yearly_df = pd.DataFrame(all_yearly_returns).mul(100)
-                    monthly_cum_df = pd.DataFrame(all_monthly_cum_returns).mul(100)
-                    strategy_names = list(all_monthly_returns.keys())
-
-                    all_years_set = set(monthly_df.index.year)
-                    if not yearly_df.empty:
-                        all_years_set.update(yearly_df.index.year)
-
-                    all_years = sorted(list(all_years_set))
-
-                    for year in all_years:
-                        print(f"\n--- {year}년 ---")
-
-                        year_monthly_df = monthly_df[monthly_df.index.year == year]
-
-                        headers = ["월"] + strategy_names
-                        rows_data = []
-
-                        for month in range(1, 13):
-                            month_data = [f"{month}월"]
-                            cum_data = ["  (누적)"]
-                            month_end_dt = pd.Timestamp(year, month, 1) + pd.offsets.MonthEnd(0)
-
-                            has_data_for_month = month_end_dt in year_monthly_df.index
-                            if has_data_for_month:
-                                month_ret_row = year_monthly_df.loc[month_end_dt]
-                                cum_ret_row = None
-                                if (
-                                    not monthly_cum_df.empty
-                                    and month_end_dt in monthly_cum_df.index
-                                ):
-                                    cum_ret_row = monthly_cum_df.loc[month_end_dt]
-                                for strategy in strategy_names:
-                                    val = month_ret_row.get(strategy)
-                                    month_data.append(f"{val:+.2f}%" if pd.notna(val) else "-")
-
-                                    cum_val = (
-                                        cum_ret_row.get(strategy)
-                                        if cum_ret_row is not None
-                                        else None
-                                    )
-                                    cum_data.append(
-                                        f"{cum_val:+.2f}%" if pd.notna(cum_val) else "-"
-                                    )
-                            else:
-                                month_data.extend(["-"] * len(strategy_names))
-                                cum_data.extend(["-"] * len(strategy_names))
-                            rows_data.append(month_data)
-                            # 월간 데이터가 있는 경우에만 누적 행 추가
-                            if has_data_for_month:
-                                rows_data.append(cum_data)
-
-                        yearly_data = ["연간"]
-                        year_end_dt = pd.Timestamp(year, 12, 31) + pd.offsets.YearEnd(0)
-                        if not yearly_df.empty and year_end_dt in yearly_df.index:
-                            year_row = yearly_df.loc[year_end_dt]
-                            for strategy in strategy_names:
-                                val = year_row.get(strategy)
-                                yearly_data.append(f"{val:+.2f}%" if pd.notna(val) else "-")
-                        else:
-                            yearly_data.extend(["-"] * len(strategy_names))
-                        rows_data.append(yearly_data)
-
-                        # 연간 누적 수익률 행 추가
-                        cum_yearly_data = ["  (누적)"]
-                        year_cum_df = monthly_cum_df[monthly_cum_df.index.year == year]
-                        if not year_cum_df.empty:
-                            last_date_of_year = year_cum_df.index[-1]
-                            cum_year_row = monthly_cum_df.loc[last_date_of_year]
-                            for strategy in strategy_names:
-                                cum_val = cum_year_row.get(strategy)
-                                cum_yearly_data.append(
-                                    f"{cum_val:+.2f}%" if pd.notna(cum_val) else "-"
-                                )
-                        else:
-                            cum_yearly_data.extend(["-"] * len(strategy_names))
-                        rows_data.append(cum_yearly_data)
-
-                        aligns = ["left"] + ["right"] * len(strategy_names)
-                        print("\n".join(render_table_eaw(headers, rows_data, aligns)))
+            report = generate_strategy_comparison_report(all_results)
+            print(report)
         else:
             # `python main.py --test <strategy_name>`
             strategy_name = args.test
             print(f"'{strategy_name}' 전략에 대한 상세 백테스트를 실행합니다...")
-            run_test(strategy_name=strategy_name, portfolio_path=args.portfolio, quiet=False)
+            run_test(strategy_name=strategy_name, quiet=False)
 
     elif args.today:
         strategy_name = args.today

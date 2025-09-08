@@ -1,4 +1,5 @@
 import importlib
+import logging
 import os
 import sys
 import warnings
@@ -16,11 +17,12 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 def main(
     strategy_name: str = "jason",
-    portfolio_path: Optional[str] = None,
     quiet: bool = False,
 ):
-    # --test 실행 시 포트폴리오 파일을 사용하지 않고 settings.py의 설정을 사용합니다.
-    # portfolio_path 인자는 무시됩니다.
+    """
+    지정된 전략에 대한 백테스트를 실행하고 결과를 요약합니다.
+    `quiet=True` 모드에서는 로그를 출력하지 않고 최종 요약만 반환합니다.
+    """
     initial_capital = float(getattr(settings, "INITIAL_CAPITAL", 100_000_000))
 
     # 기간 설정 로직
@@ -41,10 +43,10 @@ def main(
                 "오류: settings.py의 TEST_DATE_RANGE 형식이 잘못되었습니다. "
                 "['YYYY-MM-DD', 'YYYY-MM-DD'] 형식으로 지정해주세요."
             )
-            test_date_range = None  # Invalidate
+            test_date_range = None  # 무효화
 
     if not test_date_range:
-        months_range = getattr(settings, "MONTHS_RANGE", [12, 0])  # Fallback
+        months_range = getattr(settings, "MONTHS_RANGE", [12, 0])  # 대체 동작
         core_start_dt = pd.Timestamp.now() - pd.DateOffset(months=int(months_range[0]))
         end_label = "현재" if int(months_range[1]) == 0 else f"{int(months_range[1])}개월"
         period_label = f"{int(months_range[0])}개월~{end_label}"
@@ -59,56 +61,40 @@ def main(
         print("      data/tickers.txt 파일이 비어있거나 존재하지 않을 수 있습니다.")
         return
 
-    _orig_stdout = sys.stdout
-    log_f = None
+    logger = logging.getLogger("backtester")
+    logger.propagate = False  # 중복 로깅 방지
+    logger.handlers.clear()
+    logger.setLevel(logging.INFO)
+
+    # 콘솔 핸들러 설정
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(console_handler)
+
+    if not quiet:
+        # 파일 핸들러 설정
+        log_dir = "logs"
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, f"test_{strategy_name}.log")
+        file_handler = logging.FileHandler(log_path, "w", encoding="utf-8")
+        file_handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(file_handler)
+    else:
+        # quiet 모드에서는 모든 출력을 비활성화
+        logger.addHandler(logging.NullHandler())
+
     return_value = None
 
     try:
-        if not quiet:
-            # Setup tee to also write console output into logs/test.log
-            log_dir = "logs"
-            os.makedirs(log_dir, exist_ok=True)
-            log_path = os.path.join(log_dir, f"test_{strategy_name}.log")
-
-            class ConsoleAndFileLogger:
-                """콘솔과 파일에 동시에 로그를 기록하는 클래스."""
-
-                def __init__(self, *streams):
-                    self.streams = streams
-
-                def write(self, data):
-                    for s in self.streams:
-                        try:
-                            s.write(data)
-                        except Exception:
-                            pass
-
-                def flush(self):
-                    for s in self.streams:
-                        try:
-                            s.flush()
-                        except Exception:
-                            pass
-
-                def close(self):
-                    # sys.stdout은 닫지 않도록 처리
-                    pass
-
-            log_f = open(log_path, "w", encoding="utf-8")
-            sys.stdout = ConsoleAndFileLogger(sys.stdout, log_f)
-        else:
-            sys.stdout = open(os.devnull, "w")
-
-        # Header in log
-        print("백테스트를 `settings.py` 설정으로 실행합니다.")
-        if log_f:
-            log_f.write(
-                f"# 시작 {datetime.now().isoformat()} | 기간={period_label} | 초기자본={int(initial_capital):,}\n"
-            )
+        # 로그 파일 헤더
+        logger.info("백테스트를 `settings.py` 설정으로 실행합니다.")
+        logger.info(
+            f"# 시작 {datetime.now().isoformat()} | 기간={period_label} | 초기자본={int(initial_capital):,}\n"
+        )
 
         # 전략 모듈 로드
         try:
-            # 패키지 기반 전략(e.g., logics/jason/strategy.py)을 먼저 시도
+            # 패키지 기반 전략(예: logics/jason/strategy.py)을 먼저 시도
             strategy_module = importlib.import_module(f"logics.{strategy_name}.strategy")
         except ImportError:
             try:
@@ -133,12 +119,12 @@ def main(
             return
 
         # 시뮬레이션 실행
-        per_ticker_ts: Dict[str, pd.DataFrame] = {}
+        time_series_by_ticker: Dict[str, pd.DataFrame] = {}
         name_by_ticker: Dict[str, str] = {t: n for t, n in pairs}
         # 전역 설정에서 PORTFOLIO_TOPN을 가져옵니다.
         portfolio_topn = int(getattr(settings, "PORTFOLIO_TOPN", 0) or 0)
         if portfolio_topn > 0:
-            per_ticker_ts = (
+            time_series_by_ticker = (
                 run_portfolio_backtest(
                     pairs,
                     months_range=months_range,
@@ -149,7 +135,7 @@ def main(
                 )
                 or {}
             )
-            if "CASH" in per_ticker_ts:
+            if "CASH" in time_series_by_ticker:
                 name_by_ticker["CASH"] = "현금"
         else:
             # 개별 종목 백테스트는 여전히 데이터를 미리 로드해야 합니다.
@@ -176,19 +162,19 @@ def main(
                     date_range=test_date_range,
                 )
                 if not ts.empty:
-                    per_ticker_ts[ticker] = ts
+                    time_series_by_ticker[ticker] = ts
 
-        if not per_ticker_ts:
+        if not time_series_by_ticker:
             if not quiet:
-                print("시뮬레이션할 유효한 데이터가 없습니다.")
+                logger.info("시뮬레이션할 유효한 데이터가 없습니다.")
             return
 
-        # Align on common dates across all tickers (intersection)
+        # 모든 티커에 걸쳐 공통된 날짜로 정렬 (교집합)
         common_index = None
-        for tkr, ts in per_ticker_ts.items():
+        for tkr, ts in time_series_by_ticker.items():
             common_index = ts.index if common_index is None else common_index.intersection(ts.index)
         if common_index is None or len(common_index) == 0:
-            print("종목들 간에 공통된 거래일이 없습니다.")
+            logger.info("종목들 간에 공통된 거래일이 없습니다.")
             return
 
         portfolio_values = []
@@ -196,19 +182,19 @@ def main(
         prev_total_pv = None
         prev_dt: Optional[pd.Timestamp] = None
         buy_date_by_ticker: Dict[str, Optional[pd.Timestamp]] = {}
-        hold_days_by_ticker: Dict[str, int] = {}
-        total_cnt = len(per_ticker_ts)
+        holding_days_by_ticker: Dict[str, int] = {}
+        total_cnt = len(time_series_by_ticker)
 
         total_init = float(initial_capital)
 
         for dt in common_index:
             portfolio_dates.append(dt)
 
-            # Aggregate
+            # 일별 자산 집계
             total_value = 0.0
             total_holdings = 0.0
             held_count = 0
-            for tkr, ts in per_ticker_ts.items():
+            for tkr, ts in time_series_by_ticker.items():
                 row = ts.loc[dt]
 
                 # NaN 값을 안전하게 처리하여 total_value를 계산합니다.
@@ -232,7 +218,7 @@ def main(
             if total_value <= 0:
                 continue
 
-            # Daily portfolio return
+            # 일일 포트폴리오 수익률
             if prev_total_pv is None:
                 day_ret_pct = 0.0
             else:
@@ -241,7 +227,7 @@ def main(
                 )
             prev_total_pv = total_value
 
-            # Cumulative portfolio return from initial capital
+            # 초기 자본 대비 누적 포트폴리오 수익률
             cum_ret_pct = (
                 ((total_value / total_init) - 1.0) * 100.0 if total_init and total_init > 0 else 0.0
             )
@@ -250,8 +236,8 @@ def main(
                 # Header line
                 denom = portfolio_topn if portfolio_topn > 0 else total_cnt
                 date_str = pd.to_datetime(dt).strftime("%Y-%m-%d")
-                print(
-                    (
+                logger.info(
+                    (  # noqa: T201
                         f"{date_str} - 보유종목 {held_count}/{denom} "
                         f"잔액(보유+현금): {format_kr_money(total_value)} "
                         f"(보유 {format_kr_money(total_holdings)} + 현금 {format_kr_money(total_cash)}) "
@@ -288,7 +274,7 @@ def main(
                 headers.append("문구")
 
                 actions = []
-                for tkr, ts in per_ticker_ts.items():
+                for tkr, ts in time_series_by_ticker.items():
                     row = ts.loc[dt]
                     name = name_by_ticker.get(tkr, "")
                     decision = str(row.get("decision", "")).upper()
@@ -395,19 +381,19 @@ def main(
                     elif decision in ("WAIT", "HOLD"):
                         phrase = str(row.get("note", "") or "")
                     if tkr not in buy_date_by_ticker:
-                        buy_date_by_ticker[tkr], hold_days_by_ticker[tkr] = None, 0
+                        buy_date_by_ticker[tkr], holding_days_by_ticker[tkr] = None, 0
                     if decision == "BUY" and shares > 0:
-                        buy_date_by_ticker[tkr], hold_days_by_ticker[tkr] = dt, 1
+                        buy_date_by_ticker[tkr], holding_days_by_ticker[tkr] = dt, 1
                     elif shares > 0:
                         if buy_date_by_ticker.get(tkr) is None:
-                            buy_date_by_ticker[tkr], hold_days_by_ticker[tkr] = dt, 1
+                            buy_date_by_ticker[tkr], holding_days_by_ticker[tkr] = dt, 1
                         else:
-                            hold_days_by_ticker[tkr] += 1
+                            holding_days_by_ticker[tkr] += 1
                     else:
-                        buy_date_by_ticker[tkr], hold_days_by_ticker[tkr] = None, 0
+                        buy_date_by_ticker[tkr], holding_days_by_ticker[tkr] = None, 0
                     bd = buy_date_by_ticker.get(tkr)
                     bd_str = pd.to_datetime(bd).strftime("%Y-%m-%d") if bd is not None else "-"
-                    hd = hold_days_by_ticker.get(tkr, 0)
+                    hd = holding_days_by_ticker.get(tkr, 0)
                     current_row = [
                         0,
                         tkr,
@@ -465,13 +451,13 @@ def main(
                 str_rows = [[str(c) for c in row] for row in rows_sorted]
 
                 # 일별 상세 테이블을 콘솔과 로그 파일에 모두 출력합니다.
-                print("\n".join(render_table_eaw(headers, str_rows, aligns)))
-                print()
+                logger.info("\n" + "\n".join(render_table_eaw(headers, str_rows, aligns)))
+                logger.info("")
 
             prev_dt = dt
 
         if not portfolio_values:
-            print("시뮬레이션 결과가 없습니다.")
+            logger.info("시뮬레이션 결과가 없습니다.")
         else:
             final_value = portfolio_values[-1]
             peak = -1
@@ -551,7 +537,7 @@ def main(
 
             # 종목별 성과 계산
             ticker_summaries = []
-            for tkr, ts in per_ticker_ts.items():
+            for tkr, ts in time_series_by_ticker.items():
                 if tkr == "CASH":
                     continue
 
@@ -576,37 +562,41 @@ def main(
                     )
 
             if not quiet:
-                print(
+                logger.info(
                     "\n"
                     + "=" * 30
                     + f"\n 백테스트 결과 요약 ({strategy_name}) ".center(30, "=")
                     + "\n"
                     + "=" * 30
                 )
-                print(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({years:.2f} 년)")
-                print(f"| 초기 자본: {format_kr_money(summary['initial_capital'])}")
-                print(f"| 최종 자산: {format_kr_money(summary['final_value'])}")
-                print(f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}%")
-                print(f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}%")
-                print(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
-                print(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
-                print(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")
-                print(f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}")
-                print("=" * 30)
-                print("\n[지표 설명]")
-                print(
+                logger.info(
+                    f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({years:.2f} 년)"
+                )
+                logger.info(f"| 초기 자본: {format_kr_money(summary['initial_capital'])}")
+                logger.info(f"| 최종 자산: {format_kr_money(summary['final_value'])}")
+                logger.info(f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}%")
+                logger.info(f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}%")
+                logger.info(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
+                logger.info(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
+                logger.info(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")
+                logger.info(f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}")
+                logger.info("=" * 30)
+                logger.info("\n[지표 설명]")
+                logger.info(
                     "  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수)."
                 )
-                print(
+                logger.info(
                     "  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수)."
                 )
-                print(
+                logger.info(
                     "  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수)."
                 )
 
                 # 월별 성과 요약 테이블 출력
                 if "monthly_returns" in summary and not summary["monthly_returns"].empty:
-                    print("\n" + "=" * 30 + "\n 월별 성과 요약 ".center(30, "=") + "\n" + "=" * 30)
+                    logger.info(
+                        "\n" + "=" * 30 + "\n 월별 성과 요약 ".center(30, "=") + "\n" + "=" * 30
+                    )
 
                     monthly_returns = summary["monthly_returns"]
                     yearly_returns = summary["yearly_returns"]
@@ -675,11 +665,11 @@ def main(
                             rows_data.append(cum_row_data)
 
                     aligns = ["left"] + ["right"] * (len(headers) - 1)
-                    print("\n".join(render_table_eaw(headers, rows_data, aligns)))
+                    logger.info("\n" + "\n".join(render_table_eaw(headers, rows_data, aligns)))
 
                 # 종목별 성과 요약 테이블 출력
                 if ticker_summaries:
-                    print(
+                    logger.info(
                         "\n" + "=" * 30 + "\n 종목별 성과 요약 ".center(30, "=") + "\n" + "=" * 30
                     )
                     headers = [
@@ -709,18 +699,10 @@ def main(
 
                     aligns = ["right", "left", "right", "right", "right", "right"]
                     table_lines = render_table_eaw(headers, rows, aligns)
-                    print("\n".join(table_lines))
+                    logger.info("\n" + "\n".join(table_lines))
 
     finally:
-        # Restore stdout and close file
-        if sys.stdout != _orig_stdout:
-            sys.stdout.close()
-        sys.stdout = _orig_stdout
-        if log_f:
-            try:
-                log_f.close()
-            except Exception:
-                pass
+        logging.shutdown()
 
     return return_value
 

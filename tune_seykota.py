@@ -2,14 +2,15 @@ import os
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import Callable, Dict
 
 from tqdm import tqdm
 
-from logics.seykota import settings as seykota_settings
-from utils.report import format_kr_money
-
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from logics.seykota import settings as seykota_settings
+from utils.report import format_kr_money
 
 
 def run_backtest_worker(params: tuple) -> tuple:
@@ -28,6 +29,50 @@ def run_backtest_worker(params: tuple) -> tuple:
     return fast_ma, slow_ma, result
 
 
+class MetricTracker:
+    """최적의 성능 지표를 추적하고 관리하는 헬퍼 클래스입니다."""
+
+    def __init__(self, name: str, compare_func: Callable):
+        """
+        Args:
+            name (str): 지표의 이름 (예: "CAGR", "MDD")
+            compare_func (Callable): 두 값을 비교하는 함수. (예: a > b 이면 더 큰 값을, a < b 이면 더 작은 값을 선택)
+        """
+        self.name = name
+        self.compare_func = compare_func
+        # 비교 함수에 따라 초기값을 무한대 또는 음의 무한대로 설정
+        self.best_value = -float("inf") if compare_func(1, 0) else float("inf")
+        self.params = None
+        self.result = None
+
+    def update(self, value: float, params: Dict, result: Dict):
+        """새로운 값이 기존의 최고/최저 값보다 나은 경우, 정보를 업데이트합니다."""
+        if self.compare_func(value, self.best_value):
+            self.best_value = value
+            self.params = params
+            self.result = result
+            tqdm.write(
+                f"  -> 새로운 최고 {self.name} 발견! {self.best_value:.2f} (FAST={params['fast_ma']}, SLOW={params['slow_ma']})"
+            )
+
+    def print_report(self, title: str):
+        """추적된 최적 지표에 대한 최종 리포트를 출력합니다."""
+        if not self.params:
+            return
+
+        print("\n" + "=" * 50)
+        print(f"\n[{title}]")
+        print(f"  - SEYKOTA_FAST_MA: {self.params['fast_ma']}")
+        print(f"  - SEYKOTA_SLOW_MA: {self.params['slow_ma']}")
+        print(f"\n[{self.name} 기준 성과]")
+        print(f"  - {self.name}: {self.best_value:.2f}")
+        print(f"  - 기간: {self.result['start_date']} ~ {self.result['end_date']}")
+        print(f"  - 최종 자산: {format_kr_money(self.result['final_value'])}")
+        print(f"  - CAGR: {self.result['cagr_pct']:.2f}%")
+        print(f"  - MDD: -{self.result['mdd_pct']:.2f}%")
+        print(f"  - Calmar Ratio: {self.result.get('calmar_ratio', 0.0):.2f}")
+
+
 def tune_parameters():
     """
     'seykota' 전략의 이동평균선 기간을 튜닝하여 최적의 값을 찾습니다.
@@ -40,25 +85,14 @@ def tune_parameters():
     # fast_ma_range = range(5, 51, 5)   # 5부터 50까지 5씩 증가
     # slow_ma_range = range(10, 201, 10) # 10부터 200까지 10씩 증가
 
-    best_params = None
-    best_cagr = -float("inf")
-    best_result = None
-
-    best_mdd_params = None
-    best_mdd = float("inf")
-    best_mdd_result = None
-
-    best_calmar_params = None
-    best_calmar = -float("inf")
-    best_calmar_result = None
-
-    best_sharpe_params = None
-    best_sharpe = -float("inf")
-    best_sharpe_result = None
-
-    best_sortino_params = None
-    best_sortino = -float("inf")
-    best_sortino_result = None
+    # 추적할 성능 지표들을 정의합니다.
+    trackers = {
+        "cagr": MetricTracker("CAGR", lambda a, b: a > b),
+        "mdd": MetricTracker("MDD", lambda a, b: a < b),
+        "calmar": MetricTracker("Calmar Ratio", lambda a, b: a > b),
+        "sharpe": MetricTracker("Sharpe Ratio", lambda a, b: a > b),
+        "sortino": MetricTracker("Sortino Ratio", lambda a, b: a > b),
+    }
 
     # 모든 유효한 조합 생성
     param_combinations = []
@@ -86,58 +120,19 @@ def tune_parameters():
             try:
                 fast_ma, slow_ma, result = future.result()
 
-                if result and "cagr_pct" in result and "mdd_pct" in result:
-                    cagr = result["cagr_pct"]
-                    mdd = result["mdd_pct"]
-                    calmar_ratio = result.get("calmar_ratio", 0)
-                    sharpe_ratio = result.get("sharpe_ratio", 0)
-                    sortino_ratio = result.get("sortino_ratio", 0)
-
-                    # 최고 CAGR 업데이트
-                    if cagr > best_cagr:
-                        best_cagr = cagr
-                        best_params = {"fast_ma": fast_ma, "slow_ma": slow_ma}
-                        best_result = result
-                        # tqdm.write는 진행률 표시줄을 방해하지 않고 메시지를 출력합니다.
-                        tqdm.write(
-                            f"  -> 새로운 최고 CAGR 발견! {cagr:.2f}% (FAST={fast_ma}, SLOW={slow_ma})"
-                        )
-
-                    # 최저 MDD 업데이트
-                    if mdd < best_mdd:
-                        best_mdd = mdd
-                        best_mdd_params = {"fast_ma": fast_ma, "slow_ma": slow_ma}
-                        best_mdd_result = result
-                        tqdm.write(
-                            f"  -> 새로운 최저 MDD 발견! -{mdd:.2f}% (FAST={fast_ma}, SLOW={slow_ma})"
-                        )
-
-                    # 최고 Calmar Ratio 업데이트
-                    if calmar_ratio > best_calmar:
-                        best_calmar = calmar_ratio
-                        best_calmar_params = {"fast_ma": fast_ma, "slow_ma": slow_ma}
-                        best_calmar_result = result
-                        tqdm.write(
-                            f"  -> 새로운 최고 Calmar Ratio 발견! {calmar_ratio:.2f} (FAST={fast_ma}, SLOW={slow_ma})"
-                        )
-
-                    # 최고 Sharpe Ratio 업데이트
-                    if sharpe_ratio > best_sharpe:
-                        best_sharpe = sharpe_ratio
-                        best_sharpe_params = {"fast_ma": fast_ma, "slow_ma": slow_ma}
-                        best_sharpe_result = result
-                        tqdm.write(
-                            f"  -> 새로운 최고 Sharpe Ratio 발견! {sharpe_ratio:.2f} (FAST={fast_ma}, SLOW={slow_ma})"
-                        )
-
-                    # 최고 Sortino Ratio 업데이트
-                    if sortino_ratio > best_sortino:
-                        best_sortino = sortino_ratio
-                        best_sortino_params = {"fast_ma": fast_ma, "slow_ma": slow_ma}
-                        best_sortino_result = result
-                        tqdm.write(
-                            f"  -> 새로운 최고 Sortino Ratio 발견! {sortino_ratio:.2f} (FAST={fast_ma}, SLOW={slow_ma})"
-                        )
+                if result:
+                    params = {"fast_ma": fast_ma, "slow_ma": slow_ma}
+                    trackers["cagr"].update(result.get("cagr_pct", -float("inf")), params, result)
+                    trackers["mdd"].update(result.get("mdd_pct", float("inf")), params, result)
+                    trackers["calmar"].update(
+                        result.get("calmar_ratio", -float("inf")), params, result
+                    )
+                    trackers["sharpe"].update(
+                        result.get("sharpe_ratio", -float("inf")), params, result
+                    )
+                    trackers["sortino"].update(
+                        result.get("sortino_ratio", -float("inf")), params, result
+                    )
 
             except Exception as e:
                 tqdm.write(f"  -> 파라미터 테스트 중 오류 발생: {e}")
@@ -150,82 +145,14 @@ def tune_parameters():
     print(f"총 소요 시간: {elapsed_time:.2f}초")
     print("=" * 50)
 
-    if best_params:
-        print("\n[최고 수익률 (CAGR 기준)]")
-        print(f"  - SEYKOTA_FAST_MA: {best_params['fast_ma']}")
-        print(f"  - SEYKOTA_SLOW_MA: {best_params['slow_ma']}")
+    # 각 지표별 최적 결과를 출력합니다.
+    trackers["cagr"].print_report("최고 수익률 (CAGR 기준)")
+    trackers["mdd"].print_report("최저 위험 (MDD 기준)")
+    trackers["calmar"].print_report("최고 효율 (Calmar Ratio 기준)")
+    trackers["sharpe"].print_report("최고 효율 (Sharpe Ratio 기준)")
+    trackers["sortino"].print_report("최고 효율 (Sortino Ratio 기준)")
 
-        print("\n[최고 CAGR 성과]")
-        print(f"  - 기간: {best_result['start_date']} ~ {best_result['end_date']}")
-        print(f"  - 최종 자산: {format_kr_money(best_result['final_value'])}")
-        print(f"  - 누적 수익률: {best_result['cumulative_return_pct']:.2f}%")
-        print(f"  - CAGR: {best_result['cagr_pct']:.2f}%")
-        print(f"  - MDD: -{best_result['mdd_pct']:.2f}%")
-        calmar = best_result.get("calmar_ratio", 0.0)
-        print(f"  - Calmar Ratio: {calmar:.2f}")
-
-    if best_mdd_params:
-        print("\n" + "=" * 50)
-        print("\n[최저 위험 (MDD 기준)]")
-        print(f"  - SEYKOTA_FAST_MA: {best_mdd_params['fast_ma']}")
-        print(f"  - SEYKOTA_SLOW_MA: {best_mdd_params['slow_ma']}")
-
-        print("\n[최저 MDD 성과]")
-        print(f"  - 기간: {best_mdd_result['start_date']} ~ {best_mdd_result['end_date']}")
-        print(f"  - 최종 자산: {format_kr_money(best_mdd_result['final_value'])}")
-        print(f"  - 누적 수익률: {best_mdd_result['cumulative_return_pct']:.2f}%")
-        print(f"  - CAGR: {best_mdd_result['cagr_pct']:.2f}%")
-        print(f"  - MDD: -{best_mdd_result['mdd_pct']:.2f}%")
-        calmar = best_mdd_result.get("calmar_ratio", 0.0)
-        print(f"  - Calmar Ratio: {calmar:.2f}")
-
-    if best_calmar_params:
-        print("\n" + "=" * 50)
-        print("\n[최고 효율 (Calmar Ratio 기준)]")
-        print(f"  - SEYKOTA_FAST_MA: {best_calmar_params['fast_ma']}")
-        print(f"  - SEYKOTA_SLOW_MA: {best_calmar_params['slow_ma']}")
-
-        print("\n[최고 Calmar Ratio 성과]")
-        print(f"  - Calmar Ratio (CAGR/MDD): {best_calmar:.2f}")
-        print(f"  - 기간: {best_calmar_result['start_date']} ~ {best_calmar_result['end_date']}")
-        print(f"  - 최종 자산: {format_kr_money(best_calmar_result['final_value'])}")
-        print(f"  - 누적 수익률: {best_calmar_result['cumulative_return_pct']:.2f}%")
-        print(f"  - CAGR: {best_calmar_result['cagr_pct']:.2f}%")
-        print(f"  - MDD: -{best_calmar_result['mdd_pct']:.2f}%")
-
-    if best_sharpe_params:
-        print("\n" + "=" * 50)
-        print("\n[최고 효율 (Sharpe Ratio 기준)]")
-        print(f"  - SEYKOTA_FAST_MA: {best_sharpe_params['fast_ma']}")
-        print(f"  - SEYKOTA_SLOW_MA: {best_sharpe_params['slow_ma']}")
-
-        print("\n[최고 Sharpe Ratio 성과]")
-        print(f"  - Sharpe Ratio: {best_sharpe:.2f}")
-        print(f"  - 기간: {best_sharpe_result['start_date']} ~ {best_sharpe_result['end_date']}")
-        print(f"  - 최종 자산: {format_kr_money(best_sharpe_result['final_value'])}")
-        print(f"  - 누적 수익률: {best_sharpe_result['cumulative_return_pct']:.2f}%")
-        print(f"  - CAGR: {best_sharpe_result['cagr_pct']:.2f}%")
-        print(f"  - MDD: -{best_sharpe_result['mdd_pct']:.2f}%")
-        print(f"  - Calmar Ratio: {best_sharpe_result.get('calmar_ratio', 0.0):.2f}")
-
-    if best_sortino_params:
-        print("\n" + "=" * 50)
-        print("\n[최고 효율 (Sortino Ratio 기준)]")
-        print(f"  - SEYKOTA_FAST_MA: {best_sortino_params['fast_ma']}")
-        print(f"  - SEYKOTA_SLOW_MA: {best_sortino_params['slow_ma']}")
-
-        print("\n[최고 Sortino Ratio 성과]")
-        print(f"  - Sortino Ratio: {best_sortino:.2f}")
-        print(f"  - 기간: {best_sortino_result['start_date']} ~ {best_sortino_result['end_date']}")
-        print(f"  - 최종 자산: {format_kr_money(best_sortino_result['final_value'])}")
-        print(f"  - 누적 수익률: {best_sortino_result['cumulative_return_pct']:.2f}%")
-        print(f"  - CAGR: {best_sortino_result['cagr_pct']:.2f}%")
-        print(f"  - MDD: -{best_sortino_result['mdd_pct']:.2f}%")
-        print(f"  - Calmar Ratio: {best_sortino_result.get('calmar_ratio', 0.0):.2f}")
-
-    if not any(
-        [best_params, best_mdd_params, best_calmar_params, best_sharpe_params, best_sortino_params]
-    ):
+    if not trackers["cagr"].params:
         print("\n유효한 결과를 찾지 못했습니다.")
 
 

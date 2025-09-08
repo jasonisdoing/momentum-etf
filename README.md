@@ -1,7 +1,7 @@
 # momentum-pilot
-ETF 추세추종 전략을 기반으로 한 자동매매 엔진
+ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
-간단한 운용, 시뮬레이션, 일일 액션 산출을 위한 스크립트 모음입니다. 실제 운용 전 반드시 충분한 검증과 점검을 해 주세요.
+간단한 운용, 시뮬레이션, 일일 액션 산출을 위한 스크립트 모음입니다. 모든 결과는 투자 참고용이며, 실제 투자 결정에 대한 책임은 투자자 본인에게 있습니다.
 
 구성 개요 / 폴더 구조
 ---------------------
@@ -10,9 +10,6 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
   - `tickers.txt`: 운용/시뮬레이션 대상 티커 목록. (포맷: `티커 이름`).
   - `portfolio_raw.txt`: 사용자가 직접 관리하는 포트폴리오 원본 파일.
   - `portfolio_YYYY-MM-DD.json`: `convert_portfolio.py`를 통해 생성되는 포트폴리오 스냅샷.
-- `core/`: 핵심 엔진
-  - `backtester.py`: (사용되지 않음) 개별 종목 백테스팅 실행기.
-  - `portfolio.py`: (사용되지 않음) 포트폴리오 백테스팅 실행기.
 - `logics/`: 매매 전략(로직) 정의. 각 전략은 자체 폴더를 가집니다.
   - `<strategy_name>/strategy.py`: 전략의 핵심 백테스팅 로직.
   - `<strategy_name>/settings.py`: 해당 전략에만 사용되는 파라미터.
@@ -20,10 +17,11 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
   - `data_loader.py`: 데이터 로딩 및 API 호출.
   - `indicators.py`: 보조지표 계산 (SuperTrend 등).
   - `report.py`: 리포트, 로그 포맷팅 및 테이블 렌더링.
-- `main.py`: 프로젝트 메인 실행 진입점.
+- `main.py`: 프로젝트의 메인 실행 진입점.
 - `test.py`: 과거 구간 백테스트 실행 및 `logs/test.log` 생성.
 - `today.py`: 당일/익일 매매 액션 계산 및 `logs/today.log` 생성.
 - `tune_seykota.py`: `seykota` 전략의 파라미터를 최적화하는 스크립트.
+- `web_app.py`: Streamlit 기반 웹 UI. 오늘의 액션 플랜을 시각적으로 보여줍니다.
 - `convert_portfolio.py`: `portfolio_raw.txt`를 `portfolio_YYYY-MM-DD.json` 형식으로 변환합니다.
 - `settings.py`: 모든 전략에 공통으로 적용되는 전역 설정.
 
@@ -32,7 +30,7 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 
 각 투자 전략은 `logics/` 디렉토리 아래에 자체 폴더로 구성됩니다. 예를 들어, `jason` 전략은 `logics/jason/` 폴더에 위치합니다.
 - `logics/jason/strategy.py`: `jason` 전략의 매수/매도 로직을 구현합니다.
-- `logics/jason/settings.py`: `jason` 전략에만 사용되는 파라미터(예: `BUY_SUM_THRESHOLD`)를 정의합니다.
+- `logics/jason/settings.py`: `jason` 전략에만 사용되는 파라미터(예: `BUY_SUM_THRESHOLD`)를 정의합니다. 전역 설정에 정의된 값보다 우선 적용될 수 있습니다.
 - `settings.py`: 모든 전략에 공통으로 적용되는 파라미터(예: `INITIAL_CAPITAL`, `PORTFOLIO_TOPN`)를 정의합니다.
 
 설치 및 준비
@@ -50,8 +48,8 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 
 3) 파일 준비
 
-- `data/tickers.txt`에 운용 티커/명칭을 한 줄씩 등록합니다.
-- `data/portfolio_raw.txt` 파일을 생성하고, 보유 종목 정보를 입력합니다. `convert_portfolio.py` 실행 후 생성된 `.json` 파일에서 총평가액을 직접 수정해야 합니다. (자세한 형식은 아래 '데이터 파일 포맷' 참조)
+- **티커 목록**: `data/tickers.txt`에 운용할 종목의 티커와 이름을 한 줄씩 등록합니다.
+- **포트폴리오**: `data/portfolio_raw.txt` 파일을 생성하고, 보유 종목 정보를 입력합니다. (자세한 형식은 아래 '데이터 파일 포맷' 참조)
 
 실행 방법
 --------
@@ -62,7 +60,8 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 
     python convert_portfolio.py
 
-- `data/portfolio_raw.txt` 파일이 없으면 예시 파일이 생성됩니다.
+- `data/portfolio_raw.txt` 파일이 없으면 예시 파일이 자동 생성됩니다.
+- 실행 후 생성된 `portfolio_YYYY-MM-DD.json` 파일의 `total_equity` 값을 실제 총평가액으로 직접 수정해야 합니다.
 
 2) 오늘/다음 거래일 액션 산출
 
@@ -74,7 +73,7 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 - 헤더 표기: pykrx 거래일 캘린더로 오늘이 휴장/영업일인지 판별해
   - 영업일이면: “오늘 YYYY-MM-DD”
   - 휴장 등이면: “다음 거래일 YYYY-MM-DD”
-- 사전 조건: `data/portfolio_YYYY-MM-DD.json` 파일에 해당 거래일의 평가금액과 보유종목이 있어야 합니다.
+- 사전 조건: `data/portfolio_YYYY-MM-DD.json` 파일에 해당 거래일의 평가금액과 보유 종목이 있어야 합니다.
 - 표: `jason`, `seykota` 전략은 신호 점수가 높은 순으로 정렬됩니다. 상태(SELL/CUT/TRIM/BUY/HOLD/WAIT), 비중, 전략별 신호, 문구(사유) 등을 표시합니다.
 
 3) 백테스트 로그 생성
@@ -100,18 +99,27 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 - 스크립트 내에서 테스트할 파라미터 범위를 조절할 수 있습니다.
 - 최종적으로 최고 CAGR, 최저 MDD, 최고 Calmar Ratio(위험 조정 수익률)를 기록한 파라미터와 성과를 각각 출력합니다.
 
+5) 웹앱으로 액션 플랜 확인
+
+웹 브라우저를 통해 오늘의 액션 플랜을 시각적으로 확인합니다.
+
+    streamlit run web_app.py
+
+- 각 전략(`jason`, `seykota`, `donchian`)이 탭으로 구분되어 표시됩니다. 탭을 클릭하면 해당 전략의 액션 플랜이 즉시 표시됩니다.
+- 테이블의 수익률 항목은 양수일 경우 <span style="color:red">빨간색</span>, 음수일 경우 <span style="color:blue">파란색</span>으로 표시됩니다.
+
 전략/로직 요약
 -------------
 
 ### `jason` 전략 (모멘텀 + 추세추종)
 - **매수 신호**:
-  - 모멘텀 점수(`score`)가 `BUY_SUM_THRESHOLD`를 초과하고,
-  - 슈퍼트렌드(`filter`)가 상승 추세(+1)일 때.
-  - *참고: `score`는 최근 1주 수익률과 2주 수익률의 가중합으로 계산됩니다.*
+  - **모멘텀 점수**: 최근 1주 수익률과 그 이전 1주(총 2주) 수익률의 합이 `BUY_SUM_THRESHOLD`를 초과.
+  - **추세 필터**: 슈퍼트렌드 지표가 상승 추세(+1)일 때.
 - **매도 신호**:
   - **모멘텀소진**: 보유 수익률과 모멘텀 점수의 합이 `SELL_SUM_THRESHOLD` 미만일 때.
 
 ### `seykota` 전략 (이동평균선 추세추종)
+- **매수 신호**:
 - **매수 신호**:
   - 단기 이동평균선이 장기 이동평균선 위에 있을 때 (골든 크로스).
 - **매도 신호**:
@@ -121,10 +129,10 @@ ETF 추세추종 전략을 기반으로 한 자동매매 엔진
 - **매도 신호**:
   - **추세이탈**: 가격이 이동평균선 아래로 내려갈 때.
 
-- 공통 규칙(시뮬레이션)
+### 공통 리스크 관리 규칙 (백테스트)
   - **가격기반손절(CUT)**: 보유수익률 ≤ `HOLDING_STOP_LOSS_PCT`
   - **비중조절(TRIM)**: 보유가치 > `MAX_POSITION_PCT` × 총자산 → 초과분 부분매도
-  - 쿨다운: 매수/매도 후 COOLDOWN_DAYS 동안 반대 방향 거래 금지
+  - **쿨다운**: 매수/매도 후 `COOLDOWN_DAYS` 동안 반대 방향 거래 금지
 
 설정 파일
 --------

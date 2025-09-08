@@ -1,6 +1,6 @@
 """
-Strategy: 'seykota'
-Ed Seykota-style trend-following strategy using moving average crossovers.
+전략: 'seykota'
+이동평균선 교차를 사용하는 에드 세이코타 스타일의 추세추종 전략입니다.
 """
 
 from math import ceil
@@ -15,7 +15,7 @@ from . import settings as seykota_settings
 
 
 def run_portfolio_backtest(
-    pairs: List[Tuple[str, str]],
+    ticker_name_pairs: List[Tuple[str, str]],
     months_range: Optional[List[int]] = None,
     initial_capital: float = 100_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
@@ -23,7 +23,7 @@ def run_portfolio_backtest(
     date_range: Optional[List[str]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
-    Simulates a Top-N portfolio using a moving average crossover strategy.
+    이동평균선 교차 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
     """
     # Settings
     try:
@@ -59,11 +59,11 @@ def run_portfolio_backtest(
         adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
 
     # Fetch all series and precompute indicators
-    data = {}
-    tickers_to_process = [p[0] for p in pairs]
+    data_by_ticker = {}
+    tickers_to_process = [p[0] for p in ticker_name_pairs]
 
     for tkr in tickers_to_process:
-        df = fetch_ohlcv(tkr, months_range=months_range, date_range=adjusted_date_range)
+        df = fetch_ohlcv(tkr, date_range=adjusted_date_range)
 
         if df is None or len(df) < slow_ma_period:
             continue
@@ -73,7 +73,7 @@ def run_portfolio_backtest(
         slow_ma = close.rolling(window=slow_ma_period).mean()
         ma_score = (fast_ma / slow_ma - 1.0).fillna(0.0)
 
-        data[tkr] = {
+        data_by_ticker[tkr] = {
             "df": df,
             "close": close,
             "fast_ma": fast_ma,
@@ -81,12 +81,12 @@ def run_portfolio_backtest(
             "ma_score": ma_score,
         }
 
-    if not data:
+    if not data_by_ticker:
         return {}
 
     # 모든 종목의 거래일을 합집합하여 전체 백테스트 기간을 설정합니다.
     union_index = pd.DatetimeIndex([])
-    for tkr, d in data.items():
+    for tkr, d in data_by_ticker.items():
         union_index = union_index.union(d["close"].index)
 
     if union_index.empty:
@@ -101,7 +101,7 @@ def run_portfolio_backtest(
     if union_index.empty:
         return {}
 
-    # State
+    # 시뮬레이션 상태 변수 초기화
     state = {
         tkr: {
             "shares": 0,
@@ -109,22 +109,23 @@ def run_portfolio_backtest(
             "buy_block_until": -1,
             "sell_block_until": -1,
         }
-        for tkr in data.keys()
+        for tkr in data_by_ticker.keys()
     }
     cash = float(initial_capital)
-    out_rows = {tkr: [] for tkr in data.keys()}
+    out_rows = {tkr: [] for tkr in data_by_ticker.keys()}
     out_cash = []
 
+    # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     for i, dt in enumerate(union_index):
-        tickers_available_today = [tkr for tkr, d in data.items() if dt in d["df"].index]
+        tickers_available_today = [tkr for tkr, d in data_by_ticker.items() if dt in d["df"].index]
         today_prices = {
             tkr: float(d["close"].loc[dt]) if pd.notna(d["close"].loc[dt]) else None
-            for tkr, d in data.items()
+            for tkr, d in data_by_ticker.items()
             if dt in d["close"].index
         }
 
         # Calculate current holdings value once per day
-        current_holdings_value = 0
+        current_holdings_value = 0.0
         for tkr_h, s_h in state.items():
             if s_h["shares"] > 0:
                 price_h = today_prices.get(tkr_h)
@@ -134,8 +135,8 @@ def run_portfolio_backtest(
         # Sells, Trims and State Recording
         equity = cash + current_holdings_value
 
-        for tkr, d in data.items():
-            s, price = state[tkr], today_prices.get(tkr)
+        for tkr, d in data_by_ticker.items():
+            ticker_state, price = state[tkr], today_prices.get(tkr)
             decision, trade_amount, trade_profit, trade_pl_pct = None, 0.0, 0.0, 0.0
 
             is_ticker_warming_up = tkr not in tickers_available_today or pd.isna(
@@ -144,12 +145,16 @@ def run_portfolio_backtest(
 
             if tkr in tickers_available_today:
                 if (
-                    s["shares"] > 0
+                    ticker_state["shares"] > 0
                     and pd.notna(price)
-                    and i >= s["sell_block_until"]
+                    and i >= ticker_state["sell_block_until"]
                     and not is_ticker_warming_up
                 ):
-                    hold_ret = (price / s["avg_cost"] - 1.0) * 100.0 if s["avg_cost"] > 0 else 0.0
+                    hold_ret = (
+                        (price / ticker_state["avg_cost"] - 1.0) * 100.0
+                        if ticker_state["avg_cost"] > 0
+                        else 0.0
+                    )
 
                     if stop_loss is not None and hold_ret <= float(stop_loss):
                         decision = "CUT_STOPLOSS"
@@ -162,41 +167,45 @@ def run_portfolio_backtest(
                         decision = "SELL_TREND"
 
                     if decision:
-                        qty = s["shares"]
+                        qty = ticker_state["shares"]
                         trade_amount = qty * price
-                        if s["avg_cost"] > 0:
-                            trade_profit = (price - s["avg_cost"]) * qty
+                        if ticker_state["avg_cost"] > 0:
+                            trade_profit = (price - ticker_state["avg_cost"]) * qty
                             trade_pl_pct = hold_ret
                         cash += trade_amount
-                        s["shares"], s["avg_cost"] = 0, 0.0
+                        ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
                         if cooldown_days > 0:
-                            s["buy_block_until"] = i + cooldown_days
+                            ticker_state["buy_block_until"] = i + cooldown_days
 
                     elif trim_on and max_pos_pct < 1.0:
-                        curr_val, cap_val = s["shares"] * price, max_pos_pct * equity
+                        curr_val, cap_val = ticker_state["shares"] * price, max_pos_pct * equity
                         if curr_val > cap_val and price > 0:
-                            sell_qty = min(s["shares"], int((curr_val - cap_val) // price))
+                            sell_qty = min(
+                                ticker_state["shares"], int((curr_val - cap_val) // price)
+                            )
                             if sell_qty > 0:
                                 decision, trade_amount = (
                                     "TRIM_REBALANCE",
                                     sell_qty * price,
                                 )
                                 cash += trade_amount
-                                s["shares"] -= sell_qty
-                                if s["avg_cost"] > 0:
-                                    trade_profit = (price - s["avg_cost"]) * sell_qty
+                                ticker_state["shares"] -= sell_qty
+                                if ticker_state["avg_cost"] > 0:
+                                    trade_profit = (price - ticker_state["avg_cost"]) * sell_qty
                                     trade_pl_pct = hold_ret
                                 if cooldown_days > 0:
-                                    s["buy_block_until"] = i + cooldown_days
+                                    ticker_state["buy_block_until"] = i + cooldown_days
 
-            decision_out = decision if decision else ("HOLD" if s["shares"] > 0 else "WAIT")
+            decision_out = (
+                decision if decision else ("HOLD" if ticker_state["shares"] > 0 else "WAIT")
+            )
             note = ""
             if is_ticker_warming_up:
                 note = "웜업 기간"
             elif decision_out in ("WAIT", "HOLD"):
-                if s["shares"] > 0 and i < s["sell_block_until"]:
+                if ticker_state["shares"] > 0 and i < ticker_state["sell_block_until"]:
                     note = "매도 쿨다운"
-                elif s["shares"] == 0 and i < s["buy_block_until"]:
+                elif ticker_state["shares"] == 0 and i < ticker_state["buy_block_until"]:
                     note = "매수 쿨다운"
 
             if tkr in tickers_available_today:
@@ -204,10 +213,10 @@ def run_portfolio_backtest(
                     {
                         "date": dt,
                         "price": price,
-                        "shares": s["shares"],
-                        "pv": s["shares"] * (price if pd.notna(price) else 0),
+                        "shares": ticker_state["shares"],
+                        "pv": ticker_state["shares"] * (price if pd.notna(price) else 0),
                         "decision": decision_out,
-                        "avg_cost": s["avg_cost"],
+                        "avg_cost": ticker_state["avg_cost"],
                         "trade_amount": trade_amount,
                         "trade_profit": trade_profit,
                         "trade_pl_pct": trade_pl_pct,
@@ -222,11 +231,12 @@ def run_portfolio_backtest(
                 out_rows[tkr].append(
                     {
                         "date": dt,
-                        "price": s["avg_cost"],
-                        "shares": s["shares"],
-                        "pv": s["shares"] * (s["avg_cost"] if pd.notna(s["avg_cost"]) else 0.0),
-                        "decision": "HOLD" if s["shares"] > 0 else "WAIT",
-                        "avg_cost": s["avg_cost"],
+                        "price": ticker_state["avg_cost"],
+                        "shares": ticker_state["shares"],
+                        "pv": ticker_state["shares"]
+                        * (ticker_state["avg_cost"] if pd.notna(ticker_state["avg_cost"]) else 0.0),
+                        "decision": "HOLD" if ticker_state["shares"] > 0 else "WAIT",
+                        "avg_cost": ticker_state["avg_cost"],
                         "trade_amount": 0.0,
                         "trade_profit": 0.0,
                         "trade_pl_pct": 0.0,
@@ -238,29 +248,29 @@ def run_portfolio_backtest(
                     }
                 )
 
-        # Buys
+        # 매수 로직
         held_count = sum(1 for s in state.values() if s["shares"] > 0)
         slots_to_fill = max(0, top_n - held_count)
         if slots_to_fill > 0 and cash > 0:  # 매수 여력 있을 때
-            cands = []
+            buy_candidates = []
             for tkr in tickers_available_today:  # 오늘 거래 가능한 종목 중에서만 후보 선정
-                d = data.get(tkr)
-                s = state[tkr]
+                d = data_by_ticker.get(tkr)
+                ticker_state = state[tkr]
                 if (
-                    s["shares"] == 0
-                    and i >= s["buy_block_until"]
+                    ticker_state["shares"] == 0
+                    and i >= ticker_state["buy_block_until"]
                     and pd.notna(d["fast_ma"].get(dt))
                     and pd.notna(d["slow_ma"].get(dt))
                 ):
                     if d["fast_ma"].loc[dt] > d["slow_ma"].loc[dt]:
-                        cands.append((d["ma_score"].loc[dt], tkr))
+                        buy_candidates.append((d["ma_score"].loc[dt], tkr))
 
-            cands.sort(reverse=True)
+            buy_candidates.sort(reverse=True)
 
-            for k in range(min(slots_to_fill, len(cands))):
+            for k in range(min(slots_to_fill, len(buy_candidates))):
                 if cash <= 0:
                     break
-                _, tkr = cands[k]
+                _, tkr = buy_candidates[k]
 
                 price = today_prices.get(tkr)
                 if pd.isna(price):
@@ -278,12 +288,14 @@ def run_portfolio_backtest(
                 if trade_amount > cash:
                     continue
 
-                s = state[tkr]
+                ticker_state = state[tkr]
                 cash -= trade_amount
-                s["shares"] += req_qty
-                s["avg_cost"] = price
+                ticker_state["shares"] += req_qty
+                ticker_state["avg_cost"] = price
                 if cooldown_days > 0:
-                    s["sell_block_until"] = max(s["sell_block_until"], i + cooldown_days)
+                    ticker_state["sell_block_until"] = max(
+                        ticker_state["sell_block_until"], i + cooldown_days
+                    )
 
                 if out_rows[tkr] and out_rows[tkr][-1]["date"] == dt:
                     row = out_rows[tkr][-1]
@@ -291,17 +303,17 @@ def run_portfolio_backtest(
                         {
                             "decision": "BUY",
                             "trade_amount": trade_amount,
-                            "shares": s["shares"],
-                            "pv": s["shares"] * price,
-                            "avg_cost": s["avg_cost"],
+                            "shares": ticker_state["shares"],
+                            "pv": ticker_state["shares"] * price,
+                            "avg_cost": ticker_state["avg_cost"],
                         }
                     )
         else:  # 매수 여력 없을 때 (포트폴리오 가득 참 또는 현금 부족)
             # 매수 신호가 있었으나 무시된 종목에 사유를 기록
             for tkr in tickers_available_today:  # 오늘 거래 가능한 종목 중에서만 확인
-                s = state[tkr]
-                if s["shares"] == 0:  # 비보유 종목 중에서
-                    d = data.get(tkr)
+                ticker_state = state[tkr]
+                if ticker_state["shares"] == 0:  # 비보유 종목 중에서
+                    d = data_by_ticker.get(tkr)
                     if (
                         pd.notna(d["fast_ma"].get(dt))
                         and pd.notna(d["slow_ma"].get(dt))
@@ -341,7 +353,7 @@ def run_single_ticker_backtest(
     date_range: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """
-    Simulates a single ticker backtest using a moving average crossover strategy.
+    단일 종목에 대해 이동평균선 교차 전략 백테스트를 실행합니다.
     """
     try:
         # 전략 고유 설정
@@ -362,7 +374,7 @@ def run_single_ticker_backtest(
         ) from e
 
     if df is None:
-        df = fetch_ohlcv(ticker, months_range=months_range, date_range=date_range)
+        df = fetch_ohlcv(ticker, date_range=date_range)
     if df is None or len(df) < slow_ma_period:
         return pd.DataFrame()
 
@@ -377,7 +389,7 @@ def run_single_ticker_backtest(
         except Exception:
             pass
 
-    # State
+    # 시뮬레이션 상태 변수 초기화
     cash = float(initial_capital)
     shares = 0
     avg_cost = 0.0
@@ -392,7 +404,7 @@ def run_single_ticker_backtest(
         price = float(price_val)
         decision, trade_amount, trade_profit, trade_pl_pct = None, 0.0, 0.0, 0.0
 
-        # Warm-up check: If the slow MA is not yet calculated, skip trading.
+        # 웜업 확인: 장기 이동평균이 계산되기 전까지는 거래하지 않습니다.
         if pd.isna(slow_ma.iloc[i]):
             rows.append(
                 {
@@ -415,7 +427,7 @@ def run_single_ticker_backtest(
             )
             continue
 
-        # Sell/Cut logic
+        # 매도/손절 로직
         if shares > 0 and i >= sell_block_until:
             hold_ret = (price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
             if stop_loss is not None and hold_ret <= float(stop_loss):
@@ -433,7 +445,7 @@ def run_single_ticker_backtest(
                 if cooldown_days > 0:
                     buy_block_until = i + cooldown_days
 
-        # Buy logic
+        # 매수 로직
         if decision is None and shares == 0 and i >= buy_block_until:
             if fast_ma.iloc[i] > slow_ma.iloc[i]:
                 buy_qty = int(cash // price)

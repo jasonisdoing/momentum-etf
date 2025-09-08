@@ -39,7 +39,13 @@ def fetch_ohlcv(
     months_range: Optional[List[int]] = None,
     date_range: Optional[List[str]] = None,
 ) -> Optional[pd.DataFrame]:
-    """pykrx를 통해 OHLCV 데이터를 조회합니다."""
+    """
+    pykrx를 통해 OHLCV 데이터를 조회합니다.
+
+    Args:
+        ticker (str): 조회할 종목의 티커.
+        date_range (Optional[List[str]]): ['YYYY-MM-DD', 'YYYY-MM-DD'] 형식의 조회 기간.
+    """
     if not is_pykrx_available():
         return None
 
@@ -108,17 +114,20 @@ def fetch_ohlcv(
 
 
 def read_tickers_file(path: str = "tickers.txt") -> List[Tuple[str, str]]:
-    """tickers.txt 파일에서 (티커, 이름) 목록을 읽어옵니다."""
+    """지정된 경로의 파일에서 (티커, 이름) 목록을 읽어옵니다."""
     items: List[Tuple[str, str]] = []
     try:
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
-                s = line.strip()
-                if not s or s.startswith("#"):
+                line_content = line.strip()
+                if not line_content or line_content.startswith("#"):
                     continue
-                parts = [p.strip() for p in s.replace("\t", ",").split(",") if p.strip()]
+                # 탭과 쉼표를 모두 쉼표로 통일하여 처리합니다.
+                parts = [p.strip() for p in line_content.replace("\t", ",").split(",") if p.strip()]
+                # 쉼표로 분리되지 않은 경우, 공백으로 다시 시도합니다.
                 if len(parts) == 1:
-                    parts = s.split()
+                    parts = line_content.split()
+                # 최종적으로 파싱된 결과에서 티커와 이름을 추출합니다.
                 if len(parts) == 1:
                     ticker, name = parts[0], ""
                 else:
@@ -131,7 +140,7 @@ def read_tickers_file(path: str = "tickers.txt") -> List[Tuple[str, str]]:
 
 def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
     """
-    네이버 금융 웹 스크레이핑을 통해 종목의 실시간 현재가를 가져옵니다.
+    네이버 금융 웹 스크레이핑을 통해 종목의 실시간 현재가를 조회합니다.
     주의: 이 방법은 웹페이지 구조 변경에 취약하며, 비공식적인 방법입니다.
     """
     if not requests or not BeautifulSoup:
@@ -140,7 +149,7 @@ def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
     try:
         url = f"https://finance.naver.com/item/sise.naver?code={ticker}"
         # 네이버의 차단을 피하기 위해 브라우저처럼 보이는 User-Agent를 설정합니다.
-        headers = {
+        headers = {  # noqa: F841
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
         }
         response = requests.get(url, headers=headers, timeout=5)

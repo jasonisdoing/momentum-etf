@@ -3,10 +3,6 @@ import warnings
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 
-# 로그 출력 여부
-# SHOW_LOGS = True
-SHOW_LOGS = False
-
 # 백테스트 기본값
 INITIAL_CAPITAL = 100_000_000  # 1억
 
