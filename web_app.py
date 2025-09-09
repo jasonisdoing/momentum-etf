@@ -1,5 +1,6 @@
 import glob
 import os
+import json
 
 import pandas as pd
 import streamlit as st
@@ -38,6 +39,23 @@ def display_strategy_plan(
     strategy_name: str, country: str, portfolio_path: str, date_str: str
 ):
     """지정된 전략, 국가, 포트폴리오 파일의 액션 플랜을 가져와 Streamlit UI에 표시합니다."""
+    try:
+        with open(portfolio_path, "r", encoding="utf-8") as f:
+            portfolio_data = json.load(f)
+        total_equity = portfolio_data.get("total_equity", 0.0)
+
+        if not isinstance(total_equity, (int, float)) or total_equity <= 0:
+            st.warning(
+                f"평가금액(total_equity)이 0입니다. '{os.path.basename(portfolio_path)}' 파일을 열어 실제 총평가액을 입력해주세요."
+            )
+            st.info(
+                f"`python {country}.py --convert` 실행 후 생성된 JSON 파일의 `total_equity` 값을 직접 수정해야 합니다."
+            )
+            return
+    except (json.JSONDecodeError, FileNotFoundError):
+        st.error(f"포트폴리오 파일 '{os.path.basename(portfolio_path)}'을(를) 읽는 데 실패했습니다.")
+        return
+
     spinner_message = f"'{date_str}' 기준 전략 데이터를 분석하고 있습니다..."
     with st.spinner(spinner_message):
         result = get_cached_action_plan(
@@ -83,7 +101,7 @@ def display_strategy_plan(
 def main():
     """MomentumPilot 오늘의 현황 웹 UI를 렌더링합니다."""
     st.set_page_config(page_title="MomentumPilot Status", layout="wide")
-    st.title("MomentumPilot - 오늘의 현황")
+    st.title("MomentumPilot - 김치네 화이팅")
 
     countries = ["kor", "aus"]
     country_options = [f"[{c.upper()}]" for c in countries]

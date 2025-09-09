@@ -232,10 +232,12 @@ def generate_action_plan(
         # 호주: 가격은 AUD, 금액은 KRW로 표시
         price_formatter = format_aud_money
         money_formatter = lambda x: format_kr_money(x * aud_krw_rate)
+        ma_formatter = format_aud_money  # 이동평균선 포맷터
     else:
         # 원화(KRW) 형식으로 가격을 포맷합니다.
         money_formatter = format_kr_money
         price_formatter = lambda p: f"{int(round(p)):,}"
+        ma_formatter = lambda p: f"{int(round(p)):,}원"
 
     market_is_open = is_market_open(country)
     if market_is_open:
@@ -252,6 +254,23 @@ def generate_action_plan(
             "찾을 수 없습니다. 전역 설정을 사용합니다."
         )
         strategy_settings = global_settings
+
+    # 교체 매매 관련 설정 로드 (donchian 전략용)
+    replace_weaker_stock = False
+    replace_threshold = 0.0
+    if strategy_name == "donchian":
+        replace_weaker_stock = bool(
+            getattr(strategy_settings, "DONCHIAN_REPLACE_WEAKER_STOCK", False)
+        )
+        replace_threshold = float(
+            getattr(strategy_settings, "DONCHIAN_REPLACE_SCORE_THRESHOLD", 0.0)
+        )
+        atr_period = int(
+            getattr(strategy_settings, "DONCHIAN_ATR_PERIOD_FOR_NORMALIZATION", 20)
+        )
+        max_replacements_per_day = int(
+            getattr(strategy_settings, "DONCHIAN_MAX_REPLACEMENTS_PER_DAY", 1)
+        )
 
     # Load initial state from portfolio file.
     data_dir = f"data/{country}"
@@ -282,9 +301,11 @@ def generate_action_plan(
     print("-> 과거 포트폴리오 파일을 기반으로 보유 기간을 자동 계산했습니다.")
 
     # 티커 목록 결정
-    print(f"\n[고정 유니버스] data/{country}/tickers.txt 파일의 종목을 사용합니다.")
+    print(f"\n[고정 유니버스] data/{country}/tickers_etf.txt와 tickers_stock.txt 파일의 종목을 사용합니다.")
     # tickers.txt와 현재 보유 종목을 합쳐서 전체 유니버스 구성
-    static_pairs = read_tickers_file(f"data/{country}/tickers.txt", country=country)
+    etf_pairs = read_tickers_file(f"data/{country}/tickers_etf.txt", country=country)
+    stock_pairs = read_tickers_file(f"data/{country}/tickers_stock.txt", country=country)
+    static_pairs = etf_pairs + stock_pairs
     pairs = build_pairs_with_holdings(static_pairs, holdings)
 
     if not pairs:
@@ -408,21 +429,37 @@ def generate_action_plan(
                 "avg_cost": ac,
             }
     elif strategy_name == "donchian":
-        ma_period = int(getattr(strategy_settings, "DONCHIAN_MA_PERIOD", 20))
-        entry_delay_days = int(getattr(strategy_settings, "DONCHIAN_ENTRY_DELAY_DAYS", 0))
-        required_days = ma_period + entry_delay_days + 5  # 버퍼 추가
+        ma_period_etf = int(getattr(strategy_settings, "DONCHIAN_MA_PERIOD_FOR_ETF", 15))
+        ma_period_stock = int(getattr(strategy_settings, "DONCHIAN_MA_PERIOD_FOR_STOCK", 75))
+        atr_period_norm = int(
+            getattr(strategy_settings, "DONCHIAN_ATR_PERIOD_FOR_NORMALIZATION", 20)
+        )
+
+        # --- 티커 유형(ETF/주식) 구분 ---
+        etf_pairs_status = read_tickers_file(f"data/{country}/tickers_etf.txt", country=country)
+        etf_tickers_status = {ticker for ticker, _ in etf_pairs_status}
+
+        max_ma_period = max(ma_period_etf, ma_period_stock)
+        required_days = max(max_ma_period, atr_period_norm) + 5  # 버퍼 추가
         required_months = (required_days // 22) + 2
+
+        from utils.indicators import calculate_atr
 
         for tkr, _ in pairs:
             df = fetch_ohlcv(
                 tkr, country=country, months_range=[required_months, 0]
             )  # 더 많은 데이터 요청
-            if df is None or len(df) < ma_period:
+
+            # 티커 유형에 따라 이동평균 기간 결정
+            ma_period = ma_period_etf if tkr in etf_tickers_status else ma_period_stock
+
+            if df is None or len(df) < max(ma_period, atr_period_norm):
                 continue
             close = df["Close"]
             if isinstance(close, pd.DataFrame):
                 close = close.iloc[:, 0]
             ma = close.rolling(window=ma_period).mean()
+            atr = calculate_atr(df, period=atr_period_norm)
 
             # 실시간 가격 조회 시도 (장중일 경우)
             realtime_price = None
@@ -444,7 +481,10 @@ def generate_action_plan(
 
             m = ma.iloc[-1]
 
-            ma_score = (c0 / m - 1.0) * 100.0 if m > 0 and not pd.isna(m) else 0.0
+            a = atr.iloc[-1]
+            ma_score = 0.0
+            if pd.notna(m) and pd.notna(a) and a > 0:
+                ma_score = (c0 - m) / a
 
             # 이동평균 돌파 후 연속된 일수 계산
             buy_signal_active = close > ma
@@ -465,7 +505,7 @@ def generate_action_plan(
                 "prev_close": prev_close,
                 "s1": m,  # 이동평균 (값)
                 "s2": ma_period,  # 이동평균 (기간)
-                "score": ma_score,  # 이격도
+                "score": ma_score,  # 정규화 점수
                 "filter": buy_signal_days_today,  # 신호 지속일
                 "shares": sh,
                 "avg_cost": ac,
@@ -621,7 +661,7 @@ def generate_action_plan(
         f"현금: {header_money_formatter(cash_in_krw)} | 일간: {day_ret_pct:+.2f}% | 누적: {cum_ret_pct:+.2f}%"
     )
 
-    actions = []  # (state, weight, score, tkr, row)
+    actions = []  # List of dictionaries
     for tkr, name in pairs:
         d = data_by_tkr.get(tkr)
         if not d:
@@ -742,8 +782,7 @@ def generate_action_plan(
             elif strategy_name == "donchian":
                 price, ma, period = d["price"], d["s1"], d["s2"]
                 buy_signal_days_today = d["filter"]
-                entry_delay_days = int(getattr(strategy_settings, "DONCHIAN_ENTRY_DELAY_DAYS", 0))
-                if buy_signal_days_today > entry_delay_days:
+                if buy_signal_days_today > 0:
                     buy_signal = True
                     buy_phrase = f"추세진입 ({buy_signal_days_today}일째)"
 
@@ -790,15 +829,15 @@ def generate_action_plan(
                 else "-"
             )
         elif strategy_name == "seykota":
-            s1_str = f"{d['s1']:.0f}" if not pd.isna(d["s1"]) else "-"
-            s2_str = f"{d['s2']:.0f}" if not pd.isna(d["s2"]) else "-"
+            s1_str = ma_formatter(d["s1"]) if not pd.isna(d["s1"]) else "-"
+            s2_str = ma_formatter(d["s2"]) if not pd.isna(d["s2"]) else "-"
             score_str = f"{d['score']:+.2f}%"
             filter_str = "-"
         elif strategy_name == "donchian":
-            s1_str = f"{d['s1']:.0f}" if not pd.isna(d["s1"]) else "-"  # 이평선(값)
+            s1_str = ma_formatter(d["s1"]) if not pd.isna(d["s1"]) else "-"  # 이평선(값)
             drawdown_val = d.get("drawdown_from_peak")
-            s2_str = f"{drawdown_val:.1f}%" if drawdown_val is not None else "-"
-            score_str = f"{d['score']:+.2f}%" if not pd.isna(d["score"]) else "-"  # 이격도
+            s2_str = f"{drawdown_val:.1f}%" if drawdown_val is not None else "-"  # 고점대비
+            score_str = f"{d['score']:+.2f}" if not pd.isna(d["score"]) else "-"  # 정규화 점수
             filter_str = f"{d['filter']}일" if d.get("filter") is not None else "-"
 
         else:
@@ -827,22 +866,113 @@ def generate_action_plan(
             filter_str,
             phrase,
         ]
-        actions.append((state, position_weight_pct, score, tkr, current_row))
+        actions.append(
+            {
+                "state": state,
+                "weight": position_weight_pct,
+                "score": score,
+                "tkr": tkr,
+                "row": current_row,
+                "buy_signal": buy_signal if state == "WAIT" else False,
+            }
+        )
 
-    # 정렬: 전략별 점수(우선순위)가 높은 순으로 정렬
-    def sort_key(action_tuple):
-        _, _, score, tkr, _ = action_tuple
+    # --- 교체 매매 로직 (포트폴리오가 가득 찼을 경우) ---
+    if strategy_name == "donchian" and held_count >= denom and replace_weaker_stock:
+        buy_candidates = sorted(
+            [a for a in actions if a["buy_signal"]],
+            key=lambda x: x["score"],
+            reverse=True,
+        )
+        held_stocks = sorted(
+            [a for a in actions if a["state"] == "HOLD"], key=lambda x: x["score"]
+        )
+
+        num_possible_replacements = min(
+            len(buy_candidates), len(held_stocks), max_replacements_per_day
+        )
+
+        for k in range(num_possible_replacements):
+            best_new = buy_candidates[k]
+            weakest_held = held_stocks[k]
+
+            # 교체 조건: 새 후보의 점수가 기존 보유 종목보다 임계값 이상 높을 때
+            if best_new["score"] > weakest_held["score"] + replace_threshold:
+                # 1. 교체될 종목(매도)의 상태 업데이트
+                d_weakest = data_by_tkr.get(weakest_held["tkr"])
+                sell_price = d_weakest.get("price", 0)
+                sell_qty = d_weakest.get("shares", 0)
+                avg_cost = d_weakest.get("avg_cost", 0)
+
+                hold_ret = 0.0
+                prof = 0.0
+                if avg_cost > 0 and sell_price > 0:
+                    hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
+                    prof = (sell_price - avg_cost) * sell_qty
+
+                sell_phrase = f"교체매도 {sell_qty}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'} ({best_new['tkr']}(으)로 교체)"
+
+                weakest_held["state"] = "SELL_REPLACE"
+                weakest_held["row"][3] = "SELL_REPLACE"
+                weakest_held["row"][-1] = sell_phrase
+
+                # 2. 새로 편입될 종목(매수)의 상태 업데이트
+                best_new["state"] = "BUY_REPLACE"
+                best_new["row"][3] = "BUY_REPLACE"
+
+                # 매수 수량 및 금액 계산
+                sell_value = weakest_held["weight"] / 100.0 * current_equity
+                buy_price = data_by_tkr.get(best_new["tkr"], {}).get("price", 0)
+                if buy_price > 0:
+                    # 매도 금액으로 살 수 있는 최대 수량
+                    buy_qty = int(sell_value // buy_price)
+                    buy_notional = buy_qty * buy_price
+                    best_new["row"][
+                        -1
+                    ] = f"매수 {buy_qty}주 @ {price_formatter(buy_price)} ({money_formatter(buy_notional)}) ({weakest_held['tkr']} 대체)"
+                else:
+                    best_new["row"][-1] = f"{weakest_held['tkr']}(을)를 대체 (가격정보 없음)"
+            else:
+                # 점수가 정렬되어 있으므로, 더 이상의 교체는 불가능합니다.
+                break
+
+        # 3. 교체되지 않은 나머지 매수 후보들의 상태 업데이트
+        for cand in buy_candidates:
+            if cand["state"] == "WAIT":  # 아직 매수/교체매수 결정이 안된 경우
+                cand["row"][-1] = "포트폴리오 가득 참 (교체대상 아님)"
+
+    # 정렬: 매도/보유 종목을 상단에, 매수 후보를 하단에 정렬
+    def sort_key(action_dict):
+        state = action_dict["state"]
+        weight = action_dict["weight"]
+        score = action_dict["score"]
+        tkr = action_dict["tkr"]
+
+        state_order = {
+            "CUT_STOPLOSS": 0,
+            "SELL_MOMENTUM": 1,
+            "SELL_TREND": 2,
+            "SELL_REPLACE": 3,
+            "TRIM_REBALANCE": 4,
+            "HOLD": 5,
+            "BUY_REPLACE": 6,
+            "BUY": 7,
+            "WAIT": 8,
+        }
+        order = state_order.get(state, 99)
+
+        # 보유 종목은 비중이 높은 순으로, 매수/대기 종목은 점수가 높은 순으로 정렬
+        sort_value = -weight if state in ("HOLD", "TRIM_REBALANCE") else -score
 
         # 1. 점수가 높은 순서대로 정렬 (NaN 값은 가장 낮은 우선순위로 처리)
-        sort_score = -score if pd.notna(score) else float("inf")
-
         # 2. 점수가 같을 경우 티커 이름으로 정렬
-        return (sort_score, tkr)
+        return (order, sort_value, tkr)
 
     actions.sort(key=sort_key)
 
     rows_sorted = []
-    for i, (_, _, _, _, row) in enumerate(actions, 1):
+    for i, action_dict in enumerate(actions, 1):
+        row = action_dict["row"]
         row[0] = i
         rows_sorted.append(row)
 
@@ -882,7 +1012,7 @@ def generate_action_plan(
     elif strategy_name == "seykota":
         signal_headers = ["단기MA", "장기MA", "MA스코어", "필터"]
     elif strategy_name == "donchian":
-        signal_headers = ["이평선(값)", "고점대비", "이격도", "신호지속일"]
+        signal_headers = ["이평선(값)", "고점대비", "정규화점수", "신호지속일"]
     else:
         signal_headers = ["신호1", "신호2", "점수", "필터"]
 

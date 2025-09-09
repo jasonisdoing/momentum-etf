@@ -19,6 +19,7 @@ def main(
     strategy_name: str = "jason",
     country: str = "kor",
     quiet: bool = False,
+    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
 ):
     """
     지정된 전략에 대한 백테스트를 실행하고 결과를 요약합니다.
@@ -30,10 +31,12 @@ def main(
     if country == "aus":
         money_formatter = format_aud_money
         price_formatter = format_aud_money
+        ma_formatter = format_aud_money
     else:
         # 원화(KRW) 형식으로 가격을 포맷합니다.
         money_formatter = format_kr_money
         price_formatter = lambda p: f"{int(round(p)):,}"
+        ma_formatter = lambda p: f"{int(round(p)):,}원"
 
     # 기간 설정 로직
     test_date_range = getattr(settings, "TEST_DATE_RANGE", None)
@@ -63,12 +66,16 @@ def main(
 
     # 티커 목록 결정
     if not quiet:
-        print(f"\n[고정 유니버스] data/{country}/tickers.txt 파일의 종목을 사용합니다.")
-    pairs = read_tickers_file(f"data/{country}/tickers.txt", country=country)
+        print(f"\n[고정 유니버스] data/{country}/tickers_etf.txt와 tickers_stock.txt 파일의 종목을 사용합니다.")
+    etf_pairs = read_tickers_file(f"data/{country}/tickers_etf.txt", country=country)
+    stock_pairs = read_tickers_file(f"data/{country}/tickers_stock.txt", country=country)
+    pairs = etf_pairs + stock_pairs
 
     if not pairs:
         print("오류: 백테스트에 사용할 티커를 찾을 수 없습니다.")
-        print(f"      data/{country}/tickers.txt 파일이 비어있거나 존재하지 않을 수 있습니다.")
+        print(
+            f"      data/{country}/tickers_etf.txt 또는 tickers_stock.txt 파일이 비어있거나 존재하지 않을 수 있습니다."
+        )
         return
 
     logger = logging.getLogger("backtester")
@@ -143,6 +150,7 @@ def main(
                     top_n=portfolio_topn,
                     date_range=test_date_range,
                     country=country,
+                    prefetched_data=prefetched_data,
                 )
                 or {}
             )
@@ -265,7 +273,7 @@ def main(
                 elif strategy_name == "seykota":
                     signal_headers = ["단기MA", "장기MA", "MA스코어", "필터"]
                 elif strategy_name == "donchian":
-                    signal_headers = ["이평선(값)", "고점대비", "이격도", "신호지속일"]
+                    signal_headers = ["이평선(값)", "고점대비", "정규화점수", "신호지속일"]
                 else:
                     signal_headers = ["신호1", "신호2", "점수", "필터"]
 
@@ -356,14 +364,14 @@ def main(
                             else ("-1" if pd.notna(filter_val) and filter_val < 0 else "0")
                         )
                     elif strategy_name == "seykota":
-                        s1_str = f"{int(s1):,}" if pd.notna(s1) else "-"
-                        s2_str = f"{int(s2):,}" if pd.notna(s2) else "-"
+                        s1_str = ma_formatter(s1) if pd.notna(s1) else "-"
+                        s2_str = ma_formatter(s2) if pd.notna(s2) else "-"
                         score_str = f"{float(score):+,.2f}%" if pd.notna(score) else "-"
                         filter_str = "-"  # seykota는 필터를 사용하지 않음
                     elif strategy_name == "donchian":
-                        s1_str = f"{int(s1):,}" if pd.notna(s1) else "-"  # 이평선(값)
+                        s1_str = ma_formatter(s1) if pd.notna(s1) else "-"  # 이평선(값)
                         s2_str = f"{float(s2):.1f}%" if pd.notna(s2) else "-"  # 고점대비
-                        score_str = f"{float(score):+,.2f}%" if pd.notna(score) else "-"  # 이격도
+                        score_str = f"{float(score):+,.2f}" if pd.notna(score) else "-"  # 정규화점수
                         filter_str = f"{int(filter_val)}일" if pd.notna(filter_val) else "-"
 
                     else:  # 일반적인 폴백
@@ -371,14 +379,20 @@ def main(
 
                     display_status = decision
                     phrase = ""
-                    if is_trade_decision and amount and price_today:
+                    note_from_strategy = str(row.get("note", "") or "")
+                    if is_trade_decision and amount > 0 and price_today > 0:
                         qty_calc = (
                             int(float(amount) // float(price_today))
                             if float(price_today) > 0
                             else 0
                         )
-                        if decision == "BUY":
-                            phrase = f"매수 {qty_calc}주 @ {price_formatter(price_today)} ({money_formatter(amount)})"
+                        if decision.startswith("BUY"):
+                            tag = "매수"
+                            if decision == "BUY_REPLACE":
+                                tag = "교체매수"
+                            phrase = f"{tag} {qty_calc}주 @ {price_formatter(price_today)} ({money_formatter(amount)})"
+                            if note_from_strategy:
+                                phrase += f" ({note_from_strategy})"
                         else:
                             # 결정 코드에 따라 상세한 사유를 생성합니다.
                             if decision == "SELL_MOMENTUM":
@@ -389,11 +403,15 @@ def main(
                                 tag = "가격기반손절"
                             elif decision == "TRIM_REBALANCE":
                                 tag = "비중조절"
-                            else:  # 이전 버전 호환용
+                            elif decision == "SELL_REPLACE":
+                                tag = "교체매도"
+                            else:  # 이전 버전 호환용 (e.g. "SELL")
                                 tag = "매도"
                             phrase = f"{tag} {qty_calc}주 @ {price_formatter(price_today)} 수익 {money_formatter(prof)} 손익률 {f'{plpct:+.1f}%'}"
+                            if note_from_strategy:
+                                phrase += f" ({note_from_strategy})"
                     elif decision in ("WAIT", "HOLD"):
-                        phrase = str(row.get("note", "") or "")
+                        phrase = note_from_strategy
                     if tkr not in buy_date_by_ticker:
                         buy_date_by_ticker[tkr], holding_days_by_ticker[tkr] = None, 0
                     if decision == "BUY" and shares > 0:

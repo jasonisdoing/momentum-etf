@@ -22,6 +22,7 @@ def run_portfolio_backtest(
     top_n: int = 10,
     date_range: Optional[List[str]] = None,
     country: str = "kor",
+    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     이동평균선 교차 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
@@ -64,7 +65,14 @@ def run_portfolio_backtest(
     tickers_to_process = [p[0] for p in ticker_name_pairs]
 
     for tkr in tickers_to_process:
-        df = fetch_ohlcv(tkr, country=country, date_range=adjusted_date_range)
+        # 미리 로드된 데이터가 있으면 사용하고, 없으면 새로 조회합니다.
+        if prefetched_data and tkr in prefetched_data:
+            df = prefetched_data[tkr].copy()
+        else:
+            df = fetch_ohlcv(tkr, country=country, date_range=adjusted_date_range)
+
+        if df is None:
+            continue
 
         # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
         # 컬럼을 단순화하고 중복을 제거합니다.
@@ -72,7 +80,7 @@ def run_portfolio_backtest(
             df.columns = df.columns.get_level_values(0)
             df = df.loc[:, ~df.columns.duplicated()]
 
-        if df is None or len(df) < slow_ma_period:
+        if len(df) < slow_ma_period:
             continue
 
         close = df["Close"]
@@ -386,12 +394,15 @@ def run_single_ticker_backtest(
     if df is None:
         df = fetch_ohlcv(ticker, country=country, date_range=date_range)
 
+    if df is None:
+        return pd.DataFrame()
+
     # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
     # 컬럼을 단순화하고 중복을 제거합니다.
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
         df = df.loc[:, ~df.columns.duplicated()]
-    if df is None or len(df) < slow_ma_period:
+    if len(df) < slow_ma_period:
         return pd.DataFrame()
 
     close = df["Close"]

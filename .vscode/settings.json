@@ -3,4 +3,8 @@
     "editor.fontFamily": "'D2Coding', Menlo, Monaco, 'Courier New', monospace",
     "debug.console.fontFamily": "D2Coding",
     "terminal.integrated.fontFamily": "monospace",
+    "python.analysis.extraPaths": [
+        "./src",
+        "./app"
+    ]
 }

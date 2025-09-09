@@ -91,14 +91,14 @@ def _convert_for_country(country: str):
                 else:
                     name = ""
                 shares = int(shares_str.replace(",", ""))
-                avg_cost = float(avg_cost_str.replace("원", "").replace(",", ""))
+                avg_cost = int(float(avg_cost_str.replace("원", "").replace(",", "")))
 
             if not name and country == "aus":
                 name = fetch_yfinance_name(ticker)
 
             # 국가별 티커 형식 검증
             if country == "kor":
-                if not (len(ticker) == 6 and ticker.isdigit()):
+                if not (len(ticker) == 6 and ticker.isalnum()):
                     print(f"경고: 한국 시장의 잘못된 티커 형식입니다. 건너뜁니다: '{line}'")
                     continue
 
@@ -153,7 +153,13 @@ def _convert_for_country(country: str):
             total_equity = 0
             had_equity_before = False
 
-    portfolio_archive = {"date": archive_date_str, "total_equity": total_equity}
+    # 국가별로 total_equity 데이터 타입 조정
+    if country == "kor":
+        final_total_equity = int(total_equity)
+    else:
+        final_total_equity = total_equity
+
+    portfolio_archive = {"date": archive_date_str, "total_equity": final_total_equity}
 
     # 호주 포트폴리오에만 international_shares 필드를 추가합니다.
     if country == "aus":

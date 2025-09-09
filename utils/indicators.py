@@ -53,3 +53,21 @@ def supertrend_direction(df: pd.DataFrame, period: int, multiplier: float) -> pd
             st.iloc[i] = min(upperband.iloc[i], prev_st if prev_dir == -1 else upperband.iloc[i])
 
     return direction.fillna(-1).astype(int)
+
+
+def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """
+    Average True Range (ATR)를 계산합니다.
+    """
+    if not all(col in df.columns for col in ["High", "Low", "Close"]):
+        return pd.Series(dtype=float, index=df.index)
+
+    high_low = df["High"] - df["Low"]
+    high_close = (df["High"] - df["Close"].shift()).abs()
+    low_close = (df["Low"] - df["Close"].shift()).abs()
+
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+
+    # ATR은 일반적으로 지수이동평균(EMA)을 사용합니다.
+    atr_series = tr.ewm(com=period - 1, min_periods=period).mean()
+    return atr_series
