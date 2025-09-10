@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Callable, Dict
  
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
  
@@ -21,18 +22,18 @@ def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame])
     단일 파라미터 조합에 대한 백테스트를 실행하는 워커 함수입니다.
     이 함수는 별도의 프로세스에서 실행됩니다.
     """
-    ma_etf, ma_stock, replace_stock, replace_threshold = params
+    ma_etf, ma_stock, replace_stock, replace_threshold, country = params
     # 각 프로세스는 자체적인 모듈 컨텍스트를 가지므로, 여기서 다시 임포트하고 설정합니다.
     from test import main as run_test
  
     donchian_settings.DONCHIAN_MA_PERIOD_FOR_ETF = ma_etf
     donchian_settings.DONCHIAN_MA_PERIOD_FOR_STOCK = ma_stock
     donchian_settings.DONCHIAN_REPLACE_WEAKER_STOCK = replace_stock
-    donchian_settings.DONCHIAN_REPLACE_SCORE_THRESHOLD_PCT = replace_threshold
+    donchian_settings.DONCHIAN_REPLACE_SCORE_THRESHOLD = replace_threshold
  
     # 미리 로드된 데이터를 전달하여 yfinance 호출을 방지합니다.
     result = run_test(
-        strategy_name="donchian", country="aus", quiet=True, prefetched_data=prefetched_data
+        strategy_name="donchian", country=country, quiet=True, prefetched_data=prefetched_data
     )
     return ma_etf, ma_stock, replace_stock, replace_threshold, result
  
@@ -60,7 +61,7 @@ class MetricTracker:
             self.params = params
             self.result = result
             tqdm.write(
-                f"  -> 새로운 최고 {self.name} 발견! {self.best_value:.2f} (ETF MA={params['ma_etf']}, Stock MA={params['ma_stock']}, Replace={params['replace_stock']}, Thresh={params['replace_threshold']})"
+                f"  -> 새로운 최고 {self.name} 발견! {self.best_value:.2f} (Threshold={params['replace_threshold']:.2f})"
             )
  
     def print_report(self, title: str):
@@ -73,9 +74,7 @@ class MetricTracker:
         print(f"  - DONCHIAN_MA_PERIOD_FOR_ETF: {self.params['ma_etf']}")
         print(f"  - DONCHIAN_MA_PERIOD_FOR_STOCK: {self.params['ma_stock']}")
         print(f"  - DONCHIAN_REPLACE_WEAKER_STOCK: {self.params['replace_stock']}")
-        print(
-            f"  - DONCHIAN_REPLACE_SCORE_THRESHOLD_PCT: {self.params['replace_threshold']}"
-        )
+        print(f"  - DONCHIAN_REPLACE_SCORE_THRESHOLD: {self.params['replace_threshold']:.2f}")
         print(f"\n[{self.name} 기준 성과]")
         print(f"  - {self.name}: {self.best_value:.2f}")
         print(f"  - 기간: {self.result['start_date']} ~ {self.result['end_date']}")
@@ -85,15 +84,18 @@ class MetricTracker:
         print(f"  - Calmar Ratio: {self.result.get('calmar_ratio', 0.0):.2f}")
  
  
-def tune_parameters():
+def tune_parameters(country: str):
     """
-    'donchian' 전략의 파라미터를 튜닝하여 최적의 값을 찾습니다.
+    'donchian' 전략의 DONCHIAN_REPLACE_SCORE_THRESHOLD 파라미터를 튜닝하여
+    최적의 값을 찾습니다.
     """
     # 튜닝할 파라미터 범위 설정
-    ma_etf_range = range(10, 51, 5)  # 예시: 10, 15, ..., 50
-    ma_stock_range = range(50, 151, 10)  # 예시: 50, 60, ..., 150
-    replace_stock_options = [True, False]
-    replace_threshold_range = range(1, 10)
+    # 다른 파라미터는 settings.py의 기본값으로 고정합니다.
+    ma_etf_range = [donchian_settings.DONCHIAN_MA_PERIOD_FOR_ETF]
+    ma_stock_range = [donchian_settings.DONCHIAN_MA_PERIOD_FOR_STOCK]
+    # 임계값 튜닝은 교체매매가 True일 때만 의미가 있습니다.
+    replace_stock_options = [True]
+    replace_threshold_range = np.arange(0.5, 5.1, 0.5)  # 0.5부터 5.0까지 0.5 간격으로 테스트
  
     # 추적할 성능 지표들을 정의합니다.
     trackers = {
@@ -105,7 +107,6 @@ def tune_parameters():
     }
  
     # --- 데이터 사전 로딩 (yfinance 호출 최소화) ---
-    country = "aus"
     print(f"튜닝을 위해 {country.upper()} 시장의 데이터를 미리 로딩합니다...")
  
     # 1. 튜닝에 필요한 최대 기간 계산
@@ -149,17 +150,13 @@ def tune_parameters():
     for ma_etf in ma_etf_range:
         for ma_stock in ma_stock_range:
             for replace_stock in replace_stock_options:
-                if replace_stock:
-                    for replace_threshold in replace_threshold_range:
-                        param_combinations.append(
-                            (ma_etf, ma_stock, replace_stock, replace_threshold)
-                        )
-                else:
-                    # replace_stock이 False이면 threshold는 의미 없으므로 0으로 고정
-                    param_combinations.append((ma_etf, ma_stock, replace_stock, 0))
+                for replace_threshold in replace_threshold_range:
+                    param_combinations.append(
+                        (ma_etf, ma_stock, replace_stock, replace_threshold, country)
+                    )
  
     total_combinations = len(param_combinations)
-    print(f"'{'donchian'}' 전략 파라미터 튜닝을 시작합니다 (호주 시장).")
+    print(f"'{'donchian'}' 전략의 교체 임계값(Threshold) 튜닝을 시작합니다 ({country.upper()} 시장).")
     print(f"총 {total_combinations}개의 조합을 테스트합니다.")
     print("=" * 50)
     print("주의: 테스트에 매우 오랜 시간이 소요될 수 있습니다.")
@@ -212,7 +209,37 @@ def tune_parameters():
  
     if not trackers["cagr"].params:
         print("\n유효한 결과를 찾지 못했습니다.")
+        return None, None
+
+    return trackers["cagr"].best_value, trackers["cagr"].params["replace_threshold"]
  
  
 if __name__ == "__main__":
-    tune_parameters()
+    print("Donchian 전략의 DONCHIAN_REPLACE_SCORE_THRESHOLD 최적화를 시작합니다.")
+
+    print("\n" + "=" * 50)
+    print(">>> 한국(KOR) 시장 최적화 시작...")
+    print("=" * 50)
+    kor_best_cagr, kor_best_threshold = tune_parameters(country="kor")
+
+    print("\n" + "=" * 50)
+    print(">>> 호주(AUS) 시장 최적화 시작...")
+    print("=" * 50)
+    aus_best_cagr, aus_best_threshold = tune_parameters(country="aus")
+
+    print("\n\n" + "=" * 50)
+    print(">>> 최종 최적화 결과 요약 (최고 CAGR 기준) <<<")
+    print("=" * 50)
+    if kor_best_cagr is not None and kor_best_threshold is not None:
+        print(
+            f"  - 한국 (KOR) 최적 CAGR: {kor_best_cagr:.2f}% (Threshold: {kor_best_threshold:.2f})"
+        )
+    else:
+        print("  - 한국 (KOR): 유효한 결과를 찾지 못했습니다.")
+    if aus_best_cagr is not None and aus_best_threshold is not None:
+        print(
+            f"  - 호주 (AUS) 최적 CAGR: {aus_best_cagr:.2f}% (Threshold: {aus_best_threshold:.2f})"
+        )
+    else:
+        print("  - 호주 (AUS): 유효한 결과를 찾지 못했습니다.")
+    print("=" * 50)

@@ -16,7 +16,7 @@ DONCHIAN_REPLACE_WEAKER_STOCK = True
 
 # 교체 매매 시, 새로운 종목의 점수가 기존 보유 종목의 점수보다
 # 이 값(ATR 단위) 이상 높을 때만 교체를 실행합니다. (과도한 교체 방지)
-DONCHIAN_REPLACE_SCORE_THRESHOLD = 3.0
+DONCHIAN_REPLACE_SCORE_THRESHOLD = 1.5
 
 # 하루에 교체 매매를 실행할 최대 종목 수를 제한합니다.
 DONCHIAN_MAX_REPLACEMENTS_PER_DAY = 5

@@ -1,5 +1,10 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+# 프로젝트 루트를 Python 경로에 추가합니다.
+
+import os
+import sys
+import warnings
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 """
 find.py
@@ -17,6 +22,11 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 from pykrx import stock
+
+
+# --- 설정 ---
+# 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
+EXCLUDE_KEYWORDS = ["레버리지", "채권"]
 
 
 def get_latest_trading_day() -> str:
@@ -161,18 +171,39 @@ def find_top_gainers_by_sector(min_change_pct: float = 5.0, asset_type: str = No
 
         print(f"등락률 {min_change_pct}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
 
-        # ETF만 볼 때는 섹터 분류가 의미 없으므로 건너뜁니다.
-        if asset_type == "etf":
-            ticker_to_sector = {}
-        else:
-            ticker_to_sector = create_ticker_sector_map(latest_day)
+        # 종목명 및 섹터 정보 처리
+        etf_ticker_list = set(stock.get_etf_ticker_list(latest_day))
 
-        top_gainers["종목명"] = top_gainers["티커"].apply(stock.get_market_ticker_name)
-        top_gainers["섹터"] = top_gainers["티커"].map(ticker_to_sector).fillna("기타")
+        def get_name(ticker):
+            """티커 종류(주식/ETF)에 따라 올바른 이름 조회 함수를 호출합니다."""
+            if ticker in etf_ticker_list:
+                return stock.get_etf_ticker_name(ticker)
+            else:
+                return stock.get_market_ticker_name(ticker)
 
-        # ETF만 조회 시, 모든 종목을 'ETF' 섹터로 그룹화합니다.
+        top_gainers["종목명"] = top_gainers["티커"].apply(get_name)
+
+        # 키워드 기반 필터링
+        if EXCLUDE_KEYWORDS:
+            initial_count = len(top_gainers)
+            # '|'로 키워드를 연결하여 정규식 OR 조건 생성
+            exclude_pattern = "|".join(EXCLUDE_KEYWORDS)
+            # '종목명'에 키워드가 포함되지 않은 행만 남김
+            top_gainers = top_gainers[~top_gainers["종목명"].str.contains(exclude_pattern, na=False)]
+            filtered_count = initial_count - len(top_gainers)
+            if filtered_count > 0:
+                print(f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {filtered_count}개 종목을 제외했습니다.")
+
+        # 섹터 정보 할당
         if asset_type == "etf":
             top_gainers["섹터"] = "ETF"
+        else:
+            # 'stock' 또는 'None'
+            ticker_to_sector = create_ticker_sector_map(latest_day)
+            top_gainers["섹터"] = top_gainers["티커"].map(ticker_to_sector).fillna("기타")
+            # 혼합 모드('None')일 경우, ETF 종목의 섹터를 'ETF'로 명확히 지정합니다.
+            if asset_type is None:
+                top_gainers.loc[top_gainers['티커'].isin(etf_ticker_list), '섹터'] = 'ETF'
 
         grouped = sorted(top_gainers.groupby("섹터"), key=lambda x: x[0])
 

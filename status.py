@@ -216,11 +216,26 @@ def generate_action_plan(
     print(f"'{strategy_name}' 전략을 사용하여 오늘의 액션 플랜을 생성합니다.")
 
     # 환율 정보 조회
+    # 포트폴리오 파일의 날짜를 기준으로 환율을 조회합니다.
+    portfolio_data_for_date = load_portfolio_data(portfolio_path, data_dir=f"data/{country}")
+    if not portfolio_data_for_date:
+        print(
+            f"오류: 포트폴리오 파일(portfolio_*.json)을 찾을 수 없습니다. data/{country}/ 폴더를 확인해주세요."
+        )
+        return
+
+    try:
+        date_str_from_filename = os.path.basename(portfolio_data_for_date["filepath"]).replace("portfolio_", "").replace(".json", "")
+        base_date = pd.to_datetime(date_str_from_filename).normalize()
+    except (ValueError, TypeError):
+        print(f"경고: 포트폴리오 파일명에서 날짜를 추출할 수 없습니다. 현재 날짜를 사용합니다.")
+        base_date = pd.Timestamp.now().normalize()
+
     aud_krw_rate = None
     if country == "aus":
-        aud_krw_rate = fetch_exchange_rate("AUDKRW=X")
+        aud_krw_rate = fetch_exchange_rate("AUDKRW=X", as_of_date=base_date.strftime("%Y-%m-%d"))
         if aud_krw_rate:
-            print(f"-> 실시간 AUD/KRW 환율 적용: {aud_krw_rate:.2f}")
+            print(f"-> {base_date.strftime('%Y-%m-%d')} 기준 AUD/KRW 환율 적용: {aud_krw_rate:.2f}")
         else:
             # 환율 조회 실패 시 기본값 사용 및 경고
             aud_krw_rate = 900.0  # Fallback rate
@@ -239,8 +254,10 @@ def generate_action_plan(
         price_formatter = lambda p: f"{int(round(p)):,}"
         ma_formatter = lambda p: f"{int(round(p)):,}원"
 
-    market_is_open = is_market_open(country)
-    if market_is_open:
+    # 실시간 가격 조회는 포트폴리오 기준일이 오늘일 경우에만 시도합니다.
+    today_cal = pd.Timestamp.now().normalize()
+    market_is_open = is_market_open(country) and base_date.date() == today_cal.date()
+    if market_is_open and base_date.date() == today_cal.date():
         if country == "kor":
             print("-> 장중입니다. 네이버 금융에서 실시간 시세를 가져옵니다 (비공식, 지연 가능).")
 
@@ -274,15 +291,7 @@ def generate_action_plan(
 
     # Load initial state from portfolio file.
     data_dir = f"data/{country}"
-    portfolio_data = load_portfolio_data(portfolio_path, data_dir=data_dir)
-
-    if not portfolio_data:
-        print(
-            "오류: 포트폴리오 파일(portfolio_*.json)을 찾을 수 없습니다. "
-            f"--portfolio 옵션으로 파일을 지정하거나 data/{country}/ 폴더에 파일을 위치시켜주세요."
-        )
-        print(f"`python {country}.py --convert`를 실행하여 새 포트폴리오를 생성할 수 있습니다.")
-        return
+    portfolio_data = portfolio_data_for_date  # 위에서 이미 로드함
 
     print(
         f"포트폴리오 파일 '{os.path.basename(portfolio_data['filepath'])}'을(를) 기준으로 오늘의 액션을 계산합니다."
@@ -321,7 +330,7 @@ def generate_action_plan(
     # --- 전략별 신호 계산 ---
     if strategy_name == "jason":
         for tkr, _ in pairs:
-            df = fetch_ohlcv(tkr, country=country, months_range=[1, 0])
+            df = fetch_ohlcv(tkr, country=country, months_range=[1, 0], base_date=base_date)
             if df is None or len(df) < 11:
                 continue
             close = df["Close"]
@@ -383,7 +392,9 @@ def generate_action_plan(
         required_months = (slow_ma_period // 22) + 2
 
         for tkr, _ in pairs:
-            df = fetch_ohlcv(tkr, country=country, months_range=[required_months, 0])
+            df = fetch_ohlcv(
+                tkr, country=country, months_range=[required_months, 0], base_date=base_date
+            )
             if df is None or len(df) < slow_ma_period:
                 continue
             close = df["Close"]
@@ -447,7 +458,7 @@ def generate_action_plan(
 
         for tkr, _ in pairs:
             df = fetch_ohlcv(
-                tkr, country=country, months_range=[required_months, 0]
+                tkr, country=country, months_range=[required_months, 0], base_date=base_date
             )  # 더 많은 데이터 요청
 
             # 티커 유형에 따라 이동평균 기간 결정
@@ -648,17 +659,46 @@ def generate_action_plan(
         prev_equity = None
 
     day_ret_pct = 0.0
+    day_profit_loss = 0.0
     if prev_equity is not None and prev_equity > 0:
         day_ret_pct = ((current_equity / prev_equity) - 1.0) * 100.0
+        day_profit_loss = current_equity - prev_equity
 
     # 헤더 생성 (모든 금액을 KRW로 변환하여 표시)
     total_cash = float(current_equity) - float(total_holdings)
     holdings_in_krw = total_holdings * aud_krw_rate if country == "aus" and aud_krw_rate else total_holdings
     cash_in_krw = equity_in_krw - holdings_in_krw
 
+    # 총 매수금액 계산 (평가 수익률용)
+    total_acquisition_cost = 0.0
+    for tkr, d in data_by_tkr.items():
+        sh = int(d.get("shares", 0))
+        if sh > 0:
+            ac = float(d.get("avg_cost", 0.0))
+            total_acquisition_cost += sh * ac
+
+    # 평가 수익률 계산 (개별 주식/ETF 대상, 해외주식 제외)
+    eval_ret_pct = 0.0
+    eval_profit_loss = 0.0
+    if total_acquisition_cost > 0:
+        eval_ret_pct = ((total_holdings_value / total_acquisition_cost) - 1.0) * 100.0
+        eval_profit_loss = total_holdings_value - total_acquisition_cost
+
+    # 수익률에 대한 절대 금액 계산 (KRW 기준)
+    day_profit_loss_krw = (
+        day_profit_loss * aud_krw_rate if country == "aus" and aud_krw_rate else day_profit_loss
+    )
+    eval_profit_loss_krw = (
+        eval_profit_loss * aud_krw_rate if country == "aus" and aud_krw_rate else eval_profit_loss
+    )
+    cum_profit_loss_krw = (
+        equity_in_krw - initial_capital_setting if initial_capital_setting > 0 else 0.0
+    )
+
     header_line = (
         f"보유종목: {held_count} | 평가금액: {header_money_formatter(equity_in_krw)} | 보유금액: {header_money_formatter(holdings_in_krw)} | "
-        f"현금: {header_money_formatter(cash_in_krw)} | 일간: {day_ret_pct:+.2f}% | 누적: {cum_ret_pct:+.2f}%"
+        f"현금: {header_money_formatter(cash_in_krw)} | 일간: {day_ret_pct:+.2f}%({header_money_formatter(day_profit_loss_krw)}) | "
+        f"평가: {eval_ret_pct:+.2f}%({header_money_formatter(eval_profit_loss_krw)}) | 누적: {cum_ret_pct:+.2f}%({header_money_formatter(cum_profit_loss_krw)})"
     )
 
     actions = []  # List of dictionaries
@@ -822,7 +862,6 @@ def generate_action_plan(
         if strategy_name == "jason":
             s1_str = f"{d['s1']:+.1f}%"
             s2_str = f"{d['s2']:+.1f}%"
-            score_str = f"{d['score']:+.1f}%"
             filter_str = (
                 ("+1" if d["filter"] > 0 else ("-1" if d["filter"] < 0 else "0"))
                 if d["filter"] is not None
@@ -831,17 +870,15 @@ def generate_action_plan(
         elif strategy_name == "seykota":
             s1_str = ma_formatter(d["s1"]) if not pd.isna(d["s1"]) else "-"
             s2_str = ma_formatter(d["s2"]) if not pd.isna(d["s2"]) else "-"
-            score_str = f"{d['score']:+.2f}%"
             filter_str = "-"
         elif strategy_name == "donchian":
             s1_str = ma_formatter(d["s1"]) if not pd.isna(d["s1"]) else "-"  # 이평선(값)
             drawdown_val = d.get("drawdown_from_peak")
             s2_str = f"{drawdown_val:.1f}%" if drawdown_val is not None else "-"  # 고점대비
-            score_str = f"{d['score']:+.2f}" if not pd.isna(d["score"]) else "-"  # 정규화 점수
             filter_str = f"{d['filter']}일" if d.get("filter") is not None else "-"
 
         else:
-            s1_str, s2_str, score_str, filter_str = "-", "-", "-", "-"
+            s1_str, s2_str, filter_str = "-", "-", "-"
 
         buy_date_display = buy_date.strftime("%Y-%m-%d") if buy_date else "-"
         holding_days_display = str(holding_days) if holding_days > 0 else "-"
@@ -855,14 +892,14 @@ def generate_action_plan(
             buy_date_display,
             holding_days_display,
             price_formatter(price),
-            day_ret_str,
+            day_ret,
             f"{sh:,}",
             money_formatter(amount),
-            f"{hold_ret:+.1f}%" if hold_ret is not None else "-",
-            f"{position_weight_pct:.0f}%",
+            hold_ret,
+            position_weight_pct,
             s1_str,
             s2_str,
-            score_str,
+            d.get("score"),  # raw score 값으로 변경
             filter_str,
             phrase,
         ]
@@ -991,14 +1028,17 @@ def generate_action_plan(
             "-",  # 매수일
             "-",  # 보유일
             price_formatter(is_value),  # 현재가 (AUD)
-            "0.0%",  # 일간수익률
+            0.0,  # 일간수익률
             "1",  # 보유수량
             money_formatter(is_value),  # 금액 (KRW)
-            f"{is_change_pct:+.2f}%",  # 누적수익률
-            f"{is_weight_pct:.0f}%",  # 비중
+            is_change_pct,  # 누적수익률
+            is_weight_pct,  # 비중
         ]
         # 나머지 신호 컬럼과 문구 컬럼을 빈 값으로 채웁니다.
-        special_row.extend(["-"] * num_signal_cols)
+        signal_values = ["-"] * num_signal_cols
+        if num_signal_cols > 2:
+            signal_values[2] = None  # 점수 컬럼은 None으로 설정
+        special_row.extend(signal_values)
         special_row.append("")  # 문구
 
         rows_sorted.insert(0, special_row)
@@ -1043,8 +1083,69 @@ def main(strategy_name: str, country: str = "kor", portfolio_path: Optional[str]
     if result:
         header_line, headers, rows_sorted = result
 
-        # 콘솔과 로그 파일에 테이블 렌더링
-        table_lines = render_table_eaw(headers, rows_sorted, aligns=None)
+        # --- 콘솔 출력용 포맷팅 ---
+        # 웹앱은 raw data (rows_sorted)를 사용하고, 콘솔은 포맷된 데이터를 사용합니다.
+
+        # 컬럼 인덱스 찾기
+        col_indices = {}
+        try:
+            score_header_candidates = ["정규화점수", "모멘텀점수", "MA스코어"]
+            for h in score_header_candidates:
+                if h in headers:
+                    col_indices["score"] = headers.index(h)
+                    break
+            col_indices["day_ret"] = headers.index("일간수익률")
+            col_indices["cum_ret"] = headers.index("누적수익률")
+            col_indices["weight"] = headers.index("비중")
+        except (ValueError, KeyError):
+            pass  # 일부 컬럼을 못찾아도 괜찮음
+
+        display_rows = []
+        for row in rows_sorted:
+            display_row = list(row)  # 복사
+
+            # 점수 포맷팅
+            idx = col_indices.get("score")
+            if idx is not None:
+                val = display_row[idx]
+                if isinstance(val, (int, float)):
+                    if strategy_name == "jason":
+                        display_row[idx] = f"{val:+.1f}%"
+                    elif strategy_name == "seykota":
+                        display_row[idx] = f"{val:+.2f}%"
+                    elif strategy_name == "donchian":
+                        display_row[idx] = f"{val:+.2f}"
+                    else:
+                        display_row[idx] = str(val)
+                else:
+                    display_row[idx] = "-"
+
+            # 일간수익률 포맷팅
+            idx = col_indices.get("day_ret")
+            if idx is not None:
+                val = display_row[idx]
+                display_row[idx] = f"{val:+.1f}%" if isinstance(val, (int, float)) else "-"
+
+            # 누적수익률 포맷팅
+            idx = col_indices.get("cum_ret")
+            if idx is not None:
+                val = display_row[idx]
+                if isinstance(val, (int, float)):
+                    # International Shares는 소수점 2자리
+                    fmt = "{:+.2f}%" if row[1] == "IS" else "{:+.1f}%"
+                    display_row[idx] = fmt.format(val)
+                else:
+                    display_row[idx] = "-"
+
+            # 비중 포맷팅
+            idx = col_indices.get("weight")
+            if idx is not None:
+                val = display_row[idx]
+                display_row[idx] = f"{val:.0f}%" if isinstance(val, (int, float)) else "-"
+
+            display_rows.append(display_row)
+
+        table_lines = render_table_eaw(headers, display_rows, aligns=None)
 
         print("\n" + header_line)
         print("\n".join(table_lines))

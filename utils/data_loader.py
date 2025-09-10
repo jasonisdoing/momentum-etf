@@ -56,6 +56,7 @@ def fetch_ohlcv(
     months_back: int = None,
     months_range: Optional[List[int]] = None,
     date_range: Optional[List[str]] = None,
+    base_date: Optional[pd.Timestamp] = None,
 ) -> Optional[pd.DataFrame]:
     """
     pykrx를 통해 OHLCV 데이터를 조회합니다.
@@ -75,7 +76,7 @@ def fetch_ohlcv(
             )
             return None
     else:
-        now = pd.to_datetime(get_today_str())
+        now = base_date if base_date is not None else pd.to_datetime(get_today_str())
         if months_range is not None and len(months_range) == 2:
             start_off, end_off = months_range
             start_dt = now - pd.DateOffset(months=int(start_off))
@@ -281,7 +282,7 @@ def fetch_yfinance_name(ticker: str) -> str:
 
 
 @functools.lru_cache(maxsize=None)
-def fetch_exchange_rate(ticker: str = "AUDKRW=X") -> float | None:
+def fetch_exchange_rate(ticker: str = "AUDKRW=X", as_of_date: Optional[str] = None) -> float | None:
     """
     yfinance를 통해 실시간 환율 정보를 조회합니다.
     결과는 단일 실행 내에서 캐시됩니다.
@@ -289,8 +290,17 @@ def fetch_exchange_rate(ticker: str = "AUDKRW=X") -> float | None:
     if yf is None:
         return None
     try:
-        # 최근 2일 데이터를 가져와 가장 최신 종가를 사용 (휴일 대응)
-        data = yf.Ticker(ticker).history(period="2d", auto_adjust=True, progress=False)
+        if as_of_date:
+            end_date = pd.to_datetime(as_of_date)
+            # 해당 날짜의 데이터를 포함하기 위해 end_date에 하루를 더하고, 휴일을 고려해 7일 전부터 조회
+            start_date = end_date - pd.Timedelta(days=7)
+            data = yf.Ticker(ticker).history(
+                start=start_date, end=end_date + pd.Timedelta(days=1), auto_adjust=True, progress=False
+            )
+        else:
+            # as_of_date가 없으면 최신 데이터를 가져옵니다 (기존 동작).
+            data = yf.Ticker(ticker).history(period="2d", auto_adjust=True, progress=False)
+
         if not data.empty:
             return data["Close"].iloc[-1]
     except Exception as e:
