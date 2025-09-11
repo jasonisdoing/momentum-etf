@@ -40,6 +40,14 @@ def run_portfolio_backtest(
         max_replacements_per_day = int(
             getattr(settings, "MAX_REPLACEMENTS_PER_DAY", 1)
         )
+        # 시장 레짐 필터 설정
+        regime_filter_enabled = bool(
+            getattr(settings, "MARKET_REGIME_FILTER_ENABLED", False)
+        )
+        regime_filter_ticker = str(getattr(settings, "MARKET_REGIME_FILTER_TICKER", "^GSPC"))
+        regime_filter_ma_period = int(
+            getattr(settings, "MARKET_REGIME_FILTER_MA_PERIOD", 20)
+        )
         atr_period = int(
             getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20)
         )
@@ -61,7 +69,7 @@ def run_portfolio_backtest(
     # --- 티커 유형(ETF/주식) 구분 ---
     etf_tickers = {stock['ticker'] for stock in stocks if stock.get('type') == 'etf'}
 
-    # --- 데이터 로딩 및 지표 계산 ---
+    # --- 데이터 로딩을 위한 날짜 범위 계산 ---
     # 웜업 기간을 가장 긴 MA 기간 기준으로 계산합니다.
     max_ma_period = max(ma_period_etf, ma_period_stock)
     warmup_days = int(max(max_ma_period, atr_period) * 1.5)
@@ -72,6 +80,24 @@ def run_portfolio_backtest(
         warmup_start = core_start - pd.DateOffset(days=warmup_days)
         adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
 
+    # --- 시장 레짐 필터 데이터 로딩 ---
+    market_regime_df = None
+    if regime_filter_enabled:
+        # fetch_ohlcv는 지수 티커를 처리할 수 있도록 수정되었습니다.
+        market_regime_df = fetch_ohlcv(
+            regime_filter_ticker, country=country, date_range=adjusted_date_range
+        )
+        if market_regime_df is not None and not market_regime_df.empty:
+            market_regime_df["MA"] = (
+                market_regime_df["Close"]
+                .rolling(window=regime_filter_ma_period)
+                .mean()
+            )
+        else:
+            print(f"경고: 시장 레짐 필터 티커({regime_filter_ticker})의 데이터를 가져올 수 없습니다. 필터를 비활성화합니다.")
+            regime_filter_enabled = False
+
+    # --- 개별 종목 데이터 로딩 및 지표 계산 ---
     data = {}
     tickers_to_process = [s['ticker'] for s in stocks]
 
@@ -167,6 +193,15 @@ def run_portfolio_backtest(
             if dt in d["close"].index
         }
 
+        # --- 시장 레짐 필터 적용 (Risk-Off 조건 확인) ---
+        is_risk_off = False
+        if regime_filter_enabled and market_regime_df is not None and dt in market_regime_df.index:
+            market_price = market_regime_df.loc[dt, "Close"]
+            market_ma = market_regime_df.loc[dt, "MA"]
+            if pd.notna(market_price) and pd.notna(market_ma) and market_price < market_ma:
+                is_risk_off = True
+
+
         # 현재 총 보유 자산 가치를 계산합니다.
         current_holdings_value = 0
         for tkr_h, s_h in state.items():
@@ -177,46 +212,12 @@ def run_portfolio_backtest(
 
         # 총 평가금액(현금 + 주식)을 계산합니다.
         equity = cash + current_holdings_value
-
+        # --- 1. 기본 정보 및 출력 행 생성 ---
         for tkr, d in data.items():
             ticker_state, price = state[tkr], today_prices.get(tkr)
-            decision, trade_amount, trade_profit, trade_pl_pct = None, 0.0, 0.0, 0.0
-
             is_ticker_warming_up = tkr not in tickers_available_today or pd.isna(d["ma"].get(dt))
-
-            if tkr in tickers_available_today:
-                if (
-                    ticker_state["shares"] > 0
-                    and pd.notna(price)
-                    and i >= ticker_state["sell_block_until"]
-                    and not is_ticker_warming_up
-                ):
-                    hold_ret = (
-                        (price / ticker_state["avg_cost"] - 1.0) * 100.0
-                        if ticker_state["avg_cost"] > 0
-                        else 0.0
-                    )
-
-                    if stop_loss is not None and hold_ret <= float(stop_loss):
-                        decision = "CUT_STOPLOSS"
-                    elif not is_ticker_warming_up and price < d["ma"].loc[dt]:
-                        decision = "SELL_TREND"
-
-                    # 매도 결정이 내려졌을 경우, 상태를 업데이트합니다.
-                    if decision:
-                        qty = ticker_state["shares"]
-                        trade_amount = qty * price
-                        if ticker_state["avg_cost"] > 0:
-                            trade_profit = (price - ticker_state["avg_cost"]) * qty
-                            trade_pl_pct = hold_ret
-                        cash += trade_amount
-                        ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
-                        if cooldown_days > 0:
-                            ticker_state["buy_block_until"] = i + cooldown_days
-
-            decision_out = (
-                decision if decision else ("HOLD" if ticker_state["shares"] > 0 else "WAIT")
-            )
+            
+            decision_out = ("HOLD" if ticker_state["shares"] > 0 else "WAIT")
             note = ""
             if is_ticker_warming_up:
                 note = "웜업 기간"
@@ -226,6 +227,7 @@ def run_portfolio_backtest(
                 elif ticker_state["shares"] == 0 and i < ticker_state["buy_block_until"]:
                     note = "매수 쿨다운"
 
+            # Create the row first
             if tkr in tickers_available_today:
                 out_rows[tkr].append(
                     {
@@ -235,9 +237,7 @@ def run_portfolio_backtest(
                         "pv": ticker_state["shares"] * (price if pd.notna(price) else 0),
                         "decision": decision_out,
                         "avg_cost": ticker_state["avg_cost"],
-                        "trade_amount": trade_amount,
-                        "trade_profit": trade_profit,
-                        "trade_pl_pct": trade_pl_pct,
+                        "trade_amount": 0.0, "trade_profit": 0.0, "trade_pl_pct": 0.0,
                         "note": note,
                         "signal1": d["ma"].get(dt),  # 이평선(값)
                         "signal2": None,  # 고점대비
@@ -266,162 +266,235 @@ def run_portfolio_backtest(
                     }
                 )
 
-        # 매수 로직
-        # 1. 매수 후보 선정
-        buy_candidates = []
-        if cash > 0:  # 현금이 있어야만 매수 후보를 고려
-            for tkr_cand in tickers_available_today:
-                d_cand = data.get(tkr_cand)
-                ticker_state_cand = state[tkr_cand]
-                buy_signal_days_today = d_cand["buy_signal_days"].get(dt, 0)
-
-                if (
-                    ticker_state_cand["shares"] == 0
-                    and i >= ticker_state_cand["buy_block_until"]
-                    and buy_signal_days_today > 0
-                ):
-                    score_cand = d_cand["ma_score"].get(dt, -float("inf"))
-                    if pd.notna(score_cand):
-                        buy_candidates.append((score_cand, tkr_cand))
-            buy_candidates.sort(reverse=True)
-
-        # 2. 매수 실행 (신규 또는 교체)
-        held_count = sum(1 for s in state.values() if s["shares"] > 0)
-        slots_to_fill = max(0, top_n - held_count)
-
-        if slots_to_fill > 0 and buy_candidates:
-            # 2-1. 신규 매수: 포트폴리오에 빈 슬롯이 있는 경우
-            for k in range(min(slots_to_fill, len(buy_candidates))):
-                if cash <= 0:
-                    break
-                _, tkr_to_buy = buy_candidates[k]
-
-                price = today_prices.get(tkr_to_buy)
-                if pd.isna(price):
-                    continue
-
-                equity = cash + current_holdings_value
-                min_val = min_pos_pct * equity
-                req_qty = ceil(min_val / price) if price > 0 else 0
-                if req_qty <= 0:
-                    continue
-
-                trade_amount = req_qty * price
-                if trade_amount <= cash:
-                    ticker_state = state[tkr_to_buy]
-                    cash -= trade_amount
-                    ticker_state["shares"] += req_qty
-                    ticker_state["avg_cost"] = price
-                    if cooldown_days > 0:
-                        ticker_state["sell_block_until"] = max(
-                            ticker_state["sell_block_until"], i + cooldown_days
-                        )
-
-                    if out_rows[tkr_to_buy] and out_rows[tkr_to_buy][-1]["date"] == dt:
-                        row = out_rows[tkr_to_buy][-1]
-                        row.update(
-                            {
-                                "decision": "BUY",
-                                "trade_amount": trade_amount,
-                                "shares": ticker_state["shares"],
-                                "pv": ticker_state["shares"] * price,
-                                "avg_cost": ticker_state["avg_cost"],
-                            }
-                        )
-
-        elif slots_to_fill <= 0 and replace_weaker_stock and buy_candidates:
-            # 2-2. 교체 매매: 포트폴리오가 가득 찼지만, 더 좋은 종목이 나타난 경우
-            held_stocks_with_scores = []
+        # --- 2. 매도 로직 ---
+        # (a) 시장 레짐 필터
+        if is_risk_off:
             for tkr_h, ticker_state_h in state.items():
                 if ticker_state_h["shares"] > 0:
-                    d_h = data.get(tkr_h)
-                    if d_h and dt in d_h["ma_score"].index:
-                        score_h = d_h["ma_score"].loc[dt]
-                        if pd.notna(score_h):
-                            held_stocks_with_scores.append((score_h, tkr_h))
-
-            # 점수 오름차순 정렬 (약한 것부터)
-            held_stocks_with_scores.sort()
-            # buy_candidates는 이미 점수 내림차순으로 정렬되어 있음 (강한 것부터)
-
-            num_possible_replacements = min(
-                len(buy_candidates), len(held_stocks_with_scores), max_replacements_per_day
-            )
-
-            for k in range(num_possible_replacements):
-                best_new_score, best_new_tkr = buy_candidates[k]
-                weakest_held_score, weakest_held_tkr = held_stocks_with_scores[k]
-
-                # 교체 조건: 새 후보가 기존 보유 종목보다 강하고, 매수/매도할 가격이 유효할 때
-                if best_new_score > weakest_held_score + replace_threshold:
-                    sell_price = today_prices.get(weakest_held_tkr)
-                    buy_price = today_prices.get(best_new_tkr)
-
-                    if pd.notna(sell_price) and sell_price > 0 and pd.notna(buy_price) and buy_price > 0:
-                        # (a) 가장 약한 종목 매도
-                        weakest_state = state[weakest_held_tkr]
-                        sell_qty = weakest_state["shares"]
-                        sell_amount = sell_qty * sell_price
-                        hold_ret = ((sell_price / weakest_state["avg_cost"] - 1.0) * 100.0 if weakest_state["avg_cost"] > 0 else 0.0)
-                        trade_profit = (sell_price - weakest_state["avg_cost"]) * sell_qty if weakest_state["avg_cost"] > 0 else 0.0
-
-                        cash += sell_amount
-                        weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
+                    price = today_prices.get(tkr_h)
+                    if pd.notna(price):
+                        qty = ticker_state_h["shares"]
+                        trade_amount = qty * price
+                        hold_ret = ((price / ticker_state_h["avg_cost"] - 1.0) * 100.0 if ticker_state_h["avg_cost"] > 0 else 0.0)
+                        trade_profit = ((price - ticker_state_h["avg_cost"]) * qty if ticker_state_h["avg_cost"] > 0 else 0.0)
+                        
+                        cash += trade_amount
+                        ticker_state_h["shares"], ticker_state_h["avg_cost"] = 0, 0.0
+                        
+                        # Update the already created row
+                        row = out_rows[tkr_h][-1]
+                        row.update({
+                            "decision": "SELL_REGIME_FILTER", "trade_amount": trade_amount,
+                            "trade_profit": trade_profit, "trade_pl_pct": hold_ret,
+                            "shares": 0, "pv": 0, "avg_cost": 0, "note": "시장 위험 회피",
+                        })
+        # (b) 개별 종목 매도 (시장이 Risk-On일 때만)
+        else:
+            for tkr, d in data.items():
+                ticker_state, price = state[tkr], today_prices.get(tkr)
+                is_ticker_warming_up = tkr not in tickers_available_today or pd.isna(d["ma"].get(dt))
+                
+                if (ticker_state["shares"] > 0 and pd.notna(price) and 
+                    i >= ticker_state["sell_block_until"] and not is_ticker_warming_up):
+                    
+                    decision = None
+                    hold_ret = ((price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0)
+                    
+                    if stop_loss is not None and hold_ret <= float(stop_loss):
+                        decision = "CUT_STOPLOSS"
+                    elif price < d["ma"].loc[dt]:
+                        decision = "SELL_TREND"
+                    
+                    if decision:
+                        qty = ticker_state["shares"]
+                        trade_amount = qty * price
+                        trade_profit = ((price - ticker_state["avg_cost"]) * qty if ticker_state["avg_cost"] > 0 else 0.0)
+                        
+                        cash += trade_amount
+                        ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
                         if cooldown_days > 0:
-                            weakest_state["buy_block_until"] = i + cooldown_days
+                            ticker_state["buy_block_until"] = i + cooldown_days
+                        
+                        # Update the row
+                        row = out_rows[tkr][-1]
+                        row.update({
+                            "decision": decision, "trade_amount": trade_amount,
+                            "trade_profit": trade_profit, "trade_pl_pct": hold_ret,
+                            "shares": 0, "pv": 0, "avg_cost": 0,
+                        })
 
-                        if out_rows[weakest_held_tkr] and out_rows[weakest_held_tkr][-1]["date"] == dt:
-                            row = out_rows[weakest_held_tkr][-1]
-                            row.update({
-                                "decision": "SELL_REPLACE",
-                                "trade_amount": sell_amount,
-                                "trade_profit": trade_profit,
-                                "trade_pl_pct": hold_ret,
-                                "shares": 0, "pv": 0, "avg_cost": 0,
-                                "note": f"{best_new_tkr}(으)로 교체",
-                            })
+        # --- 3. 매수 로직 (시장이 Risk-On일 때만) ---
+        if not is_risk_off:
+            # 1. 매수 후보 선정
+            buy_candidates = []
+            if cash > 0:  # 현금이 있어야만 매수 후보를 고려
+                for tkr_cand in tickers_available_today:
+                    d_cand = data.get(tkr_cand)
+                    ticker_state_cand = state[tkr_cand]
+                    buy_signal_days_today = d_cand["buy_signal_days"].get(dt, 0)
 
-                        # (b) 가장 강한 새 종목 매수
-                        equity = cash + current_holdings_value
-                        min_val = min_pos_pct * equity
-                        req_qty = ceil(min_val / buy_price) if buy_price > 0 else 0
+                    if (
+                        ticker_state_cand["shares"] == 0
+                        and i >= ticker_state_cand["buy_block_until"]
+                        and buy_signal_days_today > 0
+                    ):
+                        score_cand = d_cand["ma_score"].get(dt, -float("inf"))
+                        if pd.notna(score_cand):
+                            buy_candidates.append((score_cand, tkr_cand))
+                buy_candidates.sort(reverse=True)
 
-                        if req_qty > 0:
-                            buy_amount = req_qty * buy_price
-                            if buy_amount <= cash:
-                                new_ticker_state = state[best_new_tkr]
-                                cash -= buy_amount
-                                new_ticker_state["shares"], new_ticker_state["avg_cost"] = req_qty, buy_price
-                                if cooldown_days > 0:
-                                    new_ticker_state["sell_block_until"] = max(new_ticker_state["sell_block_until"], i + cooldown_days)
+            # 2. 매수 실행 (신규 또는 교체)
+            held_count = sum(1 for s in state.values() if s["shares"] > 0)
+            slots_to_fill = max(0, top_n - held_count)
 
-                                if out_rows[best_new_tkr] and out_rows[best_new_tkr][-1]["date"] == dt:
-                                    row = out_rows[best_new_tkr][-1]
-                                    row.update({
-                                        "decision": "BUY_REPLACE",
-                                        "trade_amount": buy_amount,
-                                        "shares": req_qty, "pv": req_qty * buy_price, "avg_cost": buy_price,
-                                        "note": f"{weakest_held_tkr}(을)를 대체",
-                                    })
-                            else:
-                                # 매수 실패 시, 매도만 실행된 상태가 됨. 다음 날 빈 슬롯에 매수 시도.
-                                if out_rows[best_new_tkr] and out_rows[best_new_tkr][-1]["date"] == dt:
-                                    out_rows[best_new_tkr][-1]["note"] = "교체매수 현금부족"
-                else:
-                    # 점수가 정렬되어 있으므로, 더 이상의 교체는 불가능합니다.
-                    break
+            if slots_to_fill > 0 and buy_candidates:
+                # 2-1. 신규 매수: 포트폴리오에 빈 슬롯이 있는 경우
+                for k in range(min(slots_to_fill, len(buy_candidates))):
+                    if cash <= 0:
+                        break
+                    _, tkr_to_buy = buy_candidates[k]
 
-        # 3. 매수하지 못한 후보에 사유 기록
-        # 오늘 매수 또는 교체매수된 종목 목록을 만듭니다.
-        bought_tickers_today = {
-            tkr for tkr, r in out_rows.items()
-            if r and r[-1]["date"] == dt and r[-1]["decision"] in ("BUY", "BUY_REPLACE")
-        }
-        for _, tkr_cand in buy_candidates:
-            if tkr_cand not in bought_tickers_today:
+                    price = today_prices.get(tkr_to_buy)
+                    if pd.isna(price):
+                        continue
+
+                    equity = cash + current_holdings_value
+                    min_val = min_pos_pct * equity
+                    req_qty = ceil(min_val / price) if price > 0 else 0
+                    if req_qty <= 0:
+                        continue
+
+                    trade_amount = req_qty * price
+                    if trade_amount <= cash:
+                        ticker_state = state[tkr_to_buy]
+                        cash -= trade_amount
+                        ticker_state["shares"] += req_qty
+                        ticker_state["avg_cost"] = price
+                        if cooldown_days > 0:
+                            ticker_state["sell_block_until"] = max(
+                                ticker_state["sell_block_until"], i + cooldown_days
+                            )
+
+                        if out_rows[tkr_to_buy] and out_rows[tkr_to_buy][-1]["date"] == dt:
+                            row = out_rows[tkr_to_buy][-1]
+                            row.update(
+                                {
+                                    "decision": "BUY",
+                                    "trade_amount": trade_amount,
+                                    "shares": ticker_state["shares"],
+                                    "pv": ticker_state["shares"] * price,
+                                    "avg_cost": ticker_state["avg_cost"],
+                                }
+                            )
+
+            elif slots_to_fill <= 0 and replace_weaker_stock and buy_candidates:
+                # 2-2. 교체 매매: 포트폴리오가 가득 찼지만, 더 좋은 종목이 나타난 경우
+                held_stocks_with_scores = []
+                for tkr_h, ticker_state_h in state.items():
+                    if ticker_state_h["shares"] > 0:
+                        d_h = data.get(tkr_h)
+                        if d_h and dt in d_h["ma_score"].index:
+                            score_h = d_h["ma_score"].loc[dt]
+                            if pd.notna(score_h):
+                                held_stocks_with_scores.append((score_h, tkr_h))
+
+                # 점수 오름차순 정렬 (약한 것부터)
+                held_stocks_with_scores.sort()
+                # buy_candidates는 이미 점수 내림차순으로 정렬되어 있음 (강한 것부터)
+
+                num_possible_replacements = min(
+                    len(buy_candidates), len(held_stocks_with_scores), max_replacements_per_day
+                )
+
+                for k in range(num_possible_replacements):
+                    best_new_score, best_new_tkr = buy_candidates[k]
+                    weakest_held_score, weakest_held_tkr = held_stocks_with_scores[k]
+
+                    # 교체 조건: 새 후보가 기존 보유 종목보다 강하고, 매수/매도할 가격이 유효할 때
+                    if best_new_score > weakest_held_score + replace_threshold:
+                        sell_price = today_prices.get(weakest_held_tkr)
+                        buy_price = today_prices.get(best_new_tkr)
+
+                        if pd.notna(sell_price) and sell_price > 0 and pd.notna(buy_price) and buy_price > 0:
+                            # (a) 가장 약한 종목 매도
+                            weakest_state = state[weakest_held_tkr]
+                            sell_qty = weakest_state["shares"]
+                            sell_amount = sell_qty * sell_price
+                            hold_ret = ((sell_price / weakest_state["avg_cost"] - 1.0) * 100.0 if weakest_state["avg_cost"] > 0 else 0.0)
+                            trade_profit = (sell_price - weakest_state["avg_cost"]) * sell_qty if weakest_state["avg_cost"] > 0 else 0.0
+
+                            cash += sell_amount
+                            weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
+                            if cooldown_days > 0:
+                                weakest_state["buy_block_until"] = i + cooldown_days
+
+                            if out_rows[weakest_held_tkr] and out_rows[weakest_held_tkr][-1]["date"] == dt:
+                                row = out_rows[weakest_held_tkr][-1]
+                                row.update({
+                                    "decision": "SELL_REPLACE",
+                                    "trade_amount": sell_amount,
+                                    "trade_profit": trade_profit,
+                                    "trade_pl_pct": hold_ret,
+                                    "shares": 0, "pv": 0, "avg_cost": 0,
+                                    "note": f"{best_new_tkr}(으)로 교체",
+                                })
+
+                            # (b) 가장 강한 새 종목 매수
+                            equity = cash + current_holdings_value
+                            min_val = min_pos_pct * equity
+                            req_qty = ceil(min_val / buy_price) if buy_price > 0 else 0
+
+                            if req_qty > 0:
+                                buy_amount = req_qty * buy_price
+                                if buy_amount <= cash:
+                                    new_ticker_state = state[best_new_tkr]
+                                    cash -= buy_amount
+                                    new_ticker_state["shares"], new_ticker_state["avg_cost"] = req_qty, buy_price
+                                    if cooldown_days > 0:
+                                        new_ticker_state["sell_block_until"] = max(new_ticker_state["sell_block_until"], i + cooldown_days)
+
+                                    if out_rows[best_new_tkr] and out_rows[best_new_tkr][-1]["date"] == dt:
+                                        row = out_rows[best_new_tkr][-1]
+                                        row.update({
+                                            "decision": "BUY_REPLACE",
+                                            "trade_amount": buy_amount,
+                                            "shares": req_qty, "pv": req_qty * buy_price, "avg_cost": buy_price,
+                                            "note": f"{weakest_held_tkr}(을)를 대체",
+                                        })
+                                else:
+                                    # 매수 실패 시, 매도만 실행된 상태가 됨. 다음 날 빈 슬롯에 매수 시도.
+                                    if out_rows[best_new_tkr] and out_rows[best_new_tkr][-1]["date"] == dt:
+                                        out_rows[best_new_tkr][-1]["note"] = "교체매수 현금부족"
+                    else:
+                        # 점수가 정렬되어 있으므로, 더 이상의 교체는 불가능합니다.
+                        break
+
+            # 3. 매수하지 못한 후보에 사유 기록
+            # 오늘 매수 또는 교체매수된 종목 목록을 만듭니다.
+            bought_tickers_today = {
+                tkr for tkr, r in out_rows.items()
+                if r and r[-1]["date"] == dt and r[-1]["decision"] in ("BUY", "BUY_REPLACE")
+            }
+            for _, tkr_cand in buy_candidates:
+                if tkr_cand not in bought_tickers_today:
+                    if out_rows[tkr_cand] and out_rows[tkr_cand][-1]["date"] == dt:
+                        note = "포트폴리오 가득 참" if slots_to_fill <= 0 else "현금 부족"
+                        out_rows[tkr_cand][-1]["note"] = note
+        else: # is_risk_off
+            # 매수 후보가 있더라도, 시장이 위험 회피 상태이므로 매수하지 않음
+            # 후보들에게 사유 기록
+            buy_candidates = []
+            if cash > 0:
+                for tkr_cand in tickers_available_today:
+                    d_cand = data.get(tkr_cand)
+                    ticker_state_cand = state[tkr_cand]
+                    buy_signal_days_today = d_cand["buy_signal_days"].get(dt, 0)
+                    if (ticker_state_cand["shares"] == 0 and i >= ticker_state_cand["buy_block_until"] and buy_signal_days_today > 0):
+                        buy_candidates.append(tkr_cand)
+
+            for tkr_cand in buy_candidates:
                 if out_rows[tkr_cand] and out_rows[tkr_cand][-1]["date"] == dt:
-                    note = "포트폴리오 가득 참" if slots_to_fill <= 0 else "현금 부족"
-                    out_rows[tkr_cand][-1]["note"] = note
+                    out_rows[tkr_cand][-1]["note"] = "시장 위험 회피"
 
         out_cash.append(
             {

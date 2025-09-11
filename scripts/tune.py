@@ -119,10 +119,10 @@ def tune_parameters(country: str):
     warmup_days = int(max_ma_period * 1.5)
  
     # 2. logic 설정에서 백테스트 기간 가져오기
-    test_date_range = getattr(settings, "TEST_DATE_RANGE", None)
-    if not test_date_range or len(test_date_range) != 2:
-        print("오류: settings.py에 TEST_DATE_RANGE가 올바르게 설정되지 않았습니다.")
-        return
+    test_months_range = getattr(settings, "TEST_MONTHS_RANGE", 12)
+    core_end_dt = pd.Timestamp.now()
+    core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
+    test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]
  
     # 3. DB에서 티커 목록 읽기
     core_start = pd.to_datetime(test_date_range[0])

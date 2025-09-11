@@ -10,8 +10,8 @@ import streamlit as st
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import settings as global_settings
-from logic.settings import TEST_DATE_RANGE, SECTOR_COUNTRY_OPTIONS
-from status import generate_status_report
+from logic.settings import TEST_MONTHS_RANGE, SECTOR_COUNTRY_OPTIONS
+from status import generate_status_report, get_market_regime_status_string
 from utils.data_loader import fetch_yfinance_name, get_trading_days, fetch_pykrx_name, fetch_ohlcv_for_tickers
 from utils.db_manager import (
     get_available_snapshot_dates, get_portfolio_snapshot, get_all_trades, get_all_daily_equities, 
@@ -986,10 +986,9 @@ def render_country_tab(country_code: str):
         db_settings = get_app_settings(country_code)
         current_capital = db_settings.get("initial_capital", 0) if db_settings else 0
 
-        # TEST_DATE_RANGE의 시작일을 기본 날짜로 사용
-        test_date_range = TEST_DATE_RANGE
-        default_date_str = (test_date_range or [""])[0]
-        default_date = pd.to_datetime(default_date_str) if default_date_str else datetime.now()
+        # TEST_MONTHS_RANGE를 기반으로 기본 날짜를 계산합니다.
+        test_months_range = TEST_MONTHS_RANGE if TEST_MONTHS_RANGE else 12
+        default_date = pd.Timestamp.now() - pd.DateOffset(months=test_months_range)
         current_date = db_settings.get("initial_date", default_date) if db_settings else default_date
 
         with st.form(key=f"settings_form_{country_code}"):
@@ -1036,7 +1035,24 @@ def main():
     if not check_password():
         st.stop()  # 비밀번호가 맞지 않으면 앱의 나머지 부분을 렌더링하지 않습니다.
 
-    st.title("Momentum. Pilot.")
+    # 제목과 시장 상태를 한 줄에 표시
+    # "최근 중단" 기간이 길어지면서 줄바꿈되는 현상을 방지하기 위해
+    # 오른쪽 컬럼의 너비를 늘립니다. (3:1 -> 2.5:1.5)
+    col1, col2 = st.columns([2.5, 1.5])
+    with col1:
+        st.title("Momentum. Pilot.")
+    with col2:
+        # 시장 상태는 한 번만 계산하여 10분간 캐시합니다.
+        @st.cache_data(ttl=600)
+        def _get_cached_market_status():
+            return get_market_regime_status_string()
+
+        market_status_str = _get_cached_market_status()
+        if market_status_str:
+            # st.markdown을 사용하여 오른쪽 정렬 및 상단 패딩을 적용합니다.
+            st.markdown(
+                f'<div style="text-align: right; padding-top: 1.5rem; font-size: 1.1rem;">{market_status_str}</div>', unsafe_allow_html=True
+            )
 
     tab_names = ["한국주식", "호주주식", "마스터 정보", "설정"]
     tab_kor, tab_aus, tab_master, tab_settings = st.tabs(tab_names)

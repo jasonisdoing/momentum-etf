@@ -34,6 +34,11 @@ def main():
         help="백테스터(test.py)를 실행합니다.",
     )
     group.add_argument(
+        "--tune-regime",
+        action="store_true",
+        help="시장 레짐 필터의 이동평균 기간을 튜닝합니다 (scripts/tune_regime_filter.py).",
+    )
+    group.add_argument(
         "--status",
         action="store_true",
         help="오늘의 현황(status.py)을 실행합니다.",
@@ -67,7 +72,10 @@ def main():
 
             tickers = [s['ticker'] for s in stocks_from_db]
             
-            test_date_range = getattr(settings, "TEST_DATE_RANGE", None)
+            test_months_range = getattr(settings, "TEST_MONTHS_RANGE", 12)
+            core_end_dt = pd.Timestamp.now()
+            core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
+            test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]
             max_ma_period = max(getattr(settings, "MA_PERIOD_FOR_ETF", 0), getattr(settings, "MA_PERIOD_FOR_STOCK", 0))
             warmup_days = int(max_ma_period * 1.5)
             
@@ -76,6 +84,12 @@ def main():
 
         print("전략에 대한 상세 백테스트를 실행합니다...")
         run_test(country=country, quiet=False, prefetched_data=prefetched_data)
+
+    elif args.tune_regime:
+        from scripts.tune_regime_filter import tune_regime_filter
+
+        print("시장 레짐 필터 파라미터 최적화를 시작합니다...")
+        tune_regime_filter(country=country)
 
     elif args.status:
         from status import main as run_status

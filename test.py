@@ -41,30 +41,12 @@ def main(
         ma_formatter = lambda p: f"{int(round(p)):,}원"
 
     # 기간 설정 로직
-    test_date_range = getattr(settings, "TEST_DATE_RANGE", None)
-    months_range = None
-    core_start_dt = None
-    period_label = ""
-
-    if test_date_range and len(test_date_range) == 2:
-        try:
-            core_start_dt = pd.to_datetime(test_date_range[0])
-            core_end_dt = pd.to_datetime(test_date_range[1])
-            period_label = (
-                f"{core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')}"
-            )
-        except (ValueError, TypeError):
-            print(
-                "오류: settings.py의 TEST_DATE_RANGE 형식이 잘못되었습니다. "
-                "['YYYY-MM-DD', 'YYYY-MM-DD'] 형식으로 지정해주세요."
-            )
-            test_date_range = None  # 무효화
-
-    if not test_date_range:
-        months_range = getattr(settings, "MONTHS_RANGE", [12, 0])  # 대체 동작
-        core_start_dt = pd.Timestamp.now() - pd.DateOffset(months=int(months_range[0]))
-        end_label = "현재" if int(months_range[1]) == 0 else f"{int(months_range[1])}개월"
-        period_label = f"{int(months_range[0])}개월~{end_label}"
+    test_months_range = getattr(settings, "TEST_MONTHS_RANGE", 12)
+    core_end_dt = pd.Timestamp.now()
+    core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
+    test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]
+    period_label = f"최근 {test_months_range}개월 ({core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')})"
+    months_range = None  # 이 변수는 더 이상 사용되지 않습니다.
 
     # 티커 목록 결정
     if not quiet:
@@ -357,6 +339,8 @@ def main(
                                 tag = "가격기반손절"
                             elif decision == "SELL_REPLACE":
                                 tag = "교체매도"
+                            elif decision == "SELL_REGIME_FILTER":
+                                tag = "시장위험회피"
                             else:  # 이전 버전 호환용 (e.g. "SELL")
                                 tag = "매도"
                             phrase = f"{tag} {qty_calc}주 @ {price_formatter(price_today)} 수익 {money_formatter(prof)} 손익률 {f'{plpct:+.1f}%'}"
@@ -454,12 +438,67 @@ def main(
                     if drawdown > max_drawdown:
                         max_drawdown = drawdown
 
+            # 시장 위험 회피(Risk-Off) 기간을 계산합니다.
+            risk_off_periods = []
+            market_regime_filter_enabled = bool(getattr(settings, "MARKET_REGIME_FILTER_ENABLED", False))
+
+            if market_regime_filter_enabled:
+                # '시장 위험 회피' 노트가 있는지 확인하여 리스크 오프 기간을 식별합니다.
+                # 모든 티커의 노트를 하나의 데이터프레임으로 합칩니다.
+                notes_df = pd.DataFrame({
+                    tkr: ts['note'] for tkr, ts in time_series_by_ticker.items() if tkr != "CASH"
+                }, index=common_index)
+                
+                # 어느 한 종목이라도 '시장 위험 회피' 노트를 가지면 해당일은 리스크 오프입니다.
+                if not notes_df.empty:
+                    is_risk_off_series = (notes_df == "시장 위험 회피").any(axis=1)
+
+                    # 연속된 True 블록(리스크 오프 기간)을 찾습니다.
+                    in_risk_off_period = False
+                    start_of_period = None
+                    for dt, is_off in is_risk_off_series.items():
+                        if is_off and not in_risk_off_period:
+                            in_risk_off_period = True
+                            start_of_period = dt
+                        elif not is_off and in_risk_off_period:
+                            in_risk_off_period = False
+                            # 리스크 오프 기간의 마지막 날은 is_off가 False가 되기 바로 전날입니다.
+                            end_of_period = is_risk_off_series.index[is_risk_off_series.index.get_loc(dt) - 1]
+                            risk_off_periods.append((start_of_period, end_of_period))
+                            start_of_period = None
+                    
+                    # 백테스트가 리스크 오프 기간 중에 끝나는 경우를 처리합니다.
+                    if in_risk_off_period and start_of_period:
+                        risk_off_periods.append((start_of_period, is_risk_off_series.index[-1]))
+
             start_date = portfolio_dates[0]
             end_date = portfolio_dates[-1]
             years = (end_date - start_date).days / 365.25
             cagr = 0
             if years > 0 and initial_capital > 0:
                 cagr = ((final_value / initial_capital) ** (1 / years)) - 1
+
+            # --- 벤치마크 (S&P 500) 성과 계산 ---
+            from utils.data_loader import fetch_ohlcv
+            benchmark_ticker = "^GSPC"
+            benchmark_df = fetch_ohlcv(
+                benchmark_ticker,
+                country=country, # country는 지수 티커에 영향을 주지 않음
+                date_range=[start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
+            )
+            
+            benchmark_cum_ret_pct = 0.0
+            benchmark_cagr_pct = 0.0
+            if benchmark_df is not None and not benchmark_df.empty:
+                # 벤치마크 데이터를 실제 백테스트 날짜와 일치시킵니다.
+                benchmark_df = benchmark_df.loc[benchmark_df.index.isin(portfolio_dates)]
+                if not benchmark_df.empty:
+                    benchmark_start_price = benchmark_df["Close"].iloc[0]
+                    benchmark_end_price = benchmark_df["Close"].iloc[-1]
+                    if benchmark_start_price > 0:
+                        benchmark_cum_ret_pct = ((benchmark_end_price / benchmark_start_price) - 1) * 100
+                        if years > 0:
+                            benchmark_cagr_pct = ((benchmark_end_price / benchmark_start_price) ** (1 / years) - 1) * 100
 
             # Sharpe Ratio 계산
             pv_series = pd.Series(portfolio_values, index=pd.to_datetime(portfolio_dates))
@@ -495,6 +534,9 @@ def main(
                 "cumulative_return_pct": (
                     (final_value / initial_capital - 1) * 100 if initial_capital > 0 else 0
                 ),
+                "risk_off_periods": risk_off_periods,
+                "benchmark_cum_ret_pct": benchmark_cum_ret_pct,
+                "benchmark_cagr_pct": benchmark_cagr_pct,
             }
 
             # 월별/연간 수익률 계산
@@ -552,13 +594,23 @@ def main(
                     + "\n"
                     + "=" * 30
                 )
+                test_months_range = getattr(settings, "TEST_MONTHS_RANGE", 12)
                 logger.info(
-                    f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({years:.2f} 년)"
+                    f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)"
                 )
+                if summary.get("risk_off_periods"):
+                    for start, end in summary["risk_off_periods"]:
+                        logger.info(
+                            f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
+                        )
                 logger.info(f"| 초기 자본: {money_formatter(summary['initial_capital'])}")
                 logger.info(f"| 최종 자산: {money_formatter(summary['final_value'])}")
-                logger.info(f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}%")
-                logger.info(f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}%")
+                logger.info(
+                    f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% (S&P 500: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
+                )
+                logger.info(
+                    f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% (S&P 500: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
+                )
                 logger.info(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
                 logger.info(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
                 logger.info(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")

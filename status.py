@@ -39,6 +39,79 @@ try:
 except ImportError:
     yf = None
 
+def get_market_regime_status_string() -> Optional[str]:
+    """
+    S&P 500 지수를 기준으로 현재 시장 레짐 상태를 계산하여 HTML 문자열로 반환합니다.
+    """
+    # 설정 로드
+    try:
+        regime_filter_enabled = bool(getattr(settings, "MARKET_REGIME_FILTER_ENABLED", False))
+        if not regime_filter_enabled:
+            return None
+        
+        regime_ticker = str(getattr(settings, "MARKET_REGIME_FILTER_TICKER", "^GSPC"))
+        regime_ma_period = int(getattr(settings, "MARKET_REGIME_FILTER_MA_PERIOD", 20))
+    except AttributeError:
+        return None
+
+    # 데이터 로딩에 필요한 기간 계산 (마지막 중단 기간을 찾기 위해 12개월치 데이터 조회)
+    required_months = 12
+
+    # 데이터 조회
+    df_regime = fetch_ohlcv(
+        regime_ticker, country="kor", months_range=[required_months, 0] # country doesn't matter for index
+    )
+
+    if df_regime is None or df_regime.empty or len(df_regime) < regime_ma_period:
+        return '<span style="color:grey">시장 상태: 데이터 부족</span>'
+
+    # 지표 계산
+    df_regime["MA"] = df_regime["Close"].rolling(window=regime_ma_period).mean()
+    df_regime.dropna(subset=['MA'], inplace=True)
+
+    # --- 최근 투자 중단 기간 찾기 ---
+    risk_off_periods_str = ""
+    if not df_regime.empty:
+        is_risk_off_series = df_regime["Close"] < df_regime["MA"]
+
+        # 모든 완료된 리스크 오프 기간을 찾습니다.
+        completed_periods = []
+        in_period = False
+        start_date = None
+        for i, (dt, is_off) in enumerate(is_risk_off_series.items()):
+            if is_off and not in_period:
+                in_period = True
+                start_date = dt
+            elif not is_off and in_period:
+                in_period = False
+                # 리스크 오프 기간의 마지막 날은 is_off가 False가 되기 바로 전날입니다.
+                # i > 0 이므로 is_risk_off_series.index[i - 1]은 안전합니다.
+                end_date = is_risk_off_series.index[i - 1]
+                completed_periods.append((start_date, end_date))
+                start_date = None
+
+        if completed_periods:
+            # 최근 1개의 중단 기간을 가져옵니다.
+            recent_periods = completed_periods[-1:]
+            period_strings = [
+                f"{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
+                for start, end in recent_periods
+            ]
+            if period_strings:
+                risk_off_periods_str = f" (최근 중단: {', '.join(period_strings)})"
+
+    current_price = df_regime["Close"].iloc[-1]
+    current_ma = df_regime["MA"].iloc[-1]
+    
+    if pd.notna(current_price) and pd.notna(current_ma) and current_ma > 0:
+        proximity_pct = ((current_price / current_ma) - 1) * 100
+        is_risk_off = current_price < current_ma
+        
+        status_text = "위험" if is_risk_off else "안전"
+        color = "orange" if is_risk_off else "green"
+        return f'시장: <span style="color:{color}">{status_text} ({proximity_pct:+.1f}%)</span>{risk_off_periods_str}'
+    
+    return f'<span style="color:grey">시장 상태: 계산 불가</span>{risk_off_periods_str}'
 
 def is_market_open(country: str = "kor") -> bool:
     """
@@ -207,7 +280,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
         print(
             f"오류: '{country}' 국가의 포트폴리오 스냅샷을 DB에서 찾을 수 없습니다. 웹 앱의 '거래 입력' 또는 '설정' 탭을 통해 데이터를 먼저 생성해주세요."
         )
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, None
     try:
         # DB에서 가져온 date는 이미 datetime 객체일 수 있습니다.
         base_date = pd.to_datetime(portfolio_data["date"]).normalize()
@@ -260,15 +333,45 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
     ma_period_stock = int(getattr(settings, "MA_PERIOD_FOR_STOCK", 75))
     atr_period_norm = int(getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20))
 
+    # 시장 레짐 필터 설정 로드
+    regime_filter_enabled = bool(getattr(settings, "MARKET_REGIME_FILTER_ENABLED", False))
+    regime_ma_period = int(getattr(settings, "MARKET_REGIME_FILTER_MA_PERIOD", 20))
+
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
     if not stocks_from_db:
         print(f"오류: '{country}_stocks' 컬렉션에서 현황을 계산할 종목을 찾을 수 없습니다.")
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, None
     etf_tickers_status = {stock['ticker'] for stock in stocks_from_db if stock.get('type') == 'etf'}
 
-    max_ma_period = max(ma_period_etf, ma_period_stock)
+    max_ma_period = max(ma_period_etf, ma_period_stock, regime_ma_period if regime_filter_enabled else 0)
     required_days = max(max_ma_period, atr_period_norm) + 5  # 버퍼 추가
     required_months = (required_days // 22) + 2
+
+    # --- 시장 레짐 필터 데이터 로딩 ---
+    regime_info = None
+    if regime_filter_enabled:
+        regime_ticker = str(getattr(settings, "MARKET_REGIME_FILTER_TICKER", "^GSPC"))
+        
+        df_regime = fetch_ohlcv(
+            regime_ticker, country=country, months_range=[required_months, 0], base_date=base_date
+        )
+        
+        if df_regime is not None and not df_regime.empty and len(df_regime) >= regime_ma_period:
+            df_regime["MA"] = df_regime["Close"].rolling(window=regime_ma_period).mean()
+            
+            current_price = df_regime["Close"].iloc[-1]
+            current_ma = df_regime["MA"].iloc[-1]
+            
+            if pd.notna(current_price) and pd.notna(current_ma) and current_ma > 0:
+                proximity_pct = ((current_price / current_ma) - 1) * 100
+                is_risk_off = current_price < current_ma
+                regime_info = {
+                    "ticker": regime_ticker,
+                    "price": current_price,
+                    "ma": current_ma,
+                    "proximity_pct": proximity_pct,
+                    "is_risk_off": is_risk_off,
+                }
 
     data_by_tkr = {}
     total_holdings_value = 0.0
@@ -312,7 +415,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
                 "shares": sh, "avg_cost": ac, "df": result["df"]
             }
     
-    return portfolio_data, data_by_tkr, total_holdings_value, datestamps, pairs, base_date
+    return portfolio_data, data_by_tkr, total_holdings_value, datestamps, pairs, base_date, regime_info
 
 
 def _build_header_line(country, portfolio_data, current_equity, total_holdings_value, data_by_tkr, base_date):
@@ -335,20 +438,6 @@ def _build_header_line(country, portfolio_data, current_equity, total_holdings_v
     app_settings = get_app_settings(country)
     initial_capital_local = float(app_settings.get("initial_capital", 0)) if app_settings else 0.0
     cum_ret_pct = ((current_equity / initial_capital_local) - 1.0) * 100.0 if initial_capital_local > 0 else 0.0
-
-    # 교체 매매 관련 설정 로드
-    replace_weaker_stock = bool(
-        getattr(settings, "REPLACE_WEAKER_STOCK", False)
-    )
-    replace_threshold = float(
-        getattr(settings, "REPLACE_SCORE_THRESHOLD", 0.0)
-    )
-    atr_period = int(
-        getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20)
-    )
-    max_replacements_per_day = int(
-        getattr(settings, "MAX_REPLACEMENTS_PER_DAY", 1)
-    )
 
     # Determine trading-calendar-based label/date via pykrx
     ref_ticker_for_cal = next(iter(data_by_tkr.keys())) if data_by_tkr else None
@@ -446,7 +535,7 @@ def generate_status_report(
     if not result or not result[0]:
         return None
 
-    portfolio_data, data_by_tkr, total_holdings_value, datestamps, pairs, base_date = result
+    portfolio_data, data_by_tkr, total_holdings_value, datestamps, pairs, base_date, regime_info = result
     current_equity = float(portfolio_data.get("total_equity", 0.0))
     holdings = {
         item["ticker"]: {
@@ -912,7 +1001,27 @@ def main(country: str = "kor", date_str: Optional[str] = None):
 
             display_rows.append(display_row)
 
-        table_lines = render_table_eaw(headers, display_rows, aligns=None)
+        aligns = [
+            "right",  # #
+            "right",  # 티커
+            "left",   # 이름
+            "center", # 상태
+            "left",   # 매수일
+            "right",  # 보유일
+            "right",  # 현재가
+            "right",  # 일간수익률
+            "right",  # 보유수량
+            "right",  # 금액
+            "right",  # 누적수익률
+            "right",  # 비중
+            "right",  # 이평선(값)
+            "right",  # 고점대비
+            "right",  # 점수
+            "center", # 신호지속일
+            "left",   # 문구
+        ]
+
+        table_lines = render_table_eaw(headers, display_rows, aligns=aligns)
 
         print("\n" + header_line)
         print("\n".join(table_lines))

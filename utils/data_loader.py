@@ -39,6 +39,9 @@ def is_pykrx_available() -> bool:
 
 def format_aus_ticker_for_yfinance(ticker: str) -> str:
     """'ASX:BHP' 또는 'BHP' 같은 티커를 yfinance API 형식인 'BHP.AX'로 변환합니다."""
+    # 지수 티커(예: ^AXJO)는 변환하지 않습니다.
+    if ticker.startswith("^"):
+        return ticker
     if ticker.upper().startswith("ASX:"):
         ticker = ticker[4:]
     if not ticker.upper().endswith(".AX"):
@@ -138,6 +141,41 @@ def fetch_ohlcv(
     if start_dt > end_dt:
         start_dt, end_dt = end_dt, start_dt
 
+    # 지수 티커는 국가와 상관없이 yfinance로 조회합니다.
+    if ticker.startswith("^"):
+        if yf is None:
+            logging.getLogger(__name__).error(
+                "yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
+            )
+            return None
+        try:
+            df = yf.download(
+                ticker,
+                start=start_dt,
+                end=end_dt + pd.Timedelta(days=1),
+                progress=False,
+                auto_adjust=True,
+            )
+            if df.empty:
+                return None
+
+            # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
+            # 컬럼을 단순화하고 중복을 제거합니다.
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+                df = df.loc[:, ~df.columns.duplicated()]
+
+            # yfinance는 timezone-aware index를 반환할 수 있습니다.
+            # 데이터 일관성을 위해 중복을 제거하고 naive timestamp로 변환합니다.
+            if not df.index.is_unique:
+                df = df[~df.index.duplicated(keep="first")]
+            if df.index.tz is not None:
+                df.index = df.index.tz_localize(None)
+            return df
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"{ticker}의 데이터 조회 중 오류: {e}")
+            return None
+
     if country == "kor":
         if not is_pykrx_available():
             logging.getLogger(__name__).error(
@@ -203,6 +241,19 @@ def fetch_ohlcv(
             )
             if df.empty:
                 return None
+
+            # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
+            # 컬럼을 단순화하고 중복을 제거합니다.
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+                df = df.loc[:, ~df.columns.duplicated()]
+
+            # yfinance는 timezone-aware index를 반환할 수 있습니다.
+            # 데이터 일관성을 위해 중복을 제거하고 naive timestamp로 변환합니다.
+            if not df.index.is_unique:
+                df = df[~df.index.duplicated(keep="first")]
+            if df.index.tz is not None:
+                df.index = df.index.tz_localize(None)
             # yfinance는 이미 컬럼명이 영어로 되어있음
             return df
         except Exception as e:

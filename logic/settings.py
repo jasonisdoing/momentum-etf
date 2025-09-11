@@ -1,9 +1,11 @@
 # 전략 설정
 
 # 이 파일에서는 매매 전략에 사용되는 고유 파라미터를 정의합니다.
-
 INITIAL_CAPITAL = 100000000
-TEST_DATE_RANGE = ["2025-01-01", "2025-09-30"]
+# 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월 데이터로 테스트)
+TEST_MONTHS_RANGE = 60
+
+
 PORTFOLIO_TOPN = 10
 MIN_POSITION_PCT = 0.10
 HOLDING_STOP_LOSS_PCT = -10.0
@@ -15,6 +17,12 @@ COOLDOWN_DAYS = 5
 # 가격이 이동평균선 위에 있으면 매수, 아래에 있으면 매도합니다.
 MA_PERIOD_FOR_ETF = 15
 MA_PERIOD_FOR_STOCK = 75
+
+# --- 시장 레짐 필터 (Market Regime Filter) ---
+# S&P 500, KOSPI 등 주요 지수가 장기 이동평균선 아래에 있을 때 모든 주식을 매도하고 현금 보유
+MARKET_REGIME_FILTER_ENABLED = True
+MARKET_REGIME_FILTER_TICKER = "^GSPC"  # S&P 500 지수
+MARKET_REGIME_FILTER_MA_PERIOD = 20
 
 # 포트폴리오가 가득 찼을 때(PORTFOLIO_TOPN), 새로운 강한 신호가 발생한 종목이
 # 기존 보유 종목 중 가장 점수가 낮은 종목보다 강할 경우 교체 매매를 실행할지 여부.
