@@ -24,6 +24,7 @@ from utils.db_manager import get_db_connection, get_portfolio_snapshot, get_prev
 from utils.data_loader import (
     fetch_ohlcv,
     format_aus_ticker_for_yfinance,
+    get_trading_days,
 )
 from utils.report import format_aud_money, format_kr_money, render_table_eaw, format_aud_price
 
@@ -112,6 +113,83 @@ def get_market_regime_status_string() -> Optional[str]:
         return f'시장: <span style="color:{color}">{status_text} ({proximity_pct:+.1f}%)</span>{risk_off_periods_str}'
     
     return f'<span style="color:grey">시장 상태: 계산 불가</span>{risk_off_periods_str}'
+
+
+def get_benchmark_status_string(country: str) -> Optional[str]:
+    """
+    포트폴리오의 누적 수익률을 벤치마크와 비교하여 초과 성과를 HTML 문자열로 반환합니다.
+    """
+    # 1. 설정 로드
+    app_settings = get_app_settings(country)
+    if not app_settings or "initial_capital" not in app_settings or "initial_date" not in app_settings:
+        return None
+
+    initial_capital = float(app_settings["initial_capital"])
+    initial_date = pd.to_datetime(app_settings["initial_date"])
+
+    if initial_capital <= 0:
+        return None
+
+    # 2. 최신 포트폴리오 스냅샷 로드
+    portfolio_data = get_portfolio_snapshot(country)  # date_str=None to get latest
+    if not portfolio_data:
+        return None
+
+    current_equity = float(portfolio_data.get("total_equity", 0.0))
+    base_date = pd.to_datetime(portfolio_data["date"]).normalize()
+
+    # 3. 포트폴리오 누적 수익률 계산
+    portfolio_cum_ret_pct = ((current_equity / initial_capital) - 1.0) * 100.0
+
+    # 4. 벤치마크 티커 결정
+    benchmark_tickers_map = {
+        "kor": "379800",  # KODEX 미국S&P500TR
+        "aus": "IVV.AX",  # iShares Core S&P 500 ETF
+    }
+    benchmark_ticker = getattr(settings, "BENCHMARK_TICKERS", benchmark_tickers_map).get(country)
+    if not benchmark_ticker:
+        return None
+
+    # 5. 벤치마크 데이터 조회
+    df_benchmark = fetch_ohlcv(
+        benchmark_ticker,
+        country=country,
+        date_range=[initial_date.strftime("%Y-%m-%d"), base_date.strftime("%Y-%m-%d")],
+    )
+
+    if df_benchmark is None or df_benchmark.empty:
+        return f'<span style="color:grey">벤치마크({benchmark_ticker}) 데이터 조회 실패</span>'
+
+    # 6. 벤치마크 성과 계산
+    start_prices = df_benchmark[df_benchmark.index >= initial_date]["Close"]
+    if start_prices.empty:
+        return f'<span style="color:grey">벤치마크 시작 가격 조회 실패</span>'
+    benchmark_start_price = start_prices.iloc[0]
+
+    end_prices = df_benchmark[df_benchmark.index <= base_date]["Close"]
+    if end_prices.empty:
+        return f'<span style="color:grey">벤치마크 종료 가격 조회 실패</span>'
+    benchmark_end_price = end_prices.iloc[-1]
+
+    if pd.isna(benchmark_start_price) or pd.isna(benchmark_end_price) or benchmark_start_price <= 0:
+        return '<span style="color:grey">벤치마크 가격 정보 오류</span>'
+
+    benchmark_cum_ret_pct = ((benchmark_end_price / benchmark_start_price) - 1.0) * 100.0
+
+    # 7. 초과 성과 계산 및 문자열 포맷팅
+    excess_return_pct = portfolio_cum_ret_pct - benchmark_cum_ret_pct
+    color = "red" if excess_return_pct > 0 else "blue" if excess_return_pct < 0 else "black"
+
+    from utils.data_loader import fetch_yfinance_name
+    benchmark_name = ""
+    if country == 'kor' and _stock:
+        try: benchmark_name = _stock.get_etf_ticker_name(benchmark_ticker)
+        except Exception: pass
+    elif country == 'aus':
+        benchmark_name = fetch_yfinance_name(benchmark_ticker)
+
+    benchmark_display_name = f" vs {benchmark_name}" if benchmark_name else f" vs {benchmark_ticker}"
+    return f'초과성과: <span style="color:{color}">{excess_return_pct:+.2f}%</span>{benchmark_display_name}'
 
 def is_market_open(country: str = "kor") -> bool:
     """
@@ -604,36 +682,26 @@ def generate_status_report(
         consecutive_info = consecutive_holding_info.get(tkr)
         buy_date = consecutive_info.get("buy_date") if consecutive_info else None
         holding_days = 0
-        if sh > 0 and buy_date:
+
+        if buy_date:
+            # label_date는 naive timestamp이므로, buy_date도 naive로 만듭니다.
+            if hasattr(buy_date, 'tzinfo') and buy_date.tzinfo is not None:
+                buy_date = buy_date.tz_localize(None)
+            buy_date = pd.to_datetime(buy_date).normalize()
+
+        if sh > 0 and buy_date and buy_date <= label_date:
             try:
-                # 거래일 기준으로 보유일수 계산
-                if country == "kor":
-                    if _stock and ref_ticker_for_cal and buy_date <= label_date:
-                        df_days = _stock.get_market_ohlcv_by_date(
-                            buy_date.strftime("%Y%m%d"),
-                            label_date.strftime("%Y%m%d"),
-                            ref_ticker_for_cal,
-                        )
-                        holding_days = len(df_days)
-                    else:
-                        holding_days = (label_date - buy_date).days + 1
-                elif country == "aus":
-                    if yf and ref_ticker_for_cal and buy_date <= label_date:
-                        ticker_yf = format_aus_ticker_for_yfinance(ref_ticker_for_cal)
-                        df_days = yf.download(
-                            ticker_yf,
-                            start=buy_date,
-                            end=label_date + pd.Timedelta(days=1),
-                            progress=False, auto_adjust=True
-                        )
-                        holding_days = len(df_days)
-                    else:
-                        holding_days = (label_date - buy_date).days + 1
-                else: # Fallback
-                    # pykrx 사용 불가 시, 단순 일수 차이로 계산 (1을 더해 보유일수 개념으로)
-                    holding_days = (label_date - buy_date).days + 1
-            except Exception:
-                holding_days = 0  # fallback
+                # 거래일 기준으로 보유일수 계산 (캐시된 함수 사용)
+                trading_days_in_period = get_trading_days(
+                    buy_date.strftime("%Y-%m-%d"),
+                    label_date.strftime("%Y-%m-%d"),
+                    country
+                )
+                holding_days = len(trading_days_in_period)
+            except Exception as e:
+                print(f"경고: 보유일 계산 중 오류 발생 ({tkr}): {e}. 달력일 기준으로 대체합니다.")
+                # 거래일 계산 실패 시, 달력일 기준으로 계산
+                holding_days = (label_date - buy_date).days + 1
 
         state = "HOLD" if sh > 0 else "WAIT"
         phrase = ""

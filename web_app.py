@@ -1,5 +1,6 @@
 import os
 import sys
+import warnings
 
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -8,10 +9,13 @@ import streamlit as st
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+
+
 
 import settings as global_settings
 from logic.settings import TEST_MONTHS_RANGE, SECTOR_COUNTRY_OPTIONS
-from status import generate_status_report, get_market_regime_status_string
+from status import generate_status_report, get_market_regime_status_string, get_benchmark_status_string
 from utils.data_loader import fetch_yfinance_name, get_trading_days, fetch_pykrx_name, fetch_ohlcv_for_tickers
 from utils.db_manager import (
     get_available_snapshot_dates, get_portfolio_snapshot, get_all_trades, get_all_daily_equities, 
@@ -30,6 +34,13 @@ COUNTRY_CODE_MAP = {"kor": "한국", "aus": "호주"}
 
 
 # --- Functions ---
+
+@st.cache_data(ttl=600)
+def get_cached_benchmark_status(country: str) -> Optional[str]:
+    """벤치마크 비교 문자열을 캐시하여 반환합니다."""
+    # status.py에서 직접 임포트하면 순환 참조 가능성이 있으므로, 함수 내에서 호출합니다.
+    return get_benchmark_status_string(country)
+
 
 
 def get_cached_status_report(country: str, date_str: str, force_recalculate: bool = False, prefetched_data: Optional[Dict[str, pd.DataFrame]] = None):
@@ -124,12 +135,13 @@ def style_returns(val) -> str:
 def show_buy_dialog(country_code: str):
     """매수(BUY) 거래 입력을 위한 모달 다이얼로그를 표시합니다."""
 
+    currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
     # on_click 콜백은 위젯이 렌더링되기 전에 실행됩니다.
     # 따라서 모든 로직을 콜백 함수 내에서 처리하고, st.rerun()으로 다이얼로그를 닫습니다.
     def on_buy_submit():
         # st.session_state에서 폼 데이터 가져오기
         trade_date = st.session_state[f"buy_date_{country_code}"]
-        ticker = st.session_state[f"buy_ticker_{country_code}"]
+        ticker = st.session_state[f"buy_ticker_{country_code}"].strip()
         shares = st.session_state[f"buy_shares_{country_code}"]
         price = st.session_state[f"buy_price_{country_code}"]
 
@@ -191,7 +203,7 @@ def show_buy_dialog(country_code: str):
         st.text_input("종목코드 (티커)", key=f"buy_ticker_{country_code}")
         st.number_input("수량", min_value=1, step=1, key=f"buy_shares_{country_code}")
         st.number_input(
-            "매수 단가", 
+            f"매수 단가{currency_str}", 
             min_value=0.0, 
             format="%.4f" if country_code == "aus" else "%d",
             key=f"buy_price_{country_code}"
@@ -202,6 +214,7 @@ def show_buy_dialog(country_code: str):
 @st.dialog("SELL", width="large")
 def show_sell_dialog(country_code: str):
     """보유 종목 매도를 위한 모달 다이얼로그를 표시합니다."""
+    currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
     from utils.data_loader import fetch_naver_realtime_price, fetch_ohlcv
     
     latest_date_str = get_available_snapshot_dates(country_code)[0] if get_available_snapshot_dates(country_code) else None
@@ -310,24 +323,26 @@ def show_sell_dialog(country_code: str):
         # 정렬이 필요한 컬럼은 숫자형으로 유지하고, column_config에서 포맷팅합니다.
         # 이렇게 하면 '평가금액' 등에서 문자열이 아닌 숫자 기준으로 올바르게 정렬됩니다.
         df_display = df_holdings[['선택', 'name', 'ticker', 'shares', 'return_pct', 'value', 'price']].copy()
+        value_col_name = f'평가금액{currency_str}'
+        price_col_name = f'현재가{currency_str}'
         df_display.rename(columns={
-            'name': '종목명', 'ticker': '티커', 'shares': '보유수량',
-            'return_pct': '수익률', 'value': '평가금액', 'price': '현재가'
+            'name': '종목명', 'ticker': '티커', 'shares': '보유수량', 'return_pct': '수익률', 
+            'value': value_col_name, 'price': price_col_name
         }, inplace=True)
         
         st.data_editor(
             df_display, hide_index=True, width='stretch',
             key=f"sell_editor_{country_code}",
-            disabled=['종목명', '티커', '보유수량', '평가금액', '수익률', '현재가'],
+            disabled=['종목명', '티커', '보유수량', value_col_name, '수익률', price_col_name],
             column_config={
                 "선택": st.column_config.CheckboxColumn(required=True),
                 "보유수량": st.column_config.NumberColumn(format="%d"),
                 "수익률": st.column_config.NumberColumn(format="%.2f%%"),
-                "평가금액": st.column_config.NumberColumn(
+                value_col_name: st.column_config.NumberColumn(
                     # 쉼표(,)를 포맷에 추가하여 3자리마다 구분자를 표시합니다.
                     format="%,.0f" if country_code == 'kor' else "%,.2f"
                 ),
-                "현재가": st.column_config.NumberColumn(
+                price_col_name: st.column_config.NumberColumn(
                     format="%.4f" if country_code == 'aus' else "%d"
                 ),
             }
@@ -714,10 +729,18 @@ def render_country_tab(country_code: str):
         else:
             latest_date_str = sorted_dates[0]
 
-            # 다시 계산 버튼
-            force_recalc = st.button("다시 계산", key=f"recalc_status_{country_code}_{latest_date_str}")
+            col1, col2 = st.columns([1, 4])
+            with col1:
+                force_recalc = st.button("다시 계산", key=f"recalc_status_{country_code}_{latest_date_str}")
+            with col2:
+                # 벤치마크 성과를 표시합니다.
+                benchmark_str = get_cached_benchmark_status(country_code)
+                if benchmark_str:
+                    st.markdown(
+                        f'<div style="text-align: right; padding-top: 0.5rem;">{benchmark_str}</div>', unsafe_allow_html=True
+                    )
 
-            spinner_message = f"'{latest_date_str}' 기준 현황 데이터를 계산하고 있습니다..."
+            spinner_message = f"'{latest_date_str}' 기준 현황 데이터를 계산하고 있습니다..."            
             with st.spinner(spinner_message):
                 result = get_cached_status_report(
                     country=country_code, date_str=latest_date_str, force_recalculate=force_recalc
@@ -855,19 +878,25 @@ def render_country_tab(country_code: str):
         with history_equity_tab:
             app_settings = get_app_settings(country_code)
             initial_date = (app_settings.get("initial_date") if app_settings else None) or (datetime.now() - pd.DateOffset(months=3))
-            
+
+            currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
+
             start_date_str = initial_date.strftime("%Y-%m-%d")
             end_date_str = datetime.now().strftime("%Y-%m-%d")
 
             with st.spinner("거래일 및 평가금액 데이터를 불러오는 중..."):
                 all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
-                if not all_trading_days:
+                if not all_trading_days and country_code == 'kor': # 호주는 yfinance가 주말을 건너뛰므로 거래일 조회가 필수는 아님
                     st.warning("거래일을 조회할 수 없습니다.")
                 else:
                     start_dt_obj = pd.to_datetime(start_date_str).to_pydatetime()
                     end_dt_obj = pd.to_datetime(end_date_str).to_pydatetime()
                     existing_equities = get_all_daily_equities(country_code, start_dt_obj, end_dt_obj)
                     equity_data_map = {pd.to_datetime(e['date']).normalize(): e for e in existing_equities}
+
+                    # 거래일 조회가 실패한 경우(예: 호주), DB에 있는 날짜만 사용
+                    if not all_trading_days:
+                        all_trading_days = sorted(list(equity_data_map.keys()))
 
                     data_for_editor = []
                     for trade_date in all_trading_days:
@@ -883,11 +912,11 @@ def render_country_tab(country_code: str):
 
                     column_config = {
                         "date": st.column_config.DateColumn("일자", format="YYYY-MM-DD", disabled=True),
-                        "total_equity": st.column_config.NumberColumn("총 평가금액", format="%.2f" if country_code == "aus" else "%d", required=True),
+                        "total_equity": st.column_config.NumberColumn(f"총 평가금액{currency_str}", format="%.2f" if country_code == "aus" else "%d", required=True),
                     }
                     if country_code == "aus":
-                        column_config["is_value"] = st.column_config.NumberColumn("해외주식 평가액", format="%.2f")
-                        column_config["is_change_pct"] = st.column_config.NumberColumn("해외주식 수익률(%)", format="%.2f")
+                        column_config["is_value"] = st.column_config.NumberColumn(f"해외주식 평가액{currency_str}", format="%.2f")
+                        column_config["is_change_pct"] = st.column_config.NumberColumn("해외주식 수익률(%)", format="%.2f", help="수익률(%)만 입력합니다. 예: 5.5")
 
                     st.info("총 평가금액을 수정한 후 아래 '저장하기' 버튼을 눌러주세요.")
                     
@@ -992,8 +1021,10 @@ def render_country_tab(country_code: str):
         current_date = db_settings.get("initial_date", default_date) if db_settings else default_date
 
         with st.form(key=f"settings_form_{country_code}"):
+            currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
+
             new_capital = st.number_input(
-                "초기 자본금 (INITIAL_CAPITAL)",
+                f"초기 자본금 (INITIAL_CAPITAL){currency_str}",
                 value=float(current_capital) if country_code == "aus" else int(current_capital),
                 format="%.2f" if country_code == "aus" else "%d",
                 help="포트폴리오의 시작 자본금을 설정합니다. 누적 수익률 계산의 기준이 됩니다."

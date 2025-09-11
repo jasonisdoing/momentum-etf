@@ -6,6 +6,7 @@ import os
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
+from threading import Lock
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
@@ -30,6 +31,8 @@ try:
     from pykrx import stock as _stock
 except Exception:
     _stock = None
+
+yf_lock = Lock()
 
 
 def is_pykrx_available() -> bool:
@@ -78,7 +81,8 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
             # ASX 200 지수로 거래일 조회
             # yfinance의 end는 exclusive이므로 하루를 더해줍니다.
             end_date_plus_one = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-            df = yf.download("^AXJO", start=start_date, end=end_date_plus_one, progress=False, auto_adjust=True)
+            with yf_lock:
+                df = yf.download("^AXJO", start=start_date, end=end_date_plus_one, progress=False, auto_adjust=True)
             # yfinance는 timezone-aware index를 반환하므로, naive date-only timestamp로 변환합니다.
             trading_days_ts = [pd.Timestamp(d.date()) for d in df.index]
         except Exception as e:
@@ -149,13 +153,14 @@ def fetch_ohlcv(
             )
             return None
         try:
-            df = yf.download(
-                ticker,
-                start=start_dt,
-                end=end_dt + pd.Timedelta(days=1),
-                progress=False,
-                auto_adjust=True,
-            )
+            with yf_lock:
+                df = yf.download(
+                    ticker,
+                    start=start_dt,
+                    end=end_dt + pd.Timedelta(days=1),
+                    progress=False,
+                    auto_adjust=True,
+                )
             if df.empty:
                 return None
 
@@ -232,13 +237,14 @@ def fetch_ohlcv(
 
         try:
             # yfinance는 start/end를 사용하며, end 날짜를 포함하려면 하루를 더해야 할 수 있습니다.
-            df = yf.download(
-                ticker_yf,
-                start=start_dt,
-                end=end_dt + pd.Timedelta(days=1),
-                progress=False,
-                auto_adjust=True,
-            )
+            with yf_lock:
+                df = yf.download(
+                    ticker_yf,
+                    start=start_dt,
+                    end=end_dt + pd.Timedelta(days=1),
+                    progress=False,
+                    auto_adjust=True,
+                )
             if df.empty:
                 return None
 
