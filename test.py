@@ -1,4 +1,3 @@
-import importlib
 import logging
 import os
 import sys
@@ -8,15 +7,18 @@ from typing import Dict, Optional
 
 import pandas as pd
 
-import settings
-from utils.data_loader import read_tickers_file
-from utils.report import format_aud_money, format_kr_money, render_table_eaw
+# 프로젝트 루트를 Python 경로에 추가
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from logic import settings
+from logic import strategy as strategy_module
+from utils.report import format_aud_money, format_kr_money, render_table_eaw, format_aud_price
+from utils.db_manager import get_stocks
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 
 def main(
-    strategy_name: str = "jason",
     country: str = "kor",
     quiet: bool = False,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
@@ -30,8 +32,8 @@ def main(
     # 국가별로 다른 포맷터 사용
     if country == "aus":
         money_formatter = format_aud_money
-        price_formatter = format_aud_money
-        ma_formatter = format_aud_money
+        price_formatter = format_aud_price
+        ma_formatter = format_aud_price
     else:
         # 원화(KRW) 형식으로 가격을 포맷합니다.
         money_formatter = format_kr_money
@@ -66,16 +68,10 @@ def main(
 
     # 티커 목록 결정
     if not quiet:
-        print(f"\n[고정 유니버스] data/{country}/tickers_etf.txt와 tickers_stock.txt 파일의 종목을 사용합니다.")
-    etf_pairs = read_tickers_file(f"data/{country}/tickers_etf.txt", country=country)
-    stock_pairs = read_tickers_file(f"data/{country}/tickers_stock.txt", country=country)
-    pairs = etf_pairs + stock_pairs
-
-    if not pairs:
-        print("오류: 백테스트에 사용할 티커를 찾을 수 없습니다.")
-        print(
-            f"      data/{country}/tickers_etf.txt 또는 tickers_stock.txt 파일이 비어있거나 존재하지 않을 수 있습니다."
-        )
+        print(f"\nDB의 '{country}_stocks' 컬렉션에서 종목을 가져와 백테스트를 실행합니다.")
+    stocks_from_db = get_stocks(country)
+    if not stocks_from_db:
+        print(f"오류: '{country}_stocks' 컬렉션에서 백테스트에 사용할 종목을 찾을 수 없습니다.")
         return
 
     logger = logging.getLogger("backtester")
@@ -92,7 +88,7 @@ def main(
         # 파일 핸들러 설정
         log_dir = "logs"
         os.makedirs(log_dir, exist_ok=True)
-        log_path = os.path.join(log_dir, f"test_{country}_{strategy_name}.log")
+        log_path = os.path.join(log_dir, f"test_{country}.log")
         file_handler = logging.FileHandler(log_path, "w", encoding="utf-8")
         file_handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(file_handler)
@@ -109,41 +105,26 @@ def main(
             f"# 시작 {datetime.now().isoformat()} | 기간={period_label} | 초기자본={int(initial_capital):,}\n"
         )
 
-        # 전략 모듈 로드
-        try:
-            # 패키지 기반 전략(예: logics/jason/strategy.py)을 먼저 시도
-            strategy_module = importlib.import_module(f"logics.{strategy_name}.strategy")
-        except ImportError:
-            try:
-                # 단일 파일 기반 전략(e.g., logics/my_strategy.py)으로 폴백
-                strategy_module = importlib.import_module(f"logics.{strategy_name}")
-            except ImportError:
-                print(
-                    f"오류: '{strategy_name}' 전략을 찾을 수 없습니다. logics/{strategy_name}/strategy.py "
-                    f"또는 logics/{strategy_name}.py 파일을 확인해주세요."
-                )
-                return
-
         # 전략 모듈에서 백테스트 함수를 가져옵니다.
         try:
             run_portfolio_backtest = getattr(strategy_module, "run_portfolio_backtest")
             run_single_ticker_backtest = getattr(strategy_module, "run_single_ticker_backtest")
         except AttributeError:
             print(
-                f"오류: '{strategy_name}' 전략 모듈에 run_portfolio_backtest 또는 "
+                "오류: 'logic.strategy' 모듈에 run_portfolio_backtest 또는 "
                 "run_single_ticker_backtest 함수가 정의되지 않았습니다."
             )
             return
 
         # 시뮬레이션 실행
         time_series_by_ticker: Dict[str, pd.DataFrame] = {}
-        name_by_ticker: Dict[str, str] = {t: n for t, n in pairs}
+        name_by_ticker: Dict[str, str] = {s['ticker']: s['name'] for s in stocks_from_db}
         # 전역 설정에서 PORTFOLIO_TOPN을 가져옵니다.
         portfolio_topn = int(getattr(settings, "PORTFOLIO_TOPN", 0) or 0)
         if portfolio_topn > 0:
             time_series_by_ticker = (
                 run_portfolio_backtest(
-                    pairs,
+                    stocks=stocks_from_db,
                     months_range=months_range,
                     initial_capital=initial_capital,
                     core_start_date=core_start_dt,
@@ -155,13 +136,15 @@ def main(
                 or {}
             )
             if "CASH" in time_series_by_ticker:
+                name_by_ticker = {s['ticker']: s['name'] for s in stocks_from_db}
                 name_by_ticker["CASH"] = "현금"
         else:
             # 개별 종목 백테스트는 여전히 데이터를 미리 로드해야 합니다.
             from utils.data_loader import fetch_ohlcv
 
             raw_data_by_ticker: Dict[str, pd.DataFrame] = {}
-            for ticker, name in pairs:
+            for stock in stocks_from_db:
+                ticker = stock['ticker']
                 df = fetch_ohlcv(
                     ticker, country=country, months_range=months_range, date_range=test_date_range
                 )
@@ -169,13 +152,15 @@ def main(
                     raw_data_by_ticker[ticker] = df
 
             # 종목별 고정 자본 방식: 전체 자본을 종목 수로 나눔
-            capital_per_ticker = initial_capital / len(pairs) if pairs else 0
-            for ticker, _ in pairs:
+            capital_per_ticker = initial_capital / len(stocks_from_db) if stocks_from_db else 0
+            for stock in stocks_from_db:
+                ticker = stock['ticker']
                 df_ticker = raw_data_by_ticker.get(ticker)
                 if df_ticker is None:
                     continue
                 ts = run_single_ticker_backtest(
                     ticker,
+                    stock_type=stock.get('type', 'stock'),
                     df=df_ticker,
                     months_range=months_range,
                     initial_capital=capital_per_ticker,
@@ -201,7 +186,7 @@ def main(
 
         portfolio_values = []
         portfolio_dates = []
-        prev_total_pv = None
+        prev_total_pv = float(initial_capital)
         prev_dt: Optional[pd.Timestamp] = None
         buy_date_by_ticker: Dict[str, Optional[pd.Timestamp]] = {}
         holding_days_by_ticker: Dict[str, int] = {}
@@ -237,13 +222,8 @@ def main(
             total_cash = total_value - total_holdings
             portfolio_values.append(total_value)
 
-            if total_value <= 0:
-                continue
-
             # 일일 포트폴리오 수익률
-            if prev_total_pv is None:
-                day_ret_pct = 0.0
-            else:
+            if prev_total_pv is not None and prev_total_pv > 0:
                 day_ret_pct = (
                     ((total_value / prev_total_pv) - 1.0) * 100.0 if prev_total_pv > 0 else 0.0
                 )
@@ -268,15 +248,7 @@ def main(
                 )
 
                 # 전략에 따라 동적으로 헤더를 설정합니다.
-                if strategy_name == "jason":
-                    signal_headers = ["1주수익", "2주수익", "모멘텀점수", "ST"]
-                elif strategy_name == "seykota":
-                    signal_headers = ["단기MA", "장기MA", "MA스코어", "필터"]
-                elif strategy_name == "donchian":
-                    signal_headers = ["이평선(값)", "고점대비", "정규화점수", "신호지속일"]
-                else:
-                    signal_headers = ["신호1", "신호2", "점수", "필터"]
-
+                # signal_headers = ["이평선(값)", "고점대비", "점수", "신호지속일"]
                 rows = []
                 headers = [
                     "#",
@@ -292,10 +264,10 @@ def main(
                     "누적수익률",
                     "비중",
                 ]
-                headers.extend(signal_headers)
+                headers.extend(["이평선(값)", "고점대비", "점수", "신호지속일"])
                 headers.append("문구")
 
-                actions = []
+                decisions_list = []
                 for tkr, ts in time_series_by_ticker.items():
                     row = ts.loc[dt]
                     name = name_by_ticker.get(tkr, "")
@@ -313,7 +285,7 @@ def main(
 
                     disp_price = price_today
                     disp_shares = shares
-                    is_trade_decision = decision.startswith(("BUY", "SELL", "CUT", "TRIM"))
+                    is_trade_decision = decision.startswith(("BUY", "SELL", "CUT"))
                     amount = trade_amount if is_trade_decision else (shares * price_today)
                     try:
                         price_prev_val = (
@@ -354,28 +326,10 @@ def main(
                     )
 
                     # 전략에 따라 신호 값의 포맷을 다르게 지정합니다.
-                    if strategy_name == "jason":
-                        s1_str = f"{float(s1):+,.1f}%" if pd.notna(s1) else "-"
-                        s2_str = f"{float(s2):+,.1f}%" if pd.notna(s2) else "-"
-                        score_str = f"{float(score):+,.1f}%" if pd.notna(score) else "-"
-                        filter_str = (
-                            "+1"
-                            if pd.notna(filter_val) and filter_val > 0
-                            else ("-1" if pd.notna(filter_val) and filter_val < 0 else "0")
-                        )
-                    elif strategy_name == "seykota":
-                        s1_str = ma_formatter(s1) if pd.notna(s1) else "-"
-                        s2_str = ma_formatter(s2) if pd.notna(s2) else "-"
-                        score_str = f"{float(score):+,.2f}%" if pd.notna(score) else "-"
-                        filter_str = "-"  # seykota는 필터를 사용하지 않음
-                    elif strategy_name == "donchian":
-                        s1_str = ma_formatter(s1) if pd.notna(s1) else "-"  # 이평선(값)
-                        s2_str = f"{float(s2):.1f}%" if pd.notna(s2) else "-"  # 고점대비
-                        score_str = f"{float(score):+,.2f}" if pd.notna(score) else "-"  # 정규화점수
-                        filter_str = f"{int(filter_val)}일" if pd.notna(filter_val) else "-"
-
-                    else:  # 일반적인 폴백
-                        s1_str, s2_str, score_str, filter_str = "-", "-", "-", "-"
+                    s1_str = ma_formatter(s1) if pd.notna(s1) else "-"
+                    s2_str = f"{float(s2):.1f}%" if pd.notna(s2) else "-"  # 고점대비
+                    score_str = f"{float(score):+,.2f}" if pd.notna(score) else "-"  # 점수
+                    filter_str = f"{int(filter_val)}일" if pd.notna(filter_val) else "-"
 
                     display_status = decision
                     phrase = ""
@@ -401,8 +355,6 @@ def main(
                                 tag = "추세이탈(이익)" if prof >= 0 else "추세이탈(손실)"
                             elif decision == "CUT_STOPLOSS":
                                 tag = "가격기반손절"
-                            elif decision == "TRIM_REBALANCE":
-                                tag = "비중조절"
                             elif decision == "SELL_REPLACE":
                                 tag = "교체매도"
                             else:  # 이전 버전 호환용 (e.g. "SELL")
@@ -445,19 +397,19 @@ def main(
                         filter_str,
                         phrase,
                     ]
-                    actions.append((decision, w, score, tkr, current_row))
+                    decisions_list.append((decision, w, score, tkr, current_row))
 
-                def sort_key(action_tuple):
-                    state, weight, score, tkr, _ = action_tuple
+                def sort_key(decision_tuple):
+                    state, weight, score, tkr, _ = decision_tuple
                     is_hold = 1 if state == "HOLD" else 2
                     is_wait = 1 if state == "WAIT" else 0
                     sort_value = -score if pd.notna(score) and state == "WAIT" else -weight
                     return (is_hold, is_wait, sort_value, tkr)
 
-                actions.sort(key=sort_key)
+                decisions_list.sort(key=sort_key)
 
                 rows_sorted = []
-                for idx, (_, _, _, _, row) in enumerate(actions, 1):
+                for idx, (_, _, _, _, row) in enumerate(decisions_list, 1):
                     row[0] = idx
                     rows_sorted.append(row)
 
@@ -531,7 +483,6 @@ def main(
             calmar_ratio = (cagr * 100) / (max_drawdown * 100) if max_drawdown > 0 else 0
 
             summary = {
-                "strategy": strategy_name,
                 "start_date": start_date.strftime("%Y-%m-%d"),
                 "end_date": end_date.strftime("%Y-%m-%d"),
                 "initial_capital": initial_capital,
@@ -558,7 +509,7 @@ def main(
 
                 # 월별 누적 수익률
                 eom_pv = pv_series.resample("ME").last()
-                monthly_cum_returns = (eom_pv / initial_capital - 1).ffill()
+                monthly_cum_returns = (eom_pv / initial_capital - 1).ffill() if initial_capital > 0 else pd.Series()
                 summary["monthly_cum_returns"] = monthly_cum_returns
 
                 # 연간 수익률
@@ -597,7 +548,7 @@ def main(
                 logger.info(
                     "\n"
                     + "=" * 30
-                    + f"\n 백테스트 결과 요약 ({strategy_name}) ".center(30, "=")
+                    + "\n 백테스트 결과 요약 ".center(30, "=")
                     + "\n"
                     + "=" * 30
                 )
@@ -740,4 +691,4 @@ def main(
 
 
 if __name__ == "__main__":
-    main(quiet=False)
+    main(country="kor", quiet=False)

@@ -1,14 +1,15 @@
 """
 데이터 조회, 파일 입출력 등 공통으로 사용되는 유틸리티 함수 모음.
 """
-
 import functools
 import os
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
+from tqdm import tqdm
 
 # 웹 스크레이핑을 위한 라이브러리
 try:
@@ -48,6 +49,53 @@ def format_aus_ticker_for_yfinance(ticker: str) -> str:
 def get_today_str() -> str:
     """오늘 날짜를 'YYYYMMDD' 형식의 문자열로 반환합니다."""
     return datetime.now().strftime("%Y%m%d")
+
+
+@functools.lru_cache(maxsize=10)
+def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Timestamp]:
+    """
+    지정된 기간 내의 모든 거래일을 pd.Timestamp 리스트로 반환합니다.
+    API에서 아직 제공하지 않는 최근 거래일도 포함하도록 시도합니다.
+    """
+    trading_days_ts = []
+    if country == "kor":
+        if not is_pykrx_available():
+            trading_days_ts = pd.bdate_range(start=start_date, end=end_date).tolist()
+        try:
+            # KOSPI 대표 종목으로 거래일 조회
+            df = _stock.get_market_ohlcv_by_date(start_date.replace("-", ""), end_date.replace("-", ""), "005930")
+            trading_days_ts = df.index.tolist()
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"pykrx로 거래일 조회 중 오류: {e}. 주말 제외 날짜를 사용합니다.")
+            trading_days_ts = pd.bdate_range(start=start_date, end=end_date).tolist()
+    elif country == "aus":
+        if yf is None:
+            trading_days_ts = pd.bdate_range(start=start_date, end=end_date).tolist()
+        try:
+            # ASX 200 지수로 거래일 조회
+            # yfinance의 end는 exclusive이므로 하루를 더해줍니다.
+            end_date_plus_one = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+            df = yf.download("^AXJO", start=start_date, end=end_date_plus_one, progress=False, auto_adjust=True)
+            # yfinance는 timezone-aware index를 반환하므로, naive date-only timestamp로 변환합니다.
+            trading_days_ts = [pd.Timestamp(d.date()) for d in df.index]
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"yfinance로 거래일 조회 중 오류: {e}. 주말 제외 날짜를 사용합니다.")
+            trading_days_ts = pd.bdate_range(start=start_date, end=end_date).tolist()
+
+    # API가 아직 오늘 데이터를 제공하지 않는 경우를 대비하여, 오늘이 평일이면 추가합니다.
+    today = pd.Timestamp.now().normalize()
+    end_date_ts = pd.to_datetime(end_date).normalize()
+
+    if end_date_ts >= today and today.weekday() < 5: # 조회 종료일이 오늘이거나 미래이고, 오늘이 평일인 경우
+        # API 결과에 오늘 날짜가 포함되어 있는지 확인
+        if not any(d.date() == today.date() for d in trading_days_ts):
+            trading_days_ts.append(today)
+
+    # 최종적으로 start_date와 end_date 사이의 날짜만 반환하고, 중복 제거 및 정렬합니다.
+    start_date_ts = pd.to_datetime(start_date).normalize()
+    final_list = [d for d in trading_days_ts if start_date_ts <= d <= end_date_ts]
+    
+    return sorted(list(set(final_list)))
 
 
 def fetch_ohlcv(
@@ -165,65 +213,35 @@ def fetch_ohlcv(
         return None
 
 
-def read_tickers_file(path: str = "tickers.txt", country: str = "kor") -> List[Tuple[str, str]]:
+def fetch_ohlcv_for_tickers(
+    tickers: List[str],
+    country: str,
+    date_range: Optional[List[str]] = None,
+    warmup_days: int = 0,
+) -> Dict[str, pd.DataFrame]:
     """
-    지정된 경로의 파일에서 (티커, 이름) 목록을 읽어옵니다.
-    호주('aus')의 경우, 이름이 비어있으면 yfinance에서 조회하여 파일에 다시 씁니다.
+    주어진 티커 목록에 대해 OHLCV 데이터를 병렬로 조회합니다.
     """
-    items: List[Tuple[str, str]] = []
-    try:
-        # 파일이 존재하지 않으면 빈 리스트를 반환합니다.
-        if not os.path.exists(path):
-            return items
+    prefetched_data = {}
+    
+    if not date_range or len(date_range) != 2:
+        return {}
 
-        with open(path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
+    core_start = pd.to_datetime(date_range[0])
+    warmup_start = core_start - pd.DateOffset(days=warmup_days)
+    adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
 
-        updated_lines = []
-        file_was_updated = False
+    def worker(ticker):
+        return ticker, fetch_ohlcv(ticker, country=country, date_range=adjusted_date_range)
 
-        for line in lines:
-            line_content = line.strip()
-
-            if not line_content or line_content.startswith("#"):
-                updated_lines.append(line)
-                continue
-
-            parts = [p.strip() for p in line_content.replace("\t", ",").split(",") if p.strip()]
-            if len(parts) == 1:
-                parts = line_content.split()
-
-            if len(parts) == 1:
-                ticker, name = parts[0], ""
-            else:
-                ticker, name = parts[0], " ".join(parts[1:])
-
-            original_ticker_from_file = ticker
-
-            if not name and country == "aus":
-                fetched_name = fetch_yfinance_name(original_ticker_from_file)
-                if fetched_name:
-                    name = fetched_name
-                    file_was_updated = True
-                    updated_lines.append(f"{original_ticker_from_file} {name}\n")
-                else:
-                    updated_lines.append(line)
-            else:
-                updated_lines.append(line)
-
-            items.append((original_ticker_from_file, name))
-
-        if file_was_updated:
-            try:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.writelines(updated_lines)
-                print(f"-> '{path}' 파일에 조회된 종목명을 업데이트했습니다.")
-            except Exception as e:
-                print(f"-> 경고: '{path}' 파일 업데이트 중 오류 발생: {e}")
-
-    except FileNotFoundError:
-        logging.getLogger(__name__).error(f"{path} 파일을 찾을 수 없습니다.")
-    return items
+    with ThreadPoolExecutor() as executor:
+        futures = [executor.submit(worker, tkr) for tkr in tickers]
+        for future in tqdm(as_completed(futures), total=len(tickers), desc="전체 시세 데이터 로딩"):
+            tkr, df = future.result()
+            if df is not None and not df.empty:
+                prefetched_data[tkr] = df
+    
+    return prefetched_data
 
 
 def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
@@ -253,6 +271,42 @@ def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
     except Exception as e:
         logging.getLogger(__name__).warning(f"{ticker}의 실시간 가격 조회 중 오류 발생: {e}")
     return None
+
+
+_pykrx_name_cache: Dict[str, str] = {}
+
+
+def fetch_pykrx_name(ticker: str) -> str:
+    """
+    pykrx를 통해 종목의 이름을 가져옵니다. ETF와 일반 주식을 모두 시도합니다.
+    결과는 단일 실행 내에서 캐시됩니다.
+    """
+    if ticker in _pykrx_name_cache:
+        return _pykrx_name_cache[ticker]
+
+    if not is_pykrx_available():
+        return ""
+
+    stock_name = ""
+    try:
+        # 1. ETF 이름 조회 시도
+        name_candidate = _stock.get_etf_ticker_name(ticker)
+        if isinstance(name_candidate, str) and name_candidate:
+            stock_name = name_candidate
+    except Exception:
+        pass
+
+    if not stock_name:
+        try:
+            # 2. 주식 이름 조회 시도
+            name_candidate = _stock.get_market_ticker_name(ticker)
+            if isinstance(name_candidate, str) and name_candidate:
+                stock_name = name_candidate
+        except Exception:
+            pass
+
+    _pykrx_name_cache[ticker] = stock_name
+    return stock_name
 
 
 _yfinance_name_cache: Dict[str, str] = {}

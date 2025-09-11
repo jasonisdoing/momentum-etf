@@ -26,7 +26,7 @@ from pykrx import stock
 
 # --- 설정 ---
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
-EXCLUDE_KEYWORDS = ["레버리지", "채권"]
+EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "선물", "ETN"]
 
 
 def get_latest_trading_day() -> str:
@@ -102,21 +102,19 @@ def create_ticker_sector_map(date: str) -> dict:
     return ticker_sector_map
 
 
-def find_top_gainers_by_sector(min_change_pct: float = 5.0, asset_type: str = None):
+def find_top_gainers_by_sector(min_change_pct: float = 5.0, asset_type: str = "etf"):
     """
     지정된 등락률 이상 상승한 종목들을 섹터별로 분류하여 보여줍니다.
     """
     try:
         latest_day = get_latest_trading_day()
-        type_str = (
-            f" ({asset_type.upper()})" if asset_type else " (전체)"
-        )
+        type_str = f" ({asset_type.upper()})"
         print(f"기준일: {latest_day[:4]}-{latest_day[4:6]}-{latest_day[6:]}{type_str}\n")
 
         df_change = pd.DataFrame()
 
         # 1. ETF 데이터 가져오기
-        if asset_type == "etf" or asset_type is None:
+        if asset_type == "etf":
             print("ETF의 가격 변동 정보를 가져오는 중입니다...")
             try:
                 # 등락률 계산을 위해 이전 거래일이 필요합니다.
@@ -148,7 +146,7 @@ def find_top_gainers_by_sector(min_change_pct: float = 5.0, asset_type: str = No
                 print(f"경고: ETF 정보 조회 중 오류가 발생했습니다: {e}")
 
         # 2. 일반 주식 데이터 가져오기
-        if asset_type == "stock" or asset_type is None:
+        if asset_type == "stock":
             print("일반 주식의 가격 변동 정보를 가져오는 중입니다...")
             try:
                 # get_market_price_change_by_ticker는 '등락률' 컬럼을 포함합니다.
@@ -198,12 +196,9 @@ def find_top_gainers_by_sector(min_change_pct: float = 5.0, asset_type: str = No
         if asset_type == "etf":
             top_gainers["섹터"] = "ETF"
         else:
-            # 'stock' 또는 'None'
+            # 'stock'
             ticker_to_sector = create_ticker_sector_map(latest_day)
-            top_gainers["섹터"] = top_gainers["티커"].map(ticker_to_sector).fillna("기타")
-            # 혼합 모드('None')일 경우, ETF 종목의 섹터를 'ETF'로 명확히 지정합니다.
-            if asset_type is None:
-                top_gainers.loc[top_gainers['티커'].isin(etf_ticker_list), '섹터'] = 'ETF'
+            top_gainers["섹터"] = top_gainers["티커"].map(ticker_to_sector).fillna("글로벌")
 
         grouped = sorted(top_gainers.groupby("섹터"), key=lambda x: x[0])
 
@@ -221,14 +216,14 @@ def find_top_gainers_by_sector(min_change_pct: float = 5.0, asset_type: str = No
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="금일 급등주를 섹터별로 분류하여 보여줍니다.")
     parser.add_argument(
-        "--min-change", type=float, default=5.0, help="검색할 최소 등락률 (기본값: 5.0)"
+        "--min-change", type=float, default=3.0, help="검색할 최소 등락률 (기본값: 5.0)"
     )
     parser.add_argument(
         "--type",
         type=str,
         choices=["stock", "etf"],
-        default=None,
-        help="검색할 종목 유형 (stock: 일반 주식, etf: ETF, 미지정: 전체)",
+        default="etf",
+        help="검색할 종목 유형 (stock: 일반 주식, etf: ETF (기본값))",
     )
     args = parser.parse_args()
     find_top_gainers_by_sector(min_change_pct=args.min_change, asset_type=args.type)

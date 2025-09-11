@@ -11,10 +11,9 @@ from tqdm import tqdm
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
  
-import settings as global_settings
-from logics.donchian import settings as donchian_settings
-from utils.data_loader import fetch_ohlcv, read_tickers_file
+from logic import settings
 from utils.report import format_aud_money
+from utils.db_manager import get_stocks
  
  
 def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame]) -> tuple:
@@ -25,16 +24,15 @@ def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame])
     ma_etf, ma_stock, replace_stock, replace_threshold, country = params
     # 각 프로세스는 자체적인 모듈 컨텍스트를 가지므로, 여기서 다시 임포트하고 설정합니다.
     from test import main as run_test
+    from logic import settings as worker_settings
  
-    donchian_settings.DONCHIAN_MA_PERIOD_FOR_ETF = ma_etf
-    donchian_settings.DONCHIAN_MA_PERIOD_FOR_STOCK = ma_stock
-    donchian_settings.DONCHIAN_REPLACE_WEAKER_STOCK = replace_stock
-    donchian_settings.DONCHIAN_REPLACE_SCORE_THRESHOLD = replace_threshold
+    worker_settings.MA_PERIOD_FOR_ETF = ma_etf
+    worker_settings.MA_PERIOD_FOR_STOCK = ma_stock
+    worker_settings.REPLACE_WEAKER_STOCK = replace_stock
+    worker_settings.REPLACE_SCORE_THRESHOLD = replace_threshold
  
     # 미리 로드된 데이터를 전달하여 yfinance 호출을 방지합니다.
-    result = run_test(
-        strategy_name="donchian", country=country, quiet=True, prefetched_data=prefetched_data
-    )
+    result = run_test(country=country, quiet=True, prefetched_data=prefetched_data)
     return ma_etf, ma_stock, replace_stock, replace_threshold, result
  
  
@@ -71,10 +69,10 @@ class MetricTracker:
  
         print("\n" + "=" * 50)
         print(f"\n[{title}]")
-        print(f"  - DONCHIAN_MA_PERIOD_FOR_ETF: {self.params['ma_etf']}")
-        print(f"  - DONCHIAN_MA_PERIOD_FOR_STOCK: {self.params['ma_stock']}")
-        print(f"  - DONCHIAN_REPLACE_WEAKER_STOCK: {self.params['replace_stock']}")
-        print(f"  - DONCHIAN_REPLACE_SCORE_THRESHOLD: {self.params['replace_threshold']:.2f}")
+        print(f"  - MA_PERIOD_FOR_ETF: {self.params['ma_etf']}")
+        print(f"  - MA_PERIOD_FOR_STOCK: {self.params['ma_stock']}")
+        print(f"  - REPLACE_WEAKER_STOCK: {self.params['replace_stock']}")
+        print(f"  - REPLACE_SCORE_THRESHOLD: {self.params['replace_threshold']:.2f}")
         print(f"\n[{self.name} 기준 성과]")
         print(f"  - {self.name}: {self.best_value:.2f}")
         print(f"  - 기간: {self.result['start_date']} ~ {self.result['end_date']}")
@@ -86,13 +84,12 @@ class MetricTracker:
  
 def tune_parameters(country: str):
     """
-    'donchian' 전략의 DONCHIAN_REPLACE_SCORE_THRESHOLD 파라미터를 튜닝하여
-    최적의 값을 찾습니다.
+    전략의 파라미터를 튜닝하여 최적의 값을 찾습니다.
     """
     # 튜닝할 파라미터 범위 설정
     # 다른 파라미터는 settings.py의 기본값으로 고정합니다.
-    ma_etf_range = [donchian_settings.DONCHIAN_MA_PERIOD_FOR_ETF]
-    ma_stock_range = [donchian_settings.DONCHIAN_MA_PERIOD_FOR_STOCK]
+    ma_etf_range = [settings.MA_PERIOD_FOR_ETF]
+    ma_stock_range = [settings.MA_PERIOD_FOR_STOCK]
     # 임계값 튜닝은 교체매매가 True일 때만 의미가 있습니다.
     replace_stock_options = [True]
     replace_threshold_range = np.arange(0.5, 5.1, 0.5)  # 0.5부터 5.0까지 0.5 간격으로 테스트
@@ -113,8 +110,8 @@ def tune_parameters(country: str):
     max_ma_period = max(max(ma_etf_range), max(ma_stock_range))
     warmup_days = int(max_ma_period * 1.5)
  
-    # 2. 전역 설정에서 백테스트 기간 가져오기
-    test_date_range = getattr(global_settings, "TEST_DATE_RANGE", None)
+    # 2. logic 설정에서 백테스트 기간 가져오기
+    test_date_range = getattr(settings, "TEST_DATE_RANGE", None)
     if not test_date_range or len(test_date_range) != 2:
         print("오류: settings.py에 TEST_DATE_RANGE가 올바르게 설정되지 않았습니다.")
         return
@@ -123,14 +120,12 @@ def tune_parameters(country: str):
     warmup_start = core_start - pd.DateOffset(days=warmup_days)
     adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), test_date_range[1]]
  
-    # 3. 티커 목록 읽기
-    etf_pairs = read_tickers_file(f"data/{country}/tickers_etf.txt", country=country)
-    stock_pairs = read_tickers_file(f"data/{country}/tickers_stock.txt", country=country)
-    pairs = etf_pairs + stock_pairs
-    if not pairs:
-        print(f"오류: data/{country}/tickers_etf.txt 또는 tickers_stock.txt 에서 티커를 찾을 수 없습니다.")
+    # 3. DB에서 티커 목록 읽기
+    stocks_from_db = get_stocks(country)
+    if not stocks_from_db:
+        print(f"오류: '{country}_stocks' 컬렉션에서 튜닝에 사용할 종목을 찾을 수 없습니다.")
         return
-    tickers_to_process = [p[0] for p in pairs]
+    tickers_to_process = [s['ticker'] for s in stocks_from_db]
  
     # 4. 데이터 로딩
     prefetched_data = {}
@@ -156,7 +151,7 @@ def tune_parameters(country: str):
                     )
  
     total_combinations = len(param_combinations)
-    print(f"'{'donchian'}' 전략의 교체 임계값(Threshold) 튜닝을 시작합니다 ({country.upper()} 시장).")
+    print(f"전략의 교체 임계값(Threshold) 튜닝을 시작합니다 ({country.upper()}).")
     print(f"총 {total_combinations}개의 조합을 테스트합니다.")
     print("=" * 50)
     print("주의: 테스트에 매우 오랜 시간이 소요될 수 있습니다.")
@@ -215,7 +210,7 @@ def tune_parameters(country: str):
  
  
 if __name__ == "__main__":
-    print("Donchian 전략의 DONCHIAN_REPLACE_SCORE_THRESHOLD 최적화를 시작합니다.")
+    print("전략 파라미터 최적화를 시작합니다.")
 
     print("\n" + "=" * 50)
     print(">>> 한국(KOR) 시장 최적화 시작...")

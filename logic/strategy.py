@@ -1,6 +1,5 @@
 """
-전략: 'donchian'
-단일 이동평균선을 사용하는 리처드 돈치안 스타일의 추세추종 전략입니다.
+단일 이동평균선을 사용하는 추세추종 전략입니다.
 """
 
 from math import ceil
@@ -9,14 +8,13 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-import settings as global_settings
-from utils.data_loader import fetch_ohlcv, read_tickers_file
+from utils.data_loader import fetch_ohlcv
 
-from . import settings as donchian_settings
+from . import settings
 
 
 def run_portfolio_backtest(
-    ticker_name_pairs: List[Tuple[str, str]],
+    stocks: List[Dict],
     months_range: Optional[List[int]] = None,
     initial_capital: float = 100_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
@@ -31,40 +29,37 @@ def run_portfolio_backtest(
     # Settings
     try:
         # 전략 고유 설정
-        ma_period_etf = int(donchian_settings.DONCHIAN_MA_PERIOD_FOR_ETF)
-        ma_period_stock = int(donchian_settings.DONCHIAN_MA_PERIOD_FOR_STOCK)
+        ma_period_etf = int(settings.MA_PERIOD_FOR_ETF)
+        ma_period_stock = int(settings.MA_PERIOD_FOR_STOCK)
         replace_weaker_stock = bool(
-            getattr(donchian_settings, "DONCHIAN_REPLACE_WEAKER_STOCK", False)
+            getattr(settings, "REPLACE_WEAKER_STOCK", False)
         )
         replace_threshold = float(
-            getattr(donchian_settings, "DONCHIAN_REPLACE_SCORE_THRESHOLD", 0.0)
+            getattr(settings, "REPLACE_SCORE_THRESHOLD", 0.0)
         )
         max_replacements_per_day = int(
-            getattr(donchian_settings, "DONCHIAN_MAX_REPLACEMENTS_PER_DAY", 1)
+            getattr(settings, "MAX_REPLACEMENTS_PER_DAY", 1)
         )
         atr_period = int(
-            getattr(donchian_settings, "DONCHIAN_ATR_PERIOD_FOR_NORMALIZATION", 20)
+            getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20)
         )
     except AttributeError as e:
         raise AttributeError(
-            f"'{e.name}' 설정이 logics/donchian/settings.py 파일에 반드시 정의되어야 합니다."
+            f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
         ) from e
 
     try:
-        # 전역 설정
-        stop_loss = global_settings.HOLDING_STOP_LOSS_PCT
-        cooldown_days = int(global_settings.COOLDOWN_DAYS)
-        min_pos_pct = float(global_settings.MIN_POSITION_PCT)
-        max_pos_pct = float(global_settings.MAX_POSITION_PCT)
-        trim_on = bool(global_settings.ENABLE_MAX_POSITION_TRIM)
+        # 공통 설정
+        stop_loss = settings.HOLDING_STOP_LOSS_PCT
+        cooldown_days = int(settings.COOLDOWN_DAYS)
+        min_pos_pct = float(settings.MIN_POSITION_PCT)
     except AttributeError as e:
         raise AttributeError(
-            f"'{e.name}' 설정이 전역 settings.py 파일에 반드시 정의되어야 합니다."
+            f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
         ) from e
 
     # --- 티커 유형(ETF/주식) 구분 ---
-    etf_pairs = read_tickers_file(f"data/{country}/tickers_etf.txt", country=country)
-    etf_tickers = {ticker for ticker, _ in etf_pairs}
+    etf_tickers = {stock['ticker'] for stock in stocks if stock.get('type') == 'etf'}
 
     # --- 데이터 로딩 및 지표 계산 ---
     # 웜업 기간을 가장 긴 MA 기간 기준으로 계산합니다.
@@ -78,7 +73,7 @@ def run_portfolio_backtest(
         adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
 
     data = {}
-    tickers_to_process = [p[0] for p in ticker_name_pairs]
+    tickers_to_process = [s['ticker'] for s in stocks]
 
     for tkr in tickers_to_process:
         # 미리 로드된 데이터가 있으면 사용하고, 없으면 새로 조회합니다.
@@ -218,23 +213,6 @@ def run_portfolio_backtest(
                         ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
                         if cooldown_days > 0:
                             ticker_state["buy_block_until"] = i + cooldown_days
-
-                    # 최대 비중 초과 시 리밸런싱(부분 매도)
-                    elif trim_on and max_pos_pct < 1.0:
-                        curr_val, cap_val = ticker_state["shares"] * price, max_pos_pct * equity
-                        if curr_val > cap_val and price > 0:
-                            sell_qty = min(
-                                ticker_state["shares"], int((curr_val - cap_val) // price)
-                            )
-                            if sell_qty > 0:
-                                decision, trade_amount = ("TRIM_REBALANCE", sell_qty * price)
-                                cash += trade_amount
-                                ticker_state["shares"] -= sell_qty
-                                if ticker_state["avg_cost"] > 0:
-                                    trade_profit = (price - ticker_state["avg_cost"]) * sell_qty
-                                    trade_pl_pct = hold_ret
-                                if cooldown_days > 0:
-                                    ticker_state["buy_block_until"] = i + cooldown_days
 
             decision_out = (
                 decision if decision else ("HOLD" if ticker_state["shares"] > 0 else "WAIT")
@@ -467,6 +445,7 @@ def run_portfolio_backtest(
 
 def run_single_ticker_backtest(
     ticker: str,
+    stock_type: str = 'stock',
     df: Optional[pd.DataFrame] = None,
     months_range: Optional[List[int]] = None,
     initial_capital: float = 1_000_000.0,
@@ -479,31 +458,27 @@ def run_single_ticker_backtest(
     """
     try:
         # 전략 고유 설정
-        ma_period_etf = int(donchian_settings.DONCHIAN_MA_PERIOD_FOR_ETF)
-        ma_period_stock = int(donchian_settings.DONCHIAN_MA_PERIOD_FOR_STOCK)
+        ma_period_etf = int(settings.MA_PERIOD_FOR_ETF)
+        ma_period_stock = int(settings.MA_PERIOD_FOR_STOCK)
         atr_period = int(
-            getattr(donchian_settings, "DONCHIAN_ATR_PERIOD_FOR_NORMALIZATION", 20)
+            getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20)
         )
     except AttributeError as e:
         raise AttributeError(
-            f"'{e.name}' 설정이 logics/donchian/settings.py 파일에 반드시 정의되어야 합니다."
+            f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
         ) from e
 
     try:
-        # 전역 설정
-        stop_loss = global_settings.HOLDING_STOP_LOSS_PCT
-        cooldown_days = int(global_settings.COOLDOWN_DAYS)
+        # 공통 설정
+        stop_loss = settings.HOLDING_STOP_LOSS_PCT
+        cooldown_days = int(settings.COOLDOWN_DAYS)
     except AttributeError as e:
         raise AttributeError(
-            f"'{e.name}' 설정이 전역 settings.py 파일에 반드시 정의되어야 합니다."
+            f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
         ) from e
 
     # --- 티커 유형(ETF/주식) 구분 ---
-    etf_pairs = read_tickers_file(f"data/{country}/tickers_etf.txt", country=country)
-    etf_tickers = {ticker for ticker, _ in etf_pairs}
-
-    ma_period = ma_period_etf if ticker in etf_tickers else ma_period_stock
-
+    ma_period = ma_period_etf if stock_type == 'etf' else ma_period_stock
     if df is None:
         df = fetch_ohlcv(ticker, country=country, date_range=date_range)
 
