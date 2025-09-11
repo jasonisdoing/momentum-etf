@@ -1,5 +1,15 @@
 """
 MomentumPilot 프로젝트의 메인 실행 파일입니다.
+
+이 스크립트는 CLI(명령줄 인터페이스)를 통해 프로젝트의 주요 기능인
+백테스트(`test.py`)와 현황 조회(`status.py`)를 실행하는 통합 진입점 역할을 합니다.
+
+[사용법]
+1. 현황 조회: python run.py <국가코드> --status
+   - 예: python run.py kor --status
+
+2. 백테스트 실행: python run.py <국가코드> --test
+   - 예: python run.py aus --test
 """
 
 import argparse
@@ -46,7 +56,7 @@ def main():
         if country == "aus":
             print("백테스트 속도 향상을 위해 데이터를 미리 로딩합니다...")
             from logic import settings
-            from utils.data_loader import format_aus_ticker_for_yfinance, fetch_ohlcv_for_tickers
+            from utils.data_loader import fetch_ohlcv_for_tickers
             from utils.db_manager import get_stocks
             import pandas as pd
 
