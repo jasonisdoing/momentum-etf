@@ -16,11 +16,12 @@ import pandas as pd
 from tqdm import tqdm
 
 # 프로젝트 루트를 Python 경로에 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logic import settings
 from utils.report import format_aud_money
 from utils.db_manager import get_stocks
+from utils.data_loader import fetch_ohlcv
  
  
 def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame]) -> tuple:

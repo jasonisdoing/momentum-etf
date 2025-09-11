@@ -11,9 +11,9 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
   - `data_loader.py`: 데이터 로딩 및 API 호출.
   - `indicators.py`: 보조지표 계산 (SuperTrend 등).
   - `report.py`: 리포트, 로그 포맷팅 및 테이블 렌더링.
+- `scripts/`: 각종 유틸리티 및 분석 스크립트 모음.
 - `run.py`: 메인 실행 진입점.
 - `test.py`: 과거 구간 백테스트 실행 및 `logs/test.log` 생성.
-- `tune.py`: 전략의 파라미터를 최적화하는 스크립트.
 - `web_app.py`: Streamlit 기반 웹 UI. 오늘의 현황을 시각적으로 보여줍니다.
 - `settings.py`: 모든 전략에 공통으로 적용되는 전역 설정.
 설치 및 준비
@@ -47,7 +47,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 `tune.py` 스크립트를 실행하여 전략의 최적 파라미터를 찾습니다.
 
-    python tune.py
+    python scripts/tune.py
 
 - 주의: 매우 많은 조합을 테스트하므로 실행에 오랜 시간이 걸릴 수 있습니다.
 - 스크립트 내에서 테스트할 파라미터 범위를 조절할 수 있습니다.
@@ -63,13 +63,20 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 모든 종목의 업종을 공백으로 초기화하여 재분류할 수 있도록 준비합니다.
 
-    python reset_stock_sectors.py
+    python scripts/reset_stock_sectors.py
 
 6) (선택) 업종 목록 재설정
 
 모든 기존 업종을 삭제하고, 스크립트 내에 정의된 새로운 표준 업종 목록으로 교체합니다.
 
-    python reset_and_seed_sectors.py
+    python scripts/reset_and_seed_sectors.py
+
+7) (선택) 급등주 찾기
+
+pykrx 라이브러리를 사용하여 한국 시장의 급등주를 섹터별로 찾아봅니다.
+
+    python scripts/find.py --type stock --min-change 5.0
+
 
 전략/로직 요약
 -------------

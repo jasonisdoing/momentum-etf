@@ -13,10 +13,9 @@ import settings as global_settings
 from logic.settings import TEST_DATE_RANGE, SECTOR_COUNTRY_OPTIONS
 from status import generate_status_report
 from utils.data_loader import fetch_yfinance_name, get_trading_days, fetch_pykrx_name, fetch_ohlcv_for_tickers
-from utils.report import format_kr_money
 from utils.db_manager import (
     get_available_snapshot_dates, get_portfolio_snapshot, get_all_trades, get_all_daily_equities, 
-    get_sectors, save_sectors, is_sector_in_use, get_sector_stock_counts, delete_sectors_and_reset_stocks,
+    get_sectors, save_sectors, get_sector_stock_counts, delete_sectors_and_reset_stocks,
     get_status_report_from_db, save_status_report_to_db, delete_trade_by_id, save_sector_changes,
     get_stocks, save_stocks, save_daily_equity, save_trade, 
     get_app_settings, save_app_settings,

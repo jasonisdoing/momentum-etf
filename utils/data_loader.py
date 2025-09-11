@@ -332,31 +332,4 @@ def fetch_yfinance_name(ticker: str) -> str:
     except Exception as e:
         logging.getLogger(__name__).warning(f"{cache_key}의 이름 조회 중 오류 발생: {e}")
         _yfinance_name_cache[cache_key] = ""  # 실패도 캐시하여 재시도 방지
-        return ""
-
-
-@functools.lru_cache(maxsize=None)
-def fetch_exchange_rate(ticker: str = "AUDKRW=X", as_of_date: Optional[str] = None) -> float | None:
-    """
-    yfinance를 통해 실시간 환율 정보를 조회합니다.
-    결과는 단일 실행 내에서 캐시됩니다.
-    """
-    if yf is None:
-        return None
-    try:
-        if as_of_date:
-            end_date = pd.to_datetime(as_of_date)
-            # 해당 날짜의 데이터를 포함하기 위해 end_date에 하루를 더하고, 휴일을 고려해 7일 전부터 조회
-            start_date = end_date - pd.Timedelta(days=7)
-            data = yf.Ticker(ticker).history(
-                start=start_date, end=end_date + pd.Timedelta(days=1), auto_adjust=True, progress=False
-            )
-        else:
-            # as_of_date가 없으면 최신 데이터를 가져옵니다 (기존 동작).
-            data = yf.Ticker(ticker).history(period="2d", auto_adjust=True, progress=False)
-
-        if not data.empty:
-            return data["Close"].iloc[-1]
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"{ticker} 환율 조회 중 오류 발생: {e}")
     return None

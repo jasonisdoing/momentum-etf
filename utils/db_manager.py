@@ -174,23 +174,6 @@ def get_previous_portfolio_snapshot(
     
     return get_portfolio_snapshot(country, prev_date_str)
 
-
-def get_historical_holdings(country: str, as_of_date: datetime) -> List[Dict]:
-    """
-    주어진 날짜까지의 모든 포트폴리오 스냅샷 기록을 가져옵니다.
-    """
-    db = get_db_connection()
-    if db is None:
-        return []
-
-    # 참고: 이 함수는 거래 기반 모델에서 매우 비효율적일 수 있습니다.
-    # calculate_consecutive_holding_info 함수는 더 이상 이 함수를 사용하지 않습니다.
-    dates = get_available_snapshot_dates(country, as_of_date, include_as_of_date=True)
-    snapshots = [get_portfolio_snapshot(country, d) for d in dates]
-    snapshots = [s for s in snapshots if s] # None 값 제거
-    return snapshots
-
-
 def get_available_snapshot_dates(country: str, as_of_date: Optional[datetime] = None, include_as_of_date: bool = False) -> List[str]:
     """
     지정된 국가에 대해 DB에 저장된 모든 스냅샷의 날짜 목록을 반환합니다.
@@ -466,19 +449,6 @@ def _get_stock_collection_names(db) -> List[str]:
     """'_stocks'로 끝나는 모든 컬렉션 이름을 찾아 반환합니다. (예: 'kor_stocks')"""
     # 더 명시적으로 하려면 ['kor_stocks', 'aus_stocks']와 같이 하드코딩할 수 있습니다.
     return [name for name in db.list_collection_names() if name.endswith("_stocks")]
-
-def is_sector_in_use(sector_name: str) -> bool:
-    """지정된 업종이 현재 종목 관리에서 사용 중인지 확인합니다."""
-    db = get_db_connection()
-    if db is None:
-        return False # DB 오류 시 안전하게 삭제 방지
-    
-    stock_collections = _get_stock_collection_names(db)
-    for coll_name in stock_collections:
-        count = db[coll_name].count_documents({"sector": sector_name, "is_deleted": {"$ne": True}})
-        if count > 0:
-            return True
-    return False
 
 def get_sector_stock_counts() -> Dict[str, Dict[str, int]]:
     """

@@ -20,9 +20,8 @@ except ImportError:
     pytz = None
 
 # New structure imports
-from utils.db_manager import get_db_connection, get_portfolio_snapshot, get_previous_portfolio_snapshot, get_historical_holdings, get_app_settings, get_trades_on_date, get_stocks
+from utils.db_manager import get_db_connection, get_portfolio_snapshot, get_previous_portfolio_snapshot, get_app_settings, get_trades_on_date, get_stocks
 from utils.data_loader import (
-    fetch_exchange_rate,
     fetch_ohlcv,
     format_aus_ticker_for_yfinance,
 )
@@ -497,6 +496,9 @@ def generate_status_report(
         money_formatter = format_kr_money
         price_formatter = lambda p: f"{int(round(p)):,}"
         ma_formatter = lambda p: f"{int(round(p)):,}원"
+
+    # 거래일 계산을 위한 참조 티커를 설정합니다.
+    ref_ticker_for_cal = next(iter(data_by_tkr.keys())) if data_by_tkr else None
 
     for tkr, name in pairs:
         d = data_by_tkr.get(tkr)
