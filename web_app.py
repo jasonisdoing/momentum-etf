@@ -367,8 +367,8 @@ def show_sell_dialog(country_code: str):
                         df = df.loc[:, ~df.columns.duplicated()]
                     price = df['Close'].iloc[-1]
             
-            # Ensure price is a scalar before boolean evaluation and calculations.
-            # This handles cases where a function returns a Series (e.g., due to duplicate columns).
+            # 불리언 평가 및 계산 전에 가격을 스칼라로 보장합니다.
+            # 예: 중복 컬럼 등으로 인해 함수가 Series를 반환하는 경우를 처리합니다.
             price_val = price.item() if isinstance(price, pd.Series) else price
 
             if price_val and pd.notna(price_val):
@@ -549,7 +549,7 @@ def show_add_stock_dialog(country_code: str, sectors: List[Dict]):
 
             with st.spinner("종목 정보를 조회하고 추가하는 중..."):
                 if country_code != "coin":
-                    # For non-coin, we still fetch the name
+                    # 코인이 아닌 경우에도 종목명을 조회합니다.
                     fetched_name = ""
                     if country_code == "kor" and _stock:
                         try:
@@ -568,7 +568,7 @@ def show_add_stock_dialog(country_code: str, sectors: List[Dict]):
                     
                     if not fetched_name:
                         st.warning(f"티커 '{ticker.upper()}'의 종목명을 찾을 수 없습니다. 종목명 없이 추가됩니다.")
-                    stock_name = fetched_name # Use fetched name
+                    stock_name = fetched_name # 조회한 종목명을 사용
 
                 current_stocks = get_stocks(country_code)
                 if ticker.upper() in [s['ticker'] for s in current_stocks]:
@@ -596,7 +596,7 @@ def show_add_stock_dialog(country_code: str, sectors: List[Dict]):
 
 def render_master_stock_ui(country_code: str, sectors: List[Dict]):
     """종목 마스터 관리 UI를 렌더링합니다."""
-    # from utils.data_loader import fetch_crypto_name # Removed as per user request
+    # from utils.data_loader import fetch_crypto_name # 사용자 요청에 따라 제거됨
     
     country_name = COUNTRY_CODE_MAP.get(country_code, "기타")
 

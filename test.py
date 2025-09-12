@@ -88,7 +88,7 @@ def main(
         print(f"오류: 공통 설정에 다음 값이 없습니다: {', '.join(missing)}")
         return
     try:
-        # Interpret positive input as a negative threshold (e.g., 10 -> -10)
+        # 양수 입력을 음수 임계값으로 해석합니다 (예: 10 -> -10)
         settings.HOLDING_STOP_LOSS_PCT = -abs(float(common["HOLDING_STOP_LOSS_PCT"]))
         settings.COOLDOWN_DAYS = int(common["COOLDOWN_DAYS"])
         settings.ATR_PERIOD_FOR_NORMALIZATION = int(common["ATR_PERIOD_FOR_NORMALIZATION"])
@@ -120,7 +120,6 @@ def main(
     core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
     test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]
     period_label = f"최근 {test_months_range}개월 ({core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')})"
-    months_range = None  # 이 변수는 더 이상 사용되지 않습니다.
 
     # 티커 목록 결정
     if not quiet:
@@ -179,7 +178,6 @@ def main(
             time_series_by_ticker = (
                 run_portfolio_backtest(
                     stocks=stocks_from_db,
-                    months_range=months_range,
                     initial_capital=initial_capital,
                     core_start_date=core_start_dt,
                     top_n=portfolio_topn,
@@ -200,7 +198,7 @@ def main(
             for stock in stocks_from_db:
                 ticker = stock['ticker']
                 df = fetch_ohlcv(
-                    ticker, country=country, months_range=months_range, date_range=test_date_range
+                    ticker, country=country, date_range=test_date_range
                 )
                 if df is not None and not df.empty:
                     raw_data_by_ticker[ticker] = df
@@ -216,7 +214,6 @@ def main(
                     ticker,
                     stock_type=stock.get('type', 'stock'),
                     df=df_ticker,
-                    months_range=months_range,
                     initial_capital=capital_per_ticker,
                     core_start_date=core_start_dt,
                     date_range=test_date_range,
@@ -289,11 +286,11 @@ def main(
             )
 
             if not quiet:
-                # Header line
+                # 헤더 라인 출력
                 denom = portfolio_topn if portfolio_topn > 0 else total_cnt
                 date_str = pd.to_datetime(dt).strftime("%Y-%m-%d")
                 logger.info(
-                    (  # noqa: T201
+                    (  # noqa: T201 (터미널 출력 규칙 예외 허용)
                         f"{date_str} - 보유종목 {held_count}/{denom} "
                         f"잔액(보유+현금): {money_formatter(total_value)} "
                         f"(보유 {money_formatter(total_holdings)} + 현금 {money_formatter(total_cash)}) "
@@ -302,7 +299,7 @@ def main(
                 )
 
                 # 전략에 따라 동적으로 헤더를 설정합니다.
-                # signal_headers = ["이평선(값)", "고점대비", "점수", "신호지속일"]
+                # signal_headers = ["이평선(값)", "고점대비", "점수", "신호지속일"] (참고용 예시)
                 rows = []
                 headers = [
                     "#",
@@ -413,7 +410,7 @@ def main(
                                 tag = "교체매도"
                             elif decision == "SELL_REGIME_FILTER":
                                 tag = "시장위험회피"
-                            else:  # 이전 버전 호환용 (e.g. "SELL")
+                            else:  # 이전 버전 호환용 (예: "SELL")
                                 tag = "매도"
                             phrase = f"{tag} {qty_calc}주 @ {price_formatter(price_today)} 수익 {money_formatter(prof)} 손익률 {f'{plpct:+.1f}%'}"
                             if note_from_strategy:
@@ -576,7 +573,7 @@ def main(
                         if years > 0:
                             benchmark_cagr_pct = ((benchmark_end_price / benchmark_start_price) ** (1 / years) - 1) * 100
 
-            # Sharpe Ratio 계산
+            # 샤프 지수(Sharpe Ratio) 계산
             pv_series = pd.Series(portfolio_values, index=pd.to_datetime(portfolio_dates))
             daily_returns = pv_series.pct_change().dropna()
 
@@ -586,7 +583,7 @@ def main(
                 # 연간 252 거래일로 가정
                 sharpe_ratio = (daily_returns.mean() / daily_returns.std()) * (252**0.5)
 
-            # Sortino Ratio 계산 (하락 위험만 고려)
+            # 소르티노 지수(Sortino Ratio) 계산 (하락 위험만 고려)
             downside_returns = daily_returns[daily_returns < 0]
             sortino_ratio = 0
             if not downside_returns.empty:
@@ -594,7 +591,7 @@ def main(
                 if downside_deviation > 0:
                     sortino_ratio = (daily_returns.mean() / downside_deviation) * (252**0.5)
 
-            # Calmar Ratio 계산 (CAGR / MDD)
+            # 칼마 지수(Calmar Ratio) 계산 (CAGR / MDD)
             calmar_ratio = (cagr * 100) / (max_drawdown * 100) if max_drawdown > 0 else 0
 
             summary = {
@@ -730,7 +727,7 @@ def main(
                         yearly_series = yearly_returns.mul(100)
                         yearly_series.index = yearly_series.index.year
                         pivot_df["연간"] = yearly_series
-                    # If yearly_returns is empty, the '연간' column will not be added, and .get() will return None later.
+                    # yearly_returns가 비어 있으면 '연간' 컬럼을 추가하지 않으며, 이후 .get()은 None을 반환합니다.
 
                     cum_pivot_df = None
                     if monthly_cum_returns is not None and not monthly_cum_returns.empty:

@@ -11,7 +11,6 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from logic import settings
-import settings as global_settings
 from pymongo import DESCENDING
 
 try:
@@ -331,7 +330,7 @@ def _format_return_for_header(label: str, pct: float, amount: float, formatter: 
     return f'{label}: <span style="color:{color}">{pct:+.2f}%({formatted_amount})</span>'
 
 
-def _fetch_ticker_data_worker(args):
+def _load_and_prepare_ticker_data(args):
     """
     단일 티커에 대한 데이터 조회 및 지표 계산을 수행하는 워커 함수입니다.
     병렬 처리를 위해 사용됩니다.
@@ -517,7 +516,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
         tasks.append((tkr, country, required_months, base_date, ma_period, atr_period_norm, df_full))
 
     with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(_fetch_ticker_data_worker, task) for task in tasks]
+        futures = [executor.submit(_load_and_prepare_ticker_data, task) for task in tasks]
         
         desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
         for future in tqdm(as_completed(futures), total=len(tasks), desc=desc):

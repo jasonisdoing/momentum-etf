@@ -97,7 +97,7 @@ def render_table_eaw(
             left = pad // 2
             right = pad - left
             return ' ' * left + s_str + ' ' * right
-        else: # left
+        else: # 왼쪽 정렬
             return s_str + ' ' * pad
 
     widths = [max(_disp_width_eaw(v) for v in [headers[j]] + [r[j] for r in rows]) for j in range(len(headers))]

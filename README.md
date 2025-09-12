@@ -90,16 +90,19 @@ pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 섹터별�
   - **가격기반손절(CUT)**: 보유수익률 ≤ `HOLDING_STOP_LOSS_PCT`
   - **쿨다운**: 매수/매도 후 `COOLDOWN_DAYS` 동안 반대 방향 거래 금지
 
-설정 파일
---------
- 
-- **`settings.py`**: 데이터베이스 연결, 웹앱 비밀번호 등 인프라 관련 전역 설정을 정의합니다.
-- **`logic/settings.py`**: 백테스트 및 매매 전략에 사용되는 파라미터를 정의합니다.
-  - `INITIAL_CAPITAL`: 초기 자본금
-  - `TEST_MONTHS_RANGE`: 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월)
-  - `HOLDING_STOP_LOSS_PCT`: 개별 종목 손절매 비율
-  - `COOLDOWN_DAYS`: 매매 후 쿨다운 기간
-  - `MA_PERIOD_FOR_ETF`, `REPLACE_SCORE_THRESHOLD` 등 전략 고유 파라미터.
+설정 체계 (DB 기반)
+-------------------
+
+- 인프라 설정(`settings.py`): DB 연결, 웹앱 비밀번호 등 인프라 관련 설정.
+- 공통 설정(웹앱 ‘설정’ 탭 → 공통 설정)
+  - 모든 국가가 동일하게 사용하는 전역 파라미터를 DB에 저장하여 관리합니다.
+  - MARKET_REGIME_FILTER_ENABLED / MARKET_REGIME_FILTER_TICKER / MARKET_REGIME_FILTER_MA_PERIOD
+  - HOLDING_STOP_LOSS_PCT / COOLDOWN_DAYS / ATR_PERIOD_FOR_NORMALIZATION
+  - 주의: HOLDING_STOP_LOSS_PCT는 양수로 입력해도 자동으로 음수로 저장/해석됩니다. (예: 10 → -10)
+- 국가별 전략 파라미터(각 국가 탭 → 설정)
+  - portfolio_topn, ma_period_etf, ma_period_stock
+  - replace_weaker_stock, max_replacements_per_day, replace_threshold
+  - 각 국가별로 DB에 저장되어 해당 국가 현황/백테스트에 반영됩니다.
 
 주의/제약
 --------

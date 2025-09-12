@@ -1,5 +1,6 @@
 """
 단일 이동평균선을 사용하는 추세추종 전략입니다.
+(포트폴리오 Top-N 선택, 교체 매매, 시장 레짐 필터 포함)
 """
 
 from math import ceil
@@ -15,7 +16,6 @@ from . import settings
 
 def run_portfolio_backtest(
     stocks: List[Dict],
-    months_range: Optional[List[int]] = None,
     initial_capital: float = 100_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
     top_n: int = 10,
@@ -26,7 +26,7 @@ def run_portfolio_backtest(
     """
     단일 이동평균선 교차 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
     """
-    # Settings
+    # 설정값 로드 (필수)
     try:
         # 전략 고유 설정
         ma_period_etf = int(settings.MA_PERIOD_FOR_ETF)
@@ -60,8 +60,8 @@ def run_portfolio_backtest(
     # --- 티커 유형(ETF/주식) 구분 ---
     etf_tickers = {stock['ticker'] for stock in stocks if stock.get('type') == 'etf'}
 
-    # --- 데이터 로딩을 위한 날짜 범위 계산 ---
-    # 웜업 기간을 가장 긴 MA 기간 기준으로 계산합니다.
+    # --- 데이터 로딩 범위 계산 ---
+    # 웜업 기간은 가장 긴 MA 또는 ATR 기간을 기준으로 산정
     max_ma_period = max(ma_period_etf, ma_period_stock)
     warmup_days = int(max(max_ma_period, atr_period) * 1.5)
 
@@ -74,7 +74,7 @@ def run_portfolio_backtest(
     # --- 시장 레짐 필터 데이터 로딩 ---
     market_regime_df = None
     if regime_filter_enabled:
-        # fetch_ohlcv는 지수 티커를 처리할 수 있도록 수정되었습니다.
+        # 지수 티커를 지원하므로, 국가 코드는 의미상만 전달됩니다.
         market_regime_df = fetch_ohlcv(
             regime_filter_ticker, country=country, date_range=adjusted_date_range
         )
@@ -102,8 +102,7 @@ def run_portfolio_backtest(
         if df is None:
             continue
 
-        # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
-        # 컬럼을 단순화하고 중복을 제거합니다.
+        # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우가 있어 컬럼을 단순화/중복 제거
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
             df = df.loc[:, ~df.columns.duplicated()]
@@ -184,7 +183,7 @@ def run_portfolio_backtest(
             if dt in d["close"].index
         }
 
-        # --- 시장 레짐 필터 적용 (Risk-Off 조건 확인) ---
+    # --- 시장 레짐 필터 적용 (Risk-Off 조건 확인) ---
         is_risk_off = False
         if regime_filter_enabled and market_regime_df is not None and dt in market_regime_df.index:
             market_price = market_regime_df.loc[dt, "Close"]
@@ -218,7 +217,7 @@ def run_portfolio_backtest(
                 elif ticker_state["shares"] == 0 and i < ticker_state["buy_block_until"]:
                     note = "매수 쿨다운"
 
-            # Create the row first
+            # 출력 행을 먼저 구성
             if tkr in tickers_available_today:
                 out_rows[tkr].append(
                     {
@@ -272,7 +271,7 @@ def run_portfolio_backtest(
                         cash += trade_amount
                         ticker_state_h["shares"], ticker_state_h["avg_cost"] = 0, 0.0
                         
-                        # Update the already created row
+                        # 이미 만들어둔 행을 업데이트
                         row = out_rows[tkr_h][-1]
                         row.update({
                             "decision": "SELL_REGIME_FILTER", "trade_amount": trade_amount,
@@ -306,7 +305,7 @@ def run_portfolio_backtest(
                         if cooldown_days > 0:
                             ticker_state["buy_block_until"] = i + cooldown_days
                         
-                        # Update the row
+                        # 행 업데이트
                         row = out_rows[tkr][-1]
                         row.update({
                             "decision": decision, "trade_amount": trade_amount,
@@ -314,7 +313,7 @@ def run_portfolio_backtest(
                             "shares": 0, "pv": 0, "avg_cost": 0,
                         })
 
-        # --- 3. 매수 로직 (시장이 Risk-On일 때만) ---
+    # --- 3. 매수 로직 (시장이 Risk-On일 때만) ---
         if not is_risk_off:
             # 1. 매수 후보 선정
             buy_candidates = []
@@ -471,7 +470,7 @@ def run_portfolio_backtest(
                     if out_rows[tkr_cand] and out_rows[tkr_cand][-1]["date"] == dt:
                         note = "포트폴리오 가득 참" if slots_to_fill <= 0 else "현금 부족"
                         out_rows[tkr_cand][-1]["note"] = note
-        else: # is_risk_off
+        else: # 리스크 오프 상태
             # 매수 후보가 있더라도, 시장이 위험 회피 상태이므로 매수하지 않음
             # 후보들에게 사유 기록
             buy_candidates = []
@@ -511,7 +510,6 @@ def run_single_ticker_backtest(
     ticker: str,
     stock_type: str = 'stock',
     df: Optional[pd.DataFrame] = None,
-    months_range: Optional[List[int]] = None,
     initial_capital: float = 1_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
     date_range: Optional[List[str]] = None,
@@ -547,8 +545,7 @@ def run_single_ticker_backtest(
     if df is None or df.empty:
         return pd.DataFrame()
 
-    # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
-    # 컬럼을 단순화하고 중복을 제거합니다.
+    # yfinance의 MultiIndex 컬럼을 단순화/중복 제거
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
         df = df.loc[:, ~df.columns.duplicated()]
