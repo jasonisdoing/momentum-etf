@@ -108,14 +108,13 @@ def tune_parameters(country: str):
     """
     # --- 튜닝할 파라미터 범위 설정 ---
     # 다른 파라미터는 settings.py의 기본값으로 고정합니다.
-    ma_etf_range = [settings.MA_PERIOD_FOR_ETF]
-    ma_stock_range = [settings.MA_PERIOD_FOR_STOCK]
     # 임계값 튜닝은 교체매매가 True일 때만 의미가 있습니다.
     replace_stock_options = [True]
     replace_threshold_range = np.arange(0.5, 5.1, 0.5)  # 0.5부터 5.0까지 0.5 간격으로 테스트합니다.
 
     if country == "coin":
         # 가상화폐의 경우, 더 넓은 범위의 파라미터를 튜닝합니다.
+        ma_etf_range = [15] # 코인에는 ETF가 없으므로 기본값 사용
         # MA_PERIOD_FOR_STOCK: 5부터 200까지 5 간격
         ma_stock_range = np.arange(5, 201, 5)
         # REPLACE_SCORE_THRESHOLD: 0.5부터 10.0까지 0.5 간격
@@ -123,13 +122,22 @@ def tune_parameters(country: str):
         # PORTFOLIO_TOPN: 1부터 5까지 1 간격
         portfolio_topn_range = np.arange(1, 6, 1)
     else:
-        # 한국/호주의 경우, DB에서 PORTFOLIO_TOPN 값을 가져옵니다.
+        # 한국/호주의 경우, DB에서 설정을 가져옵니다.
         app_settings_from_db = get_app_settings(country)
-        db_topn = app_settings_from_db.get("portfolio_topn") if app_settings_from_db else None
-        if not db_topn:
-            print(f"오류: {country.upper()} 국가의 PORTFOLIO_TOPN 설정이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        if (not app_settings_from_db 
+            or "portfolio_topn" not in app_settings_from_db
+            or "ma_period_etf" not in app_settings_from_db
+            or "ma_period_stock" not in app_settings_from_db):
+            print(f"오류: {country.upper()} 국가의 설정(TopN, MA 기간)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
             return None, None
-        portfolio_topn_range = [int(db_topn)]
+        
+        try:
+            portfolio_topn_range = [int(app_settings_from_db["portfolio_topn"])]
+            ma_etf_range = [int(app_settings_from_db["ma_period_etf"])]
+            ma_stock_range = [int(app_settings_from_db["ma_period_stock"])]
+        except (ValueError, TypeError):
+            print(f"오류: {country.upper()} 국가의 DB 설정값이 올바르지 않습니다.")
+            return None, None
 
 
     # 국가별 포맷터 설정

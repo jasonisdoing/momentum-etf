@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logic import settings
 from logic import strategy as strategy_module
 from utils.report import format_aud_money, format_kr_money, render_table_eaw, format_aud_price
-from utils.db_manager import get_stocks
+from utils.db_manager import get_stocks, get_app_settings
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
@@ -28,6 +28,23 @@ def main(
     `quiet=True` 모드에서는 로그를 출력하지 않고 최종 요약만 반환합니다.
     """
     initial_capital = float(getattr(settings, "INITIAL_CAPITAL", 100_000_000))
+
+    # DB에서 앱 설정을 불러와 logic.settings에 동적으로 설정합니다.
+    app_settings = get_app_settings(country)
+    if (not app_settings 
+        or "ma_period_etf" not in app_settings 
+        or "ma_period_stock" not in app_settings
+        or "portfolio_topn" not in app_settings):
+        print(f"오류: '{country}' 국가의 설정(TopN, MA 기간)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        return
+    
+    try:
+        settings.MA_PERIOD_FOR_ETF = int(app_settings["ma_period_etf"])
+        settings.MA_PERIOD_FOR_STOCK = int(app_settings["ma_period_stock"])
+        portfolio_topn = int(app_settings["portfolio_topn"])
+    except (ValueError, TypeError):
+        print(f"오류: '{country}' 국가의 DB 설정값이 올바르지 않습니다.")
+        return
 
     # 국가별로 다른 포맷터 사용
     if country == "aus":
@@ -101,8 +118,6 @@ def main(
         # 시뮬레이션 실행
         time_series_by_ticker: Dict[str, pd.DataFrame] = {}
         name_by_ticker: Dict[str, str] = {s['ticker']: s['name'] for s in stocks_from_db}
-        # 전역 설정에서 PORTFOLIO_TOPN을 가져옵니다.
-        portfolio_topn = int(getattr(settings, "PORTFOLIO_TOPN", 0) or 0)
         if portfolio_topn > 0:
             time_series_by_ticker = (
                 run_portfolio_backtest(

@@ -242,20 +242,23 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
 @st.dialog("BUY")
 def show_buy_dialog(country_code: str):
     """매수(BUY) 거래 입력을 위한 모달 다이얼로그를 표시합니다."""
-
+    
     currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
-    # on_click 콜백은 위젯이 렌더링되기 전에 실행됩니다.
-    # 따라서 모든 로직을 콜백 함수 내에서 처리하고, st.rerun()으로 다이얼로그를 닫습니다.
+    message_key = f"buy_message_{country_code}"
+
     def on_buy_submit():
         # st.session_state에서 폼 데이터 가져오기
         trade_date = st.session_state[f"buy_date_{country_code}"]
         ticker = st.session_state[f"buy_ticker_{country_code}"].strip()
         shares = st.session_state[f"buy_shares_{country_code}"]
         price = st.session_state[f"buy_price_{country_code}"]
-
+        
         if not ticker or not shares > 0 or not price > 0:
-            st.session_state[f"buy_message"] = ("error", "종목코드, 수량, 가격을 모두 올바르게 입력해주세요.")
-            return  # st.rerun()을 호출하지 않아 다이얼로그가 닫히지 않고 오류 메시지 표시
+            st.session_state[message_key] = (
+                "error",
+                "종목코드, 수량, 가격을 모두 올바르게 입력해주세요.",
+            )
+            return
 
         stock_name = ""
         if country_code == "kor" and _stock:
@@ -292,19 +295,20 @@ def show_buy_dialog(country_code: str):
         }
         
         if save_trade(trade_data):
-            # 성공 메시지를 세션에 저장하고, st.rerun()으로 다이얼로그를 닫고 앱을 새로고침합니다.
-            st.session_state[f"buy_message"] = ("success", "거래가 성공적으로 저장되었습니다.")
-            st.rerun()
+            st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
         else:
-            st.session_state[f"buy_message"] = ("error", "거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.")
+            st.session_state[message_key] = (
+                "error",
+                "거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.",
+            )
 
-    # 이전 실행에서 저장된 메시지가 있다면 표시합니다.
-    if f"buy_message" in st.session_state:
-        msg_type, msg_text = st.session_state.pop(f"buy_message")
+    # 다이얼로그 내에서 오류 메시지만 표시합니다. 성공 메시지는 메인 화면에서 토스트로 표시됩니다.
+    if message_key in st.session_state:
+        msg_type, msg_text = st.session_state[message_key]
         if msg_type == "success":
-            st.toast(msg_text)
-        else:
             st.error(msg_text)
+            # 오류 메시지는 한 번만 표시되도록 세션에서 제거합니다.
+            del st.session_state[message_key]
 
     with st.form(f"trade_form_{country_code}"):
         st.date_input("거래일", value="today", key=f"buy_date_{country_code}")
@@ -324,6 +328,8 @@ def show_buy_dialog(country_code: str):
 def show_sell_dialog(country_code: str):
     """보유 종목 매도를 위한 모달 다이얼로그를 표시합니다."""
     currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
+    message_key = f"sell_message_{country_code}"
+
     from utils.data_loader import fetch_naver_realtime_price, fetch_ohlcv
     
     latest_date_str = get_available_snapshot_dates(country_code)[0] if get_available_snapshot_dates(country_code) else None
@@ -389,7 +395,7 @@ def show_sell_dialog(country_code: str):
         ]
 
         if not selected_indices:
-            st.session_state[f"sell_message"] = ("warning", "매도할 종목을 선택해주세요.")
+            st.session_state[message_key] = ("warning", "매도할 종목을 선택해주세요.")
             return
 
         selected_rows = df_holdings.loc[selected_indices]
@@ -407,22 +413,23 @@ def show_sell_dialog(country_code: str):
                 success_count += 1
         
         if success_count == len(selected_rows):
-            st.session_state[f"sell_message"] = ("success", f"{success_count}개 종목의 매도 거래가 성공적으로 저장되었습니다.")
+            st.session_state[message_key] = (
+                "success",
+                f"{success_count}개 종목의 매도 거래가 성공적으로 저장되었습니다.",
+            )
         else:
-            st.session_state[f"sell_message"] = ("error", "일부 거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.")
-        
-        # st.rerun()을 호출하여 다이얼로그를 닫고 앱을 새로고침합니다.
-        st.rerun()
+            st.session_state[message_key] = ("error", "일부 거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.")
 
-    # 이전 실행에서 저장된 메시지가 있다면 표시합니다.
-    if f"sell_message" in st.session_state:
-        msg_type, msg_text = st.session_state.pop(f"sell_message")
+    # 다이얼로그 내에서 오류/경고 메시지만 표시합니다.
+    if message_key in st.session_state:
+        msg_type, msg_text = st.session_state[message_key]
         if msg_type == "success":
-            st.toast(msg_text)
-        elif msg_type == "warning":
-            st.warning(msg_text)
-        else:
-            st.error(msg_text)
+            if msg_type == "warning":
+                st.warning(msg_text)
+            else:
+                st.error(msg_text)
+            # 메시지는 한 번만 표시되도록 세션에서 제거합니다.
+            del st.session_state[message_key]
 
     with st.form(f"sell_form_{country_code}"):
         st.subheader("매도할 종목을 선택하세요 (전체 매도)")
@@ -890,9 +897,28 @@ def render_master_sector_ui():
                             else:
                                 st.error("업종 삭제에 실패했습니다.")
 
+def _display_success_toast(country_code: str):
+    """
+    세션 상태에서 성공 메시지를 확인하고 토스트로 표시합니다.
+    주로 다이얼로그가 닫힌 후 피드백을 주기 위해 사용됩니다.
+    """
+    keys_to_check = [
+        f"buy_message_{country_code}",
+        f"sell_message_{country_code}",
+    ]
+    for key in keys_to_check:
+        if key in st.session_state:
+            message = st.session_state[key]
+            # 메시지가 (type, text) 튜플이고, type이 'success'인 경우에만 처리
+            if isinstance(message, tuple) and len(message) == 2 and message[0] == "success":
+                _, msg_text = st.session_state.pop(key)
+                st.toast(msg_text)
+
 
 def render_country_tab(country_code: str):
     """지정된 국가에 대한 탭의 전체 UI를 렌더링합니다."""
+    _display_success_toast(country_code)
+
     sub_tab_names = ["현황", "히스토리", "트레이드", "종목 관리", "설정"]
     sub_tab_status, sub_tab_history, sub_tab_trades, sub_tab_stock_management, sub_tab_settings = st.tabs(sub_tab_names)
 
@@ -1151,6 +1177,8 @@ def render_country_tab(country_code: str):
         db_settings = get_app_settings(country_code)
         current_capital = db_settings.get("initial_capital", 0) if db_settings else 0
         current_topn = db_settings.get("portfolio_topn") if db_settings else None
+        current_ma_etf = db_settings.get("ma_period_etf") if db_settings else None
+        current_ma_stock = db_settings.get("ma_period_stock") if db_settings else None
 
         # TEST_MONTHS_RANGE를 기반으로 기본 날짜를 계산합니다.
         test_months_range = TEST_MONTHS_RANGE if TEST_MONTHS_RANGE else 12
@@ -1183,18 +1211,52 @@ def render_country_tab(country_code: str):
                 help="포트폴리오에서 최대로 보유할 종목의 개수를 설정합니다."
             )
 
+            st.markdown("---")
+            st.subheader("전략 파라미터")
+
+            if current_ma_etf is None:
+                st.warning("ETF 이동평균 기간(MA_PERIOD_FOR_ETF)을 설정해주세요.")
+            new_ma_etf_str = st.text_input(
+                "ETF 이동평균 기간 (MA_PERIOD_FOR_ETF)",
+                value=str(current_ma_etf) if current_ma_etf is not None else "15",
+                placeholder="예: 15",
+                help="ETF 종목의 추세 판단에 사용될 이동평균 기간입니다."
+            )
+
+            if current_ma_stock is None:
+                st.warning("개별종목 이동평균 기간(MA_PERIOD_FOR_STOCK)을 설정해주세요.")
+            new_ma_stock_str = st.text_input(
+                "개별종목 이동평균 기간 (MA_PERIOD_FOR_STOCK)",
+                value=str(current_ma_stock) if current_ma_stock is not None else "75",
+                placeholder="예: 75",
+                help="개별 주식/코인 종목의 추세 판단에 사용될 이동평균 기간입니다."
+            )
+
             save_settings_submitted = st.form_submit_button("설정 저장하기")
 
             if save_settings_submitted:
+                error = False
                 if not new_topn_str or not new_topn_str.isdigit() or int(new_topn_str) < 1:
                     st.error("최대 보유 종목 수는 1 이상의 숫자여야 합니다.")
-                else:
+                    error = True
+                if not new_ma_etf_str or not new_ma_etf_str.isdigit() or int(new_ma_etf_str) < 1:
+                    st.error("ETF 이동평균 기간은 1 이상의 숫자여야 합니다.")
+                    error = True
+                if not new_ma_stock_str or not new_ma_stock_str.isdigit() or int(new_ma_stock_str) < 1:
+                    st.error("개별종목 이동평균 기간은 1 이상의 숫자여야 합니다.")
+                    error = True
+                
+                if not error:
                     new_topn = int(new_topn_str)
+                    new_ma_etf = int(new_ma_etf_str)
+                    new_ma_stock = int(new_ma_stock_str)
                     settings_to_save = {
                         "country": country_code,
                         "initial_capital": new_capital,
                         "initial_date": pd.to_datetime(new_date).to_pydatetime(),
-                        "portfolio_topn": new_topn
+                        "portfolio_topn": new_topn,
+                        "ma_period_etf": new_ma_etf,
+                        "ma_period_stock": new_ma_stock,
                     }
                     if save_app_settings(country_code, settings_to_save):
                         st.success("설정이 성공적으로 저장되었습니다.")

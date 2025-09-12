@@ -21,7 +21,7 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logic import settings
-from utils.db_manager import get_stocks
+from utils.db_manager import get_stocks, get_app_settings
 from utils.data_loader import fetch_ohlcv_for_tickers
 
 
@@ -58,8 +58,19 @@ def tune_regime_filter(country: str):
     print(f"\n튜닝을 위해 {country.upper()} 시장의 데이터를 미리 로딩합니다...")
 
     # 1. 튜닝에 필요한 최대 기간 계산
+    app_settings = get_app_settings(country)
+    if not app_settings or "ma_period_etf" not in app_settings or "ma_period_stock" not in app_settings:
+        print(f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        return
+    try:
+        ma_period_etf = int(app_settings["ma_period_etf"])
+        ma_period_stock = int(app_settings["ma_period_stock"])
+    except (ValueError, TypeError):
+        print(f"오류: '{country}' 국가의 MA 기간 설정이 올바르지 않습니다.")
+        return
+
     max_months_range = max(test_months_ranges)
-    max_strategy_ma = max(settings.MA_PERIOD_FOR_ETF, settings.MA_PERIOD_FOR_STOCK)
+    max_strategy_ma = max(ma_period_etf, ma_period_stock)
     max_regime_ma = max(regime_ma_periods)
     warmup_days = int(max(max_strategy_ma, max_regime_ma) * 1.5)
 

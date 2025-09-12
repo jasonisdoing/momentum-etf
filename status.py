@@ -371,6 +371,18 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
     """
     # 설정을 불러옵니다.
     print(f"현황을 계산합니다.")
+    app_settings = get_app_settings(country)
+    if not app_settings or "ma_period_etf" not in app_settings or "ma_period_stock" not in app_settings:
+        print(f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        return None, None, None, None, None, None, None, None
+
+    try:
+        ma_period_etf = int(app_settings["ma_period_etf"])
+        ma_period_stock = int(app_settings["ma_period_stock"])
+    except (ValueError, TypeError):
+        print(f"오류: '{country}' 국가의 MA 기간 설정이 올바르지 않습니다.")
+        return None, None, None, None, None, None, None, None
+
     portfolio_data = get_portfolio_snapshot(country, date_str)
     if not portfolio_data:
         print(
@@ -426,8 +438,6 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
             print("-> 장중입니다. 네이버 금융에서 실시간 시세를 가져옵니다 (비공식, 지연 가능).")
  
     # --- 신호 계산 ---
-    ma_period_etf = int(getattr(settings, "MA_PERIOD_FOR_ETF", 15))
-    ma_period_stock = int(getattr(settings, "MA_PERIOD_FOR_STOCK", 75))
     atr_period_norm = int(getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20))
 
     # 시장 레짐 필터 설정 로드
@@ -530,10 +540,11 @@ def _build_header_line(country, portfolio_data, current_equity, total_holdings_v
     # 현금
     total_cash = float(current_equity) - float(total_holdings)
 
-    # 누적 수익률
+    # 누적 수익률 및 TopN
     app_settings = get_app_settings(country)
     initial_capital_local = float(app_settings.get("initial_capital", 0)) if app_settings else 0.0
     cum_ret_pct = ((current_equity / initial_capital_local) - 1.0) * 100.0 if initial_capital_local > 0 else 0.0
+    portfolio_topn = app_settings.get("portfolio_topn", 0) if app_settings else 0
 
     # Determine trading-calendar-based label/date via pykrx
     ref_ticker_for_cal = next(iter(data_by_tkr.keys())) if data_by_tkr else None
@@ -605,7 +616,7 @@ def _build_header_line(country, portfolio_data, current_equity, total_holdings_v
     cum_ret_str = _format_return_for_header("누적", cum_ret_pct, current_equity - initial_capital_local, money_formatter)
 
     header_line = (
-        f"보유종목: {held_count} | 평가금액: {equity_str} | 보유금액: {holdings_str} | "
+        f"보유종목: {held_count}/{portfolio_topn} | 평가금액: {equity_str} | 보유금액: {holdings_str} | "
         f"현금: {cash_str} | {day_ret_str} | {eval_ret_str} | {cum_ret_str}"
     )
 

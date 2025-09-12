@@ -9,12 +9,6 @@ HOLDING_STOP_LOSS_PCT = -10.0
 COOLDOWN_DAYS = 5
 
 
-# --- 전략 고유 파라미터 ---
-# Richard Donchian-style trend-following
-# 가격이 이동평균선 위에 있으면 매수, 아래에 있으면 매도합니다.
-MA_PERIOD_FOR_ETF = 15
-MA_PERIOD_FOR_STOCK = 75
-
 # --- 시장 레짐 필터 (Market Regime Filter) ---
 # S&P 500, KOSPI 등 주요 지수가 장기 이동평균선 아래에 있을 때 모든 주식을 매도하고 현금 보유
 MARKET_REGIME_FILTER_ENABLED = True
