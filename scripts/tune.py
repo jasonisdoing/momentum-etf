@@ -19,9 +19,9 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logic import settings
-from utils.report import format_aud_money
 from utils.db_manager import get_stocks
-from utils.data_loader import fetch_ohlcv
+from utils.data_loader import fetch_ohlcv_for_tickers
+from utils.report import format_aud_money
  
  
 def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame]) -> tuple:
@@ -29,32 +29,35 @@ def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame])
     단일 파라미터 조합에 대한 백테스트를 실행하는 워커 함수입니다.
     이 함수는 별도의 프로세스에서 실행됩니다.
     """
-    ma_etf, ma_stock, replace_stock, replace_threshold, country = params
+    ma_etf, ma_stock, replace_stock, replace_threshold, portfolio_topn, country = params
     # 각 프로세스는 자체적인 모듈 컨텍스트를 가지므로, 여기서 다시 임포트하고 설정합니다.
     from test import main as run_test
     from logic import settings as worker_settings
 
     worker_settings.MA_PERIOD_FOR_ETF = ma_etf
     worker_settings.MA_PERIOD_FOR_STOCK = ma_stock
+    worker_settings.PORTFOLIO_TOPN = portfolio_topn
     worker_settings.REPLACE_WEAKER_STOCK = replace_stock
     worker_settings.REPLACE_SCORE_THRESHOLD = replace_threshold
 
     # 미리 로드된 데이터를 전달하여 yfinance 호출을 방지합니다.
     result = run_test(country=country, quiet=True, prefetched_data=prefetched_data)
-    return ma_etf, ma_stock, replace_stock, replace_threshold, result
+    return ma_etf, ma_stock, replace_stock, replace_threshold, portfolio_topn, result
  
  
 class MetricTracker:
     """최적의 성능 지표를 추적하고 관리하는 헬퍼 클래스입니다."""
  
-    def __init__(self, name: str, compare_func: Callable[[float, float], bool]):
+    def __init__(self, name: str, compare_func: Callable[[float, float], bool], money_formatter: Callable):
         """
         Args:
             name (str): 지표의 이름 (예: "CAGR", "MDD")
             compare_func (Callable): 두 값을 비교하는 함수. (예: a > b 이면 더 큰 값을, a < b 이면 더 작은 값을 선택)
+            money_formatter (Callable): 금액 포맷팅 함수
         """
         self.name = name
         self.compare_func = compare_func
+        self.money_formatter = money_formatter
         # 비교 함수에 따라 초기값을 무한대 또는 음의 무한대로 설정
         self.best_value = -float("inf") if compare_func(1, 0) else float("inf")
         self.params = None
@@ -66,8 +69,14 @@ class MetricTracker:
             self.best_value = value
             self.params = params
             self.result = result
+
+            param_str = f"Threshold={params['replace_threshold']:.2f}"
+            # 'portfolio_topn'이 params에 있고, 기본값과 다를 경우 (즉, coin 튜닝일 경우)
+            if 'portfolio_topn' in params and params['portfolio_topn'] != settings.PORTFOLIO_TOPN:
+                param_str = f"TopN={params['portfolio_topn']}, MA={params['ma_stock']}, {param_str}"
+
             tqdm.write(
-                f"  -> 새로운 최적 {self.name} 발견! {self.best_value:.2f} (Threshold={params['replace_threshold']:.2f})"
+                f"  -> 새로운 최적 {self.name} 발견! {self.best_value:.2f} ({param_str})"
             )
  
     def print_report(self, title: str):
@@ -79,12 +88,14 @@ class MetricTracker:
         print(f"\n[{title}]")
         print(f"  - MA_PERIOD_FOR_ETF: {self.params['ma_etf']}")
         print(f"  - MA_PERIOD_FOR_STOCK: {self.params['ma_stock']}")
+        if 'portfolio_topn' in self.params:
+            print(f"  - PORTFOLIO_TOPN: {self.params['portfolio_topn']}")
         print(f"  - REPLACE_WEAKER_STOCK: {self.params['replace_stock']}")
         print(f"  - REPLACE_SCORE_THRESHOLD: {self.params['replace_threshold']:.2f}")
         print(f"\n[{self.name} 기준 성과]")
         print(f"  - {self.name}: {self.best_value:.2f}")
         print(f"  - 기간: {self.result['start_date']} ~ {self.result['end_date']}")
-        print(f"  - 최종 자산: {format_aud_money(self.result['final_value'])}")
+        print(f"  - 최종 자산: {self.money_formatter(self.result['final_value'])}")
         print(f"  - CAGR: {self.result['cagr_pct']:.2f}%")
         print(f"  - MDD: -{self.result['mdd_pct']:.2f}%")
         print(f"  - Calmar Ratio: {self.result.get('calmar_ratio', 0.0):.2f}")
@@ -98,17 +109,34 @@ def tune_parameters(country: str):
     # 다른 파라미터는 settings.py의 기본값으로 고정합니다.
     ma_etf_range = [settings.MA_PERIOD_FOR_ETF]
     ma_stock_range = [settings.MA_PERIOD_FOR_STOCK]
+    portfolio_topn_range = [settings.PORTFOLIO_TOPN]
     # 임계값 튜닝은 교체매매가 True일 때만 의미가 있습니다.
     replace_stock_options = [True]
     replace_threshold_range = np.arange(0.5, 5.1, 0.5)  # 0.5부터 5.0까지 0.5 간격으로 테스트합니다.
- 
+
+    if country == "coin":
+        # 가상화폐의 경우, 더 넓은 범위의 파라미터를 튜닝합니다.
+        # MA_PERIOD_FOR_STOCK: 5부터 200까지 5 간격
+        ma_stock_range = np.arange(5, 201, 5)
+        # REPLACE_SCORE_THRESHOLD: 0.5부터 10.0까지 0.5 간격
+        replace_threshold_range = np.arange(0.5, 10.1, 0.5)
+        # PORTFOLIO_TOPN: 1부터 5까지 1 간격
+        portfolio_topn_range = np.arange(1, 6, 1)
+
+    # 국가별 포맷터 설정
+    if country == "aus":
+        money_formatter = format_aud_money
+    else:  # kor, coin
+        from utils.report import format_kr_money
+        money_formatter = format_kr_money
+
     # 추적할 성능 지표들을 정의합니다.
     trackers = {
-        "cagr": MetricTracker("CAGR", lambda a, b: a > b),
-        "mdd": MetricTracker("MDD", lambda a, b: a < b),
-        "calmar": MetricTracker("Calmar Ratio", lambda a, b: a > b),
-        "sharpe": MetricTracker("Sharpe Ratio", lambda a, b: a > b),
-        "sortino": MetricTracker("Sortino Ratio", lambda a, b: a > b),
+        "cagr": MetricTracker("CAGR", lambda a, b: a > b, money_formatter),
+        "mdd": MetricTracker("MDD", lambda a, b: a < b, money_formatter),
+        "calmar": MetricTracker("Calmar Ratio", lambda a, b: a > b, money_formatter),
+        "sharpe": MetricTracker("Sharpe Ratio", lambda a, b: a > b, money_formatter),
+        "sortino": MetricTracker("Sortino Ratio", lambda a, b: a > b, money_formatter),
     }
  
     # --- 데이터 사전 로딩 (yfinance 호출 최소화) ---
@@ -116,7 +144,8 @@ def tune_parameters(country: str):
  
     # 1. 튜닝에 필요한 최대 기간 계산
     max_ma_period = max(max(ma_etf_range), max(ma_stock_range))
-    warmup_days = int(max_ma_period * 1.5)
+    atr_period_norm = int(getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20))
+    warmup_days = int(max(max_ma_period, atr_period_norm) * 1.5)
  
     # 2. logic 설정에서 백테스트 기간 가져오기
     test_months_range = getattr(settings, "TEST_MONTHS_RANGE", 12)
@@ -124,23 +153,16 @@ def tune_parameters(country: str):
     core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
     test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]
  
-    # 3. DB에서 티커 목록 읽기
-    core_start = pd.to_datetime(test_date_range[0])
-    warmup_start = core_start - pd.DateOffset(days=warmup_days)
-    adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), test_date_range[1]]
- 
     stocks_from_db = get_stocks(country)
     if not stocks_from_db:
         print(f"오류: '{country}_stocks' 컬렉션에서 튜닝에 사용할 종목을 찾을 수 없습니다.")
         return
     tickers_to_process = [s['ticker'] for s in stocks_from_db]
  
-    # 4. 모든 종목의 시세 데이터를 병렬로 미리 로딩합니다.
-    prefetched_data = {}
-    for tkr in tqdm(tickers_to_process, desc="시세 데이터 로딩"):
-        df = fetch_ohlcv(tkr, country=country, date_range=adjusted_date_range)
-        if df is not None and not df.empty:
-            prefetched_data[tkr] = df
+    # 3. 모든 종목의 시세 데이터를 병렬로 미리 로딩합니다.
+    prefetched_data = fetch_ohlcv_for_tickers(
+        tickers_to_process, country, date_range=test_date_range, warmup_days=warmup_days
+    )
  
     if not prefetched_data:
         print("오류: 튜닝에 사용할 데이터를 로드하지 못했습니다.")
@@ -151,14 +173,15 @@ def tune_parameters(country: str):
     param_combinations = []
     for ma_etf in ma_etf_range:
         for ma_stock in ma_stock_range:
-            for replace_stock in replace_stock_options:
-                for replace_threshold in replace_threshold_range:
-                    param_combinations.append(
-                        (ma_etf, ma_stock, replace_stock, replace_threshold, country)
-                    )
+            for portfolio_topn in portfolio_topn_range:
+                for replace_stock in replace_stock_options:
+                    for replace_threshold in replace_threshold_range:
+                        param_combinations.append(
+                            (ma_etf, ma_stock, replace_stock, replace_threshold, portfolio_topn, country)
+                        )
  
     total_combinations = len(param_combinations)
-    print(f"전략의 교체 임계값(Threshold) 튜닝을 시작합니다 ({country.upper()}).")
+    print(f"전략 파라미터 튜닝을 시작합니다 ({country.upper()}).")
     print(f"총 {total_combinations}개의 조합을 테스트합니다...")
     print("=" * 60)
     print("주의: 테스트에 매우 오랜 시간이 소요될 수 있습니다.")
@@ -175,12 +198,13 @@ def tune_parameters(country: str):
  
         for future in tqdm(as_completed(futures), total=total_combinations, desc="튜닝 진행률"):
             try:
-                ma_etf, ma_stock, replace_stock, replace_threshold, result = future.result()
+                ma_etf, ma_stock, replace_stock, replace_threshold, portfolio_topn, result = future.result()
  
                 if result:
                     params = {
                         "ma_etf": ma_etf,
                         "ma_stock": ma_stock,
+                        "portfolio_topn": portfolio_topn,
                         "replace_stock": replace_stock,
                         "replace_threshold": replace_threshold,
                     }
@@ -213,35 +237,39 @@ def tune_parameters(country: str):
         print("\n유효한 결과를 찾지 못했습니다.")
         return None, None
 
-    return trackers["cagr"].best_value, trackers["cagr"].params["replace_threshold"]
+    return trackers["cagr"].best_value, trackers["cagr"].params
  
  
 if __name__ == "__main__":
-    print("전략 파라미터 최적화를 시작합니다.")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="전략 파라미터 최적화를 시작합니다.")
+    parser.add_argument(
+        "country",
+        choices=["kor", "aus", "coin"],
+        help="튜닝을 진행할 시장 (kor, aus, coin)",
+    )
+    args = parser.parse_args()
+    country = args.country
 
     print("\n" + "=" * 60)
-    print(">>> 한국(KOR) 시장 최적화 시작...")
+    print(f">>> {country.upper()} 시장 최적화 시작...")
     print("=" * 60)
-    kor_best_cagr, kor_best_threshold = tune_parameters(country="kor")
-
-    print("\n" + "=" * 60)
-    print(">>> 호주(AUS) 시장 최적화 시작...")
-    print("=" * 60)
-    aus_best_cagr, aus_best_threshold = tune_parameters(country="aus")
+    best_cagr, best_params = tune_parameters(country=country)
 
     print("\n\n" + "=" * 60)
     print(">>> 최종 최적화 결과 요약 (최고 CAGR 기준) <<<")
     print("=" * 60)
-    if kor_best_cagr is not None and kor_best_threshold is not None:
-        print(
-            f"  - 한국 (KOR) 최적 CAGR: {kor_best_cagr:.2f}% (Threshold: {kor_best_threshold:.2f})"
-        )
+    if best_cagr is not None and best_params is not None:
+        if country == 'coin':
+            print(
+                f"  - {country.upper()} 최적 CAGR: {best_cagr:.2f}% "
+                f"(TopN: {best_params['portfolio_topn']}, MA: {best_params['ma_stock']}, Threshold: {best_params['replace_threshold']:.2f})"
+            )
+        else:
+            print(
+                f"  - {country.upper()} 최적 CAGR: {best_cagr:.2f}% (Threshold: {best_params['replace_threshold']:.2f})"
+            )
     else:
-        print("  - 한국 (KOR): 유효한 결과를 찾지 못했습니다.")
-    if aus_best_cagr is not None and aus_best_threshold is not None:
-        print(
-            f"  - 호주 (AUS) 최적 CAGR: {aus_best_cagr:.2f}% (Threshold: {aus_best_threshold:.2f})"
-        )
-    else:
-        print("  - 호주 (AUS): 유효한 결과를 찾지 못했습니다.")
+        print(f"  - {country.upper()}: 유효한 결과를 찾지 못했습니다.")
     print("=" * 60)

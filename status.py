@@ -118,6 +118,7 @@ def get_market_regime_status_string() -> Optional[str]:
 def get_benchmark_status_string(country: str) -> Optional[str]:
     """
     포트폴리오의 누적 수익률을 벤치마크와 비교하여 초과 성과를 HTML 문자열로 반환합니다.
+    가상화폐의 경우, 여러 벤치마크와 비교할 수 있습니다.
     """
     # 1. 설정 로드
     app_settings = get_app_settings(country)
@@ -141,55 +142,72 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
     # 3. 포트폴리오 누적 수익률 계산
     portfolio_cum_ret_pct = ((current_equity / initial_capital) - 1.0) * 100.0
 
-    # 4. 벤치마크 티커 결정
-    benchmark_tickers_map = {
-        "kor": "379800",  # KODEX 미국S&P500TR
-        "aus": "IVV.AX",  # iShares Core S&P 500 ETF
-    }
-    benchmark_ticker = getattr(settings, "BENCHMARK_TICKERS", benchmark_tickers_map).get(country)
-    if not benchmark_ticker:
-        return None
+    def _calculate_and_format_single_benchmark(benchmark_ticker: str, benchmark_country: str, display_name_override: Optional[str] = None) -> str:
+        """단일 벤치마크와의 비교 문자열을 생성하는 헬퍼 함수입니다."""
+        df_benchmark = fetch_ohlcv(
+            benchmark_ticker,
+            country=benchmark_country,
+            date_range=[initial_date.strftime("%Y-%m-%d"), base_date.strftime("%Y-%m-%d")],
+        )
 
-    # 5. 벤치마크 데이터 조회
-    df_benchmark = fetch_ohlcv(
-        benchmark_ticker,
-        country=country,
-        date_range=[initial_date.strftime("%Y-%m-%d"), base_date.strftime("%Y-%m-%d")],
-    )
+        if df_benchmark is None or df_benchmark.empty:
+            return f'<span style="color:grey">벤치마크({benchmark_ticker}) 데이터 조회 실패</span>'
 
-    if df_benchmark is None or df_benchmark.empty:
-        return f'<span style="color:grey">벤치마크({benchmark_ticker}) 데이터 조회 실패</span>'
+        start_prices = df_benchmark[df_benchmark.index >= initial_date]["Close"]
+        if start_prices.empty:
+            return f'<span style="color:grey">벤치마크 시작 가격 조회 실패</span>'
+        benchmark_start_price = start_prices.iloc[0]
 
-    # 6. 벤치마크 성과 계산
-    start_prices = df_benchmark[df_benchmark.index >= initial_date]["Close"]
-    if start_prices.empty:
-        return f'<span style="color:grey">벤치마크 시작 가격 조회 실패</span>'
-    benchmark_start_price = start_prices.iloc[0]
+        end_prices = df_benchmark[df_benchmark.index <= base_date]["Close"]
+        if end_prices.empty:
+            return f'<span style="color:grey">벤치마크 종료 가격 조회 실패</span>'
+        benchmark_end_price = end_prices.iloc[-1]
 
-    end_prices = df_benchmark[df_benchmark.index <= base_date]["Close"]
-    if end_prices.empty:
-        return f'<span style="color:grey">벤치마크 종료 가격 조회 실패</span>'
-    benchmark_end_price = end_prices.iloc[-1]
+        if pd.isna(benchmark_start_price) or pd.isna(benchmark_end_price) or benchmark_start_price <= 0:
+            return '<span style="color:grey">벤치마크 가격 정보 오류</span>'
 
-    if pd.isna(benchmark_start_price) or pd.isna(benchmark_end_price) or benchmark_start_price <= 0:
-        return '<span style="color:grey">벤치마크 가격 정보 오류</span>'
+        benchmark_cum_ret_pct = ((benchmark_end_price / benchmark_start_price) - 1.0) * 100.0
 
-    benchmark_cum_ret_pct = ((benchmark_end_price / benchmark_start_price) - 1.0) * 100.0
+        excess_return_pct = portfolio_cum_ret_pct - benchmark_cum_ret_pct
+        color = "red" if excess_return_pct > 0 else "blue" if excess_return_pct < 0 else "black"
 
-    # 7. 초과 성과 계산 및 문자열 포맷팅
-    excess_return_pct = portfolio_cum_ret_pct - benchmark_cum_ret_pct
-    color = "red" if excess_return_pct > 0 else "blue" if excess_return_pct < 0 else "black"
+        from utils.data_loader import fetch_yfinance_name, fetch_pykrx_name
 
-    from utils.data_loader import fetch_yfinance_name
-    benchmark_name = ""
-    if country == 'kor' and _stock:
-        try: benchmark_name = _stock.get_etf_ticker_name(benchmark_ticker)
-        except Exception: pass
-    elif country == 'aus':
-        benchmark_name = fetch_yfinance_name(benchmark_ticker)
+        benchmark_name = display_name_override
+        if not benchmark_name:
+            if benchmark_country == 'kor' and _stock:
+                benchmark_name = fetch_pykrx_name(benchmark_ticker)
+            elif benchmark_country == 'aus':
+                benchmark_name = fetch_yfinance_name(benchmark_ticker)
+            elif benchmark_country == 'coin':
+                benchmark_name = benchmark_ticker.upper()
 
-    benchmark_display_name = f" vs {benchmark_name}" if benchmark_name else f" vs {benchmark_ticker}"
-    return f'초과성과: <span style="color:{color}">{excess_return_pct:+.2f}%</span>{benchmark_display_name}'
+        benchmark_display_name = f" vs {benchmark_name}" if benchmark_name else f" vs {benchmark_ticker}"
+        return f'초과성과: <span style="color:{color}">{excess_return_pct:+.2f}%</span>{benchmark_display_name}'
+
+    if country == "coin":
+        # 가상화폐의 경우, 두 개의 벤치마크와 비교합니다.
+        benchmarks_to_compare = [
+            {"ticker": "379800", "country": "kor", "name": "KODEX 미국S&P500"},
+            {"ticker": "BTC", "country": "coin", "name": "BTC"},
+        ]
+        
+        results = []
+        for bm in benchmarks_to_compare:
+            results.append(_calculate_and_format_single_benchmark(bm["ticker"], bm["country"], bm["name"]))
+        
+        return "<br>".join(results)
+    else:
+        # 기존 로직 (한국/호주)
+        benchmark_tickers_map = {
+            "kor": "379800",
+            "aus": "IVV.AX",
+        }
+        benchmark_ticker = getattr(settings, "BENCHMARK_TICKERS", benchmark_tickers_map).get(country)
+        if not benchmark_ticker:
+            return None
+        
+        return _calculate_and_format_single_benchmark(benchmark_ticker, country)
 
 def is_market_open(country: str = "kor") -> bool:
     """
@@ -483,7 +501,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
             ma_score = (c0 - m) / a if pd.notna(m) and pd.notna(a) and a > 0 else 0.0
             buy_signal_days_today = result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0
     
-            sh = int((holdings.get(tkr) or {}).get("shares") or 0)
+            sh = float((holdings.get(tkr) or {}).get("shares") or 0.0)
             ac = float((holdings.get(tkr) or {}).get("avg_cost") or 0.0)
             total_holdings_value += sh * c0
             datestamps.append(result["df"].index[-1])
@@ -502,7 +520,7 @@ def _build_header_line(country, portfolio_data, current_equity, total_holdings_v
     money_formatter = format_kr_money if country != 'aus' else format_aud_money
 
     # 보유 종목 수
-    held_count = sum(1 for v in portfolio_data.get("holdings", []) if int(v.get("shares", 0)) > 0)
+    held_count = sum(1 for v in portfolio_data.get("holdings", []) if float(v.get("shares", 0)) > 0)
 
     # 해외 주식 가치 포함
     total_holdings = total_holdings_value
@@ -627,10 +645,10 @@ def generate_status_report(
     header_line, label_date, day_label = _build_header_line(country, portfolio_data, current_equity, total_holdings_value, data_by_tkr, base_date)
 
     # 3. 보유 기간 및 고점 대비 하락률 계산
-    held_tickers = [tkr for tkr, v in holdings.items() if int((v or {}).get("shares") or 0) > 0]
+    held_tickers = [tkr for tkr, v in holdings.items() if float((v or {}).get("shares") or 0.0) > 0]
     consecutive_holding_info = calculate_consecutive_holding_info(held_tickers, country, base_date)
     for tkr, d in data_by_tkr.items():
-        if int(d.get("shares", 0)) > 0:
+        if float(d.get("shares", 0.0)) > 0:
             buy_date = consecutive_holding_info.get(tkr, {}).get("buy_date")
             if buy_date:
                 df_holding_period = d["df"][buy_date:]
@@ -640,15 +658,22 @@ def generate_status_report(
                     if pd.notna(peak_high) and peak_high > 0 and pd.notna(current_price):
                         d["drawdown_from_peak"] = ((current_price / peak_high) - 1.0) * 100.0
 
+    app_settings = get_app_settings(country)
+    if not app_settings or "portfolio_topn" not in app_settings:
+        print(f"오류: '{country}' 국가의 최대 보유 종목 수(portfolio_topn)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        return None
+    
+    portfolio_topn = app_settings["portfolio_topn"]
+
     try:
-        denom = int(settings.PORTFOLIO_TOPN)
+        denom = int(portfolio_topn)
         stop_loss = settings.HOLDING_STOP_LOSS_PCT
         min_pos = float(settings.MIN_POSITION_PCT)
     except AttributeError as e:
         print(f"오류: '{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.")
-        return
+        return None
 
-    held_count = sum(1 for v in holdings.values() if int((v or {}).get("shares") or 0) > 0)
+    held_count = sum(1 for v in holdings.values() if float((v or {}).get("shares") or 0.0) > 0)
     total_cash = float(current_equity) - float(total_holdings_value)
 
     # 4. 초기 매매 결정 생성
@@ -663,6 +688,13 @@ def generate_status_report(
         price_formatter = lambda p: f"{int(round(p)):,}"
         ma_formatter = lambda p: f"{int(round(p)):,}원"
 
+    def format_shares(quantity):
+        if country == 'coin':
+            # 소수점 8자리까지 표시하되, 불필요한 0은 제거
+            return f"{quantity:,.8f}".rstrip('0').rstrip('.')
+        else:
+            return f"{int(quantity):,d}"
+
     # 거래일 계산을 위한 참조 티커를 설정합니다.
     ref_ticker_for_cal = next(iter(data_by_tkr.keys())) if data_by_tkr else None
 
@@ -672,7 +704,7 @@ def generate_status_report(
             continue
         price = d["price"]
         score = d.get("score", 0.0)
-        sh = int(d["shares"])
+        sh = float(d["shares"])
         ac = float(d.get("avg_cost") or 0.0)
 
         # 자동 계산된 보유종목의 매수일과 보유일
@@ -715,7 +747,7 @@ def generate_status_report(
                 qty = sh
                 notional = qty * price
                 prof = (price - ac) * qty if ac > 0 else 0.0
-                phrase = f"가격기반손절 {qty}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+                phrase = f"가격기반손절 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
         # --- 전략별 매수/매도 로직 ---
         if state == "HOLD":  # 아직 매도 결정이 내려지지 않은 경우
@@ -726,7 +758,7 @@ def generate_status_report(
                 notional = qty * price
                 prof = (price - ac) * qty if ac > 0 else 0.0
                 tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"
-                phrase = f"{tag} {qty}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+                phrase = f"{tag} {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
         elif state == "WAIT":  # 아직 보유하지 않은 경우
             price, ma, period = d["price"], d["s1"], d["s2"]
@@ -738,6 +770,7 @@ def generate_status_report(
         amount = sh * price if pd.notna(price) else 0.0
         # 일간 수익률 계산
         prev_close = d.get("prev_close")
+        day_ret = 0.0
         day_ret_str = "-"
         if prev_close is not None and prev_close > 0 and pd.notna(price):
             day_ret = ((price / prev_close) - 1.0) * 100.0
@@ -760,11 +793,11 @@ def generate_status_report(
             state,
             buy_date_display,
             holding_days_display,
-            price_formatter(price),
+            price,
             day_ret,
-            f"{sh:,}",
-            money_formatter(amount),
-            hold_ret,
+            sh,
+            amount,
+            hold_ret if hold_ret is not None else 0.0,
             position_weight_pct,
             f"{d.get('drawdown_from_peak'):.1f}%" if d.get("drawdown_from_peak") is not None else "-",  # 고점대비
             d.get("score"),  # raw score 값으로 변경
@@ -809,17 +842,21 @@ def generate_status_report(
             price = d["price"]
             
             if price > 0:
-                from math import ceil
                 equity = current_equity
                 min_val = min_pos * equity
-                req_qty = int(ceil(min_val / price))
+                
+                if country == 'coin':
+                    req_qty = min_val / price
+                else:
+                    from math import ceil
+                    req_qty = int(ceil(min_val / price))
                 buy_notional = req_qty * price
 
                 if req_qty > 0 and buy_notional <= available_cash:
                     # 매수 결정
                     cand["state"] = "BUY"
                     cand["row"][3] = "BUY"
-                    buy_phrase = f"매수 {req_qty}주 @ {price_formatter(price)} ({money_formatter(buy_notional)})"
+                    buy_phrase = f"매수 {format_shares(req_qty)}주 @ {price_formatter(price)} ({money_formatter(buy_notional)})"
                     original_phrase = cand["row"][-1]
                     cand["row"][-1] = f"{buy_phrase} ({original_phrase})"
                     
@@ -853,9 +890,9 @@ def generate_status_report(
             if best_new["score"] > weakest_held["score"] + replace_threshold:
                 # 1. 교체될 종목(매도)의 상태 업데이트
                 d_weakest = data_by_tkr.get(weakest_held["tkr"])
-                sell_price = d_weakest.get("price", 0)
-                sell_qty = d_weakest.get("shares", 0)
-                avg_cost = d_weakest.get("avg_cost", 0)
+                sell_price = float(d_weakest.get("price", 0))
+                sell_qty = float(d_weakest.get("shares", 0))
+                avg_cost = float(d_weakest.get("avg_cost", 0))
 
                 hold_ret = 0.0
                 prof = 0.0
@@ -863,7 +900,7 @@ def generate_status_report(
                     hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
                     prof = (sell_price - avg_cost) * sell_qty
 
-                sell_phrase = f"교체매도 {sell_qty}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'} ({best_new['tkr']}(으)로 교체)"
+                sell_phrase = f"교체매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'} ({best_new['tkr']}(으)로 교체)"
 
                 weakest_held["state"] = "SELL_REPLACE"
                 weakest_held["row"][3] = "SELL_REPLACE"
@@ -875,14 +912,17 @@ def generate_status_report(
 
                 # 매수 수량 및 금액 계산
                 sell_value = weakest_held["weight"] / 100.0 * current_equity
-                buy_price = data_by_tkr.get(best_new["tkr"], {}).get("price", 0)
+                buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
                 if buy_price > 0:
-                    # 매도 금액으로 살 수 있는 최대 수량
-                    buy_qty = int(sell_value // buy_price)
+                    if country == 'coin':
+                        buy_qty = sell_value / buy_price
+                    else:
+                        # 매도 금액으로 살 수 있는 최대 수량
+                        buy_qty = int(sell_value // buy_price)
                     buy_notional = buy_qty * buy_price
                     best_new["row"][
                         -1
-                    ] = f"매수 {buy_qty}주 @ {price_formatter(buy_price)} ({money_formatter(buy_notional)}) ({weakest_held['tkr']} 대체)"
+                    ] = f"매수 {format_shares(buy_qty)}주 @ {price_formatter(buy_price)} ({money_formatter(buy_notional)}) ({weakest_held['tkr']} 대체)"
                 else:
                     best_new["row"][-1] = f"{weakest_held['tkr']}(을)를 대체 (가격정보 없음)"
             else:
@@ -962,14 +1002,14 @@ def generate_status_report(
             "HOLD",  # 상태
             "-",  # 매수일
             "-",  # 보유
-            price_formatter(is_value),  # 현재가
+            is_value,  # 현재가
             0.0,  # 일간수익률
             "1",  # 보유수량
-            money_formatter(is_value),  # 금액
+            is_value,  # 금액
             is_change_pct,  # 누적수익률
             is_weight_pct,  # 비중
             "-",  # 고점대비
-            None,  # 점수
+            "-",  # 점수
             "-",  # 지속
             "International Shares",  # 문구
         ]

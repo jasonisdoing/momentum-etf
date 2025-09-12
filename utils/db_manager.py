@@ -113,7 +113,7 @@ def get_portfolio_snapshot(
     for trade in trades_cursor:
         ticker = trade["ticker"]
         if ticker not in holdings_agg:
-            holdings_agg[ticker] = {"shares": 0, "total_cost": 0.0, "name": trade.get("name", "")}
+            holdings_agg[ticker] = {"shares": 0.0, "total_cost": 0.0, "name": trade.get("name", "")}
         
         if trade["action"] == "BUY":
             holdings_agg[ticker]["shares"] += trade["shares"]

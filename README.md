@@ -97,7 +97,6 @@ pykrx 라이브러리를 사용하여 한국 시장의 급등주를 섹터별로
 - **`logic/settings.py`**: 백테스트 및 매매 전략에 사용되는 파라미터를 정의합니다.
   - `INITIAL_CAPITAL`: 초기 자본금
   - `TEST_MONTHS_RANGE`: 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월)
-  - `PORTFOLIO_TOPN`: 최대 보유 종목 수
   - `MIN_POSITION_PCT`: 최소 포지션 비율
   - `HOLDING_STOP_LOSS_PCT`: 개별 종목 손절매 비율
   - `COOLDOWN_DAYS`: 매매 후 쿨다운 기간

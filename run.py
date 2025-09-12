@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 def main():
     """CLI 인자를 파싱하여 해당 모듈을 실행합니다."""
     parser = argparse.ArgumentParser(description="MomentumPilot Trading Engine")
-    parser.add_argument("country", choices=["kor", "aus"], help="실행할 포트폴리오 국가 (kor, aus)")
+    parser.add_argument("country", choices=["kor", "aus", "coin"], help="실행할 포트폴리오 국가 (kor, aus, coin)")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--test",

@@ -32,12 +32,22 @@ try:
 except Exception:
     _stock = None
 
+# ccxt가 설치되지 않았을 경우를 대비한 예외 처리
+try:
+    import ccxt
+except ImportError:
+    ccxt = None
+
 yf_lock = Lock()
 
 
 def is_pykrx_available() -> bool:
     """pykrx 모듈이 성공적으로 임포트되었는지 확인합니다."""
     return _stock is not None
+
+def is_ccxt_available() -> bool:
+    """ccxt 모듈이 성공적으로 임포트되었는지 확인합니다."""
+    return ccxt is not None
 
 
 def format_aus_ticker_for_yfinance(ticker: str) -> str:
@@ -80,7 +90,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
         try:
             # ASX 200 지수로 거래일 조회
             # yfinance의 end는 exclusive이므로 하루를 더해줍니다.
-            end_date_plus_one = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+            end_date_plus_one = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
             with yf_lock:
                 df = yf.download("^AXJO", start=start_date, end=end_date_plus_one, progress=False, auto_adjust=True)
             # yfinance는 timezone-aware index를 반환하므로, naive date-only timestamp로 변환합니다.
@@ -88,6 +98,13 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
         except Exception as e:
             logging.getLogger(__name__).warning(f"yfinance로 거래일 조회 중 오류: {e}. 주말 제외 날짜를 사용합니다.")
             trading_days_ts = pd.bdate_range(start=start_date, end=end_date).tolist()
+    elif country == "coin":
+        # 암호화폐는 24/7 거래되므로, 단순히 날짜 범위 내의 모든 날짜를 반환합니다.
+        # 실제 거래가 없는 날(예: 거래소 점검)은 고려하지 않습니다.
+        trading_days_ts = pd.date_range(start=start_date, end=end_date, freq='D').tolist()
+    else:
+        logging.getLogger(__name__).error(f"지원하지 않는 국가 코드입니다: {country}")
+        return []
 
     # API가 아직 오늘 데이터를 제공하지 않는 경우를 대비하여, 오늘이 평일이면 추가합니다.
     today = pd.Timestamp.now().normalize()
@@ -114,8 +131,7 @@ def fetch_ohlcv(
     base_date: Optional[pd.Timestamp] = None,
 ) -> Optional[pd.DataFrame]:
     """
-    pykrx를 통해 OHLCV 데이터를 조회합니다.
-
+    OHLCV 데이터를 조회합니다.
     Args:
         ticker (str): 조회할 종목의 티커.
         date_range (Optional[List[str]]): ['YYYY-MM-DD', 'YYYY-MM-DD'] 형식의 조회 기간.
@@ -265,6 +281,38 @@ def fetch_ohlcv(
         except Exception as e:
             logging.getLogger(__name__).warning(f"{ticker}의 데이터 조회 중 오류: {e}")
             return None
+    elif country == "coin":
+        if not is_ccxt_available():
+            logging.getLogger(__name__).error(
+                "ccxt 라이브러리가 설치되지 않았습니다. 'pip install ccxt'로 설치해주세요."
+            )
+            return None
+
+        exchange = ccxt.bithumb()
+        symbol = f"{ticker.upper()}/KRW"
+
+        try:
+            since = int(start_dt.timestamp() * 1000)
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1d', since=since)
+            
+            if not ohlcv:
+                logging.getLogger(__name__).warning(f"{symbol}에 대한 OHLCV 데이터를 Bithumb에서 찾을 수 없습니다.")
+                return None
+
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            df = df.loc[start_dt:end_dt]
+            
+            if df.empty:
+                return None
+            return df
+        except ccxt.BadSymbol:
+            logging.getLogger(__name__).warning(f"Bithumb에서 지원하지 않는 암호화폐 티커 심볼입니다: {symbol}")
+            return None
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"암호화폐 {symbol}의 OHLCV 데이터 조회 중 오류: {e}")
+            return None
     else:
         logging.getLogger(__name__).error(f"지원하지 않는 국가 코드입니다: {country}")
         return None
@@ -390,3 +438,48 @@ def fetch_yfinance_name(ticker: str) -> str:
         logging.getLogger(__name__).warning(f"{cache_key}의 이름 조회 중 오류 발생: {e}")
         _yfinance_name_cache[cache_key] = ""  # 실패도 캐시하여 재시도 방지
     return None
+
+
+_crypto_name_cache: Dict[str, str] = {}
+
+
+def validate_and_fetch_crypto_name(ticker: str) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    ccxt를 사용하여 티커의 유효성을 검사하고, 암호화폐의 전체 이름을 가져옵니다.
+    Bithumb 거래소의 KRW 또는 BTC 마켓을 기준으로 검사합니다.
+
+    Returns:
+        Tuple[bool, Optional[str], Optional[str]]: (유효성 여부, 메시지, 종목명)
+    """
+    if not is_ccxt_available():
+        logging.getLogger(__name__).warning("ccxt가 설치되지 않아 암호화폐 티커 유효성을 검사할 수 없습니다.")
+        return True, None, None
+
+    exchange = ccxt.bithumb()
+    ticker_upper = ticker.upper()
+    symbol_krw = f"{ticker_upper}/KRW"
+    symbol_btc = f"{ticker_upper}/BTC"
+
+    try:
+        markets = exchange.load_markets()
+        
+        symbol_to_use = None
+        if symbol_krw in markets:
+            symbol_to_use = symbol_krw
+        elif symbol_btc in markets:
+            symbol_to_use = symbol_btc
+
+        if symbol_to_use:
+            # 티커가 유효하므로, 종목명을 가져옵니다.
+            # Bithumb의 경우 'name' 필드에 한글 이름이 포함되어 있습니다.
+            name = exchange.currencies.get(ticker_upper, {}).get('name', ticker_upper)
+            return True, symbol_to_use, name
+        else:
+            return False, f"'{ticker_upper}'에 대한 KRW 또는 BTC 마켓을 Bithumb 거래소에서 찾을 수 없습니다.", None
+            
+    except ccxt.NetworkError as e:
+        logging.getLogger(__name__).warning(f"Bithumb 네트워크 오류로 티커 유효성 검사 실패: {e}")
+        return True, None, None  # 네트워크 오류 시에는 검사를 통과시킴
+    except Exception as e:
+        logging.getLogger(__name__).error(f"ccxt로 티커 유효성 검사 중 알 수 없는 오류: {e}")
+        return False, "티커 유효성 검사 중 오류가 발생했습니다.", None
