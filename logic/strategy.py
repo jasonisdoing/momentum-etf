@@ -60,11 +60,14 @@ def run_portfolio_backtest(
         # 공통 설정
         stop_loss = settings.HOLDING_STOP_LOSS_PCT
         cooldown_days = int(settings.COOLDOWN_DAYS)
-        min_pos_pct = float(settings.MIN_POSITION_PCT)
     except AttributeError as e:
         raise AttributeError(
             f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
         ) from e
+
+    if top_n <= 0:
+        raise ValueError("PORTFOLIO_TOPN (top_n)은 0보다 커야 합니다.")
+    min_pos_pct = 1.0 / top_n
 
     # --- 티커 유형(ETF/주식) 구분 ---
     etf_tickers = {stock['ticker'] for stock in stocks if stock.get('type') == 'etf'}

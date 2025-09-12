@@ -663,15 +663,17 @@ def generate_status_report(
         print(f"오류: '{country}' 국가의 최대 보유 종목 수(portfolio_topn)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return None
     
-    portfolio_topn = app_settings["portfolio_topn"]
-
     try:
-        denom = int(portfolio_topn)
+        denom = int(app_settings["portfolio_topn"])
         stop_loss = settings.HOLDING_STOP_LOSS_PCT
-        min_pos = float(settings.MIN_POSITION_PCT)
     except AttributeError as e:
         print(f"오류: '{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.")
         return None
+
+    if denom <= 0:
+        print(f"오류: '{country}' 국가의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
+        return None
+    min_pos = 1.0 / denom
 
     held_count = sum(1 for v in holdings.values() if float((v or {}).get("shares") or 0.0) > 0)
     total_cash = float(current_equity) - float(total_holdings_value)

@@ -19,7 +19,7 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from logic import settings
-from utils.db_manager import get_stocks
+from utils.db_manager import get_stocks, get_app_settings
 from utils.data_loader import fetch_ohlcv_for_tickers
 from utils.report import format_aud_money
  
@@ -48,7 +48,7 @@ def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame])
 class MetricTracker:
     """최적의 성능 지표를 추적하고 관리하는 헬퍼 클래스입니다."""
  
-    def __init__(self, name: str, compare_func: Callable[[float, float], bool], money_formatter: Callable):
+    def __init__(self, name: str, compare_func: Callable[[float, float], bool], money_formatter: Callable, country: str):
         """
         Args:
             name (str): 지표의 이름 (예: "CAGR", "MDD")
@@ -58,6 +58,7 @@ class MetricTracker:
         self.name = name
         self.compare_func = compare_func
         self.money_formatter = money_formatter
+        self.country = country
         # 비교 함수에 따라 초기값을 무한대 또는 음의 무한대로 설정
         self.best_value = -float("inf") if compare_func(1, 0) else float("inf")
         self.params = None
@@ -72,7 +73,7 @@ class MetricTracker:
 
             param_str = f"Threshold={params['replace_threshold']:.2f}"
             # 'portfolio_topn'이 params에 있고, 기본값과 다를 경우 (즉, coin 튜닝일 경우)
-            if 'portfolio_topn' in params and params['portfolio_topn'] != settings.PORTFOLIO_TOPN:
+            if self.country == 'coin':
                 param_str = f"TopN={params['portfolio_topn']}, MA={params['ma_stock']}, {param_str}"
 
             tqdm.write(
@@ -109,7 +110,6 @@ def tune_parameters(country: str):
     # 다른 파라미터는 settings.py의 기본값으로 고정합니다.
     ma_etf_range = [settings.MA_PERIOD_FOR_ETF]
     ma_stock_range = [settings.MA_PERIOD_FOR_STOCK]
-    portfolio_topn_range = [settings.PORTFOLIO_TOPN]
     # 임계값 튜닝은 교체매매가 True일 때만 의미가 있습니다.
     replace_stock_options = [True]
     replace_threshold_range = np.arange(0.5, 5.1, 0.5)  # 0.5부터 5.0까지 0.5 간격으로 테스트합니다.
@@ -122,6 +122,15 @@ def tune_parameters(country: str):
         replace_threshold_range = np.arange(0.5, 10.1, 0.5)
         # PORTFOLIO_TOPN: 1부터 5까지 1 간격
         portfolio_topn_range = np.arange(1, 6, 1)
+    else:
+        # 한국/호주의 경우, DB에서 PORTFOLIO_TOPN 값을 가져옵니다.
+        app_settings_from_db = get_app_settings(country)
+        db_topn = app_settings_from_db.get("portfolio_topn") if app_settings_from_db else None
+        if not db_topn:
+            print(f"오류: {country.upper()} 국가의 PORTFOLIO_TOPN 설정이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+            return None, None
+        portfolio_topn_range = [int(db_topn)]
+
 
     # 국가별 포맷터 설정
     if country == "aus":
@@ -132,11 +141,11 @@ def tune_parameters(country: str):
 
     # 추적할 성능 지표들을 정의합니다.
     trackers = {
-        "cagr": MetricTracker("CAGR", lambda a, b: a > b, money_formatter),
-        "mdd": MetricTracker("MDD", lambda a, b: a < b, money_formatter),
-        "calmar": MetricTracker("Calmar Ratio", lambda a, b: a > b, money_formatter),
-        "sharpe": MetricTracker("Sharpe Ratio", lambda a, b: a > b, money_formatter),
-        "sortino": MetricTracker("Sortino Ratio", lambda a, b: a > b, money_formatter),
+        "cagr": MetricTracker("CAGR", lambda a, b: a > b, money_formatter, country),
+        "mdd": MetricTracker("MDD", lambda a, b: a < b, money_formatter, country),
+        "calmar": MetricTracker("Calmar Ratio", lambda a, b: a > b, money_formatter, country),
+        "sharpe": MetricTracker("Sharpe Ratio", lambda a, b: a > b, money_formatter, country),
+        "sortino": MetricTracker("Sortino Ratio", lambda a, b: a > b, money_formatter, country),
     }
  
     # --- 데이터 사전 로딩 (yfinance 호출 최소화) ---

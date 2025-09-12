@@ -5,8 +5,6 @@ INITIAL_CAPITAL = 100000000
 # 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월 데이터로 테스트)
 TEST_MONTHS_RANGE = 60
 
-
-MIN_POSITION_PCT = 0.10
 HOLDING_STOP_LOSS_PCT = -10.0
 COOLDOWN_DAYS = 5
 
