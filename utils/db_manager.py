@@ -601,6 +601,31 @@ def add_stocks(portfolio_country: str, stocks_to_add: List[Dict]) -> bool:
         print(f"오류: {portfolio_country.upper()} 포트폴리오에 종목 추가 중 오류 발생: {e}")
         return False
 
+def delete_stocks_by_ticker(portfolio_country: str, tickers_to_delete: List[str]) -> bool:
+    """
+    지정된 티커 목록에 해당하는 종목들을 소프트 삭제합니다.
+    """
+    db = get_db_connection()
+    if db is None or not tickers_to_delete:
+        return False
+
+    try:
+        collection_name = f"{portfolio_country}_stocks"
+        collection = db[collection_name]
+        
+        result = collection.update_many(
+            {"ticker": {"$in": tickers_to_delete}},
+            {"$set": {"is_deleted": True, "deleted_at": datetime.now()}}
+        )
+        
+        print(f"성공: {portfolio_country.upper()} 포트폴리오에서 {result.modified_count}개의 종목을 삭제 처리했습니다.")
+        return True
+    except Exception as e:
+        print(f"오류: 종목 삭제 중 오류 발생: {e}")
+        return False
+
+
+
 def get_all_daily_equities(country: str, start_date: datetime, end_date: datetime) -> List[Dict]:
     """지정된 기간 내의 모든 일별 평가금액 데이터를 DB에서 가져옵니다."""
     db = get_db_connection()

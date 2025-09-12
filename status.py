@@ -358,7 +358,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
         print(
             f"오류: '{country}' 국가의 포트폴리오 스냅샷을 DB에서 찾을 수 없습니다. 웹 앱의 '거래 입력' 또는 '설정' 탭을 통해 데이터를 먼저 생성해주세요."
         )
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None
     try:
         # DB에서 가져온 date는 이미 datetime 객체일 수 있습니다.
         base_date = pd.to_datetime(portfolio_data["date"]).normalize()
@@ -377,6 +377,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
 
     # DB에서 종목 목록을 가져와 전체 유니버스를 구성합니다.
     stocks_from_db = get_stocks(country)
+    stock_meta = {stock['ticker']: stock for stock in stocks_from_db}
     static_pairs = [(stock['ticker'], stock['name']) for stock in stocks_from_db]
     pairs = build_pairs_with_holdings(static_pairs, holdings)
 
@@ -386,7 +387,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
         # 호주: 가격은 AUD, 금액은 KRW로 표시
         price_formatter = format_aud_price
         money_formatter = format_aud_money
-        ma_formatter = format_aud_price  # 이동평균선 포맷터
+        ma_formatter = format_aud_price
     else:
         # 원화(KRW) 형식으로 가격을 포맷합니다.
         money_formatter = format_kr_money
@@ -418,7 +419,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
     if not stocks_from_db:
         print(f"오류: '{country}_stocks' 컬렉션에서 현황을 계산할 종목을 찾을 수 없습니다.")
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None
     etf_tickers_status = {stock['ticker'] for stock in stocks_from_db if stock.get('type') == 'etf'}
 
     max_ma_period = max(ma_period_etf, ma_period_stock, regime_ma_period if regime_filter_enabled else 0)
@@ -493,8 +494,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
                 "shares": sh, "avg_cost": ac, "df": result["df"]
             }
     
-    return portfolio_data, data_by_tkr, total_holdings_value, datestamps, pairs, base_date, regime_info
-
+    return portfolio_data, data_by_tkr, total_holdings_value, datestamps, pairs, base_date, regime_info, stock_meta
 
 def _build_header_line(country, portfolio_data, current_equity, total_holdings_value, data_by_tkr, base_date):
     """리포트의 헤더 라인을 생성합니다."""
@@ -601,7 +601,6 @@ def _build_header_line(country, portfolio_data, current_equity, total_holdings_v
 
     return header_line, label_date, day_label
 
-
 def generate_status_report(
     country: str = "kor",
     date_str: Optional[str] = None,
@@ -613,7 +612,7 @@ def generate_status_report(
     if not result or not result[0]:
         return None
 
-    portfolio_data, data_by_tkr, total_holdings_value, datestamps, pairs, base_date, regime_info = result
+    portfolio_data, data_by_tkr, total_holdings_value, datestamps, pairs, base_date, regime_info, stock_meta = result
     current_equity = float(portfolio_data.get("total_equity", 0.0))
     holdings = {
         item["ticker"]: {
@@ -754,10 +753,10 @@ def generate_status_report(
         holding_days_display = str(holding_days) if holding_days > 0 else "-"
 
         position_weight_pct = (amount / current_equity) * 100.0 if current_equity > 0 else 0.0
+        
         current_row = [
             0,
             tkr,
-            name,
             state,
             buy_date_display,
             holding_days_display,
@@ -767,7 +766,6 @@ def generate_status_report(
             money_formatter(amount),
             hold_ret,
             position_weight_pct,
-            ma_formatter(d["s1"]) if not pd.isna(d["s1"]) else "-",  # 이평선(값)
             f"{d.get('drawdown_from_peak'):.1f}%" if d.get("drawdown_from_peak") is not None else "-",  # 고점대비
             d.get("score"),  # raw score 값으로 변경
             f"{d['filter']}일" if d.get("filter") is not None else "-",
@@ -958,27 +956,23 @@ def generate_status_report(
         is_change_pct = international_shares_data.get("change_pct", 0.0)
         is_weight_pct = (is_value / current_equity) * 100.0 if current_equity > 0 else 0.0
 
-        num_signal_cols = 4  # 신호 관련 컬럼 수
         special_row = [
             0,  # #
             "IS",  # 티커
-            "International Shares",  # 이름
             "HOLD",  # 상태
             "-",  # 매수일
-            "-",  # 보유일
-            price_formatter(is_value),  # 현재가 (AUD)
+            "-",  # 보유
+            price_formatter(is_value),  # 현재가
             0.0,  # 일간수익률
             "1",  # 보유수량
-            money_formatter(is_value),  # 금액 (KRW)
+            money_formatter(is_value),  # 금액
             is_change_pct,  # 누적수익률
             is_weight_pct,  # 비중
+            "-",  # 고점대비
+            None,  # 점수
+            "-",  # 지속
+            "International Shares",  # 문구
         ]
-        # 나머지 신호 컬럼과 문구 컬럼을 빈 값으로 채웁니다.
-        signal_values = ["-"] * num_signal_cols
-        if num_signal_cols > 2:
-            signal_values[2] = None  # 점수 컬럼은 None으로 설정
-        special_row.extend(signal_values)
-        special_row.append("")  # 문구
 
         rows_sorted.insert(0, special_row)
         # 행을 추가했으므로, 순번을 다시 매깁니다.
@@ -986,14 +980,12 @@ def generate_status_report(
             row[0] = i
 
     # 8. 최종 결과 반환
-    # signal_headers = ["이평선(값)", "고점대비", "점수", "신호지속일"]
     headers = [
         "#",
         "티커",
-        "이름",
         "상태",
         "매수일",
-        "보유일",
+        "보유",
         "현재가",
         "일간수익률",
         "보유수량",
@@ -1001,8 +993,7 @@ def generate_status_report(
         "누적수익률",
         "비중",
     ]
-    headers.extend(["이평선(값)", "고점대비", "점수", "신호지속일"])
-    headers.append("문구")
+    headers.extend(["고점대비", "점수", "지속", "문구"])
 
     return (header_line, headers, rows_sorted)
 
@@ -1072,20 +1063,20 @@ def main(country: str = "kor", date_str: Optional[str] = None):
         aligns = [
             "right",  # #
             "right",  # 티커
-            "left",   # 이름
             "center", # 상태
             "left",   # 매수일
-            "right",  # 보유일
+            "right",  # 보유
             "right",  # 현재가
             "right",  # 일간수익률
             "right",  # 보유수량
             "right",  # 금액
             "right",  # 누적수익률
             "right",  # 비중
-            "right",  # 이평선(값)
             "right",  # 고점대비
             "right",  # 점수
-            "center", # 신호지속일
+            "center", # 지속
+            "center", # 국가
+            "left",   # 업종
             "left",   # 문구
         ]
 

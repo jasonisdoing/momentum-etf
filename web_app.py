@@ -131,6 +131,89 @@ def style_returns(val) -> str:
     return f"color: {color}"
 
 
+def _display_status_report_df(df: pd.DataFrame, country_code: str):
+    """
+    현황 리포트 DataFrame에 종목 메타데이터(이름, 국가, 업종)를 실시간으로 병합하고 스타일을 적용하여 표시합니다.
+    """
+    # 1. 종목 메타데이터 로드
+    stocks_data = get_stocks(country_code)
+    if not stocks_data:
+        meta_df = pd.DataFrame(columns=['ticker', '이름', '국가', '업종'])
+    else:
+        meta_df = pd.DataFrame(stocks_data)
+        required_cols = ['ticker', 'name', 'country', 'sector']
+        for col in required_cols:
+            if col not in meta_df.columns:
+                meta_df[col] = None
+        
+        meta_df = meta_df[required_cols]
+        meta_df.rename(columns={'name': '이름', 'country': '국가', 'sector': '업종'}, inplace=True)
+
+    # 2. 메타데이터 병합
+    df_merged = pd.merge(df, meta_df, left_on='티커', right_on='ticker', how='left')
+    
+    # 메타데이터 병합 후 컬럼이 없을 경우를 대비
+    if '이름' in df_merged.columns:
+        df_merged['이름'] = df_merged['이름'].fillna(df_merged['티커'])
+    else:
+        df_merged['이름'] = df_merged['티커']
+
+    if '국가' in df_merged.columns:
+        df_merged['국가'] = df_merged['국가'].fillna('-')
+
+    if '업종' in df_merged.columns:
+        df_merged['업종'] = df_merged['업종'].fillna('-') 
+
+    # 3. 컬럼 순서 재정렬
+    # '이름' 컬럼은 아래 column_config에서 '종목명'으로 표시됩니다.
+    final_cols = [
+        '#', '티커', '이름', '상태', '매수일', '보유', '현재가', 
+        '일간수익률', '보유수량', '금액', '누적수익률', '비중', '고점대비', '점수', '지속', '국가', '업종', '문구'
+    ]
+    
+    existing_cols = [col for col in final_cols if col in df_merged.columns]
+    df_display = df_merged[existing_cols]
+
+    # 4. 스타일 적용 및 표시
+    if "#" in df_display.columns:
+        df_display = df_display.set_index("#")
+
+    style_cols = ["일간수익률", "누적수익률"]
+    styler = df_display.style
+    for col in style_cols:
+        if col in df_display.columns:
+            styler = styler.map(style_returns, subset=[col])
+    
+    formats = {
+        "일간수익률": "{:+.2f}%",
+        "누적수익률": "{:+.2f}%",
+        "비중": "{:.1f}%",
+        "점수": "{:.2f}",
+    }
+    styler = styler.format(formats, na_rep="-")
+
+    num_rows_to_display = min(len(df_display), 15)
+    height = (num_rows_to_display + 1) * 35 + 3
+
+    st.dataframe(
+        styler,
+        width='stretch',
+        height=height,
+        column_config={
+            "이름": st.column_config.TextColumn("종목명", width="medium"),
+            "상태": st.column_config.TextColumn(width="small"),
+            "보유": st.column_config.TextColumn(width="small"),
+            "보유수량": st.column_config.TextColumn(width="small"),
+            "일간수익률": st.column_config.TextColumn(width="small"),
+            "누적수익률": st.column_config.TextColumn(width="small"),
+            "비중": st.column_config.TextColumn(width="small"),
+            "지속": st.column_config.TextColumn(width="small"),
+            "국가": st.column_config.TextColumn(width="small"),
+            "업종": st.column_config.TextColumn(width="medium"),
+            "문구": st.column_config.TextColumn("문구", width="large"),
+        }
+    )
+
 @st.dialog("BUY")
 def show_buy_dialog(country_code: str):
     """매수(BUY) 거래 입력을 위한 모달 다이얼로그를 표시합니다."""
@@ -392,7 +475,7 @@ def show_add_stock_dialog(country_code: str, sectors: List[Dict]):
         # 종목의 실제 소속 국가(시장)를 선택합니다.
         country_options = [""] + SECTOR_COUNTRY_OPTIONS
         market_country = st.selectbox("소속 국가(시장)", options=country_options, index=0, format_func=lambda x: "선택 안 함" if x == "" else x)
-        stock_type = st.selectbox("타입", options=["stock", "etf"])
+        stock_type = st.selectbox("타입", options=["etf", "stock"])
         
         sector_names = sorted([s.get("name") for s in sectors if s.get("name")])
         sector_options = [""] + sector_names
@@ -748,39 +831,14 @@ def render_country_tab(country_code: str):
             if result:
                 header_line, headers, rows = result
                 st.markdown(f":information_source: {header_line}", unsafe_allow_html=True)
-                df = pd.DataFrame(rows, columns=headers)
-                if "#" in df.columns:
-                    df = df.set_index("#")
-                style_cols = ["일간수익률", "누적수익률"]
-                styler = df.style
-                for col in style_cols:
-                    if col in df.columns:
-                        styler = styler.map(style_returns, subset=[col])
-                formats = {
-                    "일간수익률": "{:+.2f}%",
-                    "누적수익률": "{:+.2f}%",
-                    "비중": "{:.1f}%",
-                    "점수": "{:.2f}",
-                }
-                styler = styler.format(formats, na_rep="-")
-
-                num_rows_to_display = min(len(df), 15)
-                height = (num_rows_to_display + 1) * 35 + 3
-
-                st.dataframe(
-                    styler,                    
-                    width='stretch',
-                    height=height,
-                    column_config={
-                        "상태": st.column_config.TextColumn(width="small"),
-                        "보유일": st.column_config.TextColumn(width="small"),
-                        "보유수량": st.column_config.TextColumn(width="small"),
-                        "일간수익률": st.column_config.TextColumn(width="small"),
-                        "누적수익률": st.column_config.TextColumn(width="small"),
-                        "비중": st.column_config.TextColumn(width="small"),
-                        "문구": st.column_config.TextColumn("문구", width="large"),
-                    }
-                )
+                # 데이터와 헤더의 컬럼 수가 일치하는지 확인하여 앱 충돌 방지
+                if rows and headers and len(rows[0]) != len(headers):
+                    st.error(f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '다시 계산'을 시도해주세요.")
+                    st.write("- 헤더:", headers)
+                    st.write("- 첫 번째 행 데이터:", rows[0])
+                else:
+                    df = pd.DataFrame(rows, columns=headers)
+                    _display_status_report_df(df, country_code)
             else:
                 st.error(f"'{latest_date_str}' 기준 ({country_code.upper()}) 현황을 생성하는 데 실패했습니다.")
 
@@ -839,39 +897,14 @@ def render_country_tab(country_code: str):
                         if result:
                             header_line, headers, rows = result
                             st.markdown(f":information_source: {header_line}", unsafe_allow_html=True)
-                            df = pd.DataFrame(rows, columns=headers)
-                            if "#" in df.columns:
-                                df = df.set_index("#")
-                            style_cols = ["일간수익률", "누적수익률"]
-                            styler = df.style
-                            for col in style_cols:
-                                if col in df.columns:
-                                    styler = styler.map(style_returns, subset=[col])
-                            formats = {
-                                "일간수익률": "{:+.2f}%",
-                                "누적수익률": "{:+.2f}%",
-                                "비중": "{:.1f}%",
-                            "점수": "{:.2f}",
-                            }
-                            styler = styler.format(formats, na_rep="-")
-
-                            num_rows_to_display = min(len(df), 15)
-                            height = (num_rows_to_display + 1) * 35 + 3
-
-                            st.dataframe(
-                                styler,                                
-                                width='stretch',
-                                height=height,
-                                column_config={
-                                    "상태": st.column_config.TextColumn(width="small"),
-                                    "보유일": st.column_config.TextColumn(width="small"),
-                                    "보유수량": st.column_config.TextColumn(width="small"),
-                                    "일간수익률": st.column_config.TextColumn(width="small"),
-                                    "누적수익률": st.column_config.TextColumn(width="small"),
-                                    "비중": st.column_config.TextColumn(width="small"),
-                                    "문구": st.column_config.TextColumn("문구", width="large"),
-                                }
-                            )
+                            # 데이터와 헤더의 컬럼 수가 일치하는지 확인하여 앱 충돌 방지
+                            if rows and headers and len(rows[0]) != len(headers):
+                                st.error(f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '과거 전체 다시계산'을 시도해주세요.")
+                                st.write("- 헤더:", headers)
+                                st.write("- 첫 번째 행 데이터:", rows[0])
+                            else:
+                                df = pd.DataFrame(rows, columns=headers)
+                                _display_status_report_df(df, country_code)
                         else:
                             st.error(f"'{date_str}' 기준 ({country_code.upper()}) 현황을 생성하는 데 실패했습니다.")
         
