@@ -161,11 +161,19 @@ def tune_parameters(country: str):
  
     # 1. 튜닝에 필요한 최대 기간 계산
     max_ma_period = max(max(ma_etf_range), max(ma_stock_range))
-    atr_period_norm = int(getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20))
+    try:
+        atr_period_norm = int(settings.ATR_PERIOD_FOR_NORMALIZATION)
+    except AttributeError:
+        print("오류: ATR_PERIOD_FOR_NORMALIZATION 설정이 logic/settings.py 에 정의되어야 합니다.")
+        return None, None
     warmup_days = int(max(max_ma_period, atr_period_norm) * 1.5)
  
     # 2. logic 설정에서 백테스트 기간 가져오기
-    test_months_range = getattr(settings, "TEST_MONTHS_RANGE", 12)
+    try:
+        test_months_range = settings.TEST_MONTHS_RANGE
+    except AttributeError:
+        print("오류: TEST_MONTHS_RANGE 설정이 logic/settings.py 에 정의되어야 합니다.")
+        return None, None
     core_end_dt = pd.Timestamp.now()
     core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
     test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]

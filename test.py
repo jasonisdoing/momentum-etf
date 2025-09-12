@@ -13,10 +13,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logic import settings
 from logic import strategy as strategy_module
 from utils.report import format_aud_money, format_kr_money, render_table_eaw, format_aud_price
-from utils.db_manager import get_stocks, get_app_settings
+from utils.db_manager import get_stocks, get_app_settings, get_common_settings
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
+# 이 파일에서는 매매 전략에 사용되는 고유 파라미터를 정의합니다.
+INITIAL_CAPITAL = 100000000
+# 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월 데이터로 테스트)
+TEST_MONTHS_RANGE = 60
 
 def main(
     country: str = "kor",
@@ -27,7 +31,11 @@ def main(
     지정된 전략에 대한 백테스트를 실행하고 결과를 요약합니다.
     `quiet=True` 모드에서는 로그를 출력하지 않고 최종 요약만 반환합니다.
     """
-    initial_capital = float(getattr(settings, "INITIAL_CAPITAL", 100_000_000))
+    try:
+        initial_capital = INITIAL_CAPITAL
+    except AttributeError:
+        print("오류: INITIAL_CAPITAL 설정이 logic/settings.py 에 정의되어야 합니다.")
+        return
 
     # DB에서 앱 설정을 불러와 logic.settings에 동적으로 설정합니다.
     app_settings = get_app_settings(country)
@@ -38,12 +46,57 @@ def main(
         print(f"오류: '{country}' 국가의 설정(TopN, MA 기간)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return
     
+    # 필수 설정값이 모두 있는지 검증 (fallback 금지)
+    if "replace_threshold" not in app_settings:
+        print(f"오류: '{country}' 국가의 설정에 'replace_threshold'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        return
+    # 추가 필수값: replace_weaker_stock, max_replacements_per_day
+    if "replace_weaker_stock" not in app_settings:
+        print(f"오류: '{country}' 국가의 설정에 'replace_weaker_stock'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        return
+    if "max_replacements_per_day" not in app_settings:
+        print(f"오류: '{country}' 국가의 설정에 'max_replacements_per_day'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        return
+
     try:
         settings.MA_PERIOD_FOR_ETF = int(app_settings["ma_period_etf"])
         settings.MA_PERIOD_FOR_STOCK = int(app_settings["ma_period_stock"])
         portfolio_topn = int(app_settings["portfolio_topn"])
+        # 교체 매매 파라미터 (백테스트용, 필수)
+        settings.REPLACE_SCORE_THRESHOLD = float(app_settings["replace_threshold"])  
+        settings.REPLACE_WEAKER_STOCK = bool(app_settings["replace_weaker_stock"])  
+        settings.MAX_REPLACEMENTS_PER_DAY = int(app_settings["max_replacements_per_day"])  
     except (ValueError, TypeError):
         print(f"오류: '{country}' 국가의 DB 설정값이 올바르지 않습니다.")
+        return
+
+    # 공통(전역) 설정 로드 및 주입 (필수)
+    common = get_common_settings()
+    if not common:
+        print("오류: 공통 설정이 DB에 없습니다. 웹 앱의 '설정' 탭에서 먼저 값을 저장해주세요.")
+        return
+    required_common_keys = [
+        "HOLDING_STOP_LOSS_PCT",
+        "COOLDOWN_DAYS",
+        "ATR_PERIOD_FOR_NORMALIZATION",
+        "MARKET_REGIME_FILTER_ENABLED",
+        "MARKET_REGIME_FILTER_TICKER",
+        "MARKET_REGIME_FILTER_MA_PERIOD",
+    ]
+    missing = [k for k in required_common_keys if k not in common]
+    if missing:
+        print(f"오류: 공통 설정에 다음 값이 없습니다: {', '.join(missing)}")
+        return
+    try:
+        # Interpret positive input as a negative threshold (e.g., 10 -> -10)
+        settings.HOLDING_STOP_LOSS_PCT = -abs(float(common["HOLDING_STOP_LOSS_PCT"]))
+        settings.COOLDOWN_DAYS = int(common["COOLDOWN_DAYS"])
+        settings.ATR_PERIOD_FOR_NORMALIZATION = int(common["ATR_PERIOD_FOR_NORMALIZATION"])
+        settings.MARKET_REGIME_FILTER_ENABLED = bool(common["MARKET_REGIME_FILTER_ENABLED"])
+        settings.MARKET_REGIME_FILTER_TICKER = str(common["MARKET_REGIME_FILTER_TICKER"])
+        settings.MARKET_REGIME_FILTER_MA_PERIOD = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
+    except (ValueError, TypeError):
+        print("오류: 공통 설정 값의 형식이 올바르지 않습니다.")
         return
 
     # 국가별로 다른 포맷터 사용
@@ -57,8 +110,12 @@ def main(
         price_formatter = lambda p: f"{int(round(p)):,}"
         ma_formatter = lambda p: f"{int(round(p)):,}원"
 
-    # 기간 설정 로직
-    test_months_range = getattr(settings, "TEST_MONTHS_RANGE", 12)
+    # 기간 설정 로직 (필수 설정)
+    try:
+        test_months_range = TEST_MONTHS_RANGE
+    except AttributeError:
+        print("오류: TEST_MONTHS_RANGE 설정이 logic/settings.py 에 정의되어야 합니다.")
+        return
     core_end_dt = pd.Timestamp.now()
     core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
     test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]
@@ -455,7 +512,11 @@ def main(
 
             # 시장 위험 회피(Risk-Off) 기간을 계산합니다.
             risk_off_periods = []
-            market_regime_filter_enabled = bool(getattr(settings, "MARKET_REGIME_FILTER_ENABLED", False))
+            try:
+                market_regime_filter_enabled = bool(settings.MARKET_REGIME_FILTER_ENABLED)
+            except AttributeError:
+                print("오류: MARKET_REGIME_FILTER_ENABLED 설정이 logic/settings.py 에 정의되어야 합니다.")
+                return
 
             if market_regime_filter_enabled:
                 # '시장 위험 회피' 노트가 있는지 확인하여 리스크 오프 기간을 식별합니다.
@@ -609,7 +670,10 @@ def main(
                     + "\n"
                     + "=" * 30
                 )
-                test_months_range = getattr(settings, "TEST_MONTHS_RANGE", 12)
+                try:
+                    test_months_range = settings.TEST_MONTHS_RANGE
+                except AttributeError:
+                    test_months_range = None
                 logger.info(
                     f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)"
                 )

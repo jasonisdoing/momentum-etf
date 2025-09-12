@@ -41,7 +41,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
     python run.py <국가코드> --test
 
-예: `python run.py aus --test`
+예: `python run.py coin --test`
 
 3) 파라미터 튜닝
 
@@ -73,9 +73,9 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 7) (선택) 급등주 찾기
 
-pykrx 라이브러리를 사용하여 한국 시장의 급등주를 섹터별로 찾아봅니다.
+pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 섹터별로 찾아봅니다.
 
-    python scripts/find.py --type stock --min-change 5.0
+    python scripts/find.py --type etf --min-change 5.0
 
 
 전략/로직 요약

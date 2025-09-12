@@ -72,11 +72,17 @@ def main():
 
             tickers = [s['ticker'] for s in stocks_from_db]
             
-            test_months_range = getattr(settings, "TEST_MONTHS_RANGE", 12)
+            try:
+                test_months_range = settings.TEST_MONTHS_RANGE
+                ma_etf = int(settings.MA_PERIOD_FOR_ETF)
+                ma_stock = int(settings.MA_PERIOD_FOR_STOCK)
+            except AttributeError:
+                print("오류: TEST_MONTHS_RANGE, MA_PERIOD_FOR_ETF, MA_PERIOD_FOR_STOCK 설정이 logic/settings.py 에 정의되어야 합니다.")
+                return
             core_end_dt = pd.Timestamp.now()
             core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
             test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]
-            max_ma_period = max(getattr(settings, "MA_PERIOD_FOR_ETF", 0), getattr(settings, "MA_PERIOD_FOR_STOCK", 0))
+            max_ma_period = max(ma_etf, ma_stock)
             warmup_days = int(max_ma_period * 1.5)
             
             prefetched_data = fetch_ohlcv_for_tickers(tickers, country, date_range=test_date_range, warmup_days=warmup_days)

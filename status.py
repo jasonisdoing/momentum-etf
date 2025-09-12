@@ -20,7 +20,7 @@ except ImportError:
     pytz = None
 
 # New structure imports
-from utils.db_manager import get_db_connection, get_portfolio_snapshot, get_previous_portfolio_snapshot, get_app_settings, get_trades_on_date, get_stocks
+from utils.db_manager import get_db_connection, get_portfolio_snapshot, get_previous_portfolio_snapshot, get_app_settings, get_trades_on_date, get_stocks, get_common_settings
 from utils.data_loader import (
     fetch_ohlcv,
     format_aus_ticker_for_yfinance,
@@ -44,24 +44,37 @@ def get_market_regime_status_string() -> Optional[str]:
     """
     S&P 500 지수를 기준으로 현재 시장 레짐 상태를 계산하여 HTML 문자열로 반환합니다.
     """
-    # 설정 로드
+    # 공통 설정 로드 (DB)
+    common = get_common_settings()
+    if not common:
+        # 설정이 없으면 안내 문구를 회색으로 표시하여 사용자에게 알림
+        return '<span style="color:grey">시장 상태: 설정 필요</span>'
     try:
-        regime_filter_enabled = bool(getattr(settings, "MARKET_REGIME_FILTER_ENABLED", False))
+        regime_filter_enabled = bool(common.get("MARKET_REGIME_FILTER_ENABLED"))
         if not regime_filter_enabled:
-            return None
-        
-        regime_ticker = str(getattr(settings, "MARKET_REGIME_FILTER_TICKER", "^GSPC"))
-        regime_ma_period = int(getattr(settings, "MARKET_REGIME_FILTER_MA_PERIOD", 20))
-    except AttributeError:
-        return None
+            return '<span style="color:grey">시장 상태: 비활성화</span>'
+        regime_ticker = str(common["MARKET_REGIME_FILTER_TICKER"])
+        regime_ma_period = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
+    except KeyError:
+        return '<span style="color:grey">시장 상태: 설정 필요</span>'
+    except (ValueError, TypeError):
+        print("오류: 공통 설정의 시장 레짐 필터 값 형식이 올바르지 않습니다.")
+        return '<span style="color:grey">시장 상태: 설정 오류</span>'
 
-    # 데이터 로딩에 필요한 기간 계산 (마지막 중단 기간을 찾기 위해 12개월치 데이터 조회)
-    required_months = 12
+    # 데이터 로딩에 필요한 기간 계산: 레짐 MA 기간을 만족하도록 동적으로 산정
+    # 거래일 기준 대략 22일/월 가정 + 여유 버퍼
+    required_days = int(regime_ma_period) + 30
+    required_months = max(3, (required_days // 22) + 2)
 
     # 데이터 조회
     df_regime = fetch_ohlcv(
         regime_ticker, country="kor", months_range=[required_months, 0] # country doesn't matter for index
     )
+    # 만약 데이터가 부족하면, 기간을 늘려 한 번 더 시도합니다.
+    if (df_regime is None or df_regime.empty or len(df_regime) < regime_ma_period):
+        df_regime = fetch_ohlcv(
+            regime_ticker, country="kor", months_range=[required_months * 2, 0]
+        )
 
     if df_regime is None or df_regime.empty or len(df_regime) < regime_ma_period:
         return '<span style="color:grey">시장 상태: 데이터 부족</span>'
@@ -199,11 +212,11 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
         return "<br>".join(results)
     else:
         # 기존 로직 (한국/호주)
-        benchmark_tickers_map = {
-            "kor": "379800",
-            "aus": "IVV.AX",
-        }
-        benchmark_ticker = getattr(settings, "BENCHMARK_TICKERS", benchmark_tickers_map).get(country)
+        try:
+            benchmark_ticker = settings.BENCHMARK_TICKERS.get(country)
+        except AttributeError:
+            print("오류: BENCHMARK_TICKERS 설정이 logic/settings.py 에 정의되어야 합니다.")
+            return None
         if not benchmark_ticker:
             return None
         
@@ -437,12 +450,21 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
         if country == "kor":
             print("-> 장중입니다. 네이버 금융에서 실시간 시세를 가져옵니다 (비공식, 지연 가능).")
  
-    # --- 신호 계산 ---
-    atr_period_norm = int(getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20))
-
-    # 시장 레짐 필터 설정 로드
-    regime_filter_enabled = bool(getattr(settings, "MARKET_REGIME_FILTER_ENABLED", False))
-    regime_ma_period = int(getattr(settings, "MARKET_REGIME_FILTER_MA_PERIOD", 20))
+    # --- 신호 계산 (공통 설정에서) ---
+    common = get_common_settings()
+    if not common:
+        print("오류: 공통 설정이 DB에 없습니다. '설정' 탭에서 값을 저장해주세요.")
+        return None, None, None, None, None, None, None, None
+    try:
+        atr_period_norm = int(common["ATR_PERIOD_FOR_NORMALIZATION"])
+        regime_filter_enabled = bool(common["MARKET_REGIME_FILTER_ENABLED"])
+        regime_ma_period = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
+    except KeyError as e:
+        print(f"오류: 공통 설정 '{e.args[0]}' 값이 없습니다.")
+        return None, None, None, None, None, None, None, None
+    except (ValueError, TypeError):
+        print("오류: 공통 설정 값 형식이 올바르지 않습니다.")
+        return None, None, None, None, None, None, None, None
 
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
     if not stocks_from_db:
@@ -457,7 +479,10 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
     # --- 시장 레짐 필터 데이터 로딩 ---
     regime_info = None
     if regime_filter_enabled:
-        regime_ticker = str(getattr(settings, "MARKET_REGIME_FILTER_TICKER", "^GSPC"))
+        if "MARKET_REGIME_FILTER_TICKER" not in common:
+            print("오류: 공통 설정에 MARKET_REGIME_FILTER_TICKER 값이 없습니다.")
+            return None, None, None, None, None, None, None, None
+        regime_ticker = str(common["MARKET_REGIME_FILTER_TICKER"])
         
         df_regime = fetch_ohlcv(
             regime_ticker, country=country, months_range=[required_months, 0], base_date=base_date
@@ -676,9 +701,21 @@ def generate_status_report(
     
     try:
         denom = int(app_settings["portfolio_topn"])
-        stop_loss = settings.HOLDING_STOP_LOSS_PCT
-    except AttributeError as e:
-        print(f"오류: '{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.")
+    except (ValueError, TypeError):
+        print("오류: DB의 portfolio_topn 값이 올바르지 않습니다.")
+        return None
+
+    # 공통 설정에서 손절 퍼센트 로드
+    common = get_common_settings()
+    if not common or "HOLDING_STOP_LOSS_PCT" not in common:
+        print("오류: 공통 설정에 HOLDING_STOP_LOSS_PCT 값이 없습니다.")
+        return None
+    try:
+        stop_loss_raw = float(common["HOLDING_STOP_LOSS_PCT"])
+        # Interpret positive input as a negative threshold (e.g., 10 -> -10)
+        stop_loss = -abs(stop_loss_raw)
+    except (ValueError, TypeError):
+        print("오류: 공통 설정의 HOLDING_STOP_LOSS_PCT 값 형식이 올바르지 않습니다.")
         return None
 
     if denom <= 0:
@@ -829,10 +866,38 @@ def generate_status_report(
         )
 
     # 5. 신규 매수 및 교체 매매 로직 적용
-    # 교체 매매 관련 설정 로드
-    replace_weaker_stock = bool(getattr(settings, "REPLACE_WEAKER_STOCK", False))
-    replace_threshold = float(getattr(settings, "REPLACE_SCORE_THRESHOLD", 0.0))
-    max_replacements_per_day = int(getattr(settings, "MAX_REPLACEMENTS_PER_DAY", 1))
+    # 교체 매매 관련 설정 로드 (임계값은 DB 설정 우선)
+    # 국가별 전략 파라미터는 DB에서 필수 제공
+    app_settings_for_country = get_app_settings(country)
+    if not app_settings_for_country:
+        print(f"오류: '{country}' 국가의 전략 파라미터가 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 저장해주세요.")
+        return None
+    # 교체 매매 사용 여부 (bool)
+    if "replace_weaker_stock" not in app_settings_for_country:
+        print(f"오류: '{country}' 국가의 설정에 'replace_weaker_stock'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        return None
+    try:
+        replace_weaker_stock = bool(app_settings_for_country["replace_weaker_stock"])  
+    except Exception:
+        print(f"오류: '{country}' 국가의 'replace_weaker_stock' 값이 올바르지 않습니다.")
+        return None
+    # 하루 최대 교체 수 (int)
+    if "max_replacements_per_day" not in app_settings_for_country:
+        print(f"오류: '{country}' 국가의 설정에 'max_replacements_per_day'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        return None
+    try:
+        max_replacements_per_day = int(app_settings_for_country["max_replacements_per_day"])  
+    except Exception:
+        print(f"오류: '{country}' 국가의 'max_replacements_per_day' 값이 올바르지 않습니다.")
+        return None
+    if "replace_threshold" not in app_settings_for_country:
+        print(f"오류: '{country}' 국가의 교체 매매 임계값(replace_threshold)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        return None
+    try:
+        replace_threshold = float(app_settings_for_country["replace_threshold"])  
+    except (ValueError, TypeError):
+        print(f"오류: '{country}' 국가의 교체 매매 임계값(replace_threshold) 값이 올바르지 않습니다.")
+        return None
     slots_to_fill = denom - held_count
     if slots_to_fill > 0:
         # 매수 후보들을 점수 순으로 정렬

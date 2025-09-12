@@ -224,6 +224,30 @@ def save_app_settings(country: str, settings_data: Dict) -> bool:
         print(f"오류: 앱 설정 저장 중 오류 발생: {e}")
         return False
 
+def get_common_settings() -> Optional[Dict]:
+    """공통(전역) 설정을 DB에서 가져옵니다. 모든 국가가 공유합니다."""
+    db = get_db_connection()
+    if db is None:
+        return None
+    settings = db.app_settings.find_one({"country": "common"})
+    if settings:
+        settings.pop("_id", None)
+    return settings
+
+def save_common_settings(settings_data: Dict) -> bool:
+    """공통(전역) 설정을 DB에 저장합니다."""
+    db = get_db_connection()
+    if db is None:
+        return False
+    try:
+        query = {"country": "common"}
+        db.app_settings.update_one(query, {"$set": {**settings_data, "country": "common"}}, upsert=True)
+        print("성공: 공통 설정을 저장했습니다.")
+        return True
+    except Exception as e:
+        print(f"오류: 공통 설정 저장 중 오류 발생: {e}")
+        return False
+
 def get_status_report_from_db(country: str, date: datetime) -> Optional[Dict]:
     """
     지정된 조건에 맞는 현황 리포트를 DB에서 가져옵니다.

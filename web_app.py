@@ -14,7 +14,9 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 
 import settings as global_settings
-from logic.settings import TEST_MONTHS_RANGE, SECTOR_COUNTRY_OPTIONS
+from test import TEST_MONTHS_RANGE
+from logic.settings import SECTOR_COUNTRY_OPTIONS
+from logic import settings as logic_settings
 from status import generate_status_report, get_market_regime_status_string, get_benchmark_status_string
 from utils.data_loader import fetch_yfinance_name, get_trading_days, fetch_pykrx_name, fetch_ohlcv_for_tickers
 from utils.db_manager import (
@@ -22,7 +24,7 @@ from utils.db_manager import (
     get_sectors, save_sectors, get_sector_stock_counts, delete_sectors_and_reset_stocks,
     get_status_report_from_db, save_status_report_to_db, delete_trade_by_id, save_sector_changes,
     get_stocks, save_stocks, save_daily_equity, save_trade, 
-    get_app_settings, save_app_settings,
+    get_app_settings, save_app_settings, get_common_settings, save_common_settings,
 )
 
 try:
@@ -929,8 +931,9 @@ def render_country_tab(country_code: str):
     today = pd.Timestamp.now().normalize()
     today_str = today.strftime("%Y-%m-%d")
 
-    # 오늘이 평일(월~금)이고, DB에 오늘 날짜 데이터가 아직 없는 경우
-    if today.weekday() < 5 and today_str not in sorted_dates:
+    # 오늘이 코인이거나 평일(월~금)이며, DB에 오늘 날짜 데이터가 아직 없는 경우
+    # 코인은 365일 거래되므로 주말에도 오늘 날짜를 추가합니다.
+    if ((country_code == 'coin') or (today.weekday() < 5)) and today_str not in sorted_dates:
         sorted_dates.insert(0, today_str)
 
     # --- 1. 현황 탭 (최신 날짜) ---
@@ -989,8 +992,12 @@ def render_country_tab(country_code: str):
                     newest_date = pd.to_datetime(past_dates[0])
                     
                     from logic import settings
-                    max_ma_period = max(getattr(settings, "MA_PERIOD_FOR_ETF", 0), getattr(settings, "MA_PERIOD_FOR_STOCK", 0))
-                    atr_period_norm = int(getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20))
+                    try:
+                        max_ma_period = max(int(settings.MA_PERIOD_FOR_ETF), int(settings.MA_PERIOD_FOR_STOCK))
+                        atr_period_norm = int(settings.ATR_PERIOD_FOR_NORMALIZATION)
+                    except AttributeError:
+                        st.error("오류: MA_PERIOD_FOR_ETF, MA_PERIOD_FOR_STOCK, ATR_PERIOD_FOR_NORMALIZATION 설정이 logic/settings.py 에 정의되어야 합니다.")
+                        return
                     warmup_days = int(max(max_ma_period, atr_period_norm) * 1.5)
 
                     # 2. 모든 기간의 데이터를 한 번에 병렬로 가져옵니다.
@@ -1179,9 +1186,12 @@ def render_country_tab(country_code: str):
         current_topn = db_settings.get("portfolio_topn") if db_settings else None
         current_ma_etf = db_settings.get("ma_period_etf") if db_settings else None
         current_ma_stock = db_settings.get("ma_period_stock") if db_settings else None
+        current_replace_threshold = db_settings.get("replace_threshold") if db_settings else None
+        current_replace_weaker = db_settings.get("replace_weaker_stock") if db_settings else None
+        current_max_replacements = db_settings.get("max_replacements_per_day") if db_settings else None
 
-        # TEST_MONTHS_RANGE를 기반으로 기본 날짜를 계산합니다.
-        test_months_range = TEST_MONTHS_RANGE if TEST_MONTHS_RANGE else 12
+        # TEST_MONTHS_RANGE를 기반으로 기본 날짜를 계산합니다. (필수 설정)
+        test_months_range = TEST_MONTHS_RANGE
         default_date = pd.Timestamp.now() - pd.DateOffset(months=test_months_range)
         current_date = db_settings.get("initial_date", default_date) if db_settings else default_date
 
@@ -1232,6 +1242,29 @@ def render_country_tab(country_code: str):
                 help="개별 주식/코인 종목의 추세 판단에 사용될 이동평균 기간입니다."
             )
 
+            # 교체 매매 사용 여부 (bool)
+            replace_weaker_checkbox = st.checkbox(
+                "교체 매매 사용 (REPLACE_WEAKER_STOCK)",
+                value=bool(current_replace_weaker) if current_replace_weaker is not None else False,
+                help="포트폴리오가 가득 찼을 때, 더 강한 후보가 있을 경우 약한 보유종목을 교체할지 여부"
+            )
+
+            # 하루 최대 교체 수
+            max_replacements_str = st.text_input(
+                "하루 최대 교체 수 (MAX_REPLACEMENTS_PER_DAY)",
+                value=str(current_max_replacements) if current_max_replacements is not None else "",
+                placeholder="예: 5",
+                help="하루에 실행할 수 있는 교체 매매의 최대 종목 수"
+            )
+
+            # 교체 매매 임계값 설정 (DB에서 관리)
+            new_replace_threshold_str = st.text_input(
+                "교체 매매 점수 임계값 (REPLACE_SCORE_THRESHOLD)",
+                value=("{:.2f}".format(float(current_replace_threshold)) if current_replace_threshold is not None else ""),
+                placeholder="예: 1.5",
+                help="교체 매매 실행 조건: 새 후보 점수가 기존 보유 점수보다 이 값만큼 높을 때 교체.",
+            )
+
             save_settings_submitted = st.form_submit_button("설정 저장하기")
 
             if save_settings_submitted:
@@ -1245,11 +1278,23 @@ def render_country_tab(country_code: str):
                 if not new_ma_stock_str or not new_ma_stock_str.isdigit() or int(new_ma_stock_str) < 1:
                     st.error("개별종목 이동평균 기간은 1 이상의 숫자여야 합니다.")
                     error = True
+                # max_replacements_per_day 검증 (정수 >= 0)
+                if not max_replacements_str or not max_replacements_str.isdigit() or int(max_replacements_str) < 0:
+                    st.error("하루 최대 교체 수는 0 이상의 정수여야 합니다.")
+                    error = True
+                # replace_threshold 검증 (float 가능 여부)
+                try:
+                    _ = float(new_replace_threshold_str)
+                except Exception:
+                    st.error("교체 매매 점수 임계값은 숫자여야 합니다.")
+                    error = True
                 
                 if not error:
                     new_topn = int(new_topn_str)
                     new_ma_etf = int(new_ma_etf_str)
                     new_ma_stock = int(new_ma_stock_str)
+                    new_max_replacements = int(max_replacements_str)
+                    new_replace_threshold = float(new_replace_threshold_str)
                     settings_to_save = {
                         "country": country_code,
                         "initial_capital": new_capital,
@@ -1257,6 +1302,9 @@ def render_country_tab(country_code: str):
                         "portfolio_topn": new_topn,
                         "ma_period_etf": new_ma_etf,
                         "ma_period_stock": new_ma_stock,
+                        "replace_weaker_stock": bool(replace_weaker_checkbox),
+                        "max_replacements_per_day": new_max_replacements,
+                        "replace_threshold": new_replace_threshold,
                     }
                     if save_app_settings(country_code, settings_to_save):
                         st.success("설정이 성공적으로 저장되었습니다.")
@@ -1300,7 +1348,7 @@ def main():
                 f'<div style="text-align: right; padding-top: 1.5rem; font-size: 1.1rem;">{market_status_str}</div>', unsafe_allow_html=True
             )
 
-    tab_names = ["한국주식", "호주주식", "가상화폐", "마스터 정보", "설정"]
+    tab_names = ["한국", "호주", "코인", "마스터", "설정"]
     tab_kor, tab_aus, tab_coin, tab_master, tab_settings = st.tabs(tab_names)
 
     with tab_kor:
@@ -1318,9 +1366,59 @@ def main():
             render_master_sector_ui()
 
     with tab_settings:
-        st.header("설정")
-        st.write("이곳에 웹앱 관련 설정을 변경하는 UI를 추가할 수 있습니다.")
-        st.info("예: 기본 전략 변경, 알림 설정 등")
+        st.header("공통 설정 (모든 국가 공유)")
+        common = get_common_settings() or {}
+        current_enabled = bool(common.get("MARKET_REGIME_FILTER_ENABLED")) if "MARKET_REGIME_FILTER_ENABLED" in common else False
+        current_ticker = common.get("MARKET_REGIME_FILTER_TICKER")
+        current_ma = common.get("MARKET_REGIME_FILTER_MA_PERIOD")
+        current_stop = common.get("HOLDING_STOP_LOSS_PCT")
+        current_cooldown = common.get("COOLDOWN_DAYS")
+        current_atr = common.get("ATR_PERIOD_FOR_NORMALIZATION")
+
+        with st.form("common_settings_form"):
+            st.subheader("시장 레짐 필터")
+            new_enabled = st.checkbox("활성화 (MARKET_REGIME_FILTER_ENABLED)", value=current_enabled)
+            new_ticker = st.text_input("레짐 기준 지수 티커 (MARKET_REGIME_FILTER_TICKER)", value=str(current_ticker) if current_ticker is not None else "", placeholder="예: ^GSPC")
+            new_ma_str = st.text_input("레짐 MA 기간 (MARKET_REGIME_FILTER_MA_PERIOD)", value=str(current_ma) if current_ma is not None else "", placeholder="예: 20")
+
+            st.subheader("위험 관리 및 지표")
+            new_stop = st.number_input("보유 손절 임계값 % (HOLDING_STOP_LOSS_PCT)", value=float(current_stop) if current_stop is not None else 0.0, step=0.1, format="%.2f", help="예: -10.0")
+            new_cooldown_str = st.text_input("쿨다운 일수 (COOLDOWN_DAYS)", value=str(current_cooldown) if current_cooldown is not None else "", placeholder="예: 5")
+            new_atr_str = st.text_input("ATR 기간 (ATR_PERIOD_FOR_NORMALIZATION)", value=str(current_atr) if current_atr is not None else "", placeholder="예: 14")
+
+            submitted = st.form_submit_button("공통 설정 저장")
+            if submitted:
+                error = False
+                # Required validations
+                if not new_ticker:
+                    st.error("시장 레짐 필터 티커를 입력해주세요.")
+                    error = True
+                if not new_ma_str.isdigit() or int(new_ma_str) < 1:
+                    st.error("레짐 MA 기간은 1 이상의 정수여야 합니다.")
+                    error = True
+                if not new_cooldown_str.isdigit() or int(new_cooldown_str) < 0:
+                    st.error("쿨다운 일수는 0 이상의 정수여야 합니다.")
+                    error = True
+                if not new_atr_str.isdigit() or int(new_atr_str) < 1:
+                    st.error("ATR 기간은 1 이상의 정수여야 합니다.")
+                    error = True
+
+                if not error:
+                    # Normalize stop loss: interpret positive value as negative threshold
+                    normalized_stop = -abs(float(new_stop))
+                    to_save = {
+                        "MARKET_REGIME_FILTER_ENABLED": bool(new_enabled),
+                        "MARKET_REGIME_FILTER_TICKER": new_ticker,
+                        "MARKET_REGIME_FILTER_MA_PERIOD": int(new_ma_str),
+                        "HOLDING_STOP_LOSS_PCT": normalized_stop,
+                        "COOLDOWN_DAYS": int(new_cooldown_str),
+                        "ATR_PERIOD_FOR_NORMALIZATION": int(new_atr_str),
+                    }
+                    if save_common_settings(to_save):
+                        st.success("공통 설정을 저장했습니다.")
+                        st.rerun()
+                    else:
+                        st.error("공통 설정 저장에 실패했습니다.")
 
 
 if __name__ == "__main__":

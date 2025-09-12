@@ -31,26 +31,14 @@ def run_portfolio_backtest(
         # 전략 고유 설정
         ma_period_etf = int(settings.MA_PERIOD_FOR_ETF)
         ma_period_stock = int(settings.MA_PERIOD_FOR_STOCK)
-        replace_weaker_stock = bool(
-            getattr(settings, "REPLACE_WEAKER_STOCK", False)
-        )
-        replace_threshold = float(
-            getattr(settings, "REPLACE_SCORE_THRESHOLD", 0.0)
-        )
-        max_replacements_per_day = int(
-            getattr(settings, "MAX_REPLACEMENTS_PER_DAY", 1)
-        )
+        replace_weaker_stock = bool(settings.REPLACE_WEAKER_STOCK)
+        replace_threshold = float(settings.REPLACE_SCORE_THRESHOLD)
+        max_replacements_per_day = int(settings.MAX_REPLACEMENTS_PER_DAY)
         # 시장 레짐 필터 설정
-        regime_filter_enabled = bool(
-            getattr(settings, "MARKET_REGIME_FILTER_ENABLED", False)
-        )
-        regime_filter_ticker = str(getattr(settings, "MARKET_REGIME_FILTER_TICKER", "^GSPC"))
-        regime_filter_ma_period = int(
-            getattr(settings, "MARKET_REGIME_FILTER_MA_PERIOD", 20)
-        )
-        atr_period = int(
-            getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20)
-        )
+        regime_filter_enabled = bool(settings.MARKET_REGIME_FILTER_ENABLED)
+        regime_filter_ticker = str(settings.MARKET_REGIME_FILTER_TICKER)
+        regime_filter_ma_period = int(settings.MARKET_REGIME_FILTER_MA_PERIOD)
+        atr_period = int(settings.ATR_PERIOD_FOR_NORMALIZATION)
     except AttributeError as e:
         raise AttributeError(
             f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
@@ -536,9 +524,7 @@ def run_single_ticker_backtest(
         # 전략 고유 설정
         ma_period_etf = int(settings.MA_PERIOD_FOR_ETF)
         ma_period_stock = int(settings.MA_PERIOD_FOR_STOCK)
-        atr_period = int(
-            getattr(settings, "ATR_PERIOD_FOR_NORMALIZATION", 20)
-        )
+        atr_period = int(settings.ATR_PERIOD_FOR_NORMALIZATION)
     except AttributeError as e:
         raise AttributeError(
             f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
