@@ -39,6 +39,7 @@ def send_telegram_message(text: str) -> bool:
     payload = {
         "chat_id": str(chat_id),
         "text": text,
+        "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
     data = json.dumps(payload).encode("utf-8")

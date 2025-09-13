@@ -1049,7 +1049,7 @@ def generate_status_report(
                 if req_qty > 0 and buy_notional <= available_cash + 1e-9:
                     # 매수 결정
                     cand["state"] = "BUY"
-                    cand["row"][3] = "BUY"
+                    cand["row"][2] = "BUY"
                     buy_phrase = f"매수 {format_shares(req_qty)}주 @ {price_formatter(price)} ({money_formatter(buy_notional)})"
                     original_phrase = cand["row"][-1]
                     cand["row"][-1] = f"{buy_phrase} ({original_phrase})"
@@ -1097,12 +1097,12 @@ def generate_status_report(
                 sell_phrase = f"교체매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'} ({best_new['tkr']}(으)로 교체)"
 
                 weakest_held["state"] = "SELL_REPLACE"
-                weakest_held["row"][3] = "SELL_REPLACE"
+                weakest_held["row"][2] = "SELL_REPLACE"
                 weakest_held["row"][-1] = sell_phrase
 
                 # 2. 새로 편입될 종목(매수)의 상태 업데이트
                 best_new["state"] = "BUY_REPLACE"
-                best_new["row"][3] = "BUY_REPLACE"
+                best_new["row"][2] = "BUY_REPLACE"
 
                 # 매수 수량 및 금액 계산
                 sell_value = weakest_held["weight"] / 100.0 * current_equity
@@ -1147,7 +1147,7 @@ def generate_status_report(
         elif decision['state'] == 'WAIT' and tkr in executed_sells_today:
             # 이 종목이 오늘 매도되었음을 표시. 기존의 '추세진입' 등 메시지를 덮어씁니다.
             decision['state'] = "SOLD" # 정렬 및 표시를 위한 새로운 상태
-            decision['row'][3] = "SOLD"
+            decision['row'][2] = "SOLD"
             decision['row'][-1] = "✅ 완료: 매도"
 
     # 7. 최종 정렬
@@ -1485,65 +1485,6 @@ def _maybe_notify_coin_detailed(country: str, header_line: str, headers: list, r
     except Exception:
         return False
 
-
-def _maybe_notify_coin_signals(country: str, headers: list, rows_sorted: list, force: bool = False) -> bool:
-    """Send a concise signals message for coin when actionable states are present.
-
-    States: CUT_STOPLOSS, SELL_MOMENTUM, SELL_TREND, SELL_REPLACE, BUY_REPLACE, BUY
-    Message format: one line per item → "TICKER STATE qty@price - phrase"
-    """
-    try:
-        from utils.notify import send_telegram_message
-    except Exception:
-        return False
-
-    if not force and not _is_trading_day(country):
-        # Coin returns True always, but keep symmetry
-        return False
-
-    try:
-        idx_ticker = headers.index("티커")
-        idx_state = headers.index("상태")
-        idx_price = headers.index("현재가") if "현재가" in headers else None
-        idx_shares = headers.index("보유수량") if "보유수량" in headers else None
-        idx_phrase = headers.index("문구") if "문구" in headers else None
-    except ValueError:
-        return False
-
-    action_states = {
-        "CUT_STOPLOSS",
-        "SELL_MOMENTUM",
-        "SELL_TREND",
-        "SELL_REPLACE",
-        "BUY_REPLACE",
-        "BUY",
-    }
-
-    lines = []
-    for row in rows_sorted:
-        try:
-            stt = str(row[idx_state])
-            if stt not in action_states:
-                continue
-            tkr = str(row[idx_ticker])
-            sh = row[idx_shares] if (idx_shares is not None and idx_shares < len(row)) else None
-            px = row[idx_price] if (idx_price is not None and idx_price < len(row)) else None
-            phr = str(row[idx_phrase]) if (idx_phrase is not None and idx_phrase < len(row)) else ""
-            sh_txt = f"{sh}" if isinstance(sh, (int, float)) else (str(sh) if sh is not None else "-")
-            px_txt = f"{int(round(px)):,}" if isinstance(px, (int, float)) else (str(px) if px is not None else "-")
-            line = f"{tkr} {stt} {sh_txt}@{px_txt} - {phr}"
-            lines.append(line)
-        except Exception:
-            continue
-
-    if not lines:
-        return False
-
-    country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
-    header = f"[{country_kor}] 시그널"
-    text = "\n".join([header] + lines)
-    return bool(send_telegram_message(text))
-
     if not force and not _is_trading_day(country):
         return False
 
@@ -1574,16 +1515,19 @@ def _maybe_notify_coin_signals(country: str, headers: list, rows_sorted: list, f
             date_part = date_part.split("[")[0].strip()
         date_part = _strip_html(date_part)
 
-        # Holdings count and eval return
+        # Holdings count and eval/cumulative return
         hold_seg = next((seg for seg in header_line.split("|") if "보유종목:" in seg), "보유종목: -")
         hold_text = _strip_html(hold_seg.split(":", 1)[1].strip())
         eval_seg = next((seg for seg in header_line.split("|") if "평가:" in seg), "평가: +0.00%(0원)")
         eval_text = _strip_html(eval_seg.split(":", 1)[1].strip())
+        cum_seg = next((seg for seg in header_line.split("|") if "누적:" in seg), "누적: +0.00%(0원)")
+        cum_text = _strip_html(cum_seg.split(":", 1)[1].strip())
 
         # Columns
         idx_ticker = headers.index("티커")
         idx_value = headers.index("금액") if "금액" in headers else None
         idx_ret = headers.index("누적수익률") if "누적수익률" in headers else (headers.index("일간수익률") if "일간수익률" in headers else None)
+        idx_score = headers.index("점수") if "점수" in headers else None
 
         # Names map
         name_map = {}
@@ -1594,7 +1538,9 @@ def _maybe_notify_coin_signals(country: str, headers: list, rows_sorted: list, f
             pass
 
         holdings_total = 0.0
-        lines = []
+        # Build ASCII table with score as last column (종목명 제거)
+        headers_tbl = ["티커", "금액", "누적수익률", "점수"]
+        display_rows = []
         for row in rows_sorted:
             try:
                 tkr = str(row[idx_ticker])
@@ -1602,7 +1548,7 @@ def _maybe_notify_coin_signals(country: str, headers: list, rows_sorted: list, f
                 if val <= 0:
                     continue
                 holdings_total += val
-                nm = name_map.get(tkr, "")
+                # return pct
                 pct_txt = ""
                 if idx_ret is not None:
                     r = row[idx_ret]
@@ -1610,9 +1556,22 @@ def _maybe_notify_coin_signals(country: str, headers: list, rows_sorted: list, f
                         pct_txt = f"{r:+.2f}%"
                     else:
                         pct_txt = str(r)
-                lines.append(f"{tkr}\t{nm} {fmt_eok_man(val)} {pct_txt}")
+                # score
+                sc = row[idx_score] if (idx_score is not None and idx_score < len(row)) else None
+                sc_txt = f"{float(sc):.2f}" if isinstance(sc, (int, float)) else (str(sc) if sc is not None else "-")
+                display_rows.append([tkr, fmt_eok_man(val), pct_txt, sc_txt])
             except Exception:
                 continue
+
+        aligns_tbl = ["right", "right", "right", "right"]
+        table_lines = render_table_eaw(headers_tbl, display_rows, aligns=aligns_tbl)
+        # Wrap table in <pre> to preserve alignment in Telegram
+        def _html_escape(s: str) -> str:
+            try:
+                return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            except Exception:
+                return s
+        table_block = "<pre>" + _html_escape("\n".join(table_lines)) + "</pre>"
 
         # KRW balance
         cash_txt = "-"
@@ -1639,12 +1598,91 @@ def _maybe_notify_coin_signals(country: str, headers: list, rows_sorted: list, f
         hold_txt = fmt_eok_man(holdings_total)
         country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
         header = f"[{country_kor}] {date_part} 잔액: {cash_txt}, 보유금액: {hold_txt}"
-        eval_line = f"수익 {eval_text}"
+        # Replace line to show cumulative instead of 평가 수익
+        eval_line = f"누적: {cum_text}"
         hold_line = f"보유종목: {hold_text}"
-        text = "\n".join([header, eval_line, hold_line] + lines)
+        text = "\n".join([header, eval_line, hold_line, table_block])
         return bool(send_telegram_message(text))
     except Exception:
         return False
+
+
+def _maybe_notify_coin_signals(country: str, headers: list, rows_sorted: list, force: bool = False) -> bool:
+    """Send coin signals as a table (ticker, name, state, score) plus a simple recommendation."""
+    try:
+        from utils.notify import send_telegram_message
+    except Exception:
+        return False
+
+    if not force and not _is_trading_day(country):
+        return False
+
+    try:
+        idx_ticker = headers.index("티커")
+        idx_state = headers.index("상태")
+        idx_score = headers.index("점수") if "점수" in headers else None
+    except ValueError:
+        return False
+
+    # Ticker → name map
+    name_map = {}
+    try:
+        stocks = get_stocks('coin') or []
+        name_map = {str(s.get('ticker') or '').upper(): str(s.get('name') or '') for s in stocks}
+    except Exception:
+        pass
+
+    # Build an ASCII table for Telegram (no 종목명)
+    headers_tbl = ["티커", "상태", "점수"]
+    display_rows = []
+    for row in rows_sorted:
+        try:
+            tkr = str(row[idx_ticker])
+            stt = str(row[idx_state])
+            sc = row[idx_score] if (idx_score is not None and idx_score < len(row)) else None
+            sc_txt = f"{float(sc):.2f}" if isinstance(sc, (int, float)) else (str(sc) if sc is not None else "-")
+            display_rows.append([tkr, stt, sc_txt])
+        except Exception:
+            continue
+    aligns_tbl = ["right", "left", "right"]
+    table_lines = render_table_eaw(headers_tbl, display_rows, aligns=aligns_tbl)
+    # Wrap in <pre> to preserve alignment in Telegram (HTML parse_mode)
+    def _html_escape(s: str) -> str:
+        try:
+            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        except Exception:
+            return s
+    table_block = "<pre>" + _html_escape("\n".join(table_lines)) + "</pre>"
+
+    # Recommendation (first SELL_* and BUY_* encountered)
+    sell_states = {"CUT_STOPLOSS", "SELL_MOMENTUM", "SELL_TREND", "SELL_REPLACE"}
+    buy_states = {"BUY_REPLACE", "BUY"}
+    sell_tkr = buy_tkr = None
+    for row in rows_sorted:
+        try:
+            stt = str(row[idx_state])
+            if sell_tkr is None and stt in sell_states:
+                sell_tkr = str(row[idx_ticker])
+            if buy_tkr is None and stt in buy_states:
+                buy_tkr = str(row[idx_ticker])
+            if sell_tkr and buy_tkr:
+                break
+        except Exception:
+            continue
+
+    country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
+    msg = [f"[{country_kor}] 시그널", table_block]
+    recs = []
+    if sell_tkr:
+        recs.append(f"{sell_tkr} 를 파세요!")
+    if buy_tkr:
+        recs.append(f"{buy_tkr} 를 사세요!")
+    if recs:
+        msg.append("")
+        msg.extend(recs)
+
+    text = "\n".join(msg)
+    return bool(send_telegram_message(text))
 
 
 if __name__ == "__main__":

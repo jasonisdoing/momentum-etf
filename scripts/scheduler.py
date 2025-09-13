@@ -125,6 +125,7 @@ def main():
                 _try_sync_bithumb_equity()
                 run_status("coin")
             scheduler.add_job(coin_job, IntervalTrigger(hours=every_h), id="coin_status")
+            # scheduler.add_job(coin_job, IntervalTrigger(minutes=1), id="coin_status")
             logging.info("Scheduled COIN: every %sh", every_h)
         else:
             cron = _get("SCHEDULE_COIN_CRON", "5 0 * * *")

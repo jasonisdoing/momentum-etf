@@ -37,7 +37,7 @@ ATR_PERIOD_FOR_NORMALIZATION = 14
 
 MA_ETF_FIXED = 14  # 코인에는 ETF 없음. 더미 고정값
 MA_STOCK_RANGE = np.arange(1, 201, 1)
-REPLACE_THRESHOLD_RANGE = np.arange(0.5, 10.1, 0.5)
+REPLACE_THRESHOLD_RANGE = [1]
 PORTFOLIO_TOPN_RANGE = np.arange(1, 6, 1)      # 1 ~ 5
 REPLACE_WEAKER_STOCK = True
 
@@ -66,6 +66,14 @@ TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL", "ADA", "DOGE",
 # 현금 부족 규칙 없고 + 코인 호주는 소수 구매
 # 5종목 테스트 누적 수익률: +140.95%
 # 8종목 테스트 누적 수익률: +182.65%
+
+# 8종목
+# 460%
+# [수익률 기준 최적 조합]
+#   - MA_PERIOD_FOR_STOCK: 3
+#   - PORTFOLIO_TOPN: 3
+#   - REPLACE_WEAKER_STOCK: True
+#   - REPLACE_SCORE_THRESHOLD: 1.00
 
 # 8개 종목 튜닝
 
