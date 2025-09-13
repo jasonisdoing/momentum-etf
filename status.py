@@ -1,4 +1,5 @@
 import os
+import re
 import warnings
 import sys
 from datetime import datetime
@@ -18,7 +19,16 @@ except ImportError:
     pytz = None
 
 # New structure imports
-from utils.db_manager import get_db_connection, get_portfolio_snapshot, get_previous_portfolio_snapshot, get_app_settings, get_trades_on_date, get_stocks, get_common_settings
+from utils.db_manager import (
+    get_db_connection,
+    get_portfolio_snapshot,
+    get_previous_portfolio_snapshot,
+    get_app_settings,
+    get_trades_on_date,
+    get_stocks,
+    get_common_settings,
+    save_status_report_to_db,
+)
 from utils.data_loader import (
     fetch_ohlcv,
     format_aus_ticker_for_yfinance,
@@ -161,6 +171,52 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
             date_range=[initial_date.strftime("%Y-%m-%d"), base_date.strftime("%Y-%m-%d")],
         )
 
+        # Fallbacks when primary source is unavailable
+        if df_benchmark is None or df_benchmark.empty:
+            # 1) KRX/KOR fallback via yfinance (e.g., 379800 -> 379800.KS)
+            if benchmark_country == 'kor' and yf is not None:
+                try:
+                    y_ticker = benchmark_ticker
+                    if benchmark_ticker.isdigit() and len(benchmark_ticker) == 6:
+                        y_ticker = f"{benchmark_ticker}.KS"
+                    df_y = yf.download(
+                        y_ticker,
+                        start=initial_date.strftime('%Y-%m-%d'),
+                        end=(base_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d'),
+                        progress=False,
+                        auto_adjust=True,
+                    )
+                    if df_y is not None and not df_y.empty:
+                        # Normalize columns/index to expected shape
+                        if isinstance(df_y.columns, pd.MultiIndex):
+                            df_y.columns = df_y.columns.get_level_values(0)
+                            df_y = df_y.loc[:, ~df_y.columns.duplicated()]
+                        if df_y.index.tz is not None:
+                            df_y.index = df_y.index.tz_localize(None)
+                        df_benchmark = df_y.rename(columns={'Adj Close': 'Close'})
+                except Exception:
+                    pass
+            # 2) COIN fallback via yfinance (e.g., BTC -> BTC-USD)
+            if (df_benchmark is None or df_benchmark.empty) and benchmark_country == 'coin' and yf is not None:
+                try:
+                    y_ticker = 'BTC-USD' if benchmark_ticker.upper() == 'BTC' else f"{benchmark_ticker.upper()}-USD"
+                    df_y = yf.download(
+                        y_ticker,
+                        start=initial_date.strftime('%Y-%m-%d'),
+                        end=(base_date + pd.Timedelta(days=1)).strftime('%Y-%m-%d'),
+                        progress=False,
+                        auto_adjust=True,
+                    )
+                    if df_y is not None and not df_y.empty:
+                        if isinstance(df_y.columns, pd.MultiIndex):
+                            df_y.columns = df_y.columns.get_level_values(0)
+                            df_y = df_y.loc[:, ~df_y.columns.duplicated()]
+                        if df_y.index.tz is not None:
+                            df_y.index = df_y.index.tz_localize(None)
+                        df_benchmark = df_y.rename(columns={'Adj Close': 'Close'})
+                except Exception:
+                    pass
+
         if df_benchmark is None or df_benchmark.empty:
             return f'<span style="color:grey">벤치마크({benchmark_ticker}) 데이터 조회 실패</span>'
 
@@ -269,12 +325,16 @@ def calculate_consecutive_holding_info(
         print("-> 경고: DB에 연결할 수 없어 보유일 계산을 건너뜁니다.")
         return holding_info
 
+    # 코인은 트레이드가 시각 포함으로 기록되므로, 동일 달력일의 모든 거래를 포함하도록
+    # as_of_date 상한을 해당일 23:59:59.999999로 확장합니다.
+    include_until = as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999) if country == 'coin' else as_of_date
+
     for tkr in held_tickers:
         try:
             # 해당 티커의 모든 거래를 날짜 내림차순, 그리고 같은 날짜 내에서는 생성 순서(_id) 내림차순으로 가져옵니다.
             # 이를 통해 동일한 날짜에 발생한 거래의 순서를 정확히 반영하여 연속 보유 기간을 계산합니다.
             trades = list(db.trades.find(
-                {"country": country, "ticker": tkr, "date": {"$lte": as_of_date}},
+                {"country": country, "ticker": tkr, "date": {"$lte": include_until}},
                 sort=[("date", DESCENDING), ("_id", DESCENDING)]
             ))
 
@@ -470,7 +530,8 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
         return None, None, None, None, None, None, None, None
 
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
-    if not stocks_from_db:
+    # 코인은 거래소 잔고 기반 표시이므로, 종목 마스터가 비어 있어도 보유코인을 기준으로 진행합니다.
+    if not stocks_from_db and country != "coin":
         print(f"오류: '{country}_stocks' 컬렉션에서 현황을 계산할 종목을 찾을 수 없습니다.")
         return None, None, None, None, None, None, None, None
     etf_tickers_status = {stock['ticker'] for stock in stocks_from_db if stock.get('type') == 'etf'}
@@ -511,6 +572,11 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
     data_by_tkr = {}
     total_holdings_value = 0.0
     datestamps = []
+
+    # 코인도 이제 trades 기반 포트폴리오를 사용합니다. (빗썸 스냅샷→trades 동기화 별도 스크립트)
+    if country == "coin":
+        # 제외할 특수 심볼 제거 (예: 'P')
+        pairs = [(t, n) for (t, n) in pairs if t != 'P']
 
     # --- 병렬 데이터 로딩 및 지표 계산 ---
     tasks = []
@@ -564,6 +630,7 @@ def _build_header_line(country, portfolio_data, current_equity, total_holdings_v
     total_holdings = total_holdings_value
     if country == "aus" and portfolio_data.get("international_shares"):
         total_holdings += portfolio_data["international_shares"].get("value", 0.0)
+    # 코인도 다른 국가와 동일하게 보유금액은 포지션 합으로 계산합니다.
 
     # 현금
     total_cash = float(current_equity) - float(total_holdings)
@@ -621,9 +688,16 @@ def _build_header_line(country, portfolio_data, current_equity, total_holdings_v
             day_label = "기준일"
             label_date = base_date
     else:
-        # 코인은 항상 오늘 기준
-        day_label = "오늘"
-        label_date = today_cal
+        # 코인: 오늘이면 '오늘', 과거면 '기준일'로 표시 날짜를 base_date로 설정
+        if base_date.date() == today_cal.date():
+            day_label = "오늘"
+            label_date = today_cal
+        elif base_date.date() < today_cal.date():
+            day_label = "기준일"
+            label_date = base_date
+        else:
+            day_label = "기준일"
+            label_date = base_date
 
     # 일간 수익률: 다음 거래일 기준일에는 아직 수익률이 없으므로 0 처리
     if day_label == "다음 거래일":
@@ -701,17 +775,23 @@ def generate_status_report(
 
     # 3. 보유 기간 및 고점 대비 하락률 계산
     held_tickers = [tkr for tkr, v in holdings.items() if float((v or {}).get("shares") or 0.0) > 0]
-    consecutive_holding_info = calculate_consecutive_holding_info(held_tickers, country, base_date)
+    # 보유 시작일 계산 기준은 실제 표시 기준일(label_date)과 일치시킵니다.
+    consecutive_holding_info = calculate_consecutive_holding_info(held_tickers, country, label_date)
     for tkr, d in data_by_tkr.items():
         if float(d.get("shares", 0.0)) > 0:
             buy_date = consecutive_holding_info.get(tkr, {}).get("buy_date")
-            if buy_date:
-                df_holding_period = d["df"][buy_date:]
-                if not df_holding_period.empty:
-                    peak_high = df_holding_period["High"].max()
-                    current_price = d["price"]
-                    if pd.notna(peak_high) and peak_high > 0 and pd.notna(current_price):
-                        d["drawdown_from_peak"] = ((current_price / peak_high) - 1.0) * 100.0
+            # Drawdown 계산은 시계열이 있는 경우에만 수행 (코인 간소화 경로는 df가 비어있을 수 있음)
+            if buy_date and isinstance(d.get("df"), pd.DataFrame) and not d["df"].empty and isinstance(d["df"].index, pd.DatetimeIndex):
+                try:
+                    buy_date_norm = pd.to_datetime(buy_date).normalize()
+                    df_holding_period = d["df"][d["df"].index >= buy_date_norm]
+                    if not df_holding_period.empty and "High" in df_holding_period.columns:
+                        peak_high = df_holding_period["High"].max()
+                        current_price = d["price"]
+                        if pd.notna(peak_high) and peak_high > 0 and pd.notna(current_price):
+                            d["drawdown_from_peak"] = ((current_price / peak_high) - 1.0) * 100.0
+                except Exception:
+                    pass
 
     app_settings = get_app_settings(country)
     if not app_settings or "portfolio_topn" not in app_settings:
@@ -775,6 +855,10 @@ def generate_status_report(
         score = d.get("score", 0.0)
         sh = float(d["shares"])
         ac = float(d.get("avg_cost") or 0.0)
+        # Coin: exclude only special-denied symbols; include WAIT rows too
+        if country == 'coin':
+            if tkr == 'P':
+                continue
 
         # 자동 계산된 보유종목의 매수일과 보유일
         buy_signal = False
@@ -1122,8 +1206,8 @@ def generate_status_report(
         "#",
         "티커",
         "상태",
-        "매수일",
-        "보유",
+        "매수일자",
+        "보유일",
         "현재가",
         "일간수익률",
         "보유수량",
@@ -1142,13 +1226,26 @@ def main(country: str = "kor", date_str: Optional[str] = None):
 
     if result:
         header_line, headers, rows_sorted = result
+        # Persist status report for use in web app history, if possible.
+        try:
+            # Use provided date_str if given; else use today
+            if date_str:
+                report_date = pd.to_datetime(date_str).to_pydatetime()
+            else:
+                report_date = pd.Timestamp.now().normalize().to_pydatetime()
+            save_status_report_to_db(country, report_date, (header_line, headers, rows_sorted))
+        except Exception:
+            pass
 
         # 텔레그램 알림: 기본 현황 + (옵션) 매수/매도 신호 요약
         try:
-            _maybe_notify_basic_status(country, header_line)
-            _maybe_notify_signal_summary(country, headers, rows_sorted)
+            if country == 'coin':
+                _maybe_notify_coin_detailed(country, header_line, headers, rows_sorted)
+                _maybe_notify_coin_signals(country, headers, rows_sorted)
+            else:
+                _maybe_notify_basic_status(country, header_line)
+                _maybe_notify_signal_summary(country, headers, rows_sorted)
         except Exception:
-            # 알림 실패는 콘솔 출력에 영향을 주지 않도록 무시
             pass
 
         # --- 콘솔 출력용 포맷팅 ---
@@ -1165,6 +1262,7 @@ def main(country: str = "kor", date_str: Optional[str] = None):
             col_indices["day_ret"] = headers.index("일간수익률")
             col_indices["cum_ret"] = headers.index("누적수익률")
             col_indices["weight"] = headers.index("비중")
+            col_indices["shares"] = headers.index("보유수량")
         except (ValueError, KeyError):
             pass  # 일부 컬럼을 못찾아도 괜찮음
 
@@ -1203,6 +1301,19 @@ def main(country: str = "kor", date_str: Optional[str] = None):
             if idx is not None:
                 val = display_row[idx]
                 display_row[idx] = f"{val:.0f}%" if isinstance(val, (int, float)) else "-"
+
+            # 보유수량 포맷팅 (코인은 소수점 8자리)
+            idx = col_indices.get("shares")
+            if idx is not None:
+                val = display_row[idx]
+                if isinstance(val, (int, float)):
+                    if country == 'coin':
+                        s = f"{float(val):.8f}".rstrip('0').rstrip('.')
+                        display_row[idx] = s if s != '' else '0'
+                    else:
+                        display_row[idx] = f"{int(round(val)):,d}"
+                else:
+                    display_row[idx] = val
 
             display_rows.append(display_row)
 
@@ -1276,24 +1387,33 @@ def _maybe_notify_basic_status(country: str, header_line: str, force: bool = Fal
     # Expected pattern in header_line:
     # "기준일: YYYY-MM-DD(요일) [라벨] | 보유종목: X/Y | ... | 보유금액: ... | ... | 평가: +x.x%(금액) | ..."
     try:
+        def _strip_html(s: str) -> str:
+            try:
+                return re.sub(r"<[^>]+>", "", s)
+            except Exception:
+                return s
         first_seg = header_line.split("|")[0].strip()
         # Extract date(weekday)
         # first_seg like: "기준일: 2025-09-13(토) [오늘]"
         date_part = first_seg.split(":", 1)[1].strip()
         if "[" in date_part:
             date_part = date_part.split("[")[0].strip()
+        date_part = _strip_html(date_part)
 
         # Extract holdings X/Y
         hold_seg = next(seg for seg in header_line.split("|") if "보유종목:" in seg)
         hold_text = hold_seg.strip().replace("보유종목:", "보유종목:").split("보유종목:")[-1].strip()
+        hold_text = _strip_html(hold_text)
 
         # Extract holdings amount
         amt_seg = next(seg for seg in header_line.split("|") if "보유금액:" in seg)
         amt_text = amt_seg.strip().split(":", 1)[1].strip()
+        amt_text = _strip_html(amt_text)
 
         # Extract evaluation return (수익률)
         eval_seg = next(seg for seg in header_line.split("|") if "평가:" in seg)
         eval_text = eval_seg.strip().split(":", 1)[1].strip()
+        eval_text = _strip_html(eval_text)
 
         country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
         msg = f"[{country_kor}] {date_part} 보유종목: {hold_text} | 보유금액: {amt_text} | 수익률: {eval_text}"
@@ -1343,6 +1463,175 @@ def _maybe_notify_signal_summary(country: str, headers: list, rows_sorted: list,
         parts.append(f"{sell_cnt}종목 매도 필요")
     text = f"[{country_kor}] " + ", ".join(parts)
     return bool(send_telegram_message(text))
+
+
+def _maybe_notify_coin_detailed(country: str, header_line: str, headers: list, rows_sorted: list, force: bool = False) -> bool:
+    """Send a detailed multi-line Telegram message for coin with 억/만원 formatting and 누적수익률."""
+    try:
+        from utils.notify import send_telegram_message
+    except Exception:
+        return False
+
+
+def _maybe_notify_coin_signals(country: str, headers: list, rows_sorted: list, force: bool = False) -> bool:
+    """Send a concise signals message for coin when actionable states are present.
+
+    States: CUT_STOPLOSS, SELL_MOMENTUM, SELL_TREND, SELL_REPLACE, BUY_REPLACE, BUY
+    Message format: one line per item → "TICKER STATE qty@price - phrase"
+    """
+    try:
+        from utils.notify import send_telegram_message
+    except Exception:
+        return False
+
+    if not force and not _is_trading_day(country):
+        # Coin returns True always, but keep symmetry
+        return False
+
+    try:
+        idx_ticker = headers.index("티커")
+        idx_state = headers.index("상태")
+        idx_price = headers.index("현재가") if "현재가" in headers else None
+        idx_shares = headers.index("보유수량") if "보유수량" in headers else None
+        idx_phrase = headers.index("문구") if "문구" in headers else None
+    except ValueError:
+        return False
+
+    action_states = {
+        "CUT_STOPLOSS",
+        "SELL_MOMENTUM",
+        "SELL_TREND",
+        "SELL_REPLACE",
+        "BUY_REPLACE",
+        "BUY",
+    }
+
+    lines = []
+    for row in rows_sorted:
+        try:
+            stt = str(row[idx_state])
+            if stt not in action_states:
+                continue
+            tkr = str(row[idx_ticker])
+            sh = row[idx_shares] if (idx_shares is not None and idx_shares < len(row)) else None
+            px = row[idx_price] if (idx_price is not None and idx_price < len(row)) else None
+            phr = str(row[idx_phrase]) if (idx_phrase is not None and idx_phrase < len(row)) else ""
+            sh_txt = f"{sh}" if isinstance(sh, (int, float)) else (str(sh) if sh is not None else "-")
+            px_txt = f"{int(round(px)):,}" if isinstance(px, (int, float)) else (str(px) if px is not None else "-")
+            line = f"{tkr} {stt} {sh_txt}@{px_txt} - {phr}"
+            lines.append(line)
+        except Exception:
+            continue
+
+    if not lines:
+        return False
+
+    country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
+    header = f"[{country_kor}] 시그널"
+    text = "\n".join([header] + lines)
+    return bool(send_telegram_message(text))
+
+    if not force and not _is_trading_day(country):
+        return False
+
+    try:
+        def _strip_html(s: str) -> str:
+            try:
+                return re.sub(r"<[^>]+>", "", s)
+            except Exception:
+                return s
+
+        def fmt_eok_man(n: float) -> str:
+            try:
+                val = int(round(n))
+                eok = val // 100_000_000
+                man = (val % 100_000_000) // 10_000
+                if eok > 0 and man > 0:
+                    return f"{eok}억 {man:,}만원"
+                if eok > 0 and man == 0:
+                    return f"{eok}억원"
+                return f"{man:,}만원"
+            except Exception:
+                return f"{n}원"
+
+        # Date
+        first_seg = header_line.split("|")[0].strip()
+        date_part = first_seg.split(":", 1)[1].strip()
+        if "[" in date_part:
+            date_part = date_part.split("[")[0].strip()
+        date_part = _strip_html(date_part)
+
+        # Holdings count and eval return
+        hold_seg = next((seg for seg in header_line.split("|") if "보유종목:" in seg), "보유종목: -")
+        hold_text = _strip_html(hold_seg.split(":", 1)[1].strip())
+        eval_seg = next((seg for seg in header_line.split("|") if "평가:" in seg), "평가: +0.00%(0원)")
+        eval_text = _strip_html(eval_seg.split(":", 1)[1].strip())
+
+        # Columns
+        idx_ticker = headers.index("티커")
+        idx_value = headers.index("금액") if "금액" in headers else None
+        idx_ret = headers.index("누적수익률") if "누적수익률" in headers else (headers.index("일간수익률") if "일간수익률" in headers else None)
+
+        # Names map
+        name_map = {}
+        try:
+            stocks = get_stocks('coin') or []
+            name_map = {str(s.get('ticker') or '').upper(): str(s.get('name') or '') for s in stocks}
+        except Exception:
+            pass
+
+        holdings_total = 0.0
+        lines = []
+        for row in rows_sorted:
+            try:
+                tkr = str(row[idx_ticker])
+                val = float(row[idx_value]) if (idx_value is not None and isinstance(row[idx_value], (int, float))) else 0.0
+                if val <= 0:
+                    continue
+                holdings_total += val
+                nm = name_map.get(tkr, "")
+                pct_txt = ""
+                if idx_ret is not None:
+                    r = row[idx_ret]
+                    if isinstance(r, (int, float)):
+                        pct_txt = f"{r:+.2f}%"
+                    else:
+                        pct_txt = str(r)
+                lines.append(f"{tkr}\t{nm} {fmt_eok_man(val)} {pct_txt}")
+            except Exception:
+                continue
+
+        # KRW balance
+        cash_txt = "-"
+        try:
+            from utils.exchanges.bithumb_v2 import BithumbV2Client
+            v2 = BithumbV2Client()
+            items = v2.accounts()
+            # Sum KRW = balance + locked for KRW item
+            krw_val = 0.0
+            for it in items or []:
+                cur = str(it.get('currency') or '').upper()
+                if cur == 'KRW':
+                    def _pf(x):
+                        try:
+                            return float(str(x).replace(',', ''))
+                        except Exception:
+                            return 0.0
+                    krw_val = _pf(it.get('balance')) + _pf(it.get('locked'))
+                    break
+            cash_txt = fmt_eok_man(krw_val)
+        except Exception:
+            pass
+
+        hold_txt = fmt_eok_man(holdings_total)
+        country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
+        header = f"[{country_kor}] {date_part} 잔액: {cash_txt}, 보유금액: {hold_txt}"
+        eval_line = f"수익 {eval_text}"
+        hold_line = f"보유종목: {hold_text}"
+        text = "\n".join([header, eval_line, hold_line] + lines)
+        return bool(send_telegram_message(text))
+    except Exception:
+        return False
 
 
 if __name__ == "__main__":

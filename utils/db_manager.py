@@ -104,9 +104,14 @@ def get_portfolio_snapshot(
 
     # 3. 'trades' 컬렉션에서 보유 종목 재구성
     # 날짜 오름차순, 그리고 같은 날짜 내에서는 생성 순서(ObjectId) 오름차순으로 정렬합니다.
-    # 이를 통해 동일한 날짜에 발생한 매도 후 매수 등의 거래 순서를 정확히 반영합니다.
+    # 코인의 경우, daily_equities가 자정(00:00)으로 저장되고 트레이드는 시각 포함으로 저장되므로
+    # 동일한 달력일에 발생한 모든 트레이드를 포함하도록 상한을 '해당일의 23:59:59.999999'로 확장합니다.
+    if country == "coin":
+        upper_bound = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+    else:
+        upper_bound = target_date
     trades_cursor = db.trades.find(
-        {"country": country, "date": {"$lte": target_date}, "is_deleted": {"$ne": True}}
+        {"country": country, "date": {"$lte": upper_bound}, "is_deleted": {"$ne": True}}
     ).sort(
         [("date", 1), ("_id", 1)]
     )
@@ -190,14 +195,29 @@ def get_available_snapshot_dates(country: str, as_of_date: Optional[datetime] = 
     if as_of_date:
         query["date"] = {"$lte" if include_as_of_date else "$lt": as_of_date}
 
-    equity_dates = set(db.daily_equities.distinct("date", {**query, "is_deleted": {"$ne": True}}))
-    trade_dates = set(db.trades.distinct("date", {**query, "is_deleted": {"$ne": True}}))
-    
-    all_dates = equity_dates.union(trade_dates)
+    equity_dates = list(db.daily_equities.distinct("date", {**query, "is_deleted": {"$ne": True}}))
+    trade_dates = list(db.trades.distinct("date", {**query, "is_deleted": {"$ne": True}}))
 
-    # 날짜를 'YYYY-MM-DD' 형식의 문자열로 변환하고 내림차순으로 정렬합니다.
-    sorted_dates = sorted([d.strftime("%Y-%m-%d") for d in all_dates], reverse=True)
-    return sorted_dates
+    # 날짜를 'YYYY-MM-DD' 문자열로 변환한 뒤, 중복(같은 날 서로 다른 시각)을 제거합니다.
+    def to_day_str_list(dt_list):
+        day_strs = []
+        for d in dt_list or []:
+            try:
+                day_strs.append(d.strftime("%Y-%m-%d"))
+            except Exception:
+                # 일부 드라이버가 naive/aware 차이가 있을 수 있으므로 방어적으로 처리
+                try:
+                    day_strs.append(pd.to_datetime(d).strftime("%Y-%m-%d"))  # type: ignore
+                except Exception:
+                    continue
+        return day_strs
+
+    equity_days = set(to_day_str_list(equity_dates))
+    trade_days = set(to_day_str_list(trade_dates))
+    all_days = equity_days.union(trade_days)
+
+    # 내림차순 정렬
+    return sorted(all_days, reverse=True)
 
 
 def get_app_settings(country: str) -> Optional[Dict]:
@@ -249,6 +269,49 @@ def save_common_settings(settings_data: Dict) -> bool:
         return True
     except Exception as e:
         print(f"오류: 공통 설정 저장 중 오류 발생: {e}")
+        return False
+
+
+# --- Import checkpoints (incremental sync) ---
+def get_import_checkpoint(source: str, country: str, key: Optional[str] = None) -> Optional[int]:
+    """Return last processed timestamp (ms) for a given import source/country/key.
+
+    - source: e.g., 'bithumb_v1_trades'
+    - country: e.g., 'coin'
+    - key: optional sub-key (e.g., base ticker like 'BTC')
+    """
+    db = get_db_connection()
+    if db is None:
+        return None
+    q: Dict[str, object] = {"source": source, "country": country}
+    if key is not None:
+        q["key"] = key
+    doc = db.import_checkpoints.find_one(q)
+    if not doc:
+        return None
+    try:
+        return int(doc.get("last_ts_ms"))
+    except Exception:
+        return None
+
+
+def save_import_checkpoint(source: str, country: str, last_ts_ms: int, key: Optional[str] = None) -> bool:
+    """Upsert last processed timestamp (ms) for a given import source/country/key."""
+    db = get_db_connection()
+    if db is None:
+        return False
+    q: Dict[str, object] = {"source": source, "country": country}
+    if key is not None:
+        q["key"] = key
+    try:
+        db.import_checkpoints.update_one(
+            q,
+            {"$set": {**q, "last_ts_ms": int(last_ts_ms), "updated_at": datetime.now()}},
+            upsert=True,
+        )
+        return True
+    except Exception as e:
+        print(f"오류: 체크포인트 저장 실패 ({source}/{country}/{key}): {e}")
         return False
 
 def get_status_report_from_db(country: str, date: datetime) -> Optional[Dict]:
@@ -558,6 +621,7 @@ def save_stocks(portfolio_country: str, stocks: List[Dict], edited_tickers: Opti
                 "sector": stock.get("sector"),
                 "is_deleted": False
             }
+            # No exchange-specific symbol mapping; use ticker as source of truth
             
             # 업데이트 연산을 조건부로 구성하여 '$set'과 '$setOnInsert' 간의 필드 충돌을 방지합니다.
             set_on_insert_op = {"created_at": now}
@@ -616,6 +680,7 @@ def add_stocks(portfolio_country: str, stocks_to_add: List[Dict]) -> bool:
                 "is_deleted": False,
                 "last_modified": now,
             }
+            # No exchange-specific symbol mapping; use ticker as source of truth
             set_on_insert_doc = {"created_at": now}
             requests.append(UpdateOne(query, {"$set": update_doc, "$setOnInsert": set_on_insert_doc, "$unset": {"deleted_at": ""}}, upsert=True))
         
@@ -674,15 +739,23 @@ def get_all_daily_equities(country: str, start_date: datetime, end_date: datetim
 
 
 def get_all_trades(country: str) -> List[Dict]:
-    """지정된 국가의 모든 거래 내역을 DB에서 가져옵니다."""
+    """지정된 국가의 모든 거래 내역을 DB에서 가져옵니다.
+
+    country 필드의 대소문자 불일치를 허용하기 위해 정규식(대소문자 무시)으로 조회합니다.
+    """
     db = get_db_connection()
     if db is None:
         return []
-    
+
+    query = {
+        "country": {"$regex": f"^{country}$", "$options": "i"},
+        "is_deleted": {"$ne": True},
+    }
+
     # 최신 거래가 위로 오도록 날짜와 생성 순서(_id)로 정렬합니다.
-    trades = list(db.trades.find(
-        {"country": country, "is_deleted": {"$ne": True}}
-    ).sort([("date", DESCENDING), ("_id", DESCENDING)]))
+    trades = list(
+        db.trades.find(query).sort([("date", DESCENDING), ("_id", DESCENDING)])
+    )
 
     for trade in trades:
         # ObjectId를 웹 앱에서 사용하기 쉽도록 문자열 ID로 변환합니다.
@@ -752,7 +825,7 @@ def delete_trade_by_id(trade_id: str) -> bool:
             return True # 이미 삭제되었거나 없는 경우도 성공으로 간주
     except Exception as e:
         print(f"오류: 거래 내역 삭제 중 오류 발생: {e}")
-        return False
+    return False
 
 
 def save_daily_equity(country: str, date: datetime, total_equity: float, international_shares: Optional[Dict] = None) -> bool:
@@ -776,3 +849,24 @@ def save_daily_equity(country: str, date: datetime, total_equity: float, interna
     except Exception as e:
         print(f"오류: 일별 평가금액 저장 중 오류 발생: {e}")
         return False
+
+
+def soft_delete_all_trades(country: str) -> int:
+    """Soft-delete all trades for the specified country by setting is_deleted=True.
+
+    Returns the number of modified documents.
+    """
+    db = get_db_connection()
+    if db is None:
+        return 0
+    try:
+        from pymongo import UpdateMany
+        res = db.trades.update_many(
+            {"country": country, "is_deleted": {"$ne": True}},
+            {"$set": {"is_deleted": True, "deleted_at": datetime.now()}},
+        )
+        print(f"성공: {country.upper()} 국가의 거래 {res.modified_count}건을 삭제 처리했습니다.")
+        return int(res.modified_count)
+    except Exception as e:
+        print(f"오류: {country.upper()} 국가 거래 일괄 삭제 중 오류: {e}")
+        return 0

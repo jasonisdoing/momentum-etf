@@ -3,3 +3,5 @@ streamlit
 pykrx
 pymongo[srv]
 APScheduler
+python-dotenv
+requests

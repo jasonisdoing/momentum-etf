@@ -20,7 +20,7 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 # 이 파일에서는 매매 전략에 사용되는 고유 파라미터를 정의합니다.
 INITIAL_CAPITAL = 100000000
 # 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월 데이터로 테스트)
-TEST_MONTHS_RANGE = 60
+TEST_MONTHS_RANGE = 12
 
 def main(
     country: str = "kor",
@@ -306,7 +306,7 @@ def main(
                     "티커",
                     "이름",
                     "상태",
-                    "매수일",
+                    "매수일자",
                     "보유일",
                     "현재가",
                     "일간수익률",

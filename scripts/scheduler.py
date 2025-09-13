@@ -28,9 +28,12 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 try:
     # DB에서 설정을 읽어 스케줄 주기를 제어
-    from utils.db_manager import get_common_settings
+    from utils.db_manager import get_common_settings, get_app_settings
+    from utils.env import load_env_if_present
 except Exception:
     get_common_settings = lambda: None
+    get_app_settings = lambda country: None
+    load_env_if_present = lambda: False
 
 
 def _bool_env(name: str, default: bool = True) -> bool:
@@ -54,8 +57,29 @@ def run_status(country: str):
         logging.exception("Status job failed for %s: %s", country, e)
 
 
+def _try_sync_bithumb_equity():
+    """If coin: snapshot Bithumb balances into daily_equities before status run."""
+    try:
+        from scripts.snapshot_bithumb_balances import main as snapshot_main
+        snapshot_main()
+    except Exception as e:
+        logging.warning("Bithumb balance snapshot skipped or failed: %s", e)
+
+
+def _try_sync_bithumb_trades():
+    """If coin: sync Bithumb accounts → trades before status run."""
+    try:
+        from scripts.sync_bithumb_accounts_to_trades import main as sync_main
+        sync_main()
+    except Exception as e:
+        logging.warning("Bithumb accounts→trades sync skipped or failed: %s", e)
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
+
+    # Load .env for API keys, DB, etc.
+    load_env_if_present()
 
     scheduler = BlockingScheduler()
 
@@ -96,12 +120,20 @@ def main():
     if _bool_env("SCHEDULE_ENABLE_COIN", True):
         every_h = _hours("SCHEDULE_EVERY_HOURS_COIN")
         if every_h:
-            scheduler.add_job(run_status, IntervalTrigger(hours=every_h), args=["coin"], id="coin_status")
+            def coin_job():
+                _try_sync_bithumb_trades()
+                _try_sync_bithumb_equity()
+                run_status("coin")
+            scheduler.add_job(coin_job, IntervalTrigger(hours=every_h), id="coin_status")
             logging.info("Scheduled COIN: every %sh", every_h)
         else:
             cron = _get("SCHEDULE_COIN_CRON", "5 0 * * *")
             tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
-            scheduler.add_job(run_status, CronTrigger.from_crontab(cron, timezone=tz), args=["coin"], id="coin_status")
+            def coin_job():
+                _try_sync_bithumb_trades()
+                _try_sync_bithumb_equity()
+                run_status("coin")
+            scheduler.add_job(coin_job, CronTrigger.from_crontab(cron, timezone=tz), id="coin_status")
             logging.info("Scheduled COIN: cron=%s tz=%s", cron, tz)
 
     if _bool_env("RUN_IMMEDIATELY_ON_START", False):
