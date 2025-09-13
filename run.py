@@ -49,6 +49,12 @@ def main():
         default=None,
         help="조회할 포트폴리오 스냅샷의 날짜. (예: 2024-01-01). 미지정 시 최신 날짜 사용.",
     )
+    parser.add_argument(
+        "--tickers",
+        type=str,
+        default=None,
+        help="테스트에 사용할 티커 리스트 (쉼표구분, 예: BTC,ETH,SOL). 미지정 시 DB 목록 사용",
+    )
 
     args = parser.parse_args()
     country = args.country
@@ -56,6 +62,14 @@ def main():
     if args.test:
         from test import main as run_test
         prefetched_data = None
+        override_settings = {}
+
+        # 티커 오버라이드 파싱 (모든 국가 공통, 특히 coin 용)
+        tickers_override = None
+        if args.tickers:
+            tickers_override = [t.strip().upper() for t in args.tickers.split(',') if t.strip()]
+            if tickers_override:
+                override_settings["tickers_override"] = tickers_override
 
         # 호주 시장의 경우, yfinance API 호출을 최소화하기 위해 데이터를 미리 로딩합니다.
         if country == "aus":
@@ -71,6 +85,11 @@ def main():
                 return
 
             tickers = [s['ticker'] for s in stocks_from_db]
+            if tickers_override:
+                tickers = [t for t in tickers if t.upper() in set(tickers_override)]
+                if not tickers:
+                    print("오류: 지정한 --tickers 가 DB 목록과 일치하지 않습니다.")
+                    return
             
             try:
                 test_months_range = settings.TEST_MONTHS_RANGE
@@ -89,7 +108,7 @@ def main():
             print(f"총 {len(prefetched_data)}개 종목의 데이터 로딩 완료.")
 
         print("전략에 대한 상세 백테스트를 실행합니다...")
-        run_test(country=country, quiet=False, prefetched_data=prefetched_data)
+        run_test(country=country, quiet=False, prefetched_data=prefetched_data, override_settings=override_settings or None)
 
     elif args.tune_regime:
         from scripts.tune_regime_filter import tune_regime_filter

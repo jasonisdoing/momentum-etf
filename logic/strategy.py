@@ -55,7 +55,9 @@ def run_portfolio_backtest(
 
     if top_n <= 0:
         raise ValueError("PORTFOLIO_TOPN (top_n)은 0보다 커야 합니다.")
-    min_pos_pct = 1.0 / top_n
+    # 포지션 비중 가이드라인 (모든 국가에 동일 규칙 적용)
+    min_pos_pct = 1.0 / (top_n * 2.0)
+    max_pos_pct = 1.0 / top_n
 
     # --- 티커 유형(ETF/주식) 구분 ---
     etf_tickers = {stock['ticker'] for stock in stocks if stock.get('type') == 'etf'}
@@ -348,14 +350,28 @@ def run_portfolio_backtest(
                     if pd.isna(price):
                         continue
 
-                    equity = cash + current_holdings_value
-                    min_val = min_pos_pct * equity
-                    req_qty = ceil(min_val / price) if price > 0 else 0
-                    if req_qty <= 0:
+                    # 예산 산정은 기준 자산(equity) 고정값을 사용 (intra-day 순서 영향을 제거)
+                    equity_base = equity
+                    min_val = min_pos_pct * equity_base
+                    max_val = max_pos_pct * equity_base
+                    budget = min(max_val, cash)
+
+                    # 예산이 최소 비중보다 작으면 스킵
+                    if budget <= 0 or budget < min_val:
                         continue
 
-                    trade_amount = req_qty * price
-                    if trade_amount <= cash:
+                    if country in ('coin', 'aus'):
+                        req_qty = budget / price if price > 0 else 0
+                        trade_amount = budget
+                    else:
+                        req_qty = ceil(budget / price) if price > 0 else 0
+                        # 정수 수량은 예산 내 최대 구매량으로, 최소 비중 충족 필요 -> floor로 재계산
+                        req_qty = int(budget // price)
+                        trade_amount = req_qty * price
+                        if req_qty <= 0 or trade_amount + 1e-9 < min_val:
+                            continue
+
+                    if trade_amount <= cash + 1e-9:
                         ticker_state = state[tkr_to_buy]
                         cash -= trade_amount
                         ticker_state["shares"] += req_qty
@@ -429,32 +445,63 @@ def run_portfolio_backtest(
                                     "note": f"{best_new_tkr}(으)로 교체",
                                 })
 
-                            # (b) 가장 강한 새 종목 매수
-                            equity = cash + current_holdings_value
-                            min_val = min_pos_pct * equity
-                            req_qty = ceil(min_val / buy_price) if buy_price > 0 else 0
-
-                            if req_qty > 0:
+                            # (b) 가장 강한 새 종목 매수 (기준 자산 기반 예산)
+                            equity_base = equity
+                            min_val = min_pos_pct * equity_base
+                            max_val = max_pos_pct * equity_base
+                            budget = min(max_val, cash)
+                            if budget <= 0 or budget < min_val:
+                                continue
+                            # 수량/금액 산정
+                            if country in ('coin', 'aus'):
+                                req_qty = (budget / buy_price) if buy_price > 0 else 0
+                                buy_amount = budget
+                            else:
+                                req_qty = int(budget // buy_price) if buy_price > 0 else 0
                                 buy_amount = req_qty * buy_price
-                                if buy_amount <= cash:
-                                    new_ticker_state = state[best_new_tkr]
-                                    cash -= buy_amount
-                                    new_ticker_state["shares"], new_ticker_state["avg_cost"] = req_qty, buy_price
-                                    if cooldown_days > 0:
-                                        new_ticker_state["sell_block_until"] = max(new_ticker_state["sell_block_until"], i + cooldown_days)
+                                if req_qty <= 0 or buy_amount + 1e-9 < min_val:
+                                    continue
 
-                                    if out_rows[best_new_tkr] and out_rows[best_new_tkr][-1]["date"] == dt:
-                                        row = out_rows[best_new_tkr][-1]
-                                        row.update({
-                                            "decision": "BUY_REPLACE",
-                                            "trade_amount": buy_amount,
-                                            "shares": req_qty, "pv": req_qty * buy_price, "avg_cost": buy_price,
-                                            "note": f"{weakest_held_tkr}(을)를 대체",
-                                        })
+                            # 체결 반영
+                            if req_qty > 0 and buy_amount <= cash + 1e-9:
+                                new_ticker_state = state[best_new_tkr]
+                                cash -= buy_amount
+                                new_ticker_state["shares"], new_ticker_state["avg_cost"] = req_qty, buy_price
+                                if cooldown_days > 0:
+                                    new_ticker_state["sell_block_until"] = max(new_ticker_state["sell_block_until"], i + cooldown_days)
+
+                                # 결과 행 업데이트: 없으면 새로 추가
+                                if out_rows.get(best_new_tkr) and out_rows[best_new_tkr] and out_rows[best_new_tkr][-1]["date"] == dt:
+                                    row = out_rows[best_new_tkr][-1]
+                                    row.update({
+                                        "decision": "BUY_REPLACE",
+                                        "trade_amount": buy_amount,
+                                        "shares": req_qty,
+                                        "pv": req_qty * buy_price,
+                                        "avg_cost": buy_price,
+                                        "note": f"{weakest_held_tkr}(을)를 대체",
+                                    })
                                 else:
-                                    # 매수 실패 시, 매도만 실행된 상태가 됨. 다음 날 빈 슬롯에 매수 시도.
-                                    if out_rows[best_new_tkr] and out_rows[best_new_tkr][-1]["date"] == dt:
-                                        out_rows[best_new_tkr][-1]["note"] = "교체매수 현금부족"
+                                    out_rows.setdefault(best_new_tkr, []).append({
+                                        "date": dt,
+                                        "price": buy_price,
+                                        "shares": req_qty,
+                                        "pv": req_qty * buy_price,
+                                        "decision": "BUY_REPLACE",
+                                        "avg_cost": buy_price,
+                                        "trade_amount": buy_amount,
+                                        "trade_profit": 0.0,
+                                        "trade_pl_pct": 0.0,
+                                        "note": f"{weakest_held_tkr}(을)를 대체",
+                                        "signal1": None,
+                                        "signal2": None,
+                                        "score": None,
+                                        "filter": None,
+                                    })
+                            else:
+                                # 매수 실패 시, 매도만 실행된 상태가 됨. 다음 날 빈 슬롯에 매수 시도.
+                                if out_rows.get(best_new_tkr) and out_rows[best_new_tkr] and out_rows[best_new_tkr][-1]["date"] == dt:
+                                    out_rows[best_new_tkr][-1]["note"] = "교체매수 현금부족"
                     else:
                         # 점수가 정렬되어 있으므로, 더 이상의 교체는 불가능합니다.
                         break
@@ -577,7 +624,7 @@ def run_single_ticker_backtest(
             pass
 
     cash = float(initial_capital)
-    shares = 0
+    shares: float = 0.0
     avg_cost = 0.0
     buy_block_until = -1
     sell_block_until = -1
@@ -636,11 +683,15 @@ def run_single_ticker_backtest(
         if decision is None and shares == 0 and i >= buy_block_until:
             buy_signal_days_today = buy_signal_days.iloc[i]
             if buy_signal_days_today > 0:
-                buy_qty = int(cash // price)
+                if country in ('coin', 'aus'):
+                    # 소수점 4자리까지 허용
+                    buy_qty = round(cash / price, 4) if price > 0 else 0.0
+                else:
+                    buy_qty = int(cash // price)
                 if buy_qty > 0:
-                    trade_amount = buy_qty * price
+                    trade_amount = float(buy_qty) * price
                     cash -= trade_amount
-                    avg_cost, shares = price, buy_qty
+                    avg_cost, shares = price, float(buy_qty)
                     decision = "BUY"
                     if cooldown_days > 0:
                         sell_block_until = i + cooldown_days

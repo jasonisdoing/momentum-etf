@@ -820,7 +820,9 @@ def generate_status_report(
     if denom <= 0:
         print(f"오류: '{country}' 국가의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
         return None
-    min_pos = 1.0 / denom
+    # 포지션 비중 가이드라인: 모든 국가 동일 규칙 적용
+    min_pos = 1.0 / (denom * 2.0)  # 최소 편입 비중
+    max_pos = 1.0 / denom          # 목표/최대 비중
 
     held_count = sum(1 for v in holdings.values() if float((v or {}).get("shares") or 0.0) > 0)
     total_cash = float(current_equity) - float(total_holdings_value)
@@ -839,10 +841,12 @@ def generate_status_report(
 
     def format_shares(quantity):
         if country == 'coin':
-            # 소수점 8자리까지 표시하되, 불필요한 0은 제거
+            # 코인: 소수점 8자리까지 표시 (불필요한 0 제거)
             return f"{quantity:,.8f}".rstrip('0').rstrip('.')
-        else:
-            return f"{int(quantity):,d}"
+        if country == 'aus':
+            # 호주: 소수점 4자리까지 표시 (불필요한 0 제거)
+            return f"{quantity:,.4f}".rstrip('0').rstrip('.')
+        return f"{int(quantity):,d}"
 
     # 거래일 계산을 위한 참조 티커를 설정합니다.
     ref_ticker_for_cal = next(iter(data_by_tkr.keys())) if data_by_tkr else None
@@ -1025,15 +1029,24 @@ def generate_status_report(
             if price > 0:
                 equity = current_equity
                 min_val = min_pos * equity
-                
-                if country == 'coin':
-                    req_qty = min_val / price
-                else:
-                    from math import ceil
-                    req_qty = int(ceil(min_val / price))
-                buy_notional = req_qty * price
+                max_val = max_pos * equity
+                budget = min(max_val, available_cash)
 
-                if req_qty > 0 and buy_notional <= available_cash:
+                req_qty = 0
+                buy_notional = 0.0
+                if budget >= min_val and budget > 0:
+                    if country in ('coin', 'aus'):
+                        req_qty = budget / price
+                        buy_notional = budget
+                    else:
+                        # 정수 수량 시장: 예산 내에서 살 수 있는 최대 정수 수량으로, 최소 비중 충족해야 함
+                        req_qty = int(budget // price)
+                        buy_notional = req_qty * price
+                        if req_qty <= 0 or buy_notional + 1e-9 < min_val:
+                            req_qty = 0
+                            buy_notional = 0.0
+
+                if req_qty > 0 and buy_notional <= available_cash + 1e-9:
                     # 매수 결정
                     cand["state"] = "BUY"
                     cand["row"][3] = "BUY"
@@ -1095,7 +1108,7 @@ def generate_status_report(
                 sell_value = weakest_held["weight"] / 100.0 * current_equity
                 buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
                 if buy_price > 0:
-                    if country == 'coin':
+                    if country in ('coin', 'aus'):
                         buy_qty = sell_value / buy_price
                     else:
                         # 매도 금액으로 살 수 있는 최대 수량

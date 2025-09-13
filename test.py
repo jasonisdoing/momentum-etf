@@ -22,10 +22,12 @@ INITIAL_CAPITAL = 100000000
 # 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월 데이터로 테스트)
 TEST_MONTHS_RANGE = 12
 
+
 def main(
     country: str = "kor",
     quiet: bool = False,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    override_settings: Optional[Dict] = None,
 ):
     """
     지정된 전략에 대한 백테스트를 실행하고 결과를 요약합니다.
@@ -70,6 +72,25 @@ def main(
         print(f"오류: '{country}' 국가의 DB 설정값이 올바르지 않습니다.")
         return
 
+    # Optional overrides from caller (e.g., tuning scripts)
+    if override_settings:
+        try:
+            if "ma_etf" in override_settings:
+                settings.MA_PERIOD_FOR_ETF = int(override_settings["ma_etf"])  # no-op for coin but safe
+            if "ma_stock" in override_settings:
+                settings.MA_PERIOD_FOR_STOCK = int(override_settings["ma_stock"]) 
+            if "portfolio_topn" in override_settings:
+                portfolio_topn = int(override_settings["portfolio_topn"])  
+            if "replace_threshold" in override_settings:
+                settings.REPLACE_SCORE_THRESHOLD = float(override_settings["replace_threshold"])  
+            if "replace_weaker_stock" in override_settings:
+                settings.REPLACE_WEAKER_STOCK = bool(override_settings["replace_weaker_stock"])  
+            if "max_replacements_per_day" in override_settings:
+                settings.MAX_REPLACEMENTS_PER_DAY = int(override_settings["max_replacements_per_day"])  
+        except Exception:
+            # Silently ignore malformed overrides
+            pass
+
     # 공통(전역) 설정 로드 및 주입 (필수)
     common = get_common_settings()
     if not common:
@@ -112,9 +133,9 @@ def main(
 
     # 기간 설정 로직 (필수 설정)
     try:
-        test_months_range = TEST_MONTHS_RANGE
-    except AttributeError:
-        print("오류: TEST_MONTHS_RANGE 설정이 logic/settings.py 에 정의되어야 합니다.")
+        test_months_range = int(override_settings.get("test_months_range")) if override_settings and "test_months_range" in override_settings else TEST_MONTHS_RANGE
+    except Exception:
+        print("오류: 테스트 기간(test_months_range) 설정이 올바르지 않습니다.")
         return
     core_end_dt = pd.Timestamp.now()
     core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
@@ -129,17 +150,50 @@ def main(
         print(f"오류: '{country}_stocks' 컬렉션에서 백테스트에 사용할 종목을 찾을 수 없습니다.")
         return
 
+    # 티커 오버라이드: 콤마 구분 리스트. coin은 DB 목록과 합집합 사용, 그 외는 교집합.
+    if override_settings and override_settings.get("tickers_override"):
+        allow = [str(t).upper() for t in override_settings.get("tickers_override")]
+        allow_set = set(allow)
+        existing_set = {str(s.get('ticker') or '').upper() for s in stocks_from_db}
+        if country == 'coin':
+            # 합집합: DB + (없는 티커는 기본 메타로 추가)
+            missing = [t for t in allow if t not in existing_set]
+            if missing:
+                for t in missing:
+                    stocks_from_db.append({
+                        'ticker': t,
+                        'name': t,
+                        'type': 'stock',
+                        'country': country,
+                    })
+            # 그리고 중복 제거 + 순서 유지 (DB 우선, 이후 override 순서)
+            seen = set()
+            merged = []
+            for s in stocks_from_db + [{"ticker": t, "name": t, "type": "stock", "country": country} for t in allow]:
+                key = str(s.get('ticker') or '').upper()
+                if key and key not in seen:
+                    seen.add(key)
+                    merged.append(s)
+            stocks_from_db = merged
+        else:
+            # 교집합: DB에 있는 티커만 사용
+            filtered = [s for s in stocks_from_db if str(s.get('ticker') or '').upper() in allow_set]
+            if not filtered:
+                print("오류: override tickers 가 DB 목록과 일치하지 않습니다.")
+                return
+            stocks_from_db = filtered
+
     logger = logging.getLogger("backtester")
     logger.propagate = False  # 중복 로깅 방지
     logger.handlers.clear()
     logger.setLevel(logging.INFO)
 
-    # 콘솔 핸들러 설정
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(console_handler)
-
     if not quiet:
+        # 콘솔 핸들러 설정 (quiet=False일 때만)
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(console_handler)
+
         # 파일 핸들러 설정
         log_dir = "logs"
         os.makedirs(log_dir, exist_ok=True)
@@ -148,13 +202,13 @@ def main(
         file_handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(file_handler)
     else:
-        # quiet 모드에서는 모든 출력을 비활성화
+        # quiet 모드에서는 모든 핸들러를 Null로 대체하여 콘솔/파일 출력 억제
         logger.addHandler(logging.NullHandler())
 
     return_value = None
 
     try:
-        # 로그 파일 헤더
+        # 로그 파일 헤더 (quiet일 때는 핸들러가 없으므로 출력되지 않음)
         logger.info("백테스트를 `settings.py` 설정으로 실행합니다.")
         logger.info(
             f"# 시작 {datetime.now().isoformat()} | 기간={period_label} | 초기자본={int(initial_capital):,}\n"
@@ -260,7 +314,9 @@ def main(
                 total_value += float(pv_val) if pd.notna(pv_val) else 0.0
 
                 if tkr != "CASH":
-                    sh = int(row.get("shares", 0))
+                    # 코인/호주는 소수점 수량을 허용 (최대 4자리)
+                    sh_raw = row.get("shares", 0)
+                    sh = float(sh_raw) if pd.notna(sh_raw) else 0.0
 
                     # NaN 값을 안전하게 처리하여 price를 가져옵니다.
                     price_val = row.get("price")
@@ -329,7 +385,7 @@ def main(
                     price_today = float(price_val) if pd.notna(price_val) else 0.0
 
                     shares_val = row.get("shares")
-                    shares = int(shares_val) if pd.notna(shares_val) else 0
+                    shares = float(shares_val) if pd.notna(shares_val) else 0.0
 
                     trade_amount_val = row.get("trade_amount", 0.0)
                     trade_amount = float(trade_amount_val) if pd.notna(trade_amount_val) else 0.0
@@ -386,16 +442,21 @@ def main(
                     phrase = ""
                     note_from_strategy = str(row.get("note", "") or "")
                     if is_trade_decision and amount > 0 and price_today > 0:
-                        qty_calc = (
-                            int(float(amount) // float(price_today))
-                            if float(price_today) > 0
-                            else 0
-                        )
+                        # 거래 문구의 수량 포맷: coin/aus는 소수점 4자리, kor는 정수
+                        if country in ("coin", "aus"):
+                            qty_calc = round(float(amount) / float(price_today), 4)
+                        else:
+                            qty_calc = int(float(amount) // float(price_today))
                         if decision.startswith("BUY"):
                             tag = "매수"
                             if decision == "BUY_REPLACE":
                                 tag = "교체매수"
-                            phrase = f"{tag} {qty_calc}주 @ {price_formatter(price_today)} ({money_formatter(amount)})"
+                            # 보유수량 표시 포맷팅
+                            if country in ("coin", "aus"):
+                                qty_str = f"{qty_calc:,.4f}".rstrip('0').rstrip('.')
+                            else:
+                                qty_str = f"{int(qty_calc):,d}"
+                            phrase = f"{tag} {qty_str}주 @ {price_formatter(price_today)} ({money_formatter(amount)})"
                             if note_from_strategy:
                                 phrase += f" ({note_from_strategy})"
                         else:
@@ -431,6 +492,12 @@ def main(
                     bd = buy_date_by_ticker.get(tkr)
                     bd_str = pd.to_datetime(bd).strftime("%Y-%m-%d") if bd is not None else "-"
                     hd = holding_days_by_ticker.get(tkr, 0)
+                    # 보유수량 표시 포맷: coin/aus는 4자리 소수, 그 외 정수
+                    if country in ("coin", "aus"):
+                        disp_shares_str = f"{disp_shares:,.4f}".rstrip('0').rstrip('.')
+                    else:
+                        disp_shares_str = f"{int(disp_shares):,d}"
+
                     current_row = [
                         0,
                         tkr,
@@ -440,7 +507,7 @@ def main(
                         f"{hd}",
                         price_formatter(disp_price),
                         f"{tkr_day_ret:+.1f}%",
-                        f"{disp_shares:,}",
+                        disp_shares_str,
                         money_formatter(amount),
                         hold_ret_str,
                         f"{w:.0f}%",
