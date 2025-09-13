@@ -59,19 +59,35 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
     
     streamlit run web_app.py
 
+6) 스케줄러로 자동 실행 (APScheduler)
+
+장 마감 이후 자동으로 현황을 계산하고(교체매매 신호 포함) 텔레그램으로 알림을 보낼 수 있습니다.
+
+1. 의존성 설치: `pip install -r requirements.txt`
+2. (선택) 환경 변수로 스케줄/타임존 설정
+   - `SCHEDULE_ENABLE_KOR|AUS|COIN` = `1`/`0` (기본 1)
+   - `SCHEDULE_KOR_CRON` = `"10 18 * * 1-5"` (서울 18:10 평일)
+   - `SCHEDULE_AUS_CRON` = `"10 18 * * 1-5"` (시드니 18:10 평일)
+   - `SCHEDULE_COIN_CRON` = `"5 0 * * *"` (매일 00:05)
+   - `SCHEDULE_KOR_TZ` = `Asia/Seoul`, `SCHEDULE_AUS_TZ` = `Australia/Sydney`, `SCHEDULE_COIN_TZ` = `Asia/Seoul`
+   - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
+3. 실행: `python scripts/scheduler.py`
+
+텔레그램 알림은 웹앱 설정 탭의 공통 설정에 `TELEGRAM_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 저장 후 동작합니다.
+
 5) (선택) 종목 업종 일괄 초기화
 
 모든 종목의 업종을 공백으로 초기화하여 재분류할 수 있도록 준비합니다.
 
     python scripts/reset_stock_sectors.py
 
-6) (선택) 업종 목록 재설정
+7) (선택) 업종 목록 재설정
 
 모든 기존 업종을 삭제하고, 스크립트 내에 정의된 새로운 표준 업종 목록으로 교체합니다.
 
     python scripts/reset_and_seed_sectors.py
 
-7) (선택) 급등주 찾기
+8) (선택) 급등주 찾기
 
 pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 섹터별로 찾아봅니다.
 

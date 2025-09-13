@@ -1143,6 +1143,14 @@ def main(country: str = "kor", date_str: Optional[str] = None):
     if result:
         header_line, headers, rows_sorted = result
 
+        # 텔레그램 알림: 기본 현황 + (옵션) 매수/매도 신호 요약
+        try:
+            _maybe_notify_basic_status(country, header_line)
+            _maybe_notify_signal_summary(country, headers, rows_sorted)
+        except Exception:
+            # 알림 실패는 콘솔 출력에 영향을 주지 않도록 무시
+            pass
+
         # --- 콘솔 출력용 포맷팅 ---
         # 웹앱은 raw data (rows_sorted)를 사용하고, 콘솔은 포맷된 데이터를 사용합니다.
 
@@ -1222,6 +1230,119 @@ def main(country: str = "kor", date_str: Optional[str] = None):
 
         print("\n" + header_line)
         print("\n".join(table_lines))
+
+
+def _is_trading_day(country: str) -> bool:
+    """Return True if today is a trading day for the given country.
+
+    - kor/aus: use trading calendar (fallback: Mon-Fri)
+    - coin: always True
+    """
+    if country == "coin":
+        return True
+    try:
+        # Localize 'today' to country timezone for accuracy
+        if pytz:
+            tz = pytz.timezone("Asia/Seoul" if country == "kor" else "Australia/Sydney")
+            today_local = datetime.now(tz).date()
+        else:
+            today_local = datetime.now().date()
+        start = end = pd.Timestamp(today_local).strftime('%Y-%m-%d')
+        days = get_trading_days(start, end, country)
+        return any(pd.Timestamp(d).date() == today_local for d in days)
+    except Exception:
+        # Fallback: Mon-Fri
+        if pytz:
+            tz = pytz.timezone("Asia/Seoul" if country == "kor" else "Australia/Sydney")
+            wd = datetime.now(tz).weekday()
+        else:
+            wd = datetime.now().weekday()
+        return wd < 5
+
+
+def _maybe_notify_basic_status(country: str, header_line: str, force: bool = False) -> bool:
+    """Send the basic hourly/daily header-style status message.
+
+    Returns True if a message was sent successfully. If not trading day and not forced, returns False.
+    """
+    try:
+        from utils.notify import send_telegram_message
+    except Exception:
+        return False
+
+    if not force and not _is_trading_day(country):
+        return False
+
+    # Expected pattern in header_line:
+    # "기준일: YYYY-MM-DD(요일) [라벨] | 보유종목: X/Y | ... | 보유금액: ... | ... | 평가: +x.x%(금액) | ..."
+    try:
+        first_seg = header_line.split("|")[0].strip()
+        # Extract date(weekday)
+        # first_seg like: "기준일: 2025-09-13(토) [오늘]"
+        date_part = first_seg.split(":", 1)[1].strip()
+        if "[" in date_part:
+            date_part = date_part.split("[")[0].strip()
+
+        # Extract holdings X/Y
+        hold_seg = next(seg for seg in header_line.split("|") if "보유종목:" in seg)
+        hold_text = hold_seg.strip().replace("보유종목:", "보유종목:").split("보유종목:")[-1].strip()
+
+        # Extract holdings amount
+        amt_seg = next(seg for seg in header_line.split("|") if "보유금액:" in seg)
+        amt_text = amt_seg.strip().split(":", 1)[1].strip()
+
+        # Extract evaluation return (수익률)
+        eval_seg = next(seg for seg in header_line.split("|") if "평가:" in seg)
+        eval_text = eval_seg.strip().split(":", 1)[1].strip()
+
+        country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
+        msg = f"[{country_kor}] {date_part} 보유종목: {hold_text} | 보유금액: {amt_text} | 수익률: {eval_text}"
+        return bool(send_telegram_message(msg))
+    except Exception:
+        return False
+
+
+def _maybe_notify_signal_summary(country: str, headers: list, rows_sorted: list, force: bool = False) -> bool:
+    """Send optional summary: X종목 매수 필요, X종목 매도 필요.
+
+    Returns True if a message was sent successfully; False otherwise. Respects trading-day gating unless forced.
+    """
+    try:
+        from utils.notify import send_telegram_message
+    except Exception:
+        return False
+
+    if not force and not _is_trading_day(country):
+        return False
+
+    try:
+        idx_state = headers.index("상태")
+    except ValueError:
+        return False
+
+    buy_states = {"BUY", "BUY_REPLACE"}
+    sell_states = {"SELL", "SELL_REPLACE"}
+
+    buy_cnt = 0
+    sell_cnt = 0
+    for row in rows_sorted:
+        stt = str(row[idx_state]) if idx_state < len(row) else ""
+        if stt in buy_states:
+            buy_cnt += 1
+        elif stt in sell_states:
+            sell_cnt += 1
+
+    if buy_cnt == 0 and sell_cnt == 0:
+        return False
+
+    country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
+    parts = []
+    if buy_cnt:
+        parts.append(f"{buy_cnt}종목 매수 필요")
+    if sell_cnt:
+        parts.append(f"{sell_cnt}종목 매도 필요")
+    text = f"[{country_kor}] " + ", ".join(parts)
+    return bool(send_telegram_message(text))
 
 
 if __name__ == "__main__":

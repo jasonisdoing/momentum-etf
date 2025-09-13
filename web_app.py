@@ -18,7 +18,13 @@ import settings as global_settings
 from test import TEST_MONTHS_RANGE
 from logic.settings import SECTOR_COUNTRY_OPTIONS
 from logic import settings as logic_settings
-from status import generate_status_report, get_market_regime_status_string, get_benchmark_status_string
+from status import (
+    generate_status_report,
+    get_market_regime_status_string,
+    get_benchmark_status_string,
+    _maybe_notify_basic_status,
+    _maybe_notify_signal_summary,
+)
 from utils.data_loader import fetch_yfinance_name, get_trading_days, fetch_pykrx_name, fetch_ohlcv_for_tickers
 from utils.db_manager import (
     get_available_snapshot_dates, get_portfolio_snapshot, get_all_trades, get_all_daily_equities, 
@@ -1493,8 +1499,8 @@ def main():
                 f'<div style="text-align: right; padding-top: 1.5rem; font-size: 1.1rem;">{market_status_str}</div>', unsafe_allow_html=True
             )
 
-    tab_names = ["한국", "호주", "코인", "마스터", "설정"]
-    tab_kor, tab_aus, tab_coin, tab_master, tab_settings = st.tabs(tab_names)
+    tab_names = ["한국", "호주", "코인", "마스터", "설정", "텔레그램"]
+    tab_kor, tab_aus, tab_coin, tab_master, tab_settings, tab_telegram = st.tabs(tab_names)
 
     with tab_kor:
         render_country_tab("kor")
@@ -1531,6 +1537,8 @@ def main():
             new_cooldown_str = st.text_input("쿨다운 일수 (COOLDOWN_DAYS)", value=str(current_cooldown) if current_cooldown is not None else "", placeholder="예: 5")
             new_atr_str = st.text_input("ATR 기간 (ATR_PERIOD_FOR_NORMALIZATION)", value=str(current_atr) if current_atr is not None else "", placeholder="예: 14")
 
+            # (스케줄러 주기는 텔레그램 탭으로 이동)
+
             submitted = st.form_submit_button("공통 설정 저장")
             if submitted:
                 error = False
@@ -1564,6 +1572,144 @@ def main():
                         st.rerun()
                     else:
                         st.error("공통 설정 저장에 실패했습니다.")
+
+    with tab_telegram:
+        st.header("텔레그램 설정")
+        common = get_common_settings() or {}
+        tg_enabled = bool(common.get("TELEGRAM_ENABLED", False))
+        tg_token = common.get("TELEGRAM_BOT_TOKEN") or ""
+        tg_chat = str(common.get("TELEGRAM_CHAT_ID") or "")
+
+        with st.form("telegram_settings_form"):
+            st.subheader("알림")
+            new_tg_enabled = st.checkbox("텔레그램 알림 사용 (TELEGRAM_ENABLED)", value=tg_enabled, help="교체매매/현황 메시지를 텔레그램으로 전송")
+            new_tg_token = st.text_input("봇 토큰 (TELEGRAM_BOT_TOKEN)", value=tg_token, type="password", placeholder="예: 123456:ABC-DEF...", help="@BotFather 로 생성")
+            new_tg_chat = st.text_input("채팅 ID (TELEGRAM_CHAT_ID)", value=tg_chat, placeholder="예: 123456789", help="@userinfobot 등으로 확인")
+
+            st.subheader("전송 주기")
+            # 스케줄 주기(시간) – 정수 입력 (0 입력 시 크론 스케줄 사용)
+            cur_kor = common.get("SCHEDULE_EVERY_HOURS_KOR")
+            cur_aus = common.get("SCHEDULE_EVERY_HOURS_AUS")
+            cur_coin = common.get("SCHEDULE_EVERY_HOURS_COIN")
+            try:
+                defv_kor = int(cur_kor) if cur_kor is not None else 0
+            except Exception:
+                defv_kor = 0
+            try:
+                defv_aus = int(cur_aus) if cur_aus is not None else 0
+            except Exception:
+                defv_aus = 0
+            try:
+                defv_coin = int(cur_coin) if cur_coin is not None else 0
+            except Exception:
+                defv_coin = 0
+            sel_kor = st.number_input("한국 텔레그램 전송 주기(시간)", min_value=0, step=1, value=defv_kor, help="N시간마다 실행. 0 입력 시 환경변수 크론 스케줄 사용")
+            sel_aus = st.number_input("호주 텔레그램 전송 주기(시간)", min_value=0, step=1, value=defv_aus)
+            sel_coin = st.number_input("코인 텔레그램 전송 주기(시간)", min_value=0, step=1, value=defv_coin)
+
+            st.caption("테스트는 스케줄과 무관하게 1회 계산 후 텔레그램으로 전송합니다. 한국/호주는 거래일에만 전송됩니다.")
+            test_country_label = st.selectbox("테스트 국가", options=["한국", "호주", "코인"], index=2)
+            _country_map = {"한국": "kor", "호주": "aus", "코인": "coin"}
+            test_country = _country_map[test_country_label]
+
+            cols = st.columns(3)
+            with cols[0]:
+                tg_save = st.form_submit_button("텔레그램 설정 저장")
+            with cols[1]:
+                tg_test = st.form_submit_button("텔레그램 테스트 전송")
+            with cols[2]:
+                tg_ping = st.form_submit_button("간단 텍스트 전송(직접)")
+
+        if 'tg_save' in locals() and tg_save:
+            error = False
+            to_save = {}
+            if new_tg_enabled:
+                if not new_tg_token or not new_tg_chat:
+                    st.error("텔레그램 알림을 사용하려면 봇 토큰과 채팅 ID가 필요합니다.")
+                    error = True
+                else:
+                    to_save.update({
+                        "TELEGRAM_ENABLED": True,
+                        "TELEGRAM_BOT_TOKEN": new_tg_token.strip(),
+                        "TELEGRAM_CHAT_ID": new_tg_chat.strip(),
+                    })
+            else:
+                to_save.update({"TELEGRAM_ENABLED": False})
+
+            # 스케줄 전송 주기 저장
+            to_save.update({
+                "SCHEDULE_EVERY_HOURS_KOR": int(sel_kor),
+                "SCHEDULE_EVERY_HOURS_AUS": int(sel_aus),
+                "SCHEDULE_EVERY_HOURS_COIN": int(sel_coin),
+            })
+
+            if not error:
+                if save_common_settings(to_save):
+                    st.success("텔레그램 설정을 저장했습니다.")
+                    st.rerun()
+                else:
+                    st.error("텔레그램 설정 저장에 실패했습니다.")
+
+        if 'tg_test' in locals() and tg_test:
+            # 테스트 전송: 입력값 우선 저장 후 실행
+            error = False
+            if not new_tg_enabled:
+                st.warning("텔레그램 알림이 비활성화되어 있어 전송되지 않을 수 있습니다. 활성화 후 테스트하세요.")
+            if not new_tg_token or not new_tg_chat:
+                st.error("봇 토큰과 채팅 ID를 입력해주세요.")
+                error = True
+            if not error:
+                if save_common_settings({
+                    "TELEGRAM_ENABLED": True,
+                    "TELEGRAM_BOT_TOKEN": new_tg_token.strip(),
+                    "TELEGRAM_CHAT_ID": new_tg_chat.strip(),
+                }):
+                    try:
+                        res = generate_status_report(country=test_country, date_str=None, prefetched_data=None)
+                        if not res:
+                            st.error("현황 계산 실패로 테스트 전송을 건너뜁니다.")
+                        else:
+                            header_line, headers, rows_sorted = res
+                            sent_basic = _maybe_notify_basic_status(test_country, header_line, force=True)
+                            sent_signals = _maybe_notify_signal_summary(test_country, headers, rows_sorted, force=True)
+                            if sent_basic or sent_signals:
+                                st.success("텔레그램 테스트 전송 완료(강제 전송). 채팅에서 확인하세요.")
+                            else:
+                                from utils.notify import get_last_error
+                                err = get_last_error()
+                                if err:
+                                    st.warning(f"전송 시도는 했지만 응답이 없었습니다. 상세: {err}")
+                                else:
+                                    st.warning("전송 시도는 했지만 응답이 없었습니다. 토큰/채팅 ID를 확인하세요.")
+                    except Exception as e:
+                        st.error(f"테스트 전송 중 오류: {e}")
+                else:
+                    st.error("설정 저장 실패로 테스트 전송을 건너뜁니다.")
+
+        if 'tg_ping' in locals() and tg_ping:
+            # 상태 계산 없이, 토큰/채팅ID만으로 전송 테스트
+            error = False
+            if not new_tg_token or not new_tg_chat:
+                st.error("봇 토큰과 채팅 ID를 입력해주세요.")
+                error = True
+            if not error:
+                if save_common_settings({
+                    "TELEGRAM_ENABLED": True,
+                    "TELEGRAM_BOT_TOKEN": new_tg_token.strip(),
+                    "TELEGRAM_CHAT_ID": new_tg_chat.strip(),
+                }):
+                    try:
+                        from utils.notify import send_telegram_message, get_last_error
+                        ok = send_telegram_message(f"[테스트] MomentumPilot 핑 메시지 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+                        if ok:
+                            st.success("간단 텍스트 전송 성공. 텔레그램에서 확인하세요.")
+                        else:
+                            err = get_last_error()
+                            st.warning(f"전송 실패: {err or '상세 사유 없음'}")
+                    except Exception as e:
+                        st.error(f"전송 중 오류: {e}")
+                else:
+                    st.error("설정 저장 실패로 전송을 건너뜁니다.")
 
 
 if __name__ == "__main__":
