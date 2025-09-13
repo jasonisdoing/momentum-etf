@@ -80,9 +80,9 @@ def get_portfolio_snapshot(
 
     # 2. 대상 날짜의 총 평가금액 조회
     equity_data = db.daily_equities.find_one({"country": country, "date": target_date, "is_deleted": {"$ne": True}})
+    # 기본값 초기화
     is_equity_stale = False
-    stale_equity_date = None
-
+    
     # 해당 날짜의 평가금액이 유효한지 확인합니다.
     is_equity_valid = equity_data and equity_data.get("total_equity", 0) > 0
 
@@ -93,10 +93,12 @@ def get_portfolio_snapshot(
             sort=[("date", DESCENDING)]
         )
         if latest_valid_equity:
-            # 찾은 이전 데이터를 현재 평가금액 데이터로 사용합니다.
             equity_data = latest_valid_equity
-            is_equity_stale = True
-            stale_equity_date = latest_valid_equity.get("date")
+
+    # 최종적으로 사용되는 평가금액의 날짜를 결정합니다.
+    equity_date = equity_data.get("date") if equity_data else None
+    if equity_date and equity_date != target_date:
+        is_equity_stale = True
 
     total_equity = equity_data.get("total_equity", 0) if equity_data else 0
 
@@ -140,8 +142,9 @@ def get_portfolio_snapshot(
         "total_equity": total_equity, "holdings": holdings_list,
         "is_equity_stale": is_equity_stale
     }
-    if is_equity_stale:
-        snapshot["equity_date"] = stale_equity_date
+    # 'equity_date'를 항상 포함하여 헤더에서 비교/표시가 가능하도록 합니다.
+    if equity_date:
+        snapshot["equity_date"] = equity_date
 
     if country == "aus" and equity_data and "international_shares" in equity_data:
         snapshot["international_shares"] = equity_data["international_shares"]
@@ -262,7 +265,7 @@ def get_status_report_from_db(country: str, date: datetime) -> Optional[Dict]:
     }
     report_doc = db.status_reports.find_one(query)
     if report_doc and "report" in report_doc:
-        print(f"-> DB 캐시에서 현황 리포트를 불러왔습니다: {country}/{date.strftime('%Y-%m-%d')}")
+        # 조용한 읽기: 과거 탭 렌더링 등에서 대량 호출될 수 있으므로 콘솔 로그는 생략합니다.
         return report_doc["report"]
     return None
 

@@ -15,7 +15,6 @@ from typing import Dict
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -114,13 +113,13 @@ def tune_regime_filter(country: str):
 
     with ProcessPoolExecutor() as executor:
         futures = [executor.submit(run_backtest_worker, params, prefetched_data) for params in param_combinations]
-        for future in tqdm(as_completed(futures), total=total_combinations, desc="튜닝 진행률"):
+        for future in as_completed(futures):
             try:
                 regime_ma_period, months_range, result = future.result()
                 if result and 'cagr_pct' in result:
                     results_by_month[months_range][regime_ma_period] = result['cagr_pct']
             except Exception as e:
-                tqdm.write(f"  -> 파라미터 테스트 중 오류 발생: {e}")
+                print(f"  -> 파라미터 테스트 중 오류 발생: {e}")
 
     end_time = time.time()
     print(f"\n\n파라미터 튜닝 완료! (총 소요 시간: {end_time - start_time:.2f}초)")

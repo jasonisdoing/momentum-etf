@@ -10,7 +10,6 @@ from threading import Lock
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
-from tqdm import tqdm
 
 # 웹 스크레이핑을 위한 라이브러리
 try:
@@ -341,7 +340,7 @@ def fetch_ohlcv_for_tickers(
 
     with ThreadPoolExecutor() as executor:
         futures = [executor.submit(worker, tkr) for tkr in tickers]
-        for future in tqdm(as_completed(futures), total=len(tickers), desc="전체 시세 데이터 로딩"):
+        for future in as_completed(futures):
             tkr, df = future.result()
             if df is not None and not df.empty:
                 prefetched_data[tkr] = df

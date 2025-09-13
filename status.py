@@ -3,7 +3,6 @@ import warnings
 import sys
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
@@ -382,7 +381,6 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
     신호 계산에 필요한 보조지표(이동평균, ATR 등)를 계산합니다.
     """
     # 설정을 불러옵니다.
-    print(f"현황을 계산합니다.")
     app_settings = get_app_settings(country)
     if not app_settings or "ma_period_etf" not in app_settings or "ma_period_stock" not in app_settings:
         print(f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
@@ -407,6 +405,12 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
     except (ValueError, TypeError):
         print(f"경고: 포트폴리오 스냅샷에서 날짜를 추출할 수 없습니다. 현재 날짜를 사용합니다.")
         base_date = pd.Timestamp.now().normalize()
+
+    # 콘솔 로그에 국가/날짜를 포함하여 표시
+    try:
+        print(f"{country}/{base_date.strftime('%Y-%m-%d')} 현황을 계산합니다")
+    except Exception:
+        pass
 
     holdings = {
         item["ticker"]: {
@@ -519,7 +523,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
         futures = [executor.submit(_load_and_prepare_ticker_data, task) for task in tasks]
         
         desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
-        for future in tqdm(as_completed(futures), total=len(tasks), desc=desc):
+        for future in as_completed(futures):
             tkr, result = future.result()
             if not result:
                 continue
@@ -573,58 +577,64 @@ def _build_header_line(country, portfolio_data, current_equity, total_holdings_v
     # Determine trading-calendar-based label/date via pykrx
     ref_ticker_for_cal = next(iter(data_by_tkr.keys())) if data_by_tkr else None
 
-    def get_next_trading_day(start_date: pd.Timestamp, ref_ticker: str) -> pd.Timestamp:
-        """주어진 날짜 또는 그 이후의 가장 가까운 거래일을 효율적으로 찾습니다."""
-        if country == "kor":
-            if _stock is None or ref_ticker is None:
-                return start_date  # pykrx 사용 불가 시, 입력일을 그대로 반환
-            try:
-                # 앞으로 2주간의 데이터를 한 번에 조회하여 가장 빠른 거래일을 찾습니다.
-                from_date_str = start_date.strftime("%Y%m%d")
-                to_date_str = (start_date + pd.Timedelta(days=14)).strftime("%Y%m%d")
-                df = _stock.get_market_ohlcv_by_date(from_date_str, to_date_str, ref_ticker)
-                if not df.empty:
-                    return df.index[0]
-            except Exception:
-                pass
-            return start_date  # 조회 실패 시, 입력일을 그대로 반환
-        elif country == "aus":
-            if yf is None or ref_ticker is None:
-                return start_date
-            ticker_yf = format_aus_ticker_for_yfinance(ref_ticker)
-            # yfinance는 주말/공휴일을 자동으로 건너뛰므로, 하루씩 더해가며 확인
-            current_date = start_date
-            for _ in range(14):
-                df = yf.download(
-                    ticker_yf, start=current_date, end=current_date + pd.Timedelta(days=1), progress=False, auto_adjust=True
-                )
-                if not df.empty:
-                    return current_date
-                current_date += pd.Timedelta(days=1)
-        return start_date
+    def get_next_trading_day(start_date: pd.Timestamp) -> pd.Timestamp:
+        """주어진 날짜 또는 그 이후의 가장 가까운 거래일을 반환합니다.
+        가능한 경우 DB/캘린더 유틸을 사용하고, 실패 시 요일 기준으로 월~금을 반환합니다."""
+        if country == 'coin':
+            return start_date
+        try:
+            start_str = start_date.strftime('%Y-%m-%d')
+            end_str = (start_date + pd.Timedelta(days=14)).strftime('%Y-%m-%d')
+            days = get_trading_days(start_str, end_str, country)
+            for d in days:
+                if d.date() >= start_date.date():
+                    return pd.Timestamp(d).normalize()
+        except Exception:
+            pass
+        # 폴백: 토/일이면 다음 월요일, 평일이면 그대로
+        wd = start_date.weekday()
+        delta = 0 if wd < 5 else (7 - wd)
+        return (start_date + pd.Timedelta(days=delta)).normalize()
 
     today_cal = pd.Timestamp.now().normalize()
 
-    # The date for calculation and display is the one from the file
+    # 기본 표시 날짜는 파일의 기준일
     label_date = base_date
 
-    # Set the label based on whether the portfolio date is today or in the past
-    if base_date.date() == today_cal.date():
-        # If it's today, check if it's a trading day to decide between "오늘" and "다음 거래일"
-        next_trading_day = get_next_trading_day(base_date, ref_ticker_for_cal)
-        if next_trading_day.date() == base_date.date():
-            day_label = "오늘"
-        else:
+    # 오늘/다음 거래일/기준일 라벨 및 표시 날짜 결정
+    if country != 'coin':
+        if base_date.date() == today_cal.date():
+            # 오늘 기준일이면, 오늘이 거래일인지에 따라 라벨 결정
+            next_from_today = get_next_trading_day(today_cal)
+            if next_from_today.date() == today_cal.date():
+                day_label = "오늘"
+                label_date = today_cal
+            else:
+                day_label = "다음 거래일"
+                label_date = next_from_today
+        elif base_date.date() > today_cal.date():
+            # 파일 기준일이 미래(다음 거래일 등)
             day_label = "다음 거래일"
-            label_date = next_trading_day
+            label_date = base_date
+        else:
+            # 과거 기준일(히스토리): 강제로 변경하지 않고 그대로 표시
+            day_label = "기준일"
+            label_date = base_date
     else:
-        day_label = "기준일"
+        # 코인은 항상 오늘 기준
+        day_label = "오늘"
+        label_date = today_cal
 
-    # 일간 수익률
-    prev_snapshot = get_previous_portfolio_snapshot(country, base_date)
-    prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else None
-    day_ret_pct = ((current_equity / prev_equity) - 1.0) * 100.0 if prev_equity and prev_equity > 0 else 0.0
-    day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
+    # 일간 수익률: 다음 거래일 기준일에는 아직 수익률이 없으므로 0 처리
+    if day_label == "다음 거래일":
+        day_ret_pct = 0.0
+        day_profit_loss = 0.0
+    else:
+        compare_date = base_date
+        prev_snapshot = get_previous_portfolio_snapshot(country, compare_date)
+        prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else None
+        day_ret_pct = ((current_equity / prev_equity) - 1.0) * 100.0 if prev_equity and prev_equity > 0 else 0.0
+        day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
 
     # 평가 수익률
     total_acquisition_cost = sum(d['shares'] * d['avg_cost'] for d in data_by_tkr.values() if d['shares'] > 0)
@@ -639,17 +649,27 @@ def _build_header_line(country, portfolio_data, current_equity, total_holdings_v
     eval_ret_str = _format_return_for_header("평가", eval_ret_pct, eval_profit_loss, money_formatter)
     cum_ret_str = _format_return_for_header("누적", cum_ret_pct, current_equity - initial_capital_local, money_formatter)
 
-    header_line = (
+    # 기준일 정보(맨 앞에 배치)
+    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
+    label_weekday_str = weekday_map[label_date.weekday()]
+    date_prefix = f"기준일: {label_date.strftime('%Y-%m-%d')}({label_weekday_str}) [{day_label}]"
+
+    # 헤더 본문
+    header_body = (
         f"보유종목: {held_count}/{portfolio_topn} | 평가금액: {equity_str} | 보유금액: {holdings_str} | "
         f"현금: {cash_str} | {day_ret_str} | {eval_ret_str} | {cum_ret_str}"
     )
 
-    if portfolio_data.get("is_equity_stale"):
-        stale_date = portfolio_data.get("equity_date")
-        target_date = portfolio_data.get("date")
+    header_line = f"{date_prefix} | {header_body}"
+
+    # 평가금액 경고: 표시 기준일의 평가금액이 없으면 최근 평가금액 날짜를 안내
+    equity_date = portfolio_data.get("equity_date") or base_date
+    if label_date.normalize() != pd.to_datetime(equity_date).normalize():
+        target_date = label_date
         weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
         weekday_str = weekday_map[target_date.weekday()]
-        warning_msg = f"<br><span style='color:orange;'>⚠️ {target_date.strftime('%Y년 %m월 %d일')}({weekday_str})의 평가금액이 없습니다. 최근({stale_date.strftime('%Y-%m-%d')}) 평가금액으로 현황을 계산합니다.</span>"
+        stale_str = pd.to_datetime(equity_date).strftime('%Y-%m-%d')
+        warning_msg = f"<br><span style='color:orange;'>⚠️ {target_date.strftime('%Y년 %m월 %d일')}({weekday_str})의 평가금액이 없습니다. 최근({stale_str}) 평가금액으로 현황을 계산합니다.</span>"
         header_line += warning_msg
 
     return header_line, label_date, day_label
@@ -820,10 +840,10 @@ def generate_status_report(
         # 일간 수익률 계산
         prev_close = d.get("prev_close")
         day_ret = 0.0
-        day_ret_str = "-"
-        if prev_close is not None and prev_close > 0 and pd.notna(price):
-            day_ret = ((price / prev_close) - 1.0) * 100.0
-            day_ret_str = f"{day_ret:+.1f}%"
+        # 다음 거래일 화면에서는 아직 일간 수익률이 없으므로 0으로 고정
+        if day_label != "다음 거래일":
+            if prev_close is not None and prev_close > 0 and pd.notna(price):
+                day_ret = ((price / prev_close) - 1.0) * 100.0
 
         # 테이블 출력용 신호 포맷팅
         s1_str = ma_formatter(d["s1"]) if not pd.isna(d["s1"]) else "-"  # 이평선(값)
@@ -1013,7 +1033,8 @@ def generate_status_report(
 
     # 6. 완료된 거래 표시
     # 기준일에 발생한 거래를 가져와서, 추천에 따라 실행되었는지 확인하는 데 사용합니다.
-    trades_on_base_date = get_trades_on_date(country, base_date)
+    # 표시 기준일 기준으로 '완료' 거래를 표시합니다. 다음 거래일이면 거래가 없을 확률이 높음
+    trades_on_base_date = get_trades_on_date(country, label_date)
     executed_buys_today = {trade['ticker'] for trade in trades_on_base_date if trade['action'] == 'BUY'}
     executed_sells_today = {trade['ticker'] for trade in trades_on_base_date if trade['action'] == 'SELL'}
     # 기준일에 실행된 거래가 있다면, 현황 목록에 '완료' 상태를 표시합니다.

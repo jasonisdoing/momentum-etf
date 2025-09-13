@@ -13,7 +13,6 @@ from typing import Callable, Dict
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -76,9 +75,7 @@ class MetricTracker:
             if self.country == 'coin':
                 param_str = f"TopN={params['portfolio_topn']}, MA={params['ma_stock']}, {param_str}"
 
-            tqdm.write(
-                f"  -> 새로운 최적 {self.name} 발견! {self.best_value:.2f} ({param_str})"
-            )
+            print(f"  -> 새로운 최적 {self.name} 발견! {self.best_value:.2f} ({param_str})")
  
     def print_report(self, title: str):
         """추적된 최적 지표에 대한 최종 리포트를 출력합니다."""
@@ -221,7 +218,7 @@ def tune_parameters(country: str):
             for params in param_combinations
         ]
  
-        for future in tqdm(as_completed(futures), total=total_combinations, desc="튜닝 진행률"):
+        for future in as_completed(futures):
             try:
                 ma_etf, ma_stock, replace_stock, replace_threshold, portfolio_topn, result = future.result()
  
@@ -245,7 +242,7 @@ def tune_parameters(country: str):
                         result.get("sortino_ratio", -float("inf")), params, result
                     )
             except Exception as e:
-                tqdm.write(f"  -> 파라미터 테스트 중 오류 발생: {e}")
+                print(f"  -> 파라미터 테스트 중 오류 발생: {e}")
  
     end_time = time.time()
     elapsed_time = end_time - start_time

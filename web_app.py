@@ -5,6 +5,7 @@ import warnings
 from datetime import datetime
 from typing import List, Dict, Optional
 import pandas as pd
+import threading
 import streamlit as st
 
 # 프로젝트 루트를 Python 경로에 추가
@@ -927,14 +928,40 @@ def render_country_tab(country_code: str):
     # --- 공통 데이터 로딩 ---
     sorted_dates = get_available_snapshot_dates(country_code)
 
-    # 오늘 날짜가 거래일이고, 아직 데이터가 없는 경우 날짜 목록에 추가
+    # 오늘/다음 거래일을 목록에 반영
     today = pd.Timestamp.now().normalize()
     today_str = today.strftime("%Y-%m-%d")
-
-    # 오늘이 코인이거나 평일(월~금)이며, DB에 오늘 날짜 데이터가 아직 없는 경우
-    # 코인은 365일 거래되므로 주말에도 오늘 날짜를 추가합니다.
-    if ((country_code == 'coin') or (today.weekday() < 5)) and today_str not in sorted_dates:
-        sorted_dates.insert(0, today_str)
+    if country_code == 'coin':
+        # 코인은 365일 거래되므로 오늘 날짜를 항상 추가 (없을 때만)
+        if today_str not in sorted_dates:
+            sorted_dates.insert(0, today_str)
+    else:
+        # 한국/호주: 실제 거래일 캘린더로 오늘/다음 거래일을 판단 (실패 시 월~금 폴백)
+        next_td_str_fallback = None
+        try:
+            lookahead_end = (today + pd.Timedelta(days=14)).strftime("%Y-%m-%d")
+            upcoming_days = get_trading_days(today_str, lookahead_end, country_code)
+            is_trading_today = any(d.date() == today.date() for d in upcoming_days)
+            if is_trading_today:
+                if today_str not in sorted_dates:
+                    sorted_dates.insert(0, today_str)
+            else:
+                # 다음 거래일을 찾아 추가 (예: 토요일이면 다음 월요일)
+                next_td = next((d for d in upcoming_days if d.date() >= today.date()), None)
+                if next_td is not None:
+                    next_td_str = pd.Timestamp(next_td).strftime("%Y-%m-%d")
+                    if next_td_str not in sorted_dates:
+                        sorted_dates.insert(0, next_td_str)
+        except Exception:
+            # 무시하고 폴백 계산 수행
+            pass
+        # 캘린더 조회 실패 또는 주말일 때의 폴백: 다음 월~금
+        if today.weekday() >= 5:  # 토/일
+            delta = 7 - today.weekday()
+            next_bday = (today + pd.Timedelta(days=delta))
+            next_td_str_fallback = next_bday.strftime('%Y-%m-%d')
+            if next_td_str_fallback not in sorted_dates:
+                sorted_dates.insert(0, next_td_str_fallback)
 
     # --- 1. 현황 탭 (최신 날짜) ---
     with sub_tab_status:
@@ -945,24 +972,100 @@ def render_country_tab(country_code: str):
             latest_date_str = sorted_dates[0]
 
             col1, col2 = st.columns([1, 4])
-            with col1:
-                force_recalc = st.button("다시 계산", key=f"recalc_status_{country_code}_{latest_date_str}")
-            with col2:
-                # 벤치마크 성과를 표시합니다.
-                benchmark_str = get_cached_benchmark_status(country_code)
-                if benchmark_str:
-                    st.markdown(
-                        f'<div style="text-align: right; padding-top: 0.5rem;">{benchmark_str}</div>', unsafe_allow_html=True
-                    )
 
-            spinner_message = f"'{latest_date_str}' 기준 현황 데이터를 계산하고 있습니다..."            
-            with st.spinner(spinner_message):
-                result = get_cached_status_report(
-                    country=country_code, date_str=latest_date_str, force_recalculate=force_recalc
-                )
+            # 스피너 문구용 표시 날짜 계산 (주말/비거래일에는 다음 거래일을 표시)
+            display_date_str = latest_date_str
+            try:
+                if country_code != 'coin':
+                    today = pd.Timestamp.now().normalize()
+                    today_str = today.strftime('%Y-%m-%d')
+                    lookahead_end = (today + pd.Timedelta(days=14)).strftime('%Y-%m-%d')
+                    upcoming_days = get_trading_days(today_str, lookahead_end, country_code)
+                    # 다음 거래일 (오늘 포함)
+                    next_td = next((d for d in upcoming_days if d.date() >= today.date()), None)
+                    if next_td is not None:
+                        next_td_str = pd.Timestamp(next_td).strftime('%Y-%m-%d')
+                        if pd.to_datetime(latest_date_str) < pd.to_datetime(next_td_str):
+                            display_date_str = next_td_str
+                    else:
+                        # 폴백: 주말이면 다음 월요일
+                        if today.weekday() >= 5:
+                            delta = 7 - today.weekday()
+                            next_bday = (today + pd.Timedelta(days=delta))
+                            next_bday_str = next_bday.strftime('%Y-%m-%d')
+                            if pd.to_datetime(latest_date_str) < pd.to_datetime(next_bday_str):
+                                display_date_str = next_bday_str
+            except Exception:
+                # 폴백: 주말이면 다음 월요일
+                if country_code != 'coin' and today.weekday() >= 5:
+                    delta = 7 - today.weekday()
+                    next_bday = (today + pd.Timedelta(days=delta))
+                    next_bday_str = next_bday.strftime('%Y-%m-%d')
+                    if pd.to_datetime(latest_date_str) < pd.to_datetime(next_bday_str):
+                        display_date_str = next_bday_str
+
+            # 백그라운드 재계산 지원
+            target_date_str = display_date_str
+
+            # 재계산 버튼: 백그라운드 스레드에서 실행하여 UI 블로킹을 피합니다.
+            recalc_key = f"{country_code}_{target_date_str}"
+            if st.button("다시 계산", key=f"recalc_status_{recalc_key}"):
+                if "recalc_running" not in st.session_state:
+                    st.session_state["recalc_running"] = {}
+                if "recalc_started_at" not in st.session_state:
+                    st.session_state["recalc_started_at"] = {}
+                if not st.session_state["recalc_running"].get(recalc_key):
+                    st.session_state["recalc_running"][recalc_key] = True
+                    st.session_state["recalc_started_at"][recalc_key] = datetime.now().isoformat()
+
+                    def _recalc_task():
+                        # DB에 강제 재계산/저장
+                        # 세션 상태는 백그라운드 스레드에서 접근하지 않습니다.
+                        get_cached_status_report(country=country_code, date_str=target_date_str, force_recalculate=True)
+
+                    threading.Thread(target=_recalc_task, daemon=True).start()
+
+            # 재계산 상태 안내 및 자동 업데이트
+            running = (st.session_state.get("recalc_running", {}).get(recalc_key) is True)
+            if running:
+                st.info(f"'{target_date_str}' 기준 현황을 백그라운드에서 다시 계산 중입니다. 다른 탭을 사용해도 됩니다.")
+                # DB에 저장이 끝났는지 확인하고, 끝났으면 페이지를 새로고침합니다.
+                report_ready = get_status_report_from_db(country_code, pd.to_datetime(target_date_str).to_pydatetime())
+                if report_ready:
+                    st.session_state["recalc_running"][recalc_key] = False
+                    st.success("재계산이 완료되었습니다. 화면을 갱신합니다.")
+                    st.rerun()
+                # 타임아웃/지연 대비 수동 초기화 옵션
+                started_at_iso = st.session_state.get("recalc_started_at", {}).get(recalc_key)
+                if started_at_iso:
+                    try:
+                        elapsed_sec = (datetime.now() - pd.to_datetime(started_at_iso).to_pydatetime()).total_seconds()
+                        if elapsed_sec > 180:
+                            st.warning("재계산이 지연되는 것 같습니다. 아래 버튼으로 상태를 초기화할 수 있습니다.")
+                            if st.button("재계산 상태 초기화", key=f"reset_recalc_{recalc_key}"):
+                                st.session_state["recalc_running"][recalc_key] = False
+                                st.rerun()
+                    except Exception:
+                        pass
+
+            # 캐시된(또는 계산 완료된) 결과를 표시
+            result = get_cached_status_report(
+                country=country_code, date_str=target_date_str, force_recalculate=False
+            )
             if result:
                 header_line, headers, rows = result
-                st.markdown(f":information_source: {header_line}", unsafe_allow_html=True)
+                # 헤더(요약)과 경고를 분리합니다. '<br>' 이전은 요약, 이후는 경고 영역입니다.
+                header_main = header_line
+                warning_html = None
+                if isinstance(header_line, str) and "<br>" in header_line:
+                    parts = header_line.split("<br>", 1)
+                    header_main = parts[0]
+                    warning_html = parts[1]
+
+                # 테이블 상단에 요약 헤더를 표시합니다.
+                if header_main:
+                    st.markdown(f":information_source: {header_main}", unsafe_allow_html=True)
+
                 # 데이터와 헤더의 컬럼 수가 일치하는지 확인하여 앱 충돌 방지
                 if rows and headers and len(rows[0]) != len(headers):
                     st.error(f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '다시 계산'을 시도해주세요.")
@@ -971,6 +1074,15 @@ def render_country_tab(country_code: str):
                 else:
                     df = pd.DataFrame(rows, columns=headers)
                     _display_status_report_df(df, country_code)
+                    # 테이블 아래에 경고(평가금액 대체 안내)가 있으면 표시합니다.
+                    if warning_html:
+                        st.markdown(warning_html, unsafe_allow_html=True)
+                    # 테이블 아래에 벤치마크 대비 초과성과를 표시합니다.
+                    benchmark_str = get_cached_benchmark_status(country_code)
+                    if benchmark_str:
+                        st.markdown(
+                            f'<div style="text-align: left; padding-top: 0.5rem;">{benchmark_str}</div>', unsafe_allow_html=True
+                        )
             else:
                 st.error(f"'{latest_date_str}' 기준 ({country_code.upper()}) 현황을 생성하는 데 실패했습니다.")
 
@@ -980,6 +1092,23 @@ def render_country_tab(country_code: str):
 
         with history_status_tab:
             past_dates = sorted_dates[1:]
+            # 한국/호주: 히스토리의 첫 탭은 항상 '마지막 거래일'이 되도록 보정합니다.
+            if country_code in ("kor", "aus") and past_dates:
+                try:
+                    today = pd.Timestamp.now().normalize()
+                    lookback_start = (today - pd.Timedelta(days=21)).strftime('%Y-%m-%d')
+                    today_str = today.strftime('%Y-%m-%d')
+                    trading_days = get_trading_days(lookback_start, today_str, country_code)
+                    if trading_days:
+                        last_td = max(d for d in trading_days if d.date() <= today.date())
+                        last_td_str = pd.Timestamp(last_td).strftime('%Y-%m-%d')
+                        # 히스토리 탭 목록 맨 앞에 마지막 거래일이 오도록 정렬 보정
+                        if last_td_str in past_dates:
+                            past_dates = [last_td_str] + [d for d in past_dates if d != last_td_str]
+                        else:
+                            past_dates = [last_td_str] + past_dates
+                except Exception:
+                    pass
             if not past_dates:
                 st.info("과거 현황 데이터가 없습니다.")
             else:
@@ -991,12 +1120,23 @@ def render_country_tab(country_code: str):
                     oldest_date = pd.to_datetime(past_dates[-1])
                     newest_date = pd.to_datetime(past_dates[0])
                     
-                    from logic import settings
+                    # 웜업 기간 계산에 필요한 파라미터를 DB에서 읽어옵니다.
+                    app_settings_db = get_app_settings(country_code)
+                    common_settings = get_common_settings()
+                    if (not app_settings_db
+                        or "ma_period_etf" not in app_settings_db
+                        or "ma_period_stock" not in app_settings_db):
+                        st.error("오류: DB에 MA 기간 설정이 없습니다. 각 국가 탭의 '설정'에서 값을 저장해주세요.")
+                        return
+                    if (not common_settings
+                        or "ATR_PERIOD_FOR_NORMALIZATION" not in common_settings):
+                        st.error("오류: DB 공통 설정에 ATR 기간이 없습니다. '설정' 탭의 공통 설정에서 값을 저장해주세요.")
+                        return
                     try:
-                        max_ma_period = max(int(settings.MA_PERIOD_FOR_ETF), int(settings.MA_PERIOD_FOR_STOCK))
-                        atr_period_norm = int(settings.ATR_PERIOD_FOR_NORMALIZATION)
-                    except AttributeError:
-                        st.error("오류: MA_PERIOD_FOR_ETF, MA_PERIOD_FOR_STOCK, ATR_PERIOD_FOR_NORMALIZATION 설정이 logic/settings.py 에 정의되어야 합니다.")
+                        max_ma_period = max(int(app_settings_db["ma_period_etf"]), int(app_settings_db["ma_period_stock"]))
+                        atr_period_norm = int(common_settings["ATR_PERIOD_FOR_NORMALIZATION"])
+                    except (ValueError, TypeError):
+                        st.error("오류: DB 설정값 형식이 올바르지 않습니다. 숫자 여부를 확인해주세요.")
                         return
                     warmup_days = int(max(max_ma_period, atr_period_norm) * 1.5)
 
@@ -1024,16 +1164,13 @@ def render_country_tab(country_code: str):
                 history_date_tabs = st.tabs(past_dates)
                 for i, date_str in enumerate(past_dates):
                     with history_date_tabs[i]:
-
-                        spinner_message = f"'{date_str}' 기준 현황 데이터를 계산하고 있습니다..."
-                        with st.spinner(spinner_message):
-                            result = get_cached_status_report(
-                                country=country_code, date_str=date_str, force_recalculate=False
-                            )
-                        if result:
-                            header_line, headers, rows = result
+                        # 과거 데이터는 자동 계산/저장하지 않고, DB에 있으면 표시만 합니다.
+                        report_from_db = get_status_report_from_db(country_code, pd.to_datetime(date_str).to_pydatetime())
+                        if report_from_db:
+                            header_line = report_from_db.get("header_line")
+                            headers = report_from_db.get("headers")
+                            rows = report_from_db.get("rows")
                             st.markdown(f":information_source: {header_line}", unsafe_allow_html=True)
-                            # 데이터와 헤더의 컬럼 수가 일치하는지 확인하여 앱 충돌 방지
                             if rows and headers and len(rows[0]) != len(headers):
                                 st.error(f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '과거 전체 다시계산'을 시도해주세요.")
                                 st.write("- 헤더:", headers)
@@ -1042,7 +1179,15 @@ def render_country_tab(country_code: str):
                                 df = pd.DataFrame(rows, columns=headers)
                                 _display_status_report_df(df, country_code)
                         else:
-                            st.error(f"'{date_str}' 기준 ({country_code.upper()}) 현황을 생성하는 데 실패했습니다.")
+                            st.info(f"'{date_str}' 기준 현황 데이터가 없습니다.")
+                            if st.button("이 날짜 계산하기", key=f"calc_hist_{country_code}_{date_str}"):
+                                with st.spinner(f"'{date_str}' 기준 현황 데이터를 계산/저장 중..."):
+                                    calc_result = get_cached_status_report(
+                                        country=country_code, date_str=date_str, force_recalculate=True
+                                    )
+                                if calc_result:
+                                    st.success("계산/저장 완료!")
+                                    st.rerun()
         
         with history_equity_tab:
             app_settings = get_app_settings(country_code)
