@@ -4,6 +4,7 @@
 import functools
 import os
 import logging
+import warnings
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from threading import Lock
@@ -22,6 +23,9 @@ except ImportError:
 # yfinance가 설치되지 않았을 경우를 대비한 예외 처리
 try:
     import yfinance as yf
+    # Silence noisy yfinance "Failed download" console messages
+    import logging as _yf_logging  # noqa: E402
+    _yf_logging.getLogger("yfinance").setLevel(_yf_logging.ERROR)
 except ImportError:
     yf = None
 
@@ -61,33 +65,59 @@ def get_today_str() -> str:
 def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Timestamp]:
     """
     지정된 기간 내의 모든 거래일을 pd.Timestamp 리스트로 반환합니다.
-    API에서 아직 제공하지 않는 최근 거래일도 포함하도록 시도합니다.
+    한국(KRX), 호주(ASX)는 pandas_market_calendars만 사용합니다.
     """
-    trading_days_ts = []
+    trading_days_ts: List[pd.Timestamp] = []
+
+    def _pmc(country_code: str) -> List[pd.Timestamp]:
+        import pandas_market_calendars as mcal  # type: ignore
+        cal_code = {"kor": "XKRX", "aus": "ASX"}.get(country_code)
+        if not cal_code:
+            return []
+        try:
+            cal = mcal.get_calendar(cal_code)
+            # Latest pmc: remove all discontinued market_times using the new API
+            try:
+                dmt = getattr(cal, "discontinued_market_times", {})
+                for tname in getattr(dmt, "keys", lambda: [])():
+                    try:
+                        cal.remove_time(tname)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+            except Exception:
+                # Older versions fallback
+                for tname in ("break_start", "break_end"):
+                    try:
+                        cal.remove_time(tname)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+
+            # Prefer valid_days (dates only)
+            try:
+                days_idx = cal.valid_days(start_date=start_date, end_date=end_date)
+                if days_idx is not None and len(days_idx) > 0:
+                    return [pd.Timestamp(pd.Timestamp(d).date()) for d in days_idx]
+            except Exception:
+                pass
+
+            # Fallback to schedule, suppress deprecation warning
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"\['break_start', 'break_end'\] are discontinued",
+                    category=UserWarning,
+                )
+                sched = cal.schedule(start_date=start_date, end_date=end_date)
+            if sched is not None and not sched.empty:
+                return [pd.Timestamp(d.date()) for d in sched.index]
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"pandas_market_calendars({country_code}:{cal_code}) 조회 실패: {e}")
+        return []
+
     if country == "kor":
-        if not is_pykrx_available():
-            trading_days_ts = pd.bdate_range(start=start_date, end=end_date).tolist()
-        try:
-            # KOSPI 대표 종목으로 거래일 조회
-            df = _stock.get_market_ohlcv_by_date(start_date.replace("-", ""), end_date.replace("-", ""), "005930")
-            trading_days_ts = df.index.tolist()
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"pykrx로 거래일 조회 중 오류: {e}. 주말 제외 날짜를 사용합니다.")
-            trading_days_ts = pd.bdate_range(start=start_date, end=end_date).tolist()
+        trading_days_ts = _pmc("kor")
     elif country == "aus":
-        if yf is None:
-            trading_days_ts = pd.bdate_range(start=start_date, end=end_date).tolist()
-        try:
-            # ASX 200 지수로 거래일 조회
-            # yfinance의 end는 exclusive이므로 하루를 더해줍니다.
-            end_date_plus_one = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-            with yf_lock:
-                df = yf.download("^AXJO", start=start_date, end=end_date_plus_one, progress=False, auto_adjust=True)
-            # yfinance는 timezone-aware index를 반환하므로, naive date-only timestamp로 변환합니다.
-            trading_days_ts = [pd.Timestamp(d.date()) for d in df.index]
-        except Exception as e:
-            logging.getLogger(__name__).warning(f"yfinance로 거래일 조회 중 오류: {e}. 주말 제외 날짜를 사용합니다.")
-            trading_days_ts = pd.bdate_range(start=start_date, end=end_date).tolist()
+        trading_days_ts = _pmc("aus")
     elif country == "coin":
         # 암호화폐는 24/7 거래되므로, 단순히 날짜 범위 내의 모든 날짜를 반환합니다.
         # 실제 거래가 없는 날(예: 거래소 점검)은 고려하지 않습니다.
@@ -96,17 +126,9 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
         logging.getLogger(__name__).error(f"지원하지 않는 국가 코드입니다: {country}")
         return []
 
-    # API가 아직 오늘 데이터를 제공하지 않는 경우를 대비하여, 오늘이 평일이면 추가합니다.
-    today = pd.Timestamp.now().normalize()
-    end_date_ts = pd.to_datetime(end_date).normalize()
-
-    if end_date_ts >= today and today.weekday() < 5: # 조회 종료일이 오늘이거나 미래이고, 오늘이 평일인 경우
-        # API 결과에 오늘 날짜가 포함되어 있는지 확인
-        if not any(d.date() == today.date() for d in trading_days_ts):
-            trading_days_ts.append(today)
-
     # 최종적으로 start_date와 end_date 사이의 날짜만 반환하고, 중복 제거 및 정렬합니다.
     start_date_ts = pd.to_datetime(start_date).normalize()
+    end_date_ts = pd.to_datetime(end_date).normalize()
     final_list = [d for d in trading_days_ts if start_date_ts <= d <= end_date_ts]
     
     return sorted(list(set(final_list)))

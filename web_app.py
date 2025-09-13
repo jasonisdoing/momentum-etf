@@ -1578,6 +1578,37 @@ def main():
     if not check_password():
         st.stop()  # 비밀번호가 맞지 않으면 앱의 나머지 부분을 렌더링하지 않습니다.
 
+    # 앱 가동시 거래일 캘린더 준비 상태 확인
+    try:
+        import pandas_market_calendars as _mcal  # type: ignore
+    except Exception as e:
+        st.error(
+            "거래일 캘린더 라이브러리(pandas-market-calendars)를 불러올 수 없습니다.\n"
+            "다음 명령으로 설치 후 다시 시도하세요: pip install pandas-market-calendars\n"
+            f"상세: {e}"
+        )
+        st.stop()
+
+    try:
+        today = pd.Timestamp.now().normalize()
+        start = (today - pd.DateOffset(days=30)).strftime("%Y-%m-%d")
+        end = (today + pd.DateOffset(days=7)).strftime("%Y-%m-%d")
+        problems = []
+        for c in ("kor", "aus"):
+            days = get_trading_days(start, end, c)
+            if not days:
+                problems.append(c)
+        if problems:
+            st.error(
+                "거래일 캘린더를 조회하지 못했습니다: "
+                + ", ".join({"kor": "한국", "aus": "호주"}[p] for p in problems)
+                + "\nKOSPI/ASX 캘린더를 사용할 수 있는지 확인해주세요."
+            )
+            st.stop()
+    except Exception as e:
+        st.error(f"거래일 캘린더 초기화 중 오류가 발생했습니다: {e}")
+        st.stop()
+
     # 제목과 시장 상태를 한 줄에 표시
     # "최근 중단" 기간이 길어지면서 줄바꿈되는 현상을 방지하기 위해
     # 오른쪽 컬럼의 너비를 늘립니다. (3:1 -> 2.5:1.5)

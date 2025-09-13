@@ -1250,11 +1250,10 @@ def main(country: str = "kor", date_str: Optional[str] = None):
         except Exception:
             pass
 
-        # 텔레그램 알림: 기본 현황 + (옵션) 매수/매도 신호 요약
+        # 텔레그램 알림: 현황 전송 (코인은 상세 현황에 신호 포함)
         try:
             if country == 'coin':
                 _maybe_notify_coin_detailed(country, header_line, headers, rows_sorted)
-                _maybe_notify_coin_signals(country, headers, rows_sorted)
             else:
                 _maybe_notify_basic_status(country, header_line)
                 _maybe_notify_signal_summary(country, headers, rows_sorted)
@@ -1525,6 +1524,7 @@ def _maybe_notify_coin_detailed(country: str, header_line: str, headers: list, r
 
         # Columns
         idx_ticker = headers.index("티커")
+        idx_state = headers.index("상태") if "상태" in headers else None
         idx_value = headers.index("금액") if "금액" in headers else None
         idx_ret = headers.index("누적수익률") if "누적수익률" in headers else (headers.index("일간수익률") if "일간수익률" in headers else None)
         idx_score = headers.index("점수") if "점수" in headers else None
@@ -1538,15 +1538,15 @@ def _maybe_notify_coin_detailed(country: str, header_line: str, headers: list, r
             pass
 
         holdings_total = 0.0
-        # Build ASCII table with score as last column (종목명 제거)
-        headers_tbl = ["티커", "금액", "누적수익률", "점수"]
+        # Build ASCII table including 상태 (종목명 제거)
+        headers_tbl = ["티커", "상태", "금액", "누적수익률", "점수"]
         display_rows = []
         for row in rows_sorted:
             try:
                 tkr = str(row[idx_ticker])
+                stt = str(row[idx_state]) if (idx_state is not None and idx_state < len(row)) else "-"
+                # amount
                 val = float(row[idx_value]) if (idx_value is not None and isinstance(row[idx_value], (int, float))) else 0.0
-                if val <= 0:
-                    continue
                 holdings_total += val
                 # return pct
                 pct_txt = ""
@@ -1556,14 +1556,16 @@ def _maybe_notify_coin_detailed(country: str, header_line: str, headers: list, r
                         pct_txt = f"{r:+.2f}%"
                     else:
                         pct_txt = str(r)
+                if not pct_txt:
+                    pct_txt = "0%"
                 # score
                 sc = row[idx_score] if (idx_score is not None and idx_score < len(row)) else None
                 sc_txt = f"{float(sc):.2f}" if isinstance(sc, (int, float)) else (str(sc) if sc is not None else "-")
-                display_rows.append([tkr, fmt_eok_man(val), pct_txt, sc_txt])
+                display_rows.append([tkr, stt, fmt_eok_man(val), pct_txt, sc_txt])
             except Exception:
                 continue
 
-        aligns_tbl = ["right", "right", "right", "right"]
+        aligns_tbl = ["right", "left", "right", "right", "right"]
         table_lines = render_table_eaw(headers_tbl, display_rows, aligns=aligns_tbl)
         # Wrap table in <pre> to preserve alignment in Telegram
         def _html_escape(s: str) -> str:
@@ -1605,84 +1607,6 @@ def _maybe_notify_coin_detailed(country: str, header_line: str, headers: list, r
         return bool(send_telegram_message(text))
     except Exception:
         return False
-
-
-def _maybe_notify_coin_signals(country: str, headers: list, rows_sorted: list, force: bool = False) -> bool:
-    """Send coin signals as a table (ticker, name, state, score) plus a simple recommendation."""
-    try:
-        from utils.notify import send_telegram_message
-    except Exception:
-        return False
-
-    if not force and not _is_trading_day(country):
-        return False
-
-    try:
-        idx_ticker = headers.index("티커")
-        idx_state = headers.index("상태")
-        idx_score = headers.index("점수") if "점수" in headers else None
-    except ValueError:
-        return False
-
-    # Ticker → name map
-    name_map = {}
-    try:
-        stocks = get_stocks('coin') or []
-        name_map = {str(s.get('ticker') or '').upper(): str(s.get('name') or '') for s in stocks}
-    except Exception:
-        pass
-
-    # Build an ASCII table for Telegram (no 종목명)
-    headers_tbl = ["티커", "상태", "점수"]
-    display_rows = []
-    for row in rows_sorted:
-        try:
-            tkr = str(row[idx_ticker])
-            stt = str(row[idx_state])
-            sc = row[idx_score] if (idx_score is not None and idx_score < len(row)) else None
-            sc_txt = f"{float(sc):.2f}" if isinstance(sc, (int, float)) else (str(sc) if sc is not None else "-")
-            display_rows.append([tkr, stt, sc_txt])
-        except Exception:
-            continue
-    aligns_tbl = ["right", "left", "right"]
-    table_lines = render_table_eaw(headers_tbl, display_rows, aligns=aligns_tbl)
-    # Wrap in <pre> to preserve alignment in Telegram (HTML parse_mode)
-    def _html_escape(s: str) -> str:
-        try:
-            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        except Exception:
-            return s
-    table_block = "<pre>" + _html_escape("\n".join(table_lines)) + "</pre>"
-
-    # Recommendation (first SELL_* and BUY_* encountered)
-    sell_states = {"CUT_STOPLOSS", "SELL_MOMENTUM", "SELL_TREND", "SELL_REPLACE"}
-    buy_states = {"BUY_REPLACE", "BUY"}
-    sell_tkr = buy_tkr = None
-    for row in rows_sorted:
-        try:
-            stt = str(row[idx_state])
-            if sell_tkr is None and stt in sell_states:
-                sell_tkr = str(row[idx_ticker])
-            if buy_tkr is None and stt in buy_states:
-                buy_tkr = str(row[idx_ticker])
-            if sell_tkr and buy_tkr:
-                break
-        except Exception:
-            continue
-
-    country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
-    msg = [f"[{country_kor}] 시그널", table_block]
-    recs = []
-    if sell_tkr:
-        recs.append(f"{sell_tkr} 를 파세요!")
-    if buy_tkr:
-        recs.append(f"{buy_tkr} 를 사세요!")
-    if recs:
-        msg.append("")
-        msg.extend(recs)
-
-    text = "\n".join(msg)
-    return bool(send_telegram_message(text))
 
 
 if __name__ == "__main__":

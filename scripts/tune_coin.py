@@ -37,7 +37,7 @@ ATR_PERIOD_FOR_NORMALIZATION = 14
 
 MA_ETF_FIXED = 14  # 코인에는 ETF 없음. 더미 고정값
 MA_STOCK_RANGE = np.arange(1, 201, 1)
-REPLACE_THRESHOLD_RANGE = [1]
+REPLACE_THRESHOLD_RANGE = np.arange(0.5, 10.1, 0.5)
 PORTFOLIO_TOPN_RANGE = np.arange(1, 6, 1)      # 1 ~ 5
 REPLACE_WEAKER_STOCK = True
 
@@ -51,8 +51,8 @@ REPLACE_WEAKER_STOCK = True
 # 빈 리스트([])이면 DB의 coin_stocks 컬렉션에서 티커를 로드합니다.
 # 예시: ["BTC", "ETH", "SOL"]
 # TICKERS_OVERRIDE: list[str] = ["BTC"]
-# TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL"]
-TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL", "ADA", "DOGE", "TRX"]
+TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL"]
+# TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL", "ADA", "DOGE", "TRX"]
 
 # 12개월 - 5종목
 # 210.15% (TopN: 3, MA: 3, Threshold: 1.50)
@@ -75,7 +75,11 @@ TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL", "ADA", "DOGE",
 #   - REPLACE_WEAKER_STOCK: True
 #   - REPLACE_SCORE_THRESHOLD: 1.00
 
+
+# 5개 종목 튜닝
+# 
 # 8개 종목 튜닝
+# 
 
 
 
