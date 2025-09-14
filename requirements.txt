@@ -6,3 +6,5 @@ APScheduler
 python-dotenv
 requests
 pre-commit
+yfinance
+pandas_market_calendars

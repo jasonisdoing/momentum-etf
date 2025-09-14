@@ -71,7 +71,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
    - `SCHEDULE_COIN_CRON` = `"5 0 * * *"` (매일 00:05)
    - `SCHEDULE_KOR_TZ` = `Asia/Seoul`, `SCHEDULE_AUS_TZ` = `Australia/Sydney`, `SCHEDULE_COIN_TZ` = `Asia/Seoul`
    - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
-3. 실행: `python scripts/scheduler.py`
+3. 실행: `python scheduler.py`
 
 텔레그램 알림은 웹앱 설정 탭의 공통 설정에 `TELEGRAM_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 저장 후 동작합니다.
 

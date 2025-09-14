@@ -1532,12 +1532,9 @@ def _is_trading_day(country: str) -> bool:
 
 
 def _maybe_notify_basic_status(country: str, header_line: str, force: bool = False) -> bool:
-    """Send the basic hourly/daily header-style status message.
-
-    Returns True if a message was sent successfully. If not trading day and not forced, returns False.
-    """
+    """Send the basic hourly/daily header-style status message."""
     try:
-        from utils.notify import send_telegram_message
+        from utils.notify import send_slack_message, send_telegram_message
     except Exception:
         return False
 
@@ -1581,7 +1578,11 @@ def _maybe_notify_basic_status(country: str, header_line: str, force: bool = Fal
 
         country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
         msg = f"[{country_kor}] {date_part} 보유종목: {hold_text} | 보유금액: {amt_text} | 수익률: {eval_text}"
-        return bool(send_telegram_message(msg))
+
+        tg_sent = send_telegram_message(msg)
+        slack_sent = send_slack_message(msg)
+
+        return tg_sent or slack_sent
     except Exception:
         return False
 
@@ -1589,12 +1590,9 @@ def _maybe_notify_basic_status(country: str, header_line: str, force: bool = Fal
 def _maybe_notify_signal_summary(
     country: str, headers: list, rows_sorted: list, force: bool = False
 ) -> bool:
-    """Send optional summary: X종목 매수 필요, X종목 매도 필요.
-
-    Returns True if a message was sent successfully; False otherwise. Respects trading-day gating unless forced.
-    """
+    """Send optional summary: X종목 매수 필요, X종목 매도 필요."""
     try:
-        from utils.notify import send_telegram_message
+        from utils.notify import send_slack_message, send_telegram_message
     except Exception:
         return False
 
@@ -1628,7 +1626,11 @@ def _maybe_notify_signal_summary(
     if sell_cnt:
         parts.append(f"{sell_cnt}종목 매도 필요")
     text = f"[{country_kor}] " + ", ".join(parts)
-    return bool(send_telegram_message(text))
+
+    tg_sent = send_telegram_message(text)
+    slack_sent = send_slack_message(text)
+
+    return tg_sent or slack_sent
 
 
 def _maybe_notify_coin_detailed(
@@ -1636,7 +1638,12 @@ def _maybe_notify_coin_detailed(
 ) -> bool:
     """Send a detailed multi-line Telegram message for coin with 억/만원 formatting and 누적수익률."""
     try:
-        from utils.notify import send_telegram_message
+        from utils.notify import (
+            send_slack_message,
+            send_telegram_message,
+            send_telegram_photo,
+        )
+        from utils.report import render_table_as_image, render_table_eaw
     except Exception:
         return False
 
@@ -1707,12 +1714,13 @@ def _maybe_notify_coin_detailed(
             pass
 
         holdings_total = 0.0
-        # Build ASCII table including 상태 (종목명 제거)
-        headers_tbl = ["티커", "상태", "금액", "누적수익률", "점수"]
+        # Build table with name column
+        headers_tbl = ["티커", "종목명", "상태", "금액", "누적수익률", "점수"]
         display_rows = []
         for row in rows_sorted:
             try:
                 tkr = str(row[idx_ticker])
+                name = name_map.get(tkr.upper(), "")
                 stt = (
                     str(row[idx_state]) if (idx_state is not None and idx_state < len(row)) else "-"
                 )
@@ -1740,30 +1748,19 @@ def _maybe_notify_coin_detailed(
                     if isinstance(sc, (int, float))
                     else (str(sc) if sc is not None else "-")
                 )
-                display_rows.append([tkr, stt, fmt_eok_man(val), pct_txt, sc_txt])
+                display_rows.append([tkr, name, stt, fmt_eok_man(val), pct_txt, sc_txt])
             except Exception:
                 continue
 
-        aligns_tbl = ["right", "left", "right", "right", "right"]
-        table_lines = render_table_eaw(headers_tbl, display_rows, aligns=aligns_tbl)
+        aligns_tbl = ["right", "left", "left", "right", "right", "right"]
 
-        # Wrap table in <pre> to preserve alignment in Telegram
-        def _html_escape(s: str) -> str:
-            try:
-                return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            except Exception:
-                return s
-
-        table_block = "<pre>" + _html_escape("\n".join(table_lines)) + "</pre>"
-
-        # KRW balance
+        # --- Common Caption/Header ---
         cash_txt = "-"
         try:
             from utils.exchanges.bithumb_v2 import BithumbV2Client
 
             v2 = BithumbV2Client()
             items = v2.accounts()
-            # Sum KRW = balance + locked for KRW item
             krw_val = 0.0
             for it in items or []:
                 cur = str(it.get("currency") or "").upper()
@@ -1784,11 +1781,30 @@ def _maybe_notify_coin_detailed(
         hold_txt = fmt_eok_man(holdings_total)
         country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
         header = f"[{country_kor}] {date_part} 잔액: {cash_txt}, 보유금액: {hold_txt}"
-        # Replace line to show cumulative instead of 평가 수익
         eval_line = f"누적: {cum_text}"
         hold_line = f"보유종목: {hold_text}"
-        text = "\n".join([header, eval_line, hold_line, table_block])
-        return bool(send_telegram_message(text))
+        caption = "\n".join([header, eval_line, hold_line])
+
+        # --- Send Telegram ---
+        image_buffer = render_table_as_image(headers_tbl, display_rows, aligns_tbl)
+        photo_sent = send_telegram_photo(caption=caption, image_buffer=image_buffer)
+        table_lines = render_table_eaw(headers_tbl, display_rows, aligns_tbl)
+
+        def _html_escape(s: str) -> str:
+            try:
+                return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            except Exception:
+                return s
+
+        table_block = "<pre>" + _html_escape("\n".join(table_lines)) + "</pre>"
+        text_sent_tg = send_telegram_message(table_block)
+
+        # --- Send Slack ---
+        slack_header = caption
+        slack_table = "```\n" + "\n".join(table_lines) + "\n```"
+        slack_sent = send_slack_message(f"{slack_header}\n{slack_table}")
+
+        return photo_sent and text_sent_tg and slack_sent
     except Exception:
         return False
 
