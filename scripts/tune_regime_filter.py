@@ -19,9 +19,8 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from logic import settings
-from utils.db_manager import get_stocks, get_app_settings
 from utils.data_loader import fetch_ohlcv_for_tickers
+from utils.db_manager import get_app_settings, get_stocks
 
 
 def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame]) -> tuple:
@@ -33,6 +32,7 @@ def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame])
 
     # 각 프로세스는 자체적인 모듈 컨텍스트를 가지므로, 여기서 다시 임포트하고 설정합니다.
     from test import main as run_test
+
     from logic import settings as worker_settings
 
     worker_settings.MARKET_REGIME_FILTER_MA_PERIOD = int(regime_ma_period)
@@ -58,8 +58,14 @@ def tune_regime_filter(country: str):
 
     # 1. 튜닝에 필요한 최대 기간 계산
     app_settings = get_app_settings(country)
-    if not app_settings or "ma_period_etf" not in app_settings or "ma_period_stock" not in app_settings:
-        print(f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+    if (
+        not app_settings
+        or "ma_period_etf" not in app_settings
+        or "ma_period_stock" not in app_settings
+    ):
+        print(
+            f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
+        )
         return
     try:
         ma_period_etf = int(app_settings["ma_period_etf"])
@@ -82,14 +88,14 @@ def tune_regime_filter(country: str):
     if not stocks_from_db:
         print(f"오류: '{country}_stocks' 컬렉션에서 튜닝에 사용할 종목을 찾을 수 없습니다.")
         return
-    tickers_to_process = [s['ticker'] for s in stocks_from_db]
+    tickers_to_process = [s["ticker"] for s in stocks_from_db]
 
     # 4. 모든 종목의 시세 데이터를 병렬로 미리 로딩합니다.
     prefetched_data = fetch_ohlcv_for_tickers(
         tickers_to_process,
         country=country,
-        date_range=[core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')],
-        warmup_days=warmup_days
+        date_range=[core_start_dt.strftime("%Y-%m-%d"), core_end_dt.strftime("%Y-%m-%d")],
+        warmup_days=warmup_days,
     )
 
     if not prefetched_data:
@@ -112,12 +118,15 @@ def tune_regime_filter(country: str):
     results_by_month = {months: {} for months in test_months_ranges}
 
     with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(run_backtest_worker, params, prefetched_data) for params in param_combinations]
+        futures = [
+            executor.submit(run_backtest_worker, params, prefetched_data)
+            for params in param_combinations
+        ]
         for future in as_completed(futures):
             try:
                 regime_ma_period, months_range, result = future.result()
-                if result and 'cagr_pct' in result:
-                    results_by_month[months_range][regime_ma_period] = result['cagr_pct']
+                if result and "cagr_pct" in result:
+                    results_by_month[months_range][regime_ma_period] = result["cagr_pct"]
             except Exception as e:
                 print(f"  -> 파라미터 테스트 중 오류 발생: {e}")
 
@@ -134,16 +143,26 @@ def tune_regime_filter(country: str):
         else:
             best_ma = max(results_for_this_month, key=results_for_this_month.get)
             best_cagr = results_for_this_month[best_ma]
-        summary_data.append([f"{months}개월", str(best_ma), f"{best_cagr:.2f}%" if isinstance(best_cagr, float) else best_cagr])
+        summary_data.append(
+            [
+                f"{months}개월",
+                str(best_ma),
+                f"{best_cagr:.2f}%" if isinstance(best_cagr, float) else best_cagr,
+            ]
+        )
 
     from utils.report import render_table_eaw
+
     headers = ["백테스트 기간", "최적 MA 기간", "최고 CAGR"]
     aligns = ["left", "right", "right"]
     print("\n" + "\n".join(render_table_eaw(headers, summary_data, aligns)))
     print("=" * 60)
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="시장 레짐 필터의 이동평균 기간(MA Period)을 튜닝합니다.")
+    parser = argparse.ArgumentParser(
+        description="시장 레짐 필터의 이동평균 기간(MA Period)을 튜닝합니다."
+    )
     parser.add_argument("country", choices=["kor", "aus"], help="튜닝을 진행할 시장 (kor, aus)")
     args = parser.parse_args()
     tune_regime_filter(country=args.country)

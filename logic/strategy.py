@@ -4,7 +4,7 @@
 """
 
 from math import ceil
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -60,7 +60,7 @@ def run_portfolio_backtest(
     max_pos_pct = 1.0 / top_n
 
     # --- 티커 유형(ETF/주식) 구분 ---
-    etf_tickers = {stock['ticker'] for stock in stocks if stock.get('type') == 'etf'}
+    etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
 
     # --- 데이터 로딩 범위 계산 ---
     # 웜업 기간은 가장 긴 MA 또는 ATR 기간을 기준으로 산정
@@ -82,17 +82,17 @@ def run_portfolio_backtest(
         )
         if market_regime_df is not None and not market_regime_df.empty:
             market_regime_df["MA"] = (
-                market_regime_df["Close"]
-                .rolling(window=regime_filter_ma_period)
-                .mean()
+                market_regime_df["Close"].rolling(window=regime_filter_ma_period).mean()
             )
         else:
-            print(f"경고: 시장 레짐 필터 티커({regime_filter_ticker})의 데이터를 가져올 수 없습니다. 필터를 비활성화합니다.")
+            print(
+                f"경고: 시장 레짐 필터 티커({regime_filter_ticker})의 데이터를 가져올 수 없습니다. 필터를 비활성화합니다."
+            )
             regime_filter_enabled = False
 
     # --- 개별 종목 데이터 로딩 및 지표 계산 ---
     data = {}
-    tickers_to_process = [s['ticker'] for s in stocks]
+    tickers_to_process = [s["ticker"] for s in stocks]
 
     for tkr in tickers_to_process:
         # 미리 로드된 데이터가 있으면 사용하고, 없으면 새로 조회합니다.
@@ -185,14 +185,13 @@ def run_portfolio_backtest(
             if dt in d["close"].index
         }
 
-    # --- 시장 레짐 필터 적용 (Risk-Off 조건 확인) ---
+        # --- 시장 레짐 필터 적용 (Risk-Off 조건 확인) ---
         is_risk_off = False
         if regime_filter_enabled and market_regime_df is not None and dt in market_regime_df.index:
             market_price = market_regime_df.loc[dt, "Close"]
             market_ma = market_regime_df.loc[dt, "MA"]
             if pd.notna(market_price) and pd.notna(market_ma) and market_price < market_ma:
                 is_risk_off = True
-
 
         # 현재 총 보유 자산 가치를 계산합니다.
         current_holdings_value = 0
@@ -209,7 +208,7 @@ def run_portfolio_backtest(
             ticker_state, price = state[tkr], today_prices.get(tkr)
             is_ticker_warming_up = tkr not in tickers_available_today or pd.isna(d["ma"].get(dt))
 
-            decision_out = ("HOLD" if ticker_state["shares"] > 0 else "WAIT")
+            decision_out = "HOLD" if ticker_state["shares"] > 0 else "WAIT"
             note = ""
             if is_ticker_warming_up:
                 note = "웜업 기간"
@@ -229,7 +228,9 @@ def run_portfolio_backtest(
                         "pv": ticker_state["shares"] * (price if pd.notna(price) else 0),
                         "decision": decision_out,
                         "avg_cost": ticker_state["avg_cost"],
-                        "trade_amount": 0.0, "trade_profit": 0.0, "trade_pl_pct": 0.0,
+                        "trade_amount": 0.0,
+                        "trade_profit": 0.0,
+                        "trade_pl_pct": 0.0,
                         "note": note,
                         "signal1": d["ma"].get(dt),  # 이평선(값)
                         "signal2": None,  # 고점대비
@@ -267,30 +268,55 @@ def run_portfolio_backtest(
                     if pd.notna(price):
                         qty = ticker_state_h["shares"]
                         trade_amount = qty * price
-                        hold_ret = ((price / ticker_state_h["avg_cost"] - 1.0) * 100.0 if ticker_state_h["avg_cost"] > 0 else 0.0)
-                        trade_profit = ((price - ticker_state_h["avg_cost"]) * qty if ticker_state_h["avg_cost"] > 0 else 0.0)
+                        hold_ret = (
+                            (price / ticker_state_h["avg_cost"] - 1.0) * 100.0
+                            if ticker_state_h["avg_cost"] > 0
+                            else 0.0
+                        )
+                        trade_profit = (
+                            (price - ticker_state_h["avg_cost"]) * qty
+                            if ticker_state_h["avg_cost"] > 0
+                            else 0.0
+                        )
 
                         cash += trade_amount
                         ticker_state_h["shares"], ticker_state_h["avg_cost"] = 0, 0.0
 
                         # 이미 만들어둔 행을 업데이트
                         row = out_rows[tkr_h][-1]
-                        row.update({
-                            "decision": "SELL_REGIME_FILTER", "trade_amount": trade_amount,
-                            "trade_profit": trade_profit, "trade_pl_pct": hold_ret,
-                            "shares": 0, "pv": 0, "avg_cost": 0, "note": "시장 위험 회피",
-                        })
+                        row.update(
+                            {
+                                "decision": "SELL_REGIME_FILTER",
+                                "trade_amount": trade_amount,
+                                "trade_profit": trade_profit,
+                                "trade_pl_pct": hold_ret,
+                                "shares": 0,
+                                "pv": 0,
+                                "avg_cost": 0,
+                                "note": "시장 위험 회피",
+                            }
+                        )
         # (b) 개별 종목 매도 (시장이 Risk-On일 때만)
         else:
             for tkr, d in data.items():
                 ticker_state, price = state[tkr], today_prices.get(tkr)
-                is_ticker_warming_up = tkr not in tickers_available_today or pd.isna(d["ma"].get(dt))
+                is_ticker_warming_up = tkr not in tickers_available_today or pd.isna(
+                    d["ma"].get(dt)
+                )
 
-                if (ticker_state["shares"] > 0 and pd.notna(price) and
-                    i >= ticker_state["sell_block_until"] and not is_ticker_warming_up):
+                if (
+                    ticker_state["shares"] > 0
+                    and pd.notna(price)
+                    and i >= ticker_state["sell_block_until"]
+                    and not is_ticker_warming_up
+                ):
 
                     decision = None
-                    hold_ret = ((price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0)
+                    hold_ret = (
+                        (price / ticker_state["avg_cost"] - 1.0) * 100.0
+                        if ticker_state["avg_cost"] > 0
+                        else 0.0
+                    )
 
                     if stop_loss is not None and hold_ret <= float(stop_loss):
                         decision = "CUT_STOPLOSS"
@@ -300,7 +326,11 @@ def run_portfolio_backtest(
                     if decision:
                         qty = ticker_state["shares"]
                         trade_amount = qty * price
-                        trade_profit = ((price - ticker_state["avg_cost"]) * qty if ticker_state["avg_cost"] > 0 else 0.0)
+                        trade_profit = (
+                            (price - ticker_state["avg_cost"]) * qty
+                            if ticker_state["avg_cost"] > 0
+                            else 0.0
+                        )
 
                         cash += trade_amount
                         ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
@@ -309,13 +339,19 @@ def run_portfolio_backtest(
 
                         # 행 업데이트
                         row = out_rows[tkr][-1]
-                        row.update({
-                            "decision": decision, "trade_amount": trade_amount,
-                            "trade_profit": trade_profit, "trade_pl_pct": hold_ret,
-                            "shares": 0, "pv": 0, "avg_cost": 0,
-                        })
+                        row.update(
+                            {
+                                "decision": decision,
+                                "trade_amount": trade_amount,
+                                "trade_profit": trade_profit,
+                                "trade_pl_pct": hold_ret,
+                                "shares": 0,
+                                "pv": 0,
+                                "avg_cost": 0,
+                            }
+                        )
 
-    # --- 3. 매수 로직 (시장이 Risk-On일 때만) ---
+        # --- 3. 매수 로직 (시장이 Risk-On일 때만) ---
         if not is_risk_off:
             # 1. 매수 후보 선정
             buy_candidates = []
@@ -360,7 +396,7 @@ def run_portfolio_backtest(
                     if budget <= 0 or budget < min_val:
                         continue
 
-                    if country in ('coin', 'aus'):
+                    if country in ("coin", "aus"):
                         req_qty = budget / price if price > 0 else 0
                         trade_amount = budget
                     else:
@@ -421,29 +457,49 @@ def run_portfolio_backtest(
                         sell_price = today_prices.get(weakest_held_tkr)
                         buy_price = today_prices.get(best_new_tkr)
 
-                        if pd.notna(sell_price) and sell_price > 0 and pd.notna(buy_price) and buy_price > 0:
+                        if (
+                            pd.notna(sell_price)
+                            and sell_price > 0
+                            and pd.notna(buy_price)
+                            and buy_price > 0
+                        ):
                             # (a) 가장 약한 종목 매도
                             weakest_state = state[weakest_held_tkr]
                             sell_qty = weakest_state["shares"]
                             sell_amount = sell_qty * sell_price
-                            hold_ret = ((sell_price / weakest_state["avg_cost"] - 1.0) * 100.0 if weakest_state["avg_cost"] > 0 else 0.0)
-                            trade_profit = (sell_price - weakest_state["avg_cost"]) * sell_qty if weakest_state["avg_cost"] > 0 else 0.0
+                            hold_ret = (
+                                (sell_price / weakest_state["avg_cost"] - 1.0) * 100.0
+                                if weakest_state["avg_cost"] > 0
+                                else 0.0
+                            )
+                            trade_profit = (
+                                (sell_price - weakest_state["avg_cost"]) * sell_qty
+                                if weakest_state["avg_cost"] > 0
+                                else 0.0
+                            )
 
                             cash += sell_amount
                             weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
                             if cooldown_days > 0:
                                 weakest_state["buy_block_until"] = i + cooldown_days
 
-                            if out_rows[weakest_held_tkr] and out_rows[weakest_held_tkr][-1]["date"] == dt:
+                            if (
+                                out_rows[weakest_held_tkr]
+                                and out_rows[weakest_held_tkr][-1]["date"] == dt
+                            ):
                                 row = out_rows[weakest_held_tkr][-1]
-                                row.update({
-                                    "decision": "SELL_REPLACE",
-                                    "trade_amount": sell_amount,
-                                    "trade_profit": trade_profit,
-                                    "trade_pl_pct": hold_ret,
-                                    "shares": 0, "pv": 0, "avg_cost": 0,
-                                    "note": f"{best_new_tkr}(으)로 교체",
-                                })
+                                row.update(
+                                    {
+                                        "decision": "SELL_REPLACE",
+                                        "trade_amount": sell_amount,
+                                        "trade_profit": trade_profit,
+                                        "trade_pl_pct": hold_ret,
+                                        "shares": 0,
+                                        "pv": 0,
+                                        "avg_cost": 0,
+                                        "note": f"{best_new_tkr}(으)로 교체",
+                                    }
+                                )
 
                             # (b) 가장 강한 새 종목 매수 (기준 자산 기반 예산)
                             equity_base = equity
@@ -453,7 +509,7 @@ def run_portfolio_backtest(
                             if budget <= 0 or budget < min_val:
                                 continue
                             # 수량/금액 산정
-                            if country in ('coin', 'aus'):
+                            if country in ("coin", "aus"):
                                 req_qty = (budget / buy_price) if buy_price > 0 else 0
                                 buy_amount = budget
                             else:
@@ -466,41 +522,58 @@ def run_portfolio_backtest(
                             if req_qty > 0 and buy_amount <= cash + 1e-9:
                                 new_ticker_state = state[best_new_tkr]
                                 cash -= buy_amount
-                                new_ticker_state["shares"], new_ticker_state["avg_cost"] = req_qty, buy_price
+                                new_ticker_state["shares"], new_ticker_state["avg_cost"] = (
+                                    req_qty,
+                                    buy_price,
+                                )
                                 if cooldown_days > 0:
-                                    new_ticker_state["sell_block_until"] = max(new_ticker_state["sell_block_until"], i + cooldown_days)
+                                    new_ticker_state["sell_block_until"] = max(
+                                        new_ticker_state["sell_block_until"], i + cooldown_days
+                                    )
 
                                 # 결과 행 업데이트: 없으면 새로 추가
-                                if out_rows.get(best_new_tkr) and out_rows[best_new_tkr] and out_rows[best_new_tkr][-1]["date"] == dt:
+                                if (
+                                    out_rows.get(best_new_tkr)
+                                    and out_rows[best_new_tkr]
+                                    and out_rows[best_new_tkr][-1]["date"] == dt
+                                ):
                                     row = out_rows[best_new_tkr][-1]
-                                    row.update({
-                                        "decision": "BUY_REPLACE",
-                                        "trade_amount": buy_amount,
-                                        "shares": req_qty,
-                                        "pv": req_qty * buy_price,
-                                        "avg_cost": buy_price,
-                                        "note": f"{weakest_held_tkr}(을)를 대체",
-                                    })
+                                    row.update(
+                                        {
+                                            "decision": "BUY_REPLACE",
+                                            "trade_amount": buy_amount,
+                                            "shares": req_qty,
+                                            "pv": req_qty * buy_price,
+                                            "avg_cost": buy_price,
+                                            "note": f"{weakest_held_tkr}(을)를 대체",
+                                        }
+                                    )
                                 else:
-                                    out_rows.setdefault(best_new_tkr, []).append({
-                                        "date": dt,
-                                        "price": buy_price,
-                                        "shares": req_qty,
-                                        "pv": req_qty * buy_price,
-                                        "decision": "BUY_REPLACE",
-                                        "avg_cost": buy_price,
-                                        "trade_amount": buy_amount,
-                                        "trade_profit": 0.0,
-                                        "trade_pl_pct": 0.0,
-                                        "note": f"{weakest_held_tkr}(을)를 대체",
-                                        "signal1": None,
-                                        "signal2": None,
-                                        "score": None,
-                                        "filter": None,
-                                    })
+                                    out_rows.setdefault(best_new_tkr, []).append(
+                                        {
+                                            "date": dt,
+                                            "price": buy_price,
+                                            "shares": req_qty,
+                                            "pv": req_qty * buy_price,
+                                            "decision": "BUY_REPLACE",
+                                            "avg_cost": buy_price,
+                                            "trade_amount": buy_amount,
+                                            "trade_profit": 0.0,
+                                            "trade_pl_pct": 0.0,
+                                            "note": f"{weakest_held_tkr}(을)를 대체",
+                                            "signal1": None,
+                                            "signal2": None,
+                                            "score": None,
+                                            "filter": None,
+                                        }
+                                    )
                             else:
                                 # 매수 실패 시, 매도만 실행된 상태가 됨. 다음 날 빈 슬롯에 매수 시도.
-                                if out_rows.get(best_new_tkr) and out_rows[best_new_tkr] and out_rows[best_new_tkr][-1]["date"] == dt:
+                                if (
+                                    out_rows.get(best_new_tkr)
+                                    and out_rows[best_new_tkr]
+                                    and out_rows[best_new_tkr][-1]["date"] == dt
+                                ):
                                     out_rows[best_new_tkr][-1]["note"] = "교체매수 현금부족"
                     else:
                         # 점수가 정렬되어 있으므로, 더 이상의 교체는 불가능합니다.
@@ -509,7 +582,8 @@ def run_portfolio_backtest(
             # 3. 매수하지 못한 후보에 사유 기록
             # 오늘 매수 또는 교체매수된 종목 목록을 만듭니다.
             bought_tickers_today = {
-                tkr for tkr, r in out_rows.items()
+                tkr
+                for tkr, r in out_rows.items()
                 if r and r[-1]["date"] == dt and r[-1]["decision"] in ("BUY", "BUY_REPLACE")
             }
             for _, tkr_cand in buy_candidates:
@@ -517,7 +591,7 @@ def run_portfolio_backtest(
                     if out_rows[tkr_cand] and out_rows[tkr_cand][-1]["date"] == dt:
                         note = "포트폴리오 가득 참" if slots_to_fill <= 0 else "현금 부족"
                         out_rows[tkr_cand][-1]["note"] = note
-        else: # 리스크 오프 상태
+        else:  # 리스크 오프 상태
             # 매수 후보가 있더라도, 시장이 위험 회피 상태이므로 매수하지 않음
             # 후보들에게 사유 기록
             buy_candidates = []
@@ -526,7 +600,11 @@ def run_portfolio_backtest(
                     d_cand = data.get(tkr_cand)
                     ticker_state_cand = state[tkr_cand]
                     buy_signal_days_today = d_cand["buy_signal_days"].get(dt, 0)
-                    if (ticker_state_cand["shares"] == 0 and i >= ticker_state_cand["buy_block_until"] and buy_signal_days_today > 0):
+                    if (
+                        ticker_state_cand["shares"] == 0
+                        and i >= ticker_state_cand["buy_block_until"]
+                        and buy_signal_days_today > 0
+                    ):
                         buy_candidates.append(tkr_cand)
 
             for tkr_cand in buy_candidates:
@@ -555,7 +633,7 @@ def run_portfolio_backtest(
 
 def run_single_ticker_backtest(
     ticker: str,
-    stock_type: str = 'stock',
+    stock_type: str = "stock",
     df: Optional[pd.DataFrame] = None,
     initial_capital: float = 1_000_000.0,
     core_start_date: Optional[pd.Timestamp] = None,
@@ -585,7 +663,7 @@ def run_single_ticker_backtest(
         ) from e
 
     # --- 티커 유형(ETF/주식) 구분 ---
-    ma_period = ma_period_etf if stock_type == 'etf' else ma_period_stock
+    ma_period = ma_period_etf if stock_type == "etf" else ma_period_stock
     if df is None:
         df = fetch_ohlcv(ticker, country=country, date_range=date_range)
 
@@ -683,7 +761,7 @@ def run_single_ticker_backtest(
         if decision is None and shares == 0 and i >= buy_block_until:
             buy_signal_days_today = buy_signal_days.iloc[i]
             if buy_signal_days_today > 0:
-                if country in ('coin', 'aus'):
+                if country in ("coin", "aus"):
                     # 소수점 4자리까지 허용
                     buy_qty = round(cash / price, 4) if price > 0 else 0.0
                 else:

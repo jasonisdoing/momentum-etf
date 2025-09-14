@@ -1,15 +1,15 @@
 """
 데이터 조회, 파일 입출력 등 공통으로 사용되는 유틸리티 함수 모음.
 """
+
 import functools
-import os
 import logging
 import warnings
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple
-from threading import Lock
-
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from threading import Lock
+from typing import Dict, List, Optional
+
 import pandas as pd
 
 # 웹 스크레이핑을 위한 라이브러리
@@ -22,9 +22,11 @@ except ImportError:
 
 # yfinance가 설치되지 않았을 경우를 대비한 예외 처리
 try:
-    import yfinance as yf
     # Silence noisy yfinance "Failed download" console messages
     import logging as _yf_logging  # noqa: E402
+
+    import yfinance as yf
+
     _yf_logging.getLogger("yfinance").setLevel(_yf_logging.ERROR)
 except ImportError:
     yf = None
@@ -71,6 +73,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
 
     def _pmc(country_code: str) -> List[pd.Timestamp]:
         import pandas_market_calendars as mcal  # type: ignore
+
         cal_code = {"kor": "XKRX", "aus": "ASX"}.get(country_code)
         if not cal_code:
             return []
@@ -111,7 +114,9 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
             if sched is not None and not sched.empty:
                 return [pd.Timestamp(d.date()) for d in sched.index]
         except Exception as e:
-            logging.getLogger(__name__).warning(f"pandas_market_calendars({country_code}:{cal_code}) 조회 실패: {e}")
+            logging.getLogger(__name__).warning(
+                f"pandas_market_calendars({country_code}:{cal_code}) 조회 실패: {e}"
+            )
         return []
 
     if country == "kor":
@@ -121,7 +126,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
     elif country == "coin":
         # 암호화폐는 24/7 거래되므로, 단순히 날짜 범위 내의 모든 날짜를 반환합니다.
         # 실제 거래가 없는 날(예: 거래소 점검)은 고려하지 않습니다.
-        trading_days_ts = pd.date_range(start=start_date, end=end_date, freq='D').tolist()
+        trading_days_ts = pd.date_range(start=start_date, end=end_date, freq="D").tolist()
     else:
         logging.getLogger(__name__).error(f"지원하지 않는 국가 코드입니다: {country}")
         return []
@@ -297,7 +302,9 @@ def fetch_ohlcv(
         # 코인: 빗썸 퍼블릭 캔들스틱 API로 일봉(24h) OHLCV를 조회합니다.
         try:
             from datetime import datetime, timezone
+
             import pandas as _pd
+
             base = ticker.upper()
             url = f"https://api.bithumb.com/public/candlestick/{base}_KRW/24h"
             r = requests.get(url, timeout=10)
@@ -324,7 +331,9 @@ def fetch_ohlcv(
             if not rows:
                 return None
             rows.sort(key=lambda x: x[0])
-            df = _pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"]).set_index("Date")
+            df = _pd.DataFrame(
+                rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"]
+            ).set_index("Date")
             # Optional date filtering
             if date_range and len(date_range) == 2:
                 try:

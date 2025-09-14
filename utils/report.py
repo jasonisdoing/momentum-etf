@@ -3,10 +3,9 @@
 """
 
 import re
-from typing import Dict, List
+from typing import List
 from unicodedata import east_asian_width, normalize
 
-import pandas as pd
 
 def format_kr_money(value: float) -> str:
     """금액을 '억', '만' 단위를 포함한 한글 문자열로 포맷합니다."""
@@ -34,6 +33,7 @@ def format_kr_money(value: float) -> str:
 
     return sign + " ".join(parts) + "원"
 
+
 def format_aud_money(value: float) -> str:
     """금액을 호주 달러(A$) 형식의 문자열로 포맷합니다."""
     if value is None:
@@ -48,11 +48,7 @@ def format_aud_price(value: float) -> str:
     return f"{value:,.4f}"
 
 
-def render_table_eaw(
-    headers: List[str],
-    rows: List[List[str]],
-    aligns: List[str]
-) -> List[str]:
+def render_table_eaw(headers: List[str], rows: List[List[str]], aligns: List[str]) -> List[str]:
     """
     동아시아 문자 너비를 고려하여 리스트 데이터를 ASCII 테이블 문자열로 렌더링합니다.
     """
@@ -62,8 +58,8 @@ def render_table_eaw(
     def _clean(s: str) -> str:
         if not isinstance(s, str):
             s = str(s)
-        s = _ANSI_RE.sub('', s)
-        s = normalize('NFKC', s)
+        s = _ANSI_RE.sub("", s)
+        s = normalize("NFKC", s)
         return s
 
     def _disp_width_eaw(s: str) -> int:
@@ -72,12 +68,12 @@ def render_table_eaw(
         w = 0
         for ch in s:
             # 박스 드로잉 문자는 터미널에서 넓게 렌더링되는 경우가 많습니다.
-            if '\u2500' <= ch <= '\u257f':
+            if "\u2500" <= ch <= "\u257f":
                 w += 2
                 continue
             eaw = east_asian_width(ch)
             # 'Ambiguous'(A) 문자를 Wide로 처리하여 대부분의 터미널에서 정렬이 깨지지 않도록 합니다.
-            if eaw in ('W', 'F', 'A'):
+            if eaw in ("W", "F", "A"):
                 w += 2
             else:
                 w += 1
@@ -91,26 +87,32 @@ def render_table_eaw(
         if dw >= width:
             return s_str
         pad = width - dw
-        if align == 'right':
-            return ' ' * pad + s_str
-        elif align == 'center':
+        if align == "right":
+            return " " * pad + s_str
+        elif align == "center":
             left = pad // 2
             right = pad - left
-            return ' ' * left + s_str + ' ' * right
-        else: # 왼쪽 정렬
-            return s_str + ' ' * pad
+            return " " * left + s_str + " " * right
+        else:  # 왼쪽 정렬
+            return s_str + " " * pad
 
-    widths = [max(_disp_width_eaw(v) for v in [headers[j]] + [r[j] for r in rows]) for j in range(len(headers))]
+    widths = [
+        max(_disp_width_eaw(v) for v in [headers[j]] + [r[j] for r in rows])
+        for j in range(len(headers))
+    ]
 
     def _hline():
-        return '+' + '+'.join('-' * (w + 2) for w in widths) + '+'
+        return "+" + "+".join("-" * (w + 2) for w in widths) + "+"
 
     out = [_hline()]
-    header_cells = [_pad(headers[j], widths[j], 'center' if aligns[j] == 'center' else 'left') for j in range(len(headers))]
-    out.append('| ' + ' | '.join(header_cells) + ' |')
+    header_cells = [
+        _pad(headers[j], widths[j], "center" if aligns[j] == "center" else "left")
+        for j in range(len(headers))
+    ]
+    out.append("| " + " | ".join(header_cells) + " |")
     out.append(_hline())
     for r in rows:
         cells = [_pad(r[j], widths[j], aligns[j]) for j in range(len(headers))]
-        out.append('| ' + ' | '.join(cells) + ' |')
+        out.append("| " + " | ".join(cells) + " |")
     out.append(_hline())
     return out

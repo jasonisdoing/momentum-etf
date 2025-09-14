@@ -38,7 +38,7 @@ ATR_PERIOD_FOR_NORMALIZATION = 14
 MA_ETF_FIXED = 14  # 코인에는 ETF 없음. 더미 고정값
 MA_STOCK_RANGE = np.arange(1, 201, 1)
 REPLACE_THRESHOLD_RANGE = np.arange(0.5, 10.1, 0.5)
-PORTFOLIO_TOPN_RANGE = np.arange(1, 6, 1)      # 1 ~ 5
+PORTFOLIO_TOPN_RANGE = np.arange(1, 6, 1)  # 1 ~ 5
 REPLACE_WEAKER_STOCK = True
 
 # MA_ETF_FIXED = 14  # 코인에는 ETF 없음. 더미 고정값
@@ -97,12 +97,12 @@ TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL", "ADA", "DOGE",
 #   - REPLACE_SCORE_THRESHOLD: 2.50
 
 
-from utils.db_manager import get_stocks
 from utils.data_loader import fetch_ohlcv_for_tickers
-
+from utils.db_manager import get_stocks
 
 # --- 워커 프로세스 전역 데이터 (초기화 1회) -----------------------------------
 PREFETCHED_DATA: Dict[str, pd.DataFrame] | None = None
+
 
 def _init_worker(prefetched: Dict[str, pd.DataFrame]):
     """Initializer for each worker process: store prefetched data once."""
@@ -114,9 +114,6 @@ def run_backtest_worker(params: tuple) -> tuple:
     """단일 파라미터 조합에 대한 백테스트(별도 프로세스)."""
     ma_etf, ma_stock, replace_stock, replace_threshold, portfolio_topn = params
     from test import main as run_test
-    from logic import settings as worker_settings
-
-
 
     overrides = {
         "ma_etf": ma_etf,
@@ -127,7 +124,9 @@ def run_backtest_worker(params: tuple) -> tuple:
         "test_months_range": TEST_MONTHS_RANGE,
     }
     # Use process-local prefetched data to avoid re-pickling per task
-    result = run_test(country='coin', quiet=True, prefetched_data=PREFETCHED_DATA, override_settings=overrides)
+    result = run_test(
+        country="coin", quiet=True, prefetched_data=PREFETCHED_DATA, override_settings=overrides
+    )
     return ma_etf, ma_stock, replace_stock, replace_threshold, portfolio_topn, result
 
 
@@ -152,6 +151,7 @@ class MetricTracker:
         if not self.params:
             return
         from utils.report import format_kr_money
+
         print("\n" + "=" * 60)
         print(f"\n[{title}]")
         print(f"  - MA_PERIOD_FOR_STOCK: {self.params['ma_stock']}")
@@ -177,7 +177,7 @@ def tune_coin() -> tuple | None:
 
     core_end_dt = pd.Timestamp.now()
     core_start_dt = core_end_dt - pd.DateOffset(months=int(TEST_MONTHS_RANGE))
-    test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]
+    test_date_range = [core_start_dt.strftime("%Y-%m-%d"), core_end_dt.strftime("%Y-%m-%d")]
 
     # 티커 소스: 오버라이드 > DB
     tickers_to_process: list[str]
@@ -185,14 +185,16 @@ def tune_coin() -> tuple | None:
         tickers_to_process = [str(t).upper() for t in TICKERS_OVERRIDE if str(t).strip()]
         print(f"[INFO] Using override tickers: {', '.join(tickers_to_process)}")
     else:
-        stocks_from_db = get_stocks('coin')
+        stocks_from_db = get_stocks("coin")
         if not stocks_from_db:
-            print("오류: 'coin_stocks' 컬렉션에서 종목을 찾을 수 없습니다. 또는 상단 TICKERS_OVERRIDE를 설정하세요.")
+            print(
+                "오류: 'coin_stocks' 컬렉션에서 종목을 찾을 수 없습니다. 또는 상단 TICKERS_OVERRIDE를 설정하세요."
+            )
             return None, None
-        tickers_to_process = [s['ticker'] for s in stocks_from_db]
+        tickers_to_process = [s["ticker"] for s in stocks_from_db]
 
     prefetched_data = fetch_ohlcv_for_tickers(
-        tickers_to_process, 'coin', date_range=test_date_range, warmup_days=warmup_days
+        tickers_to_process, "coin", date_range=test_date_range, warmup_days=warmup_days
     )
     if not prefetched_data:
         print("오류: 튜닝에 사용할 데이터를 로드하지 못했습니다.")
@@ -205,7 +207,13 @@ def tune_coin() -> tuple | None:
         for portfolio_topn in PORTFOLIO_TOPN_RANGE:
             for replace_threshold in REPLACE_THRESHOLD_RANGE:
                 param_combinations.append(
-                    (MA_ETF_FIXED, int(ma_stock), REPLACE_WEAKER_STOCK, float(replace_threshold), int(portfolio_topn))
+                    (
+                        MA_ETF_FIXED,
+                        int(ma_stock),
+                        REPLACE_WEAKER_STOCK,
+                        float(replace_threshold),
+                        int(portfolio_topn),
+                    )
                 )
 
     total = len(param_combinations)
@@ -239,20 +247,30 @@ def tune_coin() -> tuple | None:
         max_workers = None
     env_chunk = os.environ.get("TUNE_CHUNKSIZE")
     try:
-        chunksize = int(env_chunk) if env_chunk else (max(1, total // ((os.cpu_count() or 2) * 4)) if total > 200 else 1)
+        chunksize = (
+            int(env_chunk)
+            if env_chunk
+            else (max(1, total // ((os.cpu_count() or 2) * 4)) if total > 200 else 1)
+        )
     except Exception:
         chunksize = 1
 
     # 안내 로그: 초기 시딩에는 시간이 걸릴 수 있음
-    print(f"[INFO] Starting pool: workers={max_workers or (os.cpu_count() or 1)}, tickers={len(tickers_to_process)}, combos={total}")
+    print(
+        f"[INFO] Starting pool: workers={max_workers or (os.cpu_count() or 1)}, tickers={len(tickers_to_process)}, combos={total}"
+    )
     print("[INFO] Seeding worker processes with prefetched data... (first result may take a while)")
 
-    with ProcessPoolExecutor(max_workers=max_workers, initializer=_init_worker, initargs=(prefetched_data,)) as executor:
+    with ProcessPoolExecutor(
+        max_workers=max_workers, initializer=_init_worker, initargs=(prefetched_data,)
+    ) as executor:
         futures = [executor.submit(run_backtest_worker, params) for params in param_combinations]
         print("[INFO] Dispatched all parameter jobs. Waiting for first completion...", flush=True)
         for fut in as_completed(futures):
             try:
-                ma_etf, ma_stock, replace_stock, replace_threshold, portfolio_topn, result = fut.result()
+                ma_etf, ma_stock, replace_stock, replace_threshold, portfolio_topn, result = (
+                    fut.result()
+                )
                 if result:
                     params = {
                         "ma_stock": ma_stock,
@@ -274,21 +292,30 @@ def tune_coin() -> tuple | None:
                     pct = (completed / total) * 100.0
                     # naive ETA
                     eta = (elapsed / completed) * (total - completed) if completed > 0 else 0
-                    print(f"진행률: {completed}/{total} ({pct:5.1f}%) | 경과 {_fmt_time(elapsed)} | 예상잔여 {_fmt_time(eta)}", flush=True)
+                    print(
+                        f"진행률: {completed}/{total} ({pct:5.1f}%) | 경과 {_fmt_time(elapsed)} | 예상잔여 {_fmt_time(eta)}",
+                        flush=True,
+                    )
                     next_report = completed + report_step
 
     elapsed = time.time() - start_t
-    print("\n\n" + "=" * 60 + "\n파라미터 튜닝 완료!\n" + f"총 소요 시간: {elapsed:.2f}초\n" + "=" * 60)
+    print(
+        "\n\n"
+        + "=" * 60
+        + "\n파라미터 튜닝 완료!\n"
+        + f"총 소요 시간: {elapsed:.2f}초\n"
+        + "=" * 60
+    )
 
     if not best_params or not best_result:
         print("\n유효한 결과를 찾지 못했습니다.")
         return None, None
 
     # 수익률 기준 최적 결과 요약 출력
-    start_date = best_result.get('start_date')
-    end_date = best_result.get('end_date')
-    cagr_pct = float(best_result.get('cagr_pct', 0.0))
-    cum_ret_pct = float(best_result.get('cumulative_return_pct', 0.0))
+    start_date = best_result.get("start_date")
+    end_date = best_result.get("end_date")
+    cagr_pct = float(best_result.get("cagr_pct", 0.0))
+    cum_ret_pct = float(best_result.get("cumulative_return_pct", 0.0))
     print("\n" + "=" * 60)
     print("[수익률 기준 최적 조합]")
     print(f"  - MA_PERIOD_FOR_STOCK: {best_params['ma_stock']}")

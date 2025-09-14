@@ -2,16 +2,16 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from bson import ObjectId
 import pandas as pd
-from pymongo import MongoClient, DESCENDING
+from bson import ObjectId
+from pymongo import DESCENDING, MongoClient
 
 import settings as global_settings
-
 
 # --- 전역 변수로 DB 연결 관리 ---
 _db_connection = None
 _mongo_client: Optional[MongoClient] = None
+
 
 def get_db_connection():
     """
@@ -34,10 +34,14 @@ def get_db_connection():
         max_pool = int(os.environ.get("MONGO_DB_MAX_POOL_SIZE", "20"))
         min_pool = int(os.environ.get("MONGO_DB_MIN_POOL_SIZE", "0"))
         max_idle = int(os.environ.get("MONGO_DB_MAX_IDLE_TIME_MS", "0"))  # 0 = driver default
-        wait_q_timeout = int(os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "0"))  # 0 = driver default
+        wait_q_timeout = int(
+            os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "0")
+        )  # 0 = driver default
 
         if not connection_string:
-            raise ValueError("MongoDB 연결 문자열이 설정되지 않았습니다. (MONGO_DB_CONNECTION_STRING)")
+            raise ValueError(
+                "MongoDB 연결 문자열이 설정되지 않았습니다. (MONGO_DB_CONNECTION_STRING)"
+            )
 
         if _mongo_client is None:
             client_kwargs = dict(
@@ -82,9 +86,7 @@ def get_db_connection():
         return None
 
 
-def get_portfolio_snapshot(
-    country: str, date_str: Optional[str] = None
-) -> Optional[Dict]:
+def get_portfolio_snapshot(country: str, date_str: Optional[str] = None) -> Optional[Dict]:
     """
     'trades'와 'daily_equities' 컬렉션에서 데이터를 재구성하여 특정 날짜의 포트폴리오 스냅샷을 생성합니다.
     """
@@ -102,20 +104,26 @@ def get_portfolio_snapshot(
             return None
     else:
         # daily_equities에서 가장 최근 날짜를 찾습니다.
-        latest_equity = db.daily_equities.find_one({"country": country, "is_deleted": {"$ne": True}}, sort=[("date", DESCENDING)])
+        latest_equity = db.daily_equities.find_one(
+            {"country": country, "is_deleted": {"$ne": True}}, sort=[("date", DESCENDING)]
+        )
         if latest_equity:
             target_date = latest_equity["date"]
 
     if not target_date:
         # 거래 내역은 있지만 평가금액이 없을 수도 있으므로, trades에서 날짜를 찾아봅니다.
-        latest_trade = db.trades.find_one({"country": country, "is_deleted": {"$ne": True}}, sort=[("date", DESCENDING)])
+        latest_trade = db.trades.find_one(
+            {"country": country, "is_deleted": {"$ne": True}}, sort=[("date", DESCENDING)]
+        )
         if latest_trade:
             target_date = latest_trade["date"]
         else:
-            return None # 데이터가 전혀 없음
+            return None  # 데이터가 전혀 없음
 
     # 2. 대상 날짜의 총 평가금액 조회
-    equity_data = db.daily_equities.find_one({"country": country, "date": target_date, "is_deleted": {"$ne": True}})
+    equity_data = db.daily_equities.find_one(
+        {"country": country, "date": target_date, "is_deleted": {"$ne": True}}
+    )
     # 기본값 초기화
     is_equity_stale = False
 
@@ -125,8 +133,13 @@ def get_portfolio_snapshot(
     # 평가금액이 없거나 0이면, 가장 최근의 유효한 평가금액을 찾습니다.
     if not is_equity_valid:
         latest_valid_equity = db.daily_equities.find_one(
-            {"country": country, "date": {"$lt": target_date}, "total_equity": {"$gt": 0}, "is_deleted": {"$ne": True}},
-            sort=[("date", DESCENDING)]
+            {
+                "country": country,
+                "date": {"$lt": target_date},
+                "total_equity": {"$gt": 0},
+                "is_deleted": {"$ne": True},
+            },
+            sort=[("date", DESCENDING)],
         )
         if latest_valid_equity:
             equity_data = latest_valid_equity
@@ -148,9 +161,7 @@ def get_portfolio_snapshot(
         upper_bound = target_date
     trades_cursor = db.trades.find(
         {"country": country, "date": {"$lte": upper_bound}, "is_deleted": {"$ne": True}}
-    ).sort(
-        [("date", 1), ("_id", 1)]
-    )
+    ).sort([("date", 1), ("_id", 1)])
 
     holdings_agg = {}
     for trade in trades_cursor:
@@ -172,16 +183,22 @@ def get_portfolio_snapshot(
     for ticker, data in holdings_agg.items():
         if data["shares"] > 0:
             avg_cost = data["total_cost"] / data["shares"] if data["shares"] > 0 else 0
-            holdings_list.append({
-                "ticker": ticker, "name": data["name"],
-                "shares": data["shares"], "avg_cost": avg_cost
-            })
+            holdings_list.append(
+                {
+                    "ticker": ticker,
+                    "name": data["name"],
+                    "shares": data["shares"],
+                    "avg_cost": avg_cost,
+                }
+            )
 
     # 4. 최종 스냅샷 조립
     snapshot = {
-        "date": target_date, "country": country,
-        "total_equity": total_equity, "holdings": holdings_list,
-        "is_equity_stale": is_equity_stale
+        "date": target_date,
+        "country": country,
+        "total_equity": total_equity,
+        "holdings": holdings_list,
+        "is_equity_stale": is_equity_stale,
     }
     # 'equity_date'를 항상 포함하여 헤더에서 비교/표시가 가능하도록 합니다.
     if equity_date:
@@ -193,9 +210,7 @@ def get_portfolio_snapshot(
     return snapshot
 
 
-def get_previous_portfolio_snapshot(
-    country: str, as_of_date: datetime
-) -> Optional[Dict]:
+def get_previous_portfolio_snapshot(country: str, as_of_date: datetime) -> Optional[Dict]:
     """
     주어진 날짜 이전의 가장 최근 포트폴리오 스냅샷을 가져옵니다.
     """
@@ -204,8 +219,12 @@ def get_previous_portfolio_snapshot(
         return None
 
     # 'daily_equities'와 'trades'에서 as_of_date 이전의 날짜들을 찾습니다.
-    equity_dates = db.daily_equities.distinct("date", {"country": country, "date": {"$lt": as_of_date}, "is_deleted": {"$ne": True}})
-    trade_dates = db.trades.distinct("date", {"country": country, "date": {"$lt": as_of_date}, "is_deleted": {"$ne": True}})
+    equity_dates = db.daily_equities.distinct(
+        "date", {"country": country, "date": {"$lt": as_of_date}, "is_deleted": {"$ne": True}}
+    )
+    trade_dates = db.trades.distinct(
+        "date", {"country": country, "date": {"$lt": as_of_date}, "is_deleted": {"$ne": True}}
+    )
 
     all_prev_dates = set(equity_dates).union(set(trade_dates))
 
@@ -218,7 +237,10 @@ def get_previous_portfolio_snapshot(
 
     return get_portfolio_snapshot(country, prev_date_str)
 
-def get_available_snapshot_dates(country: str, as_of_date: Optional[datetime] = None, include_as_of_date: bool = False) -> List[str]:
+
+def get_available_snapshot_dates(
+    country: str, as_of_date: Optional[datetime] = None, include_as_of_date: bool = False
+) -> List[str]:
     """
     지정된 국가에 대해 DB에 저장된 모든 스냅샷의 날짜 목록을 반환합니다.
     'daily_equities'와 'trades' 양쪽의 날짜를 모두 고려합니다.
@@ -283,6 +305,7 @@ def save_app_settings(country: str, settings_data: Dict) -> bool:
         print(f"오류: 앱 설정 저장 중 오류 발생: {e}")
         return False
 
+
 def get_common_settings() -> Optional[Dict]:
     """공통(전역) 설정을 DB에서 가져옵니다. 모든 국가가 공유합니다."""
     db = get_db_connection()
@@ -293,6 +316,7 @@ def get_common_settings() -> Optional[Dict]:
         settings.pop("_id", None)
     return settings
 
+
 def save_common_settings(settings_data: Dict) -> bool:
     """공통(전역) 설정을 DB에 저장합니다."""
     db = get_db_connection()
@@ -300,7 +324,9 @@ def save_common_settings(settings_data: Dict) -> bool:
         return False
     try:
         query = {"country": "common"}
-        db.app_settings.update_one(query, {"$set": {**settings_data, "country": "common"}}, upsert=True)
+        db.app_settings.update_one(
+            query, {"$set": {**settings_data, "country": "common"}}, upsert=True
+        )
         print("성공: 공통 설정을 저장했습니다.")
         return True
     except Exception as e:
@@ -331,7 +357,9 @@ def get_import_checkpoint(source: str, country: str, key: Optional[str] = None) 
         return None
 
 
-def save_import_checkpoint(source: str, country: str, last_ts_ms: int, key: Optional[str] = None) -> bool:
+def save_import_checkpoint(
+    source: str, country: str, last_ts_ms: int, key: Optional[str] = None
+) -> bool:
     """Upsert last processed timestamp (ms) for a given import source/country/key."""
     db = get_db_connection()
     if db is None:
@@ -350,6 +378,7 @@ def save_import_checkpoint(source: str, country: str, last_ts_ms: int, key: Opti
         print(f"오류: 체크포인트 저장 실패 ({source}/{country}/{key}): {e}")
         return False
 
+
 def get_status_report_from_db(country: str, date: datetime) -> Optional[Dict]:
     """
     지정된 조건에 맞는 현황 리포트를 DB에서 가져옵니다.
@@ -358,17 +387,17 @@ def get_status_report_from_db(country: str, date: datetime) -> Optional[Dict]:
     if db is None:
         return None
 
-    query = {
-        "country": country,
-        "date": date
-    }
+    query = {"country": country, "date": date}
     report_doc = db.status_reports.find_one(query)
     if report_doc and "report" in report_doc:
         # 조용한 읽기: 과거 탭 렌더링 등에서 대량 호출될 수 있으므로 콘솔 로그는 생략합니다.
         return report_doc["report"]
     return None
 
-def save_status_report_to_db(country: str, date: datetime, report_data: Tuple[str, List[str], List[List[str]]]) -> bool:
+
+def save_status_report_to_db(
+    country: str, date: datetime, report_data: Tuple[str, List[str], List[List[str]]]
+) -> bool:
     """
     계산된 현황 리포트를 DB에 저장합니다.
     """
@@ -379,23 +408,22 @@ def save_status_report_to_db(country: str, date: datetime, report_data: Tuple[st
     try:
         header_line, headers, rows = report_data
         doc_to_save = {
-            "country": country, "date": date,
-            "report": { "header_line": header_line, "headers": headers, "rows": rows },
-            "created_at": datetime.now()
+            "country": country,
+            "date": date,
+            "report": {"header_line": header_line, "headers": headers, "rows": rows},
+            "created_at": datetime.now(),
         }
         query = {"country": country, "date": date}
         # upsert=True 이므로, 문서가 존재하면 업데이트하고, 없으면 새로 생성합니다.
         # $unset을 사용하여 과거에 있었을 수 있는 'strategy' 필드를 명시적으로 제거합니다.
-        update_operation = {
-            "$set": doc_to_save,
-            "$unset": {"strategy": ""}
-        }
+        update_operation = {"$set": doc_to_save, "$unset": {"strategy": ""}}
         db.status_reports.update_one(query, update_operation, upsert=True)
         print(f"-> 현황 리포트가 DB에 저장되었습니다: {country}/{date.strftime('%Y-%m-%d')}")
         return True
     except Exception as e:
         print(f"오류: 현황 리포트 DB 저장 중 오류 발생: {e}")
         return False
+
 
 def get_all_daily_equities(country: str, start_date: datetime, end_date: datetime) -> List[Dict]:
     """지정된 기간 내의 모든 일별 평가금액 데이터를 DB에서 가져옵니다."""
@@ -409,7 +437,7 @@ def get_all_daily_equities(country: str, start_date: datetime, end_date: datetim
             "$gte": start_date,
             "$lte": end_date,
         },
-        "is_deleted": {"$ne": True}
+        "is_deleted": {"$ne": True},
     }
     equities = list(db.daily_equities.find(query).sort("date", 1))
     for equity in equities:
@@ -432,9 +460,7 @@ def get_all_trades(country: str) -> List[Dict]:
     }
 
     # 최신 거래가 위로 오도록 날짜와 생성 순서(_id)로 정렬합니다.
-    trades = list(
-        db.trades.find(query).sort([("date", DESCENDING), ("_id", DESCENDING)])
-    )
+    trades = list(db.trades.find(query).sort([("date", DESCENDING), ("_id", DESCENDING)]))
 
     for trade in trades:
         # ObjectId를 웹 앱에서 사용하기 쉽도록 문자열 ID로 변환합니다.
@@ -454,11 +480,8 @@ def get_trades_on_date(country: str, target_date: datetime) -> List[Dict]:
 
     query = {
         "country": country,
-        "date": {
-            "$gte": start_of_day,
-            "$lte": end_of_day
-        },
-        "is_deleted": {"$ne": True}
+        "date": {"$gte": start_of_day, "$lte": end_of_day},
+        "is_deleted": {"$ne": True},
     }
     # 생성 순서대로 정렬
     trades = list(db.trades.find(query).sort("_id", 1))
@@ -493,35 +516,39 @@ def delete_trade_by_id(trade_id: str) -> bool:
     try:
         obj_id = ObjectId(trade_id)
         result = db.trades.update_one(
-            {"_id": obj_id},
-            {"$set": {"is_deleted": True, "deleted_at": datetime.now()}}
+            {"_id": obj_id}, {"$set": {"is_deleted": True, "deleted_at": datetime.now()}}
         )
         if result.modified_count > 0:
             print(f"성공: 거래 ID {trade_id} 를 삭제했습니다.")
             return True
         else:
             print(f"경고: 삭제할 거래 ID {trade_id} 를 찾지 못했습니다.")
-            return True # 이미 삭제되었거나 없는 경우도 성공으로 간주
+            return True  # 이미 삭제되었거나 없는 경우도 성공으로 간주
     except Exception as e:
         print(f"오류: 거래 내역 삭제 중 오류 발생: {e}")
     return False
 
 
-def save_daily_equity(country: str, date: datetime, total_equity: float, international_shares: Optional[Dict] = None) -> bool:
+def save_daily_equity(
+    country: str, date: datetime, total_equity: float, international_shares: Optional[Dict] = None
+) -> bool:
     """Saves or updates the total equity for a given date."""
     db = get_db_connection()
-    if db is None: return False
+    if db is None:
+        return False
 
     try:
         query = {"country": country, "date": date}
-        set_data = {"country": country, "date": date, "total_equity": total_equity, "is_deleted": False}
+        set_data = {
+            "country": country,
+            "date": date,
+            "total_equity": total_equity,
+            "is_deleted": False,
+        }
         if international_shares is not None:
             set_data["international_shares"] = international_shares
 
-        update_operation = {
-            "$set": set_data,
-            "$unset": {"deleted_at": ""}
-        }
+        update_operation = {"$set": set_data, "$unset": {"deleted_at": ""}}
 
         db.daily_equities.update_one(query, update_operation, upsert=True)
         return True
@@ -539,7 +566,6 @@ def soft_delete_all_trades(country: str) -> int:
     if db is None:
         return 0
     try:
-        from pymongo import UpdateMany
         res = db.trades.update_many(
             {"country": country, "is_deleted": {"$ne": True}},
             {"$set": {"is_deleted": True, "deleted_at": datetime.now()}},
