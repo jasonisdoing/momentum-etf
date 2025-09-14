@@ -63,49 +63,9 @@ def get_previous_trading_day(date_str: str) -> str:
     return (dt - timedelta(days=1)).strftime("%Y%m%d")
 
 
-def create_ticker_sector_map(date: str) -> dict:
+def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
     """
-    KOSPI와 KOSDAQ의 모든 종목에 대해 {티커: 섹터명} 맵을 생성합니다.
-    pykrx의 WICS 섹터 분류를 사용합니다.
-    """
-    print("섹터 정보를 구성하는 중입니다... (시간이 소요될 수 있습니다)")
-    ticker_sector_map = {}
-
-    # KOSPI 섹터 정보 (WICS 기준)
-    kospi_indices = stock.get_index_ticker_list(market="KOSPI")
-    for index_code in kospi_indices:
-        index_name = stock.get_index_ticker_name(index_code)
-        # '코스피 XXX' 형태의 WICS 섹터 지수만 필터링
-        if index_name.startswith("코스피 ") and not any(
-            s in index_name for s in ["200", "100", "50", " KRX"]
-        ):
-            sector_name = index_name.replace("코스피 ", "")
-            tickers_in_sector = stock.get_index_ticker_list(date, index_code)
-            for ticker in tickers_in_sector:
-                ticker_sector_map[ticker] = sector_name
-
-    # KOSDAQ 섹터 정보 (WICS 기준)
-    kosdaq_indices = stock.get_index_ticker_list(market="KOSDAQ")
-    for index_code in kosdaq_indices:
-        index_name = stock.get_index_ticker_name(index_code)
-        # '코스닥 XXX' 형태의 WICS 섹터 지수만 필터링
-        if index_name.startswith("코스닥 ") and not any(
-            s in index_name for s in ["150", "글로벌", "프리미어"]
-        ):
-            sector_name = index_name.replace("코스닥 ", "")
-            tickers_in_sector = stock.get_index_ticker_list(date, index_code)
-            for ticker in tickers_in_sector:
-                # KOSPI 정보가 이미 있으면 덮어쓰지 않음 (더 상위 시장)
-                if ticker not in ticker_sector_map:
-                    ticker_sector_map[ticker] = sector_name
-
-    print("섹터 정보 구성 완료.")
-    return ticker_sector_map
-
-
-def find_top_gainers_by_sector(min_change_pct: float = 5.0, asset_type: str = "etf"):
-    """
-    지정된 등락률 이상 상승한 종목들을 섹터별로 분류하여 보여줍니다.
+    지정된 등락률 이상 상승한 종목들을 보여줍니다.
     """
     try:
         latest_day = get_latest_trading_day()
@@ -193,29 +153,19 @@ def find_top_gainers_by_sector(min_change_pct: float = 5.0, asset_type: str = "e
             if filtered_count > 0:
                 print(f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {filtered_count}개 종목을 제외했습니다.")
 
-        # 섹터 정보 할당
-        if asset_type == "etf":
-            top_gainers["섹터"] = "ETF"
-        else:
-            # 'stock'
-            ticker_to_sector = create_ticker_sector_map(latest_day)
-            top_gainers["섹터"] = top_gainers["티커"].map(ticker_to_sector).fillna("글로벌")
+        # 등락률 순으로 정렬
+        sorted_gainers = top_gainers.sort_values(by="등락률", ascending=False)
 
-        grouped = sorted(top_gainers.groupby("섹터"), key=lambda x: x[0])
-
-        print("\n--- 섹터별 급등주 목록 ---")
-        for sector_name, group in grouped:
-            print(f"\n# {sector_name}")
-            sorted_group = group.sort_values(by="등락률", ascending=False)
-            for _, row in sorted_group.iterrows():
-                print(f"  - {row['종목명']} ({row['티커']}): +{row['등락률']:.2f}%")
+        print("\n--- 급등주 목록 ---")
+        for _, row in sorted_gainers.iterrows():
+            print(f"  - {row['종목명']} ({row['티커']}): +{row['등락률']:.2f}%")
 
     except Exception as e:
         print(f"오류가 발생했습니다: {e}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="금일 급등주를 섹터별로 분류하여 보여줍니다.")
+    parser = argparse.ArgumentParser(description="금일 급등주를 보여줍니다.")
     parser.add_argument(
         "--min-change", type=float, default=3.0, help="검색할 최소 등락률 (기본값: 5.0)"
     )
@@ -227,4 +177,4 @@ if __name__ == "__main__":
         help="검색할 종목 유형 (stock: 일반 주식, etf: ETF (기본값))",
     )
     args = parser.parse_args()
-    find_top_gainers_by_sector(min_change_pct=args.min_change, asset_type=args.type)
+    find_top_gainers(min_change_pct=args.min_change, asset_type=args.type)

@@ -130,7 +130,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
     start_date_ts = pd.to_datetime(start_date).normalize()
     end_date_ts = pd.to_datetime(end_date).normalize()
     final_list = [d for d in trading_days_ts if start_date_ts <= d <= end_date_ts]
-    
+
     return sorted(list(set(final_list)))
 
 
@@ -352,7 +352,7 @@ def fetch_ohlcv_for_tickers(
     주어진 티커 목록에 대해 OHLCV 데이터를 병렬로 조회합니다.
     """
     prefetched_data = {}
-    
+
     if not date_range or len(date_range) != 2:
         return {}
 
@@ -369,7 +369,7 @@ def fetch_ohlcv_for_tickers(
             tkr, df = future.result()
             if df is not None and not df.empty:
                 prefetched_data[tkr] = df
-    
+
     return prefetched_data
 
 

@@ -208,7 +208,7 @@ def run_portfolio_backtest(
         for tkr, d in data.items():
             ticker_state, price = state[tkr], today_prices.get(tkr)
             is_ticker_warming_up = tkr not in tickers_available_today or pd.isna(d["ma"].get(dt))
-            
+
             decision_out = ("HOLD" if ticker_state["shares"] > 0 else "WAIT")
             note = ""
             if is_ticker_warming_up:
@@ -269,10 +269,10 @@ def run_portfolio_backtest(
                         trade_amount = qty * price
                         hold_ret = ((price / ticker_state_h["avg_cost"] - 1.0) * 100.0 if ticker_state_h["avg_cost"] > 0 else 0.0)
                         trade_profit = ((price - ticker_state_h["avg_cost"]) * qty if ticker_state_h["avg_cost"] > 0 else 0.0)
-                        
+
                         cash += trade_amount
                         ticker_state_h["shares"], ticker_state_h["avg_cost"] = 0, 0.0
-                        
+
                         # 이미 만들어둔 행을 업데이트
                         row = out_rows[tkr_h][-1]
                         row.update({
@@ -285,28 +285,28 @@ def run_portfolio_backtest(
             for tkr, d in data.items():
                 ticker_state, price = state[tkr], today_prices.get(tkr)
                 is_ticker_warming_up = tkr not in tickers_available_today or pd.isna(d["ma"].get(dt))
-                
-                if (ticker_state["shares"] > 0 and pd.notna(price) and 
+
+                if (ticker_state["shares"] > 0 and pd.notna(price) and
                     i >= ticker_state["sell_block_until"] and not is_ticker_warming_up):
-                    
+
                     decision = None
                     hold_ret = ((price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0)
-                    
+
                     if stop_loss is not None and hold_ret <= float(stop_loss):
                         decision = "CUT_STOPLOSS"
                     elif price < d["ma"].loc[dt]:
                         decision = "SELL_TREND"
-                    
+
                     if decision:
                         qty = ticker_state["shares"]
                         trade_amount = qty * price
                         trade_profit = ((price - ticker_state["avg_cost"]) * qty if ticker_state["avg_cost"] > 0 else 0.0)
-                        
+
                         cash += trade_amount
                         ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
                         if cooldown_days > 0:
                             ticker_state["buy_block_until"] = i + cooldown_days
-                        
+
                         # 행 업데이트
                         row = out_rows[tkr][-1]
                         row.update({

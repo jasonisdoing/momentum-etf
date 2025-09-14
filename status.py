@@ -25,10 +25,10 @@ from utils.db_manager import (
     get_previous_portfolio_snapshot,
     get_app_settings,
     get_trades_on_date,
-    get_stocks,
     get_common_settings,
     save_status_report_to_db,
 )
+from utils.stock_list_io import get_stocks
 from utils.data_loader import (
     fetch_ohlcv,
     format_aus_ticker_for_yfinance,
@@ -131,15 +131,15 @@ def get_market_regime_status_string() -> Optional[str]:
 
     current_price = df_regime["Close"].iloc[-1]
     current_ma = df_regime["MA"].iloc[-1]
-    
+
     if pd.notna(current_price) and pd.notna(current_ma) and current_ma > 0:
         proximity_pct = ((current_price / current_ma) - 1) * 100
         is_risk_off = current_price < current_ma
-        
+
         status_text = "위험" if is_risk_off else "안전"
         color = "orange" if is_risk_off else "green"
         return f'시장: <span style="color:{color}">{status_text} ({proximity_pct:+.1f}%)</span>{risk_off_periods_str}'
-    
+
     return f'<span style="color:grey">시장 상태: 계산 불가</span>{risk_off_periods_str}'
 
 
@@ -265,11 +265,11 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
             {"ticker": "379800", "country": "kor", "name": "KODEX 미국S&P500"},
             {"ticker": "BTC", "country": "coin", "name": "BTC"},
         ]
-        
+
         results = []
         for bm in benchmarks_to_compare:
             results.append(_calculate_and_format_single_benchmark(bm["ticker"], bm["country"], bm["name"]))
-        
+
         return "<br>".join(results)
     else:
         # 기존 로직 (한국/호주)
@@ -280,7 +280,7 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
             return None
         if not benchmark_ticker:
             return None
-        
+
         return _calculate_and_format_single_benchmark(benchmark_ticker, country)
 
 def is_market_open(country: str = "kor") -> bool:
@@ -355,24 +355,24 @@ def calculate_consecutive_holding_info(
                     current_shares += trade['shares']
                 elif trade['action'] == 'SELL':
                     current_shares -= trade['shares']
-            
+
             # 현재부터 과거로 시간을 거슬러 올라가며 확인합니다.
             buy_date = None
             for trade in trades: # 날짜 내림차순으로 정렬되어 있음
                 if current_shares <= 0:
                     break # 현재 보유 기간의 시작점을 지났음
-                
+
                 buy_date = trade['date'] # 잠재적인 매수 시작일
                 if trade['action'] == 'BUY':
                     current_shares -= trade['shares']
                 elif trade['action'] == 'SELL':
                     current_shares += trade['shares']
-            
+
             if buy_date:
                 holding_info[tkr]["buy_date"] = buy_date
         except Exception as e:
             print(f"-> 경고: {tkr} 보유일 계산 중 오류 발생: {e}")
-            
+
     return holding_info
 
 
@@ -489,9 +489,9 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
     }
 
     # DB에서 종목 목록을 가져와 전체 유니버스를 구성합니다.
-    stocks_from_db = get_stocks(country)
-    stock_meta = {stock['ticker']: stock for stock in stocks_from_db}
-    static_pairs = [(stock['ticker'], stock['name']) for stock in stocks_from_db]
+    stocks_from_file = get_stocks(country)
+    stock_meta = {stock['ticker']: stock for stock in stocks_from_file}
+    static_pairs = [(stock['ticker'], stock['name']) for stock in stocks_from_file]
     pairs = build_pairs_with_holdings(static_pairs, holdings)
 
     # 국가별로 다른 포맷터 사용
@@ -519,7 +519,7 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
     if market_is_open and base_date.date() == today_cal.date():
         if country == "kor":
             print("-> 장중입니다. 네이버 금융에서 실시간 시세를 가져옵니다 (비공식, 지연 가능).")
- 
+
     # --- 신호 계산 (공통 설정에서) ---
     common = get_common_settings()
     if not common:
@@ -538,10 +538,10 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
 
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
     # 코인은 거래소 잔고 기반 표시이므로, 종목 마스터가 비어 있어도 보유코인을 기준으로 진행합니다.
-    if not stocks_from_db and country != "coin":
-        print(f"오류: '{country}_stocks' 컬렉션에서 현황을 계산할 종목을 찾을 수 없습니다.")
+    if not stocks_from_file and country != "coin":
+        print(f"오류: 'data/' 폴더에서 '{country}' 국가의 현황을 계산할 종목을 찾을 수 없습니다.")
         return None, None, None, None, None, None, None, None
-    etf_tickers_status = {stock['ticker'] for stock in stocks_from_db if stock.get('type') == 'etf'}
+    etf_tickers_status = {stock['ticker'] for stock in stocks_from_file if stock.get('type') == 'etf'}
 
     max_ma_period = max(ma_period_etf, ma_period_stock, regime_ma_period if regime_filter_enabled else 0)
     required_days = max(max_ma_period, atr_period_norm) + 5  # 버퍼 추가
@@ -554,17 +554,17 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
             print("오류: 공통 설정에 MARKET_REGIME_FILTER_TICKER 값이 없습니다.")
             return None, None, None, None, None, None, None, None
         regime_ticker = str(common["MARKET_REGIME_FILTER_TICKER"])
-        
+
         df_regime = fetch_ohlcv(
             regime_ticker, country=country, months_range=[required_months, 0], base_date=base_date
         )
-        
+
         if df_regime is not None and not df_regime.empty and len(df_regime) >= regime_ma_period:
             df_regime["MA"] = df_regime["Close"].rolling(window=regime_ma_period).mean()
-            
+
             current_price = df_regime["Close"].iloc[-1]
             current_ma = df_regime["MA"].iloc[-1]
-            
+
             if pd.notna(current_price) and pd.notna(current_ma) and current_ma > 0:
                 proximity_pct = ((current_price / current_ma) - 1) * 100
                 is_risk_off = current_price < current_ma
@@ -594,35 +594,35 @@ def _fetch_and_prepare_data(country: str, date_str: Optional[str], prefetched_da
 
     with ThreadPoolExecutor() as executor:
         futures = [executor.submit(_load_and_prepare_ticker_data, task) for task in tasks]
-        
+
         desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
         for future in as_completed(futures):
             tkr, result = future.result()
             if not result:
                 continue
-    
+
             realtime_price = _fetch_realtime_price(tkr) if market_is_open else None
             c0 = float(realtime_price) if realtime_price else float(result["close"].iloc[-1])
             if pd.isna(c0): continue
-    
+
             prev_close = float(result["close"].iloc[-2]) if len(result["close"]) >= 2 and pd.notna(result["close"].iloc[-2]) else 0.0
             m = result["ma"].iloc[-1]
             a = result["atr"].iloc[-1]
-    
+
             ma_score = (c0 - m) / a if pd.notna(m) and pd.notna(a) and a > 0 else 0.0
             buy_signal_days_today = result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0
-    
+
             sh = float((holdings.get(tkr) or {}).get("shares") or 0.0)
             ac = float((holdings.get(tkr) or {}).get("avg_cost") or 0.0)
             total_holdings_value += sh * c0
             datestamps.append(result["df"].index[-1])
-    
+
             data_by_tkr[tkr] = {
                 "price": c0, "prev_close": prev_close, "s1": m, "s2": result["ma_period"],
                 "score": ma_score, "filter": buy_signal_days_today,
                 "shares": sh, "avg_cost": ac, "df": result["df"]
             }
-    
+
     return portfolio_data, data_by_tkr, total_holdings_value, datestamps, pairs, base_date, regime_info, stock_meta
 
 def _build_header_line(country, portfolio_data, current_equity, total_holdings_value, data_by_tkr, base_date):
@@ -763,7 +763,7 @@ def generate_status_report(
     """지정된 전략에 대한 오늘의 현황 데이터를 생성하여 반환합니다."""
     # 1. 데이터 로드 및 지표 계산
     result = _fetch_and_prepare_data(country, date_str, prefetched_data)
-    if not result or not result[0]:
+    if not result or not result[0]: # type: ignore
         return None
 
     portfolio_data, data_by_tkr, total_holdings_value, datestamps, pairs, base_date, regime_info, stock_meta = result
@@ -804,7 +804,7 @@ def generate_status_report(
     if not app_settings or "portfolio_topn" not in app_settings:
         print(f"오류: '{country}' 국가의 최대 보유 종목 수(portfolio_topn)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return None
-    
+
     try:
         denom = int(app_settings["portfolio_topn"])
     except (ValueError, TypeError):
@@ -950,7 +950,7 @@ def generate_status_report(
         holding_days_display = str(holding_days) if holding_days > 0 else "-"
 
         position_weight_pct = (amount / current_equity) * 100.0 if current_equity > 0 else 0.0
-        
+
         current_row = [
             0,
             tkr,
@@ -991,7 +991,7 @@ def generate_status_report(
         print(f"오류: '{country}' 국가의 설정에 'replace_weaker_stock'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return None
     try:
-        replace_weaker_stock = bool(app_settings_for_country["replace_weaker_stock"])  
+        replace_weaker_stock = bool(app_settings_for_country["replace_weaker_stock"])
     except Exception:
         print(f"오류: '{country}' 국가의 'replace_weaker_stock' 값이 올바르지 않습니다.")
         return None
@@ -1000,7 +1000,7 @@ def generate_status_report(
         print(f"오류: '{country}' 국가의 설정에 'max_replacements_per_day'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return None
     try:
-        max_replacements_per_day = int(app_settings_for_country["max_replacements_per_day"])  
+        max_replacements_per_day = int(app_settings_for_country["max_replacements_per_day"])
     except Exception:
         print(f"오류: '{country}' 국가의 'max_replacements_per_day' 값이 올바르지 않습니다.")
         return None
@@ -1008,7 +1008,7 @@ def generate_status_report(
         print(f"오류: '{country}' 국가의 교체 매매 임계값(replace_threshold)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return None
     try:
-        replace_threshold = float(app_settings_for_country["replace_threshold"])  
+        replace_threshold = float(app_settings_for_country["replace_threshold"])
     except (ValueError, TypeError):
         print(f"오류: '{country}' 국가의 교체 매매 임계값(replace_threshold) 값이 올바르지 않습니다.")
         return None
@@ -1020,10 +1020,10 @@ def generate_status_report(
             key=lambda x: x["score"],
             reverse=True,
         )
-        
+
         available_cash = total_cash
         buys_made = 0
-        
+
         for cand in buy_candidates:
             if buys_made >= slots_to_fill:
                 # 포트폴리오가 가득 찼으므로 더 이상 매수 불가
@@ -1032,7 +1032,7 @@ def generate_status_report(
 
             d = data_by_tkr.get(cand["tkr"])
             price = d["price"]
-            
+
             if price > 0:
                 equity = current_equity
                 min_val = min_pos * equity
@@ -1060,7 +1060,7 @@ def generate_status_report(
                     buy_phrase = f"매수 {format_shares(req_qty)}주 @ {price_formatter(price)} ({money_formatter(buy_notional)})"
                     original_phrase = cand["row"][-1]
                     cand["row"][-1] = f"{buy_phrase} ({original_phrase})"
-                    
+
                     available_cash -= buy_notional
                     buys_made += 1
                 else:
@@ -1144,18 +1144,18 @@ def generate_status_report(
     # 기준일에 실행된 거래가 있다면, 현황 목록에 '완료' 상태를 표시합니다.
     for decision in decisions:
         tkr = decision['tkr']
-        
+
         # 오늘 매수했고, 현재 보유 중인 종목
         if decision['state'] == 'HOLD' and tkr in executed_buys_today:
             # 이 종목이 오늘 신규 매수되었음을 표시
-            decision['row'][-1] = "✅ 완료: 신규 매수"
-            
+            decision['row'][-1] = "✅ 신규 매수"
+
         # 오늘 매도했고, 현재는 미보유(WAIT) 상태인 종목
         elif decision['state'] == 'WAIT' and tkr in executed_sells_today:
             # 이 종목이 오늘 매도되었음을 표시. 기존의 '추세진입' 등 메시지를 덮어씁니다.
             decision['state'] = "SOLD" # 정렬 및 표시를 위한 새로운 상태
             decision['row'][2] = "SOLD"
-            decision['row'][-1] = "✅ 완료: 매도"
+            decision['row'][-1] = "🔚 매도"
 
     # 7. 최종 정렬
     def sort_key(decision_dict):
@@ -1351,8 +1351,6 @@ def main(country: str = "kor", date_str: Optional[str] = None):
             "right",  # 고점대비
             "right",  # 점수
             "center", # 지속
-            "center", # 국가
-            "left",   # 업종
             "left",   # 문구
         ]
 

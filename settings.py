@@ -12,4 +12,3 @@ MONGO_DB_NAME = "momentum_pilot_db"
 
 # --- 웹앱 비밀번호 (선택 사항) ---
 # WEBAPP_PASSWORD = "your_password"
-

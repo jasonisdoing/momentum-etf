@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+from logic.data_updater import update_stock_names
 
 try:
     # DB에서 설정을 읽어 스케줄 주기를 제어
@@ -80,6 +81,14 @@ def main():
 
     # Load .env for API keys, DB, etc.
     load_env_if_present()
+
+    # Update stock names before scheduling
+    logging.info("Checking for and updating stock names...")
+    try:
+        update_stock_names()
+        logging.info("Stock name update complete.")
+    except Exception as e:
+        logging.error(f"Failed to update stock names: {e}")
 
     scheduler = BlockingScheduler()
 

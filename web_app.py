@@ -3,7 +3,7 @@ import sys
 import warnings
 
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import Dict, Optional
 import pandas as pd
 import threading
 import streamlit as st
@@ -22,24 +22,21 @@ warnings.filterwarnings(
 
 
 import settings as global_settings
-from test import TEST_MONTHS_RANGE
-from logic.settings import SECTOR_COUNTRY_OPTIONS
-from logic import settings as logic_settings
 from status import (
     generate_status_report,
     get_market_regime_status_string,
     get_benchmark_status_string,
+    _maybe_notify_coin_detailed,
     _maybe_notify_basic_status,
     _maybe_notify_signal_summary,
-    _maybe_notify_coin_detailed,
 )
 from utils.data_loader import fetch_yfinance_name, get_trading_days, fetch_pykrx_name, fetch_ohlcv_for_tickers
+from utils.stock_list_io import get_stocks
 from utils.db_manager import (
-    get_available_snapshot_dates, get_portfolio_snapshot, get_all_trades, get_all_daily_equities, 
-    get_sectors, save_sectors, get_sector_stock_counts, delete_sectors_and_reset_stocks,
-    get_status_report_from_db, save_status_report_to_db, delete_trade_by_id, save_sector_changes,
-    get_stocks, save_stocks, save_daily_equity, save_trade, 
-    get_app_settings, save_app_settings, get_common_settings, save_common_settings,
+    get_available_snapshot_dates, get_portfolio_snapshot, get_all_trades, get_all_daily_equities,
+    get_status_report_from_db, save_status_report_to_db, delete_trade_by_id,
+    save_daily_equity, save_trade, get_app_settings, save_app_settings,
+    get_common_settings, save_common_settings,
 )
 
 try:
@@ -162,51 +159,38 @@ def style_returns(val) -> str:
 
 def _display_status_report_df(df: pd.DataFrame, country_code: str):
     """
-    현황 리포트 DataFrame에 종목 메타데이터(이름, 국가, 업종)를 실시간으로 병합하고 스타일을 적용하여 표시합니다.
+    현황 리포트 DataFrame에 종목 메타데이터(이름)를 실시간으로 병합하고 스타일을 적용하여 표시합니다.
     """
     # 1. 종목 메타데이터 로드
-    stocks_data = get_stocks(country_code)
+    stocks_data = get_stocks(country_code) # 이제 파일에서 로드
     if not stocks_data:
-        meta_df = pd.DataFrame(columns=['ticker', '이름', '국가', '업종'])
+        meta_df = pd.DataFrame(columns=['ticker', '이름'])
     else:
         meta_df = pd.DataFrame(stocks_data)
-        required_cols = ['ticker', 'name', 'country', 'sector']
+        required_cols = ['ticker', 'name']
         for col in required_cols:
             if col not in meta_df.columns:
                 meta_df[col] = None
-        
+
         meta_df = meta_df[required_cols]
-        meta_df.rename(columns={'name': '이름', 'country': '국가', 'sector': '업종'}, inplace=True)
+        meta_df.rename(columns={'name': '이름'}, inplace=True)
 
     # 2. 메타데이터 병합
     df_merged = pd.merge(df, meta_df, left_on='티커', right_on='ticker', how='left')
-    
+
     # 메타데이터 병합 후 컬럼이 없을 경우를 대비
     if '이름' in df_merged.columns:
         df_merged['이름'] = df_merged['이름'].fillna(df_merged['티커'])
     else:
         df_merged['이름'] = df_merged['티커']
 
-    # 국가 및 업종 필드 처리
-    country_fill = '글로벌' if country_code == 'coin' else '-'
-    if '국가' in df_merged.columns:
-        df_merged['국가'] = df_merged['국가'].fillna(country_fill)
-    else:
-        df_merged['국가'] = country_fill
-
-    sector_fill = '가상화폐' if country_code == 'coin' else '-'
-    if '업종' in df_merged.columns:
-        df_merged['업종'] = df_merged['업종'].fillna(sector_fill)
-    else:
-        df_merged['업종'] = sector_fill
-
     # 3. 컬럼 순서 재정렬
     # '이름' 컬럼은 아래 column_config에서 '종목명'으로 표시됩니다.
     final_cols = [
-        '#', '티커', '이름', '상태', '매수일자', '보유일', '현재가', 
-        '일간수익률', '보유수량', '금액', '누적수익률', '비중', '고점대비', '점수', '지속', '국가', '업종', '문구'
+        '#', '티커', '이름', '상태', '매수일자', '보유일', '현재가',
+        '일간수익률', '보유수량', '금액', '누적수익률', '비중', '고점대비', '점수', '지속', '문구'
     ]
-    
+
     existing_cols = [col for col in final_cols if col in df_merged.columns]
     df_display = df_merged[existing_cols].copy()
 
@@ -226,7 +210,7 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
     for col in style_cols:
         if col in df_display.columns:
             styler = styler.map(style_returns, subset=[col])
-    
+
     formats = {
         "일간수익률": "{:+.2f}%",
         "누적수익률": "{:+.2f}%",
@@ -259,14 +243,14 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         column_config={
             "이름": st.column_config.TextColumn("종목명", width="medium"),
             "상태": st.column_config.TextColumn(width="small"),
+            "매수일자": st.column_config.TextColumn(width="small"),
             "보유": st.column_config.TextColumn(width=40),
             "보유수량": st.column_config.NumberColumn(format=shares_format_str),
             "일간수익률": st.column_config.TextColumn(width="small"),
+            "금액": st.column_config.TextColumn(width="small"),
             "누적수익률": st.column_config.TextColumn(width="small"),
             "비중": st.column_config.TextColumn(width=50),
             "지속": st.column_config.TextColumn(width=50),
-            "국가": st.column_config.TextColumn(width=60),
-            "업종": st.column_config.TextColumn(width="small"),
             "문구": st.column_config.TextColumn("문구", width="large"),
         }
     )
@@ -274,7 +258,7 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
 @st.dialog("BUY")
 def show_buy_dialog(country_code: str):
     """매수(BUY) 거래 입력을 위한 모달 다이얼로그를 표시합니다."""
-    
+
     currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
     message_key = f"buy_message_{country_code}"
 
@@ -284,7 +268,7 @@ def show_buy_dialog(country_code: str):
         ticker = st.session_state[f"buy_ticker_{country_code}"].strip()
         shares = st.session_state[f"buy_shares_{country_code}"]
         price = st.session_state[f"buy_price_{country_code}"]
-        
+
         if not ticker or not shares > 0 or not price > 0:
             st.session_state[message_key] = (
                 "error",
@@ -325,7 +309,7 @@ def show_buy_dialog(country_code: str):
             "price": float(price),
             "note": "Manual input from web app"
         }
-        
+
         if save_trade(trade_data):
             st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
         else:
@@ -348,8 +332,8 @@ def show_buy_dialog(country_code: str):
         shares_format_str = "%.8f" if country_code == "coin" else "%d"
         st.number_input("수량", min_value=0.00000001, step=0.00000001, format=shares_format_str, key=f"buy_shares_{country_code}")
         st.number_input(
-            f"매수 단가{currency_str}", 
-            min_value=0.0, 
+            f"매수 단가{currency_str}",
+            min_value=0.0,
             format="%.4f" if country_code == "aus" else ("%d" if country_code in ["kor", "coin"] else "%d"),
             key=f"buy_price_{country_code}"
         )
@@ -363,7 +347,7 @@ def show_sell_dialog(country_code: str):
     message_key = f"sell_message_{country_code}"
 
     from utils.data_loader import fetch_naver_realtime_price, fetch_ohlcv
-    
+
     latest_date_str = get_available_snapshot_dates(country_code)[0] if get_available_snapshot_dates(country_code) else None
     if not latest_date_str:
         st.warning("보유 종목이 없어 매도할 수 없습니다.")
@@ -373,9 +357,9 @@ def show_sell_dialog(country_code: str):
     if not snapshot or not snapshot.get("holdings"):
         st.warning("보유 종목이 없어 매도할 수 없습니다.")
         return
-        
+
     holdings = snapshot.get("holdings", [])
-    
+
     holdings_with_prices = []
     with st.spinner("보유 종목의 현재가를 조회하는 중..."):
         for h in holdings:
@@ -396,7 +380,7 @@ def show_sell_dialog(country_code: str):
                         df.columns = df.columns.get_level_values(0)
                         df = df.loc[:, ~df.columns.duplicated()]
                     price = df['Close'].iloc[-1]
-            
+
             # 불리언 평가 및 계산 전에 가격을 스칼라로 보장합니다.
             # 예: 중복 컬럼 등으로 인해 함수가 Series를 반환하는 경우를 처리합니다.
             price_val = price.item() if isinstance(price, pd.Series) else price
@@ -422,7 +406,7 @@ def show_sell_dialog(country_code: str):
 
         # data_editor에서 선택된 행의 인덱스를 찾습니다.
         selected_indices = [
-            idx for idx, edit in editor_state.get("edited_rows", {}).items() 
+            idx for idx, edit in editor_state.get("edited_rows", {}).items()
             if edit.get("선택")
         ]
 
@@ -431,7 +415,7 @@ def show_sell_dialog(country_code: str):
             return
 
         selected_rows = df_holdings.loc[selected_indices]
-        
+
         success_count = 0
         for _, row in selected_rows.iterrows():
             trade_data = {
@@ -443,7 +427,7 @@ def show_sell_dialog(country_code: str):
             }
             if save_trade(trade_data):
                 success_count += 1
-        
+
         if success_count == len(selected_rows):
             st.session_state[message_key] = (
                 "success",
@@ -466,7 +450,7 @@ def show_sell_dialog(country_code: str):
     with st.form(f"sell_form_{country_code}"):
         st.subheader("매도할 종목을 선택하세요 (전체 매도)")
         st.date_input("매도일", value="today", key=f"sell_date_{country_code}")
-        
+
         df_holdings['선택'] = False
         # 정렬이 필요한 컬럼은 숫자형으로 유지하고, column_config에서 포맷팅합니다.
         # 이렇게 하면 '평가금액' 등에서 문자열이 아닌 숫자 기준으로 올바르게 정렬됩니다.
@@ -474,10 +458,10 @@ def show_sell_dialog(country_code: str):
         value_col_name = f'평가금액{currency_str}'
         price_col_name = f'현재가{currency_str}'
         df_display.rename(columns={
-            'name': '종목명', 'ticker': '티커', 'shares': '보유수량', 'return_pct': '수익률', 
+            'name': '종목명', 'ticker': '티커', 'shares': '보유수량', 'return_pct': '수익률',
             'value': value_col_name, 'price': price_col_name
         }, inplace=True)
-        
+
         st.data_editor(
             df_display, hide_index=True, width='stretch',
             key=f"sell_editor_{country_code}",
@@ -495,213 +479,43 @@ def show_sell_dialog(country_code: str):
                 ),
             }
         )
-        
+
         st.form_submit_button("선택 종목 매도", on_click=on_sell_submit)
 
 
-@st.dialog("업종 추가")
-def show_add_sector_dialog(country_code: str):
-    """업종 추가를 위한 모달 다이얼로그"""
-    with st.form(f"add_sector_form_{country_code}"):
-        sector_name = st.text_input("업종명")
-        added_date = st.date_input("추가일", value="today")
-        submitted = st.form_submit_button("저장")
-
-        if submitted:
-            if not sector_name:
-                st.error("업종명을 입력해주세요.")
-                return
-
-            with st.spinner("업종을 추가하는 중..."):
-                current_sectors_data = get_sectors()
-                current_sector_names = {s.get("name") for s in current_sectors_data}
-                if sector_name in current_sector_names:
-                    st.error(f"업종 '{sector_name}'은(는) 이미 존재합니다.")
-                    return
-                
-                new_sector = {
-                    "name": sector_name,
-                    "added_date": pd.to_datetime(added_date).to_pydatetime()
-                }
-                current_sectors_data.append(new_sector)
-                
-                if save_sectors(current_sectors_data):
-                    st.success(f"업종 '{sector_name}'이(가) 추가되었습니다.")
-                    st.rerun()
-                else:
-                    st.error("업종 추가에 실패했습니다.")
 
 
-@st.dialog("종목 추가")
-def show_add_stock_dialog(country_code: str, sectors: List[Dict]):
-    """종목 추가를 위한 모달 다이얼로그"""
-    # no external validation required for coin tickers
 
-    with st.form(f"add_stock_form_{country_code}"):
-        ticker = st.text_input("티커")
-        
-        stock_name_input = ""
-        market_country = ""
-        stock_type = ""
-        sector = ""
-
-        if country_code == "coin":
-            stock_name_input = st.text_input("종목명")
-            market_country = "글로벌"
-            stock_type = "crypto"
-            sector = "가상화폐"
-        else:
-            country_options = [""] + SECTOR_COUNTRY_OPTIONS
-            market_country = st.selectbox("소속 국가(시장)", options=country_options, index=0, format_func=lambda x: "선택 안 함" if x == "" else x)
-            stock_type = st.selectbox("타입", options=["etf", "stock"])
-            
-            sector_names = sorted([s.get("name") for s in sectors if s.get("name")])
-            sector_options = [""] + sector_names
-            sector = st.selectbox("업종", options=sector_options, index=0, format_func=lambda x: "선택 안 함" if x == "" else x)
-        
-        submitted = st.form_submit_button("저장")
-
-        if submitted:
-            if not ticker:
-                st.error("티커는 필수 항목입니다.")
-                return
-
-            stock_name = ""
-            if country_code == "coin":
-                if not stock_name_input:
-                    st.error("종목명은 필수 항목입니다.")
-                    return
-                stock_name = stock_name_input
-            else:
-                if not stock_type:
-                    st.error("타입은 필수 항목입니다.")
-                    return
-
-            with st.spinner("종목 정보를 조회하고 추가하는 중..."):
-                if country_code != "coin":
-                    # 코인이 아닌 경우에도 종목명을 조회합니다.
-                    fetched_name = ""
-                    if country_code == "kor" and _stock:
-                        try:
-                            name_candidate = _stock.get_etf_ticker_name(ticker)
-                            if isinstance(name_candidate, str) and name_candidate:
-                                fetched_name = name_candidate
-                        except Exception: pass
-                        if not fetched_name:
-                            try:
-                                name_candidate = _stock.get_market_ticker_name(ticker)
-                                if isinstance(name_candidate, str) and name_candidate:
-                                    fetched_name = name_candidate
-                            except Exception: pass
-                    elif country_code == "aus":
-                        fetched_name = fetch_yfinance_name(ticker)
-                    
-                    if not fetched_name:
-                        st.warning(f"티커 '{ticker.upper()}'의 종목명을 찾을 수 없습니다. 종목명 없이 추가됩니다.")
-                    stock_name = fetched_name # 조회한 종목명을 사용
-
-                current_stocks = get_stocks(country_code)
-                if ticker.upper() in [s['ticker'] for s in current_stocks]:
-                    st.error(f"티커 '{ticker.upper()}'는 현재 포트폴리오에 이미 존재합니다.")
-                    return
-
-                new_stock = {
-                    "country": market_country,
-                    "ticker": ticker.upper(),
-                    "name": stock_name,
-                    "type": stock_type,
-                    "sector": sector
-                }
-                current_stocks.append(new_stock)
-                
-                if save_stocks(country_code, current_stocks):
-                    success_msg = f"종목 '{ticker.upper()}'이(가) 추가되었습니다."
-                    if stock_name:
-                        success_msg = f"종목 '{ticker.upper()} ({stock_name})'이(가) 추가되었습니다."
-                    st.success(success_msg)
-                    st.rerun()
-                else:
-                    st.error("종목 추가에 실패했습니다.")
-
-
-def render_master_stock_ui(country_code: str, sectors: List[Dict]):
-    """종목 마스터 관리 UI를 렌더링합니다."""
+def render_master_stock_ui(country_code: str):
+    """종목 마스터 조회 UI를 렌더링합니다."""
     # from utils.data_loader import fetch_crypto_name # 사용자 요청에 따라 제거됨
-    
+
     country_name = COUNTRY_CODE_MAP.get(country_code, "기타")
 
     if country_code == "coin":
-        st.info("이곳에서 가상화폐 종목을 관리할 수 있습니다. 티커와 종목명만 직접 입력합니다.")
+        st.info("이곳에서 가상화폐 종목을 조회할 수 있습니다.")
     else:
-        st.info("이곳에서 투자 유니버스에 포함될 종목을 관리할 수 있습니다.")
-
-    col1, col2, _ = st.columns([1.2, 1.8, 7.0])
-    with col1:
-        if st.button("종목 추가", key=f"add_stock_btn_{country_code}"):
-            show_add_stock_dialog(country_code, sectors)
-    
-    if country_code != "coin":
-        with col2:
-            if st.button("종목명 일괄 업데이트", key=f"update_names_btn_{country_code}"):
-                with st.spinner("모든 종목명을 업데이트하는 중..."):
-                    stocks_to_update = get_stocks(country_code)
-                    updated_count = 0
-                    
-                    for stock in stocks_to_update:
-                        # 이름이 없거나, 티커와 이름이 같은 경우에 업데이트 시도
-                        if not stock.get("name") or stock.get("name") == stock.get("ticker"):
-                            new_name = ""
-                            ticker = stock.get("ticker")
-                            if not ticker:
-                                continue
-
-                            if country_code == "kor":
-                                new_name = fetch_pykrx_name(ticker)
-                            elif country_code == "aus":
-                                new_name = fetch_yfinance_name(ticker)
-                            
-                            # 새로운 이름이 있고, 기존 이름과 다를 경우에만 업데이트
-                            if new_name and new_name != stock.get("name"):
-                                stock['name'] = new_name
-                                updated_count += 1
-                    
-                    if updated_count > 0:
-                        if save_stocks(country_code, stocks_to_update):
-                            st.success(f"{updated_count}개 종목의 이름이 업데이트되었습니다.")
-                            st.rerun()
-                        else:
-                            st.error("종목명 업데이트 저장에 실패했습니다.")
-                    else:
-                        st.info("업데이트할 종목명이 없습니다.")
+        st.info("이곳에서 투자 유니버스에 포함된 종목을 조회할 수 있습니다.")
 
     with st.spinner("종목 마스터 데이터를 불러오는 중..."):
-        # 사용 가능한 업종 목록을 이름 리스트로 준비합니다.
-        sector_names = sorted([s.get("name") for s in sectors if s.get("name")])
-        sector_options = [""] + sector_names
-        default_sector = ""
-
         stocks_data = get_stocks(country_code)
         if not stocks_data:
-            st.info("관리할 종목이 없습니다. '종목 추가' 버튼을 눌러 종목을 추가해주세요.")
+            st.info("조회할 종목이 없습니다.")
             return
 
         df_stocks = pd.DataFrame(stocks_data)
 
+        # 데이터 정합성을 위한 처리: 'name' 컬럼이 없거나 NaN 값이 있으면 오류가 발생할 수 있습니다.
+        if 'name' not in df_stocks.columns:
+            df_stocks['name'] = ''
+        df_stocks['name'] = df_stocks['name'].fillna('').astype(str)
+
         # 데이터 정합성을 위한 처리
         if country_code == "coin":
-            for col, default_val in [("country", "글로벌"), ("sector", "가상화폐"), ("type", "crypto")]:
-                if col not in df_stocks.columns:
-                    df_stocks[col] = default_val
-                df_stocks[col] = df_stocks[col].fillna(default_val)
+            if "type" not in df_stocks.columns:
+                df_stocks["type"] = "crypto"
+            df_stocks["type"] = df_stocks["type"].fillna("crypto")
         else:
-            if 'country' not in df_stocks.columns:
-                df_stocks['country'] = ""
-            df_stocks['country'] = df_stocks['country'].apply(lambda c: c if c in SECTOR_COUNTRY_OPTIONS else "")
-            
-            if 'sector' not in df_stocks.columns:
-                df_stocks['sector'] = ""
-            df_stocks['sector'] = df_stocks['sector'].apply(lambda s: s if s in sector_options else default_sector)
-
             if 'type' not in df_stocks.columns:
                 df_stocks['type'] = ""
 
@@ -709,225 +523,40 @@ def render_master_stock_ui(country_code: str, sectors: List[Dict]):
         if 'last_modified' not in df_stocks.columns:
             df_stocks['last_modified'] = pd.NaT
 
-
-        # 정렬 로직: 1. 업종 미지정 우선, 2. 오래된 수정일자 우선
-        df_stocks['sector_sort_key'] = df_stocks['sector'].apply(lambda s: 0 if s == default_sector else 1)
+        # 정렬 로직: 오래된 수정일자 우선
         df_stocks['modified_sort_key'] = pd.to_datetime(df_stocks['last_modified'], errors='coerce')
 
         df_stocks.sort_values(
-            by=['sector_sort_key', 'modified_sort_key'],
-            ascending=[True, True],
+            by=['modified_sort_key'],
+            ascending=True,
             na_position='first',  # 수정일자가 없는 가장 오래된 데이터부터 표시
             inplace=True
         )
-        
+
         # 정렬에 사용된 임시 컬럼들을 삭제합니다.
-        df_for_display = df_stocks.drop(columns=['sector_sort_key', 'modified_sort_key', 'last_modified'], errors='ignore')
+        df_for_display = df_stocks.drop(columns=['modified_sort_key', 'last_modified'], errors='ignore')
 
         # 컬럼 순서 조정
         if country_code == "coin":
-            display_cols = ['삭제', 'ticker', 'name', 'country', 'sector']
+            display_cols = ['ticker', 'name']
         else:
-            display_cols = ['삭제', 'ticker', 'country', 'name', 'type', 'sector']
+            display_cols = ['ticker', 'name', 'type']
         df_for_display = df_stocks.reindex(columns=display_cols)
-        df_for_display['삭제'] = False
 
-
-        st.info("아래 표에서 종목 정보를 수정하거나, 삭제할 종목을 선택 후 '변경사항 저장' 버튼을 눌러주세요.")
-        
-        column_config_dict = {
-            "삭제": st.column_config.CheckboxColumn("삭제", required=True),
-            "ticker": st.column_config.TextColumn("티커", disabled=True),
-            "name": st.column_config.TextColumn("종목명", disabled=False),
-        }
-
-        if country_code == "coin":
-            column_config_dict.update({
-                "country": st.column_config.TextColumn("국가", disabled=True),
-                "sector": st.column_config.TextColumn("업종", disabled=True),
-            })
-        else:
-            column_config_dict.update({
-                "country": st.column_config.SelectboxColumn(
-                    "국가",
-                    options=[""] + SECTOR_COUNTRY_OPTIONS,
-                    required=False,
-                ),
-                "type": st.column_config.TextColumn("타입", disabled=True),
-                "sector": st.column_config.SelectboxColumn(
-                    "업종",
-                    options=sector_options,
-                    required=False,
-                ),
-            })
-
-        edited_df = st.data_editor(
+        st.dataframe(
             df_for_display,
             width='stretch',
             hide_index=True,
-            key=f"stock_editor_{country_code}",
-            column_config=column_config_dict,
-        )
-
-        if st.button("변경사항 저장", key=f"save_stock_changes_{country_code}"):
-            with st.spinner("종목 정보를 업데이트하는 중..."):
-                # 사용자가 수정한 행을 식별하여 타임스탬프를 업데이트합니다.
-                editor_state = st.session_state[f"stock_editor_{country_code}"]
-                edited_rows_indices = editor_state.get("edited_rows", {}).keys()
-                
-                if edited_rows_indices:
-                    edited_tickers = df_stocks.iloc[list(edited_rows_indices)]['ticker'].tolist()
-                else:
-                    edited_tickers = []
-
-                # 삭제로 표시된 행을 제외하고 저장할 데이터 준비
-                stocks_to_keep_df = edited_df[~edited_df['삭제']]
-                
-                # 코인의 경우 'country', 'type', 'sector' 컬럼이 없을 수 있으므로 조건부 드롭
-                cols_to_drop = ['삭제']
-                if country_code == "coin":
-                    # 코인 데이터프레임에는 이 컬럼들이 없을 수 있으므로, 존재하는 경우에만 드롭
-                    cols_to_drop.extend([col for col in ['country', 'type', 'sector'] if col in stocks_to_keep_df.columns])
-                
-                stocks_to_save = stocks_to_keep_df.drop(columns=cols_to_drop, errors='ignore').to_dict('records')
-
-                if save_stocks(country_code, stocks_to_save, edited_tickers):
-                    st.success("변경사항이 성공적으로 저장되었습니다.")
-                    st.rerun()
-                else:
-                    st.error("종목 정보 업데이트에 실패했습니다.")
-
-
-def render_master_sector_ui():
-    """전역 업종 마스터 관리 UI를 렌더링합니다."""
-    st.info("이곳에서 모든 포트폴리오가 공통으로 사용하는 업종 리스트를 관리할 수 있습니다.")
-
-    with st.spinner("업종 데이터를 불러오는 중..."):
-        if st.button("업종 추가", key="add_sector_btn_global"):
-            # show_add_sector_dialog는 country_code를 사용하지 않으므로 빈 문자열을 전달해도 무방합니다.
-            show_add_sector_dialog("")
-
-        sectors = get_sectors()
-        if not sectors:
-            # 초기 데이터 시딩
-            initial_sectors = [
-                "지수", "AI·반도체", "IT·소프트웨어", "금융", "고배당",
-                "인컴·부동산", "에너지·원자재", "산업재·인프라", "의약·헬스케어",
-                "소비재 (생활·필수재)", "농업·식량", "레저·서비스",
-                "미디어·엔터테인먼트", "자동차·운송·물류", "친환경·신재생에너지",
-                "방산·우주항공"
-            ]
-            sectors_to_save = [{"name": s, "added_date": datetime.now()} for s in initial_sectors]
-            if save_sectors(sectors_to_save):
-                st.success("초기 업종 데이터가 생성되었습니다.")
-                st.rerun()
-            else:
-                st.error("초기 업종 데이터 생성에 실패했습니다.")
-
-        # 데이터 에디터를 위한 데이터프레임 생성
-        sector_counts_by_country = get_sector_stock_counts()
-        data_for_df = []
-        for s in sectors:
-            sector_name = s.get("name")
-            counts = sector_counts_by_country.get(sector_name, {})
-            data_for_df.append({
-                "업종명": sector_name,
-                "종목 수(한국)": counts.get("kor", 0),
-                "종목 수(호주)": counts.get("aus", 0),
-                "추가된 날짜": pd.to_datetime(s.get("added_date")) if s.get("added_date") else pd.NaT
-            })
-
-        # 총 종목 수를 기준으로 정렬
-        sorted_data = sorted(
-            data_for_df,
-            key=lambda x: (-(x["종목 수(한국)"] + x["종목 수(호주)"]), x["추가된 날짜"] if pd.notna(x["추가된 날짜"]) else pd.Timestamp.max)
-        )
-
-        for item in sorted_data:
-            if pd.notna(item["추가된 날짜"]):
-                item["추가된 날짜"] = item["추가된 날짜"].strftime('%Y-%m-%d')
-            else:
-                item["추가된 날짜"] = "-"
-
-        df_for_display = pd.DataFrame(sorted_data)
-        original_df = df_for_display.copy()
-
-        df_for_display['삭제'] = False
-        df_for_display = df_for_display[['삭제', '업종명', '종목 수(한국)', '종목 수(호주)', '추가된 날짜']]
-
-        st.info("아래 표에서 '업종명'을 수정하거나, 삭제할 업종을 선택 후 버튼을 눌러주세요.")
-
-        edited_df = st.data_editor(
-            df_for_display,
-            width='stretch',
-            hide_index=True,
-            key="sector_editor_global",
+            key=f"stock_viewer_{country_code}",
             column_config={
-                "삭제": st.column_config.CheckboxColumn("삭제", required=True),
-                "업종명": st.column_config.TextColumn("업종명", required=True),
-                "종목 수(한국)": st.column_config.NumberColumn("종목 수(한국)", disabled=True),
-                "종목 수(호주)": st.column_config.NumberColumn("종목 수(호주)", disabled=True),
-                "추가된 날짜": st.column_config.TextColumn("추가된 날짜", disabled=True)
+                "ticker": st.column_config.TextColumn("티커"),
+                "name": st.column_config.TextColumn("종목명"),
+                "type": st.column_config.TextColumn("타입"),
             }
         )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("업종명 변경사항 저장", key="save_sector_changes_global"):
-                name_changes = {}
-                final_sectors = []
-                
-                edited_names = [row['업종명'] for _, row in edited_df.iterrows()]
-                if len(set(edited_names)) != len(edited_df):
-                    st.error("업종명은 고유해야 합니다.")
-                    st.stop()
 
-                for index in original_df.index:
-                    old_name = original_df.loc[index, '업종명']
-                    edited_row = edited_df.loc[index]
-                    new_name = edited_row['업종명']
 
-                    if not new_name:
-                        st.error("업종명은 비워둘 수 없습니다.")
-                        st.stop()
-
-                    if old_name != new_name:
-                        name_changes[old_name] = new_name
-                    
-                    original_sector_data = next((s for s in data_for_df if s['업종명'] == old_name), None)
-                    added_date = pd.to_datetime(original_sector_data['추가된 날짜']) if original_sector_data and original_sector_data['추가된 날짜'] != '-' else datetime.now()
-
-                    final_sectors.append({
-                        "name": new_name, "added_date": added_date
-                    })
-
-                if not name_changes and original_df.equals(edited_df.drop(columns=['삭제'])):
-                    st.info("변경사항이 없습니다.")
-                else:
-                    with st.spinner("업종 정보를 업데이트하는 중..."):
-                        if save_sector_changes(final_sectors, name_changes):
-                            st.success("업종 정보가 성공적으로 업데이트되었습니다.")
-                            st.rerun()
-                        else:
-                            st.error("업종 정보 업데이트에 실패했습니다.")
-        
-        with col2:
-            if st.button("선택한 업종 삭제", key="delete_sector_btn_global", type="primary"):
-                sectors_to_delete_df = edited_df[edited_df['삭제']]
-                if sectors_to_delete_df.empty:
-                    st.warning("삭제할 업종을 선택해주세요.")
-                else:
-                    names_to_delete = sectors_to_delete_df['업종명'].tolist()
-                    
-                    if "글로벌" in names_to_delete:
-                        st.error("'글로벌' 업종은 삭제할 수 없습니다.")
-                    else:
-                        with st.spinner(f"{len(names_to_delete)}개 업종을 삭제하는 중..."):
-                            if delete_sectors_and_reset_stocks(names_to_delete):
-                                st.success(f"{len(names_to_delete)}개 업종이 성공적으로 삭제되었습니다.")
-                                st.rerun()
-                            else:
-                                st.error("업종 삭제에 실패했습니다.")
 
 def _display_success_toast(country_code: str):
     """
@@ -1175,12 +804,12 @@ def render_country_tab(country_code: str):
                 # 코인 탭에서는 '과거 전체 다시계산' 기능을 제공하지 않습니다.
                 if country_code != 'coin' and st.button("과거 전체 다시계산", key=f"recalc_all_hist_{country_code}"):
                     # 1. 재계산에 필요한 모든 종목과 전체 기간을 결정합니다.
-                    stocks_from_db = get_stocks(country_code)
-                    tickers = [s['ticker'] for s in stocks_from_db]
-                    
+                    stocks_from_file = get_stocks(country_code)
+                    tickers = [s['ticker'] for s in stocks_from_file]
+
                     oldest_date = pd.to_datetime(past_dates[-1])
                     newest_date = pd.to_datetime(past_dates[0])
-                    
+
                     # 웜업 기간 계산에 필요한 파라미터를 DB에서 읽어옵니다.
                     app_settings_db = get_app_settings(country_code)
                     common_settings = get_common_settings()
@@ -1203,8 +832,8 @@ def render_country_tab(country_code: str):
 
                     # 2. 모든 기간의 데이터를 한 번에 병렬로 가져옵니다.
                     prefetched_data = fetch_ohlcv_for_tickers(
-                        tickers, 
-                        country=country_code, 
+                        tickers,
+                        country=country_code,
                         date_range=[oldest_date.strftime('%Y-%m-%d'), newest_date.strftime('%Y-%m-%d')],
                         warmup_days=warmup_days
                     )
@@ -1275,7 +904,7 @@ def render_country_tab(country_code: str):
                                 if calc_result:
                                     st.success("계산/저장 완료!")
                                     st.rerun()
-        
+
         with history_equity_tab:
             app_settings = get_app_settings(country_code)
             initial_date = (app_settings.get("initial_date") if app_settings else None) or (datetime.now() - pd.DateOffset(months=3))
@@ -1320,7 +949,7 @@ def render_country_tab(country_code: str):
                         column_config["is_change_pct"] = st.column_config.NumberColumn("해외주식 수익률(%)", format="%.2f", help="수익률(%)만 입력합니다. 예: 5.5")
 
                     st.info("총 평가금액을 수정한 후 아래 '저장하기' 버튼을 눌러주세요.")
-                    
+
                     edited_df = st.data_editor(df_to_edit, key=f"equity_editor_{country_code}", width='stretch', hide_index=True, column_config=column_config)
 
                     if st.button("평가금액 저장하기", key=f"save_all_equities_{country_code}"):
@@ -1332,10 +961,10 @@ def render_country_tab(country_code: str):
                                 is_data_to_save = None
                                 if country_code == 'aus':
                                     is_data_to_save = {"value": row['is_value'], "change_pct": row['is_change_pct']}
-                                
+
                                 if save_daily_equity(country_code, date_to_save, equity_to_save, is_data_to_save):
                                     saved_count += 1
-                            
+
                             st.success(f"{saved_count}개 날짜의 평가금액을 저장/업데이트했습니다.")
                             st.rerun()
 
@@ -1352,7 +981,7 @@ def render_country_tab(country_code: str):
             with col2:
                 if st.button("SELL", key=f"add_sell_btn_{country_code}"):
                     show_sell_dialog(country_code)
-        
+
         all_trades = get_all_trades(country_code)
         if not all_trades:
             st.info("거래 내역이 없습니다.")
@@ -1367,7 +996,7 @@ def render_country_tab(country_code: str):
                 )
                 if selected != 'ALL':
                     df_trades = df_trades[df_trades['ticker'].str.upper() == selected]
-            
+
             # 금액(수량*가격) 계산: 정수, 천단위 콤마
             try:
                 amt = (pd.to_numeric(df_trades.get('shares'), errors='coerce').fillna(0.0) *
@@ -1380,13 +1009,13 @@ def render_country_tab(country_code: str):
 
             # 삭제 선택을 위한 컬럼 추가
             df_trades['delete'] = False
-            
+
             # 표시할 컬럼 순서 정의
             # 기록시간 대신 거래시간(빗썸 시간, 'date')을 우선 표시합니다.
             cols_to_show = ['delete', 'date', 'action', 'ticker', 'name', 'shares', 'price', 'amount', 'note', 'id']
             # reindex를 사용하여 이전 데이터에 'created_at'이 없어도 오류가 발생하지 않도록 합니다.
             df_display = df_trades.reindex(columns=cols_to_show).copy()
-            
+
             # 날짜 및 시간 포맷팅
             df_display['date'] = pd.to_datetime(df_display['date'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S')
 
@@ -1418,7 +1047,7 @@ def render_country_tab(country_code: str):
                         for trade_id in trades_to_delete['id']:
                             if delete_trade_by_id(trade_id):
                                 deleted_count += 1
-                        
+
                         st.success(f"{deleted_count}개의 거래를 성공적으로 삭제했습니다.")
                         st.rerun()
                 else:
@@ -1426,12 +1055,8 @@ def render_country_tab(country_code: str):
 
     with sub_tab_stock_management:
         with st.spinner("종목 마스터 데이터를 불러오는 중..."):
-            available_sectors = get_sectors()
-            if not available_sectors:
-                st.warning("업종이 등록되지 않았습니다. '마스터 정보' 탭에서 먼저 업종을 추가해주세요.")
-            else:
-                render_master_stock_ui(country_code, available_sectors)
-                    
+            render_master_stock_ui(country_code)
+
     with sub_tab_settings:
         # 1. DB에서 현재 설정값 로드
         db_settings = get_app_settings(country_code)
@@ -1443,8 +1068,7 @@ def render_country_tab(country_code: str):
         current_replace_weaker = db_settings.get("replace_weaker_stock") if db_settings else None
         current_max_replacements = db_settings.get("max_replacements_per_day") if db_settings else None
 
-        # TEST_MONTHS_RANGE를 기반으로 기본 날짜를 계산합니다. (필수 설정)
-        test_months_range = TEST_MONTHS_RANGE
+        test_months_range = 12 # Default value
         default_date = pd.Timestamp.now() - pd.DateOffset(months=test_months_range)
         current_date = db_settings.get("initial_date", default_date) if db_settings else default_date
 
@@ -1543,7 +1167,7 @@ def render_country_tab(country_code: str):
                 except Exception:
                     st.error("교체 매매 점수 임계값은 숫자여야 합니다.")
                     error = True
-                
+
                 if not error:
                     new_topn = int(new_topn_str)
                     new_ma_etf = int(new_ma_etf_str)
@@ -1635,23 +1259,17 @@ def main():
                 f'<div style="text-align: right; padding-top: 1.5rem; font-size: 1.1rem;">{market_status_str}</div>', unsafe_allow_html=True
             )
 
-    tab_names = ["코인", "한국", "호주", "마스터", "설정", "텔레그램"]
-    tab_coin, tab_kor, tab_aus, tab_master, tab_settings, tab_telegram = st.tabs(tab_names)
+    tab_names = ["코인", "한국", "호주", "설정", "텔레그램"]
+    tab_coin, tab_kor, tab_aus, tab_settings, tab_telegram = st.tabs(tab_names)
 
     with tab_coin:
         render_country_tab("coin")
-        
+
     with tab_kor:
         render_country_tab("kor")
 
     with tab_aus:
         render_country_tab("aus")
-
-
-    with tab_master:
-        sector_management_tab, = st.tabs(["업종"])
-        with sector_management_tab:
-            render_master_sector_ui()
 
     with tab_settings:
         st.header("공통 설정 (모든 국가 공유)")

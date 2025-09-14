@@ -83,21 +83,21 @@ def main():
             print("백테스트 속도 향상을 위해 데이터를 미리 로딩합니다...")
             from logic import settings
             from utils.data_loader import fetch_ohlcv_for_tickers
-            from utils.db_manager import get_stocks
+            from utils.stock_list_io import get_stocks
             import pandas as pd
 
-            stocks_from_db = get_stocks(country)
-            if not stocks_from_db:
-                print("오류: 백테스트에 사용할 티커를 찾을 수 없습니다.")
+            stocks_from_file = get_stocks(country)
+            if not stocks_from_file:
+                print("오류: 'data/' 폴더에서 백테스트에 사용할 티커를 찾을 수 없습니다.")
                 return
 
-            tickers = [s['ticker'] for s in stocks_from_db]
+            tickers = [s['ticker'] for s in stocks_from_file]
             if tickers_override:
                 tickers = [t for t in tickers if t.upper() in set(tickers_override)]
                 if not tickers:
                     print("오류: 지정한 --tickers 가 DB 목록과 일치하지 않습니다.")
                     return
-            
+
             try:
                 test_months_range = settings.TEST_MONTHS_RANGE
                 ma_etf = int(settings.MA_PERIOD_FOR_ETF)
@@ -110,7 +110,7 @@ def main():
             test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]
             max_ma_period = max(ma_etf, ma_stock)
             warmup_days = int(max_ma_period * 1.5)
-            
+
             prefetched_data = fetch_ohlcv_for_tickers(tickers, country, date_range=test_date_range, warmup_days=warmup_days)
             print(f"총 {len(prefetched_data)}개 종목의 데이터 로딩 완료.")
 

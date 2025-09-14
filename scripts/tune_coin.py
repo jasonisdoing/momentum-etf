@@ -51,8 +51,8 @@ REPLACE_WEAKER_STOCK = True
 # 빈 리스트([])이면 DB의 coin_stocks 컬렉션에서 티커를 로드합니다.
 # 예시: ["BTC", "ETH", "SOL"]
 # TICKERS_OVERRIDE: list[str] = ["BTC"]
-TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL"]
-# TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL", "ADA", "DOGE", "TRX"]
+# TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL"]
+TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL", "ADA", "DOGE", "TRX"]
 
 # 12개월 - 5종목
 # 210.15% (TopN: 3, MA: 3, Threshold: 1.50)
@@ -67,20 +67,34 @@ TICKERS_OVERRIDE: list[str] = ["BTC", "ETH", "XRP", "BNB", "SOL"]
 # 5종목 테스트 누적 수익률: +140.95%
 # 8종목 테스트 누적 수익률: +182.65%
 
-# 8종목
-# 460%
+
+# 5개 종목 튜닝
 # [수익률 기준 최적 조합]
 #   - MA_PERIOD_FOR_STOCK: 3
 #   - PORTFOLIO_TOPN: 3
 #   - REPLACE_WEAKER_STOCK: True
-#   - REPLACE_SCORE_THRESHOLD: 1.00
+#   - REPLACE_SCORE_THRESHOLD: 2.50
 
-
-# 5개 종목 튜닝
-# 
+# [성과]
+#   - 기간: 2024-09-14 ~ 2025-09-13
+#   - 누적 수익률: +479.60%
+#   - CAGR: +483.11%
 # 8개 종목 튜닝
-# 
+# [수익률 기준 최적 조합]
+#   - MA_PERIOD_FOR_STOCK: 3
+#   - PORTFOLIO_TOPN: 3
+#   - REPLACE_WEAKER_STOCK: True
+#   - REPLACE_SCORE_THRESHOLD: 2.50
 
+# [성과]
+#   - 기간: 2024-09-14 ~ 2025-09-13
+#   - 누적 수익률: +481.08%
+#   - CAGR: +484.60%
+
+#  5종목, 8종목 큰 차이 없고 3 - 3 - 2.5가 최적
+#   - MA_PERIOD_FOR_STOCK: 3
+#   - PORTFOLIO_TOPN: 3
+#   - REPLACE_SCORE_THRESHOLD: 2.50
 
 
 from utils.db_manager import get_stocks

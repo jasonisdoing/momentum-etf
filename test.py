@@ -13,7 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logic import settings
 from logic import strategy as strategy_module
 from utils.report import format_aud_money, format_kr_money, render_table_eaw, format_aud_price
-from utils.db_manager import get_stocks, get_app_settings, get_common_settings
+from utils.stock_list_io import get_stocks as get_stocks_from_files
+from utils.db_manager import get_app_settings, get_common_settings
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
@@ -41,13 +42,13 @@ def main(
 
     # DB에서 앱 설정을 불러와 logic.settings에 동적으로 설정합니다.
     app_settings = get_app_settings(country)
-    if (not app_settings 
-        or "ma_period_etf" not in app_settings 
+    if (not app_settings
+        or "ma_period_etf" not in app_settings
         or "ma_period_stock" not in app_settings
         or "portfolio_topn" not in app_settings):
         print(f"오류: '{country}' 국가의 설정(TopN, MA 기간)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return
-    
+
     # 필수 설정값이 모두 있는지 검증 (fallback 금지)
     if "replace_threshold" not in app_settings:
         print(f"오류: '{country}' 국가의 설정에 'replace_threshold'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
@@ -65,9 +66,9 @@ def main(
         settings.MA_PERIOD_FOR_STOCK = int(app_settings["ma_period_stock"])
         portfolio_topn = int(app_settings["portfolio_topn"])
         # 교체 매매 파라미터 (백테스트용, 필수)
-        settings.REPLACE_SCORE_THRESHOLD = float(app_settings["replace_threshold"])  
-        settings.REPLACE_WEAKER_STOCK = bool(app_settings["replace_weaker_stock"])  
-        settings.MAX_REPLACEMENTS_PER_DAY = int(app_settings["max_replacements_per_day"])  
+        settings.REPLACE_SCORE_THRESHOLD = float(app_settings["replace_threshold"])
+        settings.REPLACE_WEAKER_STOCK = bool(app_settings["replace_weaker_stock"])
+        settings.MAX_REPLACEMENTS_PER_DAY = int(app_settings["max_replacements_per_day"])
     except (ValueError, TypeError):
         print(f"오류: '{country}' 국가의 DB 설정값이 올바르지 않습니다.")
         return
@@ -78,15 +79,15 @@ def main(
             if "ma_etf" in override_settings:
                 settings.MA_PERIOD_FOR_ETF = int(override_settings["ma_etf"])  # no-op for coin but safe
             if "ma_stock" in override_settings:
-                settings.MA_PERIOD_FOR_STOCK = int(override_settings["ma_stock"]) 
+                settings.MA_PERIOD_FOR_STOCK = int(override_settings["ma_stock"])
             if "portfolio_topn" in override_settings:
-                portfolio_topn = int(override_settings["portfolio_topn"])  
+                portfolio_topn = int(override_settings["portfolio_topn"])
             if "replace_threshold" in override_settings:
-                settings.REPLACE_SCORE_THRESHOLD = float(override_settings["replace_threshold"])  
+                settings.REPLACE_SCORE_THRESHOLD = float(override_settings["replace_threshold"])
             if "replace_weaker_stock" in override_settings:
-                settings.REPLACE_WEAKER_STOCK = bool(override_settings["replace_weaker_stock"])  
+                settings.REPLACE_WEAKER_STOCK = bool(override_settings["replace_weaker_stock"])
             if "max_replacements_per_day" in override_settings:
-                settings.MAX_REPLACEMENTS_PER_DAY = int(override_settings["max_replacements_per_day"])  
+                settings.MAX_REPLACEMENTS_PER_DAY = int(override_settings["max_replacements_per_day"])
         except Exception:
             # Silently ignore malformed overrides
             pass
@@ -144,44 +145,30 @@ def main(
 
     # 티커 목록 결정
     if not quiet:
-        print(f"\nDB의 '{country}_stocks' 컬렉션에서 종목을 가져와 백테스트를 실행합니다.")
-    stocks_from_db = get_stocks(country)
-    if not stocks_from_db:
-        print(f"오류: '{country}_stocks' 컬렉션에서 백테스트에 사용할 종목을 찾을 수 없습니다.")
+        print(f"\n'data/' 폴더의 '{country}_stock.json', '{country}_etf.json' 파일에서 종목을 가져와 백테스트를 실행합니다.")
+    stocks_from_file = get_stocks_from_files(country)
+    if not stocks_from_file:
+        print(f"오류: 'data/' 폴더에서 '{country}' 국가의 백테스트에 사용할 종목을 찾을 수 없습니다.")
         return
 
-    # 티커 오버라이드: 콤마 구분 리스트. coin은 DB 목록과 합집합 사용, 그 외는 교집합.
+    # 티커 오버라이드: 콤마 구분 리스트. coin은 파일 목록과 합집합, 그 외는 교집합.
     if override_settings and override_settings.get("tickers_override"):
         allow = [str(t).upper() for t in override_settings.get("tickers_override")]
         allow_set = set(allow)
-        existing_set = {str(s.get('ticker') or '').upper() for s in stocks_from_db}
-        if country == 'coin':
-            # 합집합: DB + (없는 티커는 기본 메타로 추가)
-            missing = [t for t in allow if t not in existing_set]
-            if missing:
-                for t in missing:
-                    stocks_from_db.append({
-                        'ticker': t,
-                        'name': t,
-                        'type': 'stock',
-                        'country': country,
-                    })
-            # 그리고 중복 제거 + 순서 유지 (DB 우선, 이후 override 순서)
-            seen = set()
-            merged = []
-            for s in stocks_from_db + [{"ticker": t, "name": t, "type": "stock", "country": country} for t in allow]:
-                key = str(s.get('ticker') or '').upper()
-                if key and key not in seen:
-                    seen.add(key)
-                    merged.append(s)
-            stocks_from_db = merged
+
+        if country == "coin":
+            # 합집합: 파일 목록에 override tickers를 추가하고 중복 제거
+            existing_set = {str(s.get("ticker") or "").upper() for s in stocks_from_file}
+            for t in allow:
+                if t not in existing_set:
+                    stocks_from_file.append({"ticker": t, "name": t, "type": "stock", "country": "coin"})
         else:
-            # 교집합: DB에 있는 티커만 사용
-            filtered = [s for s in stocks_from_db if str(s.get('ticker') or '').upper() in allow_set]
+            # 교집합: 파일에 있는 티커 중 override 목록에 있는 것만 사용
+            filtered = [s for s in stocks_from_file if str(s.get("ticker") or "").upper() in allow_set]
             if not filtered:
                 print("오류: override tickers 가 DB 목록과 일치하지 않습니다.")
                 return
-            stocks_from_db = filtered
+            stocks_from_file = filtered
 
     logger = logging.getLogger("backtester")
     logger.propagate = False  # 중복 로깅 방지
@@ -227,11 +214,11 @@ def main(
 
         # 시뮬레이션 실행
         time_series_by_ticker: Dict[str, pd.DataFrame] = {}
-        name_by_ticker: Dict[str, str] = {s['ticker']: s['name'] for s in stocks_from_db}
+        name_by_ticker: Dict[str, str] = {s["ticker"]: s["name"] for s in stocks_from_file}
         if portfolio_topn > 0:
             time_series_by_ticker = (
                 run_portfolio_backtest(
-                    stocks=stocks_from_db,
+                    stocks=stocks_from_file,
                     initial_capital=initial_capital,
                     core_start_date=core_start_dt,
                     top_n=portfolio_topn,
@@ -242,14 +229,14 @@ def main(
                 or {}
             )
             if "CASH" in time_series_by_ticker:
-                name_by_ticker = {s['ticker']: s['name'] for s in stocks_from_db}
+                name_by_ticker = {s["ticker"]: s["name"] for s in stocks_from_file}
                 name_by_ticker["CASH"] = "현금"
         else:
             # 개별 종목 백테스트는 여전히 데이터를 미리 로드해야 합니다.
             from utils.data_loader import fetch_ohlcv
 
             raw_data_by_ticker: Dict[str, pd.DataFrame] = {}
-            for stock in stocks_from_db:
+            for stock in stocks_from_file:
                 ticker = stock['ticker']
                 df = fetch_ohlcv(
                     ticker, country=country, date_range=test_date_range
@@ -258,8 +245,8 @@ def main(
                     raw_data_by_ticker[ticker] = df
 
             # 종목별 고정 자본 방식: 전체 자본을 종목 수로 나눔
-            capital_per_ticker = initial_capital / len(stocks_from_db) if stocks_from_db else 0
-            for stock in stocks_from_db:
+            capital_per_ticker = initial_capital / len(stocks_from_file) if stocks_from_file else 0
+            for stock in stocks_from_file:
                 ticker = stock['ticker']
                 df_ticker = raw_data_by_ticker.get(ticker)
                 if df_ticker is None:
@@ -588,7 +575,7 @@ def main(
                 notes_df = pd.DataFrame({
                     tkr: ts['note'] for tkr, ts in time_series_by_ticker.items() if tkr != "CASH"
                 }, index=common_index)
-                
+
                 # 어느 한 종목이라도 '시장 위험 회피' 노트를 가지면 해당일은 리스크 오프입니다.
                 if not notes_df.empty:
                     is_risk_off_series = (notes_df == "시장 위험 회피").any(axis=1)
@@ -606,7 +593,7 @@ def main(
                             end_of_period = is_risk_off_series.index[is_risk_off_series.index.get_loc(dt) - 1]
                             risk_off_periods.append((start_of_period, end_of_period))
                             start_of_period = None
-                    
+
                     # 백테스트가 리스크 오프 기간 중에 끝나는 경우를 처리합니다.
                     if in_risk_off_period and start_of_period:
                         risk_off_periods.append((start_of_period, is_risk_off_series.index[-1]))
@@ -620,13 +607,23 @@ def main(
 
             # --- 벤치마크 (S&P 500) 성과 계산 ---
             from utils.data_loader import fetch_ohlcv
-            benchmark_ticker = "^GSPC"
+
+            # 국가에 따라 벤치마크 티커와 이름을 설정합니다.
+            if country == 'coin':
+                benchmark_ticker = "BTC"
+                benchmark_name = "BTC"
+                benchmark_country = "coin"
+            else:
+                benchmark_ticker = "^GSPC"
+                benchmark_name = "S&P 500"
+                benchmark_country = country # country는 지수 티커에 영향을 주지 않음
+
             benchmark_df = fetch_ohlcv(
                 benchmark_ticker,
-                country=country, # country는 지수 티커에 영향을 주지 않음
+                country=benchmark_country,
                 date_range=[start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
             )
-            
+
             benchmark_cum_ret_pct = 0.0
             benchmark_cagr_pct = 0.0
             if benchmark_df is not None and not benchmark_df.empty:
@@ -734,10 +731,6 @@ def main(
                     + "\n"
                     + "=" * 30
                 )
-                try:
-                    test_months_range = settings.TEST_MONTHS_RANGE
-                except AttributeError:
-                    test_months_range = None
                 logger.info(
                     f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)"
                 )
@@ -749,10 +742,10 @@ def main(
                 logger.info(f"| 초기 자본: {money_formatter(summary['initial_capital'])}")
                 logger.info(f"| 최종 자산: {money_formatter(summary['final_value'])}")
                 logger.info(
-                    f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% (S&P 500: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
+                    f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
                 )
                 logger.info(
-                    f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% (S&P 500: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
+                    f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
                 )
                 logger.info(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
                 logger.info(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
