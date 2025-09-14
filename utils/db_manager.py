@@ -11,12 +11,13 @@ import settings as global_settings
 
 # --- 전역 변수로 DB 연결 관리 ---
 _db_connection = None
+_mongo_client: Optional[MongoClient] = None
 
 def get_db_connection():
     """
     MongoDB 클라이언트 연결을 생성하고, 전역 변수에 저장하여 재사용합니다.
     """
-    global _db_connection
+    global _db_connection, _mongo_client
 
     # 이미 연결이 설정되어 있으면, 기존 연결을 반환합니다.
     if _db_connection is not None:
@@ -29,17 +30,52 @@ def get_db_connection():
         db_name = os.environ.get("MONGO_DB_NAME") or getattr(
             global_settings, "MONGO_DB_NAME", "momentum_pilot_db"
         )
+        # Connection pool tuning (env optional)
+        max_pool = int(os.environ.get("MONGO_DB_MAX_POOL_SIZE", "20"))
+        min_pool = int(os.environ.get("MONGO_DB_MIN_POOL_SIZE", "0"))
+        max_idle = int(os.environ.get("MONGO_DB_MAX_IDLE_TIME_MS", "0"))  # 0 = driver default
+        wait_q_timeout = int(os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "0"))  # 0 = driver default
 
         if not connection_string:
             raise ValueError("MongoDB 연결 문자열이 설정되지 않았습니다. (MONGO_DB_CONNECTION_STRING)")
 
-        client = MongoClient(connection_string)
+        if _mongo_client is None:
+            client_kwargs = dict(
+                maxPoolSize=max_pool,
+                minPoolSize=min_pool,
+                retryWrites=True,
+                serverSelectionTimeoutMS=8000,
+                connectTimeoutMS=5000,
+                socketTimeoutMS=10000,
+            )
+            if max_idle > 0:
+                client_kwargs["maxIdleTimeMS"] = max_idle
+            if wait_q_timeout > 0:
+                client_kwargs["waitQueueTimeoutMS"] = wait_q_timeout
+            _mongo_client = MongoClient(connection_string, **client_kwargs)
+        client = _mongo_client
         # 서버에 연결하여 연결 성공 여부 확인
         client.server_info()
-        
+
         # 성공적으로 연결되면, 전역 변수에 DB 객체를 저장합니다.
         _db_connection = client[db_name]
-        print("-> MongoDB에 성공적으로 연결되었습니다.")
+
+        # 연결 수(서버 전체) 정보 출력 시도
+        try:
+            status = client.admin.command("serverStatus")  # requires clusterMonitor on Atlas
+            conn = status.get("connections", {}) if isinstance(status, dict) else {}
+            current = conn.get("current")
+            available = conn.get("available")
+            total_created = conn.get("totalCreated")
+            if current is not None:
+                print(
+                    f"-> MongoDB에 성공적으로 연결되었습니다. (connections: current={current}, available={available}, totalCreated={total_created})"
+                )
+            else:
+                print("-> MongoDB에 성공적으로 연결되었습니다.")
+        except Exception:
+            # 권한 부족 등으로 serverStatus 실패 시, 기본 메시지만 출력
+            print("-> MongoDB에 성공적으로 연결되었습니다.")
         return _db_connection
     except Exception as e:
         print(f"오류: MongoDB 연결에 실패했습니다: {e}")

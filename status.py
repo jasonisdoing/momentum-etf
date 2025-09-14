@@ -37,6 +37,13 @@ from utils.data_loader import (
 from utils.report import format_aud_money, format_kr_money, render_table_eaw, format_aud_price
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+# Suppress pmc discontinued break warnings globally for status runs
+warnings.filterwarnings(
+    "ignore",
+    message=r"\['break_start', 'break_end'\] are discontinued",
+    category=UserWarning,
+    module=r"^pandas_market_calendars\."
+)
 
 try:
     from pykrx import stock as _stock

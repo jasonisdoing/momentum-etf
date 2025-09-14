@@ -21,6 +21,13 @@ import warnings
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+# Suppress pmc discontinued break warnings globally for CLI flows
+warnings.filterwarnings(
+    "ignore",
+    message=r"\['break_start', 'break_end'\] are discontinued",
+    category=UserWarning,
+    module=r"^pandas_market_calendars\."
+)
 
 
 def main():

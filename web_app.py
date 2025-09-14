@@ -11,6 +11,13 @@ import streamlit as st
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+# Suppress pmc discontinued break warnings globally
+warnings.filterwarnings(
+    "ignore",
+    message=r"\['break_start', 'break_end'\] are discontinued",
+    category=UserWarning,
+    module=r"^pandas_market_calendars\."
+)
 
 
 
@@ -252,14 +259,14 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         column_config={
             "이름": st.column_config.TextColumn("종목명", width="medium"),
             "상태": st.column_config.TextColumn(width="small"),
-            "보유일": st.column_config.TextColumn(width="small"),
+            "보유": st.column_config.TextColumn(width=40),
             "보유수량": st.column_config.NumberColumn(format=shares_format_str),
             "일간수익률": st.column_config.TextColumn(width="small"),
             "누적수익률": st.column_config.TextColumn(width="small"),
-            "비중": st.column_config.TextColumn(width="small"),
-            "지속": st.column_config.TextColumn(width="small"),
-            "국가": st.column_config.TextColumn(width="small"),
-            "업종": st.column_config.TextColumn(width="medium"),
+            "비중": st.column_config.TextColumn(width=50),
+            "지속": st.column_config.TextColumn(width=50),
+            "국가": st.column_config.TextColumn(width=60),
+            "업종": st.column_config.TextColumn(width="small"),
             "문구": st.column_config.TextColumn("문구", width="large"),
         }
     )
