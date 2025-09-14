@@ -550,7 +550,34 @@ def _fetch_and_prepare_data(
     stocks_from_file = get_stocks(country)
     stock_meta = {stock["ticker"]: stock for stock in stocks_from_file}
     static_pairs = [(stock["ticker"], stock["name"]) for stock in stocks_from_file]
-    pairs = build_pairs_with_holdings(static_pairs, holdings)
+
+    # 오늘 판매된 종목을 추가합니다.
+    sold_tickers_today = set()
+    trades_on_base_date = get_trades_on_date(country, base_date)
+    for trade in trades_on_base_date:
+        if trade["action"] == "SELL":
+            sold_tickers_today.add(trade["ticker"])
+            # stock_meta에 없는 경우 추가 (이름은 나중에 채워질 수 있음)
+            if trade["ticker"] not in stock_meta:
+                stock_meta[trade["ticker"]] = {
+                    "ticker": trade["ticker"],
+                    "name": trade.get("name", ""),
+                    "category": "",
+                }
+            # holdings에 없는 경우 추가 (shares=0으로)
+            if trade["ticker"] not in holdings:
+                holdings[trade["ticker"]] = {
+                    "name": trade.get("name", ""),
+                    "shares": 0,
+                    "avg_cost": 0.0,
+                }
+
+    # 모든 티커를 포함하도록 pairs를 재구성합니다.
+    all_tickers_for_processing = set(holdings.keys()) | set(stock_meta.keys())
+    pairs = []
+    for tkr in all_tickers_for_processing:
+        name = stock_meta.get(tkr, {}).get("name") or holdings.get(tkr, {}).get("name") or ""
+        pairs.append((tkr, name))
 
     # 국가별로 다른 포맷터 사용
     header_money_formatter = format_kr_money
@@ -1284,18 +1311,18 @@ def generate_status_report(
     executed_sells_today = {
         trade["ticker"] for trade in trades_on_base_date if trade["action"] == "SELL"
     }
+
     # 기준일에 실행된 거래가 있다면, 현황 목록에 '완료' 상태를 표시합니다.
     for decision in decisions:
         tkr = decision["tkr"]
 
         # 오늘 매수했고, 현재 보유 중인 종목
-        if decision["state"] == "HOLD" and tkr in executed_buys_today:
+        if tkr in executed_buys_today:
             # 이 종목이 오늘 신규 매수되었음을 표시
             decision["row"][-1] = "✅ 신규 매수"
 
-        # 오늘 매도했고, 현재는 미보유(WAIT) 상태인 종목
-        elif decision["state"] == "WAIT" and tkr in executed_sells_today:
-            # 이 종목이 오늘 매도되었음을 표시. 기존의 '추세진입' 등 메시지를 덮어씁니다.
+        # 오늘 매도된 종목은 상태를 SOLD로 강제합니다.
+        if tkr in executed_sells_today:
             decision["state"] = "SOLD"  # 정렬 및 표시를 위한 새로운 상태
             decision["row"][2] = "SOLD"
             decision["row"][-1] = "🔚 매도"

@@ -183,19 +183,18 @@ def style_returns(val) -> str:
 
 def _display_status_report_df(df: pd.DataFrame, country_code: str):
     """
-    현황 리포트 DataFrame에 종목 메타데이터(이름)를 실시간으로 병합하고 스타일을 적용하여 표시합니다.
+    현황 리포트 DataFrame에 종목 메타데이터(이름, 카테고리)를 실시간으로 병합하고 스타일을 적용하여 표시합니다.
     """
     # 1. 종목 메타데이터 로드
-    stocks_data = get_stocks(country_code)  # 이제 파일에서 로드
+    stocks_data = get_stocks(country_code)
     if not stocks_data:
-        meta_df = pd.DataFrame(columns=["ticker", "이름"])
+        meta_df = pd.DataFrame(columns=["ticker", "이름", "category"])
     else:
         meta_df = pd.DataFrame(stocks_data)
-        required_cols = ["ticker", "name"]
+        required_cols = ["ticker", "name", "category"]
         for col in required_cols:
             if col not in meta_df.columns:
                 meta_df[col] = None
-
         meta_df = meta_df[required_cols]
         meta_df.rename(columns={"name": "이름"}, inplace=True)
 
@@ -207,13 +206,15 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         df_merged["이름"] = df_merged["이름"].fillna(df_merged["티커"])
     else:
         df_merged["이름"] = df_merged["티커"]
+    if "category" not in df_merged.columns:
+        df_merged["category"] = ""  # 카테고리 정보가 없을 경우 빈 문자열로 채움
 
     # 3. 컬럼 순서 재정렬
-    # '이름' 컬럼은 아래 column_config에서 '종목명'으로 표시됩니다.
     final_cols = [
         "#",
         "티커",
         "이름",
+        "category",
         "상태",
         "매수일자",
         "보유일",
@@ -236,7 +237,6 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
     numeric_cols = ["현재가", "일간수익률", "보유수량", "금액", "누적수익률", "비중", "점수"]
     for col in numeric_cols:
         if col in df_display.columns:
-            # errors='coerce'를 사용하여 숫자로 변환할 수 없는 값은 NaN으로 만듭니다.
             df_display[col] = pd.to_numeric(df_display[col], errors="coerce")
 
     # 4. 스타일 적용 및 표시
@@ -279,7 +279,8 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         width="stretch",
         height=height,
         column_config={
-            "이름": st.column_config.TextColumn("종목명", width="medium"),
+            "이름": st.column_config.TextColumn("종목명", width=200),
+            "category": st.column_config.TextColumn("카테고리", width=100),
             "상태": st.column_config.TextColumn(width="small"),
             "매수일자": st.column_config.TextColumn(width="small"),
             "보유": st.column_config.TextColumn(width=40),
@@ -1474,8 +1475,8 @@ def main():
                 unsafe_allow_html=True,
             )
 
-    tab_names = ["코인", "한국", "호주", "설정", "알림"]
-    tab_coin, tab_kor, tab_aus, tab_settings, tab_notification = st.tabs(tab_names)
+    tab_names = ["한국", "호주", "코인", "설정", "알림"]
+    tab_kor, tab_aus, tab_coin, tab_settings, tab_notification = st.tabs(tab_names)
 
     with tab_coin:
         render_country_tab("coin")
