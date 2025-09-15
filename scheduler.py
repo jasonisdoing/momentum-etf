@@ -50,7 +50,7 @@ def _get(name: str, default: str) -> str:
 
 
 def run_status(country: str):
-    """Run status generation and implicit Telegram notification."""
+    """Run status generation and implicit Slack notification."""
     try:
         from status import main as run_status_main
 

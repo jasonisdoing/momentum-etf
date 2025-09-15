@@ -21,9 +21,7 @@ warnings.filterwarnings(
 
 import settings as global_settings
 from status import (
-    _maybe_notify_basic_status,
-    _maybe_notify_coin_detailed,
-    _maybe_notify_signal_summary,
+    _maybe_notify_detailed_status,
     generate_status_report,
     get_benchmark_status_string,
     get_market_regime_status_string,
@@ -70,6 +68,64 @@ COUNTRY_CODE_MAP = {"kor": "한국", "aus": "호주", "coin": "가상화폐"}
 
 
 # --- Functions ---
+
+
+def render_cron_input(label, key, default_value, country_code: str):
+    """Crontab 입력을 위한 UI와 실시간 유효성 검사를 렌더링합니다."""
+    col1, col2 = st.columns([2, 3])
+    with col1:
+        st.text_input(
+            label,
+            value=default_value,
+            key=key,
+            help="Crontab 형식 입력 (예: '0 * * * *'는 매시간 실행)",
+        )
+    with col2:
+        # 폼이 렌더링될 때 st.session_state에서 현재 입력된 값을 가져와 유효성을 검사합니다.
+        current_val = st.session_state.get(key, default_value)
+        if croniter and current_val:
+            try:
+                if not croniter.is_valid(current_val):
+                    st.warning("❌ 잘못된 Crontab 형식입니다.")
+                else:
+                    display_text = "✅ 유효"
+                    if get_cron_description:
+                        try:
+                            desc_ko = ""
+                            try:
+                                # 최신 API (cron-descriptor >= 1.2.16)
+                                desc_ko = get_cron_description(
+                                    current_val,
+                                    locale="ko_KR",
+                                    use_24hour_time_format=True,
+                                )
+                            except TypeError:
+                                # 구버전 API 폴백 (cron-descriptor < 1.2.16)
+                                from cron_descriptor import (
+                                    ExpressionDescriptor,
+                                    Options,
+                                )
+
+                                options = Options()
+                                options.use_24hour_time_format = True
+                                options.locale_code = "ko_KR"
+                                desc_ko = ExpressionDescriptor(
+                                    current_val, options
+                                ).get_description()
+
+                            if desc_ko:
+                                display_text = f"✅ 유효. {desc_ko}"
+                        except Exception as e:
+                            # 설명 생성 실패 시, 콘솔에 오류를 기록하고 기본 문구만 표시합니다.
+                            print(f"Crontab 설명 생성 중 오류: {e}")
+
+                    # 수직 정렬을 위해 div와 패딩을 사용합니다.
+                    st.markdown(
+                        f"<div style='padding-top: 32px;'><span style='color:green;'>{display_text}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+            except Exception as e:
+                st.error(f"오류: {e}")
 
 
 @st.cache_data(ttl=600)
@@ -651,6 +707,106 @@ def render_master_stock_ui(country_code: str):
         )
 
 
+def render_notification_settings_ui(country_code: str):
+    """지정된 국가에 대한 알림 설정 UI를 렌더링합니다."""
+    st.header(f"{COUNTRY_CODE_MAP.get(country_code, country_code.upper())} 국가 알림 설정")
+
+    # 국가별 슬랙 설정은 app_settings에서, 크론 설정은 common_settings에서 로드
+    app_settings = get_app_settings(country_code) or {}
+    common_settings = get_common_settings() or {}
+
+    with st.form(f"notification_settings_form_{country_code}"):
+        st.subheader("슬랙 설정")
+        slack_enabled = bool(app_settings.get("SLACK_ENABLED", False))
+        slack_webhook_url = app_settings.get("SLACK_WEBHOOK_URL", "")
+
+        new_slack_enabled = st.checkbox(
+            "슬랙 알림 사용",
+            value=slack_enabled,
+            key=f"slack_enabled_{country_code}",
+            help="이 국가의 현황 메시지를 슬랙으로 전송합니다.",
+        )
+        new_slack_webhook_url = st.text_input(
+            "웹훅 URL",
+            value=slack_webhook_url,
+            key=f"slack_webhook_url_{country_code}",
+            placeholder="예: https://hooks.slack.com/services/...",
+            help="이 국가의 알림을 받을 Slack 채널의 Incoming Webhook URL",
+        )
+
+        st.subheader("전송 주기 (Crontab 형식)")
+        cron_key = f"SCHEDULE_CRON_{country_code.upper()}"
+        default_cron = {
+            "kor": "*/10 9-15 * * 1-5",
+            "aus": "*/10 10-16 * * 1-5",
+            "coin": "*/5 * * * *",
+        }.get(country_code, "0 * * * *")
+        cron_value = common_settings.get(cron_key, default_cron)
+
+        render_cron_input("알림 전송 주기", f"cron_input_{country_code}", cron_value, country_code)
+
+        st.caption("테스트는 스케줄과 무관하게 1회 계산 후 알림을 전송합니다.")
+
+        cols = st.columns(2)
+        with cols[0]:
+            settings_save = st.form_submit_button("설정 저장")
+        with cols[1]:
+            test_send = st.form_submit_button("알림 테스트 전송")
+
+    if settings_save:
+        error = False
+        # 슬랙 설정 저장 (app_settings)
+        slack_settings_to_save = {}
+        if new_slack_enabled:
+            if not new_slack_webhook_url:
+                st.error("슬랙 알림을 사용하려면 웹훅 URL이 필요합니다.")
+                error = True
+            else:
+                slack_settings_to_save["SLACK_ENABLED"] = True
+                slack_settings_to_save["SLACK_WEBHOOK_URL"] = new_slack_webhook_url.strip()
+        else:
+            slack_settings_to_save["SLACK_ENABLED"] = False
+            slack_settings_to_save["SLACK_WEBHOOK_URL"] = ""
+
+        # 크론 설정 저장 (common_settings)
+        cron_settings_to_save = {}
+        if croniter:
+            new_cron_val = st.session_state[f"cron_input_{country_code}"]
+            if not croniter.is_valid(new_cron_val):
+                st.error("Crontab 형식이 올바르지 않습니다.")
+                error = True
+            else:
+                cron_settings_to_save[cron_key] = new_cron_val.strip()
+
+        if not error:
+            save_app_settings(country_code, slack_settings_to_save)
+            save_common_settings(cron_settings_to_save)
+            st.success(f"{country_code.upper()} 국가의 알림 설정을 저장했습니다.")
+            st.rerun()
+
+    if test_send:
+        # 테스트 전송은 현재 UI의 값을 즉시 저장하고 실행
+        save_app_settings(
+            country_code,
+            {"SLACK_ENABLED": new_slack_enabled, "SLACK_WEBHOOK_URL": new_slack_webhook_url},
+        )
+        res = generate_status_report(country=country_code, date_str=None)
+        if not res:
+            st.error("현황 계산 실패로 테스트 전송을 건너뜁니다.")
+        else:
+            header_line, headers, rows_sorted = res
+            sent = _maybe_notify_detailed_status(
+                country_code, header_line, headers, rows_sorted, force=True
+            )
+            if sent:
+                st.success("알림 테스트 전송 완료. 슬랙 채널을 확인하세요.")
+            else:
+                from utils.notify import get_last_error
+
+                err = get_last_error()
+                st.warning(f"전송 시도는 했지만 응답이 없었습니다. 상세: {err or '설정 확인'}")
+
+
 def _display_success_toast(country_code: str):
     """
     세션 상태에서 성공 메시지를 확인하고 토스트로 표시합니다.
@@ -673,10 +829,15 @@ def render_country_tab(country_code: str):
     """지정된 국가에 대한 탭의 전체 UI를 렌더링합니다."""
     _display_success_toast(country_code)
 
-    sub_tab_names = ["현황", "히스토리", "트레이드", "종목 관리", "설정"]
-    sub_tab_status, sub_tab_history, sub_tab_trades, sub_tab_stock_management, sub_tab_settings = (
-        st.tabs(sub_tab_names)
-    )
+    sub_tab_names = ["현황", "히스토리", "트레이드", "종목 관리", "설정", "알림"]
+    (
+        sub_tab_status,
+        sub_tab_history,
+        sub_tab_trades,
+        sub_tab_stock_management,
+        sub_tab_settings,
+        sub_tab_notification,
+    ) = st.tabs(sub_tab_names)
 
     # --- 공통 데이터 로딩 ---
     sorted_dates = get_available_snapshot_dates(country_code)
@@ -1237,6 +1398,9 @@ def render_country_tab(country_code: str):
         with st.spinner("종목 마스터 데이터를 불러오는 중..."):
             render_master_stock_ui(country_code)
 
+    with sub_tab_notification:
+        render_notification_settings_ui(country_code)
+
     with sub_tab_settings:
         # 1. DB에서 현재 설정값 로드
         db_settings = get_app_settings(country_code)
@@ -1459,8 +1623,8 @@ def main():
                 unsafe_allow_html=True,
             )
 
-    tab_names = ["한국", "호주", "코인", "설정", "알림"]
-    tab_kor, tab_aus, tab_coin, tab_settings, tab_notification = st.tabs(tab_names)
+    tab_names = ["한국", "호주", "코인", "설정"]
+    tab_kor, tab_aus, tab_coin, tab_settings = st.tabs(tab_names)
 
     with tab_coin:
         render_country_tab("coin")
@@ -1555,303 +1719,6 @@ def main():
                         st.rerun()
                     else:
                         st.error("공통 설정 저장에 실패했습니다.")
-
-    with tab_notification:
-        st.header("알림 설정")
-        common = get_common_settings() or {}
-
-        with st.form("notification_settings_form"):
-            st.subheader("텔레그램 설정")
-            tg_enabled = bool(common.get("TELEGRAM_ENABLED", False))
-            tg_token = common.get("TELEGRAM_BOT_TOKEN") or ""
-            tg_chat = str(common.get("TELEGRAM_CHAT_ID") or "")
-
-            new_tg_enabled = st.checkbox(
-                "텔레그램 알림 사용 (TELEGRAM_ENABLED)",
-                value=tg_enabled,
-                help="교체매매/현황 메시지를 텔레그램으로 전송",
-            )
-            new_tg_token = st.text_input(
-                "봇 토큰 (TELEGRAM_BOT_TOKEN)",
-                value=tg_token,
-                type="password",
-                placeholder="예: 123456:ABC-DEF...",
-                help="@BotFather 로 생성",
-            )
-            new_tg_chat = st.text_input(
-                "채팅 ID (TELEGRAM_CHAT_ID)",
-                value=tg_chat,
-                placeholder="예: 123456789",
-                help="@userinfobot 등으로 확인",
-            )
-
-            st.subheader("슬랙 설정")
-            slack_enabled = bool(common.get("SLACK_ENABLED", False))
-            slack_webhook_url = common.get("SLACK_WEBHOOK_URL") or ""
-
-            new_slack_enabled = st.checkbox(
-                "슬랙 알림 사용 (SLACK_ENABLED)",
-                value=slack_enabled,
-                help="교체매매/현황 메시지를 슬랙으로 전송",
-            )
-            new_slack_webhook_url = st.text_input(
-                "웹훅 URL (SLACK_WEBHOOK_URL)",
-                value=slack_webhook_url,
-                type="password",
-                placeholder="예: https://hooks.slack.com/services/...",
-                help="Slack 앱의 Incoming Webhook URL",
-            )
-
-            st.subheader("전송 주기 (Crontab 형식)")
-            if croniter is None:
-                st.error(
-                    "Crontab 유효성 검사를 위해 'croniter' 라이브러리가 필요합니다. `pip install croniter`로 설치해주세요."
-                )
-            if get_cron_description is None:
-                st.error(
-                    "Crontab 설명 생성을 위해 'cron-descriptor' 라이브러리가 필요합니다. `pip install cron-descriptor`로 설치해주세요."
-                )
-
-            # DB에서 현재 크론 설정 로드, 없으면 기본값 사용
-            # 보다 직관적이고 일반적인 스케줄을 기본값으로 제안합니다.
-            # 한국: 평일 장중 10분마다 (9:00-15:50)
-            cron_kor = common.get("SCHEDULE_CRON_KOR", "*/10 9-15 * * 1-5")
-            # 호주: 평일 장중 10분마다 (10:00-16:50)
-            cron_aus = common.get("SCHEDULE_CRON_AUS", "*/10 10-16 * * 1-5")
-            # 코인: 5분마다
-            cron_coin = common.get("SCHEDULE_CRON_COIN", "*/5 * * * *")
-
-            def render_cron_input(label, key, default_value):
-                """Crontab 입력을 위한 UI와 실시간 유효성 검사를 렌더링합니다."""
-                col1, col2 = st.columns([2, 3])
-                with col1:
-                    st.text_input(
-                        label,
-                        value=default_value,
-                        key=key,
-                        help="Crontab 형식 입력 (예: '0 * * * *'는 매시간 실행)",
-                    )
-                with col2:
-                    # 폼이 렌더링될 때 st.session_state에서 현재 입력된 값을 가져와 유효성을 검사합니다.
-                    current_val = st.session_state.get(key, default_value)
-                    if croniter and current_val:
-                        try:
-                            if not croniter.is_valid(current_val):
-                                st.warning("❌ 잘못된 Crontab 형식입니다.")
-                            else:
-                                display_text = "✅ 유효"
-                                if get_cron_description:
-                                    try:
-                                        desc_ko = ""
-                                        try:
-                                            # 최신 API (cron-descriptor >= 1.2.16)
-                                            desc_ko = get_cron_description(
-                                                current_val,
-                                                locale="ko_KR",
-                                                use_24hour_time_format=True,
-                                            )
-                                        except TypeError:
-                                            # 구버전 API 폴백 (cron-descriptor < 1.2.16)
-                                            from cron_descriptor import (
-                                                ExpressionDescriptor,
-                                                Options,
-                                            )
-
-                                            options = Options()
-                                            options.use_24hour_time_format = True
-                                            options.locale_code = "ko_KR"
-                                            desc_ko = ExpressionDescriptor(
-                                                current_val, options
-                                            ).get_description()
-
-                                        if desc_ko:
-                                            display_text = f"✅ 유효. {desc_ko}"
-                                    except Exception as e:
-                                        # 설명 생성 실패 시, 콘솔에 오류를 기록하고 기본 문구만 표시합니다.
-                                        print(f"Crontab 설명 생성 중 오류: {e}")
-
-                                # 수직 정렬을 위해 div와 패딩을 사용합니다.
-                                st.markdown(
-                                    f"<div style='padding-top: 32px;'>"
-                                    f"<span style='color:green;'>{display_text}</span></div>",
-                                    unsafe_allow_html=True,
-                                )
-                        except Exception as e:
-                            st.error(f"오류: {e}")
-
-            render_cron_input("한국 알림 전송 주기", "cron_kor_input", cron_kor)
-            render_cron_input("호주 알림 전송 주기", "cron_aus_input", cron_aus)
-            render_cron_input("코인 알림 전송 주기", "cron_coin_input", cron_coin)
-
-            st.caption(
-                "테스트는 스케줄과 무관하게 1회 계산 후 알림을 전송합니다. 한국/호주는 거래일에만 전송됩니다."
-            )
-            test_country_label = st.selectbox(
-                "테스트 국가", options=["한국", "호주", "코인"], index=2
-            )
-            _country_map = {"한국": "kor", "호주": "aus", "코인": "coin"}
-            test_country = _country_map[test_country_label]
-
-            cols = st.columns(3)
-            with cols[0]:
-                settings_save = st.form_submit_button("알림 설정 저장")
-            with cols[1]:
-                test_send = st.form_submit_button("알림 테스트 전송")
-            with cols[2]:
-                tg_ping = st.form_submit_button("간단 텍스트 전송(직접)")
-
-        if "settings_save" in locals() and settings_save:
-            error = False
-            to_save = {}
-            if new_tg_enabled:
-                if not new_tg_token or not new_tg_chat:
-                    st.error("텔레그램 알림을 사용하려면 봇 토큰과 채팅 ID가 필요합니다.")
-                    error = True
-                else:
-                    to_save.update(
-                        {
-                            "TELEGRAM_ENABLED": True,
-                            "TELEGRAM_BOT_TOKEN": new_tg_token.strip(),
-                            "TELEGRAM_CHAT_ID": new_tg_chat.strip(),
-                        }
-                    )
-            else:
-                to_save.update({"TELEGRAM_ENABLED": False})
-
-            if new_slack_enabled:
-                if not new_slack_webhook_url:
-                    st.error("슬랙 알림을 사용하려면 웹훅 URL이 필요합니다.")
-                    error = True
-                else:
-                    to_save.update(
-                        {
-                            "SLACK_ENABLED": True,
-                            "SLACK_WEBHOOK_URL": new_slack_webhook_url.strip(),
-                        }
-                    )
-            else:
-                to_save.update({"SLACK_ENABLED": False})
-
-            # 스케줄 전송 주기(Crontab) 저장
-            if croniter:
-                new_cron_kor = st.session_state.cron_kor_input
-                new_cron_aus = st.session_state.cron_aus_input
-                new_cron_coin = st.session_state.cron_coin_input
-
-                for cron_val, country_name in [
-                    (new_cron_kor, "한국"),
-                    (new_cron_aus, "호주"),
-                    (new_cron_coin, "코인"),
-                ]:
-                    if not croniter.is_valid(cron_val):
-                        st.error(f"{country_name}의 Crontab 형식이 올바르지 않습니다: '{cron_val}'")
-                        error = True
-                to_save.update(
-                    {
-                        "SCHEDULE_CRON_KOR": new_cron_kor.strip(),
-                        "SCHEDULE_CRON_AUS": new_cron_aus.strip(),
-                        "SCHEDULE_CRON_COIN": new_cron_coin.strip(),
-                    }
-                )
-
-            if not error:
-                if save_common_settings(to_save):
-                    st.success("알림 설정을 저장했습니다.")
-                    st.rerun()
-                else:
-                    st.error("알림 설정 저장에 실패했습니다.")
-
-        if "test_send" in locals() and test_send:
-            # 테스트 전송: 입력값 우선 저장 후 실행
-            error = False
-            if not new_tg_enabled and not new_slack_enabled:
-                st.warning(
-                    "텔레그램과 슬랙 알림이 모두 비활성화되어 있어 전송되지 않을 수 있습니다."
-                )
-            if new_tg_enabled and (not new_tg_token or not new_tg_chat):
-                st.error("텔레그램 봇 토큰과 채팅 ID를 입력해주세요.")
-                error = True
-            if new_slack_enabled and not new_slack_webhook_url:
-                st.error("슬랙 웹훅 URL을 입력해주세요.")
-                error = True
-
-            if not error:
-                settings_to_save_for_test = {
-                    "TELEGRAM_ENABLED": new_tg_enabled,
-                    "TELEGRAM_BOT_TOKEN": new_tg_token.strip(),
-                    "TELEGRAM_CHAT_ID": new_tg_chat.strip(),
-                    "SLACK_ENABLED": new_slack_enabled,
-                    "SLACK_WEBHOOK_URL": new_slack_webhook_url.strip(),
-                }
-                if save_common_settings(settings_to_save_for_test):
-                    try:
-                        res = generate_status_report(
-                            country=test_country, date_str=None, prefetched_data=None
-                        )
-                        if not res:
-                            st.error("현황 계산 실패로 테스트 전송을 건너뜁니다.")
-                        else:
-                            header_line, headers, rows_sorted = res
-                            if test_country == "coin":
-                                sent = _maybe_notify_coin_detailed(
-                                    test_country, header_line, headers, rows_sorted, force=True
-                                )
-                            else:
-                                sent_basic = _maybe_notify_basic_status(
-                                    test_country, header_line, force=True
-                                )
-                                sent_signals = _maybe_notify_signal_summary(
-                                    test_country, headers, rows_sorted, force=True
-                                )
-                                sent = sent_basic or sent_signals
-                            if sent:
-                                st.success(
-                                    "알림 테스트 전송 완료(강제 전송). 텔레그램/슬랙 채널에서 확인하세요."
-                                )
-                            else:
-                                from utils.notify import get_last_error
-
-                                err = get_last_error()
-                                if err:
-                                    st.warning(f"전송 시도는 했지만 응답이 없었습니다. 상세: {err}")
-                                else:
-                                    st.warning(
-                                        "전송 시도는 했지만 응답이 없었습니다. 설정을 확인하세요."
-                                    )
-                    except Exception as e:
-                        st.error(f"테스트 전송 중 오류: {e}")
-                else:
-                    st.error("설정 저장 실패로 테스트 전송을 건너뜁니다.")
-
-        if "tg_ping" in locals() and tg_ping:
-            # 상태 계산 없이, 토큰/채팅ID만으로 전송 테스트
-            error = False
-            if not new_tg_token or not new_tg_chat:
-                st.error("봇 토큰과 채팅 ID를 입력해주세요.")
-                error = True
-            if not error:
-                if save_common_settings(
-                    {
-                        "TELEGRAM_ENABLED": True,
-                        "TELEGRAM_BOT_TOKEN": new_tg_token.strip(),
-                        "TELEGRAM_CHAT_ID": new_tg_chat.strip(),
-                    }
-                ):
-                    try:
-                        from utils.notify import get_last_error, send_telegram_message
-
-                        ok = send_telegram_message(
-                            f"[테스트] MomentumPilot 핑 메시지 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})"
-                        )
-                        if ok:
-                            st.success("간단 텍스트 전송 성공. 텔레그램에서 확인하세요.")
-                        else:
-                            err = get_last_error()
-                            st.warning(f"전송 실패: {err or '상세 사유 없음'}")
-                    except Exception as e:
-                        st.error(f"전송 중 오류: {e}")
-                else:
-                    st.error("설정 저장 실패로 전송을 건너뜁니다.")
 
 
 if __name__ == "__main__":

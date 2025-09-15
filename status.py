@@ -62,6 +62,67 @@ try:
 except ImportError:
     yf = None
 
+# 슬랙 알림에 사용될 매매 결정(decision) 코드별 표시 설정을 관리합니다.
+# - display_name: 슬랙 메시지에 표시될 그룹 헤더
+# - order: 그룹 표시 순서 (낮을수록 위)
+# - is_recommendation: True이면 @channel 알림을 유발하는 '추천'으로 간주
+# - show_return: True이면 메시지에 '수익률' 정보를 포함
+DECISION_CONFIG = {
+    # 보유  (알림 없음)
+    "HOLD": {
+        "display_name": "<💼 보유>",
+        "order": 1,
+        "is_recommendation": False,
+        "show_return": True,
+    },
+    # 매도 추천 (알림 발생)
+    "CUT_STOPLOSS": {
+        "display_name": "<🚨 손절매도>",
+        "order": 10,
+        "is_recommendation": True,
+        "show_return": False,
+    },
+    "SELL_TREND": {
+        "display_name": "<📉 추세이탈 매도>",
+        "order": 11,
+        "is_recommendation": True,
+        "show_return": False,
+    },
+    "SELL_REPLACE": {
+        "display_name": "<🔄 교체매도>",
+        "order": 12,
+        "is_recommendation": True,
+        "show_return": False,
+    },
+    # 매수 추천 (알림 발생)
+    "BUY_REPLACE": {
+        "display_name": "<🔄 교체매수>",
+        "order": 20,
+        "is_recommendation": True,
+        "show_return": True,
+    },
+    "BUY": {
+        "display_name": "<🚀 신규매수>",
+        "order": 21,
+        "is_recommendation": True,
+        "show_return": True,
+    },
+    # 보유 및 대기 (알림 없음)
+    "WAIT": {
+        "display_name": "<⏳ 대기>",
+        "order": 40,
+        "is_recommendation": False,
+        "show_return": False,
+    },
+    # 거래 완료 (알림 없음)
+    "SOLD": {
+        "display_name": "<✅ 매도 완료>",
+        "order": 50,
+        "is_recommendation": False,
+        "show_return": False,
+    },
+}
+
 
 def get_market_regime_status_string() -> Optional[str]:
     """
@@ -1038,6 +1099,11 @@ def generate_status_report(
         state = "HOLD" if sh > 0 else "WAIT"
         phrase = ""
 
+        # 이 루프의 모든 경로에서 사용되므로, 여기서 초기화합니다.
+        buy_date = None
+        holding_days = 0
+        hold_ret = None
+
         # 카테고리 중복 확인 및 상태 변경 (BUY 대상에서 제외)
         category = stock_meta.get(tkr, {}).get("category")
         # Only apply category check for non-held stocks (potential buys)
@@ -1048,7 +1114,6 @@ def generate_status_report(
         else:
             consecutive_info = consecutive_holding_info.get(tkr)
             buy_date = consecutive_info.get("buy_date") if consecutive_info else None
-            holding_days = 0
 
             if buy_date:
                 # label_date는 naive timestamp이므로, buy_date도 naive로 만듭니다.
@@ -1363,9 +1428,13 @@ def generate_status_report(
     executed_buys_today = {
         trade["ticker"] for trade in trades_on_base_date if trade["action"] == "BUY"
     }
-    executed_sells_today = {
-        trade["ticker"] for trade in trades_on_base_date if trade["action"] == "SELL"
-    }
+    sell_trades_today = {}
+    for trade in trades_on_base_date:
+        if trade["action"] == "SELL":
+            tkr = trade["ticker"]
+            if tkr not in sell_trades_today:
+                sell_trades_today[tkr] = []
+            sell_trades_today[tkr].append(trade)
 
     # 기준일에 실행된 거래가 있다면, 현황 목록에 '완료' 상태를 표시합니다.
     for decision in decisions:
@@ -1376,11 +1445,32 @@ def generate_status_report(
             # 이 종목이 오늘 신규 매수되었음을 표시
             decision["row"][-1] = "✅ 신규 매수"
 
-        # 오늘 매도된 종목은 상태를 SOLD로 강제합니다.
-        if tkr in executed_sells_today:
-            decision["state"] = "SOLD"  # 정렬 및 표시를 위한 새로운 상태
-            decision["row"][2] = "SOLD"
-            decision["row"][-1] = "🔚 매도"
+        # 오늘 매도된 종목 처리
+        if tkr in sell_trades_today:
+            d = data_by_tkr.get(tkr)
+            remaining_shares = float(d.get("shares", 0.0)) if d else 0.0
+
+            if remaining_shares > 0:
+                # 부분 매도: 상태는 HOLD로 유지하고, 문구에만 정보를 추가합니다.
+                decision["state"] = "HOLD"
+                decision["row"][2] = "HOLD"
+
+                total_sold_shares = sum(trade.get("shares", 0) for trade in sell_trades_today[tkr])
+
+                sell_phrase = f"⚠️ 부분 매도 ({format_shares(total_sold_shares)}주)"
+
+                # 기존 문구와 합칩니다.
+                original_phrase = decision["row"][-1]
+                # 'HOLD'나 'WAIT' 같은 기본 상태 문구는 덮어씁니다.
+                if original_phrase and original_phrase not in ["HOLD", "WAIT", ""]:
+                    decision["row"][-1] = f"{sell_phrase}, {original_phrase}"
+                else:
+                    decision["row"][-1] = sell_phrase
+            else:
+                # 전체 매도: 상태를 SOLD로 변경합니다.
+                decision["state"] = "SOLD"
+                decision["row"][2] = "SOLD"
+                decision["row"][-1] = "🔚 매도 완료"
 
     # 7. 최종 정렬
     def sort_key(decision_dict):
@@ -1407,8 +1497,19 @@ def generate_status_report(
 
     decisions.sort(key=sort_key)
 
+    # WAIT 종목은 점수 순으로 상위 5개만 표시합니다.
+    final_decisions = []
+    wait_count = 0
+    for d in decisions:
+        if d["state"] == "WAIT":
+            if wait_count < 5:
+                final_decisions.append(d)
+                wait_count += 1
+        else:
+            final_decisions.append(d)
+
     rows_sorted = []
-    for i, decision_dict in enumerate(decisions, 1):
+    for i, decision_dict in enumerate(final_decisions, 1):
         row = decision_dict["row"]
         row[0] = i
         rows_sorted.append(row)
@@ -1482,13 +1583,9 @@ def main(country: str = "kor", date_str: Optional[str] = None):
         except Exception:
             pass
 
-        # 텔레그램 알림: 현황 전송 (코인은 상세 현황에 신호 포함)
+        # 슬랙 알림: 현황 전송
         try:
-            if country == "coin":
-                _maybe_notify_coin_detailed(country, header_line, headers, rows_sorted)
-            else:
-                _maybe_notify_basic_status(country, header_line)
-                _maybe_notify_signal_summary(country, headers, rows_sorted)
+            _maybe_notify_detailed_status(country, header_line, headers, rows_sorted)
         except Exception:
             pass
 
@@ -1613,119 +1710,15 @@ def _is_trading_day(country: str) -> bool:
         return wd < 5
 
 
-def _maybe_notify_basic_status(country: str, header_line: str, force: bool = False) -> bool:
-    """Send the basic hourly/daily header-style status message."""
-    try:
-        from utils.notify import send_slack_message, send_telegram_message
-    except Exception:
-        return False
-
-    if not force and not _is_trading_day(country):
-        return False
-
-    # Expected pattern in header_line:
-    # "기준일: YYYY-MM-DD(요일) [라벨] | 보유종목: X/Y | ... | 보유금액: ... | ... | 평가: +x.x%(금액) | ..."
-    try:
-
-        def _strip_html(s: str) -> str:
-            try:
-                return re.sub(r"<[^>]+>", "", s)
-            except Exception:
-                return s
-
-        first_seg = header_line.split("|")[0].strip()
-        # Extract date(weekday)
-        # first_seg like: "기준일: 2025-09-13(토) [오늘]"
-        date_part = first_seg.split(":", 1)[1].strip()
-        if "[" in date_part:
-            date_part = date_part.split("[")[0].strip()
-        date_part = _strip_html(date_part)
-
-        # Extract holdings X/Y
-        hold_seg = next(seg for seg in header_line.split("|") if "보유종목:" in seg)
-        hold_text = (
-            hold_seg.strip().replace("보유종목:", "보유종목:").split("보유종목:")[-1].strip()
-        )
-        hold_text = _strip_html(hold_text)
-
-        # Extract holdings amount
-        amt_seg = next(seg for seg in header_line.split("|") if "보유금액:" in seg)
-        amt_text = amt_seg.strip().split(":", 1)[1].strip()
-        amt_text = _strip_html(amt_text)
-
-        # Extract evaluation return (수익률)
-        eval_seg = next(seg for seg in header_line.split("|") if "평가:" in seg)
-        eval_text = eval_seg.strip().split(":", 1)[1].strip()
-        eval_text = _strip_html(eval_text)
-
-        country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
-        msg = f"[{country_kor}] {date_part} 보유종목: {hold_text} | 보유금액: {amt_text} | 수익률: {eval_text}"
-
-        tg_sent = send_telegram_message(msg)
-        slack_sent = send_slack_message(msg)
-
-        return tg_sent or slack_sent
-    except Exception:
-        return False
-
-
-def _maybe_notify_signal_summary(
-    country: str, headers: list, rows_sorted: list, force: bool = False
-) -> bool:
-    """Send optional summary: X종목 매수 필요, X종목 매도 필요."""
-    try:
-        from utils.notify import send_slack_message, send_telegram_message
-    except Exception:
-        return False
-
-    if not force and not _is_trading_day(country):
-        return False
-
-    try:
-        idx_state = headers.index("상태")
-    except ValueError:
-        return False
-
-    buy_states = {"BUY", "BUY_REPLACE"}
-    sell_states = {"SELL", "SELL_REPLACE"}
-
-    buy_cnt = 0
-    sell_cnt = 0
-    for row in rows_sorted:
-        stt = str(row[idx_state]) if idx_state < len(row) else ""
-        if stt in buy_states:
-            buy_cnt += 1
-        elif stt in sell_states:
-            sell_cnt += 1
-
-    if buy_cnt == 0 and sell_cnt == 0:
-        return False
-
-    country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
-    parts = []
-    if buy_cnt:
-        parts.append(f"{buy_cnt}종목 매수 필요")
-    if sell_cnt:
-        parts.append(f"{sell_cnt}종목 매도 필요")
-    text = f"[{country_kor}] " + ", ".join(parts)
-
-    tg_sent = send_telegram_message(text)
-    slack_sent = send_slack_message(text)
-
-    return tg_sent or slack_sent
-
-
-def _maybe_notify_coin_detailed(
+def _maybe_notify_detailed_status(
     country: str, header_line: str, headers: list, rows_sorted: list, force: bool = False
 ) -> bool:
-    """Send a detailed multi-line Telegram message for coin with 억/만원 formatting and 누적수익률."""
+    """국가별 설정에 따라 슬랙으로 상세 현황 알림을 전송합니다."""
     try:
+        from utils.db_manager import get_app_settings
         from utils.notify import (
             send_slack_message,
-            send_telegram_message,
-            send_telegram_photo,
         )
-        from utils.report import render_table_as_image, render_table_eaw
     except Exception:
         return False
 
@@ -1740,19 +1733,7 @@ def _maybe_notify_coin_detailed(
             except Exception:
                 return s
 
-        def fmt_eok_man(n: float) -> str:
-            try:
-                val = int(round(n))
-                eok = val // 100_000_000
-                man = (val % 100_000_000) // 10_000
-                if eok > 0 and man > 0:
-                    return f"{eok}억 {man:,}만원"
-                if eok > 0 and man == 0:
-                    return f"{eok}억원"
-                return f"{man:,}만원"
-            except Exception:
-                return f"{n}원"
-
+        # --- Parse header_line for caption ---
         # Date
         first_seg = header_line.split("|")[0].strip()
         date_part = first_seg.split(":", 1)[1].strip()
@@ -1760,24 +1741,37 @@ def _maybe_notify_coin_detailed(
             date_part = date_part.split("[")[0].strip()
         date_part = _strip_html(date_part)
 
-        # Holdings count and eval/cumulative return
+        # Holdings count
         hold_seg = next(
             (seg for seg in header_line.split("|") if "보유종목:" in seg), "보유종목: -"
         )
         hold_text = _strip_html(hold_seg.split(":", 1)[1].strip())
-        eval_seg = next(
-            (seg for seg in header_line.split("|") if "평가:" in seg), "평가: +0.00%(0원)"
+
+        # Holdings value
+        hold_val_seg = next(
+            (seg for seg in header_line.split("|") if "보유금액:" in seg), "보유금액: 0"
         )
-        eval_text = _strip_html(eval_seg.split(":", 1)[1].strip())
+        hold_val_text = _strip_html(hold_val_seg.split(":", 1)[1].strip())
+
+        # Cash value
+        cash_seg = next((seg for seg in header_line.split("|") if "현금:" in seg), "현금: 0")
+        cash_text = _strip_html(cash_seg.split(":", 1)[1].strip())
+
+        # Cumulative return
         cum_seg = next(
             (seg for seg in header_line.split("|") if "누적:" in seg), "누적: +0.00%(0원)"
         )
         cum_text = _strip_html(cum_seg.split(":", 1)[1].strip())
 
+        # Total equity value
+        equity_seg = next(
+            (seg for seg in header_line.split("|") if "평가금액:" in seg), "평가금액: 0"
+        )
+        equity_text = _strip_html(equity_seg.split(":", 1)[1].strip())
+
         # Columns
         idx_ticker = headers.index("티커")
         idx_state = headers.index("상태") if "상태" in headers else None
-        idx_value = headers.index("금액") if "금액" in headers else None
         idx_ret = (
             headers.index("누적수익률")
             if "누적수익률" in headers
@@ -1788,105 +1782,138 @@ def _maybe_notify_coin_detailed(
         # Names map
         name_map = {}
         try:
-            stocks = get_stocks("coin") or []
+            # Use the country parameter to get the correct stocks
+            stocks = get_stocks(country) or []
             name_map = {
                 str(s.get("ticker") or "").upper(): str(s.get("name") or "") for s in stocks
             }
         except Exception:
             pass
 
-        holdings_total = 0.0
-        # Build table with name column
-        headers_tbl = ["티커", "종목명", "상태", "금액", "누적수익률", "점수"]
-        display_rows = []
+        # 1. 데이터를 사전 처리하여 표시할 부분을 만들고 최대 너비를 찾습니다.
+        display_parts_list = []
+        max_len_name = 0
+        max_len_return_col = 0
+        max_len_score_col = 0
+
         for row in rows_sorted:
             try:
+                num_part = f"[{row[0]}]"
                 tkr = str(row[idx_ticker])
                 name = name_map.get(tkr.upper(), "")
+                name_part = f"{name}({tkr})" if name else tkr
+                full_name_part = f"{num_part} {name_part}"
+
                 stt = (
-                    str(row[idx_state]) if (idx_state is not None and idx_state < len(row)) else "-"
+                    str(row[idx_state]) if (idx_state is not None and idx_state < len(row)) else ""
                 )
-                # amount
-                val = (
-                    float(row[idx_value])
-                    if (idx_value is not None and isinstance(row[idx_value], (int, float)))
-                    else 0.0
-                )
-                holdings_total += val
-                # return pct
-                pct_txt = ""
+
+                return_col = ""
                 if idx_ret is not None:
                     r = row[idx_ret]
-                    if isinstance(r, (int, float)):
-                        pct_txt = f"{r:+.2f}%"
-                    else:
-                        pct_txt = str(r)
-                if not pct_txt:
-                    pct_txt = "0%"
-                # score
-                sc = row[idx_score] if (idx_score is not None and idx_score < len(row)) else None
-                sc_txt = (
-                    f"{float(sc):.2f}"
-                    if isinstance(sc, (int, float))
-                    else (str(sc) if sc is not None else "-")
-                )
-                display_rows.append([tkr, name, stt, fmt_eok_man(val), pct_txt, sc_txt])
+                    if isinstance(r, (int, float)) and abs(r) > 0.001:
+                        return_col = f"수익 {r:+.2f}%,"
+
+                score_col = ""
+                if idx_score is not None:
+                    sc = row[idx_score]
+                    if isinstance(sc, (int, float)):
+                        score_col = f"점수 {float(sc):.2f}"
+
+                parts = {
+                    "name": full_name_part,
+                    "status": stt,
+                    "return_col": return_col,
+                    "score_col": score_col,
+                }
+                display_parts_list.append(parts)
+
+                max_len_name = max(max_len_name, len(full_name_part))
+                max_len_return_col = max(max_len_return_col, len(return_col))
+                max_len_score_col = max(max_len_score_col, len(score_col))
+
             except Exception:
                 continue
 
-        aligns_tbl = ["right", "left", "left", "right", "right", "right"]
+        # 2. 상태별로 그룹화합니다.
+        grouped_parts = {}
+        for parts in display_parts_list:
+            status = parts["status"]
+            if status not in grouped_parts:
+                grouped_parts[status] = []
+            grouped_parts[status].append(parts)
 
-        # --- Common Caption/Header ---
-        cash_txt = "-"
-        try:
-            from utils.exchanges.bithumb_v2 import BithumbV2Client
+        # 3. 그룹 헤더와 함께 정렬된 라인을 만듭니다.
+        body_lines = []
+        # 정렬 순서는 DECISION_CONFIG의 'order' 값을 기준으로 합니다.
+        sorted_groups = sorted(
+            grouped_parts.items(),
+            key=lambda item: DECISION_CONFIG.get(item[0], {"order": 99}).get("order", 99),
+        )
 
-            v2 = BithumbV2Client()
-            items = v2.accounts()
-            krw_val = 0.0
-            for it in items or []:
-                cur = str(it.get("currency") or "").upper()
-                if cur == "KRW":
+        for group_name, parts_in_group in sorted_groups:
+            config = DECISION_CONFIG.get(group_name)
+            if not config:
+                # 설정에 없는 상태(예: SELL_MOMENTUM)에 대한 폴백 처리
+                display_name = f"<{group_name}>"
+                show_return = group_name == "HOLD"
+            else:
+                display_name = config["display_name"]
+                show_return = config["show_return"]
 
-                    def _pf(x):
-                        try:
-                            return float(str(x).replace(",", ""))
-                        except Exception:
-                            return 0.0
+            if parts_in_group:
+                body_lines.append(display_name)
+                for parts in parts_in_group:
+                    name_part = parts["name"].ljust(max_len_name)
+                    score_part = parts["score_col"].ljust(max_len_score_col)
 
-                    krw_val = _pf(it.get("balance")) + _pf(it.get("locked"))
-                    break
-            cash_txt = fmt_eok_man(krw_val)
-        except Exception:
-            pass
+                    if show_return:
+                        return_part = parts["return_col"].ljust(max_len_return_col)
+                        line = f"{name_part}  {return_part} {score_part}"
+                    else:
+                        return_part = "".ljust(max_len_return_col)
+                        line = f"{name_part}  {return_part} {score_part}"
 
-        hold_txt = fmt_eok_man(holdings_total)
+                    body_lines.append(line.rstrip())
+                body_lines.append("")  # 그룹 사이에 빈 줄 추가
+
+        if body_lines and body_lines[-1] == "":
+            body_lines.pop()
+
+        # --- Build caption for message ---
         country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
-        header = f"[{country_kor}] {date_part} 잔액: {cash_txt}, 보유금액: {hold_txt}"
-        eval_line = f"누적: {cum_text}"
+
+        line1 = f"[{country_kor}] {date_part} 평가금액: {equity_text}, 누적수익 {cum_text}"
+        line2 = f"현금: {cash_text}, 보유금액: {hold_val_text}"
         hold_line = f"보유종목: {hold_text}"
-        caption = "\n".join([header, eval_line, hold_line])
+        caption = "\n".join([line1, line2, hold_line])
 
-        # --- Send Telegram ---
-        image_buffer = render_table_as_image(headers_tbl, display_rows, aligns_tbl)
-        photo_sent = send_telegram_photo(caption=caption, image_buffer=image_buffer)
-        table_lines = render_table_eaw(headers_tbl, display_rows, aligns_tbl)
+        # --- Send notifications ---
+        app_settings = get_app_settings(country) or {}
+        if not app_settings.get("SLACK_ENABLED"):
+            return False
+        webhook_url = app_settings.get("SLACK_WEBHOOK_URL")
+        if not webhook_url:
+            return False
 
-        def _html_escape(s: str) -> str:
-            try:
-                return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            except Exception:
-                return s
+        # DECISION_CONFIG에서 is_recommendation=True인 그룹이 하나라도 있으면 @channel 멘션을 포함합니다.
+        has_recommendation = False
+        for group_name in grouped_parts.keys():
+            config = DECISION_CONFIG.get(group_name)
+            if config and config.get("is_recommendation", False):
+                has_recommendation = True
+                break
+        slack_mention = "<!channel>\n" if has_recommendation else ""
 
-        table_block = "<pre>" + _html_escape("\n".join(table_lines)) + "</pre>"
-        text_sent_tg = send_telegram_message(table_block)
+        if not body_lines:
+            # No items to report, just send caption
+            slack_sent = send_slack_message(slack_mention + caption, webhook_url=webhook_url)
+        else:
+            # For Slack, use ``` for code blocks
+            slack_message = caption + "\n\n" + "```\n" + "\n".join(body_lines) + "\n```"
+            slack_sent = send_slack_message(slack_mention + slack_message, webhook_url=webhook_url)
 
-        # --- Send Slack ---
-        slack_header = caption
-        slack_table = "```\n" + "\n".join(table_lines) + "\n```"
-        slack_sent = send_slack_message(f"{slack_header}\n{slack_table}")
-
-        return photo_sent and text_sent_tg and slack_sent
+        return slack_sent
     except Exception:
         return False
 

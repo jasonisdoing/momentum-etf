@@ -61,7 +61,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 6) 스케줄러로 자동 실행 (APScheduler)
 
-장 마감 이후 자동으로 현황을 계산하고(교체매매 신호 포함) 텔레그램으로 알림을 보낼 수 있습니다.
+장 마감 이후 자동으로 현황을 계산하고(교체매매 신호 포함) 슬랙(Slack)으로 알림을 보낼 수 있습니다.
 
 1. 의존성 설치: `pip install -r requirements.txt`
 2. (선택) 환경 변수로 스케줄/타임존 설정
@@ -73,7 +73,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
    - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
 3. 실행: `python scheduler.py`
 
-텔레그램 알림은 웹앱 설정 탭의 공통 설정에 `TELEGRAM_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 저장 후 동작합니다.
+슬랙(Slack) 알림은 웹앱의 각 국가별 탭 하위의 '알림' 탭에서 웹훅(Webhook) URL을 설정한 후 동작합니다.
 
 5) (선택) 급등주 찾기
 
