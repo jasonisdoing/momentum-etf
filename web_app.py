@@ -55,6 +55,17 @@ try:
 except Exception:
     _stock = None
 
+try:
+    from croniter import croniter
+except ImportError:
+    croniter = None
+
+try:
+    from cron_descriptor import get_description as get_cron_description
+except ImportError:
+    get_cron_description = None
+
+
 COUNTRY_CODE_MAP = {"kor": "한국", "aus": "호주", "coin": "가상화폐"}
 
 
@@ -1591,36 +1602,86 @@ def main():
                 help="Slack 앱의 Incoming Webhook URL",
             )
 
-            st.subheader("전송 주기")
-            # 스케줄 주기(시간) – 정수 입력 (0 입력 시 크론 스케줄 사용)
-            cur_kor = common.get("SCHEDULE_EVERY_HOURS_KOR")
-            cur_aus = common.get("SCHEDULE_EVERY_HOURS_AUS")
-            cur_coin = common.get("SCHEDULE_EVERY_HOURS_COIN")
-            try:
-                defv_kor = int(cur_kor) if cur_kor is not None else 0
-            except Exception:
-                defv_kor = 0
-            try:
-                defv_aus = int(cur_aus) if cur_aus is not None else 0
-            except Exception:
-                defv_aus = 0
-            try:
-                defv_coin = int(cur_coin) if cur_coin is not None else 0
-            except Exception:
-                defv_coin = 0
-            sel_kor = st.number_input(
-                "한국 알림 전송 주기(시간)",
-                min_value=0,
-                step=1,
-                value=defv_kor,
-                help="N시간마다 실행. 0 입력 시 환경변수 크론 스케줄 사용",
-            )
-            sel_aus = st.number_input(
-                "호주 알림 전송 주기(시간)", min_value=0, step=1, value=defv_aus
-            )
-            sel_coin = st.number_input(
-                "코인 알림 전송 주기(시간)", min_value=0, step=1, value=defv_coin
-            )
+            st.subheader("전송 주기 (Crontab 형식)")
+            if croniter is None:
+                st.error(
+                    "Crontab 유효성 검사를 위해 'croniter' 라이브러리가 필요합니다. `pip install croniter`로 설치해주세요."
+                )
+            if get_cron_description is None:
+                st.error(
+                    "Crontab 설명 생성을 위해 'cron-descriptor' 라이브러리가 필요합니다. `pip install cron-descriptor`로 설치해주세요."
+                )
+
+            # DB에서 현재 크론 설정 로드, 없으면 기본값 사용
+            # 보다 직관적이고 일반적인 스케줄을 기본값으로 제안합니다.
+            # 한국: 평일 장중 10분마다 (9:00-15:50)
+            cron_kor = common.get("SCHEDULE_CRON_KOR", "*/10 9-15 * * 1-5")
+            # 호주: 평일 장중 10분마다 (10:00-16:50)
+            cron_aus = common.get("SCHEDULE_CRON_AUS", "*/10 10-16 * * 1-5")
+            # 코인: 5분마다
+            cron_coin = common.get("SCHEDULE_CRON_COIN", "*/5 * * * *")
+
+            def render_cron_input(label, key, default_value):
+                """Crontab 입력을 위한 UI와 실시간 유효성 검사를 렌더링합니다."""
+                col1, col2 = st.columns([2, 3])
+                with col1:
+                    st.text_input(
+                        label,
+                        value=default_value,
+                        key=key,
+                        help="Crontab 형식 입력 (예: '0 * * * *'는 매시간 실행)",
+                    )
+                with col2:
+                    # 폼이 렌더링될 때 st.session_state에서 현재 입력된 값을 가져와 유효성을 검사합니다.
+                    current_val = st.session_state.get(key, default_value)
+                    if croniter and current_val:
+                        try:
+                            if not croniter.is_valid(current_val):
+                                st.warning("❌ 잘못된 Crontab 형식입니다.")
+                            else:
+                                display_text = "✅ 유효"
+                                if get_cron_description:
+                                    try:
+                                        desc_ko = ""
+                                        try:
+                                            # 최신 API (cron-descriptor >= 1.2.16)
+                                            desc_ko = get_cron_description(
+                                                current_val,
+                                                locale="ko_KR",
+                                                use_24hour_time_format=True,
+                                            )
+                                        except TypeError:
+                                            # 구버전 API 폴백 (cron-descriptor < 1.2.16)
+                                            from cron_descriptor import (
+                                                ExpressionDescriptor,
+                                                Options,
+                                            )
+
+                                            options = Options()
+                                            options.use_24hour_time_format = True
+                                            options.locale_code = "ko_KR"
+                                            desc_ko = ExpressionDescriptor(
+                                                current_val, options
+                                            ).get_description()
+
+                                        if desc_ko:
+                                            display_text = f"✅ 유효. {desc_ko}"
+                                    except Exception as e:
+                                        # 설명 생성 실패 시, 콘솔에 오류를 기록하고 기본 문구만 표시합니다.
+                                        print(f"Crontab 설명 생성 중 오류: {e}")
+
+                                # 수직 정렬을 위해 div와 패딩을 사용합니다.
+                                st.markdown(
+                                    f"<div style='padding-top: 32px;'>"
+                                    f"<span style='color:green;'>{display_text}</span></div>",
+                                    unsafe_allow_html=True,
+                                )
+                        except Exception as e:
+                            st.error(f"오류: {e}")
+
+            render_cron_input("한국 알림 전송 주기", "cron_kor_input", cron_kor)
+            render_cron_input("호주 알림 전송 주기", "cron_aus_input", cron_aus)
+            render_cron_input("코인 알림 전송 주기", "cron_coin_input", cron_coin)
 
             st.caption(
                 "테스트는 스케줄과 무관하게 1회 계산 후 알림을 전송합니다. 한국/호주는 거래일에만 전송됩니다."
@@ -1671,14 +1732,27 @@ def main():
             else:
                 to_save.update({"SLACK_ENABLED": False})
 
-            # 스케줄 전송 주기 저장
-            to_save.update(
-                {
-                    "SCHEDULE_EVERY_HOURS_KOR": int(sel_kor),
-                    "SCHEDULE_EVERY_HOURS_AUS": int(sel_aus),
-                    "SCHEDULE_EVERY_HOURS_COIN": int(sel_coin),
-                }
-            )
+            # 스케줄 전송 주기(Crontab) 저장
+            if croniter:
+                new_cron_kor = st.session_state.cron_kor_input
+                new_cron_aus = st.session_state.cron_aus_input
+                new_cron_coin = st.session_state.cron_coin_input
+
+                for cron_val, country_name in [
+                    (new_cron_kor, "한국"),
+                    (new_cron_aus, "호주"),
+                    (new_cron_coin, "코인"),
+                ]:
+                    if not croniter.is_valid(cron_val):
+                        st.error(f"{country_name}의 Crontab 형식이 올바르지 않습니다: '{cron_val}'")
+                        error = True
+                to_save.update(
+                    {
+                        "SCHEDULE_CRON_KOR": new_cron_kor.strip(),
+                        "SCHEDULE_CRON_AUS": new_cron_aus.strip(),
+                        "SCHEDULE_CRON_COIN": new_cron_coin.strip(),
+                    }
+                )
 
             if not error:
                 if save_common_settings(to_save):

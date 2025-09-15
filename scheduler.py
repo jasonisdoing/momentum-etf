@@ -99,77 +99,43 @@ def main():
     # 공통 설정에서 스케줄 주기(시간) 읽기
     common = get_common_settings() or {}
 
-    def _hours(name: str):
-        try:
-            v = common.get(name)
-            return int(v) if v is not None and int(v) > 0 else None
-        except Exception:
-            return None
-
     # coin
     if _bool_env("SCHEDULE_ENABLE_COIN", True):
-        every_h = _hours("SCHEDULE_EVERY_HOURS_COIN")
-        if every_h:
+        # DB의 크론 설정을 우선 사용, 없으면 환경변수 폴백
+        cron = common.get("SCHEDULE_CRON_COIN") or _get("SCHEDULE_COIN_CRON", "5 0 * * *")
+        tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
 
-            def coin_job():
-                _try_sync_bithumb_trades()
-                _try_sync_bithumb_equity()
-                run_status("coin")
+        def coin_job():
+            _try_sync_bithumb_trades()
+            _try_sync_bithumb_equity()
+            run_status("coin")
 
-            scheduler.add_job(coin_job, IntervalTrigger(hours=every_h), id="coin_status")
-            # scheduler.add_job(coin_job, IntervalTrigger(minutes=1), id="coin_status")
-            logging.info("Scheduled COIN: every %sh", every_h)
-        else:
-            cron = _get("SCHEDULE_COIN_CRON", "5 0 * * *")
-            tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
-
-            def coin_job():
-                _try_sync_bithumb_trades()
-                _try_sync_bithumb_equity()
-                run_status("coin")
-
-            scheduler.add_job(
-                coin_job, CronTrigger.from_crontab(cron, timezone=tz), id="coin_status"
-            )
-            logging.info("Scheduled COIN: cron=%s tz=%s", cron, tz)
+        scheduler.add_job(coin_job, CronTrigger.from_crontab(cron, timezone=tz), id="coin_status")
+        logging.info("Scheduled COIN: cron=%s tz=%s", cron, tz)
 
     # kor
     if _bool_env("SCHEDULE_ENABLE_KOR", True):
-        every_h = _hours("SCHEDULE_EVERY_HOURS_KOR")
-        if every_h:
-            scheduler.add_job(
-                run_status, IntervalTrigger(hours=every_h), args=["kor"], id="kor_status"
-            )
-            logging.info("Scheduled KOR: every %sh", every_h)
-        else:
-            cron = _get("SCHEDULE_KOR_CRON", "10 18 * * 1-5")
-            tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
-            scheduler.add_job(
-                run_status,
-                CronTrigger.from_crontab(cron, timezone=tz),
-                args=["kor"],
-                id="kor_status",
-            )
-            logging.info("Scheduled KOR: cron=%s tz=%s", cron, tz)
+        cron = common.get("SCHEDULE_CRON_KOR") or _get("SCHEDULE_KOR_CRON", "10 18 * * 1-5")
+        tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
+        scheduler.add_job(
+            run_status,
+            CronTrigger.from_crontab(cron, timezone=tz),
+            args=["kor"],
+            id="kor_status",
+        )
+        logging.info("Scheduled KOR: cron=%s tz=%s", cron, tz)
 
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
-        every_h = _hours("SCHEDULE_EVERY_HOURS_AUS")
-        if every_h:
-            scheduler.add_job(
-                run_status, IntervalTrigger(hours=every_h), args=["aus"], id="aus_status"
-            )
-            logging.info("Scheduled AUS: every %sh", every_h)
-        else:
-            cron = _get("SCHEDULE_AUS_CRON", "10 18 * * 1-5")
-            tz = _get("SCHEDULE_AUS_TZ", "Australia/Sydney")
-            scheduler.add_job(
-                run_status,
-                CronTrigger.from_crontab(cron, timezone=tz),
-                args=["aus"],
-                id="aus_status",
-            )
-            logging.info("Scheduled AUS: cron=%s tz=%s", cron, tz)
+        cron = common.get("SCHEDULE_CRON_AUS") or _get("SCHEDULE_AUS_CRON", "10 18 * * 1-5")
+        tz = _get("SCHEDULE_AUS_TZ", "Australia/Sydney")
+        scheduler.add_job(
+            run_status,
+            CronTrigger.from_crontab(cron, timezone=tz),
+            args=["aus"],
+            id="aus_status",
+        )
+        logging.info("Scheduled AUS: cron=%s tz=%s", cron, tz)
 
     if _bool_env("RUN_IMMEDIATELY_ON_START", False):
         # 시작 시 한 번 즉시 실행

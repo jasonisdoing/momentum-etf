@@ -8,3 +8,5 @@ requests
 pre-commit
 yfinance
 pandas_market_calendars
+croniter
+cron-descriptor
