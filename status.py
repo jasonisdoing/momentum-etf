@@ -922,6 +922,14 @@ def generate_status_report(
         if item.get("ticker")
     }
 
+    # 현재 보유 종목의 카테고리 (TBD 제외)
+    held_categories = set()
+    for tkr, d in holdings.items():
+        if float(d.get("shares", 0.0)) > 0:
+            category = stock_meta.get(tkr, {}).get("category")
+            if category and category != "TBD":
+                held_categories.add(category)
+
     # 2. 헤더 생성
     header_line, label_date, day_label = _build_header_line(
         country, portfolio_data, current_equity, total_holdings_value, data_by_tkr, base_date
@@ -1027,61 +1035,73 @@ def generate_status_report(
 
         # 자동 계산된 보유종목의 매수일과 보유일
         buy_signal = False
-
-        consecutive_info = consecutive_holding_info.get(tkr)
-        buy_date = consecutive_info.get("buy_date") if consecutive_info else None
-        holding_days = 0
-
-        if buy_date:
-            # label_date는 naive timestamp이므로, buy_date도 naive로 만듭니다.
-            if hasattr(buy_date, "tzinfo") and buy_date.tzinfo is not None:
-                buy_date = buy_date.tz_localize(None)
-            buy_date = pd.to_datetime(buy_date).normalize()
-
-        if sh > 0 and buy_date and buy_date <= label_date:
-            try:
-                # 거래일 기준으로 보유일수 계산 (캐시된 함수 사용)
-                trading_days_in_period = get_trading_days(
-                    buy_date.strftime("%Y-%m-%d"), label_date.strftime("%Y-%m-%d"), country
-                )
-                holding_days = len(trading_days_in_period)
-            except Exception as e:
-                print(f"경고: 보유일 계산 중 오류 발생 ({tkr}): {e}. 달력일 기준으로 대체합니다.")
-                # 거래일 계산 실패 시, 달력일 기준으로 계산
-                holding_days = (label_date - buy_date).days + 1
-
         state = "HOLD" if sh > 0 else "WAIT"
         phrase = ""
-        qty = 0
-        notional = 0.0
-        # Current holding return
-        hold_ret = ((price / ac) - 1.0) * 100.0 if (sh > 0 and ac > 0 and pd.notna(price)) else None
-        # TRIM if exceeding cap
-        if sh > 0:
-            if stop_loss is not None and ac > 0 and hold_ret <= float(stop_loss):
-                state = "CUT_STOPLOSS"  # 결정 코드
-                qty = sh
-                notional = qty * price
-                prof = (price - ac) * qty if ac > 0 else 0.0
-                phrase = f"가격기반손절 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
-        # --- 전략별 매수/매도 로직 ---
-        if state == "HOLD":  # 아직 매도 결정이 내려지지 않은 경우
-            price, ma, period = d["price"], d["s1"], d["s2"]
-            if sh > 0 and not pd.isna(price) and not pd.isna(ma) and price < ma:
-                state = "SELL_TREND"  # 결정 코드
-                qty = sh
-                notional = qty * price
-                prof = (price - ac) * qty if ac > 0 else 0.0
-                tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"
-                phrase = f"{tag} {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+        # 카테고리 중복 확인 및 상태 변경 (BUY 대상에서 제외)
+        category = stock_meta.get(tkr, {}).get("category")
+        # Only apply category check for non-held stocks (potential buys)
+        if sh == 0 and category and category != "TBD" and category in held_categories:
+            state = "WAIT"  # 카테고리 중복 시 BUY 대상에서 제외하고 WAIT 상태로
+            phrase = "카테고리 중복"
+            buy_signal = False  # 매수 신호도 비활성화
+        else:
+            consecutive_info = consecutive_holding_info.get(tkr)
+            buy_date = consecutive_info.get("buy_date") if consecutive_info else None
+            holding_days = 0
 
-        elif state == "WAIT":  # 아직 보유하지 않은 경우
-            price, ma, period = d["price"], d["s1"], d["s2"]
-            buy_signal_days_today = d["filter"]
-            if buy_signal_days_today > 0:
-                buy_signal = True
-                phrase = f"추세진입 ({buy_signal_days_today}일째)"
+            if buy_date:
+                # label_date는 naive timestamp이므로, buy_date도 naive로 만듭니다.
+                if hasattr(buy_date, "tzinfo") and buy_date.tzinfo is not None:
+                    buy_date = buy_date.tz_localize(None)
+                buy_date = pd.to_datetime(buy_date).normalize()
+
+            if sh > 0 and buy_date and buy_date <= label_date:
+                try:
+                    # 거래일 기준으로 보유일수 계산 (캐시된 함수 사용)
+                    trading_days_in_period = get_trading_days(
+                        buy_date.strftime("%Y-%m-%d"), label_date.strftime("%Y-%m-%d"), country
+                    )
+                    holding_days = len(trading_days_in_period)
+                except Exception as e:
+                    print(
+                        f"경고: 보유일 계산 중 오류 발생 ({tkr}): {e}. 달력일 기준으로 대체합니다."
+                    )
+                    # 거래일 계산 실패 시, 달력일 기준으로 계산
+                    holding_days = (label_date - buy_date).days + 1
+
+            qty = 0
+            notional = 0.0
+            # Current holding return
+            hold_ret = (
+                ((price / ac) - 1.0) * 100.0 if (sh > 0 and ac > 0 and pd.notna(price)) else None
+            )
+            # TRIM if exceeding cap
+            if sh > 0:
+                if stop_loss is not None and ac > 0 and hold_ret <= float(stop_loss):
+                    state = "CUT_STOPLOSS"  # 결정 코드
+                    qty = sh
+                    notional = qty * price
+                    prof = (price - ac) * qty if ac > 0 else 0.0
+                    phrase = f"가격기반손절 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+
+            # --- 전략별 매수/매도 로직 ---
+            if state == "HOLD":  # 아직 매도 결정이 내려지지 않은 경우
+                price, ma, period = d["price"], d["s1"], d["s2"]
+                if sh > 0 and not pd.isna(price) and not pd.isna(ma) and price < ma:
+                    state = "SELL_TREND"  # 결정 코드
+                    qty = sh
+                    notional = qty * price
+                    prof = (price - ac) * qty if ac > 0 else 0.0
+                    tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"
+                    phrase = f"{tag} {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+
+            elif state == "WAIT":  # 아직 보유하지 않은 경우
+                price, ma, period = d["price"], d["s1"], d["s2"]
+                buy_signal_days_today = d["filter"]
+                if buy_signal_days_today > 0:
+                    buy_signal = True
+                    phrase = f"추세진입 ({buy_signal_days_today}일째)"
 
         amount = sh * price if pd.notna(price) else 0.0
         # 일간 수익률 계산
@@ -1180,12 +1200,47 @@ def generate_status_report(
         return None
     slots_to_fill = denom - held_count
     if slots_to_fill > 0:
+        # 현재 보유 종목의 카테고리 (TBD 제외)
+        held_categories = set()
+        for tkr, d in data_by_tkr.items():
+            if float(d.get("shares", 0.0)) > 0:
+                category = stock_meta.get(tkr, {}).get("category")
+                if category and category != "TBD":
+                    held_categories.add(category)
+
         # 매수 후보들을 점수 순으로 정렬
-        buy_candidates = sorted(
+        buy_candidates_raw = sorted(
             [a for a in decisions if a.get("buy_signal")],
             key=lambda x: x["score"],
             reverse=True,
         )
+
+        final_buy_candidates = []
+        recommended_buy_categories = (
+            set()
+        )  # New set to track categories for current BUY recommendations
+
+        for cand in buy_candidates_raw:
+            category = stock_meta.get(cand["tkr"], {}).get("category")
+            # First, check against already held categories (from previous fix)
+            if category and category != "TBD" and category in held_categories:
+                cand["state"] = "WAIT"
+                cand["row"][2] = "WAIT"
+                cand["row"][-1] = "카테고리 중복 (보유)" + f" ({cand['row'][-1]})"
+                continue  # Skip to next candidate if category is already held
+
+            # Then, check against categories already recommended for BUY in this cycle
+            if category and category != "TBD" and category in recommended_buy_categories:
+                cand["state"] = "WAIT"
+                cand["row"][2] = "WAIT"
+                cand["row"][-1] = "카테고리 중복 (추천)" + f" ({cand['row'][-1]})"
+                continue  # Skip to next candidate if category is already recommended
+
+            final_buy_candidates.append(cand)
+            if category and category != "TBD":
+                recommended_buy_categories.add(category)
+
+        buy_candidates = final_buy_candidates  # Use the filtered and processed candidates
 
         available_cash = total_cash
         buys_made = 0
@@ -1223,7 +1278,7 @@ def generate_status_report(
                     # 매수 결정
                     cand["state"] = "BUY"
                     cand["row"][2] = "BUY"
-                    buy_phrase = f"매수 {format_shares(req_qty)}주 @ {price_formatter(price)} ({money_formatter(buy_notional)})"
+                    buy_phrase = f"🚀 매수 {format_shares(req_qty)}주 @ {price_formatter(price)} ({money_formatter(buy_notional)})"
                     original_phrase = cand["row"][-1]
                     cand["row"][-1] = f"{buy_phrase} ({original_phrase})"
 

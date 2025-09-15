@@ -1,6 +1,5 @@
 import os
 import sys
-import threading
 import warnings
 from datetime import datetime
 from typing import Dict, Optional
@@ -98,14 +97,22 @@ def get_cached_status_report(
 
     # 2. DB에 없거나, 강제로 다시 계산해야 하는 경우
     try:
-        # 코인: 재계산 시 최신 /accounts → trades 동기화 및 평가 스냅샷 수행
-        if country == "coin":
+        # 코인: '오늘' 현황을 계산/재계산할 때만 최신 계좌를 동기화합니다.
+        # 과거 날짜 재계산 시에는 동기화하면 안 됩니다.
+        is_today = pd.to_datetime(date_str).normalize() == pd.Timestamp.now().normalize()
+        if country == "coin" and is_today:
             try:
                 from scripts.sync_bithumb_accounts_to_trades import main as _sync_trades
 
+                print("Bithumb 계좌 동기화를 시작합니다...")
                 _sync_trades()
-            except Exception:
-                pass
+                print("Bithumb 계좌 동기화가 완료되었습니다.")
+            except Exception as e:
+                import traceback
+
+                print("--- Bithumb 계좌 동기화 중 오류 발생 ---")
+                traceback.print_exc()
+                st.warning(f"코인 계좌 동기화 중 오류가 발생했습니다: {e}")
             try:
                 from scripts.snapshot_bithumb_balances import main as _snapshot_equity
 
@@ -693,6 +700,10 @@ def render_country_tab(country_code: str):
             next_td_str_fallback = next_bday.strftime("%Y-%m-%d")
             if next_td_str_fallback not in sorted_dates:
                 sorted_dates.insert(0, next_td_str_fallback)
+    # 코인: 현황 탭은 항상 오늘 날짜를 기준으로 하므로, 목록 맨 앞에 오늘 날짜를 추가합니다.
+    elif country_code == "coin":
+        if today_str not in sorted_dates:
+            sorted_dates.insert(0, today_str)
 
     # --- 1. 현황 탭 (최신 날짜) ---
     with sub_tab_status:
@@ -702,93 +713,49 @@ def render_country_tab(country_code: str):
             )
             st.info("먼저 '거래 입력' 버튼을 통해 거래 내역을 추가해주세요.")
         else:
-            latest_date_str = sorted_dates[0]
+            # '현황' 탭의 기준 날짜를 결정합니다.
+            # - 코인: 항상 오늘 날짜
+            # - 한국/호주: 오늘이 거래일이면 오늘, 아니면 다음 거래일
+            today = pd.Timestamp.now().normalize()
+            target_date_str = today.strftime("%Y-%m-%d")  # 기본값은 오늘
+
+            if country_code != "coin":
+                try:
+                    lookahead_end = (today + pd.Timedelta(days=14)).strftime("%Y-%m-%d")
+                    # get_trading_days의 start_date는 target_date_str로 사용
+                    upcoming_days = get_trading_days(target_date_str, lookahead_end, country_code)
+
+                    # 오늘 또는 그 이후의 가장 가까운 거래일을 찾습니다.
+                    next_td = next((d for d in upcoming_days if d.date() >= today.date()), None)
+
+                    if next_td is not None:
+                        target_date_str = pd.Timestamp(next_td).strftime("%Y-%m-%d")
+                    else:
+                        # 거래일 조회 실패 시 주말/평일로 폴백
+                        if today.weekday() >= 5:  # 토/일
+                            delta = 7 - today.weekday()
+                            next_bday = today + pd.Timedelta(days=delta)
+                            target_date_str = next_bday.strftime("%Y-%m-%d")
+                except Exception:
+                    # 예외 발생 시에도 주말/평일로 폴백
+                    if today.weekday() >= 5:  # 토/일
+                        delta = 7 - today.weekday()
+                        next_bday = today + pd.Timedelta(days=delta)
+                        target_date_str = next_bday.strftime("%Y-%m-%d")
 
             col1, col2 = st.columns([1, 4])
 
-            # 스피너 문구용 표시 날짜 계산 (주말/비거래일에는 다음 거래일을 표시)
-            display_date_str = latest_date_str
-            try:
-                if country_code != "coin":
-                    today = pd.Timestamp.now().normalize()
-                    today_str = today.strftime("%Y-%m-%d")
-                    lookahead_end = (today + pd.Timedelta(days=14)).strftime("%Y-%m-%d")
-                    upcoming_days = get_trading_days(today_str, lookahead_end, country_code)
-                    # 다음 거래일 (오늘 포함)
-                    next_td = next((d for d in upcoming_days if d.date() >= today.date()), None)
-                    if next_td is not None:
-                        next_td_str = pd.Timestamp(next_td).strftime("%Y-%m-%d")
-                        if pd.to_datetime(latest_date_str) < pd.to_datetime(next_td_str):
-                            display_date_str = next_td_str
-                    else:
-                        # 폴백: 주말이면 다음 월요일
-                        if today.weekday() >= 5:
-                            delta = 7 - today.weekday()
-                            next_bday = today + pd.Timedelta(days=delta)
-                            next_bday_str = next_bday.strftime("%Y-%m-%d")
-                            if pd.to_datetime(latest_date_str) < pd.to_datetime(next_bday_str):
-                                display_date_str = next_bday_str
-            except Exception:
-                # 폴백: 주말이면 다음 월요일
-                if country_code != "coin" and today.weekday() >= 5:
-                    delta = 7 - today.weekday()
-                    next_bday = today + pd.Timedelta(days=delta)
-                    next_bday_str = next_bday.strftime("%Y-%m-%d")
-                    if pd.to_datetime(latest_date_str) < pd.to_datetime(next_bday_str):
-                        display_date_str = next_bday_str
-
-            # 백그라운드 재계산 지원
-            target_date_str = display_date_str
-
-            # 재계산 버튼: 백그라운드 스레드에서 실행하여 UI 블로킹을 피합니다.
+            # 재계산 버튼
             recalc_key = f"{country_code}_{target_date_str}"
             if st.button("다시 계산", key=f"recalc_status_{recalc_key}"):
-                if "recalc_running" not in st.session_state:
-                    st.session_state["recalc_running"] = {}
-                if "recalc_started_at" not in st.session_state:
-                    st.session_state["recalc_started_at"] = {}
-                if not st.session_state["recalc_running"].get(recalc_key):
-                    st.session_state["recalc_running"][recalc_key] = True
-                    st.session_state["recalc_started_at"][recalc_key] = datetime.now().isoformat()
-
-                def _recalc_task():
-                    # 동기화는 스케줄러에서 수행. 여기서는 현황만 재계산/저장합니다.
+                with st.spinner(f"'{target_date_str}' 기준 현황을 다시 계산 중입니다..."):
+                    # 현황을 다시 계산하고 DB에 저장합니다.
+                    # 코인의 경우, 오늘 날짜에 한해 빗썸 계좌 동기화(거래내역 생성)를 먼저 수행합니다.
                     get_cached_status_report(
                         country=country_code, date_str=target_date_str, force_recalculate=True
                     )
-
-                threading.Thread(target=_recalc_task, daemon=True).start()
-
-            # 재계산 상태 안내 및 자동 업데이트
-            running = st.session_state.get("recalc_running", {}).get(recalc_key) is True
-            if running:
-                st.info(
-                    f"'{target_date_str}' 기준 현황을 백그라운드에서 다시 계산 중입니다. 다른 탭을 사용해도 됩니다."
-                )
-                # DB에 저장이 끝났는지 확인하고, 끝났으면 페이지를 새로고침합니다.
-                report_ready = get_status_report_from_db(
-                    country_code, pd.to_datetime(target_date_str).to_pydatetime()
-                )
-                if report_ready:
-                    st.session_state["recalc_running"][recalc_key] = False
-                    st.success("재계산이 완료되었습니다. 화면을 갱신합니다.")
-                    st.rerun()
-                # 타임아웃/지연 대비 수동 초기화 옵션
-                started_at_iso = st.session_state.get("recalc_started_at", {}).get(recalc_key)
-                if started_at_iso:
-                    try:
-                        elapsed_sec = (
-                            datetime.now() - pd.to_datetime(started_at_iso).to_pydatetime()
-                        ).total_seconds()
-                        if elapsed_sec > 180:
-                            st.warning(
-                                "재계산이 지연되는 것 같습니다. 아래 버튼으로 상태를 초기화할 수 있습니다."
-                            )
-                            if st.button("재계산 상태 초기화", key=f"reset_recalc_{recalc_key}"):
-                                st.session_state["recalc_running"][recalc_key] = False
-                                st.rerun()
-                    except Exception:
-                        pass
+                st.success("재계산이 완료되었습니다.")
+                st.rerun()
 
             # 캐시된(또는 계산 완료된) 결과를 표시
             result = get_cached_status_report(
@@ -830,7 +797,7 @@ def render_country_tab(country_code: str):
                         )
             else:
                 st.error(
-                    f"'{latest_date_str}' 기준 ({country_code.upper()}) 현황을 생성하는 데 실패했습니다."
+                    f"'{target_date_str}' 기준 ({country_code.upper()}) 현황을 생성하는 데 실패했습니다."
                 )
 
     with sub_tab_history:
@@ -838,8 +805,10 @@ def render_country_tab(country_code: str):
         history_status_tab, history_equity_tab = st.tabs(history_sub_tab_names)
 
         with history_status_tab:
-            # Drop today from history explicitly
-            past_dates = [d for d in sorted_dates if d != pd.Timestamp.now().strftime("%Y-%m-%d")]
+            # 히스토리 탭에서는 오늘 및 미래 날짜를 제외합니다.
+            today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+            past_dates = [d for d in sorted_dates if d < today_str]
+
             # 코인: 시작일부터 어제까지 모든 날짜로 탭을 생성하고, 중복을 제거합니다.
             if country_code == "coin" and past_dates:
                 try:
@@ -884,16 +853,20 @@ def render_country_tab(country_code: str):
                 try:
                     today = pd.Timestamp.now().normalize()
                     lookback_start = (today - pd.Timedelta(days=21)).strftime("%Y-%m-%d")
-                    today_str = today.strftime("%Y-%m-%d")
                     trading_days = get_trading_days(lookback_start, today_str, country_code)
                     if trading_days:
-                        last_td = max(d for d in trading_days if d.date() <= today.date())
-                        last_td_str = pd.Timestamp(last_td).strftime("%Y-%m-%d")
-                        # 히스토리 탭 목록 맨 앞에 마지막 거래일이 오도록 정렬 보정
-                        if last_td_str in past_dates:
-                            past_dates = [last_td_str] + [d for d in past_dates if d != last_td_str]
-                        else:
-                            past_dates = [last_td_str] + past_dates
+                        # 오늘 '이전'의 마지막 거래일을 찾습니다.
+                        past_trading_days = [d for d in trading_days if d.date() < today.date()]
+                        if past_trading_days:
+                            last_td = max(past_trading_days)
+                            last_td_str = pd.Timestamp(last_td).strftime("%Y-%m-%d")
+                            # 히스토리 탭 목록 맨 앞에 마지막 거래일이 오도록 정렬 보정
+                            if last_td_str in past_dates:
+                                past_dates = [last_td_str] + [
+                                    d for d in past_dates if d != last_td_str
+                                ]
+                            elif not past_dates or last_td_str > past_dates[0]:
+                                past_dates.insert(0, last_td_str)
                 except Exception:
                     pass
             if not past_dates:

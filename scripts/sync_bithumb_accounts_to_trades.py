@@ -14,9 +14,9 @@ Usage:
 
 from __future__ import annotations
 
+import math
 import os
 import sys
-import math
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -25,14 +25,16 @@ import pandas as pd
 # Add project root to Python path for `utils` imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.env import load_env_if_present
-from utils.db_manager import get_db_connection, get_stocks, save_trade
 from utils.data_loader import fetch_ohlcv
+from utils.db_manager import get_db_connection, save_trade
+from utils.env import load_env_if_present
+from utils.stock_list_io import get_stocks
 
 
 def _now_day() -> datetime:
     """Normalized date (00:00) for snapshot day grouping."""
     return pd.Timestamp.now().normalize().to_pydatetime()
+
 
 def _now_time() -> datetime:
     """Exact run timestamp for trade event time."""
@@ -42,6 +44,7 @@ def _now_time() -> datetime:
 def _fetch_accounts() -> List[Dict]:
     """Fetch raw Bithumb v2 accounts list."""
     from utils.exchanges.bithumb_v2 import BithumbV2Client
+
     v2 = BithumbV2Client()
     return v2.accounts() or []
 
@@ -62,11 +65,13 @@ def _normalize_accounts(items: List[Dict]) -> Tuple[float, Dict[str, Dict[str, f
         cur = str(it.get("currency") or "").upper()
         if not cur:
             continue
+
         def _pf(x) -> float:
             try:
                 return float(str(x).replace(",", ""))
             except Exception:
                 return 0.0
+
         bal = _pf(it.get("balance"))
         locked = _pf(it.get("locked"))
         total_field = (
@@ -107,7 +112,10 @@ def _save_snapshot(db, krw: float, coins: Dict[str, Dict[str, float]]):
         "source": "bithumb",
         "date": _now_day(),
         "krw": float(krw),
-        "coins": {k: {"qty": float(v.get("qty", 0.0)), "avg": float(v.get("avg", 0.0))} for k, v in coins.items()},
+        "coins": {
+            k: {"qty": float(v.get("qty", 0.0)), "avg": float(v.get("avg", 0.0))}
+            for k, v in coins.items()
+        },
         "created_at": now,
     }
     db.exchange_account_snapshots.insert_one(doc)
@@ -124,7 +132,9 @@ def _price_close_krw(tkr: str) -> float:
         return 0.0
 
 
-def _infer_buy_price(avg_old: float, q_old: float, avg_new: float, q_new: float, delta: float) -> Optional[float]:
+def _infer_buy_price(
+    avg_old: float, q_old: float, avg_new: float, q_new: float, delta: float
+) -> Optional[float]:
     """Infer the buy unit price from average price change.
     p = (avg_new*q_new - avg_old*q_old) / delta
     """
@@ -154,7 +164,9 @@ def _universe() -> Tuple[List[str], Dict[str, str]]:
     return sorted(tickers), names
 
 
-def _save_trade(ticker: str, action: str, shares: float, price: float, name: str, when: datetime) -> bool:
+def _save_trade(
+    ticker: str, action: str, shares: float, price: float, name: str, when: datetime
+) -> bool:
     data = {
         "country": "coin",
         "ticker": ticker,
@@ -222,7 +234,10 @@ def main():
         return
 
     # Subsequent days: diff quantities to create BUY/SELL
-    coins_prev: Dict[str, Dict[str, float]] = {k: {"qty": float(v.get("qty", 0.0)), "avg": float(v.get("avg", 0.0))} for k, v in (snap_prev.get("coins") or {}).items()}
+    coins_prev: Dict[str, Dict[str, float]] = {
+        k: {"qty": float(v.get("qty", 0.0)), "avg": float(v.get("avg", 0.0))}
+        for k, v in (snap_prev.get("coins") or {}).items()
+    }
 
     # if today's balances identical to last snapshot, nothing to do
     def _same(a: Dict[str, Dict[str, float]], b: Dict[str, Dict[str, float]]) -> bool:

@@ -79,7 +79,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 찾아봅니다.
 
-    python scripts/find.py --type etf --min-change 5.0
+    python scripts/find.py --type etf --min-change 3.0
 
 
 전략/로직 요약
