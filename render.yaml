@@ -2,10 +2,7 @@ services:
   - type: web
     name: momentum-pilot
     env: docker
-    # 이 프로젝트가 있는 GitHub 리포지토리 주소를 입력하세요.
-    # 예: https://github.com/your-username/momentum-pilot
-    repo: https://github.com/jason-in-action/momentum-pilot
-    # HTTP Basic Authentication 활성화
+    repo: https://github.com/jasonisdoing/momentum-pilot.git
     envVars:
       # 기존 환경 변수들
       - key: MONGO_DB_CONNECTION_STRING
