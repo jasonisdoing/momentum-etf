@@ -6,10 +6,17 @@ services:
     # 예: https://github.com/your-username/momentum-pilot
     repo: https://github.com/jason-in-action/momentum-pilot
     # HTTP Basic Authentication 활성화
-    # basicAuth: true로 설정하면 Render가 자동으로 아이디/비밀번호를 생성합니다.
-    # 생성된 정보는 Render 대시보드의 서비스 페이지에서 확인할 수 있습니다.
-    basicAuth: true
+    # 아래 username과 password는 Render 대시보드의 환경 변수에서 값을 가져옵니다.
+    basicAuth:
+      username: ${BASIC_AUTH_USER}
+      password: ${BASIC_AUTH_PASSWORD}
     envVars:
+      # Basic Auth를 위한 환경 변수 (값은 Render 대시보드에서 설정)
+      - key: BASIC_AUTH_USER
+        sync: false
+      - key: BASIC_AUTH_PASSWORD
+        sync: false
+      # 기존 환경 변수들
       - key: MONGO_DB_CONNECTION_STRING
         # 중요: 실제 값은 Render 대시보드에서 Secret으로 설정하세요.
         # sync: false는 이 값이 YAML 파일과 동기화되지 않음을 의미합니다.
