@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 import warnings
@@ -7,77 +8,17 @@ from typing import Dict, Optional
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from streamlit_cookies_manager import EncryptedCookieManager
 
 # .env 파일이 있다면 로드합니다.
 load_dotenv()
 
+# 로거 설정
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 # --- Main App ---
 st.set_page_config(page_title="MomentumPilot Status", layout="wide")
 
-
-# --- Authentication Logic using streamlit-cookies-manager ---
-
-# SECRET_COOKIE_TOKEN을 암호화 키로 사용합니다.
-encryption_password = os.environ.get("SECRET_COOKIE_TOKEN", "a_default_secret_key_for_dev")
-cookies = EncryptedCookieManager(
-    prefix="momentum_pilot",
-    password=encryption_password,
-)
-
-if not cookies.ready():
-    # Wait for the component to load and send us current cookies.
-    st.stop()
-print(cookies.get("logged_in"))
-print(st.session_state)
-# --- Authentication Logic ---
-# 세션 초기화: 쿠키 값을 읽어와서 복원
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = cookies.get("logged_in") == "true"
-    st.session_state["username"] = cookies.get("username")
-
-# 인증되지 않았다면 로그인 폼을 표시합니다.
-if not st.session_state.get("logged_in"):
-    correct_username = os.environ.get("BASIC_AUTH_USER")
-    correct_password = os.environ.get("BASIC_AUTH_PASSWORD")
-
-    # 환경 변수에 ID/PW가 설정되지 않았으면 로그인을 건너뜁니다 (개발 편의성).
-    if not correct_username or not correct_password:
-        st.session_state["logged_in"] = True
-        st.rerun()
-
-    st.subheader("로그인")
-    username = st.text_input("아이디")
-    password = st.text_input("비밀번호", type="password")
-
-    if st.button("로그인"):
-        if username == correct_username and password == correct_password:
-            st.session_state["logged_in"] = True
-            st.session_state["username"] = username
-            # 쿠키 저장
-            cookies["logged_in"] = "true"
-            cookies["username"] = username
-            cookies.save()
-
-            print("save!!!!!!!!!!!")
-            st.rerun()
-        else:
-            st.error("😕 아이디 또는 비밀번호가 올바르지 않습니다.")
-
-    # Stop execution of the rest of the app if not logged in.
-    st.stop()
-
-# --- Logout Button ---
-st.sidebar.write(f"Welcome, {os.environ.get('BASIC_AUTH_USER', 'Guest')}")
-if st.sidebar.button("Logout", key="logout_button"):
-    # 세션 초기화
-    st.session_state["logged_in"] = False
-    st.session_state["username"] = None
-    # 쿠키 초기화
-    cookies["logged_in"] = "false"
-    cookies["username"] = ""
-    cookies.save()
-    st.rerun()
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -170,7 +111,7 @@ def render_cron_input(label, key, default_value, country_code: str):
                                 desc_ko = get_cron_description(
                                     current_val,
                                     locale="ko_KR",
-                                    use_24hour_time_format=True,
+                                    use_24hour_time_format=True,  # type: ignore
                                 )
                             except TypeError:
                                 # 구버전 API 폴백 (cron-descriptor < 1.2.16)
@@ -190,7 +131,7 @@ def render_cron_input(label, key, default_value, country_code: str):
                                 display_text = f"✅ 유효. {desc_ko}"
                         except Exception as e:
                             # 설명 생성 실패 시, 콘솔에 오류를 기록하고 기본 문구만 표시합니다.
-                            print(f"Crontab 설명 생성 중 오류: {e}")
+                            logger.warning(f"Crontab 설명 생성 중 오류: {e}")
 
                     # 수직 정렬을 위해 div와 패딩을 사용합니다.
                     st.markdown(
@@ -244,21 +185,18 @@ def get_cached_status_report(
             try:
                 from scripts.sync_bithumb_accounts_to_trades import main as _sync_trades
 
-                print("Bithumb 계좌 동기화를 시작합니다...")
+                logger.info("Bithumb 계좌 동기화를 시작합니다...")
                 _sync_trades()
-                print("Bithumb 계좌 동기화가 완료되었습니다.")
+                logger.info("Bithumb 계좌 동기화가 완료되었습니다.")
             except Exception as e:
-                import traceback
-
-                print("--- Bithumb 계좌 동기화 중 오류 발생 ---")
-                traceback.print_exc()
+                logger.exception("Bithumb 계좌 동기화 중 오류 발생")
                 st.warning(f"코인 계좌 동기화 중 오류가 발생했습니다: {e}")
             try:
                 from scripts.snapshot_bithumb_balances import main as _snapshot_equity
 
                 _snapshot_equity()
             except Exception:
-                pass
+                logger.warning("코인 평가금액 스냅샷 생성 중 오류 발생", exc_info=True)
         new_report = generate_status_report(
             country=country, date_str=date_str, prefetched_data=prefetched_data
         )
@@ -267,15 +205,10 @@ def get_cached_status_report(
             save_status_report_to_db(country, report_date, new_report)
         return new_report
     except Exception as e:
-        # 계산 중 발생한 오류를 사용자에게 알리고, 디버깅을 위해 콘솔에 전체 오류를 출력합니다.
-        import traceback
-
+        logger.exception(f"현황 계산 오류: {country}/{date_str}")
         st.error(
             f"'{date_str}' 현황 계산 중 오류가 발생했습니다. 자세한 내용은 콘솔 로그를 확인해주세요."
         )
-        print(f"--- 현황 계산 오류: {country}/{date_str} ---")
-        traceback.print_exc()
-        print("------------------------------------")
         return None
 
 
@@ -1574,9 +1507,8 @@ def main():
 
             MongoDB 데이터베이스에 연결할 수 없습니다. 다음 사항을 확인해주세요:
 
-            1.  **환경 변수**: Render 대시보드에 `MONGO_DB_CONNECTION_STRING` 환경 변수가 올바르게 설정되었는지 확인하세요.
-            2.  **IP 접근 목록**: Render 서비스의 IP 주소가 MongoDB Atlas의 'IP Access List'에 추가되었는지 확인하세요.
-                (Render Shell에서 `curl ifconfig.me` 명령으로 현재 IP를 확인할 수 있습니다.)
+            1.  **환경 변수**: `MONGO_DB_CONNECTION_STRING` 환경 변수가 올바르게 설정되었는지 확인하세요.
+            2.  **IP 접근 목록**: 현재 서비스의 IP 주소가 MongoDB Atlas의 'IP Access List'에 추가되었는지 확인하세요.
             3.  **클러스터 상태**: MongoDB Atlas 클러스터가 정상적으로 실행 중인지 확인하세요.
             """
         )

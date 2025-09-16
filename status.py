@@ -123,6 +123,9 @@ DECISION_CONFIG = {
     },
 }
 
+# 코인 보유 수량에서 0으로 간주할 임계값 (거래소의 dust 처리)
+COIN_ZERO_THRESHOLD = 1e-9
+
 
 def get_market_regime_status_string() -> Optional[str]:
     """
@@ -1080,15 +1083,17 @@ def generate_status_report(
     for tkr, name in pairs:
         d = data_by_tkr.get(tkr)
 
-        # 보유 종목은 데이터가 없어도 표시해야 합니다.
-        is_held = tkr in holdings and float(holdings[tkr].get("shares", 0.0)) > 0
-        if not d and not is_held:
-            continue
-
         # 보유 정보는 `holdings` 딕셔너리에서 직접 가져옵니다.
         holding_info = holdings.get(tkr, {})
         sh = float(holding_info.get("shares", 0.0))
         ac = float(holding_info.get("avg_cost", 0.0))
+
+        # 코인의 경우, 아주 작은 잔량(dust)은 보유하지 않은 것으로 간주합니다.
+        is_effectively_held = (sh > COIN_ZERO_THRESHOLD) if country == "coin" else (sh > 0)
+
+        # 데이터가 없고, 실질적으로 보유하지도 않은 종목은 건너뜁니다.
+        if not d and not is_effectively_held:
+            continue
 
         # 데이터가 없는 보유 종목을 위한 기본값 설정
         if not d:
@@ -1106,9 +1111,9 @@ def generate_status_report(
 
         # 자동 계산된 보유종목의 매수일과 보유일
         buy_signal = False
-        state = "HOLD" if sh > 0 else "WAIT"
+        state = "HOLD" if is_effectively_held else "WAIT"
         phrase = ""
-        if price == 0.0 and is_held:
+        if price == 0.0 and is_effectively_held:
             phrase = "가격 데이터 조회 실패"
 
         # 이 루프의 모든 경로에서 사용되므로, 여기서 초기화합니다.
@@ -1118,8 +1123,13 @@ def generate_status_report(
 
         # 카테고리 중복 확인 및 상태 변경 (BUY 대상에서 제외)
         category = etf_meta.get(tkr, {}).get("category")
-        # Only apply category check for non-held stocks (potential buys)
-        if sh == 0 and category and category != "TBD" and category in held_categories:
+        # 실질적으로 보유하지 않은 종목(매수 후보)에 대해서만 카테고리 중복을 확인합니다.
+        if (
+            not is_effectively_held
+            and category
+            and category != "TBD"
+            and category in held_categories
+        ):
             state = "WAIT"  # 카테고리 중복 시 BUY 대상에서 제외하고 WAIT 상태로
             phrase = "카테고리 중복"
             buy_signal = False  # 매수 신호도 비활성화
@@ -1133,7 +1143,7 @@ def generate_status_report(
                     buy_date = buy_date.tz_localize(None)
                 buy_date = pd.to_datetime(buy_date).normalize()
 
-            if sh > 0 and buy_date and buy_date <= label_date:
+            if is_effectively_held and buy_date and buy_date <= label_date:
                 try:
                     # 거래일 기준으로 보유일수 계산 (캐시된 함수 사용)
                     trading_days_in_period = get_trading_days(
@@ -1151,12 +1161,18 @@ def generate_status_report(
             notional = 0.0
             # Current holding return
             hold_ret = (
-                ((price / ac) - 1.0) * 100.0 if (sh > 0 and ac > 0 and pd.notna(price)) else None
+                ((price / ac) - 1.0) * 100.0
+                if (is_effectively_held and ac > 0 and pd.notna(price))
+                else None
             )
-            # TRIM if exceeding cap
-            if sh > 0:
-                if stop_loss is not None and ac > 0 and hold_ret <= float(stop_loss):
-                    state = "CUT_STOPLOSS"  # 결정 코드
+            if is_effectively_held:
+                if (
+                    stop_loss is not None
+                    and ac > 0
+                    and hold_ret is not None
+                    and hold_ret <= float(stop_loss)
+                ):
+                    state = "CUT_STOPLOSS"
                     qty = sh
                     notional = qty * price
                     prof = (price - ac) * qty if ac > 0 else 0.0
@@ -1165,7 +1181,7 @@ def generate_status_report(
             # --- 전략별 매수/매도 로직 ---
             if state == "HOLD":  # 아직 매도 결정이 내려지지 않은 경우
                 price, ma, period = d["price"], d["s1"], d["s2"]
-                if sh > 0 and not pd.isna(price) and not pd.isna(ma) and price < ma:
+                if not pd.isna(price) and not pd.isna(ma) and price < ma:
                     state = "SELL_TREND"  # 결정 코드
                     qty = sh
                     notional = qty * price
@@ -1463,7 +1479,14 @@ def generate_status_report(
             d = data_by_tkr.get(tkr)
             remaining_shares = float(d.get("shares", 0.0)) if d else 0.0
 
-            if remaining_shares > 0:
+            # 코인의 경우, 아주 작은 잔량은 0으로 간주합니다.
+            is_fully_sold = (
+                remaining_shares <= COIN_ZERO_THRESHOLD
+                if country == "coin"
+                else remaining_shares <= 0
+            )
+
+            if not is_fully_sold:
                 # 부분 매도: 상태는 HOLD로 유지하고, 문구에만 정보를 추가합니다.
                 decision["state"] = "HOLD"
                 decision["row"][2] = "HOLD"

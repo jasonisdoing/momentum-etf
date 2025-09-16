@@ -26,7 +26,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from logic.data_updater import update_stock_names
+from logic.data_updater import update_etf_names
 
 try:
     # DB에서 설정을 읽어 스케줄 주기를 제어
@@ -89,7 +89,7 @@ def main():
     # Update stock names before scheduling
     logging.info("Checking for and updating stock names...")
     try:
-        update_stock_names()
+        update_etf_names()
         logging.info("Stock name update complete.")
     except Exception as e:
         logging.error(f"Failed to update stock names: {e}")
