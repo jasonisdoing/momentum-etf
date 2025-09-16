@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: momentum-pilot
+    env: docker
+    # 이 프로젝트가 있는 GitHub 리포지토리 주소를 입력하세요.
+    # 예: https://github.com/your-username/momentum-pilot
+    repo: https://github.com/jason-in-action/momentum-pilot
+    # HTTP Basic Authentication 활성화
+    # protected: true로 설정하면 Render가 자동으로 아이디/비밀번호를 생성합니다.
+    # 생성된 정보는 Render 대시보드의 서비스 페이지에서 확인할 수 있습니다.
+    protected: true
+    envVars:
+      - key: MONGO_DB_CONNECTION_STRING
+        # 중요: 실제 값은 Render 대시보드에서 Secret으로 설정하세요.
+        # sync: false는 이 값이 YAML 파일과 동기화되지 않음을 의미합니다.
+        sync: false
+      - key: MONGO_DB_NAME
+        sync: false
+      - key: WEBAPP_PASSWORD
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      # Dockerfile에서 EXPOSE한 포트와 일치해야 합니다.
+      - key: PORT
+        value: 10000
+      # Streamlit이 외부 접속을 허용하도록 설정합니다.
+      - key: STREAMLIT_SERVER_ADDRESS
+        value: 0.0.0.0
