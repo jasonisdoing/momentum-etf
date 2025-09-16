@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # --- Main App ---
-st.set_page_config(page_title="MomentumPilot Status", layout="wide")
+st.set_page_config(page_title="MomentumETF Status", layout="wide")
 
 
 # 프로젝트 루트를 Python 경로에 추가
@@ -1487,7 +1487,7 @@ def render_country_tab(country_code: str):
 
 
 def main():
-    """MomentumPilot 오늘의 현황 웹 UI를 렌더링합니다."""
+    """MomentumETF 오늘의 현황 웹 UI를 렌더링합니다."""
     # 페이지 상단 여백을 줄이기 위한 CSS 주입
     st.markdown(
         """
@@ -1550,7 +1550,7 @@ def main():
     # 오른쪽 컬럼의 너비를 늘립니다. (3:1 -> 2.5:1.5)
     col1, col2 = st.columns([2.5, 1.5])
     with col1:
-        st.title("Momentum. Pilot.")
+        st.title("Momentum. ETF.")
     with col2:
         # 시장 상태는 한 번만 계산하여 10분간 캐시합니다.
         @st.cache_data(ttl=600)
