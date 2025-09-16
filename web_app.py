@@ -4,13 +4,62 @@ import warnings
 from datetime import datetime
 from typing import Dict, Optional
 
+import pandas as pd
+import streamlit as st
 from dotenv import load_dotenv
+
+
+# --- Authentication ---
+def check_password():
+    """Returns `True` if the user entered the correct password."""
+
+    # Render 환경 변수 또는 .env 파일에서 사용자 이름과 비밀번호를 가져옵니다.
+    correct_username = os.environ.get("BASIC_AUTH_USER")
+    correct_password = os.environ.get("BASIC_AUTH_PASSWORD")
+
+    # 환경 변수가 설정되지 않은 경우, 인증을 건너뜁니다 (로컬 개발용).
+    if not correct_username or not correct_password:
+        return True
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if (
+            st.session_state["username"] == correct_username
+            and st.session_state["password"] == correct_password
+        ):
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password.
+            del st.session_state["username"]
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First run, show inputs for username and password.
+        st.text_input("Username", on_change=password_entered, key="username")
+        st.text_input("Password", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Password not correct, show input + error.
+        st.text_input("Username", on_change=password_entered, key="username")
+        st.text_input("Password", type="password", on_change=password_entered, key="password")
+        st.error("😕 User not known or password incorrect")
+        return False
+    else:
+        # Password correct.
+        return True
+
 
 # .env 파일이 있다면 로드합니다. (로컬 개발 환경용)
 # 이 코드는 다른 프로젝트 모듈이 임포트되기 전에 실행되어야 합니다.
 load_dotenv()
-import pandas as pd
-import streamlit as st
+
+
+# --- Main App ---
+st.set_page_config(page_title="MomentumPilot Status", layout="wide")
+
+if not check_password():
+    st.stop()
+
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -18,9 +67,9 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 # Suppress pmc discontinued break warnings globally
 warnings.filterwarnings(
     "ignore",
-    message=r"\[\'break_start\', \'break_end\'\] are discontinued",
+    message=r"\\[\'break_start\', \'break_end\'\\] are discontinued",
     category=UserWarning,
-    module=r"^pandas_market_calendars\.",
+    module=r"^pandas_market_calendars\\.",
 )
 
 
@@ -1488,8 +1537,6 @@ def render_country_tab(country_code: str):
 
 def main():
     """MomentumPilot 오늘의 현황 웹 UI를 렌더링합니다."""
-    st.set_page_config(page_title="MomentumPilot Status", layout="wide")
-
     # 페이지 상단 여백을 줄이기 위한 CSS 주입
     st.markdown(
         """
@@ -1513,7 +1560,7 @@ def main():
             2.  **IP 접근 목록**: Render 서비스의 IP 주소가 MongoDB Atlas의 'IP Access List'에 추가되었는지 확인하세요.
                 (Render Shell에서 `curl ifconfig.me` 명령으로 현재 IP를 확인할 수 있습니다.)
             3.  **클러스터 상태**: MongoDB Atlas 클러스터가 정상적으로 실행 중인지 확인하세요.
-            """
+            """,
         )
         st.stop()  # DB 연결 실패 시 앱 실행 중단
 
