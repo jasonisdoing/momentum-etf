@@ -1626,8 +1626,6 @@ def main():
                 placeholder="예: 14",
             )
 
-            # (스케줄러 주기는 텔레그램 탭으로 이동)
-
             submitted = st.form_submit_button("공통 설정 저장")
             if submitted:
                 error = False

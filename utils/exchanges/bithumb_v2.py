@@ -1,13 +1,14 @@
-import os
-import uuid
-import time
-import json
-import hmac
-import hashlib
 import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+import uuid
 from typing import Any, Dict, List
 
 import requests
+
 from utils.env import load_env_if_present
 
 
@@ -31,11 +32,15 @@ class BithumbV2Client:
         except Exception:
             pass
         self.access_key = os.environ.get("BITHUMB_V2_API_KEY") or os.environ.get("BITHUMB_API_KEY")
-        self.secret_key = os.environ.get("BITHUMB_V2_API_SECRET") or os.environ.get("BITHUMB_API_SECRET")
+        self.secret_key = os.environ.get("BITHUMB_V2_API_SECRET") or os.environ.get(
+            "BITHUMB_API_SECRET"
+        )
         if not self.access_key or not self.secret_key:
-            raise RuntimeError("BITHUMB_V2_API_KEY / BITHUMB_V2_API_SECRET (or v1 vars) are required")
+            raise RuntimeError(
+                "BITHUMB_V2_API_KEY / BITHUMB_V2_API_SECRET (or v1 vars) are required"
+            )
         self.session = requests.Session()
-        self.session.headers.update({"Accept": "application/json", "User-Agent": "MomentumPilot/1.0"})
+        self.session.headers.update({"Accept": "application/json", "User-Agent": "MomentumEtf/1.0"})
 
     def _auth_headers(self) -> Dict[str, str]:
         payload = {
@@ -43,9 +48,11 @@ class BithumbV2Client:
             "nonce": str(uuid.uuid4()),
             "timestamp": int(round(time.time() * 1000)),
         }
+
         # Minimal JWT HS256 (header.payload.signature), base64url without padding
         def b64url(b: bytes) -> bytes:
             return base64.urlsafe_b64encode(b).rstrip(b"=")
+
         header = {"alg": "HS256", "typ": "JWT"}
         signing_input = b".".join(
             [

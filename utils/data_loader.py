@@ -3,6 +3,7 @@
 """
 
 import functools
+import json
 import logging
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -220,8 +221,12 @@ def fetch_ohlcv(
                 "pykrx 라이브러리가 설치되지 않았습니다. 'pip install pykrx'로 설치해주세요."
             )
             return None
+
         # pykrx API 안정성을 위해 긴 기간 조회 시 1년 단위로 나누어 요청합니다.
+        # JSONDecodeError 발생 시 yfinance로 폴백합니다.
         all_dfs = []
+        pykrx_failed_with_json_error = False
+
         current_start = start_dt
         while current_start <= end_dt:
             current_end = min(
@@ -235,12 +240,53 @@ def fetch_ohlcv(
                 if df_part is not None and not df_part.empty:
                     all_dfs.append(df_part)
             except Exception as e:
-                # 특정 기간 조회 실패 시 경고만 하고 계속 진행
-                logging.getLogger(__name__).warning(
-                    f"{ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {e}"
-                )
+                # pykrx에서 JSONDecodeError가 발생하면 (KRX 웹사이트 응답 문제),
+                # 루프를 중단하고 yfinance로 전체 기간 폴백을 시도합니다.
+                is_json_error = isinstance(e, json.JSONDecodeError) or "Expecting value" in str(e)
+                if is_json_error:
+                    pykrx_failed_with_json_error = True
+                    logging.getLogger(__name__).warning(
+                        f"pykrx 조회 실패({type(e).__name__}), yfinance로 전체 기간 대체 시도: {ticker}"
+                    )
+                    break  # while 루프 중단
+                else:
+                    # 다른 종류의 예외인 경우, 기존처럼 경고만 로깅합니다.
+                    logging.getLogger(__name__).warning(
+                        f"{ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {e}"
+                    )
 
             current_start += pd.DateOffset(years=1)
+
+        if pykrx_failed_with_json_error:
+            if yf is None:
+                return None  # yfinance가 없으면 실패 처리
+            try:
+                y_ticker = ticker
+                if ticker.isdigit() and len(ticker) == 6:
+                    y_ticker = f"{ticker}.KS"
+
+                with yf_lock:
+                    df_yf = yf.download(
+                        y_ticker,
+                        start=start_dt,
+                        end=end_dt + pd.Timedelta(days=1),
+                        progress=False,
+                        auto_adjust=True,
+                    )
+
+                if df_yf is not None and not df_yf.empty:
+                    if isinstance(df_yf.columns, pd.MultiIndex):
+                        df_yf.columns = df_yf.columns.get_level_values(0)
+                        df_yf = df_yf.loc[:, ~df_yf.columns.duplicated()]
+                    if df_yf.index.tz is not None:
+                        df_yf.index = df_yf.index.tz_localize(None)
+                    # yfinance는 이미 영어 컬럼이므로, 바로 반환합니다.
+                    return df_yf
+                else:
+                    return None  # yfinance 조회도 실패
+            except Exception as yf_e:
+                logging.getLogger(__name__).warning(f"yfinance 대체 조회도 실패: {ticker} ({yf_e})")
+                return None
 
         if not all_dfs:
             return None

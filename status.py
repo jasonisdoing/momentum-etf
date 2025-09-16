@@ -807,7 +807,16 @@ def _build_header_line(
     money_formatter = format_kr_money if country != "aus" else format_aud_money
 
     # 보유 종목 수
-    held_count = sum(1 for v in portfolio_data.get("holdings", []) if float(v.get("shares", 0)) > 0)
+    if country == "coin":
+        held_count = sum(
+            1
+            for v in portfolio_data.get("holdings", [])
+            if float(v.get("shares", 0)) > COIN_ZERO_THRESHOLD
+        )
+    else:
+        held_count = sum(
+            1 for v in portfolio_data.get("holdings", []) if float(v.get("shares", 0)) > 0
+        )
 
     # 해외 주식 가치 포함
     total_holdings = total_holdings_value
@@ -1053,7 +1062,15 @@ def generate_status_report(
     min_pos = 1.0 / (denom * 2.0)  # 최소 편입 비중
     max_pos = 1.0 / denom  # 목표/최대 비중
 
-    held_count = sum(1 for v in holdings.values() if float((v or {}).get("shares") or 0.0) > 0)
+    if country == "coin":
+        held_count = sum(
+            1
+            for v in holdings.values()
+            if float((v or {}).get("shares") or 0.0) > COIN_ZERO_THRESHOLD
+        )
+    else:
+        held_count = sum(1 for v in holdings.values() if float((v or {}).get("shares") or 0.0) > 0)
+
     total_cash = float(current_equity) - float(total_holdings_value)
 
     # 4. 초기 매매 결정 생성

@@ -1,5 +1,5 @@
 """
-MomentumPilot 프로젝트의 메인 실행 파일입니다.
+MomentumEtf 프로젝트의 메인 실행 파일입니다.
 
 이 스크립트는 CLI(명령줄 인터페이스)를 통해 프로젝트의 주요 기능인
 백테스트(`test.py`)와 현황 조회(`status.py`)를 실행하는 통합 진입점 역할을 합니다.
@@ -33,7 +33,7 @@ warnings.filterwarnings(
 
 def main():
     """CLI 인자를 파싱하여 해당 모듈을 실행합니다."""
-    parser = argparse.ArgumentParser(description="MomentumPilot Trading Engine")
+    parser = argparse.ArgumentParser(description="MomentumEtf Trading Engine")
     parser.add_argument(
         "country", choices=["kor", "aus", "coin"], help="실행할 포트폴리오 국가 (kor, aus, coin)"
     )

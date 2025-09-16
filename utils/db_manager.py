@@ -28,7 +28,7 @@ def get_db_connection():
             global_settings, "MONGO_DB_CONNECTION_STRING", None
         )
         db_name = os.environ.get("MONGO_DB_NAME") or getattr(
-            global_settings, "MONGO_DB_NAME", "momentum_pilot_db"
+            global_settings, "MONGO_DB_NAME", "momentum_etf_db"
         )
         # Connection pool tuning (env optional)
         max_pool = int(os.environ.get("MONGO_DB_MAX_POOL_SIZE", "20"))
