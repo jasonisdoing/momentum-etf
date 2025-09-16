@@ -12,3 +12,4 @@ pandas_market_calendars
 croniter
 cron-descriptor
 google-generativeai
+streamlit-cookies-manager
