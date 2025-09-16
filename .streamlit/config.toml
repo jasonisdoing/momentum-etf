@@ -1,0 +1,7 @@
+# Streamlit 앱의 전역 설정을 관리합니다.
+
+[theme]
+base="dark"
+
+[client]
+toolbarMode = "minimal"

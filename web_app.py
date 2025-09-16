@@ -38,6 +38,7 @@ from utils.db_manager import (
     get_app_settings,
     get_available_snapshot_dates,
     get_common_settings,
+    get_db_connection,
     get_portfolio_snapshot,
     get_status_report_from_db,
     save_app_settings,
@@ -1493,6 +1494,23 @@ def main():
     """,
         unsafe_allow_html=True,
     )
+
+    # --- DB 연결 확인 ---
+    # 앱의 다른 부분이 실행되기 전에 DB 연결을 먼저 확인합니다.
+    if get_db_connection() is None:
+        st.error(
+            """
+            **데이터베이스 연결 실패**
+
+            MongoDB 데이터베이스에 연결할 수 없습니다. 다음 사항을 확인해주세요:
+
+            1.  **환경 변수**: Render 대시보드에 `MONGO_DB_CONNECTION_STRING` 환경 변수가 올바르게 설정되었는지 확인하세요.
+            2.  **IP 접근 목록**: Render 서비스의 IP 주소가 MongoDB Atlas의 'IP Access List'에 추가되었는지 확인하세요.
+                (Render Shell에서 `curl ifconfig.me` 명령으로 현재 IP를 확인할 수 있습니다.)
+            3.  **클러스터 상태**: MongoDB Atlas 클러스터가 정상적으로 실행 중인지 확인하세요.
+            """
+        )
+        st.stop()  # DB 연결 실패 시 앱 실행 중단
 
     # 앱 가동시 거래일 캘린더 준비 상태 확인
     try:
