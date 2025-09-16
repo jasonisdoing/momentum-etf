@@ -14,38 +14,42 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.env import load_env_if_present
-from utils.db_manager import get_stocks, save_daily_equity
 from utils.data_loader import fetch_ohlcv
+from utils.db_manager import save_daily_equity
+from utils.env import load_env_if_present
+from utils.stock_list_io import get_etfs
 
 
 def _fetch_bithumb_balance_dict():
     try:
         from utils.exchanges.bithumb_v2 import BithumbV2Client
+
         v2 = BithumbV2Client()
         items = v2.accounts()
     except Exception as e:
         print(f"[ERROR] Bithumb v2 accounts failed: {e}")
         return None
     out = {}
+
     def _pf(x) -> float:
         try:
-            return float(str(x).replace(',', ''))
+            return float(str(x).replace(",", ""))
         except Exception:
             return 0.0
+
     for it in items or []:
-        cur = str(it.get('currency') or '').upper()
+        cur = str(it.get("currency") or "").upper()
         if not cur:
             continue
         # Prefer explicit balance + locked when available; else fall back to total_balance or quantity
-        bal = _pf(it.get('balance'))
-        locked = _pf(it.get('locked'))
-        total_field = _pf(it.get('total_balance')) or _pf(it.get('quantity'))
+        bal = _pf(it.get("balance"))
+        locked = _pf(it.get("locked"))
+        total_field = _pf(it.get("total_balance")) or _pf(it.get("quantity"))
         total = bal + locked if (bal or locked) else total_field
-        if cur == 'KRW':
-            out['total_krw'] = total
+        if cur == "KRW":
+            out["total_krw"] = total
         else:
-            out[f'total_{cur}'] = total
+            out[f"total_{cur}"] = total
     return out
 
 
@@ -55,7 +59,7 @@ def _get_total_amount_for(symbol: str, bal: dict) -> float:
     for key in (f"total_{symbol.lower()}", f"total_{symbol.upper()}"):
         if key in bal:
             try:
-                return float(str(bal[key]).replace(',', ''))
+                return float(str(bal[key]).replace(",", ""))
             except Exception:
                 return 0.0
     return 0.0
@@ -67,12 +71,12 @@ def _get_total_krw(bal: dict) -> float:
     for key in ("total_krw", "total_KRW"):
         if key in bal:
             try:
-                return float(str(bal[key]).replace(',', ''))
+                return float(str(bal[key]).replace(",", ""))
             except Exception:
                 pass
     try:
-        avail = float(str(bal.get('available_krw', '0')).replace(',', ''))
-        in_use = float(str(bal.get('in_use_krw', '0')).replace(',', ''))
+        avail = float(str(bal.get("available_krw", "0")).replace(",", ""))
+        in_use = float(str(bal.get("in_use_krw", "0")).replace(",", ""))
         return avail + in_use
     except Exception:
         return 0.0
@@ -87,13 +91,13 @@ def main():
         return
 
     # Resolve coins universe = DB union accounts
-    coin_stocks = get_stocks('coin') or []
-    db_coins = {str(s.get('ticker') or '').upper() for s in coin_stocks if s.get('ticker')}
+    coin_etfs = get_etfs("coin") or []
+    db_coins = {str(s.get("ticker") or "").upper() for s in coin_etfs if s.get("ticker")}
     acct_coins = set()
     for k in list(bal.keys()):
-        if isinstance(k, str) and k.lower().startswith('total_'):
-            sym = k.split('_', 1)[-1].upper()
-            if sym != 'KRW':
+        if isinstance(k, str) and k.lower().startswith("total_"):
+            sym = k.split("_", 1)[-1].upper()
+            if sym != "KRW":
                 acct_coins.add(sym)
     coins = sorted(db_coins.union(acct_coins))
     if not coins:
@@ -109,21 +113,23 @@ def main():
         if qty <= 0:
             continue
         price = 0.0
-        df = fetch_ohlcv(c, country='coin')
+        df = fetch_ohlcv(c, country="coin")
         if df is not None and not df.empty:
             try:
-                price = float(df['Close'].iloc[-1])
+                price = float(df["Close"].iloc[-1])
             except Exception:
                 price = 0.0
         total_value += qty * price
 
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    ok = save_daily_equity('coin', today, total_value)
+    ok = save_daily_equity("coin", today, total_value)
     if ok:
-        print(f"[OK] Saved coin daily equity for {today.strftime('%Y-%m-%d')}: {int(total_value):,} KRW")
+        print(
+            f"[OK] Saved coin daily equity for {today.strftime('%Y-%m-%d')}: {int(total_value):,} KRW"
+        )
     else:
         print("[ERROR] Failed to save daily equity")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

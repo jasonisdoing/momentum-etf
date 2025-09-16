@@ -41,15 +41,15 @@ from utils.report import (
     format_kr_money,
     render_table_eaw,
 )
-from utils.stock_list_io import get_stocks
+from utils.stock_list_io import get_etfs
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 # Suppress pmc discontinued break warnings globally for status runs
 warnings.filterwarnings(
     "ignore",
-    message=r"\['break_start', 'break_end'\] are discontinued",
+    message=r"\[\'break_start\', \'break_end\'\] are discontinued",
     category=UserWarning,
-    module=r"^pandas_market_calendars\.",
+    module=r"^pandas_market_calendars.",
 )
 
 try:
@@ -561,31 +561,30 @@ def _fetch_and_prepare_data(
     """
     # 설정을 불러옵니다.
     app_settings = get_app_settings(country)
-    if (
-        not app_settings
-        or "ma_period_etf" not in app_settings
-        or "ma_period_stock" not in app_settings
-    ):
+    if not app_settings or "ma_period" not in app_settings:
         print(
             f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
         )
         return None, None, None, None, None, None, None, None
 
     try:
-        ma_period_etf = int(app_settings["ma_period_etf"])
-        ma_period_stock = int(app_settings["ma_period_stock"])
+        ma_period = int(app_settings["ma_period"])
     except (ValueError, TypeError):
         print(f"오류: '{country}' 국가의 MA 기간 설정이 올바르지 않습니다.")
         return None, None, None, None, None, None, None, None
 
+    # 현황 조회 시, 날짜가 지정되지 않으면 항상 오늘 날짜를 기준으로 조회합니다.
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
     portfolio_data = get_portfolio_snapshot(country, date_str)
     if not portfolio_data:
         print(
-            f"오류: '{country}' 국가의 포트폴리오 스냅샷을 DB에서 찾을 수 없습니다. 웹 앱의 '거래 입력' 또는 '설정' 탭을 통해 데이터를 먼저 생성해주세요."
+            f"오류: '{country}' 국가의 '{date_str}' 날짜에 대한 포트폴리오 스냅샷을 DB에서 찾을 수 없습니다. 거래 내역이 없거나 DB 연결에 문제가 있을 수 있습니다."
         )
         return None, None, None, None, None, None, None, None
     try:
-        # DB에서 가져온 date는 이미 datetime 객체일 수 있습니다.
+        # DB에서 가져온 date는 스냅샷의 기준일이 됩니다.
         base_date = pd.to_datetime(portfolio_data["date"]).normalize()
     except (ValueError, TypeError):
         print(f"경고: 포트폴리오 스냅샷에서 날짜를 추출할 수 없습니다. 현재 날짜를 사용합니다.")
@@ -608,9 +607,9 @@ def _fetch_and_prepare_data(
     }
 
     # DB에서 종목 목록을 가져와 전체 유니버스를 구성합니다.
-    stocks_from_file = get_stocks(country)
-    stock_meta = {stock["ticker"]: stock for stock in stocks_from_file}
-    static_pairs = [(stock["ticker"], stock["name"]) for stock in stocks_from_file]
+    etfs_from_file = get_etfs(country)
+    etf_meta = {etf["ticker"]: etf for etf in etfs_from_file}
+    static_pairs = [(etf["ticker"], etf["name"]) for etf in etfs_from_file]
 
     # 오늘 판매된 종목을 추가합니다.
     sold_tickers_today = set()
@@ -618,9 +617,9 @@ def _fetch_and_prepare_data(
     for trade in trades_on_base_date:
         if trade["action"] == "SELL":
             sold_tickers_today.add(trade["ticker"])
-            # stock_meta에 없는 경우 추가 (이름은 나중에 채워질 수 있음)
-            if trade["ticker"] not in stock_meta:
-                stock_meta[trade["ticker"]] = {
+            # etf_meta에 없는 경우 추가 (이름은 나중에 채워질 수 있음)
+            if trade["ticker"] not in etf_meta:
+                etf_meta[trade["ticker"]] = {
                     "ticker": trade["ticker"],
                     "name": trade.get("name", ""),
                     "category": "",
@@ -634,10 +633,10 @@ def _fetch_and_prepare_data(
                 }
 
     # 모든 티커를 포함하도록 pairs를 재구성합니다.
-    all_tickers_for_processing = set(holdings.keys()) | set(stock_meta.keys())
+    all_tickers_for_processing = set(holdings.keys()) | set(etf_meta.keys())
     pairs = []
     for tkr in all_tickers_for_processing:
-        name = stock_meta.get(tkr, {}).get("name") or holdings.get(tkr, {}).get("name") or ""
+        name = etf_meta.get(tkr, {}).get("name") or holdings.get(tkr, {}).get("name") or ""
         pairs.append((tkr, name))
 
     # 국가별로 다른 포맷터 사용
@@ -684,16 +683,13 @@ def _fetch_and_prepare_data(
 
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
     # 코인은 거래소 잔고 기반 표시이므로, 종목 마스터가 비어 있어도 보유코인을 기준으로 진행합니다.
-    if not stocks_from_file and country != "coin":
-        print(f"오류: 'data/' 폴더에서 '{country}' 국가의 현황을 계산할 종목을 찾을 수 없습니다.")
+    if not etfs_from_file and country != "coin":
+        print(
+            f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 현황을 계산할 종목을 찾을 수 없습니다."
+        )
         return None, None, None, None, None, None, None, None
-    etf_tickers_status = {
-        stock["ticker"] for stock in stocks_from_file if stock.get("type") == "etf"
-    }
 
-    max_ma_period = max(
-        ma_period_etf, ma_period_stock, regime_ma_period if regime_filter_enabled else 0
-    )
+    max_ma_period = max(ma_period, regime_ma_period if regime_filter_enabled else 0)
     required_days = max(max_ma_period, atr_period_norm) + 5  # 버퍼 추가
     required_months = (required_days // 22) + 2
 
@@ -733,12 +729,12 @@ def _fetch_and_prepare_data(
     # 코인도 이제 trades 기반 포트폴리오를 사용합니다. (빗썸 스냅샷→trades 동기화 별도 스크립트)
     if country == "coin":
         # 제외할 특수 심볼 제거 (예: 'P')
-        pairs = [(t, n) for (t, n) in pairs if t != "P"]
-
+        # 종목 마스터에 없는 종목은 처리에서 제외합니다. (단, 오늘 매도된 종목은 포함)
+        allowed_tickers = {etf["ticker"] for etf in etfs_from_file}
+        pairs = [(t, n) for t, n in pairs if t in allowed_tickers or t in sold_tickers_today]
     # --- 병렬 데이터 로딩 및 지표 계산 ---
     tasks = []
     for tkr, _ in pairs:
-        ma_period = ma_period_etf if tkr in etf_tickers_status else ma_period_stock
         df_full = prefetched_data.get(tkr) if prefetched_data else None
         tasks.append(
             (tkr, country, required_months, base_date, ma_period, atr_period_norm, df_full)
@@ -796,7 +792,7 @@ def _fetch_and_prepare_data(
         pairs,
         base_date,
         regime_info,
-        stock_meta,
+        etf_meta,
     )
 
 
@@ -970,7 +966,7 @@ def generate_status_report(
         pairs,
         base_date,
         regime_info,
-        stock_meta,
+        etf_meta,
     ) = result
     current_equity = float(portfolio_data.get("total_equity", 0.0))
     holdings = {
@@ -987,7 +983,7 @@ def generate_status_report(
     held_categories = set()
     for tkr, d in holdings.items():
         if float(d.get("shares", 0.0)) > 0:
-            category = stock_meta.get(tkr, {}).get("category")
+            category = etf_meta.get(tkr, {}).get("category")
             if category and category != "TBD":
                 held_categories.add(category)
 
@@ -1089,10 +1085,6 @@ def generate_status_report(
         score = d.get("score", 0.0)
         sh = float(d["shares"])
         ac = float(d.get("avg_cost") or 0.0)
-        # Coin: exclude only special-denied symbols; include WAIT rows too
-        if country == "coin":
-            if tkr == "P":
-                continue
 
         # 자동 계산된 보유종목의 매수일과 보유일
         buy_signal = False
@@ -1105,7 +1097,7 @@ def generate_status_report(
         hold_ret = None
 
         # 카테고리 중복 확인 및 상태 변경 (BUY 대상에서 제외)
-        category = stock_meta.get(tkr, {}).get("category")
+        category = etf_meta.get(tkr, {}).get("category")
         # Only apply category check for non-held stocks (potential buys)
         if sh == 0 and category and category != "TBD" and category in held_categories:
             state = "WAIT"  # 카테고리 중복 시 BUY 대상에서 제외하고 WAIT 상태로
@@ -1269,7 +1261,7 @@ def generate_status_report(
         held_categories = set()
         for tkr, d in data_by_tkr.items():
             if float(d.get("shares", 0.0)) > 0:
-                category = stock_meta.get(tkr, {}).get("category")
+                category = etf_meta.get(tkr, {}).get("category")
                 if category and category != "TBD":
                     held_categories.add(category)
 
@@ -1286,7 +1278,7 @@ def generate_status_report(
         )  # New set to track categories for current BUY recommendations
 
         for cand in buy_candidates_raw:
-            category = stock_meta.get(cand["tkr"], {}).get("category")
+            category = etf_meta.get(cand["tkr"], {}).get("category")
             # First, check against already held categories (from previous fix)
             if category and category != "TBD" and category in held_categories:
                 cand["state"] = "WAIT"
@@ -1362,7 +1354,8 @@ def generate_status_report(
             reverse=True,
         )
         held_stocks = sorted(
-            [a for a in decisions if a["state"] == "HOLD"], key=lambda x: x["score"]
+            [a for a in decisions if a["state"] == "HOLD"],
+            key=lambda x: x["score"],
         )
 
         num_possible_replacements = min(
@@ -1497,19 +1490,8 @@ def generate_status_report(
 
     decisions.sort(key=sort_key)
 
-    # WAIT 종목은 점수 순으로 상위 5개만 표시합니다.
-    final_decisions = []
-    wait_count = 0
-    for d in decisions:
-        if d["state"] == "WAIT":
-            if wait_count < 5:
-                final_decisions.append(d)
-                wait_count += 1
-        else:
-            final_decisions.append(d)
-
     rows_sorted = []
-    for i, decision_dict in enumerate(final_decisions, 1):
+    for i, decision_dict in enumerate(decisions, 1):
         row = decision_dict["row"]
         row[0] = i
         rows_sorted.append(row)
@@ -1782,11 +1764,9 @@ def _maybe_notify_detailed_status(
         # Names map
         name_map = {}
         try:
-            # Use the country parameter to get the correct stocks
-            stocks = get_stocks(country) or []
-            name_map = {
-                str(s.get("ticker") or "").upper(): str(s.get("name") or "") for s in stocks
-            }
+            # Use the country parameter to get the correct etfs
+            etfs = get_etfs(country) or []
+            name_map = {str(s.get("ticker") or "").upper(): str(s.get("name") or "") for s in etfs}
         except Exception:
             pass
 

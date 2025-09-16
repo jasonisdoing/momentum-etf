@@ -12,9 +12,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from logic import settings
 from logic import strategy as strategy_module
-from utils.report import format_aud_money, format_kr_money, render_table_eaw, format_aud_price
-from utils.stock_list_io import get_stocks as get_stocks_from_files
 from utils.db_manager import get_app_settings, get_common_settings
+from utils.report import (
+    format_aud_money,
+    format_aud_price,
+    format_kr_money,
+    render_table_eaw,
+)
+from utils.stock_list_io import get_etfs as get_etfs_from_files
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
@@ -42,28 +47,32 @@ def main(
 
     # DB에서 앱 설정을 불러와 logic.settings에 동적으로 설정합니다.
     app_settings = get_app_settings(country)
-    if (not app_settings
-        or "ma_period_etf" not in app_settings
-        or "ma_period_stock" not in app_settings
-        or "portfolio_topn" not in app_settings):
-        print(f"오류: '{country}' 국가의 설정(TopN, MA 기간)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+    if not app_settings or "ma_period" not in app_settings or "portfolio_topn" not in app_settings:
+        print(
+            f"오류: '{country}' 국가의 설정(TopN, MA 기간)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
+        )
         return
 
     # 필수 설정값이 모두 있는지 검증 (fallback 금지)
     if "replace_threshold" not in app_settings:
-        print(f"오류: '{country}' 국가의 설정에 'replace_threshold'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        print(
+            f"오류: '{country}' 국가의 설정에 'replace_threshold'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
+        )
         return
     # 추가 필수값: replace_weaker_stock, max_replacements_per_day
     if "replace_weaker_stock" not in app_settings:
-        print(f"오류: '{country}' 국가의 설정에 'replace_weaker_stock'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        print(
+            f"오류: '{country}' 국가의 설정에 'replace_weaker_stock'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
+        )
         return
     if "max_replacements_per_day" not in app_settings:
-        print(f"오류: '{country}' 국가의 설정에 'max_replacements_per_day'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+        print(
+            f"오류: '{country}' 국가의 설정에 'max_replacements_per_day'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
+        )
         return
 
     try:
-        settings.MA_PERIOD_FOR_ETF = int(app_settings["ma_period_etf"])
-        settings.MA_PERIOD_FOR_STOCK = int(app_settings["ma_period_stock"])
+        settings.MA_PERIOD = int(app_settings["ma_period"])
         portfolio_topn = int(app_settings["portfolio_topn"])
         # 교체 매매 파라미터 (백테스트용, 필수)
         settings.REPLACE_SCORE_THRESHOLD = float(app_settings["replace_threshold"])
@@ -76,10 +85,8 @@ def main(
     # Optional overrides from caller (e.g., tuning scripts)
     if override_settings:
         try:
-            if "ma_etf" in override_settings:
-                settings.MA_PERIOD_FOR_ETF = int(override_settings["ma_etf"])  # no-op for coin but safe
-            if "ma_stock" in override_settings:
-                settings.MA_PERIOD_FOR_STOCK = int(override_settings["ma_stock"])
+            if "ma_period" in override_settings:
+                settings.MA_PERIOD = int(override_settings["ma_period"])
             if "portfolio_topn" in override_settings:
                 portfolio_topn = int(override_settings["portfolio_topn"])
             if "replace_threshold" in override_settings:
@@ -87,7 +94,9 @@ def main(
             if "replace_weaker_stock" in override_settings:
                 settings.REPLACE_WEAKER_STOCK = bool(override_settings["replace_weaker_stock"])
             if "max_replacements_per_day" in override_settings:
-                settings.MAX_REPLACEMENTS_PER_DAY = int(override_settings["max_replacements_per_day"])
+                settings.MAX_REPLACEMENTS_PER_DAY = int(
+                    override_settings["max_replacements_per_day"]
+                )
         except Exception:
             # Silently ignore malformed overrides
             pass
@@ -134,21 +143,29 @@ def main(
 
     # 기간 설정 로직 (필수 설정)
     try:
-        test_months_range = int(override_settings.get("test_months_range")) if override_settings and "test_months_range" in override_settings else TEST_MONTHS_RANGE
+        test_months_range = (
+            int(override_settings.get("test_months_range"))
+            if override_settings and "test_months_range" in override_settings
+            else TEST_MONTHS_RANGE
+        )
     except Exception:
         print("오류: 테스트 기간(test_months_range) 설정이 올바르지 않습니다.")
         return
     core_end_dt = pd.Timestamp.now()
     core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
-    test_date_range = [core_start_dt.strftime('%Y-%m-%d'), core_end_dt.strftime('%Y-%m-%d')]
+    test_date_range = [core_start_dt.strftime("%Y-%m-%d"), core_end_dt.strftime("%Y-%m-%d")]
     period_label = f"최근 {test_months_range}개월 ({core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')})"
 
     # 티커 목록 결정
     if not quiet:
-        print(f"\n'data/' 폴더의 '{country}_stock.json', '{country}_etf.json' 파일에서 종목을 가져와 백테스트를 실행합니다.")
-    stocks_from_file = get_stocks_from_files(country)
-    if not stocks_from_file:
-        print(f"오류: 'data/' 폴더에서 '{country}' 국가의 백테스트에 사용할 종목을 찾을 수 없습니다.")
+        print(
+            f"\n'data/{country}/' 폴더의 'etf.json' 파일에서 종목을 가져와 백테스트를 실행합니다."
+        )
+    etfs_from_file = get_etfs_from_files(country)
+    if not etfs_from_file:
+        print(
+            f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 백테스트에 사용할 종목을 찾을 수 없습니다."
+        )
         return
 
     # 티커 오버라이드: 콤마 구분 리스트. coin은 파일 목록과 합집합, 그 외는 교집합.
@@ -158,17 +175,21 @@ def main(
 
         if country == "coin":
             # 합집합: 파일 목록에 override tickers를 추가하고 중복 제거
-            existing_set = {str(s.get("ticker") or "").upper() for s in stocks_from_file}
+            existing_set = {str(s.get("ticker") or "").upper() for s in etfs_from_file}
             for t in allow:
                 if t not in existing_set:
-                    stocks_from_file.append({"ticker": t, "name": t, "type": "stock", "country": "coin"})
+                    etfs_from_file.append(
+                        {"ticker": t, "name": t, "type": "etf", "country": "coin"}
+                    )
         else:
             # 교집합: 파일에 있는 티커 중 override 목록에 있는 것만 사용
-            filtered = [s for s in stocks_from_file if str(s.get("ticker") or "").upper() in allow_set]
+            filtered = [
+                s for s in etfs_from_file if str(s.get("ticker") or "").upper() in allow_set
+            ]
             if not filtered:
                 print("오류: override tickers 가 DB 목록과 일치하지 않습니다.")
                 return
-            stocks_from_file = filtered
+            etfs_from_file = filtered
 
     logger = logging.getLogger("backtester")
     logger.propagate = False  # 중복 로깅 방지
@@ -214,11 +235,11 @@ def main(
 
         # 시뮬레이션 실행
         time_series_by_ticker: Dict[str, pd.DataFrame] = {}
-        name_by_ticker: Dict[str, str] = {s["ticker"]: s["name"] for s in stocks_from_file}
+        name_by_ticker: Dict[str, str] = {s["ticker"]: s["name"] for s in etfs_from_file}
         if portfolio_topn > 0:
             time_series_by_ticker = (
                 run_portfolio_backtest(
-                    stocks=stocks_from_file,
+                    stocks=etfs_from_file,
                     initial_capital=initial_capital,
                     core_start_date=core_start_dt,
                     top_n=portfolio_topn,
@@ -229,31 +250,28 @@ def main(
                 or {}
             )
             if "CASH" in time_series_by_ticker:
-                name_by_ticker = {s["ticker"]: s["name"] for s in stocks_from_file}
+                name_by_ticker = {s["ticker"]: s["name"] for s in etfs_from_file}
                 name_by_ticker["CASH"] = "현금"
         else:
             # 개별 종목 백테스트는 여전히 데이터를 미리 로드해야 합니다.
             from utils.data_loader import fetch_ohlcv
 
             raw_data_by_ticker: Dict[str, pd.DataFrame] = {}
-            for stock in stocks_from_file:
-                ticker = stock['ticker']
-                df = fetch_ohlcv(
-                    ticker, country=country, date_range=test_date_range
-                )
+            for etf in etfs_from_file:
+                ticker = etf["ticker"]
+                df = fetch_ohlcv(ticker, country=country, date_range=test_date_range)
                 if df is not None and not df.empty:
                     raw_data_by_ticker[ticker] = df
 
             # 종목별 고정 자본 방식: 전체 자본을 종목 수로 나눔
-            capital_per_ticker = initial_capital / len(stocks_from_file) if stocks_from_file else 0
-            for stock in stocks_from_file:
-                ticker = stock['ticker']
+            capital_per_ticker = initial_capital / len(etfs_from_file) if etfs_from_file else 0
+            for etf in etfs_from_file:
+                ticker = etf["ticker"]
                 df_ticker = raw_data_by_ticker.get(ticker)
                 if df_ticker is None:
                     continue
                 ts = run_single_ticker_backtest(
                     ticker,
-                    stock_type=stock.get('type', 'stock'),
                     df=df_ticker,
                     initial_capital=capital_per_ticker,
                     core_start_date=core_start_dt,
@@ -333,7 +351,7 @@ def main(
                 denom = portfolio_topn if portfolio_topn > 0 else total_cnt
                 date_str = pd.to_datetime(dt).strftime("%Y-%m-%d")
                 logger.info(
-                    (  # noqa: T201 (터미널 출력 규칙 예외 허용)
+                    (
                         f"{date_str} - 보유종목 {held_count}/{denom} "
                         f"잔액(보유+현금): {money_formatter(total_value)} "
                         f"(보유 {money_formatter(total_holdings)} + 현금 {money_formatter(total_cash)}) "
@@ -440,7 +458,7 @@ def main(
                                 tag = "교체매수"
                             # 보유수량 표시 포맷팅
                             if country in ("coin", "aus"):
-                                qty_str = f"{qty_calc:,.4f}".rstrip('0').rstrip('.')
+                                qty_str = f"{qty_calc:,.4f}".rstrip("0").rstrip(".")
                             else:
                                 qty_str = f"{int(qty_calc):,d}"
                             phrase = f"{tag} {qty_str}주 @ {price_formatter(price_today)} ({money_formatter(amount)})"
@@ -481,7 +499,7 @@ def main(
                     hd = holding_days_by_ticker.get(tkr, 0)
                     # 보유수량 표시 포맷: coin/aus는 4자리 소수, 그 외 정수
                     if country in ("coin", "aus"):
-                        disp_shares_str = f"{disp_shares:,.4f}".rstrip('0').rstrip('.')
+                        disp_shares_str = f"{disp_shares:,.4f}".rstrip("0").rstrip(".")
                     else:
                         disp_shares_str = f"{int(disp_shares):,d}"
 
@@ -566,15 +584,18 @@ def main(
             try:
                 market_regime_filter_enabled = bool(settings.MARKET_REGIME_FILTER_ENABLED)
             except AttributeError:
-                print("오류: MARKET_REGIME_FILTER_ENABLED 설정이 logic/settings.py 에 정의되어야 합니다.")
+                print(
+                    "오류: MARKET_REGIME_FILTER_ENABLED 설정이 logic/settings.py 에 정의되어야 합니다."
+                )
                 return
 
             if market_regime_filter_enabled:
                 # '시장 위험 회피' 노트가 있는지 확인하여 리스크 오프 기간을 식별합니다.
                 # 모든 티커의 노트를 하나의 데이터프레임으로 합칩니다.
-                notes_df = pd.DataFrame({
-                    tkr: ts['note'] for tkr, ts in time_series_by_ticker.items() if tkr != "CASH"
-                }, index=common_index)
+                notes_df = pd.DataFrame(
+                    {tkr: ts["note"] for tkr, ts in time_series_by_ticker.items() if tkr != "CASH"},
+                    index=common_index,
+                )
 
                 # 어느 한 종목이라도 '시장 위험 회피' 노트를 가지면 해당일은 리스크 오프입니다.
                 if not notes_df.empty:
@@ -590,7 +611,9 @@ def main(
                         elif not is_off and in_risk_off_period:
                             in_risk_off_period = False
                             # 리스크 오프 기간의 마지막 날은 is_off가 False가 되기 바로 전날입니다.
-                            end_of_period = is_risk_off_series.index[is_risk_off_series.index.get_loc(dt) - 1]
+                            end_of_period = is_risk_off_series.index[
+                                is_risk_off_series.index.get_loc(dt) - 1
+                            ]
                             risk_off_periods.append((start_of_period, end_of_period))
                             start_of_period = None
 
@@ -609,14 +632,14 @@ def main(
             from utils.data_loader import fetch_ohlcv
 
             # 국가에 따라 벤치마크 티커와 이름을 설정합니다.
-            if country == 'coin':
+            if country == "coin":
                 benchmark_ticker = "BTC"
                 benchmark_name = "BTC"
                 benchmark_country = "coin"
             else:
                 benchmark_ticker = "^GSPC"
                 benchmark_name = "S&P 500"
-                benchmark_country = country # country는 지수 티커에 영향을 주지 않음
+                benchmark_country = country  # country는 지수 티커에 영향을 주지 않음
 
             benchmark_df = fetch_ohlcv(
                 benchmark_ticker,
@@ -633,9 +656,13 @@ def main(
                     benchmark_start_price = benchmark_df["Close"].iloc[0]
                     benchmark_end_price = benchmark_df["Close"].iloc[-1]
                     if benchmark_start_price > 0:
-                        benchmark_cum_ret_pct = ((benchmark_end_price / benchmark_start_price) - 1) * 100
+                        benchmark_cum_ret_pct = (
+                            (benchmark_end_price / benchmark_start_price) - 1
+                        ) * 100
                         if years > 0:
-                            benchmark_cagr_pct = ((benchmark_end_price / benchmark_start_price) ** (1 / years) - 1) * 100
+                            benchmark_cagr_pct = (
+                                (benchmark_end_price / benchmark_start_price) ** (1 / years) - 1
+                            ) * 100
 
             # 샤프 지수(Sharpe Ratio) 계산
             pv_series = pd.Series(portfolio_values, index=pd.to_datetime(portfolio_dates))
@@ -688,7 +715,9 @@ def main(
 
                 # 월별 누적 수익률
                 eom_pv = pv_series.resample("ME").last()
-                monthly_cum_returns = (eom_pv / initial_capital - 1).ffill() if initial_capital > 0 else pd.Series()
+                monthly_cum_returns = (
+                    (eom_pv / initial_capital - 1).ffill() if initial_capital > 0 else pd.Series()
+                )
                 summary["monthly_cum_returns"] = monthly_cum_returns
 
                 # 연간 수익률
@@ -703,33 +732,50 @@ def main(
                 if tkr == "CASH":
                     continue
 
-                trades = ts[ts["decision"].isin(["SELL", "CUT", "TRIM"])]
+                # 1. 실현 손익 계산 (모든 매도 유형 포함)
+                sell_decisions = [
+                    "SELL_MOMENTUM",
+                    "SELL_TREND",
+                    "CUT_STOPLOSS",
+                    "SELL_REPLACE",
+                    "SELL_REGIME_FILTER",
+                ]
+                trades = ts[ts["decision"].isin(sell_decisions)]
+                realized_profit = trades["trade_profit"].sum()
                 total_trades = len(trades)
+                winning_trades = len(trades[trades["trade_profit"] > 0])
 
-                # 거래가 있는 종목만 요약에 포함
-                if total_trades > 0:
-                    winning_trades = len(trades[trades["trade_profit"] > 0])
-                    win_rate = (winning_trades / total_trades) * 100.0
-                    total_profit = trades["trade_profit"].sum()
-                    avg_profit = total_profit / total_trades
+                # 2. 미실현 손익 계산 (백테스트 종료 시점 기준)
+                last_row = ts.iloc[-1]
+                final_shares = float(last_row.get("shares", 0.0))
+                unrealized_profit = 0.0
+                if final_shares > 0:
+                    final_price = float(last_row.get("price", 0.0))
+                    avg_cost = float(last_row.get("avg_cost", 0.0))
+                    if avg_cost > 0:
+                        unrealized_profit = (final_price - avg_cost) * final_shares
+
+                # 3. 총 기여도 (실현 + 미실현)
+                total_contribution = realized_profit + unrealized_profit
+
+                # 거래가 있거나, 최종 보유 수량이 있는 종목만 요약에 포함
+                if total_trades > 0 or final_shares > 0:
+                    win_rate = (winning_trades / total_trades) * 100.0 if total_trades > 0 else 0.0
                     ticker_summaries.append(
                         {
                             "ticker": tkr,
                             "name": name_by_ticker.get(tkr, ""),
                             "total_trades": total_trades,
                             "win_rate": win_rate,
-                            "total_profit": total_profit,
-                            "avg_profit": avg_profit,
+                            "realized_profit": realized_profit,
+                            "unrealized_profit": unrealized_profit,
+                            "total_contribution": total_contribution,
                         }
                     )
 
             if not quiet:
                 logger.info(
-                    "\n"
-                    + "=" * 30
-                    + "\n 백테스트 결과 요약 ".center(30, "=")
-                    + "\n"
-                    + "=" * 30
+                    "\n" + "=" * 30 + "\n 백테스트 결과 요약 ".center(30, "=") + "\n" + "=" * 30
                 )
                 logger.info(
                     f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)"
@@ -846,29 +892,31 @@ def main(
                     headers = [
                         "티커",
                         "종목명",
+                        "총 기여도",
+                        "실현손익",
+                        "미실현손익",
                         "거래횟수",
                         "승률",
-                        "총손익",
-                        "평균손익",
                     ]
 
                     sorted_summaries = sorted(
-                        ticker_summaries, key=lambda x: x["total_profit"], reverse=True
+                        ticker_summaries, key=lambda x: x["total_contribution"], reverse=True
                     )
 
                     rows = [
                         [
                             s["ticker"],
                             s["name"],
+                            money_formatter(s["total_contribution"]),
+                            money_formatter(s["realized_profit"]),
+                            money_formatter(s["unrealized_profit"]),
                             f"{s['total_trades']}회",
                             f"{s['win_rate']:.1f}%",
-                            money_formatter(s["total_profit"]),
-                            money_formatter(s["avg_profit"]),
                         ]
                         for s in sorted_summaries
                     ]
 
-                    aligns = ["right", "left", "right", "right", "right", "right"]
+                    aligns = ["right", "left", "right", "right", "right", "right", "right"]
                     table_lines = render_table_eaw(headers, rows, aligns)
                     logger.info("\n" + "\n".join(table_lines))
 

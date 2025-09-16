@@ -13,7 +13,7 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 # Suppress pmc discontinued break warnings globally
 warnings.filterwarnings(
     "ignore",
-    message=r"\['break_start', 'break_end'\] are discontinued",
+    message=r"\[\'break_start\', \'break_end\'\] are discontinued",
     category=UserWarning,
     module=r"^pandas_market_calendars\.",
 )
@@ -46,7 +46,7 @@ from utils.db_manager import (
     save_status_report_to_db,
     save_trade,
 )
-from utils.stock_list_io import get_stocks
+from utils.stock_list_io import get_etfs
 
 try:
     from pykrx import stock as _stock
@@ -260,17 +260,25 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
     현황 리포트 DataFrame에 종목 메타데이터(이름, 카테고리)를 실시간으로 병합하고 스타일을 적용하여 표시합니다.
     """
     # 1. 종목 메타데이터 로드
-    stocks_data = get_stocks(country_code)
-    if not stocks_data:
+    etfs_data = get_etfs(country_code)
+    if not etfs_data:
         meta_df = pd.DataFrame(columns=["ticker", "이름", "category"])
     else:
-        meta_df = pd.DataFrame(stocks_data)
+        meta_df = pd.DataFrame(etfs_data)
         required_cols = ["ticker", "name", "category"]
         for col in required_cols:
             if col not in meta_df.columns:
                 meta_df[col] = None
         meta_df = meta_df[required_cols]
         meta_df.rename(columns={"name": "이름"}, inplace=True)
+
+    # 호주 'IS' 종목의 이름을 수동으로 지정합니다.
+    if country_code == "aus":
+        # 'IS' 종목에 대한 메타데이터를 수동으로 추가합니다.
+        is_meta = pd.DataFrame(
+            [{"ticker": "IS", "이름": "International Shares", "category": "기타"}]
+        )
+        meta_df = pd.concat([meta_df, is_meta], ignore_index=True)
 
     # 2. 메타데이터 병합
     df_merged = pd.merge(df, meta_df, left_on="티커", right_on="ticker", how="left")
@@ -390,34 +398,22 @@ def show_buy_dialog(country_code: str):
             )
             return
 
-        stock_name = ""
+        etf_name = ""
         if country_code == "kor" and _stock:
-            # pykrx는 주식과 ETF의 이름 조회 함수가 다르므로,
-            # 두 함수 모두 시도하여 유효한 문자열 결과를 찾습니다.
             try:
-                # 1. ETF 이름 조회 시도
                 name_candidate = _stock.get_etf_ticker_name(ticker)
                 if isinstance(name_candidate, str) and name_candidate:
-                    stock_name = name_candidate
+                    etf_name = name_candidate
             except Exception:
-                pass  # 실패하면 다음으로 넘어감
-
-            if not stock_name:
-                try:
-                    # 2. 주식 이름 조회 시도
-                    name_candidate = _stock.get_market_ticker_name(ticker)
-                    if isinstance(name_candidate, str) and name_candidate:
-                        stock_name = name_candidate
-                except Exception:
-                    pass  # 최종 실패
+                pass  # 최종 실패
         elif country_code == "aus":
-            stock_name = fetch_yfinance_name(ticker)
+            etf_name = fetch_yfinance_name(ticker)
 
         trade_data = {
             "country": country_code,
             "date": pd.to_datetime(trade_date).to_pydatetime(),
             "ticker": ticker.upper(),
-            "name": stock_name,
+            "name": etf_name,
             "action": "BUY",
             "shares": float(shares),
             "price": float(price),
@@ -621,7 +617,9 @@ def show_sell_dialog(country_code: str):
             column_config={
                 "선택": st.column_config.CheckboxColumn("삭제", required=True),
                 "보유수량": st.column_config.NumberColumn(format="%.8f"),
-                "수익률": st.column_config.NumberColumn(format="%.2f%%"),
+                "수익률": st.column_config.NumberColumn(
+                    format="%.2f%%",
+                ),
                 value_col_name: st.column_config.NumberColumn(
                     # 쉼표(,)를 포맷에 추가하여 3자리마다 구분자를 표시합니다.
                     format="%,.0f" if country_code == "kor" else "%,.2f"
@@ -635,7 +633,7 @@ def show_sell_dialog(country_code: str):
         st.form_submit_button("선택 종목 매도", on_click=on_sell_submit)
 
 
-def render_master_stock_ui(country_code: str):
+def render_master_etf_ui(country_code: str):
     """종목 마스터 조회 UI를 렌더링합니다."""
     # from utils.data_loader import fetch_crypto_name # 사용자 요청에 따라 제거됨
 
@@ -647,62 +645,53 @@ def render_master_stock_ui(country_code: str):
         st.info("이곳에서 투자 유니버스에 포함된 종목을 조회할 수 있습니다.")
 
     with st.spinner("종목 마스터 데이터를 불러오는 중..."):
-        stocks_data = get_stocks(country_code)
-        if not stocks_data:
+        etfs_data = get_etfs(country_code)
+        if not etfs_data:
             st.info("조회할 종목이 없습니다.")
             return
 
-        df_stocks = pd.DataFrame(stocks_data)
+        df_etfs = pd.DataFrame(etfs_data)
 
         # 데이터 정합성을 위한 처리: 'name' 컬럼이 없거나 NaN 값이 있으면 오류가 발생할 수 있습니다.
-        if "name" not in df_stocks.columns:
-            df_stocks["name"] = ""
-        df_stocks["name"] = df_stocks["name"].fillna("").astype(str)
+        if "name" not in df_etfs.columns:
+            df_etfs["name"] = ""
+        df_etfs["name"] = df_etfs["name"].fillna("").astype(str)
 
         # 데이터 정합성을 위한 처리
         if country_code == "coin":
-            if "type" not in df_stocks.columns:
-                df_stocks["type"] = "crypto"
-            df_stocks["type"] = df_stocks["type"].fillna("crypto")
+            if "type" not in df_etfs.columns:
+                df_etfs["type"] = "crypto"
+            df_etfs["type"] = df_etfs["type"].fillna("crypto")
         else:
-            if "type" not in df_stocks.columns:
-                df_stocks["type"] = ""
+            if "type" not in df_etfs.columns:
+                df_etfs["type"] = ""
 
         # 'last_modified' 컬럼이 없는 구버전 데이터와의 호환성을 위해 추가
-        if "last_modified" not in df_stocks.columns:
-            df_stocks["last_modified"] = pd.NaT
+        if "last_modified" not in df_etfs.columns:
+            df_etfs["last_modified"] = pd.NaT
 
         # 정렬 로직: 오래된 수정일자 우선
-        df_stocks["modified_sort_key"] = pd.to_datetime(df_stocks["last_modified"], errors="coerce")
+        df_etfs["modified_sort_key"] = pd.to_datetime(df_etfs["last_modified"], errors="coerce")
 
-        df_stocks.sort_values(
+        df_etfs.sort_values(
             by=["modified_sort_key"],
             ascending=True,
             na_position="first",  # 수정일자가 없는 가장 오래된 데이터부터 표시
             inplace=True,
         )
 
-        # 정렬에 사용된 임시 컬럼들을 삭제합니다.
-        df_for_display = df_stocks.drop(
-            columns=["modified_sort_key", "last_modified"], errors="ignore"
-        )
-
         # 컬럼 순서 조정
-        if country_code == "coin":
-            display_cols = ["ticker", "name"]
-        else:
-            display_cols = ["ticker", "name", "type"]
-        df_for_display = df_stocks.reindex(columns=display_cols)
+        display_cols = ["ticker", "name", "category"]
+        df_for_display = df_etfs.reindex(columns=display_cols)
 
         st.dataframe(
             df_for_display,
             width="stretch",
             hide_index=True,
-            key=f"stock_viewer_{country_code}",
+            key=f"etf_viewer_{country_code}",
             column_config={
                 "ticker": st.column_config.TextColumn("티커"),
                 "name": st.column_config.TextColumn("종목명"),
-                "type": st.column_config.TextColumn("타입"),
             },
         )
 
@@ -834,7 +823,7 @@ def render_country_tab(country_code: str):
         sub_tab_status,
         sub_tab_history,
         sub_tab_trades,
-        sub_tab_stock_management,
+        sub_tab_etf_management,
         sub_tab_settings,
         sub_tab_notification,
     ) = st.tabs(sub_tab_names)
@@ -1049,8 +1038,8 @@ def render_country_tab(country_code: str):
                     "과거 전체 다시계산", key=f"recalc_all_hist_{country_code}"
                 ):
                     # 1. 재계산에 필요한 모든 종목과 전체 기간을 결정합니다.
-                    stocks_from_file = get_stocks(country_code)
-                    tickers = [s["ticker"] for s in stocks_from_file]
+                    etfs_from_file = get_etfs(country_code)
+                    tickers = [s["ticker"] for s in etfs_from_file]
 
                     oldest_date = pd.to_datetime(past_dates[-1])
                     newest_date = pd.to_datetime(past_dates[0])
@@ -1058,11 +1047,7 @@ def render_country_tab(country_code: str):
                     # 웜업 기간 계산에 필요한 파라미터를 DB에서 읽어옵니다.
                     app_settings_db = get_app_settings(country_code)
                     common_settings = get_common_settings()
-                    if (
-                        not app_settings_db
-                        or "ma_period_etf" not in app_settings_db
-                        or "ma_period_stock" not in app_settings_db
-                    ):
+                    if not app_settings_db or "ma_period" not in app_settings_db:
                         st.error(
                             "오류: DB에 MA 기간 설정이 없습니다. 각 국가 탭의 '설정'에서 값을 저장해주세요."
                         )
@@ -1073,10 +1058,7 @@ def render_country_tab(country_code: str):
                         )
                         return
                     try:
-                        max_ma_period = max(
-                            int(app_settings_db["ma_period_etf"]),
-                            int(app_settings_db["ma_period_stock"]),
-                        )
+                        max_ma_period = int(app_settings_db["ma_period"])
                         atr_period_norm = int(common_settings["ATR_PERIOD_FOR_NORMALIZATION"])
                     except (ValueError, TypeError):
                         st.error(
@@ -1200,8 +1182,10 @@ def render_country_tab(country_code: str):
             with st.spinner("거래일 및 평가금액 데이터를 불러오는 중..."):
                 all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
                 if (
-                    not all_trading_days and country_code == "kor"
-                ):  # 호주는 yfinance가 주말을 건너뛰므로 거래일 조회가 필수는 아님
+                    not all_trading_days
+                    and country_code
+                    == "kor"  # 호주는 yfinance가 주말을 건너뛰므로 거래일 조회가 필수는 아님
+                ):
                     st.warning("거래일을 조회할 수 없습니다.")
                 else:
                     start_dt_obj = pd.to_datetime(start_date_str).to_pydatetime()
@@ -1394,9 +1378,9 @@ def render_country_tab(country_code: str):
                 else:
                     st.warning("삭제할 거래를 선택해주세요.")
 
-    with sub_tab_stock_management:
+    with sub_tab_etf_management:
         with st.spinner("종목 마스터 데이터를 불러오는 중..."):
-            render_master_stock_ui(country_code)
+            render_master_etf_ui(country_code)
 
     with sub_tab_notification:
         render_notification_settings_ui(country_code)
@@ -1406,8 +1390,7 @@ def render_country_tab(country_code: str):
         db_settings = get_app_settings(country_code)
         current_capital = db_settings.get("initial_capital", 0) if db_settings else 0
         current_topn = db_settings.get("portfolio_topn") if db_settings else None
-        current_ma_etf = db_settings.get("ma_period_etf") if db_settings else None
-        current_ma_stock = db_settings.get("ma_period_stock") if db_settings else None
+        current_ma = db_settings.get("ma_period") if db_settings else None
         current_replace_threshold = db_settings.get("replace_threshold") if db_settings else None
         current_replace_weaker = db_settings.get("replace_weaker_stock") if db_settings else None
         current_max_replacements = (
@@ -1449,22 +1432,13 @@ def render_country_tab(country_code: str):
             st.markdown("---")
             st.subheader("전략 파라미터")
 
-            if current_ma_etf is None:
-                st.warning("ETF 이동평균 기간(MA_PERIOD_FOR_ETF)을 설정해주세요.")
-            new_ma_etf_str = st.text_input(
-                "ETF 이동평균 기간 (MA_PERIOD_FOR_ETF)",
-                value=str(current_ma_etf) if current_ma_etf is not None else "15",
+            if current_ma is None:
+                st.warning("이동평균 기간(MA_PERIOD)을 설정해주세요.")
+            new_ma_str = st.text_input(
+                "이동평균 기간 (MA_PERIOD)",
+                value=str(current_ma) if current_ma is not None else "75",
                 placeholder="예: 15",
-                help="ETF 종목의 추세 판단에 사용될 이동평균 기간입니다.",
-            )
-
-            if current_ma_stock is None:
-                st.warning("개별종목 이동평균 기간(MA_PERIOD_FOR_STOCK)을 설정해주세요.")
-            new_ma_stock_str = st.text_input(
-                "개별종목 이동평균 기간 (MA_PERIOD_FOR_STOCK)",
-                value=str(current_ma_stock) if current_ma_stock is not None else "75",
-                placeholder="예: 75",
-                help="개별 주식/코인 종목의 추세 판단에 사용될 이동평균 기간입니다.",
+                help="종목의 추세 판단에 사용될 이동평균 기간입니다.",
             )
 
             # 교체 매매 사용 여부 (bool)
@@ -1503,15 +1477,8 @@ def render_country_tab(country_code: str):
                 if not new_topn_str or not new_topn_str.isdigit() or int(new_topn_str) < 1:
                     st.error("최대 보유 종목 수는 1 이상의 숫자여야 합니다.")
                     error = True
-                if not new_ma_etf_str or not new_ma_etf_str.isdigit() or int(new_ma_etf_str) < 1:
-                    st.error("ETF 이동평균 기간은 1 이상의 숫자여야 합니다.")
-                    error = True
-                if (
-                    not new_ma_stock_str
-                    or not new_ma_stock_str.isdigit()
-                    or int(new_ma_stock_str) < 1
-                ):
-                    st.error("개별종목 이동평균 기간은 1 이상의 숫자여야 합니다.")
+                if not new_ma_str or not new_ma_str.isdigit() or int(new_ma_str) < 1:
+                    st.error("이동평균 기간은 1 이상의 숫자여야 합니다.")
                     error = True
                 # max_replacements_per_day 검증 (정수 >= 0)
                 if (
@@ -1530,8 +1497,7 @@ def render_country_tab(country_code: str):
 
                 if not error:
                     new_topn = int(new_topn_str)
-                    new_ma_etf = int(new_ma_etf_str)
-                    new_ma_stock = int(new_ma_stock_str)
+                    new_ma = int(new_ma_str)
                     new_max_replacements = int(max_replacements_str)
                     new_replace_threshold = float(new_replace_threshold_str)
                     settings_to_save = {
@@ -1539,8 +1505,7 @@ def render_country_tab(country_code: str):
                         "initial_capital": new_capital,
                         "initial_date": pd.to_datetime(new_date).to_pydatetime(),
                         "portfolio_topn": new_topn,
-                        "ma_period_etf": new_ma_etf,
-                        "ma_period_stock": new_ma_stock,
+                        "ma_period": new_ma,
                         "replace_weaker_stock": bool(replace_weaker_checkbox),
                         "max_replacements_per_day": new_max_replacements,
                         "replace_threshold": new_replace_threshold,
@@ -1561,9 +1526,7 @@ def main():
     st.markdown(
         """
         <style>
-            .block-container {
-                padding-top: 1rem;
-            }
+            .block-container { padding-top: 1rem; }
         </style>
     """,
         unsafe_allow_html=True,

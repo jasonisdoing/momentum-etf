@@ -1,6 +1,6 @@
-import os
 import json
-from typing import List, Dict
+import os
+from typing import Dict, List
 
 
 def _get_data_dir():
@@ -9,53 +9,91 @@ def _get_data_dir():
     return os.path.join(project_root, "data")
 
 
-def get_stocks(country: str) -> List[Dict[str, str]]:
+def get_etfs(country: str) -> List[Dict[str, str]]:
     """
-    'data/' 디렉토리의 JSON 파일에서 종목 목록을 로드합니다.
-    - 주식: {country}_stock.json
-    - ETF: {country}_etf.json
-    - 파일 형식: [{"category": "...", "tickers": [{"ticker": "...", "name": "..."}]}]
+    'data/{country}/' 폴더에서 'etf.json' 파일을 읽어
+    종목 목록을 반환합니다.
     """
-    all_stocks = []
+    all_etfs = []
     seen_tickers = set()
-    data_dir = _get_data_dir()
+    country_data_dir = os.path.join(_get_data_dir(), country)
 
-    for stock_type in ["stock", "etf"]:
-        file_path = os.path.join(data_dir, f"{country}_{stock_type}.json")
-        if not os.path.exists(file_path):
-            continue
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if not isinstance(data, list):
-                    print(f"경고: '{file_path}' 파일의 형식이 리스트가 아닙니다. 건너뜁니다.")
+    file_path = os.path.join(country_data_dir, "etf.json")
+    if not os.path.exists(file_path):
+        return all_etfs
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if not isinstance(data, list):
+                print(f"경고: '{file_path}' 파일의 형식이 리스트가 아닙니다. 건너뜁니다.")
+                return all_etfs
+
+            for category_block in data:
+                if not isinstance(category_block, dict) or "tickers" not in category_block:
                     continue
 
+                category_name = category_block.get("category", "Uncategorized")
+                tickers_list = category_block.get("tickers", [])
+                if not isinstance(tickers_list, list):
+                    continue
+
+                for item in tickers_list:
+                    if not isinstance(item, dict) or not item.get("ticker"):
+                        continue
+
+                    ticker = item["ticker"]
+                    if ticker in seen_tickers:
+                        continue
+
+                    seen_tickers.add(ticker)
+                    item["type"] = "etf"
+                    item["category"] = category_name
+                    all_etfs.append(item)
+    except json.JSONDecodeError as e:
+        print(f"오류: '{file_path}' JSON 파일 파싱 실패 - {e}")
+    except Exception as e:
+        print(f"경고: '{file_path}' 파일 읽기 실패 - {e}")
+
+    return all_etfs
+
+
+def save_etfs(country: str, data: List[Dict]):
+    """
+    주어진 데이터를 'data/{country}/etf.json' 파일에 저장합니다.
+    """
+    country_data_dir = os.path.join(_get_data_dir(), country)
+    os.makedirs(country_data_dir, exist_ok=True)
+    file_path = os.path.join(country_data_dir, "etf.json")
+
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        print(f"성공: {len(data)}개 카테고리의 종목 정보가 '{file_path}'에 저장되었습니다.")
+    except Exception as e:
+        print(f"오류: '{file_path}' 파일 저장 실패 - {e}")
+        raise
+
+
+def get_etf_categories(country: str) -> List[str]:
+    """
+    지정된 국가의 모든 ETF 카테고리 목록을 반환합니다.
+    """
+    categories = set()
+    country_data_dir = os.path.join(_get_data_dir(), country)
+    file_path = os.path.join(country_data_dir, "etf.json")
+
+    if not os.path.exists(file_path):
+        return []
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
                 for category_block in data:
-                    if not isinstance(category_block, dict) or 'tickers' not in category_block:
-                        continue
+                    if isinstance(category_block, dict) and "category" in category_block:
+                        categories.add(category_block["category"])
+    except Exception as e:
+        print(f"경고: '{file_path}' 파일에서 카테고리 읽기 실패 - {e}")
 
-                    category_name = category_block.get('category', 'Uncategorized')
-                    tickers_list = category_block.get('tickers', [])
-                    if not isinstance(tickers_list, list):
-                        continue
-
-                    for item in tickers_list:
-                        if not isinstance(item, dict) or not item.get('ticker'):
-                            continue
-
-                        ticker = item['ticker']
-                        if ticker in seen_tickers:
-                            continue
-
-                        seen_tickers.add(ticker)
-                        if 'type' not in item or not item['type']:
-                            item['type'] = stock_type
-                        item['category'] = category_name
-                        all_stocks.append(item)
-        except json.JSONDecodeError as e:
-            print(f"오류: '{file_path}' JSON 파일 파싱 실패 - {e}")
-        except Exception as e:
-            print(f"경고: '{file_path}' 파일 읽기 실패 - {e}")
-
-    return all_stocks
+    return sorted(list(categories))

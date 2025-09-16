@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.data_loader import fetch_ohlcv
 from utils.db_manager import get_db_connection, save_trade
 from utils.env import load_env_if_present
-from utils.stock_list_io import get_stocks
+from utils.stock_list_io import get_etfs
 
 
 def _now_day() -> datetime:
@@ -151,11 +151,11 @@ def _infer_buy_price(
 
 
 def _universe() -> Tuple[List[str], Dict[str, str]]:
-    """Return (tickers, name_by_ticker) for coin universe from DB stocks."""
-    stocks = get_stocks("coin") or []
+    """Return (tickers, name_by_ticker) for coin universe from DB etfs."""
+    etfs = get_etfs("coin") or []
     tickers = []
     names: Dict[str, str] = {}
-    for s in stocks:
+    for s in etfs:
         t = str(s.get("ticker") or "").upper()
         if not t:
             continue

@@ -231,7 +231,7 @@ def fetch_ohlcv(
             end_str = current_end.strftime("%Y%m%d")
 
             try:
-                df_part = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
+                df_part = _stock.get_etf_ohlcv_by_date(start_str, end_str, ticker)
                 if df_part is not None and not df_part.empty:
                     all_dfs.append(df_part)
             except Exception as e:
@@ -425,26 +425,17 @@ def fetch_pykrx_name(ticker: str) -> str:
     if not is_pykrx_available():
         return ""
 
-    stock_name = ""
+    etf_name = ""
     try:
         # 1. ETF 이름 조회 시도
         name_candidate = _stock.get_etf_ticker_name(ticker)
         if isinstance(name_candidate, str) and name_candidate:
-            stock_name = name_candidate
+            etf_name = name_candidate
     except Exception:
         pass
 
-    if not stock_name:
-        try:
-            # 2. 주식 이름 조회 시도
-            name_candidate = _stock.get_market_ticker_name(ticker)
-            if isinstance(name_candidate, str) and name_candidate:
-                stock_name = name_candidate
-        except Exception:
-            pass
-
-    _pykrx_name_cache[ticker] = stock_name
-    return stock_name
+    _pykrx_name_cache[ticker] = etf_name
+    return etf_name
 
 
 _yfinance_name_cache: Dict[str, str] = {}

@@ -43,15 +43,26 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 예: `python run.py coin --test`
 
-3) 파라미터 튜닝 (코인 전용)
+3) 파라미터 튜닝
 
-`tune_coin.py` 스크립트를 실행하여 코인 전략의 최적 파라미터를 찾습니다.
+`run.py`를 통해 파라미터 튜닝을 실행하여 각 전략의 최적 파라미터를 찾습니다.
 
-    python scripts/tune_coin.py
+    python run.py <국가코드> --tune
 
 - 주의: 매우 많은 조합을 테스트하므로 실행에 오랜 시간이 걸릴 수 있습니다.
 - 스크립트 상단에서 테스트할 파라미터 범위를 조절할 수 있습니다.
-- 최종적으로 최고 CAGR, 최저 MDD, 최고 Calmar Ratio(위험 조정 수익률)를 기록한 파라미터와 성과를 각각 출력합니다.
+- 최종적으로 최고 CAGR, 최저 MDD, 최고 Calmar Ratio(위험 조정 수익률) 등을 기록한 파라미터와 성과를 각각 출력합니다.
+
+4) ETF 섹터 분류 (AI 사용)
+
+`scripts/categorize_etf.py` 스크립트를 실행하여 `data/<국가코드>/etf_raw.txt` 파일의 ETF들을 AI를 이용해 섹터별로 자동 분류하고 `data/<국가코드>/etf_categorized.csv` 파일에 저장합니다.
+
+    python scripts/categorize_etf.py <국가코드>
+
+- **사전 준비**: `pip install google-generativeai python-dotenv` 라이브러리 설치가 필요합니다.
+- **API 키 설정**: 프로젝트 루트 디렉터리에 `.env` 파일을 만들고 API 키를 저장합니다.
+  - `GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"` (Google AI Studio에서 발급)
+- 실행 시 `etf_categorized.csv` 파일에 `category` 컬럼이 추가/업데이트됩니다.
 
 4) 웹앱으로 현황 확인
 
@@ -103,8 +114,8 @@ pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 찾아봅�
   - MARKET_REGIME_FILTER_ENABLED / MARKET_REGIME_FILTER_TICKER / MARKET_REGIME_FILTER_MA_PERIOD
   - HOLDING_STOP_LOSS_PCT / COOLDOWN_DAYS / ATR_PERIOD_FOR_NORMALIZATION
   - 주의: HOLDING_STOP_LOSS_PCT는 양수로 입력해도 자동으로 음수로 저장/해석됩니다. (예: 10 → -10)
-- 국가별 전략 파라미터(웹앱 각 국가 탭 → 설정)
-  - portfolio_topn, ma_period_etf, ma_period_stock
+- 국가별 전략 파라미터(웹앱 각 국가 탭 → 설정):
+  - portfolio_topn, ma_period
   - replace_weaker_stock, max_replacements_per_day, replace_threshold
   - 각 국가별로 DB에 저장되어 해당 국가 현황/백테스트에 반영됩니다.
 

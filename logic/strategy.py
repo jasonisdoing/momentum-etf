@@ -29,8 +29,8 @@ def run_portfolio_backtest(
     # 설정값 로드 (필수)
     try:
         # 전략 고유 설정
-        ma_period_etf = int(settings.MA_PERIOD_FOR_ETF)
-        ma_period_stock = int(settings.MA_PERIOD_FOR_STOCK)
+        ma_period_etf = int(settings.MA_PERIOD)
+        ma_period_stock = int(settings.MA_PERIOD)
         replace_weaker_stock = bool(settings.REPLACE_WEAKER_STOCK)
         replace_threshold = float(settings.REPLACE_SCORE_THRESHOLD)
         max_replacements_per_day = int(settings.MAX_REPLACEMENTS_PER_DAY)
@@ -645,8 +645,8 @@ def run_single_ticker_backtest(
     """
     try:
         # 전략 고유 설정
-        ma_period_etf = int(settings.MA_PERIOD_FOR_ETF)
-        ma_period_stock = int(settings.MA_PERIOD_FOR_STOCK)
+        ma_period_etf = int(settings.MA_PERIOD)
+        ma_period_stock = int(settings.MA_PERIOD)
         atr_period = int(settings.ATR_PERIOD_FOR_NORMALIZATION)
     except AttributeError as e:
         raise AttributeError(

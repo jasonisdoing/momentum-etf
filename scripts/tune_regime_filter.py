@@ -20,7 +20,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.data_loader import fetch_ohlcv_for_tickers
-from utils.db_manager import get_app_settings, get_stocks
+from utils.db_manager import get_app_settings
+from utils.stock_list_io import get_etfs
 
 
 def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame]) -> tuple:
@@ -58,24 +59,19 @@ def tune_regime_filter(country: str):
 
     # 1. 튜닝에 필요한 최대 기간 계산
     app_settings = get_app_settings(country)
-    if (
-        not app_settings
-        or "ma_period_etf" not in app_settings
-        or "ma_period_stock" not in app_settings
-    ):
+    if not app_settings or "ma_period_etf" not in app_settings:
         print(
             f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
         )
         return
     try:
         ma_period_etf = int(app_settings["ma_period_etf"])
-        ma_period_stock = int(app_settings["ma_period_stock"])
     except (ValueError, TypeError):
         print(f"오류: '{country}' 국가의 MA 기간 설정이 올바르지 않습니다.")
         return
 
     max_months_range = max(test_months_ranges)
-    max_strategy_ma = max(ma_period_etf, ma_period_stock)
+    max_strategy_ma = ma_period_etf
     max_regime_ma = max(regime_ma_periods)
     warmup_days = int(max(max_strategy_ma, max_regime_ma) * 1.5)
 
@@ -84,11 +80,11 @@ def tune_regime_filter(country: str):
     core_start_dt = core_end_dt - pd.DateOffset(months=max_months_range)
 
     # 3. DB에서 티커 목록 읽기
-    stocks_from_db = get_stocks(country)
-    if not stocks_from_db:
-        print(f"오류: '{country}_stocks' 컬렉션에서 튜닝에 사용할 종목을 찾을 수 없습니다.")
+    etfs_from_db = get_etfs(country)
+    if not etfs_from_db:
+        print(f"오류: '{country}_etfs' 컬렉션에서 튜닝에 사용할 종목을 찾을 수 없습니다.")
         return
-    tickers_to_process = [s["ticker"] for s in stocks_from_db]
+    tickers_to_process = [s["ticker"] for s in etfs_from_db]
 
     # 4. 모든 종목의 시세 데이터를 병렬로 미리 로딩합니다.
     prefetched_data = fetch_ohlcv_for_tickers(
