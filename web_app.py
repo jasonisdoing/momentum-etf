@@ -4,6 +4,11 @@ import warnings
 from datetime import datetime
 from typing import Dict, Optional
 
+from dotenv import load_dotenv
+
+# .env 파일이 있다면 로드합니다. (로컬 개발 환경용)
+# 이 코드는 다른 프로젝트 모듈이 임포트되기 전에 실행되어야 합니다.
+load_dotenv()
 import pandas as pd
 import streamlit as st
 
