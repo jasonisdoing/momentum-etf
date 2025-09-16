@@ -26,7 +26,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from logic.data_updater import update_etf_names
+from utils.data_updater import update_etf_names
 
 try:
     # DB에서 설정을 읽어 스케줄 주기를 제어

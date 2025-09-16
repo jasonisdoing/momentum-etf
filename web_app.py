@@ -204,6 +204,16 @@ def get_cached_status_report(
             # 3. 계산된 결과를 DB에 저장합니다.
             save_status_report_to_db(country, report_date, new_report)
         return new_report
+    except ValueError as e:
+        if str(e).startswith("PRICE_FETCH_FAILED:"):
+            failed_tickers_str = str(e).split(":", 1)[1]
+            st.error(f"{failed_tickers_str} 종목의 가격을 가져올 수 없습니다. 다시 시도하세요.")
+            return None
+        else:
+            # 다른 ValueError는 기존처럼 처리
+            logger.exception(f"현황 계산 오류: {country}/{date_str}")
+            st.error(f"'{date_str}' 현황 계산 중 오류가 발생했습니다: {e}")
+            return None
     except Exception as e:
         logger.exception(f"현황 계산 오류: {country}/{date_str}")
         st.error(
@@ -878,13 +888,14 @@ def render_country_tab(country_code: str):
             recalc_key = f"{country_code}_{target_date_str}"
             if st.button("다시 계산", key=f"recalc_status_{recalc_key}"):
                 with st.spinner(f"'{target_date_str}' 기준 현황을 다시 계산 중입니다..."):
-                    # 현황을 다시 계산하고 DB에 저장합니다.
-                    # 코인의 경우, 오늘 날짜에 한해 빗썸 계좌 동기화(거래내역 생성)를 먼저 수행합니다.
-                    get_cached_status_report(
+                    report = get_cached_status_report(
                         country=country_code, date_str=target_date_str, force_recalculate=True
                     )
-                st.success("재계산이 완료되었습니다.")
-                st.rerun()
+                if report:
+                    st.success("재계산이 완료되었습니다.")
+                    st.rerun()
+                # 오류 발생 시, get_cached_status_report 내부에서 메시지를 표시하므로
+                # 여기서는 별도 처리가 필요 없습니다.
 
             # 캐시된(또는 계산 완료된) 결과를 표시
             result = get_cached_status_report(
@@ -1050,19 +1061,27 @@ def render_country_tab(country_code: str):
                     progress_text = "과거 현황 데이터를 다시 계산하는 중..."
                     progress_bar = st.progress(0, text=progress_text)
                     total_dates = len(past_dates)
+                    recalculation_ok = True
                     for i, date_str in enumerate(past_dates):
-                        get_cached_status_report(
+                        report = get_cached_status_report(
                             country=country_code,
                             date_str=date_str,
                             force_recalculate=True,
                             prefetched_data=prefetched_data,
                         )
+                        if report is None:
+                            # get_cached_status_report 내부에서 이미 오류 메시지를 표시했습니다.
+                            st.warning("오류로 인해 과거 전체 재계산을 중단합니다.")
+                            recalculation_ok = False
+                            break  # 루프 중단
+
                         progress_bar.progress(
                             (i + 1) / total_dates, text=f"{progress_text} ({i+1}/{total_dates})"
                         )
                     progress_bar.empty()
-                    st.success("모든 과거 현황 데이터가 다시 계산되었습니다.")
-                    st.rerun()
+                    if recalculation_ok:
+                        st.success("모든 과거 현황 데이터가 다시 계산되었습니다.")
+                        st.rerun()
 
                 history_date_tabs = st.tabs(past_dates)
                 for i, date_str in enumerate(past_dates):

@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from pymongo import DESCENDING
 
-from logic import settings
+import settings as global_settings
 
 try:
     import pytz
@@ -368,9 +368,9 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
     else:
         # 기존 로직 (한국/호주)
         try:
-            benchmark_ticker = settings.BENCHMARK_TICKERS.get(country)
+            benchmark_ticker = global_settings.BENCHMARK_TICKERS.get(country)
         except AttributeError:
-            print("오류: BENCHMARK_TICKERS 설정이 logic/settings.py 에 정의되어야 합니다.")
+            print("오류: BENCHMARK_TICKERS 설정이 settings.py 에 정의되어야 합니다.")
             return None
         if not benchmark_ticker:
             return None
@@ -980,6 +980,22 @@ def generate_status_report(
         regime_info,
         etf_meta,
     ) = result
+
+    # --- 가격 조회 실패 검증 ---
+    # 현황을 계산하기 전에 모든 종목의 가격 데이터가 유효한지 확인합니다.
+    failed_tickers = []
+    for tkr, _ in pairs:
+        # data_by_tkr에 티커가 없거나, 있어도 가격이 0 이하이면 실패로 간주합니다.
+        # 코인의 경우, 보유하지 않은 종목은 pairs에 포함되지만 data_by_tkr에 없을 수 있습니다.
+        # 하지만 현황 계산에 필요한 모든 종목(보유+유니버스)은 가격이 있어야 합니다.
+        if tkr not in data_by_tkr or data_by_tkr[tkr].get("price", 0) <= 0:
+            failed_tickers.append(tkr)
+
+    if failed_tickers:
+        # 실패한 티커가 있으면, 처리를 중단하고 예외를 발생시킵니다.
+        # 이 예외는 web_app.py에서 처리하여 사용자에게 메시지를 표시합니다.
+        raise ValueError(f"PRICE_FETCH_FAILED:{','.join(sorted(list(set(failed_tickers))))}")
+
     current_equity = float(portfolio_data.get("total_equity", 0.0))
     holdings = {
         item["ticker"]: {

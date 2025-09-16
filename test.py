@@ -10,8 +10,8 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from logic import jason as strategy_module
 from logic import settings
-from logic import strategy as strategy_module
 from utils.db_manager import get_app_settings, get_common_settings
 from utils.report import (
     format_aud_money,
