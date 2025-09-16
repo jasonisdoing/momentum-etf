@@ -3,6 +3,11 @@ services:
     name: momentum-pilot
     env: docker
     repo: https://github.com/jasonisdoing/momentum-pilot.git
+    # HTTP Basic Authentication을 활성화합니다.
+    # 아이디와 비밀번호는 아래 envVars에 정의된 환경 변수에서 값을 가져옵니다.
+    basicAuth:
+      username: ${BASIC_AUTH_USER}
+      password: ${BASIC_AUTH_PASSWORD}
     envVars:
       # Basic Auth를 위한 환경 변수 (값은 Render 대시보드에서 Secret으로 설정)
       - key: BASIC_AUTH_USER
