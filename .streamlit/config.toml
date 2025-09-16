@@ -1,7 +1,12 @@
 # Streamlit 앱의 전역 설정을 관리합니다.
 
 [theme]
-base="dark"
+# Anthropic 스타일을 모방한 커스텀 테마
+primaryColor="#D94D2B"  # Anthropic의 브랜드 오렌지/레드 색상
+backgroundColor="#FFFFFF" # 깔끔한 흰색 배경
+secondaryBackgroundColor="#F0F2F6" # 사이드바 및 위젯 배경 (밝은 회색)
+textColor="#262730" # 가독성 높은 어두운 텍스트 색상
+font="sans serif" # 깔끔한 산세리프 폰트
 
 [client]
 toolbarMode = "minimal"
