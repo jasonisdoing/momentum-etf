@@ -5,10 +5,14 @@
 """
 
 # --- 데이터베이스 및 인프라 설정 ---
-# MongoDB 연결 문자열. 보안을 위해 환경 변수 사용을 권장합니다.
-# 예: "mongodb://user:password@host:port/"
-MONGO_DB_CONNECTION_STRING = "mongodb+srv://jasonisdoing:bdqSPwnQ3H5mxN8V@cluster.m3jtdwa.mongodb.net/?retryWrites=true&w=majority&appName=Cluster"
-MONGO_DB_NAME = "momentum_pilot_db"
+# Render 대시보드의 'Environment' 탭에서 'MONGO_DB_CONNECTION_STRING'와 'MONGO_DB_NAME'을 설정하세요.
+MONGO_DB_CONNECTION_STRING = None
+MONGO_DB_NAME = None
 
-# --- 웹앱 비밀번호 (선택 사항) ---
-# WEBAPP_PASSWORD = "your_password"
+# --- 웹앱 UI 및 마스터 데이터 관련 설정 ---
+
+# 벤치마크 티커 매핑 (국가별)
+BENCHMARK_TICKERS = {
+    "kor": "379800",  # KODEX 미국S&P500 ETF
+    "aus": "IVV.AX",  # iShares S&P 500 (AUD)
+}

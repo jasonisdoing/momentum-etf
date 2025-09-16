@@ -206,44 +206,6 @@ def get_cached_status_report(
         return None
 
 
-def check_password():
-    """
-    사용자가 올바른 비밀번호를 입력했는지 확인합니다.
-    비밀번호가 맞지 않으면 입력을 요청하고 False를 반환합니다.
-    """
-    # 비밀번호를 환경 변수 또는 settings.py에서 가져옵니다.
-    # 배포 환경에서는 환경 변수(Secrets) 사용을 권장합니다.
-    correct_password = os.environ.get("WEBAPP_PASSWORD") or getattr(
-        global_settings, "WEBAPP_PASSWORD", None
-    )
-
-    # 비밀번호가 설정되지 않은 경우, 바로 접근을 허용합니다.
-    if not correct_password:
-        return True
-
-    # st.session_state를 사용하여 로그인 상태를 유지합니다.
-    if "password_correct" not in st.session_state:
-        st.session_state["password_correct"] = False
-
-    if st.session_state["password_correct"]:
-        return True
-
-    # 비밀번호 입력 폼
-    with st.form("password_form"):
-        st.title("MomentumPilot")
-        st.header("비밀번호를 입력하세요")
-        password = st.text_input("Password", type="password", label_visibility="collapsed")
-        submitted = st.form_submit_button("로그인")
-
-        if submitted:
-            if password == correct_password:
-                st.session_state["password_correct"] = True
-                st.rerun()
-            else:
-                st.error("비밀번호가 올바르지 않습니다.")
-    return False
-
-
 def style_returns(val) -> str:
     """수익률 값(숫자)에 대해 양수는 빨간색, 음수는 파란색으로 스타일을 적용합니다."""
     color = ""
@@ -1531,9 +1493,6 @@ def main():
     """,
         unsafe_allow_html=True,
     )
-
-    if not check_password():
-        st.stop()  # 비밀번호가 맞지 않으면 앱의 나머지 부분을 렌더링하지 않습니다.
 
     # 앱 가동시 거래일 캘린더 준비 상태 확인
     try:
