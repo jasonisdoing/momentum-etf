@@ -2,14 +2,9 @@
 리포트 및 로그 출력을 위한 포맷팅 유틸리티 함수 모음.
 """
 
-import io
 import re
 from typing import List
 from unicodedata import east_asian_width, normalize
-
-import matplotlib
-import matplotlib.pyplot as plt
-import pandas as pd
 
 
 def format_kr_money(value: float) -> str:
@@ -142,65 +137,3 @@ def render_table_html(headers: List[str], rows: List[List[str]], aligns: List[st
         html += "</tr>"
     html += "</tbody></table>"
     return html
-
-
-def render_table_as_image(
-    headers: List[str], rows: List[List[str]], aligns: List[str]
-) -> io.BytesIO:
-    """Render list data as a table image using matplotlib."""
-    matplotlib.use("Agg")
-
-    try:
-        plt.rc("font", family="AppleGothic")
-        # Windows라면 "Malgun Gothic"
-    except Exception as e:
-        print(f"Warning: Could not set Korean font. Error: {e}")
-
-    df = pd.DataFrame(rows, columns=headers)
-
-    # --- Figure out table dimensions ---
-    fig, ax = plt.subplots(figsize=(10, 3))  # 조금 넉넉한 사이즈
-    ax.axis("off")
-
-    table = ax.table(
-        cellText=df.values,
-        colLabels=df.columns,
-        cellLoc="center",
-        loc="center",
-    )
-
-    # --- Style the table ---
-    table.auto_set_font_size(False)
-    table.set_fontsize(11)
-
-    # 모든 셀 높이를 고정 (예: 0.08 → 값은 상황에 따라 조절)
-    fixed_height = 0.08
-    for (i, j), cell in table.get_celld().items():
-        cell.set_height(fixed_height)
-        cell.set_edgecolor("lightgrey")
-
-        # Header 스타일
-        if i == 0:
-            cell.set_text_props(weight="bold", color="white")
-            cell.set_facecolor("#4C5A65")
-
-        # 데이터 행 배경색
-        if i > 0:
-            status = df.iloc[i - 1, 2]  # 3번째 컬럼 기준 예시
-            if status == "HOLD":
-                cell.set_facecolor("#E6F5FF")
-            elif status == "SOLD":
-                cell.set_facecolor("#F0F0F0")
-
-        # 정렬
-        if aligns and j < len(aligns):
-            cell.set_text_props(ha=aligns[j])
-
-    plt.tight_layout(pad=0.5)
-
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    buf.seek(0)
-    plt.close(fig)
-
-    return buf

@@ -1,12 +1,6 @@
 # 1. 베이스 이미지로 Python 3.11 slim 버전을 사용합니다.
 FROM python:3.11-slim
 
-# 2. 시스템 패키지 설치 (폰트 등)
-# matplotlib에서 한글 폰트를 사용하기 위해 필요합니다.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    fonts-nanum \
-    && rm -rf /var/lib/apt/lists/*
-
 # 3. 작업 디렉토리를 /app으로 설정합니다.
 WORKDIR /app
 
