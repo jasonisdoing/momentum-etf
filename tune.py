@@ -33,6 +33,22 @@ TUNING_CONFIG = {
 }
 
 
+class Tee:
+    """STDOUT과 파일에 동시에 쓰기 위한 헬퍼 클래스입니다."""
+
+    def __init__(self, *files):
+        self.files = files
+
+    def write(self, obj):
+        for f in self.files:
+            f.write(obj)
+            f.flush()
+
+    def flush(self):
+        for f in self.files:
+            f.flush()
+
+
 # --- 워커 프로세스 전역 데이터 (초기화 1회) ---
 PREFETCHED_DATA: pd.DataFrame | None = None
 
@@ -82,120 +98,137 @@ def run_single_backtest(params):
 
 def main(country_code: str):
     """파라미터 튜닝을 실행하고 최적 결과를 출력합니다."""
-    # --- 국가별 튜닝 설정 로드 ---
-    config = TUNING_CONFIG.get(country_code)
-    if not config:
-        print(f"오류: '{country_code}' 국가에 대한 튜닝 설정이 없습니다.")
-        return
+    # 로그 파일 설정
+    log_dir = "logs"
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, f"tune_{country_code}.log")
 
-    MA_RANGE = config["MA_RANGE"]
-    TEST_MONTHS_RANGE = config["TEST_MONTHS_RANGE"]
+    original_stdout = sys.stdout
+    with open(log_path, "w", encoding="utf-8") as log_file:
+        sys.stdout = Tee(original_stdout, log_file)
+        try:
+            # --- 국가별 튜닝 설정 로드 ---
+            config = TUNING_CONFIG.get(country_code)
+            if not config:
+                print(f"오류: '{country_code}' 국가에 대한 튜닝 설정이 없습니다.")
+                return
 
-    # --- DB에서 고정 파라미터 로드 ---
-    print(f"DB에서 {country_code.upper()} 포트폴리오의 고정 파라미터를 로드합니다...")
-    app_settings = get_app_settings(country_code)
-    if not app_settings:
-        print(
-            f"오류: '{country_code}' 국가의 설정을 DB에서 찾을 수 없습니다. 웹 앱의 '설정' 탭에서 값을 저장해주세요."
-        )
-        return
+            MA_RANGE = config["MA_RANGE"]
+            TEST_MONTHS_RANGE = config["TEST_MONTHS_RANGE"]
 
-    try:
-        TOPN_FIXED = [int(app_settings["portfolio_topn"])]
-        REPLACE_THRESHOLD_FIXED = [float(app_settings["replace_threshold"])]
-        MAX_REPLACEMENTS_FIXED = [int(app_settings["max_replacements_per_day"])]
-        print(
-            f"  - 고정값: TopN={TOPN_FIXED[0]}, ReplaceThr={REPLACE_THRESHOLD_FIXED[0]}, MaxRepl={MAX_REPLACEMENTS_FIXED[0]}"
-        )
-    except (KeyError, ValueError, TypeError) as e:
-        print(f"오류: DB에서 고정 파라미터를 로드하는 중 문제가 발생했습니다: {e}")
-        return
+            # --- DB에서 고정 파라미터 로드 ---
+            print(f"DB에서 {country_code.upper()} 포트폴리오의 고정 파라미터를 로드합니다...")
+            app_settings = get_app_settings(country_code)
+            if not app_settings:
+                print(
+                    f"오류: '{country_code}' 국가의 설정을 DB에서 찾을 수 없습니다. 웹 앱의 '설정' 탭에서 값을 저장해주세요."
+                )
+                return
 
-    # --- 데이터 사전 로딩 ---
-    print(f"\n튜닝을 위해 {country_code.upper()} 시장의 데이터를 미리 로딩합니다...")
-    etfs_from_file = get_etfs(country_code)
-    if not etfs_from_file:
-        print(f"오류: 'data/{country_code}/' 폴더에서 백테스트에 사용할 티커를 찾을 수 없습니다.")
-        return
+            try:
+                TOPN_FIXED = [int(app_settings["portfolio_topn"])]
+                REPLACE_THRESHOLD_FIXED = [float(app_settings["replace_threshold"])]
+                MAX_REPLACEMENTS_FIXED = [int(app_settings["max_replacements_per_day"])]
+                print(
+                    f"  - 고정값: TopN={TOPN_FIXED[0]}, ReplaceThr={REPLACE_THRESHOLD_FIXED[0]}, MaxRepl={MAX_REPLACEMENTS_FIXED[0]}"
+                )
+            except (KeyError, ValueError, TypeError) as e:
+                print(f"오류: DB에서 고정 파라미터를 로드하는 중 문제가 발생했습니다: {e}")
+                return
 
-    tickers = [s["ticker"] for s in etfs_from_file]
-    max_ma_period = int(max(MA_RANGE))
+            # --- 데이터 사전 로딩 ---
+            print(f"\n튜닝을 위해 {country_code.upper()} 시장의 데이터를 미리 로딩합니다...")
+            etfs_from_file = get_etfs(country_code)
+            if not etfs_from_file:
+                print(
+                    f"오류: 'data/{country_code}/' 폴더에서 백테스트에 사용할 티커를 찾을 수 없습니다."
+                )
+                return
 
-    common_settings = get_common_settings()
-    if not common_settings or "ATR_PERIOD_FOR_NORMALIZATION" not in common_settings:
-        print(
-            "오류: DB 공통 설정에 ATR 기간(ATR_PERIOD_FOR_NORMALIZATION)이 없습니다. 웹 앱의 '설정' 탭에서 값을 저장해주세요."
-        )
-        return
-    atr_period_norm = int(common_settings["ATR_PERIOD_FOR_NORMALIZATION"])
+            tickers = [s["ticker"] for s in etfs_from_file]
+            max_ma_period = int(max(MA_RANGE))
 
-    warmup_days = int(max(max_ma_period, atr_period_norm) * 1.5)
+            common_settings = get_common_settings()
+            if not common_settings or "ATR_PERIOD_FOR_NORMALIZATION" not in common_settings:
+                print(
+                    "오류: DB 공통 설정에 ATR 기간(ATR_PERIOD_FOR_NORMALIZATION)이 없습니다. 웹 앱의 '설정' 탭에서 값을 저장해주세요."
+                )
+                return
+            atr_period_norm = int(common_settings["ATR_PERIOD_FOR_NORMALIZATION"])
 
-    core_end_dt = pd.Timestamp.now()
-    core_start_dt = core_end_dt - pd.DateOffset(months=int(TEST_MONTHS_RANGE))
-    test_date_range = [core_start_dt.strftime("%Y-%m-%d"), core_end_dt.strftime("%Y-%m-%d")]
+            warmup_days = int(max(max_ma_period, atr_period_norm) * 1.5)
 
-    prefetched_data = fetch_ohlcv_for_tickers(
-        tickers, country_code, date_range=test_date_range, warmup_days=warmup_days
-    )
-    if not prefetched_data:
-        print("오류: 튜닝에 사용할 데이터를 로드하지 못했습니다.")
-        return
-    print(f"총 {len(prefetched_data)}개 종목의 데이터 로딩 완료.")
+            core_end_dt = pd.Timestamp.now()
+            core_start_dt = core_end_dt - pd.DateOffset(months=int(TEST_MONTHS_RANGE))
+            test_date_range = [core_start_dt.strftime("%Y-%m-%d"), core_end_dt.strftime("%Y-%m-%d")]
 
-    param_combinations = list(
-        itertools.product(
-            [country_code],
-            TOPN_FIXED,
-            MA_RANGE,
-            REPLACE_THRESHOLD_FIXED,
-            MAX_REPLACEMENTS_FIXED,
-            [TEST_MONTHS_RANGE],
-        )
-    )
+            prefetched_data = fetch_ohlcv_for_tickers(
+                tickers, country_code, date_range=test_date_range, warmup_days=warmup_days
+            )
+            if not prefetched_data:
+                print("오류: 튜닝에 사용할 데이터를 로드하지 못했습니다.")
+                return
+            print(f"총 {len(prefetched_data)}개 종목의 데이터 로딩 완료.")
 
-    print(f"Total combinations to test: {len(param_combinations)}")
+            param_combinations = list(
+                itertools.product(
+                    [country_code],
+                    TOPN_FIXED,
+                    MA_RANGE,
+                    REPLACE_THRESHOLD_FIXED,
+                    MAX_REPLACEMENTS_FIXED,
+                    [TEST_MONTHS_RANGE],
+                )
+            )
 
-    results = []
+            print(f"Total combinations to test: {len(param_combinations)}")
 
-    # 병렬 처리를 위해 ProcessPoolExecutor 사용
-    with ProcessPoolExecutor(initializer=_init_worker, initargs=(prefetched_data,)) as executor:
-        futures = [executor.submit(run_single_backtest, params) for params in param_combinations]
+            results = []
 
-        for i, future in enumerate(as_completed(futures)):
-            result = future.result()
-            if result:
-                results.append(result)
-            print(f"Progress: {i + 1}/{len(param_combinations)}")
+            # 병렬 처리를 위해 ProcessPoolExecutor 사용
+            with ProcessPoolExecutor(
+                initializer=_init_worker, initargs=(prefetched_data,)
+            ) as executor:
+                futures = [
+                    executor.submit(run_single_backtest, params) for params in param_combinations
+                ]
 
-    if not results:
-        print("No valid backtest results found.")
-        return
+                for i, future in enumerate(as_completed(futures)):
+                    result = future.result()
+                    if result:
+                        results.append(result)
+                    print(f"Progress: {i + 1}/{len(param_combinations)}")
 
-    # --- 결과 분석 ---
-    df_results = pd.DataFrame(results)
+            if not results:
+                print("No valid backtest results found.")
+                return
 
-    # CAGR 기준으로 상위 3개 결과를 찾습니다.
-    top_3_results = df_results.sort_values(by="cagr_pct", ascending=False).head(3)
+            # --- 결과 분석 ---
+            df_results = pd.DataFrame(results)
 
-    print("\n" + "=" * 50)
-    print(">>> 튜닝 결과: CAGR 상위 3개 파라미터 <<<")
-    print("=" * 50)
+            # CAGR 기준으로 상위 5개 결과를 찾습니다.
+            top_3_results = df_results.sort_values(by="cagr_pct", ascending=False).head(5)
 
-    for i, (_, row) in enumerate(top_3_results.iterrows(), 1):
-        params = row["params"]
-        _, ma_period, _, _, _ = params
+            print("\n" + "=" * 50)
+            print(">>> 튜닝 결과: CAGR 상위 5개 파라미터 <<<")
+            print("=" * 50)
 
-        print(f"\n--- {i}위 ---")
-        print(f"  - MA_PERIOD: {ma_period}")
-        print("-" * 20)
-        print(f"  - CAGR: {row['cagr_pct']:.2f}%")
-        print(f"  - MDD: {-row['mdd_pct']:.2f}%")
-        print(f"  - Calmar Ratio: {row['calmar_ratio']:.2f}")
-        print(f"  - Sharpe Ratio: {row['sharpe_ratio']:.2f}")
+            for i, (_, row) in enumerate(top_3_results.iterrows(), 1):
+                params = row["params"]
+                _, ma_period, _, _, _ = params
 
-    if not top_3_results.empty:
-        first_row_params = top_3_results.iloc[0]["params"]
-        topn, _, replace_thr, max_repl, _ = first_row_params
-        print("\n" + "=" * 50)
-        print(f"(고정 파라미터: TopN={topn}, ReplaceThr={replace_thr}, MaxRepl={max_repl})")
+                print(f"\n--- {i}위 ---")
+                print(f"  - MA_PERIOD: {ma_period}")
+                print("-" * 20)
+                print(f"  - CAGR: {row['cagr_pct']:.2f}%")
+                print(f"  - MDD: {-row['mdd_pct']:.2f}%")
+                print(f"  - Calmar Ratio: {row['calmar_ratio']:.2f}")
+                print(f"  - Sharpe Ratio: {row['sharpe_ratio']:.2f}")
+
+            if not top_3_results.empty:
+                first_row_params = top_3_results.iloc[0]["params"]
+                topn, _, replace_thr, max_repl, _ = first_row_params
+                print("\n" + "=" * 50)
+                print(f"(고정 파라미터: TopN={topn}, ReplaceThr={replace_thr}, MaxRepl={max_repl})")
+        finally:
+            sys.stdout = original_stdout

@@ -1079,17 +1079,37 @@ def generate_status_report(
 
     for tkr, name in pairs:
         d = data_by_tkr.get(tkr)
-        if not d:
+
+        # 보유 종목은 데이터가 없어도 표시해야 합니다.
+        is_held = tkr in holdings and float(holdings[tkr].get("shares", 0.0)) > 0
+        if not d and not is_held:
             continue
-        price = d["price"]
+
+        # 보유 정보는 `holdings` 딕셔너리에서 직접 가져옵니다.
+        holding_info = holdings.get(tkr, {})
+        sh = float(holding_info.get("shares", 0.0))
+        ac = float(holding_info.get("avg_cost", 0.0))
+
+        # 데이터가 없는 보유 종목을 위한 기본값 설정
+        if not d:
+            d = {
+                "price": 0.0,
+                "prev_close": 0.0,
+                "s1": float("nan"),
+                "s2": float("nan"),
+                "score": 0.0,
+                "filter": 0,
+            }
+
+        price = d.get("price", 0.0)
         score = d.get("score", 0.0)
-        sh = float(d["shares"])
-        ac = float(d.get("avg_cost") or 0.0)
 
         # 자동 계산된 보유종목의 매수일과 보유일
         buy_signal = False
         state = "HOLD" if sh > 0 else "WAIT"
         phrase = ""
+        if price == 0.0 and is_held:
+            phrase = "가격 데이터 조회 실패"
 
         # 이 루프의 모든 경로에서 사용되므로, 여기서 초기화합니다.
         buy_date = None
