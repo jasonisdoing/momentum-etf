@@ -138,6 +138,24 @@ def render_cron_input(label, key, default_value, country_code: str):
                 st.error(f"오류: {e}")
 
 
+def _format_korean_datetime(dt: datetime) -> str:
+    """날짜-시간 객체를 'YYYY년 MM월 DD일(요일) 오전/오후 HH시 MM분' 형식으로 변환합니다."""
+    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
+    weekday_str = weekday_map[dt.weekday()]
+
+    hour12 = dt.hour
+    if hour12 >= 12:
+        ampm_str = "오후"
+        if hour12 > 12:
+            hour12 -= 12
+    else:
+        ampm_str = "오전"
+    if hour12 == 0:
+        hour12 = 12
+
+    return f"{dt.strftime('%Y년 %m월 %d일')}({weekday_str}) {ampm_str} {hour12}시 {dt.minute:02d}분"
+
+
 def _is_running_in_streamlit():
     """
     Streamlit 실행 환경인지 확인합니다.
@@ -165,6 +183,47 @@ else:
         return get_benchmark_status_string(country)
 
 
+def get_next_schedule_time_str(country_code: str) -> str:
+    """지정된 국가의 다음 스케줄 실행 시간을 문자열로 반환합니다."""
+    if not croniter or not pytz:
+        return "스케줄러 라이브러리가 설치되지 않았습니다."
+
+    common_settings = get_common_settings() or {}
+    cron_key = f"SCHEDULE_CRON_{country_code.upper()}"
+
+    default_cron = {
+        "kor": "10 18 * * 1-5",
+        "aus": "10 18 * * 1-5",
+        "coin": "5 0 * * *",
+    }.get(country_code, "0 * * * *")
+
+    cron_value = common_settings.get(cron_key, default_cron)
+
+    # scheduler.py의 로직과 일관성을 맞추기 위해 타임존을 설정합니다.
+    # 참고: scheduler.py에서는 호주(aus) 스케줄에 'Asia/Seoul'을 사용하고 있습니다.
+    tz_str_map = {
+        "kor": "Asia/Seoul",
+        "aus": "Asia/Seoul",
+        "coin": "Asia/Seoul",
+    }
+    tz_str = tz_str_map.get(country_code, "Asia/Seoul")
+
+    try:
+        local_tz = pytz.timezone(tz_str)
+        now_local = datetime.now(local_tz)
+
+        if not croniter.is_valid(cron_value):
+            return "설정된 스케줄(Crontab)이 올바르지 않습니다."
+
+        cron = croniter(cron_value, now_local)
+        next_run_time = cron.get_next(datetime)
+
+        return _format_korean_datetime(next_run_time)
+
+    except Exception as e:
+        return f"다음 실행 시간 계산 중 오류 발생: {e}"
+
+
 def get_cached_status_report(
     country: str,
     date_str: str,
@@ -173,7 +232,7 @@ def get_cached_status_report(
 ):
     """
     MongoDB를 사용하여 현황 데이터를 캐시합니다.
-    force_recalculate=True일 경우, 캐시를 무시하고 다시 계산합니다.
+    force_recalculate=True일 경우에만 다시 계산합니다.
     """
     try:
         report_date = pd.to_datetime(date_str).to_pydatetime()
@@ -191,19 +250,23 @@ def get_cached_status_report(
                 report_from_db.get("headers"),
                 report_from_db.get("rows"),
             )
+        else:
+            # DB에 없으면 계산하지 않고 None을 반환합니다.
+            return None
 
-    # 2. DB에 없거나, 강제로 다시 계산해야 하는 경우
+    # 2. 강제로 다시 계산해야 하는 경우
     try:
-        new_report = generate_status_report(
-            country=country,
-            date_str=date_str,
-            prefetched_data=prefetched_data,
-            notify_start=False,
-        )
-        if new_report:
-            # 3. 계산된 결과를 DB에 저장합니다.
-            save_status_report_to_db(country, report_date, new_report)
-        return new_report
+        with st.spinner(f"'{date_str}' 현황을 다시 계산하는 중..."):
+            new_report = generate_status_report(
+                country=country,
+                date_str=date_str,
+                prefetched_data=prefetched_data,
+                notify_start=False,
+            )
+            if new_report:
+                # 3. 계산된 결과를 DB에 저장합니다.
+                save_status_report_to_db(country, report_date, new_report)
+            return new_report
     except ValueError as e:
         if str(e).startswith("PRICE_FETCH_FAILED:"):
             failed_tickers_str = str(e).split(":", 1)[1]
@@ -898,8 +961,6 @@ def render_country_tab(country_code: str):
                         next_bday = today + pd.Timedelta(days=delta)
                         target_date_str = next_bday.strftime("%Y-%m-%d")
 
-            col1, col2 = st.columns([1, 4])
-
             # 캐시된(또는 계산 완료된) 결과를 표시
             result = get_cached_status_report(
                 country=country_code, date_str=target_date_str, force_recalculate=False
@@ -939,8 +1000,15 @@ def render_country_tab(country_code: str):
                             unsafe_allow_html=True,
                         )
             else:
-                st.error(
-                    f"'{target_date_str}' 기준 ({country_code.upper()}) 현황을 생성하는 데 실패했습니다."
+                next_run_time_str = get_next_schedule_time_str(country_code)
+                st.info(
+                    f"""
+**{target_date_str}** 날짜의 현황 데이터가 아직 계산되지 않았습니다.
+
+스케줄러에 의해 자동으로 계산될 예정입니다.
+
+다음 예상 실행 시간: **{next_run_time_str}**
+"""
                 )
 
     with sub_tab_history:
