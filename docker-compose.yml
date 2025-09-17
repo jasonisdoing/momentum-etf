@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  webapp:
+    build: .
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    command: streamlit run web_app.py
+
+  scheduler:
+    build: .
+    env_file:
+      - .env
+    command: python scheduler.py
