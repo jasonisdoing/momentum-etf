@@ -1,0 +1,186 @@
+[
+    {
+        "category": "금",
+        "tickers": [
+            {
+                "ticker": "ASX:MNRS",
+                "name": "Betashares Global Gold Miners Currency Hedged ETF"
+            },
+            {
+                "ticker": "ASX:GDX",
+                "name": "VanEck Gold Miners ETF"
+            }
+        ]
+    },
+    {
+        "category": "중국(지수)",
+        "tickers": [
+            {
+                "ticker": "ASX:IZZ",
+                "name": "iShares China Large-Cap ETF (AU)"
+            },
+            {
+                "ticker": "ASX:CNEW",
+                "name": "VanEck China New Economy ETF"
+            },
+            {
+                "ticker": "ASX:CETF",
+                "name": "VanEck FTSE China A50 ETF"
+            }
+        ]
+    },
+    {
+        "category": "테크(일반)",
+        "tickers": [
+            {
+                "ticker": "ASX:ASIA",
+                "name": "BetaShares Asia Technology Tigers ETF"
+            },
+            {
+                "ticker": "ASX:FANG",
+                "name": "Global X FANG+ ETF"
+            },
+            {
+                "ticker": "ASX:HACK",
+                "name": "BetaShares Global Cybersecurity ETF"
+            }
+        ]
+    },
+    {
+        "category": "글로벌(지수)",
+        "tickers": [
+            {
+                "ticker": "ASX:IAA",
+                "name": "iShares Asia 50 ETF (AU)"
+            },
+            {
+                "ticker": "ASX:HYGG",
+                "name": "Hyperion Global Growth Companies Fund-Active ETF"
+            },
+            {
+                "ticker": "ASX:VAE",
+                "name": "Vanguard FTSE Asia ex Japan Shares Index ETF"
+            },
+            {
+                "ticker": "ASX:WEMG",
+                "name": "SPDR S&P Emerging Markets Carbon Aware ETF"
+            },
+            {
+                "ticker": "ASX:IEM",
+                "name": "iShares MSCI Emerging Markets ETF (AU)"
+            },
+            {
+                "ticker": "ASX:FEMX",
+                "name": "Fidelity Global Emerging Markets ETF"
+            },
+            {
+                "ticker": "ASX:VGE",
+                "name": "Vanguard FTSE Emerging Markets Shares ETF"
+            },
+            {
+                "ticker": "ASX:IOO",
+                "name": "iShares Global 100 ETF (AU)"
+            }
+        ]
+    },
+    {
+        "category": "힌국(지수)",
+        "tickers": [
+            {
+                "ticker": "ASX:IKO",
+                "name": "iShares MSCI South Korea ETF (AU)"
+            }
+        ]
+    },
+    {
+        "category": "일본(지수)",
+        "tickers": [
+            {
+                "ticker": "ASX:HJPN",
+                "name": "Betashares Japan Currency Hedged ETF"
+            }
+        ]
+    },
+    {
+        "category": "호주(지수)",
+        "tickers": [
+            {
+                "ticker": "ASX:ATEC",
+                "name": "BetaShares S&P/ASX Australian Technology ETF"
+            }
+        ]
+    },
+    {
+        "category": "미국(지수)",
+        "tickers": [
+            {
+                "ticker": "ASX:NDQ",
+                "name": "BetaShares NASDAQ 100 ETF"
+            }
+        ]
+    },
+    {
+        "category": "금융",
+        "tickers": [
+            {
+                "ticker": "ASX:BNKS",
+                "name": "Betashares Global Banks Currency Hedged ETF"
+            }
+        ]
+    },
+    {
+        "category": "자원/광산",
+        "tickers": [
+            {
+                "ticker": "ASX:MVR",
+                "name": "VanEck Australian Resources ETF"
+            }
+        ]
+    },
+    {
+        "category": "배터리",
+        "tickers": [
+            {
+                "ticker": "ASX:ACDC",
+                "name": "Global X Battery Tech & Lithium ETF"
+            }
+        ]
+    },
+    {
+        "category": "TBD",
+        "tickers": [
+            {
+                "ticker": "ASX:ETHI",
+                "name": "BetaShares Global Sustainability Leaders ETF"
+            },
+            {
+                "ticker": "ASX:FAIR",
+                "name": "BetaShares Australian Sustainability Leaders ETF"
+            },
+            {
+                "ticker": "ASX:IOO",
+                "name": "iShares Global 100 ETF (AU)"
+            },
+            {
+                "ticker": "ASX:IVV",
+                "name": "iShares S&P 500 ETF"
+            },
+            {
+                "ticker": "ASX:MVB",
+                "name": "VanEck Australian Banks ETF"
+            },
+            {
+                "ticker": "ASX:QFN",
+                "name": "BetaShares Australian Financials Sector ETF"
+            },
+            {
+                "ticker": "ASX:RBTZ",
+                "name": "BetaShares Global Robotics and Artificial Intelligence ETF"
+            },
+            {
+                "ticker": "ASX:VHY",
+                "name": "Vanguard Australian Shares High Yield ETF"
+            }
+        ]
+    }
+]

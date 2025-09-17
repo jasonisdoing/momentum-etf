@@ -15,20 +15,14 @@ MomentumEtf 프로젝트의 메인 실행 파일입니다.
 import argparse
 import os
 import sys
-import warnings
 from test import TEST_MONTHS_RANGE
 
 # 프로젝트 루트를 Python 경로에 추가합니다.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import warnings
+
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-# Suppress pmc discontinued break warnings globally for CLI flows
-warnings.filterwarnings(
-    "ignore",
-    message=r"\['break_start', 'break_end'\] are discontinued",
-    category=UserWarning,
-    module=r"^pandas_market_calendars\.",
-)
 
 
 def main():

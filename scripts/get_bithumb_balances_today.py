@@ -19,43 +19,13 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from scripts.snapshot_bithumb_balances import (
+    _fetch_bithumb_balance_dict as fetch_bithumb_balance_dict,
+)
 from utils.data_loader import fetch_ohlcv
 from utils.db_manager import save_daily_equity
 from utils.env import load_env_if_present
 from utils.stock_list_io import get_etfs
-
-
-def fetch_bithumb_balance_dict():
-    # Use v2 accounts; normalize and include balance + locked
-    try:
-        from utils.exchanges.bithumb_v2 import BithumbV2Client
-
-        v2 = BithumbV2Client()
-        items = v2.accounts()
-    except Exception as e:
-        print(f"[ERROR] Bithumb v2 client/accounts failed: {e}")
-        return None
-    out = {}
-
-    def _pf(x):
-        try:
-            return float(str(x).replace(",", ""))
-        except Exception:
-            return 0.0
-
-    for it in items or []:
-        cur = str(it.get("currency") or "").upper()
-        if not cur:
-            continue
-        bal = _pf(it.get("balance"))
-        locked = _pf(it.get("locked"))
-        total_field = _pf(it.get("total_balance")) or _pf(it.get("quantity"))
-        total = bal + locked if (bal or locked) else total_field
-        if cur == "KRW":
-            out["total_krw"] = total
-        else:
-            out[f"total_{cur}"] = total
-    return out
 
 
 def get_total_key(symbol: str):
@@ -93,19 +63,11 @@ def main():
         print("[ERROR] Could not fetch Bithumb balances")
         return
 
-    total_krw = 0.0
-    for key in ("total_krw", "total_KRW"):
-        if key in bal:
-            total_krw = to_float_safe(bal[key])
-            break
-    if total_krw == 0.0:
-        # Sum available + in_use if total_krw not provided
-        total_krw = to_float_safe(bal.get("available_krw")) + to_float_safe(bal.get("in_use_krw"))
-
+    total_balance = bal.get("total_balance", 0.0)
     print("Balances (as of today):\n")
     print(f"{ 'COIN':<8}{'QTY':>16}{'PRICE(KRW)':>16}{'VALUE(KRW)':>16}")
 
-    grand_total_value = total_krw
+    grand_total_value = total_balance
     for c in coins:
         qty = 0.0
         # Try lower and upper total key variants
@@ -125,7 +87,7 @@ def main():
         grand_total_value += value
         print(f"{c:<8}{qty:>16.8f}{price:>16,.0f}{value:>16,.0f}")
 
-    print(f"\n{'KRW':<8}{'':>16}{'':>16}{total_krw:>16,.0f}")
+    print(f"\n{'KRW':<8}{'':>16}{'':>16}{total_balance:>16,.0f}")
     print(f"{ 'TOTAL':<8}{'':>16}{'':>16}{grand_total_value:>16,.0f}")
 
     if args.save:

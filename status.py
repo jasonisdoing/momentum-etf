@@ -2,10 +2,11 @@ import os
 import re
 import sys
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 import pandas as pd
 
 # 프로젝트 루트를 Python 경로에 추가
@@ -13,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from pymongo import DESCENDING
 
-from logic import settings
+import settings as global_settings
 
 try:
     import pytz
@@ -43,18 +44,9 @@ from utils.report import (
 )
 from utils.stock_list_io import get_etfs
 
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-# Suppress pmc discontinued break warnings globally for status runs
-warnings.filterwarnings(
-    "ignore",
-    message=r"\[\'break_start\', \'break_end\'\] are discontinued",
-    category=UserWarning,
-    module=r"^pandas_market_calendars.",
-)
-
 try:
     from pykrx import stock as _stock
-except Exception:
+except ImportError:
     _stock = None
 
 try:
@@ -107,16 +99,16 @@ DECISION_CONFIG = {
         "is_recommendation": True,
         "show_return": True,
     },
-    # 보유 및 대기 (알림 없음)
-    "WAIT": {
-        "display_name": "<⏳ 대기>",
+    # 거래 완료 (알림 없음)
+    "SOLD": {
+        "display_name": "<✅ 매도 완료>",
         "order": 40,
         "is_recommendation": False,
         "show_return": False,
     },
-    # 거래 완료 (알림 없음)
-    "SOLD": {
-        "display_name": "<✅ 매도 완료>",
+    # 보유 및 대기 (알림 없음)
+    "WAIT": {
+        "display_name": "<⏳ 대기>",
         "order": 50,
         "is_recommendation": False,
         "show_return": False,
@@ -125,6 +117,20 @@ DECISION_CONFIG = {
 
 # 코인 보유 수량에서 0으로 간주할 임계값 (거래소의 dust 처리)
 COIN_ZERO_THRESHOLD = 1e-9
+
+
+@dataclass
+class StatusReportData:
+    portfolio_data: Dict
+    data_by_tkr: Dict
+    total_holdings_value: float
+    datestamps: List
+    pairs: List[Tuple[str, str]]
+    base_date: pd.Timestamp
+    regime_info: Optional[Dict]
+    etf_meta: Dict
+    failed_tickers_info: Dict
+    description: str
 
 
 def get_market_regime_status_string() -> Optional[str]:
@@ -279,7 +285,9 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
                         if df_y.index.tz is not None:
                             df_y.index = df_y.index.tz_localize(None)
                         df_benchmark = df_y.rename(columns={"Adj Close": "Close"})
-                except Exception:
+                except (
+                    Exception
+                ):  # TODO: Refine exception handling (e.g., requests.exceptions.RequestException, ValueError)
                     pass
             # 2) COIN fallback via yfinance (e.g., BTC -> BTC-USD)
             if (
@@ -368,9 +376,9 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
     else:
         # 기존 로직 (한국/호주)
         try:
-            benchmark_ticker = settings.BENCHMARK_TICKERS.get(country)
+            benchmark_ticker = global_settings.BENCHMARK_TICKERS.get(country)
         except AttributeError:
-            print("오류: BENCHMARK_TICKERS 설정이 logic/settings.py 에 정의되어야 합니다.")
+            print("오류: BENCHMARK_TICKERS 설정이 settings.py 에 정의되어야 합니다.")
             return None
         if not benchmark_ticker:
             return None
@@ -413,7 +421,7 @@ def is_market_open(country: str = "kor") -> bool:
         # 개장 시간 확인
         market_open_time, market_close_time = market_hours[country]
         return market_open_time <= now_local.time() <= market_close_time
-    except Exception:
+    except Exception:  # TODO: Refine exception handling
         return False  # 오류 발생 시 안전하게 False 반환
 
 
@@ -435,11 +443,8 @@ def calculate_consecutive_holding_info(
 
     # 코인은 트레이드가 시각 포함으로 기록되므로, 동일 달력일의 모든 거래를 포함하도록
     # as_of_date 상한을 해당일 23:59:59.999999로 확장합니다.
-    include_until = (
-        as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-        if country == "coin"
-        else as_of_date
-    )
+    # 모든 국가에 대해 동일하게 적용하여, 특정 날짜의 모든 거래를 포함하도록 합니다.
+    include_until = as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
     for tkr in held_tickers:
         try:
@@ -506,13 +511,14 @@ def _format_return_for_header(label: str, pct: float, amount: float, formatter: 
 def _load_and_prepare_ticker_data(args):
     """
     단일 티커에 대한 데이터 조회 및 지표 계산을 수행하는 워커 함수입니다.
-    병렬 처리를 위해 사용됩니다.
     """
     # Unpack arguments
     tkr, country, required_months, base_date, ma_period, atr_period_norm, df_full = args
     from utils.indicators import calculate_atr
 
     if df_full is None:
+        from utils.data_loader import fetch_ohlcv
+
         # df_full이 제공되지 않으면, 네트워크를 통해 데이터를 새로 조회합니다.
         df = fetch_ohlcv(
             tkr, country=country, months_range=[required_months, 0], base_date=base_date
@@ -521,8 +527,11 @@ def _load_and_prepare_ticker_data(args):
         # df_full이 제공되면, base_date까지의 데이터만 잘라서 사용합니다.
         df = df_full[df_full.index <= base_date].copy()
 
-    if df is None or len(df) < max(ma_period, atr_period_norm):
-        return tkr, None
+    if df is None:
+        return tkr, {"error": "FETCH_FAILED"}
+
+    if len(df) < max(ma_period, atr_period_norm):
+        return tkr, {"error": "INSUFFICIENT_DATA"}
 
     # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
     # 컬럼을 단순화하고 중복을 제거합니다.
@@ -557,7 +566,7 @@ def _load_and_prepare_ticker_data(args):
 
 def _fetch_and_prepare_data(
     country: str, date_str: Optional[str], prefetched_data: Optional[Dict[str, pd.DataFrame]] = None
-):
+) -> Optional[StatusReportData]:
     """
     주어진 종목 목록에 대해 OHLCV 데이터를 조회하고,
     신호 계산에 필요한 보조지표(이동평균, ATR 등)를 계산합니다.
@@ -568,13 +577,13 @@ def _fetch_and_prepare_data(
         print(
             f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
         )
-        return None, None, None, None, None, None, None, None
+        return None
 
     try:
         ma_period = int(app_settings["ma_period"])
     except (ValueError, TypeError):
         print(f"오류: '{country}' 국가의 MA 기간 설정이 올바르지 않습니다.")
-        return None, None, None, None, None, None, None, None
+        return None
 
     # 현황 조회 시, 날짜가 지정되지 않으면 항상 오늘 날짜를 기준으로 조회합니다.
     if date_str is None:
@@ -585,7 +594,7 @@ def _fetch_and_prepare_data(
         print(
             f"오류: '{country}' 국가의 '{date_str}' 날짜에 대한 포트폴리오 스냅샷을 DB에서 찾을 수 없습니다. 거래 내역이 없거나 DB 연결에 문제가 있을 수 있습니다."
         )
-        return None, None, None, None, None, None, None, None
+        return None
     try:
         # DB에서 가져온 date는 스냅샷의 기준일이 됩니다.
         base_date = pd.to_datetime(portfolio_data["date"]).normalize()
@@ -672,17 +681,17 @@ def _fetch_and_prepare_data(
     common = get_common_settings()
     if not common:
         print("오류: 공통 설정이 DB에 없습니다. '설정' 탭에서 값을 저장해주세요.")
-        return None, None, None, None, None, None, None, None
+        return None
     try:
         atr_period_norm = int(common["ATR_PERIOD_FOR_NORMALIZATION"])
         regime_filter_enabled = bool(common["MARKET_REGIME_FILTER_ENABLED"])
         regime_ma_period = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
     except KeyError as e:
         print(f"오류: 공통 설정 '{e.args[0]}' 값이 없습니다.")
-        return None, None, None, None, None, None, None, None
+        return None
     except (ValueError, TypeError):
         print("오류: 공통 설정 값 형식이 올바르지 않습니다.")
-        return None, None, None, None, None, None, None, None
+        return None
 
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
     # 코인은 거래소 잔고 기반 표시이므로, 종목 마스터가 비어 있어도 보유코인을 기준으로 진행합니다.
@@ -690,7 +699,7 @@ def _fetch_and_prepare_data(
         print(
             f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 현황을 계산할 종목을 찾을 수 없습니다."
         )
-        return None, None, None, None, None, None, None, None
+        return None
 
     max_ma_period = max(ma_period, regime_ma_period if regime_filter_enabled else 0)
     required_days = max(max_ma_period, atr_period_norm) + 5  # 버퍼 추가
@@ -701,7 +710,7 @@ def _fetch_and_prepare_data(
     if regime_filter_enabled:
         if "MARKET_REGIME_FILTER_TICKER" not in common:
             print("오류: 공통 설정에 MARKET_REGIME_FILTER_TICKER 값이 없습니다.")
-            return None, None, None, None, None, None, None, None
+            return None
         regime_ticker = str(common["MARKET_REGIME_FILTER_TICKER"])
 
         df_regime = fetch_ohlcv(
@@ -728,6 +737,7 @@ def _fetch_and_prepare_data(
     data_by_tkr = {}
     total_holdings_value = 0.0
     datestamps = []
+    failed_tickers_info = {}
 
     # 코인도 이제 trades 기반 포트폴리오를 사용합니다. (빗썸 스냅샷→trades 동기화 별도 스크립트)
     if country == "coin":
@@ -735,6 +745,7 @@ def _fetch_and_prepare_data(
         # 종목 마스터에 없는 종목은 처리에서 제외합니다. (단, 오늘 매도된 종목은 포함)
         allowed_tickers = {etf["ticker"] for etf in etfs_from_file}
         pairs = [(t, n) for t, n in pairs if t in allowed_tickers or t in sold_tickers_today]
+
     # --- 병렬 데이터 로딩 및 지표 계산 ---
     tasks = []
     for tkr, _ in pairs:
@@ -743,59 +754,86 @@ def _fetch_and_prepare_data(
             (tkr, country, required_months, base_date, ma_period, atr_period_norm, df_full)
         )
 
-    with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(_load_and_prepare_ticker_data, task) for task in tasks]
+    # 병렬 처리로 데이터 로딩 및 기본 지표 계산
+    processed_results = {}
+    desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
+    print(f"-> {desc} 시작... (총 {len(tasks)}개 종목)")
 
-        desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
-        for future in as_completed(futures):
-            tkr, result = future.result()
-            if not result:
-                continue
+    # 직렬 처리로 데이터 로딩 및 기본 지표 계산
+    for i, task in enumerate(tasks):
+        tkr = task[0]
+        try:
+            _, result = _load_and_prepare_ticker_data(task)
+            processed_results[tkr] = result
+        except Exception as exc:
+            print(f"\n-> 경고: {tkr} 데이터 처리 중 오류 발생: {exc}")
+            processed_results[tkr] = {"error": "PROCESS_ERROR"}
 
-            realtime_price = _fetch_realtime_price(tkr) if market_is_open else None
-            c0 = float(realtime_price) if realtime_price else float(result["close"].iloc[-1])
-            if pd.isna(c0):
-                continue
+        # 진행 상황 표시
+        print(f"\r   {desc} 진행: {i + 1}/{len(tasks)}", end="", flush=True)
 
-            prev_close = (
-                float(result["close"].iloc[-2])
-                if len(result["close"]) >= 2 and pd.notna(result["close"].iloc[-2])
-                else 0.0
-            )
-            m = result["ma"].iloc[-1]
-            a = result["atr"].iloc[-1]
+    print("\n-> 데이터 처리 완료.")
 
-            ma_score = (c0 - m) / a if pd.notna(m) and pd.notna(a) and a > 0 else 0.0
-            buy_signal_days_today = (
-                result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0
-            )
+    # --- 최종 데이터 조합 및 계산 ---
+    # --- 최종 데이터 조합 및 계산 ---
+    # 이제 `processed_results`를 사용하여 순차적으로 나머지 계산을 수행합니다.
+    for tkr, _ in pairs:
+        result = processed_results.get(tkr)
+        if not result:
+            failed_tickers_info[tkr] = "FETCH_FAILED"
+            continue
 
-            sh = float((holdings.get(tkr) or {}).get("shares") or 0.0)
-            ac = float((holdings.get(tkr) or {}).get("avg_cost") or 0.0)
-            total_holdings_value += sh * c0
-            datestamps.append(result["df"].index[-1])
+        if "error" in result:
+            failed_tickers_info[tkr] = result["error"]
+            continue
 
-            data_by_tkr[tkr] = {
-                "price": c0,
-                "prev_close": prev_close,
-                "s1": m,
-                "s2": result["ma_period"],
-                "score": ma_score,
-                "filter": buy_signal_days_today,
-                "shares": sh,
-                "avg_cost": ac,
-                "df": result["df"],
-            }
+        realtime_price = _fetch_realtime_price(tkr) if market_is_open else None
+        c0 = float(realtime_price) if realtime_price else float(result["close"].iloc[-1])
+        if pd.isna(c0) or c0 <= 0:
+            failed_tickers_info[tkr] = "FETCH_FAILED"
+            continue
 
-    return (
-        portfolio_data,
-        data_by_tkr,
-        total_holdings_value,
-        datestamps,
-        pairs,
-        base_date,
-        regime_info,
-        etf_meta,
+        prev_close = (
+            float(result["close"].iloc[-2])
+            if len(result["close"]) >= 2 and pd.notna(result["close"].iloc[-2])
+            else 0.0
+        )
+        m = result["ma"].iloc[-1]
+        a = result["atr"].iloc[-1]
+
+        ma_score = (c0 - m) / a if pd.notna(m) and pd.notna(a) and a > 0 else 0.0
+        buy_signal_days_today = (
+            result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0
+        )
+
+        sh = float((holdings.get(tkr) or {}).get("shares") or 0.0)
+        ac = float((holdings.get(tkr) or {}).get("avg_cost") or 0.0)
+        total_holdings_value += sh * c0
+        datestamps.append(result["df"].index[-1])
+
+        data_by_tkr[tkr] = {
+            "price": c0,
+            "prev_close": prev_close,
+            "s1": m,
+            "s2": result["ma_period"],
+            "score": ma_score,
+            "filter": buy_signal_days_today,
+            "shares": sh,
+            "avg_cost": ac,
+            "df": result["df"],
+        }
+
+    return StatusReportData(
+        portfolio_data=portfolio_data,
+        data_by_tkr=data_by_tkr,
+        total_holdings_value=total_holdings_value,
+        datestamps=datestamps,
+        pairs=pairs,
+        base_date=base_date,
+        regime_info=regime_info,
+        etf_meta=etf_meta,
+        failed_tickers_info=failed_tickers_info,
+        description=desc,
     )
 
 
@@ -959,28 +997,181 @@ def _build_header_line(
     return header_line, label_date, day_label
 
 
+def _notify_calculation_start(
+    country: str, num_tickers: int, description: str, warnings: List[str]
+):
+    """계산 시작과 경고에 대한 슬랙 알림을 보냅니다."""
+    try:
+        from utils.db_manager import get_app_settings
+        from utils.notify import send_slack_message
+    except Exception:
+        return False
+
+    app_settings = get_app_settings(country) or {}
+    if not app_settings.get("SLACK_ENABLED"):
+        return False
+    webhook_url = app_settings.get("SLACK_WEBHOOK_URL")
+    if not webhook_url:
+        return False
+
+    country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
+
+    message_lines = [
+        f"[{country_kor}] 계산",
+        f"- 대상 종목: {num_tickers}개",
+        f"- 계산 내용: {description}",
+    ]
+
+    if warnings:
+        max_warnings = 10
+        message_lines.append("- 경고:")
+        for i, warning in enumerate(warnings):
+            if i < max_warnings:
+                message_lines.append(f"  ⚠️ {warning}")
+        if len(warnings) > max_warnings:
+            message_lines.append(f"  ... 외 {len(warnings) - max_warnings}건의 경고가 더 있습니다.")
+
+    message = "\n".join(message_lines)
+
+    return send_slack_message(message, webhook_url=webhook_url)
+
+
+def _notify_equity_update(country: str, old_equity: float, new_equity: float):
+    """평가금액 자동 보정 시 슬랙으로 알림을 보냅니다."""
+    try:
+        from utils.db_manager import get_app_settings
+        from utils.notify import send_slack_message
+        from utils.report import format_aud_money, format_kr_money
+    except Exception:
+        return False
+
+    app_settings = get_app_settings(country) or {}
+    if not app_settings.get("SLACK_ENABLED"):
+        return False
+    webhook_url = app_settings.get("SLACK_WEBHOOK_URL")
+    if not webhook_url:
+        return False
+
+    country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
+    money_formatter = format_aud_money if country == "aus" else format_kr_money
+
+    diff = new_equity - old_equity
+    diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"
+
+    if old_equity > 0:
+        # 평가금액 변동(증가/감소)에 따라 다른 레이블을 사용합니다.
+        change_label = "증가" if diff >= 0 else "감소"
+        message = f"[{country_kor}] 평가금액 {change_label}: {money_formatter(old_equity)} => {money_formatter(new_equity)} ({diff_str})"
+    else:
+        message = f"[{country_kor}] 신규 평가금액 저장: {money_formatter(new_equity)}"
+
+    return send_slack_message(message, webhook_url=webhook_url)
+
+
 def generate_status_report(
     country: str = "kor",
     date_str: Optional[str] = None,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    notify_start: bool = False,
 ) -> Optional[Tuple[str, List[str], List[List[str]]]]:
     """지정된 전략에 대한 오늘의 현황 데이터를 생성하여 반환합니다."""
     # 1. 데이터 로드 및 지표 계산
     result = _fetch_and_prepare_data(country, date_str, prefetched_data)
-    if not result or not result[0]:  # type: ignore
+    if result is None:
         return None
 
-    (
-        portfolio_data,
-        data_by_tkr,
-        total_holdings_value,
-        datestamps,
-        pairs,
-        base_date,
-        regime_info,
-        etf_meta,
-    ) = result
+    portfolio_data = result.portfolio_data
+    data_by_tkr = result.data_by_tkr
+    total_holdings_value = result.total_holdings_value
+    datestamps = result.datestamps
+    pairs = result.pairs
+    base_date = result.base_date
+    regime_info = result.regime_info
+    etf_meta = result.etf_meta
+    failed_tickers_info = result.failed_tickers_info
+    desc = result.description
+
+    # --- 데이터 유효성 검증 및 경고 생성 ---
+    hard_failure_reasons = ["FETCH_FAILED", "PROCESS_ERROR"]
+    fetch_failed_tickers = [
+        tkr for tkr, reason in failed_tickers_info.items() if reason in hard_failure_reasons
+    ]
+    insufficient_data_tickers = [
+        tkr for tkr, reason in failed_tickers_info.items() if reason == "INSUFFICIENT_DATA"
+    ]
+
+    # 데이터 조회/처리에 실패한 종목이 있으면, 처리를 중단하고 예외를 발생시킵니다.
+    if fetch_failed_tickers:
+        # 이 예외는 web_app.py에서 처리하여 사용자에게 메시지를 표시합니다.
+        raise ValueError(f"PRICE_FETCH_FAILED:{','.join(sorted(list(set(fetch_failed_tickers))))}")
+
+    # --- 현황 계산 시작 알림 ---
+    if notify_start:
+        warning_messages_for_slack = []
+        if insufficient_data_tickers:
+            name_map = {tkr: name for tkr, name in pairs}
+            for tkr in sorted(insufficient_data_tickers):
+                name = name_map.get(tkr, tkr)
+                warning_messages_for_slack.append(
+                    f"{name}({tkr}): 데이터 기간이 부족하여 계산에서 제외됩니다."
+                )
+        _notify_calculation_start(country, len(pairs), desc, warning_messages_for_slack)
+
     current_equity = float(portfolio_data.get("total_equity", 0.0))
+    equity_date = portfolio_data.get("equity_date")
+
+    # 자동 보정 로직을 위한 평가금액 결정:
+    # 평가금액의 날짜가 기준일(base_date)과 다르면, 기준일의 평가금액은 0으로 간주합니다.
+    # 이렇게 하면, 오늘 날짜의 평가금액이 없을 때 과거 값을 가져와도 '신규'로 처리됩니다.
+    equity_for_autocorrect = current_equity
+    is_stale_equity = (
+        equity_date and pd.to_datetime(equity_date).normalize() != base_date.normalize()
+    )
+    if is_stale_equity:
+        equity_for_autocorrect = 0.0
+
+    # --- 자동 평가금액 보정 로직 ---
+    # 보유 종목의 현재가 합(total_holdings_value)이 기록된 평가금액(equity_for_autocorrect)보다 크거나,
+    # 평가금액이 0일 경우, 평가금액을 보유 종목 가치 합으로 자동 보정합니다.
+    # 이는 현금이 음수로 표시되는 것을 방지하고, 평가금액 미입력 시 초기값을 설정해줍니다.
+    # 호주의 경우, 해외 주식 가치도 포함하여 최종 평가금액을 계산합니다.
+    new_equity_candidate = total_holdings_value
+    if country == "aus" and portfolio_data.get("international_shares"):
+        new_equity_candidate += portfolio_data["international_shares"].get("value", 0.0)
+
+    # new_equity_candidate가 0보다 크고, (기존 평가금액보다 크거나, 기존 평가금액이 0일 때)
+    if new_equity_candidate > 0 and (
+        new_equity_candidate > equity_for_autocorrect or equity_for_autocorrect == 0
+    ):
+        old_equity = equity_for_autocorrect
+        new_equity = new_equity_candidate
+
+        # 보정된 평가금액이 유의미한 차이를 보일 때만 업데이트 및 알림 (부동소수점 오차 방지)
+        if abs(new_equity - old_equity) > 1e-9:
+            # 1. DB에 새로운 평가금액 저장
+            from utils.db_manager import save_daily_equity
+
+            # 호주: international_shares 정보도 함께 저장해야 함
+            is_data_to_save = None
+            if country == "aus":
+                is_data_to_save = portfolio_data.get("international_shares")
+
+            save_daily_equity(
+                country,
+                base_date.to_pydatetime(),
+                new_equity,
+                is_data_to_save,
+                updated_by="스케줄러",
+            )
+
+            # 2. 슬랙 알림 전송
+            _notify_equity_update(country, old_equity, new_equity)
+
+            # 3. 현재 실행 컨텍스트에 보정된 값 반영
+            current_equity = new_equity
+            portfolio_data["total_equity"] = new_equity
+            print(f"-> 평가금액 자동 보정: {old_equity:,.0f}원 -> {new_equity:,.0f}원")
+
     holdings = {
         item["ticker"]: {
             "name": item.get("name", ""),
@@ -1003,6 +1194,20 @@ def generate_status_report(
     header_line, label_date, day_label = _build_header_line(
         country, portfolio_data, current_equity, total_holdings_value, data_by_tkr, base_date
     )
+
+    # 데이터 기간이 부족한 종목에 대한 경고 메시지를 헤더에 추가합니다.
+    if insufficient_data_tickers:
+        name_map = {tkr: name for tkr, name in pairs}
+        warning_messages = []
+        for tkr in sorted(insufficient_data_tickers):
+            name = name_map.get(tkr, tkr)
+            warning_messages.append(f"{name}({tkr}): 데이터 기간이 부족하여 계산에서 제외됩니다.")
+
+        if warning_messages:
+            full_warning_str = "<br>".join(
+                [f"<span style='color:orange;'>⚠️ {msg}</span>" for msg in warning_messages]
+            )
+            header_line += f"<br>{full_warning_str}"
 
     # 3. 보유 기간 및 고점 대비 하락률 계산
     held_tickers = [tkr for tkr, v in holdings.items() if float((v or {}).get("shares") or 0.0) > 0]
@@ -1525,6 +1730,20 @@ def generate_status_report(
                 decision["row"][2] = "SOLD"
                 decision["row"][-1] = "🔚 매도 완료"
 
+    # --- WAIT 종목 수 제한 ---
+    # 웹 UI와 슬랙 알림에 표시될 대기(WAIT) 종목의 수를 최대 10개로 제한합니다.
+    # 점수가 높은 순서대로 상위 10개만 남깁니다.
+    wait_decisions = [d for d in decisions if d["state"] == "WAIT"]
+    other_decisions = [d for d in decisions if d["state"] != "WAIT"]
+
+    MAX_WAIT_ITEMS = 10
+    if len(wait_decisions) > MAX_WAIT_ITEMS:
+        # 점수(score)가 높은 순으로 정렬합니다. 점수가 없는 경우 0으로 처리합니다.
+        wait_decisions_sorted = sorted(
+            wait_decisions, key=lambda x: x.get("score", 0.0) or 0.0, reverse=True
+        )
+        decisions = other_decisions + wait_decisions_sorted[:MAX_WAIT_ITEMS]
+
     # 7. 최종 정렬
     def sort_key(decision_dict):
         state = decision_dict["state"]
@@ -1610,7 +1829,7 @@ def generate_status_report(
 
 def main(country: str = "kor", date_str: Optional[str] = None):
     """CLI에서 오늘의 현황을 실행하고 결과를 출력/저장합니다."""
-    result = generate_status_report(country, date_str)
+    result = generate_status_report(country, date_str, notify_start=True)
 
     if result:
         header_line, headers, rows_sorted = result
@@ -1721,7 +1940,8 @@ def main(country: str = "kor", date_str: Optional[str] = None):
         table_lines = render_table_eaw(headers, display_rows, aligns=aligns)
 
         print("\n" + header_line)
-        print("\n".join(table_lines))
+        # 스케줄러 실행 시 콘솔에 상세 테이블을 출력하지 않도록 주석 처리합니다.
+        # print("\n".join(table_lines))
 
 
 def _is_trading_day(country: str) -> bool:
@@ -1768,6 +1988,9 @@ def _maybe_notify_detailed_status(
         return False
 
     try:
+        # 상세 알림에서는 시작 알림에서 보낸 경고(데이터 부족 등)를 제외합니다.
+        # header_line은 HTML <br> 태그로 경고와 구분됩니다.
+        header_line_clean = header_line.split("<br>")[0]
 
         def _strip_html(s: str) -> str:
             try:
@@ -1777,7 +2000,7 @@ def _maybe_notify_detailed_status(
 
         # --- Parse header_line for caption ---
         # Date
-        first_seg = header_line.split("|")[0].strip()
+        first_seg = header_line_clean.split("|")[0].strip()
         date_part = first_seg.split(":", 1)[1].strip()
         if "[" in date_part:
             date_part = date_part.split("[")[0].strip()
@@ -1785,29 +2008,29 @@ def _maybe_notify_detailed_status(
 
         # Holdings count
         hold_seg = next(
-            (seg for seg in header_line.split("|") if "보유종목:" in seg), "보유종목: -"
+            (seg for seg in header_line_clean.split("|") if "보유종목:" in seg), "보유종목: -"
         )
         hold_text = _strip_html(hold_seg.split(":", 1)[1].strip())
 
         # Holdings value
         hold_val_seg = next(
-            (seg for seg in header_line.split("|") if "보유금액:" in seg), "보유금액: 0"
+            (seg for seg in header_line_clean.split("|") if "보유금액:" in seg), "보유금액: 0"
         )
         hold_val_text = _strip_html(hold_val_seg.split(":", 1)[1].strip())
 
         # Cash value
-        cash_seg = next((seg for seg in header_line.split("|") if "현금:" in seg), "현금: 0")
+        cash_seg = next((seg for seg in header_line_clean.split("|") if "현금:" in seg), "현금: 0")
         cash_text = _strip_html(cash_seg.split(":", 1)[1].strip())
 
         # Cumulative return
         cum_seg = next(
-            (seg for seg in header_line.split("|") if "누적:" in seg), "누적: +0.00%(0원)"
+            (seg for seg in header_line_clean.split("|") if "누적:" in seg), "누적: +0.00%(0원)"
         )
         cum_text = _strip_html(cum_seg.split(":", 1)[1].strip())
 
         # Total equity value
         equity_seg = next(
-            (seg for seg in header_line.split("|") if "평가금액:" in seg), "평가금액: 0"
+            (seg for seg in header_line_clean.split("|") if "평가금액:" in seg), "평가금액: 0"
         )
         equity_text = _strip_html(equity_seg.split(":", 1)[1].strip())
 
@@ -1830,6 +2053,10 @@ def _maybe_notify_detailed_status(
         except Exception:
             pass
 
+        # 호주 'IS' 종목의 이름을 수동으로 지정합니다.
+        if country == "aus":
+            name_map["IS"] = "International Shares"
+
         # 1. 데이터를 사전 처리하여 표시할 부분을 만들고 최대 너비를 찾습니다.
         display_parts_list = []
         max_len_name = 0
@@ -1841,7 +2068,12 @@ def _maybe_notify_detailed_status(
                 num_part = f"[{row[0]}]"
                 tkr = str(row[idx_ticker])
                 name = name_map.get(tkr.upper(), "")
-                name_part = f"{name}({tkr})" if name else tkr
+
+                # 'IS' 종목은 티커 없이 이름만 표시합니다.
+                if country == "aus" and tkr.upper() == "IS":
+                    name_part = name
+                else:
+                    name_part = f"{name}({tkr})" if name else tkr
                 full_name_part = f"{num_part} {name_part}"
 
                 stt = (
@@ -1923,10 +2155,11 @@ def _maybe_notify_detailed_status(
         # --- Build caption for message ---
         country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
 
-        line1 = f"[{country_kor}] {date_part} 평가금액: {equity_text}, 누적수익 {cum_text}"
-        line2 = f"현금: {cash_text}, 보유금액: {hold_val_text}"
+        title_line = f"[{country_kor}] 상세내역"
+        equity_line = f"평가금액: {equity_text}, 누적수익 {cum_text}"
+        cash_line = f"현금: {cash_text}, 보유금액: {hold_val_text}"
         hold_line = f"보유종목: {hold_text}"
-        caption = "\n".join([line1, line2, hold_line])
+        caption = "\n".join([title_line, equity_line, cash_line, hold_line])
 
         # --- Send notifications ---
         app_settings = get_app_settings(country) or {}
