@@ -485,9 +485,7 @@ def render_notification_settings_ui(country_code: str):
     """지정된 국가에 대한 알림 설정 UI를 렌더링합니다."""
     st.header(f"{COUNTRY_CODE_MAP.get(country_code, country_code.upper())} 국가 알림 설정")
 
-    # 국가별 슬랙 설정은 app_settings에서, 크론 설정은 common_settings에서 로드
     app_settings = get_app_settings(country_code) or {}
-    common_settings = get_common_settings() or {}
 
     with st.form(f"notification_settings_form_{country_code}"):
         st.subheader("슬랙 설정")
@@ -507,17 +505,6 @@ def render_notification_settings_ui(country_code: str):
             placeholder="예: https://hooks.slack.com/services/",
             help="이 국가의 알림을 받을 Slack 채널의 Incoming Webhook URL",
         )
-
-        st.subheader("전송 주기 (Crontab 형식)")
-        cron_key = f"SCHEDULE_CRON_{country_code.upper()}"
-        default_cron = {
-            "kor": "*/10 9-15 * * 1-5",
-            "aus": "*/10 10-16 * * 1-5",
-            "coin": "*/5 * * * *",
-        }.get(country_code, "0 * * * *")
-        cron_value = common_settings.get(cron_key, default_cron)
-
-        render_cron_input("알림 전송 주기", f"cron_input_{country_code}", cron_value, country_code)
 
         st.caption("테스트는 스케줄과 무관하게 1회 계산 후 알림을 전송합니다.")
 
@@ -542,20 +529,9 @@ def render_notification_settings_ui(country_code: str):
             slack_settings_to_save["SLACK_ENABLED"] = False
             slack_settings_to_save["SLACK_WEBHOOK_URL"] = ""
 
-        # 크론 설정 저장 (common_settings)
-        cron_settings_to_save = {}
-        if croniter:
-            new_cron_val = st.session_state[f"cron_input_{country_code}"]
-            if not croniter.is_valid(new_cron_val):
-                st.error("Crontab 형식이 올바르지 않습니다.")
-                error = True
-            else:
-                cron_settings_to_save[cron_key] = new_cron_val.strip()
-
         if not error:
             save_app_settings(country_code, slack_settings_to_save)
-            save_common_settings(cron_settings_to_save)
-            st.success(f"{country_code.upper()} 국가의 알림 설정을 저장했습니다.")
+            st.success(f"{country_code.upper()} 국가의 슬랙 설정을 저장했습니다.")
             st.rerun()
 
     if test_send:
@@ -581,6 +557,70 @@ def render_notification_settings_ui(country_code: str):
                 st.warning(f"전송 시도는 했지만 응답이 없었습니다. 상세: {err or '설정 확인'}")
 
 
+def render_scheduler_tab():
+    """스케줄러 설정을 위한 UI를 렌더링합니다."""
+    st.header("스케줄러 설정 (모든 국가)")
+    st.info("각 국가별 현황 계산 작업이 실행될 주기를 Crontab 형식으로 설정합니다.")
+
+    common_settings = get_common_settings() or {}
+
+    with st.form("scheduler_settings_form"):
+        st.subheader("한국 (KOR)")
+        kor_cron_key = "SCHEDULE_CRON_KOR"
+        kor_default_cron = "10 18 * * 1-5"
+        kor_cron_value = common_settings.get(kor_cron_key, kor_default_cron)
+        render_cron_input("실행 주기", "cron_input_kor_scheduler", kor_cron_value, "kor")
+
+        st.subheader("호주 (AUS)")
+        aus_cron_key = "SCHEDULE_CRON_AUS"
+        aus_default_cron = "10 18 * * 1-5"
+        aus_cron_value = common_settings.get(aus_cron_key, aus_default_cron)
+        render_cron_input("실행 주기", "cron_input_aus_scheduler", aus_cron_value, "aus")
+
+        st.subheader("가상화폐 (COIN)")
+        coin_cron_key = "SCHEDULE_CRON_COIN"
+        coin_default_cron = "5 0 * * *"
+        coin_cron_value = common_settings.get(coin_cron_key, coin_default_cron)
+        render_cron_input("실행 주기", "cron_input_coin_scheduler", coin_cron_value, "coin")
+
+        submitted = st.form_submit_button("스케줄러 설정 저장")
+
+        if submitted:
+            error = False
+            cron_settings_to_save = {}
+
+            # KOR
+            new_kor_cron = st.session_state["cron_input_kor_scheduler"]
+            if croniter and not croniter.is_valid(new_kor_cron):
+                st.error("한국(KOR)의 Crontab 형식이 올바르지 않습니다.")
+                error = True
+            else:
+                cron_settings_to_save[kor_cron_key] = new_kor_cron.strip()
+
+            # AUS
+            new_aus_cron = st.session_state["cron_input_aus_scheduler"]
+            if croniter and not croniter.is_valid(new_aus_cron):
+                st.error("호주(AUS)의 Crontab 형식이 올바르지 않습니다.")
+                error = True
+            else:
+                cron_settings_to_save[aus_cron_key] = new_aus_cron.strip()
+
+            # COIN
+            new_coin_cron = st.session_state["cron_input_coin_scheduler"]
+            if croniter and not croniter.is_valid(new_coin_cron):
+                st.error("가상화폐(COIN)의 Crontab 형식이 올바르지 않습니다.")
+                error = True
+            else:
+                cron_settings_to_save[coin_cron_key] = new_coin_cron.strip()
+
+            if not error:
+                if save_common_settings(cron_settings_to_save):
+                    st.success("스케줄러 설정을 성공적으로 저장했습니다.")
+                    st.rerun()
+                else:
+                    st.error("스케줄러 설정 저장에 실패했습니다.")
+
+
 def _display_success_toast(country_code: str):
     """
     세션 상태에서 성공 메시지를 확인하고 토스트로 표시합니다.
@@ -601,10 +641,9 @@ def _display_success_toast(country_code: str):
 
 def render_country_tab(country_code: str):
     """지정된 국가에 대한 탭의 전체 UI를 렌더링합니다."""
-    _display_success_toast(country_code)
 
     @st.dialog("BUY")
-    def show_buy_dialog(country_code_inner: str = country_code):
+    def show_buy_dialog(country_code_inner: str):
         """매수(BUY) 거래 입력을 위한 모달 다이얼로그를 표시합니다."""
 
         currency_str = f" ({'AUD' if country_code_inner == 'aus' else 'KRW'})"
@@ -694,7 +733,7 @@ def render_country_tab(country_code: str):
             st.form_submit_button("거래 저장", on_click=on_buy_submit)
 
     @st.dialog("SELL", width="large")
-    def show_sell_dialog(country_code_inner: str = country_code):
+    def show_sell_dialog(country_code_inner: str):
         """보유 종목 매도를 위한 모달 다이얼로그를 표시합니다."""
         currency_str = f" ({'AUD' if country_code_inner == 'aus' else 'KRW'})"
         message_key = f"sell_message_{country_code_inner}"
@@ -874,6 +913,8 @@ def render_country_tab(country_code: str):
             )
 
             st.form_submit_button("선택 종목 매도", on_click=on_sell_submit)
+
+    _display_success_toast(country_code)
 
     sub_tab_names = ["현황", "히스토리", "트레이드", "종목 관리", "설정", "알림"]
     (
@@ -1612,8 +1653,8 @@ def main():
                 unsafe_allow_html=True,
             )
 
-    tab_names = ["한국", "호주", "코인", "설정"]
-    tab_kor, tab_aus, tab_coin, tab_settings = st.tabs(tab_names)
+    tab_names = ["한국", "호주", "코인", "스케줄러", "설정"]
+    tab_kor, tab_aus, tab_coin, tab_scheduler, tab_settings = st.tabs(tab_names)
 
     with tab_coin:
         render_country_tab("coin")
@@ -1623,6 +1664,9 @@ def main():
 
     with tab_aus:
         render_country_tab("aus")
+
+    with tab_scheduler:
+        render_scheduler_tab()
 
     with tab_settings:
         st.header("공통 설정 (모든 국가 공유)")
