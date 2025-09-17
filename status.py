@@ -99,16 +99,16 @@ DECISION_CONFIG = {
         "is_recommendation": True,
         "show_return": True,
     },
-    # 보유 및 대기 (알림 없음)
-    "WAIT": {
-        "display_name": "<⏳ 대기>",
+    # 거래 완료 (알림 없음)
+    "SOLD": {
+        "display_name": "<✅ 매도 완료>",
         "order": 40,
         "is_recommendation": False,
         "show_return": False,
     },
-    # 거래 완료 (알림 없음)
-    "SOLD": {
-        "display_name": "<✅ 매도 완료>",
+    # 보유 및 대기 (알림 없음)
+    "WAIT": {
+        "display_name": "<⏳ 대기>",
         "order": 50,
         "is_recommendation": False,
         "show_return": False,
@@ -1036,6 +1036,38 @@ def _notify_calculation_start(
     return send_slack_message(message, webhook_url=webhook_url)
 
 
+def _notify_equity_update(country: str, old_equity: float, new_equity: float):
+    """평가금액 자동 보정 시 슬랙으로 알림을 보냅니다."""
+    try:
+        from utils.db_manager import get_app_settings
+        from utils.notify import send_slack_message
+        from utils.report import format_aud_money, format_kr_money
+    except Exception:
+        return False
+
+    app_settings = get_app_settings(country) or {}
+    if not app_settings.get("SLACK_ENABLED"):
+        return False
+    webhook_url = app_settings.get("SLACK_WEBHOOK_URL")
+    if not webhook_url:
+        return False
+
+    country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
+    money_formatter = format_aud_money if country == "aus" else format_kr_money
+
+    diff = new_equity - old_equity
+    diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"
+
+    if old_equity > 0:
+        # 평가금액 변동(증가/감소)에 따라 다른 레이블을 사용합니다.
+        change_label = "증가" if diff >= 0 else "감소"
+        message = f"[{country_kor}] 평가금액 {change_label}: {money_formatter(old_equity)} => {money_formatter(new_equity)} ({diff_str})"
+    else:
+        message = f"[{country_kor}] 신규 평가금액 저장: {money_formatter(new_equity)}"
+
+    return send_slack_message(message, webhook_url=webhook_url)
+
+
 def generate_status_report(
     country: str = "kor",
     date_str: Optional[str] = None,
@@ -1081,11 +1113,65 @@ def generate_status_report(
             for tkr in sorted(insufficient_data_tickers):
                 name = name_map.get(tkr, tkr)
                 warning_messages_for_slack.append(
-                    f"{name}({tkr}): 데이터 기간이 부족하여 현황 계산에서 제외됩니다."
+                    f"{name}({tkr}): 데이터 기간이 부족하여 계산에서 제외됩니다."
                 )
         _notify_calculation_start(country, len(pairs), desc, warning_messages_for_slack)
 
     current_equity = float(portfolio_data.get("total_equity", 0.0))
+    equity_date = portfolio_data.get("equity_date")
+
+    # 자동 보정 로직을 위한 평가금액 결정:
+    # 평가금액의 날짜가 기준일(base_date)과 다르면, 기준일의 평가금액은 0으로 간주합니다.
+    # 이렇게 하면, 오늘 날짜의 평가금액이 없을 때 과거 값을 가져와도 '신규'로 처리됩니다.
+    equity_for_autocorrect = current_equity
+    is_stale_equity = (
+        equity_date and pd.to_datetime(equity_date).normalize() != base_date.normalize()
+    )
+    if is_stale_equity:
+        equity_for_autocorrect = 0.0
+
+    # --- 자동 평가금액 보정 로직 ---
+    # 보유 종목의 현재가 합(total_holdings_value)이 기록된 평가금액(equity_for_autocorrect)보다 크거나,
+    # 평가금액이 0일 경우, 평가금액을 보유 종목 가치 합으로 자동 보정합니다.
+    # 이는 현금이 음수로 표시되는 것을 방지하고, 평가금액 미입력 시 초기값을 설정해줍니다.
+    # 호주의 경우, 해외 주식 가치도 포함하여 최종 평가금액을 계산합니다.
+    new_equity_candidate = total_holdings_value
+    if country == "aus" and portfolio_data.get("international_shares"):
+        new_equity_candidate += portfolio_data["international_shares"].get("value", 0.0)
+
+    # new_equity_candidate가 0보다 크고, (기존 평가금액보다 크거나, 기존 평가금액이 0일 때)
+    if new_equity_candidate > 0 and (
+        new_equity_candidate > equity_for_autocorrect or equity_for_autocorrect == 0
+    ):
+        old_equity = equity_for_autocorrect
+        new_equity = new_equity_candidate
+
+        # 보정된 평가금액이 유의미한 차이를 보일 때만 업데이트 및 알림 (부동소수점 오차 방지)
+        if abs(new_equity - old_equity) > 1e-9:
+            # 1. DB에 새로운 평가금액 저장
+            from utils.db_manager import save_daily_equity
+
+            # 호주: international_shares 정보도 함께 저장해야 함
+            is_data_to_save = None
+            if country == "aus":
+                is_data_to_save = portfolio_data.get("international_shares")
+
+            save_daily_equity(
+                country,
+                base_date.to_pydatetime(),
+                new_equity,
+                is_data_to_save,
+                updated_by="스케줄러",
+            )
+
+            # 2. 슬랙 알림 전송
+            _notify_equity_update(country, old_equity, new_equity)
+
+            # 3. 현재 실행 컨텍스트에 보정된 값 반영
+            current_equity = new_equity
+            portfolio_data["total_equity"] = new_equity
+            print(f"-> 평가금액 자동 보정: {old_equity:,.0f}원 -> {new_equity:,.0f}원")
+
     holdings = {
         item["ticker"]: {
             "name": item.get("name", ""),
@@ -1115,9 +1201,7 @@ def generate_status_report(
         warning_messages = []
         for tkr in sorted(insufficient_data_tickers):
             name = name_map.get(tkr, tkr)
-            warning_messages.append(
-                f"{name}({tkr}): 데이터 기간이 부족하여 현황 계산에서 제외됩니다."
-            )
+            warning_messages.append(f"{name}({tkr}): 데이터 기간이 부족하여 계산에서 제외됩니다.")
 
         if warning_messages:
             full_warning_str = "<br>".join(
@@ -1646,6 +1730,20 @@ def generate_status_report(
                 decision["row"][2] = "SOLD"
                 decision["row"][-1] = "🔚 매도 완료"
 
+    # --- WAIT 종목 수 제한 ---
+    # 웹 UI와 슬랙 알림에 표시될 대기(WAIT) 종목의 수를 최대 10개로 제한합니다.
+    # 점수가 높은 순서대로 상위 10개만 남깁니다.
+    wait_decisions = [d for d in decisions if d["state"] == "WAIT"]
+    other_decisions = [d for d in decisions if d["state"] != "WAIT"]
+
+    MAX_WAIT_ITEMS = 10
+    if len(wait_decisions) > MAX_WAIT_ITEMS:
+        # 점수(score)가 높은 순으로 정렬합니다. 점수가 없는 경우 0으로 처리합니다.
+        wait_decisions_sorted = sorted(
+            wait_decisions, key=lambda x: x.get("score", 0.0) or 0.0, reverse=True
+        )
+        decisions = other_decisions + wait_decisions_sorted[:MAX_WAIT_ITEMS]
+
     # 7. 최종 정렬
     def sort_key(decision_dict):
         state = decision_dict["state"]
@@ -1842,7 +1940,8 @@ def main(country: str = "kor", date_str: Optional[str] = None):
         table_lines = render_table_eaw(headers, display_rows, aligns=aligns)
 
         print("\n" + header_line)
-        print("\n".join(table_lines))
+        # 스케줄러 실행 시 콘솔에 상세 테이블을 출력하지 않도록 주석 처리합니다.
+        # print("\n".join(table_lines))
 
 
 def _is_trading_day(country: str) -> bool:

@@ -194,25 +194,6 @@ def get_cached_status_report(
 
     # 2. DB에 없거나, 강제로 다시 계산해야 하는 경우
     try:
-        # 코인: '오늘' 현황을 계산/재계산할 때만 최신 계좌를 동기화합니다.
-        # 과거 날짜 재계산 시에는 동기화하면 안 됩니다.
-        is_today = pd.to_datetime(date_str).normalize() == pd.Timestamp.now().normalize()
-        if country == "coin" and is_today:
-            try:
-                from scripts.sync_bithumb_accounts_to_trades import main as _sync_trades
-
-                print("-> Bithumb 계좌 동기화를 시작합니다...")
-                _sync_trades()
-                print("-> Bithumb 계좌 동기화가 완료되었습니다.")
-            except Exception as e:
-                print(f"오류: Bithumb 계좌 동기화 중 오류 발생: {e}")
-                st.warning(f"코인 계좌 동기화 중 오류가 발생했습니다: {e}")
-            try:
-                from scripts.snapshot_bithumb_balances import main as _snapshot_equity
-
-                _snapshot_equity()
-            except Exception:
-                print("경고: 코인 평가금액 스냅샷 생성 중 오류 발생")
         new_report = generate_status_report(
             country=country,
             date_str=date_str,
@@ -1145,6 +1126,8 @@ def render_country_tab(country_code: str):
                         row = {
                             "date": trade_date,
                             "total_equity": existing_data.get("total_equity", 0.0),
+                            "updated_at": existing_data.get("updated_at"),
+                            "updated_by": existing_data.get("updated_by"),
                         }
                         if country_code == "aus":
                             is_data = existing_data.get("international_shares", {})
@@ -1163,6 +1146,10 @@ def render_country_tab(country_code: str):
                             format="%.2f" if country_code == "aus" else "%d",
                             required=True,
                         ),
+                        "updated_at": st.column_config.DatetimeColumn(
+                            "변경일시", format="YYYY-MM-DD HH:mm:ss", disabled=True
+                        ),
+                        "updated_by": st.column_config.TextColumn("변경자", disabled=True),
                     }
                     if country_code == "aus":
                         column_config["is_value"] = st.column_config.NumberColumn(
@@ -1186,24 +1173,43 @@ def render_country_tab(country_code: str):
 
                     if st.button("평가금액 저장하기", key=f"save_all_equities_{country_code}"):
                         with st.spinner("변경된 평가금액을 저장하는 중..."):
+                            # st.data_editor의 변경 사항은 세션 상태에 저장됩니다.
+                            # 전체 데이터프레임을 순회하는 대신, 변경된 행만 처리하여 불필요한 DB 업데이트를 방지합니다.
+                            editor_state = st.session_state[f"equity_editor_{country_code}"]
+                            edited_rows = editor_state.get("edited_rows", {})
+
                             saved_count = 0
-                            for _, row in edited_df.iterrows():
-                                date_to_save = row["date"].to_pydatetime()
-                                equity_to_save = row["total_equity"]
+                            for row_index, changes in edited_rows.items():
+                                # 변경된 행의 원본 데이터를 가져옵니다.
+                                original_row = df_to_edit.iloc[row_index]
+
+                                # 저장할 데이터를 구성합니다.
+                                date_to_save = original_row["date"].to_pydatetime()
+                                equity_to_save = changes.get(
+                                    "total_equity", original_row["total_equity"]
+                                )
                                 is_data_to_save = None
                                 if country_code == "aus":
                                     is_data_to_save = {
-                                        "value": row["is_value"],
-                                        "change_pct": row["is_change_pct"],
+                                        "value": changes.get("is_value", original_row["is_value"]),
+                                        "change_pct": changes.get(
+                                            "is_change_pct", original_row["is_change_pct"]
+                                        ),
                                     }
 
                                 if save_daily_equity(
-                                    country_code, date_to_save, equity_to_save, is_data_to_save
+                                    country_code,
+                                    date_to_save,
+                                    equity_to_save,
+                                    is_data_to_save,
+                                    updated_by="사용자",
                                 ):
                                     saved_count += 1
-
-                            st.success(f"{saved_count}개 날짜의 평가금액을 저장/업데이트했습니다.")
-                            st.rerun()
+                            if saved_count > 0:
+                                st.success(f"{saved_count}개 날짜의 평가금액을 업데이트했습니다.")
+                                st.rerun()
+                            else:
+                                st.info("변경된 내용이 없어 저장하지 않았습니다.")
 
     with sub_tab_trades:
         # 코인 탭: 거래 입력 대신 보유 현황/데이터 편집만 제공 (동기화 버튼 제거)

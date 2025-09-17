@@ -25,31 +25,40 @@ def _fetch_bithumb_balance_dict():
         from utils.exchanges.bithumb_v2 import BithumbV2Client
 
         v2 = BithumbV2Client()
-        items = v2.accounts()
+        # v2.accounts()는 각 통화별 잔액 정보가 담긴 딕셔너리의 리스트를 반환합니다.
+        # 예: [{"currency": "KRW", "balance": "1000", "locked": "0"}, {"currency": "BTC", ...}]
+        balance_items = v2.accounts()
     except Exception as e:
         print(f"[ERROR] Bithumb v2 accounts failed: {e}")
         return None
+
+    if not isinstance(balance_items, list):
+        print(f"[ERROR] Bithumb balance data is not a list: {type(balance_items)}")
+        return None
+
     out = {}
 
     def _pf(x) -> float:
         try:
             return float(str(x).replace(",", ""))
-        except Exception:
+        except (ValueError, TypeError):
             return 0.0
 
-    for it in items or []:
-        cur = str(it.get("currency") or "").upper()
-        if not cur:
+    for item in balance_items:
+        currency = str(item.get("currency") or "").upper()
+        if not currency:
             continue
-        # Prefer explicit balance + locked when available; else fall back to total_balance or quantity
-        bal = _pf(it.get("balance"))
-        locked = _pf(it.get("locked"))
-        total_field = _pf(it.get("total_balance")) or _pf(it.get("quantity"))
-        total = bal + locked if (bal or locked) else total_field
-        if cur == "KRW":
-            out["total_krw"] = total
+
+        # Bithumb v2 API는 'balance'(사용 가능)와 'locked'(사용 중) 필드를 반환합니다.
+        # 총 잔액은 이 두 값의 합입니다.
+        available_balance = _pf(item.get("balance"))
+        locked_balance = _pf(item.get("locked"))
+        total_balance = available_balance + locked_balance
+        if currency == "KRW":
+            out["total_krw"] = total_balance
         else:
-            out[f"total_{cur}"] = total
+            out[f"total_{currency}"] = total_balance
+
     return out
 
 
@@ -63,23 +72,6 @@ def _get_total_amount_for(symbol: str, bal: dict) -> float:
             except Exception:
                 return 0.0
     return 0.0
-
-
-def _get_total_krw(bal: dict) -> float:
-    if not isinstance(bal, dict):
-        return 0.0
-    for key in ("total_krw", "total_KRW"):
-        if key in bal:
-            try:
-                return float(str(bal[key]).replace(",", ""))
-            except Exception:
-                pass
-    try:
-        avail = float(str(bal.get("available_krw", "0")).replace(",", ""))
-        in_use = float(str(bal.get("in_use_krw", "0")).replace(",", ""))
-        return avail + in_use
-    except Exception:
-        return 0.0
 
 
 def main():
@@ -97,15 +89,19 @@ def main():
     for k in list(bal.keys()):
         if isinstance(k, str) and k.lower().startswith("total_"):
             sym = k.split("_", 1)[-1].upper()
-            if sym != "KRW":
+            # KRW와 P는 총 평가금액 계산 시 특별 처리되므로, 여기서는 제외합니다.
+            if sym not in ["KRW", "P"]:
                 acct_coins.add(sym)
     coins = sorted(db_coins.union(acct_coins))
     if not coins:
         print("[WARN] No coins found in DB or accounts; nothing to snapshot.")
         return
 
-    total_krw = _get_total_krw(bal)
-    total_value = total_krw
+    # 총 평가금액 초기화: KRW 잔액과 P 잔액을 합산합니다.
+    # 사용자의 요청에 따라 'P'는 원화(KRW)처럼 취급합니다.
+    krw_balance = bal.get("total_krw", 0.0)
+    p_balance = bal.get("total_P", 0.0)
+    total_value = krw_balance + p_balance
 
     # Price coins using latest 24h close
     for c in coins:

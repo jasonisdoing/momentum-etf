@@ -530,7 +530,11 @@ def delete_trade_by_id(trade_id: str) -> bool:
 
 
 def save_daily_equity(
-    country: str, date: datetime, total_equity: float, international_shares: Optional[Dict] = None
+    country: str,
+    date: datetime,
+    total_equity: float,
+    international_shares: Optional[Dict] = None,
+    updated_by: Optional[str] = None,
 ) -> bool:
     """Saves or updates the total equity for a given date."""
     db = get_db_connection()
@@ -538,15 +542,22 @@ def save_daily_equity(
         return False
 
     try:
-        query = {"country": country, "date": date}
+        # upsert 작업의 일관성을 보장하기 위해 마이크로초를 제거하여 날짜를 정규화합니다.
+        # 이렇게 하면 미세한 시간 차이로 인해 중복 문서가 생성되는 것을 방지할 수 있습니다.
+        date_normalized = date.replace(microsecond=0)
+
+        query = {"country": country, "date": date_normalized}
         set_data = {
             "country": country,
-            "date": date,
+            "date": date_normalized,
             "total_equity": total_equity,
+            "updated_at": datetime.now(),
             "is_deleted": False,
         }
         if international_shares is not None:
             set_data["international_shares"] = international_shares
+        if updated_by:
+            set_data["updated_by"] = updated_by
 
         update_operation = {"$set": set_data, "$unset": {"deleted_at": ""}}
 
