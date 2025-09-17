@@ -6,9 +6,7 @@ import functools
 import json
 import logging
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from threading import Lock
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -37,9 +35,6 @@ try:
     from pykrx import stock as _stock
 except Exception:
     _stock = None
-
-
-yf_lock = Lock()
 
 
 def is_pykrx_available() -> bool:
@@ -187,14 +182,13 @@ def fetch_ohlcv(
             )
             return None
         try:
-            with yf_lock:
-                df = yf.download(
-                    ticker,
-                    start=start_dt,
-                    end=end_dt + pd.Timedelta(days=1),
-                    progress=False,
-                    auto_adjust=True,
-                )
+            df = yf.download(
+                ticker,
+                start=start_dt,
+                end=end_dt + pd.Timedelta(days=1),
+                progress=False,
+                auto_adjust=True,
+            )
             if df.empty:
                 return None
 
@@ -239,21 +233,19 @@ def fetch_ohlcv(
                 df_part = _stock.get_etf_ohlcv_by_date(start_str, end_str, ticker)
                 if df_part is not None and not df_part.empty:
                     all_dfs.append(df_part)
-            except Exception as e:
-                # pykrx에서 JSONDecodeError가 발생하면 (KRX 웹사이트 응답 문제),
+            except (json.JSONDecodeError, KeyError) as e:  # Catch KeyError as well
+                # pykrx에서 JSONDecodeError 또는 KeyError가 발생하면 (KRX 웹사이트 응답 문제 또는 데이터 구조 문제),
                 # 루프를 중단하고 yfinance로 전체 기간 폴백을 시도합니다.
-                is_json_error = isinstance(e, json.JSONDecodeError) or "Expecting value" in str(e)
-                if is_json_error:
-                    pykrx_failed_with_json_error = True
-                    logging.getLogger(__name__).warning(
-                        f"pykrx 조회 실패({type(e).__name__}), yfinance로 전체 기간 대체 시도: {ticker}"
-                    )
-                    break  # while 루프 중단
-                else:
-                    # 다른 종류의 예외인 경우, 기존처럼 경고만 로깅합니다.
-                    logging.getLogger(__name__).warning(
-                        f"{ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {e}"
-                    )
+                pykrx_failed_with_json_error = True  # Renamed variable for clarity, but same logic
+                logging.getLogger(__name__).warning(
+                    f"pykrx 조회 실패({type(e).__name__}), yfinance로 전체 기간 대체 시도: {ticker}"
+                )
+                break  # while 루프 중단
+            except Exception as e:
+                # 다른 종류의 예외인 경우, 기존처럼 경고만 로깅합니다。
+                logging.getLogger(__name__).warning(
+                    f"{ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {e}"
+                )
 
             current_start += pd.DateOffset(years=1)
 
@@ -265,14 +257,13 @@ def fetch_ohlcv(
                 if ticker.isdigit() and len(ticker) == 6:
                     y_ticker = f"{ticker}.KS"
 
-                with yf_lock:
-                    df_yf = yf.download(
-                        y_ticker,
-                        start=start_dt,
-                        end=end_dt + pd.Timedelta(days=1),
-                        progress=False,
-                        auto_adjust=True,
-                    )
+                df_yf = yf.download(
+                    y_ticker,
+                    start=start_dt,
+                    end=end_dt + pd.Timedelta(days=1),
+                    progress=False,
+                    auto_adjust=True,
+                )
 
                 if df_yf is not None and not df_yf.empty:
                     if isinstance(df_yf.columns, pd.MultiIndex):
@@ -316,14 +307,13 @@ def fetch_ohlcv(
 
         try:
             # yfinance는 start/end를 사용하며, end 날짜를 포함하려면 하루를 더해야 할 수 있습니다.
-            with yf_lock:
-                df = yf.download(
-                    ticker_yf,
-                    start=start_dt,
-                    end=end_dt + pd.Timedelta(days=1),
-                    progress=False,
-                    auto_adjust=True,
-                )
+            df = yf.download(
+                ticker_yf,
+                start=start_dt,
+                end=end_dt + pd.Timedelta(days=1),
+                progress=False,
+                auto_adjust=True,
+            )
             if df.empty:
                 return None
 
@@ -404,7 +394,7 @@ def fetch_ohlcv_for_tickers(
     warmup_days: int = 0,
 ) -> Dict[str, pd.DataFrame]:
     """
-    주어진 티커 목록에 대해 OHLCV 데이터를 병렬로 조회합니다.
+    주어진 티커 목록에 대해 OHLCV 데이터를 직렬로 조회합니다.
     """
     prefetched_data = {}
 
@@ -415,15 +405,10 @@ def fetch_ohlcv_for_tickers(
     warmup_start = core_start - pd.DateOffset(days=warmup_days)
     adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
 
-    def worker(ticker):
-        return ticker, fetch_ohlcv(ticker, country=country, date_range=adjusted_date_range)
-
-    with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(worker, tkr) for tkr in tickers]
-        for future in as_completed(futures):
-            tkr, df = future.result()
-            if df is not None and not df.empty:
-                prefetched_data[tkr] = df
+    for tkr in tickers:
+        df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range)
+        if df is not None and not df.empty:
+            prefetched_data[tkr] = df
 
     return prefetched_data
 

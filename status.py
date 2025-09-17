@@ -2,7 +2,6 @@ import os
 import re
 import sys
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -743,14 +742,11 @@ def _fetch_and_prepare_data(
             (tkr, country, required_months, base_date, ma_period, atr_period_norm, df_full)
         )
 
-    with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(_load_and_prepare_ticker_data, task) for task in tasks]
-
-        desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
-        for future in as_completed(futures):
-            tkr, result = future.result()
-            if not result:
-                continue
+    desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
+    for task in tasks:
+        tkr, result = _load_and_prepare_ticker_data(task)
+        if not result:
+            continue
 
             realtime_price = _fetch_realtime_price(tkr) if market_is_open else None
             c0 = float(realtime_price) if realtime_price else float(result["close"].iloc[-1])
