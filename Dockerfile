@@ -5,24 +5,26 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONDONTWRITEBYTECODE 1
 
-# 3. 시스템 패키지를 업데이트하고, 빌드에 필요한 도구를 설치합니다.
-#    (yfinance 등 일부 라이브러리는 빌드 도구가 필요할 수 있습니다)
+# 3. debconf가 대화형 프롬프트를 표시하지 않도록 설정합니다.
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 4. 시스템 패키지를 업데이트하고, 빌드에 필요한 도구를 설치합니다.
 RUN apt-get update && apt-get install -y --no-install-recommends gcc build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-# 4. 작업 디렉토리를 생성하고 설정합니다.
+# 5. 작업 디렉토리를 생성하고 설정합니다.
 WORKDIR /app
 
-# 5. 의존성 설치를 위해 requirements.txt 파일을 먼저 복사합니다.
+# 6. 의존성 설치를 위해 requirements.txt 파일을 먼저 복사합니다.
 #    이 파일이 변경되지 않으면 이 레이어는 캐시되어 빌드 속도가 향상됩니다.
 COPY requirements.txt .
 
-# 6. pip를 업그레이드하고 의존성을 설치합니다.
+# 7. pip를 업그레이드하고 의존성을 설치합니다.
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# 7. 나머지 애플리케이션 소스 코드 전체를 작업 디렉토리로 복사합니다.
+# 8. 나머지 애플리케이션 소스 코드 전체를 작업 디렉토리로 복사합니다.
 COPY . .
 
-# 8. Streamlit이 사용하는 포트를 외부에 노출합니다.
+# 9. Streamlit이 사용하는 포트를 외부에 노출합니다.
 EXPOSE 8501
