@@ -483,83 +483,6 @@ def render_master_etf_ui(country_code: str):
         )
 
 
-def render_notification_settings_ui(country_code: str):
-    """지정된 국가에 대한 알림 설정 UI를 렌더링합니다."""
-    st.header(f"{COUNTRY_CODE_MAP.get(country_code, country_code.upper())} 국가 알림 설정")
-
-    # .env 파일에서 웹훅 URL을 가져옵니다.
-    from utils.notify import get_slack_webhook_url
-
-    app_settings = get_app_settings(country_code) or {}
-
-    with st.form(f"notification_settings_form_{country_code}"):
-        st.subheader("슬랙 설정")
-        slack_enabled = bool(app_settings.get("SLACK_ENABLED", False))
-        slack_webhook_url = app_settings.get("SLACK_WEBHOOK_URL", "")
-
-        new_slack_enabled = st.checkbox(
-            "슬랙 알림 사용",
-            value=slack_enabled,
-            key=f"slack_enabled_{country_code}",
-            help="이 국가의 현황 메시지를 슬랙으로 전송합니다.",
-        )
-
-        webhook_url_from_env = get_slack_webhook_url(country_code)
-        if webhook_url_from_env:
-            st.text_input(
-                "웹훅 URL (.env)",
-                value=webhook_url_from_env,
-                disabled=True,
-                help=f"{country_code.upper()}_SLACK_WEBHOOK 환경 변수에서 가져온 값입니다.",
-            )
-        else:
-            st.warning(
-                f"`.env` 파일에 `{country_code.upper()}_SLACK_WEBHOOK` 환경 변수를 설정해주세요."
-            )
-
-        st.caption("테스트는 스케줄과 무관하게 1회 계산 후 알림을 전송합니다.")
-
-        cols = st.columns(2)
-        with cols[0]:
-            settings_save = st.form_submit_button("설정 저장")
-        with cols[1]:
-            test_send = st.form_submit_button("알림 테스트 전송")
-
-    if settings_save:
-        error = False
-        # 웹훅 URL은 더 이상 DB에 저장하지 않고, '사용' 여부만 저장합니다.
-        slack_settings_to_save = {"SLACK_ENABLED": new_slack_enabled}
-
-        if not error:
-            save_app_settings(country_code, slack_settings_to_save)
-            st.success(f"{country_code.upper()} 국가의 슬랙 설정을 저장했습니다.")
-            st.rerun()
-
-    if test_send:
-        # 테스트 전송은 현재 UI의 '사용' 여부만 저장하고 실행합니다.
-        save_app_settings(country_code, {"SLACK_ENABLED": new_slack_enabled})
-        if not webhook_url_from_env:
-            st.error("테스트를 보내려면 .env 파일에 웹훅 URL을 먼저 설정해야 합니다.")
-        else:
-            result_tuple = generate_status_report(
-                country=country_code, date_str=None, notify_start=True
-            )
-            if not result_tuple:
-                st.error("현황 계산 실패로 테스트 전송을 건너뜁니다.")
-            else:
-                header_line, headers, rows_sorted, _ = result_tuple
-                sent = _maybe_notify_detailed_status(
-                    country_code, header_line, headers, rows_sorted, force=True
-                )
-                if sent:
-                    st.success("알림 테스트 전송 완료. 슬랙 채널을 확인하세요.")
-                else:
-                    from utils.notify import get_last_error
-
-                    err = get_last_error()
-                    st.warning(f"전송 시도는 했지만 응답이 없었습니다. 상세: {err or '설정 확인'}")
-
-
 def render_scheduler_tab():
     """스케줄러 설정을 위한 UI를 렌더링합니다."""
     st.header("스케줄러 설정 (모든 국가)")
@@ -919,14 +842,13 @@ def render_country_tab(country_code: str):
 
     _display_success_toast(country_code)
 
-    sub_tab_names = ["현황", "히스토리", "트레이드", "종목 관리", "설정", "알림"]
+    sub_tab_names = ["현황", "히스토리", "트레이드", "종목 관리", "설정"]
     (
         sub_tab_status,
         sub_tab_history,
         sub_tab_trades,
         sub_tab_etf_management,
         sub_tab_settings,
-        sub_tab_notification,
     ) = st.tabs(sub_tab_names)
 
     # --- 공통 데이터 로딩 ---
@@ -1418,9 +1340,6 @@ def render_country_tab(country_code: str):
     with sub_tab_etf_management:
         with st.spinner("종목 마스터 데이터를 불러오는 중..."):
             render_master_etf_ui(country_code)
-
-    with sub_tab_notification:
-        render_notification_settings_ui(country_code)
 
     with sub_tab_settings:
         # 1. DB에서 현재 설정값 로드

@@ -1033,14 +1033,10 @@ def _notify_calculation_start(
 ):
     """계산 시작과 경고에 대한 슬랙 알림을 보냅니다."""
     try:
-        from utils.db_manager import get_app_settings
         from utils.notify import get_slack_webhook_url, send_slack_message
     except Exception:
         return False
 
-    app_settings = get_app_settings(country) or {}
-    if not app_settings.get("SLACK_ENABLED"):
-        return False
     webhook_url = get_slack_webhook_url(country)
     if not webhook_url:
         return False
@@ -1070,15 +1066,11 @@ def _notify_calculation_start(
 def _notify_equity_update(country: str, old_equity: float, new_equity: float):
     """평가금액 자동 보정 시 슬랙으로 알림을 보냅니다."""
     try:
-        from utils.db_manager import get_app_settings
         from utils.notify import get_slack_webhook_url, send_slack_message
         from utils.report import format_aud_money, format_kr_money
     except Exception:
         return False
 
-    app_settings = get_app_settings(country) or {}
-    if not app_settings.get("SLACK_ENABLED"):
-        return False
     webhook_url = get_slack_webhook_url(country)
     if not webhook_url:
         return False
@@ -2192,9 +2184,6 @@ def _maybe_notify_detailed_status(
         caption = "\n".join([title_line, equity_line, cash_line, hold_line])
 
         # --- Send notifications ---
-        app_settings = get_app_settings(country) or {}
-        if not app_settings.get("SLACK_ENABLED"):
-            return False
         webhook_url = get_slack_webhook_url(country)
         if not webhook_url:
             return False

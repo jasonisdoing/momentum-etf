@@ -84,7 +84,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
    - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
 3. 실행: `python scheduler.py`
 
-슬랙(Slack) 알림은 웹앱의 각 국가별 탭 하위의 '알림' 탭에서 웹훅(Webhook) URL을 설정한 후 동작합니다.
+슬랙(Slack) 알림은 `.env` 파일에 `KOR_SLACK_WEBHOOK` 등 국가별 웹훅 URL을 설정하면 자동으로 동작합니다.
 
 5) (선택) 급등주 찾기
 
