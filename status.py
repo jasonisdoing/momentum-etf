@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import warnings
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -734,6 +735,7 @@ def _fetch_and_prepare_data(
         # 종목 마스터에 없는 종목은 처리에서 제외합니다. (단, 오늘 매도된 종목은 포함)
         allowed_tickers = {etf["ticker"] for etf in etfs_from_file}
         pairs = [(t, n) for t, n in pairs if t in allowed_tickers or t in sold_tickers_today]
+
     # --- 병렬 데이터 로딩 및 지표 계산 ---
     tasks = []
     for tkr, _ in pairs:
@@ -742,46 +744,74 @@ def _fetch_and_prepare_data(
             (tkr, country, required_months, base_date, ma_period, atr_period_norm, df_full)
         )
 
+    # 병렬 처리로 데이터 로딩 및 기본 지표 계산
+    processed_results = {}
     desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
-    for task in tasks:
-        tkr, result = _load_and_prepare_ticker_data(task)
+    print(f"-> {desc} 시작... (총 {len(tasks)}개 종목)")
+
+    with ProcessPoolExecutor() as executor:
+        # 작업을 제출하고 future 객체를 리스트에 저장
+        future_to_tkr = {
+            executor.submit(_load_and_prepare_ticker_data, task): task[0] for task in tasks
+        }
+
+        # 완료되는 작업 순서대로 결과 처리
+        for i, future in enumerate(as_completed(future_to_tkr)):
+            tkr = future_to_tkr[future]
+            try:
+                _, result = future.result()
+                if result:
+                    processed_results[tkr] = result
+            except Exception as exc:
+                # 진행률 표시가 깨지지 않도록 개행 문자를 추가합니다.
+                print(f"\n-> 경고: {tkr} 데이터 처리 중 오류 발생: {exc}")
+
+            # 진행 상황 표시
+            print(f"\r   {desc} 진행: {i + 1}/{len(tasks)}", end="", flush=True)
+    # 루프가 끝나면 개행하여 다음 출력이 줄의 시작에서 이뤄지도록 합니다.
+    print("\n-> 데이터 처리 완료.")
+
+    # --- 최종 데이터 조합 및 계산 ---
+    # 이제 `processed_results`를 사용하여 순차적으로 나머지 계산을 수행합니다.
+    for tkr, _ in pairs:
+        result = processed_results.get(tkr)
         if not result:
             continue
 
-            realtime_price = _fetch_realtime_price(tkr) if market_is_open else None
-            c0 = float(realtime_price) if realtime_price else float(result["close"].iloc[-1])
-            if pd.isna(c0):
-                continue
+        realtime_price = _fetch_realtime_price(tkr) if market_is_open else None
+        c0 = float(realtime_price) if realtime_price else float(result["close"].iloc[-1])
+        if pd.isna(c0):
+            continue
 
-            prev_close = (
-                float(result["close"].iloc[-2])
-                if len(result["close"]) >= 2 and pd.notna(result["close"].iloc[-2])
-                else 0.0
-            )
-            m = result["ma"].iloc[-1]
-            a = result["atr"].iloc[-1]
+        prev_close = (
+            float(result["close"].iloc[-2])
+            if len(result["close"]) >= 2 and pd.notna(result["close"].iloc[-2])
+            else 0.0
+        )
+        m = result["ma"].iloc[-1]
+        a = result["atr"].iloc[-1]
 
-            ma_score = (c0 - m) / a if pd.notna(m) and pd.notna(a) and a > 0 else 0.0
-            buy_signal_days_today = (
-                result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0
-            )
+        ma_score = (c0 - m) / a if pd.notna(m) and pd.notna(a) and a > 0 else 0.0
+        buy_signal_days_today = (
+            result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0
+        )
 
-            sh = float((holdings.get(tkr) or {}).get("shares") or 0.0)
-            ac = float((holdings.get(tkr) or {}).get("avg_cost") or 0.0)
-            total_holdings_value += sh * c0
-            datestamps.append(result["df"].index[-1])
+        sh = float((holdings.get(tkr) or {}).get("shares") or 0.0)
+        ac = float((holdings.get(tkr) or {}).get("avg_cost") or 0.0)
+        total_holdings_value += sh * c0
+        datestamps.append(result["df"].index[-1])
 
-            data_by_tkr[tkr] = {
-                "price": c0,
-                "prev_close": prev_close,
-                "s1": m,
-                "s2": result["ma_period"],
-                "score": ma_score,
-                "filter": buy_signal_days_today,
-                "shares": sh,
-                "avg_cost": ac,
-                "df": result["df"],
-            }
+        data_by_tkr[tkr] = {
+            "price": c0,
+            "prev_close": prev_close,
+            "s1": m,
+            "s2": result["ma_period"],
+            "score": ma_score,
+            "filter": buy_signal_days_today,
+            "shares": sh,
+            "avg_cost": ac,
+            "df": result["df"],
+        }
 
     return (
         portfolio_data,

@@ -68,6 +68,11 @@ except Exception:
     _stock = None
 
 try:
+    import pytz
+except ImportError:
+    pytz = None
+
+try:
     from croniter import croniter
 except ImportError:
     croniter = None
@@ -142,11 +147,28 @@ def render_cron_input(label, key, default_value, country_code: str):
                 st.error(f"오류: {e}")
 
 
-@st.cache_data(ttl=600)
-def get_cached_benchmark_status(country: str) -> Optional[str]:
-    """벤치마크 비교 문자열을 캐시하여 반환합니다."""
-    # status.py에서 직접 임포트하면 순환 참조 가능성이 있으므로, 함수 내에서 호출합니다.
-    return get_benchmark_status_string(country)
+def _is_running_in_streamlit():
+    """Streamlit 실행 환경인지 확인합니다."""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+        return get_script_run_ctx() is not None
+    except Exception:
+        return False
+
+
+if _is_running_in_streamlit():
+
+    @st.cache_data(ttl=600)
+    def get_cached_benchmark_status(country: str) -> Optional[str]:
+        """벤치마크 비교 문자열을 캐시하여 반환합니다. (Streamlit용)"""
+        return get_benchmark_status_string(country)
+
+else:
+
+    def get_cached_benchmark_status(country: str) -> Optional[str]:
+        """벤치마크 비교 문자열을 반환합니다. (CLI용, 캐시 없음)"""
+        return get_benchmark_status_string(country)
 
 
 def get_cached_status_report(
@@ -363,8 +385,19 @@ def show_buy_dialog(country_code: str):
     message_key = f"buy_message_{country_code}"
 
     def on_buy_submit():
+        # 한국 현지 시간으로 현재 시간을 가져옵니다.
+        trade_time = datetime.now()
+        if pytz:
+            try:
+                korea_tz = pytz.timezone("Asia/Seoul")
+                # DB에 시간대 정보가 없는 순수한 한국 시간(naive)으로 저장해달라는 요청에 따라
+                # aware datetime에서 timezone 정보를 제거합니다.
+                trade_time = datetime.now(korea_tz).replace(tzinfo=None)
+            except pytz.UnknownTimeZoneError:
+                # pytz가 설치되었지만 'Asia/Seoul'을 모르는 경우에 대한 폴백
+                pass
+
         # st.session_state에서 폼 데이터 가져오기
-        trade_date = st.session_state[f"buy_date_{country_code}"]
         ticker = st.session_state[f"buy_ticker_{country_code}"].strip()
         shares = st.session_state[f"buy_shares_{country_code}"]
         price = st.session_state[f"buy_price_{country_code}"]
@@ -389,7 +422,7 @@ def show_buy_dialog(country_code: str):
 
         trade_data = {
             "country": country_code,
-            "date": pd.to_datetime(trade_date).to_pydatetime(),
+            "date": trade_time,
             "ticker": ticker.upper(),
             "name": etf_name,
             "action": "BUY",
@@ -415,7 +448,6 @@ def show_buy_dialog(country_code: str):
             del st.session_state[message_key]
 
     with st.form(f"trade_form_{country_code}"):
-        st.date_input("거래일", value="today", key=f"buy_date_{country_code}")
         st.text_input("종목코드 (티커)", key=f"buy_ticker_{country_code}")
         shares_format_str = "%.8f" if country_code == "coin" else "%d"
         st.number_input(
