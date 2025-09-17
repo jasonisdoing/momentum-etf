@@ -119,6 +119,25 @@ DECISION_CONFIG = {
 COIN_ZERO_THRESHOLD = 1e-9
 
 
+def get_next_trading_day(country: str, start_date: pd.Timestamp) -> pd.Timestamp:
+    """주어진 날짜 또는 그 이후의 가장 가까운 거래일을 반환합니다."""
+    if country == "coin":
+        return start_date
+    try:
+        start_str = start_date.strftime("%Y-%m-%d")
+        end_str = (start_date + pd.Timedelta(days=14)).strftime("%Y-%m-%d")
+        days = get_trading_days(start_str, end_str, country)
+        for d in days:
+            if d.date() >= start_date.date():
+                return pd.Timestamp(d).normalize()
+    except Exception:
+        pass
+    # 폴백: 토/일이면 다음 월요일, 평일이면 그대로
+    wd = start_date.weekday()
+    delta = 0 if wd < 5 else (7 - wd)
+    return (start_date + pd.Timedelta(days=delta)).normalize()
+
+
 @dataclass
 class StatusReportData:
     portfolio_data: Dict
@@ -389,10 +408,13 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
 def is_market_open(country: str = "kor") -> bool:
     """
     지정된 국가의 주식 시장이 현재 개장 시간인지 확인합니다.
-    정확한 공휴일은 반영하지 않으며, 시간과 요일만으로 판단합니다.
+    정확한 공휴일을 반영하여 시간과 요일, 날짜를 모두 판단합니다.
     """
     if not pytz:
         return False  # pytz 없으면 안전하게 False 반환
+
+    if country == "coin":  # 코인은 항상 열려있다고 가정
+        return True
 
     timezones = {"kor": "Asia/Seoul", "aus": "Australia/Sydney"}
     market_hours = {
@@ -401,8 +423,8 @@ def is_market_open(country: str = "kor") -> bool:
             datetime.strptime("15:30", "%H:%M").time(),
         ),
         "aus": (
-            datetime.strptime("10:00", "%H:%M").time(),
-            datetime.strptime("16:00", "%H:%M").time(),
+            datetime.strptime("10:00", "%H:%M").time(),  # 호주 시드니 시간 기준
+            datetime.strptime("16:00", "%H:%M").time(),  # 호주 시드니 시간 기준
         ),
     }
 
@@ -414,15 +436,73 @@ def is_market_open(country: str = "kor") -> bool:
         local_tz = pytz.timezone(tz_str)
         now_local = datetime.now(local_tz)
 
-        # 주말(토, 일) 확인
-        if now_local.weekday() >= 5:
+        # 1. 거래일인지 확인 (공휴일 포함)
+        today_str_for_util = now_local.strftime("%Y-%m-%d")
+        is_trading_day_today = bool(
+            get_trading_days(today_str_for_util, today_str_for_util, country)
+        )
+
+        if not is_trading_day_today:
             return False
 
-        # 개장 시간 확인
+        # 2. 개장 시간 확인
         market_open_time, market_close_time = market_hours[country]
         return market_open_time <= now_local.time() <= market_close_time
     except Exception:  # TODO: Refine exception handling
         return False  # 오류 발생 시 안전하게 False 반환
+
+
+def _determine_target_date_for_scheduler(country: str) -> pd.Timestamp:
+    """
+    스케줄러 실행 시, 현재 시간에 따라 계산 대상 날짜를 동적으로 결정합니다.
+    - 코인: 항상 오늘
+    - 주식/ETF: 장 마감 2시간 후부터는 다음 거래일을 계산 대상으로 함.
+    """
+    if country == "coin":
+        return pd.Timestamp.now().normalize()
+
+    # 각 시장의 현지 시간과 장 마감 시간을 기준으로 대상 날짜를 결정합니다.
+    market_settings = {
+        "kor": {"tz": "Asia/Seoul", "close": "15:30"},
+        "aus": {"tz": "Australia/Sydney", "close": "16:00"},
+    }
+    settings = market_settings.get(country)
+    if not settings or not pytz:
+        # 설정이 없거나 pytz가 없으면 오늘 날짜로 폴백
+        return pd.Timestamp.now().normalize()
+
+    try:
+        local_tz = pytz.timezone(settings["tz"])
+        now_local = datetime.now(local_tz)
+    except Exception:
+        now_local = datetime.now()  # 폴백
+
+    today = pd.Timestamp(now_local).normalize()
+
+    # 오늘이 거래일인지 확인
+    try:
+        today_str = today.strftime("%Y-%m-%d")
+        is_trading_today = bool(get_trading_days(today_str, today_str, country))
+    except Exception:
+        is_trading_today = now_local.weekday() < 5  # 폴백
+
+    if is_trading_today:
+        close_time = datetime.strptime(settings["close"], "%H:%M").time()
+        close_datetime_naive = datetime.combine(today.date(), close_time)
+        # Naive datetime을 localize 해야 시간대 계산이 정확함
+        close_datetime_local = local_tz.localize(close_datetime_naive)
+        cutoff_datetime_local = close_datetime_local + pd.Timedelta(hours=2)
+
+        if now_local < cutoff_datetime_local:
+            # 컷오프 이전: 오늘 날짜를 대상으로 함
+            return today
+        else:
+            # 컷오프 이후: 다음 거래일을 대상으로 함
+            start_search_date = today + pd.Timedelta(days=1)
+            return get_next_trading_day(country, start_search_date)
+    else:
+        # 오늘이 거래일이 아님 (주말/공휴일): 다음 거래일을 대상으로 함
+        return get_next_trading_day(country, today)
 
 
 def calculate_consecutive_holding_info(
@@ -587,7 +667,8 @@ def _fetch_and_prepare_data(
 
     # 현황 조회 시, 날짜가 지정되지 않으면 항상 오늘 날짜를 기준으로 조회합니다.
     if date_str is None:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        target_date = _determine_target_date_for_scheduler(country)
+        date_str = target_date.strftime("%Y-%m-%d")
 
     portfolio_data = get_portfolio_snapshot(country, date_str)
     if not portfolio_data:
@@ -875,28 +956,6 @@ def _build_header_line(
     )
     portfolio_topn = app_settings.get("portfolio_topn", 0) if app_settings else 0
 
-    # Determine trading-calendar-based label/date via pykrx
-    ref_ticker_for_cal = next(iter(data_by_tkr.keys())) if data_by_tkr else None
-
-    def get_next_trading_day(start_date: pd.Timestamp) -> pd.Timestamp:
-        """주어진 날짜 또는 그 이후의 가장 가까운 거래일을 반환합니다.
-        가능한 경우 DB/캘린더 유틸을 사용하고, 실패 시 요일 기준으로 월~금을 반환합니다."""
-        if country == "coin":
-            return start_date
-        try:
-            start_str = start_date.strftime("%Y-%m-%d")
-            end_str = (start_date + pd.Timedelta(days=14)).strftime("%Y-%m-%d")
-            days = get_trading_days(start_str, end_str, country)
-            for d in days:
-                if d.date() >= start_date.date():
-                    return pd.Timestamp(d).normalize()
-        except Exception:
-            pass
-        # 폴백: 토/일이면 다음 월요일, 평일이면 그대로
-        wd = start_date.weekday()
-        delta = 0 if wd < 5 else (7 - wd)
-        return (start_date + pd.Timedelta(days=delta)).normalize()
-
     today_cal = pd.Timestamp.now().normalize()
 
     # 기본 표시 날짜는 파일의 기준일
@@ -906,7 +965,7 @@ def _build_header_line(
     if country != "coin":
         if base_date.date() == today_cal.date():
             # 오늘 기준일이면, 오늘이 거래일인지에 따라 라벨 결정
-            next_from_today = get_next_trading_day(today_cal)
+            next_from_today = get_next_trading_day(country, today_cal)
             if next_from_today.date() == today_cal.date():
                 day_label = "오늘"
                 label_date = today_cal

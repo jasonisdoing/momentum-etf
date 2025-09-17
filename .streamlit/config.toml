@@ -1,5 +1,3 @@
-# Streamlit 앱의 전역 설정을 관리합니다.
-
 [theme]
 # Anthropic 스타일을 모방한 커스텀 테마
 primaryColor="#D94D2B"  # Anthropic의 브랜드 오렌지/레드 색상
