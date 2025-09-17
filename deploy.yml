@@ -1,11 +1,11 @@
 # .github/workflows/deploy.yml
 name: Deploy to Lightsail
 
-# main 브랜치에 push 이벤트가 발생할 때마다 이 워크플로우를 실행합니다.
 on:
   push:
     branches:
-      - main
+      # - main # main 브랜치에 push 이벤트가 발생할 때마다 이 워크플로우를 실행합니다.
+      - upgrade # upgrade 브랜치에 push 이벤트가 발생할 때마다 이 워크플로우를 실행합니다.
 
 jobs:
   deploy:
