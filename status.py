@@ -435,11 +435,8 @@ def calculate_consecutive_holding_info(
 
     # 코인은 트레이드가 시각 포함으로 기록되므로, 동일 달력일의 모든 거래를 포함하도록
     # as_of_date 상한을 해당일 23:59:59.999999로 확장합니다.
-    include_until = (
-        as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-        if country == "coin"
-        else as_of_date
-    )
+    # 모든 국가에 대해 동일하게 적용하여, 특정 날짜의 모든 거래를 포함하도록 합니다.
+    include_until = as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
     for tkr in held_tickers:
         try:
@@ -508,11 +505,18 @@ def _load_and_prepare_ticker_data(args):
     단일 티커에 대한 데이터 조회 및 지표 계산을 수행하는 워커 함수입니다.
     병렬 처리를 위해 사용됩니다.
     """
+    # 병렬 처리 시 자식 프로세스에서 발생하는 경고를 억제합니다.
+    import warnings
+
+    warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+
     # Unpack arguments
     tkr, country, required_months, base_date, ma_period, atr_period_norm, df_full = args
     from utils.indicators import calculate_atr
 
     if df_full is None:
+        from utils.data_loader import fetch_ohlcv
+
         # df_full이 제공되지 않으면, 네트워크를 통해 데이터를 새로 조회합니다.
         df = fetch_ohlcv(
             tkr, country=country, months_range=[required_months, 0], base_date=base_date
@@ -521,8 +525,11 @@ def _load_and_prepare_ticker_data(args):
         # df_full이 제공되면, base_date까지의 데이터만 잘라서 사용합니다.
         df = df_full[df_full.index <= base_date].copy()
 
-    if df is None or len(df) < max(ma_period, atr_period_norm):
-        return tkr, None
+    if df is None:
+        return tkr, {"error": "FETCH_FAILED"}
+
+    if len(df) < max(ma_period, atr_period_norm):
+        return tkr, {"error": "INSUFFICIENT_DATA"}
 
     # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
     # 컬럼을 단순화하고 중복을 제거합니다.
@@ -728,6 +735,7 @@ def _fetch_and_prepare_data(
     data_by_tkr = {}
     total_holdings_value = 0.0
     datestamps = []
+    failed_tickers_info = {}
 
     # 코인도 이제 trades 기반 포트폴리오를 사용합니다. (빗썸 스냅샷→trades 동기화 별도 스크립트)
     if country == "coin":
@@ -759,12 +767,12 @@ def _fetch_and_prepare_data(
         for i, future in enumerate(as_completed(future_to_tkr)):
             tkr = future_to_tkr[future]
             try:
-                _, result = future.result()
-                if result:
-                    processed_results[tkr] = result
+                _, result = future.result()  # result는 데이터 또는 에러 딕셔너리
+                processed_results[tkr] = result
             except Exception as exc:
                 # 진행률 표시가 깨지지 않도록 개행 문자를 추가합니다.
                 print(f"\n-> 경고: {tkr} 데이터 처리 중 오류 발생: {exc}")
+                processed_results[tkr] = {"error": "PROCESS_ERROR"}
 
             # 진행 상황 표시
             print(f"\r   {desc} 진행: {i + 1}/{len(tasks)}", end="", flush=True)
@@ -772,15 +780,22 @@ def _fetch_and_prepare_data(
     print("\n-> 데이터 처리 완료.")
 
     # --- 최종 데이터 조합 및 계산 ---
+    # --- 최종 데이터 조합 및 계산 ---
     # 이제 `processed_results`를 사용하여 순차적으로 나머지 계산을 수행합니다.
     for tkr, _ in pairs:
         result = processed_results.get(tkr)
         if not result:
+            failed_tickers_info[tkr] = "FETCH_FAILED"
+            continue
+
+        if "error" in result:
+            failed_tickers_info[tkr] = result["error"]
             continue
 
         realtime_price = _fetch_realtime_price(tkr) if market_is_open else None
         c0 = float(realtime_price) if realtime_price else float(result["close"].iloc[-1])
-        if pd.isna(c0):
+        if pd.isna(c0) or c0 <= 0:
+            failed_tickers_info[tkr] = "FETCH_FAILED"
             continue
 
         prev_close = (
@@ -822,6 +837,8 @@ def _fetch_and_prepare_data(
         base_date,
         regime_info,
         etf_meta,
+        failed_tickers_info,
+        desc,
     )
 
 
@@ -985,10 +1002,50 @@ def _build_header_line(
     return header_line, label_date, day_label
 
 
+def _notify_calculation_start(
+    country: str, num_tickers: int, description: str, warnings: List[str]
+):
+    """계산 시작과 경고에 대한 슬랙 알림을 보냅니다."""
+    try:
+        from utils.db_manager import get_app_settings
+        from utils.notify import send_slack_message
+    except Exception:
+        return False
+
+    app_settings = get_app_settings(country) or {}
+    if not app_settings.get("SLACK_ENABLED"):
+        return False
+    webhook_url = app_settings.get("SLACK_WEBHOOK_URL")
+    if not webhook_url:
+        return False
+
+    country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
+
+    message_lines = [
+        f"[{country_kor}] 계산",
+        f"- 대상 종목: {num_tickers}개",
+        f"- 계산 내용: {description}",
+    ]
+
+    if warnings:
+        max_warnings = 10
+        message_lines.append("- 경고:")
+        for i, warning in enumerate(warnings):
+            if i < max_warnings:
+                message_lines.append(f"  ⚠️ {warning}")
+        if len(warnings) > max_warnings:
+            message_lines.append(f"  ... 외 {len(warnings) - max_warnings}건의 경고가 더 있습니다.")
+
+    message = "\n".join(message_lines)
+
+    return send_slack_message(message, webhook_url=webhook_url)
+
+
 def generate_status_report(
     country: str = "kor",
     date_str: Optional[str] = None,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    notify_start: bool = False,
 ) -> Optional[Tuple[str, List[str], List[List[str]]]]:
     """지정된 전략에 대한 오늘의 현황 데이터를 생성하여 반환합니다."""
     # 1. 데이터 로드 및 지표 계산
@@ -1005,22 +1062,35 @@ def generate_status_report(
         base_date,
         regime_info,
         etf_meta,
+        failed_tickers_info,
+        desc,
     ) = result
 
-    # --- 가격 조회 실패 검증 ---
-    # 현황을 계산하기 전에 모든 종목의 가격 데이터가 유효한지 확인합니다.
-    failed_tickers = []
-    for tkr, _ in pairs:
-        # data_by_tkr에 티커가 없거나, 있어도 가격이 0 이하이면 실패로 간주합니다.
-        # 코인의 경우, 보유하지 않은 종목은 pairs에 포함되지만 data_by_tkr에 없을 수 있습니다.
-        # 하지만 현황 계산에 필요한 모든 종목(보유+유니버스)은 가격이 있어야 합니다.
-        if tkr not in data_by_tkr or data_by_tkr[tkr].get("price", 0) <= 0:
-            failed_tickers.append(tkr)
+    # --- 데이터 유효성 검증 및 경고 생성 ---
+    hard_failure_reasons = ["FETCH_FAILED", "PROCESS_ERROR"]
+    fetch_failed_tickers = [
+        tkr for tkr, reason in failed_tickers_info.items() if reason in hard_failure_reasons
+    ]
+    insufficient_data_tickers = [
+        tkr for tkr, reason in failed_tickers_info.items() if reason == "INSUFFICIENT_DATA"
+    ]
 
-    if failed_tickers:
-        # 실패한 티커가 있으면, 처리를 중단하고 예외를 발생시킵니다.
+    # 데이터 조회/처리에 실패한 종목이 있으면, 처리를 중단하고 예외를 발생시킵니다.
+    if fetch_failed_tickers:
         # 이 예외는 web_app.py에서 처리하여 사용자에게 메시지를 표시합니다.
-        raise ValueError(f"PRICE_FETCH_FAILED:{','.join(sorted(list(set(failed_tickers))))}")
+        raise ValueError(f"PRICE_FETCH_FAILED:{','.join(sorted(list(set(fetch_failed_tickers))))}")
+
+    # --- 현황 계산 시작 알림 ---
+    if notify_start:
+        warning_messages_for_slack = []
+        if insufficient_data_tickers:
+            name_map = {tkr: name for tkr, name in pairs}
+            for tkr in sorted(insufficient_data_tickers):
+                name = name_map.get(tkr, tkr)
+                warning_messages_for_slack.append(
+                    f"{name}({tkr}): 데이터 기간이 부족하여 현황 계산에서 제외됩니다."
+                )
+        _notify_calculation_start(country, len(pairs), desc, warning_messages_for_slack)
 
     current_equity = float(portfolio_data.get("total_equity", 0.0))
     holdings = {
@@ -1045,6 +1115,22 @@ def generate_status_report(
     header_line, label_date, day_label = _build_header_line(
         country, portfolio_data, current_equity, total_holdings_value, data_by_tkr, base_date
     )
+
+    # 데이터 기간이 부족한 종목에 대한 경고 메시지를 헤더에 추가합니다.
+    if insufficient_data_tickers:
+        name_map = {tkr: name for tkr, name in pairs}
+        warning_messages = []
+        for tkr in sorted(insufficient_data_tickers):
+            name = name_map.get(tkr, tkr)
+            warning_messages.append(
+                f"{name}({tkr}): 데이터 기간이 부족하여 현황 계산에서 제외됩니다."
+            )
+
+        if warning_messages:
+            full_warning_str = "<br>".join(
+                [f"<span style='color:orange;'>⚠️ {msg}</span>" for msg in warning_messages]
+            )
+            header_line += f"<br>{full_warning_str}"
 
     # 3. 보유 기간 및 고점 대비 하락률 계산
     held_tickers = [tkr for tkr, v in holdings.items() if float((v or {}).get("shares") or 0.0) > 0]
@@ -1652,7 +1738,7 @@ def generate_status_report(
 
 def main(country: str = "kor", date_str: Optional[str] = None):
     """CLI에서 오늘의 현황을 실행하고 결과를 출력/저장합니다."""
-    result = generate_status_report(country, date_str)
+    result = generate_status_report(country, date_str, notify_start=True)
 
     if result:
         header_line, headers, rows_sorted = result
@@ -1810,6 +1896,9 @@ def _maybe_notify_detailed_status(
         return False
 
     try:
+        # 상세 알림에서는 시작 알림에서 보낸 경고(데이터 부족 등)를 제외합니다.
+        # header_line은 HTML <br> 태그로 경고와 구분됩니다.
+        header_line_clean = header_line.split("<br>")[0]
 
         def _strip_html(s: str) -> str:
             try:
@@ -1819,7 +1908,7 @@ def _maybe_notify_detailed_status(
 
         # --- Parse header_line for caption ---
         # Date
-        first_seg = header_line.split("|")[0].strip()
+        first_seg = header_line_clean.split("|")[0].strip()
         date_part = first_seg.split(":", 1)[1].strip()
         if "[" in date_part:
             date_part = date_part.split("[")[0].strip()
@@ -1827,29 +1916,29 @@ def _maybe_notify_detailed_status(
 
         # Holdings count
         hold_seg = next(
-            (seg for seg in header_line.split("|") if "보유종목:" in seg), "보유종목: -"
+            (seg for seg in header_line_clean.split("|") if "보유종목:" in seg), "보유종목: -"
         )
         hold_text = _strip_html(hold_seg.split(":", 1)[1].strip())
 
         # Holdings value
         hold_val_seg = next(
-            (seg for seg in header_line.split("|") if "보유금액:" in seg), "보유금액: 0"
+            (seg for seg in header_line_clean.split("|") if "보유금액:" in seg), "보유금액: 0"
         )
         hold_val_text = _strip_html(hold_val_seg.split(":", 1)[1].strip())
 
         # Cash value
-        cash_seg = next((seg for seg in header_line.split("|") if "현금:" in seg), "현금: 0")
+        cash_seg = next((seg for seg in header_line_clean.split("|") if "현금:" in seg), "현금: 0")
         cash_text = _strip_html(cash_seg.split(":", 1)[1].strip())
 
         # Cumulative return
         cum_seg = next(
-            (seg for seg in header_line.split("|") if "누적:" in seg), "누적: +0.00%(0원)"
+            (seg for seg in header_line_clean.split("|") if "누적:" in seg), "누적: +0.00%(0원)"
         )
         cum_text = _strip_html(cum_seg.split(":", 1)[1].strip())
 
         # Total equity value
         equity_seg = next(
-            (seg for seg in header_line.split("|") if "평가금액:" in seg), "평가금액: 0"
+            (seg for seg in header_line_clean.split("|") if "평가금액:" in seg), "평가금액: 0"
         )
         equity_text = _strip_html(equity_seg.split(":", 1)[1].strip())
 
@@ -1872,6 +1961,10 @@ def _maybe_notify_detailed_status(
         except Exception:
             pass
 
+        # 호주 'IS' 종목의 이름을 수동으로 지정합니다.
+        if country == "aus":
+            name_map["IS"] = "International Shares"
+
         # 1. 데이터를 사전 처리하여 표시할 부분을 만들고 최대 너비를 찾습니다.
         display_parts_list = []
         max_len_name = 0
@@ -1883,7 +1976,12 @@ def _maybe_notify_detailed_status(
                 num_part = f"[{row[0]}]"
                 tkr = str(row[idx_ticker])
                 name = name_map.get(tkr.upper(), "")
-                name_part = f"{name}({tkr})" if name else tkr
+
+                # 'IS' 종목은 티커 없이 이름만 표시합니다.
+                if country == "aus" and tkr.upper() == "IS":
+                    name_part = name
+                else:
+                    name_part = f"{name}({tkr})" if name else tkr
                 full_name_part = f"{num_part} {name_part}"
 
                 stt = (
@@ -1965,10 +2063,11 @@ def _maybe_notify_detailed_status(
         # --- Build caption for message ---
         country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
 
-        line1 = f"[{country_kor}] {date_part} 평가금액: {equity_text}, 누적수익 {cum_text}"
-        line2 = f"현금: {cash_text}, 보유금액: {hold_val_text}"
+        title_line = f"[{country_kor}] 상세내역"
+        equity_line = f"평가금액: {equity_text}, 누적수익 {cum_text}"
+        cash_line = f"현금: {cash_text}, 보유금액: {hold_val_text}"
         hold_line = f"보유종목: {hold_text}"
-        caption = "\n".join([line1, line2, hold_line])
+        caption = "\n".join([title_line, equity_line, cash_line, hold_line])
 
         # --- Send notifications ---
         app_settings = get_app_settings(country) or {}

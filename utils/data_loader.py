@@ -4,7 +4,6 @@
 
 import functools
 import json
-import logging
 import warnings
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -21,12 +20,7 @@ except ImportError:
 
 # yfinance가 설치되지 않았을 경우를 대비한 예외 처리
 try:
-    # Silence noisy yfinance "Failed download" console messages
-    import logging as _yf_logging  # noqa: E402
-
     import yfinance as yf
-
-    _yf_logging.getLogger("yfinance").setLevel(_yf_logging.ERROR)
 except ImportError:
     yf = None
 
@@ -110,9 +104,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
             if sched is not None and not sched.empty:
                 return [pd.Timestamp(d.date()) for d in sched.index]
         except Exception as e:
-            logging.getLogger(__name__).warning(
-                f"pandas_market_calendars({country_code}:{cal_code}) 조회 실패: {e}"
-            )
+            print(f"경고: pandas_market_calendars({country_code}:{cal_code}) 조회 실패: {e}")
         return []
 
     if country == "kor":
@@ -124,7 +116,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
         # 실제 거래가 없는 날(예: 거래소 점검)은 고려하지 않습니다.
         trading_days_ts = pd.date_range(start=start_date, end=end_date, freq="D").tolist()
     else:
-        logging.getLogger(__name__).error(f"지원하지 않는 국가 코드입니다: {country}")
+        print(f"오류: 지원하지 않는 국가 코드입니다: {country}")
         return []
 
     # 최종적으로 start_date와 end_date 사이의 날짜만 반환하고, 중복 제거 및 정렬합니다.
@@ -155,8 +147,8 @@ def fetch_ohlcv(
             start_dt = pd.to_datetime(date_range[0])
             end_dt = pd.to_datetime(date_range[1])
         except (ValueError, TypeError):
-            logging.getLogger(__name__).error(
-                f"잘못된 date_range 형식: {date_range}. 'YYYY-MM-DD' 형식을 사용해야 합니다."
+            print(
+                f"오류: 잘못된 date_range 형식: {date_range}. 'YYYY-MM-DD' 형식을 사용해야 합니다."
             )
             return None
     else:
@@ -177,8 +169,8 @@ def fetch_ohlcv(
     # 지수 티커는 국가와 상관없이 yfinance로 조회합니다.
     if ticker.startswith("^"):
         if yf is None:
-            logging.getLogger(__name__).error(
-                "yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
+            print(
+                "오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
             )
             return None
         try:
@@ -206,13 +198,13 @@ def fetch_ohlcv(
                 df.index = df.index.tz_localize(None)
             return df
         except Exception as e:
-            logging.getLogger(__name__).warning(f"{ticker}의 데이터 조회 중 오류: {e}")
+            print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
             return None
 
     if country == "kor":
         if not is_pykrx_available():
-            logging.getLogger(__name__).error(
-                "pykrx 라이브러리가 설치되지 않았습니다. 'pip install pykrx'로 설치해주세요."
+            print(
+                "오류: pykrx 라이브러리가 설치되지 않았습니다. 'pip install pykrx'로 설치해주세요."
             )
             return None
 
@@ -230,22 +222,30 @@ def fetch_ohlcv(
             end_str = current_end.strftime("%Y%m%d")
 
             try:
+                # 1. ETF로 먼저 조회 시도
                 df_part = _stock.get_etf_ohlcv_by_date(start_str, end_str, ticker)
+
+                # 2. ETF 조회가 비어있으면 일반 주식으로 간주하고 다시 시도
+                if df_part is None or df_part.empty:
+                    df_part = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
+
+                # 3. 주식 조회도 비어있으면 ETN으로 간주하고 다시 시도
+                if df_part is None or df_part.empty:
+                    df_part = _stock.get_etn_ohlcv_by_date(start_str, end_str, ticker)
+
                 if df_part is not None and not df_part.empty:
                     all_dfs.append(df_part)
             except (json.JSONDecodeError, KeyError) as e:  # Catch KeyError as well
                 # pykrx에서 JSONDecodeError 또는 KeyError가 발생하면 (KRX 웹사이트 응답 문제 또는 데이터 구조 문제),
                 # 루프를 중단하고 yfinance로 전체 기간 폴백을 시도합니다.
                 pykrx_failed_with_json_error = True  # Renamed variable for clarity, but same logic
-                logging.getLogger(__name__).warning(
-                    f"pykrx 조회 실패({type(e).__name__}), yfinance로 전체 기간 대체 시도: {ticker}"
+                print(
+                    f"경고: pykrx 조회 실패({type(e).__name__}), yfinance로 전체 기간 대체 시도: {ticker}"
                 )
                 break  # while 루프 중단
             except Exception as e:
                 # 다른 종류의 예외인 경우, 기존처럼 경고만 로깅합니다。
-                logging.getLogger(__name__).warning(
-                    f"{ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {e}"
-                )
+                print(f"경고: {ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {e}")
 
             current_start += pd.DateOffset(years=1)
 
@@ -276,7 +276,7 @@ def fetch_ohlcv(
                 else:
                     return None  # yfinance 조회도 실패
             except Exception as yf_e:
-                logging.getLogger(__name__).warning(f"yfinance 대체 조회도 실패: {ticker} ({yf_e})")
+                print(f"경고: yfinance 대체 조회도 실패: {ticker} ({yf_e})")
                 return None
 
         if not all_dfs:
@@ -298,8 +298,8 @@ def fetch_ohlcv(
         )
     elif country == "aus":
         if yf is None:
-            logging.getLogger(__name__).error(
-                "yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
+            print(
+                "오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
             )
             return None
 
@@ -332,7 +332,7 @@ def fetch_ohlcv(
             # yfinance는 이미 컬럼명이 영어로 되어있음
             return df
         except Exception as e:
-            logging.getLogger(__name__).warning(f"{ticker}의 데이터 조회 중 오류: {e}")
+            print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
             return None
     elif country == "coin":
         # 코인: 빗썸 퍼블릭 캔들스틱 API로 일봉(24h) OHLCV를 조회합니다.
@@ -380,10 +380,10 @@ def fetch_ohlcv(
                     pass
             return df if not df.empty else None
         except Exception as e:
-            logging.getLogger(__name__).warning(f"{ticker} 코인 OHLCV 조회 중 오류: {e}")
+            print(f"경고: {ticker} 코인 OHLCV 조회 중 오류: {e}")
             return None
     else:
-        logging.getLogger(__name__).error(f"지원하지 않는 국가 코드입니다: {country}")
+        print(f"오류: 지원하지 않는 국가 코드입니다: {country}")
         return None
 
 
@@ -438,7 +438,7 @@ def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
             price_str = price_element.get_text().replace(",", "")
             return float(price_str)
     except Exception as e:
-        logging.getLogger(__name__).warning(f"{ticker}의 실시간 가격 조회 중 오류 발생: {e}")
+        print(f"경고: {ticker}의 실시간 가격 조회 중 오류 발생: {e}")
     return None
 
 
@@ -447,7 +447,7 @@ _pykrx_name_cache: Dict[str, str] = {}
 
 def fetch_pykrx_name(ticker: str) -> str:
     """
-    pykrx를 통해 종목의 이름을 가져옵니다. ETF와 일반 주식을 모두 시도합니다.
+    pykrx를 통해 종목의 이름을 가져옵니다. ETF, 일반 주식, ETN을 모두 시도합니다.
     결과는 단일 실행 내에서 캐시됩니다.
     """
     if ticker in _pykrx_name_cache:
@@ -456,17 +456,35 @@ def fetch_pykrx_name(ticker: str) -> str:
     if not is_pykrx_available():
         return ""
 
-    etf_name = ""
+    name = ""
     try:
         # 1. ETF 이름 조회 시도
         name_candidate = _stock.get_etf_ticker_name(ticker)
         if isinstance(name_candidate, str) and name_candidate:
-            etf_name = name_candidate
+            name = name_candidate
     except Exception:
         pass
 
-    _pykrx_name_cache[ticker] = etf_name
-    return etf_name
+    # 2. ETF 조회가 실패하면 일반 주식으로 간주하고 다시 시도
+    if not name:
+        try:
+            name_candidate = _stock.get_market_ticker_name(ticker)
+            if isinstance(name_candidate, str) and name_candidate:
+                name = name_candidate
+        except Exception:
+            pass
+
+    # 3. 주식 조회도 실패하면 ETN으로 간주하고 다시 시도
+    if not name:
+        try:
+            name_candidate = _stock.get_etn_ticker_name(ticker)
+            if isinstance(name_candidate, str) and name_candidate:
+                name = name_candidate
+        except Exception:
+            pass
+
+    _pykrx_name_cache[ticker] = name
+    return name
 
 
 _yfinance_name_cache: Dict[str, str] = {}
@@ -490,6 +508,6 @@ def fetch_yfinance_name(ticker: str) -> str:
         _yfinance_name_cache[cache_key] = name
         return name
     except Exception as e:
-        logging.getLogger(__name__).warning(f"{cache_key}의 이름 조회 중 오류 발생: {e}")
+        print(f"경고: {cache_key}의 이름 조회 중 오류 발생: {e}")
         _yfinance_name_cache[cache_key] = ""  # 실패도 캐시하여 재시도 방지
     return None
