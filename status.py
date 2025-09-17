@@ -1853,7 +1853,7 @@ def generate_status_report(
     return (header_line, headers, rows_sorted, base_date)
 
 
-def main(country: str = "kor", date_str: Optional[str] = None):
+def main(country: str = "kor", date_str: Optional[str] = None) -> Optional[datetime]:
     """CLI에서 오늘의 현황을 실행하고 결과를 출력/저장합니다."""
     result = generate_status_report(country, date_str, notify_start=True)
 
@@ -1873,6 +1873,8 @@ def main(country: str = "kor", date_str: Optional[str] = None):
             _maybe_notify_detailed_status(country, header_line, headers, rows_sorted)
         except Exception:
             pass
+
+        return report_base_date.to_pydatetime()
 
         # --- 콘솔 출력용 포맷팅 ---
         # 웹앱은 raw data (rows_sorted)를 사용하고, 콘솔은 포맷된 데이터를 사용합니다.

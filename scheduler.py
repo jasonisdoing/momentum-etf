@@ -17,6 +17,7 @@ ENV
 
 import os
 import sys
+import time
 from datetime import datetime
 
 # 프로젝트 루트를 Python 경로에 추가
@@ -67,17 +68,29 @@ def _format_korean_datetime(dt: datetime) -> str:
     return f"{dt.strftime('%Y년 %m월 %d일')}({weekday_str}) {ampm_str} {hour12}시 {dt.minute:02d}분"
 
 
-def run_status(country: str):
-    """Run status generation and implicit Slack notification."""
+def run_status(country: str) -> None:
+    """Run status generation and sends a completion log to Slack."""
+    start_time = time.time()
+    report_date = None
     try:
         from status import main as run_status_main
+        from utils.notify import send_log_to_slack
 
         print(f"Running status for {country}")
         if country == "coin":
             _try_sync_bithumb_trades()
             _try_sync_bithumb_equity()
 
-        run_status_main(country=country, date_str=None)
+        # status.main은 성공 시 계산된 리포트의 기준 날짜를 반환합니다.
+        report_date = run_status_main(country=country, date_str=None)
+
+        # 작업이 성공적으로 완료되고 날짜를 받아왔을 때만 로그 전송
+        if report_date:
+            duration = time.time() - start_time
+            date_str = report_date.strftime("%Y-%m-%d")
+            message = f"{country}/{date_str} 작업이 완료 되었습니다 (작업시간: {duration:.1f}초)"
+            send_log_to_slack(message)
+
     except Exception as e:
         error_message = f"Status job failed for {country}: {e}"
         print(error_message)
