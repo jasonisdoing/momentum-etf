@@ -485,6 +485,9 @@ def render_notification_settings_ui(country_code: str):
     """지정된 국가에 대한 알림 설정 UI를 렌더링합니다."""
     st.header(f"{COUNTRY_CODE_MAP.get(country_code, country_code.upper())} 국가 알림 설정")
 
+    # .env 파일에서 웹훅 URL을 가져옵니다.
+    from utils.notify import get_slack_webhook_url
+
     app_settings = get_app_settings(country_code) or {}
 
     with st.form(f"notification_settings_form_{country_code}"):
@@ -498,13 +501,19 @@ def render_notification_settings_ui(country_code: str):
             key=f"slack_enabled_{country_code}",
             help="이 국가의 현황 메시지를 슬랙으로 전송합니다.",
         )
-        new_slack_webhook_url = st.text_input(
-            "웹훅 URL",
-            value=slack_webhook_url,
-            key=f"slack_webhook_url_{country_code}",
-            placeholder="예: https://hooks.slack.com/services/",
-            help="이 국가의 알림을 받을 Slack 채널의 Incoming Webhook URL",
-        )
+
+        webhook_url_from_env = get_slack_webhook_url(country_code)
+        if webhook_url_from_env:
+            st.text_input(
+                "웹훅 URL (.env)",
+                value=webhook_url_from_env,
+                disabled=True,
+                help=f"{country_code.upper()}_SLACK_WEBHOOK 환경 변수에서 가져온 값입니다.",
+            )
+        else:
+            st.warning(
+                f"`.env` 파일에 `{country_code.upper()}_SLACK_WEBHOOK` 환경 변수를 설정해주세요."
+            )
 
         st.caption("테스트는 스케줄과 무관하게 1회 계산 후 알림을 전송합니다.")
 
@@ -516,18 +525,8 @@ def render_notification_settings_ui(country_code: str):
 
     if settings_save:
         error = False
-        # 슬랙 설정 저장 (app_settings)
-        slack_settings_to_save = {}
-        if new_slack_enabled:
-            if not new_slack_webhook_url:
-                st.error("슬랙 알림을 사용하려면 웹훅 URL이 필요합니다.")
-                error = True
-            else:
-                slack_settings_to_save["SLACK_ENABLED"] = True
-                slack_settings_to_save["SLACK_WEBHOOK_URL"] = new_slack_webhook_url.strip()
-        else:
-            slack_settings_to_save["SLACK_ENABLED"] = False
-            slack_settings_to_save["SLACK_WEBHOOK_URL"] = ""
+        # 웹훅 URL은 더 이상 DB에 저장하지 않고, '사용' 여부만 저장합니다.
+        slack_settings_to_save = {"SLACK_ENABLED": new_slack_enabled}
 
         if not error:
             save_app_settings(country_code, slack_settings_to_save)
@@ -535,26 +534,26 @@ def render_notification_settings_ui(country_code: str):
             st.rerun()
 
     if test_send:
-        # 테스트 전송은 현재 UI의 값을 즉시 저장하고 실행
-        save_app_settings(
-            country_code,
-            {"SLACK_ENABLED": new_slack_enabled, "SLACK_WEBHOOK_URL": new_slack_webhook_url},
-        )
-        res = generate_status_report(country=country_code, date_str=None, notify_start=True)
-        if not res:
-            st.error("현황 계산 실패로 테스트 전송을 건너뜁니다.")
+        # 테스트 전송은 현재 UI의 '사용' 여부만 저장하고 실행합니다.
+        save_app_settings(country_code, {"SLACK_ENABLED": new_slack_enabled})
+        if not webhook_url_from_env:
+            st.error("테스트를 보내려면 .env 파일에 웹훅 URL을 먼저 설정해야 합니다.")
         else:
-            header_line, headers, rows_sorted = res
-            sent = _maybe_notify_detailed_status(
-                country_code, header_line, headers, rows_sorted, force=True
-            )
-            if sent:
-                st.success("알림 테스트 전송 완료. 슬랙 채널을 확인하세요.")
+            res = generate_status_report(country=country_code, date_str=None, notify_start=True)
+            if not res:
+                st.error("현황 계산 실패로 테스트 전송을 건너뜁니다.")
             else:
-                from utils.notify import get_last_error
+                header_line, headers, rows_sorted = res
+                sent = _maybe_notify_detailed_status(
+                    country_code, header_line, headers, rows_sorted, force=True
+                )
+                if sent:
+                    st.success("알림 테스트 전송 완료. 슬랙 채널을 확인하세요.")
+                else:
+                    from utils.notify import get_last_error
 
-                err = get_last_error()
-                st.warning(f"전송 시도는 했지만 응답이 없었습니다. 상세: {err or '설정 확인'}")
+                    err = get_last_error()
+                    st.warning(f"전송 시도는 했지만 응답이 없었습니다. 상세: {err or '설정 확인'}")
 
 
 def render_scheduler_tab():

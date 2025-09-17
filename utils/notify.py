@@ -1,8 +1,23 @@
+import os
 from typing import Optional
 
 import requests
 
 _LAST_ERROR: Optional[str] = None
+
+
+def get_slack_webhook_url(country: str) -> Optional[str]:
+    """환경 변수에서 지정된 국가의 슬랙 웹훅 URL을 가져옵니다."""
+    env_var_name = f"{country.upper()}_SLACK_WEBHOOK"
+    return os.environ.get(env_var_name)
+
+
+def send_log_to_slack(message: str):
+    """중요 로그 메시지를 전용 슬랙 채널로 전송합니다."""
+    webhook_url = os.environ.get("LOGS_SLACK_WEBHOOK")
+    if webhook_url:
+        log_message = f"📜 *System Log*\n```{message}```"
+        send_slack_message(log_message, webhook_url=webhook_url)
 
 
 def get_last_error() -> Optional[str]:

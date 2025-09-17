@@ -79,7 +79,8 @@ def run_status(country: str):
 
         run_status_main(country=country, date_str=None)
     except Exception as e:
-        print(f"Status job failed for {country}: {e}")
+        error_message = f"Status job failed for {country}: {e}"
+        print(error_message)
 
 
 def _try_sync_bithumb_equity():
@@ -121,7 +122,8 @@ def _try_sync_bithumb_equity():
             print("-> 코인 평가금액 스냅샷을 찾을 수 없어 업데이트를 건너뜁니다.")
 
     except Exception as e:
-        print(f"Bithumb balance snapshot skipped or failed: {e}")
+        error_message = f"Bithumb balance snapshot skipped or failed: {e}"
+        print(error_message)
 
 
 def _try_sync_bithumb_trades():
@@ -131,7 +133,8 @@ def _try_sync_bithumb_trades():
 
         sync_main()
     except Exception as e:
-        print(f"Bithumb accounts→trades sync skipped or failed: {e}")
+        error_message = f"Bithumb accounts→trades sync skipped or failed: {e}"
+        print(error_message)
 
 
 def main():

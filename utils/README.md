@@ -73,6 +73,14 @@ MONGO_DB_CONNECTION_STRING="mongodb+srv://<username>:<password>@cluster0.xxxxx.m
 # 사용할 데이터베이스 이름 (기본값: momentum_etf_db)
 MONGO_DB_NAME="momentum_etf_db"
 
+# (선택) 국가별 슬랙 알림 웹훅 URL
+KOR_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+AUS_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+COIN_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+
+# (선택) 중요 시스템 로그를 받을 슬랙 웹훅 URL
+LOGS_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+
 # (선택) 빗썸 API 키 (가상화폐 자산 추적용)
 BITHUMB_API_KEY="Your_Bithumb_API_Key"
 BITHUMB_API_SECRET="Your_Bithumb_Secret_Key"

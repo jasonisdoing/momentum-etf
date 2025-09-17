@@ -86,7 +86,8 @@ def get_db_connection():
             print("-> MongoDB에 성공적으로 연결되었습니다.")
         return _db_connection
     except Exception as e:
-        print(f"오류: MongoDB 연결에 실패했습니다: {e}")
+        error_message = f"오류: MongoDB 연결에 실패했습니다: {e}"
+        print(error_message)
         return None
 
 

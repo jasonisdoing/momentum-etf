@@ -1062,14 +1062,14 @@ def _notify_calculation_start(
     """계산 시작과 경고에 대한 슬랙 알림을 보냅니다."""
     try:
         from utils.db_manager import get_app_settings
-        from utils.notify import send_slack_message
+        from utils.notify import get_slack_webhook_url, send_slack_message
     except Exception:
         return False
 
     app_settings = get_app_settings(country) or {}
     if not app_settings.get("SLACK_ENABLED"):
         return False
-    webhook_url = app_settings.get("SLACK_WEBHOOK_URL")
+    webhook_url = get_slack_webhook_url(country)
     if not webhook_url:
         return False
 
@@ -1099,7 +1099,7 @@ def _notify_equity_update(country: str, old_equity: float, new_equity: float):
     """평가금액 자동 보정 시 슬랙으로 알림을 보냅니다."""
     try:
         from utils.db_manager import get_app_settings
-        from utils.notify import send_slack_message
+        from utils.notify import get_slack_webhook_url, send_slack_message
         from utils.report import format_aud_money, format_kr_money
     except Exception:
         return False
@@ -1107,7 +1107,7 @@ def _notify_equity_update(country: str, old_equity: float, new_equity: float):
     app_settings = get_app_settings(country) or {}
     if not app_settings.get("SLACK_ENABLED"):
         return False
-    webhook_url = app_settings.get("SLACK_WEBHOOK_URL")
+    webhook_url = get_slack_webhook_url(country)
     if not webhook_url:
         return False
 
@@ -1134,10 +1134,13 @@ def generate_status_report(
     notify_start: bool = False,
 ) -> Optional[Tuple[str, List[str], List[List[str]]]]:
     """지정된 전략에 대한 오늘의 현황 데이터를 생성하여 반환합니다."""
-    # 1. 데이터 로드 및 지표 계산
-    result = _fetch_and_prepare_data(country, date_str, prefetched_data)
-    if result is None:
-        return None
+    try:
+        # 1. 데이터 로드 및 지표 계산
+        result = _fetch_and_prepare_data(country, date_str, prefetched_data)
+        if result is None:
+            return None
+    except Exception as e:
+        raise  # 오류를 다시 발생시켜 호출한 쪽에서 처리하도록 함
 
     portfolio_data = result.portfolio_data
     data_by_tkr = result.data_by_tkr
@@ -2037,9 +2040,7 @@ def _maybe_notify_detailed_status(
     """국가별 설정에 따라 슬랙으로 상세 현황 알림을 전송합니다."""
     try:
         from utils.db_manager import get_app_settings
-        from utils.notify import (
-            send_slack_message,
-        )
+        from utils.notify import get_slack_webhook_url, send_slack_message
     except Exception:
         return False
 
@@ -2224,7 +2225,7 @@ def _maybe_notify_detailed_status(
         app_settings = get_app_settings(country) or {}
         if not app_settings.get("SLACK_ENABLED"):
             return False
-        webhook_url = app_settings.get("SLACK_WEBHOOK_URL")
+        webhook_url = get_slack_webhook_url(country)
         if not webhook_url:
             return False
 
