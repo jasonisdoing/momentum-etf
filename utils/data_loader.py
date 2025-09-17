@@ -30,6 +30,16 @@ try:
 except Exception:
     _stock = None
 
+import warnings
+
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+warnings.filterwarnings(
+    "ignore",
+    message=r"\['break_start', 'break_end'\] are discontinued",
+    category=UserWarning,
+    module=r"^pandas_market_calendars\.",
+)
+
 
 def is_pykrx_available() -> bool:
     """pykrx 모듈이 성공적으로 임포트되었는지 확인합니다."""

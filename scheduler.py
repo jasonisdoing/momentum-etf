@@ -15,7 +15,6 @@ ENV
 - RUN_IMMEDIATELY_ON_START: "1" 이면 시작 시 즉시 한 번 실행
 """
 
-import logging
 import os
 import sys
 
@@ -54,10 +53,10 @@ def run_status(country: str):
     try:
         from status import main as run_status_main
 
-        logging.info("Running status for %s", country)
+        print(f"Running status for {country}")
         run_status_main(country=country, date_str=None)
     except Exception as e:
-        logging.exception("Status job failed for %s: %s", country, e)
+        print(f"Status job failed for {country}: {e}")
 
 
 def _try_sync_bithumb_equity():
@@ -67,7 +66,7 @@ def _try_sync_bithumb_equity():
 
         snapshot_main()
     except Exception as e:
-        logging.warning("Bithumb balance snapshot skipped or failed: %s", e)
+        print(f"Bithumb balance snapshot skipped or failed: {e}")
 
 
 def _try_sync_bithumb_trades():
@@ -77,22 +76,20 @@ def _try_sync_bithumb_trades():
 
         sync_main()
     except Exception as e:
-        logging.warning("Bithumb accounts→trades sync skipped or failed: %s", e)
+        print(f"Bithumb accounts→trades sync skipped or failed: {e}")
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
-
     # Load .env for API keys, DB, etc.
     load_env_if_present()
 
     # Update stock names before scheduling
-    logging.info("Checking for and updating stock names...")
+    print("Checking for and updating stock names...")
     try:
         update_etf_names()
-        logging.info("Stock name update complete.")
+        print("Stock name update complete.")
     except Exception as e:
-        logging.error(f"Failed to update stock names: {e}")
+        print(f"Failed to update stock names: {e}")
 
     scheduler = BlockingScheduler()
 
@@ -111,7 +108,7 @@ def main():
             run_status("coin")
 
         scheduler.add_job(coin_job, CronTrigger.from_crontab(cron, timezone=tz), id="coin_status")
-        logging.info("Scheduled COIN: cron=%s tz=%s", cron, tz)
+        print(f"Scheduled COIN: cron={cron} tz={tz}")
 
     # kor
     if _bool_env("SCHEDULE_ENABLE_KOR", True):
@@ -123,7 +120,7 @@ def main():
             args=["kor"],
             id="kor_status",
         )
-        logging.info("Scheduled KOR: cron=%s tz=%s", cron, tz)
+        print(f"Scheduled KOR: cron={cron} tz={tz}")
 
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
@@ -135,7 +132,7 @@ def main():
             args=["aus"],
             id="aus_status",
         )
-        logging.info("Scheduled AUS: cron=%s tz=%s", cron, tz)
+        print(f"Scheduled AUS: cron={cron} tz={tz}")
 
     if _bool_env("RUN_IMMEDIATELY_ON_START", False):
         # 시작 시 한 번 즉시 실행
@@ -146,7 +143,6 @@ def main():
             except Exception:
                 pass
 
-    logging.info("Starting scheduler...")
     scheduler.start()
 
 

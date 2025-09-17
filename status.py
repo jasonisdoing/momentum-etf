@@ -2,10 +2,11 @@ import os
 import re
 import sys
 import warnings
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 import pandas as pd
 
 # 프로젝트 루트를 Python 경로에 추가
@@ -43,18 +44,9 @@ from utils.report import (
 )
 from utils.stock_list_io import get_etfs
 
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-# Suppress pmc discontinued break warnings globally for status runs
-warnings.filterwarnings(
-    "ignore",
-    message=r"\[\'break_start\', \'break_end\'\] are discontinued",
-    category=UserWarning,
-    module=r"^pandas_market_calendars.",
-)
-
 try:
     from pykrx import stock as _stock
-except Exception:
+except ImportError:
     _stock = None
 
 try:
@@ -125,6 +117,20 @@ DECISION_CONFIG = {
 
 # 코인 보유 수량에서 0으로 간주할 임계값 (거래소의 dust 처리)
 COIN_ZERO_THRESHOLD = 1e-9
+
+
+@dataclass
+class StatusReportData:
+    portfolio_data: Dict
+    data_by_tkr: Dict
+    total_holdings_value: float
+    datestamps: List
+    pairs: List[Tuple[str, str]]
+    base_date: pd.Timestamp
+    regime_info: Optional[Dict]
+    etf_meta: Dict
+    failed_tickers_info: Dict
+    description: str
 
 
 def get_market_regime_status_string() -> Optional[str]:
@@ -279,7 +285,9 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
                         if df_y.index.tz is not None:
                             df_y.index = df_y.index.tz_localize(None)
                         df_benchmark = df_y.rename(columns={"Adj Close": "Close"})
-                except Exception:
+                except (
+                    Exception
+                ):  # TODO: Refine exception handling (e.g., requests.exceptions.RequestException, ValueError)
                     pass
             # 2) COIN fallback via yfinance (e.g., BTC -> BTC-USD)
             if (
@@ -413,7 +421,7 @@ def is_market_open(country: str = "kor") -> bool:
         # 개장 시간 확인
         market_open_time, market_close_time = market_hours[country]
         return market_open_time <= now_local.time() <= market_close_time
-    except Exception:
+    except Exception:  # TODO: Refine exception handling
         return False  # 오류 발생 시 안전하게 False 반환
 
 
@@ -503,13 +511,7 @@ def _format_return_for_header(label: str, pct: float, amount: float, formatter: 
 def _load_and_prepare_ticker_data(args):
     """
     단일 티커에 대한 데이터 조회 및 지표 계산을 수행하는 워커 함수입니다.
-    병렬 처리를 위해 사용됩니다.
     """
-    # 병렬 처리 시 자식 프로세스에서 발생하는 경고를 억제합니다.
-    import warnings
-
-    warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-
     # Unpack arguments
     tkr, country, required_months, base_date, ma_period, atr_period_norm, df_full = args
     from utils.indicators import calculate_atr
@@ -564,7 +566,7 @@ def _load_and_prepare_ticker_data(args):
 
 def _fetch_and_prepare_data(
     country: str, date_str: Optional[str], prefetched_data: Optional[Dict[str, pd.DataFrame]] = None
-):
+) -> Optional[StatusReportData]:
     """
     주어진 종목 목록에 대해 OHLCV 데이터를 조회하고,
     신호 계산에 필요한 보조지표(이동평균, ATR 등)를 계산합니다.
@@ -575,13 +577,13 @@ def _fetch_and_prepare_data(
         print(
             f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
         )
-        return None, None, None, None, None, None, None, None
+        return None
 
     try:
         ma_period = int(app_settings["ma_period"])
     except (ValueError, TypeError):
         print(f"오류: '{country}' 국가의 MA 기간 설정이 올바르지 않습니다.")
-        return None, None, None, None, None, None, None, None
+        return None
 
     # 현황 조회 시, 날짜가 지정되지 않으면 항상 오늘 날짜를 기준으로 조회합니다.
     if date_str is None:
@@ -592,7 +594,7 @@ def _fetch_and_prepare_data(
         print(
             f"오류: '{country}' 국가의 '{date_str}' 날짜에 대한 포트폴리오 스냅샷을 DB에서 찾을 수 없습니다. 거래 내역이 없거나 DB 연결에 문제가 있을 수 있습니다."
         )
-        return None, None, None, None, None, None, None, None
+        return None
     try:
         # DB에서 가져온 date는 스냅샷의 기준일이 됩니다.
         base_date = pd.to_datetime(portfolio_data["date"]).normalize()
@@ -679,17 +681,17 @@ def _fetch_and_prepare_data(
     common = get_common_settings()
     if not common:
         print("오류: 공통 설정이 DB에 없습니다. '설정' 탭에서 값을 저장해주세요.")
-        return None, None, None, None, None, None, None, None
+        return None
     try:
         atr_period_norm = int(common["ATR_PERIOD_FOR_NORMALIZATION"])
         regime_filter_enabled = bool(common["MARKET_REGIME_FILTER_ENABLED"])
         regime_ma_period = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
     except KeyError as e:
         print(f"오류: 공통 설정 '{e.args[0]}' 값이 없습니다.")
-        return None, None, None, None, None, None, None, None
+        return None
     except (ValueError, TypeError):
         print("오류: 공통 설정 값 형식이 올바르지 않습니다.")
-        return None, None, None, None, None, None, None, None
+        return None
 
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
     # 코인은 거래소 잔고 기반 표시이므로, 종목 마스터가 비어 있어도 보유코인을 기준으로 진행합니다.
@@ -697,7 +699,7 @@ def _fetch_and_prepare_data(
         print(
             f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 현황을 계산할 종목을 찾을 수 없습니다."
         )
-        return None, None, None, None, None, None, None, None
+        return None
 
     max_ma_period = max(ma_period, regime_ma_period if regime_filter_enabled else 0)
     required_days = max(max_ma_period, atr_period_norm) + 5  # 버퍼 추가
@@ -708,7 +710,7 @@ def _fetch_and_prepare_data(
     if regime_filter_enabled:
         if "MARKET_REGIME_FILTER_TICKER" not in common:
             print("오류: 공통 설정에 MARKET_REGIME_FILTER_TICKER 값이 없습니다.")
-            return None, None, None, None, None, None, None, None
+            return None
         regime_ticker = str(common["MARKET_REGIME_FILTER_TICKER"])
 
         df_regime = fetch_ohlcv(
@@ -757,26 +759,19 @@ def _fetch_and_prepare_data(
     desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
     print(f"-> {desc} 시작... (총 {len(tasks)}개 종목)")
 
-    with ProcessPoolExecutor() as executor:
-        # 작업을 제출하고 future 객체를 리스트에 저장
-        future_to_tkr = {
-            executor.submit(_load_and_prepare_ticker_data, task): task[0] for task in tasks
-        }
+    # 직렬 처리로 데이터 로딩 및 기본 지표 계산
+    for i, task in enumerate(tasks):
+        tkr = task[0]
+        try:
+            _, result = _load_and_prepare_ticker_data(task)
+            processed_results[tkr] = result
+        except Exception as exc:
+            print(f"\n-> 경고: {tkr} 데이터 처리 중 오류 발생: {exc}")
+            processed_results[tkr] = {"error": "PROCESS_ERROR"}
 
-        # 완료되는 작업 순서대로 결과 처리
-        for i, future in enumerate(as_completed(future_to_tkr)):
-            tkr = future_to_tkr[future]
-            try:
-                _, result = future.result()  # result는 데이터 또는 에러 딕셔너리
-                processed_results[tkr] = result
-            except Exception as exc:
-                # 진행률 표시가 깨지지 않도록 개행 문자를 추가합니다.
-                print(f"\n-> 경고: {tkr} 데이터 처리 중 오류 발생: {exc}")
-                processed_results[tkr] = {"error": "PROCESS_ERROR"}
+        # 진행 상황 표시
+        print(f"\r   {desc} 진행: {i + 1}/{len(tasks)}", end="", flush=True)
 
-            # 진행 상황 표시
-            print(f"\r   {desc} 진행: {i + 1}/{len(tasks)}", end="", flush=True)
-    # 루프가 끝나면 개행하여 다음 출력이 줄의 시작에서 이뤄지도록 합니다.
     print("\n-> 데이터 처리 완료.")
 
     # --- 최종 데이터 조합 및 계산 ---
@@ -828,17 +823,17 @@ def _fetch_and_prepare_data(
             "df": result["df"],
         }
 
-    return (
-        portfolio_data,
-        data_by_tkr,
-        total_holdings_value,
-        datestamps,
-        pairs,
-        base_date,
-        regime_info,
-        etf_meta,
-        failed_tickers_info,
-        desc,
+    return StatusReportData(
+        portfolio_data=portfolio_data,
+        data_by_tkr=data_by_tkr,
+        total_holdings_value=total_holdings_value,
+        datestamps=datestamps,
+        pairs=pairs,
+        base_date=base_date,
+        regime_info=regime_info,
+        etf_meta=etf_meta,
+        failed_tickers_info=failed_tickers_info,
+        description=desc,
     )
 
 
@@ -1050,21 +1045,19 @@ def generate_status_report(
     """지정된 전략에 대한 오늘의 현황 데이터를 생성하여 반환합니다."""
     # 1. 데이터 로드 및 지표 계산
     result = _fetch_and_prepare_data(country, date_str, prefetched_data)
-    if not result or not result[0]:  # type: ignore
+    if result is None:
         return None
 
-    (
-        portfolio_data,
-        data_by_tkr,
-        total_holdings_value,
-        datestamps,
-        pairs,
-        base_date,
-        regime_info,
-        etf_meta,
-        failed_tickers_info,
-        desc,
-    ) = result
+    portfolio_data = result.portfolio_data
+    data_by_tkr = result.data_by_tkr
+    total_holdings_value = result.total_holdings_value
+    datestamps = result.datestamps
+    pairs = result.pairs
+    base_date = result.base_date
+    regime_info = result.regime_info
+    etf_meta = result.etf_meta
+    failed_tickers_info = result.failed_tickers_info
+    desc = result.description
 
     # --- 데이터 유효성 검증 및 경고 생성 ---
     hard_failure_reasons = ["FETCH_FAILED", "PROCESS_ERROR"]

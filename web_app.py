@@ -1,12 +1,7 @@
-import logging
 import os
 import sys
-import warnings
 from datetime import datetime
 from typing import Dict, Optional
-
-# Streamlit 관련 경고를 최대한 빨리 억제
-logging.getLogger("streamlit").setLevel(logging.ERROR)
 
 import pandas as pd
 import streamlit as st
@@ -14,19 +9,19 @@ from dotenv import load_dotenv
 
 # .env 파일이 있다면 로드합니다.
 load_dotenv()
+import warnings
+
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+warnings.filterwarnings(
+    "ignore",
+    message=r"\['break_start', 'break_end'\] are discontinued",
+    category=UserWarning,
+    module=r"^pandas_market_calendars\.",
+)
 
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-# Suppress pmc discontinued break warnings globally
-warnings.filterwarnings(
-    "ignore",
-    message=r"\\[\'break_start\', \'break_end\'\\] are discontinued",
-    category=UserWarning,
-    module=r"^pandas_market_calendars\\.",
-)
-
 
 import settings as global_settings
 from status import (
@@ -146,25 +141,11 @@ def render_cron_input(label, key, default_value, country_code: str):
 def _is_running_in_streamlit():
     """
     Streamlit 실행 환경인지 확인합니다.
-    get_script_run_ctx() 호출 시 발생하는 'missing ScriptRunContext' 경고를
-    일시적으로 로깅 레벨을 조정하여 숨깁니다.
     """
     try:
-        # Streamlit의 경고 로거를 특정합니다.
-        logger = logging.getLogger("streamlit.runtime.scriptrunner_utils")
-        # 기존 로깅 레벨을 저장해둡니다.
-        original_level = logger.level
-        # 경고를 무시하도록 로깅 레벨을 ERROR로 상향 조정합니다.
-        logger.setLevel(logging.ERROR)
-
         from streamlit.runtime.scriptrunner import get_script_run_ctx
 
-        is_running = get_script_run_ctx() is not None
-
-        # 원래 로깅 레벨로 복원합니다.
-        logger.setLevel(original_level)
-
-        return is_running
+        return get_script_run_ctx() is not None
     except Exception:
         # 어떤 경우에도 실패하면 False를 반환합니다.
         return False
@@ -740,8 +721,19 @@ def render_country_tab(country_code: str):
         df_holdings = pd.DataFrame(holdings_with_prices)
 
         def on_sell_submit():
+            # 한국 현지 시간으로 현재 시간을 가져옵니다.
+            trade_time = datetime.now()
+            if pytz:
+                try:
+                    korea_tz = pytz.timezone("Asia/Seoul")
+                    # DB에 시간대 정보가 없는 순수한 한국 시간(naive)으로 저장해달라는 요청에 따라
+                    # aware datetime에서 timezone 정보를 제거합니다.
+                    trade_time = datetime.now(korea_tz).replace(tzinfo=None)
+                except pytz.UnknownTimeZoneError:
+                    # pytz가 설치되었지만 'Asia/Seoul'을 모르는 경우에 대한 폴백
+                    pass
+
             # st.session_state에서 폼 데이터 가져오기
-            sell_date = st.session_state[f"sell_date_{country_code_inner}"]
             editor_state = st.session_state[f"sell_editor_{country_code_inner}"]
 
             # data_editor에서 선택된 행의 인덱스를 찾습니다.
@@ -759,7 +751,7 @@ def render_country_tab(country_code: str):
             for _, row in selected_rows.iterrows():
                 trade_data = {
                     "country": country_code_inner,
-                    "date": pd.to_datetime(sell_date).to_pydatetime(),
+                    "date": trade_time,
                     "ticker": row["ticker"],
                     "name": row["name"],
                     "action": "SELL",
@@ -794,7 +786,6 @@ def render_country_tab(country_code: str):
 
         with st.form(f"sell_form_{country_code_inner}"):
             st.subheader("매도할 종목을 선택하세요 (전체 매도)")
-            st.date_input("매도일", value="today", key=f"sell_date_{country_code_inner}")
 
             df_holdings["선택"] = False
             # 정렬이 필요한 컬럼은 숫자형으로 유지하고, column_config에서 포맷팅합니다.
