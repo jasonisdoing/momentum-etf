@@ -15,9 +15,9 @@ def get_slack_webhook_url(country: str) -> Optional[str]:
 def send_log_to_slack(message: str):
     """중요 로그 메시지를 전용 슬랙 채널로 전송합니다."""
     webhook_url = os.environ.get("LOGS_SLACK_WEBHOOK")
-    env_name = os.environ.get("APP_ENV", "SERVER")
+    app_type = os.environ.get("APP_TYPE", "SERVER")
     if webhook_url:
-        log_message = f"📜 *[{env_name}]* {message}"
+        log_message = f"📜 *[{app_type}]* {message}"
         send_slack_message(log_message, webhook_url=webhook_url)
 
 
