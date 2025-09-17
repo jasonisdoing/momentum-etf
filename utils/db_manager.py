@@ -4,9 +4,13 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from bson import ObjectId
+from dotenv import load_dotenv
 from pymongo import DESCENDING, MongoClient
 
 import settings as global_settings
+
+# .env 파일이 있다면 로드합니다.
+load_dotenv()
 
 # --- 전역 변수로 DB 연결 관리 ---
 _db_connection = None
