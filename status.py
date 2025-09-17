@@ -459,7 +459,17 @@ def _determine_target_date_for_scheduler(country: str) -> pd.Timestamp:
     - 주식/ETF: 장 마감 2시간 후부터는 다음 거래일을 계산 대상으로 함.
     """
     if country == "coin":
-        return pd.Timestamp.now().normalize()
+        # 서버의 시간대가 UTC일 수 있으므로, 한국 시간 기준으로 '오늘'을 결정합니다.
+        if pytz:
+            try:
+                seoul_tz = pytz.timezone("Asia/Seoul")
+                return pd.Timestamp.now(seoul_tz).normalize()
+            except Exception:
+                # pytz가 있으나 타임존을 못찾는 경우 폴백
+                return pd.Timestamp.now().normalize()
+        else:
+            # pytz가 없는 경우, 시스템 시간에 의존
+            return pd.Timestamp.now().normalize()
 
     # 각 시장의 현지 시간과 장 마감 시간을 기준으로 대상 날짜를 결정합니다.
     market_settings = {
@@ -474,14 +484,8 @@ def _determine_target_date_for_scheduler(country: str) -> pd.Timestamp:
     try:
         local_tz = pytz.timezone(settings["tz"])
         now_local = datetime.now(local_tz)
-        print(
-            f"  [Debug] Timezone: {settings['tz']}, Converted Time: {now_local.strftime('%Y-%m-%d %H:%M:%S %Z%z')}"
-        )
     except Exception:
         now_local = datetime.now()  # 폴백
-        print(
-            f"  [Debug] Timezone conversion failed. Using system time: {now_local.strftime('%Y-%m-%d %H:%M:%S')}"
-        )
 
     today = pd.Timestamp(now_local).normalize()
 
@@ -498,25 +502,17 @@ def _determine_target_date_for_scheduler(country: str) -> pd.Timestamp:
         # Naive datetime을 localize 해야 시간대 계산이 정확함
         close_datetime_local = local_tz.localize(close_datetime_naive)
         cutoff_datetime_local = close_datetime_local + pd.Timedelta(hours=2)
-        print(f"  [Debug] Cutoff Time: {cutoff_datetime_local.strftime('%Y-%m-%d %H:%M:%S %Z%z')}")
 
         if now_local < cutoff_datetime_local:
             # 컷오프 이전: 오늘 날짜를 대상으로 함
             target_date = today
-            print(f"  [Debug] Decision: Current time is BEFORE cutoff. Calculating for TODAY.")
         else:
             # 컷오프 이후: 다음 거래일을 대상으로 함
             start_search_date = today + pd.Timedelta(days=1)
             target_date = get_next_trading_day(country, start_search_date)
-            print(
-                f"  [Debug] Decision: Current time is AFTER cutoff. Calculating for NEXT TRADING DAY."
-            )
     else:
         # 오늘이 거래일이 아님 (주말/공휴일): 다음 거래일을 대상으로 함
         target_date = get_next_trading_day(country, today)
-        print(f"  [Debug] Decision: Today is not a trading day. Calculating for NEXT TRADING DAY.")
-
-    print(f"  [Debug] Final target_date: {target_date.strftime('%Y-%m-%d')}")
     return target_date
 
 
