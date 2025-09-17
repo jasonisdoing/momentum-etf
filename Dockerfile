@@ -4,6 +4,9 @@ FROM python:3.12-slim
 # 2. 환경 변수를 설정하여 파이썬 출력이 버퍼링되지 않도록 하고, .pyc 파일을 생성하지 않도록 합니다.
 ENV PYTHONUNBUFFERED 1
 ENV PYTHONDONTWRITEBYTECODE 1
+# 컨테이너의 기본 인코딩을 UTF-8로 설정하여 한글 깨짐을 방지합니다.
+ENV LANG C.UTF-8
+ENV LC_ALL C.UTF-8
 
 # 3. debconf가 대화형 프롬프트를 표시하지 않도록 설정합니다.
 ENV DEBIAN_FRONTEND=noninteractive

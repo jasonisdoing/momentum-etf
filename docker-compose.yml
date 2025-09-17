@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   scheduler:
+    container_name: etf
     build: .
     env_file:
       - .env
