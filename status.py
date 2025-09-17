@@ -958,39 +958,16 @@ def _build_header_line(
 
     today_cal = pd.Timestamp.now().normalize()
 
-    # 기본 표시 날짜는 파일의 기준일
+    # 표시 날짜는 항상 계산 기준일(base_date)을 따릅니다.
     label_date = base_date
 
-    # 오늘/다음 거래일/기준일 라벨 및 표시 날짜 결정
-    if country != "coin":
-        if base_date.date() == today_cal.date():
-            # 오늘 기준일이면, 오늘이 거래일인지에 따라 라벨 결정
-            next_from_today = get_next_trading_day(country, today_cal)
-            if next_from_today.date() == today_cal.date():
-                day_label = "오늘"
-                label_date = today_cal
-            else:
-                day_label = "다음 거래일"
-                label_date = next_from_today
-        elif base_date.date() > today_cal.date():
-            # 파일 기준일이 미래(다음 거래일 등)
-            day_label = "다음 거래일"
-            label_date = base_date
-        else:
-            # 과거 기준일(히스토리): 강제로 변경하지 않고 그대로 표시
-            day_label = "기준일"
-            label_date = base_date
+    # 라벨(오늘, 다음 거래일 등)을 결정합니다.
+    if base_date.date() < today_cal.date():
+        day_label = "기준일"
+    elif base_date.date() > today_cal.date():
+        day_label = "다음 거래일"
     else:
-        # 코인: 오늘이면 '오늘', 과거면 '기준일'로 표시 날짜를 base_date로 설정
-        if base_date.date() == today_cal.date():
-            day_label = "오늘"
-            label_date = today_cal
-        elif base_date.date() < today_cal.date():
-            day_label = "기준일"
-            label_date = base_date
-        else:
-            day_label = "기준일"
-            label_date = base_date
+        day_label = "오늘"
 
     # 일간 수익률: 다음 거래일 기준일에는 아직 수익률이 없으므로 0 처리
     if day_label == "다음 거래일":
@@ -1030,18 +1007,13 @@ def _build_header_line(
         "누적", cum_ret_pct, current_equity - initial_capital_local, money_formatter
     )
 
-    # 기준일 정보(맨 앞에 배치)
-    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
-    label_weekday_str = weekday_map[label_date.weekday()]
-    date_prefix = f"기준일: {label_date.strftime('%Y-%m-%d')}({label_weekday_str}) [{day_label}]"
-
     # 헤더 본문
     header_body = (
         f"보유종목: {held_count}/{portfolio_topn} | 평가금액: {equity_str} | 보유금액: {holdings_str} | "
         f"현금: {cash_str} | {day_ret_str} | {eval_ret_str} | {cum_ret_str}"
     )
 
-    header_line = f"{date_prefix} | {header_body}"
+    header_line = header_body
 
     # 평가금액 경고: 표시 기준일의 평가금액이 없으면 최근 평가금액 날짜를 안내
     equity_date = portfolio_data.get("equity_date") or base_date
@@ -1132,7 +1104,7 @@ def generate_status_report(
     date_str: Optional[str] = None,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     notify_start: bool = False,
-) -> Optional[Tuple[str, List[str], List[List[str]]]]:
+) -> Optional[Tuple[str, List[str], List[List[str]], pd.Timestamp]]:
     """지정된 전략에 대한 오늘의 현황 데이터를 생성하여 반환합니다."""
     try:
         # 1. 데이터 로드 및 지표 계산
@@ -1886,7 +1858,7 @@ def generate_status_report(
     ]
     headers.extend(["고점대비", "점수", "지속", "문구"])
 
-    return (header_line, headers, rows_sorted)
+    return (header_line, headers, rows_sorted, base_date)
 
 
 def main(country: str = "kor", date_str: Optional[str] = None):
@@ -1894,15 +1866,13 @@ def main(country: str = "kor", date_str: Optional[str] = None):
     result = generate_status_report(country, date_str, notify_start=True)
 
     if result:
-        header_line, headers, rows_sorted = result
+        header_line, headers, rows_sorted, report_base_date = result
         # Persist status report for use in web app history, if possible.
         try:
-            # Use provided date_str if given; else use today
-            if date_str:
-                report_date = pd.to_datetime(date_str).to_pydatetime()
-            else:
-                report_date = pd.Timestamp.now().normalize().to_pydatetime()
-            save_status_report_to_db(country, report_date, (header_line, headers, rows_sorted))
+            # Use the returned base_date for saving, which is the true date of the report
+            save_status_report_to_db(
+                country, report_base_date.to_pydatetime(), (header_line, headers, rows_sorted)
+            )
         except Exception:
             pass
 

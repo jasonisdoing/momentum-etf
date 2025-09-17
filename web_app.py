@@ -257,13 +257,15 @@ def get_cached_status_report(
     # 2. 강제로 다시 계산해야 하는 경우
     try:
         with st.spinner(f"'{date_str}' 현황을 다시 계산하는 중..."):
-            new_report = generate_status_report(
+            new_report_tuple = generate_status_report(
                 country=country,
                 date_str=date_str,
                 prefetched_data=prefetched_data,
                 notify_start=False,
             )
-            if new_report:
+            if new_report_tuple:
+                header_line, headers, rows, _ = new_report_tuple
+                new_report = (header_line, headers, rows)
                 # 3. 계산된 결과를 DB에 저장합니다.
                 save_status_report_to_db(country, report_date, new_report)
             return new_report
@@ -539,11 +541,13 @@ def render_notification_settings_ui(country_code: str):
         if not webhook_url_from_env:
             st.error("테스트를 보내려면 .env 파일에 웹훅 URL을 먼저 설정해야 합니다.")
         else:
-            res = generate_status_report(country=country_code, date_str=None, notify_start=True)
-            if not res:
+            result_tuple = generate_status_report(
+                country=country_code, date_str=None, notify_start=True
+            )
+            if not result_tuple:
                 st.error("현황 계산 실패로 테스트 전송을 건너뜁니다.")
             else:
-                header_line, headers, rows_sorted = res
+                header_line, headers, rows_sorted, _ = result_tuple
                 sent = _maybe_notify_detailed_status(
                     country_code, header_line, headers, rows_sorted, force=True
                 )
@@ -1126,74 +1130,55 @@ def render_country_tab(country_code: str):
                 history_date_tabs = st.tabs(past_dates)
                 for i, date_str in enumerate(past_dates):
                     with history_date_tabs[i]:
-                        # 과거 데이터는 기본적으로 DB에서 표시. 헤더의 기준일이 탭 날짜와 불일치하면 자동 재계산하여 교정.
                         want_date = pd.to_datetime(date_str).to_pydatetime()
                         report_from_db = get_status_report_from_db(country_code, want_date)
-                        needs_recalc = False
+
                         if report_from_db:
-                            header_line = str(report_from_db.get("header_line") or "")
-                            # 기대 접두부: "기준일: YYYY-MM-DD(" (요일은 다를 수 있으므로 괄호 전까지만 비교)
-                            expected_prefix = f"기준일: {date_str}("
-                            if not header_line.startswith(expected_prefix):
-                                needs_recalc = True
-                        if not report_from_db or needs_recalc:
-                            # 캐시 불일치 또는 헤더 교정 필요: 재계산 후 저장/표시
-                            new_report = get_cached_status_report(
-                                country_code, date_str, force_recalculate=True
-                            )
-                            if new_report:
-                                header_line, headers, rows = new_report
-                                st.markdown(
-                                    f":information_source: {header_line}", unsafe_allow_html=True
-                                )
-                                if rows and headers and len(rows[0]) == len(headers):
-                                    df = pd.DataFrame(rows, columns=headers)
-                                    _display_status_report_df(df, country_code)
-                                else:
-                                    st.error("재계산된 데이터 형식이 올바르지 않습니다.")
-                            else:
-                                st.info(f"'{date_str}' 기준 현황 데이터를 생성할 수 없습니다.")
-                        else:
+                            # 데이터가 있으면 표시합니다.
+                            header_line = report_from_db.get("header_line", "")
                             headers = report_from_db.get("headers")
                             rows = report_from_db.get("rows")
+
                             st.markdown(
-                                f":information_source: {report_from_db.get('header_line')}",
-                                unsafe_allow_html=True,
+                                f":information_source: {header_line}", unsafe_allow_html=True
                             )
+
+                            # 데이터 형식 검증 (과거 데이터 호환용)
+                            # "기준일:"로 시작하는 과거 형식의 헤더에 대해서만 날짜 일치 여부를 확인합니다.
+                            if header_line.startswith("기준일:"):
+                                expected_prefix = f"기준일: {date_str}("
+                                if not header_line.startswith(expected_prefix):
+                                    st.warning(
+                                        "저장된 데이터의 날짜가 일치하지 않습니다. 재계산이 필요할 수 있습니다."
+                                    )
+
                             if rows and headers and len(rows[0]) != len(headers):
-                                if country_code != "coin":
-                                    st.error(
-                                        f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '과거 전체 다시계산'을 시도해주세요."
-                                    )
-                                else:
-                                    st.error(
-                                        f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. 해당 날짜를 '다시 계산'해 주세요."
-                                    )
+                                st.error(
+                                    f"데이터 형식 오류: 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다."
+                                )
                                 st.write("- 헤더:", headers)
                                 st.write("- 첫 번째 행 데이터:", rows[0])
                             else:
                                 df = pd.DataFrame(rows, columns=headers)
                                 _display_status_report_df(df, country_code)
+                        else:
+                            # 데이터가 없으면 메시지를 표시합니다.
+                            st.info(f"'{date_str}' 날짜의 현황 데이터가 없습니다.")
+
                         # 수동 재계산 버튼
                         if st.button(
                             "이 날짜 다시 계산하기",
                             key=f"recalc_hist_{country_code}_{date_str}_{i}",
                         ):
-                            new_report = get_cached_status_report(
-                                country_code, date_str, force_recalculate=True
-                            )
-                            if new_report:
-                                st.success("재계산 완료")
+                            with st.spinner(f"'{date_str}' 기준 현황 데이터를 계산/저장 중..."):
+                                calc_result = get_cached_status_report(
+                                    country=country_code,
+                                    date_str=date_str,
+                                    force_recalculate=True,
+                                )
+                            if calc_result:
+                                st.success("재계산 완료!")
                                 st.rerun()
-                                with st.spinner(f"'{date_str}' 기준 현황 데이터를 계산/저장 중..."):
-                                    calc_result = get_cached_status_report(
-                                        country=country_code,
-                                        date_str=date_str,
-                                        force_recalculate=True,
-                                    )
-                                if calc_result:
-                                    st.success("계산/저장 완료!")
-                                    st.rerun()
 
         with history_equity_tab:
             app_settings = get_app_settings(country_code)
