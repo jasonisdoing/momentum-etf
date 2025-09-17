@@ -6,3 +6,5 @@ services:
     env_file:
       - .env
     command: python scheduler.py
+    volumes:
+      - ./logs:/app/logs

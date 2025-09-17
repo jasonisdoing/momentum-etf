@@ -16,12 +16,13 @@ ENV
 """
 
 import os
+import logging
 import sys
 import time
 from datetime import datetime
 
 # 프로젝트 루트를 Python 경로에 추가
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -42,6 +43,29 @@ except Exception:
 
     def load_env_if_present():
         return False
+
+
+def setup_logging():
+    """
+    로그 파일을 설정합니다. logs/YYYY-MM-DD.log 형식으로 생성됩니다.
+    프로세스가 시작될 때의 날짜를 기준으로 파일명이 정해집니다.
+    """
+    # 프로젝트 루트 아래에 logs 디렉토리 생성
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    # YYYY-MM-DD.log 파일명 설정
+    log_filename = os.path.join(log_dir, f"{datetime.now().strftime('%Y-%m-%d')}.log")
+
+    # 로거 설정: 파일과 콘솔에 모두 출력
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_filename, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
 
 
 def _bool_env(name: str, default: bool = True) -> bool:
@@ -81,7 +105,7 @@ def run_status(country: str) -> None:
         from status import main as run_status_main
         from utils.notify import send_log_to_slack
 
-        print(f"Running status for {country}")
+        logging.info(f"Running status for {country}")
         if country == "coin":
             _try_sync_bithumb_trades()
             _try_sync_bithumb_equity()
@@ -96,9 +120,9 @@ def run_status(country: str) -> None:
             message = f"{country}/{date_str} 작업 완료(작업시간: {duration:.1f}초)"
             send_log_to_slack(message)
 
-    except Exception as e:
-        error_message = f"Status job failed for {country}: {e}"
-        print(error_message)
+    except Exception:
+        error_message = f"Status job for {country} failed"
+        logging.error(error_message, exc_info=True)
 
 
 def _try_sync_bithumb_equity():
@@ -117,9 +141,9 @@ def _try_sync_bithumb_equity():
         )
 
         # 2. 빗썸 잔액 스냅샷 스크립트를 실행하여 DB를 업데이트합니다.
-        print("snapshot_main----------------")
+        logging.info("Starting Bithumb balance snapshot...")
         snapshot_main()
-        print("snapshot_main----------------")
+        logging.info("Bithumb balance snapshot finished.")
 
         # 3. 업데이트 후 새로운 평가금액을 가져옵니다.
         new_snapshot = get_portfolio_snapshot("coin")
@@ -132,22 +156,22 @@ def _try_sync_bithumb_equity():
             save_daily_equity(
                 "coin", new_snapshot["date"], new_equity, updated_by="스케줄러"
             )
-            print("-> 코인 평가금액 스냅샷 업데이트 완료. (updated_by='스케줄러')")
+            logging.info("-> Coin equity snapshot updated. (updated_by='scheduler')")
 
             # 5. 평가금액이 변경되었는지 확인하고, 변경된 경우 슬랙 알림을 보냅니다.
             if abs(new_equity - old_equity) > 1e-9:
-                print(
-                    f"-> 코인 평가금액 변경 감지: {old_equity:,.0f}원 -> {new_equity:,.0f}원. 알림을 보냅니다."
+                logging.info(
+                    f"-> Coin equity change detected: {old_equity:,.0f} -> {new_equity:,.0f}. Sending notification."
                 )
                 _notify_equity_update("coin", old_equity, new_equity)
             else:
-                print("-> 코인 평가금액에 변경이 없습니다.")
+                logging.info("-> No change in coin equity.")
         else:
-            print("-> 코인 평가금액 스냅샷을 찾을 수 없어 업데이트를 건너뜁니다.")
+            logging.warning("-> Coin equity snapshot not found, skipping update.")
 
-    except Exception as e:
-        error_message = f"Bithumb balance snapshot skipped or failed: {e}"
-        print(error_message)
+    except Exception:
+        error_message = "Bithumb balance snapshot skipped or failed"
+        logging.error(error_message, exc_info=True)
 
 
 def _try_sync_bithumb_trades():
@@ -156,22 +180,25 @@ def _try_sync_bithumb_trades():
         from scripts.sync_bithumb_accounts_to_trades import main as sync_main
 
         sync_main()
-    except Exception as e:
-        error_message = f"Bithumb accounts→trades sync skipped or failed: {e}"
-        print(error_message)
+    except Exception:
+        error_message = "Bithumb accounts->trades sync skipped or failed"
+        logging.error(error_message, exc_info=True)
 
 
 def main():
+    # 로깅 설정
+    setup_logging()
+
     # Load .env for API keys, DB, etc.
     load_env_if_present()
 
     # Update stock names before scheduling
-    print("Checking for and updating stock names...")
+    logging.info("Checking for and updating stock names...")
     try:
         update_etf_names()
-        print("Stock name update complete.")
+        logging.info("Stock name update complete.")
     except Exception as e:
-        print(f"Failed to update stock names: {e}")
+        logging.error(f"Failed to update stock names: {e}", exc_info=True)
 
     scheduler = BlockingScheduler()
 
@@ -190,7 +217,7 @@ def main():
             args=["coin"],
             id="coin",
         )
-        print(f"Scheduled COIN: cron={cron} tz={tz}")
+        logging.info(f"Scheduled COIN: cron='{cron}' tz='{tz}'")
 
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
@@ -204,7 +231,7 @@ def main():
             args=["aus"],
             id="aus",
         )
-        print(f"Scheduled AUS: cron={cron} tz={tz}")
+        logging.info(f"Scheduled AUS: cron='{cron}' tz='{tz}'")
 
     # kor
     if _bool_env("SCHEDULE_ENABLE_KOR", True):
@@ -218,23 +245,23 @@ def main():
             args=["kor"],
             id="kor",
         )
-        print(f"Scheduled KOR: cron={cron} tz={tz}")
+        logging.info(f"Scheduled KOR: cron='{cron}' tz='{tz}'")
 
     if _bool_env("RUN_IMMEDIATELY_ON_START", False):
         # 시작 시 한 번 즉시 실행
-        print("\n[초기 실행] 시작...")
+        logging.info("\n[Initial Run] Starting...")
         for c in ("coin", "aus", "kor"):
             try:
                 if _bool_env(f"SCHEDULE_ENABLE_{c.upper()}", True):
                     run_status(c)
-            except Exception as e:
-                print(f"초기 실행 중 오류 ({c}): {e}")
-        print("[초기 실행] 완료.")
+            except Exception:
+                logging.error(f"Error during initial run for {c}", exc_info=True)
+        logging.info("[Initial Run] Complete.")
 
     # 다음 실행 시간 출력
     jobs = scheduler.get_jobs()
     if jobs:
-        print("\n다음 실행 예정 시간:")
+        logging.info("\nNext scheduled run times:")
         for job in jobs:
             # 3.x: job.next_run_time
             next_time = getattr(job, "next_run_time", None)
@@ -244,10 +271,10 @@ def main():
                 next_time = job.trigger.get_next_fire_time(None, datetime.now())
 
             if next_time:
-                print(f"- {job.id}: {_format_korean_datetime(next_time)}")
+                logging.info(f"- {job.id}: {_format_korean_datetime(next_time)}")
             else:
-                print(f"- {job.id}: 실행 예정 없음")
-    print("\n스케줄러를 시작합니다. 다음 주기까지 대기합니다...")
+                logging.info(f"- {job.id}: No scheduled runs")
+    logging.info("\nStarting scheduler. Waiting for the next job...")
     scheduler.start()
 
 

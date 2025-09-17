@@ -25,6 +25,3 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # 8. 나머지 애플리케이션 소스 코드 전체를 작업 디렉토리로 복사합니다.
 COPY . .
-
-# 9. Streamlit이 사용하는 포트를 외부에 노출합니다.
-EXPOSE 8501
