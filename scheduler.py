@@ -25,7 +25,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 
 from utils.data_updater import update_etf_names
 
@@ -34,9 +33,15 @@ try:
     from utils.db_manager import get_app_settings, get_common_settings
     from utils.env import load_env_if_present
 except Exception:
-    get_common_settings = lambda: None
-    get_app_settings = lambda country: None
-    load_env_if_present = lambda: False
+
+    def get_common_settings():
+        return None
+
+    def get_app_settings(country):
+        return None
+
+    def load_env_if_present():
+        return False
 
 
 def _bool_env(name: str, default: bool = True) -> bool:
@@ -88,7 +93,7 @@ def run_status(country: str) -> None:
         if report_date:
             duration = time.time() - start_time
             date_str = report_date.strftime("%Y-%m-%d")
-            message = f"{country}/{date_str} 작업이 완료 되었습니다 (작업시간: {duration:.1f}초)"
+            message = f"{country}/{date_str} 작업 완료(작업시간: {duration:.1f}초)"
             send_log_to_slack(message)
 
     except Exception as e:
@@ -107,21 +112,27 @@ def _try_sync_bithumb_equity():
 
         # 1. 업데이트 전 현재 평가금액을 가져옵니다.
         old_snapshot = get_portfolio_snapshot("coin")
-        old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
+        old_equity = (
+            float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
+        )
 
         # 2. 빗썸 잔액 스냅샷 스크립트를 실행하여 DB를 업데이트합니다.
-        print(f"snapshot_main----------------")
+        print("snapshot_main----------------")
         snapshot_main()
-        print(f"snapshot_main----------------")
+        print("snapshot_main----------------")
 
         # 3. 업데이트 후 새로운 평가금액을 가져옵니다.
         new_snapshot = get_portfolio_snapshot("coin")
-        new_equity = float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
+        new_equity = (
+            float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
+        )
 
         # 4. 스케줄러에 의한 업데이트임을 기록하기 위해 `updated_by`와 함께 항상 저장합니다.
         if new_snapshot:
-            save_daily_equity("coin", new_snapshot["date"], new_equity, updated_by="스케줄러")
-            print(f"-> 코인 평가금액 스냅샷 업데이트 완료. (updated_by='스케줄러')")
+            save_daily_equity(
+                "coin", new_snapshot["date"], new_equity, updated_by="스케줄러"
+            )
+            print("-> 코인 평가금액 스냅샷 업데이트 완료. (updated_by='스케줄러')")
 
             # 5. 평가금액이 변경되었는지 확인하고, 변경된 경우 슬랙 알림을 보냅니다.
             if abs(new_equity - old_equity) > 1e-9:
@@ -169,7 +180,9 @@ def main():
     # coin
     if _bool_env("SCHEDULE_ENABLE_COIN", True):
         # DB의 크론 설정을 우선 사용, 없으면 환경변수 폴백
-        cron = common.get("SCHEDULE_CRON_COIN") or _get("SCHEDULE_COIN_CRON", "5 0 * * *")
+        cron = common.get("SCHEDULE_CRON_COIN") or _get(
+            "SCHEDULE_COIN_CRON", "5 0 * * *"
+        )
         tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_status,
@@ -181,7 +194,9 @@ def main():
 
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
-        cron = common.get("SCHEDULE_CRON_AUS") or _get("SCHEDULE_AUS_CRON", "10 18 * * 1-5")
+        cron = common.get("SCHEDULE_CRON_AUS") or _get(
+            "SCHEDULE_AUS_CRON", "10 18 * * 1-5"
+        )
         tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_status,
@@ -193,7 +208,9 @@ def main():
 
     # kor
     if _bool_env("SCHEDULE_ENABLE_KOR", True):
-        cron = common.get("SCHEDULE_CRON_KOR") or _get("SCHEDULE_KOR_CRON", "10 18 * * 1-5")
+        cron = common.get("SCHEDULE_CRON_KOR") or _get(
+            "SCHEDULE_KOR_CRON", "10 18 * * 1-5"
+        )
         tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_status,
