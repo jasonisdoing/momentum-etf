@@ -10,7 +10,6 @@ import argparse
 import os
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Dict
 
 import numpy as np
@@ -27,11 +26,9 @@ from utils.stock_list_io import get_etfs
 def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame]) -> tuple:
     """
     단일 파라미터 조합에 대한 백테스트를 실행하는 워커 함수입니다.
-    이 함수는 별도의 프로세스에서 실행됩니다.
     """
     regime_ma_period, months_range, country = params
 
-    # 각 프로세스는 자체적인 모듈 컨텍스트를 가지므로, 여기서 다시 임포트하고 설정합니다.
     from test import main as run_test
 
     from logic import settings as worker_settings
@@ -113,18 +110,15 @@ def tune_regime_filter(country: str):
     start_time = time.time()
     results_by_month = {months: {} for months in test_months_ranges}
 
-    with ProcessPoolExecutor() as executor:
-        futures = [
-            executor.submit(run_backtest_worker, params, prefetched_data)
-            for params in param_combinations
-        ]
-        for future in as_completed(futures):
-            try:
-                regime_ma_period, months_range, result = future.result()
-                if result and "cagr_pct" in result:
-                    results_by_month[months_range][regime_ma_period] = result["cagr_pct"]
-            except Exception as e:
-                print(f"  -> 파라미터 테스트 중 오류 발생: {e}")
+    # 직렬 백테스트 실행
+    for i, params in enumerate(param_combinations):
+        print(f"\r   테스트 진행: {i + 1}/{total_combinations}", end="", flush=True)
+        try:
+            regime_ma_period, months_range, result = run_backtest_worker(params, prefetched_data)
+            if result and "cagr_pct" in result:
+                results_by_month[months_range][regime_ma_period] = result["cagr_pct"]
+        except Exception as e:
+            print(f"  -> 파라미터 테스트 중 오류 발생: {e}")
 
     end_time = time.time()
     print(f"\n\n파라미터 튜닝 완료! (총 소요 시간: {end_time - start_time:.2f}초)")

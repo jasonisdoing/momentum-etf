@@ -155,10 +155,10 @@ def get_portfolio_snapshot(country: str, date_str: Optional[str] = None) -> Opti
     # 날짜 오름차순, 그리고 같은 날짜 내에서는 생성 순서(ObjectId) 오름차순으로 정렬합니다.
     # 코인의 경우, daily_equities가 자정(00:00)으로 저장되고 트레이드는 시각 포함으로 저장되므로
     # 동일한 달력일에 발생한 모든 트레이드를 포함하도록 상한을 '해당일의 23:59:59.999999'로 확장합니다.
-    if country == "coin":
-        upper_bound = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-    else:
-        upper_bound = target_date
+    # 코인의 경우, daily_equities가 자정(00:00)으로 저장되고 트레이드는 시각 포함으로 저장되므로
+    # 동일한 달력일에 발생한 모든 트레이드를 포함하도록 상한을 '해당일의 23:59:59.999999'로 확장합니다.
+    # 모든 국가에 대해 동일하게 적용하여, 특정 날짜의 모든 거래를 포함하도록 합니다.
+    upper_bound = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
     trades_cursor = db.trades.find(
         {"country": country, "date": {"$lte": upper_bound}, "is_deleted": {"$ne": True}}
     ).sort([("date", 1), ("_id", 1)])
@@ -530,7 +530,11 @@ def delete_trade_by_id(trade_id: str) -> bool:
 
 
 def save_daily_equity(
-    country: str, date: datetime, total_equity: float, international_shares: Optional[Dict] = None
+    country: str,
+    date: datetime,
+    total_equity: float,
+    international_shares: Optional[Dict] = None,
+    updated_by: Optional[str] = None,
 ) -> bool:
     """Saves or updates the total equity for a given date."""
     db = get_db_connection()
@@ -538,15 +542,22 @@ def save_daily_equity(
         return False
 
     try:
-        query = {"country": country, "date": date}
+        # upsert 작업의 일관성을 보장하기 위해 마이크로초를 제거하여 날짜를 정규화합니다.
+        # 이렇게 하면 미세한 시간 차이로 인해 중복 문서가 생성되는 것을 방지할 수 있습니다.
+        date_normalized = date.replace(microsecond=0)
+
+        query = {"country": country, "date": date_normalized}
         set_data = {
             "country": country,
-            "date": date,
+            "date": date_normalized,
             "total_equity": total_equity,
+            "updated_at": datetime.now(),
             "is_deleted": False,
         }
         if international_shares is not None:
             set_data["international_shares"] = international_shares
+        if updated_by:
+            set_data["updated_by"] = updated_by
 
         update_operation = {"$set": set_data, "$unset": {"deleted_at": ""}}
 

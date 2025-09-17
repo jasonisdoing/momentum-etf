@@ -1,0 +1,14 @@
+pandas
+numpy
+streamlit
+pykrx
+pymongo
+APScheduler
+python-dotenv
+requests
+beautifulsoup4
+yfinance
+pandas_market_calendars
+croniter
+cron-descriptor
+google-generativeai

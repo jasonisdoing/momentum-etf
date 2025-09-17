@@ -2,7 +2,8 @@
 .env
 
 # User Data
-data/
+# data/ - # 관리 종목을 퍼블릭에 오픈해도 문제 없음
+
 
 # Log Data
 logs/

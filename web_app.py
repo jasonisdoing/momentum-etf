@@ -1,7 +1,5 @@
-import logging
 import os
 import sys
-import warnings
 from datetime import datetime
 from typing import Dict, Optional
 
@@ -11,26 +9,19 @@ from dotenv import load_dotenv
 
 # .env 파일이 있다면 로드합니다.
 load_dotenv()
+import warnings
 
-# 로거 설정
-logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
-
-# --- Main App ---
-st.set_page_config(page_title="MomentumETF Status", layout="wide")
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+warnings.filterwarnings(
+    "ignore",
+    message=r"\['break_start', 'break_end'\] are discontinued",
+    category=UserWarning,
+    module=r"^pandas_market_calendars\.",
+)
 
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-# Suppress pmc discontinued break warnings globally
-warnings.filterwarnings(
-    "ignore",
-    message=r"\\[\'break_start\', \'break_end\'\\] are discontinued",
-    category=UserWarning,
-    module=r"^pandas_market_calendars\\.",
-)
-
 
 import settings as global_settings
 from status import (
@@ -66,6 +57,11 @@ try:
     from pykrx import stock as _stock
 except Exception:
     _stock = None
+
+try:
+    import pytz
+except ImportError:
+    pytz = None
 
 try:
     from croniter import croniter
@@ -131,7 +127,7 @@ def render_cron_input(label, key, default_value, country_code: str):
                                 display_text = f"✅ 유효. {desc_ko}"
                         except Exception as e:
                             # 설명 생성 실패 시, 콘솔에 오류를 기록하고 기본 문구만 표시합니다.
-                            logger.warning(f"Crontab 설명 생성 중 오류: {e}")
+                            print(f"경고: Crontab 설명 생성 중 오류: {e}")
 
                     # 수직 정렬을 위해 div와 패딩을 사용합니다.
                     st.markdown(
@@ -142,11 +138,31 @@ def render_cron_input(label, key, default_value, country_code: str):
                 st.error(f"오류: {e}")
 
 
-@st.cache_data(ttl=600)
-def get_cached_benchmark_status(country: str) -> Optional[str]:
-    """벤치마크 비교 문자열을 캐시하여 반환합니다."""
-    # status.py에서 직접 임포트하면 순환 참조 가능성이 있으므로, 함수 내에서 호출합니다.
-    return get_benchmark_status_string(country)
+def _is_running_in_streamlit():
+    """
+    Streamlit 실행 환경인지 확인합니다.
+    """
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+
+        return get_script_run_ctx() is not None
+    except Exception:
+        # 어떤 경우에도 실패하면 False를 반환합니다.
+        return False
+
+
+if _is_running_in_streamlit():
+
+    @st.cache_data(ttl=600)
+    def get_cached_benchmark_status(country: str) -> Optional[str]:
+        """벤치마크 비교 문자열을 캐시하여 반환합니다. (Streamlit용)"""
+        return get_benchmark_status_string(country)
+
+else:
+
+    def get_cached_benchmark_status(country: str) -> Optional[str]:
+        """벤치마크 비교 문자열을 반환합니다. (CLI용, 캐시 없음)"""
+        return get_benchmark_status_string(country)
 
 
 def get_cached_status_report(
@@ -178,34 +194,28 @@ def get_cached_status_report(
 
     # 2. DB에 없거나, 강제로 다시 계산해야 하는 경우
     try:
-        # 코인: '오늘' 현황을 계산/재계산할 때만 최신 계좌를 동기화합니다.
-        # 과거 날짜 재계산 시에는 동기화하면 안 됩니다.
-        is_today = pd.to_datetime(date_str).normalize() == pd.Timestamp.now().normalize()
-        if country == "coin" and is_today:
-            try:
-                from scripts.sync_bithumb_accounts_to_trades import main as _sync_trades
-
-                logger.info("Bithumb 계좌 동기화를 시작합니다...")
-                _sync_trades()
-                logger.info("Bithumb 계좌 동기화가 완료되었습니다.")
-            except Exception as e:
-                logger.exception("Bithumb 계좌 동기화 중 오류 발생")
-                st.warning(f"코인 계좌 동기화 중 오류가 발생했습니다: {e}")
-            try:
-                from scripts.snapshot_bithumb_balances import main as _snapshot_equity
-
-                _snapshot_equity()
-            except Exception:
-                logger.warning("코인 평가금액 스냅샷 생성 중 오류 발생", exc_info=True)
         new_report = generate_status_report(
-            country=country, date_str=date_str, prefetched_data=prefetched_data
+            country=country,
+            date_str=date_str,
+            prefetched_data=prefetched_data,
+            notify_start=False,
         )
         if new_report:
             # 3. 계산된 결과를 DB에 저장합니다.
             save_status_report_to_db(country, report_date, new_report)
         return new_report
+    except ValueError as e:
+        if str(e).startswith("PRICE_FETCH_FAILED:"):
+            failed_tickers_str = str(e).split(":", 1)[1]
+            st.error(f"{failed_tickers_str} 종목의 가격을 가져올 수 없습니다. 다시 시도하세요.")
+            return None
+        else:
+            # 다른 ValueError는 기존처럼 처리
+            print(f"오류: 현황 계산 오류: {country}/{date_str}: {e}")
+            st.error(f"'{date_str}' 현황 계산 중 오류가 발생했습니다: {e}")
+            return None
     except Exception as e:
-        logger.exception(f"현황 계산 오류: {country}/{date_str}")
+        print(f"오류: 현황 계산 오류: {country}/{date_str}: {e}")
         st.error(
             f"'{date_str}' 현황 계산 중 오류가 발생했습니다. 자세한 내용은 콘솔 로그를 확인해주세요."
         )
@@ -343,262 +353,6 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
             "문구": st.column_config.TextColumn("문구", width="large"),
         },
     )
-
-
-@st.dialog("BUY")
-def show_buy_dialog(country_code: str):
-    """매수(BUY) 거래 입력을 위한 모달 다이얼로그를 표시합니다."""
-
-    currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
-    message_key = f"buy_message_{country_code}"
-
-    def on_buy_submit():
-        # st.session_state에서 폼 데이터 가져오기
-        trade_date = st.session_state[f"buy_date_{country_code}"]
-        ticker = st.session_state[f"buy_ticker_{country_code}"].strip()
-        shares = st.session_state[f"buy_shares_{country_code}"]
-        price = st.session_state[f"buy_price_{country_code}"]
-
-        if not ticker or not shares > 0 or not price > 0:
-            st.session_state[message_key] = (
-                "error",
-                "종목코드, 수량, 가격을 모두 올바르게 입력해주세요.",
-            )
-            return
-
-        etf_name = ""
-        if country_code == "kor" and _stock:
-            try:
-                name_candidate = _stock.get_etf_ticker_name(ticker)
-                if isinstance(name_candidate, str) and name_candidate:
-                    etf_name = name_candidate
-            except Exception:
-                pass  # 최종 실패
-        elif country_code == "aus":
-            etf_name = fetch_yfinance_name(ticker)
-
-        trade_data = {
-            "country": country_code,
-            "date": pd.to_datetime(trade_date).to_pydatetime(),
-            "ticker": ticker.upper(),
-            "name": etf_name,
-            "action": "BUY",
-            "shares": float(shares),
-            "price": float(price),
-            "note": "Manual input from web app",
-        }
-
-        if save_trade(trade_data):
-            st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
-        else:
-            st.session_state[message_key] = (
-                "error",
-                "거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.",
-            )
-
-    # 다이얼로그 내에서 오류 메시지만 표시합니다. 성공 메시지는 메인 화면에서 토스트로 표시됩니다.
-    if message_key in st.session_state:
-        msg_type, msg_text = st.session_state[message_key]
-        if msg_type == "success":
-            st.error(msg_text)
-            # 오류 메시지는 한 번만 표시되도록 세션에서 제거합니다.
-            del st.session_state[message_key]
-
-    with st.form(f"trade_form_{country_code}"):
-        st.date_input("거래일", value="today", key=f"buy_date_{country_code}")
-        st.text_input("종목코드 (티커)", key=f"buy_ticker_{country_code}")
-        shares_format_str = "%.8f" if country_code == "coin" else "%d"
-        st.number_input(
-            "수량",
-            min_value=0.00000001,
-            step=0.00000001,
-            format=shares_format_str,
-            key=f"buy_shares_{country_code}",
-        )
-        st.number_input(
-            f"매수 단가{currency_str}",
-            min_value=0.0,
-            format=(
-                "%.4f"
-                if country_code == "aus"
-                else ("%d" if country_code in ["kor", "coin"] else "%d")
-            ),
-            key=f"buy_price_{country_code}",
-        )
-        st.form_submit_button("거래 저장", on_click=on_buy_submit)
-
-
-@st.dialog("SELL", width="large")
-def show_sell_dialog(country_code: str):
-    """보유 종목 매도를 위한 모달 다이얼로그를 표시합니다."""
-    currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
-    message_key = f"sell_message_{country_code}"
-
-    from utils.data_loader import fetch_naver_realtime_price, fetch_ohlcv
-
-    latest_date_str = (
-        get_available_snapshot_dates(country_code)[0]
-        if get_available_snapshot_dates(country_code)
-        else None
-    )
-    if not latest_date_str:
-        st.warning("보유 종목이 없어 매도할 수 없습니다.")
-        return
-
-    snapshot = get_portfolio_snapshot(country_code, date_str=latest_date_str)
-    if not snapshot or not snapshot.get("holdings"):
-        st.warning("보유 종목이 없어 매도할 수 없습니다.")
-        return
-
-    holdings = snapshot.get("holdings", [])
-
-    holdings_with_prices = []
-    with st.spinner("보유 종목의 현재가를 조회하는 중..."):
-        for h in holdings:
-            price = None
-            if country_code == "kor":
-                price = fetch_naver_realtime_price(h["ticker"])
-                if not price:
-                    df = fetch_ohlcv(h["ticker"], country="kor", months_back=1)
-                    if df is not None and not df.empty:
-                        if isinstance(df.columns, pd.MultiIndex):
-                            df.columns = df.columns.get_level_values(0)
-                            df = df.loc[:, ~df.columns.duplicated()]
-                        price = df["Close"].iloc[-1]
-            elif country_code == "aus":
-                df = fetch_ohlcv(h["ticker"], country="aus", months_back=1)
-                if df is not None and not df.empty:
-                    if isinstance(df.columns, pd.MultiIndex):
-                        df.columns = df.columns.get_level_values(0)
-                        df = df.loc[:, ~df.columns.duplicated()]
-                    price = df["Close"].iloc[-1]
-
-            # 불리언 평가 및 계산 전에 가격을 스칼라로 보장합니다.
-            # 예: 중복 컬럼 등으로 인해 함수가 Series를 반환하는 경우를 처리합니다.
-            price_val = price.item() if isinstance(price, pd.Series) else price
-
-            if price_val and pd.notna(price_val):
-                value = h["shares"] * price_val
-                return_pct = (
-                    (price_val / h["avg_cost"] - 1) * 100 if h.get("avg_cost", 0) > 0 else 0.0
-                )
-                holdings_with_prices.append(
-                    {
-                        "ticker": h["ticker"],
-                        "name": h["name"],
-                        "shares": h["shares"],
-                        "price": price_val,
-                        "value": value,
-                        "return_pct": return_pct,
-                    }
-                )
-
-    if not holdings_with_prices:
-        st.error("보유 종목의 현재가를 조회할 수 없습니다.")
-        return
-
-    df_holdings = pd.DataFrame(holdings_with_prices)
-
-    def on_sell_submit():
-        # st.session_state에서 폼 데이터 가져오기
-        sell_date = st.session_state[f"sell_date_{country_code}"]
-        editor_state = st.session_state[f"sell_editor_{country_code}"]
-
-        # data_editor에서 선택된 행의 인덱스를 찾습니다.
-        selected_indices = [
-            idx for idx, edit in editor_state.get("edited_rows", {}).items() if edit.get("선택")
-        ]
-
-        if not selected_indices:
-            st.session_state[message_key] = ("warning", "매도할 종목을 선택해주세요.")
-            return
-
-        selected_rows = df_holdings.loc[selected_indices]
-
-        success_count = 0
-        for _, row in selected_rows.iterrows():
-            trade_data = {
-                "country": country_code,
-                "date": pd.to_datetime(sell_date).to_pydatetime(),
-                "ticker": row["ticker"],
-                "name": row["name"],
-                "action": "SELL",
-                "shares": row["shares"],
-                "price": row["price"],
-                "note": "Manual sell from web app",
-            }
-            if save_trade(trade_data):
-                success_count += 1
-
-        if success_count == len(selected_rows):
-            st.session_state[message_key] = (
-                "success",
-                f"{success_count}개 종목의 매도 거래가 성공적으로 저장되었습니다.",
-            )
-        else:
-            st.session_state[message_key] = (
-                "error",
-                "일부 거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.",
-            )
-
-    # 다이얼로그 내에서 오류/경고 메시지만 표시합니다.
-    if message_key in st.session_state:
-        msg_type, msg_text = st.session_state[message_key]
-        if msg_type == "success":
-            if msg_type == "warning":
-                st.warning(msg_text)
-            else:
-                st.error(msg_text)
-            # 메시지는 한 번만 표시되도록 세션에서 제거합니다.
-            del st.session_state[message_key]
-
-    with st.form(f"sell_form_{country_code}"):
-        st.subheader("매도할 종목을 선택하세요 (전체 매도)")
-        st.date_input("매도일", value="today", key=f"sell_date_{country_code}")
-
-        df_holdings["선택"] = False
-        # 정렬이 필요한 컬럼은 숫자형으로 유지하고, column_config에서 포맷팅합니다.
-        # 이렇게 하면 '평가금액' 등에서 문자열이 아닌 숫자 기준으로 올바르게 정렬됩니다.
-        df_display = df_holdings[
-            ["선택", "name", "ticker", "shares", "return_pct", "value", "price"]
-        ].copy()
-        value_col_name = f"평가금액{currency_str}"
-        price_col_name = f"현재가{currency_str}"
-        df_display.rename(
-            columns={
-                "name": "종목명",
-                "ticker": "티커",
-                "shares": "보유수량",
-                "return_pct": "수익률",
-                "value": value_col_name,
-                "price": price_col_name,
-            },
-            inplace=True,
-        )
-
-        st.data_editor(
-            df_display,
-            hide_index=True,
-            width="stretch",
-            key=f"sell_editor_{country_code}",
-            disabled=["종목명", "티커", "보유수량", value_col_name, "수익률", price_col_name],
-            column_config={
-                "선택": st.column_config.CheckboxColumn("삭제", required=True),
-                "보유수량": st.column_config.NumberColumn(format="%.8f"),
-                "수익률": st.column_config.NumberColumn(
-                    format="%.2f%%",
-                ),
-                value_col_name: st.column_config.NumberColumn(
-                    # 쉼표(,)를 포맷에 추가하여 3자리마다 구분자를 표시합니다.
-                    format="%,.0f" if country_code == "kor" else "%,.2f"
-                ),
-                price_col_name: st.column_config.NumberColumn(
-                    format="%.4f" if country_code == "aus" else "%d"
-                ),
-            },
-        )
-
-        st.form_submit_button("선택 종목 매도", on_click=on_sell_submit)
 
 
 def render_master_etf_ui(country_code: str):
@@ -747,7 +501,7 @@ def render_notification_settings_ui(country_code: str):
             country_code,
             {"SLACK_ENABLED": new_slack_enabled, "SLACK_WEBHOOK_URL": new_slack_webhook_url},
         )
-        res = generate_status_report(country=country_code, date_str=None)
+        res = generate_status_report(country=country_code, date_str=None, notify_start=True)
         if not res:
             st.error("현황 계산 실패로 테스트 전송을 건너뜁니다.")
         else:
@@ -785,6 +539,278 @@ def _display_success_toast(country_code: str):
 def render_country_tab(country_code: str):
     """지정된 국가에 대한 탭의 전체 UI를 렌더링합니다."""
     _display_success_toast(country_code)
+
+    @st.dialog("BUY")
+    def show_buy_dialog(country_code_inner: str = country_code):
+        """매수(BUY) 거래 입력을 위한 모달 다이얼로그를 표시합니다."""
+
+        currency_str = f" ({'AUD' if country_code_inner == 'aus' else 'KRW'})"
+        message_key = f"buy_message_{country_code_inner}"
+
+        def on_buy_submit():
+            # 한국 현지 시간으로 현재 시간을 가져옵니다.
+            trade_time = datetime.now()
+            if pytz:
+                try:
+                    korea_tz = pytz.timezone("Asia/Seoul")
+                    # DB에 시간대 정보가 없는 순수한 한국 시간(naive)으로 저장해달라는 요청에 따라
+                    # aware datetime에서 timezone 정보를 제거합니다.
+                    trade_time = datetime.now(korea_tz).replace(tzinfo=None)
+                except pytz.UnknownTimeZoneError:
+                    # pytz가 설치되었지만 'Asia/Seoul'을 모르는 경우에 대한 폴백
+                    pass
+
+            # st.session_state에서 폼 데이터 가져오기
+            ticker = st.session_state[f"buy_ticker_{country_code_inner}"].strip()
+            shares = st.session_state[f"buy_shares_{country_code_inner}"]
+            price = st.session_state[f"buy_price_{country_code_inner}"]
+
+            if not ticker or not shares > 0 or not price > 0:
+                st.session_state[message_key] = (
+                    "error",
+                    "종목코드, 수량, 가격을 모두 올바르게 입력해주세요.",
+                )
+                return
+
+            etf_name = ""
+            if country_code_inner == "kor" and _stock:
+                # fetch_pykrx_name은 ETF와 ETN/주식 이름을 모두 조회 시도합니다.
+                from utils.data_loader import fetch_pykrx_name
+
+                etf_name = fetch_pykrx_name(ticker)
+            elif country_code_inner == "aus":
+                etf_name = fetch_yfinance_name(ticker)
+
+            trade_data = {
+                "country": country_code_inner,
+                "date": trade_time,
+                "ticker": ticker.upper(),
+                "name": etf_name,
+                "action": "BUY",
+                "shares": float(shares),
+                "price": float(price),
+                "note": "Manual input from web app",
+            }
+
+            if save_trade(trade_data):
+                st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
+            else:
+                st.session_state[message_key] = (
+                    "error",
+                    "거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.",
+                )
+
+        # 다이얼로그 내에서 오류 메시지만 표시합니다. 성공 메시지는 메인 화면에서 토스트로 표시됩니다.
+        if message_key in st.session_state:
+            msg_type, msg_text = st.session_state[message_key]
+            if msg_type == "success":
+                st.error(msg_text)
+                # 오류 메시지는 한 번만 표시되도록 세션에서 제거합니다.
+                del st.session_state[message_key]
+
+        with st.form(f"trade_form_{country_code_inner}"):
+            st.text_input("종목코드 (티커)", key=f"buy_ticker_{country_code_inner}")
+            shares_format_str = "%.8f" if country_code_inner == "coin" else "%d"
+            st.number_input(
+                "수량",
+                min_value=0.00000001,
+                step=0.00000001,
+                format=shares_format_str,
+                key=f"buy_shares_{country_code_inner}",
+            )
+            st.number_input(
+                f"매수 단가{currency_str}",
+                min_value=0.0,
+                format=(
+                    "%.4f"
+                    if country_code_inner == "aus"
+                    else ("%d" if country_code_inner in ["kor", "coin"] else "%d")
+                ),
+                key=f"buy_price_{country_code_inner}",
+            )
+            st.form_submit_button("거래 저장", on_click=on_buy_submit)
+
+    @st.dialog("SELL", width="large")
+    def show_sell_dialog(country_code_inner: str = country_code):
+        """보유 종목 매도를 위한 모달 다이얼로그를 표시합니다."""
+        currency_str = f" ({'AUD' if country_code_inner == 'aus' else 'KRW'})"
+        message_key = f"sell_message_{country_code_inner}"
+
+        from utils.data_loader import fetch_naver_realtime_price, fetch_ohlcv
+
+        latest_date_str = (
+            get_available_snapshot_dates(country_code_inner)[0]
+            if get_available_snapshot_dates(country_code_inner)
+            else None
+        )
+        if not latest_date_str:
+            st.warning("보유 종목이 없어 매도할 수 없습니다.")
+            return
+
+        snapshot = get_portfolio_snapshot(country_code_inner, date_str=latest_date_str)
+        if not snapshot or not snapshot.get("holdings"):
+            st.warning("보유 종목이 없어 매도할 수 없습니다.")
+            return
+
+        holdings = snapshot.get("holdings", [])
+
+        holdings_with_prices = []
+        with st.spinner("보유 종목의 현재가를 조회하는 중..."):
+            for h in holdings:
+                price = None
+                if country_code_inner == "kor":
+                    price = fetch_naver_realtime_price(h["ticker"])
+                    if not price:
+                        df = fetch_ohlcv(h["ticker"], country="kor", months_back=1)
+                        if df is not None and not df.empty:
+                            if isinstance(df.columns, pd.MultiIndex):
+                                df.columns = df.columns.get_level_values(0)
+                                df = df.loc[:, ~df.columns.duplicated()]
+                            price = df["Close"].iloc[-1]
+                elif country_code_inner == "aus":
+                    df = fetch_ohlcv(h["ticker"], country="aus", months_back=1)
+                    if df is not None and not df.empty:
+                        if isinstance(df.columns, pd.MultiIndex):
+                            df.columns = df.columns.get_level_values(0)
+                            df = df.loc[:, ~df.columns.duplicated()]
+                        price = df["Close"].iloc[-1]
+
+                # 불리언 평가 및 계산 전에 가격을 스칼라로 보장합니다.
+                # 예: 중복 컬럼 등으로 인해 함수가 Series를 반환하는 경우를 처리합니다.
+                price_val = price.item() if isinstance(price, pd.Series) else price
+
+                if price_val and pd.notna(price_val):
+                    value = h["shares"] * price_val
+                    return_pct = (
+                        (price_val / h["avg_cost"] - 1) * 100 if h.get("avg_cost", 0) > 0 else 0.0
+                    )
+                    holdings_with_prices.append(
+                        {
+                            "ticker": h["ticker"],
+                            "name": h["name"],
+                            "shares": h["shares"],
+                            "price": price_val,
+                            "value": value,
+                            "return_pct": return_pct,
+                        }
+                    )
+
+        if not holdings_with_prices:
+            st.error("보유 종목의 현재가를 조회할 수 없습니다.")
+            return
+
+        df_holdings = pd.DataFrame(holdings_with_prices)
+
+        def on_sell_submit():
+            # 한국 현지 시간으로 현재 시간을 가져옵니다.
+            trade_time = datetime.now()
+            if pytz:
+                try:
+                    korea_tz = pytz.timezone("Asia/Seoul")
+                    # DB에 시간대 정보가 없는 순수한 한국 시간(naive)으로 저장해달라는 요청에 따라
+                    # aware datetime에서 timezone 정보를 제거합니다.
+                    trade_time = datetime.now(korea_tz).replace(tzinfo=None)
+                except pytz.UnknownTimeZoneError:
+                    # pytz가 설치되었지만 'Asia/Seoul'을 모르는 경우에 대한 폴백
+                    pass
+
+            # st.session_state에서 폼 데이터 가져오기
+            editor_state = st.session_state[f"sell_editor_{country_code_inner}"]
+
+            # data_editor에서 선택된 행의 인덱스를 찾습니다.
+            selected_indices = [
+                idx for idx, edit in editor_state.get("edited_rows", {}).items() if edit.get("선택")
+            ]
+
+            if not selected_indices:
+                st.session_state[message_key] = ("warning", "매도할 종목을 선택해주세요.")
+                return
+
+            selected_rows = df_holdings.loc[selected_indices]
+
+            success_count = 0
+            for _, row in selected_rows.iterrows():
+                trade_data = {
+                    "country": country_code_inner,
+                    "date": trade_time,
+                    "ticker": row["ticker"],
+                    "name": row["name"],
+                    "action": "SELL",
+                    "shares": row["shares"],
+                    "price": row["price"],
+                    "note": "Manual sell from web app",
+                }
+                if save_trade(trade_data):
+                    success_count += 1
+
+            if success_count == len(selected_rows):
+                st.session_state[message_key] = (
+                    "success",
+                    f"{success_count}개 종목의 매도 거래가 성공적으로 저장되었습니다.",
+                )
+            else:
+                st.session_state[message_key] = (
+                    "error",
+                    "일부 거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.",
+                )
+
+        # 다이얼로그 내에서 오류/경고 메시지만 표시합니다.
+        if message_key in st.session_state:
+            msg_type, msg_text = st.session_state[message_key]
+            if msg_type == "success":
+                if msg_type == "warning":
+                    st.warning(msg_text)
+                else:
+                    st.error(msg_text)
+                # 메시지는 한 번만 표시되도록 세션에서 제거합니다.
+                del st.session_state[message_key]
+
+        with st.form(f"sell_form_{country_code_inner}"):
+            st.subheader("매도할 종목을 선택하세요 (전체 매도)")
+
+            df_holdings["선택"] = False
+            # 정렬이 필요한 컬럼은 숫자형으로 유지하고, column_config에서 포맷팅합니다.
+            # 이렇게 하면 '평가금액' 등에서 문자열이 아닌 숫자 기준으로 올바르게 정렬됩니다.
+            df_display = df_holdings[
+                ["선택", "name", "ticker", "shares", "return_pct", "value", "price"]
+            ].copy()
+            value_col_name = f"평가금액{currency_str}"
+            price_col_name = f"현재가{currency_str}"
+            df_display.rename(
+                columns={
+                    "name": "종목명",
+                    "ticker": "티커",
+                    "shares": "보유수량",
+                    "return_pct": "수익률",
+                    "value": value_col_name,
+                    "price": price_col_name,
+                },
+                inplace=True,
+            )
+
+            st.data_editor(
+                df_display,
+                hide_index=True,
+                width="stretch",
+                key=f"sell_editor_{country_code_inner}",
+                disabled=["종목명", "티커", "보유수량", value_col_name, "수익률", price_col_name],
+                column_config={
+                    "선택": st.column_config.CheckboxColumn("삭제", required=True),
+                    "보유수량": st.column_config.NumberColumn(format="%.8f"),
+                    "수익률": st.column_config.NumberColumn(
+                        format="%.2f%%",
+                    ),
+                    value_col_name: st.column_config.NumberColumn(
+                        # 쉼표(,)를 포맷에 추가하여 3자리마다 구분자를 표시합니다.
+                        format="%,.0f" if country_code_inner == "kor" else "%,.2f"
+                    ),
+                    price_col_name: st.column_config.NumberColumn(
+                        format="%.4f" if country_code_inner == "aus" else "%d"
+                    ),
+                },
+            )
+
+            st.form_submit_button("선택 종목 매도", on_click=on_sell_submit)
 
     sub_tab_names = ["현황", "히스토리", "트레이드", "종목 관리", "설정", "알림"]
     (
@@ -873,18 +899,6 @@ def render_country_tab(country_code: str):
                         target_date_str = next_bday.strftime("%Y-%m-%d")
 
             col1, col2 = st.columns([1, 4])
-
-            # 재계산 버튼
-            recalc_key = f"{country_code}_{target_date_str}"
-            if st.button("다시 계산", key=f"recalc_status_{recalc_key}"):
-                with st.spinner(f"'{target_date_str}' 기준 현황을 다시 계산 중입니다..."):
-                    # 현황을 다시 계산하고 DB에 저장합니다.
-                    # 코인의 경우, 오늘 날짜에 한해 빗썸 계좌 동기화(거래내역 생성)를 먼저 수행합니다.
-                    get_cached_status_report(
-                        country=country_code, date_str=target_date_str, force_recalculate=True
-                    )
-                st.success("재계산이 완료되었습니다.")
-                st.rerun()
 
             # 캐시된(또는 계산 완료된) 결과를 표시
             result = get_cached_status_report(
@@ -1001,69 +1015,6 @@ def render_country_tab(country_code: str):
             if not past_dates:
                 st.info("과거 현황 데이터가 없습니다.")
             else:
-                # 코인 탭에서는 '과거 전체 다시계산' 기능을 제공하지 않습니다.
-                if country_code != "coin" and st.button(
-                    "과거 전체 다시계산", key=f"recalc_all_hist_{country_code}"
-                ):
-                    # 1. 재계산에 필요한 모든 종목과 전체 기간을 결정합니다.
-                    etfs_from_file = get_etfs(country_code)
-                    tickers = [s["ticker"] for s in etfs_from_file]
-
-                    oldest_date = pd.to_datetime(past_dates[-1])
-                    newest_date = pd.to_datetime(past_dates[0])
-
-                    # 웜업 기간 계산에 필요한 파라미터를 DB에서 읽어옵니다.
-                    app_settings_db = get_app_settings(country_code)
-                    common_settings = get_common_settings()
-                    if not app_settings_db or "ma_period" not in app_settings_db:
-                        st.error(
-                            "오류: DB에 MA 기간 설정이 없습니다. 각 국가 탭의 '설정'에서 값을 저장해주세요."
-                        )
-                        return
-                    if not common_settings or "ATR_PERIOD_FOR_NORMALIZATION" not in common_settings:
-                        st.error(
-                            "오류: DB 공통 설정에 ATR 기간이 없습니다. '설정' 탭의 공통 설정에서 값을 저장해주세요."
-                        )
-                        return
-                    try:
-                        max_ma_period = int(app_settings_db["ma_period"])
-                        atr_period_norm = int(common_settings["ATR_PERIOD_FOR_NORMALIZATION"])
-                    except (ValueError, TypeError):
-                        st.error(
-                            "오류: DB 설정값 형식이 올바르지 않습니다. 숫자 여부를 확인해주세요."
-                        )
-                        return
-                    warmup_days = int(max(max_ma_period, atr_period_norm) * 1.5)
-
-                    # 2. 모든 기간의 데이터를 한 번에 병렬로 가져옵니다.
-                    prefetched_data = fetch_ohlcv_for_tickers(
-                        tickers,
-                        country=country_code,
-                        date_range=[
-                            oldest_date.strftime("%Y-%m-%d"),
-                            newest_date.strftime("%Y-%m-%d"),
-                        ],
-                        warmup_days=warmup_days,
-                    )
-
-                    # 3. 미리 가져온 데이터를 사용하여 각 날짜를 순차적으로 재계산합니다.
-                    progress_text = "과거 현황 데이터를 다시 계산하는 중..."
-                    progress_bar = st.progress(0, text=progress_text)
-                    total_dates = len(past_dates)
-                    for i, date_str in enumerate(past_dates):
-                        get_cached_status_report(
-                            country=country_code,
-                            date_str=date_str,
-                            force_recalculate=True,
-                            prefetched_data=prefetched_data,
-                        )
-                        progress_bar.progress(
-                            (i + 1) / total_dates, text=f"{progress_text} ({i+1}/{total_dates})"
-                        )
-                    progress_bar.empty()
-                    st.success("모든 과거 현황 데이터가 다시 계산되었습니다.")
-                    st.rerun()
-
                 history_date_tabs = st.tabs(past_dates)
                 for i, date_str in enumerate(past_dates):
                     with history_date_tabs[i]:
@@ -1175,6 +1126,8 @@ def render_country_tab(country_code: str):
                         row = {
                             "date": trade_date,
                             "total_equity": existing_data.get("total_equity", 0.0),
+                            "updated_at": existing_data.get("updated_at"),
+                            "updated_by": existing_data.get("updated_by"),
                         }
                         if country_code == "aus":
                             is_data = existing_data.get("international_shares", {})
@@ -1193,6 +1146,10 @@ def render_country_tab(country_code: str):
                             format="%.2f" if country_code == "aus" else "%d",
                             required=True,
                         ),
+                        "updated_at": st.column_config.DatetimeColumn(
+                            "변경일시", format="YYYY-MM-DD HH:mm:ss", disabled=True
+                        ),
+                        "updated_by": st.column_config.TextColumn("변경자", disabled=True),
                     }
                     if country_code == "aus":
                         column_config["is_value"] = st.column_config.NumberColumn(
@@ -1216,24 +1173,43 @@ def render_country_tab(country_code: str):
 
                     if st.button("평가금액 저장하기", key=f"save_all_equities_{country_code}"):
                         with st.spinner("변경된 평가금액을 저장하는 중..."):
+                            # st.data_editor의 변경 사항은 세션 상태에 저장됩니다.
+                            # 전체 데이터프레임을 순회하는 대신, 변경된 행만 처리하여 불필요한 DB 업데이트를 방지합니다.
+                            editor_state = st.session_state[f"equity_editor_{country_code}"]
+                            edited_rows = editor_state.get("edited_rows", {})
+
                             saved_count = 0
-                            for _, row in edited_df.iterrows():
-                                date_to_save = row["date"].to_pydatetime()
-                                equity_to_save = row["total_equity"]
+                            for row_index, changes in edited_rows.items():
+                                # 변경된 행의 원본 데이터를 가져옵니다.
+                                original_row = df_to_edit.iloc[row_index]
+
+                                # 저장할 데이터를 구성합니다.
+                                date_to_save = original_row["date"].to_pydatetime()
+                                equity_to_save = changes.get(
+                                    "total_equity", original_row["total_equity"]
+                                )
                                 is_data_to_save = None
                                 if country_code == "aus":
                                     is_data_to_save = {
-                                        "value": row["is_value"],
-                                        "change_pct": row["is_change_pct"],
+                                        "value": changes.get("is_value", original_row["is_value"]),
+                                        "change_pct": changes.get(
+                                            "is_change_pct", original_row["is_change_pct"]
+                                        ),
                                     }
 
                                 if save_daily_equity(
-                                    country_code, date_to_save, equity_to_save, is_data_to_save
+                                    country_code,
+                                    date_to_save,
+                                    equity_to_save,
+                                    is_data_to_save,
+                                    updated_by="사용자",
                                 ):
                                     saved_count += 1
-
-                            st.success(f"{saved_count}개 날짜의 평가금액을 저장/업데이트했습니다.")
-                            st.rerun()
+                            if saved_count > 0:
+                                st.success(f"{saved_count}개 날짜의 평가금액을 업데이트했습니다.")
+                                st.rerun()
+                            else:
+                                st.info("변경된 내용이 없어 저장하지 않았습니다.")
 
     with sub_tab_trades:
         # 코인 탭: 거래 입력 대신 보유 현황/데이터 편집만 제공 (동기화 버튼 제거)
@@ -1244,10 +1220,10 @@ def render_country_tab(country_code: str):
             col1, col2, _ = st.columns([1, 1, 8])
             with col1:
                 if st.button("BUY", key=f"add_buy_btn_{country_code}"):
-                    show_buy_dialog(country_code)
+                    show_buy_dialog()
             with col2:
                 if st.button("SELL", key=f"add_sell_btn_{country_code}"):
-                    show_sell_dialog(country_code)
+                    show_sell_dialog()
 
         all_trades = get_all_trades(country_code)
         if not all_trades:
@@ -1488,6 +1464,9 @@ def render_country_tab(country_code: str):
 
 def main():
     """MomentumETF 오늘의 현황 웹 UI를 렌더링합니다."""
+    # 페이지 설정은 Streamlit의 첫 명령으로 실행되어야 합니다.
+    st.set_page_config(page_title="MomentumETF Status", layout="wide")
+
     # 페이지 상단 여백을 줄이기 위한 CSS 주입
     st.markdown(
         """
