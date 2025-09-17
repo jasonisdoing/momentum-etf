@@ -163,18 +163,6 @@ def main():
         )
         print(f"Scheduled COIN: cron={cron} tz={tz}")
 
-    # kor
-    if _bool_env("SCHEDULE_ENABLE_KOR", True):
-        cron = common.get("SCHEDULE_CRON_KOR") or _get("SCHEDULE_KOR_CRON", "10 18 * * 1-5")
-        tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
-        scheduler.add_job(
-            run_status,
-            CronTrigger.from_crontab(cron, timezone=tz),
-            args=["kor"],
-            id="kor",
-        )
-        print(f"Scheduled KOR: cron={cron} tz={tz}")
-
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
         cron = common.get("SCHEDULE_CRON_AUS") or _get("SCHEDULE_AUS_CRON", "10 18 * * 1-5")
@@ -187,10 +175,22 @@ def main():
         )
         print(f"Scheduled AUS: cron={cron} tz={tz}")
 
+    # kor
+    if _bool_env("SCHEDULE_ENABLE_KOR", True):
+        cron = common.get("SCHEDULE_CRON_KOR") or _get("SCHEDULE_KOR_CRON", "10 18 * * 1-5")
+        tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
+        scheduler.add_job(
+            run_status,
+            CronTrigger.from_crontab(cron, timezone=tz),
+            args=["kor"],
+            id="kor",
+        )
+        print(f"Scheduled KOR: cron={cron} tz={tz}")
+
     if _bool_env("RUN_IMMEDIATELY_ON_START", False):
         # 시작 시 한 번 즉시 실행
         print("\n[초기 실행] 시작...")
-        for c in ("coin", "kor", "aus"):
+        for c in ("coin", "aus", "kor"):
             try:
                 if _bool_env(f"SCHEDULE_ENABLE_{c.upper()}", True):
                     run_status(c)

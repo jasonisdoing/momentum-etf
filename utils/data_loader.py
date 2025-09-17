@@ -322,7 +322,11 @@ def fetch_ohlcv(
                 start=start_dt,
                 end=end_dt + pd.Timedelta(days=1),
                 progress=False,
-                auto_adjust=True,
+                # auto_adjust=True가 일부 호주 종목(예: ACDC)에 대해
+                # 잘못된 조정 값을 반환하는 문제가 있어 False로 변경합니다.
+                # 이로써 'Close' 가격은 조정되지 않은 원본 가격을 사용하게 되어
+                # 표시되는 현재가가 정확해집니다.
+                auto_adjust=False,
             )
             if df.empty:
                 return None
