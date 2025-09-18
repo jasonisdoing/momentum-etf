@@ -19,3 +19,6 @@ venv/
 
 # OS
 .DS_Store
+
+# 서버에 수동으로 넣어놓음(chmod +x update.sh 충돌때문에)
+update.sh

@@ -26,6 +26,7 @@ except ImportError:
 from utils.data_loader import (
     fetch_ohlcv,
     get_trading_days,
+    PykrxDataUnavailable,
 )
 
 # New structure imports
@@ -45,6 +46,7 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.stock_list_io import get_etfs
+from utils.notify import send_log_to_slack
 
 try:
     from pykrx import stock as _stock
@@ -955,6 +957,16 @@ def _fetch_and_prepare_data(
         try:
             _, result = _load_and_prepare_ticker_data(task)
             processed_results[tkr] = result
+        except PykrxDataUnavailable as exc:
+            start_str = exc.start_dt.strftime("%Y-%m-%d")
+            end_str = exc.end_dt.strftime("%Y-%m-%d")
+            message = f"[{country.upper()}] pykrx 조회 실패 ({start_str}~{end_str}): {exc.detail}"
+            logger.error(message)
+            try:
+                send_log_to_slack(message)
+            except Exception:
+                pass
+            raise
         except Exception as exc:
             print(f"\n-> 경고: {tkr} 데이터 처리 중 오류 발생: {exc}")
             processed_results[tkr] = {"error": "PROCESS_ERROR"}
@@ -1201,11 +1213,10 @@ def _notify_calculation_start(
     if not webhook_url:
         return False
 
-    app_type = os.environ.get("APP_TYPE", "SERVER")
     country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
 
     message_lines = [
-        f"[{app_type}][{country_kor}] 계산",
+        f"[{global_settings.APP_TYPE}][{country_kor}] 계산",
         f"- 대상 종목: {num_tickers}개",
         f"- 계산 내용: {description}",
     ]
@@ -1236,7 +1247,6 @@ def _notify_equity_update(country: str, old_equity: float, new_equity: float):
     if not webhook_url:
         return False
 
-    app_type = os.environ.get("APP_TYPE", "SERVER")
     country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
     money_formatter = format_aud_money if country == "aus" else format_kr_money
 
@@ -1246,9 +1256,9 @@ def _notify_equity_update(country: str, old_equity: float, new_equity: float):
     if old_equity > 0:
         # 평가금액 변동(증가/감소)에 따라 다른 레이블을 사용합니다.
         change_label = "증가" if diff >= 0 else "감소"
-        message = f"[{app_type}][{country_kor}] 평가금액 {change_label}: {money_formatter(old_equity)} => {money_formatter(new_equity)} ({diff_str})"
+        message = f"[{global_settings.APP_TYPE}][{country_kor}] 평가금액 {change_label}: {money_formatter(old_equity)} => {money_formatter(new_equity)} ({diff_str})"
     else:
-        message = f"[{app_type}][{country_kor}] 신규 평가금액 저장: {money_formatter(new_equity)}"
+        message = f"[{global_settings.APP_TYPE}][{country_kor}] 신규 평가금액 저장: {money_formatter(new_equity)}"
 
     return send_slack_message(message, webhook_url=webhook_url)
 
@@ -1348,38 +1358,45 @@ def generate_status_report(
     # 호주의 경우, 해외 주식 가치도 포함하여 최종 평가금액을 계산합니다.
     new_equity_candidate = total_holdings_value + international_shares_value
 
-    # new_equity_candidate가 0보다 크고, (기존 평가금액보다 크거나, 기존 평가금액이 0일 때)
-    if new_equity_candidate > 0 and (
-        new_equity_candidate > equity_for_autocorrect or equity_for_autocorrect == 0
-    ):
+    # 국가별 업데이트 조건: 한국/호주는 증가분만, 코인은 증감 모두 반영
+    if country == "coin":
+        reference_equity = current_equity
+        if reference_equity is None:
+            reference_equity = 0.0
+        should_update_equity = abs(new_equity_candidate - reference_equity) > 1e-9
+        old_equity = reference_equity
+    else:
+        should_update_equity = new_equity_candidate > 0 and (
+            new_equity_candidate > equity_for_autocorrect or equity_for_autocorrect == 0
+        )
         old_equity = equity_for_autocorrect
+
+    if should_update_equity and abs(new_equity_candidate - old_equity) > 1e-9:
         new_equity = new_equity_candidate
 
-        # 보정된 평가금액이 유의미한 차이를 보일 때만 업데이트 및 알림 (부동소수점 오차 방지)
-        if abs(new_equity - old_equity) > 1e-9:
-            # 1. DB에 새로운 평가금액 저장
-            from utils.db_manager import save_daily_equity
+        # 1. DB에 새로운 평가금액 저장
+        from utils.db_manager import save_daily_equity
 
-            # 호주: international_shares 정보도 함께 저장해야 함
-            is_data_to_save = None
-            if country == "aus":
-                is_data_to_save = portfolio_data.get("international_shares")
+        # 호주: international_shares 정보도 함께 저장해야 함
+        is_data_to_save = None
+        if country == "aus":
+            is_data_to_save = portfolio_data.get("international_shares")
 
-            save_daily_equity(
-                country,
-                base_date.to_pydatetime(),
-                new_equity,
-                is_data_to_save,
-                updated_by="스케줄러",
-            )
+        save_daily_equity(
+            country,
+            base_date.to_pydatetime(),
+            new_equity,
+            is_data_to_save,
+            updated_by="스케줄러",
+        )
 
-            # 2. 슬랙 알림 전송
-            _notify_equity_update(country, old_equity, new_equity)
+        # 2. 슬랙 알림 전송
+        _notify_equity_update(country, old_equity, new_equity)
 
-            # 3. 현재 실행 컨텍스트에 보정된 값 반영
-            current_equity = new_equity
-            portfolio_data["total_equity"] = new_equity
-            print(f"-> 평가금액 자동 보정: {old_equity:,.0f}원 -> {new_equity:,.0f}원")
+        # 3. 현재 실행 컨텍스트에 보정된 값 반영
+        current_equity = new_equity
+        portfolio_data["total_equity"] = new_equity
+        print(f"-> 평가금액 자동 보정: {old_equity:,.0f}원 -> {new_equity:,.0f}원")
 
     holdings = {
         item["ticker"]: {
@@ -2438,8 +2455,7 @@ def _maybe_notify_detailed_status(
         # --- Build caption for message ---
         country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
 
-        app_type = os.environ.get("APP_TYPE", "SERVER")
-        title_line = f"[{app_type}][{country_kor}] 상세내역"
+        title_line = f"[{global_settings.APP_TYPE}][{country_kor}] 상세내역"
         equity_line = f"평가금액: {equity_text}, 누적수익 {cum_text}"
         cash_line = f"현금: {cash_text}, 보유금액: {hold_val_text}"
         hold_line = f"보유종목: {hold_text}"
