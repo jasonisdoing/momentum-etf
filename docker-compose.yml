@@ -6,6 +6,6 @@ services:
       - .env
     environment:
       - TZ=Asia/Seoul
-    command: python scheduler.py
+    command: python s.py
     volumes:
       - ./logs:/app/logs

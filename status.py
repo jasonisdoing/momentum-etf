@@ -1,9 +1,11 @@
+import logging
 import os
 import re
 import sys
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 # 프로젝트 루트를 Python 경로에 추가
@@ -117,6 +119,34 @@ DECISION_CONFIG = {
 
 # 코인 보유 수량에서 0으로 간주할 임계값 (거래소의 dust 처리)
 COIN_ZERO_THRESHOLD = 1e-9
+
+
+_STATUS_LOGGER = None
+
+
+def get_status_logger() -> logging.Logger:
+    """로그 파일(콘솔 출력 없이)에 기록하는 status 전용 로거를 반환합니다."""
+    global _STATUS_LOGGER
+    if _STATUS_LOGGER:
+        return _STATUS_LOGGER
+
+    logger = logging.getLogger("status.detail")
+    if not logger.handlers:
+        project_root = Path(__file__).resolve().parent
+        log_dir = project_root / "logs"
+        log_dir.mkdir(exist_ok=True)
+        log_path = log_dir / f"{datetime.now().strftime('%Y-%m-%d')}.log"
+
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        file_handler.setFormatter(formatter)
+
+        logger.addHandler(file_handler)
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+
+    _STATUS_LOGGER = logger
+    return logger
 
 
 def get_next_trading_day(country: str, start_date: pd.Timestamp) -> pd.Timestamp:
@@ -697,6 +727,8 @@ def _fetch_and_prepare_data(
     주어진 종목 목록에 대해 OHLCV 데이터를 조회하고,
     신호 계산에 필요한 보조지표(이동평균, ATR 등)를 계산합니다.
     """
+    logger = get_status_logger()
+
     # 설정을 불러옵니다.
     app_settings = get_app_settings(country)
     if not app_settings or "ma_period" not in app_settings:
@@ -711,6 +743,11 @@ def _fetch_and_prepare_data(
         print(f"오류: '{country}' 국가의 MA 기간 설정이 올바르지 않습니다.")
         return None
 
+    request_label = date_str or "auto"
+    logger.info(
+        "[%s] status data preparation started (input date=%s)", country.upper(), request_label
+    )
+
     # 현황 조회 시, 날짜가 지정되지 않으면 항상 오늘 날짜를 기준으로 조회합니다.
     if date_str is None:
         target_date = _determine_target_date_for_scheduler(country)
@@ -721,6 +758,7 @@ def _fetch_and_prepare_data(
         print(
             f"오류: '{country}' 국가의 '{date_str}' 날짜에 대한 포트폴리오 스냅샷을 DB에서 찾을 수 없습니다. 거래 내역이 없거나 DB 연결에 문제가 있을 수 있습니다."
         )
+        logger.warning("[%s] portfolio snapshot missing for %s", country.upper(), date_str)
         return None
     try:
         # DB에서 가져온 date는 스냅샷의 기준일이 됩니다.
@@ -728,6 +766,13 @@ def _fetch_and_prepare_data(
     except (ValueError, TypeError):
         print("경고: 포트폴리오 스냅샷에서 날짜를 추출할 수 없습니다. 현재 날짜를 사용합니다.")
         base_date = pd.Timestamp.now().normalize()
+
+    logger.info(
+        "[%s] portfolio snapshot loaded for %s (holdings=%d)",
+        country.upper(),
+        base_date.strftime("%Y-%m-%d"),
+        len(portfolio_data.get("holdings", [])),
+    )
 
     # 콘솔 로그에 국가/날짜를 포함하여 표시
     try:
@@ -776,6 +821,14 @@ def _fetch_and_prepare_data(
     for tkr in all_tickers_for_processing:
         name = etf_meta.get(tkr, {}).get("name") or holdings.get(tkr, {}).get("name") or ""
         pairs.append((tkr, name))
+
+    logger.info(
+        "[%s] gathered universe: holdings=%d, meta=%d, total_pairs=%d",
+        country.upper(),
+        len(holdings),
+        len(etf_meta),
+        len(pairs),
+    )
 
     # 국가별로 다른 포맷터 사용
     def _fetch_realtime_price(tkr):
@@ -861,6 +914,13 @@ def _fetch_and_prepare_data(
         # 종목 마스터에 없는 종목은 처리에서 제외합니다. (단, 오늘 매도된 종목은 포함)
         allowed_tickers = {etf["ticker"] for etf in etfs_from_file}
         pairs = [(t, n) for t, n in pairs if t in allowed_tickers or t in sold_tickers_today]
+        logger.info(
+            "[%s] coin universe filtered to %d tickers (allowed=%d, sold_today=%d)",
+            country.upper(),
+            len(pairs),
+            len(allowed_tickers),
+            len(sold_tickers_today),
+        )
 
     # --- 병렬 데이터 로딩 및 지표 계산 ---
     tasks = []
@@ -881,6 +941,12 @@ def _fetch_and_prepare_data(
     # 병렬 처리로 데이터 로딩 및 기본 지표 계산
     processed_results = {}
     desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
+    logger.info(
+        "[%s] %s started (tickers=%d)",
+        country.upper(),
+        desc,
+        len(tasks),
+    )
     print(f"-> {desc} 시작... (총 {len(tasks)}개 종목)")
 
     # 직렬 처리로 데이터 로딩 및 기본 지표 계산
@@ -892,11 +958,13 @@ def _fetch_and_prepare_data(
         except Exception as exc:
             print(f"\n-> 경고: {tkr} 데이터 처리 중 오류 발생: {exc}")
             processed_results[tkr] = {"error": "PROCESS_ERROR"}
+            logger.exception("[%s] %s data processing error", country.upper(), tkr)
 
         # 진행 상황 표시
         print(f"\r   {desc} 진행: {i + 1}/{len(tasks)}", end="", flush=True)
 
     print("\n-> 데이터 처리 완료.")
+    logger.info("[%s] %s finished", country.upper(), desc)
 
     # --- 최종 데이터 조합 및 계산 ---
     # --- 최종 데이터 조합 및 계산 ---
@@ -905,16 +973,30 @@ def _fetch_and_prepare_data(
         result = processed_results.get(tkr)
         if not result:
             failed_tickers_info[tkr] = "FETCH_FAILED"
+            logger.warning("[%s] %s missing result (treated as FETCH_FAILED)", country.upper(), tkr)
             continue
 
         if "error" in result:
             failed_tickers_info[tkr] = result["error"]
+            logger.warning(
+                "[%s] %s excluded due to %s",
+                country.upper(),
+                tkr,
+                result["error"],
+            )
             continue
 
         realtime_price = _fetch_realtime_price(tkr) if market_is_open else None
         c0 = float(realtime_price) if realtime_price else float(result["close"].iloc[-1])
         if pd.isna(c0) or c0 <= 0:
             failed_tickers_info[tkr] = "FETCH_FAILED"
+            logger.warning(
+                "[%s] %s excluded (invalid price: %s, realtime=%s)",
+                country.upper(),
+                tkr,
+                c0,
+                bool(realtime_price),
+            )
             continue
 
         prev_close = (
@@ -946,6 +1028,29 @@ def _fetch_and_prepare_data(
             "avg_cost": ac,
             "df": result["df"],
         }
+
+        logger.debug(
+            "[%s] %s processed: shares=%.4f price=%.2f prev_close=%.2f data_points=%d buy_signal_days=%d",
+            country.upper(),
+            tkr,
+            sh,
+            c0,
+            prev_close,
+            len(result["df"]),
+            buy_signal_days_today,
+        )
+
+    fail_counts: Dict[str, int] = {}
+    for reason in failed_tickers_info.values():
+        fail_counts[reason] = fail_counts.get(reason, 0) + 1
+
+    logger.info(
+        "[%s] status data summary for %s: processed=%d, failures=%s",
+        country.upper(),
+        base_date.strftime("%Y-%m-%d"),
+        len(data_by_tkr),
+        fail_counts or "{}",
+    )
 
     return StatusReportData(
         portfolio_data=portfolio_data,
@@ -1070,8 +1175,6 @@ def _build_header_line(
         f"현금: {cash_str} | {day_ret_str} | {eval_ret_str} | {cum_ret_str}"
     )
 
-    header_line = header_body
-
     # 평가금액 경고: 표시 기준일의 평가금액이 없으면 최근 평가금액 날짜를 안내
     equity_date = portfolio_data.get("equity_date") or base_date
     if label_date.normalize() != pd.to_datetime(equity_date).normalize():
@@ -1080,9 +1183,9 @@ def _build_header_line(
         weekday_str = weekday_map[target_date.weekday()]
         stale_str = pd.to_datetime(equity_date).strftime("%Y-%m-%d")
         warning_msg = f"<br><span style='color:orange;'>⚠️ {target_date.strftime('%Y년 %m월 %d일')}({weekday_str})의 평가금액이 없습니다. 최근({stale_str}) 평가금액으로 현황을 계산합니다.</span>"
-        header_line += warning_msg
+        header_body += warning_msg
 
-    return header_line, label_date, day_label
+    return header_body, label_date, day_label
 
 
 def _notify_calculation_start(
@@ -1157,6 +1260,7 @@ def generate_status_report(
     notify_start: bool = False,
 ) -> Optional[Tuple[str, List[str], List[List[str]], pd.Timestamp]]:
     """지정된 전략에 대한 오늘의 현황 데이터를 생성하여 반환합니다."""
+    logger = get_status_logger()
     try:
         # 1. 데이터 로드 및 지표 계산
         result = _fetch_and_prepare_data(country, date_str, prefetched_data)
@@ -1174,6 +1278,14 @@ def generate_status_report(
     failed_tickers_info = result.failed_tickers_info
     desc = result.description
 
+    logger.info(
+        "[%s] decision build starting: pairs=%d, successes=%d, failures=%d",
+        country.upper(),
+        len(pairs),
+        len(data_by_tkr),
+        len(failed_tickers_info),
+    )
+
     # --- 데이터 유효성 검증 및 경고 생성 ---
     hard_failure_reasons = ["FETCH_FAILED", "PROCESS_ERROR"]
     fetch_failed_tickers = [
@@ -1182,6 +1294,13 @@ def generate_status_report(
     insufficient_data_tickers = [
         tkr for tkr, reason in failed_tickers_info.items() if reason == "INSUFFICIENT_DATA"
     ]
+
+    if insufficient_data_tickers:
+        logger.info(
+            "[%s] tickers skipped due to insufficient data: %s",
+            country.upper(),
+            ",".join(sorted(insufficient_data_tickers)),
+        )
 
     # 데이터 조회/처리에 실패한 종목이 있으면, 처리를 중단하고 예외를 발생시킵니다.
     if fetch_failed_tickers:
@@ -1812,12 +1931,12 @@ def generate_status_report(
                 decision["row"][-1] = "🔚 매도 완료"
 
     # --- WAIT 종목 수 제한 ---
-    # 웹 UI와 슬랙 알림에 표시될 대기(WAIT) 종목의 수를 최대 10개로 제한합니다.
-    # 점수가 높은 순서대로 상위 10개만 남깁니다.
+    # 웹 UI와 슬랙 알림에 표시될 대기(WAIT) 종목의 수를 최대 MAX_WAIT_ITEMS 개로 제한합니다.
+    # 점수가 높은 순서대로 상위 MAX_WAIT_ITEMS 개만 남깁니다.
     wait_decisions = [d for d in decisions if d["state"] == "WAIT"]
     other_decisions = [d for d in decisions if d["state"] != "WAIT"]
 
-    MAX_WAIT_ITEMS = 10
+    MAX_WAIT_ITEMS = 100
     if len(wait_decisions) > MAX_WAIT_ITEMS:
         # 점수(score)가 높은 순으로 정렬합니다. 점수가 없는 경우 0으로 처리합니다.
         wait_decisions_sorted = sorted(
@@ -1904,6 +2023,18 @@ def generate_status_report(
         "비중",
     ]
     headers.extend(["고점대비", "점수", "지속", "문구"])
+
+    state_counts: Dict[str, int] = {}
+    for row in rows_sorted:
+        state = row[2]
+        state_counts[state] = state_counts.get(state, 0) + 1
+
+    logger.info(
+        "[%s] status report ready: rows=%d state_counts=%s",
+        country.upper(),
+        len(rows_sorted),
+        state_counts,
+    )
 
     return (header_line, headers, rows_sorted, base_date)
 

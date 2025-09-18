@@ -27,33 +27,39 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 주요 사용법
 -----------
 
-1) 오늘/다음 거래일 현황 조회
+1) 웹앱으로 현황 확인
+
+웹 브라우저를 통해 오늘의 현황을 시각적으로 확인하고, 거래 내역, 종목 등 데이터를 관리합니다.
+
+    python run.py
+
+2) 오늘/다음 거래일 현황 조회 (CLI)
 
 과거 시뮬레이션 없이 “현재 보유 + 오늘 신호”를 바탕으로 다음 거래일에 대한 현황을 제안합니다.
 
-    python run.py <국가코드> --status
+    python cli.py <국가코드> --status
 
-예: `python run.py kor --status`
+예: `python cli.py kor --status`
 
-2) 백테스트 로그 생성
+3) 백테스트 로그 생성 (CLI)
 
 과거 구간에 대해 백테스트를 실행합니다.
 
-    python run.py <국가코드> --test
+    python cli.py <국가코드> --test
 
-예: `python run.py coin --test`
+예: `python cli.py coin --test`
 
-3) 파라미터 튜닝
+4) 파라미터 튜닝 (CLI)
 
-`run.py`를 통해 파라미터 튜닝을 실행하여 각 전략의 최적 파라미터를 찾습니다.
+`cli.py`를 통해 파라미터 튜닝을 실행하여 각 전략의 최적 파라미터를 찾습니다.
 
-    python run.py <국가코드> --tune
+    python cli.py <국가코드> --tune
 
 - 주의: 매우 많은 조합을 테스트하므로 실행에 오랜 시간이 걸릴 수 있습니다.
 - 스크립트 상단에서 테스트할 파라미터 범위를 조절할 수 있습니다.
 - 최종적으로 최고 CAGR, 최저 MDD, 최고 Calmar Ratio(위험 조정 수익률) 등을 기록한 파라미터와 성과를 각각 출력합니다.
 
-4) ETF 섹터 분류 (AI 사용)
+5) ETF 섹터 분류 (AI 사용)
 
 `scripts/categorize_etf.py` 스크립트를 실행하여 `data/<국가코드>/etf_raw.txt` 파일의 ETF들을 AI를 이용해 섹터별로 자동 분류하고 `data/<국가코드>/etf_categorized.csv` 파일에 저장합니다.
 
@@ -63,12 +69,6 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 - **API 키 설정**: 프로젝트 루트 디렉터리에 `.env` 파일을 만들고 API 키를 저장합니다.
   - `GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY"` (Google AI Studio에서 발급)
 - 실행 시 `etf_categorized.csv` 파일에 `category` 컬럼이 추가/업데이트됩니다.
-
-4) 웹앱으로 현황 확인
-
-웹 브라우저를 통해 오늘의 현황을 시각적으로 확인하고, 거래 내역, 종목 등 데이터를 관리합니다.
-
-    streamlit run web_app.py
 
 6) 스케줄러로 자동 실행 (APScheduler)
 
@@ -82,7 +82,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
    - `SCHEDULE_COIN_CRON` = `"5 0 * * *"` (매일 00:05)
    - `SCHEDULE_KOR_TZ` = `Asia/Seoul`, `SCHEDULE_AUS_TZ` = `Australia/Sydney`, `SCHEDULE_COIN_TZ` = `Asia/Seoul`
    - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
-3. 실행: `python scheduler.py`
+3. 실행: `python s.py`
 
 슬랙(Slack) 알림은 `.env` 파일에 `KOR_SLACK_WEBHOOK` 등 국가별 웹훅 URL을 설정하면 자동으로 동작합니다.
 

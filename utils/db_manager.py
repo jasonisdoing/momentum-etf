@@ -258,6 +258,7 @@ def get_available_snapshot_dates(
 
     equity_dates = list(db.daily_equities.distinct("date", {**query, "is_deleted": {"$ne": True}}))
     trade_dates = list(db.trades.distinct("date", {**query, "is_deleted": {"$ne": True}}))
+    status_dates = list(db.status_reports.distinct("date", query))
 
     # 날짜를 'YYYY-MM-DD' 문자열로 변환한 뒤, 중복(같은 날 서로 다른 시각)을 제거합니다.
     def to_day_str_list(dt_list):
@@ -275,7 +276,8 @@ def get_available_snapshot_dates(
 
     equity_days = set(to_day_str_list(equity_dates))
     trade_days = set(to_day_str_list(trade_dates))
-    all_days = equity_days.union(trade_days)
+    status_days = set(to_day_str_list(status_dates))
+    all_days = equity_days.union(trade_days).union(status_days)
 
     # 내림차순 정렬
     return sorted(all_days, reverse=True)
