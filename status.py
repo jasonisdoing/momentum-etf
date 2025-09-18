@@ -270,7 +270,7 @@ def get_market_regime_status_string() -> Optional[str]:
     return f'<span style="color:grey">시장 상태: 계산 불가</span>{risk_off_periods_str}'
 
 
-def get_benchmark_status_string(country: str) -> Optional[str]:
+def get_benchmark_status_string(country: str, date_str: Optional[str] = None) -> Optional[str]:
     """
     포트폴리오의 누적 수익률을 벤치마크와 비교하여 초과 성과를 HTML 문자열로 반환합니다.
     가상화폐의 경우, 여러 벤치마크와 비교할 수 있습니다.
@@ -293,8 +293,8 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
     if initial_capital <= 0:
         return None
 
-    # 2. 최신 포트폴리오 스냅샷 로드
-    portfolio_data = get_portfolio_snapshot(country)  # date_str=None to get latest
+    # 2. 해당 날짜의 포트폴리오 스냅샷 로드
+    portfolio_data = get_portfolio_snapshot(country, date_str)
     if not portfolio_data:
         return None
 
@@ -1332,12 +1332,21 @@ def generate_status_report(
     if is_stale_equity:
         equity_for_autocorrect = 0.0
 
+    international_shares_value = 0.0
+    if country == "aus":
+        intl_info = portfolio_data.get("international_shares")
+        if isinstance(intl_info, dict):
+            try:
+                international_shares_value = float(intl_info.get("value", 0.0))
+            except (TypeError, ValueError):
+                international_shares_value = 0.0
+
     # --- 자동 평가금액 보정 로직 ---
     # 보유 종목의 현재가 합(total_holdings_value)이 기록된 평가금액(equity_for_autocorrect)보다 크거나,
     # 평가금액이 0일 경우, 평가금액을 보유 종목 가치 합으로 자동 보정합니다.
     # 이는 현금이 음수로 표시되는 것을 방지하고, 평가금액 미입력 시 초기값을 설정해줍니다.
     # 호주의 경우, 해외 주식 가치도 포함하여 최종 평가금액을 계산합니다.
-    new_equity_candidate = total_holdings_value
+    new_equity_candidate = total_holdings_value + international_shares_value
 
     # new_equity_candidate가 0보다 크고, (기존 평가금액보다 크거나, 기존 평가금액이 0일 때)
     if new_equity_candidate > 0 and (
@@ -1391,6 +1400,8 @@ def generate_status_report(
                 held_categories.add(category)
 
     # 2. 헤더 생성
+    total_holdings_value += international_shares_value
+
     header_line, label_date, day_label = _build_header_line(
         country,
         portfolio_data,

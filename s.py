@@ -209,6 +209,21 @@ def _try_sync_bithumb_trades():
         logging.error(error_message, exc_info=True)
 
 
+def run_cache_refresh() -> None:
+    """모든 국가의 가격 캐시를 갱신합니다."""
+    start_date = os.environ.get("CACHE_START_DATE", "2020-01-01")
+    countries_env = os.environ.get("CACHE_COUNTRIES", "kor,aus,coin")
+    countries = [c.strip().lower() for c in countries_env.split(",") if c.strip()]
+    logging.info("Running cache refresh (start=%s, countries=%s)", start_date, ",".join(countries))
+    try:
+        from scripts.update_price_cache import refresh_all_caches
+
+        refresh_all_caches(countries=countries, start_date=start_date)
+        logging.info("Cache refresh completed successfully")
+    except Exception:
+        logging.error("Cache refresh job failed", exc_info=True)
+
+
 def main():
     # 로깅 설정
     setup_logging()
@@ -264,6 +279,16 @@ def main():
             id="kor",
         )
         logging.info(f"Scheduled KOR: cron='{cron}' tz='{tz}'")
+
+    if _bool_env("SCHEDULE_ENABLE_CACHE", True):
+        cache_cron = _get("SCHEDULE_CACHE_CRON", "30 3 * * *")
+        cache_tz = _get("SCHEDULE_CACHE_TZ", "Asia/Seoul")
+        scheduler.add_job(
+            run_cache_refresh,
+            CronTrigger.from_crontab(cache_cron, timezone=cache_tz),
+            id="price_cache_refresh",
+        )
+        logging.info(f"Scheduled CACHE: cron='{cache_cron}' tz='{cache_tz}'")
 
     if _bool_env("RUN_IMMEDIATELY_ON_START", False):
         # 시작 시 한 번 즉시 실행

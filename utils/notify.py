@@ -21,6 +21,15 @@ def send_log_to_slack(message: str):
         send_slack_message(log_message, webhook_url=webhook_url)
 
 
+def send_verbose_log_to_slack(message: str):
+    """잡다한 로그 메시지를 전용 슬랙 채널로 전송합니다."""
+    webhook_url = os.environ.get("VERBOSE_LOGS_SLACK_WEBHOOK")
+    app_type = os.environ.get("APP_TYPE", "SERVER")
+    if webhook_url:
+        log_message = f"📜 *[{app_type}]* {message}"
+        send_slack_message(log_message, webhook_url=webhook_url)
+
+
 def get_last_error() -> Optional[str]:
     return _LAST_ERROR
 
