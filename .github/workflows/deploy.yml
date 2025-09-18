@@ -20,6 +20,7 @@ jobs:
           script: |
             echo ">>> Connecting to Lightsail and starting deployment..."
             cd /home/ubuntu/momentum-etf
+            chmod +x update.sh
             ./update.sh
             echo ">>> Deployment script finished."
       - name: Notify Slack (deploy succeeded)
