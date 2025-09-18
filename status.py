@@ -987,8 +987,6 @@ def _build_header_line(
 
     # 해외 주식 가치 포함
     total_holdings = total_holdings_value
-    if country == "aus" and portfolio_data.get("international_shares"):
-        total_holdings += portfolio_data["international_shares"].get("value", 0.0)
     # 코인도 다른 국가와 동일하게 보유금액은 포지션 합으로 계산합니다.
 
     # 현금
@@ -1049,14 +1047,6 @@ def _build_header_line(
     # 최종 평가 수익률 계산을 위한 변수 초기화
     final_total_holdings_value = total_holdings_value
     final_total_acquisition_cost = total_aus_etf_acquisition_cost
-
-    # 호주 포트폴리오의 경우, international_shares 가치를 평가 수익률 계산에 포함
-    if country == "aus" and portfolio_data.get("international_shares"):
-        is_value = portfolio_data["international_shares"].get("value", 0.0)
-        final_total_holdings_value += is_value
-        # international_shares의 매입가는 알 수 없으므로, 현재 가치를 그대로 더해 수익률 계산에 영향을 주지 않도록 함
-        final_total_acquisition_cost += is_value
-
     eval_ret_pct = (
         ((final_total_holdings_value / final_total_acquisition_cost) - 1.0) * 100.0
         if final_total_acquisition_cost > 0
@@ -1229,8 +1219,6 @@ def generate_status_report(
     # 이는 현금이 음수로 표시되는 것을 방지하고, 평가금액 미입력 시 초기값을 설정해줍니다.
     # 호주의 경우, 해외 주식 가치도 포함하여 최종 평가금액을 계산합니다.
     new_equity_candidate = total_holdings_value
-    if country == "aus" and portfolio_data.get("international_shares"):
-        new_equity_candidate += portfolio_data["international_shares"].get("value", 0.0)
 
     # new_equity_candidate가 0보다 크고, (기존 평가금액보다 크거나, 기존 평가금액이 0일 때)
     if new_equity_candidate > 0 and (
