@@ -38,7 +38,7 @@ def format_aud_money(value: float) -> str:
     """금액을 호주 달러(A$) 형식의 문자열로 포맷합니다."""
     if value is None:
         return "-"
-    return f"{value:,.2f}"
+    return f"A${value:,.2f}"
 
 
 def format_aud_price(value: float) -> str:

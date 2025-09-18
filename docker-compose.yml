@@ -1,0 +1,11 @@
+services:
+  scheduler:
+    container_name: etf
+    build: .
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Seoul
+    command: python s.py
+    volumes:
+      - ./logs:/app/logs
