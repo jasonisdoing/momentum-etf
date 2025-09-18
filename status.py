@@ -1201,11 +1201,10 @@ def _notify_calculation_start(
     if not webhook_url:
         return False
 
-    app_type = os.environ.get("APP_TYPE", "SERVER")
     country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
 
     message_lines = [
-        f"[{app_type}][{country_kor}] 계산",
+        f"[{global_settings.APP_TYPE}][{country_kor}] 계산",
         f"- 대상 종목: {num_tickers}개",
         f"- 계산 내용: {description}",
     ]
@@ -1236,7 +1235,6 @@ def _notify_equity_update(country: str, old_equity: float, new_equity: float):
     if not webhook_url:
         return False
 
-    app_type = os.environ.get("APP_TYPE", "SERVER")
     country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
     money_formatter = format_aud_money if country == "aus" else format_kr_money
 
@@ -1246,9 +1244,9 @@ def _notify_equity_update(country: str, old_equity: float, new_equity: float):
     if old_equity > 0:
         # 평가금액 변동(증가/감소)에 따라 다른 레이블을 사용합니다.
         change_label = "증가" if diff >= 0 else "감소"
-        message = f"[{app_type}][{country_kor}] 평가금액 {change_label}: {money_formatter(old_equity)} => {money_formatter(new_equity)} ({diff_str})"
+        message = f"[{global_settings.APP_TYPE}][{country_kor}] 평가금액 {change_label}: {money_formatter(old_equity)} => {money_formatter(new_equity)} ({diff_str})"
     else:
-        message = f"[{app_type}][{country_kor}] 신규 평가금액 저장: {money_formatter(new_equity)}"
+        message = f"[{global_settings.APP_TYPE}][{country_kor}] 신규 평가금액 저장: {money_formatter(new_equity)}"
 
     return send_slack_message(message, webhook_url=webhook_url)
 
@@ -2438,8 +2436,7 @@ def _maybe_notify_detailed_status(
         # --- Build caption for message ---
         country_kor = {"kor": "한국", "aus": "호주", "coin": "코인"}.get(country, country.upper())
 
-        app_type = os.environ.get("APP_TYPE", "SERVER")
-        title_line = f"[{app_type}][{country_kor}] 상세내역"
+        title_line = f"[{global_settings.APP_TYPE}][{country_kor}] 상세내역"
         equity_line = f"평가금액: {equity_text}, 누적수익 {cum_text}"
         cash_line = f"현금: {cash_text}, 보유금액: {hold_val_text}"
         hold_line = f"보유종목: {hold_text}"
