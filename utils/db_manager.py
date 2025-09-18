@@ -86,7 +86,8 @@ def get_db_connection():
             print("-> MongoDB에 성공적으로 연결되었습니다.")
         return _db_connection
     except Exception as e:
-        print(f"오류: MongoDB 연결에 실패했습니다: {e}")
+        error_message = f"오류: MongoDB 연결에 실패했습니다: {e}"
+        print(error_message)
         return None
 
 
@@ -157,8 +158,6 @@ def get_portfolio_snapshot(country: str, date_str: Optional[str] = None) -> Opti
 
     # 3. 'trades' 컬렉션에서 보유 종목 재구성
     # 날짜 오름차순, 그리고 같은 날짜 내에서는 생성 순서(ObjectId) 오름차순으로 정렬합니다.
-    # 코인의 경우, daily_equities가 자정(00:00)으로 저장되고 트레이드는 시각 포함으로 저장되므로
-    # 동일한 달력일에 발생한 모든 트레이드를 포함하도록 상한을 '해당일의 23:59:59.999999'로 확장합니다.
     # 코인의 경우, daily_equities가 자정(00:00)으로 저장되고 트레이드는 시각 포함으로 저장되므로
     # 동일한 달력일에 발생한 모든 트레이드를 포함하도록 상한을 '해당일의 23:59:59.999999'로 확장합니다.
     # 모든 국가에 대해 동일하게 적용하여, 특정 날짜의 모든 거래를 포함하도록 합니다.
@@ -259,6 +258,7 @@ def get_available_snapshot_dates(
 
     equity_dates = list(db.daily_equities.distinct("date", {**query, "is_deleted": {"$ne": True}}))
     trade_dates = list(db.trades.distinct("date", {**query, "is_deleted": {"$ne": True}}))
+    status_dates = list(db.status_reports.distinct("date", query))
 
     # 날짜를 'YYYY-MM-DD' 문자열로 변환한 뒤, 중복(같은 날 서로 다른 시각)을 제거합니다.
     def to_day_str_list(dt_list):
@@ -276,7 +276,8 @@ def get_available_snapshot_dates(
 
     equity_days = set(to_day_str_list(equity_dates))
     trade_days = set(to_day_str_list(trade_dates))
-    all_days = equity_days.union(trade_days)
+    status_days = set(to_day_str_list(status_dates))
+    all_days = equity_days.union(trade_days).union(status_days)
 
     # 내림차순 정렬
     return sorted(all_days, reverse=True)

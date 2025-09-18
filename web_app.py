@@ -1,15 +1,19 @@
 import os
 import sys
+import warnings
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
+# 프로젝트 루트를 Python 경로에 추가
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 # .env 파일이 있다면 로드합니다.
 load_dotenv()
-import warnings
+
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 warnings.filterwarnings(
@@ -20,18 +24,30 @@ warnings.filterwarnings(
 )
 
 
-# 프로젝트 루트를 Python 경로에 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from cron_descriptor import get_description as get_cron_description
+except ImportError:
+    get_cron_description = None
+try:
+    from croniter import croniter
+except ImportError:
+    croniter = None
+try:
+    import pytz
+except ImportError:
+    pytz = None
+try:
+    from pykrx import stock as _stock
+except Exception:
+    _stock = None
 
-import settings as global_settings
 from status import (
-    _maybe_notify_detailed_status,
     generate_status_report,
     get_benchmark_status_string,
     get_market_regime_status_string,
+    get_next_trading_day,
 )
 from utils.data_loader import (
-    fetch_ohlcv_for_tickers,
     fetch_yfinance_name,
     get_trading_days,
 )
@@ -53,28 +69,80 @@ from utils.db_manager import (
 )
 from utils.stock_list_io import get_etfs
 
-try:
-    from pykrx import stock as _stock
-except Exception:
-    _stock = None
-
-try:
-    import pytz
-except ImportError:
-    pytz = None
-
-try:
-    from croniter import croniter
-except ImportError:
-    croniter = None
-
-try:
-    from cron_descriptor import get_description as get_cron_description
-except ImportError:
-    get_cron_description = None
-
 
 COUNTRY_CODE_MAP = {"kor": "한국", "aus": "호주", "coin": "가상화폐"}
+
+MARKET_DISPLAY_SETTINGS = {
+    "kor": {"tz": "Asia/Seoul", "close": "15:30"},
+    "aus": {"tz": "Australia/Sydney", "close": "16:00"},
+}
+
+
+def _get_local_now(country_code: str) -> Optional[datetime]:
+    if not pytz:
+        return None
+    settings = MARKET_DISPLAY_SETTINGS.get(country_code)
+    if not settings:
+        return None
+    try:
+        tz = pytz.timezone(settings["tz"])
+        return datetime.now(tz)
+    except Exception:
+        return None
+
+
+def _get_status_target_date_str(country_code: str) -> str:
+    today = pd.Timestamp.now().normalize()
+    today_str = today.strftime("%Y-%m-%d")
+
+    if country_code == "coin":
+        return today_str
+
+    now_local = _get_local_now(country_code)
+    if not now_local:
+        return today_str
+
+    close_time = datetime.strptime(MARKET_DISPLAY_SETTINGS[country_code]["close"], "%H:%M").time()
+    lookahead_end = (now_local + pd.Timedelta(days=14)).strftime("%Y-%m-%d")
+
+    try:
+        upcoming_days = get_trading_days(today_str, lookahead_end, country_code)
+    except Exception:
+        upcoming_days = []
+
+    if not upcoming_days:
+        return today_str
+
+    is_trading_today = any(d.date() == now_local.date() for d in upcoming_days)
+    if is_trading_today and now_local.time() < close_time:
+        return today_str
+
+    next_day = next((d for d in upcoming_days if d.date() > now_local.date()), None)
+    if not next_day:
+        fallback = get_next_trading_day(
+            country_code, pd.Timestamp(now_local.date()) + pd.Timedelta(days=1)
+        )
+        return pd.Timestamp(fallback).strftime("%Y-%m-%d")
+
+    return pd.Timestamp(next_day).strftime("%Y-%m-%d")
+
+
+def _ensure_header_has_date(header: str, date: datetime) -> str:
+    """날짜 표시가 필요하면 붙이고, 이미 있다면 그대로 반환합니다."""
+    if not header:
+        return header
+
+    normalized = header.strip()
+    if "년" in normalized and "월" in normalized:
+        return header
+
+    date_display = f"{date.year}년 {date.month}월 {date.day}일"
+    prefix = f"{date_display} | "
+
+    if normalized.startswith(prefix):
+        return header
+
+    return prefix + header
 
 
 # --- Functions ---
@@ -257,13 +325,15 @@ def get_cached_status_report(
     # 2. 강제로 다시 계산해야 하는 경우
     try:
         with st.spinner(f"'{date_str}' 현황을 다시 계산하는 중..."):
-            new_report = generate_status_report(
+            new_report_tuple = generate_status_report(
                 country=country,
                 date_str=date_str,
                 prefetched_data=prefetched_data,
                 notify_start=False,
             )
-            if new_report:
+            if new_report_tuple:
+                header_line, headers, rows, _ = new_report_tuple
+                new_report = (header_line, headers, rows)
                 # 3. 계산된 결과를 DB에 저장합니다.
                 save_status_report_to_db(country, report_date, new_report)
             return new_report
@@ -357,17 +427,25 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
     df_display = df_merged[existing_cols].copy()
 
     # 숫자형으로 변환해야 하는 컬럼 목록
-    numeric_cols = ["현재가", "일간수익률", "보유수량", "금액", "누적수익률", "비중", "점수"]
+    numeric_cols = [
+        "현재가",
+        "일간수익률",
+        "보유수량",
+        "금액",
+        "누적수익률",
+        "비중",
+        "점수",
+    ]
     for col in numeric_cols:
         if col in df_display.columns:
             df_display[col] = pd.to_numeric(df_display[col], errors="coerce")
 
-    # 4. 스타일 적용 및 표시
+    # 4. 스타일 적용
     if "#" in df_display.columns:
         df_display = df_display.set_index("#")
 
-    style_cols = ["일간수익률", "누적수익률"]
     styler = df_display.style
+    style_cols = ["일간수익률", "누적수익률"]
     for col in style_cols:
         if col in df_display.columns:
             styler = styler.map(style_returns, subset=[col])
@@ -392,8 +470,8 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         formats["보유수량"] = "{:.8f}"
     styler = styler.format(formats, na_rep="-")
 
-    num_rows_to_display = min(len(df_display), 15)
-    height = (num_rows_to_display + 1) * 35 + 3
+    # 테이블 높이를 16개 행이 보이도록 고정합니다. (헤더 포함 16)
+    height = (16) * 35 + 3
 
     shares_format_str = "%.8f" if country_code == "coin" else "%d"
 
@@ -421,8 +499,6 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
 def render_master_etf_ui(country_code: str):
     """종목 마스터 조회 UI를 렌더링합니다."""
     # from utils.data_loader import fetch_crypto_name # 사용자 요청에 따라 제거됨
-
-    country_name = COUNTRY_CODE_MAP.get(country_code, "기타")
 
     if country_code == "coin":
         st.info("이곳에서 가상화폐 종목을 조회할 수 있습니다.")
@@ -479,82 +555,6 @@ def render_master_etf_ui(country_code: str):
                 "name": st.column_config.TextColumn("종목명"),
             },
         )
-
-
-def render_notification_settings_ui(country_code: str):
-    """지정된 국가에 대한 알림 설정 UI를 렌더링합니다."""
-    st.header(f"{COUNTRY_CODE_MAP.get(country_code, country_code.upper())} 국가 알림 설정")
-
-    app_settings = get_app_settings(country_code) or {}
-
-    with st.form(f"notification_settings_form_{country_code}"):
-        st.subheader("슬랙 설정")
-        slack_enabled = bool(app_settings.get("SLACK_ENABLED", False))
-        slack_webhook_url = app_settings.get("SLACK_WEBHOOK_URL", "")
-
-        new_slack_enabled = st.checkbox(
-            "슬랙 알림 사용",
-            value=slack_enabled,
-            key=f"slack_enabled_{country_code}",
-            help="이 국가의 현황 메시지를 슬랙으로 전송합니다.",
-        )
-        new_slack_webhook_url = st.text_input(
-            "웹훅 URL",
-            value=slack_webhook_url,
-            key=f"slack_webhook_url_{country_code}",
-            placeholder="예: https://hooks.slack.com/services/",
-            help="이 국가의 알림을 받을 Slack 채널의 Incoming Webhook URL",
-        )
-
-        st.caption("테스트는 스케줄과 무관하게 1회 계산 후 알림을 전송합니다.")
-
-        cols = st.columns(2)
-        with cols[0]:
-            settings_save = st.form_submit_button("설정 저장")
-        with cols[1]:
-            test_send = st.form_submit_button("알림 테스트 전송")
-
-    if settings_save:
-        error = False
-        # 슬랙 설정 저장 (app_settings)
-        slack_settings_to_save = {}
-        if new_slack_enabled:
-            if not new_slack_webhook_url:
-                st.error("슬랙 알림을 사용하려면 웹훅 URL이 필요합니다.")
-                error = True
-            else:
-                slack_settings_to_save["SLACK_ENABLED"] = True
-                slack_settings_to_save["SLACK_WEBHOOK_URL"] = new_slack_webhook_url.strip()
-        else:
-            slack_settings_to_save["SLACK_ENABLED"] = False
-            slack_settings_to_save["SLACK_WEBHOOK_URL"] = ""
-
-        if not error:
-            save_app_settings(country_code, slack_settings_to_save)
-            st.success(f"{country_code.upper()} 국가의 슬랙 설정을 저장했습니다.")
-            st.rerun()
-
-    if test_send:
-        # 테스트 전송은 현재 UI의 값을 즉시 저장하고 실행
-        save_app_settings(
-            country_code,
-            {"SLACK_ENABLED": new_slack_enabled, "SLACK_WEBHOOK_URL": new_slack_webhook_url},
-        )
-        res = generate_status_report(country=country_code, date_str=None, notify_start=True)
-        if not res:
-            st.error("현황 계산 실패로 테스트 전송을 건너뜁니다.")
-        else:
-            header_line, headers, rows_sorted = res
-            sent = _maybe_notify_detailed_status(
-                country_code, header_line, headers, rows_sorted, force=True
-            )
-            if sent:
-                st.success("알림 테스트 전송 완료. 슬랙 채널을 확인하세요.")
-            else:
-                from utils.notify import get_last_error
-
-                err = get_last_error()
-                st.warning(f"전송 시도는 했지만 응답이 없었습니다. 상세: {err or '설정 확인'}")
 
 
 def render_scheduler_tab():
@@ -695,7 +695,10 @@ def render_country_tab(country_code: str):
             }
 
             if save_trade(trade_data):
-                st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
+                st.session_state[message_key] = (
+                    "success",
+                    "거래가 성공적으로 저장되었습니다.",
+                )
             else:
                 st.session_state[message_key] = (
                     "error",
@@ -825,7 +828,10 @@ def render_country_tab(country_code: str):
             ]
 
             if not selected_indices:
-                st.session_state[message_key] = ("warning", "매도할 종목을 선택해주세요.")
+                st.session_state[message_key] = (
+                    "warning",
+                    "매도할 종목을 선택해주세요.",
+                )
                 return
 
             selected_rows = df_holdings.loc[selected_indices]
@@ -895,7 +901,14 @@ def render_country_tab(country_code: str):
                 hide_index=True,
                 width="stretch",
                 key=f"sell_editor_{country_code_inner}",
-                disabled=["종목명", "티커", "보유수량", value_col_name, "수익률", price_col_name],
+                disabled=[
+                    "종목명",
+                    "티커",
+                    "보유수량",
+                    value_col_name,
+                    "수익률",
+                    price_col_name,
+                ],
                 column_config={
                     "선택": st.column_config.CheckboxColumn("삭제", required=True),
                     "보유수량": st.column_config.NumberColumn(format="%.8f"),
@@ -916,111 +929,78 @@ def render_country_tab(country_code: str):
 
     _display_success_toast(country_code)
 
-    sub_tab_names = ["현황", "히스토리", "트레이드", "종목 관리", "설정", "알림"]
+    sub_tab_names = ["현황", "평가금액", "트레이드", "종목 관리", "설정"]
     (
         sub_tab_status,
-        sub_tab_history,
+        sub_tab_equity_history,
         sub_tab_trades,
         sub_tab_etf_management,
         sub_tab_settings,
-        sub_tab_notification,
     ) = st.tabs(sub_tab_names)
 
-    # --- 공통 데이터 로딩 ---
-    sorted_dates = get_available_snapshot_dates(country_code)
+    raw_dates = get_available_snapshot_dates(country_code)
+    sorted_dates = sorted(set(raw_dates), reverse=True)
 
-    # 오늘/다음 거래일을 목록에 반영
-    today = pd.Timestamp.now().normalize()
-    today_str = today.strftime("%Y-%m-%d")
-    if country_code != "coin":
-        # 한국/호주: 실제 거래일 캘린더로 오늘/다음 거래일을 판단 (실패 시 월~금 폴백)
-        next_td_str_fallback = None
-        try:
-            lookahead_end = (today + pd.Timedelta(days=14)).strftime("%Y-%m-%d")
-            upcoming_days = get_trading_days(today_str, lookahead_end, country_code)
-            is_trading_today = any(d.date() == today.date() for d in upcoming_days)
-            if is_trading_today:
-                if today_str not in sorted_dates:
-                    sorted_dates.insert(0, today_str)
+    today_ts = pd.Timestamp.now()
+    today_str = today_ts.strftime("%Y-%m-%d")
+    target_date_str = _get_status_target_date_str(country_code)
+
+    date_options: List[str] = []
+    for candidate in [target_date_str] + sorted_dates:
+        if candidate and candidate not in date_options:
+            date_options.append(candidate)
+
+    option_labels: Dict[str, str] = {}
+    if date_options:
+        if country_code == "coin":
+            option_labels[target_date_str] = f"{target_date_str} (오늘)"
+        else:
+            if target_date_str == today_str:
+                option_labels[target_date_str] = f"{target_date_str} (오늘)"
             else:
-                # 다음 거래일을 찾아 추가 (예: 토요일이면 다음 월요일)
-                next_td = next((d for d in upcoming_days if d.date() >= today.date()), None)
-                if next_td is not None:
-                    next_td_str = pd.Timestamp(next_td).strftime("%Y-%m-%d")
-                    if next_td_str not in sorted_dates:
-                        sorted_dates.insert(0, next_td_str)
-        except Exception:
-            # 무시하고 폴백 계산 수행
-            pass
-        # 캘린더 조회 실패 또는 주말일 때의 폴백: 다음 월~금
-        if today.weekday() >= 5:  # 토/일
-            delta = 7 - today.weekday()
-            next_bday = today + pd.Timedelta(days=delta)
-            next_td_str_fallback = next_bday.strftime("%Y-%m-%d")
-            if next_td_str_fallback not in sorted_dates:
-                sorted_dates.insert(0, next_td_str_fallback)
-    # 코인: 현황 탭은 항상 오늘 날짜를 기준으로 하므로, 목록 맨 앞에 오늘 날짜를 추가합니다.
-    elif country_code == "coin":
-        if today_str not in sorted_dates:
-            sorted_dates.insert(0, today_str)
+                option_labels[target_date_str] = f"{target_date_str} (다음 거래일)"
+            if today_str in date_options and today_str != target_date_str:
+                option_labels.setdefault(today_str, f"{today_str} (오늘)")
 
-    # --- 1. 현황 탭 (최신 날짜) ---
     with sub_tab_status:
-        if not sorted_dates:
+        if not date_options:
             st.warning(
                 f"[{country_code.upper()}] 국가의 포트폴리오 데이터를 DB에서 찾을 수 없습니다."
             )
             st.info("먼저 '거래 입력' 버튼을 통해 거래 내역을 추가해주세요.")
         else:
-            # '현황' 탭의 기준 날짜를 결정합니다.
-            # - 코인: 항상 오늘 날짜
-            # - 한국/호주: 오늘이 거래일이면 오늘, 아니면 다음 거래일
-            today = pd.Timestamp.now().normalize()
-            target_date_str = today.strftime("%Y-%m-%d")  # 기본값은 오늘
-
-            if country_code != "coin":
-                try:
-                    lookahead_end = (today + pd.Timedelta(days=14)).strftime("%Y-%m-%d")
-                    # get_trading_days의 start_date는 target_date_str로 사용
-                    upcoming_days = get_trading_days(target_date_str, lookahead_end, country_code)
-
-                    # 오늘 또는 그 이후의 가장 가까운 거래일을 찾습니다.
-                    next_td = next((d for d in upcoming_days if d.date() >= today.date()), None)
-
-                    if next_td is not None:
-                        target_date_str = pd.Timestamp(next_td).strftime("%Y-%m-%d")
-                    else:
-                        # 거래일 조회 실패 시 주말/평일로 폴백
-                        if today.weekday() >= 5:  # 토/일
-                            delta = 7 - today.weekday()
-                            next_bday = today + pd.Timedelta(days=delta)
-                            target_date_str = next_bday.strftime("%Y-%m-%d")
-                except Exception:
-                    # 예외 발생 시에도 주말/평일로 폴백
-                    if today.weekday() >= 5:  # 토/일
-                        delta = 7 - today.weekday()
-                        next_bday = today + pd.Timedelta(days=delta)
-                        target_date_str = next_bday.strftime("%Y-%m-%d")
-
-            # 캐시된(또는 계산 완료된) 결과를 표시
-            result = get_cached_status_report(
-                country=country_code, date_str=target_date_str, force_recalculate=False
+            selected_date_str = st.selectbox(
+                "조회 날짜",
+                date_options,
+                format_func=lambda d: option_labels.get(d, d),
+                key=f"status_date_select_{country_code}",
             )
+
+            result = get_cached_status_report(
+                country=country_code,
+                date_str=selected_date_str,
+                force_recalculate=False,
+            )
+
             if result:
                 header_line, headers, rows = result
-                # 헤더(요약)과 경고를 분리합니다. '<br>' 이전은 요약, 이후는 경고 영역입니다.
-                header_main = header_line
+                header_main = header_line or ""
                 warning_html = None
-                if isinstance(header_line, str) and "<br>" in header_line:
-                    parts = header_line.split("<br>", 1)
+                if isinstance(header_main, str) and "<br>" in header_main:
+                    parts = header_main.split("<br>", 1)
                     header_main = parts[0]
                     warning_html = parts[1]
 
-                # 테이블 상단에 요약 헤더를 표시합니다.
-                if header_main:
-                    st.markdown(f":information_source: {header_main}", unsafe_allow_html=True)
+                header_display = _ensure_header_has_date(
+                    header_main, pd.to_datetime(selected_date_str).to_pydatetime()
+                )
+                if header_display:
+                    safe_header = header_display.replace("$", "&#36;")
+                    st.markdown(
+                        f'<div class="status-summary">{safe_header}</div>',
+                        unsafe_allow_html=True,
+                    )
 
-                # 데이터와 헤더의 컬럼 수가 일치하는지 확인하여 앱 충돌 방지
                 if rows and headers and len(rows[0]) != len(headers):
                     st.error(
                         f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '다시 계산'을 시도해주세요."
@@ -1030,10 +1010,8 @@ def render_country_tab(country_code: str):
                 else:
                     df = pd.DataFrame(rows, columns=headers)
                     _display_status_report_df(df, country_code)
-                    # 테이블 아래에 경고(평가금액 대체 안내)가 있으면 표시합니다.
                     if warning_html:
                         st.markdown(warning_html, unsafe_allow_html=True)
-                    # 테이블 아래에 벤치마크 대비 초과성과를 표시합니다.
                     benchmark_str = get_cached_benchmark_status(country_code)
                     if benchmark_str:
                         st.markdown(
@@ -1041,284 +1019,155 @@ def render_country_tab(country_code: str):
                             unsafe_allow_html=True,
                         )
             else:
-                next_run_time_str = get_next_schedule_time_str(country_code)
-                st.info(
-                    f"""
-**{target_date_str}** 날짜의 현황 데이터가 아직 계산되지 않았습니다.
+                if selected_date_str == target_date_str:
+                    next_run_time_str = get_next_schedule_time_str(country_code)
+                    st.info(
+                        f"""
+    **{selected_date_str}** 날짜의 현황 데이터가 아직 계산되지 않았습니다.
 
-스케줄러에 의해 자동으로 계산될 예정입니다.
+    스케줄러에 의해 자동으로 계산될 예정입니다.
 
-다음 예상 실행 시간: **{next_run_time_str}**
-"""
-                )
-
-    with sub_tab_history:
-        history_sub_tab_names = ["현황", "평가금액"]
-        history_status_tab, history_equity_tab = st.tabs(history_sub_tab_names)
-
-        with history_status_tab:
-            # 히스토리 탭에서는 오늘 및 미래 날짜를 제외합니다.
-            today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
-            past_dates = [d for d in sorted_dates if d < today_str]
-
-            # 코인: 시작일부터 어제까지 모든 날짜로 탭을 생성하고, 중복을 제거합니다.
-            if country_code == "coin" and past_dates:
-                try:
-                    # Apply INITIAL_DATE floor
-                    coin_settings = get_app_settings(country_code) or {}
-                    initial_dt = None
-                    if coin_settings.get("initial_date"):
-                        try:
-                            initial_dt = pd.to_datetime(
-                                coin_settings.get("initial_date")
-                            ).normalize()
-                        except Exception:
-                            initial_dt = None
-                    oldest = pd.to_datetime(past_dates[-1]).normalize()
-                    start_dt = max(oldest, initial_dt) if initial_dt is not None else oldest
-                    yesterday = pd.Timestamp.now().normalize() - pd.Timedelta(days=1)
-                    full_range = pd.date_range(start=start_dt, end=yesterday, freq="D")
-                    # 최신이 먼저 오도록 내림차순 정렬 후 문자열로 변환
-                    past_dates = [d.strftime("%Y-%m-%d") for d in full_range[::-1]]
-                except Exception:
-                    # 폴백: 중복 제거만 수행
-                    seen = set()
-                    uniq = []
-                    # Also filter below INITIAL_DATE in fallback path
-                    init_str = None
-                    try:
-                        if coin_settings.get("initial_date"):
-                            init_str = pd.to_datetime(coin_settings.get("initial_date")).strftime(
-                                "%Y-%m-%d"
-                            )
-                    except Exception:
-                        init_str = None
-                    for d in past_dates:
-                        if init_str and d < init_str:
-                            continue
-                        if d not in seen:
-                            seen.add(d)
-                            uniq.append(d)
-                    past_dates = uniq
-            # 한국/호주: 히스토리의 첫 탭은 항상 '마지막 거래일'이 되도록 보정합니다.
-            if country_code in ("kor", "aus") and past_dates:
-                try:
-                    today = pd.Timestamp.now().normalize()
-                    lookback_start = (today - pd.Timedelta(days=21)).strftime("%Y-%m-%d")
-                    trading_days = get_trading_days(lookback_start, today_str, country_code)
-                    if trading_days:
-                        # 오늘 '이전'의 마지막 거래일을 찾습니다.
-                        past_trading_days = [d for d in trading_days if d.date() < today.date()]
-                        if past_trading_days:
-                            last_td = max(past_trading_days)
-                            last_td_str = pd.Timestamp(last_td).strftime("%Y-%m-%d")
-                            # 히스토리 탭 목록 맨 앞에 마지막 거래일이 오도록 정렬 보정
-                            if last_td_str in past_dates:
-                                past_dates = [last_td_str] + [
-                                    d for d in past_dates if d != last_td_str
-                                ]
-                            elif not past_dates or last_td_str > past_dates[0]:
-                                past_dates.insert(0, last_td_str)
-                except Exception:
-                    pass
-            if not past_dates:
-                st.info("과거 현황 데이터가 없습니다.")
-            else:
-                history_date_tabs = st.tabs(past_dates)
-                for i, date_str in enumerate(past_dates):
-                    with history_date_tabs[i]:
-                        # 과거 데이터는 기본적으로 DB에서 표시. 헤더의 기준일이 탭 날짜와 불일치하면 자동 재계산하여 교정.
-                        want_date = pd.to_datetime(date_str).to_pydatetime()
-                        report_from_db = get_status_report_from_db(country_code, want_date)
-                        needs_recalc = False
-                        if report_from_db:
-                            header_line = str(report_from_db.get("header_line") or "")
-                            # 기대 접두부: "기준일: YYYY-MM-DD(" (요일은 다를 수 있으므로 괄호 전까지만 비교)
-                            expected_prefix = f"기준일: {date_str}("
-                            if not header_line.startswith(expected_prefix):
-                                needs_recalc = True
-                        if not report_from_db or needs_recalc:
-                            # 캐시 불일치 또는 헤더 교정 필요: 재계산 후 저장/표시
-                            new_report = get_cached_status_report(
-                                country_code, date_str, force_recalculate=True
-                            )
-                            if new_report:
-                                header_line, headers, rows = new_report
-                                st.markdown(
-                                    f":information_source: {header_line}", unsafe_allow_html=True
-                                )
-                                if rows and headers and len(rows[0]) == len(headers):
-                                    df = pd.DataFrame(rows, columns=headers)
-                                    _display_status_report_df(df, country_code)
-                                else:
-                                    st.error("재계산된 데이터 형식이 올바르지 않습니다.")
-                            else:
-                                st.info(f"'{date_str}' 기준 현황 데이터를 생성할 수 없습니다.")
-                        else:
-                            headers = report_from_db.get("headers")
-                            rows = report_from_db.get("rows")
-                            st.markdown(
-                                f":information_source: {report_from_db.get('header_line')}",
-                                unsafe_allow_html=True,
-                            )
-                            if rows and headers and len(rows[0]) != len(headers):
-                                if country_code != "coin":
-                                    st.error(
-                                        f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '과거 전체 다시계산'을 시도해주세요."
-                                    )
-                                else:
-                                    st.error(
-                                        f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. 해당 날짜를 '다시 계산'해 주세요."
-                                    )
-                                st.write("- 헤더:", headers)
-                                st.write("- 첫 번째 행 데이터:", rows[0])
-                            else:
-                                df = pd.DataFrame(rows, columns=headers)
-                                _display_status_report_df(df, country_code)
-                        # 수동 재계산 버튼
-                        if st.button(
-                            "이 날짜 다시 계산하기",
-                            key=f"recalc_hist_{country_code}_{date_str}_{i}",
-                        ):
-                            new_report = get_cached_status_report(
-                                country_code, date_str, force_recalculate=True
-                            )
-                            if new_report:
-                                st.success("재계산 완료")
-                                st.rerun()
-                                with st.spinner(f"'{date_str}' 기준 현황 데이터를 계산/저장 중..."):
-                                    calc_result = get_cached_status_report(
-                                        country=country_code,
-                                        date_str=date_str,
-                                        force_recalculate=True,
-                                    )
-                                if calc_result:
-                                    st.success("계산/저장 완료!")
-                                    st.rerun()
-
-        with history_equity_tab:
-            app_settings = get_app_settings(country_code)
-            initial_date = (app_settings.get("initial_date") if app_settings else None) or (
-                datetime.now() - pd.DateOffset(months=3)
-            )
-
-            currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
-
-            start_date_str = initial_date.strftime("%Y-%m-%d")
-            end_date_str = datetime.now().strftime("%Y-%m-%d")
-
-            with st.spinner("거래일 및 평가금액 데이터를 불러오는 중..."):
-                all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
-                if (
-                    not all_trading_days
-                    and country_code
-                    == "kor"  # 호주는 yfinance가 주말을 건너뛰므로 거래일 조회가 필수는 아님
-                ):
-                    st.warning("거래일을 조회할 수 없습니다.")
-                else:
-                    start_dt_obj = pd.to_datetime(start_date_str).to_pydatetime()
-                    end_dt_obj = pd.to_datetime(end_date_str).to_pydatetime()
-                    existing_equities = get_all_daily_equities(
-                        country_code, start_dt_obj, end_dt_obj
+    다음 예상 실행 시간: **{next_run_time_str}**
+    """
                     )
-                    equity_data_map = {
-                        pd.to_datetime(e["date"]).normalize(): e for e in existing_equities
-                    }
+                else:
+                    st.info(f"'{selected_date_str}' 날짜의 현황 데이터가 없습니다.")
 
-                    # 거래일 조회가 실패한 경우(예: 호주), DB에 있는 날짜만 사용
-                    if not all_trading_days:
-                        all_trading_days = sorted(list(equity_data_map.keys()))
+            if st.button(
+                "이 날짜 다시 계산하기",
+                key=f"recalc_status_{country_code}_{selected_date_str}",
+            ):
+                with st.spinner(f"'{selected_date_str}' 기준 현황 데이터를 계산/저장 중..."):
+                    calc_result = get_cached_status_report(
+                        country=country_code,
+                        date_str=selected_date_str,
+                        force_recalculate=True,
+                    )
+                if calc_result:
+                    st.success("재계산 완료!")
+                    st.rerun()
 
-                    data_for_editor = []
-                    for trade_date in all_trading_days:
-                        existing_data = equity_data_map.get(trade_date, {})
-                        row = {
-                            "date": trade_date,
-                            "total_equity": existing_data.get("total_equity", 0.0),
-                            "updated_at": existing_data.get("updated_at"),
-                            "updated_by": existing_data.get("updated_by"),
-                        }
-                        if country_code == "aus":
-                            is_data = existing_data.get("international_shares", {})
-                            row["is_value"] = is_data.get("value", 0.0)
-                            row["is_change_pct"] = is_data.get("change_pct", 0.0)
-                        data_for_editor.append(row)
+    with sub_tab_equity_history:
 
-                    df_to_edit = pd.DataFrame(data_for_editor)
+        app_settings = get_app_settings(country_code)
+        initial_date = (app_settings.get("initial_date") if app_settings else None) or (
+            datetime.now() - pd.DateOffset(months=3)
+        )
 
-                    column_config = {
-                        "date": st.column_config.DateColumn(
-                            "일자", format="YYYY-MM-DD", disabled=True
-                        ),
-                        "total_equity": st.column_config.NumberColumn(
-                            f"총 평가금액{currency_str}",
-                            format="%.2f" if country_code == "aus" else "%d",
-                            required=True,
-                        ),
-                        "updated_at": st.column_config.DatetimeColumn(
-                            "변경일시", format="YYYY-MM-DD HH:mm:ss", disabled=True
-                        ),
-                        "updated_by": st.column_config.TextColumn("변경자", disabled=True),
+        currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
+
+        start_date_str = initial_date.strftime("%Y-%m-%d")
+        end_date_str = datetime.now().strftime("%Y-%m-%d")
+
+        with st.spinner("거래일 및 평가금액 데이터를 불러오는 중..."):
+            all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
+            if (
+                not all_trading_days
+                and country_code
+                == "kor"  # 호주는 yfinance가 주말을 건너뛰므로 거래일 조회가 필수는 아님
+            ):
+                st.warning("거래일을 조회할 수 없습니다.")
+            else:
+                start_dt_obj = pd.to_datetime(start_date_str).to_pydatetime()
+                end_dt_obj = pd.to_datetime(end_date_str).to_pydatetime()
+                existing_equities = get_all_daily_equities(country_code, start_dt_obj, end_dt_obj)
+                equity_data_map = {
+                    pd.to_datetime(e["date"]).normalize(): e for e in existing_equities
+                }
+
+                # 거래일 조회가 실패한 경우(예: 호주), DB에 있는 날짜만 사용
+                if not all_trading_days:
+                    all_trading_days = sorted(list(equity_data_map.keys()))
+
+                data_for_editor = []
+                for trade_date in all_trading_days:
+                    existing_data = equity_data_map.get(trade_date, {})
+                    row = {
+                        "date": trade_date,
+                        "total_equity": existing_data.get("total_equity", 0.0),
+                        "updated_at": existing_data.get("updated_at"),
+                        "updated_by": existing_data.get("updated_by"),
                     }
                     if country_code == "aus":
-                        column_config["is_value"] = st.column_config.NumberColumn(
-                            f"해외주식 평가액{currency_str}", format="%.2f"
-                        )
-                        column_config["is_change_pct"] = st.column_config.NumberColumn(
-                            "해외주식 수익률(%)",
-                            format="%.2f",
-                            help="수익률(%)만 입력합니다. 예: 5.5",
-                        )
+                        is_data = existing_data.get("international_shares", {})
+                        row["is_value"] = is_data.get("value", 0.0)
+                        row["is_change_pct"] = is_data.get("change_pct", 0.0)
+                    data_for_editor.append(row)
 
-                    st.info("총 평가금액을 수정한 후 아래 '저장하기' 버튼을 눌러주세요.")
+                df_to_edit = pd.DataFrame(data_for_editor)
 
-                    edited_df = st.data_editor(
-                        df_to_edit,
-                        key=f"equity_editor_{country_code}",
-                        width="stretch",
-                        hide_index=True,
-                        column_config=column_config,
+                column_config = {
+                    "date": st.column_config.DateColumn("일자", format="YYYY-MM-DD", disabled=True),
+                    "total_equity": st.column_config.NumberColumn(
+                        f"총 평가금액{currency_str}",
+                        format="%.2f" if country_code == "aus" else "%d",
+                        required=True,
+                    ),
+                    "updated_at": st.column_config.DatetimeColumn(
+                        "변경일시", format="YYYY-MM-DD HH:mm:ss", disabled=True
+                    ),
+                    "updated_by": st.column_config.TextColumn("변경자", disabled=True),
+                }
+                if country_code == "aus":
+                    column_config["is_value"] = st.column_config.NumberColumn(
+                        f"해외주식 평가액{currency_str}", format="%.2f"
+                    )
+                    column_config["is_change_pct"] = st.column_config.NumberColumn(
+                        "해외주식 수익률(%)",
+                        format="%.2f",
+                        help="수익률(%)만 입력합니다. 예: 5.5",
                     )
 
-                    if st.button("평가금액 저장하기", key=f"save_all_equities_{country_code}"):
-                        with st.spinner("변경된 평가금액을 저장하는 중..."):
-                            # st.data_editor의 변경 사항은 세션 상태에 저장됩니다.
-                            # 전체 데이터프레임을 순회하는 대신, 변경된 행만 처리하여 불필요한 DB 업데이트를 방지합니다.
-                            editor_state = st.session_state[f"equity_editor_{country_code}"]
-                            edited_rows = editor_state.get("edited_rows", {})
+                st.info("총 평가금액을 수정한 후 아래 '저장하기' 버튼을 눌러주세요.")
 
-                            saved_count = 0
-                            for row_index, changes in edited_rows.items():
-                                # 변경된 행의 원본 데이터를 가져옵니다.
-                                original_row = df_to_edit.iloc[row_index]
+                edited_df = st.data_editor(
+                    df_to_edit,
+                    key=f"equity_editor_{country_code}",
+                    width="stretch",
+                    hide_index=True,
+                    column_config=column_config,
+                )
 
-                                # 저장할 데이터를 구성합니다.
-                                date_to_save = original_row["date"].to_pydatetime()
-                                equity_to_save = changes.get(
-                                    "total_equity", original_row["total_equity"]
-                                )
-                                is_data_to_save = None
-                                if country_code == "aus":
-                                    is_data_to_save = {
-                                        "value": changes.get("is_value", original_row["is_value"]),
-                                        "change_pct": changes.get(
-                                            "is_change_pct", original_row["is_change_pct"]
-                                        ),
-                                    }
+                if st.button("평가금액 저장하기", key=f"save_all_equities_{country_code}"):
+                    with st.spinner("변경된 평가금액을 저장하는 중..."):
+                        # st.data_editor의 변경 사항은 세션 상태에 저장됩니다.
+                        # 전체 데이터프레임을 순회하는 대신, 변경된 행만 처리하여 불필요한 DB 업데이트를 방지합니다.
+                        editor_state = st.session_state[f"equity_editor_{country_code}"]
+                        edited_rows = editor_state.get("edited_rows", {})
 
-                                if save_daily_equity(
-                                    country_code,
-                                    date_to_save,
-                                    equity_to_save,
-                                    is_data_to_save,
-                                    updated_by="사용자",
-                                ):
-                                    saved_count += 1
-                            if saved_count > 0:
-                                st.success(f"{saved_count}개 날짜의 평가금액을 업데이트했습니다.")
-                                st.rerun()
-                            else:
-                                st.info("변경된 내용이 없어 저장하지 않았습니다.")
+                        saved_count = 0
+                        for row_index, changes in edited_rows.items():
+                            # 변경된 행의 원본 데이터를 가져옵니다.
+                            original_row = df_to_edit.iloc[row_index]
+
+                            # 저장할 데이터를 구성합니다.
+                            date_to_save = original_row["date"].to_pydatetime()
+                            equity_to_save = changes.get(
+                                "total_equity", original_row["total_equity"]
+                            )
+                            is_data_to_save = None
+                            if country_code == "aus":
+                                is_data_to_save = {
+                                    "value": changes.get("is_value", original_row["is_value"]),
+                                    "change_pct": changes.get(
+                                        "is_change_pct",
+                                        original_row["is_change_pct"],
+                                    ),
+                                }
+
+                            if save_daily_equity(
+                                country_code,
+                                date_to_save,
+                                equity_to_save,
+                                is_data_to_save,
+                                updated_by="사용자",
+                            ):
+                                saved_count += 1
+                        if saved_count > 0:
+                            st.success(f"{saved_count}개 날짜의 평가금액을 업데이트했습니다.")
+                            st.rerun()
+                        else:
+                            st.info("변경된 내용이 없어 저장하지 않았습니다.")
 
     with sub_tab_trades:
         # 코인 탭: 거래 입력 대신 보유 현황/데이터 편집만 제공 (동기화 버튼 제거)
@@ -1329,10 +1178,10 @@ def render_country_tab(country_code: str):
             col1, col2, _ = st.columns([1, 1, 8])
             with col1:
                 if st.button("BUY", key=f"add_buy_btn_{country_code}"):
-                    show_buy_dialog()
+                    show_buy_dialog(country_code)
             with col2:
                 if st.button("SELL", key=f"add_sell_btn_{country_code}"):
-                    show_sell_dialog()
+                    show_sell_dialog(country_code)
 
         all_trades = get_all_trades(country_code)
         if not all_trades:
@@ -1346,7 +1195,10 @@ def render_country_tab(country_code: str):
                 )
                 options = ["ALL"] + unique_tickers
                 selected = st.selectbox(
-                    "티커 필터", options, index=0, key=f"coin_trades_filter_{country_code}"
+                    "티커 필터",
+                    options,
+                    index=0,
+                    key=f"coin_trades_filter_{country_code}",
                 )
                 if selected != "ALL":
                     df_trades = df_trades[df_trades["ticker"].str.upper() == selected]
@@ -1412,11 +1264,22 @@ def render_country_tab(country_code: str):
                     "amount": st.column_config.NumberColumn("금액", format="%.0f"),
                     "note": st.column_config.TextColumn("비고", width="large"),
                 },
-                disabled=["date", "action", "ticker", "name", "shares", "price", "amount", "note"],
+                disabled=[
+                    "date",
+                    "action",
+                    "ticker",
+                    "name",
+                    "shares",
+                    "price",
+                    "amount",
+                    "note",
+                ],
             )
 
             if st.button(
-                "선택한 거래 삭제", key=f"delete_trade_btn_{country_code}", type="primary"
+                "선택한 거래 삭제",
+                key=f"delete_trade_btn_{country_code}",
+                type="primary",
             ):
                 trades_to_delete = edited_df[edited_df["delete"]]
                 if not trades_to_delete.empty:
@@ -1434,9 +1297,6 @@ def render_country_tab(country_code: str):
     with sub_tab_etf_management:
         with st.spinner("종목 마스터 데이터를 불러오는 중..."):
             render_master_etf_ui(country_code)
-
-    with sub_tab_notification:
-        render_notification_settings_ui(country_code)
 
     with sub_tab_settings:
         # 1. DB에서 현재 설정값 로드
@@ -1604,7 +1464,7 @@ def main():
 
     # 앱 가동시 거래일 캘린더 준비 상태 확인
     try:
-        import pandas_market_calendars as _mcal  # type: ignore
+        pass  # type: ignore
     except Exception as e:
         st.error(
             "거래일 캘린더 라이브러리(pandas-market-calendars)를 불러올 수 없습니다.\n"

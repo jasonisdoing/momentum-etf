@@ -73,6 +73,14 @@ MONGO_DB_CONNECTION_STRING="mongodb+srv://<username>:<password>@cluster0.xxxxx.m
 # 사용할 데이터베이스 이름 (기본값: momentum_etf_db)
 MONGO_DB_NAME="momentum_etf_db"
 
+# (선택) 국가별 슬랙 알림 웹훅 URL
+KOR_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+AUS_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+COIN_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+
+# (선택) 중요 시스템 로그를 받을 슬랙 웹훅 URL
+LOGS_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+
 # (선택) 빗썸 API 키 (가상화폐 자산 추적용)
 BITHUMB_API_KEY="Your_Bithumb_API_Key"
 BITHUMB_API_SECRET="Your_Bithumb_Secret_Key"
@@ -96,7 +104,7 @@ streamlit run web_app.py
 현황 계산 및 알림을 자동으로 실행하려면 스케줄러를 별도의 터미널에서 실행해야 합니다.
 
 ```bash
-python scheduler.py
+python s.py
 ```
 
 스케줄러는 웹 앱의 '알림' 탭에서 설정한 주기에 따라 자동으로 작업을 수행합니다.
@@ -118,7 +126,7 @@ python test.py
 *   `web_app.py`: Streamlit 웹 UI의 메인 애플리케이션 파일.
 *   `status.py`: 각 국가별 포트폴리오의 현재 상태를 계산하는 핵심 로직.
 *   `test.py`: 투자 전략의 성과를 검증하기 위한 백테스팅 스크립트.
-*   `scheduler.py`: `status.py`를 주기적으로 실행하는 스케줄러.
+*   `s.py`: `status.py`를 주기적으로 실행하는 스케줄러.
 *   `logic/`: 실제 매매 전략(모멘텀 점수 계산, 매수/매도 결정 등)이 구현된 폴더.
 *   `utils/`: 데이터베이스 관리, 데이터 로딩, 슬랙 알림 등 공통 유틸리티 함수.
 *   `scripts/`: 빗썸 거래 내역 동기화 등 보조 스크립트.

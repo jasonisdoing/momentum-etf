@@ -60,6 +60,10 @@
             {
                 "ticker": "498270",
                 "name": "KIWOOM 미국양자컴퓨팅"
+            },
+            {
+                "ticker": "0020H0",
+                "name": "KoAct 글로벌양자컴퓨팅액티브"
             }
         ]
     },
@@ -111,6 +115,10 @@
             {
                 "ticker": "091160",
                 "name": "KODEX 반도체"
+            },
+            {
+                "ticker": "0093A0",
+                "name": "RISE AI반도체TOP10"
             }
         ]
     },
@@ -153,10 +161,23 @@
             {
                 "ticker": "456600",
                 "name": "TIMEFOLIO 글로벌AI인공지능액티브"
-            },
+            }
+        ]
+    },
+    {
+        "category": "로봇",
+        "tickers": [
             {
                 "ticker": "469070",
                 "name": "RISE AI&로봇"
+            },
+            {
+                "ticker": "0035T0",
+                "name": "PLUS 글로벌휴머노이드로봇액티브"
+            },
+            {
+                "ticker": "445290",
+                "name": "KODEX 로봇액티브"
             }
         ]
     },
