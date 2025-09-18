@@ -1931,6 +1931,7 @@ def main(country: str = "kor", date_str: Optional[str] = None) -> Optional[datet
         except Exception:
             pass
 
+        # print(rows_sorted)
         return report_base_date.to_pydatetime()
 
         # --- 콘솔 출력용 포맷팅 ---
@@ -2023,8 +2024,6 @@ def main(country: str = "kor", date_str: Optional[str] = None) -> Optional[datet
         render_table_eaw(headers, display_rows, aligns=aligns)
 
         print("\n" + header_line)
-        # 스케줄러 실행 시 콘솔에 상세 테이블을 출력하지 않도록 주석 처리합니다.
-        # print("\n".join(table_lines))
 
 
 def _is_trading_day(country: str) -> bool:
@@ -2064,6 +2063,7 @@ def _maybe_notify_detailed_status(
 ) -> bool:
     """국가별 설정에 따라 슬랙으로 상세 현황 알림을 전송합니다."""
     try:
+        from utils.report import format_aud_money, format_aud_price, format_kr_money
         from utils.notify import get_slack_webhook_url, send_slack_message
     except Exception:
         return False
@@ -2072,6 +2072,25 @@ def _maybe_notify_detailed_status(
         return False
 
     try:
+        # 국가별 포맷터 설정
+        if country == "aus":
+            price_formatter = format_aud_price
+            money_formatter = format_aud_money
+        else:  # kor, coin
+            money_formatter = format_kr_money
+
+            def price_formatter(p):
+                return f"{int(round(p)):,}" if isinstance(p, (int, float)) else str(p)
+
+        def format_shares(quantity):
+            if not isinstance(quantity, (int, float)):
+                return str(quantity)
+            if country == "coin":
+                return f"{quantity:,.8f}".rstrip("0").rstrip(".")
+            if country == "aus":
+                return f"{quantity:.4f}".rstrip("0").rstrip(".")
+            return f"{int(quantity):,d}"
+
         # 상세 알림에서는 시작 알림에서 보낸 경고(데이터 부족 등)를 제외합니다.
         # header_line은 HTML <br> 태그로 경고와 구분됩니다.
         header_line_clean = header_line.split("<br>")[0]
@@ -2125,6 +2144,9 @@ def _maybe_notify_detailed_status(
         # Columns
         idx_ticker = headers.index("티커")
         idx_state = headers.index("상태") if "상태" in headers else None
+        idx_price = headers.index("현재가") if "현재가" in headers else None
+        idx_shares = headers.index("보유수량") if "보유수량" in headers else None
+        idx_amount = headers.index("금액") if "금액" in headers else None
         idx_ret = (
             headers.index("누적수익률")
             if "누적수익률" in headers
@@ -2148,6 +2170,9 @@ def _maybe_notify_detailed_status(
         # 1. 데이터를 사전 처리하여 표시할 부분을 만들고 최대 너비를 찾습니다.
         display_parts_list = []
         max_len_name = 0
+        max_len_price_col = 0
+        max_len_shares_col = 0
+        max_len_amount_col = 0
         max_len_return_col = 0
         max_len_score_col = 0
 
@@ -2168,6 +2193,25 @@ def _maybe_notify_detailed_status(
                     str(row[idx_state]) if (idx_state is not None and idx_state < len(row)) else ""
                 )
 
+                price_col = ""
+                if idx_price is not None:
+                    p = row[idx_price]
+                    if isinstance(p, (int, float)):
+                        price_col = f"@{price_formatter(p)}"
+
+                shares_col = ""
+                if idx_shares is not None:
+                    s = row[idx_shares]
+                    # 보유한 경우에만 표시
+                    if isinstance(s, (int, float)) and s > 1e-9:
+                        shares_col = f"{format_shares(s)}주"
+
+                amount_col = ""
+                if idx_amount is not None:
+                    a = row[idx_amount]
+                    if isinstance(a, (int, float)) and a > 1e-9:
+                        amount_col = f"{money_formatter(a)}"
+
                 return_col = ""
                 if idx_ret is not None:
                     r = row[idx_ret]
@@ -2183,12 +2227,18 @@ def _maybe_notify_detailed_status(
                 parts = {
                     "name": full_name_part,
                     "status": stt,
+                    "price_col": price_col,
+                    "shares_col": shares_col,
+                    "amount_col": amount_col,
                     "return_col": return_col,
                     "score_col": score_col,
                 }
                 display_parts_list.append(parts)
 
                 max_len_name = max(max_len_name, len(full_name_part))
+                max_len_price_col = max(max_len_price_col, len(price_col))
+                max_len_shares_col = max(max_len_shares_col, len(shares_col))
+                max_len_amount_col = max(max_len_amount_col, len(amount_col))
                 max_len_return_col = max(max_len_return_col, len(return_col))
                 max_len_score_col = max(max_len_score_col, len(score_col))
 
@@ -2225,14 +2275,17 @@ def _maybe_notify_detailed_status(
                 body_lines.append(display_name)
                 for parts in parts_in_group:
                     name_part = parts["name"].ljust(max_len_name)
+                    price_part = parts["price_col"].ljust(max_len_price_col)
+                    shares_part = parts["shares_col"].rjust(max_len_shares_col)
+                    amount_part = parts["amount_col"].rjust(max_len_amount_col)
                     score_part = parts["score_col"].ljust(max_len_score_col)
 
                     if show_return:
                         return_part = parts["return_col"].ljust(max_len_return_col)
-                        line = f"{name_part}  {return_part} {score_part}"
+                        line = f"{name_part}  {price_part} {shares_part} {amount_part}  {return_part} {score_part}"
                     else:
                         return_part = "".ljust(max_len_return_col)
-                        line = f"{name_part}  {return_part} {score_part}"
+                        line = f"{name_part}  {price_part} {shares_part} {amount_part}  {return_part} {score_part}"
 
                     body_lines.append(line.rstrip())
                 body_lines.append("")  # 그룹 사이에 빈 줄 추가

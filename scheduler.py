@@ -108,7 +108,7 @@ def run_status(country: str) -> None:
         logging.info(f"Running status for {country}")
         if country == "coin":
             _try_sync_bithumb_trades()
-            _try_sync_bithumb_equity()
+            # _try_sync_bithumb_equity()
 
         # status.main은 성공 시 계산된 리포트의 기준 날짜를 반환합니다.
         report_date = run_status_main(country=country, date_str=None)
@@ -136,9 +136,7 @@ def _try_sync_bithumb_equity():
 
         # 1. 업데이트 전 현재 평가금액을 가져옵니다.
         old_snapshot = get_portfolio_snapshot("coin")
-        old_equity = (
-            float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
-        )
+        old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
         # 2. 빗썸 잔액 스냅샷 스크립트를 실행하여 DB를 업데이트합니다.
         logging.info("Starting Bithumb balance snapshot...")
@@ -147,15 +145,11 @@ def _try_sync_bithumb_equity():
 
         # 3. 업데이트 후 새로운 평가금액을 가져옵니다.
         new_snapshot = get_portfolio_snapshot("coin")
-        new_equity = (
-            float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
-        )
+        new_equity = float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
 
         # 4. 스케줄러에 의한 업데이트임을 기록하기 위해 `updated_by`와 함께 항상 저장합니다.
         if new_snapshot:
-            save_daily_equity(
-                "coin", new_snapshot["date"], new_equity, updated_by="스케줄러"
-            )
+            save_daily_equity("coin", new_snapshot["date"], new_equity, updated_by="스케줄러")
             logging.info("-> Coin equity snapshot updated. (updated_by='scheduler')")
 
             # 5. 평가금액이 변경되었는지 확인하고, 변경된 경우 슬랙 알림을 보냅니다.
@@ -207,9 +201,7 @@ def main():
     # coin
     if _bool_env("SCHEDULE_ENABLE_COIN", True):
         # DB의 크론 설정을 우선 사용, 없으면 환경변수 폴백
-        cron = common.get("SCHEDULE_CRON_COIN") or _get(
-            "SCHEDULE_COIN_CRON", "5 0 * * *"
-        )
+        cron = common.get("SCHEDULE_CRON_COIN") or _get("SCHEDULE_COIN_CRON", "5 0 * * *")
         tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_status,
@@ -221,10 +213,8 @@ def main():
 
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
-        cron = common.get("SCHEDULE_CRON_AUS") or _get(
-            "SCHEDULE_AUS_CRON", "10 18 * * 1-5"
-        )
-        tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
+        cron = common.get("SCHEDULE_CRON_AUS") or _get("SCHEDULE_AUS_CRON", "10 18 * * 1-5")
+        tz = _get("SCHEDULE_AUS_TZ", "Australia/Sydney")
         scheduler.add_job(
             run_status,
             CronTrigger.from_crontab(cron, timezone=tz),
@@ -235,9 +225,7 @@ def main():
 
     # kor
     if _bool_env("SCHEDULE_ENABLE_KOR", True):
-        cron = common.get("SCHEDULE_CRON_KOR") or _get(
-            "SCHEDULE_KOR_CRON", "10 18 * * 1-5"
-        )
+        cron = common.get("SCHEDULE_CRON_KOR") or _get("SCHEDULE_KOR_CRON", "10 18 * * 1-5")
         tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_status,
@@ -250,12 +238,13 @@ def main():
     if _bool_env("RUN_IMMEDIATELY_ON_START", False):
         # 시작 시 한 번 즉시 실행
         logging.info("\n[Initial Run] Starting...")
-        for c in ("coin", "aus", "kor"):
+        # run_status("aus")
+        for country in ("coin", "aus", "kor"):
             try:
-                if _bool_env(f"SCHEDULE_ENABLE_{c.upper()}", True):
-                    run_status(c)
+                if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", True):
+                    run_status(country)
             except Exception:
-                logging.error(f"Error during initial run for {c}", exc_info=True)
+                logging.error(f"Error during initial run for {country}", exc_info=True)
         logging.info("[Initial Run] Complete.")
 
     # 다음 실행 시간 출력
