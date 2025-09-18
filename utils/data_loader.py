@@ -4,6 +4,7 @@
 
 import functools
 import json
+import os
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from contextlib import contextmanager
@@ -43,6 +44,74 @@ warnings.filterwarnings(
     category=UserWarning,
     module=r"^pandas_market_calendars\.",
 )
+
+CACHE_START_DATE_FALLBACK = "2020-01-01"
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
+
+
+class PykrxDataUnavailable(Exception):
+    """pykrx 데이터가 제공되지 않을 때 사용되는 예외."""
+
+    def __init__(
+        self,
+        country: str,
+        start_dt: pd.Timestamp,
+        end_dt: pd.Timestamp,
+        detail: str,
+    ) -> None:
+        self.country = country
+        self.start_dt = start_dt
+        self.end_dt = end_dt
+        self.detail = detail
+        message = (
+            f"[{country.upper()}] pykrx data unavailable "
+            f"({start_dt.date()}~{end_dt.date()}): {detail}"
+        )
+        super().__init__(message)
+
+
+def _get_cache_start_dt() -> Optional[pd.Timestamp]:
+    """환경 변수 또는 기본값에서 캐시 시작 날짜를 로드합니다."""
+    raw = os.environ.get("CACHE_START_DATE", CACHE_START_DATE_FALLBACK)
+    if not raw:
+        return None
+    try:
+        dt = pd.to_datetime(raw)
+    except Exception:
+        return None
+    if isinstance(dt, pd.DatetimeIndex):
+        dt = dt[0]
+    if isinstance(dt, pd.Timestamp):
+        if dt.tzinfo is not None:
+            dt = dt.tz_localize(None)
+        return dt.normalize()
+    return None
+
+
+def _should_skip_pykrx_fetch(
+    country: str,
+    cache_end: Optional[pd.Timestamp],
+    miss_start: pd.Timestamp,
+) -> bool:
+    """장 시작 전에는 캐시만 사용하도록 pykrx 호출을 지연합니다."""
+
+    if country != "kor" or cache_end is None:
+        return False
+
+    if ZoneInfo is not None:
+        now_local = datetime.now(ZoneInfo("Asia/Seoul"))
+    else:  # pragma: no cover
+        now_local = datetime.now()
+
+    # pykrx 데이터가 당일 분이 아직 나오지 않은 장 시작 전(16시 이전)이라면 생략
+    if miss_start.normalize() == pd.Timestamp(now_local.date()) and now_local.hour < 16:
+        return True
+
+    return False
 
 
 @contextmanager
@@ -208,6 +277,8 @@ def _fetch_ohlcv_with_cache(
 ) -> Optional[pd.DataFrame]:
     cached_df = load_cached_frame(country, ticker)
     missing_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    cache_start: Optional[pd.Timestamp] = None
+    cache_end: Optional[pd.Timestamp] = None
     if cached_df is None or cached_df.empty:
         cached_df = None
         missing_ranges.append((start_dt, end_dt))
@@ -224,15 +295,19 @@ def _fetch_ohlcv_with_cache(
     for miss_start, miss_end in missing_ranges:
         if miss_start > miss_end:
             continue
+        if cache_start is not None and miss_end < cache_start:
+            continue
+        if cache_end is not None and _should_skip_pykrx_fetch(country, cache_end, miss_start):
+            continue
         fetched = _fetch_ohlcv_core(ticker, country, miss_start, miss_end, cached_df)
         if fetched is not None and not fetched.empty:
             new_frames.append(fetched)
 
     combined_df = cached_df
+    prev_count = 0 if cached_df is None else cached_df.shape[0]
     added_count = 0
 
     if new_frames:
-        added_count = sum(len(frame) for frame in new_frames if frame is not None)
         frames = []
         if cached_df is not None and not cached_df.empty:
             frames.append(cached_df)
@@ -243,6 +318,7 @@ def _fetch_ohlcv_with_cache(
         save_cached_frame(country, ticker, combined_df)
 
         new_total = combined_df.shape[0]
+        added_count = max(0, new_total - prev_count)
         if added_count > 0:
             try:
                 display_name = _get_display_name(country, ticker)
@@ -329,6 +405,7 @@ def _fetch_ohlcv_core(
 
         all_dfs = []
         pykrx_failed = False
+        pykrx_error_msg = None
 
         current_start = start_dt
         while current_start <= end_dt:
@@ -348,45 +425,32 @@ def _fetch_ohlcv_core(
                         df_part = get_etn_func(start_str, end_str, ticker)
                 if df_part is not None and not df_part.empty:
                     all_dfs.append(df_part)
-            except (json.JSONDecodeError, KeyError):
+            except (json.JSONDecodeError, KeyError) as err:
                 pykrx_failed = True
-                print(f"경고: pykrx 조회 실패(JSON 오류), yfinance로 전체 기간 대체 시도: {ticker}")
+                pykrx_error_msg = str(err) or "JSON/KeyError"
+                print(
+                    f"경고: {ticker}의 {start_str}~{end_str} 기간 pykrx 조회 중 오류: {pykrx_error_msg}"
+                )
                 break
             except Exception as e:
-                print(f"경고: {ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {e}")
+                err_text = str(e)
+                print(
+                    f"경고: {ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {err_text}"
+                )
+                if isinstance(e, KeyError) or "are in the [columns]" in err_text:
+                    pykrx_failed = True
+                    pykrx_error_msg = err_text
+                    break
 
             current_start += pd.DateOffset(years=1)
 
-        if pykrx_failed:
-            if yf is None:
-                return None
-            try:
-                y_ticker = ticker
-                if ticker.isdigit() and len(ticker) == 6:
-                    y_ticker = f"{ticker}.KS"
-                df_yf = yf.download(
-                    y_ticker,
-                    start=start_dt,
-                    end=end_dt + pd.Timedelta(days=1),
-                    progress=False,
-                    auto_adjust=True,
-                )
-                if df_yf is not None and not df_yf.empty:
-                    if isinstance(df_yf.columns, pd.MultiIndex):
-                        df_yf.columns = df_yf.columns.get_level_values(0)
-                        df_yf = df_yf.loc[:, ~df_yf.columns.duplicated()]
-                    if df_yf.index.tz is not None:
-                        df_yf.index = df_yf.index.tz_localize(None)
-                    if not df_yf.index.is_unique:
-                        df_yf = df_yf[~df_yf.index.duplicated(keep="first")]
-                    return df_yf
-                return None
-            except Exception as yf_e:
-                print(f"경고: yfinance 대체 조회도 실패: {ticker} ({yf_e})")
-                return None
-
         if not all_dfs:
-            return None
+            pykrx_failed = True
+            if pykrx_error_msg is None:
+                pykrx_error_msg = "데이터 없음"
+
+        if pykrx_failed:
+            raise PykrxDataUnavailable(country, start_dt, end_dt, pykrx_error_msg)
 
         full_df = pd.concat(all_dfs)
         full_df = full_df[~full_df.index.duplicated(keep="first")]
@@ -462,6 +526,15 @@ def _fetch_ohlcv_core(
             df = _pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
             df.set_index("Date", inplace=True)
             df.sort_index(inplace=True)
+            cache_start_dt = _get_cache_start_dt()
+            window_start = start_dt
+            if cache_start_dt is not None and cache_start_dt > window_start:
+                window_start = cache_start_dt
+            if window_start > end_dt:
+                return None
+            df = df[(df.index >= window_start) & (df.index <= end_dt)]
+            if df.empty:
+                return None
             return df
         except Exception as e:
             print(f"경고: {ticker} 코인 OHLCV 조회 중 오류: {e}")

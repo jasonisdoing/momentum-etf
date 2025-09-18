@@ -143,9 +143,26 @@ def run_status(country: str) -> None:
 
             if abs(new_equity - old_equity) > 1e-9:
                 diff = new_equity - old_equity
-                diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"
                 change_label = "📈평가금액 증가" if diff >= 0 else "📉평가금액 감소"
-                equity_change_message = f"{change_label}: {money_formatter(old_equity)} => {money_formatter(new_equity)} ({diff_str})"
+
+                if country == "aus" or abs(diff) >= 10_000:
+                    old_equity_str = money_formatter(old_equity)
+                    new_equity_str = money_formatter(new_equity)
+                    diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"
+                else:
+                    old_equity_str = f"{int(round(old_equity)):,}원"
+                    new_equity_str = f"{int(round(new_equity)):,}원"
+                    diff_int = int(round(diff))
+                    if diff_int != 0:
+                        sign = "+" if diff_int > 0 else ""
+                        diff_str = f"{sign}{diff_int:,}원"
+                    else:
+                        sign = "+" if diff > 0 else "-" if diff < 0 else ""
+                        diff_str = "0원" if sign == "" else f"{sign}{abs(diff):,.2f}원"
+
+                equity_change_message = (
+                    f"{change_label}: {old_equity_str} => {new_equity_str} ({diff_str})"
+                )
                 message += f" | {equity_change_message}"
 
             send_log_to_slack(message)

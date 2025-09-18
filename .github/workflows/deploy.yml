@@ -20,5 +20,19 @@ jobs:
           script: |
             echo ">>> Connecting to Lightsail and starting deployment..."
             cd /home/ubuntu/momentum-etf
+            chmod +x update.sh
             ./update.sh
             echo ">>> Deployment script finished."
+      - name: Notify Slack (deploy succeeded)
+        if: ${{ success() }}          # 이전 단계들이 모두 성공했을 때만 실행
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"<!channel> ✅ Lightsail 배포 완료\\nRepo: ${{ github.repository }}\\nCommit: ${{ github.sha }}\"}" \
+            ${{ secrets.LOGS_SLACK_WEBHOOK }}
+      - name: Notify Slack (deploy failed)
+        if: ${{ failure() }}
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"<!channel> ❌ Lightsail 배포 실패\\nRepo: ${{ github.repository }}\\nCommit: ${{ github.sha }}\"}" \
+            ${{ secrets.LOGS_SLACK_WEBHOOK }}
+
