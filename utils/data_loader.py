@@ -4,6 +4,7 @@
 
 import functools
 import json
+import os
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from contextlib import contextmanager
@@ -43,6 +44,26 @@ warnings.filterwarnings(
     category=UserWarning,
     module=r"^pandas_market_calendars\.",
 )
+
+CACHE_START_DATE_FALLBACK = "2020-01-01"
+
+
+def _get_cache_start_dt() -> Optional[pd.Timestamp]:
+    """환경 변수 또는 기본값에서 캐시 시작 날짜를 로드합니다."""
+    raw = os.environ.get("CACHE_START_DATE", CACHE_START_DATE_FALLBACK)
+    if not raw:
+        return None
+    try:
+        dt = pd.to_datetime(raw)
+    except Exception:
+        return None
+    if isinstance(dt, pd.DatetimeIndex):
+        dt = dt[0]
+    if isinstance(dt, pd.Timestamp):
+        if dt.tzinfo is not None:
+            dt = dt.tz_localize(None)
+        return dt.normalize()
+    return None
 
 
 @contextmanager
@@ -229,10 +250,10 @@ def _fetch_ohlcv_with_cache(
             new_frames.append(fetched)
 
     combined_df = cached_df
+    prev_count = 0 if cached_df is None else cached_df.shape[0]
     added_count = 0
 
     if new_frames:
-        added_count = sum(len(frame) for frame in new_frames if frame is not None)
         frames = []
         if cached_df is not None and not cached_df.empty:
             frames.append(cached_df)
@@ -243,6 +264,7 @@ def _fetch_ohlcv_with_cache(
         save_cached_frame(country, ticker, combined_df)
 
         new_total = combined_df.shape[0]
+        added_count = max(0, new_total - prev_count)
         if added_count > 0:
             try:
                 display_name = _get_display_name(country, ticker)
@@ -462,6 +484,15 @@ def _fetch_ohlcv_core(
             df = _pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
             df.set_index("Date", inplace=True)
             df.sort_index(inplace=True)
+            cache_start_dt = _get_cache_start_dt()
+            window_start = start_dt
+            if cache_start_dt is not None and cache_start_dt > window_start:
+                window_start = cache_start_dt
+            if window_start > end_dt:
+                return None
+            df = df[(df.index >= window_start) & (df.index <= end_dt)]
+            if df.empty:
+                return None
             return df
         except Exception as e:
             print(f"경고: {ticker} 코인 OHLCV 조회 중 오류: {e}")

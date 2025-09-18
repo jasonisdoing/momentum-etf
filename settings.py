@@ -5,6 +5,7 @@
 """
 
 import os
+
 from dotenv import load_dotenv
 
 # .env 파일이 있다면 로드합니다.
@@ -17,6 +18,6 @@ BENCHMARK_TICKERS = {
     "aus": "IVV.AX",  # iShares S&P 500 (AUD)
 }
 
-APP_VERSION = "2025.09.18.1"
+APP_VERSION_TIME = os.environ.get("APP_VERSION_TIME", "2025-09-19-07")
 
-APP_TYPE = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
+APP_TYPE = os.environ.get("APP_TYPE", f"APP-{APP_VERSION_TIME}")
