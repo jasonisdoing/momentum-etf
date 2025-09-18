@@ -1,5 +1,6 @@
 import os
 import sys
+import warnings
 from datetime import datetime
 from typing import Dict, Optional
 
@@ -7,9 +8,12 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
+# 프로젝트 루트를 Python 경로에 추가
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 # .env 파일이 있다면 로드합니다.
 load_dotenv()
-import warnings
+
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 warnings.filterwarnings(
@@ -20,18 +24,29 @@ warnings.filterwarnings(
 )
 
 
-# 프로젝트 루트를 Python 경로에 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from cron_descriptor import get_description as get_cron_description
+except ImportError:
+    get_cron_description = None
+try:
+    from croniter import croniter
+except ImportError:
+    croniter = None
+try:
+    import pytz
+except ImportError:
+    pytz = None
+try:
+    from pykrx import stock as _stock
+except Exception:
+    _stock = None
 
-import settings as global_settings
 from status import (
-    _maybe_notify_detailed_status,
     generate_status_report,
     get_benchmark_status_string,
     get_market_regime_status_string,
 )
 from utils.data_loader import (
-    fetch_ohlcv_for_tickers,
     fetch_yfinance_name,
     get_trading_days,
 )
@@ -52,26 +67,6 @@ from utils.db_manager import (
     save_trade,
 )
 from utils.stock_list_io import get_etfs
-
-try:
-    from pykrx import stock as _stock
-except Exception:
-    _stock = None
-
-try:
-    import pytz
-except ImportError:
-    pytz = None
-
-try:
-    from croniter import croniter
-except ImportError:
-    croniter = None
-
-try:
-    from cron_descriptor import get_description as get_cron_description
-except ImportError:
-    get_cron_description = None
 
 
 COUNTRY_CODE_MAP = {"kor": "한국", "aus": "호주", "coin": "가상화폐"}
@@ -359,7 +354,15 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
     df_display = df_merged[existing_cols].copy()
 
     # 숫자형으로 변환해야 하는 컬럼 목록
-    numeric_cols = ["현재가", "일간수익률", "보유수량", "금액", "누적수익률", "비중", "점수"]
+    numeric_cols = [
+        "현재가",
+        "일간수익률",
+        "보유수량",
+        "금액",
+        "누적수익률",
+        "비중",
+        "점수",
+    ]
     for col in numeric_cols:
         if col in df_display.columns:
             df_display[col] = pd.to_numeric(df_display[col], errors="coerce")
@@ -423,8 +426,6 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
 def render_master_etf_ui(country_code: str):
     """종목 마스터 조회 UI를 렌더링합니다."""
     # from utils.data_loader import fetch_crypto_name # 사용자 요청에 따라 제거됨
-
-    country_name = COUNTRY_CODE_MAP.get(country_code, "기타")
 
     if country_code == "coin":
         st.info("이곳에서 가상화폐 종목을 조회할 수 있습니다.")
@@ -621,7 +622,10 @@ def render_country_tab(country_code: str):
             }
 
             if save_trade(trade_data):
-                st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
+                st.session_state[message_key] = (
+                    "success",
+                    "거래가 성공적으로 저장되었습니다.",
+                )
             else:
                 st.session_state[message_key] = (
                     "error",
@@ -751,7 +755,10 @@ def render_country_tab(country_code: str):
             ]
 
             if not selected_indices:
-                st.session_state[message_key] = ("warning", "매도할 종목을 선택해주세요.")
+                st.session_state[message_key] = (
+                    "warning",
+                    "매도할 종목을 선택해주세요.",
+                )
                 return
 
             selected_rows = df_holdings.loc[selected_indices]
@@ -821,7 +828,14 @@ def render_country_tab(country_code: str):
                 hide_index=True,
                 width="stretch",
                 key=f"sell_editor_{country_code_inner}",
-                disabled=["종목명", "티커", "보유수량", value_col_name, "수익률", price_col_name],
+                disabled=[
+                    "종목명",
+                    "티커",
+                    "보유수량",
+                    value_col_name,
+                    "수익률",
+                    price_col_name,
+                ],
                 column_config={
                     "선택": st.column_config.CheckboxColumn("삭제", required=True),
                     "보유수량": st.column_config.NumberColumn(format="%.8f"),
@@ -1062,7 +1076,8 @@ def render_country_tab(country_code: str):
                             rows = report_from_db.get("rows")
 
                             st.markdown(
-                                f":information_source: {header_line}", unsafe_allow_html=True
+                                f":information_source: {header_line}",
+                                unsafe_allow_html=True,
                             )
 
                             # 데이터 형식 검증 (과거 데이터 호환용)
@@ -1208,7 +1223,8 @@ def render_country_tab(country_code: str):
                                     is_data_to_save = {
                                         "value": changes.get("is_value", original_row["is_value"]),
                                         "change_pct": changes.get(
-                                            "is_change_pct", original_row["is_change_pct"]
+                                            "is_change_pct",
+                                            original_row["is_change_pct"],
                                         ),
                                     }
 
@@ -1235,10 +1251,10 @@ def render_country_tab(country_code: str):
             col1, col2, _ = st.columns([1, 1, 8])
             with col1:
                 if st.button("BUY", key=f"add_buy_btn_{country_code}"):
-                    show_buy_dialog()
+                    show_buy_dialog(country_code)
             with col2:
                 if st.button("SELL", key=f"add_sell_btn_{country_code}"):
-                    show_sell_dialog()
+                    show_sell_dialog(country_code)
 
         all_trades = get_all_trades(country_code)
         if not all_trades:
@@ -1252,7 +1268,10 @@ def render_country_tab(country_code: str):
                 )
                 options = ["ALL"] + unique_tickers
                 selected = st.selectbox(
-                    "티커 필터", options, index=0, key=f"coin_trades_filter_{country_code}"
+                    "티커 필터",
+                    options,
+                    index=0,
+                    key=f"coin_trades_filter_{country_code}",
                 )
                 if selected != "ALL":
                     df_trades = df_trades[df_trades["ticker"].str.upper() == selected]
@@ -1318,11 +1337,22 @@ def render_country_tab(country_code: str):
                     "amount": st.column_config.NumberColumn("금액", format="%.0f"),
                     "note": st.column_config.TextColumn("비고", width="large"),
                 },
-                disabled=["date", "action", "ticker", "name", "shares", "price", "amount", "note"],
+                disabled=[
+                    "date",
+                    "action",
+                    "ticker",
+                    "name",
+                    "shares",
+                    "price",
+                    "amount",
+                    "note",
+                ],
             )
 
             if st.button(
-                "선택한 거래 삭제", key=f"delete_trade_btn_{country_code}", type="primary"
+                "선택한 거래 삭제",
+                key=f"delete_trade_btn_{country_code}",
+                type="primary",
             ):
                 trades_to_delete = edited_df[edited_df["delete"]]
                 if not trades_to_delete.empty:
@@ -1507,7 +1537,7 @@ def main():
 
     # 앱 가동시 거래일 캘린더 준비 상태 확인
     try:
-        import pandas_market_calendars as _mcal  # type: ignore
+        pass  # type: ignore
     except Exception as e:
         st.error(
             "거래일 캘린더 라이브러리(pandas-market-calendars)를 불러올 수 없습니다.\n"

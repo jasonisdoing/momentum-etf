@@ -1,11 +1,10 @@
 # .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff의 버전을 고정하여 일관된 결과를 보장합니다.
-    rev: v0.4.4
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.3.0
     hooks:
-      # 코드를 검사하고 자동으로 수정합니다.
-      - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
-      # 코드를 포맷팅합니다.
-      - id: ruff-format
+      - id: flake8
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black

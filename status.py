@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-import pandas as pd
-
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+
+import pandas as pd
 from pymongo import DESCENDING
 
 import settings as global_settings
@@ -246,6 +246,9 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
     가상화폐의 경우, 여러 벤치마크와 비교할 수 있습니다.
     """
     # 1. 설정 로드
+    # 함수 내에서 동적으로 import가 필요할 경우, 함수 상단에 배치하여 스코프 문제를 방지합니다.
+    from utils.data_loader import fetch_ohlcv
+
     app_settings = get_app_settings(country)
     if (
         not app_settings
@@ -268,17 +271,43 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
     current_equity = float(portfolio_data.get("total_equity", 0.0))
     base_date = pd.to_datetime(portfolio_data["date"]).normalize()
 
+    # --- 데이터 오염 방지를 위한 평가금액 재계산 ---
+    # DB의 평가금액이 오염되었을 수 있으므로, 보유 종목의 현재가 합계를 직접 계산하여 비교합니다.
+    # 이는 비효율적이지만, 데이터 정합성을 보장하기 위한 방어적 코드입니다.
+    equity_for_calc = current_equity
+    if country == "aus":
+        holdings = portfolio_data.get("holdings", [])
+        recalculated_holdings_value = 0.0
+
+        for h in holdings:
+            df = fetch_ohlcv(h["ticker"], country=country, months_back=1, base_date=base_date)
+            if df is not None and not df.empty:
+                price = df["Close"].iloc[-1]
+                recalculated_holdings_value += h["shares"] * price
+
+        if portfolio_data.get("international_shares"):
+            recalculated_holdings_value += portfolio_data["international_shares"].get("value", 0.0)
+
+        # 휴리스틱: DB 평가금액이 재계산된 보유금액보다 10배 이상 크면, 데이터 오염으로 간주합니다.
+        if recalculated_holdings_value > 1 and (current_equity / recalculated_holdings_value) > 10:
+            equity_for_calc = recalculated_holdings_value  # 현금을 무시하고 보유금액만 사용
+
     # 3. 포트폴리오 누적 수익률 계산
-    portfolio_cum_ret_pct = ((current_equity / initial_capital) - 1.0) * 100.0
+    portfolio_cum_ret_pct = ((equity_for_calc / initial_capital) - 1.0) * 100.0
 
     def _calculate_and_format_single_benchmark(
-        benchmark_ticker: str, benchmark_country: str, display_name_override: Optional[str] = None
+        benchmark_ticker: str,
+        benchmark_country: str,
+        display_name_override: Optional[str] = None,
     ) -> str:
         """단일 벤치마크와의 비교 문자열을 생성하는 헬퍼 함수입니다."""
         df_benchmark = fetch_ohlcv(
             benchmark_ticker,
             country=benchmark_country,
-            date_range=[initial_date.strftime("%Y-%m-%d"), base_date.strftime("%Y-%m-%d")],
+            date_range=[
+                initial_date.strftime("%Y-%m-%d"),
+                base_date.strftime("%Y-%m-%d"),
+            ],
         )
 
         # Fallbacks when primary source is unavailable
@@ -342,12 +371,12 @@ def get_benchmark_status_string(country: str) -> Optional[str]:
 
         start_prices = df_benchmark[df_benchmark.index >= initial_date]["Close"]
         if start_prices.empty:
-            return f'<span style="color:grey">벤치마크 시작 가격 조회 실패</span>'
+            return '<span style="color:grey">벤치마크 시작 가격 조회 실패</span>'
         benchmark_start_price = start_prices.iloc[0]
 
         end_prices = df_benchmark[df_benchmark.index <= base_date]["Close"]
         if end_prices.empty:
-            return f'<span style="color:grey">벤치마크 종료 가격 조회 실패</span>'
+            return '<span style="color:grey">벤치마크 종료 가격 조회 실패</span>'
         benchmark_end_price = end_prices.iloc[-1]
 
         if (
@@ -543,7 +572,11 @@ def calculate_consecutive_holding_info(
             # 이를 통해 동일한 날짜에 발생한 거래의 순서를 정확히 반영하여 연속 보유 기간을 계산합니다.
             trades = list(
                 db.trades.find(
-                    {"country": country, "ticker": tkr, "date": {"$lte": include_until}},
+                    {
+                        "country": country,
+                        "ticker": tkr,
+                        "date": {"$lte": include_until},
+                    },
                     sort=[("date", DESCENDING), ("_id", DESCENDING)],
                 )
             )
@@ -656,7 +689,9 @@ def _load_and_prepare_ticker_data(args):
 
 
 def _fetch_and_prepare_data(
-    country: str, date_str: Optional[str], prefetched_data: Optional[Dict[str, pd.DataFrame]] = None
+    country: str,
+    date_str: Optional[str],
+    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Optional[StatusReportData]:
     """
     주어진 종목 목록에 대해 OHLCV 데이터를 조회하고,
@@ -691,7 +726,7 @@ def _fetch_and_prepare_data(
         # DB에서 가져온 date는 스냅샷의 기준일이 됩니다.
         base_date = pd.to_datetime(portfolio_data["date"]).normalize()
     except (ValueError, TypeError):
-        print(f"경고: 포트폴리오 스냅샷에서 날짜를 추출할 수 없습니다. 현재 날짜를 사용합니다.")
+        print("경고: 포트폴리오 스냅샷에서 날짜를 추출할 수 없습니다. 현재 날짜를 사용합니다.")
         base_date = pd.Timestamp.now().normalize()
 
     # 콘솔 로그에 국가/날짜를 포함하여 표시
@@ -713,7 +748,6 @@ def _fetch_and_prepare_data(
     # DB에서 종목 목록을 가져와 전체 유니버스를 구성합니다.
     etfs_from_file = get_etfs(country)
     etf_meta = {etf["ticker"]: etf for etf in etfs_from_file}
-    static_pairs = [(etf["ticker"], etf["name"]) for etf in etfs_from_file]
 
     # 오늘 판매된 종목을 추가합니다.
     sold_tickers_today = set()
@@ -744,19 +778,6 @@ def _fetch_and_prepare_data(
         pairs.append((tkr, name))
 
     # 국가별로 다른 포맷터 사용
-    header_money_formatter = format_kr_money
-    if country == "aus":
-        # 호주: 가격은 AUD, 금액은 KRW로 표시
-        price_formatter = format_aud_price
-        money_formatter = format_aud_money
-        ma_formatter = format_aud_price
-    else:
-        # 원화(KRW) 형식으로 가격을 포맷합니다.
-        money_formatter = format_kr_money
-        price_formatter = lambda p: f"{int(round(p)):,}"
-        ma_formatter = lambda p: f"{int(round(p)):,}원"
-
-    # 실시간 가격 조회를 위한 헬퍼 함수
     def _fetch_realtime_price(tkr):
         from utils.data_loader import fetch_naver_realtime_price
 
@@ -806,7 +827,10 @@ def _fetch_and_prepare_data(
         regime_ticker = str(common["MARKET_REGIME_FILTER_TICKER"])
 
         df_regime = fetch_ohlcv(
-            regime_ticker, country=country, months_range=[required_months, 0], base_date=base_date
+            regime_ticker,
+            country=country,
+            months_range=[required_months, 0],
+            base_date=base_date,
         )
 
         if df_regime is not None and not df_regime.empty and len(df_regime) >= regime_ma_period:
@@ -843,7 +867,15 @@ def _fetch_and_prepare_data(
     for tkr, _ in pairs:
         df_full = prefetched_data.get(tkr) if prefetched_data else None
         tasks.append(
-            (tkr, country, required_months, base_date, ma_period, atr_period_norm, df_full)
+            (
+                tkr,
+                country,
+                required_months,
+                base_date,
+                ma_period,
+                atr_period_norm,
+                df_full,
+            )
         )
 
     # 병렬 처리로 데이터 로딩 및 기본 지표 계산
@@ -930,7 +962,12 @@ def _fetch_and_prepare_data(
 
 
 def _build_header_line(
-    country, portfolio_data, current_equity, total_holdings_value, data_by_tkr, base_date
+    country,
+    portfolio_data,
+    current_equity,
+    total_holdings_value,
+    data_by_tkr,
+    base_date,
 ):
     """리포트의 헤더 라인을 생성합니다."""
     # 국가별 포맷터 설정
@@ -957,15 +994,24 @@ def _build_header_line(
     # 현금
     total_cash = float(current_equity) - float(total_holdings)
 
+    # --- 데이터 오염 방지를 위한 누적 수익률용 평가금액 보정 ---
+    equity_for_cum_calc = current_equity
+    # 휴리스틱: DB 평가금액이 재계산된 보유금액보다 10배 이상 크면, 데이터 오염으로 간주합니다.
+    if country == "aus" and total_holdings > 1 and current_equity > 1:
+        if (current_equity / total_holdings) > 10:
+            equity_for_cum_calc = total_holdings  # 현금을 무시하고 보유금액만 사용
+
     # 누적 수익률 및 TopN
     app_settings = get_app_settings(country)
     initial_capital_local = float(app_settings.get("initial_capital", 0)) if app_settings else 0.0
     cum_ret_pct = (
-        ((current_equity / initial_capital_local) - 1.0) * 100.0
+        ((equity_for_cum_calc / initial_capital_local) - 1.0) * 100.0
         if initial_capital_local > 0
         else 0.0
     )
     portfolio_topn = app_settings.get("portfolio_topn", 0) if app_settings else 0
+
+    cum_profit_loss = equity_for_cum_calc - initial_capital_local
 
     today_cal = pd.Timestamp.now().normalize()
 
@@ -996,15 +1042,27 @@ def _build_header_line(
         day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
 
     # 평가 수익률
-    total_acquisition_cost = sum(
+    total_aus_etf_acquisition_cost = sum(
         d["shares"] * d["avg_cost"] for d in data_by_tkr.values() if d["shares"] > 0
     )
+
+    # 최종 평가 수익률 계산을 위한 변수 초기화
+    final_total_holdings_value = total_holdings_value
+    final_total_acquisition_cost = total_aus_etf_acquisition_cost
+
+    # 호주 포트폴리오의 경우, international_shares 가치를 평가 수익률 계산에 포함
+    if country == "aus" and portfolio_data.get("international_shares"):
+        is_value = portfolio_data["international_shares"].get("value", 0.0)
+        final_total_holdings_value += is_value
+        # international_shares의 매입가는 알 수 없으므로, 현재 가치를 그대로 더해 수익률 계산에 영향을 주지 않도록 함
+        final_total_acquisition_cost += is_value
+
     eval_ret_pct = (
-        ((total_holdings_value / total_acquisition_cost) - 1.0) * 100.0
-        if total_acquisition_cost > 0
+        ((final_total_holdings_value / final_total_acquisition_cost) - 1.0) * 100.0
+        if final_total_acquisition_cost > 0
         else 0.0
     )
-    eval_profit_loss = total_holdings_value - total_acquisition_cost
+    eval_profit_loss = final_total_holdings_value - final_total_acquisition_cost
 
     # 헤더 문자열 생성
     equity_str = money_formatter(current_equity)
@@ -1014,9 +1072,7 @@ def _build_header_line(
     eval_ret_str = _format_return_for_header(
         "평가", eval_ret_pct, eval_profit_loss, money_formatter
     )
-    cum_ret_str = _format_return_for_header(
-        "누적", cum_ret_pct, current_equity - initial_capital_local, money_formatter
-    )
+    cum_ret_str = _format_return_for_header("누적", cum_ret_pct, cum_profit_loss, money_formatter)
 
     # 헤더 본문
     header_body = (
@@ -1116,16 +1172,14 @@ def generate_status_report(
         result = _fetch_and_prepare_data(country, date_str, prefetched_data)
         if result is None:
             return None
-    except Exception as e:
+    except Exception:
         raise  # 오류를 다시 발생시켜 호출한 쪽에서 처리하도록 함
 
     portfolio_data = result.portfolio_data
     data_by_tkr = result.data_by_tkr
     total_holdings_value = result.total_holdings_value
-    datestamps = result.datestamps
     pairs = result.pairs
     base_date = result.base_date
-    regime_info = result.regime_info
     etf_meta = result.etf_meta
     failed_tickers_info = result.failed_tickers_info
     desc = result.description
@@ -1231,7 +1285,12 @@ def generate_status_report(
 
     # 2. 헤더 생성
     header_line, label_date, day_label = _build_header_line(
-        country, portfolio_data, current_equity, total_holdings_value, data_by_tkr, base_date
+        country,
+        portfolio_data,
+        current_equity,
+        total_holdings_value,
+        data_by_tkr,
+        base_date,
     )
 
     # 데이터 기간이 부족한 종목에 대한 경고 메시지를 헤더에 추가합니다.
@@ -1304,7 +1363,7 @@ def generate_status_report(
         return None
     # 포지션 비중 가이드라인: 모든 국가 동일 규칙 적용
     min_pos = 1.0 / (denom * 2.0)  # 최소 편입 비중
-    max_pos = 1.0 / denom  # 목표/최대 비중
+    max_pos = 1.0 / denom  # 목표/최대 비중 # noqa: F841
 
     if country == "coin":
         held_count = sum(
@@ -1319,15 +1378,20 @@ def generate_status_report(
 
     # 4. 초기 매매 결정 생성
     decisions = []
+
+    def _format_kr_price(p):
+        return f"{int(round(p)):,}"
+
+    def _format_kr_ma(p):
+        return f"{int(round(p)):,}원"
+
     # 국가별 포맷터 설정
     if country == "aus":
         price_formatter = format_aud_price
         money_formatter = format_aud_money
-        ma_formatter = format_aud_price
     else:  # kor
         money_formatter = format_kr_money
-        price_formatter = lambda p: f"{int(round(p)):,}"
-        ma_formatter = lambda p: f"{int(round(p)):,}원"
+        price_formatter = _format_kr_price
 
     def format_shares(quantity):
         if country == "coin":
@@ -1337,9 +1401,6 @@ def generate_status_report(
             # 호주: 소수점 4자리까지 표시 (불필요한 0 제거)
             return f"{quantity:,.4f}".rstrip("0").rstrip(".")
         return f"{int(quantity):,d}"
-
-    # 거래일 계산을 위한 참조 티커를 설정합니다.
-    ref_ticker_for_cal = next(iter(data_by_tkr.keys())) if data_by_tkr else None
 
     for tkr, name in pairs:
         d = data_by_tkr.get(tkr)
@@ -1408,7 +1469,9 @@ def generate_status_report(
                 try:
                     # 거래일 기준으로 보유일수 계산 (캐시된 함수 사용)
                     trading_days_in_period = get_trading_days(
-                        buy_date.strftime("%Y-%m-%d"), label_date.strftime("%Y-%m-%d"), country
+                        buy_date.strftime("%Y-%m-%d"),
+                        label_date.strftime("%Y-%m-%d"),
+                        country,
                     )
                     holding_days = len(trading_days_in_period)
                 except Exception as e:
@@ -1419,7 +1482,6 @@ def generate_status_report(
                     holding_days = (label_date - buy_date).days + 1
 
             qty = 0
-            notional = 0.0
             # Current holding return
             hold_ret = (
                 ((price / ac) - 1.0) * 100.0
@@ -1435,23 +1497,21 @@ def generate_status_report(
                 ):
                     state = "CUT_STOPLOSS"
                     qty = sh
-                    notional = qty * price
                     prof = (price - ac) * qty if ac > 0 else 0.0
                     phrase = f"가격기반손절 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
             # --- 전략별 매수/매도 로직 ---
             if state == "HOLD":  # 아직 매도 결정이 내려지지 않은 경우
-                price, ma, period = d["price"], d["s1"], d["s2"]
+                price, ma, _ = d["price"], d["s1"], d["s2"]
                 if not pd.isna(price) and not pd.isna(ma) and price < ma:
-                    state = "SELL_TREND"  # 결정 코드
+                    state = "SELL_TREND"  # 결정 코드 # noqa: F841
                     qty = sh
-                    notional = qty * price
                     prof = (price - ac) * qty if ac > 0 else 0.0
-                    tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"
+                    tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"  # noqa: F841
                     phrase = f"{tag} {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
             elif state == "WAIT":  # 아직 보유하지 않은 경우
-                price, ma, period = d["price"], d["s1"], d["s2"]
+                price, ma, _ = d["price"], d["s1"], d["s2"]
                 buy_signal_days_today = d["filter"]
                 if buy_signal_days_today > 0:
                     buy_signal = True
@@ -1465,12 +1525,6 @@ def generate_status_report(
         if day_label != "다음 거래일":
             if prev_close is not None and prev_close > 0 and pd.notna(price):
                 day_ret = ((price / prev_close) - 1.0) * 100.0
-
-        # 테이블 출력용 신호 포맷팅
-        s1_str = ma_formatter(d["s1"]) if not pd.isna(d["s1"]) else "-"  # 이평선(값)
-        drawdown_val = d.get("drawdown_from_peak")
-        s2_str = f"{drawdown_val:.1f}%" if drawdown_val is not None else "-"  # 고점대비
-        filter_str = f"{d['filter']}일" if d.get("filter") is not None else "-"
 
         buy_date_display = buy_date.strftime("%Y-%m-%d") if buy_date else "-"
         holding_days_display = str(holding_days) if holding_days > 0 else "-"
@@ -1876,7 +1930,9 @@ def main(country: str = "kor", date_str: Optional[str] = None) -> Optional[datet
         try:
             # Use the returned base_date for saving, which is the true date of the report
             save_status_report_to_db(
-                country, report_base_date.to_pydatetime(), (header_line, headers, rows_sorted)
+                country,
+                report_base_date.to_pydatetime(),
+                (header_line, headers, rows_sorted),
             )
         except Exception:
             pass
@@ -1976,7 +2032,7 @@ def main(country: str = "kor", date_str: Optional[str] = None) -> Optional[datet
             "left",  # 문구
         ]
 
-        table_lines = render_table_eaw(headers, display_rows, aligns=aligns)
+        render_table_eaw(headers, display_rows, aligns=aligns)
 
         print("\n" + header_line)
         # 스케줄러 실행 시 콘솔에 상세 테이블을 출력하지 않도록 주석 처리합니다.
@@ -2012,11 +2068,14 @@ def _is_trading_day(country: str) -> bool:
 
 
 def _maybe_notify_detailed_status(
-    country: str, header_line: str, headers: list, rows_sorted: list, force: bool = False
+    country: str,
+    header_line: str,
+    headers: list,
+    rows_sorted: list,
+    force: bool = False,
 ) -> bool:
     """국가별 설정에 따라 슬랙으로 상세 현황 알림을 전송합니다."""
     try:
-        from utils.db_manager import get_app_settings
         from utils.notify import get_slack_webhook_url, send_slack_message
     except Exception:
         return False
@@ -2045,13 +2104,15 @@ def _maybe_notify_detailed_status(
 
         # Holdings count
         hold_seg = next(
-            (seg for seg in header_line_clean.split("|") if "보유종목:" in seg), "보유종목: -"
+            (seg for seg in header_line_clean.split("|") if "보유종목:" in seg),
+            "보유종목: -",
         )
         hold_text = _strip_html(hold_seg.split(":", 1)[1].strip())
 
         # Holdings value
         hold_val_seg = next(
-            (seg for seg in header_line_clean.split("|") if "보유금액:" in seg), "보유금액: 0"
+            (seg for seg in header_line_clean.split("|") if "보유금액:" in seg),
+            "보유금액: 0",
         )
         hold_val_text = _strip_html(hold_val_seg.split(":", 1)[1].strip())
 
@@ -2061,13 +2122,15 @@ def _maybe_notify_detailed_status(
 
         # Cumulative return
         cum_seg = next(
-            (seg for seg in header_line_clean.split("|") if "누적:" in seg), "누적: +0.00%(0원)"
+            (seg for seg in header_line_clean.split("|") if "누적:" in seg),
+            "누적: +0.00%(0원)",
         )
         cum_text = _strip_html(cum_seg.split(":", 1)[1].strip())
 
         # Total equity value
         equity_seg = next(
-            (seg for seg in header_line_clean.split("|") if "평가금액:" in seg), "평가금액: 0"
+            (seg for seg in header_line_clean.split("|") if "평가금액:" in seg),
+            "평가금액: 0",
         )
         equity_text = _strip_html(equity_seg.split(":", 1)[1].strip())
 
