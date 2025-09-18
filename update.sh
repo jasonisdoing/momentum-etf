@@ -4,8 +4,8 @@
 set -e
 
 # 1. Git 리포지토리에서 최신 코드를 가져옵니다.
-echo ">>> 1. Pulling latest code from 'main' branch..."
-git pull origin main
+echo ">>> 1. Pulling latest code from 'upgrade' branch..."
+git pull origin upgrade
 
 # 2. Docker Compose를 사용하여 컨테이너를 다시 빌드하고 재시작합니다.
 # --build 옵션은 Dockerfile, requirements.txt, 소스 코드 등 변경사항을 이미지에 새로 반영합니다.
