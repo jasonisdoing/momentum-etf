@@ -104,6 +104,12 @@ def run_status(country: str) -> None:
     try:
         from status import main as run_status_main
         from utils.notify import send_log_to_slack
+        from utils.db_manager import get_portfolio_snapshot, get_app_settings
+        from utils.report import format_aud_money, format_kr_money
+
+        # Get old equity
+        old_snapshot = get_portfolio_snapshot(country)
+        old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
         logging.info(f"Running status for {country}")
         if country == "coin":
@@ -118,6 +124,30 @@ def run_status(country: str) -> None:
             duration = time.time() - start_time
             date_str = report_date.strftime("%Y-%m-%d")
             message = f"{country}/{date_str} 작업 완료(작업시간: {duration:.1f}초)"
+
+            # Get new equity
+            new_snapshot = get_portfolio_snapshot(country)
+            new_equity = float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
+
+            # Calculate cumulative return
+            app_settings = get_app_settings(country)
+            initial_capital = float(app_settings.get("initial_capital", 0)) if app_settings else 0.0
+
+            money_formatter = format_aud_money if country == "aus" else format_kr_money
+
+            if initial_capital > 0:
+                cum_ret_pct = ((new_equity / initial_capital) - 1.0) * 100.0
+                cum_profit_loss = new_equity - initial_capital
+                equity_summary = f"평가금액: {money_formatter(new_equity)}, 누적수익 {cum_ret_pct:+.2f}%({money_formatter(cum_profit_loss)})"
+                message += f" | {equity_summary}"
+
+            if abs(new_equity - old_equity) > 1e-9:
+                diff = new_equity - old_equity
+                diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"
+                change_label = "📈평가금액 증가" if diff >= 0 else "📉평가금액 감소"
+                equity_change_message = f"{change_label}: {money_formatter(old_equity)} => {money_formatter(new_equity)} ({diff_str})"
+                message += f" | {equity_change_message}"
+
             send_log_to_slack(message)
 
     except Exception:
