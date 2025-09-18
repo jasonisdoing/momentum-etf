@@ -92,35 +92,38 @@ def _get_local_now(country_code: str) -> Optional[datetime]:
 
 
 def _get_status_target_date_str(country_code: str) -> str:
-    today = pd.Timestamp.now().normalize()
-    today_str = today.strftime("%Y-%m-%d")
-
     if country_code == "coin":
-        return today_str
+        today = pd.Timestamp.now().normalize()
+        return today.strftime("%Y-%m-%d")
 
     now_local = _get_local_now(country_code)
     if not now_local:
-        return today_str
+        today = pd.Timestamp.now().normalize()
+        return today.strftime("%Y-%m-%d")
+
+    local_today = now_local.date()
+    today_str = pd.Timestamp(local_today).strftime("%Y-%m-%d")
 
     close_time = datetime.strptime(MARKET_DISPLAY_SETTINGS[country_code]["close"], "%H:%M").time()
-    lookahead_end = (now_local + pd.Timedelta(days=14)).strftime("%Y-%m-%d")
+    lookahead_end = pd.Timestamp(local_today) + pd.Timedelta(days=14)
+    lookahead_end_str = lookahead_end.strftime("%Y-%m-%d")
 
     try:
-        upcoming_days = get_trading_days(today_str, lookahead_end, country_code)
+        upcoming_days = get_trading_days(today_str, lookahead_end_str, country_code)
     except Exception:
         upcoming_days = []
 
     if not upcoming_days:
         return today_str
 
-    is_trading_today = any(d.date() == now_local.date() for d in upcoming_days)
+    is_trading_today = any(d.date() == local_today for d in upcoming_days)
     if is_trading_today and now_local.time() < close_time:
         return today_str
 
-    next_day = next((d for d in upcoming_days if d.date() > now_local.date()), None)
+    next_day = next((d for d in upcoming_days if d.date() > local_today), None)
     if not next_day:
         fallback = get_next_trading_day(
-            country_code, pd.Timestamp(now_local.date()) + pd.Timedelta(days=1)
+            country_code, pd.Timestamp(local_today) + pd.Timedelta(days=1)
         )
         return pd.Timestamp(fallback).strftime("%Y-%m-%d")
 
@@ -240,15 +243,15 @@ def _is_running_in_streamlit():
 if _is_running_in_streamlit():
 
     @st.cache_data(ttl=600)
-    def get_cached_benchmark_status(country: str) -> Optional[str]:
+    def get_cached_benchmark_status(country: str, date_str: str) -> Optional[str]:
         """벤치마크 비교 문자열을 캐시하여 반환합니다. (Streamlit용)"""
-        return get_benchmark_status_string(country)
+        return get_benchmark_status_string(country, date_str)
 
 else:
 
-    def get_cached_benchmark_status(country: str) -> Optional[str]:
+    def get_cached_benchmark_status(country: str, date_str: str) -> Optional[str]:
         """벤치마크 비교 문자열을 반환합니다. (CLI용, 캐시 없음)"""
-        return get_benchmark_status_string(country)
+        return get_benchmark_status_string(country, date_str)
 
 
 def get_next_schedule_time_str(country_code: str) -> str:
@@ -941,8 +944,12 @@ def render_country_tab(country_code: str):
     raw_dates = get_available_snapshot_dates(country_code)
     sorted_dates = sorted(set(raw_dates), reverse=True)
 
-    today_ts = pd.Timestamp.now()
-    today_str = today_ts.strftime("%Y-%m-%d")
+    if country_code == "coin":
+        today_ts = pd.Timestamp.now()
+    else:
+        local_now = _get_local_now(country_code)
+        today_ts = pd.Timestamp(local_now) if local_now else pd.Timestamp.now()
+    today_str = pd.Timestamp(today_ts.date()).strftime("%Y-%m-%d")
     target_date_str = _get_status_target_date_str(country_code)
 
     date_options: List[str] = []
@@ -1012,7 +1019,7 @@ def render_country_tab(country_code: str):
                     _display_status_report_df(df, country_code)
                     if warning_html:
                         st.markdown(warning_html, unsafe_allow_html=True)
-                    benchmark_str = get_cached_benchmark_status(country_code)
+                    benchmark_str = get_cached_benchmark_status(country_code, selected_date_str)
                     if benchmark_str:
                         st.markdown(
                             f'<div style="text-align: left; padding-top: 0.5rem;">{benchmark_str}</div>',
