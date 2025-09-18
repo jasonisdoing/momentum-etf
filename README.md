@@ -12,6 +12,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
   - `indicators.py`: 보조지표 계산 (SuperTrend 등).
   - `report.py`: 리포트, 로그 포맷팅 및 테이블 렌더링.
 - `scripts/`: 각종 유틸리티 및 분석 스크립트 모음.
+  - `update_price_cache.py`: 국가별 종목 OHLCV 데이터를 캐시에 선다운로드/증분 갱신.
 - `run.py`: 메인 실행 진입점.
 - `test.py`: 과거 구간 백테스트 실행 및 `logs/test.log` 생성.
 - `web_app.py`: Streamlit 기반 웹 UI. 오늘의 현황을 시각적으로 보여줍니다.
@@ -82,7 +83,18 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
    - `SCHEDULE_COIN_CRON` = `"5 0 * * *"` (매일 00:05)
    - `SCHEDULE_KOR_TZ` = `Asia/Seoul`, `SCHEDULE_AUS_TZ` = `Australia/Sydney`, `SCHEDULE_COIN_TZ` = `Asia/Seoul`
    - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
+   - `SCHEDULE_ENABLE_CACHE` = `1`/`0` (기본 1)
+   - `SCHEDULE_CACHE_CRON` = `"30 3 * * *"` (서울 03:30)
+   - `SCHEDULE_CACHE_TZ` = `Asia/Seoul`
+   - `CACHE_START_DATE` = `2020-01-01` (캐시 초기화 시작일 기본값)
+   - `CACHE_COUNTRIES` = `kor,aus,coin`
 3. 실행: `python s.py`
+
+가격 캐시만 따로 갱신하려면:
+
+```
+python scripts/update_price_cache.py --country all --start 2020-01-01
+```
 
 슬랙(Slack) 알림은 `.env` 파일에 `KOR_SLACK_WEBHOOK` 등 국가별 웹훅 URL을 설정하면 자동으로 동작합니다.
 

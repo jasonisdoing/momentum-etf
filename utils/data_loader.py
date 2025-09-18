@@ -4,9 +4,9 @@
 
 import functools
 import json
-import warnings
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+from contextlib import contextmanager
 
 import pandas as pd
 
@@ -30,6 +30,10 @@ try:
 except Exception:
     _stock = None
 
+from utils.cache_utils import load_cached_frame, save_cached_frame
+from utils.stock_list_io import get_etfs
+from utils.notify import send_verbose_log_to_slack
+
 import warnings
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
@@ -39,6 +43,25 @@ warnings.filterwarnings(
     category=UserWarning,
     module=r"^pandas_market_calendars\.",
 )
+
+
+@contextmanager
+def _silence_yfinance_logs():
+    import logging
+
+    targets = [
+        logging.getLogger("yfinance"),
+        logging.getLogger("yfinance.utils"),
+        logging.getLogger("yfinance.data"),
+    ]
+    prev_levels = [lg.level for lg in targets]
+    try:
+        for lg in targets:
+            lg.setLevel(logging.CRITICAL)
+        yield
+    finally:
+        for lg, lvl in zip(targets, prev_levels):
+            lg.setLevel(lvl)
 
 
 def is_pykrx_available() -> bool:
@@ -145,13 +168,8 @@ def fetch_ohlcv(
     date_range: Optional[List[str]] = None,
     base_date: Optional[pd.Timestamp] = None,
 ) -> Optional[pd.DataFrame]:
-    """
-    OHLCV 데이터를 조회합니다.
-    Args:
-        ticker (str): 조회할 종목의 티커.
-        date_range (Optional[List[str]]): ['YYYY-MM-DD', 'YYYY-MM-DD'] 형식의 조회 기간.
-    """
-    # 날짜 범위 결정
+    """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
+
     if date_range and len(date_range) == 2:
         try:
             start_dt = pd.to_datetime(date_range[0])
@@ -173,35 +191,120 @@ def fetch_ohlcv(
             start_dt = now - pd.DateOffset(months=int(months_back))
             end_dt = now
 
+    today = pd.Timestamp.now().normalize()
+    if end_dt > today:
+        end_dt = today
     if start_dt > end_dt:
         start_dt, end_dt = end_dt, start_dt
 
-    # 지수 티커는 국가와 상관없이 yfinance로 조회합니다.
+    return _fetch_ohlcv_with_cache(ticker, country, start_dt.normalize(), end_dt.normalize())
+
+
+def _fetch_ohlcv_with_cache(
+    ticker: str,
+    country: str,
+    start_dt: pd.Timestamp,
+    end_dt: pd.Timestamp,
+) -> Optional[pd.DataFrame]:
+    cached_df = load_cached_frame(country, ticker)
+    missing_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    if cached_df is None or cached_df.empty:
+        cached_df = None
+        missing_ranges.append((start_dt, end_dt))
+    else:
+        cache_start = cached_df.index.min().normalize()
+        cache_end = cached_df.index.max().normalize()
+
+        if start_dt < cache_start:
+            missing_ranges.append((start_dt, cache_start - pd.Timedelta(days=1)))
+        if end_dt > cache_end:
+            missing_ranges.append((cache_end + pd.Timedelta(days=1), end_dt))
+
+    new_frames: List[pd.DataFrame] = []
+    for miss_start, miss_end in missing_ranges:
+        if miss_start > miss_end:
+            continue
+        fetched = _fetch_ohlcv_core(ticker, country, miss_start, miss_end, cached_df)
+        if fetched is not None and not fetched.empty:
+            new_frames.append(fetched)
+
+    combined_df = cached_df
+    added_count = 0
+
+    if new_frames:
+        added_count = sum(len(frame) for frame in new_frames if frame is not None)
+        frames = []
+        if cached_df is not None and not cached_df.empty:
+            frames.append(cached_df)
+        frames.extend(new_frames)
+        combined_df = pd.concat(frames)
+        combined_df.sort_index(inplace=True)
+        combined_df = combined_df[~combined_df.index.duplicated(keep="last")]
+        save_cached_frame(country, ticker, combined_df)
+
+        new_total = combined_df.shape[0]
+        if added_count > 0:
+            try:
+                display_name = _get_display_name(country, ticker)
+                suffix = f"({display_name})" if display_name else ""
+                send_verbose_log_to_slack(
+                    f"[CACHE] {country.upper()}/{ticker}{suffix} {new_total:,} rows (+{added_count:,} rows)"
+                )
+            except Exception:
+                pass
+
+    if combined_df is None or combined_df.empty:
+        return None
+
+    cache_min = combined_df.index.min()
+    cache_max = combined_df.index.max()
+
+    effective_start = start_dt
+    if start_dt > cache_max:
+        effective_start = cache_max
+    elif start_dt < cache_min:
+        effective_start = cache_min
+
+    effective_end = end_dt if end_dt <= cache_max else cache_max
+
+    mask = (combined_df.index >= effective_start) & (combined_df.index <= effective_end)
+    sliced = combined_df.loc[mask].copy()
+    return sliced if not sliced.empty else None
+
+
+def _fetch_ohlcv_core(
+    ticker: str,
+    country: str,
+    start_dt: pd.Timestamp,
+    end_dt: pd.Timestamp,
+    existing_df: Optional[pd.DataFrame] = None,
+) -> Optional[pd.DataFrame]:
+    """실제 원천 API에서 OHLCV를 조회합니다."""
+
     if ticker.startswith("^"):
+        if existing_df is not None and not existing_df.empty:
+            fallback = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
+            if not fallback.empty:
+                return fallback
         if yf is None:
             print(
                 "오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
             )
             return None
         try:
-            df = yf.download(
-                ticker,
-                start=start_dt,
-                end=end_dt + pd.Timedelta(days=1),
-                progress=False,
-                auto_adjust=True,
-            )
+            with _silence_yfinance_logs():
+                df = yf.download(
+                    ticker,
+                    start=start_dt,
+                    end=end_dt + pd.Timedelta(days=1),
+                    progress=False,
+                    auto_adjust=True,
+                )
             if df.empty:
                 return None
-
-            # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
-            # 컬럼을 단순화하고 중복을 제거합니다.
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
                 df = df.loc[:, ~df.columns.duplicated()]
-
-            # yfinance는 timezone-aware index를 반환할 수 있습니다.
-            # 데이터 일관성을 위해 중복을 제거하고 naive timestamp로 변환합니다.
             if not df.index.is_unique:
                 df = df[~df.index.duplicated(keep="first")]
             if df.index.tz is not None:
@@ -209,6 +312,12 @@ def fetch_ohlcv(
             return df
         except Exception as e:
             print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
+            if existing_df is not None and not existing_df.empty:
+                fallback_df = existing_df[
+                    (existing_df.index >= start_dt) & (existing_df.index <= end_dt)
+                ]
+                if not fallback_df.empty:
+                    return fallback_df
             return None
 
     if country == "kor":
@@ -218,10 +327,8 @@ def fetch_ohlcv(
             )
             return None
 
-        # pykrx API 안정성을 위해 긴 기간 조회 시 1년 단위로 나누어 요청합니다.
-        # JSONDecodeError 발생 시 yfinance로 폴백합니다.
         all_dfs = []
-        pykrx_failed_with_json_error = False
+        pykrx_failed = False
 
         current_start = start_dt
         while current_start <= end_dt:
@@ -232,41 +339,31 @@ def fetch_ohlcv(
             end_str = current_end.strftime("%Y%m%d")
 
             try:
-                # 1. ETF로 먼저 조회 시도
                 df_part = _stock.get_etf_ohlcv_by_date(start_str, end_str, ticker)
-
-                # 2. ETF 조회가 비어있으면 일반 주식으로 간주하고 다시 시도
                 if df_part is None or df_part.empty:
                     df_part = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
-
-                # 3. 주식 조회도 비어있으면 ETN으로 간주하고 다시 시도
                 if df_part is None or df_part.empty:
-                    df_part = _stock.get_etn_ohlcv_by_date(start_str, end_str, ticker)
-
+                    get_etn_func = getattr(_stock, "get_etn_ohlcv_by_date", None)
+                    if callable(get_etn_func):
+                        df_part = get_etn_func(start_str, end_str, ticker)
                 if df_part is not None and not df_part.empty:
                     all_dfs.append(df_part)
-            except (json.JSONDecodeError, KeyError) as e:  # Catch KeyError as well
-                # pykrx에서 JSONDecodeError 또는 KeyError가 발생하면 (KRX 웹사이트 응답 문제 또는 데이터 구조 문제),
-                # 루프를 중단하고 yfinance로 전체 기간 폴백을 시도합니다.
-                pykrx_failed_with_json_error = True  # Renamed variable for clarity, but same logic
-                print(
-                    f"경고: pykrx 조회 실패({type(e).__name__}), yfinance로 전체 기간 대체 시도: {ticker}"
-                )
-                break  # while 루프 중단
+            except (json.JSONDecodeError, KeyError):
+                pykrx_failed = True
+                print(f"경고: pykrx 조회 실패(JSON 오류), yfinance로 전체 기간 대체 시도: {ticker}")
+                break
             except Exception as e:
-                # 다른 종류의 예외인 경우, 기존처럼 경고만 로깅합니다。
                 print(f"경고: {ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {e}")
 
             current_start += pd.DateOffset(years=1)
 
-        if pykrx_failed_with_json_error:
+        if pykrx_failed:
             if yf is None:
-                return None  # yfinance가 없으면 실패 처리
+                return None
             try:
                 y_ticker = ticker
                 if ticker.isdigit() and len(ticker) == 6:
                     y_ticker = f"{ticker}.KS"
-
                 df_yf = yf.download(
                     y_ticker,
                     start=start_dt,
@@ -274,17 +371,16 @@ def fetch_ohlcv(
                     progress=False,
                     auto_adjust=True,
                 )
-
                 if df_yf is not None and not df_yf.empty:
                     if isinstance(df_yf.columns, pd.MultiIndex):
                         df_yf.columns = df_yf.columns.get_level_values(0)
                         df_yf = df_yf.loc[:, ~df_yf.columns.duplicated()]
                     if df_yf.index.tz is not None:
                         df_yf.index = df_yf.index.tz_localize(None)
-                    # yfinance는 이미 영어 컬럼이므로, 바로 반환합니다.
+                    if not df_yf.index.is_unique:
+                        df_yf = df_yf[~df_yf.index.duplicated(keep="first")]
                     return df_yf
-                else:
-                    return None  # yfinance 조회도 실패
+                return None
             except Exception as yf_e:
                 print(f"경고: yfinance 대체 조회도 실패: {ticker} ({yf_e})")
                 return None
@@ -292,11 +388,8 @@ def fetch_ohlcv(
         if not all_dfs:
             return None
 
-        # 조회된 모든 데이터프레임을 하나로 합칩니다.
         full_df = pd.concat(all_dfs)
-        # 중복된 인덱스(날짜)가 있을 경우 첫 번째 데이터만 남깁니다.
         full_df = full_df[~full_df.index.duplicated(keep="first")]
-
         return full_df.rename(
             columns={
                 "시가": "Open",
@@ -306,7 +399,8 @@ def fetch_ohlcv(
                 "거래량": "Volume",
             }
         )
-    elif country == "aus":
+
+    if country == "aus":
         if yf is None:
             print(
                 "오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
@@ -314,44 +408,31 @@ def fetch_ohlcv(
             return None
 
         ticker_yf = format_aus_ticker_for_yfinance(ticker)
-
         try:
-            # yfinance는 start/end를 사용하며, end 날짜를 포함하려면 하루를 더해야 할 수 있습니다.
             df = yf.download(
                 ticker_yf,
                 start=start_dt,
                 end=end_dt + pd.Timedelta(days=1),
                 progress=False,
-                # auto_adjust=True가 일부 호주 종목(예: ACDC)에 대해
-                # 잘못된 조정 값을 반환하는 문제가 있어 False로 변경합니다.
-                # 이로써 'Close' 가격은 조정되지 않은 원본 가격을 사용하게 되어
-                # 표시되는 현재가가 정확해집니다.
                 auto_adjust=False,
             )
             if df.empty:
                 return None
-
-            # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
-            # 컬럼을 단순화하고 중복을 제거합니다.
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
                 df = df.loc[:, ~df.columns.duplicated()]
-
-            # yfinance는 timezone-aware index를 반환할 수 있습니다.
-            # 데이터 일관성을 위해 중복을 제거하고 naive timestamp로 변환합니다.
             if not df.index.is_unique:
                 df = df[~df.index.duplicated(keep="first")]
             if df.index.tz is not None:
                 df.index = df.index.tz_localize(None)
-            # yfinance는 이미 컬럼명이 영어로 되어있음
             return df
         except Exception as e:
             print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
             return None
-    elif country == "coin":
-        # 코인: 빗썸 퍼블릭 캔들스틱 API로 일봉(24h) OHLCV를 조회합니다.
+
+    if country == "coin":
         try:
-            from datetime import datetime, timezone
+            from datetime import timezone
 
             import pandas as _pd
 
@@ -363,7 +444,6 @@ def fetch_ohlcv(
             data = j.get("data") or []
             if not data:
                 return None
-            # data: list of arrays [ts(ms), open, close, high, low, volume]
             rows = []
             for arr in data:
                 try:
@@ -371,34 +451,24 @@ def fetch_ohlcv(
                     o = float(arr[1])
                     c = float(arr[2])
                     h = float(arr[3])
-                    l = float(arr[4])
+                    low = float(arr[4])
                     v = float(arr[5])
                 except Exception:
                     continue
-                # Convert ms epoch to naive timestamp (UTC-based)
                 dt = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc).replace(tzinfo=None)
-                rows.append((dt, o, h, l, c, v))
+                rows.append((dt, o, h, low, c, v))
             if not rows:
                 return None
-            rows.sort(key=lambda x: x[0])
-            df = _pd.DataFrame(
-                rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"]
-            ).set_index("Date")
-            # Optional date filtering
-            if date_range and len(date_range) == 2:
-                try:
-                    start_dt = _pd.to_datetime(date_range[0])
-                    end_dt = _pd.to_datetime(date_range[1])
-                    df = df[(df.index >= start_dt) & (df.index <= end_dt)]
-                except Exception:
-                    pass
-            return df if not df.empty else None
+            df = _pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+            df.set_index("Date", inplace=True)
+            df.sort_index(inplace=True)
+            return df
         except Exception as e:
             print(f"경고: {ticker} 코인 OHLCV 조회 중 오류: {e}")
             return None
-    else:
-        print(f"오류: 지원하지 않는 국가 코드입니다: {country}")
-        return None
+
+    print(f"오류: 지원하지 않는 국가 코드입니다: {country}")
+    return None
 
 
 def fetch_ohlcv_for_tickers(
@@ -502,6 +572,7 @@ def fetch_pykrx_name(ticker: str) -> str:
 
 
 _yfinance_name_cache: Dict[str, str] = {}
+_etf_name_cache: Dict[Tuple[str, str], str] = {}
 
 
 def fetch_yfinance_name(ticker: str) -> str:
@@ -524,4 +595,44 @@ def fetch_yfinance_name(ticker: str) -> str:
     except Exception as e:
         print(f"경고: {cache_key}의 이름 조회 중 오류 발생: {e}")
         _yfinance_name_cache[cache_key] = ""  # 실패도 캐시하여 재시도 방지
-    return None
+    return ""
+
+
+def _get_display_name(country: str, ticker: str) -> str:
+    key = (country.lower(), (ticker or "").upper())
+    if key in _etf_name_cache:
+        return _etf_name_cache[key]
+
+    name = ""
+    try:
+        etf_blocks = get_etfs(country) or []
+        for block in etf_blocks:
+            if isinstance(block, dict):
+                if "tickers" in block:
+                    for item in block.get("tickers", []):
+                        if isinstance(item, dict):
+                            tkr = (item.get("ticker") or "").upper()
+                            if tkr == key[1]:
+                                name = item.get("name") or block.get("name") or ""
+                                break
+                    if name:
+                        break
+                else:
+                    tkr = (block.get("ticker") or "").upper()
+                    if tkr == key[1]:
+                        name = block.get("name", "")
+                        break
+    except Exception:
+        pass
+
+    if not name:
+        try:
+            if country == "kor":
+                name = fetch_pykrx_name(ticker)
+            elif country == "aus":
+                name = fetch_yfinance_name(ticker)
+        except Exception:
+            pass
+
+    _etf_name_cache[key] = name or ""
+    return _etf_name_cache[key]
