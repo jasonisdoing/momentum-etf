@@ -77,10 +77,6 @@
             {
                 "ticker": "157490",
                 "name": "TIGER 소프트웨어"
-            },
-            {
-                "ticker": "367760",
-                "name": "RISE 5G테크"
             }
         ]
     },
@@ -90,10 +86,6 @@
             {
                 "ticker": "069500",
                 "name": "Kodex 200"
-            },
-            {
-                "ticker": "289260",
-                "name": "TIGER MSCI KOREA ESG리더스"
             },
             {
                 "ticker": "315930",
@@ -210,6 +202,10 @@
             {
                 "ticker": "417450",
                 "name": "RISE 글로벌수소경제"
+            },
+            {
+                "ticker": "475070",
+                "name": "KoAct 글로벌친환경전력인프라액티브"
             }
         ]
     },
@@ -465,10 +461,6 @@
             {
                 "ticker": "475050",
                 "name": "ACE KPOP포커스"
-            },
-            {
-                "ticker": "475070",
-                "name": "KoAct 글로벌친환경전력인프라액티브"
             },
             {
                 "ticker": "475350",

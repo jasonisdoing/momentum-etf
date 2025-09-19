@@ -1733,6 +1733,13 @@ def generate_status_report(
             }
         )
 
+    # 매수/교체매수 후보는 반드시 '종목 마스터(etf.json)'에 포함된 종목으로 제한합니다.
+    # 이는 사용자가 유니버스에서 제외한 종목(예: 당일 매도 후 목록에서 제거)이
+    # 다시 매수 후보로 추천되는 것을 방지합니다.
+    from utils.stock_list_io import get_etfs
+
+    universe_tickers = {etf["ticker"] for etf in get_etfs(country)}
+
     # 5. 신규 매수 및 교체 매매 로직 적용
     # 교체 매매 관련 설정 로드 (임계값은 DB 설정 우선)
     # 국가별 전략 파라미터는 DB에서 필수 제공
@@ -1788,7 +1795,7 @@ def generate_status_report(
 
         # 매수 후보들을 점수 순으로 정렬
         buy_candidates_raw = sorted(
-            [a for a in decisions if a.get("buy_signal")],
+            [a for a in decisions if a.get("buy_signal") and a["tkr"] in universe_tickers],
             key=lambda x: x["score"],
             reverse=True,
         )
@@ -1870,7 +1877,7 @@ def generate_status_report(
     # --- 교체 매매 로직 (포트폴리오가 가득 찼을 경우) ---
     if held_count >= denom and replace_weaker_stock:
         buy_candidates = sorted(
-            [a for a in decisions if a["buy_signal"]],
+            [a for a in decisions if a.get("buy_signal") and a["tkr"] in universe_tickers],
             key=lambda x: x["score"],
             reverse=True,
         )
