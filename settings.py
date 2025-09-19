@@ -18,6 +18,6 @@ BENCHMARK_TICKERS = {
     "aus": "IVV.AX",  # iShares S&P 500 (AUD)
 }
 
-APP_DATE_TIME = "2025-09-19-08"
+APP_DATE_TIME = "2025-09-19-10"
 
 APP_TYPE = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
