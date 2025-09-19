@@ -1011,13 +1011,26 @@ def _fetch_and_prepare_data(
             )
             continue
 
-        prev_close = (
-            float(result["close"].iloc[-2])
-            if len(result["close"]) >= 2 and pd.notna(result["close"].iloc[-2])
-            else 0.0
-        )
         m = result["ma"].iloc[-1]
         a = result["atr"].iloc[-1]
+
+        # 전일 종가(prev_close)를 결정합니다.
+        # 장중(market_is_open)이고 실시간 가격을 성공적으로 가져온 경우,
+        # OHLCV 데이터(result["close"])의 마지막 값은 전일 종가입니다.
+        # 그 외의 경우(장 마감 후 또는 실시간 가격 조회 실패), OHLCV 데이터의 마지막 값은
+        # 당일(또는 가장 최근 거래일) 종가이므로, 전일 종가는 그 이전 값입니다.
+        if market_is_open and realtime_price:
+            prev_close = (
+                float(result["close"].iloc[-1])
+                if len(result["close"]) >= 1 and pd.notna(result["close"].iloc[-1])
+                else 0.0
+            )
+        else:
+            prev_close = (
+                float(result["close"].iloc[-2])
+                if len(result["close"]) >= 2 and pd.notna(result["close"].iloc[-2])
+                else 0.0
+            )
 
         ma_score = (c0 - m) / a if pd.notna(m) and pd.notna(a) and a > 0 else 0.0
         buy_signal_days_today = (
@@ -1119,6 +1132,11 @@ def _build_header_line(
     # 누적 수익률 및 TopN
     app_settings = get_app_settings(country)
     initial_capital_local = float(app_settings.get("initial_capital", 0)) if app_settings else 0.0
+    initial_date = (
+        pd.to_datetime(app_settings.get("initial_date"))
+        if app_settings and app_settings.get("initial_date")
+        else None
+    )
     cum_ret_pct = (
         ((equity_for_cum_calc / initial_capital_local) - 1.0) * 100.0
         if initial_capital_local > 0
@@ -1186,6 +1204,23 @@ def _build_header_line(
         f"보유종목: {held_count}/{portfolio_topn} | 평가금액: {equity_str} | 보유금액: {holdings_str} | "
         f"현금: {cash_str} | {day_ret_str} | {eval_ret_str} | {cum_ret_str}"
     )
+
+    # --- N 거래일차 계산 및 추가 ---
+    if initial_date and base_date >= initial_date:
+        try:
+            # get_trading_days는 시작일과 종료일을 포함하여 계산합니다.
+            trading_days_count = len(
+                get_trading_days(
+                    initial_date.strftime("%Y-%m-%d"),
+                    base_date.strftime("%Y-%m-%d"),
+                    country,
+                )
+            )
+            trading_days_str = f' | <span style="color:blue">{trading_days_count} 거래일차</span>'
+            header_body += trading_days_str
+        except Exception:
+            # 오류 발생 시 거래일차 정보는 추가하지 않습니다.
+            pass
 
     # 평가금액 경고: 표시 기준일의 평가금액이 없으면 최근 평가금액 날짜를 안내
     equity_date = portfolio_data.get("equity_date") or base_date

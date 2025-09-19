@@ -141,9 +141,14 @@ def run_status(country: str) -> None:
                 equity_summary = f"평가금액: {money_formatter(new_equity)}, 누적수익 {cum_ret_pct:+.2f}%({money_formatter(cum_profit_loss)})"
                 message += f" | {equity_summary}"
 
-            if abs(new_equity - old_equity) > 1e-9:
+            # 평가금액 변동이 통화의 최소 표시 단위(KRW: 1원, AUD: 0.01달러)를 기준으로
+            # 의미있는 수준일 때만 변동 내역을 알립니다.
+            # 이는 부동소수점 오차로 인한 불필요한 알림("0.00원 증가")을 방지합니다.
+            min_change_threshold = 0.5 if country != "aus" else 0.005
+
+            if abs(new_equity - old_equity) >= min_change_threshold:
                 diff = new_equity - old_equity
-                change_label = "📈평가금액 증가" if diff >= 0 else "📉평가금액 감소"
+                change_label = "📈평가금액 증가" if diff > 0 else "📉평가금액 감소"
 
                 if country == "aus" or abs(diff) >= 10_000:
                     old_equity_str = money_formatter(old_equity)
