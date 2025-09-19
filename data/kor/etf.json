@@ -43,6 +43,14 @@
             {
                 "ticker": "473460",
                 "name": "KODEX 미국서학개미"
+            },
+            {
+                "ticker": "0051A0",
+                "name": "KoAct 브로드컴밸류체인액티브"
+            },
+            {
+                "ticker": "0093D0",
+                "name": "KoAct 팔란티어밸류체인액티브"
             }
         ]
     },
@@ -115,6 +123,31 @@
         ]
     },
     {
+        "category": "미국반도체",
+        "tickers": [
+            {
+                "ticker": "390390",
+                "name": "KODEX 미국반도체"
+            },
+            {
+                "ticker": "469060",
+                "name": "RISE 미국반도체NYSE"
+            },
+            {
+                "ticker": "381180",
+                "name": "TIGER 미국필라델피아반도체나스닥"
+            },
+            {
+                "ticker": "473490",
+                "name": "KIWOOM 글로벌AI반도체"
+            },
+            {
+                "ticker": "453950",
+                "name": "TIGER TSMC파운드리밸류체인"
+            }
+        ]
+    },
+    {
         "category": "AI",
         "tickers": [
             {
@@ -180,11 +213,24 @@
         ]
     },
     {
+        "category": "미국바이오",
+        "tickers": [
+            {
+                "ticker": "476070",
+                "name": "KODEX 글로벌비만치료제TOP2 Plus"
+            }
+        ]
+    },
+    {
         "category": "한국AI전력",
         "tickers": [
             {
                 "ticker": "487240",
                 "name": "Kodex AI전력핵심설비"
+            },
+            {
+                "ticker": "434730",
+                "name": "HANARO 원자력iSelect"
             }
         ]
     },
@@ -254,20 +300,27 @@
         ]
     },
     {
-        "category": "한국에너지",
-        "tickers": [
-            {
-                "ticker": "434730",
-                "name": "HANARO 원자력iSelect"
-            }
-        ]
-    },
-    {
         "category": "중국(지수)",
         "tickers": [
             {
                 "ticker": "414780",
                 "name": "TIGER 차이나과창판STAR50(합성)"
+            },
+            {
+                "ticker": "413220",
+                "name": "SOL 차이나태양광CSI(합성)"
+            },
+            {
+                "ticker": "256750",
+                "name": "KODEX 차이나심천ChiNext(합성)"
+            },
+            {
+                "ticker": "372330",
+                "name": "Kodex 차이나항셍테크"
+            },
+            {
+                "ticker": "419430",
+                "name": "Kodex 차이나2차전지MSCI(합성)"
             }
         ]
     },
@@ -339,10 +392,6 @@
                 "name": "Kodex MSCI선진국"
             },
             {
-                "ticker": "256750",
-                "name": "KODEX 차이나심천ChiNext(합성)"
-            },
-            {
                 "ticker": "266390",
                 "name": "KODEX 경기소비재"
             },
@@ -361,10 +410,6 @@
             {
                 "ticker": "371450",
                 "name": "TIGER 글로벌클라우드컴퓨팅INDXX"
-            },
-            {
-                "ticker": "372330",
-                "name": "Kodex 차이나항셍테크"
             },
             {
                 "ticker": "379800",
@@ -391,16 +436,8 @@
                 "name": "KIWOOM 독일DAX"
             },
             {
-                "ticker": "413220",
-                "name": "SOL 차이나태양광CSI(합성)"
-            },
-            {
                 "ticker": "415920",
                 "name": "PLUS 글로벌희토류&전략자원생산기업"
-            },
-            {
-                "ticker": "419430",
-                "name": "Kodex 차이나2차전지MSCI(합성)"
             },
             {
                 "ticker": "441640",

@@ -126,6 +126,33 @@ COIN_ZERO_THRESHOLD = 1e-9
 _STATUS_LOGGER = None
 
 
+def _resolve_previous_close(close_series: pd.Series, base_date: pd.Timestamp) -> float:
+    """Return the most recent close prior to base_date (0.0 if unavailable)."""
+    if close_series is None or close_series.empty:
+        return 0.0
+
+    try:
+        closes_until_base = close_series.loc[:base_date]
+    except Exception:
+        closes_until_base = close_series[close_series.index <= base_date]
+
+    if closes_until_base.empty:
+        return 0.0
+
+    last_idx = closes_until_base.index[-1]
+    if pd.notna(last_idx) and pd.Timestamp(last_idx).normalize() == base_date.normalize():
+        closes_until_base = closes_until_base.iloc[:-1]
+
+    if closes_until_base.empty:
+        if len(close_series) >= 2:
+            candidate = close_series.iloc[-2]
+            return float(candidate) if pd.notna(candidate) else 0.0
+        return 0.0
+
+    candidate = closes_until_base.iloc[-1]
+    return float(candidate) if pd.notna(candidate) else 0.0
+
+
 def get_status_logger() -> logging.Logger:
     """로그 파일(콘솔 출력 없이)에 기록하는 status 전용 로거를 반환합니다."""
     global _STATUS_LOGGER
@@ -1014,23 +1041,7 @@ def _fetch_and_prepare_data(
         m = result["ma"].iloc[-1]
         a = result["atr"].iloc[-1]
 
-        # 전일 종가(prev_close)를 결정합니다.
-        # 장중(market_is_open)이고 실시간 가격을 성공적으로 가져온 경우,
-        # OHLCV 데이터(result["close"])의 마지막 값은 전일 종가입니다.
-        # 그 외의 경우(장 마감 후 또는 실시간 가격 조회 실패), OHLCV 데이터의 마지막 값은
-        # 당일(또는 가장 최근 거래일) 종가이므로, 전일 종가는 그 이전 값입니다.
-        if market_is_open and realtime_price:
-            prev_close = (
-                float(result["close"].iloc[-1])
-                if len(result["close"]) >= 1 and pd.notna(result["close"].iloc[-1])
-                else 0.0
-            )
-        else:
-            prev_close = (
-                float(result["close"].iloc[-2])
-                if len(result["close"]) >= 2 and pd.notna(result["close"].iloc[-2])
-                else 0.0
-            )
+        prev_close = _resolve_previous_close(result["close"], base_date)
 
         ma_score = (c0 - m) / a if pd.notna(m) and pd.notna(a) and a > 0 else 0.0
         buy_signal_days_today = (
