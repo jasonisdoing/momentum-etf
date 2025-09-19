@@ -1025,7 +1025,23 @@ def _fetch_and_prepare_data(
             )
             continue
 
-        realtime_price = _fetch_realtime_price(tkr) if market_is_open else None
+        latest_close_dt = None
+        try:
+            latest_close_dt = pd.to_datetime(result["df"].index[-1]).normalize()
+        except Exception:
+            pass
+
+        needs_latest_price = False
+        if latest_close_dt is not None:
+            try:
+                needs_latest_price = latest_close_dt < base_date.normalize()
+            except Exception:
+                needs_latest_price = latest_close_dt < base_date
+
+        realtime_price = None
+        if market_is_open or needs_latest_price:
+            realtime_price = _fetch_realtime_price(tkr)
+
         c0 = float(realtime_price) if realtime_price else float(result["close"].iloc[-1])
         if pd.isna(c0) or c0 <= 0:
             failed_tickers_info[tkr] = "FETCH_FAILED"

@@ -80,6 +80,10 @@
             {
                 "ticker": "ASX:IOO",
                 "name": "iShares Global 100 ETF (AU)"
+            },
+            {
+                "ticker": "ASX:VGS",
+                "name": "Vanguard MSCI Index International Shares ETF"
             }
         ]
     },
@@ -116,6 +120,22 @@
             {
                 "ticker": "ASX:NDQ",
                 "name": "BetaShares NASDAQ 100 ETF"
+            },
+            {
+                "ticker": "ASX:VTS",
+                "name": "Vanguard US Total Market Shares Index ETF"
+            },
+            {
+                "ticker": "ASX:HNDQ",
+                "name": "Betashares Nasdaq 100 Currency Hedged ETF"
+            },
+            {
+                "ticker": "ASX:SPY",
+                "name": "SPDR S&P 500 ETF"
+            },
+            {
+                "ticker": "ASX:IVV",
+                "name": "iShares S&P 500 ETF"
             }
         ]
     },
@@ -176,6 +196,10 @@
             {
                 "ticker": "ASX:RBTZ",
                 "name": "BetaShares Global Robotics and Artificial Intelligence ETF"
+            },
+            {
+                "ticker": "ASX:ROBO",
+                "name": "Global X ROBO Global Robotics & Automation ETF"
             },
             {
                 "ticker": "ASX:VHY",
