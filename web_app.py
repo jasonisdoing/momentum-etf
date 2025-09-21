@@ -68,6 +68,8 @@ from utils.db_manager import (
     save_portfolio_settings,
     save_signal_report_to_db,
     save_trade,
+    update_trade_by_id,
+    restore_trade_by_id,
 )
 from utils.stock_list_io import get_etfs
 
@@ -755,7 +757,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                 "action": "BUY",
                 "shares": float(shares),
                 "price": float(price),
-                "note": "Manual input from web app",
+                "note": "",
             }
 
             if save_trade(trade_data):
@@ -910,7 +912,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                     "action": "SELL",
                     "shares": row["shares"],
                     "price": row["price"],
-                    "note": "Manual sell from web app",
+                    "note": "",
                 }
                 if save_trade(trade_data):
                     success_count += 1
@@ -1347,65 +1349,52 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                 if st.button("SELL", key=f"add_sell_btn_{account_prefix}"):
                     show_sell_dialog(country_code)
 
-        all_trades = get_all_trades(country_code, account_code)
+        # 항상 모든 거래(삭제된 항목 포함)를 가져옵니다.
+        all_trades = get_all_trades(country_code, account_code, include_deleted=True)
         if not all_trades:
             st.info("거래 내역이 없습니다.")
         else:
             df_trades = pd.DataFrame(all_trades)
             # 코인 전용: 티커 필터(ALL 포함)
             if country_code == "coin" and "ticker" in df_trades.columns:
-                unique_tickers = sorted(
-                    {str(t).upper() for t in df_trades["ticker"].dropna().tolist()}
-                )
+                unique_tickers = sorted({str(t).upper() for t in df_trades["ticker"].dropna()})
                 options = ["ALL"] + unique_tickers
                 selected = st.selectbox(
-                    "티커 필터",
-                    options,
-                    index=0,
-                    key=f"coin_trades_filter_{account_prefix}",
+                    "티커 필터", options, key=f"coin_trades_filter_{account_prefix}"
                 )
                 if selected != "ALL":
                     df_trades = df_trades[df_trades["ticker"].str.upper() == selected]
 
-            # 금액(수량*가격) 계산: 정수, 천단위 콤마
-            try:
-                amt = pd.to_numeric(df_trades.get("shares"), errors="coerce").fillna(
-                    0.0
-                ) * pd.to_numeric(df_trades.get("price"), errors="coerce").fillna(0.0)
-                df_trades["amount"] = (
-                    amt.round(0)
-                    .astype("Int64")
-                    .fillna(0)
-                    .astype(object)
-                    .apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
-                )
-            except Exception:
-                df_trades["amount"] = "0"
-
-            # 삭제 선택을 위한 컬럼 추가
-            df_trades["delete"] = False
+            # 선택 컬럼 및 삭제 상태 컬럼 추가
+            df_trades["선택"] = False
+            df_trades["삭제"] = df_trades["is_deleted"].apply(lambda x: "삭제" if x else "")
 
             # 표시할 컬럼 순서 정의
-            # 기록시간 대신 거래시간(빗썸 시간, 'date')을 우선 표시합니다.
             cols_to_show = [
-                "delete",
+                "선택",
                 "date",
                 "action",
                 "ticker",
                 "name",
                 "shares",
                 "price",
-                "amount",
                 "note",
+                "updated_at",
+                "삭제",
                 "id",
             ]
-            # reindex를 사용하여 이전 데이터에 'created_at'이 없어도 오류가 발생하지 않도록 합니다.
             df_display = df_trades.reindex(columns=cols_to_show).copy()
 
             # 날짜 및 시간 포맷팅
             df_display["date"] = pd.to_datetime(df_display["date"], errors="coerce").dt.strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
+            if "updated_at" in df_display.columns:
+                df_display["updated_at"] = pd.to_datetime(
+                    df_display["updated_at"], errors="coerce"
+                ).dt.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                df_display["updated_at"] = "-"
 
             edited_df = st.data_editor(
                 df_display,
@@ -1413,50 +1402,84 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                 hide_index=True,
                 width="stretch",
                 column_config={
-                    "delete": st.column_config.CheckboxColumn("삭제", required=True),
+                    "선택": st.column_config.CheckboxColumn("선택", required=True),
                     "id": None,  # ID 컬럼은 숨김
-                    "date": st.column_config.TextColumn("거래시간"),
-                    "action": st.column_config.TextColumn("종류"),
-                    "ticker": st.column_config.TextColumn("티커"),
-                    "name": st.column_config.TextColumn("종목명", width="medium"),
+                    "date": st.column_config.TextColumn("거래시간", disabled=True),
+                    "updated_at": st.column_config.TextColumn("수정일시", disabled=True),
+                    "action": st.column_config.TextColumn("종류", disabled=True),
+                    "삭제": st.column_config.TextColumn("삭제", disabled=True),
+                    "ticker": st.column_config.TextColumn("티커", disabled=True),
+                    "name": st.column_config.TextColumn("종목명", width="medium", disabled=True),
                     "shares": st.column_config.NumberColumn(
-                        "수량", format="%.8f" if country_code in ["coin"] else "%.0f"
+                        "수량",
+                        format=(
+                            "%.8f"
+                            if country_code == "coin"
+                            else ("%.4f" if country_code == "aus" else "%.0f")
+                        ),
                     ),
                     "price": st.column_config.NumberColumn(
                         "가격", format="%.4f" if country_code == "aus" else "%d"
                     ),
-                    "amount": st.column_config.NumberColumn("금액", format="%.0f"),
                     "note": st.column_config.TextColumn("비고", width="large"),
                 },
-                disabled=[
-                    "date",
-                    "action",
-                    "ticker",
-                    "name",
-                    "shares",
-                    "price",
-                    "amount",
-                    "note",
-                ],
+                disabled=["date", "action", "ticker", "name", "updated_at", "삭제"],
             )
 
-            if st.button(
-                "선택한 거래 삭제",
-                key=f"delete_trade_btn_{account_prefix}",
-                type="primary",
-            ):
-                trades_to_delete = edited_df[edited_df["delete"]]
-                if not trades_to_delete.empty:
-                    with st.spinner(f"{len(trades_to_delete)}개의 거래를 삭제하는 중..."):
-                        deleted_count = 0
-                        for trade_id in trades_to_delete["id"]:
-                            if delete_trade_by_id(trade_id):
-                                deleted_count += 1
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button("선택 항목 수정 저장", key=f"update_trade_btn_{account_prefix}"):
+                    editor_state = st.session_state[f"trades_editor_{account_prefix}"]
+                    edited_rows = editor_state.get("edited_rows", {})
+                    if not edited_rows:
+                        st.warning("수정된 내용이 없습니다.")
+                    else:
+                        with st.spinner(f"{len(edited_rows)}개 거래를 수정하는 중..."):
+                            updated_count = 0
+                            for row_index, changes in edited_rows.items():
+                                trade_id = df_display.iloc[row_index]["id"]
+                                update_data = {}
+                                if "shares" in changes:
+                                    update_data["shares"] = changes["shares"]
+                                if "price" in changes:
+                                    update_data["price"] = changes["price"]
+                                if "note" in changes:
+                                    update_data["note"] = changes["note"]
 
-                        st.success(f"{deleted_count}개의 거래를 성공적으로 삭제했습니다.")
-                        st.rerun()
-                else:
-                    st.warning("삭제할 거래를 선택해주세요.")
+                                if update_data and update_trade_by_id(trade_id, update_data):
+                                    updated_count += 1
+                            st.success(f"{updated_count}개 거래를 성공적으로 수정했습니다.")
+                            st.rerun()
+            with col2:
+                if st.button(
+                    "선택 항목 삭제",
+                    key=f"delete_trade_btn_{account_prefix}",
+                    type="primary",
+                ):
+                    trades_to_delete = edited_df[edited_df["선택"]]
+                    if not trades_to_delete.empty:
+                        with st.spinner(f"{len(trades_to_delete)}개 거래를 삭제하는 중..."):
+                            deleted_count = 0
+                            for trade_id in trades_to_delete["id"]:
+                                if delete_trade_by_id(trade_id):
+                                    deleted_count += 1
+                            st.success(f"{deleted_count}개 거래를 성공적으로 삭제했습니다.")
+                            st.rerun()
+                    else:
+                        st.warning("삭제할 거래를 선택해주세요.")
+            with col3:
+                if st.button("선택 항목 복구", key=f"restore_trade_btn_{account_prefix}"):
+                    trades_to_restore = edited_df[edited_df["선택"]]
+                    if not trades_to_restore.empty:
+                        with st.spinner(f"{len(trades_to_restore)}개 거래를 복구하는 중..."):
+                            restored_count = 0
+                            for trade_id in trades_to_restore["id"]:
+                                if restore_trade_by_id(trade_id):
+                                    restored_count += 1
+                            st.success(f"{restored_count}개 거래를 성공적으로 복구했습니다.")
+                            st.rerun()
+                    else:
+                        st.warning("복구할 거래를 선택해주세요.")
 
     with sub_tab_settings:
         if not account_code:

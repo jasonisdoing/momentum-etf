@@ -570,7 +570,7 @@ def get_all_daily_equities(
     return equities
 
 
-def get_all_trades(country: str, account: str) -> List[Dict]:
+def get_all_trades(country: str, account: str, include_deleted: bool = False) -> List[Dict]:
     """지정된 국가의 모든 거래 내역을 DB에서 가져옵니다.
 
     country 필드의 대소문자 불일치를 허용하기 위해 정규식(대소문자 무시)으로 조회합니다.
@@ -579,10 +579,9 @@ def get_all_trades(country: str, account: str) -> List[Dict]:
     if db is None:
         return []
 
-    query = {
-        "country": {"$regex": f"^{country}$", "$options": "i"},
-        "is_deleted": {"$ne": True},
-    }
+    query = {"country": {"$regex": f"^{country}$", "$options": "i"}}
+    if not include_deleted:
+        query["is_deleted"] = {"$ne": True}
     query = _apply_account_filter(query, account)
 
     # 최신 거래가 위로 오도록 날짜와 생성 순서(_id)로 정렬합니다.
@@ -654,6 +653,49 @@ def delete_trade_by_id(trade_id: str) -> bool:
     except Exception as e:
         print(f"오류: 거래 내역 삭제 중 오류 발생: {e}")
     return False
+
+
+def update_trade_by_id(trade_id: str, update_data: Dict) -> bool:
+    """ID를 기준으로 'trades' 컬렉션에서 단일 거래 내역을 업데이트합니다."""
+    db = get_db_connection()
+    if db is None:
+        return False
+
+    try:
+        obj_id = ObjectId(trade_id)
+        # 업데이트할 데이터에 수정 시간을 추가합니다.
+        update_doc = {"$set": {**update_data, "updated_at": datetime.now()}}
+        result = db.trades.update_one({"_id": obj_id}, update_doc)
+        if result.modified_count > 0:
+            print(f"성공: 거래 ID {trade_id} 를 업데이트했습니다.")
+            return True
+        else:
+            print(f"경고: 업데이트할 거래 ID {trade_id} 를 찾지 못했거나 변경된 내용이 없습니다.")
+            return False
+    except Exception as e:
+        print(f"오류: 거래 내역 업데이트 중 오류 발생: {e}")
+        return False
+
+
+def restore_trade_by_id(trade_id: str) -> bool:
+    """ID를 기준으로 soft-delete된 거래를 복구합니다."""
+    db = get_db_connection()
+    if db is None:
+        return False
+
+    try:
+        obj_id = ObjectId(trade_id)
+        result = db.trades.update_one(
+            {"_id": obj_id},
+            {
+                "$set": {"is_deleted": False, "updated_at": datetime.now()},
+                "$unset": {"deleted_at": ""},
+            },
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"오류: 거래 내역 복구 중 오류 발생: {e}")
+        return False
 
 
 def save_daily_equity(
