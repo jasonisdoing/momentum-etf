@@ -331,7 +331,14 @@ def main(
         print(
             f"\n'data/{country}/' 폴더의 'etf.json' 파일에서 종목을 가져와 백테스트를 실행합니다."
         )
-    etfs_from_file = get_etfs_from_files(country)
+    all_etfs_from_file = get_etfs_from_files(country)
+    # is_active 필드가 없는 종목이 있는지 확인합니다.
+    for etf in all_etfs_from_file:
+        if "is_active" not in etf:
+            raise ValueError(
+                f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
+            )
+    etfs_from_file = [etf for etf in all_etfs_from_file if etf["is_active"] is not False]
     if not etfs_from_file:
         print(
             f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 백테스트에 사용할 종목을 찾을 수 없습니다."

@@ -540,7 +540,18 @@ def render_master_etf_ui(country_code: str):
         st.info("조회할 종목이 없습니다.")
         return
 
+    # is_active 필드가 없는 종목이 있는지 확인합니다.
+    for etf in etfs_data:
+        if "is_active" not in etf:
+            st.error(
+                f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
+            )
+            st.stop()
+
     df_etfs = pd.DataFrame(etfs_data)
+
+    # 'is_active' 컬럼이 없는 경우는 위에서 처리했으므로, NaN 값만 True로 채웁니다.
+    df_etfs["is_active"] = df_etfs["is_active"].fillna(True)
 
     # 데이터 정합성을 위한 처리: 'name' 컬럼이 없거나 NaN 값이 있으면 오류가 발생할 수 있습니다.
     if "name" not in df_etfs.columns:
@@ -571,7 +582,7 @@ def render_master_etf_ui(country_code: str):
     )
 
     # 컬럼 순서 조정
-    display_cols = ["ticker", "name", "category"]
+    display_cols = ["ticker", "name", "category", "is_active"]
     df_for_display = df_etfs.reindex(columns=display_cols)
 
     st.dataframe(
@@ -582,6 +593,7 @@ def render_master_etf_ui(country_code: str):
         column_config={
             "ticker": st.column_config.TextColumn("티커"),
             "name": st.column_config.TextColumn("종목명"),
+            "is_active": st.column_config.CheckboxColumn("활성", disabled=True),
         },
     )
 

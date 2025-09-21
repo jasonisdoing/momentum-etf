@@ -39,7 +39,14 @@ def refresh_all_caches(countries: list[str], start_date: str, rebuild: bool = Fa
 
     for country in countries:
         print(f"\n[{country.upper()}] 국가의 캐시를 갱신합니다...")
-        etfs = get_etfs(country)
+        all_etfs_from_file = get_etfs(country)
+        # is_active 필드가 없는 종목이 있는지 확인합니다.
+        for etf in all_etfs_from_file:
+            if "is_active" not in etf:
+                raise ValueError(
+                    f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
+                )
+        etfs = [etf for etf in all_etfs_from_file if etf["is_active"] is not False]
         if not etfs:
             print(f"-> {country.upper()} 국가에 등록된 종목이 없습니다.")
             continue
