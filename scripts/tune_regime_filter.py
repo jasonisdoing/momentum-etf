@@ -7,10 +7,10 @@
 """
 
 import argparse
+
 import os
 import sys
 import time
-from typing import Dict
 
 import numpy as np
 import pandas as pd
@@ -18,31 +18,57 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utils.account_registry import get_accounts_by_country, load_accounts
 from utils.data_loader import fetch_ohlcv_for_tickers
-from utils.db_manager import get_app_settings
+from utils.db_manager import get_portfolio_settings
 from utils.stock_list_io import get_etfs
 
 
-def run_backtest_worker(params: tuple, prefetched_data: Dict[str, pd.DataFrame]) -> tuple:
+def _resolve_account(country: str, account: str | None) -> str:
+    if account:
+        return account
+    load_accounts(force_reload=False)
+    entries = get_accounts_by_country(country) or []
+    for entry in entries:
+        code = entry.get("account")
+        if code:
+            return str(code)
+    raise SystemExit(f"'{country}' 국가에 등록된 계좌가 없습니다. data/accounts.json을 확인하세요.")
+
+
+def run_backtest_worker(params: tuple, prefetched_data: dict, account: str) -> tuple:
     """
     단일 파라미터 조합에 대한 백테스트를 실행하는 워커 함수입니다.
     """
     regime_ma_period, months_range, country = params
 
     from test import main as run_test
+    from logic import settings
 
-    from logic import settings as worker_settings
+    # 워커 프로세스별로 설정을 override합니다.
+    # logic.settings는 모듈 수준의 전역 변수이므로 직접 수정합니다.
+    settings.MARKET_REGIME_FILTER_MA_PERIOD = int(regime_ma_period)
 
-    worker_settings.MARKET_REGIME_FILTER_MA_PERIOD = int(regime_ma_period)
-    worker_settings.TEST_MONTHS_RANGE = int(months_range)
+    override_settings = {
+        "test_months_range": int(months_range),
+    }
+
+    if not account:
+        raise RuntimeError("Account context not initialised for tuning worker")
 
     # 미리 로드된 데이터를 전달하여 API 호출을 최소화합니다.
-    result = run_test(country=country, quiet=True, prefetched_data=prefetched_data)
+    result = run_test(
+        country=country,
+        quiet=True,
+        prefetched_data=prefetched_data,
+        override_settings=override_settings,
+        account=account,
+    )
 
     return regime_ma_period, months_range, result
 
 
-def tune_regime_filter(country: str):
+def tune_regime_filter(country: str, account: str):
     """
     MARKET_REGIME_FILTER_MA_PERIOD 파라미터를 튜닝하여 최적의 값을 찾습니다.
     """
@@ -55,14 +81,17 @@ def tune_regime_filter(country: str):
     print(f"\n튜닝을 위해 {country.upper()} 시장의 데이터를 미리 로딩합니다...")
 
     # 1. 튜닝에 필요한 최대 기간 계산
-    app_settings = get_app_settings(country)
-    if not app_settings or "ma_period_etf" not in app_settings:
+    if not account:
+        raise ValueError("account is required for tune_regime_filter")
+
+    portfolio_settings = get_portfolio_settings(country, account=account)
+    if not portfolio_settings or "ma_period" not in portfolio_settings:
         print(
             f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
         )
         return
     try:
-        ma_period_etf = int(app_settings["ma_period_etf"])
+        ma_period_etf = int(portfolio_settings["ma_period"])
     except (ValueError, TypeError):
         print(f"오류: '{country}' 국가의 MA 기간 설정이 올바르지 않습니다.")
         return
@@ -110,11 +139,13 @@ def tune_regime_filter(country: str):
     start_time = time.time()
     results_by_month = {months: {} for months in test_months_ranges}
 
-    # 직렬 백테스트 실행
+    # 순차 백테스트 실행
     for i, params in enumerate(param_combinations):
         print(f"\r   테스트 진행: {i + 1}/{total_combinations}", end="", flush=True)
         try:
-            regime_ma_period, months_range, result = run_backtest_worker(params, prefetched_data)
+            regime_ma_period, months_range, result = run_backtest_worker(
+                params, prefetched_data, account
+            )
             if result and "cagr_pct" in result:
                 results_by_month[months_range][regime_ma_period] = result["cagr_pct"]
         except Exception as e:
@@ -154,5 +185,12 @@ if __name__ == "__main__":
         description="시장 레짐 필터의 이동평균 기간(MA Period)을 튜닝합니다."
     )
     parser.add_argument("country", choices=["kor", "aus"], help="튜닝을 진행할 시장 (kor, aus)")
+    parser.add_argument(
+        "--account",
+        type=str,
+        default=None,
+        help="계좌 코드 (예: m1, a1). 미지정 시 첫 번째 활성 계좌 사용",
+    )
     args = parser.parse_args()
-    tune_regime_filter(country=args.country)
+    resolved_account = _resolve_account(args.country, args.account)
+    tune_regime_filter(country=args.country, account=resolved_account)

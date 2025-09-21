@@ -1,7 +1,7 @@
 import os
 import sys
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 import pandas as pd
 
@@ -10,13 +10,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from logic import jason as strategy_module
 from logic import settings
-from utils.db_manager import get_app_settings, get_common_settings
+from utils.db_manager import get_common_settings, get_portfolio_settings
 from utils.report import (
     format_aud_money,
     format_aud_price,
     format_kr_money,
     render_table_eaw,
 )
+from utils.data_loader import get_latest_trading_day
 from utils.stock_list_io import get_etfs as get_etfs_from_files
 
 # 이 파일에서는 매매 전략에 사용되는 고유 파라미터를 정의합니다.
@@ -25,11 +26,184 @@ INITIAL_CAPITAL = 100000000
 TEST_MONTHS_RANGE = 12
 
 
+def _print_backtest_summary(
+    summary: Dict,
+    country: str,
+    account: str,
+    test_months_range: int,
+    initial_capital: float,
+    portfolio_topn: int,
+    ticker_summaries: List[Dict],
+):
+    """백테스트 결과 요약을 콘솔에 출력합니다."""
+    if country == "aus":
+        money_formatter = format_aud_money
+    else:
+        money_formatter = format_kr_money
+
+    benchmark_name = "BTC" if country == "coin" else "S&P 500"
+
+    print("\n" + "=" * 30 + "\n 백테스트 결과 요약 ".center(30, "=") + "\n" + "=" * 30)
+    print(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
+    if summary.get("risk_off_periods"):
+        for start, end in summary["risk_off_periods"]:
+            print(f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}")
+    print(f"| 초기 자본: {money_formatter(summary['initial_capital'])}")
+    print(f"| 최종 자산: {money_formatter(summary['final_value'])}")
+    print(
+        f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
+    )
+    print(
+        f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
+    )
+    print(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
+    print(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
+    print(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")
+    print(f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}")
+    print("=" * 30)
+
+    print("\n" + "=" * 30 + "\n 사용된 설정값 ".center(30, "=") + "\n" + "=" * 30)
+    used_settings = {
+        "계좌 정보": f"{country.upper()} / {account}",
+        "테스트 기간": f"최근 {test_months_range}개월",
+        "초기 자본": money_formatter(initial_capital),
+        "포트폴리오 종목 수 (TopN)": portfolio_topn,
+        "모멘텀 스코어 MA 기간": f"{settings.MA_PERIOD}일",
+        "교체 매매 점수 임계값": settings.REPLACE_SCORE_THRESHOLD,
+        "약세 종목 우선 교체": "예" if settings.REPLACE_WEAKER_STOCK else "아니오",
+        "개별 종목 손절매": f"{settings.HOLDING_STOP_LOSS_PCT}%",
+        "매도 후 재매수 금지 기간": f"{settings.COOLDOWN_DAYS}일",
+        "시장 위험 필터": "활성" if settings.MARKET_REGIME_FILTER_ENABLED else "비활성",
+    }
+    if settings.MARKET_REGIME_FILTER_ENABLED:
+        used_settings["시장 위험 필터 지표"] = settings.MARKET_REGIME_FILTER_TICKER
+        used_settings["시장 위험 필터 MA 기간"] = f"{settings.MARKET_REGIME_FILTER_MA_PERIOD}일"
+
+    for key, value in used_settings.items():
+        print(f"| {key}: {value}")
+    print("=" * 30)
+
+    print("\n[지표 설명]")
+    print(
+        "  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수)."
+    )
+    print(
+        "  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수)."
+    )
+    print(
+        "  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수)."
+    )
+
+    # 월별 성과 요약 테이블 출력
+    if "monthly_returns" in summary and not summary["monthly_returns"].empty:
+        print("\n" + "=" * 30 + "\n 월별 성과 요약 ".center(30, "=") + "\n" + "=" * 30)
+
+        monthly_returns = summary["monthly_returns"]
+        yearly_returns = summary["yearly_returns"]
+        monthly_cum_returns = summary.get("monthly_cum_returns")
+
+        pivot_df = (
+            monthly_returns.mul(100)
+            .to_frame("return")
+            .pivot_table(
+                index=monthly_returns.index.year,
+                columns=monthly_returns.index.month,
+                values="return",
+            )
+        )
+
+        if not yearly_returns.empty:
+            yearly_series = yearly_returns.mul(100)
+            yearly_series.index = yearly_series.index.year
+            pivot_df["연간"] = yearly_series
+        # yearly_returns가 비어 있으면 '연간' 컬럼을 추가하지 않으며, 이후 .get()은 None을 반환합니다.
+
+        cum_pivot_df = None
+        if monthly_cum_returns is not None and not monthly_cum_returns.empty:
+            cum_pivot_df = (
+                monthly_cum_returns.mul(100)
+                .to_frame("cum_return")
+                .pivot_table(
+                    index=monthly_cum_returns.index.year,
+                    columns=monthly_cum_returns.index.month,
+                    values="cum_return",
+                )
+            )
+
+        headers = ["연도"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
+        rows_data = []
+        for year, row in pivot_df.iterrows():
+            # 월간 수익률 행
+            monthly_row_data = [str(year)]
+            for month in range(1, 13):
+                val = row.get(month)
+                monthly_row_data.append(f"{val:+.2f}%" if pd.notna(val) else "-")
+
+            yearly_val = row.get("연간")
+            monthly_row_data.append(f"{yearly_val:+.2f}%" if pd.notna(yearly_val) else "-")
+            rows_data.append(monthly_row_data)
+
+            # 누적 수익률 행
+            if cum_pivot_df is not None and year in cum_pivot_df.index:
+                cum_row = cum_pivot_df.loc[year]
+                cum_row_data = ["  (누적)"]
+                for month in range(1, 13):
+                    cum_val = cum_row.get(month)
+                    cum_row_data.append(f"{cum_val:+.2f}%" if pd.notna(cum_val) else "-")
+
+                # 연말 누적 수익률을 찾습니다.
+                last_valid_month_index = cum_row.last_valid_index()
+                if last_valid_month_index is not None:
+                    cum_annual_val = cum_row[last_valid_month_index]
+                    cum_row_data.append(f"{cum_annual_val:+.2f}%")
+                else:
+                    cum_row_data.append("-")
+                rows_data.append(cum_row_data)
+
+        aligns = ["left"] + ["right"] * (len(headers) - 1)
+        print("\n" + "\n".join(render_table_eaw(headers, rows_data, aligns)))
+
+    # 종목별 성과 요약 테이블 출력
+    if ticker_summaries:
+        print("\n" + "=" * 30 + "\n 종목별 성과 요약 ".center(30, "=") + "\n" + "=" * 30)
+        headers = [
+            "티커",
+            "종목명",
+            "총 기여도",
+            "실현손익",
+            "미실현손익",
+            "거래횟수",
+            "승률",
+        ]
+
+        sorted_summaries = sorted(
+            ticker_summaries, key=lambda x: x["total_contribution"], reverse=True
+        )
+
+        rows = [
+            [
+                s["ticker"],
+                s["name"],
+                money_formatter(s["total_contribution"]),
+                money_formatter(s["realized_profit"]),
+                money_formatter(s["unrealized_profit"]),
+                f"{s['total_trades']}회",
+                f"{s['win_rate']:.1f}%",
+            ]
+            for s in sorted_summaries
+        ]
+
+        aligns = ["right", "left", "right", "right", "right", "right", "right"]
+        table_lines = render_table_eaw(headers, rows, aligns)
+        print("\n" + "\n".join(table_lines))
+
+
 def main(
     country: str = "kor",
     quiet: bool = False,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     override_settings: Optional[Dict] = None,
+    account: str = "",
 ):
     """
     지정된 전략에 대한 백테스트를 실행하고 결과를 요약합니다.
@@ -41,39 +215,40 @@ def main(
         print("오류: INITIAL_CAPITAL 설정이 logic/settings.py 에 정의되어야 합니다.")
         return
 
+    if not account:
+        raise ValueError("account is required for backtest execution")
+
     # DB에서 앱 설정을 불러와 logic.settings에 동적으로 설정합니다.
-    app_settings = get_app_settings(country)
-    if not app_settings or "ma_period" not in app_settings or "portfolio_topn" not in app_settings:
+    portfolio_settings = get_portfolio_settings(country, account=account)
+    if (
+        not portfolio_settings
+        or "ma_period" not in portfolio_settings
+        or "portfolio_topn" not in portfolio_settings
+    ):
         print(
             f"오류: '{country}' 국가의 설정(TopN, MA 기간)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
         )
         return
 
     # 필수 설정값이 모두 있는지 검증 (fallback 금지)
-    if "replace_threshold" not in app_settings:
+    if "replace_threshold" not in portfolio_settings:
         print(
             f"오류: '{country}' 국가의 설정에 'replace_threshold'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
         )
         return
-    # 추가 필수값: replace_weaker_stock, max_replacements_per_day
-    if "replace_weaker_stock" not in app_settings:
+    # 추가 필수값: replace_weaker_stock
+    if "replace_weaker_stock" not in portfolio_settings:
         print(
             f"오류: '{country}' 국가의 설정에 'replace_weaker_stock'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
         )
         return
-    if "max_replacements_per_day" not in app_settings:
-        print(
-            f"오류: '{country}' 국가의 설정에 'max_replacements_per_day'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
-        )
-        return
 
     try:
-        settings.MA_PERIOD = int(app_settings["ma_period"])
-        portfolio_topn = int(app_settings["portfolio_topn"])
+        settings.MA_PERIOD = int(portfolio_settings["ma_period"])
+        portfolio_topn = int(portfolio_settings["portfolio_topn"])
         # 교체 매매 파라미터 (백테스트용, 필수)
-        settings.REPLACE_SCORE_THRESHOLD = float(app_settings["replace_threshold"])
-        settings.REPLACE_WEAKER_STOCK = bool(app_settings["replace_weaker_stock"])
-        settings.MAX_REPLACEMENTS_PER_DAY = int(app_settings["max_replacements_per_day"])
+        settings.REPLACE_SCORE_THRESHOLD = float(portfolio_settings["replace_threshold"])
+        settings.REPLACE_WEAKER_STOCK = bool(portfolio_settings["replace_weaker_stock"])
     except (ValueError, TypeError):
         print(f"오류: '{country}' 국가의 DB 설정값이 올바르지 않습니다.")
         return
@@ -89,10 +264,6 @@ def main(
                 settings.REPLACE_SCORE_THRESHOLD = float(override_settings["replace_threshold"])
             if "replace_weaker_stock" in override_settings:
                 settings.REPLACE_WEAKER_STOCK = bool(override_settings["replace_weaker_stock"])
-            if "max_replacements_per_day" in override_settings:
-                settings.MAX_REPLACEMENTS_PER_DAY = int(
-                    override_settings["max_replacements_per_day"]
-                )
         except Exception:
             # Silently ignore malformed overrides
             pass
@@ -105,7 +276,6 @@ def main(
     required_common_keys = [
         "HOLDING_STOP_LOSS_PCT",
         "COOLDOWN_DAYS",
-        "ATR_PERIOD_FOR_NORMALIZATION",
         "MARKET_REGIME_FILTER_ENABLED",
         "MARKET_REGIME_FILTER_TICKER",
         "MARKET_REGIME_FILTER_MA_PERIOD",
@@ -118,7 +288,6 @@ def main(
         # 양수 입력을 음수 임계값으로 해석합니다 (예: 10 -> -10)
         settings.HOLDING_STOP_LOSS_PCT = -abs(float(common["HOLDING_STOP_LOSS_PCT"]))
         settings.COOLDOWN_DAYS = int(common["COOLDOWN_DAYS"])
-        settings.ATR_PERIOD_FOR_NORMALIZATION = int(common["ATR_PERIOD_FOR_NORMALIZATION"])
         settings.MARKET_REGIME_FILTER_ENABLED = bool(common["MARKET_REGIME_FILTER_ENABLED"])
         settings.MARKET_REGIME_FILTER_TICKER = str(common["MARKET_REGIME_FILTER_TICKER"])
         settings.MARKET_REGIME_FILTER_MA_PERIOD = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
@@ -134,8 +303,12 @@ def main(
     else:
         # 원화(KRW) 형식으로 가격을 포맷합니다.
         money_formatter = format_kr_money
-        price_formatter = lambda p: f"{int(round(p)):,}"
-        ma_formatter = lambda p: f"{int(round(p)):,}원"
+
+        def price_formatter(p):
+            return f"{int(round(p)):,}"
+
+        def ma_formatter(p):
+            return f"{int(round(p)):,}원"
 
     # 기간 설정 로직 (필수 설정)
     try:
@@ -147,7 +320,8 @@ def main(
     except Exception:
         print("오류: 테스트 기간(test_months_range) 설정이 올바르지 않습니다.")
         return
-    core_end_dt = pd.Timestamp.now()
+
+    core_end_dt = get_latest_trading_day(country)
     core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
     test_date_range = [core_start_dt.strftime("%Y-%m-%d"), core_end_dt.strftime("%Y-%m-%d")]
     period_label = f"최근 {test_months_range}개월 ({core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')})"
@@ -191,7 +365,8 @@ def main(
 
     try:
         if not quiet:
-            print("백테스트를 `settings.py` 설정으로 실행합니다.")
+            header_suffix = f" (account={account})" if account else ""
+            print(f"백테스트를 `settings.py` 설정으로 실행합니다{header_suffix}.")
             print(
                 f"# 시작 {datetime.now().isoformat()} | 기간={period_label} | 초기자본={int(initial_capital):,}\n"
             )
@@ -333,7 +508,6 @@ def main(
 
                 # 전략에 따라 동적으로 헤더를 설정합니다.
                 # signal_headers = ["이평선(값)", "고점대비", "점수", "신호지속일"] (참고용 예시)
-                rows = []
                 headers = [
                     "#",
                     "티커",
@@ -607,11 +781,9 @@ def main(
             # 국가에 따라 벤치마크 티커와 이름을 설정합니다.
             if country == "coin":
                 benchmark_ticker = "BTC"
-                benchmark_name = "BTC"
                 benchmark_country = "coin"
             else:
                 benchmark_ticker = "^GSPC"
-                benchmark_name = "S&P 500"
                 benchmark_country = country  # country는 지수 티커에 영향을 주지 않음
 
             benchmark_df = fetch_ohlcv(
@@ -747,147 +919,15 @@ def main(
                     )
 
             if not quiet:
-                print("\n" + "=" * 30 + "\n 백테스트 결과 요약 ".center(30, "=") + "\n" + "=" * 30)
-                print(
-                    f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)"
+                _print_backtest_summary(
+                    summary,
+                    country,
+                    account,
+                    test_months_range,
+                    initial_capital,
+                    portfolio_topn,
+                    ticker_summaries,
                 )
-                if summary.get("risk_off_periods"):
-                    for start, end in summary["risk_off_periods"]:
-                        print(
-                            f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
-                        )
-                print(f"| 초기 자본: {money_formatter(summary['initial_capital'])}")
-                print(f"| 최종 자산: {money_formatter(summary['final_value'])}")
-                print(
-                    f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
-                )
-                print(
-                    f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
-                )
-                print(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
-                print(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
-                print(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")
-                print(f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}")
-                print("=" * 30)
-                print("\n[지표 설명]")
-                print(
-                    "  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수)."
-                )
-                print(
-                    "  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수)."
-                )
-                print(
-                    "  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수)."
-                )
-
-                # 월별 성과 요약 테이블 출력
-                if "monthly_returns" in summary and not summary["monthly_returns"].empty:
-                    print("\n" + "=" * 30 + "\n 월별 성과 요약 ".center(30, "=") + "\n" + "=" * 30)
-
-                    monthly_returns = summary["monthly_returns"]
-                    yearly_returns = summary["yearly_returns"]
-                    monthly_cum_returns = summary.get("monthly_cum_returns")
-
-                    pivot_df = (
-                        monthly_returns.mul(100)
-                        .to_frame("return")
-                        .pivot_table(
-                            index=monthly_returns.index.year,
-                            columns=monthly_returns.index.month,
-                            values="return",
-                        )
-                    )
-
-                    if not yearly_returns.empty:
-                        yearly_series = yearly_returns.mul(100)
-                        yearly_series.index = yearly_series.index.year
-                        pivot_df["연간"] = yearly_series
-                    # yearly_returns가 비어 있으면 '연간' 컬럼을 추가하지 않으며, 이후 .get()은 None을 반환합니다.
-
-                    cum_pivot_df = None
-                    if monthly_cum_returns is not None and not monthly_cum_returns.empty:
-                        cum_pivot_df = (
-                            monthly_cum_returns.mul(100)
-                            .to_frame("cum_return")
-                            .pivot_table(
-                                index=monthly_cum_returns.index.year,
-                                columns=monthly_cum_returns.index.month,
-                                values="cum_return",
-                            )
-                        )
-
-                    headers = ["연도"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
-                    rows_data = []
-                    for year, row in pivot_df.iterrows():
-                        # 월간 수익률 행
-                        monthly_row_data = [str(year)]
-                        for month in range(1, 13):
-                            val = row.get(month)
-                            monthly_row_data.append(f"{val:+.2f}%" if pd.notna(val) else "-")
-
-                        yearly_val = row.get("연간")
-                        monthly_row_data.append(
-                            f"{yearly_val:+.2f}%" if pd.notna(yearly_val) else "-"
-                        )
-                        rows_data.append(monthly_row_data)
-
-                        # 누적 수익률 행
-                        if cum_pivot_df is not None and year in cum_pivot_df.index:
-                            cum_row = cum_pivot_df.loc[year]
-                            cum_row_data = ["  (누적)"]
-                            for month in range(1, 13):
-                                cum_val = cum_row.get(month)
-                                cum_row_data.append(
-                                    f"{cum_val:+.2f}%" if pd.notna(cum_val) else "-"
-                                )
-
-                            # 연말 누적 수익률을 찾습니다.
-                            last_valid_month_index = cum_row.last_valid_index()
-                            if last_valid_month_index is not None:
-                                cum_annual_val = cum_row[last_valid_month_index]
-                                cum_row_data.append(f"{cum_annual_val:+.2f}%")
-                            else:
-                                cum_row_data.append("-")
-                            rows_data.append(cum_row_data)
-
-                    aligns = ["left"] + ["right"] * (len(headers) - 1)
-                    print("\n" + "\n".join(render_table_eaw(headers, rows_data, aligns)))
-
-                # 종목별 성과 요약 테이블 출력
-                if ticker_summaries:
-                    print(
-                        "\n" + "=" * 30 + "\n 종목별 성과 요약 ".center(30, "=") + "\n" + "=" * 30
-                    )
-                    headers = [
-                        "티커",
-                        "종목명",
-                        "총 기여도",
-                        "실현손익",
-                        "미실현손익",
-                        "거래횟수",
-                        "승률",
-                    ]
-
-                    sorted_summaries = sorted(
-                        ticker_summaries, key=lambda x: x["total_contribution"], reverse=True
-                    )
-
-                    rows = [
-                        [
-                            s["ticker"],
-                            s["name"],
-                            money_formatter(s["total_contribution"]),
-                            money_formatter(s["realized_profit"]),
-                            money_formatter(s["unrealized_profit"]),
-                            f"{s['total_trades']}회",
-                            f"{s['win_rate']:.1f}%",
-                        ]
-                        for s in sorted_summaries
-                    ]
-
-                    aligns = ["right", "left", "right", "right", "right", "right", "right"]
-                    table_lines = render_table_eaw(headers, rows, aligns)
-                    print("\n" + "\n".join(table_lines))
 
     finally:
         pass
