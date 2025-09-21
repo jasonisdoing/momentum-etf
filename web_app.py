@@ -46,6 +46,7 @@ from signals import (
     get_market_regime_status_string,
     calculate_benchmark_comparison,
     get_next_trading_day,
+    _is_trading_day,
 )
 from utils.account_registry import get_accounts_by_country, load_accounts
 from utils.data_loader import (
@@ -995,15 +996,12 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
 
     _display_success_toast(account_prefix)
 
-    sub_tab_names = ["시그널", "평가금액", "트레이드", "설정"]
+    sub_tab_names = ["시그널", "평가금액", "트레이드"]
     (
         sub_tab_signal,
         sub_tab_equity_history,
         sub_tab_trades,
-        sub_tab_settings,
-    ) = st.tabs(
-        sub_tab_names
-    )  # noqa: F841
+    ) = st.tabs(sub_tab_names)
 
     # 계좌 시작일 및 거래일 정보를 사용하여 날짜 선택 옵션을 필터링합니다.
     account_settings = get_account_settings(account_code)
@@ -1030,6 +1028,20 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
     for candidate in [target_date_str] + sorted_dates:
         if candidate and candidate not in date_options:
             date_options.append(candidate)
+
+    # 휴장일 필터링 (코인 제외)
+    if country_code != "coin":
+        trading_day_options = []
+        for d_str in date_options:
+            try:
+                # _is_trading_day는 datetime 객체를 받습니다.
+                d_dt = pd.to_datetime(d_str).to_pydatetime()
+                if _is_trading_day(country_code, d_dt):
+                    trading_day_options.append(d_str)
+            except Exception:
+                # 잘못된 날짜 형식은 무시합니다.
+                pass
+        date_options = trading_day_options
 
     option_labels: Dict[str, str] = {}
     if date_options:
@@ -1187,6 +1199,129 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                 if calc_result:
                     st.success("재계산 완료!")
                     st.rerun()
+
+        with st.expander("계좌 설정"):
+            if not account_code:
+                st.info("활성 계좌가 없습니다. 계좌를 등록한 후 설정을 변경할 수 있습니다.")
+                db_settings = {}
+            else:
+                db_settings = get_account_settings(account_code)
+                if not db_settings:
+                    st.info(
+                        "해당 계좌에 저장된 설정이 없습니다. 값을 입력 후 저장하면 계좌별 설정이 생성됩니다."
+                    )
+                    db_settings = {}
+
+            current_capital = db_settings.get("initial_capital", 0)
+            current_topn = db_settings.get("portfolio_topn")
+            current_ma = db_settings.get("ma_period")
+            current_replace_threshold = db_settings.get("replace_threshold")
+            current_replace_weaker = db_settings.get("replace_weaker_stock")
+
+            test_months_range = 12  # Default value
+            default_date = pd.Timestamp.now() - pd.DateOffset(months=test_months_range)
+            current_date = db_settings.get("initial_date", default_date)
+
+            with st.form(key=f"settings_form_{account_prefix}"):
+                currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
+
+                new_capital = st.number_input(
+                    f"초기 자본금 (INITIAL_CAPITAL){currency_str}",
+                    value=float(current_capital) if country_code == "aus" else int(current_capital),
+                    format="%.2f" if country_code == "aus" else "%d",
+                    help="포트폴리오의 시작 자본금을 설정합니다. 누적 수익률 계산의 기준이 됩니다.",
+                )
+
+                new_date = st.date_input(
+                    "초기 자본 기준일 (INITIAL_DATE)",
+                    value=current_date,
+                    help="초기 자본금이 투입된 날짜를 설정합니다.",
+                )
+
+                if current_topn is None:
+                    st.warning("최대 보유 종목 수(PORTFOLIO_TOPN)를 설정해주세요.")
+
+                new_topn_str = st.text_input(
+                    "최대 보유 종목 수 (PORTFOLIO_TOPN)",
+                    value=str(current_topn) if current_topn is not None else "",
+                    placeholder="예: 10",
+                    help="포트폴리오에서 최대로 보유할 종목의 개수를 설정합니다.",
+                )
+
+                st.markdown("---")
+                st.subheader("전략 파라미터")
+
+                if current_ma is None:
+                    st.warning("이동평균 기간(MA_PERIOD)을 설정해주세요.")
+                new_ma_str = st.text_input(
+                    "이동평균 기간 (MA_PERIOD)",
+                    value=str(current_ma) if current_ma is not None else "75",
+                    placeholder="예: 15",
+                    help="종목의 추세 판단에 사용될 이동평균 기간입니다.",
+                )
+
+                # 교체 매매 사용 여부 (bool)
+                replace_weaker_checkbox = st.checkbox(
+                    "교체 매매 사용 (REPLACE_WEAKER_STOCK)",
+                    value=(
+                        bool(current_replace_weaker)
+                        if current_replace_weaker is not None
+                        else False
+                    ),
+                    help="포트폴리오가 가득 찼을 때, 더 강한 후보가 있을 경우 약한 보유종목을 교체할지 여부",
+                )
+
+                # 교체 매매 임계값 설정 (DB에서 관리)
+                new_replace_threshold_str = st.text_input(
+                    "교체 매매 점수 임계값 (REPLACE_SCORE_THRESHOLD)",
+                    value=(
+                        "{:.2f}".format(float(current_replace_threshold))
+                        if current_replace_threshold is not None
+                        else ""
+                    ),
+                    placeholder="예: 1.5",
+                    help="교체 매매 실행 조건: 새 후보 점수가 기존 보유 점수보다 이 값만큼 높을 때 교체.",
+                )
+
+                save_settings_submitted = st.form_submit_button("설정 저장하기")
+
+                if save_settings_submitted:
+                    error = False
+                    if not new_topn_str or not new_topn_str.isdigit() or int(new_topn_str) < 1:
+                        st.error("최대 보유 종목 수는 1 이상의 숫자여야 합니다.")
+                        error = True
+                    if not new_ma_str or not new_ma_str.isdigit() or int(new_ma_str) < 1:
+                        st.error("이동평균 기간은 1 이상의 숫자여야 합니다.")
+                        error = True
+                    # replace_threshold 검증 (float 가능 여부)
+                    try:
+                        _ = float(new_replace_threshold_str)
+                    except Exception:
+                        st.error("교체 매매 점수 임계값은 숫자여야 합니다.")
+                        error = True
+
+                    if not error:
+                        new_topn = int(new_topn_str)
+                        new_ma = int(new_ma_str)
+                        new_replace_threshold = float(new_replace_threshold_str)
+                        settings_to_save = {
+                            "country": country_code,
+                            "initial_capital": new_capital,
+                            "initial_date": pd.to_datetime(new_date).to_pydatetime(),
+                            "portfolio_topn": new_topn,
+                            "ma_period": new_ma,
+                            "replace_weaker_stock": bool(replace_weaker_checkbox),
+                            "replace_threshold": new_replace_threshold,
+                        }
+                        success = save_portfolio_settings(
+                            country_code, settings_to_save, account=account_code
+                        )
+
+                        if success:
+                            st.success("설정이 성공적으로 저장되었습니다.")
+                            st.rerun()
+                        else:
+                            st.error("설정 저장에 실패했습니다.")
 
     with sub_tab_equity_history:
 
@@ -1480,128 +1615,6 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                             st.rerun()
                     else:
                         st.warning("복구할 거래를 선택해주세요.")
-
-    with sub_tab_settings:
-        if not account_code:
-            st.info("활성 계좌가 없습니다. 계좌를 등록한 후 설정을 변경할 수 있습니다.")
-            db_settings = {}
-        else:
-            db_settings = get_account_settings(account_code)
-            if not db_settings:
-                st.info(
-                    "해당 계좌에 저장된 설정이 없습니다. 값을 입력 후 저장하면 계좌별 설정이 생성됩니다."
-                )
-                db_settings = {}
-
-        current_capital = db_settings.get("initial_capital", 0)
-        current_topn = db_settings.get("portfolio_topn")
-        current_ma = db_settings.get("ma_period")
-        current_replace_threshold = db_settings.get("replace_threshold")
-        current_replace_weaker = db_settings.get("replace_weaker_stock")
-
-        test_months_range = 12  # Default value
-        default_date = pd.Timestamp.now() - pd.DateOffset(months=test_months_range)
-        current_date = db_settings.get("initial_date", default_date)
-
-        with st.form(key=f"settings_form_{account_prefix}"):
-            currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
-
-            new_capital = st.number_input(
-                f"초기 자본금 (INITIAL_CAPITAL){currency_str}",
-                value=float(current_capital) if country_code == "aus" else int(current_capital),
-                format="%.2f" if country_code == "aus" else "%d",
-                help="포트폴리오의 시작 자본금을 설정합니다. 누적 수익률 계산의 기준이 됩니다.",
-            )
-
-            new_date = st.date_input(
-                "초기 자본 기준일 (INITIAL_DATE)",
-                value=current_date,
-                help="초기 자본금이 투입된 날짜를 설정합니다.",
-            )
-
-            if current_topn is None:
-                st.warning("최대 보유 종목 수(PORTFOLIO_TOPN)를 설정해주세요.")
-
-            new_topn_str = st.text_input(
-                "최대 보유 종목 수 (PORTFOLIO_TOPN)",
-                value=str(current_topn) if current_topn is not None else "",
-                placeholder="예: 10",
-                help="포트폴리오에서 최대로 보유할 종목의 개수를 설정합니다.",
-            )
-
-            st.markdown("---")
-            st.subheader("전략 파라미터")
-
-            if current_ma is None:
-                st.warning("이동평균 기간(MA_PERIOD)을 설정해주세요.")
-            new_ma_str = st.text_input(
-                "이동평균 기간 (MA_PERIOD)",
-                value=str(current_ma) if current_ma is not None else "75",
-                placeholder="예: 15",
-                help="종목의 추세 판단에 사용될 이동평균 기간입니다.",
-            )
-
-            # 교체 매매 사용 여부 (bool)
-            replace_weaker_checkbox = st.checkbox(
-                "교체 매매 사용 (REPLACE_WEAKER_STOCK)",
-                value=bool(current_replace_weaker) if current_replace_weaker is not None else False,
-                help="포트폴리오가 가득 찼을 때, 더 강한 후보가 있을 경우 약한 보유종목을 교체할지 여부",
-            )
-
-            # 교체 매매 임계값 설정 (DB에서 관리)
-            new_replace_threshold_str = st.text_input(
-                "교체 매매 점수 임계값 (REPLACE_SCORE_THRESHOLD)",
-                value=(
-                    "{:.2f}".format(float(current_replace_threshold))
-                    if current_replace_threshold is not None
-                    else ""
-                ),
-                placeholder="예: 1.5",
-                help="교체 매매 실행 조건: 새 후보 점수가 기존 보유 점수보다 이 값만큼 높을 때 교체.",
-            )
-
-            # 코인 전용 임포트 기간 설정 제거됨 (트레이드 동기화 폐지)
-
-            save_settings_submitted = st.form_submit_button("설정 저장하기")
-
-            if save_settings_submitted:
-                error = False
-                if not new_topn_str or not new_topn_str.isdigit() or int(new_topn_str) < 1:
-                    st.error("최대 보유 종목 수는 1 이상의 숫자여야 합니다.")
-                    error = True
-                if not new_ma_str or not new_ma_str.isdigit() or int(new_ma_str) < 1:
-                    st.error("이동평균 기간은 1 이상의 숫자여야 합니다.")
-                    error = True
-                # replace_threshold 검증 (float 가능 여부)
-                try:
-                    _ = float(new_replace_threshold_str)
-                except Exception:
-                    st.error("교체 매매 점수 임계값은 숫자여야 합니다.")
-                    error = True
-
-                if not error:
-                    new_topn = int(new_topn_str)
-                    new_ma = int(new_ma_str)
-                    new_replace_threshold = float(new_replace_threshold_str)
-                    settings_to_save = {
-                        "country": country_code,
-                        "initial_capital": new_capital,
-                        "initial_date": pd.to_datetime(new_date).to_pydatetime(),
-                        "portfolio_topn": new_topn,
-                        "ma_period": new_ma,
-                        "replace_weaker_stock": bool(replace_weaker_checkbox),
-                        "replace_threshold": new_replace_threshold,
-                    }
-                    # 코인용 빗썸 임포트 기간 설정은 더 이상 사용하지 않습니다.
-                    success = save_portfolio_settings(
-                        country_code, settings_to_save, account=account_code
-                    )
-
-                    if success:
-                        st.success("설정이 성공적으로 저장되었습니다.")
-                        st.rerun()
-                    else:
-                        st.error("설정 저장에 실패했습니다.")
 
 
 def _render_country_etf_management(country_code: str) -> None:

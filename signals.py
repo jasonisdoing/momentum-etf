@@ -679,10 +679,10 @@ def _determine_target_date_for_scheduler(country: str) -> pd.Timestamp:
 
 
 def calculate_consecutive_holding_info(
-    held_tickers: List[str], country: str, as_of_date: datetime
+    held_tickers: List[str], country: str, account: str, as_of_date: datetime
 ) -> Dict[str, Dict]:
     """
-    'trades' 컬렉션을 스캔하여 각 티커의 연속 보유 시작일을 계산합니다.
+    'trades' 컬렉션을 스캔하여 지정된 계좌의 각 티커별 연속 보유 시작일을 계산합니다.
     'buy_date' (연속 보유 시작일)을 포함한 딕셔너리를 반환합니다.
     """
     holding_info = {tkr: {"buy_date": None} for tkr in held_tickers}
@@ -701,15 +701,20 @@ def calculate_consecutive_holding_info(
 
     for tkr in held_tickers:
         try:
+            query = {
+                "country": country,
+                "ticker": tkr,
+                "date": {"$lte": include_until},
+            }
+            if not account:
+                raise ValueError("account is required for calculating holding info")
+            query["account"] = account
+
             # 해당 티커의 모든 거래를 날짜 내림차순, 그리고 같은 날짜 내에서는 생성 순서(_id) 내림차순으로 가져옵니다.
             # 이를 통해 동일한 날짜에 발생한 거래의 순서를 정확히 반영하여 연속 보유 기간을 계산합니다.
             trades = list(
                 db.trades.find(
-                    {
-                        "country": country,
-                        "ticker": tkr,
-                        "date": {"$lte": include_until},
-                    },
+                    query,
                     sort=[("date", DESCENDING), ("_id", DESCENDING)],
                 )
             )
@@ -897,11 +902,6 @@ def _fetch_and_prepare_data(
     logger.info(
         "[%s] signal data preparation started (input date=%s)", country.upper(), request_label
     )
-
-    # 현황 조회 시, 날짜가 지정되지 않으면 항상 오늘 날짜를 기준으로 조회합니다.
-    if date_str is None:
-        target_date = _determine_target_date_for_scheduler(country)
-        date_str = target_date.strftime("%Y-%m-%d")
 
     # --- 추가된 로직: 계좌 시작일 이전 데이터 생성 방지 ---
     initial_date = portfolio_settings.get("initial_date")
@@ -1694,7 +1694,9 @@ def generate_signal_report(
     # 4. 보유 기간 및 고점 대비 하락률 계산
     held_tickers = [tkr for tkr, v in holdings.items() if float((v or {}).get("shares") or 0.0) > 0]
     # 보유 시작일 계산 기준은 실제 표시 기준일(label_date)과 일치시킵니다.
-    consecutive_holding_info = calculate_consecutive_holding_info(held_tickers, country, label_date)
+    consecutive_holding_info = calculate_consecutive_holding_info(
+        held_tickers, country, account, label_date
+    )
     for tkr, d in data_by_tkr.items():
         if float(d.get("shares", 0.0)) > 0:
             buy_date = consecutive_holding_info.get(tkr, {}).get("buy_date")
