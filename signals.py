@@ -65,66 +65,66 @@ except ImportError:
 # - display_name: 슬랙 메시지에 표시될 그룹 헤더
 # - order: 그룹 표시 순서 (낮을수록 위)
 # - is_recommendation: True이면 @channel 알림을 유발하는 '추천'으로 간주
-# - show_return: True이면 메시지에 '수익률' 정보를 포함
+# - show_slack: True이면 슬랙 알림에 해당 그룹을 포함
 DECISION_CONFIG = {
     # 보유  (알림 없음)
     "HOLD": {
         "display_name": "<💼 보유>",
         "order": 1,
         "is_recommendation": False,
-        "show_return": True,
+        "show_slack": True,
     },
     # 매도 추천 (알림 발생)
     "CUT_STOPLOSS": {
         "display_name": "<🚨 손절매도>",
         "order": 10,
         "is_recommendation": True,
-        "show_return": False,
+        "show_slack": True,
     },
     "SELL_TREND": {
         "display_name": "<📉 추세이탈 매도>",
         "order": 11,
         "is_recommendation": True,
-        "show_return": False,
+        "show_slack": True,
     },
     "SELL_REPLACE": {
         "display_name": "<🔄 교체매도>",
         "order": 12,
         "is_recommendation": True,
-        "show_return": False,
+        "show_slack": True,
     },
     "SELL_REBALANCE": {
         "display_name": "<⚖️ 리밸런스 매도>",
         "order": 13,
         "is_recommendation": True,
-        "show_return": False,
+        "show_slack": True,
     },
     # 매수 추천 (알림 발생)
     "BUY_REPLACE": {
         "display_name": "<🔄 교체매수>",
         "order": 20,
         "is_recommendation": True,
-        "show_return": True,
+        "show_slack": True,
     },
     "BUY": {
         "display_name": "<🚀 신규매수>",
         "order": 21,
         "is_recommendation": True,
-        "show_return": True,
+        "show_slack": True,
     },
     # 거래 완료 (알림 없음)
     "SOLD": {
         "display_name": "<✅ 매도 완료>",
         "order": 40,
         "is_recommendation": False,
-        "show_return": False,
+        "show_slack": True,
     },
     # 보유 및 대기 (알림 없음)
     "WAIT": {
         "display_name": "<⏳ 대기>",
         "order": 50,
         "is_recommendation": False,
-        "show_return": False,
+        "show_slack": False,
     },
 }
 
@@ -1959,10 +1959,18 @@ def generate_signal_report(
             f"오류: '{country}' 국가의 교체 매매 임계값(replace_threshold) 값이 올바르지 않습니다."
         )
         return None
-    num_to_sell_for_rebalance = held_count - denom
+
+    # 리밸런싱 매도 결정 전, 다른 이유로 이미 매도 결정된 종목 수를 파악합니다.
+    other_sell_states = {"CUT_STOPLOSS", "SELL_TREND"}
+    num_already_selling = sum(1 for d in decisions if d["state"] in other_sell_states)
+
+    # 목표 보유 수(denom)를 맞추기 위해 추가로 매도해야 할 종목 수를 계산합니다.
+    # (현재 보유 수 - 이미 매도 결정된 수) > 목표 보유 수
+    num_to_sell_for_rebalance = (held_count - num_already_selling) - denom
+
     if num_to_sell_for_rebalance > 0:
         # Case 1: 포트폴리오가 목표보다 크므로, 가장 약한 종목을 매도하여 축소
-        # 매도 후보: 현재 'HOLD' 상태인 종목들
+        # 매도 후보: 현재 'HOLD' 상태인 종목들 중에서만 선택합니다.
         rebalance_sell_candidates = [d for d in decisions if d["state"] == "HOLD"]
 
         # 점수가 낮은 순으로 정렬 (가장 약한 종목부터). 점수가 없으면 가장 약한 것으로 간주.
@@ -1971,13 +1979,11 @@ def generate_signal_report(
         )
 
         # 리밸런싱을 위해 매도할 종목들을 결정
-        tickers_to_sell_for_rebalance = [
-            d["tkr"] for d in rebalance_sell_candidates[:num_to_sell_for_rebalance]
-        ]
+        tickers_to_sell = [d["tkr"] for d in rebalance_sell_candidates[:num_to_sell_for_rebalance]]
 
         # 결정된 종목들의 상태를 'SELL_REBALANCE'로 변경
         for decision in decisions:
-            if decision["tkr"] in tickers_to_sell_for_rebalance:
+            if decision["tkr"] in tickers_to_sell:
                 decision["state"] = "SELL_REBALANCE"
                 decision["row"][2] = "SELL_REBALANCE"
 
@@ -2687,13 +2693,18 @@ def _maybe_notify_detailed_signal(
             if not config:
                 # 설정에 없는 상태(예: SELL_MOMENTUM)에 대한 폴백 처리
                 display_name = f"<{group_name}>"
-                show_return = group_name == "HOLD"
+                show_slack = True  # 알 수 없는 그룹은 일단 표시
             else:
                 display_name = config["display_name"]
-                show_return = config["show_return"]
+                show_slack = config.get("show_slack", True)
+
+            if not show_slack:
+                continue
 
             if parts_in_group:
                 body_lines.append(display_name)
+                # 수익률 컬럼 표시 여부 결정: 보유 또는 매수 관련 상태일 때만 표시
+                show_return_col = group_name in ["HOLD", "BUY", "BUY_REPLACE"]
                 for parts in parts_in_group:
                     name_part = parts["name"].ljust(max_len_name)
                     price_part = parts["price_col"].ljust(max_len_price_col)
@@ -2701,7 +2712,7 @@ def _maybe_notify_detailed_signal(
                     amount_part = parts["amount_col"].rjust(max_len_amount_col)
                     score_part = parts["score_col"].ljust(max_len_score_col)
 
-                    if show_return:
+                    if show_return_col:
                         return_part = parts["return_col"].ljust(max_len_return_col)
                         line = f"{name_part}  {price_part} {shares_part} {amount_part}  {return_part} {score_part}"
                     else:
@@ -2716,7 +2727,7 @@ def _maybe_notify_detailed_signal(
 
         # --- 슬랙 메시지의 캡션을 구성합니다. ---
 
-        title_line = f"[{global_settings.APP_TYPE}][{country}/{account}] 상세내역"
+        title_line = f"[{global_settings.APP_TYPE}][{country}/{account}] 시그널"
         test_line = "\n".join(slack_message_lines)
         equity_line = f"평가금액: {equity_text}, 누적수익 {cum_text}"
         cash_line = f"현금: {cash_text}, 보유금액: {hold_val_text}"
