@@ -952,6 +952,7 @@ def _fetch_and_prepare_data(
         return None
 
     portfolio_data = get_portfolio_snapshot(country, account=account, date_str=date_str)
+
     if not portfolio_data:
         print(
             f"오류: '{country}' 국가의 '{date_str}' 날짜에 대한 포트폴리오 스냅샷을 DB에서 찾을 수 없습니다. 거래 내역이 없거나 DB 연결에 문제가 있을 수 있습니다."
@@ -979,7 +980,7 @@ def _fetch_and_prepare_data(
 
     # 콘솔 로그에 국가/날짜를 포함하여 표시
     try:
-        print(f"{country}/{base_date.strftime('%Y-%m-%d')} 현황을 계산합니다")
+        print(f"{country}/{base_date.strftime('%Y-%m-%d')} 시그널을 계산합니다")
     except Exception:
         pass
 
@@ -1428,16 +1429,6 @@ def _build_header_line(
             # 오류 발생 시 거래일차 정보는 추가하지 않습니다.
             pass
 
-    # 평가금액 경고: 표시 기준일의 평가금액이 없으면 최근 평가금액 날짜를 안내
-    equity_date = portfolio_data.get("equity_date") or base_date
-    if label_date.normalize() != pd.to_datetime(equity_date).normalize():
-        target_date = label_date
-        weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
-        weekday_str = weekday_map[target_date.weekday()]
-        stale_str = pd.to_datetime(equity_date).strftime("%Y-%m-%d")
-        warning_msg = f"<br><span style='color:orange;'>⚠️ {target_date.strftime('%Y년 %m월 %d일')}({weekday_str})의 평가금액이 없습니다. 최근({stale_str}) 평가금액으로 현황을 계산합니다.</span>"
-        header_body += warning_msg
-
     return header_body, label_date, day_label
 
 
@@ -1523,42 +1514,13 @@ def generate_signal_report(
         )
         return None
 
-    try:
-        # 3. 데이터 로드 및 지표 계산
-        print(f"\n데이터 로드 (기준일: {effective_date_str})...")
-        result = _fetch_and_prepare_data(
-            country, account, portfolio_settings, effective_date_str, prefetched_data
-        )
-    except PykrxDataUnavailable as e:
-        # 데이터 조회 실패 시, 이전 거래일로 재시도합니다.
-        print(f"경고: {effective_date_str} 데이터 조회 실패. 이전 거래일로 재시도합니다. ({e})")
-
-        prev_day_search_end = target_date - pd.Timedelta(days=1)
-        prev_day_search_start = prev_day_search_end - pd.Timedelta(days=14)
-
-        previous_trading_days = get_trading_days(
-            prev_day_search_start.strftime("%Y-%m-%d"),
-            prev_day_search_end.strftime("%Y-%m-%d"),
-            country,
-        )
-
-        if not previous_trading_days:
-            print("오류: 이전 거래일을 찾을 수 없어 시그널 생성을 중단합니다.")
-            return None
-
-        previous_trading_day = previous_trading_days[-1]
-        effective_date_str = previous_trading_day.strftime("%Y-%m-%d")
-
-        try:
-            print(f"\n데이터 로드 재시도 (기준일: {effective_date_str})...")
-            result = _fetch_and_prepare_data(
-                country, account, portfolio_settings, effective_date_str, prefetched_data
-            )
-        except PykrxDataUnavailable as e2:
-            print(f"오류: 재시도 실패. 시그널 생성에 필요한 데이터를 로드할 수 없습니다: {e2}")
-            return None
-    except Exception:
-        raise  # 다른 예외는 그대로 발생시킴
+    # 3. 데이터 로드 및 지표 계산
+    # PykrxDataUnavailable 예외는 get_latest_trading_day 로직으로 인해 발생 가능성이 낮아졌습니다.
+    # 만약 발생하더라도, 상위 호출자(cli.py, web_app.py)에서 처리하도록 그대로 전달합니다.
+    print(f"\n데이터 로드 (기준일: {effective_date_str})...")
+    result = _fetch_and_prepare_data(
+        country, account, portfolio_settings, effective_date_str, prefetched_data
+    )
 
     if result is None:
         print("오류: 시그널 생성에 필요한 데이터를 로드하지 못했습니다.")
@@ -1616,23 +1578,8 @@ def generate_signal_report(
     current_equity = float(portfolio_data.get("total_equity", 0.0))
     equity_date = portfolio_data.get("equity_date")
 
-    # --- 평가금액 자동 보정 준비 ---
-    # 보정 로직에서 사용할 평가금액을 결정합니다.
-    equity_for_autocorrect = current_equity
-
-    # 현황 계산에 사용된 실제 데이터의 최신 날짜를 찾습니다.
-    # 이 날짜를 기준으로 평가금액이 '오래된(stale)' 것인지 판단해야 합니다.
-    # 보고서의 기준일(base_date)은 미래 날짜일 수 있기 때문입니다.
-    datestamps = result.datestamps
-    latest_data_date = max(datestamps).normalize() if datestamps else base_date.normalize()
-
-    # 평가금액의 날짜가 실제 데이터의 최신 날짜와 다를 경우에만 '오래된 데이터'로 간주합니다.
-    is_stale_equity = equity_date and pd.to_datetime(equity_date).normalize() != latest_data_date
-    if is_stale_equity:
-        # 자동 보정을 위해 평가금액을 0으로 초기화합니다.
-        # 이렇게 하면, 보유 자산 가치 합계로 새로운 평가금액이 계산됩니다.
-        equity_for_autocorrect = 0.0
-
+    # --- 평가금액 이월 및 자동 보정 로직 ---
+    # 1. 자동 보정이 필요한지 판단하기 위한 후보 금액 계산
     international_shares_value = 0.0
     if country == "aus":
         intl_info = portfolio_data.get("international_shares")
@@ -1641,16 +1588,8 @@ def generate_signal_report(
                 international_shares_value = float(intl_info.get("value", 0.0))
             except (TypeError, ValueError):
                 international_shares_value = 0.0
-
-    # --- 자동 평가금액 보정 로직 ---
-    # 보유 종목의 현재가 합(total_holdings_value)이 기록된 평가금액(equity_for_autocorrect)보다 크거나,
-    # 평가금액이 0일 경우, 평가금액을 보유 종목 가치 합으로 자동 보정합니다.
-    # 이는 현금이 음수로 표시되는 것을 방지하고, 평가금액 미입력 시 초기값을 설정해줍니다.
-    # 호주의 경우, 해외 주식 가치도 포함하여 최종 평가금액을 계산합니다.
     new_equity_candidate = total_holdings_value + international_shares_value
 
-    # 코인(bithumb)의 경우, 평가금액은 보유 코인 가치 합계에 KRW 및 P 잔액을 더해야 합니다.
-    # 자동 보정 시 이를 반영하기 위해 실시간 잔액을 조회합니다.
     if country == "coin":
         try:
             from scripts.snapshot_bithumb_balances import (
@@ -1664,75 +1603,95 @@ def generate_signal_report(
                 new_equity_candidate += krw_balance + p_balance
         except Exception as e:
             logger.warning(
-                "[%s] Bithumb 잔액(KRW, P) 조회 실패. 평가금액 자동 보정 시 코인 가치만 반영됩니다. (%s)",
-                country.upper(),
-                e,
+                "Bithumb 잔액 조회 실패. 평가금액 자동 보정 시 코인 가치만 반영됩니다. (%s)", e
             )
 
-    # 국가별 업데이트 조건: 한국/호주는 증가분만, 코인은 증감 모두 반영
+    # 2. 자동 보정 및 이월 조건 확인
+    is_carried_forward = (
+        equity_date
+        and base_date
+        and pd.to_datetime(equity_date).normalize() != base_date.normalize()
+    )
+
+    should_autocorrect = False
     if country == "coin":
-        reference_equity = current_equity
-        if reference_equity is None:
-            reference_equity = 0.0
-        should_update_equity = abs(new_equity_candidate - reference_equity) > 1e-9
-        old_equity = reference_equity
+        # 코인은 항상 최신 잔액으로 덮어씀
+        should_autocorrect = abs(new_equity_candidate - current_equity) > 1e-9
     else:
-        should_update_equity = new_equity_candidate > 0 and (
-            new_equity_candidate > equity_for_autocorrect or equity_for_autocorrect == 0
+        # 주식/ETF는 증가하는 경우에만 보정
+        should_autocorrect = new_equity_candidate > 0 and (
+            new_equity_candidate > current_equity or current_equity == 0
         )
-        old_equity = equity_for_autocorrect
 
-    # 보고서 기준일(base_date)이 실제 거래일인지 확인합니다. (저장 단계에서 사용)
-    is_base_date_trading_day = _is_trading_day(country, base_date.to_pydatetime())
+    # 3. 최종 평가금액 및 DB 저장 여부 결정
+    final_equity = current_equity
+    updated_by = None
+    old_equity_for_log = current_equity
 
-    if (
-        is_base_date_trading_day
-        and should_update_equity
-        and abs(new_equity_candidate - old_equity) >= 1.0
-    ):
-        new_equity = new_equity_candidate
+    if should_autocorrect:
+        final_equity = new_equity_candidate
+        updated_by = "스케줄러(보정)"
+    elif is_carried_forward and current_equity > 0:
+        # 자동 보정은 필요 없지만, 과거 데이터를 현재 날짜로 이월해야 함
+        final_equity = current_equity  # 값은 그대로
+        updated_by = "스케줄러(이월)"
 
-        # 1. DB에 새로운 평가금액 저장
-        from utils.db_manager import save_daily_equity
+    # 4. DB에 저장 및 컨텍스트 업데이트
+    if updated_by and abs(final_equity - old_equity_for_log) >= 1.0:
+        is_base_date_trading_day = _is_trading_day(country, base_date.to_pydatetime())
+        if is_base_date_trading_day:
+            from utils.db_manager import save_daily_equity
 
-        # 호주: international_shares 정보도 함께 저장해야 함
-        is_data_to_save = None
-        if country == "aus":
-            is_data_to_save = portfolio_data.get("international_shares")
+            is_data_to_save = None
+            if country == "aus":
+                is_data_to_save = portfolio_data.get("international_shares")
 
-        save_success = save_daily_equity(
-            country,
-            account,
-            base_date.to_pydatetime(),
-            new_equity,
-            is_data_to_save,
-            updated_by="스케줄러",
-        )
-        if save_success:
-            logger.info(
-                "[%s/%s] daily_equities 업데이트: %s -> %0.2f",
-                country.upper(),
+            save_success = save_daily_equity(
+                country,
                 account,
-                base_date.strftime("%Y-%m-%d"),
-                new_equity,
+                base_date.to_pydatetime(),
+                final_equity,
+                is_data_to_save,
+                updated_by=updated_by,
             )
-        else:
-            logger.error(
-                "[%s/%s] daily_equities 저장 실패: %s",
-                country.upper(),
-                account,
-                base_date.strftime("%Y-%m-%d"),
-            )
-        # 2. 슬랙 알림 전송
-        equity_message_line = _get_equity_update_message_line(
-            country, account, old_equity, new_equity
-        )
-        slack_message_lines.append(equity_message_line)
 
-        # 3. 현재 실행 컨텍스트에 보정된 값 반영
-        current_equity = new_equity
-        portfolio_data["total_equity"] = new_equity
-        print(f"-> 평가금액 자동 보정: {old_equity:,.0f}원 -> {new_equity:,.0f}원")
+            if save_success:
+                if updated_by == "스케줄러(보정)":
+                    log_msg = (
+                        f"평가금액 자동 보정: {old_equity_for_log:,.0f}원 -> {final_equity:,.0f}원"
+                    )
+                    print(f"-> {log_msg}")
+                    equity_message_line = _get_equity_update_message_line(
+                        country, account, old_equity_for_log, final_equity
+                    )
+                    slack_message_lines.append(equity_message_line)
+                else:  # 이월
+                    log_msg = (
+                        f"평가금액 이월: {pd.to_datetime(equity_date).strftime('%Y-%m-%d')}의 평가금액"
+                        f"({final_equity:,.0f}원)을 {base_date.strftime('%Y-%m-%d')}으로 저장했습니다."
+                    )
+                    print(f"-> {log_msg}")
+
+                logger.info(
+                    "[%s/%s] Daily equity updated by %s on %s: %0.2f",
+                    country.upper(),
+                    account,
+                    updated_by,
+                    base_date.strftime("%Y-%m-%d"),
+                    final_equity,
+                )
+
+                # 로컬 컨텍스트 업데이트
+                current_equity = final_equity
+                portfolio_data["total_equity"] = final_equity
+            else:
+                logger.error(
+                    "[%s/%s] daily_equities 저장 실패: %s",
+                    country.upper(),
+                    account,
+                    base_date.strftime("%Y-%m-%d"),
+                )
+
     # 현재 보유 종목의 카테고리 (TBD 제외)
     held_categories = set()
     for tkr, d in holdings.items():

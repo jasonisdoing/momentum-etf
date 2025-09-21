@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test import main as run_backtest
 from utils.data_loader import (
-    PykrxDataUnavailable,
     fetch_ohlcv_for_tickers,
     get_latest_trading_day,
 )
@@ -151,23 +150,15 @@ def main():
 
             core_end_dt = get_latest_trading_day(country_code)
 
-            try:
-                core_start_dt = core_end_dt - pd.DateOffset(months=int(TEST_MONTHS_RANGE))
-                test_date_range = [
-                    core_start_dt.strftime("%Y-%m-%d"),
-                    core_end_dt.strftime("%Y-%m-%d"),
-                ]
-                print(f"\n데이터 로드 (기간: {test_date_range[0]} ~ {test_date_range[1]})...")
-                prefetched_data = fetch_ohlcv_for_tickers(
-                    tickers, country_code, date_range=test_date_range, warmup_days=warmup_days
-                )
-            except PykrxDataUnavailable as e:
-                print(f"오류: 데이터 로드 실패: {e}")
-                print("장 마감 직후라면 잠시 후 다시 시도해주세요.")
-                return
-            except Exception as e:
-                print(f"오류: 데이터 로드 중 예상치 못한 오류 발생: {e}")
-                return
+            core_start_dt = core_end_dt - pd.DateOffset(months=int(TEST_MONTHS_RANGE))
+            test_date_range = [
+                core_start_dt.strftime("%Y-%m-%d"),
+                core_end_dt.strftime("%Y-%m-%d"),
+            ]
+            print(f"\n데이터 로드 (기간: {test_date_range[0]} ~ {test_date_range[1]})...")
+            prefetched_data = fetch_ohlcv_for_tickers(
+                tickers, country_code, date_range=test_date_range, warmup_days=warmup_days
+            )
 
             if not prefetched_data:
                 print("오류: 튜닝에 사용할 데이터를 로드하지 못했습니다.")

@@ -227,13 +227,27 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
 @functools.lru_cache(maxsize=5)
 def get_latest_trading_day(country: str) -> pd.Timestamp:
     """
-    오늘 또는 가장 가까운 과거의 거래일을 pd.Timestamp 형식으로 반환합니다.
+    오늘 또는 가장 가까운 과거의 '데이터가 있을 것으로 예상되는' 거래일을 pd.Timestamp 형식으로 반환합니다.
     """
     end_dt = pd.Timestamp.now()
     if country == "coin":
         return end_dt.normalize()
 
-    # 오늘부터 과거로 하루씩 이동하며 거래일을 찾습니다.
+    # 한국 시장의 경우, 장 마감 데이터가 집계되기 전(오후 4시 이전)이라면,
+    # 조회 기준일을 하루 전으로 설정하여 어제까지의 데이터만 사용하도록 합니다.
+    if country == "kor":
+        try:
+            if ZoneInfo is not None:
+                local_now = datetime.now(ZoneInfo("Asia/Seoul"))
+            else:  # pragma: no cover
+                local_now = datetime.now()
+            if local_now.hour < 16:
+                end_dt = end_dt - pd.DateOffset(days=1)
+        except Exception:
+            # 타임존 처리 실패 시 안전하게 폴백
+            pass
+
+    # end_dt부터 과거로 하루씩 이동하며 거래일을 찾습니다.
     for i in range(15):
         check_date = end_dt - pd.DateOffset(days=i)
         check_date_str = check_date.strftime("%Y-%m-%d")

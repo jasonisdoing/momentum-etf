@@ -177,8 +177,6 @@ def get_portfolio_snapshot(
         {"country": country, "date": target_date, "is_deleted": {"$ne": True}}, account
     )
     equity_data = db.daily_equities.find_one(equity_query)
-    # 기본값 초기화
-    is_equity_stale = False
 
     # 해당 날짜의 평가금액이 유효한지 확인합니다.
     is_equity_valid = equity_data and equity_data.get("total_equity", 0) > 0
@@ -202,8 +200,6 @@ def get_portfolio_snapshot(
 
     # 최종적으로 사용되는 평가금액의 날짜를 결정합니다.
     equity_date = equity_data.get("date") if equity_data else None
-    if equity_date and equity_date != target_date:
-        is_equity_stale = True
 
     total_equity = equity_data.get("total_equity", 0) if equity_data else 0
 
@@ -254,7 +250,6 @@ def get_portfolio_snapshot(
         "country": country,
         "total_equity": total_equity,
         "holdings": holdings_list,
-        "is_equity_stale": is_equity_stale,
     }
     if account:
         snapshot["account"] = account
