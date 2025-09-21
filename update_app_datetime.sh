@@ -4,10 +4,20 @@
 SETTINGS_FILE="settings.py"
 CURRENT_TIME=$(date +"%Y-%m-%d-%H")
 
-# APP_DATE_TIME 라인 치환
-sed -i.bak -E "s/^APP_DATE_TIME = \".*\"/APP_DATE_TIME = \"${CURRENT_TIME}\"/" $SETTINGS_FILE
+# 파일에 APP_DATE_TIME 가 있을 때만 치환
+if grep -q '^APP_DATE_TIME = ' "$SETTINGS_FILE"; then
+  # macOS와 Linux 모두 대응
+  if sed --version >/dev/null 2>&1; then
+    # GNU sed (Linux)
+    sed -i "s/^APP_DATE_TIME = \".*\"/APP_DATE_TIME = \"${CURRENT_TIME}\"/" "$SETTINGS_FILE"
+  else
+    # BSD sed (macOS)
+    sed -i '' "s/^APP_DATE_TIME = \".*\"/APP_DATE_TIME = \"${CURRENT_TIME}\"/" "$SETTINGS_FILE"
+  fi
+  echo "🔄 APP_DATE_TIME updated to ${CURRENT_TIME}"
+else
+  echo "⚠️  APP_DATE_TIME not found in $SETTINGS_FILE"
+fi
 
-# 백업 파일(.bak) 제거
-rm -f "${SETTINGS_FILE}.bak"
-
-echo "🔄 APP_DATE_TIME updated to ${CURRENT_TIME}"
+# 자동으로 git add 실행 (변경사항 커밋에 포함시키기)
+git add "$SETTINGS_FILE"
