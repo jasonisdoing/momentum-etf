@@ -41,8 +41,8 @@ try:
 except Exception:
     _stock = None
 
-from status import (
-    generate_status_report,
+from signals import (
+    generate_signal_report,
     get_market_regime_status_string,
     calculate_benchmark_comparison,
     get_next_trading_day,
@@ -62,11 +62,11 @@ from utils.db_manager import (
     get_common_settings,
     get_db_connection,
     get_portfolio_snapshot,
-    get_status_report_from_db,
+    get_signal_report_from_db,
     save_common_settings,
     save_daily_equity,
     save_portfolio_settings,
-    save_status_report_to_db,
+    save_signal_report_to_db,
     save_trade,
 )
 from utils.stock_list_io import get_etfs
@@ -311,26 +311,26 @@ def get_next_schedule_time_str(country_code: str) -> str:
         return f"다음 실행 시간 계산 중 오류 발생: {e}"
 
 
-def get_cached_status_report(
+def get_cached_signal_report(
     country: str,
     account: str,
     date_str: str,
     force_recalculate: bool = False,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
-):
+) -> Optional[tuple[Any, Any, Any]]:
     """
-    MongoDB를 사용하여 현황 데이터를 캐시합니다.
+    MongoDB를 사용하여 매매 신호 리포트를 캐시합니다.
     force_recalculate=True일 경우에만 다시 계산합니다.
     """
     try:
         report_date = pd.to_datetime(date_str).to_pydatetime()
     except (ValueError, TypeError):
         st.error(f"잘못된 날짜 형식입니다: {date_str}")
-        return None
+        return None  # noqa: B901
 
     if not force_recalculate:
         # 1. DB에서 먼저 찾아봅니다.
-        report_from_db = get_status_report_from_db(country, account, report_date)
+        report_from_db = get_signal_report_from_db(country, account, report_date)
         if report_from_db:
             # DB에 저장된 형식은 딕셔너리, 반환 형식은 튜플이어야 합니다.
             return (
@@ -344,8 +344,8 @@ def get_cached_status_report(
 
     # 2. 강제로 다시 계산해야 하는 경우
     try:
-        with st.spinner(f"'{date_str}' 현황을 다시 계산하는 중..."):
-            new_report_tuple = generate_status_report(
+        with st.spinner(f"'{date_str}' 매매 신호를 다시 계산하는 중..."):
+            new_report_tuple = generate_signal_report(
                 country,
                 account,
                 date_str,
@@ -355,22 +355,22 @@ def get_cached_status_report(
                 header_line, headers, rows, _, _ = new_report_tuple
                 new_report = (header_line, headers, rows)
                 # 3. 계산된 결과를 DB에 저장합니다.
-                save_status_report_to_db(country, account, report_date, new_report)
+                save_signal_report_to_db(country, account, report_date, new_report)
             return new_report
     except ValueError as e:
         if str(e).startswith("PRICE_FETCH_FAILED:"):
             failed_tickers_str = str(e).split(":", 1)[1]
             st.error(f"{failed_tickers_str} 종목의 가격을 가져올 수 없습니다. 다시 시도하세요.")
-            return None
+            return None  # noqa: B901
         else:
             # 다른 ValueError는 기존처럼 처리
-            print(f"오류: 현황 계산 오류: {country}/{date_str}: {e}")
-            st.error(f"'{date_str}' 현황 계산 중 오류가 발생했습니다: {e}")
+            print(f"오류: 신호 계산 오류: {country}/{date_str}: {e}")
+            st.error(f"'{date_str}' 신호 계산 중 오류가 발생했습니다: {e}")
             return None
-    except Exception as e:
-        print(f"오류: 현황 계산 오류: {country}/{date_str}: {e}")
+    except Exception as e:  # noqa: E722
+        print(f"오류: 신호 계산 오류: {country}/{date_str}: {e}")
         st.error(
-            f"'{date_str}' 현황 계산 중 오류가 발생했습니다. 자세한 내용은 콘솔 로그를 확인해주세요."
+            f"'{date_str}' 신호 계산 중 오류가 발생했습니다. 자세한 내용은 콘솔 로그를 확인해주세요."
         )
         return None
 
@@ -394,7 +394,7 @@ def get_cached_etfs(country_code: str) -> List[Dict[str, Any]]:
 
 def _display_status_report_df(df: pd.DataFrame, country_code: str):
     """
-    현황 리포트 DataFrame에 종목 메타데이터(이름, 카테고리)를 실시간으로 병합하고 스타일을 적용하여 표시합니다.
+    시그널 리포트 DataFrame에 종목 메타데이터(이름, 카테고리)를 실시간으로 병합하고 스타일을 적용하여 표시합니다.
     """
     # 1. 종목 메타데이터 로드
     etfs_data = get_cached_etfs(country_code)
@@ -585,7 +585,7 @@ def render_master_etf_ui(country_code: str):
 def render_scheduler_tab():
     """스케줄러 설정을 위한 UI를 렌더링합니다."""
     st.header("스케줄러 설정 (모든 국가)")
-    st.info("각 국가별 현황 계산 작업이 실행될 주기를 Crontab 형식으로 설정합니다.")
+    st.info("각 국가별 시그널 계산 작업이 실행될 주기를 Crontab 형식으로 설정합니다.")
 
     common_settings = get_common_settings() or {}
 
@@ -696,7 +696,7 @@ def _account_prefix(country_code: str, account_code: Optional[str]) -> str:
 
 
 def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
-    """지정된 계좌의 현황/평가/거래/설정을 렌더링합니다."""
+    """지정된 계좌의 시그널/평가/거래/설정을 렌더링합니다."""
 
     account_code = account_entry.get("account")
     account_prefix = _account_prefix(country_code, account_code)
@@ -993,13 +993,15 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
 
     _display_success_toast(account_prefix)
 
-    sub_tab_names = ["현황", "평가금액", "트레이드", "설정"]
+    sub_tab_names = ["시그널", "평가금액", "트레이드", "설정"]
     (
-        sub_tab_status,
+        sub_tab_signal,
         sub_tab_equity_history,
         sub_tab_trades,
         sub_tab_settings,
-    ) = st.tabs(sub_tab_names)
+    ) = st.tabs(
+        sub_tab_names
+    )  # noqa: F841
 
     # 계좌 시작일 및 거래일 정보를 사용하여 날짜 선택 옵션을 필터링합니다.
     account_settings = get_account_settings(account_code)
@@ -1039,7 +1041,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
             if today_str in date_options and today_str != target_date_str:
                 option_labels.setdefault(today_str, f"{today_str} (오늘)")
 
-    with sub_tab_status:
+    with sub_tab_signal:
         if not date_options:
             # 데이터가 DB에 있지만 필터링되어 표시할 것이 없는 경우와,
             # DB에 데이터가 아예 없는 경우를 구분하여 메시지를 표시합니다.
@@ -1053,20 +1055,20 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                     # 코인은 빗썸 동기화를 통해 거래 내역이 생성되므로, 그에 맞는 안내를 제공합니다.
                     st.info("빗썸 거래내역 동기화가 필요할 수 있습니다.")
             else:
-                st.warning(f"[{country_code.upper()}] 표시에 유효한 현황 데이터가 없습니다.")
+                st.warning(f"[{country_code.upper()}] 표시에 유효한 시그널 데이터가 없습니다.")
                 st.info("DB에 미래 날짜 또는 거래일이 아닌 날짜의 데이터만 존재할 수 있습니다.")
         else:
             selected_date_str = st.selectbox(
                 "조회 날짜",
                 date_options,
                 format_func=lambda d: option_labels.get(d, d),
-                key=f"status_date_select_{account_prefix}",
+                key=f"signal_date_select_{account_prefix}",
             )
 
-            result = get_cached_status_report(
+            result = get_cached_signal_report(
                 country=country_code,
                 account=account_code,
-                date_str=selected_date_str,
+                date_str=selected_date_str,  # type: ignore
                 force_recalculate=False,
             )
 
@@ -1091,7 +1093,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
 
                 if rows and headers and len(rows[0]) != len(headers):
                     st.error(
-                        f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '다시 계산'을 시도해주세요."
+                        f"데이터 형식 오류: 시그널 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '다시 계산'을 시도해주세요."
                     )
                     st.write("- 헤더:", headers)
                     st.write("- 첫 번째 행 데이터:", rows[0])
@@ -1102,7 +1104,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                         st.markdown(warning_html, unsafe_allow_html=True)
                 # --- 벤치마크 비교 테이블 렌더링 ---
                 benchmark_results = get_cached_benchmark_comparison(
-                    country_code, selected_date_str, account=account_code
+                    country_code, selected_date_str, account=account_code  # type: ignore
                 )
                 if benchmark_results:
                     data_for_df = []
@@ -1156,7 +1158,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                     next_run_time_str = get_next_schedule_time_str(country_code)
                     st.info(
                         f"""
-    **{selected_date_str}** 날짜의 현황 데이터가 아직 계산되지 않았습니다.
+    **{selected_date_str}** 날짜의 매매 신호가 아직 계산되지 않았습니다.
 
     스케줄러에 의해 자동으로 계산될 예정입니다.
 
@@ -1164,17 +1166,17 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
     """
                     )
                 else:
-                    st.info(f"'{selected_date_str}' 날짜의 현황 데이터가 없습니다.")
+                    st.info(f"'{selected_date_str}' 날짜의 매매 신호 데이터가 없습니다.")
 
             if st.button(
                 "이 날짜 다시 계산하기",
-                key=f"recalc_status_{account_prefix}_{selected_date_str}",
+                key=f"recalc_signal_{account_prefix}_{selected_date_str}",
             ):
-                with st.spinner(f"'{selected_date_str}' 기준 현황 데이터를 계산/저장 중..."):
-                    calc_result = get_cached_status_report(
+                with st.spinner(f"'{selected_date_str}' 기준 매매 신호를 계산/저장 중..."):
+                    calc_result = get_cached_signal_report(
                         country=country_code,
                         account=account_code,
-                        date_str=selected_date_str,
+                        date_str=selected_date_str,  # type: ignore
                         force_recalculate=True,
                     )
                 if calc_result:
@@ -1202,7 +1204,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
             start_date_str = initial_date.strftime("%Y-%m-%d")
 
             # 조회 종료일을 오늘과 DB에 저장된 최신 스냅샷 날짜 중 더 미래의 날짜로 설정합니다.
-            # 이를 통해 미래 날짜로 백테스트/현황조회한 데이터도 평가금액 탭에 표시될 수 있습니다.
+            # 이를 통해 미래 날짜로 백테스트/시그널조회한 데이터도 평가금액 탭에 표시될 수 있습니다.
             end_dt_candidates = [pd.Timestamp.now()]
             if sorted_dates:
                 try:
@@ -1329,7 +1331,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                                 st.info("변경된 내용이 없어 저장하지 않았습니다.")
 
     with sub_tab_trades:
-        # 코인 탭: 거래 입력 대신 보유 현황/데이터 편집만 제공 (동기화 버튼 제거)
+        # 코인 탭: 거래 입력 대신 보유 시그널/데이터 편집만 제공 (동기화 버튼 제거)
         if country_code == "coin":
             pass
 
@@ -1600,9 +1602,9 @@ def render_country_tab(country_code: str, accounts: Optional[List[Dict[str, Any]
 
 
 def main():
-    """MomentumETF 오늘의 현황 웹 UI를 렌더링합니다."""
-    # 페이지 설정은 Streamlit의 첫 명령으로 실행되어야 합니다.
-    st.set_page_config(page_title="MomentumETF Status", layout="wide")
+    """MomentumETF 매매 신호 웹 UI를 렌더링합니다."""
+    # 페이지 설정은 Streamlit의 첫 명령으로 실행되어야 합니다.  # noqa: E501
+    st.set_page_config(page_title="MomentumETF Signal", layout="wide")
 
     # 페이지 상단 여백을 줄이기 위한 CSS 주입
     st.markdown(

@@ -322,11 +322,11 @@ def get_available_snapshot_dates(
 
     equity_query = _apply_account_filter({**query, "is_deleted": {"$ne": True}}, account)
     trade_query = _apply_account_filter({**query, "is_deleted": {"$ne": True}}, account)
-    status_query = _apply_account_filter(dict(query), account)
+    signal_query = _apply_account_filter(dict(query), account)
 
     equity_dates = list(db.daily_equities.distinct("date", equity_query))
     trade_dates = list(db.trades.distinct("date", trade_query))
-    status_dates = list(db.status_reports.distinct("date", status_query))
+    signal_dates = list(db.signals.distinct("date", signal_query))
 
     # 날짜를 'YYYY-MM-DD' 문자열로 변환한 뒤, 중복(같은 날 서로 다른 시각)을 제거합니다.
     def to_day_str_list(dt_list):
@@ -344,8 +344,8 @@ def get_available_snapshot_dates(
 
     equity_days = set(to_day_str_list(equity_dates))
     trade_days = set(to_day_str_list(trade_dates))
-    status_days = set(to_day_str_list(status_dates))
-    all_days = equity_days.union(trade_days).union(status_days)
+    signal_days = set(to_day_str_list(signal_dates))
+    all_days = equity_days.union(trade_days).union(signal_days)
 
     # 내림차순 정렬
     return sorted(all_days, reverse=True)
@@ -491,30 +491,30 @@ def save_import_checkpoint(
         return False
 
 
-def get_status_report_from_db(country: str, account: str, date: datetime) -> Optional[Dict]:
+def get_signal_report_from_db(country: str, account: str, date: datetime) -> Optional[Dict]:
     """
-    지정된 조건에 맞는 현황 리포트를 DB에서 가져옵니다.
+    지정된 조건에 맞는 시그널 리포트를 DB에서 가져옵니다.
     """
     db = get_db_connection()
     if db is None:
         return None
 
     query = _apply_account_filter({"country": country, "date": date}, account)
-    report_doc = db.status_reports.find_one(query)
+    report_doc = db.signals.find_one(query)
     if report_doc and "report" in report_doc:
         # 조용한 읽기: 과거 탭 렌더링 등에서 대량 호출될 수 있으므로 콘솔 로그는 생략합니다.
         return report_doc["report"]
     return None
 
 
-def save_status_report_to_db(
+def save_signal_report_to_db(
     country: str,
     account: str,
     date: datetime,
     report_data: Tuple[str, List[str], List[List[str]]],
 ) -> bool:
     """
-    계산된 현황 리포트를 DB에 저장합니다.
+    계산된 시그널 리포트를 DB에 저장합니다.
     """
     db = get_db_connection()
     if db is None:
@@ -535,13 +535,13 @@ def save_status_report_to_db(
         # upsert=True 이므로, 문서가 존재하면 업데이트하고, 없으면 새로 생성합니다.
         # $unset을 사용하여 과거에 있었을 수 있는 'strategy' 필드를 명시적으로 제거합니다.
         update_operation = {"$set": doc_to_save, "$unset": {"strategy": ""}}
-        db.status_reports.update_one(query, update_operation, upsert=True)
+        db.signals.update_one(query, update_operation, upsert=True)
         print(
-            f"-> 현황 리포트가 DB에 저장되었습니다: [{country}/{account}]{date.strftime('%Y-%m-%d')}"
+            f"-> 시그널 리포트가 DB에 저장되었습니다: [{country}/{account}]{date.strftime('%Y-%m-%d')}"
         )
         return True
     except Exception as e:
-        print(f"오류: 현황 리포트 DB 저장 중 오류 발생: {e}")
+        print(f"오류: 시그널 리포트 DB 저장 중 오류 발생: {e}")
         return False
 
 

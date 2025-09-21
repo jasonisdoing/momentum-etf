@@ -1,12 +1,11 @@
 """
 MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니다.
 
-이 스크립트는 백테스트, 현황 조회, 파라미터 튜닝 등
+이 스크립트는 백테스트, 시그널 조회, 파라미터 튜닝 등
 웹 UI 외부에서 실행되는 주요 기능들의 통합 진입점 역할을 합니다.
-
 [사용법]
-1. 현황 조회: python cli.py <국가코드> --status
-   - 예: python cli.py kor --status
+1. 시그널 조회: python cli.py <국가코드> --signal
+   - 예: python cli.py kor --signal
 
 2. 백테스트 실행: python cli.py <국가코드> --test
    - 예: python cli.py aus --test
@@ -23,17 +22,17 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
 # --- 계좌별 기본 명령어 (status, test, tune) ---
 
 # 한국 (KOR) / m1 계좌
-python cli.py kor --status --account m1
+python cli.py kor --signal --account m1
 python cli.py kor --test --account m1
 python cli.py kor --tune --account m1
 
 # 호주 (AUS) / a1 계좌
-python cli.py aus --status --account a1
+python cli.py aus --signal --account a1
 python cli.py aus --test --account a1
 python cli.py aus --tune --account a1
 
 # 가상화폐 (COIN) / b1 계좌
-python cli.py coin --status --account b1
+python cli.py coin --signal --account b1
 python cli.py coin --test --account b1
 python cli.py coin --tune --account b1
 
@@ -98,9 +97,9 @@ def main():
         help="전략 파라미터를 튜닝합니다 (tune.py).",
     )
     group.add_argument(
-        "--status",
+        "--signal",
         action="store_true",
-        help="오늘의 현황(status.py)을 실행합니다.",
+        help="오늘의 매매 신호(signal.py)를 실행합니다.",
     )
     parser.add_argument(
         "--date",
@@ -209,18 +208,18 @@ def main():
         )
         run_tune(country_code=country, account=account)
 
-    elif args.status:
-        from status import main as run_status, send_summary_notification
+    elif args.signal:
+        from signals import main as run_signal, send_summary_notification
         from utils.db_manager import get_portfolio_snapshot
 
-        print("전략으로 오늘의 현황을 조회합니다...")
+        print("전략으로 오늘의 매매 신호를 조회합니다...")
         start_time = time.time()
 
         # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
         old_snapshot = get_portfolio_snapshot(country, account=account)
         old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
-        report_date = run_status(country=country, date_str=args.date, account=account)
+        report_date = run_signal(country=country, date_str=args.date, account=account)
 
         if report_date:
             duration = time.time() - start_time

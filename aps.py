@@ -100,26 +100,26 @@ def _accounts_for_country(country: str) -> list[str]:
         return []
 
 
-def run_status(country: str, account: str | None = None) -> None:
-    """Run status generation and sends a completion log to Slack."""
+def run_signal_generation(country: str, account: str | None = None) -> None:
+    """Run signal generation and sends a completion log to Slack."""
     start_time = time.time()
     report_date = None
     try:
-        from status import main as run_status_main
-        from status import send_summary_notification
+        from signals import main as run_signal_main
+        from signals import send_summary_notification
         from utils.db_manager import get_portfolio_snapshot
 
         # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
         old_snapshot = get_portfolio_snapshot(country, account=account)
         old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
-        log_target = f"{country}/{account}" if account else country
-        logging.info(f"Running status for {log_target}")
+        log_target = f"{country}/{account}"
+        logging.info(f"Running signal generation for {log_target}")
         if country == "coin":
             _try_sync_bithumb_trades()
 
-        # status.main은 상세 알림을 처리합니다.
-        report_date = run_status_main(country, account, date_str=None)
+        # signal.main은 상세 알림을 처리합니다.
+        report_date = run_signal_main(country, account, date_str=None)
 
         # 작업이 성공적으로 완료되고 날짜를 받아왔을 때만 요약 알림 전송
         if report_date:
@@ -130,20 +130,22 @@ def run_status(country: str, account: str | None = None) -> None:
             logging.info(f"[{prefix}/{date_str}] 작업 완료(작업시간: {duration:.1f}초)")
 
     except Exception:
-        error_message = f"Status job for {country} failed"
+        error_message = f"Signal generation job for {country}/{account} failed"
         logging.error(error_message, exc_info=True)
 
 
-def run_status_for_country(country: str) -> None:
+def run_signals_for_country(country: str) -> None:
     accounts = _accounts_for_country(country)
     if accounts:
         for account in accounts:
             try:
-                run_status(country, account)
+                run_signal_generation(country, account)
             except Exception:
-                logging.error(f"Error running status for {country}/{account}", exc_info=True)
+                logging.error(
+                    f"Error running signal generation for {country}/{account}", exc_info=True
+                )
     else:
-        logging.warning("No registered accounts for %s; skipping status run.", country)
+        logging.warning("No registered accounts for %s; skipping signal generation.", country)
 
 
 def _try_sync_bithumb_trades():
@@ -197,7 +199,7 @@ def main():
         cron = common.get("SCHEDULE_CRON_COIN") or _get("SCHEDULE_COIN_CRON", "5 0 * * *")
         tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
         scheduler.add_job(
-            run_status_for_country,
+            run_signals_for_country,
             CronTrigger.from_crontab(cron, timezone=tz),
             args=["coin"],
             id="coin",
@@ -209,7 +211,7 @@ def main():
         cron = common.get("SCHEDULE_CRON_AUS") or _get("SCHEDULE_AUS_CRON", "10 18 * * 1-5")
         tz = _get("SCHEDULE_AUS_TZ", "Australia/Sydney")
         scheduler.add_job(
-            run_status_for_country,
+            run_signals_for_country,
             CronTrigger.from_crontab(cron, timezone=tz),
             args=["aus"],
             id="aus",
@@ -221,7 +223,7 @@ def main():
         cron = common.get("SCHEDULE_CRON_KOR") or _get("SCHEDULE_KOR_CRON", "10 18 * * 1-5")
         tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
         scheduler.add_job(
-            run_status_for_country,
+            run_signals_for_country,
             CronTrigger.from_crontab(cron, timezone=tz),
             args=["kor"],
             id="kor",
@@ -245,7 +247,7 @@ def main():
         for country in ("coin", "aus", "kor"):
             try:
                 if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", True):
-                    run_status_for_country(country)
+                    run_signals_for_country(country)
             except Exception:
                 logging.error(f"Error during initial run for {country}", exc_info=True)
         logging.info("[Initial Run] Complete.")

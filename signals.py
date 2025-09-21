@@ -40,7 +40,7 @@ from utils.db_manager import (
     get_portfolio_snapshot,
     get_previous_portfolio_snapshot,
     get_trades_on_date,
-    save_status_report_to_db,
+    save_signal_report_to_db,
 )
 from utils.report import (
     format_aud_money,
@@ -144,7 +144,7 @@ def _fetch_bithumb_realtime_price(symbol: str) -> Optional[float]:
     return None
 
 
-_STATUS_LOGGER = None
+_SIGNAL_LOGGER = None
 
 
 def _resolve_previous_close(close_series: pd.Series, base_date: pd.Timestamp) -> float:
@@ -154,7 +154,7 @@ def _resolve_previous_close(close_series: pd.Series, base_date: pd.Timestamp) ->
 
     try:
         closes_until_base = close_series.loc[:base_date]
-    except Exception:
+    except Exception:  # noqa: E722
         closes_until_base = close_series[close_series.index <= base_date]
 
     if closes_until_base.empty:
@@ -174,13 +174,13 @@ def _resolve_previous_close(close_series: pd.Series, base_date: pd.Timestamp) ->
     return float(candidate) if pd.notna(candidate) else 0.0
 
 
-def get_status_logger() -> logging.Logger:
-    """로그 파일(콘솔 출력 없이)에 기록하는 status 전용 로거를 반환합니다."""
-    global _STATUS_LOGGER
-    if _STATUS_LOGGER:
-        return _STATUS_LOGGER
+def get_signal_logger() -> logging.Logger:
+    """로그 파일(콘솔 출력 없이)에 기록하는 signal 전용 로거를 반환합니다."""
+    global _SIGNAL_LOGGER
+    if _SIGNAL_LOGGER:
+        return _SIGNAL_LOGGER
 
-    logger = logging.getLogger("status.detail")
+    logger = logging.getLogger("signal.detail")
     if not logger.handlers:
         project_root = Path(__file__).resolve().parent
         log_dir = project_root / "logs"
@@ -195,7 +195,7 @@ def get_status_logger() -> logging.Logger:
         logger.setLevel(logging.DEBUG)
         logger.propagate = False
 
-    _STATUS_LOGGER = logger
+    _SIGNAL_LOGGER = logger
     return logger
 
 
@@ -209,7 +209,7 @@ def get_next_trading_day(country: str, start_date: pd.Timestamp) -> pd.Timestamp
         days = get_trading_days(start_str, end_str, country)
         for d in days:
             if d.date() >= start_date.date():
-                return pd.Timestamp(d).normalize()
+                return pd.Timestamp(d).normalize()  # noqa: E722
     except Exception:
         pass
     # 폴백: 토/일이면 다음 월요일, 평일이면 그대로
@@ -219,7 +219,7 @@ def get_next_trading_day(country: str, start_date: pd.Timestamp) -> pd.Timestamp
 
 
 @dataclass
-class StatusReportData:
+class SignalReportData:
     portfolio_data: Dict
     data_by_tkr: Dict
     total_holdings_value: float
@@ -856,13 +856,13 @@ def _fetch_and_prepare_data(
     country: str,
     account: str,
     date_str: Optional[str],
-    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
-) -> Optional[StatusReportData]:
+    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,  # noqa: E501
+) -> Optional[SignalReportData]:
     """
     주어진 종목 목록에 대해 OHLCV 데이터를 조회하고,
     신호 계산에 필요한 이동평균 기반 지표를 계산합니다.
     """
-    logger = get_status_logger()
+    logger = get_signal_logger()
 
     # 설정을 불러옵니다.
     if not account:
@@ -884,7 +884,7 @@ def _fetch_and_prepare_data(
 
     request_label = date_str or "auto"
     logger.info(
-        "[%s] status data preparation started (input date=%s)", country.upper(), request_label
+        "[%s] signal data preparation started (input date=%s)", country.upper(), request_label
     )
 
     # 시그널 조회 시, 날짜가 지정되지 않으면 항상 오늘 날짜를 기준으로 조회합니다.
@@ -1235,14 +1235,14 @@ def _fetch_and_prepare_data(
         fail_counts[reason] = fail_counts.get(reason, 0) + 1
 
     logger.info(
-        "[%s] status data summary for %s: processed=%d, failures=%s",
+        "[%s] signal data summary for %s: processed=%d, failures=%s",
         country.upper(),
         base_date.strftime("%Y-%m-%d"),
         len(data_by_tkr),
         fail_counts or "{}",
     )
 
-    return StatusReportData(
+    return SignalReportData(
         portfolio_data=portfolio_data,
         data_by_tkr=data_by_tkr,
         total_holdings_value=total_holdings_value,
@@ -1450,14 +1450,14 @@ def _get_equity_update_message_line(
     return message
 
 
-def generate_status_report(
+def generate_signal_report(
     country: str,
     account: str,
     date_str: Optional[str] = None,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Optional[Tuple[str, List[str], List[List[str]], pd.Timestamp, List[str]]]:
-    """지정된 전략에 대한 오늘의 시그널 데이터를 생성하여 반환합니다."""
-    logger = get_status_logger()
+    """지정된 전략에 대한 오늘의 매매 신호를 생성하여 리포트로 반환합니다."""
+    logger = get_signal_logger()
     try:
         # 1. 데이터 로드 및 지표 계산
         result = _fetch_and_prepare_data(country, account, date_str, prefetched_data)
@@ -2280,7 +2280,7 @@ def generate_status_report(
         state_counts[state] = state_counts.get(state, 0) + 1
 
     logger.info(
-        "[%s] status report ready: rows=%d state_counts=%s",
+        "[%s] signal report ready: rows=%d state_counts=%s",
         country.upper(),
         len(rows_sorted),
         state_counts,
@@ -2294,18 +2294,18 @@ def main(
     account: str = "",
     date_str: Optional[str] = None,
 ) -> Optional[datetime]:
-    """CLI에서 오늘의 시그널을 실행하고 결과를 출력/저장합니다."""
+    """CLI에서 오늘의 매매 신호를 실행하고 결과를 출력/저장합니다."""
     if not account:
-        raise ValueError("account is required for status generation")
+        raise ValueError("account is required for signal generation")
 
-    result = generate_status_report(country, account, date_str)
+    result = generate_signal_report(country, account, date_str)
 
     if result:
         header_line, headers, rows_sorted, report_base_date, slack_message_lines = result
         # 가능하다면 웹 앱 히스토리에서 사용할 수 있도록 시그널 보고서를 저장합니다.
         try:
             # 반환된 base_date는 보고서의 실제 기준일이므로 그대로 저장에 사용합니다.
-            save_status_report_to_db(
+            save_signal_report_to_db(
                 country,
                 account,
                 report_base_date.to_pydatetime(),
@@ -2316,7 +2316,7 @@ def main(
 
         # 슬랙 알림: 시그널 전송
         try:
-            _maybe_notify_detailed_status(
+            _maybe_notify_detailed_signal(
                 country,
                 account,
                 header_line,
@@ -2423,7 +2423,7 @@ def main(
 
 def _is_trading_day(country: str, a_date: Optional[datetime] = None) -> bool:
     """지정 국가 기준으로 해당 날짜가 거래일이면 True를 반환합니다.
-    a_date가 None이면 오늘 날짜를 검사합니다.
+    a_date가 None이면 오늘 날짜를 검사합니다. # noqa: E501
 
     - kor/aus: 거래소 달력을 사용합니다. 조회 실패 시 안전하게 비거래일(False)로 간주합니다.
     - coin: 항상 True를 반환합니다.
@@ -2432,7 +2432,7 @@ def _is_trading_day(country: str, a_date: Optional[datetime] = None) -> bool:
         return True
 
     check_date = a_date or datetime.now()
-    logger = get_status_logger()
+    logger = get_signal_logger()
 
     try:
         # get_trading_days 함수는 문자열 형태의 날짜를 기대합니다.
@@ -2452,7 +2452,7 @@ def _is_trading_day(country: str, a_date: Optional[datetime] = None) -> bool:
         return False
 
 
-def _maybe_notify_detailed_status(
+def _maybe_notify_detailed_signal(
     country: str,
     account: str,
     header_line: str,
@@ -2798,7 +2798,7 @@ def send_summary_notification(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="포트폴리오 시그널을 계산합니다.")
+    parser = argparse.ArgumentParser(description="포트폴리오 매매 신호를 계산합니다.")
     parser.add_argument("country", choices=["kor", "aus", "coin"], help="국가 코드")
     parser.add_argument("--account", required=True, help="계좌 코드 (예: m1, a1, b1)")
     parser.add_argument("--date", default=None, help="기준 날짜 (YYYY-MM-DD). 미지정 시 자동 결정")
