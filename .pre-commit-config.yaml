@@ -1,13 +1,12 @@
 # .pre-commit-config.yaml
 repos:
--   repo: local
+  - repo: local
     hooks:
-    -   id: motivational-quote
-        name: Motivational Quote
-        entry: bash -c 'echo -e "\n\e[1;36m✨ 오늘도 한 걸음 더 나아가는 당신을 응원합니다! ✨\e[0m\n"'
+      - id: update-app-datetime
+        name: Update APP_DATE_TIME
+        entry: ./update_app_datetime.sh
         language: system
         stages: [commit]
-        always_run: true
 
 repos:
   - repo: https://github.com/pycqa/flake8
