@@ -330,6 +330,15 @@ def _fetch_ohlcv_with_cache(
             continue
         if cache_end is not None and _should_skip_pykrx_fetch(country, cache_end, miss_start):
             continue
+
+        # Check if there are any trading days in the missing range before attempting to fetch.
+        # This prevents errors when the gap consists only of non-trading days (weekends, holidays).
+        trading_days_in_gap = get_trading_days(
+            miss_start.strftime("%Y-%m-%d"), miss_end.strftime("%Y-%m-%d"), country
+        )
+        if not trading_days_in_gap:
+            continue
+
         fetched = _fetch_ohlcv_core(ticker, country, miss_start, miss_end, cached_df)
         if fetched is not None and not fetched.empty:
             new_frames.append(fetched)

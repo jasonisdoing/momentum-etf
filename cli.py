@@ -219,7 +219,11 @@ def main():
         old_snapshot = get_portfolio_snapshot(country, account=account)
         old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
-        report_date = run_signal(country=country, date_str=args.date, account=account)
+        try:
+            report_date = run_signal(country=country, date_str=args.date, account=account)
+        except Exception as e:
+            print(f"\n오류: 시그널 생성 중 오류가 발생했습니다: {e}")
+            return
 
         if report_date:
             duration = time.time() - start_time

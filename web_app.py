@@ -354,6 +354,7 @@ def get_cached_signal_report(
                 date_str,
                 prefetched_data=prefetched_data,
             )
+            new_report = None
             if new_report_tuple:
                 header_line, headers, rows, _, _ = new_report_tuple
                 new_report = (header_line, headers, rows)

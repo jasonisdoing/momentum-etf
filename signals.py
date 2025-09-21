@@ -371,7 +371,7 @@ def _calculate_single_benchmark(
     """단일 벤치마크의 성과를 계산하여 딕셔너리로 반환합니다."""
     base_result = {"ticker": benchmark_ticker, "name": benchmark_name}
 
-    from utils.data_loader import fetch_ohlcv
+    from utils.data_loader import PykrxDataUnavailable, fetch_ohlcv, get_trading_days
 
     # 방어 코드: base_date가 initial_date보다 이전일 수 없음
     if base_date < initial_date:
@@ -379,14 +379,41 @@ def _calculate_single_benchmark(
         base_result["error"] = error_msg
         return base_result
 
-    df_benchmark = fetch_ohlcv(
-        benchmark_ticker,
-        country=benchmark_country,
-        date_range=[
-            initial_date.strftime("%Y-%m-%d"),
-            base_date.strftime("%Y-%m-%d"),
-        ],
-    )
+    try:
+        df_benchmark = fetch_ohlcv(
+            benchmark_ticker,
+            country=benchmark_country,
+            date_range=[
+                initial_date.strftime("%Y-%m-%d"),
+                base_date.strftime("%Y-%m-%d"),
+            ],
+        )
+    except PykrxDataUnavailable:
+        # 데이터 조회 실패 시, 이전 거래일로 재시도합니다.
+        prev_day_search_end = base_date - pd.Timedelta(days=1)
+        prev_day_search_start = prev_day_search_end - pd.Timedelta(days=14)
+
+        previous_trading_days = get_trading_days(
+            prev_day_search_start.strftime("%Y-%m-%d"),
+            prev_day_search_end.strftime("%Y-%m-%d"),
+            benchmark_country,
+        )
+
+        if previous_trading_days:
+            previous_trading_day = previous_trading_days[-1]
+            print(
+                f"경고: {base_date.date()} 벤치마크 데이터 조회 실패. 이전 거래일({previous_trading_day.date()})로 재시도합니다."
+            )
+            df_benchmark = fetch_ohlcv(
+                benchmark_ticker,
+                country=benchmark_country,
+                date_range=[
+                    initial_date.strftime("%Y-%m-%d"),
+                    previous_trading_day.strftime("%Y-%m-%d"),
+                ],
+            )
+        else:
+            df_benchmark = None
 
     # 주요 데이터 소스에서 벤치마크를 가져오지 못했을 때의 폴백 경로입니다.
     if df_benchmark is None or df_benchmark.empty:
@@ -1128,7 +1155,7 @@ def _fetch_and_prepare_data(
         except PykrxDataUnavailable as exc:
             start_str = exc.start_dt.strftime("%Y-%m-%d")
             end_str = exc.end_dt.strftime("%Y-%m-%d")
-            message = f"[{country.upper()}] pykrx 조회 실패 ({start_str}~{end_str}): {exc.detail}"
+            message = f"[{country}/{account}] pykrx 조회 실패 ({start_str}~{end_str}): {exc.detail}"
             logger.error(message)
             try:
                 send_log_to_slack(message)
@@ -1138,7 +1165,7 @@ def _fetch_and_prepare_data(
         except Exception as exc:
             print(f"\n-> 경고: {tkr} 데이터 처리 중 오류 발생: {exc}")
             processed_results[tkr] = {"error": "PROCESS_ERROR"}
-            logger.error("[%s] %s data processing error", country.upper(), tkr)
+            logger.error("[%s] %s data processing error", country, tkr)
         # 진행 상황 표시
         print(f"\r   {desc} 진행: {i + 1}/{len(tasks)}", end="", flush=True)
 
@@ -1465,7 +1492,26 @@ def generate_signal_report(
     """지정된 전략에 대한 오늘의 매매 신호를 생성하여 리포트로 반환합니다."""
     logger = get_signal_logger()
 
-    # 1. 설정을 한 번만 가져옵니다.
+    # 1. 대상 날짜 결정
+    if date_str:
+        try:
+            target_date = pd.to_datetime(date_str).normalize()
+        except (ValueError, TypeError):
+            raise ValueError(f"잘못된 날짜 형식입니다: {date_str}")
+    else:
+        # 날짜가 지정되지 않으면 스케줄러 로직에 따라 동적으로 결정
+        target_date = _determine_target_date_for_scheduler(country)
+
+    # 휴장일 검사
+    if country != "coin":
+        if not _is_trading_day(country, target_date.to_pydatetime()):
+            raise ValueError(
+                f"휴장일({target_date.strftime('%Y-%m-%d')})에는 시그널을 생성할 수 없습니다."
+            )
+
+    effective_date_str = target_date.strftime("%Y-%m-%d")
+
+    # 2. 설정을 한 번만 가져옵니다.
     portfolio_settings = get_account_settings(account)
     if (
         not portfolio_settings
@@ -1478,14 +1524,45 @@ def generate_signal_report(
         return None
 
     try:
-        # 2. 데이터 로드 및 지표 계산
+        # 3. 데이터 로드 및 지표 계산
+        print(f"\n데이터 로드 (기준일: {effective_date_str})...")
         result = _fetch_and_prepare_data(
-            country, account, portfolio_settings, date_str, prefetched_data
+            country, account, portfolio_settings, effective_date_str, prefetched_data
         )
-        if result is None:
+    except PykrxDataUnavailable as e:
+        # 데이터 조회 실패 시, 이전 거래일로 재시도합니다.
+        print(f"경고: {effective_date_str} 데이터 조회 실패. 이전 거래일로 재시도합니다. ({e})")
+
+        prev_day_search_end = target_date - pd.Timedelta(days=1)
+        prev_day_search_start = prev_day_search_end - pd.Timedelta(days=14)
+
+        previous_trading_days = get_trading_days(
+            prev_day_search_start.strftime("%Y-%m-%d"),
+            prev_day_search_end.strftime("%Y-%m-%d"),
+            country,
+        )
+
+        if not previous_trading_days:
+            print("오류: 이전 거래일을 찾을 수 없어 시그널 생성을 중단합니다.")
+            return None
+
+        previous_trading_day = previous_trading_days[-1]
+        effective_date_str = previous_trading_day.strftime("%Y-%m-%d")
+
+        try:
+            print(f"\n데이터 로드 재시도 (기준일: {effective_date_str})...")
+            result = _fetch_and_prepare_data(
+                country, account, portfolio_settings, effective_date_str, prefetched_data
+            )
+        except PykrxDataUnavailable as e2:
+            print(f"오류: 재시도 실패. 시그널 생성에 필요한 데이터를 로드할 수 없습니다: {e2}")
             return None
     except Exception:
-        raise  # 오류를 다시 발생시켜 호출한 쪽에서 처리하도록 함
+        raise  # 다른 예외는 그대로 발생시킴
+
+    if result is None:
+        print("오류: 시그널 생성에 필요한 데이터를 로드하지 못했습니다.")
+        return None
 
     portfolio_data = result.portfolio_data
     data_by_tkr = result.data_by_tkr

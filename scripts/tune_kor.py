@@ -32,7 +32,6 @@ from utils.data_loader import (
     PykrxDataUnavailable,
     fetch_ohlcv_for_tickers,
     get_latest_trading_day,
-    get_trading_days,
 )
 from utils.account_registry import get_accounts_by_country, load_accounts
 from utils.stock_list_io import get_etfs
@@ -152,41 +151,23 @@ def main():
 
             core_end_dt = get_latest_trading_day(country_code)
 
-            prefetched_data = None
-            # 데이터 로드 재시도 로직: 데이터가 없는 경우 하루씩 이전으로 이동하며 최대 5번 시도
-            for i in range(5):
-                try:
-                    core_start_dt = core_end_dt - pd.DateOffset(months=int(TEST_MONTHS_RANGE))
-                    test_date_range = [
-                        core_start_dt.strftime("%Y-%m-%d"),
-                        core_end_dt.strftime("%Y-%m-%d"),
-                    ]
-
-                    print(
-                        f"\n데이터 로드 시도 (기간: {test_date_range[0]} ~ {test_date_range[1]})..."
-                    )
-                    prefetched_data = fetch_ohlcv_for_tickers(
-                        tickers, country_code, date_range=test_date_range, warmup_days=warmup_days
-                    )
-                    if prefetched_data:
-                        break  # 데이터 로드 성공
-                except PykrxDataUnavailable as e:
-                    print(f"경고: {e}")
-                    print(
-                        "데이터가 아직 집계되지 않았을 수 있습니다. 하루 이전 날짜로 재시도합니다."
-                    )
-                    previous_day = core_end_dt - pd.Timedelta(days=1)
-                    previous_trading_days = get_trading_days(
-                        (previous_day - pd.Timedelta(days=7)).strftime("%Y-%m-%d"),
-                        previous_day.strftime("%Y-%m-%d"),
-                        country_code,
-                    )
-                    if not previous_trading_days:
-                        print("오류: 이전 거래일을 찾을 수 없어 튜닝을 중단합니다.")
-                        return
-                    core_end_dt = previous_trading_days[-1]
-                except Exception as e:
-                    raise e  # 다른 예외는 그대로 발생시킴
+            try:
+                core_start_dt = core_end_dt - pd.DateOffset(months=int(TEST_MONTHS_RANGE))
+                test_date_range = [
+                    core_start_dt.strftime("%Y-%m-%d"),
+                    core_end_dt.strftime("%Y-%m-%d"),
+                ]
+                print(f"\n데이터 로드 (기간: {test_date_range[0]} ~ {test_date_range[1]})...")
+                prefetched_data = fetch_ohlcv_for_tickers(
+                    tickers, country_code, date_range=test_date_range, warmup_days=warmup_days
+                )
+            except PykrxDataUnavailable as e:
+                print(f"오류: 데이터 로드 실패: {e}")
+                print("장 마감 직후라면 잠시 후 다시 시도해주세요.")
+                return
+            except Exception as e:
+                print(f"오류: 데이터 로드 중 예상치 못한 오류 발생: {e}")
+                return
 
             if not prefetched_data:
                 print("오류: 튜닝에 사용할 데이터를 로드하지 못했습니다.")
