@@ -480,7 +480,7 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         "일간수익률": "{:+.2f}%",
         "누적수익률": "{:+.2f}%",
         "비중": "{:.1f}%",
-        "점수": "{:.2f}",
+        "점수": lambda val: f"{val * 100:+.1f}%" if pd.notna(val) else "-",
     }
 
     # 국가별로 통화 형식 지정
@@ -1112,6 +1112,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                         if res.get("error"):
                             data_for_df.append(
                                 {
+                                    "티커": res.get("ticker", "-"),
                                     "벤치마크": res["name"],
                                     "누적수익률": res["error"],
                                     "초과수익률": "-",
@@ -1138,6 +1139,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
 
                             data_for_df.append(
                                 {
+                                    "티커": res.get("ticker", "-"),
                                     "벤치마크": res["name"],
                                     "누적수익률": res["cum_ret_pct"],
                                     "초과수익률": excess_return_pct,
@@ -1149,6 +1151,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                         hide_index=True,
                         width="stretch",
                         column_config={
+                            "티커": st.column_config.TextColumn("티커"),
                             "누적수익률": st.column_config.NumberColumn(format="%.2f%%"),
                             "초과수익률": st.column_config.NumberColumn(format="%+.2f%%"),
                         },
