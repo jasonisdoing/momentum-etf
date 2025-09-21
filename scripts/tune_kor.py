@@ -1,11 +1,11 @@
 """
-'kor' 국가, 'm1' 계좌에 대한 파라미터 튜닝을 실행하는 스크립트입니다.
+'kor' 국가에 대한 파라미터 튜닝을 실행하는 스크립트입니다.
 
 이 스크립트는 `test.py`를 병렬로 실행하여
 지정된 파라미터 범위 내에서 최적의 조합(최고 CAGR 기준)을 찾습니다.
 
 [사용법]
-python scripts/tune_kor_m1.py
+python scripts/tune_kor.py --account m1
 
 [튜닝 설정]
 스크립트 상단의 `TUNING_PARAMS` 딕셔너리에서 튜닝할 파라미터의 범위를,
@@ -13,12 +13,14 @@ python scripts/tune_kor_m1.py
 - 튜닝할 값: 리스트나 `np.arange()`로 지정 (예: `np.arange(10, 101, 10)`)
 - 고정할 값: 단일 값을 포함한 리스트로 지정 (예: `[10]`)
 
-결과는 콘솔에 출력되고 `logs/tune_kor_m1.log` 파일에도 저장됩니다.
+결과는 콘솔에 출력되고 `logs/tune_kor_{account}.log` 파일에도 저장됩니다.
 """
 
 import itertools
 import os
 import sys
+import argparse
+from typing import Optional
 
 import pandas as pd
 
@@ -26,7 +28,13 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test import main as run_backtest
-from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day
+from utils.data_loader import (
+    PykrxDataUnavailable,
+    fetch_ohlcv_for_tickers,
+    get_latest_trading_day,
+    get_trading_days,
+)
+from utils.account_registry import get_accounts_by_country, load_accounts
 from utils.stock_list_io import get_etfs
 
 # --- 튜닝 파라미터 정의 ---
@@ -34,7 +42,7 @@ from utils.stock_list_io import get_etfs
 TUNING_PARAMS = {
     # "ma_period": np.arange(1, 30, 1),  # 10부터 150까지 5씩 증가
     "ma_period": [10, 15],
-    "portfolio_topn": [5],
+    "portfolio_topn": [5, 10],
     "replace_threshold": [0],  # 0 고정
 }
 # 백테스트 기간 (개월)
@@ -92,25 +100,47 @@ def run_single_backtest(params: tuple, prefetched_data: dict, account: str):
     return None
 
 
+def _resolve_account(country: str, explicit: Optional[str]) -> str:
+    """CLI 인자와 accounts.json을 기반으로 대상 계좌 코드를 결정합니다."""
+    if explicit:
+        return explicit
+
+    load_accounts(force_reload=False)
+    entries = get_accounts_by_country(country) or []
+    for entry in entries:
+        code = entry.get("account")
+        if code:
+            return str(code)
+    raise SystemExit(f"'{country}' 국가에 등록된 계좌가 없습니다. data/accounts.json을 확인하세요.")
+
+
 def main():
-    """'kor' 국가, 'm1' 계좌에 대한 파라미터 튜닝을 실행합니다."""
+    """'kor' 국가에 대한 파라미터 튜닝을 실행합니다."""
+    parser = argparse.ArgumentParser(description="'kor' 국가의 파라미터 튜닝을 실행합니다.")
+    parser.add_argument(
+        "--account",
+        type=str,
+        default=None,
+        help="튜닝을 실행할 계좌 코드. 미지정 시 첫 번째 활성 계좌 사용",
+    )
+    args = parser.parse_args()
+
+    country_code = "kor"
+    account = _resolve_account(country_code, args.account)
+
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     log_dir = os.path.join(project_root, "logs")
     os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, "tune_kor_m1.log")
+    log_path = os.path.join(log_dir, f"tune_{country_code}_{account}.log")
 
     original_stdout = sys.stdout
     with open(log_path, "w", encoding="utf-8") as log_file:
         sys.stdout = Tee(original_stdout, log_file)
         try:
-            country_code = "kor"
-            account = "m1"
-
             print(
                 f"'{country_code.upper()}' 국가, '{account}' 계좌에 대한 파라미터 튜닝을 시작합니다."
             )
 
-            print(f"\n튜닝을 위해 {country_code.upper()} 시장의 데이터를 미리 로딩합니다...")
             etfs_from_file = get_etfs(country_code)
             if not etfs_from_file:
                 print(f"오류: 'data/{country_code}/' 폴더에서 티커를 찾을 수 없습니다.")
@@ -121,15 +151,43 @@ def main():
             warmup_days = int(max_ma_period * 1.5)
 
             core_end_dt = get_latest_trading_day(country_code)
-            core_start_dt = core_end_dt - pd.DateOffset(months=int(TEST_MONTHS_RANGE))
-            test_date_range = [
-                core_start_dt.strftime("%Y-%m-%d"),
-                core_end_dt.strftime("%Y-%m-%d"),
-            ]
 
-            prefetched_data = fetch_ohlcv_for_tickers(
-                tickers, country_code, date_range=test_date_range, warmup_days=warmup_days
-            )
+            prefetched_data = None
+            # 데이터 로드 재시도 로직: 데이터가 없는 경우 하루씩 이전으로 이동하며 최대 5번 시도
+            for i in range(5):
+                try:
+                    core_start_dt = core_end_dt - pd.DateOffset(months=int(TEST_MONTHS_RANGE))
+                    test_date_range = [
+                        core_start_dt.strftime("%Y-%m-%d"),
+                        core_end_dt.strftime("%Y-%m-%d"),
+                    ]
+
+                    print(
+                        f"\n데이터 로드 시도 (기간: {test_date_range[0]} ~ {test_date_range[1]})..."
+                    )
+                    prefetched_data = fetch_ohlcv_for_tickers(
+                        tickers, country_code, date_range=test_date_range, warmup_days=warmup_days
+                    )
+                    if prefetched_data:
+                        break  # 데이터 로드 성공
+                except PykrxDataUnavailable as e:
+                    print(f"경고: {e}")
+                    print(
+                        "데이터가 아직 집계되지 않았을 수 있습니다. 하루 이전 날짜로 재시도합니다."
+                    )
+                    previous_day = core_end_dt - pd.Timedelta(days=1)
+                    previous_trading_days = get_trading_days(
+                        (previous_day - pd.Timedelta(days=7)).strftime("%Y-%m-%d"),
+                        previous_day.strftime("%Y-%m-%d"),
+                        country_code,
+                    )
+                    if not previous_trading_days:
+                        print("오류: 이전 거래일을 찾을 수 없어 튜닝을 중단합니다.")
+                        return
+                    core_end_dt = previous_trading_days[-1]
+                except Exception as e:
+                    raise e  # 다른 예외는 그대로 발생시킴
+
             if not prefetched_data:
                 print("오류: 튜닝에 사용할 데이터를 로드하지 못했습니다.")
                 return

@@ -257,7 +257,7 @@ def fetch_ohlcv(
     country: str = "kor",
     months_back: int = None,
     months_range: Optional[List[int]] = None,
-    date_range: Optional[List[str]] = None,
+    date_range: Optional[List[Optional[str]]] = None,
     base_date: Optional[pd.Timestamp] = None,
 ) -> Optional[pd.DataFrame]:
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
@@ -265,21 +265,24 @@ def fetch_ohlcv(
     if date_range and len(date_range) == 2:
         try:
             start_dt = pd.to_datetime(date_range[0])
-            end_dt = pd.to_datetime(date_range[1])
+            if date_range[1] is None:
+                # date_range의 두 번째 인자가 None이면 오늘까지 조회합니다.
+                end_dt = pd.to_datetime(get_today_str())
+            else:
+                end_dt = pd.to_datetime(date_range[1])
         except (ValueError, TypeError):
             print(
                 f"오류: 잘못된 date_range 형식: {date_range}. 'YYYY-MM-DD' 형식을 사용해야 합니다."
             )
             return None
     else:
-        now = base_date if base_date is not None else pd.to_datetime(get_today_str())
+        now = base_date if base_date is not None else pd.Timestamp.now()
         if months_range is not None and len(months_range) == 2:
             start_off, end_off = months_range
             start_dt = now - pd.DateOffset(months=int(start_off))
             end_dt = now - pd.DateOffset(months=int(end_off))
         else:
-            if months_back is None:
-                months_back = 12
+            months_back = months_back or 12
             start_dt = now - pd.DateOffset(months=int(months_back))
             end_dt = now
 
@@ -431,6 +434,15 @@ def _fetch_ohlcv_core(
             )
             return None
 
+    if country == "kor":
+        # pykrx에 데이터를 요청하기 전에, 해당 기간에 거래일이 있는지 먼저 확인합니다.
+        # 거래일이 없는 기간(예: 주말, 연휴)에 대해 불필요한 예외 발생을 방지합니다.
+        trading_days_in_range = get_trading_days(
+            start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), "kor"
+        )
+        if not trading_days_in_range:
+            return None  # 거래일이 없으므로 데이터를 가져올 수 없는 것이 정상입니다.
+
         all_dfs = []
         pykrx_failed = False
         pykrx_error_msg = None
@@ -475,7 +487,14 @@ def _fetch_ohlcv_core(
         if not all_dfs:
             pykrx_failed = True
             if pykrx_error_msg is None:
-                pykrx_error_msg = "데이터 없음"
+                # 요청 기간의 마지막 거래일이 오늘인 경우, 데이터가 아직 집계되지 않았을 가능성을 안내합니다.
+                last_expected_day = max(trading_days_in_range)
+                if last_expected_day.date() == datetime.now().date():
+                    pykrx_error_msg = (
+                        "데이터 없음 (장 마감 후 데이터가 집계되지 않았을 수 있습니다)"
+                    )
+                else:
+                    pykrx_error_msg = "데이터 없음"
 
         if pykrx_failed:
             raise PykrxDataUnavailable(country, start_dt, end_dt, pykrx_error_msg)
