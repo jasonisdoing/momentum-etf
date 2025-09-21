@@ -8,6 +8,7 @@ repos:
         language: system
         stages: [commit]
         always_run: true
+
 repos:
   - repo: https://github.com/pycqa/flake8
     rev: 7.3.0
