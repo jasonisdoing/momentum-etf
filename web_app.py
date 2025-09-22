@@ -2,7 +2,8 @@ import os
 import sys
 import warnings
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+import time
 
 import pandas as pd
 import streamlit as st
@@ -41,31 +42,35 @@ try:
 except Exception:
     _stock = None
 
-from status import (
-    generate_status_report,
-    get_benchmark_status_string,
+from signals import (
+    generate_signal_report,
     get_market_regime_status_string,
+    calculate_benchmark_comparison,
     get_next_trading_day,
 )
+from utils.account_registry import get_accounts_by_country, load_accounts
 from utils.data_loader import (
     fetch_yfinance_name,
     get_trading_days,
+    PykrxDataUnavailable,
 )
 from utils.db_manager import (
     delete_trade_by_id,
+    get_account_settings,
     get_all_daily_equities,
     get_all_trades,
-    get_app_settings,
     get_available_snapshot_dates,
     get_common_settings,
     get_db_connection,
     get_portfolio_snapshot,
-    get_status_report_from_db,
-    save_app_settings,
+    get_signal_report_from_db,
     save_common_settings,
     save_daily_equity,
-    save_status_report_to_db,
+    save_portfolio_settings,
+    save_signal_report_to_db,
     save_trade,
+    update_trade_by_id,
+    restore_trade_by_id,
 )
 from utils.stock_list_io import get_etfs
 
@@ -104,7 +109,10 @@ def _get_status_target_date_str(country_code: str) -> str:
     local_today = now_local.date()
     today_str = pd.Timestamp(local_today).strftime("%Y-%m-%d")
 
-    close_time = datetime.strptime(MARKET_DISPLAY_SETTINGS[country_code]["close"], "%H:%M").time()
+    # 장 마감 시간에 30분 버퍼를 추가하여 현재가 데이터 지연에 대응합니다.
+    # 예: 한국 15:30 -> 16:00, 호주 16:00 -> 16:30 (현지시간 기준)
+    close_time_dt = datetime.strptime(MARKET_DISPLAY_SETTINGS[country_code]["close"], "%H:%M")
+    close_time_with_buffer = (close_time_dt + pd.Timedelta(minutes=30)).time()
     lookahead_end = pd.Timestamp(local_today) + pd.Timedelta(days=14)
     lookahead_end_str = lookahead_end.strftime("%Y-%m-%d")
 
@@ -117,7 +125,7 @@ def _get_status_target_date_str(country_code: str) -> str:
         return today_str
 
     is_trading_today = any(d.date() == local_today for d in upcoming_days)
-    if is_trading_today and now_local.time() < close_time:
+    if is_trading_today and now_local.time() < close_time_with_buffer:
         return today_str
 
     next_day = next((d for d in upcoming_days if d.date() > local_today), None)
@@ -243,15 +251,29 @@ def _is_running_in_streamlit():
 if _is_running_in_streamlit():
 
     @st.cache_data(ttl=600)
-    def get_cached_benchmark_status(country: str, date_str: str) -> Optional[str]:
-        """벤치마크 비교 문자열을 캐시하여 반환합니다. (Streamlit용)"""
-        return get_benchmark_status_string(country, date_str)
+    def get_cached_benchmark_comparison(
+        country: str, date_str: str, account: str
+    ) -> Optional[List[Dict[str, Any]]]:
+        """벤치마크 비교 데이터를 캐시하여 반환합니다. (Streamlit용)"""
+        try:
+            return calculate_benchmark_comparison(country, account, date_str)
+        except PykrxDataUnavailable as exc:
+            start = exc.start_dt.strftime("%Y-%m-%d")
+            end = exc.end_dt.strftime("%Y-%m-%d")
+            return [{"name": "벤치마크", "error": f"데이터 없음 ({start}~{end})"}]
 
 else:
 
-    def get_cached_benchmark_status(country: str, date_str: str) -> Optional[str]:
-        """벤치마크 비교 문자열을 반환합니다. (CLI용, 캐시 없음)"""
-        return get_benchmark_status_string(country, date_str)
+    def get_cached_benchmark_comparison(
+        country: str, date_str: str, account: str
+    ) -> Optional[List[Dict[str, Any]]]:
+        """벤치마크 비교 데이터를 반환합니다. (CLI용, 캐시 없음)"""
+        try:
+            return calculate_benchmark_comparison(country, account, date_str)
+        except PykrxDataUnavailable as exc:
+            start = exc.start_dt.strftime("%Y-%m-%d")
+            end = exc.end_dt.strftime("%Y-%m-%d")
+            return [{"name": "벤치마크", "error": f"데이터 없음 ({start}~{end})"}]
 
 
 def get_next_schedule_time_str(country_code: str) -> str:
@@ -295,25 +317,26 @@ def get_next_schedule_time_str(country_code: str) -> str:
         return f"다음 실행 시간 계산 중 오류 발생: {e}"
 
 
-def get_cached_status_report(
+def get_cached_signal_report(
     country: str,
+    account: str,
     date_str: str,
     force_recalculate: bool = False,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
-):
+) -> Optional[tuple[Any, Any, Any]]:
     """
-    MongoDB를 사용하여 현황 데이터를 캐시합니다.
+    MongoDB를 사용하여 매매 신호 리포트를 캐시합니다.
     force_recalculate=True일 경우에만 다시 계산합니다.
     """
     try:
         report_date = pd.to_datetime(date_str).to_pydatetime()
     except (ValueError, TypeError):
         st.error(f"잘못된 날짜 형식입니다: {date_str}")
-        return None
+        return None  # noqa: B901
 
     if not force_recalculate:
         # 1. DB에서 먼저 찾아봅니다.
-        report_from_db = get_status_report_from_db(country, report_date)
+        report_from_db = get_signal_report_from_db(country, account, report_date)
         if report_from_db:
             # DB에 저장된 형식은 딕셔너리, 반환 형식은 튜플이어야 합니다.
             return (
@@ -327,34 +350,33 @@ def get_cached_status_report(
 
     # 2. 강제로 다시 계산해야 하는 경우
     try:
-        with st.spinner(f"'{date_str}' 현황을 다시 계산하는 중..."):
-            new_report_tuple = generate_status_report(
-                country=country,
-                date_str=date_str,
+        with st.spinner(f"'{date_str}' 매매 신호를 다시 계산하는 중..."):
+            new_report_tuple = generate_signal_report(
+                country,
+                account,
+                date_str,
                 prefetched_data=prefetched_data,
-                notify_start=False,
             )
+            new_report = None
             if new_report_tuple:
-                header_line, headers, rows, _ = new_report_tuple
+                header_line, headers, rows, _, _ = new_report_tuple
                 new_report = (header_line, headers, rows)
                 # 3. 계산된 결과를 DB에 저장합니다.
-                save_status_report_to_db(country, report_date, new_report)
+                save_signal_report_to_db(country, account, report_date, new_report)
             return new_report
     except ValueError as e:
         if str(e).startswith("PRICE_FETCH_FAILED:"):
             failed_tickers_str = str(e).split(":", 1)[1]
             st.error(f"{failed_tickers_str} 종목의 가격을 가져올 수 없습니다. 다시 시도하세요.")
-            return None
+            return None  # noqa: B901
         else:
             # 다른 ValueError는 기존처럼 처리
-            print(f"오류: 현황 계산 오류: {country}/{date_str}: {e}")
-            st.error(f"'{date_str}' 현황 계산 중 오류가 발생했습니다: {e}")
+            print(f"오류: 신호 계산 오류: {country}/{date_str}: {e}")
+            st.error(f"'{date_str}' 신호 계산 중 오류가 발생했습니다: {e}")
             return None
-    except Exception as e:
-        print(f"오류: 현황 계산 오류: {country}/{date_str}: {e}")
-        st.error(
-            f"'{date_str}' 현황 계산 중 오류가 발생했습니다. 자세한 내용은 콘솔 로그를 확인해주세요."
-        )
+    except Exception as e:  # noqa: E722
+        print(f"오류: 신호 계산 오류: {country}/{date_str}: {e}")
+        st.error(f"'{date_str}' 신호 계산 중 오류가 발생했습니다. 자세한 내용은 콘솔 로그를 확인해주세요.")
         return None
 
 
@@ -369,12 +391,18 @@ def style_returns(val) -> str:
     return f"color: {color}"
 
 
+@st.cache_data
+def get_cached_etfs(country_code: str) -> List[Dict[str, Any]]:
+    """종목 마스터(etf.json) 데이터를 캐시하여 반환합니다."""
+    return get_etfs(country_code) or []
+
+
 def _display_status_report_df(df: pd.DataFrame, country_code: str):
     """
-    현황 리포트 DataFrame에 종목 메타데이터(이름, 카테고리)를 실시간으로 병합하고 스타일을 적용하여 표시합니다.
+    시그널 리포트 DataFrame에 종목 메타데이터(이름, 카테고리)를 실시간으로 병합하고 스타일을 적용하여 표시합니다.
     """
     # 1. 종목 메타데이터 로드
-    etfs_data = get_etfs(country_code)
+    etfs_data = get_cached_etfs(country_code)
     if not etfs_data:
         meta_df = pd.DataFrame(columns=["ticker", "이름", "category"])
     else:
@@ -389,9 +417,7 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
     # 호주 'IS' 종목의 이름을 수동으로 지정합니다.
     if country_code == "aus":
         # 'IS' 종목에 대한 메타데이터를 수동으로 추가합니다.
-        is_meta = pd.DataFrame(
-            [{"ticker": "IS", "이름": "International Shares", "category": "기타"}]
-        )
+        is_meta = pd.DataFrame([{"ticker": "IS", "이름": "International Shares", "category": "기타"}])
         meta_df = pd.concat([meta_df, is_meta], ignore_index=True)
 
     # 2. 메타데이터 병합
@@ -457,7 +483,7 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         "일간수익률": "{:+.2f}%",
         "누적수익률": "{:+.2f}%",
         "비중": "{:.1f}%",
-        "점수": "{:.2f}",
+        "점수": lambda val: f"{val * 100:.1f}" if pd.notna(val) else "-",
     }
 
     # 국가별로 통화 형식 지정
@@ -473,8 +499,8 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         formats["보유수량"] = "{:.8f}"
     styler = styler.format(formats, na_rep="-")
 
-    # 테이블 높이를 16개 행이 보이도록 고정합니다. (헤더 포함 16)
-    height = (16) * 35 + 3
+    # 테이블 높이를 11개 행이 보이도록 고정합니다. (헤더 포함 11)
+    height = (11) * 35 + 3
 
     shares_format_str = "%.8f" if country_code == "coin" else "%d"
 
@@ -508,62 +534,71 @@ def render_master_etf_ui(country_code: str):
     else:
         st.info("이곳에서 투자 유니버스에 포함된 종목을 조회할 수 있습니다.")
 
-    with st.spinner("종목 마스터 데이터를 불러오는 중..."):
-        etfs_data = get_etfs(country_code)
-        if not etfs_data:
-            st.info("조회할 종목이 없습니다.")
-            return
+    etfs_data = get_etfs(country_code)
+    if not etfs_data:
+        st.info("조회할 종목이 없습니다.")
+        return
 
-        df_etfs = pd.DataFrame(etfs_data)
+    # is_active 필드가 없는 종목이 있는지 확인합니다.
+    for etf in etfs_data:
+        if "is_active" not in etf:
+            st.error(f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요.")
+            st.stop()
 
-        # 데이터 정합성을 위한 처리: 'name' 컬럼이 없거나 NaN 값이 있으면 오류가 발생할 수 있습니다.
-        if "name" not in df_etfs.columns:
-            df_etfs["name"] = ""
-        df_etfs["name"] = df_etfs["name"].fillna("").astype(str)
+    df_etfs = pd.DataFrame(etfs_data)
 
-        # 데이터 정합성을 위한 처리
-        if country_code == "coin":
-            if "type" not in df_etfs.columns:
-                df_etfs["type"] = "crypto"
-            df_etfs["type"] = df_etfs["type"].fillna("crypto")
-        else:
-            if "type" not in df_etfs.columns:
-                df_etfs["type"] = ""
+    # 'is_active' 컬럼이 없는 경우는 위에서 처리했으므로, NaN 값만 True로 채웁니다.
+    df_etfs["is_active"] = df_etfs["is_active"].fillna(True)
 
-        # 'last_modified' 컬럼이 없는 구버전 데이터와의 호환성을 위해 추가
-        if "last_modified" not in df_etfs.columns:
-            df_etfs["last_modified"] = pd.NaT
+    # 데이터 정합성을 위한 처리: 'name' 컬럼이 없거나 NaN 값이 있으면 오류가 발생할 수 있습니다.
+    if "name" not in df_etfs.columns:
+        df_etfs["name"] = ""
+    df_etfs["name"] = df_etfs["name"].fillna("").astype(str)
 
-        # 정렬 로직: 오래된 수정일자 우선
-        df_etfs["modified_sort_key"] = pd.to_datetime(df_etfs["last_modified"], errors="coerce")
+    # 데이터 정합성을 위한 처리
+    if country_code == "coin":
+        if "type" not in df_etfs.columns:
+            df_etfs["type"] = "crypto"
+        df_etfs["type"] = df_etfs["type"].fillna("crypto")
+    else:
+        if "type" not in df_etfs.columns:
+            df_etfs["type"] = ""
 
-        df_etfs.sort_values(
-            by=["modified_sort_key"],
-            ascending=True,
-            na_position="first",  # 수정일자가 없는 가장 오래된 데이터부터 표시
-            inplace=True,
-        )
+    # 'last_modified' 컬럼이 없는 구버전 데이터와의 호환성을 위해 추가
+    if "last_modified" not in df_etfs.columns:
+        df_etfs["last_modified"] = pd.NaT
 
-        # 컬럼 순서 조정
-        display_cols = ["ticker", "name", "category"]
-        df_for_display = df_etfs.reindex(columns=display_cols)
+    # 정렬 로직: 오래된 수정일자 우선
+    df_etfs["modified_sort_key"] = pd.to_datetime(df_etfs["last_modified"], errors="coerce")
 
-        st.dataframe(
-            df_for_display,
-            width="stretch",
-            hide_index=True,
-            key=f"etf_viewer_{country_code}",
-            column_config={
-                "ticker": st.column_config.TextColumn("티커"),
-                "name": st.column_config.TextColumn("종목명"),
-            },
-        )
+    df_etfs.sort_values(
+        by=["modified_sort_key"],
+        ascending=True,
+        na_position="first",  # 수정일자가 없는 가장 오래된 데이터부터 표시
+        inplace=True,
+    )
+
+    # 컬럼 순서 조정
+    display_cols = ["ticker", "name", "category", "is_active"]
+    df_for_display = df_etfs.reindex(columns=display_cols)
+
+    st.dataframe(
+        df_for_display,
+        width="stretch",
+        hide_index=True,
+        key=f"etf_viewer_{country_code}",
+        column_config={
+            "ticker": st.column_config.TextColumn("티커"),
+            "name": st.column_config.TextColumn("종목명"),
+            "is_active": st.column_config.CheckboxColumn("활성", disabled=True),
+        },
+    )
 
 
 def render_scheduler_tab():
     """스케줄러 설정을 위한 UI를 렌더링합니다."""
     st.header("스케줄러 설정 (모든 국가)")
-    st.info("각 국가별 현황 계산 작업이 실행될 주기를 Crontab 형식으로 설정합니다.")
+    st.info("각 국가별 시그널 계산 작업이 실행될 주기를 Crontab 형식으로 설정합니다.")
 
     common_settings = get_common_settings() or {}
 
@@ -624,14 +659,14 @@ def render_scheduler_tab():
                     st.error("스케줄러 설정 저장에 실패했습니다.")
 
 
-def _display_success_toast(country_code: str):
+def _display_success_toast(key_prefix: str):
     """
     세션 상태에서 성공 메시지를 확인하고 토스트로 표시합니다.
     주로 다이얼로그가 닫힌 후 피드백을 주기 위해 사용됩니다.
     """
     keys_to_check = [
-        f"buy_message_{country_code}",
-        f"sell_message_{country_code}",
+        f"buy_message_{key_prefix}",
+        f"sell_message_{key_prefix}",
     ]
     for key in keys_to_check:
         if key in st.session_state:
@@ -642,17 +677,95 @@ def _display_success_toast(country_code: str):
                 st.toast(msg_text)
 
 
-def render_country_tab(country_code: str):
-    """지정된 국가에 대한 탭의 전체 UI를 렌더링합니다."""
+def _prepare_account_entries(
+    country_code: str, accounts: Optional[List[Dict[str, Any]]]
+) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    for entry in accounts or []:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("is_active", True):
+            entries.append(entry)
+    if not entries:
+        entries.append(
+            {
+                "account": None,
+                "country": country_code,
+                "display_name": COUNTRY_CODE_MAP.get(country_code, country_code.upper()),
+            }
+        )
+    return entries
+
+
+def _account_label(entry: Dict[str, Any]) -> str:
+    label = entry.get("display_name") or entry.get("account")
+    if not label:
+        return "계좌"
+    return str(label)
+
+
+def _account_prefix(country_code: str, account_code: Optional[str]) -> str:
+    return f"{country_code}_{account_code or 'default'}"
+
+
+def _render_account_dashboard(
+    country_code: str,
+    account_entry: Dict[str, Any],
+    prefetched_trading_days: Optional[List[pd.Timestamp]] = None,
+):
+    """지정된 계좌의 시그널/평가/거래/설정을 렌더링합니다."""
+    print(f"\n[{country_code.upper()}/{account_entry.get('account')}] 대시보드 렌더링 시작...")
+
+    account_code = account_entry.get("account")
+    account_prefix = _account_prefix(country_code, account_code)
+
+    if not account_code:
+        st.info("활성 계좌가 없습니다. 계좌를 등록한 후 이용해주세요.")
+        print(f"[{country_code.upper()}] 활성 계좌 없음. 렌더링 중단.")
+        return
+
+    def _load_data_for_sell_dialog():
+        # --- 매도 다이얼로그를 위한 데이터 로딩 (성능 개선) ---
+        # 가격 조회를 제거하여 모달을 즉시 띄웁니다.
+        print("\n[SELL] 매도 모달 데이터 로딩 시작...")
+
+        # 1. 최신 스냅샷에서 보유 종목 목록을 가져옵니다.
+        print("[SELL] 1/3: 사용 가능한 스냅샷 날짜 조회...")
+        snapshot_dates = get_available_snapshot_dates(country_code, account=account_code)
+        latest_date_str = snapshot_dates[0] if snapshot_dates else None
+
+        if not latest_date_str:
+            print("[SELL] 경고: 사용 가능한 스냅샷이 없어 로딩을 중단합니다.")
+            return []
+
+        print(f"[SELL] 2/3: 최신 스냅샷({latest_date_str}) 데이터 로딩...")
+        snapshot = get_portfolio_snapshot(
+            country_code, date_str=latest_date_str, account=account_code
+        )
+
+        if not snapshot or not snapshot.get("holdings"):
+            print("[SELL] 경고: 스냅샷에 보유 종목 데이터가 없어 로딩을 중단합니다.")
+            return []
+
+        # 2. 보유 수량이 0보다 큰 종목만 필터링하여 반환합니다.
+        print("[SELL] 3/3: 보유 수량이 있는 종목 필터링...")
+        holdings_for_sell_dialog = [
+            h for h in snapshot.get("holdings", []) if h.get("shares", 0.0) > 0
+        ]
+
+        print(f"[SELL] 매도 모달 데이터 로딩 완료. (총 {len(holdings_for_sell_dialog)}개 종목)")
+        return holdings_for_sell_dialog
 
     @st.dialog("BUY")
     def show_buy_dialog(country_code_inner: str):
         """매수(BUY) 거래 입력을 위한 모달 다이얼로그를 표시합니다."""
+        print("\n[BUY] 매수 모달 오픈.")
 
         currency_str = f" ({'AUD' if country_code_inner == 'aus' else 'KRW'})"
-        message_key = f"buy_message_{country_code_inner}"
+        message_key = f"buy_message_{account_prefix}"
 
         def on_buy_submit():
+            print("[BUY] '거래 저장' 버튼 클릭됨. 매수 거래 처리 시작...")
             # 한국 현지 시간으로 현재 시간을 가져옵니다.
             trade_time = datetime.now()
             if pytz:
@@ -666,9 +779,10 @@ def render_country_tab(country_code: str):
                     pass
 
             # st.session_state에서 폼 데이터 가져오기
-            ticker = st.session_state[f"buy_ticker_{country_code_inner}"].strip()
-            shares = st.session_state[f"buy_shares_{country_code_inner}"]
-            price = st.session_state[f"buy_price_{country_code_inner}"]
+            print("[BUY] 1/3: 폼 데이터 가져오기...")
+            ticker = st.session_state[f"buy_ticker_{account_prefix}"].strip()
+            shares = st.session_state[f"buy_shares_{account_prefix}"]
+            price = st.session_state[f"buy_price_{account_prefix}"]
 
             if not ticker or not shares > 0 or not price > 0:
                 st.session_state[message_key] = (
@@ -678,6 +792,7 @@ def render_country_tab(country_code: str):
                 return
 
             etf_name = ""
+            print(f"[BUY] 2/3: 종목명 조회 시작 (티커: {ticker})...")
             if country_code_inner == "kor" and _stock:
                 # fetch_pykrx_name은 ETF와 ETN/주식 이름을 모두 조회 시도합니다.
                 from utils.data_loader import fetch_pykrx_name
@@ -685,46 +800,52 @@ def render_country_tab(country_code: str):
                 etf_name = fetch_pykrx_name(ticker)
             elif country_code_inner == "aus":
                 etf_name = fetch_yfinance_name(ticker)
+            print(f"[BUY] 종목명 조회 완료: '{etf_name}'")
 
             trade_data = {
                 "country": country_code_inner,
+                "account": account_code,
                 "date": trade_time,
                 "ticker": ticker.upper(),
                 "name": etf_name,
                 "action": "BUY",
                 "shares": float(shares),
                 "price": float(price),
-                "note": "Manual input from web app",
+                "note": "",
             }
 
+            print("[BUY] 3/3: 거래 내역 DB에 저장 시도...")
             if save_trade(trade_data):
+                print("[BUY] 거래 내역 저장 성공.")
                 st.session_state[message_key] = (
                     "success",
                     "거래가 성공적으로 저장되었습니다.",
                 )
             else:
+                print("[BUY] 거래 내역 저장 실패.")
                 st.session_state[message_key] = (
                     "error",
                     "거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.",
                 )
+            print("[BUY] 매수 거래 처리 완료.")
 
         # 다이얼로그 내에서 오류 메시지만 표시합니다. 성공 메시지는 메인 화면에서 토스트로 표시됩니다.
         if message_key in st.session_state:
             msg_type, msg_text = st.session_state[message_key]
-            if msg_type == "success":
+            if msg_type != "success":
                 st.error(msg_text)
-                # 오류 메시지는 한 번만 표시되도록 세션에서 제거합니다.
+                # 메시지는 한 번만 표시되도록 세션에서 제거합니다.
                 del st.session_state[message_key]
 
-        with st.form(f"trade_form_{country_code_inner}"):
-            st.text_input("종목코드 (티커)", key=f"buy_ticker_{country_code_inner}")
+        with st.form(f"trade_form_{account_prefix}"):
+            st.text_input("종목코드 (티커)", key=f"buy_ticker_{account_prefix}")
             shares_format_str = "%.8f" if country_code_inner == "coin" else "%d"
             st.number_input(
                 "수량",
                 min_value=0.00000001,
                 step=0.00000001,
                 format=shares_format_str,
-                key=f"buy_shares_{country_code_inner}",
+                key=f"buy_shares_{account_prefix}",
             )
             st.number_input(
                 f"매수 단가{currency_str}",
@@ -734,96 +855,27 @@ def render_country_tab(country_code: str):
                     if country_code_inner == "aus"
                     else ("%d" if country_code_inner in ["kor", "coin"] else "%d")
                 ),
-                key=f"buy_price_{country_code_inner}",
+                key=f"buy_price_{account_prefix}",
             )
             st.form_submit_button("거래 저장", on_click=on_buy_submit)
 
     @st.dialog("SELL", width="large")
-    def show_sell_dialog(country_code_inner: str):
+    def show_sell_dialog(country_code_inner: str, holdings_data: list):
         """보유 종목 매도를 위한 모달 다이얼로그를 표시합니다."""
-        currency_str = f" ({'AUD' if country_code_inner == 'aus' else 'KRW'})"
-        message_key = f"sell_message_{country_code_inner}"
+        print("\n[SELL] 매도 모달 오픈.")
+        message_key = f"sell_message_{account_prefix}"
 
-        from utils.data_loader import fetch_naver_realtime_price, fetch_ohlcv
-
-        latest_date_str = (
-            get_available_snapshot_dates(country_code_inner)[0]
-            if get_available_snapshot_dates(country_code_inner)
-            else None
-        )
-        if not latest_date_str:
+        if not holdings_data:
             st.warning("보유 종목이 없어 매도할 수 없습니다.")
             return
 
-        snapshot = get_portfolio_snapshot(country_code_inner, date_str=latest_date_str)
-        if not snapshot or not snapshot.get("holdings"):
-            st.warning("보유 종목이 없어 매도할 수 없습니다.")
-            return
-
-        holdings = snapshot.get("holdings", [])
-
-        holdings_with_prices = []
-        with st.spinner("보유 종목의 현재가를 조회하는 중..."):
-            for h in holdings:
-                price = None
-                if country_code_inner == "kor":
-                    price = fetch_naver_realtime_price(h["ticker"])
-                    if not price:
-                        df = fetch_ohlcv(h["ticker"], country="kor", months_back=1)
-                        if df is not None and not df.empty:
-                            if isinstance(df.columns, pd.MultiIndex):
-                                df.columns = df.columns.get_level_values(0)
-                                df = df.loc[:, ~df.columns.duplicated()]
-                            price = df["Close"].iloc[-1]
-                elif country_code_inner == "aus":
-                    df = fetch_ohlcv(h["ticker"], country="aus", months_back=1)
-                    if df is not None and not df.empty:
-                        if isinstance(df.columns, pd.MultiIndex):
-                            df.columns = df.columns.get_level_values(0)
-                            df = df.loc[:, ~df.columns.duplicated()]
-                        price = df["Close"].iloc[-1]
-
-                # 불리언 평가 및 계산 전에 가격을 스칼라로 보장합니다.
-                # 예: 중복 컬럼 등으로 인해 함수가 Series를 반환하는 경우를 처리합니다.
-                price_val = price.item() if isinstance(price, pd.Series) else price
-
-                if price_val and pd.notna(price_val):
-                    value = h["shares"] * price_val
-                    return_pct = (
-                        (price_val / h["avg_cost"] - 1) * 100 if h.get("avg_cost", 0) > 0 else 0.0
-                    )
-                    holdings_with_prices.append(
-                        {
-                            "ticker": h["ticker"],
-                            "name": h["name"],
-                            "shares": h["shares"],
-                            "price": price_val,
-                            "value": value,
-                            "return_pct": return_pct,
-                        }
-                    )
-
-        if not holdings_with_prices:
-            st.error("보유 종목의 현재가를 조회할 수 없습니다.")
-            return
-
-        df_holdings = pd.DataFrame(holdings_with_prices)
+        df_holdings = pd.DataFrame(holdings_data)
 
         def on_sell_submit():
-            # 한국 현지 시간으로 현재 시간을 가져옵니다.
-            trade_time = datetime.now()
-            if pytz:
-                try:
-                    korea_tz = pytz.timezone("Asia/Seoul")
-                    # DB에 시간대 정보가 없는 순수한 한국 시간(naive)으로 저장해달라는 요청에 따라
-                    # aware datetime에서 timezone 정보를 제거합니다.
-                    trade_time = datetime.now(korea_tz).replace(tzinfo=None)
-                except pytz.UnknownTimeZoneError:
-                    # pytz가 설치되었지만 'Asia/Seoul'을 모르는 경우에 대한 폴백
-                    pass
-
+            print("[SELL] '선택 종목 매도' 버튼 클릭됨. 매도 거래 처리 시작...")
             # st.session_state에서 폼 데이터 가져오기
-            editor_state = st.session_state[f"sell_editor_{country_code_inner}"]
+            print("[SELL] 1/2: 사용자가 선택한 종목 확인...")
+            editor_state = st.session_state[f"sell_editor_{account_prefix}"]
 
             # data_editor에서 선택된 행의 인덱스를 찾습니다.
             selected_indices = [
@@ -838,37 +890,51 @@ def render_country_tab(country_code: str):
                 return
 
             selected_rows = df_holdings.loc[selected_indices]
+            print(f"[SELL] 선택된 종목: {len(selected_rows)}개")
+
+            # 거래 시간은 한 번만 가져옵니다.
+            trade_time = datetime.now()
+            if pytz:
+                try:
+                    korea_tz = pytz.timezone("Asia/Seoul")
+                    trade_time = datetime.now(korea_tz).replace(tzinfo=None)
+                except pytz.UnknownTimeZoneError:
+                    pass
 
             success_count = 0
-            for _, row in selected_rows.iterrows():
-                trade_data = {
-                    "country": country_code_inner,
-                    "date": trade_time,
-                    "ticker": row["ticker"],
-                    "name": row["name"],
-                    "action": "SELL",
-                    "shares": row["shares"],
-                    "price": row["price"],
-                    "note": "Manual sell from web app",
-                }
-                if save_trade(trade_data):
-                    success_count += 1
+            print("[SELL] 2/2: 선택된 각 종목에 대한 매도 거래 내역 생성 및 저장...")
+            with st.spinner("선택한 종목의 매도 거래를 저장하는 중..."):
+                for i, (_, row) in enumerate(selected_rows.iterrows()):
+                    print(f"  - 처리 중 ({i + 1}/{len(selected_rows)}): {row['ticker']}")
+                    trade_data = {
+                        "country": country_code_inner,
+                        "account": account_code,
+                        "date": trade_time,
+                        "ticker": row["ticker"],
+                        "name": row["name"],
+                        "action": "SELL",
+                        "shares": row["shares"],
+                        "note": "",
+                    }
+                    if save_trade(trade_data):
+                        success_count += 1
+            print("[SELL] 매도 거래 저장 완료.")
 
+            # --- 결과 메시지 처리 ---
             if success_count == len(selected_rows):
                 st.session_state[message_key] = (
                     "success",
                     f"{success_count}개 종목의 매도 거래가 성공적으로 저장되었습니다.",
                 )
             else:
-                st.session_state[message_key] = (
-                    "error",
-                    "일부 거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.",
-                )
+                st.session_state[message_key] = ("error", "일부 거래 저장에 실패했습니다.")
+
+            print("[SELL] 매도 거래 처리 완료.")
 
         # 다이얼로그 내에서 오류/경고 메시지만 표시합니다.
         if message_key in st.session_state:
             msg_type, msg_text = st.session_state[message_key]
-            if msg_type == "success":
+            if msg_type != "success":
                 if msg_type == "warning":
                     st.warning(msg_text)
                 else:
@@ -876,25 +942,16 @@ def render_country_tab(country_code: str):
                 # 메시지는 한 번만 표시되도록 세션에서 제거합니다.
                 del st.session_state[message_key]
 
-        with st.form(f"sell_form_{country_code_inner}"):
+        with st.form(f"sell_form_{account_prefix}"):
             st.subheader("매도할 종목을 선택하세요 (전체 매도)")
 
             df_holdings["선택"] = False
-            # 정렬이 필요한 컬럼은 숫자형으로 유지하고, column_config에서 포맷팅합니다.
-            # 이렇게 하면 '평가금액' 등에서 문자열이 아닌 숫자 기준으로 올바르게 정렬됩니다.
-            df_display = df_holdings[
-                ["선택", "name", "ticker", "shares", "return_pct", "value", "price"]
-            ].copy()
-            value_col_name = f"평가금액{currency_str}"
-            price_col_name = f"현재가{currency_str}"
+            df_display = df_holdings[["선택", "name", "ticker", "shares"]].copy()
             df_display.rename(
                 columns={
                     "name": "종목명",
                     "ticker": "티커",
                     "shares": "보유수량",
-                    "return_pct": "수익률",
-                    "value": value_col_name,
-                    "price": price_col_name,
                 },
                 inplace=True,
             )
@@ -903,45 +960,41 @@ def render_country_tab(country_code: str):
                 df_display,
                 hide_index=True,
                 width="stretch",
-                key=f"sell_editor_{country_code_inner}",
-                disabled=[
-                    "종목명",
-                    "티커",
-                    "보유수량",
-                    value_col_name,
-                    "수익률",
-                    price_col_name,
-                ],
+                key=f"sell_editor_{account_prefix}",
+                disabled=["종목명", "티커", "보유수량"],
                 column_config={
                     "선택": st.column_config.CheckboxColumn("삭제", required=True),
                     "보유수량": st.column_config.NumberColumn(format="%.8f"),
-                    "수익률": st.column_config.NumberColumn(
-                        format="%.2f%%",
-                    ),
-                    value_col_name: st.column_config.NumberColumn(
-                        # 쉼표(,)를 포맷에 추가하여 3자리마다 구분자를 표시합니다.
-                        format="%,.0f" if country_code_inner == "kor" else "%,.2f"
-                    ),
-                    price_col_name: st.column_config.NumberColumn(
-                        format="%.4f" if country_code_inner == "aus" else "%d"
-                    ),
                 },
             )
 
             st.form_submit_button("선택 종목 매도", on_click=on_sell_submit)
 
-    _display_success_toast(country_code)
+    _display_success_toast(account_prefix)
 
-    sub_tab_names = ["현황", "평가금액", "트레이드", "종목 관리", "설정"]
+    sub_tab_names = ["시그널", "평가금액", "트레이드"]
     (
-        sub_tab_status,
+        sub_tab_signal,
         sub_tab_equity_history,
         sub_tab_trades,
-        sub_tab_etf_management,
-        sub_tab_settings,
     ) = st.tabs(sub_tab_names)
 
-    raw_dates = get_available_snapshot_dates(country_code)
+    # 계좌 시작일 및 거래일 정보를 사용하여 날짜 선택 옵션을 필터링합니다.
+    account_settings = get_account_settings(account_code)
+    initial_date = None
+    if account_settings and account_settings.get("initial_date"):
+        try:
+            initial_date = pd.to_datetime(account_settings["initial_date"]).normalize()
+        except (ValueError, TypeError):
+            pass
+
+    print(f"[{country_code.upper()}/{account_code}] 날짜 선택 옵션 준비 시작...")
+    start_time_snapshots = time.time()
+    raw_dates = get_available_snapshot_dates(country_code, account=account_code)
+    duration_snapshots = time.time() - start_time_snapshots
+    print(
+        f"[{country_code.upper()}/{account_code}] 사용 가능한 스냅샷 날짜 {len(raw_dates)}개 조회 완료. ({duration_snapshots:.2f}초)"
+    )
     sorted_dates = sorted(set(raw_dates), reverse=True)
 
     if country_code == "coin":
@@ -949,13 +1002,35 @@ def render_country_tab(country_code: str):
     else:
         local_now = _get_local_now(country_code)
         today_ts = pd.Timestamp(local_now) if local_now else pd.Timestamp.now()
+
     today_str = pd.Timestamp(today_ts.date()).strftime("%Y-%m-%d")
     target_date_str = _get_status_target_date_str(country_code)
+    print(f"[{country_code.upper()}/{account_code}] 대상 날짜 결정: {target_date_str}")
 
     date_options: List[str] = []
     for candidate in [target_date_str] + sorted_dates:
         if candidate and candidate not in date_options:
             date_options.append(candidate)
+
+    # 휴장일 필터링 (코인 제외)
+    if country_code != "coin":
+        print(f"[{country_code.upper()}/{account_code}] 휴장일 필터링 시작...")
+        start_time_filter = time.time()
+        if date_options:  # noqa: SIM102
+            # 전체 기간에 대한 거래일을 한 번에 조회하여 성능을 최적화합니다.
+            if prefetched_trading_days is not None:
+                trading_day_set = {d.strftime("%Y-%m-%d") for d in prefetched_trading_days}
+                date_options = [d for d in date_options if d in trading_day_set]
+            else:  # 폴백
+                min_date = min(date_options)
+                max_date = max(date_options)
+                all_trading_days_in_range = get_trading_days(min_date, max_date, country_code)
+                trading_day_set = {d.strftime("%Y-%m-%d") for d in all_trading_days_in_range}
+                date_options = [d for d in date_options if d in trading_day_set]
+        duration_filter = time.time() - start_time_filter
+        print(
+            f"[{country_code.upper()}/{account_code}] 휴장일 필터링 완료. 유효 날짜 {len(date_options)}개. ({duration_filter:.2f}초)"
+        )
 
     option_labels: Dict[str, str] = {}
     if date_options:
@@ -969,24 +1044,43 @@ def render_country_tab(country_code: str):
             if today_str in date_options and today_str != target_date_str:
                 option_labels.setdefault(today_str, f"{today_str} (오늘)")
 
-    with sub_tab_status:
+    print(f"[{country_code.upper()}/{account_code}] 날짜 선택 옵션 준비 완료.")
+
+    with sub_tab_signal:
+        print(f"[{country_code.upper()}/{account_code}] '시그널' 탭 렌더링 시작...")
         if not date_options:
-            st.warning(
-                f"[{country_code.upper()}] 국가의 포트폴리오 데이터를 DB에서 찾을 수 없습니다."
-            )
-            st.info("먼저 '거래 입력' 버튼을 통해 거래 내역을 추가해주세요.")
+            # 데이터가 DB에 있지만 필터링되어 표시할 것이 없는 경우와,
+            # DB에 데이터가 아예 없는 경우를 구분하여 메시지를 표시합니다.
+            if not sorted_dates:
+                st.warning(f"[{country_code.upper()}] 국가의 포트폴리오 데이터를 DB에서 찾을 수 없습니다.")
+                if country_code != "coin":
+                    st.info("먼저 '거래 입력' 버튼을 통해 거래 내역을 추가해주세요.")
+                else:
+                    # 코인은 빗썸 동기화를 통해 거래 내역이 생성되므로, 그에 맞는 안내를 제공합니다.
+                    st.info("빗썸 거래내역 동기화가 필요할 수 있습니다.")
+            else:
+                st.warning(f"[{country_code.upper()}] 표시에 유효한 시그널 데이터가 없습니다.")
+                st.info("DB에 미래 날짜 또는 거래일이 아닌 날짜의 데이터만 존재할 수 있습니다.")
         else:
             selected_date_str = st.selectbox(
                 "조회 날짜",
                 date_options,
                 format_func=lambda d: option_labels.get(d, d),
-                key=f"status_date_select_{country_code}",
+                key=f"signal_date_select_{account_prefix}",
             )
+            print(f"[{country_code.upper()}/{account_code}] 선택된 날짜: {selected_date_str}")
 
-            result = get_cached_status_report(
+            print(f"[{country_code.upper()}/{account_code}] 시그널 리포트 조회 시작 (DB 캐시)...")
+            start_time_signal = time.time()
+            result = get_cached_signal_report(
                 country=country_code,
-                date_str=selected_date_str,
+                account=account_code,
+                date_str=selected_date_str,  # type: ignore
                 force_recalculate=False,
+            )
+            duration_signal = time.time() - start_time_signal
+            print(
+                f"[{country_code.upper()}/{account_code}] 시그널 리포트 조회 완료. (결과: {'있음' if result else '없음'}) ({duration_signal:.2f}초)"
             )
 
             if result:
@@ -1010,7 +1104,7 @@ def render_country_tab(country_code: str):
 
                 if rows and headers and len(rows[0]) != len(headers):
                     st.error(
-                        f"데이터 형식 오류: 현황 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '다시 계산'을 시도해주세요."
+                        f"데이터 형식 오류: 시그널 리포트의 컬럼 수({len(headers)})와 데이터 수({len(rows[0])})가 일치하지 않습니다. '다시 계산'을 시도해주세요."
                     )
                     st.write("- 헤더:", headers)
                     st.write("- 첫 번째 행 데이터:", rows[0])
@@ -1019,18 +1113,72 @@ def render_country_tab(country_code: str):
                     _display_status_report_df(df, country_code)
                     if warning_html:
                         st.markdown(warning_html, unsafe_allow_html=True)
-                    benchmark_str = get_cached_benchmark_status(country_code, selected_date_str)
-                    if benchmark_str:
-                        st.markdown(
-                            f'<div style="text-align: left; padding-top: 0.5rem;">{benchmark_str}</div>',
-                            unsafe_allow_html=True,
-                        )
+                # --- 벤치마크 비교 테이블 렌더링 ---
+                print(f"[{country_code.upper()}/{account_code}] 벤치마크 비교 데이터 조회 시작...")
+                start_time_benchmark = time.time()
+                benchmark_results = get_cached_benchmark_comparison(
+                    country_code, selected_date_str, account=account_code  # type: ignore
+                )
+                duration_benchmark = time.time() - start_time_benchmark
+                print(
+                    f"[{country_code.upper()}/{account_code}] 벤치마크 비교 데이터 조회 완료. ({duration_benchmark:.2f}초)"
+                )
+                if benchmark_results:
+                    data_for_df = []
+                    for res in benchmark_results:
+                        if res.get("error"):
+                            data_for_df.append(
+                                {
+                                    "티커": res.get("ticker", "-"),
+                                    "벤치마크": res["name"],
+                                    "누적수익률": res["error"],
+                                    "초과수익률": "-",
+                                }
+                            )
+                        else:
+                            # header_line에서 실제 누적 수익률을 파싱하여 사용합니다.
+                            # calculate_benchmark_comparison가 코인에 대해 잘못된 값을 반환하는 문제를 해결합니다.
+                            portfolio_cum_ret_pct = None
+                            if header_line:
+                                try:
+                                    # "누적: <span...>{+4.56}%...</span>" 형태에서 숫자 부분을 추출
+                                    cum_ret_segment = [
+                                        s for s in header_line.split("|") if "누적:" in s
+                                    ][0]
+                                    cum_ret_str = cum_ret_segment.split("%")[0].split("</span>")[-1]
+                                    portfolio_cum_ret_pct = float(cum_ret_str)
+                                except (IndexError, ValueError):
+                                    pass  # 파싱 실패 시 기존 로직으로 폴백
+
+                            excess_return_pct = res["excess_return_pct"]
+                            if portfolio_cum_ret_pct is not None:
+                                excess_return_pct = portfolio_cum_ret_pct - res["cum_ret_pct"]
+
+                            data_for_df.append(
+                                {
+                                    "티커": res.get("ticker", "-"),
+                                    "벤치마크": res["name"],
+                                    "누적수익률": res["cum_ret_pct"],
+                                    "초과수익률": excess_return_pct,
+                                }
+                            )
+                    df_benchmark = pd.DataFrame(data_for_df)
+                    st.dataframe(
+                        df_benchmark,
+                        hide_index=True,
+                        width="stretch",
+                        column_config={
+                            "티커": st.column_config.TextColumn("티커"),
+                            "누적수익률": st.column_config.NumberColumn(format="%.2f%%"),
+                            "초과수익률": st.column_config.NumberColumn(format="%+.2f%%"),
+                        },
+                    )
             else:
                 if selected_date_str == target_date_str:
                     next_run_time_str = get_next_schedule_time_str(country_code)
                     st.info(
                         f"""
-    **{selected_date_str}** 날짜의 현황 데이터가 아직 계산되지 않았습니다.
+    **{selected_date_str}** 날짜의 매매 신호가 아직 계산되지 않았습니다.
 
     스케줄러에 의해 자동으로 계산될 예정입니다.
 
@@ -1038,53 +1186,203 @@ def render_country_tab(country_code: str):
     """
                     )
                 else:
-                    st.info(f"'{selected_date_str}' 날짜의 현황 데이터가 없습니다.")
+                    st.info(f"'{selected_date_str}' 날짜의 매매 신호 데이터가 없습니다.")
 
             if st.button(
                 "이 날짜 다시 계산하기",
-                key=f"recalc_status_{country_code}_{selected_date_str}",
+                key=f"recalc_signal_{account_prefix}_{selected_date_str}",
             ):
-                with st.spinner(f"'{selected_date_str}' 기준 현황 데이터를 계산/저장 중..."):
-                    calc_result = get_cached_status_report(
+                with st.spinner(f"'{selected_date_str}' 기준 매매 신호를 계산/저장 중..."):
+                    calc_result = get_cached_signal_report(
                         country=country_code,
-                        date_str=selected_date_str,
+                        account=account_code,
+                        date_str=selected_date_str,  # type: ignore
                         force_recalculate=True,
                     )
                 if calc_result:
                     st.success("재계산 완료!")
                     st.rerun()
 
-    with sub_tab_equity_history:
-
-        app_settings = get_app_settings(country_code)
-        initial_date = (app_settings.get("initial_date") if app_settings else None) or (
-            datetime.now() - pd.DateOffset(months=3)
-        )
-
-        currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
-
-        start_date_str = initial_date.strftime("%Y-%m-%d")
-        end_date_str = datetime.now().strftime("%Y-%m-%d")
-
-        with st.spinner("거래일 및 평가금액 데이터를 불러오는 중..."):
-            all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
-            if (
-                not all_trading_days
-                and country_code
-                == "kor"  # 호주는 yfinance가 주말을 건너뛰므로 거래일 조회가 필수는 아님
-            ):
-                st.warning("거래일을 조회할 수 없습니다.")
+        with st.expander("계좌 설정"):
+            if not account_code:
+                st.info("활성 계좌가 없습니다. 계좌를 등록한 후 설정을 변경할 수 있습니다.")
+                db_settings = {}
             else:
+                db_settings = get_account_settings(account_code)
+                if not db_settings:
+                    st.info("해당 계좌에 저장된 설정이 없습니다. 값을 입력 후 저장하면 계좌별 설정이 생성됩니다.")
+                    db_settings = {}
+
+            current_capital = db_settings.get("initial_capital", 0)
+            current_topn = db_settings.get("portfolio_topn")
+            current_ma = db_settings.get("ma_period")
+            current_replace_threshold = db_settings.get("replace_threshold")
+            current_replace_weaker = db_settings.get("replace_weaker_stock")
+
+            test_months_range = 12  # Default value
+            default_date = pd.Timestamp.now() - pd.DateOffset(months=test_months_range)
+            current_date = db_settings.get("initial_date", default_date)
+
+            with st.form(key=f"settings_form_{account_prefix}"):
+                currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
+
+                new_capital = st.number_input(
+                    f"초기 자본금 (INITIAL_CAPITAL){currency_str}",
+                    value=float(current_capital) if country_code == "aus" else int(current_capital),
+                    format="%.2f" if country_code == "aus" else "%d",
+                    help="포트폴리오의 시작 자본금을 설정합니다. 누적 수익률 계산의 기준이 됩니다.",
+                )
+
+                new_date = st.date_input(
+                    "초기 자본 기준일 (INITIAL_DATE)",
+                    value=current_date,
+                    help="초기 자본금이 투입된 날짜를 설정합니다.",
+                )
+
+                if current_topn is None:
+                    st.warning("최대 보유 종목 수(PORTFOLIO_TOPN)를 설정해주세요.")
+
+                new_topn_str = st.text_input(
+                    "최대 보유 종목 수 (PORTFOLIO_TOPN)",
+                    value=str(current_topn) if current_topn is not None else "",
+                    placeholder="예: 10",
+                    help="포트폴리오에서 최대로 보유할 종목의 개수를 설정합니다.",
+                )
+
+                st.markdown("---")
+                st.subheader("전략 파라미터")
+
+                if current_ma is None:
+                    st.warning("이동평균 기간(MA_PERIOD)을 설정해주세요.")
+                new_ma_str = st.text_input(
+                    "이동평균 기간 (MA_PERIOD)",
+                    value=str(current_ma) if current_ma is not None else "75",
+                    placeholder="예: 15",
+                    help="종목의 추세 판단에 사용될 이동평균 기간입니다.",
+                )
+
+                # 교체 매매 사용 여부 (bool)
+                replace_weaker_checkbox = st.checkbox(
+                    "교체 매매 사용 (REPLACE_WEAKER_STOCK)",
+                    value=(
+                        bool(current_replace_weaker)
+                        if current_replace_weaker is not None
+                        else False
+                    ),
+                    help="포트폴리오가 가득 찼을 때, 더 강한 후보가 있을 경우 약한 보유종목을 교체할지 여부",
+                )
+
+                # 교체 매매 임계값 설정 (DB에서 관리)
+                new_replace_threshold_str = st.text_input(
+                    "교체 매매 점수 임계값 (REPLACE_SCORE_THRESHOLD)",
+                    value=(
+                        "{:.2f}".format(float(current_replace_threshold))
+                        if current_replace_threshold is not None
+                        else ""
+                    ),
+                    placeholder="예: 1.5",
+                    help="교체 매매 실행 조건: 새 후보 점수가 기존 보유 점수보다 이 값만큼 높을 때 교체.",
+                )
+
+                save_settings_submitted = st.form_submit_button("설정 저장하기")
+
+                if save_settings_submitted:
+                    error = False
+                    if not new_topn_str or not new_topn_str.isdigit() or int(new_topn_str) < 1:
+                        st.error("최대 보유 종목 수는 1 이상의 숫자여야 합니다.")
+                        error = True
+                    if not new_ma_str or not new_ma_str.isdigit() or int(new_ma_str) < 1:
+                        st.error("이동평균 기간은 1 이상의 숫자여야 합니다.")
+                        error = True
+                    # replace_threshold 검증 (float 가능 여부)
+                    try:
+                        _ = float(new_replace_threshold_str)
+                    except Exception:
+                        st.error("교체 매매 점수 임계값은 숫자여야 합니다.")
+                        error = True
+
+                    if not error:
+                        new_topn = int(new_topn_str)
+                        new_ma = int(new_ma_str)
+                        new_replace_threshold = float(new_replace_threshold_str)
+                        settings_to_save = {
+                            "country": country_code,
+                            "initial_capital": new_capital,
+                            "initial_date": pd.to_datetime(new_date).to_pydatetime(),
+                            "portfolio_topn": new_topn,
+                            "ma_period": new_ma,
+                            "replace_weaker_stock": bool(replace_weaker_checkbox),
+                            "replace_threshold": new_replace_threshold,
+                        }
+                        success = save_portfolio_settings(
+                            country_code, settings_to_save, account=account_code
+                        )
+
+                        if success:
+                            st.success("설정이 성공적으로 저장되었습니다.")
+                            st.rerun()
+                        else:
+                            st.error("설정 저장에 실패했습니다.")
+
+    with sub_tab_equity_history:
+        if not account_code:
+            st.info("활성 계좌가 없습니다. 계좌를 등록한 후 이용해주세요.")
+        else:
+            account_settings = get_account_settings(account_code)
+            if not account_settings:
+                st.warning(f"'{account_code}' 계좌의 설정을 찾을 수 없습니다. 설정을 먼저 저장해주세요.")
+                account_settings = {}
+
+            initial_date = (account_settings.get("initial_date") if account_settings else None) or (
+                datetime.now() - pd.DateOffset(months=3)
+            )
+
+            currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
+
+            start_date_str = initial_date.strftime("%Y-%m-%d")
+
+            # 조회 종료일을 오늘과 DB에 저장된 최신 스냅샷 날짜 중 더 미래의 날짜로 설정합니다.
+            # 이를 통해 미래 날짜로 백테스트/시그널조회한 데이터도 평가금액 탭에 표시될 수 있습니다.
+            end_dt_candidates = [pd.Timestamp.now()]
+            if sorted_dates:
+                try:
+                    latest_snapshot_dt = pd.to_datetime(sorted_dates[0])
+                    end_dt_candidates.append(latest_snapshot_dt)
+                except (ValueError, TypeError):
+                    pass
+
+            final_end_dt = max(end_dt_candidates)
+            end_date_str = final_end_dt.strftime("%Y-%m-%d")
+
+            with st.spinner("거래일 및 평가금액 데이터를 불러오는 중..."):
+                if prefetched_trading_days is not None:
+                    start_dt = pd.to_datetime(start_date_str).normalize()
+                    end_dt = pd.to_datetime(end_date_str).normalize()
+                    all_trading_days = [
+                        d for d in prefetched_trading_days if start_dt <= d <= end_dt
+                    ]
+                else:
+                    all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
+                trading_day_set = set()
+                if not all_trading_days:
+                    if country_code == "kor":
+                        st.warning("거래일을 조회할 수 없습니다.")
+                else:
+                    trading_day_set = {pd.to_datetime(day).normalize() for day in all_trading_days}
+
                 start_dt_obj = pd.to_datetime(start_date_str).to_pydatetime()
                 end_dt_obj = pd.to_datetime(end_date_str).to_pydatetime()
-                existing_equities = get_all_daily_equities(country_code, start_dt_obj, end_dt_obj)
+                existing_equities = get_all_daily_equities(
+                    country_code, account_code, start_dt_obj, end_dt_obj
+                )
                 equity_data_map = {
                     pd.to_datetime(e["date"]).normalize(): e for e in existing_equities
                 }
 
-                # 거래일 조회가 실패한 경우(예: 호주), DB에 있는 날짜만 사용
-                if not all_trading_days:
-                    all_trading_days = sorted(list(equity_data_map.keys()))
+                db_day_set = set(equity_data_map.keys())
+                combined_days = sorted(trading_day_set.union(db_day_set))
+
+                all_trading_days = combined_days
 
                 data_for_editor = []
                 for trade_date in all_trading_days:
@@ -1129,17 +1427,17 @@ def render_country_tab(country_code: str):
 
                 edited_df = st.data_editor(
                     df_to_edit,
-                    key=f"equity_editor_{country_code}",
+                    key=f"equity_editor_{account_prefix}",
                     width="stretch",
                     hide_index=True,
                     column_config=column_config,
                 )
 
-                if st.button("평가금액 저장하기", key=f"save_all_equities_{country_code}"):
+                if st.button("평가금액 저장하기", key=f"save_all_equities_{account_prefix}"):
                     with st.spinner("변경된 평가금액을 저장하는 중..."):
                         # st.data_editor의 변경 사항은 세션 상태에 저장됩니다.
                         # 전체 데이터프레임을 순회하는 대신, 변경된 행만 처리하여 불필요한 DB 업데이트를 방지합니다.
-                        editor_state = st.session_state[f"equity_editor_{country_code}"]
+                        editor_state = st.session_state[f"equity_editor_{account_prefix}"]
                         edited_rows = editor_state.get("edited_rows", {})
 
                         saved_count = 0
@@ -1155,295 +1453,224 @@ def render_country_tab(country_code: str):
                             is_data_to_save = None
                             if country_code == "aus":
                                 is_data_to_save = {
-                                    "value": changes.get("is_value", original_row["is_value"]),
+                                    "value": changes.get("is_value", original_row.get("is_value")),
                                     "change_pct": changes.get(
                                         "is_change_pct",
-                                        original_row["is_change_pct"],
+                                        original_row.get("is_change_pct"),
                                     ),
                                 }
 
                             if save_daily_equity(
                                 country_code,
+                                account_code,
                                 date_to_save,
                                 equity_to_save,
                                 is_data_to_save,
                                 updated_by="사용자",
                             ):
                                 saved_count += 1
-                        if saved_count > 0:
-                            st.success(f"{saved_count}개 날짜의 평가금액을 업데이트했습니다.")
-                            st.rerun()
-                        else:
-                            st.info("변경된 내용이 없어 저장하지 않았습니다.")
+                            if saved_count > 0:
+                                st.success(f"{saved_count}개 날짜의 평가금액을 업데이트했습니다.")
+                                st.rerun()
+                            else:
+                                st.info("변경된 내용이 없어 저장하지 않았습니다.")
 
     with sub_tab_trades:
-        # 코인 탭: 거래 입력 대신 보유 현황/데이터 편집만 제공 (동기화 버튼 제거)
+        # 코인 탭: 거래 입력 대신 보유 시그널/데이터 편집만 제공 (동기화 버튼 제거)
         if country_code == "coin":
             pass
 
         if country_code != "coin":
             col1, col2, _ = st.columns([1, 1, 8])
             with col1:
-                if st.button("BUY", key=f"add_buy_btn_{country_code}"):
+                if st.button("BUY", key=f"add_buy_btn_{account_prefix}"):
                     show_buy_dialog(country_code)
             with col2:
-                if st.button("SELL", key=f"add_sell_btn_{country_code}"):
-                    show_sell_dialog(country_code)
+                if st.button("SELL", key=f"add_sell_btn_{account_prefix}"):
+                    with st.spinner("보유 종목 데이터를 불러오는 중..."):
+                        holdings_for_dialog = _load_data_for_sell_dialog()
+                    show_sell_dialog(country_code, holdings_for_dialog)
 
-        all_trades = get_all_trades(country_code)
+        # 항상 모든 거래(삭제된 항목 포함)를 가져옵니다.
+        all_trades = get_all_trades(country_code, account_code, include_deleted=True)
         if not all_trades:
             st.info("거래 내역이 없습니다.")
         else:
             df_trades = pd.DataFrame(all_trades)
             # 코인 전용: 티커 필터(ALL 포함)
             if country_code == "coin" and "ticker" in df_trades.columns:
-                unique_tickers = sorted(
-                    {str(t).upper() for t in df_trades["ticker"].dropna().tolist()}
-                )
+                unique_tickers = sorted({str(t).upper() for t in df_trades["ticker"].dropna()})
                 options = ["ALL"] + unique_tickers
                 selected = st.selectbox(
-                    "티커 필터",
-                    options,
-                    index=0,
-                    key=f"coin_trades_filter_{country_code}",
+                    "티커 필터", options, key=f"coin_trades_filter_{account_prefix}"
                 )
                 if selected != "ALL":
                     df_trades = df_trades[df_trades["ticker"].str.upper() == selected]
 
-            # 금액(수량*가격) 계산: 정수, 천단위 콤마
-            try:
-                amt = pd.to_numeric(df_trades.get("shares"), errors="coerce").fillna(
-                    0.0
-                ) * pd.to_numeric(df_trades.get("price"), errors="coerce").fillna(0.0)
-                df_trades["amount"] = (
-                    amt.round(0)
-                    .astype("Int64")
-                    .fillna(0)
-                    .astype(object)
-                    .apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
-                )
-            except Exception:
-                df_trades["amount"] = "0"
-
-            # 삭제 선택을 위한 컬럼 추가
-            df_trades["delete"] = False
+            # 선택 컬럼 및 삭제 상태 컬럼 추가
+            df_trades["선택"] = False
+            df_trades["삭제"] = df_trades["is_deleted"].apply(lambda x: "삭제" if x else "")
 
             # 표시할 컬럼 순서 정의
-            # 기록시간 대신 거래시간(빗썸 시간, 'date')을 우선 표시합니다.
             cols_to_show = [
-                "delete",
+                "선택",
                 "date",
                 "action",
                 "ticker",
                 "name",
                 "shares",
                 "price",
-                "amount",
                 "note",
+                "updated_at",
+                "삭제",
                 "id",
             ]
-            # reindex를 사용하여 이전 데이터에 'created_at'이 없어도 오류가 발생하지 않도록 합니다.
             df_display = df_trades.reindex(columns=cols_to_show).copy()
 
             # 날짜 및 시간 포맷팅
             df_display["date"] = pd.to_datetime(df_display["date"], errors="coerce").dt.strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
+            if "updated_at" in df_display.columns:
+                df_display["updated_at"] = pd.to_datetime(
+                    df_display["updated_at"], errors="coerce"
+                ).dt.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                df_display["updated_at"] = "-"
 
             edited_df = st.data_editor(
                 df_display,
-                key=f"trades_editor_{country_code}",
+                key=f"trades_editor_{account_prefix}",
                 hide_index=True,
                 width="stretch",
                 column_config={
-                    "delete": st.column_config.CheckboxColumn("삭제", required=True),
+                    "선택": st.column_config.CheckboxColumn("선택", required=True),
                     "id": None,  # ID 컬럼은 숨김
-                    "date": st.column_config.TextColumn("거래시간"),
-                    "action": st.column_config.TextColumn("종류"),
-                    "ticker": st.column_config.TextColumn("티커"),
-                    "name": st.column_config.TextColumn("종목명", width="medium"),
+                    "date": st.column_config.TextColumn("거래시간", disabled=True),
+                    "updated_at": st.column_config.TextColumn("수정일시", disabled=True),
+                    "action": st.column_config.TextColumn("종류", disabled=True),
+                    "삭제": st.column_config.TextColumn("삭제", disabled=True),
+                    "ticker": st.column_config.TextColumn("티커", disabled=True),
+                    "name": st.column_config.TextColumn("종목명", width="medium", disabled=True),
                     "shares": st.column_config.NumberColumn(
-                        "수량", format="%.8f" if country_code in ["coin"] else "%.0f"
+                        "수량",
+                        format=(
+                            "%.8f"
+                            if country_code == "coin"
+                            else ("%.4f" if country_code == "aus" else "%.0f")
+                        ),
                     ),
                     "price": st.column_config.NumberColumn(
                         "가격", format="%.4f" if country_code == "aus" else "%d"
                     ),
-                    "amount": st.column_config.NumberColumn("금액", format="%.0f"),
                     "note": st.column_config.TextColumn("비고", width="large"),
                 },
-                disabled=[
-                    "date",
-                    "action",
-                    "ticker",
-                    "name",
-                    "shares",
-                    "price",
-                    "amount",
-                    "note",
-                ],
+                disabled=["date", "action", "ticker", "name", "updated_at", "삭제"],
             )
 
-            if st.button(
-                "선택한 거래 삭제",
-                key=f"delete_trade_btn_{country_code}",
-                type="primary",
-            ):
-                trades_to_delete = edited_df[edited_df["delete"]]
-                if not trades_to_delete.empty:
-                    with st.spinner(f"{len(trades_to_delete)}개의 거래를 삭제하는 중..."):
-                        deleted_count = 0
-                        for trade_id in trades_to_delete["id"]:
-                            if delete_trade_by_id(trade_id):
-                                deleted_count += 1
-
-                        st.success(f"{deleted_count}개의 거래를 성공적으로 삭제했습니다.")
-                        st.rerun()
-                else:
-                    st.warning("삭제할 거래를 선택해주세요.")
-
-    with sub_tab_etf_management:
-        with st.spinner("종목 마스터 데이터를 불러오는 중..."):
-            render_master_etf_ui(country_code)
-
-    with sub_tab_settings:
-        # 1. DB에서 현재 설정값 로드
-        db_settings = get_app_settings(country_code)
-        current_capital = db_settings.get("initial_capital", 0) if db_settings else 0
-        current_topn = db_settings.get("portfolio_topn") if db_settings else None
-        current_ma = db_settings.get("ma_period") if db_settings else None
-        current_replace_threshold = db_settings.get("replace_threshold") if db_settings else None
-        current_replace_weaker = db_settings.get("replace_weaker_stock") if db_settings else None
-        current_max_replacements = (
-            db_settings.get("max_replacements_per_day") if db_settings else None
-        )
-
-        test_months_range = 12  # Default value
-        default_date = pd.Timestamp.now() - pd.DateOffset(months=test_months_range)
-        current_date = (
-            db_settings.get("initial_date", default_date) if db_settings else default_date
-        )
-
-        with st.form(key=f"settings_form_{country_code}"):
-            currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
-
-            new_capital = st.number_input(
-                f"초기 자본금 (INITIAL_CAPITAL){currency_str}",
-                value=float(current_capital) if country_code == "aus" else int(current_capital),
-                format="%.2f" if country_code == "aus" else "%d",
-                help="포트폴리오의 시작 자본금을 설정합니다. 누적 수익률 계산의 기준이 됩니다.",
-            )
-
-            new_date = st.date_input(
-                "초기 자본 기준일 (INITIAL_DATE)",
-                value=current_date,
-                help="초기 자본금이 투입된 날짜를 설정합니다.",
-            )
-
-            if current_topn is None:
-                st.warning("최대 보유 종목 수(PORTFOLIO_TOPN)를 설정해주세요.")
-
-            new_topn_str = st.text_input(
-                "최대 보유 종목 수 (PORTFOLIO_TOPN)",
-                value=str(current_topn) if current_topn is not None else "",
-                placeholder="예: 10",
-                help="포트폴리오에서 최대로 보유할 종목의 개수를 설정합니다.",
-            )
-
-            st.markdown("---")
-            st.subheader("전략 파라미터")
-
-            if current_ma is None:
-                st.warning("이동평균 기간(MA_PERIOD)을 설정해주세요.")
-            new_ma_str = st.text_input(
-                "이동평균 기간 (MA_PERIOD)",
-                value=str(current_ma) if current_ma is not None else "75",
-                placeholder="예: 15",
-                help="종목의 추세 판단에 사용될 이동평균 기간입니다.",
-            )
-
-            # 교체 매매 사용 여부 (bool)
-            replace_weaker_checkbox = st.checkbox(
-                "교체 매매 사용 (REPLACE_WEAKER_STOCK)",
-                value=bool(current_replace_weaker) if current_replace_weaker is not None else False,
-                help="포트폴리오가 가득 찼을 때, 더 강한 후보가 있을 경우 약한 보유종목을 교체할지 여부",
-            )
-
-            # 하루 최대 교체 수
-            max_replacements_str = st.text_input(
-                "하루 최대 교체 수 (MAX_REPLACEMENTS_PER_DAY)",
-                value=str(current_max_replacements) if current_max_replacements is not None else "",
-                placeholder="예: 5",
-                help="하루에 실행할 수 있는 교체 매매의 최대 종목 수",
-            )
-
-            # 교체 매매 임계값 설정 (DB에서 관리)
-            new_replace_threshold_str = st.text_input(
-                "교체 매매 점수 임계값 (REPLACE_SCORE_THRESHOLD)",
-                value=(
-                    "{:.2f}".format(float(current_replace_threshold))
-                    if current_replace_threshold is not None
-                    else ""
-                ),
-                placeholder="예: 1.5",
-                help="교체 매매 실행 조건: 새 후보 점수가 기존 보유 점수보다 이 값만큼 높을 때 교체.",
-            )
-
-            # 코인 전용 임포트 기간 설정 제거됨 (트레이드 동기화 폐지)
-
-            save_settings_submitted = st.form_submit_button("설정 저장하기")
-
-            if save_settings_submitted:
-                error = False
-                if not new_topn_str or not new_topn_str.isdigit() or int(new_topn_str) < 1:
-                    st.error("최대 보유 종목 수는 1 이상의 숫자여야 합니다.")
-                    error = True
-                if not new_ma_str or not new_ma_str.isdigit() or int(new_ma_str) < 1:
-                    st.error("이동평균 기간은 1 이상의 숫자여야 합니다.")
-                    error = True
-                # max_replacements_per_day 검증 (정수 >= 0)
-                if (
-                    not max_replacements_str
-                    or not max_replacements_str.isdigit()
-                    or int(max_replacements_str) < 0
-                ):
-                    st.error("하루 최대 교체 수는 0 이상의 정수여야 합니다.")
-                    error = True
-                # replace_threshold 검증 (float 가능 여부)
-                try:
-                    _ = float(new_replace_threshold_str)
-                except Exception:
-                    st.error("교체 매매 점수 임계값은 숫자여야 합니다.")
-                    error = True
-
-                if not error:
-                    new_topn = int(new_topn_str)
-                    new_ma = int(new_ma_str)
-                    new_max_replacements = int(max_replacements_str)
-                    new_replace_threshold = float(new_replace_threshold_str)
-                    settings_to_save = {
-                        "country": country_code,
-                        "initial_capital": new_capital,
-                        "initial_date": pd.to_datetime(new_date).to_pydatetime(),
-                        "portfolio_topn": new_topn,
-                        "ma_period": new_ma,
-                        "replace_weaker_stock": bool(replace_weaker_checkbox),
-                        "max_replacements_per_day": new_max_replacements,
-                        "replace_threshold": new_replace_threshold,
-                    }
-                    # 코인용 빗썸 임포트 기간 설정은 더 이상 사용하지 않습니다.
-                    if save_app_settings(country_code, settings_to_save):
-                        st.success("설정이 성공적으로 저장되었습니다.")
-                        st.rerun()
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button("선택 항목 수정 저장", key=f"update_trade_btn_{account_prefix}"):
+                    editor_state = st.session_state[f"trades_editor_{account_prefix}"]
+                    edited_rows = editor_state.get("edited_rows", {})
+                    if not edited_rows:
+                        st.warning("수정된 내용이 없습니다.")
                     else:
-                        st.error("설정 저장에 실패했습니다.")
+                        with st.spinner(f"{len(edited_rows)}개 거래를 수정하는 중..."):
+                            updated_count = 0
+                            for row_index, changes in edited_rows.items():
+                                trade_id = df_display.iloc[row_index]["id"]
+                                update_data = {}
+                                if "shares" in changes:
+                                    update_data["shares"] = changes["shares"]
+                                if "price" in changes:
+                                    update_data["price"] = changes["price"]
+                                if "note" in changes:
+                                    update_data["note"] = changes["note"]
+
+                                if update_data and update_trade_by_id(trade_id, update_data):
+                                    updated_count += 1
+                            st.success(f"{updated_count}개 거래를 성공적으로 수정했습니다.")
+                            st.rerun()
+            with col2:
+                if st.button(
+                    "선택 항목 삭제",
+                    key=f"delete_trade_btn_{account_prefix}",
+                    type="primary",
+                ):
+                    trades_to_delete = edited_df[edited_df["선택"]]
+                    if not trades_to_delete.empty:
+                        with st.spinner(f"{len(trades_to_delete)}개 거래를 삭제하는 중..."):
+                            deleted_count = 0
+                            for trade_id in trades_to_delete["id"]:
+                                if delete_trade_by_id(trade_id):
+                                    deleted_count += 1
+                            st.success(f"{deleted_count}개 거래를 성공적으로 삭제했습니다.")
+                            st.rerun()
+                    else:
+                        st.warning("삭제할 거래를 선택해주세요.")
+            with col3:
+                if st.button("선택 항목 복구", key=f"restore_trade_btn_{account_prefix}"):
+                    trades_to_restore = edited_df[edited_df["선택"]]
+                    if not trades_to_restore.empty:
+                        with st.spinner(f"{len(trades_to_restore)}개 거래를 복구하는 중..."):
+                            restored_count = 0
+                            for trade_id in trades_to_restore["id"]:
+                                if restore_trade_by_id(trade_id):
+                                    restored_count += 1
+                            st.success(f"{restored_count}개 거래를 성공적으로 복구했습니다.")
+                            st.rerun()
+                    else:
+                        st.warning("복구할 거래를 선택해주세요.")
+
+
+def _render_country_etf_management(country_code: str) -> None:
+    render_master_etf_ui(country_code)
+
+
+def render_country_tab(country_code: str, accounts: Optional[List[Dict[str, Any]]] = None):
+    """국가 탭 내에서 계좌별 서브 탭과 종목 관리를 구성합니다."""
+
+    account_entries = _prepare_account_entries(country_code, accounts)
+    account_labels = [_account_label(entry) for entry in account_entries]
+
+    # --- 최적화: 국가 내 모든 계좌의 거래일을 한 번에 미리 조회합니다 ---
+    all_snapshot_dates_for_country = []
+    if country_code != "coin":
+        for entry in account_entries:
+            account_code = entry.get("account")
+            if account_code:
+                all_snapshot_dates_for_country.extend(
+                    get_available_snapshot_dates(country_code, account=account_code)
+                )
+
+    all_trading_days_in_range = []
+    if all_snapshot_dates_for_country:
+        # get_available_snapshot_dates는 날짜를 내림차순으로 반환합니다.
+        # 오름차순으로 정렬하여 min/max를 찾습니다.
+        unique_dates = sorted(list(set(all_snapshot_dates_for_country)))
+        if unique_dates:
+            min_date = unique_dates[0]
+            max_date = unique_dates[-1]
+            all_trading_days_in_range = get_trading_days(min_date, max_date, country_code)
+
+    tab_labels = account_labels + ["종목 관리"]
+
+    tabs = st.tabs(tab_labels)
+
+    for tab, entry in zip(tabs[: len(account_entries)], account_entries):
+        with tab:
+            _render_account_dashboard(country_code, entry, all_trading_days_in_range)
+
+    with tabs[-1]:
+        with st.spinner("종목 관리 데이터를 불러오는 중..."):
+            _render_country_etf_management(country_code)
 
 
 def main():
-    """MomentumETF 오늘의 현황 웹 UI를 렌더링합니다."""
-    # 페이지 설정은 Streamlit의 첫 명령으로 실행되어야 합니다.
-    st.set_page_config(page_title="MomentumETF Status", layout="wide")
+    """MomentumETF 매매 신호 웹 UI를 렌더링합니다."""
+    st.set_page_config(page_title="MomentumETF Signal", layout="wide")
 
-    # 페이지 상단 여백을 줄이기 위한 CSS 주입
     st.markdown(
         """
         <style>
@@ -1453,11 +1680,13 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # --- DB 연결 확인 ---
-    # 앱의 다른 부분이 실행되기 전에 DB 연결을 먼저 확인합니다.
-    if get_db_connection() is None:
-        st.error(
-            """
+    # --- 초기 로딩 단계별 시간 측정 (콘솔 출력) ---
+    print("\n[MAIN] 1/4: 데이터베이스 연결 확인 시작...")
+    start_time = time.time()
+    with st.spinner("데이터베이스 연결 확인 중..."):
+        if get_db_connection() is None:
+            st.error(
+                """
             **데이터베이스 연결 실패**
 
             MongoDB 데이터베이스에 연결할 수 없습니다. 다음 사항을 확인해주세요:
@@ -1466,75 +1695,92 @@ def main():
             2.  **IP 접근 목록**: 현재 서비스의 IP 주소가 MongoDB Atlas의 'IP Access List'에 추가되었는지 확인하세요.
             3.  **클러스터 상태**: MongoDB Atlas 클러스터가 정상적으로 실행 중인지 확인하세요.
             """
-        )
-        st.stop()  # DB 연결 실패 시 앱 실행 중단
+            )
+            st.stop()  # DB 연결 실패 시 앱 실행 중단
+    duration = time.time() - start_time
+    print(f"[MAIN] 1/4: 데이터베이스 연결 확인 완료 ({duration:.2f}초)")
 
-    # 앱 가동시 거래일 캘린더 준비 상태 확인
-    try:
-        pass  # type: ignore
-    except Exception as e:
-        st.error(
-            "거래일 캘린더 라이브러리(pandas-market-calendars)를 불러올 수 없습니다.\n"
-            "다음 명령으로 설치 후 다시 시도하세요: pip install pandas-market-calendars\n"
-            f"상세: {e}"
-        )
-        st.stop()
-
-    try:
-        today = pd.Timestamp.now().normalize()
-        start = (today - pd.DateOffset(days=30)).strftime("%Y-%m-%d")
-        end = (today + pd.DateOffset(days=7)).strftime("%Y-%m-%d")
-        problems = []
-        for c in ("kor", "aus"):
-            days = get_trading_days(start, end, c)
-            if not days:
-                problems.append(c)
-        if problems:
+    print("[MAIN] 2/4: 거래일 캘린더 데이터 확인 시작...")
+    start_time = time.time()
+    with st.spinner("거래일 캘린더 데이터 확인 중..."):
+        try:
+            pass  # type: ignore
+        except Exception as e:
             st.error(
-                "거래일 캘린더를 조회하지 못했습니다: "
-                + ", ".join({"kor": "한국", "aus": "호주"}[p] for p in problems)
-                + "\nKOSPI/ASX 캘린더를 사용할 수 있는지 확인해주세요."
+                "거래일 캘린더 라이브러리(pandas-market-calendars)를 불러올 수 없습니다.\n"
+                "다음 명령으로 설치 후 다시 시도하세요: pip install pandas-market-calendars\n"
+                f"상세: {e}"
             )
             st.stop()
-    except Exception as e:
-        st.error(f"거래일 캘린더 초기화 중 오류가 발생했습니다: {e}")
-        st.stop()
+
+        try:
+            today = pd.Timestamp.now().normalize()
+            start = (today - pd.DateOffset(days=30)).strftime("%Y-%m-%d")
+            end = (today + pd.DateOffset(days=7)).strftime("%Y-%m-%d")
+            problems = []
+            for c in ("kor", "aus"):
+                days = get_trading_days(start, end, c)
+                if not days:
+                    problems.append(c)
+            if problems:
+                st.error(
+                    "거래일 캘린더를 조회하지 못했습니다: "
+                    + ", ".join({"kor": "한국", "aus": "호주"}[p] for p in problems)
+                    + "\nKOSPI/ASX 캘린더를 사용할 수 있는지 확인해주세요."
+                )
+                st.stop()
+        except Exception as e:
+            st.error(f"거래일 캘린더 초기화 중 오류가 발생했습니다: {e}")
+            st.stop()
+    duration = time.time() - start_time
+    print(f"[MAIN] 2/4: 거래일 캘린더 데이터 확인 완료 ({duration:.2f}초)")
 
     # 제목과 시장 상태를 한 줄에 표시
-    # "최근 중단" 기간이 길어지면서 줄바꿈되는 현상을 방지하기 위해
-    # 오른쪽 컬럼의 너비를 늘립니다. (3:1 -> 2.5:1.5)
     col1, col2 = st.columns([2.5, 1.5])
     with col1:
         st.title("Momentum. ETF.")
     with col2:
-        # 시장 상태는 한 번만 계산하여 10분간 캐시합니다.
-        @st.cache_data(ttl=600)
-        def _get_cached_market_status():
-            return get_market_regime_status_string()
+        print("[MAIN] 3/4: 시장 레짐 상태 분석 시작...")
+        start_time = time.time()
+        with st.spinner("시장 레짐 상태 분석 중..."):
+            # 시장 상태는 한 번만 계산하여 10분간 캐시합니다.
+            @st.cache_data(ttl=600)
+            def _get_cached_market_status():
+                return get_market_regime_status_string()
 
-        market_status_str = _get_cached_market_status()
+            market_status_str = _get_cached_market_status()
+        duration = time.time() - start_time
+        print(f"[MAIN] 3/4: 시장 레짐 상태 분석 완료 ({duration:.2f}초)")
+
         if market_status_str:
-            # st.markdown을 사용하여 오른쪽 정렬 및 상단 패딩을 적용합니다.
             st.markdown(
                 f'<div style="text-align: right; padding-top: 1.5rem; font-size: 1.1rem;">{market_status_str}</div>',
                 unsafe_allow_html=True,
             )
 
+    print("[MAIN] 4/4: 계좌 정보 로딩 시작...")
+    start_time = time.time()
+    with st.spinner("계좌 정보 로딩 중..."):
+        load_accounts(force_reload=False)
+        account_map = {
+            "kor": get_accounts_by_country("kor"),
+            "aus": get_accounts_by_country("aus"),
+            "coin": get_accounts_by_country("coin"),
+        }
+    duration = time.time() - start_time
+    print(f"[MAIN] 4/4: 계좌 정보 로딩 완료 ({duration:.2f}초)")
+
     tab_names = ["한국", "호주", "코인", "스케줄러", "설정"]
     tab_kor, tab_aus, tab_coin, tab_scheduler, tab_settings = st.tabs(tab_names)
 
-    with tab_coin:
-        render_country_tab("coin")
-
     with tab_kor:
-        render_country_tab("kor")
-
+        render_country_tab("kor", accounts=account_map.get("kor"))
     with tab_aus:
-        render_country_tab("aus")
-
+        render_country_tab("aus", accounts=account_map.get("aus"))
+    with tab_coin:
+        render_country_tab("coin", accounts=account_map.get("coin"))
     with tab_scheduler:
         render_scheduler_tab()
-
     with tab_settings:
         st.header("공통 설정 (모든 국가 공유)")
         common = get_common_settings() or {}
@@ -1547,13 +1793,10 @@ def main():
         current_ma = common.get("MARKET_REGIME_FILTER_MA_PERIOD")
         current_stop = common.get("HOLDING_STOP_LOSS_PCT")
         current_cooldown = common.get("COOLDOWN_DAYS")
-        current_atr = common.get("ATR_PERIOD_FOR_NORMALIZATION")
 
         with st.form("common_settings_form"):
             st.subheader("시장 레짐 필터")
-            new_enabled = st.checkbox(
-                "활성화 (MARKET_REGIME_FILTER_ENABLED)", value=current_enabled
-            )
+            new_enabled = st.checkbox("활성화 (MARKET_REGIME_FILTER_ENABLED)", value=current_enabled)
             new_ticker = st.text_input(
                 "레짐 기준 지수 티커 (MARKET_REGIME_FILTER_TICKER)",
                 value=str(current_ticker) if current_ticker is not None else "",
@@ -1578,11 +1821,6 @@ def main():
                 value=str(current_cooldown) if current_cooldown is not None else "",
                 placeholder="예: 5",
             )
-            new_atr_str = st.text_input(
-                "ATR 기간 (ATR_PERIOD_FOR_NORMALIZATION)",
-                value=str(current_atr) if current_atr is not None else "",
-                placeholder="예: 14",
-            )
 
             submitted = st.form_submit_button("공통 설정 저장")
             if submitted:
@@ -1597,9 +1835,6 @@ def main():
                 if not new_cooldown_str.isdigit() or int(new_cooldown_str) < 0:
                     st.error("쿨다운 일수는 0 이상의 정수여야 합니다.")
                     error = True
-                if not new_atr_str.isdigit() or int(new_atr_str) < 1:
-                    st.error("ATR 기간은 1 이상의 정수여야 합니다.")
-                    error = True
 
                 if not error:
                     # Normalize stop loss: interpret positive value as negative threshold
@@ -1610,7 +1845,6 @@ def main():
                         "MARKET_REGIME_FILTER_MA_PERIOD": int(new_ma_str),
                         "HOLDING_STOP_LOSS_PCT": normalized_stop,
                         "COOLDOWN_DAYS": int(new_cooldown_str),
-                        "ATR_PERIOD_FOR_NORMALIZATION": int(new_atr_str),
                     }
                     if save_common_settings(to_save):
                         st.success("공통 설정을 저장했습니다.")

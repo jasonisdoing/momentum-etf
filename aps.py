@@ -28,21 +28,9 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from utils.data_updater import update_etf_names
-
-try:
-    # DB에서 설정을 읽어 스케줄 주기를 제어
-    from utils.db_manager import get_app_settings, get_common_settings
-    from utils.env import load_env_if_present
-except Exception:
-
-    def get_common_settings():
-        return None
-
-    def get_app_settings(country):
-        return None
-
-    def load_env_if_present():
-        return False
+from utils.env import load_env_if_present
+from utils.account_registry import get_accounts_by_country, load_accounts
+from utils.db_manager import get_common_settings
 
 
 def setup_logging():
@@ -97,122 +85,67 @@ def _format_korean_datetime(dt: datetime) -> str:
     return f"{dt.strftime('%Y년 %m월 %d일')}({weekday_str}) {ampm_str} {hour12}시 {dt.minute:02d}분"
 
 
-def run_status(country: str) -> None:
-    """Run status generation and sends a completion log to Slack."""
+def _accounts_for_country(country: str) -> list[str]:
+    try:
+        load_accounts(force_reload=False)
+        entries = get_accounts_by_country(country) or []
+        accounts = []
+        for entry in entries:
+            code = entry.get("account")
+            if code:
+                accounts.append(str(code).strip())
+        return accounts
+    except Exception:
+        logging.exception(f"Failed to load accounts for {country}")
+        return []
+
+
+def run_signal_generation(country: str, account: str | None = None) -> None:
+    """Run signal generation and sends a completion log to Slack."""
     start_time = time.time()
     report_date = None
     try:
-        from status import main as run_status_main
-        from utils.notify import send_log_to_slack
-        from utils.db_manager import get_portfolio_snapshot, get_app_settings
-        from utils.report import format_aud_money, format_kr_money
+        from signals import main as run_signal_main
+        from signals import send_summary_notification
+        from utils.db_manager import get_portfolio_snapshot
 
-        # Get old equity
-        old_snapshot = get_portfolio_snapshot(country)
+        # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
+        old_snapshot = get_portfolio_snapshot(country, account=account)
         old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
-        logging.info(f"Running status for {country}")
+        log_target = f"{country}/{account}"
+        logging.info(f"Running signal generation for {log_target}")
         if country == "coin":
             _try_sync_bithumb_trades()
-            # _try_sync_bithumb_equity()
 
-        # status.main은 성공 시 계산된 리포트의 기준 날짜를 반환합니다.
-        report_date = run_status_main(country=country, date_str=None)
+        # signal.main은 상세 알림을 처리합니다.
+        report_date = run_signal_main(country, account, date_str=None)
 
-        # 작업이 성공적으로 완료되고 날짜를 받아왔을 때만 로그 전송
+        # 작업이 성공적으로 완료되고 날짜를 받아왔을 때만 요약 알림 전송
         if report_date:
             duration = time.time() - start_time
+            send_summary_notification(country, account, report_date, duration, old_equity)
             date_str = report_date.strftime("%Y-%m-%d")
-            message = f"{country}/{date_str} 작업 완료(작업시간: {duration:.1f}초)"
-
-            # Get new equity
-            new_snapshot = get_portfolio_snapshot(country)
-            new_equity = float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
-
-            # Calculate cumulative return
-            app_settings = get_app_settings(country)
-            initial_capital = float(app_settings.get("initial_capital", 0)) if app_settings else 0.0
-
-            money_formatter = format_aud_money if country == "aus" else format_kr_money
-
-            if initial_capital > 0:
-                cum_ret_pct = ((new_equity / initial_capital) - 1.0) * 100.0
-                cum_profit_loss = new_equity - initial_capital
-                equity_summary = f"평가금액: {money_formatter(new_equity)}, 누적수익 {cum_ret_pct:+.2f}%({money_formatter(cum_profit_loss)})"
-                message += f" | {equity_summary}"
-
-            if abs(new_equity - old_equity) > 1e-9:
-                diff = new_equity - old_equity
-                change_label = "📈평가금액 증가" if diff >= 0 else "📉평가금액 감소"
-
-                if country == "aus" or abs(diff) >= 10_000:
-                    old_equity_str = money_formatter(old_equity)
-                    new_equity_str = money_formatter(new_equity)
-                    diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"
-                else:
-                    old_equity_str = f"{int(round(old_equity)):,}원"
-                    new_equity_str = f"{int(round(new_equity)):,}원"
-                    diff_int = int(round(diff))
-                    if diff_int != 0:
-                        sign = "+" if diff_int > 0 else ""
-                        diff_str = f"{sign}{diff_int:,}원"
-                    else:
-                        sign = "+" if diff > 0 else "-" if diff < 0 else ""
-                        diff_str = "0원" if sign == "" else f"{sign}{abs(diff):,.2f}원"
-
-                equity_change_message = (
-                    f"{change_label}: {old_equity_str} => {new_equity_str} ({diff_str})"
-                )
-                message += f" | {equity_change_message}"
-
-            send_log_to_slack(message)
+            prefix = f"{country}/{account}" if account else country
+            logging.info(f"[{prefix}/{date_str}] 작업 완료(작업시간: {duration:.1f}초)")
 
     except Exception:
-        error_message = f"Status job for {country} failed"
+        error_message = f"Signal generation job for {country}/{account} failed"
         logging.error(error_message, exc_info=True)
 
 
-def _try_sync_bithumb_equity():
-    """
-    코인(Bithumb) 잔액을 스냅샷하고, 변경된 경우 슬랙으로 알림을 보냅니다.
-    """
-    try:
-        from scripts.snapshot_bithumb_balances import main as snapshot_main
-        from status import _notify_equity_update
-        from utils.db_manager import get_portfolio_snapshot, save_daily_equity
-
-        # 1. 업데이트 전 현재 평가금액을 가져옵니다.
-        old_snapshot = get_portfolio_snapshot("coin")
-        old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
-
-        # 2. 빗썸 잔액 스냅샷 스크립트를 실행하여 DB를 업데이트합니다.
-        logging.info("Starting Bithumb balance snapshot...")
-        snapshot_main()
-        logging.info("Bithumb balance snapshot finished.")
-
-        # 3. 업데이트 후 새로운 평가금액을 가져옵니다.
-        new_snapshot = get_portfolio_snapshot("coin")
-        new_equity = float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
-
-        # 4. 스케줄러에 의한 업데이트임을 기록하기 위해 `updated_by`와 함께 항상 저장합니다.
-        if new_snapshot:
-            save_daily_equity("coin", new_snapshot["date"], new_equity, updated_by="스케줄러")
-            logging.info("-> Coin equity snapshot updated. (updated_by='scheduler')")
-
-            # 5. 평가금액이 변경되었는지 확인하고, 변경된 경우 슬랙 알림을 보냅니다.
-            if abs(new_equity - old_equity) > 1e-9:
-                logging.info(
-                    f"-> Coin equity change detected: {old_equity:,.0f} -> {new_equity:,.0f}. Sending notification."
+def run_signals_for_country(country: str) -> None:
+    accounts = _accounts_for_country(country)
+    if accounts:
+        for account in accounts:
+            try:
+                run_signal_generation(country, account)
+            except Exception:
+                logging.error(
+                    f"Error running signal generation for {country}/{account}", exc_info=True
                 )
-                _notify_equity_update("coin", old_equity, new_equity)
-            else:
-                logging.info("-> No change in coin equity.")
-        else:
-            logging.warning("-> Coin equity snapshot not found, skipping update.")
-
-    except Exception:
-        error_message = "Bithumb balance snapshot skipped or failed"
-        logging.error(error_message, exc_info=True)
+    else:
+        logging.warning("No registered accounts for %s; skipping signal generation.", country)
 
 
 def _try_sync_bithumb_trades():
@@ -266,7 +199,7 @@ def main():
         cron = common.get("SCHEDULE_CRON_COIN") or _get("SCHEDULE_COIN_CRON", "5 0 * * *")
         tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
         scheduler.add_job(
-            run_status,
+            run_signals_for_country,
             CronTrigger.from_crontab(cron, timezone=tz),
             args=["coin"],
             id="coin",
@@ -278,7 +211,7 @@ def main():
         cron = common.get("SCHEDULE_CRON_AUS") or _get("SCHEDULE_AUS_CRON", "10 18 * * 1-5")
         tz = _get("SCHEDULE_AUS_TZ", "Australia/Sydney")
         scheduler.add_job(
-            run_status,
+            run_signals_for_country,
             CronTrigger.from_crontab(cron, timezone=tz),
             args=["aus"],
             id="aus",
@@ -290,7 +223,7 @@ def main():
         cron = common.get("SCHEDULE_CRON_KOR") or _get("SCHEDULE_KOR_CRON", "10 18 * * 1-5")
         tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
         scheduler.add_job(
-            run_status,
+            run_signals_for_country,
             CronTrigger.from_crontab(cron, timezone=tz),
             args=["kor"],
             id="kor",
@@ -314,7 +247,7 @@ def main():
         for country in ("coin", "aus", "kor"):
             try:
                 if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", True):
-                    run_status(country)
+                    run_signals_for_country(country)
             except Exception:
                 logging.error(f"Error during initial run for {country}", exc_info=True)
         logging.info("[Initial Run] Complete.")

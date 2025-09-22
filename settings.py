@@ -12,12 +12,6 @@ from dotenv import load_dotenv
 load_dotenv()
 # --- 웹앱 UI 및 마스터 데이터 관련 설정 ---
 
-# 벤치마크 티커 매핑 (국가별)
-BENCHMARK_TICKERS = {
-    "kor": "379800",  # KODEX 미국S&P500 ETF
-    "aus": "IVV.AX",  # iShares S&P 500 (AUD)
-}
-
-APP_DATE_TIME = "2025-09-19-08"
+APP_DATE_TIME = "2025-09-22-16"
 
 APP_TYPE = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")

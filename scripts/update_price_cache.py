@@ -1,134 +1,88 @@
-"""가격 데이터 캐시를 구축/갱신하는 스크립트."""
+"""
+모든 국가의 모든 종목에 대해 가격 데이터(OHLCV) 캐시를 생성하거나 업데이트합니다.
+
+[사용법]
+1. 모든 국가 캐시 업데이트 (기본값: 2020-01-01부터)
+   python scripts/update_price_cache.py
+
+2. 특정 국가, 특정 시작일부터 업데이트
+   python scripts/update_price_cache.py --country kor --start 2021-01-01
+
+3. 캐시 강제 재빌드 (기존 캐시 삭제 후 전체 다시 다운로드)
+   python scripts/update_price_cache.py --rebuild
+"""
 
 import argparse
 import os
 import sys
-from datetime import datetime
-from typing import Iterable, List, Optional
-
-
-import warnings
-
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-
-from dotenv import load_dotenv
-
-load_dotenv()
+from pathlib import Path
 
 # 프로젝트 루트를 Python 경로에 추가
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.data_loader import fetch_ohlcv
-from utils.cache_utils import load_cached_frame
 from utils.stock_list_io import get_etfs
-
-DEFAULT_START_DATE = "2020-01-01"
-
-
-def _list_etf_tickers(country: str) -> List[str]:
-    data = get_etfs(country) or []
-    tickers: List[str] = []
-    for block in data:
-        if isinstance(block, dict) and "tickers" in block:
-            t_list = block.get("tickers") or []
-            for item in t_list:
-                tkr = item.get("ticker") if isinstance(item, dict) else None
-                if tkr:
-                    tickers.append(tkr)
-        elif isinstance(block, dict) and "ticker" in block:
-            tickers.append(block["ticker"])
-    return sorted(list({(t or "").upper() for t in tickers if t}))
+from utils.env import load_env_if_present
 
 
-def ensure_cache_for_tickers(
-    country: str,
-    tickers: Iterable[str],
-    start_date: str,
-    end_date: str,
-) -> None:
-    total = 0
-    success = 0
-    for ticker in tickers:
-        total += 1
-        try:
-            before_df = load_cached_frame(country, ticker)
-            before_count = 0 if before_df is None else before_df.shape[0]
-
-            _ = fetch_ohlcv(
-                ticker=ticker,
-                country=country,
-                date_range=[start_date, end_date],
-            )
-
-            after_df = load_cached_frame(country, ticker)
-            after_count = 0 if after_df is None else after_df.shape[0]
-            added_count = max(0, after_count - before_count)
-
-            if after_count > 0:
-                success += 1
-                if added_count > 0:
-                    print(
-                        f"[{country.upper()}] {ticker}: {after_count} rows cached (+{added_count})"
-                    )
-                else:
-                    print(f"[{country.upper()}] {ticker}: {after_count} rows cached (unchanged)")
-            else:
-                print(f"[{country.upper()}] {ticker}: 데이터 없음")
-        except Exception as exc:  # noqa: BLE001
-            print(f"오류: {country}/{ticker} 캐시 갱신 실패: {exc}")
-    print(f"[{country.upper()}] 완료 - 총 {total}개 중 {success}개 캐시 반영")
+def get_cache_file_path(country: str, ticker: str) -> Path:
+    """주어진 티커의 캐시 파일 경로를 구성합니다."""
+    project_root = Path(__file__).resolve().parent.parent
+    return project_root / "data" / "cache" / country / f"{ticker}.pkl"
 
 
-def refresh_all_caches(
-    countries: Iterable[str] = ("kor", "aus", "coin"),
-    start_date: str = DEFAULT_START_DATE,
-    end_date: Optional[str] = None,
-) -> None:
-    final_end = end_date or datetime.now().strftime("%Y-%m-%d")
+def refresh_all_caches(countries: list[str], start_date: str, rebuild: bool = False):
+    """지정된 국가의 모든 종목에 대한 가격 데이터 캐시를 새로 고칩니다."""
+    print(f"캐시 갱신 시작 (국가: {', '.join(countries)}, 시작일: {start_date}, 강제 재빌드: {rebuild})")
+
     for country in countries:
-        ticker_list = _list_etf_tickers(country)
-        if not ticker_list:
-            print(f"[{country.upper()}] 캐시 대상 티커가 없습니다.")
+        print(f"\n[{country.upper()}] 국가의 캐시를 갱신합니다...")
+        all_etfs_from_file = get_etfs(country)
+        # is_active 필드가 없는 종목이 있는지 확인합니다.
+        for etf in all_etfs_from_file:
+            if "is_active" not in etf:
+                raise ValueError(
+                    f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
+                )
+        etfs = [etf for etf in all_etfs_from_file if etf["is_active"] is not False]
+        if not etfs:
+            print(f"-> {country.upper()} 국가에 등록된 종목이 없습니다.")
             continue
-        ensure_cache_for_tickers(country, ticker_list, start_date, final_end)
+
+        tickers = [etf["ticker"] for etf in etfs]
+        total_tickers = len(tickers)
+        for i, ticker in enumerate(tickers, 1):
+            print(f"\r  -> 처리 중: {i}/{total_tickers} ({ticker})", end="", flush=True)
+
+            if rebuild:
+                cache_file = get_cache_file_path(country, ticker)
+                if cache_file.exists():
+                    try:
+                        cache_file.unlink()
+                    except OSError as e:
+                        print(f"\n경고: 캐시 파일 삭제 실패 {cache_file}: {e}")
+
+            try:
+                # fetch_ohlcv는 캐시가 없으면 자동으로 데이터를 조회하고 저장합니다.
+                # date_range의 두 번째 인자를 None으로 주면 오늘까지 조회합니다.
+                fetch_ohlcv(ticker, country, date_range=[start_date, None])
+            except Exception as e:
+                print(f"\n경고: {ticker} 데이터 처리 중 오류 발생: {e}")
+        print(f"\n-> {country.upper()} 국가의 캐시 갱신 완료.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="OHLCV 캐시 업데이트")
-    parser.add_argument(
-        "--country",
-        choices=["kor", "aus", "coin", "all"],
-        default="all",
-        help="갱신할 국가 (기본 all)",
-    )
-    parser.add_argument(
-        "--start",
-        default=DEFAULT_START_DATE,
-        help="조회 시작일 (YYYY-MM-DD) - 기본 2020-01-01",
-    )
-    parser.add_argument(
-        "--end",
-        default=None,
-        help="조회 종료일 (YYYY-MM-DD) - 기본 오늘",
-    )
-    parser.add_argument(
-        "--tickers",
-        default=None,
-        help="쉼표로 구분된 티커 목록 (지정 시 해당 티커만 갱신)",
-    )
+    """CLI 진입점"""
+    parser = argparse.ArgumentParser(description="OHLCV 데이터 캐시를 업데이트합니다.")
+    parser.add_argument("--country", type=str, default="all", help="국가 코드 (kor, aus, coin, 또는 all)")
+    parser.add_argument("--start", type=str, default="2020-01-01", help="시작 날짜 (YYYY-MM-DD)")
+    parser.add_argument("--rebuild", action="store_true", help="기존 캐시를 강제로 삭제하고 다시 다운로드합니다.")
     args = parser.parse_args()
 
-    end_date = args.end or datetime.now().strftime("%Y-%m-%d")
-    countries = ["kor", "aus", "coin"] if args.country == "all" else [args.country]
+    load_env_if_present()
 
-    if args.tickers:
-        manual_tickers = [t.strip() for t in args.tickers.split(",") if t.strip()]
-        for country in countries:
-            ensure_cache_for_tickers(country, manual_tickers, args.start, end_date)
-    else:
-        refresh_all_caches(countries=countries, start_date=args.start, end_date=end_date)
+    countries = ["kor", "aus", "coin"] if args.country.lower() == "all" else [args.country]
+    refresh_all_caches(countries, args.start, args.rebuild)
 
 
 if __name__ == "__main__":

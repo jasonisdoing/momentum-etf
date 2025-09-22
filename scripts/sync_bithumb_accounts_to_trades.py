@@ -29,6 +29,9 @@ from utils.data_loader import fetch_ohlcv
 from utils.db_manager import get_db_connection, save_trade
 from utils.env import load_env_if_present
 from utils.stock_list_io import get_etfs
+import warnings
+
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 
 def _now_day() -> datetime:
@@ -83,7 +86,7 @@ def _normalize_accounts(items: List[Dict]) -> Tuple[float, Dict[str, Dict[str, f
         qty = bal + locked if (bal or locked) else total_field
 
         if cur == "KRW":
-            krw += qty
+            krw += bal + locked if (bal or locked) else qty
             continue
 
         avg = 0.0
@@ -177,16 +180,39 @@ def _save_trade(
         "price": float(price),
         "fees": 0.0,
         "note": "auto-sync from Bithumb accounts",
-        "account": "Bithumb",
+        "account": "b1",
     }
     return save_trade(data)
 
 
-def _has_any_trades(db) -> bool:
+def _aggregate_current_holdings(db) -> Dict[str, float]:
+    """Return current net holdings per ticker reconstructed from trades."""
+
+    holdings: Dict[str, float] = {}
     try:
-        return db.trades.count_documents({"country": "coin", "is_deleted": {"$ne": True}}) > 0
+        cursor = db.trades.find(
+            {"country": "coin", "is_deleted": {"$ne": True}},
+            {"ticker": 1, "action": 1, "shares": 1},
+        )
     except Exception:
-        return False
+        return holdings
+
+    for trade in cursor:
+        ticker = str(trade.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        qty = float(trade.get("shares", 0.0) or 0.0)
+        if trade.get("action") == "BUY":
+            holdings[ticker] = holdings.get(ticker, 0.0) + qty
+        elif trade.get("action") == "SELL":
+            holdings[ticker] = holdings.get(ticker, 0.0) - qty
+
+    # remove near zero noise
+    cleaned: Dict[str, float] = {}
+    for t, q in holdings.items():
+        if abs(q) > 1e-6:
+            cleaned[t] = q
+    return cleaned
 
 
 def main():
@@ -210,79 +236,59 @@ def main():
     if tickers:
         coins_now = {k: v for k, v in coins_now.items() if k in tickers}
 
-    snap_prev = _last_snapshot(db)
-    today = _now_day()
     run_ts = _now_time()
 
-    # Seed condition: no previous snapshot OR no existing trades in DB
-    if not snap_prev or not _has_any_trades(db):
-        # First day: seed BUY trades for all positive balances
-        reason = "no previous snapshot" if not snap_prev else "no existing trades"
-        print(f"[INFO] Initial seeding due to {reason}; creating BUY trades from accounts")
-        for tkr, d in sorted(coins_now.items()):
-            q = float(d.get("qty", 0.0))
-            if q <= 0:
+    holdings_from_trades = _aggregate_current_holdings(db)
+
+    if not holdings_from_trades and not db.trades.count_documents(
+        {"country": "coin", "is_deleted": {"$ne": True}}
+    ):
+        print("[INFO] Initial seeding; creating BUY trades from current balances")
+        for tkr, info in sorted(coins_now.items()):
+            qty = float(info.get("qty", 0.0))
+            if qty <= 0:
                 continue
-            avg = float(d.get("avg", 0.0)) or 0.0
+            avg = float(info.get("avg", 0.0)) or 0.0
             px = avg or _price_close_krw(tkr)
             if px <= 0:
-                # last resort fallback
                 px = avg if avg > 0 else 1.0
-            _save_trade(tkr, "BUY", q, px, names.get(tkr, ""), run_ts)
+            _save_trade(tkr, "BUY", qty, px, names.get(tkr, ""), run_ts)
         _save_snapshot(db, krw, coins_now)
         print("[OK] Initial trades seeded and snapshot saved.")
         return
 
-    # Subsequent days: diff quantities to create BUY/SELL
-    coins_prev: Dict[str, Dict[str, float]] = {
-        k: {"qty": float(v.get("qty", 0.0)), "avg": float(v.get("avg", 0.0))}
-        for k, v in (snap_prev.get("coins") or {}).items()
-    }
+    tolerance = 1e-6
+    trades_changed = False
 
-    # if today's balances identical to last snapshot, nothing to do
-    def _same(a: Dict[str, Dict[str, float]], b: Dict[str, Dict[str, float]]) -> bool:
-        keys = set(a.keys()) | set(b.keys())
-        for k in keys:
-            aq = float((a.get(k) or {}).get("qty", 0.0))
-            bq = float((b.get(k) or {}).get("qty", 0.0))
-            # tolerate tiny float dust
-            if abs(aq - bq) > 1e-10:
-                return False
-        return True
-
-    if _same(coins_prev, coins_now):
-        print("[INFO] Accounts unchanged since last snapshot; no trades created.")
-        # still save a new snapshot if date changed to mark the day
-        if pd.to_datetime(snap_prev.get("date")).normalize() != pd.to_datetime(today).normalize():
-            _save_snapshot(db, krw, coins_now)
-            print("[OK] Saved snapshot for today (no trades).")
-        return
-
-    # Create trades for each changed coin
-    tickers_all = sorted(set(coins_prev.keys()) | set(coins_now.keys()))
+    tickers_all = sorted(set(coins_now.keys()) | set(holdings_from_trades.keys()))
     for tkr in tickers_all:
-        prev = coins_prev.get(tkr, {"qty": 0.0, "avg": 0.0})
-        cur = coins_now.get(tkr, {"qty": 0.0, "avg": 0.0})
-        q0 = float(prev.get("qty", 0.0))
-        q1 = float(cur.get("qty", 0.0))
-        if abs(q1 - q0) <= 1e-10:
+        target = float(coins_now.get(tkr, {}).get("qty", 0.0))
+        current = float(holdings_from_trades.get(tkr, 0.0))
+        delta = target - current
+        if abs(delta) <= tolerance:
             continue
-        delta = q1 - q0
+
+        info = coins_now.get(tkr, {})
+        avg_now = float(info.get("avg", 0.0))
         if delta > 0:
-            # BUY
-            avg0 = float(prev.get("avg", 0.0))
-            avg1 = float(cur.get("avg", 0.0))
-            px = _infer_buy_price(avg0, q0, avg1, q1, delta) or (avg1 or _price_close_krw(tkr))
+            # _infer_buy_price 로직에 오류가 있어, Bithumb API에서 제공하는 평균 매수 단가를 우선 사용합니다.
+            px = avg_now or _price_close_krw(tkr)
             if px <= 0:
-                px = avg1 if avg1 > 0 else 1.0
+                px = avg_now if avg_now > 0 else 1.0
             _save_trade(tkr, "BUY", delta, px, names.get(tkr, ""), run_ts)
+            trades_changed = True
         else:
-            # SELL
-            px = _price_close_krw(tkr) or float(prev.get("avg", 0.0)) or 1.0
+            px = _price_close_krw(tkr)
+            if px <= 0:
+                px = avg_now if avg_now > 0 else 1.0
             _save_trade(tkr, "SELL", abs(delta), px, names.get(tkr, ""), run_ts)
+            trades_changed = True
 
     _save_snapshot(db, krw, coins_now)
-    print("[OK] Trades synced from accounts diff and snapshot saved.")
+    if trades_changed:
+        print("[OK] Trades synced and snapshot saved.")
+    else:
+        print("[INFO] Accounts unchanged; snapshot saved.")
 
 
 if __name__ == "__main__":

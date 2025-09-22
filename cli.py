@@ -1,12 +1,11 @@
 """
 MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니다.
 
-이 스크립트는 백테스트, 현황 조회, 파라미터 튜닝 등
+이 스크립트는 백테스트, 시그널 조회, 파라미터 튜닝 등
 웹 UI 외부에서 실행되는 주요 기능들의 통합 진입점 역할을 합니다.
-
 [사용법]
-1. 현황 조회: python cli.py <국가코드> --status
-   - 예: python cli.py kor --status
+1. 시그널 조회: python cli.py <국가코드> --signal
+   - 예: python cli.py kor --signal
 
 2. 백테스트 실행: python cli.py <국가코드> --test
    - 예: python cli.py aus --test
@@ -15,9 +14,41 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
    - 예: python cli.py kor --tune
 """
 
+"""
+[실행 예시]
+아래는 'data/accounts.json'에 등록된 계좌를 기반으로 생성된 실행 명령어 예시입니다.
+이 목록을 복사하여 터미널에서 바로 사용할 수 있습니다.
+
+# --- 계좌별 기본 명령어 (signal, test, tune) ---
+
+# 한국 (KOR) / m1 계좌
+python cli.py kor --signal --account m3 --date 2025-09-22
+python cli.py kor --test --account m1
+python cli.py kor --tune --account m1
+
+# 호주 (AUS) / a1 계좌
+python cli.py aus --signal --account a1
+python cli.py aus --test --account a1
+python cli.py aus --tune --account a1
+
+# 가상화폐 (COIN) / b1 계좌
+python cli.py coin --signal --account b1
+python cli.py coin --test --account b1
+python cli.py coin --tune --account b1
+
+# --- 특수 목적 명령어 ---
+
+# 시장 레짐 필터 튜닝 (모든 계좌에 공통 적용되는 설정을 튜닝합니다)
+python cli.py kor --tune-regime --account m1
+
+"""
+
 import argparse
 import os
+import time
 import sys
+from typing import Optional
+
 from test import TEST_MONTHS_RANGE
 
 # 프로젝트 루트를 Python 경로에 추가합니다.
@@ -26,6 +57,21 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import warnings
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
+
+from utils.account_registry import get_accounts_by_country, load_accounts
+
+
+def _resolve_account(country: str, explicit: Optional[str]) -> str:
+    if explicit:
+        return explicit
+
+    load_accounts(force_reload=False)
+    entries = get_accounts_by_country(country) or []
+    for entry in entries:
+        code = entry.get("account")
+        if code:
+            return str(code)
+    raise SystemExit(f"'{country}' 국가에 등록된 계좌가 없습니다. data/accounts.json을 확인하세요.")
 
 
 def main():
@@ -51,9 +97,9 @@ def main():
         help="전략 파라미터를 튜닝합니다 (tune.py).",
     )
     group.add_argument(
-        "--status",
+        "--signal",
         action="store_true",
-        help="오늘의 현황(status.py)을 실행합니다.",
+        help="오늘의 매매 신호(signal.py)를 실행합니다.",
     )
     parser.add_argument(
         "--date",
@@ -67,9 +113,16 @@ def main():
         default=None,
         help="테스트에 사용할 티커 리스트 (쉼표구분, 예: BTC,ETH,SOL). 미지정 시 DB 목록 사용",
     )
+    parser.add_argument(
+        "--account",
+        type=str,
+        default=None,
+        help="국가 내 특정 계좌 코드 (예: m2, a1). 미지정 시 첫 번째 활성 계좌 사용",
+    )
 
     args = parser.parse_args()
     country = args.country
+    account = _resolve_account(country, args.account)
 
     if args.test:
         from test import main as run_test
@@ -90,7 +143,7 @@ def main():
             import pandas as pd
 
             from utils.data_loader import fetch_ohlcv_for_tickers
-            from utils.db_manager import get_app_settings
+            from utils.db_manager import get_portfolio_settings
             from utils.stock_list_io import get_etfs
 
             etfs_from_file = get_etfs(country)
@@ -105,17 +158,15 @@ def main():
                     print("오류: 지정한 --tickers 가 DB 목록과 일치하지 않습니다.")
                     return
 
-            app_settings = get_app_settings(country)
-            if not app_settings:
-                print(
-                    f"오류: '{country}' 국가의 설정을 DB에서 찾을 수 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
-                )
+            portfolio_settings = get_portfolio_settings(country, account=account)
+            if not portfolio_settings:
+                print(f"오류: '{country}' 국가의 설정을 DB에서 찾을 수 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
                 return
 
             try:
                 test_months_range = TEST_MONTHS_RANGE
                 # test.py의 하드코딩된 값 대신 DB에서 실제 MA 기간을 가져옵니다.
-                ma_etf = int(app_settings["ma_period"])
+                ma_etf = int(portfolio_settings["ma_period"])
             except (KeyError, ValueError, TypeError):
                 print("오류: DB의 MA 기간 설정이 올바르지 않습니다.")
                 return
@@ -136,25 +187,44 @@ def main():
             quiet=False,
             prefetched_data=prefetched_data,
             override_settings=override_settings or None,
+            account=account,
         )
 
     elif args.tune_regime:
         from scripts.tune_regime_filter import tune_regime_filter
 
         print("시장 레짐 필터 파라미터 최적화를 시작합니다...")
-        tune_regime_filter(country=country)
+        tune_regime_filter(country=country, account=account)
 
     elif args.tune:
         from tune import main as run_tune
 
-        print(f"{country.upper()} 포트폴리오의 전략 파라미터 튜닝을 시작합니다...")
-        run_tune(country_code=country)
+        print(
+            f"{country.upper()} 포트폴리오의 전략 파라미터 튜닝을 시작합니다"
+            + (f" (계좌: {account})" if account else "")
+            + "..."
+        )
+        run_tune(country_code=country, account=account)
 
-    elif args.status:
-        from status import main as run_status
+    elif args.signal:
+        from signals import main as run_signal, send_summary_notification
+        from utils.db_manager import get_portfolio_snapshot
 
-        print("전략으로 오늘의 현황을 조회합니다...")
-        run_status(country=country, date_str=args.date)
+        print("전략으로 오늘의 매매 신호를 조회합니다...")
+        start_time = time.time()
+
+        # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
+        old_snapshot = get_portfolio_snapshot(country, account=account)
+        old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
+
+        try:
+            report_date = run_signal(country=country, date_str=args.date, account=account)
+        except Exception as e:
+            print(f"\n오류: 시그널 생성 중 오류가 발생했습니다: {e}")
+            return
+        if report_date:
+            duration = time.time() - start_time
+            send_summary_notification(country, account, report_date, duration, old_equity)
 
 
 if __name__ == "__main__":

@@ -133,11 +133,6 @@ def _silence_yfinance_logs():
             lg.setLevel(lvl)
 
 
-def is_pykrx_available() -> bool:
-    """pykrx 모듈이 성공적으로 임포트되었는지 확인합니다."""
-    return _stock is not None
-
-
 def format_aus_ticker_for_yfinance(ticker: str) -> str:
     """'ASX:BHP' 또는 'BHP' 같은 티커를 yfinance API 형식인 'BHP.AX'로 변환합니다."""
     # 지수 티커(예: ^AXJO)는 변환하지 않습니다.
@@ -171,7 +166,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
             return []
         try:
             cal = mcal.get_calendar(cal_code)
-            # Latest pmc: remove all discontinued market_times using the new API
+            # 최신 pandas_market_calendars에서는 폐지된 장중 시간대를 새 API로 제거합니다.
             try:
                 dmt = getattr(cal, "discontinued_market_times", {})
                 for tname in getattr(dmt, "keys", lambda: [])():
@@ -180,14 +175,14 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
                     except Exception:
                         pass
             except Exception:
-                # Older versions fallback
+                # 이전 버전에서는 기존 방식으로 폴백합니다.
                 for tname in ("break_start", "break_end"):
                     try:
                         cal.remove_time(tname)  # type: ignore[attr-defined]
                     except Exception:
                         pass
 
-            # Prefer valid_days (dates only)
+            # 가능하다면 날짜만 반환하는 valid_days 결과를 우선 사용합니다.
             try:
                 days_idx = cal.valid_days(start_date=start_date, end_date=end_date)
                 if days_idx is not None and len(days_idx) > 0:
@@ -195,7 +190,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
             except Exception:
                 pass
 
-            # Fallback to schedule, suppress deprecation warning
+            # 위 단계가 실패하면 schedule 기반으로 폴백하고 폐기 경고를 숨깁니다.
             with warnings.catch_warnings():
                 warnings.filterwarnings(
                     "ignore",
@@ -229,12 +224,52 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
     return sorted(list(set(final_list)))
 
 
+@functools.lru_cache(maxsize=5)
+def get_latest_trading_day(country: str) -> pd.Timestamp:
+    """
+    오늘 또는 가장 가까운 과거의 '데이터가 있을 것으로 예상되는' 거래일을 pd.Timestamp 형식으로 반환합니다.
+    """
+    end_dt = pd.Timestamp.now()
+    if country == "coin":
+        return end_dt.normalize()
+
+    # 한국 시장의 경우, 장 마감 데이터가 집계되기 전(오후 4시 이전)이라면,
+    # 조회 기준일을 하루 전으로 설정하여 어제까지의 데이터만 사용하도록 합니다.
+    if country == "kor":
+        try:
+            if ZoneInfo is not None:
+                local_now = datetime.now(ZoneInfo("Asia/Seoul"))
+            else:  # pragma: no cover
+                local_now = datetime.now()
+            if local_now.hour < 16:
+                end_dt = end_dt - pd.DateOffset(days=1)
+        except Exception:
+            # 타임존 처리 실패 시 안전하게 폴백
+            pass
+
+    # end_dt부터 과거로 하루씩 이동하며 거래일을 찾습니다.
+    for i in range(15):
+        check_date = end_dt - pd.DateOffset(days=i)
+        check_date_str = check_date.strftime("%Y-%m-%d")
+        try:
+            if get_trading_days(check_date_str, check_date_str, country):
+                return check_date.normalize()
+        except Exception as e:
+            print(f"경고: 거래일 조회 중 오류 발생({check_date_str}): {e}")
+            # 오류 발생 시 다음 날짜로 계속 탐색
+            continue
+
+    # 15일 동안 거래일을 찾지 못하면 오늘 날짜를 정규화하여 반환합니다.
+    print(f"경고: 최근 15일 내에 거래일을 찾지 못했습니다. 오늘 날짜({end_dt.strftime('%Y-%m-%d')})를 사용합니다.")
+    return end_dt.normalize()
+
+
 def fetch_ohlcv(
     ticker: str,
     country: str = "kor",
     months_back: int = None,
     months_range: Optional[List[int]] = None,
-    date_range: Optional[List[str]] = None,
+    date_range: Optional[List[Optional[str]]] = None,
     base_date: Optional[pd.Timestamp] = None,
 ) -> Optional[pd.DataFrame]:
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
@@ -242,29 +277,35 @@ def fetch_ohlcv(
     if date_range and len(date_range) == 2:
         try:
             start_dt = pd.to_datetime(date_range[0])
-            end_dt = pd.to_datetime(date_range[1])
+            if date_range[1] is None:
+                # date_range의 두 번째 인자가 None이면 오늘까지 조회합니다.
+                end_dt = pd.to_datetime(get_today_str())
+            else:
+                end_dt = pd.to_datetime(date_range[1])
         except (ValueError, TypeError):
-            print(
-                f"오류: 잘못된 date_range 형식: {date_range}. 'YYYY-MM-DD' 형식을 사용해야 합니다."
-            )
+            print(f"오류: 잘못된 date_range 형식: {date_range}. 'YYYY-MM-DD' 형식을 사용해야 합니다.")
             return None
     else:
-        now = base_date if base_date is not None else pd.to_datetime(get_today_str())
+        now = base_date if base_date is not None else pd.Timestamp.now()
         if months_range is not None and len(months_range) == 2:
             start_off, end_off = months_range
             start_dt = now - pd.DateOffset(months=int(start_off))
             end_dt = now - pd.DateOffset(months=int(end_off))
         else:
-            if months_back is None:
-                months_back = 12
+            months_back = months_back or 12
             start_dt = now - pd.DateOffset(months=int(months_back))
             end_dt = now
 
-    today = pd.Timestamp.now().normalize()
-    if end_dt > today:
-        end_dt = today
+    # 조회 종료일(end_dt)이 실제 데이터가 있는 마지막 거래일을 초과하지 않도록 보정합니다.
+    # 이는 주말이나 휴일에 다음 거래일을 기준으로 데이터를 조회할 때, 아직 존재하지 않는
+    # 미래 데이터를 조회하려는 시도를 방지합니다.
+    latest_known_trading_day = get_latest_trading_day(country)
+    if end_dt > latest_known_trading_day:
+        end_dt = latest_known_trading_day
+
     if start_dt > end_dt:
-        start_dt, end_dt = end_dt, start_dt
+        # 보정 후 시작일이 종료일보다 미래가 될 수 있으므로, 이 경우 데이터를 조회하지 않습니다.
+        return None
 
     return _fetch_ohlcv_with_cache(ticker, country, start_dt.normalize(), end_dt.normalize())
 
@@ -299,6 +340,15 @@ def _fetch_ohlcv_with_cache(
             continue
         if cache_end is not None and _should_skip_pykrx_fetch(country, cache_end, miss_start):
             continue
+
+        # Check if there are any trading days in the missing range before attempting to fetch.
+        # This prevents errors when the gap consists only of non-trading days (weekends, holidays).
+        trading_days_in_gap = get_trading_days(
+            miss_start.strftime("%Y-%m-%d"), miss_end.strftime("%Y-%m-%d"), country
+        )
+        if not trading_days_in_gap:
+            continue
+
         fetched = _fetch_ohlcv_core(ticker, country, miss_start, miss_end, cached_df)
         if fetched is not None and not fetched.empty:
             new_frames.append(fetched)
@@ -363,9 +413,7 @@ def _fetch_ohlcv_core(
             if not fallback.empty:
                 return fallback
         if yf is None:
-            print(
-                "오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
-            )
+            print("오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
             return None
         try:
             with _silence_yfinance_logs():
@@ -397,11 +445,18 @@ def _fetch_ohlcv_core(
             return None
 
     if country == "kor":
-        if not is_pykrx_available():
-            print(
-                "오류: pykrx 라이브러리가 설치되지 않았습니다. 'pip install pykrx'로 설치해주세요."
-            )
+        if _stock is None:
+            print("오류: pykrx 라이브러리가 설치되지 않았습니다. 'pip install pykrx'로 설치해주세요.")
             return None
+
+    if country == "kor":
+        # pykrx에 데이터를 요청하기 전에, 해당 기간에 거래일이 있는지 먼저 확인합니다.
+        # 거래일이 없는 기간(예: 주말, 연휴)에 대해 불필요한 예외 발생을 방지합니다.
+        trading_days_in_range = get_trading_days(
+            start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), "kor"
+        )
+        if not trading_days_in_range:
+            return None  # 거래일이 없으므로 데이터를 가져올 수 없는 것이 정상입니다.
 
         all_dfs = []
         pykrx_failed = False
@@ -428,15 +483,11 @@ def _fetch_ohlcv_core(
             except (json.JSONDecodeError, KeyError) as err:
                 pykrx_failed = True
                 pykrx_error_msg = str(err) or "JSON/KeyError"
-                print(
-                    f"경고: {ticker}의 {start_str}~{end_str} 기간 pykrx 조회 중 오류: {pykrx_error_msg}"
-                )
+                print(f"경고: {ticker}의 {start_str}~{end_str} 기간 pykrx 조회 중 오류: {pykrx_error_msg}")
                 break
             except Exception as e:
                 err_text = str(e)
-                print(
-                    f"경고: {ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {err_text}"
-                )
+                print(f"경고: {ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {err_text}")
                 if isinstance(e, KeyError) or "are in the [columns]" in err_text:
                     pykrx_failed = True
                     pykrx_error_msg = err_text
@@ -447,7 +498,12 @@ def _fetch_ohlcv_core(
         if not all_dfs:
             pykrx_failed = True
             if pykrx_error_msg is None:
-                pykrx_error_msg = "데이터 없음"
+                # 요청 기간의 마지막 거래일이 오늘인 경우, 데이터가 아직 집계되지 않았을 가능성을 안내합니다.
+                last_expected_day = max(trading_days_in_range)
+                if last_expected_day.date() == datetime.now().date():
+                    pykrx_error_msg = "데이터 없음 (장 마감 후 데이터가 집계되지 않았을 수 있습니다)"
+                else:
+                    pykrx_error_msg = "데이터 없음"
 
         if pykrx_failed:
             raise PykrxDataUnavailable(country, start_dt, end_dt, pykrx_error_msg)
@@ -466,9 +522,7 @@ def _fetch_ohlcv_core(
 
     if country == "aus":
         if yf is None:
-            print(
-                "오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
-            )
+            print("오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
             return None
 
         ticker_yf = format_aus_ticker_for_yfinance(ticker)
@@ -478,10 +532,19 @@ def _fetch_ohlcv_core(
                 start=start_dt,
                 end=end_dt + pd.Timedelta(days=1),
                 progress=False,
-                auto_adjust=False,
+                auto_adjust=False,  # 원본 데이터를 모두 가져옵니다.
             )
             if df.empty:
                 return None
+
+            # 실제 마감가를 unadjusted_close 컬럼에 백업합니다.
+            if "Close" in df.columns:
+                df["unadjusted_close"] = df["Close"]
+
+            # Adj Close가 있는 경우, 이를 계산의 기준으로 삼고 Close 컬럼에 덮어씁니다.
+            if "Adj Close" in df.columns:
+                df["Close"] = df["Adj Close"]
+
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
                 df = df.loc[:, ~df.columns.duplicated()]
@@ -610,7 +673,7 @@ def fetch_pykrx_name(ticker: str) -> str:
     if ticker in _pykrx_name_cache:
         return _pykrx_name_cache[ticker]
 
-    if not is_pykrx_available():
+    if _stock is None:
         return ""
 
     name = ""
@@ -709,3 +772,52 @@ def _get_display_name(country: str, ticker: str) -> str:
 
     _etf_name_cache[key] = name or ""
     return _etf_name_cache[key]
+
+
+def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
+    """Fetches the latest unadjusted closing price for a ticker."""
+    if not yf:
+        return None
+
+    yfinance_ticker = ticker
+    if country == "aus":
+        if not ticker.upper().endswith(".AX"):
+            yfinance_ticker = f"{ticker.upper()}.AX"
+    elif country == "kor":
+        if ticker.isdigit() and len(ticker) == 6:
+            yfinance_ticker = f"{ticker.KS}"
+
+    latest_trade_day = get_latest_trading_day(country)
+    if not latest_trade_day:
+        print(f"[ERROR] Could not determine latest trading day for country {country}.")
+        return None
+
+    start_date = latest_trade_day
+    end_date = latest_trade_day + pd.Timedelta(days=1)
+    date_str_for_log = start_date.strftime("%Y-%m-%d")
+
+    try:
+        print(
+            f"[INFO] Fetching unadjusted price for {yfinance_ticker} for trading day: {date_str_for_log}, {start_date.strftime('%Y-%m-%d')}, {end_date.strftime('%Y-%m-%d')}"
+        )
+
+        df = yf.download(
+            yfinance_ticker,
+            start=start_date.strftime("%Y-%m-%d"),
+            end=end_date.strftime("%Y-%m-%d"),
+            auto_adjust=False,
+            progress=False,
+            show_errors=False,  # 에러 로그를 직접 제어하기 위해 False로 설정
+        )
+
+        if df is not None and not df.empty:
+            return df["Close"].iloc[-1]
+        else:
+            print(f"[WARN] No data returned for {yfinance_ticker} for date {date_str_for_log}.")
+            return None
+
+    except Exception as e:
+        print(
+            f"[ERROR] yfinance download failed for {yfinance_ticker} (date: {date_str_for_log}): {e}"
+        )
+        return None
