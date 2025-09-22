@@ -109,7 +109,11 @@ def _get_status_target_date_str(country_code: str) -> str:
     local_today = now_local.date()
     today_str = pd.Timestamp(local_today).strftime("%Y-%m-%d")
 
-    close_time = datetime.strptime(MARKET_DISPLAY_SETTINGS[country_code]["close"], "%H:%M").time()
+    # 장 마감 시간에 30분 버퍼를 추가하여 현재가 데이터 지연에 대응합니다.
+    # 예: 한국 15:30 -> 16:00, 호주 16:00 -> 16:30 (현지시간 기준)
+    close_time_dt = datetime.strptime(MARKET_DISPLAY_SETTINGS[country_code]["close"], "%H:%M")
+    close_time_with_buffer = (close_time_dt + pd.Timedelta(minutes=30)).time()
+
     lookahead_end = pd.Timestamp(local_today) + pd.Timedelta(days=14)
     lookahead_end_str = lookahead_end.strftime("%Y-%m-%d")
 
@@ -122,7 +126,7 @@ def _get_status_target_date_str(country_code: str) -> str:
         return today_str
 
     is_trading_today = any(d.date() == local_today for d in upcoming_days)
-    if is_trading_today and now_local.time() < close_time:
+    if is_trading_today and now_local.time() < close_time_with_buffer:
         return today_str
 
     next_day = next((d for d in upcoming_days if d.date() > local_today), None)

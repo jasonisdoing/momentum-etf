@@ -652,7 +652,7 @@ def _determine_target_date_for_scheduler(country: str) -> pd.Timestamp:
     """
     스케줄러 실행 시, 현재 시간에 따라 계산 대상 날짜를 동적으로 결정합니다.
     - 코인: 항상 오늘
-    - 주식/ETF: 장 마감 2시간 후부터는 다음 거래일을 계산 대상으로 함.
+    - 주식/ETF: 장 마감 후 일정 시간(버퍼)까지는 당일을, 그 이후에는 다음 거래일을 계산 대상으로 함.
     """
     if country == "coin":
         # 서버의 시간대가 UTC일 수 있으므로, 한국 시간 기준으로 '오늘'을 결정합니다.
@@ -697,7 +697,8 @@ def _determine_target_date_for_scheduler(country: str) -> pd.Timestamp:
         close_datetime_naive = datetime.combine(today.date(), close_time)
         # Naive datetime을 localize 해야 시간대 계산이 정확함
         close_datetime_local = local_tz.localize(close_datetime_naive)
-        cutoff_datetime_local = close_datetime_local + pd.Timedelta(hours=2)
+        # 데이터 지연을 고려하여 30분 버퍼를 추가합니다.
+        cutoff_datetime_local = close_datetime_local + pd.Timedelta(minutes=30)
 
         if now_local < cutoff_datetime_local:
             # 컷오프 이전: 오늘 날짜를 대상으로 함
