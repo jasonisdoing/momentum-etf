@@ -1,18 +1,18 @@
 """
 APScheduler 기반 스케줄러
 
-환경변수로 크론 및 타임존을 설정할 수 있으며,
-기본값은 각 국가 장 마감 이후(평일)로 설정됩니다.
+[스케줄 설정]
+스케줄은 아래 환경 변수를 통해 설정할 수 있습니다.
+환경 변수가 없으면 각 작업의 기본값(Default)이 사용됩니다.
 
-ENV
-- SCHEDULE_ENABLE_KOR/AUS/COIN: "1"/"0" (기본 1)
-- SCHEDULE_KOR_CRON: 기본 "10 18 * * 1-5" (18:10, 평일)
-- SCHEDULE_AUS_CRON: 기본 "10 18 * * 1-5"
-- SCHEDULE_COIN_CRON: 기본 "5 0 * * *" (매일 00:05)
-- SCHEDULE_KOR_TZ: 기본 "Asia/Seoul"
-- SCHEDULE_AUS_TZ: 기본 "Australia/Sydney"
-- SCHEDULE_COIN_TZ: 기본 "Asia/Seoul"
-- RUN_IMMEDIATELY_ON_START: "1" 이면 시작 시 즉시 한 번 실행
+- SCHEDULE_ENABLE_KOR/AUS/COIN: "1" 또는 "0" (기본: "1", 활성화)
+- SCHEDULE_KOR_CRON: 한국 시그널 계산 주기
+- SCHEDULE_AUS_CRON: 호주 시그널 계산 주기
+- SCHEDULE_COIN_CRON: 코인 시그널 계산 주기
+- SCHEDULE_KOR_TZ: 한국 시간대 (기본: "Asia/Seoul")
+- SCHEDULE_AUS_TZ: 호주 시간대 (기본: "Australia/Sydney")
+- SCHEDULE_COIN_TZ: 코인 시간대 (기본: "Asia/Seoul")
+- RUN_IMMEDIATELY_ON_START: "1" 이면 시작 시 즉시 한 번 실행 (기본: "0")
 """
 
 import os
@@ -30,7 +30,6 @@ from apscheduler.triggers.cron import CronTrigger
 from utils.data_updater import update_etf_names
 from utils.env import load_env_if_present
 from utils.account_registry import get_accounts_by_country, load_accounts
-from utils.db_manager import get_common_settings
 
 
 def setup_logging():
@@ -191,12 +190,9 @@ def main():
 
     scheduler = BlockingScheduler()
 
-    # 공통 설정에서 스케줄 주기(시간) 읽기
-    common = get_common_settings() or {}
     # coin
     if _bool_env("SCHEDULE_ENABLE_COIN", True):
-        # DB의 크론 설정을 우선 사용, 없으면 환경변수 폴백
-        cron = common.get("SCHEDULE_CRON_COIN") or _get("SCHEDULE_COIN_CRON", "5 0 * * *")
+        cron = _get("SCHEDULE_COIN_CRON", "0,30 * * * *")
         tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,
@@ -208,7 +204,7 @@ def main():
 
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
-        cron = common.get("SCHEDULE_CRON_AUS") or _get("SCHEDULE_AUS_CRON", "10 18 * * 1-5")
+        cron = _get("SCHEDULE_AUS_CRON", "0,30 9-16 * * 1-5")
         tz = _get("SCHEDULE_AUS_TZ", "Australia/Sydney")
         scheduler.add_job(
             run_signals_for_country,
@@ -220,7 +216,7 @@ def main():
 
     # kor
     if _bool_env("SCHEDULE_ENABLE_KOR", True):
-        cron = common.get("SCHEDULE_CRON_KOR") or _get("SCHEDULE_KOR_CRON", "10 18 * * 1-5")
+        cron = _get("SCHEDULE_KOR_CRON", "0,30 9-16 * * 1-5")
         tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,

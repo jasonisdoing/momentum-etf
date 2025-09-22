@@ -24,11 +24,6 @@ warnings.filterwarnings(
     module=r"^pandas_market_calendars\.",
 )
 
-
-try:
-    from cron_descriptor import get_description as get_cron_description
-except ImportError:
-    get_cron_description = None
 try:
     from croniter import croniter
 except ImportError:
@@ -159,64 +154,6 @@ def _ensure_header_has_date(header: str, date: datetime) -> str:
 # --- Functions ---
 
 
-def render_cron_input(label, key, default_value, country_code: str):
-    """Crontab 입력을 위한 UI와 실시간 유효성 검사를 렌더링합니다."""
-    col1, col2 = st.columns([2, 3])
-    with col1:
-        st.text_input(
-            label,
-            value=default_value,
-            key=key,
-            help="Crontab 형식 입력 (예: '0 * * * *'는 매시간 실행)",
-        )
-    with col2:
-        # 폼이 렌더링될 때 st.session_state에서 현재 입력된 값을 가져와 유효성을 검사합니다.
-        current_val = st.session_state.get(key, default_value)
-        if croniter and current_val:
-            try:
-                if not croniter.is_valid(current_val):
-                    st.warning("❌ 잘못된 Crontab 형식입니다.")
-                else:
-                    display_text = "✅ 유효"
-                    if get_cron_description:
-                        try:
-                            desc_ko = ""
-                            try:
-                                # 최신 API (cron-descriptor >= 1.2.16)
-                                desc_ko = get_cron_description(
-                                    current_val,
-                                    locale="ko_KR",
-                                    use_24hour_time_format=True,  # type: ignore
-                                )
-                            except TypeError:
-                                # 구버전 API 폴백 (cron-descriptor < 1.2.16)
-                                from cron_descriptor import (
-                                    ExpressionDescriptor,
-                                    Options,
-                                )
-
-                                options = Options()
-                                options.use_24hour_time_format = True
-                                options.locale_code = "ko_KR"
-                                desc_ko = ExpressionDescriptor(
-                                    current_val, options
-                                ).get_description()
-
-                            if desc_ko:
-                                display_text = f"✅ 유효. {desc_ko}"
-                        except Exception as e:
-                            # 설명 생성 실패 시, 콘솔에 오류를 기록하고 기본 문구만 표시합니다.
-                            print(f"경고: Crontab 설명 생성 중 오류: {e}")
-
-                    # 수직 정렬을 위해 div와 패딩을 사용합니다.
-                    st.markdown(
-                        f"<div style='padding-top: 32px;'><span style='color:green;'>{display_text}</span></div>",
-                        unsafe_allow_html=True,
-                    )
-            except Exception as e:
-                st.error(f"오류: {e}")
-
-
 def _format_korean_datetime(dt: datetime) -> str:
     """날짜-시간 객체를 'YYYY년 MM월 DD일(요일) 오전/오후 HH시 MM분' 형식으로 변환합니다."""
     weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
@@ -281,16 +218,15 @@ def get_next_schedule_time_str(country_code: str) -> str:
     if not croniter or not pytz:
         return "스케줄러 라이브러리가 설치되지 않았습니다."
 
-    common_settings = get_common_settings() or {}
     cron_key = f"SCHEDULE_CRON_{country_code.upper()}"
-
     default_cron = {
         "kor": "10 18 * * 1-5",
         "aus": "10 18 * * 1-5",
         "coin": "5 0 * * *",
     }.get(country_code, "0 * * * *")
 
-    cron_value = common_settings.get(cron_key, default_cron)
+    # 환경 변수에서 크론 설정을 읽어옵니다. 없으면 기본값을 사용합니다.
+    cron_value = os.environ.get(cron_key, default_cron)
 
     # scheduler.py의 로직과 일관성을 맞추기 위해 타임존을 설정합니다.
     # 참고: scheduler.py에서는 호주(aus) 스케줄에 'Asia/Seoul'을 사용하고 있습니다.
@@ -593,70 +529,6 @@ def render_master_etf_ui(country_code: str):
             "is_active": st.column_config.CheckboxColumn("활성", disabled=True),
         },
     )
-
-
-def render_scheduler_tab():
-    """스케줄러 설정을 위한 UI를 렌더링합니다."""
-    st.header("스케줄러 설정 (모든 국가)")
-    st.info("각 국가별 시그널 계산 작업이 실행될 주기를 Crontab 형식으로 설정합니다.")
-
-    common_settings = get_common_settings() or {}
-
-    with st.form("scheduler_settings_form"):
-        st.subheader("한국 (KOR)")
-        kor_cron_key = "SCHEDULE_CRON_KOR"
-        kor_default_cron = "10 18 * * 1-5"
-        kor_cron_value = common_settings.get(kor_cron_key, kor_default_cron)
-        render_cron_input("실행 주기", "cron_input_kor_scheduler", kor_cron_value, "kor")
-
-        st.subheader("호주 (AUS)")
-        aus_cron_key = "SCHEDULE_CRON_AUS"
-        aus_default_cron = "10 18 * * 1-5"
-        aus_cron_value = common_settings.get(aus_cron_key, aus_default_cron)
-        render_cron_input("실행 주기", "cron_input_aus_scheduler", aus_cron_value, "aus")
-
-        st.subheader("가상화폐 (COIN)")
-        coin_cron_key = "SCHEDULE_CRON_COIN"
-        coin_default_cron = "5 0 * * *"
-        coin_cron_value = common_settings.get(coin_cron_key, coin_default_cron)
-        render_cron_input("실행 주기", "cron_input_coin_scheduler", coin_cron_value, "coin")
-
-        submitted = st.form_submit_button("스케줄러 설정 저장")
-
-        if submitted:
-            error = False
-            cron_settings_to_save = {}
-
-            # KOR
-            new_kor_cron = st.session_state["cron_input_kor_scheduler"]
-            if croniter and not croniter.is_valid(new_kor_cron):
-                st.error("한국(KOR)의 Crontab 형식이 올바르지 않습니다.")
-                error = True
-            else:
-                cron_settings_to_save[kor_cron_key] = new_kor_cron.strip()
-
-            # AUS
-            new_aus_cron = st.session_state["cron_input_aus_scheduler"]
-            if croniter and not croniter.is_valid(new_aus_cron):
-                st.error("호주(AUS)의 Crontab 형식이 올바르지 않습니다.")
-                error = True
-            else:
-                cron_settings_to_save[aus_cron_key] = new_aus_cron.strip()
-
-            # COIN
-            new_coin_cron = st.session_state["cron_input_coin_scheduler"]
-            if croniter and not croniter.is_valid(new_coin_cron):
-                st.error("가상화폐(COIN)의 Crontab 형식이 올바르지 않습니다.")
-                error = True
-            else:
-                cron_settings_to_save[coin_cron_key] = new_coin_cron.strip()
-
-            if not error:
-                if save_common_settings(cron_settings_to_save):
-                    st.success("스케줄러 설정을 성공적으로 저장했습니다.")
-                    st.rerun()
-                else:
-                    st.error("스케줄러 설정 저장에 실패했습니다.")
 
 
 def _display_success_toast(key_prefix: str):
@@ -1770,8 +1642,8 @@ def main():
     duration = time.time() - start_time
     print(f"[MAIN] 4/4: 계좌 정보 로딩 완료 ({duration:.2f}초)")
 
-    tab_names = ["한국", "호주", "코인", "스케줄러", "설정"]
-    tab_kor, tab_aus, tab_coin, tab_scheduler, tab_settings = st.tabs(tab_names)
+    tab_names = ["한국", "호주", "코인", "설정"]
+    tab_kor, tab_aus, tab_coin, tab_settings = st.tabs(tab_names)
 
     with tab_kor:
         render_country_tab("kor", accounts=account_map.get("kor"))
@@ -1779,8 +1651,6 @@ def main():
         render_country_tab("aus", accounts=account_map.get("aus"))
     with tab_coin:
         render_country_tab("coin", accounts=account_map.get("coin"))
-    with tab_scheduler:
-        render_scheduler_tab()
     with tab_settings:
         st.header("공통 설정 (모든 국가 공유)")
         common = get_common_settings() or {}
