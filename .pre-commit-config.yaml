@@ -1,10 +1,18 @@
-# .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.3.0
+  - repo: local
     hooks:
-      - id: flake8
+      - id: update-app-datetime
+        name: Update APP_DATE_TIME
+        entry: ./update_app_datetime.sh
+        language: system
+        stages: [pre-push]
+
   - repo: https://github.com/psf/black
-    rev: 24.10.0
+    rev: 23.9.1
     hooks:
       - id: black
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.1.0
+    hooks:
+      - id: flake8

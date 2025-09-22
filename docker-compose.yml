@@ -6,6 +6,6 @@ services:
       - .env
     environment:
       - TZ=Asia/Seoul
-    command: python s.py
+    command: python aps.py
     volumes:
       - ./logs:/app/logs

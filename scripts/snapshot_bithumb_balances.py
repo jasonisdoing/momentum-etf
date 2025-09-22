@@ -11,8 +11,11 @@ Usage:
 import os
 import sys
 from datetime import datetime
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import requests
 
 from utils.data_loader import fetch_ohlcv
 from utils.db_manager import save_daily_equity
@@ -74,6 +77,24 @@ def _get_total_amount_for(symbol: str, bal: dict) -> float:
     return 0.0
 
 
+def _fetch_bithumb_realtime_price(symbol: str) -> Optional[float]:
+    symbol = symbol.upper()
+    if symbol in {"KRW", "P"}:
+        return 1.0
+    url = f"https://api.bithumb.com/public/ticker/{symbol}_KRW"
+    try:
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, dict) and data.get("status") == "0000":
+            closing_price = data.get("data", {}).get("closing_price")
+            if closing_price is not None:
+                return float(str(closing_price).replace(",", ""))
+    except Exception:
+        return None
+    return None
+
+
 def main():
     load_env_if_present()
     # Fetch balances first
@@ -108,17 +129,18 @@ def main():
         qty = _get_total_amount_for(c, bal)
         if qty <= 0:
             continue
-        price = 0.0
-        df = fetch_ohlcv(c, country="coin")
-        if df is not None and not df.empty:
-            try:
-                price = float(df["Close"].iloc[-1])
-            except Exception:
-                price = 0.0
+        price = _fetch_bithumb_realtime_price(c) or 0.0
+        if price <= 0:
+            df = fetch_ohlcv(c, country="coin")
+            if df is not None and not df.empty:
+                try:
+                    price = float(df["Close"].iloc[-1])
+                except Exception:
+                    price = 0.0
         total_value += qty * price
 
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    ok = save_daily_equity("coin", today, total_value)
+    ok = save_daily_equity("coin", "b1", today, total_value)
     if ok:
         print(
             f"[OK] Saved coin daily equity for {today.strftime('%Y-%m-%d')}: {int(total_value):,} KRW"

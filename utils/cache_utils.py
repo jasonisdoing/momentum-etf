@@ -1,4 +1,4 @@
-"""Utility helpers for OHLCV caching on disk."""
+"""OHLCV 데이터를 디스크에 캐싱하고 관리하기 위한 헬퍼 함수 모음입니다."""
 
 import re
 from pathlib import Path
@@ -10,21 +10,21 @@ CACHE_ROOT = Path(__file__).resolve().parents[1] / "data" / "cache"
 
 
 def _sanitize_ticker(ticker: str) -> str:
-    """파일 시스템에 안전한 티커 문자열을 반환합니다."""
+    """파일 시스템에 안전하게 저장할 수 있는 티커 문자열을 생성합니다."""
     if not ticker:
         return "unknown"
     return re.sub(r"[^A-Za-z0-9._-]", "_", ticker.upper())
 
 
 def get_cache_path(country: str, ticker: str) -> Path:
-    """캐시 파일 경로를 반환합니다 (없으면 생성하지는 않음)."""
+    """캐시 파일 경로를 반환합니다. (존재하지 않으면 생성하지 않습니다.)"""
     safe_country = (country or "global").lower()
     safe_ticker = _sanitize_ticker(ticker)
     return CACHE_ROOT / safe_country / f"{safe_ticker}.pkl"
 
 
 def load_cached_frame(country: str, ticker: str) -> Optional[pd.DataFrame]:
-    """저장된 캐시 DataFrame을 로드합니다. 없으면 None."""
+    """저장된 캐시 DataFrame을 로드하고, 없으면 None을 반환합니다."""
     path = get_cache_path(country, ticker)
     if not path.exists():
         return None

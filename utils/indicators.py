@@ -1,7 +1,9 @@
 """
 보조지표 계산 함수 모음 (e.g., SuperTrend, EMA, etc.)
 """
+
 import pandas as pd
+
 
 def supertrend_direction(df: pd.DataFrame, period: int, multiplier: float) -> pd.Series:
     """SuperTrend 방향을 계산합니다. (+1: 상향, -1: 하향)"""
@@ -36,8 +38,8 @@ def supertrend_direction(df: pd.DataFrame, period: int, multiplier: float) -> pd
             st.iloc[i] = upperband.iloc[i]
             direction.iloc[i] = -1
             continue
-        prev_st = st.iloc[i-1]
-        prev_dir = direction.iloc[i-1]
+        prev_st = st.iloc[i - 1]
+        prev_dir = direction.iloc[i - 1]
         curr_close = close.iloc[i]
 
         if curr_close > prev_st:

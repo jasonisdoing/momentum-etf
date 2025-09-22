@@ -100,9 +100,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
                     ).where(df_merged["price_yest"] > 0, 0)
 
                     # 필요한 컬럼만 선택하여 df_change에 추가합니다.
-                    df_etf_filtered = df_merged[
-                        ["등락률"]
-                    ].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
+                    df_etf_filtered = df_merged[["등락률"]].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
                     df_change = pd.concat([df_change, df_etf_filtered], ignore_index=True)
             except Exception as e:
                 print(f"경고: ETF 정보 조회 중 오류가 발생했습니다: {e}")
@@ -116,9 +114,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
                     latest_day, latest_day, market="ALL"
                 )
                 # 필요한 컬럼만 선택하여 df_change에 추가합니다.
-                df_stock_filtered = df_stock[
-                    ["등락률"]
-                ].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
+                df_stock_filtered = df_stock[["등락률"]].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
                 df_change = pd.concat([df_change, df_stock_filtered], ignore_index=True)
             except Exception as e:
                 print(f"경고: 일반 주식 정보 조회 중 오류가 발생했습니다: {e}")
@@ -153,14 +149,10 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             # '|'로 키워드를 연결하여 정규식 OR 조건 생성
             exclude_pattern = "|".join(EXCLUDE_KEYWORDS)
             # '종목명'에 키워드가 포함되지 않은 행만 남김
-            top_gainers = top_gainers[
-                ~top_gainers["종목명"].str.contains(exclude_pattern, na=False)
-            ]
+            top_gainers = top_gainers[~top_gainers["종목명"].str.contains(exclude_pattern, na=False)]
             filtered_count = initial_count - len(top_gainers)
             if filtered_count > 0:
-                print(
-                    f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {filtered_count}개 종목을 제외했습니다."
-                )
+                print(f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {filtered_count}개 종목을 제외했습니다.")
 
         # 등락률 순으로 정렬
         sorted_gainers = top_gainers.sort_values(by="등락률", ascending=False)
@@ -175,9 +167,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="금일 급등주를 보여줍니다.")
-    parser.add_argument(
-        "--min-change", type=float, default=3.0, help="검색할 최소 등락률 (기본값: 5.0)"
-    )
+    parser.add_argument("--min-change", type=float, default=3.0, help="검색할 최소 등락률 (기본값: 5.0)")
     parser.add_argument(
         "--type",
         type=str,

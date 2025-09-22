@@ -7,7 +7,7 @@ MomentumEtf 프로젝트의 웹 애플리케이션 실행 파일입니다.
 [사용법]
 python run.py
 
-백테스트, 현황 조회 등 다른 CLI 기능은 `cli.py`를 사용하세요.
+백테스트, 시그널 조회 등 다른 CLI 기능은 `cli.py`를 사용하세요.
 (예: python cli.py kor --test)
 """
 
