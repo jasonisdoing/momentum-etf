@@ -5,7 +5,7 @@ repos:
         name: Update APP_DATE_TIME
         entry: ./update_app_datetime.sh
         language: system
-        stages: [pre-commit]
+        stages: [pre-push]
 
   - repo: https://github.com/psf/black
     rev: 23.9.1

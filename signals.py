@@ -1053,12 +1053,34 @@ def _fetch_and_prepare_data(
         len(pairs),
     )
 
-    # 실시간 가격 조회는 포트폴리오 기준일이 오늘일 경우에만 시도합니다.
+    # 실시간 가격을 조회할지 여부를 결정합니다.
+    # - 코인: 항상 조회
+    # - 한국: 거래일의 장 시작(09시) ~ 자정까지 조회 (DEVELOPMENT_RULES.md 2.2)
+    # - 호주: 장중(10:00-16:00)에만 조회
     today_cal = pd.Timestamp.now().normalize()
-    market_is_open = is_market_open(country) and base_date.date() == today_cal.date()
-    if market_is_open and base_date.date() == today_cal.date():
+    use_realtime = False
+    if base_date.date() == today_cal.date():
+        if country == "coin":
+            use_realtime = True
+        elif country == "kor":
+            if pytz:
+                try:
+                    seoul_tz = pytz.timezone("Asia/Seoul")
+                    now_local = datetime.now(seoul_tz)
+                    if _is_trading_day(country, now_local) and now_local.hour >= 9:
+                        use_realtime = True
+                except Exception:
+                    pass  # pytz 또는 타임존 오류 시 False 유지
+        else:  # aus
+            use_realtime = is_market_open(country)
+
+    if use_realtime:
         if country == "kor":
-            print("-> 장중입니다. 네이버 금융에서 실시간 시세를 가져옵니다 (비공식, 지연 가능).")
+            print("-> 장중 또는 장 마감 직후입니다. 네이버 금융에서 실시간 시세를 가져옵니다.")
+        elif country == "coin":
+            print("-> 실시간 시세를 가져옵니다 (코인).")
+        else:  # aus
+            print("-> 장중입니다. 실시간 시세를 가져옵니다.")
 
     # --- 신호 계산 (공통 설정에서) ---
     common = get_common_settings()
@@ -1089,7 +1111,7 @@ def _fetch_and_prepare_data(
     # 개장 중일 경우, 모든 종목의 실시간 가격을 미리 한 번에 조회합니다.
     # 이 가격은 추세 분석(이동평균 계산)에 사용됩니다.
     realtime_prices: Dict[str, Optional[float]] = {}
-    if market_is_open:
+    if use_realtime:
         print("-> 실시간 가격 일괄 조회 시작...")
 
         def _fetch_realtime_price(tkr_local: str) -> Optional[float]:
@@ -1250,7 +1272,11 @@ def _fetch_and_prepare_data(
 
         m = result["ma"].iloc[-1]
 
-        prev_close = _resolve_previous_close(result["close"], base_date)
+        # `base_date`가 '다음 거래일'인 경우, `prev_close`는 '어제' 종가를 의미해야 합니다.
+        # `result["close"]`는 '오늘'까지의 데이터를 포함하므로, '오늘'을 기준으로 이전 종가를 찾습니다.
+        today_cal = pd.Timestamp.now().normalize()
+        date_for_prev_close = today_cal if base_date.date() > today_cal.date() else base_date
+        prev_close = _resolve_previous_close(result["close"], date_for_prev_close)
 
         if pd.notna(m) and m > 0:
             ma_score = (c0 / m) - 1.0
@@ -1384,22 +1410,25 @@ def _build_header_line(
     else:
         day_label = "오늘"
 
-    # 일간 수익률: 다음 거래일 기준일에는 아직 수익률이 없으므로 0 처리
+    # 일간 수익률 계산
+    # '다음 거래일' 리포트의 일간 수익률은 '오늘'의 수익률을 의미합니다.
+    # 따라서 이전 스냅샷을 조회하는 기준 날짜를 조정합니다.
     if day_label == "다음 거래일":
-        day_ret_pct = 0.0
-        day_profit_loss = 0.0
+        # `current_equity`는 오늘의 종가 기준 평가금액입니다.
+        # 따라서 '오늘'을 기준으로 이전 스냅샷(어제)을 가져와야 합니다.
+        compare_date_for_prev = today_cal
     else:
-        compare_date = base_date
-        prev_snapshot = get_previous_portfolio_snapshot(
-            country, compare_date, portfolio_settings.get("account")
-        )
-        prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else None
-        day_ret_pct = (
-            ((current_equity / prev_equity) - 1.0) * 100.0
-            if prev_equity and prev_equity > 0
-            else 0.0
-        )
-        day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
+        # '오늘' 또는 '과거' 리포트에서는 `base_date`를 기준으로 이전 스냅샷을 가져옵니다.
+        compare_date_for_prev = base_date
+
+    prev_snapshot = get_previous_portfolio_snapshot(
+        country, compare_date_for_prev, portfolio_settings.get("account")
+    )
+    prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else None
+    day_ret_pct = (
+        ((current_equity / prev_equity) - 1.0) * 100.0 if prev_equity and prev_equity > 0 else 0.0
+    )
+    day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
 
     # 평가 수익률
     total_aus_etf_acquisition_cost = sum(
@@ -1951,11 +1980,11 @@ def generate_signal_report(
         amount = sh * price if pd.notna(price) else 0.0
         # 일간 수익률 계산
         prev_close = d.get("prev_close")
-        day_ret = 0.0
-        # 다음 거래일 화면에서는 아직 일간 수익률이 없으므로 0으로 고정
-        if day_label != "다음 거래일":
-            if prev_close is not None and prev_close > 0 and pd.notna(price):
-                day_ret = ((price / prev_close) - 1.0) * 100.0
+        day_ret = (
+            ((price / prev_close) - 1.0) * 100.0
+            if prev_close is not None and prev_close > 0 and pd.notna(price)
+            else 0.0
+        )
 
         buy_date_display = buy_date.strftime("%Y-%m-%d") if buy_date else "-"
         holding_days_display = str(holding_days) if holding_days > 0 else "-"

@@ -113,7 +113,6 @@ def _get_status_target_date_str(country_code: str) -> str:
     # 예: 한국 15:30 -> 16:00, 호주 16:00 -> 16:30 (현지시간 기준)
     close_time_dt = datetime.strptime(MARKET_DISPLAY_SETTINGS[country_code]["close"], "%H:%M")
     close_time_with_buffer = (close_time_dt + pd.Timedelta(minutes=30)).time()
-
     lookahead_end = pd.Timestamp(local_today) + pd.Timedelta(days=14)
     lookahead_end_str = lookahead_end.strftime("%Y-%m-%d")
 
