@@ -22,7 +22,7 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
 # --- 계좌별 기본 명령어 (signal, test, tune) ---
 
 # 한국 (KOR) / m1 계좌
-python cli.py kor --signal --account m2 --date 2025-09-22
+python cli.py kor --signal --account m3 --date 2025-09-22
 python cli.py kor --test --account m1
 python cli.py kor --tune --account m1
 
@@ -222,7 +222,7 @@ def main():
         except Exception as e:
             print(f"\n오류: 시그널 생성 중 오류가 발생했습니다: {e}")
             return
-
+        print(11111112222222)
         if report_date:
             duration = time.time() - start_time
             send_summary_notification(country, account, report_date, duration, old_equity)

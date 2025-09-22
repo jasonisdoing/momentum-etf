@@ -2776,7 +2776,6 @@ def send_summary_notification(
     old_equity: float,
 ) -> None:
     """작업 완료 요약 슬랙 알림을 전송합니다."""
-    from utils.notify import get_slack_webhook_url, send_slack_message
     from utils.db_manager import get_portfolio_snapshot, get_portfolio_settings
     from utils.report import format_aud_money, format_kr_money
 
@@ -2827,10 +2826,7 @@ def send_summary_notification(
             )
             message += f" | {equity_change_message}"
 
-        # Get webhook and send message
-        webhook_url = get_slack_webhook_url(country, account=account)
-        if webhook_url:
-            send_slack_message(message, webhook_url=webhook_url)
+        send_log_to_slack(message)
     except Exception as e:
         logging.error(
             f"Failed to send summary notification for {country}/{account}: {e}", exc_info=True
