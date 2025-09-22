@@ -718,7 +718,7 @@ def calculate_consecutive_holding_info(
 ) -> Dict[str, Dict]:
     """
     'trades' 컬렉션을 스캔하여 지정된 계좌의 각 티커별 연속 보유 시작일을 계산합니다.
-    'buy_date' (연속 보유 시작일)을 포함한 딕셔너리를 반환합니다.
+    N+1 DB 조회를 피하기 위해 모든 종목의 거래를 한 번에 가져옵니다.
     """
     holding_info = {tkr: {"buy_date": None} for tkr in held_tickers}
     if not held_tickers:
@@ -729,46 +729,51 @@ def calculate_consecutive_holding_info(
         print("-> 경고: DB에 연결할 수 없어 보유일 계산을 건너뜁니다.")
         return holding_info
 
+    if not account:
+        raise ValueError("account is required for calculating holding info")
+
     # 코인은 트레이드가 시각 포함으로 기록되므로, 동일 달력일의 모든 거래를 포함하도록
     # as_of_date 상한을 해당일 23:59:59.999999로 확장합니다.
     # 모든 국가에 대해 동일하게 적용하여, 특정 날짜의 모든 거래를 포함하도록 합니다.
     include_until = as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-    for tkr in held_tickers:
-        try:
-            query = {
-                "country": country,
-                "ticker": tkr,
-                "date": {"$lte": include_until},
-            }
-            if not account:
-                raise ValueError("account is required for calculating holding info")
-            query["account"] = account
+    # 1. 모든 보유 종목의 거래 내역을 한 번의 쿼리로 가져옵니다.
+    query = {
+        "country": country,
+        "account": account,
+        "ticker": {"$in": held_tickers},
+        "date": {"$lte": include_until},
+    }
+    all_trades = list(
+        db.trades.find(
+            query,
+            sort=[("date", DESCENDING), ("_id", DESCENDING)],
+        )
+    )
 
-            # 해당 티커의 모든 거래를 날짜 내림차순, 그리고 같은 날짜 내에서는 생성 순서(_id) 내림차순으로 가져옵니다.
-            # 이를 통해 동일한 날짜에 발생한 거래의 순서를 정확히 반영하여 연속 보유 기간을 계산합니다.
-            trades = list(
-                db.trades.find(
-                    query,
-                    sort=[("date", DESCENDING), ("_id", DESCENDING)],
-                )
+    # 2. 거래 내역을 티커별로 그룹화합니다.
+    from collections import defaultdict
+
+    trades_by_ticker = defaultdict(list)
+    for trade in all_trades:
+        trades_by_ticker[trade["ticker"]].append(trade)
+
+    # 3. 각 티커별로 연속 보유 시작일을 계산합니다.
+    for tkr in held_tickers:
+        trades = trades_by_ticker.get(tkr)
+        if not trades:
+            continue
+
+        try:
+            # 현재 보유 수량을 계산합니다. (모든 거래의 합)
+            current_shares = sum(
+                t["shares"] if t["action"] == "BUY" else -t["shares"] for t in trades
             )
 
-            if not trades:
-                continue
-
-            # 현재 보유 수량을 계산합니다.
-            current_shares = 0
-            for trade in reversed(trades):  # 시간순으로 반복
-                if trade["action"] == "BUY":
-                    current_shares += trade["shares"]
-                elif trade["action"] == "SELL":
-                    current_shares -= trade["shares"]
-
-            # 현재부터 과거로 시간을 거슬러 올라가며 확인합니다.
+            # 현재부터 과거로 시간을 거슬러 올라가며 확인합니다. (trades는 날짜 내림차순으로 정렬되어 있음)
             buy_date = None
-            for trade in trades:  # 날짜 내림차순으로 정렬되어 있음
-                if current_shares <= 0:
+            for trade in trades:
+                if current_shares <= COIN_ZERO_THRESHOLD:
                     break  # 현재 보유 기간의 시작점을 지났음
 
                 buy_date = trade["date"]  # 잠재적인 매수 시작일

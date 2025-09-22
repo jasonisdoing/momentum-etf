@@ -708,7 +708,11 @@ def _account_prefix(country_code: str, account_code: Optional[str]) -> str:
     return f"{country_code}_{account_code or 'default'}"
 
 
-def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
+def _render_account_dashboard(
+    country_code: str,
+    account_entry: Dict[str, Any],
+    prefetched_trading_days: Optional[List[pd.Timestamp]] = None,
+):
     """지정된 계좌의 시그널/평가/거래/설정을 렌더링합니다."""
     print(f"\n[{country_code.upper()}/{account_entry.get('account')}] 대시보드 렌더링 시작...")
 
@@ -1012,14 +1016,17 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
     if country_code != "coin":
         print(f"[{country_code.upper()}/{account_code}] 휴장일 필터링 시작...")
         start_time_filter = time.time()
-        if date_options:
+        if date_options:  # noqa: SIM102
             # 전체 기간에 대한 거래일을 한 번에 조회하여 성능을 최적화합니다.
-            min_date = min(date_options)
-            max_date = max(date_options)
-            all_trading_days_in_range = get_trading_days(min_date, max_date, country_code)
-            # O(1) 조회를 위해 날짜 문자열 set으로 변환합니다.
-            trading_day_set = {d.strftime("%Y-%m-%d") for d in all_trading_days_in_range}
-            date_options = [d for d in date_options if d in trading_day_set]
+            if prefetched_trading_days is not None:
+                trading_day_set = {d.strftime("%Y-%m-%d") for d in prefetched_trading_days}
+                date_options = [d for d in date_options if d in trading_day_set]
+            else:  # 폴백
+                min_date = min(date_options)
+                max_date = max(date_options)
+                all_trading_days_in_range = get_trading_days(min_date, max_date, country_code)
+                trading_day_set = {d.strftime("%Y-%m-%d") for d in all_trading_days_in_range}
+                date_options = [d for d in date_options if d in trading_day_set]
         duration_filter = time.time() - start_time_filter
         print(
             f"[{country_code.upper()}/{account_code}] 휴장일 필터링 완료. 유효 날짜 {len(date_options)}개. ({duration_filter:.2f}초)"
@@ -1348,7 +1355,14 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
             end_date_str = final_end_dt.strftime("%Y-%m-%d")
 
             with st.spinner("거래일 및 평가금액 데이터를 불러오는 중..."):
-                all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
+                if prefetched_trading_days is not None:
+                    start_dt = pd.to_datetime(start_date_str).normalize()
+                    end_dt = pd.to_datetime(end_date_str).normalize()
+                    all_trading_days = [
+                        d for d in prefetched_trading_days if start_dt <= d <= end_dt
+                    ]
+                else:
+                    all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
                 trading_day_set = set()
                 if not all_trading_days:
                     if country_code == "kor":
@@ -1620,13 +1634,33 @@ def render_country_tab(country_code: str, accounts: Optional[List[Dict[str, Any]
     account_entries = _prepare_account_entries(country_code, accounts)
     account_labels = [_account_label(entry) for entry in account_entries]
 
+    # --- 최적화: 국가 내 모든 계좌의 거래일을 한 번에 미리 조회합니다 ---
+    all_snapshot_dates_for_country = []
+    if country_code != "coin":
+        for entry in account_entries:
+            account_code = entry.get("account")
+            if account_code:
+                all_snapshot_dates_for_country.extend(
+                    get_available_snapshot_dates(country_code, account=account_code)
+                )
+
+    all_trading_days_in_range = []
+    if all_snapshot_dates_for_country:
+        # get_available_snapshot_dates는 날짜를 내림차순으로 반환합니다.
+        # 오름차순으로 정렬하여 min/max를 찾습니다.
+        unique_dates = sorted(list(set(all_snapshot_dates_for_country)))
+        if unique_dates:
+            min_date = unique_dates[0]
+            max_date = unique_dates[-1]
+            all_trading_days_in_range = get_trading_days(min_date, max_date, country_code)
+
     tab_labels = account_labels + ["종목 관리"]
 
     tabs = st.tabs(tab_labels)
 
     for tab, entry in zip(tabs[: len(account_entries)], account_entries):
         with tab:
-            _render_account_dashboard(country_code, entry)
+            _render_account_dashboard(country_code, entry, all_trading_days_in_range)
 
     with tabs[-1]:
         with st.spinner("종목 관리 데이터를 불러오는 중..."):
