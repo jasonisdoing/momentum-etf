@@ -9,7 +9,7 @@
 logs/
 
 # 메모 파일
-memo.txt
+memo*.txt
 
 # Python
 __pycache__/
