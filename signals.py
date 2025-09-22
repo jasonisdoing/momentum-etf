@@ -1414,21 +1414,23 @@ def _build_header_line(
     # '다음 거래일' 리포트의 일간 수익률은 '오늘'의 수익률을 의미합니다.
     # 따라서 이전 스냅샷을 조회하는 기준 날짜를 조정합니다.
     if day_label == "다음 거래일":
-        # `current_equity`는 오늘의 종가 기준 평가금액입니다.
-        # 따라서 '오늘'을 기준으로 이전 스냅샷(어제)을 가져와야 합니다.
-        compare_date_for_prev = today_cal
+        # '다음 거래일' 리포트에서는 일간 수익률을 0으로 표시합니다.
+        day_ret_pct = 0.0
+        day_profit_loss = 0.0
+        prev_equity = None
     else:
         # '오늘' 또는 '과거' 리포트에서는 `base_date`를 기준으로 이전 스냅샷을 가져옵니다.
         compare_date_for_prev = base_date
-
-    prev_snapshot = get_previous_portfolio_snapshot(
-        country, compare_date_for_prev, portfolio_settings.get("account")
-    )
-    prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else None
-    day_ret_pct = (
-        ((current_equity / prev_equity) - 1.0) * 100.0 if prev_equity and prev_equity > 0 else 0.0
-    )
-    day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
+        prev_snapshot = get_previous_portfolio_snapshot(
+            country, compare_date_for_prev, portfolio_settings.get("account")
+        )
+        prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else None
+        day_ret_pct = (
+            ((current_equity / prev_equity) - 1.0) * 100.0
+            if prev_equity and prev_equity > 0
+            else 0.0
+        )
+        day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
 
     # 평가 수익률
     total_aus_etf_acquisition_cost = sum(
@@ -1659,50 +1661,58 @@ def generate_signal_report(
         and pd.to_datetime(equity_date).normalize() != base_date.normalize()
     )
 
-    should_autocorrect = False
-    if country == "coin":
-        # 코인은 항상 최신 잔액으로 덮어씀
-        should_autocorrect = abs(new_equity_candidate - current_equity) > 1e-9
-    else:
-        # 주식/ETF는 증가하는 경우에만 보정
-        should_autocorrect = new_equity_candidate > 0 and (
-            new_equity_candidate > current_equity or current_equity == 0
-        )
-
     # 3. 최종 평가금액 및 DB 저장 여부 결정
     final_equity = current_equity
     updated_by = None
     old_equity_for_log = current_equity
 
-    if should_autocorrect:
-        final_equity = new_equity_candidate
-        updated_by = "스케줄러(보정)"
-    elif is_carried_forward and current_equity > 0:
-        # 자동 보정은 필요 없지만, 과거 데이터를 현재 날짜로 이월해야 함
-        final_equity = current_equity  # 값은 그대로
+    if is_carried_forward:
+        # 휴장일 등: 과거 평가금액을 현재 날짜로 이월만 합니다. 보정(재계산)은 하지 않습니다.
+        final_equity = current_equity  # 값은 그대로 유지
         updated_by = "스케줄러(이월)"
+    else:
+        # 거래일: 자동 보정 로직을 적용합니다.
+        should_autocorrect = False
+        autocorrect_reason = ""
+        if country == "coin":
+            # 코인은 항상 최신 잔액으로 덮어씁니다.
+            if abs(new_equity_candidate - current_equity) > 1e-9:
+                should_autocorrect = True
+                autocorrect_reason = "보정"
+        elif new_equity_candidate > 0 and (
+            new_equity_candidate > current_equity or current_equity == 0
+        ):
+            # 주식/ETF는 오늘 날짜의 평가금액이 이미 있을 때, 증가하는 경우에만 보정합니다.
+            should_autocorrect = True
+            autocorrect_reason = "보정"
+
+        if should_autocorrect:
+            final_equity = new_equity_candidate
+            updated_by = f"스케줄러({autocorrect_reason})"
 
     # 4. DB에 저장 및 컨텍스트 업데이트
-    if updated_by and abs(final_equity - old_equity_for_log) >= 1.0:
-        is_base_date_trading_day = _is_trading_day(country, base_date.to_pydatetime())
-        if is_base_date_trading_day:
-            from utils.db_manager import save_daily_equity
+    # '이월'의 경우 평가금액 변동이 없으므로, updated_by가 설정되었는지 여부로 저장 로직을 트리거합니다.
+    if updated_by:
+        # 이월(휴장일) 또는 보정(거래일) 시 모두 DB에 저장합니다.
+        from utils.db_manager import save_daily_equity
 
-            is_data_to_save = None
-            if country == "aus":
-                is_data_to_save = portfolio_data.get("international_shares")
+        is_data_to_save = None
+        if country == "aus":
+            is_data_to_save = portfolio_data.get("international_shares")
 
-            save_success = save_daily_equity(
-                country,
-                account,
-                base_date.to_pydatetime(),
-                final_equity,
-                is_data_to_save,
-                updated_by=updated_by,
-            )
+        save_success = save_daily_equity(
+            country,
+            account,
+            base_date.to_pydatetime(),
+            final_equity,
+            is_data_to_save,
+            updated_by=updated_by,
+        )
 
-            if save_success:
-                if updated_by == "스케줄러(보정)":
+        if save_success:
+            if "보정" in updated_by:
+                # 보정은 금액 변동이 있을 때만 로그를 남깁니다.
+                if abs(final_equity - old_equity_for_log) >= 1.0:
                     log_msg = f"평가금액 자동 보정: {old_equity_for_log:,.0f}원 -> {final_equity:,.0f}원"
                     print(f"-> {log_msg}")
                     equity_message_line = _get_equity_update_message_line(
@@ -1711,7 +1721,7 @@ def generate_signal_report(
                     slack_message_lines.append(equity_message_line)
                 else:  # 이월
                     log_msg = (
-                        f"평가금액 이월: {pd.to_datetime(equity_date).strftime('%Y-%m-%d')}의 평가금액"
+                        f"평가금액 이월: {pd.to_datetime(equity_date).strftime('%Y-%m-%d')}의 평가금액 "
                         f"({final_equity:,.0f}원)을 {base_date.strftime('%Y-%m-%d')}으로 저장했습니다."
                     )
                     print(f"-> {log_msg}")
@@ -1735,6 +1745,26 @@ def generate_signal_report(
                     account,
                     base_date.strftime("%Y-%m-%d"),
                 )
+
+                logger.info(
+                    "[%s/%s] Daily equity updated by %s on %s: %0.2f",
+                    country.upper(),
+                    account,
+                    updated_by,
+                    base_date.strftime("%Y-%m-%d"),
+                    final_equity,
+                )
+
+                # 로컬 컨텍스트 업데이트
+                current_equity = final_equity
+                portfolio_data["total_equity"] = final_equity
+        else:
+            logger.error(
+                "[%s/%s] daily_equities 저장 실패: %s",
+                country.upper(),
+                account,
+                base_date.strftime("%Y-%m-%d"),
+            )
 
     # 현재 보유 종목의 카테고리 (TBD 제외)
     held_categories = set()
@@ -1979,12 +2009,16 @@ def generate_signal_report(
 
         amount = sh * price if pd.notna(price) else 0.0
         # 일간 수익률 계산
+        # '다음 거래일' 리포트에서는 일간 수익률을 0으로 표시합니다.
+        is_next_day_report = base_date.date() > pd.Timestamp.now().normalize().date()
         prev_close = d.get("prev_close")
-        day_ret = (
-            ((price / prev_close) - 1.0) * 100.0
-            if prev_close is not None and prev_close > 0 and pd.notna(price)
-            else 0.0
-        )
+        day_ret = 0.0
+        if not is_next_day_report:
+            day_ret = (
+                ((price / prev_close) - 1.0) * 100.0
+                if prev_close is not None and prev_close > 0 and pd.notna(price)
+                else 0.0
+            )
 
         buy_date_display = buy_date.strftime("%Y-%m-%d") if buy_date else "-"
         holding_days_display = str(holding_days) if holding_days > 0 else "-"
@@ -2465,7 +2499,7 @@ def main(
             if idx is not None:
                 val = display_row[idx]
                 if isinstance(val, (int, float)):
-                    display_row[idx] = f"{val * 100:+.1f}%"
+                    display_row[idx] = f"{val * 100:.1f}"
                 else:
                     display_row[idx] = "-"
 
@@ -2725,7 +2759,7 @@ def _maybe_notify_detailed_signal(
             if idx_score is not None:
                 sc = row[idx_score]
                 if isinstance(sc, (int, float)):
-                    score_col = f"점수 {float(sc) * 100:+.1f}%"
+                    score_col = f"점수 {float(sc) * 100:.1f}"
 
             parts = {
                 "name": full_name_part,

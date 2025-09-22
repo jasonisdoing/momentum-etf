@@ -483,7 +483,7 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         "일간수익률": "{:+.2f}%",
         "누적수익률": "{:+.2f}%",
         "비중": "{:.1f}%",
-        "점수": lambda val: f"{val * 100:+.1f}%" if pd.notna(val) else "-",
+        "점수": lambda val: f"{val * 100:.1f}" if pd.notna(val) else "-",
     }
 
     # 국가별로 통화 형식 지정

@@ -577,7 +577,7 @@ def main(
                     # 전략에 따라 신호 값의 포맷을 다르게 지정합니다.
                     s1_str = ma_formatter(s1) if pd.notna(s1) else "-"
                     s2_str = f"{float(s2):.1f}%" if pd.notna(s2) else "-"  # 고점대비
-                    score_str = f"{float(score) * 100:+.1f}%" if pd.notna(score) else "-"  # 점수
+                    score_str = f"{float(score) * 100:.1f}" if pd.notna(score) else "-"  # 점수
                     filter_str = f"{int(filter_val)}일" if pd.notna(filter_val) else "-"
 
                     display_status = decision
