@@ -222,7 +222,6 @@ def main():
         except Exception as e:
             print(f"\n오류: 시그널 생성 중 오류가 발생했습니다: {e}")
             return
-        print(11111112222222)
         if report_date:
             duration = time.time() - start_time
             send_summary_notification(country, account, report_date, duration, old_equity)

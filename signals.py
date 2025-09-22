@@ -797,7 +797,15 @@ def _load_and_prepare_ticker_data(args):
     단일 티커에 대한 데이터 조회 및 지표 계산을 수행하는 워커 함수입니다.
     """
     # 전달받은 인자를 변수로 풀어냅니다.
-    tkr, country, required_months, base_date, ma_period, df_full = args
+    (
+        tkr,
+        country,
+        required_months,
+        base_date,
+        ma_period,
+        df_full,
+        realtime_price,
+    ) = args
 
     if df_full is None:
         from utils.data_loader import fetch_ohlcv
@@ -812,6 +820,13 @@ def _load_and_prepare_ticker_data(args):
 
     if df is None or df.empty:
         return tkr, {"error": "INSUFFICIENT_DATA"}
+
+    # 실시간 가격이 있으면, 이를 데이터프레임의 마지막 행으로 추가/업데이트합니다.
+    # 이렇게 하면 이동평균 및 추세 신호가 실시간 가격을 반영하여 계산됩니다.
+    if realtime_price is not None and pd.notna(realtime_price):
+        # .loc를 사용하여 base_date 인덱스에 'Close' 값을 설정합니다.
+        # 해당 날짜가 없으면 새로 추가되고, 있으면 업데이트됩니다.
+        df.loc[base_date, "Close"] = realtime_price
 
     if len(df) < ma_period:
         return tkr, {"error": "INSUFFICIENT_DATA"}
@@ -1037,16 +1052,6 @@ def _fetch_and_prepare_data(
         len(pairs),
     )
 
-    # 국가별로 다른 포맷터 사용
-    def _fetch_realtime_price(tkr):
-        from utils.data_loader import fetch_naver_realtime_price
-
-        if country == "kor":
-            return fetch_naver_realtime_price(tkr)
-        if country == "coin":
-            return _fetch_bithumb_realtime_price(tkr)
-        return None
-
     # 실시간 가격 조회는 포트폴리오 기준일이 오늘일 경우에만 시도합니다.
     today_cal = pd.Timestamp.now().normalize()
     market_is_open = is_market_open(country) and base_date.date() == today_cal.date()
@@ -1078,6 +1083,28 @@ def _fetch_and_prepare_data(
     max_ma_period = max(ma_period, regime_ma_period if regime_filter_enabled else 0)
     required_days = max_ma_period + 5  # 버퍼 추가
     required_months = (required_days // 22) + 2
+
+    # --- 실시간 가격 일괄 조회 ---
+    # 개장 중일 경우, 모든 종목의 실시간 가격을 미리 한 번에 조회합니다.
+    # 이 가격은 추세 분석(이동평균 계산)에 사용됩니다.
+    realtime_prices: Dict[str, Optional[float]] = {}
+    if market_is_open:
+        print("-> 실시간 가격 일괄 조회 시작...")
+
+        def _fetch_realtime_price(tkr_local: str) -> Optional[float]:
+            from utils.data_loader import fetch_naver_realtime_price
+
+            if country == "kor":
+                return fetch_naver_realtime_price(tkr_local)
+            if country == "coin":
+                return _fetch_bithumb_realtime_price(tkr_local)
+            return None
+
+        for tkr, _ in pairs:
+            rt_price = _fetch_realtime_price(tkr)
+            if rt_price is not None:
+                realtime_prices[tkr] = rt_price
+        print(f"-> 실시간 가격 조회 완료 ({len(realtime_prices)}/{len(pairs)}개 성공).")
 
     # --- 시장 레짐 필터 데이터 로딩 ---
     regime_info = None
@@ -1144,6 +1171,7 @@ def _fetch_and_prepare_data(
                 base_date,
                 ma_period,
                 df_full,
+                realtime_prices.get(tkr),  # 조회된 실시간 가격 전달
             )
         )
 
@@ -1206,39 +1234,16 @@ def _fetch_and_prepare_data(
             )
             continue
 
-        latest_close_dt = None
-        try:
-            latest_close_dt = pd.to_datetime(result["df"].index[-1]).normalize()
-        except Exception:
-            pass
-
-        needs_latest_price = False
-        if latest_close_dt is not None:
-            try:
-                needs_latest_price = latest_close_dt < base_date.normalize()
-            except Exception:
-                needs_latest_price = latest_close_dt < base_date
-
-        realtime_price = None
-        if market_is_open or needs_latest_price:
-            realtime_price = _fetch_realtime_price(tkr)
-
-        # unadjusted_close가 있으면 그것을 우선 사용하고, 없으면 기존 방식을 따릅니다.
-        unadjusted_close_series = result.get("unadjusted_close")
-        if unadjusted_close_series is not None and not unadjusted_close_series.empty:
-            c0 = (
-                float(realtime_price) if realtime_price else float(unadjusted_close_series.iloc[-1])
-            )
-        else:
-            c0 = float(realtime_price) if realtime_price else float(result["close"].iloc[-1])
+        # 현재가는 _load_and_prepare_ticker_data에서 실시간 가격을 반영하여
+        # 계산된 'close' 시리즈의 마지막 값을 사용합니다.
+        c0 = float(result["close"].iloc[-1])
         if pd.isna(c0) or c0 <= 0:
             failed_tickers_info[tkr] = "FETCH_FAILED"
             logger.error(
-                "[%s] %s excluded due to invalid price (price: %s, realtime: %s)",
+                "[%s] %s excluded due to invalid price (price: %s)",
                 country.upper(),
                 tkr,
                 c0,
-                bool(realtime_price),
             )
             continue
 
@@ -2733,10 +2738,10 @@ def _maybe_notify_detailed_signal(
         config = DECISION_CONFIG.get(group_name)
         if not config:
             # 설정에 없는 상태(예: SELL_MOMENTUM)에 대한 폴백 처리
-            display_name = f"<{group_name}>"
+            display_name = f"<{group_name}>({group_name})"
             show_slack = True  # 알 수 없는 그룹은 일단 표시
         else:
-            display_name = config["display_name"]
+            display_name = f"{config['display_name']}({group_name})"
             show_slack = config.get("show_slack", True)
 
         if not show_slack:
