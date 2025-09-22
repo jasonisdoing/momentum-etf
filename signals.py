@@ -99,6 +99,12 @@ DECISION_CONFIG = {
         "is_recommendation": True,
         "show_slack": True,
     },
+    "SELL_INACTIVE": {
+        "display_name": "<🗑️ 비활성 매도>",
+        "order": 14,
+        "is_recommendation": True,
+        "show_slack": True,
+    },
     # 매수 추천 (알림 발생)
     "BUY_REPLACE": {
         "display_name": "<🔄 교체매수>",
@@ -233,6 +239,7 @@ class SignalReportData:
     pairs: List[Tuple[str, str]]
     base_date: pd.Timestamp
     regime_info: Optional[Dict]
+    full_etf_meta: Dict
     etf_meta: Dict
     failed_tickers_info: Dict
 
@@ -983,7 +990,15 @@ def _fetch_and_prepare_data(
     holdings = _normalize_holdings(portfolio_data.get("holdings", []))
 
     # DB에서 종목 목록을 가져와 전체 유니버스를 구성합니다.
-    etfs_from_file = get_etfs(country)
+    all_etfs_from_file = get_etfs(country)
+    # is_active 필드가 없는 종목이 있는지 확인합니다.
+    for etf in all_etfs_from_file:
+        if "is_active" not in etf:
+            raise ValueError(
+                f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
+            )
+    full_etf_meta = {etf["ticker"]: etf for etf in all_etfs_from_file}
+    etfs_from_file = [etf for etf in all_etfs_from_file if etf.get("is_active") is not False]
     etf_meta = {etf["ticker"]: etf for etf in etfs_from_file}
 
     # 오늘 판매된 종목을 추가합니다.
@@ -1118,6 +1133,8 @@ def _fetch_and_prepare_data(
     # --- 데이터 로딩 및 지표 계산 ---
     tasks = []
     for tkr, _ in pairs:
+        if not full_etf_meta.get(tkr, {}).get("is_active", True):
+            continue
         df_full = prefetched_data.get(tkr) if prefetched_data else None
         tasks.append(
             (
@@ -1171,6 +1188,8 @@ def _fetch_and_prepare_data(
     # 이제 `processed_results`를 사용하여 순차적으로 나머지 계산을 수행합니다.
     print("\n-> 최종 데이터 조합 및 계산 시작...")
     for tkr, _ in pairs:
+        if not full_etf_meta.get(tkr, {}).get("is_active", True):
+            continue
         result = processed_results.get(tkr)
         if not result:
             failed_tickers_info[tkr] = "FETCH_FAILED"
@@ -1283,6 +1302,7 @@ def _fetch_and_prepare_data(
         pairs=pairs,
         base_date=base_date,
         regime_info=regime_info,
+        full_etf_meta=full_etf_meta,
         etf_meta=etf_meta,
         failed_tickers_info=failed_tickers_info,
     )
@@ -1521,6 +1541,7 @@ def generate_signal_report(
     pairs = result.pairs
     base_date = result.base_date
     etf_meta = result.etf_meta
+    full_etf_meta = result.full_etf_meta
     failed_tickers_info = result.failed_tickers_info
 
     logger.info(
@@ -1556,6 +1577,11 @@ def generate_signal_report(
     if insufficient_data_tickers:
         name_map = {tkr: name for tkr, name in pairs}
         for tkr in sorted(insufficient_data_tickers):
+            # Check if the ticker is inactive.
+            if not full_etf_meta.get(tkr, {}).get("is_active", True):
+                # If it's an inactive ticker, we don't need to warn about insufficient data.
+                # The SELL_INACTIVE signal will explain its status.
+                continue
             name = name_map.get(tkr, tkr)
             warning_messages_for_slack.append(f"{name}({tkr}): 데이터 기간이 부족하여 계산에서 제외됩니다.")
     # 슬랙 메시지를 위한 메시지 만들기 시작
@@ -1830,6 +1856,7 @@ def generate_signal_report(
         buy_signal = False
         state = "HOLD" if is_effectively_held else "WAIT"
         phrase = ""
+        is_active = full_etf_meta.get(tkr, {}).get("is_active", True)
         if price == 0.0 and is_effectively_held:
             phrase = "가격 데이터 조회 실패"
 
@@ -1892,6 +1919,11 @@ def generate_signal_report(
                     qty = sh
                     prof = (price - ac) * qty if ac > 0 else 0.0
                     phrase = f"가격기반손절 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+                elif not is_active:
+                    state = "SELL_INACTIVE"
+                    qty = sh
+                    prof = (price - ac) * qty if ac > 0 else 0.0
+                    phrase = f"비활성 종목 정리 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
             # --- 전략별 매수/매도 로직 ---
             if state == "HOLD":  # 아직 매도 결정이 내려지지 않은 경우
