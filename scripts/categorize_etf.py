@@ -25,7 +25,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.data_loader import fetch_pykrx_name, fetch_yfinance_name
-from utils.etf_categorizer import SECTORS, classify_etf_with_ai
+from utils.etf_categorizer import classify_etf_with_ai
 
 try:
     from dotenv import load_dotenv
@@ -173,9 +173,7 @@ def main():
     # 6. 최종 요약 출력
     if processed_results:
         df_final = pd.DataFrame(processed_results)
-        print(
-            f"\n분류가 완료되었습니다. '{categorized_csv_path}' 파일에 총 {len(df_final)}개 ETF 정보가 저장되었습니다."
-        )
+        print(f"\n분류가 완료되었습니다. '{categorized_csv_path}' 파일에 총 {len(df_final)}개 ETF 정보가 저장되었습니다.")
         print("\n[분류 결과 요약]")
         print(df_final["category"].value_counts())
     else:

@@ -84,15 +84,9 @@ def _print_backtest_summary(
     print("=" * 30)
 
     print("\n[지표 설명]")
-    print(
-        "  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수)."
-    )
-    print(
-        "  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수)."
-    )
-    print(
-        "  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수)."
-    )
+    print("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
+    print("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
+    print("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
 
     # 월별 성과 요약 테이블 출력
     if "monthly_returns" in summary and not summary["monthly_returns"].empty:
@@ -225,22 +219,16 @@ def main(
         or "ma_period" not in portfolio_settings
         or "portfolio_topn" not in portfolio_settings
     ):
-        print(
-            f"오류: '{country}' 국가의 설정(TopN, MA 기간)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
-        )
+        print(f"오류: '{country}' 국가의 설정(TopN, MA 기간)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return
 
     # 필수 설정값이 모두 있는지 검증 (fallback 금지)
     if "replace_threshold" not in portfolio_settings:
-        print(
-            f"오류: '{country}' 국가의 설정에 'replace_threshold'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
-        )
+        print(f"오류: '{country}' 국가의 설정에 'replace_threshold'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return
     # 추가 필수값: replace_weaker_stock
     if "replace_weaker_stock" not in portfolio_settings:
-        print(
-            f"오류: '{country}' 국가의 설정에 'replace_weaker_stock'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
-        )
+        print(f"오류: '{country}' 국가의 설정에 'replace_weaker_stock'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return
 
     try:
@@ -328,9 +316,7 @@ def main(
 
     # 티커 목록 결정
     if not quiet:
-        print(
-            f"\n'data/{country}/' 폴더의 'etf.json' 파일에서 종목을 가져와 백테스트를 실행합니다."
-        )
+        print(f"\n'data/{country}/' 폴더의 'etf.json' 파일에서 종목을 가져와 백테스트를 실행합니다.")
     all_etfs_from_file = get_etfs_from_files(country)
     # is_active 필드가 없는 종목이 있는지 확인합니다.
     for etf in all_etfs_from_file:
@@ -340,9 +326,7 @@ def main(
             )
     etfs_from_file = [etf for etf in all_etfs_from_file if etf["is_active"] is not False]
     if not etfs_from_file:
-        print(
-            f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 백테스트에 사용할 종목을 찾을 수 없습니다."
-        )
+        print(f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 백테스트에 사용할 종목을 찾을 수 없습니다.")
         return
 
     # 티커 오버라이드: 콤마 구분 리스트. coin은 파일 목록과 합집합, 그 외는 교집합.
@@ -738,9 +722,7 @@ def main(
             try:
                 market_regime_filter_enabled = bool(settings.MARKET_REGIME_FILTER_ENABLED)
             except AttributeError:
-                print(
-                    "오류: MARKET_REGIME_FILTER_ENABLED 설정이 logic/settings.py 에 정의되어야 합니다."
-                )
+                print("오류: MARKET_REGIME_FILTER_ENABLED 설정이 logic/settings.py 에 정의되어야 합니다.")
                 return
 
             if market_regime_filter_enabled:

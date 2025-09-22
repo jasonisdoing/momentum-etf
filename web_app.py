@@ -373,9 +373,7 @@ def get_cached_signal_report(
             return None
     except Exception as e:  # noqa: E722
         print(f"오류: 신호 계산 오류: {country}/{date_str}: {e}")
-        st.error(
-            f"'{date_str}' 신호 계산 중 오류가 발생했습니다. 자세한 내용은 콘솔 로그를 확인해주세요."
-        )
+        st.error(f"'{date_str}' 신호 계산 중 오류가 발생했습니다. 자세한 내용은 콘솔 로그를 확인해주세요.")
         return None
 
 
@@ -416,9 +414,7 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
     # 호주 'IS' 종목의 이름을 수동으로 지정합니다.
     if country_code == "aus":
         # 'IS' 종목에 대한 메타데이터를 수동으로 추가합니다.
-        is_meta = pd.DataFrame(
-            [{"ticker": "IS", "이름": "International Shares", "category": "기타"}]
-        )
+        is_meta = pd.DataFrame([{"ticker": "IS", "이름": "International Shares", "category": "기타"}])
         meta_df = pd.concat([meta_df, is_meta], ignore_index=True)
 
     # 2. 메타데이터 병합
@@ -543,9 +539,7 @@ def render_master_etf_ui(country_code: str):
     # is_active 필드가 없는 종목이 있는지 확인합니다.
     for etf in etfs_data:
         if "is_active" not in etf:
-            st.error(
-                f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
-            )
+            st.error(f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요.")
             st.stop()
 
     df_etfs = pd.DataFrame(etfs_data)
@@ -997,7 +991,9 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                     ),
                     value_col_name: st.column_config.NumberColumn(
                         # 쉼표(,)를 포맷에 추가하여 3자리마다 구분자를 표시합니다.
-                        format="%,.0f" if country_code_inner == "kor" else "%,.2f"
+                        format="%,.0f"
+                        if country_code_inner == "kor"
+                        else "%,.2f"
                     ),
                     price_col_name: st.column_config.NumberColumn(
                         format="%.4f" if country_code_inner == "aus" else "%d"
@@ -1073,9 +1069,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
             # 데이터가 DB에 있지만 필터링되어 표시할 것이 없는 경우와,
             # DB에 데이터가 아예 없는 경우를 구분하여 메시지를 표시합니다.
             if not sorted_dates:
-                st.warning(
-                    f"[{country_code.upper()}] 국가의 포트폴리오 데이터를 DB에서 찾을 수 없습니다."
-                )
+                st.warning(f"[{country_code.upper()}] 국가의 포트폴리오 데이터를 DB에서 찾을 수 없습니다.")
                 if country_code != "coin":
                     st.info("먼저 '거래 입력' 버튼을 통해 거래 내역을 추가해주세요.")
                 else:
@@ -1220,9 +1214,7 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
             else:
                 db_settings = get_account_settings(account_code)
                 if not db_settings:
-                    st.info(
-                        "해당 계좌에 저장된 설정이 없습니다. 값을 입력 후 저장하면 계좌별 설정이 생성됩니다."
-                    )
+                    st.info("해당 계좌에 저장된 설정이 없습니다. 값을 입력 후 저장하면 계좌별 설정이 생성됩니다.")
                     db_settings = {}
 
             current_capital = db_settings.get("initial_capital", 0)
@@ -1337,15 +1329,12 @@ def _render_account_dashboard(country_code: str, account_entry: Dict[str, Any]):
                             st.error("설정 저장에 실패했습니다.")
 
     with sub_tab_equity_history:
-
         if not account_code:
             st.info("활성 계좌가 없습니다. 계좌를 등록한 후 이용해주세요.")
         else:
             account_settings = get_account_settings(account_code)
             if not account_settings:
-                st.warning(
-                    f"'{account_code}' 계좌의 설정을 찾을 수 없습니다. 설정을 먼저 저장해주세요."
-                )
+                st.warning(f"'{account_code}' 계좌의 설정을 찾을 수 없습니다. 설정을 먼저 저장해주세요.")
                 account_settings = {}
 
             initial_date = (account_settings.get("initial_date") if account_settings else None) or (
@@ -1772,9 +1761,7 @@ def main():
 
         with st.form("common_settings_form"):
             st.subheader("시장 레짐 필터")
-            new_enabled = st.checkbox(
-                "활성화 (MARKET_REGIME_FILTER_ENABLED)", value=current_enabled
-            )
+            new_enabled = st.checkbox("활성화 (MARKET_REGIME_FILTER_ENABLED)", value=current_enabled)
             new_ticker = st.text_input(
                 "레짐 기준 지수 티커 (MARKET_REGIME_FILTER_TICKER)",
                 value=str(current_ticker) if current_ticker is not None else "",

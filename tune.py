@@ -106,14 +106,10 @@ def main(country_code: str, account: str):
             TEST_MONTHS_RANGE = config["TEST_MONTHS_RANGE"]
 
             # --- DB에서 고정 파라미터 로드 ---
-            print(
-                f"DB에서 {country_code.upper()} 포트폴리오의 고정 파라미터를 로드합니다 (account={account})..."
-            )
+            print(f"DB에서 {country_code.upper()} 포트폴리오의 고정 파라미터를 로드합니다 (account={account})...")
             portfolio_settings = get_portfolio_settings(country_code, account=account)
             if not portfolio_settings:
-                print(
-                    f"오류: '{country_code}' 국가의 설정을 DB에서 찾을 수 없습니다. 웹 앱의 '설정' 탭에서 값을 저장해주세요."
-                )
+                print(f"오류: '{country_code}' 국가의 설정을 DB에서 찾을 수 없습니다. 웹 앱의 '설정' 탭에서 값을 저장해주세요.")
                 return
 
             try:
@@ -125,14 +121,10 @@ def main(country_code: str, account: str):
                 return
 
             # --- 데이터 사전 로딩 ---
-            print(
-                f"\n튜닝을 위해 {country_code.upper()} 시장의 데이터를 미리 로딩합니다 (account={account})..."
-            )
+            print(f"\n튜닝을 위해 {country_code.upper()} 시장의 데이터를 미리 로딩합니다 (account={account})...")
             etfs_from_file = get_etfs(country_code)
             if not etfs_from_file:
-                print(
-                    f"오류: 'data/{country_code}/' 폴더에서 백테스트에 사용할 티커를 찾을 수 없습니다."
-                )
+                print(f"오류: 'data/{country_code}/' 폴더에서 백테스트에 사용할 티커를 찾을 수 없습니다.")
                 return
 
             tickers = [s["ticker"] for s in etfs_from_file]

@@ -23,7 +23,7 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.data_loader import fetch_ohlcv, fetch_pykrx_name, fetch_yfinance_name
+from utils.data_loader import fetch_ohlcv
 from utils.momentum_scorer import momentum_score_krx, momentum_score_yf
 
 # --- 설정 ---
@@ -83,9 +83,7 @@ def get_etf_return(full_ticker: str, country: str, months: int) -> tuple[float |
 
 def main():
     """메인 실행 함수"""
-    parser = argparse.ArgumentParser(
-        description="ETF 수익률을 계산하여 최종 CSV 파일을 생성합니다."
-    )
+    parser = argparse.ArgumentParser(description="ETF 수익률을 계산하여 최종 CSV 파일을 생성합니다.")
     parser.add_argument("country", choices=["kor", "aus"], help="처리할 국가 코드 (kor 또는 aus)")
     args = parser.parse_args()
     country_code = args.country
@@ -112,9 +110,7 @@ def main():
         return
 
     # 2. 각 티커의 수익률을 계산합니다.
-    print(
-        f"\n총 {len(df_categorized)}개 ETF의 최근 {months_to_calculate}개월 수익률을 계산합니다..."
-    )
+    print(f"\n총 {len(df_categorized)}개 ETF의 최근 {months_to_calculate}개월 수익률을 계산합니다...")
     processed_results = []
     failed_tickers = []
     for i, row in df_categorized.iterrows():
@@ -164,9 +160,7 @@ def main():
 
             try:
                 df_results.to_csv(final_csv_path, index=False, encoding="utf-8-sig")
-                print(
-                    f"\n'{final_csv_path}' 파일에 {len(df_results)}개 ETF 정보를 수익률 순으로 덮어썼습니다."
-                )
+                print(f"\n'{final_csv_path}' 파일에 {len(df_results)}개 ETF 정보를 수익률 순으로 덮어썼습니다.")
             except IOError as e:
                 print(f"\nCSV 파일 쓰기 중 오류 발생: {e}")
         else:
@@ -186,13 +180,6 @@ def main():
         insufficient_data_tickers = sorted(
             [item["ticker"] for item in failed_tickers if item["reason"] == "INSUFFICIENT_DATA"]
         )
-        other_failed_tickers = sorted(
-            [
-                item["ticker"]
-                for item in failed_tickers
-                if item["reason"] not in ["NO_DATA", "INSUFFICIENT_DATA"]
-            ]
-        )
 
         if no_data_tickers:
             print(
@@ -203,9 +190,7 @@ def main():
             print("-" * 30)
 
         if insufficient_data_tickers:
-            print(
-                f"다음 {len(insufficient_data_tickers)}개 티커는 데이터 기간이 충분하지 않습니다. (상장 초기 종목 등)"
-            )
+            print(f"다음 {len(insufficient_data_tickers)}개 티커는 데이터 기간이 충분하지 않습니다. (상장 초기 종목 등)")
             for ticker in insufficient_data_tickers:
                 print(f"- {ticker}")
             print("-" * 30)

@@ -914,9 +914,7 @@ def _fetch_and_prepare_data(
     logger = get_signal_logger()
 
     if not portfolio_settings or "ma_period" not in portfolio_settings:
-        print(
-            f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
-        )
+        print(f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return None
 
     try:
@@ -933,9 +931,7 @@ def _fetch_and_prepare_data(
     # --- 추가된 로직: 계좌 시작일 이전 데이터 생성 방지 ---
     initial_date = portfolio_settings.get("initial_date")
     if not initial_date:
-        print(
-            f"오류: '{country}' 국가의 '{account}' 계좌에 초기 기준일(initial_date)이 설정되지 않았습니다."
-        )
+        print(f"오류: '{country}' 국가의 '{account}' 계좌에 초기 기준일(initial_date)이 설정되지 않았습니다.")
         return None
 
     try:
@@ -947,7 +943,7 @@ def _fetch_and_prepare_data(
 
     if request_date_ts < initial_date_ts:
         print(
-            f"정보: 요청된 날짜({request_date_ts.strftime('%Y-%m-%d')})가 계좌 시작일({initial_date_ts.strftime('%Y-%m-%d')}) 이전이므로 시그널을 계산하지 않습니다."
+            f"정보: 요청된 날짜({request_date_ts.strftime('%Y-%m-%d')})가 계좌 시작일({initial_date_ts.strftime('%Y-%m-%d')}) 이전이므로 현황을 계산하지 않습니다."
         )
         return None
 
@@ -987,14 +983,7 @@ def _fetch_and_prepare_data(
     holdings = _normalize_holdings(portfolio_data.get("holdings", []))
 
     # DB에서 종목 목록을 가져와 전체 유니버스를 구성합니다.
-    all_etfs_from_file = get_etfs(country)
-    # is_active 필드가 없는 종목이 있는지 확인합니다.
-    for etf in all_etfs_from_file:
-        if "is_active" not in etf:
-            raise ValueError(
-                f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
-            )
-    etfs_from_file = [etf for etf in all_etfs_from_file if etf["is_active"] is not False]
+    etfs_from_file = get_etfs(country)
     etf_meta = {etf["ticker"]: etf for etf in etfs_from_file}
 
     # 오늘 판매된 종목을 추가합니다.
@@ -1068,9 +1057,7 @@ def _fetch_and_prepare_data(
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
     # 코인은 거래소 잔고 기반 표시이므로, 종목 마스터가 비어 있어도 보유코인을 기준으로 진행합니다.
     if not etfs_from_file and country != "coin":
-        print(
-            f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 시그널을 계산할 종목을 찾을 수 없습니다."
-        )
+        print(f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 현황을 계산할 종목을 찾을 수 없습니다.")
         return None
 
     max_ma_period = max(ma_period, regime_ma_period if regime_filter_enabled else 0)
@@ -1408,9 +1395,7 @@ def _build_header_line(
     holdings_str = money_formatter(total_holdings)
     cash_str = money_formatter(total_cash)
     day_ret_str = _format_return_for_header("일간", day_ret_pct, day_profit_loss, money_formatter)
-    eval_ret_str = _format_return_for_header(
-        "평가", eval_ret_pct, eval_profit_loss, money_formatter
-    )
+    eval_ret_str = _format_return_for_header("평가", eval_ret_pct, eval_profit_loss, money_formatter)
     cum_ret_str = _format_return_for_header("누적", cum_ret_pct, cum_profit_loss, money_formatter)
 
     # 헤더 본문
@@ -1440,7 +1425,6 @@ def _build_header_line(
 
 
 def _get_calculation_message_lines(num_tickers: int, warnings: List[str]):
-
     message_lines = [
         f"계산에 이용된 종목의 수: {num_tickers}",
     ]
@@ -1503,9 +1487,7 @@ def generate_signal_report(
     # 휴장일 검사
     if country != "coin":
         if not _is_trading_day(country, target_date.to_pydatetime()):
-            raise ValueError(
-                f"휴장일({target_date.strftime('%Y-%m-%d')})에는 시그널을 생성할 수 없습니다."
-            )
+            raise ValueError(f"휴장일({target_date.strftime('%Y-%m-%d')})에는 시그널을 생성할 수 없습니다.")
 
     effective_date_str = target_date.strftime("%Y-%m-%d")
 
@@ -1575,9 +1557,7 @@ def generate_signal_report(
         name_map = {tkr: name for tkr, name in pairs}
         for tkr in sorted(insufficient_data_tickers):
             name = name_map.get(tkr, tkr)
-            warning_messages_for_slack.append(
-                f"{name}({tkr}): 데이터 기간이 부족하여 계산에서 제외됩니다."
-            )
+            warning_messages_for_slack.append(f"{name}({tkr}): 데이터 기간이 부족하여 계산에서 제외됩니다.")
     # 슬랙 메시지를 위한 메시지 만들기 시작
     slack_message_lines = _get_calculation_message_lines(len(pairs), warning_messages_for_slack)
 
@@ -1609,9 +1589,7 @@ def generate_signal_report(
                 p_balance = bal.get("total_P", 0.0)
                 new_equity_candidate += krw_balance + p_balance
         except Exception as e:
-            logger.warning(
-                "Bithumb 잔액 조회 실패. 평가금액 자동 보정 시 코인 가치만 반영됩니다. (%s)", e
-            )
+            logger.warning("Bithumb 잔액 조회 실패. 평가금액 자동 보정 시 코인 가치만 반영됩니다. (%s)", e)
 
     # 2. 자동 보정 및 이월 조건 확인
     is_carried_forward = (
@@ -1664,9 +1642,7 @@ def generate_signal_report(
 
             if save_success:
                 if updated_by == "스케줄러(보정)":
-                    log_msg = (
-                        f"평가금액 자동 보정: {old_equity_for_log:,.0f}원 -> {final_equity:,.0f}원"
-                    )
+                    log_msg = f"평가금액 자동 보정: {old_equity_for_log:,.0f}원 -> {final_equity:,.0f}원"
                     print(f"-> {log_msg}")
                     equity_message_line = _get_equity_update_message_line(
                         country, account, old_equity_for_log, final_equity
@@ -1894,9 +1870,7 @@ def generate_signal_report(
                     )
                     holding_days = len(trading_days_in_period)
                 except Exception as e:
-                    print(
-                        f"경고: 보유일 계산 중 오류 발생 ({tkr}): {e}. 달력일 기준으로 대체합니다."
-                    )
+                    print(f"경고: 보유일 계산 중 오류 발생 ({tkr}): {e}. 달력일 기준으로 대체합니다.")
                     # 거래일 계산 실패 시, 달력일 기준으로 계산
                     holding_days = (label_date - buy_date).days + 1
 
@@ -1985,7 +1959,9 @@ def generate_signal_report(
     # 매수/교체매수 후보는 반드시 '종목 마스터(etf.json)'에 포함된 종목으로 제한합니다.
     # 이는 사용자가 유니버스에서 제외한 종목(예: 당일 매도 후 목록에서 제거)이
     # 다시 매수 후보로 추천되는 것을 방지합니다.
-    universe_tickers = set(etf_meta.keys())
+    from utils.stock_list_io import get_etfs
+
+    universe_tickers = {etf["ticker"] for etf in get_etfs(country)}
 
     # 6. 리밸런싱, 신규매수, 교체매매 로직 적용
     # 교체 매매 관련 설정 로드 (임계값은 DB 설정 우선)
@@ -1998,9 +1974,7 @@ def generate_signal_report(
     try:
         replace_threshold = float(portfolio_settings["replace_threshold"])
     except (ValueError, TypeError):
-        print(
-            f"오류: '{country}' 국가의 교체 매매 임계값(replace_threshold) 값이 올바르지 않습니다."
-        )
+        print(f"오류: '{country}' 국가의 교체 매매 임계값(replace_threshold) 값이 올바르지 않습니다.")
         return None
 
     # 리밸런싱 매도 결정 전, 다른 이유로 이미 매도 결정된 종목 수를 파악합니다.
@@ -2205,7 +2179,7 @@ def generate_signal_report(
                 sell_trades_today[tkr] = []
             sell_trades_today[tkr].append(trade)
 
-    # 기준일에 실행된 거래가 있다면, 시그널 목록에 '완료' 상태를 표시합니다.
+    # 기준일에 실행된 거래가 있다면, 현황 목록에 '완료' 상태를 표시합니다.
     for decision in decisions:
         tkr = decision["tkr"]
 
@@ -2371,7 +2345,7 @@ def main(
 
     if result:
         header_line, headers, rows_sorted, report_base_date, slack_message_lines = result
-        # 가능하다면 웹 앱 히스토리에서 사용할 수 있도록 시그널을 저장합니다.
+        # 가능하다면 웹 앱 히스토리에서 사용할 수 있도록 현황 보고서를 저장합니다.
         try:
             # 반환된 base_date는 보고서의 실제 기준일이므로 그대로 저장에 사용합니다.
             save_signal_report_to_db(
@@ -2529,12 +2503,8 @@ def _maybe_notify_detailed_signal(
     rows_sorted: list,
     slack_message_lines: list[str],
 ) -> bool:
-    """국가별 설정에 따라 슬랙으로 상세 시그널 알림을 전송합니다."""
-    try:
-        from utils.report import format_aud_money, format_aud_price, format_kr_money
-        from utils.notify import get_slack_webhook_url, send_slack_message
-    except Exception:
-        return False
+    """국가별 설정에 따라 슬랙으로 상세 현황 알림을 전송합니다."""
+    from utils.notify import get_slack_webhook_url, send_slack_message
 
     # 사용자가 모든 수동 실행에서 슬랙 알림을 받기를 원하므로, 거래일 확인 로직을 비활성화합니다.
     # 이로 인해 과거 날짜 조회 등 모든 'status' 명령어 실행 시 알림이 전송됩니다.
@@ -2777,7 +2747,7 @@ def _maybe_notify_detailed_signal(
         caption = "\n".join([title_line, test_line, equity_line, cash_line, hold_line])
 
         # --- 슬랙 알림 발송 ---
-        webhook_url = get_slack_webhook_url(country)
+        webhook_url = get_slack_webhook_url(country, account=account)
         if not webhook_url:
             return False
 
@@ -2812,7 +2782,7 @@ def send_summary_notification(
     old_equity: float,
 ) -> None:
     """작업 완료 요약 슬랙 알림을 전송합니다."""
-    from utils.notify import send_log_to_slack
+    from utils.notify import get_slack_webhook_url, send_slack_message
     from utils.db_manager import get_portfolio_snapshot, get_portfolio_settings
     from utils.report import format_aud_money, format_kr_money
 
@@ -2863,7 +2833,10 @@ def send_summary_notification(
             )
             message += f" | {equity_change_message}"
 
-        send_log_to_slack(message)
+        # Get webhook and send message
+        webhook_url = get_slack_webhook_url(country, account=account)
+        if webhook_url:
+            send_slack_message(message, webhook_url=webhook_url)
     except Exception as e:
         logging.error(
             f"Failed to send summary notification for {country}/{account}: {e}", exc_info=True

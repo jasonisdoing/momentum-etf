@@ -31,9 +31,7 @@ def clone_account_settings(
     col = db.account_settings
     source_doc = col.find_one({"account": source_account})
     if not source_doc:
-        raise SystemExit(
-            f"계좌 '{source_account}'에 대한 account_settings 문서를 찾을 수 없습니다."
-        )
+        raise SystemExit(f"계좌 '{source_account}'에 대한 account_settings 문서를 찾을 수 없습니다.")
 
     source_doc.pop("_id", None)
 

@@ -160,9 +160,7 @@ def main():
 
             portfolio_settings = get_portfolio_settings(country, account=account)
             if not portfolio_settings:
-                print(
-                    f"오류: '{country}' 국가의 설정을 DB에서 찾을 수 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
-                )
+                print(f"오류: '{country}' 국가의 설정을 DB에서 찾을 수 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
                 return
 
             try:

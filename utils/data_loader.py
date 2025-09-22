@@ -260,9 +260,7 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
             continue
 
     # 15일 동안 거래일을 찾지 못하면 오늘 날짜를 정규화하여 반환합니다.
-    print(
-        f"경고: 최근 15일 내에 거래일을 찾지 못했습니다. 오늘 날짜({end_dt.strftime('%Y-%m-%d')})를 사용합니다."
-    )
+    print(f"경고: 최근 15일 내에 거래일을 찾지 못했습니다. 오늘 날짜({end_dt.strftime('%Y-%m-%d')})를 사용합니다.")
     return end_dt.normalize()
 
 
@@ -285,9 +283,7 @@ def fetch_ohlcv(
             else:
                 end_dt = pd.to_datetime(date_range[1])
         except (ValueError, TypeError):
-            print(
-                f"오류: 잘못된 date_range 형식: {date_range}. 'YYYY-MM-DD' 형식을 사용해야 합니다."
-            )
+            print(f"오류: 잘못된 date_range 형식: {date_range}. 'YYYY-MM-DD' 형식을 사용해야 합니다.")
             return None
     else:
         now = base_date if base_date is not None else pd.Timestamp.now()
@@ -417,9 +413,7 @@ def _fetch_ohlcv_core(
             if not fallback.empty:
                 return fallback
         if yf is None:
-            print(
-                "오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
-            )
+            print("오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
             return None
         try:
             with _silence_yfinance_logs():
@@ -452,9 +446,7 @@ def _fetch_ohlcv_core(
 
     if country == "kor":
         if _stock is None:
-            print(
-                "오류: pykrx 라이브러리가 설치되지 않았습니다. 'pip install pykrx'로 설치해주세요."
-            )
+            print("오류: pykrx 라이브러리가 설치되지 않았습니다. 'pip install pykrx'로 설치해주세요.")
             return None
 
     if country == "kor":
@@ -491,15 +483,11 @@ def _fetch_ohlcv_core(
             except (json.JSONDecodeError, KeyError) as err:
                 pykrx_failed = True
                 pykrx_error_msg = str(err) or "JSON/KeyError"
-                print(
-                    f"경고: {ticker}의 {start_str}~{end_str} 기간 pykrx 조회 중 오류: {pykrx_error_msg}"
-                )
+                print(f"경고: {ticker}의 {start_str}~{end_str} 기간 pykrx 조회 중 오류: {pykrx_error_msg}")
                 break
             except Exception as e:
                 err_text = str(e)
-                print(
-                    f"경고: {ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {err_text}"
-                )
+                print(f"경고: {ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {err_text}")
                 if isinstance(e, KeyError) or "are in the [columns]" in err_text:
                     pykrx_failed = True
                     pykrx_error_msg = err_text
@@ -513,9 +501,7 @@ def _fetch_ohlcv_core(
                 # 요청 기간의 마지막 거래일이 오늘인 경우, 데이터가 아직 집계되지 않았을 가능성을 안내합니다.
                 last_expected_day = max(trading_days_in_range)
                 if last_expected_day.date() == datetime.now().date():
-                    pykrx_error_msg = (
-                        "데이터 없음 (장 마감 후 데이터가 집계되지 않았을 수 있습니다)"
-                    )
+                    pykrx_error_msg = "데이터 없음 (장 마감 후 데이터가 집계되지 않았을 수 있습니다)"
                 else:
                     pykrx_error_msg = "데이터 없음"
 
@@ -536,9 +522,7 @@ def _fetch_ohlcv_core(
 
     if country == "aus":
         if yf is None:
-            print(
-                "오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요."
-            )
+            print("오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
             return None
 
         ticker_yf = format_aus_ticker_for_yfinance(ticker)

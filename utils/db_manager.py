@@ -81,9 +81,7 @@ def get_db_connection():
         )  # 0 = driver default
 
         if not connection_string:
-            raise ValueError(
-                "MongoDB 연결 문자열이 설정되지 않았습니다. (MONGO_DB_CONNECTION_STRING)"
-            )
+            raise ValueError("MongoDB 연결 문자열이 설정되지 않았습니다. (MONGO_DB_CONNECTION_STRING)")
 
         if _mongo_client is None:
             client_kwargs = dict(
@@ -531,9 +529,7 @@ def save_signal_report_to_db(
         # $unset을 사용하여 과거에 있었을 수 있는 'strategy' 필드를 명시적으로 제거합니다.
         update_operation = {"$set": doc_to_save, "$unset": {"strategy": ""}}
         db.signals.update_one(query, update_operation, upsert=True)
-        print(
-            f"-> 시그널 리포트가 DB에 저장되었습니다: [{country}/{account}]{date.strftime('%Y-%m-%d')}"
-        )
+        print(f"-> 시그널 리포트가 DB에 저장되었습니다: [{country}/{account}]{date.strftime('%Y-%m-%d')}")
         return True
     except Exception as e:
         print(f"오류: 시그널 리포트 DB 저장 중 오류 발생: {e}")

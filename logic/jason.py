@@ -38,18 +38,14 @@ def run_portfolio_backtest(
         regime_filter_ticker = str(settings.MARKET_REGIME_FILTER_TICKER)
         regime_filter_ma_period = int(settings.MARKET_REGIME_FILTER_MA_PERIOD)
     except AttributeError as e:
-        raise AttributeError(
-            f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
-        ) from e
+        raise AttributeError(f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.") from e
 
     try:
         # 공통 설정
         stop_loss = settings.HOLDING_STOP_LOSS_PCT
         cooldown_days = int(settings.COOLDOWN_DAYS)
     except AttributeError as e:
-        raise AttributeError(
-            f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
-        ) from e
+        raise AttributeError(f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.") from e
 
     if top_n <= 0:
         raise ValueError("PORTFOLIO_TOPN (top_n)은 0보다 커야 합니다.")
@@ -83,9 +79,7 @@ def run_portfolio_backtest(
                 market_regime_df["Close"].rolling(window=regime_filter_ma_period).mean()
             )
         else:
-            print(
-                f"경고: 시장 레짐 필터 티커({regime_filter_ticker})의 데이터를 가져올 수 없습니다. 필터를 비활성화합니다."
-            )
+            print(f"경고: 시장 레짐 필터 티커({regime_filter_ticker})의 데이터를 가져올 수 없습니다. 필터를 비활성화합니다.")
             regime_filter_enabled = False
 
     # --- 개별 종목 데이터 로딩 및 지표 계산 ---
@@ -319,7 +313,6 @@ def run_portfolio_backtest(
                     and i >= ticker_state["sell_block_until"]
                     and not is_ticker_warming_up
                 ):
-
                     decision = None
                     hold_ret = (
                         (price / ticker_state["avg_cost"] - 1.0) * 100.0
@@ -673,18 +666,14 @@ def run_single_ticker_backtest(
         ma_period_etf = int(settings.MA_PERIOD)
         ma_period_stock = int(settings.MA_PERIOD)
     except AttributeError as e:
-        raise AttributeError(
-            f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
-        ) from e
+        raise AttributeError(f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.") from e
 
     try:
         # 공통 설정
         stop_loss = settings.HOLDING_STOP_LOSS_PCT
         cooldown_days = int(settings.COOLDOWN_DAYS)
     except AttributeError as e:
-        raise AttributeError(
-            f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다."
-        ) from e
+        raise AttributeError(f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.") from e
 
     # --- 티커 유형(ETF/주식) 구분 ---
     ma_period = ma_period_etf if stock_type == "etf" else ma_period_stock

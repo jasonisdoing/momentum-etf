@@ -86,9 +86,7 @@ def tune_regime_filter(country: str, account: str):
 
     portfolio_settings = get_portfolio_settings(country, account=account)
     if not portfolio_settings or "ma_period" not in portfolio_settings:
-        print(
-            f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
-        )
+        print(f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
         return
     try:
         ma_period_etf = int(portfolio_settings["ma_period"])
@@ -181,9 +179,7 @@ def tune_regime_filter(country: str, account: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="시장 레짐 필터의 이동평균 기간(MA Period)을 튜닝합니다."
-    )
+    parser = argparse.ArgumentParser(description="시장 레짐 필터의 이동평균 기간(MA Period)을 튜닝합니다.")
     parser.add_argument("country", choices=["kor", "aus"], help="튜닝을 진행할 시장 (kor, aus)")
     parser.add_argument(
         "--account",

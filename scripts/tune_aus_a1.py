@@ -106,9 +106,7 @@ def main():
             country_code = "aus"
             account = "a1"
 
-            print(
-                f"'{country_code.upper()}' 국가, '{account}' 계좌에 대한 파라미터 튜닝을 시작합니다."
-            )
+            print(f"'{country_code.upper()}' 국가, '{account}' 계좌에 대한 파라미터 튜닝을 시작합니다.")
 
             print(f"\n튜닝을 위해 {country_code.upper()} 시장의 데이터를 미리 로딩합니다...")
             etfs_from_file = get_etfs(country_code)

@@ -135,9 +135,7 @@ def main():
     with open(log_path, "w", encoding="utf-8") as log_file:
         sys.stdout = Tee(original_stdout, log_file)
         try:
-            print(
-                f"'{country_code.upper()}' 국가, '{account}' 계좌에 대한 파라미터 튜닝을 시작합니다."
-            )
+            print(f"'{country_code.upper()}' 국가, '{account}' 계좌에 대한 파라미터 튜닝을 시작합니다.")
 
             all_etfs_from_file = get_etfs(country_code)
             # is_active 필드가 없는 종목이 있는지 확인합니다.
