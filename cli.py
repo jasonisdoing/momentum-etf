@@ -19,7 +19,7 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
 아래는 'data/accounts.json'에 등록된 계좌를 기반으로 생성된 실행 명령어 예시입니다.
 이 목록을 복사하여 터미널에서 바로 사용할 수 있습니다.
 
-# --- 계좌별 기본 명령어 (status, test, tune) ---
+# --- 계좌별 기본 명령어 (signal, test, tune) ---
 
 # 한국 (KOR) / m1 계좌
 python cli.py kor --signal --account m2 --date 2025-09-22
