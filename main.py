@@ -33,7 +33,7 @@ from utils.data_loader import get_aud_to_krw_rate
 
 def main():
     """메인 대시보드를 렌더링합니다."""
-    st.set_page_config(page_title="Main", page_icon="📈", layout="wide")
+    st.set_page_config(page_title="main", page_icon="📈", layout="wide")
     st.title("📈 메인 대시보드")
 
     hide_amounts = st.toggle("금액 숨기기", key="hide_amounts")
@@ -66,8 +66,12 @@ def main():
                 padding-left: 2rem;
                 padding-right: 2rem;
             }
+            /* Custom CSS to reduce sidebar width */
+            [data-testid="stSidebar"] {
+                width: 150px !important;
+            }
         </style>
-    """,
+        """,
         unsafe_allow_html=True,
     )
 

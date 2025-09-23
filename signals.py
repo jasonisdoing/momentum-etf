@@ -2214,7 +2214,9 @@ def generate_signal_report(
                                     if held_category == category:
                                         conflicting_ticker = held_tkr
                                         break
-                            cand["row"][-1] = f"카테고리 중복 ({conflicting_ticker} 보유)"
+                            cand["row"][
+                                -1
+                            ] = f"카테고리 중복 - {etf_meta.get(conflicting_ticker, {}).get('name', conflicting_ticker)}({conflicting_ticker})"
                             continue
                         if category in recommended_buy_categories:
                             cand["row"][-1] = "카테고리 중복 (추천)"
@@ -2301,7 +2303,9 @@ def generate_signal_report(
                                     "???",
                                 )
                                 original_phrase = best_new["row"][-1]
-                                best_new["row"][-1] = f"카테고리 중복 ({conflicting_ticker} 보유)"
+                                best_new["row"][
+                                    -1
+                                ] = f"카테고리 중복 - {etf_meta.get(conflicting_ticker, {}).get('name', conflicting_ticker)}({conflicting_ticker})"
                                 continue  # 다음 교체 후보 쌍으로 넘어감
 
                         if (
