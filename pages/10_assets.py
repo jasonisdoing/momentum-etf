@@ -517,16 +517,42 @@ def render_assets_dashboard(
             with st.expander("신규 매수 (BUY)"):
                 with st.form(f"buy_form_{account_prefix}", clear_on_submit=True):
                     buy_ticker = st.text_input("종목코드 (티커)")
-                    shares_format_str = "%.8f" if country_code == "coin" else "%d"
+                    shares_format_str = (
+                        "%.8f"
+                        if country_code == "coin"
+                        else ("%.4f" if country_code == "aus" else "%d")
+                    )
+
+                    # Determine min_value and step for shares based on country_code
+                    if country_code == "kor":
+                        shares_min_value = 1
+                        shares_step = 1
+                    elif country_code == "aus":
+                        shares_min_value = 0.0001
+                        shares_step = 0.0001
+                    else:  # coin
+                        shares_min_value = 0.00000001
+                        shares_step = 0.00000001
+
                     buy_shares = st.number_input(
                         "수량",
-                        min_value=0.00000001,
-                        step=0.00000001,
+                        min_value=shares_min_value,
+                        step=shares_step,
                         format=shares_format_str,
                     )
+
+                    # Determine min_value and step for price based on precision
+                    price_min_value = 0.0
+                    price_step = 1.0  # Default step for floats
+
+                    if precision == 0:
+                        price_min_value = 0  # or 1 if price cannot be 0
+                        price_step = 1
+
                     buy_price = st.number_input(
                         f"매수 단가{currency_str}",
-                        min_value=0.0,
+                        min_value=price_min_value,
+                        step=price_step,
                         format=f"%.{precision}f" if precision > 0 else "%d",
                     )
                     buy_submitted = st.form_submit_button("매수 거래 저장")
