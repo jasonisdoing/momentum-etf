@@ -22,7 +22,7 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
 # --- 계좌별 기본 명령어 (signal, test, tune) ---
 
 # 한국 (KOR) / m1 계좌
-python cli.py kor --signal --account m3 --date 2025-09-22
+python cli.py kor --signal --account m3 --date 2025-09-23
 python cli.py kor --test --account m1
 python cli.py kor --tune --account m1
 

@@ -11,8 +11,6 @@ import pandas as pd
 
 from utils.data_loader import fetch_ohlcv
 
-from . import settings
-
 
 def run_portfolio_backtest(
     stocks: List[Dict],
@@ -26,6 +24,8 @@ def run_portfolio_backtest(
     """
     단일 이동평균선 교차 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
     """
+    from . import settings
+
     # 설정값 로드 (필수)
     try:
         # 전략 고유 설정
@@ -661,6 +661,8 @@ def run_single_ticker_backtest(
     """
     단일 종목에 대해 이동평균선 교차 전략 백테스트를 실행합니다.
     """
+    from . import settings
+
     try:
         # 전략 고유 설정
         ma_period_etf = int(settings.MA_PERIOD)

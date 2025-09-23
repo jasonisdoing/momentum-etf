@@ -1,25 +1,5 @@
 [
     {
-        "category": "미국액티브지수",
-        "tickers": [
-            {
-                "ticker": "426030",
-                "name": "TIMEFOLIO 미국나스닥100액티브",
-                "is_active": true
-            },
-            {
-                "ticker": "426020",
-                "name": "TIMEFOLIO 미국S&P500액티브",
-                "is_active": true
-            },
-            {
-                "ticker": "0015B0",
-                "name": "KoAct 미국나스닥성장기업액티브",
-                "is_active": true
-            }
-        ]
-    },
-    {
         "category": "미국지수",
         "tickers": [
             {
@@ -38,8 +18,18 @@
                 "is_active": true
             },
             {
-                "ticker": "381170",
-                "name": "TIGER 미국테크TOP10 INDXX",
+                "ticker": "426030",
+                "name": "TIMEFOLIO 미국나스닥100액티브",
+                "is_active": true
+            },
+            {
+                "ticker": "426020",
+                "name": "TIMEFOLIO 미국S&P500액티브",
+                "is_active": true
+            },
+            {
+                "ticker": "0015B0",
+                "name": "KoAct 미국나스닥성장기업액티브",
                 "is_active": true
             }
         ]
@@ -47,6 +37,11 @@
     {
         "category": "미국테크",
         "tickers": [
+            {
+                "ticker": "381170",
+                "name": "TIGER 미국테크TOP10 INDXX",
+                "is_active": true
+            },
             {
                 "ticker": "463690",
                 "name": "KODEX 미국S&P500커뮤니케이션",
@@ -70,7 +65,7 @@
         ]
     },
     {
-        "category": "미국양자컴퓨터",
+        "category": "양자컴퓨터",
         "tickers": [
             {
                 "ticker": "0023B0",
@@ -310,31 +305,46 @@
         ]
     },
     {
-        "category": "미국AI전력",
+        "category": "수소",
         "tickers": [
-            {
-                "ticker": "0051G0",
-                "name": "SOL 미국원자력SMR",
-                "is_active": true
-            },
-            {
-                "ticker": "487230",
-                "name": "Kodex 미국AI전력핵심인프라",
-                "is_active": true
-            },
             {
                 "ticker": "417450",
                 "name": "RISE 글로벌수소경제",
                 "is_active": true
             },
             {
+                "ticker": "419650",
+                "name": "PLUS 글로벌수소&차세대연료전지",
+                "is_active": true
+            }
+        ]
+    },
+    {
+        "category": "원자력",
+        "tickers": [
+            {
+                "ticker": "442320",
+                "name": "RISE 글로벌원자력",
+                "is_active": true
+            },
+            {
+                "ticker": "0051G0",
+                "name": "SOL 미국원자력SMR",
+                "is_active": true
+            }
+        ]
+    },
+    {
+        "category": "AI전력",
+        "tickers": [
+            {
                 "ticker": "475070",
                 "name": "KoAct 글로벌친환경전력인프라액티브",
                 "is_active": true
             },
             {
-                "ticker": "442320",
-                "name": "RISE 글로벌원자력",
+                "ticker": "487230",
+                "name": "Kodex 미국AI전력핵심인프라",
                 "is_active": true
             }
         ]

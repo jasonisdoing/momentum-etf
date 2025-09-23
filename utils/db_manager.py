@@ -88,9 +88,9 @@ def get_db_connection():
                 maxPoolSize=max_pool,
                 minPoolSize=min_pool,
                 retryWrites=True,
-                serverSelectionTimeoutMS=8000,
-                connectTimeoutMS=5000,
-                socketTimeoutMS=10000,
+                serverSelectionTimeoutMS=30000,
+                connectTimeoutMS=30000,
+                socketTimeoutMS=30000,
             )
             if max_idle > 0:
                 client_kwargs["maxIdleTimeMS"] = max_idle

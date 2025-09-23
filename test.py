@@ -9,7 +9,6 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from logic import jason as strategy_module
-from logic import settings
 from utils.account_registry import (
     get_account_file_settings,
     get_common_file_settings,
@@ -36,6 +35,8 @@ def _print_backtest_summary(
     portfolio_topn: int,
     ticker_summaries: List[Dict],
 ):
+    from logic import settings
+
     """백테스트 결과 요약을 콘솔에 출력합니다."""
     account_info = get_account_info(account)
     currency = account_info.get("currency", "KRW")
@@ -210,6 +211,8 @@ def main(
     """
     if not account:
         raise ValueError("account is required for backtest execution")
+
+    from logic import settings
 
     # 파일에서 초기 자본금 및 모든 계좌 설정을 가져옵니다.
     try:
