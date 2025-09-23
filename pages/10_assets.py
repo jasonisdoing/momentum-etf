@@ -19,11 +19,10 @@ except Exception:
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.account_registry import get_accounts_by_country, load_accounts
+from utils.account_registry import get_account_file_settings, get_accounts_by_country, load_accounts
 from utils.data_loader import fetch_yfinance_name, get_trading_days
 from utils.db_manager import (
     delete_trade_by_id,
-    get_account_settings,
     get_all_daily_equities,
     get_all_trades,
     get_available_snapshot_dates,
@@ -37,9 +36,9 @@ from utils.db_manager import (
 COUNTRY_CODE_MAP = {"kor": "한국", "aus": "호주", "coin": "가상화폐"}
 
 
-def _display_success_toast(key_prefix: str):
+def _display_feedback_messages(key_prefix: str):
     """
-    세션 상태에서 성공 메시지를 확인하고 토스트로 표시합니다.
+    세션 상태에서 피드백 메시지를 확인하고 토스트로 표시합니다.
     주로 다이얼로그가 닫힌 후 피드백을 주기 위해 사용됩니다.
     """
     keys_to_check = [
@@ -48,11 +47,16 @@ def _display_success_toast(key_prefix: str):
     ]
     for key in keys_to_check:
         if key in st.session_state:
-            message = st.session_state[key]
-            # 메시지가 (type, text) 튜플이고, type이 'success'인 경우에만 처리
-            if isinstance(message, tuple) and len(message) == 2 and message[0] == "success":
-                _, msg_text = st.session_state.pop(key)
-                st.toast(msg_text)
+            # 메시지를 즉시 pop하여 중복 표시를 방지합니다.
+            message = st.session_state.pop(key)
+            if isinstance(message, tuple) and len(message) == 2:
+                msg_type, msg_text = message
+                if msg_type == "success":
+                    st.toast(msg_text, icon="✅")
+                elif msg_type == "error":
+                    st.toast(msg_text, icon="🚨")
+                elif msg_type == "warning":
+                    st.toast(msg_text, icon="⚠️")
 
 
 def _prepare_account_entries(
@@ -133,6 +137,7 @@ def render_assets_dashboard(
 
             if not ticker or not shares > 0 or not price > 0:
                 st.session_state[message_key] = ("error", "종목코드, 수량, 가격을 모두 올바르게 입력해주세요.")
+                st.rerun()
                 return
 
             etf_name = ""
@@ -159,12 +164,7 @@ def render_assets_dashboard(
                 st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
             else:
                 st.session_state[message_key] = ("error", "거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.")
-
-        if message_key in st.session_state:
-            msg_type, msg_text = st.session_state[message_key]
-            if msg_type != "success":
-                st.error(msg_text)
-                del st.session_state[message_key]
+            st.rerun()
 
         with st.form(f"trade_form_{account_prefix}"):
             st.text_input("종목코드 (티커)", key=f"buy_ticker_{account_prefix}")
@@ -207,6 +207,7 @@ def render_assets_dashboard(
 
             if not selected_indices:
                 st.session_state[message_key] = ("warning", "매도할 종목을 선택해주세요.")
+                st.rerun()
                 return
 
             selected_rows = df_holdings.loc[selected_indices]
@@ -241,12 +242,7 @@ def render_assets_dashboard(
                 )
             else:
                 st.session_state[message_key] = ("error", "일부 거래 저장에 실패했습니다.")
-
-        if message_key in st.session_state:
-            msg_type, msg_text = st.session_state[message_key]
-            if msg_type != "success":
-                st.warning(msg_text) if msg_type == "warning" else st.error(msg_text)
-                del st.session_state[message_key]
+            st.rerun()
 
         with st.form(f"sell_form_{account_prefix}"):
             st.subheader("매도할 종목을 선택하세요 (전체 매도)")
@@ -269,17 +265,18 @@ def render_assets_dashboard(
             )
             st.form_submit_button("선택 종목 매도", on_click=on_sell_submit)
 
-    _display_success_toast(account_prefix)
+    _display_feedback_messages(account_prefix)
 
     sub_tab_equity_history, sub_tab_trades = st.tabs(["평가금액", "트레이드"])
 
     with sub_tab_equity_history:
-        account_settings = get_account_settings(account_code)
-        if not account_settings:
-            st.warning(f"'{account_code}' 계좌의 설정을 찾을 수 없습니다. '90_settings' 페이지에서 설정을 먼저 저장해주세요.")
-            account_settings = {}
+        try:
+            account_settings = get_account_file_settings(country_code, account_code)
+        except SystemExit as e:
+            st.error(str(e))
+            st.stop()
 
-        initial_date = (account_settings.get("initial_date") if account_settings else None) or (
+        initial_date = account_settings.get("initial_date") or (
             datetime.now() - pd.DateOffset(months=3)
         )
         currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
@@ -543,6 +540,20 @@ def render_assets_dashboard(
 def main():
     """자산 관리 페이지를 렌더링합니다."""
     st.title("🗂️ 자산 관리 (Assets)")
+
+    st.markdown(
+        """
+        <style>
+            .block-container {
+                max-width: 100%;
+                padding-top: 1rem;
+                padding-left: 2rem;
+                padding-right: 2rem;
+            }
+        </style>
+    """,
+        unsafe_allow_html=True,
+    )
 
     print("[MAIN] 계좌 정보 로딩 시작...")
     start_time = time.time()

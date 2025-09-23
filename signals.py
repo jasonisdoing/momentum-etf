@@ -34,8 +34,6 @@ from utils.data_loader import (
 
 # 신규 구조 모듈 임포트를 정리합니다.
 from utils.db_manager import (
-    get_account_settings,
-    get_common_settings,
     get_db_connection,
     get_portfolio_snapshot,
     get_previous_portfolio_snapshot,
@@ -49,6 +47,7 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.stock_list_io import get_etfs
+from utils.account_registry import get_account_file_settings, get_common_file_settings
 from utils.notify import send_log_to_slack
 
 try:
@@ -248,22 +247,17 @@ def get_market_regime_status_string() -> Optional[str]:
     """
     S&P 500 지수를 기준으로 현재 시장 레짐 상태를 계산하여 HTML 문자열로 반환합니다.
     """
-    # 공통 설정 로드 (DB)
-    common = get_common_settings()
-    if not common:
-        # 설정이 없으면 안내 문구를 회색으로 표시하여 사용자에게 알림
-        return '<span style="color:grey">시장 상태: 설정 필요</span>'
+    # 공통 설정 로드 (파일)
     try:
-        regime_filter_enabled = bool(common.get("MARKET_REGIME_FILTER_ENABLED"))
+        common = get_common_file_settings()
+        regime_filter_enabled = common["MARKET_REGIME_FILTER_ENABLED"]
         if not regime_filter_enabled:
             return '<span style="color:grey">시장 상태: 비활성화</span>'
         regime_ticker = str(common["MARKET_REGIME_FILTER_TICKER"])
         regime_ma_period = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
-    except KeyError:
-        return '<span style="color:grey">시장 상태: 설정 필요</span>'
-    except (ValueError, TypeError):
-        print("오류: 공통 설정의 시장 레짐 필터 값 형식이 올바르지 않습니다.")
-        return '<span style="color:grey">시장 상태: 설정 오류</span>'
+    except (SystemExit, KeyError, ValueError, TypeError) as e:
+        print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
+        return '<span style="color:grey">시장 상태: 설정 파일 오류</span>'
 
     # 데이터 로딩에 필요한 기간 계산: 레짐 MA 기간을 만족하도록 동적으로 산정
     # 거래일 기준 대략 22일/월 가정 + 여유 버퍼
@@ -501,26 +495,16 @@ def calculate_benchmark_comparison(
     if not account:
         return None
 
-    # DB에 저장된 동적 설정(초기자본, 날짜 등)과
-    # accounts.json 파일의 정적 설정(벤치마크 목록)을 모두 가져옵니다.
-    portfolio_settings = get_account_settings(account)
+    # 파일에서 초기 자본/날짜 설정을 로드합니다.
+    try:
+        file_settings = get_account_file_settings(country, account)
+        initial_capital = float(file_settings["initial_capital"])
+        initial_date = pd.to_datetime(file_settings["initial_date"])
+    except SystemExit as e:
+        return [{"name": "벤치마크", "error": str(e)}]
+
+    # accounts.json 파일의 정적 설정(벤치마크 목록)을 가져옵니다.
     account_info = get_account_info(account)
-
-    if not portfolio_settings:
-        return [{"name": "벤치마크", "error": "계좌 설정을 DB에서 찾을 수 없습니다."}]
-
-    missing_settings = []
-    if "initial_capital" not in portfolio_settings:
-        missing_settings.append("초기 자본금")
-    if "initial_date" not in portfolio_settings:
-        missing_settings.append("초기 자본 기준일")
-
-    if missing_settings:
-        error_msg = f"계좌 설정 필요: {', '.join(missing_settings)}"
-        return [{"name": "벤치마크", "error": error_msg}]
-
-    if not account_info or "benchmarks_tickers" not in account_info:
-        return None
 
     if not account_info or "benchmarks_tickers" not in account_info:
         return None
@@ -528,9 +512,6 @@ def calculate_benchmark_comparison(
     benchmarks_to_compare = account_info["benchmarks_tickers"]
     if not benchmarks_to_compare:
         return None
-
-    initial_capital = float(portfolio_settings["initial_capital"])
-    initial_date = pd.to_datetime(portfolio_settings["initial_date"])
 
     if initial_capital <= 0:
         return None
@@ -941,32 +922,20 @@ def _fetch_and_prepare_data(
     """
     logger = get_signal_logger()
 
-    if not portfolio_settings or "ma_period" not in portfolio_settings:
-        print(f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
-        return None
-
-    try:
-        ma_period = int(portfolio_settings["ma_period"])
-    except (ValueError, TypeError):
-        print(f"오류: '{country}' 국가의 MA 기간 설정이 올바르지 않습니다.")
-        return None
+    ma_period = portfolio_settings["ma_period"]
 
     request_label = date_str or "auto"
     logger.info(
         "[%s] signal data preparation started (input date=%s)", country.upper(), request_label
     )
 
-    # --- 추가된 로직: 계좌 시작일 이전 데이터 생성 방지 ---
-    initial_date = portfolio_settings.get("initial_date")
-    if not initial_date:
-        print(f"오류: '{country}' 국가의 '{account}' 계좌에 초기 기준일(initial_date)이 설정되지 않았습니다.")
-        return None
-
     try:
-        initial_date_ts = pd.to_datetime(initial_date).normalize()
+        initial_date_ts = pd.to_datetime(portfolio_settings["initial_date"]).normalize()
         request_date_ts = pd.to_datetime(date_str).normalize()
-    except (ValueError, TypeError):
-        print(f"오류: 날짜 형식 변환에 실패했습니다. (요청: {date_str}, 시작일: {initial_date})")
+    except (ValueError, TypeError, AttributeError):
+        print(
+            f"오류: 날짜 형식 변환에 실패했습니다. (요청: {date_str}, 시작일: {portfolio_settings.get('initial_date')})"
+        )
         return None
 
     if request_date_ts < initial_date_ts:
@@ -1016,7 +985,7 @@ def _fetch_and_prepare_data(
     for etf in all_etfs_from_file:
         if "is_active" not in etf:
             raise ValueError(
-                f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
+                f"종목 마스터 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
             )
     full_etf_meta = {etf["ticker"]: etf for etf in all_etfs_from_file}
     etfs_from_file = [etf for etf in all_etfs_from_file if etf.get("is_active") is not False]
@@ -1088,24 +1057,18 @@ def _fetch_and_prepare_data(
             print("-> 장중입니다. 실시간 시세를 가져옵니다.")
 
     # --- 신호 계산 (공통 설정에서) ---
-    common = get_common_settings()
-    if not common:
-        print("오류: 공통 설정이 DB에 없습니다. '설정' 탭에서 값을 저장해주세요.")
-        return None
     try:
-        regime_filter_enabled = bool(common["MARKET_REGIME_FILTER_ENABLED"])
-        regime_ma_period = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
-    except KeyError as e:
-        print(f"오류: 공통 설정 '{e.args[0]}' 값이 없습니다.")
-        return None
-    except (ValueError, TypeError):
-        print("오류: 공통 설정 값 형식이 올바르지 않습니다.")
+        common = get_common_file_settings()
+        regime_filter_enabled = common["MARKET_REGIME_FILTER_ENABLED"]
+        regime_ma_period = common["MARKET_REGIME_FILTER_MA_PERIOD"]
+    except (SystemExit, KeyError, ValueError, TypeError) as e:
+        print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
         return None
 
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
     # 코인은 거래소 잔고 기반 표시이므로, 종목 마스터가 비어 있어도 보유코인을 기준으로 진행합니다.
     if not etfs_from_file and country != "coin":
-        print(f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 현황을 계산할 종목을 찾을 수 없습니다.")
+        print(f"오류: 'data/stocks/{country}.json' 파일에서 '{country}' 국가의 현황을 계산할 종목을 찾을 수 없습니다.")
         return None
 
     max_ma_period = max(ma_period, regime_ma_period if regime_filter_enabled else 0)
@@ -1347,6 +1310,7 @@ def _fetch_and_prepare_data(
 
 def _build_header_line(
     country,
+    account: str,
     portfolio_data,
     current_equity,
     total_holdings_value,
@@ -1426,9 +1390,7 @@ def _build_header_line(
     else:
         # '오늘' 또는 '과거' 리포트에서는 `base_date`를 기준으로 이전 스냅샷을 가져옵니다.
         compare_date_for_prev = base_date
-        prev_snapshot = get_previous_portfolio_snapshot(
-            country, compare_date_for_prev, portfolio_settings.get("account")
-        )
+        prev_snapshot = get_previous_portfolio_snapshot(country, compare_date_for_prev, account)
         prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else None
         day_ret_pct = (
             ((current_equity / prev_equity) - 1.0) * 100.0
@@ -1553,16 +1515,11 @@ def generate_signal_report(
 
     effective_date_str = target_date.strftime("%Y-%m-%d")
 
-    # 2. 설정을 한 번만 가져옵니다.
-    portfolio_settings = get_account_settings(account)
-    if (
-        not portfolio_settings
-        or "ma_period" not in portfolio_settings
-        or "portfolio_topn" not in portfolio_settings
-    ):
-        print(
-            f"오류: '{country}/{account}' 계좌의 필수 설정(MA 기간, TopN)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요."
-        )
+    # 2. 설정을 파일에서 가져옵니다.
+    try:
+        portfolio_settings = get_account_file_settings(country, account)
+    except SystemExit as e:
+        print(str(e))
         return None
 
     # 3. 데이터 로드 및 지표 계산
@@ -1784,6 +1741,7 @@ def generate_signal_report(
 
     header_line, label_date, day_label = _build_header_line(
         country,
+        account,
         portfolio_data,
         current_equity,
         total_holdings_value,
@@ -1840,16 +1798,13 @@ def generate_signal_report(
         return None
 
     # 공통 설정에서 손절 퍼센트 로드
-    common = get_common_settings()
-    if not common or "HOLDING_STOP_LOSS_PCT" not in common:
-        print("오류: 공통 설정에 HOLDING_STOP_LOSS_PCT 값이 없습니다.")
-        return None
     try:
+        common = get_common_file_settings()
         stop_loss_raw = float(common["HOLDING_STOP_LOSS_PCT"])
         # 양수 입력이 들어오더라도 손절 임계값은 음수로 해석합니다 (예: 10 -> -10).
         stop_loss = -abs(stop_loss_raw)
-    except (ValueError, TypeError):
-        print("오류: 공통 설정의 HOLDING_STOP_LOSS_PCT 값 형식이 올바르지 않습니다.")
+    except (SystemExit, KeyError, ValueError, TypeError) as e:
+        print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
         return None
 
     if denom <= 0:
@@ -2062,7 +2017,7 @@ def generate_signal_report(
             }
         )
 
-    # 매수/교체매수 후보는 반드시 '종목 마스터(etf.json)'에 포함된 종목으로 제한합니다.
+    # 매수/교체매수 후보는 반드시 '종목 마스터(data/stocks/{country}.json)'에 포함된 종목으로 제한합니다.
     # 이는 사용자가 유니버스에서 제외한 종목(예: 당일 매도 후 목록에서 제거)이
     # 다시 매수 후보로 추천되는 것을 방지합니다.
     from utils.stock_list_io import get_etfs
@@ -2882,24 +2837,25 @@ def send_summary_notification(
     old_equity: float,
 ) -> None:
     """작업 완료 요약 슬랙 알림을 전송합니다."""
-    from utils.db_manager import get_portfolio_snapshot, get_portfolio_settings
+    from utils.db_manager import get_portfolio_snapshot
     from utils.report import format_aud_money, format_kr_money
 
     try:
         date_str = report_date.strftime("%Y-%m-%d")
         prefix = f"{country}/{account}"
-        message = f"[{prefix}/{date_str}] 작업 완료(작업시간: {duration:.1f}초)"
 
         # Get new equity
         new_snapshot = get_portfolio_snapshot(country, account=account)
         new_equity = float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
 
         # Calculate cumulative return
-        portfolio_settings = get_portfolio_settings(country, account=account)
-        initial_capital = (
-            float(portfolio_settings.get("initial_capital", 0)) if portfolio_settings else 0.0
-        )
+        try:
+            file_settings = get_account_file_settings(country, account)
+            initial_capital = float(file_settings.get("initial_capital", 0))
+        except SystemExit:
+            initial_capital = 0.0  # 알림에서는 조용히 실패 처리
 
+        message = f"[{prefix}/{date_str}] 작업 완료(작업시간: {duration:.1f}초)"
         money_formatter = format_aud_money if country == "aus" else format_kr_money
 
         if initial_capital > 0:

@@ -236,17 +236,16 @@ def main():
         )
         logging.info(f"Scheduled CACHE: cron='{cache_cron}' tz='{cache_tz}'")
 
-    if _bool_env("RUN_IMMEDIATELY_ON_START", False):
-        # 시작 시 한 번 즉시 실행
-        logging.info("\n[Initial Run] Starting...")
-        # run_status("aus")
-        for country in ("coin", "aus", "kor"):
-            try:
-                if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", True):
-                    run_signals_for_country(country)
-            except Exception:
-                logging.error(f"Error during initial run for {country}", exc_info=True)
-        logging.info("[Initial Run] Complete.")
+    # 시작 시 한 번 즉시 실행
+    logging.info("\n[Initial Run] Starting...")
+    # run_status("aus")
+    for country in ("coin", "aus", "kor"):
+        try:
+            if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", True):
+                run_signals_for_country(country)
+        except Exception:
+            logging.error(f"Error during initial run for {country}", exc_info=True)
+    logging.info("[Initial Run] Complete.")
 
     # 다음 실행 시간 출력
     jobs = scheduler.get_jobs()

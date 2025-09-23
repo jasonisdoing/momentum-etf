@@ -34,7 +34,12 @@ def main():
     st.markdown(
         """
         <style>
-            .block-container { padding-top: 1rem; }
+            .block-container {
+                max-width: 100%;
+                padding-top: 1rem;
+                padding-left: 2rem;
+                padding-right: 2rem;
+            }
         </style>
     """,
         unsafe_allow_html=True,

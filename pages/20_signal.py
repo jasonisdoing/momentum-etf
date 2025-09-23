@@ -274,7 +274,7 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
     st.dataframe(
         styler,
         width="stretch",
-        height=(11 * 35 + 3),
+        height=(16 * 35 + 3),
         column_config={
             "이름": st.column_config.TextColumn("종목명", width=200),
             "category": st.column_config.TextColumn("카테고리", width=100),
@@ -491,6 +491,20 @@ def render_signal_dashboard(
 def main():
     """매매 신호 페이지를 렌더링합니다."""
     st.title("📈 매매 신호 (Signal)")
+
+    st.markdown(
+        """
+        <style>
+            .block-container {
+                max-width: 100%;
+                padding-top: 1rem;
+                padding-left: 2rem;
+                padding-right: 2rem;
+            }
+        </style>
+    """,
+        unsafe_allow_html=True,
+    )
 
     print("[MAIN] 계좌 정보 로딩 시작...")
     start_time = time.time()

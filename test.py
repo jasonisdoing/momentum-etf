@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from logic import jason as strategy_module
 from logic import settings
-from utils.db_manager import get_common_settings, get_portfolio_settings
+from utils.account_registry import get_account_file_settings, get_common_file_settings
 from utils.report import (
     format_aud_money,
     format_aud_price,
@@ -21,7 +21,6 @@ from utils.data_loader import get_latest_trading_day
 from utils.stock_list_io import get_etfs as get_etfs_from_files
 
 # 이 파일에서는 매매 전략에 사용되는 고유 파라미터를 정의합니다.
-INITIAL_CAPITAL = 100000000
 # 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월 데이터로 테스트)
 TEST_MONTHS_RANGE = 12
 
@@ -203,42 +202,19 @@ def main(
     지정된 전략에 대한 백테스트를 실행하고 결과를 요약합니다.
     `quiet=True` 모드에서는 로그를 출력하지 않고 최종 요약만 반환합니다.
     """
-    try:
-        initial_capital = INITIAL_CAPITAL
-    except AttributeError:
-        print("오류: INITIAL_CAPITAL 설정이 logic/settings.py 에 정의되어야 합니다.")
-        return
-
     if not account:
         raise ValueError("account is required for backtest execution")
 
-    # DB에서 앱 설정을 불러와 logic.settings에 동적으로 설정합니다.
-    portfolio_settings = get_portfolio_settings(country, account=account)
-    if (
-        not portfolio_settings
-        or "ma_period" not in portfolio_settings
-        or "portfolio_topn" not in portfolio_settings
-    ):
-        print(f"오류: '{country}' 국가의 설정(TopN, MA 기간)이 DB에 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
-        return
-
-    # 필수 설정값이 모두 있는지 검증 (fallback 금지)
-    if "replace_threshold" not in portfolio_settings:
-        print(f"오류: '{country}' 국가의 설정에 'replace_threshold'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
-        return
-    # 추가 필수값: replace_weaker_stock
-    if "replace_weaker_stock" not in portfolio_settings:
-        print(f"오류: '{country}' 국가의 설정에 'replace_weaker_stock'가 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
-        return
-
+    # 파일에서 초기 자본금 및 모든 계좌 설정을 가져옵니다.
     try:
-        settings.MA_PERIOD = int(portfolio_settings["ma_period"])
-        portfolio_topn = int(portfolio_settings["portfolio_topn"])
-        # 교체 매매 파라미터 (백테스트용, 필수)
-        settings.REPLACE_SCORE_THRESHOLD = float(portfolio_settings["replace_threshold"])
-        settings.REPLACE_WEAKER_STOCK = bool(portfolio_settings["replace_weaker_stock"])
-    except (ValueError, TypeError):
-        print(f"오류: '{country}' 국가의 DB 설정값이 올바르지 않습니다.")
+        portfolio_settings = get_account_file_settings(country, account)
+        initial_capital = portfolio_settings["initial_capital"]
+        settings.MA_PERIOD = portfolio_settings["ma_period"]
+        portfolio_topn = portfolio_settings["portfolio_topn"]
+        settings.REPLACE_SCORE_THRESHOLD = portfolio_settings["replace_threshold"]
+        settings.REPLACE_WEAKER_STOCK = portfolio_settings["replace_weaker_stock"]
+    except SystemExit as e:
+        print(str(e))
         return
 
     # Optional overrides from caller (e.g., tuning scripts)
@@ -256,31 +232,17 @@ def main(
             # Silently ignore malformed overrides
             pass
 
-    # 공통(전역) 설정 로드 및 주입 (필수)
-    common = get_common_settings()
-    if not common:
-        print("오류: 공통 설정이 DB에 없습니다. 웹 앱의 '설정' 탭에서 먼저 값을 저장해주세요.")
-        return
-    required_common_keys = [
-        "HOLDING_STOP_LOSS_PCT",
-        "COOLDOWN_DAYS",
-        "MARKET_REGIME_FILTER_ENABLED",
-        "MARKET_REGIME_FILTER_TICKER",
-        "MARKET_REGIME_FILTER_MA_PERIOD",
-    ]
-    missing = [k for k in required_common_keys if k not in common]
-    if missing:
-        print(f"오류: 공통 설정에 다음 값이 없습니다: {', '.join(missing)}")
-        return
     try:
+        # 공통(전역) 설정 로드 및 주입 (필수)
+        common = get_common_file_settings()
         # 양수 입력을 음수 임계값으로 해석합니다 (예: 10 -> -10)
         settings.HOLDING_STOP_LOSS_PCT = -abs(float(common["HOLDING_STOP_LOSS_PCT"]))
         settings.COOLDOWN_DAYS = int(common["COOLDOWN_DAYS"])
         settings.MARKET_REGIME_FILTER_ENABLED = bool(common["MARKET_REGIME_FILTER_ENABLED"])
         settings.MARKET_REGIME_FILTER_TICKER = str(common["MARKET_REGIME_FILTER_TICKER"])
         settings.MARKET_REGIME_FILTER_MA_PERIOD = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
-    except (ValueError, TypeError):
-        print("오류: 공통 설정 값의 형식이 올바르지 않습니다.")
+    except (SystemExit, KeyError, ValueError, TypeError) as e:
+        print(f"오류: 공통 설정 파일을 읽는 중 문제가 발생했습니다: {e}")
         return
 
     # 국가별로 다른 포맷터 사용

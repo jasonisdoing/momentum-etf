@@ -16,7 +16,7 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
 
 """
 [실행 예시]
-아래는 'data/accounts.json'에 등록된 계좌를 기반으로 생성된 실행 명령어 예시입니다.
+아래는 'data/accounts/country_mapping.json'에 등록된 계좌를 기반으로 생성된 실행 명령어 예시입니다.
 이 목록을 복사하여 터미널에서 바로 사용할 수 있습니다.
 
 # --- 계좌별 기본 명령어 (signal, test, tune) ---
@@ -71,7 +71,7 @@ def _resolve_account(country: str, explicit: Optional[str]) -> str:
         code = entry.get("account")
         if code:
             return str(code)
-    raise SystemExit(f"'{country}' 국가에 등록된 계좌가 없습니다. data/accounts.json을 확인하세요.")
+    raise SystemExit(f"'{country}' 국가에 등록된 계좌가 없습니다. data/accounts/country_mapping.json을 확인하세요.")
 
 
 def main():
@@ -143,12 +143,12 @@ def main():
             import pandas as pd
 
             from utils.data_loader import fetch_ohlcv_for_tickers
-            from utils.db_manager import get_portfolio_settings
+            from utils.account_registry import get_account_file_settings
             from utils.stock_list_io import get_etfs
 
             etfs_from_file = get_etfs(country)
             if not etfs_from_file:
-                print("오류: 'data/aus/' 폴더에서 백테스트에 사용할 티커를 찾을 수 없습니다.")
+                print("오류: 'data/stocks/aus.json' 파일에서 백테스트에 사용할 티커를 찾을 수 없습니다.")
                 return
 
             tickers = [s["ticker"] for s in etfs_from_file]
@@ -158,17 +158,18 @@ def main():
                     print("오류: 지정한 --tickers 가 DB 목록과 일치하지 않습니다.")
                     return
 
-            portfolio_settings = get_portfolio_settings(country, account=account)
-            if not portfolio_settings:
-                print(f"오류: '{country}' 국가의 설정을 DB에서 찾을 수 없습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+            try:
+                portfolio_settings = get_account_file_settings(country, account)
+            except SystemExit as e:
+                print(str(e))
                 return
 
             try:
                 test_months_range = TEST_MONTHS_RANGE
-                # test.py의 하드코딩된 값 대신 DB에서 실제 MA 기간을 가져옵니다.
+                # test.py의 하드코딩된 값 대신 파일에서 실제 MA 기간을 가져옵니다.
                 ma_etf = int(portfolio_settings["ma_period"])
             except (KeyError, ValueError, TypeError):
-                print("오류: DB의 MA 기간 설정이 올바르지 않습니다.")
+                print("오류: 계좌 설정 파일의 MA 기간 설정이 올바르지 않습니다.")
                 return
             core_end_dt = pd.Timestamp.now()
             core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)

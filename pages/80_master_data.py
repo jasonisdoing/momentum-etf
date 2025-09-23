@@ -13,7 +13,7 @@ from utils.stock_list_io import get_etfs
 
 @st.cache_data
 def get_cached_etfs(country_code: str) -> List[Dict[str, Any]]:
-    """종목 마스터(etf.json) 데이터를 캐시하여 반환합니다."""
+    """종목 마스터(data/stocks/{country}.json) 데이터를 캐시하여 반환합니다."""
     return get_etfs(country_code) or []
 
 
@@ -31,7 +31,7 @@ def render_master_etf_ui(country_code: str):
 
     for etf in etfs_data:
         if "is_active" not in etf:
-            st.error(f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요.")
+            st.error(f"종목 마스터 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요.")
             st.stop()
 
     df_etfs = pd.DataFrame(etfs_data)
@@ -74,6 +74,20 @@ def render_master_etf_ui(country_code: str):
 def main():
     """종목 관리 페이지를 렌더링합니다."""
     st.title("🗃️ 종목 관리 (Master Data)")
+
+    st.markdown(
+        """
+        <style>
+            .block-container {
+                max-width: 100%;
+                padding-top: 1rem;
+                padding-left: 2rem;
+                padding-right: 2rem;
+            }
+        </style>
+    """,
+        unsafe_allow_html=True,
+    )
 
     tab_kor, tab_aus, tab_coin = st.tabs(["한국", "호주", "코인"])
 

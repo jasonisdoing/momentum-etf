@@ -1,0 +1,92 @@
+[
+    {
+        "country": "kor",
+        "account": "m1",
+        "display_name": "매리츠1",
+        "benchmarks_tickers": [
+            {
+                "ticker": "379800",
+                "name": "KODEX 미국S&P500"
+            },
+            {
+                "ticker": "426030",
+                "name": "TIMEFOLIO 미국나스닥100액티브"
+            }
+        ],
+        "currency": "KRW",
+        "precision": 0,
+        "is_active": true
+    },
+    {
+        "country": "kor",
+        "account": "m2",
+        "display_name": "매리츠2",
+        "benchmarks_tickers": [
+            {
+                "ticker": "379800",
+                "name": "KODEX 미국S&P500"
+            },
+            {
+                "ticker": "426030",
+                "name": "TIMEFOLIO 미국나스닥100액티브"
+            }
+        ],
+        "currency": "KRW",
+        "precision": 0,
+        "is_active": true
+    },
+    {
+        "country": "kor",
+        "account": "m3",
+        "display_name": "매리츠3",
+        "benchmarks_tickers": [
+            {
+                "ticker": "379800",
+                "name": "KODEX 미국S&P500"
+            },
+            {
+                "ticker": "426030",
+                "name": "TIMEFOLIO 미국나스닥100액티브"
+            }
+        ],
+        "currency": "KRW",
+        "precision": 0,
+        "is_active": true
+    },
+    {
+        "country": "aus",
+        "account": "a1",
+        "display_name": "호주연금",
+        "benchmarks_tickers": [
+            {
+                "ticker": "IVV.AX",
+                "name": "iShares S&P 500 (AUD)"
+            }
+        ],
+        "currency": "AUD",
+        "precision": 2,
+        "is_active": true
+    },
+    {
+        "country": "coin",
+        "account": "b1",
+        "display_name": "빗썸",
+        "benchmarks_tickers": [
+            {
+                "ticker": "379800",
+                "name": "KODEX 미국S&P500"
+            },
+            {
+                "ticker": "BTC",
+                "name": "비트코인"
+            },
+            {
+                "ticker": "ETH",
+                "name": "이더리움"
+            }
+        ],
+        "currency": "KRW",
+        "precision": 0,
+        "is_active": true
+    }
+]
