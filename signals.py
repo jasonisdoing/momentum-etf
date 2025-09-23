@@ -2193,71 +2193,71 @@ def generate_signal_report(
                 else:
                     cand["row"][-1] = "가격 정보 없음" + f" ({cand['row'][-1]})"
 
-        # 2b: 포트폴리오가 가득 찼으므로 교체 매매 고려
-        # 현금 부족으로 신규 매수에 실패했더라도, 더 좋은 종목으로 교체할 수 있는지 항상 확인합니다.
-        if replace_weaker_stock:
-            buy_candidates = sorted(
-                [a for a in decisions if a.get("buy_signal") and a["tkr"] in universe_tickers],
-                key=lambda x: x["score"],
-                reverse=True,
-            )
-            held_stocks = sorted(
-                [a for a in decisions if a["state"] == "HOLD"],
-                # 점수가 없는(nan) 종목을 교체 우선순위에서 가장 낮게(가장 먼저 팔리도록) 설정
-                key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"),
-            )
+        else:
+            # 2b: 포트폴리오가 가득 찼으므로 교체 매매 고려
+            if replace_weaker_stock:
+                buy_candidates = sorted(
+                    [a for a in decisions if a.get("buy_signal") and a["tkr"] in universe_tickers],
+                    key=lambda x: x["score"],
+                    reverse=True,
+                )
+                held_stocks = sorted(
+                    [a for a in decisions if a["state"] == "HOLD"],
+                    # 점수가 없는(nan) 종목을 교체 우선순위에서 가장 낮게(가장 먼저 팔리도록) 설정
+                    key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"),
+                )
 
-            num_possible_replacements = min(len(buy_candidates), len(held_stocks))
+                num_possible_replacements = min(len(buy_candidates), len(held_stocks))
 
-            for k in range(num_possible_replacements):
-                best_new = buy_candidates[k]
-                weakest_held = held_stocks[k]
+                for k in range(num_possible_replacements):
+                    best_new = buy_candidates[k]
+                    weakest_held = held_stocks[k]
 
-                # 교체는 아직 매수/매도 결정이 없는 'WAIT'와 'HOLD' 상태의 종목에만 적용합니다.
-                if best_new["state"] != "WAIT" or weakest_held["state"] != "HOLD":
-                    continue
+                    # 교체는 아직 매수/매도 결정이 없는 'WAIT'와 'HOLD' 상태의 종목에만 적용합니다.
+                    if best_new["state"] != "WAIT" or weakest_held["state"] != "HOLD":
+                        continue
 
-                # replace_threshold는 % 단위이므로 100으로 나누어 점수(소수점)와 단위를 맞춥니다.
-                if (
-                    pd.notna(best_new["score"])
-                    and pd.notna(weakest_held["score"])
-                    and best_new["score"] > weakest_held["score"] + (replace_threshold / 100.0)
-                ):
-                    d_weakest = data_by_tkr.get(weakest_held["tkr"])
-                    sell_price = float(d_weakest.get("price", 0))
-                    sell_qty = float(d_weakest.get("shares", 0))
-                    avg_cost = float(d_weakest.get("avg_cost", 0))
+                    # replace_threshold는 % 단위이므로 100으로 나누어 점수(소수점)와 단위를 맞춥니다.
+                    if (
+                        pd.notna(best_new["score"])
+                        and pd.notna(weakest_held["score"])
+                        and best_new["score"] > weakest_held["score"] + (replace_threshold / 100.0)
+                    ):
+                        d_weakest = data_by_tkr.get(weakest_held["tkr"])
+                        sell_price = float(d_weakest.get("price", 0))
+                        sell_qty = float(d_weakest.get("shares", 0))
+                        avg_cost = float(d_weakest.get("avg_cost", 0))
 
-                    hold_ret = 0.0
-                    prof = 0.0
-                    if avg_cost > 0 and sell_price > 0:
-                        hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
-                        prof = (sell_price - avg_cost) * sell_qty
+                        hold_ret = 0.0
+                        prof = 0.0
+                        if avg_cost > 0 and sell_price > 0:
+                            hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
+                            prof = (sell_price - avg_cost) * sell_qty
 
-                    sell_phrase = f"교체매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'} ({best_new['tkr']}(으)로 교체)"
+                        sell_phrase = f"교체매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'} ({best_new['tkr']}(으)로 교체)"
 
-                    weakest_held["state"] = "SELL_REPLACE"
-                    weakest_held["row"][2] = "SELL_REPLACE"
-                    weakest_held["row"][-1] = sell_phrase
+                        weakest_held["state"] = "SELL_REPLACE"
+                        weakest_held["row"][2] = "SELL_REPLACE"
+                        weakest_held["row"][-1] = sell_phrase
 
-                    best_new["state"] = "BUY_REPLACE"
-                    best_new["row"][2] = "BUY_REPLACE"
+                        best_new["state"] = "BUY_REPLACE"
+                        best_new["row"][2] = "BUY_REPLACE"
 
-                    sell_value = weakest_held["weight"] / 100.0 * current_equity
-                    buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
-                    if buy_price > 0:
-                        if country in ("coin", "aus"):
-                            buy_qty = sell_value / buy_price
+                        sell_value = weakest_held["weight"] / 100.0 * current_equity
+                        buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
+                        if buy_price > 0:
+                            if country in ("coin", "aus"):
+                                buy_qty = sell_value / buy_price
+                            else:
+                                buy_qty = int(sell_value // buy_price)
+                            buy_notional = buy_qty * buy_price
+                            best_new["row"][
+                                -1
+                            ] = f"매수 {format_shares(buy_qty)}주 @ {price_formatter(buy_price)} ({money_formatter(buy_notional)}) ({weakest_held['tkr']} 대체)"
                         else:
-                            buy_qty = int(sell_value // buy_price)
-                        buy_notional = buy_qty * buy_price
-                        best_new["row"][
-                            -1
-                        ] = f"매수 {format_shares(buy_qty)}주 @ {price_formatter(buy_price)} ({money_formatter(buy_notional)}) ({weakest_held['tkr']} 대체)"
+                            best_new["row"][-1] = f"{weakest_held['tkr']}(을)를 대체 (가격정보 없음)"
                     else:
-                        best_new["row"][-1] = f"{weakest_held['tkr']}(을)를 대체 (가격정보 없음)"
-                else:
-                    break
+                        break
 
     # 최종 정리: 아직 'WAIT' 상태인 종목들의 사유를 명확히 합니다.
     for cand in decisions:
