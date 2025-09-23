@@ -40,7 +40,6 @@ def momentum_score_yf(ticker: str, end_date: str = None) -> float | None:
             ticker,
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
-            progress=False,
             auto_adjust=True,
         )
 

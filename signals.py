@@ -45,11 +45,7 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.stock_list_io import get_etfs
-from utils.account_registry import (
-    get_account_file_settings,
-    get_common_file_settings,
-    get_country_file_settings,
-)
+from utils.account_registry import get_account_file_settings, get_common_file_settings
 from utils.notify import send_log_to_slack
 
 try:
@@ -103,6 +99,12 @@ DECISION_CONFIG = {
     "SELL_INACTIVE": {
         "display_name": "<🗑️ 비활성 매도>",
         "order": 14,
+        "is_recommendation": True,
+        "show_slack": True,
+    },
+    "SELL_REGIME_FILTER": {
+        "display_name": "<🛡️ 시장위험회피 매도>",
+        "order": 15,
         "is_recommendation": True,
         "show_slack": True,
     },
@@ -299,8 +301,7 @@ def get_market_regime_status_string() -> Optional[str]:
             elif not is_off and in_period:
                 in_period = False
                 # 리스크 오프 기간의 마지막 날은 is_off가 False가 되기 바로 전날입니다.
-                # i > 0 이므로 is_risk_off_series.index[i - 1]은 안전합니다.
-                end_date = is_risk_off_series.index[i - 1]
+                end_date = is_risk_off_series.index[is_risk_off_series.index.get_loc(dt) - 1]
                 completed_periods.append((start_date, end_date))
                 start_date = None
 
@@ -436,7 +437,6 @@ def _calculate_single_benchmark(
                     y_ticker,
                     start=initial_date.strftime("%Y-%m-%d"),
                     end=(base_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
-                    progress=False,
                     auto_adjust=True,
                 )
                 df_benchmark = _normalize_yfinance_df(df_y)
@@ -483,7 +483,7 @@ def calculate_benchmark_comparison(
 
     # 파일에서 초기 자본/날짜 설정을 로드합니다.
     try:
-        file_settings = get_account_file_settings(account)
+        file_settings = get_account_file_settings(country, account)
         initial_capital = float(file_settings["initial_capital"])
         initial_date = pd.to_datetime(file_settings["initial_date"])
     except SystemExit as e:
@@ -1111,6 +1111,23 @@ def _fetch_and_prepare_data(
             base_date=base_date,
         )
 
+        if df_regime is not None and not df_regime.empty:
+            # 실시간 가격 조회 및 적용
+            if use_realtime and yf:
+                try:
+                    # yfinance를 사용하여 최근 데이터를 가져옵니다.
+                    # 미국 지수는 보통 15분 지연되지만, 장중 추세를 반영하기에 충분합니다.
+                    ticker_obj = yf.Ticker(regime_ticker)
+                    # "1d" 기간은 때때로 전날 종가만 반환할 수 있으므로 "2d"로 조회하여 최신 데이터를 확보합니다.
+                    hist = ticker_obj.history(period="2d", interval="15m", auto_adjust=True)
+                    if not hist.empty:
+                        latest_price = hist["Close"].iloc[-1]
+                        # base_date에 최신 가격을 업데이트/추가합니다.
+                        df_regime.loc[base_date, "Close"] = latest_price
+                        print(f"-> 시장 레짐 필터({regime_ticker}) 실시간 가격 적용: {latest_price:,.2f}")
+                except Exception as e:
+                    print(f"-> 경고: 시장 레짐 필터({regime_ticker}) 실시간 가격 조회 실패: {e}")
+
         if df_regime is not None and not df_regime.empty and len(df_regime) >= regime_ma_period:
             df_regime["MA"] = df_regime["Close"].rolling(window=regime_ma_period).mean()
 
@@ -1530,9 +1547,7 @@ def generate_signal_report(
 
     # 2. 설정을 파일에서 가져옵니다.
     try:
-        account_settings = get_account_file_settings(account)
-        country_settings = get_country_file_settings(country)
-        portfolio_settings = {**account_settings, **country_settings}
+        portfolio_settings = get_account_file_settings(country, account)
     except SystemExit as e:
         print(str(e))
         return None
@@ -1917,82 +1932,69 @@ def generate_signal_report(
         holding_days = 0
         hold_ret = None
 
-        # 카테고리 중복 확인 및 상태 변경 (BUY 대상에서 제외)
-        category = etf_meta.get(tkr, {}).get("category")
-        # 실질적으로 보유하지 않은 종목(매수 후보)에 대해서만 카테고리 중복을 확인합니다.
-        if (
-            not is_effectively_held
-            and category
-            and category != "TBD"
-            and category in held_categories
-        ):
-            state = "WAIT"  # 카테고리 중복 시 BUY 대상에서 제외하고 WAIT 상태로
-            phrase = "카테고리 중복"
-            buy_signal = False  # 매수 신호도 비활성화
-        else:
-            consecutive_info = consecutive_holding_info.get(tkr)
-            buy_date = consecutive_info.get("buy_date") if consecutive_info else None
+        consecutive_info = consecutive_holding_info.get(tkr)
+        buy_date = consecutive_info.get("buy_date") if consecutive_info else None
 
-            if buy_date:
-                # label_date는 naive timestamp이므로, buy_date도 naive로 만듭니다.
-                if hasattr(buy_date, "tzinfo") and buy_date.tzinfo is not None:
-                    buy_date = buy_date.tz_localize(None)
-                buy_date = pd.to_datetime(buy_date).normalize()
+        if buy_date:
+            # label_date는 naive timestamp이므로, buy_date도 naive로 만듭니다.
+            if hasattr(buy_date, "tzinfo") and buy_date.tzinfo is not None:
+                buy_date = buy_date.tz_localize(None)
+            buy_date = pd.to_datetime(buy_date).normalize()
 
-            if is_effectively_held and buy_date and buy_date <= label_date:
-                try:
-                    # 거래일 기준으로 보유일수 계산 (캐시된 함수 사용)
-                    trading_days_in_period = get_trading_days(
-                        buy_date.strftime("%Y-%m-%d"),
-                        label_date.strftime("%Y-%m-%d"),
-                        country,
-                    )
-                    holding_days = len(trading_days_in_period)
-                except Exception as e:
-                    print(f"경고: 보유일 계산 중 오류 발생 ({tkr}): {e}. 달력일 기준으로 대체합니다.")
-                    # 거래일 계산 실패 시, 달력일 기준으로 계산
-                    holding_days = (label_date - buy_date).days + 1
+        if is_effectively_held and buy_date and buy_date <= label_date:
+            try:
+                # 거래일 기준으로 보유일수 계산 (캐시된 함수 사용)
+                trading_days_in_period = get_trading_days(
+                    buy_date.strftime("%Y-%m-%d"),
+                    label_date.strftime("%Y-%m-%d"),
+                    country,
+                )
+                holding_days = len(trading_days_in_period)
+            except Exception as e:
+                print(f"경고: 보유일 계산 중 오류 발생 ({tkr}): {e}. 달력일 기준으로 대체합니다.")
+                # 거래일 계산 실패 시, 달력일 기준으로 계산
+                holding_days = (label_date - buy_date).days + 1
 
-            qty = 0
-            # 현재 보유 포지션의 손익률을 계산합니다.
-            hold_ret = (
-                ((price / ac) - 1.0) * 100.0
-                if (is_effectively_held and ac > 0 and pd.notna(price))
-                else None
-            )
-            if is_effectively_held:
-                if (
-                    stop_loss is not None
-                    and ac > 0
-                    and hold_ret is not None
-                    and hold_ret <= float(stop_loss)
-                ):
-                    state = "CUT_STOPLOSS"
-                    qty = sh
-                    prof = (price - ac) * qty if ac > 0 else 0.0
-                    phrase = f"가격기반손절 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
-                elif not is_active:
-                    state = "SELL_INACTIVE"
-                    qty = sh
-                    prof = (price - ac) * qty if ac > 0 else 0.0
-                    phrase = f"비활성 종목 정리 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+        qty = 0
+        # 현재 보유 포지션의 손익률을 계산합니다.
+        hold_ret = (
+            ((price / ac) - 1.0) * 100.0
+            if (is_effectively_held and ac > 0 and pd.notna(price))
+            else None
+        )
+        if is_effectively_held:
+            if (
+                stop_loss is not None
+                and ac > 0
+                and hold_ret is not None
+                and hold_ret <= float(stop_loss)
+            ):
+                state = "CUT_STOPLOSS"
+                qty = sh
+                prof = (price - ac) * qty if ac > 0 else 0.0
+                phrase = f"가격기반손절 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+            elif not is_active:
+                state = "SELL_INACTIVE"
+                qty = sh
+                prof = (price - ac) * qty if ac > 0 else 0.0
+                phrase = f"비활성 종목 정리 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
-            # --- 전략별 매수/매도 로직 ---
-            if state == "HOLD":  # 아직 매도 결정이 내려지지 않은 경우
-                price, ma, _ = d["price"], d["s1"], d["s2"]
-                if not pd.isna(price) and not pd.isna(ma) and price < ma:
-                    state = "SELL_TREND"  # 결정 코드 # noqa: F841
-                    qty = sh
-                    prof = (price - ac) * qty if ac > 0 else 0.0
-                    tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"  # noqa: F841
-                    phrase = f"{tag} {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+        # --- 전략별 매수/매도 로직 ---
+        if state == "HOLD":  # 아직 매도 결정이 내려지지 않은 경우
+            price, ma, _ = d["price"], d["s1"], d["s2"]
+            if not pd.isna(price) and not pd.isna(ma) and price < ma:
+                state = "SELL_TREND"  # 결정 코드 # noqa: F841
+                qty = sh
+                prof = (price - ac) * qty if ac > 0 else 0.0
+                tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"  # noqa: F841
+                phrase = f"{tag} {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
-            elif state == "WAIT":  # 아직 보유하지 않은 경우
-                price, ma, _ = d["price"], d["s1"], d["s2"]
-                buy_signal_days_today = d["filter"]
-                if buy_signal_days_today > 0:
-                    buy_signal = True
-                    phrase = f"추세진입 ({buy_signal_days_today}일째)"
+        elif state == "WAIT":  # 아직 보유하지 않은 경우
+            price, ma, _ = d["price"], d["s1"], d["s2"]
+            buy_signal_days_today = d["filter"]
+            if buy_signal_days_today > 0:
+                buy_signal = True
+                phrase = f"추세진입 ({buy_signal_days_today}일째)"
 
         amount = sh * price if pd.notna(price) else 0.0
         # 일간 수익률 계산
@@ -2051,220 +2053,219 @@ def generate_signal_report(
 
     universe_tickers = {etf["ticker"] for etf in get_etfs(country)}
 
-    # 6. 리밸런싱, 신규매수, 교체매매 로직 적용
-    # 교체 매매 관련 설정 로드 (임계값은 DB 설정 우선)
-    # 교체 매매 사용 여부 (bool)
-    try:
-        replace_weaker_stock = bool(portfolio_settings["replace_weaker_stock"])
-    except Exception:
-        print(f"오류: '{country}' 국가의 'replace_weaker_stock' 값이 올바르지 않습니다.")
-        return None
-    try:
-        replace_threshold = float(portfolio_settings["replace_threshold"])
-    except (ValueError, TypeError):
-        print(f"오류: '{country}' 국가의 교체 매매 임계값(replace_threshold) 값이 올바르지 않습니다.")
-        return None
+    # 6. 시장 레짐 필터 및 매매 로직 적용
+    is_risk_off = result.regime_info and result.regime_info.get("is_risk_off", False)
 
-    # 리밸런싱 매도 결정 전, 다른 이유로 이미 매도 결정된 종목 수를 파악합니다.
-    other_sell_states = {"CUT_STOPLOSS", "SELL_TREND"}
-    num_already_selling = sum(1 for d in decisions if d["state"] in other_sell_states)
-
-    # 목표 보유 수(denom)를 맞추기 위해 추가로 매도해야 할 종목 수를 계산합니다.
-    # (현재 보유 수 - 이미 매도 결정된 수) > 목표 보유 수
-    num_to_sell_for_rebalance = (held_count - num_already_selling) - denom
-
-    if num_to_sell_for_rebalance > 0:
-        # Case 1: 포트폴리오가 목표보다 크므로, 가장 약한 종목을 매도하여 축소
-        # 매도 후보: 현재 'HOLD' 상태인 종목들 중에서만 선택합니다.
-        rebalance_sell_candidates = [d for d in decisions if d["state"] == "HOLD"]
-
-        # 점수가 낮은 순으로 정렬 (가장 약한 종목부터). 점수가 없으면 가장 약한 것으로 간주.
-        rebalance_sell_candidates.sort(
-            key=lambda x: x.get("score") if pd.notna(x.get("score")) else -float("inf")
-        )
-
-        # 리밸런싱을 위해 매도할 종목들을 결정
-        tickers_to_sell = [d["tkr"] for d in rebalance_sell_candidates[:num_to_sell_for_rebalance]]
-
-        # 결정된 종목들의 상태를 'SELL_REBALANCE'로 변경
+    if is_risk_off:
+        # 리스크 오프: 모든 보유 종목을 매도하고, 매수 신호를 무시합니다.
         for decision in decisions:
-            if decision["tkr"] in tickers_to_sell:
-                decision["state"] = "SELL_REBALANCE"
-                decision["row"][2] = "SELL_REBALANCE"
+            # 1. 보유 종목 매도 (이미 다른 이유로 매도 결정된 것은 제외)
+            if decision["state"] == "HOLD":
+                decision["state"] = "SELL_REGIME_FILTER"
+                decision["row"][2] = "SELL_REGIME_FILTER"
 
                 # 매도 문구 생성
                 d_sell = data_by_tkr.get(decision["tkr"])
-                sell_price = float(d_sell.get("price", 0))
-                sell_qty = float(d_sell.get("shares", 0))
-                avg_cost = float(d_sell.get("avg_cost", 0))
+                if d_sell:
+                    sell_price = float(d_sell.get("price", 0))
+                    sell_qty = float(d_sell.get("shares", 0))
+                    avg_cost = float(d_sell.get("avg_cost", 0))
 
-                hold_ret = 0.0
-                prof = 0.0
-                if avg_cost > 0 and sell_price > 0:
-                    hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
-                    prof = (sell_price - avg_cost) * sell_qty
+                    hold_ret = 0.0
+                    prof = 0.0
+                    if avg_cost > 0 and sell_price > 0:
+                        hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
+                        prof = (sell_price - avg_cost) * sell_qty
 
-                sell_phrase = f"리밸런스 매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
-                decision["row"][-1] = sell_phrase
-    else:
-        # Case 2: 포트폴리오 크기가 정상이거나 작음 (신규매수 또는 교체매매)
-        slots_to_fill = denom - held_count
-        if slots_to_fill > 0:
-            # 2a: 빈 슬롯이 있으므로 신규 매수
-            # 현재 보유 종목의 카테고리 (TBD 제외)
-            held_categories = set()
-            for tkr, d in data_by_tkr.items():
-                if float(d.get("shares", 0.0)) > 0:
-                    category = etf_meta.get(tkr, {}).get("category")
-                    if category and category != "TBD":
-                        held_categories.add(category)
+                    sell_phrase = f"시장위험회피 매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+                    decision["row"][-1] = sell_phrase
 
-            # 매수 후보들을 점수 순으로 정렬
-            buy_candidates_raw = sorted(
-                [a for a in decisions if a.get("buy_signal") and a["tkr"] in universe_tickers],
-                key=lambda x: x["score"],
-                reverse=True,
-            )
-
-            final_buy_candidates = []
-            recommended_buy_categories = set()
-
-            for cand in buy_candidates_raw:
-                category = etf_meta.get(cand["tkr"], {}).get("category")
-                if category and category != "TBD" and category in held_categories:
-                    cand["state"] = "WAIT"
-                    cand["row"][2] = "WAIT"
-                    cand["row"][-1] = "카테고리 중복 (보유)" + f" ({cand['row'][-1]})"
-                    continue
-
-                if category and category != "TBD" and category in recommended_buy_categories:
-                    cand["state"] = "WAIT"
-                    cand["row"][2] = "WAIT"
-                    cand["row"][-1] = "카테고리 중복 (추천)" + f" ({cand['row'][-1]})"
-                    continue
-
-                final_buy_candidates.append(cand)
-                if category and category != "TBD":
-                    recommended_buy_categories.add(category)
-
-            buy_candidates = final_buy_candidates
-
-            available_cash = total_cash
-            buys_made = 0
-
-            for cand in buy_candidates:
-                if buys_made >= slots_to_fill:
-                    cand["row"][-1] = "포트폴리오 가득 참" + f" ({cand['row'][-1]})"
-                    continue
-
-                d = data_by_tkr.get(cand["tkr"])
-                price = d["price"]
-
-                if price > 0:
-                    equity = current_equity
-                    min_val = min_pos * equity
-                    max_val = max_pos * equity
-                    budget = min(max_val, available_cash)
-
-                    req_qty = 0
-                    buy_notional = 0.0
-                    if budget >= min_val and budget > 0:
-                        if country in ("coin", "aus"):
-                            req_qty = budget / price
-                            buy_notional = budget
-                        else:
-                            req_qty = int(budget // price)
-                            buy_notional = req_qty * price
-                            if req_qty <= 0 or buy_notional + 1e-9 < min_val:
-                                req_qty = 0
-                                buy_notional = 0.0
-
-                    if req_qty > 0 and buy_notional <= available_cash + 1e-9:
-                        cand["state"] = "BUY"
-                        cand["row"][2] = "BUY"
-                        buy_phrase = f"🚀 매수 {format_shares(req_qty)}주 @ {price_formatter(price)} ({money_formatter(buy_notional)})"
-                        original_phrase = cand["row"][-1]
-                        cand["row"][-1] = f"{buy_phrase} ({original_phrase})"
-
-                        available_cash -= buy_notional
-                        buys_made += 1
+            # 2. 매수 신호 무시
+            if decision.get("buy_signal"):
+                decision["buy_signal"] = False
+                if decision["state"] == "WAIT":
+                    original_phrase = decision["row"][-1]
+                    if original_phrase and "추세진입" in original_phrase:
+                        decision["row"][-1] = f"시장 위험 회피 ({original_phrase})"
                     else:
-                        cand["row"][-1] = "현금 부족" + f" ({cand['row'][-1]})"
-                else:
-                    cand["row"][-1] = "가격 정보 없음" + f" ({cand['row'][-1]})"
+                        decision["row"][-1] = "시장 위험 회피"
+    else:
+        # 리스크 온: 기존 리밸런싱, 신규매수, 교체매매 로직 적용
+        # 교체 매매 관련 설정 로드 (임계값은 DB 설정 우선)
+        try:
+            replace_weaker_stock = bool(portfolio_settings["replace_weaker_stock"])
+            replace_threshold = float(portfolio_settings["replace_threshold"])
+        except (KeyError, ValueError, TypeError) as e:
+            print(f"오류: '{country}' 국가의 교체 매매 설정값이 올바르지 않습니다: {e}")
+            return None
 
+        # 리밸런싱 매도 결정 전, 다른 이유로 이미 매도 결정된 종목 수를 파악합니다.
+        other_sell_states = {"CUT_STOPLOSS", "SELL_TREND", "SELL_INACTIVE"}
+        num_already_selling = sum(1 for d in decisions if d["state"] in other_sell_states)
+
+        # 목표 보유 수(denom)를 맞추기 위해 추가로 매도해야 할 종목 수를 계산합니다.
+        num_to_sell_for_rebalance = (held_count - num_already_selling) - denom
+
+        if num_to_sell_for_rebalance > 0:
+            # Case 1: 포트폴리오가 목표보다 크므로, 가장 약한 종목을 매도하여 축소
+            rebalance_sell_candidates = [d for d in decisions if d["state"] == "HOLD"]
+            rebalance_sell_candidates.sort(
+                key=lambda x: x.get("score") if pd.notna(x.get("score")) else -float("inf")
+            )
+            tickers_to_sell = [
+                d["tkr"] for d in rebalance_sell_candidates[:num_to_sell_for_rebalance]
+            ]
+
+            for decision in decisions:
+                if decision["tkr"] in tickers_to_sell:
+                    decision["state"] = "SELL_REBALANCE"
+                    decision["row"][2] = "SELL_REBALANCE"
+                    d_sell = data_by_tkr.get(decision["tkr"])
+                    if d_sell:
+                        sell_price = float(d_sell.get("price", 0))
+                        sell_qty = float(d_sell.get("shares", 0))
+                        avg_cost = float(d_sell.get("avg_cost", 0))
+                        hold_ret = (
+                            ((sell_price / avg_cost) - 1.0) * 100.0
+                            if avg_cost > 0 and sell_price > 0
+                            else 0.0
+                        )
+                        prof = (sell_price - avg_cost) * sell_qty if avg_cost > 0 else 0.0
+                        sell_phrase = f"리밸런스 매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+                        decision["row"][-1] = sell_phrase
         else:
-            # 2b: 포트폴리오가 가득 찼으므로 교체 매매 고려
-            if replace_weaker_stock:
-                buy_candidates = sorted(
+            # Case 2: 포트폴리오 크기가 정상이거나 작음 (신규매수 또는 교체매매)
+            slots_to_fill = denom - held_count
+            if slots_to_fill > 0:
+                # 2a: 빈 슬롯이 있으므로 신규 매수
+                # ... (The rest of the logic for new buys and replacement buys)
+                buy_candidates_raw = sorted(
                     [a for a in decisions if a.get("buy_signal") and a["tkr"] in universe_tickers],
                     key=lambda x: x["score"],
                     reverse=True,
                 )
-                held_stocks = sorted(
-                    [a for a in decisions if a["state"] == "HOLD"],
-                    # 점수가 없는(nan) 종목을 교체 우선순위에서 가장 낮게(가장 먼저 팔리도록) 설정
-                    key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"),
-                )
-
-                num_possible_replacements = min(len(buy_candidates), len(held_stocks))
-
-                for k in range(num_possible_replacements):
-                    best_new = buy_candidates[k]
-                    weakest_held = held_stocks[k]
-
-                    # 교체는 아직 매수/매도 결정이 없는 'WAIT'와 'HOLD' 상태의 종목에만 적용합니다.
-                    if best_new["state"] != "WAIT" or weakest_held["state"] != "HOLD":
-                        continue
-
-                    # replace_threshold는 % 단위이므로 100으로 나누어 점수(소수점)와 단위를 맞춥니다.
-                    if (
-                        pd.notna(best_new["score"])
-                        and pd.notna(weakest_held["score"])
-                        and best_new["score"] > weakest_held["score"] + (replace_threshold / 100.0)
-                    ):
-                        d_weakest = data_by_tkr.get(weakest_held["tkr"])
-                        sell_price = float(d_weakest.get("price", 0))
-                        sell_qty = float(d_weakest.get("shares", 0))
-                        avg_cost = float(d_weakest.get("avg_cost", 0))
-
-                        hold_ret = 0.0
-                        prof = 0.0
-                        if avg_cost > 0 and sell_price > 0:
-                            hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
-                            prof = (sell_price - avg_cost) * sell_qty
-
-                        sell_phrase = f"교체매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'} ({best_new['tkr']}(으)로 교체)"
-
-                        weakest_held["state"] = "SELL_REPLACE"
-                        weakest_held["row"][2] = "SELL_REPLACE"
-                        weakest_held["row"][-1] = sell_phrase
-
-                        best_new["state"] = "BUY_REPLACE"
-                        best_new["row"][2] = "BUY_REPLACE"
-
-                        sell_value = weakest_held["weight"] / 100.0 * current_equity
-                        buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
-                        if buy_price > 0:
-                            if country in ("coin", "aus"):
-                                buy_qty = sell_value / buy_price
-                            else:
-                                buy_qty = int(sell_value // buy_price)
-                            buy_notional = buy_qty * buy_price
-                            best_new["row"][
+                final_buy_candidates, recommended_buy_categories = [], set()
+                for cand in buy_candidates_raw:
+                    category = etf_meta.get(cand["tkr"], {}).get("category")
+                    if category and category != "TBD":
+                        if category in held_categories:
+                            # Find which held ticker has this category
+                            conflicting_ticker = "???"
+                            for held_tkr, held_data in holdings.items():
+                                if float(held_data.get("shares", 0.0)) > 0:
+                                    held_category = etf_meta.get(held_tkr, {}).get("category")
+                                    if held_category == category:
+                                        conflicting_ticker = held_tkr
+                                        break
+                            cand["row"][
                                 -1
-                            ] = f"매수 {format_shares(buy_qty)}주 @ {price_formatter(buy_price)} ({money_formatter(buy_notional)}) ({weakest_held['tkr']} 대체)"
-                        else:
-                            best_new["row"][-1] = f"{weakest_held['tkr']}(을)를 대체 (가격정보 없음)"
-                    else:
-                        break
+                            ] = f"카테고리 중복 ({conflicting_ticker} 보유) ({cand['row'][-1]})"
+                            continue
+                        if category in recommended_buy_categories:
+                            cand["row"][-1] = f"카테고리 중복 (추천) ({cand['row'][-1]})"
+                            continue
+                        recommended_buy_categories.add(category)
+                    final_buy_candidates.append(cand)
 
+                available_cash, buys_made = total_cash, 0
+                for cand in final_buy_candidates:
+                    if buys_made >= slots_to_fill:
+                        cand["row"][-1] = f"포트폴리오 가득 참 ({cand['row'][-1]})"
+                        continue
+                    d, price = data_by_tkr.get(cand["tkr"]), 0
+                    if d:
+                        price = d.get("price", 0)
+                    if price > 0:
+                        _, min_val, max_val = (
+                            current_equity,
+                            min_pos * current_equity,
+                            max_pos * current_equity,
+                        )
+                        budget = min(max_val, available_cash)
+                        req_qty, buy_notional = 0, 0.0
+                        if budget >= min_val and budget > 0:
+                            if country in ("coin", "aus"):
+                                req_qty, buy_notional = budget / price, budget
+                            else:
+                                req_qty = int(budget // price)
+                                buy_notional = req_qty * price
+                                if req_qty <= 0 or buy_notional + 1e-9 < min_val:
+                                    req_qty, buy_notional = 0, 0.0
+                        if req_qty > 0 and buy_notional <= available_cash + 1e-9:
+                            cand["state"], cand["row"][2] = "BUY", "BUY"
+                            buy_phrase = f"🚀 매수 {format_shares(req_qty)}주 @ {price_formatter(price)} ({money_formatter(buy_notional)})"
+                            cand["row"][-1] = f"{buy_phrase} ({cand['row'][-1]})"
+                            available_cash -= buy_notional
+                            buys_made += 1
+                        else:
+                            cand["row"][-1] = f"현금 부족 ({cand['row'][-1]})"
+                    else:
+                        cand["row"][-1] = f"가격 정보 없음 ({cand['row'][-1]})"
+            else:
+                # 2b: 포트폴리오가 가득 찼으므로 교체 매매 고려
+                if replace_weaker_stock:
+                    buy_candidates = sorted(
+                        [
+                            a
+                            for a in decisions
+                            if a.get("buy_signal") and a["tkr"] in universe_tickers
+                        ],
+                        key=lambda x: x["score"],
+                        reverse=True,
+                    )
+                    held_stocks = sorted(
+                        [a for a in decisions if a["state"] == "HOLD"],
+                        key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"),
+                    )
+                    for k in range(min(len(buy_candidates), len(held_stocks))):
+                        best_new, weakest_held = buy_candidates[k], held_stocks[k]
+                        if best_new["state"] != "WAIT" or weakest_held["state"] != "HOLD":
+                            continue
+                        if (
+                            pd.notna(best_new["score"])
+                            and pd.notna(weakest_held["score"])
+                            and best_new["score"]
+                            > weakest_held["score"] + (replace_threshold / 100.0)
+                        ):
+                            d_weakest = data_by_tkr.get(weakest_held["tkr"])
+                            sell_price, sell_qty, avg_cost = (
+                                float(d_weakest.get(k, 0)) for k in ["price", "shares", "avg_cost"]
+                            )
+                            hold_ret = (
+                                ((sell_price / avg_cost) - 1.0) * 100.0
+                                if avg_cost > 0 and sell_price > 0
+                                else 0.0
+                            )
+                            prof = (sell_price - avg_cost) * sell_qty if avg_cost > 0 else 0.0
+                            sell_phrase = f"교체매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'} ({best_new['tkr']}(으)로 교체)"
+                            (
+                                weakest_held["state"],
+                                weakest_held["row"][2],
+                                weakest_held["row"][-1],
+                            ) = ("SELL_REPLACE", "SELL_REPLACE", sell_phrase)
+                            best_new["state"], best_new["row"][2] = "BUY_REPLACE", "BUY_REPLACE"
+                            sell_value = weakest_held["weight"] / 100.0 * current_equity
+                            buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
+                            if buy_price > 0:
+                                buy_qty = (
+                                    sell_value / buy_price
+                                    if country in ("coin", "aus")
+                                    else int(sell_value // buy_price)
+                                )
+                                buy_notional = buy_qty * buy_price
+                                best_new["row"][
+                                    -1
+                                ] = f"매수 {format_shares(buy_qty)}주 @ {price_formatter(buy_price)} ({money_formatter(buy_notional)}) ({weakest_held['tkr']} 대체)"
+                            else:
+                                best_new["row"][-1] = f"{weakest_held['tkr']}(을)를 대체 (가격정보 없음)"
+                        else:
+                            break
     # 최종 정리: 아직 'WAIT' 상태인 종목들의 사유를 명확히 합니다.
     for cand in decisions:
         if cand["state"] == "WAIT":
             # 이미 '현금 부족' 또는 '카테고리 중복' 등의 구체적인 사유가 설정된 경우는 덮어쓰지 않습니다.
             if "추세진입" in cand["row"][-1]:
-                cand["row"][-1] = "포트폴리오 가득 참" + f" ({cand['row'][-1]})"
+                cand["row"][-1] = "포트폴리오 가득 참 (교체대상 아님)" + f" ({cand['row'][-1]})"
     # 7. 완료된 거래 표시
     # 기준일에 발생한 거래를 가져와서, 추천에 따라 실행되었는지 확인하는 데 사용합니다.
     # 표시 기준일 기준으로 '완료' 거래를 표시합니다. 다음 거래일이면 거래가 없을 확률이 높음
@@ -2908,7 +2909,7 @@ def send_summary_notification(
 
         # Calculate cumulative return
         try:
-            file_settings = get_account_file_settings(account)
+            file_settings = get_account_file_settings(country, account)
             initial_capital = float(file_settings.get("initial_capital", 0))
         except SystemExit:
             initial_capital = 0.0  # 알림에서는 조용히 실패 처리

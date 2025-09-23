@@ -114,6 +114,27 @@ def _should_skip_pykrx_fetch(
     return False
 
 
+@functools.lru_cache(maxsize=1)
+def get_aud_to_krw_rate() -> Optional[float]:
+    """yfinance를 사용하여 AUD/KRW 환율을 조회합니다."""
+    if not yf:
+        return None
+    try:
+        ticker = yf.Ticker("AUDKRW=X")
+        # 가장 최근 가격을 가져오기 위해 2일간의 1분 단위 데이터 시도
+        data = ticker.history(period="2d", interval="1m")
+        if not data.empty:
+            return data["Close"].iloc[-1]
+        # 1m 데이터가 없으면 일 단위 데이터로 폴백
+        data = ticker.history(period="2d")
+        if not data.empty:
+            return data["Close"].iloc[-1]
+    except Exception as e:
+        print(f"AUD/KRW 환율 정보를 가져오는 데 실패했습니다: {e}")
+        return None
+    return None
+
+
 @contextmanager
 def _silence_yfinance_logs():
     import logging
@@ -421,7 +442,6 @@ def _fetch_ohlcv_core(
                     ticker,
                     start=start_dt,
                     end=end_dt + pd.Timedelta(days=1),
-                    progress=False,
                     auto_adjust=True,
                 )
             if df.empty:
@@ -531,7 +551,6 @@ def _fetch_ohlcv_core(
                 ticker_yf,
                 start=start_dt,
                 end=end_dt + pd.Timedelta(days=1),
-                progress=False,
                 auto_adjust=False,  # 원본 데이터를 모두 가져옵니다.
             )
             if df.empty:
@@ -806,7 +825,6 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
             auto_adjust=False,
-            progress=False,
             show_errors=False,  # 에러 로그를 직접 제어하기 위해 False로 설정
         )
 

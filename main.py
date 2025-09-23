@@ -21,32 +21,12 @@ from utils.account_registry import (
     load_accounts,
 )
 from utils.db_manager import get_portfolio_snapshot, get_previous_portfolio_snapshot
-
-
-@st.cache_data(ttl=3600)  # 1시간 동안 환율 정보 캐시
-def get_aud_to_krw_rate():
-    """yfinance를 사용하여 AUD/KRW 환율을 조회합니다."""
-    if not yf:
-        return None
-    try:
-        ticker = yf.Ticker("AUDKRW=X")
-        # 가장 최근 가격을 가져오기 위해 2일간의 1분 단위 데이터 시도
-        data = ticker.history(period="2d", interval="1m")
-        if not data.empty:
-            return data["Close"].iloc[-1]
-        # 1m 데이터가 없으면 일 단위 데이터로 폴백
-        data = ticker.history(period="2d")
-        if not data.empty:
-            return data["Close"].iloc[-1]
-    except Exception as e:
-        print(f"AUD/KRW 환율 정보를 가져오는 데 실패했습니다: {e}")
-        return None
-    return None
+from utils.data_loader import get_aud_to_krw_rate
 
 
 def main():
     """메인 대시보드를 렌더링합니다."""
-    st.set_page_config(page_title="main", page_icon="📈", layout="wide")
+    st.set_page_config(page_title="Main", page_icon="📈", layout="wide")
     st.title("📈 메인 대시보드")
 
     status_html = get_market_regime_status_string()
@@ -98,47 +78,62 @@ def main():
 
         try:
             settings = get_account_file_settings(account)
-            initial_capital = float(settings.get("initial_capital", 0.0))
+            # For all accounts, initial_capital is in KRW.
+            initial_capital_krw = float(settings.get("initial_capital", 0.0))
 
             snapshot = get_portfolio_snapshot(country, account)
             if not snapshot:
                 continue
 
-            current_equity = float(snapshot.get("total_equity", 0.0))
+            # These are in native currency (AUD for aus, KRW for kor)
+            current_equity_native = float(snapshot.get("total_equity", 0.0))
             snapshot_date = pd.to_datetime(snapshot.get("date"))
 
             prev_snapshot = get_previous_portfolio_snapshot(country, snapshot_date, account)
-            prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else 0.0
-
-            daily_return_pct = (
-                ((current_equity / prev_equity) - 1) * 100 if prev_equity > 0 else 0.0
-            )
-            cum_return_pct = (
-                ((current_equity / initial_capital) - 1) * 100 if initial_capital > 0 else 0.0
+            prev_equity_native = (
+                float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else 0.0
             )
 
             currency = account_info.get("currency", "KRW")
-            precision = account_info.get("precision", 0)
 
-            initial_capital_krw = initial_capital
-            current_equity_krw = current_equity
+            # --- Convert all values to KRW for calculation and display ---
+            current_equity_krw = current_equity_native
+            prev_equity_krw = prev_equity_native
 
-            if currency == "AUD" and aud_krw_rate:
-                initial_capital_krw *= aud_krw_rate
-                current_equity_krw *= aud_krw_rate
+            if currency == "AUD":
+                if aud_krw_rate:
+                    current_equity_krw = current_equity_native * aud_krw_rate
+                    prev_equity_krw = prev_equity_native * aud_krw_rate
+                else:
+                    # If rate is missing, we can't calculate, so skip this account for display
+                    st.warning(f"'{account_info['display_name']}' 계좌의 환율 정보가 없어 요약에서 제외합니다.")
+                    continue
 
+            # --- All calculations are now in KRW ---
+            daily_return_pct = (
+                ((current_equity_krw / prev_equity_krw) - 1) * 100 if prev_equity_krw > 0 else 0.0
+            )
+            cum_return_pct = (
+                ((current_equity_krw / initial_capital_krw) - 1) * 100
+                if initial_capital_krw > 0
+                else 0.0
+            )
+
+            # --- Add to totals (already in KRW) ---
             total_initial_capital_krw += initial_capital_krw
             total_current_equity_krw += current_equity_krw
 
+            # --- Prepare summary for display (all in KRW) ---
             account_summaries.append(
                 {
                     "display_name": account_info["display_name"],
-                    "initial_capital": initial_capital,
-                    "current_equity": current_equity,
+                    "initial_capital": initial_capital_krw,
+                    "current_equity": current_equity_krw,
                     "daily_return_pct": daily_return_pct,
                     "cum_return_pct": cum_return_pct,
-                    "currency": currency,
-                    "precision": precision,
+                    "currency": "KRW",  # Always display in KRW
+                    "precision": 0,  # Always display as integer KRW
+                    "order": account_info.get("order", 99),
                 }
             )
         except Exception as e:
@@ -193,8 +188,8 @@ def main():
     )
     st.markdown("""<hr style="margin:0.5rem 0;" />""", unsafe_allow_html=True)
 
-    for summary in sorted(account_summaries, key=lambda x: x["display_name"]):
-        currency_symbol = "$" if summary["currency"] == "AUD" else "원"
+    for summary in sorted(account_summaries, key=lambda x: x.get("order", 99)):
+        currency_symbol = "원"  # All summaries are now in KRW
         precision = summary["precision"]
         profit_loss = summary["current_equity"] - summary["initial_capital"]
 
