@@ -206,9 +206,22 @@ def render_transaction_tab(
 
     with st.expander(f"신규 {title} 등록"):
         with st.form(f"{transaction_type}_form_{account_prefix}", clear_on_submit=True):
+            tx_date = st.date_input(
+                "날짜", value="today", key=f"tx_date_{account_prefix}_{transaction_type}"
+            )
+
+            # Determine min_value and step for amount based on precision
+            amount_min_value = 0.0
+            amount_step = 1.0  # Default step for floats
+
+            if precision == 0:
+                amount_min_value = 0
+                amount_step = 1
+
             tx_amount = st.number_input(
                 f"{title} 금액{currency_str}",
-                min_value=0.0,
+                min_value=amount_min_value,
+                step=amount_step,
                 format=f"%.{precision}f" if precision > 0 else "%d",
             )
             tx_note = st.text_input("비고")
@@ -216,10 +229,13 @@ def render_transaction_tab(
 
             if tx_submitted:
                 if tx_amount > 0:
+                    # Combine date and time (time is set to midnight)
+                    combined_datetime = datetime(tx_date.year, tx_date.month, tx_date.day, 0, 0, 0)
+
                     tx_data = {
                         "country": country_code,
                         "account": account_code,
-                        "date": datetime.now(),
+                        "date": combined_datetime,
                         "type": transaction_type,
                         "amount": float(tx_amount),
                         "note": tx_note,
