@@ -2584,6 +2584,11 @@ def _maybe_notify_detailed_signal(
     # 이로 인해 과거 날짜 조회 등 모든 'status' 명령어 실행 시 알림이 전송됩니다.
     # if not _is_trading_day(country, report_date.to_pydatetime() if report_date else None):
     #     return False
+    # --- 슬랙 알림 발송 ---
+    webhook_info = get_slack_webhook_url(country, account=account)
+    if not webhook_info:
+        return False
+    webhook_url, webhook_name = webhook_info
     # 국가별 포맷터 설정
     if country == "aus":
         price_formatter = format_aud_price
@@ -2817,11 +2822,6 @@ def _maybe_notify_detailed_signal(
     hold_line = f"보유종목: {hold_text}"
     caption = "\n".join([title_line, test_line, equity_line, cash_line, hold_line])
 
-    # --- 슬랙 알림 발송 ---
-    webhook_url = get_slack_webhook_url(country, account=account)
-    if not webhook_url:
-        return False
-
     # DECISION_CONFIG에서 is_recommendation=True인 그룹이 하나라도 있으면 @channel 멘션을 포함합니다.
     has_recommendation = False
     for group_name in grouped_parts.keys():
@@ -2832,12 +2832,16 @@ def _maybe_notify_detailed_signal(
     slack_mention = "<!channel>\n" if has_recommendation else ""
     if not body_lines:
         # 상세 항목이 없으면 캡션만 전송합니다.
-        slack_sent = send_slack_message(slack_mention + caption, webhook_url=webhook_url)
+        slack_sent = send_slack_message(
+            slack_mention + caption, webhook_url=webhook_url, webhook_name=webhook_name
+        )
     else:
         # 슬랙 코드 블록을 사용하여 표 형태를 유지합니다.
         # slack_message = caption + "\n\n" + "\n".join(slack_message_lines)+ "```\n" + "\n".join(body_lines) + "\n```"
         slack_message = caption + "\n\n" + "```\n" + "\n".join(body_lines) + "\n```"
-        slack_sent = send_slack_message(slack_mention + slack_message, webhook_url=webhook_url)
+        slack_sent = send_slack_message(
+            slack_mention + slack_message, webhook_url=webhook_url, webhook_name=webhook_name
+        )
 
     return slack_sent
 

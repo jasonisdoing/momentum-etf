@@ -99,6 +99,15 @@ def render_assets_dashboard(
     account_code = account_entry.get("account")
     account_prefix = _account_prefix(country_code, account_code)
 
+    # --- 세션 상태 초기화 ---
+    # 다이얼로그의 표시 여부를 제어하기 위한 세션 상태 변수를 초기화합니다.
+    buy_dialog_key = f"show_buy_dialog_{account_prefix}"
+    sell_dialog_key = f"show_sell_dialog_{account_prefix}"
+    if buy_dialog_key not in st.session_state:
+        st.session_state[buy_dialog_key] = False
+    if sell_dialog_key not in st.session_state:
+        st.session_state[sell_dialog_key] = False
+
     if not account_code:
         st.info("활성 계좌가 없습니다. 계좌를 등록한 후 이용해주세요.")
         return
@@ -137,8 +146,8 @@ def render_assets_dashboard(
 
             if not ticker or not shares > 0 or not price > 0:
                 st.session_state[message_key] = ("error", "종목코드, 수량, 가격을 모두 올바르게 입력해주세요.")
-                st.rerun()
-                return
+                # 유효성 검사 실패 시, 다이얼로그를 닫지 않고 메시지만 설정합니다.
+                return  # st.rerun()을 호출하지 않습니다.
 
             etf_name = ""
             if country_code_inner == "kor" and _stock:
@@ -164,7 +173,8 @@ def render_assets_dashboard(
                 st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
             else:
                 st.session_state[message_key] = ("error", "거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.")
-            st.rerun()
+            # 작업 완료 후 다이얼로그를 닫도록 상태를 변경합니다.
+            st.session_state[buy_dialog_key] = False
 
         with st.form(f"trade_form_{account_prefix}"):
             st.text_input("종목코드 (티커)", key=f"buy_ticker_{account_prefix}")
@@ -207,8 +217,8 @@ def render_assets_dashboard(
 
             if not selected_indices:
                 st.session_state[message_key] = ("warning", "매도할 종목을 선택해주세요.")
-                st.rerun()
-                return
+                # 유효성 검사 실패 시, 다이얼로그를 닫지 않고 메시지만 설정합니다.
+                return  # st.rerun()을 호출하지 않습니다.
 
             selected_rows = df_holdings.loc[selected_indices]
             trade_time = datetime.now()
@@ -220,20 +230,19 @@ def render_assets_dashboard(
                     pass
 
             success_count = 0
-            with st.spinner("선택한 종목의 매도 거래를 저장하는 중..."):
-                for _, row in selected_rows.iterrows():
-                    trade_data = {
-                        "country": country_code_inner,
-                        "account": account_code,
-                        "date": trade_time,
-                        "ticker": row["ticker"],
-                        "name": row["name"],
-                        "action": "SELL",
-                        "shares": row["shares"],
-                        "note": "",
-                    }
-                    if save_trade(trade_data):
-                        success_count += 1
+            for _, row in selected_rows.iterrows():
+                trade_data = {
+                    "country": country_code_inner,
+                    "account": account_code,
+                    "date": trade_time,
+                    "ticker": row["ticker"],
+                    "name": row["name"],
+                    "action": "SELL",
+                    "shares": row["shares"],
+                    "note": "",
+                }
+                if save_trade(trade_data):
+                    success_count += 1
 
             if success_count == len(selected_rows):
                 st.session_state[message_key] = (
@@ -242,7 +251,8 @@ def render_assets_dashboard(
                 )
             else:
                 st.session_state[message_key] = ("error", "일부 거래 저장에 실패했습니다.")
-            st.rerun()
+            # 작업 완료 후 다이얼로그를 닫도록 상태를 변경합니다.
+            st.session_state[sell_dialog_key] = False
 
         with st.form(f"sell_form_{account_prefix}"):
             st.subheader("매도할 종목을 선택하세요 (전체 매도)")
@@ -266,6 +276,16 @@ def render_assets_dashboard(
             st.form_submit_button("선택 종목 매도", on_click=on_sell_submit)
 
     _display_feedback_messages(account_prefix)
+
+    # --- 다이얼로그 호출 ---
+    # 세션 상태에 따라 BUY 또는 SELL 다이얼로그를 표시합니다.
+    if st.session_state[buy_dialog_key]:
+        show_buy_dialog(country_code)
+
+    if st.session_state[sell_dialog_key]:
+        with st.spinner("보유 종목 데이터를 불러오는 중..."):
+            holdings_for_dialog = _load_data_for_sell_dialog()
+        show_sell_dialog(country_code, holdings_for_dialog)
 
     sub_tab_equity_history, sub_tab_trades = st.tabs(["평가금액", "트레이드"])
 
@@ -408,12 +428,12 @@ def render_assets_dashboard(
             col1, col2, _ = st.columns([1, 1, 8])
             with col1:
                 if st.button("BUY", key=f"add_buy_btn_{account_prefix}"):
-                    show_buy_dialog(country_code)
+                    st.session_state[buy_dialog_key] = True
+                    st.rerun()
             with col2:
                 if st.button("SELL", key=f"add_sell_btn_{account_prefix}"):
-                    with st.spinner("보유 종목 데이터를 불러오는 중..."):
-                        holdings_for_dialog = _load_data_for_sell_dialog()
-                    show_sell_dialog(country_code, holdings_for_dialog)
+                    st.session_state[sell_dialog_key] = True
+                    st.rerun()
 
         all_trades = get_all_trades(country_code, account_code, include_deleted=True)
         if not all_trades:

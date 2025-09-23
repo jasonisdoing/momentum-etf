@@ -135,6 +135,12 @@ def get_account_file_settings(country: str, account: str) -> Dict[str, Any]:
         settings["replace_weaker_stock"] = replace_weaker
         settings["replace_threshold"] = replace_threshold
 
+        # (선택) 슬랙 웹훅 URL
+        slack_webhook_url = getattr(module, "SLACK_WEBHOOK_URL", None)
+        if slack_webhook_url and not isinstance(slack_webhook_url, str):
+            raise ValueError("SLACK_WEBHOOK_URL은 문자열이어야 합니다.")
+        settings["slack_webhook_url"] = slack_webhook_url
+
     except (AttributeError, ValueError, TypeError, ImportError) as e:
         raise SystemExit(f"오류: 계좌 설정 파일({file_path})에 문제가 있습니다: {e}")
 
