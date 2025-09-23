@@ -99,196 +99,11 @@ def render_assets_dashboard(
     account_code = account_entry.get("account")
     account_prefix = _account_prefix(country_code, account_code)
 
-    # --- 세션 상태 초기화 ---
-    # 다이얼로그의 표시 여부를 제어하기 위한 세션 상태 변수를 초기화합니다.
-    buy_dialog_key = f"show_buy_dialog_{account_prefix}"
-    sell_dialog_key = f"show_sell_dialog_{account_prefix}"
-    if buy_dialog_key not in st.session_state:
-        st.session_state[buy_dialog_key] = False
-    if sell_dialog_key not in st.session_state:
-        st.session_state[sell_dialog_key] = False
-
     if not account_code:
         st.info("활성 계좌가 없습니다. 계좌를 등록한 후 이용해주세요.")
         return
 
-    def _load_data_for_sell_dialog():
-        print("\n[SELL] 매도 모달 데이터 로딩 시작...")
-        snapshot_dates = get_available_snapshot_dates(country_code, account=account_code)
-        latest_date_str = snapshot_dates[0] if snapshot_dates else None
-        if not latest_date_str:
-            return []
-        snapshot = get_portfolio_snapshot(
-            country_code, date_str=latest_date_str, account=account_code
-        )
-        if not snapshot or not snapshot.get("holdings"):
-            return []
-        return [h for h in snapshot.get("holdings", []) if h.get("shares", 0.0) > 0]
-
-    @st.dialog("BUY")
-    def show_buy_dialog(country_code_inner: str):
-        """매수(BUY) 거래 입력을 위한 모달 다이얼로그를 표시합니다."""
-        currency_str = f" ({'AUD' if country_code_inner == 'aus' else 'KRW'})"
-        message_key = f"buy_message_{account_prefix}"
-
-        def on_buy_submit():
-            trade_time = datetime.now()
-            if pytz:
-                try:
-                    korea_tz = pytz.timezone("Asia/Seoul")
-                    trade_time = datetime.now(korea_tz).replace(tzinfo=None)
-                except pytz.UnknownTimeZoneError:
-                    pass
-
-            ticker = st.session_state[f"buy_ticker_{account_prefix}"].strip()
-            shares = st.session_state[f"buy_shares_{account_prefix}"]
-            price = st.session_state[f"buy_price_{account_prefix}"]
-
-            if not ticker or not shares > 0 or not price > 0:
-                st.session_state[message_key] = ("error", "종목코드, 수량, 가격을 모두 올바르게 입력해주세요.")
-                st.session_state[buy_dialog_key] = False
-                st.rerun()
-                return
-
-            etf_name = ""
-            if country_code_inner == "kor" and _stock:
-                from utils.data_loader import fetch_pykrx_name
-
-                etf_name = fetch_pykrx_name(ticker)
-            elif country_code_inner == "aus":
-                etf_name = fetch_yfinance_name(ticker)
-
-            trade_data = {
-                "country": country_code_inner,
-                "account": account_code,
-                "date": trade_time,
-                "ticker": ticker.upper(),
-                "name": etf_name,
-                "action": "BUY",
-                "shares": float(shares),
-                "price": float(price),
-                "note": "",
-            }
-
-            if save_trade(trade_data):
-                st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
-            else:
-                st.session_state[message_key] = ("error", "거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.")
-            # 작업 완료 후 다이얼로그를 닫도록 상태를 변경합니다.
-            st.session_state[buy_dialog_key] = False
-            st.rerun()
-
-        with st.form(f"trade_form_{account_prefix}"):
-            st.text_input("종목코드 (티커)", key=f"buy_ticker_{account_prefix}")
-            shares_format_str = "%.8f" if country_code_inner == "coin" else "%d"
-            st.number_input(
-                "수량",
-                min_value=0.00000001,
-                step=0.00000001,
-                format=shares_format_str,
-                key=f"buy_shares_{account_prefix}",
-            )
-            st.number_input(
-                f"매수 단가{currency_str}",
-                min_value=0.0,
-                format=(
-                    "%.4f"
-                    if country_code_inner == "aus"
-                    else ("%d" if country_code_inner in ["kor", "coin"] else "%d")
-                ),
-                key=f"buy_price_{account_prefix}",
-            )
-            st.form_submit_button("거래 저장", on_click=on_buy_submit)
-
-    @st.dialog("SELL", width="large")
-    def show_sell_dialog(country_code_inner: str, holdings_data: list):
-        """보유 종목 매도를 위한 모달 다이얼로그를 표시합니다."""
-        message_key = f"sell_message_{account_prefix}"
-
-        if not holdings_data:
-            st.warning("보유 종목이 없어 매도할 수 없습니다.")
-            return
-
-        df_holdings = pd.DataFrame(holdings_data)
-
-        def on_sell_submit():
-            editor_state = st.session_state[f"sell_editor_{account_prefix}"]
-            selected_indices = [
-                idx for idx, edit in editor_state.get("edited_rows", {}).items() if edit.get("선택")
-            ]
-
-            if not selected_indices:
-                st.session_state[message_key] = ("warning", "매도할 종목을 선택해주세요.")
-                st.session_state[sell_dialog_key] = False
-                st.rerun()
-                return
-
-            selected_rows = df_holdings.loc[selected_indices]
-            trade_time = datetime.now()
-            if pytz:
-                try:
-                    korea_tz = pytz.timezone("Asia/Seoul")
-                    trade_time = datetime.now(korea_tz).replace(tzinfo=None)
-                except pytz.UnknownTimeZoneError:
-                    pass
-
-            success_count = 0
-            for _, row in selected_rows.iterrows():
-                trade_data = {
-                    "country": country_code_inner,
-                    "account": account_code,
-                    "date": trade_time,
-                    "ticker": row["ticker"],
-                    "name": row["name"],
-                    "action": "SELL",
-                    "shares": row["shares"],
-                    "note": "",
-                }
-                if save_trade(trade_data):
-                    success_count += 1
-
-            if success_count == len(selected_rows):
-                st.session_state[message_key] = (
-                    "success",
-                    f"{success_count}개 종목의 매도 거래가 성공적으로 저장되었습니다.",
-                )
-            else:
-                st.session_state[message_key] = ("error", "일부 거래 저장에 실패했습니다.")
-            # 작업 완료 후 다이얼로그를 닫도록 상태를 변경합니다.
-            st.session_state[sell_dialog_key] = False
-            st.rerun()
-
-        with st.form(f"sell_form_{account_prefix}"):
-            st.subheader("매도할 종목을 선택하세요 (전체 매도)")
-            df_holdings["선택"] = False
-            df_display = df_holdings[["선택", "name", "ticker", "shares"]].copy()
-            df_display.rename(
-                columns={"name": "종목명", "ticker": "티커", "shares": "보유수량"}, inplace=True
-            )
-
-            st.data_editor(
-                df_display,
-                hide_index=True,
-                width="stretch",
-                key=f"sell_editor_{account_prefix}",
-                disabled=["종목명", "티커", "보유수량"],
-                column_config={
-                    "선택": st.column_config.CheckboxColumn("삭제", required=True),
-                    "보유수량": st.column_config.NumberColumn(format="%.8f"),
-                },
-            )
-            st.form_submit_button("선택 종목 매도", on_click=on_sell_submit)
-
     _display_feedback_messages(account_prefix)
-
-    # --- 다이얼로그 호출 ---
-    # 세션 상태에 따라 BUY 또는 SELL 다이얼로그를 표시합니다.
-    if st.session_state[buy_dialog_key]:
-        show_buy_dialog(country_code)
-
-    if st.session_state[sell_dialog_key]:
-        holdings_for_dialog = _load_data_for_sell_dialog()
-        show_sell_dialog(country_code, holdings_for_dialog)
 
     sub_tab_equity_history, sub_tab_trades = st.tabs(["평가금액", "트레이드"])
 
@@ -427,17 +242,6 @@ def render_assets_dashboard(
                             st.info("변경된 내용이 없어 저장하지 않았습니다.")
 
     with sub_tab_trades:
-        if country_code != "coin":
-            col1, col2, _ = st.columns([1, 1, 8])
-            with col1:
-                if st.button("BUY", key=f"add_buy_btn_{account_prefix}"):
-                    st.session_state[buy_dialog_key] = True
-                    st.rerun()
-            with col2:
-                if st.button("SELL", key=f"add_sell_btn_{account_prefix}"):
-                    st.session_state[sell_dialog_key] = True
-                    st.rerun()
-
         all_trades = get_all_trades(country_code, account_code, include_deleted=True)
         if not all_trades:
             st.info("거래 내역이 없습니다.")
@@ -558,6 +362,158 @@ def render_assets_dashboard(
                             st.rerun()
                     else:
                         st.warning("복구할 거래를 선택해주세요.")
+
+        if country_code != "coin":
+            st.markdown("---")
+            with st.expander("신규 매수 (BUY)"):
+                with st.form(f"buy_form_{account_prefix}", clear_on_submit=True):
+                    currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
+                    buy_ticker = st.text_input("종목코드 (티커)")
+                    shares_format_str = "%.8f" if country_code == "coin" else "%d"
+                    buy_shares = st.number_input(
+                        "수량",
+                        min_value=0.00000001,
+                        step=0.00000001,
+                        format=shares_format_str,
+                    )
+                    buy_price = st.number_input(
+                        f"매수 단가{currency_str}",
+                        min_value=0.0,
+                        format=(
+                            "%.4f"
+                            if country_code == "aus"
+                            else ("%d" if country_code in ["kor", "coin"] else "%d")
+                        ),
+                    )
+                    buy_submitted = st.form_submit_button("매수 거래 저장")
+
+                    if buy_submitted:
+                        message_key = f"buy_message_{account_prefix}"
+                        trade_time = datetime.now()
+                        if pytz:
+                            try:
+                                korea_tz = pytz.timezone("Asia/Seoul")
+                                trade_time = datetime.now(korea_tz).replace(tzinfo=None)
+                            except pytz.UnknownTimeZoneError:
+                                pass
+
+                        ticker = buy_ticker.strip()
+                        shares = buy_shares
+                        price = buy_price
+
+                        if not ticker or not shares > 0 or not price > 0:
+                            st.session_state[message_key] = (
+                                "error",
+                                "종목코드, 수량, 가격을 모두 올바르게 입력해주세요.",
+                            )
+                        else:
+                            etf_name = ""
+                            if country_code == "kor" and _stock:
+                                from utils.data_loader import fetch_pykrx_name
+
+                                etf_name = fetch_pykrx_name(ticker)
+                            elif country_code == "aus":
+                                etf_name = fetch_yfinance_name(ticker)
+
+                            trade_data = {
+                                "country": country_code,
+                                "account": account_code,
+                                "date": trade_time,
+                                "ticker": ticker.upper(),
+                                "name": etf_name,
+                                "action": "BUY",
+                                "shares": float(shares),
+                                "price": float(price),
+                                "note": "",
+                            }
+
+                            if save_trade(trade_data):
+                                st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
+                            else:
+                                st.session_state[message_key] = (
+                                    "error",
+                                    "거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.",
+                                )
+                        st.rerun()
+
+            with st.expander("보유 종목 매도 (SELL)"):
+                snapshot_dates = get_available_snapshot_dates(country_code, account=account_code)
+                latest_date_str = snapshot_dates[0] if snapshot_dates else None
+                holdings_data = []
+                if latest_date_str:
+                    snapshot = get_portfolio_snapshot(
+                        country_code, date_str=latest_date_str, account=account_code
+                    )
+                    if snapshot and snapshot.get("holdings"):
+                        holdings_data = [
+                            h for h in snapshot.get("holdings", []) if h.get("shares", 0.0) > 0
+                        ]
+
+                if not holdings_data:
+                    st.info("매도할 보유 종목이 없습니다.")
+                else:
+                    with st.form(f"sell_form_{account_prefix}"):
+                        df_holdings = pd.DataFrame(holdings_data)
+                        df_holdings["선택"] = False
+                        df_display = df_holdings[["선택", "name", "ticker", "shares"]].copy()
+                        df_display.rename(
+                            columns={"name": "종목명", "ticker": "티커", "shares": "보유수량"},
+                            inplace=True,
+                        )
+
+                        edited_sell_df = st.data_editor(
+                            df_display,
+                            hide_index=True,
+                            width="stretch",
+                            disabled=["종목명", "티커", "보유수량"],
+                            column_config={
+                                "선택": st.column_config.CheckboxColumn("선택", required=True),
+                                "보유수량": st.column_config.NumberColumn(format="%.8f"),
+                            },
+                        )
+                        sell_submitted = st.form_submit_button("선택 종목 매도")
+
+                        if sell_submitted:
+                            message_key = f"sell_message_{account_prefix}"
+                            selected_rows = edited_sell_df[edited_sell_df["선택"]]
+
+                            if selected_rows.empty:
+                                st.session_state[message_key] = ("warning", "매도할 종목을 선택해주세요.")
+                            else:
+                                trade_time = datetime.now()
+                                if pytz:
+                                    try:
+                                        korea_tz = pytz.timezone("Asia/Seoul")
+                                        trade_time = datetime.now(korea_tz).replace(tzinfo=None)
+                                    except pytz.UnknownTimeZoneError:
+                                        pass
+
+                                success_count = 0
+                                original_indices = selected_rows.index
+                                rows_to_sell = df_holdings.loc[original_indices]
+
+                                for _, row in rows_to_sell.iterrows():
+                                    trade_data = {
+                                        "country": country_code,
+                                        "account": account_code,
+                                        "date": trade_time,
+                                        "ticker": row["ticker"],
+                                        "name": row["name"],
+                                        "action": "SELL",
+                                        "shares": row["shares"],
+                                        "note": "",
+                                    }
+                                    if save_trade(trade_data):
+                                        success_count += 1
+
+                                if success_count == len(rows_to_sell):
+                                    st.session_state[message_key] = (
+                                        "success",
+                                        f"{success_count}개 종목의 매도 거래가 성공적으로 저장되었습니다.",
+                                    )
+                                else:
+                                    st.session_state[message_key] = ("error", "일부 거래 저장에 실패했습니다.")
+                            st.rerun()
 
 
 def main():
