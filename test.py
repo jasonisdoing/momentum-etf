@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logic import jason as strategy_module
 from utils.account_registry import (
     get_account_file_settings,
+    get_country_file_settings,
     get_common_file_settings,
     get_account_info,
 )
@@ -216,12 +217,15 @@ def main(
 
     # 파일에서 초기 자본금 및 모든 계좌 설정을 가져옵니다.
     try:
-        portfolio_settings = get_account_file_settings(country, account)
-        initial_capital = portfolio_settings["initial_capital"]
-        settings.MA_PERIOD = portfolio_settings["ma_period"]
-        portfolio_topn = portfolio_settings["portfolio_topn"]
-        settings.REPLACE_SCORE_THRESHOLD = portfolio_settings["replace_threshold"]
-        settings.REPLACE_WEAKER_STOCK = portfolio_settings["replace_weaker_stock"]
+        account_settings = get_account_file_settings(account)
+        country_settings = get_country_file_settings(country)
+
+        initial_capital = account_settings["initial_capital"]
+
+        settings.MA_PERIOD = country_settings["ma_period"]
+        portfolio_topn = country_settings["portfolio_topn"]
+        settings.REPLACE_SCORE_THRESHOLD = country_settings["replace_threshold"]
+        settings.REPLACE_WEAKER_STOCK = country_settings["replace_weaker_stock"]
     except SystemExit as e:
         print(str(e))
         return

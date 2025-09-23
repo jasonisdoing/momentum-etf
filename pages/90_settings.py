@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.account_registry import (
     get_account_file_settings,
+    get_country_file_settings,
     get_common_file_settings,
     get_accounts_by_country,
     load_accounts,
@@ -24,7 +25,7 @@ def render_common_settings():
         st.error(str(e))
         st.stop()
 
-    help_text = "이 값은 `data/common/settings.py` 파일에서 수정할 수 있습니다."
+    help_text = "이 값은 `data/settings/common.py` 파일에서 수정할 수 있습니다."
 
     st.subheader("시장 레짐 필터 (파일에서 설정)")
     st.checkbox(
@@ -63,15 +64,15 @@ def render_common_settings():
 
 def render_account_settings(country_code: str, account_code: str):
     """계좌별 설정 UI를 렌더링합니다."""
-    # 파일에서 모든 계좌 설정을 가져옵니다.
     try:
-        file_settings = get_account_file_settings(country_code, account_code)
+        account_settings = get_account_file_settings(account_code)
+        country_settings = get_country_file_settings(country_code)
     except SystemExit as e:
         st.error(str(e))
         st.stop()
 
-    st.subheader("계좌 정보 (파일에서 설정)")
-    help_text = f"이 값들은 `data/accounts/settings/{country_code}_{account_code}.py` 파일에서 수정할 수 있습니다."
+    st.subheader("계좌 고유 설정 (파일에서 설정)")
+    account_help_text = f"이 값들은 `data/settings/accounts/{account_code}.py` 파일에서 수정할 수 있습니다."
 
     from utils.account_registry import get_account_info
 
@@ -83,45 +84,46 @@ def render_account_settings(country_code: str, account_code: str):
     currency_str = f" ({currency})"
     st.text_input(
         f"초기 자본금{currency_str}",
-        value=f"{float(file_settings['initial_capital']):,.{precision}f}"
+        value=f"{float(account_settings['initial_capital']):,.{precision}f}"
         if precision > 0
-        else f"{int(file_settings['initial_capital']):,d}",
+        else f"{int(account_settings['initial_capital']):,d}",
         disabled=True,
-        help=help_text,
+        help=account_help_text,
     )
     st.date_input(
         "초기 자본 기준일",
-        value=file_settings["initial_date"],
+        value=account_settings["initial_date"],
         disabled=True,
-        help=help_text,
+        help=account_help_text,
     )
     st.markdown("---")
 
     # 전략 파라미터
-    st.subheader("전략 파라미터 (파일에서 설정)")
+    st.subheader("국가별 전략 파라미터 (파일에서 설정)")
+    country_help_text = f"이 값들은 `data/settings/country/{country_code}.py` 파일에서 수정할 수 있습니다."
     st.text_input(
         "최대 보유 종목 수 (Top-N)",
-        value=str(file_settings["portfolio_topn"]),
+        value=str(country_settings["portfolio_topn"]),
         disabled=True,
-        help=help_text,
+        help=country_help_text,
     )
     st.text_input(
         "이동평균 기간 (MA)",
-        value=str(file_settings["ma_period"]),
+        value=str(country_settings["ma_period"]),
         disabled=True,
-        help=help_text,
+        help=country_help_text,
     )
     st.checkbox(
         "교체 매매 사용",
-        value=bool(file_settings["replace_weaker_stock"]),
+        value=bool(country_settings["replace_weaker_stock"]),
         disabled=True,
-        help=help_text,
+        help=country_help_text,
     )
     st.text_input(
         "교체 매매 점수 임계값",
-        value=f"{float(file_settings['replace_threshold']):.2f}",
+        value=f"{float(country_settings['replace_threshold']):.2f}",
         disabled=True,
-        help=help_text,
+        help=country_help_text,
     )
 
 

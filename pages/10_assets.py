@@ -109,7 +109,7 @@ def render_assets_dashboard(
         return
 
     try:
-        account_settings = get_account_file_settings(country_code, account_code)
+        account_settings = get_account_file_settings(account_code)
         account_info = get_account_info(account_code)
     except SystemExit as e:
         st.error(str(e))

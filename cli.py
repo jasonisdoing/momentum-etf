@@ -143,7 +143,7 @@ def main():
             import pandas as pd
 
             from utils.data_loader import fetch_ohlcv_for_tickers
-            from utils.account_registry import get_account_file_settings
+            from utils.account_registry import get_country_file_settings
             from utils.stock_list_io import get_etfs
 
             etfs_from_file = get_etfs(country)
@@ -159,7 +159,7 @@ def main():
                     return
 
             try:
-                portfolio_settings = get_account_file_settings(country, account)
+                country_settings = get_country_file_settings(country)
             except SystemExit as e:
                 print(str(e))
                 return
@@ -167,7 +167,7 @@ def main():
             try:
                 test_months_range = TEST_MONTHS_RANGE
                 # test.py의 하드코딩된 값 대신 파일에서 실제 MA 기간을 가져옵니다.
-                ma_etf = int(portfolio_settings["ma_period"])
+                ma_etf = int(country_settings["ma_period"])
             except (KeyError, ValueError, TypeError):
                 print("오류: 계좌 설정 파일의 MA 기간 설정이 올바르지 않습니다.")
                 return

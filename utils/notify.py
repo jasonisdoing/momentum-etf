@@ -18,7 +18,7 @@ def get_slack_webhook_url(country: str, account: Optional[str] = None) -> Option
     # 1. 파일에서 계정별 설정 확인
     if account:
         try:
-            settings = get_account_file_settings(country, account)
+            settings = get_account_file_settings(account)
             url = settings.get("slack_webhook_url")
             if url:
                 # 파일에서 가져온 경우, 이름은 계정명으로 합니다.

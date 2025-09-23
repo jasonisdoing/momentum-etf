@@ -45,9 +45,9 @@ def get_aud_to_krw_rate():
 
 
 def main():
-    """메인 대시보드를 렌더링합니다."""
-    st.set_page_config(page_title="main", page_icon="📈", layout="wide")
-    st.title("📈 메인 대시보드")
+    """통합 자산 현황 대시보드를 렌더링합니다."""
+    st.set_page_config(page_title="통합 자산 현황", layout="wide")
+    st.title("📈 통합 자산 현황")
 
     status_html = get_market_regime_status_string()
     if status_html:

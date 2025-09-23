@@ -45,7 +45,11 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.stock_list_io import get_etfs
-from utils.account_registry import get_account_file_settings, get_common_file_settings
+from utils.account_registry import (
+    get_account_file_settings,
+    get_common_file_settings,
+    get_country_file_settings,
+)
 from utils.notify import send_log_to_slack
 
 try:
@@ -479,7 +483,7 @@ def calculate_benchmark_comparison(
 
     # 파일에서 초기 자본/날짜 설정을 로드합니다.
     try:
-        file_settings = get_account_file_settings(country, account)
+        file_settings = get_account_file_settings(account)
         initial_capital = float(file_settings["initial_capital"])
         initial_date = pd.to_datetime(file_settings["initial_date"])
     except SystemExit as e:
@@ -1526,7 +1530,9 @@ def generate_signal_report(
 
     # 2. 설정을 파일에서 가져옵니다.
     try:
-        portfolio_settings = get_account_file_settings(country, account)
+        account_settings = get_account_file_settings(account)
+        country_settings = get_country_file_settings(country)
+        portfolio_settings = {**account_settings, **country_settings}
     except SystemExit as e:
         print(str(e))
         return None
@@ -2902,7 +2908,7 @@ def send_summary_notification(
 
         # Calculate cumulative return
         try:
-            file_settings = get_account_file_settings(country, account)
+            file_settings = get_account_file_settings(account)
             initial_capital = float(file_settings.get("initial_capital", 0))
         except SystemExit:
             initial_capital = 0.0  # 알림에서는 조용히 실패 처리

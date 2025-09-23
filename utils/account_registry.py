@@ -11,7 +11,7 @@ from datetime import datetime
 
 
 ACCOUNTS_FILE = (
-    Path(__file__).resolve().parent.parent / "data" / "accounts" / "country_mapping.json"
+    Path(__file__).resolve().parent.parent / "data" / "settings" / "country_mapping.json"
 )
 
 _accounts_cache: List[Dict[str, Any]] = []
@@ -32,7 +32,7 @@ def get_common_file_settings() -> Dict[str, Any]:
 
     settings: Dict[str, Any] = {}
     project_root = Path(__file__).resolve().parent.parent
-    file_path = project_root / "data" / "common" / "settings.py"
+    file_path = project_root / "data" / "settings" / "common.py"
     module_name = "common_settings"
 
     if not file_path.is_file():
@@ -83,19 +83,72 @@ def get_common_file_settings() -> Dict[str, Any]:
 _account_file_settings_cache: Dict[str, Dict[str, Any]] = {}
 
 
-def get_account_file_settings(country: str, account: str) -> Dict[str, Any]:
+def get_country_file_settings(country: str) -> Dict[str, Any]:
     """
-    계좌별 설정 파일(예: 'data/accounts/settings/kor_m1.py')에서 초기 자본금,
-    기준일 및 전략 파라미터를 동적으로 로드합니다.
+    국가별 전략 설정 파일(예: 'data/settings/country/kor.py')에서
+    전략 파라미터를 동적으로 로드합니다.
     """
-    cache_key = f"{country}_{account}"
+    cache_key = f"country_{country}"
     if cache_key in _account_file_settings_cache:
         return _account_file_settings_cache[cache_key]
 
     settings: Dict[str, Any] = {}
     project_root = Path(__file__).resolve().parent.parent
-    file_path = project_root / "data" / "accounts" / "settings" / f"{country}_{account}.py"
-    module_name = f"account_settings_{country}_{account}"
+    file_path = project_root / "data" / "settings" / "country" / f"{country}.py"
+    module_name = f"country_settings_{country}"
+
+    if not file_path.is_file():
+        raise SystemExit(f"오류: 국가 설정 파일({file_path})을 찾을 수 없습니다. 이 파일은 필수입니다.")
+
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Cannot create module spec from {file_path}")
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        # 필수 설정 로드
+        ma_period = getattr(module, "MA_PERIOD")
+        portfolio_topn = getattr(module, "PORTFOLIO_TOPN")
+        replace_weaker = getattr(module, "REPLACE_WEAKER_STOCK")
+        replace_threshold = getattr(module, "REPLACE_SCORE_THRESHOLD")
+
+        # 유효성 검사
+        if not isinstance(ma_period, int) or ma_period <= 0:
+            raise ValueError("MA_PERIOD는 0보다 큰 정수여야 합니다.")
+        if not isinstance(portfolio_topn, int) or portfolio_topn <= 0:
+            raise ValueError("PORTFOLIO_TOPN은 0보다 큰 정수여야 합니다.")
+        if not isinstance(replace_weaker, bool):
+            raise ValueError("REPLACE_WEAKER_STOCK은 True 또는 False여야 합니다.")
+        if not isinstance(replace_threshold, (int, float)):
+            raise ValueError("REPLACE_SCORE_THRESHOLD는 숫자여야 합니다.")
+
+        settings["ma_period"] = ma_period
+        settings["portfolio_topn"] = portfolio_topn
+        settings["replace_weaker_stock"] = replace_weaker
+        settings["replace_threshold"] = replace_threshold
+
+    except (AttributeError, ValueError, TypeError, ImportError) as e:
+        raise SystemExit(f"오류: 국가 설정 파일({file_path})에 문제가 있습니다: {e}")
+
+    _account_file_settings_cache[cache_key] = settings
+    return settings
+
+
+def get_account_file_settings(account: str) -> Dict[str, Any]:
+    """
+    계좌별 설정 파일(예: 'data/accounts/settings/kor_m1.py')에서 초기 자본금,
+    기준일 및 전략 파라미터를 동적으로 로드합니다.
+    """
+    cache_key = f"account_{account}"
+    if cache_key in _account_file_settings_cache:
+        return _account_file_settings_cache[cache_key]
+
+    settings: Dict[str, Any] = {}
+    project_root = Path(__file__).resolve().parent.parent
+    file_path = project_root / "data" / "settings" / "accounts" / f"{account}.py"
+    module_name = f"account_settings_{account}"
 
     if not file_path.is_file():
         raise SystemExit(f"오류: 계좌 설정 파일({file_path})을 찾을 수 없습니다. 이 파일은 필수입니다.")
@@ -111,29 +164,13 @@ def get_account_file_settings(country: str, account: str) -> Dict[str, Any]:
         # 필수 설정 로드
         capital = getattr(module, "INITIAL_CAPITAL")
         date_str = getattr(module, "INITIAL_DATE")
-        ma_period = getattr(module, "MA_PERIOD")
-        portfolio_topn = getattr(module, "PORTFOLIO_TOPN")
-        replace_weaker = getattr(module, "REPLACE_WEAKER_STOCK")
-        replace_threshold = getattr(module, "REPLACE_SCORE_THRESHOLD")
 
         # 유효성 검사
         if not isinstance(capital, (int, float)) or capital <= 0:
             raise ValueError("INITIAL_CAPITAL은 0보다 큰 숫자여야 합니다.")
-        if not isinstance(ma_period, int) or ma_period <= 0:
-            raise ValueError("MA_PERIOD는 0보다 큰 정수여야 합니다.")
-        if not isinstance(portfolio_topn, int) or portfolio_topn <= 0:
-            raise ValueError("PORTFOLIO_TOPN은 0보다 큰 정수여야 합니다.")
-        if not isinstance(replace_weaker, bool):
-            raise ValueError("REPLACE_WEAKER_STOCK은 True 또는 False여야 합니다.")
-        if not isinstance(replace_threshold, (int, float)):
-            raise ValueError("REPLACE_SCORE_THRESHOLD는 숫자여야 합니다.")
 
         settings["initial_capital"] = capital
         settings["initial_date"] = datetime.strptime(date_str, "%Y-%m-%d")
-        settings["ma_period"] = ma_period
-        settings["portfolio_topn"] = portfolio_topn
-        settings["replace_weaker_stock"] = replace_weaker
-        settings["replace_threshold"] = replace_threshold
 
         # (선택) 슬랙 웹훅 URL
         slack_webhook_url = getattr(module, "SLACK_WEBHOOK_URL", None)
