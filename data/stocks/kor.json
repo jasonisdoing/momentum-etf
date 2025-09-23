@@ -331,6 +331,11 @@
                 "ticker": "475070",
                 "name": "KoAct 글로벌친환경전력인프라액티브",
                 "is_active": true
+            },
+            {
+                "ticker": "442320",
+                "name": "RISE 글로벌원자력",
+                "is_active": true
             }
         ]
     },
@@ -555,11 +560,6 @@
             {
                 "ticker": "441640",
                 "name": "Kodex 미국배당커버드콜액티브",
-                "is_active": true
-            },
-            {
-                "ticker": "442320",
-                "name": "RISE 글로벌원자력",
                 "is_active": true
             },
             {

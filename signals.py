@@ -2167,7 +2167,8 @@ def generate_signal_report(
                     cand["row"][-1] = "가격 정보 없음" + f" ({cand['row'][-1]})"
 
         # 2b: 포트폴리오가 가득 찼으므로 교체 매매 고려
-        if slots_to_fill <= 0 and replace_weaker_stock:
+        # 현금 부족으로 신규 매수에 실패했더라도, 더 좋은 종목으로 교체할 수 있는지 항상 확인합니다.
+        if replace_weaker_stock:
             buy_candidates = sorted(
                 [a for a in decisions if a.get("buy_signal") and a["tkr"] in universe_tickers],
                 key=lambda x: x["score"],
@@ -2175,7 +2176,8 @@ def generate_signal_report(
             )
             held_stocks = sorted(
                 [a for a in decisions if a["state"] == "HOLD"],
-                key=lambda x: x["score"],
+                # 점수가 없는(nan) 종목을 교체 우선순위에서 가장 낮게(가장 먼저 팔리도록) 설정
+                key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"),
             )
 
             num_possible_replacements = min(len(buy_candidates), len(held_stocks))
@@ -2184,7 +2186,16 @@ def generate_signal_report(
                 best_new = buy_candidates[k]
                 weakest_held = held_stocks[k]
 
-                if best_new["score"] > weakest_held["score"] + replace_threshold:
+                # 교체는 아직 매수/매도 결정이 없는 'WAIT'와 'HOLD' 상태의 종목에만 적용합니다.
+                if best_new["state"] != "WAIT" or weakest_held["state"] != "HOLD":
+                    continue
+
+                # replace_threshold는 % 단위이므로 100으로 나누어 점수(소수점)와 단위를 맞춥니다.
+                if (
+                    pd.notna(best_new["score"])
+                    and pd.notna(weakest_held["score"])
+                    and best_new["score"] > weakest_held["score"] + (replace_threshold / 100.0)
+                ):
                     d_weakest = data_by_tkr.get(weakest_held["tkr"])
                     sell_price = float(d_weakest.get("price", 0))
                     sell_qty = float(d_weakest.get("shares", 0))
@@ -2221,10 +2232,12 @@ def generate_signal_report(
                 else:
                     break
 
-            for cand in buy_candidates:
-                if cand["state"] == "WAIT":
-                    cand["row"][-1] = "포트폴리오 가득 참 (교체대상 아님)"
-
+    # 최종 정리: 아직 'WAIT' 상태인 종목들의 사유를 명확히 합니다.
+    for cand in decisions:
+        if cand["state"] == "WAIT":
+            # 이미 '현금 부족' 또는 '카테고리 중복' 등의 구체적인 사유가 설정된 경우는 덮어쓰지 않습니다.
+            if "추세진입" in cand["row"][-1]:
+                cand["row"][-1] = "포트폴리오 가득 참 (교체대상 아님)" + f" ({cand['row'][-1]})"
     # 7. 완료된 거래 표시
     # 기준일에 발생한 거래를 가져와서, 추천에 따라 실행되었는지 확인하는 데 사용합니다.
     # 표시 기준일 기준으로 '완료' 거래를 표시합니다. 다음 거래일이면 거래가 없을 확률이 높음
