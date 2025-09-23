@@ -36,6 +36,8 @@ def main():
     st.set_page_config(page_title="Main", page_icon="📈", layout="wide")
     st.title("📈 메인 대시보드")
 
+    hide_amounts = st.toggle("금액 숨기기", key="hide_amounts")
+
     date_str_for_snapshot = None
     if pytz:
         try:
@@ -167,11 +169,16 @@ def main():
     )
 
     col1, col2, col3 = st.columns(3)
-    col1.metric(label="총 초기자본", value=f"{total_initial_capital_krw:,.0f} 원")
+
+    initial_capital_display = "****** 원" if hide_amounts else f"{total_initial_capital_krw:,.0f} 원"
+    current_equity_display = "****** 원" if hide_amounts else f"{total_current_equity_krw:,.0f} 원"
+    profit_loss_display = "****** 원" if hide_amounts else f"{total_profit_loss_krw:,.0f} 원"
+
+    col1.metric(label="총 초기자본", value=initial_capital_display)
     col2.metric(
         label="총 평가금액",
-        value=f"{total_current_equity_krw:,.0f} 원",
-        delta=f"{total_profit_loss_krw:,.0f} 원",
+        value=current_equity_display,
+        delta=profit_loss_display,
     )
     col3.metric(label="총 누적수익률", value=f"{total_cum_return_pct:.2f}%")
 
@@ -213,19 +220,26 @@ def main():
         cols = st.columns((2, 2.2, 2.2, 2.2, 1.5, 1.5))
         cols[0].write(summary["display_name"])
 
-        initial_capital_str = f"{summary['initial_capital']:,.{precision}f} {currency_symbol}"
+        if hide_amounts:
+            initial_capital_str = f"****** {currency_symbol}"
+            current_equity_str = f"****** {currency_symbol}"
+            profit_loss_str = f"****** {currency_symbol}"
+        else:
+            initial_capital_str = f"{summary['initial_capital']:,.{precision}f} {currency_symbol}"
+            current_equity_str = f"{summary['current_equity']:,.{precision}f} {currency_symbol}"
+            profit_loss_color = "red" if profit_loss >= 0 else "blue"
+            profit_loss_sign = "+" if profit_loss > 0 else ""
+            profit_loss_str = f"{profit_loss_sign}{profit_loss:,.{precision}f} {currency_symbol}"
+
         cols[1].markdown(
             f"<div style='text-align: right;'>{initial_capital_str}</div>", unsafe_allow_html=True
         )
 
-        current_equity_str = f"{summary['current_equity']:,.{precision}f} {currency_symbol}"
         cols[2].markdown(
             f"<div style='text-align: right;'>{current_equity_str}</div>", unsafe_allow_html=True
         )
 
         profit_loss_color = "red" if profit_loss >= 0 else "blue"
-        profit_loss_sign = "+" if profit_loss > 0 else ""
-        profit_loss_str = f"{profit_loss_sign}{profit_loss:,.{precision}f} {currency_symbol}"
         cols[3].markdown(
             f"<div style='text-align: right; color: {profit_loss_color};'>{profit_loss_str}</div>",
             unsafe_allow_html=True,
