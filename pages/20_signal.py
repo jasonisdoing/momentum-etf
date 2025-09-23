@@ -428,38 +428,13 @@ def render_signal_dashboard(
         if benchmark_results:
             data_for_df = []
             for res in benchmark_results:
-                if res.get("error"):
-                    data_for_df.append(
-                        {
-                            "티커": res.get("ticker", "-"),
-                            "벤치마크": res["name"],
-                            "누적수익률": res["error"],
-                            "초과수익률": "-",
-                        }
-                    )
-                else:
-                    portfolio_cum_ret_pct = None
-                    if header_line:
-                        try:
-                            cum_ret_segment = [s for s in header_line.split("|") if "누적:" in s][0]
-                            portfolio_cum_ret_pct = float(
-                                cum_ret_segment.split("%")[0].split("</span>")[-1]
-                            )
-                        except (IndexError, ValueError):
-                            pass
-                    excess_return_pct = (
-                        portfolio_cum_ret_pct - res["cum_ret_pct"]
-                        if portfolio_cum_ret_pct is not None
-                        else res["excess_return_pct"]
-                    )
-                    data_for_df.append(
-                        {
-                            "티커": res.get("ticker", "-"),
-                            "벤치마크": res["name"],
-                            "누적수익률": res["cum_ret_pct"],
-                            "초과수익률": excess_return_pct,
-                        }
-                    )
+                row_data = {
+                    "티커": res.get("ticker", "-"),
+                    "벤치마크": res.get("name", "N/A"),
+                    "누적수익률": res.get("cum_ret_pct") if not res.get("error") else res.get("error"),
+                    "초과수익률": res.get("excess_return_pct") if not res.get("error") else "-",
+                }
+                data_for_df.append(row_data)
             st.dataframe(
                 pd.DataFrame(data_for_df),
                 hide_index=True,
@@ -495,6 +470,10 @@ def main():
     st.markdown(
         """
         <style>
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
+            body {
+                font-family: 'Noto Sans KR', sans-serif;
+            }
             .block-container {
                 max-width: 100%;
                 padding-top: 1rem;

@@ -146,8 +146,9 @@ def render_assets_dashboard(
 
             if not ticker or not shares > 0 or not price > 0:
                 st.session_state[message_key] = ("error", "종목코드, 수량, 가격을 모두 올바르게 입력해주세요.")
-                # 유효성 검사 실패 시, 다이얼로그를 닫지 않고 메시지만 설정합니다.
-                return  # st.rerun()을 호출하지 않습니다.
+                st.session_state[buy_dialog_key] = False
+                st.rerun()
+                return
 
             etf_name = ""
             if country_code_inner == "kor" and _stock:
@@ -175,6 +176,7 @@ def render_assets_dashboard(
                 st.session_state[message_key] = ("error", "거래 저장에 실패했습니다. 콘솔 로그를 확인해주세요.")
             # 작업 완료 후 다이얼로그를 닫도록 상태를 변경합니다.
             st.session_state[buy_dialog_key] = False
+            st.rerun()
 
         with st.form(f"trade_form_{account_prefix}"):
             st.text_input("종목코드 (티커)", key=f"buy_ticker_{account_prefix}")
@@ -217,8 +219,9 @@ def render_assets_dashboard(
 
             if not selected_indices:
                 st.session_state[message_key] = ("warning", "매도할 종목을 선택해주세요.")
-                # 유효성 검사 실패 시, 다이얼로그를 닫지 않고 메시지만 설정합니다.
-                return  # st.rerun()을 호출하지 않습니다.
+                st.session_state[sell_dialog_key] = False
+                st.rerun()
+                return
 
             selected_rows = df_holdings.loc[selected_indices]
             trade_time = datetime.now()
@@ -253,6 +256,7 @@ def render_assets_dashboard(
                 st.session_state[message_key] = ("error", "일부 거래 저장에 실패했습니다.")
             # 작업 완료 후 다이얼로그를 닫도록 상태를 변경합니다.
             st.session_state[sell_dialog_key] = False
+            st.rerun()
 
         with st.form(f"sell_form_{account_prefix}"):
             st.subheader("매도할 종목을 선택하세요 (전체 매도)")
@@ -283,8 +287,7 @@ def render_assets_dashboard(
         show_buy_dialog(country_code)
 
     if st.session_state[sell_dialog_key]:
-        with st.spinner("보유 종목 데이터를 불러오는 중..."):
-            holdings_for_dialog = _load_data_for_sell_dialog()
+        holdings_for_dialog = _load_data_for_sell_dialog()
         show_sell_dialog(country_code, holdings_for_dialog)
 
     sub_tab_equity_history, sub_tab_trades = st.tabs(["평가금액", "트레이드"])
@@ -564,6 +567,10 @@ def main():
     st.markdown(
         """
         <style>
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
+            body {
+                font-family: 'Noto Sans KR', sans-serif;
+            }
             .block-container {
                 max-width: 100%;
                 padding-top: 1rem;

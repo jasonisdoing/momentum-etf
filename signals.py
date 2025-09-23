@@ -418,23 +418,7 @@ def _calculate_single_benchmark(
 
     # 주요 데이터 소스에서 벤치마크를 가져오지 못했을 때의 폴백 경로입니다.
     if df_benchmark is None or df_benchmark.empty:
-        # 1) 한국 지수는 yfinance 형식(예: 379800 -> 379800.KS)으로 재시도합니다.
-        if benchmark_country == "kor" and yf is not None:
-            try:
-                y_ticker = benchmark_ticker
-                if benchmark_ticker.isdigit() and len(benchmark_ticker) == 6:
-                    y_ticker = f"{benchmark_ticker}.KS"
-                df_y = yf.download(
-                    y_ticker,
-                    start=initial_date.strftime("%Y-%m-%d"),
-                    end=(base_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
-                    progress=False,
-                    auto_adjust=True,
-                )
-                df_benchmark = _normalize_yfinance_df(df_y)
-            except Exception:
-                pass
-        # 2) 코인 지수는 yfinance 심볼(예: BTC -> BTC-USD)로 재시도합니다.
+        # 코인 지수는 yfinance 심볼(예: BTC -> BTC-USD)로 재시도합니다.
         if (
             (df_benchmark is None or df_benchmark.empty)
             and benchmark_country == "coin"
@@ -522,6 +506,38 @@ def calculate_benchmark_comparison(
 
     base_date = pd.to_datetime(portfolio_data["date"]).normalize()
 
+    # --- 평가금액 보정 로직 추가 (generate_signal_report와 일관성 유지) ---
+    current_equity = float(portfolio_data.get("total_equity", 0.0))
+    recalculated_holdings_value = 0.0
+    holdings = portfolio_data.get("holdings", [])
+    for h in holdings:
+        ticker = h.get("ticker")
+        shares = h.get("shares", 0.0)
+        if not ticker or not shares > 0:
+            continue
+        # 이 함수는 UI에서 호출되므로, 속도를 위해 간단한 조회를 사용합니다.
+        df = fetch_ohlcv(ticker, country=country, months_back=1, base_date=base_date)
+        price = 0.0
+        if df is not None and not df.empty:
+            prices_until_base = df[df.index <= base_date]["Close"]
+            if not prices_until_base.empty:
+                price = prices_until_base.iloc[-1]
+        if price > 0:
+            recalculated_holdings_value += shares * price
+
+    # 호주 계좌의 해외 주식 가치 추가
+    if country == "aus":
+        intl_info = portfolio_data.get("international_shares")
+        if isinstance(intl_info, dict):
+            recalculated_holdings_value += float(intl_info.get("value", 0.0))
+
+    equity_for_calc = current_equity
+    # `generate_signal_report`의 보정 로직과 동일하게 적용
+    if recalculated_holdings_value > 0 and (
+        current_equity == 0 or recalculated_holdings_value > current_equity
+    ):
+        equity_for_calc = recalculated_holdings_value
+
     # 벤치마크 계산 기준일(base_date)이 거래일이 아닌 경우, 그 이전의 가장 가까운 거래일로 보정합니다.
     if country != "coin":
         if not _is_trading_day(country, base_date.to_pydatetime()):
@@ -535,25 +551,6 @@ def calculate_benchmark_comparison(
     if initial_date > base_date:
         error_msg = f"초기 기준일({initial_date.strftime('%Y-%m-%d')})이 조회일({base_date.strftime('%Y-%m-%d')})보다 미래입니다."
         return [{"name": "벤치마크", "error": error_msg}]
-
-    current_equity = float(portfolio_data.get("total_equity", 0.0))
-
-    equity_for_calc = current_equity
-    if country == "aus":
-        holdings = portfolio_data.get("holdings", [])
-        recalculated_holdings_value = 0.0
-
-        for h in holdings:
-            df = fetch_ohlcv(h["ticker"], country=country, months_back=1)
-            if df is not None and not df.empty:
-                price = df["Close"].iloc[-1]
-                recalculated_holdings_value += h["shares"] * price
-
-        if portfolio_data.get("international_shares"):
-            recalculated_holdings_value += portfolio_data["international_shares"].get("value", 0.0)
-
-        if recalculated_holdings_value > 1 and (current_equity / recalculated_holdings_value) > 10:
-            equity_for_calc = recalculated_holdings_value
 
     portfolio_cum_ret_pct = ((equity_for_calc / initial_capital) - 1.0) * 100.0
 
