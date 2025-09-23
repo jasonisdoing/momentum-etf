@@ -19,7 +19,12 @@ except Exception:
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.account_registry import get_account_file_settings, get_accounts_by_country, load_accounts
+from utils.account_registry import (
+    get_account_file_settings,
+    get_accounts_by_country,
+    load_accounts,
+    get_account_info,
+)
 from utils.data_loader import fetch_yfinance_name, get_trading_days
 from utils.db_manager import (
     delete_trade_by_id,
@@ -103,21 +108,25 @@ def render_assets_dashboard(
         st.info("활성 계좌가 없습니다. 계좌를 등록한 후 이용해주세요.")
         return
 
+    try:
+        account_settings = get_account_file_settings(country_code, account_code)
+        account_info = get_account_info(account_code)
+    except SystemExit as e:
+        st.error(str(e))
+        st.stop()
+
+    currency = account_info.get("currency", "KRW")
+    precision = account_info.get("precision", 0)
+    currency_str = f" ({currency})"
+
     _display_feedback_messages(account_prefix)
 
     sub_tab_equity_history, sub_tab_trades = st.tabs(["평가금액", "트레이드"])
 
     with sub_tab_equity_history:
-        try:
-            account_settings = get_account_file_settings(country_code, account_code)
-        except SystemExit as e:
-            st.error(str(e))
-            st.stop()
-
         initial_date = account_settings.get("initial_date") or (
             datetime.now() - pd.DateOffset(months=3)
         )
-        currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
         start_date_str = initial_date.strftime("%Y-%m-%d")
 
         raw_dates = get_available_snapshot_dates(country_code, account=account_code)
@@ -181,7 +190,7 @@ def render_assets_dashboard(
                 "date": st.column_config.DateColumn("일자", format="YYYY-MM-DD", disabled=True),
                 "total_equity": st.column_config.NumberColumn(
                     f"총 평가금액{currency_str}",
-                    format="%.2f" if country_code == "aus" else "%d",
+                    format=f"%.{precision}f" if precision > 0 else "%d",
                     required=True,
                 ),
                 "updated_at": st.column_config.DatetimeColumn(
@@ -191,7 +200,7 @@ def render_assets_dashboard(
             }
             if country_code == "aus":
                 column_config["is_value"] = st.column_config.NumberColumn(
-                    f"해외주식 평가액{currency_str}", format="%.2f"
+                    f"해외주식 평가액{currency_str}", format=f"%.{precision}f"
                 )
                 column_config["is_change_pct"] = st.column_config.NumberColumn(
                     "해외주식 수익률(%)", format="%.2f", help="수익률(%)만 입력합니다. 예: 5.5"
@@ -308,7 +317,7 @@ def render_assets_dashboard(
                         ),
                     ),
                     "price": st.column_config.NumberColumn(
-                        "가격", format="%.4f" if country_code == "aus" else "%d"
+                        "가격", format=f"%.{precision}f" if precision > 0 else "%d"
                     ),
                     "note": st.column_config.TextColumn("비고", width="large"),
                 },
@@ -367,7 +376,6 @@ def render_assets_dashboard(
             st.markdown("---")
             with st.expander("신규 매수 (BUY)"):
                 with st.form(f"buy_form_{account_prefix}", clear_on_submit=True):
-                    currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
                     buy_ticker = st.text_input("종목코드 (티커)")
                     shares_format_str = "%.8f" if country_code == "coin" else "%d"
                     buy_shares = st.number_input(
@@ -379,11 +387,7 @@ def render_assets_dashboard(
                     buy_price = st.number_input(
                         f"매수 단가{currency_str}",
                         min_value=0.0,
-                        format=(
-                            "%.4f"
-                            if country_code == "aus"
-                            else ("%d" if country_code in ["kor", "coin"] else "%d")
-                        ),
+                        format=f"%.{precision}f" if precision > 0 else "%d",
                     )
                     buy_submitted = st.form_submit_button("매수 거래 저장")
 

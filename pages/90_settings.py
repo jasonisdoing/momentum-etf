@@ -73,12 +73,18 @@ def render_account_settings(country_code: str, account_code: str):
     st.subheader("계좌 정보 (파일에서 설정)")
     help_text = f"이 값들은 `data/accounts/settings/{country_code}_{account_code}.py` 파일에서 수정할 수 있습니다."
 
+    from utils.account_registry import get_account_info
+
+    account_info = get_account_info(account_code)
+    currency = account_info.get("currency", "KRW")
+    precision = account_info.get("precision", 0)
+
     # 기본 정보
-    currency_str = f" ({'AUD' if country_code == 'aus' else 'KRW'})"
+    currency_str = f" ({currency})"
     st.text_input(
         f"초기 자본금{currency_str}",
-        value=f"{float(file_settings['initial_capital']):,.2f}"
-        if country_code == "aus"
+        value=f"{float(file_settings['initial_capital']):,.{precision}f}"
+        if precision > 0
         else f"{int(file_settings['initial_capital']):,d}",
         disabled=True,
         help=help_text,

@@ -41,8 +41,6 @@ from utils.db_manager import (
     save_signal_report_to_db,
 )
 from utils.report import (
-    format_aud_money,
-    format_aud_price,
     format_kr_money,
     render_table_eaw,
 )
@@ -1316,8 +1314,17 @@ def _build_header_line(
     portfolio_settings: Dict,
 ):
     """리포트의 헤더 라인을 생성합니다."""
+    from utils.account_registry import get_account_info
+
+    account_info = get_account_info(account)
+    currency = account_info.get("currency", "KRW")
+    precision = account_info.get("precision", 0)
+
+    def _aud_money_formatter(amount):
+        return f"${amount:,.{precision}f}"
+
     # 국가별 포맷터 설정
-    money_formatter = format_kr_money if country != "aus" else format_aud_money
+    money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
 
     # 보유 종목 수
     if country == "coin":
@@ -1466,12 +1473,17 @@ def _get_equity_update_message_line(
     country: str, account: str, old_equity: float, new_equity: float
 ):
     """평가금액 자동 보정 시 슬랙으로 알림을 보냅니다."""
-    try:
-        from utils.report import format_aud_money, format_kr_money
-    except Exception:
-        return False
+    from utils.account_registry import get_account_info
+    from utils.report import format_kr_money
 
-    money_formatter = format_aud_money if country == "aus" else format_kr_money
+    account_info = get_account_info(account)
+    currency = account_info.get("currency", "KRW")
+    precision = account_info.get("precision", 0)
+
+    def _aud_money_formatter(amount):
+        return f"${amount:,.{precision}f}"
+
+    money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
 
     diff = new_equity - old_equity
     diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"
@@ -1825,13 +1837,25 @@ def generate_signal_report(
     # 5. 초기 매매 결정 생성
     decisions = []
 
+    from utils.account_registry import get_account_info
+
+    account_info = get_account_info(account)
+    currency = account_info.get("currency", "KRW")
+    precision = account_info.get("precision", 0)
+
     def _format_kr_price(p):
         return f"{int(round(p)):,}"
 
+    def _aud_money_formatter(amount):
+        return f"${amount:,.{precision}f}"
+
+    def _aud_price_formatter(p):
+        return f"${p:,.{precision}f}"
+
     # 국가별 포맷터 설정
-    if country == "aus":
-        price_formatter = format_aud_price
-        money_formatter = format_aud_money
+    if currency == "AUD":
+        money_formatter = _aud_money_formatter
+        price_formatter = _aud_price_formatter
     else:  # kor
         money_formatter = format_kr_money
         price_formatter = _format_kr_price
@@ -2586,15 +2610,29 @@ def _maybe_notify_detailed_signal(
     if not webhook_info:
         return False
     webhook_url, webhook_name = webhook_info
+
+    from utils.account_registry import get_account_info
+
+    account_info = get_account_info(account)
+    currency = account_info.get("currency", "KRW")
+    precision = account_info.get("precision", 0)
+
+    def _aud_money_formatter(amount):
+        return f"${amount:,.{precision}f}"
+
+    def _aud_price_formatter(p):
+        return f"${p:,.{precision}f}" if isinstance(p, (int, float)) else str(p)
+
+    def _kor_coin_price_formatter(p):
+        return f"{int(round(p)):,}" if isinstance(p, (int, float)) else str(p)
+
     # 국가별 포맷터 설정
-    if country == "aus":
-        price_formatter = format_aud_price
-        money_formatter = format_aud_money
+    if currency == "AUD":
+        money_formatter = _aud_money_formatter
+        price_formatter = _aud_price_formatter
     else:  # kor, coin
         money_formatter = format_kr_money
-
-        def price_formatter(p):
-            return f"{int(round(p)):,}" if isinstance(p, (int, float)) else str(p)
+        price_formatter = _kor_coin_price_formatter
 
     def format_shares(quantity):
         if not isinstance(quantity, (int, float)):
@@ -2852,7 +2890,7 @@ def send_summary_notification(
 ) -> None:
     """작업 완료 요약 슬랙 알림을 전송합니다."""
     from utils.db_manager import get_portfolio_snapshot
-    from utils.report import format_aud_money, format_kr_money
+    from utils.report import format_kr_money
 
     try:
         date_str = report_date.strftime("%Y-%m-%d")
@@ -2870,7 +2908,16 @@ def send_summary_notification(
             initial_capital = 0.0  # 알림에서는 조용히 실패 처리
 
         message = f"[{prefix}/{date_str}] 작업 완료(작업시간: {duration:.1f}초)"
-        money_formatter = format_aud_money if country == "aus" else format_kr_money
+        from utils.account_registry import get_account_info
+
+        account_info = get_account_info(account)
+        currency = account_info.get("currency", "KRW")
+        precision = account_info.get("precision", 0)
+
+        def _aud_money_formatter(amount):
+            return f"${amount:,.{precision}f}"
+
+        money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
 
         if initial_capital > 0:
             cum_ret_pct = ((new_equity / initial_capital) - 1.0) * 100.0

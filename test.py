@@ -10,10 +10,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from logic import jason as strategy_module
 from logic import settings
-from utils.account_registry import get_account_file_settings, get_common_file_settings
+from utils.account_registry import (
+    get_account_file_settings,
+    get_common_file_settings,
+    get_account_info,
+)
 from utils.report import (
-    format_aud_money,
-    format_aud_price,
     format_kr_money,
     render_table_eaw,
 )
@@ -35,10 +37,14 @@ def _print_backtest_summary(
     ticker_summaries: List[Dict],
 ):
     """백테스트 결과 요약을 콘솔에 출력합니다."""
-    if country == "aus":
-        money_formatter = format_aud_money
-    else:
-        money_formatter = format_kr_money
+    account_info = get_account_info(account)
+    currency = account_info.get("currency", "KRW")
+    precision = account_info.get("precision", 0)
+
+    def _aud_money_formatter(amount):
+        return f"${amount:,.{precision}f}"
+
+    money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
 
     benchmark_name = "BTC" if country == "coin" else "S&P 500"
 
@@ -245,20 +251,32 @@ def main(
         print(f"오류: 공통 설정 파일을 읽는 중 문제가 발생했습니다: {e}")
         return
 
+    account_info = get_account_info(account)
+    currency = account_info.get("currency", "KRW")
+    precision = account_info.get("precision", 0)
+
+    def _aud_money_formatter(amount):
+        return f"${amount:,.{precision}f}"
+
+    def _aud_price_formatter(p):
+        return f"${p:,.{precision}f}"
+
+    def _kr_price_formatter(p):
+        return f"{int(round(p)):,}"
+
+    def _kr_ma_formatter(p):
+        return f"{int(round(p)):,}원"
+
     # 국가별로 다른 포맷터 사용
-    if country == "aus":
-        money_formatter = format_aud_money
-        price_formatter = format_aud_price
-        ma_formatter = format_aud_price
+    if currency == "AUD":
+        money_formatter = _aud_money_formatter
+        price_formatter = _aud_price_formatter
+        ma_formatter = _aud_price_formatter
     else:
         # 원화(KRW) 형식으로 가격을 포맷합니다.
         money_formatter = format_kr_money
-
-        def price_formatter(p):
-            return f"{int(round(p)):,}"
-
-        def ma_formatter(p):
-            return f"{int(round(p)):,}원"
+        price_formatter = _kr_price_formatter
+        ma_formatter = _kr_ma_formatter
 
     # 기간 설정 로직 (필수 설정)
     try:
