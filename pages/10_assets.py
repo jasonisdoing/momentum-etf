@@ -37,6 +37,14 @@ from utils.db_manager import (
     save_trade,
     update_trade_by_id,
 )
+from utils.transaction_manager import (
+    delete_transaction_by_id,
+    get_all_transactions,
+    restore_transaction_by_id,
+    save_transaction,
+    update_transaction_by_id,
+)
+
 
 COUNTRY_CODE_MAP = {"kor": "한국", "aus": "호주", "coin": "가상화폐"}
 
@@ -95,6 +103,136 @@ def _account_prefix(country_code: str, account_code: Optional[str]) -> str:
     return f"{country_code}_{account_code or 'default'}"
 
 
+def render_transaction_tab(
+    country_code: str,
+    account_code: str,
+    account_prefix: str,
+    transaction_type: str,
+    currency: str,
+    precision: int,
+):
+    """현금인출 또는 자본추가 탭의 UI를 렌더링합니다."""
+    is_injection = transaction_type == "capital_injection"
+    title = "자본추가" if is_injection else "현금인출"
+    currency_str = f" ({currency})"
+
+    all_txs = get_all_transactions(
+        country_code, account_code, transaction_type, include_deleted=True
+    )
+
+    if not all_txs:
+        st.info(f"{title} 내역이 없습니다.")
+    else:
+        df_txs = pd.DataFrame(all_txs)
+        df_txs["선택"] = False
+        df_txs["삭제"] = df_txs["is_deleted"].apply(lambda x: "삭제" if x else "")
+
+        cols_to_show = ["선택", "date", "amount", "note", "updated_at", "삭제", "id"]
+        df_display = df_txs.reindex(columns=cols_to_show).copy()
+
+        df_display["date"] = pd.to_datetime(df_display["date"], errors="coerce").dt.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        df_display["updated_at"] = pd.to_datetime(
+            df_display["updated_at"], errors="coerce"
+        ).dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        edited_df = st.data_editor(
+            df_display,
+            key=f"{transaction_type}_editor_{account_prefix}",
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "선택": st.column_config.CheckboxColumn("선택", required=True),
+                "id": None,
+                "date": st.column_config.TextColumn("일시", disabled=True),
+                "updated_at": st.column_config.TextColumn("수정일시", disabled=True),
+                "삭제": st.column_config.TextColumn("삭제", disabled=True),
+                "amount": st.column_config.NumberColumn(
+                    "금액", format=f"%.{precision}f" if precision > 0 else "%d"
+                ),
+                "note": st.column_config.TextColumn("비고", width="large"),
+            },
+            disabled=["date", "updated_at", "삭제"],
+        )
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("선택 항목 수정 저장", key=f"update_{transaction_type}_btn_{account_prefix}"):
+                editor_state = st.session_state[f"{transaction_type}_editor_{account_prefix}"]
+                edited_rows = editor_state.get("edited_rows", {})
+                if not edited_rows:
+                    st.warning("수정된 내용이 없습니다.")
+                else:
+                    with st.spinner(f"{len(edited_rows)}개 내역을 수정하는 중..."):
+                        updated_count = 0
+                        for row_index, changes in edited_rows.items():
+                            tx_id = df_display.iloc[row_index]["id"]
+                            update_data = {
+                                k: v for k, v in changes.items() if k in ["amount", "note"]
+                            }
+                            if update_data and update_transaction_by_id(tx_id, update_data):
+                                updated_count += 1
+                        st.success(f"{updated_count}개 내역을 성공적으로 수정했습니다.")
+                        st.rerun()
+        with col2:
+            if st.button(
+                "선택 항목 삭제", key=f"delete_{transaction_type}_btn_{account_prefix}", type="primary"
+            ):
+                txs_to_delete = edited_df[edited_df["선택"]]
+                if not txs_to_delete.empty:
+                    with st.spinner(f"{len(txs_to_delete)}개 내역을 삭제하는 중..."):
+                        deleted_count = 0
+                        for tx_id in txs_to_delete["id"]:
+                            if delete_transaction_by_id(tx_id):
+                                deleted_count += 1
+                        st.success(f"{deleted_count}개 내역을 성공적으로 삭제했습니다.")
+                        st.rerun()
+                else:
+                    st.warning("삭제할 내역을 선택해주세요.")
+        with col3:
+            if st.button("선택 항목 복구", key=f"restore_{transaction_type}_btn_{account_prefix}"):
+                txs_to_restore = edited_df[edited_df["선택"]]
+                if not txs_to_restore.empty:
+                    with st.spinner(f"{len(txs_to_restore)}개 내역을 복구하는 중..."):
+                        restored_count = 0
+                        for tx_id in txs_to_restore["id"]:
+                            if restore_transaction_by_id(tx_id):
+                                restored_count += 1
+                        st.success(f"{restored_count}개 내역을 성공적으로 복구했습니다.")
+                        st.rerun()
+                else:
+                    st.warning("복구할 내역을 선택해주세요.")
+
+    with st.expander(f"신규 {title} 등록"):
+        with st.form(f"{transaction_type}_form_{account_prefix}", clear_on_submit=True):
+            tx_amount = st.number_input(
+                f"{title} 금액{currency_str}",
+                min_value=0.0,
+                format=f"%.{precision}f" if precision > 0 else "%d",
+            )
+            tx_note = st.text_input("비고")
+            tx_submitted = st.form_submit_button(f"{title} 내역 저장")
+
+            if tx_submitted:
+                if tx_amount > 0:
+                    tx_data = {
+                        "country": country_code,
+                        "account": account_code,
+                        "date": datetime.now(),
+                        "type": transaction_type,
+                        "amount": float(tx_amount),
+                        "note": tx_note,
+                    }
+                    if save_transaction(tx_data):
+                        st.success(f"{title} 내역이 성공적으로 저장되었습니다.")
+                    else:
+                        st.error("저장에 실패했습니다. 콘솔 로그를 확인해주세요.")
+                else:
+                    st.warning("금액을 올바르게 입력해주세요.")
+                st.rerun()
+
+
 def render_assets_dashboard(
     country_code: str,
     account_entry: Dict[str, Any],
@@ -121,7 +259,9 @@ def render_assets_dashboard(
 
     _display_feedback_messages(account_prefix)
 
-    sub_tab_equity_history, sub_tab_trades = st.tabs(["평가금액", "트레이드"])
+    sub_tab_equity_history, sub_tab_trades, sub_tab_withdrawal, sub_tab_injection = st.tabs(
+        ["평가금액", "트레이드", "현금인출", "자본추가"]
+    )
 
     with sub_tab_equity_history:
         initial_date = account_settings.get("initial_date") or (
@@ -518,6 +658,16 @@ def render_assets_dashboard(
                                 else:
                                     st.session_state[message_key] = ("error", "일부 거래 저장에 실패했습니다.")
                             st.rerun()
+
+    with sub_tab_withdrawal:
+        render_transaction_tab(
+            country_code, account_code, account_prefix, "cash_withdrawal", currency, precision
+        )
+
+    with sub_tab_injection:
+        render_transaction_tab(
+            country_code, account_code, account_prefix, "capital_injection", currency, precision
+        )
 
 
 def main():

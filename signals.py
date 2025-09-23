@@ -45,7 +45,11 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.stock_list_io import get_etfs
-from utils.account_registry import get_account_file_settings, get_common_file_settings
+from utils.account_registry import (
+    get_account_file_settings,
+    get_common_file_settings,
+    get_country_file_settings,
+)
 from utils.notify import send_log_to_slack
 
 try:
@@ -478,12 +482,17 @@ def calculate_benchmark_comparison(
     """
     from utils.account_registry import get_account_info
 
+    try:
+        from utils.transaction_manager import get_transactions_up_to_date
+    except (SystemExit, ImportError) as e:
+        return [{"name": "벤치마크", "error": f"모듈 로딩 실패: {e}"}]
+
     if not account:
         return None
 
     # 파일에서 초기 자본/날짜 설정을 로드합니다.
     try:
-        file_settings = get_account_file_settings(country, account)
+        file_settings = get_account_file_settings(account)
         initial_capital = float(file_settings["initial_capital"])
         initial_date = pd.to_datetime(file_settings["initial_date"])
     except SystemExit as e:
@@ -554,7 +563,21 @@ def calculate_benchmark_comparison(
         error_msg = f"초기 기준일({initial_date.strftime('%Y-%m-%d')})이 조회일({base_date.strftime('%Y-%m-%d')})보다 미래입니다."
         return [{"name": "벤치마크", "error": error_msg}]
 
-    portfolio_cum_ret_pct = ((equity_for_calc / initial_capital) - 1.0) * 100.0
+    # 자본 추가 및 현금 인출을 반영하여 누적 수익률을 계산합니다.
+    injections = get_transactions_up_to_date(country, account, base_date, "capital_injection")
+    withdrawals = get_transactions_up_to_date(country, account, base_date, "cash_withdrawal")
+
+    total_injections = sum(inj.get("amount", 0.0) for inj in injections)
+    total_withdrawals = sum(wd.get("amount", 0.0) for wd in withdrawals)
+
+    adjusted_capital_base = initial_capital + total_injections
+    adjusted_equity = equity_for_calc + total_withdrawals
+
+    portfolio_cum_ret_pct = (
+        ((adjusted_equity / adjusted_capital_base) - 1.0) * 100.0
+        if adjusted_capital_base > 0
+        else 0.0
+    )
 
     results = []
     for bm_info in benchmarks_to_compare:
@@ -1337,6 +1360,11 @@ def _build_header_line(
     """리포트의 헤더 라인을 생성합니다."""
     from utils.account_registry import get_account_info
 
+    try:
+        from utils.transaction_manager import get_transactions_up_to_date
+    except (SystemExit, ImportError) as e:
+        raise RuntimeError(f"transaction_manager 모듈 로딩 실패: {e}") from e
+
     account_info = get_account_info(account)
     currency = account_info.get("currency", "KRW")
     precision = account_info.get("precision", 0)
@@ -1373,8 +1401,8 @@ def _build_header_line(
         if (current_equity / total_holdings) > 10:
             equity_for_cum_calc = total_holdings  # 현금을 무시하고 보유금액만 사용
 
-    # 누적 수익률 및 TopN
-    initial_capital_local = (
+    # --- 누적 수익률 계산 (자본 추가/인출 반영) ---
+    initial_capital_from_file = (
         float(portfolio_settings.get("initial_capital", 0)) if portfolio_settings else 0.0
     )
     initial_date = (
@@ -1382,14 +1410,23 @@ def _build_header_line(
         if portfolio_settings and portfolio_settings.get("initial_date")
         else None
     )
+
+    injections = get_transactions_up_to_date(country, account, base_date, "capital_injection")
+    withdrawals = get_transactions_up_to_date(country, account, base_date, "cash_withdrawal")
+
+    total_injections = sum(inj.get("amount", 0.0) for inj in injections)
+    total_withdrawals = sum(wd.get("amount", 0.0) for wd in withdrawals)
+
+    adjusted_capital_base = initial_capital_from_file + total_injections
+    adjusted_equity = equity_for_cum_calc + total_withdrawals
+
     cum_ret_pct = (
-        ((equity_for_cum_calc / initial_capital_local) - 1.0) * 100.0
-        if initial_capital_local > 0
+        ((adjusted_equity / adjusted_capital_base) - 1.0) * 100.0
+        if adjusted_capital_base > 0
         else 0.0
     )
+    cum_profit_loss = adjusted_equity - adjusted_capital_base
     portfolio_topn = portfolio_settings.get("portfolio_topn", 0) if portfolio_settings else 0
-
-    cum_profit_loss = equity_for_cum_calc - initial_capital_local
 
     today_cal = pd.Timestamp.now().normalize()
 
@@ -1547,7 +1584,10 @@ def generate_signal_report(
 
     # 2. 설정을 파일에서 가져옵니다.
     try:
-        portfolio_settings = get_account_file_settings(country, account)
+        # 국가별 전략 파라미터와 계좌별 설정을 모두 로드하여 병합합니다.
+        account_settings = get_account_file_settings(account)
+        country_settings = get_country_file_settings(country)
+        portfolio_settings = {**account_settings, **country_settings}
     except SystemExit as e:
         print(str(e))
         return None
@@ -2897,6 +2937,13 @@ def send_summary_notification(
 ) -> None:
     """작업 완료 요약 슬랙 알림을 전송합니다."""
     from utils.db_manager import get_portfolio_snapshot
+
+    # transaction_manager는 선택적으로 임포트합니다. 실패해도 알림은 계속되어야 합니다.
+    try:
+        from utils.transaction_manager import get_transactions_up_to_date
+    except (SystemExit, ImportError):
+        get_transactions_up_to_date = None
+
     from utils.report import format_kr_money
 
     try:
@@ -2909,7 +2956,7 @@ def send_summary_notification(
 
         # Calculate cumulative return
         try:
-            file_settings = get_account_file_settings(country, account)
+            file_settings = get_account_file_settings(account)
             initial_capital = float(file_settings.get("initial_capital", 0))
         except SystemExit:
             initial_capital = 0.0  # 알림에서는 조용히 실패 처리
@@ -2926,9 +2973,27 @@ def send_summary_notification(
 
         money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
 
-        if initial_capital > 0:
-            cum_ret_pct = ((new_equity / initial_capital) - 1.0) * 100.0
-            cum_profit_loss = new_equity - initial_capital
+        if initial_capital > 0 and get_transactions_up_to_date:
+            # 자본 추가/인출 내역을 반영하여 누적 수익률 계산
+            injections = get_transactions_up_to_date(
+                country, account, report_date, "capital_injection"
+            )
+            withdrawals = get_transactions_up_to_date(
+                country, account, report_date, "cash_withdrawal"
+            )
+
+            total_injections = sum(inj.get("amount", 0.0) for inj in injections)
+            total_withdrawals = sum(wd.get("amount", 0.0) for wd in withdrawals)
+
+            adjusted_capital_base = initial_capital + total_injections
+            adjusted_equity = new_equity + total_withdrawals
+
+            cum_ret_pct = (
+                ((adjusted_equity / adjusted_capital_base) - 1.0) * 100.0
+                if adjusted_capital_base > 0
+                else 0.0
+            )
+            cum_profit_loss = adjusted_equity - adjusted_capital_base
             equity_summary = f"평가금액: {money_formatter(new_equity)}, 누적수익 {cum_ret_pct:+.2f}%({money_formatter(cum_profit_loss)})"
             message += f" | {equity_summary}"
 
