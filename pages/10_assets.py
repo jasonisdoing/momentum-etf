@@ -32,7 +32,6 @@ from utils.db_manager import (
     get_all_trades,
     get_available_snapshot_dates,
     get_portfolio_snapshot,
-    restore_trade_by_id,
     save_daily_equity,
     save_trade,
     update_trade_by_id,
@@ -40,7 +39,6 @@ from utils.db_manager import (
 from utils.transaction_manager import (
     delete_transaction_by_id,
     get_all_transactions,
-    restore_transaction_by_id,
     save_transaction,
     update_transaction_by_id,
 )
@@ -116,18 +114,15 @@ def render_transaction_tab(
     title = "자본추가" if is_injection else "현금인출"
     currency_str = f" ({currency})"
 
-    all_txs = get_all_transactions(
-        country_code, account_code, transaction_type, include_deleted=True
-    )
+    all_txs = get_all_transactions(country_code, account_code, transaction_type)
 
     if not all_txs:
         st.info(f"{title} 내역이 없습니다.")
     else:
         df_txs = pd.DataFrame(all_txs)
         df_txs["선택"] = False
-        df_txs["삭제"] = df_txs["is_deleted"].apply(lambda x: "삭제" if x else "")
 
-        cols_to_show = ["선택", "date", "amount", "note", "updated_at", "삭제", "id"]
+        cols_to_show = ["선택", "date", "amount", "note", "updated_at", "id"]
         df_display = df_txs.reindex(columns=cols_to_show).copy()
 
         df_display["date"] = pd.to_datetime(df_display["date"], errors="coerce").dt.strftime(
@@ -147,16 +142,15 @@ def render_transaction_tab(
                 "id": None,
                 "date": st.column_config.TextColumn("일시", disabled=True),
                 "updated_at": st.column_config.TextColumn("수정일시", disabled=True),
-                "삭제": st.column_config.TextColumn("삭제", disabled=True),
                 "amount": st.column_config.NumberColumn(
                     "금액", format=f"%.{precision}f" if precision > 0 else "%d"
                 ),
                 "note": st.column_config.TextColumn("비고", width="large"),
             },
-            disabled=["date", "updated_at", "삭제"],
+            disabled=["date", "updated_at"],
         )
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
             if st.button("선택 항목 수정 저장", key=f"update_{transaction_type}_btn_{account_prefix}"):
                 editor_state = st.session_state[f"{transaction_type}_editor_{account_prefix}"]
@@ -190,19 +184,6 @@ def render_transaction_tab(
                         st.rerun()
                 else:
                     st.warning("삭제할 내역을 선택해주세요.")
-        with col3:
-            if st.button("선택 항목 복구", key=f"restore_{transaction_type}_btn_{account_prefix}"):
-                txs_to_restore = edited_df[edited_df["선택"]]
-                if not txs_to_restore.empty:
-                    with st.spinner(f"{len(txs_to_restore)}개 내역을 복구하는 중..."):
-                        restored_count = 0
-                        for tx_id in txs_to_restore["id"]:
-                            if restore_transaction_by_id(tx_id):
-                                restored_count += 1
-                        st.success(f"{restored_count}개 내역을 성공적으로 복구했습니다.")
-                        st.rerun()
-                else:
-                    st.warning("복구할 내역을 선택해주세요.")
 
     with st.expander(f"신규 {title} 등록"):
         with st.form(f"{transaction_type}_form_{account_prefix}", clear_on_submit=True):
@@ -407,7 +388,7 @@ def render_assets_dashboard(
                             st.info("변경된 내용이 없어 저장하지 않았습니다.")
 
     with sub_tab_trades:
-        all_trades = get_all_trades(country_code, account_code, include_deleted=True)
+        all_trades = get_all_trades(country_code, account_code)
         if not all_trades:
             st.info("거래 내역이 없습니다.")
         else:
@@ -422,7 +403,6 @@ def render_assets_dashboard(
                     df_trades = df_trades[df_trades["ticker"].str.upper() == selected]
 
             df_trades["선택"] = False
-            df_trades["삭제"] = df_trades["is_deleted"].apply(lambda x: "삭제" if x else "")
 
             cols_to_show = [
                 "선택",
@@ -434,7 +414,6 @@ def render_assets_dashboard(
                 "price",
                 "note",
                 "updated_at",
-                "삭제",
                 "id",
             ]
             df_display = df_trades.reindex(columns=cols_to_show).copy()
@@ -461,7 +440,6 @@ def render_assets_dashboard(
                     "date": st.column_config.TextColumn("거래시간", disabled=True),
                     "updated_at": st.column_config.TextColumn("수정일시", disabled=True),
                     "action": st.column_config.TextColumn("종류", disabled=True),
-                    "삭제": st.column_config.TextColumn("삭제", disabled=True),
                     "ticker": st.column_config.TextColumn("티커", disabled=True),
                     "name": st.column_config.TextColumn("종목명", width="medium", disabled=True),
                     "shares": st.column_config.NumberColumn(
@@ -477,10 +455,10 @@ def render_assets_dashboard(
                     ),
                     "note": st.column_config.TextColumn("비고", width="large"),
                 },
-                disabled=["date", "action", "ticker", "name", "updated_at", "삭제"],
+                disabled=["date", "action", "ticker", "name", "updated_at"],
             )
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
                 if st.button("선택 항목 수정 저장", key=f"update_trade_btn_{account_prefix}"):
                     editor_state = st.session_state[f"trades_editor_{account_prefix}"]
@@ -514,19 +492,6 @@ def render_assets_dashboard(
                             st.rerun()
                     else:
                         st.warning("삭제할 거래를 선택해주세요.")
-            with col3:
-                if st.button("선택 항목 복구", key=f"restore_trade_btn_{account_prefix}"):
-                    trades_to_restore = edited_df[edited_df["선택"]]
-                    if not trades_to_restore.empty:
-                        with st.spinner(f"{len(trades_to_restore)}개 거래를 복구하는 중..."):
-                            restored_count = 0
-                            for trade_id in trades_to_restore["id"]:
-                                if restore_trade_by_id(trade_id):
-                                    restored_count += 1
-                            st.success(f"{restored_count}개 거래를 성공적으로 복구했습니다.")
-                            st.rerun()
-                    else:
-                        st.warning("복구할 거래를 선택해주세요.")
 
         if country_code != "coin":
             st.markdown("---")

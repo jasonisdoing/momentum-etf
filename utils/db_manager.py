@@ -152,18 +152,14 @@ def get_portfolio_snapshot(
             return None
     else:
         # daily_equities에서 가장 최근 날짜를 찾습니다.
-        latest_equity_query = _apply_account_filter(
-            {"country": country, "is_deleted": {"$ne": True}}, account
-        )
+        latest_equity_query = _apply_account_filter({"country": country}, account)
         latest_equity = db.daily_equities.find_one(latest_equity_query, sort=[("date", DESCENDING)])
         if latest_equity:
             target_date = latest_equity["date"]
 
     if not target_date:
         # 거래 내역은 있지만 평가금액이 없을 수도 있으므로, trades에서 날짜를 찾아봅니다.
-        latest_trade_query = _apply_account_filter(
-            {"country": country, "is_deleted": {"$ne": True}}, account
-        )
+        latest_trade_query = _apply_account_filter({"country": country}, account)
         latest_trade = db.trades.find_one(latest_trade_query, sort=[("date", DESCENDING)])
         if latest_trade:
             target_date = latest_trade["date"]
@@ -171,9 +167,7 @@ def get_portfolio_snapshot(
             return None  # 데이터가 전혀 없음
 
     # 2. 대상 날짜의 총 평가금액 조회
-    equity_query = _apply_account_filter(
-        {"country": country, "date": target_date, "is_deleted": {"$ne": True}}, account
-    )
+    equity_query = _apply_account_filter({"country": country, "date": target_date}, account)
     equity_data = db.daily_equities.find_one(equity_query)
 
     # 해당 날짜의 평가금액이 유효한지 확인합니다.
@@ -186,7 +180,6 @@ def get_portfolio_snapshot(
                 "country": country,
                 "date": {"$lt": target_date},
                 "total_equity": {"$gt": 0},
-                "is_deleted": {"$ne": True},
             },
             account,
         )
@@ -208,7 +201,7 @@ def get_portfolio_snapshot(
     # 모든 국가에 대해 동일하게 적용하여, 특정 날짜의 모든 거래를 포함하도록 합니다.
     upper_bound = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
     trades_query = _apply_account_filter(
-        {"country": country, "date": {"$lte": upper_bound}, "is_deleted": {"$ne": True}},
+        {"country": country, "date": {"$lte": upper_bound}},
         account,
     )
     trades_cursor = db.trades.find(trades_query).sort([("date", 1), ("_id", 1)])
@@ -273,12 +266,12 @@ def get_previous_portfolio_snapshot(
 
     # 'daily_equities'와 'trades'에서 as_of_date 이전의 날짜들을 찾습니다.
     equity_dates_query = _apply_account_filter(
-        {"country": country, "date": {"$lt": as_of_date}, "is_deleted": {"$ne": True}},
+        {"country": country, "date": {"$lt": as_of_date}},
         account,
     )
     equity_dates = db.daily_equities.distinct("date", equity_dates_query)
     trade_dates_query = _apply_account_filter(
-        {"country": country, "date": {"$lt": as_of_date}, "is_deleted": {"$ne": True}},
+        {"country": country, "date": {"$lt": as_of_date}},
         account,
     )
     trade_dates = db.trades.distinct("date", trade_dates_query)
@@ -313,8 +306,8 @@ def get_available_snapshot_dates(
     if as_of_date:
         query["date"] = {"$lte" if include_as_of_date else "$lt": as_of_date}
 
-    equity_query = _apply_account_filter({**query, "is_deleted": {"$ne": True}}, account)
-    trade_query = _apply_account_filter({**query, "is_deleted": {"$ne": True}}, account)
+    equity_query = _apply_account_filter(dict(query), account)
+    trade_query = _apply_account_filter(dict(query), account)
     signal_query = _apply_account_filter(dict(query), account)
 
     equity_dates = list(db.daily_equities.distinct("date", equity_query))
@@ -468,7 +461,7 @@ def get_all_daily_equities(
     return equities
 
 
-def get_all_trades(country: str, account: str, include_deleted: bool = False) -> List[Dict]:
+def get_all_trades(country: str, account: str) -> List[Dict]:
     """지정된 국가의 모든 거래 내역을 DB에서 가져옵니다.
 
     country 필드의 대소문자 불일치를 허용하기 위해 정규식(대소문자 무시)으로 조회합니다.
@@ -478,8 +471,6 @@ def get_all_trades(country: str, account: str, include_deleted: bool = False) ->
         return []
 
     query = {"country": {"$regex": f"^{country}$", "$options": "i"}}
-    if not include_deleted:
-        query["is_deleted"] = {"$ne": True}
     query = _apply_account_filter(query, account)
 
     # 최신 거래가 위로 오도록 날짜와 생성 순서(_id)로 정렬합니다.
@@ -504,7 +495,6 @@ def get_trades_on_date(country: str, account: str, target_date: datetime) -> Lis
     query = {
         "country": country,
         "date": {"$gte": start_of_day, "$lte": end_of_day},
-        "is_deleted": {"$ne": True},
     }
     query = _apply_account_filter(query, account)
     # 생성 순서대로 정렬
@@ -521,7 +511,6 @@ def save_trade(trade_data: Dict) -> bool:
         return False
 
     try:
-        trade_data["is_deleted"] = False
         trade_data["created_at"] = datetime.now()
         db.trades.insert_one(trade_data)
         print(f"성공: {trade_data['country'].upper()} 국가의 거래를 저장했습니다: {trade_data}")
@@ -539,15 +528,13 @@ def delete_trade_by_id(trade_id: str) -> bool:
 
     try:
         obj_id = ObjectId(trade_id)
-        result = db.trades.update_one(
-            {"_id": obj_id}, {"$set": {"is_deleted": True, "deleted_at": datetime.now()}}
-        )
-        if result.modified_count > 0:
+        result = db.trades.delete_one({"_id": obj_id})
+        if result.deleted_count > 0:
             print(f"성공: 거래 ID {trade_id} 를 삭제했습니다.")
             return True
         else:
             print(f"경고: 삭제할 거래 ID {trade_id} 를 찾지 못했습니다.")
-            return True  # 이미 삭제되었거나 없는 경우도 성공으로 간주
+            return False  # 삭제할 문서가 없으면 실패로 간주
     except Exception as e:
         print(f"오류: 거래 내역 삭제 중 오류 발생: {e}")
     return False
@@ -572,27 +559,6 @@ def update_trade_by_id(trade_id: str, update_data: Dict) -> bool:
             return False
     except Exception as e:
         print(f"오류: 거래 내역 업데이트 중 오류 발생: {e}")
-        return False
-
-
-def restore_trade_by_id(trade_id: str) -> bool:
-    """ID를 기준으로 soft-delete된 거래를 복구합니다."""
-    db = get_db_connection()
-    if db is None:
-        return False
-
-    try:
-        obj_id = ObjectId(trade_id)
-        result = db.trades.update_one(
-            {"_id": obj_id},
-            {
-                "$set": {"is_deleted": False, "updated_at": datetime.now()},
-                "$unset": {"deleted_at": ""},
-            },
-        )
-        return result.modified_count > 0
-    except Exception as e:
-        print(f"오류: 거래 내역 복구 중 오류 발생: {e}")
         return False
 
 
@@ -623,7 +589,6 @@ def save_daily_equity(
             "date": date_normalized,
             "total_equity": total_equity,
             "updated_at": datetime.now(),
-            "is_deleted": False,
         }
         set_data["account"] = account
         if international_shares is not None:
@@ -631,7 +596,7 @@ def save_daily_equity(
         if updated_by:
             set_data["updated_by"] = updated_by
 
-        update_operation = {"$set": set_data, "$unset": {"deleted_at": ""}}
+        update_operation = {"$set": set_data}
 
         db.daily_equities.update_one(query, update_operation, upsert=True)
         return True

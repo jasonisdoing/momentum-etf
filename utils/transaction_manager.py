@@ -26,7 +26,6 @@ def save_transaction(transaction_data: Dict[str, Any]) -> bool:
     try:
         collection = get_transactions_collection()
         transaction_data["updated_at"] = datetime.now()
-        transaction_data["is_deleted"] = False
         result = collection.insert_one(transaction_data)
         return result.acknowledged
     except Exception as e:
@@ -38,7 +37,6 @@ def get_all_transactions(
     country: str,
     account: str,
     transaction_type: Optional[str] = None,
-    include_deleted: bool = False,
 ) -> List[Dict[str, Any]]:
     """특정 계좌의 모든 거래(자본추가/현금인출) 내역을 조회합니다."""
     try:
@@ -46,8 +44,6 @@ def get_all_transactions(
         query = {"country": country, "account": account}
         if transaction_type:
             query["type"] = transaction_type
-        if not include_deleted:
-            query["is_deleted"] = {"$ne": True}
 
         transactions = []
         for t in collection.find(query).sort("date", DESCENDING):
@@ -70,7 +66,6 @@ def get_transactions_up_to_date(
             "account": account,
             "type": transaction_type,
             "date": {"$lte": base_date},
-            "is_deleted": {"$ne": True},
         }
         return list(collection.find(query))
     except Exception as e:
@@ -93,10 +88,11 @@ def update_transaction_by_id(transaction_id: str, update_data: Dict[str, Any]) -
 
 
 def delete_transaction_by_id(transaction_id: str) -> bool:
-    """ID로 거래(자본/인출)를 논리적으로 삭제합니다."""
-    return update_transaction_by_id(transaction_id, {"is_deleted": True})
-
-
-def restore_transaction_by_id(transaction_id: str) -> bool:
-    """ID로 거래(자본/인출)를 복구합니다."""
-    return update_transaction_by_id(transaction_id, {"is_deleted": False})
+    """ID로 거래(자본/인출)를 삭제합니다."""
+    try:
+        collection = get_transactions_collection()
+        result = collection.delete_one({"_id": ObjectId(transaction_id)})
+        return result.deleted_count > 0
+    except Exception as e:
+        logging.error(f"Failed to delete transaction {transaction_id}: {e}", exc_info=True)
+        return False
