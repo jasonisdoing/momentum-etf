@@ -1,36 +1,52 @@
 import os
 import sys
-import time
-import warnings
+
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# .env 파일이 있다면 로드합니다.
-load_dotenv()
+try:
+    import yfinance as yf
+except ImportError:
+    st.error("yfinance 라이브러리가 설치되지 않았습니다. `pip install yfinance`로 설치해주세요.")
+    yf = None
+    st.stop()
 
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-warnings.filterwarnings(
-    "ignore",
-    message=r"\['break_start', 'break_end'\] are discontinued",
-    category=UserWarning,
-    module=r"^pandas_market_calendars\.",
+from utils.account_registry import (
+    get_account_file_settings,
+    get_accounts_by_country,
+    load_accounts,
 )
+from utils.db_manager import get_portfolio_snapshot, get_previous_portfolio_snapshot
 
-# FIX: Add missing imports and remove unnecessary ones
-from utils.account_registry import load_accounts
-from signals import get_market_regime_status_string
-from utils.data_loader import get_trading_days
-from utils.db_manager import get_db_connection
+
+@st.cache_data(ttl=3600)  # 1시간 동안 환율 정보 캐시
+def get_aud_to_krw_rate():
+    """yfinance를 사용하여 AUD/KRW 환율을 조회합니다."""
+    if not yf:
+        return None
+    try:
+        ticker = yf.Ticker("AUDKRW=X")
+        # 가장 최근 가격을 가져오기 위해 2일간의 1분 단위 데이터 시도
+        data = ticker.history(period="2d", interval="1m")
+        if not data.empty:
+            return data["Close"].iloc[-1]
+        # 1m 데이터가 없으면 일 단위 데이터로 폴백
+        data = ticker.history(period="2d")
+        if not data.empty:
+            return data["Close"].iloc[-1]
+    except Exception as e:
+        print(f"AUD/KRW 환율 정보를 가져오는 데 실패했습니다: {e}")
+        return None
+    return None
 
 
 def main():
-    """MomentumETF 대시보드 메인 페이지를 렌더링합니다."""
-    st.set_page_config(page_title="MomentumETF", layout="wide")
-
+    """통합 자산 현황 대시보드를 렌더링합니다."""
+    st.set_page_config(page_title="통합 자산 현황", layout="wide")
+    st.title("📈 통합 자산 현황")
     st.markdown(
         """
         <style>
@@ -49,106 +65,168 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # --- 초기 로딩 단계별 시간 측정 (콘솔 출력) ---
-    print("\n[MAIN] 1/4: 데이터베이스 연결 확인 시작...")
-    start_time = time.time()
-    with st.spinner("데이터베이스 연결 확인 중..."):
-        if get_db_connection() is None:
-            st.error(
-                """
-            **데이터베이스 연결 실패**
+    with st.spinner("계좌 및 환율 정보 로딩 중..."):
+        load_accounts(force_reload=True)
+        all_accounts = []
+        for country_code in ["kor", "aus", "coin"]:
+            accounts = get_accounts_by_country(country_code)
+            if accounts:
+                for acc in accounts:
+                    if acc.get("is_active", True):
+                        all_accounts.append(acc)
 
-            MongoDB 데이터베이스에 연결할 수 없습니다. 다음 사항을 확인해주세요:
+        aud_krw_rate = get_aud_to_krw_rate()
 
-            1.  **환경 변수**: `MONGO_DB_CONNECTION_STRING` 환경 변수가 올바르게 설정되었는지 확인하세요.
-            2.  **IP 접근 목록**: 현재 서비스의 IP 주소가 MongoDB Atlas의 'IP Access List'에 추가되었는지 확인하세요.
-            3.  **클러스터 상태**: MongoDB Atlas 클러스터가 정상적으로 실행 중인지 확인하세요.
-            """
-            )
-            st.stop()  # DB 연결 실패 시 앱 실행 중단
-    duration = time.time() - start_time
-    print(f"[MAIN] 1/4: 데이터베이스 연결 확인 완료 ({duration:.2f}초)")
+    if not all_accounts:
+        st.info("활성화된 계좌가 없습니다. `country_mapping.json`에 계좌를 추가하고 `is_active: true`로 설정해주세요.")
+        st.stop()
 
-    print("[MAIN] 2/4: 거래일 캘린더 데이터 확인 시작...")
-    start_time = time.time()
-    with st.spinner("거래일 캘린더 데이터 확인 중..."):
-        try:
-            import pandas_market_calendars as mcal  # noqa: F401
-        except ImportError as e:
-            st.error(
-                "거래일 캘린더 라이브러리(pandas-market-calendars)를 불러올 수 없습니다.\n"
-                "다음 명령으로 설치 후 다시 시도하세요: pip install pandas-market-calendars\n"
-                f"상세: {e}"
-            )
-            st.stop()
+    account_summaries = []
+    total_initial_capital_krw = 0.0
+    total_current_equity_krw = 0.0
+
+    for account_info in all_accounts:
+        country = account_info["country"]
+        account = account_info["account"]
 
         try:
-            today = pd.Timestamp.now().normalize()
-            start = (today - pd.DateOffset(days=30)).strftime("%Y-%m-%d")
-            end = (today + pd.DateOffset(days=7)).strftime("%Y-%m-%d")
-            problems = []
-            for c in ("kor", "aus"):
-                days = get_trading_days(start, end, c)
-                if not days:
-                    problems.append(c)
-            if problems:
-                st.error(
-                    "거래일 캘린더를 조회하지 못했습니다: "
-                    + ", ".join({"kor": "한국", "aus": "호주"}[p] for p in problems)
-                    + "\nKOSPI/ASX 캘린더를 사용할 수 있는지 확인해주세요."
-                )
-                st.stop()
+            settings = get_account_file_settings(country, account)
+            initial_capital = float(settings.get("initial_capital", 0.0))
+
+            snapshot = get_portfolio_snapshot(country, account)
+            if not snapshot:
+                continue
+
+            current_equity = float(snapshot.get("total_equity", 0.0))
+            snapshot_date = pd.to_datetime(snapshot.get("date"))
+
+            prev_snapshot = get_previous_portfolio_snapshot(country, snapshot_date, account)
+            prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else 0.0
+
+            daily_return_pct = (
+                ((current_equity / prev_equity) - 1) * 100 if prev_equity > 0 else 0.0
+            )
+            cum_return_pct = (
+                ((current_equity / initial_capital) - 1) * 100 if initial_capital > 0 else 0.0
+            )
+
+            currency = account_info.get("currency", "KRW")
+            precision = account_info.get("precision", 0)
+
+            initial_capital_krw = initial_capital
+            current_equity_krw = current_equity
+
+            if currency == "AUD" and aud_krw_rate:
+                initial_capital_krw *= aud_krw_rate
+                current_equity_krw *= aud_krw_rate
+
+            total_initial_capital_krw += initial_capital_krw
+            total_current_equity_krw += current_equity_krw
+
+            account_summaries.append(
+                {
+                    "display_name": account_info["display_name"],
+                    "initial_capital": initial_capital,
+                    "current_equity": current_equity,
+                    "daily_return_pct": daily_return_pct,
+                    "cum_return_pct": cum_return_pct,
+                    "currency": currency,
+                    "precision": precision,
+                }
+            )
         except Exception as e:
-            st.error(f"거래일 캘린더 초기화 중 오류가 발생했습니다: {e}")
-            st.stop()
-    duration = time.time() - start_time
-    print(f"[MAIN] 2/4: 거래일 캘린더 데이터 확인 완료 ({duration:.2f}초)")
+            st.warning(f"'{account_info['display_name']}' 계좌 정보를 불러오는 중 오류 발생: {e}")
+            continue
 
-    # 제목과 시장 상태를 한 줄에 표시
-    col1, col2 = st.columns([2.5, 1.5])
-    with col1:
-        st.title("Momentum. ETF.")
-    with col2:
-        print("[MAIN] 3/4: 시장 레짐 상태 분석 시작...")
-        start_time = time.time()
-        with st.spinner("시장 레짐 상태 분석 중..."):
-            # 시장 상태는 한 번만 계산하여 10분간 캐시합니다.
-            @st.cache_data(ttl=600)
-            def _get_cached_market_status():
-                return get_market_regime_status_string()
-
-            market_status_str = _get_cached_market_status()
-        duration = time.time() - start_time
-        print(f"[MAIN] 3/4: 시장 레짐 상태 분석 완료 ({duration:.2f}초)")
-
-        if market_status_str:
-            st.markdown(
-                f'<div style="text-align: right; padding-top: 1.5rem; font-size: 1.1rem;">{market_status_str}</div>',
-                unsafe_allow_html=True,
-            )
-
-    print("[MAIN] 4/4: 계좌 정보 로딩 시작...")
-    start_time = time.time()
-    with st.spinner("계좌 정보 로딩 중..."):
-        # FIX: load_accounts is called to populate the registry if needed by other pages.
-        load_accounts(force_reload=False)
-    duration = time.time() - start_time
-    print(f"[MAIN] 4/4: 계좌 정보 로딩 완료 ({duration:.2f}초)")
-
-    # FIX: Remove old tab logic and provide guidance for the new multi-page structure.
-    st.markdown("---")
-    st.header("🚀 시작하기")
-    st.info(
-        """
-        왼쪽 사이드바 메뉴를 사용하여 각 기능 페이지로 이동할 수 있습니다.
-
-        - **assets**: 계좌별 자산(평가금액) 및 거래 내역을 관리합니다.
-        - **signal**: 날짜별 매매 신호를 확인합니다.
-        - **master_data**: 투자 유니버스에 포함된 종목을 조회합니다.
-        - **settings**: 앱의 공통 설정 및 계좌별 전략 파라미터를 관리합니다.
-        """
+    # --- 총 자산 요약 표시 ---
+    st.subheader("총 자산 요약 (KRW 환산)")
+    total_profit_loss_krw = total_current_equity_krw - total_initial_capital_krw
+    total_cum_return_pct = (
+        ((total_current_equity_krw / total_initial_capital_krw) - 1) * 100
+        if total_initial_capital_krw > 0
+        else 0.0
     )
-    st.success("모든 페이지가 준비되었습니다. 왼쪽 사이드바에서 원하시는 메뉴를 선택하세요.")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric(label="총 초기자본", value=f"{total_initial_capital_krw:,.0f} 원")
+    col2.metric(
+        label="총 평가금액",
+        value=f"{total_current_equity_krw:,.0f} 원",
+        delta=f"{total_profit_loss_krw:,.0f} 원",
+    )
+    col3.metric(label="총 누적수익률", value=f"{total_cum_return_pct:.2f}%")
+
+    if aud_krw_rate:
+        st.caption(f"적용 환율: 1 AUD = {aud_krw_rate:,.2f} KRW")
+    else:
+        st.warning("AUD/KRW 환율 조회에 실패하여, 총 자산 요약에 호주 계좌가 정확히 반영되지 않았을 수 있습니다.")
+
+    st.markdown("---")
+
+    # --- 계좌별 상세 현황 표시 ---
+    st.subheader("계좌별 상세 현황")
+
+    # Display header
+    header_cols = st.columns((2, 2.2, 2.2, 2.2, 1.5, 1.5))
+    header_cols[0].markdown("**계좌**")
+    header_cols[1].markdown(
+        "<div style='text-align: right;'><b>초기자본</b></div>", unsafe_allow_html=True
+    )
+    header_cols[2].markdown(
+        "<div style='text-align: right;'><b>평가금액</b></div>", unsafe_allow_html=True
+    )
+    header_cols[3].markdown(
+        "<div style='text-align: right;'><b>수익금</b></div>", unsafe_allow_html=True
+    )
+    header_cols[4].markdown(
+        "<div style='text-align: right;'><b>일간(%)</b></div>", unsafe_allow_html=True
+    )
+    header_cols[5].markdown(
+        "<div style='text-align: right;'><b>누적(%)</b></div>", unsafe_allow_html=True
+    )
+    st.markdown("""<hr style="margin:0.5rem 0;" />""", unsafe_allow_html=True)
+
+    for summary in sorted(account_summaries, key=lambda x: x["display_name"]):
+        currency_symbol = "$" if summary["currency"] == "AUD" else "원"
+        precision = summary["precision"]
+        profit_loss = summary["current_equity"] - summary["initial_capital"]
+
+        cols = st.columns((2, 2.2, 2.2, 2.2, 1.5, 1.5))
+        cols[0].write(summary["display_name"])
+
+        initial_capital_str = f"{summary['initial_capital']:,.{precision}f} {currency_symbol}"
+        cols[1].markdown(
+            f"<div style='text-align: right;'>{initial_capital_str}</div>", unsafe_allow_html=True
+        )
+
+        current_equity_str = f"{summary['current_equity']:,.{precision}f} {currency_symbol}"
+        cols[2].markdown(
+            f"<div style='text-align: right;'>{current_equity_str}</div>", unsafe_allow_html=True
+        )
+
+        profit_loss_color = "red" if profit_loss >= 0 else "blue"
+        profit_loss_sign = "+" if profit_loss > 0 else ""
+        profit_loss_str = f"{profit_loss_sign}{profit_loss:,.{precision}f} {currency_symbol}"
+        cols[3].markdown(
+            f"<div style='text-align: right; color: {profit_loss_color};'>{profit_loss_str}</div>",
+            unsafe_allow_html=True,
+        )
+
+        cum_return_pct = summary["cum_return_pct"]
+        daily_return_pct = summary["daily_return_pct"]
+        daily_ret_color = (
+            "red" if daily_return_pct > 0 else "blue" if daily_return_pct < 0 else "black"
+        )
+        cols[4].markdown(
+            f"<div style='text-align: right; color: {daily_ret_color};'>{daily_return_pct:+.2f}%</div>",
+            unsafe_allow_html=True,
+        )
+
+        cum_ret_color = "red" if cum_return_pct >= 0 else "blue"
+        cols[5].markdown(
+            f"<div style='text-align: right; color: {cum_ret_color};'>{cum_return_pct:+.2f}%</div>",
+            unsafe_allow_html=True,
+        )
 
 
 if __name__ == "__main__":
