@@ -1,8 +1,15 @@
 import os
 import sys
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+
+try:
+    import pytz
+except ImportError:
+    pytz = None
+
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -28,6 +35,16 @@ def main():
     """메인 대시보드를 렌더링합니다."""
     st.set_page_config(page_title="Main", page_icon="📈", layout="wide")
     st.title("📈 메인 대시보드")
+
+    date_str_for_snapshot = None
+    if pytz:
+        try:
+            # 모든 국가에 대해 한국 시간 기준으로 '오늘'을 결정
+            seoul_tz = pytz.timezone("Asia/Seoul")
+            now_seoul = datetime.now(seoul_tz)
+            date_str_for_snapshot = now_seoul.strftime("%Y-%m-%d")
+        except Exception:
+            pass  # fallback to None
 
     status_html = get_market_regime_status_string()
     if status_html:
@@ -81,7 +98,7 @@ def main():
             # For all accounts, initial_capital is in KRW.
             initial_capital_krw = float(settings.get("initial_capital", 0.0))
 
-            snapshot = get_portfolio_snapshot(country, account)
+            snapshot = get_portfolio_snapshot(country, account, date_str=date_str_for_snapshot)
             if not snapshot:
                 continue
 

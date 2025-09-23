@@ -345,11 +345,12 @@ def render_signal_dashboard(
     today_str = pd.Timestamp(today_ts.date()).strftime("%Y-%m-%d")
     target_date_str = _get_status_target_date_str(country_code)
 
-    date_options = [
-        d
-        for d in [target_date_str] + sorted_dates
-        if d and d not in locals().get("date_options", [])
-    ]
+    date_options = []
+    if target_date_str:
+        date_options.append(target_date_str)
+    for d in sorted_dates:
+        if d and d not in date_options:
+            date_options.append(d)
 
     if country_code != "coin" and date_options:
         trading_day_set = {

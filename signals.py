@@ -1577,6 +1577,11 @@ def generate_signal_report(
     """지정된 전략에 대한 오늘의 매매 신호를 생성하여 리포트로 반환합니다."""
     logger = get_signal_logger()
 
+    from utils.account_registry import get_account_info
+
+    account_info = get_account_info(account)
+    need_signal = account_info.get("need_signal", True) if account_info else True
+
     # 1. 대상 날짜 결정
     if date_str:
         try:
@@ -2338,6 +2343,24 @@ def generate_signal_report(
                                 best_new["row"][-1] = f"{weakest_held['tkr']}(을)를 대체 (가격정보 없음)"
                         else:
                             break
+
+    # --- need_signal=False 처리 ---
+    if not need_signal:
+        for decision in decisions:
+            state = decision["state"]
+            is_recommendation = DECISION_CONFIG.get(state, {}).get("is_recommendation", False)
+
+            if is_recommendation:
+                tkr = decision["tkr"]
+                holding_info = holdings.get(tkr, {})
+                sh = float(holding_info.get("shares", 0.0))
+                is_effectively_held = (sh > COIN_ZERO_THRESHOLD) if country == "coin" else (sh > 0)
+
+                new_state = "HOLD" if is_effectively_held else "WAIT"
+                decision["state"] = new_state
+                decision["row"][2] = new_state
+                decision["row"][-1] = "시그널 생성 제외"
+
     # 최종 정리: 아직 'WAIT' 상태인 종목들의 사유를 명확히 합니다.
     for cand in decisions:
         if cand["state"] == "WAIT":
