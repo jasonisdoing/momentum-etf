@@ -410,10 +410,9 @@ def save_signal_report_to_db(
     account: str,
     date: datetime,
     report_data: Tuple[str, List[str], List[List[str]]],
+    summary_data: Optional[Dict] = None,
 ) -> bool:
-    """
-    계산된 시그널 리포트를 DB에 저장합니다.
-    """
+    """계산된 시그널 리포트를 DB에 저장합니다."""
     db = get_db_connection()
     if db is None:
         return False
@@ -428,6 +427,9 @@ def save_signal_report_to_db(
         }
         if account:
             doc_to_save["account"] = account
+
+        if summary_data:
+            doc_to_save["summary"] = summary_data
 
         query = _apply_account_filter({"country": country, "date": date}, account)
         # upsert=True 이므로, 문서가 존재하면 업데이트하고, 없으면 새로 생성합니다.

@@ -16,6 +16,7 @@
         ],
         "currency": "KRW",
         "precision": 0,
+        "need_signal": true,
         "is_active": true
     },
     {
@@ -35,6 +36,7 @@
         ],
         "currency": "KRW",
         "precision": 0,
+        "need_signal": true,
         "is_active": true
     },
     {
@@ -54,6 +56,7 @@
         ],
         "currency": "KRW",
         "precision": 0,
+        "need_signal": true,
         "is_active": true
     },
     {
@@ -69,6 +72,7 @@
         ],
         "currency": "AUD",
         "precision": 2,
+        "need_signal": true,
         "is_active": true
     },
     {
@@ -92,6 +96,7 @@
         ],
         "currency": "KRW",
         "precision": 0,
+        "need_signal": true,
         "is_active": true
     },
     {
@@ -111,6 +116,7 @@
         ],
         "currency": "KRW",
         "precision": 0,
+        "need_signal": false,
         "is_active": true
     },
     {
@@ -130,6 +136,7 @@
         ],
         "currency": "KRW",
         "precision": 0,
+        "need_signal": false,
         "is_active": true
     },
     {
@@ -149,6 +156,7 @@
         ],
         "currency": "KRW",
         "precision": 0,
+        "need_signal": false,
         "is_active": true
     },
     {
@@ -168,6 +176,7 @@
         ],
         "currency": "KRW",
         "precision": 0,
+        "need_signal": false,
         "is_active": true
     }
 ]

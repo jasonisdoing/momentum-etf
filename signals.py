@@ -1507,7 +1507,19 @@ def _build_header_line(
             # 오류 발생 시 거래일차 정보는 추가하지 않습니다.
             pass
 
-    return header_body, label_date, day_label
+    summary_data = {
+        "total_equity": current_equity,
+        "total_holdings_value": total_holdings,
+        "total_cash": total_cash,
+        "daily_profit_loss": day_profit_loss,
+        "daily_return_pct": day_ret_pct,
+        "eval_profit_loss": eval_profit_loss,
+        "eval_return_pct": eval_ret_pct,
+        "cum_profit_loss": cum_profit_loss,
+        "cum_return_pct": cum_ret_pct,
+    }
+
+    return header_body, label_date, day_label, summary_data
 
 
 def _get_calculation_message_lines(num_tickers: int, warnings: List[str]):
@@ -1809,7 +1821,7 @@ def generate_signal_report(
     # 3. 헤더 생성
     total_holdings_value += international_shares_value
 
-    header_line, label_date, day_label = _build_header_line(
+    header_line, label_date, day_label, summary_data = _build_header_line(
         country,
         account,
         portfolio_data,
@@ -2197,12 +2209,10 @@ def generate_signal_report(
                                     if held_category == category:
                                         conflicting_ticker = held_tkr
                                         break
-                            cand["row"][
-                                -1
-                            ] = f"카테고리 중복 ({conflicting_ticker} 보유) ({cand['row'][-1]})"
+                            cand["row"][-1] = f"카테고리 중복 ({conflicting_ticker} 보유)"
                             continue
                         if category in recommended_buy_categories:
-                            cand["row"][-1] = f"카테고리 중복 (추천) ({cand['row'][-1]})"
+                            cand["row"][-1] = "카테고리 중복 (추천)"
                             continue
                         recommended_buy_categories.add(category)
                     final_buy_candidates.append(cand)
@@ -2210,7 +2220,7 @@ def generate_signal_report(
                 available_cash, buys_made = total_cash, 0
                 for cand in final_buy_candidates:
                     if buys_made >= slots_to_fill:
-                        cand["row"][-1] = f"포트폴리오 가득 참 ({cand['row'][-1]})"
+                        cand["row"][-1] = "포트폴리오 가득 참"
                         continue
                     d, price = data_by_tkr.get(cand["tkr"]), 0
                     if d:
@@ -2234,11 +2244,11 @@ def generate_signal_report(
                         if req_qty > 0 and buy_notional <= available_cash + 1e-9:
                             cand["state"], cand["row"][2] = "BUY", "BUY"
                             buy_phrase = f"🚀 매수 {format_shares(req_qty)}주 @ {price_formatter(price)} ({money_formatter(buy_notional)})"
-                            cand["row"][-1] = f"{buy_phrase} ({cand['row'][-1]})"
+                            cand["row"][-1] = buy_phrase
                             available_cash -= buy_notional
                             buys_made += 1
                         else:
-                            cand["row"][-1] = f"현금 부족 ({cand['row'][-1]})"
+                            cand["row"][-1] = "현금 부족"
                     else:
                         cand["row"][-1] = f"가격 정보 없음 ({cand['row'][-1]})"
             else:
@@ -2261,6 +2271,34 @@ def generate_signal_report(
                         best_new, weakest_held = buy_candidates[k], held_stocks[k]
                         if best_new["state"] != "WAIT" or weakest_held["state"] != "HOLD":
                             continue
+
+                        # 교체 매매 시 카테고리 중복 방지
+                        replacement_category = etf_meta.get(best_new["tkr"], {}).get("category")
+                        if replacement_category and replacement_category != "TBD":
+                            weakest_held_category = etf_meta.get(weakest_held["tkr"], {}).get(
+                                "category"
+                            )
+
+                            # 교체 대상의 카테고리와 같으면 허용. 다를 경우에만 중복 검사.
+                            if (
+                                replacement_category != weakest_held_category
+                                and replacement_category in held_categories
+                            ):
+                                # 중복 발생. 이 교체는 건너뜀.
+                                conflicting_ticker = next(
+                                    (
+                                        ht
+                                        for ht in held_tickers
+                                        if ht != weakest_held["tkr"]
+                                        and etf_meta.get(ht, {}).get("category")
+                                        == replacement_category
+                                    ),
+                                    "???",
+                                )
+                                original_phrase = best_new["row"][-1]
+                                best_new["row"][-1] = f"카테고리 중복 ({conflicting_ticker} 보유)"
+                                continue  # 다음 교체 후보 쌍으로 넘어감
+
                         if (
                             pd.notna(best_new["score"])
                             and pd.notna(weakest_held["score"])
@@ -2304,8 +2342,12 @@ def generate_signal_report(
     for cand in decisions:
         if cand["state"] == "WAIT":
             # 이미 '현금 부족' 또는 '카테고리 중복' 등의 구체적인 사유가 설정된 경우는 덮어쓰지 않습니다.
-            if "추세진입" in cand["row"][-1]:
-                cand["row"][-1] = "포트폴리오 가득 참 (교체대상 아님)" + f" ({cand['row'][-1]})"
+            if (
+                "추세진입" in cand["row"][-1]
+                and "카테고리 중복" not in cand["row"][-1]
+                and "현금 부족" not in cand["row"][-1]
+            ):
+                cand["row"][-1] = "포트폴리오 가득 참"
     # 7. 완료된 거래 표시
     # 기준일에 발생한 거래를 가져와서, 추천에 따라 실행되었는지 확인하는 데 사용합니다.
     # 표시 기준일 기준으로 '완료' 거래를 표시합니다. 다음 거래일이면 거래가 없을 확률이 높음
@@ -2471,7 +2513,7 @@ def generate_signal_report(
         state_counts,
     )
 
-    return (header_line, headers, rows_sorted, base_date, slack_message_lines)
+    return (header_line, headers, rows_sorted, base_date, slack_message_lines, summary_data)
 
 
 def main(
@@ -2486,7 +2528,14 @@ def main(
     result = generate_signal_report(country, account, date_str)
 
     if result:
-        header_line, headers, rows_sorted, report_base_date, slack_message_lines = result
+        (
+            header_line,
+            headers,
+            rows_sorted,
+            report_base_date,
+            slack_message_lines,
+            summary_data,
+        ) = result
         # 가능하다면 웹 앱 히스토리에서 사용할 수 있도록 현황 보고서를 저장합니다.
         try:
             # 반환된 base_date는 보고서의 실제 기준일이므로 그대로 저장에 사용합니다.
@@ -2495,6 +2544,7 @@ def main(
                 account,
                 report_base_date.to_pydatetime(),
                 (header_line, headers, rows_sorted),
+                summary_data,
             )
         except Exception:
             pass
