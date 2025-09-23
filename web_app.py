@@ -14,6 +14,7 @@ except ImportError:
     yf = None
     st.stop()
 
+from signals import get_market_regime_status_string
 from utils.account_registry import (
     get_account_file_settings,
     get_accounts_by_country,
@@ -47,6 +48,12 @@ def main():
     """통합 자산 현황 대시보드를 렌더링합니다."""
     st.set_page_config(page_title="통합 자산 현황", layout="wide")
     st.title("📈 통합 자산 현황")
+
+    status_html = get_market_regime_status_string()
+    if status_html:
+        # 페이지 우측 상단에 시장 상태를 표시합니다.
+        st.markdown(f'<div style="text-align: right;">{status_html}</div>', unsafe_allow_html=True)
+
     st.markdown(
         """
         <style>
