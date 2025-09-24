@@ -54,42 +54,33 @@ def _get_local_now(country_code: str) -> Optional[datetime]:
 
 
 def _get_status_target_date_str(country_code: str) -> str:
+    """
+    시그널 화면에 기본으로 표시될 날짜를 결정합니다.
+    한국 시간(KST) 자정을 기준으로 '오늘' 또는 '다음 거래일'을 반환합니다.
+    """
     if country_code == "coin":
         return pd.Timestamp.now().normalize().strftime("%Y-%m-%d")
 
-    now_local = _get_local_now(country_code)
-    if not now_local:
+    if not pytz:
         return pd.Timestamp.now().normalize().strftime("%Y-%m-%d")
 
-    local_today = now_local.date()
-    today_str = pd.Timestamp(local_today).strftime("%Y-%m-%d")
-
-    close_time_dt = datetime.strptime(MARKET_DISPLAY_SETTINGS[country_code]["close"], "%H:%M")
-    close_time_with_buffer = (close_time_dt + pd.Timedelta(minutes=30)).time()
-    lookahead_end = pd.Timestamp(local_today) + pd.Timedelta(days=14)
-
     try:
-        upcoming_days = get_trading_days(
-            today_str, lookahead_end.strftime("%Y-%m-%d"), country_code
-        )
+        kst_tz = pytz.timezone("Asia/Seoul")
+        now_kst = datetime.now(kst_tz)
     except Exception:
-        upcoming_days = []
+        now_kst = datetime.now()
 
-    if not upcoming_days:
-        return today_str
+    today_kst = pd.Timestamp(now_kst).normalize()
 
-    is_trading_today = any(d.date() == local_today for d in upcoming_days)
-    if is_trading_today and now_local.time() < close_time_with_buffer:
-        return today_str
+    # 자정이 지났거나 오늘이 휴장일이면 다음 거래일을 찾습니다.
+    if now_kst.date() > today_kst.date() or not get_trading_days(
+        today_kst.strftime("%Y-%m-%d"), today_kst.strftime("%Y-%m-%d"), country_code
+    ):
+        target_date = get_next_trading_day(country_code, today_kst)
+    else:
+        target_date = today_kst
 
-    next_day = next((d for d in upcoming_days if d.date() > local_today), None)
-    if not next_day:
-        fallback = get_next_trading_day(
-            country_code, pd.Timestamp(local_today) + pd.Timedelta(days=1)
-        )
-        return pd.Timestamp(fallback).strftime("%Y-%m-%d")
-
-    return pd.Timestamp(next_day).strftime("%Y-%m-%d")
+    return target_date.strftime("%Y-%m-%d")
 
 
 def _ensure_header_has_date(header: str, date: datetime) -> str:

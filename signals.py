@@ -580,49 +580,38 @@ def _determine_target_date_for_scheduler(country: str) -> pd.Timestamp:
             # pytz가 없는 경우, 시스템 시간에 의존
             return pd.Timestamp.now().normalize()
 
-    # 각 시장의 현지 시간과 장 마감 시간을 기준으로 대상 날짜를 결정합니다.
-    market_settings = {
-        "kor": {"tz": "Asia/Seoul", "close": "15:30"},
-        "aus": {"tz": "Australia/Sydney", "close": "16:00"},
-    }
-    settings = market_settings.get(country)
-    if not settings or not pytz:
-        # 설정이 없거나 pytz가 없으면 오늘 날짜로 폴백
+    # 한국, 호주 시장 모두 한국 시간(KST)을 기준으로 날짜를 결정합니다.
+    if not pytz:
+        # pytz가 없으면 시스템 시간 기준으로 오늘 날짜로 폴백
         return pd.Timestamp.now().normalize()
 
     try:
-        local_tz = pytz.timezone(settings["tz"])
-        now_local = datetime.now(local_tz)
+        kst_tz = pytz.timezone("Asia/Seoul")
+        now_kst = datetime.now(kst_tz)
     except Exception:
-        now_local = datetime.now()  # 폴백
+        # 타임존 조회 실패 시 시스템 시간으로 폴백
+        now_kst = datetime.now()
 
-    today = pd.Timestamp(now_local).normalize()
+    # KST 기준 '오늘' 날짜
+    today_kst = pd.Timestamp(now_kst).normalize()
 
-    # 오늘이 거래일인지 확인
-    try:
-        today_str = today.strftime("%Y-%m-%d")
-        is_trading_today = bool(get_trading_days(today_str, today_str, country))
-    except Exception:
-        is_trading_today = now_local.weekday() < 5  # 폴백
-
-    if is_trading_today:
-        close_time = datetime.strptime(settings["close"], "%H:%M").time()
-        close_datetime_naive = datetime.combine(today.date(), close_time)
-        # Naive datetime을 localize 해야 시간대 계산이 정확함
-        close_datetime_local = local_tz.localize(close_datetime_naive)
-        # 데이터 지연을 고려하여 30분 버퍼를 추가합니다.
-        cutoff_datetime_local = close_datetime_local + pd.Timedelta(minutes=30)
-
-        if now_local < cutoff_datetime_local:
-            # 컷오프 이전: 오늘 날짜를 대상으로 함
-            target_date = today
-        else:
-            # 컷오프 이후: 다음 거래일을 대상으로 함
-            start_search_date = today + pd.Timedelta(days=1)
-            target_date = get_next_trading_day(country, start_search_date)
+    # 자정(00:00)을 기준으로 날짜를 전환합니다.
+    # 현재 시간이 자정을 넘었으면, 다음 거래일을 계산 대상으로 합니다.
+    # 이 로직은 DEVELOPMENT_RULES.md 6.1 규칙을 따릅니다.
+    # (거래일 개장시간 이후 자정까지는 그날의 시그널, 자정 이후는 다음 거래일)
+    # now_kst.date()는 KST 기준 현재 날짜, today_kst.date()는 KST 기준 오늘 날짜의 시작(00:00)
+    # 이 둘을 비교하여 자정이 지났는지 확인합니다.
+    if now_kst.date() > today_kst.date():
+        # 자정이 지났으므로, 다음 거래일을 찾습니다.
+        target_date = get_next_trading_day(country, today_kst)
     else:
-        # 오늘이 거래일이 아님 (주말/공휴일): 다음 거래일을 대상으로 함
-        target_date = get_next_trading_day(country, today)
+        # 자정 이전: 오늘이 거래일인지 확인합니다.
+        if _is_trading_day(country, today_kst.to_pydatetime()):
+            target_date = today_kst
+        else:
+            # 오늘이 휴장일이면 다음 거래일을 찾습니다.
+            target_date = get_next_trading_day(country, today_kst)
+
     return target_date
 
 
