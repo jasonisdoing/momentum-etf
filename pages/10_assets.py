@@ -345,10 +345,16 @@ def render_assets_dashboard(
                     "해외주식 수익률(%)", format="%.2f", help="수익률(%)만 입력합니다. 예: 5.5"
                 )
 
+            # 컬럼 순서 정의: 'updated_at'을 가장 오른쪽으로 이동
+            columns_to_display = ["date", "total_equity", "updated_by"]
+            if country_code == "aus":
+                columns_to_display.extend(["is_value", "is_change_pct"])
+            columns_to_display.append("updated_at")
+
             st.info("총 평가금액을 수정한 후 아래 '저장하기' 버튼을 눌러주세요.")
 
             edited_df = st.data_editor(
-                df_to_edit,
+                df_to_edit[columns_to_display],
                 key=f"equity_editor_{account_prefix}",
                 width="stretch",
                 hide_index=True,

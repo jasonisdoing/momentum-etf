@@ -1069,6 +1069,8 @@ def generate_daily_signals_for_portfolio(
 
         num_to_sell_for_rebalance = (held_count - num_already_selling) - denom
 
+        slots_to_fill = denom - held_count
+
         if num_to_sell_for_rebalance > 0:
             rebalance_sell_candidates = [d for d in decisions if d["state"] == "HOLD"]
             rebalance_sell_candidates.sort(
@@ -1096,7 +1098,6 @@ def generate_daily_signals_for_portfolio(
                         sell_phrase = f"리밸런스 매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
                         decision["row"][-1] = sell_phrase
         else:
-            slots_to_fill = denom - held_count
             if slots_to_fill > 0:
                 best_wait_by_category = {}
                 for cand in wait_candidates_raw:
