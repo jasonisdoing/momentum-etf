@@ -352,6 +352,7 @@ def _calculate_single_benchmark(
                     start=initial_date.strftime("%Y-%m-%d"),
                     end=(base_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
                     auto_adjust=True,
+                    progress=False,
                 )
                 df_benchmark = _normalize_yfinance_df(df_y)
             except Exception:

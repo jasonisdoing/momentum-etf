@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -25,7 +24,7 @@ from utils.account_registry import (
     load_accounts,
     get_account_info,
 )
-from utils.data_loader import fetch_yfinance_name, get_trading_days
+from utils.data_loader import fetch_yfinance_name
 from utils.db_manager import (
     delete_trade_by_id,
     get_all_daily_equities,
@@ -284,12 +283,7 @@ def render_assets_dashboard(
 
         with st.spinner("거래일 및 평가금액 데이터를 불러오는 중..."):
             if prefetched_trading_days is not None:
-                start_dt = pd.to_datetime(start_date_str).normalize()
-                end_dt = pd.to_datetime(end_date_str).normalize()
-                all_trading_days = [d for d in prefetched_trading_days if start_dt <= d <= end_dt]
-            else:
-                all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
-
+                all_trading_days = prefetched_trading_days
             trading_day_set = set()
             if not all_trading_days:
                 if country_code == "kor":
@@ -718,9 +712,6 @@ def main():
     """,
         unsafe_allow_html=True,
     )
-
-    print("[MAIN] 계좌 정보 로딩 시작...")
-    start_time = time.time()
     with st.spinner("계좌 정보 로딩 중..."):
         load_accounts(force_reload=False)
         account_map = {
@@ -728,8 +719,6 @@ def main():
             "aus": get_accounts_by_country("aus"),
             "coin": get_accounts_by_country("coin"),
         }
-    duration = time.time() - start_time
-    print(f"[MAIN] 계좌 정보 로딩 완료 ({duration:.2f}초)")
 
     tab_kor, tab_aus, tab_coin = st.tabs(["한국", "호주", "코인"])
 

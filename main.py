@@ -63,7 +63,7 @@ def main():
     )
 
     with st.spinner("계좌 정보 로딩 중..."):
-        load_accounts(force_reload=True)
+        load_accounts(force_reload=False)
         all_accounts = []
         for country_code in ["kor", "aus", "coin"]:
             accounts = get_accounts_by_country(country_code)

@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -477,8 +476,6 @@ def main():
         unsafe_allow_html=True,
     )
 
-    print("[MAIN] 계좌 정보 로딩 시작...")
-    start_time = time.time()
     with st.spinner("계좌 정보 로딩 중..."):
         load_accounts(force_reload=False)
         account_map = {
@@ -486,8 +483,6 @@ def main():
             "aus": get_accounts_by_country("aus"),
             "coin": get_accounts_by_country("coin"),
         }
-    duration = time.time() - start_time
-    print(f"[MAIN] 계좌 정보 로딩 완료 ({duration:.2f}초)")
 
     tab_kor, tab_aus, tab_coin = st.tabs(["한국", "호주", "코인"])
 
