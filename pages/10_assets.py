@@ -107,7 +107,8 @@ def render_transaction_tab(
     account_prefix: str,
     transaction_type: str,
     currency: str,
-    precision: int,
+    amt_precision: int,
+    qty_precision: int,
 ):
     """현금인출 또는 자본추가 탭의 UI를 렌더링합니다."""
     is_injection = transaction_type == "capital_injection"
@@ -143,7 +144,7 @@ def render_transaction_tab(
                 "date": st.column_config.TextColumn("일시", disabled=True),
                 "updated_at": st.column_config.TextColumn("수정일시", disabled=True),
                 "amount": st.column_config.NumberColumn(
-                    "금액", format=f"%.{precision}f" if precision > 0 else "%d"
+                    "금액", format=f"%.{amt_precision}f" if amt_precision > 0 else "%d"
                 ),
                 "note": st.column_config.TextColumn("비고", width="large"),
             },
@@ -191,11 +192,11 @@ def render_transaction_tab(
                 "날짜", value="today", key=f"tx_date_{account_prefix}_{transaction_type}"
             )
 
-            # Determine min_value and step for amount based on precision
+            # Determine min_value and step for amount based on amt_precision
             amount_min_value = 0.0
             amount_step = 1.0  # Default step for floats
 
-            if precision == 0:
+            if amt_precision == 0:
                 amount_min_value = 0
                 amount_step = 1
 
@@ -203,7 +204,7 @@ def render_transaction_tab(
                 f"{title} 금액{currency_str}",
                 min_value=amount_min_value,
                 step=amount_step,
-                format=f"%.{precision}f" if precision > 0 else "%d",
+                format=f"%.{amt_precision}f" if amt_precision > 0 else "%d",
             )
             tx_note = st.text_input("비고")
             tx_submitted = st.form_submit_button(f"{title} 내역 저장")
@@ -251,7 +252,8 @@ def render_assets_dashboard(
         st.stop()
 
     currency = account_info.get("currency", "KRW")
-    precision = account_info.get("precision", 0)
+    amt_precision = account_info.get("amt_precision", 0)
+    qty_precision = account_info.get("qty_precision", 0)
     currency_str = f" ({currency})"
 
     _display_feedback_messages(account_prefix)
@@ -327,7 +329,7 @@ def render_assets_dashboard(
                 "date": st.column_config.DateColumn("일자", format="YYYY-MM-DD", disabled=True),
                 "total_equity": st.column_config.NumberColumn(
                     f"총 평가금액{currency_str}",
-                    format=f"%.{precision}f" if precision > 0 else "%d",
+                    format=f"%.{amt_precision}f" if amt_precision > 0 else "%d",
                     required=True,
                 ),
                 "updated_at": st.column_config.DatetimeColumn(
@@ -337,7 +339,7 @@ def render_assets_dashboard(
             }
             if country_code == "aus":
                 column_config["is_value"] = st.column_config.NumberColumn(
-                    f"해외주식 평가액{currency_str}", format=f"%.{precision}f"
+                    f"해외주식 평가액{currency_str}", format=f"%.{amt_precision}f"
                 )
                 column_config["is_change_pct"] = st.column_config.NumberColumn(
                     "해외주식 수익률(%)", format="%.2f", help="수익률(%)만 입력합니다. 예: 5.5"
@@ -451,7 +453,7 @@ def render_assets_dashboard(
                         ),
                     ),
                     "price": st.column_config.NumberColumn(
-                        "가격", format=f"%.{precision}f" if precision > 0 else "%d"
+                        "가격", format=f"%.{amt_precision}f" if amt_precision > 0 else "%d"
                     ),
                     "note": st.column_config.TextColumn("비고", width="large"),
                 },
@@ -526,7 +528,7 @@ def render_assets_dashboard(
                     price_min_value = 0.0
                     price_step = 1.0  # Default step for floats
 
-                    if precision == 0:
+                    if amt_precision == 0:
                         price_min_value = 0  # or 1 if price cannot be 0
                         price_step = 1
 
@@ -534,7 +536,7 @@ def render_assets_dashboard(
                         f"매수 단가{currency_str}",
                         min_value=price_min_value,
                         step=price_step,
-                        format=f"%.{precision}f" if precision > 0 else "%d",
+                        format=f"%.{amt_precision}f" if amt_precision > 0 else "%d",
                     )
                     buy_submitted = st.form_submit_button("매수 거래 저장")
 
@@ -668,12 +670,24 @@ def render_assets_dashboard(
 
     with sub_tab_withdrawal:
         render_transaction_tab(
-            country_code, account_code, account_prefix, "cash_withdrawal", currency, precision
+            country_code,
+            account_code,
+            account_prefix,
+            "cash_withdrawal",
+            currency,
+            amt_precision,
+            qty_precision,
         )
 
     with sub_tab_injection:
         render_transaction_tab(
-            country_code, account_code, account_prefix, "capital_injection", currency, precision
+            country_code,
+            account_code,
+            account_prefix,
+            "capital_injection",
+            currency,
+            amt_precision,
+            qty_precision,
         )
 
 

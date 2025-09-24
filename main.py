@@ -155,7 +155,8 @@ def main():
                     "daily_return_pct": daily_return_pct,
                     "cum_return_pct": cum_return_pct,
                     "currency": "KRW",  # Always display in KRW
-                    "precision": 0,  # Always display as integer KRW
+                    "amt_precision": 0,  # Always display as integer KRW
+                    "qty_precision": 0,
                     "order": account_info.get("order", 99),
                 }
             )
@@ -218,7 +219,7 @@ def main():
 
     for summary in sorted(account_summaries, key=lambda x: x.get("order", 99)):
         currency_symbol = "원"  # All summaries are now in KRW
-        precision = summary["precision"]
+        amt_precision = summary["amt_precision"]
         profit_loss = summary["current_equity"] - summary["initial_capital"]
 
         cols = st.columns((2, 2.2, 2.2, 2.2, 1.5, 1.5))
@@ -229,11 +230,15 @@ def main():
             current_equity_str = f"****** {currency_symbol}"
             profit_loss_str = f"****** {currency_symbol}"
         else:
-            initial_capital_str = f"{summary['initial_capital']:,.{precision}f} {currency_symbol}"
-            current_equity_str = f"{summary['current_equity']:,.{precision}f} {currency_symbol}"
+            initial_capital_str = (
+                f"{summary['initial_capital']:,.{amt_precision}f} {currency_symbol}"
+            )
+            current_equity_str = f"{summary['current_equity']:,.{amt_precision}f} {currency_symbol}"
             profit_loss_color = "red" if profit_loss >= 0 else "blue"
             profit_loss_sign = "+" if profit_loss > 0 else ""
-            profit_loss_str = f"{profit_loss_sign}{profit_loss:,.{precision}f} {currency_symbol}"
+            profit_loss_str = (
+                f"{profit_loss_sign}{profit_loss:,.{amt_precision}f} {currency_symbol}"
+            )
 
         cols[1].markdown(
             f"<div style='text-align: right;'>{initial_capital_str}</div>", unsafe_allow_html=True
