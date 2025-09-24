@@ -652,6 +652,24 @@ def fetch_ohlcv_for_tickers(
     return prefetched_data
 
 
+def fetch_bithumb_realtime_price(symbol: str) -> Optional[float]:
+    symbol = (symbol or "").upper()
+    if not symbol or symbol in {"KRW", "P"}:
+        return 1.0
+    url = f"https://api.bithumb.com/public/ticker/{symbol}_KRW"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, dict) and data.get("status") == "0000":
+            closing_price = data.get("data", {}).get("closing_price")
+            if closing_price is not None:
+                return float(str(closing_price).replace(",", ""))
+    except Exception:
+        return None
+    return None
+
+
 def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
     """
     네이버 금융 웹 스크레이핑을 통해 종목의 실시간 현재가를 조회합니다.

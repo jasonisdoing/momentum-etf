@@ -42,27 +42,6 @@
         "is_active": true
     },
     {
-        "country": "kor",
-        "account": "m3",
-        "display_name": "매리츠3",
-        "order": 3,
-        "benchmarks_tickers": [
-            {
-                "ticker": "379800",
-                "name": "KODEX 미국S&P500"
-            },
-            {
-                "ticker": "426030",
-                "name": "TIMEFOLIO 미국나스닥100액티브"
-            }
-        ],
-        "currency": "KRW",
-        "amt_precision": 0,
-        "qty_precision": 0,
-        "need_signal": true,
-        "is_active": true
-    },
-    {
         "country": "aus",
         "account": "a1",
         "order": 10,

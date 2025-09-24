@@ -8,8 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
-import requests
-
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -52,6 +50,18 @@ from utils.account_registry import (
 )
 from utils.notify import send_log_to_slack
 
+
+def format_shares(quantity, country: str):
+    if not isinstance(quantity, (int, float)):
+        return str(quantity)
+    if country == "coin":
+        return f"{quantity:,.8f}".rstrip("0").rstrip(".")
+    return f"{quantity:,.0f}"
+
+
+# 전략 모듈 임포트
+from logic.jason import generate_daily_signals_for_portfolio, DECISION_CONFIG, COIN_ZERO_THRESHOLD
+
 try:
     from pykrx import stock as _stock
 except ImportError:
@@ -61,106 +71,6 @@ try:
     import yfinance as yf
 except ImportError:
     yf = None
-
-# 슬랙 알림에 사용될 매매 결정(decision) 코드별 표시 설정을 관리합니다.
-# - display_name: 슬랙 메시지에 표시될 그룹 헤더
-# - order: 그룹 표시 순서 (낮을수록 위)
-# - is_recommendation: True이면 @channel 알림을 유발하는 '추천'으로 간주
-# - show_slack: True이면 슬랙 알림에 해당 그룹을 포함
-DECISION_CONFIG = {
-    # 보유  (알림 없음)
-    "HOLD": {
-        "display_name": "<💼 보유>",
-        "order": 1,
-        "is_recommendation": False,
-        "show_slack": True,
-    },
-    # 매도 추천 (알림 발생)
-    "CUT_STOPLOSS": {
-        "display_name": "<🚨 손절매도>",
-        "order": 10,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
-    "SELL_TREND": {
-        "display_name": "<📉 추세이탈 매도>",
-        "order": 11,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
-    "SELL_REPLACE": {
-        "display_name": "<🔄 교체매도>",
-        "order": 12,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
-    "SELL_REBALANCE": {
-        "display_name": "<⚖️ 리밸런스 매도>",
-        "order": 13,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
-    "SELL_INACTIVE": {
-        "display_name": "<🗑️ 비활성 매도>",
-        "order": 14,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
-    "SELL_REGIME_FILTER": {
-        "display_name": "<🛡️ 시장위험회피 매도>",
-        "order": 15,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
-    # 매수 추천 (알림 발생)
-    "BUY_REPLACE": {
-        "display_name": "<🔄 교체매수>",
-        "order": 20,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
-    "BUY": {
-        "display_name": "<🚀 신규매수>",
-        "order": 21,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
-    # 거래 완료 (알림 없음)
-    "SOLD": {
-        "display_name": "<✅ 매도 완료>",
-        "order": 40,
-        "is_recommendation": False,
-        "show_slack": True,
-    },
-    # 보유 및 대기 (알림 없음)
-    "WAIT": {
-        "display_name": "<⏳ 대기>",
-        "order": 50,
-        "is_recommendation": False,
-        "show_slack": False,
-    },
-}
-
-# 코인 보유 수량에서 0으로 간주할 임계값 (거래소의 dust 처리)
-COIN_ZERO_THRESHOLD = 1e-9
-
-
-def _fetch_bithumb_realtime_price(symbol: str) -> Optional[float]:
-    symbol = (symbol or "").upper()
-    if not symbol or symbol in {"KRW", "P"}:
-        return 1.0
-    url = f"https://api.bithumb.com/public/ticker/{symbol}_KRW"
-    try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        if isinstance(data, dict) and data.get("status") == "0000":
-            closing_price = data.get("data", {}).get("closing_price")
-            if closing_price is not None:
-                return float(str(closing_price).replace(",", ""))
-    except Exception:
-        return None
-    return None
 
 
 _SIGNAL_LOGGER = None
@@ -1026,7 +936,7 @@ def _fetch_and_prepare_data(
                     "name": trade.get("name", ""),
                     "category": "",
                 }
-            # holdings에 없는 경우 추가 (shares=0으로)
+            # holdings에 없는 경우, 매도된 종목 정보를 추가합니다.
             if trade["ticker"] not in holdings:
                 holdings[trade["ticker"]] = {
                     "name": trade.get("name", ""),
@@ -1106,11 +1016,12 @@ def _fetch_and_prepare_data(
 
         def _fetch_realtime_price(tkr_local: str) -> Optional[float]:
             from utils.data_loader import fetch_naver_realtime_price
+            from utils.data_loader import fetch_bithumb_realtime_price
 
             if country == "kor":
                 return fetch_naver_realtime_price(tkr_local)
             if country == "coin":
-                return _fetch_bithumb_realtime_price(tkr_local)
+                return fetch_bithumb_realtime_price(tkr_local)
             return None
 
         for tkr, _ in pairs:
@@ -1285,10 +1196,9 @@ def _fetch_and_prepare_data(
         date_for_prev_close = today_cal if base_date.date() > today_cal.date() else base_date
         prev_close = _resolve_previous_close(result["close"], date_for_prev_close)
 
+        ma_score = 0.0
         if pd.notna(m) and m > 0:
-            ma_score = (c0 / m) - 1.0
-        else:
-            ma_score = 0.0
+            ma_score = round(((c0 / m) - 1.0) * 100, 1)
         buy_signal_days_today = (
             result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0
         )
@@ -1878,12 +1788,6 @@ def generate_signal_report(
                 except Exception:
                     pass
 
-    try:
-        denom = int(portfolio_settings["portfolio_topn"])
-    except (ValueError, TypeError):
-        print("오류: DB의 portfolio_topn 값이 올바르지 않습니다.")
-        return None
-
     # 공통 설정에서 손절 퍼센트 로드
     try:
         common = get_common_file_settings()
@@ -1894,459 +1798,37 @@ def generate_signal_report(
         print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
         return None
 
-    if denom <= 0:
-        print(f"오류: '{country}' 국가의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
-        return None
-    # 포지션 비중 가이드라인: 모든 국가 동일 규칙 적용
-    min_pos = 1.0 / (denom * 2.0)  # 최소 편입 비중
-    max_pos = 1.0 / denom  # 목표/최대 비중 # noqa: F841
-
-    if country == "coin":
-        held_count = sum(
-            1
-            for v in holdings.values()
-            if float((v or {}).get("shares") or 0.0) > COIN_ZERO_THRESHOLD
-        )
-    else:
-        held_count = sum(1 for v in holdings.values() if float((v or {}).get("shares") or 0.0) > 0)
-
     total_cash = float(current_equity) - float(total_holdings_value)
 
-    # 5. 초기 매매 결정 생성
-    decisions = []
+    # 5. 전략 모듈을 사용하여 매매 결정 생성
+    # 공통 설정에서 손절 퍼센트 로드
+    try:
+        common = get_common_file_settings()
+        stop_loss_raw = float(common["HOLDING_STOP_LOSS_PCT"])
+        # 양수 입력이 들어오더라도 손절 임계값은 음수로 해석합니다 (예: 10 -> -10).
+        stop_loss = -abs(stop_loss_raw)
+    except (SystemExit, KeyError, ValueError, TypeError) as e:
+        print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
+        return None
 
-    from utils.account_registry import get_account_info
-
-    account_info = get_account_info(account)
-    currency = account_info.get("currency", "KRW")
-    precision = account_info.get("precision", 0)
-
-    def _format_kr_price(p):
-        return f"{int(round(p)):,}"
-
-    def _aud_money_formatter(amount):
-        return f"${amount:,.{precision}f}"
-
-    def _aud_price_formatter(p):
-        return f"${p:,.{precision}f}"
-
-    # 국가별 포맷터 설정
-    if currency == "AUD":
-        money_formatter = _aud_money_formatter
-        price_formatter = _aud_price_formatter
-    else:  # kor
-        money_formatter = format_kr_money
-        price_formatter = _format_kr_price
-
-    def format_shares(quantity):
-        if country == "coin":
-            # 코인: 소수점 8자리까지 표시 (불필요한 0 제거)
-            return f"{quantity:,.8f}".rstrip("0").rstrip(".")
-        if country == "aus":
-            # 호주: 소수점 4자리까지 표시 (불필요한 0 제거)
-            return f"{quantity:,.4f}".rstrip("0").rstrip(".")
-        return f"{int(quantity):,d}"
-
-    for tkr, name in pairs:
-        d = data_by_tkr.get(tkr)
-
-        # 보유 정보는 `holdings` 딕셔너리에서 직접 가져옵니다.
-        holding_info = holdings.get(tkr, {})
-        sh = float(holding_info.get("shares", 0.0))
-        ac = float(holding_info.get("avg_cost", 0.0))
-
-        # 코인의 경우, 아주 작은 잔량(dust)은 보유하지 않은 것으로 간주합니다.
-        is_effectively_held = (sh > COIN_ZERO_THRESHOLD) if country == "coin" else (sh > 0)
-
-        # 데이터가 없고, 실질적으로 보유하지도 않은 종목은 건너뜁니다.
-        if not d and not is_effectively_held:
-            continue
-
-        # 데이터가 없는 보유 종목을 위한 기본값 설정
-        if not d:
-            d = {
-                "price": 0.0,
-                "prev_close": 0.0,
-                "s1": float("nan"),
-                "s2": float("nan"),
-                "score": 0.0,
-                "filter": 0,
-            }
-
-        price = d.get("price", 0.0)
-        score = d.get("score", 0.0)
-
-        # 자동 계산된 보유종목의 매수일과 보유일
-        buy_signal = False
-        state = "HOLD" if is_effectively_held else "WAIT"
-        phrase = ""
-        is_active = full_etf_meta.get(tkr, {}).get("is_active", True)
-        if price == 0.0 and is_effectively_held:
-            phrase = "가격 데이터 조회 실패"
-
-        # 이 루프의 모든 경로에서 사용되므로, 여기서 초기화합니다.
-        buy_date = None
-        holding_days = 0
-        hold_ret = None
-
-        consecutive_info = consecutive_holding_info.get(tkr)
-        buy_date = consecutive_info.get("buy_date") if consecutive_info else None
-
-        if buy_date:
-            # label_date는 naive timestamp이므로, buy_date도 naive로 만듭니다.
-            if hasattr(buy_date, "tzinfo") and buy_date.tzinfo is not None:
-                buy_date = buy_date.tz_localize(None)
-            buy_date = pd.to_datetime(buy_date).normalize()
-
-        if is_effectively_held and buy_date and buy_date <= label_date:
-            try:
-                # 거래일 기준으로 보유일수 계산 (캐시된 함수 사용)
-                trading_days_in_period = get_trading_days(
-                    buy_date.strftime("%Y-%m-%d"),
-                    label_date.strftime("%Y-%m-%d"),
-                    country,
-                )
-                holding_days = len(trading_days_in_period)
-            except Exception as e:
-                print(f"경고: 보유일 계산 중 오류 발생 ({tkr}): {e}. 달력일 기준으로 대체합니다.")
-                # 거래일 계산 실패 시, 달력일 기준으로 계산
-                holding_days = (label_date - buy_date).days + 1
-
-        qty = 0
-        # 현재 보유 포지션의 손익률을 계산합니다.
-        hold_ret = (
-            ((price / ac) - 1.0) * 100.0
-            if (is_effectively_held and ac > 0 and pd.notna(price))
-            else None
-        )
-        if is_effectively_held:
-            if (
-                stop_loss is not None
-                and ac > 0
-                and hold_ret is not None
-                and hold_ret <= float(stop_loss)
-            ):
-                state = "CUT_STOPLOSS"
-                qty = sh
-                prof = (price - ac) * qty if ac > 0 else 0.0
-                phrase = f"가격기반손절 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
-            elif not is_active:
-                state = "SELL_INACTIVE"
-                qty = sh
-                prof = (price - ac) * qty if ac > 0 else 0.0
-                phrase = f"비활성 종목 정리 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
-
-        # --- 전략별 매수/매도 로직 ---
-        if state == "HOLD":  # 아직 매도 결정이 내려지지 않은 경우
-            price, ma, _ = d["price"], d["s1"], d["s2"]
-            if not pd.isna(price) and not pd.isna(ma) and price < ma:
-                state = "SELL_TREND"  # 결정 코드 # noqa: F841
-                qty = sh
-                prof = (price - ac) * qty if ac > 0 else 0.0
-                tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"  # noqa: F841
-                phrase = f"{tag} {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
-
-        elif state == "WAIT":  # 아직 보유하지 않은 경우
-            price, ma, _ = d["price"], d["s1"], d["s2"]
-            buy_signal_days_today = d["filter"]
-            if buy_signal_days_today > 0:
-                buy_signal = True
-                phrase = f"추세진입 ({buy_signal_days_today}일째)"
-
-        amount = sh * price if pd.notna(price) else 0.0
-        # 일간 수익률 계산
-        # '다음 거래일' 리포트에서는 일간 수익률을 0으로 표시합니다.
-        is_next_day_report = base_date.date() > pd.Timestamp.now().normalize().date()
-        prev_close = d.get("prev_close")
-        day_ret = 0.0
-        if not is_next_day_report:
-            day_ret = (
-                ((price / prev_close) - 1.0) * 100.0
-                if prev_close is not None and prev_close > 0 and pd.notna(price)
-                else 0.0
-            )
-
-        buy_date_display = buy_date.strftime("%Y-%m-%d") if buy_date else "-"
-        holding_days_display = str(holding_days) if holding_days > 0 else "-"
-
-        position_weight_pct = (amount / current_equity) * 100.0 if current_equity > 0 else 0.0
-
-        current_row = [
-            0,
-            tkr,
-            state,
-            buy_date_display,
-            holding_days_display,
-            price,
-            day_ret,
-            sh,
-            amount,
-            hold_ret if hold_ret is not None else 0.0,
-            position_weight_pct,
-            (
-                f"{d.get('drawdown_from_peak'):.1f}%"
-                if d.get("drawdown_from_peak") is not None
-                else "-"
-            ),  # 고점대비
-            d.get("score"),  # raw score 값으로 변경
-            f"{d['filter']}일" if d.get("filter") is not None else "-",
-            phrase,
-        ]
-        decisions.append(
-            {
-                "state": state,
-                "weight": position_weight_pct,
-                "score": score,
-                "tkr": tkr,
-                "row": current_row,
-                "buy_signal": buy_signal,
-            }
-        )
-
-    # 매수/교체매수 후보는 반드시 '종목 마스터(data/stocks/{country}.json)'에 포함된 종목으로 제한합니다.
-    # 이는 사용자가 유니버스에서 제외한 종목(예: 당일 매도 후 목록에서 제거)이
-    # 다시 매수 후보로 추천되는 것을 방지합니다.
-    from utils.stock_list_io import get_etfs
-
-    universe_tickers = {etf["ticker"] for etf in get_etfs(country)}
-
-    # 6. 시장 레짐 필터 및 매매 로직 적용
-    is_risk_off = result.regime_info and result.regime_info.get("is_risk_off", False)
-
-    if is_risk_off:
-        # 리스크 오프: 모든 보유 종목을 매도하고, 매수 신호를 무시합니다.
-        for decision in decisions:
-            # 1. 보유 종목 매도 (이미 다른 이유로 매도 결정된 것은 제외)
-            if decision["state"] == "HOLD":
-                decision["state"] = "SELL_REGIME_FILTER"
-                decision["row"][2] = "SELL_REGIME_FILTER"
-
-                # 매도 문구 생성
-                d_sell = data_by_tkr.get(decision["tkr"])
-                if d_sell:
-                    sell_price = float(d_sell.get("price", 0))
-                    sell_qty = float(d_sell.get("shares", 0))
-                    avg_cost = float(d_sell.get("avg_cost", 0))
-
-                    hold_ret = 0.0
-                    prof = 0.0
-                    if avg_cost > 0 and sell_price > 0:
-                        hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
-                        prof = (sell_price - avg_cost) * sell_qty
-
-                    sell_phrase = f"시장위험회피 매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
-                    decision["row"][-1] = sell_phrase
-
-            # 2. 매수 신호 무시
-            if decision.get("buy_signal"):
-                decision["buy_signal"] = False
-                if decision["state"] == "WAIT":
-                    original_phrase = decision["row"][-1]
-                    if original_phrase and "추세진입" in original_phrase:
-                        decision["row"][-1] = f"시장 위험 회피 ({original_phrase})"
-                    else:
-                        decision["row"][-1] = "시장 위험 회피"
-    else:
-        # 리스크 온: 기존 리밸런싱, 신규매수, 교체매매 로직 적용
-        # 교체 매매 관련 설정 로드 (임계값은 DB 설정 우선)
-        try:
-            replace_weaker_stock = bool(portfolio_settings["replace_weaker_stock"])
-            replace_threshold = float(portfolio_settings["replace_threshold"])
-        except (KeyError, ValueError, TypeError) as e:
-            print(f"오류: '{country}' 국가의 교체 매매 설정값이 올바르지 않습니다: {e}")
-            return None
-
-        # 리밸런싱 매도 결정 전, 다른 이유로 이미 매도 결정된 종목 수를 파악합니다.
-        other_sell_states = {"CUT_STOPLOSS", "SELL_TREND", "SELL_INACTIVE"}
-        num_already_selling = sum(1 for d in decisions if d["state"] in other_sell_states)
-
-        # 목표 보유 수(denom)를 맞추기 위해 추가로 매도해야 할 종목 수를 계산합니다.
-        num_to_sell_for_rebalance = (held_count - num_already_selling) - denom
-
-        if num_to_sell_for_rebalance > 0:
-            # Case 1: 포트폴리오가 목표보다 크므로, 가장 약한 종목을 매도하여 축소
-            rebalance_sell_candidates = [d for d in decisions if d["state"] == "HOLD"]
-            rebalance_sell_candidates.sort(
-                key=lambda x: x.get("score") if pd.notna(x.get("score")) else -float("inf")
-            )
-            tickers_to_sell = [
-                d["tkr"] for d in rebalance_sell_candidates[:num_to_sell_for_rebalance]
-            ]
-
-            for decision in decisions:
-                if decision["tkr"] in tickers_to_sell:
-                    decision["state"] = "SELL_REBALANCE"
-                    decision["row"][2] = "SELL_REBALANCE"
-                    d_sell = data_by_tkr.get(decision["tkr"])
-                    if d_sell:
-                        sell_price = float(d_sell.get("price", 0))
-                        sell_qty = float(d_sell.get("shares", 0))
-                        avg_cost = float(d_sell.get("avg_cost", 0))
-                        hold_ret = (
-                            ((sell_price / avg_cost) - 1.0) * 100.0
-                            if avg_cost > 0 and sell_price > 0
-                            else 0.0
-                        )
-                        prof = (sell_price - avg_cost) * sell_qty if avg_cost > 0 else 0.0
-                        sell_phrase = f"리밸런스 매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
-                        decision["row"][-1] = sell_phrase
-        else:
-            # Case 2: 포트폴리오 크기가 정상이거나 작음 (신규매수 또는 교체매매)
-            slots_to_fill = denom - held_count
-            if slots_to_fill > 0:
-                # 2a: 빈 슬롯이 있으므로 신규 매수
-                # ... (The rest of the logic for new buys and replacement buys)
-                buy_candidates_raw = sorted(
-                    [a for a in decisions if a.get("buy_signal") and a["tkr"] in universe_tickers],
-                    key=lambda x: x["score"],
-                    reverse=True,
-                )
-                final_buy_candidates, recommended_buy_categories = [], set()
-                for cand in buy_candidates_raw:
-                    category = etf_meta.get(cand["tkr"], {}).get("category")
-                    if category and category != "TBD":
-                        if category in held_categories:
-                            # Find which held ticker has this category
-                            conflicting_ticker = "???"
-                            for held_tkr, held_data in holdings.items():
-                                if float(held_data.get("shares", 0.0)) > 0:
-                                    held_category = etf_meta.get(held_tkr, {}).get("category")
-                                    if held_category == category:
-                                        conflicting_ticker = held_tkr
-                                        break
-                            cand["row"][
-                                -1
-                            ] = f"카테고리 중복 - {etf_meta.get(conflicting_ticker, {}).get('name', conflicting_ticker)}({conflicting_ticker})"
-                            continue
-                        if category in recommended_buy_categories:
-                            cand["row"][-1] = "카테고리 중복 (추천)"
-                            continue
-                        recommended_buy_categories.add(category)
-                    final_buy_candidates.append(cand)
-
-                available_cash, buys_made = total_cash, 0
-                for cand in final_buy_candidates:
-                    if buys_made >= slots_to_fill:
-                        cand["row"][-1] = "포트폴리오 가득 참"
-                        continue
-                    d, price = data_by_tkr.get(cand["tkr"]), 0
-                    if d:
-                        price = d.get("price", 0)
-                    if price > 0:
-                        _, min_val, max_val = (
-                            current_equity,
-                            min_pos * current_equity,
-                            max_pos * current_equity,
-                        )
-                        budget = min(max_val, available_cash)
-                        req_qty, buy_notional = 0, 0.0
-                        if budget >= min_val and budget > 0:
-                            if country in ("coin", "aus"):
-                                req_qty, buy_notional = budget / price, budget
-                            else:
-                                req_qty = int(budget // price)
-                                buy_notional = req_qty * price
-                                if req_qty <= 0 or buy_notional + 1e-9 < min_val:
-                                    req_qty, buy_notional = 0, 0.0
-                        if req_qty > 0 and buy_notional <= available_cash + 1e-9:
-                            cand["state"], cand["row"][2] = "BUY", "BUY"
-                            buy_phrase = f"🚀 매수 {format_shares(req_qty)}주 @ {price_formatter(price)} ({money_formatter(buy_notional)})"
-                            cand["row"][-1] = buy_phrase
-                            available_cash -= buy_notional
-                            buys_made += 1
-                        else:
-                            cand["row"][-1] = "현금 부족"
-                    else:
-                        cand["row"][-1] = f"가격 정보 없음 ({cand['row'][-1]})"
-            else:
-                # 2b: 포트폴리오가 가득 찼으므로 교체 매매 고려
-                if replace_weaker_stock:
-                    buy_candidates = sorted(
-                        [
-                            a
-                            for a in decisions
-                            if a.get("buy_signal") and a["tkr"] in universe_tickers
-                        ],
-                        key=lambda x: x["score"],
-                        reverse=True,
-                    )
-                    held_stocks = sorted(
-                        [a for a in decisions if a["state"] == "HOLD"],
-                        key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"),
-                    )
-                    for k in range(min(len(buy_candidates), len(held_stocks))):
-                        best_new, weakest_held = buy_candidates[k], held_stocks[k]
-                        if best_new["state"] != "WAIT" or weakest_held["state"] != "HOLD":
-                            continue
-
-                        # 교체 매매 시 카테고리 중복 방지
-                        replacement_category = etf_meta.get(best_new["tkr"], {}).get("category")
-                        if replacement_category and replacement_category != "TBD":
-                            weakest_held_category = etf_meta.get(weakest_held["tkr"], {}).get(
-                                "category"
-                            )
-
-                            # 교체 대상의 카테고리와 같으면 허용. 다를 경우에만 중복 검사.
-                            if (
-                                replacement_category != weakest_held_category
-                                and replacement_category in held_categories
-                            ):
-                                # 중복 발생. 이 교체는 건너뜀.
-                                conflicting_ticker = next(
-                                    (
-                                        ht
-                                        for ht in held_tickers
-                                        if ht != weakest_held["tkr"]
-                                        and etf_meta.get(ht, {}).get("category")
-                                        == replacement_category
-                                    ),
-                                    "???",
-                                )
-                                original_phrase = best_new["row"][-1]
-                                best_new["row"][
-                                    -1
-                                ] = f"카테고리 중복 - {etf_meta.get(conflicting_ticker, {}).get('name', conflicting_ticker)}({conflicting_ticker})"
-                                continue  # 다음 교체 후보 쌍으로 넘어감
-
-                        if (
-                            pd.notna(best_new["score"])
-                            and pd.notna(weakest_held["score"])
-                            and best_new["score"]
-                            > weakest_held["score"] + (replace_threshold / 100.0)
-                        ):
-                            d_weakest = data_by_tkr.get(weakest_held["tkr"])
-                            sell_price, sell_qty, avg_cost = (
-                                float(d_weakest.get(k, 0)) for k in ["price", "shares", "avg_cost"]
-                            )
-                            hold_ret = (
-                                ((sell_price / avg_cost) - 1.0) * 100.0
-                                if avg_cost > 0 and sell_price > 0
-                                else 0.0
-                            )
-                            prof = (sell_price - avg_cost) * sell_qty if avg_cost > 0 else 0.0
-                            sell_phrase = f"교체매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'} ({best_new['tkr']}(으)로 교체)"
-                            (
-                                weakest_held["state"],
-                                weakest_held["row"][2],
-                                weakest_held["row"][-1],
-                            ) = ("SELL_REPLACE", "SELL_REPLACE", sell_phrase)
-                            best_new["state"], best_new["row"][2] = "BUY_REPLACE", "BUY_REPLACE"
-                            sell_value = weakest_held["weight"] / 100.0 * current_equity
-                            buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
-                            if buy_price > 0:
-                                buy_qty = (
-                                    sell_value / buy_price
-                                    if country in ("coin", "aus")
-                                    else int(sell_value // buy_price)
-                                )
-                                buy_notional = buy_qty * buy_price
-                                best_new["row"][
-                                    -1
-                                ] = f"매수 {format_shares(buy_qty)}주 @ {price_formatter(buy_price)} ({money_formatter(buy_notional)}) ({weakest_held['tkr']} 대체)"
-                            else:
-                                best_new["row"][-1] = f"{weakest_held['tkr']}(을)를 대체 (가격정보 없음)"
-                        else:
-                            break
+    decisions = generate_daily_signals_for_portfolio(
+        country=country,
+        account=account,
+        base_date=base_date,
+        portfolio_settings=portfolio_settings,
+        data_by_tkr=data_by_tkr,
+        holdings=holdings,
+        etf_meta=etf_meta,
+        full_etf_meta=full_etf_meta,
+        regime_info=result.regime_info,
+        current_equity=current_equity,
+        total_cash=total_cash,
+        pairs=pairs,
+        consecutive_holding_info=consecutive_holding_info,
+        stop_loss=stop_loss,
+        COIN_ZERO_THRESHOLD=COIN_ZERO_THRESHOLD,
+        DECISION_CONFIG=DECISION_CONFIG,
+    )
 
     # --- need_signal=False 처리 ---
     if not need_signal:
@@ -2365,16 +1847,6 @@ def generate_signal_report(
                 decision["row"][2] = new_state
                 decision["row"][-1] = "시그널 생성 제외"
 
-    # 최종 정리: 아직 'WAIT' 상태인 종목들의 사유를 명확히 합니다.
-    for cand in decisions:
-        if cand["state"] == "WAIT":
-            # 이미 '현금 부족' 또는 '카테고리 중복' 등의 구체적인 사유가 설정된 경우는 덮어쓰지 않습니다.
-            if (
-                "추세진입" in cand["row"][-1]
-                and "카테고리 중복" not in cand["row"][-1]
-                and "현금 부족" not in cand["row"][-1]
-            ):
-                cand["row"][-1] = "포트폴리오 가득 참"
     # 7. 완료된 거래 표시
     # 기준일에 발생한 거래를 가져와서, 추천에 따라 실행되었는지 확인하는 데 사용합니다.
     # 표시 기준일 기준으로 '완료' 거래를 표시합니다. 다음 거래일이면 거래가 없을 확률이 높음
@@ -2418,7 +1890,7 @@ def generate_signal_report(
 
                 total_sold_shares = sum(trade.get("shares", 0) for trade in sell_trades_today[tkr])
 
-                sell_phrase = f"⚠️ 부분 매도 ({format_shares(total_sold_shares)}주)"
+                sell_phrase = f"⚠️ 부분 매도 ({format_shares(total_sold_shares, country)}주)"
 
                 # 기존 문구와 합칩니다.
                 original_phrase = decision["row"][-1]
@@ -2616,9 +2088,10 @@ def main(
             idx = col_indices.get("score")
             if idx is not None:
                 val = display_row[idx]
+                # 점수는 이미 포맷팅되어 있으므로 그대로 사용하거나, 문자열로 변환합니다.
                 if isinstance(val, (int, float)):
-                    display_row[idx] = f"{val * 100:.1f}"
-                else:
+                    display_row[idx] = f"{val:.1f}"
+                elif val is None or not str(val).strip():
                     display_row[idx] = "-"
 
             # 일간수익률 포맷팅
@@ -2758,15 +2231,6 @@ def _maybe_notify_detailed_signal(
         money_formatter = format_kr_money
         price_formatter = _kor_coin_price_formatter
 
-    def format_shares(quantity):
-        if not isinstance(quantity, (int, float)):
-            return str(quantity)
-        if country == "coin":
-            return f"{quantity:,.8f}".rstrip("0").rstrip(".")
-        if country == "aus":
-            return f"{quantity:.4f}".rstrip("0").rstrip(".")
-        return f"{int(quantity):,d}"
-
     # 상세 알림에서는 시작 알림에서 보낸 경고(데이터 부족 등)를 제외합니다.
     # header_line은 HTML <br> 태그로 경고와 구분됩니다.
     header_line_clean = header_line.split("<br>")[0]
@@ -2878,7 +2342,7 @@ def _maybe_notify_detailed_signal(
                 s = row[idx_shares]
                 # 보유한 경우에만 표시
                 if isinstance(s, (int, float)) and s > 1e-9:
-                    shares_col = f"{format_shares(s)}주"
+                    shares_col = f"{format_shares(s, country)}주"
 
             amount_col = ""
             if idx_amount is not None:
@@ -2896,7 +2360,7 @@ def _maybe_notify_detailed_signal(
             if idx_score is not None:
                 sc = row[idx_score]
                 if isinstance(sc, (int, float)):
-                    score_col = f"점수 {float(sc) * 100:.1f}"
+                    score_col = f"점수 {float(sc):.1f}"
 
             parts = {
                 "name": full_name_part,
