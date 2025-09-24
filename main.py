@@ -146,121 +146,6 @@ def main():
             st.warning(f"'{account_info['display_name']}' 계좌 정보를 불러오는 중 오류 발생: {e}")
             continue
 
-    # --- 총 자산 요약 표시 ---
-    st.subheader("총 자산 요약")
-    # --- 총계 계산 ---
-    # 누적손익은 이미 합산됨 (total_cum_profit_loss_krw)
-    # 일간 수익률
-    total_prev_equity_krw = total_current_equity_krw - total_daily_profit_loss_krw
-    total_daily_return_pct = (
-        (total_daily_profit_loss_krw / total_prev_equity_krw) * 100
-        if total_prev_equity_krw > 0
-        else 0.0
-    )
-    # 평가 수익률
-    total_acquisition_cost_krw = total_holdings_value_krw - total_eval_profit_loss_krw
-    total_eval_return_pct = (
-        (total_eval_profit_loss_krw / total_acquisition_cost_krw) * 100
-        if total_acquisition_cost_krw > 0
-        else 0.0
-    )
-    # 누적 수익률
-    total_cum_return_pct = (
-        (total_cum_profit_loss_krw / total_initial_capital_krw) * 100
-        if total_initial_capital_krw > 0
-        else 0.0
-    )
-
-    # --- UI 렌더링 ---
-    def format_total_amount(value):
-        return f"{value:,.0f} 원"
-
-    def format_total_amount_with_sign(value):
-        color = "red" if value >= 0 else "blue"
-        sign = "+" if value > 0 else ""
-        return f"<div style='text-align: right; color: {color};'>{sign}{value:,.0f} 원</div>"
-
-    def format_total_pct(value):
-        color = "red" if value > 0 else "blue" if value < 0 else "black"
-        return f"<div style='text-align: right; color: {color};'>{value:+.2f}%</div>"
-
-    header_cols = st.columns((1.5, 1.5, 1, 1.5, 1, 1.5, 1, 1.5, 1.5))
-    header_cols[0].markdown(
-        "<div style='text-align: right;'><b>원금</b></div>", unsafe_allow_html=True
-    )
-    header_cols[1].markdown(
-        "<div style='text-align: right;'><b>일간손익</b></div>", unsafe_allow_html=True
-    )
-    header_cols[2].markdown(
-        "<div style='text-align: right;'><b>일간(%)</b></div>", unsafe_allow_html=True
-    )
-    header_cols[3].markdown(
-        "<div style='text-align: right;'><b>평가손익</b></div>", unsafe_allow_html=True
-    )
-    header_cols[4].markdown(
-        "<div style='text-align: right;'><b>평가(%)</b></div>", unsafe_allow_html=True
-    )
-    header_cols[5].markdown(
-        "<div style='text-align: right;'><b>누적손익</b></div>", unsafe_allow_html=True
-    )
-    header_cols[6].markdown(
-        "<div style='text-align: right;'><b>누적(%)</b></div>", unsafe_allow_html=True
-    )
-    header_cols[7].markdown(
-        "<div style='text-align: right;'><b>현금</b></div>", unsafe_allow_html=True
-    )
-    header_cols[8].markdown(
-        "<div style='text-align: right;'><b>평가금액</b></div>", unsafe_allow_html=True
-    )
-
-    value_cols = st.columns((1.5, 1.5, 1, 1.5, 1, 1.5, 1, 1.5, 1.5))
-    if hide_amounts:
-        hidden_str = "<div style='text-align: right;'>****** 원</div>"
-        value_cols[0].markdown(hidden_str, unsafe_allow_html=True)
-        value_cols[1].markdown(hidden_str, unsafe_allow_html=True)
-        value_cols[3].markdown(hidden_str, unsafe_allow_html=True)
-        value_cols[5].markdown(hidden_str, unsafe_allow_html=True)
-        value_cols[7].markdown(hidden_str, unsafe_allow_html=True)
-        value_cols[8].markdown(hidden_str, unsafe_allow_html=True)
-    else:
-        # 원금
-        value_cols[0].markdown(
-            f"<div style='text-align: right;'>{format_total_amount(total_initial_capital_krw)}</div>",
-            unsafe_allow_html=True,
-        )
-        # 일간손익
-        value_cols[1].markdown(
-            format_total_amount_with_sign(total_daily_profit_loss_krw), unsafe_allow_html=True
-        )
-        # 평가손익
-        value_cols[3].markdown(
-            format_total_amount_with_sign(total_eval_profit_loss_krw), unsafe_allow_html=True
-        )
-        # 누적손익
-        value_cols[5].markdown(
-            format_total_amount_with_sign(total_cum_profit_loss_krw), unsafe_allow_html=True
-        )
-        # 현금
-        value_cols[7].markdown(
-            f"<div style='text-align: right;'>{format_total_amount(total_cash_krw)}</div>",
-            unsafe_allow_html=True,
-        )
-        # 평가금액
-        value_cols[8].markdown(
-            f"<div style='text-align: right;'>{format_total_amount(total_current_equity_krw)}</div>",
-            unsafe_allow_html=True,
-        )
-
-    # % 값들 (금액 숨기기와 무관)
-    value_cols[2].markdown(format_total_pct(total_daily_return_pct), unsafe_allow_html=True)
-    value_cols[4].markdown(format_total_pct(total_eval_return_pct), unsafe_allow_html=True)
-    value_cols[6].markdown(format_total_pct(total_cum_return_pct), unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    # --- 계좌별 상세 현황 표시 ---
-    st.subheader("계좌별 상세 현황")
-
     # Display header
     header_cols = st.columns((1.5, 1.5, 1.5, 1, 1.5, 1, 1.5, 1, 1.5, 1.5))
     header_cols[0].markdown("**계좌**")
@@ -313,7 +198,7 @@ def main():
             return f"<div style='text-align: right; color: {color};'>{value:+.2f}%</div>"
 
         if hide_amounts:
-            hidden_str = f"****** {currency_symbol}"
+            hidden_str = "****** " + currency_symbol
             cols[1].markdown(
                 f"<div style='text-align: right;'>{hidden_str}</div>", unsafe_allow_html=True
             )
@@ -365,6 +250,85 @@ def main():
         cols[3].markdown(format_pct(summary["daily_return_pct"]), unsafe_allow_html=True)
         cols[5].markdown(format_pct(summary["eval_return_pct"]), unsafe_allow_html=True)
         cols[7].markdown(format_pct(summary["cum_return_pct"]), unsafe_allow_html=True)
+
+    # --- 총 자산 합계 행 추가 ---
+    st.markdown("""<hr style="margin:0.5rem 0;" />""", unsafe_allow_html=True)
+
+    # --- 총계 수익률 계산 ---
+    total_prev_equity_krw = total_current_equity_krw - total_daily_profit_loss_krw
+    total_daily_return_pct = (
+        (total_daily_profit_loss_krw / total_prev_equity_krw) * 100
+        if total_prev_equity_krw > 0
+        else 0.0
+    )
+    total_acquisition_cost_krw = total_holdings_value_krw - total_eval_profit_loss_krw
+    total_eval_return_pct = (
+        (total_eval_profit_loss_krw / total_acquisition_cost_krw) * 100
+        if total_acquisition_cost_krw > 0
+        else 0.0
+    )
+    total_cum_return_pct = (
+        (total_cum_profit_loss_krw / total_initial_capital_krw) * 100
+        if total_initial_capital_krw > 0
+        else 0.0
+    )
+
+    # --- 총계 행 렌더링 ---
+    total_cols = st.columns((1.5, 1.5, 1.5, 1, 1.5, 1, 1.5, 1, 1.5, 1.5))
+    total_cols[0].markdown("<b>총 자산</b>", unsafe_allow_html=True)
+
+    def format_total_amount(value):
+        return f"{value:,.0f} 원"
+
+    def format_total_amount_with_sign(value):
+        color = "red" if value >= 0 else "blue"
+        sign = "+" if value > 0 else ""
+        return f"<div style='text-align: right; color: {color};'><b>{sign}{value:,.0f} 원</b></div>"
+
+    def format_total_pct(value):
+        color = "red" if value > 0 else "blue" if value < 0 else "black"
+        return f"<div style='text-align: right; color: {color};'><b>{value:+.2f}%</b></div>"
+
+    if hide_amounts:
+        hidden_str = "****** 원"
+        for i in [1, 2, 4, 6, 8, 9]:
+            total_cols[i].markdown(
+                f"<div style='text-align: right;'><b>{hidden_str}</b></div>",
+                unsafe_allow_html=True,
+            )
+    else:
+        # 원금
+        total_cols[1].markdown(
+            f"<div style='text-align: right;'><b>{format_total_amount(total_initial_capital_krw)}</b></div>",
+            unsafe_allow_html=True,
+        )
+        # 일간손익
+        total_cols[2].markdown(
+            format_total_amount_with_sign(total_daily_profit_loss_krw), unsafe_allow_html=True
+        )
+        # 평가손익
+        total_cols[4].markdown(
+            format_total_amount_with_sign(total_eval_profit_loss_krw), unsafe_allow_html=True
+        )
+        # 누적손익
+        total_cols[6].markdown(
+            format_total_amount_with_sign(total_cum_profit_loss_krw), unsafe_allow_html=True
+        )
+        # 현금
+        total_cols[8].markdown(
+            f"<div style='text-align: right;'><b>{format_total_amount(total_cash_krw)}</b></div>",
+            unsafe_allow_html=True,
+        )
+        # 평가금액
+        total_cols[9].markdown(
+            f"<div style='text-align: right;'><b>{format_total_amount(total_current_equity_krw)}</b></div>",
+            unsafe_allow_html=True,
+        )
+
+    # % 값들 (금액 숨기기와 무관)
+    total_cols[3].markdown(format_total_pct(total_daily_return_pct), unsafe_allow_html=True)
+    total_cols[5].markdown(format_total_pct(total_eval_return_pct), unsafe_allow_html=True)
+    total_cols[7].markdown(format_total_pct(total_cum_return_pct), unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
