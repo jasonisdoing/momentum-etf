@@ -403,7 +403,7 @@ def calculate_benchmark_comparison(
     # 파일에서 초기 자본/날짜 설정을 로드합니다.
     try:
         file_settings = get_account_file_settings(account)
-        initial_capital = float(file_settings["initial_capital"])
+        initial_capital_krw = float(file_settings["initial_capital_krw"])
         initial_date = pd.to_datetime(file_settings["initial_date"])
     except SystemExit as e:
         return [{"name": "벤치마크", "error": str(e)}]
@@ -418,7 +418,7 @@ def calculate_benchmark_comparison(
     if not benchmarks_to_compare:
         return None
 
-    if initial_capital <= 0:
+    if initial_capital_krw <= 0:
         return None
 
     portfolio_data = get_portfolio_snapshot(country, account=account, date_str=date_str)
@@ -480,7 +480,7 @@ def calculate_benchmark_comparison(
     total_injections = sum(inj.get("amount", 0.0) for inj in injections)
     total_withdrawals = sum(wd.get("amount", 0.0) for wd in withdrawals)
 
-    adjusted_capital_base = initial_capital + total_injections
+    adjusted_capital_base = initial_capital_krw + total_injections
     adjusted_equity = equity_for_calc + total_withdrawals
 
     portfolio_cum_ret_pct = (
@@ -1109,7 +1109,7 @@ def _fetch_and_prepare_data(
     processed_results: Dict[str, Dict[str, Any]] = {}
     desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
     logger.info(
-        "[%s] %s started (tickers=%d)",
+        "[%s] %s 시작 (tickers=%d)",
         country.upper(),
         desc,
         len(tasks),
@@ -1269,28 +1269,25 @@ def _build_header_line(
     account: str,
     portfolio_data,
     current_equity,
-    total_holdings_value,
     data_by_tkr,
     base_date,
     portfolio_settings: Dict,
 ):
     """리포트의 헤더 라인을 생성합니다."""
+    total_holdings_value = 0.0
+    from utils.transaction_manager import get_transactions_up_to_date
     from utils.account_registry import get_account_info
-
-    try:
-        from utils.transaction_manager import get_transactions_up_to_date
-    except (SystemExit, ImportError) as e:
-        raise RuntimeError(f"transaction_manager 모듈 로딩 실패: {e}") from e
+    from utils.data_loader import get_aud_to_krw_rate
 
     account_info = get_account_info(account)
-    currency = account_info.get("currency", "KRW")
-    precision = account_info.get("precision", 0)
+    currency = account_info.get("currency", "KRW") if account_info else "KRW"
+    precision = account_info.get("precision", 0) if account_info else 0
 
     def _aud_money_formatter(amount):
         return f"${amount:,.{precision}f}"
 
-    # 국가별 포맷터 설정
-    money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
+    # 헤더의 모든 금액 표시는 KRW를 기준으로 하므로, KRW 포맷터를 기본값으로 사용합니다.
+    money_formatter = format_kr_money
 
     # 보유 종목 수
     if country == "coin":
@@ -1305,8 +1302,15 @@ def _build_header_line(
         )
 
     # 해외 주식 가치 포함
-    total_holdings = total_holdings_value
-    # 코인도 다른 국가와 동일하게 보유금액은 포지션 합으로 계산합니다.
+    total_holdings = sum(d["shares"] * d["price"] for d in data_by_tkr.values() if d["shares"] > 0)
+
+    if country == "aus":
+        intl_info = portfolio_data.get("international_shares")
+        if isinstance(intl_info, dict):
+            try:
+                total_holdings += float(intl_info.get("value", 0.0))
+            except (TypeError, ValueError):
+                pass
 
     # 현금
     total_cash = float(current_equity) - float(total_holdings)
@@ -1319,9 +1323,20 @@ def _build_header_line(
             equity_for_cum_calc = total_holdings  # 현금을 무시하고 보유금액만 사용
 
     # --- 누적 수익률 계산 (자본 추가/인출 반영) ---
-    initial_capital_from_file = (
-        float(portfolio_settings.get("initial_capital", 0)) if portfolio_settings else 0.0
+    initial_capital_krw_from_file = (
+        float(portfolio_settings.get("initial_capital_krw", 0)) if portfolio_settings else 0.0
     )
+
+    # 호주 계좌의 경우, 모든 요약 금액을 KRW로 환산합니다.
+    aud_krw_rate = None
+    if currency == "AUD":
+        aud_krw_rate = get_aud_to_krw_rate()
+        if aud_krw_rate:
+            current_equity *= aud_krw_rate
+            total_holdings *= aud_krw_rate
+            total_cash *= aud_krw_rate
+            equity_for_cum_calc *= aud_krw_rate
+
     initial_date = (
         pd.to_datetime(portfolio_settings.get("initial_date"))
         if portfolio_settings and portfolio_settings.get("initial_date")
@@ -1334,7 +1349,7 @@ def _build_header_line(
     total_injections = sum(inj.get("amount", 0.0) for inj in injections)
     total_withdrawals = sum(wd.get("amount", 0.0) for wd in withdrawals)
 
-    adjusted_capital_base = initial_capital_from_file + total_injections
+    adjusted_capital_base = initial_capital_krw_from_file + total_injections
     adjusted_equity = equity_for_cum_calc + total_withdrawals
 
     cum_ret_pct = (
@@ -1370,6 +1385,10 @@ def _build_header_line(
         # '오늘' 또는 '과거' 리포트에서는 `base_date`를 기준으로 이전 스냅샷을 가져옵니다.
         compare_date_for_prev = base_date
         prev_snapshot = get_previous_portfolio_snapshot(country, compare_date_for_prev, account)
+        # 호주 계좌의 경우, 이전 평가금액도 KRW로 환산합니다.
+        if currency == "AUD" and prev_snapshot and aud_krw_rate:
+            prev_snapshot["total_equity"] *= aud_krw_rate
+
         prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else None
         day_ret_pct = (
             ((current_equity / prev_equity) - 1.0) * 100.0
@@ -1379,13 +1398,27 @@ def _build_header_line(
         day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
 
     # 평가 수익률
+    # 1. 국내/호주 ETF/주식의 매수원금 총합
     total_aus_etf_acquisition_cost = sum(
         d["shares"] * d["avg_cost"] for d in data_by_tkr.values() if d["shares"] > 0
     )
 
-    # 최종 평가 수익률 계산을 위한 변수 초기화
+    # 2. 호주 계좌의 해외주식(IS) 매수원금 추가
+    # 현재는 해외주식의 매수원금을 추적하지 않으므로, 평가액을 매수원금으로 간주합니다.
+    # 이는 해외주식 자체의 평가손익은 0으로 만들지만, 전체 포트폴리오 계산에는 영향을 주지 않습니다.
+    international_shares_value = 0.0
+    if country == "aus":
+        intl_info = portfolio_data.get("international_shares")
+        if isinstance(intl_info, dict):
+            international_shares_value = float(intl_info.get("value", 0.0))
+
+    # 호주 계좌의 경우, KRW로 환산합니다.
+    if currency == "AUD" and aud_krw_rate:
+        total_holdings_value *= aud_krw_rate
+        total_aus_etf_acquisition_cost *= aud_krw_rate
+
     final_total_holdings_value = total_holdings_value
-    final_total_acquisition_cost = total_aus_etf_acquisition_cost
+    final_total_acquisition_cost = total_aus_etf_acquisition_cost + international_shares_value
     eval_ret_pct = (
         ((final_total_holdings_value / final_total_acquisition_cost) - 1.0) * 100.0
         if final_total_acquisition_cost > 0
@@ -1393,20 +1426,23 @@ def _build_header_line(
     )
     eval_profit_loss = final_total_holdings_value - final_total_acquisition_cost
 
+    # --- 최종 헤더 및 요약 데이터 생성 ---
+
     # 헤더 문자열 생성
     equity_str = money_formatter(current_equity)
-    holdings_str = money_formatter(total_holdings)
+    # holdings_str = money_formatter(total_holdings) # 헤더에서 제거됨
     cash_str = money_formatter(total_cash)
+    principal_str = money_formatter(adjusted_capital_base)
     day_ret_str = _format_return_for_header("일간", day_ret_pct, day_profit_loss, money_formatter)
     eval_ret_str = _format_return_for_header("평가", eval_ret_pct, eval_profit_loss, money_formatter)
     cum_ret_str = _format_return_for_header("누적", cum_ret_pct, cum_profit_loss, money_formatter)
 
     # 헤더 본문
     header_body = (
-        f"보유종목: {held_count}/{portfolio_topn} | 평가금액: {equity_str} | 보유금액: {holdings_str} | "
-        f"현금: {cash_str} | {day_ret_str} | {eval_ret_str} | {cum_ret_str}"
+        f"보유종목: {held_count}/{portfolio_topn} | 원금: {principal_str} | {day_ret_str} | "
+        f"{eval_ret_str} | {cum_ret_str} | 현금: {cash_str} | 평가금액: {equity_str}"
     )
-
+    # --- N 거래일차 계산 및 추가 ---
     # --- N 거래일차 계산 및 추가 ---
     if initial_date and base_date >= initial_date:
         try:
@@ -1418,13 +1454,17 @@ def _build_header_line(
                     country,
                 )
             )
-            trading_days_str = f' | <span style="color:blue">{trading_days_count} 거래일차</span>'
+            since_str = f"(Since {initial_date.strftime('%Y-%m-%d')})"
+            trading_days_str = (
+                f' | <span style="color:blue">{trading_days_count} 거래일차</span> {since_str}'
+            )
             header_body += trading_days_str
         except Exception:
             # 오류 발생 시 거래일차 정보는 추가하지 않습니다.
             pass
 
     summary_data = {
+        "principal": adjusted_capital_base,
         "total_equity": current_equity,
         "total_holdings_value": total_holdings,
         "total_cash": total_cash,
@@ -1490,7 +1530,7 @@ def generate_signal_report(
     account: str,
     date_str: Optional[str] = None,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
-) -> Optional[Tuple[str, List[str], List[List[str]], pd.Timestamp, List[str]]]:
+) -> Optional[Tuple[str, List[str], List[List[str]], pd.Timestamp, List[str], Dict[str, Any]]]:
     """지정된 전략에 대한 오늘의 매매 신호를 생성하여 리포트로 반환합니다."""
     logger = get_signal_logger()
 
@@ -1748,7 +1788,6 @@ def generate_signal_report(
         account,
         portfolio_data,
         current_equity,
-        total_holdings_value,
         data_by_tkr,
         base_date,
         portfolio_settings,
@@ -2240,6 +2279,7 @@ def _maybe_notify_detailed_signal(
     def _strip_html(s: str) -> str:
         try:
             return re.sub(r"<[^>]+>", "", s)
+
         except Exception:
             return s
 
@@ -2500,9 +2540,9 @@ def send_summary_notification(
         # Calculate cumulative return
         try:
             file_settings = get_account_file_settings(account)
-            initial_capital = float(file_settings.get("initial_capital", 0))
+            initial_capital_krw = float(file_settings.get("initial_capital_krw", 0))
         except SystemExit:
-            initial_capital = 0.0  # 알림에서는 조용히 실패 처리
+            initial_capital_krw = 0.0  # 알림에서는 조용히 실패 처리
 
         message = f"[{prefix}/{date_str}] 작업 완료(작업시간: {duration:.1f}초)"
         from utils.account_registry import get_account_info
@@ -2516,7 +2556,7 @@ def send_summary_notification(
 
         money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
 
-        if initial_capital > 0 and get_transactions_up_to_date:
+        if initial_capital_krw > 0 and get_transactions_up_to_date:
             # 자본 추가/인출 내역을 반영하여 누적 수익률 계산
             injections = get_transactions_up_to_date(
                 country, account, report_date, "capital_injection"
@@ -2528,7 +2568,7 @@ def send_summary_notification(
             total_injections = sum(inj.get("amount", 0.0) for inj in injections)
             total_withdrawals = sum(wd.get("amount", 0.0) for wd in withdrawals)
 
-            adjusted_capital_base = initial_capital + total_injections
+            adjusted_capital_base = initial_capital_krw + total_injections
             adjusted_equity = new_equity + total_withdrawals
 
             cum_ret_pct = (

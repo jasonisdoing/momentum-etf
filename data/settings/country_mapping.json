@@ -128,7 +128,7 @@
     {
         "country": "kor",
         "account": "k3",
-        "display_name": "KB ISA(호주)",
+        "display_name": "KB ISA(거소증)",
         "order": 5,
         "benchmarks_tickers": [
             {
@@ -149,7 +149,7 @@
     {
         "country": "kor",
         "account": "k4",
-        "display_name": "KB 연금저축(호주)",
+        "display_name": "KB 연금저축(거소증)",
         "order": 5,
         "benchmarks_tickers": [
             {

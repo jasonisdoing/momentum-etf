@@ -398,6 +398,59 @@ def get_signal_report_from_db(country: str, account: str, date: datetime) -> Opt
     return None
 
 
+def get_latest_signal_report(
+    country: str, account: str, date: Optional[datetime] = None
+) -> Optional[Dict]:
+    """
+    지정된 계좌에 대해 가장 최근의 시그널 리포트를 반환합니다.
+    date가 지정되면 해당 날짜의 리포트를 찾습니다.
+    """
+    db = get_db_connection()
+    if db is None:
+        return None
+
+    query = _apply_account_filter({"country": country}, account)
+
+    if date:
+        # 날짜가 지정된 경우, 해당 날짜의 시작과 끝을 정의하여 하루 전체를 검색합니다.
+        start_of_day = date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        query["date"] = {"$gte": start_of_day, "$lte": end_of_day}
+        # 해당 날짜에 여러 리포트가 있을 경우 가장 최신 것을 가져옵니다.
+        latest_signal = db.signals.find_one(query, sort=[("date", DESCENDING)])
+    else:
+        # 날짜가 지정되지 않은 경우, 'date' 필드를 기준으로 내림차순 정렬하여 가장 최근 문서를 찾습니다.
+        latest_signal = db.signals.find_one(query, sort=[("date", DESCENDING)])
+
+    if latest_signal:
+        # 최신 시그널 리포트가 존재하면 반환합니다.
+        return latest_signal
+
+    return None
+
+
+def get_latest_signal_summary(country: str, account: str) -> Optional[Dict]:
+    """
+    지정된 계좌의 가장 최근 시그널 리포트에 저장된 요약(summary) 정보를 가져옵니다.
+    """
+    db = get_db_connection()
+    if db is None:
+        return None
+
+    query = _apply_account_filter({"country": country}, account)
+    # summary 필드가 존재하는 가장 최근 문서를 찾습니다.
+    query["summary"] = {"$exists": True}
+
+    latest_signal = db.signals.find_one(query, sort=[("date", DESCENDING)])
+
+    if latest_signal and "summary" in latest_signal:
+        summary = latest_signal["summary"]
+        summary["date"] = latest_signal.get("date")  # 요약 정보에 날짜 추가
+        return summary
+
+    return None
+
+
 def save_signal_report_to_db(
     country: str,
     account: str,

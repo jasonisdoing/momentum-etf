@@ -162,14 +162,14 @@ def get_account_file_settings(account: str) -> Dict[str, Any]:
         spec.loader.exec_module(module)
 
         # 필수 설정 로드
-        capital = getattr(module, "INITIAL_CAPITAL")
+        initial_capital_krw = getattr(module, "INITIAL_CAPITAL_KRW")
         date_str = getattr(module, "INITIAL_DATE")
 
         # 유효성 검사
-        if not isinstance(capital, (int, float)) or capital <= 0:
-            raise ValueError("INITIAL_CAPITAL은 0보다 큰 숫자여야 합니다.")
+        if not isinstance(initial_capital_krw, (int, float)) or initial_capital_krw <= 0:
+            raise ValueError("INITIAL_CAPITAL_KRW 0보다 큰 숫자여야 합니다.")
 
-        settings["initial_capital"] = capital
+        settings["initial_capital_krw"] = initial_capital_krw
         settings["initial_date"] = datetime.strptime(date_str, "%Y-%m-%d")
 
         # (선택) 슬랙 웹훅 URL

@@ -2,7 +2,6 @@ import os
 import sys
 from datetime import datetime
 
-import pandas as pd
 import streamlit as st
 
 try:
@@ -15,22 +14,20 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    import yfinance as yf
+    pass
 except ImportError:
     st.error("yfinance 라이브러리가 설치되지 않았습니다. `pip install yfinance`로 설치해주세요.")
     yf = None
     st.stop()
 
 from signals import get_market_regime_status_string
-from utils.transaction_manager import (
-    get_transactions_up_to_date,
-)
 from utils.account_registry import (
-    get_account_file_settings,
     get_accounts_by_country,
     load_accounts,
 )
-from utils.db_manager import get_portfolio_snapshot, get_previous_portfolio_snapshot
+from utils.db_manager import (
+    get_latest_signal_report,
+)
 from utils.data_loader import get_aud_to_krw_rate
 
 
@@ -40,16 +37,6 @@ def main():
     st.title("📈 메인 대시보드")
 
     hide_amounts = st.toggle("금액 숨기기", key="hide_amounts")
-
-    date_str_for_snapshot = None
-    if pytz:
-        try:
-            # 모든 국가에 대해 한국 시간 기준으로 '오늘'을 결정
-            seoul_tz = pytz.timezone("Asia/Seoul")
-            now_seoul = datetime.now(seoul_tz)
-            date_str_for_snapshot = now_seoul.strftime("%Y-%m-%d")
-        except Exception:
-            pass  # fallback to None
 
     status_html = get_market_regime_status_string()
     if status_html:
@@ -103,65 +90,72 @@ def main():
         account = account_info["account"]
 
         try:
-            settings = get_account_file_settings(account)
-            # For all accounts, initial_capital is in KRW.
-            initial_capital_from_file = float(settings.get("initial_capital", 0.0))
-
-            # 자본 추가 내역을 반영하여 원금을 계산합니다.
-            injections = get_transactions_up_to_date(
-                country, account, datetime.now(), "capital_injection"
-            )
-            total_injections = sum(inj.get("amount", 0.0) for inj in injections)
-            principal_krw = initial_capital_from_file + total_injections
-
-            snapshot = get_portfolio_snapshot(country, account, date_str=date_str_for_snapshot)
-            if not snapshot:
+            # signal_reports 컬렉션에서 가장 최근의 요약 데이터를 가져옵니다.
+            today_dt = None
+            if pytz:
+                try:
+                    seoul_tz = pytz.timezone("Asia/Seoul")
+                    today_dt = datetime.now(seoul_tz)
+                except Exception:
+                    today_dt = datetime.now()
+            else:
+                today_dt = datetime.now()
+            report_data = get_latest_signal_report(country, account)
+            today_dt = None
+            if pytz:
+                try:
+                    seoul_tz = pytz.timezone("Asia/Seoul")
+                    today_dt = datetime.now(seoul_tz)
+                except Exception:
+                    today_dt = datetime.now()
+            else:
+                today_dt = datetime.now()
+            report_data = get_latest_signal_report(country, account, date=today_dt)
+            if not report_data or "summary" not in report_data:
                 continue
 
-            # These are in native currency (AUD for aus, KRW for kor)
-            current_equity_native = float(snapshot.get("total_equity", 0.0))
-            snapshot_date = pd.to_datetime(snapshot.get("date"))
-
-            prev_snapshot = get_previous_portfolio_snapshot(country, snapshot_date, account)
-            prev_equity_native = (
-                float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else 0.0
-            )
+            summary = report_data["summary"]
 
             currency = account_info.get("currency", "KRW")
 
-            # --- Convert all values to KRW for calculation and display ---
-            current_equity_krw = current_equity_native
-            prev_equity_krw = prev_equity_native
+            # --- KRW로 모든 값 변환 ---
+            print(summary.get("principal", 0.0))
+            initial_capital_krw = summary.get("principal", 0.0)
+            current_equity_krw = summary.get("total_equity", 0.0)
+            daily_profit_loss_krw = summary.get("daily_profit_loss", 0.0)
+            eval_profit_loss_krw = summary.get("eval_profit_loss", 0.0)
+            cum_profit_loss_krw = summary.get("cum_profit_loss", 0.0)
+            total_cash_krw = summary.get("total_cash", 0.0)
 
             if currency == "AUD":
                 if aud_krw_rate:
-                    current_equity_krw = current_equity_native * aud_krw_rate
-                    prev_equity_krw = prev_equity_native * aud_krw_rate
+                    initial_capital_krw *= aud_krw_rate
+                    current_equity_krw *= aud_krw_rate
+                    daily_profit_loss_krw *= aud_krw_rate
+                    eval_profit_loss_krw *= aud_krw_rate
+                    cum_profit_loss_krw *= aud_krw_rate
+                    total_cash_krw *= aud_krw_rate
                 else:
-                    # If rate is missing, we can't calculate, so skip this account for display
                     st.warning(f"'{account_info['display_name']}' 계좌의 환율 정보가 없어 요약에서 제외합니다.")
                     continue
 
-            # --- All calculations are now in KRW ---
-            daily_return_pct = (
-                ((current_equity_krw / prev_equity_krw) - 1) * 100 if prev_equity_krw > 0 else 0.0
-            )
-            cum_return_pct = (
-                ((current_equity_krw / principal_krw) - 1) * 100 if principal_krw > 0 else 0.0
-            )
-
             # --- Add to totals (already in KRW) ---
-            total_initial_capital_krw += principal_krw
+            total_initial_capital_krw += initial_capital_krw
             total_current_equity_krw += current_equity_krw
 
             # --- Prepare summary for display (all in KRW) ---
             account_summaries.append(
                 {
                     "display_name": account_info["display_name"],
-                    "initial_capital": principal_krw,  # "원금"으로 사용될 값
+                    "principal": initial_capital_krw,
                     "current_equity": current_equity_krw,
-                    "daily_return_pct": daily_return_pct,
-                    "cum_return_pct": cum_return_pct,
+                    "total_cash": total_cash_krw,
+                    "daily_profit_loss": daily_profit_loss_krw,
+                    "daily_return_pct": summary.get("daily_return_pct", 0.0),
+                    "eval_profit_loss": eval_profit_loss_krw,
+                    "eval_return_pct": summary.get("eval_return_pct", 0.0),
+                    "cum_profit_loss": cum_profit_loss_krw,
+                    "cum_return_pct": summary.get("cum_return_pct", 0.0),
                     "currency": "KRW",  # Always display in KRW
                     "amt_precision": 0,  # Always display as integer KRW
                     "qty_precision": 0,
@@ -187,7 +181,7 @@ def main():
     current_equity_display = "****** 원" if hide_amounts else f"{total_current_equity_krw:,.0f} 원"
     profit_loss_display = "****** 원" if hide_amounts else f"{total_profit_loss_krw:,.0f} 원"
 
-    col1.metric(label="총 원금", value=initial_capital_display)
+    col1.metric(label="총 초기자본", value=initial_capital_display)
     col2.metric(
         label="총 평가금액",
         value=current_equity_display,
@@ -206,77 +200,109 @@ def main():
     st.subheader("계좌별 상세 현황")
 
     # Display header
-    header_cols = st.columns((2, 2.2, 2.2, 2.2, 1.5, 1.5))
+    header_cols = st.columns((1.5, 1.5, 1.5, 1, 1.5, 1, 1.5, 1, 1.5, 1.5))
     header_cols[0].markdown("**계좌**")
     header_cols[1].markdown(
         "<div style='text-align: right;'><b>원금</b></div>", unsafe_allow_html=True
     )
     header_cols[2].markdown(
-        "<div style='text-align: right;'><b>평가금액</b></div>", unsafe_allow_html=True
+        "<div style='text-align: right;'><b>일간손익</b></div>", unsafe_allow_html=True
     )
     header_cols[3].markdown(
-        "<div style='text-align: right;'><b>수익금</b></div>", unsafe_allow_html=True
-    )
-    header_cols[4].markdown(
         "<div style='text-align: right;'><b>일간(%)</b></div>", unsafe_allow_html=True
     )
+    header_cols[4].markdown(
+        "<div style='text-align: right;'><b>평가손익</b></div>", unsafe_allow_html=True
+    )
     header_cols[5].markdown(
+        "<div style='text-align: right;'><b>평가(%)</b></div>", unsafe_allow_html=True
+    )
+    header_cols[6].markdown(
+        "<div style='text-align: right;'><b>누적손익</b></div>", unsafe_allow_html=True
+    )
+    header_cols[7].markdown(
         "<div style='text-align: right;'><b>누적(%)</b></div>", unsafe_allow_html=True
+    )
+    header_cols[8].markdown(
+        "<div style='text-align: right;'><b>현금</b></div>", unsafe_allow_html=True
+    )
+    header_cols[9].markdown(
+        "<div style='text-align: right;'><b>평가금액</b></div>", unsafe_allow_html=True
     )
     st.markdown("""<hr style="margin:0.5rem 0;" />""", unsafe_allow_html=True)
 
     for summary in sorted(account_summaries, key=lambda x: x.get("order", 99)):
         currency_symbol = "원"  # All summaries are now in KRW
         amt_precision = summary["amt_precision"]
-        profit_loss = summary["current_equity"] - summary["initial_capital"]
 
-        cols = st.columns((2, 2.2, 2.2, 2.2, 1.5, 1.5))
+        cols = st.columns((1.5, 1.5, 1.5, 1, 1.5, 1, 1.5, 1, 1.5, 1.5))
         cols[0].write(summary["display_name"])
 
+        def format_amount(value):
+            return f"{value:,.{amt_precision}f} {currency_symbol}"
+
+        def format_amount_with_sign(value):
+            color = "red" if value >= 0 else "blue"
+            sign = "+" if value > 0 else ""
+            return f"<div style='text-align: right; color: {color};'>{sign}{value:,.{amt_precision}f} {currency_symbol}</div>"
+
+        def format_pct(value):
+            color = "red" if value > 0 else "blue" if value < 0 else "black"
+            return f"<div style='text-align: right; color: {color};'>{value:+.2f}%</div>"
+
         if hide_amounts:
-            initial_capital_str = f"****** {currency_symbol}"
-            current_equity_str = f"****** {currency_symbol}"
-            profit_loss_str = f"****** {currency_symbol}"
+            hidden_str = f"****** {currency_symbol}"
+            cols[1].markdown(
+                f"<div style='text-align: right;'>{hidden_str}</div>", unsafe_allow_html=True
+            )
+            cols[2].markdown(
+                f"<div style='text-align: right;'>{hidden_str}</div>", unsafe_allow_html=True
+            )
+            cols[4].markdown(
+                f"<div style='text-align: right;'>{hidden_str}</div>", unsafe_allow_html=True
+            )
+            cols[6].markdown(
+                f"<div style='text-align: right;'>{hidden_str}</div>", unsafe_allow_html=True
+            )
+            cols[8].markdown(
+                f"<div style='text-align: right;'>{hidden_str}</div>", unsafe_allow_html=True
+            )
+            cols[9].markdown(
+                f"<div style='text-align: right;'>{hidden_str}</div>", unsafe_allow_html=True
+            )
         else:
-            initial_capital_str = (
-                f"{summary['initial_capital']:,.{amt_precision}f} {currency_symbol}"
+            # 원금
+            cols[1].markdown(
+                f"<div style='text-align: right;'>{format_amount(summary['principal'])}</div>",
+                unsafe_allow_html=True,
             )
-            current_equity_str = f"{summary['current_equity']:,.{amt_precision}f} {currency_symbol}"
-            profit_loss_color = "red" if profit_loss >= 0 else "blue"
-            profit_loss_sign = "+" if profit_loss > 0 else ""
-            profit_loss_str = (
-                f"{profit_loss_sign}{profit_loss:,.{amt_precision}f} {currency_symbol}"
+            # 일간손익
+            cols[2].markdown(
+                format_amount_with_sign(summary["daily_profit_loss"]), unsafe_allow_html=True
+            )
+            # 평가손익
+            cols[4].markdown(
+                format_amount_with_sign(summary["eval_profit_loss"]), unsafe_allow_html=True
+            )
+            # 누적손익
+            cols[6].markdown(
+                format_amount_with_sign(summary["cum_profit_loss"]), unsafe_allow_html=True
+            )
+            # 현금
+            cols[8].markdown(
+                f"<div style='text-align: right;'>{format_amount(summary['total_cash'])}</div>",
+                unsafe_allow_html=True,
+            )
+            # 평가금액
+            cols[9].markdown(
+                f"<div style='text-align: right;'>{format_amount(summary['current_equity'])}</div>",
+                unsafe_allow_html=True,
             )
 
-        cols[1].markdown(
-            f"<div style='text-align: right;'>{initial_capital_str}</div>", unsafe_allow_html=True
-        )
-
-        cols[2].markdown(
-            f"<div style='text-align: right;'>{current_equity_str}</div>", unsafe_allow_html=True
-        )
-
-        profit_loss_color = "red" if profit_loss >= 0 else "blue"
-        cols[3].markdown(
-            f"<div style='text-align: right; color: {profit_loss_color};'>{profit_loss_str}</div>",
-            unsafe_allow_html=True,
-        )
-
-        cum_return_pct = summary["cum_return_pct"]
-        daily_return_pct = summary["daily_return_pct"]
-        daily_ret_color = (
-            "red" if daily_return_pct > 0 else "blue" if daily_return_pct < 0 else "black"
-        )
-        cols[4].markdown(
-            f"<div style='text-align: right; color: {daily_ret_color};'>{daily_return_pct:+.2f}%</div>",
-            unsafe_allow_html=True,
-        )
-
-        cum_ret_color = "red" if cum_return_pct >= 0 else "blue"
-        cols[5].markdown(
-            f"<div style='text-align: right; color: {cum_ret_color};'>{cum_return_pct:+.2f}%</div>",
-            unsafe_allow_html=True,
-        )
+        # % 값들
+        cols[3].markdown(format_pct(summary["daily_return_pct"]), unsafe_allow_html=True)
+        cols[5].markdown(format_pct(summary["eval_return_pct"]), unsafe_allow_html=True)
+        cols[7].markdown(format_pct(summary["cum_return_pct"]), unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.data_loader import get_latest_trading_day
+from utils.data_loader import get_aud_to_krw_rate
 from utils.stock_list_io import get_etfs as get_etfs_from_files
 
 # 이 파일에서는 매매 전략에 사용되는 고유 파라미터를 정의합니다.
@@ -32,7 +33,7 @@ def _print_backtest_summary(
     country: str,
     account: str,
     test_months_range: int,
-    initial_capital: float,
+    initial_capital_krw: float,
     portfolio_topn: int,
     ticker_summaries: List[Dict],
 ):
@@ -55,7 +56,7 @@ def _print_backtest_summary(
     if summary.get("risk_off_periods"):
         for start, end in summary["risk_off_periods"]:
             print(f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}")
-    print(f"| 초기 자본: {money_formatter(summary['initial_capital'])}")
+    print(f"| 초기 자본: {money_formatter(summary['initial_capital_krw'])}")
     print(f"| 최종 자산: {money_formatter(summary['final_value'])}")
     print(
         f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
@@ -73,7 +74,7 @@ def _print_backtest_summary(
     used_settings = {
         "계좌 정보": f"{country.upper()} / {account}",
         "테스트 기간": f"최근 {test_months_range}개월",
-        "초기 자본": money_formatter(initial_capital),
+        "초기 자본": money_formatter(initial_capital_krw),
         "포트폴리오 종목 수 (TopN)": portfolio_topn,
         "모멘텀 스코어 MA 기간": f"{settings.MA_PERIOD}일",
         "교체 매매 점수 임계값": settings.REPLACE_SCORE_THRESHOLD,
@@ -220,7 +221,18 @@ def main(
         account_settings = get_account_file_settings(account)
         country_settings = get_country_file_settings(country)
 
-        initial_capital = account_settings["initial_capital"]
+        initial_capital_krw = account_settings["initial_capital_krw"]
+        account_info = get_account_info(account)
+        currency = account_info.get("currency", "KRW")
+
+        # 호주 계좌의 경우, KRW로 설정된 초기 자본금을 AUD로 변환합니다.
+        if currency == "AUD":
+            aud_krw_rate = get_aud_to_krw_rate()
+            if aud_krw_rate and aud_krw_rate > 0:
+                initial_capital_krw /= aud_krw_rate
+            else:
+                print("오류: AUD/KRW 환율을 가져올 수 없어 백테스트를 진행할 수 없습니다.")
+                return
 
         settings.MA_PERIOD = country_settings["ma_period"]
         portfolio_topn = country_settings["portfolio_topn"]
@@ -346,7 +358,7 @@ def main(
             header_suffix = f" (account={account})" if account else ""
             print(f"백테스트를 `settings.py` 설정으로 실행합니다{header_suffix}.")
             print(
-                f"# 시작 {datetime.now().isoformat()} | 기간={period_label} | 초기자본={int(initial_capital):,}\n"
+                f"# 시작 {datetime.now().isoformat()} | 기간={period_label} | 초기자본={int(initial_capital_krw):,}\n"
             )
         # 전략 모듈에서 백테스트 함수를 가져옵니다.
         try:
@@ -366,7 +378,7 @@ def main(
             time_series_by_ticker = (
                 run_portfolio_backtest(
                     stocks=etfs_from_file,
-                    initial_capital=initial_capital,
+                    initial_capital_krw=initial_capital_krw,
                     core_start_date=core_start_dt,
                     top_n=portfolio_topn,
                     date_range=test_date_range,
@@ -390,7 +402,7 @@ def main(
                     raw_data_by_ticker[ticker] = df
 
             # 종목별 고정 자본 방식: 전체 자본을 종목 수로 나눔
-            capital_per_ticker = initial_capital / len(etfs_from_file) if etfs_from_file else 0
+            capital_per_ticker = initial_capital_krw / len(etfs_from_file) if etfs_from_file else 0
             for etf in etfs_from_file:
                 ticker = etf["ticker"]
                 df_ticker = raw_data_by_ticker.get(ticker)
@@ -399,7 +411,7 @@ def main(
                 ts = run_single_ticker_backtest(
                     ticker,
                     df=df_ticker,
-                    initial_capital=capital_per_ticker,
+                    initial_capital_krw=capital_per_ticker,
                     core_start_date=core_start_dt,
                     date_range=test_date_range,
                     country=country,
@@ -423,13 +435,13 @@ def main(
 
         portfolio_values = []
         portfolio_dates = []
-        prev_total_pv = float(initial_capital)
+        prev_total_pv = float(initial_capital_krw)
         prev_dt: Optional[pd.Timestamp] = None
         buy_date_by_ticker: Dict[str, Optional[pd.Timestamp]] = {}
         holding_days_by_ticker: Dict[str, int] = {}
         total_cnt = len(time_series_by_ticker)
 
-        total_init = float(initial_capital)
+        total_init = float(initial_capital_krw)
 
         for dt in common_index:
             portfolio_dates.append(dt)
@@ -748,8 +760,8 @@ def main(
             end_date = portfolio_dates[-1]
             years = (end_date - start_date).days / 365.25
             cagr = 0
-            if years > 0 and initial_capital > 0:
-                cagr = ((final_value / initial_capital) ** (1 / years)) - 1
+            if years > 0 and initial_capital_krw > 0:
+                cagr = ((final_value / initial_capital_krw) ** (1 / years)) - 1
 
             # --- 벤치마크 (S&P 500) 성과 계산 ---
             from utils.data_loader import fetch_ohlcv
@@ -809,7 +821,7 @@ def main(
             summary = {
                 "start_date": start_date.strftime("%Y-%m-%d"),
                 "end_date": end_date.strftime("%Y-%m-%d"),
-                "initial_capital": initial_capital,
+                "initial_capital_krw": initial_capital_krw,
                 "final_value": final_value,
                 "cagr_pct": cagr * 100,
                 "mdd_pct": max_drawdown * 100,
@@ -817,7 +829,7 @@ def main(
                 "sortino_ratio": sortino_ratio,
                 "calmar_ratio": calmar_ratio,
                 "cumulative_return_pct": (
-                    (final_value / initial_capital - 1) * 100 if initial_capital > 0 else 0
+                    (final_value / initial_capital_krw - 1) * 100 if initial_capital_krw > 0 else 0
                 ),
                 "risk_off_periods": risk_off_periods,
                 "benchmark_cum_ret_pct": benchmark_cum_ret_pct,
@@ -827,7 +839,9 @@ def main(
             # 월별/연간 수익률 계산
             if portfolio_values:
                 # 수익률 계산을 위해 시작점에 초기 자본을 추가
-                start_row = pd.Series([initial_capital], index=[start_date - pd.Timedelta(days=1)])
+                start_row = pd.Series(
+                    [initial_capital_krw], index=[start_date - pd.Timedelta(days=1)]
+                )
                 pv_series_with_start = pd.concat([start_row, pv_series])
 
                 # 월별 수익률
@@ -837,7 +851,9 @@ def main(
                 # 월별 누적 수익률
                 eom_pv = pv_series.resample("ME").last()
                 monthly_cum_returns = (
-                    (eom_pv / initial_capital - 1).ffill() if initial_capital > 0 else pd.Series()
+                    (eom_pv / initial_capital_krw - 1).ffill()
+                    if initial_capital_krw > 0
+                    else pd.Series()
                 )
                 summary["monthly_cum_returns"] = monthly_cum_returns
 
@@ -900,7 +916,7 @@ def main(
                     country,
                     account,
                     test_months_range,
-                    initial_capital,
+                    initial_capital_krw,
                     portfolio_topn,
                     ticker_summaries,
                 )

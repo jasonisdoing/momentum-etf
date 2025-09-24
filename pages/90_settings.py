@@ -84,9 +84,9 @@ def render_account_settings(country_code: str, account_code: str):
     currency_str = f" ({currency})"
     st.text_input(
         f"초기 자본금{currency_str}",
-        value=f"{float(account_settings['initial_capital']):,.{precision}f}"
+        value=f"{float(account_settings['initial_capital_krw']):,.{precision}f}"
         if precision > 0
-        else f"{int(account_settings['initial_capital']):,d}",
+        else f"{int(account_settings['initial_capital_krw']):,d}",
         disabled=True,
         help=account_help_text,
     )

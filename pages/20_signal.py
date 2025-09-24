@@ -98,7 +98,7 @@ def _format_korean_datetime(dt: datetime) -> str:
     return f"{dt.strftime('%Y년 %m월 %d일')}({weekday_map[dt.weekday()]}) {ampm_str} {hour12}시 {dt.minute:02d}분"
 
 
-@st.cache_data(ttl=600)
+# @st.cache_data(ttl=600)
 def get_cached_benchmark_comparison(
     country: str, date_str: str, account: str
 ) -> Optional[List[Dict[str, Any]]]:
