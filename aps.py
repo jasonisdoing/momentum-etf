@@ -204,7 +204,7 @@ def main():
 
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
-        cron = _get("SCHEDULE_AUS_CRON", "1,31 9-16 * * 1-5")
+        cron = _get("SCHEDULE_AUS_CRON", "1 9-18 * * 1-5")
         tz = _get("SCHEDULE_AUS_TZ", "Australia/Sydney")
         scheduler.add_job(
             run_signals_for_country,
@@ -216,7 +216,7 @@ def main():
 
     # kor
     if _bool_env("SCHEDULE_ENABLE_KOR", True):
-        cron = _get("SCHEDULE_KOR_CRON", "1,31 9-16 * * 1-5")
+        cron = _get("SCHEDULE_KOR_CRON", "1 9-18 * * 1-5")
         tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,

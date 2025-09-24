@@ -1768,6 +1768,11 @@ def generate_signal_report(
             )
             header_line += f"<br>{full_warning_str}"
 
+    # need_signal=False 경고 메시지 추가
+    if not need_signal:
+        warning_str = '<br><span style="color:orange;">⚠️ 이 계좌는 시그널 생성을 하지 않도록 설정되어 있습니다.</span>'
+        header_line += warning_str
+
     # 4. 보유 기간 및 고점 대비 하락률 계산
     held_tickers = [tkr for tkr, v in holdings.items() if float((v or {}).get("shares") or 0.0) > 0]
     # 보유 시작일 계산 기준은 실제 표시 기준일(label_date)과 일치시킵니다.
@@ -1852,8 +1857,9 @@ def generate_signal_report(
                 new_state = "HOLD" if is_effectively_held else "WAIT"
                 decision["state"] = new_state
                 decision["row"][2] = new_state
-                decision["row"][-1] = "시그널 생성 제외"
 
+            # 모든 문구 컬럼을 비웁니다.
+            decision["row"][-1] = ""
     # 7. 완료된 거래 표시
     # 기준일에 발생한 거래를 가져와서, 추천에 따라 실행되었는지 확인하는 데 사용합니다.
     # 표시 기준일 기준으로 '완료' 거래를 표시합니다. 다음 거래일이면 거래가 없을 확률이 높음
