@@ -44,12 +44,6 @@ DECISION_CONFIG = {
         "is_recommendation": True,
         "show_slack": True,
     },
-    "SELL_INACTIVE": {
-        "display_name": "<🗑️ 비활성 매도>",
-        "order": 14,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
     "SELL_REGIME_FILTER": {
         "display_name": "<🛡️ 시장위험회피 매도>",
         "order": 15,
@@ -914,7 +908,6 @@ def generate_daily_signals_for_portfolio(
         buy_signal = False
         state = "HOLD" if is_effectively_held else "WAIT"
         phrase = ""
-        is_active = full_etf_meta.get(tkr, {}).get("is_active", True)
         if price == 0.0 and is_effectively_held:
             phrase = "가격 데이터 조회 실패"
 
@@ -947,11 +940,6 @@ def generate_daily_signals_for_portfolio(
                 qty = sh
                 prof = (price - ac) * qty if ac > 0 else 0.0
                 phrase = f"가격기반손절 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
-            elif not is_active:
-                state = "SELL_INACTIVE"
-                qty = sh
-                prof = (price - ac) * qty if ac > 0 else 0.0
-                phrase = f"비활성 종목 정리 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
         if state == "HOLD":
             price_ma, ma = d["price"], d["s1"]

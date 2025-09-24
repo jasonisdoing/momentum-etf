@@ -1623,7 +1623,6 @@ def generate_signal_report(
             # Check if the ticker is inactive.
             if not full_etf_meta.get(tkr, {}).get("is_active", True):
                 # If it's an inactive ticker, we don't need to warn about insufficient data.
-                # The SELL_INACTIVE signal will explain its status.
                 continue
             name = name_map.get(tkr, tkr)
             warning_messages_for_slack.append(f"{name}({tkr}): 데이터 기간이 부족하여 계산에서 제외됩니다.")
