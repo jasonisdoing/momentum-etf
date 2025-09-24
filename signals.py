@@ -1398,33 +1398,48 @@ def _build_header_line(
         day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
 
     # 평가 수익률
-    # 1. 국내/호주 ETF/주식의 매수원금 총합
-    total_aus_etf_acquisition_cost = sum(
+    total_acquisition_cost = sum(
         d["shares"] * d["avg_cost"] for d in data_by_tkr.values() if d["shares"] > 0
     )
 
-    # 2. 호주 계좌의 해외주식(IS) 매수원금 추가
-    # 현재는 해외주식의 매수원금을 추적하지 않으므로, 평가액을 매수원금으로 간주합니다.
-    # 이는 해외주식 자체의 평가손익은 0으로 만들지만, 전체 포트폴리오 계산에는 영향을 주지 않습니다.
-    international_shares_value = 0.0
+    # 국가별로 평가손익 계산 로직을 분리합니다.
     if country == "aus":
+        # 호주 계좌: 해외주식(IS) 가치를 포함하여 계산합니다.
+        # IS의 매수원금은 평가액과 동일하게 간주하여 IS 자체의 평가손익은 0이 됩니다.
         intl_info = portfolio_data.get("international_shares")
+        international_shares_value = 0.0
         if isinstance(intl_info, dict):
             international_shares_value = float(intl_info.get("value", 0.0))
+            international_shares_change_pct = float(intl_info.get("change_pct", 0.0))
 
-    # 호주 계좌의 경우, KRW로 환산합니다.
-    if currency == "AUD" and aud_krw_rate:
-        total_holdings_value *= aud_krw_rate
-        total_aus_etf_acquisition_cost *= aud_krw_rate
+        # 호주 계좌의 모든 금액을 KRW로 환산합니다.
+        if aud_krw_rate:
+            total_acquisition_cost *= aud_krw_rate
+            international_shares_cost = (
+                international_shares_value
+                / (1 + international_shares_change_pct / 100)
+                * aud_krw_rate
+            )
+        print(intl_info)
+        print(f"total_acquisition_cost: {total_acquisition_cost}")
+        print(f"international_shares_value: {international_shares_value}")
+        total_holdings_value = total_holdings
+        final_total_acquisition_cost = total_acquisition_cost + international_shares_cost
+    else:  # kor, coin
+        total_holdings_value = total_holdings
+        final_total_acquisition_cost = total_acquisition_cost
 
-    final_total_holdings_value = total_holdings_value
-    final_total_acquisition_cost = total_aus_etf_acquisition_cost + international_shares_value
+    print(f"total_holdings: {total_holdings}")
+    print(f"final_total_acquisition_cost: {final_total_acquisition_cost}")
+
     eval_ret_pct = (
-        ((final_total_holdings_value / final_total_acquisition_cost) - 1.0) * 100.0
+        ((total_holdings_value / final_total_acquisition_cost) - 1.0) * 100.0
         if final_total_acquisition_cost > 0
         else 0.0
     )
-    eval_profit_loss = final_total_holdings_value - final_total_acquisition_cost
+    print(f"eval_ret_pct: {eval_ret_pct}")
+    eval_profit_loss = total_holdings_value - final_total_acquisition_cost
+    print(f"eval_profit_loss: {eval_profit_loss}")
 
     # --- 최종 헤더 및 요약 데이터 생성 ---
 

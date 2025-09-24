@@ -106,35 +106,35 @@ def main():
             summary = report_data["summary"]
 
             # --- KRW로 모든 값 변환 ---
-            initial_capital_krw = summary.get("principal", 0.0)
-            current_equity_krw = summary.get("total_equity", 0.0)
-            daily_profit_loss_krw = summary.get("daily_profit_loss", 0.0)
-            eval_profit_loss_krw = summary.get("eval_profit_loss", 0.0)
-            cum_profit_loss_krw = summary.get("cum_profit_loss", 0.0)
-            total_cash_krw = summary.get("total_cash", 0.0)
-            total_holdings_value_krw = summary.get("total_holdings_value", 0.0)
+            initial_capital_krw_local = summary.get("principal", 0.0)
+            current_equity_krw_local = summary.get("total_equity", 0.0)
+            daily_profit_loss_krw_local = summary.get("daily_profit_loss", 0.0)
+            eval_profit_loss_krw_local = summary.get("eval_profit_loss", 0.0)
+            cum_profit_loss_krw_local = summary.get("cum_profit_loss", 0.0)
+            cash_krw_local = summary.get("total_cash", 0.0)
+            holdings_value_krw_local = summary.get("total_holdings_value", 0.0)
 
             # --- Add to totals (already in KRW) ---
-            total_initial_capital_krw += initial_capital_krw
-            total_current_equity_krw += current_equity_krw
-            total_daily_profit_loss_krw += daily_profit_loss_krw
-            total_eval_profit_loss_krw += eval_profit_loss_krw
-            total_cum_profit_loss_krw += cum_profit_loss_krw
+            total_initial_capital_krw += initial_capital_krw_local
+            total_current_equity_krw += current_equity_krw_local
+            total_daily_profit_loss_krw += daily_profit_loss_krw_local
+            total_eval_profit_loss_krw += eval_profit_loss_krw_local
+            total_cum_profit_loss_krw += cum_profit_loss_krw_local
             total_cash_krw += total_cash_krw
-            total_holdings_value_krw += total_holdings_value_krw
+            total_holdings_value_krw += holdings_value_krw_local
 
             # --- Prepare summary for display (all in KRW) ---
             account_summaries.append(
                 {
                     "display_name": account_info["display_name"],
-                    "principal": initial_capital_krw,
-                    "current_equity": current_equity_krw,
-                    "total_cash": total_cash_krw,
-                    "daily_profit_loss": daily_profit_loss_krw,
+                    "principal": initial_capital_krw_local,
+                    "current_equity": current_equity_krw_local,
+                    "total_cash": cash_krw_local,
+                    "daily_profit_loss": daily_profit_loss_krw_local,
                     "daily_return_pct": summary.get("daily_return_pct", 0.0),
-                    "eval_profit_loss": eval_profit_loss_krw,
+                    "eval_profit_loss": eval_profit_loss_krw_local,
                     "eval_return_pct": summary.get("eval_return_pct", 0.0),
-                    "cum_profit_loss": cum_profit_loss_krw,
+                    "cum_profit_loss": cum_profit_loss_krw_local,
                     "cum_return_pct": summary.get("cum_return_pct", 0.0),
                     "currency": "KRW",  # Always display in KRW
                     "amt_precision": 0,  # Always display as integer KRW
