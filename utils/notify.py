@@ -1,8 +1,16 @@
 import os
+from datetime import datetime
 from typing import Optional, Tuple
 
 import requests
 import settings as global_settings
+
+try:
+    from croniter import croniter
+    import pytz
+except ImportError:
+    croniter = None
+    pytz = None
 
 _LAST_ERROR: Optional[str] = None
 
@@ -33,6 +41,40 @@ def get_slack_webhook_url(country: str, account: Optional[str] = None) -> Option
         return url, env_var_name
 
     return None
+
+
+def should_notify_on_schedule(country: str) -> bool:
+    """
+    알림 전용 CRON 설정이 있는 경우, 현재 시간이 해당 스케줄과 일치하는지 확인합니다.
+    설정이 없으면 항상 True를 반환합니다.
+    """
+    if not croniter or not pytz:
+        return True  # 라이브러리가 없으면 검사를 건너뛰고 항상 알림
+
+    # 1. 알림 전용 CRON 환경 변수 확인
+    # 환경 변수를 먼저 확인하고, 없으면 settings.py의 설정을 사용합니다.
+    notify_cron_env = f"NOTIFY_{country.upper()}_CRON"
+    cron_schedule = os.environ.get(notify_cron_env)
+    if cron_schedule is None:
+        # settings.py에서 해당 변수를 가져옵니다.
+        cron_schedule = getattr(global_settings, notify_cron_env, None)
+
+    if not cron_schedule:
+        return True  # 설정이 없으면 항상 알림
+
+    # 2. 타임존 설정 (aps.py와 일관성 유지)
+    tz_env = f"SCHEDULE_{country.upper()}_TZ"
+    default_tz = {"kor": "Asia/Seoul", "aus": "Australia/Sydney", "coin": "Asia/Seoul"}.get(
+        country, "Asia/Seoul"
+    )
+    tz_str = os.environ.get(tz_env, default_tz)
+
+    try:
+        local_tz = pytz.timezone(tz_str)
+        now = datetime.now(local_tz)
+        return croniter.match(cron_schedule, now)
+    except Exception:
+        return True  # 오류 발생 시 안전하게 알림 허용
 
 
 def send_log_to_slack(message: str):

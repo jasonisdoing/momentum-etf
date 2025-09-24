@@ -1420,26 +1420,18 @@ def _build_header_line(
                 / (1 + international_shares_change_pct / 100)
                 * aud_krw_rate
             )
-        print(intl_info)
-        print(f"total_acquisition_cost: {total_acquisition_cost}")
-        print(f"international_shares_value: {international_shares_value}")
         total_holdings_value = total_holdings
         final_total_acquisition_cost = total_acquisition_cost + international_shares_cost
     else:  # kor, coin
         total_holdings_value = total_holdings
         final_total_acquisition_cost = total_acquisition_cost
 
-    print(f"total_holdings: {total_holdings}")
-    print(f"final_total_acquisition_cost: {final_total_acquisition_cost}")
-
     eval_ret_pct = (
         ((total_holdings_value / final_total_acquisition_cost) - 1.0) * 100.0
         if final_total_acquisition_cost > 0
         else 0.0
     )
-    print(f"eval_ret_pct: {eval_ret_pct}")
     eval_profit_loss = total_holdings_value - final_total_acquisition_cost
-    print(f"eval_profit_loss: {eval_profit_loss}")
 
     # --- 최종 헤더 및 요약 데이터 생성 ---
 
@@ -2252,7 +2244,7 @@ def _maybe_notify_detailed_signal(
     slack_message_lines: list[str],
 ) -> bool:
     """국가별 설정에 따라 슬랙으로 상세 현황 알림을 전송합니다."""
-    from utils.notify import get_slack_webhook_url, send_slack_message
+    from utils.notify import get_slack_webhook_url, send_slack_message, should_notify_on_schedule
 
     # 사용자가 모든 수동 실행에서 슬랙 알림을 받기를 원하므로, 거래일 확인 로직을 비활성화합니다.
     # 이로 인해 과거 날짜 조회 등 모든 'status' 명령어 실행 시 알림이 전송됩니다.
@@ -2261,6 +2253,10 @@ def _maybe_notify_detailed_signal(
     # --- 슬랙 알림 발송 ---
     webhook_info = get_slack_webhook_url(country, account=account)
     if not webhook_info:
+        return False
+
+    # 알림 전용 CRON 설정이 있고, 현재 시간이 스케줄과 맞지 않으면 알림을 보내지 않습니다.
+    if not should_notify_on_schedule(country):
         return False
     webhook_url, webhook_name = webhook_info
 
@@ -2533,7 +2529,8 @@ def send_summary_notification(
     duration: float,
     old_equity: float,
 ) -> None:
-    """작업 완료 요약 슬랙 알림을 전송합니다."""
+    """작업 완료 요약 슬랙 알림을 전송합니다. 알림 전용 CRON 설정이 있으면 해당 시간에만 전송됩니다."""
+    from utils.notify import should_notify_on_schedule
     from utils.db_manager import get_portfolio_snapshot
 
     # transaction_manager는 선택적으로 임포트합니다. 실패해도 알림은 계속되어야 합니다.
@@ -2543,6 +2540,10 @@ def send_summary_notification(
         get_transactions_up_to_date = None
 
     from utils.report import format_kr_money
+
+    # 알림 전용 CRON 설정이 있고, 현재 시간이 스케줄과 맞지 않으면 알림을 보내지 않습니다.
+    if not should_notify_on_schedule(country):
+        return
 
     try:
         date_str = report_date.strftime("%Y-%m-%d")

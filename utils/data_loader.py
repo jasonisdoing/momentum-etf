@@ -33,7 +33,8 @@ except Exception:
 
 from utils.cache_utils import load_cached_frame, save_cached_frame
 from utils.stock_list_io import get_etfs
-from utils.notify import send_verbose_log_to_slack
+
+# from utils.notify import send_verbose_log_to_slack
 
 import warnings
 
@@ -375,8 +376,8 @@ def _fetch_ohlcv_with_cache(
             new_frames.append(fetched)
 
     combined_df = cached_df
-    prev_count = 0 if cached_df is None else cached_df.shape[0]
-    added_count = 0
+    # prev_count = 0 if cached_df is None else cached_df.shape[0]
+    # added_count = 0
 
     if new_frames:
         frames = []
@@ -388,17 +389,17 @@ def _fetch_ohlcv_with_cache(
         combined_df = combined_df[~combined_df.index.duplicated(keep="last")]
         save_cached_frame(country, ticker, combined_df)
 
-        new_total = combined_df.shape[0]
-        added_count = max(0, new_total - prev_count)
-        if added_count > 0:
-            try:
-                display_name = _get_display_name(country, ticker)
-                suffix = f"({display_name})" if display_name else ""
-                send_verbose_log_to_slack(
-                    f"[CACHE] {country.upper()}/{ticker}{suffix} {new_total:,} rows (+{added_count:,} rows)"
-                )
-            except Exception:
-                pass
+        # new_total = combined_df.shape[0]
+        # added_count = max(0, new_total - prev_count)
+        # if added_count > 0:
+        #     try:
+        #         display_name = _get_display_name(country, ticker)
+        #         suffix = f"({display_name})" if display_name else ""
+        #         send_verbose_log_to_slack(
+        #             f"[CACHE] {country.upper()}/{ticker}{suffix} {new_total:,} rows (+{added_count:,} rows)"
+        #         )
+        #     except Exception:
+        #         pass
 
     if combined_df is None or combined_df.empty:
         return None

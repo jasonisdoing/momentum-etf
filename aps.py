@@ -10,7 +10,7 @@ APScheduler 기반 스케줄러
 - SCHEDULE_AUS_CRON: 호주 시그널 계산 주기
 - SCHEDULE_COIN_CRON: 코인 시그널 계산 주기
 - SCHEDULE_KOR_TZ: 한국 시간대 (기본: "Asia/Seoul")
-- SCHEDULE_AUS_TZ: 호주 시간대 (기본: "Australia/Sydney")
+- SCHEDULE_AUS_TZ: 호주 시간대 (기본: "Asia/Seoul")
 - SCHEDULE_COIN_TZ: 코인 시간대 (기본: "Asia/Seoul")
 - RUN_IMMEDIATELY_ON_START: "1" 이면 시작 시 즉시 한 번 실행 (기본: "0")
 """
@@ -192,7 +192,7 @@ def main():
 
     # coin
     if _bool_env("SCHEDULE_ENABLE_COIN", True):
-        cron = _get("SCHEDULE_COIN_CRON", "1,31 * * * *")
+        cron = _get("SCHEDULE_COIN_CRON", "*/5 * * * *")
         tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,
@@ -204,8 +204,8 @@ def main():
 
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
-        cron = _get("SCHEDULE_AUS_CRON", "1 9-18 * * 1-5")
-        tz = _get("SCHEDULE_AUS_TZ", "Australia/Sydney")
+        cron = _get("SCHEDULE_AUS_CRON", "*/5 * * * *")
+        tz = _get("SCHEDULE_AUS_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,
             CronTrigger.from_crontab(cron, timezone=tz),
@@ -216,7 +216,7 @@ def main():
 
     # kor
     if _bool_env("SCHEDULE_ENABLE_KOR", True):
-        cron = _get("SCHEDULE_KOR_CRON", "1 9-18 * * 1-5")
+        cron = _get("SCHEDULE_KOR_CRON", "*/5 * * * *")
         tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,
@@ -237,15 +237,14 @@ def main():
         logging.info(f"Scheduled CACHE: cron='{cache_cron}' tz='{cache_tz}'")
 
     # 시작 시 한 번 즉시 실행
-    # logging.info("\n[Initial Run] Starting...")
-    # # run_status("aus")
-    # for country in ("coin", "aus", "kor"):
-    #     try:
-    #         if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", True):
-    #             run_signals_for_country(country)
-    #     except Exception:
-    #         logging.error(f"Error during initial run for {country}", exc_info=True)
-    # logging.info("[Initial Run] Complete.")
+    logging.info("\n[Initial Run] Starting...")
+    for country in ("coin", "aus", "kor"):
+        try:
+            if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", True):
+                run_signals_for_country(country)
+        except Exception:
+            logging.error(f"Error during initial run for {country}", exc_info=True)
+    logging.info("[Initial Run] Complete.")
 
     # 다음 실행 시간 출력
     jobs = scheduler.get_jobs()
