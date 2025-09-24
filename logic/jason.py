@@ -99,6 +99,7 @@ def run_portfolio_backtest(
     regime_filter_ma_period: int = 200,
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
+    min_buy_score: Optional[float] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     단일 이동평균선 교차 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
@@ -429,8 +430,14 @@ def run_portfolio_backtest(
                         and i >= ticker_state_cand["buy_block_until"]
                         and buy_signal_days_today > 0
                     ):
-                        score_cand = candidate_metrics["ma_score"].get(dt, -float("inf"))
-                        if pd.notna(score_cand):
+                        score_cand = candidate_metrics["ma_score"].get(dt, -float("inf")) or -float(
+                            "inf"
+                        )
+                        passes_score_threshold = True
+                        if min_buy_score is not None and score_cand < min_buy_score:
+                            passes_score_threshold = False
+
+                        if passes_score_threshold:
                             buy_ranked_candidates.append((score_cand, candidate_ticker))
                 buy_ranked_candidates.sort(reverse=True)
 
@@ -1244,6 +1251,7 @@ def run_single_ticker_backtest(
     ma_period: int = 20,
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
+    min_buy_score: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     단일 종목에 대해 이동평균선 교차 전략 백테스트를 실행합니다.
@@ -1349,7 +1357,15 @@ def run_single_ticker_backtest(
 
         if decision is None and shares == 0 and i >= buy_block_until:
             buy_signal_days_today = buy_signal_days.iloc[i]
-            if buy_signal_days_today > 0:
+            ma_score_today = 0.0
+            if pd.notna(ma_today) and ma_today > 0:
+                ma_score_today = (price / ma_today) - 1.0
+
+            passes_score_threshold = True
+            if min_buy_score is not None and ma_score_today < min_buy_score:
+                passes_score_threshold = False
+
+            if buy_signal_days_today > 0 and passes_score_threshold:
                 if country in ("coin", "aus"):
                     # 소수점 4자리까지 허용
                     buy_qty = round(cash / price, 4) if price > 0 else 0.0

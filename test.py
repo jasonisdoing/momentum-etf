@@ -260,6 +260,7 @@ def main(
         portfolio_topn = country_settings["portfolio_topn"]
         settings.REPLACE_SCORE_THRESHOLD = country_settings["replace_threshold"]
         settings.REPLACE_WEAKER_STOCK = country_settings["replace_weaker_stock"]
+        min_buy_score = country_settings.get("min_buy_score", 0.0)
     except SystemExit as e:
         print(str(e))
         if log_file:
@@ -426,6 +427,7 @@ def main(
                     regime_filter_ma_period=settings.MARKET_REGIME_FILTER_MA_PERIOD,
                     stop_loss_pct=settings.HOLDING_STOP_LOSS_PCT,
                     cooldown_days=settings.COOLDOWN_DAYS,
+                    min_buy_score=min_buy_score,
                 )
                 or {}
             )
@@ -451,6 +453,7 @@ def main(
                     ma_period=settings.MA_PERIOD,
                     stop_loss_pct=settings.HOLDING_STOP_LOSS_PCT,
                     cooldown_days=settings.COOLDOWN_DAYS,
+                    min_buy_score=min_buy_score,
                 )
                 if not ts.empty:
                     time_series_by_ticker[ticker] = ts

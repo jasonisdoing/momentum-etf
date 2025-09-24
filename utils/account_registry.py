@@ -113,6 +113,7 @@ def get_country_file_settings(country: str) -> Dict[str, Any]:
         portfolio_topn = getattr(module, "PORTFOLIO_TOPN")
         replace_weaker = getattr(module, "REPLACE_WEAKER_STOCK")
         replace_threshold = getattr(module, "REPLACE_SCORE_THRESHOLD")
+        min_buy_score = getattr(module, "MIN_BUY_SCORE", 0.0)  # 없으면 0.0으로 폴백
 
         # 유효성 검사
         if not isinstance(ma_period, int) or ma_period <= 0:
@@ -123,11 +124,14 @@ def get_country_file_settings(country: str) -> Dict[str, Any]:
             raise ValueError("REPLACE_WEAKER_STOCK은 True 또는 False여야 합니다.")
         if not isinstance(replace_threshold, (int, float)):
             raise ValueError("REPLACE_SCORE_THRESHOLD는 숫자여야 합니다.")
+        if not isinstance(min_buy_score, (int, float)):
+            raise ValueError("MIN_BUY_SCORE는 숫자여야 합니다.")
 
         settings["ma_period"] = ma_period
         settings["portfolio_topn"] = portfolio_topn
         settings["replace_weaker_stock"] = replace_weaker
         settings["replace_threshold"] = replace_threshold
+        settings["min_buy_score"] = min_buy_score
 
     except (AttributeError, ValueError, TypeError, ImportError) as e:
         raise SystemExit(f"오류: 국가 설정 파일({file_path})에 문제가 있습니다: {e}")
