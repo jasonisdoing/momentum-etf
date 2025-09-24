@@ -22,6 +22,9 @@ except ImportError:
     st.stop()
 
 from signals import get_market_regime_status_string
+from utils.transaction_manager import (
+    get_transactions_up_to_date,
+)
 from utils.account_registry import (
     get_account_file_settings,
     get_accounts_by_country,
@@ -102,7 +105,14 @@ def main():
         try:
             settings = get_account_file_settings(account)
             # For all accounts, initial_capital is in KRW.
-            initial_capital_krw = float(settings.get("initial_capital", 0.0))
+            initial_capital_from_file = float(settings.get("initial_capital", 0.0))
+
+            # 자본 추가 내역을 반영하여 원금을 계산합니다.
+            injections = get_transactions_up_to_date(
+                country, account, datetime.now(), "capital_injection"
+            )
+            total_injections = sum(inj.get("amount", 0.0) for inj in injections)
+            principal_krw = initial_capital_from_file + total_injections
 
             snapshot = get_portfolio_snapshot(country, account, date_str=date_str_for_snapshot)
             if not snapshot:
@@ -137,20 +147,18 @@ def main():
                 ((current_equity_krw / prev_equity_krw) - 1) * 100 if prev_equity_krw > 0 else 0.0
             )
             cum_return_pct = (
-                ((current_equity_krw / initial_capital_krw) - 1) * 100
-                if initial_capital_krw > 0
-                else 0.0
+                ((current_equity_krw / principal_krw) - 1) * 100 if principal_krw > 0 else 0.0
             )
 
             # --- Add to totals (already in KRW) ---
-            total_initial_capital_krw += initial_capital_krw
+            total_initial_capital_krw += principal_krw
             total_current_equity_krw += current_equity_krw
 
             # --- Prepare summary for display (all in KRW) ---
             account_summaries.append(
                 {
                     "display_name": account_info["display_name"],
-                    "initial_capital": initial_capital_krw,
+                    "initial_capital": principal_krw,  # "원금"으로 사용될 값
                     "current_equity": current_equity_krw,
                     "daily_return_pct": daily_return_pct,
                     "cum_return_pct": cum_return_pct,
@@ -179,7 +187,7 @@ def main():
     current_equity_display = "****** 원" if hide_amounts else f"{total_current_equity_krw:,.0f} 원"
     profit_loss_display = "****** 원" if hide_amounts else f"{total_profit_loss_krw:,.0f} 원"
 
-    col1.metric(label="총 초기자본", value=initial_capital_display)
+    col1.metric(label="총 원금", value=initial_capital_display)
     col2.metric(
         label="총 평가금액",
         value=current_equity_display,
@@ -201,7 +209,7 @@ def main():
     header_cols = st.columns((2, 2.2, 2.2, 2.2, 1.5, 1.5))
     header_cols[0].markdown("**계좌**")
     header_cols[1].markdown(
-        "<div style='text-align: right;'><b>초기자본</b></div>", unsafe_allow_html=True
+        "<div style='text-align: right;'><b>원금</b></div>", unsafe_allow_html=True
     )
     header_cols[2].markdown(
         "<div style='text-align: right;'><b>평가금액</b></div>", unsafe_allow_html=True
