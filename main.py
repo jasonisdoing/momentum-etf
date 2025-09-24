@@ -33,8 +33,8 @@ from utils.data_loader import get_aud_to_krw_rate
 
 def main():
     """메인 대시보드를 렌더링합니다."""
-    st.set_page_config(page_title="main", page_icon="📈", layout="wide")
-    st.title("📈 메인 대시보드")
+    st.set_page_config(page_title="Momentum ETF", page_icon="📈", layout="wide")
+    st.title("대시보드")
 
     hide_amounts = st.toggle("금액 숨기기", key="hide_amounts")
 
@@ -100,44 +100,19 @@ def main():
                     today_dt = datetime.now()
             else:
                 today_dt = datetime.now()
-            report_data = get_latest_signal_report(country, account)
-            today_dt = None
-            if pytz:
-                try:
-                    seoul_tz = pytz.timezone("Asia/Seoul")
-                    today_dt = datetime.now(seoul_tz)
-                except Exception:
-                    today_dt = datetime.now()
-            else:
-                today_dt = datetime.now()
             report_data = get_latest_signal_report(country, account, date=today_dt)
             if not report_data or "summary" not in report_data:
                 continue
 
             summary = report_data["summary"]
 
-            currency = account_info.get("currency", "KRW")
-
             # --- KRW로 모든 값 변환 ---
-            print(summary.get("principal", 0.0))
             initial_capital_krw = summary.get("principal", 0.0)
             current_equity_krw = summary.get("total_equity", 0.0)
             daily_profit_loss_krw = summary.get("daily_profit_loss", 0.0)
             eval_profit_loss_krw = summary.get("eval_profit_loss", 0.0)
             cum_profit_loss_krw = summary.get("cum_profit_loss", 0.0)
             total_cash_krw = summary.get("total_cash", 0.0)
-
-            if currency == "AUD":
-                if aud_krw_rate:
-                    initial_capital_krw *= aud_krw_rate
-                    current_equity_krw *= aud_krw_rate
-                    daily_profit_loss_krw *= aud_krw_rate
-                    eval_profit_loss_krw *= aud_krw_rate
-                    cum_profit_loss_krw *= aud_krw_rate
-                    total_cash_krw *= aud_krw_rate
-                else:
-                    st.warning(f"'{account_info['display_name']}' 계좌의 환율 정보가 없어 요약에서 제외합니다.")
-                    continue
 
             # --- Add to totals (already in KRW) ---
             total_initial_capital_krw += initial_capital_krw
