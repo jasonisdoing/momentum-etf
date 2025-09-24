@@ -1914,19 +1914,8 @@ def generate_signal_report(
         score = decision_dict["score"]
         tkr = decision_dict["tkr"]
 
-        state_order = {
-            "HOLD": 0,
-            "CUT_STOPLOSS": 1,
-            "SELL_MOMENTUM": 2,
-            "SELL_TREND": 3,
-            "SELL_REPLACE": 4,
-            "SELL_REBALANCE": 4,
-            "SOLD": 5,
-            "BUY_REPLACE": 6,
-            "BUY": 7,
-            "WAIT": 8,
-        }
-        order = state_order.get(state, 99)
+        # DECISION_CONFIG에서 'order' 값을 가져옵니다. 없으면 99를 기본값으로 사용합니다.
+        order = DECISION_CONFIG.get(state, {}).get("order", 99)
 
         # 보유/매수/대기 종목 모두 점수가 높은 순으로 정렬
         sort_value = -score

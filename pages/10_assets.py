@@ -305,7 +305,7 @@ def render_assets_dashboard(
             equity_data_map = {pd.to_datetime(e["date"]).normalize(): e for e in existing_equities}
 
             db_day_set = set(equity_data_map.keys())
-            combined_days = sorted(trading_day_set.union(db_day_set))
+            combined_days = sorted(trading_day_set.union(db_day_set), reverse=True)
             all_trading_days = combined_days
 
             data_for_editor = []
