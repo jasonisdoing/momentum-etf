@@ -1442,7 +1442,7 @@ def _build_header_line(
         f"보유종목: {held_count}/{portfolio_topn} | 원금: {principal_str} | {day_ret_str} | "
         f"{eval_ret_str} | {cum_ret_str} | 현금: {cash_str} | 평가금액: {equity_str}"
     )
-    # --- N 거래일차 계산 및 추가 ---
+
     # --- N 거래일차 계산 및 추가 ---
     if initial_date and base_date >= initial_date:
         try:
@@ -1468,6 +1468,7 @@ def _build_header_line(
         "total_equity": current_equity,
         "total_holdings_value": total_holdings,
         "total_cash": total_cash,
+        "total_holdings_value": total_holdings,
         "daily_profit_loss": day_profit_loss,
         "daily_return_pct": day_ret_pct,
         "eval_profit_loss": eval_profit_loss,
