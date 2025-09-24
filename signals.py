@@ -1089,21 +1089,21 @@ def _fetch_and_prepare_data(
 
     # --- 데이터 로딩 및 지표 계산 ---
     tasks = []
-    for tkr, _ in pairs:
-        if not full_etf_meta.get(tkr, {}).get("is_active", True):
-            continue
-        df_full = prefetched_data.get(tkr) if prefetched_data else None
-        tasks.append(
-            (
-                tkr,
-                country,
-                required_months,
-                base_date,
-                ma_period,
-                df_full,
-                realtime_prices.get(tkr),  # 조회된 실시간 가격 전달
+    for tkr, name in pairs:
+        # is_active: true인 종목만 과거 데이터 조회 및 계산 태스크를 생성합니다.
+        if full_etf_meta.get(tkr, {}).get("is_active", True):
+            df_full = prefetched_data.get(tkr) if prefetched_data else None
+            tasks.append(
+                (
+                    tkr,
+                    country,
+                    required_months,
+                    base_date,
+                    ma_period,
+                    df_full,
+                    realtime_prices.get(tkr),  # 조회된 실시간 가격 전달
+                )
             )
-        )
 
     # 순차 처리로 데이터 로딩 및 기본 지표 계산
     processed_results: Dict[str, Dict[str, Any]] = {}
@@ -1146,8 +1146,26 @@ def _fetch_and_prepare_data(
     # 이제 `processed_results`를 사용하여 순차적으로 나머지 계산을 수행합니다.
     print("\n-> 최종 데이터 조합 및 계산 시작...")
     for tkr, _ in pairs:
-        if not full_etf_meta.get(tkr, {}).get("is_active", True):
+        is_active = full_etf_meta.get(tkr, {}).get("is_active", True)
+
+        if not is_active:
+            # 비활성 종목: 실시간 가격만 사용하고, 계산은 건너뜁니다.
+            price = realtime_prices.get(tkr)
+            if price is not None:
+                data_by_tkr[tkr] = {
+                    "price": price,
+                    "prev_close": 0.0,  # 과거 데이터 없으므로 0
+                    "s1": float("nan"),
+                    "s2": float("nan"),
+                    "score": 0.0,
+                    "filter": 0,
+                    "shares": float((holdings.get(tkr) or {}).get("shares") or 0.0),
+                    "avg_cost": float((holdings.get(tkr) or {}).get("avg_cost") or 0.0),
+                    "df": pd.DataFrame(),  # 빈 데이터프레임
+                }
             continue
+
+        # 활성 종목: 계산된 결과를 사용합니다.
         result = processed_results.get(tkr)
         if not result:
             failed_tickers_info[tkr] = "FETCH_FAILED"
