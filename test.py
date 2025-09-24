@@ -1,7 +1,7 @@
 import os
 import sys
 from datetime import datetime
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 
 import pandas as pd
 
@@ -15,6 +15,7 @@ from utils.account_registry import (
     get_common_file_settings,
     get_account_info,
 )
+from utils.tee import Tee
 from utils.report import (
     format_kr_money,
     render_table_eaw,
@@ -35,9 +36,9 @@ def _print_backtest_summary(
     test_months_range: int,
     initial_capital_krw: float,
     portfolio_topn: int,
-    ticker_summaries: List[Dict],
+    ticker_summaries: List[Dict[str, Any]],
 ):
-    from logic import settings
+    from logic import jason as settings
 
     """백테스트 결과 요약을 콘솔에 출력합니다."""
     account_info = get_account_info(account)
@@ -214,7 +215,25 @@ def main(
     if not account:
         raise ValueError("account is required for backtest execution")
 
-    from logic import settings
+    # --- 로그 파일 설정 ---
+    # quiet 모드가 아닐 때만 파일 로깅을 설정합니다.
+    original_stdout = sys.stdout
+    log_file = None
+    if not quiet:
+        log_dir = "logs"
+        os.makedirs(log_dir, exist_ok=True)
+        log_filename = f"test_{country}_{account}.log"
+        log_path = os.path.join(log_dir, log_filename)
+        try:
+            log_file = open(log_path, "w", encoding="utf-8")
+            sys.stdout = Tee(original_stdout, log_file)
+            print(f"백테스트 로그가 다음 파일에 저장됩니다: {log_path}")
+        except Exception as e:
+            print(f"경고: 로그 파일을 열 수 없습니다: {e}")
+            # 파일 열기 실패 시, 콘솔 출력은 계속 유지됩니다.
+            sys.stdout = original_stdout
+
+    from logic import jason as settings
 
     # 파일에서 초기 자본금 및 모든 계좌 설정을 가져옵니다.
     try:
@@ -231,7 +250,10 @@ def main(
             if aud_krw_rate and aud_krw_rate > 0:
                 initial_capital_krw /= aud_krw_rate
             else:
-                print("오류: AUD/KRW 환율을 가져올 수 없어 백테스트를 진행할 수 없습니다.")
+                if not quiet:
+                    print("오류: AUD/KRW 환율을 가져올 수 없어 백테스트를 진행할 수 없습니다.")
+                if log_file:
+                    log_file.close()
                 return
 
         settings.MA_PERIOD = country_settings["ma_period"]
@@ -240,7 +262,9 @@ def main(
         settings.REPLACE_WEAKER_STOCK = country_settings["replace_weaker_stock"]
     except SystemExit as e:
         print(str(e))
-        return
+        if log_file:
+            log_file.close()
+        return None
 
     # Optional overrides from caller (e.g., tuning scripts)
     if override_settings:
@@ -268,7 +292,9 @@ def main(
         settings.MARKET_REGIME_FILTER_MA_PERIOD = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
     except (SystemExit, KeyError, ValueError, TypeError) as e:
         print(f"오류: 공통 설정 파일을 읽는 중 문제가 발생했습니다: {e}")
-        return
+        if log_file:
+            log_file.close()
+        return None
 
     account_info = get_account_info(account)
     currency = account_info.get("currency", "KRW")
@@ -305,7 +331,9 @@ def main(
             else TEST_MONTHS_RANGE
         )
     except Exception:
-        print("오류: 테스트 기간(test_months_range) 설정이 올바르지 않습니다.")
+        if not quiet:
+            print("오류: 테스트 기간(test_months_range) 설정이 올바르지 않습니다.")
+        return_value = None
         return
 
     core_end_dt = get_latest_trading_day(country)
@@ -325,7 +353,9 @@ def main(
             )
     etfs_from_file = [etf for etf in all_etfs_from_file if etf["is_active"] is not False]
     if not etfs_from_file:
-        print(f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 백테스트에 사용할 종목을 찾을 수 없습니다.")
+        if not quiet:
+            print(f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 백테스트에 사용할 종목을 찾을 수 없습니다.")
+        return_value = None
         return
 
     # 티커 오버라이드: 콤마 구분 리스트. coin은 파일 목록과 합집합, 그 외는 교집합.
@@ -347,8 +377,10 @@ def main(
                 s for s in etfs_from_file if str(s.get("ticker") or "").upper() in allow_set
             ]
             if not filtered:
-                print("오류: override tickers 가 DB 목록과 일치하지 않습니다.")
-                return
+                if not quiet:
+                    print("오류: override tickers 가 DB 목록과 일치하지 않습니다.")
+                return_value = None
+                return None
             etfs_from_file = filtered
 
     return_value = None
@@ -366,10 +398,12 @@ def main(
             run_single_ticker_backtest = getattr(strategy_module, "run_single_ticker_backtest")
         except AttributeError:
             print(
-                "오류: 'logic.strategy' 모듈에 run_portfolio_backtest 또는 "
+                "오류: 'logic/jason.py' 모듈에 run_portfolio_backtest 또는 "
                 "run_single_ticker_backtest 함수가 정의되지 않았습니다."
             )
-            return
+            if log_file:
+                log_file.close()
+            return None
 
         # 시뮬레이션 실행
         time_series_by_ticker: Dict[str, pd.DataFrame] = {}
@@ -378,12 +412,20 @@ def main(
             time_series_by_ticker = (
                 run_portfolio_backtest(
                     stocks=etfs_from_file,
-                    initial_capital_krw=initial_capital_krw,
+                    initial_capital=initial_capital_krw,
                     core_start_date=core_start_dt,
                     top_n=portfolio_topn,
                     date_range=test_date_range,
                     country=country,
                     prefetched_data=prefetched_data,
+                    ma_period=settings.MA_PERIOD,
+                    replace_weaker_stock=settings.REPLACE_WEAKER_STOCK,
+                    replace_threshold=settings.REPLACE_SCORE_THRESHOLD,
+                    regime_filter_enabled=settings.MARKET_REGIME_FILTER_ENABLED,
+                    regime_filter_ticker=settings.MARKET_REGIME_FILTER_TICKER,
+                    regime_filter_ma_period=settings.MARKET_REGIME_FILTER_MA_PERIOD,
+                    stop_loss_pct=settings.HOLDING_STOP_LOSS_PCT,
+                    cooldown_days=settings.COOLDOWN_DAYS,
                 )
                 or {}
             )
@@ -391,30 +433,24 @@ def main(
                 name_by_ticker = {s["ticker"]: s["name"] for s in etfs_from_file}
                 name_by_ticker["CASH"] = "현금"
         else:
-            # 개별 종목 백테스트는 여전히 데이터를 미리 로드해야 합니다.
-            from utils.data_loader import fetch_ohlcv
-
-            raw_data_by_ticker: Dict[str, pd.DataFrame] = {}
-            for etf in etfs_from_file:
-                ticker = etf["ticker"]
-                df = fetch_ohlcv(ticker, country=country, date_range=test_date_range)
-                if df is not None and not df.empty:
-                    raw_data_by_ticker[ticker] = df
-
             # 종목별 고정 자본 방식: 전체 자본을 종목 수로 나눔
             capital_per_ticker = initial_capital_krw / len(etfs_from_file) if etfs_from_file else 0
             for etf in etfs_from_file:
                 ticker = etf["ticker"]
-                df_ticker = raw_data_by_ticker.get(ticker)
+                # prefetched_data가 있으면 사용하고, 없으면 None을 전달하여 함수 내부에서 조회하도록 합니다.
+                df_ticker = prefetched_data.get(ticker) if prefetched_data else None
                 if df_ticker is None:
                     continue
                 ts = run_single_ticker_backtest(
                     ticker,
                     df=df_ticker,
-                    initial_capital_krw=capital_per_ticker,
+                    initial_capital=capital_per_ticker,
                     core_start_date=core_start_dt,
                     date_range=test_date_range,
                     country=country,
+                    ma_period=settings.MA_PERIOD,
+                    stop_loss_pct=settings.HOLDING_STOP_LOSS_PCT,
+                    cooldown_days=settings.COOLDOWN_DAYS,
                 )
                 if not ts.empty:
                     time_series_by_ticker[ticker] = ts
@@ -422,13 +458,17 @@ def main(
         if not time_series_by_ticker:
             if not quiet:
                 print("시뮬레이션할 유효한 데이터가 없습니다.")
-            return
+            if log_file:
+                log_file.close()
+            return None
 
         # 모든 티커에 걸쳐 공통된 날짜로 정렬 (교집합)
         common_index = None
         for tkr, ts in time_series_by_ticker.items():
             common_index = ts.index if common_index is None else common_index.intersection(ts.index)
         if common_index is None or len(common_index) == 0:
+            if log_file:
+                log_file.close()
             if not quiet:
                 print("종목들 간에 공통된 거래일이 없습니다.")
             return
@@ -706,6 +746,8 @@ def main(
                 print("시뮬레이션 결과가 없습니다.")
         else:
             final_value = portfolio_values[-1]
+            if not quiet:
+                print(f"\n백테스트 최종 자산: {money_formatter(final_value)}")
             peak = -1
             max_drawdown = 0
             for value in portfolio_values:
@@ -722,7 +764,9 @@ def main(
                 market_regime_filter_enabled = bool(settings.MARKET_REGIME_FILTER_ENABLED)
             except AttributeError:
                 print("오류: MARKET_REGIME_FILTER_ENABLED 설정이 logic/settings.py 에 정의되어야 합니다.")
-                return
+                if log_file:
+                    log_file.close()
+                return None
 
             if market_regime_filter_enabled:
                 # '시장 위험 회피' 노트가 있는지 확인하여 리스크 오프 기간을 식별합니다.
@@ -922,7 +966,11 @@ def main(
                 )
 
     finally:
-        pass
+        # 원래의 stdout으로 복원하고 로그 파일을 닫습니다.
+        if not quiet and log_file:
+            sys.stdout = original_stdout
+            log_file.close()
+            print(f"\n백테스트가 완료되었습니다. 상세 내용은 {log_path} 파일을 확인하세요.")
 
     return return_value
 

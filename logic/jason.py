@@ -91,32 +91,21 @@ def run_portfolio_backtest(
     date_range: Optional[List[str]] = None,
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    ma_period: int = 20,
+    replace_weaker_stock: bool = True,
+    replace_threshold: float = 0.0,
+    regime_filter_enabled: bool = False,
+    regime_filter_ticker: str = "^GSPC",
+    regime_filter_ma_period: int = 200,
+    stop_loss_pct: float = -10.0,
+    cooldown_days: int = 5,
 ) -> Dict[str, pd.DataFrame]:
     """
     단일 이동평균선 교차 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
     """
-    from . import settings
-
-    # 설정값 로드 (필수)
-    try:
-        # 전략 고유 설정
-        ma_period_etf = int(settings.MA_PERIOD)
-        ma_period_stock = int(settings.MA_PERIOD)
-        replace_weaker_stock = bool(settings.REPLACE_WEAKER_STOCK)
-        replace_threshold = float(settings.REPLACE_SCORE_THRESHOLD)
-        # 시장 레짐 필터 설정
-        regime_filter_enabled = bool(settings.MARKET_REGIME_FILTER_ENABLED)
-        regime_filter_ticker = str(settings.MARKET_REGIME_FILTER_TICKER)
-        regime_filter_ma_period = int(settings.MARKET_REGIME_FILTER_MA_PERIOD)
-    except AttributeError as e:
-        raise AttributeError(f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.") from e
-
-    try:
-        # 공통 설정
-        stop_loss = settings.HOLDING_STOP_LOSS_PCT
-        cooldown_days = int(settings.COOLDOWN_DAYS)
-    except AttributeError as e:
-        raise AttributeError(f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.") from e
+    ma_period_etf = ma_period
+    ma_period_stock = ma_period
+    stop_loss = stop_loss_pct
 
     if top_n <= 0:
         raise ValueError("PORTFOLIO_TOPN (top_n)은 0보다 커야 합니다.")
@@ -124,16 +113,13 @@ def run_portfolio_backtest(
     # --- 티커 유형(ETF/주식) 구분 ---
     etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
 
-    # --- 티커별 카테고리 매핑 생성 ---
-    ticker_to_category = {stock["ticker"]: stock.get("category") for stock in stocks}
-
-    # --- 데이터 로딩 범위 계산 ---
-    # 웜업 기간은 필요한 이동평균 기간을 기준으로 산정
-    max_ma_period = max(ma_period_etf, ma_period_stock)
+    # --- 데이터 로딩 범위 계산 (웜업 기간 포함) ---
+    # 웜업 기간은 이동평균 계산에 필요한 과거 데이터를 확보하기 위함입니다.
+    max_ma_period = max(ma_period_etf, ma_period_stock, regime_filter_ma_period)
     warmup_days = int(max_ma_period * 1.5)
 
-    adjusted_date_range = None
-    if date_range and len(date_range) == 2:
+    adjusted_date_range = date_range
+    if date_range and len(date_range) == 2 and date_range[0] is not None:
         core_start = pd.to_datetime(date_range[0])
         warmup_start = core_start - pd.DateOffset(days=warmup_days)
         adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
@@ -154,15 +140,19 @@ def run_portfolio_backtest(
             regime_filter_enabled = False
 
     # --- 개별 종목 데이터 로딩 및 지표 계산 ---
+    # --- 티커별 카테고리 매핑 생성 ---
+    ticker_to_category = {stock["ticker"]: stock.get("category") for stock in stocks}
     metrics_by_ticker = {}
     tickers_to_process = [s["ticker"] for s in stocks]
 
     for ticker in tickers_to_process:
         # 미리 로드된 데이터가 있으면 사용하고, 없으면 새로 조회합니다.
         if prefetched_data and ticker in prefetched_data:
-            df = prefetched_data[ticker].copy()
+            df = prefetched_data[ticker]
         else:
-            df = fetch_ohlcv(ticker, country=country, date_range=adjusted_date_range)
+            # prefetched_data가 없으면 date_range를 사용하여 직접 조회합니다.
+            # 이 경로는 주로 test.py가 아닌 다른 곳에서 호출될 때 사용됩니다.
+            df = fetch_ohlcv(ticker, country=country, date_range=date_range)
 
         if df is None:
             continue
@@ -1251,29 +1241,23 @@ def run_single_ticker_backtest(
     core_start_date: Optional[pd.Timestamp] = None,
     date_range: Optional[List[str]] = None,
     country: str = "kor",
+    ma_period: int = 20,
+    stop_loss_pct: float = -10.0,
+    cooldown_days: int = 5,
 ) -> pd.DataFrame:
     """
     단일 종목에 대해 이동평균선 교차 전략 백테스트를 실행합니다.
     """
-    from . import settings
-
-    try:
-        # 전략 고유 설정
-        ma_period_etf = int(settings.MA_PERIOD)
-        ma_period_stock = int(settings.MA_PERIOD)
-    except AttributeError as e:
-        raise AttributeError(f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.") from e
-
-    try:
-        # 공통 설정
-        stop_loss = settings.HOLDING_STOP_LOSS_PCT
-        cooldown_days = int(settings.COOLDOWN_DAYS)
-    except AttributeError as e:
-        raise AttributeError(f"'{e.name}' 설정이 logic/settings.py 파일에 반드시 정의되어야 합니다.") from e
+    ma_period_etf = ma_period
+    ma_period_stock = ma_period
+    stop_loss = stop_loss_pct
 
     # --- 티커 유형(ETF/주식) 구분 ---
     ma_period = ma_period_etf if stock_type == "etf" else ma_period_stock
     if df is None:
+        # df가 제공되지 않으면, date_range를 사용하여 직접 데이터를 조회합니다.
+        # date_range가 없으면 기본값(3개월)으로 조회됩니다.
+        # test.py에서 호출 시에는 항상 date_range가 전달됩니다.
         df = fetch_ohlcv(ticker, country=country, date_range=date_range)
 
     if df is None or df.empty:

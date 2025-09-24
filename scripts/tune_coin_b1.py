@@ -38,7 +38,7 @@ TUNING_PARAMS = {
     "replace_threshold": [0],
 }
 # 백테스트 기간 (개월)
-TEST_MONTHS_RANGE = 3
+TEST_MONTHS_RANGE = 12
 
 
 class Tee:

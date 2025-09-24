@@ -297,7 +297,7 @@ def fetch_ohlcv(
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
 
     if date_range and len(date_range) == 2:
-        try:
+        try:  # date_range가 있으면, 다른 기간 인자들을 무시하고 이를 기준으로 start_dt, end_dt를 설정합니다.
             start_dt = pd.to_datetime(date_range[0])
             if date_range[1] is None:
                 # date_range의 두 번째 인자가 None이면 오늘까지 조회합니다.
@@ -309,12 +309,12 @@ def fetch_ohlcv(
             return None
     else:
         now = base_date if base_date is not None else pd.Timestamp.now()
-        if months_range is not None and len(months_range) == 2:
+        if months_range is not None and len(months_range) == 2:  # months_range가 있으면 사용
             start_off, end_off = months_range
             start_dt = now - pd.DateOffset(months=int(start_off))
             end_dt = now - pd.DateOffset(months=int(end_off))
         else:
-            months_back = months_back or 12
+            months_back = months_back or 3  # months_back의 기본값은 3개월
             start_dt = now - pd.DateOffset(months=int(months_back))
             end_dt = now
 
@@ -444,6 +444,7 @@ def _fetch_ohlcv_core(
                     start=start_dt,
                     end=end_dt + pd.Timedelta(days=1),
                     auto_adjust=True,
+                    progress=False,
                 )
             if df.empty:
                 return None
@@ -553,6 +554,7 @@ def _fetch_ohlcv_core(
                 start=start_dt,
                 end=end_dt + pd.Timedelta(days=1),
                 auto_adjust=False,  # 원본 데이터를 모두 가져옵니다.
+                progress=False,
             )
             if df.empty:
                 return None
@@ -609,13 +611,10 @@ def _fetch_ohlcv_core(
             df = _pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
             df.set_index("Date", inplace=True)
             df.sort_index(inplace=True)
-            cache_start_dt = _get_cache_start_dt()
-            window_start = start_dt
-            if cache_start_dt is not None and cache_start_dt > window_start:
-                window_start = cache_start_dt
-            if window_start > end_dt:
+            # Bithumb API는 전체 기간을 반환하므로, 요청된 start_dt와 end_dt로 정확히 잘라내야 합니다.
+            if start_dt > end_dt:
                 return None
-            df = df[(df.index >= window_start) & (df.index <= end_dt)]
+            df = df[(df.index >= start_dt) & (df.index <= end_dt)]
             if df.empty:
                 return None
             return df
@@ -844,6 +843,7 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
             auto_adjust=False,
+            progress=False,
             show_errors=False,  # 에러 로그를 직접 제어하기 위해 False로 설정
         )
 

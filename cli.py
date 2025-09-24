@@ -45,6 +45,7 @@ python cli.py kor --tune-regime --account m1
 
 import argparse
 import os
+import subprocess
 import time
 import sys
 from typing import Optional
@@ -160,53 +161,52 @@ def main():
                 if tickers_override:
                     override_settings["tickers_override"] = tickers_override
 
-            # 호주 시장의 경우, yfinance API 호출을 최소화하기 위해 데이터를 미리 로딩합니다.
-            if country == "aus":
-                print("백테스트 속도 향상을 위해 데이터를 미리 로딩합니다...")
-                import pandas as pd
+            # 백테스트 속도 향상을 위해 모든 국가에 대해 데이터를 미리 로딩합니다.
+            print("백테스트 속도 향상을 위해 데이터를 미리 로딩합니다...")
+            import pandas as pd
 
-                from utils.data_loader import fetch_ohlcv_for_tickers
-                from utils.account_registry import get_country_file_settings
-                from utils.stock_list_io import get_etfs
+            from utils.data_loader import fetch_ohlcv_for_tickers
+            from utils.account_registry import get_country_file_settings
+            from utils.stock_list_io import get_etfs
 
-                etfs_from_file = get_etfs(country)
-                if not etfs_from_file:
-                    print("오류: 'data/stocks/aus.json' 파일에서 백테스트에 사용할 티커를 찾을 수 없습니다.")
+            etfs_from_file = get_etfs(country)
+            if not etfs_from_file:
+                print(f"오류: 'data/{country}/' 폴더에서 백테스트에 사용할 티커를 찾을 수 없습니다.")
+                return
+
+            tickers = [s["ticker"] for s in etfs_from_file]
+            if tickers_override:
+                tickers = [t for t in tickers if t.upper() in set(tickers_override)]
+                if not tickers:
+                    print("오류: 지정한 --tickers 가 DB 목록과 일치하지 않습니다.")
                     return
 
-                tickers = [s["ticker"] for s in etfs_from_file]
-                if tickers_override:
-                    tickers = [t for t in tickers if t.upper() in set(tickers_override)]
-                    if not tickers:
-                        print("오류: 지정한 --tickers 가 DB 목록과 일치하지 않습니다.")
-                        return
+            try:
+                country_settings = get_country_file_settings(country)
+            except SystemExit as e:
+                print(str(e))
+                return
 
-                try:
-                    country_settings = get_country_file_settings(country)
-                except SystemExit as e:
-                    print(str(e))
-                    return
+            try:
+                test_months_range = TEST_MONTHS_RANGE
+                # test.py의 하드코딩된 값 대신 파일에서 실제 MA 기간을 가져옵니다.
+                ma_etf = int(country_settings["ma_period"])
+            except (KeyError, ValueError, TypeError):
+                print("오류: 계좌 설정 파일의 MA 기간 설정이 올바르지 않습니다.")
+                return
+            core_end_dt = pd.Timestamp.now()
+            core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
+            test_date_range = [
+                core_start_dt.strftime("%Y-%m-%d"),
+                core_end_dt.strftime("%Y-%m-%d"),
+            ]
+            max_ma_period = ma_etf
+            warmup_days = int(max_ma_period * 1.5)
 
-                try:
-                    test_months_range = TEST_MONTHS_RANGE
-                    # test.py의 하드코딩된 값 대신 파일에서 실제 MA 기간을 가져옵니다.
-                    ma_etf = int(country_settings["ma_period"])
-                except (KeyError, ValueError, TypeError):
-                    print("오류: 계좌 설정 파일의 MA 기간 설정이 올바르지 않습니다.")
-                    return
-                core_end_dt = pd.Timestamp.now()
-                core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
-                test_date_range = [
-                    core_start_dt.strftime("%Y-%m-%d"),
-                    core_end_dt.strftime("%Y-%m-%d"),
-                ]
-                max_ma_period = ma_etf
-                warmup_days = int(max_ma_period * 1.5)
-
-                prefetched_data = fetch_ohlcv_for_tickers(
-                    tickers, country, date_range=test_date_range, warmup_days=warmup_days
-                )
-                print(f"총 {len(prefetched_data)}개 종목의 데이터 로딩 완료.")
+            prefetched_data = fetch_ohlcv_for_tickers(
+                tickers, country, date_range=test_date_range, warmup_days=warmup_days
+            )
+            print(f"총 {len(prefetched_data)}개 종목의 데이터 로딩 완료.")
 
             print("전략에 대한 상세 백테스트를 실행합니다...")
             run_test(
@@ -224,14 +224,14 @@ def main():
             tune_regime_filter(country=country, account=account)
 
         elif args.tune:
-            from tune import main as run_tune
-
             print(
                 f"{country.upper()} 포트폴리오의 전략 파라미터 튜닝을 시작합니다"
                 + (f" (계좌: {account})" if account else "")
                 + "..."
             )
-            run_tune(country_code=country, account=account)
+            # tune.py를 별도 프로세스로 실행하여 파일 로깅이 정상적으로 동작하도록 합니다.
+            command = [sys.executable, "tune.py", country, "--account", account]
+            subprocess.run(command, check=True)
 
         elif args.signal:
             from signals import main as run_signal, send_summary_notification

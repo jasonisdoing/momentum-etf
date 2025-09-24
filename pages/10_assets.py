@@ -284,6 +284,8 @@ def render_assets_dashboard(
         with st.spinner("거래일 및 평가금액 데이터를 불러오는 중..."):
             if prefetched_trading_days is not None:
                 all_trading_days = prefetched_trading_days
+            else:
+                all_trading_days = []  # prefetched_trading_days가 없을 경우 빈 리스트로 초기화
             trading_day_set = set()
             if not all_trading_days:
                 if country_code == "kor":

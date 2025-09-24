@@ -28,7 +28,7 @@ from utils.env import load_env_if_present
 def get_cache_file_path(country: str, ticker: str) -> Path:
     """주어진 티커의 캐시 파일 경로를 구성합니다."""
     project_root = Path(__file__).resolve().parent.parent
-    return project_root / "data" / "cache" / country / f"{ticker}.pkl"
+    return project_root / "data" / "stocks" / "cache" / country / f"{ticker}.pkl"
 
 
 def refresh_all_caches(countries: list[str], start_date: str, rebuild: bool = False):

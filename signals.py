@@ -720,9 +720,7 @@ def _load_and_prepare_ticker_data(args):
         from utils.data_loader import fetch_ohlcv
 
         # df_full이 제공되지 않으면, 네트워크를 통해 데이터를 새로 조회합니다.
-        df = fetch_ohlcv(
-            tkr, country=country, months_range=[required_months, 0], base_date=base_date
-        )
+        df = fetch_ohlcv(tkr, country=country, months_back=required_months, base_date=base_date)
     else:
         # df_full이 제공되면, base_date까지의 데이터만 잘라서 사용합니다.
         df = df_full[df_full.index <= base_date].copy()
