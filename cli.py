@@ -48,7 +48,7 @@ import os
 import subprocess
 import time
 import sys
-from typing import Optional
+from typing import List, Optional
 
 from test import TEST_MONTHS_RANGE
 
@@ -107,6 +107,18 @@ def main():
         type=str,
         default=None,
         help="조회할 포트폴리오 스냅샷의 날짜. (예: 2024-01-01). 미지정 시 최신 날짜 사용.",
+    )
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default=None,
+        help="여러 날짜를 재계산할 때 사용할 시작일(포함). (예: 2024-01-01)",
+    )
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        default=None,
+        help="여러 날짜를 재계산할 때 사용할 종료일(포함). 지정하지 않으면 시작일과 동일",
     )
     parser.add_argument(
         "--tickers",
@@ -238,20 +250,59 @@ def main():
             from utils.db_manager import get_portfolio_snapshot
 
             print("전략으로 오늘의 매매 신호를 조회합니다...")
-            start_time = time.time()
-
-            # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
-            old_snapshot = get_portfolio_snapshot(country, account=account)
-            old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
-
-            try:
-                report_date = run_signal(country=country, date_str=args.date, account=account)
-            except Exception as e:
-                print(f"\n오류: 시그널 생성 중 오류가 발생했습니다: {e}")
+            if args.start_date and args.date:
+                print("오류: --date 와 --start-date 는 동시에 사용할 수 없습니다.")
                 return
-            if report_date:
-                duration = time.time() - start_time
-                send_summary_notification(country, account, report_date, duration, old_equity)
+
+            if args.end_date and not args.start_date:
+                print("오류: --end-date 를 사용하려면 --start-date 도 지정해야 합니다.")
+                return
+
+            date_inputs: List[Optional[str]] = []
+            if args.start_date:
+                try:
+                    import pandas as pd
+
+                    start_dt = pd.to_datetime(args.start_date).normalize()
+                    end_dt = (
+                        pd.to_datetime(args.end_date).normalize() if args.end_date else start_dt
+                    )
+                except Exception:
+                    print("오류: 날짜 형식이 올바르지 않습니다. 예) 2024-01-01")
+                    return
+
+                if end_dt < start_dt:
+                    print("오류: --end-date 는 --start-date 이후여야 합니다.")
+                    return
+
+                date_inputs = [dt.strftime("%Y-%m-%d") for dt in pd.date_range(start_dt, end_dt)]
+            else:
+                date_inputs = [args.date]  # 단일 실행 (args.date 가 None 이면 최신 기준)
+
+            for idx, date_str in enumerate(date_inputs, start=1):
+                run_label = date_str if date_str else "최신 기준일"
+                print(f"-> ({idx}/{len(date_inputs)}) {run_label} 데이터 계산 중...")
+
+                start_time = time.time()
+
+                # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
+                if date_str:
+                    old_snapshot = get_portfolio_snapshot(
+                        country, account=account, date_str=date_str
+                    )
+                else:
+                    old_snapshot = get_portfolio_snapshot(country, account=account)
+                old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
+
+                try:
+                    report_date = run_signal(country=country, date_str=date_str, account=account)
+                except Exception as e:
+                    print(f"\n오류: {run_label} 시그널 생성 중 오류가 발생했습니다: {e}")
+                    continue
+
+                if report_date:
+                    duration = time.time() - start_time
+                    send_summary_notification(country, account, report_date, duration, old_equity)
 
         print(f"==================== [{country.upper()}/{account}] 계좌 작업 완료 ====================")
 

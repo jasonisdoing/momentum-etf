@@ -1013,6 +1013,10 @@ def generate_daily_signals_for_portfolio(
 
     is_risk_off = regime_info and regime_info.get("is_risk_off", False)
 
+    # WAIT 후보 목록과 남은 슬롯 수는 모든 시나리오에서 참조되므로 기본값을 미리 정의합니다.
+    wait_candidates_raw: List[Dict] = []
+    slots_to_fill = denom - held_count
+
     if is_risk_off:
         for decision in decisions:
             if decision["state"] == "HOLD":
@@ -1049,8 +1053,6 @@ def generate_daily_signals_for_portfolio(
             for d in decisions
             if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] in universe_tickers
         ]
-
-        slots_to_fill = denom - held_count
 
         # 신규 매수 로직: 빈 슬롯이 있을 때 실행
         if slots_to_fill > 0:

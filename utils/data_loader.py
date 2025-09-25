@@ -559,17 +559,20 @@ def _fetch_ohlcv_core(
             if df.empty:
                 return None
 
-            # 실제 마감가를 unadjusted_close 컬럼에 백업합니다.
-            if "Close" in df.columns:
-                df["unadjusted_close"] = df["Close"]
-
-            # Adj Close가 있는 경우, 이를 계산의 기준으로 삼고 Close 컬럼에 덮어씁니다.
-            if "Adj Close" in df.columns and not df["Adj Close"].isnull().all():
-                df["Close"] = df["Adj Close"]
-
+            # 실제 마감가를 unadjusted_close 컬럼에 백업하기 전에 MultiIndex 컬럼을 정리합니다.
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
                 df = df.loc[:, ~df.columns.duplicated()]
+
+            if "Close" in df.columns:
+                df["unadjusted_close"] = df["Close"]
+
+            if "Adj Close" in df.columns:
+                adj_close = df["Adj Close"]
+                if isinstance(adj_close, pd.DataFrame):
+                    adj_close = adj_close.iloc[:, 0]
+                if not adj_close.isnull().all():
+                    df["Close"] = adj_close
             if not df.index.is_unique:
                 df = df[~df.index.duplicated(keep="first")]
             if df.index.tz is not None:
