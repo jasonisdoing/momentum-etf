@@ -34,7 +34,6 @@ from utils.data_loader import (
 from utils.db_manager import (
     get_db_connection,
     get_portfolio_snapshot,
-    get_previous_portfolio_snapshot,
     get_trades_on_date,
     save_signal_report_to_db,
 )
@@ -1367,34 +1366,35 @@ def _build_header_line(
     # 라벨(오늘, 다음 거래일 등)을 결정합니다.
     if base_date.date() < today_cal.date():
         day_label = "기준일"
-    elif base_date.date() > today_cal.date():
-        day_label = "다음 거래일"
     else:
-        day_label = "오늘"
+        day_label = "다음 거래일" if base_date.date() > today_cal.date() else "오늘"
+
+    # 호주 계좌의 경우, 모든 요약 금액을 KRW로 환산합니다.
+    aud_krw_rate = None
+    if currency == "AUD":
+        aud_krw_rate = get_aud_to_krw_rate()
+        if aud_krw_rate:
+            current_equity *= aud_krw_rate
+            total_holdings *= aud_krw_rate
+            total_cash *= aud_krw_rate
+            equity_for_cum_calc *= aud_krw_rate
 
     # 일간 수익률 계산
-    # '다음 거래일' 리포트의 일간 수익률은 '오늘'의 수익률을 의미합니다.
-    # 따라서 이전 스냅샷을 조회하는 기준 날짜를 조정합니다.
-    if day_label == "다음 거래일":
-        # '다음 거래일' 리포트에서는 일간 수익률을 0으로 표시합니다.
-        day_ret_pct = 0.0
-        day_profit_loss = 0.0
-        prev_equity = None
-    else:
-        # '오늘' 또는 '과거' 리포트에서는 `base_date`를 기준으로 이전 스냅샷을 가져옵니다.
-        compare_date_for_prev = base_date
-        prev_snapshot = get_previous_portfolio_snapshot(country, compare_date_for_prev, account)
-        # 호주 계좌의 경우, 이전 평가금액도 KRW로 환산합니다.
-        if currency == "AUD" and prev_snapshot and aud_krw_rate:
-            prev_snapshot["total_equity"] *= aud_krw_rate
+    # DB를 조회하는 대신, 현재 테이블의 '전일 종가'와 '보유 수량'을 기반으로 이전 평가금액을 계산합니다.
+    prev_total_holdings = sum(
+        d["shares"] * d["prev_close"]
+        for d in data_by_tkr.values()
+        if d.get("shares", 0) > 0 and d.get("prev_close", 0) > 0
+    )
+    # 호주 계좌의 경우, 이전 보유금액도 KRW로 환산합니다.
+    if currency == "AUD" and aud_krw_rate:
+        prev_total_holdings *= aud_krw_rate
+    prev_equity = prev_total_holdings + total_cash if prev_total_holdings > 0 else 0.0
 
-        prev_equity = float(prev_snapshot.get("total_equity", 0.0)) if prev_snapshot else None
-        day_ret_pct = (
-            ((current_equity / prev_equity) - 1.0) * 100.0
-            if prev_equity and prev_equity > 0
-            else 0.0
-        )
-        day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
+    day_ret_pct = (
+        ((current_equity / prev_equity) - 1.0) * 100.0 if prev_equity and prev_equity > 0 else 0.0
+    )
+    day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
 
     # 평가 수익률
     total_acquisition_cost = sum(

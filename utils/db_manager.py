@@ -265,18 +265,25 @@ def get_previous_portfolio_snapshot(
         return None
 
     # 'daily_equities'와 'trades'에서 as_of_date 이전의 날짜들을 찾습니다.
+    # as_of_date를 포함하여 조회한 후, 코드에서 as_of_date를 제외하여 바로 이전 날짜를 찾습니다.
     equity_dates_query = _apply_account_filter(
-        {"country": country, "date": {"$lt": as_of_date}},
+        {"country": country, "date": {"$lte": as_of_date}},
         account,
     )
     equity_dates = db.daily_equities.distinct("date", equity_dates_query)
     trade_dates_query = _apply_account_filter(
-        {"country": country, "date": {"$lt": as_of_date}},
+        {"country": country, "date": {"$lte": as_of_date}},
         account,
     )
     trade_dates = db.trades.distinct("date", trade_dates_query)
 
     all_prev_dates = set(equity_dates).union(set(trade_dates))
+    # as_of_date의 시간대 정보를 제거하여 naive datetime으로 만듭니다.
+    as_of_date_naive = as_of_date.replace(tzinfo=None)
+
+    # as_of_date 당일은 제외합니다.
+    # DB에서 가져온 날짜들도 naive이므로, naive 객체로 비교해야 합니다.
+    all_prev_dates.discard(as_of_date_naive)
 
     if not all_prev_dates:
         return None
