@@ -1127,18 +1127,8 @@ def _build_header_line(
     summary_data: Dict,
 ) -> Tuple[str, pd.Timestamp, str]:
     """리포트의 헤더 라인을 생성합니다."""
-    from utils.account_registry import get_account_info
 
-    account_info = get_account_info(account)
-    currency = account_info.get("currency", "KRW") if account_info else "KRW"
-    precision = account_info.get("precision", 0) if account_info else 0
-
-    if country == "aus":
-        money_formatter = format_kr_money
-    else:
-        money_formatter = (
-            (lambda amt: f"${amt:,.{precision}f}") if currency == "AUD" else format_kr_money
-        )
+    money_formatter = format_kr_money
 
     # 보유 종목 수
     if country == "coin":
@@ -1445,20 +1435,9 @@ def _get_equity_update_message_line(
     country: str, account: str, old_equity: float, new_equity: float
 ):
     """평가금액 자동 보정 시 슬랙으로 알림을 보냅니다."""
-    from utils.account_registry import get_account_info
     from utils.report import format_kr_money
 
-    account_info = get_account_info(account)
-    currency = account_info.get("currency", "KRW")
-    precision = account_info.get("precision", 0)
-
-    def _aud_money_formatter(amount):
-        return f"${amount:,.{precision}f}"
-
-    if country == "aus":
-        money_formatter = format_kr_money
-    else:
-        money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
+    money_formatter = format_kr_money
 
     diff = new_equity - old_equity
     diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"
@@ -2200,28 +2179,11 @@ def _maybe_notify_detailed_signal(
         return False
     webhook_url, webhook_name = webhook_info
 
-    from utils.account_registry import get_account_info
-
-    account_info = get_account_info(account)
-    currency = account_info.get("currency", "KRW")
-    precision = account_info.get("precision", 0)
-
-    def _aud_money_formatter(amount):
-        return f"${amount:,.{precision}f}"
-
-    def _aud_price_formatter(p):
-        return f"${p:,.{precision}f}" if isinstance(p, (int, float)) else str(p)
-
-    def _kor_coin_price_formatter(p):
+    def _kr_price_formatter(p):
         return f"{int(round(p)):,}" if isinstance(p, (int, float)) else str(p)
 
-    # 국가별 포맷터 설정
-    if currency == "AUD":
-        money_formatter = _aud_money_formatter
-        price_formatter = _aud_price_formatter
-    else:  # kor, coin
-        money_formatter = format_kr_money
-        price_formatter = _kor_coin_price_formatter
+    money_formatter = format_kr_money
+    price_formatter = _kr_price_formatter
 
     # 상세 알림에서는 시작 알림에서 보낸 경고(데이터 부족 등)를 제외합니다.
     # header_line은 HTML <br> 태그로 경고와 구분됩니다.
@@ -2501,16 +2463,8 @@ def send_summary_notification(
             initial_capital_krw = 0.0  # 알림에서는 조용히 실패 처리
 
         message = f"[{prefix}/{date_str}] 작업 완료(작업시간: {duration:.1f}초)"
-        from utils.account_registry import get_account_info
 
-        account_info = get_account_info(account)
-        currency = account_info.get("currency", "KRW")
-        precision = account_info.get("precision", 0)
-
-        def _aud_money_formatter(amount):
-            return f"${amount:,.{precision}f}"
-
-        money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
+        money_formatter = format_kr_money
 
         if initial_capital_krw > 0 and get_transactions_up_to_date:
             # 자본 추가/인출 내역을 반영하여 누적 수익률 계산
