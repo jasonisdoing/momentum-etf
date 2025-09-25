@@ -4,33 +4,27 @@
         "tickers": [
             {
                 "ticker": "379800",
-                "name": "Kodex 미국S&P500",
-                "is_active": true
+                "name": "Kodex 미국S&P500"
             },
             {
                 "ticker": "379810",
-                "name": "Kodex 미국나스닥100",
-                "is_active": true
+                "name": "Kodex 미국나스닥100"
             },
             {
                 "ticker": "499150",
-                "name": "SOL 미국S&P500엔화노출(H)",
-                "is_active": true
+                "name": "SOL 미국S&P500엔화노출(H)"
             },
             {
                 "ticker": "426030",
-                "name": "TIMEFOLIO 미국나스닥100액티브",
-                "is_active": true
+                "name": "TIMEFOLIO 미국나스닥100액티브"
             },
             {
                 "ticker": "426020",
-                "name": "TIMEFOLIO 미국S&P500액티브",
-                "is_active": true
+                "name": "TIMEFOLIO 미국S&P500액티브"
             },
             {
                 "ticker": "0015B0",
-                "name": "KoAct 미국나스닥성장기업액티브",
-                "is_active": true
+                "name": "KoAct 미국나스닥성장기업액티브"
             }
         ]
     },
@@ -39,28 +33,23 @@
         "tickers": [
             {
                 "ticker": "381170",
-                "name": "TIGER 미국테크TOP10 INDXX",
-                "is_active": true
+                "name": "TIGER 미국테크TOP10 INDXX"
             },
             {
                 "ticker": "463690",
-                "name": "KODEX 미국S&P500커뮤니케이션",
-                "is_active": true
+                "name": "KODEX 미국S&P500커뮤니케이션"
             },
             {
                 "ticker": "473460",
-                "name": "KODEX 미국서학개미",
-                "is_active": true
+                "name": "KODEX 미국서학개미"
             },
             {
                 "ticker": "0051A0",
-                "name": "KoAct 브로드컴밸류체인액티브",
-                "is_active": true
+                "name": "KoAct 브로드컴밸류체인액티브"
             },
             {
                 "ticker": "0093D0",
-                "name": "KoAct 팔란티어밸류체인액티브",
-                "is_active": true
+                "name": "KoAct 팔란티어밸류체인액티브"
             }
         ]
     },
@@ -69,23 +58,19 @@
         "tickers": [
             {
                 "ticker": "0023B0",
-                "name": "PLUS 미국양자컴퓨팅TOP10",
-                "is_active": true
+                "name": "PLUS 미국양자컴퓨팅TOP10"
             },
             {
                 "ticker": "0023A0",
-                "name": "SOL 미국양자컴퓨팅TOP10",
-                "is_active": true
+                "name": "SOL 미국양자컴퓨팅TOP10"
             },
             {
                 "ticker": "498270",
-                "name": "KIWOOM 미국양자컴퓨팅",
-                "is_active": true
+                "name": "KIWOOM 미국양자컴퓨팅"
             },
             {
                 "ticker": "0020H0",
-                "name": "KoAct 글로벌양자컴퓨팅액티브",
-                "is_active": true
+                "name": "KoAct 글로벌양자컴퓨팅액티브"
             }
         ]
     },
@@ -94,13 +79,11 @@
         "tickers": [
             {
                 "ticker": "365000",
-                "name": "TIGER 인터넷TOP10",
-                "is_active": true
+                "name": "TIGER 인터넷TOP10"
             },
             {
                 "ticker": "157490",
-                "name": "TIGER 소프트웨어",
-                "is_active": true
+                "name": "TIGER 소프트웨어"
             }
         ]
     },
@@ -109,23 +92,19 @@
         "tickers": [
             {
                 "ticker": "069500",
-                "name": "Kodex 200",
-                "is_active": true
+                "name": "Kodex 200"
             },
             {
                 "ticker": "315930",
-                "name": "Kodex Top5Plus TR",
-                "is_active": true
+                "name": "Kodex Top5Plus TR"
             },
             {
                 "ticker": "495060",
-                "name": "TIMEFOLIO 코리아밸류업액티브",
-                "is_active": true
+                "name": "TIMEFOLIO 코리아밸류업액티브"
             },
             {
                 "ticker": "441800",
-                "name": "TIMEFOLIO Korea플러스배당액티브",
-                "is_active": true
+                "name": "TIMEFOLIO Korea플러스배당액티브"
             }
         ]
     },
@@ -134,13 +113,11 @@
         "tickers": [
             {
                 "ticker": "091160",
-                "name": "KODEX 반도체",
-                "is_active": true
+                "name": "KODEX 반도체"
             },
             {
                 "ticker": "0093A0",
-                "name": "RISE AI반도체TOP10",
-                "is_active": true
+                "name": "RISE AI반도체TOP10"
             }
         ]
     },
@@ -149,28 +126,23 @@
         "tickers": [
             {
                 "ticker": "390390",
-                "name": "KODEX 미국반도체",
-                "is_active": true
+                "name": "KODEX 미국반도체"
             },
             {
                 "ticker": "469060",
-                "name": "RISE 미국반도체NYSE",
-                "is_active": true
+                "name": "RISE 미국반도체NYSE"
             },
             {
                 "ticker": "381180",
-                "name": "TIGER 미국필라델피아반도체나스닥",
-                "is_active": true
+                "name": "TIGER 미국필라델피아반도체나스닥"
             },
             {
                 "ticker": "473490",
-                "name": "KIWOOM 글로벌AI반도체",
-                "is_active": true
+                "name": "KIWOOM 글로벌AI반도체"
             },
             {
                 "ticker": "453950",
-                "name": "TIGER TSMC파운드리밸류체인",
-                "is_active": true
+                "name": "TIGER TSMC파운드리밸류체인"
             }
         ]
     },
@@ -179,8 +151,7 @@
         "tickers": [
             {
                 "ticker": "456600",
-                "name": "TIMEFOLIO 글로벌AI인공지능액티브",
-                "is_active": true
+                "name": "TIMEFOLIO 글로벌AI인공지능액티브"
             }
         ]
     },
@@ -189,18 +160,15 @@
         "tickers": [
             {
                 "ticker": "469070",
-                "name": "RISE AI&로봇",
-                "is_active": true
+                "name": "RISE AI&로봇"
             },
             {
                 "ticker": "0035T0",
-                "name": "PLUS 글로벌휴머노이드로봇액티브",
-                "is_active": true
+                "name": "PLUS 글로벌휴머노이드로봇액티브"
             },
             {
                 "ticker": "445290",
-                "name": "KODEX 로봇액티브",
-                "is_active": true
+                "name": "KODEX 로봇액티브"
             }
         ]
     },
@@ -209,8 +177,7 @@
         "tickers": [
             {
                 "ticker": "473640",
-                "name": "HANARO 글로벌 금채굴기업",
-                "is_active": true
+                "name": "HANARO 글로벌 금채굴기업"
             }
         ]
     },
@@ -219,13 +186,11 @@
         "tickers": [
             {
                 "ticker": "0097L0",
-                "name": "KIWOOM 한국고배당&미국AI테크",
-                "is_active": false
+                "name": "KIWOOM 한국고배당&미국AI테크"
             },
             {
                 "ticker": "0107F0",
-                "name": "KIWOOM 미국고배당&AI테크",
-                "is_active": false
+                "name": "KIWOOM 미국고배당&AI테크"
             }
         ]
     },
@@ -234,8 +199,7 @@
         "tickers": [
             {
                 "ticker": "161510",
-                "name": "PLUS 고배당주",
-                "is_active": true
+                "name": "PLUS 고배당주"
             }
         ]
     },
@@ -244,18 +208,15 @@
         "tickers": [
             {
                 "ticker": "102970",
-                "name": "KODEX 증권",
-                "is_active": true
+                "name": "KODEX 증권"
             },
             {
                 "ticker": "498860",
-                "name": "RISE 코리아금융고배당",
-                "is_active": true
+                "name": "RISE 코리아금융고배당"
             },
             {
                 "ticker": "466940",
-                "name": "TIGER 은행고배당플러스TOP10",
-                "is_active": true
+                "name": "TIGER 은행고배당플러스TOP10"
             }
         ]
     },
@@ -264,13 +225,11 @@
         "tickers": [
             {
                 "ticker": "476070",
-                "name": "KODEX 글로벌비만치료제TOP2 Plus",
-                "is_active": true
+                "name": "KODEX 글로벌비만치료제TOP2 Plus"
             },
             {
                 "ticker": "203780",
-                "name": "TIGER 미국나스닥바이오",
-                "is_active": true
+                "name": "TIGER 미국나스닥바이오"
             }
         ]
     },
@@ -279,13 +238,11 @@
         "tickers": [
             {
                 "ticker": "463050",
-                "name": "TIMEFOLIO K바이오액티브",
-                "is_active": true
+                "name": "TIMEFOLIO K바이오액티브"
             },
             {
                 "ticker": "0000Z0",
-                "name": "RISE 바이오TOP10액티브",
-                "is_active": true
+                "name": "RISE 바이오TOP10액티브"
             }
         ]
     },
@@ -294,13 +251,11 @@
         "tickers": [
             {
                 "ticker": "487240",
-                "name": "Kodex AI전력핵심설비",
-                "is_active": true
+                "name": "Kodex AI전력핵심설비"
             },
             {
                 "ticker": "434730",
-                "name": "HANARO 원자력iSelect",
-                "is_active": true
+                "name": "HANARO 원자력iSelect"
             }
         ]
     },
@@ -309,13 +264,11 @@
         "tickers": [
             {
                 "ticker": "417450",
-                "name": "RISE 글로벌수소경제",
-                "is_active": true
+                "name": "RISE 글로벌수소경제"
             },
             {
                 "ticker": "419650",
-                "name": "PLUS 글로벌수소&차세대연료전지",
-                "is_active": true
+                "name": "PLUS 글로벌수소&차세대연료전지"
             }
         ]
     },
@@ -324,13 +277,11 @@
         "tickers": [
             {
                 "ticker": "442320",
-                "name": "RISE 글로벌원자력",
-                "is_active": true
+                "name": "RISE 글로벌원자력"
             },
             {
                 "ticker": "0051G0",
-                "name": "SOL 미국원자력SMR",
-                "is_active": true
+                "name": "SOL 미국원자력SMR"
             }
         ]
     },
@@ -339,13 +290,11 @@
         "tickers": [
             {
                 "ticker": "486450",
-                "name": "SOL 미국AI전력인프라",
-                "is_active": true
+                "name": "SOL 미국AI전력인프라"
             },
             {
                 "ticker": "487230",
-                "name": "Kodex 미국AI전력핵심인프라",
-                "is_active": true
+                "name": "Kodex 미국AI전력핵심인프라"
             }
         ]
     },
@@ -354,13 +303,11 @@
         "tickers": [
             {
                 "ticker": "449450",
-                "name": "PLUS K방산",
-                "is_active": true
+                "name": "PLUS K방산"
             },
             {
                 "ticker": "0080G0",
-                "name": "Kodex K방산TOP10",
-                "is_active": true
+                "name": "Kodex K방산TOP10"
             }
         ]
     },
@@ -369,8 +316,7 @@
         "tickers": [
             {
                 "ticker": "305720",
-                "name": "Kodex 2차전지산업",
-                "is_active": true
+                "name": "Kodex 2차전지산업"
             }
         ]
     },
@@ -379,13 +325,11 @@
         "tickers": [
             {
                 "ticker": "466920",
-                "name": "SOL 조선TOP3플러스",
-                "is_active": true
+                "name": "SOL 조선TOP3플러스"
             },
             {
                 "ticker": "445150",
-                "name": "Kodex 친환경조선해운액티브",
-                "is_active": true
+                "name": "Kodex 친환경조선해운액티브"
             }
         ]
     },
@@ -394,8 +338,7 @@
         "tickers": [
             {
                 "ticker": "139230",
-                "name": "TIGER 200 중공업",
-                "is_active": true
+                "name": "TIGER 200 중공업"
             }
         ]
     },
@@ -404,28 +347,23 @@
         "tickers": [
             {
                 "ticker": "414780",
-                "name": "TIGER 차이나과창판STAR50(합성)",
-                "is_active": true
+                "name": "TIGER 차이나과창판STAR50(합성)"
             },
             {
                 "ticker": "413220",
-                "name": "SOL 차이나태양광CSI(합성)",
-                "is_active": true
+                "name": "SOL 차이나태양광CSI(합성)"
             },
             {
                 "ticker": "256750",
-                "name": "KODEX 차이나심천ChiNext(합성)",
-                "is_active": true
+                "name": "KODEX 차이나심천ChiNext(합성)"
             },
             {
                 "ticker": "372330",
-                "name": "Kodex 차이나항셍테크",
-                "is_active": true
+                "name": "Kodex 차이나항셍테크"
             },
             {
                 "ticker": "419430",
-                "name": "Kodex 차이나2차전지MSCI(합성)",
-                "is_active": true
+                "name": "Kodex 차이나2차전지MSCI(합성)"
             }
         ]
     },
@@ -434,238 +372,191 @@
         "tickers": [
             {
                 "ticker": "117680",
-                "name": "KODEX 철강",
-                "is_active": true
+                "name": "KODEX 철강"
             },
             {
                 "ticker": "091180",
-                "name": "KODEX 자동차",
-                "is_active": true
+                "name": "KODEX 자동차"
             },
             {
                 "ticker": "102960",
-                "name": "KODEX 기계장비",
-                "is_active": true
+                "name": "KODEX 기계장비"
             },
             {
                 "ticker": "117460",
-                "name": "KODEX 에너지화학",
-                "is_active": true
+                "name": "KODEX 에너지화학"
             },
             {
                 "ticker": "117700",
-                "name": "KODEX 건설",
-                "is_active": true
+                "name": "KODEX 건설"
             },
             {
                 "ticker": "140700",
-                "name": "Kodex 보험",
-                "is_active": true
+                "name": "Kodex 보험"
             },
             {
                 "ticker": "140710",
-                "name": "KODEX 운송",
-                "is_active": true
+                "name": "KODEX 운송"
             },
             {
                 "ticker": "182480",
-                "name": "TIGER 미국MSCI리츠(합성 H)",
-                "is_active": true
+                "name": "TIGER 미국MSCI리츠(합성 H)"
             },
             {
                 "ticker": "200030",
-                "name": "KODEX 미국S&P500산업재(합성)",
-                "is_active": true
+                "name": "KODEX 미국S&P500산업재(합성)"
             },
             {
                 "ticker": "218420",
-                "name": "KODEX 미국S&P500에너지(합성)",
-                "is_active": true
+                "name": "KODEX 미국S&P500에너지(합성)"
             },
             {
                 "ticker": "241180",
-                "name": "TIGER 일본니케이225",
-                "is_active": true
+                "name": "TIGER 일본니케이225"
             },
             {
                 "ticker": "245340",
-                "name": "TIGER 미국다우존스30",
-                "is_active": true
+                "name": "TIGER 미국다우존스30"
             },
             {
                 "ticker": "245350",
-                "name": "TIGER 유로스탁스배당30",
-                "is_active": true
+                "name": "TIGER 유로스탁스배당30"
             },
             {
                 "ticker": "245710",
-                "name": "ACE 베트남VN30",
-                "is_active": true
+                "name": "ACE 베트남VN30"
             },
             {
                 "ticker": "251350",
-                "name": "Kodex MSCI선진국",
-                "is_active": true
+                "name": "Kodex MSCI선진국"
             },
             {
                 "ticker": "266390",
-                "name": "KODEX 경기소비재",
-                "is_active": true
+                "name": "KODEX 경기소비재"
             },
             {
                 "ticker": "266410",
-                "name": "KODEX 필수소비재",
-                "is_active": true
+                "name": "KODEX 필수소비재"
             },
             {
                 "ticker": "329670",
-                "name": "Kodex TRF7030",
-                "is_active": true
+                "name": "Kodex TRF7030"
             },
             {
                 "ticker": "352540",
-                "name": "Kodex 일본부동산리츠(H)",
-                "is_active": true
+                "name": "Kodex 일본부동산리츠(H)"
             },
             {
                 "ticker": "371450",
-                "name": "TIGER 글로벌클라우드컴퓨팅INDXX",
-                "is_active": true
+                "name": "TIGER 글로벌클라우드컴퓨팅INDXX"
             },
             {
                 "ticker": "379800",
-                "name": "Kodex 미국S&P500",
-                "is_active": true
+                "name": "Kodex 미국S&P500"
             },
             {
                 "ticker": "379810",
-                "name": "Kodex 미국나스닥100",
-                "is_active": true
+                "name": "Kodex 미국나스닥100"
             },
             {
                 "ticker": "394670",
-                "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
-                "is_active": true
+                "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)"
             },
             {
                 "ticker": "399580",
-                "name": "RISE 글로벌클린에너지",
-                "is_active": true
+                "name": "RISE 글로벌클린에너지"
             },
             {
                 "ticker": "410870",
-                "name": "TIMEFOLIO K컬처액티브",
-                "is_active": true
+                "name": "TIMEFOLIO K컬처액티브"
             },
             {
                 "ticker": "411860",
-                "name": "KIWOOM 독일DAX",
-                "is_active": true
+                "name": "KIWOOM 독일DAX"
             },
             {
                 "ticker": "415920",
-                "name": "PLUS 글로벌희토류&전략자원생산기업",
-                "is_active": true
+                "name": "PLUS 글로벌희토류&전략자원생산기업"
             },
             {
                 "ticker": "441640",
-                "name": "Kodex 미국배당커버드콜액티브",
-                "is_active": true
+                "name": "Kodex 미국배당커버드콜액티브"
             },
             {
                 "ticker": "453630",
-                "name": "KODEX 미국S&P500필수소비재",
-                "is_active": true
+                "name": "KODEX 미국S&P500필수소비재"
             },
             {
                 "ticker": "453640",
-                "name": "KODEX 미국S&P500헬스케어",
-                "is_active": true
+                "name": "KODEX 미국S&P500헬스케어"
             },
             {
                 "ticker": "453650",
-                "name": "KODEX 미국S&P500금융",
-                "is_active": true
+                "name": "KODEX 미국S&P500금융"
             },
             {
                 "ticker": "453660",
-                "name": "KODEX 미국S&P500경기소비재",
-                "is_active": true
+                "name": "KODEX 미국S&P500경기소비재"
             },
             {
                 "ticker": "453810",
-                "name": "Kodex 인도Nifty50",
-                "is_active": true
+                "name": "Kodex 인도Nifty50"
             },
             {
                 "ticker": "456250",
-                "name": "Kodex 유럽명품TOP10 STOXX",
-                "is_active": true
+                "name": "Kodex 유럽명품TOP10 STOXX"
             },
             {
                 "ticker": "460960",
-                "name": "ACE 글로벌인컴TOP10 SOLACTIVE",
-                "is_active": true
+                "name": "ACE 글로벌인컴TOP10 SOLACTIVE"
             },
             {
                 "ticker": "463640",
-                "name": "KODEX 미국S&P500유틸리티",
-                "is_active": true
+                "name": "KODEX 미국S&P500유틸리티"
             },
             {
                 "ticker": "463680",
-                "name": "KODEX 미국S&P500테크놀로지",
-                "is_active": true
+                "name": "KODEX 미국S&P500테크놀로지"
             },
             {
                 "ticker": "465670",
-                "name": "TIGER 미국캐시카우100",
-                "is_active": true
+                "name": "TIGER 미국캐시카우100"
             },
             {
                 "ticker": "474800",
-                "name": "KIWOOM 미국원유에너지기업",
-                "is_active": true
+                "name": "KIWOOM 미국원유에너지기업"
             },
             {
                 "ticker": "475050",
-                "name": "ACE KPOP포커스",
-                "is_active": true
+                "name": "ACE KPOP포커스"
             },
             {
                 "ticker": "475350",
-                "name": "RISE 버크셔포트폴리오TOP10",
-                "is_active": true
+                "name": "RISE 버크셔포트폴리오TOP10"
             },
             {
                 "ticker": "476690",
-                "name": "TIGER 글로벌비만치료제TOP2Plus",
-                "is_active": true
+                "name": "TIGER 글로벌비만치료제TOP2Plus"
             },
             {
                 "ticker": "477730",
-                "name": "KODEX 인도타타그룹",
-                "is_active": true
+                "name": "KODEX 인도타타그룹"
             },
             {
                 "ticker": "479730",
-                "name": "TIGER 인도빌리언컨슈머",
-                "is_active": true
+                "name": "TIGER 인도빌리언컨슈머"
             },
             {
                 "ticker": "487920",
-                "name": "ACE 인도시장대표BIG5그룹액티브",
-                "is_active": true
+                "name": "ACE 인도시장대표BIG5그룹액티브"
             },
             {
                 "ticker": "488480",
-                "name": "RISE 일본섹터TOP4Plus",
-                "is_active": true
+                "name": "RISE 일본섹터TOP4Plus"
             },
             {
                 "ticker": "266420",
-                "name": "KODEX 헬스케어",
-                "is_active": true
+                "name": "KODEX 헬스케어"
             }
         ]
     }

@@ -137,14 +137,8 @@ def main():
         try:
             print(f"'{country_code.upper()}' 국가, '{account}' 계좌에 대한 파라미터 튜닝을 시작합니다.")
 
-            all_etfs_from_file = get_etfs(country_code)
-            # is_active 필드가 없는 종목이 있는지 확인합니다.
-            for etf in all_etfs_from_file:
-                if "is_active" not in etf:
-                    raise ValueError(
-                        f"종목 마스터 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
-                    )
-            etfs_from_file = [etf for etf in all_etfs_from_file if etf["is_active"] is not False]
+            etfs_from_file = get_etfs(country_code)
+
             if not etfs_from_file:
                 print(f"오류: 'data/stocks/{country_code}.json' 파일에서 티커를 찾을 수 없습니다.")
                 return

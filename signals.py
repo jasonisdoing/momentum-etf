@@ -900,15 +900,8 @@ def _fetch_and_prepare_data(
 
     # DB에서 종목 목록을 가져와 전체 유니버스를 구성합니다.
     all_etfs_from_file = get_etfs(country)
-    # is_active 필드가 없는 종목이 있는지 확인합니다.
-    for etf in all_etfs_from_file:
-        if "is_active" not in etf:
-            raise ValueError(
-                f"종목 마스터 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
-            )
     full_etf_meta = {etf["ticker"]: etf for etf in all_etfs_from_file}
-    etfs_from_file = [etf for etf in all_etfs_from_file if etf.get("is_active") is not False]
-    etf_meta = {etf["ticker"]: etf for etf in etfs_from_file}
+    etf_meta = {etf["ticker"]: etf for etf in all_etfs_from_file}
 
     # 오늘 판매된 종목을 추가합니다.
     sold_tickers_today = set()
@@ -986,7 +979,7 @@ def _fetch_and_prepare_data(
 
     # DB에서 종목 유형(ETF/주식) 정보 가져오기
     # 코인은 거래소 잔고 기반 표시이므로, 종목 마스터가 비어 있어도 보유코인을 기준으로 진행합니다.
-    if not etfs_from_file and country != "coin":
+    if not all_etfs_from_file and country != "coin":
         print(f"오류: 'data/stocks/{country}.json' 파일에서 '{country}' 국가의 현황을 계산할 종목을 찾을 수 없습니다.")
         return None
 
@@ -1080,7 +1073,7 @@ def _fetch_and_prepare_data(
     if country == "coin":
         # 제외할 특수 심볼 제거 (예: 'P')
         # 종목 마스터에 없는 종목은 처리에서 제외합니다. (단, 오늘 매도된 종목은 포함)
-        allowed_tickers = {etf["ticker"] for etf in etfs_from_file}
+        allowed_tickers = {etf["ticker"] for etf in all_etfs_from_file}
         pairs = [(t, n) for t, n in pairs if t in allowed_tickers or t in sold_tickers_today]
         logger.info(
             "[%s] coin universe filtered to %d tickers (allowed=%d, sold_today=%d)",
@@ -1093,20 +1086,18 @@ def _fetch_and_prepare_data(
     # --- 데이터 로딩 및 지표 계산 ---
     tasks = []
     for tkr, name in pairs:
-        # is_active: true인 종목만 과거 데이터 조회 및 계산 태스크를 생성합니다.
-        if full_etf_meta.get(tkr, {}).get("is_active", True):
-            df_full = prefetched_data.get(tkr) if prefetched_data else None
-            tasks.append(
-                (
-                    tkr,
-                    country,
-                    required_months,
-                    base_date,
-                    ma_period,
-                    df_full,
-                    realtime_prices.get(tkr),  # 조회된 실시간 가격 전달
-                )
+        df_full = prefetched_data.get(tkr) if prefetched_data else None
+        tasks.append(
+            (
+                tkr,
+                country,
+                required_months,
+                base_date,
+                ma_period,
+                df_full,
+                realtime_prices.get(tkr),  # 조회된 실시간 가격 전달
             )
+        )
 
     # 순차 처리로 데이터 로딩 및 기본 지표 계산
     processed_results: Dict[str, Dict[str, Any]] = {}
@@ -1149,26 +1140,7 @@ def _fetch_and_prepare_data(
     # 이제 `processed_results`를 사용하여 순차적으로 나머지 계산을 수행합니다.
     print("\n-> 최종 데이터 조합 및 계산 시작...")
     for tkr, _ in pairs:
-        is_active = full_etf_meta.get(tkr, {}).get("is_active", True)
-
-        if not is_active:
-            # 비활성 종목: 실시간 가격만 사용하고, 계산은 건너뜁니다.
-            price = realtime_prices.get(tkr)
-            if price is not None:
-                data_by_tkr[tkr] = {
-                    "price": price,
-                    "prev_close": 0.0,  # 과거 데이터 없으므로 0
-                    "s1": float("nan"),
-                    "s2": float("nan"),
-                    "score": 0.0,
-                    "filter": 0,
-                    "shares": float((holdings.get(tkr) or {}).get("shares") or 0.0),
-                    "avg_cost": float((holdings.get(tkr) or {}).get("avg_cost") or 0.0),
-                    "df": pd.DataFrame(),  # 빈 데이터프레임
-                }
-            continue
-
-        # 활성 종목: 계산된 결과를 사용합니다.
+        # 계산된 결과를 사용합니다.
         result = processed_results.get(tkr)
         if not result:
             failed_tickers_info[tkr] = "FETCH_FAILED"
@@ -1622,10 +1594,6 @@ def generate_signal_report(
     if insufficient_data_tickers:
         name_map = {tkr: name for tkr, name in pairs}
         for tkr in sorted(insufficient_data_tickers):
-            # Check if the ticker is inactive.
-            if not full_etf_meta.get(tkr, {}).get("is_active", True):
-                # If it's an inactive ticker, we don't need to warn about insufficient data.
-                continue
             name = name_map.get(tkr, tkr)
             warning_messages_for_slack.append(f"{name}({tkr}): 데이터 기간이 부족하여 계산에서 제외됩니다.")
     # 슬랙 메시지를 위한 메시지 만들기 시작
