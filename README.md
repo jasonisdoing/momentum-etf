@@ -46,9 +46,9 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 과거 구간에 대해 백테스트를 실행합니다.
 
-    python cli.py <국가코드> --test
+    python cli.py <국가코드> --test --account <계좌코드>
 
-예: `python cli.py coin --test`
+예: `python cli.py coin --test --account b1`
 
 4) 파라미터 튜닝 (CLI)
 
@@ -112,9 +112,9 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 과거 구간에 대해 백테스트를 실행합니다.
 
-    python cli.py <국가코드> --test
+    python cli.py <국가코드> --test --account <계좌코드>
 
-예: `python cli.py coin --test`
+예: `python cli.py coin --test --account b1`
 
 4) 파라미터 튜닝 (CLI)
 

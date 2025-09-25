@@ -2,10 +2,10 @@
 MomentumEtf 프로젝트의 웹 애플리케이션 실행 파일입니다.
 
 이 스크립트는 `streamlit run web_app.py`와 동일하게 동작하여
-웹 브라우저에서 프로젝트의 대시보드를 실행합니다.
+웹 브라우저에서 프로젝트의 메인 대시보드를 실행합니다.
 
 [사용법]
-python run.py
+python run.py 또는 streamlit run Main.py
 
 백테스트, 시그널 조회 등 다른 CLI 기능은 `cli.py`를 사용하세요.
 (예: python cli.py kor --test)
@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def main():
     """
     Streamlit 웹 애플리케이션을 실행합니다.
-    `streamlit run web_app.py`와 동일하게 동작합니다.
+    `streamlit run Main.py`와 동일하게 동작합니다.
     """
     try:
         from streamlit.web import cli as stcli
@@ -29,12 +29,12 @@ def main():
         print("오류: Streamlit이 설치되어 있지 않습니다. 'pip install streamlit'으로 설치해주세요.")
         sys.exit(1)
 
-    # web_app.py 파일의 절대 경로를 찾습니다.
+    # Main.py 파일의 절대 경로를 찾습니다.
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    script_path = os.path.join(dir_path, "web_app.py")
+    script_path = os.path.join(dir_path, "Main.py")
 
     # Streamlit을 실행하기 위한 인자를 구성합니다.
-    # sys.argv를 수정하여 `streamlit run web_app.py` 처럼 보이게 합니다.
+    # sys.argv를 수정하여 `streamlit run Main.py` 처럼 보이게 합니다.
     # 추가적인 Streamlit 인자(예: --server.port)를 전달할 수 있도록 합니다.
     args = ["run", script_path] + sys.argv[1:]
     sys.argv = ["streamlit"] + args

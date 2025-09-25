@@ -33,7 +33,8 @@ except Exception:
 
 from utils.cache_utils import load_cached_frame, save_cached_frame
 from utils.stock_list_io import get_etfs
-from utils.notify import send_verbose_log_to_slack
+
+# from utils.notify import send_verbose_log_to_slack
 
 import warnings
 
@@ -112,6 +113,27 @@ def _should_skip_pykrx_fetch(
         return True
 
     return False
+
+
+@functools.lru_cache(maxsize=1)
+def get_aud_to_krw_rate() -> Optional[float]:
+    """yfinance를 사용하여 AUD/KRW 환율을 조회합니다."""
+    if not yf:
+        return None
+    try:
+        ticker = yf.Ticker("AUDKRW=X")
+        # 가장 최근 가격을 가져오기 위해 2일간의 1분 단위 데이터 시도
+        data = ticker.history(period="2d", interval="1m")
+        if not data.empty:
+            return data["Close"].iloc[-1]
+        # 1m 데이터가 없으면 일 단위 데이터로 폴백
+        data = ticker.history(period="2d")
+        if not data.empty:
+            return data["Close"].iloc[-1]
+    except Exception as e:
+        print(f"AUD/KRW 환율 정보를 가져오는 데 실패했습니다: {e}")
+        return None
+    return None
 
 
 @contextmanager
@@ -275,7 +297,7 @@ def fetch_ohlcv(
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
 
     if date_range and len(date_range) == 2:
-        try:
+        try:  # date_range가 있으면, 다른 기간 인자들을 무시하고 이를 기준으로 start_dt, end_dt를 설정합니다.
             start_dt = pd.to_datetime(date_range[0])
             if date_range[1] is None:
                 # date_range의 두 번째 인자가 None이면 오늘까지 조회합니다.
@@ -287,12 +309,12 @@ def fetch_ohlcv(
             return None
     else:
         now = base_date if base_date is not None else pd.Timestamp.now()
-        if months_range is not None and len(months_range) == 2:
+        if months_range is not None and len(months_range) == 2:  # months_range가 있으면 사용
             start_off, end_off = months_range
             start_dt = now - pd.DateOffset(months=int(start_off))
             end_dt = now - pd.DateOffset(months=int(end_off))
         else:
-            months_back = months_back or 12
+            months_back = months_back or 3  # months_back의 기본값은 3개월
             start_dt = now - pd.DateOffset(months=int(months_back))
             end_dt = now
 
@@ -354,8 +376,8 @@ def _fetch_ohlcv_with_cache(
             new_frames.append(fetched)
 
     combined_df = cached_df
-    prev_count = 0 if cached_df is None else cached_df.shape[0]
-    added_count = 0
+    # prev_count = 0 if cached_df is None else cached_df.shape[0]
+    # added_count = 0
 
     if new_frames:
         frames = []
@@ -367,17 +389,17 @@ def _fetch_ohlcv_with_cache(
         combined_df = combined_df[~combined_df.index.duplicated(keep="last")]
         save_cached_frame(country, ticker, combined_df)
 
-        new_total = combined_df.shape[0]
-        added_count = max(0, new_total - prev_count)
-        if added_count > 0:
-            try:
-                display_name = _get_display_name(country, ticker)
-                suffix = f"({display_name})" if display_name else ""
-                send_verbose_log_to_slack(
-                    f"[CACHE] {country.upper()}/{ticker}{suffix} {new_total:,} rows (+{added_count:,} rows)"
-                )
-            except Exception:
-                pass
+        # new_total = combined_df.shape[0]
+        # added_count = max(0, new_total - prev_count)
+        # if added_count > 0:
+        #     try:
+        #         display_name = _get_display_name(country, ticker)
+        #         suffix = f"({display_name})" if display_name else ""
+        #         send_verbose_log_to_slack(
+        #             f"[CACHE] {country.upper()}/{ticker}{suffix} {new_total:,} rows (+{added_count:,} rows)"
+        #         )
+        #     except Exception:
+        #         pass
 
     if combined_df is None or combined_df.empty:
         return None
@@ -421,8 +443,8 @@ def _fetch_ohlcv_core(
                     ticker,
                     start=start_dt,
                     end=end_dt + pd.Timedelta(days=1),
-                    progress=False,
                     auto_adjust=True,
+                    progress=False,
                 )
             if df.empty:
                 return None
@@ -531,8 +553,8 @@ def _fetch_ohlcv_core(
                 ticker_yf,
                 start=start_dt,
                 end=end_dt + pd.Timedelta(days=1),
-                progress=False,
                 auto_adjust=False,  # 원본 데이터를 모두 가져옵니다.
+                progress=False,
             )
             if df.empty:
                 return None
@@ -589,13 +611,10 @@ def _fetch_ohlcv_core(
             df = _pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
             df.set_index("Date", inplace=True)
             df.sort_index(inplace=True)
-            cache_start_dt = _get_cache_start_dt()
-            window_start = start_dt
-            if cache_start_dt is not None and cache_start_dt > window_start:
-                window_start = cache_start_dt
-            if window_start > end_dt:
+            # Bithumb API는 전체 기간을 반환하므로, 요청된 start_dt와 end_dt로 정확히 잘라내야 합니다.
+            if start_dt > end_dt:
                 return None
-            df = df[(df.index >= window_start) & (df.index <= end_dt)]
+            df = df[(df.index >= start_dt) & (df.index <= end_dt)]
             if df.empty:
                 return None
             return df
@@ -631,6 +650,56 @@ def fetch_ohlcv_for_tickers(
             prefetched_data[tkr] = df
 
     return prefetched_data
+
+
+def fetch_bithumb_realtime_price(symbol: str) -> Optional[float]:
+    symbol = (symbol or "").upper()
+    if not symbol or symbol in {"KRW", "P"}:
+        return 1.0
+    url = f"https://api.bithumb.com/public/ticker/{symbol}_KRW"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, dict) and data.get("status") == "0000":
+            closing_price = data.get("data", {}).get("closing_price")
+            if closing_price is not None:
+                return float(str(closing_price).replace(",", ""))
+    except Exception:
+        return None
+    return None
+
+
+def fetch_au_realtime_price(ticker: str) -> Optional[float]:
+    """
+    Yahoo Finance (AU) 웹 스크레이핑을 통해 호주 종목의 실시간 현재가를 조회합니다.
+    yfinance 라이브러리의 데이터 지연/오류 발생 시 보조 소스로 사용됩니다.
+    """
+    if not requests or not BeautifulSoup or not yf:
+        return None
+
+    try:
+        # yfinance 라이브러리와 일관성을 유지하기 위해 티커 형식을 변환합니다. (예: 'CBA' -> 'CBA.AX')
+        ticker_yf = format_aus_ticker_for_yfinance(ticker)
+        url = f"https://au.finance.yahoo.com/quote/{ticker_yf}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        # 실시간 가격을 담고 있는 fin-streamer 요소를 찾습니다.
+        price_element = soup.select_one(
+            f'fin-streamer[data-symbol="{ticker_yf}"][data-field="regularMarketPrice"]'
+        )
+
+        if price_element:
+            price_str = price_element.get_text(strip=True).replace(",", "")
+            return float(price_str)
+    except Exception as e:
+        print(f"경고: {ticker}의 호주 실시간 가격 조회 중 오류 발생: {e}")
+    return None
 
 
 def fetch_naver_realtime_price(ticker: str) -> Optional[float]:

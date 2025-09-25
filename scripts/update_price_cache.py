@@ -28,7 +28,7 @@ from utils.env import load_env_if_present
 def get_cache_file_path(country: str, ticker: str) -> Path:
     """주어진 티커의 캐시 파일 경로를 구성합니다."""
     project_root = Path(__file__).resolve().parent.parent
-    return project_root / "data" / "cache" / country / f"{ticker}.pkl"
+    return project_root / "data" / "stocks" / "cache" / country / f"{ticker}.pkl"
 
 
 def refresh_all_caches(countries: list[str], start_date: str, rebuild: bool = False):
@@ -42,7 +42,7 @@ def refresh_all_caches(countries: list[str], start_date: str, rebuild: bool = Fa
         for etf in all_etfs_from_file:
             if "is_active" not in etf:
                 raise ValueError(
-                    f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
+                    f"종목 마스터 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
                 )
         etfs = [etf for etf in all_etfs_from_file if etf["is_active"] is not False]
         if not etfs:
