@@ -1002,13 +1002,18 @@ def _fetch_and_prepare_data(
         print("-> 실시간 가격 일괄 조회 시작...")
 
         def _fetch_realtime_price(tkr_local: str) -> Optional[float]:
-            from utils.data_loader import fetch_naver_realtime_price
-            from utils.data_loader import fetch_bithumb_realtime_price
+            from utils.data_loader import (
+                fetch_naver_realtime_price,
+                fetch_bithumb_realtime_price,
+                fetch_au_realtime_price,
+            )
 
             if country == "kor":
                 return fetch_naver_realtime_price(tkr_local)
-            if country == "coin":
+            elif country == "coin":
                 return fetch_bithumb_realtime_price(tkr_local)
+            elif country == "aus":
+                return fetch_au_realtime_price(tkr_local)
             return None
 
         for tkr, _ in pairs:
@@ -1368,16 +1373,6 @@ def _build_header_line(
         day_label = "기준일"
     else:
         day_label = "다음 거래일" if base_date.date() > today_cal.date() else "오늘"
-
-    # 호주 계좌의 경우, 모든 요약 금액을 KRW로 환산합니다.
-    aud_krw_rate = None
-    if currency == "AUD":
-        aud_krw_rate = get_aud_to_krw_rate()
-        if aud_krw_rate:
-            current_equity *= aud_krw_rate
-            total_holdings *= aud_krw_rate
-            total_cash *= aud_krw_rate
-            equity_for_cum_calc *= aud_krw_rate
 
     # 일간 수익률 계산
     # DB를 조회하는 대신, 현재 테이블의 '전일 종가'와 '보유 수량'을 기반으로 이전 평가금액을 계산합니다.

@@ -672,33 +672,22 @@ def fetch_bithumb_realtime_price(symbol: str) -> Optional[float]:
 
 def fetch_au_realtime_price(ticker: str) -> Optional[float]:
     """
-    Yahoo Finance (AU) 웹 스크레이핑을 통해 호주 종목의 실시간 현재가를 조회합니다.
-    yfinance 라이브러리의 데이터 지연/오류 발생 시 보조 소스로 사용됩니다.
+    yfinance 라이브러리를 통해 호주 종목의 실시간 현재가를 조회합니다.
     """
-    if not requests or not BeautifulSoup or not yf:
+    if not yf:
         return None
 
+    ticker_yf = format_aus_ticker_for_yfinance(ticker)
     try:
-        # yfinance 라이브러리와 일관성을 유지하기 위해 티커 형식을 변환합니다. (예: 'CBA' -> 'CBA.AX')
-        ticker_yf = format_aus_ticker_for_yfinance(ticker)
-        url = f"https://au.finance.yahoo.com/quote/{ticker_yf}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=5)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, "html.parser")
-        # 실시간 가격을 담고 있는 fin-streamer 요소를 찾습니다.
-        price_element = soup.select_one(
-            f'fin-streamer[data-symbol="{ticker_yf}"][data-field="regularMarketPrice"]'
-        )
-
-        if price_element:
-            price_str = price_element.get_text(strip=True).replace(",", "")
-            return float(price_str)
-    except Exception as e:
-        print(f"경고: {ticker}의 호주 실시간 가격 조회 중 오류 발생: {e}")
+        # yfinance 라이브러리를 사용하여 가격 정보를 가져옵니다.
+        stock = yf.Ticker(ticker_yf)
+        # 'regularMarketPrice'는 장중 실시간 가격, 'previousClose'는 전일 종가입니다.
+        # 실시간 데이터가 없을 경우를 대비하여 두 값을 모두 확인합니다.
+        price = stock.info.get("regularMarketPrice") or stock.info.get("previousClose")
+        if price:
+            return float(price)
+    except Exception as e_yf:
+        print(f"경고: {ticker}의 호주 실시간 가격 조회(yfinance) 실패: {e_yf}")
     return None
 
 
