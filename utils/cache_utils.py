@@ -6,7 +6,7 @@ from typing import Optional, Tuple
 
 import pandas as pd
 
-CACHE_ROOT = Path(__file__).resolve().parents[1] / "data" / "cache"
+CACHE_ROOT = Path(__file__).resolve().parents[1] / "data" / "stocks" / "cache"
 
 
 def _sanitize_ticker(ticker: str) -> str:

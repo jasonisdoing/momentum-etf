@@ -2,14 +2,16 @@
 .env
 
 # User Data
-# data/ - # 관리 종목을 퍼블릭에 오픈해도 문제 없음
+data/kor/
+data/aus/
+data/coin/
 
 
 # Log Data
 logs/
 
 # 메모 파일
-memo.txt
+memo*.txt
 
 # Python
 __pycache__/

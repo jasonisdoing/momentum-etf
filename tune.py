@@ -1,6 +1,7 @@
 import itertools
 import os
 import sys
+import argparse
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from test import main as run_backtest
 
+from utils.tee import Tee
 from utils.data_loader import fetch_ohlcv_for_tickers
 from utils.db_manager import get_portfolio_settings
 from utils.stock_list_io import get_etfs
@@ -30,25 +32,6 @@ TUNING_CONFIG = {
         "TEST_MONTHS_RANGE": 12,
     },
 }
-
-
-class Tee:
-    """STDOUT과 파일에 동시에 쓰기 위한 헬퍼 클래스입니다."""
-
-    def __init__(self, *files):
-        self.files = files
-
-    def write(self, obj):
-        for f in self.files:
-            f.write(obj)
-            f.flush()
-
-    def flush(self):
-        for f in self.files:
-            f.flush()
-
-
-# --- 튜닝 실행 함수 ---
 
 
 def run_single_backtest(params, prefetched_data, account):
@@ -85,12 +68,22 @@ def run_single_backtest(params, prefetched_data, account):
     return None
 
 
-def main(country_code: str, account: str):
+def main():
     """파라미터 튜닝을 실행하고 최적 결과를 출력합니다."""
+    parser = argparse.ArgumentParser(description="전략 파라미터를 튜닝합니다.")
+    parser.add_argument("country", choices=["kor", "aus", "coin"], help="튜닝할 국가 코드")
+    parser.add_argument("--account", required=True, help="튜닝에 사용할 계좌 코드")
+    args = parser.parse_args()
+
+    country_code = args.country
+    account = args.account
+
     # 로그 파일 설정
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f"tune_{country_code}.log")
+    log_path = os.path.join(log_dir, f"tune_{country_code}_{account}.log")
+
+    print(f"튜닝 로그가 다음 파일에 저장됩니다: {log_path}")
 
     original_stdout = sys.stdout
     with open(log_path, "w", encoding="utf-8") as log_file:
@@ -192,9 +185,11 @@ def main(country_code: str, account: str):
                 print(f"  - Sharpe Ratio: {row['sharpe_ratio']:.2f}")
 
             if not top_3_results.empty:
+                print(f"\n튜닝이 완료되었습니다. 상세 내용은 {log_path} 파일을 확인하세요.")
+        finally:
+            sys.stdout = original_stdout
+            if not top_3_results.empty:
                 first_row_params = top_3_results.iloc[0]["params"]
                 topn, _, replace_thr, _ = first_row_params
                 print("\n" + "=" * 50)
                 print(f"(고정 파라미터: TopN={topn}, ReplaceThr={replace_thr})")
-        finally:
-            sys.stdout = original_stdout

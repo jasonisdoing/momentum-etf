@@ -99,7 +99,7 @@ def run_single_backtest(params: tuple, prefetched_data: dict, account: str):
 
 
 def _resolve_account(country: str, explicit: Optional[str]) -> str:
-    """CLI 인자와 accounts.json을 기반으로 대상 계좌 코드를 결정합니다."""
+    """CLI 인자와 data/accounts/country_mapping.json을 기반으로 대상 계좌 코드를 결정합니다."""
     if explicit:
         return explicit
 
@@ -109,7 +109,7 @@ def _resolve_account(country: str, explicit: Optional[str]) -> str:
         code = entry.get("account")
         if code:
             return str(code)
-    raise SystemExit(f"'{country}' 국가에 등록된 계좌가 없습니다. data/accounts.json을 확인하세요.")
+    raise SystemExit(f"'{country}' 국가에 등록된 계좌가 없습니다. data/accounts/country_mapping.json을 확인하세요.")
 
 
 def main():
@@ -142,11 +142,11 @@ def main():
             for etf in all_etfs_from_file:
                 if "is_active" not in etf:
                     raise ValueError(
-                        f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
+                        f"종목 마스터 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
                     )
             etfs_from_file = [etf for etf in all_etfs_from_file if etf["is_active"] is not False]
             if not etfs_from_file:
-                print(f"오류: 'data/{country_code}/' 폴더에서 티커를 찾을 수 없습니다.")
+                print(f"오류: 'data/stocks/{country_code}.json' 파일에서 티커를 찾을 수 없습니다.")
                 return
 
             tickers = [s["ticker"] for s in etfs_from_file]

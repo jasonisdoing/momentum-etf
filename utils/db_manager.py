@@ -88,9 +88,9 @@ def get_db_connection():
                 maxPoolSize=max_pool,
                 minPoolSize=min_pool,
                 retryWrites=True,
-                serverSelectionTimeoutMS=8000,
-                connectTimeoutMS=5000,
-                socketTimeoutMS=10000,
+                serverSelectionTimeoutMS=30000,
+                connectTimeoutMS=30000,
+                socketTimeoutMS=30000,
             )
             if max_idle > 0:
                 client_kwargs["maxIdleTimeMS"] = max_idle
@@ -152,18 +152,14 @@ def get_portfolio_snapshot(
             return None
     else:
         # daily_equities에서 가장 최근 날짜를 찾습니다.
-        latest_equity_query = _apply_account_filter(
-            {"country": country, "is_deleted": {"$ne": True}}, account
-        )
+        latest_equity_query = _apply_account_filter({"country": country}, account)
         latest_equity = db.daily_equities.find_one(latest_equity_query, sort=[("date", DESCENDING)])
         if latest_equity:
             target_date = latest_equity["date"]
 
     if not target_date:
         # 거래 내역은 있지만 평가금액이 없을 수도 있으므로, trades에서 날짜를 찾아봅니다.
-        latest_trade_query = _apply_account_filter(
-            {"country": country, "is_deleted": {"$ne": True}}, account
-        )
+        latest_trade_query = _apply_account_filter({"country": country}, account)
         latest_trade = db.trades.find_one(latest_trade_query, sort=[("date", DESCENDING)])
         if latest_trade:
             target_date = latest_trade["date"]
@@ -171,9 +167,7 @@ def get_portfolio_snapshot(
             return None  # 데이터가 전혀 없음
 
     # 2. 대상 날짜의 총 평가금액 조회
-    equity_query = _apply_account_filter(
-        {"country": country, "date": target_date, "is_deleted": {"$ne": True}}, account
-    )
+    equity_query = _apply_account_filter({"country": country, "date": target_date}, account)
     equity_data = db.daily_equities.find_one(equity_query)
 
     # 해당 날짜의 평가금액이 유효한지 확인합니다.
@@ -186,7 +180,6 @@ def get_portfolio_snapshot(
                 "country": country,
                 "date": {"$lt": target_date},
                 "total_equity": {"$gt": 0},
-                "is_deleted": {"$ne": True},
             },
             account,
         )
@@ -208,7 +201,7 @@ def get_portfolio_snapshot(
     # 모든 국가에 대해 동일하게 적용하여, 특정 날짜의 모든 거래를 포함하도록 합니다.
     upper_bound = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
     trades_query = _apply_account_filter(
-        {"country": country, "date": {"$lte": upper_bound}, "is_deleted": {"$ne": True}},
+        {"country": country, "date": {"$lte": upper_bound}},
         account,
     )
     trades_cursor = db.trades.find(trades_query).sort([("date", 1), ("_id", 1)])
@@ -272,18 +265,25 @@ def get_previous_portfolio_snapshot(
         return None
 
     # 'daily_equities'와 'trades'에서 as_of_date 이전의 날짜들을 찾습니다.
+    # as_of_date를 포함하여 조회한 후, 코드에서 as_of_date를 제외하여 바로 이전 날짜를 찾습니다.
     equity_dates_query = _apply_account_filter(
-        {"country": country, "date": {"$lt": as_of_date}, "is_deleted": {"$ne": True}},
+        {"country": country, "date": {"$lte": as_of_date}},
         account,
     )
     equity_dates = db.daily_equities.distinct("date", equity_dates_query)
     trade_dates_query = _apply_account_filter(
-        {"country": country, "date": {"$lt": as_of_date}, "is_deleted": {"$ne": True}},
+        {"country": country, "date": {"$lte": as_of_date}},
         account,
     )
     trade_dates = db.trades.distinct("date", trade_dates_query)
 
     all_prev_dates = set(equity_dates).union(set(trade_dates))
+    # as_of_date의 시간대 정보를 제거하여 naive datetime으로 만듭니다.
+    as_of_date_naive = as_of_date.replace(tzinfo=None)
+
+    # as_of_date 당일은 제외합니다.
+    # DB에서 가져온 날짜들도 naive이므로, naive 객체로 비교해야 합니다.
+    all_prev_dates.discard(as_of_date_naive)
 
     if not all_prev_dates:
         return None
@@ -313,8 +313,8 @@ def get_available_snapshot_dates(
     if as_of_date:
         query["date"] = {"$lte" if include_as_of_date else "$lt": as_of_date}
 
-    equity_query = _apply_account_filter({**query, "is_deleted": {"$ne": True}}, account)
-    trade_query = _apply_account_filter({**query, "is_deleted": {"$ne": True}}, account)
+    equity_query = _apply_account_filter(dict(query), account)
+    trade_query = _apply_account_filter(dict(query), account)
     signal_query = _apply_account_filter(dict(query), account)
 
     equity_dates = list(db.daily_equities.distinct("date", equity_query))
@@ -342,101 +342,6 @@ def get_available_snapshot_dates(
 
     # 내림차순 정렬
     return sorted(all_days, reverse=True)
-
-
-def get_account_settings(account: str) -> Optional[Dict]:
-    """지정된 계좌의 앱 설정을 account_settings 컬렉션에서 가져옵니다."""
-
-    if not account:
-        return None
-    db = get_db_connection()
-    if db is None:
-        return None
-    doc = db.account_settings.find_one({"account": account})
-    if doc:
-        doc.pop("_id", None)
-    return doc
-
-
-def save_account_settings(account: str, settings_data: Dict) -> bool:
-    """지정된 계좌의 앱 설정을 account_settings 컬렉션에 저장합니다."""
-
-    if not account:
-        print("오류: account 값이 지정되지 않았습니다.")
-        return False
-    db = get_db_connection()
-    if db is None:
-        return False
-
-    try:
-        set_data = dict(settings_data)
-        set_data["account"] = account
-        set_data["updated_at"] = datetime.now()
-        db.account_settings.update_one(
-            {"account": account},
-            {
-                "$set": set_data,
-                "$setOnInsert": {"created_at": datetime.now()},
-            },
-            upsert=True,
-        )
-        print(f"성공: 계좌 '{account}' 설정을 저장했습니다.")
-        return True
-    except Exception as e:
-        print(f"오류: 계좌 설정 저장 중 오류 발생: {e}")
-        return False
-
-
-def get_portfolio_settings(country: str, account: str) -> Optional[Dict]:
-    """지정된 계좌의 포트폴리오 설정을 반환합니다."""
-
-    if not account:
-        raise ValueError("account is required to load portfolio settings")
-
-    doc = get_account_settings(account)
-    if doc:
-        return doc
-    print(f"경고: '{country}' 국가의 '{account}' 계좌 설정을 찾을 수 없습니다.")
-    return None
-
-
-def save_portfolio_settings(country: str, settings_data: Dict, account: str) -> bool:
-    """포트폴리오 설정을 account_settings 또는 common_settings 에 저장합니다."""
-
-    if not account:
-        print(f"오류: '{country}' 국가에 대한 계좌(account) 값이 필요합니다.")
-        return False
-
-    set_data = dict(settings_data)
-    set_data.setdefault("country", country)
-    return save_account_settings(account, set_data)
-
-
-def get_common_settings() -> Optional[Dict]:
-    """공통(전역) 설정을 DB에서 가져옵니다. 모든 국가가 공유합니다."""
-    db = get_db_connection()
-    if db is None:
-        return None
-    settings = db.common_settings.find_one()
-    if settings:
-        settings.pop("_id", None)
-    return settings
-
-
-def save_common_settings(settings_data: Dict) -> bool:
-    """공통(전역) 설정을 DB에 저장합니다."""
-    db = get_db_connection()
-    if db is None:
-        return False
-    try:
-        query = {"country": "common"}
-        update_doc = {"$set": {**settings_data, "country": "common"}}
-        db.common_settings.update_one(query, update_doc, upsert=True)
-        print("성공: 공통 설정을 저장했습니다.")
-        return True
-    except Exception as e:
-        print(f"오류: 공통 설정 저장 중 오류 발생: {e}")
-        return False
 
 
 # --- Import checkpoints (incremental sync) ---
@@ -500,15 +405,67 @@ def get_signal_report_from_db(country: str, account: str, date: datetime) -> Opt
     return None
 
 
+def get_latest_signal_report(
+    country: str, account: str, date: Optional[datetime] = None
+) -> Optional[Dict]:
+    """
+    지정된 계좌에 대해 가장 최근의 시그널 리포트를 반환합니다.
+    date가 지정되면 해당 날짜의 리포트를 찾습니다.
+    """
+    db = get_db_connection()
+    if db is None:
+        return None
+
+    query = _apply_account_filter({"country": country}, account)
+
+    if date:
+        # 날짜가 지정된 경우, 해당 날짜의 시작과 끝을 정의하여 하루 전체를 검색합니다.
+        start_of_day = date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        query["date"] = {"$gte": start_of_day, "$lte": end_of_day}
+        # 해당 날짜에 여러 리포트가 있을 경우 가장 최신 것을 가져옵니다.
+        latest_signal = db.signals.find_one(query, sort=[("date", DESCENDING)])
+    else:
+        # 날짜가 지정되지 않은 경우, 'date' 필드를 기준으로 내림차순 정렬하여 가장 최근 문서를 찾습니다.
+        latest_signal = db.signals.find_one(query, sort=[("date", DESCENDING)])
+
+    if latest_signal:
+        # 최신 시그널 리포트가 존재하면 반환합니다.
+        return latest_signal
+
+    return None
+
+
+def get_latest_signal_summary(country: str, account: str) -> Optional[Dict]:
+    """
+    지정된 계좌의 가장 최근 시그널 리포트에 저장된 요약(summary) 정보를 가져옵니다.
+    """
+    db = get_db_connection()
+    if db is None:
+        return None
+
+    query = _apply_account_filter({"country": country}, account)
+    # summary 필드가 존재하는 가장 최근 문서를 찾습니다.
+    query["summary"] = {"$exists": True}
+
+    latest_signal = db.signals.find_one(query, sort=[("date", DESCENDING)])
+
+    if latest_signal and "summary" in latest_signal:
+        summary = latest_signal["summary"]
+        summary["date"] = latest_signal.get("date")  # 요약 정보에 날짜 추가
+        return summary
+
+    return None
+
+
 def save_signal_report_to_db(
     country: str,
     account: str,
     date: datetime,
     report_data: Tuple[str, List[str], List[List[str]]],
+    summary_data: Optional[Dict] = None,
 ) -> bool:
-    """
-    계산된 시그널 리포트를 DB에 저장합니다.
-    """
+    """계산된 시그널 리포트를 DB에 저장합니다."""
     db = get_db_connection()
     if db is None:
         return False
@@ -523,6 +480,9 @@ def save_signal_report_to_db(
         }
         if account:
             doc_to_save["account"] = account
+
+        if summary_data:
+            doc_to_save["summary"] = summary_data
 
         query = _apply_account_filter({"country": country, "date": date}, account)
         # upsert=True 이므로, 문서가 존재하면 업데이트하고, 없으면 새로 생성합니다.
@@ -561,7 +521,7 @@ def get_all_daily_equities(
     return equities
 
 
-def get_all_trades(country: str, account: str, include_deleted: bool = False) -> List[Dict]:
+def get_all_trades(country: str, account: str) -> List[Dict]:
     """지정된 국가의 모든 거래 내역을 DB에서 가져옵니다.
 
     country 필드의 대소문자 불일치를 허용하기 위해 정규식(대소문자 무시)으로 조회합니다.
@@ -571,8 +531,6 @@ def get_all_trades(country: str, account: str, include_deleted: bool = False) ->
         return []
 
     query = {"country": {"$regex": f"^{country}$", "$options": "i"}}
-    if not include_deleted:
-        query["is_deleted"] = {"$ne": True}
     query = _apply_account_filter(query, account)
 
     # 최신 거래가 위로 오도록 날짜와 생성 순서(_id)로 정렬합니다.
@@ -597,7 +555,6 @@ def get_trades_on_date(country: str, account: str, target_date: datetime) -> Lis
     query = {
         "country": country,
         "date": {"$gte": start_of_day, "$lte": end_of_day},
-        "is_deleted": {"$ne": True},
     }
     query = _apply_account_filter(query, account)
     # 생성 순서대로 정렬
@@ -614,7 +571,6 @@ def save_trade(trade_data: Dict) -> bool:
         return False
 
     try:
-        trade_data["is_deleted"] = False
         trade_data["created_at"] = datetime.now()
         db.trades.insert_one(trade_data)
         print(f"성공: {trade_data['country'].upper()} 국가의 거래를 저장했습니다: {trade_data}")
@@ -632,15 +588,13 @@ def delete_trade_by_id(trade_id: str) -> bool:
 
     try:
         obj_id = ObjectId(trade_id)
-        result = db.trades.update_one(
-            {"_id": obj_id}, {"$set": {"is_deleted": True, "deleted_at": datetime.now()}}
-        )
-        if result.modified_count > 0:
+        result = db.trades.delete_one({"_id": obj_id})
+        if result.deleted_count > 0:
             print(f"성공: 거래 ID {trade_id} 를 삭제했습니다.")
             return True
         else:
             print(f"경고: 삭제할 거래 ID {trade_id} 를 찾지 못했습니다.")
-            return True  # 이미 삭제되었거나 없는 경우도 성공으로 간주
+            return False  # 삭제할 문서가 없으면 실패로 간주
     except Exception as e:
         print(f"오류: 거래 내역 삭제 중 오류 발생: {e}")
     return False
@@ -665,27 +619,6 @@ def update_trade_by_id(trade_id: str, update_data: Dict) -> bool:
             return False
     except Exception as e:
         print(f"오류: 거래 내역 업데이트 중 오류 발생: {e}")
-        return False
-
-
-def restore_trade_by_id(trade_id: str) -> bool:
-    """ID를 기준으로 soft-delete된 거래를 복구합니다."""
-    db = get_db_connection()
-    if db is None:
-        return False
-
-    try:
-        obj_id = ObjectId(trade_id)
-        result = db.trades.update_one(
-            {"_id": obj_id},
-            {
-                "$set": {"is_deleted": False, "updated_at": datetime.now()},
-                "$unset": {"deleted_at": ""},
-            },
-        )
-        return result.modified_count > 0
-    except Exception as e:
-        print(f"오류: 거래 내역 복구 중 오류 발생: {e}")
         return False
 
 
@@ -716,7 +649,6 @@ def save_daily_equity(
             "date": date_normalized,
             "total_equity": total_equity,
             "updated_at": datetime.now(),
-            "is_deleted": False,
         }
         set_data["account"] = account
         if international_shares is not None:
@@ -724,7 +656,7 @@ def save_daily_equity(
         if updated_by:
             set_data["updated_by"] = updated_by
 
-        update_operation = {"$set": set_data, "$unset": {"deleted_at": ""}}
+        update_operation = {"$set": set_data}
 
         db.daily_equities.update_one(query, update_operation, upsert=True)
         return True

@@ -11,14 +11,12 @@ def _get_data_dir():
 
 def get_etfs(country: str) -> List[Dict[str, str]]:
     """
-    'data/{country}/' 폴더에서 'etf.json' 파일을 읽어
-    종목 목록을 반환합니다.
+    'data/stocks/{country}.json' 파일에서 종목 목록을 반환합니다.
     """
     all_etfs = []
     seen_tickers = set()
-    country_data_dir = os.path.join(_get_data_dir(), country)
 
-    file_path = os.path.join(country_data_dir, "etf.json")
+    file_path = os.path.join(_get_data_dir(), "stocks", f"{country}.json")
     if not os.path.exists(file_path):
         return all_etfs
 
@@ -60,11 +58,11 @@ def get_etfs(country: str) -> List[Dict[str, str]]:
 
 def save_etfs(country: str, data: List[Dict]):
     """
-    주어진 데이터를 'data/{country}/etf.json' 파일에 저장합니다.
+    주어진 데이터를 'data/stocks/{country}.json' 파일에 저장합니다.
     """
-    country_data_dir = os.path.join(_get_data_dir(), country)
-    os.makedirs(country_data_dir, exist_ok=True)
-    file_path = os.path.join(country_data_dir, "etf.json")
+    stocks_data_dir = os.path.join(_get_data_dir(), "stocks")
+    os.makedirs(stocks_data_dir, exist_ok=True)
+    file_path = os.path.join(stocks_data_dir, f"{country}.json")
 
     try:
         with open(file_path, "w", encoding="utf-8") as f:
@@ -80,9 +78,8 @@ def get_etf_categories(country: str) -> List[str]:
     지정된 국가의 모든 ETF 카테고리 목록을 반환합니다.
     """
     categories = set()
-    country_data_dir = os.path.join(_get_data_dir(), country)
-    file_path = os.path.join(country_data_dir, "etf.json")
 
+    file_path = os.path.join(_get_data_dir(), "stocks", f"{country}.json")
     if not os.path.exists(file_path):
         return []
 

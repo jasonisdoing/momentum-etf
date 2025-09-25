@@ -40,8 +40,8 @@ def momentum_score_yf(ticker: str, end_date: str = None) -> float | None:
             ticker,
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
-            progress=False,
             auto_adjust=True,
+            progress=False,
         )
 
         # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비합니다.
