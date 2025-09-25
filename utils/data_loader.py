@@ -764,6 +764,9 @@ def fetch_pykrx_name(ticker: str) -> str:
         except Exception:
             pass
 
+    if not name:
+        name = _get_display_name("kor", ticker)
+
     _pykrx_name_cache[ticker] = name
     return name
 
@@ -793,6 +796,31 @@ def fetch_yfinance_name(ticker: str) -> str:
         print(f"경고: {cache_key}의 이름 조회 중 오류 발생: {e}")
         _yfinance_name_cache[cache_key] = ""  # 실패도 캐시하여 재시도 방지
     return ""
+
+
+def resolve_security_name(country: str, ticker: str) -> str:
+    """지정한 국가/티커의 표시용 이름을 반환합니다."""
+    if not ticker:
+        return ""
+
+    ticker_upper = ticker.strip().upper()
+    if not ticker_upper:
+        return ""
+
+    country_lower = (country or "").strip().lower()
+
+    name = ""
+    if country_lower == "kor":
+        name = fetch_pykrx_name(ticker_upper)
+    elif country_lower == "aus":
+        name = fetch_yfinance_name(ticker_upper)
+    elif country_lower == "coin":
+        name = ticker_upper
+
+    if not name:
+        name = _get_display_name(country_lower, ticker_upper)
+
+    return name
 
 
 def _get_display_name(country: str, ticker: str) -> str:
