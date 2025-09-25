@@ -550,7 +550,7 @@ def run_portfolio_backtest(
 
                     if held_stock_same_category:
                         # 같은 카테고리 종목이 있는 경우: 점수만 비교
-                        if best_new_score > held_stock_same_category["score"]:
+                        if best_new_score > held_stock_same_category["score"] + replace_threshold:
                             ticker_to_sell = held_stock_same_category["ticker"]
                             replacement_note = (
                                 f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체 (동일 카테고리)"
@@ -1164,7 +1164,8 @@ def generate_daily_signals_for_portfolio(
                     if (
                         pd.notna(best_new["score"])
                         and pd.notna(held_stock_same_category["score"])
-                        and best_new["score"] > held_stock_same_category["score"]
+                        and best_new["score"]
+                        > held_stock_same_category["score"] + replace_threshold
                     ):
                         ticker_to_sell = held_stock_same_category["tkr"]
                     else:
