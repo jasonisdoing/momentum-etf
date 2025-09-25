@@ -34,6 +34,7 @@ from utils.data_loader import (
 from utils.db_manager import (
     get_db_connection,
     get_portfolio_snapshot,
+    get_previous_portfolio_snapshot,
     get_trades_on_date,
     save_signal_report_to_db,
 )
@@ -1132,9 +1133,12 @@ def _build_header_line(
     currency = account_info.get("currency", "KRW") if account_info else "KRW"
     precision = account_info.get("precision", 0) if account_info else 0
 
-    money_formatter = (
-        (lambda amt: f"${amt:,.{precision}f}") if currency == "AUD" else format_kr_money
-    )
+    if country == "aus":
+        money_formatter = format_kr_money
+    else:
+        money_formatter = (
+            (lambda amt: f"${amt:,.{precision}f}") if currency == "AUD" else format_kr_money
+        )
 
     # 보유 종목 수
     if country == "coin":
@@ -1285,14 +1289,92 @@ def _calculate_portfolio_summary(
     cum_profit_loss = adjusted_equity - adjusted_capital_base
 
     # --- 일간 수익률 계산 ---
-    prev_total_holdings = sum(
+    prev_domestic_holdings_value = sum(
         d["shares"] * d["prev_close"]
         for d in data_by_tkr.values()
         if d.get("shares", 0) > 0 and d.get("prev_close", 0) > 0
     )
+
+    prev_international_value = 0.0
+    international_shares_value = None
+    international_change_pct = 0.0
+
+    if country == "aus":
+        print("\n\n[DEBUG] Daily Return Calculation (AUS):")
+        print(f"  - Domestic previous holdings value: {prev_domestic_holdings_value:,.0f}")
+        intl_info = portfolio_data.get("international_shares")
+        if isinstance(intl_info, dict):
+            try:
+                international_shares_value = float(intl_info.get("value", 0.0))
+            except (TypeError, ValueError):
+                international_shares_value = 0.0
+            try:
+                international_change_pct = float(intl_info.get("change_pct", 0.0))
+            except (TypeError, ValueError):
+                international_change_pct = 0.0
+
+            denominator = 1.0 + (international_change_pct / 100.0)
+            if denominator > 0:
+                prev_international_value = international_shares_value / denominator
+            else:
+                prev_international_value = 0.0
+
+            print(
+                "  - International shares (current value, change%): "
+                f"{international_shares_value:,.0f}, {international_change_pct:.2f}%"
+            )
+            print(f"  - International shares previous value (raw): {prev_international_value:,.0f}")
+        else:
+            print("  - No international shares info found.")
+
     if currency == "AUD" and aud_krw_rate:
-        prev_total_holdings *= aud_krw_rate
-    prev_equity = prev_total_holdings + total_cash if prev_total_holdings > 0 else 0.0
+        prev_domestic_holdings_value *= aud_krw_rate
+        prev_international_value *= aud_krw_rate
+        if international_shares_value is not None:
+            international_shares_value *= aud_krw_rate
+
+    prev_total_holdings = prev_domestic_holdings_value + prev_international_value
+    prev_equity_from_holdings = prev_total_holdings + total_cash if prev_total_holdings > 0 else 0.0
+
+    prev_equity = prev_equity_from_holdings
+    prev_equity_snapshot = None
+    if account:
+        try:
+            prev_snapshot = get_previous_portfolio_snapshot(
+                country, base_date.to_pydatetime(), account
+            )
+        except Exception:
+            prev_snapshot = None
+
+        if prev_snapshot:
+            prev_snapshot_equity = float(prev_snapshot.get("total_equity", 0.0) or 0.0)
+            if currency == "AUD" and aud_krw_rate:
+                prev_snapshot_equity *= aud_krw_rate
+            if prev_snapshot_equity > 0:
+                prev_equity = prev_snapshot_equity
+                prev_equity_snapshot = prev_snapshot_equity
+
+    if country == "aus":
+        print(f"  - Domestic prev holdings (converted): {prev_domestic_holdings_value:,.0f}")
+        print(f"  - International prev holdings (converted): {prev_international_value:,.0f}")
+        if international_shares_value is not None:
+            print(f"  - International current value (converted): {international_shares_value:,.0f}")
+        if prev_equity_snapshot:
+            print(f"  - Previous equity from snapshot (converted): {prev_equity_snapshot:,.0f}")
+        else:
+            print("  - Snapshot equity unavailable; using reconstructed holdings value.")
+            if prev_equity_from_holdings > 0:
+                print(f"    · Reconstructed prev equity: {prev_equity_from_holdings:,.0f}")
+        print(f"  - total_cash: {total_cash:,.0f}")
+        print(f"  - prev_equity: {prev_equity:,.0f}")
+        print(f"  - current_equity: {current_equity:,.0f}")
+        calculated_day_ret_pct = (
+            ((current_equity / prev_equity) - 1.0) * 100.0
+            if prev_equity and prev_equity > 0
+            else 0.0
+        )
+        print(f"  - Calculated daily_return_pct: {calculated_day_ret_pct:.2f}%")
+        print("[/DEBUG]\n")
 
     day_ret_pct = (
         ((current_equity / prev_equity) - 1.0) * 100.0 if prev_equity and prev_equity > 0 else 0.0
@@ -1373,7 +1455,10 @@ def _get_equity_update_message_line(
     def _aud_money_formatter(amount):
         return f"${amount:,.{precision}f}"
 
-    money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
+    if country == "aus":
+        money_formatter = format_kr_money
+    else:
+        money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
 
     diff = new_equity - old_equity
     diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"

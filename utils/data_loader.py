@@ -564,7 +564,7 @@ def _fetch_ohlcv_core(
                 df["unadjusted_close"] = df["Close"]
 
             # Adj Close가 있는 경우, 이를 계산의 기준으로 삼고 Close 컬럼에 덮어씁니다.
-            if "Adj Close" in df.columns:
+            if "Adj Close" in df.columns and not df["Adj Close"].isnull().all():
                 df["Close"] = df["Adj Close"]
 
             if isinstance(df.columns, pd.MultiIndex):

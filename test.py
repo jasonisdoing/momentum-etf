@@ -337,10 +337,22 @@ def main(
         return_value = None
         return
 
-    core_end_dt = get_latest_trading_day(country)
-    core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
-    test_date_range = [core_start_dt.strftime("%Y-%m-%d"), core_end_dt.strftime("%Y-%m-%d")]
-    period_label = f"최근 {test_months_range}개월 ({core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')})"
+    # 기간 설정 로직: override_settings에 start_date, end_date가 있으면 우선 사용
+    if override_settings and "start_date" in override_settings and "end_date" in override_settings:
+        core_start_dt = pd.to_datetime(override_settings["start_date"])
+        core_end_dt = pd.to_datetime(override_settings["end_date"])
+        period_label = (
+            f"지정 기간 ({core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')})"
+        )
+    else:
+        core_end_dt = get_latest_trading_day(country)
+        core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
+        period_label = f"최근 {test_months_range}개월 ({core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')})"
+
+    test_date_range = [
+        core_start_dt.strftime("%Y-%m-%d"),
+        core_end_dt.strftime("%Y-%m-%d"),
+    ]
 
     # 티커 목록 결정
     if not quiet:
