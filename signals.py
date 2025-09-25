@@ -744,7 +744,7 @@ def _calculate_indicators(args: Tuple) -> Tuple[str, Dict[str, Any]]:
     if realtime_price is not None and pd.notna(realtime_price):
         df.loc[base_date, "Close"] = realtime_price
 
-    if not is_realtime_only and len(df) < ma_period:
+    if not is_realtime_only and (df is None or len(df) < ma_period):
         return tkr, {"error": "INSUFFICIENT_DATA"}
 
     if isinstance(df.columns, pd.MultiIndex):
@@ -996,6 +996,11 @@ def _fetch_and_prepare_data(
             df_full = prefetched_data.get(tkr) if prefetched_data else None
             df = _load_ticker_data(tkr, country, required_months, base_date, df_full)
             is_realtime_only = False
+
+            # 상장 초기 종목 처리: pykrx에 데이터가 있지만 MA 기간보다 짧은 경우,
+            # is_realtime_only와 동일하게 취급하여 화면에 표시되도록 함.
+            if df is not None and not df.empty and len(df) < ma_period:
+                is_realtime_only = True
 
             if df is None:
                 rt_price = realtime_prices.get(tkr)
