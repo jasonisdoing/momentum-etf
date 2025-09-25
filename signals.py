@@ -700,21 +700,17 @@ def _format_return_for_header(label: str, pct: float, amount: float, formatter: 
     return f'{label}: <span style="color:{color}">{pct:+.2f}%({formatted_amount})</span>'
 
 
-def _load_and_prepare_ticker_data(args):
+def _load_ticker_data(
+    tkr: str,
+    country: str,
+    required_months: int,
+    base_date: pd.Timestamp,
+    df_full: Optional[pd.DataFrame] = None,
+) -> Optional[pd.DataFrame]:
     """
-    단일 티커에 대한 데이터 조회 및 지표 계산을 수행하는 워커 함수입니다.
+    단일 티커의 OHLCV 데이터를 로드합니다.
+    사전 조회된 데이터(df_full)가 있으면 사용하고, 없으면 네트워크에서 새로 조회합니다.
     """
-    # 전달받은 인자를 변수로 풀어냅니다.
-    (
-        tkr,
-        country,
-        required_months,
-        base_date,
-        ma_period,
-        df_full,
-        realtime_price,
-    ) = args
-
     if df_full is None:
         from utils.data_loader import fetch_ohlcv
 
@@ -725,30 +721,38 @@ def _load_and_prepare_ticker_data(args):
         df = df_full[df_full.index <= base_date].copy()
 
     if df is None or df.empty:
-        return tkr, {"error": "INSUFFICIENT_DATA"}
+        return None
+    return df
 
-    # 실시간 가격이 있으면, 이를 데이터프레임의 마지막 행으로 추가/업데이트합니다.
-    # 이렇게 하면 이동평균 및 추세 신호가 실시간 가격을 반영하여 계산됩니다.
+
+def _calculate_indicators(args: Tuple) -> Tuple[str, Dict[str, Any]]:
+    """
+    주어진 데이터프레임에 대해 기술적 지표(이동평균 등)를 계산합니다.
+    """
+    (
+        tkr,
+        df,
+        base_date,
+        ma_period,
+        realtime_price,
+        is_realtime_only,
+    ) = args
+
+    if df is None:
+        return tkr, {"error": "PROCESS_ERROR"}
+
     if realtime_price is not None and pd.notna(realtime_price):
-        # .loc를 사용하여 base_date 인덱스에 'Close' 값을 설정합니다.
-        # 해당 날짜가 없으면 새로 추가되고, 있으면 업데이트됩니다.
         df.loc[base_date, "Close"] = realtime_price
 
-    if len(df) < ma_period:
+    if not is_realtime_only and len(df) < ma_period:
         return tkr, {"error": "INSUFFICIENT_DATA"}
 
-    # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우에 대비하여,
-    # 컬럼을 단순화하고 중복을 제거합니다.
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
         df = df.loc[:, ~df.columns.duplicated()]
 
     close = df["Close"]
-    if isinstance(close, pd.DataFrame):
-        close = close.iloc[:, 0]
-
     ma = close.rolling(window=ma_period).mean()
-
     buy_signal_active = close > ma
     buy_signal_days = (
         buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum())
@@ -767,65 +771,55 @@ def _load_and_prepare_ticker_data(args):
     }
 
 
-def _normalize_holdings(raw_items: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
-    """포트폴리오 스냅샷의 보유 종목 리스트를 정규화된 딕셔너리로 변환합니다."""
-    normalized: Dict[str, Dict[str, float]] = {}
-    for item in raw_items or []:
-        tkr = item.get("ticker")
-        if not tkr:
-            continue
-        normalized[str(tkr)] = {
-            "name": item.get("name", ""),
-            "shares": float(item.get("shares", 0.0) or 0.0),
-            "avg_cost": float(item.get("avg_cost", 0.0) or 0.0),
-        }
-    return normalized
+def _build_universe(
+    country: str, account: str, base_date: pd.Timestamp
+) -> Tuple[Dict[str, Dict], Dict[str, Dict], List[Tuple[str, str]]]:
+    """
+    처리할 종목의 전체 목록(universe)을 생성합니다.
+    보유 종목, 종목 마스터, 당일 매도 종목을 모두 포함합니다.
+    """
+    # DB에서 종목 목록을 가져와 전체 유니버스를 구성합니다.
+    all_etfs_from_file = get_etfs(country)
+    full_etf_meta = {etf["ticker"]: etf for etf in all_etfs_from_file}
 
+    # 포트폴리오 스냅샷에서 보유 종목 정보를 가져옵니다.
+    portfolio_data = get_portfolio_snapshot(
+        country, account=account, date_str=base_date.strftime("%Y-%m-%d")
+    )
+    if not portfolio_data:
+        raise ValueError(f"'{base_date.strftime('%Y-%m-%d')}' 날짜의 포트폴리오 스냅샷을 찾을 수 없습니다.")
 
-def _lookup_price(
-    data_entry: Dict[str, Any], target_date: Optional[pd.Timestamp]
-) -> Optional[float]:
-    """캐시된 데이터에서 특정 날짜의 종가를 조회합니다."""
-    if target_date is None or not data_entry:
-        return None
-    df_price = data_entry.get("df")
-    if df_price is None or df_price.empty:
-        return None
+    holdings = _normalize_holdings(portfolio_data.get("holdings", []))
 
-    # 데이터프레임 복사본을 만들어 원본 수정을 방지합니다.
-    df_local = df_price.copy()
+    # 당일 매도 종목을 유니버스에 추가합니다.
+    sold_tickers_today = set()
+    trades_on_base_date = get_trades_on_date(country, account, base_date)
+    for trade in trades_on_base_date:
+        if trade["action"] == "SELL":
+            ticker = trade["ticker"]
+            sold_tickers_today.add(ticker)
+            if ticker not in full_etf_meta:
+                full_etf_meta[ticker] = {
+                    "ticker": ticker,
+                    "name": trade.get("name", ""),
+                    "category": "",
+                }
+            if ticker not in holdings:
+                holdings[ticker] = {"name": trade.get("name", ""), "shares": 0, "avg_cost": 0.0}
 
-    if isinstance(df_local.columns, pd.MultiIndex):
-        df_local.columns = df_local.columns.get_level_values(0)
-        df_local = df_local.loc[:, ~df_local.columns.duplicated()]
-    if not isinstance(df_local.index, pd.DatetimeIndex):
-        df_local.index = pd.to_datetime(df_local.index)
+    # 모든 티커를 포함하도록 pairs를 재구성합니다.
+    all_tickers_for_processing = set(holdings.keys()) | set(full_etf_meta.keys())
+    pairs = []
+    for tkr in sorted(list(all_tickers_for_processing)):
+        name = full_etf_meta.get(tkr, {}).get("name") or holdings.get(tkr, {}).get("name") or ""
+        pairs.append((tkr, name))
 
-    price = None
-    try:
-        # 가장 빠른 방법: 날짜로 직접 조회
-        row = df_local.loc[target_date]
-        price = row.get("Close") if isinstance(row, pd.Series) else row["Close"].iloc[0]
-    except KeyError:
-        # 해당 날짜에 데이터가 없는 경우 (휴장일 등), 그 이전 가장 최근 데이터를 찾습니다.
-        subset = df_local[df_local.index <= target_date]
-        if not subset.empty and "Close" in subset.columns:
-            price = subset["Close"].iloc[-1]
+    # 코인 시장의 경우, 종목 마스터에 없는 종목은 처리에서 제외합니다.
+    if country == "coin":
+        allowed_tickers = {etf["ticker"] for etf in all_etfs_from_file}
+        pairs = [(t, n) for t, n in pairs if t in allowed_tickers or t in sold_tickers_today]
 
-    # 'Adj Close'에 대한 폴백 로직 (yfinance 등)
-    if price is None and "Adj Close" in df_local.columns:
-        try:
-            row = df_local.loc[target_date, "Adj Close"]
-            price = row.iloc[0] if isinstance(row, pd.Series) else row
-        except KeyError:
-            subset = df_local[df_local.index <= target_date]
-            if not subset.empty:
-                price = subset["Adj Close"].iloc[-1]
-
-    try:
-        return float(price)
-    except (TypeError, ValueError, OverflowError):
-        return None
+    return holdings, full_etf_meta, pairs
 
 
 def _fetch_and_prepare_data(
@@ -840,100 +834,30 @@ def _fetch_and_prepare_data(
     신호 계산에 필요한 이동평균 기반 지표를 계산합니다.
     """
     logger = get_signal_logger()
-
-    ma_period = portfolio_settings["ma_period"]
-
-    request_label = date_str or "auto"
-    logger.info(
-        "[%s] signal data preparation started (input date=%s)", country.upper(), request_label
-    )
-
     try:
         initial_date_ts = pd.to_datetime(portfolio_settings["initial_date"]).normalize()
-        request_date_ts = pd.to_datetime(date_str).normalize()
+        base_date = pd.to_datetime(date_str).normalize()
     except (ValueError, TypeError, AttributeError):
+        raise ValueError(f"날짜 형식 변환 실패: {date_str}")
+
+    if base_date < initial_date_ts:
         print(
-            f"오류: 날짜 형식 변환에 실패했습니다. (요청: {date_str}, 시작일: {portfolio_settings.get('initial_date')})"
+            f"정보: 요청된 날짜({base_date.strftime('%Y-%m-%d')})가 계좌 시작일({initial_date_ts.strftime('%Y-%m-%d')}) 이전이므로 현황을 계산하지 않습니다."
         )
         return None
 
-    if request_date_ts < initial_date_ts:
-        print(
-            f"정보: 요청된 날짜({request_date_ts.strftime('%Y-%m-%d')})가 계좌 시작일({initial_date_ts.strftime('%Y-%m-%d')}) 이전이므로 현황을 계산하지 않습니다."
-        )
-        return None
-
-    portfolio_data = get_portfolio_snapshot(country, account=account, date_str=date_str)
-
-    if not portfolio_data:
-        print(
-            f"오류: '{country}' 국가의 '{date_str}' 날짜에 대한 포트폴리오 스냅샷을 DB에서 찾을 수 없습니다. 거래 내역이 없거나 DB 연결에 문제가 있을 수 있습니다."
-        )
-        logger.warning("[%s] portfolio snapshot missing for %s", country.upper(), date_str)
-        return None
+    # --- 1. 유니버스 구성 ---
     try:
-        # DB에서 가져온 date는 스냅샷의 기준일이 됩니다.
-        base_date = pd.to_datetime(portfolio_data["date"]).normalize()
-    except (ValueError, TypeError):
-        print("경고: 포트폴리오 스냅샷에서 날짜를 추출할 수 없습니다. 현재 날짜를 사용합니다.")
-        base_date = pd.Timestamp.now().normalize()
+        holdings, etf_meta, pairs = _build_universe(country, account, base_date)
+    except ValueError as e:
+        print(f"오류: {e}")
+        return None
 
     logger.info(
-        "[%s] portfolio snapshot loaded for %s (holdings=%d)",
+        "[%s/%s] Universe built for %s: holdings=%d, meta=%d, total_pairs=%d",
         country.upper(),
+        account,
         base_date.strftime("%Y-%m-%d"),
-        len(portfolio_data.get("holdings", [])),
-    )
-    try:
-        sample_holding = portfolio_data.get("holdings", [])[:2]
-        logger.info("[%s/%s] sample holdings: %s", country.upper(), account, sample_holding)
-    except Exception:
-        pass
-
-    # 콘솔 로그에 국가/날짜를 포함하여 표시
-    try:
-        print(f"[{country}/{account}]{base_date.strftime('%Y-%m-%d')} 시그널을 계산합니다")
-    except Exception:
-        pass
-
-    holdings = _normalize_holdings(portfolio_data.get("holdings", []))
-
-    # DB에서 종목 목록을 가져와 전체 유니버스를 구성합니다.
-    all_etfs_from_file = get_etfs(country)
-    full_etf_meta = {etf["ticker"]: etf for etf in all_etfs_from_file}
-    etf_meta = {etf["ticker"]: etf for etf in all_etfs_from_file}
-
-    # 오늘 판매된 종목을 추가합니다.
-    sold_tickers_today = set()
-    trades_on_base_date = get_trades_on_date(country, account, base_date)
-    for trade in trades_on_base_date:
-        if trade["action"] == "SELL":
-            sold_tickers_today.add(trade["ticker"])
-            # etf_meta에 없는 경우 추가 (이름은 나중에 채워질 수 있음)
-            if trade["ticker"] not in etf_meta:
-                etf_meta[trade["ticker"]] = {
-                    "ticker": trade["ticker"],
-                    "name": trade.get("name", ""),
-                    "category": "",
-                }
-            # holdings에 없는 경우, 매도된 종목 정보를 추가합니다.
-            if trade["ticker"] not in holdings:
-                holdings[trade["ticker"]] = {
-                    "name": trade.get("name", ""),
-                    "shares": 0,
-                    "avg_cost": 0.0,
-                }
-
-    # 모든 티커를 포함하도록 pairs를 재구성합니다.
-    all_tickers_for_processing = set(holdings.keys()) | set(etf_meta.keys())
-    pairs = []
-    for tkr in all_tickers_for_processing:
-        name = etf_meta.get(tkr, {}).get("name") or holdings.get(tkr, {}).get("name") or ""
-        pairs.append((tkr, name))
-
-    logger.info(
-        "[%s] gathered universe: holdings=%d, meta=%d, total_pairs=%d",
-        country.upper(),
         len(holdings),
         len(etf_meta),
         len(pairs),
@@ -960,15 +884,6 @@ def _fetch_and_prepare_data(
         else:  # aus
             use_realtime = is_market_open(country)
 
-    if use_realtime:
-        if country == "kor":
-            print("-> 장중 또는 장 마감 직후입니다. 네이버 금융에서 실시간 시세를 가져옵니다.")
-        elif country == "coin":
-            print("-> 실시간 시세를 가져옵니다 (코인).")
-        else:  # aus
-            print("-> 장중입니다. 실시간 시세를 가져옵니다.")
-
-    # --- 신호 계산 (공통 설정에서) ---
     try:
         common = get_common_file_settings()
         regime_filter_enabled = common["MARKET_REGIME_FILTER_ENABLED"]
@@ -977,12 +892,7 @@ def _fetch_and_prepare_data(
         print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
         return None
 
-    # DB에서 종목 유형(ETF/주식) 정보 가져오기
-    # 코인은 거래소 잔고 기반 표시이므로, 종목 마스터가 비어 있어도 보유코인을 기준으로 진행합니다.
-    if not all_etfs_from_file and country != "coin":
-        print(f"오류: 'data/stocks/{country}.json' 파일에서 '{country}' 국가의 현황을 계산할 종목을 찾을 수 없습니다.")
-        return None
-
+    ma_period = portfolio_settings["ma_period"]
     max_ma_period = max(ma_period, regime_ma_period if regime_filter_enabled else 0)
     required_days = max_ma_period + 5  # 버퍼 추가
     required_months = (required_days // 22) + 2
@@ -992,6 +902,13 @@ def _fetch_and_prepare_data(
     # 이 가격은 추세 분석(이동평균 계산)에 사용됩니다.
     realtime_prices: Dict[str, Optional[float]] = {}
     if use_realtime:
+        if country == "kor":
+            print("-> 장중 또는 장 마감 직후입니다. 네이버 금융에서 실시간 시세를 가져옵니다.")
+        elif country == "coin":
+            print("-> 실시간 시세를 가져옵니다 (코인).")
+        else:  # aus
+            print("-> 장중입니다. 실시간 시세를 가져옵니다.")
+
         print("-> 실시간 가격 일괄 조회 시작...")
 
         def _fetch_realtime_price(tkr_local: str) -> Optional[float]:
@@ -1069,111 +986,75 @@ def _fetch_and_prepare_data(
     datestamps = []
     failed_tickers_info = {}
 
-    # 코인도 이제 trades 기반 포트폴리오를 사용합니다. (빗썸 스냅샷→trades 동기화 별도 스크립트)
-    if country == "coin":
-        # 제외할 특수 심볼 제거 (예: 'P')
-        # 종목 마스터에 없는 종목은 처리에서 제외합니다. (단, 오늘 매도된 종목은 포함)
-        allowed_tickers = {etf["ticker"] for etf in all_etfs_from_file}
-        pairs = [(t, n) for t, n in pairs if t in allowed_tickers or t in sold_tickers_today]
-        logger.info(
-            "[%s] coin universe filtered to %d tickers (allowed=%d, sold_today=%d)",
-            country.upper(),
-            len(pairs),
-            len(allowed_tickers),
-            len(sold_tickers_today),
-        )
-
-    # --- 데이터 로딩 및 지표 계산 ---
-    tasks = []
-    for tkr, name in pairs:
-        df_full = prefetched_data.get(tkr) if prefetched_data else None
-        tasks.append(
-            (
-                tkr,
-                country,
-                required_months,
-                base_date,
-                ma_period,
-                df_full,
-                realtime_prices.get(tkr),  # 조회된 실시간 가격 전달
-            )
-        )
-
-    # 순차 처리로 데이터 로딩 및 기본 지표 계산
+    # --- 4. 종목별 데이터 처리 ---
     processed_results: Dict[str, Dict[str, Any]] = {}
     desc = "과거 데이터 처리" if prefetched_data else "종목 데이터 로딩"
-    logger.info(
-        "[%s] %s 시작 (tickers=%d)",
-        country.upper(),
-        desc,
-        len(tasks),
-    )
-    print(f"-> {desc} 시작... (총 {len(tasks)}개 종목)")
+    print(f"-> {desc} 시작... (총 {len(pairs)}개 종목)")
 
-    # 순차 처리로 데이터 로딩 및 기본 지표 계산 (병렬 처리 금지 원칙 준수)
-    for i, task in enumerate(tasks):
-        tkr = task[0]
+    for i, (tkr, _) in enumerate(pairs):
         try:
-            _, result = _load_and_prepare_ticker_data(task)
-            processed_results[tkr] = result
-        except PykrxDataUnavailable as exc:
-            start_str = exc.start_dt.strftime("%Y-%m-%d")
-            end_str = exc.end_dt.strftime("%Y-%m-%d")
-            message = f"[{country}/{account}] pykrx 조회 실패 ({start_str}~{end_str}): {exc.detail}"
-            logger.error(message)
-            try:
-                send_log_to_slack(message)
-            except Exception:
-                pass
-            raise
+            df_full = prefetched_data.get(tkr) if prefetched_data else None
+            df = _load_ticker_data(tkr, country, required_months, base_date, df_full)
+            is_realtime_only = False
+
+            if df is None:
+                rt_price = realtime_prices.get(tkr)
+                if rt_price is not None and pd.notna(rt_price):
+                    print(f"\n-> 정보: {tkr}의 과거 데이터는 없지만 실시간 가격({rt_price})이 있어 처리를 계속합니다.")
+                    df = pd.DataFrame([{"Close": rt_price}], index=[base_date])
+                    is_realtime_only = True
+                else:
+                    failed_tickers_info[tkr] = "INSUFFICIENT_DATA"
+                    continue
+
+            _, result = _calculate_indicators(
+                (tkr, df, base_date, ma_period, realtime_prices.get(tkr), is_realtime_only)
+            )
+
+            if "error" in result:
+                failed_tickers_info[tkr] = result["error"]
+            else:
+                processed_results[tkr] = result
+
+        except PykrxDataUnavailable:
+            rt_price = realtime_prices.get(tkr)
+            if rt_price is not None and pd.notna(rt_price):
+                print(f"\n-> 정보: {tkr}의 pykrx 데이터는 없지만 실시간 가격({rt_price})이 있어 처리를 계속합니다.")
+                df = pd.DataFrame([{"Close": rt_price}], index=[base_date])
+                _, result = _calculate_indicators((tkr, df, base_date, ma_period, rt_price, True))
+                if "error" in result:
+                    failed_tickers_info[tkr] = result["error"]
+                else:
+                    processed_results[tkr] = result
+            else:
+                failed_tickers_info[tkr] = "INSUFFICIENT_DATA"
+                logger.warning(
+                    "[%s] %s excluded due to PykrxDataUnavailable and no realtime price",
+                    country,
+                    tkr,
+                )
         except Exception as exc:
             print(f"\n-> 경고: {tkr} 데이터 처리 중 오류 발생: {exc}")
-            processed_results[tkr] = {"error": "PROCESS_ERROR"}
-            logger.error("[%s] %s data processing error", country, tkr)
-        # 진행 상황 표시
-        print(f"\r   {desc} 진행: {i + 1}/{len(tasks)}", end="", flush=True)
+            failed_tickers_info[tkr] = "PROCESS_ERROR"
+            logger.error("[%s] %s data processing error", country, tkr, exc_info=True)
 
-    print("\n-> 종목 데이터 처리 완료.")
-    logger.info("[%s] %s finished", country.upper(), desc)
+        print(f"\r   {desc} 진행: {i + 1}/{len(pairs)}", end="", flush=True)
 
-    # --- 최종 데이터 조합 및 계산 ---
-    # 이제 `processed_results`를 사용하여 순차적으로 나머지 계산을 수행합니다.
+    print(f"\n-> {desc} 완료.")
+
+    # --- 5. 최종 데이터 조합 및 계산 ---
     print("\n-> 최종 데이터 조합 및 계산 시작...")
     for tkr, _ in pairs:
-        # 계산된 결과를 사용합니다.
         result = processed_results.get(tkr)
         if not result:
-            failed_tickers_info[tkr] = "FETCH_FAILED"
-            logger.warning("[%s] %s missing result (treated as FETCH_FAILED)", country.upper(), tkr)
             continue
 
-        if "error" in result:
-            failed_tickers_info[tkr] = result["error"]
-            logger.warning(
-                "[%s] %s excluded due to %s",
-                country.upper(),
-                tkr,
-                result["error"],
-            )
-            continue
-
-        # 현재가는 _load_and_prepare_ticker_data에서 실시간 가격을 반영하여
-        # 계산된 'close' 시리즈의 마지막 값을 사용합니다.
         c0 = float(result["close"].iloc[-1])
         if pd.isna(c0) or c0 <= 0:
-            failed_tickers_info[tkr] = "FETCH_FAILED"
-            logger.error(
-                "[%s] %s excluded due to invalid price (price: %s)",
-                country.upper(),
-                tkr,
-                c0,
-            )
+            failed_tickers_info[tkr] = "INVALID_PRICE"
             continue
 
         m = result["ma"].iloc[-1]
-
-        # `base_date`가 '다음 거래일'인 경우, `prev_close`는 '어제' 종가를 의미해야 합니다.
-        # `result["close"]`는 '오늘'까지의 데이터를 포함하므로, '오늘'을 기준으로 이전 종가를 찾습니다.
         today_cal = pd.Timestamp.now().normalize()
         date_for_prev_close = today_cal if base_date.date() > today_cal.date() else base_date
         prev_close = _resolve_previous_close(result["close"], date_for_prev_close)
@@ -1202,17 +1083,6 @@ def _fetch_and_prepare_data(
             "df": result["df"],
         }
 
-        logger.debug(
-            "[%s] %s processed: shares=%.4f price=%.2f prev_close=%.2f data_points=%d buy_signal_days=%d",
-            country.upper(),
-            tkr,
-            sh,
-            c0,
-            prev_close,
-            len(result["df"]),
-            buy_signal_days_today,
-        )
-
     fail_counts: Dict[str, int] = {}
     for reason in failed_tickers_info.values():
         fail_counts[reason] = fail_counts.get(reason, 0) + 1
@@ -1225,6 +1095,7 @@ def _fetch_and_prepare_data(
         fail_counts or "{}",
     )
 
+    portfolio_data = get_portfolio_snapshot(country, account=account, date_str=date_str)
     return SignalReportData(
         portfolio_data=portfolio_data,
         data_by_tkr=data_by_tkr,
@@ -1233,7 +1104,7 @@ def _fetch_and_prepare_data(
         pairs=pairs,
         base_date=base_date,
         regime_info=regime_info,
-        full_etf_meta=full_etf_meta,
+        full_etf_meta=etf_meta,
         etf_meta=etf_meta,
         failed_tickers_info=failed_tickers_info,
     )
@@ -1247,22 +1118,18 @@ def _build_header_line(
     data_by_tkr,
     base_date,
     portfolio_settings: Dict,
-):
+    summary_data: Dict,
+) -> Tuple[str, pd.Timestamp, str]:
     """리포트의 헤더 라인을 생성합니다."""
-    total_holdings_value = 0.0
-    from utils.transaction_manager import get_transactions_up_to_date
     from utils.account_registry import get_account_info
-    from utils.data_loader import get_aud_to_krw_rate
 
     account_info = get_account_info(account)
     currency = account_info.get("currency", "KRW") if account_info else "KRW"
     precision = account_info.get("precision", 0) if account_info else 0
 
-    def _aud_money_formatter(amount):
-        return f"${amount:,.{precision}f}"
-
-    # 헤더의 모든 금액 표시는 KRW를 기준으로 하므로, KRW 포맷터를 기본값으로 사용합니다.
-    money_formatter = format_kr_money
+    money_formatter = (
+        (lambda amt: f"${amt:,.{precision}f}") if currency == "AUD" else format_kr_money
+    )
 
     # 보유 종목 수
     if country == "coin":
@@ -1276,9 +1143,90 @@ def _build_header_line(
             1 for v in portfolio_data.get("holdings", []) if float(v.get("shares", 0)) > 0
         )
 
-    # 해외 주식 가치 포함
+    portfolio_topn = portfolio_settings.get("portfolio_topn", 0) if portfolio_settings else 0
+
+    # 헤더 문자열 생성
+    equity_str = money_formatter(summary_data["total_equity"])
+    cash_str = money_formatter(summary_data["total_cash"])
+    principal_str = money_formatter(summary_data["principal"])
+    day_ret_str = _format_return_for_header(
+        "일간", summary_data["daily_return_pct"], summary_data["daily_profit_loss"], money_formatter
+    )
+    eval_ret_str = _format_return_for_header(
+        "평가", summary_data["eval_return_pct"], summary_data["eval_profit_loss"], money_formatter
+    )
+    cum_ret_str = _format_return_for_header(
+        "누적", summary_data["cum_return_pct"], summary_data["cum_profit_loss"], money_formatter
+    )
+
+    header_body = (
+        f"보유종목: {held_count}/{portfolio_topn} | 원금: {principal_str} | {day_ret_str} | "
+        f"{eval_ret_str} | {cum_ret_str} | 현금: {cash_str} | 평가금액: {equity_str}"
+    )
+
+    # --- N 거래일차 계산 및 추가 ---
+    initial_date = summary_data.get("initial_date")
+    if initial_date and base_date >= initial_date:
+        try:
+            trading_days_count = len(
+                get_trading_days(
+                    initial_date.strftime("%Y-%m-%d"), base_date.strftime("%Y-%m-%d"), country
+                )
+            )
+            since_str = f"(Since {initial_date.strftime('%Y-%m-%d')})"
+            header_body += (
+                f' | <span style="color:blue">{trading_days_count} 거래일차</span> {since_str}'
+            )
+        except Exception:
+            pass
+
+    # --- 날짜 라벨 결정 ---
+    today_cal = pd.Timestamp.now().normalize()
+    label_date = base_date
+    if base_date.date() < today_cal.date():
+        day_label = "기준일"
+    else:
+        day_label = "다음 거래일" if base_date.date() > today_cal.date() else "오늘"
+
+    return header_body, label_date, day_label
+
+
+def _normalize_holdings(raw_items: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
+    """포트폴리오 스냅샷의 보유 종목 리스트를 정규화된 딕셔너리로 변환합니다."""
+    normalized: Dict[str, Dict[str, float]] = {}
+    for item in raw_items or []:
+        tkr = item.get("ticker")
+        if not tkr:
+            continue
+        normalized[str(tkr)] = {
+            "name": item.get("name", ""),
+            "shares": float(item.get("shares", 0.0) or 0.0),
+            "avg_cost": float(item.get("avg_cost", 0.0) or 0.0),
+        }
+    return normalized
+
+
+def _calculate_portfolio_summary(
+    country: str,
+    account: str,
+    portfolio_data: Dict,
+    current_equity: float,
+    data_by_tkr: Dict,
+    base_date: pd.Timestamp,
+    portfolio_settings: Dict,
+) -> Dict[str, Any]:
+    """포트폴리오의 요약 통계(수익률, 평가금액 등)를 계산합니다."""
+    from utils.transaction_manager import get_transactions_up_to_date
+    from utils.account_registry import get_account_info
+    from utils.data_loader import get_aud_to_krw_rate
+
+    account_info = get_account_info(account)
+    currency = account_info.get("currency", "KRW") if account_info else "KRW"
+
+    # 보유 종목 가치 계산
     total_holdings = sum(d["shares"] * d["price"] for d in data_by_tkr.values() if d["shares"] > 0)
 
+    # 호주 계좌의 경우 해외 주식 가치 포함
     if country == "aus":
         intl_info = portfolio_data.get("international_shares")
         if isinstance(intl_info, dict):
@@ -1287,22 +1235,26 @@ def _build_header_line(
             except (TypeError, ValueError):
                 pass
 
-    # 현금
+    # 현금 계산
     total_cash = float(current_equity) - float(total_holdings)
 
     # --- 데이터 오염 방지를 위한 누적 수익률용 평가금액 보정 ---
     equity_for_cum_calc = current_equity
-    # 휴리스틱: DB 평가금액이 재계산된 보유금액보다 10배 이상 크면, 데이터 오염으로 간주합니다.
     if country == "aus" and total_holdings > 1 and current_equity > 1:
         if (current_equity / total_holdings) > 10:
-            equity_for_cum_calc = total_holdings  # 현금을 무시하고 보유금액만 사용
+            equity_for_cum_calc = total_holdings
 
     # --- 누적 수익률 계산 (자본 추가/인출 반영) ---
-    initial_capital_krw_from_file = (
+    initial_capital_from_file = (
         float(portfolio_settings.get("initial_capital_krw", 0)) if portfolio_settings else 0.0
     )
+    initial_date = (
+        pd.to_datetime(portfolio_settings.get("initial_date"))
+        if portfolio_settings and portfolio_settings.get("initial_date")
+        else None
+    )
 
-    # 호주 계좌의 경우, 모든 요약 금액을 KRW로 환산합니다.
+    # 호주 계좌의 경우, 모든 요약 금액을 KRW로 환산
     aud_krw_rate = None
     if currency == "AUD":
         aud_krw_rate = get_aud_to_krw_rate()
@@ -1312,19 +1264,12 @@ def _build_header_line(
             total_cash *= aud_krw_rate
             equity_for_cum_calc *= aud_krw_rate
 
-    initial_date = (
-        pd.to_datetime(portfolio_settings.get("initial_date"))
-        if portfolio_settings and portfolio_settings.get("initial_date")
-        else None
-    )
-
     injections = get_transactions_up_to_date(country, account, base_date, "capital_injection")
     withdrawals = get_transactions_up_to_date(country, account, base_date, "cash_withdrawal")
-
     total_injections = sum(inj.get("amount", 0.0) for inj in injections)
     total_withdrawals = sum(wd.get("amount", 0.0) for wd in withdrawals)
 
-    adjusted_capital_base = initial_capital_krw_from_file + total_injections
+    adjusted_capital_base = initial_capital_from_file + total_injections
     adjusted_equity = equity_for_cum_calc + total_withdrawals
 
     cum_ret_pct = (
@@ -1333,27 +1278,13 @@ def _build_header_line(
         else 0.0
     )
     cum_profit_loss = adjusted_equity - adjusted_capital_base
-    portfolio_topn = portfolio_settings.get("portfolio_topn", 0) if portfolio_settings else 0
 
-    today_cal = pd.Timestamp.now().normalize()
-
-    # 표시 날짜는 항상 계산 기준일(base_date)을 따릅니다.
-    label_date = base_date
-
-    # 라벨(오늘, 다음 거래일 등)을 결정합니다.
-    if base_date.date() < today_cal.date():
-        day_label = "기준일"
-    else:
-        day_label = "다음 거래일" if base_date.date() > today_cal.date() else "오늘"
-
-    # 일간 수익률 계산
-    # DB를 조회하는 대신, 현재 테이블의 '전일 종가'와 '보유 수량'을 기반으로 이전 평가금액을 계산합니다.
+    # --- 일간 수익률 계산 ---
     prev_total_holdings = sum(
         d["shares"] * d["prev_close"]
         for d in data_by_tkr.values()
         if d.get("shares", 0) > 0 and d.get("prev_close", 0) > 0
     )
-    # 호주 계좌의 경우, 이전 보유금액도 KRW로 환산합니다.
     if currency == "AUD" and aud_krw_rate:
         prev_total_holdings *= aud_krw_rate
     prev_equity = prev_total_holdings + total_cash if prev_total_holdings > 0 else 0.0
@@ -1363,94 +1294,47 @@ def _build_header_line(
     )
     day_profit_loss = current_equity - prev_equity if prev_equity else 0.0
 
-    # 평가 수익률
+    # --- 평가 수익률 계산 ---
     total_acquisition_cost = sum(
         d["shares"] * d["avg_cost"] for d in data_by_tkr.values() if d["shares"] > 0
     )
 
-    # 국가별로 평가손익 계산 로직을 분리합니다.
     if country == "aus":
-        # 호주 계좌: 해외주식(IS) 가치를 포함하여 계산합니다.
-        # IS의 매수원금은 평가액과 동일하게 간주하여 IS 자체의 평가손익은 0이 됩니다.
         intl_info = portfolio_data.get("international_shares")
-        international_shares_value = 0.0
         if isinstance(intl_info, dict):
             international_shares_value = float(intl_info.get("value", 0.0))
-            international_shares_change_pct = float(intl_info.get("change_pct", 0.0))
-
-        # 호주 계좌의 모든 금액을 KRW로 환산합니다.
-        if aud_krw_rate:
-            total_acquisition_cost *= aud_krw_rate
-            international_shares_cost = (
-                international_shares_value
-                / (1 + international_shares_change_pct / 100)
-                * aud_krw_rate
+            change_pct = float(intl_info.get("change_pct", 0.0))
+            cost = (
+                international_shares_value / (1 + change_pct / 100)
+                if (1 + change_pct / 100) != 0
+                else 0
             )
-        total_holdings_value = total_holdings
-        final_total_acquisition_cost = total_acquisition_cost + international_shares_cost
-    else:  # kor, coin
-        total_holdings_value = total_holdings
-        final_total_acquisition_cost = total_acquisition_cost
+            total_acquisition_cost += cost
+
+    if currency == "AUD" and aud_krw_rate:
+        total_acquisition_cost *= aud_krw_rate
 
     eval_ret_pct = (
-        ((total_holdings_value / final_total_acquisition_cost) - 1.0) * 100.0
-        if final_total_acquisition_cost > 0
+        ((total_holdings / total_acquisition_cost) - 1.0) * 100.0
+        if total_acquisition_cost > 0
         else 0.0
     )
-    eval_profit_loss = total_holdings_value - final_total_acquisition_cost
+    eval_profit_loss = total_holdings - total_acquisition_cost
 
-    # --- 최종 헤더 및 요약 데이터 생성 ---
-
-    # 헤더 문자열 생성
-    equity_str = money_formatter(current_equity)
-    # holdings_str = money_formatter(total_holdings) # 헤더에서 제거됨
-    cash_str = money_formatter(total_cash)
-    principal_str = money_formatter(adjusted_capital_base)
-    day_ret_str = _format_return_for_header("일간", day_ret_pct, day_profit_loss, money_formatter)
-    eval_ret_str = _format_return_for_header("평가", eval_ret_pct, eval_profit_loss, money_formatter)
-    cum_ret_str = _format_return_for_header("누적", cum_ret_pct, cum_profit_loss, money_formatter)
-
-    # 헤더 본문
-    header_body = (
-        f"보유종목: {held_count}/{portfolio_topn} | 원금: {principal_str} | {day_ret_str} | "
-        f"{eval_ret_str} | {cum_ret_str} | 현금: {cash_str} | 평가금액: {equity_str}"
-    )
-
-    # --- N 거래일차 계산 및 추가 ---
-    if initial_date and base_date >= initial_date:
-        try:
-            # get_trading_days는 시작일과 종료일을 포함하여 계산합니다.
-            trading_days_count = len(
-                get_trading_days(
-                    initial_date.strftime("%Y-%m-%d"),
-                    base_date.strftime("%Y-%m-%d"),
-                    country,
-                )
-            )
-            since_str = f"(Since {initial_date.strftime('%Y-%m-%d')})"
-            trading_days_str = (
-                f' | <span style="color:blue">{trading_days_count} 거래일차</span> {since_str}'
-            )
-            header_body += trading_days_str
-        except Exception:
-            # 오류 발생 시 거래일차 정보는 추가하지 않습니다.
-            pass
-
-    summary_data = {
+    return {
         "principal": adjusted_capital_base,
         "total_equity": current_equity,
         "total_holdings_value": total_holdings,
         "total_cash": total_cash,
-        "total_holdings_value": total_holdings,
         "daily_profit_loss": day_profit_loss,
         "daily_return_pct": day_ret_pct,
         "eval_profit_loss": eval_profit_loss,
         "eval_return_pct": eval_ret_pct,
         "cum_profit_loss": cum_profit_loss,
         "cum_return_pct": cum_ret_pct,
+        "initial_date": initial_date,
+        "aud_krw_rate": aud_krw_rate,
     }
-
-    return header_body, label_date, day_label, summary_data
 
 
 def _get_calculation_message_lines(num_tickers: int, warnings: List[str]):
@@ -1752,7 +1636,10 @@ def generate_signal_report(
     # 3. 헤더 생성
     total_holdings_value += international_shares_value
 
-    header_line, label_date, day_label, summary_data = _build_header_line(
+    summary_data = _calculate_portfolio_summary(
+        country, account, portfolio_data, current_equity, data_by_tkr, base_date, portfolio_settings
+    )
+    header_line, label_date, day_label = _build_header_line(  # type: ignore
         country,
         account,
         portfolio_data,
@@ -1760,6 +1647,7 @@ def generate_signal_report(
         data_by_tkr,
         base_date,
         portfolio_settings,
+        summary_data,
     )
 
     # 데이터 기간이 부족한 종목에 대한 경고 메시지를 헤더에 추가합니다.

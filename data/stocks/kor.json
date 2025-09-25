@@ -299,6 +299,15 @@
         ]
     },
     {
+        "category": "희토류",
+        "tickers": [
+            {
+                "ticker": "415920",
+                "name": "PLUS 글로벌희토류&전략자원생산기업"
+            }
+        ]
+    },
+    {
         "category": "한국방산",
         "tickers": [
             {
@@ -473,10 +482,6 @@
             {
                 "ticker": "411860",
                 "name": "KIWOOM 독일DAX"
-            },
-            {
-                "ticker": "415920",
-                "name": "PLUS 글로벌희토류&전략자원생산기업"
             },
             {
                 "ticker": "441640",
