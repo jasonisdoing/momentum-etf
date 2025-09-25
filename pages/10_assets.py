@@ -285,7 +285,10 @@ def render_assets_dashboard(
             if prefetched_trading_days is not None:
                 all_trading_days = prefetched_trading_days
             else:
-                all_trading_days = []  # prefetched_trading_days가 없을 경우 빈 리스트로 초기화
+                # prefetched_trading_days가 없으면 직접 거래일을 조회합니다.
+                from utils.data_loader import get_trading_days
+
+                all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
             trading_day_set = set()
             if not all_trading_days:
                 if country_code == "kor":
