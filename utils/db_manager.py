@@ -16,6 +16,30 @@ load_dotenv()
 _db_connection = None
 _mongo_client: Optional[MongoClient] = None
 
+_coin_min_holding_cost_cache: Optional[float] = None
+
+
+def _get_coin_min_holding_cost() -> float:
+    """코인 dust 임계값을 국가 설정에서 로드합니다."""
+
+    global _coin_min_holding_cost_cache
+    if _coin_min_holding_cost_cache is not None:
+        return _coin_min_holding_cost_cache
+
+    threshold = 10000.0  # coin.py 기본값과 동일하게 폴백
+    try:
+        from utils.account_registry import get_country_file_settings
+
+        settings = get_country_file_settings("coin")
+        value = settings.get("coin_min_holding_cost_krw")
+        if value is not None:
+            threshold = float(value)
+    except Exception:
+        pass
+
+    _coin_min_holding_cost_cache = threshold
+    return threshold
+
 
 def _get_primary_account_for_country(country: str) -> Optional[str]:
     """Return the first active account code for the given country (if any)."""
@@ -222,18 +246,29 @@ def get_portfolio_snapshot(
                 holdings_agg[ticker]["total_cost"] -= trade["shares"] * cost_per_share
             holdings_agg[ticker]["shares"] -= trade["shares"]
 
+    coin_min_holding_cost = _get_coin_min_holding_cost() if country == "coin" else 0.0
+
     holdings_list = []
     for ticker, data in holdings_agg.items():
-        if data["shares"] > 0:
-            avg_cost = data["total_cost"] / data["shares"] if data["shares"] > 0 else 0
-            holdings_list.append(
-                {
-                    "ticker": ticker,
-                    "name": data["name"],
-                    "shares": data["shares"],
-                    "avg_cost": avg_cost,
-                }
-            )
+        shares = float(data.get("shares", 0.0) or 0.0)
+        if shares <= 0:
+            continue
+
+        total_cost = max(float(data.get("total_cost", 0.0) or 0.0), 0.0)
+
+        if country == "coin" and coin_min_holding_cost > 0 and total_cost < coin_min_holding_cost:
+            # Dust-sized coin positions are treated as cash and excluded from holdings.
+            continue
+
+        avg_cost = total_cost / shares if total_cost > 0 else 0.0
+        holdings_list.append(
+            {
+                "ticker": ticker,
+                "name": data.get("name", ""),
+                "shares": shares,
+                "avg_cost": avg_cost,
+            }
+        )
 
     # 4. 최종 스냅샷 조립
     snapshot = {
