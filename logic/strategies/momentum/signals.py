@@ -248,17 +248,15 @@ def generate_daily_signals_for_portfolio(
 
         ticker_key = str(tkr).upper()
         is_locked = ticker_key in locked_tickers
+        locked_skip = False
         if is_locked:
-            # print(
-            #     f"[LOCKED] {country}/{account} - {ticker_key}: forcing HOLD with phrase '신호와 상관없이 보유'"
-            # )
             buy_signal = False
             lock_msg = "신호와 상관없이 보유"
-            state = "HOLD"
-            if not phrase:
+            if is_effectively_held:
+                state = "HOLD"
                 phrase = lock_msg
-            elif lock_msg not in phrase:
-                phrase = f"{phrase}, {lock_msg}"
+            else:
+                locked_skip = True
 
         amount = sh * price if pd.notna(price) else 0.0
 
@@ -309,6 +307,8 @@ def generate_daily_signals_for_portfolio(
                 "sell_cooldown_info": sell_block_info,
                 "buy_cooldown_info": buy_block_info,
                 "is_locked": is_locked,
+                "is_held": is_effectively_held,
+                "skip_locked": locked_skip,
             }
         )
 
@@ -599,6 +599,8 @@ def generate_daily_signals_for_portfolio(
     # 최종 decisions 리스트에서 카테고리 1등이 아닌 WAIT 종목을 제거합니다.
     final_decisions = []
     for d in decisions:
+        if d.get("skip_locked"):
+            continue
         # WAIT 상태이고, buy_signal이 있으며, best_wait_tickers에 없는 종목은 제외
         if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] not in best_wait_tickers:
             continue
@@ -627,7 +629,7 @@ def generate_daily_signals_for_portfolio(
 
     lock_phrase = "신호와 상관없이 보유"
     for d in final_decisions:
-        if d.get("is_locked"):
+        if d.get("is_locked") and d.get("is_held"):
             d["state"] = "HOLD"
             d["row"][2] = "HOLD"
             d["buy_signal"] = False
