@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.account_registry import get_accounts_by_country, load_accounts
 from utils.data_loader import fetch_ohlcv_for_tickers
-from utils.db_manager import get_portfolio_settings
+from utils.account_registry import get_strategy_rules_for_account
 from utils.stock_list_io import get_etfs
 
 
@@ -58,11 +58,10 @@ def run_backtest_worker(params: tuple, prefetched_data: dict, account: str) -> t
 
     # 미리 로드된 데이터를 전달하여 API 호출을 최소화합니다.
     result = run_test(
-        country=country,
+        account=account,
         quiet=True,
         prefetched_data=prefetched_data,
         override_settings=override_settings,
-        account=account,
     )
 
     return regime_ma_period, months_range, result
@@ -84,15 +83,11 @@ def tune_regime_filter(country: str, account: str):
     if not account:
         raise ValueError("account is required for tune_regime_filter")
 
-    portfolio_settings = get_portfolio_settings(country, account=account)
-    if not portfolio_settings or "ma_period" not in portfolio_settings:
-        print(f"오류: '{country}' 국가의 전략 파라미터(MA 기간)가 설정되지 않았습니다. 웹 앱의 '설정' 탭에서 값을 지정해주세요.")
+    rules = get_strategy_rules_for_account(account)
+    if not rules:
+        print(f"오류: '{account}' 계좌의 전략 파라미터를 찾을 수 없습니다.")
         return
-    try:
-        ma_period_etf = int(portfolio_settings["ma_period"])
-    except (ValueError, TypeError):
-        print(f"오류: '{country}' 국가의 MA 기간 설정이 올바르지 않습니다.")
-        return
+    ma_period_etf = int(rules.ma_period)
 
     max_months_range = max(test_months_ranges)
     max_strategy_ma = ma_period_etf

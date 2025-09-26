@@ -8,12 +8,12 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from logic import jason as strategy_module
+from logic import momentum as strategy_module
 from utils.account_registry import (
     get_account_file_settings,
-    get_country_file_settings,
     get_common_file_settings,
     get_account_info,
+    get_strategy_rules_for_account,
 )
 from utils.tee import Tee
 from utils.report import (
@@ -38,7 +38,7 @@ def _print_backtest_summary(
     portfolio_topn: int,
     ticker_summaries: List[Dict[str, Any]],
 ):
-    from logic import jason as settings
+    from logic import momentum as settings
 
     """백테스트 결과 요약을 콘솔에 출력합니다."""
     account_info = get_account_info(account)
@@ -202,11 +202,10 @@ def _print_backtest_summary(
 
 
 def main(
-    country: str = "kor",
+    account: str,
     quiet: bool = False,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     override_settings: Optional[Dict] = None,
-    account: str = "",
 ):
     """
     지정된 전략에 대한 백테스트를 실행하고 결과를 요약합니다.
@@ -214,6 +213,13 @@ def main(
     """
     if not account:
         raise ValueError("account is required for backtest execution")
+
+    account_info = get_account_info(account)
+    if not account_info:
+        raise ValueError(f"등록되지 않은 계좌입니다: {account}")
+    country = str(account_info.get("country") or "").strip()
+    if not country:
+        raise ValueError(f"'{account}' 계좌에 국가 정보가 없습니다.")
 
     # --- 로그 파일 설정 ---
     # quiet 모드가 아닐 때만 파일 로깅을 설정합니다.
@@ -233,15 +239,14 @@ def main(
             # 파일 열기 실패 시, 콘솔 출력은 계속 유지됩니다.
             sys.stdout = original_stdout
 
-    from logic import jason as settings
+    from logic import momentum as settings
 
     # 파일에서 초기 자본금 및 모든 계좌 설정을 가져옵니다.
     try:
         account_settings = get_account_file_settings(account)
-        country_settings = get_country_file_settings(country)
+        strategy_rules = get_strategy_rules_for_account(account)
 
         initial_capital_krw = account_settings["initial_capital_krw"]
-        account_info = get_account_info(account)
         currency = account_info.get("currency", "KRW")
 
         # 호주 계좌의 경우, KRW로 설정된 초기 자본금을 AUD로 변환합니다.
@@ -256,11 +261,11 @@ def main(
                     log_file.close()
                 return
 
-        settings.MA_PERIOD = country_settings["ma_period"]
-        portfolio_topn = country_settings["portfolio_topn"]
-        settings.REPLACE_SCORE_THRESHOLD = country_settings["replace_threshold"]
-        settings.REPLACE_WEAKER_STOCK = country_settings["replace_weaker_stock"]
-        min_buy_score = country_settings.get("min_buy_score", 0.0)
+        settings.MA_PERIOD = strategy_rules.ma_period
+        portfolio_topn = strategy_rules.portfolio_topn
+        settings.REPLACE_SCORE_THRESHOLD = strategy_rules.replace_threshold
+        settings.REPLACE_WEAKER_STOCK = strategy_rules.replace_weaker_stock
+        min_buy_score = strategy_rules.min_buy_score or 0.0
     except SystemExit as e:
         print(str(e))
         if log_file:
@@ -297,7 +302,6 @@ def main(
             log_file.close()
         return None
 
-    account_info = get_account_info(account)
     currency = account_info.get("currency", "KRW")
     precision = account_info.get("precision", 0)
 
@@ -337,22 +341,28 @@ def main(
         return_value = None
         return
 
-    core_end_dt = get_latest_trading_day(country)
-    core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
-    test_date_range = [core_start_dt.strftime("%Y-%m-%d"), core_end_dt.strftime("%Y-%m-%d")]
-    period_label = f"최근 {test_months_range}개월 ({core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')})"
+    # 기간 설정 로직: override_settings에 start_date, end_date가 있으면 우선 사용
+    if override_settings and "start_date" in override_settings and "end_date" in override_settings:
+        core_start_dt = pd.to_datetime(override_settings["start_date"])
+        core_end_dt = pd.to_datetime(override_settings["end_date"])
+        period_label = (
+            f"지정 기간 ({core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')})"
+        )
+    else:
+        core_end_dt = get_latest_trading_day(country)
+        core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
+        period_label = f"최근 {test_months_range}개월 ({core_start_dt.strftime('%Y-%m-%d')}~{core_end_dt.strftime('%Y-%m-%d')})"
+
+    test_date_range = [
+        core_start_dt.strftime("%Y-%m-%d"),
+        core_end_dt.strftime("%Y-%m-%d"),
+    ]
 
     # 티커 목록 결정
     if not quiet:
         print(f"\n'data/{country}/' 폴더의 'etf.json' 파일에서 종목을 가져와 백테스트를 실행합니다.")
     all_etfs_from_file = get_etfs_from_files(country)
-    # is_active 필드가 없는 종목이 있는지 확인합니다.
-    for etf in all_etfs_from_file:
-        if "is_active" not in etf:
-            raise ValueError(
-                f"etf.json 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요."
-            )
-    etfs_from_file = [etf for etf in all_etfs_from_file if etf["is_active"] is not False]
+    etfs_from_file = all_etfs_from_file
     if not etfs_from_file:
         if not quiet:
             print(f"오류: 'data/{country}/' 폴더에서 '{country}' 국가의 백테스트에 사용할 종목을 찾을 수 없습니다.")
@@ -398,8 +408,9 @@ def main(
             run_portfolio_backtest = getattr(strategy_module, "run_portfolio_backtest")
             run_single_ticker_backtest = getattr(strategy_module, "run_single_ticker_backtest")
         except AttributeError:
+            module_name = getattr(strategy_module, "__name__", "알 수 없는 모듈")
             print(
-                "오류: 'logic/jason.py' 모듈에 run_portfolio_backtest 또는 "
+                f"오류: '{module_name}' 모듈에 run_portfolio_backtest 또는 "
                 "run_single_ticker_backtest 함수가 정의되지 않았습니다."
             )
             if log_file:

@@ -559,17 +559,20 @@ def _fetch_ohlcv_core(
             if df.empty:
                 return None
 
-            # 실제 마감가를 unadjusted_close 컬럼에 백업합니다.
-            if "Close" in df.columns:
-                df["unadjusted_close"] = df["Close"]
-
-            # Adj Close가 있는 경우, 이를 계산의 기준으로 삼고 Close 컬럼에 덮어씁니다.
-            if "Adj Close" in df.columns:
-                df["Close"] = df["Adj Close"]
-
+            # 실제 마감가를 unadjusted_close 컬럼에 백업하기 전에 MultiIndex 컬럼을 정리합니다.
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
                 df = df.loc[:, ~df.columns.duplicated()]
+
+            if "Close" in df.columns:
+                df["unadjusted_close"] = df["Close"]
+
+            if "Adj Close" in df.columns:
+                adj_close = df["Adj Close"]
+                if isinstance(adj_close, pd.DataFrame):
+                    adj_close = adj_close.iloc[:, 0]
+                if not adj_close.isnull().all():
+                    df["Close"] = adj_close
             if not df.index.is_unique:
                 df = df[~df.index.duplicated(keep="first")]
             if df.index.tz is not None:
@@ -672,33 +675,22 @@ def fetch_bithumb_realtime_price(symbol: str) -> Optional[float]:
 
 def fetch_au_realtime_price(ticker: str) -> Optional[float]:
     """
-    Yahoo Finance (AU) 웹 스크레이핑을 통해 호주 종목의 실시간 현재가를 조회합니다.
-    yfinance 라이브러리의 데이터 지연/오류 발생 시 보조 소스로 사용됩니다.
+    yfinance 라이브러리를 통해 호주 종목의 실시간 현재가를 조회합니다.
     """
-    if not requests or not BeautifulSoup or not yf:
+    if not yf:
         return None
 
+    ticker_yf = format_aus_ticker_for_yfinance(ticker)
     try:
-        # yfinance 라이브러리와 일관성을 유지하기 위해 티커 형식을 변환합니다. (예: 'CBA' -> 'CBA.AX')
-        ticker_yf = format_aus_ticker_for_yfinance(ticker)
-        url = f"https://au.finance.yahoo.com/quote/{ticker_yf}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=5)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, "html.parser")
-        # 실시간 가격을 담고 있는 fin-streamer 요소를 찾습니다.
-        price_element = soup.select_one(
-            f'fin-streamer[data-symbol="{ticker_yf}"][data-field="regularMarketPrice"]'
-        )
-
-        if price_element:
-            price_str = price_element.get_text(strip=True).replace(",", "")
-            return float(price_str)
-    except Exception as e:
-        print(f"경고: {ticker}의 호주 실시간 가격 조회 중 오류 발생: {e}")
+        # yfinance 라이브러리를 사용하여 가격 정보를 가져옵니다.
+        stock = yf.Ticker(ticker_yf)
+        # 'regularMarketPrice'는 장중 실시간 가격, 'previousClose'는 전일 종가입니다.
+        # 실시간 데이터가 없을 경우를 대비하여 두 값을 모두 확인합니다.
+        price = stock.info.get("regularMarketPrice") or stock.info.get("previousClose")
+        if price:
+            return float(price)
+    except Exception as e_yf:
+        print(f"경고: {ticker}의 호주 실시간 가격 조회(yfinance) 실패: {e_yf}")
     return None
 
 
@@ -772,6 +764,9 @@ def fetch_pykrx_name(ticker: str) -> str:
         except Exception:
             pass
 
+    if not name:
+        name = _get_display_name("kor", ticker)
+
     _pykrx_name_cache[ticker] = name
     return name
 
@@ -801,6 +796,31 @@ def fetch_yfinance_name(ticker: str) -> str:
         print(f"경고: {cache_key}의 이름 조회 중 오류 발생: {e}")
         _yfinance_name_cache[cache_key] = ""  # 실패도 캐시하여 재시도 방지
     return ""
+
+
+def resolve_security_name(country: str, ticker: str) -> str:
+    """지정한 국가/티커의 표시용 이름을 반환합니다."""
+    if not ticker:
+        return ""
+
+    ticker_upper = ticker.strip().upper()
+    if not ticker_upper:
+        return ""
+
+    country_lower = (country or "").strip().lower()
+
+    name = ""
+    if country_lower == "kor":
+        name = fetch_pykrx_name(ticker_upper)
+    elif country_lower == "aus":
+        name = fetch_yfinance_name(ticker_upper)
+    elif country_lower == "coin":
+        name = ticker_upper
+
+    if not name:
+        name = _get_display_name(country_lower, ticker_upper)
+
+    return name
 
 
 def _get_display_name(country: str, ticker: str) -> str:

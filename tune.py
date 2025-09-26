@@ -13,8 +13,8 @@ from test import main as run_backtest
 
 from utils.tee import Tee
 from utils.data_loader import fetch_ohlcv_for_tickers
-from utils.db_manager import get_portfolio_settings
 from utils.stock_list_io import get_etfs
+from utils.account_registry import get_account_info, get_strategy_rules_for_account
 
 # --- 국가별 튜닝 파라미터 범위 정의 ---
 TUNING_CONFIG = {
@@ -52,11 +52,10 @@ def run_single_backtest(params, prefetched_data, account):
         if not account:
             raise RuntimeError("Account context not initialised for tuning worker")
         summary = run_backtest(
-            country=country_code,
+            account=account,
             quiet=True,
             override_settings=override_settings,
             prefetched_data=prefetched_data,
-            account=account,
         )
         if summary:
             # 파라미터에서 국가 코드는 제외하고 저장
@@ -71,12 +70,18 @@ def run_single_backtest(params, prefetched_data, account):
 def main():
     """파라미터 튜닝을 실행하고 최적 결과를 출력합니다."""
     parser = argparse.ArgumentParser(description="전략 파라미터를 튜닝합니다.")
-    parser.add_argument("country", choices=["kor", "aus", "coin"], help="튜닝할 국가 코드")
-    parser.add_argument("--account", required=True, help="튜닝에 사용할 계좌 코드")
+    parser.add_argument("account", help="튜닝에 사용할 계좌 코드")
     args = parser.parse_args()
 
-    country_code = args.country
     account = args.account
+    account_info = get_account_info(account)
+    if not account_info:
+        raise SystemExit(f"등록되지 않은 계좌입니다: {account}")
+    country_code = str(account_info.get("country") or "").strip()
+    if not country_code:
+        raise SystemExit(f"'{account}' 계좌에 국가 정보가 없습니다.")
+
+    strategy_rules = get_strategy_rules_for_account(account)
 
     # 로그 파일 설정
     log_dir = "logs"
@@ -86,6 +91,8 @@ def main():
     print(f"튜닝 로그가 다음 파일에 저장됩니다: {log_path}")
 
     original_stdout = sys.stdout
+    top_3_results = pd.DataFrame()
+
     with open(log_path, "w", encoding="utf-8") as log_file:
         sys.stdout = Tee(original_stdout, log_file)
         try:
@@ -99,19 +106,9 @@ def main():
             TEST_MONTHS_RANGE = config["TEST_MONTHS_RANGE"]
 
             # --- DB에서 고정 파라미터 로드 ---
-            print(f"DB에서 {country_code.upper()} 포트폴리오의 고정 파라미터를 로드합니다 (account={account})...")
-            portfolio_settings = get_portfolio_settings(country_code, account=account)
-            if not portfolio_settings:
-                print(f"오류: '{country_code}' 국가의 설정을 DB에서 찾을 수 없습니다. 웹 앱의 '설정' 탭에서 값을 저장해주세요.")
-                return
-
-            try:
-                TOPN_FIXED = [int(portfolio_settings["portfolio_topn"])]
-                REPLACE_THRESHOLD_FIXED = [float(portfolio_settings["replace_threshold"])]
-                print(f"  - 고정값: TopN={TOPN_FIXED[0]}, ReplaceThr={REPLACE_THRESHOLD_FIXED[0]}")
-            except (KeyError, ValueError, TypeError) as e:
-                print(f"오류: DB에서 고정 파라미터를 로드하는 중 문제가 발생했습니다: {e}")
-                return
+            TOPN_FIXED = [int(strategy_rules.portfolio_topn)]
+            REPLACE_THRESHOLD_FIXED = [float(strategy_rules.replace_threshold)]
+            print(f"  - 고정값: TopN={TOPN_FIXED[0]}, ReplaceThr={REPLACE_THRESHOLD_FIXED[0]}")
 
             # --- 데이터 사전 로딩 ---
             print(f"\n튜닝을 위해 {country_code.upper()} 시장의 데이터를 미리 로딩합니다 (account={account})...")

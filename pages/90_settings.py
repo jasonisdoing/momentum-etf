@@ -8,9 +8,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.account_registry import (
     get_account_file_settings,
-    get_country_file_settings,
     get_common_file_settings,
     get_accounts_by_country,
+    get_strategy_rules_for_account,
     load_accounts,
 )
 
@@ -66,8 +66,8 @@ def render_account_settings(country_code: str, account_code: str):
     """계좌별 설정 UI를 렌더링합니다."""
     try:
         account_settings = get_account_file_settings(account_code)
-        country_settings = get_country_file_settings(country_code)
-    except SystemExit as e:
+        strategy_rules = get_strategy_rules_for_account(account_code)
+    except (SystemExit, ValueError) as e:
         st.error(str(e))
         st.stop()
 
@@ -99,32 +99,47 @@ def render_account_settings(country_code: str, account_code: str):
     st.markdown("---")
 
     # 전략 파라미터
-    st.subheader("국가별 전략 파라미터 (파일에서 설정)")
-    country_help_text = f"이 값들은 `data/settings/country/{country_code}.py` 파일에서 수정할 수 있습니다."
+    st.subheader("계좌별 전략 파라미터 (country_mapping.json)")
+    strategy_help_text = "이 값들은 `data/settings/country_mapping.json` 파일의 'strategy' 항목에서 관리합니다."
     st.text_input(
         "최대 보유 종목 수 (Top-N)",
-        value=str(country_settings["portfolio_topn"]),
+        value=str(strategy_rules.portfolio_topn),
         disabled=True,
-        help=country_help_text,
+        help=strategy_help_text,
     )
     st.text_input(
         "이동평균 기간 (MA)",
-        value=str(country_settings["ma_period"]),
+        value=str(strategy_rules.ma_period),
         disabled=True,
-        help=country_help_text,
+        help=strategy_help_text,
     )
     st.checkbox(
         "교체 매매 사용",
-        value=bool(country_settings["replace_weaker_stock"]),
+        value=bool(strategy_rules.replace_weaker_stock),
         disabled=True,
-        help=country_help_text,
+        help=strategy_help_text,
     )
     st.text_input(
         "교체 매매 점수 임계값",
-        value=f"{float(country_settings['replace_threshold']):.2f}",
+        value=f"{float(strategy_rules.replace_threshold):.2f}",
         disabled=True,
-        help=country_help_text,
+        help=strategy_help_text,
     )
+    st.text_input(
+        "최소 매수 점수",
+        value=f"{strategy_rules.min_buy_score:.2f}"
+        if strategy_rules.min_buy_score is not None
+        else "-",
+        disabled=True,
+        help=strategy_help_text,
+    )
+    if strategy_rules.coin_min_holding_cost_krw is not None:
+        st.text_input(
+            "코인 최소 보유 금액",
+            value=f"{strategy_rules.coin_min_holding_cost_krw:,.0f}원",
+            disabled=True,
+            help=strategy_help_text,
+        )
 
 
 def main():
