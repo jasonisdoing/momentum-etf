@@ -302,7 +302,14 @@ def main():
 
                 if report_date:
                     duration = time.time() - start_time
-                    send_summary_notification(country, account, report_date, duration, old_equity)
+                    send_summary_notification(
+                        country,
+                        account,
+                        report_date,
+                        duration,
+                        old_equity,
+                        force_send=True,
+                    )
 
         print(f"==================== [{country.upper()}/{account}] 계좌 작업 완료 ====================")
 

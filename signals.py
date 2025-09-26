@@ -2472,6 +2472,7 @@ def send_summary_notification(
     report_date: datetime,
     duration: float,
     old_equity: float,
+    force_send: bool = False,
 ) -> None:
     """작업 완료 요약 슬랙 알림을 전송합니다. 알림 전용 CRON 설정이 있으면 해당 시간에만 전송됩니다."""
     from utils.notify import should_notify_on_schedule
@@ -2486,7 +2487,7 @@ def send_summary_notification(
     from utils.report import format_kr_money
 
     # 알림 전용 CRON 설정이 있고, 현재 시간이 스케줄과 맞지 않으면 알림을 보내지 않습니다.
-    if not should_notify_on_schedule(country):
+    if not force_send and not should_notify_on_schedule(country):
         return
 
     try:
@@ -2496,6 +2497,25 @@ def send_summary_notification(
         # Get new equity
         new_snapshot = get_portfolio_snapshot(country, account=account)
         new_equity = float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
+
+        # 계좌 통화를 확인하여 필요 시 KRW로 환산합니다.
+        aud_krw_rate = None
+        account_currency = None
+        try:
+            from utils.account_registry import get_account_info
+
+            account_info = get_account_info(account)
+            account_currency = (account_info or {}).get("currency")
+            if account_currency == "AUD":
+                from utils.data_loader import get_aud_to_krw_rate
+
+                aud_krw_rate = get_aud_to_krw_rate()
+        except Exception:
+            account_currency = None
+
+        if account_currency == "AUD" and aud_krw_rate:
+            new_equity *= aud_krw_rate
+            old_equity *= aud_krw_rate
 
         # Calculate cumulative return
         try:
@@ -2583,4 +2603,11 @@ if __name__ == "__main__":
     # 요약 알림 전송
     if report_date:
         duration = time.time() - start_time
-        send_summary_notification(args.country, args.account, report_date, duration, old_equity)
+        send_summary_notification(
+            args.country,
+            args.account,
+            report_date,
+            duration,
+            old_equity,
+            force_send=True,
+        )
