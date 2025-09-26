@@ -10,6 +10,8 @@ import pandas as pd
 
 from utils.data_loader import fetch_ohlcv
 
+from .rules import passes_min_buy_score, resolve_min_buy_score
+
 
 def run_portfolio_backtest(
     stocks: List[Dict],
@@ -35,6 +37,7 @@ def run_portfolio_backtest(
     ma_period_etf = ma_period
     ma_period_stock = ma_period
     stop_loss = stop_loss_pct
+    min_buy_score = resolve_min_buy_score(min_buy_score)
 
     if top_n <= 0:
         raise ValueError("PORTFOLIO_TOPN (top_n)은 0보다 커야 합니다.")
@@ -361,11 +364,8 @@ def run_portfolio_backtest(
                         score_cand = candidate_metrics["ma_score"].get(dt, -float("inf")) or -float(
                             "inf"
                         )
-                        passes_score_threshold = True
-                        if min_buy_score is not None and score_cand < min_buy_score:
-                            passes_score_threshold = False
 
-                        if passes_score_threshold:
+                        if passes_min_buy_score(score_cand, min_buy_score):
                             buy_ranked_candidates.append((score_cand, candidate_ticker))
                 buy_ranked_candidates.sort(reverse=True)
 
@@ -740,6 +740,7 @@ def run_single_ticker_backtest(
     ma_period_etf = ma_period
     ma_period_stock = ma_period
     stop_loss = stop_loss_pct
+    min_buy_score = resolve_min_buy_score(min_buy_score)
 
     # --- 티커 유형(ETF/주식) 구분 ---
     ma_period = ma_period_etf if stock_type == "etf" else ma_period_stock
@@ -843,7 +844,7 @@ def run_single_ticker_backtest(
                 ma_score_today = (price / ma_today) - 1.0
 
             passes_score_threshold = True
-            if min_buy_score is not None and ma_score_today < min_buy_score:
+            if not passes_min_buy_score(ma_score_today, min_buy_score):
                 passes_score_threshold = False
 
             if buy_signal_days_today > 0 and passes_score_threshold:

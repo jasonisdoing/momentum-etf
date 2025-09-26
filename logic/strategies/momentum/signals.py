@@ -8,12 +8,15 @@ import pandas as pd
 
 from utils.report import format_kr_money
 
+from .rules import format_min_buy_shortfall, passes_min_buy_score, StrategyRules
+
 
 def generate_daily_signals_for_portfolio(
     country: str,
     account: str,
     base_date: pd.Timestamp,
     portfolio_settings: Dict,
+    strategy_rules: StrategyRules,
     data_by_tkr: Dict[str, Any],
     holdings: Dict[str, Dict[str, float]],
     etf_meta: Dict[str, Any],
@@ -48,6 +51,7 @@ def generate_daily_signals_for_portfolio(
     # 여기서는 임시로 기본값을 사용하거나, portfolio_settings에서 가져오는 것으로 가정합니다.
     currency = portfolio_settings.get("currency", "KRW")
     precision = portfolio_settings.get("precision", 0)
+    min_buy_score = strategy_rules.min_buy_score
 
     if currency == "AUD":
 
@@ -74,15 +78,11 @@ def generate_daily_signals_for_portfolio(
         return f"쿨다운 {cooldown_days}일 대기중 ({action} {last_dt.strftime('%Y-%m-%d')})"
 
     # 전략 설정 로드
-    try:
-        denom = int(portfolio_settings["portfolio_topn"])
-        replace_weaker_stock = bool(portfolio_settings["replace_weaker_stock"])
-        replace_threshold = float(portfolio_settings["replace_threshold"])
-    except (KeyError, ValueError, TypeError) as e:
-        raise ValueError(f"포트폴리오 설정값 로드 오류: {e}") from e
-
+    denom = strategy_rules.portfolio_topn
     if denom <= 0:
         raise ValueError(f"'{country}' 국가의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
+    replace_weaker_stock = strategy_rules.replace_weaker_stock
+    replace_threshold = strategy_rules.replace_threshold
 
     # 현재 보유 종목의 카테고리 (TBD 제외)
     held_categories = set()
@@ -163,7 +163,15 @@ def generate_daily_signals_for_portfolio(
             }
 
         price = d.get("price", 0.0)
-        score = d.get("score", 0.0)
+        score_raw = d.get("score", 0.0)
+        score_value: Optional[float]
+        if isinstance(score_raw, (int, float)):
+            score_value = float(score_raw)
+        else:
+            try:
+                score_value = float(score_raw)
+            except (TypeError, ValueError):
+                score_value = None
 
         buy_signal = False
         state = "HOLD" if is_effectively_held else "WAIT"
@@ -219,11 +227,16 @@ def generate_daily_signals_for_portfolio(
 
         elif state == "WAIT":
             buy_signal_days_today = d["filter"]
-            if buy_signal_days_today > 0:
+            if buy_signal_days_today > 0 and passes_min_buy_score(score_value, min_buy_score):
                 buy_signal = True
                 if buy_block_info:
                     buy_signal = False
                     phrase = _format_cooldown_phrase("최근 매도", buy_block_info.get("last_sell"))
+            elif buy_signal_days_today > 0:
+                if not phrase:
+                    shortfall_msg = format_min_buy_shortfall(score_value, min_buy_score)
+                    if shortfall_msg:
+                        phrase = shortfall_msg
 
         amount = sh * price if pd.notna(price) else 0.0
 
@@ -265,7 +278,7 @@ def generate_daily_signals_for_portfolio(
             {
                 "state": state,
                 "weight": position_weight_pct,
-                "score": score,
+                "score": score_value if score_value is not None else 0.0,
                 "tkr": tkr,
                 "row": current_row,
                 "buy_signal": buy_signal,

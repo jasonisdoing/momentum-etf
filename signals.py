@@ -65,6 +65,7 @@ from logic.momentum import (
     generate_daily_signals_for_portfolio,
     DECISION_CONFIG,
     COIN_ZERO_THRESHOLD,
+    StrategyRules,
 )
 
 try:
@@ -1820,11 +1821,22 @@ def generate_signal_report(
         all_tickers_for_cooldown, country, account, label_date
     )
 
+    strategy_rules: StrategyRules = country_settings.get("strategy_rules")
+    if not isinstance(strategy_rules, StrategyRules):
+        strategy_rules = StrategyRules.from_values(
+            ma_period=country_settings.get("ma_period"),
+            portfolio_topn=country_settings.get("portfolio_topn"),
+            replace_weaker_stock=country_settings.get("replace_weaker_stock"),
+            replace_threshold=country_settings.get("replace_threshold"),
+            min_buy_score=country_settings.get("min_buy_score"),
+        )
+
     decisions = generate_daily_signals_for_portfolio(
         country=country,
         account=account,
         base_date=base_date,
         portfolio_settings=portfolio_settings,
+        strategy_rules=strategy_rules,
         data_by_tkr=data_by_tkr,
         holdings=holdings,
         etf_meta=etf_meta,

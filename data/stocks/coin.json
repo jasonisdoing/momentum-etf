@@ -33,14 +33,6 @@
             {
                 "ticker": "ADA",
                 "name": "에이다"
-            },
-            {
-                "ticker": "USDT",
-                "name": "테더(달러)"
-            },
-            {
-                "ticker": "USDC",
-                "name": "써클(달러)"
             }
         ]
     }

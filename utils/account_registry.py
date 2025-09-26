@@ -10,6 +10,9 @@ from typing import Any, Dict, Iterable, List, Optional
 from datetime import datetime
 
 
+from logic.strategies.momentum.rules import StrategyRules
+
+
 ACCOUNTS_FILE = (
     Path(__file__).resolve().parent.parent / "data" / "settings" / "country_mapping.json"
 )
@@ -113,30 +116,27 @@ def get_country_file_settings(country: str) -> Dict[str, Any]:
         portfolio_topn = getattr(module, "PORTFOLIO_TOPN")
         replace_weaker = getattr(module, "REPLACE_WEAKER_STOCK")
         replace_threshold = getattr(module, "REPLACE_SCORE_THRESHOLD")
-        min_buy_score = getattr(module, "MIN_BUY_SCORE", 0.0)  # 없으면 0.0으로 폴백
+        min_buy_score_raw = getattr(module, "MIN_BUY_SCORE", 0.0)  # 없으면 0.0으로 폴백
         coin_min_cost = getattr(module, "COIN_MIN_HOLDING_COST_KRW", None)
 
-        # 유효성 검사
-        if not isinstance(ma_period, int) or ma_period <= 0:
-            raise ValueError("MA_PERIOD는 0보다 큰 정수여야 합니다.")
-        if not isinstance(portfolio_topn, int) or portfolio_topn <= 0:
-            raise ValueError("PORTFOLIO_TOPN은 0보다 큰 정수여야 합니다.")
-        if not isinstance(replace_weaker, bool):
-            raise ValueError("REPLACE_WEAKER_STOCK은 True 또는 False여야 합니다.")
-        if not isinstance(replace_threshold, (int, float)):
-            raise ValueError("REPLACE_SCORE_THRESHOLD는 숫자여야 합니다.")
-        if not isinstance(min_buy_score, (int, float)):
-            raise ValueError("MIN_BUY_SCORE는 숫자여야 합니다.")
+        strategy_rules = StrategyRules.from_values(
+            ma_period=ma_period,
+            portfolio_topn=portfolio_topn,
+            replace_weaker_stock=replace_weaker,
+            replace_threshold=replace_threshold,
+            min_buy_score=min_buy_score_raw,
+        )
         if coin_min_cost is not None and (
             not isinstance(coin_min_cost, (int, float)) or coin_min_cost < 0
         ):
             raise ValueError("COIN_MIN_HOLDING_COST_KRW는 0 이상 숫자여야 합니다.")
 
-        settings["ma_period"] = ma_period
-        settings["portfolio_topn"] = portfolio_topn
-        settings["replace_weaker_stock"] = replace_weaker
-        settings["replace_threshold"] = replace_threshold
-        settings["min_buy_score"] = min_buy_score
+        settings["ma_period"] = strategy_rules.ma_period
+        settings["portfolio_topn"] = strategy_rules.portfolio_topn
+        settings["replace_weaker_stock"] = strategy_rules.replace_weaker_stock
+        settings["replace_threshold"] = strategy_rules.replace_threshold
+        settings["min_buy_score"] = strategy_rules.min_buy_score
+        settings["strategy_rules"] = strategy_rules
         if coin_min_cost is not None:
             settings["coin_min_holding_cost_krw"] = float(coin_min_cost)
 
