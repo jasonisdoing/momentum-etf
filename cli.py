@@ -47,6 +47,7 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from typing import List, Optional
 
 from test import TEST_MONTHS_RANGE
@@ -245,8 +246,12 @@ def main():
             subprocess.run(command, check=True)
 
         elif args.signal:
-            from signals import main as run_signal, send_summary_notification
+            from signals import main as run_signal
             from utils.db_manager import get_portfolio_snapshot
+            from utils.notification import (
+                send_summary_notification,
+                send_detailed_signal_notification,
+            )
 
             print("전략으로 오늘의 매매 신호를 조회합니다...")
             if args.start_date and args.date:
@@ -282,6 +287,8 @@ def main():
                 run_label = date_str if date_str else "최신 기준일"
                 print(f"-> ({idx}/{len(date_inputs)}) {run_label} 데이터 계산 중...")
 
+                start_time = time.time()
+
                 # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
                 if date_str:
                     old_snapshot = get_portfolio_snapshot(
@@ -292,19 +299,37 @@ def main():
                 old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
                 try:
-                    signal_result = run_signal(country=country, date_str=date_str, account=account)
+                    signal_result = run_signal(
+                        country=country,
+                        date_str=date_str,
+                        account=account,
+                    )
                 except Exception as e:
                     print(f"\n오류: {run_label} 시그널 생성 중 오류가 발생했습니다: {e}")
                     continue
 
                 if signal_result:
+                    duration = time.time() - start_time
                     send_summary_notification(
                         country,
                         account,
                         signal_result.report_date,
+                        duration,
                         old_equity,
                         summary_data=signal_result.summary_data,
                         header_line=signal_result.header_line,
+                        force_send=True,
+                    )
+
+                    time.sleep(2)
+                    send_detailed_signal_notification(
+                        country,
+                        account,
+                        signal_result.header_line,
+                        signal_result.detail_headers,
+                        signal_result.detail_rows,
+                        decision_config=signal_result.decision_config,
+                        extra_lines=signal_result.detail_extra_lines,
                         force_send=True,
                     )
 

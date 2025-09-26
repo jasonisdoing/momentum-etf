@@ -105,7 +105,10 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
     report_date = None
     try:
         from signals import main as run_signal_main
-        from signals import send_summary_notification
+        from utils.notification import (
+            send_summary_notification,
+            send_detailed_signal_notification,
+        )
         from utils.db_manager import get_portfolio_snapshot
 
         # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
@@ -128,10 +131,22 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
                 country,
                 account,
                 report_date,
+                duration,
                 old_equity,
                 summary_data=signal_result.summary_data,
                 header_line=signal_result.header_line,
-                # force_send=True,
+                force_send=True,
+            )
+            time.sleep(2)
+            send_detailed_signal_notification(
+                country,
+                account,
+                signal_result.header_line,
+                signal_result.detail_headers,
+                signal_result.detail_rows,
+                decision_config=signal_result.decision_config,
+                extra_lines=signal_result.detail_extra_lines,
+                force_send=True,
             )
             date_str = report_date.strftime("%Y-%m-%d")
             prefix = f"{country}/{account}" if account else country

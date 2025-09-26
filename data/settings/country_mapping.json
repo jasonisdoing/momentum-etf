@@ -38,7 +38,7 @@
         "currency": "KRW",
         "amt_precision": 0,
         "qty_precision": 0,
-        "need_signal": true,
+        "need_signal": false,
         "is_active": true
     },
     {

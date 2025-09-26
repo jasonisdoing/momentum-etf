@@ -1,6 +1,5 @@
 import logging
 import os
-import re
 import sys
 import warnings
 from dataclasses import dataclass
@@ -17,7 +16,6 @@ import pandas as pd
 from pymongo import DESCENDING
 
 import argparse
-import settings as global_settings
 
 try:
     import pytz
@@ -48,7 +46,10 @@ from utils.account_registry import (
     get_common_file_settings,
     get_country_file_settings,
 )
-from utils.notify import send_log_to_slack
+from utils.notification import (
+    build_summary_line_from_summary_data,
+    send_summary_notification,
+)
 
 
 def format_shares(quantity, country: str):
@@ -166,6 +167,10 @@ class SignalExecutionResult:
     report_date: datetime
     summary_data: Dict[str, Any]
     header_line: str
+    detail_headers: List[str]
+    detail_rows: List[List[str]]
+    detail_extra_lines: List[str]
+    decision_config: Dict[str, Any]
 
 
 def get_market_regime_status_string() -> Optional[str]:
@@ -1208,7 +1213,7 @@ def _build_header_line(
     summary_data["portfolio_topn"] = portfolio_topn
 
     # 헤더 문자열 생성
-    header_body = _build_summary_line_from_summary_data(
+    header_body = build_summary_line_from_summary_data(
         summary_data, money_formatter, use_html=True, prefix=None
     )
 
@@ -1463,10 +1468,8 @@ def _calculate_portfolio_summary(
     }
 
 
-def _get_calculation_message_lines(num_tickers: int, warnings: List[str]):
-    message_lines = [
-        f"계산에 이용된 종목의 수: {num_tickers}",
-    ]
+def _get_calculation_message_lines(warnings: List[str]):
+    message_lines = []
 
     if warnings:
         max_warnings = 10
@@ -1478,27 +1481,6 @@ def _get_calculation_message_lines(num_tickers: int, warnings: List[str]):
             message_lines.append(f"  ... 외 {len(warnings) - max_warnings}건의 경고가 더 있습니다.")
 
     return message_lines
-
-
-def _get_equity_update_message_line(
-    country: str, account: str, old_equity: float, new_equity: float
-):
-    """평가금액 자동 보정 시 슬랙으로 알림을 보냅니다."""
-    from utils.report import format_kr_money
-
-    money_formatter = format_kr_money
-
-    diff = new_equity - old_equity
-    diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"
-
-    if old_equity > 0:
-        # 평가금액 변동(증가/감소)에 따라 다른 레이블을 사용합니다.
-        change_label = "증가" if diff >= 0 else "감소"
-        message = f"평가금액 {change_label}: {money_formatter(old_equity)} => {money_formatter(new_equity)} ({diff_str})"
-    else:
-        message = f"신규 평가금액 저장: {money_formatter(new_equity)}"
-
-    return message
 
 
 def generate_signal_report(
@@ -1598,8 +1580,8 @@ def generate_signal_report(
         for tkr in sorted(insufficient_data_tickers):
             name = name_map.get(tkr, tkr)
             warning_messages_for_slack.append(f"{name}({tkr}): 데이터 기간이 부족하여 계산에서 제외됩니다.")
-    # 슬랙 메시지를 위한 메시지 만들기 시작
-    slack_message_lines = _get_calculation_message_lines(len(pairs), warning_messages_for_slack)
+
+    slack_message_lines = _get_calculation_message_lines(warning_messages_for_slack)
 
     holdings = _normalize_holdings(portfolio_data.get("holdings", []))
     current_equity = float(portfolio_data.get("total_equity", 0.0))
@@ -1692,10 +1674,12 @@ def generate_signal_report(
                 if abs(final_equity - old_equity_for_log) >= 1.0:
                     log_msg = f"평가금액 자동 보정: {old_equity_for_log:,.0f}원 -> {final_equity:,.0f}원"
                     print(f"-> {log_msg}")
-                    equity_message_line = _get_equity_update_message_line(
-                        country, account, old_equity_for_log, final_equity
+                    diff = final_equity - old_equity_for_log
+                    diff_str = f"{'+' if diff > 0 else ''}{format_kr_money(diff)}"
+                    slack_message_lines.append(
+                        "평가금액 보정: "
+                        f"{format_kr_money(old_equity_for_log)} => {format_kr_money(final_equity)} ({diff_str})"
                     )
-                    slack_message_lines.append(equity_message_line)
                 else:  # 이월
                     log_msg = (
                         f"평가금액 이월: {pd.to_datetime(equity_date).strftime('%Y-%m-%d')}의 평가금액 "
@@ -2062,19 +2046,6 @@ def main(
             pass
 
         # 슬랙 알림: 현황 전송
-        try:
-            _maybe_notify_detailed_signal(
-                country,
-                account,
-                header_line,
-                headers,
-                rows_sorted,
-                slack_message_lines
-                # report_base_date,
-            )
-        except Exception:
-            pass
-
         # --- 콘솔 출력용 포맷팅 ---
         # 웹앱은 raw data (rows_sorted)를 사용하고, 콘솔은 포맷된 데이터를 사용합니다.
 
@@ -2165,7 +2136,7 @@ def main(
 
         render_table_eaw(headers, display_rows, aligns=aligns)
 
-        summary_line_plain = _build_summary_line_from_summary_data(
+        summary_line_plain = build_summary_line_from_summary_data(
             summary_data, format_kr_money, use_html=False, prefix=None
         )
 
@@ -2175,6 +2146,10 @@ def main(
             report_date=report_base_date.to_pydatetime(),
             summary_data=summary_data,
             header_line=header_line,
+            detail_headers=headers,
+            detail_rows=rows_sorted,
+            detail_extra_lines=slack_message_lines,
+            decision_config=DECISION_CONFIG,
         )
 
 
@@ -2209,505 +2184,6 @@ def _is_trading_day(country: str, a_date: Optional[datetime] = None) -> bool:
         return False
 
 
-def _maybe_notify_detailed_signal(
-    country: str,
-    account: str,
-    header_line: str,
-    headers: list,
-    rows_sorted: list,
-    slack_message_lines: list[str],
-) -> bool:
-    """국가별 설정에 따라 슬랙으로 상세 현황 알림을 전송합니다."""
-    from utils.notify import get_slack_webhook_url, send_slack_message, should_notify_on_schedule
-
-    # 사용자가 모든 수동 실행에서 슬랙 알림을 받기를 원하므로, 거래일 확인 로직을 비활성화합니다.
-    # 이로 인해 과거 날짜 조회 등 모든 'status' 명령어 실행 시 알림이 전송됩니다.
-    # if not _is_trading_day(country, report_date.to_pydatetime() if report_date else None):
-    #     return False
-    # --- 슬랙 알림 발송 ---
-    webhook_info = get_slack_webhook_url(country, account=account)
-    if not webhook_info:
-        return False
-
-    # 알림 전용 CRON 설정이 있고, 현재 시간이 스케줄과 맞지 않으면 알림을 보내지 않습니다.
-    if not should_notify_on_schedule(country):
-        return False
-    webhook_url, webhook_name = webhook_info
-
-    def _kr_price_formatter(p):
-        return f"{int(round(p)):,}" if isinstance(p, (int, float)) else str(p)
-
-    money_formatter = format_kr_money
-    price_formatter = _kr_price_formatter
-
-    # 상세 알림에서는 시작 알림에서 보낸 경고(데이터 부족 등)를 제외합니다.
-    # header_line은 HTML <br> 태그로 경고와 구분됩니다.
-    header_line_clean = header_line.split("<br>")[0]
-
-    # --- 헤더 문자열을 파싱하여 캡션 구성 요소로 나눕니다. ---
-    # 날짜 정보
-    first_seg = header_line_clean.split("|")[0].strip()
-    date_part = first_seg.split(":", 1)[1].strip()
-    if "[" in date_part:
-        date_part = date_part.split("[")[0].strip()
-    date_part = _strip_html_tags(date_part)
-
-    # 보유 종목 수
-    hold_seg = next(
-        (seg for seg in header_line_clean.split("|") if "보유종목:" in seg),
-        "보유종목: -",
-    )
-    hold_text = _strip_html_tags(hold_seg.split(":", 1)[1].strip())
-
-    # 보유 금액
-    hold_val_seg = next(
-        (seg for seg in header_line_clean.split("|") if "보유금액:" in seg),
-        "보유금액: 0",
-    )
-    hold_val_text = _strip_html_tags(hold_val_seg.split(":", 1)[1].strip())
-
-    # 현금 금액
-    cash_seg = next((seg for seg in header_line_clean.split("|") if "현금:" in seg), "현금: 0")
-    cash_text = _strip_html_tags(cash_seg.split(":", 1)[1].strip())
-
-    # 누적 수익률 정보
-    cum_seg = next(
-        (seg for seg in header_line_clean.split("|") if "누적:" in seg),
-        "누적: +0.00%(0원)",
-    )
-    cum_text = _strip_html_tags(cum_seg.split(":", 1)[1].strip())
-
-    # 총 평가 금액
-    equity_seg = next(
-        (seg for seg in header_line_clean.split("|") if "평가금액:" in seg),
-        "평가금액: 0",
-    )
-    equity_text = _strip_html_tags(equity_seg.split(":", 1)[1].strip())
-
-    # 컬럼 인덱스를 계산합니다.
-    idx_ticker = headers.index("티커")
-    idx_state = headers.index("상태") if "상태" in headers else None
-    idx_price = headers.index("현재가") if "현재가" in headers else None
-    idx_shares = headers.index("보유수량") if "보유수량" in headers else None
-    idx_amount = headers.index("금액") if "금액" in headers else None
-    idx_ret = (
-        headers.index("누적수익률")
-        if "누적수익률" in headers
-        else (headers.index("일간수익률") if "일간수익률" in headers else None)
-    )
-    idx_score = headers.index("점수") if "점수" in headers else None
-
-    # 티커와 이름 매핑을 구성합니다.
-    name_map = {}
-    try:
-        # 국가 코드에 맞는 ETF 목록을 불러옵니다.
-        etfs = get_etfs(country) or []
-        name_map = {str(s.get("ticker") or "").upper(): str(s.get("name") or "") for s in etfs}
-    except Exception:
-        pass
-
-    # 호주 'IS' 종목은 수동으로 이름을 지정합니다.
-    if country == "aus":
-        name_map["IS"] = "International Shares"
-
-    # 1. 데이터를 사전 처리하여 표시할 부분을 만들고 최대 너비를 찾습니다.
-    display_parts_list = []
-    max_len_name = 0
-    max_len_price_col = 0
-    max_len_shares_col = 0
-    max_len_amount_col = 0
-    max_len_return_col = 0
-    max_len_score_col = 0
-
-    for row in rows_sorted:
-        try:
-            num_part = f"[{row[0]}]"
-            tkr = str(row[idx_ticker])
-            name = name_map.get(tkr.upper(), "")
-
-            # 'IS' 종목은 티커 없이 이름만 표시합니다.
-            if country == "aus" and tkr.upper() == "IS":
-                name_part = name
-            else:
-                name_part = f"{name}({tkr})" if name else tkr
-            full_name_part = f"{num_part} {name_part}"
-
-            stt = str(row[idx_state]) if (idx_state is not None and idx_state < len(row)) else ""
-
-            price_col = ""
-            if idx_price is not None:
-                p = row[idx_price]
-                if isinstance(p, (int, float)):
-                    price_col = f"@{price_formatter(p)}"
-
-            shares_col = ""
-            if idx_shares is not None:
-                s = row[idx_shares]
-                # 보유한 경우에만 표시
-                if isinstance(s, (int, float)) and s > 1e-9:
-                    shares_col = f"{format_shares(s, country)}주"
-
-            amount_col = ""
-            if idx_amount is not None:
-                a = row[idx_amount]
-                if isinstance(a, (int, float)) and a > 1e-9:
-                    amount_col = f"{money_formatter(a)}"
-
-            return_col = ""
-            if idx_ret is not None:
-                r = row[idx_ret]
-                if isinstance(r, (int, float)) and abs(r) > 0.001:
-                    return_col = f"수익 {r:+.2f}%,"
-
-            score_col = ""
-            if idx_score is not None:
-                sc = row[idx_score]
-                if isinstance(sc, (int, float)):
-                    score_col = f"점수 {float(sc):.1f}"
-
-            parts = {
-                "name": full_name_part,
-                "status": stt,
-                "price_col": price_col,
-                "shares_col": shares_col,
-                "amount_col": amount_col,
-                "return_col": return_col,
-                "score_col": score_col,
-            }
-            display_parts_list.append(parts)
-
-            max_len_name = max(max_len_name, len(full_name_part))
-            max_len_price_col = max(max_len_price_col, len(price_col))
-            max_len_shares_col = max(max_len_shares_col, len(shares_col))
-            max_len_amount_col = max(max_len_amount_col, len(amount_col))
-            max_len_return_col = max(max_len_return_col, len(return_col))
-            max_len_score_col = max(max_len_score_col, len(score_col))
-
-        except Exception:
-            continue
-
-    # 2. 상태별로 그룹화합니다.
-    grouped_parts = {}
-    for parts in display_parts_list:
-        status = parts["status"]
-        if status not in grouped_parts:
-            grouped_parts[status] = []
-        grouped_parts[status].append(parts)
-
-    # 3. 그룹 헤더와 함께 정렬된 라인을 만듭니다.
-    body_lines = []
-    # 정렬 순서는 DECISION_CONFIG의 'order' 값을 기준으로 합니다.
-    sorted_groups = sorted(
-        grouped_parts.items(),
-        key=lambda item: DECISION_CONFIG.get(item[0], {"order": 99}).get("order", 99),
-    )
-
-    for group_name, parts_in_group in sorted_groups:
-        config = DECISION_CONFIG.get(group_name)
-        if not config:
-            # 설정에 없는 상태(예: SELL_MOMENTUM)에 대한 폴백 처리
-            display_name = f"<{group_name}>({group_name})"
-            show_slack = True  # 알 수 없는 그룹은 일단 표시
-        else:
-            display_name = f"{config['display_name']}({group_name})"
-            show_slack = config.get("show_slack", True)
-
-        if not show_slack:
-            continue
-
-        if parts_in_group:
-            body_lines.append(display_name)
-            # 수익률 컬럼 표시 여부 결정: 보유 또는 매수 관련 상태일 때만 표시
-            show_return_col = group_name in ["HOLD", "BUY", "BUY_REPLACE"]
-            for parts in parts_in_group:
-                name_part = parts["name"].ljust(max_len_name)
-                price_part = parts["price_col"].ljust(max_len_price_col)
-                shares_part = parts["shares_col"].rjust(max_len_shares_col)
-                amount_part = parts["amount_col"].rjust(max_len_amount_col)
-                score_part = parts["score_col"].ljust(max_len_score_col)
-
-                if show_return_col:
-                    return_part = parts["return_col"].ljust(max_len_return_col)
-                    line = f"{name_part}  {price_part} {shares_part} {amount_part}  {return_part} {score_part}"
-                else:
-                    return_part = "".ljust(max_len_return_col)
-                    line = f"{name_part}  {price_part} {shares_part} {amount_part}  {return_part} {score_part}"
-
-                body_lines.append(line.rstrip())
-            body_lines.append("")  # 그룹 사이에 빈 줄 추가
-
-    if body_lines and body_lines[-1] == "":
-        body_lines.pop()
-
-    # --- 슬랙 메시지의 캡션을 구성합니다. ---
-
-    title_line = f"[{global_settings.APP_TYPE}][{country}/{account}] 시그널"
-    test_line = "\n".join(slack_message_lines)
-    equity_line = f"평가금액: {equity_text}, 누적수익 {cum_text}"
-    cash_line = f"현금: {cash_text}, 보유금액: {hold_val_text}"
-    hold_line = f"보유종목: {hold_text}"
-    caption = "\n".join([title_line, test_line, equity_line, cash_line, hold_line])
-
-    # DECISION_CONFIG에서 is_recommendation=True인 그룹이 하나라도 있으면 @channel 멘션을 포함합니다.
-    has_recommendation = False
-    for group_name in grouped_parts.keys():
-        config = DECISION_CONFIG.get(group_name)
-        if config and config.get("is_recommendation", False):
-            has_recommendation = True
-            break
-    slack_mention = "<!channel>\n" if has_recommendation else ""
-    if not body_lines:
-        # 상세 항목이 없으면 캡션만 전송합니다.
-        slack_sent = send_slack_message(
-            slack_mention + caption, webhook_url=webhook_url, webhook_name=webhook_name
-        )
-    else:
-        # 슬랙 코드 블록을 사용하여 표 형태를 유지합니다.
-        # slack_message = caption + "\n\n" + "\n".join(slack_message_lines)+ "```\n" + "\n".join(body_lines) + "\n```"
-        slack_message = caption + "\n\n" + "```\n" + "\n".join(body_lines) + "\n```"
-        slack_sent = send_slack_message(
-            slack_mention + slack_message, webhook_url=webhook_url, webhook_name=webhook_name
-        )
-
-    return slack_sent
-
-
-def _strip_html_tags(value: str) -> str:
-    try:
-        return re.sub(r"<[^>]+>", "", value)
-    except Exception:
-        return value
-
-
-def _build_summary_line_from_summary_data(
-    summary_data: Dict[str, Any],
-    money_formatter: callable,
-    *,
-    use_html: bool,
-    prefix: Optional[str] = None,
-    include_hold: bool = True,
-) -> str:
-    parts: List[str] = []
-
-    if include_hold:
-        held_count = summary_data.get("held_count")
-        portfolio_topn = summary_data.get("portfolio_topn")
-        if held_count is not None and portfolio_topn is not None:
-            try:
-                held_count_int = int(held_count)
-                topn_int = int(portfolio_topn)
-                parts.append(f"보유종목: {held_count_int}/{topn_int}")
-            except (TypeError, ValueError):
-                pass
-
-    principal = money_formatter(float(summary_data.get("principal", 0.0) or 0.0))
-    parts.append(f"원금: {principal}")
-
-    parts.append(
-        _format_return_with_amount(
-            "일간",
-            float(summary_data.get("daily_return_pct", 0.0) or 0.0),
-            float(summary_data.get("daily_profit_loss", 0.0) or 0.0),
-            money_formatter,
-            use_html=use_html,
-        )
-    )
-    parts.append(
-        _format_return_with_amount(
-            "평가",
-            float(summary_data.get("eval_return_pct", 0.0) or 0.0),
-            float(summary_data.get("eval_profit_loss", 0.0) or 0.0),
-            money_formatter,
-            use_html=use_html,
-        )
-    )
-    parts.append(
-        _format_return_with_amount(
-            "누적",
-            float(summary_data.get("cum_return_pct", 0.0) or 0.0),
-            float(summary_data.get("cum_profit_loss", 0.0) or 0.0),
-            money_formatter,
-            use_html=use_html,
-        )
-    )
-
-    cash = money_formatter(float(summary_data.get("total_cash", 0.0) or 0.0))
-    equity = money_formatter(float(summary_data.get("total_equity", 0.0) or 0.0))
-    parts.append(f"현금: {cash}")
-    parts.append(f"평가금액: {equity}")
-
-    body = " | ".join(parts)
-    if prefix:
-        return f"{prefix} {body}"
-    return body
-
-
-def _build_summary_line_from_header(header_line: str, prefix: Optional[str] = None) -> str:
-    header_line_clean = header_line.split("<br>")[0]
-    segments = [seg.strip() for seg in header_line_clean.split("|")]
-
-    def _pick(label: str, default: str) -> str:
-        for seg in segments:
-            if label in seg:
-                value = seg.split(":", 1)[1].strip()
-                return f"{label}: {_strip_html_tags(value)}"
-        return default
-
-    parts = [
-        _pick("보유종목", "보유종목: -"),
-        _pick("원금", "원금: -"),
-        _pick("일간", "일간: +0.00%(0원)"),
-        _pick("평가", "평가: +0.00%(0원)"),
-        _pick("누적", "누적: +0.00%(0원)"),
-        _pick("현금", "현금: 0원"),
-        _pick("평가금액", "평가금액: 0원"),
-    ]
-
-    body = " | ".join(parts)
-    if prefix:
-        return f"{prefix} {body}"
-    return body
-
-
-def send_summary_notification(
-    country: str,
-    account: str,
-    report_date: datetime,
-    old_equity: float,
-    summary_data: Optional[Dict[str, Any]] = None,
-    header_line: Optional[str] = None,
-    force_send: bool = False,
-) -> None:
-    """작업 완료 요약 슬랙 알림을 전송합니다. 알림 전용 CRON 설정이 있으면 해당 시간에만 전송됩니다."""
-    from utils.notify import should_notify_on_schedule
-    from utils.db_manager import get_portfolio_snapshot
-
-    # transaction_manager는 선택적으로 임포트합니다. 실패해도 알림은 계속되어야 합니다.
-    try:
-        from utils.transaction_manager import get_transactions_up_to_date
-    except (SystemExit, ImportError):
-        get_transactions_up_to_date = None
-
-    from utils.report import format_kr_money
-
-    # 알림 전용 CRON 설정이 있고, 현재 시간이 스케줄과 맞지 않으면 알림을 보내지 않습니다.
-    if not force_send and not should_notify_on_schedule(country):
-        return
-
-    try:
-        date_str = report_date.strftime("%Y-%m-%d")
-        # Get new equity
-        new_snapshot = get_portfolio_snapshot(country, account=account)
-        new_equity = float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
-
-        # 계좌 통화를 확인하여 필요 시 KRW로 환산합니다.
-        aud_krw_rate = None
-        account_currency = None
-        try:
-            from utils.account_registry import get_account_info
-
-            account_info = get_account_info(account)
-            account_currency = (account_info or {}).get("currency")
-            if account_currency == "AUD":
-                from utils.data_loader import get_aud_to_krw_rate
-
-                aud_krw_rate = get_aud_to_krw_rate()
-        except Exception:
-            account_currency = None
-
-        if account_currency == "AUD" and aud_krw_rate:
-            new_equity *= aud_krw_rate
-            old_equity *= aud_krw_rate
-
-        # Calculate cumulative return
-        try:
-            file_settings = get_account_file_settings(account)
-            initial_capital_krw = float(file_settings.get("initial_capital_krw", 0))
-        except SystemExit:
-            initial_capital_krw = 0.0  # 알림에서는 조용히 실패 처리
-
-        money_formatter = format_kr_money
-        summary_prefix = f"[{country}/{account}/{date_str}]"
-
-        if summary_data:
-            new_equity = float(summary_data.get("total_equity", new_equity) or 0.0)
-
-        summary_line: Optional[str] = None
-        if summary_data:
-            summary_line = _build_summary_line_from_summary_data(
-                summary_data,
-                money_formatter,
-                use_html=False,
-                prefix=summary_prefix,
-            )
-        elif header_line:
-            summary_line = _build_summary_line_from_header(header_line, prefix=summary_prefix)
-        else:
-            parts = [f"금액: {money_formatter(new_equity)}"]
-
-            if old_equity > 0 and new_equity > 0:
-                day_ret_pct = ((new_equity / old_equity) - 1.0) * 100.0
-                day_profit_loss = new_equity - old_equity
-                parts.append(f"일간: {day_ret_pct:+.2f}%({money_formatter(day_profit_loss)})")
-
-            if initial_capital_krw > 0 and get_transactions_up_to_date:
-                injections = get_transactions_up_to_date(
-                    country, account, report_date, "capital_injection"
-                )
-                withdrawals = get_transactions_up_to_date(
-                    country, account, report_date, "cash_withdrawal"
-                )
-
-                total_injections = sum(inj.get("amount", 0.0) for inj in injections)
-                total_withdrawals = sum(wd.get("amount", 0.0) for wd in withdrawals)
-
-                adjusted_capital_base = initial_capital_krw + total_injections
-                adjusted_equity = new_equity + total_withdrawals
-
-                if adjusted_capital_base > 0:
-                    eval_profit_loss = new_equity - adjusted_capital_base
-                    eval_ret_pct = (eval_profit_loss / adjusted_capital_base) * 100.0
-                    parts.append(f"평가: {eval_ret_pct:+.2f}%({money_formatter(eval_profit_loss)})")
-
-                    cum_ret_pct = ((adjusted_equity / adjusted_capital_base) - 1.0) * 100.0
-                    cum_profit_loss = adjusted_equity - adjusted_capital_base
-                    parts.append(f"누적: {cum_ret_pct:+.2f}%({money_formatter(cum_profit_loss)})")
-
-            summary_line = f"{summary_prefix} " + " | ".join(parts)
-
-        min_change_threshold = 0.5 if country != "aus" else 0.005
-        change_segment = None
-        if abs(new_equity - old_equity) >= min_change_threshold:
-            diff = new_equity - old_equity
-            change_label = "📈평가금액 증가" if diff > 0 else "📉평가금액 감소"
-
-            if country == "aus" or abs(diff) >= 10_000:
-                old_equity_str = money_formatter(old_equity)
-                new_equity_str = money_formatter(new_equity)
-                diff_str = f"{'+' if diff > 0 else ''}{money_formatter(diff)}"
-            else:
-                old_equity_str = f"{int(round(old_equity)):,}원"
-                new_equity_str = f"{int(round(new_equity)):,}원"
-                diff_int = int(round(diff))
-                diff_str = (
-                    f"{'+' if diff_int > 0 else ''}{diff_int:,}원"
-                    if diff_int != 0
-                    else f"{diff:+.2f}원"
-                )
-
-            change_segment = f"{change_label}: {old_equity_str} => {new_equity_str} ({diff_str})"
-
-        final_message = summary_line or f"{summary_prefix} 금액: {money_formatter(new_equity)}"
-        if change_segment:
-            final_message = f"{final_message} | {change_segment}"
-
-        send_log_to_slack(final_message)
-    except Exception as e:
-        logging.error(
-            f"Failed to send summary notification for {country}/{account}: {e}", exc_info=True
-        )
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="포트폴리오 매매 신호를 계산합니다.")
     parser.add_argument("country", choices=["kor", "aus", "coin"], help="국가 코드")
@@ -2723,16 +2199,35 @@ if __name__ == "__main__":
     old_snapshot = get_portfolio_snapshot(args.country, account=args.account)
     old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
-    signal_result = main(country=args.country, account=args.account, date_str=args.date)
+    signal_result = main(
+        country=args.country,
+        account=args.account,
+        date_str=args.date,
+    )
 
     # 요약 알림 전송
     if signal_result:
+        duration = time.time() - start_time
         send_summary_notification(
             args.country,
             args.account,
             signal_result.report_date,
+            duration,
             old_equity,
             summary_data=signal_result.summary_data,
             header_line=signal_result.header_line,
+            force_send=True,
+        )
+        time.sleep(2)
+        from utils.notification import send_detailed_signal_notification
+
+        send_detailed_signal_notification(
+            args.country,
+            args.account,
+            signal_result.header_line,
+            signal_result.detail_headers,
+            signal_result.detail_rows,
+            decision_config=signal_result.decision_config,
+            extra_lines=signal_result.detail_extra_lines,
             force_send=True,
         )
