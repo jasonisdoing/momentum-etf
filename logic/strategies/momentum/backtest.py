@@ -27,6 +27,7 @@ def run_portfolio_backtest(
     regime_filter_enabled: bool = False,
     regime_filter_ticker: str = "^GSPC",
     regime_filter_ma_period: int = 200,
+    regime_behavior: str = "sell_all",
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
     min_buy_score: Optional[float] = None,
@@ -38,6 +39,10 @@ def run_portfolio_backtest(
     ma_period_stock = ma_period
     stop_loss = stop_loss_pct
     min_buy_score = resolve_min_buy_score(min_buy_score)
+
+    valid_regime_behaviors = {"sell_all", "hold_block_buy"}
+    if regime_behavior not in valid_regime_behaviors:
+        raise ValueError("regime_behavior must be one of {'sell_all', 'hold_block_buy'}")
 
     if top_n <= 0:
         raise ValueError("PORTFOLIO_TOPN (top_n)은 0보다 커야 합니다.")
@@ -182,6 +187,10 @@ def run_portfolio_backtest(
             if pd.notna(market_price) and pd.notna(market_ma) and market_price < market_ma:
                 is_risk_off = True
 
+        force_regime_sell = is_risk_off and regime_behavior == "sell_all"
+        allow_individual_sells = (not is_risk_off) or regime_behavior == "hold_block_buy"
+        allow_new_buys = not is_risk_off
+
         # 현재 총 보유 자산 가치를 계산합니다.
         current_holdings_value = 0
         for held_ticker, held_state in position_state.items():
@@ -257,7 +266,7 @@ def run_portfolio_backtest(
 
         # --- 2. 매도 로직 ---
         # (a) 시장 레짐 필터
-        if is_risk_off:
+        if force_regime_sell:
             for held_ticker, held_state in position_state.items():
                 if held_state["shares"] > 0:
                     price = today_prices.get(held_ticker)
@@ -292,8 +301,8 @@ def run_portfolio_backtest(
                                 "note": "시장 위험 회피",
                             }
                         )
-        # (b) 개별 종목 매도 (시장이 리스크 온일 때만)
-        else:
+        # (b) 개별 종목 매도
+        elif allow_individual_sells:
             for ticker, ticker_metrics in metrics_by_ticker.items():
                 ticker_state, price = position_state[ticker], today_prices.get(ticker)
                 is_ticker_warming_up = ticker not in tickers_available_today or pd.isna(
@@ -346,8 +355,8 @@ def run_portfolio_backtest(
                             }
                         )
 
-        # --- 3. 매수 로직 (시장이 리스크 온일 때만) ---
-        if not is_risk_off:
+        # --- 3. 매수 로직 (리스크 온일 때만) ---
+        if allow_new_buys:
             # 1. 매수 후보 선정
             buy_ranked_candidates = []
             if cash > 0:  # 현금이 있어야만 매수 후보를 고려
