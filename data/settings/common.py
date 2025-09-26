@@ -3,4 +3,10 @@ MARKET_REGIME_FILTER_TICKER = "^GSPC"
 MARKET_REGIME_FILTER_MA_PERIOD = 20
 
 HOLDING_STOP_LOSS_PCT = 10  # 양수로 입력해도 자동으로 음수로 저장/해석됩니다.
-COOLDOWN_DAYS = 1
+COOLDOWN_DAYS = 2  # 매수/매도한 날 + 그 다음날은 거래방지 = 2
+
+LOCKED_TICKERS = [
+    "ETH",
+    "0097L0",
+    "0107F0",
+]

@@ -52,6 +52,8 @@ dnspython==2.8.0
     # via pymongo
 exchange-calendars==4.11.1
     # via pandas-market-calendars
+flake8==7.3.0
+    # via -r requirements.in
 fonttools==4.59.2
     # via matplotlib
 frozendict==2.4.6
@@ -112,6 +114,8 @@ markupsafe==3.0.2
     # via jinja2
 matplotlib==3.10.6
     # via pykrx
+mccabe==0.7.0
+    # via flake8
 multipledispatch==1.0.0
     # via pykrx
 multitasking==0.0.12
@@ -174,6 +178,8 @@ pyasn1==0.6.1
     #   rsa
 pyasn1-modules==0.4.2
     # via google-auth
+pycodestyle==2.14.0
+    # via flake8
 pycparser==2.23
     # via cffi
 pydantic==2.11.9
@@ -182,6 +188,8 @@ pydantic-core==2.33.2
     # via pydantic
 pydeck==0.9.1
     # via streamlit
+pyflakes==3.4.0
+    # via flake8
 pykrx==1.0.51
     # via -r requirements.in
 pyluach==2.3.0

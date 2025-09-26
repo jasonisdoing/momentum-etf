@@ -4,43 +4,35 @@
         "tickers": [
             {
                 "ticker": "BTC",
-                "name": "비트코인",
-                "is_active": true
+                "name": "비트코인"
             },
             {
                 "ticker": "ETH",
-                "name": "이더리움",
-                "is_active": true
+                "name": "이더리움"
             },
             {
                 "ticker": "XRP",
-                "name": "리플",
-                "is_active": true
+                "name": "리플"
             },
             {
                 "ticker": "BNB",
-                "name": "바이낸스코인",
-                "is_active": true
+                "name": "바이낸스코인"
             },
             {
                 "ticker": "SOL",
-                "name": "솔라나",
-                "is_active": true
+                "name": "솔라나"
             },
             {
                 "ticker": "DOGE",
-                "name": "도지코인",
-                "is_active": true
+                "name": "도지코인"
             },
             {
                 "ticker": "TRX",
-                "name": "트론",
-                "is_active": true
+                "name": "트론"
             },
             {
                 "ticker": "ADA",
-                "name": "에이다",
-                "is_active": true
+                "name": "에이다"
             }
         ]
     }

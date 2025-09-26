@@ -24,7 +24,7 @@ from utils.account_registry import (
     load_accounts,
     get_account_info,
 )
-from utils.data_loader import fetch_yfinance_name
+from utils.data_loader import fetch_yfinance_name, resolve_security_name
 from utils.db_manager import (
     delete_trade_by_id,
     get_all_daily_equities,
@@ -285,7 +285,10 @@ def render_assets_dashboard(
             if prefetched_trading_days is not None:
                 all_trading_days = prefetched_trading_days
             else:
-                all_trading_days = []  # prefetched_trading_days가 없을 경우 빈 리스트로 초기화
+                # prefetched_trading_days가 없으면 직접 거래일을 조회합니다.
+                from utils.data_loader import get_trading_days
+
+                all_trading_days = get_trading_days(start_date_str, end_date_str, country_code)
             trading_day_set = set()
             if not all_trading_days:
                 if country_code == "kor":
@@ -397,6 +400,14 @@ def render_assets_dashboard(
             st.info("거래 내역이 없습니다.")
         else:
             df_trades = pd.DataFrame(all_trades)
+            if "name" in df_trades.columns:
+                missing_name_mask = df_trades["name"].isna() | (
+                    df_trades["name"].astype(str).str.strip() == ""
+                )
+                if missing_name_mask.any():
+                    df_trades.loc[missing_name_mask, "name"] = df_trades.loc[
+                        missing_name_mask, "ticker"
+                    ].apply(lambda t: resolve_security_name(country_code, str(t)))
             if country_code == "coin" and "ticker" in df_trades.columns:
                 unique_tickers = sorted({str(t).upper() for t in df_trades["ticker"].dropna()})
                 options = ["ALL"] + unique_tickers
@@ -607,6 +618,12 @@ def render_assets_dashboard(
                 if not holdings_data:
                     st.info("매도할 보유 종목이 없습니다.")
                 else:
+                    for item in holdings_data:
+                        if not item.get("name") and item.get("ticker"):
+                            item["name"] = resolve_security_name(
+                                country_code, str(item.get("ticker"))
+                            )
+
                     with st.form(f"sell_form_{account_prefix}"):
                         df_holdings = pd.DataFrame(holdings_data)
                         df_holdings["선택"] = False

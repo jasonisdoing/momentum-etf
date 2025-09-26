@@ -53,7 +53,6 @@ def migrate_etfs_from_json_to_mongo(country: str):
                 "name": name,
                 "country": country,
                 "category": category_name,
-                "is_active": item.get("is_active", True),
                 "last_modified": datetime.utcnow(),
             }
             stocks_collection.insert_one(doc)

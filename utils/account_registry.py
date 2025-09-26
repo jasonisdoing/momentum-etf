@@ -10,6 +10,9 @@ from typing import Any, Dict, Iterable, List, Optional
 from datetime import datetime
 
 
+from logic.strategies.momentum.rules import StrategyRules
+
+
 ACCOUNTS_FILE = (
     Path(__file__).resolve().parent.parent / "data" / "settings" / "country_mapping.json"
 )
@@ -55,6 +58,13 @@ def get_common_file_settings() -> Dict[str, Any]:
         settings["HOLDING_STOP_LOSS_PCT"] = getattr(module, "HOLDING_STOP_LOSS_PCT")
         settings["COOLDOWN_DAYS"] = getattr(module, "COOLDOWN_DAYS")
 
+        # 선택 설정 (존재할 경우만 추가)
+        locked_tickers = getattr(module, "LOCKED_TICKERS", None)
+        if locked_tickers is not None:
+            if not isinstance(locked_tickers, (list, tuple, set)):
+                raise ValueError("LOCKED_TICKERS 는 리스트/튜플/셋 형태여야 합니다.")
+            settings["LOCKED_TICKERS"] = list(locked_tickers)
+
         # 유효성 검사
         if not isinstance(settings["MARKET_REGIME_FILTER_ENABLED"], bool):
             raise ValueError("MARKET_REGIME_FILTER_ENABLED는 True 또는 False여야 합니다.")
@@ -80,64 +90,7 @@ def get_common_file_settings() -> Dict[str, Any]:
     return settings
 
 
-_account_file_settings_cache: Dict[str, Dict[str, Any]] = {}
-
-
-def get_country_file_settings(country: str) -> Dict[str, Any]:
-    """
-    국가별 전략 설정 파일(예: 'data/settings/country/kor.py')에서
-    전략 파라미터를 동적으로 로드합니다.
-    """
-    cache_key = f"country_{country}"
-    if cache_key in _account_file_settings_cache:
-        return _account_file_settings_cache[cache_key]
-
-    settings: Dict[str, Any] = {}
-    project_root = Path(__file__).resolve().parent.parent
-    file_path = project_root / "data" / "settings" / "country" / f"{country}.py"
-    module_name = f"country_settings_{country}"
-
-    if not file_path.is_file():
-        raise SystemExit(f"오류: 국가 설정 파일({file_path})을 찾을 수 없습니다. 이 파일은 필수입니다.")
-
-    try:
-        spec = importlib.util.spec_from_file_location(module_name, file_path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Cannot create module spec from {file_path}")
-
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        # 필수 설정 로드
-        ma_period = getattr(module, "MA_PERIOD")
-        portfolio_topn = getattr(module, "PORTFOLIO_TOPN")
-        replace_weaker = getattr(module, "REPLACE_WEAKER_STOCK")
-        replace_threshold = getattr(module, "REPLACE_SCORE_THRESHOLD")
-        min_buy_score = getattr(module, "MIN_BUY_SCORE", 0.0)  # 없으면 0.0으로 폴백
-
-        # 유효성 검사
-        if not isinstance(ma_period, int) or ma_period <= 0:
-            raise ValueError("MA_PERIOD는 0보다 큰 정수여야 합니다.")
-        if not isinstance(portfolio_topn, int) or portfolio_topn <= 0:
-            raise ValueError("PORTFOLIO_TOPN은 0보다 큰 정수여야 합니다.")
-        if not isinstance(replace_weaker, bool):
-            raise ValueError("REPLACE_WEAKER_STOCK은 True 또는 False여야 합니다.")
-        if not isinstance(replace_threshold, (int, float)):
-            raise ValueError("REPLACE_SCORE_THRESHOLD는 숫자여야 합니다.")
-        if not isinstance(min_buy_score, (int, float)):
-            raise ValueError("MIN_BUY_SCORE는 숫자여야 합니다.")
-
-        settings["ma_period"] = ma_period
-        settings["portfolio_topn"] = portfolio_topn
-        settings["replace_weaker_stock"] = replace_weaker
-        settings["replace_threshold"] = replace_threshold
-        settings["min_buy_score"] = min_buy_score
-
-    except (AttributeError, ValueError, TypeError, ImportError) as e:
-        raise SystemExit(f"오류: 국가 설정 파일({file_path})에 문제가 있습니다: {e}")
-
-    _account_file_settings_cache[cache_key] = settings
-    return settings
+_account_settings_cache: Dict[str, Dict[str, Any]] = {}
 
 
 def get_account_file_settings(account: str) -> Dict[str, Any]:
@@ -146,8 +99,8 @@ def get_account_file_settings(account: str) -> Dict[str, Any]:
     기준일 및 전략 파라미터를 동적으로 로드합니다.
     """
     cache_key = f"account_{account}"
-    if cache_key in _account_file_settings_cache:
-        return _account_file_settings_cache[cache_key]
+    if cache_key in _account_settings_cache:
+        return _account_settings_cache[cache_key]
 
     settings: Dict[str, Any] = {}
     project_root = Path(__file__).resolve().parent.parent
@@ -185,7 +138,7 @@ def get_account_file_settings(account: str) -> Dict[str, Any]:
     except (AttributeError, ValueError, TypeError, ImportError) as e:
         raise SystemExit(f"오류: 계좌 설정 파일({file_path})에 문제가 있습니다: {e}")
 
-    _account_file_settings_cache[cache_key] = settings
+    _account_settings_cache[cache_key] = settings
     return settings
 
 
@@ -209,6 +162,34 @@ def _refresh_cache() -> None:
                 continue
             # 이후 단계에서 원본 데이터를 변경해도 캐시에 영향을 주지 않도록 얕은 복사본을 저장합니다.
             item = dict(entry)
+            strategy_cfg = item.get("strategy")
+            if not strategy_cfg:
+                raise SystemExit(f"계좌 '{account_code}' 설정에 'strategy' 항목이 필요합니다.")
+            try:
+                strategy_rules = StrategyRules.from_mapping(strategy_cfg)
+            except ValueError as exc:
+                raise SystemExit(f"계좌 '{account_code}'의 전략 설정이 올바르지 않습니다: {exc}") from exc
+
+            item["strategy_rules"] = strategy_rules
+            strategy_dict = strategy_rules.to_dict()
+            item["strategy"] = strategy_dict
+            item["ma_period"] = strategy_rules.ma_period
+            item["portfolio_topn"] = strategy_rules.portfolio_topn
+            item["replace_weaker_stock"] = strategy_rules.replace_weaker_stock
+            item["replace_threshold"] = strategy_rules.replace_threshold
+            item["min_buy_score"] = strategy_rules.min_buy_score
+            if strategy_rules.coin_min_holding_cost_krw is not None:
+                item["coin_min_holding_cost_krw"] = strategy_rules.coin_min_holding_cost_krw
+
+            precision_cfg = item.get("precision")
+            if isinstance(precision_cfg, dict):
+                item["currency"] = precision_cfg.get("currency", item.get("currency"))
+                item["amt_precision"] = precision_cfg.get(
+                    "amt_precision", item.get("amt_precision")
+                )
+                item["qty_precision"] = precision_cfg.get(
+                    "qty_precision", item.get("qty_precision")
+                )
             normalized.append(item)
             mapping[account_code] = item
         _accounts_cache = normalized
@@ -286,3 +267,18 @@ def iter_account_info() -> Iterable[Dict[str, Any]]:
     """계좌 메타데이터를 하나씩 읽기 전용 형태로 순회합니다."""
 
     yield from load_accounts()
+
+
+def get_strategy_rules_for_account(account: str) -> StrategyRules:
+    info = get_account_info(account)
+    if not info or "strategy_rules" not in info:
+        raise ValueError(f"'{account}' 계좌의 전략 설정을 찾을 수 없습니다.")
+    return info["strategy_rules"]
+
+
+def get_strategy_dict_for_account(account: str) -> Dict[str, Any]:
+    return get_strategy_rules_for_account(account).to_dict()
+
+
+def get_coin_min_holding_cost(account: str) -> Optional[float]:
+    return get_strategy_rules_for_account(account).coin_min_holding_cost_krw
