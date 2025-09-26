@@ -132,6 +132,7 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
                 old_equity,
                 summary_data=signal_result.summary_data,
                 header_line=signal_result.header_line,
+                force_send=True,
             )
             date_str = report_date.strftime("%Y-%m-%d")
             prefix = f"{country}/{account}" if account else country
