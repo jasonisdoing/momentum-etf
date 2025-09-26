@@ -23,7 +23,11 @@ from signals import (
     generate_signal_report,
     get_next_trading_day,
 )
-from utils.account_registry import get_accounts_by_country, load_accounts
+from utils.account_registry import (
+    get_accounts_by_country,
+    get_common_file_settings,
+    load_accounts,
+)
 from utils.data_loader import PykrxDataUnavailable, get_trading_days
 from utils.db_manager import (
     get_available_snapshot_dates,
@@ -200,6 +204,13 @@ def get_cached_etfs(country_code: str) -> List[Dict[str, Any]]:
 
 
 def _display_status_report_df(df: pd.DataFrame, country_code: str):
+    common_settings = get_common_file_settings()
+    locked_set = (
+        {str(t).upper() for t in common_settings.get("LOCKED_TICKERS", [])}
+        if isinstance(common_settings, dict)
+        else set()
+    )
+
     etfs_data = get_cached_etfs(country_code)
     meta_df = (
         pd.DataFrame(etfs_data) if etfs_data else pd.DataFrame(columns=["ticker", "이름", "category"])
@@ -267,6 +278,16 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
     if country_code == "coin" and "보유수량" in df_display.columns:
         formats["보유수량"] = "{:.8f}"
     styler = styler.format(formats, na_rep="-")
+
+    if locked_set and "티커" in df_display.columns:
+
+        def highlight_locked(row):
+            ticker = str(row.get("티커") or "").upper()
+            if ticker in locked_set:
+                return ["background-color: #d9fdd3"] * len(row)
+            return ["" for _ in row]
+
+        styler = styler.apply(highlight_locked, axis=1)
 
     st.dataframe(
         styler,

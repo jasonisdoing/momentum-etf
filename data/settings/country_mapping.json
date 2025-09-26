@@ -109,7 +109,7 @@
         "is_active": true,
         "strategy": {
             "MA_PERIOD": 15,
-            "PORTFOLIO_TOPN": 10,
+            "PORTFOLIO_TOPN": 8,
             "REPLACE_WEAKER_STOCK": true,
             "REPLACE_SCORE_THRESHOLD": 1.0,
             "MIN_BUY_SCORE": 0.0

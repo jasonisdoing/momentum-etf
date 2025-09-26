@@ -58,6 +58,13 @@ def get_common_file_settings() -> Dict[str, Any]:
         settings["HOLDING_STOP_LOSS_PCT"] = getattr(module, "HOLDING_STOP_LOSS_PCT")
         settings["COOLDOWN_DAYS"] = getattr(module, "COOLDOWN_DAYS")
 
+        # 선택 설정 (존재할 경우만 추가)
+        locked_tickers = getattr(module, "LOCKED_TICKERS", None)
+        if locked_tickers is not None:
+            if not isinstance(locked_tickers, (list, tuple, set)):
+                raise ValueError("LOCKED_TICKERS 는 리스트/튜플/셋 형태여야 합니다.")
+            settings["LOCKED_TICKERS"] = list(locked_tickers)
+
         # 유효성 검사
         if not isinstance(settings["MARKET_REGIME_FILTER_ENABLED"], bool):
             raise ValueError("MARKET_REGIME_FILTER_ENABLED는 True 또는 False여야 합니다.")

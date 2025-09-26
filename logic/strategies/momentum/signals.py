@@ -111,12 +111,10 @@ def generate_daily_signals_for_portfolio(
     from utils.account_registry import get_common_file_settings
 
     common_settings = get_common_file_settings()
-    locked_map = (
-        common_settings.get("LOCKED_TICKERS_BY_ACCOUNT", {})
-        if isinstance(common_settings, dict)
-        else {}
+    locked_list = (
+        common_settings.get("LOCKED_TICKERS", []) if isinstance(common_settings, dict) else []
     )
-    locked_tickers: Set[str] = locked_map.get((country, account), set())
+    locked_tickers: Set[str] = {str(ticker).upper() for ticker in locked_list}
 
     base_date_norm = base_date.normalize()
     sell_cooldown_block: Dict[str, Dict[str, Any]] = {}
@@ -248,14 +246,15 @@ def generate_daily_signals_for_portfolio(
                     if shortfall_msg:
                         phrase = shortfall_msg
 
-        is_locked = tkr in locked_tickers
+        ticker_key = str(tkr).upper()
+        is_locked = ticker_key in locked_tickers
         if is_locked:
+            # print(
+            #     f"[LOCKED] {country}/{account} - {ticker_key}: forcing HOLD with phrase '신호와 상관없이 보유'"
+            # )
             buy_signal = False
-            lock_msg = "거래 제한"
-            if is_effectively_held:
-                state = "HOLD"
-            else:
-                state = "WAIT"
+            lock_msg = "신호와 상관없이 보유"
+            state = "HOLD"
             if not phrase:
                 phrase = lock_msg
             elif lock_msg not in phrase:
@@ -625,6 +624,14 @@ def generate_daily_signals_for_portfolio(
                     else:
                         # 그 외의 경우 (점수 미달 등)
                         d["row"][-1] = "포트폴리오 가득 참"
+
+    lock_phrase = "신호와 상관없이 보유"
+    for d in final_decisions:
+        if d.get("is_locked"):
+            d["state"] = "HOLD"
+            d["row"][2] = "HOLD"
+            d["buy_signal"] = False
+            d["row"][-1] = lock_phrase
 
     # 최종 정렬
     def sort_key(decision_dict):
