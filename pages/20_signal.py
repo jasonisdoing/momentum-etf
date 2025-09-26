@@ -162,7 +162,14 @@ def get_cached_signal_report(
                 country, account, date_str, prefetched_data=prefetched_data
             )
             if new_report_tuple:
-                header_line, headers, rows, _, _ = new_report_tuple
+                (
+                    header_line,
+                    headers,
+                    rows,
+                    _,
+                    _,
+                    _,
+                ) = new_report_tuple
                 new_report = (header_line, headers, rows)
                 save_signal_report_to_db(country, account, report_date, new_report)
                 return new_report

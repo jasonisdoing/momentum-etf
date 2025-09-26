@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 # --- 웹앱 UI 및 마스터 데이터 관련 설정 ---
 
-APP_DATE_TIME = "2025-09-25-20"
+APP_DATE_TIME = "2025-09-26-09"
 
 APP_TYPE = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 
@@ -30,6 +30,6 @@ APP_TYPE = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 # 알림은 두 조건이 모두 맞는 2시간마다 발송됩니다.
 # 이 설정이 비어있으면(None), 메인 스케줄러가 실행될 때마다 항상 알림이 발송됩니다.
 
-NOTIFY_KOR_CRON = "0 9-16 * * 1-5"
-NOTIFY_AUS_CRON = "0 9-16 * * 1-5"
-NOTIFY_COIN_CRON = "*/10 * * * *"  # 10분마다
+NOTIFY_KOR_CRON = "5,35 9-16 * * 1-5"
+NOTIFY_AUS_CRON = "5,35 9-16 * * 1-5"
+NOTIFY_COIN_CRON = "5,35 * * * *"

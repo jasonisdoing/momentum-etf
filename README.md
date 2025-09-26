@@ -147,7 +147,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
    - `SCHEDULE_KOR_CRON` = `"10 18 * * 1-5"` (서울 18:10 평일)
    - `SCHEDULE_AUS_CRON` = `"10 18 * * 1-5"` (시드니 18:10 평일)
    - `SCHEDULE_COIN_CRON` = `"5 0 * * *"` (매일 00:05)
-   - `SCHEDULE_KOR_TZ` = `Asia/Seoul`, `SCHEDULE_AUS_TZ` = `Australia/Sydney`, `SCHEDULE_COIN_TZ` = `Asia/Seoul`
+   - `SCHEDULE_KOR_TZ` = `Asia/Seoul`, `SCHEDULE_AUS_TZ` = `Asia/Seoul`, `SCHEDULE_COIN_TZ` = `Asia/Seoul`
    - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
    - `SCHEDULE_ENABLE_CACHE` = `1`/`0` (기본 1)
    - `SCHEDULE_CACHE_CRON` = `"30 3 * * *"` (서울 03:30)
