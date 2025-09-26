@@ -116,11 +116,6 @@ def main():
     for i, row in df_categorized.iterrows():
         ticker = row["ticker"]
 
-        # is_active가 False이면 계산을 건너뜁니다.
-        if "is_active" in row and row["is_active"] is False:
-            print(f"  - 건너뛰기 ({i + 1}/{len(df_categorized)}): {ticker} (is_active: false)")
-            continue
-
         print(f"  - 처리 중 ({i + 1}/{len(df_categorized)}): {ticker}")
         try:
             return_pct, reason = get_etf_return(ticker, country_code, months_to_calculate)

@@ -29,13 +29,7 @@ def render_master_etf_ui(country_code: str):
         st.info("조회할 종목이 없습니다.")
         return
 
-    for etf in etfs_data:
-        if "is_active" not in etf:
-            st.error(f"종목 마스터 파일의 '{etf.get('ticker')}' 종목에 'is_active' 필드가 없습니다. 파일을 확인해주세요.")
-            st.stop()
-
     df_etfs = pd.DataFrame(etfs_data)
-    df_etfs["is_active"] = df_etfs["is_active"].fillna(True)
 
     if "name" not in df_etfs.columns:
         df_etfs["name"] = ""
@@ -55,8 +49,9 @@ def render_master_etf_ui(country_code: str):
     df_etfs["modified_sort_key"] = pd.to_datetime(df_etfs["last_modified"], errors="coerce")
     df_etfs.sort_values(by=["modified_sort_key"], ascending=True, na_position="first", inplace=True)
 
-    display_cols = ["ticker", "name", "category", "is_active"]
+    display_cols = ["ticker", "name", "category"]
     df_for_display = df_etfs.reindex(columns=display_cols)
+    df_for_display = df_for_display.fillna("")
 
     st.dataframe(
         df_for_display,
@@ -66,7 +61,6 @@ def render_master_etf_ui(country_code: str):
         column_config={
             "ticker": st.column_config.TextColumn("티커"),
             "name": st.column_config.TextColumn("종목명"),
-            "is_active": st.column_config.CheckboxColumn("활성", disabled=True),
         },
     )
 
