@@ -126,20 +126,20 @@ def get_last_error() -> Optional[str]:
     return _LAST_ERROR
 
 
-def send_log_to_slack(message: str):
+def send_slack_message_to_logs(message: str):
     webhook_url = os.environ.get("LOGS_SLACK_WEBHOOK")
     if webhook_url:
         log_message = f"📜 *[{global_settings.APP_TYPE}]*{message}"
         send_slack_message(log_message, webhook_url=webhook_url, webhook_name="LOGS_SLACK_WEBHOOK")
 
 
-def send_verbose_log_to_slack(message: str):
-    webhook_url = os.environ.get("VERBOSE_LOGS_SLACK_WEBHOOK")
-    if webhook_url:
-        log_message = f"📜 *[{global_settings.APP_TYPE}]*{message}"
-        send_slack_message(
-            log_message, webhook_url=webhook_url, webhook_name="VERBOSE_LOGS_SLACK_WEBHOOK"
-        )
+# def send_verbose_log_to_slack(message: str):
+#     webhook_url = os.environ.get("VERBOSE_LOGS_SLACK_WEBHOOK")
+#     if webhook_url:
+#         log_message = f"📜 *[{global_settings.APP_TYPE}]*{message}"
+#         send_slack_message(
+#             log_message, webhook_url=webhook_url, webhook_name="VERBOSE_LOGS_SLACK_WEBHOOK"
+#         )
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +392,7 @@ def send_summary_notification(
 
     slug = f"summary:{country}/{account}"
     send_slack_message(final_message, webhook_url=webhook_url, webhook_name=slug)
+    send_slack_message_to_logs(final_message)
 
 
 def send_detailed_signal_notification(
@@ -582,10 +583,10 @@ __all__ = [
     "get_last_error",
     "get_slack_webhook_url",
     "send_detailed_signal_notification",
-    "send_log_to_slack",
+    "send_slack_message_to_logs",
     "send_slack_message",
     "send_summary_notification",
-    "send_verbose_log_to_slack",
+    # "send_verbose_log_to_slack",
     "should_notify_on_schedule",
     "strip_html_tags",
 ]
