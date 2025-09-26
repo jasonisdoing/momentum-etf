@@ -229,6 +229,19 @@
         ]
     },
     {
+        "category": "미국금융",
+        "tickers": [
+            {
+                "ticker": "0013P0",
+                "name": "RISE 미국은행TOP10"
+            },
+            {
+                "ticker": "0028X0",
+                "name": "Kodex 미국금융테크액티브"
+            }
+        ]
+    },
+    {
         "category": "미국바이오",
         "tickers": [
             {
