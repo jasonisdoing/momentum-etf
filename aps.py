@@ -128,11 +128,10 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
                 country,
                 account,
                 report_date,
-                duration,
                 old_equity,
                 summary_data=signal_result.summary_data,
                 header_line=signal_result.header_line,
-                force_send=True,
+                # force_send=True,
             )
             date_str = report_date.strftime("%Y-%m-%d")
             prefix = f"{country}/{account}" if account else country
@@ -202,7 +201,7 @@ def main():
 
     # coin
     if _bool_env("SCHEDULE_ENABLE_COIN", True):
-        cron = _get("SCHEDULE_COIN_CRON", "*/5 * * * *")
+        cron = _get("SCHEDULE_COIN_CRON", "1,11,21,31,41,51 * * * *")
         tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,
@@ -214,7 +213,7 @@ def main():
 
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
-        cron = _get("SCHEDULE_AUS_CRON", "*/5 * * * *")
+        cron = _get("SCHEDULE_AUS_CRON", "1,11,21,31,41,51 * * * *")
         tz = _get("SCHEDULE_AUS_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,
@@ -226,7 +225,7 @@ def main():
 
     # kor
     if _bool_env("SCHEDULE_ENABLE_KOR", True):
-        cron = _get("SCHEDULE_KOR_CRON", "*/5 * * * *")
+        cron = _get("SCHEDULE_KOR_CRON", "1,11,21,31,41,51 * * * *")
         tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,

@@ -46,7 +46,6 @@ python cli.py kor --tune-regime --account m1
 import argparse
 import os
 import subprocess
-import time
 import sys
 from typing import List, Optional
 
@@ -283,8 +282,6 @@ def main():
                 run_label = date_str if date_str else "최신 기준일"
                 print(f"-> ({idx}/{len(date_inputs)}) {run_label} 데이터 계산 중...")
 
-                start_time = time.time()
-
                 # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
                 if date_str:
                     old_snapshot = get_portfolio_snapshot(
@@ -301,12 +298,10 @@ def main():
                     continue
 
                 if signal_result:
-                    duration = time.time() - start_time
                     send_summary_notification(
                         country,
                         account,
                         signal_result.report_date,
-                        duration,
                         old_equity,
                         summary_data=signal_result.summary_data,
                         header_line=signal_result.header_line,

@@ -2573,7 +2573,6 @@ def send_summary_notification(
     country: str,
     account: str,
     report_date: datetime,
-    duration: float,
     old_equity: float,
     summary_data: Optional[Dict[str, Any]] = None,
     header_line: Optional[str] = None,
@@ -2728,12 +2727,10 @@ if __name__ == "__main__":
 
     # 요약 알림 전송
     if signal_result:
-        duration = time.time() - start_time
         send_summary_notification(
             args.country,
             args.account,
             signal_result.report_date,
-            duration,
             old_equity,
             summary_data=signal_result.summary_data,
             header_line=signal_result.header_line,
