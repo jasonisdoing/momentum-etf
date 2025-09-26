@@ -61,7 +61,11 @@ def format_shares(quantity, country: str):
 
 
 # 전략 모듈 임포트
-from logic.jason import generate_daily_signals_for_portfolio, DECISION_CONFIG, COIN_ZERO_THRESHOLD
+from logic.momentum import (
+    generate_daily_signals_for_portfolio,
+    DECISION_CONFIG,
+    COIN_ZERO_THRESHOLD,
+)
 
 try:
     from pykrx import stock as _stock

@@ -8,7 +8,7 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from logic import jason as strategy_module
+from logic import momentum as strategy_module
 from utils.account_registry import (
     get_account_file_settings,
     get_country_file_settings,
@@ -38,7 +38,7 @@ def _print_backtest_summary(
     portfolio_topn: int,
     ticker_summaries: List[Dict[str, Any]],
 ):
-    from logic import jason as settings
+    from logic import momentum as settings
 
     """백테스트 결과 요약을 콘솔에 출력합니다."""
     account_info = get_account_info(account)
@@ -233,7 +233,7 @@ def main(
             # 파일 열기 실패 시, 콘솔 출력은 계속 유지됩니다.
             sys.stdout = original_stdout
 
-    from logic import jason as settings
+    from logic import momentum as settings
 
     # 파일에서 초기 자본금 및 모든 계좌 설정을 가져옵니다.
     try:
@@ -410,8 +410,9 @@ def main(
             run_portfolio_backtest = getattr(strategy_module, "run_portfolio_backtest")
             run_single_ticker_backtest = getattr(strategy_module, "run_single_ticker_backtest")
         except AttributeError:
+            module_name = getattr(strategy_module, "__name__", "알 수 없는 모듈")
             print(
-                "오류: 'logic/jason.py' 모듈에 run_portfolio_backtest 또는 "
+                f"오류: '{module_name}' 모듈에 run_portfolio_backtest 또는 "
                 "run_single_ticker_backtest 함수가 정의되지 않았습니다."
             )
             if log_file:
