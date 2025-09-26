@@ -330,6 +330,19 @@
         ]
     },
     {
+        "category": "글로벌2차전지",
+        "tickers": [
+            {
+                "ticker": "394670",
+                "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)"
+            },
+            {
+                "ticker": "419430",
+                "name": "Kodex 차이나2차전지MSCI(합성)"
+            }
+        ]
+    },
+    {
         "category": "한국조선",
         "tickers": [
             {
@@ -369,10 +382,6 @@
             {
                 "ticker": "372330",
                 "name": "Kodex 차이나항셍테크"
-            },
-            {
-                "ticker": "419430",
-                "name": "Kodex 차이나2차전지MSCI(합성)"
             }
         ]
     },
@@ -466,10 +475,6 @@
             {
                 "ticker": "379810",
                 "name": "Kodex 미국나스닥100"
-            },
-            {
-                "ticker": "394670",
-                "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)"
             },
             {
                 "ticker": "399580",

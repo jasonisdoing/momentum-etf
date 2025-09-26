@@ -693,6 +693,51 @@ def calculate_consecutive_holding_info(
     return holding_info
 
 
+def calculate_trade_cooldown_info(
+    tickers: List[str], country: str, account: str, as_of_date: datetime
+) -> Dict[str, Dict[str, Optional[datetime]]]:
+    """최근 매수/매도 일자를 계산하여 쿨다운 판단에 활용합니다."""
+
+    info = {tkr: {"last_buy": None, "last_sell": None} for tkr in tickers}
+    if not tickers:
+        return info
+
+    db = get_db_connection()
+    if db is None:
+        print("-> 경고: DB에 연결할 수 없어 쿨다운 계산을 건너뜁니다.")
+        return info
+
+    include_until = as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    query = {
+        "country": country,
+        "account": account,
+        "ticker": {"$in": tickers},
+        "date": {"$lte": include_until},
+    }
+
+    trades_cursor = db.trades.find(
+        query,
+        sort=[("date", DESCENDING), ("_id", DESCENDING)],
+    )
+
+    for trade in trades_cursor:
+        ticker = trade.get("ticker")
+        action = (trade.get("action") or "").upper()
+        if ticker not in info:
+            continue
+
+        if action == "BUY" and info[ticker]["last_buy"] is None:
+            info[ticker]["last_buy"] = trade.get("date")
+        elif action == "SELL" and info[ticker]["last_sell"] is None:
+            info[ticker]["last_sell"] = trade.get("date")
+
+        if info[ticker]["last_buy"] and info[ticker]["last_sell"]:
+            continue
+
+    return info
+
+
 def _format_return_for_header(label: str, pct: float, amount: float, formatter: callable) -> str:
     """수익률과 금액을 HTML 색상과 함께 포맷팅합니다."""
     color = "red" if pct > 0 else "blue" if pct < 0 else "black"
@@ -1771,22 +1816,17 @@ def generate_signal_report(
         stop_loss_raw = float(common["HOLDING_STOP_LOSS_PCT"])
         # 양수 입력이 들어오더라도 손절 임계값은 음수로 해석합니다 (예: 10 -> -10).
         stop_loss = -abs(stop_loss_raw)
+        cooldown_days = int(common.get("COOLDOWN_DAYS", 0))
     except (SystemExit, KeyError, ValueError, TypeError) as e:
         print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
         return None
 
     total_cash = float(current_equity) - float(total_holdings_value)
 
-    # 5. 전략 모듈을 사용하여 매매 결정 생성
-    # 공통 설정에서 손절 퍼센트 로드
-    try:
-        common = get_common_file_settings()
-        stop_loss_raw = float(common["HOLDING_STOP_LOSS_PCT"])
-        # 양수 입력이 들어오더라도 손절 임계값은 음수로 해석합니다 (예: 10 -> -10).
-        stop_loss = -abs(stop_loss_raw)
-    except (SystemExit, KeyError, ValueError, TypeError) as e:
-        print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
-        return None
+    all_tickers_for_cooldown: List[str] = sorted({tkr for tkr, _ in pairs}.union(held_tickers))
+    trade_cooldown_info = calculate_trade_cooldown_info(
+        all_tickers_for_cooldown, country, account, label_date
+    )
 
     decisions = generate_daily_signals_for_portfolio(
         country=country,
@@ -1805,6 +1845,8 @@ def generate_signal_report(
         stop_loss=stop_loss,
         COIN_ZERO_THRESHOLD=COIN_ZERO_THRESHOLD,
         DECISION_CONFIG=DECISION_CONFIG,
+        trade_cooldown_info=trade_cooldown_info,
+        cooldown_days=cooldown_days,
     )
 
     # --- need_signal=False 처리 ---

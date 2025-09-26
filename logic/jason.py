@@ -810,6 +810,8 @@ def generate_daily_signals_for_portfolio(
     stop_loss: Optional[float],
     COIN_ZERO_THRESHOLD: float,
     DECISION_CONFIG: Dict[str, Any],
+    trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
+    cooldown_days: int,
 ) -> List[Dict[str, Any]]:
     """
     주어진 데이터를 기반으로 포트폴리오의 일일 매매 신호를 생성합니다.
@@ -850,6 +852,11 @@ def generate_daily_signals_for_portfolio(
             return f"{quantity:,.4f}".rstrip("0").rstrip(".")
         return f"{int(quantity):,d}"
 
+    def _format_cooldown_phrase(action: str, last_dt: Optional[pd.Timestamp]) -> str:
+        if last_dt is None:
+            return f"쿨다운 {cooldown_days}일 대기중"
+        return f"쿨다운 {cooldown_days}일 대기중 ({action} {last_dt.strftime('%Y-%m-%d')})"
+
     # 전략 설정 로드
     try:
         denom = int(portfolio_settings["portfolio_topn"])
@@ -885,6 +892,38 @@ def generate_daily_signals_for_portfolio(
 
     decisions = []
 
+    base_date_norm = base_date.normalize()
+    sell_cooldown_block: Dict[str, Dict[str, Any]] = {}
+    buy_cooldown_block: Dict[str, Dict[str, Any]] = {}
+
+    if cooldown_days and cooldown_days > 0:
+        for tkr, trade_info in (trade_cooldown_info or {}).items():
+            if not isinstance(trade_info, dict):
+                continue
+
+            last_buy = trade_info.get("last_buy")
+            last_sell = trade_info.get("last_sell")
+
+            if last_buy is not None:
+                last_buy_ts = pd.to_datetime(last_buy).normalize()
+                if last_buy_ts <= base_date_norm:
+                    days_since_buy = (base_date_norm - last_buy_ts).days
+                    if days_since_buy < cooldown_days:
+                        sell_cooldown_block[tkr] = {
+                            "last_buy": last_buy_ts,
+                            "days_since": days_since_buy,
+                        }
+
+            if last_sell is not None:
+                last_sell_ts = pd.to_datetime(last_sell).normalize()
+                if last_sell_ts <= base_date_norm:
+                    days_since_sell = (base_date_norm - last_sell_ts).days
+                    if days_since_sell < cooldown_days:
+                        buy_cooldown_block[tkr] = {
+                            "last_sell": last_sell_ts,
+                            "days_since": days_since_sell,
+                        }
+
     for tkr, name in pairs:
         d = data_by_tkr.get(tkr)
 
@@ -915,6 +954,9 @@ def generate_daily_signals_for_portfolio(
         phrase = ""
         if price == 0.0 and is_effectively_held:
             phrase = "가격 데이터 조회 실패"
+
+        sell_block_info = sell_cooldown_block.get(tkr)
+        buy_block_info = buy_cooldown_block.get(tkr)
 
         buy_date = None
         holding_days = 0
@@ -955,10 +997,17 @@ def generate_daily_signals_for_portfolio(
                 tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"
                 phrase = f"{tag} {format_shares(qty)}주 @ {price_formatter(price_ma)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
 
+            if sell_block_info and state in {"SELL_TREND", "CUT_STOPLOSS"}:
+                state = "HOLD"
+                phrase = _format_cooldown_phrase("최근 매수", sell_block_info.get("last_buy"))
+
         elif state == "WAIT":
             buy_signal_days_today = d["filter"]
             if buy_signal_days_today > 0:
                 buy_signal = True
+                if buy_block_info:
+                    buy_signal = False
+                    phrase = _format_cooldown_phrase("최근 매도", buy_block_info.get("last_sell"))
 
         amount = sh * price if pd.notna(price) else 0.0
 
@@ -1004,6 +1053,8 @@ def generate_daily_signals_for_portfolio(
                 "tkr": tkr,
                 "row": current_row,
                 "buy_signal": buy_signal,
+                "sell_cooldown_info": sell_block_info,
+                "buy_cooldown_info": buy_block_info,
             }
         )
 
@@ -1185,6 +1236,16 @@ def generate_daily_signals_for_portfolio(
                             ticker_to_sell = weakest_held["tkr"]
 
                 if ticker_to_sell:
+                    sell_block_for_candidate = sell_cooldown_block.get(ticker_to_sell)
+                    if sell_block_for_candidate and cooldown_days > 0:
+                        blocked_name = (
+                            etf_meta.get(ticker_to_sell, {}).get("name") or ticker_to_sell
+                        )
+                        best_new["state"], best_new["row"][2] = "WAIT", "WAIT"
+                        best_new["row"][-1] = f"쿨다운 {cooldown_days}일 대기중 - {blocked_name}"
+                        best_new["buy_signal"] = False
+                        continue
+
                     # 3. 교체 실행
                     d_weakest = data_by_tkr.get(ticker_to_sell)
                     if d_weakest:
@@ -1249,6 +1310,27 @@ def generate_daily_signals_for_portfolio(
                     current_held_stocks.sort(
                         key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf")
                     )
+
+    SELL_STATE_SET = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_REGIME_FILTER"}
+    BUY_STATE_SET = {"BUY", "BUY_REPLACE"}
+
+    if cooldown_days and cooldown_days > 0:
+        for d in decisions:
+            tkr = d["tkr"]
+            sell_info = sell_cooldown_block.get(tkr)
+            buy_info = buy_cooldown_block.get(tkr)
+
+            if sell_info and d["state"] in SELL_STATE_SET:
+                d["state"] = "HOLD"
+                d["row"][2] = "HOLD"
+                d["row"][-1] = _format_cooldown_phrase("최근 매수", sell_info.get("last_buy"))
+                d["buy_signal"] = False
+
+            if buy_info and d["state"] in BUY_STATE_SET:
+                d["state"] = "WAIT"
+                d["row"][2] = "WAIT"
+                d["row"][-1] = _format_cooldown_phrase("최근 매도", buy_info.get("last_sell"))
+                d["buy_signal"] = False
 
     # --- 최종 필터링: 카테고리별 1등이 아닌 WAIT 종목 제거 ---
     best_wait_by_category = {}
