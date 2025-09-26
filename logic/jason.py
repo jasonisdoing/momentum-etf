@@ -986,7 +986,7 @@ def generate_daily_signals_for_portfolio(
                 state = "CUT_STOPLOSS"
                 qty = sh
                 prof = (price - ac) * qty if ac > 0 else 0.0
-                phrase = f"가격기반손절 {format_shares(qty)}주 @ {price_formatter(price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+                phrase = "가격기반손절"
 
         if state == "HOLD":
             price_ma, ma = d["price"], d["s1"]
@@ -995,7 +995,7 @@ def generate_daily_signals_for_portfolio(
                 qty = sh
                 prof = (price_ma - ac) * qty if ac > 0 else 0.0
                 tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"
-                phrase = f"{tag} {format_shares(qty)}주 @ {price_formatter(price_ma)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+                phrase = tag
 
             if sell_block_info and state in {"SELL_TREND", "CUT_STOPLOSS"}:
                 state = "HOLD"
@@ -1086,7 +1086,7 @@ def generate_daily_signals_for_portfolio(
                         hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
                         prof = (sell_price - avg_cost) * sell_qty
 
-                    sell_phrase = f"시장위험회피 매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'}"
+                    sell_phrase = "시장위험회피 매도"
                     decision["row"][-1] = sell_phrase
 
             if decision.get("buy_signal"):
@@ -1149,9 +1149,7 @@ def generate_daily_signals_for_portfolio(
                             else int(budget // buy_price)
                         )
                         buy_notional = buy_qty * buy_price
-                        cand["row"][
-                            -1
-                        ] = f"신규매수 {format_shares(buy_qty)}주 @ {price_formatter(buy_price)} ({money_formatter(buy_notional)})"
+                        cand["row"][-1] = "신규매수"
                         bought_count += 1
                         # 매수 후, 이 카테고리를 보유 카테고리에 추가하여 다음 후보가 중복 체크할 수 있도록 함
                         if cand_category and cand_category != "TBD":

@@ -181,6 +181,14 @@
                 "ticker": "ASX:MVR",
                 "name": "VanEck Australian Resources ETF",
                 "is_active": true
+            },
+            {
+                "ticker": "ASX:QRE",
+                "name": "BetaShares Australian Resources Sector ETF"
+            },
+            {
+                "ticker": "ASX:OZR",
+                "name": "SPDR S&P/ASX 200 Resources ETF"
             }
         ]
     },
@@ -347,10 +355,6 @@
                 "name": "BetaShares Australian Ex-20 Portfolio Diversifier ETF"
             },
             {
-                "ticker": "ASX:QRE",
-                "name": "BetaShares Australian Resources Sector ETF"
-            },
-            {
                 "ticker": "ASX:WRLD",
                 "name": "Betashares Managed Risk Global Shares Complex ETF"
             },
@@ -365,10 +369,6 @@
             {
                 "ticker": "ASX:MVB",
                 "name": "VanEck Australian Banks ETF"
-            },
-            {
-                "ticker": "ASX:OZR",
-                "name": "SPDR S&P/ASX 200 Resources ETF"
             },
             {
                 "ticker": "ASX:VVLU",

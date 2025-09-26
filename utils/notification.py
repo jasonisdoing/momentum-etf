@@ -418,9 +418,6 @@ def send_detailed_signal_notification(
 
     idx_ticker = headers.index("티커")
     idx_state = headers.index("상태") if "상태" in headers else None
-    idx_price = headers.index("현재가") if "현재가" in headers else None
-    idx_shares = headers.index("보유수량") if "보유수량" in headers else None
-    idx_amount = headers.index("금액") if "금액" in headers else None
     idx_ret = (
         headers.index("누적수익률")
         if "누적수익률" in headers
@@ -440,9 +437,6 @@ def send_detailed_signal_notification(
     display_rows: List[Dict[str, str]] = []
     width_tracker = {
         "name": 0,
-        "price": 0,
-        "shares": 0,
-        "amount": 0,
         "return": 0,
         "score": 0,
     }
@@ -459,24 +453,6 @@ def send_detailed_signal_notification(
             full_name_part = f"{num_part} {name_part}"
 
             state = str(row[idx_state]) if idx_state is not None and idx_state < len(row) else ""
-            price_col = ""
-            if idx_price is not None:
-                price_value = row[idx_price]
-                if isinstance(price_value, (int, float)):
-                    price_col = f"@{int(round(price_value)):,}"
-
-            shares_col = ""
-            if idx_shares is not None:
-                shares_value = row[idx_shares]
-                if isinstance(shares_value, (int, float)) and shares_value > 1e-9:
-                    shares_col = f"{_format_shares_for_country(shares_value, country)}주"
-
-            amount_col = ""
-            if idx_amount is not None:
-                amount_value = row[idx_amount]
-                if isinstance(amount_value, (int, float)) and amount_value > 1e-9:
-                    amount_col = format_kr_money(amount_value)
-
             return_col = ""
             if idx_ret is not None:
                 ret_value = row[idx_ret]
@@ -494,23 +470,25 @@ def send_detailed_signal_notification(
             except (TypeError, ValueError):
                 score_value_float = float("nan")
 
+            note_text = ""
+            if isinstance(row, (list, tuple)) and row:
+                try:
+                    note_text = str(row[-1]).strip()
+                except Exception:
+                    note_text = ""
+
             display_rows.append(
                 {
                     "name": full_name_part,
                     "state": state,
-                    "price": price_col,
-                    "shares": shares_col,
-                    "amount": amount_col,
                     "return": return_col,
                     "score": score_col,
                     "score_value": score_value_float,
+                    "note": note_text,
                 }
             )
 
             width_tracker["name"] = max(width_tracker["name"], len(full_name_part))
-            width_tracker["price"] = max(width_tracker["price"], len(price_col))
-            width_tracker["shares"] = max(width_tracker["shares"], len(shares_col))
-            width_tracker["amount"] = max(width_tracker["amount"], len(amount_col))
             width_tracker["return"] = max(width_tracker["return"], len(return_col))
             width_tracker["score"] = max(width_tracker["score"], len(score_col))
         except Exception:
@@ -563,15 +541,13 @@ def send_detailed_signal_notification(
         show_return_col = state in {"HOLD", "BUY", "BUY_REPLACE"}
         for parts in items:
             name_part = parts["name"].ljust(width_tracker["name"])
-            price_part = parts["price"].ljust(width_tracker["price"])
-            shares_part = parts["shares"].rjust(width_tracker["shares"])
-            amount_part = parts["amount"].rjust(width_tracker["amount"])
             score_part = parts["score"].ljust(width_tracker["score"])
-            return_part = parts["return"].ljust(width_tracker["return"]) if show_return_col else ""
-            line = (
-                f"{name_part}  {price_part} {shares_part} {amount_part}  {return_part} {score_part}"
-            )
-            lines.append(line.rstrip())
+            return_text = parts["return"].ljust(width_tracker["return"]) if show_return_col else ""
+            note_text = parts.get("note", "")
+            line = f"{name_part}  {return_text} {score_part}".rstrip()
+            if note_text:
+                line = f"{line}  {note_text}"
+            lines.append(line)
         lines.append("")
 
     if lines and lines[-1] == "":
