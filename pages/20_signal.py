@@ -159,7 +159,7 @@ def get_cached_signal_report(
     try:
         with st.spinner(f"'{date_str}' 매매 신호를 다시 계산하는 중..."):
             new_report_tuple = generate_signal_report(
-                country, account, date_str, prefetched_data=prefetched_data
+                account, date_str, prefetched_data=prefetched_data
             )
             if new_report_tuple:
                 (

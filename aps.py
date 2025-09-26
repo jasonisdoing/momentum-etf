@@ -110,25 +110,32 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
             send_detailed_signal_notification,
         )
         from utils.db_manager import get_portfolio_snapshot
+        from utils.account_registry import get_account_info
+
+        account_info = get_account_info(account) if account else None
+        derived_country = (
+            str(account_info.get("country") or "").strip() if account_info else country
+        )
+        snapshot_country = derived_country or country
 
         # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
-        old_snapshot = get_portfolio_snapshot(country, account=account)
+        old_snapshot = get_portfolio_snapshot(snapshot_country, account=account)
         old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
-        log_target = f"{country}/{account}"
+        log_target = f"{snapshot_country}/{account}"
         logging.info(f"Running signal generation for {log_target}")
-        if country == "coin":
+        if snapshot_country == "coin":
             _try_sync_bithumb_trades()
 
         # signal.main은 상세 알림을 처리합니다.
-        signal_result = run_signal_main(country, account, date_str=None)
+        signal_result = run_signal_main(account=account, date_str=None)
 
         # 작업이 성공적으로 완료되고 결과를 받아왔을 때만 요약 알림 전송
         if signal_result:
             report_date = signal_result.report_date
             duration = time.time() - start_time
             send_summary_notification(
-                country,
+                snapshot_country,
                 account,
                 report_date,
                 duration,
@@ -139,7 +146,7 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
             )
             time.sleep(2)
             send_detailed_signal_notification(
-                country,
+                snapshot_country,
                 account,
                 signal_result.header_line,
                 signal_result.detail_headers,
@@ -149,7 +156,7 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
                 force_send=True,
             )
             date_str = report_date.strftime("%Y-%m-%d")
-            prefix = f"{country}/{account}" if account else country
+            prefix = f"{snapshot_country}/{account}" if account else snapshot_country
             logging.info(f"[{prefix}/{date_str}] 작업 완료(작업시간: {duration:.1f}초)")
 
     except Exception:
@@ -228,7 +235,7 @@ def main():
 
     # aus
     if _bool_env("SCHEDULE_ENABLE_AUS", True):
-        cron = _get("SCHEDULE_AUS_CRON", "1,11,21,31,41,51 * * * *")
+        cron = _get("SCHEDULE_AUS_CRON", "1,11,21,31,41,51 9-16 * * 1-5")
         tz = _get("SCHEDULE_AUS_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,
@@ -240,7 +247,7 @@ def main():
 
     # kor
     if _bool_env("SCHEDULE_ENABLE_KOR", True):
-        cron = _get("SCHEDULE_KOR_CRON", "1,11,21,31,41,51 * * * *")
+        cron = _get("SCHEDULE_KOR_CRON", "1,11,21,31,41,51 9-16 * * 1-5")
         tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
         scheduler.add_job(
             run_signals_for_country,

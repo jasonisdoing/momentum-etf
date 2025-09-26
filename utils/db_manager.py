@@ -26,14 +26,16 @@ def _get_coin_min_holding_cost() -> float:
     if _coin_min_holding_cost_cache is not None:
         return _coin_min_holding_cost_cache
 
-    threshold = 10000.0  # coin.py 기본값과 동일하게 폴백
+    threshold = 10000.0  # 기본 폴백
     try:
-        from utils.account_registry import get_country_file_settings
+        from utils.account_registry import get_strategy_rules_for_account
 
-        settings = get_country_file_settings("coin")
-        value = settings.get("coin_min_holding_cost_krw")
-        if value is not None:
-            threshold = float(value)
+        primary_account = _get_primary_account_for_country("coin")
+        if primary_account:
+            rules = get_strategy_rules_for_account(primary_account)
+            value = rules.coin_min_holding_cost_krw
+            if value is not None:
+                threshold = float(value)
     except Exception:
         pass
 

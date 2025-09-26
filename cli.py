@@ -4,14 +4,14 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
 이 스크립트는 백테스트, 시그널 조회, 파라미터 튜닝 등
 웹 UI 외부에서 실행되는 주요 기능들의 통합 진입점 역할을 합니다.
 [사용법]
-1. 시그널 조회: python cli.py <국가코드> --signal
-   - 예: python cli.py kor --signal
+1. 시그널 조회: python cli.py <계좌코드> --signal
+   - 예: python cli.py k1 --signal
 
-2. 백테스트 실행: python cli.py <국가코드> --test
-   - 예: python cli.py aus --test
+2. 백테스트 실행: python cli.py <계좌코드> --test
+   - 예: python cli.py a1 --test
 
-3. 파라미터 튜닝: python cli.py <국가코드> --tune
-   - 예: python cli.py kor --tune
+3. 파라미터 튜닝: python cli.py <계좌코드> --tune
+   - 예: python cli.py k1 --tune
 """
 
 """
@@ -22,19 +22,19 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
 # --- 계좌별 기본 명령어 (signal, test, tune) ---
 
 # 한국 (KOR) / m1 계좌
-python cli.py kor --signal --account m1 --date 2025-09-23
-python cli.py kor --test --account m1
-python cli.py kor --tune --account m1
+python cli.py m1 --signal --date 2025-09-23
+python cli.py m1 --test
+python cli.py m1 --tune
 
 # 호주 (AUS) / a1 계좌
-python cli.py aus --signal --account a1
-python cli.py aus --test --account a1
-python cli.py aus --tune --account a1
+python cli.py a1 --signal
+python cli.py a1 --test
+python cli.py a1 --tune
 
 # 가상화폐 (COIN) / b1 계좌
-python cli.py coin --signal --account b1
-python cli.py coin --test --account b1
-python cli.py coin --tune --account b1
+python cli.py b1 --signal
+python cli.py b1 --test
+python cli.py b1 --tune
 
 # --- 특수 목적 명령어 ---
 
@@ -48,7 +48,7 @@ import os
 import subprocess
 import sys
 import time
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from test import TEST_MONTHS_RANGE
 
@@ -59,7 +59,12 @@ import warnings
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
-from utils.account_registry import get_accounts_by_country, load_accounts
+from utils.account_registry import (
+    get_account_info,
+    get_accounts_by_country,
+    get_strategy_rules_for_account,
+    load_accounts,
+)
 
 
 def _resolve_account(country: str, explicit: Optional[str]) -> str:
@@ -79,7 +84,10 @@ def main():
     """CLI 인자를 파싱하여 해당 모듈을 실행합니다."""
     parser = argparse.ArgumentParser(description="MomentumEtf Trading Engine CLI")
     parser.add_argument(
-        "country", choices=["kor", "aus", "coin"], help="실행할 포트폴리오 국가 (kor, aus, coin)"
+        "account",
+        nargs="?",
+        default=None,
+        help="실행할 계좌 코드 (예: k1, a1, b1)",
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -127,37 +135,58 @@ def main():
         help="테스트에 사용할 티커 리스트 (쉼표구분, 예: BTC,ETH,SOL). 미지정 시 DB 목록 사용",
     )
     parser.add_argument(
-        "--account",
+        "--accounts",
         type=str,
         default=None,
-        help="국가 내 특정 계좌 코드 (예: m2, a1). 미지정 시 해당 국가의 모든 활성 계좌에 대해 실행",
+        help="콤마로 구분된 여러 계좌 코드 (예: k1,k2).",
+    )
+    parser.add_argument(
+        "--country",
+        type=str,
+        choices=["kor", "aus", "coin"],
+        help="특정 국가에 속한 모든 활성 계좌를 실행합니다.",
     )
 
     args = parser.parse_args()
-    country = args.country
 
-    # 실행할 계좌 목록을 결정합니다.
-    accounts_to_run = []
+    requested_accounts: List[str] = []
     if args.account:
-        # --account가 지정되면 해당 계좌만 실행합니다.
-        accounts_to_run.append(args.account)
+        requested_accounts.append(args.account)
+
+    if args.accounts:
+        requested_accounts.extend([acc.strip() for acc in args.accounts.split(",") if acc.strip()])
+
+    accounts_to_run: List[str] = []
+    if requested_accounts:
+        accounts_to_run = requested_accounts
     else:
-        # --account가 없으면 해당 국가의 모든 활성 계좌를 가져옵니다.
         load_accounts(force_reload=False)
-        entries = get_accounts_by_country(country) or []
-        for entry in entries:
+        if args.country:
+            candidates = get_accounts_by_country(args.country)
+        else:
+            candidates = load_accounts()
+        for entry in candidates or []:
             if entry.get("is_active", True):
                 code = entry.get("account")
                 if code:
                     accounts_to_run.append(str(code).strip())
 
     if not accounts_to_run:
-        raise SystemExit(
-            f"'{country}' 국가에 실행할 활성 계좌가 없습니다. data/accounts/country_mapping.json을 확인하세요."
-        )
+        raise SystemExit("실행할 활성 계좌를 찾을 수 없습니다. country_mapping.json을 확인하세요.")
 
     # 각 계좌에 대해 요청된 작업을 실행합니다.
+    seen_accounts: Set[str] = set()
     for account in accounts_to_run:
+        if account in seen_accounts:
+            continue
+        seen_accounts.add(account)
+
+        account_info = get_account_info(account)
+        if not account_info:
+            print(f"경고: 등록되지 않은 계좌를 건너뜁니다: {account}")
+            continue
+        country = str(account_info.get("country") or "").strip()
+
         print(f"\n{'=' * 20} [{country.upper()}/{account}] 계좌 작업 시작 {'=' * 20}")
 
         if args.test:
@@ -178,7 +207,6 @@ def main():
             import pandas as pd
 
             from utils.data_loader import fetch_ohlcv_for_tickers
-            from utils.account_registry import get_country_file_settings
             from utils.stock_list_io import get_etfs
 
             etfs_from_file = get_etfs(country)
@@ -193,19 +221,10 @@ def main():
                     print("오류: 지정한 --tickers 가 DB 목록과 일치하지 않습니다.")
                     return
 
-            try:
-                country_settings = get_country_file_settings(country)
-            except SystemExit as e:
-                print(str(e))
-                return
+            strategy_rules = get_strategy_rules_for_account(account)
 
-            try:
-                test_months_range = TEST_MONTHS_RANGE
-                # test.py의 하드코딩된 값 대신 파일에서 실제 MA 기간을 가져옵니다.
-                ma_etf = int(country_settings["ma_period"])
-            except (KeyError, ValueError, TypeError):
-                print("오류: 계좌 설정 파일의 MA 기간 설정이 올바르지 않습니다.")
-                return
+            test_months_range = TEST_MONTHS_RANGE
+            ma_etf = int(strategy_rules.ma_period)
             core_end_dt = pd.Timestamp.now()
             core_start_dt = core_end_dt - pd.DateOffset(months=test_months_range)
             test_date_range = [
@@ -222,11 +241,10 @@ def main():
 
             print("전략에 대한 상세 백테스트를 실행합니다...")
             run_test(
-                country=country,
+                account=account,
                 quiet=False,
                 prefetched_data=prefetched_data,
                 override_settings=override_settings or None,
-                account=account,
             )
 
         elif args.tune_regime:
@@ -236,13 +254,9 @@ def main():
             tune_regime_filter(country=country, account=account)
 
         elif args.tune:
-            print(
-                f"{country.upper()} 포트폴리오의 전략 파라미터 튜닝을 시작합니다"
-                + (f" (계좌: {account})" if account else "")
-                + "..."
-            )
+            print(f"{country.upper()} 포트폴리오의 전략 파라미터 튜닝을 시작합니다" + f" (계좌: {account})...")
             # tune.py를 별도 프로세스로 실행하여 파일 로깅이 정상적으로 동작하도록 합니다.
-            command = [sys.executable, "tune.py", country, "--account", account]
+            command = [sys.executable, "tune.py", account]
             subprocess.run(command, check=True)
 
         elif args.signal:
@@ -300,9 +314,8 @@ def main():
 
                 try:
                     signal_result = run_signal(
-                        country=country,
-                        date_str=date_str,
                         account=account,
+                        date_str=date_str,
                     )
                 except Exception as e:
                     print(f"\n오류: {run_label} 시그널 생성 중 오류가 발생했습니다: {e}")

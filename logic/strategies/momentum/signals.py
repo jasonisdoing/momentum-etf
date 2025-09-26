@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 import pandas as pd
 
@@ -107,6 +107,16 @@ def generate_daily_signals_for_portfolio(
         held_count = sum(1 for v in holdings.values() if float((v or {}).get("shares", 0.0)) > 0)
 
     decisions = []
+
+    from utils.account_registry import get_common_file_settings
+
+    common_settings = get_common_file_settings()
+    locked_map = (
+        common_settings.get("LOCKED_TICKERS_BY_ACCOUNT", {})
+        if isinstance(common_settings, dict)
+        else {}
+    )
+    locked_tickers: Set[str] = locked_map.get((country, account), set())
 
     base_date_norm = base_date.normalize()
     sell_cooldown_block: Dict[str, Dict[str, Any]] = {}
@@ -238,6 +248,19 @@ def generate_daily_signals_for_portfolio(
                     if shortfall_msg:
                         phrase = shortfall_msg
 
+        is_locked = tkr in locked_tickers
+        if is_locked:
+            buy_signal = False
+            lock_msg = "거래 제한"
+            if is_effectively_held:
+                state = "HOLD"
+            else:
+                state = "WAIT"
+            if not phrase:
+                phrase = lock_msg
+            elif lock_msg not in phrase:
+                phrase = f"{phrase}, {lock_msg}"
+
         amount = sh * price if pd.notna(price) else 0.0
 
         # 일간 수익률 계산
@@ -274,6 +297,8 @@ def generate_daily_signals_for_portfolio(
             f"{d['filter']}일" if d.get("filter") is not None else "-",
             phrase,
         ]
+        current_row[2] = state
+
         decisions.append(
             {
                 "state": state,
@@ -284,6 +309,7 @@ def generate_daily_signals_for_portfolio(
                 "buy_signal": buy_signal,
                 "sell_cooldown_info": sell_block_info,
                 "buy_cooldown_info": buy_block_info,
+                "is_locked": is_locked,
             }
         )
 
@@ -299,6 +325,8 @@ def generate_daily_signals_for_portfolio(
 
     if is_risk_off:
         for decision in decisions:
+            if decision.get("is_locked"):
+                continue
             if decision["state"] == "HOLD":
                 decision["state"] = "SELL_REGIME_FILTER"
                 decision["row"][2] = "SELL_REGIME_FILTER"

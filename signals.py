@@ -44,7 +44,8 @@ from utils.stock_list_io import get_etfs
 from utils.account_registry import (
     get_account_file_settings,
     get_common_file_settings,
-    get_country_file_settings,
+    get_account_info,
+    get_strategy_rules_for_account,
 )
 from utils.notification import (
     build_summary_line_from_summary_data,
@@ -65,7 +66,6 @@ from logic.momentum import (
     generate_daily_signals_for_portfolio,
     DECISION_CONFIG,
     COIN_ZERO_THRESHOLD,
-    StrategyRules,
 )
 
 try:
@@ -1489,18 +1489,22 @@ def _get_calculation_message_lines(warnings: List[str]):
 
 
 def generate_signal_report(
-    country: str,
     account: str,
     date_str: Optional[str] = None,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Optional[Tuple[str, List[str], List[List[str]], pd.Timestamp, List[str], Dict[str, Any]]]:
     """지정된 전략에 대한 오늘의 매매 신호를 생성하여 리포트로 반환합니다."""
     logger = get_signal_logger()
-
-    from utils.account_registry import get_account_info
-
     account_info = get_account_info(account)
-    need_signal = account_info.get("need_signal", True) if account_info else True
+    if not account_info:
+        raise ValueError(f"등록되지 않은 계좌입니다: {account}")
+
+    country = str(account_info.get("country") or "").strip()
+    if not country:
+        raise ValueError(f"'{account}' 계좌에 국가 정보가 없습니다.")
+
+    need_signal = account_info.get("need_signal", True)
+    strategy_rules = get_strategy_rules_for_account(account)
 
     # 1. 대상 날짜 결정
     if date_str:
@@ -1521,10 +1525,10 @@ def generate_signal_report(
 
     # 2. 설정을 파일에서 가져옵니다.
     try:
-        # 국가별 전략 파라미터와 계좌별 설정을 모두 로드하여 병합합니다.
         account_settings = get_account_file_settings(account)
-        country_settings = get_country_file_settings(country)
-        portfolio_settings = {**account_settings, **country_settings}
+        strategy_dict = strategy_rules.to_dict()
+        portfolio_settings = {**account_settings, **strategy_dict}
+        portfolio_settings["country"] = country
     except SystemExit as e:
         print(str(e))
         return None
@@ -1821,16 +1825,6 @@ def generate_signal_report(
         all_tickers_for_cooldown, country, account, label_date
     )
 
-    strategy_rules: StrategyRules = country_settings.get("strategy_rules")
-    if not isinstance(strategy_rules, StrategyRules):
-        strategy_rules = StrategyRules.from_values(
-            ma_period=country_settings.get("ma_period"),
-            portfolio_topn=country_settings.get("portfolio_topn"),
-            replace_weaker_stock=country_settings.get("replace_weaker_stock"),
-            replace_threshold=country_settings.get("replace_threshold"),
-            min_buy_score=country_settings.get("min_buy_score"),
-        )
-
     decisions = generate_daily_signals_for_portfolio(
         country=country,
         account=account,
@@ -2029,15 +2023,22 @@ def generate_signal_report(
 
 
 def main(
-    country: str = "kor",
-    account: str = "",
+    account: str,
     date_str: Optional[str] = None,
 ) -> Optional[SignalExecutionResult]:
     """CLI에서 오늘의 매매 신호를 실행하고 결과를 출력/저장합니다."""
     if not account:
         raise ValueError("account is required for signal generation")
 
-    result = generate_signal_report(country, account, date_str)
+    account_info = get_account_info(account)
+    if not account_info:
+        raise ValueError(f"등록되지 않은 계좌입니다: {account}")
+
+    country = str(account_info.get("country") or "").strip()
+    if not country:
+        raise ValueError(f"'{account}' 계좌에 국가 정보가 없습니다.")
+
+    result = generate_signal_report(account, date_str)
 
     if result:
         (
@@ -2202,8 +2203,7 @@ def _is_trading_day(country: str, a_date: Optional[datetime] = None) -> bool:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="포트폴리오 매매 신호를 계산합니다.")
-    parser.add_argument("country", choices=["kor", "aus", "coin"], help="국가 코드")
-    parser.add_argument("--account", required=True, help="계좌 코드 (예: m1, a1, b1)")
+    parser.add_argument("account", help="계좌 코드 (예: m1, a1, b1)")
     parser.add_argument("--date", default=None, help="기준 날짜 (YYYY-MM-DD). 미지정 시 자동 결정")
     args = parser.parse_args()
 
@@ -2211,12 +2211,18 @@ if __name__ == "__main__":
 
     start_time = time.time()
 
+    account_info = get_account_info(args.account)
+    if not account_info:
+        raise SystemExit(f"등록되지 않은 계좌입니다: {args.account}")
+    country = str(account_info.get("country") or "").strip()
+    if not country:
+        raise SystemExit(f"'{args.account}' 계좌에 국가 정보가 없습니다.")
+
     # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
-    old_snapshot = get_portfolio_snapshot(args.country, account=args.account)
+    old_snapshot = get_portfolio_snapshot(country, account=args.account)
     old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
     signal_result = main(
-        country=args.country,
         account=args.account,
         date_str=args.date,
     )
@@ -2225,7 +2231,7 @@ if __name__ == "__main__":
     if signal_result:
         duration = time.time() - start_time
         send_summary_notification(
-            args.country,
+            country,
             args.account,
             signal_result.report_date,
             duration,
@@ -2238,7 +2244,7 @@ if __name__ == "__main__":
         from utils.notification import send_detailed_signal_notification
 
         send_detailed_signal_notification(
-            args.country,
+            country,
             args.account,
             signal_result.header_line,
             signal_result.detail_headers,

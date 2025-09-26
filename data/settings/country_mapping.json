@@ -1,64 +1,5 @@
 [
     {
-        "country": "kor",
-        "account": "m1",
-        "display_name": "매리츠1",
-        "order": 1,
-        "benchmarks_tickers": [
-            {
-                "ticker": "379800",
-                "name": "KODEX 미국S&P500"
-            },
-            {
-                "ticker": "426030",
-                "name": "TIMEFOLIO 미국나스닥100액티브"
-            }
-        ],
-        "currency": "KRW",
-        "amt_precision": 0,
-        "qty_precision": 0,
-        "need_signal": true,
-        "is_active": true
-    },
-    {
-        "country": "kor",
-        "account": "m2",
-        "display_name": "매리츠2",
-        "order": 2,
-        "benchmarks_tickers": [
-            {
-                "ticker": "379800",
-                "name": "KODEX 미국S&P500"
-            },
-            {
-                "ticker": "426030",
-                "name": "TIMEFOLIO 미국나스닥100액티브"
-            }
-        ],
-        "currency": "KRW",
-        "amt_precision": 0,
-        "qty_precision": 0,
-        "need_signal": false,
-        "is_active": true
-    },
-    {
-        "country": "aus",
-        "account": "a1",
-        "order": 10,
-        "display_name": "호주연금",
-        "benchmarks_tickers": [
-            {
-                "ticker": "IVV.AX",
-                "name": "iShares S&P 500 (AUD)"
-            }
-        ],
-        "currency": "AUD",
-        "amt_precision": 4,
-        "qty_precision": 0,
-        "need_signal": true,
-        "is_active": true
-    },
-    {
         "country": "coin",
         "account": "b1",
         "order": 9,
@@ -77,11 +18,107 @@
                 "name": "이더리움"
             }
         ],
-        "currency": "KRW",
-        "amt_precision": 0,
-        "qty_precision": 8,
         "need_signal": true,
-        "is_active": true
+        "is_active": true,
+        "strategy": {
+            "MA_PERIOD": 2,
+            "PORTFOLIO_TOPN": 2,
+            "REPLACE_WEAKER_STOCK": true,
+            "REPLACE_SCORE_THRESHOLD": 0.5,
+            "MIN_BUY_SCORE": 0.2,
+            "COIN_MIN_HOLDING_COST_KRW": 10000
+        },
+        "precision": {
+            "currency": "KRW",
+            "amt_precision": 0,
+            "qty_precision": 8
+        }
+    },
+    {
+        "country": "aus",
+        "account": "a1",
+        "order": 10,
+        "display_name": "호주연금",
+        "benchmarks_tickers": [
+            {
+                "ticker": "IVV.AX",
+                "name": "iShares S&P 500 (AUD)"
+            }
+        ],
+        "need_signal": true,
+        "is_active": true,
+        "strategy": {
+            "MA_PERIOD": 15,
+            "PORTFOLIO_TOPN": 7,
+            "REPLACE_WEAKER_STOCK": true,
+            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "MIN_BUY_SCORE": 0.0
+        },
+        "precision": {
+            "currency": "AUD",
+            "amt_precision": 4,
+            "qty_precision": 0
+        }
+    },
+    {
+        "country": "kor",
+        "account": "m1",
+        "display_name": "매리츠1",
+        "order": 1,
+        "benchmarks_tickers": [
+            {
+                "ticker": "379800",
+                "name": "KODEX 미국S&P500"
+            },
+            {
+                "ticker": "426030",
+                "name": "TIMEFOLIO 미국나스닥100액티브"
+            }
+        ],
+        "need_signal": true,
+        "is_active": true,
+        "strategy": {
+            "MA_PERIOD": 15,
+            "PORTFOLIO_TOPN": 10,
+            "REPLACE_WEAKER_STOCK": true,
+            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "MIN_BUY_SCORE": 0.0
+        },
+        "precision": {
+            "currency": "KRW",
+            "amt_precision": 0,
+            "qty_precision": 0
+        }
+    },
+    {
+        "country": "kor",
+        "account": "m2",
+        "display_name": "매리츠2",
+        "order": 2,
+        "benchmarks_tickers": [
+            {
+                "ticker": "379800",
+                "name": "KODEX 미국S&P500"
+            },
+            {
+                "ticker": "426030",
+                "name": "TIMEFOLIO 미국나스닥100액티브"
+            }
+        ],
+        "need_signal": true,
+        "is_active": true,
+        "strategy": {
+            "MA_PERIOD": 15,
+            "PORTFOLIO_TOPN": 10,
+            "REPLACE_WEAKER_STOCK": true,
+            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "MIN_BUY_SCORE": 0.0
+        },
+        "precision": {
+            "currency": "KRW",
+            "amt_precision": 0,
+            "qty_precision": 0
+        }
     },
     {
         "country": "kor",
@@ -98,11 +135,20 @@
                 "name": "TIMEFOLIO 미국나스닥100액티브"
             }
         ],
-        "currency": "KRW",
-        "amt_precision": 0,
-        "qty_precision": 0,
-        "need_signal": false,
-        "is_active": true
+        "need_signal": true,
+        "is_active": true,
+        "strategy": {
+            "MA_PERIOD": 15,
+            "PORTFOLIO_TOPN": 2,
+            "REPLACE_WEAKER_STOCK": true,
+            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "MIN_BUY_SCORE": 0.0
+        },
+        "precision": {
+            "currency": "KRW",
+            "amt_precision": 0,
+            "qty_precision": 0
+        }
     },
     {
         "country": "kor",
@@ -119,11 +165,20 @@
                 "name": "TIMEFOLIO 미국나스닥100액티브"
             }
         ],
-        "currency": "KRW",
-        "amt_precision": 0,
-        "qty_precision": 0,
         "need_signal": false,
-        "is_active": true
+        "is_active": true,
+        "strategy": {
+            "MA_PERIOD": 15,
+            "PORTFOLIO_TOPN": 2,
+            "REPLACE_WEAKER_STOCK": true,
+            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "MIN_BUY_SCORE": 0.0
+        },
+        "precision": {
+            "currency": "KRW",
+            "amt_precision": 0,
+            "qty_precision": 0
+        }
     },
     {
         "country": "kor",
@@ -140,11 +195,20 @@
                 "name": "TIMEFOLIO 미국나스닥100액티브"
             }
         ],
-        "currency": "KRW",
-        "amt_precision": 0,
-        "qty_precision": 0,
         "need_signal": false,
-        "is_active": true
+        "is_active": true,
+        "strategy": {
+            "MA_PERIOD": 15,
+            "PORTFOLIO_TOPN": 2,
+            "REPLACE_WEAKER_STOCK": true,
+            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "MIN_BUY_SCORE": 0.0
+        },
+        "precision": {
+            "currency": "KRW",
+            "amt_precision": 0,
+            "qty_precision": 0
+        }
     },
     {
         "country": "kor",
@@ -161,10 +225,19 @@
                 "name": "TIMEFOLIO 미국나스닥100액티브"
             }
         ],
-        "currency": "KRW",
-        "amt_precision": 0,
-        "qty_precision": 0,
         "need_signal": false,
-        "is_active": true
+        "is_active": true,
+        "strategy": {
+            "MA_PERIOD": 15,
+            "PORTFOLIO_TOPN": 2,
+            "REPLACE_WEAKER_STOCK": true,
+            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "MIN_BUY_SCORE": 0.0
+        },
+        "precision": {
+            "currency": "KRW",
+            "amt_precision": 0,
+            "qty_precision": 0
+        }
     }
 ]

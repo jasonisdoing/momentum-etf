@@ -11,9 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logic import momentum as strategy_module
 from utils.account_registry import (
     get_account_file_settings,
-    get_country_file_settings,
     get_common_file_settings,
     get_account_info,
+    get_strategy_rules_for_account,
 )
 from utils.tee import Tee
 from utils.report import (
@@ -202,11 +202,10 @@ def _print_backtest_summary(
 
 
 def main(
-    country: str = "kor",
+    account: str,
     quiet: bool = False,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     override_settings: Optional[Dict] = None,
-    account: str = "",
 ):
     """
     지정된 전략에 대한 백테스트를 실행하고 결과를 요약합니다.
@@ -214,6 +213,13 @@ def main(
     """
     if not account:
         raise ValueError("account is required for backtest execution")
+
+    account_info = get_account_info(account)
+    if not account_info:
+        raise ValueError(f"등록되지 않은 계좌입니다: {account}")
+    country = str(account_info.get("country") or "").strip()
+    if not country:
+        raise ValueError(f"'{account}' 계좌에 국가 정보가 없습니다.")
 
     # --- 로그 파일 설정 ---
     # quiet 모드가 아닐 때만 파일 로깅을 설정합니다.
@@ -238,10 +244,9 @@ def main(
     # 파일에서 초기 자본금 및 모든 계좌 설정을 가져옵니다.
     try:
         account_settings = get_account_file_settings(account)
-        country_settings = get_country_file_settings(country)
+        strategy_rules = get_strategy_rules_for_account(account)
 
         initial_capital_krw = account_settings["initial_capital_krw"]
-        account_info = get_account_info(account)
         currency = account_info.get("currency", "KRW")
 
         # 호주 계좌의 경우, KRW로 설정된 초기 자본금을 AUD로 변환합니다.
@@ -256,11 +261,11 @@ def main(
                     log_file.close()
                 return
 
-        settings.MA_PERIOD = country_settings["ma_period"]
-        portfolio_topn = country_settings["portfolio_topn"]
-        settings.REPLACE_SCORE_THRESHOLD = country_settings["replace_threshold"]
-        settings.REPLACE_WEAKER_STOCK = country_settings["replace_weaker_stock"]
-        min_buy_score = country_settings.get("min_buy_score", 0.0)
+        settings.MA_PERIOD = strategy_rules.ma_period
+        portfolio_topn = strategy_rules.portfolio_topn
+        settings.REPLACE_SCORE_THRESHOLD = strategy_rules.replace_threshold
+        settings.REPLACE_WEAKER_STOCK = strategy_rules.replace_weaker_stock
+        min_buy_score = strategy_rules.min_buy_score or 0.0
     except SystemExit as e:
         print(str(e))
         if log_file:
@@ -297,7 +302,6 @@ def main(
             log_file.close()
         return None
 
-    account_info = get_account_info(account)
     currency = account_info.get("currency", "KRW")
     precision = account_info.get("precision", 0)
 
