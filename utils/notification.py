@@ -7,6 +7,8 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import math
+
 import requests
 import settings as global_settings
 
@@ -322,7 +324,7 @@ def send_summary_notification(
     money_formatter = format_kr_money
     app_tag = getattr(global_settings, "APP_TYPE", "APP")
     app_prefix = app_tag if app_tag.startswith("[") and app_tag.endswith("]") else f"[{app_tag}]"
-    summary_prefix = f"{app_prefix} [{country}/{account}]"
+    summary_prefix = f"{app_prefix}[{country}/{account}]"
 
     if summary_data:
         new_equity = float(summary_data.get("total_equity", new_equity) or 0.0)
@@ -487,6 +489,11 @@ def send_detailed_signal_notification(
                 if isinstance(score_value, (int, float)):
                     score_col = f"점수 {float(score_value):.1f}"
 
+            try:
+                score_value_float = float(score_value)
+            except (TypeError, ValueError):
+                score_value_float = float("nan")
+
             display_rows.append(
                 {
                     "name": full_name_part,
@@ -496,6 +503,7 @@ def send_detailed_signal_notification(
                     "amount": amount_col,
                     "return": return_col,
                     "score": score_col,
+                    "score_value": score_value_float,
                 }
             )
 
@@ -517,6 +525,23 @@ def send_detailed_signal_notification(
         grouped.items(),
         key=lambda item: decision_config.get(item[0], {"order": 99}).get("order", 99),
     ):
+        trimmed_suffix = ""
+        if state == "WAIT" and items:
+
+            def _score_value(part):
+                val = part.get("score_value")
+                if isinstance(val, float) and math.isnan(val):
+                    return float("-inf")
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    return float("-inf")
+
+            items = sorted(items, key=_score_value, reverse=True)
+            if len(items) > 10:
+                items = items[:10]
+                trimmed_suffix = " (TOP 10)"
+
         config = decision_config.get(state)
         if not config:
             display_name = f"<{state}>({state})"
@@ -525,10 +550,16 @@ def send_detailed_signal_notification(
             display_name = f"{config['display_name']}({state})"
             show_slack = config.get("show_slack", True)
 
+        if state == "WAIT":
+            show_slack = True
+
         if not show_slack:
             continue
 
-        lines.append(display_name)
+        if not items:
+            continue
+
+        lines.append(display_name + trimmed_suffix)
         show_return_col = state in {"HOLD", "BUY", "BUY_REPLACE"}
         for parts in items:
             name_part = parts["name"].ljust(width_tracker["name"])
