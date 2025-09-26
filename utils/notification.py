@@ -127,14 +127,14 @@ def get_last_error() -> Optional[str]:
 def send_log_to_slack(message: str):
     webhook_url = os.environ.get("LOGS_SLACK_WEBHOOK")
     if webhook_url:
-        log_message = f"📜 *[{global_settings.APP_TYPE}]* {message}"
+        log_message = f"📜 *[{global_settings.APP_TYPE}]*{message}"
         send_slack_message(log_message, webhook_url=webhook_url, webhook_name="LOGS_SLACK_WEBHOOK")
 
 
 def send_verbose_log_to_slack(message: str):
     webhook_url = os.environ.get("VERBOSE_LOGS_SLACK_WEBHOOK")
     if webhook_url:
-        log_message = f"📜 *[{global_settings.APP_TYPE}]* {message}"
+        log_message = f"📜 *[{global_settings.APP_TYPE}]*{message}"
         send_slack_message(
             log_message, webhook_url=webhook_url, webhook_name="VERBOSE_LOGS_SLACK_WEBHOOK"
         )
