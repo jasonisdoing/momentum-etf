@@ -118,12 +118,21 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
             _try_sync_bithumb_trades()
 
         # signal.main은 상세 알림을 처리합니다.
-        report_date = run_signal_main(country, account, date_str=None)
+        signal_result = run_signal_main(country, account, date_str=None)
 
-        # 작업이 성공적으로 완료되고 날짜를 받아왔을 때만 요약 알림 전송
-        if report_date:
+        # 작업이 성공적으로 완료되고 결과를 받아왔을 때만 요약 알림 전송
+        if signal_result:
+            report_date = signal_result.report_date
             duration = time.time() - start_time
-            send_summary_notification(country, account, report_date, duration, old_equity)
+            send_summary_notification(
+                country,
+                account,
+                report_date,
+                duration,
+                old_equity,
+                summary_data=signal_result.summary_data,
+                header_line=signal_result.header_line,
+            )
             date_str = report_date.strftime("%Y-%m-%d")
             prefix = f"{country}/{account}" if account else country
             logging.info(f"[{prefix}/{date_str}] 작업 완료(작업시간: {duration:.1f}초)")

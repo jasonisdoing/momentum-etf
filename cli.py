@@ -295,19 +295,21 @@ def main():
                 old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
 
                 try:
-                    report_date = run_signal(country=country, date_str=date_str, account=account)
+                    signal_result = run_signal(country=country, date_str=date_str, account=account)
                 except Exception as e:
                     print(f"\n오류: {run_label} 시그널 생성 중 오류가 발생했습니다: {e}")
                     continue
 
-                if report_date:
+                if signal_result:
                     duration = time.time() - start_time
                     send_summary_notification(
                         country,
                         account,
-                        report_date,
+                        signal_result.report_date,
                         duration,
                         old_equity,
+                        summary_data=signal_result.summary_data,
+                        header_line=signal_result.header_line,
                         force_send=True,
                     )
 
