@@ -23,6 +23,7 @@ from utils.account_registry import (
     get_account_file_settings,
     get_account_info,
 )
+from utils.schedule_config import get_country_schedule
 from utils.data_loader import get_aud_to_krw_rate
 from utils.db_manager import get_portfolio_snapshot
 from utils.report import format_kr_money
@@ -66,15 +67,22 @@ def should_notify_on_schedule(country: str) -> bool:
 
     notify_cron_env = f"NOTIFY_{country.upper()}_CRON"
     cron_schedule = os.environ.get(notify_cron_env)
+    config = get_country_schedule(country)
     if cron_schedule is None:
-        cron_schedule = getattr(global_settings, notify_cron_env, None)
+        cron_schedule = config.get("notify_cron")
 
     if not cron_schedule:
         return True
 
     tz_env = f"SCHEDULE_{country.upper()}_TZ"
-    default_tz = {"kor": "Asia/Seoul", "aus": "Australia/Sydney", "coin": "Asia/Seoul"}.get(
-        country, "Asia/Seoul"
+    default_tz = (
+        config.get("notify_timezone")
+        or config.get("timezone")
+        or {
+            "kor": "Asia/Seoul",
+            "aus": "Australia/Sydney",
+            "coin": "Asia/Seoul",
+        }.get(country, "Asia/Seoul")
     )
     tz_str = os.environ.get(tz_env, default_tz)
 

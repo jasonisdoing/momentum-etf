@@ -30,6 +30,11 @@ from apscheduler.triggers.cron import CronTrigger
 from utils.data_updater import update_etf_names
 from utils.env import load_env_if_present
 from utils.account_registry import get_accounts_by_country, load_accounts
+from utils.schedule_config import (
+    get_all_country_schedules,
+    get_cache_schedule,
+    get_global_schedule_settings,
+)
 
 
 def setup_logging():
@@ -142,7 +147,6 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
                 old_equity,
                 summary_data=signal_result.summary_data,
                 header_line=signal_result.header_line,
-                force_send=True,
             )
             time.sleep(2)
             send_detailed_signal_notification(
@@ -153,7 +157,6 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
                 signal_result.detail_rows,
                 decision_config=signal_result.decision_config,
                 extra_lines=signal_result.detail_extra_lines,
-                force_send=True,
             )
             date_str = report_date.strftime("%Y-%m-%d")
             prefix = f"{snapshot_country}/{account}" if account else snapshot_country
@@ -220,46 +223,34 @@ def main():
         logging.error(f"Failed to update stock names: {e}", exc_info=True)
 
     scheduler = BlockingScheduler()
+    # 1. signal_cron 와 notify_cron 이 겹치는 경우: 작업도 실행되고, 슬랙도 발송
+    # 2. python cli.py --signal 로 실행되는 경우: 작업도 실행되고, 슬랙도 발송
+    # 3. signal_cron 에는 해당되지만 notify_cron 에 해당 안되는 경우: 작업은 실행되고, 슬랙은 발송안됨
+    cron_default = "0 0 * * *"
+    tz_default = "Asia/Seoul"
+    country_schedules = get_all_country_schedules()
+    for country, cfg in country_schedules.items():
+        enabled_default = bool(cfg.get("enabled", True))
+        if not _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", enabled_default):
+            logging.info(f"Skipping {country.upper()} schedule (disabled)")
+            continue
 
-    # coin
-    if _bool_env("SCHEDULE_ENABLE_COIN", True):
-        cron = _get("SCHEDULE_COIN_CRON", "1,11,21,31,41,51 * * * *")
-        tz = _get("SCHEDULE_COIN_TZ", "Asia/Seoul")
+        cron_expr = _get(f"SCHEDULE_{country.upper()}_CRON", cron_default)
+        timezone = _get(f"SCHEDULE_{country.upper()}_TZ", tz_default)
+
         scheduler.add_job(
             run_signals_for_country,
-            CronTrigger.from_crontab(cron, timezone=tz),
-            args=["coin"],
-            id="coin",
+            CronTrigger.from_crontab(cron_expr, timezone=timezone),
+            args=[country],
+            id=country,
         )
-        logging.info(f"Scheduled COIN: cron='{cron}' tz='{tz}'")
+        logging.info(f"Scheduled {country.upper()}: cron='{cron_expr}' tz='{timezone}'")
 
-    # aus
-    if _bool_env("SCHEDULE_ENABLE_AUS", True):
-        cron = _get("SCHEDULE_AUS_CRON", "1,11,21,31,41,51 9-16 * * 1-5")
-        tz = _get("SCHEDULE_AUS_TZ", "Asia/Seoul")
-        scheduler.add_job(
-            run_signals_for_country,
-            CronTrigger.from_crontab(cron, timezone=tz),
-            args=["aus"],
-            id="aus",
-        )
-        logging.info(f"Scheduled AUS: cron='{cron}' tz='{tz}'")
-
-    # kor
-    if _bool_env("SCHEDULE_ENABLE_KOR", True):
-        cron = _get("SCHEDULE_KOR_CRON", "1,11,21,31,41,51 9-16 * * 1-5")
-        tz = _get("SCHEDULE_KOR_TZ", "Asia/Seoul")
-        scheduler.add_job(
-            run_signals_for_country,
-            CronTrigger.from_crontab(cron, timezone=tz),
-            args=["kor"],
-            id="kor",
-        )
-        logging.info(f"Scheduled KOR: cron='{cron}' tz='{tz}'")
-
-    if _bool_env("SCHEDULE_ENABLE_CACHE", True):
-        cache_cron = _get("SCHEDULE_CACHE_CRON", "30 3 * * *")
-        cache_tz = _get("SCHEDULE_CACHE_TZ", "Asia/Seoul")
+    cache_cfg = get_cache_schedule()
+    cache_enabled_default = bool(cache_cfg.get("enabled", True))
+    if _bool_env("SCHEDULE_ENABLE_CACHE", cache_enabled_default):
+        cache_cron = _get("SCHEDULE_CACHE_CRON", cache_cfg.get("cron"))
+        cache_tz = _get("SCHEDULE_CACHE_TZ", cache_cfg.get("timezone", tz_default))
         scheduler.add_job(
             run_cache_refresh,
             CronTrigger.from_crontab(cache_cron, timezone=cache_tz),
@@ -267,15 +258,20 @@ def main():
         )
         logging.info(f"Scheduled CACHE: cron='{cache_cron}' tz='{cache_tz}'")
 
-    # 시작 시 한 번 즉시 실행
-    logging.info("\n[Initial Run] Starting...")
-    for country in ("coin", "aus", "kor"):
-        try:
-            if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", True):
-                run_signals_for_country(country)
-        except Exception:
-            logging.error(f"Error during initial run for {country}", exc_info=True)
-    logging.info("[Initial Run] Complete.")
+    global_schedule = get_global_schedule_settings()
+    run_initial_default = bool(global_schedule.get("run_immediately_on_start", True))
+    if _bool_env("RUN_IMMEDIATELY_ON_START", run_initial_default):
+        logging.info("\n[Initial Run] Starting...")
+        for country, cfg in country_schedules.items():
+            try:
+                enabled_default = bool(cfg.get("enabled", True))
+                if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", enabled_default):
+                    run_signals_for_country(country)
+            except Exception:
+                logging.error(f"Error during initial run for {country}", exc_info=True)
+        logging.info("[Initial Run] Complete.")
+    else:
+        logging.info("Initial run skipped (RUN_IMMEDIATELY_ON_START=0)")
 
     # 다음 실행 시간 출력
     jobs = scheduler.get_jobs()
