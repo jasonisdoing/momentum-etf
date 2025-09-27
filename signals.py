@@ -165,6 +165,7 @@ class SignalReportData:
     full_etf_meta: Dict
     etf_meta: Dict
     failed_tickers_info: Dict
+    realtime_prices: Dict[str, Optional[float]]
 
 
 @dataclass
@@ -1183,6 +1184,7 @@ def _fetch_and_prepare_data(
         full_etf_meta=etf_meta,
         etf_meta=etf_meta,
         failed_tickers_info=failed_tickers_info,
+        realtime_prices=realtime_prices,
     )
 
 
@@ -1262,6 +1264,83 @@ def _normalize_holdings(raw_items: List[Dict[str, Any]]) -> Dict[str, Dict[str, 
             "avg_cost": float(item.get("avg_cost", 0.0) or 0.0),
         }
     return normalized
+
+
+def _apply_live_balance_to_holdings(
+    portfolio_data: Dict[str, Any],
+    balance: Dict[str, Any],
+    universe_pairs: List[Tuple[str, str]],
+) -> Dict[str, float]:
+    """실시간 잔고 데이터로 보유 수량을 덮어쓰고, 티커별 최신 수량을 반환한다."""
+
+    def _parse_balance(value: Any) -> float:
+        try:
+            return float(str(value).replace(",", ""))
+        except (TypeError, ValueError):
+            return 0.0
+
+    # 기존 보유 데이터를 티커 기준으로 맵핑한다.
+    holdings_list = list(portfolio_data.get("holdings") or [])
+    holdings_by_ticker: Dict[str, Dict[str, Any]] = {}
+    live_share_map: Dict[str, float] = {}
+
+    for entry in holdings_list:
+        ticker = str(entry.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        holdings_by_ticker[ticker] = entry
+
+    name_lookup = {str(t).upper(): n for t, n in universe_pairs}
+
+    seen: set[str] = set()
+    updated_holdings: List[Dict[str, Any]] = []
+
+    # 1) 기존 보유 종목을 실시간 잔고 기준으로 갱신
+    for ticker, entry in holdings_by_ticker.items():
+        live_key_upper = f"total_{ticker.upper()}"
+        live_key_lower = f"total_{ticker.lower()}"
+        live_amount = 0.0
+        if live_key_upper in balance:
+            live_amount = _parse_balance(balance[live_key_upper])
+        elif live_key_lower in balance:
+            live_amount = _parse_balance(balance[live_key_lower])
+
+        if live_amount <= COIN_ZERO_THRESHOLD:
+            live_amount = 0.0
+
+        entry = dict(entry)
+        entry["shares"] = live_amount
+        updated_holdings.append(entry)
+        seen.add(ticker.upper())
+        live_share_map[ticker.upper()] = live_amount
+
+    # 2) 실시간 잔고에만 존재하는 신규 코인 처리
+    for key, value in balance.items():
+        if not isinstance(key, str) or not key.lower().startswith("total_"):
+            continue
+        symbol = key.split("_", 1)[-1].upper()
+        if symbol in {"KRW", "P"}:
+            continue
+        if symbol in seen:
+            continue
+
+        live_amount = _parse_balance(value)
+        if live_amount <= COIN_ZERO_THRESHOLD:
+            continue
+
+        updated_holdings.append(
+            {
+                "ticker": symbol,
+                "name": name_lookup.get(symbol, symbol),
+                "shares": live_amount,
+                "avg_cost": 0.0,
+            }
+        )
+        seen.add(symbol)
+        live_share_map[symbol] = live_amount
+
+    portfolio_data["holdings"] = updated_holdings
+    return live_share_map
 
 
 def _calculate_portfolio_summary(
@@ -1553,6 +1632,7 @@ def generate_signal_report(
     etf_meta = result.etf_meta
     full_etf_meta = result.full_etf_meta
     failed_tickers_info = result.failed_tickers_info
+    realtime_prices = result.realtime_prices or {}
 
     logger.info(
         "[%s] decision build starting: pairs=%d, successes=%d, failures=%d",
@@ -1620,9 +1700,66 @@ def generate_signal_report(
 
             bal = fetch_bithumb_balance_dict()
             if bal:
-                krw_balance = bal.get("total_krw", 0.0)
-                p_balance = bal.get("total_P", 0.0)
-                new_equity_candidate += krw_balance + p_balance
+                krw_balance = float(bal.get("total_krw", 0.0) or 0.0)
+                p_balance = float(bal.get("total_P", 0.0) or 0.0)
+
+                live_share_map: Dict[str, float] = {}
+                try:
+                    live_share_map = _apply_live_balance_to_holdings(portfolio_data, bal, pairs)
+                except Exception as exc:
+                    logger.warning(
+                        "[%s/%s] Failed to apply live balance to holdings: %s",
+                        country.upper(),
+                        account,
+                        exc,
+                    )
+                    live_share_map = {}
+
+                # holdings 기반 지표(data_by_tkr)도 실시간 수량으로 맞춘다.
+                if live_share_map:
+                    for ticker_upper, shares in live_share_map.items():
+                        # data_by_tkr 키는 원래 티커 문자열을 그대로 사용한다.
+                        entry = data_by_tkr.get(ticker_upper)
+                        if entry is None and ticker_upper.lower() in data_by_tkr:
+                            entry = data_by_tkr.get(ticker_upper.lower())
+                        if entry is None and ticker_upper.upper() in data_by_tkr:
+                            entry = data_by_tkr.get(ticker_upper.upper())
+
+                        if entry is not None:
+                            entry["shares"] = shares
+                        else:
+                            # universe에 없던 신규 코인은 실시간 가격이 있다면 반영
+                            price = realtime_prices.get(ticker_upper)
+                            if price is None:
+                                from utils.data_loader import fetch_bithumb_realtime_price
+
+                                price = fetch_bithumb_realtime_price(ticker_upper)
+                            if price and price > 0:
+                                data_by_tkr[ticker_upper] = {
+                                    "price": price,
+                                    "prev_close": price,
+                                    "s1": 0.0,
+                                    "s2": 0.0,
+                                    "score": 0.0,
+                                    "filter": 0,
+                                    "shares": shares,
+                                    "avg_cost": 0.0,
+                                    "df": pd.DataFrame([{"Close": price}], index=[base_date]),
+                                }
+
+                    # 실시간 수량이 반영된 뒤 보유 자산 가치를 재계산한다.
+                    total_holdings_value = sum(
+                        max(0.0, float(entry.get("shares", 0.0) or 0.0))
+                        * max(0.0, float(entry.get("price", 0.0) or 0.0))
+                        for entry in data_by_tkr.values()
+                    )
+
+                    # 이후 로직에서 사용할 holdings 맵도 최신 상태로 갱신한다.
+                    holdings = _normalize_holdings(portfolio_data.get("holdings", []))
+
+                new_equity_candidate = (
+                    total_holdings_value + international_shares_value + krw_balance + p_balance
+                )
         except Exception as e:
             logger.warning("Bithumb 잔액 조회 실패. 평가금액 자동 보정 시 코인 가치만 반영됩니다. (%s)", e)
     elif country == "coin":

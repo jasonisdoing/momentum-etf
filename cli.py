@@ -6,7 +6,7 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
 
 사용 예시는 아래를 참고하세요.
 
-- 오늘 시그널 계산:              ``python cli.py k1 --signal``
+- 오늘 시그널 계산:              ``python cli.py b1 --signal``
 - 여러 계좌 시그널 계산:         ``python cli.py --accounts k1,k2 --signal``
 - 국가 단위 전체 시그널 계산:    ``python cli.py --country kor --signal``
 - 특정 기준일 시그널 재계산:     ``python cli.py k1 --signal --date 2025-09-26``
