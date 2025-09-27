@@ -56,7 +56,6 @@ def get_common_file_settings() -> Dict[str, Any]:
             module, "MARKET_REGIME_FILTER_MA_PERIOD"
         )
         settings["HOLDING_STOP_LOSS_PCT"] = getattr(module, "HOLDING_STOP_LOSS_PCT")
-        settings["COOLDOWN_DAYS"] = getattr(module, "COOLDOWN_DAYS")
 
         # 선택 설정 (존재할 경우만 추가)
         locked_tickers = getattr(module, "LOCKED_TICKERS", None)
@@ -80,8 +79,6 @@ def get_common_file_settings() -> Dict[str, Any]:
             raise ValueError("MARKET_REGIME_FILTER_MA_PERIOD는 0보다 큰 정수여야 합니다.")
         if not isinstance(settings["HOLDING_STOP_LOSS_PCT"], (int, float)):
             raise ValueError("HOLDING_STOP_LOSS_PCT는 숫자여야 합니다.")
-        if not isinstance(settings["COOLDOWN_DAYS"], int) or settings["COOLDOWN_DAYS"] < 0:
-            raise ValueError("COOLDOWN_DAYS는 0 이상의 정수여야 합니다.")
 
     except (AttributeError, ValueError, TypeError, ImportError) as e:
         raise SystemExit(f"오류: 공통 설정 파일({file_path})에 문제가 있습니다: {e}")
@@ -129,10 +126,19 @@ def get_account_file_settings(account: str) -> Dict[str, Any]:
     if slack_webhook_url is not None and not isinstance(slack_webhook_url, str):
         raise SystemExit(f"오류: 계좌 '{account}'의 slack_webhook_url 값은 문자열이어야 합니다.")
 
+    cooldown_days_raw = settings_cfg.get("cooldown_days", 0)
+    try:
+        cooldown_days = int(cooldown_days_raw)
+        if cooldown_days < 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        raise SystemExit(f"오류: 계좌 '{account}'의 cooldown_days 값이 0 이상의 정수가 아닙니다.")
+
     settings: Dict[str, Any] = {
         "initial_capital_krw": initial_capital,
         "initial_date": initial_date,
         "slack_webhook_url": slack_webhook_url,
+        "cooldown_days": cooldown_days,
     }
 
     _account_settings_cache[cache_key] = settings

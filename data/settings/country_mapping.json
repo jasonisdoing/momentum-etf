@@ -35,7 +35,8 @@
         },
         "account_settings": {
             "initial_capital_krw": 30000000,
-            "initial_date": "2025-09-26"
+            "initial_date": "2025-09-26",
+            "cooldown_days": 0
         }
     },
     {
@@ -65,7 +66,8 @@
         },
         "account_settings": {
             "initial_capital_krw": 71000000,
-            "initial_date": "2025-09-26"
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -99,7 +101,8 @@
         },
         "account_settings": {
             "initial_capital_krw": 180000000,
-            "initial_date": "2025-09-26"
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -133,7 +136,8 @@
         },
         "account_settings": {
             "initial_capital_krw": 84000000,
-            "initial_date": "2025-09-26"
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -167,7 +171,8 @@
         },
         "account_settings": {
             "initial_capital_krw": 20000000,
-            "initial_date": "2025-09-26"
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -201,7 +206,8 @@
         },
         "account_settings": {
             "initial_capital_krw": 18000000,
-            "initial_date": "2025-09-26"
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -235,7 +241,8 @@
         },
         "account_settings": {
             "initial_capital_krw": 20000000,
-            "initial_date": "2025-09-26"
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -269,7 +276,8 @@
         },
         "account_settings": {
             "initial_capital_krw": 24000000,
-            "initial_date": "2025-09-26"
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     }
 ]

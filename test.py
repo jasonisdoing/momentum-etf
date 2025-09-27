@@ -52,24 +52,36 @@ def _print_backtest_summary(
 
     benchmark_name = "BTC" if country == "coin" else "S&P 500"
 
-    print("\n" + "=" * 30 + "\n 백테스트 결과 요약 ".center(30, "=") + "\n" + "=" * 30)
-    print(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
+    summary_lines = [
+        "\n" + "=" * 30 + "\n 백테스트 결과 요약 ".center(30, "=") + "\n" + "=" * 30,
+        f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)",
+    ]
+
     if summary.get("risk_off_periods"):
         for start, end in summary["risk_off_periods"]:
-            print(f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}")
-    print(f"| 초기 자본: {money_formatter(summary['initial_capital_krw'])}")
-    print(f"| 최종 자산: {money_formatter(summary['final_value'])}")
-    print(
-        f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
+            summary_lines.append(
+                f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
+            )
+
+    summary_lines.extend(
+        [
+            f"| 초기 자본: {money_formatter(summary['initial_capital_krw'])}",
+            f"| 최종 자산: {money_formatter(summary['final_value'])}",
+            (
+                f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% "
+                f"({benchmark_name}: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
+            ),
+            (
+                f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% "
+                f"({benchmark_name}: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
+            ),
+            f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%",
+            f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}",
+            f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}",
+            f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}",
+            "=" * 30,
+        ]
     )
-    print(
-        f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
-    )
-    print(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
-    print(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
-    print(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")
-    print(f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}")
-    print("=" * 30)
 
     print("\n" + "=" * 30 + "\n 사용된 설정값 ".center(30, "=") + "\n" + "=" * 30)
     used_settings = {
@@ -200,6 +212,9 @@ def _print_backtest_summary(
         table_lines = render_table_eaw(headers, rows, aligns)
         print("\n" + "\n".join(table_lines))
 
+    for line in summary_lines:
+        print(line)
+
 
 def main(
     account: str,
@@ -292,7 +307,7 @@ def main(
         common = get_common_file_settings()
         # 양수 입력을 음수 임계값으로 해석합니다 (예: 10 -> -10)
         settings.HOLDING_STOP_LOSS_PCT = -abs(float(common["HOLDING_STOP_LOSS_PCT"]))
-        settings.COOLDOWN_DAYS = int(common["COOLDOWN_DAYS"])
+        settings.COOLDOWN_DAYS = int(account_settings.get("cooldown_days", 0))
         settings.MARKET_REGIME_FILTER_ENABLED = bool(common["MARKET_REGIME_FILTER_ENABLED"])
         settings.MARKET_REGIME_FILTER_TICKER = str(common["MARKET_REGIME_FILTER_TICKER"])
         settings.MARKET_REGIME_FILTER_MA_PERIOD = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])

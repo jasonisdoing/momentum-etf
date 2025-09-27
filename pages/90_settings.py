@@ -54,12 +54,6 @@ def render_common_settings():
         disabled=True,
         help=f"{help_text} (양수로 입력해도 음수로 해석됩니다)",
     )
-    st.text_input(
-        "쿨다운 일수 (COOLDOWN_DAYS)",
-        value=str(common_settings["COOLDOWN_DAYS"]),
-        disabled=True,
-        help=help_text,
-    )
 
 
 def render_account_settings(country_code: str, account_code: str):
@@ -95,6 +89,14 @@ def render_account_settings(country_code: str, account_code: str):
         value=account_settings["initial_date"],
         disabled=True,
         help=account_help_text,
+    )
+    st.markdown("---")
+
+    st.text_input(
+        "쿨다운 일수 (COOLDOWN_DAYS)",
+        value=str(account_settings.get("cooldown_days", 0)),
+        disabled=True,
+        help="이 값은 `data/settings/country_mapping.json` 의 계좌별 `account_settings.cooldown_days` 에서 설정합니다.",
     )
     st.markdown("---")
 

@@ -122,6 +122,8 @@ def compare_allocation(account: str, start: str | None, end: str | None) -> None
     stocks = get_etfs(country)
 
     print(f"포트폴리오 백테스트 실행 ({account}, {start_date}~{end_date})...")
+    cooldown_days = int(account_settings.get("cooldown_days", 0))
+
     portfolio = run_portfolio_backtest(
         stocks=stocks,
         initial_capital=account_settings["initial_capital_krw"],
@@ -131,7 +133,7 @@ def compare_allocation(account: str, start: str | None, end: str | None) -> None
         replace_threshold=rules.replace_threshold,
         country=country,
         stop_loss_pct=-abs(float(common["HOLDING_STOP_LOSS_PCT"])),
-        cooldown_days=int(common["COOLDOWN_DAYS"]),
+        cooldown_days=cooldown_days,
         regime_filter_enabled=False,
         min_buy_score=rules.min_buy_score,
         date_range=[start_date, end_date],
@@ -149,7 +151,7 @@ def compare_allocation(account: str, start: str | None, end: str | None) -> None
         replace_threshold=rules.replace_threshold,
         country=country,
         stop_loss_pct=-abs(float(common["HOLDING_STOP_LOSS_PCT"])),
-        cooldown_days=int(common["COOLDOWN_DAYS"]),
+        cooldown_days=cooldown_days,
         regime_filter_enabled=bool(common.get("MARKET_REGIME_FILTER_ENABLED", False)),
         regime_filter_ticker=str(common.get("MARKET_REGIME_FILTER_TICKER", "^GSPC")),
         regime_filter_ma_period=int(common.get("MARKET_REGIME_FILTER_MA_PERIOD", 20)),

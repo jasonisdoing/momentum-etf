@@ -1952,12 +1952,13 @@ def generate_signal_report(
                     pass
 
     # 공통 설정에서 손절 퍼센트 로드
+    cooldown_days = int(account_settings.get("cooldown_days", 0))
+
     try:
         common = get_common_file_settings()
         stop_loss_raw = float(common["HOLDING_STOP_LOSS_PCT"])
         # 양수 입력이 들어오더라도 손절 임계값은 음수로 해석합니다 (예: 10 -> -10).
         stop_loss = -abs(stop_loss_raw)
-        cooldown_days = int(common.get("COOLDOWN_DAYS", 0))
     except (SystemExit, KeyError, ValueError, TypeError) as e:
         print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
         return None

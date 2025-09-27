@@ -92,6 +92,8 @@ def compare_exit_behaviors(account: str, start: str | None, end: str | None) -> 
 
     print(f"레짐 출구 비교 백테스트 실행 ({account}, {start_date}~{end_date})...")
 
+    cooldown_days = int(account_settings.get("cooldown_days", 0))
+
     base_kwargs = dict(
         stocks=stocks,
         initial_capital=account_settings["initial_capital_krw"],
@@ -101,7 +103,7 @@ def compare_exit_behaviors(account: str, start: str | None, end: str | None) -> 
         replace_threshold=rules.replace_threshold,
         country=country,
         stop_loss_pct=-abs(float(common["HOLDING_STOP_LOSS_PCT"])),
-        cooldown_days=int(common["COOLDOWN_DAYS"]),
+        cooldown_days=cooldown_days,
         regime_filter_enabled=bool(common.get("MARKET_REGIME_FILTER_ENABLED", False)),
         regime_filter_ticker=str(common.get("MARKET_REGIME_FILTER_TICKER", "^GSPC")),
         regime_filter_ma_period=int(common.get("MARKET_REGIME_FILTER_MA_PERIOD", 20)),
