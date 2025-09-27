@@ -850,7 +850,7 @@ def run_single_ticker_backtest(
             buy_signal_days_today = buy_signal_days.iloc[i]
             ma_score_today = 0.0
             if pd.notna(ma_today) and ma_today > 0:
-                ma_score_today = (price / ma_today) - 1.0
+                ma_score_today = ((price / ma_today) - 1.0) * 100.0
 
             passes_score_threshold = True
             if not passes_min_buy_score(ma_score_today, min_buy_score):
@@ -875,7 +875,7 @@ def run_single_ticker_backtest(
 
         ma_score_today = 0.0
         if pd.notna(ma_today) and ma_today > 0:
-            ma_score_today = (price / ma_today) - 1.0
+            ma_score_today = ((price / ma_today) - 1.0) * 100.0
 
         rows.append(
             {
