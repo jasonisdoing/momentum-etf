@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from math import ceil
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 import numpy as np
 import pandas as pd
@@ -11,6 +11,7 @@ import pandas as pd
 from utils.data_loader import fetch_ohlcv
 
 from .rules import passes_min_buy_score, resolve_min_buy_score
+from .shared import select_candidates_by_category
 
 
 def run_portfolio_backtest(
@@ -79,6 +80,7 @@ def run_portfolio_backtest(
     # --- 개별 종목 데이터 로딩 및 지표 계산 ---
     # --- 티커별 카테고리 매핑 생성 ---
     ticker_to_category = {stock["ticker"]: stock.get("category") for stock in stocks}
+    etf_meta = {stock["ticker"]: stock for stock in stocks if stock.get("ticker")}
     metrics_by_ticker = {}
     tickers_to_process = [s["ticker"] for s in stocks]
 
@@ -359,47 +361,77 @@ def run_portfolio_backtest(
         if allow_new_buys:
             # 1. 매수 후보 선정
             buy_ranked_candidates = []
-            if cash > 0:  # 현금이 있어야만 매수 후보를 고려
-                for candidate_ticker in tickers_available_today:
-                    candidate_metrics = metrics_by_ticker.get(candidate_ticker)
-                    ticker_state_cand = position_state[candidate_ticker]
-                    buy_signal_days_today = candidate_metrics["buy_signal_days"].get(dt, 0)
+            for candidate_ticker in tickers_available_today:
+                candidate_metrics = metrics_by_ticker.get(candidate_ticker)
+                ticker_state_cand = position_state[candidate_ticker]
+                buy_signal_days_today = candidate_metrics["buy_signal_days"].get(dt, 0)
 
-                    if (
-                        ticker_state_cand["shares"] == 0
-                        and i >= ticker_state_cand["buy_block_until"]
-                        and buy_signal_days_today > 0
-                    ):
-                        score_cand = candidate_metrics["ma_score"].get(dt, -float("inf")) or -float(
-                            "inf"
-                        )
+                if (
+                    ticker_state_cand["shares"] == 0
+                    and i >= ticker_state_cand["buy_block_until"]
+                    and buy_signal_days_today > 0
+                ):
+                    score_cand = candidate_metrics["ma_score"].get(dt, -float("inf")) or -float(
+                        "inf"
+                    )
 
-                        if passes_min_buy_score(score_cand, min_buy_score):
-                            buy_ranked_candidates.append((score_cand, candidate_ticker))
-                buy_ranked_candidates.sort(reverse=True)
+                    if passes_min_buy_score(score_cand, min_buy_score):
+                        buy_ranked_candidates.append((score_cand, candidate_ticker))
+            buy_ranked_candidates.sort(reverse=True)
 
             # 2. 매수 실행 (신규 또는 교체)
             held_count = sum(1 for pos in position_state.values() if pos["shares"] > 0)
             slots_to_fill = max(0, top_n - held_count)
 
+            purchased_today: Set[str] = set()
+
             if slots_to_fill > 0 and buy_ranked_candidates:
-                # 2-1. 신규 매수: 포트폴리오에 빈 슬롯이 있는 경우
-                for k in range(min(slots_to_fill, len(buy_ranked_candidates))):
+                held_categories = {
+                    cat
+                    for tkr, state in position_state.items()
+                    if state["shares"] > 0 and (cat := ticker_to_category.get(tkr)) and cat != "TBD"
+                }
+
+                helper_candidates = [
+                    {"tkr": ticker, "score": score} for score, ticker in buy_ranked_candidates
+                ]
+
+                selected_candidates, rejected_candidates = select_candidates_by_category(
+                    helper_candidates,
+                    etf_meta,
+                    held_categories=held_categories,
+                    max_count=slots_to_fill,
+                    skip_held_categories=True,
+                )
+
+                for cand, reason in rejected_candidates:
+                    if reason != "category_held":
+                        continue
+                    ticker_rejected = cand.get("tkr")
+                    if not ticker_rejected:
+                        continue
+                    records = daily_records_by_ticker.get(ticker_rejected)
+                    if (
+                        records
+                        and records[-1]["date"] == dt
+                        and records[-1].get("decision") == "WAIT"
+                    ):
+                        records[-1]["note"] = "카테고리 중복"
+
+                for cand in selected_candidates:
                     if cash <= 0:
                         break
-                    _, ticker_to_buy = buy_ranked_candidates[k]
 
+                    ticker_to_buy = cand["tkr"]
                     price = today_prices.get(ticker_to_buy)
                     if pd.isna(price):
                         continue
 
-                    # 예산 산정은 기준 자산(Equity)을 고정하여 일중 처리 순서 영향을 제거합니다.
                     equity_base = equity
                     min_val = 1.0 / (top_n * 2.0) * equity_base
                     max_val = 1.0 / top_n * equity_base
                     budget = min(max_val, cash)
 
-                    # 예산이 최소 비중보다 작으면 스킵
                     if budget <= 0 or budget < min_val:
                         continue
 
@@ -408,13 +440,12 @@ def run_portfolio_backtest(
                         trade_amount = budget
                     else:
                         req_qty = ceil(budget / price) if price > 0 else 0
-                        # 정수 수량은 예산 내 최대 구매량으로 계산하되, 최소 비중을 충족하도록 다시 내림 처리합니다.
                         req_qty = int(budget // price)
                         trade_amount = req_qty * price
                         if req_qty <= 0 or trade_amount + 1e-9 < min_val:
                             continue
 
-                    if trade_amount <= cash + 1e-9:
+                    if trade_amount <= cash + 1e-9 and req_qty > 0:
                         ticker_state = position_state[ticker_to_buy]
                         cash -= trade_amount
                         ticker_state["shares"] += req_qty
@@ -423,6 +454,10 @@ def run_portfolio_backtest(
                             ticker_state["sell_block_until"] = max(
                                 ticker_state["sell_block_until"], i + cooldown_days
                             )
+
+                        category = ticker_to_category.get(ticker_to_buy)
+                        if category and category != "TBD":
+                            held_categories.add(category)
 
                         if (
                             daily_records_by_ticker[ticker_to_buy]
@@ -438,10 +473,23 @@ def run_portfolio_backtest(
                                     "avg_cost": ticker_state["avg_cost"],
                                 }
                             )
+                        purchased_today.add(ticker_to_buy)
 
             elif slots_to_fill <= 0 and replace_weaker_stock and buy_ranked_candidates:
-                # 2-2. 교체 매매: 포트폴리오가 가득 찼지만, 더 좋은 종목이 나타난 경우
-                # 현재 보유 종목 목록 (점수와 티커 포함)
+                helper_candidates = [
+                    {"tkr": ticker, "score": score}
+                    for score, ticker in buy_ranked_candidates
+                    if ticker not in purchased_today
+                ]
+
+                replacement_candidates, _ = select_candidates_by_category(
+                    helper_candidates,
+                    etf_meta,
+                    held_categories=None,
+                    max_count=None,
+                    skip_held_categories=False,
+                )
+
                 held_stocks_with_scores = []
                 for held_ticker, held_position in position_state.items():
                     if held_position["shares"] > 0:
@@ -457,14 +505,16 @@ def run_portfolio_backtest(
                                     }
                                 )
 
-                # 대기 종목 (매수 후보) 목록은 이미 점수 내림차순(강한 순)으로 정렬되어 있습니다.
-                # held_stocks_with_scores는 점수 오름차순으로 정렬하여 가장 약한 종목을 쉽게 찾을 수 있도록 합니다.
                 held_stocks_with_scores.sort(key=lambda x: x["score"])
 
-                # 교체 매매 로직 시작
-                # 대기 종목(buy_ranked_candidates)을 점수 높은 순서대로 순회
-                for best_new_score, replacement_ticker in buy_ranked_candidates:
+                for candidate in replacement_candidates:
+                    replacement_ticker = candidate["tkr"]
                     wait_stock_category = ticker_to_category.get(replacement_ticker)
+                    best_new_score_raw = candidate.get("score")
+                    try:
+                        best_new_score = float(best_new_score_raw)
+                    except (TypeError, ValueError):
+                        best_new_score = float("-inf")
 
                     # 교체 대상이 될 수 있는 보유 종목을 찾습니다.
                     # 1. 같은 카테고리의 종목이 있는지 확인

@@ -115,6 +115,14 @@
             {
                 "ticker": "ASX:ATEC",
                 "name": "BetaShares S&P/ASX Australian Technology ETF"
+            },
+            {
+                "ticker": "ASX:SSO",
+                "name": "SPDR S&P/ASX Small Ordinaries ETF"
+            },
+            {
+                "ticker": "ASX:ISO",
+                "name": "iShares S&P/ASX Small Ordinaries ETF"
             }
         ]
     },
@@ -140,6 +148,10 @@
             {
                 "ticker": "ASX:IVV",
                 "name": "iShares S&P 500 ETF"
+            },
+            {
+                "ticker": "ASX:GGUS",
+                "name": "Betashares Geared US Equities Currency Hedged Complex ETF"
             }
         ]
     },
@@ -227,14 +239,6 @@
                 "name": "Vanguard Australian Shares High Yield ETF"
             },
             {
-                "ticker": "ASX:SSO",
-                "name": "SPDR S&P/ASX Small Ordinaries ETF"
-            },
-            {
-                "ticker": "ASX:ISO",
-                "name": "iShares S&P/ASX Small Ordinaries ETF"
-            },
-            {
                 "ticker": "ASX:WDMF",
                 "name": "iShares World Equity Factor ETF"
             },
@@ -253,10 +257,6 @@
             {
                 "ticker": "ASX:VEU",
                 "name": "Vanguard All-World ex-US Shares Index ETF"
-            },
-            {
-                "ticker": "ASX:GGUS",
-                "name": "Betashares Geared US Equities Currency Hedged Complex ETF"
             },
             {
                 "ticker": "ASX:VESG",

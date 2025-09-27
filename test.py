@@ -9,6 +9,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from logic import momentum as strategy_module
+from logic.strategies.momentum.shared import SIGNAL_TABLE_HEADERS
 from utils.account_registry import (
     get_account_file_settings,
     get_common_file_settings,
@@ -23,6 +24,7 @@ from utils.report import (
 from utils.data_loader import get_latest_trading_day
 from utils.data_loader import get_aud_to_krw_rate
 from utils.stock_list_io import get_etfs as get_etfs_from_files
+from utils.notification import build_summary_line_from_summary_data
 
 # 이 파일에서는 매매 전략에 사용되는 고유 파라미터를 정의합니다.
 # 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월 데이터로 테스트)
@@ -43,7 +45,11 @@ def _print_backtest_summary(
     """백테스트 결과 요약을 콘솔에 출력합니다."""
     account_info = get_account_info(account)
     currency = account_info.get("currency", "KRW")
-    precision = account_info.get("precision", 0)
+    precision = account_info.get("amt_precision", 0)
+    try:
+        precision = int(precision)
+    except (TypeError, ValueError):
+        precision = 0
 
     def _aud_money_formatter(amount):
         return f"${amount:,.{precision}f}"
@@ -318,7 +324,11 @@ def main(
         return None
 
     currency = account_info.get("currency", "KRW")
-    precision = account_info.get("precision", 0)
+    precision = account_info.get("amt_precision", account_info.get("precision", 0))
+    try:
+        precision = int(precision)
+    except (TypeError, ValueError):
+        precision = 0
 
     def _aud_money_formatter(amount):
         return f"${amount:,.{precision}f}"
@@ -336,12 +346,12 @@ def main(
     if currency == "AUD":
         money_formatter = _aud_money_formatter
         price_formatter = _aud_price_formatter
-        ma_formatter = _aud_price_formatter
+        # ma_formatter = _aud_price_formatter
     else:
         # 원화(KRW) 형식으로 가격을 포맷합니다.
         money_formatter = format_kr_money
         price_formatter = _kr_price_formatter
-        ma_formatter = _kr_ma_formatter
+        # ma_formatter = _kr_ma_formatter
 
     # 기간 설정 로직 (필수 설정)
     try:
@@ -434,7 +444,10 @@ def main(
 
         # 시뮬레이션 실행
         time_series_by_ticker: Dict[str, pd.DataFrame] = {}
-        name_by_ticker: Dict[str, str] = {s["ticker"]: s["name"] for s in etfs_from_file}
+        name_by_ticker: Dict[str, str] = {s["ticker"]: s.get("name", "") for s in etfs_from_file}
+        category_by_ticker: Dict[str, str] = {
+            s["ticker"]: str(s.get("category") or "") for s in etfs_from_file
+        }
         if portfolio_topn > 0:
             time_series_by_ticker = (
                 run_portfolio_backtest(
@@ -458,8 +471,9 @@ def main(
                 or {}
             )
             if "CASH" in time_series_by_ticker:
-                name_by_ticker = {s["ticker"]: s["name"] for s in etfs_from_file}
+                name_by_ticker = {s["ticker"]: s.get("name", "") for s in etfs_from_file}
                 name_by_ticker["CASH"] = "현금"
+                category_by_ticker["CASH"] = "-"
         else:
             # 종목별 고정 자본 방식: 전체 자본을 종목 수로 나눔
             capital_per_ticker = initial_capital_krw / len(etfs_from_file) if etfs_from_file else 0
@@ -518,6 +532,7 @@ def main(
             # 일별 자산 집계
             total_value = 0.0
             total_holdings = 0.0
+            total_acquisition_cost = 0.0
             held_count = 0
             for tkr, ts in time_series_by_ticker.items():
                 row = ts.loc[dt]
@@ -535,18 +550,24 @@ def main(
                     price_val = row.get("price")
                     price = float(price_val) if pd.notna(price_val) else 0.0
 
+                    avg_cost_val = row.get("avg_cost", 0.0)
+                    avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
+
                     total_holdings += price * sh
                     if sh > 0:
                         held_count += 1
+                        total_acquisition_cost += avg_cost * sh
 
             total_cash = total_value - total_holdings
             portfolio_values.append(total_value)
 
             # 일일 포트폴리오 수익률
+            prev_equity = prev_total_pv
             if prev_total_pv is not None and prev_total_pv > 0:
                 day_ret_pct = (
                     ((total_value / prev_total_pv) - 1.0) * 100.0 if prev_total_pv > 0 else 0.0
                 )
+            day_profit_loss = total_value - prev_equity if prev_equity is not None else 0.0
             prev_total_pv = total_value
 
             # 초기 자본 대비 누적 포트폴리오 수익률
@@ -557,37 +578,50 @@ def main(
             if not quiet:
                 # 헤더 라인 출력
                 denom = portfolio_topn if portfolio_topn > 0 else total_cnt
-                date_str = pd.to_datetime(dt).strftime("%Y-%m-%d")
-                print(
-                    f"{date_str} - 보유종목 {held_count}/{denom} "
-                    f"잔액(보유+현금): {money_formatter(total_value)} "
-                    f"(보유 {money_formatter(total_holdings)} + 현금 {money_formatter(total_cash)}) "
-                    f"금일 수익률 {day_ret_pct:+.1f}%, 누적 수익률 {cum_ret_pct:+.1f}%"
+                date_kor = f"{pd.to_datetime(dt).year}년 {pd.to_datetime(dt).month}월 {pd.to_datetime(dt).day}일"
+
+                if total_acquisition_cost > 0:
+                    eval_profit_loss = total_holdings - total_acquisition_cost
+                    eval_return_pct = (total_holdings / total_acquisition_cost - 1.0) * 100.0
+                else:
+                    eval_profit_loss = 0.0
+                    eval_return_pct = 0.0
+
+                summary_data = {
+                    "principal": float(initial_capital_krw),
+                    "total_equity": float(total_value),
+                    "total_holdings_value": float(total_holdings),
+                    "total_cash": float(total_cash),
+                    "daily_profit_loss": float(day_profit_loss),
+                    "daily_return_pct": float(day_ret_pct),
+                    "eval_profit_loss": float(eval_profit_loss),
+                    "eval_return_pct": float(eval_return_pct),
+                    "cum_profit_loss": float(total_value - total_init),
+                    "cum_return_pct": float(cum_ret_pct),
+                    "held_count": int(held_count),
+                    "portfolio_topn": int(denom),
+                }
+
+                summary_line = build_summary_line_from_summary_data(
+                    summary_data,
+                    money_formatter,
+                    use_html=False,
+                    prefix=f"{date_kor} |",
                 )
+                print(summary_line)
 
                 # 전략에 따라 동적으로 헤더를 설정합니다.
                 # signal_headers = ["이평선(값)", "고점대비", "점수", "신호지속일"] (참고용 예시)
-                headers = [
-                    "#",
-                    "티커",
-                    "이름",
-                    "상태",
-                    "매수일자",
-                    "보유일",
-                    "현재가",
-                    "일간수익률",
-                    "보유수량",
-                    "금액",
-                    "누적수익률",
-                    "비중",
-                ]
-                headers.extend(["이평선(값)", "고점대비", "점수", "신호지속일"])
-                headers.append("문구")
+                headers = list(SIGNAL_TABLE_HEADERS)
 
                 decisions_list = []
                 for tkr, ts in time_series_by_ticker.items():
                     row = ts.loc[dt]
                     name = name_by_ticker.get(tkr, "")
+                    category_raw = category_by_ticker.get(tkr, "")
+                    category_display = (
+                        category_raw if category_raw and category_raw.upper() != "TBD" else "-"
+                    )
                     decision = str(row.get("decision", "")).upper()
 
                     # NaN 값에 대한 안정성 강화: 모든 숫자 변수를 사용 전에 확인하고 처리합니다.
@@ -635,7 +669,7 @@ def main(
                         else "-"
                     )
 
-                    s1, s2, score, filter_val = (
+                    _, s2, score, filter_val = (
                         row.get("signal1"),
                         row.get("signal2"),
                         row.get("score"),
@@ -643,7 +677,7 @@ def main(
                     )
 
                     # 전략에 따라 신호 값의 포맷을 다르게 지정합니다.
-                    s1_str = ma_formatter(s1) if pd.notna(s1) else "-"
+                    # s1_str = ma_formatter(s1) if pd.notna(s1) else "-"
                     s2_str = f"{float(s2):.1f}%" if pd.notna(s2) else "-"  # 고점대비
                     score_str = f"{float(score):.1f}" if pd.notna(score) else "-"  # 점수
                     filter_str = f"{int(filter_val)}일" if pd.notna(filter_val) else "-"
@@ -711,7 +745,8 @@ def main(
                     current_row = [
                         0,
                         tkr,
-                        name,
+                        name or tkr,
+                        category_display,
                         display_status,
                         bd_str,
                         f"{hd}",
@@ -721,7 +756,6 @@ def main(
                         money_formatter(amount),
                         hold_ret_str,
                         f"{w:.0f}%",
-                        s1_str,
                         s2_str,
                         score_str,
                         filter_str,
@@ -731,10 +765,13 @@ def main(
 
                 def sort_key(decision_tuple):
                     state, weight, score, tkr, _ = decision_tuple
-                    is_hold = 1 if state == "HOLD" else 2
-                    is_wait = 1 if state == "WAIT" else 0
-                    sort_value = -score if pd.notna(score) and state == "WAIT" else -weight
-                    return (is_hold, is_wait, sort_value, tkr)
+                    order = strategy_module.DECISION_CONFIG.get(state, {}).get("order", 99)
+                    try:
+                        score_val = float(score)
+                    except (TypeError, ValueError):
+                        score_val = float("-inf")
+                    sort_value = -score_val
+                    return (order, sort_value, tkr)
 
                 decisions_list.sort(key=sort_key)
 
@@ -747,9 +784,9 @@ def main(
                     "right",
                     "right",
                     "left",
+                    "left",
                     "center",
                     "left",
-                    "right",
                     "right",
                     "right",
                     "right",

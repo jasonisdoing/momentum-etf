@@ -9,6 +9,7 @@ import pandas as pd
 from utils.report import format_kr_money
 
 from .rules import format_min_buy_shortfall, passes_min_buy_score, StrategyRules
+from .shared import select_candidates_by_category
 
 
 def generate_daily_signals_for_portfolio(
@@ -260,6 +261,13 @@ def generate_daily_signals_for_portfolio(
 
         amount = sh * price if pd.notna(price) else 0.0
 
+        meta = etf_meta.get(tkr) or full_etf_meta.get(tkr, {}) or {}
+        display_name = str(meta.get("name") or tkr)
+        raw_category = meta.get("category")
+        display_category = (
+            str(raw_category) if raw_category and str(raw_category).upper() != "TBD" else "-"
+        )
+
         # 일간 수익률 계산
         prev_close = d.get("prev_close", 0.0)
         day_ret = (
@@ -276,6 +284,8 @@ def generate_daily_signals_for_portfolio(
         current_row = [
             0,
             tkr,
+            display_name,
+            display_category,
             state,
             buy_date_display,
             holding_days_display,
@@ -294,7 +304,7 @@ def generate_daily_signals_for_portfolio(
             f"{d['filter']}일" if d.get("filter") is not None else "-",
             phrase,
         ]
-        current_row[2] = state
+        current_row[4] = state
 
         decisions.append(
             {
@@ -328,7 +338,7 @@ def generate_daily_signals_for_portfolio(
                 continue
             if decision["state"] == "HOLD":
                 decision["state"] = "SELL_REGIME_FILTER"
-                decision["row"][2] = "SELL_REGIME_FILTER"
+                decision["row"][4] = "SELL_REGIME_FILTER"
 
                 d_sell = data_by_tkr.get(decision["tkr"])
                 if d_sell:
@@ -363,35 +373,22 @@ def generate_daily_signals_for_portfolio(
 
         # 신규 매수 로직: 빈 슬롯이 있을 때 실행
         if slots_to_fill > 0:
-            # 카테고리별 최고점수 매수 후보 선정
-            best_wait_by_category = {}
-            for cand in wait_candidates_raw:
-                category = etf_meta.get(cand["tkr"], {}).get("category")
-                key = category if (category and category != "TBD") else f"__i_{cand['tkr']}"
-                if (
-                    key not in best_wait_by_category
-                    or cand["score"] > best_wait_by_category[key]["score"]
-                ):
-                    best_wait_by_category[key] = cand
-
-            # 점수 높은 순으로 최종 매수 후보 정렬
-            buy_candidates = sorted(
-                best_wait_by_category.values(), key=lambda x: x["score"], reverse=True
+            selected_candidates, rejected_candidates = select_candidates_by_category(
+                wait_candidates_raw,
+                etf_meta,
+                held_categories=held_categories,
+                max_count=slots_to_fill,
+                skip_held_categories=True,
             )
 
-            bought_count = 0
-            for cand in buy_candidates:
-                if bought_count >= slots_to_fill:
-                    break
-
-                cand_category = etf_meta.get(cand["tkr"], {}).get("category")
-                # 이미 보유한 카테고리인지 확인
-                if cand_category and cand_category != "TBD" and cand_category in held_categories:
+            for cand, reason in rejected_candidates:
+                if reason == "category_held":
                     cand["row"][-1] = "카테고리 중복"
-                    continue
 
+            for cand in selected_candidates:
+                cand_category = etf_meta.get(cand["tkr"], {}).get("category")
                 # 매수 실행
-                cand["state"], cand["row"][2] = "BUY", "BUY"
+                cand["state"], cand["row"][4] = "BUY", "BUY"
                 buy_price = float(data_by_tkr.get(cand["tkr"], {}).get("price", 0))
                 if buy_price > 0:
                     budget = (current_equity / denom) if denom > 0 else 0
@@ -406,8 +403,6 @@ def generate_daily_signals_for_portfolio(
                         )
                         buy_notional = buy_qty * buy_price
                         cand["row"][-1] = "신규매수"
-                        bought_count += 1
-                        # 매수 후, 이 카테고리를 보유 카테고리에 추가하여 다음 후보가 중복 체크할 수 있도록 함
                         if cand_category and cand_category != "TBD":
                             held_categories.add(cand_category)
                     else:
@@ -417,28 +412,12 @@ def generate_daily_signals_for_portfolio(
 
         # 교체 매매 로직: 포트폴리오에 빈 슬롯이 있더라도, 더 좋은 종목으로 교체할 기회가 있으면 실행
         if replace_weaker_stock:
-            # 1. 카테고리별 최고점수 매수 후보 선정
-            wait_candidates_by_category: Dict[str, List[Dict]] = {}
-            for cand in wait_candidates_raw:
-                # 이미 신규 매수된 종목은 교체 후보에서 제외
-                if cand["state"] == "BUY":
-                    continue
-                category = etf_meta.get(cand["tkr"], {}).get("category")
-                key = category if (category and category != "TBD") else f"__i_{cand['tkr']}"
-                if key not in wait_candidates_by_category:
-                    wait_candidates_by_category[key] = []
-                wait_candidates_by_category[key].append(cand)
-
-            # 각 카테고리 내에서 점수가 가장 높은 후보만 남김
-            best_wait_candidates = []
-            for key, candidates in wait_candidates_by_category.items():
-                if candidates:
-                    best_cand = max(candidates, key=lambda x: x["score"])
-                    best_wait_candidates.append(best_cand)
-
-            # 점수 높은 순으로 최종 교체 후보 정렬
-            buy_candidates_for_replacement = sorted(
-                best_wait_candidates, key=lambda x: x["score"], reverse=True
+            replacement_candidates, _ = select_candidates_by_category(
+                [cand for cand in wait_candidates_raw if cand.get("state") != "BUY"],
+                etf_meta,
+                held_categories=None,
+                max_count=None,
+                skip_held_categories=False,
             )
 
             # 2. 교체 로직 실행
@@ -447,7 +426,7 @@ def generate_daily_signals_for_portfolio(
                 key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf")
             )
 
-            for best_new in buy_candidates_for_replacement:
+            for best_new in replacement_candidates:
                 if not current_held_stocks:
                     break
 
@@ -495,7 +474,7 @@ def generate_daily_signals_for_portfolio(
                         blocked_name = (
                             etf_meta.get(ticker_to_sell, {}).get("name") or ticker_to_sell
                         )
-                        best_new["state"], best_new["row"][2] = "WAIT", "WAIT"
+                        best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
                         best_new["row"][-1] = f"쿨다운 {cooldown_days}일 대기중 - {blocked_name}"
                         best_new["buy_signal"] = False
                         continue
@@ -517,7 +496,7 @@ def generate_daily_signals_for_portfolio(
 
                         for d_item in decisions:
                             if d_item["tkr"] == ticker_to_sell:
-                                d_item["state"], d_item["row"][2], d_item["row"][-1] = (
+                                d_item["state"], d_item["row"][4], d_item["row"][-1] = (
                                     "SELL_REPLACE",
                                     "SELL_REPLACE",
                                     sell_phrase,
@@ -525,7 +504,7 @@ def generate_daily_signals_for_portfolio(
                                 break
 
                     # (b) 매수 신호 생성
-                    best_new["state"], best_new["row"][2] = "BUY_REPLACE", "BUY_REPLACE"
+                    best_new["state"], best_new["row"][4] = "BUY_REPLACE", "BUY_REPLACE"
                     buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
                     if buy_price > 0:
                         # 매도 금액만큼 매수 예산 설정
@@ -576,13 +555,13 @@ def generate_daily_signals_for_portfolio(
 
             if sell_info and d["state"] in SELL_STATE_SET:
                 d["state"] = "HOLD"
-                d["row"][2] = "HOLD"
+                d["row"][4] = "HOLD"
                 d["row"][-1] = _format_cooldown_phrase("최근 매수", sell_info.get("last_buy"))
                 d["buy_signal"] = False
 
             if buy_info and d["state"] in BUY_STATE_SET:
                 d["state"] = "WAIT"
-                d["row"][2] = "WAIT"
+                d["row"][4] = "WAIT"
                 d["row"][-1] = _format_cooldown_phrase("최근 매도", buy_info.get("last_sell"))
                 d["buy_signal"] = False
 
@@ -631,7 +610,7 @@ def generate_daily_signals_for_portfolio(
     for d in final_decisions:
         if d.get("is_locked") and d.get("is_held"):
             d["state"] = "HOLD"
-            d["row"][2] = "HOLD"
+            d["row"][4] = "HOLD"
             d["buy_signal"] = False
             d["row"][-1] = lock_phrase
 

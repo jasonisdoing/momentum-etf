@@ -21,7 +21,7 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 2,
+            "MA_PERIOD": 3,
             "PORTFOLIO_TOPN": 2,
             "REPLACE_WEAKER_STOCK": true,
             "REPLACE_SCORE_THRESHOLD": 0.5,
@@ -89,7 +89,7 @@
         "is_active": true,
         "strategy": {
             "MA_PERIOD": 15,
-            "PORTFOLIO_TOPN": 10,
+            "PORTFOLIO_TOPN": 8,
             "REPLACE_WEAKER_STOCK": true,
             "REPLACE_SCORE_THRESHOLD": 1.0,
             "MIN_BUY_SCORE": 0.0
@@ -120,7 +120,7 @@
                 "name": "TIMEFOLIO 미국나스닥100액티브"
             }
         ],
-        "need_signal": true,
+        "need_signal": false,
         "is_active": true,
         "strategy": {
             "MA_PERIOD": 15,

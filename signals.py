@@ -67,6 +67,7 @@ from logic.momentum import (
     DECISION_CONFIG,
     COIN_ZERO_THRESHOLD,
 )
+from logic.strategies.momentum.shared import SIGNAL_TABLE_HEADERS
 
 try:
     from pykrx import stock as _stock
@@ -2116,9 +2117,11 @@ def generate_signal_report(
         special_row = [
             0,  # #
             "IS",  # 티커
+            "International Shares",  # 종목명
+            "-",  # 카테고리
             "HOLD",  # 상태
-            "-",  # 매수일
-            "-",  # 보유
+            "-",  # 매수일자
+            "-",  # 보유일
             is_value,  # 현재가
             0.0,  # 일간수익률
             "1",  # 보유수량
@@ -2137,24 +2140,11 @@ def generate_signal_report(
             row[0] = i
 
     # 9. 최종 결과 반환
-    headers = [
-        "#",
-        "티커",
-        "상태",
-        "매수일자",
-        "보유일",
-        "현재가",
-        "일간수익률",
-        "보유수량",
-        "금액",
-        "누적수익률",
-        "비중",
-    ]
-    headers.extend(["고점대비", "점수", "지속", "문구"])
+    headers = list(SIGNAL_TABLE_HEADERS)
 
     state_counts: Dict[str, int] = {}
     for row in rows_sorted:
-        state = row[2]
+        state = row[4]
         state_counts[state] = state_counts.get(state, 0) + 1
 
     logger.info(
@@ -2280,9 +2270,11 @@ def main(
         aligns = [
             "right",  # #
             "right",  # 티커
+            "left",  # 종목명
+            "left",  # 카테고리
             "center",  # 상태
-            "left",  # 매수일
-            "right",  # 보유
+            "left",  # 매수일자
+            "right",  # 보유일
             "right",  # 현재가
             "right",  # 일간수익률
             "right",  # 보유수량
