@@ -1608,7 +1608,11 @@ def generate_signal_report(
                 international_shares_value = 0.0
     new_equity_candidate = total_holdings_value + international_shares_value
 
-    if country == "coin":
+    today_norm = pd.Timestamp.now().normalize()
+    base_norm = base_date.normalize() if isinstance(base_date, pd.Timestamp) else today_norm
+    allow_live_balance = country == "coin" and base_norm >= today_norm
+
+    if country == "coin" and allow_live_balance:
         try:
             from scripts.snapshot_bithumb_balances import (
                 _fetch_bithumb_balance_dict as fetch_bithumb_balance_dict,
@@ -1621,6 +1625,9 @@ def generate_signal_report(
                 new_equity_candidate += krw_balance + p_balance
         except Exception as e:
             logger.warning("Bithumb 잔액 조회 실패. 평가금액 자동 보정 시 코인 가치만 반영됩니다. (%s)", e)
+    elif country == "coin":
+        # 과거 날짜를 재계산할 때는 당시 DB에 저장된 값을 유지합니다.
+        new_equity_candidate = current_equity
 
     # 2. 자동 보정 및 이월 조건 확인
     is_carried_forward = (
@@ -1642,7 +1649,7 @@ def generate_signal_report(
         # 거래일: 자동 보정 로직을 적용합니다.
         should_autocorrect = False
         autocorrect_reason = ""
-        if country == "coin":
+        if country == "coin" and allow_live_balance:
             # 코인은 항상 최신 잔액으로 덮어씁니다.
             if abs(new_equity_candidate - current_equity) > 1e-9:
                 should_autocorrect = True
@@ -2077,7 +2084,6 @@ def main(
             col_indices["day_ret"] = headers.index("일간수익률")
             col_indices["cum_ret"] = headers.index("누적수익률")
             col_indices["weight"] = headers.index("비중")
-            col_indices["shares"] = headers.index("보유수량")
         except (ValueError, KeyError):
             pass  # 일부 컬럼을 못찾아도 괜찮음
 
@@ -2158,6 +2164,55 @@ def main(
         )
 
         print("\n" + summary_line_plain)
+
+        # 콘솔 로그용 보유 자산 상세 출력
+        cash_amount = float(summary_data.get("total_cash", 0.0) or 0.0)
+        total_equity = float(summary_data.get("total_equity", 0.0) or 0.0)
+
+        try:
+            idx_ticker = headers.index("티커")
+            idx_amount = headers.index("금액")
+        except ValueError:
+            idx_ticker = idx_amount = None
+
+        breakdown_items = []
+        if idx_ticker is not None and idx_amount is not None:
+            for row in rows_sorted:
+                amount = row[idx_amount]
+                try:
+                    value = float(amount)
+                except (TypeError, ValueError):
+                    continue
+                if value <= 0:
+                    continue
+
+                ticker = row[idx_ticker]
+                breakdown_items.append((value, ticker))
+
+        breakdown_items.sort(key=lambda x: x[0], reverse=True)
+
+        if breakdown_items or cash_amount:
+            print("보유 자산 구성:")
+
+            ticker_name_map = {}
+            try:
+                for item in get_etfs(country) or []:
+                    code = item.get("ticker")
+                    if code:
+                        ticker_name_map[str(code)] = item.get("name", "")
+            except Exception:
+                ticker_name_map = {}
+
+            for value, ticker in breakdown_items:
+                name_lookup = ticker_name_map.get(ticker)
+                if not name_lookup:
+                    name_lookup = ticker
+                display_name = (
+                    f"{ticker}({name_lookup})" if name_lookup and name_lookup != ticker else ticker
+                )
+                print(f"  - {display_name}: {format_kr_money(value)}")
+            print(f"  - 현금: {format_kr_money(cash_amount)}")
+            print(f"  = 합계: {format_kr_money(total_equity)}")
 
         return SignalExecutionResult(
             report_date=report_base_date.to_pydatetime(),

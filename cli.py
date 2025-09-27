@@ -3,43 +3,19 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
 
 이 스크립트는 백테스트, 시그널 조회, 파라미터 튜닝 등
 웹 UI 외부에서 실행되는 주요 기능들의 통합 진입점 역할을 합니다.
-[사용법]
-1. 시그널 조회: python cli.py <계좌코드> --signal
-   - 예: python cli.py k1 --signal
 
-2. 백테스트 실행: python cli.py <계좌코드> --test
-   - 예: python cli.py a1 --test
+사용 예시는 아래를 참고하세요.
 
-3. 파라미터 튜닝: python cli.py <계좌코드> --tune
-   - 예: python cli.py k1 --tune
-"""
-
-"""
-[실행 예시]
-아래는 'data/accounts/country_mapping.json'에 등록된 계좌를 기반으로 생성된 실행 명령어 예시입니다.
-이 목록을 복사하여 터미널에서 바로 사용할 수 있습니다.
-
-# --- 계좌별 기본 명령어 (signal, test, tune) ---
-
-# 한국 (KOR) / m1 계좌
-python cli.py m1 --signal --date 2025-09-23
-python cli.py m1 --test
-python cli.py m1 --tune
-
-# 호주 (AUS) / a1 계좌
-python cli.py a1 --signal
-python cli.py a1 --test
-python cli.py a1 --tune
-
-# 가상화폐 (COIN) / b1 계좌
-python cli.py b1 --signal
-python cli.py b1 --test
-python cli.py b1 --tune
-
-# --- 특수 목적 명령어 ---
-
-# 시장 레짐 필터 튜닝 (모든 계좌에 공통 적용되는 설정을 튜닝합니다)
-python cli.py kor --tune-regime --account m1
+- 오늘 시그널 계산:              ``python cli.py k1 --signal``
+- 여러 계좌 시그널 계산:         ``python cli.py --accounts k1,k2 --signal``
+- 국가 단위 전체 시그널 계산:    ``python cli.py --country kor --signal``
+- 특정 기준일 시그널 재계산:     ``python cli.py k1 --signal --date 2025-09-26``
+- 구간 시그널 일괄 재계산:       ``python cli.py k1 --signal --start-date 2025-09-01 --end-date 2025-09-26``
+- 전략 백테스트:                 ``python cli.py k1 --test``
+- 사용자 지정 티커로 백테스트:   ``python cli.py b1 --test --tickers BTC,ETH,SOL``
+- 여러 계좌 백테스트:            ``python cli.py --accounts k1,k2 --test``
+- 시장 레짐 파라미터 튜닝:       ``python cli.py k1 --tune-regime``
+- 전략 파라미터 튜닝:            ``python cli.py k1 --tune``
 
 """
 
@@ -65,19 +41,6 @@ from utils.account_registry import (
     get_strategy_rules_for_account,
     load_accounts,
 )
-
-
-def _resolve_account(country: str, explicit: Optional[str]) -> str:
-    if explicit:
-        return explicit
-
-    load_accounts(force_reload=False)
-    entries = get_accounts_by_country(country) or []
-    for entry in entries:
-        code = entry.get("account")
-        if code:
-            return str(code)
-    raise SystemExit(f"'{country}' 국가에 등록된 계좌가 없습니다. data/accounts/country_mapping.json을 확인하세요.")
 
 
 def main():

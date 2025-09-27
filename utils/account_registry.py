@@ -94,49 +94,46 @@ _account_settings_cache: Dict[str, Dict[str, Any]] = {}
 
 
 def get_account_file_settings(account: str) -> Dict[str, Any]:
-    """
-    계좌별 설정 파일(예: 'data/accounts/settings/kor_m1.py')에서 초기 자본금,
-    기준일 및 전략 파라미터를 동적으로 로드합니다.
-    """
+    """country_mapping.json에 저장된 계좌별 설정을 반환합니다."""
+
     cache_key = f"account_{account}"
     if cache_key in _account_settings_cache:
         return _account_settings_cache[cache_key]
 
-    settings: Dict[str, Any] = {}
-    project_root = Path(__file__).resolve().parent.parent
-    file_path = project_root / "data" / "settings" / "accounts" / f"{account}.py"
-    module_name = f"account_settings_{account}"
+    account_info = get_account_info(account)
+    if not account_info:
+        raise SystemExit(f"오류: 등록되지 않은 계좌입니다: {account}")
 
-    if not file_path.is_file():
-        raise SystemExit(f"오류: 계좌 설정 파일({file_path})을 찾을 수 없습니다. 이 파일은 필수입니다.")
+    settings_cfg = account_info.get("account_settings")
+    if not isinstance(settings_cfg, dict):
+        raise SystemExit(f"오류: 계좌 '{account}' 설정에 account_settings 항목이 없습니다.")
 
     try:
-        spec = importlib.util.spec_from_file_location(module_name, file_path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Cannot create module spec from {file_path}")
+        initial_capital = float(settings_cfg["initial_capital_krw"])
+    except (KeyError, TypeError, ValueError) as exc:  # noqa: PERF203
+        raise SystemExit(f"오류: 계좌 '{account}'의 initial_capital_krw 값이 올바르지 않습니다.") from exc
 
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+    date_value = settings_cfg.get("initial_date")
+    if not date_value:
+        raise SystemExit(f"오류: 계좌 '{account}'의 initial_date 값이 누락되었습니다.")
 
-        # 필수 설정 로드
-        initial_capital_krw = getattr(module, "INITIAL_CAPITAL_KRW")
-        date_str = getattr(module, "INITIAL_DATE")
+    if isinstance(date_value, datetime):
+        initial_date = date_value
+    else:
+        try:
+            initial_date = datetime.strptime(str(date_value), "%Y-%m-%d")
+        except ValueError as exc:  # noqa: PERF203
+            raise SystemExit(f"오류: 계좌 '{account}'의 initial_date 값이 YYYY-MM-DD 형식이 아닙니다.") from exc
 
-        # 유효성 검사
-        if not isinstance(initial_capital_krw, (int, float)) or initial_capital_krw <= 0:
-            raise ValueError("INITIAL_CAPITAL_KRW 0보다 큰 숫자여야 합니다.")
+    slack_webhook_url = settings_cfg.get("slack_webhook_url")
+    if slack_webhook_url is not None and not isinstance(slack_webhook_url, str):
+        raise SystemExit(f"오류: 계좌 '{account}'의 slack_webhook_url 값은 문자열이어야 합니다.")
 
-        settings["initial_capital_krw"] = initial_capital_krw
-        settings["initial_date"] = datetime.strptime(date_str, "%Y-%m-%d")
-
-        # (선택) 슬랙 웹훅 URL
-        slack_webhook_url = getattr(module, "SLACK_WEBHOOK_URL", None)
-        if slack_webhook_url and not isinstance(slack_webhook_url, str):
-            raise ValueError("SLACK_WEBHOOK_URL은 문자열이어야 합니다.")
-        settings["slack_webhook_url"] = slack_webhook_url
-
-    except (AttributeError, ValueError, TypeError, ImportError) as e:
-        raise SystemExit(f"오류: 계좌 설정 파일({file_path})에 문제가 있습니다: {e}")
+    settings: Dict[str, Any] = {
+        "initial_capital_krw": initial_capital,
+        "initial_date": initial_date,
+        "slack_webhook_url": slack_webhook_url,
+    }
 
     _account_settings_cache[cache_key] = settings
     return settings
