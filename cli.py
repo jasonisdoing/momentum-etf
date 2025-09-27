@@ -11,7 +11,7 @@ MomentumEtf 프로젝트의 CLI(명령줄 인터페이스) 실행 파일입니�
 - 국가 단위 전체 시그널 계산:    ``python cli.py --country kor --signal``
 - 특정 기준일 시그널 재계산:     ``python cli.py k1 --signal --date 2025-09-26``
 - 구간 시그널 일괄 재계산:       ``python cli.py k1 --signal --start-date 2025-09-01 --end-date 2025-09-26``
-- 전략 백테스트:                 ``python cli.py k1 --test``
+- 전략 백테스트:                 ``python cli.py b1 --test``
 - 사용자 지정 티커로 백테스트:   ``python cli.py b1 --test --tickers BTC,ETH,SOL``
 - 여러 계좌 백테스트:            ``python cli.py --accounts k1,k2 --test``
 - 시장 레짐 파라미터 튜닝:       ``python cli.py k1 --tune-regime``

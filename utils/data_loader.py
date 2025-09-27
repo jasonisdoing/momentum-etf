@@ -358,8 +358,6 @@ def _fetch_ohlcv_with_cache(
     for miss_start, miss_end in missing_ranges:
         if miss_start > miss_end:
             continue
-        if cache_start is not None and miss_end < cache_start:
-            continue
         if cache_end is not None and _should_skip_pykrx_fetch(country, cache_end, miss_start):
             continue
 
