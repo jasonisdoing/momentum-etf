@@ -12,7 +12,6 @@ class StrategyRules:
 
     ma_period: int
     portfolio_topn: int
-    replace_weaker_stock: bool
     replace_threshold: float
     min_buy_score: Optional[float] = None
     coin_min_holding_cost_krw: Optional[float] = None
@@ -23,7 +22,6 @@ class StrategyRules:
         *,
         ma_period: Any,
         portfolio_topn: Any,
-        replace_weaker_stock: Any,
         replace_threshold: Any,
         min_buy_score: Any = None,
         coin_min_holding_cost_krw: Any = None,
@@ -42,9 +40,6 @@ class StrategyRules:
         if portfolio_topn_int <= 0:
             raise ValueError("PORTFOLIO_TOPN은 0보다 큰 정수여야 합니다.")
 
-        if not isinstance(replace_weaker_stock, bool):
-            raise ValueError("REPLACE_WEAKER_STOCK은 True 또는 False여야 합니다.")
-
         try:
             replace_threshold_float = float(replace_threshold)
         except (TypeError, ValueError):
@@ -56,7 +51,6 @@ class StrategyRules:
         return cls(
             ma_period=ma_period_int,
             portfolio_topn=portfolio_topn_int,
-            replace_weaker_stock=replace_weaker_stock,
             replace_threshold=replace_threshold_float,
             min_buy_score=min_buy_score_resolved,
             coin_min_holding_cost_krw=coin_min_resolved,
@@ -67,8 +61,6 @@ class StrategyRules:
         return cls.from_values(
             ma_period=mapping.get("MA_PERIOD") or mapping.get("ma_period"),
             portfolio_topn=mapping.get("PORTFOLIO_TOPN") or mapping.get("portfolio_topn"),
-            replace_weaker_stock=mapping.get("REPLACE_WEAKER_STOCK")
-            or mapping.get("replace_weaker_stock"),
             replace_threshold=mapping.get("REPLACE_SCORE_THRESHOLD")
             or mapping.get("replace_threshold"),
             min_buy_score=mapping.get("MIN_BUY_SCORE") or mapping.get("min_buy_score"),
@@ -80,7 +72,6 @@ class StrategyRules:
         return {
             "ma_period": self.ma_period,
             "portfolio_topn": self.portfolio_topn,
-            "replace_weaker_stock": self.replace_weaker_stock,
             "replace_threshold": self.replace_threshold,
             "min_buy_score": self.min_buy_score,
             "coin_min_holding_cost_krw": self.coin_min_holding_cost_krw,

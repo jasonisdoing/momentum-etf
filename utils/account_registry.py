@@ -178,7 +178,6 @@ def _refresh_cache() -> None:
             item["strategy"] = strategy_dict
             item["ma_period"] = strategy_rules.ma_period
             item["portfolio_topn"] = strategy_rules.portfolio_topn
-            item["replace_weaker_stock"] = strategy_rules.replace_weaker_stock
             item["replace_threshold"] = strategy_rules.replace_threshold
             item["min_buy_score"] = strategy_rules.min_buy_score
             if strategy_rules.coin_min_holding_cost_krw is not None:

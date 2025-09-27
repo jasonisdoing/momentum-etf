@@ -259,7 +259,6 @@ def load_portfolio_results(
         date_range=date_range,
         country=country,
         ma_period=strategy_rules.ma_period,
-        replace_weaker_stock=strategy_rules.replace_weaker_stock,
         replace_threshold=strategy_rules.replace_threshold,
         regime_filter_enabled=common["MARKET_REGIME_FILTER_ENABLED"],
         regime_filter_ticker=common["MARKET_REGIME_FILTER_TICKER"],

@@ -23,7 +23,6 @@ def run_portfolio_backtest(
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     ma_period: int = 20,
-    replace_weaker_stock: bool = True,
     replace_threshold: float = 0.0,
     regime_filter_enabled: bool = False,
     regime_filter_ticker: str = "^GSPC",
@@ -475,7 +474,7 @@ def run_portfolio_backtest(
                             )
                         purchased_today.add(ticker_to_buy)
 
-            elif slots_to_fill <= 0 and replace_weaker_stock and buy_ranked_candidates:
+            elif slots_to_fill <= 0 and buy_ranked_candidates:
                 helper_candidates = [
                     {"tkr": ticker, "score": score}
                     for score, ticker in buy_ranked_candidates

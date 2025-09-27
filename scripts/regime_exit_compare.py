@@ -99,7 +99,6 @@ def compare_exit_behaviors(account: str, start: str | None, end: str | None) -> 
         initial_capital=account_settings["initial_capital_krw"],
         top_n=rules.portfolio_topn,
         ma_period=rules.ma_period,
-        replace_weaker_stock=rules.replace_weaker_stock,
         replace_threshold=rules.replace_threshold,
         country=country,
         stop_loss_pct=-abs(float(common["HOLDING_STOP_LOSS_PCT"])),

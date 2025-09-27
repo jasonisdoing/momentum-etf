@@ -97,7 +97,6 @@ def _print_backtest_summary(
         "포트폴리오 종목 수 (TopN)": portfolio_topn,
         "모멘텀 스코어 MA 기간": f"{settings.MA_PERIOD}일",
         "교체 매매 점수 임계값": settings.REPLACE_SCORE_THRESHOLD,
-        "약세 종목 우선 교체": "예" if settings.REPLACE_WEAKER_STOCK else "아니오",
         "개별 종목 손절매": f"{settings.HOLDING_STOP_LOSS_PCT}%",
         "매도 후 재매수 금지 기간": f"{settings.COOLDOWN_DAYS}일",
         "시장 위험 필터": "활성" if settings.MARKET_REGIME_FILTER_ENABLED else "비활성",
@@ -285,7 +284,6 @@ def main(
         settings.MA_PERIOD = strategy_rules.ma_period
         portfolio_topn = strategy_rules.portfolio_topn
         settings.REPLACE_SCORE_THRESHOLD = strategy_rules.replace_threshold
-        settings.REPLACE_WEAKER_STOCK = strategy_rules.replace_weaker_stock
         min_buy_score = strategy_rules.min_buy_score or 0.0
     except SystemExit as e:
         print(str(e))
@@ -302,8 +300,6 @@ def main(
                 portfolio_topn = int(override_settings["portfolio_topn"])
             if "replace_threshold" in override_settings:
                 settings.REPLACE_SCORE_THRESHOLD = float(override_settings["replace_threshold"])
-            if "replace_weaker_stock" in override_settings:
-                settings.REPLACE_WEAKER_STOCK = bool(override_settings["replace_weaker_stock"])
         except Exception:
             # Silently ignore malformed overrides
             pass
@@ -459,7 +455,6 @@ def main(
                     country=country,
                     prefetched_data=prefetched_data,
                     ma_period=settings.MA_PERIOD,
-                    replace_weaker_stock=settings.REPLACE_WEAKER_STOCK,
                     replace_threshold=settings.REPLACE_SCORE_THRESHOLD,
                     regime_filter_enabled=settings.MARKET_REGIME_FILTER_ENABLED,
                     regime_filter_ticker=settings.MARKET_REGIME_FILTER_TICKER,

@@ -82,7 +82,6 @@ def generate_daily_signals_for_portfolio(
     denom = strategy_rules.portfolio_topn
     if denom <= 0:
         raise ValueError(f"'{country}' 국가의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
-    replace_weaker_stock = strategy_rules.replace_weaker_stock
     replace_threshold = strategy_rules.replace_threshold
 
     # 현재 보유 종목의 카테고리 (TBD 제외)
@@ -411,24 +410,23 @@ def generate_daily_signals_for_portfolio(
                     cand["row"][-1] = "가격 정보 없음"
 
         # 교체 매매 로직: 포트폴리오에 빈 슬롯이 있더라도, 더 좋은 종목으로 교체할 기회가 있으면 실행
-        if replace_weaker_stock:
-            replacement_candidates, _ = select_candidates_by_category(
-                [cand for cand in wait_candidates_raw if cand.get("state") != "BUY"],
-                etf_meta,
-                held_categories=None,
-                max_count=None,
-                skip_held_categories=False,
-            )
+        replacement_candidates, _ = select_candidates_by_category(
+            [cand for cand in wait_candidates_raw if cand.get("state") != "BUY"],
+            etf_meta,
+            held_categories=None,
+            max_count=None,
+            skip_held_categories=False,
+        )
 
-            # 2. 교체 로직 실행
-            current_held_stocks = [d for d in decisions if d["state"] == "HOLD"]
-            current_held_stocks.sort(
-                key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf")
-            )
+        # 2. 교체 로직 실행
+        current_held_stocks = [d for d in decisions if d["state"] == "HOLD"]
+        current_held_stocks.sort(
+            key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf")
+        )
 
-            for best_new in replacement_candidates:
-                if not current_held_stocks:
-                    break
+        for best_new in replacement_candidates:
+            if not current_held_stocks:
+                break
 
                 wait_stock_category = etf_meta.get(best_new["tkr"], {}).get("category")
 

@@ -14,12 +14,15 @@ from test import main as run_backtest
 from utils.tee import Tee
 from utils.data_loader import fetch_ohlcv_for_tickers
 from utils.stock_list_io import get_etfs
-from utils.account_registry import get_account_info, get_strategy_rules_for_account
+from utils.account_registry import get_account_info
 
 # --- 국가별 튜닝 파라미터 범위 정의 ---
 TUNING_CONFIG = {
     "aus": {
-        "MA_RANGE": np.arange(5, 101, 1),
+        "MA_RANGE": np.arange(5, 21, 1),
+        "PORTFOLIO_TOPN": np.arange(3, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.0, 0.5),
+        "MIN_BUY_SCORE": np.arange(0, 2.0, 0.5),
         "TEST_MONTHS_RANGE": 12,
     },
     "kor": {
@@ -34,19 +37,23 @@ TUNING_CONFIG = {
 }
 
 
-def run_single_backtest(params, prefetched_data, account):
+PARAM_LABELS = [
+    ("PORTFOLIO_TOPN", "portfolio_topn"),
+    ("MA_RANGE", "ma_period"),
+    ("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
+    ("MIN_BUY_SCORE", "min_buy_score"),
+]
+
+
+def run_single_backtest(params, prefetched_data, account, param_names, test_months):
     """단일 파라미터 조합으로 백테스트를 실행하고 결과를 반환합니다."""
-    country_code, topn, ma_period, replace_threshold, test_months = params
 
-    override_settings = {
-        "portfolio_topn": topn,
-        "ma_period": ma_period,
-        "replace_threshold": replace_threshold,
-        "replace_weaker_stock": True,  # 교체매매는 활성화된 상태에서 테스트
-        "test_months_range": test_months,
-    }
+    param_values = params[1:]
+    override_settings = {name: value for name, value in zip(param_names, param_values)}
+    override_settings["test_months_range"] = test_months
 
-    print(f"Testing with: TopN={topn}, MA={ma_period}, ReplaceThr={replace_threshold}")
+    log_params = ", ".join(f"{name}={value}" for name, value in zip(param_names, param_values))
+    print(f"Testing with: {log_params}")
 
     try:
         if not account:
@@ -58,8 +65,7 @@ def run_single_backtest(params, prefetched_data, account):
             prefetched_data=prefetched_data,
         )
         if summary:
-            # 파라미터에서 국가 코드는 제외하고 저장
-            summary["params"] = params[1:]
+            summary["params"] = param_values
             return summary
     except Exception as e:
         print(f"Error during backtest with params {params}: {e}")
@@ -81,8 +87,6 @@ def main():
     if not country_code:
         raise SystemExit(f"'{account}' 계좌에 국가 정보가 없습니다.")
 
-    strategy_rules = get_strategy_rules_for_account(account)
-
     # 로그 파일 설정
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
@@ -102,13 +106,39 @@ def main():
                 print(f"오류: '{country_code}' 국가에 대한 튜닝 설정이 없습니다.")
                 return
 
-            MA_RANGE = config["MA_RANGE"]
-            TEST_MONTHS_RANGE = config["TEST_MONTHS_RANGE"]
+            MA_RANGE = config.get("MA_RANGE")
+            TEST_MONTHS_RANGE = config.get("TEST_MONTHS_RANGE", 12)
 
-            # --- DB에서 고정 파라미터 로드 ---
-            TOPN_FIXED = [int(strategy_rules.portfolio_topn)]
-            REPLACE_THRESHOLD_FIXED = [float(strategy_rules.replace_threshold)]
-            print(f"  - 고정값: TopN={TOPN_FIXED[0]}, ReplaceThr={REPLACE_THRESHOLD_FIXED[0]}")
+            param_ranges = []
+            param_names = []
+            for label, override_key in PARAM_LABELS:
+                if label not in config:
+                    continue
+                cfg_values = config[label]
+                if isinstance(cfg_values, (list, tuple, np.ndarray)):
+                    values = list(cfg_values)
+                else:
+                    values = [cfg_values]
+                if not values:
+                    continue
+                param_ranges.append(values)
+                param_names.append(override_key)
+
+            if not param_ranges:
+                print("오류: 튜닝할 파라미터 범위가 설정되지 않았습니다.")
+                return
+
+            print("튜닝 대상 파라미터:")
+            for label, override_key in zip(
+                [lbl for lbl, _ in PARAM_LABELS if lbl in config], param_names
+            ):
+                values = config[label]
+                if isinstance(values, (list, tuple, np.ndarray)) and len(values) > 1:
+                    preview = ", ".join(str(v) for v in values[:5])
+                    suffix = "..." if len(values) > 5 else ""
+                    print(f"  - {override_key}: [{preview}{suffix}]")
+                else:
+                    print(f"  - {override_key}: {values}")
 
             # --- 데이터 사전 로딩 ---
             print(f"\n튜닝을 위해 {country_code.upper()} 시장의 데이터를 미리 로딩합니다 (account={account})...")
@@ -137,10 +167,7 @@ def main():
             param_combinations = list(
                 itertools.product(
                     [country_code],
-                    TOPN_FIXED,
-                    MA_RANGE,
-                    REPLACE_THRESHOLD_FIXED,
-                    [TEST_MONTHS_RANGE],
+                    *param_ranges,
                 )
             )
 
@@ -150,7 +177,13 @@ def main():
 
             # 순차 처리를 위해 for 루프 사용
             for i, params in enumerate(param_combinations):
-                result = run_single_backtest(params, prefetched_data, account)
+                result = run_single_backtest(
+                    params,
+                    prefetched_data,
+                    account,
+                    param_names,
+                    TEST_MONTHS_RANGE,
+                )
                 if result:
                     results.append(result)
                 print(f"Progress: {i + 1}/{len(param_combinations)}")
@@ -171,10 +204,9 @@ def main():
 
             for i, (_, row) in enumerate(top_3_results.iterrows(), 1):
                 params = row["params"]
-                _, ma_period, _, _ = params
-
                 print(f"\n--- {i}위 ---")
-                print(f"  - MA_PERIOD: {ma_period}")
+                for name, value in zip(param_names, params):
+                    print(f"  - {name}: {value}")
                 print("-" * 20)
                 print(f"  - CAGR: {row['cagr_pct']:.2f}%")
                 print(f"  - MDD: {-row['mdd_pct']:.2f}%")
@@ -186,7 +218,11 @@ def main():
         finally:
             sys.stdout = original_stdout
             if not top_3_results.empty:
-                first_row_params = top_3_results.iloc[0]["params"]
-                topn, _, replace_thr, _ = first_row_params
+                best_params = top_3_results.iloc[0]["params"]
                 print("\n" + "=" * 50)
-                print(f"(고정 파라미터: TopN={topn}, ReplaceThr={replace_thr})")
+                best_summary = [f"{name}={value}" for name, value in zip(param_names, best_params)]
+                print("최적 파라미터: " + ", ".join(best_summary))
+
+
+if __name__ == "__main__":
+    main()

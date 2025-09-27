@@ -115,12 +115,6 @@ def render_account_settings(country_code: str, account_code: str):
         disabled=True,
         help=strategy_help_text,
     )
-    st.checkbox(
-        "교체 매매 사용",
-        value=bool(strategy_rules.replace_weaker_stock),
-        disabled=True,
-        help=strategy_help_text,
-    )
     st.text_input(
         "교체 매매 점수 임계값",
         value=f"{float(strategy_rules.replace_threshold):.2f}",
