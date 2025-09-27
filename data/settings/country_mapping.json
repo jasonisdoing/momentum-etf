@@ -155,7 +155,7 @@
                 "name": "TIMEFOLIO 미국나스닥100액티브"
             }
         ],
-        "need_signal": true,
+        "need_signal": false,
         "is_active": true,
         "strategy": {
             "MA_PERIOD": 15,
