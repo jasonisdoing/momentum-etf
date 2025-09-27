@@ -4,6 +4,7 @@
 
 import functools
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -45,6 +46,32 @@ warnings.filterwarnings(
     category=UserWarning,
     module=r"^pandas_market_calendars\.",
 )
+
+
+class _PykrxLogFilter(logging.Filter):
+    """Suppress malformed pykrx util logs that break formatting."""  # pragma: no cover - log hygiene
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.msg
+        args = record.args
+        if (
+            isinstance(msg, tuple)
+            and len(msg) == 3
+            and all(isinstance(m, str) for m in msg)
+            and isinstance(args, tuple)
+            and len(args) == 1
+            and isinstance(args[0], dict)
+            and not args[0]
+        ):
+            return False
+        if isinstance(msg, str) and "None of [Index(['" in msg and not args:
+            return False
+        return True
+
+
+_root_logger = logging.getLogger()
+if not any(isinstance(f, _PykrxLogFilter) for f in _root_logger.filters):
+    _root_logger.addFilter(_PykrxLogFilter())
 
 CACHE_START_DATE_FALLBACK = "2020-01-01"
 
