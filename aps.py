@@ -235,8 +235,14 @@ def main():
             logging.info(f"Skipping {country.upper()} schedule (disabled)")
             continue
 
-        cron_expr = _get(f"SCHEDULE_{country.upper()}_CRON", cron_default)
-        timezone = _get(f"SCHEDULE_{country.upper()}_TZ", tz_default)
+        cron_expr = _get(
+            f"SCHEDULE_{country.upper()}_CRON",
+            cfg.get("signal_cron", cron_default),
+        )
+        timezone = _get(
+            f"SCHEDULE_{country.upper()}_TZ",
+            cfg.get("timezone", tz_default),
+        )
 
         scheduler.add_job(
             run_signals_for_country,
