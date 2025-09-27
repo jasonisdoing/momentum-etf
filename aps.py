@@ -104,7 +104,12 @@ def _accounts_for_country(country: str) -> list[str]:
         return []
 
 
-def run_signal_generation(country: str, account: str | None = None) -> None:
+def run_signal_generation(
+    country: str,
+    account: str | None = None,
+    *,
+    force_notify: bool = False,
+) -> None:
     """Run signal generation and sends a completion log to Slack."""
     start_time = time.time()
     report_date = None
@@ -147,6 +152,7 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
                 old_equity,
                 summary_data=signal_result.summary_data,
                 header_line=signal_result.header_line,
+                force_send=force_notify,
             )
             time.sleep(2)
             send_detailed_signal_notification(
@@ -157,6 +163,7 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
                 signal_result.detail_rows,
                 decision_config=signal_result.decision_config,
                 extra_lines=signal_result.detail_extra_lines,
+                force_send=force_notify,
             )
             date_str = report_date.strftime("%Y-%m-%d")
             prefix = f"{snapshot_country}/{account}" if account else snapshot_country
@@ -167,12 +174,12 @@ def run_signal_generation(country: str, account: str | None = None) -> None:
         logging.error(error_message, exc_info=True)
 
 
-def run_signals_for_country(country: str) -> None:
+def run_signals_for_country(country: str, *, force_notify: bool = False) -> None:
     accounts = _accounts_for_country(country)
     if accounts:
         for account in accounts:
             try:
-                run_signal_generation(country, account)
+                run_signal_generation(country, account, force_notify=force_notify)
             except Exception:
                 logging.error(
                     f"Error running signal generation for {country}/{account}", exc_info=True
@@ -272,7 +279,7 @@ def main():
             try:
                 enabled_default = bool(cfg.get("enabled", True))
                 if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", enabled_default):
-                    run_signals_for_country(country)
+                    run_signals_for_country(country, force_notify=True)
             except Exception:
                 logging.error(f"Error during initial run for {country}", exc_info=True)
         logging.info("[Initial Run] Complete.")
