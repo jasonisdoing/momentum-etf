@@ -10,7 +10,6 @@ import pandas as pd
 
 from utils.data_loader import fetch_ohlcv
 
-from .rules import passes_min_buy_score, resolve_min_buy_score
 from .shared import select_candidates_by_category
 
 
@@ -30,7 +29,7 @@ def run_portfolio_backtest(
     regime_behavior: str = "sell_all",
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
-    min_buy_score: Optional[float] = None,
+    **kwargs,
 ) -> Dict[str, pd.DataFrame]:
     """
     단일 이동평균선 교차 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
@@ -38,7 +37,6 @@ def run_portfolio_backtest(
     ma_period_etf = ma_period
     ma_period_stock = ma_period
     stop_loss = stop_loss_pct
-    min_buy_score = resolve_min_buy_score(min_buy_score)
 
     valid_regime_behaviors = {"sell_all", "hold_block_buy"}
     if regime_behavior not in valid_regime_behaviors:
@@ -374,8 +372,7 @@ def run_portfolio_backtest(
                         "inf"
                     )
 
-                    if passes_min_buy_score(score_cand, min_buy_score):
-                        buy_ranked_candidates.append((score_cand, candidate_ticker))
+                    buy_ranked_candidates.append((score_cand, candidate_ticker))
             buy_ranked_candidates.sort(reverse=True)
 
             # 2. 매수 실행 (신규 또는 교체)
@@ -790,7 +787,6 @@ def run_single_ticker_backtest(
     ma_period: int = 20,
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
-    min_buy_score: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     단일 종목에 대해 이동평균선 교차 전략 백테스트를 실행합니다.
@@ -798,7 +794,6 @@ def run_single_ticker_backtest(
     ma_period_etf = ma_period
     ma_period_stock = ma_period
     stop_loss = stop_loss_pct
-    min_buy_score = resolve_min_buy_score(min_buy_score)
 
     # --- 티커 유형(ETF/주식) 구분 ---
     ma_period = ma_period_etf if stock_type == "etf" else ma_period_stock
@@ -897,15 +892,7 @@ def run_single_ticker_backtest(
 
         if decision is None and shares == 0 and i >= buy_block_until:
             buy_signal_days_today = buy_signal_days.iloc[i]
-            ma_score_today = 0.0
-            if pd.notna(ma_today) and ma_today > 0:
-                ma_score_today = ((price / ma_today) - 1.0) * 100.0
-
-            passes_score_threshold = True
-            if not passes_min_buy_score(ma_score_today, min_buy_score):
-                passes_score_threshold = False
-
-            if buy_signal_days_today > 0 and passes_score_threshold:
+            if buy_signal_days_today > 0:
                 if country in ("coin", "aus"):
                     # 소수점 4자리까지 허용
                     buy_qty = round(cash / price, 4) if price > 0 else 0.0

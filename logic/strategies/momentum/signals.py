@@ -8,7 +8,7 @@ import pandas as pd
 
 from utils.report import format_kr_money
 
-from .rules import format_min_buy_shortfall, passes_min_buy_score, StrategyRules
+from .rules import StrategyRules
 from .shared import select_candidates_by_category
 
 
@@ -52,7 +52,6 @@ def generate_daily_signals_for_portfolio(
     # 여기서는 임시로 기본값을 사용하거나, portfolio_settings에서 가져오는 것으로 가정합니다.
     currency = portfolio_settings.get("currency", "KRW")
     precision = portfolio_settings.get("precision", 0)
-    min_buy_score = strategy_rules.min_buy_score
 
     if currency == "AUD":
 
@@ -235,16 +234,11 @@ def generate_daily_signals_for_portfolio(
 
         elif state == "WAIT":
             buy_signal_days_today = d["filter"]
-            if buy_signal_days_today > 0 and passes_min_buy_score(score_value, min_buy_score):
+            if buy_signal_days_today > 0:
                 buy_signal = True
                 if buy_block_info:
                     buy_signal = False
                     phrase = _format_cooldown_phrase("최근 매도", buy_block_info.get("last_sell"))
-            elif buy_signal_days_today > 0:
-                if not phrase:
-                    shortfall_msg = format_min_buy_shortfall(score_value, min_buy_score)
-                    if shortfall_msg:
-                        phrase = shortfall_msg
 
         ticker_key = str(tkr).upper()
         is_locked = ticker_key in locked_tickers

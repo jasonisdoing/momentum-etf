@@ -16,37 +16,34 @@ from utils.data_loader import fetch_ohlcv_for_tickers
 from utils.stock_list_io import get_etfs
 from utils.account_registry import get_account_info
 
+# python cli.py b1 --tune
 # --- 국가별 튜닝 파라미터 범위 정의 ---
 TUNING_CONFIG = {
+    "coin": {
+        "MA_RANGE": np.arange(2, 6, 1),
+        "PORTFOLIO_TOPN": np.arange(1, 6, 1),
+        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "TEST_MONTHS_RANGE": 12,
+    },
     "aus": {
         "MA_RANGE": np.arange(5, 21, 1),
         "PORTFOLIO_TOPN": [7],
         "REPLACE_SCORE_THRESHOLD": [0.5],
-        "MIN_BUY_SCORE": [0],
         "TEST_MONTHS_RANGE": 12,
     },
     "kor": {
         "MA_RANGE": np.arange(10, 21, 1),
         "PORTFOLIO_TOPN": [8],
         "REPLACE_SCORE_THRESHOLD": [0.5],
-        "MIN_BUY_SCORE": [0],
-        "TEST_MONTHS_RANGE": 12,
-    },
-    "coin": {
-        "MA_RANGE": [3],
-        "PORTFOLIO_TOPN": np.arange(1, 6, 1),
-        "REPLACE_SCORE_THRESHOLD": [0.5],
-        "MIN_BUY_SCORE": np.arange(0, 2.1, 0.1),
         "TEST_MONTHS_RANGE": 12,
     },
 }
 
 
 PARAM_LABELS = [
-    ("PORTFOLIO_TOPN", "portfolio_topn"),
     ("MA_RANGE", "ma_period"),
+    ("PORTFOLIO_TOPN", "portfolio_topn"),
     ("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
-    ("MIN_BUY_SCORE", "min_buy_score"),
 ]
 
 
@@ -100,7 +97,6 @@ def main():
     print(f"튜닝 로그가 다음 파일에 저장됩니다: {log_path}")
 
     original_stdout = sys.stdout
-    top_3_results = pd.DataFrame()
 
     with open(log_path, "w", encoding="utf-8") as log_file:
         sys.stdout = Tee(original_stdout, log_file)
@@ -201,32 +197,69 @@ def main():
             df_results = pd.DataFrame(results)
 
             # CAGR 기준으로 상위 5개 결과를 찾습니다.
-            top_3_results = df_results.sort_values(by="cagr_pct", ascending=False).head(5)
+            top_cagr_results = df_results.sort_values(by="cagr_pct", ascending=False).head(5)
 
             print("\n" + "=" * 50)
             print(">>> 튜닝 결과: CAGR 상위 5개 파라미터 <<<")
             print("=" * 50)
 
-            for i, (_, row) in enumerate(top_3_results.iterrows(), 1):
+            for i, (_, row) in enumerate(top_cagr_results.iterrows(), 1):
                 params = row["params"]
-                print(f"\n--- {i}위 ---")
+                print(f"\n--- CAGR {i}위 ---")
                 for name, value in zip(param_names, params):
                     print(f"  - {name}: {value}")
                 print("-" * 20)
                 print(f"  - CAGR: {row['cagr_pct']:.2f}%")
-                print(f"  - MDD: {-row['mdd_pct']:.2f}%")
+                print(f"  - CUI: {row['cui']:.2f}")
+                print(f"  - Ulcer Index: {row['ulcer_index']:.2f}")
                 print(f"  - Calmar Ratio: {row['calmar_ratio']:.2f}")
+                print(f"  - MDD: {-row['mdd_pct']:.2f}%")
                 print(f"  - Sharpe Ratio: {row['sharpe_ratio']:.2f}")
 
-            if not top_3_results.empty:
+            # MDD 기준으로 상위 5개 결과를 찾습니다.
+            top_mdd_results = df_results.sort_values(by="mdd_pct", ascending=True).head(5)
+
+            print("\n" + "=" * 50)
+            print(">>> 튜닝 결과: MDD 상위 5개 파라미터 <<<")
+            print("=" * 50)
+
+            for i, (_, row) in enumerate(top_mdd_results.iterrows(), 1):
+                params = row["params"]
+                print(f"\n--- MDD {i}위 ---")
+                for name, value in zip(param_names, params):
+                    print(f"  - {name}: {value}")
+                print("-" * 20)
+                print(f"  - CAGR: {row['cagr_pct']:.2f}%")
+                print(f"  - CUI: {row['cui']:.2f}")
+                print(f"  - Ulcer Index: {row['ulcer_index']:.2f}")
+                print(f"  - Calmar Ratio: {row['calmar_ratio']:.2f}")
+                print(f"  - MDD: {-row['mdd_pct']:.2f}%")
+                print(f"  - Sharpe Ratio: {row['sharpe_ratio']:.2f}")
+
+            # CUI 기준으로 상위 5개 결과를 찾습니다.
+            top_cui_results = df_results.sort_values(by="cui", ascending=False).head(5)
+
+            print("\n" + "=" * 50)
+            print(">>> 튜닝 결과: CUI (Calmar/Ulcer) 상위 5개 파라미터 <<<")
+            print("=" * 50)
+
+            for i, (_, row) in enumerate(top_cui_results.iterrows(), 1):
+                params = row["params"]
+                print(f"\n--- CUI (Calmar/Ulcer) {i}위 ---")
+                for name, value in zip(param_names, params):
+                    print(f"  - {name}: {value}")
+                print("-" * 20)
+                print(f"  - CAGR: {row['cagr_pct']:.2f}%")
+                print(f"  - CUI: {row['cui']:.2f}")
+                print(f"  - Ulcer Index: {row['ulcer_index']:.2f}")
+                print(f"  - Calmar Ratio: {row['calmar_ratio']:.2f}")
+                print(f"  - MDD: {-row['mdd_pct']:.2f}%")
+                print(f"  - Sharpe Ratio: {row['sharpe_ratio']:.2f}")
+
+            if not top_cagr_results.empty:
                 print(f"\n튜닝이 완료되었습니다. 상세 내용은 {log_path} 파일을 확인하세요.")
         finally:
             sys.stdout = original_stdout
-            if not top_3_results.empty:
-                best_params = top_3_results.iloc[0]["params"]
-                print("\n" + "=" * 50)
-                best_summary = [f"{name}={value}" for name, value in zip(param_names, best_params)]
-                print("최적 파라미터: " + ", ".join(best_summary))
 
 
 if __name__ == "__main__":

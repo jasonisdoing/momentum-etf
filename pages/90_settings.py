@@ -121,14 +121,6 @@ def render_account_settings(country_code: str, account_code: str):
         disabled=True,
         help=strategy_help_text,
     )
-    st.text_input(
-        "최소 매수 점수",
-        value=f"{strategy_rules.min_buy_score:.2f}"
-        if strategy_rules.min_buy_score is not None
-        else "-",
-        disabled=True,
-        help=strategy_help_text,
-    )
     if strategy_rules.coin_min_holding_cost_krw is not None:
         st.text_input(
             "코인 최소 보유 금액",

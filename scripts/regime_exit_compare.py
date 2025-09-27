@@ -106,7 +106,6 @@ def compare_exit_behaviors(account: str, start: str | None, end: str | None) -> 
         regime_filter_enabled=bool(common.get("MARKET_REGIME_FILTER_ENABLED", False)),
         regime_filter_ticker=str(common.get("MARKET_REGIME_FILTER_TICKER", "^GSPC")),
         regime_filter_ma_period=int(common.get("MARKET_REGIME_FILTER_MA_PERIOD", 20)),
-        min_buy_score=rules.min_buy_score,
         date_range=[start_date, end_date],
     )
 

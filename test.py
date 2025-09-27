@@ -85,6 +85,8 @@ def _print_backtest_summary(
             f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}",
             f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}",
             f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}",
+            f"| Ulcer Index: {summary.get('ulcer_index', 0.0):.2f}",
+            f"| CUI (Calmar/Ulcer): {summary.get('cui', 0.0):.2f}",
             "=" * 30,
         ]
     )
@@ -113,6 +115,7 @@ def _print_backtest_summary(
     print("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
     print("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
     print("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
+    print("  - Ulcer Index (얼서 지수): 고점 대비 낙폭의 지속성과 깊이를 반영. 낮을수록 안정적.")
 
     # 월별 성과 요약 테이블 출력
     if "monthly_returns" in summary and not summary["monthly_returns"].empty:
@@ -284,7 +287,6 @@ def main(
         settings.MA_PERIOD = strategy_rules.ma_period
         portfolio_topn = strategy_rules.portfolio_topn
         settings.REPLACE_SCORE_THRESHOLD = strategy_rules.replace_threshold
-        min_buy_score = strategy_rules.min_buy_score or 0.0
     except SystemExit as e:
         print(str(e))
         if log_file:
@@ -461,7 +463,6 @@ def main(
                     regime_filter_ma_period=settings.MARKET_REGIME_FILTER_MA_PERIOD,
                     stop_loss_pct=settings.HOLDING_STOP_LOSS_PCT,
                     cooldown_days=settings.COOLDOWN_DAYS,
-                    min_buy_score=min_buy_score,
                 )
                 or {}
             )
@@ -488,7 +489,6 @@ def main(
                     ma_period=settings.MA_PERIOD,
                     stop_loss_pct=settings.HOLDING_STOP_LOSS_PCT,
                     cooldown_days=settings.COOLDOWN_DAYS,
-                    min_buy_score=min_buy_score,
                 )
                 if not ts.empty:
                     time_series_by_ticker[ticker] = ts
@@ -811,13 +811,16 @@ def main(
                 print(f"\n백테스트 최종 자산: {money_formatter(final_value)}")
             peak = -1
             max_drawdown = 0
+            drawdowns_pct = []  # Ulcer Index 계산을 위한 일별 낙폭(%) 리스트
             for value in portfolio_values:
                 if value > peak:
                     peak = value
+                drawdown = 0.0
                 if peak > 0:
                     drawdown = (peak - value) / peak
                     if drawdown > max_drawdown:
                         max_drawdown = drawdown
+                drawdowns_pct.append(drawdown * 100.0)
 
             # 시장 위험 회피(Risk-Off) 기간을 계산합니다.
             risk_off_periods = []
@@ -923,6 +926,15 @@ def main(
             # 칼마 지수(Calmar Ratio) 계산 (CAGR / MDD)
             calmar_ratio = (cagr * 100) / (max_drawdown * 100) if max_drawdown > 0 else 0
 
+            # 얼서 지수(Ulcer Index) 계산
+            ulcer_index = 0.0
+            if drawdowns_pct:
+                drawdowns_squared = [d**2 for d in drawdowns_pct]
+                ulcer_index = (sum(drawdowns_squared) / len(drawdowns_squared)) ** 0.5
+
+            # CUI (Calmar / Ulcer Index) 계산
+            cui = calmar_ratio / ulcer_index if ulcer_index > 0 else 0.0
+
             summary = {
                 "start_date": start_date.strftime("%Y-%m-%d"),
                 "end_date": end_date.strftime("%Y-%m-%d"),
@@ -933,6 +945,8 @@ def main(
                 "sharpe_ratio": sharpe_ratio,
                 "sortino_ratio": sortino_ratio,
                 "calmar_ratio": calmar_ratio,
+                "ulcer_index": ulcer_index,
+                "cui": cui,
                 "cumulative_return_pct": (
                     (final_value / initial_capital_krw - 1) * 100 if initial_capital_krw > 0 else 0
                 ),

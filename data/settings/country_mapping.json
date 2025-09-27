@@ -22,9 +22,8 @@
         "is_active": true,
         "strategy": {
             "MA_PERIOD": 3,
-            "PORTFOLIO_TOPN": 1,
+            "PORTFOLIO_TOPN": 3,
             "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MIN_BUY_SCORE": 0.0,
             "COIN_MIN_HOLDING_COST_KRW": 10000
         },
         "precision": {
@@ -52,10 +51,9 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 13,
-            "PORTFOLIO_TOPN": 5,
-            "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MIN_BUY_SCORE": 0.0
+            "MA_PERIOD": 8,
+            "PORTFOLIO_TOPN": 7,
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "AUD",
@@ -86,10 +84,9 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 10,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 8,
-            "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
@@ -120,10 +117,9 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 10,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 8,
-            "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
@@ -154,10 +150,9 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 10,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
@@ -188,10 +183,9 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 10,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
@@ -222,10 +216,9 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 10,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
@@ -256,10 +249,9 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 10,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",

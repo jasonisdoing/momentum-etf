@@ -265,7 +265,6 @@ def load_portfolio_results(
         regime_filter_ma_period=int(common["MARKET_REGIME_FILTER_MA_PERIOD"]),
         stop_loss_pct=-abs(float(common["HOLDING_STOP_LOSS_PCT"])),
         cooldown_days=account_settings.get("cooldown_days", 0),
-        min_buy_score=strategy_rules.min_buy_score,
     )
     if not portfolio:
         raise SystemExit("백테스트 결과가 비어 있습니다.")

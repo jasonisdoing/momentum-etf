@@ -13,3 +13,4 @@ croniter
 cron-descriptor
 google-generativeai
 flake8
+watchdog

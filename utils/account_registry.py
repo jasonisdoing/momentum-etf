@@ -179,9 +179,6 @@ def _refresh_cache() -> None:
             item["ma_period"] = strategy_rules.ma_period
             item["portfolio_topn"] = strategy_rules.portfolio_topn
             item["replace_threshold"] = strategy_rules.replace_threshold
-            item["min_buy_score"] = strategy_rules.min_buy_score
-            if strategy_rules.coin_min_holding_cost_krw is not None:
-                item["coin_min_holding_cost_krw"] = strategy_rules.coin_min_holding_cost_krw
 
             precision_cfg = item.get("precision")
             if isinstance(precision_cfg, dict):
