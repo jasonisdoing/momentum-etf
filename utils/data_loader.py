@@ -64,7 +64,11 @@ class _PykrxLogFilter(logging.Filter):
             and not args[0]
         ):
             return False
-        if isinstance(msg, str) and "None of [Index(['" in msg and not args:
+        try:
+            formatted = record.getMessage()
+        except Exception:  # pragma: no cover - defensive
+            formatted = ""
+        if "None of [Index(['" in formatted:
             return False
         return True
 
