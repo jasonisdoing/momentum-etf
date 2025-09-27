@@ -22,10 +22,9 @@
         "is_active": true,
         "strategy": {
             "MA_PERIOD": 3,
-            "PORTFOLIO_TOPN": 2,
-            "REPLACE_WEAKER_STOCK": true,
+            "PORTFOLIO_TOPN": 1,
             "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MIN_BUY_SCORE": 0.2,
+            "MIN_BUY_SCORE": 0.0,
             "COIN_MIN_HOLDING_COST_KRW": 10000
         },
         "precision": {
@@ -53,10 +52,9 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
-            "PORTFOLIO_TOPN": 7,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "MA_PERIOD": 13,
+            "PORTFOLIO_TOPN": 5,
+            "REPLACE_SCORE_THRESHOLD": 0.5,
             "MIN_BUY_SCORE": 0.0
         },
         "precision": {
@@ -88,10 +86,9 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 10,
             "PORTFOLIO_TOPN": 8,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "REPLACE_SCORE_THRESHOLD": 0.5,
             "MIN_BUY_SCORE": 0.0
         },
         "precision": {
@@ -123,10 +120,9 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 10,
             "PORTFOLIO_TOPN": 8,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "REPLACE_SCORE_THRESHOLD": 0.5,
             "MIN_BUY_SCORE": 0.0
         },
         "precision": {
@@ -158,10 +154,9 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 10,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "REPLACE_SCORE_THRESHOLD": 0.5,
             "MIN_BUY_SCORE": 0.0
         },
         "precision": {
@@ -193,10 +188,9 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 10,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "REPLACE_SCORE_THRESHOLD": 0.5,
             "MIN_BUY_SCORE": 0.0
         },
         "precision": {
@@ -228,10 +222,9 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 10,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "REPLACE_SCORE_THRESHOLD": 0.5,
             "MIN_BUY_SCORE": 0.0
         },
         "precision": {
@@ -263,10 +256,9 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 10,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
+            "REPLACE_SCORE_THRESHOLD": 0.5,
             "MIN_BUY_SCORE": 0.0
         },
         "precision": {

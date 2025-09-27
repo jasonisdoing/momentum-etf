@@ -20,18 +20,23 @@ from utils.account_registry import get_account_info
 TUNING_CONFIG = {
     "aus": {
         "MA_RANGE": np.arange(5, 21, 1),
-        "PORTFOLIO_TOPN": np.arange(3, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.0, 0.5),
-        "MIN_BUY_SCORE": np.arange(0, 2.0, 0.5),
+        "PORTFOLIO_TOPN": [7],
+        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "MIN_BUY_SCORE": [0],
         "TEST_MONTHS_RANGE": 12,
     },
     "kor": {
-        "MA_RANGE": np.arange(5, 151, 1),
+        "MA_RANGE": np.arange(10, 21, 1),
+        "PORTFOLIO_TOPN": [8],
+        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "MIN_BUY_SCORE": [0],
         "TEST_MONTHS_RANGE": 12,
     },
     "coin": {
-        # 코인은 단일 종목 유형으로 간주합니다.
-        "MA_RANGE": np.arange(1, 201, 1),
+        "MA_RANGE": [3],
+        "PORTFOLIO_TOPN": np.arange(1, 6, 1),
+        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "MIN_BUY_SCORE": np.arange(0, 2.1, 0.1),
         "TEST_MONTHS_RANGE": 12,
     },
 }
