@@ -400,7 +400,18 @@ def _fetch_ohlcv_with_cache(
         if not trading_days_in_gap:
             continue
 
-        fetched = _fetch_ohlcv_core(ticker, country, miss_start, miss_end, cached_df)
+        try:
+            fetched = _fetch_ohlcv_core(ticker, country, miss_start, miss_end, cached_df)
+        except PykrxDataUnavailable:
+            # 신규 상장 등으로 과거 데이터가 존재하지 않거나, 최신 데이터만 캐시에 있는 경우
+            # 기존 캐시로 충분하면 네트워크 오류를 무시하고 계속 진행합니다.
+            if cached_df is not None:
+                if cache_start is not None and miss_end < cache_start:
+                    continue
+                if cache_end is not None and miss_start > cache_end:
+                    continue
+            raise
+
         if fetched is not None and not fetched.empty:
             new_frames.append(fetched)
 
