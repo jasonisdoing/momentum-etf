@@ -180,11 +180,16 @@ def run_portfolio_backtest(
 
         # --- 시장 레짐 필터 적용 (리스크 오프 조건 확인) ---
         is_risk_off = False
-        if regime_filter_enabled and market_regime_df is not None and dt in market_regime_df.index:
-            market_price = market_regime_df.loc[dt, "Close"]
-            market_ma = market_regime_df.loc[dt, "MA"]
-            if pd.notna(market_price) and pd.notna(market_ma) and market_price < market_ma:
-                is_risk_off = True
+        dt_norm = pd.Timestamp(dt).normalize()  # 시간 정보를 제거하고 날짜만 사용
+
+        if regime_filter_enabled and market_regime_df is not None:
+            # 정규화된 날짜로 비교
+            if dt_norm in market_regime_df.index:
+                market_price = market_regime_df.loc[dt_norm, "Close"]
+                market_ma = market_regime_df.loc[dt_norm, "MA"]
+                if pd.notna(market_price) and pd.notna(market_ma) and market_price < market_ma:
+                    is_risk_off = True
+                    # print(f"[디버그] 리스크 오프 발생: {dt_norm}, 가격: {market_price:.2f}, MA: {market_ma:.2f}")  # 디버그용
 
         force_regime_sell = is_risk_off and regime_behavior == "sell_all"
         allow_individual_sells = (not is_risk_off) or regime_behavior == "hold_block_buy"

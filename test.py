@@ -68,6 +68,8 @@ def _print_backtest_summary(
             summary_lines.append(
                 f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
             )
+    else:
+        summary_lines.append("| 투자 중단: N/A")
 
     summary_lines.extend(
         [

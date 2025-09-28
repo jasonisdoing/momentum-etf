@@ -207,6 +207,15 @@ def get_market_regime_status_string() -> Optional[str]:
         country="kor",
         months_range=[required_months, 0],  # 지수 조회에서는 country 인자가 의미 없습니다.
     )
+
+    # --- 인덱스 정규화 추가 ---
+    if df_regime is not None and not df_regime.empty:
+        try:
+            df_regime.index = pd.to_datetime(df_regime.index).normalize()
+            df_regime = df_regime[~df_regime.index.duplicated(keep="last")]
+        except Exception:
+            pass  # 정규화 실패시 원본 그대로 사용
+
     # 만약 데이터가 부족하면, 기간을 늘려 한 번 더 시도합니다.
     if df_regime is None or df_regime.empty or len(df_regime) < regime_ma_period:
         df_regime = fetch_ohlcv(regime_ticker, country="kor", months_range=[required_months * 2, 0])
@@ -1021,6 +1030,13 @@ def _fetch_and_prepare_data(
         )
 
         if df_regime is not None and not df_regime.empty:
+            # 실시간 가격 조회 및 적용 전에 인덱스 정규화 추가
+            try:
+                df_regime.index = pd.to_datetime(df_regime.index).normalize()
+                df_regime = df_regime[~df_regime.index.duplicated(keep="last")]
+            except Exception:
+                pass  # 정규화 실패시 원본 그대로 사용
+
             # 실시간 가격 조회 및 적용
             if use_realtime and yf:
                 try:
