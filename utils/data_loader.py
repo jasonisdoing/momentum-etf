@@ -4,12 +4,21 @@
 
 import functools
 import json
+import logging
 import os
+import warnings
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from contextlib import contextmanager
 
 import pandas as pd
+
+# pkg_resources 워닝 억제 (가장 강력한 방법)
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.simplefilter("ignore")
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
+warnings.filterwarnings("ignore", category=UserWarning, module="pykrx")
 
 # 웹 스크레이핑을 위한 라이브러리
 try:
@@ -45,6 +54,36 @@ warnings.filterwarnings(
     category=UserWarning,
     module=r"^pandas_market_calendars\.",
 )
+
+
+class _PykrxLogFilter(logging.Filter):
+    """Suppress malformed pykrx util logs that break formatting."""  # pragma: no cover - log hygiene
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.msg
+        args = record.args
+        if (
+            isinstance(msg, tuple)
+            and len(msg) == 3
+            and all(isinstance(m, str) for m in msg)
+            and isinstance(args, tuple)
+            and len(args) == 1
+            and isinstance(args[0], dict)
+            and not args[0]
+        ):
+            return False
+        try:
+            formatted = record.getMessage()
+        except Exception:  # pragma: no cover - defensive
+            formatted = ""
+        if "None of [Index(['" in formatted:
+            return False
+        return True
+
+
+_root_logger = logging.getLogger()
+if not any(isinstance(f, _PykrxLogFilter) for f in _root_logger.filters):
+    _root_logger.addFilter(_PykrxLogFilter())
 
 CACHE_START_DATE_FALLBACK = "2020-01-01"
 
@@ -358,8 +397,6 @@ def _fetch_ohlcv_with_cache(
     for miss_start, miss_end in missing_ranges:
         if miss_start > miss_end:
             continue
-        if cache_start is not None and miss_end < cache_start:
-            continue
         if cache_end is not None and _should_skip_pykrx_fetch(country, cache_end, miss_start):
             continue
 
@@ -371,7 +408,18 @@ def _fetch_ohlcv_with_cache(
         if not trading_days_in_gap:
             continue
 
-        fetched = _fetch_ohlcv_core(ticker, country, miss_start, miss_end, cached_df)
+        try:
+            fetched = _fetch_ohlcv_core(ticker, country, miss_start, miss_end, cached_df)
+        except PykrxDataUnavailable:
+            # 신규 상장 등으로 과거 데이터가 존재하지 않거나, 최신 데이터만 캐시에 있는 경우
+            # 기존 캐시로 충분하면 네트워크 오류를 무시하고 계속 진행합니다.
+            if cached_df is not None:
+                if cache_start is not None and miss_end < cache_start:
+                    continue
+                if cache_end is not None and miss_start > cache_end:
+                    continue
+            raise
+
         if fetched is not None and not fetched.empty:
             new_frames.append(fetched)
 

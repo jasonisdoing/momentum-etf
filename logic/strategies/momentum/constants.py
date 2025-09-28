@@ -45,17 +45,17 @@ DECISION_CONFIG = {
         "is_recommendation": True,
         "show_slack": True,
     },
-    "SOLD": {
-        "display_name": "<✅ 매도 완료>",
-        "order": 40,
-        "is_recommendation": False,
-        "show_slack": True,
-    },
     "WAIT": {
         "display_name": "<⏳ 대기>",
         "order": 50,
         "is_recommendation": False,
         "show_slack": False,
+    },
+    "SOLD": {
+        "display_name": "<✅ 매도 완료>",
+        "order": 60,
+        "is_recommendation": False,
+        "show_slack": True,
     },
 }
 

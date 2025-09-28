@@ -2,9 +2,14 @@ import itertools
 import os
 import sys
 import argparse
+import warnings
 
 import numpy as np
 import pandas as pd
+
+# pkg_resources 워닝 억제
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,39 +19,48 @@ from test import main as run_backtest
 from utils.tee import Tee
 from utils.data_loader import fetch_ohlcv_for_tickers
 from utils.stock_list_io import get_etfs
-from utils.account_registry import get_account_info, get_strategy_rules_for_account
+from utils.account_registry import get_account_info
 
+# python cli.py b1 --tune
 # --- 국가별 튜닝 파라미터 범위 정의 ---
 TUNING_CONFIG = {
+    "coin": {
+        "MA_RANGE": np.arange(2, 6, 1),
+        "PORTFOLIO_TOPN": np.arange(1, 6, 1),
+        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "TEST_MONTHS_RANGE": 12,
+    },
     "aus": {
-        "MA_RANGE": np.arange(5, 101, 1),
+        "MA_RANGE": np.arange(5, 21, 1),
+        "PORTFOLIO_TOPN": [7],
+        "REPLACE_SCORE_THRESHOLD": [0.5],
         "TEST_MONTHS_RANGE": 12,
     },
     "kor": {
-        "MA_RANGE": np.arange(5, 151, 1),
-        "TEST_MONTHS_RANGE": 12,
-    },
-    "coin": {
-        # 코인은 단일 종목 유형으로 간주합니다.
-        "MA_RANGE": np.arange(1, 201, 1),
+        "MA_RANGE": np.arange(10, 21, 1),
+        "PORTFOLIO_TOPN": [8],
+        "REPLACE_SCORE_THRESHOLD": [0.5],
         "TEST_MONTHS_RANGE": 12,
     },
 }
 
 
-def run_single_backtest(params, prefetched_data, account):
+PARAM_LABELS = [
+    ("MA_RANGE", "ma_period"),
+    ("PORTFOLIO_TOPN", "portfolio_topn"),
+    ("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
+]
+
+
+def run_single_backtest(params, prefetched_data, account, param_names, test_months):
     """단일 파라미터 조합으로 백테스트를 실행하고 결과를 반환합니다."""
-    country_code, topn, ma_period, replace_threshold, test_months = params
 
-    override_settings = {
-        "portfolio_topn": topn,
-        "ma_period": ma_period,
-        "replace_threshold": replace_threshold,
-        "replace_weaker_stock": True,  # 교체매매는 활성화된 상태에서 테스트
-        "test_months_range": test_months,
-    }
+    param_values = params[1:]
+    override_settings = {name: value for name, value in zip(param_names, param_values)}
+    override_settings["test_months_range"] = test_months
 
-    print(f"Testing with: TopN={topn}, MA={ma_period}, ReplaceThr={replace_threshold}")
+    log_params = ", ".join(f"{name}={value}" for name, value in zip(param_names, param_values))
+    print(f"Testing with: {log_params}")
 
     try:
         if not account:
@@ -58,8 +72,7 @@ def run_single_backtest(params, prefetched_data, account):
             prefetched_data=prefetched_data,
         )
         if summary:
-            # 파라미터에서 국가 코드는 제외하고 저장
-            summary["params"] = params[1:]
+            summary["params"] = param_values
             return summary
     except Exception as e:
         print(f"Error during backtest with params {params}: {e}")
@@ -81,8 +94,6 @@ def main():
     if not country_code:
         raise SystemExit(f"'{account}' 계좌에 국가 정보가 없습니다.")
 
-    strategy_rules = get_strategy_rules_for_account(account)
-
     # 로그 파일 설정
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
@@ -91,7 +102,6 @@ def main():
     print(f"튜닝 로그가 다음 파일에 저장됩니다: {log_path}")
 
     original_stdout = sys.stdout
-    top_3_results = pd.DataFrame()
 
     with open(log_path, "w", encoding="utf-8") as log_file:
         sys.stdout = Tee(original_stdout, log_file)
@@ -102,13 +112,39 @@ def main():
                 print(f"오류: '{country_code}' 국가에 대한 튜닝 설정이 없습니다.")
                 return
 
-            MA_RANGE = config["MA_RANGE"]
-            TEST_MONTHS_RANGE = config["TEST_MONTHS_RANGE"]
+            MA_RANGE = config.get("MA_RANGE")
+            TEST_MONTHS_RANGE = config.get("TEST_MONTHS_RANGE", 12)
 
-            # --- DB에서 고정 파라미터 로드 ---
-            TOPN_FIXED = [int(strategy_rules.portfolio_topn)]
-            REPLACE_THRESHOLD_FIXED = [float(strategy_rules.replace_threshold)]
-            print(f"  - 고정값: TopN={TOPN_FIXED[0]}, ReplaceThr={REPLACE_THRESHOLD_FIXED[0]}")
+            param_ranges = []
+            param_names = []
+            for label, override_key in PARAM_LABELS:
+                if label not in config:
+                    continue
+                cfg_values = config[label]
+                if isinstance(cfg_values, (list, tuple, np.ndarray)):
+                    values = list(cfg_values)
+                else:
+                    values = [cfg_values]
+                if not values:
+                    continue
+                param_ranges.append(values)
+                param_names.append(override_key)
+
+            if not param_ranges:
+                print("오류: 튜닝할 파라미터 범위가 설정되지 않았습니다.")
+                return
+
+            print("튜닝 대상 파라미터:")
+            for label, override_key in zip(
+                [lbl for lbl, _ in PARAM_LABELS if lbl in config], param_names
+            ):
+                values = config[label]
+                if isinstance(values, (list, tuple, np.ndarray)) and len(values) > 1:
+                    preview = ", ".join(str(v) for v in values[:5])
+                    suffix = "..." if len(values) > 5 else ""
+                    print(f"  - {override_key}: [{preview}{suffix}]")
+                else:
+                    print(f"  - {override_key}: {values}")
 
             # --- 데이터 사전 로딩 ---
             print(f"\n튜닝을 위해 {country_code.upper()} 시장의 데이터를 미리 로딩합니다 (account={account})...")
@@ -137,10 +173,7 @@ def main():
             param_combinations = list(
                 itertools.product(
                     [country_code],
-                    TOPN_FIXED,
-                    MA_RANGE,
-                    REPLACE_THRESHOLD_FIXED,
-                    [TEST_MONTHS_RANGE],
+                    *param_ranges,
                 )
             )
 
@@ -150,7 +183,13 @@ def main():
 
             # 순차 처리를 위해 for 루프 사용
             for i, params in enumerate(param_combinations):
-                result = run_single_backtest(params, prefetched_data, account)
+                result = run_single_backtest(
+                    params,
+                    prefetched_data,
+                    account,
+                    param_names,
+                    TEST_MONTHS_RANGE,
+                )
                 if result:
                     results.append(result)
                 print(f"Progress: {i + 1}/{len(param_combinations)}")
@@ -163,30 +202,70 @@ def main():
             df_results = pd.DataFrame(results)
 
             # CAGR 기준으로 상위 5개 결과를 찾습니다.
-            top_3_results = df_results.sort_values(by="cagr_pct", ascending=False).head(5)
+            top_cagr_results = df_results.sort_values(by="cagr_pct", ascending=False).head(5)
 
             print("\n" + "=" * 50)
             print(">>> 튜닝 결과: CAGR 상위 5개 파라미터 <<<")
             print("=" * 50)
 
-            for i, (_, row) in enumerate(top_3_results.iterrows(), 1):
+            for i, (_, row) in enumerate(top_cagr_results.iterrows(), 1):
                 params = row["params"]
-                _, ma_period, _, _ = params
-
-                print(f"\n--- {i}위 ---")
-                print(f"  - MA_PERIOD: {ma_period}")
+                print(f"\n--- CAGR {i}위 ---")
+                for name, value in zip(param_names, params):
+                    print(f"  - {name}: {value}")
                 print("-" * 20)
                 print(f"  - CAGR: {row['cagr_pct']:.2f}%")
-                print(f"  - MDD: {-row['mdd_pct']:.2f}%")
+                print(f"  - CUI: {row['cui']:.2f}")
+                print(f"  - Ulcer Index: {row['ulcer_index']:.2f}")
                 print(f"  - Calmar Ratio: {row['calmar_ratio']:.2f}")
+                print(f"  - MDD: {-row['mdd_pct']:.2f}%")
                 print(f"  - Sharpe Ratio: {row['sharpe_ratio']:.2f}")
 
-            if not top_3_results.empty:
+            # MDD 기준으로 상위 5개 결과를 찾습니다.
+            top_mdd_results = df_results.sort_values(by="mdd_pct", ascending=True).head(5)
+
+            print("\n" + "=" * 50)
+            print(">>> 튜닝 결과: MDD 상위 5개 파라미터 <<<")
+            print("=" * 50)
+
+            for i, (_, row) in enumerate(top_mdd_results.iterrows(), 1):
+                params = row["params"]
+                print(f"\n--- MDD {i}위 ---")
+                for name, value in zip(param_names, params):
+                    print(f"  - {name}: {value}")
+                print("-" * 20)
+                print(f"  - CAGR: {row['cagr_pct']:.2f}%")
+                print(f"  - CUI: {row['cui']:.2f}")
+                print(f"  - Ulcer Index: {row['ulcer_index']:.2f}")
+                print(f"  - Calmar Ratio: {row['calmar_ratio']:.2f}")
+                print(f"  - MDD: {-row['mdd_pct']:.2f}%")
+                print(f"  - Sharpe Ratio: {row['sharpe_ratio']:.2f}")
+
+            # CUI 기준으로 상위 5개 결과를 찾습니다.
+            top_cui_results = df_results.sort_values(by="cui", ascending=False).head(5)
+
+            print("\n" + "=" * 50)
+            print(">>> 튜닝 결과: CUI (Calmar/Ulcer) 상위 5개 파라미터 <<<")
+            print("=" * 50)
+
+            for i, (_, row) in enumerate(top_cui_results.iterrows(), 1):
+                params = row["params"]
+                print(f"\n--- CUI (Calmar/Ulcer) {i}위 ---")
+                for name, value in zip(param_names, params):
+                    print(f"  - {name}: {value}")
+                print("-" * 20)
+                print(f"  - CAGR: {row['cagr_pct']:.2f}%")
+                print(f"  - CUI: {row['cui']:.2f}")
+                print(f"  - Ulcer Index: {row['ulcer_index']:.2f}")
+                print(f"  - Calmar Ratio: {row['calmar_ratio']:.2f}")
+                print(f"  - MDD: {-row['mdd_pct']:.2f}%")
+                print(f"  - Sharpe Ratio: {row['sharpe_ratio']:.2f}")
+
+            if not top_cagr_results.empty:
                 print(f"\n튜닝이 완료되었습니다. 상세 내용은 {log_path} 파일을 확인하세요.")
         finally:
             sys.stdout = original_stdout
-            if not top_3_results.empty:
-                first_row_params = top_3_results.iloc[0]["params"]
-                topn, _, replace_thr, _ = first_row_params
-                print("\n" + "=" * 50)
-                print(f"(고정 파라미터: TopN={topn}, ReplaceThr={replace_thr})")
+
+
+if __name__ == "__main__":
+    main()

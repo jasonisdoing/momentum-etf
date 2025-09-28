@@ -175,7 +175,7 @@ def tune_regime_filter(country: str, account: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="시장 레짐 필터의 이동평균 기간(MA Period)을 튜닝합니다.")
-    parser.add_argument("country", choices=["kor", "aus"], help="튜닝을 진행할 시장 (kor, aus)")
+    parser.add_argument("country", choices=["kor", "aus", "coin"], help="튜닝을 진행할 시장 (kor, aus)")
     parser.add_argument(
         "--account",
         type=str,

@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 from bson import ObjectId
 from dotenv import load_dotenv
-from pymongo import DESCENDING, MongoClient
+from pymongo import ASCENDING, DESCENDING, MongoClient
 
 import settings as global_settings
 
@@ -440,6 +440,19 @@ def get_signal_report_from_db(country: str, account: str, date: datetime) -> Opt
         # 조용한 읽기: 과거 탭 렌더링 등에서 대량 호출될 수 있으므로 콘솔 로그는 생략합니다.
         return report_doc["report"]
     return None
+
+
+def get_signal_report_on_or_after(country: str, account: str, date: datetime) -> Optional[Dict]:
+    """지정된 날짜 이후(포함) 중 가장 빠른 시그널 리포트를 반환합니다."""
+
+    db = get_db_connection()
+    if db is None:
+        return None
+
+    start_of_day = date.replace(hour=0, minute=0, second=0, microsecond=0)
+    query = _apply_account_filter({"country": country, "date": {"$gte": start_of_day}}, account)
+    report_doc = db.signals.find_one(query, sort=[("date", ASCENDING)])
+    return report_doc
 
 
 def get_latest_signal_report(

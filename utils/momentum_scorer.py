@@ -4,8 +4,12 @@
 """
 모멘텀 스코어를 계산하는 유틸리티 함수.
 """
+import warnings
 import numpy as np
 import pandas as pd
+
+# pkg_resources 워닝 억제
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 
 try:
     import yfinance as yf
