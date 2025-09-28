@@ -1,8 +1,13 @@
 import os
 import sys
-from datetime import datetime
+import warnings
 
+import pandas as pd
 import streamlit as st
+
+# pkg_resources 워닝 억제
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 
 try:
     import pytz
@@ -25,7 +30,11 @@ from utils.account_registry import (
     get_accounts_by_country,
     load_accounts,
 )
-from utils.db_manager import get_latest_signal_report
+from utils.db_manager import (
+    get_available_snapshot_dates,
+    get_latest_signal_report,
+    get_signal_report_on_or_after,
+)
 
 
 def main():
@@ -76,6 +85,29 @@ def main():
         st.info("활성화된 계좌가 없습니다. `country_mapping.json`에 계좌를 추가하고 `is_active: true`로 설정해주세요.")
         st.stop()
 
+    available_dates: set[str] = set()
+    for account_info in all_accounts:
+        account_dates = get_available_snapshot_dates(
+            account_info["country"], account_info["account"]
+        )
+        available_dates.update(account_dates)
+
+    if not available_dates:
+        st.info("표시할 시그널 데이터가 없습니다. 먼저 시그널을 생성해주세요.")
+        st.stop()
+
+    today = pd.Timestamp.now().normalize()
+    date_options = [d for d in available_dates if pd.to_datetime(d) <= today]
+    date_options = sorted(date_options, reverse=True)
+    selected_date_str = st.selectbox(
+        "조회 날짜",
+        date_options,
+        index=0,
+        key="dashboard_date_select",
+    )
+    selected_date_dt = pd.to_datetime(selected_date_str)
+    selected_date_py = selected_date_dt.to_pydatetime()
+
     account_summaries = []
     total_initial_capital_krw = 0.0
     total_current_equity_krw = 0.0
@@ -84,26 +116,35 @@ def main():
     total_cum_profit_loss_krw = 0.0
     total_cash_krw = 0.0
     total_holdings_value_krw = 0.0
+    accounts_without_data: list[str] = []
+    fallback_notes: list[str] = []
 
     for account_info in all_accounts:
         country = account_info["country"]
         account = account_info["account"]
 
         try:
-            # signal_reports 컬렉션에서 가장 최근의 요약 데이터를 가져옵니다.
-            if pytz:
-                try:
-                    seoul_tz = pytz.timezone("Asia/Seoul")
-                    today_dt = datetime.now(seoul_tz)
-                except Exception:
-                    today_dt = datetime.now()
-            else:
-                today_dt = datetime.now()
-            report_data = get_latest_signal_report(country, account, date=today_dt)
-            if not report_data or "summary" not in report_data:
+            # 선택한 날짜에 해당하는 요약 데이터를 가져옵니다.
+            report_doc = get_latest_signal_report(country, account, date=selected_date_py)
+            fallback_doc = None
+            if not report_doc:
+                fallback_doc = get_signal_report_on_or_after(country, account, selected_date_py)
+            target_doc = report_doc or fallback_doc
+            if not target_doc or "summary" not in target_doc:
+                accounts_without_data.append(account_info["display_name"])
                 continue
 
-            summary = report_data["summary"]
+            summary = target_doc.get("summary", {})
+            doc_date = target_doc.get("date")
+            data_date_str = (
+                pd.to_datetime(doc_date).strftime("%Y-%m-%d")
+                if doc_date is not None
+                else selected_date_str
+            )
+            # if data_date_str != selected_date_str:
+            #     fallback_notes.append(
+            #         f"{account_info['display_name']} → {data_date_str} 기준 데이터 표시"
+            #     )
 
             # --- KRW로 모든 값 변환 ---
             initial_capital_krw_local = summary.get("principal", 0.0)
@@ -120,7 +161,7 @@ def main():
             total_daily_profit_loss_krw += daily_profit_loss_krw_local
             total_eval_profit_loss_krw += eval_profit_loss_krw_local
             total_cum_profit_loss_krw += cum_profit_loss_krw_local
-            total_cash_krw += total_cash_krw
+            total_cash_krw += cash_krw_local
             total_holdings_value_krw += holdings_value_krw_local
 
             # --- Prepare summary for display (all in KRW) ---
@@ -140,11 +181,27 @@ def main():
                     "amt_precision": 0,  # Always display as integer KRW
                     "qty_precision": 0,
                     "order": account_info.get("order", 99),
+                    "data_date": data_date_str,
                 }
             )
         except Exception as e:
             st.warning(f"'{account_info['display_name']}' 계좌 정보를 불러오는 중 오류 발생: {e}")
             continue
+
+    if fallback_notes:
+        fallback_msg = "<br/>".join(fallback_notes)
+        st.caption(
+            f"선택한 날짜에 일부 계좌의 데이터가 없어 다음 거래일 데이터를 사용했습니다.<br/>{fallback_msg}",
+            unsafe_allow_html=True,
+        )
+
+    if accounts_without_data:
+        missing_list = ", ".join(accounts_without_data)
+        st.warning(f"다음 계좌의 시그널 데이터가 '{selected_date_str}' 이후로 존재하지 않습니다: {missing_list}")
+
+    if not account_summaries:
+        st.info(f"'{selected_date_str}' 날짜에 표시할 데이터가 없습니다.")
+        st.stop()
 
     # Display header
     header_cols = st.columns((1.5, 1.5, 1.5, 1, 1.5, 1, 1.5, 1, 1.5, 1.5))
@@ -183,7 +240,15 @@ def main():
         amt_precision = summary["amt_precision"]
 
         cols = st.columns((1.5, 1.5, 1.5, 1, 1.5, 1, 1.5, 1, 1.5, 1.5))
-        cols[0].write(summary["display_name"])
+        data_date = summary.get("data_date")
+        display_label = summary["display_name"]
+        if data_date:
+            cols[0].markdown(
+                f"<div><strong>{display_label}</strong><br/><span style='color:#666;font-size:0.85em;'>기준일: {data_date}</span></div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            cols[0].write(display_label)
 
         def format_amount(value):
             return f"{value:,.{amt_precision}f} {currency_symbol}"

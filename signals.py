@@ -7,6 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
+# pkg_resources 워닝 억제 (가장 강력한 방법)
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.simplefilter("ignore")
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
+warnings.filterwarnings("ignore", category=UserWarning, module="pykrx")
+
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -67,6 +74,7 @@ from logic.momentum import (
     DECISION_CONFIG,
     COIN_ZERO_THRESHOLD,
 )
+from logic.strategies.momentum.shared import SIGNAL_TABLE_HEADERS
 
 try:
     from pykrx import stock as _stock
@@ -165,6 +173,7 @@ class SignalReportData:
     full_etf_meta: Dict
     etf_meta: Dict
     failed_tickers_info: Dict
+    realtime_prices: Dict[str, Optional[float]]
 
 
 @dataclass
@@ -205,6 +214,15 @@ def get_market_regime_status_string() -> Optional[str]:
         country="kor",
         months_range=[required_months, 0],  # 지수 조회에서는 country 인자가 의미 없습니다.
     )
+
+    # --- 인덱스 정규화 추가 ---
+    if df_regime is not None and not df_regime.empty:
+        try:
+            df_regime.index = pd.to_datetime(df_regime.index).normalize()
+            df_regime = df_regime[~df_regime.index.duplicated(keep="last")]
+        except Exception:
+            pass  # 정규화 실패시 원본 그대로 사용
+
     # 만약 데이터가 부족하면, 기간을 늘려 한 번 더 시도합니다.
     if df_regime is None or df_regime.empty or len(df_regime) < regime_ma_period:
         df_regime = fetch_ohlcv(regime_ticker, country="kor", months_range=[required_months * 2, 0])
@@ -800,6 +818,8 @@ def _calculate_indicators(args: Tuple) -> Tuple[str, Dict[str, Any]]:
     """
     주어진 데이터프레임에 대해 기술적 지표(이동평균 등)를 계산합니다.
     """
+    from utils.indicators import calculate_moving_average_signals
+
     (
         tkr,
         df,
@@ -822,21 +842,18 @@ def _calculate_indicators(args: Tuple) -> Tuple[str, Dict[str, Any]]:
         df.columns = df.columns.get_level_values(0)
         df = df.loc[:, ~df.columns.duplicated()]
 
-    close = df["Close"]
-    ma = close.rolling(window=ma_period).mean()
-    buy_signal_active = close > ma
-    buy_signal_days = (
-        buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum())
-        .cumsum()
-        .fillna(0)
-        .astype(int)
+    close_prices = df["Close"]
+
+    # 공통 함수 사용
+    moving_average, buy_signal_active, consecutive_buy_days = calculate_moving_average_signals(
+        close_prices, ma_period
     )
 
     return tkr, {
         "df": df,
-        "close": close,
-        "ma": ma,
-        "buy_signal_days": buy_signal_days,
+        "close": close_prices,
+        "ma": moving_average,
+        "buy_signal_days": consecutive_buy_days,
         "ma_period": ma_period,
         "unadjusted_close": df.get("unadjusted_close"),
     }
@@ -1019,6 +1036,13 @@ def _fetch_and_prepare_data(
         )
 
         if df_regime is not None and not df_regime.empty:
+            # 실시간 가격 조회 및 적용 전에 인덱스 정규화 추가
+            try:
+                df_regime.index = pd.to_datetime(df_regime.index).normalize()
+                df_regime = df_regime[~df_regime.index.duplicated(keep="last")]
+            except Exception:
+                pass  # 정규화 실패시 원본 그대로 사용
+
             # 실시간 가격 조회 및 적용
             if use_realtime and yf:
                 try:
@@ -1183,6 +1207,7 @@ def _fetch_and_prepare_data(
         full_etf_meta=etf_meta,
         etf_meta=etf_meta,
         failed_tickers_info=failed_tickers_info,
+        realtime_prices=realtime_prices,
     )
 
 
@@ -1262,6 +1287,83 @@ def _normalize_holdings(raw_items: List[Dict[str, Any]]) -> Dict[str, Dict[str, 
             "avg_cost": float(item.get("avg_cost", 0.0) or 0.0),
         }
     return normalized
+
+
+def _apply_live_balance_to_holdings(
+    portfolio_data: Dict[str, Any],
+    balance: Dict[str, Any],
+    universe_pairs: List[Tuple[str, str]],
+) -> Dict[str, float]:
+    """실시간 잔고 데이터로 보유 수량을 덮어쓰고, 티커별 최신 수량을 반환한다."""
+
+    def _parse_balance(value: Any) -> float:
+        try:
+            return float(str(value).replace(",", ""))
+        except (TypeError, ValueError):
+            return 0.0
+
+    # 기존 보유 데이터를 티커 기준으로 맵핑한다.
+    holdings_list = list(portfolio_data.get("holdings") or [])
+    holdings_by_ticker: Dict[str, Dict[str, Any]] = {}
+    live_share_map: Dict[str, float] = {}
+
+    for entry in holdings_list:
+        ticker = str(entry.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        holdings_by_ticker[ticker] = entry
+
+    name_lookup = {str(t).upper(): n for t, n in universe_pairs}
+
+    seen: set[str] = set()
+    updated_holdings: List[Dict[str, Any]] = []
+
+    # 1) 기존 보유 종목을 실시간 잔고 기준으로 갱신
+    for ticker, entry in holdings_by_ticker.items():
+        live_key_upper = f"total_{ticker.upper()}"
+        live_key_lower = f"total_{ticker.lower()}"
+        live_amount = 0.0
+        if live_key_upper in balance:
+            live_amount = _parse_balance(balance[live_key_upper])
+        elif live_key_lower in balance:
+            live_amount = _parse_balance(balance[live_key_lower])
+
+        if live_amount <= COIN_ZERO_THRESHOLD:
+            live_amount = 0.0
+
+        entry = dict(entry)
+        entry["shares"] = live_amount
+        updated_holdings.append(entry)
+        seen.add(ticker.upper())
+        live_share_map[ticker.upper()] = live_amount
+
+    # 2) 실시간 잔고에만 존재하는 신규 코인 처리
+    for key, value in balance.items():
+        if not isinstance(key, str) or not key.lower().startswith("total_"):
+            continue
+        symbol = key.split("_", 1)[-1].upper()
+        if symbol in {"KRW", "P"}:
+            continue
+        if symbol in seen:
+            continue
+
+        live_amount = _parse_balance(value)
+        if live_amount <= COIN_ZERO_THRESHOLD:
+            continue
+
+        updated_holdings.append(
+            {
+                "ticker": symbol,
+                "name": name_lookup.get(symbol, symbol),
+                "shares": live_amount,
+                "avg_cost": 0.0,
+            }
+        )
+        seen.add(symbol)
+        live_share_map[symbol] = live_amount
+
+    portfolio_data["holdings"] = updated_holdings
+    return live_share_map
 
 
 def _calculate_portfolio_summary(
@@ -1553,6 +1655,7 @@ def generate_signal_report(
     etf_meta = result.etf_meta
     full_etf_meta = result.full_etf_meta
     failed_tickers_info = result.failed_tickers_info
+    realtime_prices = result.realtime_prices or {}
 
     logger.info(
         "[%s] decision build starting: pairs=%d, successes=%d, failures=%d",
@@ -1608,7 +1711,11 @@ def generate_signal_report(
                 international_shares_value = 0.0
     new_equity_candidate = total_holdings_value + international_shares_value
 
-    if country == "coin":
+    today_norm = pd.Timestamp.now().normalize()
+    base_norm = base_date.normalize() if isinstance(base_date, pd.Timestamp) else today_norm
+    allow_live_balance = country == "coin" and base_norm >= today_norm
+
+    if country == "coin" and allow_live_balance:
         try:
             from scripts.snapshot_bithumb_balances import (
                 _fetch_bithumb_balance_dict as fetch_bithumb_balance_dict,
@@ -1616,11 +1723,71 @@ def generate_signal_report(
 
             bal = fetch_bithumb_balance_dict()
             if bal:
-                krw_balance = bal.get("total_krw", 0.0)
-                p_balance = bal.get("total_P", 0.0)
-                new_equity_candidate += krw_balance + p_balance
+                krw_balance = float(bal.get("total_krw", 0.0) or 0.0)
+                p_balance = float(bal.get("total_P", 0.0) or 0.0)
+
+                live_share_map: Dict[str, float] = {}
+                try:
+                    live_share_map = _apply_live_balance_to_holdings(portfolio_data, bal, pairs)
+                except Exception as exc:
+                    logger.warning(
+                        "[%s/%s] Failed to apply live balance to holdings: %s",
+                        country.upper(),
+                        account,
+                        exc,
+                    )
+                    live_share_map = {}
+
+                # holdings 기반 지표(data_by_tkr)도 실시간 수량으로 맞춘다.
+                if live_share_map:
+                    for ticker_upper, shares in live_share_map.items():
+                        # data_by_tkr 키는 원래 티커 문자열을 그대로 사용한다.
+                        entry = data_by_tkr.get(ticker_upper)
+                        if entry is None and ticker_upper.lower() in data_by_tkr:
+                            entry = data_by_tkr.get(ticker_upper.lower())
+                        if entry is None and ticker_upper.upper() in data_by_tkr:
+                            entry = data_by_tkr.get(ticker_upper.upper())
+
+                        if entry is not None:
+                            entry["shares"] = shares
+                        else:
+                            # universe에 없던 신규 코인은 실시간 가격이 있다면 반영
+                            price = realtime_prices.get(ticker_upper)
+                            if price is None:
+                                from utils.data_loader import fetch_bithumb_realtime_price
+
+                                price = fetch_bithumb_realtime_price(ticker_upper)
+                            if price and price > 0:
+                                data_by_tkr[ticker_upper] = {
+                                    "price": price,
+                                    "prev_close": price,
+                                    "s1": 0.0,
+                                    "s2": 0.0,
+                                    "score": 0.0,
+                                    "filter": 0,
+                                    "shares": shares,
+                                    "avg_cost": 0.0,
+                                    "df": pd.DataFrame([{"Close": price}], index=[base_date]),
+                                }
+
+                    # 실시간 수량이 반영된 뒤 보유 자산 가치를 재계산한다.
+                    total_holdings_value = sum(
+                        max(0.0, float(entry.get("shares", 0.0) or 0.0))
+                        * max(0.0, float(entry.get("price", 0.0) or 0.0))
+                        for entry in data_by_tkr.values()
+                    )
+
+                    # 이후 로직에서 사용할 holdings 맵도 최신 상태로 갱신한다.
+                    holdings = _normalize_holdings(portfolio_data.get("holdings", []))
+
+                new_equity_candidate = (
+                    total_holdings_value + international_shares_value + krw_balance + p_balance
+                )
         except Exception as e:
             logger.warning("Bithumb 잔액 조회 실패. 평가금액 자동 보정 시 코인 가치만 반영됩니다. (%s)", e)
+    elif country == "coin":
+        # 과거 날짜를 재계산할 때는 당시 DB에 저장된 값을 유지합니다.
+        new_equity_candidate = current_equity
 
     # 2. 자동 보정 및 이월 조건 확인
     is_carried_forward = (
@@ -1642,7 +1809,7 @@ def generate_signal_report(
         # 거래일: 자동 보정 로직을 적용합니다.
         should_autocorrect = False
         autocorrect_reason = ""
-        if country == "coin":
+        if country == "coin" and allow_live_balance:
             # 코인은 항상 최신 잔액으로 덮어씁니다.
             if abs(new_equity_candidate - current_equity) > 1e-9:
                 should_autocorrect = True
@@ -1808,12 +1975,13 @@ def generate_signal_report(
                     pass
 
     # 공통 설정에서 손절 퍼센트 로드
+    cooldown_days = int(account_settings.get("cooldown_days", 0))
+
     try:
         common = get_common_file_settings()
         stop_loss_raw = float(common["HOLDING_STOP_LOSS_PCT"])
         # 양수 입력이 들어오더라도 손절 임계값은 음수로 해석합니다 (예: 10 -> -10).
         stop_loss = -abs(stop_loss_raw)
-        cooldown_days = int(common.get("COOLDOWN_DAYS", 0))
     except (SystemExit, KeyError, ValueError, TypeError) as e:
         print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
         return None
@@ -1971,9 +2139,11 @@ def generate_signal_report(
         special_row = [
             0,  # #
             "IS",  # 티커
+            "International Shares",  # 종목명
+            "-",  # 카테고리
             "HOLD",  # 상태
-            "-",  # 매수일
-            "-",  # 보유
+            "-",  # 매수일자
+            "-",  # 보유일
             is_value,  # 현재가
             0.0,  # 일간수익률
             "1",  # 보유수량
@@ -1992,24 +2162,11 @@ def generate_signal_report(
             row[0] = i
 
     # 9. 최종 결과 반환
-    headers = [
-        "#",
-        "티커",
-        "상태",
-        "매수일자",
-        "보유일",
-        "현재가",
-        "일간수익률",
-        "보유수량",
-        "금액",
-        "누적수익률",
-        "비중",
-    ]
-    headers.extend(["고점대비", "점수", "지속", "문구"])
+    headers = list(SIGNAL_TABLE_HEADERS)
 
     state_counts: Dict[str, int] = {}
     for row in rows_sorted:
-        state = row[2]
+        state = row[4]
         state_counts[state] = state_counts.get(state, 0) + 1
 
     logger.info(
@@ -2077,7 +2234,6 @@ def main(
             col_indices["day_ret"] = headers.index("일간수익률")
             col_indices["cum_ret"] = headers.index("누적수익률")
             col_indices["weight"] = headers.index("비중")
-            col_indices["shares"] = headers.index("보유수량")
         except (ValueError, KeyError):
             pass  # 일부 컬럼을 못찾아도 괜찮음
 
@@ -2136,9 +2292,11 @@ def main(
         aligns = [
             "right",  # #
             "right",  # 티커
+            "left",  # 종목명
+            "left",  # 카테고리
             "center",  # 상태
-            "left",  # 매수일
-            "right",  # 보유
+            "left",  # 매수일자
+            "right",  # 보유일
             "right",  # 현재가
             "right",  # 일간수익률
             "right",  # 보유수량
@@ -2158,6 +2316,55 @@ def main(
         )
 
         print("\n" + summary_line_plain)
+
+        # 콘솔 로그용 보유 자산 상세 출력
+        cash_amount = float(summary_data.get("total_cash", 0.0) or 0.0)
+        total_equity = float(summary_data.get("total_equity", 0.0) or 0.0)
+
+        try:
+            idx_ticker = headers.index("티커")
+            idx_amount = headers.index("금액")
+        except ValueError:
+            idx_ticker = idx_amount = None
+
+        breakdown_items = []
+        if idx_ticker is not None and idx_amount is not None:
+            for row in rows_sorted:
+                amount = row[idx_amount]
+                try:
+                    value = float(amount)
+                except (TypeError, ValueError):
+                    continue
+                if value <= 0:
+                    continue
+
+                ticker = row[idx_ticker]
+                breakdown_items.append((value, ticker))
+
+        breakdown_items.sort(key=lambda x: x[0], reverse=True)
+
+        if breakdown_items or cash_amount:
+            print("보유 자산 구성:")
+
+            ticker_name_map = {}
+            try:
+                for item in get_etfs(country) or []:
+                    code = item.get("ticker")
+                    if code:
+                        ticker_name_map[str(code)] = item.get("name", "")
+            except Exception:
+                ticker_name_map = {}
+
+            for value, ticker in breakdown_items:
+                name_lookup = ticker_name_map.get(ticker)
+                if not name_lookup:
+                    name_lookup = ticker
+                display_name = (
+                    f"{ticker}({name_lookup})" if name_lookup and name_lookup != ticker else ticker
+                )
+                print(f"  - {display_name}: {format_kr_money(value)}")
+            print(f"  - 현금: {format_kr_money(cash_amount)}")
+            print(f"  = 합계: {format_kr_money(total_equity)}")
 
         return SignalExecutionResult(
             report_date=report_base_date.to_pydatetime(),

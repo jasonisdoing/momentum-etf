@@ -1,16 +1,69 @@
-"""Momentum 전략 백테스트 유틸리티."""
+"""
+모멘텀 전략 백테스트 유틸리티
 
-from __future__ import annotations
+이 모듈은 이동평균 기반 모멘텀 전략의 백테스트를 수행합니다.
+- 포트폴리오 백테스트: 여러 종목을 대상으로 한 백테스트
+- 단일 종목 백테스트: 개별 종목에 대한 백테스트
+"""
 
 from math import ceil
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
-import numpy as np
 import pandas as pd
 
 from utils.data_loader import fetch_ohlcv
+from utils.indicators import calculate_moving_average_signals, calculate_ma_score
 
-from .rules import passes_min_buy_score, resolve_min_buy_score
+from .shared import select_candidates_by_category
+
+
+def _process_ticker_data(
+    ticker: str, df: pd.DataFrame, etf_tickers: set, etf_ma_period: int, stock_ma_period: int
+) -> Optional[Dict]:
+    """
+    개별 종목의 데이터를 처리하고 지표를 계산합니다.
+
+    Args:
+        ticker: 종목 티커
+        df: 가격 데이터프레임
+        etf_tickers: ETF 티커 집합
+        etf_ma_period: ETF 이동평균 기간
+        stock_ma_period: 주식 이동평균 기간
+
+    Returns:
+        Dict: 계산된 지표들 또는 None (처리 실패 시)
+    """
+    if df is None:
+        return None
+
+    # yfinance MultiIndex 컬럼 처리
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+        df = df.loc[:, ~df.columns.duplicated()]
+
+    # 티커 유형에 따라 이동평균 기간 결정
+    current_ma_period = etf_ma_period if ticker in etf_tickers else stock_ma_period
+
+    if len(df) < current_ma_period:
+        return None
+
+    close_prices = df["Close"]
+    if isinstance(close_prices, pd.DataFrame):
+        close_prices = close_prices.iloc[:, 0]
+
+    # 공통 함수 사용
+    moving_average, buy_signal_active, consecutive_buy_days = calculate_moving_average_signals(
+        close_prices, current_ma_period
+    )
+    ma_score = calculate_ma_score(close_prices, moving_average)
+
+    return {
+        "df": df,
+        "close": df["Close"],
+        "ma": moving_average,
+        "ma_score": ma_score,
+        "buy_signal_days": consecutive_buy_days,
+    }
 
 
 def run_portfolio_backtest(
@@ -22,32 +75,55 @@ def run_portfolio_backtest(
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     ma_period: int = 20,
-    replace_weaker_stock: bool = True,
     replace_threshold: float = 0.0,
     regime_filter_enabled: bool = False,
     regime_filter_ticker: str = "^GSPC",
     regime_filter_ma_period: int = 200,
+    regime_behavior: str = "sell_all",
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
-    min_buy_score: Optional[float] = None,
+    **kwargs,
 ) -> Dict[str, pd.DataFrame]:
     """
-    단일 이동평균선 교차 전략을 사용하여 Top-N 포트폴리오를 시뮬레이션합니다.
+    이동평균 기반 모멘텀 전략으로 포트폴리오 백테스트를 실행합니다.
+
+    Args:
+        stocks: 백테스트할 종목 목록
+        initial_capital: 초기 자본금
+        core_start_date: 백테스트 시작일
+        top_n: 포트폴리오 최대 보유 종목 수
+        date_range: 백테스트 기간 [시작일, 종료일]
+        country: 시장 국가 코드 (kor, aus, coin)
+        prefetched_data: 미리 로드된 가격 데이터
+        ma_period: 이동평균 기간
+        replace_threshold: 종목 교체 임계값
+        regime_filter_enabled: 시장 레짐 필터 사용 여부
+        regime_filter_ticker: 레짐 필터 지수 티커
+        regime_filter_ma_period: 레짐 필터 이동평균 기간
+        regime_behavior: 레짐 필터 동작 방식
+        stop_loss_pct: 손절 비율 (%)
+        cooldown_days: 거래 쿨다운 기간
+
+    Returns:
+        Dict[str, pd.DataFrame]: 종목별 백테스트 결과
     """
-    ma_period_etf = ma_period
-    ma_period_stock = ma_period
-    stop_loss = stop_loss_pct
-    min_buy_score = resolve_min_buy_score(min_buy_score)
+    etf_ma_period = ma_period
+    stock_ma_period = ma_period
+    stop_loss_threshold = stop_loss_pct
+
+    valid_regime_behaviors = {"sell_all", "hold_block_buy"}
+    if regime_behavior not in valid_regime_behaviors:
+        raise ValueError("regime_behavior must be one of {'sell_all', 'hold_block_buy'}")
 
     if top_n <= 0:
         raise ValueError("PORTFOLIO_TOPN (top_n)은 0보다 커야 합니다.")
 
-    # --- 티커 유형(ETF/주식) 구분 ---
+    # ETF와 주식을 구분하여 처리
     etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
 
-    # --- 데이터 로딩 범위 계산 (웜업 기간 포함) ---
-    # 웜업 기간은 이동평균 계산에 필요한 과거 데이터를 확보하기 위함입니다.
-    max_ma_period = max(ma_period_etf, ma_period_stock, regime_filter_ma_period)
+    # 데이터 로딩 범위 계산 (웜업 기간 포함)
+    # 웜업 기간은 이동평균 계산에 필요한 과거 데이터를 확보하기 위함
+    max_ma_period = max(etf_ma_period, stock_ma_period, regime_filter_ma_period)
     warmup_days = int(max_ma_period * 1.5)
 
     adjusted_date_range = date_range
@@ -71,59 +147,27 @@ def run_portfolio_backtest(
             print(f"경고: 시장 레짐 필터 티커({regime_filter_ticker})의 데이터를 가져올 수 없습니다. 필터를 비활성화합니다.")
             regime_filter_enabled = False
 
-    # --- 개별 종목 데이터 로딩 및 지표 계산 ---
-    # --- 티커별 카테고리 매핑 생성 ---
+    # 개별 종목 데이터 로딩 및 지표 계산
+    # 티커별 카테고리 매핑 생성 (성능 최적화를 위해 딕셔너리로 변환)
     ticker_to_category = {stock["ticker"]: stock.get("category") for stock in stocks}
+    etf_meta = {stock["ticker"]: stock for stock in stocks if stock.get("ticker")}
     metrics_by_ticker = {}
     tickers_to_process = [s["ticker"] for s in stocks]
 
     for ticker in tickers_to_process:
-        # 미리 로드된 데이터가 있으면 사용하고, 없으면 새로 조회합니다.
+        # 미리 로드된 데이터가 있으면 사용하고, 없으면 새로 조회
         if prefetched_data and ticker in prefetched_data:
             df = prefetched_data[ticker]
         else:
-            # prefetched_data가 없으면 date_range를 사용하여 직접 조회합니다.
-            # 이 경로는 주로 test.py가 아닌 다른 곳에서 호출될 때 사용됩니다.
+            # prefetched_data가 없으면 date_range를 사용하여 직접 조회
             df = fetch_ohlcv(ticker, country=country, date_range=date_range)
 
-        if df is None:
-            continue
-
-        # yfinance가 가끔 MultiIndex 컬럼을 반환하는 경우가 있어 컬럼을 단순화/중복 제거
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-            df = df.loc[:, ~df.columns.duplicated()]
-
-        # 티커 유형에 따라 이동평균 기간 결정
-        ma_period = ma_period_etf if ticker in etf_tickers else ma_period_stock
-
-        if len(df) < ma_period:
-            continue
-
-        close = df["Close"]
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
-
-        ma = close.rolling(window=ma_period).mean()
-        ma_safe = ma.replace(0, np.nan)
-        ma_score = ((close / ma_safe) - 1.0) * 100
-        ma_score = ma_score.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-        # 이동평균선 위에 주가가 머무른 연속된 일수를 계산합니다.
-        buy_signal_active = close > ma
-        buy_signal_days = (
-            buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum())
-            .cumsum()
-            .fillna(0)
-            .astype(int)
+        # 공통 함수를 사용하여 데이터 처리 및 지표 계산
+        ticker_metrics = _process_ticker_data(
+            ticker, df, etf_tickers, etf_ma_period, stock_ma_period
         )
-
-        metrics_by_ticker[ticker] = {
-            "df": df,
-            "close": df["Close"],
-            "ma": ma,
-            "ma_score": ma_score,
-            "buy_signal_days": buy_signal_days,
-        }
+        if ticker_metrics:
+            metrics_by_ticker[ticker] = ticker_metrics
 
     if not metrics_by_ticker:
         return {}
@@ -176,11 +220,20 @@ def run_portfolio_backtest(
 
         # --- 시장 레짐 필터 적용 (리스크 오프 조건 확인) ---
         is_risk_off = False
-        if regime_filter_enabled and market_regime_df is not None and dt in market_regime_df.index:
-            market_price = market_regime_df.loc[dt, "Close"]
-            market_ma = market_regime_df.loc[dt, "MA"]
-            if pd.notna(market_price) and pd.notna(market_ma) and market_price < market_ma:
-                is_risk_off = True
+        dt_norm = pd.Timestamp(dt).normalize()  # 시간 정보를 제거하고 날짜만 사용
+
+        if regime_filter_enabled and market_regime_df is not None:
+            # 정규화된 날짜로 비교
+            if dt_norm in market_regime_df.index:
+                market_price = market_regime_df.loc[dt_norm, "Close"]
+                market_ma = market_regime_df.loc[dt_norm, "MA"]
+                if pd.notna(market_price) and pd.notna(market_ma) and market_price < market_ma:
+                    is_risk_off = True
+                    # print(f"[디버그] 리스크 오프 발생: {dt_norm}, 가격: {market_price:.2f}, MA: {market_ma:.2f}")  # 디버그용
+
+        force_regime_sell = is_risk_off and regime_behavior == "sell_all"
+        allow_individual_sells = (not is_risk_off) or regime_behavior == "hold_block_buy"
+        allow_new_buys = not is_risk_off
 
         # 현재 총 보유 자산 가치를 계산합니다.
         current_holdings_value = 0
@@ -257,7 +310,7 @@ def run_portfolio_backtest(
 
         # --- 2. 매도 로직 ---
         # (a) 시장 레짐 필터
-        if is_risk_off:
+        if force_regime_sell:
             for held_ticker, held_state in position_state.items():
                 if held_state["shares"] > 0:
                     price = today_prices.get(held_ticker)
@@ -292,8 +345,8 @@ def run_portfolio_backtest(
                                 "note": "시장 위험 회피",
                             }
                         )
-        # (b) 개별 종목 매도 (시장이 리스크 온일 때만)
-        else:
+        # (b) 개별 종목 매도
+        elif allow_individual_sells:
             for ticker, ticker_metrics in metrics_by_ticker.items():
                 ticker_state, price = position_state[ticker], today_prices.get(ticker)
                 is_ticker_warming_up = ticker not in tickers_available_today or pd.isna(
@@ -313,7 +366,7 @@ def run_portfolio_backtest(
                         else 0.0
                     )
 
-                    if stop_loss is not None and hold_ret <= float(stop_loss):
+                    if stop_loss_threshold is not None and hold_ret <= float(stop_loss_threshold):
                         decision = "CUT_STOPLOSS"
                     elif price < ticker_metrics["ma"].loc[dt]:
                         decision = "SELL_TREND"
@@ -346,51 +399,80 @@ def run_portfolio_backtest(
                             }
                         )
 
-        # --- 3. 매수 로직 (시장이 리스크 온일 때만) ---
-        if not is_risk_off:
+        # --- 3. 매수 로직 (리스크 온일 때만) ---
+        if allow_new_buys:
             # 1. 매수 후보 선정
             buy_ranked_candidates = []
-            if cash > 0:  # 현금이 있어야만 매수 후보를 고려
-                for candidate_ticker in tickers_available_today:
-                    candidate_metrics = metrics_by_ticker.get(candidate_ticker)
-                    ticker_state_cand = position_state[candidate_ticker]
-                    buy_signal_days_today = candidate_metrics["buy_signal_days"].get(dt, 0)
+            for candidate_ticker in tickers_available_today:
+                candidate_metrics = metrics_by_ticker.get(candidate_ticker)
+                ticker_state_cand = position_state[candidate_ticker]
+                buy_signal_days_today = candidate_metrics["buy_signal_days"].get(dt, 0)
 
-                    if (
-                        ticker_state_cand["shares"] == 0
-                        and i >= ticker_state_cand["buy_block_until"]
-                        and buy_signal_days_today > 0
-                    ):
-                        score_cand = candidate_metrics["ma_score"].get(dt, -float("inf")) or -float(
-                            "inf"
-                        )
+                if (
+                    ticker_state_cand["shares"] == 0
+                    and i >= ticker_state_cand["buy_block_until"]
+                    and buy_signal_days_today > 0
+                ):
+                    score_cand = candidate_metrics["ma_score"].get(dt, -float("inf")) or -float(
+                        "inf"
+                    )
 
-                        if passes_min_buy_score(score_cand, min_buy_score):
-                            buy_ranked_candidates.append((score_cand, candidate_ticker))
-                buy_ranked_candidates.sort(reverse=True)
+                    buy_ranked_candidates.append((score_cand, candidate_ticker))
+            buy_ranked_candidates.sort(reverse=True)
 
             # 2. 매수 실행 (신규 또는 교체)
             held_count = sum(1 for pos in position_state.values() if pos["shares"] > 0)
             slots_to_fill = max(0, top_n - held_count)
 
+            purchased_today: Set[str] = set()
+
             if slots_to_fill > 0 and buy_ranked_candidates:
-                # 2-1. 신규 매수: 포트폴리오에 빈 슬롯이 있는 경우
-                for k in range(min(slots_to_fill, len(buy_ranked_candidates))):
+                held_categories = {
+                    cat
+                    for tkr, state in position_state.items()
+                    if state["shares"] > 0 and (cat := ticker_to_category.get(tkr)) and cat != "TBD"
+                }
+
+                helper_candidates = [
+                    {"tkr": ticker, "score": score} for score, ticker in buy_ranked_candidates
+                ]
+
+                selected_candidates, rejected_candidates = select_candidates_by_category(
+                    helper_candidates,
+                    etf_meta,
+                    held_categories=held_categories,
+                    max_count=slots_to_fill,
+                    skip_held_categories=True,
+                )
+
+                for cand, reason in rejected_candidates:
+                    if reason != "category_held":
+                        continue
+                    ticker_rejected = cand.get("tkr")
+                    if not ticker_rejected:
+                        continue
+                    records = daily_records_by_ticker.get(ticker_rejected)
+                    if (
+                        records
+                        and records[-1]["date"] == dt
+                        and records[-1].get("decision") == "WAIT"
+                    ):
+                        records[-1]["note"] = "카테고리 중복"
+
+                for cand in selected_candidates:
                     if cash <= 0:
                         break
-                    _, ticker_to_buy = buy_ranked_candidates[k]
 
+                    ticker_to_buy = cand["tkr"]
                     price = today_prices.get(ticker_to_buy)
                     if pd.isna(price):
                         continue
 
-                    # 예산 산정은 기준 자산(Equity)을 고정하여 일중 처리 순서 영향을 제거합니다.
                     equity_base = equity
                     min_val = 1.0 / (top_n * 2.0) * equity_base
                     max_val = 1.0 / top_n * equity_base
                     budget = min(max_val, cash)
 
-                    # 예산이 최소 비중보다 작으면 스킵
                     if budget <= 0 or budget < min_val:
                         continue
 
@@ -399,13 +481,12 @@ def run_portfolio_backtest(
                         trade_amount = budget
                     else:
                         req_qty = ceil(budget / price) if price > 0 else 0
-                        # 정수 수량은 예산 내 최대 구매량으로 계산하되, 최소 비중을 충족하도록 다시 내림 처리합니다.
                         req_qty = int(budget // price)
                         trade_amount = req_qty * price
                         if req_qty <= 0 or trade_amount + 1e-9 < min_val:
                             continue
 
-                    if trade_amount <= cash + 1e-9:
+                    if trade_amount <= cash + 1e-9 and req_qty > 0:
                         ticker_state = position_state[ticker_to_buy]
                         cash -= trade_amount
                         ticker_state["shares"] += req_qty
@@ -414,6 +495,10 @@ def run_portfolio_backtest(
                             ticker_state["sell_block_until"] = max(
                                 ticker_state["sell_block_until"], i + cooldown_days
                             )
+
+                        category = ticker_to_category.get(ticker_to_buy)
+                        if category and category != "TBD":
+                            held_categories.add(category)
 
                         if (
                             daily_records_by_ticker[ticker_to_buy]
@@ -429,10 +514,23 @@ def run_portfolio_backtest(
                                     "avg_cost": ticker_state["avg_cost"],
                                 }
                             )
+                        purchased_today.add(ticker_to_buy)
 
-            elif slots_to_fill <= 0 and replace_weaker_stock and buy_ranked_candidates:
-                # 2-2. 교체 매매: 포트폴리오가 가득 찼지만, 더 좋은 종목이 나타난 경우
-                # 현재 보유 종목 목록 (점수와 티커 포함)
+            elif slots_to_fill <= 0 and buy_ranked_candidates:
+                helper_candidates = [
+                    {"tkr": ticker, "score": score}
+                    for score, ticker in buy_ranked_candidates
+                    if ticker not in purchased_today
+                ]
+
+                replacement_candidates, _ = select_candidates_by_category(
+                    helper_candidates,
+                    etf_meta,
+                    held_categories=None,
+                    max_count=None,
+                    skip_held_categories=False,
+                )
+
                 held_stocks_with_scores = []
                 for held_ticker, held_position in position_state.items():
                     if held_position["shares"] > 0:
@@ -448,14 +546,16 @@ def run_portfolio_backtest(
                                     }
                                 )
 
-                # 대기 종목 (매수 후보) 목록은 이미 점수 내림차순(강한 순)으로 정렬되어 있습니다.
-                # held_stocks_with_scores는 점수 오름차순으로 정렬하여 가장 약한 종목을 쉽게 찾을 수 있도록 합니다.
                 held_stocks_with_scores.sort(key=lambda x: x["score"])
 
-                # 교체 매매 로직 시작
-                # 대기 종목(buy_ranked_candidates)을 점수 높은 순서대로 순회
-                for best_new_score, replacement_ticker in buy_ranked_candidates:
+                for candidate in replacement_candidates:
+                    replacement_ticker = candidate["tkr"]
                     wait_stock_category = ticker_to_category.get(replacement_ticker)
+                    best_new_score_raw = candidate.get("score")
+                    try:
+                        best_new_score = float(best_new_score_raw)
+                    except (TypeError, ValueError):
+                        best_new_score = float("-inf")
 
                     # 교체 대상이 될 수 있는 보유 종목을 찾습니다.
                     # 1. 같은 카테고리의 종목이 있는지 확인
@@ -732,18 +832,29 @@ def run_single_ticker_backtest(
     ma_period: int = 20,
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
-    min_buy_score: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     단일 종목에 대해 이동평균선 교차 전략 백테스트를 실행합니다.
-    """
-    ma_period_etf = ma_period
-    ma_period_stock = ma_period
-    stop_loss = stop_loss_pct
-    min_buy_score = resolve_min_buy_score(min_buy_score)
 
-    # --- 티커 유형(ETF/주식) 구분 ---
-    ma_period = ma_period_etf if stock_type == "etf" else ma_period_stock
+    Args:
+        ticker: 종목 티커
+        stock_type: 종목 유형 (etf 또는 stock)
+        df: 미리 로드된 가격 데이터
+        initial_capital: 초기 자본금
+        core_start_date: 백테스트 시작일
+        date_range: 백테스트 기간
+        country: 시장 국가 코드
+        ma_period: 이동평균 기간
+        stop_loss_pct: 손절 비율
+        cooldown_days: 거래 쿨다운 기간
+
+    Returns:
+        pd.DataFrame: 백테스트 결과
+    """
+    stop_loss_threshold = stop_loss_pct
+
+    # 티커 유형에 따른 이동평균 기간 설정
+    current_ma_period = ma_period
     if df is None:
         # df가 제공되지 않으면, date_range를 사용하여 직접 데이터를 조회합니다.
         # date_range가 없으면 기본값(3개월)으로 조회됩니다.
@@ -753,26 +864,17 @@ def run_single_ticker_backtest(
     if df is None or df.empty:
         return pd.DataFrame()
 
-    # yfinance의 MultiIndex 컬럼을 단순화/중복 제거
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-        df = df.loc[:, ~df.columns.duplicated()]
-    if len(df) < ma_period:
+    # 공통 함수를 사용하여 데이터 처리 및 지표 계산
+    etf_tickers = {ticker} if stock_type == "etf" else set()
+    ticker_metrics = _process_ticker_data(
+        ticker, df, etf_tickers, current_ma_period, current_ma_period
+    )
+
+    if not ticker_metrics:
         return pd.DataFrame()
 
-    close = df["Close"]
-    if isinstance(close, pd.DataFrame):
-        close = close.iloc[:, 0]
-
-    ma = close.rolling(window=ma_period).mean()
-
-    buy_signal_active = close > ma
-    buy_signal_days = (
-        buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum())
-        .cumsum()
-        .fillna(0)
-        .astype(int)
-    )
+    moving_average = ticker_metrics["ma"]
+    consecutive_buy_days = ticker_metrics["buy_signal_days"]
 
     loop_start_index = 0
     if core_start_date is not None:
@@ -781,32 +883,33 @@ def run_single_ticker_backtest(
         except Exception:
             pass
 
-    cash = float(initial_capital)
-    shares: float = 0.0
-    avg_cost = 0.0
-    buy_block_until = -1
-    sell_block_until = -1
+    available_cash = float(initial_capital)
+    held_shares: float = 0.0
+    average_cost = 0.0
+    buy_cooldown_until = -1
+    sell_cooldown_until = -1
 
     rows = []
+    close_prices = ticker_metrics["close"]
     for i in range(loop_start_index, len(df)):
-        price_val = close.iloc[i]
+        price_val = close_prices.iloc[i]
         if pd.isna(price_val):
             continue
-        price = float(price_val)
+        current_price = float(price_val)
         decision, trade_amount, trade_profit, trade_pl_pct = None, 0.0, 0.0, 0.0
 
-        ma_today = ma.iloc[i]
+        ma_today = moving_average.iloc[i]
 
         if pd.isna(ma_today):
             rows.append(
                 {
                     "date": df.index[i],
-                    "price": price,
-                    "cash": cash,
-                    "shares": shares,
-                    "pv": cash + shares * price,
+                    "price": current_price,
+                    "cash": available_cash,
+                    "shares": held_shares,
+                    "pv": available_cash + held_shares * current_price,
                     "decision": "WAIT",
-                    "avg_cost": avg_cost,
+                    "avg_cost": average_cost,
                     "trade_amount": 0.0,
                     "trade_profit": 0.0,
                     "trade_pl_pct": 0.0,
@@ -814,69 +917,65 @@ def run_single_ticker_backtest(
                     "signal1": ma_today,
                     "signal2": None,
                     "score": 0.0,
-                    "filter": buy_signal_days.iloc[i],
+                    "filter": consecutive_buy_days.iloc[i],
                 }
             )
             continue
 
-        if shares > 0 and i >= sell_block_until:
-            hold_ret = (price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
+        if held_shares > 0 and i >= sell_cooldown_until:
+            hold_return_pct = (
+                (current_price / average_cost - 1.0) * 100.0 if average_cost > 0 else 0.0
+            )
 
-            if stop_loss is not None and hold_ret <= float(stop_loss):
+            if stop_loss_threshold is not None and hold_return_pct <= float(stop_loss_threshold):
                 decision = "CUT_STOPLOSS"
-            elif price < ma_today:
+            elif current_price < ma_today:
                 decision = "SELL_TREND"
 
             if decision in ("CUT_STOPLOSS", "SELL_TREND"):
-                trade_amount = shares * price
-                if avg_cost > 0:
-                    trade_profit = (price - avg_cost) * shares
-                    trade_pl_pct = hold_ret
-                cash += trade_amount
-                shares, avg_cost = 0, 0.0
+                trade_amount = held_shares * current_price
+                if average_cost > 0:
+                    trade_profit = (current_price - average_cost) * held_shares
+                    trade_pl_pct = hold_return_pct
+                available_cash += trade_amount
+                held_shares, average_cost = 0, 0.0
                 if cooldown_days > 0:
-                    buy_block_until = i + cooldown_days
+                    buy_cooldown_until = i + cooldown_days
 
-        if decision is None and shares == 0 and i >= buy_block_until:
-            buy_signal_days_today = buy_signal_days.iloc[i]
-            ma_score_today = 0.0
-            if pd.notna(ma_today) and ma_today > 0:
-                ma_score_today = (price / ma_today) - 1.0
-
-            passes_score_threshold = True
-            if not passes_min_buy_score(ma_score_today, min_buy_score):
-                passes_score_threshold = False
-
-            if buy_signal_days_today > 0 and passes_score_threshold:
+        if decision is None and held_shares == 0 and i >= buy_cooldown_until:
+            consecutive_buy_days_today = consecutive_buy_days.iloc[i]
+            if consecutive_buy_days_today > 0:
                 if country in ("coin", "aus"):
                     # 소수점 4자리까지 허용
-                    buy_qty = round(cash / price, 4) if price > 0 else 0.0
+                    buy_quantity = (
+                        round(available_cash / current_price, 4) if current_price > 0 else 0.0
+                    )
                 else:
-                    buy_qty = int(cash // price)
-                if buy_qty > 0:
-                    trade_amount = float(buy_qty) * price
-                    cash -= trade_amount
-                    avg_cost, shares = price, float(buy_qty)
+                    buy_quantity = int(available_cash // current_price)
+                if buy_quantity > 0:
+                    trade_amount = float(buy_quantity) * current_price
+                    available_cash -= trade_amount
+                    average_cost, held_shares = current_price, float(buy_quantity)
                     decision = "BUY"
                     if cooldown_days > 0:
-                        sell_block_until = i + cooldown_days
+                        sell_cooldown_until = i + cooldown_days
 
         if decision is None:
-            decision = "HOLD" if shares > 0 else "WAIT"
+            decision = "HOLD" if held_shares > 0 else "WAIT"
 
         ma_score_today = 0.0
         if pd.notna(ma_today) and ma_today > 0:
-            ma_score_today = (price / ma_today) - 1.0
+            ma_score_today = ((current_price / ma_today) - 1.0) * 100.0
 
         rows.append(
             {
                 "date": df.index[i],
-                "price": price,
-                "cash": cash,
-                "shares": shares,
-                "pv": cash + shares * price,
+                "price": current_price,
+                "cash": available_cash,
+                "shares": held_shares,
+                "pv": available_cash + held_shares * current_price,
                 "decision": decision,
-                "avg_cost": avg_cost,
+                "avg_cost": average_cost,
                 "trade_amount": trade_amount,
                 "trade_profit": trade_profit,
                 "trade_pl_pct": trade_pl_pct,
@@ -884,7 +983,7 @@ def run_single_ticker_backtest(
                 "signal1": ma_today,
                 "signal2": None,
                 "score": ma_score_today,
-                "filter": buy_signal_days.iloc[i],
+                "filter": consecutive_buy_days.iloc[i],
             }
         )
 

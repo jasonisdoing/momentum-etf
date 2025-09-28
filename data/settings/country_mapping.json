@@ -23,15 +23,18 @@
         "strategy": {
             "MA_PERIOD": 2,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_WEAKER_STOCK": true,
             "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MIN_BUY_SCORE": 0.2,
             "COIN_MIN_HOLDING_COST_KRW": 10000
         },
         "precision": {
             "currency": "KRW",
             "amt_precision": 0,
             "qty_precision": 8
+        },
+        "account_settings": {
+            "initial_capital_krw": 30000000,
+            "initial_date": "2025-09-26",
+            "cooldown_days": 0
         }
     },
     {
@@ -48,16 +51,19 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 8,
             "PORTFOLIO_TOPN": 7,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "AUD",
             "amt_precision": 4,
             "qty_precision": 0
+        },
+        "account_settings": {
+            "initial_capital_krw": 71000000,
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -78,16 +84,19 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
-            "PORTFOLIO_TOPN": 10,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
-            "MIN_BUY_SCORE": 0.0
+            "MA_PERIOD": 11,
+            "PORTFOLIO_TOPN": 8,
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
             "amt_precision": 0,
             "qty_precision": 0
+        },
+        "account_settings": {
+            "initial_capital_krw": 180000000,
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -105,19 +114,22 @@
                 "name": "TIMEFOLIO 미국나스닥100액티브"
             }
         ],
-        "need_signal": true,
+        "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 8,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
             "amt_precision": 0,
             "qty_precision": 0
+        },
+        "account_settings": {
+            "initial_capital_krw": 84000000,
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -135,19 +147,22 @@
                 "name": "TIMEFOLIO 미국나스닥100액티브"
             }
         ],
-        "need_signal": true,
+        "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
             "amt_precision": 0,
             "qty_precision": 0
+        },
+        "account_settings": {
+            "initial_capital_krw": 20000000,
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -168,16 +183,19 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
             "amt_precision": 0,
             "qty_precision": 0
+        },
+        "account_settings": {
+            "initial_capital_krw": 18000000,
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -198,16 +216,19 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
             "amt_precision": 0,
             "qty_precision": 0
+        },
+        "account_settings": {
+            "initial_capital_krw": 20000000,
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     },
     {
@@ -228,16 +249,19 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 11,
             "PORTFOLIO_TOPN": 2,
-            "REPLACE_WEAKER_STOCK": true,
-            "REPLACE_SCORE_THRESHOLD": 1.0,
-            "MIN_BUY_SCORE": 0.0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {
             "currency": "KRW",
             "amt_precision": 0,
             "qty_precision": 0
+        },
+        "account_settings": {
+            "initial_capital_krw": 24000000,
+            "initial_date": "2025-09-26",
+            "cooldown_days": 2
         }
     }
 ]

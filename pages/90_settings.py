@@ -54,12 +54,6 @@ def render_common_settings():
         disabled=True,
         help=f"{help_text} (양수로 입력해도 음수로 해석됩니다)",
     )
-    st.text_input(
-        "쿨다운 일수 (COOLDOWN_DAYS)",
-        value=str(common_settings["COOLDOWN_DAYS"]),
-        disabled=True,
-        help=help_text,
-    )
 
 
 def render_account_settings(country_code: str, account_code: str):
@@ -98,6 +92,14 @@ def render_account_settings(country_code: str, account_code: str):
     )
     st.markdown("---")
 
+    st.text_input(
+        "쿨다운 일수 (COOLDOWN_DAYS)",
+        value=str(account_settings.get("cooldown_days", 0)),
+        disabled=True,
+        help="이 값은 `data/settings/country_mapping.json` 의 계좌별 `account_settings.cooldown_days` 에서 설정합니다.",
+    )
+    st.markdown("---")
+
     # 전략 파라미터
     st.subheader("계좌별 전략 파라미터 (country_mapping.json)")
     strategy_help_text = "이 값들은 `data/settings/country_mapping.json` 파일의 'strategy' 항목에서 관리합니다."
@@ -113,23 +115,9 @@ def render_account_settings(country_code: str, account_code: str):
         disabled=True,
         help=strategy_help_text,
     )
-    st.checkbox(
-        "교체 매매 사용",
-        value=bool(strategy_rules.replace_weaker_stock),
-        disabled=True,
-        help=strategy_help_text,
-    )
     st.text_input(
         "교체 매매 점수 임계값",
         value=f"{float(strategy_rules.replace_threshold):.2f}",
-        disabled=True,
-        help=strategy_help_text,
-    )
-    st.text_input(
-        "최소 매수 점수",
-        value=f"{strategy_rules.min_buy_score:.2f}"
-        if strategy_rules.min_buy_score is not None
-        else "-",
         disabled=True,
         help=strategy_help_text,
     )

@@ -1,0 +1,33 @@
+{
+    "global": {
+        "run_immediately_on_start": true
+    },
+    "countries": {
+        "coin": {
+            "enabled": true,
+            "signal_cron": "1,11,21,31,41,51 * * * *",
+            "timezone": "Asia/Seoul",
+            "notify_cron": "1,11,21,31,41,51 * * * *",
+            "notify_timezone": "Asia/Seoul"
+        },
+        "aus": {
+            "enabled": true,
+            "signal_cron": "1,11,21,31,41,51 9-16 * * *",
+            "timezone": "Asia/Seoul",
+            "notify_cron": "1,31 9-16 * * 1-5",
+            "notify_timezone": "Australia/Sydney"
+        },
+        "kor": {
+            "enabled": true,
+            "signal_cron": "1,11,21,31,41,51 9-16 * * *",
+            "timezone": "Asia/Seoul",
+            "notify_cron": "1,31 9-16 * * 1-5",
+            "notify_timezone": "Asia/Seoul"
+        }
+    },
+    "cache": {
+        "enabled": true,
+        "cron": "0 0 * * *",
+        "timezone": "Asia/Seoul"
+    }
+}

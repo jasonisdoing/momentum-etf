@@ -1,14 +1,20 @@
 import os
 import sys
+import warnings
 from datetime import datetime
 from typing import Dict, Optional, List, Any
 
 import pandas as pd
 
+# pkg_resources 워닝 억제
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from logic import momentum as strategy_module
+from logic.strategies.momentum.shared import SIGNAL_TABLE_HEADERS
 from utils.account_registry import (
     get_account_file_settings,
     get_common_file_settings,
@@ -23,6 +29,7 @@ from utils.report import (
 from utils.data_loader import get_latest_trading_day
 from utils.data_loader import get_aud_to_krw_rate
 from utils.stock_list_io import get_etfs as get_etfs_from_files
+from utils.notification import build_summary_line_from_summary_data
 
 # 이 파일에서는 매매 전략에 사용되는 고유 파라미터를 정의합니다.
 # 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월 데이터로 테스트)
@@ -43,7 +50,11 @@ def _print_backtest_summary(
     """백테스트 결과 요약을 콘솔에 출력합니다."""
     account_info = get_account_info(account)
     currency = account_info.get("currency", "KRW")
-    precision = account_info.get("precision", 0)
+    precision = account_info.get("amt_precision", 0)
+    try:
+        precision = int(precision)
+    except (TypeError, ValueError):
+        precision = 0
 
     def _aud_money_formatter(amount):
         return f"${amount:,.{precision}f}"
@@ -52,24 +63,40 @@ def _print_backtest_summary(
 
     benchmark_name = "BTC" if country == "coin" else "S&P 500"
 
-    print("\n" + "=" * 30 + "\n 백테스트 결과 요약 ".center(30, "=") + "\n" + "=" * 30)
-    print(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
+    summary_lines = [
+        "\n" + "=" * 30 + "\n 백테스트 결과 요약 ".center(30, "=") + "\n" + "=" * 30,
+        f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)",
+    ]
+
     if summary.get("risk_off_periods"):
         for start, end in summary["risk_off_periods"]:
-            print(f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}")
-    print(f"| 초기 자본: {money_formatter(summary['initial_capital_krw'])}")
-    print(f"| 최종 자산: {money_formatter(summary['final_value'])}")
-    print(
-        f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
+            summary_lines.append(
+                f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
+            )
+    else:
+        summary_lines.append("| 투자 중단: N/A")
+
+    summary_lines.extend(
+        [
+            f"| 초기 자본: {money_formatter(summary['initial_capital_krw'])}",
+            f"| 최종 자산: {money_formatter(summary['final_value'])}",
+            (
+                f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% "
+                f"({benchmark_name}: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
+            ),
+            (
+                f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% "
+                f"({benchmark_name}: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
+            ),
+            f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%",
+            f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}",
+            f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}",
+            f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}",
+            f"| Ulcer Index: {summary.get('ulcer_index', 0.0):.2f}",
+            f"| CUI (Calmar/Ulcer): {summary.get('cui', 0.0):.2f}",
+            "=" * 30,
+        ]
     )
-    print(
-        f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% ({benchmark_name}: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
-    )
-    print(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
-    print(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
-    print(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")
-    print(f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}")
-    print("=" * 30)
 
     print("\n" + "=" * 30 + "\n 사용된 설정값 ".center(30, "=") + "\n" + "=" * 30)
     used_settings = {
@@ -79,7 +106,6 @@ def _print_backtest_summary(
         "포트폴리오 종목 수 (TopN)": portfolio_topn,
         "모멘텀 스코어 MA 기간": f"{settings.MA_PERIOD}일",
         "교체 매매 점수 임계값": settings.REPLACE_SCORE_THRESHOLD,
-        "약세 종목 우선 교체": "예" if settings.REPLACE_WEAKER_STOCK else "아니오",
         "개별 종목 손절매": f"{settings.HOLDING_STOP_LOSS_PCT}%",
         "매도 후 재매수 금지 기간": f"{settings.COOLDOWN_DAYS}일",
         "시장 위험 필터": "활성" if settings.MARKET_REGIME_FILTER_ENABLED else "비활성",
@@ -96,6 +122,7 @@ def _print_backtest_summary(
     print("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
     print("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
     print("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
+    print("  - Ulcer Index (얼서 지수): 고점 대비 낙폭의 지속성과 깊이를 반영. 낮을수록 안정적.")
 
     # 월별 성과 요약 테이블 출력
     if "monthly_returns" in summary and not summary["monthly_returns"].empty:
@@ -200,6 +227,9 @@ def _print_backtest_summary(
         table_lines = render_table_eaw(headers, rows, aligns)
         print("\n" + "\n".join(table_lines))
 
+    for line in summary_lines:
+        print(line)
+
 
 def main(
     account: str,
@@ -264,8 +294,6 @@ def main(
         settings.MA_PERIOD = strategy_rules.ma_period
         portfolio_topn = strategy_rules.portfolio_topn
         settings.REPLACE_SCORE_THRESHOLD = strategy_rules.replace_threshold
-        settings.REPLACE_WEAKER_STOCK = strategy_rules.replace_weaker_stock
-        min_buy_score = strategy_rules.min_buy_score or 0.0
     except SystemExit as e:
         print(str(e))
         if log_file:
@@ -281,8 +309,6 @@ def main(
                 portfolio_topn = int(override_settings["portfolio_topn"])
             if "replace_threshold" in override_settings:
                 settings.REPLACE_SCORE_THRESHOLD = float(override_settings["replace_threshold"])
-            if "replace_weaker_stock" in override_settings:
-                settings.REPLACE_WEAKER_STOCK = bool(override_settings["replace_weaker_stock"])
         except Exception:
             # Silently ignore malformed overrides
             pass
@@ -292,7 +318,7 @@ def main(
         common = get_common_file_settings()
         # 양수 입력을 음수 임계값으로 해석합니다 (예: 10 -> -10)
         settings.HOLDING_STOP_LOSS_PCT = -abs(float(common["HOLDING_STOP_LOSS_PCT"]))
-        settings.COOLDOWN_DAYS = int(common["COOLDOWN_DAYS"])
+        settings.COOLDOWN_DAYS = int(account_settings.get("cooldown_days", 0))
         settings.MARKET_REGIME_FILTER_ENABLED = bool(common["MARKET_REGIME_FILTER_ENABLED"])
         settings.MARKET_REGIME_FILTER_TICKER = str(common["MARKET_REGIME_FILTER_TICKER"])
         settings.MARKET_REGIME_FILTER_MA_PERIOD = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
@@ -303,7 +329,11 @@ def main(
         return None
 
     currency = account_info.get("currency", "KRW")
-    precision = account_info.get("precision", 0)
+    precision = account_info.get("amt_precision", account_info.get("precision", 0))
+    try:
+        precision = int(precision)
+    except (TypeError, ValueError):
+        precision = 0
 
     def _aud_money_formatter(amount):
         return f"${amount:,.{precision}f}"
@@ -321,12 +351,12 @@ def main(
     if currency == "AUD":
         money_formatter = _aud_money_formatter
         price_formatter = _aud_price_formatter
-        ma_formatter = _aud_price_formatter
+        # ma_formatter = _aud_price_formatter
     else:
         # 원화(KRW) 형식으로 가격을 포맷합니다.
         money_formatter = format_kr_money
         price_formatter = _kr_price_formatter
-        ma_formatter = _kr_ma_formatter
+        # ma_formatter = _kr_ma_formatter
 
     # 기간 설정 로직 (필수 설정)
     try:
@@ -419,7 +449,10 @@ def main(
 
         # 시뮬레이션 실행
         time_series_by_ticker: Dict[str, pd.DataFrame] = {}
-        name_by_ticker: Dict[str, str] = {s["ticker"]: s["name"] for s in etfs_from_file}
+        name_by_ticker: Dict[str, str] = {s["ticker"]: s.get("name", "") for s in etfs_from_file}
+        category_by_ticker: Dict[str, str] = {
+            s["ticker"]: str(s.get("category") or "") for s in etfs_from_file
+        }
         if portfolio_topn > 0:
             time_series_by_ticker = (
                 run_portfolio_backtest(
@@ -431,20 +464,19 @@ def main(
                     country=country,
                     prefetched_data=prefetched_data,
                     ma_period=settings.MA_PERIOD,
-                    replace_weaker_stock=settings.REPLACE_WEAKER_STOCK,
                     replace_threshold=settings.REPLACE_SCORE_THRESHOLD,
                     regime_filter_enabled=settings.MARKET_REGIME_FILTER_ENABLED,
                     regime_filter_ticker=settings.MARKET_REGIME_FILTER_TICKER,
                     regime_filter_ma_period=settings.MARKET_REGIME_FILTER_MA_PERIOD,
                     stop_loss_pct=settings.HOLDING_STOP_LOSS_PCT,
                     cooldown_days=settings.COOLDOWN_DAYS,
-                    min_buy_score=min_buy_score,
                 )
                 or {}
             )
             if "CASH" in time_series_by_ticker:
-                name_by_ticker = {s["ticker"]: s["name"] for s in etfs_from_file}
+                name_by_ticker = {s["ticker"]: s.get("name", "") for s in etfs_from_file}
                 name_by_ticker["CASH"] = "현금"
+                category_by_ticker["CASH"] = "-"
         else:
             # 종목별 고정 자본 방식: 전체 자본을 종목 수로 나눔
             capital_per_ticker = initial_capital_krw / len(etfs_from_file) if etfs_from_file else 0
@@ -464,7 +496,6 @@ def main(
                     ma_period=settings.MA_PERIOD,
                     stop_loss_pct=settings.HOLDING_STOP_LOSS_PCT,
                     cooldown_days=settings.COOLDOWN_DAYS,
-                    min_buy_score=min_buy_score,
                 )
                 if not ts.empty:
                     time_series_by_ticker[ticker] = ts
@@ -503,6 +534,7 @@ def main(
             # 일별 자산 집계
             total_value = 0.0
             total_holdings = 0.0
+            total_acquisition_cost = 0.0
             held_count = 0
             for tkr, ts in time_series_by_ticker.items():
                 row = ts.loc[dt]
@@ -520,18 +552,24 @@ def main(
                     price_val = row.get("price")
                     price = float(price_val) if pd.notna(price_val) else 0.0
 
+                    avg_cost_val = row.get("avg_cost", 0.0)
+                    avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
+
                     total_holdings += price * sh
                     if sh > 0:
                         held_count += 1
+                        total_acquisition_cost += avg_cost * sh
 
             total_cash = total_value - total_holdings
             portfolio_values.append(total_value)
 
             # 일일 포트폴리오 수익률
+            prev_equity = prev_total_pv
             if prev_total_pv is not None and prev_total_pv > 0:
                 day_ret_pct = (
                     ((total_value / prev_total_pv) - 1.0) * 100.0 if prev_total_pv > 0 else 0.0
                 )
+            day_profit_loss = total_value - prev_equity if prev_equity is not None else 0.0
             prev_total_pv = total_value
 
             # 초기 자본 대비 누적 포트폴리오 수익률
@@ -542,37 +580,50 @@ def main(
             if not quiet:
                 # 헤더 라인 출력
                 denom = portfolio_topn if portfolio_topn > 0 else total_cnt
-                date_str = pd.to_datetime(dt).strftime("%Y-%m-%d")
-                print(
-                    f"{date_str} - 보유종목 {held_count}/{denom} "
-                    f"잔액(보유+현금): {money_formatter(total_value)} "
-                    f"(보유 {money_formatter(total_holdings)} + 현금 {money_formatter(total_cash)}) "
-                    f"금일 수익률 {day_ret_pct:+.1f}%, 누적 수익률 {cum_ret_pct:+.1f}%"
+                date_kor = f"{pd.to_datetime(dt).year}년 {pd.to_datetime(dt).month}월 {pd.to_datetime(dt).day}일"
+
+                if total_acquisition_cost > 0:
+                    eval_profit_loss = total_holdings - total_acquisition_cost
+                    eval_return_pct = (total_holdings / total_acquisition_cost - 1.0) * 100.0
+                else:
+                    eval_profit_loss = 0.0
+                    eval_return_pct = 0.0
+
+                summary_data = {
+                    "principal": float(initial_capital_krw),
+                    "total_equity": float(total_value),
+                    "total_holdings_value": float(total_holdings),
+                    "total_cash": float(total_cash),
+                    "daily_profit_loss": float(day_profit_loss),
+                    "daily_return_pct": float(day_ret_pct),
+                    "eval_profit_loss": float(eval_profit_loss),
+                    "eval_return_pct": float(eval_return_pct),
+                    "cum_profit_loss": float(total_value - total_init),
+                    "cum_return_pct": float(cum_ret_pct),
+                    "held_count": int(held_count),
+                    "portfolio_topn": int(denom),
+                }
+
+                summary_line = build_summary_line_from_summary_data(
+                    summary_data,
+                    money_formatter,
+                    use_html=False,
+                    prefix=f"{date_kor} |",
                 )
+                print(summary_line)
 
                 # 전략에 따라 동적으로 헤더를 설정합니다.
                 # signal_headers = ["이평선(값)", "고점대비", "점수", "신호지속일"] (참고용 예시)
-                headers = [
-                    "#",
-                    "티커",
-                    "이름",
-                    "상태",
-                    "매수일자",
-                    "보유일",
-                    "현재가",
-                    "일간수익률",
-                    "보유수량",
-                    "금액",
-                    "누적수익률",
-                    "비중",
-                ]
-                headers.extend(["이평선(값)", "고점대비", "점수", "신호지속일"])
-                headers.append("문구")
+                headers = list(SIGNAL_TABLE_HEADERS)
 
                 decisions_list = []
                 for tkr, ts in time_series_by_ticker.items():
                     row = ts.loc[dt]
                     name = name_by_ticker.get(tkr, "")
+                    category_raw = category_by_ticker.get(tkr, "")
+                    category_display = (
+                        category_raw if category_raw and category_raw.upper() != "TBD" else "-"
+                    )
                     decision = str(row.get("decision", "")).upper()
 
                     # NaN 값에 대한 안정성 강화: 모든 숫자 변수를 사용 전에 확인하고 처리합니다.
@@ -620,7 +671,7 @@ def main(
                         else "-"
                     )
 
-                    s1, s2, score, filter_val = (
+                    _, s2, score, filter_val = (
                         row.get("signal1"),
                         row.get("signal2"),
                         row.get("score"),
@@ -628,7 +679,7 @@ def main(
                     )
 
                     # 전략에 따라 신호 값의 포맷을 다르게 지정합니다.
-                    s1_str = ma_formatter(s1) if pd.notna(s1) else "-"
+                    # s1_str = ma_formatter(s1) if pd.notna(s1) else "-"
                     s2_str = f"{float(s2):.1f}%" if pd.notna(s2) else "-"  # 고점대비
                     score_str = f"{float(score):.1f}" if pd.notna(score) else "-"  # 점수
                     filter_str = f"{int(filter_val)}일" if pd.notna(filter_val) else "-"
@@ -696,7 +747,8 @@ def main(
                     current_row = [
                         0,
                         tkr,
-                        name,
+                        name or tkr,
+                        category_display,
                         display_status,
                         bd_str,
                         f"{hd}",
@@ -706,7 +758,6 @@ def main(
                         money_formatter(amount),
                         hold_ret_str,
                         f"{w:.0f}%",
-                        s1_str,
                         s2_str,
                         score_str,
                         filter_str,
@@ -716,10 +767,13 @@ def main(
 
                 def sort_key(decision_tuple):
                     state, weight, score, tkr, _ = decision_tuple
-                    is_hold = 1 if state == "HOLD" else 2
-                    is_wait = 1 if state == "WAIT" else 0
-                    sort_value = -score if pd.notna(score) and state == "WAIT" else -weight
-                    return (is_hold, is_wait, sort_value, tkr)
+                    order = strategy_module.DECISION_CONFIG.get(state, {}).get("order", 99)
+                    try:
+                        score_val = float(score)
+                    except (TypeError, ValueError):
+                        score_val = float("-inf")
+                    sort_value = -score_val
+                    return (order, sort_value, tkr)
 
                 decisions_list.sort(key=sort_key)
 
@@ -732,9 +786,9 @@ def main(
                     "right",
                     "right",
                     "left",
+                    "left",
                     "center",
                     "left",
-                    "right",
                     "right",
                     "right",
                     "right",
@@ -764,13 +818,16 @@ def main(
                 print(f"\n백테스트 최종 자산: {money_formatter(final_value)}")
             peak = -1
             max_drawdown = 0
+            drawdowns_pct = []  # Ulcer Index 계산을 위한 일별 낙폭(%) 리스트
             for value in portfolio_values:
                 if value > peak:
                     peak = value
+                drawdown = 0.0
                 if peak > 0:
                     drawdown = (peak - value) / peak
                     if drawdown > max_drawdown:
                         max_drawdown = drawdown
+                drawdowns_pct.append(drawdown * 100.0)
 
             # 시장 위험 회피(Risk-Off) 기간을 계산합니다.
             risk_off_periods = []
@@ -876,6 +933,15 @@ def main(
             # 칼마 지수(Calmar Ratio) 계산 (CAGR / MDD)
             calmar_ratio = (cagr * 100) / (max_drawdown * 100) if max_drawdown > 0 else 0
 
+            # 얼서 지수(Ulcer Index) 계산
+            ulcer_index = 0.0
+            if drawdowns_pct:
+                drawdowns_squared = [d**2 for d in drawdowns_pct]
+                ulcer_index = (sum(drawdowns_squared) / len(drawdowns_squared)) ** 0.5
+
+            # CUI (Calmar / Ulcer Index) 계산
+            cui = calmar_ratio / ulcer_index if ulcer_index > 0 else 0.0
+
             summary = {
                 "start_date": start_date.strftime("%Y-%m-%d"),
                 "end_date": end_date.strftime("%Y-%m-%d"),
@@ -886,6 +952,8 @@ def main(
                 "sharpe_ratio": sharpe_ratio,
                 "sortino_ratio": sortino_ratio,
                 "calmar_ratio": calmar_ratio,
+                "ulcer_index": ulcer_index,
+                "cui": cui,
                 "cumulative_return_pct": (
                     (final_value / initial_capital_krw - 1) * 100 if initial_capital_krw > 0 else 0
                 ),

@@ -18,8 +18,12 @@ python scripts/categorize_etf.py <country>
 import argparse
 import os
 import sys
+import warnings
 
 import pandas as pd
+
+# pkg_resources 워닝 억제
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
