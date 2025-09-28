@@ -1378,7 +1378,7 @@ def _calculate_portfolio_summary(
     """포트폴리오의 요약 통계(수익률, 평가금액 등)를 계산합니다."""
     from utils.transaction_manager import get_transactions_up_to_date
     from utils.account_registry import get_account_info
-    from utils.data_loader import get_aud_to_krw_rate
+    from utils.data_loader import get_aud_to_krw_rate, get_usd_to_krw_rate
 
     account_info = get_account_info(account)
     currency = account_info.get("currency", "KRW") if account_info else "KRW"
@@ -1415,13 +1415,21 @@ def _calculate_portfolio_summary(
     )
 
     # 호주 계좌의 경우, 모든 요약 금액을 KRW로 환산
+    # 미국 계좌의 경우, 모든 요약 금액을 KRW로 환산
     aud_krw_rate = None
+    usd_krw_rate = None
     if currency == "AUD":
         aud_krw_rate = get_aud_to_krw_rate()
         if aud_krw_rate:
             current_equity *= aud_krw_rate
             total_holdings *= aud_krw_rate
             total_cash *= aud_krw_rate
+            equity_for_cum_calc *= aud_krw_rate
+    elif currency == "USD":
+        usd_krw_rate = get_usd_to_krw_rate()
+        if usd_krw_rate:
+            current_equity *= usd_krw_rate
+            total_holdings *= usd_krw_rate
             equity_for_cum_calc *= aud_krw_rate
 
     injections = get_transactions_up_to_date(country, account, base_date, "capital_injection")
@@ -1478,7 +1486,7 @@ def _calculate_portfolio_summary(
         else:
             print("  - No international shares info found.")
 
-    if currency == "AUD" and aud_krw_rate:
+    if currency == "AUD" and aud_krw_rate:  # AUD 계좌 KRW 환산
         prev_domestic_holdings_value *= aud_krw_rate
         prev_international_value *= aud_krw_rate
         if international_shares_value is not None:
@@ -1572,6 +1580,7 @@ def _calculate_portfolio_summary(
         "cum_return_pct": cum_ret_pct,
         "initial_date": initial_date,
         "aud_krw_rate": aud_krw_rate,
+        "usd_krw_rate": usd_krw_rate,
     }
 
 

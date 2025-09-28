@@ -24,10 +24,12 @@ from utils.account_registry import (
 from utils.tee import Tee
 from utils.report import (
     format_kr_money,
+    format_aud_money,
+    format_usd_money,
     render_table_eaw,
 )
 from utils.data_loader import get_latest_trading_day
-from utils.data_loader import get_aud_to_krw_rate
+from utils.data_loader import get_aud_to_krw_rate, get_usd_to_krw_rate
 from utils.stock_list_io import get_etfs as get_etfs_from_files
 from utils.notification import build_summary_line_from_summary_data
 
@@ -56,11 +58,12 @@ def _print_backtest_summary(
     except (TypeError, ValueError):
         precision = 0
 
-    def _aud_money_formatter(amount):
-        return f"${amount:,.{precision}f}"
-
-    money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
-
+    if currency == "AUD":
+        money_formatter = format_aud_money
+    elif currency == "USD":
+        money_formatter = format_usd_money
+    else:
+        money_formatter = format_kr_money
     benchmark_name = "BTC" if country == "coin" else "S&P 500"
 
     summary_lines = [
@@ -290,6 +293,16 @@ def main(
                 if log_file:
                     log_file.close()
                 return
+        elif currency == "USD":
+            usd_krw_rate = get_usd_to_krw_rate()
+            if usd_krw_rate and usd_krw_rate > 0:
+                initial_capital_krw /= usd_krw_rate
+            else:
+                if not quiet:
+                    print("오류: USD/KRW 환율을 가져올 수 없어 백테스트를 진행할 수 없습니다.")
+                if log_file:
+                    log_file.close()
+                return
 
         settings.MA_PERIOD = strategy_rules.ma_period
         portfolio_topn = strategy_rules.portfolio_topn
@@ -335,28 +348,26 @@ def main(
     except (TypeError, ValueError):
         precision = 0
 
-    def _aud_money_formatter(amount):
-        return f"${amount:,.{precision}f}"
-
-    def _aud_price_formatter(p):
-        return f"${p:,.{precision}f}"
-
-    def _kr_price_formatter(p):
-        return f"{int(round(p)):,}"
-
-    def _kr_ma_formatter(p):
-        return f"{int(round(p)):,}원"
+    from utils.report import (
+        format_aud_price,
+        format_usd_price,
+    )
 
     # 국가별로 다른 포맷터 사용
     if currency == "AUD":
-        money_formatter = _aud_money_formatter
-        price_formatter = _aud_price_formatter
-        # ma_formatter = _aud_price_formatter
+        money_formatter = format_aud_money
+        price_formatter = format_aud_price
+    elif currency == "USD":
+        money_formatter = format_usd_money
+        price_formatter = format_usd_price
     else:
         # 원화(KRW) 형식으로 가격을 포맷합니다.
         money_formatter = format_kr_money
+
+        def _kr_price_formatter(p):
+            return f"{int(round(p)):,}"
+
         price_formatter = _kr_price_formatter
-        # ma_formatter = _kr_ma_formatter
 
     # 기간 설정 로직 (필수 설정)
     try:

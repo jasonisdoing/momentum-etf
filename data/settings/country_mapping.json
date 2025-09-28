@@ -34,7 +34,7 @@
         "account_settings": {
             "initial_capital_krw": 30000000,
             "initial_date": "2025-09-26",
-            "cooldown_days": 0
+            "cooldown_days": 1
         }
     },
     {
@@ -261,6 +261,35 @@
         "account_settings": {
             "initial_capital_krw": 24000000,
             "initial_date": "2025-09-26",
+            "cooldown_days": 2
+        }
+    },
+    {
+        "country": "us",
+        "account": "u1",
+        "order": 20,
+        "display_name": "미국직투",
+        "benchmarks_tickers": [
+            {
+                "ticker": "SPY",
+                "name": "SPDR S&P 500 ETF Trust"
+            }
+        ],
+        "need_signal": true,
+        "is_active": true,
+        "strategy": {
+            "MA_PERIOD": 10,
+            "PORTFOLIO_TOPN": 5,
+            "REPLACE_SCORE_THRESHOLD": 0.5
+        },
+        "precision": {
+            "currency": "USD",
+            "amt_precision": 2,
+            "qty_precision": 3
+        },
+        "account_settings": {
+            "initial_capital_krw": 10000000,
+            "initial_date": "2025-09-28",
             "cooldown_days": 2
         }
     }
