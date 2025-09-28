@@ -13,6 +13,11 @@ python run.py 또는 streamlit run Main.py
 
 import os
 import sys
+import warnings
+
+# pkg_resources 워닝 억제
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 
 # 프로젝트 루트를 Python 경로에 추가합니다.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -1,10 +1,14 @@
 import os
 import sys
+import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
+
+# pkg_resources 워닝 억제
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 
 try:
     import pytz

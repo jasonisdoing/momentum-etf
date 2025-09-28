@@ -18,6 +18,11 @@ APScheduler 기반 스케줄러
 import os
 import logging
 import sys
+import warnings
+
+# pkg_resources 워닝 억제
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 import time
 from datetime import datetime
 

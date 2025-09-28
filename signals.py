@@ -7,6 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
+# pkg_resources 워닝 억제 (가장 강력한 방법)
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.simplefilter("ignore")
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
+warnings.filterwarnings("ignore", category=UserWarning, module="pykrx")
+
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -811,6 +818,8 @@ def _calculate_indicators(args: Tuple) -> Tuple[str, Dict[str, Any]]:
     """
     주어진 데이터프레임에 대해 기술적 지표(이동평균 등)를 계산합니다.
     """
+    from utils.indicators import calculate_moving_average_signals
+
     (
         tkr,
         df,
@@ -833,21 +842,18 @@ def _calculate_indicators(args: Tuple) -> Tuple[str, Dict[str, Any]]:
         df.columns = df.columns.get_level_values(0)
         df = df.loc[:, ~df.columns.duplicated()]
 
-    close = df["Close"]
-    ma = close.rolling(window=ma_period).mean()
-    buy_signal_active = close > ma
-    buy_signal_days = (
-        buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum())
-        .cumsum()
-        .fillna(0)
-        .astype(int)
+    close_prices = df["Close"]
+
+    # 공통 함수 사용
+    moving_average, buy_signal_active, consecutive_buy_days = calculate_moving_average_signals(
+        close_prices, ma_period
     )
 
     return tkr, {
         "df": df,
-        "close": close,
-        "ma": ma,
-        "buy_signal_days": buy_signal_days,
+        "close": close_prices,
+        "ma": moving_average,
+        "buy_signal_days": consecutive_buy_days,
         "ma_period": ma_period,
         "unadjusted_close": df.get("unadjusted_close"),
     }

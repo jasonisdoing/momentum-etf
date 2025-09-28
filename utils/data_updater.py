@@ -1,9 +1,13 @@
 import glob
 import json
+import warnings
 
 import requests
 import yfinance as yf
 from pykrx.stock import get_etf_ticker_name
+
+# pkg_resources 워닝 억제
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 
 
 def update_etf_names():

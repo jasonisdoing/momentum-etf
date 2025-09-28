@@ -1,8 +1,13 @@
 import os
 import sys
+import warnings
 
 import pandas as pd
 import streamlit as st
+
+# pkg_resources 워닝 억제
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 
 try:
     import pytz

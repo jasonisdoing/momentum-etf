@@ -6,11 +6,19 @@ import functools
 import json
 import logging
 import os
+import warnings
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from contextlib import contextmanager
 
 import pandas as pd
+
+# pkg_resources 워닝 억제 (가장 강력한 방법)
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.simplefilter("ignore")
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
+warnings.filterwarnings("ignore", category=UserWarning, module="pykrx")
 
 # 웹 스크레이핑을 위한 라이브러리
 try:
