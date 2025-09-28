@@ -3,20 +3,44 @@
         "category": "TBD",
         "tickers": [
             {
-                "ticker": "SPY",
-                "name": "SPDR S&P 500 ETF Trust"
+                "ticker": "KSTR",
+                "name": "KraneShares SSE STAR Market 50 Index ETF"
             },
             {
-                "ticker": "QQQ",
-                "name": "Invesco QQQ Trust"
+                "ticker": "VNM",
+                "name": "VanEck Vietnam ETF"
+            },
+            {
+                "ticker": "ARKQ",
+                "name": "ARK Autonomous Technology & Robotics ETF"
+            },
+            {
+                "ticker": "ARKK",
+                "name": "ARK Innovation ETF"
+            },
+            {
+                "ticker": "XEM",
+                "name": "SPDR S&P Metals & Mining ETF"
+            },
+            {
+                "ticker": "URA",
+                "name": "Global X Uranium ETF"
+            },
+            {
+                "ticker": "SHLD",
+                "name": "Global X Defense ETF"
+            },
+            {
+                "ticker": "SIL",
+                "name": "Global X Silver Miners ETF"
+            },
+            {
+                "ticker": "LIT",
+                "name": "Global X Lithium & Battery Tech ETF"
             },
             {
                 "ticker": "KWEB",
                 "name": "KraneShares CSI China Internet ETF"
-            },
-            {
-                "ticker": "KSTAR",
-                "name": "KraneShares SSE STAR Market 50 Index ETF"
             },
             {
                 "ticker": "SPMO",
@@ -35,40 +59,12 @@
                 "name": "VanEck Rare Earth/Strategic Metals ETF"
             },
             {
-                "ticker": "XLK",
-                "name": "Technology Select Sector SPDR Fund"
+                "ticker": "IAI",
+                "name": "iShares US Broker-Dealers & Securities Exch ETF"
             },
             {
-                "ticker": "XLB",
-                "name": "Materials Select Sector SPDR Fund"
-            },
-            {
-                "ticker": "XLI",
-                "name": "Industrial Select Sector SPDR Fund"
-            },
-            {
-                "ticker": "XLF",
-                "name": "Financial Select Sector SPDR Fund"
-            },
-            {
-                "ticker": "XLY",
-                "name": "Consumer Discretionary Select Sector SPDR Fund"
-            },
-            {
-                "ticker": "XLC",
-                "name": "Communication Services Select Sector SPDR Fund"
-            },
-            {
-                "ticker": "XLU",
-                "name": "Utilities Select Sector SPDR Fund"
-            },
-            {
-                "ticker": "XLV",
-                "name": "Health Care Select Sector SPDR Fund"
-            },
-            {
-                "ticker": "XLP",
-                "name": "Consumer Staples Select Sector SPDR Fund"
+                "ticker": "SMH",
+                "name": "VanEck Semiconductor ETF"
             }
         ]
     }

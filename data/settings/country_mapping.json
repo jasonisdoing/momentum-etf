@@ -278,8 +278,8 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 10,
-            "PORTFOLIO_TOPN": 5,
+            "MA_PERIOD": 15,
+            "PORTFOLIO_TOPN": 8,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {

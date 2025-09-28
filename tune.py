@@ -42,6 +42,12 @@ TUNING_CONFIG = {
         "REPLACE_SCORE_THRESHOLD": [0.5],
         "TEST_MONTHS_RANGE": 12,
     },
+    "us": {
+        "MA_RANGE": np.arange(5, 31, 1),
+        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "TEST_MONTHS_RANGE": 12,
+    },
 }
 
 
