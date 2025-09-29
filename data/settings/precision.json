@@ -1,0 +1,44 @@
+{
+  "common": {
+    "daily_return_pct": 2,
+    "cum_return_pct": 2,
+    "weight_pct": 2
+  },
+  "country": {
+    "coin": {
+      "header_currency": "KRW",
+      "stock_currency": "KRW",
+      "stock_amt_precision": 0,
+      "stock_qty_precision": 8
+    },
+    "aus": {
+      "header_currency": "KRW",
+      "stock_currency": "AUD",
+      "stock_amt_precision": 4,
+      "stock_qty_precision": 0
+    },
+    "kor": {
+      "header_currency": "KRW",
+      "stock_currency": "KRW",
+      "stock_amt_precision": 0,
+      "stock_qty_precision": 0
+    },
+    "us": {
+      "header_currency": "KRW",
+      "stock_currency": "USD",
+      "stock_amt_precision": 2,
+      "stock_qty_precision": 3
+    }
+  },
+  "currency": {
+    "KRW": {
+      "precision": 0
+    },
+    "AUD": {
+      "precision": 2
+    },
+    "USD": {
+      "precision": 2
+    }
+  }
+}

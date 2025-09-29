@@ -90,6 +90,52 @@ except ImportError:
 _SIGNAL_LOGGER = None
 
 
+def _load_display_precision() -> Dict[str, int]:
+    """data/settings/common.json 에서 퍼센트 표시 정밀도를 읽어옵니다."""
+    try:
+        root = Path(__file__).resolve().parent
+        cfg_path = root / "data" / "settings" / "precision.json"
+        if not cfg_path.exists():
+            return {
+                "daily_return_pct": 2,
+                "cum_return_pct": 2,
+                "weight_pct": 2,
+            }
+        import json
+
+        with open(cfg_path, "r", encoding="utf-8") as fp:
+            data = json.load(fp) or {}
+        prec = data.get("common") or {}
+        return {
+            "daily_return_pct": int(prec.get("daily_return_pct", 2)),
+            "cum_return_pct": int(prec.get("cum_return_pct", 2)),
+            "weight_pct": int(prec.get("weight_pct", 2)),
+        }
+    except Exception:
+        return {
+            "daily_return_pct": 2,
+            "cum_return_pct": 2,
+            "weight_pct": 2,
+        }
+
+
+def _load_country_precision(country: str) -> Dict[str, Any]:
+    """precision.json의 country 섹션에서 해당 국가의 통화/표시 정밀도를 로드합니다."""
+    try:
+        root = Path(__file__).resolve().parent
+        cfg_path = root / "data" / "settings" / "precision.json"
+        import json
+
+        with open(cfg_path, "r", encoding="utf-8") as fp:
+            data = json.load(fp) or {}
+        c = (data.get("country") or {}).get(country)
+        if not isinstance(c, dict):
+            return {}
+        return c
+    except Exception:
+        return {}
+
+
 def _resolve_previous_close(close_series: pd.Series, base_date: pd.Timestamp) -> float:
     """기준일 이전에 존재하는 가장 최근 종가를 반환합니다. (없으면 0.0)"""
     if close_series is None or close_series.empty:
@@ -2332,6 +2378,24 @@ def main(
             pass  # 일부 컬럼을 못찾아도 괜찮음
 
         display_rows = []
+        # 퍼센트 표시 자릿수 로드
+        prec = _load_display_precision()
+        p_daily = max(0, int(prec.get("daily_return_pct", 2)))
+        p_cum = max(0, int(prec.get("cum_return_pct", 2)))
+        p_w = max(0, int(prec.get("weight_pct", 2)))
+        # 국가별 정밀도 로드 (수량/금액)
+        cprec = _load_country_precision(country)
+        qty_p = int(cprec.get("qty_precision", 0)) if isinstance(cprec, dict) else 0
+        amt_p = int(cprec.get("amt_precision", 0)) if isinstance(cprec, dict) else 0
+        # 컬럼 인덱스 (가격/금액)
+        try:
+            col_price = headers.index("현재가")
+        except ValueError:
+            col_price = None
+        try:
+            col_amount = headers.index("금액")
+        except ValueError:
+            col_amount = None
         for row in rows_sorted:
             display_row = list(row)  # 복사
 
@@ -2349,16 +2413,17 @@ def main(
             idx = col_indices.get("day_ret")
             if idx is not None:
                 val = display_row[idx]
-                display_row[idx] = f"{val:+.1f}%" if isinstance(val, (int, float)) else "-"
+                if isinstance(val, (int, float)):
+                    display_row[idx] = ("{:+." + str(p_daily) + "f}%").format(val)
+                else:
+                    display_row[idx] = "-"
 
             # 누적수익률 포맷팅
             idx = col_indices.get("cum_ret")
             if idx is not None:
                 val = display_row[idx]
                 if isinstance(val, (int, float)):
-                    # International Shares는 소수점 2자리
-                    fmt = "{:+.2f}%" if row[1] == "IS" else "{:+.1f}%"
-                    display_row[idx] = fmt.format(val)
+                    display_row[idx] = ("{:+." + str(p_cum) + "f}%").format(val)
                 else:
                     display_row[idx] = "-"
 
@@ -2366,20 +2431,34 @@ def main(
             idx = col_indices.get("weight")
             if idx is not None:
                 val = display_row[idx]
-                display_row[idx] = f"{val:.0f}%" if isinstance(val, (int, float)) else "-"
+                if isinstance(val, (int, float)):
+                    display_row[idx] = ("{:." + str(p_w) + "f}%").format(val)
+                else:
+                    display_row[idx] = "-"
 
-            # 보유수량 포맷팅 (코인은 소수점 8자리)
+            # 보유수량 포맷팅 (국가별 qty_precision 적용)
             idx = col_indices.get("shares")
             if idx is not None:
                 val = display_row[idx]
                 if isinstance(val, (int, float)):
-                    if country == "coin":
-                        s = f"{float(val):.8f}".rstrip("0").rstrip(".")
+                    if qty_p > 0:
+                        s = f"{float(val):.{qty_p}f}".rstrip("0").rstrip(".")
                         display_row[idx] = s if s != "" else "0"
                     else:
                         display_row[idx] = f"{int(round(val)):,d}"
                 else:
                     display_row[idx] = val
+
+            # 현재가/금액 포맷팅 (국가별 amt_precision 적용, 천단위 구분)
+            if col_price is not None and isinstance(display_row[col_price], (int, float)):
+                fmt = ("{:, ." + str(amt_p) + "f}") if amt_p > 0 else "{:, .0f}"
+                # remove space from format (safety)
+                fmt = fmt.replace(" ", "")
+                display_row[col_price] = fmt.format(float(display_row[col_price]))
+            if col_amount is not None and isinstance(display_row[col_amount], (int, float)):
+                fmt = ("{:, ." + str(amt_p) + "f}") if amt_p > 0 else "{:, .0f}"
+                fmt = fmt.replace(" ", "")
+                display_row[col_amount] = fmt.format(float(display_row[col_amount]))
 
             display_rows.append(display_row)
 

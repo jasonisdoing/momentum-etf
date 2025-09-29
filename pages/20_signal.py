@@ -1,5 +1,7 @@
 import os
 import sys
+import json
+from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -203,6 +205,16 @@ def get_cached_etfs(country_code: str) -> List[Dict[str, Any]]:
     return get_etfs(country_code) or []
 
 
+def _load_precision_settings() -> Dict[str, Any]:
+    try:
+        cfg_path = Path(__file__).resolve().parent.parent / "data" / "settings" / "precision.json"
+        with open(cfg_path, "r", encoding="utf-8") as fp:
+            data = json.load(fp) or {}
+        return data
+    except Exception:
+        return {}
+
+
 def _display_status_report_df(df: pd.DataFrame, country_code: str):
     common_settings = get_common_file_settings()
     locked_set = (
@@ -265,18 +277,45 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         if col in df_display.columns:
             styler = styler.map(style_returns, subset=[col])
 
+    # 정밀도 설정 로드
+    prec_all = _load_precision_settings()
+    prec_common = prec_all.get("common", {}) if isinstance(prec_all, dict) else {}
+    country_prec = (
+        (prec_all.get("country", {}) or {}).get(country_code, {})
+        if isinstance(prec_all, dict)
+        else {}
+    )
+
+    p_daily = int(prec_common.get("daily_return_pct", 2) or 2)
+    p_cum = int(prec_common.get("cum_return_pct", 2) or 2)
+    p_w = int(prec_common.get("weight_pct", 2) or 2)
+    qty_p = int(country_prec.get("qty_precision", 0) or 0)
+    amt_p = int(
+        country_prec.get("amt_precision", 0)
+        or (0 if country_code in ["kor", "coin"] else (2 if country_code == "aus" else 0))
+    )
+
     formats = {
-        "일간수익률": "{:+.2f}%",
-        "누적수익률": "{:+.2f}%",
-        "비중": "{:.1f}%",
-        "점수": lambda val: f"{val:.1f}" if pd.notna(val) else "-",
+        "일간수익률": "{:+." + str(p_daily) + "f}%",
+        "누적수익률": "{:+." + str(p_cum) + "f}%",
+        "비중": "{:." + str(p_w) + "f}%",
+        "점수": (lambda val: f"{val:.1f}" if pd.notna(val) else "-")
+        if "점수" in df_display.columns
+        else None,
     }
-    if country_code in ["kor", "coin"]:
-        formats.update({"현재가": "{:,.0f}", "금액": "{:,.0f}"})
-    if country_code == "aus":
-        formats.update({"현재가": "{:,.2f}", "금액": "{:,.2f}"})
-    if country_code == "coin" and "보유수량" in df_display.columns:
-        formats["보유수량"] = "{:.8f}"
+    # 제거 None 항목
+    formats = {k: v for k, v in formats.items() if v is not None}
+
+    # 현재가/금액 (천단위 구분 포함)
+    amt_fmt = ("{:,." + str(amt_p) + "f}") if amt_p > 0 else "{:,.0f}"
+    if "현재가" in df_display.columns:
+        formats["현재가"] = amt_fmt
+    if "금액" in df_display.columns:
+        formats["금액"] = amt_fmt
+
+    # 보유수량
+    if "보유수량" in df_display.columns:
+        formats["보유수량"] = ("{:." + str(qty_p) + "f}") if qty_p > 0 else "%d"
     styler = styler.format(formats, na_rep="-")
 
     if locked_set and "티커" in df_display.columns:
@@ -300,7 +339,7 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
             "매수일자": st.column_config.TextColumn(width="small"),
             "보유": st.column_config.TextColumn(width=40),
             "보유수량": st.column_config.NumberColumn(
-                format="%.8f" if country_code == "coin" else "%d"
+                format=("%." + str(qty_p) + "f") if qty_p > 0 else "%d"
             ),
             "일간수익률": st.column_config.TextColumn(width="small"),
             "금액": st.column_config.TextColumn(width="small"),

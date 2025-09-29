@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import math
@@ -26,7 +27,7 @@ from utils.account_registry import (
 from utils.schedule_config import get_country_schedule
 from utils.data_loader import get_aud_to_krw_rate
 from utils.db_manager import get_portfolio_snapshot
-from utils.report import format_kr_money
+from utils.report import format_kr_money, render_table_eaw
 from utils.stock_list_io import get_etfs
 
 _LAST_ERROR: Optional[str] = None
@@ -413,6 +414,7 @@ def send_detailed_signal_notification(
     decision_config: Dict[str, Any],
     extra_lines: Optional[List[str]] = None,
     force_send: bool = False,
+    save_to_path: Optional[str] = None,
 ) -> bool:
     """Render and send detailed signal table to Slack."""
 
@@ -579,12 +581,151 @@ def send_detailed_signal_notification(
         need_signal = True
     slack_prefix = "<!channel>\n" if has_recommendation and need_signal else ""
 
+    # 파일 저장용 렌더링 텍스트 (백테스트 스타일)과 Slack 메시지 본문(코드블럭) 분리 구성
+    if not lines:
+        rendered_text = message_header
+    else:
+        rendered_text = message_header + "\n\n" + "```\n" + "\n".join(lines) + "\n```"
+
+    # 요청 시 파일로 저장: 백테스트 스타일 테이블 (render_table_eaw)
+    if save_to_path:
+        try:
+            # 1) 헤더 요약 (웹/슬랙 헤더에서 텍스트 추출)
+            summary_line = build_summary_line_from_header(header_line)
+
+            # 2) 정렬(aligns) 정의: 숫자/퍼센트/금액은 right, 그 외 left
+            numeric_like = {
+                "#",
+                "현재가",
+                "일간수익률",
+                "보유수량",
+                "금액",
+                "누적수익률",
+                "비중",
+                "고점대비",
+                "점수",
+                "지속",
+            }
+            aligns = ["right" if (str(h) in numeric_like) else "left" for h in headers]
+
+            # 3) 퍼센트 표시 자릿수 설정 로드 및 적용
+            def _load_display_precision() -> Dict[str, int]:
+                try:
+                    root = Path(__file__).resolve().parent.parent  # project root
+                    cfg_path = root / "data" / "settings" / "precision.json"
+                    if not cfg_path.exists():
+                        return {
+                            "daily_return_pct": 2,
+                            "cum_return_pct": 2,
+                            "weight_pct": 2,
+                        }
+                    import json
+
+                    with open(cfg_path, "r", encoding="utf-8") as fp:
+                        data = json.load(fp) or {}
+                    prec = data.get("common") or {}
+                    return {
+                        "daily_return_pct": int(prec.get("daily_return_pct", 2)),
+                        "cum_return_pct": int(prec.get("cum_return_pct", 2)),
+                        "weight_pct": int(prec.get("weight_pct", 2)),
+                    }
+                except Exception:
+                    return {
+                        "daily_return_pct": 2,
+                        "cum_return_pct": 2,
+                        "weight_pct": 2,
+                    }
+
+            prec = _load_display_precision()
+            p_daily = max(0, int(prec.get("daily_return_pct", 2)))
+            p_cum = max(0, int(prec.get("cum_return_pct", 2)))
+            p_w = max(0, int(prec.get("weight_pct", 2)))
+
+            # 헤더 인덱스 찾기
+            idx_day = headers.index("일간수익률") if "일간수익률" in headers else None
+            idx_cum = headers.index("누적수익률") if "누적수익률" in headers else None
+            idx_w = headers.index("비중") if "비중" in headers else None
+            idx_sh = headers.index("보유수량") if "보유수량" in headers else None
+            idx_px = headers.index("현재가") if "현재가" in headers else None
+            idx_amt = headers.index("금액") if "금액" in headers else None
+
+            # 국가별 수량 정밀도 로더
+            def _load_country_precision(country_key: str) -> Dict[str, Any]:
+                try:
+                    root = Path(__file__).resolve().parent.parent
+                    cfg_path = root / "data" / "settings" / "precision.json"
+                    import json
+
+                    with open(cfg_path, "r", encoding="utf-8") as fp:
+                        data = json.load(fp) or {}
+                    c = (data.get("country") or {}).get(country_key)
+                    return c if isinstance(c, dict) else {}
+                except Exception:
+                    return {}
+
+            cprec = _load_country_precision(country)
+            qty_p = int(cprec.get("qty_precision", 0)) if isinstance(cprec, dict) else 0
+            amt_p = int(cprec.get("amt_precision", 0)) if isinstance(cprec, dict) else 0
+
+            # 4) 문자열 변환 + 정밀도 적용된 표 데이터 생성
+            formatted_rows: List[List[str]] = []
+            for row in rows_sorted:
+                fr = []
+                for j, c in enumerate(row):
+                    val = c
+                    if (idx_day is not None) and (j == idx_day) and isinstance(val, (int, float)):
+                        fr.append(("{:+." + str(p_daily) + "f}%").format(float(val)))
+                    elif (idx_cum is not None) and (j == idx_cum) and isinstance(val, (int, float)):
+                        fr.append(("{:+." + str(p_cum) + "f}%").format(float(val)))
+                    elif (idx_w is not None) and (j == idx_w) and isinstance(val, (int, float)):
+                        fr.append(("{:." + str(p_w) + "f}%").format(float(val)))
+                    elif (idx_sh is not None) and (j == idx_sh) and isinstance(val, (int, float)):
+                        if qty_p > 0:
+                            s = (
+                                ("{:." + str(qty_p) + "f}")
+                                .format(float(val))
+                                .rstrip("0")
+                                .rstrip(".")
+                            )
+                            fr.append(s if s != "" else "0")
+                        else:
+                            fr.append(f"{int(round(float(val))):,d}")
+                    elif (idx_px is not None) and (j == idx_px) and isinstance(val, (int, float)):
+                        fmt = ("{:, ." + str(amt_p) + "f}") if amt_p > 0 else "{:, .0f}"
+                        fmt = fmt.replace(" ", "")
+                        fr.append(fmt.format(float(val)))
+                    elif (idx_amt is not None) and (j == idx_amt) and isinstance(val, (int, float)):
+                        fmt = ("{:, ." + str(amt_p) + "f}") if amt_p > 0 else "{:, .0f}"
+                        fmt = fmt.replace(" ", "")
+                        fr.append(fmt.format(float(val)))
+                    else:
+                        fr.append("-" if (val is None) else str(val))
+                formatted_rows.append(fr)
+
+            table_lines = render_table_eaw(headers, formatted_rows, aligns)
+
+            # 4) 추가 라인(경고/노트 등) 포함
+            extras = "\n".join(extra_lines or [])
+            backtest_text = summary_line + "\n\n" + "\n".join(table_lines)
+            if extras:
+                backtest_text += "\n\n" + extras
+
+            import os
+
+            os.makedirs(os.path.dirname(save_to_path), exist_ok=True)
+            with open(save_to_path, "w", encoding="utf-8") as fp:
+                fp.write(backtest_text)
+        except Exception:
+            # 파일 저장 실패는 슬랙 전송에 영향 주지 않음
+            pass
+
+    # Slack 전송
     if not lines:
         return send_slack_message(
             slack_prefix + message_header, webhook_url=webhook_url, webhook_name=webhook_name
         )
 
-    message = message_header + "\n\n" + "```\n" + "\n".join(lines) + "\n```"
+    message = rendered_text
     return send_slack_message(
         slack_prefix + message, webhook_url=webhook_url, webhook_name=webhook_name
     )

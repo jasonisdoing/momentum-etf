@@ -298,6 +298,23 @@ def main():
                     )
 
                     time.sleep(2)
+                    # 상세 시그널을 슬랙 전송과 동시에 파일로도 저장합니다.
+                    # 파일 경로: logs/signal_{account}_{YYYY-MM-DD}.log
+                    save_path = None
+                    try:
+                        date_for_file = (
+                            signal_result.report_date.strftime("%Y-%m-%d")
+                            if getattr(signal_result, "report_date", None)
+                            else (date_str or "latest")
+                        )
+                        save_path = os.path.join(
+                            os.path.dirname(os.path.abspath(__file__)),
+                            "logs",
+                            f"signal_{account}_{date_for_file}.log",
+                        )
+                    except Exception:
+                        save_path = None
+
                     send_detailed_signal_notification(
                         country,
                         account,
@@ -307,6 +324,7 @@ def main():
                         decision_config=signal_result.decision_config,
                         extra_lines=signal_result.detail_extra_lines,
                         force_send=True,
+                        save_to_path=save_path,
                     )
 
         print(f"==================== [{country.upper()}/{account}] 계좌 작업 완료 ====================")
