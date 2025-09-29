@@ -53,6 +53,10 @@ from logic.momentum import (
     COIN_ZERO_THRESHOLD,
 )
 from logic.strategies.momentum.constants import DECISION_MESSAGES
+from logic.strategies.momentum.messages import (
+    build_partial_buy_note,
+    build_partial_sell_note,
+)
 from logic.strategies.momentum.shared import SIGNAL_TABLE_HEADERS
 from logic.signals.history import (
     calculate_consecutive_holding_info,
@@ -653,7 +657,13 @@ def _calculate_portfolio_summary(
     from utils.data_loader import get_aud_to_krw_rate, get_usd_to_krw_rate
 
     account_info = get_account_info(account)
-    currency = account_info.get("currency", "KRW") if account_info else "KRW"
+    # 통화 기본값: 국가 기준으로 안전한 기본값을 사용 (aus→AUD, 그 외→KRW)
+    if account_info:
+        currency = str(account_info.get("currency") or "").upper()
+    else:
+        currency = ""
+    if not currency:
+        currency = "AUD" if country == "aus" else "KRW"
 
     total_holdings = sum(d["shares"] * d["price"] for d in data_by_tkr.values() if d["shares"] > 0)
 
@@ -685,6 +695,22 @@ def _calculate_portfolio_summary(
     usd_krw_rate = None
     if currency == "AUD":
         aud_krw_rate = get_aud_to_krw_rate()
+        # Fallback: AUD/KRW = USD/KRW * AUD/USD
+        if not aud_krw_rate and yf:
+            try:
+                usd_krw_rate = get_usd_to_krw_rate()
+            except Exception:
+                usd_krw_rate = None
+            try:
+                if usd_krw_rate:
+                    ticker_obj = yf.Ticker("AUDUSD=X")
+                    hist = ticker_obj.history(period="2d")
+                    if not hist.empty:
+                        aud_usd = float(hist["Close"].iloc[-1])
+                        if aud_usd and aud_usd > 0:
+                            aud_krw_rate = usd_krw_rate * aud_usd
+            except Exception:
+                pass
         if aud_krw_rate:
             current_equity *= aud_krw_rate
             total_holdings *= aud_krw_rate
@@ -1293,12 +1319,7 @@ def generate_signal_report(
                 pass
 
             if (was_held_before or buy_count_today >= 2) and total_buy_amount > 0:
-                amount_str = (
-                    format_aud_money(total_buy_amount)
-                    if country == "aus"
-                    else format_kr_money(total_buy_amount)
-                )
-                decision["row"][-1] = DECISION_MESSAGES["PARTIAL_BUY"].format(amount=amount_str)
+                decision["row"][-1] = build_partial_buy_note(country, total_buy_amount)
                 try:
                     logger.debug("[label_decision] tkr=%s -> PARTIAL_BUY", tkr)
                 except Exception:
@@ -1330,12 +1351,7 @@ def generate_signal_report(
                     )
                 except Exception:
                     total_sold_amount = 0.0
-                amount_str = (
-                    format_aud_money(total_sold_amount)
-                    if country == "aus"
-                    else format_kr_money(total_sold_amount)
-                )
-                sell_phrase = DECISION_MESSAGES["PARTIAL_SELL"].format(amount=amount_str)
+                sell_phrase = build_partial_sell_note(country, total_sold_amount)
                 original_phrase = decision["row"][-1]
                 if original_phrase and original_phrase not in ["HOLD", "WAIT", ""]:
                     decision["row"][-1] = f"{sell_phrase}, {original_phrase}"
@@ -1628,14 +1644,15 @@ def main(
         except Exception:
             ticker_name_map = {}
 
+        money_fmt = format_aud_money if country == "aus" else format_kr_money
         for value, ticker in breakdown_items:
             name_lookup = ticker_name_map.get(ticker) or ticker
             display_name = (
                 f"{ticker}({name_lookup})" if name_lookup and name_lookup != ticker else ticker
             )
-            print(f"  - {display_name}: {format_kr_money(value)}")
-        print(f"  - 현금: {format_kr_money(cash_amount)}")
-        print(f"  = 합계: {format_kr_money(total_equity)}")
+            print(f"  - {display_name}: {money_fmt(value)}")
+        print(f"  - 현금: {money_fmt(cash_amount)}")
+        print(f"  = 합계: {money_fmt(total_equity)}")
 
     return SignalExecutionResult(
         report_date=report_base_date.to_pydatetime(),

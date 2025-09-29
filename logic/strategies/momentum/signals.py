@@ -10,6 +10,9 @@ from utils.report import format_kr_money
 
 from .rules import StrategyRules
 from .constants import DECISION_MESSAGES, DECISION_NOTES
+from .messages import (
+    build_buy_replace_note,
+)
 from .shared import select_candidates_by_category
 
 
@@ -529,10 +532,10 @@ def generate_daily_signals_for_portfolio(
                             buy_qty = int(sell_value_for_budget // buy_price)
                             buy_notional = buy_qty * buy_price
 
-                        # 문구 단순화: 디스플레이명 + 금액 + 대체 정보
-                        best_new["row"][
-                            -1
-                        ] = f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} {money_formatter(buy_notional)} ({ticker_to_sell} 대체)"
+                        # 문구 단순화: 디스플레이명 + 금액 + 대체 정보 (공용 함수 사용)
+                        best_new["row"][-1] = build_buy_replace_note(
+                            country, buy_notional, ticker_to_sell
+                        )
                     else:
                         best_new["row"][-1] = f"{ticker_to_sell}(을)를 대체 (매수 예산 부족)"
                 else:
