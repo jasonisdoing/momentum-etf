@@ -9,6 +9,11 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None
+
 _SIGNAL_LOGGER = None
 
 
@@ -23,7 +28,15 @@ def get_signal_logger() -> logging.Logger:
         project_root = Path(__file__).resolve().parents[2]
         log_dir = project_root / "logs"
         log_dir.mkdir(exist_ok=True)
-        log_path = log_dir / f"{datetime.now().strftime('%Y-%m-%d')}.log"
+        if ZoneInfo is not None:
+            try:
+                now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+            except Exception:
+                now_kst = datetime.now()
+        else:
+            now_kst = datetime.now()
+
+        log_path = log_dir / f"{now_kst.strftime('%Y-%m-%d')}.log"
 
         file_handler = logging.FileHandler(log_path, encoding="utf-8")
         formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")

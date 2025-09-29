@@ -26,6 +26,11 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated", categor
 import time
 from datetime import datetime
 
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None
+
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -52,7 +57,15 @@ def setup_logging():
     os.makedirs(log_dir, exist_ok=True)
 
     # YYYY-MM-DD.log 파일명 설정
-    log_filename = os.path.join(log_dir, f"{datetime.now().strftime('%Y-%m-%d')}.log")
+    if ZoneInfo is not None:
+        try:
+            now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+        except Exception:
+            now_kst = datetime.now()
+    else:
+        now_kst = datetime.now()
+
+    log_filename = os.path.join(log_dir, f"{now_kst.strftime('%Y-%m-%d')}.log")
 
     # 로거 설정: 파일과 콘솔에 모두 출력
     logging.basicConfig(
