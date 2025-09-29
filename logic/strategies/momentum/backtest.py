@@ -13,9 +13,10 @@ import pandas as pd
 
 from utils.data_loader import fetch_ohlcv
 from utils.indicators import calculate_moving_average_signals, calculate_ma_score
+from utils.report import format_kr_money, format_aud_money
 
 from .shared import select_candidates_by_category
-from .constants import DECISION_NOTES
+from .constants import DECISION_NOTES, DECISION_CONFIG
 
 
 def _process_ticker_data(
@@ -706,7 +707,10 @@ def run_portfolio_backtest(
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
                                             "avg_cost": buy_price,
-                                            "note": replacement_note,
+                                            # 시그널/리포트와 동일 포맷: 디스플레이명 + 금액 + 대체 정보
+                                            "note": f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} "
+                                            f"{format_aud_money(buy_amount) if country == 'aus' else format_kr_money(buy_amount)} "
+                                            f"({ticker_to_sell} 대체)",
                                         }
                                     )
                                 else:

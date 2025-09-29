@@ -45,7 +45,7 @@ from utils.db_manager import (
     get_portfolio_snapshot,
     get_previous_portfolio_snapshot,
 )
-from utils.report import format_kr_money, render_table_eaw
+from utils.report import format_kr_money, render_table_eaw, format_aud_money
 from utils.stock_list_io import get_etfs
 from logic.momentum import (
     generate_daily_signals_for_portfolio,
@@ -1293,9 +1293,12 @@ def generate_signal_report(
                 pass
 
             if (was_held_before or buy_count_today >= 2) and total_buy_amount > 0:
-                decision["row"][-1] = DECISION_MESSAGES["PARTIAL_BUY"].format(
-                    amount=format_kr_money(total_buy_amount)
+                amount_str = (
+                    format_aud_money(total_buy_amount)
+                    if country == "aus"
+                    else format_kr_money(total_buy_amount)
                 )
+                decision["row"][-1] = DECISION_MESSAGES["PARTIAL_BUY"].format(amount=amount_str)
                 try:
                     logger.debug("[label_decision] tkr=%s -> PARTIAL_BUY", tkr)
                 except Exception:
@@ -1327,9 +1330,12 @@ def generate_signal_report(
                     )
                 except Exception:
                     total_sold_amount = 0.0
-                sell_phrase = DECISION_MESSAGES["PARTIAL_SELL"].format(
-                    amount=format_kr_money(total_sold_amount)
+                amount_str = (
+                    format_aud_money(total_sold_amount)
+                    if country == "aus"
+                    else format_kr_money(total_sold_amount)
                 )
+                sell_phrase = DECISION_MESSAGES["PARTIAL_SELL"].format(amount=amount_str)
                 original_phrase = decision["row"][-1]
                 if original_phrase and original_phrase not in ["HOLD", "WAIT", ""]:
                     decision["row"][-1] = f"{sell_phrase}, {original_phrase}"

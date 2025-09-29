@@ -50,12 +50,13 @@ def generate_daily_signals_for_portfolio(
     def _aud_price_formatter(p, precision: int):
         return f"${p:,.{precision}f}"
 
-    # 계좌 정보에서 통화 및 정밀도 가져오기 (여기서는 직접 접근 불가하므로 인수로 받거나 기본값 사용)
-    # 여기서는 임시로 기본값을 사용하거나, portfolio_settings에서 가져오는 것으로 가정합니다.
-    currency = portfolio_settings.get("currency", "KRW")
+    # 표시 통화와 정밀도 결정
+    # 규칙: 테이블(시그널 상세)은 국가별 stock currency를 따른다.
+    # - AUS: AUD 포맷 사용
+    # - 그 외(KOR/COIN): KRW 포맷 사용
     precision = portfolio_settings.get("precision", 0)
 
-    if currency == "AUD":
+    if country == "aus":
 
         def money_formatter(amount):
             return _aud_money_formatter(amount, precision)
@@ -63,7 +64,7 @@ def generate_daily_signals_for_portfolio(
         def price_formatter(p):
             return _aud_price_formatter(p, precision)
 
-    else:  # kor
+    else:  # kor/coin
         money_formatter = format_kr_money
         price_formatter = _format_kr_price
 
