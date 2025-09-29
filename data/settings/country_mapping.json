@@ -34,7 +34,7 @@
         "account_settings": {
             "initial_capital_krw": 30000000,
             "initial_date": "2025-09-26",
-            "cooldown_days": 1
+            "cooldown_days": 0
         }
     },
     {
