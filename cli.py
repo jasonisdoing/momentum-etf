@@ -153,16 +153,6 @@ def main():
         action="store_true",
         help="실행 가능한 예제를 출력하고 종료합니다.",
     )
-    parser.add_argument(
-        "--deterministic",
-        action="store_true",
-        help="결정적 모드: 실시간 가격/변동 요소를 배제하여 재현 가능한 결과를 강제합니다.",
-    )
-    parser.add_argument(
-        "--no-realtime",
-        action="store_true",
-        help="실시간 시세 적용을 비활성화합니다.",
-    )
 
     args = parser.parse_args()
 
@@ -337,8 +327,6 @@ def main():
                     signal_result = run_signal(
                         account=account,
                         date_str=date_str,
-                        deterministic=args.deterministic,
-                        no_realtime=args.no_realtime,
                     )
                 except Exception as e:
                     print(f"\n오류: {run_label} 시그널 생성 중 오류가 발생했습니다: {e}")

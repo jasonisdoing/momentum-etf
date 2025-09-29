@@ -224,9 +224,6 @@ def _fetch_and_prepare_data(
     portfolio_settings: Dict,
     date_str: Optional[str],
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
-    *,
-    deterministic: bool = False,
-    no_realtime: bool = False,
 ) -> Optional[SignalReportData]:
     """Fetch OHLCV and compute indicators for universe.
 
@@ -263,11 +260,7 @@ def _fetch_and_prepare_data(
     )
 
     # realtime usage decision
-    today_cal = (
-        pd.Timestamp.now(tz="Asia/Seoul").normalize()
-        if deterministic
-        else pd.Timestamp.now().normalize()
-    )
+    today_cal = pd.Timestamp.now().normalize()
     use_realtime = False
     if base_date.date() == today_cal.date():
         if country == "coin":
@@ -283,13 +276,6 @@ def _fetch_and_prepare_data(
                     pass
         else:  # aus
             use_realtime = is_market_open(country)
-
-    # Override by flags
-    if deterministic or no_realtime:
-        use_realtime = False
-        print(
-            f"-> [DEBUG] use_realtime overridden to False (deterministic={deterministic}, no_realtime={no_realtime})"
-        )
 
     try:
         common = get_common_file_settings()
@@ -452,16 +438,7 @@ def _fetch_and_prepare_data(
         ma_score = 0.0
         if pd.notna(m) and m > 0:
             ma_score = round(((c0 / m) - 1.0) * 100, 1)
-        print(
-            f"[DEBUG_SCORE] {tkr}: price={c0}, MA={m}, score={ma_score} (formula=round(((price/MA)-1)*100,1))"
-        )
-        try:
-            tail_ma = result["ma"].iloc[-5:].tolist()
-        except Exception:
-            tail_ma = []
-        print(
-            f"[DEBUG] {tkr}: base={base_date.date()} price={c0} MA={m} prev_close={prev_close} ma_period={result['ma_period']} tail_MA={tail_ma}"
-        )
+
         buy_signal_days_today = (
             result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0
         )
@@ -876,9 +853,6 @@ def generate_signal_report(
     account: str,
     date_str: Optional[str] = None,
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
-    *,
-    deterministic: bool = False,
-    no_realtime: bool = False,
 ) -> Optional[Tuple[str, List[str], List[List[str]], pd.Timestamp, List[str], Dict[str, Any]]]:
     """Generate today's signal report for an account."""
     logger = get_signal_logger()
@@ -1386,9 +1360,6 @@ def generate_signal_report(
 def main(
     account: str,
     date_str: Optional[str] = None,
-    *,
-    deterministic: bool = False,
-    no_realtime: bool = False,
 ) -> Optional[SignalExecutionResult]:
     """Run signal generation and return a structured result for notifications/UI."""
     if not account:
@@ -1402,9 +1373,8 @@ def main(
     if not country:
         raise ValueError(f"'{account}' 계좌에 국가 정보가 없습니다.")
 
-    result = generate_signal_report(account, date_str)
-
-    if not result:
+    report = generate_signal_report(account, date_str)
+    if not report:
         return None
 
     (
@@ -1414,7 +1384,7 @@ def main(
         report_base_date,
         slack_message_lines,
         summary_data,
-    ) = result
+    ) = report
 
     # Save report to DB for later UI retrieval
     try:
