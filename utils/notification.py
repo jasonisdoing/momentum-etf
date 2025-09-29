@@ -572,7 +572,12 @@ def send_detailed_signal_notification(
     has_recommendation = any(
         decision_config.get(state, {}).get("is_recommendation", False) for state in grouped.keys()
     )
-    slack_prefix = "<!channel>\n" if has_recommendation else ""
+    # If the account is configured not to need signals, avoid channel-wide mention
+    try:
+        need_signal = bool((get_account_info(account) or {}).get("need_signal", True))
+    except Exception:
+        need_signal = True
+    slack_prefix = "<!channel>\n" if has_recommendation and need_signal else ""
 
     if not lines:
         return send_slack_message(

@@ -127,11 +127,6 @@ def load_dashboard_data(selected_date_str: str, all_accounts: list) -> dict:
                 else selected_date_str
             )
 
-            holdings = target_doc.get("holdings", [])
-            num_holdings = len(holdings)
-            strategy_params = account_info.get("strategy_params", {})
-            max_etfs = strategy_params.get("max_etfs", 0)
-
             # --- KRW로 모든 값 변환 ---
             initial_capital_krw_local = summary.get("principal", 0.0)
             current_equity_krw_local = summary.get("total_equity", 0.0)
@@ -168,8 +163,6 @@ def load_dashboard_data(selected_date_str: str, all_accounts: list) -> dict:
                     "qty_precision": 0,
                     "order": account_info.get("order", 99),
                     "data_date": data_date_str,
-                    "num_holdings": num_holdings,
-                    "max_etfs": max_etfs,
                 }
             )
         except Exception as e:
@@ -358,8 +351,6 @@ def main():
         cols = st.columns((1.5, 1.5, 1.5, 1, 1.5, 1, 1.5, 1, 1.5, 1.5))
         data_date = summary.get("data_date")
         display_label = summary["display_name"]
-        num_holdings = summary.get("num_holdings")
-        max_etfs = summary.get("max_etfs")
 
         # 계좌명을 클릭 가능한 링크로 표시
         account_code = None
@@ -371,9 +362,8 @@ def main():
         if account_code:
             # 같은 창에서 열리도록 HTML 링크 사용 - signal 페이지로 이동
             if data_date:
-                holdings_str = f"기준일: {data_date}"
                 cols[0].markdown(
-                    f"<div><a href='/signal?account={account_code}' target='_self' style='text-decoration: none; color: #1f77b4; font-weight: bold;'>{display_label}</a><br/><span style='color:#666;font-size:0.85em;'>{holdings_str}</span></div>",
+                    f"<div><a href='/signal?account={account_code}' target='_self' style='text-decoration: none; color: #1f77b4; font-weight: bold;'>{display_label}</a><br/><span style='color:#666;font-size:0.85em;'>기준일: {data_date}</span></div>",
                     unsafe_allow_html=True,
                 )
             else:
@@ -383,13 +373,8 @@ def main():
                 )
         else:
             if data_date:
-                holdings_str = (
-                    f"보유종목: {num_holdings}/{max_etfs}"
-                    if num_holdings is not None and max_etfs and max_etfs > 0
-                    else f"기준일: {data_date}"
-                )
                 cols[0].markdown(
-                    f"<div><strong>{display_label}</strong><br/><span style='color:#666;font-size:0.85em;'>{holdings_str}</span></div>",
+                    f"<div><strong>{display_label}</strong><br/><span style='color:#666;font-size:0.85em;'>기준일: {data_date}</span></div>",
                     unsafe_allow_html=True,
                 )
             else:
@@ -399,7 +384,7 @@ def main():
             return f"{value:,.{amt_precision}f} {currency_symbol}"
 
         def format_amount_with_sign(value):
-            color = "red" if value > 0 else "blue" if value < 0 else "black"
+            color = "red" if value >= 0 else "blue"
             sign = "+" if value > 0 else ""
             return f"<div style='text-align: right; color: {color};'>{sign}{value:,.{amt_precision}f} {currency_symbol}</div>"
 

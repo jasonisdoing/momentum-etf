@@ -2047,15 +2047,37 @@ def generate_signal_report(
     # 표시 기준일 기준으로 '완료' 거래를 표시합니다. 다음 거래일이면 거래가 없을 확률이 높음
     trades_on_base_date = get_trades_on_date(country, account, label_date)
     executed_buys_today = {
-        trade["ticker"] for trade in trades_on_base_date if trade["action"] == "BUY"
+        trade["ticker"]
+        for trade in trades_on_base_date
+        if str(trade.get("action", "")).upper() == "BUY"
     }
     sell_trades_today = {}
+    buy_trades_today_map = {}
     for trade in trades_on_base_date:
-        if trade["action"] == "SELL":
+        action = str(trade.get("action", "")).upper()
+        if action == "SELL":
             tkr = trade["ticker"]
             if tkr not in sell_trades_today:
                 sell_trades_today[tkr] = []
             sell_trades_today[tkr].append(trade)
+        elif action == "BUY":
+            tkr = trade["ticker"]
+            if tkr not in buy_trades_today_map:
+                buy_trades_today_map[tkr] = []
+            buy_trades_today_map[tkr].append(trade)
+
+    # 이전 스냅샷의 보유 수량 맵을 구성하여 '신규 매수' vs '부분 매수'를 구분합니다.
+    prev_holdings_map = {}
+    try:
+        ps = locals().get("prev_snapshot")
+        if isinstance(ps, dict) and isinstance(ps.get("holdings"), list):
+            prev_holdings_map = {
+                str(h.get("ticker")): float(h.get("shares", 0.0) or 0.0)
+                for h in ps.get("holdings", [])
+                if isinstance(h, dict)
+            }
+    except Exception:
+        prev_holdings_map = {}
 
     # 기준일에 실행된 거래가 있다면, 현황 목록에 '완료' 상태를 표시합니다.
     for decision in decisions:
@@ -2063,8 +2085,71 @@ def generate_signal_report(
 
         # 오늘 매수했고, 현재 보유 중인 종목
         if tkr in executed_buys_today:
-            # 이 종목이 오늘 신규 매수되었음을 표시
-            decision["row"][-1] = "✅ 신규 매수"
+            # 동일 종목의 당일 총 매수 금액/수량 및 건수 계산
+            trades_buys = buy_trades_today_map.get(tkr, [])
+            try:
+                total_buy_amount = sum(
+                    float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0)
+                    for tr in trades_buys
+                )
+                total_buy_shares = sum(float(tr.get("shares", 0.0) or 0.0) for tr in trades_buys)
+                buy_count_today = len(trades_buys)
+            except Exception:
+                total_buy_amount = 0.0
+                total_buy_shares = 0.0
+                buy_count_today = 1
+
+            # 현재 보유 수량에서 오늘 매수 수량을 빼고, 오늘 매도 수량을 더해 '하루 시작 시점' 보유 추정치 계산
+            d = data_by_tkr.get(tkr)
+            current_shares_now = float(d.get("shares", 0.0)) if d else 0.0
+            today_sold_shares = sum(
+                float(tr.get("shares", 0.0) or 0.0) for tr in sell_trades_today.get(tkr, [])
+            )
+            prev_shares_estimated = current_shares_now - total_buy_shares + today_sold_shares
+            was_held_before_est = (
+                prev_shares_estimated > COIN_ZERO_THRESHOLD
+                if country == "coin"
+                else prev_shares_estimated > 0.0
+            )
+
+            # 보수적으로: 이전 스냅샷 정보가 있으면 함께 고려
+            prev_shares_cached = float(prev_holdings_map.get(tkr, 0.0) or 0.0)
+            was_held_before_cached = (
+                prev_shares_cached > COIN_ZERO_THRESHOLD
+                if country == "coin"
+                else prev_shares_cached > 0.0
+            )
+            was_held_before = was_held_before_est or was_held_before_cached
+
+            # 디버그: 라벨 판정 근거 로깅
+            try:
+                logger.debug(
+                    "[label_decision] tkr=%s prev_est=%.4f prev_cached=%.4f was_held_before=%s buys_today=%d buy_shares=%.4f buy_amt=%.2f curr_shares=%.4f sold_today=%.4f",
+                    tkr,
+                    prev_shares_estimated,
+                    prev_shares_cached,
+                    str(was_held_before),
+                    buy_count_today,
+                    total_buy_shares,
+                    total_buy_amount,
+                    current_shares_now,
+                    today_sold_shares,
+                )
+            except Exception:
+                pass
+
+            if (was_held_before or buy_count_today >= 2) and total_buy_amount > 0:
+                decision["row"][-1] = f"➕ 부분 매수({format_kr_money(total_buy_amount)})"
+                try:
+                    logger.debug("[label_decision] tkr=%s -> PARTIAL_BUY", tkr)
+                except Exception:
+                    pass
+            else:
+                decision["row"][-1] = "✅ 신규 매수"
+                try:
+                    logger.debug("[label_decision] tkr=%s -> NEW_BUY", tkr)
+                except Exception:
+                    pass
 
         # 오늘 매도된 종목 처리
         if tkr in sell_trades_today:
