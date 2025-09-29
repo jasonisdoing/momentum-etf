@@ -48,7 +48,7 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 12,
+            "MA_PERIOD": 30,
             "PORTFOLIO_TOPN": 7,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
@@ -77,7 +77,7 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 10,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
@@ -106,7 +106,7 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 8,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
@@ -135,7 +135,7 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 2,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
@@ -164,7 +164,7 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 2,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
@@ -193,7 +193,7 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 2,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
@@ -222,7 +222,7 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 2,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },

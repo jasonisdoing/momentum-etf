@@ -32,7 +32,7 @@ TUNING_CONFIG = {
     },
     "aus": {
         "MA_RANGE": np.arange(15, 31, 1),
-        "PORTFOLIO_TOPN": np.arange(7, 11, 1),
+        "PORTFOLIO_TOPN": [7],
         "REPLACE_SCORE_THRESHOLD": [0.5],
         "TEST_MONTHS_RANGE": 12,
     },
@@ -219,6 +219,7 @@ def main():
                 print(f"\n--- CAGR {i}위 ---")
                 for name, value in zip(param_names, params):
                     print(f"  - {name}: {value}")
+                print(f"  - test_months_range: {TEST_MONTHS_RANGE}")
                 print("-" * 20)
                 print(f"  - CAGR: {row['cagr_pct']:.2f}%")
                 print(f"  - CUI: {row['cui']:.2f}")
@@ -239,6 +240,7 @@ def main():
                 print(f"\n--- MDD {i}위 ---")
                 for name, value in zip(param_names, params):
                     print(f"  - {name}: {value}")
+                print(f"  - test_months_range: {TEST_MONTHS_RANGE}")
                 print("-" * 20)
                 print(f"  - CAGR: {row['cagr_pct']:.2f}%")
                 print(f"  - CUI: {row['cui']:.2f}")
@@ -259,6 +261,7 @@ def main():
                 print(f"\n--- CUI (Calmar/Ulcer) {i}위 ---")
                 for name, value in zip(param_names, params):
                     print(f"  - {name}: {value}")
+                print(f"  - test_months_range: {TEST_MONTHS_RANGE}")
                 print("-" * 20)
                 print(f"  - CAGR: {row['cagr_pct']:.2f}%")
                 print(f"  - CUI: {row['cui']:.2f}")
