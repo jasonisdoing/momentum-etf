@@ -52,12 +52,8 @@ from logic.momentum import (
     DECISION_CONFIG,
     COIN_ZERO_THRESHOLD,
 )
-from logic.strategies.momentum.constants import DECISION_MESSAGES
-from logic.strategies.momentum.messages import (
-    build_partial_buy_note,
-    build_partial_sell_note,
-)
 from logic.strategies.momentum.shared import SIGNAL_TABLE_HEADERS
+from logic.strategies.momentum.labeler import compute_net_trade_note
 from logic.signals.history import (
     calculate_consecutive_holding_info,
     calculate_trade_cooldown_info,
@@ -1267,100 +1263,26 @@ def generate_signal_report(
 
     for decision in decisions:
         tkr = decision["tkr"]
-
-        if tkr in executed_buys_today:
-            trades_buys = buy_trades_today_map.get(tkr, [])
-            try:
-                total_buy_amount = sum(
-                    float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0)
-                    for tr in trades_buys
-                )
-                total_buy_shares = sum(float(tr.get("shares", 0.0) or 0.0) for tr in trades_buys)
-                buy_count_today = len(trades_buys)
-            except Exception:
-                total_buy_amount = 0.0
-                total_buy_shares = 0.0
-                buy_count_today = 1
-
-            d = data_by_tkr.get(tkr)
-            current_shares_now = float(d.get("shares", 0.0)) if d else 0.0
-            today_sold_shares = sum(
-                float(tr.get("shares", 0.0) or 0.0) for tr in sell_trades_today.get(tkr, [])
-            )
-            prev_shares_estimated = current_shares_now - total_buy_shares + today_sold_shares
-            was_held_before_est = (
-                prev_shares_estimated > COIN_ZERO_THRESHOLD
-                if country == "coin"
-                else prev_shares_estimated > 0.0
-            )
-
-            prev_shares_cached = float(prev_holdings_map.get(tkr, 0.0) or 0.0)
-            was_held_before_cached = (
-                prev_shares_cached > COIN_ZERO_THRESHOLD
-                if country == "coin"
-                else prev_shares_cached > 0.0
-            )
-            was_held_before = was_held_before_est or was_held_before_cached
-
-            try:
-                logger.debug(
-                    "[label_decision] tkr=%s prev_est=%.4f prev_cached=%.4f was_held_before=%s buys_today=%d buy_shares=%.4f buy_amt=%.2f curr_shares=%.4f sold_today=%.4f",
-                    tkr,
-                    prev_shares_estimated,
-                    prev_shares_cached,
-                    str(was_held_before),
-                    buy_count_today,
-                    total_buy_shares,
-                    total_buy_amount,
-                    current_shares_now,
-                    today_sold_shares,
-                )
-            except Exception:
-                pass
-
-            if (was_held_before or buy_count_today >= 2) and total_buy_amount > 0:
-                decision["row"][-1] = build_partial_buy_note(country, total_buy_amount)
-                try:
-                    logger.debug("[label_decision] tkr=%s -> PARTIAL_BUY", tkr)
-                except Exception:
-                    pass
-            else:
-                decision["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
-                try:
-                    logger.debug("[label_decision] tkr=%s -> NEW_BUY", tkr)
-                except Exception:
-                    pass
-
-        if tkr in sell_trades_today:
-            d = data_by_tkr.get(tkr)
-            remaining_shares = float(d.get("shares", 0.0)) if d else 0.0
-            is_fully_sold = (
-                remaining_shares <= COIN_ZERO_THRESHOLD
-                if country == "coin"
-                else remaining_shares <= 0
-            )
-
-            if not is_fully_sold:
-                decision["state"] = "HOLD"
-                decision["row"][4] = "HOLD"
-                # 부분 매도 문구는 수량이 아닌 금액 기준으로 표시
-                try:
-                    total_sold_amount = sum(
-                        float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0)
-                        for tr in sell_trades_today[tkr]
-                    )
-                except Exception:
-                    total_sold_amount = 0.0
-                sell_phrase = build_partial_sell_note(country, total_sold_amount)
-                original_phrase = decision["row"][-1]
-                if original_phrase and original_phrase not in ["HOLD", "WAIT", ""]:
-                    decision["row"][-1] = f"{sell_phrase}, {original_phrase}"
-                else:
-                    decision["row"][-1] = sell_phrase
-            else:
-                decision["state"] = "SOLD"
-                decision["row"][4] = "SOLD"
-                decision["row"][-1] = DECISION_MESSAGES["FULL_SELL"]
+        overrides = compute_net_trade_note(
+            country=country,
+            tkr=tkr,
+            data_by_tkr=data_by_tkr,
+            buy_trades_today_map=buy_trades_today_map,
+            sell_trades_today_map=sell_trades_today,
+            prev_holdings_map=prev_holdings_map,
+            COIN_ZERO_THRESHOLD=COIN_ZERO_THRESHOLD,
+        )
+        if not overrides:
+            continue
+        state = overrides.get("state")
+        row4 = overrides.get("row4")
+        note = overrides.get("note")
+        if state:
+            decision["state"] = state
+        if row4:
+            decision["row"][4] = row4
+        if note is not None:
+            decision["row"][-1] = note
 
     wait_decisions = [d for d in decisions if d["state"] == "WAIT"]
     other_decisions = [d for d in decisions if d["state"] != "WAIT"]

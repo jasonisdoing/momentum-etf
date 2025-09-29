@@ -6,12 +6,12 @@ from typing import Any, Dict, List, Optional, Tuple, Set
 
 import pandas as pd
 
-from utils.report import format_kr_money
 
 from .rules import StrategyRules
 from .constants import DECISION_MESSAGES, DECISION_NOTES
 from .messages import (
     build_buy_replace_note,
+    build_sell_replace_note,
 )
 from .shared import select_candidates_by_category
 from logic.signals.formatting import _load_country_precision
@@ -69,7 +69,6 @@ def generate_daily_signals_for_portfolio(
             return _aud_price_formatter(p, price_precision)
 
     else:  # kor/coin -> KRW 금액, 가격은 정수(또는 설정값이 있으면 적용)
-        money_formatter = format_kr_money
 
         def price_formatter(p):
             # 한국/코인 단가는 기본 정수, 설정에 값이 있으면 적용
@@ -494,7 +493,10 @@ def generate_daily_signals_for_portfolio(
                         else 0.0
                     )
                     prof = (sell_price - avg_cost) * sell_qty if avg_cost > 0 else 0.0
-                    sell_phrase = f"교체매도 {format_shares(sell_qty)}주 @ {price_formatter(sell_price)} 수익 {money_formatter(prof)} 손익률 {f'{hold_ret:+.1f}%'} ({best_new['tkr']}(으)로 교체)"
+                    trade_amount = sell_qty * sell_price
+                    sell_phrase = build_sell_replace_note(
+                        country, trade_amount, prof, hold_ret, best_new["tkr"]
+                    )
 
                     for d_item in decisions:
                         if d_item["tkr"] == ticker_to_sell:
