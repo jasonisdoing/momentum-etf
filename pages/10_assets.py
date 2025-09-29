@@ -9,6 +9,7 @@ import streamlit as st
 
 # pkg_resources 워닝 억제
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+from logic.signals.formatting import _load_country_precision
 
 try:
     import pytz
@@ -256,8 +257,12 @@ def render_assets_dashboard(
         st.stop()
 
     currency = account_info.get("currency", "KRW")
-    amt_precision = account_info.get("amt_precision", 0)
-    qty_precision = account_info.get("qty_precision", 0)
+    # precision.json의 국가별 설정 로드
+    _cprec = _load_country_precision(country_code) or {}
+    # 주식 관련 정밀도는 precision.json을 우선 적용 (수량/단가/금액)
+    qty_precision = int(_cprec.get("stock_qty_precision", account_info.get("qty_precision", 0)))
+    price_precision = int(_cprec.get("stock_price_precision", 0))
+    amt_precision = int(_cprec.get("stock_amt_precision", account_info.get("amt_precision", 0)))
     currency_str = f" ({currency})"
 
     _display_feedback_messages(account_prefix)
@@ -467,11 +472,11 @@ def render_assets_dashboard(
                         format=(
                             "%.8f"
                             if country_code == "coin"
-                            else ("%.4f" if country_code == "aus" else "%.0f")
+                            else (f"%.{qty_precision}f" if qty_precision > 0 else "%d")
                         ),
                     ),
                     "price": st.column_config.NumberColumn(
-                        "가격", format=f"%.{amt_precision}f" if amt_precision > 0 else "%d"
+                        "가격", format=(f"%.{price_precision}f" if price_precision > 0 else "%d")
                     ),
                     "note": st.column_config.TextColumn("비고", width="large"),
                 },
@@ -518,15 +523,17 @@ def render_assets_dashboard(
             with st.expander("최종 잔액 입력"):
                 with st.form(f"balance_input_form_{account_prefix}", clear_on_submit=True):
                     ticker_input = st.text_input("종목코드 (티커)")
-                    shares_format_str = "%.4f" if country_code == "aus" else "%d"
+                    # 수량/단가 입력 포맷을 precision.json에 맞게 설정
+                    shares_format_str = f"%.{qty_precision}f" if qty_precision > 0 else "%d"
 
                     # Determine min_value and step for shares based on country_code
-                    if country_code == "kor":
+                    if qty_precision == 0:
                         shares_min_value = 0
                         shares_step = 1
-                    elif country_code == "aus":
+                    else:
                         shares_min_value = 0.0
-                        shares_step = 0.0001
+                        # 정밀도에 따른 step 계산 (예: p=4 -> 0.0001)
+                        shares_step = float(f"1e-{qty_precision}")
 
                     final_shares = st.number_input(
                         "최종 보유 수량",
@@ -535,19 +542,19 @@ def render_assets_dashboard(
                         format=shares_format_str,
                     )
 
-                    # amt_precision에 따라 min_value와 step의 타입을 동적으로 설정
-                    if amt_precision == 0:
+                    # 단가는 stock_price_precision을 사용
+                    if price_precision == 0:
                         price_min_value = 0
                         price_step = 1
                     else:
                         price_min_value = 0.0
-                        price_step = 1.0
+                        price_step = float(f"1e-{price_precision}")
 
                     final_avg_price = st.number_input(
                         f"최종 평균 단가{currency_str}",
                         min_value=price_min_value,
                         step=price_step,
-                        format=f"%.{amt_precision}f" if amt_precision > 0 else "%d",
+                        format=(f"%.{price_precision}f" if price_precision > 0 else "%d"),
                     )
                     balance_submitted = st.form_submit_button("거래 생성/저장")
 
@@ -674,7 +681,13 @@ def render_assets_dashboard(
                             disabled=["종목명", "티커", "보유수량"],
                             column_config={
                                 "선택": st.column_config.CheckboxColumn("선택", required=True),
-                                "보유수량": st.column_config.NumberColumn(format="%.8f"),
+                                "보유수량": st.column_config.NumberColumn(
+                                    format=(
+                                        "%.8f"
+                                        if country_code == "coin"
+                                        else (f"%.{qty_precision}f" if qty_precision > 0 else "%d")
+                                    )
+                                ),
                             },
                         )
                         sell_submitted = st.form_submit_button("선택 종목 매도")

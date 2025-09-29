@@ -8,26 +8,30 @@
     "coin": {
       "header_currency": "KRW",
       "stock_currency": "KRW",
-      "stock_amt_precision": 0,
-      "stock_qty_precision": 8
+      "stock_qty_precision": 8,
+      "stock_price_precision": 0,
+      "stock_amt_precision": 0
     },
     "aus": {
       "header_currency": "KRW",
       "stock_currency": "AUD",
-      "stock_amt_precision": 4,
-      "stock_qty_precision": 0
+      "stock_qty_precision": 0,
+      "stock_price_precision": 4,
+      "stock_amt_precision": 2
     },
     "kor": {
       "header_currency": "KRW",
       "stock_currency": "KRW",
-      "stock_amt_precision": 0,
-      "stock_qty_precision": 0
+      "stock_qty_precision": 0,
+      "stock_price_precision": 0,
+      "stock_amt_precision": 0
     },
     "us": {
       "header_currency": "KRW",
       "stock_currency": "USD",
-      "stock_amt_precision": 2,
-      "stock_qty_precision": 3
+      "stock_qty_precision": 0,
+      "stock_price_precision": 0,
+      "stock_amt_precision": 0
     }
   },
   "currency": {

@@ -14,6 +14,7 @@ from .messages import (
     build_buy_replace_note,
 )
 from .shared import select_candidates_by_category
+from logic.signals.formatting import _load_country_precision
 
 
 def generate_daily_signals_for_portfolio(
@@ -53,30 +54,34 @@ def generate_daily_signals_for_portfolio(
     def _aud_price_formatter(p, precision: int):
         return f"${p:,.{precision}f}"
 
-    # 표시 통화와 정밀도 결정
-    # 규칙: 테이블(시그널 상세)은 국가별 stock currency를 따른다.
-    # - AUS: AUD 포맷 사용
-    # - 그 외(KOR/COIN): KRW 포맷 사용
-    precision = portfolio_settings.get("precision", 0)
+    # 표시 통화와 정밀도 결정: precision.json(country) 기준 사용
+    cprec = _load_country_precision(country) or {}
+    qty_precision = int(cprec.get("stock_qty_precision", 0))
+    price_precision = int(cprec.get("stock_price_precision", 0))
+    amt_precision = int(cprec.get("stock_amt_precision", 0))
 
     if country == "aus":
 
         def money_formatter(amount):
-            return _aud_money_formatter(amount, precision)
+            return _aud_money_formatter(amount, amt_precision)
 
         def price_formatter(p):
-            return _aud_price_formatter(p, precision)
+            return _aud_price_formatter(p, price_precision)
 
-    else:  # kor/coin
+    else:  # kor/coin -> KRW 금액, 가격은 정수(또는 설정값이 있으면 적용)
         money_formatter = format_kr_money
-        price_formatter = _format_kr_price
+
+        def price_formatter(p):
+            # 한국/코인 단가는 기본 정수, 설정에 값이 있으면 적용
+            if price_precision and price_precision > 0:
+                return f"{p:,.{price_precision}f}"
+            return _format_kr_price(p)
 
     def format_shares(quantity):
-        if country == "coin":
-            return f"{quantity:,.8f}".rstrip("0").rstrip(".")
-        if country == "aus":
-            return f"{quantity:,.4f}".rstrip("0").rstrip(".")
-        return f"{int(quantity):,d}"
+        # 모든 국가 공통: precision.json의 수량 정밀도 적용 (coin 포함)
+        if qty_precision and qty_precision > 0:
+            return f"{quantity:,.{qty_precision}f}".rstrip("0").rstrip(".")
+        return f"{int(round(quantity)):,d}"
 
     def _format_cooldown_phrase(action: str, last_dt: Optional[pd.Timestamp]) -> str:
         if last_dt is None:

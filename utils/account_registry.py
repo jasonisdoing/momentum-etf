@@ -10,7 +10,8 @@ from typing import Any, Dict, Iterable, List, Optional
 from datetime import datetime
 
 
-from logic.strategies.momentum.rules import StrategyRules
+# NOTE: StrategyRules는 순환 의존성(circular import)을 피하기 위해
+# 함수 내부에서 지연 임포트합니다.
 
 
 ACCOUNTS_FILE = (
@@ -169,6 +170,9 @@ def _refresh_cache() -> None:
             if not strategy_cfg:
                 raise SystemExit(f"계좌 '{account_code}' 설정에 'strategy' 항목이 필요합니다.")
             try:
+                # 지연 임포트로 순환 의존성 회피
+                from logic.strategies.momentum.rules import StrategyRules  # type: ignore
+
                 strategy_rules = StrategyRules.from_mapping(strategy_cfg)
             except ValueError as exc:
                 raise SystemExit(f"계좌 '{account_code}'의 전략 설정이 올바르지 않습니다: {exc}") from exc
@@ -268,7 +272,7 @@ def iter_account_info() -> Iterable[Dict[str, Any]]:
     yield from load_accounts()
 
 
-def get_strategy_rules_for_account(account: str) -> StrategyRules:
+def get_strategy_rules_for_account(account: str):
     info = get_account_info(account)
     if not info or "strategy_rules" not in info:
         raise ValueError(f"'{account}' 계좌의 전략 설정을 찾을 수 없습니다.")
