@@ -51,7 +51,7 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 10,
+            "MA_PERIOD": 12,
             "PORTFOLIO_TOPN": 7,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
