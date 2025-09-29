@@ -11,9 +11,11 @@ from typing import Optional, Dict, Any, List
 from signals import (
     generate_signal_report as _root_generate_signal_report,  # temporary import until migration
     SignalExecutionResult,
-    _get_header_money_formatter,  # temporary
-    _load_display_precision,  # temporary
-    _load_precision_all,  # temporary
+)
+from logic.signals.formatting import (
+    _get_header_money_formatter,
+    _load_display_precision,
+    _load_precision_all,
 )
 from utils.account_registry import get_account_info
 from utils.db_manager import save_signal_report_to_db

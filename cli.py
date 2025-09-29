@@ -299,7 +299,7 @@ def main():
 
                     time.sleep(1)
                     # 상세 시그널을 슬랙 전송과 동시에 파일로도 저장합니다.
-                    # 파일 경로: logs/signal_{account}_{YYYY-MM-DD}.log
+                    # 파일 경로: results/signal_{account}_{YYYY-MM-DD}.log
                     save_path = None
                     try:
                         date_for_file = (
@@ -309,7 +309,7 @@ def main():
                         )
                         save_path = os.path.join(
                             os.path.dirname(os.path.abspath(__file__)),
-                            "logs",
+                            "results",
                             f"signal_{account}_{date_for_file}.log",
                         )
                     except Exception:
