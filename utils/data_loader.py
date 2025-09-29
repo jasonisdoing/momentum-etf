@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from contextlib import contextmanager
 
@@ -696,6 +696,13 @@ def _fetch_ohlcv_core(
             if not data:
                 return None
             rows = []
+            seoul_tz = None
+            if ZoneInfo is not None:
+                try:
+                    seoul_tz = ZoneInfo("Asia/Seoul")
+                except Exception:
+                    seoul_tz = None
+            kst_offset = timedelta(hours=9)
             for arr in data:
                 try:
                     ts = int(arr[0])
@@ -706,7 +713,18 @@ def _fetch_ohlcv_core(
                     v = float(arr[5])
                 except Exception:
                     continue
-                dt = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc).replace(tzinfo=None)
+                utc_dt = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc)
+                if seoul_tz is not None:
+                    try:
+                        local_dt = utc_dt.astimezone(seoul_tz)
+                    except Exception:
+                        local_dt = utc_dt + kst_offset
+                else:
+                    local_dt = utc_dt + kst_offset
+                local_dt = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                if local_dt.tzinfo is not None:
+                    local_dt = local_dt.replace(tzinfo=None)
+                dt = local_dt
                 rows.append((dt, o, h, low, c, v))
             if not rows:
                 return None

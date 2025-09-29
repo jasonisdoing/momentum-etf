@@ -40,7 +40,6 @@ from utils.schedule_config import (
     get_cache_schedule,
     get_global_schedule_settings,
 )
-from utils.cache_utils import reset_coin_cache_for_new_deploy
 
 
 def setup_logging():
@@ -244,12 +243,6 @@ def main():
 
     # Load .env for API keys, DB, etc.
     load_env_if_present()
-
-    try:
-        if reset_coin_cache_for_new_deploy():
-            logging.info("Detected new deploy -> cleared Bithumb cache.")
-    except Exception:
-        logging.exception("Failed to reset Bithumb cache during startup")
 
     # Update stock names before scheduling
     logging.info("Checking for and updating stock names...")
