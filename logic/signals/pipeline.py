@@ -1202,7 +1202,7 @@ def generate_signal_report(
 
                 new_state = "HOLD" if is_effectively_held else "WAIT"
                 decision["state"] = new_state
-                decision["row"][2] = new_state
+                decision["row"][4] = new_state
 
             decision["row"][-1] = ""
 
@@ -1316,7 +1316,7 @@ def generate_signal_report(
 
             if not is_fully_sold:
                 decision["state"] = "HOLD"
-                decision["row"][2] = "HOLD"
+                decision["row"][4] = "HOLD"
                 total_sold_shares = sum(trade.get("shares", 0) for trade in sell_trades_today[tkr])
                 sell_phrase = f"⚠️ 부분 매도 ({format_shares(total_sold_shares, country)}주)"
                 original_phrase = decision["row"][-1]
@@ -1326,7 +1326,7 @@ def generate_signal_report(
                     decision["row"][-1] = sell_phrase
             else:
                 decision["state"] = "SOLD"
-                decision["row"][2] = "SOLD"
+                decision["row"][4] = "SOLD"
                 decision["row"][-1] = "🔚 매도 완료"
 
     wait_decisions = [d for d in decisions if d["state"] == "WAIT"]

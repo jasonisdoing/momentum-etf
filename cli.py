@@ -43,9 +43,48 @@ from utils.account_registry import (
 )
 
 
+EXAMPLES = """
+사용 예시:
+
+  # 단일 계좌 시그널 계산
+  python cli.py b1 --signal
+
+  # 국가 단위 전체 시그널 계산(활성 계좌만)
+  python cli.py --country kor --signal
+
+  # 특정 기준일 시그널
+  python cli.py b1 --signal --date 2025-09-29
+
+  # 구간 시그널 일괄 재계산
+  python cli.py b1 --signal --start-date 2025-09-01 --end-date 2025-09-26
+
+  # 백테스트
+  python cli.py b1 --test
+
+  # 사용자 지정 티커로 백테스트(파일 목록과 교집합)
+  python cli.py b1 --test --tickers BTC,ETH,SOL
+
+  # 튜닝 (별도 프로세스로 실행, logs/tune_{country}_{account}.log 저장)
+  python cli.py b1 --tune
+
+  # 국가 단위 전체 튜닝(활성 계좌만)
+  python cli.py --country kor --tune
+
+  # 여러 계좌 튜닝
+  python cli.py --accounts k1,k2 --tune
+
+  # 여러 계좌 동시에 실행
+  python cli.py --accounts k1,k2 --signal
+"""
+
+
 def main():
     """CLI 인자를 파싱하여 해당 모듈을 실행합니다."""
-    parser = argparse.ArgumentParser(description="MomentumEtf Trading Engine CLI")
+    parser = argparse.ArgumentParser(
+        description="MomentumEtf Trading Engine CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=EXAMPLES,
+    )
     parser.add_argument(
         "account",
         nargs="?",
@@ -109,8 +148,17 @@ def main():
         choices=["kor", "aus", "coin"],
         help="특정 국가에 속한 모든 활성 계좌를 실행합니다.",
     )
+    parser.add_argument(
+        "--examples",
+        action="store_true",
+        help="실행 가능한 예제를 출력하고 종료합니다.",
+    )
 
     args = parser.parse_args()
+
+    if args.examples:
+        print(EXAMPLES)
+        return
 
     requested_accounts: List[str] = []
     if args.account:
