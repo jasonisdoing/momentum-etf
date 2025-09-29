@@ -279,6 +279,9 @@ def _fetch_and_prepare_data(
 
     try:
         common = get_common_file_settings()
+        realtime_enabled = bool(common.get("REALTIME_PRICE_ENABLED", True))
+        if not realtime_enabled:
+            use_realtime = False
         regime_filter_enabled = common["MARKET_REGIME_FILTER_ENABLED"]
         regime_ma_period = common["MARKET_REGIME_FILTER_MA_PERIOD"]
     except (SystemExit, KeyError, ValueError, TypeError) as e:
