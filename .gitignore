@@ -22,7 +22,7 @@ venv/
 # OS
 .DS_Store
 
-# Cache files
+
 cache/
 
 # 서버에 수동으로 넣어놓음(chmod +x update.sh 충돌때문에)
