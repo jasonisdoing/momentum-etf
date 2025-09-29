@@ -153,7 +153,7 @@ def main():
         print(f"\n{'=' * 20} [{country.upper()}/{account}] 계좌 작업 시작 {'=' * 20}")
 
         if args.test:
-            from test import main as run_test
+            from logic.backtest.runner import run as run_test
 
             prefetched_data = None
             override_settings = {}
@@ -223,7 +223,7 @@ def main():
             subprocess.run(command, check=True)
 
         elif args.signal:
-            from signals import main as run_signal
+            from logic.signals.pipeline import main as run_signal
             from utils.db_manager import get_portfolio_snapshot
             from utils.notification import (
                 send_summary_notification,

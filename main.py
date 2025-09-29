@@ -28,7 +28,7 @@ except ImportError:
     yf = None
     st.stop()
 
-from signals import get_market_regime_status_string
+from logic.signals.market import get_market_regime_status_string
 from utils.account_registry import (
     get_accounts_by_country,
     load_accounts,
