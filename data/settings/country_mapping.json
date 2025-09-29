@@ -4,6 +4,7 @@
         "account": "b1",
         "order": 9,
         "display_name": "빗썸",
+        "slack_channel": "C09FXGJPC2U",
         "benchmarks_tickers": [
             {
                 "ticker": "379800",
@@ -21,8 +22,8 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 2,
-            "PORTFOLIO_TOPN": 2,
+            "MA_PERIOD": 3,
+            "PORTFOLIO_TOPN": 3,
             "REPLACE_SCORE_THRESHOLD": 0.5,
             "COIN_MIN_HOLDING_COST_KRW": 10000
         },
@@ -37,6 +38,7 @@
         "account": "a1",
         "order": 10,
         "display_name": "호주연금",
+        "slack_channel": "C09FAU7SKA8",
         "benchmarks_tickers": [
             {
                 "ticker": "IVV.AX",
@@ -60,6 +62,7 @@
         "country": "kor",
         "account": "m1",
         "display_name": "매리츠1",
+        "slack_channel": "C09FAU2NHM2",
         "order": 1,
         "benchmarks_tickers": [
             {
@@ -88,6 +91,7 @@
         "country": "kor",
         "account": "m2",
         "display_name": "매리츠2",
+        "slack_channel": "C09FAU2NHM2",
         "order": 2,
         "benchmarks_tickers": [
             {
@@ -116,6 +120,7 @@
         "country": "kor",
         "account": "k1",
         "display_name": "KB ISA",
+        "slack_channel": "C09FAU2NHM2",
         "order": 4,
         "benchmarks_tickers": [
             {
@@ -144,6 +149,7 @@
         "country": "kor",
         "account": "k2",
         "display_name": "KB 연금저축",
+        "slack_channel": "C09FAU2NHM2",
         "order": 5,
         "benchmarks_tickers": [
             {
@@ -172,6 +178,7 @@
         "country": "kor",
         "account": "k3",
         "display_name": "KB ISA(2)",
+        "slack_channel": "C09FAU2NHM2",
         "order": 5,
         "benchmarks_tickers": [
             {
@@ -200,6 +207,7 @@
         "country": "kor",
         "account": "k4",
         "display_name": "KB 연금저축(2)",
+        "slack_channel": "C09FAU2NHM2",
         "order": 5,
         "benchmarks_tickers": [
             {
@@ -229,6 +237,7 @@
         "account": "u1",
         "order": 20,
         "display_name": "미국직투",
+        "slack_channel": "C09FVRDJPLL",
         "benchmarks_tickers": [
             {
                 "ticker": "SPY",

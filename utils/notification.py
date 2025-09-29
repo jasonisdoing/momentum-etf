@@ -14,6 +14,13 @@ import requests
 import settings as global_settings
 
 try:
+    from slack_sdk import WebClient  # type: ignore
+    from slack_sdk.errors import SlackApiError  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    WebClient = None  # type: ignore
+    SlackApiError = Exception  # type: ignore
+
+try:
     from croniter import croniter
     import pytz
 except ImportError:  # pragma: no cover - optional dependency
@@ -140,6 +147,47 @@ def send_slack_message_to_logs(message: str):
     if webhook_url:
         log_message = f"📜 *[{global_settings.APP_TYPE}]*{message}"
         send_slack_message(log_message, webhook_url=webhook_url, webhook_name="LOGS_SLACK_WEBHOOK")
+
+
+def _upload_file_to_slack(
+    *, channel: Optional[str], file_path: Path, title: str, initial_comment: Optional[str] = None
+) -> bool:
+    """Upload a file to Slack using the Web API if a bot token is available."""
+
+    token = os.environ.get("SLACK_BOT_TOKEN")
+    if not token:
+        print("[SLACK] 파일 업로드 생략 - SLACK_BOT_TOKEN 미설정")
+        return False
+    if WebClient is None:
+        print("[SLACK] 파일 업로드 생략 - slack_sdk 미설치")
+        return False
+
+    file_exists = file_path.exists() and file_path.is_file()
+    if not file_exists:
+        print(f"[SLACK] 파일 업로드 생략 - 파일 없음: {file_path}")
+        return False
+
+    error_message: Optional[str] = None
+
+    try:
+        client = WebClient(token=token)
+        client.files_upload_v2(
+            channel=channel,
+            file=str(file_path),
+            title=title,
+            initial_comment=initial_comment,
+        )
+        print(f"[SLACK] 파일 업로드 성공 - channel={channel} file={file_path.name}")
+        return True
+    except SlackApiError as exc:  # pragma: no cover - relies on external API
+        error_message = getattr(exc, "response", {}).get("error") or str(exc)
+    except Exception as exc:  # pragma: no cover - defensive
+        error_message = str(exc)
+
+    if error_message:
+        print(f"[SLACK] 파일 업로드 실패 - channel={channel} file={file_path.name} reason={error_message}")
+
+    return False
 
 
 # def send_verbose_log_to_slack(message: str):
@@ -740,14 +788,46 @@ def send_detailed_signal_notification(
 
     # Slack 전송
     if not lines:
-        return send_slack_message(
-            slack_prefix + message_header, webhook_url=webhook_url, webhook_name=webhook_name
-        )
+        message_body = message_header
+    else:
+        message_body = rendered_text
 
-    message = rendered_text
-    return send_slack_message(
-        slack_prefix + message, webhook_url=webhook_url, webhook_name=webhook_name
+    sent = send_slack_message(
+        slack_prefix + message_body, webhook_url=webhook_url, webhook_name=webhook_name
     )
+
+    # if save_to_path:
+    #     file_path_obj = Path(save_to_path)
+    #     upload_channel = None
+
+    #     try:
+    #         account_info = get_account_info(account)
+    #         if account_info:
+    #             upload_channel = account_info.get("slack_channel")
+    #     except Exception:
+    #         upload_channel = None
+
+    #     if not upload_channel:
+    #         try:
+    #             file_settings = get_account_file_settings(account)
+    #             upload_channel = file_settings.get("slack_file_channel")
+    #         except SystemExit:
+    #             upload_channel = None
+
+    #     if upload_channel:
+    #         title = f"[{getattr(global_settings, 'APP_TYPE', 'APP')}][{country}/{account}] 시그널 로그"
+    #         _upload_file_to_slack(
+    #             channel=upload_channel,
+    #             file_path=file_path_obj,
+    #             title=title,
+    #             initial_comment=message_header,
+    #         )
+    #     else:
+    #         print(
+    #             f"[SLACK] 파일 업로드 생략 - 채널 미지정 (account={account}, country={country})"
+    #         )
+
+    return sent
 
 
 __all__ = [
