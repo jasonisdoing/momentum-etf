@@ -201,8 +201,9 @@ def main():
         """
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
-            body {
-                font-family: 'Noto Sans KR', sans-serif;
+            /* 전역 폰트: D2Coding 우선 적용, 미설치 시 폴백 */
+            body, code, pre {
+                font-family: 'D2Coding', 'NanumGothic Coding', 'Noto Sans KR', 'Consolas', 'Courier New', monospace !important;
             }
             .block-container {
                 max-width: 100%;
@@ -363,12 +364,12 @@ def main():
             # 같은 창에서 열리도록 HTML 링크 사용 - signal 페이지로 이동
             if data_date:
                 cols[0].markdown(
-                    f"<div><a href='/signal?account={account_code}' target='_self' style='text-decoration: none; color: #1f77b4; font-weight: bold;'>{display_label}</a><br/><span style='color:#666;font-size:0.85em;'>기준일: {data_date}</span></div>",
+                    f"<div><a href='/results?account={account_code}' target='_self' style='text-decoration: none; color: #1f77b4; font-weight: bold;'>{display_label}</a><br/><span style='color:#666;font-size:0.85em;'>기준일: {data_date}</span></div>",
                     unsafe_allow_html=True,
                 )
             else:
                 cols[0].markdown(
-                    f"<div><a href='/signal?account={account_code}' target='_self' style='text-decoration: none; color: #1f77b4; font-weight: bold;'>{display_label}</a></div>",
+                    f"<div><a href='/results?account={account_code}' target='_self' style='text-decoration: none; color: #1f77b4; font-weight: bold;'>{display_label}</a></div>",
                     unsafe_allow_html=True,
                 )
         else:

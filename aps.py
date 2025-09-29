@@ -160,6 +160,23 @@ def run_signal_generation(
                 force_send=force_notify,
             )
             time.sleep(2)
+
+            # 파일 저장 경로 구성 (results/ 하위에 저장)
+            try:
+                date_for_file = (
+                    report_date.strftime("%Y-%m-%d")
+                    if report_date
+                    else datetime.now().strftime("%Y-%m-%d")
+                )
+                logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+                os.makedirs(logs_dir, exist_ok=True)
+                save_path = os.path.join(
+                    logs_dir,
+                    f"signal_{account}_{date_for_file}.log",
+                )
+            except Exception:
+                save_path = None
+
             send_detailed_signal_notification(
                 snapshot_country,
                 account,
@@ -169,6 +186,7 @@ def run_signal_generation(
                 decision_config=signal_result.decision_config,
                 extra_lines=signal_result.detail_extra_lines,
                 force_send=force_notify,
+                save_to_path=save_path,
             )
             date_str = report_date.strftime("%Y-%m-%d")
             prefix = f"{snapshot_country}/{account}" if account else snapshot_country
