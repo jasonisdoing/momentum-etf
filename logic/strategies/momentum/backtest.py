@@ -15,6 +15,7 @@ from utils.data_loader import fetch_ohlcv
 from utils.indicators import calculate_moving_average_signals, calculate_ma_score
 
 from .shared import select_candidates_by_category
+from .constants import DECISION_NOTES
 
 
 def _process_ticker_data(
@@ -342,7 +343,7 @@ def run_portfolio_backtest(
                                 "shares": 0,
                                 "pv": 0,
                                 "avg_cost": 0,
-                                "note": "시장 위험 회피",
+                                "note": DECISION_NOTES["RISK_OFF"],
                             }
                         )
         # (b) 개별 종목 매도
@@ -457,7 +458,7 @@ def run_portfolio_backtest(
                         and records[-1]["date"] == dt
                         and records[-1].get("decision") == "WAIT"
                     ):
-                        records[-1]["note"] = "카테고리 중복"
+                        records[-1]["note"] = DECISION_NOTES["CATEGORY_DUP"]
 
                 for cand in selected_candidates:
                     if cash <= 0:
@@ -595,7 +596,7 @@ def run_portfolio_backtest(
                                 stock_name = stock_info.get("name", replacement_ticker)
                                 daily_records_by_ticker[replacement_ticker][-1][
                                     "note"
-                                ] = f"카테고리 중복 - {stock_name}({replacement_ticker})"
+                                ] = f"{DECISION_NOTES['CATEGORY_DUP']} - {stock_name}({replacement_ticker})"
                             continue  # 다음 buy_ranked_candidate로 넘어감
                     elif weakest_held_stock:
                         # 같은 카테고리 종목이 없는 경우: 가장 약한 종목과 임계값 포함 비교
@@ -776,8 +777,11 @@ def run_portfolio_backtest(
                         daily_records_by_ticker[candidate_ticker]
                         and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt
                     ):
-                        note = "포트폴리오 가득 참" if slots_to_fill <= 0 else "현금 부족"
-                        daily_records_by_ticker[candidate_ticker][-1]["note"] = note
+                        daily_records_by_ticker[candidate_ticker][-1]["note"] = (
+                            DECISION_NOTES["PORTFOLIO_FULL"]
+                            if slots_to_fill <= 0
+                            else DECISION_NOTES["INSUFFICIENT_CASH"]
+                        )
         else:  # 리스크 오프 상태
             # 매수 후보가 있더라도, 시장이 위험 회피 상태이므로 매수하지 않음
             # 후보들에게 사유 기록
@@ -799,7 +803,9 @@ def run_portfolio_backtest(
                     daily_records_by_ticker[candidate_ticker]
                     and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt
                 ):
-                    daily_records_by_ticker[candidate_ticker][-1]["note"] = "시장 위험 회피"
+                    daily_records_by_ticker[candidate_ticker][-1]["note"] = DECISION_NOTES[
+                        "RISK_OFF"
+                    ]
 
         out_cash.append(
             {

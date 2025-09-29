@@ -9,6 +9,7 @@ import pandas as pd
 from utils.report import format_kr_money
 
 from .rules import StrategyRules
+from .constants import DECISION_MESSAGES, DECISION_NOTES
 from .shared import select_candidates_by_category
 
 
@@ -43,7 +44,8 @@ def generate_daily_signals_for_portfolio(
         return f"{int(round(p)):,}"
 
     def _aud_money_formatter(amount, precision: int):
-        return f"${amount:,.{precision}f}"
+        # 호주달러 표기는 A$로 표시
+        return f"A${amount:,.{precision}f}"
 
     def _aud_price_formatter(p, precision: int):
         return f"${p:,.{precision}f}"
@@ -74,8 +76,10 @@ def generate_daily_signals_for_portfolio(
 
     def _format_cooldown_phrase(action: str, last_dt: Optional[pd.Timestamp]) -> str:
         if last_dt is None:
-            return f"쿨다운 {cooldown_days}일 대기중"
-        return f"쿨다운 {cooldown_days}일 대기중 ({action} {last_dt.strftime('%Y-%m-%d')})"
+            return DECISION_NOTES["COOLDOWN_GENERIC"].format(days=cooldown_days)
+        return DECISION_NOTES["COOLDOWN_WITH_ACTION"].format(
+            days=cooldown_days, action=action, date=last_dt.strftime("%Y-%m-%d")
+        )
 
     # 전략 설정 로드
     denom = strategy_rules.portfolio_topn
@@ -184,7 +188,7 @@ def generate_daily_signals_for_portfolio(
         state = "HOLD" if is_effectively_held else "WAIT"
         phrase = ""
         if price == 0.0 and is_effectively_held:
-            phrase = "가격 데이터 조회 실패"
+            phrase = DECISION_NOTES["PRICE_DATA_FAIL"]
 
         sell_block_info = sell_cooldown_block.get(tkr)
         buy_block_info = buy_cooldown_block.get(tkr)
@@ -245,7 +249,7 @@ def generate_daily_signals_for_portfolio(
         locked_skip = False
         if is_locked:
             buy_signal = False
-            lock_msg = "신호와 상관없이 보유"
+            lock_msg = DECISION_NOTES["LOCKED_HOLD"]
             if is_effectively_held:
                 state = "HOLD"
                 phrase = lock_msg
@@ -345,7 +349,7 @@ def generate_daily_signals_for_portfolio(
                         hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
                         prof = (sell_price - avg_cost) * sell_qty
 
-                    sell_phrase = "시장위험회피 매도"
+                    sell_phrase = DECISION_NOTES["RISK_OFF_SELL"]
                     decision["row"][-1] = sell_phrase
 
             if decision.get("buy_signal"):
@@ -353,9 +357,9 @@ def generate_daily_signals_for_portfolio(
                 if decision["state"] == "WAIT":
                     original_phrase = decision["row"][-1]
                     if original_phrase and "추세진입" in original_phrase:
-                        decision["row"][-1] = f"시장 위험 회피 ({original_phrase})"
+                        decision["row"][-1] = f"{DECISION_NOTES['RISK_OFF']} ({original_phrase})"
                     else:
-                        decision["row"][-1] = "시장 위험 회피"
+                        decision["row"][-1] = DECISION_NOTES["RISK_OFF"]
     else:
         # 모든 'WAIT' 상태의 매수 후보 목록을 미리 정의합니다.
         wait_candidates_raw = [
@@ -376,7 +380,7 @@ def generate_daily_signals_for_portfolio(
 
             for cand, reason in rejected_candidates:
                 if reason == "category_held":
-                    cand["row"][-1] = "카테고리 중복"
+                    cand["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
 
             for cand in selected_candidates:
                 cand_category = etf_meta.get(cand["tkr"], {}).get("category")
@@ -395,13 +399,13 @@ def generate_daily_signals_for_portfolio(
                             else int(budget // buy_price)
                         )
                         buy_notional = buy_qty * buy_price
-                        cand["row"][-1] = "🚀 신규매수"
+                        cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
                         if cand_category and cand_category != "TBD":
                             held_categories.add(cand_category)
                     else:
-                        cand["row"][-1] = "현금 부족"
+                        cand["row"][-1] = DECISION_NOTES["INSUFFICIENT_CASH"]
                 else:
-                    cand["row"][-1] = "가격 정보 없음"
+                    cand["row"][-1] = DECISION_NOTES["NO_PRICE"]
 
         # 교체 매매 로직: 포트폴리오에 빈 슬롯이 있더라도, 더 좋은 종목으로 교체할 기회가 있으면 실행
         replacement_candidates, _ = select_candidates_by_category(
@@ -496,33 +500,42 @@ def generate_daily_signals_for_portfolio(
                 best_new["state"], best_new["row"][4] = "BUY_REPLACE", "BUY_REPLACE"
                 buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
                 if buy_price > 0:
-                    # 매도 금액만큼 매수 예산 설정
+                    # 매도 금액만큼 매수 예산 설정 (보유 비중 기반 또는 보유 수량*가격 기반)
                     sell_value_for_budget = 0.0
-                    for d_item in decisions:
-                        if d_item["tkr"] == ticker_to_sell and d_item.get("weight"):
-                            sell_value_for_budget = d_item["weight"] / 100.0 * current_equity
-                            break
-                    if sell_value_for_budget == 0.0 and d_weakest:
-                        sell_value_for_budget = d_weakest.get("shares", 0.0) * d_weakest.get(
-                            "price", 0.0
-                        )
+                    d_item_for_sell = next(
+                        (x for x in decisions if x["tkr"] == ticker_to_sell), None
+                    )
+                    if d_item_for_sell and d_item_for_sell.get("weight"):
+                        try:
+                            sell_value_for_budget = (
+                                float(d_item_for_sell["weight"]) / 100.0 * float(current_equity)
+                            )
+                        except Exception:
+                            sell_value_for_budget = 0.0
+                    if sell_value_for_budget <= 0 and d_weakest:
+                        try:
+                            sell_value_for_budget = float(
+                                d_weakest.get("shares", 0.0) or 0.0
+                            ) * float(d_weakest.get("price", 0.0) or 0.0)
+                        except Exception:
+                            sell_value_for_budget = 0.0
 
-                    if sell_value_for_budget > 0:  # noqa
-                        buy_qty = (
-                            sell_value_for_budget / buy_price
-                            if country in ("coin", "aus")
-                            else int(sell_value_for_budget // buy_price)
-                        )
-                        buy_notional = buy_qty * buy_price
+                    if sell_value_for_budget > 0:
+                        if country in ("coin", "aus"):
+                            buy_qty = sell_value_for_budget / buy_price
+                            buy_notional = sell_value_for_budget
+                        else:
+                            buy_qty = int(sell_value_for_budget // buy_price)
+                            buy_notional = buy_qty * buy_price
+
+                        # 문구 단순화: 디스플레이명 + 금액 + 대체 정보
                         best_new["row"][
                             -1
-                        ] = f"매수 {format_shares(buy_qty)}주 @ {price_formatter(buy_price)} ({money_formatter(buy_notional)}) ({ticker_to_sell} 대체)"
+                        ] = f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} {money_formatter(buy_notional)} ({ticker_to_sell} 대체)"
                     else:
                         best_new["row"][-1] = f"{ticker_to_sell}(을)를 대체 (매수 예산 부족)"
                 else:
                     best_new["row"][-1] = f"{ticker_to_sell}(을)를 대체 (가격정보 없음)"
-
-                # 교체가 일어났으므로, 다음 후보 검증을 위해 상태 업데이트
                 current_held_stocks = [s for s in current_held_stocks if s["tkr"] != ticker_to_sell]
                 best_new_as_held = best_new.copy()
                 best_new_as_held["state"] = "HOLD"
@@ -588,18 +601,17 @@ def generate_daily_signals_for_portfolio(
                         and wait_category in held_categories
                     ):
                         # 동일 카테고리 보유로 인한 중복
-                        d["row"][-1] = "카테고리 중복"
+                        d["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
                     else:
                         # 그 외의 경우 (점수 미달 등)
-                        d["row"][-1] = "포트폴리오 가득 참"
+                        d["row"][-1] = DECISION_NOTES["PORTFOLIO_FULL"]
 
-    lock_phrase = "신호와 상관없이 보유"
     for d in final_decisions:
         if d.get("is_locked") and d.get("is_held"):
             d["state"] = "HOLD"
             d["row"][4] = "HOLD"
             d["buy_signal"] = False
-            d["row"][-1] = lock_phrase
+            d["row"][-1] = DECISION_NOTES["LOCKED_HOLD"]
 
     # 최종 정렬
     def sort_key(decision_dict):

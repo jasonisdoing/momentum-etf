@@ -26,7 +26,6 @@ from logic.signals.formatting import (
     _get_header_money_formatter,
     _load_display_precision,
     _load_precision_all,
-    format_shares,
 )
 from logic.signals.logger import get_signal_logger
 from logic.signals.schedule import (
@@ -53,6 +52,7 @@ from logic.momentum import (
     DECISION_CONFIG,
     COIN_ZERO_THRESHOLD,
 )
+from logic.strategies.momentum.constants import DECISION_MESSAGES
 from logic.strategies.momentum.shared import SIGNAL_TABLE_HEADERS
 from logic.signals.history import (
     calculate_consecutive_holding_info,
@@ -1293,13 +1293,15 @@ def generate_signal_report(
                 pass
 
             if (was_held_before or buy_count_today >= 2) and total_buy_amount > 0:
-                decision["row"][-1] = f"➕ 부분 매수({format_kr_money(total_buy_amount)})"
+                decision["row"][-1] = DECISION_MESSAGES["PARTIAL_BUY"].format(
+                    amount=format_kr_money(total_buy_amount)
+                )
                 try:
                     logger.debug("[label_decision] tkr=%s -> PARTIAL_BUY", tkr)
                 except Exception:
                     pass
             else:
-                decision["row"][-1] = "✅ 신규 매수"
+                decision["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
                 try:
                     logger.debug("[label_decision] tkr=%s -> NEW_BUY", tkr)
                 except Exception:
@@ -1317,8 +1319,17 @@ def generate_signal_report(
             if not is_fully_sold:
                 decision["state"] = "HOLD"
                 decision["row"][4] = "HOLD"
-                total_sold_shares = sum(trade.get("shares", 0) for trade in sell_trades_today[tkr])
-                sell_phrase = f"⚠️ 부분 매도 ({format_shares(total_sold_shares, country)}주)"
+                # 부분 매도 문구는 수량이 아닌 금액 기준으로 표시
+                try:
+                    total_sold_amount = sum(
+                        float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0)
+                        for tr in sell_trades_today[tkr]
+                    )
+                except Exception:
+                    total_sold_amount = 0.0
+                sell_phrase = DECISION_MESSAGES["PARTIAL_SELL"].format(
+                    amount=format_kr_money(total_sold_amount)
+                )
                 original_phrase = decision["row"][-1]
                 if original_phrase and original_phrase not in ["HOLD", "WAIT", ""]:
                     decision["row"][-1] = f"{sell_phrase}, {original_phrase}"
@@ -1327,17 +1338,13 @@ def generate_signal_report(
             else:
                 decision["state"] = "SOLD"
                 decision["row"][4] = "SOLD"
-                decision["row"][-1] = "🔚 매도 완료"
+                decision["row"][-1] = DECISION_MESSAGES["FULL_SELL"]
 
     wait_decisions = [d for d in decisions if d["state"] == "WAIT"]
     other_decisions = [d for d in decisions if d["state"] != "WAIT"]
 
-    MAX_WAIT_ITEMS = 100
-    if len(wait_decisions) > MAX_WAIT_ITEMS:
-        wait_decisions_sorted = sorted(
-            wait_decisions, key=lambda x: x.get("score", 0.0) or 0.0, reverse=True
-        )
-        decisions = other_decisions + wait_decisions_sorted[:MAX_WAIT_ITEMS]
+    # WAIT 항목 개수 제한 제거: 모든 WAIT 항목을 포함하여 정렬 기준(order -> score)에 따라 함께 정렬합니다.
+    decisions = other_decisions + wait_decisions
 
     def sort_key(decision_dict):
         state = decision_dict["state"]

@@ -62,4 +62,34 @@ DECISION_CONFIG = {
 # 거래소 최소 잔량 처리에 사용되는 코인 잔고 임계값
 COIN_ZERO_THRESHOLD = 1e-9
 
-__all__ = ["DECISION_CONFIG", "COIN_ZERO_THRESHOLD"]
+DECISION_MESSAGES = {
+    # 매수
+    "NEW_BUY": "✅ 신규 매수",
+    # {amount}: 금액(예: 123만원)
+    "PARTIAL_BUY": "🌗 부분 매수({amount})",
+    # 매도
+    # {amount}: 금액(예: 123만원)
+    "PARTIAL_SELL": "⚠️ 부분 매도 ({amount})",
+    "FULL_SELL": "🔚 매도 완료",
+}
+
+DECISION_NOTES = {
+    "CATEGORY_DUP": "카테고리 중복",
+    "PORTFOLIO_FULL": "포트폴리오 가득 참",
+    "INSUFFICIENT_CASH": "현금 부족",
+    "NO_PRICE": "가격 정보 없음",
+    "RISK_OFF": "시장 위험 회피",
+    "RISK_OFF_SELL": "시장위험회피 매도",
+    "LOCKED_HOLD": "신호와 상관없이 보유",
+    "PRICE_DATA_FAIL": "가격 데이터 조회 실패",
+    # 템플릿
+    "COOLDOWN_GENERIC": "쿨다운 {days}일 대기중",
+    "COOLDOWN_WITH_ACTION": "쿨다운 {days}일 대기중 ({action} {date})",
+}
+
+__all__ = [
+    "DECISION_CONFIG",
+    "COIN_ZERO_THRESHOLD",
+    "DECISION_MESSAGES",
+    "DECISION_NOTES",
+]
