@@ -428,19 +428,36 @@ def _fetch_and_prepare_data(
         if not result:
             continue
 
-        c0 = float(result["close"].iloc[-1])
+        close_series = result["close"]
+        ma_series = result["ma"]
+        raw_df = result["df"]
+
+        c0 = float(close_series.iloc[-1])
         if pd.isna(c0) or c0 <= 0:
             failed_tickers_info[tkr] = "INVALID_PRICE"
             continue
 
-        m = result["ma"].iloc[-1]
+        m = ma_series.iloc[-1]
         today_cal = pd.Timestamp.now().normalize()
         date_for_prev_close = today_cal if base_date.date() > today_cal.date() else base_date
-        prev_close = _resolve_previous_close(result["close"], date_for_prev_close)
+        prev_close = _resolve_previous_close(close_series, date_for_prev_close)
 
         ma_score = 0.0
         if pd.notna(m) and m > 0:
             ma_score = round(((c0 / m) - 1.0) * 100, 1)
+
+        if tkr == "BNB":
+            recent_debug = pd.DataFrame(
+                {
+                    "Close": close_series.tail(3),
+                    "MA": ma_series.tail(3),
+                }
+            )
+            print("\n[DEBUG] BNB 최근 3일 종가/MA")
+            print(recent_debug.to_string())
+            ma_display = f"{m:,.0f}" if pd.notna(m) else "nan"
+            score_display = f"{ma_score:.1f}"
+            print(f"[DEBUG] BNB 점수 계산: 현재가={c0:,.0f}, MA={ma_display}, score={score_display}%")
 
         buy_signal_days_today = (
             result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0
@@ -449,7 +466,7 @@ def _fetch_and_prepare_data(
         sh = float((holdings.get(tkr) or {}).get("shares") or 0.0)
         ac = float((holdings.get(tkr) or {}).get("avg_cost") or 0.0)
         total_holdings_value += sh * c0
-        datestamps.append(result["df"].index[-1])
+        datestamps.append(raw_df.index[-1])
 
         data_by_tkr[tkr] = {
             "price": c0,
@@ -460,7 +477,7 @@ def _fetch_and_prepare_data(
             "filter": buy_signal_days_today,
             "shares": sh,
             "avg_cost": ac,
-            "df": result["df"],
+            "df": raw_df,
         }
 
     fail_counts: Dict[str, int] = {}
