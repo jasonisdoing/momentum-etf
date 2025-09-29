@@ -395,7 +395,7 @@ def generate_daily_signals_for_portfolio(
                             else int(budget // buy_price)
                         )
                         buy_notional = buy_qty * buy_price
-                        cand["row"][-1] = "신규매수"
+                        cand["row"][-1] = "🚀 신규매수"
                         if cand_category and cand_category != "TBD":
                             held_categories.add(cand_category)
                     else:

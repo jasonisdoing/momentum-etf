@@ -52,7 +52,7 @@
         "is_active": true,
         "strategy": {
             "MA_PERIOD": 12,
-            "PORTFOLIO_TOPN": 7,
+            "PORTFOLIO_TOPN": 8,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "precision": {

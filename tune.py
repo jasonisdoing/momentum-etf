@@ -31,8 +31,8 @@ TUNING_CONFIG = {
         "TEST_MONTHS_RANGE": 12,
     },
     "aus": {
-        "MA_RANGE": [11, 12, 13, 14, 15],
-        "PORTFOLIO_TOPN": [7],
+        "MA_RANGE": [12],
+        "PORTFOLIO_TOPN": [7, 8],
         "REPLACE_SCORE_THRESHOLD": [0.5],
         "TEST_MONTHS_RANGE": 12,
     },
