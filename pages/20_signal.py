@@ -24,9 +24,9 @@ from signals import (
     get_next_trading_day,
 )
 from utils.account_registry import (
-    get_accounts_by_country,
     get_common_file_settings,
     load_accounts,
+    get_all_accounts_sorted_by_order,
 )
 from utils.data_loader import PykrxDataUnavailable, get_trading_days
 from utils.db_manager import (
@@ -484,7 +484,29 @@ def render_signal_dashboard(
 
 def main():
     """매매 신호 페이지를 렌더링합니다."""
-    st.title("📈 매매 신호 (Signal)")
+    # URL 쿼리 파라미터에서 계좌 정보 가져오기
+    selected_account = st.query_params.get("account")
+
+    # 계좌 정보 로드
+    with st.spinner("계좌 정보 로딩 중..."):
+        load_accounts(force_reload=False)
+        all_accounts = get_all_accounts_sorted_by_order()
+
+    # 제목 설정
+    if selected_account:
+        target_account = None
+        for account in all_accounts:
+            if account.get("account") == selected_account:
+                target_account = account
+                break
+
+        if target_account:
+            display_name = target_account.get("display_name", target_account.get("account", "계좌"))
+            st.title(f"📈 {display_name} 매매 신호 (Signal)")
+        else:
+            st.title("📈 매매 신호 (Signal)")
+    else:
+        st.title("📈 매매 신호 (Signal)")
 
     st.markdown(
         """
@@ -504,27 +526,39 @@ def main():
         unsafe_allow_html=True,
     )
 
-    with st.spinner("계좌 정보 로딩 중..."):
-        load_accounts(force_reload=False)
-        account_map = {
-            "kor": get_accounts_by_country("kor"),
-            "aus": get_accounts_by_country("aus"),
-            "coin": get_accounts_by_country("coin"),
-        }
+    if not all_accounts:
+        st.info("활성화된 계좌가 없습니다. `country_mapping.json`에 계좌를 추가하고 `is_active: true`로 설정해주세요.")
+        st.stop()
 
-    tab_kor, tab_aus, tab_coin = st.tabs(["한국", "호주", "코인"])
+    # 특정 계좌가 선택된 경우
+    if selected_account:
+        # 선택된 계좌 찾기
+        target_account = None
+        for account in all_accounts:
+            if account.get("account") == selected_account:
+                target_account = account
+                break
 
-    for country_code, tab in [("kor", tab_kor), ("aus", tab_aus), ("coin", tab_coin)]:
-        with tab:
-            account_entries = _prepare_account_entries(country_code, account_map.get(country_code))
-            if len(account_entries) == 1 and account_entries[0].get("account") is None:
-                render_signal_dashboard(country_code, account_entries[0])
-            else:
-                account_labels = [_account_label(entry) for entry in account_entries]
-                account_tabs = st.tabs(account_labels)
-                for account_tab, entry in zip(account_tabs, account_entries):
-                    with account_tab:
-                        render_signal_dashboard(country_code, entry)
+        if target_account:
+            # 선택된 계좌만 표시
+            render_signal_dashboard(target_account["country"], target_account)
+        else:
+            st.error(f"계좌 '{selected_account}'를 찾을 수 없습니다.")
+            st.link_button("모든 계좌 보기", "/signal")
+    else:
+        # 모든 계좌를 탭으로 표시
+        # 계좌 라벨 생성
+        account_labels = []
+        for account in all_accounts:
+            display_name = account.get("display_name", account.get("account", "계좌"))
+            account_labels.append(display_name)
+
+        # 계좌 탭 생성
+        account_tabs = st.tabs(account_labels)
+
+        for account_tab, account_entry in zip(account_tabs, all_accounts):
+            with account_tab:
+                render_signal_dashboard(account_entry["country"], account_entry)
 
 
 if __name__ == "__main__":

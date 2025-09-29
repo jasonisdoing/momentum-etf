@@ -51,7 +51,7 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 8,
+            "MA_PERIOD": 10,
             "PORTFOLIO_TOPN": 7,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
@@ -275,8 +275,8 @@
                 "name": "SPDR S&P 500 ETF Trust"
             }
         ],
-        "need_signal": true,
-        "is_active": true,
+        "need_signal": false,
+        "is_active": false,
         "strategy": {
             "MA_PERIOD": 15,
             "PORTFOLIO_TOPN": 8,

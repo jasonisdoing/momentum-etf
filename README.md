@@ -23,7 +23,6 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 - `pages/`: Streamlit 웹앱 페이지들
 - `data/`: 데이터 저장소
   - `kor/`, `aus/`, `coin/`: 국가별 데이터
-  - `settings/`: 설정 파일들
 - `run.py`: 메인 실행 진입점
 - `signals.py`: 실시간 시그널 생성
 - `test.py`: 과거 구간 백테스트 실행
@@ -40,8 +39,7 @@ pip install -r requirements.txt
 ```
 
 ### 2) 데이터베이스 준비
-- **MongoDB**: 연결 정보(`MONGO_DB_CONNECTION_STRING`)를 `settings.py` 또는 환경 변수에 설정
-- **종목 마스터**: 웹 앱의 `마스터정보` 탭을 통해 투자 유니버스에 포함할 종목을 관리
+- **MongoDB**: 연결 정보(`MONGO_DB_CONNECTION_STRING`)를 환경 변수에 설정
 
 ### 3) 환경 변수 설정 (선택사항)
 `.env` 파일을 생성하여 다음 변수들을 설정할 수 있습니다:
@@ -156,8 +154,8 @@ python scripts/find.py --type etf --min-change 3.0
 
 ## 설정 체계
 
-### 공통 설정 (웹앱 '설정' 탭 → 공통 설정)
-모든 국가가 동일하게 사용하는 전역 파라미터를 DB에 저장하여 관리합니다:
+### 공통 설정
+모든 국가가 동일하게 사용하는 전역 파라미터를 파일에서 관리합니다:
 - `MARKET_REGIME_FILTER_ENABLED`: 시장 레짐 필터 사용 여부
 - `MARKET_REGIME_FILTER_TICKER`: 레짐 필터 지수 티커
 - `MARKET_REGIME_FILTER_MA_PERIOD`: 레짐 필터 이동평균 기간
@@ -166,7 +164,7 @@ python scripts/find.py --type etf --min-change 3.0
 
 **주의**: `HOLDING_STOP_LOSS_PCT`는 양수로 입력해도 자동으로 음수로 저장/해석됩니다. (예: 10 → -10)
 
-### 국가별 전략 파라미터 (웹앱 각 국가 탭 → 설정)
+### 국가별 전략 파라미터
 - `portfolio_topn`: 포트폴리오 최대 보유 종목 수
 - `ma_period`: 이동평균 기간
 - `replace_weaker_stock`: 약한 종목 교체 여부

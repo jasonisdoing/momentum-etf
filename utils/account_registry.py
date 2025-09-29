@@ -279,5 +279,17 @@ def get_strategy_dict_for_account(account: str) -> Dict[str, Any]:
     return get_strategy_rules_for_account(account).to_dict()
 
 
+def get_all_accounts_sorted_by_order() -> List[Dict[str, Any]]:
+    """order 순으로 정렬된 모든 활성 계좌 목록을 반환합니다."""
+    all_accounts = load_accounts()
+    # 활성 계좌만 필터링하고 order 순으로 정렬
+    active_accounts = [
+        account
+        for account in all_accounts
+        if account.get("is_active", True) and account.get("account") is not None
+    ]
+    return sorted(active_accounts, key=lambda x: x.get("order", 999))
+
+
 def get_coin_min_holding_cost(account: str) -> Optional[float]:
     return get_strategy_rules_for_account(account).coin_min_holding_cost_krw
