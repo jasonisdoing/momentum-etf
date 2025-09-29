@@ -453,14 +453,16 @@ def _fetch_and_prepare_data(
         ma_score = 0.0
         if pd.notna(m) and m > 0:
             ma_score = round(((c0 / m) - 1.0) * 100, 1)
-        if deterministic:
-            try:
-                tail_ma = result["ma"].iloc[-5:].tolist()
-            except Exception:
-                tail_ma = []
-            print(
-                f"[DEBUG] {tkr}: base={base_date.date()} price={c0} MA={m} prev_close={prev_close} ma_period={result['ma_period']} tail_MA={tail_ma}"
-            )
+        print(
+            f"[DEBUG_SCORE] {tkr}: price={c0}, MA={m}, score={ma_score} (formula=round(((price/MA)-1)*100,1))"
+        )
+        try:
+            tail_ma = result["ma"].iloc[-5:].tolist()
+        except Exception:
+            tail_ma = []
+        print(
+            f"[DEBUG] {tkr}: base={base_date.date()} price={c0} MA={m} prev_close={prev_close} ma_period={result['ma_period']} tail_MA={tail_ma}"
+        )
         buy_signal_days_today = (
             result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0
         )
