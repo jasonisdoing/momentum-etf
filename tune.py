@@ -25,7 +25,7 @@ from utils.account_registry import get_account_info
 # --- 국가별 튜닝 파라미터 범위 정의 ---
 TUNING_CONFIG = {
     "coin": {
-        "MA_RANGE": np.arange(3, 6, 1),
+        "MA_RANGE": np.arange(1, 6, 1),
         "PORTFOLIO_TOPN": np.arange(1, 6, 1),
         "REPLACE_SCORE_THRESHOLD": [0.5],
         "TEST_MONTHS_RANGE": 12,

@@ -57,6 +57,7 @@ def get_common_file_settings() -> Dict[str, Any]:
             module, "MARKET_REGIME_FILTER_MA_PERIOD"
         )
         settings["HOLDING_STOP_LOSS_PCT"] = getattr(module, "HOLDING_STOP_LOSS_PCT")
+        settings["REALTIME_PRICE_ENABLED"] = bool(getattr(module, "REALTIME_PRICE_ENABLED", True))
 
         # 선택 설정 (존재할 경우만 추가)
         locked_tickers = getattr(module, "LOCKED_TICKERS", None)
@@ -80,6 +81,8 @@ def get_common_file_settings() -> Dict[str, Any]:
             raise ValueError("MARKET_REGIME_FILTER_MA_PERIOD는 0보다 큰 정수여야 합니다.")
         if not isinstance(settings["HOLDING_STOP_LOSS_PCT"], (int, float)):
             raise ValueError("HOLDING_STOP_LOSS_PCT는 숫자여야 합니다.")
+        if not isinstance(settings["REALTIME_PRICE_ENABLED"], bool):
+            raise ValueError("REALTIME_PRICE_ENABLED는 True 또는 False여야 합니다.")
 
     except (AttributeError, ValueError, TypeError, ImportError) as e:
         raise SystemExit(f"오류: 공통 설정 파일({file_path})에 문제가 있습니다: {e}")
