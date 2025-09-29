@@ -398,6 +398,32 @@
         ]
     },
     {
+        "category": "원유",
+        "tickers": [
+            {
+                "ticker": "218420",
+                "name": "KODEX 미국S&P500에너지(합성)"
+            },
+            {
+                "ticker": "474800",
+                "name": "KIWOOM 미국원유에너지기업"
+            }
+        ]
+    },
+    {
+        "category": "클린에너지",
+        "tickers": [
+            {
+                "ticker": "399580",
+                "name": "RISE 글로벌클린에너지"
+            },
+            {
+                "ticker": "419420",
+                "name": "KODEX 미국클린에너지나스닥"
+            }
+        ]
+    },
+    {
         "category": "TBD",
         "tickers": [
             {
@@ -435,10 +461,6 @@
             {
                 "ticker": "200030",
                 "name": "KODEX 미국S&P500산업재(합성)"
-            },
-            {
-                "ticker": "218420",
-                "name": "KODEX 미국S&P500에너지(합성)"
             },
             {
                 "ticker": "241180",
@@ -479,10 +501,6 @@
             {
                 "ticker": "371450",
                 "name": "TIGER 글로벌클라우드컴퓨팅INDXX"
-            },
-            {
-                "ticker": "399580",
-                "name": "RISE 글로벌클린에너지"
             },
             {
                 "ticker": "410870",
@@ -535,10 +553,6 @@
             {
                 "ticker": "465670",
                 "name": "TIGER 미국캐시카우100"
-            },
-            {
-                "ticker": "474800",
-                "name": "KIWOOM 미국원유에너지기업"
             },
             {
                 "ticker": "475050",
