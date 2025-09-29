@@ -1,12 +1,17 @@
 """OHLCV 데이터를 디스크에 캐싱하고 관리하기 위한 헬퍼 함수 모음입니다."""
 
+import os
 import re
+import shutil
+import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
 import pandas as pd
 
 CACHE_ROOT = Path(__file__).resolve().parents[1] / "data" / "stocks" / "cache"
+_DEPLOY_SENTINEL_NAME = "__coin_cache_deploy_id.txt"
 
 
 def _sanitize_ticker(ticker: str) -> str:
@@ -61,3 +66,76 @@ def get_cached_date_range(country: str, ticker: str) -> Optional[Tuple[pd.Timest
     if df is None or df.empty:
         return None
     return df.index.min(), df.index.max()
+
+
+def _detect_current_deploy_id() -> Optional[str]:
+    """Return a string that changes when a new deploy is detected."""
+
+    env_keys = (
+        "APP_DEPLOY_ID",
+        "DEPLOY_RELEASE_ID",
+        "RENDER_GIT_COMMIT",
+        "GIT_COMMIT",
+        "SOURCE_VERSION",
+    )
+    for key in env_keys:
+        value = os.environ.get(key)
+        if value:
+            return value.strip()
+
+    try:
+        repo_root = Path(__file__).resolve().parents[1]
+        result = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+        )
+        return result.decode().strip()
+    except Exception:
+        return None
+
+
+def reset_coin_cache_for_new_deploy() -> bool:
+    """Delete cached coin OHLCV when a new deploy is detected.
+
+    Returns True if the cache directory was cleared during this call.
+    """
+
+    deploy_id = _detect_current_deploy_id()
+    if not deploy_id:
+        deploy_id = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+
+    sentinel_path = CACHE_ROOT / _DEPLOY_SENTINEL_NAME
+    previous_id: Optional[str] = None
+    if sentinel_path.exists():
+        try:
+            previous_id = sentinel_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            previous_id = None
+
+    if previous_id == deploy_id:
+        return False
+
+    coin_cache_dir = CACHE_ROOT / "coin"
+    cache_cleared = False
+
+    if coin_cache_dir.exists():
+        for child in coin_cache_dir.iterdir():
+            try:
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+                cache_cleared = True
+            except Exception:
+                continue
+    else:
+        coin_cache_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+        sentinel_path.write_text(deploy_id, encoding="utf-8")
+    except Exception:
+        pass
+
+    return cache_cleared or previous_id != deploy_id

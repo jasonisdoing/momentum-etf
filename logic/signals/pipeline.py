@@ -335,7 +335,6 @@ def _fetch_and_prepare_data(
             rt_price = _fetch_realtime_price(tkr)
             if rt_price is not None:
                 realtime_prices[tkr] = rt_price
-                print(f"   [DEBUG] realtime {tkr} -> {rt_price}")
         print(f"-> 실시간 가격 조회 완료 ({len(realtime_prices)}/{len(pairs)}개 성공).")
 
     # regime filter
