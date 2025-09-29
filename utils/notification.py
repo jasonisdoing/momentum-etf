@@ -649,23 +649,40 @@ def send_detailed_signal_notification(
             idx_px = headers.index("현재가") if "현재가" in headers else None
             idx_amt = headers.index("금액") if "금액" in headers else None
 
-            # 국가별 수량 정밀도 로더
-            def _load_country_precision(country_key: str) -> Dict[str, Any]:
+            # precision.json 로더 (country + currency)
+            def _load_precision_all() -> Dict[str, Any]:
                 try:
                     root = Path(__file__).resolve().parent.parent
                     cfg_path = root / "data" / "settings" / "precision.json"
                     import json
 
                     with open(cfg_path, "r", encoding="utf-8") as fp:
-                        data = json.load(fp) or {}
-                    c = (data.get("country") or {}).get(country_key)
-                    return c if isinstance(c, dict) else {}
+                        return json.load(fp) or {}
                 except Exception:
                     return {}
 
-            cprec = _load_country_precision(country)
-            qty_p = int(cprec.get("qty_precision", 0)) if isinstance(cprec, dict) else 0
-            amt_p = int(cprec.get("amt_precision", 0)) if isinstance(cprec, dict) else 0
+            prec_all = _load_precision_all()
+            cprec = (
+                (prec_all.get("country") or {}).get(country, {})
+                if isinstance(prec_all, dict)
+                else {}
+            )
+            curmap = (prec_all.get("currency") or {}) if isinstance(prec_all, dict) else {}
+            stock_ccy = (
+                str(cprec.get("stock_currency", "KRW")) if isinstance(cprec, dict) else "KRW"
+            )
+            qty_p = int(cprec.get("stock_qty_precision", 0)) if isinstance(cprec, dict) else 0
+            amt_p = (
+                int(
+                    cprec.get(
+                        "stock_amt_precision", int(curmap.get(stock_ccy, {}).get("precision", 0))
+                    )
+                )
+                if isinstance(cprec, dict)
+                else int(curmap.get(stock_ccy, {}).get("precision", 0))
+            )
+            ccy_prefix = "$" if stock_ccy == "USD" else ("A$" if stock_ccy == "AUD" else "")
+            ccy_suffix = "원" if stock_ccy == "KRW" else ""
 
             # 4) 문자열 변환 + 정밀도 적용된 표 데이터 생성
             formatted_rows: List[List[str]] = []
@@ -693,11 +710,13 @@ def send_detailed_signal_notification(
                     elif (idx_px is not None) and (j == idx_px) and isinstance(val, (int, float)):
                         fmt = ("{:, ." + str(amt_p) + "f}") if amt_p > 0 else "{:, .0f}"
                         fmt = fmt.replace(" ", "")
-                        fr.append(fmt.format(float(val)))
+                        num = fmt.format(float(val))
+                        fr.append((ccy_prefix + num) if ccy_prefix else (num + ccy_suffix))
                     elif (idx_amt is not None) and (j == idx_amt) and isinstance(val, (int, float)):
                         fmt = ("{:, ." + str(amt_p) + "f}") if amt_p > 0 else "{:, .0f}"
                         fmt = fmt.replace(" ", "")
-                        fr.append(fmt.format(float(val)))
+                        num = fmt.format(float(val))
+                        fr.append((ccy_prefix + num) if ccy_prefix else (num + ccy_suffix))
                     else:
                         fr.append("-" if (val is None) else str(val))
                 formatted_rows.append(fr)

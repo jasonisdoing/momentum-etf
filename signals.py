@@ -119,28 +119,71 @@ def _load_display_precision() -> Dict[str, int]:
         }
 
 
-def _load_country_precision(country: str) -> Dict[str, Any]:
-    """precision.json의 country 섹션에서 해당 국가의 통화/표시 정밀도를 로드합니다."""
+def _load_precision_all() -> Dict[str, Any]:
+    """precision.json 전체를 로드합니다."""
     try:
         root = Path(__file__).resolve().parent
         cfg_path = root / "data" / "settings" / "precision.json"
         import json
 
         with open(cfg_path, "r", encoding="utf-8") as fp:
-            data = json.load(fp) or {}
-        c = (data.get("country") or {}).get(country)
-        if not isinstance(c, dict):
-            return {}
-        return c
+            return json.load(fp) or {}
     except Exception:
         return {}
+
+
+def _load_country_precision(country: str) -> Dict[str, Any]:
+    """precision.json의 country 섹션에서 해당 국가의 정밀도/통화 설정을 로드합니다."""
+    data = _load_precision_all()
+    c = (data.get("country") or {}).get(country)
+    if not isinstance(c, dict):
+        return {}
+    return c
+
+
+def _get_header_money_formatter(country: str):
+    """precision.json의 header_currency 및 currency.precision을 사용해 헤더 금액 포맷터를 반환합니다.
+    - header_currency == 'KRW'이면 기존 format_kr_money 유지
+    - 그 외 통화는 천단위 구분 + 해당 통화 자릿수 + 통화코드 접미로 표시
+    """
+    try:
+        all_prec = _load_precision_all()
+        cprec = (
+            (all_prec.get("country") or {}).get(country, {}) if isinstance(all_prec, dict) else {}
+        )
+        curmap = (all_prec.get("currency") or {}) if isinstance(all_prec, dict) else {}
+        header_ccy = str(cprec.get("header_currency", "KRW")) if isinstance(cprec, dict) else "KRW"
+        if header_ccy == "KRW":
+            return format_kr_money
+        prec = int(((curmap.get(header_ccy) or {}).get("precision", 0)))
+
+        def _fmt(val: float) -> str:
+            try:
+                return (
+                    ("{:, ." + str(prec) + "f} " + header_ccy).replace(" ", "").format(float(val))
+                    + " "
+                    + header_ccy
+                )
+            except Exception:
+                # 폴백: 단순 소수 포맷
+                return f"{float(val):,.{prec}f} {header_ccy}"
+
+        # 위에서 공백 제거 로직이 포맷 문자열을 망가뜨릴 수 있으므로 안전한 구현으로 대체
+        def _fmt_safe(val: float) -> str:
+            try:
+                return f"{float(val):,.{prec}f} {header_ccy}"
+            except Exception:
+                return f"{val} {header_ccy}"
+
+        return _fmt_safe
+    except Exception:
+        return format_kr_money
 
 
 def _resolve_previous_close(close_series: pd.Series, base_date: pd.Timestamp) -> float:
     """기준일 이전에 존재하는 가장 최근 종가를 반환합니다. (없으면 0.0)"""
     if close_series is None or close_series.empty:
         return 0.0
-
     try:
         closes_until_base = close_series.loc[:base_date]
     except Exception:  # noqa: E722
@@ -1269,7 +1312,8 @@ def _build_header_line(
 ) -> Tuple[str, pd.Timestamp, str]:
     """리포트의 헤더 라인을 생성합니다."""
 
-    money_formatter = format_kr_money
+    # 헤더 금액 포맷터: precision.json의 header_currency 기준
+    money_formatter = _get_header_money_formatter(country)
 
     # 보유 종목 수
     if country == "coin":
@@ -2384,9 +2428,18 @@ def main(
         p_cum = max(0, int(prec.get("cum_return_pct", 2)))
         p_w = max(0, int(prec.get("weight_pct", 2)))
         # 국가별 정밀도 로드 (수량/금액)
-        cprec = _load_country_precision(country)
-        qty_p = int(cprec.get("qty_precision", 0)) if isinstance(cprec, dict) else 0
-        amt_p = int(cprec.get("amt_precision", 0)) if isinstance(cprec, dict) else 0
+        all_prec = _load_precision_all()
+        cprec = (
+            (all_prec.get("country") or {}).get(country, {}) if isinstance(all_prec, dict) else {}
+        )
+        curmap = (all_prec.get("currency") or {}) if isinstance(all_prec, dict) else {}
+        stock_ccy = str(cprec.get("stock_currency", "KRW")) if isinstance(cprec, dict) else "KRW"
+        qty_p = int(cprec.get("stock_qty_precision", 0)) if isinstance(cprec, dict) else 0
+        # 금액 자리수는 우선 국가별 설정, 없으면 통화별 precision 사용
+        if isinstance(cprec, dict) and ("stock_amt_precision" in cprec):
+            amt_p = int(cprec.get("stock_amt_precision", 0))
+        else:
+            amt_p = int(((curmap.get(stock_ccy) or {}).get("precision", 0)))
         # 컬럼 인덱스 (가격/금액)
         try:
             col_price = headers.index("현재가")
@@ -2449,10 +2502,9 @@ def main(
                 else:
                     display_row[idx] = val
 
-            # 현재가/금액 포맷팅 (국가별 amt_precision 적용, 천단위 구분)
+            # 현재가/금액 포맷팅 (국가별 amt_precision 적용, 천단위 구분) - 통화 단위 표시는 제거
             if col_price is not None and isinstance(display_row[col_price], (int, float)):
                 fmt = ("{:, ." + str(amt_p) + "f}") if amt_p > 0 else "{:, .0f}"
-                # remove space from format (safety)
                 fmt = fmt.replace(" ", "")
                 display_row[col_price] = fmt.format(float(display_row[col_price]))
             if col_amount is not None and isinstance(display_row[col_amount], (int, float)):
@@ -2484,8 +2536,9 @@ def main(
 
         render_table_eaw(headers, display_rows, aligns=aligns)
 
+        # 콘솔 요약 라인도 헤더 통화 규칙을 따르도록 동일 포맷터 사용
         summary_line_plain = build_summary_line_from_summary_data(
-            summary_data, format_kr_money, use_html=False, prefix=None
+            summary_data, _get_header_money_formatter(country), use_html=False, prefix=None
         )
 
         print("\n" + summary_line_plain)

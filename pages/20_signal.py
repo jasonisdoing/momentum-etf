@@ -285,15 +285,23 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
         if isinstance(prec_all, dict)
         else {}
     )
+    curmap = (prec_all.get("currency", {}) or {}) if isinstance(prec_all, dict) else {}
 
     p_daily = int(prec_common.get("daily_return_pct", 2) or 2)
     p_cum = int(prec_common.get("cum_return_pct", 2) or 2)
     p_w = int(prec_common.get("weight_pct", 2) or 2)
-    qty_p = int(country_prec.get("qty_precision", 0) or 0)
-    amt_p = int(
-        country_prec.get("amt_precision", 0)
-        or (0 if country_code in ["kor", "coin"] else (2 if country_code == "aus" else 0))
+    stock_ccy = (
+        str(country_prec.get("stock_currency", "KRW")) if isinstance(country_prec, dict) else "KRW"
     )
+    qty_p = (
+        int(country_prec.get("stock_qty_precision", 0) or 0)
+        if isinstance(country_prec, dict)
+        else 0
+    )
+    if isinstance(country_prec, dict) and ("stock_amt_precision" in country_prec):
+        amt_p = int(country_prec.get("stock_amt_precision", 0) or 0)
+    else:
+        amt_p = int((curmap.get(stock_ccy, {}) or {}).get("precision", 0) or 0)
 
     formats = {
         "일간수익률": "{:+." + str(p_daily) + "f}%",
@@ -306,12 +314,23 @@ def _display_status_report_df(df: pd.DataFrame, country_code: str):
     # 제거 None 항목
     formats = {k: v for k, v in formats.items() if v is not None}
 
-    # 현재가/금액 (천단위 구분 포함)
-    amt_fmt = ("{:,." + str(amt_p) + "f}") if amt_p > 0 else "{:,.0f}"
+    # 현재가/금액 (천단위 구분 + 통화 기호/접미)
+    ccy_prefix = "$" if stock_ccy == "USD" else ("A$" if stock_ccy == "AUD" else "")
+    ccy_suffix = "원" if stock_ccy == "KRW" else ""
+
+    def _fmt_amount_with_ccy(val):
+        if pd.isna(val):
+            return "-"
+        try:
+            num = f"{float(val):,.{amt_p}f}" if amt_p > 0 else f"{float(val):,.0f}"
+            return (ccy_prefix + num) if ccy_prefix else (num + ccy_suffix)
+        except Exception:
+            return str(val)
+
     if "현재가" in df_display.columns:
-        formats["현재가"] = amt_fmt
+        formats["현재가"] = _fmt_amount_with_ccy
     if "금액" in df_display.columns:
-        formats["금액"] = amt_fmt
+        formats["금액"] = _fmt_amount_with_ccy
 
     # 보유수량
     if "보유수량" in df_display.columns:
