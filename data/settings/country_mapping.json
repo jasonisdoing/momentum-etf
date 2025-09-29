@@ -23,7 +23,7 @@
         "is_active": true,
         "strategy": {
             "MA_PERIOD": 3,
-            "PORTFOLIO_TOPN": 3,
+            "PORTFOLIO_TOPN": 2,
             "REPLACE_SCORE_THRESHOLD": 0.5,
             "COIN_MIN_HOLDING_COST_KRW": 10000
         },

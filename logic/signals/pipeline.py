@@ -446,18 +446,20 @@ def _fetch_and_prepare_data(
         if pd.notna(m) and m > 0:
             ma_score = round(((c0 / m) - 1.0) * 100, 1)
 
-        if tkr == "BNB":
-            recent_debug = pd.DataFrame(
-                {
-                    "Close": close_series.tail(3),
-                    "MA": ma_series.tail(3),
-                }
-            )
-            print("\n[DEBUG] BNB 최근 3일 종가/MA")
-            print(recent_debug.to_string())
-            ma_display = f"{m:,.0f}" if pd.notna(m) else "nan"
-            score_display = f"{ma_score:.1f}"
-            print(f"[DEBUG] BNB 점수 계산: 현재가={c0:,.0f}, MA={ma_display}, score={score_display}%")
+        # if tkr == "BNB":
+        #     recent_debug = pd.DataFrame(
+        #         {
+        #             "Close": close_series.tail(3),
+        #             "MA": ma_series.tail(3),
+        #         }
+        #     )
+        #     print("\n[DEBUG] BNB 최근 3일 종가/MA")
+        #     print(recent_debug.to_string())
+        #     ma_display = f"{m:,.0f}" if pd.notna(m) else "nan"
+        #     score_display = f"{ma_score:.1f}"
+        #     print(
+        #         f"[DEBUG] BNB 점수 계산: 현재가={c0:,.0f}, MA={ma_display}, score={score_display}%"
+        #     )
 
         buy_signal_days_today = (
             result["buy_signal_days"].iloc[-1] if not result["buy_signal_days"].empty else 0

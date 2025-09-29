@@ -12,6 +12,6 @@ from dotenv import load_dotenv
 load_dotenv()
 # --- 웹앱 UI 및 마스터 데이터 관련 설정 ---
 
-APP_DATE_TIME = "2025-09-30-07"
+APP_DATE_TIME = "2025-09-30-08"
 
 APP_TYPE = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")

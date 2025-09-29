@@ -61,6 +61,24 @@ AUS_SLACK_WEBHOOK=your_slack_webhook_url
 COIN_SLACK_WEBHOOK=your_slack_webhook_url
 ```
 
+### 4) 서버 시간대 설정 (필수)
+배포 서버의 시스템 시간이 KST(Asia/Seoul)와 동기화되어 있어야 시그널 기준일과 로그 파일이 올바르게 생성됩니다.
+
+- **시간대 지정**
+  ```bash
+  sudo timedatectl set-timezone Asia/Seoul
+  ```
+- **NTP 동기화 활성화**
+  ```bash
+  sudo timedatectl set-ntp true
+  ```
+- **설정 확인**
+  ```bash
+  timedatectl status
+  ```
+
+명령 실행 후에는 관련 서비스(APScheduler 등)를 재시작하여 새 시간 설정이 반영되도록 하세요.
+
 ## 주요 사용법
 
 ### 1) 웹앱으로 현황 확인

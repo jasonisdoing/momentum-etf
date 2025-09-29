@@ -26,7 +26,7 @@ from utils.account_registry import get_account_info
 TUNING_CONFIG = {
     "coin": {
         "MA_RANGE": np.arange(1, 6, 1),
-        "PORTFOLIO_TOPN": np.arange(1, 6, 1),
+        "PORTFOLIO_TOPN": [2, 3],
         "REPLACE_SCORE_THRESHOLD": [0.5],
         "TEST_MONTHS_RANGE": 12,
     },
