@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 import streamlit as st
 import pandas as pd
 
-from signals import calculate_benchmark_comparison
+from logic.signals.benchmarks import calculate_benchmark_comparison
 from utils.account_registry import get_account_info
 
 # 페이지 전체 폭 사용

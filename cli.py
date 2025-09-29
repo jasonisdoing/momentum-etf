@@ -297,7 +297,7 @@ def main():
                         force_send=True,
                     )
 
-                    time.sleep(2)
+                    time.sleep(1)
                     # 상세 시그널을 슬랙 전송과 동시에 파일로도 저장합니다.
                     # 파일 경로: logs/signal_{account}_{YYYY-MM-DD}.log
                     save_path = None

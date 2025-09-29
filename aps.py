@@ -119,7 +119,7 @@ def run_signal_generation(
     start_time = time.time()
     report_date = None
     try:
-        from signals import main as run_signal_main
+        from logic.signals.pipeline import main as run_signal_main
         from utils.notification import (
             send_summary_notification,
             send_detailed_signal_notification,
@@ -159,7 +159,7 @@ def run_signal_generation(
                 header_line=signal_result.header_line,
                 force_send=force_notify,
             )
-            time.sleep(2)
+            time.sleep(1)
 
             # 파일 저장 경로 구성 (results/ 하위에 저장)
             try:

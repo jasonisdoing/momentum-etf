@@ -2673,7 +2673,7 @@ if __name__ == "__main__":
             header_line=signal_result.header_line,
             force_send=True,
         )
-        time.sleep(2)
+        time.sleep(1)
         from utils.notification import send_detailed_signal_notification
 
         send_detailed_signal_notification(
