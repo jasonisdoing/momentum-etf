@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 
 import streamlit as st
 import pandas as pd
@@ -23,12 +24,27 @@ APP_ROOT = Path(__file__).resolve().parent.parent
 RESULT_DIR = APP_ROOT / "results"
 
 
+def _result_sort_key(path: Path) -> float:
+    stem = path.stem  # signal_{account}_{YYYY-MM-DD}
+    parts = stem.split("_")
+    date_str = parts[-1] if len(parts) >= 3 else None
+    if date_str:
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            return dt.timestamp()
+        except ValueError:
+            pass
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def list_result_files(account: str | None) -> List[Path]:
     files: List[Path] = []
     if RESULT_DIR.exists():
         pattern = f"signal_{account}_*.log" if account else "signal_*.log"
-        for p in sorted(RESULT_DIR.glob(pattern)):
-            files.append(p)
+        files = sorted(RESULT_DIR.glob(pattern), key=_result_sort_key, reverse=True)
     return files
 
 
