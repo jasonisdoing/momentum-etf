@@ -48,7 +48,8 @@ def build_sell_replace_note(
     amt = money_str(country, trade_amount)
     prof = money_str(country, profit_amount)
     sign_pct = f"{pl_pct:+.1f}%"
-    return f"교체매도 {amt} 수익 {prof} 손익률 {sign_pct} ({replacement_ticker}(으)로 교체)"
+    profit_label = "수익" if profit_amount >= 0 else "손실"
+    return f"교체매도 {amt} {profit_label} {prof} 손익률 {sign_pct} ({replacement_ticker}(으)로 교체)"
 
 
 def build_partial_buy_note(country: str, amount: float) -> str:
