@@ -28,7 +28,7 @@ TUNING_CONFIG = {
         "MA_RANGE": np.arange(1, 6, 1),
         "PORTFOLIO_TOPN": [2, 3],
         "REPLACE_SCORE_THRESHOLD": [0.5],
-        "TEST_MONTHS_RANGE": 12,
+        "TEST_MONTHS_RANGE": 3,
     },
     "aus": {
         "MA_RANGE": np.arange(15, 31, 1),
