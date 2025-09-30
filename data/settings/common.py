@@ -5,9 +5,3 @@ MARKET_REGIME_FILTER_MA_PERIOD = 20
 REALTIME_PRICE_ENABLED = True
 
 HOLDING_STOP_LOSS_PCT = 10  # 양수로 입력해도 자동으로 음수로 저장/해석됩니다.
-
-LOCKED_TICKERS = [
-    "ETH",
-    "0097L0",
-    "0107F0",
-]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, Set
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -118,14 +118,6 @@ def generate_daily_signals_for_portfolio(
         held_count = sum(1 for v in holdings.values() if float((v or {}).get("shares", 0.0)) > 0)
 
     decisions = []
-
-    from utils.account_registry import get_common_file_settings
-
-    common_settings = get_common_file_settings()
-    locked_list = (
-        common_settings.get("LOCKED_TICKERS", []) if isinstance(common_settings, dict) else []
-    )
-    locked_tickers: Set[str] = {str(ticker).upper() for ticker in locked_list}
 
     base_date_norm = base_date.normalize()
     sell_cooldown_block: Dict[str, Dict[str, Any]] = {}
@@ -252,18 +244,6 @@ def generate_daily_signals_for_portfolio(
                     buy_signal = False
                     phrase = _format_cooldown_phrase("최근 매도", buy_block_info.get("last_sell"))
 
-        ticker_key = str(tkr).upper()
-        is_locked = ticker_key in locked_tickers
-        locked_skip = False
-        if is_locked:
-            buy_signal = False
-            lock_msg = DECISION_NOTES["LOCKED_HOLD"]
-            if is_effectively_held:
-                state = "HOLD"
-                phrase = lock_msg
-            else:
-                locked_skip = True
-
         amount = sh * price if pd.notna(price) else 0.0
 
         meta = etf_meta.get(tkr) or full_etf_meta.get(tkr, {}) or {}
@@ -321,9 +301,7 @@ def generate_daily_signals_for_portfolio(
                 "buy_signal": buy_signal,
                 "sell_cooldown_info": sell_block_info,
                 "buy_cooldown_info": buy_block_info,
-                "is_locked": is_locked,
                 "is_held": is_effectively_held,
-                "skip_locked": locked_skip,
             }
         )
 

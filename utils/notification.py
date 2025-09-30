@@ -616,7 +616,14 @@ def send_detailed_signal_notification(
 
     app_tag = getattr(global_settings, "APP_TYPE", "APP")
     title = f"[{app_tag}][{country}/{account}] 종목상세"
+    try:
+        need_signal_flag = bool((get_account_info(account) or {}).get("need_signal", True))
+    except Exception:
+        need_signal_flag = True
+
     message_header_parts = [title]
+    if not need_signal_flag:
+        message_header_parts.append("⚠️ 이 계좌는 시그널 생성을 하지 않도록 설정되어 있습니다.")
     if extra_lines:
         message_header_parts.extend(extra_lines)
     message_header = "\n".join(message_header_parts)
@@ -625,11 +632,7 @@ def send_detailed_signal_notification(
         decision_config.get(state, {}).get("is_recommendation", False) for state in grouped.keys()
     )
     # If the account is configured not to need signals, avoid channel-wide mention
-    try:
-        need_signal = bool((get_account_info(account) or {}).get("need_signal", True))
-    except Exception:
-        need_signal = True
-    slack_prefix = "<!channel>\n" if has_recommendation and need_signal else ""
+    slack_prefix = "<!channel>\n" if has_recommendation and need_signal_flag else ""
 
     # 파일 저장용 렌더링 텍스트 (백테스트 스타일)과 Slack 메시지 본문(코드블럭) 분리 구성
     if not lines:
