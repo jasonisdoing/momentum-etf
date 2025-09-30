@@ -1,6 +1,7 @@
 pandas
 numpy
-streamlit
+streamlit==1.50.0
+streamlit-authenticator
 pykrx
 pymongo
 APScheduler

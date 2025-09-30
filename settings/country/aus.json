@@ -1,0 +1,17 @@
+{
+    "icon": "🇦🇺",
+    "name": "호주 ETF",
+    "slack_channel": "C09FAU7SKA8",
+    "strategy": {
+        "MA_PERIOD": 30,
+        "PORTFOLIO_TOPN": 7,
+        "REPLACE_SCORE_THRESHOLD": 0.5,
+        "COOLDOWN_DAYS": 1,
+        "MAX_PER_CATEGORY": 1
+    },
+    "precision": {
+        "currency": "AUD",
+        "qty_precision": 0,
+        "price_precision": 2
+    }
+}

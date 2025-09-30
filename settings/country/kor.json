@@ -1,0 +1,17 @@
+{
+    "icon": "🇰🇷",
+    "name": "한국 ETF",
+    "slack_channel": "C09FAU2NHM2",
+    "strategy": {
+        "MA_PERIOD": 24,
+        "PORTFOLIO_TOPN": 10,
+        "REPLACE_SCORE_THRESHOLD": 0.5,
+        "COOLDOWN_DAYS": 1,
+        "MAX_PER_CATEGORY": 1
+    },
+    "precision": {
+        "currency": "KRW",
+        "qty_precision": 0,
+        "price_precision": 0
+    }
+}

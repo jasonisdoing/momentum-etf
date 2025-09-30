@@ -20,36 +20,7 @@ from utils.tee import Tee
 from utils.data_loader import fetch_ohlcv_for_tickers
 from utils.stock_list_io import get_etfs
 from utils.account_registry import get_account_info
-
-# python cli.py b1 --tune
-# --- 국가별 튜닝 파라미터 범위 정의 ---
-TUNING_CONFIG = {
-    "coin": {
-        "MA_RANGE": np.arange(1, 6, 1),
-        "PORTFOLIO_TOPN": [2, 3],
-        "REPLACE_SCORE_THRESHOLD": [0.5],
-        "TEST_MONTHS_RANGE": 3,
-    },
-    "aus": {
-        "MA_RANGE": np.arange(15, 31, 1),
-        "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": [0.5],
-        "TEST_MONTHS_RANGE": 12,
-    },
-    "kor": {
-        "MA_RANGE": np.arange(15, 31, 1),
-        "PORTFOLIO_TOPN": np.arange(7, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": [0.5],
-        "TEST_MONTHS_RANGE": 12,
-    },
-    "us": {
-        "MA_RANGE": np.arange(5, 31, 1),
-        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": [0.5],
-        "TEST_MONTHS_RANGE": 12,
-    },
-}
-
+from utils.tuning_config import TUNING_CONFIG
 
 PARAM_LABELS = [
     ("MA_RANGE", "ma_period"),

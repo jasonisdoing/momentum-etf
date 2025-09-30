@@ -28,3 +28,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # 8. 나머지 애플리케이션 소스 코드 전체를 작업 디렉토리로 복사합니다.
 COPY . .
+
+# 9. 컨테이너 시작 시 Streamlit 앱을 실행합니다.
+CMD ["python", "run.py"]

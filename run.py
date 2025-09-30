@@ -34,12 +34,12 @@ def main():
         print("오류: Streamlit이 설치되어 있지 않습니다. 'pip install streamlit'으로 설치해주세요.")
         sys.exit(1)
 
-    # Main.py 파일의 절대 경로를 찾습니다.
+    # app.py 파일의 절대 경로를 찾습니다.
     dir_path = os.path.dirname(os.path.realpath(__file__))
-    script_path = os.path.join(dir_path, "Main.py")
+    script_path = os.path.join(dir_path, "app.py")
 
     # Streamlit을 실행하기 위한 인자를 구성합니다.
-    # sys.argv를 수정하여 `streamlit run Main.py` 처럼 보이게 합니다.
+    # sys.argv를 수정하여 `streamlit run app.py` 처럼 보이게 합니다.
     # 추가적인 Streamlit 인자(예: --server.port)를 전달할 수 있도록 합니다.
     args = ["run", script_path] + sys.argv[1:]
     sys.argv = ["streamlit"] + args
