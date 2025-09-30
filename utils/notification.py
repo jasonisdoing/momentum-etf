@@ -477,11 +477,13 @@ def send_detailed_signal_notification(
 
     idx_ticker = headers.index("티커")
     idx_state = headers.index("상태") if "상태" in headers else None
-    idx_ret = (
-        headers.index("누적수익률")
-        if "누적수익률" in headers
-        else (headers.index("일간수익률") if "일간수익률" in headers else None)
-    )
+    idx_ret = None
+    if "누적수익률" in headers:
+        idx_ret = headers.index("누적수익률")
+    elif "일간(%)" in headers:
+        idx_ret = headers.index("일간(%)")
+    elif "일간수익률" in headers:
+        idx_ret = headers.index("일간수익률")
     idx_score = headers.index("점수") if "점수" in headers else None
 
     try:
@@ -646,6 +648,7 @@ def send_detailed_signal_notification(
                 "#",
                 "현재가",
                 "일간수익률",
+                "일간(%)",
                 "보유수량",
                 "금액",
                 "누적수익률",
@@ -690,7 +693,11 @@ def send_detailed_signal_notification(
             p_w = max(0, int(prec.get("weight_pct", 2)))
 
             # 헤더 인덱스 찾기
-            idx_day = headers.index("일간수익률") if "일간수익률" in headers else None
+            idx_day = None
+            if "일간(%)" in headers:
+                idx_day = headers.index("일간(%)")
+            elif "일간수익률" in headers:
+                idx_day = headers.index("일간수익률")
             idx_cum = headers.index("누적수익률") if "누적수익률" in headers else None
             idx_w = headers.index("비중") if "비중" in headers else None
             idx_sh = headers.index("보유수량") if "보유수량" in headers else None

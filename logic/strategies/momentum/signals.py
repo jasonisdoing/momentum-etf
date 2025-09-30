@@ -280,11 +280,12 @@ def generate_daily_signals_for_portfolio(
             if pd.notna(price) and pd.notna(prev_close) and prev_close > 0
             else 0.0
         )
+        day_ret = round(day_ret, 2)
 
-        buy_date_display = buy_date.strftime("%Y-%m-%d") if buy_date else "-"
         holding_days_display = str(holding_days) if holding_days > 0 else "-"
 
         position_weight_pct = (amount / current_equity) * 100.0 if current_equity > 0 else 0.0
+        position_weight_pct = round(position_weight_pct, 2)
 
         current_row = [
             0,
@@ -292,7 +293,6 @@ def generate_daily_signals_for_portfolio(
             display_name,
             display_category,
             state,
-            buy_date_display,
             holding_days_display,
             price,
             day_ret,

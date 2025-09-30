@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 
+from numbers import Real
+
 import pandas as pd
 
 # optional deps
@@ -58,6 +60,13 @@ from logic.signals.history import (
     calculate_consecutive_holding_info,
     calculate_trade_cooldown_info,
 )
+
+
+def _to_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass
@@ -1345,9 +1354,8 @@ def generate_signal_report(
             "-",
             "HOLD",
             "-",
-            "-",
             is_value,
-            0.0,
+            is_change_pct,
             "1",
             is_value,
             is_change_pct,
@@ -1428,15 +1436,17 @@ def main(
             if h in headers:
                 col_indices["score"] = headers.index(h)
                 break
-        col_indices["day_ret"] = headers.index("일간수익률")
+        col_indices["holding_days"] = headers.index("보유일")
+        col_indices["day_ret"] = headers.index("일간(%)")
         col_indices["cum_ret"] = headers.index("누적수익률")
         col_indices["weight"] = headers.index("비중")
+        col_indices["shares"] = headers.index("보유수량")
     except (ValueError, KeyError):
         pass
 
     display_rows: List[List[Any]] = []
     prec = _load_display_precision()
-    p_daily = max(0, int(prec.get("daily_return_pct", 2)))
+    p_daily = 2
     p_cum = max(0, int(prec.get("cum_return_pct", 2)))
     p_w = max(0, int(prec.get("weight_pct", 2)))
 
@@ -1465,39 +1475,49 @@ def main(
         idx = col_indices.get("score")
         if idx is not None:
             val = display_row[idx]
-            if isinstance(val, (int, float)):
-                display_row[idx] = f"{val:.1f}"
+            val_num = val if isinstance(val, Real) else _to_float(val)
+            if val_num is not None:
+                display_row[idx] = f"{val_num:.1f}"
             elif val is None or not str(val).strip():
                 display_row[idx] = "-"
+
+        idx = col_indices.get("holding_days")
+        if idx is not None:
+            val = display_row[idx]
+            display_row[idx] = str(val) if val not in (None, "") else "-"
 
         idx = col_indices.get("day_ret")
         if idx is not None:
             val = display_row[idx]
-            if isinstance(val, (int, float)):
-                display_row[idx] = ("{:+." + str(p_daily) + "f}%").format(val)
+            val_num = val if isinstance(val, Real) else _to_float(val)
+            if val_num is not None:
+                width = max(0, p_daily) + 5  # sign + leading digit + decimal point + decimals
+                display_row[idx] = f"{val_num:+{width}.{p_daily}f}%"
             else:
                 display_row[idx] = "-"
 
         idx = col_indices.get("cum_ret")
         if idx is not None:
             val = display_row[idx]
-            if isinstance(val, (int, float)):
-                display_row[idx] = ("{:+." + str(p_cum) + "f}%").format(val)
+            val_num = val if isinstance(val, Real) else _to_float(val)
+            if val_num is not None:
+                display_row[idx] = ("{:+." + str(p_cum) + "f}%").format(val_num)
             else:
                 display_row[idx] = "-"
 
         idx = col_indices.get("weight")
         if idx is not None:
             val = display_row[idx]
-            if isinstance(val, (int, float)):
-                display_row[idx] = ("{:." + str(p_w) + "f}%").format(val)
+            val_num = val if isinstance(val, Real) else _to_float(val)
+            if val_num is not None:
+                display_row[idx] = ("{:." + str(p_w) + "f}%").format(val_num)
             else:
                 display_row[idx] = "-"
 
         idx = col_indices.get("shares")
         if idx is not None:
             val = display_row[idx]
-            if isinstance(val, (int, float)):
+            if isinstance(val, Real):
                 if qty_p > 0:
                     s = f"{float(val):.{qty_p}f}".rstrip("0").rstrip(".")
                     display_row[idx] = s if s != "" else "0"
@@ -1506,11 +1526,11 @@ def main(
             else:
                 display_row[idx] = val
 
-        if col_price is not None and isinstance(display_row[col_price], (int, float)):
+        if col_price is not None and isinstance(display_row[col_price], Real):
             fmt = ("{:, ." + str(amt_p) + "f}") if amt_p > 0 else "{:, .0f}"
             fmt = fmt.replace(" ", "")
             display_row[col_price] = fmt.format(float(display_row[col_price]))
-        if col_amount is not None and isinstance(display_row[col_amount], (int, float)):
+        if col_amount is not None and isinstance(display_row[col_amount], Real):
             fmt = ("{:, ." + str(amt_p) + "f}") if amt_p > 0 else "{:, .0f}"
             fmt = fmt.replace(" ", "")
             display_row[col_amount] = fmt.format(float(display_row[col_amount]))
@@ -1523,10 +1543,9 @@ def main(
         "left",  # 종목명
         "left",  # 카테고리
         "center",  # 상태
-        "left",  # 매수일자
         "right",  # 보유일
         "right",  # 현재가
-        "right",  # 일간수익률
+        "right",  # 일간(%)
         "right",  # 보유수량
         "right",  # 금액
         "right",  # 누적수익률

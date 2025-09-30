@@ -144,10 +144,6 @@
             {
                 "ticker": "ASX:IVV",
                 "name": "iShares S&P 500 ETF"
-            },
-            {
-                "ticker": "ASX:GGUS",
-                "name": "Betashares Geared US Equities Currency Hedged Complex ETF"
             }
         ]
     },
