@@ -10,7 +10,8 @@ from typing import Any, Dict, Iterable, List, Optional
 from datetime import datetime
 
 
-from logic.strategies.momentum.rules import StrategyRules
+# NOTE: StrategyRules는 순환 의존성(circular import)을 피하기 위해
+# 함수 내부에서 지연 임포트합니다.
 
 
 ACCOUNTS_FILE = (
@@ -56,13 +57,7 @@ def get_common_file_settings() -> Dict[str, Any]:
             module, "MARKET_REGIME_FILTER_MA_PERIOD"
         )
         settings["HOLDING_STOP_LOSS_PCT"] = getattr(module, "HOLDING_STOP_LOSS_PCT")
-
-        # 선택 설정 (존재할 경우만 추가)
-        locked_tickers = getattr(module, "LOCKED_TICKERS", None)
-        if locked_tickers is not None:
-            if not isinstance(locked_tickers, (list, tuple, set)):
-                raise ValueError("LOCKED_TICKERS 는 리스트/튜플/셋 형태여야 합니다.")
-            settings["LOCKED_TICKERS"] = list(locked_tickers)
+        settings["REALTIME_PRICE_ENABLED"] = bool(getattr(module, "REALTIME_PRICE_ENABLED", True))
 
         # 유효성 검사
         if not isinstance(settings["MARKET_REGIME_FILTER_ENABLED"], bool):
@@ -79,6 +74,8 @@ def get_common_file_settings() -> Dict[str, Any]:
             raise ValueError("MARKET_REGIME_FILTER_MA_PERIOD는 0보다 큰 정수여야 합니다.")
         if not isinstance(settings["HOLDING_STOP_LOSS_PCT"], (int, float)):
             raise ValueError("HOLDING_STOP_LOSS_PCT는 숫자여야 합니다.")
+        if not isinstance(settings["REALTIME_PRICE_ENABLED"], bool):
+            raise ValueError("REALTIME_PRICE_ENABLED는 True 또는 False여야 합니다.")
 
     except (AttributeError, ValueError, TypeError, ImportError) as e:
         raise SystemExit(f"오류: 공통 설정 파일({file_path})에 문제가 있습니다: {e}")
@@ -169,6 +166,9 @@ def _refresh_cache() -> None:
             if not strategy_cfg:
                 raise SystemExit(f"계좌 '{account_code}' 설정에 'strategy' 항목이 필요합니다.")
             try:
+                # 지연 임포트로 순환 의존성 회피
+                from logic.strategies.momentum.rules import StrategyRules  # type: ignore
+
                 strategy_rules = StrategyRules.from_mapping(strategy_cfg)
             except ValueError as exc:
                 raise SystemExit(f"계좌 '{account_code}'의 전략 설정이 올바르지 않습니다: {exc}") from exc
@@ -268,7 +268,7 @@ def iter_account_info() -> Iterable[Dict[str, Any]]:
     yield from load_accounts()
 
 
-def get_strategy_rules_for_account(account: str) -> StrategyRules:
+def get_strategy_rules_for_account(account: str):
     info = get_account_info(account)
     if not info or "strategy_rules" not in info:
         raise ValueError(f"'{account}' 계좌의 전략 설정을 찾을 수 없습니다.")
@@ -277,6 +277,18 @@ def get_strategy_rules_for_account(account: str) -> StrategyRules:
 
 def get_strategy_dict_for_account(account: str) -> Dict[str, Any]:
     return get_strategy_rules_for_account(account).to_dict()
+
+
+def get_all_accounts_sorted_by_order() -> List[Dict[str, Any]]:
+    """order 순으로 정렬된 모든 활성 계좌 목록을 반환합니다."""
+    all_accounts = load_accounts()
+    # 활성 계좌만 필터링하고 order 순으로 정렬
+    active_accounts = [
+        account
+        for account in all_accounts
+        if account.get("is_active", True) and account.get("account") is not None
+    ]
+    return sorted(active_accounts, key=lambda x: x.get("order", 999))
 
 
 def get_coin_min_holding_cost(account: str) -> Optional[float]:

@@ -61,5 +61,9 @@
             "bold": false,
             "italic": false
         }
+    ],
+    "cursorpyright.analysis.extraPaths": [
+        "./src",
+        "./app"
     ]
 }

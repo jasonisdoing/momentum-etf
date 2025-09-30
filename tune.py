@@ -25,20 +25,26 @@ from utils.account_registry import get_account_info
 # --- 국가별 튜닝 파라미터 범위 정의 ---
 TUNING_CONFIG = {
     "coin": {
-        "MA_RANGE": np.arange(2, 6, 1),
-        "PORTFOLIO_TOPN": np.arange(1, 6, 1),
+        "MA_RANGE": np.arange(1, 6, 1),
+        "PORTFOLIO_TOPN": [2, 3],
         "REPLACE_SCORE_THRESHOLD": [0.5],
-        "TEST_MONTHS_RANGE": 12,
+        "TEST_MONTHS_RANGE": 3,
     },
     "aus": {
-        "MA_RANGE": np.arange(5, 21, 1),
+        "MA_RANGE": np.arange(15, 31, 1),
         "PORTFOLIO_TOPN": [7],
         "REPLACE_SCORE_THRESHOLD": [0.5],
         "TEST_MONTHS_RANGE": 12,
     },
     "kor": {
-        "MA_RANGE": np.arange(10, 21, 1),
-        "PORTFOLIO_TOPN": [8],
+        "MA_RANGE": np.arange(15, 31, 1),
+        "PORTFOLIO_TOPN": np.arange(7, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "TEST_MONTHS_RANGE": 12,
+    },
+    "us": {
+        "MA_RANGE": np.arange(5, 31, 1),
+        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
         "REPLACE_SCORE_THRESHOLD": [0.5],
         "TEST_MONTHS_RANGE": 12,
     },
@@ -213,6 +219,7 @@ def main():
                 print(f"\n--- CAGR {i}위 ---")
                 for name, value in zip(param_names, params):
                     print(f"  - {name}: {value}")
+                print(f"  - test_months_range: {TEST_MONTHS_RANGE}")
                 print("-" * 20)
                 print(f"  - CAGR: {row['cagr_pct']:.2f}%")
                 print(f"  - CUI: {row['cui']:.2f}")
@@ -233,6 +240,7 @@ def main():
                 print(f"\n--- MDD {i}위 ---")
                 for name, value in zip(param_names, params):
                     print(f"  - {name}: {value}")
+                print(f"  - test_months_range: {TEST_MONTHS_RANGE}")
                 print("-" * 20)
                 print(f"  - CAGR: {row['cagr_pct']:.2f}%")
                 print(f"  - CUI: {row['cui']:.2f}")
@@ -253,6 +261,7 @@ def main():
                 print(f"\n--- CUI (Calmar/Ulcer) {i}위 ---")
                 for name, value in zip(param_names, params):
                     print(f"  - {name}: {value}")
+                print(f"  - test_months_range: {TEST_MONTHS_RANGE}")
                 print("-" * 20)
                 print(f"  - CAGR: {row['cagr_pct']:.2f}%")
                 print(f"  - CUI: {row['cui']:.2f}")

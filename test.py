@@ -24,16 +24,32 @@ from utils.account_registry import (
 from utils.tee import Tee
 from utils.report import (
     format_kr_money,
+    format_aud_money,
+    format_usd_money,
     render_table_eaw,
 )
 from utils.data_loader import get_latest_trading_day
-from utils.data_loader import get_aud_to_krw_rate
+from utils.data_loader import get_aud_to_krw_rate, get_usd_to_krw_rate
 from utils.stock_list_io import get_etfs as get_etfs_from_files
 from utils.notification import build_summary_line_from_summary_data
 
 # 이 파일에서는 매매 전략에 사용되는 고유 파라미터를 정의합니다.
 # 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월 데이터로 테스트)
 TEST_MONTHS_RANGE = 12
+
+
+def _format_period_return_with_listing_date(s: Dict[str, Any], core_start_dt: pd.Timestamp) -> str:
+    """기간수익률을 상장일과 함께 포맷합니다."""
+    period_return_pct = s.get("period_return_pct", 0.0)
+    listing_date = s.get("listing_date")
+
+    if listing_date and core_start_dt:
+        # 상장일이 테스트 시작일 이후인 경우에만 상장일 표시
+        listing_dt = pd.to_datetime(listing_date)
+        if listing_dt > core_start_dt:
+            return f"{period_return_pct:+.2f}%({listing_date})"
+
+    return f"{period_return_pct:+.2f}%"
 
 
 def _print_backtest_summary(
@@ -44,6 +60,7 @@ def _print_backtest_summary(
     initial_capital_krw: float,
     portfolio_topn: int,
     ticker_summaries: List[Dict[str, Any]],
+    core_start_dt: pd.Timestamp,
 ):
     from logic import momentum as settings
 
@@ -56,11 +73,12 @@ def _print_backtest_summary(
     except (TypeError, ValueError):
         precision = 0
 
-    def _aud_money_formatter(amount):
-        return f"${amount:,.{precision}f}"
-
-    money_formatter = _aud_money_formatter if currency == "AUD" else format_kr_money
-
+    if currency == "AUD":
+        money_formatter = format_aud_money
+    elif currency == "USD":
+        money_formatter = format_usd_money
+    else:
+        money_formatter = format_kr_money
     benchmark_name = "BTC" if country == "coin" else "S&P 500"
 
     summary_lines = [
@@ -204,6 +222,7 @@ def _print_backtest_summary(
             "미실현손익",
             "거래횟수",
             "승률",
+            "기간수익률",
         ]
 
         sorted_summaries = sorted(
@@ -219,11 +238,12 @@ def _print_backtest_summary(
                 money_formatter(s["unrealized_profit"]),
                 f"{s['total_trades']}회",
                 f"{s['win_rate']:.1f}%",
+                _format_period_return_with_listing_date(s, core_start_dt),
             ]
             for s in sorted_summaries
         ]
 
-        aligns = ["right", "left", "right", "right", "right", "right", "right"]
+        aligns = ["right", "left", "right", "right", "right", "right", "right", "right"]
         table_lines = render_table_eaw(headers, rows, aligns)
         print("\n" + "\n".join(table_lines))
 
@@ -290,6 +310,16 @@ def main(
                 if log_file:
                     log_file.close()
                 return
+        elif currency == "USD":
+            usd_krw_rate = get_usd_to_krw_rate()
+            if usd_krw_rate and usd_krw_rate > 0:
+                initial_capital_krw /= usd_krw_rate
+            else:
+                if not quiet:
+                    print("오류: USD/KRW 환율을 가져올 수 없어 백테스트를 진행할 수 없습니다.")
+                if log_file:
+                    log_file.close()
+                return
 
         settings.MA_PERIOD = strategy_rules.ma_period
         portfolio_topn = strategy_rules.portfolio_topn
@@ -335,28 +365,26 @@ def main(
     except (TypeError, ValueError):
         precision = 0
 
-    def _aud_money_formatter(amount):
-        return f"${amount:,.{precision}f}"
-
-    def _aud_price_formatter(p):
-        return f"${p:,.{precision}f}"
-
-    def _kr_price_formatter(p):
-        return f"{int(round(p)):,}"
-
-    def _kr_ma_formatter(p):
-        return f"{int(round(p)):,}원"
+    from utils.report import (
+        format_aud_price,
+        format_usd_price,
+    )
 
     # 국가별로 다른 포맷터 사용
     if currency == "AUD":
-        money_formatter = _aud_money_formatter
-        price_formatter = _aud_price_formatter
-        # ma_formatter = _aud_price_formatter
+        money_formatter = format_aud_money
+        price_formatter = format_aud_price
+    elif currency == "USD":
+        money_formatter = format_usd_money
+        price_formatter = format_usd_price
     else:
         # 원화(KRW) 형식으로 가격을 포맷합니다.
         money_formatter = format_kr_money
+
+        def _kr_price_formatter(p):
+            return f"{int(round(p)):,}"
+
         price_formatter = _kr_price_formatter
-        # ma_formatter = _kr_ma_formatter
 
     # 기간 설정 로직 (필수 설정)
     try:
@@ -506,6 +534,11 @@ def main(
             if log_file:
                 log_file.close()
             return None
+
+        # 원본 시계열 데이터를 보관합니다 (기간 수익률 계산용)
+        original_time_series_by_ticker = {
+            tkr: ts.copy() for tkr, ts in time_series_by_ticker.items()
+        }
 
         # 모든 티커에 걸쳐 공통된 날짜로 정렬 (교집합)
         common_index = None
@@ -991,7 +1024,8 @@ def main(
 
             # 종목별 성과 계산
             ticker_summaries = []
-            for tkr, ts in time_series_by_ticker.items():
+            # 원본 시계열 데이터를 사용하여 전체 기간에 대한 성과를 계산합니다.
+            for tkr, ts_original in original_time_series_by_ticker.items():
                 if tkr == "CASH":
                     continue
 
@@ -1003,13 +1037,13 @@ def main(
                     "SELL_REPLACE",
                     "SELL_REGIME_FILTER",
                 ]
-                trades = ts[ts["decision"].isin(sell_decisions)]
+                trades = ts_original[ts_original["decision"].isin(sell_decisions)]
                 realized_profit = trades["trade_profit"].sum()
                 total_trades = len(trades)
                 winning_trades = len(trades[trades["trade_profit"] > 0])
 
                 # 2. 미실현 손익 계산 (백테스트 종료 시점 기준)
-                last_row = ts.iloc[-1]
+                last_row = ts_original.iloc[-1]
                 final_shares = float(last_row.get("shares", 0.0))
                 unrealized_profit = 0.0
                 if final_shares > 0:
@@ -1020,6 +1054,27 @@ def main(
 
                 # 3. 총 기여도 (실현 + 미실현)
                 total_contribution = realized_profit + unrealized_profit
+
+                # 4. 기간 수익률 계산 (테스트 시작일과 상장일 중 더 늦은 날짜부터 계산)
+                period_return_pct = 0.0
+                listing_date = None
+                if not ts_original.empty and "price" in ts_original.columns:
+                    # 실제로 거래가 발생한 기간만을 고려하여 계산
+                    # price가 0보다 큰 값들만 필터링
+                    valid_price_mask = ts_original["price"] > 0
+                    valid_data = ts_original[valid_price_mask]
+
+                    if not valid_data.empty:
+                        first_valid_price = valid_data["price"].iloc[0]
+                        last_valid_price = valid_data["price"].iloc[-1]
+                        listing_date = valid_data.index[0].strftime("%Y-%m-%d")
+
+                        if (
+                            pd.notna(first_valid_price)
+                            and pd.notna(last_valid_price)
+                            and first_valid_price > 0
+                        ):
+                            period_return_pct = ((last_valid_price / first_valid_price) - 1) * 100.0
 
                 # 거래가 있거나, 최종 보유 수량이 있는 종목만 요약에 포함
                 if total_trades > 0 or final_shares > 0:
@@ -1033,6 +1088,8 @@ def main(
                             "realized_profit": realized_profit,
                             "unrealized_profit": unrealized_profit,
                             "total_contribution": total_contribution,
+                            "period_return_pct": period_return_pct,
+                            "listing_date": listing_date,
                         }
                     )
 
@@ -1045,6 +1102,7 @@ def main(
                     initial_capital_krw,
                     portfolio_topn,
                     ticker_summaries,
+                    core_start_dt,
                 )
 
     finally:

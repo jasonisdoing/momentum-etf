@@ -43,10 +43,6 @@
             {
                 "ticker": "ASX:HACK",
                 "name": "BetaShares Global Cybersecurity ETF"
-            },
-            {
-                "ticker": "ASX:TECH",
-                "name": "Global X Morningstar Global Technology ETF"
             }
         ]
     },
@@ -148,10 +144,6 @@
             {
                 "ticker": "ASX:IVV",
                 "name": "iShares S&P 500 ETF"
-            },
-            {
-                "ticker": "ASX:GGUS",
-                "name": "Betashares Geared US Equities Currency Hedged Complex ETF"
             }
         ]
     },
@@ -187,15 +179,6 @@
             {
                 "ticker": "ASX:ACDC",
                 "name": "Global X Battery Tech & Lithium ETF"
-            }
-        ]
-    },
-    {
-        "category": "호주배당",
-        "tickers": [
-            {
-                "ticker": "ASX:UMAX",
-                "name": "Betashares S&P 500 Yield Maximiser Complex ETF"
             }
         ]
     },

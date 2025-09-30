@@ -26,6 +26,11 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated", categor
 import time
 from datetime import datetime
 
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None
+
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -52,7 +57,15 @@ def setup_logging():
     os.makedirs(log_dir, exist_ok=True)
 
     # YYYY-MM-DD.log 파일명 설정
-    log_filename = os.path.join(log_dir, f"{datetime.now().strftime('%Y-%m-%d')}.log")
+    if ZoneInfo is not None:
+        try:
+            now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+        except Exception:
+            now_kst = datetime.now()
+    else:
+        now_kst = datetime.now()
+
+    log_filename = os.path.join(log_dir, f"{now_kst.strftime('%Y-%m-%d')}.log")
 
     # 로거 설정: 파일과 콘솔에 모두 출력
     logging.basicConfig(
@@ -119,7 +132,7 @@ def run_signal_generation(
     start_time = time.time()
     report_date = None
     try:
-        from signals import main as run_signal_main
+        from logic.signals.pipeline import main as run_signal_main
         from utils.notification import (
             send_summary_notification,
             send_detailed_signal_notification,
@@ -159,7 +172,24 @@ def run_signal_generation(
                 header_line=signal_result.header_line,
                 force_send=force_notify,
             )
-            time.sleep(2)
+            time.sleep(1)
+
+            # 파일 저장 경로 구성 (results/ 하위에 저장)
+            try:
+                date_for_file = (
+                    report_date.strftime("%Y-%m-%d")
+                    if report_date
+                    else datetime.now().strftime("%Y-%m-%d")
+                )
+                logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+                os.makedirs(logs_dir, exist_ok=True)
+                save_path = os.path.join(
+                    logs_dir,
+                    f"signal_{account}_{date_for_file}.log",
+                )
+            except Exception:
+                save_path = None
+
             send_detailed_signal_notification(
                 snapshot_country,
                 account,
@@ -169,6 +199,7 @@ def run_signal_generation(
                 decision_config=signal_result.decision_config,
                 extra_lines=signal_result.detail_extra_lines,
                 force_send=force_notify,
+                save_to_path=save_path,
             )
             date_str = report_date.strftime("%Y-%m-%d")
             prefix = f"{snapshot_country}/{account}" if account else snapshot_country
