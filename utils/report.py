@@ -48,6 +48,20 @@ def format_aud_price(value: float) -> str:
     return f"{value:,.4f}"
 
 
+def format_usd_money(value: float) -> str:
+    """금액을 미국 달러($) 형식의 문자열로 포맷합니다."""
+    if value is None:
+        return "-"
+    return f"${value:,.2f}"
+
+
+def format_usd_price(value: float) -> str:
+    """미국 주식 가격을 소수점 2자리까지 포맷합니다."""
+    if value is None:
+        return "-"
+    return f"{value:,.2f}"
+
+
 def render_table_eaw(headers: List[str], rows: List[List[str]], aligns: List[str]) -> List[str]:
     """
     동아시아 문자 너비를 고려하여 리스트 데이터를 ASCII 테이블 문자열로 렌더링합니다.

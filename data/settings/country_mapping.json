@@ -4,6 +4,7 @@
         "account": "b1",
         "order": 9,
         "display_name": "빗썸",
+        "slack_channel": "C09FXGJPC2U",
         "benchmarks_tickers": [
             {
                 "ticker": "379800",
@@ -22,14 +23,9 @@
         "is_active": true,
         "strategy": {
             "MA_PERIOD": 2,
-            "PORTFOLIO_TOPN": 2,
+            "PORTFOLIO_TOPN": 3,
             "REPLACE_SCORE_THRESHOLD": 0.5,
             "COIN_MIN_HOLDING_COST_KRW": 10000
-        },
-        "precision": {
-            "currency": "KRW",
-            "amt_precision": 0,
-            "qty_precision": 8
         },
         "account_settings": {
             "initial_capital_krw": 30000000,
@@ -42,6 +38,7 @@
         "account": "a1",
         "order": 10,
         "display_name": "호주연금",
+        "slack_channel": "C09FAU7SKA8",
         "benchmarks_tickers": [
             {
                 "ticker": "IVV.AX",
@@ -51,25 +48,21 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 8,
+            "MA_PERIOD": 30,
             "PORTFOLIO_TOPN": 7,
             "REPLACE_SCORE_THRESHOLD": 0.5
-        },
-        "precision": {
-            "currency": "AUD",
-            "amt_precision": 4,
-            "qty_precision": 0
         },
         "account_settings": {
             "initial_capital_krw": 71000000,
             "initial_date": "2025-09-26",
-            "cooldown_days": 2
+            "cooldown_days": 1
         }
     },
     {
         "country": "kor",
         "account": "m1",
         "display_name": "매리츠1",
+        "slack_channel": "C09FAU2NHM2",
         "order": 1,
         "benchmarks_tickers": [
             {
@@ -84,25 +77,21 @@
         "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
-            "PORTFOLIO_TOPN": 8,
+            "MA_PERIOD": 24,
+            "PORTFOLIO_TOPN": 10,
             "REPLACE_SCORE_THRESHOLD": 0.5
-        },
-        "precision": {
-            "currency": "KRW",
-            "amt_precision": 0,
-            "qty_precision": 0
         },
         "account_settings": {
             "initial_capital_krw": 180000000,
             "initial_date": "2025-09-26",
-            "cooldown_days": 2
+            "cooldown_days": 1
         }
     },
     {
         "country": "kor",
         "account": "m2",
         "display_name": "매리츠2",
+        "slack_channel": "C09FAU2NHM2",
         "order": 2,
         "benchmarks_tickers": [
             {
@@ -114,28 +103,24 @@
                 "name": "TIMEFOLIO 미국나스닥100액티브"
             }
         ],
-        "need_signal": false,
+        "need_signal": true,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 8,
             "REPLACE_SCORE_THRESHOLD": 0.5
-        },
-        "precision": {
-            "currency": "KRW",
-            "amt_precision": 0,
-            "qty_precision": 0
         },
         "account_settings": {
             "initial_capital_krw": 84000000,
             "initial_date": "2025-09-26",
-            "cooldown_days": 2
+            "cooldown_days": 1
         }
     },
     {
         "country": "kor",
         "account": "k1",
         "display_name": "KB ISA",
+        "slack_channel": "C09FAU2NHM2",
         "order": 4,
         "benchmarks_tickers": [
             {
@@ -150,25 +135,21 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 2,
             "REPLACE_SCORE_THRESHOLD": 0.5
-        },
-        "precision": {
-            "currency": "KRW",
-            "amt_precision": 0,
-            "qty_precision": 0
         },
         "account_settings": {
             "initial_capital_krw": 20000000,
             "initial_date": "2025-09-26",
-            "cooldown_days": 2
+            "cooldown_days": 1
         }
     },
     {
         "country": "kor",
         "account": "k2",
         "display_name": "KB 연금저축",
+        "slack_channel": "C09FAU2NHM2",
         "order": 5,
         "benchmarks_tickers": [
             {
@@ -183,25 +164,21 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 2,
             "REPLACE_SCORE_THRESHOLD": 0.5
-        },
-        "precision": {
-            "currency": "KRW",
-            "amt_precision": 0,
-            "qty_precision": 0
         },
         "account_settings": {
             "initial_capital_krw": 18000000,
             "initial_date": "2025-09-26",
-            "cooldown_days": 2
+            "cooldown_days": 1
         }
     },
     {
         "country": "kor",
         "account": "k3",
         "display_name": "KB ISA(2)",
+        "slack_channel": "C09FAU2NHM2",
         "order": 5,
         "benchmarks_tickers": [
             {
@@ -216,25 +193,21 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 2,
             "REPLACE_SCORE_THRESHOLD": 0.5
-        },
-        "precision": {
-            "currency": "KRW",
-            "amt_precision": 0,
-            "qty_precision": 0
         },
         "account_settings": {
             "initial_capital_krw": 20000000,
             "initial_date": "2025-09-26",
-            "cooldown_days": 2
+            "cooldown_days": 1
         }
     },
     {
         "country": "kor",
         "account": "k4",
         "display_name": "KB 연금저축(2)",
+        "slack_channel": "C09FAU2NHM2",
         "order": 5,
         "benchmarks_tickers": [
             {
@@ -249,19 +222,39 @@
         "need_signal": false,
         "is_active": true,
         "strategy": {
-            "MA_PERIOD": 11,
+            "MA_PERIOD": 24,
             "PORTFOLIO_TOPN": 2,
             "REPLACE_SCORE_THRESHOLD": 0.5
-        },
-        "precision": {
-            "currency": "KRW",
-            "amt_precision": 0,
-            "qty_precision": 0
         },
         "account_settings": {
             "initial_capital_krw": 24000000,
             "initial_date": "2025-09-26",
-            "cooldown_days": 2
+            "cooldown_days": 1
+        }
+    },
+    {
+        "country": "us",
+        "account": "u1",
+        "order": 20,
+        "display_name": "미국직투",
+        "slack_channel": "C09FVRDJPLL",
+        "benchmarks_tickers": [
+            {
+                "ticker": "SPY",
+                "name": "SPDR S&P 500 ETF Trust"
+            }
+        ],
+        "need_signal": false,
+        "is_active": false,
+        "strategy": {
+            "MA_PERIOD": 15,
+            "PORTFOLIO_TOPN": 8,
+            "REPLACE_SCORE_THRESHOLD": 0.5
+        },
+        "account_settings": {
+            "initial_capital_krw": 10000000,
+            "initial_date": "2025-09-28",
+            "cooldown_days": 1
         }
     }
 ]

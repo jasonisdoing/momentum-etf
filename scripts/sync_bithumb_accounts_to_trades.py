@@ -142,11 +142,11 @@ def _infer_buy_price(
     p = (avg_new*q_new - avg_old*q_old) / delta
     """
     try:
-        if delta <= 0:
+        if abs(delta) < 1e-9:  # delta가 0에 가까우면 계산 불가
             return None
         num = (avg_new * q_new) - (avg_old * q_old)
         p = num / delta
-        if math.isfinite(p) and p > 0:
+        if math.isfinite(p) and p > 0:  # BUY 가격은 양수여야 함
             return float(p)
     except Exception:
         pass
@@ -271,13 +271,16 @@ def main():
         info = coins_now.get(tkr, {})
         avg_now = float(info.get("avg", 0.0))
         if delta > 0:
-            # _infer_buy_price 로직에 오류가 있어, Bithumb API에서 제공하는 평균 매수 단가를 우선 사용합니다.
-            px = avg_now or _price_close_krw(tkr)
+            # BUY: Bithumb API에서 제공하는 평균 매수 단가를 우선 사용합니다.
+            # 이 스크립트의 목적은 API 잔고와 DB 거래 기록을 동기화하는 것이므로,
+            # 거래 가격을 추정하기보다는 API가 제공하는 평단을 사용하는 것이 더 정확합니다.
+            px = avg_now if avg_now > 0 else _price_close_krw(tkr)
             if px <= 0:
-                px = avg_now if avg_now > 0 else 1.0
+                px = 1.0  # 폴백
             _save_trade(tkr, "BUY", delta, px, names.get(tkr, ""), run_ts)
             trades_changed = True
         else:
+            # SELL: 판매 가격은 현재가로 기록합니다.
             px = _price_close_krw(tkr)
             if px <= 0:
                 px = avg_now if avg_now > 0 else 1.0

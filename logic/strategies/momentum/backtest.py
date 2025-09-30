@@ -13,8 +13,11 @@ import pandas as pd
 
 from utils.data_loader import fetch_ohlcv
 from utils.indicators import calculate_moving_average_signals, calculate_ma_score
+from utils.report import format_kr_money, format_aud_money
+from .labeler import compute_net_trade_note
 
 from .shared import select_candidates_by_category
+from .constants import DECISION_NOTES, DECISION_CONFIG
 
 
 def _process_ticker_data(
@@ -203,6 +206,10 @@ def run_portfolio_backtest(
 
     # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     for i, dt in enumerate(union_index):
+        # 당일 시작 시점 보유 수량 스냅샷(순매수/순매도 판단용)
+        prev_holdings_map = {t: float(state["shares"]) for t, state in position_state.items()}
+        buy_trades_today_map: Dict[str, List[Dict[str, float]]] = {}
+        sell_trades_today_map: Dict[str, List[Dict[str, float]]] = {}
         tickers_available_today = [
             ticker
             for ticker, ticker_metrics in metrics_by_ticker.items()
@@ -322,10 +329,19 @@ def run_portfolio_backtest(
                             if held_state["avg_cost"] > 0
                             else 0.0
                         )
+                        # 순매도 집계
+                        sell_trades_today_map.setdefault(held_ticker, []).append(
+                            {"shares": float(qty), "price": float(price)}
+                        )
                         trade_profit = (
                             (price - held_state["avg_cost"]) * qty
                             if held_state["avg_cost"] > 0
                             else 0.0
+                        )
+
+                        # 순매도 집계
+                        sell_trades_today_map.setdefault(held_ticker, []).append(
+                            {"shares": float(qty), "price": float(price)}
                         )
 
                         cash += trade_amount
@@ -342,7 +358,7 @@ def run_portfolio_backtest(
                                 "shares": 0,
                                 "pv": 0,
                                 "avg_cost": 0,
-                                "note": "시장 위험 회피",
+                                "note": DECISION_NOTES["RISK_OFF"],
                             }
                         )
         # (b) 개별 종목 매도
@@ -378,6 +394,11 @@ def run_portfolio_backtest(
                             (price - ticker_state["avg_cost"]) * qty
                             if ticker_state["avg_cost"] > 0
                             else 0.0
+                        )
+
+                        # 순매도 집계
+                        sell_trades_today_map.setdefault(ticker, []).append(
+                            {"shares": float(qty), "price": float(price)}
                         )
 
                         cash += trade_amount
@@ -457,7 +478,7 @@ def run_portfolio_backtest(
                         and records[-1]["date"] == dt
                         and records[-1].get("decision") == "WAIT"
                     ):
-                        records[-1]["note"] = "카테고리 중복"
+                        records[-1]["note"] = DECISION_NOTES["CATEGORY_DUP"]
 
                 for cand in selected_candidates:
                     if cash <= 0:
@@ -515,6 +536,14 @@ def run_portfolio_backtest(
                                 }
                             )
                         purchased_today.add(ticker_to_buy)
+                        # 순매수 집계
+                        buy_trades_today_map.setdefault(ticker_to_buy, []).append(
+                            {"shares": float(req_qty), "price": float(price)}
+                        )
+                        # 순매수 집계
+                        buy_trades_today_map.setdefault(ticker_to_buy, []).append(
+                            {"shares": float(req_qty), "price": float(price)}
+                        )
 
             elif slots_to_fill <= 0 and buy_ranked_candidates:
                 helper_candidates = [
@@ -595,7 +624,7 @@ def run_portfolio_backtest(
                                 stock_name = stock_info.get("name", replacement_ticker)
                                 daily_records_by_ticker[replacement_ticker][-1][
                                     "note"
-                                ] = f"카테고리 중복 - {stock_name}({replacement_ticker})"
+                                ] = f"{DECISION_NOTES['CATEGORY_DUP']} - {stock_name}({replacement_ticker})"
                             continue  # 다음 buy_ranked_candidate로 넘어감
                     elif weakest_held_stock:
                         # 같은 카테고리 종목이 없는 경우: 가장 약한 종목과 임계값 포함 비교
@@ -705,7 +734,10 @@ def run_portfolio_backtest(
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
                                             "avg_cost": buy_price,
-                                            "note": replacement_note,
+                                            # 시그널/리포트와 동일 포맷: 디스플레이명 + 금액 + 대체 정보
+                                            "note": f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} "
+                                            f"{format_aud_money(buy_amount) if country == 'aus' else format_kr_money(buy_amount)} "
+                                            f"({ticker_to_sell} 대체)",
                                         }
                                     )
                                 else:
@@ -776,8 +808,11 @@ def run_portfolio_backtest(
                         daily_records_by_ticker[candidate_ticker]
                         and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt
                     ):
-                        note = "포트폴리오 가득 참" if slots_to_fill <= 0 else "현금 부족"
-                        daily_records_by_ticker[candidate_ticker][-1]["note"] = note
+                        daily_records_by_ticker[candidate_ticker][-1]["note"] = (
+                            DECISION_NOTES["PORTFOLIO_FULL"]
+                            if slots_to_fill <= 0
+                            else DECISION_NOTES["INSUFFICIENT_CASH"]
+                        )
         else:  # 리스크 오프 상태
             # 매수 후보가 있더라도, 시장이 위험 회피 상태이므로 매수하지 않음
             # 후보들에게 사유 기록
@@ -799,7 +834,35 @@ def run_portfolio_backtest(
                     daily_records_by_ticker[candidate_ticker]
                     and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt
                 ):
-                    daily_records_by_ticker[candidate_ticker][-1]["note"] = "시장 위험 회피"
+                    daily_records_by_ticker[candidate_ticker][-1]["note"] = DECISION_NOTES[
+                        "RISK_OFF"
+                    ]
+
+        # --- 당일 최종 라벨 오버라이드 (공용 라벨러) ---
+        for tkr, rows in daily_records_by_ticker.items():
+            if not rows:
+                continue
+            last_row = rows[-1]
+            overrides = compute_net_trade_note(
+                country=country,
+                tkr=tkr,
+                data_by_tkr={
+                    tkr: {
+                        "shares": last_row.get("shares", 0.0),
+                        "price": last_row.get("price", 0.0),
+                    }
+                },
+                buy_trades_today_map=buy_trades_today_map,
+                sell_trades_today_map=sell_trades_today_map,
+                prev_holdings_map=prev_holdings_map,
+                COIN_ZERO_THRESHOLD=0.00000001 if country == "coin" else 0.0,
+                current_decision=str(last_row.get("decision")),
+            )
+            if overrides:
+                if overrides.get("state") == "SOLD":
+                    last_row["decision"] = "SOLD"
+                if overrides.get("note") is not None:
+                    last_row["note"] = overrides["note"]
 
         out_cash.append(
             {

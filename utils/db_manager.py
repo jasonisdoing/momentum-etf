@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -670,6 +671,55 @@ def update_trade_by_id(trade_id: str, update_data: Dict) -> bool:
     except Exception as e:
         print(f"오류: 거래 내역 업데이트 중 오류 발생: {e}")
         return False
+
+
+def infer_trade_from_state_change(
+    q_old: float,
+    avg_old: float,
+    q_new: float,
+    avg_new: float,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """
+    보유 수량 및 평균 단가 변경 전/후 상태를 기반으로 발생한 거래(BUY 또는 SELL)를 추론합니다.
+
+    Args:
+        q_old: 기존 보유 수량
+        avg_old: 기존 평균 단가
+        q_new: 새로운 보유 수량
+        avg_new: 새로운 평균 단가
+
+    Returns:
+        Tuple: (추론된 거래 정보 딕셔너리, 메시지)
+        - 성공 시: ({"action": "BUY/SELL", ...}, None)
+        - 수량 변경 없을 시: (None, "변경 사항이 없습니다.")
+        - 오류 발생 시: (None, "오류 메시지")
+    """
+    delta_q = q_new - q_old
+
+    if abs(delta_q) < 1e-9:  # 수량 변화가 거의 없으면 거래 없음
+        return None, "변경 사항이 없습니다."
+
+    try:
+        if delta_q > 0:  # 수량 증가 -> BUY
+            # 매수 가격 추론: p = (new_total_cost - old_total_cost) / delta_q
+            numerator = (q_new * avg_new) - (q_old * avg_old)
+            price = numerator / delta_q
+            if math.isfinite(price) and price >= 0:  # 0원 매수도 허용 (증여 등)
+                return {"action": "BUY", "shares": delta_q, "price": price}, None
+
+        elif delta_q < 0:  # 수량 감소 -> SELL
+            # 매도 가격 추론: p = (old_total_cost - new_total_cost) / abs(delta_q)
+            # 매도 후 남은 주식의 평균 단가는 변하지 않아야 하므로, avg_new는 avg_old와 같아야 합니다.
+            # 하지만 사용자가 다른 값을 입력할 수 있으므로, 이를 기반으로 매도 가격을 역산합니다.
+            numerator = (q_old * avg_old) - (q_new * avg_new)
+            price = numerator / abs(delta_q)
+            if math.isfinite(price) and price >= 0:
+                return {"action": "SELL", "shares": abs(delta_q), "price": price}, None
+
+    except (ValueError, TypeError, ZeroDivisionError) as e:
+        return None, f"거래 계산 중 오류가 발생했습니다: {e}"
+
+    return None, "알 수 없는 오류로 거래를 추론할 수 없습니다."
 
 
 def save_daily_equity(

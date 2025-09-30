@@ -9,6 +9,7 @@ import streamlit as st
 
 # pkg_resources 워닝 억제
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+from logic.signals.formatting import _load_country_precision
 
 try:
     import pytz
@@ -28,13 +29,14 @@ from utils.account_registry import (
     load_accounts,
     get_account_info,
 )
-from utils.data_loader import fetch_yfinance_name, resolve_security_name
+from utils.data_loader import resolve_security_name
 from utils.db_manager import (
     delete_trade_by_id,
     get_all_daily_equities,
     get_all_trades,
     get_available_snapshot_dates,
     get_portfolio_snapshot,
+    infer_trade_from_state_change,
     save_daily_equity,
     save_trade,
     update_trade_by_id,
@@ -255,8 +257,12 @@ def render_assets_dashboard(
         st.stop()
 
     currency = account_info.get("currency", "KRW")
-    amt_precision = account_info.get("amt_precision", 0)
-    qty_precision = account_info.get("qty_precision", 0)
+    # precision.json의 국가별 설정 로드
+    _cprec = _load_country_precision(country_code) or {}
+    # 주식 관련 정밀도는 precision.json을 우선 적용 (수량/단가/금액)
+    qty_precision = int(_cprec.get("stock_qty_precision", account_info.get("qty_precision", 0)))
+    price_precision = int(_cprec.get("stock_price_precision", 0))
+    amt_precision = int(_cprec.get("stock_amt_precision", account_info.get("amt_precision", 0)))
     currency_str = f" ({currency})"
 
     _display_feedback_messages(account_prefix)
@@ -466,11 +472,11 @@ def render_assets_dashboard(
                         format=(
                             "%.8f"
                             if country_code == "coin"
-                            else ("%.4f" if country_code == "aus" else "%.0f")
+                            else (f"%.{qty_precision}f" if qty_precision > 0 else "%d")
                         ),
                     ),
                     "price": st.column_config.NumberColumn(
-                        "가격", format=f"%.{amt_precision}f" if amt_precision > 0 else "%d"
+                        "가격", format=(f"%.{price_precision}f" if price_precision > 0 else "%d")
                     ),
                     "note": st.column_config.TextColumn("비고", width="large"),
                 },
@@ -514,91 +520,122 @@ def render_assets_dashboard(
 
         if country_code != "coin":
             st.markdown("---")
-            with st.expander("신규 매수 (BUY)"):
-                with st.form(f"buy_form_{account_prefix}", clear_on_submit=True):
-                    buy_ticker = st.text_input("종목코드 (티커)")
-                    shares_format_str = (
-                        "%.8f"
-                        if country_code == "coin"
-                        else ("%.4f" if country_code == "aus" else "%d")
-                    )
+            with st.expander("최종 잔액 입력"):
+                with st.form(f"balance_input_form_{account_prefix}", clear_on_submit=True):
+                    ticker_input = st.text_input("종목코드 (티커)")
+                    # 수량/단가 입력 포맷을 precision.json에 맞게 설정
+                    shares_format_str = f"%.{qty_precision}f" if qty_precision > 0 else "%d"
 
                     # Determine min_value and step for shares based on country_code
-                    if country_code == "kor":
-                        shares_min_value = 1
+                    if qty_precision == 0:
+                        shares_min_value = 0
                         shares_step = 1
-                    elif country_code == "aus":
-                        shares_min_value = 0.0001
-                        shares_step = 0.0001
-                    else:  # coin
-                        shares_min_value = 0.00000001
-                        shares_step = 0.00000001
+                    else:
+                        shares_min_value = 0.0
+                        # 정밀도에 따른 step 계산 (예: p=4 -> 0.0001)
+                        shares_step = float(f"1e-{qty_precision}")
 
-                    buy_shares = st.number_input(
-                        "수량",
+                    final_shares = st.number_input(
+                        "최종 보유 수량",
                         min_value=shares_min_value,
                         step=shares_step,
                         format=shares_format_str,
                     )
 
-                    # Determine min_value and step for price based on precision
-                    price_min_value = 0.0
-                    price_step = 1.0  # Default step for floats
-
-                    if amt_precision == 0:
-                        price_min_value = 0  # or 1 if price cannot be 0
+                    # 단가는 stock_price_precision을 사용
+                    if price_precision == 0:
+                        price_min_value = 0
                         price_step = 1
+                    else:
+                        price_min_value = 0.0
+                        price_step = float(f"1e-{price_precision}")
 
-                    buy_price = st.number_input(
-                        f"매수 단가{currency_str}",
+                    final_avg_price = st.number_input(
+                        f"최종 평균 단가{currency_str}",
                         min_value=price_min_value,
                         step=price_step,
-                        format=f"%.{amt_precision}f" if amt_precision > 0 else "%d",
+                        format=(f"%.{price_precision}f" if price_precision > 0 else "%d"),
                     )
-                    buy_submitted = st.form_submit_button("매수 거래 저장")
+                    balance_submitted = st.form_submit_button("거래 생성/저장")
 
-                    if buy_submitted:
+                    if balance_submitted:
                         message_key = f"buy_message_{account_prefix}"
-                        trade_time = datetime.now()
-                        if pytz:
-                            try:
-                                korea_tz = pytz.timezone("Asia/Seoul")
-                                trade_time = datetime.now(korea_tz).replace(tzinfo=None)
-                            except pytz.UnknownTimeZoneError:
-                                pass
+                        ticker = ticker_input.strip().upper()
 
-                        ticker = buy_ticker.strip()
-                        shares = buy_shares
-                        price = buy_price
-
-                        if not ticker or not shares > 0 or not price > 0:
+                        if not ticker:
                             st.session_state[message_key] = (
                                 "error",
-                                "종목코드, 수량, 가격을 모두 올바르게 입력해주세요.",
+                                "종목코드를 입력해주세요.",
                             )
-                        else:
-                            etf_name = ""
-                            if country_code == "kor" and _stock:
-                                from utils.data_loader import fetch_pykrx_name
+                            st.rerun()
 
-                                etf_name = fetch_pykrx_name(ticker)
-                            elif country_code == "aus":
-                                etf_name = fetch_yfinance_name(ticker)
+                        # 1. 기존 보유 현황 조회
+                        q_old, avg_old = 0.0, 0.0
+                        snapshot = get_portfolio_snapshot(country_code, account=account_code)
+                        if snapshot and snapshot.get("holdings"):
+                            for h in snapshot["holdings"]:
+                                if h.get("ticker") == ticker:
+                                    q_old = float(h.get("shares", 0.0))
+                                    avg_old = float(h.get("avg_cost", 0.0))
+                                    break
 
+                        # 2. 거래 추론
+                        q_new, avg_new = float(final_shares), float(final_avg_price)
+                        inferred_trade, message = infer_trade_from_state_change(
+                            q_old, avg_old, q_new, avg_new
+                        )
+
+                        if message:
+                            st.session_state[message_key] = ("warning", message)
+                            st.rerun()
+
+                        trade_data = None
+                        if inferred_trade:
+                            # 추론된 거래가 있는 경우
+                            trade_data = inferred_trade
+                        elif q_old == 0 and q_new > 0:
+                            # 신규 매수
                             trade_data = {
+                                "action": "BUY",
+                                "shares": q_new,
+                                "price": avg_new,
+                            }
+                        else:
+                            st.session_state[message_key] = (
+                                "error",
+                                "거래를 추론할 수 없습니다. 입력값을 확인해주세요.",
+                            )
+                            st.rerun()
+
+                        if trade_data:
+                            trade_time = datetime.now()
+                            if pytz:
+                                try:
+                                    korea_tz = pytz.timezone("Asia/Seoul")
+                                    trade_time = datetime.now(korea_tz).replace(tzinfo=None)
+                                except pytz.UnknownTimeZoneError:
+                                    pass
+
+                            etf_name = resolve_security_name(country_code, ticker)
+
+                            db_payload = {
                                 "country": country_code,
                                 "account": account_code,
                                 "date": trade_time,
-                                "ticker": ticker.upper(),
+                                "ticker": ticker,
                                 "name": etf_name,
-                                "action": "BUY",
-                                "shares": float(shares),
-                                "price": float(price),
-                                "note": "",
+                                "action": trade_data["action"],
+                                "shares": float(trade_data["shares"]),
+                                "price": float(trade_data["price"]),
+                                "note": "사용자 입력",
                             }
 
-                            if save_trade(trade_data):
-                                st.session_state[message_key] = ("success", "거래가 성공적으로 저장되었습니다.")
+                            if save_trade(db_payload):
+                                action_str = "매수" if trade_data["action"] == "BUY" else "매도"
+                                st.session_state[message_key] = (
+                                    "success",
+                                    f"'{etf_name}' {action_str} 거래가 성공적으로 저장되었습니다.",
+                                )
                             else:
                                 st.session_state[message_key] = (
                                     "error",
@@ -644,7 +681,13 @@ def render_assets_dashboard(
                             disabled=["종목명", "티커", "보유수량"],
                             column_config={
                                 "선택": st.column_config.CheckboxColumn("선택", required=True),
-                                "보유수량": st.column_config.NumberColumn(format="%.8f"),
+                                "보유수량": st.column_config.NumberColumn(
+                                    format=(
+                                        "%.8f"
+                                        if country_code == "coin"
+                                        else (f"%.{qty_precision}f" if qty_precision > 0 else "%d")
+                                    )
+                                ),
                             },
                         )
                         sell_submitted = st.form_submit_button("선택 종목 매도")

@@ -1,0 +1,71 @@
+[
+    {
+        "category": "TBD",
+        "tickers": [
+            {
+                "ticker": "KSTR",
+                "name": "KraneShares SSE STAR Market 50 Index ETF"
+            },
+            {
+                "ticker": "VNM",
+                "name": "VanEck Vietnam ETF"
+            },
+            {
+                "ticker": "ARKQ",
+                "name": "ARK Autonomous Technology & Robotics ETF"
+            },
+            {
+                "ticker": "ARKK",
+                "name": "ARK Innovation ETF"
+            },
+            {
+                "ticker": "XEM",
+                "name": "SPDR S&P Metals & Mining ETF"
+            },
+            {
+                "ticker": "URA",
+                "name": "Global X Uranium ETF"
+            },
+            {
+                "ticker": "SHLD",
+                "name": "Global X Defense ETF"
+            },
+            {
+                "ticker": "SIL",
+                "name": "Global X Silver Miners ETF"
+            },
+            {
+                "ticker": "LIT",
+                "name": "Global X Lithium & Battery Tech ETF"
+            },
+            {
+                "ticker": "KWEB",
+                "name": "KraneShares CSI China Internet ETF"
+            },
+            {
+                "ticker": "SPMO",
+                "name": "Invesco S&P 500 Momentum ETF"
+            },
+            {
+                "ticker": "BLOK",
+                "name": "Amplify Transformational Data Sharing ETF"
+            },
+            {
+                "ticker": "GDX",
+                "name": "VanEck Gold Miners ETF"
+            },
+            {
+                "ticker": "REMX",
+                "name": "VanEck Rare Earth/Strategic Metals ETF"
+            },
+            {
+                "ticker": "IAI",
+                "name": "iShares US Broker-Dealers & Securities Exch ETF"
+            },
+            {
+                "ticker": "SMH",
+                "name": "VanEck Semiconductor ETF"
+            }
+        ]
+    }
+]

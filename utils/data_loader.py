@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from contextlib import contextmanager
 
@@ -175,6 +175,26 @@ def get_aud_to_krw_rate() -> Optional[float]:
     return None
 
 
+@functools.lru_cache(maxsize=1)
+def get_usd_to_krw_rate() -> Optional[float]:
+    """yfinance를 사용하여 USD/KRW 환율을 조회합니다."""
+    if not yf:
+        return None
+    try:
+        ticker = yf.Ticker("USDKRW=X")
+        # 가장 최근 가격을 가져오기 위해 2일간의 1분 단위 데이터 시도
+        data = ticker.history(period="2d", interval="1m")
+        if not data.empty:
+            return data["Close"].iloc[-1]
+        # 1m 데이터가 없으면 일 단위 데이터로 폴백
+        data = ticker.history(period="2d")
+        if not data.empty:
+            return data["Close"].iloc[-1]
+    except Exception as e:
+        print(f"USD/KRW 환율 정보를 가져오는 데 실패했습니다: {e}")
+    return None
+
+
 @contextmanager
 def _silence_yfinance_logs():
     import logging
@@ -222,7 +242,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
     def _pmc(country_code: str) -> List[pd.Timestamp]:
         import pandas_market_calendars as mcal  # type: ignore
 
-        cal_code = {"kor": "XKRX", "aus": "ASX"}.get(country_code)
+        cal_code = {"kor": "XKRX", "aus": "ASX", "us": "NYSE"}.get(country_code)
         if not cal_code:
             return []
         try:
@@ -273,6 +293,8 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
         # 암호화폐는 24/7 거래되므로, 단순히 날짜 범위 내의 모든 날짜를 반환합니다.
         # 실제 거래가 없는 날(예: 거래소 점검)은 고려하지 않습니다.
         trading_days_ts = pd.date_range(start=start_date, end=end_date, freq="D").tolist()
+    elif country == "us":
+        trading_days_ts = _pmc("us")
     else:
         print(f"오류: 지원하지 않는 국가 코드입니다: {country}")
         return []
@@ -630,6 +652,35 @@ def _fetch_ohlcv_core(
             print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
             return None
 
+    if country == "us":
+        if yf is None:
+            print("오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
+            return None
+
+        try:
+            df = yf.download(
+                ticker,
+                start=start_dt,
+                end=end_dt + pd.Timedelta(days=1),
+                auto_adjust=True,  # 수정 종가 사용
+                progress=False,
+            )
+            if df.empty:
+                return None
+
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+                df = df.loc[:, ~df.columns.duplicated()]
+
+            if not df.index.is_unique:
+                df = df[~df.index.duplicated(keep="first")]
+            if df.index.tz is not None:
+                df.index = df.index.tz_localize(None)
+            return df
+        except Exception as e:
+            print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
+            return None
+
     if country == "coin":
         try:
             from datetime import timezone
@@ -645,6 +696,13 @@ def _fetch_ohlcv_core(
             if not data:
                 return None
             rows = []
+            seoul_tz = None
+            if ZoneInfo is not None:
+                try:
+                    seoul_tz = ZoneInfo("Asia/Seoul")
+                except Exception:
+                    seoul_tz = None
+            kst_offset = timedelta(hours=9)
             for arr in data:
                 try:
                     ts = int(arr[0])
@@ -655,7 +713,18 @@ def _fetch_ohlcv_core(
                     v = float(arr[5])
                 except Exception:
                     continue
-                dt = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc).replace(tzinfo=None)
+                utc_dt = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc)
+                if seoul_tz is not None:
+                    try:
+                        local_dt = utc_dt.astimezone(seoul_tz)
+                    except Exception:
+                        local_dt = utc_dt + kst_offset
+                else:
+                    local_dt = utc_dt + kst_offset
+                local_dt = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                if local_dt.tzinfo is not None:
+                    local_dt = local_dt.replace(tzinfo=None)
+                dt = local_dt
                 rows.append((dt, o, h, low, c, v))
             if not rows:
                 return None

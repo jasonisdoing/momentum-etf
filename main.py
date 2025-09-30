@@ -1,6 +1,9 @@
 import os
 import sys
 import warnings
+import pickle
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -25,7 +28,7 @@ except ImportError:
     yf = None
     st.stop()
 
-from signals import get_market_regime_status_string
+from logic.signals.market import get_market_regime_status_string
 from utils.account_registry import (
     get_accounts_by_country,
     load_accounts,
@@ -37,12 +40,157 @@ from utils.db_manager import (
 )
 
 
+# 캐시 관련 설정
+CACHE_DIR = Path(__file__).parent / "cache"
+CACHE_DIR.mkdir(exist_ok=True)
+CACHE_FILE = CACHE_DIR / "dashboard_data.pkl"
+CACHE_DURATION_MINUTES = 5  # 캐시 유효 시간 (분)
+
+
+def get_cache_key(selected_date_str: str) -> str:
+    """캐시 키를 생성합니다."""
+    return f"dashboard_{selected_date_str}"
+
+
+def load_cached_data(selected_date_str: str) -> tuple[dict, datetime] | None:
+    """캐시된 데이터를 로드합니다."""
+    try:
+        cache_file = CACHE_DIR / f"{get_cache_key(selected_date_str)}.pkl"
+        if cache_file.exists():
+            with open(cache_file, "rb") as f:
+                cached_data = pickle.load(f)
+                cache_time = datetime.fromtimestamp(cache_file.stat().st_mtime)
+
+                # 캐시 유효성 검사
+                if datetime.now() - cache_time < timedelta(minutes=CACHE_DURATION_MINUTES):
+                    return cached_data, cache_time
+    except Exception:
+        pass
+    return None
+
+
+def save_cached_data(selected_date_str: str, data: dict) -> None:
+    """데이터를 캐시에 저장합니다."""
+    try:
+        cache_file = CACHE_DIR / f"{get_cache_key(selected_date_str)}.pkl"
+        with open(cache_file, "wb") as f:
+            pickle.dump(data, f)
+    except Exception:
+        pass
+
+
+def clear_cache() -> None:
+    """캐시를 삭제합니다."""
+    try:
+        for cache_file in CACHE_DIR.glob("dashboard_*.pkl"):
+            cache_file.unlink()
+    except Exception:
+        pass
+
+
+def load_dashboard_data(selected_date_str: str, all_accounts: list) -> dict:
+    """대시보드 데이터를 로드합니다."""
+    selected_date_dt = pd.to_datetime(selected_date_str)
+    selected_date_py = selected_date_dt.to_pydatetime()
+
+    account_summaries = []
+    total_initial_capital_krw = 0.0
+    total_current_equity_krw = 0.0
+    total_daily_profit_loss_krw = 0.0
+    total_eval_profit_loss_krw = 0.0
+    total_cum_profit_loss_krw = 0.0
+    total_cash_krw = 0.0
+    total_holdings_value_krw = 0.0
+    accounts_without_data: list[str] = []
+    fallback_notes: list[str] = []
+
+    for account_info in all_accounts:
+        country = account_info["country"]
+        account = account_info["account"]
+
+        try:
+            # 선택한 날짜에 해당하는 요약 데이터를 가져옵니다.
+            report_doc = get_latest_signal_report(country, account, date=selected_date_py)
+            fallback_doc = None
+            if not report_doc:
+                fallback_doc = get_signal_report_on_or_after(country, account, selected_date_py)
+            target_doc = report_doc or fallback_doc
+            if not target_doc or "summary" not in target_doc:
+                accounts_without_data.append(account_info["display_name"])
+                continue
+
+            summary = target_doc.get("summary", {})
+            doc_date = target_doc.get("date")
+            data_date_str = (
+                pd.to_datetime(doc_date).strftime("%Y-%m-%d")
+                if doc_date is not None
+                else selected_date_str
+            )
+
+            # --- KRW로 모든 값 변환 ---
+            initial_capital_krw_local = summary.get("principal", 0.0)
+            current_equity_krw_local = summary.get("total_equity", 0.0)
+            daily_profit_loss_krw_local = summary.get("daily_profit_loss", 0.0)
+            eval_profit_loss_krw_local = summary.get("eval_profit_loss", 0.0)
+            cum_profit_loss_krw_local = summary.get("cum_profit_loss", 0.0)
+            cash_krw_local = summary.get("total_cash", 0.0)
+            holdings_value_krw_local = summary.get("total_holdings_value", 0.0)
+
+            # --- Add to totals (already in KRW) ---
+            total_initial_capital_krw += initial_capital_krw_local
+            total_current_equity_krw += current_equity_krw_local
+            total_daily_profit_loss_krw += daily_profit_loss_krw_local
+            total_eval_profit_loss_krw += eval_profit_loss_krw_local
+            total_cum_profit_loss_krw += cum_profit_loss_krw_local
+            total_cash_krw += cash_krw_local
+            total_holdings_value_krw += holdings_value_krw_local
+
+            # --- Prepare summary for display (all in KRW) ---
+            account_summaries.append(
+                {
+                    "display_name": account_info["display_name"],
+                    "principal": initial_capital_krw_local,
+                    "current_equity": current_equity_krw_local,
+                    "total_cash": cash_krw_local,
+                    "daily_profit_loss": daily_profit_loss_krw_local,
+                    "daily_return_pct": summary.get("daily_return_pct", 0.0),
+                    "eval_profit_loss": eval_profit_loss_krw_local,
+                    "eval_return_pct": summary.get("eval_return_pct", 0.0),
+                    "cum_profit_loss": cum_profit_loss_krw_local,
+                    "cum_return_pct": summary.get("cum_return_pct", 0.0),
+                    "currency": "KRW",  # Always display in KRW
+                    "amt_precision": 0,  # Always display as integer KRW
+                    "qty_precision": 0,
+                    "order": account_info.get("order", 99),
+                    "data_date": data_date_str,
+                }
+            )
+        except Exception as e:
+            st.warning(f"'{account_info['display_name']}' 계좌 정보를 불러오는 중 오류 발생: {e}")
+            continue
+
+    return {
+        "account_summaries": account_summaries,
+        "total_initial_capital_krw": total_initial_capital_krw,
+        "total_current_equity_krw": total_current_equity_krw,
+        "total_daily_profit_loss_krw": total_daily_profit_loss_krw,
+        "total_eval_profit_loss_krw": total_eval_profit_loss_krw,
+        "total_cum_profit_loss_krw": total_cum_profit_loss_krw,
+        "total_cash_krw": total_cash_krw,
+        "total_holdings_value_krw": total_holdings_value_krw,
+        "accounts_without_data": accounts_without_data,
+        "fallback_notes": fallback_notes,
+    }
+
+
 def main():
     """대시보드를 렌더링합니다."""
     st.set_page_config(page_title="Momentum ETF", page_icon="📈", layout="wide")
-    st.title("📈 대시보드")
+    # st.title("📈 대시보드")
 
     hide_amounts = st.toggle("금액 숨기기", key="hide_amounts")
+
+    # st.markdown("---")
 
     status_html = get_market_regime_status_string()
     if status_html:
@@ -53,8 +201,9 @@ def main():
         """
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
-            body {
-                font-family: 'Noto Sans KR', sans-serif;
+            /* 전역 폰트: D2Coding 우선 적용, 미설치 시 폴백 */
+            body, code, pre {
+                font-family: 'D2Coding', 'NanumGothic Coding', 'Noto Sans KR', 'Consolas', 'Courier New', monospace !important;
             }
             .block-container {
                 max-width: 100%;
@@ -105,88 +254,49 @@ def main():
         index=0,
         key="dashboard_date_select",
     )
-    selected_date_dt = pd.to_datetime(selected_date_str)
-    selected_date_py = selected_date_dt.to_pydatetime()
 
-    account_summaries = []
-    total_initial_capital_krw = 0.0
-    total_current_equity_krw = 0.0
-    total_daily_profit_loss_krw = 0.0
-    total_eval_profit_loss_krw = 0.0
-    total_cum_profit_loss_krw = 0.0
-    total_cash_krw = 0.0
-    total_holdings_value_krw = 0.0
-    accounts_without_data: list[str] = []
-    fallback_notes: list[str] = []
+    # 캐시 정보 표시
 
-    for account_info in all_accounts:
-        country = account_info["country"]
-        account = account_info["account"]
+    # 캐시에서 데이터 로드 시도
+    cached_result = load_cached_data(selected_date_str)
+    cache_time = None
 
-        try:
-            # 선택한 날짜에 해당하는 요약 데이터를 가져옵니다.
-            report_doc = get_latest_signal_report(country, account, date=selected_date_py)
-            fallback_doc = None
-            if not report_doc:
-                fallback_doc = get_signal_report_on_or_after(country, account, selected_date_py)
-            target_doc = report_doc or fallback_doc
-            if not target_doc or "summary" not in target_doc:
-                accounts_without_data.append(account_info["display_name"])
-                continue
+    if cached_result:
+        dashboard_data, cache_time = cached_result
+        st.info(f"📊 캐시된 데이터를 사용합니다 (저장 시간: {cache_time.strftime('%Y-%m-%d %H:%M:%S')})")
+    else:
+        # 캐시가 없거나 만료된 경우 새로 로드
+        with st.spinner("대시보드 데이터를 로딩 중..."):
+            dashboard_data = load_dashboard_data(selected_date_str, all_accounts)
+            save_cached_data(selected_date_str, dashboard_data)
+            cache_time = datetime.now()
+            st.success("✅ 최신 데이터를 로드했습니다")
+    if cache_time:
+        cache_age = datetime.now() - cache_time
+        if cache_age.total_seconds() < 60:
+            age_text = f"{int(cache_age.total_seconds())}초 전"
+        elif cache_age.total_seconds() < 3600:
+            age_text = f"{int(cache_age.total_seconds() // 60)}분 전"
+        else:
+            age_text = f"{int(cache_age.total_seconds() // 3600)}시간 전"
 
-            summary = target_doc.get("summary", {})
-            doc_date = target_doc.get("date")
-            data_date_str = (
-                pd.to_datetime(doc_date).strftime("%Y-%m-%d")
-                if doc_date is not None
-                else selected_date_str
-            )
-            # if data_date_str != selected_date_str:
-            #     fallback_notes.append(
-            #         f"{account_info['display_name']} → {data_date_str} 기준 데이터 표시"
-            #     )
+        st.caption(f"📊 캐시 데이터 저장 시간: {cache_time.strftime('%Y-%m-%d %H:%M:%S')} ({age_text})")
+    else:
+        st.caption("📊 캐시 데이터 없음")
 
-            # --- KRW로 모든 값 변환 ---
-            initial_capital_krw_local = summary.get("principal", 0.0)
-            current_equity_krw_local = summary.get("total_equity", 0.0)
-            daily_profit_loss_krw_local = summary.get("daily_profit_loss", 0.0)
-            eval_profit_loss_krw_local = summary.get("eval_profit_loss", 0.0)
-            cum_profit_loss_krw_local = summary.get("cum_profit_loss", 0.0)
-            cash_krw_local = summary.get("total_cash", 0.0)
-            holdings_value_krw_local = summary.get("total_holdings_value", 0.0)
+    # st.markdown("---")
 
-            # --- Add to totals (already in KRW) ---
-            total_initial_capital_krw += initial_capital_krw_local
-            total_current_equity_krw += current_equity_krw_local
-            total_daily_profit_loss_krw += daily_profit_loss_krw_local
-            total_eval_profit_loss_krw += eval_profit_loss_krw_local
-            total_cum_profit_loss_krw += cum_profit_loss_krw_local
-            total_cash_krw += cash_krw_local
-            total_holdings_value_krw += holdings_value_krw_local
-
-            # --- Prepare summary for display (all in KRW) ---
-            account_summaries.append(
-                {
-                    "display_name": account_info["display_name"],
-                    "principal": initial_capital_krw_local,
-                    "current_equity": current_equity_krw_local,
-                    "total_cash": cash_krw_local,
-                    "daily_profit_loss": daily_profit_loss_krw_local,
-                    "daily_return_pct": summary.get("daily_return_pct", 0.0),
-                    "eval_profit_loss": eval_profit_loss_krw_local,
-                    "eval_return_pct": summary.get("eval_return_pct", 0.0),
-                    "cum_profit_loss": cum_profit_loss_krw_local,
-                    "cum_return_pct": summary.get("cum_return_pct", 0.0),
-                    "currency": "KRW",  # Always display in KRW
-                    "amt_precision": 0,  # Always display as integer KRW
-                    "qty_precision": 0,
-                    "order": account_info.get("order", 99),
-                    "data_date": data_date_str,
-                }
-            )
-        except Exception as e:
-            st.warning(f"'{account_info['display_name']}' 계좌 정보를 불러오는 중 오류 발생: {e}")
-            continue
+    # 데이터 추출
+    account_summaries = dashboard_data["account_summaries"]
+    total_initial_capital_krw = dashboard_data["total_initial_capital_krw"]
+    total_current_equity_krw = dashboard_data["total_current_equity_krw"]
+    total_daily_profit_loss_krw = dashboard_data["total_daily_profit_loss_krw"]
+    total_eval_profit_loss_krw = dashboard_data["total_eval_profit_loss_krw"]
+    total_cum_profit_loss_krw = dashboard_data["total_cum_profit_loss_krw"]
+    total_cash_krw = dashboard_data["total_cash_krw"]
+    total_holdings_value_krw = dashboard_data["total_holdings_value_krw"]
+    accounts_without_data = dashboard_data["accounts_without_data"]
+    fallback_notes = dashboard_data["fallback_notes"]
 
     if fallback_notes:
         fallback_msg = "<br/>".join(fallback_notes)
@@ -242,13 +352,34 @@ def main():
         cols = st.columns((1.5, 1.5, 1.5, 1, 1.5, 1, 1.5, 1, 1.5, 1.5))
         data_date = summary.get("data_date")
         display_label = summary["display_name"]
-        if data_date:
-            cols[0].markdown(
-                f"<div><strong>{display_label}</strong><br/><span style='color:#666;font-size:0.85em;'>기준일: {data_date}</span></div>",
-                unsafe_allow_html=True,
-            )
+
+        # 계좌명을 클릭 가능한 링크로 표시
+        account_code = None
+        for account_info in all_accounts:
+            if account_info["display_name"] == display_label:
+                account_code = account_info["account"]
+                break
+
+        if account_code:
+            # 같은 창에서 열리도록 HTML 링크 사용 - signal 페이지로 이동
+            if data_date:
+                cols[0].markdown(
+                    f"<div><a href='/results?account={account_code}' target='_self' style='text-decoration: none; color: #1f77b4; font-weight: bold;'>{display_label}</a><br/><span style='color:#666;font-size:0.85em;'>기준일: {data_date}</span></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                cols[0].markdown(
+                    f"<div><a href='/results?account={account_code}' target='_self' style='text-decoration: none; color: #1f77b4; font-weight: bold;'>{display_label}</a></div>",
+                    unsafe_allow_html=True,
+                )
         else:
-            cols[0].write(display_label)
+            if data_date:
+                cols[0].markdown(
+                    f"<div><strong>{display_label}</strong><br/><span style='color:#666;font-size:0.85em;'>기준일: {data_date}</span></div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                cols[0].write(display_label)
 
         def format_amount(value):
             return f"{value:,.{amt_precision}f} {currency_symbol}"
@@ -394,6 +525,11 @@ def main():
     total_cols[3].markdown(format_total_pct(total_daily_return_pct), unsafe_allow_html=True)
     total_cols[5].markdown(format_total_pct(total_eval_return_pct), unsafe_allow_html=True)
     total_cols[7].markdown(format_total_pct(total_cum_return_pct), unsafe_allow_html=True)
+
+    # 새로고침 버튼을 왼쪽 정렬
+    if st.button("🔄 최신 데이터 가져오기", key="refresh_dashboard_data"):
+        clear_cache()
+        st.rerun()
 
 
 if __name__ == "__main__":
