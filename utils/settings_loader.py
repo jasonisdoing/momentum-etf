@@ -81,7 +81,7 @@ def get_country_slack_channel(country: str) -> Optional[str]:
 def get_strategy_rules(country: str):
     """국가별 전략 설정을 `StrategyRules` 객체로 반환합니다."""
 
-    from logic.strategies.momentum.rules import StrategyRules
+    from logic.maps import StrategyRules
 
     strategy = get_country_strategy(country)
     return StrategyRules.from_mapping(strategy)

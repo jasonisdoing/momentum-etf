@@ -4,7 +4,7 @@
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",
     "strategy": {
-        "MA_PERIOD": 15,
+        "MA_PERIOD": 24,
         "PORTFOLIO_TOPN": 10,
         "REPLACE_SCORE_THRESHOLD": 0.5,
         "COOLDOWN_DAYS": 1,

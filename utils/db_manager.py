@@ -373,54 +373,9 @@ def get_available_snapshot_dates(
     return sorted(all_days, reverse=True)
 
 
-# --- Import checkpoints (incremental sync) ---
-def get_import_checkpoint(source: str, country: str, key: Optional[str] = None) -> Optional[int]:
-    """Return last processed timestamp (ms) for a given import source/country/key.
-
-    - source: e.g., 'bithumb_v1_trades'
-    - country: e.g., 'coin'
-    - key: optional sub-key (e.g., base ticker like 'BTC')
-    """
-    db = get_db_connection()
-    if db is None:
-        return None
-    q: Dict[str, object] = {"source": source, "country": country}
-    if key is not None:
-        q["key"] = key
-    doc = db.import_checkpoints.find_one(q)
-    if not doc:
-        return None
-    try:
-        return int(doc.get("last_ts_ms"))
-    except Exception:
-        return None
-
-
-def save_import_checkpoint(
-    source: str, country: str, last_ts_ms: int, key: Optional[str] = None
-) -> bool:
-    """Upsert last processed timestamp (ms) for a given import source/country/key."""
-    db = get_db_connection()
-    if db is None:
-        return False
-    q: Dict[str, object] = {"source": source, "country": country}
-    if key is not None:
-        q["key"] = key
-    try:
-        db.import_checkpoints.update_one(
-            q,
-            {"$set": {**q, "last_ts_ms": int(last_ts_ms), "updated_at": datetime.now()}},
-            upsert=True,
-        )
-        return True
-    except Exception as e:
-        print(f"오류: 체크포인트 저장 실패 ({source}/{country}/{key}): {e}")
-        return False
-
-
 def get_signal_report_from_db(country: str, account: str, date: datetime) -> Optional[Dict]:
     """
-    지정된 조건에 맞는 시그널 리포트를 DB에서 가져옵니다.
+    지정된 조건에 맞는 추천 리포트를 DB에서 가져옵니다.
     """
     db = get_db_connection()
     if db is None:
@@ -435,7 +390,7 @@ def get_signal_report_from_db(country: str, account: str, date: datetime) -> Opt
 
 
 def get_signal_report_on_or_after(country: str, account: str, date: datetime) -> Optional[Dict]:
-    """지정된 날짜 이후(포함) 중 가장 빠른 시그널 리포트를 반환합니다."""
+    """지정된 날짜 이후(포함) 중 가장 빠른 추천 리포트를 반환합니다."""
 
     db = get_db_connection()
     if db is None:
@@ -451,7 +406,7 @@ def get_latest_signal_report(
     country: str, account: str, date: Optional[datetime] = None
 ) -> Optional[Dict]:
     """
-    지정된 계좌에 대해 가장 최근의 시그널 리포트를 반환합니다.
+    지정된 계좌에 대해 가장 최근의 추천 리포트를 반환합니다.
     date가 지정되면 해당 날짜의 리포트를 찾습니다.
     """
     db = get_db_connection()
@@ -472,7 +427,7 @@ def get_latest_signal_report(
         latest_signal = db.signals.find_one(query, sort=[("date", DESCENDING)])
 
     if latest_signal:
-        # 최신 시그널 리포트가 존재하면 반환합니다.
+        # 최신 추천 리포트가 존재하면 반환합니다.
         return latest_signal
 
     return None
@@ -480,7 +435,7 @@ def get_latest_signal_report(
 
 def get_latest_signal_summary(country: str, account: str) -> Optional[Dict]:
     """
-    지정된 계좌의 가장 최근 시그널 리포트에 저장된 요약(summary) 정보를 가져옵니다.
+    지정된 계좌의 가장 최근 추천 리포트에 저장된 요약(summary) 정보를 가져옵니다.
     """
     db = get_db_connection()
     if db is None:
@@ -507,7 +462,7 @@ def save_signal_report_to_db(
     report_data: Tuple[str, List[str], List[List[str]]],
     summary_data: Optional[Dict] = None,
 ) -> bool:
-    """계산된 시그널 리포트를 DB에 저장합니다."""
+    """계산된 추천 리포트를 DB에 저장합니다."""
     db = get_db_connection()
     if db is None:
         return False
@@ -531,10 +486,10 @@ def save_signal_report_to_db(
         # $unset을 사용하여 과거에 있었을 수 있는 'strategy' 필드를 명시적으로 제거합니다.
         update_operation = {"$set": doc_to_save, "$unset": {"strategy": ""}}
         db.signals.update_one(query, update_operation, upsert=True)
-        print(f"-> 시그널 리포트가 DB에 저장되었습니다: [{country}/{account}]{date.strftime('%Y-%m-%d')}")
+        print(f"-> 추천 리포트가 DB에 저장되었습니다: [{country}/{account}]{date.strftime('%Y-%m-%d')}")
         return True
     except Exception as e:
-        print(f"오류: 시그널 리포트 DB 저장 중 오류 발생: {e}")
+        print(f"오류: 추천 리포트 DB 저장 중 오류 발생: {e}")
         return False
 
 

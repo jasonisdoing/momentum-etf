@@ -14,7 +14,7 @@ from typing import Dict
 
 import pandas as pd
 
-from logic.strategies.momentum.backtest import run_portfolio_backtest
+from logic.strategies.maps.backtest import run_portfolio_backtest
 from utils.account_registry import (
     get_country_settings,
     get_strategy_rules_for_country,

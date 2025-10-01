@@ -16,23 +16,6 @@ def update_etf_names():
     """
     json_files = glob.glob("data/*/*.json")
 
-    # Prepare Bithumb coin map once
-    coin_map = {}
-    try:
-        url = "https://api.bithumb.com/v1/market/all"
-        headers = {"accept": "application/json"}
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        bithumb_data = response.json()
-        if isinstance(bithumb_data, list):
-            for coin_info in bithumb_data:
-                market = coin_info.get("market")
-                if market and market.startswith("KRW-"):
-                    ticker = market.split("-")[1]
-                    coin_map[ticker] = coin_info.get("korean_name")
-    except Exception as e:
-        print(f"Could not build Bithumb coin map: {e}")
-
     for file_path in json_files:
         if "etf.json" not in file_path:
             continue

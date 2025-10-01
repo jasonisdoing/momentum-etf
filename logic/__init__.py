@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from . import momentum
+from . import maps
 
-__all__ = ["momentum"]
+__all__ = ["maps"]

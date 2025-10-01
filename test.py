@@ -14,7 +14,7 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated", categor
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from logic import momentum as strategy_module
-from logic.strategies.momentum.shared import SIGNAL_TABLE_HEADERS
+from logic.strategies.maps.shared import SIGNAL_TABLE_HEADERS
 from utils.account_registry import (
     get_country_settings,
     get_strategy_rules,

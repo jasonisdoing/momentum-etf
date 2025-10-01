@@ -6,16 +6,16 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 ## 구성 개요 / 폴더 구조
 
-- `logic/`: 매매 전략(로직) 정의 및 시그널 파이프라인
+- `logic/`: 매매 전략(로직) 정의 및 추천 파이프라인
   - `strategies/momentum/`: 이동평균 기반 모멘텀 전략
     - `backtest.py`: 백테스트 실행 엔진
-    - `signals.py`: 전략별 시그널 생성 로직(결정 테이블)
+    - `recommends.py`: 전략별 추천 생성 로직(결정 테이블)
     - `shared.py`: 공통 유틸리티
-  - `signals/`: 시그널 파이프라인과 유틸 (루트 signals 이관)
-    - `pipeline.py`: 시그널 생성 파이프라인 진입점(`main`, `generate_signal_report`)
+  - `recommends/`: 추천 파이프라인과 유틸 (루트 recommends 이관)
+    - `pipeline.py`: 추천 생성 파이프라인 진입점(`main`, `generate_signal_report`)
     - `history.py`: 보유일/쿨다운 계산 유틸
     - `schedule.py`: 개장여부/다음 거래일/스케줄 타깃 날짜 계산
-    - `logger.py`: 시그널 전용 파일 로거
+    - `logger.py`: 추천 전용 파일 로거
     - `market.py`: 시장 레짐 상태 문자열 생성(웹 UI 헤더용)
 - `utils/`: 공통 유틸리티 모듈
   - `data_loader.py`: 데이터 로딩 및 API 호출
@@ -36,7 +36,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 ## 문서
 
-- [시그널 규칙 명세](docs/signal-rules.md)
+- [추천 규칙 명세](docs/signal-rules.md)
 - [개발 규칙(개발자 가이드)](docs/development-rules.md)
 
 ## 설치 및 준비
@@ -58,11 +58,10 @@ MONGO_DB_CONNECTION_STRING=mongodb://localhost:27017/momentum_etf
 GOOGLE_API_KEY=your_google_api_key
 KOR_SLACK_WEBHOOK=your_slack_webhook_url
 AUS_SLACK_WEBHOOK=your_slack_webhook_url
-COIN_SLACK_WEBHOOK=your_slack_webhook_url
 ```
 
 ### 4) 서버 시간대 설정 (필수)
-배포 서버의 시스템 시간이 KST(Asia/Seoul)와 동기화되어 있어야 시그널 기준일과 로그 파일이 올바르게 생성됩니다.
+배포 서버의 시스템 시간이 KST(Asia/Seoul)와 동기화되어 있어야 추천 기준일과 로그 파일이 올바르게 생성됩니다.
 
 - **시간대 지정**
   ```bash
@@ -88,7 +87,7 @@ COIN_SLACK_WEBHOOK=your_slack_webhook_url
 python run.py
 ```
 
-### 2) 실시간 시그널 조회 (CLI)
+### 2) 실시간 추천 조회 (CLI)
 과거 시뮬레이션 없이 "현재 보유 + 오늘 신호"를 바탕으로 다음 거래일에 대한 매매 신호를 제안합니다.
 
 ```bash
@@ -128,12 +127,12 @@ python cli.py <계좌코드> --tune
 
 ### 결과 파일 및 로그 경로
 
-- **시그널 결과(요약/상세) 저장**
+- **추천 결과(요약/상세) 저장**
   - DB 저장: `utils.db_manager.save_signal_report_to_db()`로 저장되어 웹앱에서 조회됩니다
   - 파일 저장(상세 로그): `results/signal_{account}_{YYYY-MM-DD}.log`
-- **시그널 전용 파일 로그**
+- **추천 전용 파일 로그**
   - 경로: `logs/YYYY-MM-DD.log` (`logic/signals/logger.py`)
-  - 내용: 시그널 생성 과정의 디테일/디버그 로그
+  - 내용: 추천 생성 과정의 디테일/디버그 로그
 - **백테스트 로그**
   - 경로: `logs/test_{country}_{account}.log`
   - 트리거: `cli.py --test` 실행 시 `test.py`에서 파일 로깅
@@ -157,11 +156,10 @@ python scripts/categorize_etf.py <국가코드>
 
 1. 의존성 설치: `pip install -r requirements.txt`
 2. (선택) 환경 변수로 스케줄/타임존 설정:
-   - `SCHEDULE_ENABLE_KOR|AUS|COIN` = `1`/`0` (기본 1)
+   - `SCHEDULE_ENABLE_KOR|AUS` = `1`/`0` (기본 1)
    - `SCHEDULE_KOR_CRON` = `"10 18 * * 1-5"` (서울 18:10 평일)
    - `SCHEDULE_AUS_CRON` = `"10 18 * * 1-5"` (시드니 18:10 평일)
-   - `SCHEDULE_COIN_CRON` = `"5 0 * * *"` (매일 00:05)
-   - `SCHEDULE_KOR_TZ` = `Asia/Seoul`, `SCHEDULE_AUS_TZ` = `Australia/Sydney`, `SCHEDULE_COIN_TZ` = `Asia/Seoul`
+   - `SCHEDULE_KOR_TZ` = `Asia/Seoul`, `SCHEDULE_AUS_TZ` = `Australia/Sydney`
    - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
    - `SCHEDULE_ENABLE_CACHE` = `1`/`0` (기본 1)
    - `SCHEDULE_CACHE_CRON` = `"30 3 * * *"` (서울 03:30)
@@ -186,7 +184,7 @@ python scripts/find.py --type etf --min-change 3.0
 
 ### 매매 신호
 - **매수 신호**: 가격이 지정된 기간의 이동평균선 위에 있을 때
-- **매도 신호**: 
+- **매도 신호**:
   - **추세이탈**: 가격이 이동평균선 아래로 내려갈 때
   - **손절**: 보유 수익률이 손절 기준을 하회할 때
 
@@ -217,7 +215,7 @@ python scripts/find.py --type etf --min-change 3.0
 ## 코드 구조 개선사항
 
 ### 최근 리팩토링(2025-09)
-1. **signals 분리/이관**: 루트 `signals.py` 삭제. 시그널 파이프라인/스케줄/로거/히스토리/마켓 상태를 `logic/signals/`로 모듈화
+1. **signals 분리/이관**: 루트 `signals.py` 삭제. 추천 파이프라인/스케줄/로거/히스토리/마켓 상태를 `logic/signals/`로 모듈화
    - 파이프라인: `logic/signals/pipeline.py` (`main`, `generate_signal_report`)
    - 스케줄: `logic/signals/schedule.py` (거래일/개장여부/스케줄 날짜)
    - 로거: `logic/signals/logger.py` (파일 로깅)
@@ -237,7 +235,7 @@ python scripts/find.py --type etf --min-change 3.0
 5. **타입 힌트 개선**: 더 명확한 타입 힌트 추가
 
 ### 주요 공통 함수들
-- `calculate_moving_average_signals()`: 이동평균 기반 시그널 계산
+- `calculate_moving_average_signals()`: 이동평균 기반 추천 계산
 - `calculate_ma_score()`: 이동평균 대비 수익률 점수 계산
 
 ## 주의/제약사항

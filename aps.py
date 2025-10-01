@@ -5,13 +5,11 @@ APScheduler 기반 스케줄러
 스케줄은 아래 환경 변수를 통해 설정할 수 있습니다.
 환경 변수가 없으면 각 작업의 기본값(Default)이 사용됩니다.
 
-- SCHEDULE_ENABLE_KOR/AUS/COIN: "1" 또는 "0" (기본: "1", 활성화)
-- SCHEDULE_KOR_CRON: 한국 시그널 계산 주기
-- SCHEDULE_AUS_CRON: 호주 시그널 계산 주기
-- SCHEDULE_COIN_CRON: 코인 시그널 계산 주기
+- SCHEDULE_ENABLE_KOR/AUS: "1" 또는 "0" (기본: "1", 활성화)
+- SCHEDULE_KOR_CRON: 한국 추천 계산 주기
+- SCHEDULE_AUS_CRON: 호주 추천 계산 주기\
 - SCHEDULE_KOR_TZ: 한국 시간대 (기본: "Asia/Seoul")
-- SCHEDULE_AUS_TZ: 호주 시간대 (기본: "Asia/Seoul")
-- SCHEDULE_COIN_TZ: 코인 시간대 (기본: "Asia/Seoul")
+- SCHEDULE_AUS_TZ: 호주 시간대 (기본: "Asia/Seoul")\
 - RUN_IMMEDIATELY_ON_START: "1" 이면 시작 시 즉시 한 번 실행 (기본: "0")
 """
 
@@ -152,8 +150,6 @@ def run_signal_generation(
 
         log_target = f"{snapshot_country}/{account}"
         logging.info(f"Running signal generation for {log_target}")
-        if snapshot_country == "coin":
-            _try_sync_bithumb_trades()
 
         # signal.main은 상세 알림을 처리합니다.
         signal_result = run_signal_main(account=account, date_str=None)
@@ -222,17 +218,6 @@ def run_signals_for_country(country: str, *, force_notify: bool = False) -> None
                 )
     else:
         logging.warning("No registered accounts for %s; skipping signal generation.", country)
-
-
-def _try_sync_bithumb_trades():
-    """If coin: sync Bithumb accounts → trades before status run."""
-    try:
-        from scripts.sync_bithumb_accounts_to_trades import main as sync_main
-
-        sync_main()
-    except Exception:
-        error_message = "Bithumb accounts->trades sync skipped or failed"
-        logging.error(error_message, exc_info=True)
 
 
 def run_cache_refresh() -> None:

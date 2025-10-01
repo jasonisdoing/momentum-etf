@@ -612,12 +612,12 @@ def send_detailed_signal_notification(
 
     app_tag = getattr(global_settings, "APP_TYPE", "APP")
     title = f"[{app_tag}][{country}/{account}] 종목상세"
-    # 국가 설정에서 시그널 필요 여부 확인 (기본값: True)
+    # 국가 설정에서 추천 필요 여부 확인 (기본값: True)
     need_signal_flag = bool(country_settings.get("need_signal", True)) if country_settings else True
 
     message_header_parts = [title]
     if not need_signal_flag:
-        message_header_parts.append("⚠️ 이 계좌는 시그널 생성을 하지 않도록 설정되어 있습니다.")
+        message_header_parts.append("⚠️ 이 계좌는 추천 생성을 하지 않도록 설정되어 있습니다.")
     if extra_lines:
         message_header_parts.extend(extra_lines)
     message_header = "\n".join(message_header_parts)
@@ -790,7 +790,7 @@ def send_detailed_signal_notification(
     #         upload_channel = country_settings.get("slack_channel") or country_settings.get("slack_file_channel")
 
     #     if upload_channel:
-    #         title = f"[{getattr(global_settings, 'APP_TYPE', 'APP')}][{country}/{account}] 시그널 로그"
+    #         title = f"[{getattr(global_settings, 'APP_TYPE', 'APP')}][{country}/{account}] 추천 로그"
     #         _upload_file_to_slack(
     #             channel=upload_channel,
     #             file_path=file_path_obj,

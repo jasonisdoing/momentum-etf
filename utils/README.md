@@ -1,11 +1,11 @@
 # Momentum ETF
 
-이 프로젝트는 모멘텀 기반의 ETF 투자 전략을 추적하고 백테스트하기 위한 웹 기반 애플리케이션입니다. 한국, 호주, 가상화폐 시장에 대한 포트폴리오 시그널을 모니터링하고, 매매 신호를 확인하며, 슬랙(Slack)을 통해 알림을 받을 수 있는 대시보드를 제공합니다.
+이 프로젝트는 모멘텀 기반의 ETF 투자 전략을 추적하고 백테스트하기 위한 웹 기반 애플리케이션입니다. 한국, 호주, 가상화폐 시장에 대한 포트폴리오 추천을 모니터링하고, 매매 신호를 확인하며, 슬랙(Slack)을 통해 알림을 받을 수 있는 대시보드를 제공합니다.
 
 ## 주요 기능 (Features)
 
-*   **웹 대시보드**: Streamlit을 사용하여 각 국가별 포트폴리오 시그널, 매매 신호, 보유 종목 등을 시각적으로 제공합니다.
-*   **자동 시그널 계산**: 스케줄러를 통해 매일 또는 지정된 주기로 포트폴리오 시그널을 자동으로 계산하고 DB에 저장합니다.
+*   **웹 대시보드**: Streamlit을 사용하여 각 국가별 포트폴리오 추천, 매매 신호, 보유 종목 등을 시각적으로 제공합니다.
+*   **자동 추천 계산**: 스케줄러를 통해 매일 또는 지정된 주기로 포트폴리오 추천을 자동으로 계산하고 DB에 저장합니다.
 *   **슬랙 알림**: 매매 신호 발생 시 슬랙(Slack)으로 실시간 알림을 전송합니다.
 *   **백테스팅**: 과거 데이터를 사용하여 투자 전략의 성과를 검증합니다.
 *   **유연한 설정**: 웹 UI를 통해 국가별 투자 전략, 초기 자본, 알림 주기 등 대부분의 설정을 관리할 수 있습니다.
@@ -14,7 +14,6 @@
 
 *   Python 3.10 이상
 *   MongoDB Atlas 계정 (무료 클러스터로 충분합니다)
-*   (선택) 빗썸(Bithumb) API Key 및 Secret Key (가상화폐 자산 추적 시 필요)
 *   (선택) Slack Incoming Webhook URL (알림 기능 사용 시 필요)
 
 ## 설치 및 설정 방법 (Setup Instructions)
@@ -76,14 +75,9 @@ MONGO_DB_NAME="momentum_etf_db"
 # (선택) 국가별 슬랙 알림 웹훅 URL
 KOR_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
 AUS_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
-COIN_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
 
 # (선택) 중요 시스템 로그를 받을 슬랙 웹훅 URL
 LOGS_SLACK_WEBHOOK="https://hooks.slack.com/services/..."
-
-# (선택) 빗썸 API 키 (가상화폐 자산 추적용)
-BITHUMB_API_KEY="Your_Bithumb_API_Key"
-BITHUMB_API_SECRET="Your_Bithumb_Secret_Key"
 
 # (선택) Google Gemini API 키 (ETF 자동 분류용)
 GOOGLE_API_KEY="Your_Google_API_Key"
@@ -101,7 +95,7 @@ streamlit run web_app.py
 
 ### 스케줄러 실행
 
-시그널 계산 및 알림을 자동으로 실행하려면 스케줄러를 별도의 터미널에서 실행해야 합니다.
+추천 계산 및 알림을 자동으로 실행하려면 스케줄러를 별도의 터미널에서 실행해야 합니다.
 
 ```bash
 python aps.py

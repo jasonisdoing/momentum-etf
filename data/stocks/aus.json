@@ -286,24 +286,12 @@
                 "name": "BetaShares Diversified All Growth ETF"
             },
             {
-                "ticker": "ASX:IWLD",
-                "name": "iShares Core MSCI World Ex Australia ESG ETF"
-            },
-            {
                 "ticker": "ASX:IHD",
                 "name": "iShares S&P/ASX Dividend Opportunities ESG Screened ETF"
             },
             {
-                "ticker": "ASX:MVA",
-                "name": "VanEck Australian Property ETF"
-            },
-            {
                 "ticker": "ASX:WXHG",
                 "name": "SPDR S&P World ex Australia Carbon Aware (Hedged) ETF"
-            },
-            {
-                "ticker": "ASX:EX20",
-                "name": "BetaShares Australian Ex-20 Portfolio Diversifier ETF"
             },
             {
                 "ticker": "ASX:WRLD",
@@ -362,24 +350,8 @@
                 "name": "Betashares Europe Currency Hedged ETF"
             },
             {
-                "ticker": "ASX:VETH",
-                "name": "Vanguard Ethically Conscious Australian Shares ETF"
-            },
-            {
-                "ticker": "ASX:RARI",
-                "name": "Russell Investments Australian Responsible Investment ETF"
-            },
-            {
                 "ticker": "ASX:VGAD",
                 "name": "Vanguard MSCI Index International Shares (Hedged) ETF"
-            },
-            {
-                "ticker": "ASX:QOZ",
-                "name": "BetaShares FTSE RAFI Australia 200 ETF"
-            },
-            {
-                "ticker": "ASX:MVW",
-                "name": "VanEck Australian Equal Weight ETF"
             }
         ]
     }

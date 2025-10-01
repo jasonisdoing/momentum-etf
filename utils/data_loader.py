@@ -537,6 +537,9 @@ def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.D
 
     if country.lower() != "kor":
         return df
+    # 네이버 실시간 가격은 한국 상장 종목(숫자/알파벳 코드)에만 적용
+    if ticker.startswith("^"):
+        return df
 
     price = fetch_naver_realtime_price(ticker)
     if price is None or price <= 0:
@@ -774,67 +777,6 @@ def _fetch_ohlcv_core(
             print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
             return None
 
-    if country == "coin":
-        try:
-            from datetime import timezone
-
-            import pandas as _pd
-
-            base = ticker.upper()
-            url = f"https://api.bithumb.com/public/candlestick/{base}_KRW/24h"
-            r = requests.get(url, timeout=10)
-            r.raise_for_status()
-            j = r.json() or {}
-            data = j.get("data") or []
-            if not data:
-                return None
-            rows = []
-            seoul_tz = None
-            if ZoneInfo is not None:
-                try:
-                    seoul_tz = ZoneInfo("Asia/Seoul")
-                except Exception:
-                    seoul_tz = None
-            kst_offset = timedelta(hours=9)
-            for arr in data:
-                try:
-                    ts = int(arr[0])
-                    o = float(arr[1])
-                    c = float(arr[2])
-                    h = float(arr[3])
-                    low = float(arr[4])
-                    v = float(arr[5])
-                except Exception:
-                    continue
-                utc_dt = datetime.fromtimestamp(ts / 1000.0, tz=timezone.utc)
-                if seoul_tz is not None:
-                    try:
-                        local_dt = utc_dt.astimezone(seoul_tz)
-                    except Exception:
-                        local_dt = utc_dt + kst_offset
-                else:
-                    local_dt = utc_dt + kst_offset
-                local_dt = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-                if local_dt.tzinfo is not None:
-                    local_dt = local_dt.replace(tzinfo=None)
-                dt = local_dt
-                rows.append((dt, o, h, low, c, v))
-            if not rows:
-                return None
-            df = _pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
-            df.set_index("Date", inplace=True)
-            df.sort_index(inplace=True)
-            # Bithumb API는 전체 기간을 반환하므로, 요청된 start_dt와 end_dt로 정확히 잘라내야 합니다.
-            if start_dt > end_dt:
-                return None
-            df = df[(df.index >= start_dt) & (df.index <= end_dt)]
-            if df.empty:
-                return None
-            return df
-        except Exception as e:
-            print(f"경고: {ticker} 코인 OHLCV 조회 중 오류: {e}")
-            return None
-
     print(f"오류: 지원하지 않는 국가 코드입니다: {country}")
     return None
 
@@ -863,24 +805,6 @@ def fetch_ohlcv_for_tickers(
             prefetched_data[tkr] = df
 
     return prefetched_data
-
-
-def fetch_bithumb_realtime_price(symbol: str) -> Optional[float]:
-    symbol = (symbol or "").upper()
-    if not symbol or symbol in {"KRW", "P"}:
-        return 1.0
-    url = f"https://api.bithumb.com/public/ticker/{symbol}_KRW"
-    try:
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        if isinstance(data, dict) and data.get("status") == "0000":
-            closing_price = data.get("data", {}).get("closing_price")
-            if closing_price is not None:
-                return float(str(closing_price).replace(",", ""))
-    except Exception:
-        return None
-    return None
 
 
 def fetch_au_realtime_price(ticker: str) -> Optional[float]:

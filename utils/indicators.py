@@ -1,6 +1,6 @@
 """
 기술적 지표 계산 함수 모음
-- 이동평균 기반 시그널 계산을 위한 공통 함수들
+- 이동평균 기반 추천 계산을 위한 공통 함수들
 """
 
 import pandas as pd
@@ -11,7 +11,7 @@ def calculate_moving_average_signals(
     close_prices: pd.Series, moving_average_period: int
 ) -> tuple[pd.Series, pd.Series, pd.Series]:
     """
-    이동평균 기반 시그널을 계산합니다.
+    이동평균 기반 추천을 계산합니다.
 
     Args:
         close_prices: 종가 시리즈
@@ -20,8 +20,8 @@ def calculate_moving_average_signals(
     Returns:
         tuple: (moving_average, buy_signal_active, consecutive_buy_days)
             - moving_average: 이동평균선
-            - buy_signal_active: 매수 시그널 활성화 여부 (close > ma)
-            - consecutive_buy_days: 매수 시그널이 연속으로 활성화된 일수
+            - buy_signal_active: 매수 추천 활성화 여부 (close > ma)
+            - consecutive_buy_days: 매수 추천이 연속으로 활성화된 일수
     """
     # MultiIndex 컬럼 처리 (성능 최적화)
     if isinstance(close_prices, pd.DataFrame):
@@ -30,10 +30,10 @@ def calculate_moving_average_signals(
     # 이동평균 계산
     moving_average = close_prices.rolling(window=moving_average_period).mean()
 
-    # 매수 시그널 활성화 여부 (종가 > 이동평균)
+    # 매수 추천 활성화 여부 (종가 > 이동평균)
     buy_signal_active = close_prices > moving_average
 
-    # 매수 시그널이 연속으로 활성화된 일수 계산
+    # 매수 추천이 연속으로 활성화된 일수 계산
     consecutive_buy_days = (
         buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum())
         .cumsum()

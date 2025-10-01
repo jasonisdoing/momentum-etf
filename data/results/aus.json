@@ -9,7 +9,6 @@
     "daily_pct": 0.88,
     "score": 7.05,
     "streak": 15,
-    "base_date": "2025-10-01",
     "holding_days": 1,
     "phrase": "✅ 신규 매수"
   },
@@ -23,7 +22,6 @@
     "daily_pct": -0.58,
     "score": 3.99,
     "streak": 14,
-    "base_date": "2025-10-01",
     "holding_days": 1,
     "phrase": "✅ 신규 매수"
   },
@@ -37,7 +35,6 @@
     "daily_pct": -0.5,
     "score": 3.05,
     "streak": 8,
-    "base_date": "2025-10-01",
     "holding_days": 0,
     "phrase": "✅ 신규 매수"
   },
@@ -51,7 +48,6 @@
     "daily_pct": 0.41,
     "score": 1.9,
     "streak": 15,
-    "base_date": "2025-10-01",
     "holding_days": 0,
     "phrase": "✅ 신규 매수"
   },
@@ -65,7 +61,6 @@
     "daily_pct": 0.19,
     "score": 1.75,
     "streak": 12,
-    "base_date": "2025-10-01",
     "holding_days": 0,
     "phrase": "✅ 신규 매수"
   },
@@ -79,7 +74,6 @@
     "daily_pct": -0.18,
     "score": 1.12,
     "streak": 15,
-    "base_date": "2025-10-01",
     "holding_days": 0,
     "phrase": "✅ 신규 매수"
   },
@@ -93,7 +87,6 @@
     "daily_pct": 0.02,
     "score": 0.94,
     "streak": 15,
-    "base_date": "2025-10-01",
     "holding_days": 0,
     "phrase": "✅ 신규 매수"
   },
@@ -107,7 +100,6 @@
     "daily_pct": -0.57,
     "score": 1.18,
     "streak": 15,
-    "base_date": "2025-10-01",
     "holding_days": 1,
     "phrase": ""
   },
@@ -121,7 +113,6 @@
     "daily_pct": -0.45,
     "score": 0.81,
     "streak": 15,
-    "base_date": "2025-10-01",
     "holding_days": 0,
     "phrase": ""
   },
@@ -135,7 +126,6 @@
     "daily_pct": -1.61,
     "score": 0.46,
     "streak": 15,
-    "base_date": "2025-10-01",
     "holding_days": 0,
     "phrase": ""
   },
@@ -149,7 +139,6 @@
     "daily_pct": -0.76,
     "score": 0.26,
     "streak": 15,
-    "base_date": "2025-10-01",
     "holding_days": 1,
     "phrase": ""
   },
@@ -163,7 +152,6 @@
     "daily_pct": -0.87,
     "score": -0.79,
     "streak": 0,
-    "base_date": "2025-10-01",
     "holding_days": 0,
     "phrase": ""
   }
