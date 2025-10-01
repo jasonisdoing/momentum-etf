@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -17,6 +19,7 @@ from utils.account_registry import (
     list_available_countries,
 )
 from utils.notification import build_summary_line_from_summary_data
+from utils.backtest_utils import print_backtest_summary
 from utils.report import (
     format_aud_money,
     format_aud_price,
@@ -31,7 +34,7 @@ from logic.backtest.country_runner import (
     run_country_backtest,
     DEFAULT_TEST_MONTHS_RANGE,
 )
-from logic.maps import DECISION_CONFIG
+from logic.entry_point import DECISION_CONFIG
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
@@ -228,6 +231,27 @@ def _render_backtest_overview(
     return lines
 
 
+def _render_legacy_header(
+    result: CountryBacktestResult,
+    *,
+    country: str,
+    months_range: int,
+) -> List[str]:
+    start_stamp = datetime.now().isoformat(timespec="seconds")
+    file_path = f"data/results/backtest_{country}.txt"
+    header_lines = [
+        f"백테스트 결과가 다음 파일에 저장됩니다: {file_path}",
+        "",
+        f"KOR 국가의 ETF 종목들을 대상으로 {months_range}개월 기간 백테스트를 실행합니다.",
+        f"국가별 설정 파일(settings/country/{country}.json)을 사용하여 전략을 적용합니다.",
+        (
+            f"실행 시간: {start_stamp} | 테스트 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}"
+        ),
+        "",
+    ]
+    return header_lines
+
+
 def _render_used_settings_section(
     *,
     result: CountryBacktestResult,
@@ -279,71 +303,6 @@ def _render_metric_descriptions_section(result: CountryBacktestResult) -> List[s
     return lines
 
 
-def _render_monthly_performance_section(
-    result: CountryBacktestResult,
-) -> List[str]:
-    monthly_returns = getattr(result, "monthly_returns", pd.Series(dtype=float))
-    if monthly_returns is None or monthly_returns.empty:
-        return []
-
-    yearly_returns = getattr(result, "yearly_returns", pd.Series(dtype=float))
-    monthly_cum_returns = getattr(result, "monthly_cum_returns", pd.Series(dtype=float))
-
-    pivot_df = (
-        monthly_returns.mul(100)
-        .to_frame("return")
-        .pivot_table(
-            index=monthly_returns.index.year, columns=monthly_returns.index.month, values="return"
-        )
-    )
-
-    if yearly_returns is not None and not yearly_returns.empty:
-        yearly_series = yearly_returns.mul(100)
-        yearly_series.index = yearly_series.index.year
-        pivot_df["연간"] = yearly_series
-
-    cum_pivot_df = None
-    if monthly_cum_returns is not None and not monthly_cum_returns.empty:
-        cum_pivot_df = (
-            monthly_cum_returns.mul(100)
-            .to_frame("cum_return")
-            .pivot_table(
-                index=monthly_cum_returns.index.year,
-                columns=monthly_cum_returns.index.month,
-                values="cum_return",
-            )
-        )
-
-    headers = ["연도"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
-    rows_data: List[List[str]] = []
-    for year, row in pivot_df.iterrows():
-        row_data = [str(year)]
-        for month in range(1, 13):
-            val = row.get(month)
-            row_data.append(f"{val:+.2f}%" if pd.notna(val) else "-")
-        yearly_val = row.get("연간")
-        row_data.append(f"{yearly_val:+.2f}%" if pd.notna(yearly_val) else "-")
-        rows_data.append(row_data)
-
-        if cum_pivot_df is not None and year in cum_pivot_df.index:
-            cum_row = cum_pivot_df.loc[year]
-            cum_data = ["  (누적)"]
-            for month in range(1, 13):
-                cum_val = cum_row.get(month)
-                cum_data.append(f"{cum_val:+.2f}%" if pd.notna(cum_val) else "-")
-            last_valid = cum_row.last_valid_index()
-            if last_valid is not None:
-                cum_data.append(f"{cum_row[last_valid]:+.2f}%")
-            else:
-                cum_data.append("-")
-            rows_data.append(cum_data)
-
-    aligns = ["left"] + ["right"] * (len(headers) - 1)
-    table_lines = render_table_eaw(headers, rows_data, aligns)
-
-    return ["", "=" * 30, " 월별 성과 요약 ".center(30, "="), "=" * 30, ""] + table_lines
-
-
 def _format_period_return_with_listing_date(entry: Mapping[str, Any]) -> str:
     listing = entry.get("listing_date")
     value = entry.get("period_return_pct")
@@ -355,46 +314,6 @@ def _format_period_return_with_listing_date(entry: Mapping[str, Any]) -> str:
     if listing:
         return f"{base} (상장: {listing})"
     return base
-
-
-def _render_ticker_performance_section(
-    result: CountryBacktestResult,
-    money_formatter,
-) -> List[str]:
-    ticker_summaries = getattr(result, "ticker_summaries", [])
-    if not ticker_summaries:
-        return []
-
-    headers = [
-        "티커",
-        "종목명",
-        "총 기여도",
-        "실현손익",
-        "미실현손익",
-        "거래횟수",
-        "승률",
-        "기간수익률",
-    ]
-
-    rows = []
-    for entry in ticker_summaries:
-        rows.append(
-            [
-                entry.get("ticker", "-"),
-                entry.get("name", "-"),
-                money_formatter(entry.get("total_contribution", 0.0)),
-                money_formatter(entry.get("realized_profit", 0.0)),
-                money_formatter(entry.get("unrealized_profit", 0.0)),
-                f"{entry.get('total_trades', 0)}회",
-                f"{entry.get('win_rate', 0.0):.1f}%",
-                _format_period_return_with_listing_date(entry),
-            ]
-        )
-
-    aligns = ["right", "left", "right", "right", "right", "right", "right", "right"]
-    table_lines = render_table_eaw(headers, rows, aligns)
-
-    return ["", "=" * 30, " 종목별 성과 요약 ".center(30, "="), "=" * 30, ""] + table_lines
 
 
 def _format_date_kor(ts: pd.Timestamp) -> str:
@@ -731,35 +650,50 @@ def _generate_daily_report_lines(
 def _dump_backtest_log(
     result: CountryBacktestResult, country_settings: Dict[str, Any], *, country: str
 ) -> Path:
+    """백테스트 로그를 파일로 저장합니다."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     path = RESULTS_DIR / f"backtest_{country}.txt"
     lines: List[str] = []
+
+    # 1. 레거시 헤더 추가
+    legacy_header = _render_legacy_header(
+        result,
+        country=country,
+        months_range=getattr(result, "months_range", DEFAULT_TEST_MONTHS_RANGE),
+    )
+    lines.extend(legacy_header)
+
+    # 2. 기본 정보 추가
     lines.append(f"백테스트 로그 생성: {datetime.now().isoformat(timespec='seconds')}")
     lines.append(
         f"국가: {result.country.upper()} | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}"
     )
     lines.append(f"초기 자본: {result.initial_capital:,.0f} | 포트폴리오 TOPN: {result.portfolio_topn}")
     lines.append("")
-    lines.extend(_render_backtest_overview(result, country_settings))
 
     daily_lines = _generate_daily_report_lines(result, country_settings)
     lines.extend(daily_lines)
 
-    lines.extend(
-        _render_used_settings_section(
-            result=result, country=country, country_settings=country_settings
+    # print_backtest_summary를 사용해서 모든 요약 정보 추가
+    summary_buffer = io.StringIO()
+    original_stdout = sys.stdout
+    sys.stdout = summary_buffer
+    try:
+        print_backtest_summary(
+            summary=result.summary,
+            country=country,
+            test_months_range=getattr(result, "months_range", DEFAULT_TEST_MONTHS_RANGE),
+            initial_capital_krw=result.initial_capital,
+            portfolio_topn=result.portfolio_topn,
+            ticker_summaries=getattr(result, "ticker_summaries", []),
+            core_start_dt=result.start_date,
         )
-    )
-    lines.extend(_render_metric_descriptions_section(result))
+    finally:
+        sys.stdout = original_stdout
+    summary_text = summary_buffer.getvalue()
+    if summary_text:
+        lines.extend(summary_text.strip("\n").splitlines())
 
-    monthly_section = _render_monthly_performance_section(result)
-    if monthly_section:
-        lines.extend(monthly_section)
-
-    currency, money_fmt, _, _, _ = _resolve_formatters(country_settings)
-    ticker_section = _render_ticker_performance_section(result, money_formatter=money_fmt)
-    if ticker_section:
-        lines.extend(ticker_section)
     with path.open("w", encoding="utf-8") as fp:
         fp.write("\n".join(lines) + "\n")
     return path
@@ -788,7 +722,16 @@ def main() -> None:
             result = run_country_backtest(country)
             country_settings = get_country_settings(country)
             log_path = _dump_backtest_log(result, country_settings, country=country)
-            print("\n".join(_render_backtest_overview(result, country_settings)))
+            # 상세한 백테스트 결과 요약을 콘솔에 출력
+            print_backtest_summary(
+                summary=result.summary,
+                country=country,
+                test_months_range=getattr(result, "months_range", DEFAULT_TEST_MONTHS_RANGE),
+                initial_capital_krw=result.initial_capital,
+                portfolio_topn=result.portfolio_topn,
+                ticker_summaries=getattr(result, "ticker_summaries", []),
+                core_start_dt=result.start_date,
+            )
             print(f"\n✅ 백테스트 로그를 '{log_path}'에 저장했습니다.")
         else:
             items = _invoke_country_pipeline(country, date_str=args.date)

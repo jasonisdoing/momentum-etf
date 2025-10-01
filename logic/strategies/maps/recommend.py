@@ -69,7 +69,7 @@ def generate_daily_signals_for_portfolio(
     else:  # kor/coin -> KRW 금액, 가격은 정수(또는 설정값이 있으면 적용)
 
         def price_formatter(p):
-            # 한국/코인 단가는 기본 정수, 설정에 값이 있으면 적용
+            # 한국 단가는 기본 정수, 설정에 값이 있으면 적용
             if price_precision and price_precision > 0:
                 return f"{p:,.{price_precision}f}"
             return _format_kr_price(p)

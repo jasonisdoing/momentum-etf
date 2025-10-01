@@ -10,6 +10,9 @@ from typing import Any, Mapping, Optional
 class StrategyRules:
     """Momentum 전략에서 공통으로 사용하는 핵심 파라미터."""
 
+    # 기본 MA 기간 (이동평균 기간)
+    DEFAULT_MA_PERIOD = 20
+
     ma_period: int
     portfolio_topn: int
     replace_threshold: float

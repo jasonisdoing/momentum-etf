@@ -17,32 +17,6 @@ load_dotenv()
 _db_connection = None
 _mongo_client: Optional[MongoClient] = None
 
-_coin_min_holding_cost_cache: Optional[float] = None
-
-
-def _get_coin_min_holding_cost() -> float:
-    """코인 dust 임계값을 국가 설정에서 로드합니다."""
-
-    global _coin_min_holding_cost_cache
-    if _coin_min_holding_cost_cache is not None:
-        return _coin_min_holding_cost_cache
-
-    threshold = 10000.0  # 기본 폴백
-    try:
-        from utils.account_registry import get_strategy_rules_for_account
-
-        primary_account = _get_primary_account_for_country("coin")
-        if primary_account:
-            rules = get_strategy_rules_for_account(primary_account)
-            value = rules.coin_min_holding_cost_krw
-            if value is not None:
-                threshold = float(value)
-    except Exception:
-        pass
-
-    _coin_min_holding_cost_cache = threshold
-    return threshold
-
 
 def _get_primary_account_for_country(country: str) -> Optional[str]:
     """Return the first active account code for the given country (if any)."""
@@ -247,8 +221,6 @@ def get_portfolio_snapshot(
                 cost_per_share = holdings_agg[ticker]["total_cost"] / original_shares
                 holdings_agg[ticker]["total_cost"] -= trade["shares"] * cost_per_share
             holdings_agg[ticker]["shares"] -= trade["shares"]
-
-    coin_min_holding_cost = _get_coin_min_holding_cost() if country == "coin" else 0.0
 
     holdings_list = []
     for ticker, data in holdings_agg.items():

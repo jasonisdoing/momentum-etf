@@ -36,7 +36,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 ## 문서
 
-- [추천 규칙 명세](docs/signal-rules.md)
+- [추천 규칙 명세](docs/recommend-rules.md)
 - [개발 규칙(개발자 가이드)](docs/development-rules.md)
 
 ## 설치 및 준비
@@ -88,17 +88,8 @@ python run.py
 ```
 
 ### 2) 실시간 추천 조회 (CLI)
-과거 시뮬레이션 없이 "현재 보유 + 오늘 신호"를 바탕으로 다음 거래일에 대한 매매 신호를 제안합니다.
+과거 시뮬레이션 없이 "현재 보유 + 오늘 추천"를 바탕으로 다음 거래일에 대한 매매 추천를 제안합니다.
 
-```bash
-# 단일 계좌 실행
-python cli.py <계좌코드> --signal
-
-# 국가 단위 전체 실행 (활성 계좌만)
-python cli.py --country kor --signal
-python cli.py --country aus --signal
-python cli.py --country coin --signal
-```
 
 ### 3) 백테스트 실행 (CLI)
 과거 구간에 대해 백테스트를 실행합니다.
@@ -152,7 +143,7 @@ python scripts/categorize_etf.py <국가코드>
 - Google AI Studio에서 API 키 발급 후 `.env` 파일에 `GOOGLE_API_KEY` 설정
 
 ### 6) 스케줄러로 자동 실행 (APScheduler)
-장 마감 이후 자동으로 현황을 계산하고(교체매매 신호 포함) 슬랙(Slack)으로 알림을 보낼 수 있습니다.
+장 마감 이후 자동으로 현황을 계산하고(교체매매 추천 포함) 슬랙(Slack)으로 알림을 보낼 수 있습니다.
 
 1. 의존성 설치: `pip install -r requirements.txt`
 2. (선택) 환경 변수로 스케줄/타임존 설정:
@@ -182,9 +173,9 @@ python scripts/find.py --type etf --min-change 3.0
 
 ## 전략/로직 요약
 
-### 매매 신호
-- **매수 신호**: 가격이 지정된 기간의 이동평균선 위에 있을 때
-- **매도 신호**:
+### 매매 추천
+- **매수 추천**: 가격이 지정된 기간의 이동평균선 위에 있을 때
+- **매도 추천**:
   - **추세이탈**: 가격이 이동평균선 아래로 내려갈 때
   - **손절**: 보유 수익률이 손절 기준을 하회할 때
 

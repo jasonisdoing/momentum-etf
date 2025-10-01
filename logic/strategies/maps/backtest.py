@@ -203,7 +203,14 @@ def run_portfolio_backtest(
     out_cash = []
 
     # 일별 루프를 돌며 시뮬레이션을 실행합니다.
+    total_days = len(union_index)
+    print(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다...")
+
     for i, dt in enumerate(union_index):
+        # 진행률 표시 (10% 단위로)
+        if i % max(1, total_days // 10) == 0 or i == total_days - 1:
+            progress_pct = int((i + 1) / total_days * 100)
+            print(f"[백테스트] 진행률: {progress_pct}% ({i + 1}/{total_days}일)")
         # 당일 시작 시점 보유 수량 스냅샷(순매수/순매도 판단용)
         prev_holdings_map = {t: float(state["shares"]) for t, state in position_state.items()}
         buy_trades_today_map: Dict[str, List[Dict[str, float]]] = {}

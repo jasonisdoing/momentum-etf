@@ -13,7 +13,7 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated", categor
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from logic import momentum as strategy_module
+import logic.entry_point as strategy_module
 from logic.strategies.maps.shared import SIGNAL_TABLE_HEADERS
 from utils.account_registry import (
     get_country_settings,
@@ -31,223 +31,14 @@ from utils.data_loader import get_latest_trading_day
 from utils.data_loader import get_aud_to_krw_rate, get_usd_to_krw_rate
 from utils.stock_list_io import get_etfs as get_etfs_from_files
 from utils.notification import build_summary_line_from_summary_data
+from utils.backtest_utils import print_backtest_summary, format_period_return_with_listing_date
 
 # 이 파일에서는 매매 전략에 사용되는 고유 파라미터를 정의합니다.
 # 백테스트를 진행할 최근 개월 수 (예: 12 -> 최근 12개월 데이터로 테스트)
 TEST_MONTHS_RANGE = 12
 
 
-def _format_period_return_with_listing_date(s: Dict[str, Any], core_start_dt: pd.Timestamp) -> str:
-    """기간수익률을 상장일과 함께 포맷합니다."""
-    period_return_pct = s.get("period_return_pct", 0.0)
-    listing_date = s.get("listing_date")
-
-    if listing_date and core_start_dt:
-        # 상장일이 테스트 시작일 이후인 경우에만 상장일 표시
-        listing_dt = pd.to_datetime(listing_date)
-        if listing_dt > core_start_dt:
-            return f"{period_return_pct:+.2f}%({listing_date})"
-
-    return f"{period_return_pct:+.2f}%"
-
-
-def _print_backtest_summary(
-    summary: Dict,
-    country: str,
-    account: str,
-    test_months_range: int,
-    initial_capital_krw: float,
-    portfolio_topn: int,
-    ticker_summaries: List[Dict[str, Any]],
-    core_start_dt: pd.Timestamp,
-):
-    from logic import momentum as settings
-
-    """백테스트 결과 요약을 콘솔에 출력합니다."""
-    # 국가 설정에서 통화 및 정밀도 정보 가져오기
-    currency = country_settings.get("currency", "KRW")
-    precision = country_settings.get("amt_precision", 0)
-    try:
-        precision = int(precision)
-    except (TypeError, ValueError):
-        precision = 0
-
-    if currency == "AUD":
-        money_formatter = format_aud_money
-    elif currency == "USD":
-        money_formatter = format_usd_money
-    else:
-        money_formatter = format_kr_money
-    benchmark_name = "BTC" if country == "coin" else "S&P 500"
-
-    summary_lines = [
-        "\n" + "=" * 30 + "\n 백테스트 결과 요약 ".center(30, "=") + "\n" + "=" * 30,
-        f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)",
-    ]
-
-    if summary.get("risk_off_periods"):
-        for start, end in summary["risk_off_periods"]:
-            summary_lines.append(
-                f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
-            )
-    else:
-        summary_lines.append("| 투자 중단: N/A")
-
-    summary_lines.extend(
-        [
-            f"| 초기 자본: {money_formatter(summary['initial_capital_krw'])}",
-            f"| 최종 자산: {money_formatter(summary['final_value'])}",
-            (
-                f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% "
-                f"({benchmark_name}: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
-            ),
-            (
-                f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% "
-                f"({benchmark_name}: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
-            ),
-            f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%",
-            f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}",
-            f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}",
-            f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}",
-            f"| Ulcer Index: {summary.get('ulcer_index', 0.0):.2f}",
-            f"| CUI (Calmar/Ulcer): {summary.get('cui', 0.0):.2f}",
-            "=" * 30,
-        ]
-    )
-
-    print("\n" + "=" * 30 + "\n 사용된 설정값 ".center(30, "=") + "\n" + "=" * 30)
-    used_settings = {
-        "계좌 정보": f"{country.upper()} / {account}",
-        "테스트 기간": f"최근 {test_months_range}개월",
-        "초기 자본": money_formatter(initial_capital_krw),
-        "포트폴리오 종목 수 (TopN)": portfolio_topn,
-        "모멘텀 스코어 MA 기간": f"{settings.MA_PERIOD}일",
-        "교체 매매 점수 임계값": settings.REPLACE_SCORE_THRESHOLD,
-        "개별 종목 손절매": f"{settings.HOLDING_STOP_LOSS_PCT}%",
-        "매도 후 재매수 금지 기간": f"{settings.COOLDOWN_DAYS}일",
-        "시장 위험 필터": "활성" if settings.MARKET_REGIME_FILTER_ENABLED else "비활성",
-    }
-    if settings.MARKET_REGIME_FILTER_ENABLED:
-        used_settings["시장 위험 필터 지표"] = settings.MARKET_REGIME_FILTER_TICKER
-        used_settings["시장 위험 필터 MA 기간"] = f"{settings.MARKET_REGIME_FILTER_MA_PERIOD}일"
-
-    for key, value in used_settings.items():
-        print(f"| {key}: {value}")
-    print("=" * 30)
-
-    print("\n[지표 설명]")
-    print("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
-    print("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
-    print("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
-    print("  - Ulcer Index (얼서 지수): 고점 대비 낙폭의 지속성과 깊이를 반영. 낮을수록 안정적.")
-
-    # 월별 성과 요약 테이블 출력
-    if "monthly_returns" in summary and not summary["monthly_returns"].empty:
-        print("\n" + "=" * 30 + "\n 월별 성과 요약 ".center(30, "=") + "\n" + "=" * 30)
-
-        monthly_returns = summary["monthly_returns"]
-        yearly_returns = summary["yearly_returns"]
-        monthly_cum_returns = summary.get("monthly_cum_returns")
-
-        pivot_df = (
-            monthly_returns.mul(100)
-            .to_frame("return")
-            .pivot_table(
-                index=monthly_returns.index.year,
-                columns=monthly_returns.index.month,
-                values="return",
-            )
-        )
-
-        if not yearly_returns.empty:
-            yearly_series = yearly_returns.mul(100)
-            yearly_series.index = yearly_series.index.year
-            pivot_df["연간"] = yearly_series
-        # yearly_returns가 비어 있으면 '연간' 컬럼을 추가하지 않으며, 이후 .get()은 None을 반환합니다.
-
-        cum_pivot_df = None
-        if monthly_cum_returns is not None and not monthly_cum_returns.empty:
-            cum_pivot_df = (
-                monthly_cum_returns.mul(100)
-                .to_frame("cum_return")
-                .pivot_table(
-                    index=monthly_cum_returns.index.year,
-                    columns=monthly_cum_returns.index.month,
-                    values="cum_return",
-                )
-            )
-
-        headers = ["연도"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
-        rows_data = []
-        for year, row in pivot_df.iterrows():
-            # 월간 수익률 행
-            monthly_row_data = [str(year)]
-            for month in range(1, 13):
-                val = row.get(month)
-                monthly_row_data.append(f"{val:+.2f}%" if pd.notna(val) else "-")
-
-            yearly_val = row.get("연간")
-            monthly_row_data.append(f"{yearly_val:+.2f}%" if pd.notna(yearly_val) else "-")
-            rows_data.append(monthly_row_data)
-
-            # 누적 수익률 행
-            if cum_pivot_df is not None and year in cum_pivot_df.index:
-                cum_row = cum_pivot_df.loc[year]
-                cum_row_data = ["  (누적)"]
-                for month in range(1, 13):
-                    cum_val = cum_row.get(month)
-                    cum_row_data.append(f"{cum_val:+.2f}%" if pd.notna(cum_val) else "-")
-
-                # 연말 누적 수익률을 찾습니다.
-                last_valid_month_index = cum_row.last_valid_index()
-                if last_valid_month_index is not None:
-                    cum_annual_val = cum_row[last_valid_month_index]
-                    cum_row_data.append(f"{cum_annual_val:+.2f}%")
-                else:
-                    cum_row_data.append("-")
-                rows_data.append(cum_row_data)
-
-        aligns = ["left"] + ["right"] * (len(headers) - 1)
-        print("\n" + "\n".join(render_table_eaw(headers, rows_data, aligns)))
-
-    # 종목별 성과 요약 테이블 출력
-    if ticker_summaries:
-        print("\n" + "=" * 30 + "\n 종목별 성과 요약 ".center(30, "=") + "\n" + "=" * 30)
-        headers = [
-            "티커",
-            "종목명",
-            "총 기여도",
-            "실현손익",
-            "미실현손익",
-            "거래횟수",
-            "승률",
-            "기간수익률",
-        ]
-
-        sorted_summaries = sorted(
-            ticker_summaries, key=lambda x: x["total_contribution"], reverse=True
-        )
-
-        rows = [
-            [
-                s["ticker"],
-                s["name"],
-                money_formatter(s["total_contribution"]),
-                money_formatter(s["realized_profit"]),
-                money_formatter(s["unrealized_profit"]),
-                f"{s['total_trades']}회",
-                f"{s['win_rate']:.1f}%",
-                _format_period_return_with_listing_date(s, core_start_dt),
-            ]
-            for s in sorted_summaries
-        ]
-
-        aligns = ["right", "left", "right", "right", "right", "right", "right", "right"]
-        table_lines = render_table_eaw(headers, rows, aligns)
-        print("\n" + "\n".join(table_lines))
-
-    for line in summary_lines:
-        print(line)
+# _format_period_return_with_listing_date and _print_backtest_summary functions have been moved to utils/backtest_utils.py
 
 
 def main(
@@ -288,7 +79,7 @@ def main(
             # 파일 열기 실패 시, 콘솔 출력은 계속 유지됩니다.
             sys.stdout = original_stdout
 
-    from logic import momentum as settings
+    from logic import entry_point as settings
 
     # 파일에서 초기 자본금 및 모든 계좌 설정을 가져옵니다.
     try:
@@ -576,7 +367,7 @@ def main(
                 total_value += float(pv_val) if pd.notna(pv_val) else 0.0
 
                 if tkr != "CASH":
-                    # 코인/호주는 소수점 수량을 허용 (최대 4자리)
+                    # 호주는 소수점 수량을 허용 (최대 4자리)
                     sh_raw = row.get("shares", 0)
                     sh = float(sh_raw) if pd.notna(sh_raw) else 0.0
 
@@ -1092,24 +883,23 @@ def main(
                         }
                     )
 
-            if not quiet:
-                _print_backtest_summary(
-                    summary,
-                    country,
-                    account,
-                    test_months_range,
-                    initial_capital_krw,
-                    portfolio_topn,
-                    ticker_summaries,
-                    core_start_dt,
-                )
-
     finally:
         # 원래의 stdout으로 복원하고 로그 파일을 닫습니다.
         if not quiet and log_file:
             sys.stdout = original_stdout
             log_file.close()
             print(f"\n백테스트가 완료되었습니다. 상세 내용은 {log_path} 파일을 확인하세요.")
+
+    # 백테스트 결과 출력
+    if not quiet:
+        print(
+            f"Backtest result for {country} from {test_months_range[0]} to {test_months_range[1]}"
+        )
+        print(f"Initial capital: {initial_capital:,}")
+        print(f"Portfolio topn: {portfolio_topn}")
+        print(f"Core start date: {core_start_dt}")
+        print(f"Summary: {result.summary}")
+        print(f"Ticker summaries: {result.ticker_summaries}")
 
     return return_value
 
