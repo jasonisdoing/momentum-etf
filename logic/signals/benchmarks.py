@@ -16,7 +16,7 @@ except Exception:  # pragma: no cover
 
 from utils.data_loader import fetch_ohlcv, get_trading_days
 from utils.db_manager import get_portfolio_snapshot
-from utils.account_registry import get_account_file_settings, get_account_info
+from utils.account_registry import get_country_settings
 
 
 def _normalize_yfinance_df(df_y: pd.DataFrame) -> Optional[pd.DataFrame]:
@@ -164,30 +164,45 @@ def calculate_benchmark_comparison(
 ) -> Optional[List[Dict[str, Any]]]:
     """Compare portfolio cumulative return vs. configured benchmarks.
 
-    Returns a list of dicts containing benchmark info and excess return.
+    Args:
+        country: 국가 코드 (예: 'kor', 'aus')
+        account: 더미 계정 (이전 버전과의 호환성을 위해 유지)
+        date_str: 기준일 (선택 사항, 기본값은 오늘)
+
+    Returns:
+        벤치마크 비교 정보를 포함한 딕셔너리 리스트 또는 오류 발생 시 None
     """
     from utils.transaction_manager import get_transactions_up_to_date
 
-    if not account:
+    if not country:
         return None
 
-    # load initial settings
+    # 국가 설정 로드
     try:
-        file_settings = get_account_file_settings(account)
-        initial_capital_krw = float(file_settings["initial_capital_krw"])
-        initial_date = pd.to_datetime(file_settings["initial_date"])  # type: ignore[arg-type]
+        # 국가 설정 가져오기
+        country_settings = get_country_settings(country)
+        if not country_settings:
+            raise ValueError(f"등록되지 않은 국가입니다: {country}")
+
+        # 초기 자본금 및 시작일 설정 (국가 설정 파일에서 가져옴)
+        initial_capital_krw = float(country_settings.get("initial_capital_krw", 0))
+        initial_date_str = country_settings.get("initial_date")
+        if not initial_date_str:
+            raise ValueError(f"{country} 국가 설정에 initial_date가 설정되지 않았습니다.")
+        initial_date = pd.to_datetime(initial_date_str).normalize()
+
+        # 벤치마크 티커 목록 가져오기
+        benchmarks_to_compare = country_settings.get("benchmarks_tickers", [])
+        if not isinstance(benchmarks_to_compare, list):
+            benchmarks_to_compare = []
+
     except Exception as e:
         return [{"name": "벤치마크", "error": str(e)}]
 
-    account_info = get_account_info(account)
-    if not account_info or "benchmarks_tickers" not in account_info:
-        return None
-
-    benchmarks_to_compare = account_info["benchmarks_tickers"]
     if not benchmarks_to_compare or initial_capital_krw <= 0:
         return None
 
-    portfolio_data = get_portfolio_snapshot(country, account=account, date_str=date_str)
+    portfolio_data = get_portfolio_snapshot(country, date_str=date_str)
     if not portfolio_data:
         return None
 

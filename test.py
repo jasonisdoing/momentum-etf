@@ -16,10 +16,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from logic import momentum as strategy_module
 from logic.strategies.momentum.shared import SIGNAL_TABLE_HEADERS
 from utils.account_registry import (
-    get_account_file_settings,
+    get_country_settings,
+    get_strategy_rules,
     get_common_file_settings,
-    get_account_info,
-    get_strategy_rules_for_account,
 )
 from utils.tee import Tee
 from utils.report import (
@@ -65,9 +64,9 @@ def _print_backtest_summary(
     from logic import momentum as settings
 
     """백테스트 결과 요약을 콘솔에 출력합니다."""
-    account_info = get_account_info(account)
-    currency = account_info.get("currency", "KRW")
-    precision = account_info.get("amt_precision", 0)
+    # 국가 설정에서 통화 및 정밀도 정보 가져오기
+    currency = country_settings.get("currency", "KRW")
+    precision = country_settings.get("amt_precision", 0)
     try:
         precision = int(precision)
     except (TypeError, ValueError):

@@ -1,0 +1,41 @@
+[
+    {
+        "category": "글로벌2차전지",
+        "tickers": [
+            {
+                "ticker": "419430",
+                "name": "Kodex 차이나2차전지MSCI(합성)"
+            }
+        ]
+    },
+    {
+        "category": "중국(지수)",
+        "tickers": [
+            {
+                "ticker": "414780",
+                "name": "TIGER 차이나과창판STAR50(합성)"
+            },
+            {
+                "ticker": "413220",
+                "name": "SOL 차이나태양광CSI(합성)"
+            },
+            {
+                "ticker": "256750",
+                "name": "KODEX 차이나심천ChiNext(합성)"
+            },
+            {
+                "ticker": "372330",
+                "name": "Kodex 차이나항셍테크"
+            }
+        ]
+    },
+    {
+        "category": "수소/클린에너지",
+        "tickers": [
+            {
+                "ticker": "417450",
+                "name": "RISE 글로벌수소경제"
+            }
+        ]
+    }
+]

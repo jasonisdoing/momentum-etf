@@ -156,7 +156,6 @@ def get_db_connection():
 
 def get_portfolio_snapshot(
     country: str,
-    account: str,
     date_str: Optional[str] = None,
 ) -> Optional[Dict]:
     """
@@ -168,8 +167,6 @@ def get_portfolio_snapshot(
 
     # 1. 대상 날짜 결정
     target_date = None
-    if not account:
-        raise ValueError("account is required to load portfolio snapshot")
 
     if date_str:
         try:
@@ -179,37 +176,39 @@ def get_portfolio_snapshot(
             return None
     else:
         # daily_equities에서 가장 최근 날짜를 찾습니다.
-        latest_equity_query = _apply_account_filter({"country": country}, account)
-        latest_equity = db.daily_equities.find_one(latest_equity_query, sort=[("date", DESCENDING)])
-        if latest_equity:
+        latest_equity = db.daily_equities.find_one(
+            {"country": country, "date": {"$exists": True}}, sort=[("date", DESCENDING)]
+        )
+        if latest_equity and "date" in latest_equity:
             target_date = latest_equity["date"]
 
     if not target_date:
         # 거래 내역은 있지만 평가금액이 없을 수도 있으므로, trades에서 날짜를 찾아봅니다.
-        latest_trade_query = _apply_account_filter({"country": country}, account)
-        latest_trade = db.trades.find_one(latest_trade_query, sort=[("date", DESCENDING)])
-        if latest_trade:
+        latest_trade = db.trades.find_one(
+            {"country": country, "date": {"$exists": True}}, sort=[("date", DESCENDING)]
+        )
+        if latest_trade and "date" in latest_trade:
             target_date = latest_trade["date"]
         else:
             return None  # 데이터가 전혀 없음
 
     # 2. 대상 날짜의 총 평가금액 조회
-    equity_query = _apply_account_filter({"country": country, "date": target_date}, account)
-    equity_data = db.daily_equities.find_one(equity_query)
+    equity_data = db.daily_equities.find_one({"country": country, "date": target_date})
 
     # 해당 날짜의 평가금액이 유효한지 확인합니다.
-    is_equity_valid = equity_data and equity_data.get("total_equity", 0) > 0
+    is_equity_valid = bool(
+        equity_data
+        and equity_data.get("total_equity") is not None
+        and equity_data.get("total_equity", 0) > 0
+    )
 
     # 평가금액이 없거나 0이면, 가장 최근의 유효한 평가금액을 찾습니다.
     if not is_equity_valid:
-        latest_valid_equity_query = _apply_account_filter(
-            {
-                "country": country,
-                "date": {"$lt": target_date},
-                "total_equity": {"$gt": 0},
-            },
-            account,
-        )
+        latest_valid_equity_query = {
+            "country": country,
+            "date": {"$lt": target_date},
+            "total_equity": {"$gt": 0},
+        }
         latest_valid_equity = db.daily_equities.find_one(
             latest_valid_equity_query, sort=[("date", DESCENDING)]
         )
@@ -292,9 +291,7 @@ def get_portfolio_snapshot(
     return snapshot
 
 
-def get_previous_portfolio_snapshot(
-    country: str, as_of_date: datetime, account: str
-) -> Optional[Dict]:
+def get_previous_portfolio_snapshot(country: str, as_of_date: datetime) -> Optional[Dict]:
     """
     주어진 날짜 이전의 가장 최근 포트폴리오 스냅샷을 가져옵니다.
     """
@@ -304,15 +301,9 @@ def get_previous_portfolio_snapshot(
 
     # 'daily_equities'와 'trades'에서 as_of_date 이전의 날짜들을 찾습니다.
     # as_of_date를 포함하여 조회한 후, 코드에서 as_of_date를 제외하여 바로 이전 날짜를 찾습니다.
-    equity_dates_query = _apply_account_filter(
-        {"country": country, "date": {"$lte": as_of_date}},
-        account,
-    )
+    equity_dates_query = {"country": country, "date": {"$lte": as_of_date}}
     equity_dates = db.daily_equities.distinct("date", equity_dates_query)
-    trade_dates_query = _apply_account_filter(
-        {"country": country, "date": {"$lte": as_of_date}},
-        account,
-    )
+    trade_dates_query = {"country": country, "date": {"$lte": as_of_date}}
     trade_dates = db.trades.distinct("date", trade_dates_query)
 
     all_prev_dates = set(equity_dates).union(set(trade_dates))
@@ -593,8 +584,16 @@ def get_all_trades(country: str, account: str) -> List[Dict]:
     return trades
 
 
-def get_trades_on_date(country: str, account: str, target_date: datetime) -> List[Dict]:
-    """지정된 날짜에 발생한 모든 거래 내역을 DB에서 가져옵니다."""
+def get_trades_on_date(country: str, target_date: datetime) -> List[Dict]:
+    """지정된 국가와 날짜에 발생한 모든 거래 내역을 DB에서 가져옵니다.
+
+    Args:
+        country: 국가 코드 (예: 'kor', 'aus')
+        target_date: 조회할 날짜 (datetime 객체)
+
+    Returns:
+        List[Dict]: 거래 내역 리스트
+    """
     db = get_db_connection()
     if db is None:
         return []
@@ -604,10 +603,9 @@ def get_trades_on_date(country: str, account: str, target_date: datetime) -> Lis
     end_of_day = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
     query = {
-        "country": country,
+        "country": country.lower(),
         "date": {"$gte": start_of_day, "$lte": end_of_day},
     }
-    query = _apply_account_filter(query, account)
     # 생성 순서대로 정렬
     trades = list(db.trades.find(query).sort("_id", 1))
     for trade in trades:

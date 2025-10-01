@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from typing import Dict, List, Optional, Tuple
 from contextlib import contextmanager
 
@@ -42,6 +42,7 @@ except Exception:
 
 from utils.cache_utils import load_cached_frame, save_cached_frame
 from utils.stock_list_io import get_etfs
+from settings.common import REALTIME_PRICE_ENABLED
 
 # from utils.notify import send_verbose_log_to_slack
 
@@ -152,6 +153,39 @@ def _should_skip_pykrx_fetch(
         return True
 
     return False
+
+
+def _now_with_zone(tz_name: str) -> datetime:
+    try:
+        if ZoneInfo is not None:
+            return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        pass
+    return datetime.now()
+
+
+def _is_kor_realtime_window(now_kst: datetime) -> bool:
+    start = time(9, 0)
+    end = time(23, 59, 59)
+    current = now_kst.time()
+    return start <= current <= end
+
+
+def _should_use_realtime_price(country: str) -> bool:
+    if not REALTIME_PRICE_ENABLED:
+        return False
+    if country.lower() != "kor":
+        return False
+
+    now_kst = _now_with_zone("Asia/Seoul")
+    if not _is_kor_realtime_window(now_kst):
+        return False
+
+    today_str = now_kst.strftime("%Y-%m-%d")
+    try:
+        return bool(get_trading_days(today_str, today_str, "kor"))
+    except Exception:
+        return False
 
 
 @functools.lru_cache(maxsize=1)
@@ -390,7 +424,15 @@ def fetch_ohlcv(
         # 보정 후 시작일이 종료일보다 미래가 될 수 있으므로, 이 경우 데이터를 조회하지 않습니다.
         return None
 
-    return _fetch_ohlcv_with_cache(ticker, country, start_dt.normalize(), end_dt.normalize())
+    df = _fetch_ohlcv_with_cache(ticker, country, start_dt.normalize(), end_dt.normalize())
+
+    if df is None or df.empty:
+        return df
+
+    if _should_use_realtime_price(country):
+        df = _overlay_realtime_price(df, ticker, country)
+
+    return df
 
 
 def _fetch_ohlcv_with_cache(
@@ -488,6 +530,54 @@ def _fetch_ohlcv_with_cache(
     mask = (combined_df.index >= effective_start) & (combined_df.index <= effective_end)
     sliced = combined_df.loc[mask].copy()
     return sliced if not sliced.empty else None
+
+
+def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.DataFrame:
+    """개장 이후 실시간 가격을 캐시 데이터에 덧씌웁니다."""
+
+    if country.lower() != "kor":
+        return df
+
+    price = fetch_naver_realtime_price(ticker)
+    if price is None or price <= 0:
+        return df
+
+    df = df.copy()
+    df.sort_index(inplace=True)
+
+    now_kst = _now_with_zone("Asia/Seoul")
+    today = pd.Timestamp(now_kst.date())
+
+    if not isinstance(df.index, pd.DatetimeIndex):
+        return df
+
+    last_idx = df.index[-1]
+    last_date = pd.Timestamp(last_idx).normalize()
+
+    target_idx = None
+    if last_date == today:
+        target_idx = last_idx
+    elif last_date < today:
+        # 새로운 거래일 행을 추가합니다.
+        new_row = df.iloc[-1].copy()
+        for col in ("Open", "High", "Low", "Close", "Adj Close"):
+            if col in df.columns:
+                new_row[col] = price
+        if "Volume" in new_row.index:
+            new_row["Volume"] = 0.0
+        target_idx = today
+        df.loc[target_idx] = new_row
+        df.sort_index(inplace=True)
+    else:
+        # 미래 날짜가 이미 존재하는 경우는 그대로 둡니다.
+        return df
+
+    if target_idx is not None:
+        for col in ("Close", "Adj Close", "Open", "High", "Low"):
+            if col in df.columns:
+                df.loc[target_idx, col] = price
+
+    return df
 
 
 def _fetch_ohlcv_core(
@@ -619,30 +709,33 @@ def _fetch_ohlcv_core(
 
         ticker_yf = format_aus_ticker_for_yfinance(ticker)
         try:
+            # yfinance에서 데이터를 가져올 때 auto_adjust=False로 설정하고, 수동으로 조정합니다.
             df = yf.download(
                 ticker_yf,
                 start=start_dt,
                 end=end_dt + pd.Timedelta(days=1),
-                auto_adjust=False,  # 원본 데이터를 모두 가져옵니다.
+                auto_adjust=False,  # 수동으로 조정
                 progress=False,
             )
             if df.empty:
                 return None
 
-            # 실제 마감가를 unadjusted_close 컬럼에 백업하기 전에 MultiIndex 컬럼을 정리합니다.
+            # MultiIndex 컬럼을 정리합니다.
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
                 df = df.loc[:, ~df.columns.duplicated()]
 
+            # 조정되지 않은 종가를 백업
             if "Close" in df.columns:
                 df["unadjusted_close"] = df["Close"]
 
-            if "Adj Close" in df.columns:
-                adj_close = df["Adj Close"]
-                if isinstance(adj_close, pd.DataFrame):
-                    adj_close = adj_close.iloc[:, 0]
-                if not adj_close.isnull().all():
-                    df["Close"] = adj_close
+            # 조정된 종가가 있으면 사용하고, 없으면 원본 종가를 사용
+            if "Adj Close" in df.columns and not df["Adj Close"].isnull().all():
+                df["Close"] = df["Adj Close"]
+
+            # 필요한 컬럼만 남기고 나머지는 제거
+            required_columns = ["Open", "High", "Low", "Close", "Volume", "unadjusted_close"]
+            df = df[[col for col in required_columns if col in df.columns]]
             if not df.index.is_unique:
                 df = df[~df.index.duplicated(keep="first")]
             if df.index.tz is not None:

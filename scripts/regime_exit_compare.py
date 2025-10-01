@@ -16,9 +16,8 @@ import pandas as pd
 
 from logic.strategies.momentum.backtest import run_portfolio_backtest
 from utils.account_registry import (
-    get_account_file_settings,
-    get_account_info,
-    get_strategy_rules_for_account,
+    get_country_settings,
+    get_strategy_rules_for_country,
     get_common_file_settings,
 )
 from utils.stock_list_io import get_etfs
@@ -66,18 +65,19 @@ def _calculate_metrics(equity: pd.Series) -> Dict[str, float]:
     }
 
 
-def compare_exit_behaviors(account: str, start: str | None, end: str | None) -> None:
-    account_settings = get_account_file_settings(account)
-    account_info = get_account_info(account)
-    if not account_info:
-        raise SystemExit(f"등록되지 않은 계좌입니다: {account}")
-    country = str(account_info.get("country") or "").strip()
-    if not country:
-        raise SystemExit(f"'{account}' 계좌에 국가 정보가 없습니다.")
+def compare_exit_behaviors(country: str, start: str | None, end: str | None) -> None:
+    # 국가 설정 가져오기
+    country_settings = get_country_settings(country)
+    if not country_settings:
+        raise SystemExit(f"등록되지 않은 국가입니다: {country}")
 
-    rules = get_strategy_rules_for_account(account)
+    # 공통 설정 가져오기
     common = get_common_file_settings()
 
+    # 전략 규칙 가져오기
+    rules = get_strategy_rules_for_country(country)
+
+    # 날짜 설정
     end_dt = pd.to_datetime(_parse_date(end) or datetime.now().strftime("%Y-%m-%d")).normalize()
     months_range = TEST_MONTHS_RANGE if TEST_MONTHS_RANGE else 12
     default_start_dt = (end_dt - pd.DateOffset(months=months_range)).normalize()
@@ -88,15 +88,21 @@ def compare_exit_behaviors(account: str, start: str | None, end: str | None) -> 
     start_date = start_dt.strftime("%Y-%m-%d")
     end_date = end_dt.strftime("%Y-%m-%d")
 
+    # ETF 목록 가져오기
     stocks = get_etfs(country)
 
-    print(f"레짐 출구 비교 백테스트 실행 ({account}, {start_date}~{end_date})...")
+    print(f"레짐 출구 비교 백테스트 실행 ({country}, {start_date}~{end_date})...")
 
-    cooldown_days = int(account_settings.get("cooldown_days", 0))
+    # 국가 설정에서 cooldown_days 가져오기
+    strategy_settings = country_settings.get("strategy", {})
+    cooldown_days = int(strategy_settings.get("COOLDOWN_DAYS", 0))
+
+    # 초기 자본 가져오기
+    initial_capital = float(country_settings.get("initial_capital_krw", 100000000))  # 기본값 1억원
 
     base_kwargs = dict(
         stocks=stocks,
-        initial_capital=account_settings["initial_capital_krw"],
+        initial_capital=initial_capital,
         top_n=rules.portfolio_topn,
         ma_period=rules.ma_period,
         replace_threshold=rules.replace_threshold,
@@ -141,19 +147,18 @@ def compare_exit_behaviors(account: str, start: str | None, end: str | None) -> 
             "equity_hold_block": equity_hold_block,
         }
     )
-    output_path = f"regime_exit_compare_{account}_{start_date}_{end_date}.csv"
+
+    output_path = f"regime_exit_compare_{country}_{start_date}_{end_date}.csv"
     result_df.to_csv(output_path, encoding="utf-8-sig")
     print(f"\n상세 결과를 CSV로 저장했습니다: {output_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Regime exit behavior 비교")
-    parser.add_argument("account", default="m1", nargs="?", help="계좌 코드 (기본: m1)")
     parser.add_argument("--start", help="시작일 (YYYY-MM-DD)")
     parser.add_argument("--end", help="종료일 (YYYY-MM-DD)")
     args = parser.parse_args()
-
-    compare_exit_behaviors(args.account, args.start, args.end)
+    compare_exit_behaviors(args.country, args.start, args.end)
 
 
 if __name__ == "__main__":

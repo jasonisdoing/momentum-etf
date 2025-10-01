@@ -19,7 +19,6 @@ from logic.signals.formatting import _load_country_precision
 
 def generate_daily_signals_for_portfolio(
     country: str,
-    account: str,
     base_date: pd.Timestamp,
     portfolio_settings: Dict,
     strategy_rules: StrategyRules,

@@ -27,10 +27,7 @@ except ImportError:  # pragma: no cover - optional dependency
     croniter = None
     pytz = None
 
-from utils.account_registry import (
-    get_account_file_settings,
-    get_account_info,
-)
+from utils.account_registry import get_country_settings
 from utils.schedule_config import get_country_schedule
 from utils.data_loader import get_aud_to_krw_rate
 from utils.db_manager import get_portfolio_snapshot
@@ -46,17 +43,21 @@ _LAST_ERROR: Optional[str] = None
 
 
 def get_slack_webhook_url(country: str, account: Optional[str] = None) -> Optional[Tuple[str, str]]:
-    """Return (webhook_url, source_name) for the given account/country."""
+    """Return (webhook_url, source_name) for the given country.
 
-    # 1. 계좌 파일에서 직접 지정한 웹훅이 있는지 확인합니다.
-    if account:
-        try:
-            settings = get_account_file_settings(account)
-            url = settings.get("slack_webhook_url")
-            if url:
-                return url, f"account:{account}"
-        except SystemExit:
-            pass
+    Args:
+        country: 국가 코드 (예: 'kor', 'aus')
+        account: 더 이상 사용되지 않음 (이전 버전과의 호환성을 위해 유지)
+
+    Returns:
+        (웹훅 URL, 소스 이름) 튜플 또는 사용 가능한 웹훅이 없으면 None
+    """
+    # 1. 국가 설정에서 웹훅 URL 가져오기
+    country_settings = get_country_settings(country)
+    if country_settings:
+        url = country_settings.get("slack_webhook_url")
+        if url:
+            return url, f"country:{country}"
 
     # 2. 환경 변수 (국가 단위) 확인
     env_var_name = f"{country.upper()}_SLACK_WEBHOOK"
@@ -357,13 +358,9 @@ def send_summary_notification(
     new_snapshot = get_portfolio_snapshot(country, account=account)
     new_equity = float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
 
-    # 필요 시 AUD -> KRW 환산
-    account_currency = None
-    try:
-        account_info = get_account_info(account)
-        account_currency = (account_info or {}).get("currency")
-    except Exception:
-        account_info = None
+    # 국가 설정에서 통화 정보 가져오기
+    country_settings = get_country_settings(country)
+    account_currency = country_settings.get("currency") if country_settings else "KRW"
 
     aud_krw_rate = None
     if account_currency == "AUD":
@@ -372,11 +369,10 @@ def send_summary_notification(
             new_equity *= aud_krw_rate
             old_equity *= aud_krw_rate
 
-    try:
-        file_settings = get_account_file_settings(account)
-        initial_capital_krw = float(file_settings.get("initial_capital_krw", 0))
-    except SystemExit:
-        initial_capital_krw = 0.0
+    # 국가 설정에서 초기 자본금 가져오기
+    initial_capital_krw = (
+        float(country_settings.get("initial_capital_krw", 0)) if country_settings else 0.0
+    )
 
     money_formatter = format_kr_money
     app_tag = getattr(global_settings, "APP_TYPE", "APP")
@@ -616,10 +612,8 @@ def send_detailed_signal_notification(
 
     app_tag = getattr(global_settings, "APP_TYPE", "APP")
     title = f"[{app_tag}][{country}/{account}] 종목상세"
-    try:
-        need_signal_flag = bool((get_account_info(account) or {}).get("need_signal", True))
-    except Exception:
-        need_signal_flag = True
+    # 국가 설정에서 시그널 필요 여부 확인 (기본값: True)
+    need_signal_flag = bool(country_settings.get("need_signal", True)) if country_settings else True
 
     message_header_parts = [title]
     if not need_signal_flag:
@@ -662,33 +656,13 @@ def send_detailed_signal_notification(
             }
             aligns = ["right" if (str(h) in numeric_like) else "left" for h in headers]
 
-            # 3) 퍼센트 표시 자릿수 설정 로드 및 적용
+            # 3) 퍼센트 표시 자릿수 설정 (기본값 사용)
             def _load_display_precision() -> Dict[str, int]:
-                try:
-                    root = Path(__file__).resolve().parent.parent  # project root
-                    cfg_path = root / "data" / "settings" / "precision.json"
-                    if not cfg_path.exists():
-                        return {
-                            "daily_return_pct": 2,
-                            "cum_return_pct": 2,
-                            "weight_pct": 2,
-                        }
-                    import json
-
-                    with open(cfg_path, "r", encoding="utf-8") as fp:
-                        data = json.load(fp) or {}
-                    prec = data.get("common") or {}
-                    return {
-                        "daily_return_pct": int(prec.get("daily_return_pct", 2)),
-                        "cum_return_pct": int(prec.get("cum_return_pct", 2)),
-                        "weight_pct": int(prec.get("weight_pct", 2)),
-                    }
-                except Exception:
-                    return {
-                        "daily_return_pct": 2,
-                        "cum_return_pct": 2,
-                        "weight_pct": 2,
-                    }
+                return {
+                    "daily_return_pct": 2,
+                    "cum_return_pct": 2,
+                    "weight_pct": 2,
+                }
 
             prec = _load_display_precision()
             p_daily = max(0, int(prec.get("daily_return_pct", 2)))
@@ -810,19 +784,10 @@ def send_detailed_signal_notification(
     #     file_path_obj = Path(save_to_path)
     #     upload_channel = None
 
-    #     try:
-    #         account_info = get_account_info(account)
-    #         if account_info:
-    #             upload_channel = account_info.get("slack_channel")
-    #     except Exception:
-    #         upload_channel = None
-
-    #     if not upload_channel:
-    #         try:
-    #             file_settings = get_account_file_settings(account)
-    #             upload_channel = file_settings.get("slack_file_channel")
-    #         except SystemExit:
-    #             upload_channel = None
+    #     # 국가 설정에서 슬랙 채널 가져오기
+    #     upload_channel = None
+    #     if country_settings:
+    #         upload_channel = country_settings.get("slack_channel") or country_settings.get("slack_file_channel")
 
     #     if upload_channel:
     #         title = f"[{getattr(global_settings, 'APP_TYPE', 'APP')}][{country}/{account}] 시그널 로그"

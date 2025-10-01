@@ -255,6 +255,10 @@
             {
                 "ticker": "490330",
                 "name": "KoAct 미국뇌질환치료제액티브"
+            },
+            {
+                "ticker": "483030",
+                "name": "KIWOOM 미국블록버스터바이오테크의약품+"
             }
         ]
     },
@@ -328,7 +332,7 @@
         ]
     },
     {
-        "category": "한국방산",
+        "category": "방산",
         "tickers": [
             {
                 "ticker": "449450",
@@ -337,6 +341,10 @@
             {
                 "ticker": "0080G0",
                 "name": "Kodex K방산TOP10"
+            },
+            {
+                "ticker": "494840",
+                "name": "TIGER 미국방산TOP10"
             }
         ]
     },
@@ -355,10 +363,6 @@
             {
                 "ticker": "394670",
                 "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)"
-            },
-            {
-                "ticker": "419430",
-                "name": "Kodex 차이나2차전지MSCI(합성)"
             }
         ]
     },
@@ -381,27 +385,6 @@
             {
                 "ticker": "139230",
                 "name": "TIGER 200 중공업"
-            }
-        ]
-    },
-    {
-        "category": "중국(지수)",
-        "tickers": [
-            {
-                "ticker": "414780",
-                "name": "TIGER 차이나과창판STAR50(합성)"
-            },
-            {
-                "ticker": "413220",
-                "name": "SOL 차이나태양광CSI(합성)"
-            },
-            {
-                "ticker": "256750",
-                "name": "KODEX 차이나심천ChiNext(합성)"
-            },
-            {
-                "ticker": "372330",
-                "name": "Kodex 차이나항셍테크"
             }
         ]
     },
@@ -486,10 +469,6 @@
                 "name": "KODEX 필수소비재"
             },
             {
-                "ticker": "329670",
-                "name": "Kodex TRF7030"
-            },
-            {
                 "ticker": "352540",
                 "name": "Kodex 일본부동산리츠(H)"
             },
@@ -504,10 +483,6 @@
             {
                 "ticker": "411860",
                 "name": "KIWOOM 독일DAX"
-            },
-            {
-                "ticker": "441640",
-                "name": "Kodex 미국배당커버드콜액티브"
             },
             {
                 "ticker": "453630",
@@ -544,10 +519,6 @@
             {
                 "ticker": "463680",
                 "name": "KODEX 미국S&P500테크놀로지"
-            },
-            {
-                "ticker": "465670",
-                "name": "TIGER 미국캐시카우100"
             },
             {
                 "ticker": "475050",

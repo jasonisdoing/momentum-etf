@@ -5,20 +5,85 @@ Moved from the root signals module to avoid circular imports and duplication.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from pymongo import DESCENDING
+from pymongo import DESCENDING, ASCENDING
 
 from logic.momentum import COIN_ZERO_THRESHOLD
+from utils.trade_store import list_open_positions
 from utils.db_manager import get_db_connection
 
 
+def _extract_trade_time(trade: dict) -> Optional[datetime]:
+    value = trade.get("date") or trade.get("executed_at")
+    if isinstance(value, datetime):
+        return value
+    return None
+
+
+def _extract_trade_shares(trade: dict) -> float:
+    raw = trade.get("shares")
+    if raw is None:
+        raw = trade.get("quantity")
+    try:
+        return float(raw or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _generate_ticker_query_keys(ticker: str) -> List[str]:
+    keys: set[str] = set()
+    raw = str(ticker or "").strip()
+    if not raw:
+        return []
+
+    upper = raw.upper()
+    keys.add(raw)
+    keys.add(upper)
+
+    if ":" in upper:
+        suffix = upper.split(":")[-1]
+        keys.add(suffix)
+        keys.add(f"{suffix}.AX")
+        keys.add(f"{suffix}.KS")
+    if "." in upper:
+        keys.add(upper.split(".")[0])
+
+    keys.add(upper.replace("ASX:", ""))
+    keys.add(upper.replace("KOR:", ""))
+
+    return [k for k in keys if k]
+
+
+def _canonical_ticker_key(ticker: str) -> str:
+    value = str(ticker or "").strip().upper()
+    if not value:
+        return ""
+
+    if ":" in value:
+        value = value.split(":")[-1]
+    if "." in value:
+        value = value.split(".")[0]
+    value = value.replace("-", "").replace("_", "")
+    value = value.replace("ASX", "", 1) if value.startswith("ASX") else value
+    value = value.replace("KOR", "", 1) if value.startswith("KOR") else value
+    return value.strip()
+
+
 def calculate_consecutive_holding_info(
-    held_tickers: List[str], country: str, account: str, as_of_date: datetime
+    held_tickers: List[str], country: str, as_of_date: datetime
 ) -> Dict[str, Dict]:
     """
     Scan 'trades' collection and compute consecutive holding start date per ticker
-    for the given account. Uses a single query to avoid N+1 access.
+    for the given country. Uses a single query to avoid N+1 access.
+
+    Args:
+        held_tickers: List of tickers to check
+        country: Country code (e.g., 'kor', 'aus')
+        as_of_date: Date to calculate holding info as of
+
+    Returns:
+        Dictionary mapping tickers to their holding info
     """
     holding_info = {tkr: {"buy_date": None} for tkr in held_tickers}
     if not held_tickers:
@@ -29,63 +94,100 @@ def calculate_consecutive_holding_info(
         print("-> 경고: DB에 연결할 수 없어 보유일 계산을 건너뜁니다.")
         return holding_info
 
-    if not account:
-        raise ValueError("account is required for calculating holding info")
-
-    # include all trades within the same calendar day (till 23:59:59.999999)
     include_until = as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-    query = {
+    query: Dict[str, Any] = {
         "country": country,
-        "account": account,
-        "ticker": {"$in": held_tickers},
-        "date": {"$lte": include_until},
+        "deleted_at": {"$exists": False},
     }
-    all_trades = list(
-        db.trades.find(
-            query,
-            sort=[("date", DESCENDING), ("_id", DESCENDING)],
-        )
+
+    query_keys: set[str] = set()
+    for tkr in held_tickers:
+        query_keys.update(_generate_ticker_query_keys(tkr))
+
+    if query_keys:
+        query["ticker"] = {"$in": list(query_keys)}
+
+    trades_cursor = db.trades.find(query).sort(
+        [
+            ("executed_at", ASCENDING),
+            ("date", ASCENDING),
+            ("_id", ASCENDING),
+        ]
     )
 
     from collections import defaultdict
 
     trades_by_ticker = defaultdict(list)
-    for trade in all_trades:
-        trades_by_ticker[trade["ticker"]].append(trade)
+    for trade in trades_cursor:
+        when = _extract_trade_time(trade)
+        if when is None or when > include_until:
+            continue
+        key = _canonical_ticker_key(trade.get("ticker"))
+        if not key:
+            continue
+        trades_by_ticker[key].append((when, trade))
+
+    threshold = COIN_ZERO_THRESHOLD if country == "coin" else 0.0
+
+    try:
+        open_positions = list_open_positions(country)
+    except Exception:
+        open_positions = []
+
+    fallback_map = {_canonical_ticker_key(pos.get("ticker")): pos for pos in open_positions}
 
     for tkr in held_tickers:
-        trades = trades_by_ticker.get(tkr)
-        if not trades:
-            continue
+        key = _canonical_ticker_key(tkr)
+        entries = trades_by_ticker.get(key)
+        buy_dt: Optional[datetime] = None
 
-        try:
-            current_shares = sum(
-                t["shares"] if t["action"] == "BUY" else -t["shares"] for t in trades
-            )
+        if entries:
+            running_shares = 0.0
+            consecutive_start: Optional[datetime] = None
 
-            buy_date = None
-            for trade in trades:
-                if current_shares <= COIN_ZERO_THRESHOLD:
-                    break
-                buy_date = trade["date"]
-                if trade["action"] == "BUY":
-                    current_shares -= trade["shares"]
-                elif trade["action"] == "SELL":
-                    current_shares += trade["shares"]
+            for when, trade in entries:
+                action = (trade.get("action") or "").upper()
+                qty = _extract_trade_shares(trade)
 
-            if buy_date:
-                holding_info[tkr]["buy_date"] = buy_date
-        except Exception as e:
-            print(f"-> 경고: {tkr} 보유일 계산 중 오류 발생: {e}")
+                if action == "BUY":
+                    running_shares += qty
+                    if running_shares > threshold and consecutive_start is None:
+                        consecutive_start = when
+                elif action == "SELL":
+                    running_shares -= qty
+                    if running_shares <= threshold:
+                        consecutive_start = None
+
+            if consecutive_start and running_shares > threshold:
+                buy_dt = consecutive_start
+
+        if buy_dt is None:
+            fallback_entry = fallback_map.get(key)
+            if fallback_entry:
+                when = _extract_trade_time(fallback_entry)
+                if when and when <= include_until:
+                    buy_dt = when
+
+        if buy_dt is not None:
+            holding_info[tkr]["buy_date"] = buy_dt
 
     return holding_info
 
 
 def calculate_trade_cooldown_info(
-    tickers: List[str], country: str, account: str, as_of_date: datetime
+    tickers: List[str], country: str, as_of_date: datetime
 ) -> Dict[str, Dict[str, Optional[datetime]]]:
-    """Compute recent buy/sell dates per ticker for trade cooldown decisions."""
+    """Compute recent buy/sell dates per ticker for trade cooldown decisions.
+
+    Args:
+        tickers: List of tickers to check
+        country: Country code (e.g., 'kor', 'aus')
+        as_of_date: Date to calculate cooldown as of
+
+    Returns:
+        Dictionary mapping tickers to their trade cooldown info
+    """
     info: Dict[str, Dict[str, Optional[datetime]]] = {
         tkr: {"last_buy": None, "last_sell": None} for tkr in tickers
     }
@@ -101,7 +203,6 @@ def calculate_trade_cooldown_info(
 
     query = {
         "country": country,
-        "account": account,
         "ticker": {"$in": tickers},
         "date": {"$lte": include_until},
     }

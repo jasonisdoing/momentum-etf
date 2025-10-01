@@ -15,7 +15,7 @@ def main() -> None:
 
 
 def generate_signal_report(*args: Any, **kwargs: Dict[str, Any]):
-    from .pipeline import generate_signal_report as _gen
+    from .pipeline import generate_country_signal_report as _gen
 
     return _gen(*args, **kwargs)
 

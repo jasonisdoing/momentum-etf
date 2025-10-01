@@ -27,19 +27,29 @@ _DISPLAY_COLUMNS = [
 ]
 
 
-@lru_cache(maxsize=None)
 def load_recommendations(country: str) -> list[dict[str, Any]]:
     """지정한 국가의 추천 종목 JSON을 로드합니다."""
 
+    # 캐시 무효화를 위해 파일의 마지막 수정 시간을 확인
     normalized_country = country.strip().lower()
     path = _DATA_DIR / f"{normalized_country}.json"
 
+    # 파일이 존재하지 않으면 빈 리스트 반환
     if not path.exists():
         raise FileNotFoundError(f"추천 종목 파일을 찾을 수 없습니다: {path}")
 
+    # 파일의 마지막 수정 시간을 기반으로 캐시 키 생성
+    file_mtime = path.stat().st_mtime
+    cache_key = f"{normalized_country}_{file_mtime}"
+
+    # 캐시된 결과가 있으면 반환
+    if hasattr(load_recommendations, "_cache") and cache_key in load_recommendations._cache:
+        return load_recommendations._cache[cache_key]
+
+    # 파일에서 데이터 로드
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:  # pragma: no cover - 단순 예외 메시지 강화
+    except json.JSONDecodeError as exc:
         raise ValueError(f"추천 종목 JSON 파싱 실패: {path.name}") from exc
 
     if not isinstance(raw, list):
@@ -51,6 +61,12 @@ def load_recommendations(country: str) -> list[dict[str, Any]]:
             normalized.append(entry.copy())
 
     normalized.sort(key=lambda row: row.get("rank", 0))
+
+    # 결과를 캐시에 저장 (함수 객체에 캐시 딕셔너리 추가)
+    if not hasattr(load_recommendations, "_cache"):
+        load_recommendations._cache = {}
+    load_recommendations._cache[cache_key] = normalized
+
     return normalized
 
 
@@ -194,10 +210,25 @@ def style_recommendations_dataframe(country: str, df: pd.DataFrame) -> Styler:
 
 
 def get_recommendations_dataframe(country: str) -> pd.DataFrame:
-    """로딩과 포맷팅을 한 번에 수행하는 헬퍼."""
+    """로딩과 포맷팅을 한 번에 수행하는 헬퍼.
 
-    rows = load_recommendations(country)
-    return recommendations_to_dataframe(country, rows)
+    Args:
+        country: 국가 코드 (예: 'kor', 'aus')
+
+    Returns:
+        포맷팅된 추천 종목 데이터프레임
+    """
+    # 캐시를 무효화하고 최신 데이터 로드
+    if hasattr(load_recommendations, "_cache"):
+        load_recommendations._cache = {}
+
+    try:
+        rows = load_recommendations(country)
+        return recommendations_to_dataframe(country, rows)
+    except Exception as e:
+        print(f"Error loading recommendations for {country}: {str(e)}")
+        # 오류 발생 시 빈 데이터프레임 반환
+        return pd.DataFrame(columns=_DISPLAY_COLUMNS)
 
 
 def get_recommendations_styler(country: str) -> tuple[pd.DataFrame, Styler]:
