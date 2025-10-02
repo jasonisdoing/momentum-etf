@@ -9,9 +9,6 @@ from .recommend import (
 )
 from .rules import StrategyRules
 
-# MA_PERIOD 상수를 StrategyRules에서 가져옵니다.
-MA_PERIOD = StrategyRules.DEFAULT_MA_PERIOD
-
 
 # 전략 실행 인터페이스
 def run_strategy_backtest(*args, **kwargs):
@@ -32,6 +29,5 @@ __all__ = [
     "run_single_ticker_backtest",
     "run_strategy_backtest",
     "run_strategy_recommendation",
-    "MA_PERIOD",
     "StrategyRules",
 ]

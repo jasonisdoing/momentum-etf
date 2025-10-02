@@ -623,7 +623,9 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
         if is_currently_held and raw_state in {"WAIT"}:
             state = "HOLD"
 
-        if "신규 매수" in phrase:
+        new_buy_phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
+
+        if new_buy_phrase in str(phrase):
             state = "BUY"
 
         phrase = _format_sell_replace_phrase(phrase, etf_meta=etf_meta_map)
@@ -648,7 +650,7 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
                 holding_days_val = (base_date - pd.to_datetime(buy_date).normalize()).days + 1
 
         # 당일 신규 편입 종목은 최소 1일 보유로 표시 및 문구 유지
-        new_buy_phrase = "✅ 신규 매수"
+        new_buy_phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
         bought_today = False
         if holding_days_val == 0:
             if raw_state in {"BUY", "BUY_REPLACE"}:
@@ -736,7 +738,7 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
 
     for i, item in enumerate(wait_items[:additional_buy_slots]):
         item["state"] = "BUY"
-        item["phrase"] = "✅ 신규 매수"
+        item["phrase"] = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
         # 신규 매수로 전환된 종목은 holdings 정보가 없으므로 기본값 추가
         holdings.setdefault(
             item["ticker"],

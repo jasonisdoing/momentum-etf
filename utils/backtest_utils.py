@@ -36,6 +36,8 @@ def print_backtest_summary(
     ticker_summaries: List[Dict[str, Any]],
     core_start_dt: pd.Timestamp,
 ):
+    from settings import common as common_settings
+
     """백테스트 결과 요약을 콘솔에 출력합니다."""
     # 국가 설정에서 통화 정보 가져오기
     country_settings = get_country_settings(country)
@@ -98,16 +100,34 @@ def print_backtest_summary(
     )
 
     print("\n" + "=" * 30 + "\n 사용된 설정값 ".center(30, "=") + "\n" + "=" * 30)
+    if "MA_PERIOD" not in strategy_settings or strategy_settings.get("MA_PERIOD") is None:
+        raise ValueError(f"'{country}' 국가 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
+    ma_period = strategy_settings["MA_PERIOD"]
+    momentum_label = f"{ma_period}일"
+
+    holding_stop_loss_pct = getattr(common_settings, "HOLDING_STOP_LOSS_PCT", None)
+    if holding_stop_loss_pct is None:
+        holding_stop_loss_pct = strategy_settings.get("HOLDING_STOP_LOSS_PCT")
+    if holding_stop_loss_pct is None:
+        raise ValueError("공통 또는 국가 전략 설정에 'HOLDING_STOP_LOSS_PCT' 값이 필요합니다.")
+    stop_loss_label = f"{holding_stop_loss_pct}%"
+
+    market_regime_enabled = getattr(common_settings, "MARKET_REGIME_FILTER_ENABLED", None)
+    if market_regime_enabled is None:
+        market_regime_enabled = strategy_settings.get("MARKET_REGIME_FILTER_ENABLED")
+    if market_regime_enabled is None:
+        raise ValueError("공통 또는 국가 전략 설정에 'MARKET_REGIME_FILTER_ENABLED' 값이 필요합니다.")
+
     used_settings = {
         "국가": country.upper(),
         "테스트 기간": f"최근 {test_months_range}개월",
         "초기 자본": money_formatter(initial_capital_krw),
         "포트폴리오 종목 수 (TopN)": portfolio_topn,
-        "모멘텀 스코어 MA 기간": "20일",  # MA_PERIOD 대신 하드코딩
+        "모멘텀 스코어 MA 기간": momentum_label,
         "교체 매매 점수 임계값": replace_threshold,
-        "개별 종목 손절매": "10%",  # HOLDING_STOP_LOSS_PCT 대신 하드코딩
+        "개별 종목 손절매": stop_loss_label,
         "매도 후 재매수 금지 기간": f"{cooldown_days}일",
-        "시장 위험 필터": "활성",  # MARKET_REGIME_FILTER_ENABLED 대신 하드코딩
+        "시장 위험 필터": "활성" if market_regime_enabled else "비활성",
     }
 
     for key, value in used_settings.items():

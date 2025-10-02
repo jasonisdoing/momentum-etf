@@ -65,12 +65,34 @@ DECISION_CONFIG = {
     },
 }
 
-DECISION_MESSAGES = {
-    # 매수
-    "NEW_BUY": "✅ 신규 매수",
-    # 매도
+
+def _normalize_display_label(raw: str | None) -> str:
+    value = str(raw or "").strip()
+    if value.startswith("<") and value.endswith(">"):
+        value = value[1:-1].strip()
+    return value
+
+
+_DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
+    "BUY": "✅ 신규 매수",
     "SOLD": "🔚 매도 완료",
+    "BUY_REPLACE": "🔄 교체매수",
+    "SELL_REPLACE": "🔄 교체매도",
 }
+
+
+DECISION_MESSAGES = {
+    key: _normalize_display_label(cfg.get("display_name"))
+    for key, cfg in DECISION_CONFIG.items()
+    if isinstance(cfg, dict) and cfg.get("display_name")
+}
+
+for override_key, override_value in _DECISION_MESSAGE_OVERRIDES.items():
+    DECISION_MESSAGES[override_key] = override_value
+
+DECISION_MESSAGES = {key: value for key, value in DECISION_MESSAGES.items() if value}
+
+DECISION_MESSAGES["NEW_BUY"] = DECISION_MESSAGES.get("BUY", "✅ 신규 매수")
 
 DECISION_NOTES = {
     "CATEGORY_DUP": "카테고리 중복",
@@ -81,7 +103,6 @@ DECISION_NOTES = {
     "RISK_OFF_SELL": "시장위험회피 매도",
     "TREND_BREAK": "추세 이탈",
     "REPLACE_SELL": "교체 매도",
-    "LOCKED_HOLD": "신호와 상관없이 보유",
     "PRICE_DATA_FAIL": "가격 데이터 조회 실패",
     # 템플릿
     "COOLDOWN_GENERIC": "쿨다운 {days}일 대기중",

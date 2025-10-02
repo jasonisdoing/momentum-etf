@@ -289,8 +289,6 @@ def generate_daily_recommendations_for_portfolio(
 
     if is_risk_off:
         for decision in decisions:
-            if decision.get("is_locked"):
-                continue
             if decision["state"] == "HOLD":
                 decision["state"] = "SELL_REGIME_FILTER"
                 decision["row"][4] = "SELL_REGIME_FILTER"
@@ -488,8 +486,6 @@ def generate_daily_recommendations_for_portfolio(
     # 최종 decisions 리스트에서 카테고리 1등이 아닌 WAIT 종목을 제거합니다.
     final_decisions = []
     for d in decisions:
-        if d.get("skip_locked"):
-            continue
         # WAIT 상태이고, buy_signal이 있으며, best_wait_tickers에 없는 종목은 제외
         if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] not in best_wait_tickers:
             continue
@@ -515,13 +511,6 @@ def generate_daily_recommendations_for_portfolio(
                     else:
                         # 그 외의 경우 (점수 미달 등)
                         d["row"][-1] = DECISION_NOTES["PORTFOLIO_FULL"]
-
-    for d in final_decisions:
-        if d.get("is_locked") and d.get("is_held"):
-            d["state"] = "HOLD"
-            d["row"][4] = "HOLD"
-            d["buy_signal"] = False
-            d["row"][-1] = DECISION_NOTES["LOCKED_HOLD"]
 
     # 최종 정렬
     sort_decisions_by_order_and_score(final_decisions)

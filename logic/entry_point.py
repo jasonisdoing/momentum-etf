@@ -30,14 +30,10 @@ generate_daily_recommendations_for_portfolio = getattr(
     _recommend_mod, "generate_daily_recommendations_for_portfolio"
 )
 
-# MA_PERIOD 상수 (이전 버전과의 호환성을 위해 유지)
-MA_PERIOD = StrategyRules.DEFAULT_MA_PERIOD
-
 __all__ = [
     "StrategyRules",
     "run_portfolio_backtest",
     "run_single_ticker_backtest",
     "DECISION_CONFIG",
     "generate_daily_recommendations_for_portfolio",
-    "MA_PERIOD",
 ]

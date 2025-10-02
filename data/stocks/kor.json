@@ -543,11 +543,6 @@
                 "recommend_enabled": true
             },
             {
-                "ticker": "117460",
-                "name": "KODEX 에너지화학",
-                "recommend_enabled": true
-            },
-            {
                 "ticker": "117700",
                 "name": "KODEX 건설",
                 "recommend_enabled": true
@@ -560,11 +555,6 @@
             {
                 "ticker": "140710",
                 "name": "KODEX 운송",
-                "recommend_enabled": true
-            },
-            {
-                "ticker": "182480",
-                "name": "TIGER 미국MSCI리츠(합성 H)",
                 "recommend_enabled": true
             },
             {
@@ -648,11 +638,6 @@
                 "recommend_enabled": true
             },
             {
-                "ticker": "453810",
-                "name": "Kodex 인도Nifty50",
-                "recommend_enabled": true
-            },
-            {
                 "ticker": "456250",
                 "name": "Kodex 유럽명품TOP10 STOXX",
                 "recommend_enabled": true
@@ -680,21 +665,6 @@
             {
                 "ticker": "475350",
                 "name": "RISE 버크셔포트폴리오TOP10",
-                "recommend_enabled": true
-            },
-            {
-                "ticker": "477730",
-                "name": "KODEX 인도타타그룹",
-                "recommend_enabled": true
-            },
-            {
-                "ticker": "479730",
-                "name": "TIGER 인도빌리언컨슈머",
-                "recommend_enabled": true
-            },
-            {
-                "ticker": "487920",
-                "name": "ACE 인도시장대표BIG5그룹액티브",
                 "recommend_enabled": true
             },
             {
