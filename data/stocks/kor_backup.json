@@ -30,11 +30,23 @@
         ]
     },
     {
-        "category": "수소/클린에너지",
+        "category": "한국지수",
         "tickers": [
             {
-                "ticker": "417450",
-                "name": "RISE 글로벌수소경제"
+                "ticker": "069500",
+                "name": "Kodex 200"
+            },
+            {
+                "ticker": "315930",
+                "name": "Kodex Top5Plus TR"
+            },
+            {
+                "ticker": "495060",
+                "name": "TIMEFOLIO 코리아밸류업액티브"
+            },
+            {
+                "ticker": "441800",
+                "name": "TIMEFOLIO Korea플러스배당액티브"
             }
         ]
     }

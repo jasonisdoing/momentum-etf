@@ -203,12 +203,12 @@ def calculate_trade_cooldown_info(
     query = {
         "country": country,
         "ticker": {"$in": tickers},
-        "date": {"$lte": include_until},
+        "$or": [{"date": {"$lte": include_until}}, {"executed_at": {"$lte": include_until}}],
     }
 
     trades_cursor = db.trades.find(
         query,
-        sort=[("date", DESCENDING), ("_id", DESCENDING)],
+        sort=[("date", DESCENDING), ("executed_at", DESCENDING), ("_id", DESCENDING)],
     )
 
     for trade in trades_cursor:
@@ -217,10 +217,14 @@ def calculate_trade_cooldown_info(
         if ticker not in info:
             continue
 
+        trade_date = _extract_trade_time(trade)
+        if trade_date is None:
+            continue
+
         if action == "BUY" and info[ticker]["last_buy"] is None:
-            info[ticker]["last_buy"] = trade.get("date")
+            info[ticker]["last_buy"] = trade_date
         elif action == "SELL" and info[ticker]["last_sell"] is None:
-            info[ticker]["last_sell"] = trade.get("date")
+            info[ticker]["last_sell"] = trade_date
 
         if info[ticker]["last_buy"] and info[ticker]["last_sell"]:
             continue

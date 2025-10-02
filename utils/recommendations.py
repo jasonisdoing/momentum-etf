@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
 import pandas as pd
 from pandas.io.formats.style import Styler
+
+from logic.strategies.maps.constants import DECISION_CONFIG
 
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
@@ -167,6 +168,21 @@ def _state_style(value: Any) -> str:
     return ""
 
 
+_STATE_BACKGROUND_MAP = {
+    key.upper(): cfg.get("background")
+    for key, cfg in DECISION_CONFIG.items()
+    if isinstance(cfg, dict)
+}
+
+
+def _row_background_styles(row: pd.Series) -> pd.Series:
+    state = str(row.get("상태", "")).upper()
+    color = _STATE_BACKGROUND_MAP.get(state)
+    if not color:
+        return pd.Series(["" for _ in row], index=row.index)
+    return pd.Series([f"background-color:{color}" for _ in row], index=row.index)
+
+
 def _pct_style(value: Any) -> str:
     text = str(value).strip()
     if text.startswith("+"):
@@ -206,6 +222,7 @@ def style_recommendations_dataframe(country: str, df: pd.DataFrame) -> Styler:
     styled = styled.applymap(_state_style, subset=["상태"])
     styled = styled.applymap(_pct_style, subset=["일간(%)"])
     styled = styled.applymap(_score_style, subset=["점수"])
+    styled = styled.apply(_row_background_styles, axis=1)
     return styled
 
 

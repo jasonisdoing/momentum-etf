@@ -9,6 +9,7 @@ import streamlit as st
 from utils.recommendations import get_recommendations_dataframe
 from utils.settings_loader import get_country_settings
 from utils.tuning_config import DEFAULT_ROW_COLORS, TUNING_CONFIG
+from logic.strategies.maps.constants import DECISION_CONFIG
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data" / "results"
@@ -50,10 +51,24 @@ def _load_country_ui_settings(country: str) -> tuple[str, str]:
 
 def _resolve_row_colors(country: str) -> dict[str, str]:
     country = (country or "").strip().lower()
+    # 기본값: DECISION_CONFIG의 background를 기반으로 구성
+    base_colors = {
+        key.upper(): cfg.get("background")
+        for key, cfg in DECISION_CONFIG.items()
+        if isinstance(cfg, dict) and cfg.get("background")
+    }
+
+    # 튜닝 설정에서 오버라이드할 색상 정보 로드 (없으면 DEFAULT_ROW_COLORS 사용)
     config = TUNING_CONFIG.get(country) or {}
-    row_colors = config.get("ROW_COLORS") or DEFAULT_ROW_COLORS
-    # copy to avoid mutating shared defaults
-    return {str(k).upper(): str(v) for k, v in row_colors.items()}
+    override_colors = config.get("ROW_COLORS") or DEFAULT_ROW_COLORS
+
+    # copy to avoid mutating shared defaults & 병합
+    merged = {str(k).upper(): str(v) for k, v in base_colors.items() if v}
+    for key, value in (override_colors or {}).items():
+        if value:
+            merged[str(key).upper()] = str(value)
+
+    return merged
 
 
 def _style_rows_by_state(df: pd.DataFrame, *, country: str) -> pd.io.formats.style.Styler:
@@ -106,15 +121,15 @@ def render_recommendation_table(df: pd.DataFrame, *, country: str) -> None:
         height=TABLE_HEIGHT,
         column_config={
             "#": st.column_config.TextColumn("#", width="small"),
-            "티커": st.column_config.TextColumn("티커", width="medium"),
-            "종목명": st.column_config.TextColumn("종목명", width="large"),
-            "카테고리": st.column_config.TextColumn("카테고리", width="medium"),
+            "티커": st.column_config.TextColumn("티커", width="small"),  # medium -> small
+            "종목명": st.column_config.TextColumn("종목명", width="medium"),  # large -> medium
+            "카테고리": st.column_config.TextColumn("카테고리", width="small"),  # medium -> small
             "상태": st.column_config.TextColumn("상태", width="small"),
             "보유일": st.column_config.TextColumn("보유일", width="small"),
-            "현재가": st.column_config.TextColumn("현재가", width="medium"),
-            "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),
-            "점수": st.column_config.TextColumn("점수"),
-            "문구": st.column_config.TextColumn("문구"),
+            "현재가": st.column_config.TextColumn("현재가", width="small"),
+            "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),  # 이미 오른쪽 정렬
+            "점수": st.column_config.NumberColumn("점수", width="small"),  # Text -> Number (오른쪽 정렬)
+            "문구": st.column_config.TextColumn("문구", width="large"),  # 기본값 -> large
         },
     )
 

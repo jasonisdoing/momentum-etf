@@ -13,11 +13,11 @@ from .messages import (
     build_buy_replace_note,
     build_sell_replace_note,
 )
-from .shared import select_candidates_by_category
+from .shared import select_candidates_by_category, sort_decisions_by_order_and_score
 from logic.recommend.formatting import _load_country_precision
 
 
-def generate_daily_signals_for_portfolio(
+def generate_daily_recommendations_for_portfolio(
     country: str,
     base_date: pd.Timestamp,
     portfolio_settings: Dict,
@@ -35,13 +35,12 @@ def generate_daily_signals_for_portfolio(
     DECISION_CONFIG: Dict[str, Any],
     trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
     cooldown_days: int,
+    max_per_category: int,
 ) -> List[Dict[str, Any]]:
     """
-    주어진 데이터를 기반으로 포트폴리오의 일일 매매 신호를 생성합니다.
-    이 함수는 signals.py에서 호출되어 실제 매매 결정을 내리는 핵심 로직을 제공합니다.
+    주어진 데이터를 기반으로 포트폴리오의 일일 매매 추천를 생성합니다.
     """
 
-    # 헬퍼 함수 (signals.py에서 가져옴)
     def _format_kr_price(p):
         return f"{int(round(p)):,}"
 
@@ -95,18 +94,17 @@ def generate_daily_signals_for_portfolio(
 
     # 현재 보유 종목의 카테고리 (TBD 제외)
     held_categories = set()
-    for tkr, d in holdings.items():
-        if float(d.get("shares", 0.0)) > 0:
-            category = etf_meta.get(tkr, {}).get("category")
-            if category and category != "TBD":
-                held_categories.add(category)
+    for tkr in holdings.keys():
+        category = etf_meta.get(tkr, {}).get("category")
+        if category and category != "TBD":
+            held_categories.add(category)
 
     # 포지션 비중 가이드라인: 모든 국가 동일 규칙 적용 (min_pos는 현재 신규 매수 로직에서 미사용)
     # min_pos = 1.0 / (denom * 2.0)  # 최소 편입 비중
     max_pos = 1.0 / denom  # 목표/최대 비중 # noqa: F841
 
     # 현재 보유 종목 수 계산
-    held_count = sum(1 for v in holdings.values() if float((v or {}).get("shares", 0.0)) > 0)
+    held_count = len(holdings)
 
     decisions = []
 
@@ -142,14 +140,12 @@ def generate_daily_signals_for_portfolio(
                             "days_since": days_since_sell,
                         }
 
+    evaluation_date = max(base_date.normalize(), pd.Timestamp.now().normalize())
+
     for tkr, name in pairs:
         d = data_by_tkr.get(tkr)
 
-        holding_info = holdings.get(tkr, {})
-        sh = float(holding_info.get("shares", 0.0))
-        ac = float(holding_info.get("avg_cost", 0.0))
-
-        is_effectively_held = sh > 0
+        is_effectively_held = tkr in holdings
 
         if not d and not is_effectively_held:
             continue
@@ -162,6 +158,7 @@ def generate_daily_signals_for_portfolio(
                 "s2": float("nan"),
                 "score": 0.0,
                 "filter": 0,
+                "close": pd.Series(),  # 추가
             }
 
         price = d.get("price", 0.0)
@@ -191,37 +188,17 @@ def generate_daily_signals_for_portfolio(
         consecutive_info = consecutive_holding_info.get(tkr)
         buy_date = consecutive_info.get("buy_date") if consecutive_info else None
 
-        if is_effectively_held and buy_date and buy_date <= base_date:
-            # Note: get_trading_days is not available here.
-            # This part should ideally be handled in signals.py or passed as pre-calculated.
-            # For now, using calendar days as a fallback.
-            holding_days = (base_date - pd.to_datetime(buy_date).normalize()).days + 1
+        if is_effectively_held and buy_date:
+            buy_date_norm = pd.to_datetime(buy_date).normalize()
+            if buy_date_norm <= evaluation_date:
+                holding_days = (evaluation_date - buy_date_norm).days + 1
 
-        hold_ret = (
-            ((price / ac) - 1.0) * 100.0
-            if (is_effectively_held and ac > 0 and pd.notna(price))
-            else None
-        )
-        if is_effectively_held:
-            if (
-                stop_loss is not None
-                and ac > 0
-                and hold_ret is not None
-                and hold_ret <= float(stop_loss)
-            ):
-                state = "CUT_STOPLOSS"
-                qty = sh
-                prof = (price - ac) * qty if ac > 0 else 0.0
-                phrase = "가격기반손절"
-
+        hold_ret = None
         if state == "HOLD":
             price_ma, ma = d["price"], d["s1"]
             if not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
                 state = "SELL_TREND"
-                qty = sh
-                prof = (price_ma - ac) * qty if ac > 0 else 0.0
-                tag = "추세이탈(이익)" if hold_ret >= 0 else "추세이탈(손실)"
-                phrase = tag
+                phrase = DECISION_NOTES["TREND_BREAK"]
 
             if sell_block_info and state in {"SELL_TREND", "CUT_STOPLOSS"}:
                 state = "HOLD"
@@ -235,7 +212,7 @@ def generate_daily_signals_for_portfolio(
                     buy_signal = False
                     phrase = _format_cooldown_phrase("최근 매도", buy_block_info.get("last_sell"))
 
-        amount = sh * price if pd.notna(price) else 0.0
+        amount = price if is_effectively_held else 0.0
 
         meta = etf_meta.get(tkr) or full_etf_meta.get(tkr, {}) or {}
         display_name = str(meta.get("name") or tkr)
@@ -243,6 +220,9 @@ def generate_daily_signals_for_portfolio(
         display_category = (
             str(raw_category) if raw_category and str(raw_category).upper() != "TBD" else "-"
         )
+
+        if holding_days == 0 and state in {"BUY", "BUY_REPLACE"}:
+            holding_days = 1
 
         # 일간 수익률 계산
         prev_close = d.get("prev_close", 0.0)
@@ -267,9 +247,9 @@ def generate_daily_signals_for_portfolio(
             holding_days_display,
             price,
             day_ret,
-            sh,
+            1 if is_effectively_held else 0,
             amount,
-            hold_ret if hold_ret is not None else 0.0,
+            0.0,
             position_weight_pct,
             (
                 f"{d.get('drawdown_from_peak'):.1f}%"
@@ -293,6 +273,7 @@ def generate_daily_signals_for_portfolio(
                 "sell_cooldown_info": sell_block_info,
                 "buy_cooldown_info": buy_block_info,
                 "is_held": is_effectively_held,
+                "filter": d.get("filter"),
             }
         )
 
@@ -316,18 +297,7 @@ def generate_daily_signals_for_portfolio(
 
                 d_sell = data_by_tkr.get(decision["tkr"])
                 if d_sell:
-                    sell_price = float(d_sell.get("price", 0))
-                    sell_qty = float(d_sell.get("shares", 0))
-                    avg_cost = float(d_sell.get("avg_cost", 0))
-
-                    hold_ret = 0.0
-                    prof = 0.0
-                    if avg_cost > 0 and sell_price > 0:
-                        hold_ret = ((sell_price / avg_cost) - 1.0) * 100.0
-                        prof = (sell_price - avg_cost) * sell_qty
-
-                    sell_phrase = DECISION_NOTES["RISK_OFF_SELL"]
-                    decision["row"][-1] = sell_phrase
+                    decision["row"][-1] = DECISION_NOTES["RISK_OFF_SELL"]
 
             if decision.get("buy_signal"):
                 decision["buy_signal"] = False
@@ -452,20 +422,7 @@ def generate_daily_signals_for_portfolio(
                 # 3. 교체 실행
                 d_weakest = data_by_tkr.get(ticker_to_sell)
                 if d_weakest:
-                    # (a) 매도 신호 생성
-                    sell_price, sell_qty, avg_cost = (
-                        float(d_weakest.get(k, 0)) for k in ["price", "shares", "avg_cost"]
-                    )
-                    hold_ret = (
-                        ((sell_price / avg_cost) - 1.0) * 100.0
-                        if avg_cost > 0 and sell_price > 0
-                        else 0.0
-                    )
-                    prof = (sell_price - avg_cost) * sell_qty if avg_cost > 0 else 0.0
-                    trade_amount = sell_qty * sell_price
-                    sell_phrase = build_sell_replace_note(
-                        country, trade_amount, prof, hold_ret, best_new["tkr"]
-                    )
+                    sell_phrase = DECISION_NOTES["REPLACE_SELL"]
 
                     for d_item in decisions:
                         if d_item["tkr"] == ticker_to_sell:
@@ -476,44 +433,15 @@ def generate_daily_signals_for_portfolio(
                             )
                             break
 
-                # (b) 매수 신호 생성
+                # (b) 매수 추천 생성
                 best_new["state"], best_new["row"][4] = "BUY_REPLACE", "BUY_REPLACE"
                 buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
                 if buy_price > 0:
-                    # 매도 금액만큼 매수 예산 설정 (보유 비중 기반 또는 보유 수량*가격 기반)
-                    sell_value_for_budget = 0.0
-                    d_item_for_sell = next(
-                        (x for x in decisions if x["tkr"] == ticker_to_sell), None
+                    best_new["row"][-1] = build_buy_replace_note(
+                        country,
+                        ticker_to_sell,
+                        full_etf_meta.get(ticker_to_sell, {}).get("name", ticker_to_sell),
                     )
-                    if d_item_for_sell and d_item_for_sell.get("weight"):
-                        try:
-                            sell_value_for_budget = (
-                                float(d_item_for_sell["weight"]) / 100.0 * float(current_equity)
-                            )
-                        except Exception:
-                            sell_value_for_budget = 0.0
-                    if sell_value_for_budget <= 0 and d_weakest:
-                        try:
-                            sell_value_for_budget = float(
-                                d_weakest.get("shares", 0.0) or 0.0
-                            ) * float(d_weakest.get("price", 0.0) or 0.0)
-                        except Exception:
-                            sell_value_for_budget = 0.0
-
-                    if sell_value_for_budget > 0:
-                        if country in ("coin", "aus"):
-                            buy_qty = sell_value_for_budget / buy_price
-                            buy_notional = sell_value_for_budget
-                        else:
-                            buy_qty = int(sell_value_for_budget // buy_price)
-                            buy_notional = buy_qty * buy_price
-
-                        # 문구 단순화: 디스플레이명 + 금액 + 대체 정보 (공용 함수 사용)
-                        best_new["row"][-1] = build_buy_replace_note(
-                            country, buy_notional, ticker_to_sell
-                        )
-                    else:
-                        best_new["row"][-1] = f"{ticker_to_sell}(을)를 대체 (매수 예산 부족)"
                 else:
                     best_new["row"][-1] = f"{ticker_to_sell}(을)를 대체 (가격정보 없음)"
                 current_held_stocks = [s for s in current_held_stocks if s["tkr"] != ticker_to_sell]
@@ -534,6 +462,8 @@ def generate_daily_signals_for_portfolio(
             buy_info = buy_cooldown_block.get(tkr)
 
             if sell_info and d["state"] in SELL_STATE_SET:
+                if d["state"] == "SELL_REPLACE":
+                    continue
                 d["state"] = "HOLD"
                 d["row"][4] = "HOLD"
                 d["row"][-1] = _format_cooldown_phrase("최근 매수", sell_info.get("last_buy"))
@@ -594,20 +524,24 @@ def generate_daily_signals_for_portfolio(
             d["row"][-1] = DECISION_NOTES["LOCKED_HOLD"]
 
     # 최종 정렬
-    def sort_key(decision_dict):
-        state = decision_dict["state"]
-        score = decision_dict["score"]
-        tkr = decision_dict["tkr"]
-
-        # DECISION_CONFIG에서 'order' 값을 가져옵니다. 없으면 99를 기본값으로 사용합니다.
-        order = DECISION_CONFIG.get(state, {}).get("order", 99)
-
-        sort_value = -score
-        return (order, sort_value, tkr)
-
-    final_decisions.sort(key=sort_key)
+    sort_decisions_by_order_and_score(final_decisions)
 
     return final_decisions
 
 
-__all__ = ["generate_daily_signals_for_portfolio"]
+def safe_generate_daily_recommendations_for_portfolio(*args, **kwargs) -> List[Dict[str, Any]]:
+    """안전하게 generate_daily_recommendations_for_portfolio 함수를 실행합니다."""
+    try:
+        return generate_daily_recommendations_for_portfolio(*args, **kwargs)
+    except Exception as e:
+        print(f"generate_daily_recommendations_for_portfolio 실행 중 오류: {str(e)}")
+        import traceback
+
+        traceback.print_exc()
+        return []
+
+
+__all__ = [
+    "generate_daily_recommendations_for_portfolio",
+    "safe_generate_daily_recommendations_for_portfolio",
+]

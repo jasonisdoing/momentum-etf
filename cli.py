@@ -139,14 +139,13 @@ def _print_result_summary(
     base_date = items[0].get("base_date") if items else (date_str or "N/A")
 
     print(f"\n=== {country.upper()} 추천 요약 (기준일: {base_date}) ===")
-    print(f"[INFO] 총 {len(items)}개 항목 ({state_summary})")
 
     # 상위 10개 항목 미리보기
     preview_count = min(10, len(items))
     if preview_count > 0:
         print(f"\n[INFO] 상위 {preview_count}개 항목 미리보기:")
-        headers = ["순위", "티커", "종목명", "카테고리", "상태", "점수", "일간수익률", "보유일"]
-        aligns = ["right", "left", "left", "left", "center", "right", "right", "right"]
+        headers = ["순위", "티커", "종목명", "카테고리", "상태", "점수", "일간수익률", "보유일", "문구"]
+        aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "left"]
         rows = []
 
         for item in items[:preview_count]:
@@ -170,6 +169,7 @@ def _print_result_summary(
                     if isinstance(item.get("daily_pct"), (int, float))
                     else "-",
                     holding_days_str,
+                    str(item.get("phrase", "")),  # 문구 추가
                 ]
             )
 

@@ -130,7 +130,7 @@ def run_signal_generation(
     start_time = time.time()
     report_date = None
     try:
-        from logic.signals.pipeline import main as run_signal_main
+        from logic.recommend.pipeline import main as run_recommend_main
         from utils.notification import (
             send_summary_notification,
             send_detailed_signal_notification,
@@ -206,7 +206,7 @@ def run_signal_generation(
         logging.error(error_message, exc_info=True)
 
 
-def run_signals_for_country(country: str, *, force_notify: bool = False) -> None:
+def run_recommend_for_country(country: str, *, force_notify: bool = False) -> None:
     accounts = _accounts_for_country(country)
     if accounts:
         for account in accounts:
@@ -273,7 +273,7 @@ def main():
         )
 
         scheduler.add_job(
-            run_signals_for_country,
+            run_recommend_for_country,
             CronTrigger.from_crontab(cron_expr, timezone=timezone),
             args=[country],
             id=country,
@@ -300,7 +300,7 @@ def main():
             try:
                 enabled_default = bool(cfg.get("enabled", True))
                 if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", enabled_default):
-                    run_signals_for_country(country, force_notify=True)
+                    run_recommend_for_country(country, force_notify=True)
             except Exception:
                 logging.error(f"Error during initial run for {country}", exc_info=True)
         logging.info("[Initial Run] Complete.")

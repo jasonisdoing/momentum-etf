@@ -26,8 +26,8 @@ run_single_ticker_backtest = getattr(_backtest_mod, "run_single_ticker_backtest"
 DECISION_CONFIG = getattr(_constants_mod, "DECISION_CONFIG")
 
 # 추천 함수
-generate_daily_signals_for_portfolio = getattr(
-    _recommend_mod, "generate_daily_signals_for_portfolio"
+generate_daily_recommendations_for_portfolio = getattr(
+    _recommend_mod, "generate_daily_recommendations_for_portfolio"
 )
 
 # MA_PERIOD 상수 (이전 버전과의 호환성을 위해 유지)
@@ -38,6 +38,6 @@ __all__ = [
     "run_portfolio_backtest",
     "run_single_ticker_backtest",
     "DECISION_CONFIG",
-    "generate_daily_signals_for_portfolio",
+    "generate_daily_recommendations_for_portfolio",
     "MA_PERIOD",
 ]

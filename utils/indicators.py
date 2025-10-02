@@ -23,6 +23,12 @@ def calculate_moving_average_signals(
             - buy_signal_active: 매수 추천 활성화 여부 (close > ma)
             - consecutive_buy_days: 매수 추천이 연속으로 활성화된 일수
     """
+    if close_prices is None:
+        return pd.Series(dtype=float), pd.Series(dtype=bool), pd.Series(dtype=int)
+
+    if len(close_prices) < moving_average_period:
+        return pd.Series(dtype=float), pd.Series(dtype=bool), pd.Series(dtype=int)
+
     # MultiIndex 컬럼 처리 (성능 최적화)
     if isinstance(close_prices, pd.DataFrame):
         close_prices = close_prices.iloc[:, 0]

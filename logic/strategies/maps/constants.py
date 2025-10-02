@@ -8,6 +8,7 @@ DECISION_CONFIG = {
         "order": 1,
         "is_recommendation": False,
         "show_slack": True,
+        "background": None,
     },
     "CUT_STOPLOSS": {
         "display_name": "<🚨 손절매도>",
@@ -26,6 +27,7 @@ DECISION_CONFIG = {
         "order": 12,
         "is_recommendation": True,
         "show_slack": True,
+        "background": "#ffc1cc",
     },
     "SELL_REGIME_FILTER": {
         "display_name": "<🛡️ 시장위험회피 매도>",
@@ -38,36 +40,36 @@ DECISION_CONFIG = {
         "order": 20,
         "is_recommendation": True,
         "show_slack": True,
+        "background": "#81c147",
     },
     "BUY": {
         "display_name": "<🚀 신규매수>",
         "order": 21,
         "is_recommendation": True,
         "show_slack": True,
+        "background": "#81c147",
     },
     "WAIT": {
         "display_name": "<⏳ 대기>",
         "order": 50,
         "is_recommendation": False,
         "show_slack": False,
+        "background": "#f0f0f0",
     },
     "SOLD": {
         "display_name": "<✅ 매도 완료>",
         "order": 50,
         "is_recommendation": False,
         "show_slack": True,
+        "background": "#f0f0f0",
     },
 }
 
 DECISION_MESSAGES = {
     # 매수
     "NEW_BUY": "✅ 신규 매수",
-    # {amount}: 금액(예: 123만원)
-    "PARTIAL_BUY": "🌗 부분 매수({amount})",
     # 매도
-    # {amount}: 금액(예: 123만원)
-    "PARTIAL_SELL": "⚠️ 부분 매도 ({amount})",
-    "FULL_SELL": "🔚 매도 완료",
+    "SOLD": "🔚 매도 완료",
 }
 
 DECISION_NOTES = {
@@ -77,6 +79,8 @@ DECISION_NOTES = {
     "NO_PRICE": "가격 정보 없음",
     "RISK_OFF": "시장 위험 회피",
     "RISK_OFF_SELL": "시장위험회피 매도",
+    "TREND_BREAK": "추세 이탈",
+    "REPLACE_SELL": "교체 매도",
     "LOCKED_HOLD": "신호와 상관없이 보유",
     "PRICE_DATA_FAIL": "가격 데이터 조회 실패",
     # 템플릿

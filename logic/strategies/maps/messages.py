@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from utils.report import format_kr_money, format_aud_money
-from .constants import DECISION_CONFIG, DECISION_MESSAGES
+from .constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 
 
 def money_str(country: str, amount: float) -> str:
@@ -28,11 +28,11 @@ def _normalize_display_name(name: str) -> str:
     return name
 
 
-def build_buy_replace_note(country: str, amount: float, ticker_to_sell: str) -> str:
-    """Build note for BUY_REPLACE: "🔄 교체매수 금액 (티커 대체)" (no angle brackets)"""
+def build_buy_replace_note(country: str, ticker_to_sell: str, ticker_to_sell_name: str) -> str:
+    """Build note for BUY_REPLACE: "🔄 교체매수 -종목명(티커) 대체" (no angle brackets)"""
     raw = DECISION_CONFIG["BUY_REPLACE"]["display_name"]
     disp = _normalize_display_name(raw)
-    return f"{disp} {money_str(country, amount)} ({ticker_to_sell} 대체)"
+    return f"{disp} -{ticker_to_sell_name}({ticker_to_sell}) 대체"
 
 
 def build_sell_replace_note(
@@ -52,22 +52,21 @@ def build_sell_replace_note(
     return f"교체매도 {amt} {profit_label} {prof} 손익률 {sign_pct} ({replacement_ticker}(으)로 교체)"
 
 
-def build_partial_buy_note(country: str, amount: float) -> str:
-    """Build note for partial buy with amount."""
-    tmpl = DECISION_MESSAGES["PARTIAL_BUY"]
-    return tmpl.format(amount=money_str(country, amount))
-
-
 def build_partial_sell_note(country: str, amount: float) -> str:
     """Build note for partial sell with amount."""
-    tmpl = DECISION_MESSAGES["PARTIAL_SELL"]
-    return tmpl.format(amount=money_str(country, amount))
+    tmpl = DECISION_MESSAGES["SOLD"]
+    return tmpl
+
+
+def build_simple_sell_replace_note() -> str:
+    """Build note for simple sell replace with no amount."""
+    return DECISION_NOTES.get("REPLACE_SELL", "교체 매도")
 
 
 __all__ = [
     "money_str",
     "build_buy_replace_note",
-    "build_partial_buy_note",
     "build_partial_sell_note",
     "build_sell_replace_note",
+    "build_simple_sell_replace_note",
 ]

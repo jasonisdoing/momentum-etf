@@ -4,11 +4,13 @@
         "tickers": [
             {
                 "ticker": "ASX:MNRS",
-                "name": "Betashares Global Gold Miners Currency Hedged ETF"
+                "name": "Betashares Global Gold Miners Currency Hedged ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:GDX",
-                "name": "VanEck Gold Miners ETF"
+                "name": "VanEck Gold Miners ETF",
+                "recommend_enabled": true
             }
         ]
     },
@@ -17,15 +19,18 @@
         "tickers": [
             {
                 "ticker": "ASX:IZZ",
-                "name": "iShares China Large-Cap ETF (AU)"
+                "name": "iShares China Large-Cap ETF (AU)",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:CNEW",
-                "name": "VanEck China New Economy ETF"
+                "name": "VanEck China New Economy ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:CETF",
-                "name": "VanEck FTSE China A50 ETF"
+                "name": "VanEck FTSE China A50 ETF",
+                "recommend_enabled": true
             }
         ]
     },
@@ -34,15 +39,18 @@
         "tickers": [
             {
                 "ticker": "ASX:ASIA",
-                "name": "BetaShares Asia Technology Tigers ETF"
+                "name": "BetaShares Asia Technology Tigers ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:FANG",
-                "name": "Global X FANG+ ETF"
+                "name": "Global X FANG+ ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:HACK",
-                "name": "BetaShares Global Cybersecurity ETF"
+                "name": "BetaShares Global Cybersecurity ETF",
+                "recommend_enabled": true
             }
         ]
     },
@@ -51,35 +59,43 @@
         "tickers": [
             {
                 "ticker": "ASX:IAA",
-                "name": "iShares Asia 50 ETF (AU)"
+                "name": "iShares Asia 50 ETF (AU)",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VAE",
-                "name": "Vanguard FTSE Asia ex Japan Shares Index ETF"
+                "name": "Vanguard FTSE Asia ex Japan Shares Index ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:WEMG",
-                "name": "SPDR S&P Emerging Markets Carbon Aware ETF"
+                "name": "SPDR S&P Emerging Markets Carbon Aware ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IEM",
-                "name": "iShares MSCI Emerging Markets ETF (AU)"
+                "name": "iShares MSCI Emerging Markets ETF (AU)",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:FEMX",
-                "name": "Fidelity Global Emerging Markets ETF"
+                "name": "Fidelity Global Emerging Markets ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VGE",
-                "name": "Vanguard FTSE Emerging Markets Shares ETF"
+                "name": "Vanguard FTSE Emerging Markets Shares ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IOO",
-                "name": "iShares Global 100 ETF (AU)"
+                "name": "iShares Global 100 ETF (AU)",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VGS",
-                "name": "Vanguard MSCI Index International Shares ETF"
+                "name": "Vanguard MSCI Index International Shares ETF",
+                "recommend_enabled": true
             }
         ]
     },
@@ -88,7 +104,8 @@
         "tickers": [
             {
                 "ticker": "ASX:IKO",
-                "name": "iShares MSCI South Korea ETF (AU)"
+                "name": "iShares MSCI South Korea ETF (AU)",
+                "recommend_enabled": true
             }
         ]
     },
@@ -97,7 +114,8 @@
         "tickers": [
             {
                 "ticker": "ASX:HJPN",
-                "name": "Betashares Japan Currency Hedged ETF"
+                "name": "Betashares Japan Currency Hedged ETF",
+                "recommend_enabled": true
             }
         ]
     },
@@ -106,15 +124,18 @@
         "tickers": [
             {
                 "ticker": "ASX:ATEC",
-                "name": "BetaShares S&P/ASX Australian Technology ETF"
+                "name": "BetaShares S&P/ASX Australian Technology ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:SSO",
-                "name": "SPDR S&P/ASX Small Ordinaries ETF"
+                "name": "SPDR S&P/ASX Small Ordinaries ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:ISO",
-                "name": "iShares S&P/ASX Small Ordinaries ETF"
+                "name": "iShares S&P/ASX Small Ordinaries ETF",
+                "recommend_enabled": true
             }
         ]
     },
@@ -123,23 +144,28 @@
         "tickers": [
             {
                 "ticker": "ASX:NDQ",
-                "name": "BetaShares NASDAQ 100 ETF"
+                "name": "BetaShares NASDAQ 100 ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VTS",
-                "name": "Vanguard US Total Market Shares Index ETF"
+                "name": "Vanguard US Total Market Shares Index ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:HNDQ",
-                "name": "Betashares Nasdaq 100 Currency Hedged ETF"
+                "name": "Betashares Nasdaq 100 Currency Hedged ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:SPY",
-                "name": "SPDR S&P 500 ETF"
+                "name": "SPDR S&P 500 ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IVV",
-                "name": "iShares S&P 500 ETF"
+                "name": "iShares S&P 500 ETF",
+                "recommend_enabled": true
             }
         ]
     },
@@ -148,7 +174,8 @@
         "tickers": [
             {
                 "ticker": "ASX:BNKS",
-                "name": "Betashares Global Banks Currency Hedged ETF"
+                "name": "Betashares Global Banks Currency Hedged ETF",
+                "recommend_enabled": true
             }
         ]
     },
@@ -157,15 +184,18 @@
         "tickers": [
             {
                 "ticker": "ASX:MVR",
-                "name": "VanEck Australian Resources ETF"
+                "name": "VanEck Australian Resources ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:QRE",
-                "name": "BetaShares Australian Resources Sector ETF"
+                "name": "BetaShares Australian Resources Sector ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:OZR",
-                "name": "SPDR S&P/ASX 200 Resources ETF"
+                "name": "SPDR S&P/ASX 200 Resources ETF",
+                "recommend_enabled": true
             }
         ]
     },
@@ -174,7 +204,8 @@
         "tickers": [
             {
                 "ticker": "ASX:ACDC",
-                "name": "Global X Battery Tech & Lithium ETF"
+                "name": "Global X Battery Tech & Lithium ETF",
+                "recommend_enabled": true
             }
         ]
     },
@@ -183,175 +214,218 @@
         "tickers": [
             {
                 "ticker": "ASX:ETHI",
-                "name": "BetaShares Global Sustainability Leaders ETF"
+                "name": "BetaShares Global Sustainability Leaders ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:FAIR",
-                "name": "BetaShares Australian Sustainability Leaders ETF"
+                "name": "BetaShares Australian Sustainability Leaders ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IOO",
-                "name": "iShares Global 100 ETF (AU)"
+                "name": "iShares Global 100 ETF (AU)",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IVV",
-                "name": "iShares S&P 500 ETF"
+                "name": "iShares S&P 500 ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:MVB",
-                "name": "VanEck Australian Banks ETF"
+                "name": "VanEck Australian Banks ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:QFN",
-                "name": "BetaShares Australian Financials Sector ETF"
+                "name": "BetaShares Australian Financials Sector ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:RBTZ",
-                "name": "BetaShares Global Robotics and Artificial Intelligence ETF"
+                "name": "BetaShares Global Robotics and Artificial Intelligence ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:ROBO",
-                "name": "Global X ROBO Global Robotics & Automation ETF"
+                "name": "Global X ROBO Global Robotics & Automation ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VHY",
-                "name": "Vanguard Australian Shares High Yield ETF"
+                "name": "Vanguard Australian Shares High Yield ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:WDMF",
-                "name": "iShares World Equity Factor ETF"
+                "name": "iShares World Equity Factor ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IHOO",
-                "name": "iShares Global 100 AUD Hedged ETF"
+                "name": "iShares Global 100 AUD Hedged ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:ESTX",
-                "name": "Global X EURO STOXX 50 ETF"
+                "name": "Global X EURO STOXX 50 ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:MVS",
-                "name": "VanEck Small Companies Masters ETF"
+                "name": "VanEck Small Companies Masters ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VEU",
-                "name": "Vanguard All-World ex-US Shares Index ETF"
+                "name": "Vanguard All-World ex-US Shares Index ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VESG",
-                "name": "Vanguard Ethically Conscious International Shares Index ETF"
+                "name": "Vanguard Ethically Conscious International Shares Index ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:AUMF",
-                "name": "iShares Edge MSCI Australia Multifactor ETF"
+                "name": "iShares Edge MSCI Australia Multifactor ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:GEAR",
-                "name": "Betashares Geared Australian Equities Complex ETF"
+                "name": "Betashares Geared Australian Equities Complex ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:F100",
-                "name": "BetaShares FTSE 100 ETF"
+                "name": "BetaShares FTSE 100 ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IJP",
-                "name": "iShares MSCI Japan ETF (AU)"
+                "name": "iShares MSCI Japan ETF (AU)",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:SYI",
-                "name": "SPDR MSCI Australia Select High Dividend Yield ETF"
+                "name": "SPDR MSCI Australia Select High Dividend Yield ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:MVE",
-                "name": "VanEck S&P/ASX MidCap ETF"
+                "name": "VanEck S&P/ASX MidCap ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:INES",
-                "name": "Intelligent Investor Ethical Share ETF"
+                "name": "Intelligent Investor Ethical Share ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:QFN",
-                "name": "BetaShares Australian Financials Sector ETF"
+                "name": "BetaShares Australian Financials Sector ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IHVV",
-                "name": "iShares S&P 500 AUD Hedged ETF"
+                "name": "iShares S&P 500 AUD Hedged ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IEU",
-                "name": "iShares Europe ETF (AU)"
+                "name": "iShares Europe ETF (AU)",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:DHHF",
-                "name": "BetaShares Diversified All Growth ETF"
+                "name": "BetaShares Diversified All Growth ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IHD",
-                "name": "iShares S&P/ASX Dividend Opportunities ESG Screened ETF"
+                "name": "iShares S&P/ASX Dividend Opportunities ESG Screened ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:WXHG",
-                "name": "SPDR S&P World ex Australia Carbon Aware (Hedged) ETF"
+                "name": "SPDR S&P World ex Australia Carbon Aware (Hedged) ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:WRLD",
-                "name": "Betashares Managed Risk Global Shares Complex ETF"
+                "name": "Betashares Managed Risk Global Shares Complex ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VEQ",
-                "name": "Vanguard FTSE Europe Shares ETF"
+                "name": "Vanguard FTSE Europe Shares ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IVE",
-                "name": "iShares MSCI EAFE ETF (AU)"
+                "name": "iShares MSCI EAFE ETF (AU)",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:MVB",
-                "name": "VanEck Australian Banks ETF"
+                "name": "VanEck Australian Banks ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VVLU",
-                "name": "Vanguard Global Value Equity Active ETF"
+                "name": "Vanguard Global Value Equity Active ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:OZF",
-                "name": "SPDR S&P/ASX 200 Financials EX A-REIT ETF"
+                "name": "SPDR S&P/ASX 200 Financials EX A-REIT ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:ZYAU",
-                "name": "Global X S&P/ASX 200 High Dividend ETF"
+                "name": "Global X S&P/ASX 200 High Dividend ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:MVOL",
-                "name": "iShares Edge MSCI Australia Minimum Volatility ETF"
+                "name": "iShares Edge MSCI Australia Minimum Volatility ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VDHG",
-                "name": "Vanguard Diversified High Growth Index ETF"
+                "name": "Vanguard Diversified High Growth Index ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:RDV",
-                "name": "Russell Investments High Dividend Australian Shares ETF"
+                "name": "Russell Investments High Dividend Australian Shares ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VSO",
-                "name": "Vanguard MSCI Australian Small Companies Index ETF"
+                "name": "Vanguard MSCI Australian Small Companies Index ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:IHWL",
-                "name": "iShares Core MSCI World ex Australia ESG (AUD Hedged) ETF"
+                "name": "iShares Core MSCI World ex Australia ESG (AUD Hedged) ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VISM",
-                "name": "Vanguard MSCI International Small Companies Index ETF"
+                "name": "Vanguard MSCI International Small Companies Index ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:HEUR",
-                "name": "Betashares Europe Currency Hedged ETF"
+                "name": "Betashares Europe Currency Hedged ETF",
+                "recommend_enabled": true
             },
             {
                 "ticker": "ASX:VGAD",
-                "name": "Vanguard MSCI Index International Shares (Hedged) ETF"
+                "name": "Vanguard MSCI Index International Shares (Hedged) ETF",
+                "recommend_enabled": true
             }
         ]
     }

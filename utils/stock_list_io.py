@@ -44,6 +44,10 @@ def get_etfs(country: str) -> List[Dict[str, str]]:
                     if ticker in seen_tickers:
                         continue
 
+                    # 추천 대상 비활성화된 종목은 제외
+                    if item.get("recommend_enabled") is False:
+                        continue
+
                     seen_tickers.add(ticker)
                     item["type"] = "etf"
                     item["category"] = category_name

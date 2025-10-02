@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from .messages import build_partial_buy_note, build_partial_sell_note
+from .messages import build_partial_sell_note
 from .constants import DECISION_MESSAGES
 
 
@@ -59,17 +59,12 @@ def compute_net_trade_note(
 
     # SOLD override: 당일 매도가 있었고 현재 보유가 0인 경우에만 SOLD 처리
     if is_fully_sold and sells and (current_decision in (None, "WAIT", "HOLD")):
-        return {"state": "SOLD", "row4": "SOLD", "note": DECISION_MESSAGES["FULL_SELL"]}
+        return {"state": "SOLD", "row4": "SOLD", "note": DECISION_MESSAGES["SOLD"]}
 
     net_amount = total_buy_amount - total_sold_amount
     if net_amount > 0:
-        # net buy
-        note = (
-            build_partial_buy_note(country, net_amount)
-            if was_held_before
-            else DECISION_MESSAGES["NEW_BUY"]
-        )
-        return {"note": note}
+        # net buy: 부분/신규 구분 없이 동일 메시지 사용
+        return {"note": DECISION_MESSAGES["NEW_BUY"]}
     if net_amount < 0:
         # net sell, keep HOLD state
         note = build_partial_sell_note(country, abs(net_amount))

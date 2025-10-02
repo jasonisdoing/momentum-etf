@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Literal, Optional, Tuple, Union
@@ -18,10 +19,16 @@ from utils.settings_loader import (
     get_country_settings,
     get_strategy_rules,
 )
-from logic.strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES
+from logic.strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
+from logic.strategies.maps.shared import sort_decisions_by_order_and_score
 from utils.stock_list_io import get_etfs
+from utils.trade_store import list_open_positions
+from logic.recommend.history import (
+    calculate_consecutive_holding_info,
+    calculate_trade_cooldown_info,
+)
 from utils.data_loader import fetch_ohlcv, get_latest_trading_day
-from logic.recommend.history import calculate_consecutive_holding_info
+from utils.db_manager import get_db_connection
 
 
 @dataclass
@@ -40,6 +47,7 @@ class _TickerScore:
     score: float
     streak: int
     category: str  # 카테고리 정보 추가
+    ma_value: float  # 이동평균 값 추가
 
 
 def _iter_universe(country: str, universe: str) -> Iterator[_TickerMeta]:
@@ -192,7 +200,7 @@ def _build_score(meta: _TickerMeta, metrics) -> _TickerScore:
         # 카테고리 정보가 없는 경우 빈 문자열로 설정
         category = ""
         if hasattr(meta, "category") and meta.category is not None:
-            # 카테고리가 집합이나 리스트인 경우 첫 번째 항목을 사용
+            # 카테고리가 리스트인 경우 첫 번째 항목을 사용
             if isinstance(meta.category, (set, list)):
                 category = str(next(iter(meta.category), "")) if meta.category else ""
             else:
@@ -200,6 +208,9 @@ def _build_score(meta: _TickerMeta, metrics) -> _TickerScore:
 
         # 점수가 None이 아니면 그대로 사용, None이면 0.0으로 설정
         final_score = float(round(score, 2)) if score is not None else 0.0
+
+        # 이동평균 값 계산 (점수를 이용해서 근사치 계산)
+        ma_value = price * (1 - score / 100) if price > 0 else 0.0
 
         return _TickerScore(
             meta=meta,
@@ -209,6 +220,7 @@ def _build_score(meta: _TickerMeta, metrics) -> _TickerScore:
             score=final_score,
             streak=int(holding_days) if holding_days is not None else 0,
             category=category.strip(),  # 공백 제거
+            ma_value=ma_value,
         )
     except Exception as e:
         print(f"경고: {meta.ticker} 점수 생성 중 오류 발생: {e}")
@@ -257,6 +269,56 @@ def _resolve_state_order(state: str) -> int:
     return int(cfg.get("order", 99))
 
 
+def _format_sell_replace_phrase(phrase: str, *, etf_meta: Dict[str, Dict[str, Any]]) -> str:
+    if not phrase or "교체매도" not in phrase:
+        return phrase
+
+    ratio_match = re.search(r"손익률\s+[+-]?[0-9.,]+%", phrase)
+    ticker_matches = re.findall(r"([A-Za-z0-9:]+)\(으\)로 교체", phrase)
+
+    if not ratio_match or not ticker_matches:
+        return phrase
+
+    target_ticker = ticker_matches[-1]
+    ratio_text = ratio_match.group(0)
+    target_meta = etf_meta.get(target_ticker) or etf_meta.get(target_ticker.upper()) or {}
+    target_name = target_meta.get("name") or target_ticker
+
+    return f"교체매도 {ratio_text} - {target_name}({target_ticker})로 교체"
+
+
+def _fetch_trades_for_date(country: str, base_date: pd.Timestamp) -> List[Dict[str, Any]]:
+    """Retrieve trades executed on the given base_date."""
+
+    db = get_db_connection()
+    if db is None:
+        return []
+
+    start = base_date.to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0)
+    # 최신 추천 실행 시 실제 거래 시간이 기준일 다음 날일 수도 있으므로 현재 시각까지 확장
+    end = max(start + timedelta(days=1), datetime.utcnow())
+
+    cursor = db.trades.find(
+        {
+            "country": country,
+            "deleted_at": {"$exists": False},
+            "executed_at": {"$gte": start, "$lt": end},
+        },
+        projection={"ticker": 1, "action": 1, "name": 1, "_id": 0},
+    )
+
+    trades: List[Dict[str, Any]] = []
+    for doc in cursor:
+        trades.append(
+            {
+                "ticker": str(doc.get("ticker") or "").upper(),
+                "action": str(doc.get("action") or "").upper(),
+                "name": str(doc.get("name") or ""),
+            }
+        )
+    return trades
+
+
 def generate_country_signal_report(country: str, date_str: Optional[str] = None) -> List[dict]:
     """국가 단위 추천 종목 리스트를 반환합니다."""
     if not country:
@@ -267,153 +329,401 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
 
     try:
         strategy_rules = get_strategy_rules(country)
+        country_settings = get_country_settings(country)
     except CountrySettingsError as exc:
         raise ValueError(str(exc)) from exc
 
     ma_period = int(strategy_rules.ma_period)
     portfolio_topn = int(strategy_rules.portfolio_topn)
+    replace_threshold = float(strategy_rules.replace_threshold)
 
-    precision_cfg = get_country_precision(country) or {}
-    price_precision = int(precision_cfg.get("price_precision", 0))
-    daily_pct_precision = (
-        int(precision_cfg.get("daily_pct_precision", 2))
-        if "daily_pct_precision" in precision_cfg
-        else 2
-    )
-    score_precision = (
-        int(precision_cfg.get("score_precision", 2)) if "score_precision" in precision_cfg else 2
-    )
-
-    scored: List[_TickerScore] = []
-    # 국가별로 적절한 universe 파일명 사용 (예: 'kor' 또는 'aus')
-    universe = country.lower()
-    for meta in _iter_universe(country, universe):
-        df = _fetch_dataframe(
-            meta.ticker, country=country, ma_period=ma_period, base_date=base_date
-        )
-        if df is None:
-            continue
-        metrics = _calc_metrics(df, ma_period)
-        if metrics is None:
-            continue
-        scored.append(_build_score(meta, metrics))
-
-    if not scored:
-        return []
-
-    # trades 기반 보유일 계산
-    holding_days_by_ticker: Dict[str, int] = {}
-    as_of_dt = base_date.to_pydatetime()
-    now_dt = datetime.now()
+    # 손절매 비율은 common_settings에서 가져옴
     try:
-        if now_dt.date() > as_of_dt.date():
-            as_of_dt = now_dt
+        from utils.account_registry import get_common_file_settings
+
+        common_settings = get_common_file_settings() or {}
+        stop_loss_pct = -abs(float(common_settings.get("HOLDING_STOP_LOSS_PCT", 10.0)))
+        max_per_category = int(common_settings.get("MAX_PER_CATEGORY", 0) or 0)
     except Exception:
-        pass
+        stop_loss_pct = -10.0
+        max_per_category = 0
 
+    # ETF 목록 가져오기
+    etf_universe = get_etfs(country)
+    pairs = [(stock["ticker"], stock["name"]) for stock in etf_universe]
+
+    # 실제 포트폴리오 데이터 준비
+    holdings: Dict[str, Dict[str, float]] = {}
     try:
-        holding_info = calculate_consecutive_holding_info(
-            [item.meta.ticker for item in scored], country, as_of_dt
+        # 현재 미매도 포지션만 조회
+        open_positions = list_open_positions(country)
+        if open_positions:
+            for position in open_positions:
+                ticker = (position.get("ticker") or "").strip().upper()
+                if not ticker:
+                    continue
+                exec_at = position.get("executed_at")
+                buy_date = None
+                if exec_at is not None:
+                    try:
+                        buy_date = pd.to_datetime(exec_at).strftime("%Y-%m-%d")
+                    except Exception:
+                        buy_date = None
+                holdings[ticker] = {
+                    "buy_date": buy_date,
+                }
+
+        # 예외적으로 포지션이 비어 있을 경우를 대비해 기존 BUY 집계를 백업으로 사용
+        if not holdings:
+            db = get_db_connection()
+            if db is not None:
+                pipeline = [
+                    {"$match": {"country": country, "action": "BUY"}},
+                    {"$group": {"_id": "$ticker"}},
+                    {"$project": {"ticker": "$_id", "_id": 0}},
+                ]
+                holdings_tickers = [item["ticker"] for item in db.trades.aggregate(pipeline)]
+                for ticker in holdings_tickers:
+                    ticker_norm = (ticker or "").strip().upper()
+                    if not ticker_norm:
+                        continue
+                    holdings[ticker_norm] = {
+                        "buy_date": None,
+                    }
+
+        print(f"계산된 holdings: {len(holdings)}개 종목")
+    except Exception as e:
+        print(f"포트폴리오 데이터 조회 실패: {e}")
+        holdings = {}
+
+    # 연속 보유 정보 계산
+    consecutive_holding_info = calculate_consecutive_holding_info(
+        list(holdings.keys()), country, base_date.to_pydatetime()
+    )
+
+    # 현재 자산/현금 정보 (임시값 - 실제 계산 필요)
+    current_equity = 100_000_000  # 임시값
+    total_cash = 100_000_000  # 임시값
+
+    # 각 티커의 현재 데이터 준비 (실제 OHLCV 데이터 사용)
+    data_by_tkr = {}
+    for stock in etf_universe:
+        ticker = stock["ticker"]
+        # 실제 데이터 가져오기
+        df = _fetch_dataframe(ticker, country=country, ma_period=ma_period, base_date=base_date)
+        if df is not None and not df.empty:
+            # 최신 가격 정보
+            latest_close = df["Close"].iloc[-1]
+            prev_close = df["Close"].iloc[-2] if len(df) > 1 else latest_close
+            daily_pct = 0.0
+            if prev_close and prev_close > 0:
+                daily_pct = ((latest_close / prev_close) - 1.0) * 100
+
+            # 이동평균 신호 계산
+            from utils.indicators import calculate_moving_average_signals, calculate_ma_score
+
+            (
+                moving_average,
+                buy_signal_active,
+                consecutive_buy_days,
+            ) = calculate_moving_average_signals(df["Close"], ma_period)
+            ma_score_series = calculate_ma_score(df["Close"], moving_average)
+            score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
+
+            data_by_tkr[ticker] = {
+                "price": latest_close,
+                "prev_close": prev_close,
+                "daily_pct": round(daily_pct, 2),
+                "close": df["Close"],  # 백테스트용 close 데이터 추가
+                "s1": moving_average.iloc[-1] if not moving_average.empty else None,
+                "s2": None,
+                "score": score,
+                "filter": int(consecutive_buy_days.iloc[-1])
+                if not consecutive_buy_days.empty
+                else 0,
+            }
+        else:
+            # 데이터가 없을 경우 기본값
+            data_by_tkr[ticker] = {
+                "price": 0.0,
+                "prev_close": 0.0,
+                "daily_pct": 0.0,
+                "close": pd.Series(),  # 빈 Series
+                "s1": None,
+                "s2": None,
+                "score": 0.0,
+                "filter": 0,
+                "drawdown_from_peak": None,
+            }
+
+    # 전략 설정
+    portfolio_settings = {}
+    regime_info = None
+
+    # 쿨다운 정보 계산
+    trade_cooldown_info = calculate_trade_cooldown_info(
+        [stock["ticker"] for stock in etf_universe], country, base_date.to_pydatetime()
+    )
+
+    # generate_daily_recommendations_for_portfolio 호출
+    try:
+        from logic.strategies.maps import safe_generate_daily_recommendations_for_portfolio
+
+        decisions = safe_generate_daily_recommendations_for_portfolio(
+            country=country,
+            base_date=base_date,
+            portfolio_settings=portfolio_settings,
+            strategy_rules=strategy_rules,
+            data_by_tkr=data_by_tkr,
+            holdings=holdings,
+            etf_meta={stock["ticker"]: stock for stock in etf_universe},
+            full_etf_meta={stock["ticker"]: stock for stock in etf_universe},
+            regime_info=regime_info,
+            current_equity=current_equity,
+            total_cash=total_cash,
+            pairs=pairs,
+            consecutive_holding_info=consecutive_holding_info,
+            stop_loss=stop_loss_pct,
+            DECISION_CONFIG=DECISION_CONFIG,
+            trade_cooldown_info=trade_cooldown_info,
+            cooldown_days=int(country_settings.get("strategy", {}).get("COOLDOWN_DAYS", 5)),
+            max_per_category=max_per_category,
         )
     except Exception as exc:
-        print(f"경고: 보유일 계산 중 오류 발생: {exc}")
-        holding_info = {}
+        print(f"generate_daily_recommendations_for_portfolio 실행 중 오류: {exc}")
+        return []
 
-    if holding_info:
-        as_of_date = as_of_dt.date()
-        for ticker, info in holding_info.items():
-            days = 0
-            buy_date = info.get("buy_date") if isinstance(info, dict) else None
-            if isinstance(buy_date, datetime):
-                delta = (as_of_date - buy_date.date()).days
-                days = max(delta + 1, 0)
-            holding_days_by_ticker[ticker] = days
+    # 당일 SELL 트레이드를 결과에 추가하여 SOLD 상태로 노출
+    trades_today = _fetch_trades_for_date(country, base_date)
+    sold_entries: List[Dict[str, Any]] = []
+    for trade in trades_today:
+        if trade.get("action") != "SELL":
+            continue
+        ticker = (trade.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        if ticker in holdings:
+            # 여전히 보유 중이면 SOLD로 표시하지 않음
+            continue
 
-    # 점수에 따라 정렬 (높은 순)
-    scored.sort(
-        key=lambda item: (
-            -item.score if item.score is not None else float("-inf"),
-            item.meta.ticker,
+        existing = next((d for d in decisions if d.get("tkr") == ticker), None)
+        if existing:
+            existing["state"] = "SOLD"
+            if existing.get("row"):
+                existing["row"][4] = "SOLD"
+                existing["row"][-1] = "당일 매도"
+            existing["buy_signal"] = False
+            continue
+
+        name = trade.get("name") or ticker
+        ticker_data = data_by_tkr.get(ticker, {})
+        if not ticker_data:
+            meta_info = next(
+                (stock for stock in etf_universe if stock.get("ticker", "").upper() == ticker),
+                None,
+            )
+            if meta_info:
+                name = meta_info.get("name") or name
+            else:
+                print(f"[경고] SOLD 종목 메타데이터 없음: {ticker}")
+                name = ticker
+
+        price_val = ticker_data.get("price", 0.0)
+        daily_pct_val = (
+            ticker_data.get("daily_pct", 0.0)
+            if "daily_pct" in ticker_data
+            else (
+                ((ticker_data.get("price", 0.0) / ticker_data.get("prev_close", 1.0)) - 1.0) * 100
+                if ticker_data.get("prev_close", 0.0) > 0
+                else 0.0
+            )
         )
-    )
+        score_val = float(ticker_data.get("score", 0.0) or 0.0)
 
-    max_per_category_raw = None
-    try:
-        country_settings = get_country_settings(country)
-        strategy_cfg = country_settings.get("strategy") or {}
-        max_per_category_raw = strategy_cfg.get("MAX_PER_CATEGORY") or strategy_cfg.get(
-            "max_per_category"
-        )
-    except CountrySettingsError:
-        max_per_category_raw = None
-
-    if max_per_category_raw is None:
-        try:
-            from utils.account_registry import (
-                get_common_file_settings,
-            )  # avoid cycle at import time
-
-            common_cfg = get_common_file_settings() or {}
-            max_per_category_raw = common_cfg.get("MAX_PER_CATEGORY")
-        except Exception:
-            max_per_category_raw = None
-    try:
-        max_per_category = int(max_per_category_raw) if max_per_category_raw is not None else None
-    except (TypeError, ValueError):
-        max_per_category = None
-    if max_per_category is not None and max_per_category <= 0:
-        max_per_category = None
-
-    category_counts: Dict[str, int] = {}
-
-    results: List[dict] = []
-    for item in scored:
-        # 카테고리가 집합이거나 리스트인 경우 첫 번째 항목을 사용하거나 빈 문자열로 처리
-        category = item.meta.category
-        if isinstance(category, (set, list)):
-            category = next(iter(category), "") if category else ""
-        category_key = str(category) if category else "-"
-        if max_per_category is not None:
-            current_count = category_counts.get(category_key, 0)
-            if current_count >= max_per_category:
-                continue
-
-        next_rank = len(results) + 1
-        state = "BUY" if next_rank <= portfolio_topn else "WAIT"
-        price_value = _apply_precision(item.price, price_precision)
-        daily_pct_value = round(item.daily_pct, daily_pct_precision)
-        score_value = round(item.score, score_precision)
-
-        # Use item.category instead of item.meta.category
-        holding_days_val = holding_days_by_ticker.get(item.meta.ticker, 0)
-
-        results.append(
+        sold_entries.append(
             {
-                "rank": next_rank,
-                "ticker": item.meta.ticker,
-                "name": item.meta.name,
-                "category": item.category,  # Updated to use item.category
-                "state": state,
-                "price": price_value,
-                "daily_pct": daily_pct_value,
-                "score": score_value,
-                "streak": item.streak,
-                "base_date": base_date.strftime("%Y-%m-%d"),
-                "holding_days": holding_days_val,
-                "phrase": _resolve_state_phrase(state),
-                "state_order": _resolve_state_order(state),
+                "state": "SOLD",
+                "tkr": ticker,
+                "score": score_val,
+                "buy_signal": False,
+                "row": [
+                    0,
+                    ticker,
+                    name,
+                    "-",
+                    "SOLD",
+                    "-",
+                    price_val,
+                    daily_pct_val,
+                    0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    "-",
+                    score_val,
+                    "-",
+                    "당일 매도",
+                ],
             }
         )
 
-        if max_per_category is not None:
-            category_counts[category_key] = category_counts.get(category_key, 0) + 1
+    # 결과 포맷팅
+    etf_meta_map: Dict[str, Dict[str, Any]] = {stock["ticker"]: stock for stock in etf_universe}
+    for key, val in list(etf_meta_map.items()):
+        upper_key = str(key).upper()
+        if upper_key not in etf_meta_map:
+            etf_meta_map[upper_key] = val
 
-    # 상태 정렬 기준은 DECISION_CONFIG order -> rank 순으로 유지
-    results.sort(key=lambda row: (row.get("state_order", 99), row["rank"]))
+    results = []
+    for decision in decisions:
+        ticker = decision["tkr"]
+        raw_state = decision["state"]
+        phrase = decision["row"][-1] if decision["row"] else ""
 
-    for idx, row in enumerate(results, start=1):
-        row["rank"] = idx
-        row.pop("state_order", None)
+        is_currently_held = ticker in holdings
+
+        state = raw_state
+        if is_currently_held and raw_state in {"WAIT"}:
+            state = "HOLD"
+
+        if "신규 매수" in phrase:
+            state = "BUY"
+
+        phrase = _format_sell_replace_phrase(phrase, etf_meta=etf_meta_map)
+
+        meta_info = etf_meta_map.get(ticker) or {}
+        name = meta_info.get("name", ticker)
+        category = meta_info.get("category", "TBD")
+        # 보유일 계산
+        holding_days_val = 0
+        if ticker in holdings:
+            # 실제 현재 날짜를 사용해서 보유일 계산
+            current_date = pd.Timestamp.now().date()
+            raw_buy_date = consecutive_holding_info.get(ticker, {}).get("buy_date")
+            if raw_buy_date:
+                buy_timestamp = pd.to_datetime(raw_buy_date)
+                if pd.notna(buy_timestamp):
+                    buy_date = buy_timestamp.date()
+                    holding_days_val = (current_date - buy_date).days + 1
+        elif ticker in consecutive_holding_info:
+            buy_date = consecutive_holding_info[ticker].get("buy_date")
+            if buy_date and buy_date <= base_date:
+                holding_days_val = (base_date - pd.to_datetime(buy_date).normalize()).days + 1
+
+        # 당일 신규 편입 종목은 최소 1일 보유로 표시 및 문구 유지
+        new_buy_phrase = "✅ 신규 매수"
+        bought_today = False
+        if holding_days_val == 0:
+            if raw_state in {"BUY", "BUY_REPLACE"}:
+                holding_days_val = 1
+                bought_today = True
+            elif is_currently_held:
+                holding_days_val = 1
+                bought_today = True
+        if bought_today and is_currently_held:
+            phrase = new_buy_phrase
+
+        ticker_data = data_by_tkr.get(ticker, {})
+        price_val = ticker_data.get("price", 0.0)
+        daily_pct_val = (
+            ticker_data.get("daily_pct", 0.0)
+            if "daily_pct" in ticker_data
+            else (
+                ((ticker_data.get("price", 0.0) / ticker_data.get("prev_close", 1.0)) - 1.0) * 100
+                if ticker_data.get("prev_close", 0.0) > 0
+                else 0.0
+            )
+        )
+        score_val = decision.get("score", 0.0)
+
+        filter_days = decision.get("filter")
+        if filter_days is None:
+            filter_days_row = decision.get("row") or []
+            if len(filter_days_row) >= 16:
+                try:
+                    filter_days = (
+                        int(str(filter_days_row[15]).replace("일", ""))
+                        if filter_days_row[15] not in ("-", None)
+                        else 0
+                    )
+                except Exception:
+                    filter_days = 0
+            else:
+                filter_days = 0
+
+        streak_val = int(filter_days or 0)
+
+        results.append(
+            {
+                "rank": len(results) + 1,
+                "ticker": ticker,
+                "name": name,
+                "category": category,
+                "state": state,
+                "price": price_val,
+                "daily_pct": daily_pct_val,
+                "score": score_val,
+                "streak": streak_val,
+                "base_date": base_date.strftime("%Y-%m-%d"),
+                "holding_days": holding_days_val,
+                "phrase": phrase,
+                "state_order": DECISION_CONFIG.get(state, {}).get("order", 99),
+            }
+        )
+
+    # BUY 종목 생성: 상위 점수의 WAIT 종목들을 BUY로 변경
+    wait_items = [
+        item
+        for item in results
+        if item["state"] == "WAIT" and item.get("phrase") != DECISION_NOTES.get("CATEGORY_DUP")
+    ]
+    wait_items.sort(key=lambda x: x["score"], reverse=True)
+
+    # 카테고리 보유 제한이 있는 경우, 동일 카테고리 수를 체크
+    category_counts = {}
+    if max_per_category and max_per_category > 0:
+        for item in results:
+            if item["state"] in {"HOLD", "BUY", "BUY_REPLACE"}:
+                category = str(item.get("category") or "").strip()
+                if category:
+                    category_counts[category] = category_counts.get(category, 0) + 1
+
+    current_holdings_count = len(holdings)
+    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_REGIME_FILTER"}
+    buy_state_set = {"BUY", "BUY_REPLACE"}
+    planned_sell_count = sum(1 for item in results if item["state"] in sell_state_set)
+    planned_buy_count = sum(1 for item in results if item["state"] in buy_state_set)
+
+    projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
+    additional_buy_slots = max(0, portfolio_topn - projected_holdings)
+
+    for i, item in enumerate(wait_items[:additional_buy_slots]):
+        item["state"] = "BUY"
+        item["phrase"] = "✅ 신규 매수"
+        # 신규 매수로 전환된 종목은 holdings 정보가 없으므로 기본값 추가
+        holdings.setdefault(
+            item["ticker"],
+            {
+                "buy_date": base_date.strftime("%Y-%m-%d"),
+            },
+        )
+
+    # rank를 점수 순서대로 재설정
+    results.sort(key=lambda x: x["score"], reverse=True)
+    for i, item in enumerate(results, 1):
+        item["rank"] = i
+
+    # 최종 state_order 재계산 및 상태 정렬 (백테스트와 동일한 기준 사용)
+    for item in results:
+        state_key = (item.get("state") or "").upper()
+        item["state_order"] = DECISION_CONFIG.get(state_key, {}).get("order", 99)
+
+    # 공통 정렬 함수 사용
+    sort_decisions_by_order_and_score(results)
+
+    # sort 후 rank 재설정
+    for i, item in enumerate(results, 1):
+        item["rank"] = i
 
     return results
 
