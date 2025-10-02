@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -15,7 +15,6 @@ import pandas as pd
 DATA_DIR = Path(__file__).parent.parent.parent / "data" / "stocks"
 from utils.settings_loader import (
     CountrySettingsError,
-    get_country_precision,
     get_country_settings,
     get_strategy_rules,
 )
@@ -29,6 +28,20 @@ from logic.recommend.history import (
 )
 from utils.data_loader import fetch_ohlcv, get_latest_trading_day
 from utils.db_manager import get_db_connection
+
+
+@dataclass
+class RecommendationReport:
+    country: str
+    base_date: pd.Timestamp
+    recommendations: List[Dict[str, Any]]
+    report_date: datetime
+    summary_data: Optional[Dict[str, Any]] = None
+    header_line: Optional[str] = None
+    detail_headers: Optional[List[str]] = None
+    detail_rows: Optional[List[List[Any]]] = None
+    detail_extra_lines: Optional[List[str]] = None
+    decision_config: Dict[str, Any] = None
 
 
 @dataclass
@@ -339,7 +352,9 @@ def _fetch_trades_for_date(country: str, base_date: pd.Timestamp) -> List[Dict[s
     return trades
 
 
-def generate_country_signal_report(country: str, date_str: Optional[str] = None) -> List[dict]:
+def generate_country_recommendation_report(
+    country: str, date_str: Optional[str] = None
+) -> RecommendationReport:
     """국가 단위 추천 종목 리스트를 반환합니다."""
     if not country:
         raise ValueError("country 인자가 필요합니다.")
@@ -355,11 +370,9 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
 
     ma_period = int(strategy_rules.ma_period)
     portfolio_topn = int(strategy_rules.portfolio_topn)
-    replace_threshold = float(strategy_rules.replace_threshold)
-
     # 손절매 비율은 common_settings에서 가져옴
     try:
-        from utils.account_registry import get_common_file_settings
+        from utils.country_registry import get_common_file_settings
 
         common_settings = get_common_file_settings() or {}
         stop_loss_pct = -abs(float(common_settings.get("HOLDING_STOP_LOSS_PCT", 10.0)))
@@ -370,7 +383,14 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
 
     # ETF 목록 가져오기
     etf_universe = get_etfs(country)
-    pairs = [(stock["ticker"], stock["name"]) for stock in etf_universe]
+    disabled_tickers = {
+        str(stock.get("ticker") or "").strip().upper()
+        for stock in etf_universe
+        if not bool(stock.get("recommend_enabled", True))
+    }
+    pairs = [
+        (stock.get("ticker"), stock.get("name")) for stock in etf_universe if stock.get("ticker")
+    ]
 
     # 실제 포트폴리오 데이터 준비
     holdings: Dict[str, Dict[str, float]] = {}
@@ -611,6 +631,7 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
                 "category": meta.get("category") or "TBD",
             }
 
+    disabled_note = DECISION_NOTES.get("NO_RECOMMEND", "추천대상에서 의도적 제외")
     results = []
     for decision in decisions:
         ticker = decision["tkr"]
@@ -633,6 +654,9 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
         meta_info = etf_meta_map.get(ticker) or {}
         name = meta_info.get("name", ticker)
         category = meta_info.get("category", "TBD")
+        ticker_upper = str(ticker).upper()
+        recommend_enabled = ticker_upper not in disabled_tickers
+
         # 보유일 계산
         holding_days_val = 0
         if ticker in holdings:
@@ -692,29 +716,36 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
 
         streak_val = int(filter_days or 0)
 
-        results.append(
-            {
-                "rank": len(results) + 1,
-                "ticker": ticker,
-                "name": name,
-                "category": category,
-                "state": state,
-                "price": price_val,
-                "daily_pct": daily_pct_val,
-                "score": score_val,
-                "streak": streak_val,
-                "base_date": base_date.strftime("%Y-%m-%d"),
-                "holding_days": holding_days_val,
-                "phrase": phrase,
-                "state_order": DECISION_CONFIG.get(state, {}).get("order", 99),
-            }
-        )
+        if not recommend_enabled and state in {"BUY", "BUY_REPLACE"}:
+            state = "WAIT"
+            phrase = disabled_note
+
+        result_entry = {
+            "rank": len(results) + 1,
+            "ticker": ticker,
+            "name": name,
+            "category": category,
+            "state": state,
+            "price": price_val,
+            "daily_pct": daily_pct_val,
+            "score": score_val,
+            "streak": streak_val,
+            "base_date": base_date.strftime("%Y-%m-%d"),
+            "holding_days": holding_days_val,
+            "phrase": phrase,
+            "state_order": DECISION_CONFIG.get(state, {}).get("order", 99),
+            "recommend_enabled": recommend_enabled,
+        }
+
+        results.append(result_entry)
 
     # BUY 종목 생성: 상위 점수의 WAIT 종목들을 BUY로 변경
     wait_items = [
         item
         for item in results
-        if item["state"] == "WAIT" and item.get("phrase") != DECISION_NOTES.get("CATEGORY_DUP")
+        if item["state"] == "WAIT"
+        and item.get("phrase") != DECISION_NOTES.get("CATEGORY_DUP")
+        and item.get("recommend_enabled", True)
     ]
     wait_items.sort(key=lambda x: x["score"], reverse=True)
 
@@ -764,7 +795,60 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
     for i, item in enumerate(results, 1):
         item["rank"] = i
 
-    return results
+    detail_headers = [
+        "순위",
+        "티커",
+        "종목명",
+        "카테고리",
+        "상태",
+        "점수",
+        "현재가",
+        "일간수익률",
+        "보유일",
+        "지속",
+        "비중",
+        "누적수익률",
+        "일간(%)",
+        "고점대비",
+        "문구",
+    ]
+
+    detail_rows: List[List[Any]] = []
+    for item in results:
+        detail_rows.append(
+            [
+                item.get("rank", 0),
+                item.get("ticker"),
+                item.get("name"),
+                item.get("category"),
+                item.get("state"),
+                item.get("score"),
+                item.get("price"),
+                item.get("daily_pct"),
+                item.get("holding_days"),
+                item.get("streak"),
+                item.get("weight", 0.0),
+                item.get("cum_return_pct", 0.0),
+                item.get("daily_pct", 0.0),
+                item.get("drawdown_from_peak", 0.0),
+                item.get("phrase", ""),
+            ]
+        )
+
+    report = RecommendationReport(
+        country=country,
+        base_date=base_date,
+        recommendations=results,
+        report_date=datetime.now(),
+        summary_data=None,
+        header_line=None,
+        detail_headers=detail_headers,
+        detail_rows=detail_rows,
+        detail_extra_lines=None,
+        decision_config=DECISION_CONFIG,
+    )
+
+    return report
 
 
-__all__ = ["generate_country_signal_report"]
+__all__ = ["generate_country_recommendation_report"]

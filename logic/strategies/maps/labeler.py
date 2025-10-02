@@ -30,9 +30,6 @@ def compute_net_trade_note(
         if trades_buys
         else 0.0
     )
-    total_buy_shares = (
-        sum(float(tr.get("shares", 0.0) or 0.0) for tr in trades_buys) if trades_buys else 0.0
-    )
 
     sells = sell_trades_today_map.get(tkr, [])
     total_sold_amount = (
@@ -42,16 +39,10 @@ def compute_net_trade_note(
         if sells
         else 0.0
     )
-    today_sold_shares = sum(float(tr.get("shares", 0.0) or 0.0) for tr in sells) if sells else 0.0
-
     d = data_by_tkr.get(tkr) or {}
     current_shares_now = float(d.get("shares", 0.0) or 0.0)
 
     is_fully_sold = current_shares_now <= 0.0
-
-    prev_shares_estimated = current_shares_now - total_buy_shares + today_sold_shares
-    prev_shares_cached = float(prev_holdings_map.get(tkr, 0.0) or 0.0)
-    was_held_before = prev_shares_estimated > 0.0 or prev_shares_cached > 0.0
 
     # 거래가 전혀 없으면 아무 것도 변경하지 않음 (WAIT/HOLD 등이 SOLD로 바뀌지 않도록)
     if not trades_buys and not sells:

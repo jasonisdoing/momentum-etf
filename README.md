@@ -6,15 +6,15 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 ## 구성 개요 / 폴더 구조
 
-- `logic/`: 매매 전략(로직) 정의 및 추천 파이프라인
-  - `strategies/momentum/`: 이동평균 기반 모멘텀 전략
+- `logic/`: 매매 전략(로직) 정의 및 추천/백테스트 파이프라인
+  - `strategies/maps/`: 이동평균 기반 모멘텀 전략 구현체
     - `backtest.py`: 백테스트 실행 엔진
-    - `recommends.py`: 전략별 추천 생성 로직(결정 테이블)
+    - `recommend.py`: 전략별 추천 생성 로직
     - `shared.py`: 공통 유틸리티
-  - `recommends/`: 추천 파이프라인과 유틸 (루트 recommends 이관)
-    - `pipeline.py`: 추천 생성 파이프라인 진입점(`main`, `generate_signal_report`)
+  - `recommend/`: 추천 파이프라인과 유틸리티
+    - `pipeline.py`: 추천 생성 파이프라인 진입점 (`generate_country_recommendation_report`)
     - `history.py`: 보유일/쿨다운 계산 유틸
-    - `schedule.py`: 개장여부/다음 거래일/스케줄 타깃 날짜 계산
+    - `schedule.py`: 개장 여부/다음 거래일/스케줄 타깃 날짜 계산
     - `logger.py`: 추천 전용 파일 로거
     - `market.py`: 시장 레짐 상태 문자열 생성(웹 UI 헤더용)
 - `utils/`: 공통 유틸리티 모듈
@@ -22,16 +22,14 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
   - `indicators.py`: 기술적 지표 계산 (이동평균, SuperTrend, ATR 등)
   - `report.py`: 리포트, 로그 포맷팅 및 테이블 렌더링
   - `db_manager.py`: 데이터베이스 관리
-  - `account_registry.py`: 계좌 관리
+  - `country_registry.py`: 국가 설정 로더 및 공통 설정 헬퍼
 - `scripts/`: 각종 유틸리티 및 분석 스크립트 모음
   - `update_price_cache.py`: 국가별 종목 OHLCV 데이터를 캐시에 선다운로드/증분 갱신
   - `categorize_etf.py`: AI를 이용한 ETF 섹터 자동 분류
 - `pages/`: Streamlit 웹앱 페이지들
 - `data/`: 데이터 저장소
-  - `kor/`, `aus/`, `coin/`: 국가별 데이터
-- `run.py`: 메인 실행 진입점
-- `test.py`: 과거 구간 백테스트 실행 (로직은 `logic/backtest/runner.py`로 위임)
-- `tune.py`: 파라미터 튜닝 (별도 프로세스 실행, 로직은 `logic/tune/runner.py`에 위치)
+  - `kor/`, `aus/`: 국가별 데이터
+- `run.py`: 메인 실행 진입점 (웹 앱 등에서 사용)
 - `settings.py`: 모든 전략에 공통으로 적용되는 전역 설정
 
 ## 문서
@@ -108,7 +106,7 @@ python cli.py m1 --test
 `cli.py`를 통해 파라미터 튜닝을 실행하여 각 전략의 최적 파라미터를 찾습니다.
 
 ```bash
-python cli.py <계좌코드> --tune
+python cli.py <국가코드> --tune
 ```
 
 **주의사항:**
@@ -120,16 +118,16 @@ python cli.py <계좌코드> --tune
 
 - **추천 결과(요약/상세) 저장**
   - DB 저장: `utils.db_manager.save_signal_report_to_db()`로 저장되어 웹앱에서 조회됩니다
-  - 파일 저장(상세 로그): `results/signal_{account}_{YYYY-MM-DD}.log`
+  - 파일 저장(상세 로그): `results/recommendation_{country}_{YYYY-MM-DD}.log`
 - **추천 전용 파일 로그**
-  - 경로: `logs/YYYY-MM-DD.log` (`logic/signals/logger.py`)
+  - 경로: `logs/YYYY-MM-DD.log` (`logic/recommend/logger.py`)
   - 내용: 추천 생성 과정의 디테일/디버그 로그
 - **백테스트 로그**
-  - 경로: `logs/test_{country}_{account}.log`
-  - 트리거: `cli.py --test` 실행 시 `test.py`에서 파일 로깅
+  - 경로: `logs/backtest_{country}.log`
+  - 트리거: `cli.py <country> --backtest` 실행 시 `logic/backtest/country_runner.py`에서 파일 로깅
 - **튜닝 로그**
-  - 경로: `logs/tune_{country}_{account}.log`
-  - 트리거: `cli.py --tune` (별도 프로세스 실행)
+  - 경로: `logs/tune_{country}.log`
+  - 트리거: `cli.py <country> --tune` (별도 프로세스 실행)
 
 ### 5) ETF 섹터 분류 (AI 사용)
 `scripts/categorize_etf.py` 스크립트를 실행하여 `data/<국가코드>/etf_raw.txt` 파일의 ETF들을 AI를 이용해 섹터별로 자동 분류하고 `data/<국가코드>/etf_categorized.csv` 파일에 저장합니다.
@@ -156,7 +154,7 @@ python scripts/categorize_etf.py <국가코드>
    - `SCHEDULE_CACHE_CRON` = `"30 3 * * *"` (서울 03:30)
    - `SCHEDULE_CACHE_TZ` = `Asia/Seoul`
    - `CACHE_START_DATE` = `2020-01-01` (캐시 초기화 시작일 기본값)
-   - `CACHE_COUNTRIES` = `kor,aus,coin`
+- `CACHE_COUNTRIES` = `kor,aus`
 3. 실행: `python aps.py`
 
 가격 캐시만 따로 갱신하려면:
@@ -206,17 +204,17 @@ python scripts/find.py --type etf --min-change 3.0
 ## 코드 구조 개선사항
 
 ### 최근 리팩토링(2025-09)
-1. **signals 분리/이관**: 루트 `signals.py` 삭제. 추천 파이프라인/스케줄/로거/히스토리/마켓 상태를 `logic/signals/`로 모듈화
-   - 파이프라인: `logic/signals/pipeline.py` (`main`, `generate_signal_report`)
-   - 스케줄: `logic/signals/schedule.py` (거래일/개장여부/스케줄 날짜)
-   - 로거: `logic/signals/logger.py` (파일 로깅)
-   - 히스토리: `logic/signals/history.py` (보유일/쿨다운)
-   - 마켓 상태: `logic/signals/market.py` (웹 UI 헤더용 문자열)
+1. **추천 파이프라인 정리**: 루트 `signals.py`를 제거하고 `logic/recommend/` 패키지로 일원화
+   - 파이프라인: `logic/recommend/pipeline.py` (`generate_country_recommendation_report`)
+   - 스케줄: `logic/recommend/schedule.py` (거래일/개장 여부 계산)
+   - 로거: `logic/recommend/logger.py` (파일 로깅)
+   - 히스토리: `logic/recommend/history.py` (보유일/쿨다운)
+   - 마켓 상태: `logic/recommend/market.py` (웹 UI 헤더용 문자열)
 2. **포맷팅/정밀도 일원화**: 금액/퍼센트/표 렌더링은 `utils.report`, 요약 문구는 `utils.notification` 사용으로 통일
 3. **벤치마크/스케줄/로거 분리**: 레이어 간 의존성 정리로 테스트/유지보수 용이성 향상
 4. **백테스트/튜닝 모듈화**:
-   - 백테스트 러너: `logic/backtest/runner.py` (현재 `test.py`를 위임)
-   - 튜닝 러너: `logic/tune/runner.py` (A안: `tune.py`를 별도 프로세스로 실행, 로직은 runner에 위치)
+   - 백테스트 러너: `logic/backtest/country_runner.py`
+   - 튜닝 러너: `logic/tune/runner.py`
 
 ### 최근 개선된 기능들
 1. **중복 코드 제거**: 이동평균 계산 로직을 `utils/indicators.py`의 공통 함수로 통합

@@ -2,7 +2,6 @@ import glob
 import json
 import warnings
 
-import requests
 import yfinance as yf
 from pykrx.stock import get_etf_ticker_name
 
@@ -37,9 +36,6 @@ def update_etf_names():
                             yfinance_ticker = ticker.replace("ASX:", "") + ".AX"
                             stock_info = yf.Ticker(yfinance_ticker).info
                             new_name = stock_info.get("longName", stock_info.get("shortName", ""))
-                        elif "coin" in file_path:
-                            new_name = coin_map.get(ticker, "")
-
                         if new_name:
                             print(f"  Found name for {ticker}: {new_name}")
                             ticker_info["name"] = new_name

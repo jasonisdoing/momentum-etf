@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Literal, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional
 
 import pandas as pd
 
@@ -19,7 +19,6 @@ from utils.settings_loader import (
     get_strategy_rules,
 )
 from logic.strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES
-from utils.stock_list_io import get_etfs
 from utils.data_loader import fetch_ohlcv, get_latest_trading_day
 from logic.recommend.history import calculate_consecutive_holding_info
 
@@ -349,7 +348,7 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
 
     if max_per_category_raw is None:
         try:
-            from utils.account_registry import (
+            from utils.country_registry import (
                 get_common_file_settings,
             )  # avoid cycle at import time
 

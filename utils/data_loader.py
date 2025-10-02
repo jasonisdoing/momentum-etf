@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import warnings
-from datetime import datetime, timedelta, time
+from datetime import datetime, time
 from typing import Dict, List, Optional, Tuple
 from contextlib import contextmanager
 
@@ -323,10 +323,6 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
         trading_days_ts = _pmc("kor")
     elif country == "aus":
         trading_days_ts = _pmc("aus")
-    elif country == "coin":
-        # 암호화폐는 24/7 거래되므로, 단순히 날짜 범위 내의 모든 날짜를 반환합니다.
-        # 실제 거래가 없는 날(예: 거래소 점검)은 고려하지 않습니다.
-        trading_days_ts = pd.date_range(start=start_date, end=end_date, freq="D").tolist()
     elif country == "us":
         trading_days_ts = _pmc("us")
     else:
@@ -347,8 +343,6 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
     오늘 또는 가장 가까운 과거의 '데이터가 있을 것으로 예상되는' 거래일을 pd.Timestamp 형식으로 반환합니다.
     """
     end_dt = pd.Timestamp.now()
-    if country == "coin":
-        return end_dt.normalize()
 
     # 한국 시장의 경우, 장 마감 데이터가 집계되기 전(오후 4시 이전)이라면,
     # 조회 기준일을 하루 전으로 설정하여 어제까지의 데이터만 사용하도록 합니다.
@@ -948,8 +942,6 @@ def resolve_security_name(country: str, ticker: str) -> str:
         name = fetch_pykrx_name(ticker_upper)
     elif country_lower == "aus":
         name = fetch_yfinance_name(ticker_upper)
-    elif country_lower == "coin":
-        name = ticker_upper
 
     if not name:
         name = _get_display_name(country_lower, ticker_upper)

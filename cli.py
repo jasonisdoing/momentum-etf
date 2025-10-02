@@ -8,17 +8,17 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Mapping
 import math
 
 import pandas as pd
 
-from utils.account_registry import (
+from utils.country_registry import (
     get_country_settings,
     get_strategy_rules,
     list_available_countries,
 )
-from utils.notification import build_summary_line_from_summary_data
+from utils.notification import build_summary_line_from_summary_data, strip_html_tags
 from utils.backtest_utils import print_backtest_summary
 from utils.report import (
     format_aud_money,
@@ -80,26 +80,42 @@ def _invoke_country_pipeline(country: str, *, date_str: str | None) -> List[Dict
     Returns:
         List[Dict[str, Any]]: 추천 결과 리스트
     """
-    from logic.recommend import generate_signal_report
+    from logic.recommend import generate_recommendation_report
 
-    signals = generate_signal_report(
+    result = generate_recommendation_report(
         country=country,
         date_str=date_str,
     )
 
-    if not signals:
+    if not result:
         print(f"[WARN] {country.upper()}에 대한 추천을 생성하지 못했습니다.")
         return []
 
+    if isinstance(result, list):
+        items = result
+    else:
+        recommendations = getattr(result, "recommendations", None)
+        if not recommendations:
+            print(f"[WARN] {country.upper()} 추천 결과가 비어 있습니다.")
+            return []
+
+        header_line = getattr(result, "header_line", "")
+        if header_line:
+            header_plain = strip_html_tags(str(header_line)).strip()
+            if header_plain:
+                print(f"\n[INFO] {header_plain}")
+
+        items = list(recommendations)
+
     # print(f"\n[DEBUG] Generated signals for {country}:")
-    # print(f"- Signals count: {len(signals)}")
+    # print(f"- Signals count: {len(items)}")
     # print("\nSample signal data (first 3 items):")
-    # for i, signal in enumerate(signals[:3], 1):
+    # for i, signal in enumerate(items[:3], 1):
     #     print(f"{i}. {signal.get('ticker')} - {signal.get('name')}")
     #     print(f"   State: {signal.get('state')}, Daily %: {signal.get('daily_pct')}")
     #     print(f"   Price: {signal.get('price')}, Score: {signal.get('score')}")
 
-    return signals
+    return items
 
 
 def _dump_json(data: Any, path: Path) -> None:
@@ -177,6 +193,8 @@ def _print_result_summary(
             print(line)
 
     # 추가 정보 출력
+    if state_summary:
+        print(f"\n[INFO] 상태 요약: {state_summary}")
     buy_count = sum(1 for item in items if item.get("state") == "BUY")
     print(f"\n[INFO] 매수 추천: {buy_count}개, 대기: {len(items) - buy_count}개")
     print(f"[INFO] 결과가 성공적으로 생성되었습니다. (총 {len(items)}개 항목)")
@@ -271,7 +289,7 @@ def _render_used_settings_section(
             f"| 테스트 기간: 최근 {getattr(result, 'months_range', DEFAULT_TEST_MONTHS_RANGE)}개월",
             f"| 초기 자본: {money_fmt(result.initial_capital)}",
             f"| 포트폴리오 종목 수 (TopN): {strategy_rules.get('portfolio_topn', result.portfolio_topn)}",
-            f"| 모멘텀 스코어 MA 기간: {strategy_rules.get('ma_period', '-') }일",
+            f"| 모멘텀 스코어 MA 기간: {strategy_rules.get('ma_period', '-')}일",
             f"| 교체 매매 점수 임계값: {strategy_rules.get('replace_threshold', '-')}",
             f"| 개별 종목 손절매: {common_settings.get('HOLDING_STOP_LOSS_PCT', '-')}%",
             f"| 매도 후 재매수 금지 기간: {strategy_settings.get('COOLDOWN_DAYS', 0)}일",
@@ -370,7 +388,6 @@ def _build_daily_table_rows(
         avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
 
         decision = str(row.get("decision", "")).upper()
-        signal2 = row.get("signal2")
         score = row.get("score")
         filter_val = row.get("filter")
         note = str(row.get("note", "") or "")
@@ -388,7 +405,6 @@ def _build_daily_table_rows(
             prev_price = None
 
         daily_ret = ((price / prev_price) - 1.0) * 100.0 if prev_price else 0.0
-        hold_ret = ((price / avg_cost) - 1.0) * 100.0 if avg_cost > 0 and shares > 0 else 0.0
         pv_safe = pv if _is_finite_number(pv) else 0.0
         total_value_safe = (
             total_value if _is_finite_number(total_value) and total_value > 0 else 0.0
@@ -413,10 +429,6 @@ def _build_daily_table_rows(
             buy_date_map[ticker_key] = None
             holding_days_map[ticker_key] = 0
 
-        buy_date = buy_date_map.get(ticker_key)
-        buy_date_display = (
-            pd.to_datetime(buy_date).strftime("%Y-%m-%d") if buy_date is not None else "-"
-        )
         holding_days_display = str(holding_days_map.get(ticker_key, 0))
 
         price_display = (
@@ -430,11 +442,6 @@ def _build_daily_table_rows(
         pv_display = money_formatter(pv)
         cost_basis = avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 else 0.0
         eval_profit_value = 0.0 if is_cash else pv - cost_basis
-        hold_ret_display = (
-            f"{hold_ret:+.1f}%"
-            if (not is_cash and _is_finite_number(hold_ret) and shares > 0 and avg_cost > 0)
-            else "-"
-        )
         evaluated_profit = evaluation.get("realized_profit", 0.0)
         cumulative_profit_value = evaluated_profit + eval_profit_value
         evaluated_profit_display = money_formatter(eval_profit_value)
@@ -445,14 +452,12 @@ def _build_daily_table_rows(
         )
         evaluated_pct_display = f"{evaluated_pct:+.1f}%" if cost_basis > 0 else "-"
         initial_value = evaluation.get("initial_value") or cost_basis
-        cumulative_profit_display = money_formatter(cumulative_profit_value)
         cumulative_pct = (
             (cumulative_profit_value / initial_value * 100.0)
             if initial_value and _is_finite_number(cumulative_profit_value)
             else 0.0
         )
         cumulative_pct_display = f"{cumulative_pct:+.1f}%" if initial_value else "-"
-        signal2_display = f"{float(signal2):.1f}%" if _is_finite_number(signal2) else "-"
         score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
         filter_display = f"{int(filter_val)}일" if _is_finite_number(filter_val) else "-"
         weight_display = f"{weight:.0f}%"

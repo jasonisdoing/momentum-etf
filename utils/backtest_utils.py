@@ -1,16 +1,16 @@
 """백테스트 관련 유틸리티 함수들."""
 
 from typing import Dict, List, Any
+
 import pandas as pd
-from datetime import datetime
+
 from .report import (
     format_kr_money,
     format_aud_money,
     format_usd_money,
     render_table_eaw,
 )
-from .data_loader import get_aud_to_krw_rate, get_usd_to_krw_rate
-from utils.account_registry import get_country_settings
+from utils.country_registry import get_country_settings
 
 
 def format_period_return_with_listing_date(s: Dict[str, Any], core_start_dt: pd.Timestamp) -> str:
@@ -62,7 +62,7 @@ def print_backtest_summary(
         money_formatter = format_usd_money
     else:
         money_formatter = format_kr_money
-    benchmark_name = "BTC" if country == "coin" else "S&P 500"
+    benchmark_name = "S&P 500"
 
     summary_lines = [
         "\n" + "=" * 30 + "\n 백테스트 결과 요약 ".center(30, "=") + "\n" + "=" * 30,

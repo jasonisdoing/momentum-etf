@@ -109,18 +109,18 @@ python aps.py
 
 ```bash
 # 한국(kor) 시장 백테스트
-python test.py
+python cli.py kor --backtest
 
-# 다른 국가를 지정하려면 인자로 전달 (예: aus, coin)
-# python test.py aus
+# 다른 국가를 지정하려면 인자로 전달 (예: aus)
+# python cli.py aus --backtest
 ```
 
 ## 프로젝트 구조
 
 *   `web_app.py`: Streamlit 웹 UI의 메인 애플리케이션 파일.
-*   `signals.py`: 각 국가별 포트폴리오의 현재 상태를 계산하는 핵심 로직.
-*   `test.py`: 투자 전략의 성과를 검증하기 위한 백테스팅 스크립트.
-*   `aps.py`: `signals.py`를 주기적으로 실행하는 스케줄러.
+*   `logic/recommend/`: 각 국가별 포트폴리오의 현재 상태를 계산하는 핵심 로직.
+*   `cli.py`: 추천/백테스트/튜닝을 실행하는 통합 CLI.
+*   `aps.py`: 추천 파이프라인을 주기적으로 실행하는 스케줄러.
 *   `logic/`: 실제 매매 전략(모멘텀 점수 계산, 매수/매도 결정 등)이 구현된 폴더.
 *   `utils/`: 데이터베이스 관리, 데이터 로딩, 슬랙 알림 등 공통 유틸리티 함수.
 *   `scripts/`: 빗썸 거래 내역 동기화 등 보조 스크립트.

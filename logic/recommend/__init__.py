@@ -14,8 +14,8 @@ def main() -> None:
     return _main()
 
 
-def generate_signal_report(*args: Any, **kwargs: Dict[str, Any]):
-    from .pipeline import generate_country_signal_report as _gen
+def generate_recommendation_report(*args: Any, **kwargs: Dict[str, Any]):
+    from .pipeline import generate_country_recommendation_report as _gen
 
     return _gen(*args, **kwargs)
 
@@ -26,4 +26,4 @@ def calculate_benchmark_comparison(*args: Any, **kwargs: Dict[str, Any]):
     return _calc(*args, **kwargs)
 
 
-__all__ = ["main", "generate_signal_report", "calculate_benchmark_comparison"]
+__all__ = ["main", "generate_recommendation_report", "calculate_benchmark_comparison"]

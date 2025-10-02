@@ -13,8 +13,9 @@ APScheduler 기반 스케줄러
 - RUN_IMMEDIATELY_ON_START: "1" 이면 시작 시 즉시 한 번 실행 (기본: "0")
 """
 
-import os
+import json
 import logging
+import os
 import sys
 import warnings
 
@@ -23,6 +24,8 @@ os.environ["PYTHONWARNINGS"] = "ignore"
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 import time
 from datetime import datetime
+from pathlib import Path
+
 
 try:
     from zoneinfo import ZoneInfo
@@ -35,14 +38,144 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+try:
+    from slack_sdk import WebClient
+    from slack_sdk.errors import SlackApiError
+except Exception:  # pragma: no cover - optional dependency
+    WebClient = None  # type: ignore[assignment]
+    SlackApiError = Exception  # type: ignore[assignment]
+
+import pandas as pd
+
+try:  # pragma: no cover - optional dependency
+    import numpy as np
+except Exception:  # pragma: no cover
+    np = None  # type: ignore[assignment]
+
+from logic.recommend.pipeline import (
+    RecommendationReport,
+    generate_country_recommendation_report,
+)
 from utils.data_updater import update_etf_names
 from utils.env import load_env_if_present
-from utils.account_registry import get_accounts_by_country, load_accounts
+from utils.notification import (
+    compose_recommendation_slack_message,
+    get_slack_webhook_url,
+    send_slack_message,
+)
 from utils.schedule_config import (
     get_all_country_schedules,
     get_cache_schedule,
     get_global_schedule_settings,
 )
+from utils.settings_loader import get_country_slack_channel
+
+
+RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
+
+
+def _make_json_safe(obj):
+    """Convert non-serializable objects into JSON safe representations."""
+
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+
+    if isinstance(obj, (datetime, pd.Timestamp)):
+        return obj.isoformat()
+
+    if np is not None and isinstance(obj, np.generic):  # numpy scalar types
+        return obj.item()
+
+    if isinstance(obj, dict):
+        return {k: _make_json_safe(v) for k, v in obj.items()}
+
+    if isinstance(obj, (list, tuple, set)):
+        return [_make_json_safe(v) for v in obj]
+
+    if isinstance(obj, pd.Series):
+        return [_make_json_safe(v) for v in obj.tolist()]
+
+    if isinstance(obj, pd.DataFrame):
+        return [
+            {k: _make_json_safe(v) for k, v in rec.items()} for rec in obj.to_dict(orient="records")
+        ]
+
+    return str(obj)
+
+
+def _save_recommendation_result(country: str, report: RecommendationReport) -> Path:
+    """Persist recommendation results to JSON for downstream consumers."""
+
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = RESULTS_DIR / f"{country}.json"
+
+    try:
+        safe_payload = _make_json_safe(report.recommendations)
+        with output_path.open("w", encoding="utf-8") as fp:
+            json.dump(safe_payload, fp, ensure_ascii=False, indent=2)
+    except Exception:
+        logging.error(
+            "Failed to write recommendation results for %s", country.upper(), exc_info=True
+        )
+        raise
+
+    return output_path
+
+
+def _send_slack_notification(
+    country: str,
+    message: str,
+) -> bool:
+    """Send Slack notification via bot token or webhook as a fallback."""
+
+    channel = get_country_slack_channel(country)
+    token = os.environ.get("SLACK_BOT_TOKEN")
+
+    if token and channel and WebClient is not None:
+        try:
+            client = WebClient(token=token)
+            client.chat_postMessage(channel=channel, text=message)
+            logging.info(
+                "Slack message sent via bot token for %s (channel=%s)",
+                country.upper(),
+                channel,
+            )
+            return True
+        except SlackApiError as exc:  # pragma: no cover - external API call
+            logging.error(
+                "Slack API error for %s: %s",
+                country.upper(),
+                getattr(exc, "response", {}).get("error") or str(exc),
+                exc_info=True,
+            )
+        except Exception:
+            logging.error("Unexpected Slack client failure for %s", country.upper(), exc_info=True)
+
+    webhook_info = get_slack_webhook_url(country)
+    if webhook_info:
+        webhook_url, source_name = webhook_info
+        sent = send_slack_message(message, webhook_url=webhook_url, webhook_name=source_name)
+        if sent:
+            logging.info(
+                "Slack message sent via webhook for %s (source=%s)",
+                country.upper(),
+                source_name,
+            )
+            return True
+
+        logging.error(
+            "Slack webhook delivery failed for %s (source=%s)",
+            country.upper(),
+            source_name,
+        )
+
+    if not channel and not webhook_info:
+        logging.info(
+            "Slack delivery skipped for %s: no channel/webhook configured",
+            country.upper(),
+        )
+
+    return False
 
 
 def setup_logging():
@@ -105,125 +238,92 @@ def _format_korean_datetime(dt: datetime) -> str:
     return f"{dt.strftime('%Y년 %m월 %d일')}({weekday_str}) {ampm_str} {hour12}시 {dt.minute:02d}분"
 
 
-def _accounts_for_country(country: str) -> list[str]:
-    try:
-        load_accounts(force_reload=False)
-        entries = get_accounts_by_country(country) or []
-        accounts = []
-        for entry in entries:
-            code = entry.get("account")
-            if code:
-                accounts.append(str(code).strip())
-        return accounts
-    except Exception:
-        logging.exception(f"Failed to load accounts for {country}")
-        return []
-
-
-def run_signal_generation(
+def run_recommendation_generation(
     country: str,
-    account: str | None = None,
     *,
     force_notify: bool = False,
 ) -> None:
-    """Run signal generation and sends a completion log to Slack."""
+    """Generate recommendations, persist them, and notify Slack."""
+
+    country_norm = (country or "").strip().lower()
+    if not country_norm:
+        logging.error("Country code is required for recommendation generation.")
+        return
+
+    logging.info("Running recommendation generation for %s", country_norm.upper())
     start_time = time.time()
-    report_date = None
+
     try:
-        from logic.recommend.pipeline import main as run_recommend_main
-        from utils.notification import (
-            send_summary_notification,
-            send_detailed_signal_notification,
-        )
-        from utils.db_manager import get_portfolio_snapshot
-        from utils.account_registry import get_account_info
-
-        account_info = get_account_info(account) if account else None
-        derived_country = (
-            str(account_info.get("country") or "").strip() if account_info else country
-        )
-        snapshot_country = derived_country or country
-
-        # 알림에 사용할 이전 평가금액을 미리 가져옵니다.
-        old_snapshot = get_portfolio_snapshot(snapshot_country, account=account)
-        old_equity = float(old_snapshot.get("total_equity", 0.0)) if old_snapshot else 0.0
-
-        log_target = f"{snapshot_country}/{account}"
-        logging.info(f"Running signal generation for {log_target}")
-
-        # signal.main은 상세 알림을 처리합니다.
-        signal_result = run_signal_main(account=account, date_str=None)
-
-        # 작업이 성공적으로 완료되고 결과를 받아왔을 때만 요약 알림 전송
-        if signal_result:
-            report_date = signal_result.report_date
-            duration = time.time() - start_time
-            send_summary_notification(
-                snapshot_country,
-                account,
-                report_date,
-                duration,
-                old_equity,
-                summary_data=signal_result.summary_data,
-                header_line=signal_result.header_line,
-                force_send=force_notify,
-            )
-            time.sleep(1)
-
-            # 파일 저장 경로 구성 (results/ 하위에 저장)
-            try:
-                date_for_file = (
-                    report_date.strftime("%Y-%m-%d")
-                    if report_date
-                    else datetime.now().strftime("%Y-%m-%d")
-                )
-                logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
-                os.makedirs(logs_dir, exist_ok=True)
-                save_path = os.path.join(
-                    logs_dir,
-                    f"signal_{account}_{date_for_file}.log",
-                )
-            except Exception:
-                save_path = None
-
-            send_detailed_signal_notification(
-                snapshot_country,
-                account,
-                signal_result.header_line,
-                signal_result.detail_headers,
-                signal_result.detail_rows,
-                decision_config=signal_result.decision_config,
-                extra_lines=signal_result.detail_extra_lines,
-                force_send=force_notify,
-                save_to_path=save_path,
-            )
-            date_str = report_date.strftime("%Y-%m-%d")
-            prefix = f"{snapshot_country}/{account}" if account else snapshot_country
-            logging.info(f"[{prefix}/{date_str}] 작업 완료(작업시간: {duration:.1f}초)")
-
+        report = generate_country_recommendation_report(country=country_norm, date_str=None)
     except Exception:
-        error_message = f"Signal generation job for {country}/{account} failed"
-        logging.error(error_message, exc_info=True)
+        logging.error("Signal generation job for %s failed", country_norm.upper(), exc_info=True)
+        return
+
+    if not isinstance(report, RecommendationReport):
+        logging.error(
+            "Unexpected recommendation report type for %s: %s",
+            country_norm.upper(),
+            type(report).__name__,
+        )
+        return
+
+    if not report.recommendations:
+        logging.warning("No recommendations produced for %s", country_norm.upper())
+        return
+
+    duration = time.time() - start_time
+
+    try:
+        output_path = _save_recommendation_result(country_norm, report)
+        logging.info(
+            "Saved %s recommendations (%d items) to %s",
+            country_norm.upper(),
+            len(report.recommendations),
+            output_path,
+        )
+    except Exception:
+        logging.error(
+            "Skipping Slack notification because saving results failed for %s",
+            country_norm.upper(),
+            exc_info=True,
+        )
+        return
+
+    slack_message = compose_recommendation_slack_message(
+        country_norm,
+        report,
+        duration=duration,
+        force_notify=force_notify,
+    )
+
+    notified = _send_slack_notification(country_norm, slack_message)
+    base_date_str = report.base_date.strftime("%Y-%m-%d")
+    if notified:
+        logging.info(
+            "[%s/%s] Slack notification completed in %.1fs",
+            country_norm.upper(),
+            base_date_str,
+            duration,
+        )
+    else:
+        logging.info(
+            "[%s/%s] Slack notification skipped or failed",
+            country_norm.upper(),
+            base_date_str,
+        )
 
 
 def run_recommend_for_country(country: str, *, force_notify: bool = False) -> None:
-    accounts = _accounts_for_country(country)
-    if accounts:
-        for account in accounts:
-            try:
-                run_signal_generation(country, account, force_notify=force_notify)
-            except Exception:
-                logging.error(
-                    f"Error running signal generation for {country}/{account}", exc_info=True
-                )
-    else:
-        logging.warning("No registered accounts for %s; skipping signal generation.", country)
+    try:
+        run_recommendation_generation(country, force_notify=force_notify)
+    except Exception:
+        logging.error(f"Error running recommendation generation for {country}", exc_info=True)
 
 
 def run_cache_refresh() -> None:
     """모든 국가의 가격 캐시를 갱신합니다."""
     start_date = os.environ.get("CACHE_START_DATE", "2020-01-01")
-    countries_env = os.environ.get("CACHE_COUNTRIES", "kor,aus,coin")
+    countries_env = os.environ.get("CACHE_COUNTRIES", "kor,aus")
     countries = [c.strip().lower() for c in countries_env.split(",") if c.strip()]
     logging.info("Running cache refresh (start=%s, countries=%s)", start_date, ",".join(countries))
     try:
@@ -251,9 +351,9 @@ def main():
         logging.error(f"Failed to update stock names: {e}", exc_info=True)
 
     scheduler = BlockingScheduler()
-    # 1. signal_cron 와 notify_cron 이 겹치는 경우: 작업도 실행되고, 슬랙도 발송
-    # 2. python cli.py --signal 로 실행되는 경우: 작업도 실행되고, 슬랙도 발송
-    # 3. signal_cron 에는 해당되지만 notify_cron 에 해당 안되는 경우: 작업은 실행되고, 슬랙은 발송안됨
+    # 1. recommendation_cron 와 notify_cron 이 겹치는 경우: 작업도 실행되고, 슬랙도 발송
+    # 2. python cli.py --recommendation 로 실행되는 경우: 작업도 실행되고, 슬랙도 발송
+    # 3. recommendation_cron 에는 해당되지만 notify_cron 에 해당 안되는 경우: 작업은 실행되고, 슬랙은 발송안됨
     cron_default = "0 0 * * *"
     tz_default = "Asia/Seoul"
     country_schedules = get_all_country_schedules()
@@ -265,7 +365,7 @@ def main():
 
         cron_expr = _get(
             f"SCHEDULE_{country.upper()}_CRON",
-            cfg.get("signal_cron", cron_default),
+            cfg.get("signal_cron") or cfg.get("recommendation_cron") or cron_default,
         )
         timezone = _get(
             f"SCHEDULE_{country.upper()}_TZ",

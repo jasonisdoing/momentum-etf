@@ -27,7 +27,7 @@ def _load_precision_all() -> Dict[str, Any]:
 
 def _load_country_precision(country: str) -> Dict[str, Any]:
     """Load country section precision/currency config from country settings."""
-    from utils.account_registry import get_country_settings
+    from utils.country_registry import get_country_settings
 
     # Load country settings
     country_settings = get_country_settings(country)
@@ -74,7 +74,7 @@ def _get_header_money_formatter(country: str) -> Callable[[float], str]:
 
         return _fmt_safe
 
-    except Exception as e:
+    except Exception:
         # Fallback to KRW formatter if there's any error
         return format_kr_money
 

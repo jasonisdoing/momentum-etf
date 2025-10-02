@@ -1,8 +1,6 @@
 """Momentum 전략 모듈에서 공통으로 사용하는 유틸리티."""
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
-
-import pandas as pd
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 SIGNAL_TABLE_HEADERS: Sequence[str] = [
     "#",
@@ -158,9 +156,6 @@ def select_candidates_by_category(
 
         traceback.print_exc()
         return [], []
-
-        if category:
-            used_categories.add(category)
 
 
 from .constants import DECISION_CONFIG

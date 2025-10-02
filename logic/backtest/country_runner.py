@@ -1,7 +1,6 @@
 """국가 기반 백테스트 실행 유틸리티.
 
-`test.py`의 계좌 기반 로직을 대체하기 위해, 국가 설정과 전략 규칙만을
-활용하여 백테스트를 실행하는 경량 러너를 제공합니다.
+계좌 기반 스크립트를 제거하고, 국가 설정과 전략 규칙만을 활용하여 백테스트를 실행합니다.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ import math
 import pandas as pd
 
 from logic.entry_point import run_portfolio_backtest, StrategyRules
-from utils.account_registry import get_common_file_settings
+from utils.country_registry import get_common_file_settings
 from utils.settings_loader import (
     CountrySettingsError,
     get_country_precision,
@@ -185,6 +184,7 @@ def run_country_backtest(
         start_date=start_date,
         end_date=end_date,
         initial_capital=initial_capital_value,
+        country_settings=country_settings,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries)
@@ -297,9 +297,6 @@ def _build_backtest_kwargs(
         "cooldown_days": cooldown_days,
     }
 
-    if strategy_rules.coin_min_holding_cost_krw is not None and country == "coin":
-        kwargs["coin_min_holding_cost_krw"] = float(strategy_rules.coin_min_holding_cost_krw)
-
     clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
     return clean_kwargs
 
@@ -410,6 +407,7 @@ def _build_summary(
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
     initial_capital: float,
+    country_settings: Mapping[str, Any],
 ) -> Tuple[
     Dict[str, Any],
     pd.Series,
@@ -455,8 +453,8 @@ def _build_summary(
 
     benchmark_cum_ret_pct = 0.0
     benchmark_cagr_pct = 0.0
-    benchmark_ticker = "^GSPC" if country != "coin" else "BTC"
-    benchmark_country = country if country == "coin" else country
+    benchmark_ticker = str(country_settings.get("benchmark_ticker") or "^GSPC")
+    benchmark_country = country
     try:
         benchmark_df = fetch_ohlcv(
             benchmark_ticker,

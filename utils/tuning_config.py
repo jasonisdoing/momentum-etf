@@ -8,13 +8,6 @@ DEFAULT_ROW_COLORS: dict[str, str] = {}
 
 
 TUNING_CONFIG: dict[str, dict] = {
-    "coin": {
-        "MA_RANGE": np.arange(1, 6, 1),
-        "PORTFOLIO_TOPN": [2, 3],
-        "REPLACE_SCORE_THRESHOLD": [0.5],
-        "TEST_MONTHS_RANGE": 3,
-        "ROW_COLORS": DEFAULT_ROW_COLORS,
-    },
     "aus": {
         "MA_RANGE": np.arange(15, 31, 1),
         "PORTFOLIO_TOPN": [7],

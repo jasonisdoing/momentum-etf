@@ -15,8 +15,12 @@ except Exception:  # pragma: no cover
     yf = None
 
 from utils.data_loader import fetch_ohlcv, get_trading_days
-from utils.db_manager import get_portfolio_snapshot
-from utils.account_registry import get_country_settings
+
+try:
+    from utils.db_manager import get_portfolio_snapshot as _get_portfolio_snapshot  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover - optional dependency removed
+    _get_portfolio_snapshot = None  # type: ignore[assignment]
+from utils.country_registry import get_country_settings
 
 
 def _normalize_yfinance_df(df_y: pd.DataFrame) -> Optional[pd.DataFrame]:
@@ -40,15 +44,12 @@ def _determine_benchmark_country(ticker: str) -> str:
 
     - 6-digit numeric -> kor
     - contains .AX -> aus
-    - short uppercase alpha (<=5) -> coin
     - default -> kor
     """
     if ticker.isdigit() and len(ticker) == 6:
         return "kor"
     if ".AX" in ticker.upper():
         return "aus"
-    if len(ticker) <= 5 and ticker.isalpha() and ticker.isupper():
-        return "coin"
     return "kor"
 
 
@@ -102,12 +103,8 @@ def _calculate_single_benchmark(
         else:
             df_benchmark = None
 
-    # fallback for coin via yfinance
-    if (
-        (df_benchmark is None or df_benchmark.empty)
-        and benchmark_country == "coin"
-        and yf is not None
-    ):
+    # generic fallback using yfinance when primary data source is unavailable
+    if (df_benchmark is None or df_benchmark.empty) and yf is not None:
         try:
             y_ticker = (
                 "BTC-USD"
@@ -160,18 +157,9 @@ def _is_trading_day(country: str, a_date: pd.Timestamp) -> bool:
 
 
 def calculate_benchmark_comparison(
-    country: str, account: str, date_str: Optional[str] = None
+    country: str, date_str: Optional[str] = None
 ) -> Optional[List[Dict[str, Any]]]:
-    """Compare portfolio cumulative return vs. configured benchmarks.
-
-    Args:
-        country: 국가 코드 (예: 'kor', 'aus')
-        account: 더미 계정 (이전 버전과의 호환성을 위해 유지)
-        date_str: 기준일 (선택 사항, 기본값은 오늘)
-
-    Returns:
-        벤치마크 비교 정보를 포함한 딕셔너리 리스트 또는 오류 발생 시 None
-    """
+    """국가 단위 포트폴리오와 벤치마크 성과를 비교합니다."""
     from utils.transaction_manager import get_transactions_up_to_date
 
     if not country:
@@ -202,7 +190,10 @@ def calculate_benchmark_comparison(
     if not benchmarks_to_compare or initial_capital_krw <= 0:
         return None
 
-    portfolio_data = get_portfolio_snapshot(country, date_str=date_str)
+    if not callable(_get_portfolio_snapshot):
+        return None
+
+    portfolio_data = _get_portfolio_snapshot(country, date_str=date_str)
     if not portfolio_data:
         return None
 
@@ -237,7 +228,7 @@ def calculate_benchmark_comparison(
         equity_for_calc = recalculated_holdings_value
 
     # adjust base_date to previous trading day if needed
-    if country != "coin" and not _is_trading_day(country, base_date):
+    if not _is_trading_day(country, base_date):
         start_search = (base_date - pd.Timedelta(days=14)).strftime("%Y-%m-%d")
         end_search = base_date.strftime("%Y-%m-%d")
         trading_days = get_trading_days(start_search, end_search, country)
@@ -248,8 +239,8 @@ def calculate_benchmark_comparison(
         error_msg = f"초기 기준일({initial_date.strftime('%Y-%m-%d')})이 조회일({base_date.strftime('%Y-%m-%d')})보다 미래입니다."
         return [{"name": "벤치마크", "error": error_msg}]
 
-    injections = get_transactions_up_to_date(country, account, base_date, "capital_injection")
-    withdrawals = get_transactions_up_to_date(country, account, base_date, "cash_withdrawal")
+    injections = get_transactions_up_to_date(country, base_date, "capital_injection")
+    withdrawals = get_transactions_up_to_date(country, base_date, "cash_withdrawal")
 
     total_injections = sum(inj.get("amount", 0.0) for inj in injections)
     total_withdrawals = sum(wd.get("amount", 0.0) for wd in withdrawals)

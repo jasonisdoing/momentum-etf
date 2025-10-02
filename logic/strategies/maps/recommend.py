@@ -9,10 +9,7 @@ import pandas as pd
 
 from .rules import StrategyRules
 from .constants import DECISION_MESSAGES, DECISION_NOTES
-from .messages import (
-    build_buy_replace_note,
-    build_sell_replace_note,
-)
+from .messages import build_buy_replace_note
 from .shared import select_candidates_by_category, sort_decisions_by_order_and_score
 from logic.recommend.formatting import _load_country_precision
 
@@ -65,7 +62,7 @@ def generate_daily_recommendations_for_portfolio(
         def price_formatter(p):
             return _aud_price_formatter(p, price_precision)
 
-    else:  # kor/coin -> KRW 금액, 가격은 정수(또는 설정값이 있으면 적용)
+    else:  # 기본(₩) 국가 -> 가격을 정수(또는 설정값)로 표기
 
         def price_formatter(p):
             # 한국 단가는 기본 정수, 설정에 값이 있으면 적용
@@ -74,7 +71,7 @@ def generate_daily_recommendations_for_portfolio(
             return _format_kr_price(p)
 
     def format_shares(quantity):
-        # 모든 국가 공통: precision.json의 수량 정밀도 적용 (coin 포함)
+        # 모든 국가 공통: precision.json의 수량 정밀도 적용
         if qty_precision and qty_precision > 0:
             return f"{quantity:,.{qty_precision}f}".rstrip("0").rstrip(".")
         return f"{int(round(quantity)):,d}"
@@ -183,8 +180,6 @@ def generate_daily_recommendations_for_portfolio(
 
         buy_date = None
         holding_days = 0
-        hold_ret = None
-
         consecutive_info = consecutive_holding_info.get(tkr)
         buy_date = consecutive_info.get("buy_date") if consecutive_info else None
 
@@ -193,7 +188,6 @@ def generate_daily_recommendations_for_portfolio(
             if buy_date_norm <= evaluation_date:
                 holding_days = (evaluation_date - buy_date_norm).days + 1
 
-        hold_ret = None
         if state == "HOLD":
             price_ma, ma = d["price"], d["s1"]
             if not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
@@ -274,6 +268,7 @@ def generate_daily_recommendations_for_portfolio(
                 "buy_cooldown_info": buy_block_info,
                 "is_held": is_effectively_held,
                 "filter": d.get("filter"),
+                "recommend_enabled": bool(etf_meta.get(tkr, {}).get("recommend_enabled", True)),
             }
         )
 
@@ -310,7 +305,10 @@ def generate_daily_recommendations_for_portfolio(
         wait_candidates_raw = [
             d
             for d in decisions
-            if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] in universe_tickers
+            if d["state"] == "WAIT"
+            and d.get("buy_signal")
+            and d["tkr"] in universe_tickers
+            and d.get("recommend_enabled", True)
         ]
 
         # 신규 매수 로직: 빈 슬롯이 있을 때 실행
@@ -338,12 +336,6 @@ def generate_daily_recommendations_for_portfolio(
                         budget = total_cash
 
                     if budget > 0:
-                        buy_qty = (
-                            budget / buy_price
-                            if country in ("coin", "aus")
-                            else int(budget // buy_price)
-                        )
-                        buy_notional = buy_qty * buy_price
                         cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
                         if cand_category and cand_category != "TBD":
                             held_categories.add(cand_category)

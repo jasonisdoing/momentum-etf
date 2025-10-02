@@ -2,11 +2,11 @@
 Delete status_reports documents for a given country and date range (inclusive).
 
 Usage examples:
-  # Delete coin status reports from 2025-09-01 through 2025-09-12 (inclusive)
-  python scripts/delete_status_reports_range.py --country coin --start 2025-09-01 --end 2025-09-12
+  # Delete AUS status reports from 2025-09-01 through 2025-09-12 (inclusive)
+  python scripts/delete_status_reports_range.py --country aus --start 2025-09-01 --end 2025-09-12
 
   # Dry-run (show how many would be deleted)
-  python scripts/delete_status_reports_range.py --country coin --start 2025-09-01 --end 2025-09-12 --dry-run
+  python scripts/delete_status_reports_range.py --country aus --start 2025-09-01 --end 2025-09-12 --dry-run
 """
 
 import argparse
@@ -22,7 +22,7 @@ from utils.env import load_env_if_present
 
 def parse_args():
     p = argparse.ArgumentParser(description="Delete status_reports in a date range (inclusive)")
-    p.add_argument("--country", type=str, required=True, help="Country code, e.g., coin/kor/aus")
+    p.add_argument("--country", type=str, required=True, help="Country code, e.g., kor/aus")
     p.add_argument("--start", type=str, required=True, help="Start date YYYY-MM-DD (inclusive)")
     p.add_argument("--end", type=str, required=True, help="End date YYYY-MM-DD (inclusive)")
     p.add_argument("--dry-run", action="store_true", help="Do not delete, only report count")

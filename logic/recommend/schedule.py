@@ -15,16 +15,9 @@ from logic.recommend.benchmarks import _is_trading_day
 
 
 def is_market_open(country: str = "kor") -> bool:
-    """Return whether specified market is currently open.
-
-    - coin: always True
-    - kor/aus: check holiday-aware trading days + local market hours
-    """
+    """지정된 주식 시장이 현재 개장 중인지 여부를 반환합니다."""
     if not pytz:
         return False
-
-    if country == "coin":
-        return True
 
     timezones = {"kor": "Asia/Seoul", "aus": "Australia/Sydney"}
     market_hours = {
@@ -60,12 +53,7 @@ def is_market_open(country: str = "kor") -> bool:
 
 
 def get_next_trading_day(country: str, start_date: pd.Timestamp) -> pd.Timestamp:
-    """Return the nearest trading day on/after start_date.
-
-    coin: return start_date as-is.
-    """
-    if country == "coin":
-        return start_date
+    """주어진 날짜 기준 가장 가까운 거래일을 반환합니다."""
     try:
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = (start_date + pd.Timedelta(days=14)).strftime("%Y-%m-%d")
@@ -82,21 +70,7 @@ def get_next_trading_day(country: str, start_date: pd.Timestamp) -> pd.Timestamp
 
 
 def determine_target_date_for_scheduler(country: str) -> pd.Timestamp:
-    """Decide target calculation date depending on current time.
-
-    - coin: today
-    - stocks: until midnight use today; after midnight use next trading day (KST)
-    """
-    if country == "coin":
-        if pytz:
-            try:
-                seoul_tz = pytz.timezone("Asia/Seoul")
-                return pd.Timestamp.now(seoul_tz).normalize()
-            except Exception:
-                return pd.Timestamp.now().normalize()
-        else:
-            return pd.Timestamp.now().normalize()
-
+    """현재 시각을 기준으로 추천 파이프라인이 사용할 기준일을 결정합니다."""
     if not pytz:
         return pd.Timestamp.now().normalize()
 

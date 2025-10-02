@@ -41,17 +41,18 @@ def get_etfs(country: str) -> List[Dict[str, str]]:
                         continue
 
                     ticker = item["ticker"]
-                    if ticker in seen_tickers:
+                    ticker_norm = str(ticker).strip()
+                    if not ticker_norm or ticker_norm in seen_tickers:
                         continue
 
-                    # 추천 대상 비활성화된 종목은 제외
-                    if item.get("recommend_enabled") is False:
-                        continue
+                    seen_tickers.add(ticker_norm)
 
-                    seen_tickers.add(ticker)
-                    item["type"] = "etf"
-                    item["category"] = category_name
-                    all_etfs.append(item)
+                    new_item = dict(item)
+                    new_item["ticker"] = ticker_norm
+                    new_item["type"] = "etf"
+                    new_item["category"] = category_name
+                    new_item["recommend_enabled"] = not (item.get("recommend_enabled") is False)
+                    all_etfs.append(new_item)
     except json.JSONDecodeError as e:
         print(f"오류: '{file_path}' JSON 파일 파싱 실패 - {e}")
     except Exception as e:

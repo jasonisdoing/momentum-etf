@@ -7,6 +7,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from collections import Counter
 
 import math
 
@@ -27,14 +28,19 @@ except ImportError:  # pragma: no cover - optional dependency
     croniter = None
     pytz = None
 
-from utils.account_registry import get_country_settings
+from utils.country_registry import get_country_settings
 from utils.schedule_config import get_country_schedule
 from utils.data_loader import get_aud_to_krw_rate
-from utils.db_manager import get_portfolio_snapshot
+
+try:
+    from utils.db_manager import get_portfolio_snapshot as _get_portfolio_snapshot  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover - optional dependency removed
+    _get_portfolio_snapshot = None  # type: ignore[assignment]
 from utils.report import format_kr_money, render_table_eaw
 from utils.stock_list_io import get_etfs
 
 _LAST_ERROR: Optional[str] = None
+APP_LABEL = getattr(global_settings, "APP_TYPE", "APP")
 
 
 # ---------------------------------------------------------------------------
@@ -42,12 +48,11 @@ _LAST_ERROR: Optional[str] = None
 # ---------------------------------------------------------------------------
 
 
-def get_slack_webhook_url(country: str, account: Optional[str] = None) -> Optional[Tuple[str, str]]:
+def get_slack_webhook_url(country: str) -> Optional[Tuple[str, str]]:
     """Return (webhook_url, source_name) for the given country.
 
     Args:
         country: 국가 코드 (예: 'kor', 'aus')
-        account: 더 이상 사용되지 않음 (이전 버전과의 호환성을 위해 유지)
 
     Returns:
         (웹훅 URL, 소스 이름) 튜플 또는 사용 가능한 웹훅이 없으면 None
@@ -90,7 +95,6 @@ def should_notify_on_schedule(country: str) -> bool:
         or {
             "kor": "Asia/Seoul",
             "aus": "Australia/Sydney",
-            "coin": "Asia/Seoul",
         }.get(country, "Asia/Seoul")
     )
     tz_str = os.environ.get(tz_env, default_tz)
@@ -212,11 +216,75 @@ def strip_html_tags(value: str) -> str:
         return value
 
 
+def compose_recommendation_slack_message(
+    country: str,
+    report: Any,
+    *,
+    duration: float,
+    force_notify: bool = False,
+) -> str:
+    """Compose a minimal Slack message with dashboard link for recommendations."""
+
+    base_date = getattr(report, "base_date", None)
+    if hasattr(base_date, "strftime"):
+        try:
+            base_date_str = base_date.strftime("%Y-%m-%d")
+        except Exception:  # pragma: no cover - defensive
+            base_date_str = str(base_date)
+    elif base_date is not None:
+        base_date_str = str(base_date)
+    else:
+        base_date_str = "N/A"
+
+    headline = f"[{APP_LABEL}][{country.upper()}] 추천 갱신 ({base_date_str})"
+    dashboard_url = (
+        "http://localhost:8501/aus"
+        if country.strip().lower() == "aus"
+        else "http://localhost:8501/"
+    )
+
+    recommendations = list(getattr(report, "recommendations", []) or [])
+    decision_config = getattr(report, "decision_config", {}) or {}
+
+    lines = [headline, f"생성시간: {duration:.1f}초"]
+
+    state_counter: Counter[str] = Counter()
+    if isinstance(decision_config, dict):
+        for item in recommendations:
+            state = str(item.get("state") or "").upper()
+            cfg = decision_config.get(state)
+            if cfg and cfg.get("is_recommendation"):
+                state_counter[state] += 1
+
+    def _state_order(state: str) -> int:
+        cfg = decision_config.get(state)
+        if isinstance(cfg, dict):
+            try:
+                return int(cfg.get("order", 99))
+            except (TypeError, ValueError):
+                return 99
+        return 99
+
+    state_lines: List[str] = []
+    for state, count in sorted(
+        state_counter.items(), key=lambda pair: (_state_order(pair[0]), pair[0])
+    ):
+        state_lines.append(f"{state}: {count}개")
+
+    if state_lines:
+        lines.extend(state_lines)
+
+    lines.append(dashboard_url)
+
+    body = "\n".join(lines)
+    if state_lines:
+        return "<!channel>\n" + body
+    return body
+
+
 def _format_shares_for_country(quantity: Any, country: str) -> str:
     if not isinstance(quantity, (int, float)):
         return str(quantity)
-    if country == "coin":
-        return f"{quantity:,.8f}".rstrip("0").rstrip(".")
     return f"{quantity:,.0f}"
 
 
@@ -334,7 +402,6 @@ def _format_return_with_amount(
 
 def send_summary_notification(
     country: str,
-    account: str,
     report_date: datetime,
     duration: float,
     old_equity: float,
@@ -342,28 +409,28 @@ def send_summary_notification(
     header_line: Optional[str] = None,
     force_send: bool = False,
 ) -> None:
-    """Send concise account summary to Slack."""
+    """지정된 국가의 요약 정보를 슬랙으로 전송합니다."""
 
     from utils.transaction_manager import get_transactions_up_to_date
 
     if not force_send and not should_notify_on_schedule(country):
         return
 
-    webhook_info = get_slack_webhook_url(country, account=account)
+    webhook_info = get_slack_webhook_url(country)
     if not webhook_info:
         return
     webhook_url, webhook_name = webhook_info
 
     # 항상 최신 평가금액을 확인합니다.
-    new_snapshot = get_portfolio_snapshot(country, account=account)
+    new_snapshot = _get_portfolio_snapshot(country) if callable(_get_portfolio_snapshot) else None
     new_equity = float(new_snapshot.get("total_equity", 0.0)) if new_snapshot else 0.0
 
     # 국가 설정에서 통화 정보 가져오기
     country_settings = get_country_settings(country)
-    account_currency = country_settings.get("currency") if country_settings else "KRW"
+    country_currency = country_settings.get("currency") if country_settings else "KRW"
 
     aud_krw_rate = None
-    if account_currency == "AUD":
+    if country_currency == "AUD":
         aud_krw_rate = get_aud_to_krw_rate()
         if aud_krw_rate:
             new_equity *= aud_krw_rate
@@ -377,7 +444,7 @@ def send_summary_notification(
     money_formatter = format_kr_money
     app_tag = getattr(global_settings, "APP_TYPE", "APP")
     app_prefix = app_tag if app_tag.startswith("[") and app_tag.endswith("]") else f"[{app_tag}]"
-    summary_prefix = f"{app_prefix}[{country}/{account}]"
+    summary_prefix = f"{app_prefix}[{country}]"
 
     if summary_data:
         new_equity = float(summary_data.get("total_equity", new_equity) or 0.0)
@@ -395,12 +462,8 @@ def send_summary_notification(
             parts.append(f"일간: {day_ret_pct:+.2f}%({money_formatter(day_profit_loss)})")
 
         if initial_capital_krw > 0:
-            injections = get_transactions_up_to_date(
-                country, account, report_date, "capital_injection"
-            )
-            withdrawals = get_transactions_up_to_date(
-                country, account, report_date, "cash_withdrawal"
-            )
+            injections = get_transactions_up_to_date(country, report_date, "capital_injection")
+            withdrawals = get_transactions_up_to_date(country, report_date, "cash_withdrawal")
 
             total_injections = sum(inj.get("amount", 0.0) for inj in injections)
             total_withdrawals = sum(wd.get("amount", 0.0) for wd in withdrawals)
@@ -443,14 +506,13 @@ def send_summary_notification(
     if change_segment:
         final_message = f"{final_message} | {change_segment}"
 
-    slug = f"summary:{country}/{account}"
+    slug = f"summary:{country}"
     send_slack_message(final_message, webhook_url=webhook_url, webhook_name=slug)
     send_slack_message_to_logs(final_message)
 
 
-def send_detailed_signal_notification(
+def send_detailed_recommendation_notification(
     country: str,
-    account: str,
     header_line: str,
     headers: List[str],
     rows_sorted: List[List[Any]],
@@ -460,9 +522,9 @@ def send_detailed_signal_notification(
     force_send: bool = False,
     save_to_path: Optional[str] = None,
 ) -> bool:
-    """Render and send detailed signal table to Slack."""
+    """Render and send detailed recommendation table to Slack."""
 
-    webhook_info = get_slack_webhook_url(country, account=account)
+    webhook_info = get_slack_webhook_url(country)
     if not webhook_info:
         return False
 
@@ -611,13 +673,10 @@ def send_detailed_signal_notification(
         lines.pop()
 
     app_tag = getattr(global_settings, "APP_TYPE", "APP")
-    title = f"[{app_tag}][{country}/{account}] 종목상세"
-    # 국가 설정에서 추천 필요 여부 확인 (기본값: True)
-    need_signal_flag = bool(country_settings.get("need_signal", True)) if country_settings else True
+    title = f"[{app_tag}][{country}] 종목상세"
 
+    # 국가 설정에서 추천 필요 여부 확인 (기본값: True)
     message_header_parts = [title]
-    if not need_signal_flag:
-        message_header_parts.append("⚠️ 이 계좌는 추천 생성을 하지 않도록 설정되어 있습니다.")
     if extra_lines:
         message_header_parts.extend(extra_lines)
     message_header = "\n".join(message_header_parts)
@@ -625,8 +684,7 @@ def send_detailed_signal_notification(
     has_recommendation = any(
         decision_config.get(state, {}).get("is_recommendation", False) for state in grouped.keys()
     )
-    # If the account is configured not to need signals, avoid channel-wide mention
-    slack_prefix = "<!channel>\n" if has_recommendation and need_signal_flag else ""
+    slack_prefix = "<!channel>\n" if has_recommendation else ""
 
     # 파일 저장용 렌더링 텍스트 (백테스트 스타일)과 Slack 메시지 본문(코드블럭) 분리 구성
     if not lines:
@@ -790,7 +848,6 @@ def send_detailed_signal_notification(
     #         upload_channel = country_settings.get("slack_channel") or country_settings.get("slack_file_channel")
 
     #     if upload_channel:
-    #         title = f"[{getattr(global_settings, 'APP_TYPE', 'APP')}][{country}/{account}] 추천 로그"
     #         _upload_file_to_slack(
     #             channel=upload_channel,
     #             file_path=file_path_obj,
@@ -799,18 +856,18 @@ def send_detailed_signal_notification(
     #         )
     #     else:
     #         print(
-    #             f"[SLACK] 파일 업로드 생략 - 채널 미지정 (account={account}, country={country})"
     #         )
 
     return sent
 
 
 __all__ = [
+    "compose_recommendation_slack_message",
     "build_summary_line_from_summary_data",
     "build_summary_line_from_header",
     "get_last_error",
     "get_slack_webhook_url",
-    "send_detailed_signal_notification",
+    "send_detailed_recommendation_notification",
     "send_slack_message_to_logs",
     "send_slack_message",
     "send_summary_notification",

@@ -20,12 +20,15 @@ def get_transactions_collection():
 
 def save_transaction(transaction_data: Dict[str, Any]) -> bool:
     """거래(자본추가/현금인출) 내역을 'transactions' 컬렉션에 저장합니다."""
-    if not all(k in transaction_data for k in ["country", "account", "date", "type", "amount"]):
+
+    required_keys = ["country", "date", "type", "amount"]
+    if not all(k in transaction_data for k in required_keys):
         logging.error("Transaction data is missing required fields.")
         return False
     try:
         collection = get_transactions_collection()
         transaction_data["updated_at"] = datetime.now()
+        transaction_data.pop("account", None)
         result = collection.insert_one(transaction_data)
         return result.acknowledged
     except Exception as e:
@@ -35,13 +38,12 @@ def save_transaction(transaction_data: Dict[str, Any]) -> bool:
 
 def get_all_transactions(
     country: str,
-    account: str,
     transaction_type: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """특정 계좌의 모든 거래(자본추가/현금인출) 내역을 조회합니다."""
+    """특정 국가의 모든 거래(자본추가/현금인출) 내역을 조회합니다."""
     try:
         collection = get_transactions_collection()
-        query = {"country": country, "account": account}
+        query = {"country": country}
         if transaction_type:
             query["type"] = transaction_type
 
@@ -51,26 +53,26 @@ def get_all_transactions(
             transactions.append(t)
         return transactions
     except Exception as e:
-        logging.error(f"Failed to get transactions for {country}/{account}: {e}", exc_info=True)
+        logging.error(f"Failed to get transactions for {country}: {e}", exc_info=True)
         return []
 
 
 def get_transactions_up_to_date(
-    country: str, account: str, base_date: datetime, transaction_type: str
+    country: str, base_date: datetime, transaction_type: str
 ) -> List[Dict[str, Any]]:
     """특정 날짜까지의 특정 유형의 거래 내역을 조회합니다."""
     try:
         collection = get_transactions_collection()
         query = {
             "country": country,
-            "account": account,
             "type": transaction_type,
             "date": {"$lte": base_date},
         }
         return list(collection.find(query))
     except Exception as e:
         logging.error(
-            f"Failed to get {transaction_type} for {country}/{account}: {e}", exc_info=True
+            f"Failed to get {transaction_type} transactions for {country}: {e}",
+            exc_info=True,
         )
         return []
 

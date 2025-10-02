@@ -3,13 +3,6 @@
         "run_immediately_on_start": true
     },
     "countries": {
-        "coin": {
-            "enabled": true,
-            "signal_cron": "1,11,21,31,41,51 * * * *",
-            "timezone": "Asia/Seoul",
-            "notify_cron": "1,11,21,31,41,51 * * * *",
-            "notify_timezone": "Asia/Seoul"
-        },
         "aus": {
             "enabled": true,
             "signal_cron": "1,11,21,31,41,51 9-16 * * *",

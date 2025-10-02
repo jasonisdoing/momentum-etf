@@ -6,8 +6,7 @@
 - 단일 종목 백테스트: 개별 종목에 대한 백테스트
 """
 
-from math import ceil
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 import pandas as pd
 
@@ -96,7 +95,7 @@ def run_portfolio_backtest(
         core_start_date: 백테스트 시작일
         top_n: 포트폴리오 최대 보유 종목 수
         date_range: 백테스트 기간 [시작일, 종료일]
-        country: 시장 국가 코드 (kor, aus, coin)
+        country: 시장 국가 코드 (예: kor, aus)
         prefetched_data: 미리 로드된 가격 데이터
         ma_period: 이동평균 기간
         replace_threshold: 종목 교체 임계값
@@ -683,7 +682,7 @@ def run_portfolio_backtest(
                             if budget <= 0 or budget < min_val:
                                 continue
                             # 수량/금액 산정
-                            if country in ("coin", "aus"):
+                            if country == "aus":
                                 req_qty = (budget / buy_price) if buy_price > 0 else 0
                                 buy_amount = budget
                             else:
@@ -906,7 +905,7 @@ def run_single_ticker_backtest(
     if df is None:
         # df가 제공되지 않으면, date_range를 사용하여 직접 데이터를 조회합니다.
         # date_range가 없으면 기본값(3개월)으로 조회됩니다.
-        # test.py에서 호출 시에는 항상 date_range가 전달됩니다.
+        # CLI 백테스트 실행 시에는 항상 date_range가 전달됩니다.
         df = fetch_ohlcv(ticker, country=country, date_range=date_range)
 
     if df is None or df.empty:
@@ -993,7 +992,7 @@ def run_single_ticker_backtest(
         if decision is None and held_shares == 0 and i >= buy_cooldown_until:
             consecutive_buy_days_today = consecutive_buy_days.iloc[i]
             if consecutive_buy_days_today > 0:
-                if country in ("coin", "aus"):
+                if country == "aus":
                     # 소수점 4자리까지 허용
                     buy_quantity = (
                         round(available_cash / current_price, 4) if current_price > 0 else 0.0

@@ -64,14 +64,14 @@ def refresh_all_caches(countries: list[str], start_date: str, rebuild: bool = Fa
 def main():
     """CLI 진입점"""
     parser = argparse.ArgumentParser(description="OHLCV 데이터 캐시를 업데이트합니다.")
-    parser.add_argument("--country", type=str, default="all", help="국가 코드 (kor, aus, coin, 또는 all)")
+    parser.add_argument("--country", type=str, default="all", help="국가 코드 (kor, aus 또는 all)")
     parser.add_argument("--start", type=str, default="2020-01-01", help="시작 날짜 (YYYY-MM-DD)")
     parser.add_argument("--rebuild", action="store_true", help="기존 캐시를 강제로 삭제하고 다시 다운로드합니다.")
     args = parser.parse_args()
 
     load_env_if_present()
 
-    countries = ["kor", "aus", "coin"] if args.country.lower() == "all" else [args.country]
+    countries = ["kor", "aus"] if args.country.lower() == "all" else [args.country]
     refresh_all_caches(countries, args.start, args.rebuild)
 
 

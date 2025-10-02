@@ -63,7 +63,7 @@ def migrate_etfs_from_json_to_mongo(country: str):
 
 
 if __name__ == "__main__":
-    countries_to_migrate = ["kor", "aus", "coin"]
+    countries_to_migrate = ["kor", "aus"]
     for c in countries_to_migrate:
         print(f"\n--- {c.upper()} 마이그레이션 시작 ---")
         migrate_etfs_from_json_to_mongo(c)

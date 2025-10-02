@@ -324,7 +324,7 @@ def _render_trade_history(username: str, country_code: str) -> None:
             "구분": st.column_config.SelectboxColumn("구분", options=["BUY", "SELL"], required=True),
         },
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         key=f"trade_editor_{country_code}",
         disabled=["No.", "티커", "종목명", "구분", "거래일시", "메모", "작성자"],  # 선택 컬럼만 편집 가능
     )
@@ -601,7 +601,7 @@ else:
         # 매수/매도 버튼
         col1, col2 = st.columns([1, 1], gap="small")
         with col1:
-            if st.button("➕ 매수", key="toggle-buy-form-kor", use_container_width=True):
+            if st.button("➕ 매수", key="toggle-buy-form-kor", width="stretch"):
                 # 매수 버튼 클릭 시 매도 폼이 열려있으면 닫기
                 if st.session_state.get("show_sell_form_kor", False):
                     st.session_state["show_sell_form_kor"] = False
@@ -610,7 +610,7 @@ else:
                 )
                 st.rerun()
         with col2:
-            if st.button("➖ 매도", key="toggle-sell-form-kor", use_container_width=True):
+            if st.button("➖ 매도", key="toggle-sell-form-kor", width="stretch"):
                 # 매도 버튼 클릭 시 매수 폼이 열려있으면 닫기
                 if st.session_state.get("show_buy_form_kor", False):
                     st.session_state["show_buy_form_kor"] = False
@@ -644,7 +644,7 @@ else:
         # 매수/매도 버튼
         col1, col2 = st.columns([1, 1], gap="small")
         with col1:
-            if st.button("➕ 매수", key="toggle-buy-form-aus", use_container_width=True):
+            if st.button("➕ 매수", key="toggle-buy-form-aus", width="stretch"):
                 # 매수 버튼 클릭 시 매도 폼이 열려있으면 닫기
                 if st.session_state.get("show_sell_form_aus", False):
                     st.session_state["show_sell_form_aus"] = False
@@ -653,7 +653,7 @@ else:
                 )
                 st.rerun()
         with col2:
-            if st.button("➖ 매도", key="toggle-sell-form-aus", use_container_width=True):
+            if st.button("➖ 매도", key="toggle-sell-form-aus", width="stretch"):
                 # 매도 버튼 클릭 시 매수 폼이 열려있으면 닫기
                 if st.session_state.get("show_buy_form_aus", False):
                     st.session_state["show_buy_form_aus"] = False
