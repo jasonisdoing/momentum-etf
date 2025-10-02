@@ -42,47 +42,67 @@ class _TickerMeta:
 class _TickerScore:
     meta: _TickerMeta
     price: float
-    prev_close: float  # 이전 종가 추가
+    prev_close: float
     daily_pct: float
     score: float
     streak: int
-    category: str  # 카테고리 정보 추가
-    ma_value: float  # 이동평균 값 추가
+    category: str
+    ma_value: float = 0.0
 
 
-def _iter_universe(country: str, universe: str) -> Iterator[_TickerMeta]:
-    """Load universe from JSON file and yield ticker metadata."""
-    filepath = DATA_DIR / f"{universe.lower()}.json"
-    with filepath.open("r") as f:
-        data = json.load(f)
+def _load_full_etf_meta(country: str) -> Dict[str, Dict[str, Any]]:
+    """Load metadata for all ETFs including recommend_disabled ones."""
 
-    for category_group in data:
-        # 카테고리 정보 가져오기 (리스트나 집합인 경우 첫 번째 항목 사용)
-        category = category_group.get("category", "")
-        if isinstance(category, (list, set, tuple)):
-            category = next(iter(category), "")  # 첫 번째 항목 가져오기
-        # 문자열로 변환하고 양쪽 공백 제거
-        category = str(category).strip() if category is not None else ""
+    file_path = DATA_DIR / f"{country}.json"
+    if not file_path.exists():
+        return {}
 
-        # tickers 리스트가 있는지 확인
-        if "tickers" not in category_group or not isinstance(category_group["tickers"], list):
-            print(f"경고: 유효한 티커 리스트를 찾을 수 없습니다. 카테고리: {category}")
+    try:
+        with file_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        print(f"[경고] 전체 ETF 메타 로드 실패: {exc}")
+        return {}
+
+    meta_map: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(data, list):
+        return meta_map
+
+    for block in data:
+        if not isinstance(block, dict):
             continue
 
-        for ticker_info in category_group["tickers"]:
-            if not isinstance(ticker_info, dict) or "ticker" not in ticker_info:
-                print(f"경고: 티커 정보가 올바르지 않습니다. 카테고리: {category}")
+        raw_category = block.get("category")
+        if isinstance(raw_category, (list, set, tuple)):
+            raw_category = next(iter(raw_category), "") if raw_category else ""
+        category_name = str(raw_category or "TBD").strip() or "TBD"
+
+        tickers = block.get("tickers") or []
+        if not isinstance(tickers, list):
+            continue
+
+        for item in tickers:
+            if not isinstance(item, dict):
                 continue
 
-            ticker = str(ticker_info["ticker"]).strip()
-            name = str(ticker_info.get("name", ticker)).strip()
+            ticker = str(item.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
 
-            # 디버깅을 위해 카테고리 정보 출력
-            if not category:
-                print(f"경고: {ticker}에 대한 카테고리 정보가 없습니다.")
+            raw_item_category = item.get("category", category_name)
+            if isinstance(raw_item_category, (list, set, tuple)):
+                raw_item_category = next(iter(raw_item_category), "") if raw_item_category else ""
+            item_category = str(raw_item_category or category_name or "TBD").strip() or "TBD"
 
-            # _TickerMeta 객체 생성 및 반환
-            yield _TickerMeta(ticker=ticker, name=name, category=category)
+            name = str(item.get("name") or ticker).strip() or ticker
+
+            meta_map[ticker] = {
+                "ticker": ticker,
+                "name": name,
+                "category": item_category,
+            }
+
+    return meta_map
 
 
 def _fetch_dataframe(
@@ -511,7 +531,7 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
             existing["state"] = "SOLD"
             if existing.get("row"):
                 existing["row"][4] = "SOLD"
-                existing["row"][-1] = "당일 매도"
+                existing["row"][-1] = DECISION_MESSAGES["SOLD"]
             existing["buy_signal"] = False
             continue
 
@@ -562,17 +582,34 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
                     "-",
                     score_val,
                     "-",
-                    "당일 매도",
+                    DECISION_MESSAGES["SOLD"],
                 ],
             }
         )
 
     # 결과 포맷팅
-    etf_meta_map: Dict[str, Dict[str, Any]] = {stock["ticker"]: stock for stock in etf_universe}
-    for key, val in list(etf_meta_map.items()):
-        upper_key = str(key).upper()
-        if upper_key not in etf_meta_map:
-            etf_meta_map[upper_key] = val
+    etf_meta_map: Dict[str, Dict[str, Any]] = {}
+    for stock in etf_universe:
+        ticker = stock.get("ticker")
+        if not ticker:
+            continue
+        upper = str(ticker).upper()
+        etf_meta_map[upper] = {
+            "ticker": upper,
+            "name": stock.get("name") or upper,
+            "category": stock.get("category") or "TBD",
+        }
+
+    # Include recommend_disabled tickers for metadata fallback
+    full_meta_map = _load_full_etf_meta(country)
+    for ticker, meta in full_meta_map.items():
+        upper_ticker = ticker.upper()
+        if upper_ticker not in etf_meta_map:
+            etf_meta_map[upper_ticker] = {
+                "ticker": upper_ticker,
+                "name": meta.get("name") or upper_ticker,
+                "category": meta.get("category") or "TBD",
+            }
 
     results = []
     for decision in decisions:

@@ -61,7 +61,7 @@ DECISION_CONFIG = {
         "order": 50,
         "is_recommendation": False,
         "show_slack": True,
-        "background": "#f0f0f0",
+        "background": "#a0a0a0",
     },
 }
 
