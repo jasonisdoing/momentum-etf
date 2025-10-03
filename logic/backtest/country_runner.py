@@ -6,12 +6,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from importlib import import_module
 from typing import Any, Dict, Mapping, Optional, List, Tuple
 import math
 
 import pandas as pd
 
+from constants import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
 from logic.entry_point import run_portfolio_backtest, StrategyRules
 from utils.country_registry import get_common_file_settings
 from utils.settings_loader import (
@@ -26,19 +26,11 @@ from utils.stock_list_io import get_etfs
 
 
 def _default_test_months_range() -> int:
-    try:
-        module = import_module("backtest")
-        return int(getattr(module, "TEST_MONTHS_RANGE"))
-    except (ModuleNotFoundError, AttributeError, ValueError, TypeError):
-        return 12
+    return TEST_MONTHS_RANGE
 
 
 def _default_initial_capital() -> float:
-    try:
-        module = import_module("backtest")
-        return float(getattr(module, "TEST_INITIAL_CAPITAL"))
-    except (ModuleNotFoundError, AttributeError, ValueError, TypeError):
-        return 100_000_000.0
+    return float(TEST_INITIAL_CAPITAL)
 
 
 @dataclass

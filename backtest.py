@@ -1,7 +1,5 @@
 """국가별 백테스트 실행 스크립트."""
 
-TEST_MONTHS_RANGE = 12
-TEST_INITIAL_CAPITAL = 100_000_000
 
 from __future__ import annotations
 
@@ -15,6 +13,8 @@ from utils.country_registry import (
 )
 from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
 from logic.recommend.output import print_run_header
+
+from constants import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 

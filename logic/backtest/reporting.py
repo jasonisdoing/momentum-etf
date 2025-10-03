@@ -6,12 +6,12 @@ import io
 import math
 import sys
 from datetime import datetime
-from importlib import import_module
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import pandas as pd
 
+from constants import TEST_MONTHS_RANGE
 from logic.backtest.country_runner import CountryBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.country_registry import get_country_settings
@@ -29,11 +29,7 @@ DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
 
 
 def _default_months_range() -> int:
-    try:
-        module = import_module("backtest")
-        return int(getattr(module, "TEST_MONTHS_RANGE"))
-    except (ModuleNotFoundError, AttributeError, ValueError, TypeError):
-        return 12
+    return TEST_MONTHS_RANGE
 
 
 # ---------------------------------------------------------------------------

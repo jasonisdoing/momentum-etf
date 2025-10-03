@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from backtest import TEST_MONTHS_RANGE
 from logic.backtest.country_runner import run_country_backtest
+from constants import TEST_MONTHS_RANGE
 from logic.entry_point import StrategyRules
 from utils.country_registry import get_strategy_rules
 from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day
