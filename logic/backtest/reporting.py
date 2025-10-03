@@ -7,14 +7,14 @@ import math
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
 from constants import TEST_MONTHS_RANGE
-from logic.backtest.country_runner import CountryBacktestResult
+from logic.backtest.account_runner import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
-from utils.country_registry import get_country_settings
+from utils.account_registry import get_account_settings
 from utils.notification import build_summary_line_from_summary_data
 from utils.report import (
     format_aud_money,
@@ -56,29 +56,30 @@ def format_period_return_with_listing_date(
 def print_backtest_summary(
     *,
     summary: Dict[str, Any],
-    country: str,
+    account_id: str,
+    country_code: str,
     test_months_range: int,
     initial_capital_krw: float,
     portfolio_topn: int,
     ticker_summaries: List[Dict[str, Any]],
     core_start_dt: pd.Timestamp,
 ) -> None:
-    """Print a concise summary for a country backtest run."""
+    """Print a concise summary for an account backtest run."""
 
     # Lazy import to avoid circular dependency during settings import
     from settings import common as common_settings
 
-    country_settings = get_country_settings(country)
-    currency = country_settings.get("currency", "KRW")
-    precision = country_settings.get("precision", {}).get(
+    account_settings = get_account_settings(account_id)
+    currency = account_settings.get("currency", "KRW")
+    precision = account_settings.get("precision", {}).get(
         "amt_precision", 0
-    ) or country_settings.get("amt_precision", 0)
+    ) or account_settings.get("amt_precision", 0)
     try:
         precision = int(precision)
     except (TypeError, ValueError):
         precision = 0
 
-    strategy_cfg = country_settings.get("strategy", {}) or {}
+    strategy_cfg = account_settings.get("strategy", {}) or {}
     if not isinstance(strategy_cfg, dict):
         strategy_cfg = {}
 
@@ -160,7 +161,7 @@ def print_backtest_summary(
 
     print("\n" + "=" * 30 + "\n 사용된 설정값 ".center(30, "=") + "\n" + "=" * 30)
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
-        raise ValueError(f"'{country}' 국가 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
+        raise ValueError(f"'{account_id}' 계정 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
     ma_period = merged_strategy["MA_PERIOD"]
     momentum_label = f"{ma_period}일"
 
@@ -179,7 +180,8 @@ def print_backtest_summary(
         raise ValueError("공통 또는 국가 전략 설정에 'MARKET_REGIME_FILTER_ENABLED' 값이 필요합니다.")
 
     used_settings = {
-        "국가": country.upper(),
+        "계정": account_id.upper(),
+        "시장 코드": country_code.upper(),
         "테스트 기간": f"최근 {test_months_range}개월",
         "초기 자본": money_formatter(initial_capital_krw),
         "포트폴리오 종목 수 (TopN)": portfolio_topn,
@@ -320,9 +322,9 @@ def _format_quantity(amount: float, precision: int) -> str:
     return f"{amount:,.{precision}f}".rstrip("0").rstrip(".")
 
 
-def _resolve_formatters(country_settings: Dict[str, Any]):
-    precision = country_settings.get("precision", {})
-    currency = str(precision.get("currency") or country_settings.get("currency", "KRW")).upper()
+def _resolve_formatters(account_settings: Dict[str, Any]):
+    precision = account_settings.get("precision", {})
+    currency = str(precision.get("currency") or account_settings.get("currency", "KRW")).upper()
     qty_precision = int(precision.get("qty_precision", 0) or 0)
     price_precision = int(precision.get("price_precision", 0) or 0)
 
@@ -346,8 +348,8 @@ def _format_date_kor(ts: pd.Timestamp) -> str:
 
 def _build_daily_table_rows(
     *,
-    result: CountryBacktestResult,
-    country_settings: Dict[str, Any],
+    result: AccountBacktestResult,
+    account_settings: Dict[str, Any],
     target_date: pd.Timestamp,
     total_value: float,
     total_cash: float,
@@ -464,7 +466,6 @@ def _build_daily_table_rows(
         )
         cumulative_pct_display = f"{cumulative_pct:+.1f}%" if initial_value else "-"
         score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
-        filter_display = f"{int(filter_val)}일" if _is_finite_number(filter_val) else "-"
         weight_display = f"{weight:.0f}%"
         if is_cash and total_value_safe > 0:
             cash_ratio = (total_cash / total_value_safe) if _is_finite_number(total_cash) else 0.0
@@ -514,8 +515,8 @@ def _build_daily_table_rows(
 
 
 def _generate_daily_report_lines(
-    result: CountryBacktestResult,
-    country_settings: Dict[str, Any],
+    result: AccountBacktestResult,
+    account_settings: Dict[str, Any],
 ) -> List[str]:
     (
         _currency,
@@ -523,7 +524,7 @@ def _generate_daily_report_lines(
         price_formatter,
         qty_precision,
         _price_precision,
-    ) = _resolve_formatters(country_settings)
+    ) = _resolve_formatters(account_settings)
 
     portfolio_df = result.portfolio_timeseries
     lines: List[str] = []
@@ -629,7 +630,7 @@ def _generate_daily_report_lines(
 
         rows = _build_daily_table_rows(
             result=result,
-            country_settings=country_settings,
+            account_settings=account_settings,
             target_date=target_date,
             total_value=total_value,
             total_cash=total_cash,
@@ -657,25 +658,30 @@ def _generate_daily_report_lines(
 
 
 def dump_backtest_log(
-    result: CountryBacktestResult,
-    country_settings: Dict[str, Any],
+    result: AccountBacktestResult,
+    account_settings: Dict[str, Any],
     *,
-    country: str,
     results_dir: Optional[Path | str] = None,
 ) -> Path:
     """Write a detailed backtest log to disk and return the file path."""
 
     base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
     base_dir.mkdir(parents=True, exist_ok=True)
-    path = base_dir / f"backtest_{country}.txt"
+    account_id = result.account_id
+    country_code = result.country_code
+
+    path = base_dir / f"backtest_{account_id}.txt"
     lines: List[str] = []
 
     start_stamp = datetime.now().isoformat(timespec="seconds")
     legacy_header = [
-        f"백테스트 결과가 다음 파일에 저장됩니다: data/results/backtest_{country}.txt",
+        f"백테스트 결과가 다음 파일에 저장됩니다: data/results/backtest_{account_id}.txt",
         "",
-        f"KOR 국가의 ETF 종목들을 대상으로 {getattr(result, 'months_range', _default_months_range())}개월 기간 백테스트를 실행합니다.",
-        f"국가별 설정 파일(settings/country/{country}.json)을 사용하여 전략을 적용합니다.",
+        (
+            f"{country_code.upper()} 시장 ETF를 대상으로 "
+            f"{getattr(result, 'months_range', _default_months_range())}개월 기간 백테스트를 실행합니다."
+        ),
+        f"계정별 설정 파일(settings/account/{account_id}.json)을 사용하여 전략을 적용합니다.",
         f"실행 시간: {start_stamp} | 테스트 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}",
         "",
     ]
@@ -683,12 +689,12 @@ def dump_backtest_log(
 
     lines.append(f"백테스트 로그 생성: {datetime.now().isoformat(timespec='seconds')}")
     lines.append(
-        f"국가: {result.country.upper()} | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}"
+        f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}"
     )
     lines.append(f"초기 자본: {result.initial_capital:,.0f} | 포트폴리오 TOPN: {result.portfolio_topn}")
     lines.append("")
 
-    daily_lines = _generate_daily_report_lines(result, country_settings)
+    daily_lines = _generate_daily_report_lines(result, account_settings)
     lines.extend(daily_lines)
 
     summary_buffer = io.StringIO()
@@ -697,7 +703,8 @@ def dump_backtest_log(
     try:
         print_backtest_summary(
             summary=result.summary,
-            country=country,
+            account_id=account_id,
+            country_code=country_code,
             test_months_range=getattr(result, "months_range", _default_months_range()),
             initial_capital_krw=result.initial_capital,
             portfolio_topn=result.portfolio_topn,

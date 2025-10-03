@@ -6,35 +6,35 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from utils.country_registry import (
-    get_country_settings,
+from utils.account_registry import (
+    get_account_settings,
     get_strategy_rules,
-    list_available_countries,
+    list_available_accounts,
 )
 from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
 from logic.recommend.output import print_run_header
 
-from constants import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
+from constants import TEST_MONTHS_RANGE
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
 
-def _available_country_choices() -> list[str]:
-    choices = list_available_countries()
+def _available_account_choices() -> list[str]:
+    choices = list_available_accounts()
     if not choices:
-        raise SystemExit("국가 설정(JSON)이 존재하지 않습니다. settings/country/*.json 파일을 확인하세요.")
+        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. settings/account/*.json 파일을 확인하세요.")
     return choices
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="MomentumEtf 국가 백테스트 실행기",
+        description="MomentumEtf 계정 백테스트 실행기",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("country", choices=_available_country_choices(), help="실행할 국가 코드")
+    parser.add_argument("account", choices=_available_account_choices(), help="실행할 계정 ID")
     parser.add_argument(
         "--output",
-        help="백테스트 로그 저장 경로 (기본값: data/results/backtest_<country>.txt)",
+        help="백테스트 로그 저장 경로 (기본값: data/results/backtest_<account>.txt)",
     )
     return parser
 
@@ -43,25 +43,24 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    country = args.country.lower()
+    account_id = args.account.lower()
 
     try:
-        country_settings = get_country_settings(country)
-        get_strategy_rules(country)
+        account_settings = get_account_settings(account_id)
+        get_strategy_rules(account_id)
     except Exception as exc:  # pragma: no cover - guard for invalid inputs
-        parser.error(f"국가 설정을 로드하는 중 오류가 발생했습니다: {exc}")
+        parser.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
-    print_run_header(country, date_str=None)
+    print_run_header(account_id, date_str=None)
 
-    from logic.backtest.country_runner import run_country_backtest
+    from logic.backtest.account_runner import run_account_backtest
 
-    result = run_country_backtest(country)
-    target_path = Path(args.output) if args.output else RESULTS_DIR / f"backtest_{country}.txt"
+    result = run_account_backtest(account_id)
+    target_path = Path(args.output) if args.output else RESULTS_DIR / f"backtest_{account_id}.txt"
 
     generated_path = dump_backtest_log(
         result,
-        country_settings,
-        country=country,
+        account_settings,
         results_dir=target_path.parent,
     )
 
@@ -73,7 +72,8 @@ def main() -> None:
 
     print_backtest_summary(
         summary=result.summary,
-        country=country,
+        account_id=account_id,
+        country_code=result.country_code,
         test_months_range=getattr(result, "months_range", TEST_MONTHS_RANGE),
         initial_capital_krw=result.initial_capital,
         portfolio_topn=result.portfolio_topn,

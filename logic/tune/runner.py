@@ -10,10 +10,11 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from logic.backtest.country_runner import run_country_backtest
+from logic.backtest.account_runner import run_account_backtest
 from constants import TEST_MONTHS_RANGE
 from logic.entry_point import StrategyRules
-from utils.country_registry import get_strategy_rules
+from utils.account_registry import get_strategy_rules
+from utils.settings_loader import AccountSettingsError, get_account_settings
 from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day
 from utils.report import render_table_eaw
 from utils.stock_list_io import get_etfs
@@ -75,24 +76,32 @@ def _format_pct(value: float | None, digits: int = 2, *, signed: bool = True) ->
     return f"{num:.{digits}f}%"
 
 
-def run_country_tuning(
-    country: str,
+def run_account_tuning(
+    account_id: str,
     *,
     output_path: Optional[Path | str] = None,
     results_dir: Optional[Path | str] = None,
     tuning_config: Optional[Dict[str, Dict[str, Any]]] = None,
     months_range: Optional[int] = None,
 ) -> Optional[Path]:
-    """Execute parameter tuning for the given country and return the output path."""
+    """Execute parameter tuning for the given account and return the output path."""
 
-    country_norm = (country or "").strip().lower()
-    config_map = tuning_config or {}
-    config = config_map.get(country_norm)
-    if not config:
-        print(f"[튜닝] '{country_norm.upper()}' 국가에 대한 튜닝 설정이 없습니다.")
+    account_norm = (account_id or "").strip().lower()
+    try:
+        account_settings = get_account_settings(account_norm)
+    except AccountSettingsError as exc:
+        print(f"[튜닝] 계정 설정 로딩 실패: {exc}")
         return None
 
-    base_rules = get_strategy_rules(country_norm)
+    country_code = (account_settings.get("country_code") or account_norm).strip().lower()
+
+    config_map = tuning_config or {}
+    config = config_map.get(account_norm) or config_map.get(country_code)
+    if not config:
+        print(f"[튜닝] '{account_norm.upper()}' 계정에 대한 튜닝 설정이 없습니다.")
+        return None
+
+    base_rules = get_strategy_rules(account_norm)
     ma_values = _normalize_tuning_values(
         config.get("MA_RANGE"), dtype=int, fallback=base_rules.ma_period
     )
@@ -118,17 +127,17 @@ def run_country_tuning(
     else:
         months_range = int(months_range)
 
-    etf_universe = get_etfs(country_norm)
+    etf_universe = get_etfs(country_code)
     if not etf_universe:
-        print(f"[튜닝] '{country_norm}' 종목 데이터를 찾을 수 없습니다.")
+        print(f"[튜닝] '{country_code}' 종목 데이터를 찾을 수 없습니다.")
         return None
 
     tickers = [str(item.get("ticker")) for item in etf_universe if item.get("ticker")]
     if not tickers:
-        print(f"[튜닝] '{country_norm}' 유효한 티커가 없습니다.")
+        print(f"[튜닝] '{country_code}' 유효한 티커가 없습니다.")
         return None
 
-    end_date = get_latest_trading_day(country_norm)
+    end_date = get_latest_trading_day(country_code)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()
     start_date = end_date - pd.DateOffset(months=months_range)
@@ -146,7 +155,7 @@ def run_country_tuning(
 
     prefetched_data = fetch_ohlcv_for_tickers(
         tickers,
-        country_norm,
+        country_code,
         date_range=date_range,
         warmup_days=warmup_days,
     )
@@ -156,7 +165,7 @@ def run_country_tuning(
 
     combos = list(product(ma_values, topn_values, replace_values))
     total = len(combos)
-    print(f"[튜닝] {country_norm.upper()} 튜닝 시작: 조합 {total}개 (기간 {months_range}개월)")
+    print(f"[튜닝] {account_norm.upper()} 튜닝 시작: 조합 {total}개 (기간 {months_range}개월)")
 
     results: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
@@ -192,8 +201,8 @@ def run_country_tuning(
             continue
 
         try:
-            bt_result = run_country_backtest(
-                country_norm,
+            bt_result = run_account_backtest(
+                account_norm,
                 months_range=months_range,
                 quiet=True,
                 override_settings={
@@ -266,7 +275,7 @@ def run_country_tuning(
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines: List[str] = []
-    lines.append(f"# {country_norm.upper()} 전략 파라미터 튜닝 결과")
+    lines.append(f"# {account_norm.upper()} 전략 파라미터 튜닝 결과")
     lines.append(f"생성 시각: {timestamp}")
     lines.append(
         f"총 조합: {total}개 | 성공: {len(results)}개 | 실패: {len(failures)}개 | 기간: {months_range}개월"
@@ -337,7 +346,7 @@ def run_country_tuning(
 
     base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
     if output_path is None:
-        output_path = base_dir / f"tune_{country_norm}.txt"
+        output_path = base_dir / f"tune_{account_norm}.txt"
     else:
         output_path = Path(output_path)
         if not output_path.is_absolute():
@@ -353,4 +362,4 @@ def run_country_tuning(
     return output_path
 
 
-__all__ = ["run_country_tuning"]
+__all__ = ["run_account_tuning"]

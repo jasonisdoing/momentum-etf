@@ -4,13 +4,17 @@
     },
     "countries": {
         "aus": {
+            "account_id": "aus",
+            "country_code": "aus",
             "enabled": true,
             "signal_cron": "1,11,21,31,41,51 9-16 * * *",
             "timezone": "Asia/Seoul",
             "notify_cron": "1,31 9-16 * * 1-5",
             "notify_timezone": "Australia/Sydney"
         },
-        "kor": {
+        "kor10": {
+            "account_id": "kor10",
+            "country_code": "kor",
             "enabled": true,
             "signal_cron": "1,11,21,31,41,51 9-16 * * *",
             "timezone": "Asia/Seoul",

@@ -1,7 +1,7 @@
 """Backtest package: runners and reporting utilities."""
 
 from constants import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
-from .country_runner import CountryBacktestResult, run_country_backtest
+from .account_runner import AccountBacktestResult, run_account_backtest
 from .reporting import (
     dump_backtest_log,
     format_period_return_with_listing_date,
@@ -9,10 +9,10 @@ from .reporting import (
 )
 
 __all__ = [
-    "CountryBacktestResult",
+    "AccountBacktestResult",
     "TEST_MONTHS_RANGE",
     "TEST_INITIAL_CAPITAL",
-    "run_country_backtest",
+    "run_account_backtest",
     "dump_backtest_log",
     "format_period_return_with_listing_date",
     "print_backtest_summary",

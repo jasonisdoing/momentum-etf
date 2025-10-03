@@ -1,7 +1,7 @@
 {
-    "order": 11,
+    "order": 10,
     "icon": "🇰🇷",
-    "name": "테스트 ETF",
+    "name": "ETF 10종목",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",

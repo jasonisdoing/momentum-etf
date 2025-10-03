@@ -11,7 +11,7 @@ from utils.db_manager import get_db_connection
 
 def insert_trade_event(
     *,
-    country: str,
+    account_id: str,
     ticker: str,
     name: str | None = None,
     action: str,
@@ -19,29 +19,22 @@ def insert_trade_event(
     memo: str | None,
     created_by: str,
     source: str = "streamlit",
+    country_code: str | None = None,
 ) -> str:
-    """`trades` 컬렉션에 매수/매도 이벤트를 기록합니다.
-
-    Args:
-        country: 국가 코드(kor, aus 등).
-        ticker: 종목 코드/식별자.
-        name: 종목명. 매수 시 필수 입력, 이후 수정 불가.
-        action: "BUY" 또는 "SELL" 등 이벤트 타입.
-        executed_at: 거래가 실행된 시각.
-        memo: 추가 메모.
-        created_by: 입력한 사용자 ID/이름.
-        source: 입력 소스 구분값.
-
-    Returns:
-        MongoDB에 생성된 ObjectId 문자열.
-    """
+    """`trades` 컬렉션에 매수/매도 이벤트를 기록합니다."""
 
     db = get_db_connection()
     if db is None:
         raise RuntimeError("MongoDB 연결을 초기화할 수 없습니다.")
 
+    account_norm = (account_id or "").strip().lower()
+    country_norm = (country_code or account_norm).strip().lower()
+    if not account_norm:
+        raise ValueError("계정 ID를 지정해야 합니다.")
+
     doc = {
-        "country": country.strip().lower(),
+        "account": account_norm,
+        "country_code": country_norm,
         "ticker": ticker,
         "action": action.upper(),
         "name": (name or "").strip(),
@@ -59,16 +52,42 @@ def insert_trade_event(
     return str(result.inserted_id)
 
 
-def fetch_recent_trades(
-    country: str | None = None, *, limit: int = 100, include_deleted: bool = False
-) -> List[dict[str, Any]]:
-    """최근 트레이드 목록을 반환합니다.
+def migrate_account_id(old_account_id: str, new_account_id: str) -> dict[str, int]:
+    """`trades` 컬렉션에서 계정 ID를 일괄 변경합니다."""
 
-    Args:
-        country: 국가 코드 (선택 사항)
-        limit: 반환할 최대 항목 수
-        include_deleted: 삭제된 항목 포함 여부
-    """
+    old_norm = (old_account_id or "").strip().lower()
+    new_norm = (new_account_id or "").strip().lower()
+    if not old_norm or not new_norm:
+        raise ValueError("old_account_id와 new_account_id는 비어 있을 수 없습니다.")
+    if old_norm == new_norm:
+        return {"matched": 0, "modified": 0}
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결을 초기화할 수 없습니다.")
+
+    result_account = db.trades.update_many(
+        {"account": old_norm},
+        {"$set": {"account": new_norm}},
+    )
+
+    # legacy country 필드가 남아 있는 경우를 대비해 동일하게 갱신
+    result_country = db.trades.update_many(
+        {"country": old_norm},
+        {"$set": {"country": new_norm}},
+    )
+
+    return {
+        "matched": int(result_account.matched_count),
+        "modified": int(result_account.modified_count),
+        "legacy_country_updated": int(result_country.modified_count),
+    }
+
+
+def fetch_recent_trades(
+    account_id: str | None = None, *, limit: int = 100, include_deleted: bool = False
+) -> List[dict[str, Any]]:
+    """최근 트레이드 목록을 반환합니다."""
     db = get_db_connection()
     if db is None:
         return []
@@ -79,8 +98,8 @@ def fetch_recent_trades(
     else:
         query["deleted_at"] = {"$exists": True}
 
-    if country:
-        query["country"] = country.strip().lower()
+    if account_id:
+        query["account"] = account_id.strip().lower()
 
     cursor = (
         db.trades.find(query)
@@ -93,7 +112,8 @@ def fetch_recent_trades(
         trades.append(
             {
                 "id": str(doc.get("_id")),
-                "country": str(doc.get("country") or ""),
+                "account": str(doc.get("account") or ""),
+                "country_code": str(doc.get("country_code") or ""),
                 "ticker": str(doc.get("ticker") or ""),
                 "action": str(doc.get("action") or ""),
                 "name": str(doc.get("name") or ""),
@@ -107,11 +127,11 @@ def fetch_recent_trades(
     return trades
 
 
-def list_open_positions(country: str) -> List[dict[str, Any]]:
-    """특정 국가의 최신 매수 상태(미매도) 종목 목록을 반환합니다."""
+def list_open_positions(account_id: str) -> List[dict[str, Any]]:
+    """특정 계정의 최신 매수 상태(미매도) 종목 목록을 반환합니다."""
 
-    country_norm = (country or "").strip().lower()
-    if not country_norm:
+    account_norm = (account_id or "").strip().lower()
+    if not account_norm:
         return []
 
     db = get_db_connection()
@@ -121,7 +141,7 @@ def list_open_positions(country: str) -> List[dict[str, Any]]:
     pipeline = [
         {
             "$match": {
-                "country": country_norm,
+                "account": account_norm,
                 "ticker": {"$ne": None},
                 "deleted_at": {"$exists": False},
             }
@@ -162,7 +182,7 @@ def list_open_positions(country: str) -> List[dict[str, Any]]:
 def update_trade_event(
     trade_id: str,
     *,
-    country: Optional[str] = None,
+    account_id: Optional[str] = None,
     ticker: Optional[str] = None,
     action: Optional[str] = None,
     executed_at: Optional[datetime] = None,
@@ -184,8 +204,8 @@ def update_trade_event(
         return False
 
     fields: dict[str, Any] = {}
-    if country is not None:
-        fields["country"] = country.strip().lower()
+    if account_id is not None:
+        fields["account"] = account_id.strip().lower()
     if ticker is not None:
         fields["ticker"] = ticker.strip()
     if action is not None:

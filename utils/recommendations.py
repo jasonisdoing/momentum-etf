@@ -228,11 +228,12 @@ def style_recommendations_dataframe(country: str, df: pd.DataFrame) -> Styler:
     return styled
 
 
-def get_recommendations_dataframe(country: str) -> pd.DataFrame:
+def get_recommendations_dataframe(country: str, *, source_key: str | None = None) -> pd.DataFrame:
     """로딩과 포맷팅을 한 번에 수행하는 헬퍼.
 
     Args:
-        country: 국가 코드 (예: 'kor', 'aus')
+        country: 표시/포맷팅에 사용할 시장 코드
+        source_key: 결과 JSON 파일을 선택할 때 사용할 키 (기본값: country)
 
     Returns:
         포맷팅된 추천 종목 데이터프레임
@@ -242,7 +243,8 @@ def get_recommendations_dataframe(country: str) -> pd.DataFrame:
         load_recommendations._cache = {}
 
     try:
-        rows = load_recommendations(country)
+        data_key = (source_key or country).strip().lower()
+        rows = load_recommendations(data_key)
         return recommendations_to_dataframe(country, rows)
     except Exception as e:
         print(f"Error loading recommendations for {country}: {str(e)}")

@@ -11,6 +11,7 @@ from pymongo import DESCENDING, ASCENDING
 
 from utils.trade_store import list_open_positions
 from utils.db_manager import get_db_connection
+from utils.settings_loader import get_account_settings
 
 
 def _extract_trade_time(trade: dict) -> Optional[datetime]:
@@ -70,15 +71,15 @@ def _canonical_ticker_key(ticker: str) -> str:
 
 
 def calculate_consecutive_holding_info(
-    held_tickers: List[str], country: str, as_of_date: datetime
+    held_tickers: List[str], account_id: str, as_of_date: datetime
 ) -> Dict[str, Dict]:
     """
-    Scan 'trades' collection and compute consecutive holding start date per ticker
-    for the given country. Uses a single query to avoid N+1 access.
+    Scan `trades` collection and compute consecutive holding start date per ticker
+    for the given account. Uses a single query to avoid N+1 access.
 
     Args:
         held_tickers: List of tickers to check
-        country: Country code (e.g., 'kor', 'aus')
+        account_id: 계정 ID (예: 'kor', 'aus')
         as_of_date: Date to calculate holding info as of
 
     Returns:
@@ -95,8 +96,10 @@ def calculate_consecutive_holding_info(
 
     include_until = as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
+    account_norm = (account_id or "").strip().lower()
+
     query: Dict[str, Any] = {
-        "country": country,
+        "account": account_norm,
         "deleted_at": {"$exists": False},
     }
 
@@ -130,7 +133,7 @@ def calculate_consecutive_holding_info(
     threshold = 0.0
 
     try:
-        open_positions = list_open_positions(country)
+        open_positions = list_open_positions(account_norm)
     except Exception:
         open_positions = []
 
@@ -175,13 +178,18 @@ def calculate_consecutive_holding_info(
 
 
 def calculate_trade_cooldown_info(
-    tickers: List[str], country: str, as_of_date: datetime
+    tickers: List[str],
+    account_id: str,
+    as_of_date: datetime,
+    *,
+    country_code: str | None = None,
 ) -> Dict[str, Dict[str, Optional[datetime]]]:
     """Compute recent buy/sell dates per ticker for trade cooldown decisions.
 
     Args:
         tickers: List of tickers to check
-        country: Country code (e.g., 'kor', 'aus')
+        account_id: 계정 ID (예: 'kor', 'aus')
+        country_code: 계정이 참조하는 시장 코드 (구 데이터 호환용, 옵션)
         as_of_date: Date to calculate cooldown as of
 
     Returns:
@@ -200,11 +208,30 @@ def calculate_trade_cooldown_info(
 
     include_until = as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-    query = {
-        "country": country,
+    account_norm = (account_id or "").strip().lower()
+    country_code_normalized = (country_code or "").strip().lower()
+
+    if not country_code_normalized and account_norm:
+        try:
+            settings = get_account_settings(account_norm)
+            country_code_normalized = str(settings.get("country_code") or "").strip().lower()
+        except Exception:
+            country_code_normalized = ""
+
+    query: Dict[str, Any] = {
         "ticker": {"$in": tickers},
         "$or": [{"date": {"$lte": include_until}}, {"executed_at": {"$lte": include_until}}],
     }
+
+    legacy_filters: List[Dict[str, Any]] = []
+    if account_norm:
+        legacy_filters.append({"account": account_norm})
+        legacy_filters.append({"country": account_norm})
+    if country_code_normalized:
+        legacy_filters.append({"country": country_code_normalized})
+
+    if legacy_filters:
+        query["$and"] = [{"$or": legacy_filters}]
 
     trades_cursor = db.trades.find(
         query,

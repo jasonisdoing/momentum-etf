@@ -14,7 +14,7 @@ except Exception:  # pragma: no cover
     yf = None
 
 from utils.data_loader import fetch_ohlcv
-from utils.country_registry import get_common_file_settings
+from utils.account_registry import get_common_file_settings
 
 
 def get_market_regime_status_string() -> Optional[str]:

@@ -25,17 +25,17 @@ def _load_precision_all() -> Dict[str, Any]:
     return {}
 
 
-def _load_country_precision(country: str) -> Dict[str, Any]:
+def _load_account_precision(country: str) -> Dict[str, Any]:
     """Load country section precision/currency config from country settings."""
-    from utils.country_registry import get_country_settings
+    from utils.account_registry import get_account_settings
 
     # Load country settings
-    country_settings = get_country_settings(country)
-    if not country_settings:
+    ccount_settings = get_account_settings(country)
+    if not ccount_settings:
         raise KeyError(f"Country settings not found for '{country}'")
 
     # Get precision settings from country config
-    precision_settings = country_settings.get("precision", {})
+    precision_settings = ccount_settings.get("precision", {})
     if not precision_settings:
         raise KeyError(f"Precision settings not found in {country} configuration")
 
@@ -59,7 +59,7 @@ def _get_header_money_formatter(country: str) -> Callable[[float], str]:
         A function that formats a float value as a currency string
     """
     try:
-        cprec = _load_country_precision(country)
+        cprec = _load_account_precision(country)
         currency = cprec.get("header_currency", "KRW")
 
         if currency == "KRW":
@@ -92,7 +92,7 @@ def format_shares(quantity, country: str) -> str:
     if not isinstance(quantity, (int, float)):
         return str(quantity)
 
-    cprec = _load_country_precision(country)
+    cprec = _load_account_precision(country)
     qty_precision = int(cprec.get("stock_qty_precision", 0))
 
     if qty_precision > 0:
@@ -103,7 +103,7 @@ def format_shares(quantity, country: str) -> str:
 __all__ = [
     "_load_display_precision",
     "_load_precision_all",
-    "_load_country_precision",
+    "_load_account_precision",
     "_get_header_money_formatter",
     "format_shares",
 ]

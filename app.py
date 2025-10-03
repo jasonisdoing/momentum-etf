@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict
 
 import streamlit as st
 
-from app_pages.country_page import render_country_page
+from app_pages.account_page import render_account_page
+
 from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
@@ -12,22 +13,24 @@ from utils.account_registry import (
 )
 
 
-def _build_country_page(
-    page_cls: Callable[..., object], account: Dict[str, Any], *, default_id: str
-):
+def _build_account_page(page_cls: Callable[..., object], account: Dict[str, Any]):
     account_id = account["account_id"]
     icon = account.get("icon") or get_icon_fallback(account.get("country_code", ""))
 
     def _render(account_key: str = account_id) -> None:
-        render_country_page(account_key)
+        render_account_page(account_key)
 
     return page_cls(
         _render,
         title=account["name"],
         icon=icon,
         url_path=account_id,
-        default=account_id == default_id,
     )
+
+
+def _render_home_page() -> None:
+    st.title("대시보드")
+    st.caption("서비스 진입점입니다. 좌측 메뉴에서 계정을 선택하세요.")
 
 
 def main() -> None:
@@ -39,7 +42,7 @@ def main() -> None:
 
     accounts = load_account_configs()
     if not accounts:
-        st.error("사용할 수 있는 계정 설정이 없습니다. `settings/country` 폴더를 확인해주세요.")
+        st.error("사용할 수 있는 계정 설정이 없습니다. `settings/account` 폴더를 확인해주세요.")
         st.stop()
 
     default_account = pick_default_account(accounts)
@@ -57,17 +60,33 @@ def main() -> None:
     )
 
     pages = [
-        _build_country_page(page_cls, account, default_id=default_account["account_id"])
-        for account in accounts
+        page_cls(
+            _render_home_page,
+            title="대시보드",
+            icon="🏠",
+            default=True,
+        )
     ]
+    for account in accounts:
+        pages.append(_build_account_page(page_cls, account))
 
     pages.append(
         page_cls(
-            "app_pages/admin.py",
-            title="관리자",
+            "app_pages/trade.py",
+            title="[Admin] trade",
             icon="📝",
+            url_path="admin",
         )
     )
+
+    # pages.append(
+    #     page_cls(
+    #         "app_pages/migration.py",
+    #         title="[관리자] 마이그레이션",
+    #         icon="🛠️",
+    #         url_path="migration",
+    #     )
+    # )
 
     navigation(pages).run()
 

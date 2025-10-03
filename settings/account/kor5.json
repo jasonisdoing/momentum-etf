@@ -1,14 +1,14 @@
 {
-    "order": 10,
+    "order": 11,
     "icon": "🇰🇷",
-    "name": "한국 ETF",
+    "name": "ETF 5종목",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",
     "strategy": {
         "tuning": {
-            "MA_PERIOD": 15,
-            "PORTFOLIO_TOPN": 10,
+            "MA_PERIOD": 45,
+            "PORTFOLIO_TOPN": 5,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "static": {

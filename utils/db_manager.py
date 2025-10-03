@@ -98,7 +98,8 @@ def save_trade(trade_data: Dict) -> bool:
     try:
         trade_data["created_at"] = datetime.now()
         db.trades.insert_one(trade_data)
-        print(f"성공: {trade_data['country'].upper()} 국가의 거래를 저장했습니다: {trade_data}")
+        account = str(trade_data.get("account") or "").upper()
+        print(f"성공: {account or 'UNKNOWN'} 계정의 거래를 저장했습니다: {trade_data}")
         return True
     except Exception as e:
         print(f"오류: 거래 내역 저장 중 오류 발생: {e}")

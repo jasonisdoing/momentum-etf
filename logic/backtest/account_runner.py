@@ -1,7 +1,4 @@
-"""국가 기반 백테스트 실행 유틸리티.
-
-계좌 기반 스크립트를 제거하고, 국가 설정과 전략 규칙만을 활용하여 백테스트를 실행합니다.
-"""
+"""계정 기반 백테스트 실행 유틸리티."""
 
 from __future__ import annotations
 
@@ -13,12 +10,12 @@ import pandas as pd
 
 from constants import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
 from logic.entry_point import run_portfolio_backtest, StrategyRules
-from utils.country_registry import get_common_file_settings
+from utils.account_registry import get_common_file_settings
 from utils.settings_loader import (
-    CountrySettingsError,
-    get_country_precision,
-    get_country_settings,
-    get_country_strategy,
+    AccountSettingsError,
+    get_account_precision,
+    get_account_settings,
+    get_account_strategy,
     get_strategy_rules,
 )
 from utils.data_loader import get_latest_trading_day, fetch_ohlcv
@@ -34,10 +31,11 @@ def _default_initial_capital() -> float:
 
 
 @dataclass
-class CountryBacktestResult:
-    """국가 기반 백테스트 결과."""
+class AccountBacktestResult:
+    """계정 기반 백테스트 결과."""
 
-    country: str
+    account_id: str
+    country_code: str
     start_date: pd.Timestamp
     end_date: pd.Timestamp
     initial_capital: float
@@ -60,7 +58,8 @@ class CountryBacktestResult:
         df = self.portfolio_timeseries.copy()
         df.index = df.index.astype(str)
         return {
-            "country": self.country,
+            "account_id": self.account_id,
+            "country_code": self.country_code,
             "start_date": self.start_date.strftime("%Y-%m-%d"),
             "end_date": self.end_date.strftime("%Y-%m-%d"),
             "initial_capital": float(self.initial_capital),
@@ -82,8 +81,8 @@ class CountryBacktestResult:
         }
 
 
-def run_country_backtest(
-    country: str,
+def run_account_backtest(
+    account_id: str,
     *,
     months_range: Optional[int] = None,
     initial_capital: Optional[float] = None,
@@ -91,26 +90,28 @@ def run_country_backtest(
     prefetched_data: Optional[Mapping[str, pd.DataFrame]] = None,
     override_settings: Optional[Dict[str, Any]] = None,
     strategy_override: Optional[StrategyRules] = None,  # type: ignore
-) -> CountryBacktestResult:
-    """국가 코드를 기반으로 백테스트를 실행합니다."""
+) -> AccountBacktestResult:
+    """계정 ID를 기반으로 백테스트를 실행합니다."""
 
     def _log(message: str) -> None:
         if not quiet:
             print(message)
 
-    _log(f"[백테스트] {country.upper()} 백테스트를 시작합니다...")
-
     override_settings = override_settings or {}
-    country = (country or "").strip().lower()
-    if not country:
-        raise CountrySettingsError("국가 코드를 지정해야 합니다.")
+    account_id = (account_id or "").strip().lower()
+    if not account_id:
+        raise AccountSettingsError("계정 ID를 지정해야 합니다.")
+
+    _log(f"[백테스트] {account_id.upper()} 백테스트를 시작합니다...")
 
     _log("[백테스트] 설정을 로드하는 중...")
-    country_settings = get_country_settings(country)
-    base_strategy_rules = get_strategy_rules(country)
+    account_settings = get_account_settings(account_id)
+    country_code = (account_settings.get("country_code") or account_id).strip().lower() or "kor"
+
+    base_strategy_rules = get_strategy_rules(account_id)
     strategy_rules = StrategyRules.from_mapping(base_strategy_rules.to_dict())
-    precision_settings = get_country_precision(country)
-    strategy_settings = dict(get_country_strategy(country))
+    precision_settings = get_account_precision(account_id)
+    strategy_settings = dict(get_account_strategy(account_id))
     common_settings = get_common_file_settings()
 
     if strategy_override is not None:
@@ -124,20 +125,20 @@ def run_country_backtest(
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
 
     months_range = _resolve_months_range(months_range, override_settings)
-    end_date = _resolve_end_date(country, override_settings)
+    end_date = _resolve_end_date(country_code, override_settings)
     start_date = _resolve_start_date(end_date, months_range, override_settings)
 
     initial_capital_value = _resolve_initial_capital(
         initial_capital,
         override_settings,
-        country_settings,
+        account_settings,
         precision_settings,
     )
 
-    _log(f"[백테스트] {country.upper()} ETF 목록을 로드하는 중...")
-    etf_universe = get_etfs(country)
+    _log(f"[백테스트] {account_id.upper()} 계정({country_code.upper()}) ETF 목록을 로드하는 중...")
+    etf_universe = get_etfs(country_code)
     if not etf_universe:
-        raise CountrySettingsError(f"'data/stocks/{country}.json' 파일에서 종목을 찾을 수 없습니다.")
+        raise AccountSettingsError(f"'data/stocks/{country_code}.json' 파일에서 종목을 찾을 수 없습니다.")
     _log(f"[백테스트] {len(etf_universe)}개의 ETF를 찾았습니다.")
 
     ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
@@ -149,7 +150,7 @@ def run_country_backtest(
 
     _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
     backtest_kwargs = _build_backtest_kwargs(
-        country=country,
+        country_code=country_code,
         strategy_rules=strategy_rules,
         common_settings=common_settings,
         strategy_settings=strategy_settings,
@@ -160,8 +161,8 @@ def run_country_backtest(
     date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
 
     _log(
-        f"[백테스트] {country.upper()} 백테스트 실행 | 기간: {date_range[0]}~{date_range[1]} | "
-        f"초기 자본: {initial_capital_value:,.0f}"
+        f"[백테스트] {account_id.upper()}({country_code.upper()}) 백테스트 실행 | "
+        f"기간: {date_range[0]}~{date_range[1]} | 초기 자본: {initial_capital_value:,.0f}"
     )
 
     _log("[백테스트] 포트폴리오 백테스트 실행 중...")
@@ -173,7 +174,7 @@ def run_country_backtest(
             core_start_date=start_date,
             top_n=portfolio_topn,
             date_range=date_range,
-            country=country,
+            country=country_code,
             **backtest_kwargs,
         )
         or {}
@@ -198,11 +199,11 @@ def run_country_backtest(
     ) = _build_summary(
         portfolio_df,
         ticker_timeseries=ticker_timeseries,
-        country=country,
+        country_code=country_code,
         start_date=start_date,
         end_date=end_date,
         initial_capital=initial_capital_value,
-        country_settings=country_settings,
+        account_settings=account_settings,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries)
@@ -215,15 +216,17 @@ def run_country_backtest(
 
     _log("[백테스트] 설정 스냅샷을 생성하는 중...")
     settings_snapshot = _build_settings_snapshot(
-        country=country,
+        account_id=account_id,
+        country_code=country_code,
         strategy_rules=strategy_rules,
         common_settings=common_settings,
         strategy_settings=strategy_settings,
         initial_capital=initial_capital_value,
     )
 
-    return CountryBacktestResult(
-        country=country,
+    return AccountBacktestResult(
+        account_id=account_id,
+        country_code=country_code,
         start_date=start_date,
         end_date=end_date,
         initial_capital=initial_capital_value,
@@ -257,7 +260,7 @@ def _resolve_months_range(months_range: Optional[int], override_settings: Mappin
 def _resolve_initial_capital(
     initial_capital: Optional[float],
     override_settings: Mapping[str, Any],
-    country_settings: Mapping[str, Any],
+    account_settings: Mapping[str, Any],
     precision_settings: Mapping[str, Any],
 ) -> float:
     if initial_capital is not None:
@@ -265,7 +268,7 @@ def _resolve_initial_capital(
     if "initial_capital" in override_settings:
         return float(override_settings["initial_capital"])
 
-    backtest_config = country_settings.get("backtest", {}) if country_settings else {}
+    backtest_config = account_settings.get("backtest", {}) if account_settings else {}
     if isinstance(backtest_config, Mapping) and "initial_capital" in backtest_config:
         return float(backtest_config["initial_capital"])
 
@@ -277,10 +280,10 @@ def _resolve_initial_capital(
     return _default_initial_capital()
 
 
-def _resolve_end_date(country: str, override_settings: Mapping[str, Any]) -> pd.Timestamp:
+def _resolve_end_date(country_code: str, override_settings: Mapping[str, Any]) -> pd.Timestamp:
     if "end_date" in override_settings:
         return pd.to_datetime(override_settings["end_date"])
-    return get_latest_trading_day(country)
+    return get_latest_trading_day(country_code)
 
 
 def _resolve_start_date(
@@ -295,7 +298,7 @@ def _resolve_start_date(
 
 def _build_backtest_kwargs(
     *,
-    country: str,
+    country_code: str,
     strategy_rules,
     common_settings: Mapping[str, Any],
     strategy_settings: Mapping[str, Any],
@@ -426,11 +429,11 @@ def _build_summary(
     portfolio_df: pd.DataFrame,
     *,
     ticker_timeseries: Mapping[str, pd.DataFrame],
-    country: str,
+    country_code: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
     initial_capital: float,
-    country_settings: Mapping[str, Any],
+    account_settings: Mapping[str, Any],
 ) -> Tuple[
     Dict[str, Any],
     pd.Series,
@@ -476,8 +479,8 @@ def _build_summary(
 
     benchmark_cum_ret_pct = 0.0
     benchmark_cagr_pct = 0.0
-    benchmark_ticker = str(country_settings.get("benchmark_ticker") or "^GSPC")
-    benchmark_country = country
+    benchmark_ticker = str(account_settings.get("benchmark_ticker") or "^GSPC")
+    benchmark_country = country_code
     try:
         benchmark_df = fetch_ohlcv(
             benchmark_ticker,
@@ -703,14 +706,16 @@ def _build_ticker_summaries(
 
 def _build_settings_snapshot(
     *,
-    country: str,
+    account_id: str,
+    country_code: str,
     strategy_rules: StrategyRules,  # type: ignore
     common_settings: Mapping[str, Any],
     strategy_settings: Mapping[str, Any],
     initial_capital: float,
 ) -> Dict[str, Any]:
     snapshot = {
-        "country": country.upper(),
+        "account_id": account_id.upper(),
+        "country_code": country_code.upper(),
         "initial_capital": float(initial_capital),
         "strategy_rules": strategy_rules.to_dict(),
         "common_settings": dict(common_settings),

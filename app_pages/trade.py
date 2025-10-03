@@ -54,7 +54,7 @@ def _default_account_id() -> str:
     return "kor"
 
 
-def _country_options() -> list[str]:
+def _account_options() -> list[str]:
     return [account["account_id"] for account in _account_configs()]
 
 
@@ -76,8 +76,8 @@ if "trade_editing" not in st.session_state:
     st.session_state["trade_editing"] = None
 if "trade_alerts" not in st.session_state:
     st.session_state["trade_alerts"] = []
-if "trade_selected_country" not in st.session_state:
-    st.session_state["trade_selected_country"] = _default_account_id()
+if "trade_selected_account" not in st.session_state:
+    st.session_state["trade_selected_account"] = _default_account_id()
 if "trade_delete_dialog" not in st.session_state:
     st.session_state["trade_delete_dialog"] = None
 
@@ -149,8 +149,8 @@ def _clear_trade_edit_state() -> None:
 
 
 @lru_cache(maxsize=16)
-def _ticker_name_map(country: str) -> dict[str, str]:
-    country_norm = (country or "").strip().lower()
+def _ticker_name_map(country_code: str) -> dict[str, str]:
+    country_norm = (country_code or "").strip().lower()
     if not country_norm:
         return {}
 
@@ -168,7 +168,7 @@ def _ticker_name_map(country: str) -> dict[str, str]:
     return mapping
 
 
-def _resolve_ticker_name(country: str, ticker: str, stored: str | None = None) -> str:
+def _resolve_ticker_name(country_code: str, ticker: str, stored: str | None = None) -> str:
     if stored:
         return stored
 
@@ -176,7 +176,7 @@ def _resolve_ticker_name(country: str, ticker: str, stored: str | None = None) -
     if not ticker_norm:
         return ""
 
-    mapping = _ticker_name_map(country)
+    mapping = _ticker_name_map(country_code)
     return mapping.get(ticker_norm, "")
 
 
@@ -302,9 +302,9 @@ def _render_trade_history(username: str, account_id: str, country_code: str) -> 
         return
 
     try:
-        trades = fetch_recent_trades(country_code, limit=100, include_deleted=False)
+        trades = fetch_recent_trades(account_id, limit=100, include_deleted=False)
     except Exception as exc:
-        st.error(f"[{country_code.upper()}] 최근 거래 내역을 불러오지 못했습니다: {exc}")
+        st.error(f"[{account_id}] 최근 거래 내역을 불러오지 못했습니다: {exc}")
         return
 
     if not trades:
@@ -314,7 +314,7 @@ def _render_trade_history(username: str, account_id: str, country_code: str) -> 
     trade_data = []
     for trade in trades:
         trade_id = trade.get("id", "")
-        country = (trade.get("country") or "").upper()
+        trade_country_code = (trade.get("country_code") or "").upper()
         ticker = (trade.get("ticker") or "").upper()
         action = (trade.get("action") or "").upper()
         executed_at = trade.get("executed_at")
@@ -327,7 +327,14 @@ def _render_trade_history(username: str, account_id: str, country_code: str) -> 
         elif executed_at:
             executed_display = str(executed_at)
 
-        trade_name = _resolve_ticker_name(country, ticker, trade.get("name")) or ticker
+        trade_name = (
+            _resolve_ticker_name(
+                trade_country_code or country_code,
+                ticker,
+                trade.get("name"),
+            )
+            or ticker
+        )
 
         trade_data.append(
             {
@@ -389,7 +396,7 @@ def _render_trade_history(username: str, account_id: str, country_code: str) -> 
                     st.rerun()
 
 
-def _render_country_section(current_user: str, account_id: str) -> None:
+def _render_account_section(current_user: str, account_id: str) -> None:
     meta = _account_meta().get(account_id, {})
     icon = meta.get("icon", "")
     label = meta.get("label", account_id.upper())
@@ -418,31 +425,31 @@ def _render_country_section(current_user: str, account_id: str) -> None:
     _render_trade_history(current_user, account_id, country_code)
 
     if st.session_state.get(buy_key, False):
-        _render_buy_form(current_user, country_code, account_id)
+        _render_buy_form(current_user, account_id, country_code)
         if st.button("닫기", key=f"close-buy-form-{account_id}"):
             st.session_state[buy_key] = False
             st.rerun()
         st.write("---")
 
     if st.session_state.get(sell_key, False):
-        _render_sell_section(current_user, country_code, account_id)
+        _render_sell_section(current_user, account_id, country_code)
         if st.button("닫기", key=f"close-sell-form-{account_id}"):
             st.session_state[sell_key] = False
             st.rerun()
 
 
-def _render_buy_form(username: str, country: str, account_id: str) -> None:
-    holdings = list_open_positions(country or "") if country else []
+def _render_buy_form(username: str, account_id: str, country_code: str) -> None:
+    holdings = list_open_positions(account_id or "") if account_id else []
     holding_tickers = {
         (pos.get("ticker") or "").strip().upper() for pos in holdings if pos.get("ticker")
     }
 
-    key_suffix = (account_id or country or "global").strip().lower() or "global"
+    key_suffix = (account_id or country_code or "global").strip().lower() or "global"
 
     with st.form(f"buy-input-form-{key_suffix}", clear_on_submit=True):
         ticker = ""
         name: str | None = None
-        ticker_map = _ticker_name_map(country)
+        ticker_map = _ticker_name_map(country_code)
 
         if ticker_map:
             placeholder_option = {
@@ -503,7 +510,7 @@ def _render_buy_form(username: str, country: str, account_id: str) -> None:
                 st.warning("티커를 입력하세요.")
                 st.stop()
 
-            resolved_name = name or _resolve_ticker_name(country, ticker)
+            resolved_name = name or _resolve_ticker_name(country_code, ticker)
             executed_date_value = executed_date
             if isinstance(executed_date_value, datetime):
                 executed_date_value = executed_date_value.date()
@@ -512,7 +519,7 @@ def _render_buy_form(username: str, country: str, account_id: str) -> None:
             if ticker_norm in holding_tickers:
                 st.session_state["buy_duplicate_warning"] = {
                     "ticker": ticker_norm,
-                    "country": (country or "").upper(),
+                    "country": (country_code or "").upper(),
                     "name": resolved_name or "",
                 }
                 st.rerun()
@@ -520,7 +527,8 @@ def _render_buy_form(username: str, country: str, account_id: str) -> None:
             executed_at = datetime.combine(executed_date_value, datetime.min.time())
             try:
                 insert_trade_event(
-                    country=country or "",
+                    account_id=account_id,
+                    country_code=country_code or "",
                     ticker=ticker.strip(),
                     name=(resolved_name or "").strip(),
                     action="BUY",
@@ -539,7 +547,7 @@ def _render_buy_form(username: str, country: str, account_id: str) -> None:
     warning_state = st.session_state.get("buy_duplicate_warning")
     if warning_state:
         ticker_label = warning_state.get("ticker") or "알 수 없음"
-        country_label = warning_state.get("country") or (country or "").upper()
+        country_label = warning_state.get("country") or (country_code or "").upper()
         name_label = warning_state.get("name") or ""
 
         warning_message = f"{country_label} 시장에서 {ticker_label}"
@@ -556,14 +564,14 @@ def _render_buy_form(username: str, country: str, account_id: str) -> None:
             st.rerun()
 
 
-def _render_sell_section(username: str, country: str, account_id: str) -> None:
-    positions = list_open_positions(country or "") if country else []
+def _render_sell_section(username: str, account_id: str, country_code: str) -> None:
+    positions = list_open_positions(account_id or "") if account_id else []
 
     if not positions:
         st.info("매도 가능한 종목이 없습니다.")
         return
 
-    key_suffix = (account_id or country or "global").strip().lower() or "global"
+    key_suffix = (account_id or country_code or "global").strip().lower() or "global"
 
     option_items: list[tuple[str, str, str]] = []
     for pos in positions:
@@ -572,7 +580,7 @@ def _render_sell_section(username: str, country: str, account_id: str) -> None:
             continue
 
         ticker = pos.get("ticker", "").upper()
-        position_name = pos.get("name") or _resolve_ticker_name(country or "", ticker)
+        position_name = pos.get("name") or _resolve_ticker_name(country_code or "", ticker)
         executed_display = _format_datetime(pos.get("executed_at"))
         memo_text = pos.get("memo") or ""
 
@@ -625,7 +633,8 @@ def _render_sell_section(username: str, country: str, account_id: str) -> None:
             executed_at = datetime.combine(executed_date, datetime.min.time())
             try:
                 insert_trade_event(
-                    country=country or "",
+                    account_id=account_id,
+                    country_code=country_code or "",
                     ticker=ticker,
                     name=None,
                     action="SELL",
@@ -659,19 +668,19 @@ else:
     authenticator.logout(button_name="로그아웃", location="sidebar")
     current_user = username or name or "unknown"
 
-    default_country = st.session_state.get("trade_selected_country", _default_account_id())
-    if "trade_selected_country_radio" not in st.session_state:
-        st.session_state["trade_selected_country_radio"] = default_country
+    default_account = st.session_state.get("trade_selected_account", _default_account_id())
+    if "trade_selected_account_radio" not in st.session_state:
+        st.session_state["trade_selected_account_radio"] = default_account
 
     with st.sidebar:
         st.markdown("### 관리자")
-        selected_country = st.radio(
-            "국가 선택",
-            options=_country_options(),
+        selected_account = st.radio(
+            "계정 선택",
+            options=_account_options(),
             format_func=_format_account_label,
-            key="trade_selected_country_radio",
+            key="trade_selected_account_radio",
         )
 
-    st.session_state["trade_selected_country"] = selected_country
+    st.session_state["trade_selected_account"] = selected_account
 
-    _render_country_section(current_user, selected_country)
+    _render_account_section(current_user, selected_account)

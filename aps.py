@@ -54,7 +54,7 @@ except Exception:  # pragma: no cover
 
 from logic.recommend.pipeline import (
     RecommendationReport,
-    generate_country_recommendation_report,
+    generate_account_recommendation_report,
 )
 from utils.data_updater import update_etf_names
 from utils.env import load_env_if_present
@@ -68,7 +68,7 @@ from utils.schedule_config import (
     get_cache_schedule,
     get_global_schedule_settings,
 )
-from utils.settings_loader import get_country_slack_channel
+from utils.settings_loader import get_account_slack_channel
 
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
@@ -103,32 +103,49 @@ def _make_json_safe(obj):
     return str(obj)
 
 
-def _save_recommendation_result(country: str, report: RecommendationReport) -> Path:
+def _save_recommendation_result(report: RecommendationReport) -> Path:
     """Persist recommendation results to JSON for downstream consumers."""
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = RESULTS_DIR / f"recommendation_{country}.json"
+
+    account_id = (getattr(report, "account_id", "") or "").strip().lower()
+    country_code = (getattr(report, "country_code", "") or "").strip().lower()
+
+    if not account_id or not country_code:
+        raise RuntimeError("Recommendation report must include both account_id and country_code")
+
+    payload = _make_json_safe(report.recommendations)
+
+    account_path = RESULTS_DIR / f"recommendation_{account_id}.json"
+    country_path = RESULTS_DIR / f"recommendation_{country_code}.json"
 
     try:
-        safe_payload = _make_json_safe(report.recommendations)
-        with output_path.open("w", encoding="utf-8") as fp:
-            json.dump(safe_payload, fp, ensure_ascii=False, indent=2)
+        with account_path.open("w", encoding="utf-8") as fp:
+            json.dump(payload, fp, ensure_ascii=False, indent=2)
+
+        if country_path != account_path:
+            with country_path.open("w", encoding="utf-8") as fp:
+                json.dump(payload, fp, ensure_ascii=False, indent=2)
     except Exception:
         logging.error(
-            "Failed to write recommendation results for %s", country.upper(), exc_info=True
+            "Failed to write recommendation results for account=%s country=%s",
+            account_id,
+            country_code,
+            exc_info=True,
         )
         raise
 
-    return output_path
+    return account_path
 
 
 def _send_slack_notification(
-    country: str,
+    account_id: str,
+    country_code: str,
     message: str,
 ) -> bool:
     """Send Slack notification via bot token or webhook as a fallback."""
 
-    channel = get_country_slack_channel(country)
+    channel = get_account_slack_channel(account_id)
     token = os.environ.get("SLACK_BOT_TOKEN")
 
     if token and channel and WebClient is not None:
@@ -136,43 +153,47 @@ def _send_slack_notification(
             client = WebClient(token=token)
             client.chat_postMessage(channel=channel, text=message)
             logging.info(
-                "Slack message sent via bot token for %s (channel=%s)",
-                country.upper(),
+                "Slack message sent via bot token for account=%s (channel=%s)",
+                account_id,
                 channel,
             )
             return True
         except SlackApiError as exc:  # pragma: no cover - external API call
             logging.error(
-                "Slack API error for %s: %s",
-                country.upper(),
+                "Slack API error for account=%s: %s",
+                account_id,
                 getattr(exc, "response", {}).get("error") or str(exc),
                 exc_info=True,
             )
         except Exception:
-            logging.error("Unexpected Slack client failure for %s", country.upper(), exc_info=True)
+            logging.error(
+                "Unexpected Slack client failure for account=%s",
+                account_id,
+                exc_info=True,
+            )
 
-    webhook_info = get_slack_webhook_url(country)
+    webhook_info = get_slack_webhook_url(account_id)
     if webhook_info:
         webhook_url, source_name = webhook_info
         sent = send_slack_message(message, webhook_url=webhook_url, webhook_name=source_name)
         if sent:
             logging.info(
                 "Slack message sent via webhook for %s (source=%s)",
-                country.upper(),
+                country_code.upper(),
                 source_name,
             )
             return True
 
         logging.error(
-            "Slack webhook delivery failed for %s (source=%s)",
-            country.upper(),
+            "Slack webhook delivery failed for account=%s (source=%s)",
+            account_id,
             source_name,
         )
 
     if not channel and not webhook_info:
         logging.info(
-            "Slack delivery skipped for %s: no channel/webhook configured",
-            country.upper(),
+            "Slack delivery skipped for account=%s: no channel/webhook configured",
+            account_id,
         )
 
     return False
@@ -239,85 +260,134 @@ def _format_korean_datetime(dt: datetime) -> str:
 
 
 def run_recommendation_generation(
-    country: str,
+    account_id: str,
     *,
+    country_code: str,
     force_notify: bool = False,
 ) -> None:
     """Generate recommendations, persist them, and notify Slack."""
 
-    country_norm = (country or "").strip().lower()
+    account_norm = (account_id or "").strip().lower()
+    if not account_norm:
+        logging.error("Account ID is required for recommendation generation.")
+        return
+
+    country_norm = (country_code or "").strip().lower()
     if not country_norm:
         logging.error("Country code is required for recommendation generation.")
         return
 
-    logging.info("Running recommendation generation for %s", country_norm.upper())
+    logging.info(
+        "Running recommendation generation for account=%s (country=%s)",
+        account_norm,
+        country_norm,
+    )
     start_time = time.time()
 
     try:
-        report = generate_country_recommendation_report(country=country_norm, date_str=None)
+        report = generate_account_recommendation_report(account_id=account_norm, date_str=None)
     except Exception:
-        logging.error("Signal generation job for %s failed", country_norm.upper(), exc_info=True)
+        logging.error(
+            "Signal generation job for account=%s failed",
+            account_norm,
+            exc_info=True,
+        )
         return
 
     if not isinstance(report, RecommendationReport):
         logging.error(
-            "Unexpected recommendation report type for %s: %s",
-            country_norm.upper(),
+            "Unexpected recommendation report type for account=%s: %s",
+            account_norm,
             type(report).__name__,
         )
         return
 
     if not report.recommendations:
-        logging.warning("No recommendations produced for %s", country_norm.upper())
+        logging.warning("No recommendations produced for account=%s", account_norm)
         return
 
     duration = time.time() - start_time
 
+    report_country = (getattr(report, "country_code", "") or "").strip().lower()
+    if report_country and report_country != country_norm:
+        logging.warning(
+            "Report country mismatch (expected=%s, got=%s)",
+            country_norm,
+            report_country,
+        )
+
+    target_country = report_country or country_norm
+
     try:
-        output_path = _save_recommendation_result(country_norm, report)
+        output_path = _save_recommendation_result(report)
         logging.info(
             "Saved %s recommendations (%d items) to %s",
-            country_norm.upper(),
+            target_country.upper(),
             len(report.recommendations),
             output_path,
         )
     except Exception:
         logging.error(
-            "Skipping Slack notification because saving results failed for %s",
-            country_norm.upper(),
+            "Skipping Slack notification because saving results failed for account=%s",
+            account_norm,
             exc_info=True,
         )
         return
 
     slack_message = compose_recommendation_slack_message(
-        country_norm,
+        account_norm,
         report,
         duration=duration,
         force_notify=force_notify,
     )
 
-    notified = _send_slack_notification(country_norm, slack_message)
+    notified = _send_slack_notification(
+        account_norm,
+        target_country,
+        slack_message,
+    )
     base_date_str = report.base_date.strftime("%Y-%m-%d")
     if notified:
         logging.info(
             "[%s/%s] Slack notification completed in %.1fs",
-            country_norm.upper(),
+            target_country.upper(),
             base_date_str,
             duration,
         )
     else:
         logging.info(
             "[%s/%s] Slack notification skipped or failed",
-            country_norm.upper(),
+            target_country.upper(),
             base_date_str,
         )
 
 
-def run_recommend_for_country(country: str, *, force_notify: bool = False) -> None:
+def run_recommend_for_country(
+    account_id: str,
+    country: str,
+    *,
+    force_notify: bool = False,
+) -> None:
+    account_norm = (account_id or "").strip().lower()
+    country_norm = (country or "").strip().lower()
+
+    if not account_norm:
+        logging.error("Account ID must be provided when scheduling recommendations.")
+        return
+
     try:
-        run_recommendation_generation(country, force_notify=force_notify)
+        run_recommendation_generation(
+            account_norm,
+            country_code=country_norm,
+            force_notify=force_notify,
+        )
     except Exception:
-        logging.error(f"Error running recommendation generation for {country}", exc_info=True)
+        logging.error(
+            "Error running recommendation generation for account=%s country=%s",
+            account_norm,
+            country_norm,
+            exc_info=True,
+        )
 
 
 def run_cache_refresh() -> None:
@@ -357,28 +427,42 @@ def main():
     cron_default = "0 0 * * *"
     tz_default = "Asia/Seoul"
     country_schedules = get_all_country_schedules()
-    for country, cfg in country_schedules.items():
+    for schedule_name, cfg in country_schedules.items():
         enabled_default = bool(cfg.get("enabled", True))
-        if not _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", enabled_default):
-            logging.info(f"Skipping {country.upper()} schedule (disabled)")
+        if not _bool_env(f"SCHEDULE_ENABLE_{schedule_name.upper()}", enabled_default):
+            logging.info(f"Skipping {schedule_name.upper()} schedule (disabled)")
             continue
 
         cron_expr = _get(
-            f"SCHEDULE_{country.upper()}_CRON",
+            f"SCHEDULE_{schedule_name.upper()}_CRON",
             cfg.get("signal_cron") or cfg.get("recommendation_cron") or cron_default,
         )
         timezone = _get(
-            f"SCHEDULE_{country.upper()}_TZ",
+            f"SCHEDULE_{schedule_name.upper()}_TZ",
             cfg.get("timezone", tz_default),
         )
+
+        account_id = (cfg.get("account_id") or "").strip().lower()
+        country_code = (cfg.get("country_code") or "").strip().lower()
+
+        if not account_id or not country_code:
+            raise RuntimeError(
+                f"Schedule entry '{schedule_name}' must define both account_id and country_code"
+            )
 
         scheduler.add_job(
             run_recommend_for_country,
             CronTrigger.from_crontab(cron_expr, timezone=timezone),
-            args=[country],
-            id=country,
+            args=[account_id, country_code],
+            id=f"{account_id}:{country_code}",
         )
-        logging.info(f"Scheduled {country.upper()}: cron='{cron_expr}' tz='{timezone}'")
+        logging.info(
+            "Scheduled %s (account=%s): cron='%s' tz='%s'",
+            country_code.upper(),
+            account_id,
+            cron_expr,
+            timezone,
+        )
 
     cache_cfg = get_cache_schedule()
     cache_enabled_default = bool(cache_cfg.get("enabled", True))
@@ -396,13 +480,28 @@ def main():
     run_initial_default = bool(global_schedule.get("run_immediately_on_start", True))
     if _bool_env("RUN_IMMEDIATELY_ON_START", run_initial_default):
         logging.info("\n[Initial Run] Starting...")
-        for country, cfg in country_schedules.items():
+        for schedule_name, cfg in country_schedules.items():
+            enabled_default = bool(cfg.get("enabled", True))
+            if not _bool_env(f"SCHEDULE_ENABLE_{schedule_name.upper()}", enabled_default):
+                continue
+
+            account_id = (cfg.get("account_id") or "").strip().lower()
+            country_code = (cfg.get("country_code") or "").strip().lower()
+
+            if not account_id or not country_code:
+                raise RuntimeError(
+                    f"Schedule entry '{schedule_name}' must define both account_id and country_code"
+                )
+
             try:
-                enabled_default = bool(cfg.get("enabled", True))
-                if _bool_env(f"SCHEDULE_ENABLE_{country.upper()}", enabled_default):
-                    run_recommend_for_country(country, force_notify=True)
+                run_recommend_for_country(account_id, country_code, force_notify=True)
             except Exception:
-                logging.error(f"Error during initial run for {country}", exc_info=True)
+                logging.error(
+                    "Error during initial run for account=%s country=%s",
+                    account_id,
+                    country_code,
+                    exc_info=True,
+                )
         logging.info("[Initial Run] Complete.")
     else:
         logging.info("Initial run skipped (RUN_IMMEDIATELY_ON_START=0)")

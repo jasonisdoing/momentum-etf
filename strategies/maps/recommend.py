@@ -11,12 +11,13 @@ from .rules import StrategyRules
 from .constants import DECISION_MESSAGES, DECISION_NOTES
 from .messages import build_buy_replace_note
 from .shared import select_candidates_by_category, sort_decisions_by_order_and_score
-from logic.recommend.formatting import _load_country_precision
+from logic.recommend.formatting import _load_account_precision
 from utils.data_loader import count_trading_days
 
 
 def generate_daily_recommendations_for_portfolio(
-    country: str,
+    account_id: str,
+    country_code: str,
     base_date: pd.Timestamp,
     portfolio_settings: Dict,
     strategy_rules: StrategyRules,
@@ -39,8 +40,6 @@ def generate_daily_recommendations_for_portfolio(
     주어진 데이터를 기반으로 포트폴리오의 일일 매매 추천를 생성합니다.
     """
 
-    country_code = (country or "").strip().lower() or "kor"
-
     def _format_kr_price(p):
         return f"{int(round(p)):,}"
 
@@ -52,7 +51,7 @@ def generate_daily_recommendations_for_portfolio(
         return f"${p:,.{precision}f}"
 
     # 표시 통화와 정밀도 결정: precision.json(country) 기준 사용
-    cprec = _load_country_precision(country_code) or {}
+    cprec = _load_account_precision(account_id) or {}
     qty_precision = int(cprec.get("stock_qty_precision", 0))
     price_precision = int(cprec.get("stock_price_precision", 0))
     amt_precision = int(cprec.get("stock_amt_precision", 0))
@@ -89,7 +88,7 @@ def generate_daily_recommendations_for_portfolio(
     # 전략 설정 로드
     denom = strategy_rules.portfolio_topn
     if denom <= 0:
-        raise ValueError(f"'{country_code}' 국가의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
+        raise ValueError(f"'{account_id}' 계좌의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
     replace_threshold = strategy_rules.replace_threshold
 
     # 현재 보유 종목의 카테고리 (TBD 제외)
@@ -441,7 +440,7 @@ def generate_daily_recommendations_for_portfolio(
                 buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
                 if buy_price > 0:
                     best_new["row"][-1] = build_buy_replace_note(
-                        country,
+                        country_code,
                         ticker_to_sell,
                         full_etf_meta.get(ticker_to_sell, {}).get("name", ticker_to_sell),
                     )

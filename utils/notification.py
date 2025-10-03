@@ -9,8 +9,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from collections import Counter
 
-import math
-
 import requests
 import settings as global_settings
 
@@ -28,11 +26,9 @@ except ImportError:  # pragma: no cover - optional dependency
     croniter = None
     pytz = None
 
-from utils.country_registry import get_country_settings
+from utils.account_registry import get_account_settings
 from utils.schedule_config import get_country_schedule
-from utils.data_loader import get_aud_to_krw_rate
-from utils.report import format_kr_money, render_table_eaw
-from utils.stock_list_io import get_etfs
+from utils.report import format_kr_money
 
 _LAST_ERROR: Optional[str] = None
 APP_LABEL = getattr(global_settings, "APP_TYPE", "APP")
@@ -53,7 +49,7 @@ def get_slack_webhook_url(country: str) -> Optional[Tuple[str, str]]:
         (웹훅 URL, 소스 이름) 튜플 또는 사용 가능한 웹훅이 없으면 None
     """
     # 1. 국가 설정에서 웹훅 URL 가져오기
-    country_settings = get_country_settings(country)
+    country_settings = get_account_settings(country)
     if country_settings:
         url = country_settings.get("slack_webhook_url")
         if url:
@@ -212,7 +208,7 @@ def strip_html_tags(value: str) -> str:
 
 
 def compose_recommendation_slack_message(
-    country: str,
+    account_id: str,
     report: Any,
     *,
     duration: float,
@@ -232,10 +228,9 @@ def compose_recommendation_slack_message(
         base_date_str = "N/A"
 
     headline = f"[{APP_LABEL}] 종목 추천 정보가 갱신되었습니다. ({base_date_str})"
+    account_norm = (account_id or "").strip().lower()
     dashboard_url = (
-        "http://localhost:8501/aus"
-        if country.strip().lower() == "aus"
-        else "http://localhost:8501/"
+        f"http://localhost:8501/{account_norm}" if account_norm else "http://localhost:8501/"
     )
 
     recommendations = list(getattr(report, "recommendations", []) or [])

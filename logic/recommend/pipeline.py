@@ -14,8 +14,8 @@ import pandas as pd
 # 데이터 디렉토리 경로 설정
 DATA_DIR = Path(__file__).parent.parent.parent / "data" / "stocks"
 from utils.settings_loader import (
-    CountrySettingsError,
-    get_country_settings,
+    AccountSettingsError,
+    get_account_settings,
     get_strategy_rules,
 )
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
@@ -37,7 +37,8 @@ from utils.db_manager import get_db_connection
 
 @dataclass
 class RecommendationReport:
-    country: str
+    account_id: str
+    country_code: str
     base_date: pd.Timestamp
     recommendations: List[Dict[str, Any]]
     report_date: datetime
@@ -68,10 +69,10 @@ class _TickerScore:
     ma_value: float = 0.0
 
 
-def _load_full_etf_meta(country: str) -> Dict[str, Dict[str, Any]]:
+def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
     """Load metadata for all ETFs including recommend_disabled ones."""
 
-    file_path = DATA_DIR / f"{country}.json"
+    file_path = DATA_DIR / f"{country_code}.json"
     if not file_path.exists():
         return {}
 
@@ -305,14 +306,16 @@ def _build_score(meta: _TickerMeta, metrics) -> _TickerScore:
         )
 
 
-def _resolve_base_date(country: str, date_str: Optional[str]) -> pd.Timestamp:
+def _resolve_base_date(account_id: str, date_str: Optional[str]) -> pd.Timestamp:
     if date_str:
         try:
             base = pd.to_datetime(date_str).normalize()
         except Exception as exc:
             raise ValueError(f"잘못된 날짜 형식입니다: {date_str}") from exc
     else:
-        base = get_latest_trading_day(country)
+        account_settings = get_account_settings(account_id)
+        country_code = (account_settings.get("country_code") or account_id).strip().lower()
+        base = get_latest_trading_day(country_code)
     return base.normalize()
 
 
@@ -353,7 +356,7 @@ def _format_sell_replace_phrase(phrase: str, *, etf_meta: Dict[str, Dict[str, An
     return f"교체매도 {ratio_text} - {target_name}({target_ticker})로 교체"
 
 
-def _fetch_trades_for_date(country: str, base_date: pd.Timestamp) -> List[Dict[str, Any]]:
+def _fetch_trades_for_date(account_id: str, base_date: pd.Timestamp) -> List[Dict[str, Any]]:
     """Retrieve trades executed on the given base_date."""
 
     db = get_db_connection()
@@ -364,9 +367,11 @@ def _fetch_trades_for_date(country: str, base_date: pd.Timestamp) -> List[Dict[s
     # 최신 추천 실행 시 실제 거래 시간이 기준일 다음 날일 수도 있으므로 현재 시각까지 확장
     end = max(start + timedelta(days=1), datetime.utcnow())
 
+    account_norm = (account_id or "").strip().lower()
+
     cursor = db.trades.find(
         {
-            "country": country,
+            "account": account_norm,
             "deleted_at": {"$exists": False},
             "executed_at": {"$gte": start, "$lt": end},
         },
@@ -385,26 +390,28 @@ def _fetch_trades_for_date(country: str, base_date: pd.Timestamp) -> List[Dict[s
     return trades
 
 
-def generate_country_recommendation_report(
-    country: str, date_str: Optional[str] = None
+def generate_account_recommendation_report(
+    account_id: str, date_str: Optional[str] = None
 ) -> RecommendationReport:
-    """국가 단위 추천 종목 리스트를 반환합니다."""
-    if not country:
-        raise ValueError("country 인자가 필요합니다.")
-    country = country.strip().lower()
+    """계정 단위 추천 종목 리스트를 반환합니다."""
+    if not account_id:
+        raise ValueError("account_id 인자가 필요합니다.")
+    account_id = account_id.strip().lower()
 
-    base_date = _resolve_base_date(country, date_str)
+    base_date = _resolve_base_date(account_id, date_str)
 
     try:
-        strategy_rules = get_strategy_rules(country)
-        country_settings = get_country_settings(country)
-    except CountrySettingsError as exc:
+        strategy_rules = get_strategy_rules(account_id)
+        account_settings = get_account_settings(account_id)
+    except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
+
+    country_code = account_settings.get("country_code")
 
     ma_period = int(strategy_rules.ma_period)
     portfolio_topn = int(strategy_rules.portfolio_topn)
 
-    strategy_cfg = country_settings.get("strategy", {}) or {}
+    strategy_cfg = account_settings.get("strategy", {}) or {}
     if not isinstance(strategy_cfg, dict):
         strategy_cfg = {}
 
@@ -428,7 +435,7 @@ def generate_country_recommendation_report(
     stop_loss_pct = -abs(float(stop_loss_raw))
 
     # ETF 목록 가져오기
-    etf_universe = get_etfs(country)
+    etf_universe = get_etfs(country_code)
     disabled_tickers = {
         str(stock.get("ticker") or "").strip().upper()
         for stock in etf_universe
@@ -442,7 +449,7 @@ def generate_country_recommendation_report(
     holdings: Dict[str, Dict[str, float]] = {}
     try:
         # 현재 미매도 포지션만 조회
-        open_positions = list_open_positions(country)
+        open_positions = list_open_positions(account_id)
         if open_positions:
             for position in open_positions:
                 ticker = (position.get("ticker") or "").strip().upper()
@@ -464,7 +471,7 @@ def generate_country_recommendation_report(
             db = get_db_connection()
             if db is not None:
                 pipeline = [
-                    {"$match": {"country": country, "action": "BUY"}},
+                    {"$match": {"account": account_id, "action": "BUY"}},
                     {"$group": {"_id": "$ticker"}},
                     {"$project": {"ticker": "$_id", "_id": 0}},
                 ]
@@ -484,7 +491,7 @@ def generate_country_recommendation_report(
 
     # 연속 보유 정보 계산
     consecutive_holding_info = calculate_consecutive_holding_info(
-        list(holdings.keys()), country, base_date.to_pydatetime()
+        list(holdings.keys()), account_id, base_date.to_pydatetime()
     )
 
     # 현재 자산/현금 정보 (임시값 - 실제 계산 필요)
@@ -501,12 +508,12 @@ def generate_country_recommendation_report(
         end_date = base_date.strftime("%Y-%m-%d")
         prefetched_data = fetch_ohlcv_for_tickers(
             tickers_all,
-            country,
+            country_code,
             date_range=[start_date, end_date],
             warmup_days=warmup_days,
         )
     except Exception as exc:
-        print(f"경고: {country} 일괄 데이터 로딩 실패: {exc}")
+        print(f"경고: {account_id} 계정 데이터 로딩 실패: {exc}")
         prefetched_data = {}
 
     data_by_tkr = {}
@@ -515,7 +522,7 @@ def generate_country_recommendation_report(
         # 실제 데이터 가져오기
         df = _fetch_dataframe(
             ticker,
-            country=country,
+            country=country_code,
             ma_period=ma_period,
             base_date=base_date,
             prefetched_data=prefetched_data,
@@ -571,7 +578,10 @@ def generate_country_recommendation_report(
 
     # 쿨다운 정보 계산
     trade_cooldown_info = calculate_trade_cooldown_info(
-        [stock["ticker"] for stock in etf_universe], country, base_date.to_pydatetime()
+        [stock["ticker"] for stock in etf_universe],
+        account_id,
+        base_date.to_pydatetime(),
+        country_code=country_code,
     )
 
     # generate_daily_recommendations_for_portfolio 호출
@@ -579,7 +589,8 @@ def generate_country_recommendation_report(
         from strategies.maps import safe_generate_daily_recommendations_for_portfolio
 
         decisions = safe_generate_daily_recommendations_for_portfolio(
-            country=country,
+            account_id=account_id,
+            country_code=country_code,
             base_date=base_date,
             portfolio_settings=portfolio_settings,
             strategy_rules=strategy_rules,
@@ -605,7 +616,7 @@ def generate_country_recommendation_report(
         return []
 
     # 당일 SELL 트레이드를 결과에 추가하여 SOLD 상태로 노출
-    trades_today = _fetch_trades_for_date(country, base_date)
+    trades_today = _fetch_trades_for_date(account_id, base_date)
     sold_entries: List[Dict[str, Any]] = []
     for trade in trades_today:
         if trade.get("action") != "SELL":
@@ -692,7 +703,7 @@ def generate_country_recommendation_report(
         }
 
     # Include recommend_disabled tickers for metadata fallback
-    full_meta_map = _load_full_etf_meta(country)
+    full_meta_map = _load_full_etf_meta(country_code)
     for ticker, meta in full_meta_map.items():
         upper_ticker = ticker.upper()
         if upper_ticker not in etf_meta_map:
@@ -737,7 +748,7 @@ def generate_country_recommendation_report(
                 buy_timestamp = pd.to_datetime(raw_buy_date).normalize()
                 if pd.notna(buy_timestamp) and buy_timestamp <= current_date:
                     holding_days_val = count_trading_days(
-                        country,
+                        country_code,
                         buy_timestamp,
                         current_date,
                     )
@@ -748,7 +759,7 @@ def generate_country_recommendation_report(
                 base_norm = base_date.normalize()
                 if pd.notna(buy_timestamp) and buy_timestamp <= base_norm:
                     holding_days_val = count_trading_days(
-                        country,
+                        country_code,
                         buy_timestamp,
                         base_norm,
                     )
@@ -916,7 +927,8 @@ def generate_country_recommendation_report(
         )
 
     report = RecommendationReport(
-        country=country,
+        account_id=account_id,
+        country_code=country_code,
         base_date=base_date,
         recommendations=results,
         report_date=datetime.now(),
@@ -931,4 +943,11 @@ def generate_country_recommendation_report(
     return report
 
 
-__all__ = ["generate_country_recommendation_report"]
+# 하위 호환: 기존 함수명을 그대로 제공
+generate_country_recommendation_report = generate_account_recommendation_report
+
+
+__all__ = [
+    "generate_account_recommendation_report",
+    "generate_country_recommendation_report",
+]

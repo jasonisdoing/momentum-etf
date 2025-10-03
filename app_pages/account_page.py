@@ -4,9 +4,9 @@ from typing import Any, Dict
 
 import streamlit as st
 
-from main import load_country_recommendations, render_recommendation_table
+from main import load_account_recommendations, render_recommendation_table
 from utils.account_registry import get_icon_fallback
-from utils.settings_loader import CountrySettingsError, get_country_settings
+from utils.settings_loader import AccountSettingsError, get_account_settings
 
 
 _DEFAULT_CAPTIONS: Dict[str, str] = {
@@ -37,23 +37,24 @@ def _resolve_caption(settings: Dict[str, Any], country_code: str) -> str:
     if isinstance(raw, str) and raw.strip():
         return raw.strip()
     return _DEFAULT_CAPTIONS.get(
-        country_code, f"data/results/recommendation_{country_code}.json 기반"
+        country_code,
+        f"data/results/recommendation_{country_code}.json 기반",
     )
 
 
-def render_country_page(account_id: str) -> None:
-    """Render a recommendation page for a given account (settings file)."""
+def render_account_page(account_id: str) -> None:
+    """주어진 계정 설정을 기반으로 추천 페이지를 렌더링합니다."""
 
     try:
-        settings = get_country_settings(account_id)
-    except CountrySettingsError as exc:  # pragma: no cover - Streamlit feedback only
+        account_settings = get_account_settings(account_id)
+    except AccountSettingsError as exc:  # pragma: no cover - Streamlit feedback only
         st.error(f"설정을 불러오지 못했습니다: {exc}")
         st.stop()
 
-    country_code = _normalize_code(settings.get("country_code"), account_id)
+    country_code = _normalize_code(account_settings.get("country_code"), account_id)
 
-    page_title = settings.get("name") or account_id.upper()
-    page_icon = settings.get("icon") or get_icon_fallback(country_code)
+    page_title = account_settings.get("name") or account_id.upper()
+    page_icon = account_settings.get("icon") or get_icon_fallback(country_code)
 
     title_text = page_title
     if page_icon:
@@ -61,11 +62,12 @@ def render_country_page(account_id: str) -> None:
 
     st.title(title_text)
 
-    caption_text = _resolve_caption(settings, country_code)
+    caption_text = _resolve_caption(account_settings, country_code)
     if caption_text:
         st.caption(caption_text)
 
-    df, updated_at = load_country_recommendations(country_code)
+    df, updated_at, loaded_country_code = load_account_recommendations(account_id)
+    country_code = loaded_country_code or country_code
 
     if df is None:
         st.error(updated_at or "데이터를 불러오지 못했습니다.")
@@ -74,9 +76,9 @@ def render_country_page(account_id: str) -> None:
     if updated_at:
         st.caption(f"데이터 업데이트: {updated_at}")
 
-    render_recommendation_table(df, country=country_code)
+    render_recommendation_table(df, account_id=account_id, country_code=country_code)
 
     st.markdown(_DATAFRAME_CSS, unsafe_allow_html=True)
 
 
-__all__ = ["render_country_page"]
+__all__ = ["render_account_page"]

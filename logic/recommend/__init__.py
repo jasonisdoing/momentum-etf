@@ -15,7 +15,7 @@ def main() -> None:
 
 
 def generate_recommendation_report(*args: Any, **kwargs: Dict[str, Any]):
-    from .pipeline import generate_country_recommendation_report as _gen
+    from .pipeline import generate_account_recommendation_report as _gen
 
     return _gen(*args, **kwargs)
 

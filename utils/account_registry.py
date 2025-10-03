@@ -1,14 +1,28 @@
-"""계정(국가) 설정 메타데이터 로더."""
+"""계정 설정 메타데이터 로더."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
-from utils.settings_loader import CountrySettingsError, get_country_settings
+from settings.common import (
+    MARKET_REGIME_FILTER_ENABLED,
+    MARKET_REGIME_FILTER_TICKER,
+    MARKET_REGIME_FILTER_MA_PERIOD,
+    REALTIME_PRICE_ENABLED,
+)
+from utils.settings_loader import (
+    AccountSettingsError,
+    get_account_precision,
+    get_account_settings,
+    get_account_slack_channel,
+    get_account_strategy,
+    get_account_strategy_sections,
+    get_strategy_rules,
+)
 
 
-_SETTINGS_DIR = Path(__file__).resolve().parent.parent / "settings" / "country"
+_SETTINGS_DIR = Path(__file__).resolve().parent.parent / "settings" / "account"
 _ICON_FALLBACKS: Dict[str, str] = {
     "kor": "🇰🇷",
     "aus": "🇦🇺",
@@ -27,23 +41,29 @@ def _resolve_order(value: Any) -> float:
         return float("inf")
 
 
-def load_account_configs() -> List[Dict[str, Any]]:
-    """`settings/country`에 정의된 계정 정보를 정렬된 리스트로 반환합니다."""
-
-    accounts: List[Dict[str, Any]] = []
+def list_available_accounts() -> List[str]:
+    """`settings/account`에 존재하는 계정 ID 목록을 반환합니다."""
 
     if not _SETTINGS_DIR.exists():
         print(f"경고: 계정 설정 디렉터리를 찾을 수 없습니다: {_SETTINGS_DIR}")
-        return accounts
+        return []
 
-    for path in sorted(_SETTINGS_DIR.glob("*.json")):
-        if not path.is_file():
-            continue
+    return [
+        path.stem.lower()
+        for path in sorted(_SETTINGS_DIR.glob("*.json"))
+        if path.is_file() and path.suffix.lower() == ".json"
+    ]
 
-        account_id = path.stem
+
+def load_account_configs() -> List[Dict[str, Any]]:
+    """`settings/account`에 정의된 계정 정보를 정렬된 리스트로 반환합니다."""
+
+    configs: List[Dict[str, Any]] = []
+
+    for account_id in list_available_accounts():
         try:
-            settings = get_country_settings(account_id)
-        except CountrySettingsError as exc:
+            settings = get_account_settings(account_id)
+        except AccountSettingsError as exc:
             print(f"[WARN] 계정 설정 로딩 실패({account_id}): {exc}")
             continue
 
@@ -53,7 +73,7 @@ def load_account_configs() -> List[Dict[str, Any]]:
         is_default = bool(settings.get("default", False))
         order = _resolve_order(settings.get("order"))
 
-        accounts.append(
+        configs.append(
             {
                 "account_id": account_id,
                 "country_code": country_code,
@@ -65,8 +85,8 @@ def load_account_configs() -> List[Dict[str, Any]]:
             }
         )
 
-    accounts.sort(key=lambda acc: (acc["order"], acc["name"]))
-    return accounts
+    configs.sort(key=lambda acc: (acc["order"], acc["name"]))
+    return configs
 
 
 def pick_default_account(accounts: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -102,9 +122,36 @@ def build_account_meta(accounts: List[Dict[str, Any]]) -> Dict[str, Dict[str, st
     return meta
 
 
+def iter_accounts() -> Iterable[str]:
+    """계정 ID 이터레이터."""
+
+    yield from list_available_accounts()
+
+
+def get_common_file_settings() -> dict[str, Any]:
+    """settings/common.py의 공통 설정을 딕셔너리로 반환합니다."""
+
+    return {
+        "MARKET_REGIME_FILTER_ENABLED": MARKET_REGIME_FILTER_ENABLED,
+        "MARKET_REGIME_FILTER_TICKER": MARKET_REGIME_FILTER_TICKER,
+        "MARKET_REGIME_FILTER_MA_PERIOD": MARKET_REGIME_FILTER_MA_PERIOD,
+        "REALTIME_PRICE_ENABLED": REALTIME_PRICE_ENABLED,
+    }
+
+
 __all__ = [
+    "AccountSettingsError",
+    "list_available_accounts",
+    "iter_accounts",
     "load_account_configs",
     "pick_default_account",
     "build_account_meta",
     "get_icon_fallback",
+    "get_account_settings",
+    "get_account_strategy",
+    "get_account_strategy_sections",
+    "get_account_precision",
+    "get_account_slack_channel",
+    "get_strategy_rules",
+    "get_common_file_settings",
 ]

@@ -1,17 +1,25 @@
-"""국가 기반 설정 로더 (구 계좌 헬퍼 대체)."""
+"""국가 기반 헬퍼에 대한 하위 호환 래퍼.
+
+새로운 계정 기반 구현(`settings_loader`, `account_registry`)을 감싸 기존 코드를 지원합니다.
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Iterable, List
+from typing import Any, Iterable
 
+from utils.account_registry import (
+    build_account_meta as build_country_meta,
+    get_icon_fallback,
+    list_available_accounts as list_available_countries,
+    pick_default_account,
+)
 from utils.settings_loader import (
-    CountrySettingsError,
-    get_country_precision,
-    get_country_settings,
-    get_country_slack_channel,
-    get_country_strategy,
-    get_country_strategy_sections,
+    AccountSettingsError as CountrySettingsError,
+    get_account_precision as get_country_precision,
+    get_account_settings as get_country_settings,
+    get_account_slack_channel as get_country_slack_channel,
+    get_account_strategy as get_country_strategy,
+    get_account_strategy_sections as get_country_strategy_sections,
     get_strategy_rules,
 )
 from settings.common import (
@@ -20,6 +28,21 @@ from settings.common import (
     MARKET_REGIME_FILTER_MA_PERIOD,
     REALTIME_PRICE_ENABLED,
 )
+
+
+def iter_countries() -> Iterable[str]:  # pragma: no cover - 호환 함수
+    yield from list_available_countries()
+
+
+def get_common_file_settings() -> dict[str, Any]:
+    """settings/common.py 설정을 딕셔너리로 반환합니다."""
+
+    return {
+        "MARKET_REGIME_FILTER_ENABLED": MARKET_REGIME_FILTER_ENABLED,
+        "MARKET_REGIME_FILTER_TICKER": MARKET_REGIME_FILTER_TICKER,
+        "MARKET_REGIME_FILTER_MA_PERIOD": MARKET_REGIME_FILTER_MA_PERIOD,
+        "REALTIME_PRICE_ENABLED": REALTIME_PRICE_ENABLED,
+    }
 
 
 __all__ = [
@@ -33,38 +56,7 @@ __all__ = [
     "get_country_slack_channel",
     "get_strategy_rules",
     "get_common_file_settings",
+    "build_country_meta",
+    "get_icon_fallback",
+    "pick_default_account",
 ]
-
-
-_SETTINGS_DIR = Path(__file__).resolve().parent.parent / "settings" / "country"
-
-
-def list_available_countries() -> List[str]:
-    """`settings/country/` 폴더에 존재하는 국가 코드 목록을 반환합니다."""
-    if not _SETTINGS_DIR.exists():
-        print(f"경고: 설정 디렉토리를 찾을 수 없습니다: {_SETTINGS_DIR}")
-        return []
-
-    countries = []
-    for path in sorted(_SETTINGS_DIR.glob("*.json")):
-        if path.is_file() and path.suffix.lower() == ".json":
-            country_code = path.stem.lower()
-            countries.append(country_code)
-
-    return countries
-
-
-def iter_countries() -> Iterable[str]:
-    """국가 코드 이터레이터."""
-    yield from list_available_countries()
-
-
-def get_common_file_settings() -> dict[str, Any]:
-    """settings/common.py의 설정을 딕셔너리로 반환합니다."""
-
-    return {
-        "MARKET_REGIME_FILTER_ENABLED": MARKET_REGIME_FILTER_ENABLED,
-        "MARKET_REGIME_FILTER_TICKER": MARKET_REGIME_FILTER_TICKER,
-        "MARKET_REGIME_FILTER_MA_PERIOD": MARKET_REGIME_FILTER_MA_PERIOD,
-        "REALTIME_PRICE_ENABLED": REALTIME_PRICE_ENABLED,
-    }
