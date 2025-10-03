@@ -1,5 +1,8 @@
 """국가별 백테스트 실행 스크립트."""
 
+TEST_MONTHS_RANGE = 12
+TEST_INITIAL_CAPITAL = 100_000_000
+
 from __future__ import annotations
 
 import argparse
@@ -10,7 +13,6 @@ from utils.country_registry import (
     get_strategy_rules,
     list_available_countries,
 )
-from logic.backtest.country_runner import DEFAULT_TEST_MONTHS_RANGE, run_country_backtest
 from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
 from logic.recommend.output import print_run_header
 
@@ -51,6 +53,8 @@ def main() -> None:
 
     print_run_header(country, date_str=None)
 
+    from logic.backtest.country_runner import run_country_backtest
+
     result = run_country_backtest(country)
     target_path = Path(args.output) if args.output else RESULTS_DIR / f"backtest_{country}.txt"
 
@@ -70,7 +74,7 @@ def main() -> None:
     print_backtest_summary(
         summary=result.summary,
         country=country,
-        test_months_range=getattr(result, "months_range", DEFAULT_TEST_MONTHS_RANGE),
+        test_months_range=getattr(result, "months_range", TEST_MONTHS_RANGE),
         initial_capital_krw=result.initial_capital,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),

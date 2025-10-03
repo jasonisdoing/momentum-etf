@@ -6,12 +6,13 @@ import io
 import math
 import sys
 from datetime import datetime
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import pandas as pd
 
-from logic.backtest.country_runner import CountryBacktestResult, DEFAULT_TEST_MONTHS_RANGE
+from logic.backtest.country_runner import CountryBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.country_registry import get_country_settings
 from utils.notification import build_summary_line_from_summary_data
@@ -25,6 +26,14 @@ from utils.report import (
 )
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
+
+
+def _default_months_range() -> int:
+    try:
+        module = import_module("backtest")
+        return int(getattr(module, "TEST_MONTHS_RANGE"))
+    except (ModuleNotFoundError, AttributeError, ValueError, TypeError):
+        return 12
 
 
 # ---------------------------------------------------------------------------
@@ -73,9 +82,30 @@ def print_backtest_summary(
     except (TypeError, ValueError):
         precision = 0
 
-    strategy_settings = country_settings.get("strategy", {})
-    cooldown_days = strategy_settings.get("COOLDOWN_DAYS", 0)
-    replace_threshold = strategy_settings.get("REPLACE_SCORE_THRESHOLD", 0.5)
+    strategy_cfg = country_settings.get("strategy", {}) or {}
+    if not isinstance(strategy_cfg, dict):
+        strategy_cfg = {}
+
+    if "tuning" in strategy_cfg or "static" in strategy_cfg:
+        strategy_tuning = (
+            strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
+        )
+        strategy_static = (
+            strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
+        )
+    else:  # 구 포맷과의 호환성
+        strategy_tuning = strategy_cfg
+        strategy_static = strategy_cfg
+
+    merged_strategy = dict(strategy_static)
+    merged_strategy.update(strategy_tuning)
+
+    cooldown_days = int(
+        strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 0)) or 0
+    )
+    replace_threshold = strategy_tuning.get("REPLACE_SCORE_THRESHOLD")
+    if replace_threshold is None:
+        replace_threshold = strategy_cfg.get("REPLACE_SCORE_THRESHOLD", 0.5)
 
     if currency == "AUD":
         money_formatter = format_aud_money
@@ -133,21 +163,22 @@ def print_backtest_summary(
     )
 
     print("\n" + "=" * 30 + "\n 사용된 설정값 ".center(30, "=") + "\n" + "=" * 30)
-    if "MA_PERIOD" not in strategy_settings or strategy_settings.get("MA_PERIOD") is None:
+    if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
         raise ValueError(f"'{country}' 국가 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
-    ma_period = strategy_settings["MA_PERIOD"]
+    ma_period = merged_strategy["MA_PERIOD"]
     momentum_label = f"{ma_period}일"
 
-    holding_stop_loss_pct = getattr(common_settings, "HOLDING_STOP_LOSS_PCT", None)
+    holding_stop_loss_pct = strategy_static.get(
+        "HOLDING_STOP_LOSS_PCT",
+        strategy_cfg.get("HOLDING_STOP_LOSS_PCT"),
+    )
     if holding_stop_loss_pct is None:
-        holding_stop_loss_pct = strategy_settings.get("HOLDING_STOP_LOSS_PCT")
-    if holding_stop_loss_pct is None:
-        raise ValueError("공통 또는 국가 전략 설정에 'HOLDING_STOP_LOSS_PCT' 값이 필요합니다.")
+        raise ValueError("strategy 설정에 'HOLDING_STOP_LOSS_PCT' 값이 필요합니다.")
     stop_loss_label = f"{holding_stop_loss_pct}%"
 
     market_regime_enabled = getattr(common_settings, "MARKET_REGIME_FILTER_ENABLED", None)
     if market_regime_enabled is None:
-        market_regime_enabled = strategy_settings.get("MARKET_REGIME_FILTER_ENABLED")
+        market_regime_enabled = merged_strategy.get("MARKET_REGIME_FILTER_ENABLED")
     if market_regime_enabled is None:
         raise ValueError("공통 또는 국가 전략 설정에 'MARKET_REGIME_FILTER_ENABLED' 값이 필요합니다.")
 
@@ -647,7 +678,7 @@ def dump_backtest_log(
     legacy_header = [
         f"백테스트 결과가 다음 파일에 저장됩니다: data/results/backtest_{country}.txt",
         "",
-        f"KOR 국가의 ETF 종목들을 대상으로 {getattr(result, 'months_range', DEFAULT_TEST_MONTHS_RANGE)}개월 기간 백테스트를 실행합니다.",
+        f"KOR 국가의 ETF 종목들을 대상으로 {getattr(result, 'months_range', _default_months_range())}개월 기간 백테스트를 실행합니다.",
         f"국가별 설정 파일(settings/country/{country}.json)을 사용하여 전략을 적용합니다.",
         f"실행 시간: {start_stamp} | 테스트 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}",
         "",
@@ -671,7 +702,7 @@ def dump_backtest_log(
         print_backtest_summary(
             summary=result.summary,
             country=country,
-            test_months_range=getattr(result, "months_range", DEFAULT_TEST_MONTHS_RANGE),
+            test_months_range=getattr(result, "months_range", _default_months_range()),
             initial_capital_krw=result.initial_capital,
             portfolio_topn=result.portfolio_topn,
             ticker_summaries=getattr(result, "ticker_summaries", []),

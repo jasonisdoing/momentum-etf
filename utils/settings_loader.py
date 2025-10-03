@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 
 class CountrySettingsError(RuntimeError):
@@ -50,14 +50,52 @@ def get_country_settings(country: str) -> Dict[str, Any]:
     return settings
 
 
-def get_country_strategy(country: str) -> Dict[str, Any]:
-    """전략 설정(dict)을 반환합니다."""
+def _split_strategy_sections(strategy: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    tuning_raw = strategy.get("tuning")
+    static_raw = strategy.get("static")
+
+    if tuning_raw is None:
+        tuning = {}
+    elif isinstance(tuning_raw, dict):
+        tuning = dict(tuning_raw)
+    else:
+        raise CountrySettingsError("'strategy.tuning' 항목은 객체(dict)여야 합니다.")
+
+    if static_raw is None:
+        static = {}
+    elif isinstance(static_raw, dict):
+        static = dict(static_raw)
+    else:
+        raise CountrySettingsError("'strategy.static' 항목은 객체(dict)여야 합니다.")
+
+    return tuning, static
+
+
+def get_country_strategy_sections(country: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """국가별 전략 설정을 (튜닝용, 고정값) 로 분리해 반환합니다."""
 
     settings = get_country_settings(country)
     strategy = settings.get("strategy")
     if not isinstance(strategy, dict):
         raise CountrySettingsError(f"'{country}' 설정에서 'strategy' 항목이 누락되었거나 잘못되었습니다.")
-    return strategy
+
+    if "tuning" in strategy or "static" in strategy:
+        return _split_strategy_sections(strategy)
+
+    # 이전 포맷과의 호환성: 모든 값을 튜닝 영역으로 간주
+    return dict(strategy), {}
+
+
+def get_country_strategy(country: str) -> Dict[str, Any]:
+    """전략 설정(dict)을 반환합니다.
+
+    새 포맷에서는 tuning/static을 병합하여 상위 키 접근을 계속 지원합니다.
+    """
+
+    tuning, static = get_country_strategy_sections(country)
+    merged: Dict[str, Any] = dict(static)
+    merged.update(tuning)
+    return merged
 
 
 def get_country_precision(country: str) -> Dict[str, Any]:
@@ -83,5 +121,5 @@ def get_strategy_rules(country: str):
 
     from logic.entry_point import StrategyRules
 
-    strategy = get_country_strategy(country)
-    return StrategyRules.from_mapping(strategy)
+    tuning, _ = get_country_strategy_sections(country)
+    return StrategyRules.from_mapping(tuning)

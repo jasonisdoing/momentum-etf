@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
+
 from utils.country_registry import (
     get_country_settings,
     get_strategy_rules,
@@ -13,6 +15,25 @@ from utils.country_registry import (
 from logic.tune.runner import run_country_tuning
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
+TUNING_MONTHS_RANGE = 12
+
+TUNING_CONFIG: dict[str, dict] = {
+    "aus": {
+        "MA_RANGE": np.arange(10, 51, 5),
+        "PORTFOLIO_TOPN": np.arange(5, 8, 1),
+        "REPLACE_SCORE_THRESHOLD": [0.5],
+    },
+    "kor": {
+        "MA_RANGE": np.arange(10, 51, 1),
+        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": [0.5],
+    },
+    "us": {
+        "MA_RANGE": np.arange(5, 31, 1),
+        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
+    },
+}
 
 
 def _available_country_choices() -> list[str]:
@@ -49,7 +70,13 @@ def main() -> None:
 
     output_path = Path(args.output) if args.output else RESULTS_DIR / f"tune_{country}.txt"
 
-    run_country_tuning(country, output_path=output_path, results_dir=RESULTS_DIR)
+    run_country_tuning(
+        country,
+        output_path=output_path,
+        results_dir=RESULTS_DIR,
+        tuning_config=TUNING_CONFIG,
+        months_range=TUNING_MONTHS_RANGE,
+    )
     print(f"\n✅ 튜닝 결과를 '{output_path}'에 저장했습니다.")
 
 

@@ -7,7 +7,7 @@ from typing import Any, Iterable
 import pandas as pd
 from pandas.io.formats.style import Styler
 
-from logic.strategies.maps.constants import DECISION_CONFIG
+from strategies.maps.constants import DECISION_CONFIG
 
 
 _BASE_DIR = Path(__file__).resolve().parent.parent

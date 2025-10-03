@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-import numpy as np
 
-from logic.backtest.country_runner import DEFAULT_TEST_MONTHS_RANGE, run_country_backtest
+from backtest import TEST_MONTHS_RANGE
+from logic.backtest.country_runner import run_country_backtest
 from logic.entry_point import StrategyRules
 from utils.country_registry import get_strategy_rules
 from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day
@@ -19,27 +19,6 @@ from utils.report import render_table_eaw
 from utils.stock_list_io import get_etfs
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
-
-TUNING_CONFIG: dict[str, dict] = {
-    "aus": {
-        "MA_RANGE": np.arange(10, 51, 5),
-        "PORTFOLIO_TOPN": np.arange(5, 8, 1),
-        "REPLACE_SCORE_THRESHOLD": [0.5],
-        "TEST_MONTHS_RANGE": 12,
-    },
-    "kor": {
-        "MA_RANGE": np.arange(10, 51, 5),
-        "PORTFOLIO_TOPN": np.arange(7, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 1.1, 0.1),
-        "TEST_MONTHS_RANGE": 12,
-    },
-    "us": {
-        "MA_RANGE": np.arange(5, 31, 1),
-        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
-        "TEST_MONTHS_RANGE": 12,
-    },
-}
 
 
 def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:
@@ -101,11 +80,14 @@ def run_country_tuning(
     *,
     output_path: Optional[Path | str] = None,
     results_dir: Optional[Path | str] = None,
+    tuning_config: Optional[Dict[str, Dict[str, Any]]] = None,
+    months_range: Optional[int] = None,
 ) -> Optional[Path]:
     """Execute parameter tuning for the given country and return the output path."""
 
     country_norm = (country or "").strip().lower()
-    config = TUNING_CONFIG.get(country_norm)
+    config_map = tuning_config or {}
+    config = config_map.get(country_norm)
     if not config:
         print(f"[튜닝] '{country_norm.upper()}' 국가에 대한 튜닝 설정이 없습니다.")
         return None
@@ -127,10 +109,14 @@ def run_country_tuning(
         print("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
-    try:
-        months_range = int(config.get("TEST_MONTHS_RANGE", DEFAULT_TEST_MONTHS_RANGE))
-    except (TypeError, ValueError):
-        months_range = DEFAULT_TEST_MONTHS_RANGE
+    if months_range is None:
+        config_months = config.get("TEST_MONTHS_RANGE") if config else None
+        try:
+            months_range = int(config_months) if config_months is not None else TEST_MONTHS_RANGE
+        except (TypeError, ValueError):
+            months_range = TEST_MONTHS_RANGE
+    else:
+        months_range = int(months_range)
 
     etf_universe = get_etfs(country_norm)
     if not etf_universe:
@@ -287,81 +273,62 @@ def run_country_tuning(
     )
     lines.append("")
 
-    lines.append("## 최적 조합")
-    lines.append(
-        f"- MA 기간: {best['ma_period']}, 포트폴리오 TOPN: {best['portfolio_topn']}, 교체 임계값: {best['replace_threshold']:.3f}"
-    )
-    lines.append(
-        f"- CAGR: {_format_pct(best['cagr_pct'])}, MDD: {_format_pct(best['mdd_pct'], signed=False)}, Sharpe: {_format_float(best['sharpe_ratio'])}, Calmar: {_format_float(best['calmar_ratio'])}"
-    )
-    lines.append(
-        f"- 누적 수익률: {_format_pct(best['cumulative_return_pct'])}, 최종 자산: {best['final_value']:,.0f}"
-    )
-    lines.append("")
-
-    lines.append("## 상위 조합")
-    headers = [
-        "순위",
-        "MA",
-        "TOPN",
-        "임계값",
-        "CAGR(%)",
-        "MDD(%)",
-        "Sharpe",
-        "Sortino",
-        "Calmar",
-        "누적(%)",
-    ]
-    aligns = ["right"] * len(headers)
-    table_rows: List[List[str]] = []
-    for idx, entry in enumerate(sorted_results[: min(10, len(sorted_results))], 1):
-        table_rows.append(
-            [
-                str(idx),
-                str(entry["ma_period"]),
-                str(entry["portfolio_topn"]),
-                f"{entry['replace_threshold']:.3f}",
-                _format_pct(entry["cagr_pct"]),
-                _format_pct(entry["mdd_pct"], signed=False),
-                _format_float(entry["sharpe_ratio"]),
-                _format_float(entry["sortino_ratio"]),
-                _format_float(entry["calmar_ratio"]),
-                _format_pct(entry["cumulative_return_pct"]),
-            ]
-        )
-
-    lines.extend(render_table_eaw(headers, table_rows, aligns))
-    lines.append("")
-
-    def _append_ranked_section(title: str, sort_key: str, ascending: bool) -> None:
-        lines.append(f"### {title}")
+    def _append_metric_table(title: str, sort_key: str, ascending: bool) -> None:
+        lines.append(f"# {title}")
         if df_results.empty:
             lines.append("(데이터 없음)")
             lines.append("")
             return
-        subset = df_results.sort_values(by=sort_key, ascending=ascending).head(5)
+
+        subset = df_results.sort_values(by=sort_key, ascending=ascending).head(10)
         if subset.empty:
             lines.append("(데이터 없음)")
             lines.append("")
             return
-        for rank, (_, row) in enumerate(subset.iterrows(), 1):
-            lines.append(
-                f"- 순위 {rank}: MA={int(row['ma_period'])}, TOPN={int(row['portfolio_topn'])}, TH={row['replace_threshold']:.3f}"
+
+        headers = [
+            "순위",
+            "MA",
+            "TOPN",
+            "임계값",
+            "CAGR(%)",
+            "MDD(%)",
+            "누적(%)",
+            "CUI (Calmar/Ulcer)",
+            "Sharpe",
+            "Sortino",
+            "Calmar",
+            "Ulcer",
+        ]
+        aligns = ["right"] * len(headers)
+        table_rows: List[List[str]] = []
+        for idx, row in enumerate(subset.itertuples(), 1):
+            table_rows.append(
+                [
+                    str(idx),
+                    str(int(row.ma_period)),
+                    str(int(row.portfolio_topn)),
+                    f"{row.replace_threshold:.3f}",
+                    _format_pct(row.cagr_pct),
+                    _format_pct(row.mdd_pct, signed=False),
+                    _format_pct(row.cumulative_return_pct),
+                    _format_float(getattr(row, "cui", None)),
+                    _format_float(row.sharpe_ratio),
+                    _format_float(row.sortino_ratio),
+                    _format_float(row.calmar_ratio),
+                    _format_float(getattr(row, "ulcer_index", None)),
+                ]
             )
-            lines.append(
-                f"  • CAGR: {_format_pct(row['cagr_pct'])}, MDD: {_format_pct(row['mdd_pct'], signed=False)}, Calmar: {_format_float(row['calmar_ratio'])}, Sharpe: {_format_float(row['sharpe_ratio'])}"
-            )
-            lines.append(
-                f"  • CUI: {_format_float(row.get('cui'))}, Ulcer: {_format_float(row.get('ulcer_index'))}, 누적수익률: {_format_pct(row['cumulative_return_pct'])}"
-            )
+
+        lines.extend(render_table_eaw(headers, table_rows, aligns))
         lines.append("")
 
-    _append_ranked_section("CAGR 기준 상위 5개", "cagr_pct", ascending=False)
-    _append_ranked_section("MDD 기준 상위 5개", "mdd_pct", ascending=True)
-    _append_ranked_section("CUI 기준 상위 5개", "cui", ascending=False)
+    _append_metric_table("CAGR 기준 상위 10개", "cagr_pct", ascending=False)
+    _append_metric_table("MDD 기준 상위 10개", "mdd_pct", ascending=True)
+    _append_metric_table("CUI 기준 상위 10개", "cui", ascending=False)
 
     if failures:
-        lines.append("## 실패한 조합")
+        lines.append("# 실패한 조합")
         for item in failures:
             lines.append(
                 f"- MA={item['ma_period']}, TOPN={item['portfolio_topn']}, TH={item['replace_threshold']}: {item['error']}"

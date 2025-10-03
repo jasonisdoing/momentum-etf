@@ -12,7 +12,7 @@ def _strategy_package_name() -> str:
     strategy = (SELECTED_STRATEGY or "").strip()
     if not strategy:
         raise ValueError("settings.common.SELECTED_STRATEGY 값이 비어 있습니다.")
-    return f"logic.strategies.{strategy}"
+    return f"strategies.{strategy}"
 
 
 @lru_cache(maxsize=1)

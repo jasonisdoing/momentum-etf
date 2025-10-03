@@ -11,6 +11,7 @@ from utils.settings_loader import (
     get_country_settings,
     get_country_slack_channel,
     get_country_strategy,
+    get_country_strategy_sections,
     get_strategy_rules,
 )
 from settings.common import (
@@ -18,8 +19,6 @@ from settings.common import (
     MARKET_REGIME_FILTER_TICKER,
     MARKET_REGIME_FILTER_MA_PERIOD,
     REALTIME_PRICE_ENABLED,
-    MAX_PER_CATEGORY,
-    HOLDING_STOP_LOSS_PCT,
 )
 
 
@@ -29,6 +28,7 @@ __all__ = [
     "iter_countries",
     "get_country_settings",
     "get_country_strategy",
+    "get_country_strategy_sections",
     "get_country_precision",
     "get_country_slack_channel",
     "get_strategy_rules",
@@ -67,6 +67,4 @@ def get_common_file_settings() -> dict[str, Any]:
         "MARKET_REGIME_FILTER_TICKER": MARKET_REGIME_FILTER_TICKER,
         "MARKET_REGIME_FILTER_MA_PERIOD": MARKET_REGIME_FILTER_MA_PERIOD,
         "REALTIME_PRICE_ENABLED": REALTIME_PRICE_ENABLED,
-        "MAX_PER_CATEGORY": MAX_PER_CATEGORY,
-        "HOLDING_STOP_LOSS_PCT": HOLDING_STOP_LOSS_PCT,
     }

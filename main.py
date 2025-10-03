@@ -8,7 +8,7 @@ import streamlit as st
 
 from utils.recommendations import get_recommendations_dataframe
 from utils.settings_loader import get_country_settings
-from logic.strategies.maps.constants import DECISION_CONFIG
+from strategies.maps.constants import DECISION_CONFIG
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data" / "results"

@@ -18,8 +18,8 @@ from utils.settings_loader import (
     get_country_settings,
     get_strategy_rules,
 )
-from logic.strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
-from logic.strategies.maps.shared import sort_decisions_by_order_and_score
+from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
+from strategies.maps.shared import sort_decisions_by_order_and_score
 from utils.stock_list_io import get_etfs
 from utils.trade_store import list_open_positions
 from logic.recommend.history import (
@@ -403,16 +403,29 @@ def generate_country_recommendation_report(
 
     ma_period = int(strategy_rules.ma_period)
     portfolio_topn = int(strategy_rules.portfolio_topn)
-    # 손절매 비율은 common_settings에서 가져옴
-    try:
-        from utils.country_registry import get_common_file_settings
 
-        common_settings = get_common_file_settings() or {}
-        stop_loss_pct = -abs(float(common_settings.get("HOLDING_STOP_LOSS_PCT", 10.0)))
-        max_per_category = int(common_settings.get("MAX_PER_CATEGORY", 0) or 0)
-    except Exception:
-        stop_loss_pct = -10.0
-        max_per_category = 0
+    strategy_cfg = country_settings.get("strategy", {}) or {}
+    if not isinstance(strategy_cfg, dict):
+        strategy_cfg = {}
+
+    if "tuning" in strategy_cfg or "static" in strategy_cfg:
+        strategy_static = (
+            strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
+        )
+    else:
+        strategy_static = strategy_cfg
+
+    stop_loss_raw = strategy_static.get(
+        "HOLDING_STOP_LOSS_PCT",
+        strategy_cfg.get("HOLDING_STOP_LOSS_PCT"),
+    )
+    if stop_loss_raw is None:
+        raise ValueError("strategy 설정에 'HOLDING_STOP_LOSS_PCT' 값이 필요합니다.")
+    max_per_category = int(
+        strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0
+    )
+
+    stop_loss_pct = -abs(float(stop_loss_raw))
 
     # ETF 목록 가져오기
     etf_universe = get_etfs(country)
@@ -563,7 +576,7 @@ def generate_country_recommendation_report(
 
     # generate_daily_recommendations_for_portfolio 호출
     try:
-        from logic.strategies.maps import safe_generate_daily_recommendations_for_portfolio
+        from strategies.maps import safe_generate_daily_recommendations_for_portfolio
 
         decisions = safe_generate_daily_recommendations_for_portfolio(
             country=country,
@@ -582,7 +595,9 @@ def generate_country_recommendation_report(
             stop_loss=stop_loss_pct,
             DECISION_CONFIG=DECISION_CONFIG,
             trade_cooldown_info=trade_cooldown_info,
-            cooldown_days=int(country_settings.get("strategy", {}).get("COOLDOWN_DAYS", 5)),
+            cooldown_days=int(
+                strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 5)) or 0
+            ),
             max_per_category=max_per_category,
         )
     except Exception as exc:

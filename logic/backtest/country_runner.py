@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
 from typing import Any, Dict, Mapping, Optional, List, Tuple
 import math
 
@@ -23,8 +24,21 @@ from utils.settings_loader import (
 from utils.data_loader import get_latest_trading_day, fetch_ohlcv
 from utils.stock_list_io import get_etfs
 
-DEFAULT_TEST_MONTHS_RANGE = 12
-DEFAULT_INITIAL_CAPITAL = 100_000_000
+
+def _default_test_months_range() -> int:
+    try:
+        module = import_module("backtest")
+        return int(getattr(module, "TEST_MONTHS_RANGE"))
+    except (ModuleNotFoundError, AttributeError, ValueError, TypeError):
+        return 12
+
+
+def _default_initial_capital() -> float:
+    try:
+        module = import_module("backtest")
+        return float(getattr(module, "TEST_INITIAL_CAPITAL"))
+    except (ModuleNotFoundError, AttributeError, ValueError, TypeError):
+        return 100_000_000.0
 
 
 @dataclass
@@ -245,7 +259,7 @@ def _resolve_months_range(months_range: Optional[int], override_settings: Mappin
         return int(override_settings["months_range"])
     if "test_months_range" in override_settings:
         return int(override_settings["test_months_range"])
-    return DEFAULT_TEST_MONTHS_RANGE
+    return _default_test_months_range()
 
 
 def _resolve_initial_capital(
@@ -268,7 +282,7 @@ def _resolve_initial_capital(
         return 200_000.0
     if currency == "USD":
         return 150_000.0
-    return DEFAULT_INITIAL_CAPITAL
+    return _default_initial_capital()
 
 
 def _resolve_end_date(country: str, override_settings: Mapping[str, Any]) -> pd.Timestamp:
@@ -296,7 +310,10 @@ def _build_backtest_kwargs(
     prefetched_data: Optional[Mapping[str, pd.DataFrame]],
     quiet: bool,
 ) -> Dict[str, Any]:
-    stop_loss_pct = -abs(float(common_settings["HOLDING_STOP_LOSS_PCT"]))
+    stop_loss_raw = strategy_settings.get("HOLDING_STOP_LOSS_PCT")
+    if stop_loss_raw is None:
+        raise ValueError("strategy 설정에 'HOLDING_STOP_LOSS_PCT' 값이 필요합니다.")
+    stop_loss_pct = -abs(float(stop_loss_raw))
     cooldown_days = int(strategy_settings.get("COOLDOWN_DAYS", 0) or 0)
 
     kwargs: Dict[str, Any] = {
