@@ -19,7 +19,7 @@ from utils.settings_loader import (
     get_strategy_rules,
 )
 from logic.strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES
-from utils.data_loader import fetch_ohlcv, get_latest_trading_day
+from utils.data_loader import fetch_ohlcv, get_latest_trading_day, count_trading_days
 from logic.recommend.history import calculate_consecutive_holding_info
 
 
@@ -324,8 +324,8 @@ def generate_country_signal_report(country: str, date_str: Optional[str] = None)
             days = 0
             buy_date = info.get("buy_date") if isinstance(info, dict) else None
             if isinstance(buy_date, datetime):
-                delta = (as_of_date - buy_date.date()).days
-                days = max(delta + 1, 0)
+                count = count_trading_days(country, buy_date, as_of_date)
+                days = max(count, 0)
             holding_days_by_ticker[ticker] = days
 
     # 점수에 따라 정렬 (높은 순)

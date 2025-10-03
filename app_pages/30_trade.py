@@ -161,11 +161,14 @@ def _flush_persisted_alerts() -> None:
     st.session_state["trade_alerts"] = []
 
 
+_COUNTRY_META = {
+    "kor": {"label": "한국", "icon": "🇰🇷"},
+    "aus": {"label": "호주", "icon": "🇦🇺"},
+}
+
+
 def _country_options() -> list[str]:
-    try:
-        return [c.lower() for c in ["kor", "aus"]]
-    except Exception:
-        return ["kor", "aus"]
+    return list(_COUNTRY_META.keys())
 
 
 def _show_delete_dialog(
@@ -359,6 +362,47 @@ def _render_trade_history(username: str, country_code: str) -> None:
                 if st.button("❌ 취소", key=f"cancel_delete_{country_code}"):
                     # 체크박스 선택 해제
                     st.rerun()
+
+
+def _render_country_section(current_user: str, country_code: str) -> None:
+    meta = _COUNTRY_META.get(country_code, {})
+    icon = meta.get("icon", "")
+    label = meta.get("label", country_code.upper())
+
+    if icon or label:
+        st.markdown(f"### {icon} {label}".strip())
+
+    buy_key = f"show_buy_form_{country_code}"
+    sell_key = f"show_sell_form_{country_code}"
+
+    col1, col2 = st.columns([1, 1], gap="small")
+    with col1:
+        if st.button("➕ 매수", key=f"toggle-buy-form-{country_code}", width="stretch"):
+            if st.session_state.get(sell_key, False):
+                st.session_state[sell_key] = False
+            st.session_state[buy_key] = not st.session_state.get(buy_key, False)
+            st.rerun()
+    with col2:
+        if st.button("➖ 매도", key=f"toggle-sell-form-{country_code}", width="stretch"):
+            if st.session_state.get(buy_key, False):
+                st.session_state[buy_key] = False
+            st.session_state[sell_key] = not st.session_state.get(sell_key, False)
+            st.rerun()
+
+    _render_trade_history(current_user, country_code)
+
+    if st.session_state.get(buy_key, False):
+        _render_buy_form(current_user, country_code)
+        if st.button("닫기", key=f"close-buy-form-{country_code}"):
+            st.session_state[buy_key] = False
+            st.rerun()
+        st.write("---")
+
+    if st.session_state.get(sell_key, False):
+        _render_sell_section(current_user, country_code)
+        if st.button("닫기", key=f"close-sell-form-{country_code}"):
+            st.session_state[sell_key] = False
+            st.rerun()
 
 
 def _render_buy_form(username: str, country: str) -> None:
@@ -591,91 +635,19 @@ else:
     authenticator.logout(button_name="로그아웃", location="sidebar")
     current_user = username or name or "unknown"
 
-    # 국가별 탭 생성
-    country_tabs = st.tabs(["🇰🇷 한국", "🇦🇺 호주"])
+    default_country = st.session_state.get("trade_selected_country", "kor")
+    if "trade_selected_country_radio" not in st.session_state:
+        st.session_state["trade_selected_country_radio"] = default_country
 
-    # 한국 탭
-    with country_tabs[0]:
-        st.session_state["trade_selected_country"] = "kor"
+    with st.sidebar:
+        st.markdown("### 관리자")
+        selected_country = st.radio(
+            "국가 선택",
+            options=_country_options(),
+            format_func=lambda code: f"{_COUNTRY_META.get(code, {}).get('icon', '')} {_COUNTRY_META.get(code, {}).get('label', code.upper())}",
+            key="trade_selected_country_radio",
+        )
 
-        # 매수/매도 버튼
-        col1, col2 = st.columns([1, 1], gap="small")
-        with col1:
-            if st.button("➕ 매수", key="toggle-buy-form-kor", width="stretch"):
-                # 매수 버튼 클릭 시 매도 폼이 열려있으면 닫기
-                if st.session_state.get("show_sell_form_kor", False):
-                    st.session_state["show_sell_form_kor"] = False
-                st.session_state["show_buy_form_kor"] = not st.session_state.get(
-                    "show_buy_form_kor", False
-                )
-                st.rerun()
-        with col2:
-            if st.button("➖ 매도", key="toggle-sell-form-kor", width="stretch"):
-                # 매도 버튼 클릭 시 매수 폼이 열려있으면 닫기
-                if st.session_state.get("show_buy_form_kor", False):
-                    st.session_state["show_buy_form_kor"] = False
-                st.session_state["show_sell_form_kor"] = not st.session_state.get(
-                    "show_sell_form_kor", False
-                )
-                st.rerun()
+    st.session_state["trade_selected_country"] = selected_country
 
-        # 한국 트레이드 히스토리 표시
-        _render_trade_history(current_user, "kor")
-
-        # 매수 입력 폼 (한국)
-        if st.session_state.get("show_buy_form_kor", False):
-            _render_buy_form(current_user, "kor")
-            if st.button("닫기", key="close-buy-form-kor"):
-                st.session_state["show_buy_form_kor"] = False
-                st.rerun()
-            st.write("---")
-
-        # 매도 입력 폼 (한국)
-        if st.session_state.get("show_sell_form_kor", False):
-            _render_sell_section(current_user, "kor")
-            if st.button("닫기", key="close-sell-form-kor"):
-                st.session_state["show_sell_form_kor"] = False
-                st.rerun()
-
-    # 호주 탭
-    with country_tabs[1]:
-        st.session_state["trade_selected_country"] = "aus"
-
-        # 매수/매도 버튼
-        col1, col2 = st.columns([1, 1], gap="small")
-        with col1:
-            if st.button("➕ 매수", key="toggle-buy-form-aus", width="stretch"):
-                # 매수 버튼 클릭 시 매도 폼이 열려있으면 닫기
-                if st.session_state.get("show_sell_form_aus", False):
-                    st.session_state["show_sell_form_aus"] = False
-                st.session_state["show_buy_form_aus"] = not st.session_state.get(
-                    "show_buy_form_aus", False
-                )
-                st.rerun()
-        with col2:
-            if st.button("➖ 매도", key="toggle-sell-form-aus", width="stretch"):
-                # 매도 버튼 클릭 시 매수 폼이 열려있으면 닫기
-                if st.session_state.get("show_buy_form_aus", False):
-                    st.session_state["show_buy_form_aus"] = False
-                st.session_state["show_sell_form_aus"] = not st.session_state.get(
-                    "show_sell_form_aus", False
-                )
-                st.rerun()
-
-        # 호주 트레이드 히스토리 표시
-        _render_trade_history(current_user, "aus")
-
-        # 매수 입력 폼 (호주)
-        if st.session_state.get("show_buy_form_aus", False):
-            _render_buy_form(current_user, "aus")
-            if st.button("닫기", key="close-buy-form-aus"):
-                st.session_state["show_buy_form_aus"] = False
-                st.rerun()
-            st.write("---")
-
-        # 매도 입력 폼 (호주)
-        if st.session_state.get("show_sell_form_aus", False):
-            _render_sell_section(current_user, "aus")
-            if st.button("닫기", key="close-sell-form-aus"):
-                st.session_state["show_sell_form_aus"] = False
-                st.rerun()
+    _render_country_section(current_user, selected_country)

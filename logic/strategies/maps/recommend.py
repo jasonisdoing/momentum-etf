@@ -12,6 +12,7 @@ from .constants import DECISION_MESSAGES, DECISION_NOTES
 from .messages import build_buy_replace_note
 from .shared import select_candidates_by_category, sort_decisions_by_order_and_score
 from logic.recommend.formatting import _load_country_precision
+from utils.data_loader import count_trading_days
 
 
 def generate_daily_recommendations_for_portfolio(
@@ -120,7 +121,10 @@ def generate_daily_recommendations_for_portfolio(
             if last_buy is not None:
                 last_buy_ts = pd.to_datetime(last_buy).normalize()
                 if last_buy_ts <= base_date_norm:
-                    days_since_buy = (base_date_norm - last_buy_ts).days
+                    days_since_buy = max(
+                        count_trading_days(country, last_buy_ts, base_date_norm) - 1,
+                        0,
+                    )
                     if days_since_buy < cooldown_days:
                         sell_cooldown_block[tkr] = {
                             "last_buy": last_buy_ts,
@@ -130,7 +134,10 @@ def generate_daily_recommendations_for_portfolio(
             if last_sell is not None:
                 last_sell_ts = pd.to_datetime(last_sell).normalize()
                 if last_sell_ts <= base_date_norm:
-                    days_since_sell = (base_date_norm - last_sell_ts).days
+                    days_since_sell = max(
+                        count_trading_days(country, last_sell_ts, base_date_norm) - 1,
+                        0,
+                    )
                     if days_since_sell < cooldown_days:
                         buy_cooldown_block[tkr] = {
                             "last_sell": last_sell_ts,
@@ -186,7 +193,11 @@ def generate_daily_recommendations_for_portfolio(
         if is_effectively_held and buy_date:
             buy_date_norm = pd.to_datetime(buy_date).normalize()
             if buy_date_norm <= evaluation_date:
-                holding_days = (evaluation_date - buy_date_norm).days + 1
+                holding_days = count_trading_days(
+                    country,
+                    buy_date_norm,
+                    evaluation_date,
+                )
 
         if state == "HOLD":
             price_ma, ma = d["price"], d["s1"]

@@ -22,15 +22,15 @@ DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
 
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
-        "MA_RANGE": np.arange(10, 51, 1),
-        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
+        "MA_RANGE": np.arange(10, 51, 5),
+        "PORTFOLIO_TOPN": np.arange(5, 8, 1),
+        "REPLACE_SCORE_THRESHOLD": [0.5],
         "TEST_MONTHS_RANGE": 12,
     },
     "kor": {
-        "MA_RANGE": np.arange(15, 31, 1),
+        "MA_RANGE": np.arange(10, 51, 5),
         "PORTFOLIO_TOPN": np.arange(7, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 1.1, 0.1),
         "TEST_MONTHS_RANGE": 12,
     },
     "us": {

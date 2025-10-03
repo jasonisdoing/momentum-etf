@@ -8,7 +8,7 @@ import logging
 import os
 import warnings
 from datetime import datetime, time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from contextlib import contextmanager
 
 import pandas as pd
@@ -335,6 +335,23 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
     final_list = [d for d in trading_days_ts if start_date_ts <= d <= end_date_ts]
 
     return sorted(list(set(final_list)))
+
+
+def count_trading_days(
+    country: str,
+    start_date: Union[str, datetime, pd.Timestamp],
+    end_date: Union[str, datetime, pd.Timestamp],
+) -> int:
+    """Return number of trading days between two dates (inclusive)."""
+
+    start_ts = pd.to_datetime(start_date).normalize()
+    end_ts = pd.to_datetime(end_date).normalize()
+
+    if start_ts > end_ts:
+        return 0
+
+    days = get_trading_days(start_ts.strftime("%Y-%m-%d"), end_ts.strftime("%Y-%m-%d"), country)
+    return len(days)
 
 
 @functools.lru_cache(maxsize=5)

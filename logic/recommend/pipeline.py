@@ -26,7 +26,12 @@ from logic.recommend.history import (
     calculate_consecutive_holding_info,
     calculate_trade_cooldown_info,
 )
-from utils.data_loader import fetch_ohlcv, get_latest_trading_day
+from utils.data_loader import (
+    fetch_ohlcv,
+    fetch_ohlcv_for_tickers,
+    get_latest_trading_day,
+    count_trading_days,
+)
 from utils.db_manager import get_db_connection
 
 
@@ -119,13 +124,24 @@ def _load_full_etf_meta(country: str) -> Dict[str, Dict[str, Any]]:
 
 
 def _fetch_dataframe(
-    ticker: str, *, country: str, ma_period: int, base_date: Optional[pd.Timestamp]
+    ticker: str,
+    *,
+    country: str,
+    ma_period: int,
+    base_date: Optional[pd.Timestamp],
+    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Optional[pd.DataFrame]:
     try:
-        # 더 긴 기간의 데이터를 가져오기 위해 months_back를 늘립니다.
-        months_back = max(12, ma_period)  # 최소 1년치 데이터 요청
-
-        df = fetch_ohlcv(ticker, country=country, months_back=months_back, base_date=base_date)
+        if prefetched_data and ticker in prefetched_data:
+            df = prefetched_data[ticker]
+        else:
+            months_back = max(12, ma_period)  # 최소 1년치 데이터 요청
+            df = fetch_ohlcv(
+                ticker,
+                country=country,
+                months_back=months_back,
+                base_date=base_date,
+            )
 
         if df is None or df.empty:
             print(f"경고: {ticker}에 대한 데이터를 가져오지 못했습니다.")
@@ -463,11 +479,34 @@ def generate_country_recommendation_report(
     total_cash = 100_000_000  # 임시값
 
     # 각 티커의 현재 데이터 준비 (실제 OHLCV 데이터 사용)
+    tickers_all = [stock.get("ticker") for stock in etf_universe if stock.get("ticker")]
+    prefetched_data: Dict[str, pd.DataFrame] = {}
+    try:
+        months_back = max(12, ma_period)
+        warmup_days = int(max(ma_period, 1) * 1.5)
+        start_date = (base_date - pd.DateOffset(months=months_back)).strftime("%Y-%m-%d")
+        end_date = base_date.strftime("%Y-%m-%d")
+        prefetched_data = fetch_ohlcv_for_tickers(
+            tickers_all,
+            country,
+            date_range=[start_date, end_date],
+            warmup_days=warmup_days,
+        )
+    except Exception as exc:
+        print(f"경고: {country} 일괄 데이터 로딩 실패: {exc}")
+        prefetched_data = {}
+
     data_by_tkr = {}
     for stock in etf_universe:
         ticker = stock["ticker"]
         # 실제 데이터 가져오기
-        df = _fetch_dataframe(ticker, country=country, ma_period=ma_period, base_date=base_date)
+        df = _fetch_dataframe(
+            ticker,
+            country=country,
+            ma_period=ma_period,
+            base_date=base_date,
+            prefetched_data=prefetched_data,
+        )
         if df is not None and not df.empty:
             # 최신 가격 정보
             latest_close = df["Close"].iloc[-1]
@@ -677,18 +716,27 @@ def generate_country_recommendation_report(
         # 보유일 계산
         holding_days_val = 0
         if ticker in holdings:
-            # 실제 현재 날짜를 사용해서 보유일 계산
-            current_date = pd.Timestamp.now().date()
+            current_date = pd.Timestamp.now().normalize()
             raw_buy_date = consecutive_holding_info.get(ticker, {}).get("buy_date")
             if raw_buy_date:
-                buy_timestamp = pd.to_datetime(raw_buy_date)
-                if pd.notna(buy_timestamp):
-                    buy_date = buy_timestamp.date()
-                    holding_days_val = (current_date - buy_date).days + 1
+                buy_timestamp = pd.to_datetime(raw_buy_date).normalize()
+                if pd.notna(buy_timestamp) and buy_timestamp <= current_date:
+                    holding_days_val = count_trading_days(
+                        country,
+                        buy_timestamp,
+                        current_date,
+                    )
         elif ticker in consecutive_holding_info:
             buy_date = consecutive_holding_info[ticker].get("buy_date")
-            if buy_date and buy_date <= base_date:
-                holding_days_val = (base_date - pd.to_datetime(buy_date).normalize()).days + 1
+            if buy_date:
+                buy_timestamp = pd.to_datetime(buy_date).normalize()
+                base_norm = base_date.normalize()
+                if pd.notna(buy_timestamp) and buy_timestamp <= base_norm:
+                    holding_days_val = count_trading_days(
+                        country,
+                        buy_timestamp,
+                        base_norm,
+                    )
 
         # 당일 신규 편입 종목은 최소 1일 보유로 표시 및 문구 유지
         new_buy_phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
