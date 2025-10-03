@@ -47,6 +47,7 @@ def get_country_settings(country: str) -> Dict[str, Any]:
     path = COUNTRY_SETTINGS_DIR / f"{country}.json"
     settings = _load_json(path)
     settings.setdefault("country", country)
+    settings.setdefault("country_code", settings.get("country", country))
     return settings
 
 

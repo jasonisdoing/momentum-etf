@@ -15,7 +15,8 @@ def money_str(country: str, amount: float) -> str:
         val = float(amount or 0.0)
     except Exception:
         val = 0.0
-    if country == "aus":
+    country_code = (country or "").strip().lower()
+    if country_code == "aus":
         return format_aud_money(val)
     return format_kr_money(val)
 

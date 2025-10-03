@@ -1,19 +1,33 @@
 from __future__ import annotations
 
+from typing import Any, Callable, Dict, List
+
 import streamlit as st
 
-from utils.settings_loader import get_country_settings
+from app_pages.country_page import render_country_page
+from utils.account_registry import (
+    get_icon_fallback,
+    load_account_configs,
+    pick_default_account,
+)
 
 
-def _load_country_ui_settings(country: str) -> tuple[str, str]:
-    try:
-        settings = get_country_settings(country)
-        name = settings.get("name") or country.upper()
-        icon = settings.get("icon") or ""
-    except Exception:
-        name = country.upper()
-        icon = ""
-    return name, icon
+def _build_country_page(
+    page_cls: Callable[..., object], account: Dict[str, Any], *, default_id: str
+):
+    account_id = account["account_id"]
+    icon = account.get("icon") or get_icon_fallback(account.get("country_code", ""))
+
+    def _render(account_key: str = account_id) -> None:
+        render_country_page(account_key)
+
+    return page_cls(
+        _render,
+        title=account["name"],
+        icon=icon,
+        url_path=account_id,
+        default=account_id == default_id,
+    )
 
 
 def main() -> None:
@@ -23,37 +37,37 @@ def main() -> None:
         st.error("현재 설치된 Streamlit 버전이 `st.navigation`을 지원하지 않습니다.")
         st.stop()
 
-    kor_info = _load_country_ui_settings("kor")
-    aus_info = _load_country_ui_settings("aus")
+    accounts = load_account_configs()
+    if not accounts:
+        st.error("사용할 수 있는 계정 설정이 없습니다. `settings/country` 폴더를 확인해주세요.")
+        st.stop()
 
-    initial_title = kor_info[0]
-    initial_icon = kor_info[1] or "🇰🇷"
+    default_account = pick_default_account(accounts)
+    default_icon = (
+        default_account.get("icon")
+        or get_icon_fallback(default_account.get("country_code", ""))
+        or "📈"
+    )
 
     st.set_page_config(
-        page_title=initial_title,
-        page_icon=initial_icon,
+        page_title=default_account.get("name") or "Momentum ETF",
+        page_icon=default_icon,
         layout="wide",
         initial_sidebar_state="expanded",
     )
 
     pages = [
+        _build_country_page(page_cls, account, default_id=default_account["account_id"])
+        for account in accounts
+    ]
+
+    pages.append(
         page_cls(
-            "app_pages/kor.py",
-            title="한국",
-            icon=kor_info[1] or "🇰🇷",
-            default=True,
-        ),
-        page_cls(
-            "app_pages/aus.py",
-            title="호주",
-            icon=aus_info[1] or "🇦🇺",
-        ),
-        page_cls(
-            "app_pages/30_trade.py",
+            "app_pages/admin.py",
             title="관리자",
             icon="📝",
-        ),
-    ]
+        )
+    )
 
     navigation(pages).run()
 

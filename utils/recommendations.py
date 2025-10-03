@@ -86,9 +86,11 @@ def _format_currency(value: Any, country: str) -> str:
     except (TypeError, ValueError):
         return str(value)
 
-    if country == "kor":
+    country_code = (country or "").strip().lower()
+
+    if country_code == "kor":
         return f"{int(round(amount)):,}원"
-    if country == "aus":
+    if country_code == "aus":
         return f"A${amount:,.2f}"
     return f"{amount:,.2f}"
 

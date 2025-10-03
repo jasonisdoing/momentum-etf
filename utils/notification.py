@@ -31,11 +31,6 @@ except ImportError:  # pragma: no cover - optional dependency
 from utils.country_registry import get_country_settings
 from utils.schedule_config import get_country_schedule
 from utils.data_loader import get_aud_to_krw_rate
-
-try:
-    from utils.db_manager import get_portfolio_snapshot as _get_portfolio_snapshot  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover - optional dependency removed
-    _get_portfolio_snapshot = None  # type: ignore[assignment]
 from utils.report import format_kr_money, render_table_eaw
 from utils.stock_list_io import get_etfs
 

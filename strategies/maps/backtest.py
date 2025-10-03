@@ -118,6 +118,8 @@ def run_portfolio_backtest(
         Dict[str, pd.DataFrame]: 종목별 백테스트 결과
     """
 
+    country_code = (country or "").strip().lower() or "kor"
+
     def _log(message: str) -> None:
         if not quiet:
             print(message)
@@ -723,7 +725,7 @@ def run_portfolio_backtest(
                             if budget <= 0 or budget < min_val:
                                 continue
                             # 수량/금액 산정
-                            if country == "aus":
+                            if country_code == "aus":
                                 req_qty = (budget / buy_price) if buy_price > 0 else 0
                                 buy_amount = budget
                             else:
@@ -762,7 +764,7 @@ def run_portfolio_backtest(
                                             "avg_cost": buy_price,
                                             # 추천/리포트와 동일 포맷: 디스플레이명 + 금액 + 대체 정보
                                             "note": f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} "
-                                            f"{format_aud_money(buy_amount) if country == 'aus' else format_kr_money(buy_amount)} "
+                                            f"{format_aud_money(buy_amount) if country_code == 'aus' else format_kr_money(buy_amount)} "
                                             f"({ticker_to_sell} 대체)",
                                         }
                                     )
@@ -938,6 +940,8 @@ def run_single_ticker_backtest(
     Returns:
         pd.DataFrame: 백테스트 결과
     """
+    country_code = (country or "").strip().lower() or "kor"
+
     stop_loss_threshold = stop_loss_pct
 
     # 티커 유형에 따른 이동평균 기간 설정
@@ -946,7 +950,7 @@ def run_single_ticker_backtest(
         # df가 제공되지 않으면, date_range를 사용하여 직접 데이터를 조회합니다.
         # date_range가 없으면 기본값(3개월)으로 조회됩니다.
         # CLI 백테스트 실행 시에는 항상 date_range가 전달됩니다.
-        df = fetch_ohlcv(ticker, country=country, date_range=date_range)
+        df = fetch_ohlcv(ticker, country=country_code, date_range=date_range)
 
     if df is None or df.empty:
         return pd.DataFrame()
@@ -1032,7 +1036,7 @@ def run_single_ticker_backtest(
         if decision is None and held_shares == 0 and i >= buy_cooldown_until:
             consecutive_buy_days_today = consecutive_buy_days.iloc[i]
             if consecutive_buy_days_today > 0:
-                if country == "aus":
+                if country_code == "aus":
                     # 소수점 4자리까지 허용
                     buy_quantity = (
                         round(available_cash / current_price, 4) if current_price > 0 else 0.0

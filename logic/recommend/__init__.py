@@ -20,10 +20,4 @@ def generate_recommendation_report(*args: Any, **kwargs: Dict[str, Any]):
     return _gen(*args, **kwargs)
 
 
-def calculate_benchmark_comparison(*args: Any, **kwargs: Dict[str, Any]):
-    from .benchmarks import calculate_benchmark_comparison as _calc
-
-    return _calc(*args, **kwargs)
-
-
-__all__ = ["main", "generate_recommendation_report", "calculate_benchmark_comparison"]
+__all__ = ["main", "generate_recommendation_report"]

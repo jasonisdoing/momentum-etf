@@ -1,6 +1,8 @@
 {
+    "order": 20,
     "icon": "🇦🇺",
     "name": "호주 ETF",
+    "country_code": "aus",
     "slack_channel": "C09FAU7SKA8",
     "initial_date": "2025-10-01",
     "strategy": {

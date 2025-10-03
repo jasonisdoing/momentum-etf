@@ -140,7 +140,9 @@ def _should_skip_pykrx_fetch(
 ) -> bool:
     """장 시작 전에는 캐시만 사용하도록 pykrx 호출을 지연합니다."""
 
-    if country != "kor" or cache_end is None:
+    country_code = (country or "").strip().lower()
+
+    if country_code != "kor" or cache_end is None:
         return False
 
     if ZoneInfo is not None:
@@ -174,7 +176,9 @@ def _is_kor_realtime_window(now_kst: datetime) -> bool:
 def _should_use_realtime_price(country: str) -> bool:
     if not REALTIME_PRICE_ENABLED:
         return False
-    if country.lower() != "kor":
+    country_code = (country or "").strip().lower()
+
+    if country_code != "kor":
         return False
 
     now_kst = _now_with_zone("Asia/Seoul")
@@ -319,14 +323,16 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
             print(f"경고: pandas_market_calendars({country_code}:{cal_code}) 조회 실패: {e}")
         return []
 
-    if country == "kor":
+    country_code = (country or "").strip().lower()
+
+    if country_code == "kor":
         trading_days_ts = _pmc("kor")
-    elif country == "aus":
+    elif country_code == "aus":
         trading_days_ts = _pmc("aus")
-    elif country == "us":
+    elif country_code == "us":
         trading_days_ts = _pmc("us")
     else:
-        print(f"오류: 지원하지 않는 국가 코드입니다: {country}")
+        print(f"오류: 지원하지 않는 국가 코드입니다: {country_code}")
         return []
 
     # 최종적으로 start_date와 end_date 사이의 날짜만 반환하고, 중복 제거 및 정렬합니다.
@@ -350,7 +356,11 @@ def count_trading_days(
     if start_ts > end_ts:
         return 0
 
-    days = get_trading_days(start_ts.strftime("%Y-%m-%d"), end_ts.strftime("%Y-%m-%d"), country)
+    country_code = (country or "").strip().lower()
+
+    days = get_trading_days(
+        start_ts.strftime("%Y-%m-%d"), end_ts.strftime("%Y-%m-%d"), country_code
+    )
     return len(days)
 
 
@@ -359,11 +369,13 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
     """
     오늘 또는 가장 가까운 과거의 '데이터가 있을 것으로 예상되는' 거래일을 pd.Timestamp 형식으로 반환합니다.
     """
+    country_code = (country or "").strip().lower()
+
     end_dt = pd.Timestamp.now()
 
     # 한국 시장의 경우, 장 마감 데이터가 집계되기 전(오후 4시 이전)이라면,
     # 조회 기준일을 하루 전으로 설정하여 어제까지의 데이터만 사용하도록 합니다.
-    if country == "kor":
+    if country_code == "kor":
         try:
             if ZoneInfo is not None:
                 local_now = datetime.now(ZoneInfo("Asia/Seoul"))
@@ -380,7 +392,7 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
         check_date = end_dt - pd.DateOffset(days=i)
         check_date_str = check_date.strftime("%Y-%m-%d")
         try:
-            if get_trading_days(check_date_str, check_date_str, country):
+            if get_trading_days(check_date_str, check_date_str, country_code):
                 return check_date.normalize()
         except Exception as e:
             print(f"경고: 거래일 조회 중 오류 발생({check_date_str}): {e}")
@@ -401,6 +413,8 @@ def fetch_ohlcv(
     base_date: Optional[pd.Timestamp] = None,
 ) -> Optional[pd.DataFrame]:
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
+
+    country_code = (country or "").strip().lower() or "kor"
 
     if date_range and len(date_range) == 2:
         try:  # date_range가 있으면, 다른 기간 인자들을 무시하고 이를 기준으로 start_dt, end_dt를 설정합니다.
@@ -427,7 +441,7 @@ def fetch_ohlcv(
     # 조회 종료일(end_dt)이 실제 데이터가 있는 마지막 거래일을 초과하지 않도록 보정합니다.
     # 이는 주말이나 휴일에 다음 거래일을 기준으로 데이터를 조회할 때, 아직 존재하지 않는
     # 미래 데이터를 조회하려는 시도를 방지합니다.
-    latest_known_trading_day = get_latest_trading_day(country)
+    latest_known_trading_day = get_latest_trading_day(country_code)
     if end_dt > latest_known_trading_day:
         end_dt = latest_known_trading_day
 
@@ -435,13 +449,13 @@ def fetch_ohlcv(
         # 보정 후 시작일이 종료일보다 미래가 될 수 있으므로, 이 경우 데이터를 조회하지 않습니다.
         return None
 
-    df = _fetch_ohlcv_with_cache(ticker, country, start_dt.normalize(), end_dt.normalize())
+    df = _fetch_ohlcv_with_cache(ticker, country_code, start_dt.normalize(), end_dt.normalize())
 
     if df is None or df.empty:
         return df
 
-    if _should_use_realtime_price(country):
-        df = _overlay_realtime_price(df, ticker, country)
+    if _should_use_realtime_price(country_code):
+        df = _overlay_realtime_price(df, ticker, country_code)
 
     return df
 
@@ -452,7 +466,9 @@ def _fetch_ohlcv_with_cache(
     start_dt: pd.Timestamp,
     end_dt: pd.Timestamp,
 ) -> Optional[pd.DataFrame]:
-    cached_df = load_cached_frame(country, ticker)
+    country_code = (country or "").strip().lower()
+
+    cached_df = load_cached_frame(country_code, ticker)
     missing_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
     cache_start: Optional[pd.Timestamp] = None
     cache_end: Optional[pd.Timestamp] = None
@@ -472,19 +488,19 @@ def _fetch_ohlcv_with_cache(
     for miss_start, miss_end in missing_ranges:
         if miss_start > miss_end:
             continue
-        if cache_end is not None and _should_skip_pykrx_fetch(country, cache_end, miss_start):
+        if cache_end is not None and _should_skip_pykrx_fetch(country_code, cache_end, miss_start):
             continue
 
         # Check if there are any trading days in the missing range before attempting to fetch.
         # This prevents errors when the gap consists only of non-trading days (weekends, holidays).
         trading_days_in_gap = get_trading_days(
-            miss_start.strftime("%Y-%m-%d"), miss_end.strftime("%Y-%m-%d"), country
+            miss_start.strftime("%Y-%m-%d"), miss_end.strftime("%Y-%m-%d"), country_code
         )
         if not trading_days_in_gap:
             continue
 
         try:
-            fetched = _fetch_ohlcv_core(ticker, country, miss_start, miss_end, cached_df)
+            fetched = _fetch_ohlcv_core(ticker, country_code, miss_start, miss_end, cached_df)
         except PykrxDataUnavailable:
             # 신규 상장 등으로 과거 데이터가 존재하지 않거나, 최신 데이터만 캐시에 있는 경우
             # 기존 캐시로 충분하면 네트워크 오류를 무시하고 계속 진행합니다.
@@ -510,7 +526,7 @@ def _fetch_ohlcv_with_cache(
         combined_df = pd.concat(frames)
         combined_df.sort_index(inplace=True)
         combined_df = combined_df[~combined_df.index.duplicated(keep="last")]
-        save_cached_frame(country, ticker, combined_df)
+        save_cached_frame(country_code, ticker, combined_df)
 
         # new_total = combined_df.shape[0]
         # added_count = max(0, new_total - prev_count)
@@ -546,7 +562,9 @@ def _fetch_ohlcv_with_cache(
 def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.DataFrame:
     """개장 이후 실시간 가격을 캐시 데이터에 덧씌웁니다."""
 
-    if country.lower() != "kor":
+    country_code = (country or "").strip().lower()
+
+    if country_code != "kor":
         return df
     # 네이버 실시간 가격은 한국 상장 종목(숫자/알파벳 코드)에만 적용
     if ticker.startswith("^"):
@@ -603,6 +621,8 @@ def _fetch_ohlcv_core(
 ) -> Optional[pd.DataFrame]:
     """실제 원천 API에서 OHLCV를 조회합니다."""
 
+    country_code = (country or "").strip().lower()
+
     if ticker.startswith("^"):
         if existing_df is not None and not existing_df.empty:
             fallback = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
@@ -640,16 +660,16 @@ def _fetch_ohlcv_core(
                     return fallback_df
             return None
 
-    if country == "kor":
+    if country_code == "kor":
         if _stock is None:
             print("오류: pykrx 라이브러리가 설치되지 않았습니다. 'pip install pykrx'로 설치해주세요.")
             return None
 
-    if country == "kor":
+    if country_code == "kor":
         # pykrx에 데이터를 요청하기 전에, 해당 기간에 거래일이 있는지 먼저 확인합니다.
         # 거래일이 없는 기간(예: 주말, 연휴)에 대해 불필요한 예외 발생을 방지합니다.
         trading_days_in_range = get_trading_days(
-            start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), "kor"
+            start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), country_code
         )
         if not trading_days_in_range:
             return None  # 거래일이 없으므로 데이터를 가져올 수 없는 것이 정상입니다.
@@ -702,7 +722,7 @@ def _fetch_ohlcv_core(
                     pykrx_error_msg = "데이터 없음"
 
         if pykrx_failed:
-            raise PykrxDataUnavailable(country, start_dt, end_dt, pykrx_error_msg)
+            raise PykrxDataUnavailable(country_code, start_dt, end_dt, pykrx_error_msg)
 
         full_df = pd.concat(all_dfs)
         full_df = full_df[~full_df.index.duplicated(keep="first")]
@@ -716,7 +736,7 @@ def _fetch_ohlcv_core(
             }
         )
 
-    if country == "aus":
+    if country_code == "aus":
         if yf is None:
             print("오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
             return None
@@ -759,7 +779,7 @@ def _fetch_ohlcv_core(
             print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
             return None
 
-    if country == "us":
+    if country_code == "us":
         if yf is None:
             print("오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
             return None
@@ -788,7 +808,7 @@ def _fetch_ohlcv_core(
             print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
             return None
 
-    print(f"오류: 지원하지 않는 국가 코드입니다: {country}")
+    print(f"오류: 지원하지 않는 국가 코드입니다: {country_code}")
     return None
 
 
@@ -967,13 +987,15 @@ def resolve_security_name(country: str, ticker: str) -> str:
 
 
 def _get_display_name(country: str, ticker: str) -> str:
-    key = (country.lower(), (ticker or "").upper())
+    country_code = (country or "").strip().lower()
+
+    key = (country_code, (ticker or "").upper())
     if key in _etf_name_cache:
         return _etf_name_cache[key]
 
     name = ""
     try:
-        etf_blocks = get_etfs(country) or []
+        etf_blocks = get_etfs(country_code) or []
         for block in etf_blocks:
             if isinstance(block, dict):
                 if "tickers" in block:
@@ -995,9 +1017,9 @@ def _get_display_name(country: str, ticker: str) -> str:
 
     if not name:
         try:
-            if country == "kor":
+            if country_code == "kor":
                 name = fetch_pykrx_name(ticker)
-            elif country == "aus":
+            elif country_code == "aus":
                 name = fetch_yfinance_name(ticker)
         except Exception:
             pass
@@ -1011,17 +1033,19 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
     if not yf:
         return None
 
+    country_code = (country or "").strip().lower() or "kor"
+
     yfinance_ticker = ticker
-    if country == "aus":
+    if country_code == "aus":
         if not ticker.upper().endswith(".AX"):
             yfinance_ticker = f"{ticker.upper()}.AX"
-    elif country == "kor":
+    elif country_code == "kor":
         if ticker.isdigit() and len(ticker) == 6:
             yfinance_ticker = f"{ticker.KS}"
 
-    latest_trade_day = get_latest_trading_day(country)
+    latest_trade_day = get_latest_trading_day(country_code)
     if not latest_trade_day:
-        print(f"[ERROR] Could not determine latest trading day for country {country}.")
+        print(f"[ERROR] Could not determine latest trading day for country {country_code}.")
         return None
 
     start_date = latest_trade_day

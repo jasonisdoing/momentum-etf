@@ -39,6 +39,8 @@ def generate_daily_recommendations_for_portfolio(
     주어진 데이터를 기반으로 포트폴리오의 일일 매매 추천를 생성합니다.
     """
 
+    country_code = (country or "").strip().lower() or "kor"
+
     def _format_kr_price(p):
         return f"{int(round(p)):,}"
 
@@ -50,12 +52,12 @@ def generate_daily_recommendations_for_portfolio(
         return f"${p:,.{precision}f}"
 
     # 표시 통화와 정밀도 결정: precision.json(country) 기준 사용
-    cprec = _load_country_precision(country) or {}
+    cprec = _load_country_precision(country_code) or {}
     qty_precision = int(cprec.get("stock_qty_precision", 0))
     price_precision = int(cprec.get("stock_price_precision", 0))
     amt_precision = int(cprec.get("stock_amt_precision", 0))
 
-    if country == "aus":
+    if country_code == "aus":
 
         def money_formatter(amount):
             return _aud_money_formatter(amount, amt_precision)
@@ -87,7 +89,7 @@ def generate_daily_recommendations_for_portfolio(
     # 전략 설정 로드
     denom = strategy_rules.portfolio_topn
     if denom <= 0:
-        raise ValueError(f"'{country}' 국가의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
+        raise ValueError(f"'{country_code}' 국가의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
     replace_threshold = strategy_rules.replace_threshold
 
     # 현재 보유 종목의 카테고리 (TBD 제외)
@@ -122,7 +124,7 @@ def generate_daily_recommendations_for_portfolio(
                 last_buy_ts = pd.to_datetime(last_buy).normalize()
                 if last_buy_ts <= base_date_norm:
                     days_since_buy = max(
-                        count_trading_days(country, last_buy_ts, base_date_norm) - 1,
+                        count_trading_days(country_code, last_buy_ts, base_date_norm) - 1,
                         0,
                     )
                     if days_since_buy < cooldown_days:
@@ -135,7 +137,7 @@ def generate_daily_recommendations_for_portfolio(
                 last_sell_ts = pd.to_datetime(last_sell).normalize()
                 if last_sell_ts <= base_date_norm:
                     days_since_sell = max(
-                        count_trading_days(country, last_sell_ts, base_date_norm) - 1,
+                        count_trading_days(country_code, last_sell_ts, base_date_norm) - 1,
                         0,
                     )
                     if days_since_sell < cooldown_days:
@@ -194,7 +196,7 @@ def generate_daily_recommendations_for_portfolio(
             buy_date_norm = pd.to_datetime(buy_date).normalize()
             if buy_date_norm <= evaluation_date:
                 holding_days = count_trading_days(
-                    country,
+                    country_code,
                     buy_date_norm,
                     evaluation_date,
                 )

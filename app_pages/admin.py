@@ -7,6 +7,11 @@ from functools import lru_cache
 import streamlit as st
 import streamlit_authenticator as stauth
 
+from utils.account_registry import (
+    build_account_meta,
+    load_account_configs,
+    pick_default_account,
+)
 from utils.stock_list_io import get_etfs
 from utils.trade_store import (
     fetch_recent_trades,
@@ -16,6 +21,55 @@ from utils.trade_store import (
 )
 
 
+def _to_plain_dict(value):
+    if isinstance(value, Mapping):
+        return {k: _to_plain_dict(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_plain_dict(v) for v in value]
+    return value
+
+
+@lru_cache(maxsize=1)
+def _account_registry():
+    accounts = load_account_configs()
+    meta = build_account_meta(accounts)
+    default = pick_default_account(accounts) if accounts else None
+    return accounts, meta, default
+
+
+def _account_configs():
+    return _account_registry()[0]
+
+
+def _account_meta():
+    return _account_registry()[1]
+
+
+def _default_account_id() -> str:
+    accounts, _, default = _account_registry()
+    if default:
+        return default["account_id"]
+    if accounts:
+        return accounts[0]["account_id"]
+    return "kor"
+
+
+def _country_options() -> list[str]:
+    return [account["account_id"] for account in _account_configs()]
+
+
+def _format_account_label(account_id: str) -> str:
+    meta = _account_meta().get(account_id, {})
+    icon = meta.get("icon", "")
+    label = meta.get("label", account_id.upper())
+    return f"{icon} {label}".strip()
+
+
+def _resolve_account_country_code(account_id: str) -> str:
+    meta = _account_meta().get(account_id, {})
+    return (meta.get("country_code") or account_id).strip().lower()
+
+
 if "trade_edit_id" not in st.session_state:
     st.session_state["trade_edit_id"] = None
 if "trade_editing" not in st.session_state:
@@ -23,17 +77,9 @@ if "trade_editing" not in st.session_state:
 if "trade_alerts" not in st.session_state:
     st.session_state["trade_alerts"] = []
 if "trade_selected_country" not in st.session_state:
-    st.session_state["trade_selected_country"] = "kor"
+    st.session_state["trade_selected_country"] = _default_account_id()
 if "trade_delete_dialog" not in st.session_state:
     st.session_state["trade_delete_dialog"] = None
-
-
-def _to_plain_dict(value):
-    if isinstance(value, Mapping):
-        return {k: _to_plain_dict(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_to_plain_dict(v) for v in value]
-    return value
 
 
 def _load_authenticator() -> stauth.Authenticate:
@@ -161,16 +207,6 @@ def _flush_persisted_alerts() -> None:
     st.session_state["trade_alerts"] = []
 
 
-_COUNTRY_META = {
-    "kor": {"label": "한국", "icon": "🇰🇷"},
-    "aus": {"label": "호주", "icon": "🇦🇺"},
-}
-
-
-def _country_options() -> list[str]:
-    return list(_COUNTRY_META.keys())
-
-
 def _show_delete_dialog(
     checked_indices: list[int],
     table_rows: list,
@@ -256,28 +292,25 @@ def _render_trade_table() -> None:
     pass
 
 
-def _render_trade_history(username: str, country_code: str) -> None:
-    """트레이드 히스토리를 표시합니다.
+def _render_trade_history(username: str, account_id: str, country_code: str) -> None:
+    """계정별 트레이드 히스토리를 표시합니다."""
 
-    Args:
-        username: 현재 로그인한 사용자명
-        country_code: 필터링할 국가 코드 (예: 'kor', 'aus')
-    """
     _flush_persisted_alerts()
 
-    # 국가 코드가 유효한지 확인
-    if not country_code or country_code not in ["kor", "aus"]:
-        st.warning("유효한 국가 코드가 아닙니다.")
+    if not country_code:
+        st.warning("국가 코드가 비어 있습니다.")
         return
 
-    # 트레이드 목록 조회 (삭제된 항목은 제외, 국가별로 필터링)
-    trades = fetch_recent_trades(country_code, limit=100, include_deleted=False)  # 국가 코드로 필터링
+    try:
+        trades = fetch_recent_trades(country_code, limit=100, include_deleted=False)
+    except Exception as exc:
+        st.error(f"[{country_code.upper()}] 최근 거래 내역을 불러오지 못했습니다: {exc}")
+        return
 
     if not trades:
         st.info("등록된 트레이드가 없습니다.")
         return
 
-    # 트레이드 목록을 데이터프레임으로 변환
     trade_data = []
     for trade in trades:
         trade_id = trade.get("id", "")
@@ -296,10 +329,9 @@ def _render_trade_history(username: str, country_code: str) -> None:
 
         trade_name = _resolve_ticker_name(country, ticker, trade.get("name")) or ticker
 
-        # 거래 데이터 추가
         trade_data.append(
             {
-                "선택": False,  # 체크박스 용도
+                "선택": False,
                 "No.": len(trade_data) + 1,
                 "티커": ticker,
                 "종목명": trade_name,
@@ -307,47 +339,41 @@ def _render_trade_history(username: str, country_code: str) -> None:
                 "거래일시": executed_display,
                 "메모": memo,
                 "작성자": created_by,
-                "id": trade_id,  # 삭제를 위한 ID
+                "id": trade_id,
             }
         )
 
-    # 데이터프레임 생성
     import pandas as pd
 
     df = pd.DataFrame(trade_data)
 
-    # 체크박스 컬럼을 가장 앞으로 이동
     cols = ["선택"] + [col for col in df.columns if col not in ["선택", "id", "수량", "가격"]]
 
-    # 데이터 에디터로 표시 (체크박스 활성화)
+    editor_key = f"trade_editor_{account_id}"
+
     edited_df = st.data_editor(
-        df[cols],  # id 컬럼을 제외하고 표시
+        df[cols],
         column_config={
             "선택": st.column_config.CheckboxColumn("선택", default=False),
             "구분": st.column_config.SelectboxColumn("구분", options=["BUY", "SELL"], required=True),
         },
         hide_index=True,
         width="stretch",
-        key=f"trade_editor_{country_code}",
-        disabled=["No.", "티커", "종목명", "구분", "거래일시", "메모", "작성자"],  # 선택 컬럼만 편집 가능
+        key=editor_key,
+        disabled=["No.", "티커", "종목명", "구분", "거래일시", "메모", "작성자"],
     )
 
-    # 체크박스 선택 상태 확인
     if any(edited_df["선택"]):
-        # 확장 패널에 삭제 확인/취소 버튼 표시
         with st.expander("선택한 항목 삭제", expanded=True):
             st.warning("정말로 선택한 항목을 삭제하시겠습니까?")
 
-            # 확인/취소 버튼
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("✅ 확인", key=f"confirm_delete_{country_code}"):
-                    # 원본 데이터프레임에서 선택된 행의 인덱스 가져오기
+                if st.button("✅ 확인", key=f"confirm_delete_{account_id}"):
                     selected_indices = edited_df[edited_df["선택"]].index
                     deleted_count = 0
 
                     for idx in selected_indices:
-                        # 원본 데이터프레임에서 해당 인덱스의 id 가져오기
                         trade_id = df.iloc[idx]["id"]
                         if delete_trade(trade_id):
                             deleted_count += 1
@@ -359,59 +385,59 @@ def _render_trade_history(username: str, country_code: str) -> None:
                         st.error("트레이드 삭제에 실패했습니다.")
 
             with col2:
-                if st.button("❌ 취소", key=f"cancel_delete_{country_code}"):
-                    # 체크박스 선택 해제
+                if st.button("❌ 취소", key=f"cancel_delete_{account_id}"):
                     st.rerun()
 
 
-def _render_country_section(current_user: str, country_code: str) -> None:
-    meta = _COUNTRY_META.get(country_code, {})
+def _render_country_section(current_user: str, account_id: str) -> None:
+    meta = _account_meta().get(account_id, {})
     icon = meta.get("icon", "")
-    label = meta.get("label", country_code.upper())
+    label = meta.get("label", account_id.upper())
+    country_code = _resolve_account_country_code(account_id)
 
     if icon or label:
         st.markdown(f"### {icon} {label}".strip())
 
-    buy_key = f"show_buy_form_{country_code}"
-    sell_key = f"show_sell_form_{country_code}"
+    buy_key = f"show_buy_form_{account_id}"
+    sell_key = f"show_sell_form_{account_id}"
 
     col1, col2 = st.columns([1, 1], gap="small")
     with col1:
-        if st.button("➕ 매수", key=f"toggle-buy-form-{country_code}", width="stretch"):
+        if st.button("➕ 매수", key=f"toggle-buy-form-{account_id}", width="stretch"):
             if st.session_state.get(sell_key, False):
                 st.session_state[sell_key] = False
             st.session_state[buy_key] = not st.session_state.get(buy_key, False)
             st.rerun()
     with col2:
-        if st.button("➖ 매도", key=f"toggle-sell-form-{country_code}", width="stretch"):
+        if st.button("➖ 매도", key=f"toggle-sell-form-{account_id}", width="stretch"):
             if st.session_state.get(buy_key, False):
                 st.session_state[buy_key] = False
             st.session_state[sell_key] = not st.session_state.get(sell_key, False)
             st.rerun()
 
-    _render_trade_history(current_user, country_code)
+    _render_trade_history(current_user, account_id, country_code)
 
     if st.session_state.get(buy_key, False):
-        _render_buy_form(current_user, country_code)
-        if st.button("닫기", key=f"close-buy-form-{country_code}"):
+        _render_buy_form(current_user, country_code, account_id)
+        if st.button("닫기", key=f"close-buy-form-{account_id}"):
             st.session_state[buy_key] = False
             st.rerun()
         st.write("---")
 
     if st.session_state.get(sell_key, False):
-        _render_sell_section(current_user, country_code)
-        if st.button("닫기", key=f"close-sell-form-{country_code}"):
+        _render_sell_section(current_user, country_code, account_id)
+        if st.button("닫기", key=f"close-sell-form-{account_id}"):
             st.session_state[sell_key] = False
             st.rerun()
 
 
-def _render_buy_form(username: str, country: str) -> None:
+def _render_buy_form(username: str, country: str, account_id: str) -> None:
     holdings = list_open_positions(country or "") if country else []
     holding_tickers = {
         (pos.get("ticker") or "").strip().upper() for pos in holdings if pos.get("ticker")
     }
 
-    key_suffix = (country or "global").strip().lower() or "global"
+    key_suffix = (account_id or country or "global").strip().lower() or "global"
 
     with st.form(f"buy-input-form-{key_suffix}", clear_on_submit=True):
         ticker = ""
@@ -507,8 +533,7 @@ def _render_buy_form(username: str, country: str) -> None:
             else:
                 _notify("매수 이벤트가 저장되었습니다.", kind="success", icon="✅", persist=True)
                 # 매수 폼을 닫기 위해 상태 업데이트
-                st.session_state["show_buy_form_kor"] = False
-                st.session_state["show_buy_form_aus"] = False
+                st.session_state[f"show_buy_form_{account_id}"] = False
                 st.rerun()
 
     warning_state = st.session_state.get("buy_duplicate_warning")
@@ -531,14 +556,14 @@ def _render_buy_form(username: str, country: str) -> None:
             st.rerun()
 
 
-def _render_sell_section(username: str, country: str) -> None:
+def _render_sell_section(username: str, country: str, account_id: str) -> None:
     positions = list_open_positions(country or "") if country else []
 
     if not positions:
         st.info("매도 가능한 종목이 없습니다.")
         return
 
-    key_suffix = (country or "global").strip().lower() or "global"
+    key_suffix = (account_id or country or "global").strip().lower() or "global"
 
     option_items: list[tuple[str, str, str]] = []
     for pos in positions:
@@ -618,8 +643,7 @@ def _render_sell_section(username: str, country: str) -> None:
                     persist=True,
                 )
                 # 매도 폼을 닫기 위해 상태 업데이트
-                st.session_state["show_sell_form_kor"] = False
-                st.session_state["show_sell_form_aus"] = False
+                st.session_state[f"show_sell_form_{account_id}"] = False
                 st.rerun()
 
 
@@ -635,7 +659,7 @@ else:
     authenticator.logout(button_name="로그아웃", location="sidebar")
     current_user = username or name or "unknown"
 
-    default_country = st.session_state.get("trade_selected_country", "kor")
+    default_country = st.session_state.get("trade_selected_country", _default_account_id())
     if "trade_selected_country_radio" not in st.session_state:
         st.session_state["trade_selected_country_radio"] = default_country
 
@@ -644,7 +668,7 @@ else:
         selected_country = st.radio(
             "국가 선택",
             options=_country_options(),
-            format_func=lambda code: f"{_COUNTRY_META.get(code, {}).get('icon', '')} {_COUNTRY_META.get(code, {}).get('label', code.upper())}",
+            format_func=_format_account_label,
             key="trade_selected_country_radio",
         )
 

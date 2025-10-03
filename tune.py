@@ -13,9 +13,9 @@ from utils.country_registry import (
     list_available_countries,
 )
 from logic.tune.runner import run_country_tuning
+from constants import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
-TUNING_MONTHS_RANGE = 12
 
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
@@ -75,7 +75,7 @@ def main() -> None:
         output_path=output_path,
         results_dir=RESULTS_DIR,
         tuning_config=TUNING_CONFIG,
-        months_range=TUNING_MONTHS_RANGE,
+        months_range=TEST_MONTHS_RANGE,
     )
     print(f"\n✅ 튜닝 결과를 '{output_path}'에 저장했습니다.")
 
