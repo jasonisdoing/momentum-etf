@@ -157,14 +157,27 @@ def _fetch_dataframe(
 def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
     try:
         # 'Close' 또는 'Adj Close' 중 사용 가능한 컬럼 선택
-        price_col = "Adj Close" if "Adj Close" in df.columns else "Close"
-        close = df[price_col].astype(float)
+        if "unadjusted_close" in df.columns:
+            raw_close = df["unadjusted_close"].astype(float)
+        else:
+            raw_close = df["Close"].astype(float)
+
+        if "Adj Close" in df.columns and not df["Adj Close"].isnull().all():
+            price_series = df["Adj Close"].astype(float)
+        else:
+            price_series = raw_close
+
+        raw_close = raw_close.dropna()
+        price_series = price_series.dropna()
+
+        if raw_close.empty or price_series.empty:
+            return None
 
         # 이동평균 계산 (최소 1개 데이터로도 계산 가능하도록 min_periods=1 설정)
-        ma = close.rolling(window=ma_period, min_periods=1).mean()
+        ma = price_series.rolling(window=ma_period, min_periods=1).mean()
 
-        latest_close = float(close.iloc[-1])
-        prev_close = float(close.iloc[-2]) if len(close) >= 2 else latest_close
+        latest_close = float(price_series.iloc[-1])
+        prev_close = float(price_series.iloc[-2]) if len(price_series) >= 2 else latest_close
         ma_value = float(ma.iloc[-1]) if not pd.isna(ma.iloc[-1]) else latest_close
 
         # 0 이하 값이면 기본값 설정
@@ -176,8 +189,12 @@ def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
 
         # 일간 수익률 계산 (이전 종가가 없거나 0 이하면 0%로 처리)
         daily_pct = 0.0
-        if prev_close and prev_close > 0:
-            daily_pct = ((latest_close / prev_close) - 1.0) * 100
+        raw_prev_close = (
+            float(raw_close.iloc[-2]) if len(raw_close) >= 2 else float(raw_close.iloc[-1])
+        )
+        raw_latest_close = float(raw_close.iloc[-1])
+        if raw_prev_close and raw_prev_close > 0:
+            daily_pct = ((raw_latest_close / raw_prev_close) - 1.0) * 100
 
         # 점수 계산 (이동평균 대비 수익률, % 단위)
         score = 0.0
@@ -191,7 +208,7 @@ def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
         # 연속 상승일 계산
         streak = 0
         for price, ma_entry in zip(
-            reversed(close.iloc[-ma_period:]), reversed(ma.iloc[-ma_period:])
+            reversed(price_series.iloc[-ma_period:]), reversed(ma.iloc[-ma_period:])
         ):
             if pd.isna(ma_entry) or pd.isna(price) or price < ma_entry:
                 break

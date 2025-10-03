@@ -8,7 +8,6 @@ import streamlit as st
 
 from utils.recommendations import get_recommendations_dataframe
 from utils.settings_loader import get_country_settings
-from utils.tuning_config import DEFAULT_ROW_COLORS, TUNING_CONFIG
 from logic.strategies.maps.constants import DECISION_CONFIG
 
 
@@ -58,17 +57,7 @@ def _resolve_row_colors(country: str) -> dict[str, str]:
         if isinstance(cfg, dict) and cfg.get("background")
     }
 
-    # 튜닝 설정에서 오버라이드할 색상 정보 로드 (없으면 DEFAULT_ROW_COLORS 사용)
-    config = TUNING_CONFIG.get(country) or {}
-    override_colors = config.get("ROW_COLORS") or DEFAULT_ROW_COLORS
-
-    # copy to avoid mutating shared defaults & 병합
-    merged = {str(k).upper(): str(v) for k, v in base_colors.items() if v}
-    for key, value in (override_colors or {}).items():
-        if value:
-            merged[str(key).upper()] = str(value)
-
-    return merged
+    return base_colors
 
 
 def _style_rows_by_state(df: pd.DataFrame, *, country: str) -> pd.io.formats.style.Styler:

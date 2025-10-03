@@ -105,7 +105,7 @@
             {
                 "ticker": "ASX:IKO",
                 "name": "iShares MSCI South Korea ETF (AU)",
-                "recommend_enabled": true
+                "recommend_enabled": false
             }
         ]
     },

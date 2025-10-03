@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import numpy as np
 
 from logic.backtest.country_runner import DEFAULT_TEST_MONTHS_RANGE, run_country_backtest
 from logic.entry_point import StrategyRules
@@ -16,9 +17,29 @@ from utils.country_registry import get_strategy_rules
 from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day
 from utils.report import render_table_eaw
 from utils.stock_list_io import get_etfs
-from utils.tuning_config import TUNING_CONFIG
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
+
+TUNING_CONFIG: dict[str, dict] = {
+    "aus": {
+        "MA_RANGE": np.arange(10, 51, 1),
+        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
+        "TEST_MONTHS_RANGE": 12,
+    },
+    "kor": {
+        "MA_RANGE": np.arange(15, 31, 1),
+        "PORTFOLIO_TOPN": np.arange(7, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
+        "TEST_MONTHS_RANGE": 12,
+    },
+    "us": {
+        "MA_RANGE": np.arange(5, 31, 1),
+        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
+        "TEST_MONTHS_RANGE": 12,
+    },
+}
 
 
 def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:

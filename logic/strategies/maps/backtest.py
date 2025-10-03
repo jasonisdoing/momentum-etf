@@ -6,7 +6,7 @@
 - 단일 종목 백테스트: 개별 종목에 대한 백테스트
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set
 
 import pandas as pd
 
@@ -49,9 +49,15 @@ def _process_ticker_data(
     if len(df) < current_ma_period:
         return None
 
-    close_prices = df["Close"]
-    if isinstance(close_prices, pd.DataFrame):
-        close_prices = close_prices.iloc[:, 0]
+    price_series = None
+    if "unadjusted_close" in df.columns:
+        price_series = df["unadjusted_close"]
+    else:
+        price_series = df["Close"]
+
+    if isinstance(price_series, pd.DataFrame):
+        price_series = price_series.iloc[:, 0]
+    close_prices = price_series.astype(float)
 
     # 공통 함수 사용
     moving_average, buy_signal_active, consecutive_buy_days = calculate_moving_average_signals(
@@ -61,7 +67,7 @@ def _process_ticker_data(
 
     return {
         "df": df,
-        "close": df["Close"],
+        "close": close_prices,
         "ma": moving_average,
         "ma_score": ma_score,
         "buy_signal_days": consecutive_buy_days,
@@ -84,6 +90,8 @@ def run_portfolio_backtest(
     regime_behavior: str = "sell_all",
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
+    quiet: bool = False,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
     **kwargs,
 ) -> Dict[str, pd.DataFrame]:
     """
@@ -109,6 +117,11 @@ def run_portfolio_backtest(
     Returns:
         Dict[str, pd.DataFrame]: 종목별 백테스트 결과
     """
+
+    def _log(message: str) -> None:
+        if not quiet:
+            print(message)
+
     etf_ma_period = ma_period
     stock_ma_period = ma_period
     stop_loss_threshold = stop_loss_pct
@@ -187,6 +200,34 @@ def run_portfolio_backtest(
     if union_index.empty:
         return {}
 
+    normalized_union_index = union_index.normalize()
+
+    for ticker, ticker_metrics in metrics_by_ticker.items():
+        close_series = ticker_metrics["close"].reindex(union_index)
+        ma_series = ticker_metrics["ma"].reindex(union_index)
+        ma_score_series = ticker_metrics["ma_score"].reindex(union_index)
+        buy_signal_series = (
+            ticker_metrics["buy_signal_days"].reindex(union_index).fillna(0).astype(int)
+        )
+
+        ticker_metrics["close_series"] = close_series
+        ticker_metrics["close_values"] = close_series.to_numpy()
+        ticker_metrics["available_mask"] = close_series.notna().to_numpy()
+        ticker_metrics["ma_values"] = ma_series.to_numpy()
+        ticker_metrics["ma_score_values"] = ma_score_series.to_numpy()
+        ticker_metrics["buy_signal_series"] = buy_signal_series
+        ticker_metrics["buy_signal_values"] = buy_signal_series.to_numpy()
+
+    market_close_arr = market_ma_arr = None
+    if regime_filter_enabled and market_regime_df is not None and not market_regime_df.empty:
+        aligned_regime_df = market_regime_df.copy()
+        aligned_regime_df.index = aligned_regime_df.index.normalize()
+        aligned_regime_df = aligned_regime_df.reindex(normalized_union_index)
+        market_close_arr = aligned_regime_df["Close"].to_numpy()
+        market_ma_arr = aligned_regime_df["MA"].to_numpy()
+    else:
+        market_regime_df = None
+
     # 시뮬레이션 상태 변수 초기화
     position_state = {
         ticker: {
@@ -203,44 +244,50 @@ def run_portfolio_backtest(
 
     # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     total_days = len(union_index)
-    print(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다...")
+    _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다...")
 
     for i, dt in enumerate(union_index):
         # 진행률 표시 (10% 단위로)
         if i % max(1, total_days // 10) == 0 or i == total_days - 1:
             progress_pct = int((i + 1) / total_days * 100)
-            print(f"[백테스트] 진행률: {progress_pct}% ({i + 1}/{total_days}일)")
+            _log(f"[백테스트] 진행률: {progress_pct}% ({i + 1}/{total_days}일)")
+        if progress_callback is not None:
+            progress_callback(i + 1, total_days)
+
         # 당일 시작 시점 보유 수량 스냅샷(순매수/순매도 판단용)
         prev_holdings_map = {t: float(state["shares"]) for t, state in position_state.items()}
         buy_trades_today_map: Dict[str, List[Dict[str, float]]] = {}
         sell_trades_today_map: Dict[str, List[Dict[str, float]]] = {}
-        tickers_available_today = [
-            ticker
-            for ticker, ticker_metrics in metrics_by_ticker.items()
-            if dt in ticker_metrics["df"].index
-        ]
-        today_prices = {
-            ticker: (
-                float(ticker_metrics["close"].loc[dt])
-                if pd.notna(ticker_metrics["close"].loc[dt])
-                else None
-            )
-            for ticker, ticker_metrics in metrics_by_ticker.items()
-            if dt in ticker_metrics["close"].index
-        }
+
+        tickers_available_today: List[str] = []
+        today_prices: Dict[str, float] = {}
+        ma_today: Dict[str, float] = {}
+        score_today: Dict[str, float] = {}
+        buy_signal_today: Dict[str, int] = {}
+
+        for ticker, ticker_metrics in metrics_by_ticker.items():
+            available = bool(ticker_metrics["available_mask"][i])
+            price_val = ticker_metrics["close_values"][i]
+            price_float = float(price_val) if not pd.isna(price_val) else float("nan")
+            today_prices[ticker] = price_float
+            if available:
+                tickers_available_today.append(ticker)
+
+            ma_val = ticker_metrics["ma_values"][i]
+            score_val = ticker_metrics["ma_score_values"][i]
+            buy_signal_val = ticker_metrics["buy_signal_values"][i]
+
+            ma_today[ticker] = float(ma_val) if not pd.isna(ma_val) else float("nan")
+            score_today[ticker] = float(score_val) if not pd.isna(score_val) else float("nan")
+            buy_signal_today[ticker] = int(buy_signal_val) if not pd.isna(buy_signal_val) else 0
 
         # --- 시장 레짐 필터 적용 (리스크 오프 조건 확인) ---
         is_risk_off = False
-        dt_norm = pd.Timestamp(dt).normalize()  # 시간 정보를 제거하고 날짜만 사용
-
-        if regime_filter_enabled and market_regime_df is not None:
-            # 정규화된 날짜로 비교
-            if dt_norm in market_regime_df.index:
-                market_price = market_regime_df.loc[dt_norm, "Close"]
-                market_ma = market_regime_df.loc[dt_norm, "MA"]
-                if pd.notna(market_price) and pd.notna(market_ma) and market_price < market_ma:
-                    is_risk_off = True
-                    # print(f"[디버그] 리스크 오프 발생: {dt_norm}, 가격: {market_price:.2f}, MA: {market_ma:.2f}")  # 디버그용
+        if regime_filter_enabled and market_close_arr is not None:
+            market_price = market_close_arr[i]
+            market_ma = market_ma_arr[i]
+            if not pd.isna(market_price) and not pd.isna(market_ma) and market_price < market_ma:
+                is_risk_off = True
 
         force_regime_sell = is_risk_off and regime_behavior == "sell_all"
         allow_individual_sells = (not is_risk_off) or regime_behavior == "hold_block_buy"
@@ -256,10 +303,12 @@ def run_portfolio_backtest(
 
         # 총 평가금액(현금 + 주식)을 계산합니다.
         equity = cash + current_holdings_value
+
         # --- 1. 기본 정보 및 출력 행 생성 ---
         for ticker, ticker_metrics in metrics_by_ticker.items():
             position_snapshot = position_state[ticker]
-            price = today_prices.get(ticker)
+            price = today_prices[ticker]
+            available_today = ticker in tickers_available_today and not pd.isna(price)
 
             decision_out = "HOLD" if position_snapshot["shares"] > 0 else "WAIT"
             note = ""
@@ -269,50 +318,49 @@ def run_portfolio_backtest(
                 elif position_snapshot["shares"] == 0 and i < position_snapshot["buy_block_until"]:
                     note = "매수 쿨다운"
 
-            # 출력 행을 먼저 구성
-            if ticker in tickers_available_today:
-                daily_records_by_ticker[ticker].append(
-                    {
-                        "date": dt,
-                        "price": price,
-                        "shares": position_snapshot["shares"],
-                        "pv": position_snapshot["shares"] * (price if pd.notna(price) else 0),
-                        "decision": decision_out,
-                        "avg_cost": position_snapshot["avg_cost"],
-                        "trade_amount": 0.0,
-                        "trade_profit": 0.0,
-                        "trade_pl_pct": 0.0,
-                        "note": note,
-                        "signal1": ticker_metrics["ma"].get(dt),  # 이평선(값)
-                        "signal2": None,  # 고점대비
-                        "score": ticker_metrics["ma_score"].loc[dt],
-                        "filter": ticker_metrics["buy_signal_days"].get(dt),
-                    }
-                )
+            ma_value = ma_today[ticker]
+            score_value = score_today[ticker]
+            filter_value = buy_signal_today[ticker] if available_today else None
+
+            if available_today:
+                pv_value = position_snapshot["shares"] * price
+                record = {
+                    "date": dt,
+                    "price": price,
+                    "shares": position_snapshot["shares"],
+                    "pv": pv_value,
+                    "decision": decision_out,
+                    "avg_cost": position_snapshot["avg_cost"],
+                    "trade_amount": 0.0,
+                    "trade_profit": 0.0,
+                    "trade_pl_pct": 0.0,
+                    "note": note,
+                    "signal1": ma_value if not pd.isna(ma_value) else None,
+                    "signal2": None,
+                    "score": score_value if not pd.isna(score_value) else None,
+                    "filter": filter_value,
+                }
             else:
-                daily_records_by_ticker[ticker].append(
-                    {
-                        "date": dt,
-                        "price": position_snapshot["avg_cost"],
-                        "shares": position_snapshot["shares"],
-                        "pv": position_snapshot["shares"]
-                        * (
-                            position_snapshot["avg_cost"]
-                            if pd.notna(position_snapshot["avg_cost"])
-                            else 0.0
-                        ),
-                        "decision": "HOLD" if position_snapshot["shares"] > 0 else "WAIT",
-                        "avg_cost": position_snapshot["avg_cost"],
-                        "trade_amount": 0.0,
-                        "trade_profit": 0.0,
-                        "trade_pl_pct": 0.0,
-                        "note": "데이터 없음",
-                        "signal1": None,  # 이평선(값)
-                        "signal2": None,  # 고점대비
-                        "score": None,
-                        "filter": None,
-                    }
-                )
+                avg_cost = position_snapshot["avg_cost"]
+                pv_value = position_snapshot["shares"] * (avg_cost if pd.notna(avg_cost) else 0.0)
+                record = {
+                    "date": dt,
+                    "price": avg_cost,
+                    "shares": position_snapshot["shares"],
+                    "pv": pv_value,
+                    "decision": "HOLD" if position_snapshot["shares"] > 0 else "WAIT",
+                    "avg_cost": avg_cost,
+                    "trade_amount": 0.0,
+                    "trade_profit": 0.0,
+                    "trade_pl_pct": 0.0,
+                    "note": "데이터 없음",
+                    "signal1": ma_value if not pd.isna(ma_value) else None,
+                    "signal2": None,
+                    "score": score_value if not pd.isna(score_value) else None,
+                    "filter": None,
+                }
+
+            daily_records_by_ticker[ticker].append(record)
 
         # --- 2. 매도 로직 ---
         # (a) 시장 레짐 필터
@@ -328,17 +376,12 @@ def run_portfolio_backtest(
                             if held_state["avg_cost"] > 0
                             else 0.0
                         )
-                        # 순매도 집계
-                        sell_trades_today_map.setdefault(held_ticker, []).append(
-                            {"shares": float(qty), "price": float(price)}
-                        )
                         trade_profit = (
                             (price - held_state["avg_cost"]) * qty
                             if held_state["avg_cost"] > 0
                             else 0.0
                         )
 
-                        # 순매도 집계
                         sell_trades_today_map.setdefault(held_ticker, []).append(
                             {"shares": float(qty), "price": float(price)}
                         )
@@ -369,7 +412,7 @@ def run_portfolio_backtest(
                     ticker_state["shares"] > 0
                     and pd.notna(price)
                     and i >= ticker_state["sell_block_until"]
-                    and ticker in tickers_available_today
+                    and metrics_by_ticker[ticker]["available_mask"][i]
                 ):
                     decision = None
                     hold_ret = (
@@ -380,7 +423,7 @@ def run_portfolio_backtest(
 
                     if stop_loss_threshold is not None and hold_ret <= float(stop_loss_threshold):
                         decision = "CUT_STOPLOSS"
-                    elif price < ticker_metrics["ma"].loc[dt]:
+                    elif price < ma_today[ticker]:
                         decision = "SELL_TREND"
 
                     if decision:
@@ -421,18 +464,17 @@ def run_portfolio_backtest(
             # 1. 매수 후보 선정
             buy_ranked_candidates = []
             for candidate_ticker in tickers_available_today:
-                candidate_metrics = metrics_by_ticker.get(candidate_ticker)
                 ticker_state_cand = position_state[candidate_ticker]
-                buy_signal_days_today = candidate_metrics["buy_signal_days"].get(dt, 0)
+                buy_signal_days_today = buy_signal_today.get(candidate_ticker, 0)
 
                 if (
                     ticker_state_cand["shares"] == 0
                     and i >= ticker_state_cand["buy_block_until"]
                     and buy_signal_days_today > 0
                 ):
-                    score_cand = candidate_metrics["ma_score"].get(dt, -float("inf")) or -float(
-                        "inf"
-                    )
+                    score_cand = score_today.get(candidate_ticker, float("nan"))
+                    if pd.isna(score_cand):
+                        score_cand = -float("inf")
 
                     buy_ranked_candidates.append((score_cand, candidate_ticker))
             buy_ranked_candidates.sort(reverse=True)
@@ -451,7 +493,8 @@ def run_portfolio_backtest(
                 }
 
                 helper_candidates = [
-                    {"tkr": ticker, "score": score} for score, ticker in buy_ranked_candidates
+                    {"tkr": ticker, "score": float(score)}
+                    for score, ticker in buy_ranked_candidates
                 ]
 
                 selected_candidates, rejected_candidates = select_candidates_by_category(
@@ -548,17 +591,15 @@ def run_portfolio_backtest(
                 held_stocks_with_scores = []
                 for held_ticker, held_position in position_state.items():
                     if held_position["shares"] > 0:
-                        held_metrics = metrics_by_ticker.get(held_ticker)
-                        if held_metrics and dt in held_metrics["ma_score"].index:
-                            score_h = held_metrics["ma_score"].loc[dt]
-                            if pd.notna(score_h):
-                                held_stocks_with_scores.append(
-                                    {
-                                        "ticker": held_ticker,
-                                        "score": score_h,
-                                        "category": ticker_to_category.get(held_ticker),
-                                    }
-                                )
+                        score_h = score_today.get(held_ticker, float("nan"))
+                        if not pd.isna(score_h):
+                            held_stocks_with_scores.append(
+                                {
+                                    "ticker": held_ticker,
+                                    "score": score_h,
+                                    "category": ticker_to_category.get(held_ticker),
+                                }
+                            )
 
                 held_stocks_with_scores.sort(key=lambda x: x["score"])
 
@@ -804,9 +845,8 @@ def run_portfolio_backtest(
             risk_off_candidates = []
             if cash > 0:
                 for candidate_ticker in tickers_available_today:
-                    candidate_metrics = metrics_by_ticker.get(candidate_ticker)
                     ticker_state_cand = position_state[candidate_ticker]
-                    buy_signal_days_today = candidate_metrics["buy_signal_days"].get(dt, 0)
+                    buy_signal_days_today = buy_signal_today.get(candidate_ticker, 0)
                     if (
                         ticker_state_cand["shares"] == 0
                         and i >= ticker_state_cand["buy_block_until"]

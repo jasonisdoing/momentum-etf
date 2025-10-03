@@ -24,7 +24,7 @@ from utils.data_loader import get_latest_trading_day, fetch_ohlcv
 from utils.stock_list_io import get_etfs
 
 DEFAULT_TEST_MONTHS_RANGE = 12
-DEFAULT_INITIAL_CAPITAL = 100_000_000.0
+DEFAULT_INITIAL_CAPITAL = 100_000_000
 
 
 @dataclass
@@ -84,18 +84,22 @@ def run_country_backtest(
     quiet: bool = False,
     prefetched_data: Optional[Mapping[str, pd.DataFrame]] = None,
     override_settings: Optional[Dict[str, Any]] = None,
-    strategy_override: Optional[StrategyRules] = None,
+    strategy_override: Optional[StrategyRules] = None,  # type: ignore
 ) -> CountryBacktestResult:
     """국가 코드를 기반으로 백테스트를 실행합니다."""
 
-    print(f"[백테스트] {country.upper()} 백테스트를 시작합니다...")
+    def _log(message: str) -> None:
+        if not quiet:
+            print(message)
+
+    _log(f"[백테스트] {country.upper()} 백테스트를 시작합니다...")
 
     override_settings = override_settings or {}
     country = (country or "").strip().lower()
     if not country:
         raise CountrySettingsError("국가 코드를 지정해야 합니다.")
 
-    print("[백테스트] 설정을 로드하는 중...")
+    _log("[백테스트] 설정을 로드하는 중...")
     country_settings = get_country_settings(country)
     base_strategy_rules = get_strategy_rules(country)
     strategy_rules = StrategyRules.from_mapping(base_strategy_rules.to_dict())
@@ -124,41 +128,37 @@ def run_country_backtest(
         precision_settings,
     )
 
-    print(f"[백테스트] {country.upper()} ETF 목록을 로드하는 중...")
+    _log(f"[백테스트] {country.upper()} ETF 목록을 로드하는 중...")
     etf_universe = get_etfs(country)
     if not etf_universe:
         raise CountrySettingsError(f"'data/stocks/{country}.json' 파일에서 종목을 찾을 수 없습니다.")
-    print(f"[백테스트] {len(etf_universe)}개의 ETF를 찾았습니다.")
+    _log(f"[백테스트] {len(etf_universe)}개의 ETF를 찾았습니다.")
 
     ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
     ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금", "category": "-"}
 
     portfolio_topn = strategy_rules.portfolio_topn
     holdings_limit = int(strategy_settings.get("MAX_PER_CATEGORY", 0) or 0)
-    print(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}, 카테고리당 최대 보유 수: {holdings_limit}")
+    _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}, 카테고리당 최대 보유 수: {holdings_limit}")
 
-    print("[백테스트] 백테스트 파라미터를 구성하는 중...")
+    _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
     backtest_kwargs = _build_backtest_kwargs(
         country=country,
         strategy_rules=strategy_rules,
         common_settings=common_settings,
         strategy_settings=strategy_settings,
         prefetched_data=prefetched_data,
+        quiet=quiet,
     )
 
     date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
 
-    if not quiet:
-        print(
-            f"[백테스트] {country.upper()} 백테스트 실행 | 기간: {date_range[0]}~{date_range[1]} | "
-            f"초기 자본: {initial_capital_value:,.0f}"
-        )
+    _log(
+        f"[백테스트] {country.upper()} 백테스트 실행 | 기간: {date_range[0]}~{date_range[1]} | "
+        f"초기 자본: {initial_capital_value:,.0f}"
+    )
 
-    print("[백테스트] 포트폴리오 백테스트 실행 중...")
-    # 예상 처리 시간 표시 (대략적인 계산)
-    etf_count = len(etf_universe)
-    estimated_seconds = max(10, etf_count * months_range * 0.3)  # ETF당 월별로 0.3초 가정
-    print(f"[백테스트] 예상 처리 시간: 약 {estimated_seconds:.0f}초 ({etf_count}개 ETF, {months_range}개월)")
+    _log("[백테스트] 포트폴리오 백테스트 실행 중...")
 
     ticker_timeseries = (
         run_portfolio_backtest(
@@ -172,7 +172,7 @@ def run_country_backtest(
         )
         or {}
     )
-    print(f"[백테스트] 백테스트 완료. {len(ticker_timeseries)}개 종목의 데이터가 생성되었습니다.")
+    _log(f"[백테스트] 백테스트 완료. {len(ticker_timeseries)}개 종목의 데이터가 생성되었습니다.")
 
     if not ticker_timeseries:
         raise RuntimeError("백테스트 결과가 비어 있습니다. 유효한 데이터가 없습니다.")
@@ -207,7 +207,7 @@ def run_country_backtest(
         start_date,
     )
 
-    print("[백테스트] 설정 스냅샷을 생성하는 중...")
+    _log("[백테스트] 설정 스냅샷을 생성하는 중...")
     settings_snapshot = _build_settings_snapshot(
         country=country,
         strategy_rules=strategy_rules,
@@ -294,6 +294,7 @@ def _build_backtest_kwargs(
     common_settings: Mapping[str, Any],
     strategy_settings: Mapping[str, Any],
     prefetched_data: Optional[Mapping[str, pd.DataFrame]],
+    quiet: bool,
 ) -> Dict[str, Any]:
     stop_loss_pct = -abs(float(common_settings["HOLDING_STOP_LOSS_PCT"]))
     cooldown_days = int(strategy_settings.get("COOLDOWN_DAYS", 0) or 0)
@@ -307,6 +308,7 @@ def _build_backtest_kwargs(
         "regime_filter_ma_period": int(common_settings["MARKET_REGIME_FILTER_MA_PERIOD"]),
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
+        "quiet": quiet,
     }
 
     clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
@@ -693,7 +695,7 @@ def _build_ticker_summaries(
 def _build_settings_snapshot(
     *,
     country: str,
-    strategy_rules: StrategyRules,
+    strategy_rules: StrategyRules,  # type: ignore
     common_settings: Mapping[str, Any],
     strategy_settings: Mapping[str, Any],
     initial_capital: float,

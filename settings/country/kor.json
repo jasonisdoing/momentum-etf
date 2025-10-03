@@ -2,7 +2,7 @@
     "icon": "🇰🇷",
     "name": "한국 ETF",
     "slack_channel": "C09FAU2NHM2",
-    "initial_date": "2025-10-01",
+    "initial_date": "2025-09-01",
     "strategy": {
         "MA_PERIOD": 15,
         "PORTFOLIO_TOPN": 10,

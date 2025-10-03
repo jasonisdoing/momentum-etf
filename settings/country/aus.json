@@ -2,9 +2,9 @@
     "icon": "🇦🇺",
     "name": "호주 ETF",
     "slack_channel": "C09FAU7SKA8",
-    "initial_date": "2025-10-01",
+    "initial_date": "2025-09-01",
     "strategy": {
-        "MA_PERIOD": 15,
+        "MA_PERIOD": 30,
         "PORTFOLIO_TOPN": 7,
         "REPLACE_SCORE_THRESHOLD": 0.5,
         "COOLDOWN_DAYS": 1,
