@@ -84,6 +84,7 @@ def run_country_backtest(
     quiet: bool = False,
     prefetched_data: Optional[Mapping[str, pd.DataFrame]] = None,
     override_settings: Optional[Dict[str, Any]] = None,
+    strategy_override: Optional[StrategyRules] = None,
 ) -> CountryBacktestResult:
     """국가 코드를 기반으로 백테스트를 실행합니다."""
 
@@ -96,10 +97,21 @@ def run_country_backtest(
 
     print("[백테스트] 설정을 로드하는 중...")
     country_settings = get_country_settings(country)
-    strategy_rules = StrategyRules.from_mapping(get_strategy_rules(country).to_dict())
+    base_strategy_rules = get_strategy_rules(country)
+    strategy_rules = StrategyRules.from_mapping(base_strategy_rules.to_dict())
     precision_settings = get_country_precision(country)
-    strategy_settings = get_country_strategy(country)
+    strategy_settings = dict(get_country_strategy(country))
     common_settings = get_common_file_settings()
+
+    if strategy_override is not None:
+        strategy_rules = StrategyRules.from_values(
+            ma_period=strategy_override.ma_period,
+            portfolio_topn=strategy_override.portfolio_topn,
+            replace_threshold=strategy_override.replace_threshold,
+        )
+        strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
+        strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
+        strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
 
     months_range = _resolve_months_range(months_range, override_settings)
     end_date = _resolve_end_date(country, override_settings)

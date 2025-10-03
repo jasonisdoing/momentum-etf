@@ -53,7 +53,6 @@ pip install -r requirements.txt
 `.env` 파일을 생성하여 다음 변수들을 설정할 수 있습니다:
 ```env
 MONGO_DB_CONNECTION_STRING=mongodb://localhost:27017/momentum_etf
-GOOGLE_API_KEY=your_google_api_key
 KOR_SLACK_WEBHOOK=your_slack_webhook_url
 AUS_SLACK_WEBHOOK=your_slack_webhook_url
 ```
@@ -88,25 +87,22 @@ python run.py
 ### 2) 실시간 추천 조회 (CLI)
 과거 시뮬레이션 없이 "현재 보유 + 오늘 추천"를 바탕으로 다음 거래일에 대한 매매 추천를 제안합니다.
 
+```bash
+python recommend.py <국가코드> [--date YYYY-MM-DD] [--output 경로]
+```
 
 ### 3) 백테스트 실행 (CLI)
 과거 구간에 대해 백테스트를 실행합니다.
 
 ```bash
-python cli.py <계좌코드> --test
-```
-
-예시:
-```bash
-python cli.py b1 --test
-python cli.py m1 --test
+python backtest.py <국가코드> [--output 경로]
 ```
 
 ### 4) 파라미터 튜닝 (CLI)
-`cli.py`를 통해 파라미터 튜닝을 실행하여 각 전략의 최적 파라미터를 찾습니다.
+`tune.py`를 통해 파라미터 튜닝을 실행하여 각 전략의 최적 파라미터를 찾습니다.
 
 ```bash
-python cli.py <국가코드> --tune
+python tune.py <국가코드> [--output 경로]
 ```
 
 **주의사항:**
@@ -123,11 +119,11 @@ python cli.py <국가코드> --tune
   - 경로: `logs/YYYY-MM-DD.log` (`logic/recommend/logger.py`)
   - 내용: 추천 생성 과정의 디테일/디버그 로그
 - **백테스트 로그**
-  - 경로: `logs/backtest_{country}.log`
-  - 트리거: `cli.py <country> --backtest` 실행 시 `logic/backtest/country_runner.py`에서 파일 로깅
+  - 경로: `data/results/backtest_{country}.txt` (기본값)
+  - 트리거: `python backtest.py <country>` 실행 시 자동 생성
 - **튜닝 로그**
-  - 경로: `logs/tune_{country}.log`
-  - 트리거: `cli.py <country> --tune` (별도 프로세스 실행)
+  - 경로: `data/results/tune_{country}.txt` (기본값)
+  - 트리거: `python tune.py <country>` 실행 시 자동 생성
 
 ### 5) ETF 섹터 분류 (AI 사용)
 `scripts/categorize_etf.py` 스크립트를 실행하여 `data/<국가코드>/etf_raw.txt` 파일의 ETF들을 AI를 이용해 섹터별로 자동 분류하고 `data/<국가코드>/etf_categorized.csv` 파일에 저장합니다.
@@ -136,9 +132,6 @@ python cli.py <국가코드> --tune
 python scripts/categorize_etf.py <국가코드>
 ```
 
-**사전 준비:**
-- `pip install google-generativeai python-dotenv` 라이브러리 설치 필요
-- Google AI Studio에서 API 키 발급 후 `.env` 파일에 `GOOGLE_API_KEY` 설정
 
 ### 6) 스케줄러로 자동 실행 (APScheduler)
 장 마감 이후 자동으로 현황을 계산하고(교체매매 추천 포함) 슬랙(Slack)으로 알림을 보낼 수 있습니다.

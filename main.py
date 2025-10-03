@@ -20,7 +20,7 @@ def load_country_recommendations(country: str) -> tuple[pd.DataFrame | None, str
     if not country_norm:
         return None, "국가 코드가 필요합니다."
 
-    file_path = DATA_DIR / f"{country_norm}.json"
+    file_path = DATA_DIR / f"recommendation_{country_norm}.json"
     if not file_path.exists():
         return None, f"데이터 파일을 찾을 수 없습니다: {file_path}"
 

@@ -236,7 +236,7 @@ def compose_recommendation_slack_message(
     else:
         base_date_str = "N/A"
 
-    headline = f"[{APP_LABEL}][{country.upper()}] 추천 갱신 ({base_date_str})"
+    headline = f"[{APP_LABEL}] 종목 추천 정보가 갱신되었습니다. ({base_date_str})"
     dashboard_url = (
         "http://localhost:8501/aus"
         if country.strip().lower() == "aus"

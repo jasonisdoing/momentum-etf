@@ -33,7 +33,7 @@ def load_recommendations(country: str) -> list[dict[str, Any]]:
 
     # 캐시 무효화를 위해 파일의 마지막 수정 시간을 확인
     normalized_country = country.strip().lower()
-    path = _DATA_DIR / f"{normalized_country}.json"
+    path = _DATA_DIR / f"recommendation_{normalized_country}.json"
 
     # 파일이 존재하지 않으면 빈 리스트 반환
     if not path.exists():

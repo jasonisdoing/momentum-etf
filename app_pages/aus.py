@@ -15,7 +15,7 @@ except Exception:
     page_icon = "🇦🇺"
 
 st.title(f"{page_icon} {page_title}")
-st.caption("data/results/aus.json 기반")
+st.caption("data/results/recommendation_aus.json 기반")
 
 df, updated_at = load_country_recommendations("aus")
 

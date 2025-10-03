@@ -7,8 +7,8 @@ MomentumEtf 프로젝트의 웹 애플리케이션 실행 파일입니다.
 [사용법]
 python run.py 또는 streamlit run Main.py
 
-백테스트, 추천 조회 등 다른 CLI 기능은 `cli.py`를 사용하세요.
-(예: python cli.py kor --test)
+추천/백테스트/튜닝 등의 CLI 작업은 각 전용 스크립트를 사용하세요.
+(예: python recommend.py kor, python backtest.py kor, python tune.py kor)
 """
 
 import os

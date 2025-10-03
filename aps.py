@@ -107,7 +107,7 @@ def _save_recommendation_result(country: str, report: RecommendationReport) -> P
     """Persist recommendation results to JSON for downstream consumers."""
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = RESULTS_DIR / f"{country}.json"
+    output_path = RESULTS_DIR / f"recommendation_{country}.json"
 
     try:
         safe_payload = _make_json_safe(report.recommendations)
@@ -352,7 +352,7 @@ def main():
 
     scheduler = BlockingScheduler()
     # 1. recommendation_cron 와 notify_cron 이 겹치는 경우: 작업도 실행되고, 슬랙도 발송
-    # 2. python cli.py --recommendation 로 실행되는 경우: 작업도 실행되고, 슬랙도 발송
+    # 2. python recommend.py 로 실행되는 경우: 작업도 실행되고, 슬랙도 발송
     # 3. recommendation_cron 에는 해당되지만 notify_cron 에 해당 안되는 경우: 작업은 실행되고, 슬랙은 발송안됨
     cron_default = "0 0 * * *"
     tz_default = "Asia/Seoul"
