@@ -480,23 +480,8 @@ def generate_daily_recommendations_for_portfolio(
                 d["row"][-1] = _format_cooldown_phrase("최근 매도", buy_info.get("last_sell"))
                 d["buy_signal"] = False
 
-    # --- 최종 필터링: 카테고리별 1등이 아닌 WAIT 종목 제거 ---
-    best_wait_by_category = {}
-    for cand in wait_candidates_raw:
-        category = etf_meta.get(cand["tkr"], {}).get("category")
-        key = category if (category and category != "TBD") else f"__i_{cand['tkr']}"
-        if key not in best_wait_by_category or cand["score"] > best_wait_by_category[key]["score"]:
-            best_wait_by_category[key] = cand
-
-    best_wait_tickers = {cand["tkr"] for cand in best_wait_by_category.values()}
-
-    # 최종 decisions 리스트에서 카테고리 1등이 아닌 WAIT 종목을 제거합니다.
-    final_decisions = []
-    for d in decisions:
-        # WAIT 상태이고, buy_signal이 있으며, best_wait_tickers에 없는 종목은 제외
-        if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] not in best_wait_tickers:
-            continue
-        final_decisions.append(d)
+    # 최종 목록에서는 WAIT 종목도 모두 노출해, 카테고리별 대표만 보여주는 형태를 피한다.
+    final_decisions = list(decisions)
 
     # 포트폴리오가 가득 찼을 때, 매수 추천되지 않은 WAIT 종목에 사유 기록
     if slots_to_fill <= 0:

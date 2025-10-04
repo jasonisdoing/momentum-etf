@@ -410,6 +410,28 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
     return end_dt.normalize()
 
 
+def get_next_trading_day(
+    country: str,
+    reference_date: Optional[pd.Timestamp] = None,
+    *,
+    search_horizon_days: int = 30,
+) -> Optional[pd.Timestamp]:
+    """reference_date 이후의 다음 거래일을 반환한다."""
+
+    country_code = (country or "").strip().lower()
+    ref = (reference_date or pd.Timestamp.now()).normalize()
+    search_end = ref + pd.DateOffset(days=search_horizon_days)
+
+    trading_days = get_trading_days(
+        ref.strftime("%Y-%m-%d"), search_end.strftime("%Y-%m-%d"), country_code
+    )
+    for day in trading_days:
+        day_norm = pd.Timestamp(day).normalize()
+        if day_norm > ref:
+            return day_norm
+    return None
+
+
 def fetch_ohlcv(
     ticker: str,
     country: str = "kor",

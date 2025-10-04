@@ -14,12 +14,8 @@
         "static": {
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
-            "HOLDING_STOP_LOSS_PCT": 10
+            "HOLDING_STOP_LOSS_PCT": 10,
+            "TRIM_DOWN_SELL_LIMIT": 6
         }
-    },
-    "precision": {
-        "currency": "KRW",
-        "qty_precision": 0,
-        "price_precision": 0
     }
 }

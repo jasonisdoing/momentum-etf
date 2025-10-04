@@ -48,8 +48,8 @@ def load_account_recommendations(
     return df, updated_at, country_code
 
 
-TABLE_VISIBLE_ROWS = 21  # header 1줄 + 내용 20줄
-TABLE_ROW_HEIGHT = 32
+TABLE_VISIBLE_ROWS = 16  # 헤더 1줄 + 내용 15줄
+TABLE_ROW_HEIGHT = 33
 TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT
 
 
@@ -112,6 +112,8 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
 
     if "일간(%)" in df.columns:
         styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, "일간(%)"])
+    if "평가(%)" in df.columns:
+        styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, "평가(%)"])
 
     return styled
 
@@ -133,6 +135,7 @@ def render_recommendation_table(df: pd.DataFrame, *, account_id: str, country_co
             "보유일": st.column_config.TextColumn("보유일", width="small"),
             "현재가": st.column_config.TextColumn("현재가", width="small"),
             "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),  # 수치형이라 기본적으로 오른쪽 정렬됨
+            "평가(%)": st.column_config.NumberColumn("평가(%)", width="small"),
             "점수": st.column_config.NumberColumn("점수", width="small"),  # 문자열 대신 수치형 컬럼으로 표시
             "문구": st.column_config.TextColumn("문구", width="large"),  # 기본값 -> large
         },

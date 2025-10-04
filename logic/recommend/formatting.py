@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, Any, Callable
 
 from utils.report import format_kr_money
+from utils.settings_loader import get_account_precision
 
 
 def _load_display_precision() -> Dict[str, int]:
@@ -14,27 +15,19 @@ def _load_display_precision() -> Dict[str, int]:
     }
 
 
-def load_account_precision(country: str) -> Dict[str, Any]:
-    """계정 설정에서 통화·정밀도 정보를 불러온다."""
-    from utils.account_registry import get_account_settings
+def load_account_precision(country_code: str) -> Dict[str, Any]:
+    """정밀도 설정을 반환한다."""
 
-    # 계정 설정을 불러온다.
-    account_settings = get_account_settings(country)
-    if not account_settings:
-        raise KeyError(f"Country settings not found for '{country}'")
+    precision_settings = get_account_precision(country_code)
 
-    # 정밀도 세부 설정을 추출한다.
-    precision_settings = account_settings.get("precision", {})
-    if not precision_settings:
-        raise KeyError(f"Precision settings not found in {country} configuration")
-
-    # 기본값을 구성한다.
     return {
         "header_currency": precision_settings.get("currency", "KRW"),
         "stock_currency": precision_settings.get("currency", "KRW"),
         "stock_qty_precision": int(precision_settings.get("qty_precision", 0)),
         "stock_price_precision": int(precision_settings.get("price_precision", 0)),
-        "stock_amt_precision": 0,  # 명시되지 않으면 0으로 간주
+        "stock_amt_precision": int(precision_settings.get("amt_precision", 0))
+        if "amt_precision" in precision_settings
+        else 0,
     }
 
 

@@ -30,6 +30,7 @@ from utils.data_loader import (
     fetch_ohlcv,
     fetch_ohlcv_for_tickers,
     get_latest_trading_day,
+    get_next_trading_day,
     count_trading_days,
 )
 from utils.db_manager import get_db_connection
@@ -312,7 +313,16 @@ def _resolve_base_date(account_id: str, date_str: Optional[str]) -> pd.Timestamp
     else:
         account_settings = get_account_settings(account_id)
         country_code = (account_settings.get("country_code") or account_id).strip().lower()
-        base = get_latest_trading_day(country_code)
+        today_norm = pd.Timestamp.now().normalize()
+        latest_trading_day = get_latest_trading_day(country_code)
+        latest_norm = latest_trading_day.normalize()
+
+        if latest_norm >= today_norm:
+            base = latest_norm
+        else:
+            next_trading_day = get_next_trading_day(country_code, reference_date=today_norm)
+            base = next_trading_day if next_trading_day is not None else latest_norm
+
     return base.normalize()
 
 
@@ -351,6 +361,72 @@ def _format_sell_replace_phrase(phrase: str, *, etf_meta: Dict[str, Dict[str, An
     target_name = target_meta.get("name") or target_ticker
 
     return f"교체매도 {ratio_text} - {target_name}({target_ticker})로 교체"
+
+
+def _normalize_buy_date(value: Any) -> Optional[pd.Timestamp]:
+    """Convert various buy date formats into a normalized pandas Timestamp."""
+
+    if value in (None, "", "-"):
+        return None
+    try:
+        ts = pd.to_datetime(value)
+    except Exception:
+        return None
+
+    if pd.isna(ts):
+        return None
+
+    if getattr(ts, "tzinfo", None) is not None:
+        try:
+            ts = ts.tz_convert(None)  # type: ignore[attr-defined]
+        except AttributeError:
+            ts = ts.tz_localize(None)  # type: ignore[attr-defined]
+    return ts.normalize()
+
+
+def _resolve_buy_price(
+    ticker_data: Dict[str, Any],
+    buy_date: Optional[pd.Timestamp],
+    *,
+    fallback_price: Optional[float] = None,
+) -> Optional[float]:
+    """Pick the closest available closing price on or before the buy date."""
+
+    if buy_date is None:
+        return fallback_price
+
+    close_series = ticker_data.get("close")
+    if not isinstance(close_series, pd.Series) or close_series.empty:
+        return fallback_price
+
+    series = close_series.dropna().copy()
+    if series.empty:
+        return fallback_price
+
+    try:
+        index = pd.to_datetime(series.index)
+    except Exception:
+        return fallback_price
+
+    if getattr(index, "tz", None) is not None:
+        index = index.tz_localize(None)  # type: ignore[attr-defined]
+    index = index.normalize()
+    normalized_series = pd.Series(series.values, index=index)
+    normalized_series = normalized_series.sort_index()
+    normalized_series = normalized_series[~normalized_series.index.duplicated(keep="last")]
+
+    if normalized_series.empty:
+        return fallback_price
+
+    prior_or_same = normalized_series.loc[normalized_series.index <= buy_date]
+    if not prior_or_same.empty:
+        return float(prior_or_same.iloc[-1])
+
+    after = normalized_series.loc[normalized_series.index >= buy_date]
+    if not after.empty:
+        return float(after.iloc[0])
+
+    return fallback_price
 
 
 def _fetch_trades_for_date(account_id: str, base_date: pd.Timestamp) -> List[Dict[str, Any]]:
@@ -428,11 +504,20 @@ def generate_account_recommendation_report(
     max_per_category = int(
         strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0
     )
+    trim_down_sell_limit = int(
+        strategy_static.get("TRIM_DOWN_SELL_LIMIT", strategy_cfg.get("TRIM_DOWN_SELL_LIMIT", 0))
+        or 0
+    )
 
     stop_loss_pct = -abs(float(stop_loss_raw))
 
     # ETF 목록 가져오기
-    etf_universe = get_etfs(country_code)
+    etf_universe = get_etfs(country_code) or []
+    logger.info(
+        "[%s] 추천 Universe 로딩 완료: %d개 종목 데이터 준비",
+        account_id.upper(),
+        len(etf_universe),
+    )
     disabled_tickers = {
         str(stock.get("ticker") or "").strip().upper()
         for stock in etf_universe
@@ -528,9 +613,16 @@ def generate_account_recommendation_report(
             # 최신 가격 정보
             latest_close = df["Close"].iloc[-1]
             prev_close = df["Close"].iloc[-2] if len(df) > 1 else latest_close
+            latest_data_date = pd.to_datetime(df.index[-1]).normalize()
+            base_norm = base_date.normalize()
+
             daily_pct = 0.0
             if prev_close and prev_close > 0:
                 daily_pct = ((latest_close / prev_close) - 1.0) * 100
+
+            if base_norm > latest_data_date:
+                prev_close = latest_close
+                daily_pct = 0.0
 
             # 이동평균 신호 계산
             from utils.indicators import calculate_moving_average_signals, calculate_ma_score
@@ -787,6 +879,25 @@ def generate_account_recommendation_report(
         )
         score_val = decision.get("score", 0.0)
 
+        evaluation_pct_val: float = 0.0
+        if holding_days_val and holding_days_val > 0 and is_currently_held:
+            buy_date_raw = consecutive_holding_info.get(ticker, {}).get("buy_date")
+            if not buy_date_raw:
+                buy_date_raw = holdings.get(ticker, {}).get("buy_date")
+
+            buy_date_norm = _normalize_buy_date(buy_date_raw)
+            if buy_date_norm is None and bought_today:
+                buy_date_norm = base_date.normalize()
+
+            buy_price = _resolve_buy_price(
+                ticker_data,
+                buy_date_norm,
+                fallback_price=float(price_val) if price_val else None,
+            )
+
+            if buy_price and buy_price > 0 and price_val:
+                evaluation_pct_val = round(((float(price_val) / buy_price) - 1.0) * 100, 2)
+
         filter_days = decision.get("filter")
         if filter_days is None:
             filter_days_row = decision.get("row") or []
@@ -816,6 +927,7 @@ def generate_account_recommendation_report(
             "state": state,
             "price": price_val,
             "daily_pct": daily_pct_val,
+            "evaluation_pct": evaluation_pct_val,
             "score": score_val,
             "streak": streak_val,
             "base_date": base_date.strftime("%Y-%m-%d"),
@@ -866,6 +978,70 @@ def generate_account_recommendation_report(
             },
         )
 
+    if trim_down_sell_limit > 0:
+        sell_state_set = {
+            "SELL_TREND",
+            "SELL_REPLACE",
+            "CUT_STOPLOSS",
+            "SELL_REGIME_FILTER",
+            "SELL_TRIM_DOWN",
+        }
+        buy_state_set = {"BUY", "BUY_REPLACE"}
+
+        planned_sell_count = sum(
+            1 for item in results if (item.get("state") or "").upper() in sell_state_set
+        )
+        planned_buy_count = sum(
+            1 for item in results if (item.get("state") or "").upper() in buy_state_set
+        )
+        projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
+
+        if projected_holdings > portfolio_topn:
+            trim_needed = projected_holdings - portfolio_topn
+            trim_count = min(trim_down_sell_limit, trim_needed)
+
+            if trim_count > 0:
+
+                def _trim_sort_key(entry: Dict[str, Any]) -> tuple[float, float, int]:
+                    score_raw = entry.get("score")
+                    try:
+                        score_val = float(score_raw)
+                    except (TypeError, ValueError):
+                        score_val = float("inf")
+
+                    eval_raw = entry.get("evaluation_pct")
+                    try:
+                        eval_val = float(eval_raw)
+                    except (TypeError, ValueError):
+                        eval_val = float("inf")
+
+                    holding_days = entry.get("holding_days")
+                    try:
+                        holding_val = int(holding_days)
+                    except (TypeError, ValueError):
+                        holding_val = 0
+
+                    return (score_val, eval_val, -holding_val)
+
+                trim_candidates: list[Dict[str, Any]] = []
+                for item in results:
+                    ticker_key = str(item.get("ticker") or "").strip().upper()
+                    if not ticker_key or ticker_key not in holdings:
+                        continue
+                    state_key = (item.get("state") or "").upper()
+                    if state_key not in {"HOLD"}:
+                        continue
+                    trim_candidates.append(item)
+
+                trim_candidates.sort(key=_trim_sort_key)
+
+                phrase_template = DECISION_MESSAGES.get("SELL_TRIM_DOWN", "✂️ 포지션 축소")
+                for item in trim_candidates[:trim_count]:
+                    item["state"] = "SELL_TRIM_DOWN"
+                    item["phrase"] = phrase_template
+
+                # projected_holdings는 레포트 출력용으로만 사용되므로 이후 계산은 생략
+
     # rank를 점수 순서대로 재설정
     results.sort(key=lambda x: x["score"], reverse=True)
     for i, item in enumerate(results, 1):
@@ -892,6 +1068,7 @@ def generate_account_recommendation_report(
         "점수",
         "현재가",
         "일간수익률",
+        "평가(%)",
         "보유일",
         "지속",
         "비중",
@@ -913,6 +1090,7 @@ def generate_account_recommendation_report(
                 item.get("score"),
                 item.get("price"),
                 item.get("daily_pct"),
+                item.get("evaluation_pct"),
                 item.get("holding_days"),
                 item.get("streak"),
                 item.get("weight", 0.0),
