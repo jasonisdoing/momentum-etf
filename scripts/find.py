@@ -7,6 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
+from utils.logger import get_app_logger
+
 """
 find.py
 
@@ -66,16 +68,23 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
     """
     지정된 등락률 이상 상승한 종목들을 보여줍니다.
     """
+    logger = get_app_logger()
     try:
         latest_day = get_latest_trading_day()
         type_str = f" ({asset_type.upper()})"
-        print(f"기준일: {latest_day[:4]}-{latest_day[4:6]}-{latest_day[6:]}{type_str}\n")
+        logger.info(
+            "기준일: %s-%s-%s%s",
+            latest_day[:4],
+            latest_day[4:6],
+            latest_day[6:],
+            type_str,
+        )
 
         df_change = pd.DataFrame()
 
         # 1. ETF 데이터 가져오기
         if asset_type == "etf":
-            print("ETF의 가격 변동 정보를 가져오는 중입니다...")
+            logger.info("ETF의 가격 변동 정보를 가져오는 중입니다...")
             try:
                 # 등락률 계산을 위해 이전 거래일이 필요합니다.
                 prev_day = get_previous_trading_day(latest_day)
@@ -103,11 +112,11 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
                     df_etf_filtered = df_merged[["등락률"]].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
                     df_change = pd.concat([df_change, df_etf_filtered], ignore_index=True)
             except Exception as e:
-                print(f"경고: ETF 정보 조회 중 오류가 발생했습니다: {e}")
+                logger.warning("ETF 정보 조회 중 오류가 발생했습니다: %s", e)
 
         # 2. 일반 주식 데이터 가져오기
         if asset_type == "stock":
-            print("일반 주식의 가격 변동 정보를 가져오는 중입니다...")
+            logger.info("일반 주식의 가격 변동 정보를 가져오는 중입니다...")
             try:
                 # get_market_price_change_by_ticker는 '등락률' 컬럼을 포함합니다.
                 df_stock = stock.get_market_price_change_by_ticker(
@@ -117,19 +126,23 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
                 df_stock_filtered = df_stock[["등락률"]].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
                 df_change = pd.concat([df_change, df_stock_filtered], ignore_index=True)
             except Exception as e:
-                print(f"경고: 일반 주식 정보 조회 중 오류가 발생했습니다: {e}")
+                logger.warning("일반 주식 정보 조회 중 오류가 발생했습니다: %s", e)
 
         if df_change.empty:
-            print("조회할 가격 정보가 없습니다.")
+            logger.info("조회할 가격 정보가 없습니다.")
             return
 
         top_gainers = df_change[df_change["등락률"] >= min_change_pct].copy()
 
         if top_gainers.empty:
-            print(f"등락률 {min_change_pct}% 이상 상승한 종목이 없습니다.")
+            logger.info("등락률 %.2f%% 이상 상승한 종목이 없습니다.", min_change_pct)
             return
 
-        print(f"등락률 {min_change_pct}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
+        logger.info(
+            "등락률 %.2f%% 이상 상승한 종목 %d개를 찾았습니다.",
+            min_change_pct,
+            len(top_gainers),
+        )
 
         # 종목명 및 섹터 정보 처리
         etf_ticker_list = set(stock.get_etf_ticker_list(latest_day))
@@ -152,17 +165,21 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             top_gainers = top_gainers[~top_gainers["종목명"].str.contains(exclude_pattern, na=False)]
             filtered_count = initial_count - len(top_gainers)
             if filtered_count > 0:
-                print(f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {filtered_count}개 종목을 제외했습니다.")
+                logger.info(
+                    "제외 키워드(%s)에 따라 %d개 종목을 제외했습니다.",
+                    ", ".join(EXCLUDE_KEYWORDS),
+                    filtered_count,
+                )
 
         # 등락률 순으로 정렬
         sorted_gainers = top_gainers.sort_values(by="등락률", ascending=False)
 
-        print("\n--- 급등주 목록 ---")
+        logger.info("\n--- 급등주 목록 ---")
         for _, row in sorted_gainers.iterrows():
-            print(f"  - {row['종목명']} ({row['티커']}): +{row['등락률']:.2f}%")
+            logger.info("  - %s (%s): +%.2f%%", row["종목명"], row["티커"], row["등락률"])
 
     except Exception as e:
-        print(f"오류가 발생했습니다: {e}")
+        logger.error("오류가 발생했습니다: %s", e)
 
 
 if __name__ == "__main__":

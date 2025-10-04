@@ -12,6 +12,9 @@ from .constants import DECISION_MESSAGES, DECISION_NOTES
 from .messages import build_buy_replace_note
 from .shared import select_candidates_by_category, sort_decisions_by_order_and_score
 from logic.recommend.formatting import load_account_precision
+from utils.logger import get_app_logger
+
+logger = get_app_logger()
 from utils.data_loader import count_trading_days
 
 
@@ -527,10 +530,7 @@ def safe_generate_daily_recommendations_for_portfolio(*args, **kwargs) -> List[D
     try:
         return generate_daily_recommendations_for_portfolio(*args, **kwargs)
     except Exception as e:
-        print(f"generate_daily_recommendations_for_portfolio 실행 중 오류: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
+        logger.exception("generate_daily_recommendations_for_portfolio 실행 중 오류: %s", e)
         return []
 
 

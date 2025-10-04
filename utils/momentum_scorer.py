@@ -8,6 +8,8 @@ import warnings
 import numpy as np
 import pandas as pd
 
+from utils.logger import get_app_logger
+
 # pkg_resources 워닝 억제
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 
@@ -21,6 +23,8 @@ try:
 except ImportError:
     stock = None
 
+logger = get_app_logger()
+
 
 def momentum_score_yf(ticker: str, end_date: str = None) -> float | None:
     """
@@ -29,7 +33,7 @@ def momentum_score_yf(ticker: str, end_date: str = None) -> float | None:
     모멘텀 스코어 = ((12-1개월 수익률) - (최근 1개월 수익률)) / (12개월 변동성)
     """
     if yf is None:
-        print("Warning: yfinance is not installed.")
+        logger.warning("yfinance가 설치되어 있지 않습니다.")
         return None
 
     if end_date is None:
@@ -92,7 +96,7 @@ def momentum_score_krx(ticker: str, end_date: str = None) -> float | None:
     ticker 예시: '069500' (KODEX 200)
     """
     if stock is None:
-        print("Warning: pykrx is not installed.")
+        logger.warning("pykrx가 설치되어 있지 않습니다.")
         return None
 
     if end_date is None:

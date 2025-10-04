@@ -2,6 +2,10 @@
 
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from utils.logger import get_app_logger
+
+logger = get_app_logger()
+
 SIGNAL_TABLE_HEADERS: Sequence[str] = [
     "#",
     "티커",
@@ -151,10 +155,7 @@ def select_candidates_by_category(
         return selected_candidates, rejected
 
     except Exception as e:
-        print(f"select_candidates_by_category 실행 중 오류: {str(e)}")
-        import traceback
-
-        traceback.print_exc()
+        logger.exception("select_candidates_by_category 실행 중 오류: %s", e)
         return [], []
 
 

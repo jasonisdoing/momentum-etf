@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from utils.logger import get_app_logger
+
 from settings.common import (
     MARKET_REGIME_FILTER_ENABLED,
     MARKET_REGIME_FILTER_TICKER,
@@ -28,6 +30,8 @@ _ICON_FALLBACKS: Dict[str, str] = {
     "aus": "🇦🇺",
 }
 
+logger = get_app_logger()
+
 
 def _normalize_code(value: Any, fallback: str) -> str:
     text = str(value or "").strip().lower()
@@ -45,7 +49,7 @@ def list_available_accounts() -> List[str]:
     """`settings/account`에 존재하는 계정 ID 목록을 반환합니다."""
 
     if not _SETTINGS_DIR.exists():
-        print(f"경고: 계정 설정 디렉터리를 찾을 수 없습니다: {_SETTINGS_DIR}")
+        logger.warning("계정 설정 디렉터리를 찾을 수 없습니다: %s", _SETTINGS_DIR)
         return []
 
     return [
@@ -64,7 +68,7 @@ def load_account_configs() -> List[Dict[str, Any]]:
         try:
             settings = get_account_settings(account_id)
         except AccountSettingsError as exc:
-            print(f"[WARN] 계정 설정 로딩 실패({account_id}): {exc}")
+            logger.warning("계정 설정 로딩 실패(%s): %s", account_id, exc)
             continue
 
         country_code = _normalize_code(settings.get("country_code"), account_id)

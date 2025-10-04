@@ -7,6 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from utils.logger import get_app_logger
+
 
 class AccountSettingsError(RuntimeError):
     """계정 설정 로딩 중 발생하는 예외."""
@@ -16,6 +18,7 @@ SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "settings"
 ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT / "account"
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
+logger = get_app_logger()
 
 
 def _load_json(path: Path) -> Dict[str, Any]:
@@ -45,7 +48,7 @@ def get_account_settings(account_id: str) -> Dict[str, Any]:
         raise AccountSettingsError("계정 식별자를 지정해야 합니다.")
 
     path = ACCOUNT_SETTINGS_DIR / f"{account}.json"
-    print(path)
+    logger.debug("계정 설정 로드: %s", path)
     settings = _load_json(path)
     settings.setdefault("account", account)
     settings.setdefault("country_code", settings.get("country_code") or account)

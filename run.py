@@ -15,6 +15,8 @@ import os
 import sys
 import warnings
 
+from utils.logger import get_app_logger
+
 # pkg_resources 워닝 억제
 os.environ["PYTHONWARNINGS"] = "ignore"
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
@@ -28,10 +30,11 @@ def main():
     Streamlit 웹 애플리케이션을 실행합니다.
     `streamlit run Main.py`와 동일하게 동작합니다.
     """
+    logger = get_app_logger()
     try:
         from streamlit.web import cli as stcli
     except ImportError:
-        print("오류: Streamlit이 설치되어 있지 않습니다. 'pip install streamlit'으로 설치해주세요.")
+        logger.error("Streamlit이 설치되어 있지 않습니다. 'pip install streamlit'으로 설치해주세요.")
         sys.exit(1)
 
     # app.py 파일의 절대 경로를 찾습니다.

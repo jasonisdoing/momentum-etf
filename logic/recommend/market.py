@@ -15,6 +15,9 @@ except Exception:  # pragma: no cover
 
 from utils.data_loader import fetch_ohlcv
 from utils.account_registry import get_common_file_settings
+from utils.logger import get_app_logger
+
+logger = get_app_logger()
 
 
 def get_market_regime_status_string() -> Optional[str]:
@@ -30,7 +33,7 @@ def get_market_regime_status_string() -> Optional[str]:
         regime_ticker = str(common["MARKET_REGIME_FILTER_TICKER"])
         regime_ma_period = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
     except (SystemExit, KeyError, ValueError, TypeError) as e:
-        print(f"오류: 공통 설정을 불러오는 중 문제가 발생했습니다: {e}")
+        logger.error("공통 설정을 불러오는 중 문제가 발생했습니다: %s", e)
         return '<span style="color:grey">시장 상태: 설정 파일 오류</span>'
 
     # 데이터 로딩에 필요한 기간 계산: 레짐 MA 기간을 만족하도록 동적으로 산정

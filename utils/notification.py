@@ -29,9 +29,11 @@ except ImportError:  # pragma: no cover - 선택적 의존성 처리
 from utils.account_registry import get_account_settings
 from utils.schedule_config import get_country_schedule
 from utils.report import format_kr_money
+from utils.logger import get_app_logger
 
 _LAST_ERROR: Optional[str] = None
 APP_LABEL = getattr(global_settings, "APP_TYPE", "APP")
+logger = get_app_logger()
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +124,7 @@ def send_slack_message(
         response = requests.post(webhook_url, json=payload, timeout=10)
         response.raise_for_status()
         if response.text == "ok":
-            print(f"[SLACK] 메시지 전송 - {webhook_name or 'Unknown Webhook'}")
+            logger.info("[SLACK] 메시지 전송 - %s", webhook_name or "Unknown Webhook")
             return True
         _LAST_ERROR = response.text or "unknown"
         return False
@@ -152,15 +154,15 @@ def _upload_file_to_slack(
 
     token = os.environ.get("SLACK_BOT_TOKEN")
     if not token:
-        print("[SLACK] 파일 업로드 생략 - SLACK_BOT_TOKEN 미설정")
+        logger.info("[SLACK] 파일 업로드 생략 - SLACK_BOT_TOKEN 미설정")
         return False
     if WebClient is None:
-        print("[SLACK] 파일 업로드 생략 - slack_sdk 미설치")
+        logger.info("[SLACK] 파일 업로드 생략 - slack_sdk 미설치")
         return False
 
     file_exists = file_path.exists() and file_path.is_file()
     if not file_exists:
-        print(f"[SLACK] 파일 업로드 생략 - 파일 없음: {file_path}")
+        logger.info("[SLACK] 파일 업로드 생략 - 파일 없음: %s", file_path)
         return False
 
     error_message: Optional[str] = None
@@ -173,7 +175,7 @@ def _upload_file_to_slack(
             title=title,
             initial_comment=initial_comment,
         )
-        print(f"[SLACK] 파일 업로드 성공 - channel={channel} file={file_path.name}")
+        logger.info("[SLACK] 파일 업로드 성공 - channel=%s file=%s", channel, file_path.name)
         return True
     except SlackApiError as exc:  # pragma: no cover - 외부 API 의존 처리
         error_message = getattr(exc, "response", {}).get("error") or str(exc)
@@ -181,7 +183,12 @@ def _upload_file_to_slack(
         error_message = str(exc)
 
     if error_message:
-        print(f"[SLACK] 파일 업로드 실패 - channel={channel} file={file_path.name} reason={error_message}")
+        logger.warning(
+            "[SLACK] 파일 업로드 실패 - channel=%s file=%s reason=%s",
+            channel,
+            file_path.name,
+            error_message,
+        )
 
     return False
 

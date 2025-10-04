@@ -14,6 +14,7 @@ from utils.account_registry import (
 )
 from logic.tune.runner import run_account_tuning
 from constants import TEST_MONTHS_RANGE
+from utils.logger import get_app_logger
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
@@ -62,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    logger = get_app_logger()
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -82,7 +85,7 @@ def main() -> None:
         tuning_config=TUNING_CONFIG,
         months_range=TEST_MONTHS_RANGE,
     )
-    print(f"\n✅ 튜닝 결과를 '{output_path}'에 저장했습니다.")
+    logger.info("✅ 튜닝 결과를 '%s'에 저장했습니다.", output_path)
 
 
 if __name__ == "__main__":

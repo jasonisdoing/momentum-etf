@@ -16,6 +16,7 @@ from logic.recommend.output import (
     print_result_summary,
     print_run_header,
 )
+from utils.logger import get_app_logger
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
@@ -45,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    logger = get_app_logger()
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -64,7 +67,7 @@ def main() -> None:
         Path(args.output) if args.output else RESULTS_DIR / f"recommendation_{account_id}.json"
     )
     dump_json(items, output_path)
-    print(f"\n✅ {account_id.upper()} 결과를 '{output_path}'에 저장했습니다.")
+    logger.info("✅ %s 결과를 '%s'에 저장했습니다.", account_id.upper(), output_path)
 
 
 if __name__ == "__main__":

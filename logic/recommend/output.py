@@ -9,6 +9,9 @@ from typing import Any, Dict, List, Optional
 
 from utils.notification import strip_html_tags
 from utils.report import render_table_eaw
+from utils.logger import get_app_logger
+
+logger = get_app_logger()
 
 
 def invoke_account_pipeline(account_id: str, *, date_str: str | None) -> List[Dict[str, Any]]:
@@ -19,7 +22,7 @@ def invoke_account_pipeline(account_id: str, *, date_str: str | None) -> List[Di
     result = generate_recommendation_report(account_id=account_id, date_str=date_str)
 
     if not result:
-        print(f"[WARN] {account_id.upper()}에 대한 추천을 생성하지 못했습니다.")
+        logger.warning("%s에 대한 추천을 생성하지 못했습니다.", account_id.upper())
         return []
 
     if isinstance(result, list):
@@ -27,14 +30,14 @@ def invoke_account_pipeline(account_id: str, *, date_str: str | None) -> List[Di
     else:
         recommendations = getattr(result, "recommendations", None)
         if not recommendations:
-            print(f"[WARN] {account_id.upper()} 추천 결과가 비어 있습니다.")
+            logger.warning("%s 추천 결과가 비어 있습니다.", account_id.upper())
             return []
 
         header_line = getattr(result, "header_line", "")
         if header_line:
             header_plain = strip_html_tags(str(header_line)).strip()
             if header_plain:
-                print(f"\n[INFO] {header_plain}")
+                logger.info(header_plain)
 
         items = list(recommendations)
 
@@ -51,8 +54,9 @@ def dump_json(data: Any, path: Path) -> None:
 
 def print_run_header(account_id: str, *, date_str: Optional[str]) -> None:
     banner = f"=== {account_id.upper()} 추천 생성 ==="
-    print("\n" + banner)
-    print(f"[INFO] 기준일: {date_str or 'auto (latest trading day)'}")
+    logger.info("")
+    logger.info("%s", banner)
+    logger.info("기준일: %s", date_str or "auto (latest trading day)")
 
 
 def print_result_summary(
@@ -61,7 +65,7 @@ def print_result_summary(
     """Emit a condensed summary of recommendation results to stdout."""
 
     if not items:
-        print(f"[WARN] {account_id.upper()}에 대한 결과가 없습니다.")
+        logger.warning("%s에 대한 결과가 없습니다.", account_id.upper())
         return
 
     state_counts = Counter(item.get("state", "UNKNOWN") for item in items)
@@ -69,11 +73,12 @@ def print_result_summary(
 
     base_date = items[0].get("base_date") if items else (date_str or "N/A")
 
-    print(f"\n=== {account_id.upper()} 추천 요약 (기준일: {base_date}) ===")
+    logger.info("\n=== %s 추천 요약 (기준일: %s) ===", account_id.upper(), base_date)
 
     preview_count = min(10, len(items))
     if preview_count > 0:
-        print(f"\n[INFO] 상위 {preview_count}개 항목 미리보기:")
+        logger.info("")
+        logger.info("상위 %d개 항목 미리보기:", preview_count)
         headers = ["순위", "티커", "종목명", "카테고리", "상태", "점수", "일간수익률", "보유일", "문구"]
         aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "left"]
         rows: List[List[str]] = []
@@ -103,13 +108,15 @@ def print_result_summary(
             )
 
         for line in render_table_eaw(headers, rows, aligns):
-            print(line)
+            logger.info("%s", line)
 
     if state_summary:
-        print(f"\n[INFO] 상태 요약: {state_summary}")
+        logger.info("")
+        logger.info("상태 요약: %s", state_summary)
     buy_count = sum(1 for item in items if item.get("state") == "BUY")
-    print(f"\n[INFO] 매수 추천: {buy_count}개, 대기: {len(items) - buy_count}개")
-    print(f"[INFO] 결과가 성공적으로 생성되었습니다. (총 {len(items)}개 항목)")
+    logger.info("")
+    logger.info("매수 추천: %d개, 대기: %d개", buy_count, len(items) - buy_count)
+    logger.info("결과가 성공적으로 생성되었습니다. (총 %d개 항목)", len(items))
 
 
 invoke_country_pipeline = invoke_account_pipeline  # 하위 호환

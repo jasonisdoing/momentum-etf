@@ -15,6 +15,7 @@ from constants import TEST_MONTHS_RANGE
 from logic.entry_point import StrategyRules
 from utils.account_registry import get_strategy_rules
 from utils.settings_loader import AccountSettingsError, get_account_settings
+from utils.logger import get_app_logger
 from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day
 from utils.report import render_table_eaw
 from utils.stock_list_io import get_etfs
@@ -87,10 +88,12 @@ def run_account_tuning(
     """Execute parameter tuning for the given account and return the output path."""
 
     account_norm = (account_id or "").strip().lower()
+    logger = get_app_logger()
+
     try:
         account_settings = get_account_settings(account_norm)
     except AccountSettingsError as exc:
-        print(f"[튜닝] 계정 설정 로딩 실패: {exc}")
+        logger.error("[튜닝] 계정 설정 로딩 실패: %s", exc)
         return None
 
     country_code = (account_settings.get("country_code") or account_norm).strip().lower()
@@ -98,7 +101,7 @@ def run_account_tuning(
     config_map = tuning_config or {}
     config = config_map.get(account_norm) or config_map.get(country_code)
     if not config:
-        print(f"[튜닝] '{account_norm.upper()}' 계정에 대한 튜닝 설정이 없습니다.")
+        logger.warning("[튜닝] '%s' 계정에 대한 튜닝 설정이 없습니다.", account_norm.upper())
         return None
 
     base_rules = get_strategy_rules(account_norm)
@@ -115,7 +118,7 @@ def run_account_tuning(
     )
 
     if not ma_values or not topn_values or not replace_values:
-        print("[튜닝] 유효한 파라미터 조합이 없습니다.")
+        logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
     if months_range is None:
@@ -129,12 +132,12 @@ def run_account_tuning(
 
     etf_universe = get_etfs(country_code)
     if not etf_universe:
-        print(f"[튜닝] '{country_code}' 종목 데이터를 찾을 수 없습니다.")
+        logger.error("[튜닝] '%s' 종목 데이터를 찾을 수 없습니다.", country_code)
         return None
 
     tickers = [str(item.get("ticker")) for item in etf_universe if item.get("ticker")]
     if not tickers:
-        print(f"[튜닝] '{country_code}' 유효한 티커가 없습니다.")
+        logger.error("[튜닝] '%s' 유효한 티커가 없습니다.", country_code)
         return None
 
     end_date = get_latest_trading_day(country_code)
@@ -149,8 +152,12 @@ def run_account_tuning(
         max_ma = base_rules.ma_period
     warmup_days = int(max(max_ma, base_rules.ma_period) * 1.5)
 
-    print(
-        f"[튜닝] 데이터 미리 로딩: 티커 {len(tickers)}개, 기간 {date_range[0]}~{date_range[1]}, 웜업 {warmup_days}일"
+    logger.info(
+        "[튜닝] 데이터 미리 로딩: 티커 %d개, 기간 %s~%s, 웜업 %d일",
+        len(tickers),
+        date_range[0],
+        date_range[1],
+        warmup_days,
     )
 
     prefetched_data = fetch_ohlcv_for_tickers(
@@ -160,18 +167,30 @@ def run_account_tuning(
         warmup_days=warmup_days,
     )
     if not prefetched_data:
-        print("[튜닝] 사전 데이터 로딩에 실패했습니다.")
+        logger.error("[튜닝] 사전 데이터 로딩에 실패했습니다.")
         return None
 
     combos = list(product(ma_values, topn_values, replace_values))
     total = len(combos)
-    print(f"[튜닝] {account_norm.upper()} 튜닝 시작: 조합 {total}개 (기간 {months_range}개월)")
+    logger.info(
+        "[튜닝] %s 튜닝 시작: 조합 %d개 (기간 %d개월)",
+        account_norm.upper(),
+        total,
+        months_range,
+    )
 
     results: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
 
     for idx, (ma, topn, threshold) in enumerate(combos, 1):
-        print(f"[튜닝] ({idx}/{total}) MA={ma}, TOPN={topn}, REPLACE_THRESHOLD={threshold}")
+        logger.debug(
+            "[튜닝] (%d/%d) MA=%s, TOPN=%s, REPLACE_THRESHOLD=%s",
+            idx,
+            total,
+            ma,
+            topn,
+            threshold,
+        )
         if topn <= 0:
             failures.append(
                 {
@@ -241,7 +260,7 @@ def run_account_tuning(
         results.append(entry)
 
     if not results:
-        print("[튜닝] 성공한 조합이 없습니다.")
+        logger.warning("[튜닝] 성공한 조합이 없습니다.")
         return None
 
     def _sort_key(item: Dict[str, Any]):
@@ -355,10 +374,13 @@ def run_account_tuning(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
 
-    print(
-        f"[튜닝] 최적 조합: MA={best['ma_period']} / TOPN={best['portfolio_topn']} / TH={best['replace_threshold']:.3f}"
+    logger.info(
+        "[튜닝] 최적 조합: MA=%d / TOPN=%d / TH=%.3f",
+        best["ma_period"],
+        best["portfolio_topn"],
+        best["replace_threshold"],
     )
-    print(f"[튜닝] 결과를 '{output_path}'에 저장했습니다.")
+    logger.info("[튜닝] 결과를 '%s'에 저장했습니다.", output_path)
     return output_path
 
 

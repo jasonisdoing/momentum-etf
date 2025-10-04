@@ -33,6 +33,9 @@ from utils.data_loader import (
     count_trading_days,
 )
 from utils.db_manager import get_db_connection
+from utils.logger import get_app_logger
+
+logger = get_app_logger()
 
 
 @dataclass
@@ -80,7 +83,7 @@ def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
         with file_path.open("r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as exc:
-        print(f"[경고] 전체 ETF 메타 로드 실패: {exc}")
+        logger.warning("전체 ETF 메타 로드 실패: %s", exc)
         return {}
 
     meta_map: Dict[str, Dict[str, Any]] = {}
@@ -145,26 +148,26 @@ def _fetch_dataframe(
             )
 
         if df is None or df.empty:
-            print(f"경고: {ticker}에 대한 데이터를 가져오지 못했습니다.")
+            logger.warning("%s에 대한 데이터를 가져오지 못했습니다.", ticker)
             return None
 
         # Close 컬럼이 없으면 에러 메시지와 함께 None 반환
         if "Close" not in df.columns:
-            print(f"경고: {ticker}에 대한 종가(Close) 데이터가 없습니다.")
+            logger.warning("%s에 대한 종가(Close) 데이터가 없습니다.", ticker)
             return None
 
         # Close가 NaN인 행 제거
         df = df.dropna(subset=["Close"])
 
         if df.empty:
-            print(f"경고: {ticker}에 대한 유효한 데이터가 없습니다.")
+            logger.warning("%s에 대한 유효한 데이터가 없습니다.", ticker)
             return None
 
         # 데이터가 충분하지 않아도 계속 진행 (나중에 _calc_metrics에서 처리)
         return df
 
     except Exception as e:
-        print(f"경고: {ticker} 데이터 처리 중 오류 발생: {e}")
+        logger.warning("%s 데이터 처리 중 오류 발생: %s", ticker, e)
         import traceback
 
         traceback.print_exc()
@@ -236,17 +239,14 @@ def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
 
         return latest_close, prev_close, daily_pct, score, holding_days
     except Exception as e:
-        print(f"경고: 메트릭 계산 중 오류 발생: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.exception("메트릭 계산 중 오류 발생: %s", e)
         return None
 
 
 def _build_score(meta: _TickerMeta, metrics) -> _TickerScore:
     # 메트릭이 없는 경우 기본값 반환
     if metrics is None:
-        print(f"경고: {meta.ticker}에 대한 메트릭이 없습니다.")
+        logger.warning("%s에 대한 메트릭이 없습니다.", meta.ticker)
         return _TickerScore(
             meta=meta,
             price=0.0,
@@ -290,10 +290,7 @@ def _build_score(meta: _TickerMeta, metrics) -> _TickerScore:
             ma_value=ma_value,
         )
     except Exception as e:
-        print(f"경고: {meta.ticker} 점수 생성 중 오류 발생: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.exception("%s 점수 생성 중 오류 발생: %s", meta.ticker, e)
         # 오류 발생 시 기본값 반환
         return _TickerScore(
             meta=meta,
@@ -484,9 +481,9 @@ def generate_account_recommendation_report(
                         "buy_date": None,
                     }
 
-        print(f"계산된 holdings: {len(holdings)}개 종목")
+        logger.debug("계산된 holdings: %d개 종목", len(holdings))
     except Exception as e:
-        print(f"포트폴리오 데이터 조회 실패: {e}")
+        logger.error("포트폴리오 데이터 조회 실패: %s", e)
         holdings = {}
 
     # 연속 보유 정보 계산
@@ -513,7 +510,7 @@ def generate_account_recommendation_report(
             warmup_days=warmup_days,
         )
     except Exception as exc:
-        print(f"경고: {account_id} 계정 데이터 로딩 실패: {exc}")
+        logger.warning("%s 계정 데이터 로딩 실패: %s", account_id, exc)
         prefetched_data = {}
 
     data_by_tkr = {}
@@ -612,7 +609,7 @@ def generate_account_recommendation_report(
             max_per_category=max_per_category,
         )
     except Exception as exc:
-        print(f"generate_daily_recommendations_for_portfolio 실행 중 오류: {exc}")
+        logger.error("generate_daily_recommendations_for_portfolio 실행 중 오류: %s", exc)
         return []
 
     # 당일 SELL 트레이드를 결과에 추가하여 SOLD 상태로 노출
@@ -647,7 +644,7 @@ def generate_account_recommendation_report(
             if meta_info:
                 name = meta_info.get("name") or name
             else:
-                print(f"[경고] SOLD 종목 메타데이터 없음: {ticker}")
+                logger.warning("SOLD 종목 메타데이터 없음: %s", ticker)
                 name = ticker
 
         price_val = ticker_data.get("price", 0.0)

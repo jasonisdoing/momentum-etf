@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from pymongo import MongoClient
 
 import settings as global_settings
+from utils.logger import get_app_logger
 
 # .env 파일이 있다면 로드합니다.
 load_dotenv()
@@ -15,6 +16,7 @@ load_dotenv()
 # --- 전역 변수로 DB 연결 관리 ---
 _db_connection = None
 _mongo_client: Optional[MongoClient] = None
+logger = get_app_logger()
 
 
 def get_db_connection():
@@ -74,18 +76,21 @@ def get_db_connection():
             available = conn.get("available")
             total_created = conn.get("totalCreated")
             if current is not None:
-                print(
-                    f"-> MongoDB에 성공적으로 연결되었습니다. (connections: current={current}, available={available}, totalCreated={total_created})"
+                logger.info(
+                    "MongoDB 연결 성공 (connections: current=%s, available=%s, totalCreated=%s)",
+                    current,
+                    available,
+                    total_created,
                 )
             else:
-                print("-> MongoDB에 성공적으로 연결되었습니다.")
+                logger.info("MongoDB에 성공적으로 연결되었습니다.")
         except Exception:
-            # 권한 부족 등으로 serverStatus 실패 시, 기본 메시지만 출력
-            print("-> MongoDB에 성공적으로 연결되었습니다.")
+            # 권한 부족 등으로 serverStatus 실패 시, 기본 메시지만 기록
+            logger.info("MongoDB에 성공적으로 연결되었습니다.")
         return _db_connection
     except Exception as e:
         error_message = f"오류: MongoDB 연결에 실패했습니다: {e}"
-        print(error_message)
+        logger.error(error_message)
         return None
 
 
@@ -99,10 +104,10 @@ def save_trade(trade_data: Dict) -> bool:
         trade_data["created_at"] = datetime.now()
         db.trades.insert_one(trade_data)
         account = str(trade_data.get("account") or "").upper()
-        print(f"성공: {account or 'UNKNOWN'} 계정의 거래를 저장했습니다: {trade_data}")
+        logger.info("%s 계정의 거래를 저장했습니다: %s", account or "UNKNOWN", trade_data)
         return True
     except Exception as e:
-        print(f"오류: 거래 내역 저장 중 오류 발생: {e}")
+        logger.error("거래 내역 저장 중 오류 발생: %s", e)
         return False
 
 
@@ -116,14 +121,14 @@ def delete_trade_by_id(trade_id: str) -> bool:
         obj_id = ObjectId(trade_id)
         result = db.trades.delete_one({"_id": obj_id})
         if result.deleted_count > 0:
-            print(f"성공: 거래 ID {trade_id} 를 삭제했습니다.")
+            logger.info("거래 ID %s 를 삭제했습니다.", trade_id)
             return True
         else:
-            print(f"경고: 삭제할 거래 ID {trade_id} 를 찾지 못했습니다.")
+            logger.warning("삭제할 거래 ID %s 를 찾지 못했습니다.", trade_id)
             return False  # 삭제할 문서가 없으면 실패로 간주
     except Exception as e:
-        print(f"오류: 거래 내역 삭제 중 오류 발생: {e}")
-    return False
+        logger.error("거래 내역 삭제 중 오류 발생: %s", e)
+        return False
 
 
 def update_trade_by_id(trade_id: str, update_data: Dict) -> bool:
@@ -138,13 +143,13 @@ def update_trade_by_id(trade_id: str, update_data: Dict) -> bool:
         update_doc = {"$set": {**update_data, "updated_at": datetime.now()}}
         result = db.trades.update_one({"_id": obj_id}, update_doc)
         if result.modified_count > 0:
-            print(f"성공: 거래 ID {trade_id} 를 업데이트했습니다.")
+            logger.info("거래 ID %s 를 업데이트했습니다.", trade_id)
             return True
         else:
-            print(f"경고: 업데이트할 거래 ID {trade_id} 를 찾지 못했거나 변경된 내용이 없습니다.")
+            logger.warning("업데이트할 거래 ID %s 를 찾지 못했거나 변경된 내용이 없습니다.", trade_id)
             return False
     except Exception as e:
-        print(f"오류: 거래 내역 업데이트 중 오류 발생: {e}")
+        logger.error("거래 내역 업데이트 중 오류 발생: %s", e)
         return False
 
 

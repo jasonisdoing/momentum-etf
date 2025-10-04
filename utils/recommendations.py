@@ -8,10 +8,12 @@ import pandas as pd
 from pandas.io.formats.style import Styler
 
 from strategies.maps.constants import DECISION_CONFIG
+from utils.logger import get_app_logger
 
 
 _BASE_DIR = Path(__file__).resolve().parent.parent
 _DATA_DIR = _BASE_DIR / "data" / "results"
+logger = get_app_logger()
 
 _DISPLAY_COLUMNS = [
     "#",
@@ -244,7 +246,7 @@ def get_recommendations_dataframe(country: str, *, source_key: str | None = None
         rows = load_recommendations(data_key)
         return recommendations_to_dataframe(country, rows)
     except Exception as e:
-        print(f"Error loading recommendations for {country}: {str(e)}")
+        logger.error("추천 데이터를 불러오지 못했습니다 (%s): %s", country, e)
         # 오류 발생 시 빈 데이터프레임 반환
         return pd.DataFrame(columns=_DISPLAY_COLUMNS)
 

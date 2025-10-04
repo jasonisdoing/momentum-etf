@@ -43,6 +43,7 @@ except Exception:
 from utils.cache_utils import load_cached_frame, save_cached_frame
 from utils.stock_list_io import get_etfs
 from settings.common import REALTIME_PRICE_ENABLED
+from utils.logger import get_app_logger
 
 # from utils.notification import send_verbose_log_to_slack
 
@@ -85,6 +86,8 @@ class _PykrxLogFilter(logging.Filter):
 _root_logger = logging.getLogger()
 if not any(isinstance(f, _PykrxLogFilter) for f in _root_logger.filters):
     _root_logger.addFilter(_PykrxLogFilter())
+
+logger = get_app_logger()
 
 CACHE_START_DATE_FALLBACK = "2020-01-01"
 
@@ -208,7 +211,7 @@ def get_aud_to_krw_rate() -> Optional[float]:
         if not data.empty:
             return data["Close"].iloc[-1]
     except Exception as e:
-        print(f"AUD/KRW 환율 정보를 가져오는 데 실패했습니다: {e}")
+        logger.warning("AUD/KRW 환율 정보를 가져오는 데 실패했습니다: %s", e)
         return None
     return None
 
@@ -229,7 +232,7 @@ def get_usd_to_krw_rate() -> Optional[float]:
         if not data.empty:
             return data["Close"].iloc[-1]
     except Exception as e:
-        print(f"USD/KRW 환율 정보를 가져오는 데 실패했습니다: {e}")
+        logger.warning("USD/KRW 환율 정보를 가져오는 데 실패했습니다: %s", e)
     return None
 
 
@@ -320,7 +323,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
             if sched is not None and not sched.empty:
                 return [pd.Timestamp(d.date()) for d in sched.index]
         except Exception as e:
-            print(f"경고: pandas_market_calendars({country_code}:{cal_code}) 조회 실패: {e}")
+            logger.warning("pandas_market_calendars(%s:%s) 조회 실패: %s", country_code, cal_code, e)
         return []
 
     country_code = (country or "").strip().lower()
@@ -332,7 +335,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
     elif country_code == "us":
         trading_days_ts = _pmc("us")
     else:
-        print(f"오류: 지원하지 않는 국가 코드입니다: {country_code}")
+        logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
         return []
 
     # 최종적으로 start_date와 end_date 사이의 날짜만 반환하고, 중복 제거 및 정렬합니다.
@@ -395,12 +398,15 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
             if get_trading_days(check_date_str, check_date_str, country_code):
                 return check_date.normalize()
         except Exception as e:
-            print(f"경고: 거래일 조회 중 오류 발생({check_date_str}): {e}")
+            logger.warning("거래일 조회 중 오류 발생(%s): %s", check_date_str, e)
             # 오류 발생 시 다음 날짜로 계속 탐색
             continue
 
     # 15일 동안 거래일을 찾지 못하면 오늘 날짜를 정규화하여 반환합니다.
-    print(f"경고: 최근 15일 내에 거래일을 찾지 못했습니다. 오늘 날짜({end_dt.strftime('%Y-%m-%d')})를 사용합니다.")
+    logger.warning(
+        "최근 15일 내에 거래일을 찾지 못했습니다. 오늘 날짜(%s)를 사용합니다.",
+        end_dt.strftime("%Y-%m-%d"),
+    )
     return end_dt.normalize()
 
 
@@ -425,7 +431,7 @@ def fetch_ohlcv(
             else:
                 end_dt = pd.to_datetime(date_range[1])
         except (ValueError, TypeError):
-            print(f"오류: 잘못된 date_range 형식: {date_range}. 'YYYY-MM-DD' 형식을 사용해야 합니다.")
+            logger.error("잘못된 date_range 형식: %s. 'YYYY-MM-DD' 형식을 사용해야 합니다.", date_range)
             return None
     else:
         now = base_date if base_date is not None else pd.Timestamp.now()
@@ -629,7 +635,7 @@ def _fetch_ohlcv_core(
             if not fallback.empty:
                 return fallback
         if yf is None:
-            print("오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
+            logger.error("yfinance 라이브러리가 설치되어 있지 않습니다. 'pip install yfinance'로 설치해주세요.")
             return None
         try:
             with _silence_yfinance_logs():
@@ -651,7 +657,7 @@ def _fetch_ohlcv_core(
                 df.index = df.index.tz_localize(None)
             return df
         except Exception as e:
-            print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
+            logger.warning("%s의 데이터 조회 중 오류: %s", ticker, e)
             if existing_df is not None and not existing_df.empty:
                 fallback_df = existing_df[
                     (existing_df.index >= start_dt) & (existing_df.index <= end_dt)
@@ -662,7 +668,7 @@ def _fetch_ohlcv_core(
 
     if country_code == "kor":
         if _stock is None:
-            print("오류: pykrx 라이브러리가 설치되지 않았습니다. 'pip install pykrx'로 설치해주세요.")
+            logger.error("pykrx 라이브러리가 설치되어 있지 않습니다. 'pip install pykrx'로 설치해주세요.")
             return None
 
     if country_code == "kor":
@@ -699,11 +705,23 @@ def _fetch_ohlcv_core(
             except (json.JSONDecodeError, KeyError) as err:
                 pykrx_failed = True
                 pykrx_error_msg = str(err) or "JSON/KeyError"
-                print(f"경고: {ticker}의 {start_str}~{end_str} 기간 pykrx 조회 중 오류: {pykrx_error_msg}")
+                logger.warning(
+                    "%s의 %s~%s 기간 pykrx 조회 중 오류: %s",
+                    ticker,
+                    start_str,
+                    end_str,
+                    pykrx_error_msg,
+                )
                 break
             except Exception as e:
                 err_text = str(e)
-                print(f"경고: {ticker}의 {start_str}~{end_str} 기간 데이터 조회 중 오류: {err_text}")
+                logger.warning(
+                    "%s의 %s~%s 기간 데이터 조회 중 오류: %s",
+                    ticker,
+                    start_str,
+                    end_str,
+                    err_text,
+                )
                 if isinstance(e, KeyError) or "are in the [columns]" in err_text:
                     pykrx_failed = True
                     pykrx_error_msg = err_text
@@ -738,7 +756,7 @@ def _fetch_ohlcv_core(
 
     if country_code == "aus":
         if yf is None:
-            print("오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
+            logger.error("yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
             return None
 
         ticker_yf = format_aus_ticker_for_yfinance(ticker)
@@ -776,12 +794,12 @@ def _fetch_ohlcv_core(
                 df.index = df.index.tz_localize(None)
             return df
         except Exception as e:
-            print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
+            logger.warning("%s의 데이터 조회 중 오류: %s", ticker, e)
             return None
 
     if country_code == "us":
         if yf is None:
-            print("오류: yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
+            logger.error("yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
             return None
 
         try:
@@ -805,10 +823,10 @@ def _fetch_ohlcv_core(
                 df.index = df.index.tz_localize(None)
             return df
         except Exception as e:
-            print(f"경고: {ticker}의 데이터 조회 중 오류: {e}")
+            logger.warning("%s의 데이터 조회 중 오류: %s", ticker, e)
             return None
 
-    print(f"오류: 지원하지 않는 국가 코드입니다: {country_code}")
+    logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
     return None
 
 
@@ -855,7 +873,7 @@ def fetch_au_realtime_price(ticker: str) -> Optional[float]:
         if price:
             return float(price)
     except Exception as e_yf:
-        print(f"경고: {ticker}의 호주 실시간 가격 조회(yfinance) 실패: {e_yf}")
+        logger.warning("%s의 호주 실시간 가격 조회(yfinance) 실패: %s", ticker, e_yf)
     return None
 
 
@@ -884,7 +902,7 @@ def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
             price_str = price_element.get_text().replace(",", "")
             return float(price_str)
     except Exception as e:
-        print(f"경고: {ticker}의 실시간 가격 조회 중 오류 발생: {e}")
+        logger.warning("%s의 실시간 가격 조회 중 오류 발생: %s", ticker, e)
     return None
 
 
@@ -958,7 +976,7 @@ def fetch_yfinance_name(ticker: str) -> str:
         _yfinance_name_cache[cache_key] = name
         return name
     except Exception as e:
-        print(f"경고: {cache_key}의 이름 조회 중 오류 발생: {e}")
+        logger.warning("%s의 이름 조회 중 오류 발생: %s", cache_key, e)
         _yfinance_name_cache[cache_key] = ""  # 실패도 캐시하여 재시도 방지
     return ""
 
@@ -1045,7 +1063,7 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
 
     latest_trade_day = get_latest_trading_day(country_code)
     if not latest_trade_day:
-        print(f"[ERROR] Could not determine latest trading day for country {country_code}.")
+        logger.error("%s 국가의 최근 거래일을 확인하지 못했습니다.", country_code)
         return None
 
     start_date = latest_trade_day
@@ -1053,8 +1071,12 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
     date_str_for_log = start_date.strftime("%Y-%m-%d")
 
     try:
-        print(
-            f"[INFO] Fetching unadjusted price for {yfinance_ticker} for trading day: {date_str_for_log}, {start_date.strftime('%Y-%m-%d')}, {end_date.strftime('%Y-%m-%d')}"
+        logger.info(
+            "%s - 거래일 %s (범위: %s ~ %s) 비조정 가격 조회",
+            yfinance_ticker,
+            date_str_for_log,
+            start_date.strftime("%Y-%m-%d"),
+            end_date.strftime("%Y-%m-%d"),
         )
 
         df = yf.download(
@@ -1069,11 +1091,18 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
         if df is not None and not df.empty:
             return df["Close"].iloc[-1]
         else:
-            print(f"[WARN] No data returned for {yfinance_ticker} for date {date_str_for_log}.")
+            logger.warning(
+                "%s에 대한 %s 날짜 데이터가 반환되지 않았습니다.",
+                yfinance_ticker,
+                date_str_for_log,
+            )
             return None
 
     except Exception as e:
-        print(
-            f"[ERROR] yfinance download failed for {yfinance_ticker} (date: {date_str_for_log}): {e}"
+        logger.error(
+            "yfinance 다운로드 실패: %s (날짜: %s) - %s",
+            yfinance_ticker,
+            date_str_for_log,
+            e,
         )
         return None

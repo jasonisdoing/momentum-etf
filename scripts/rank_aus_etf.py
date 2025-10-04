@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.data_loader import fetch_ohlcv, fetch_yfinance_name
 from utils.stock_list_io import get_etfs
+from utils.logger import get_app_logger
 
 
 def calculate_annual_return(ticker: str) -> tuple[float | None, str | None]:
@@ -69,10 +70,11 @@ def calculate_annual_return(ticker: str) -> tuple[float | None, str | None]:
 
 def main():
     """메인 실행 함수"""
-    print("data/aus/ 폴더의 종목 목록에서 'TBD' 카테고리의 ETF를 읽어옵니다...")
+    logger = get_app_logger()
+    logger.info("data/aus/ 폴더의 종목 목록에서 'TBD' 카테고리의 ETF를 읽어옵니다...")
     all_aus_etfs = get_etfs("aus")
     if not all_aus_etfs:
-        print("오류: 'data/aus/' 폴더에서 호주 종목 목록을 찾을 수 없습니다.")
+        logger.error("'data/aus/' 폴더에서 호주 종목 목록을 찾을 수 없습니다.")
         return
 
     # 'TBD' 카테고리에 속하는 ETF 티커만 필터링합니다.
@@ -81,15 +83,15 @@ def main():
     ]
 
     if not tickers:
-        print("분석할 'TBD' 카테고리의 ETF가 없습니다.")
+        logger.info("분석할 'TBD' 카테고리의 ETF가 없습니다.")
         return
 
-    print(f"총 {len(tickers)}개 ETF의 1년 수익률을 계산합니다...")
+    logger.info("총 %d개 ETF의 1년 수익률을 계산합니다...", len(tickers))
 
     results = []
     # 순차적으로 각 티커의 데이터를 조회합니다.
     for i, ticker in enumerate(tickers):
-        print(f"  - 처리 중 ({i + 1}/{len(tickers)}): {ticker}")
+        logger.debug("처리 중 (%d/%d): %s", i + 1, len(tickers), ticker)
         try:
             annual_return, name = calculate_annual_return(ticker)
             if annual_return is not None and name is not None:
@@ -101,24 +103,27 @@ def main():
                     }
                 )
         except Exception as exc:
-            print(f"    - {ticker} 처리 중 오류 발생: {exc}")
+            logger.warning("%s 처리 중 오류 발생: %s", ticker, exc)
 
     if not results:
-        print("\n수익률을 계산할 수 있는 ETF가 없습니다.")
+        logger.info("수익률을 계산할 수 있는 ETF가 없습니다.")
         return
 
     # AnnualReturn 기준으로 내림차순 정렬
     sorted_results = sorted(results, key=lambda x: x["AnnualReturn"], reverse=True)
 
-    print("\n" + "=" * 50)
-    print(">>> 호주 ETF 1년 수익률 순위 <<<")
-    print("=" * 50)
+    logger.info("\n" + "=" * 50)
+    logger.info(">>> 호주 ETF 1년 수익률 순위 <<<")
+    logger.info("=" * 50)
     for i, item in enumerate(sorted_results, 1):
-        print(
-            f"{i:2d}. {item['name']} ({item['ticker']})\n"
-            f"    - 1년 수익률: {item['AnnualReturn']:.2f}%"
+        logger.info(
+            "%2d. %s (%s)\n    - 1년 수익률: %.2f%%",
+            i,
+            item["name"],
+            item["ticker"],
+            item["AnnualReturn"],
         )
-    print("=" * 50)
+    logger.info("=" * 50)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from utils.db_manager import get_db_connection
+from utils.logger import get_app_logger
 
 
 def _normalize(value: Any) -> str:
@@ -15,6 +16,8 @@ def migrate() -> None:
     db = get_db_connection()
     if db is None:
         raise RuntimeError("MongoDB 연결을 초기화할 수 없습니다.")
+
+    logger = get_app_logger()
 
     trades = db.trades
 
@@ -29,8 +32,11 @@ def migrate() -> None:
         account_value = _normalize(doc.get("account")) if "account" in doc else ""
 
         if account_value and account_value != country_value:
-            print(
-                f"[SKIP] _id={doc_id}: account='{account_value}' / country='{country_value}' 불일치로 건너뜁니다."
+            logger.info(
+                "[SKIP] _id=%s: account='%s' / country='%s' 불일치로 건너뜁니다.",
+                doc_id,
+                account_value,
+                country_value,
             )
             skipped += 1
             continue
@@ -61,7 +67,7 @@ def migrate() -> None:
         else:
             skipped += 1
 
-    print(f"완료: account 필드 갱신 {migrated}건, 변경 없음/건너뜀 {skipped}건")
+    logger.info("완료: account 필드 갱신 %d건, 변경 없음/건너뜀 %d건", migrated, skipped)
 
 
 if __name__ == "__main__":

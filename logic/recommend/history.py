@@ -12,6 +12,7 @@ from pymongo import DESCENDING, ASCENDING
 from utils.trade_store import list_open_positions
 from utils.db_manager import get_db_connection
 from utils.settings_loader import get_account_settings
+from utils.logger import get_app_logger
 
 
 def _extract_trade_time(trade: dict) -> Optional[datetime]:
@@ -89,9 +90,11 @@ def calculate_consecutive_holding_info(
     if not held_tickers:
         return holding_info
 
+    logger = get_app_logger()
+
     db = get_db_connection()
     if db is None:
-        print("-> 경고: DB에 연결할 수 없어 보유일 계산을 건너뜁니다.")
+        logger.warning("DB에 연결할 수 없어 보유일 계산을 건너뜁니다.")
         return holding_info
 
     include_until = as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -134,7 +137,8 @@ def calculate_consecutive_holding_info(
 
     try:
         open_positions = list_open_positions(account_norm)
-    except Exception:
+    except Exception as exc:
+        logger.warning("보유 포지션 조회 실패: %s", exc)
         open_positions = []
 
     fallback_map = {_canonical_ticker_key(pos.get("ticker")): pos for pos in open_positions}
@@ -201,9 +205,11 @@ def calculate_trade_cooldown_info(
     if not tickers:
         return info
 
+    logger = get_app_logger()
+
     db = get_db_connection()
     if db is None:
-        print("-> 경고: DB에 연결할 수 없어 쿨다운 계산을 건너뜁니다.")
+        logger.warning("DB에 연결할 수 없어 쿨다운 계산을 건너뜁니다.")
         return info
 
     include_until = as_of_date.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -215,7 +221,8 @@ def calculate_trade_cooldown_info(
         try:
             settings = get_account_settings(account_norm)
             country_code_normalized = str(settings.get("country_code") or "").strip().lower()
-        except Exception:
+        except Exception as exc:
+            logger.warning("계정 설정에서 국가 코드를 찾지 못했습니다: %s", exc)
             country_code_normalized = ""
 
     query: Dict[str, Any] = {

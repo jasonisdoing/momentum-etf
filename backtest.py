@@ -13,6 +13,7 @@ from utils.account_registry import (
 )
 from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
 from logic.recommend.output import print_run_header
+from utils.logger import get_app_logger
 
 from constants import TEST_MONTHS_RANGE
 
@@ -40,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    logger = get_app_logger()
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -80,7 +83,7 @@ def main() -> None:
         ticker_summaries=getattr(result, "ticker_summaries", []),
         core_start_dt=result.start_date,
     )
-    print(f"\n✅ 백테스트 로그를 '{target_path}'에 저장했습니다.")
+    logger.info("✅ 백테스트 로그를 '%s'에 저장했습니다.", target_path)
 
 
 if __name__ == "__main__":

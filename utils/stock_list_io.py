@@ -2,6 +2,10 @@ import json
 import os
 from typing import Dict, List
 
+from utils.logger import get_app_logger
+
+logger = get_app_logger()
+
 
 def _get_data_dir():
     """Helper to get the absolute path to the 'data' directory."""
@@ -24,7 +28,7 @@ def get_etfs(country: str) -> List[Dict[str, str]]:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
             if not isinstance(data, list):
-                print(f"경고: '{file_path}' 파일의 형식이 리스트가 아닙니다. 건너뜁니다.")
+                logger.warning("'%s' 파일의 형식이 리스트가 아닙니다. 건너뜁니다.", file_path)
                 return all_etfs
 
             for category_block in data:
@@ -54,9 +58,9 @@ def get_etfs(country: str) -> List[Dict[str, str]]:
                     new_item["recommend_enabled"] = not (item.get("recommend_enabled") is False)
                     all_etfs.append(new_item)
     except json.JSONDecodeError as e:
-        print(f"오류: '{file_path}' JSON 파일 파싱 실패 - {e}")
+        logger.error("'%s' JSON 파일 파싱 실패: %s", file_path, e)
     except Exception as e:
-        print(f"경고: '{file_path}' 파일 읽기 실패 - {e}")
+        logger.warning("'%s' 파일 읽기 실패: %s", file_path, e)
 
     return all_etfs
 
@@ -72,9 +76,9 @@ def save_etfs(country: str, data: List[Dict]):
     try:
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
-        print(f"성공: {len(data)}개 카테고리의 종목 정보가 '{file_path}'에 저장되었습니다.")
+        logger.info("%d개 카테고리의 종목 정보가 '%s'에 저장되었습니다.", len(data), file_path)
     except Exception as e:
-        print(f"오류: '{file_path}' 파일 저장 실패 - {e}")
+        logger.error("'%s' 파일 저장 실패: %s", file_path, e)
         raise
 
 
@@ -96,6 +100,6 @@ def get_etf_categories(country: str) -> List[str]:
                     if isinstance(category_block, dict) and "category" in category_block:
                         categories.add(category_block["category"])
     except Exception as e:
-        print(f"경고: '{file_path}' 파일에서 카테고리 읽기 실패 - {e}")
+        logger.warning("'%s' 파일에서 카테고리 읽기 실패: %s", file_path, e)
 
     return sorted(list(categories))

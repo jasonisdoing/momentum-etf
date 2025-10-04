@@ -20,6 +20,7 @@ from utils.settings_loader import (
 )
 from utils.data_loader import get_latest_trading_day, fetch_ohlcv
 from utils.stock_list_io import get_etfs
+from utils.logger import get_app_logger
 
 
 def _default_test_months_range() -> int:
@@ -93,9 +94,13 @@ def run_account_backtest(
 ) -> AccountBacktestResult:
     """계정 ID를 기반으로 백테스트를 실행합니다."""
 
+    logger = get_app_logger()
+
     def _log(message: str) -> None:
-        if not quiet:
-            print(message)
+        if quiet:
+            logger.debug(message)
+        else:
+            logger.info(message)
 
     override_settings = override_settings or {}
     account_id = (account_id or "").strip().lower()

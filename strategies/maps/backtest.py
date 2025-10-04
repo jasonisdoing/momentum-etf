@@ -13,10 +13,13 @@ import pandas as pd
 from utils.data_loader import fetch_ohlcv
 from utils.indicators import calculate_moving_average_signals, calculate_ma_score
 from utils.report import format_kr_money, format_aud_money
+from utils.logger import get_app_logger
 from .labeler import compute_net_trade_note
 
 from .shared import select_candidates_by_category
 from .constants import DECISION_NOTES, DECISION_CONFIG
+
+logger = get_app_logger()
 
 
 def _process_ticker_data(
@@ -121,8 +124,10 @@ def run_portfolio_backtest(
     country_code = (country or "").strip().lower() or "kor"
 
     def _log(message: str) -> None:
-        if not quiet:
-            print(message)
+        if quiet:
+            logger.debug(message)
+        else:
+            logger.info(message)
 
     etf_ma_period = ma_period
     stock_ma_period = ma_period
@@ -159,7 +164,10 @@ def run_portfolio_backtest(
                 market_regime_df["Close"].rolling(window=regime_filter_ma_period).mean()
             )
         else:
-            print(f"경고: 시장 레짐 필터 티커({regime_filter_ticker})의 데이터를 가져올 수 없습니다. 필터를 비활성화합니다.")
+            logger.warning(
+                "시장 레짐 필터 티커(%s)의 데이터를 가져올 수 없습니다. 필터를 비활성화합니다.",
+                regime_filter_ticker,
+            )
             regime_filter_enabled = False
 
     # 개별 종목 데이터 로딩 및 지표 계산

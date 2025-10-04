@@ -7,6 +7,9 @@ from bson import ObjectId
 from pymongo import DESCENDING
 
 from utils.db_manager import get_db_connection
+from utils.logger import get_app_logger
+
+logger = get_app_logger()
 
 
 def insert_trade_event(
@@ -235,7 +238,7 @@ def soft_delete_trade(trade_id: str) -> bool:
         )
         return result.modified_count > 0
     except Exception as e:
-        print(f"Error soft deleting trade {trade_id}: {e}")
+        logger.error("소프트 삭제 실패 (trade_id=%s): %s", trade_id, e)
         return False
 
 
@@ -256,5 +259,5 @@ def delete_trade(trade_id: str) -> bool:
         result = db.trades.delete_one({"_id": ObjectId(trade_id)})
         return result.deleted_count > 0
     except Exception as e:
-        print(f"Error deleting trade {trade_id}: {e}")
+        logger.error("거래 삭제 실패 (trade_id=%s): %s", trade_id, e)
         return False

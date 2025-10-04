@@ -24,8 +24,10 @@ from utils.report import (
     format_usd_price,
     render_table_eaw,
 )
+from utils.logger import get_app_logger
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
+logger = get_app_logger()
 
 
 def _default_months_range() -> int:
@@ -159,7 +161,10 @@ def print_backtest_summary(
         ]
     )
 
-    print("\n" + "=" * 30 + "\n 사용된 설정값 ".center(30, "=") + "\n" + "=" * 30)
+    logger.info("")
+    logger.info("=" * 30)
+    logger.info(" 사용된 설정값 ".center(30, "="))
+    logger.info("=" * 30)
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
         raise ValueError(f"'{account_id}' 계정 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
     ma_period = merged_strategy["MA_PERIOD"]
@@ -193,17 +198,21 @@ def print_backtest_summary(
     }
 
     for key, value in used_settings.items():
-        print(f"| {key}: {value}")
-    print("=" * 30)
+        logger.info("| %s: %s", key, value)
+    logger.info("=" * 30)
 
-    print("\n[지표 설명]")
-    print("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
-    print("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
-    print("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
-    print("  - Ulcer Index (얼서 지수): 고점 대비 낙폭의 지속성과 깊이를 반영. 낮을수록 안정적.")
+    logger.info("")
+    logger.info("[지표 설명]")
+    logger.info("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
+    logger.info("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
+    logger.info("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
+    logger.info("  - Ulcer Index (얼서 지수): 고점 대비 낙폭의 지속성과 깊이를 반영. 낮을수록 안정적.")
 
     if "monthly_returns" in summary and not summary["monthly_returns"].empty:
-        print("\n" + "=" * 30 + "\n 월별 성과 요약 ".center(30, "=") + "\n" + "=" * 30)
+        logger.info("")
+        logger.info("=" * 30)
+        logger.info(" 월별 성과 요약 ".center(30, "="))
+        logger.info("=" * 30)
 
         monthly_returns = summary["monthly_returns"]
         yearly_returns = summary["yearly_returns"]
@@ -264,10 +273,14 @@ def print_backtest_summary(
                 rows_data.append(cum_row_data)
 
         aligns = ["left"] + ["right"] * (len(headers) - 1)
-        print("\n" + "\n".join(render_table_eaw(headers, rows_data, aligns)))
+        for line in render_table_eaw(headers, rows_data, aligns):
+            logger.info(line)
 
     if ticker_summaries:
-        print("\n" + "=" * 30 + "\n 종목별 성과 요약 ".center(30, "=") + "\n" + "=" * 30)
+        logger.info("")
+        logger.info("=" * 30)
+        logger.info(" 종목별 성과 요약 ".center(30, "="))
+        logger.info("=" * 30)
         headers = [
             "티커",
             "종목명",
@@ -299,10 +312,11 @@ def print_backtest_summary(
 
         aligns = ["right", "left", "right", "right", "right", "right", "right", "right"]
         table_lines = render_table_eaw(headers, rows, aligns)
-        print("\n" + "\n".join(table_lines))
+        for line in table_lines:
+            logger.info(line)
 
     for line in summary_lines:
-        print(line)
+        logger.info(line)
 
 
 # ---------------------------------------------------------------------------
