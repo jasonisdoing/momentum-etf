@@ -11,10 +11,14 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from logic.backtest.account_runner import run_account_backtest
-from constants import TEST_MONTHS_RANGE
+from settings.common import TEST_MONTHS_RANGE
 from logic.entry_point import StrategyRules
 from utils.account_registry import get_strategy_rules
-from utils.settings_loader import AccountSettingsError, get_account_settings
+from utils.settings_loader import (
+    AccountSettingsError,
+    get_account_settings,
+    get_account_strategy,
+)
 from utils.logger import get_app_logger
 from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day
 from utils.report import render_table_eaw
@@ -105,6 +109,7 @@ def run_account_tuning(
         return None
 
     base_rules = get_strategy_rules(account_norm)
+    strategy_settings = get_account_strategy(account_norm)
     ma_values = _normalize_tuning_values(
         config.get("MA_RANGE"), dtype=int, fallback=base_rules.ma_period
     )
@@ -116,8 +121,13 @@ def run_account_tuning(
         dtype=float,
         fallback=base_rules.replace_threshold,
     )
+    regime_ma_values = _normalize_tuning_values(
+        config.get("MARKET_REGIME_FILTER_MA_PERIOD"),
+        dtype=int,
+        fallback=strategy_settings.get("MARKET_REGIME_FILTER_MA_PERIOD", 10),
+    )
 
-    if not ma_values or not topn_values or not replace_values:
+    if not ma_values or not topn_values or not replace_values or not regime_ma_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
@@ -150,7 +160,13 @@ def run_account_tuning(
         max_ma = max(ma_values)
     except ValueError:
         max_ma = base_rules.ma_period
-    warmup_days = int(max(max_ma, base_rules.ma_period) * 1.5)
+
+    try:
+        max_regime_ma = max(regime_ma_values)
+    except ValueError:
+        max_regime_ma = strategy_settings.get("MARKET_REGIME_FILTER_MA_PERIOD", max_ma)
+
+    warmup_days = int(max(max_ma, base_rules.ma_period, max_regime_ma) * 1.5)
 
     logger.info(
         "[튜닝] 데이터 미리 로딩: 티커 %d개, 기간 %s~%s, 웜업 %d일",
@@ -170,7 +186,7 @@ def run_account_tuning(
         logger.error("[튜닝] 사전 데이터 로딩에 실패했습니다.")
         return None
 
-    combos = list(product(ma_values, topn_values, replace_values))
+    combos = list(product(ma_values, topn_values, replace_values, regime_ma_values))
     total = len(combos)
     logger.info(
         "[튜닝] %s 튜닝 시작: 조합 %d개 (기간 %d개월)",
@@ -182,14 +198,17 @@ def run_account_tuning(
     results: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
 
-    for idx, (ma, topn, threshold) in enumerate(combos, 1):
+    progress_interval = max(1, total // 100)  # 약 1% 간격으로 진행률 로그
+
+    for idx, (ma, topn, threshold, regime_ma) in enumerate(combos, 1):
         logger.debug(
-            "[튜닝] (%d/%d) MA=%s, TOPN=%s, REPLACE_THRESHOLD=%s",
+            "[튜닝] (%d/%d) MA=%s, TOPN=%s, REPLACE_THRESHOLD=%s, REGIME_MA=%s",
             idx,
             total,
             ma,
             topn,
             threshold,
+            regime_ma,
         )
         if topn <= 0:
             failures.append(
@@ -197,6 +216,7 @@ def run_account_tuning(
                     "ma_period": ma,
                     "portfolio_topn": topn,
                     "replace_threshold": threshold,
+                    "regime_ma_period": regime_ma,
                     "error": "PORTFOLIO_TOPN must be > 0",
                 }
             )
@@ -214,10 +234,14 @@ def run_account_tuning(
                     "ma_period": ma,
                     "portfolio_topn": topn,
                     "replace_threshold": threshold,
+                    "regime_ma_period": regime_ma,
                     "error": str(exc),
                 }
             )
             continue
+
+        if idx % progress_interval == 0 or idx == total:
+            logger.info("[튜닝] 진행률: %d/%d (%.1f%%)", idx, total, (idx / total) * 100)
 
         try:
             bt_result = run_account_backtest(
@@ -227,6 +251,9 @@ def run_account_tuning(
                 override_settings={
                     "start_date": date_range[0],
                     "end_date": date_range[1],
+                    "strategy_overrides": {
+                        "MARKET_REGIME_FILTER_MA_PERIOD": int(regime_ma),
+                    },
                 },
                 prefetched_data=prefetched_data,
                 strategy_override=override_rules,
@@ -237,6 +264,7 @@ def run_account_tuning(
                     "ma_period": ma,
                     "portfolio_topn": topn,
                     "replace_threshold": threshold,
+                    "regime_ma_period": regime_ma,
                     "error": str(exc),
                 }
             )
@@ -247,6 +275,7 @@ def run_account_tuning(
             "ma_period": int(ma),
             "portfolio_topn": int(topn),
             "replace_threshold": float(threshold),
+            "regime_ma_period": int(regime_ma),
             "cagr_pct": float(summary.get("cagr_pct", 0.0)),
             "mdd_pct": float(summary.get("mdd_pct", 0.0)),
             "sharpe_ratio": float(summary.get("sharpe_ratio", 0.0)),
@@ -319,6 +348,7 @@ def run_account_tuning(
             "MA",
             "TOPN",
             "임계값",
+            "레짐MA",
             "CAGR(%)",
             "MDD(%)",
             "누적(%)",
@@ -331,12 +361,18 @@ def run_account_tuning(
         aligns = ["right"] * len(headers)
         table_rows: List[List[str]] = []
         for idx, row in enumerate(subset.itertuples(), 1):
+            regime_ma_val = getattr(row, "regime_ma_period", None)
+            try:
+                regime_ma_disp = str(int(regime_ma_val))
+            except (TypeError, ValueError):
+                regime_ma_disp = "-"
             table_rows.append(
                 [
                     str(idx),
                     str(int(row.ma_period)),
                     str(int(row.portfolio_topn)),
                     f"{row.replace_threshold:.3f}",
+                    regime_ma_disp,
                     _format_pct(row.cagr_pct),
                     _format_pct(row.mdd_pct, signed=False),
                     _format_pct(row.cumulative_return_pct),
@@ -359,7 +395,7 @@ def run_account_tuning(
         lines.append("# 실패한 조합")
         for item in failures:
             lines.append(
-                f"- MA={item['ma_period']}, TOPN={item['portfolio_topn']}, TH={item['replace_threshold']}: {item['error']}"
+                f"- MA={item['ma_period']}, TOPN={item['portfolio_topn']}, TH={item['replace_threshold']}, REGIME_MA={item.get('regime_ma_period')}: {item['error']}"
             )
         lines.append("")
 
@@ -375,10 +411,11 @@ def run_account_tuning(
     output_path.write_text("\n".join(lines), encoding="utf-8")
 
     logger.info(
-        "[튜닝] 최적 조합: MA=%d / TOPN=%d / TH=%.3f",
+        "[튜닝] 최적 조합: MA=%d / TOPN=%d / TH=%.3f / REGIME_MA=%d",
         best["ma_period"],
         best["portfolio_topn"],
         best["replace_threshold"],
+        best.get("regime_ma_period", 0),
     )
     logger.info("[튜닝] 결과를 '%s'에 저장했습니다.", output_path)
     return output_path

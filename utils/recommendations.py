@@ -25,6 +25,9 @@ _DISPLAY_COLUMNS = [
     "현재가",
     "일간(%)",
     "평가(%)",
+    "1주(%)",
+    "2주(%)",
+    "3주(%)",
     "점수",
     "지속",
     "문구",
@@ -142,6 +145,9 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         price = _format_currency(row.get("price"), country)
         daily_pct = _format_percent(row.get("daily_pct"))
         evaluation_pct = _format_percent(row.get("evaluation_pct", 0.0))
+        return_1w = _format_percent(row.get("return_1w", 0.0))
+        return_2w = _format_percent(row.get("return_2w", 0.0))
+        return_3w = _format_percent(row.get("return_3w", 0.0))
         score = _format_score(row.get("score"))
         streak = _format_days(row.get("streak"))
         phrase = _resolve_phrase(row)
@@ -156,6 +162,9 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "현재가": price,
                 "일간(%)": daily_pct,
                 "평가(%)": evaluation_pct,
+                "1주(%)": return_1w,
+                "2주(%)": return_2w,
+                "3주(%)": return_3w,
                 "점수": score,
                 "지속": streak,
                 "문구": phrase or row.get("phrase", ""),

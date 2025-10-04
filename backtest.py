@@ -15,7 +15,7 @@ from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
 from logic.recommend.output import print_run_header
 from utils.logger import get_app_logger
 
-from constants import TEST_MONTHS_RANGE
+from settings.common import TEST_MONTHS_RANGE
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 

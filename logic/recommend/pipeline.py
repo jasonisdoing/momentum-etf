@@ -429,6 +429,33 @@ def _resolve_buy_price(
     return fallback_price
 
 
+def _compute_trailing_return(
+    close_series: pd.Series,
+    periods_back: int,
+) -> float:
+    """Compute percentage return using close price N trading days ago."""
+
+    if not isinstance(close_series, pd.Series) or close_series.empty:
+        return 0.0
+    valid = close_series.dropna()
+    if valid.empty:
+        return 0.0
+
+    if len(valid) <= periods_back:
+        return 0.0
+
+    try:
+        latest_price = float(valid.iloc[-1])
+        prev_price = float(valid.iloc[-(periods_back + 1)])
+    except (IndexError, TypeError, ValueError):
+        return 0.0
+
+    if prev_price <= 0:
+        return 0.0
+
+    return round(((latest_price / prev_price) - 1.0) * 100.0, 2)
+
+
 def _fetch_trades_for_date(account_id: str, base_date: pd.Timestamp) -> List[Dict[str, Any]]:
     """Retrieve trades executed on the given base_date."""
 
@@ -646,6 +673,9 @@ def generate_account_recommendation_report(
                 "filter": int(consecutive_buy_days.iloc[-1])
                 if not consecutive_buy_days.empty
                 else 0,
+                "ret_1w": _compute_trailing_return(df["Close"], 5),
+                "ret_2w": _compute_trailing_return(df["Close"], 10),
+                "ret_3w": _compute_trailing_return(df["Close"], 15),
             }
         else:
             # 데이터가 없을 경우 기본값
@@ -659,6 +689,9 @@ def generate_account_recommendation_report(
                 "score": 0.0,
                 "filter": 0,
                 "drawdown_from_peak": None,
+                "ret_1w": 0.0,
+                "ret_2w": 0.0,
+                "ret_3w": 0.0,
             }
 
     # 전략 설정
@@ -898,6 +931,10 @@ def generate_account_recommendation_report(
             if buy_price and buy_price > 0 and price_val:
                 evaluation_pct_val = round(((float(price_val) / buy_price) - 1.0) * 100, 2)
 
+        ret_1w = ticker_data.get("ret_1w", 0.0)
+        ret_2w = ticker_data.get("ret_2w", 0.0)
+        ret_3w = ticker_data.get("ret_3w", 0.0)
+
         filter_days = decision.get("filter")
         if filter_days is None:
             filter_days_row = decision.get("row") or []
@@ -928,6 +965,9 @@ def generate_account_recommendation_report(
             "price": price_val,
             "daily_pct": daily_pct_val,
             "evaluation_pct": evaluation_pct_val,
+            "return_1w": ret_1w,
+            "return_2w": ret_2w,
+            "return_3w": ret_3w,
             "score": score_val,
             "streak": streak_val,
             "base_date": base_date.strftime("%Y-%m-%d"),
@@ -1069,6 +1109,9 @@ def generate_account_recommendation_report(
         "현재가",
         "일간수익률",
         "평가(%)",
+        "1주(%)",
+        "2주(%)",
+        "3주(%)",
         "보유일",
         "지속",
         "비중",
@@ -1091,6 +1134,9 @@ def generate_account_recommendation_report(
                 item.get("price"),
                 item.get("daily_pct"),
                 item.get("evaluation_pct"),
+                item.get("return_1w"),
+                item.get("return_2w"),
+                item.get("return_3w"),
                 item.get("holding_days"),
                 item.get("streak"),
                 item.get("weight", 0.0),

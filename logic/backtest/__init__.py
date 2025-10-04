@@ -1,6 +1,6 @@
 """Backtest package: runners and reporting utilities."""
 
-from constants import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
+from settings.common import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
 from .account_runner import AccountBacktestResult, run_account_backtest
 from .reporting import (
     dump_backtest_log,

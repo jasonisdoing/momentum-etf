@@ -13,21 +13,23 @@ from utils.account_registry import (
     list_available_accounts,
 )
 from logic.tune.runner import run_account_tuning
-from constants import TEST_MONTHS_RANGE
+from settings.common import TEST_MONTHS_RANGE
 from utils.logger import get_app_logger
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
-        "MA_RANGE": np.arange(10, 51, 5),
+        "MA_RANGE": np.arange(10, 51, 1),
         "PORTFOLIO_TOPN": np.arange(5, 8, 1),
         "REPLACE_SCORE_THRESHOLD": [0.5],
+        "MARKET_REGIME_FILTER_MA_PERIOD": np.arange(1, 31, 1),
     },
     "kor": {
-        "MA_RANGE": [15],
+        "MA_RANGE": np.arange(10, 51, 1),
         "PORTFOLIO_TOPN": [10],
         "REPLACE_SCORE_THRESHOLD": [0.5],
+        "MARKET_REGIME_FILTER_MA_PERIOD": np.arange(1, 31, 1),
     },
     # "kor": {
     #     "MA_RANGE": np.arange(10, 51, 1),
@@ -38,6 +40,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_RANGE": np.arange(5, 31, 1),
         "PORTFOLIO_TOPN": np.arange(5, 11, 1),
         "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
+        "MARKET_REGIME_FILTER_MA_PERIOD": [20],
     },
 }
 

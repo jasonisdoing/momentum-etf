@@ -42,7 +42,6 @@ except Exception:
 
 from utils.cache_utils import load_cached_frame, save_cached_frame
 from utils.stock_list_io import get_etfs
-from settings.common import REALTIME_PRICE_ENABLED
 from utils.logger import get_app_logger
 
 # from utils.notification import send_verbose_log_to_slack
@@ -177,8 +176,6 @@ def _is_kor_realtime_window(now_kst: datetime) -> bool:
 
 
 def _should_use_realtime_price(country: str) -> bool:
-    if not REALTIME_PRICE_ENABLED:
-        return False
     country_code = (country or "").strip().lower()
 
     if country_code != "kor":

@@ -22,12 +22,6 @@ from utils.settings_loader import (
     get_account_strategy_sections as get_country_strategy_sections,
     get_strategy_rules,
 )
-from settings.common import (
-    MARKET_REGIME_FILTER_ENABLED,
-    MARKET_REGIME_FILTER_TICKER,
-    MARKET_REGIME_FILTER_MA_PERIOD,
-    REALTIME_PRICE_ENABLED,
-)
 
 
 def iter_countries() -> Iterable[str]:  # pragma: no cover - 호환 함수
@@ -38,10 +32,8 @@ def get_common_file_settings() -> dict[str, Any]:
     """settings/common.py 설정을 딕셔너리로 반환합니다."""
 
     return {
-        "MARKET_REGIME_FILTER_ENABLED": MARKET_REGIME_FILTER_ENABLED,
-        "MARKET_REGIME_FILTER_TICKER": MARKET_REGIME_FILTER_TICKER,
-        "MARKET_REGIME_FILTER_MA_PERIOD": MARKET_REGIME_FILTER_MA_PERIOD,
-        "REALTIME_PRICE_ENABLED": REALTIME_PRICE_ENABLED,
+        "MARKET_REGIME_FILTER_ENABLED": True,
+        "REALTIME_PRICE_ENABLED": True,
     }
 
 

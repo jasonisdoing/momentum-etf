@@ -14,7 +14,11 @@ except Exception:  # pragma: no cover
     yf = None
 
 from utils.data_loader import fetch_ohlcv
-from utils.account_registry import get_common_file_settings
+from utils.account_registry import (
+    load_account_configs,
+    pick_default_account,
+)
+from utils.settings_loader import get_account_strategy_sections
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -26,14 +30,35 @@ def get_market_regime_status_string() -> Optional[str]:
     """
     # 공통 설정 로드 (파일)
     try:
-        common = get_common_file_settings()
-        regime_filter_enabled = common["MARKET_REGIME_FILTER_ENABLED"]
-        if not regime_filter_enabled:
+        account_configs = load_account_configs()
+        if not account_configs:
+            return '<span style="color:grey">시장 상태: 계정 설정 없음</span>'
+
+        default_account = pick_default_account(account_configs)
+        account_id = default_account.get("account_id")
+        if not account_id:
+            return '<span style="color:grey">시장 상태: 계정 식별 실패</span>'
+
+        tuning, static = get_account_strategy_sections(account_id)
+        regime_ticker = str(
+            static.get("MARKET_REGIME_FILTER_TICKER")
+            or tuning.get("MARKET_REGIME_FILTER_TICKER")
+            or ""
+        ).strip()
+        regime_ma_raw = (
+            tuning.get("MARKET_REGIME_FILTER_MA_PERIOD") if isinstance(tuning, dict) else None
+        )
+        if regime_ma_raw is None and isinstance(static, dict):
+            regime_ma_raw = static.get("MARKET_REGIME_FILTER_MA_PERIOD")
+
+        if not regime_ticker or regime_ma_raw is None:
             return '<span style="color:grey">시장 상태: 비활성화</span>'
-        regime_ticker = str(common["MARKET_REGIME_FILTER_TICKER"])
-        regime_ma_period = int(common["MARKET_REGIME_FILTER_MA_PERIOD"])
+
+        regime_ma_period = int(regime_ma_raw)
+        if regime_ma_period <= 0:
+            return '<span style="color:grey">시장 상태: 비활성화</span>'
     except (SystemExit, KeyError, ValueError, TypeError) as e:
-        logger.error("공통 설정을 불러오는 중 문제가 발생했습니다: %s", e)
+        logger.error("시장 레짐 설정을 불러오는 중 문제가 발생했습니다: %s", e)
         return '<span style="color:grey">시장 상태: 설정 파일 오류</span>'
 
     # 데이터 로딩에 필요한 기간 계산: 레짐 MA 기간을 만족하도록 동적으로 산정

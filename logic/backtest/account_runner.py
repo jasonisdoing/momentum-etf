@@ -8,7 +8,7 @@ import math
 
 import pandas as pd
 
-from constants import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
+from settings.common import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
 from logic.entry_point import run_portfolio_backtest, StrategyRules
 from utils.account_registry import get_common_file_settings
 from utils.settings_loader import (
@@ -119,6 +119,10 @@ def run_account_backtest(
     strategy_settings = dict(get_account_strategy(account_id))
     common_settings = get_common_file_settings()
 
+    strategy_overrides_extra = override_settings.get("strategy_overrides")
+    if isinstance(strategy_overrides_extra, Mapping):
+        strategy_settings.update({str(k): v for k, v in strategy_overrides_extra.items()})
+
     if strategy_override is not None:
         strategy_rules = StrategyRules.from_values(
             ma_period=strategy_override.ma_period,
@@ -209,6 +213,7 @@ def run_account_backtest(
         end_date=end_date,
         initial_capital=initial_capital_value,
         account_settings=account_settings,
+        strategy_settings=strategy_settings,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries)
@@ -316,13 +321,27 @@ def _build_backtest_kwargs(
     stop_loss_pct = -abs(float(stop_loss_raw))
     cooldown_days = int(strategy_settings.get("COOLDOWN_DAYS", 0) or 0)
 
+    regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
+
+    regime_filter_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
+    if not regime_filter_ticker:
+        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_TICKER' 값이 필요합니다.")
+
+    regime_filter_ma_raw = strategy_settings.get("MARKET_REGIME_FILTER_MA_PERIOD")
+    if regime_filter_ma_raw is None:
+        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
+    try:
+        regime_filter_ma_period = int(regime_filter_ma_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
+
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "ma_period": strategy_rules.ma_period,
         "replace_threshold": strategy_rules.replace_threshold,
-        "regime_filter_enabled": bool(common_settings["MARKET_REGIME_FILTER_ENABLED"]),
-        "regime_filter_ticker": str(common_settings["MARKET_REGIME_FILTER_TICKER"]),
-        "regime_filter_ma_period": int(common_settings["MARKET_REGIME_FILTER_MA_PERIOD"]),
+        "regime_filter_enabled": regime_filter_enabled,
+        "regime_filter_ticker": regime_filter_ticker,
+        "regime_filter_ma_period": regime_filter_ma_period,
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
         "quiet": quiet,
@@ -439,6 +458,7 @@ def _build_summary(
     end_date: pd.Timestamp,
     initial_capital: float,
     account_settings: Mapping[str, Any],
+    strategy_settings: Mapping[str, Any],
 ) -> Tuple[
     Dict[str, Any],
     pd.Series,
@@ -482,29 +502,85 @@ def _build_summary(
         ulcer_index = float((drawdowns_pct.pow(2).mean()) ** 0.5)
     cui = calmar_ratio / ulcer_index if ulcer_index > 0 else 0.0
 
-    benchmark_cum_ret_pct = 0.0
-    benchmark_cagr_pct = 0.0
-    benchmark_ticker = str(account_settings.get("benchmark_ticker") or "^GSPC")
-    benchmark_country = country_code
-    try:
-        benchmark_df = fetch_ohlcv(
-            benchmark_ticker,
-            country=benchmark_country,
-            date_range=[start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
-        )
-    except Exception:
-        benchmark_df = None
+    def _calc_benchmark_performance(
+        *, ticker: str, name: str, country: str
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            benchmark_df = fetch_ohlcv(
+                ticker,
+                country=country,
+                date_range=[start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
+            )
+        except Exception:
+            benchmark_df = None
 
-    if benchmark_df is not None and not benchmark_df.empty:
+        if benchmark_df is None or benchmark_df.empty:
+            return None
+
         benchmark_df = benchmark_df.sort_index()
         benchmark_df = benchmark_df.loc[benchmark_df.index.intersection(pv_series.index)]
-        if not benchmark_df.empty:
-            start_price = float(benchmark_df["Close"].iloc[0])
-            end_price = float(benchmark_df["Close"].iloc[-1])
-            if start_price > 0:
-                benchmark_cum_ret_pct = ((end_price / start_price) - 1) * 100
-                if years > 0:
-                    benchmark_cagr_pct = ((end_price / start_price) ** (1 / years) - 1) * 100
+        if benchmark_df.empty:
+            return None
+
+        start_price = float(benchmark_df["Close"].iloc[0])
+        end_price = float(benchmark_df["Close"].iloc[-1])
+        if start_price <= 0:
+            return None
+
+        cum_ret_pct = ((end_price / start_price) - 1) * 100
+        cagr_pct = 0.0
+        if years > 0:
+            cagr_pct = ((end_price / start_price) ** (1 / years) - 1) * 100
+
+        return {
+            "ticker": ticker,
+            "name": name,
+            "country": country,
+            "cumulative_return_pct": cum_ret_pct,
+            "cagr_pct": cagr_pct,
+        }
+
+    benchmark_cum_ret_pct = 0.0
+    benchmark_cagr_pct = 0.0
+    benchmarks_summary: List[Dict[str, Any]] = []
+
+    configured_benchmarks = account_settings.get("benchmarks")
+    if isinstance(configured_benchmarks, list) and configured_benchmarks:
+        for entry in configured_benchmarks:
+            if not isinstance(entry, Mapping):
+                continue
+            ticker_value = str(entry.get("ticker") or "").strip()
+            if not ticker_value:
+                continue
+
+            name_value = str(entry.get("name") or ticker_value).strip() or ticker_value
+            bench_country = (
+                str(entry.get("country") or entry.get("market") or country_code).strip()
+                or country_code
+            )
+            perf = _calc_benchmark_performance(
+                ticker=ticker_value,
+                name=name_value,
+                country=bench_country,
+            )
+            if perf is not None:
+                benchmarks_summary.append(perf)
+
+    if not benchmarks_summary:
+        benchmark_ticker = str(account_settings.get("benchmark_ticker") or "^GSPC")
+        benchmark_country = country_code
+        default_name = str(account_settings.get("benchmark_name") or "S&P 500")
+        perf = _calc_benchmark_performance(
+            ticker=benchmark_ticker,
+            name=default_name,
+            country=benchmark_country,
+        )
+        if perf is not None:
+            benchmarks_summary.append(perf)
+
+    if benchmarks_summary:
+        benchmark_cum_ret_pct = float(benchmarks_summary[0]["cumulative_return_pct"])
+        benchmark_cagr_pct = float(benchmarks_summary[0]["cagr_pct"])
 
     monthly_returns = pd.Series(dtype=float)
     monthly_cum_returns = pd.Series(dtype=float)
@@ -519,6 +595,18 @@ def _build_summary(
         yearly_returns = pv_series_with_start.resample("YE").last().pct_change().dropna()
 
     risk_off_periods = _detect_risk_off_periods(pv_series.index, ticker_timeseries)
+
+    regime_filter_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
+    if not regime_filter_ticker:
+        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_TICKER' 값이 필요합니다.")
+
+    regime_filter_ma_raw = strategy_settings.get("MARKET_REGIME_FILTER_MA_PERIOD")
+    if regime_filter_ma_raw is None:
+        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
+    try:
+        regime_filter_ma_period = int(regime_filter_ma_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
 
     summary = {
         "start_date": start_date.strftime("%Y-%m-%d"),
@@ -538,6 +626,11 @@ def _build_summary(
         "cui": cui,
         "benchmark_cum_ret_pct": benchmark_cum_ret_pct,
         "benchmark_cagr_pct": benchmark_cagr_pct,
+        "benchmarks": benchmarks_summary,
+        "benchmark_name": benchmarks_summary[0]["name"] if benchmarks_summary else "S&P 500",
+        "regime_filter_enabled": True,
+        "regime_filter_ticker": regime_filter_ticker,
+        "regime_filter_ma_period": regime_filter_ma_period,
         "monthly_returns": monthly_returns,
         "monthly_cum_returns": monthly_cum_returns,
         "yearly_returns": yearly_returns,

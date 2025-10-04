@@ -7,12 +7,6 @@ from typing import Any, Dict, Iterable, List
 
 from utils.logger import get_app_logger
 
-from settings.common import (
-    MARKET_REGIME_FILTER_ENABLED,
-    MARKET_REGIME_FILTER_TICKER,
-    MARKET_REGIME_FILTER_MA_PERIOD,
-    REALTIME_PRICE_ENABLED,
-)
 from utils.settings_loader import (
     AccountSettingsError,
     get_account_precision,
@@ -136,10 +130,8 @@ def get_common_file_settings() -> dict[str, Any]:
     """settings/common.py의 공통 설정을 딕셔너리로 반환합니다."""
 
     return {
-        "MARKET_REGIME_FILTER_ENABLED": MARKET_REGIME_FILTER_ENABLED,
-        "MARKET_REGIME_FILTER_TICKER": MARKET_REGIME_FILTER_TICKER,
-        "MARKET_REGIME_FILTER_MA_PERIOD": MARKET_REGIME_FILTER_MA_PERIOD,
-        "REALTIME_PRICE_ENABLED": REALTIME_PRICE_ENABLED,
+        "MARKET_REGIME_FILTER_ENABLED": True,
+        "REALTIME_PRICE_ENABLED": True,
     }
 
 

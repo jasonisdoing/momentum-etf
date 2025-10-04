@@ -9,13 +9,25 @@
         "tuning": {
             "MA_PERIOD": 15,
             "PORTFOLIO_TOPN": 10,
-            "REPLACE_SCORE_THRESHOLD": 0.5
+            "REPLACE_SCORE_THRESHOLD": 0.5,
+            "MARKET_REGIME_FILTER_MA_PERIOD": 20
         },
         "static": {
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
             "HOLDING_STOP_LOSS_PCT": 10,
-            "TRIM_DOWN_SELL_LIMIT": 1
+            "TRIM_DOWN_SELL_LIMIT": 1,
+            "MARKET_REGIME_FILTER_TICKER": "379800"
         }
-    }
+    },
+    "benchmarks": [
+        {
+            "ticker": "379800",
+            "name": "Kodex 미국S&P500"
+        },
+        {
+            "ticker": "426030",
+            "name": "TIMEFOLIO 미국나스닥100액티브"
+        }
+    ]
 }

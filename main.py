@@ -110,10 +110,10 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
             return "color: blue"
         return "color: black"
 
-    if "일간(%)" in df.columns:
-        styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, "일간(%)"])
-    if "평가(%)" in df.columns:
-        styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, "평가(%)"])
+    pct_columns = ["일간(%)", "평가(%)", "1주(%)", "2주(%)", "3주(%)"]
+    for col in pct_columns:
+        if col in df.columns:
+            styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, col])
 
     return styled
 
@@ -134,8 +134,11 @@ def render_recommendation_table(df: pd.DataFrame, *, account_id: str, country_co
             "상태": st.column_config.TextColumn("상태", width="small"),
             "보유일": st.column_config.TextColumn("보유일", width="small"),
             "현재가": st.column_config.TextColumn("현재가", width="small"),
-            "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),  # 수치형이라 기본적으로 오른쪽 정렬됨
+            "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),
             "평가(%)": st.column_config.NumberColumn("평가(%)", width="small"),
+            "1주(%)": st.column_config.NumberColumn("1주(%)", width="small"),
+            "2주(%)": st.column_config.NumberColumn("2주(%)", width="small"),
+            "3주(%)": st.column_config.NumberColumn("3주(%)", width="small"),
             "점수": st.column_config.NumberColumn("점수", width="small"),  # 문자열 대신 수치형 컬럼으로 표시
             "문구": st.column_config.TextColumn("문구", width="large"),  # 기본값 -> large
         },

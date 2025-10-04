@@ -186,9 +186,7 @@ python scripts/find.py --type etf --min-change 3.0
 
 ### 공통 설정
 모든 국가가 동일하게 사용하는 전역 파라미터를 파일에서 관리합니다:
-- `MARKET_REGIME_FILTER_ENABLED`: 시장 레짐 필터 사용 여부
-- `MARKET_REGIME_FILTER_TICKER`: 레짐 필터 지수 티커
-- `MARKET_REGIME_FILTER_MA_PERIOD`: 레짐 필터 이동평균 기간
+- `MARKET_REGIME_FILTER_ENABLED`: 시장 레짐 필터 사용 여부 (현재 코드는 항상 활성화 상태)
 - `HOLDING_STOP_LOSS_PCT`: 보유 손절 비율
 - `COOLDOWN_DAYS`: 거래 쿨다운 기간
 
@@ -199,6 +197,8 @@ python scripts/find.py --type etf --min-change 3.0
 - `ma_period`: 이동평균 기간
 - `replace_weaker_stock`: 약한 종목 교체 여부
 - `replace_threshold`: 종목 교체 임계값
+- `MARKET_REGIME_FILTER_TICKER`: 레짐 필터 지수 티커 (`strategy.static`에 정의)
+- `MARKET_REGIME_FILTER_MA_PERIOD`: 레짐 필터 이동평균 기간 (`strategy.tuning`에 정의, 튜닝 대상)
 
 각 국가별로 DB에 저장되어 해당 국가 현황/백테스트에 반영됩니다.
 

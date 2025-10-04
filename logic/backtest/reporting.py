@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import io
 import math
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from constants import TEST_MONTHS_RANGE
+from settings.common import TEST_MONTHS_RANGE
 from logic.backtest.account_runner import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
@@ -65,11 +63,24 @@ def print_backtest_summary(
     portfolio_topn: int,
     ticker_summaries: List[Dict[str, Any]],
     core_start_dt: pd.Timestamp,
-) -> None:
-    """Print a concise summary for an account backtest run."""
+    emit_to_logger: bool = True,
+) -> List[str]:
+    """Return a formatted summary for an account backtest run.
 
-    # 설정 모듈 로딩 시 순환 의존성을 피하기 위한 지연 임포트
-    from settings import common as common_settings
+    Args:
+        summary: 백테스트 요약 지표
+        account_id: 계정 ID
+        country_code: 국가 코드
+        test_months_range: 테스트 기간(개월)
+        initial_capital_krw: 초기 자본
+        portfolio_topn: 포트폴리오 보유 종목 수
+        ticker_summaries: 종목별 성과 요약 리스트
+        core_start_dt: 백테스트 시작일
+        emit_to_logger: True면 logger.info 로 출력도 수행
+
+    Returns:
+        출력용 문자열 리스트 (섹션 구분 포함)
+    """
 
     account_settings = get_account_settings(account_id)
     currency = account_settings.get("currency", "KRW")
@@ -113,58 +124,36 @@ def print_backtest_summary(
     else:
         money_formatter = format_kr_money
 
-    benchmark_name = "S&P 500"
+    output_lines: List[str] = []
 
-    summary_lines = [
-        "\n" + "=" * 30 + "\n 백테스트 결과 요약 ".center(30, "=") + "\n" + "=" * 30,
-        f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)",
-    ]
+    def add(line: str = "") -> None:
+        output_lines.append(line)
 
-    risk_off_periods = summary.get("risk_off_periods")
-    if isinstance(risk_off_periods, pd.DataFrame):
-        if not risk_off_periods.empty:
-            for _, row in risk_off_periods.iterrows():
-                start = pd.to_datetime(row.get("start"))
-                end = pd.to_datetime(row.get("end"))
-                summary_lines.append(
-                    f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
-                )
-        else:
-            summary_lines.append("| 투자 중단: N/A")
-    elif risk_off_periods:
-        for start, end in risk_off_periods:
-            summary_lines.append(
-                f"| 투자 중단: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
-            )
-    else:
-        summary_lines.append("| 투자 중단: N/A")
+    def ensure_blank_line() -> None:
+        if output_lines and output_lines[-1] != "":
+            add("")
 
-    summary_lines.extend(
-        [
-            f"| 초기 자본: {money_formatter(summary['initial_capital_krw'])}",
-            f"| 최종 자산: {money_formatter(summary['final_value'])}",
-            (
-                f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}% "
-                f"({benchmark_name}: {summary.get('benchmark_cum_ret_pct', 0.0):+.2f}%)"
-            ),
-            (
-                f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}% "
-                f"({benchmark_name}: {summary.get('benchmark_cagr_pct', 0.0):+.2f}%)"
-            ),
-            f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%",
-            f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}",
-            f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}",
-            f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}",
-            f"| Ulcer Index: {summary.get('ulcer_index', 0.0):.2f}",
-            f"| CUI (Calmar/Ulcer): {summary.get('cui', 0.0):.2f}",
-            "=" * 30,
-        ]
-    )
+    def add_section_heading(title: str) -> None:
+        ensure_blank_line()
+        add(f"========= {title} ==========")
 
-    logger.info("")
-    logger.info("=" * 30)
-    logger.info(" 사용된 설정값 ".center(30, "="))
-    logger.info("=" * 30)
+    def append_risk_off_period(start_dt: pd.Timestamp, end_dt: pd.Timestamp) -> None:
+        start_ts = pd.to_datetime(start_dt)
+        end_ts = pd.to_datetime(end_dt)
+
+        if pd.isna(start_ts) or pd.isna(end_ts):
+            add("| 투자 중단: N/A")
+            return
+
+        diff_days = (end_ts - start_ts).days
+        trading_days = diff_days + 1 if diff_days >= 0 else 0
+
+        add(
+            f"| 투자 중단: {start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')}"
+            f" ({trading_days} 거래일)"
+        )
+
+    add_section_heading("사용된 설정값")
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
         raise ValueError(f"'{account_id}' 계정 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
     ma_period = merged_strategy["MA_PERIOD"]
@@ -178,11 +167,19 @@ def print_backtest_summary(
         raise ValueError("strategy 설정에 'HOLDING_STOP_LOSS_PCT' 값이 필요합니다.")
     stop_loss_label = f"{holding_stop_loss_pct}%"
 
-    market_regime_enabled = getattr(common_settings, "MARKET_REGIME_FILTER_ENABLED", None)
-    if market_regime_enabled is None:
-        market_regime_enabled = merged_strategy.get("MARKET_REGIME_FILTER_ENABLED")
-    if market_regime_enabled is None:
-        raise ValueError("공통 또는 국가 전략 설정에 'MARKET_REGIME_FILTER_ENABLED' 값이 필요합니다.")
+    market_regime_enabled = True
+
+    regime_filter_ticker = merged_strategy.get("MARKET_REGIME_FILTER_TICKER")
+    if not regime_filter_ticker:
+        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_TICKER' 값이 필요합니다.")
+
+    regime_filter_ma_raw = merged_strategy.get("MARKET_REGIME_FILTER_MA_PERIOD")
+    if regime_filter_ma_raw is None:
+        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
+    try:
+        regime_filter_ma_period = int(regime_filter_ma_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
 
     used_settings = {
         "계정": account_id.upper(),
@@ -195,24 +192,21 @@ def print_backtest_summary(
         "개별 종목 손절매": stop_loss_label,
         "매도 후 재매수 금지 기간": f"{cooldown_days}일",
         "시장 위험 필터": "활성" if market_regime_enabled else "비활성",
+        "시장 위험 필터 티커": regime_filter_ticker,
+        "시장 위험 필터 MA 기간": f"{regime_filter_ma_period}일",
     }
 
     for key, value in used_settings.items():
-        logger.info("| %s: %s", key, value)
-    logger.info("=" * 30)
-
-    logger.info("")
-    logger.info("[지표 설명]")
-    logger.info("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
-    logger.info("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
-    logger.info("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
-    logger.info("  - Ulcer Index (얼서 지수): 고점 대비 낙폭의 지속성과 깊이를 반영. 낮을수록 안정적.")
+        add(f"| {key}: {value}")
+    add_section_heading("지표 설명")
+    add("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
+    add("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
+    add("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
+    add("  - Ulcer Index (얼서 지수): 고점 대비 낙폭의 지속성과 깊이를 반영. 낮을수록 안정적.")
+    add("  - CUI (칼마/얼서): Calmar Ratio를 Ulcer Index로 나눈 값. 상승률 대비 낙폭 위험을 동시에 고려하며, 높을수록 우수.")
 
     if "monthly_returns" in summary and not summary["monthly_returns"].empty:
-        logger.info("")
-        logger.info("=" * 30)
-        logger.info(" 월별 성과 요약 ".center(30, "="))
-        logger.info("=" * 30)
+        add_section_heading("월별 성과 요약")
 
         monthly_returns = summary["monthly_returns"]
         yearly_returns = summary["yearly_returns"]
@@ -274,13 +268,10 @@ def print_backtest_summary(
 
         aligns = ["left"] + ["right"] * (len(headers) - 1)
         for line in render_table_eaw(headers, rows_data, aligns):
-            logger.info(line)
+            add(line)
 
     if ticker_summaries:
-        logger.info("")
-        logger.info("=" * 30)
-        logger.info(" 종목별 성과 요약 ".center(30, "="))
-        logger.info("=" * 30)
+        add_section_heading("종목별 성과 요약")
         headers = [
             "티커",
             "종목명",
@@ -313,10 +304,70 @@ def print_backtest_summary(
         aligns = ["right", "left", "right", "right", "right", "right", "right", "right"]
         table_lines = render_table_eaw(headers, rows, aligns)
         for line in table_lines:
+            add(line)
+
+    add_section_heading("백테스트 결과 요약")
+    add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
+
+    risk_off_periods = summary.get("risk_off_periods")
+    if isinstance(risk_off_periods, pd.DataFrame):
+        if not risk_off_periods.empty:
+            for _, row in risk_off_periods.iterrows():
+                append_risk_off_period(row.get("start"), row.get("end"))
+        else:
+            add("| 투자 중단: N/A")
+    elif risk_off_periods:
+        for start, end in risk_off_periods:
+            append_risk_off_period(start, end)
+    else:
+        add("| 투자 중단: N/A")
+
+    add(f"| 초기 자본: {money_formatter(summary['initial_capital_krw'])}")
+    add(f"| 최종 자산: {money_formatter(summary['final_value'])}")
+    add(f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}%")
+
+    benchmarks_info = summary.get("benchmarks")
+    if isinstance(benchmarks_info, list) and benchmarks_info:
+        add("| 벤치마크")
+        for idx, bench in enumerate(benchmarks_info, start=1):
+            name = str(bench.get("name") or bench.get("ticker") or "-").strip()
+            ticker = str(bench.get("ticker") or "-").strip()
+            cum_ret = bench.get("cumulative_return_pct")
+            cum_label = f"{float(cum_ret):+.2f}%" if cum_ret is not None else "N/A"
+            add(f"| {idx}. {name}({ticker}): {cum_label}")
+    else:
+        benchmark_name = summary.get("benchmark_name") or "S&P 500"
+        bench_ret = summary.get("benchmark_cum_ret_pct")
+        if bench_ret is not None:
+            add(f"| 벤치마크: {benchmark_name}: {bench_ret:+.2f}%")
+
+    add(f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}%")
+
+    if isinstance(benchmarks_info, list) and benchmarks_info:
+        add("| 벤치마크 CAGR")
+        for idx, bench in enumerate(benchmarks_info, start=1):
+            name = str(bench.get("name") or bench.get("ticker") or "-").strip()
+            ticker = str(bench.get("ticker") or "-").strip()
+            cagr_ret = bench.get("cagr_pct")
+            cagr_label = f"{float(cagr_ret):+.2f}%" if cagr_ret is not None else "N/A"
+            add(f"| {idx}. {name}({ticker}): {cagr_label}")
+    else:
+        benchmark_name = summary.get("benchmark_name") or "S&P 500"
+        bench_cagr = summary.get("benchmark_cagr_pct")
+        if bench_cagr is not None:
+            add(f"| 벤치마크 CAGR: {benchmark_name}: {bench_cagr:+.2f}%")
+    add(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
+    add(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
+    add(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")
+    add(f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}")
+    add(f"| Ulcer Index: {summary.get('ulcer_index', 0.0):.2f}")
+    add(f"| CUI (Calmar/Ulcer): {summary.get('cui', 0.0):.2f}")
+
+    if emit_to_logger:
+        for line in output_lines:
             logger.info(line)
 
-    for line in summary_lines:
-        logger.info(line)
+    return output_lines
 
 
 # ---------------------------------------------------------------------------
@@ -711,25 +762,19 @@ def dump_backtest_log(
     daily_lines = _generate_daily_report_lines(result, account_settings)
     lines.extend(daily_lines)
 
-    summary_buffer = io.StringIO()
-    original_stdout = sys.stdout
-    sys.stdout = summary_buffer
-    try:
-        print_backtest_summary(
-            summary=result.summary,
-            account_id=account_id,
-            country_code=country_code,
-            test_months_range=getattr(result, "months_range", _default_months_range()),
-            initial_capital_krw=result.initial_capital,
-            portfolio_topn=result.portfolio_topn,
-            ticker_summaries=getattr(result, "ticker_summaries", []),
-            core_start_dt=result.start_date,
-        )
-    finally:
-        sys.stdout = original_stdout
-    summary_text = summary_buffer.getvalue()
-    if summary_text:
-        lines.extend(summary_text.strip("\n").splitlines())
+    summary_section = print_backtest_summary(
+        summary=result.summary,
+        account_id=account_id,
+        country_code=country_code,
+        test_months_range=getattr(result, "months_range", _default_months_range()),
+        initial_capital_krw=result.initial_capital,
+        portfolio_topn=result.portfolio_topn,
+        ticker_summaries=getattr(result, "ticker_summaries", []),
+        core_start_dt=result.start_date,
+        emit_to_logger=False,
+    )
+    if summary_section:
+        lines.extend(summary_section)
 
     with path.open("w", encoding="utf-8") as fp:
         fp.write("\n".join(lines) + "\n")
