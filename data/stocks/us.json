@@ -3,6 +3,10 @@
         "category": "TBD",
         "tickers": [
             {
+                "ticker": "QTUM",
+                "name": "Defiance Quantum ETF"
+            },
+            {
                 "ticker": "KSTR",
                 "name": "KraneShares SSE STAR Market 50 Index ETF"
             },
@@ -65,6 +69,74 @@
             {
                 "ticker": "SMH",
                 "name": "VanEck Semiconductor ETF"
+            },
+            {
+                "ticker": "SOXX",
+                "name": "iShares Semiconductor ETF"
+            },
+            {
+                "ticker": "SKYY",
+                "name": "First Trust Cloud Computing ETF"
+            },
+            {
+                "ticker": "AIG",
+                "name": "American International Group Inc."
+            },
+            {
+                "ticker": "CIBR",
+                "name": "First Trust NASDAQ Cybersecurity ETF"
+            },
+            {
+                "ticker": "BOTZ",
+                "name": "Global X Robotics & Artificial Intelligence ETF"
+            },
+            {
+                "ticker": "XLB",
+                "name": "Materials Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "XLC",
+                "name": "Communication Services Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "XLY",
+                "name": "Consumer Discretionary Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "XLP",
+                "name": "Consumer Staples Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "XLE",
+                "name": "Energy Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "XLF",
+                "name": "Financial Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "XLV",
+                "name": "Health Care Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "XLI",
+                "name": "Industrial Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "XLRE",
+                "name": "Real Estate Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "XLK",
+                "name": "Technology Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "XLU",
+                "name": "Utilities Select Sector SPDR Fund"
+            },
+            {
+                "ticker": "AIQ",
+                "name": "Global X Artificial Intelligence & Technology ETF"
             }
         ]
     }

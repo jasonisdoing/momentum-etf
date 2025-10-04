@@ -155,11 +155,15 @@ def run_portfolio_backtest(
     # --- 시장 레짐 필터 데이터 로딩 ---
     market_regime_df = None
     if regime_filter_enabled:
-        # 지수 티커를 지원하므로, 국가 코드는 의미상만 전달됩니다.
-        market_regime_df = fetch_ohlcv(
-            regime_filter_ticker, country=country, date_range=fetch_date_range
-        )
+        if prefetched_data and regime_filter_ticker in prefetched_data:
+            market_regime_df = prefetched_data.get(regime_filter_ticker)
+        if market_regime_df is None or market_regime_df.empty:
+            # 지수 티커를 지원하므로, 국가 코드는 의미상만 전달됩니다.
+            market_regime_df = fetch_ohlcv(
+                regime_filter_ticker, country=country, date_range=fetch_date_range
+            )
         if market_regime_df is not None and not market_regime_df.empty:
+            market_regime_df = market_regime_df.sort_index()
             market_regime_df["MA"] = (
                 market_regime_df["Close"].rolling(window=regime_filter_ma_period).mean()
             )

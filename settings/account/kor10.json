@@ -7,17 +7,17 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "tuning": {
-            "MA_PERIOD": 15,
+            "MA_PERIOD": 49,
             "PORTFOLIO_TOPN": 10,
             "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MARKET_REGIME_FILTER_MA_PERIOD": 20
+            "MARKET_REGIME_FILTER_MA_PERIOD": 0
         },
         "static": {
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
             "HOLDING_STOP_LOSS_PCT": 10,
             "TRIM_DOWN_SELL_LIMIT": 1,
-            "MARKET_REGIME_FILTER_TICKER": "379800"
+            "MARKET_REGIME_FILTER_TICKER": "^GSPC"
         }
     },
     "benchmarks": [

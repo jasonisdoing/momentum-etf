@@ -20,7 +20,7 @@ from utils.settings_loader import (
     get_account_strategy,
 )
 from utils.logger import get_app_logger
-from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day
+from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day, fetch_ohlcv
 from utils.report import render_table_eaw
 from utils.stock_list_io import get_etfs
 
@@ -186,6 +186,24 @@ def run_account_tuning(
         logger.error("[튜닝] 사전 데이터 로딩에 실패했습니다.")
         return None
 
+    prefetched_map: Dict[str, pd.DataFrame] = dict(prefetched_data)
+
+    regime_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
+    if regime_ticker and regime_ticker not in prefetched_map:
+        try:
+            regime_prefetch = fetch_ohlcv(
+                regime_ticker,
+                country=country_code,
+                date_range=date_range,
+            )
+        except Exception:
+            regime_prefetch = None
+
+        if regime_prefetch is not None and not regime_prefetch.empty:
+            prefetched_map[regime_ticker] = regime_prefetch
+
+    prefetched_data = prefetched_map
+
     combos = list(product(ma_values, topn_values, replace_values, regime_ma_values))
     total = len(combos)
     logger.info(
@@ -345,13 +363,14 @@ def run_account_tuning(
 
         headers = [
             "순위",
+            "기간(월)",
             "MA",
             "TOPN",
             "임계값",
             "레짐MA",
             "CAGR(%)",
-            "MDD(%)",
             "누적(%)",
+            "MDD(%)",
             "CUI (Calmar/Ulcer)",
             "Sharpe",
             "Sortino",
@@ -369,13 +388,14 @@ def run_account_tuning(
             table_rows.append(
                 [
                     str(idx),
+                    str(months_range),
                     str(int(row.ma_period)),
                     str(int(row.portfolio_topn)),
                     f"{row.replace_threshold:.3f}",
                     regime_ma_disp,
                     _format_pct(row.cagr_pct),
-                    _format_pct(row.mdd_pct, signed=False),
                     _format_pct(row.cumulative_return_pct),
+                    _format_pct(row.mdd_pct, signed=False),
                     _format_float(getattr(row, "cui", None)),
                     _format_float(row.sharpe_ratio),
                     _format_float(row.sortino_ratio),

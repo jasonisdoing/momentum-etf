@@ -16,8 +16,8 @@
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
             "HOLDING_STOP_LOSS_PCT": 10,
-            "TRIM_DOWN_SELL_LIMIT": 6,
-            "MARKET_REGIME_FILTER_TICKER": "379800"
+            "TRIM_DOWN_SELL_LIMIT": 1,
+            "MARKET_REGIME_FILTER_TICKER": "^GSPC"
         }
     },
     "benchmarks": [
