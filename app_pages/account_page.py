@@ -47,7 +47,7 @@ def render_account_page(account_id: str) -> None:
 
     try:
         account_settings = get_account_settings(account_id)
-    except AccountSettingsError as exc:  # pragma: no cover - Streamlit feedback only
+    except AccountSettingsError as exc:  # pragma: no cover - Streamlit 오류 피드백 전용
         st.error(f"설정을 불러오지 못했습니다: {exc}")
         st.stop()
 

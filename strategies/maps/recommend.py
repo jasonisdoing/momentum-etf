@@ -11,7 +11,7 @@ from .rules import StrategyRules
 from .constants import DECISION_MESSAGES, DECISION_NOTES
 from .messages import build_buy_replace_note
 from .shared import select_candidates_by_category, sort_decisions_by_order_and_score
-from logic.recommend.formatting import _load_account_precision
+from logic.recommend.formatting import load_account_precision
 from utils.data_loader import count_trading_days
 
 
@@ -51,10 +51,10 @@ def generate_daily_recommendations_for_portfolio(
         return f"${p:,.{precision}f}"
 
     # 표시 통화와 정밀도 결정: precision.json(country) 기준 사용
-    cprec = _load_account_precision(account_id) or {}
-    qty_precision = int(cprec.get("stock_qty_precision", 0))
-    price_precision = int(cprec.get("stock_price_precision", 0))
-    amt_precision = int(cprec.get("stock_amt_precision", 0))
+    precision_settings = load_account_precision(account_id) or {}
+    qty_precision = int(precision_settings.get("stock_qty_precision", 0))
+    price_precision = int(precision_settings.get("stock_price_precision", 0))
+    amt_precision = int(precision_settings.get("stock_amt_precision", 0))
 
     if country_code == "aus":
 

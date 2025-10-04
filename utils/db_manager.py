@@ -34,7 +34,7 @@ def get_db_connection():
         db_name = os.environ.get("MONGO_DB_NAME") or getattr(
             global_settings, "MONGO_DB_NAME", "momentum_etf_db"
         )
-        # Connection pool tuning (env optional)
+        # 연결 풀 관련 환경 변수(선택 사항)를 반영한다.
         max_pool = int(os.environ.get("MONGO_DB_MAX_POOL_SIZE", "20"))
         min_pool = int(os.environ.get("MONGO_DB_MIN_POOL_SIZE", "0"))
         max_idle = int(os.environ.get("MONGO_DB_MAX_IDLE_TIME_MS", "0"))  # 0 = driver default
@@ -60,15 +60,15 @@ def get_db_connection():
                 client_kwargs["waitQueueTimeoutMS"] = wait_q_timeout
             _mongo_client = MongoClient(connection_string, **client_kwargs)
         client = _mongo_client
-        # 서버에 연결하여 연결 성공 여부 확인
+        # 서버 상태를 확인해 연결 성공 여부를 검증한다.
         client.server_info()
 
         # 성공적으로 연결되면, 전역 변수에 DB 객체를 저장합니다.
         _db_connection = client[db_name]
 
-        # 연결 수(서버 전체) 정보 출력 시도
+        # 서버 연결 수 정보를 함께 출력한다.
         try:
-            status = client.admin.command("serverStatus")  # requires clusterMonitor on Atlas
+            status = client.admin.command("serverStatus")  # Atlas 환경에서는 clusterMonitor 권한 필요
             conn = status.get("connections", {}) if isinstance(status, dict) else {}
             current = conn.get("current")
             available = conn.get("available")

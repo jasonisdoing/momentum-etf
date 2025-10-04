@@ -238,10 +238,7 @@ def get_recommendations_dataframe(country: str, *, source_key: str | None = None
     Returns:
         포맷팅된 추천 종목 데이터프레임
     """
-    # 캐시를 무효화하고 최신 데이터 로드
-    if hasattr(load_recommendations, "_cache"):
-        load_recommendations._cache = {}
-
+    # load_recommendations는 파일 수정 시각을 캐시 키에 반영하므로, 별도 초기화 없이도 최신 데이터를 사용한다.
     try:
         data_key = (source_key or country).strip().lower()
         rows = load_recommendations(data_key)

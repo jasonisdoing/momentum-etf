@@ -8,7 +8,7 @@ from typing import Optional
 
 import pandas as pd
 
-try:  # optional dependency
+try:  # 선택적 의존성 로딩
     import yfinance as yf  # type: ignore
 except Exception:  # pragma: no cover
     yf = None

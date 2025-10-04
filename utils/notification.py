@@ -15,14 +15,14 @@ import settings as global_settings
 try:
     from slack_sdk import WebClient  # type: ignore
     from slack_sdk.errors import SlackApiError  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
+except Exception:  # pragma: no cover - 선택적 의존성 처리
     WebClient = None  # type: ignore
     SlackApiError = Exception  # type: ignore
 
 try:
     from croniter import croniter
     import pytz
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError:  # pragma: no cover - 선택적 의존성 처리
     croniter = None
     pytz = None
 
@@ -35,7 +35,7 @@ APP_LABEL = getattr(global_settings, "APP_TYPE", "APP")
 
 
 # ---------------------------------------------------------------------------
-# Slack webhook helpers
+# 슬랙 웹훅 관련 헬퍼
 # ---------------------------------------------------------------------------
 
 
@@ -126,10 +126,10 @@ def send_slack_message(
             return True
         _LAST_ERROR = response.text or "unknown"
         return False
-    except requests.exceptions.RequestException as exc:  # pragma: no cover - simple pass through
+    except requests.exceptions.RequestException as exc:  # pragma: no cover - 단순 위임 예외 처리
         _LAST_ERROR = str(exc)
         return False
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:  # pragma: no cover - 방어적 처리
         _LAST_ERROR = str(exc)
         return False
 
@@ -175,9 +175,9 @@ def _upload_file_to_slack(
         )
         print(f"[SLACK] 파일 업로드 성공 - channel={channel} file={file_path.name}")
         return True
-    except SlackApiError as exc:  # pragma: no cover - relies on external API
+    except SlackApiError as exc:  # pragma: no cover - 외부 API 의존 처리
         error_message = getattr(exc, "response", {}).get("error") or str(exc)
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:  # pragma: no cover - 방어적 처리
         error_message = str(exc)
 
     if error_message:
@@ -196,14 +196,14 @@ def _upload_file_to_slack(
 
 
 # ---------------------------------------------------------------------------
-# Formatting helpers
+# 포맷팅 보조 함수
 # ---------------------------------------------------------------------------
 
 
 def strip_html_tags(value: str) -> str:
     try:
         return re.sub(r"<[^>]+>", "", value)
-    except Exception:  # pragma: no cover - defensive
+    except Exception:  # pragma: no cover - 방어적 처리
         return value
 
 
@@ -220,7 +220,7 @@ def compose_recommendation_slack_message(
     if hasattr(base_date, "strftime"):
         try:
             base_date_str = base_date.strftime("%Y-%m-%d")
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - 방어적 처리
             base_date_str = str(base_date)
     elif base_date is not None:
         base_date_str = str(base_date)

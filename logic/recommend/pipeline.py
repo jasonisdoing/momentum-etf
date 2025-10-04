@@ -702,7 +702,7 @@ def generate_account_recommendation_report(
             "category": stock.get("category") or "TBD",
         }
 
-    # Include recommend_disabled tickers for metadata fallback
+    # 추천 비활성 티커도 메타데이터 보완용으로 포함한다
     full_meta_map = _load_full_etf_meta(country_code)
     for ticker, meta in full_meta_map.items():
         upper_ticker = ticker.upper()

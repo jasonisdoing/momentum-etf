@@ -1,8 +1,4 @@
-"""Signal logger (self-contained).
-
-Writes detailed signal logs to project-root `logs/YYYY-MM-DD.log` without
-depending on the root `signals.py`.
-"""
+"""신호 관련 로그를 담당하는 독립형 로거."""
 from __future__ import annotations
 
 import logging
@@ -24,7 +20,7 @@ def get_signal_logger() -> logging.Logger:
 
     logger = logging.getLogger("signal.detail")
     if not logger.handlers:
-        # project root: momentum-etf/
+        # 프로젝트 루트 경로(momentum-etf/)를 기준으로 로그 디렉터리를 찾는다.
         project_root = Path(__file__).resolve().parents[2]
         log_dir = project_root / "logs"
         log_dir.mkdir(exist_ok=True)

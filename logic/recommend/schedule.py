@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pandas as pd
 
-try:  # optional dependency
+try:  # 선택적 의존성 로딩
     import pytz  # type: ignore
 except Exception:  # pragma: no cover
     pytz = None
@@ -72,7 +72,7 @@ def get_next_trading_day(country: str, start_date: pd.Timestamp) -> pd.Timestamp
                 return pd.Timestamp(d).normalize()
     except Exception:
         pass
-    # fallback: if weekend, next Monday; else same day
+    # 보정 규칙: 주말이면 다음 월요일, 그렇지 않으면 동일한 날짜를 사용한다
     wd = start_date.weekday()
     delta = 0 if wd < 5 else (7 - wd)
     return (start_date + pd.Timedelta(days=delta)).normalize()

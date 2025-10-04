@@ -23,7 +23,7 @@ def load_account_recommendations(
 
     try:
         account_settings = get_account_settings(account_norm)
-    except Exception as exc:  # pragma: no cover - Streamlit용 오류 메시지
+    except Exception as exc:  # pragma: no cover - Streamlit 오류 메시지 전용
         return None, f"계정 설정을 불러오지 못했습니다: {exc}", ""
 
     country_code = (account_settings.get("country_code") or account_norm).strip().lower()
@@ -41,7 +41,7 @@ def load_account_recommendations(
 
     try:
         df = get_recommendations_dataframe(country_code, source_key=source_key)
-    except Exception as exc:  # pragma: no cover - Streamlit용 오류 메시지
+    except Exception as exc:  # pragma: no cover - Streamlit 오류 메시지 전용
         return None, f"추천 데이터를 불러오지 못했습니다: {exc}", country_code
 
     updated_at = datetime.fromtimestamp(file_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
@@ -126,14 +126,14 @@ def render_recommendation_table(df: pd.DataFrame, *, account_id: str, country_co
         height=TABLE_HEIGHT,
         column_config={
             "#": st.column_config.TextColumn("#", width="small"),
-            "티커": st.column_config.TextColumn("티커", width="small"),  # medium -> small
-            "종목명": st.column_config.TextColumn("종목명", width="medium"),  # large -> medium
-            "카테고리": st.column_config.TextColumn("카테고리", width="small"),  # medium -> small
+            "티커": st.column_config.TextColumn("티커", width="small"),  # medium 크기 설정을 small로 조정
+            "종목명": st.column_config.TextColumn("종목명", width="medium"),  # large 크기 설정을 medium으로 조정
+            "카테고리": st.column_config.TextColumn("카테고리", width="small"),  # medium 크기 설정을 small로 조정
             "상태": st.column_config.TextColumn("상태", width="small"),
             "보유일": st.column_config.TextColumn("보유일", width="small"),
             "현재가": st.column_config.TextColumn("현재가", width="small"),
-            "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),  # 이미 오른쪽 정렬
-            "점수": st.column_config.NumberColumn("점수", width="small"),  # Text -> Number (오른쪽 정렬)
+            "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),  # 수치형이라 기본적으로 오른쪽 정렬됨
+            "점수": st.column_config.NumberColumn("점수", width="small"),  # 문자열 대신 수치형 컬럼으로 표시
             "문구": st.column_config.TextColumn("문구", width="large"),  # 기본값 -> large
         },
     )

@@ -41,13 +41,13 @@ from apscheduler.triggers.cron import CronTrigger
 try:
     from slack_sdk import WebClient
     from slack_sdk.errors import SlackApiError
-except Exception:  # pragma: no cover - optional dependency
+except Exception:  # pragma: no cover - 선택적 의존성 처리
     WebClient = None  # type: ignore[assignment]
     SlackApiError = Exception  # type: ignore[assignment]
 
 import pandas as pd
 
-try:  # pragma: no cover - optional dependency
+try:  # pragma: no cover - 선택적 의존성 처리
     import numpy as np
 except Exception:  # pragma: no cover
     np = None  # type: ignore[assignment]
@@ -158,7 +158,7 @@ def _send_slack_notification(
                 channel,
             )
             return True
-        except SlackApiError as exc:  # pragma: no cover - external API call
+        except SlackApiError as exc:  # pragma: no cover - 외부 API 호출 오류
             logging.error(
                 "Slack API error for account=%s: %s",
                 account_id,

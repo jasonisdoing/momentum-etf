@@ -48,7 +48,7 @@ def main() -> None:
     try:
         account_settings = get_account_settings(account_id)
         get_strategy_rules(account_id)
-    except Exception as exc:  # pragma: no cover - guard for invalid inputs
+    except Exception as exc:  # pragma: no cover - 잘못된 입력 방어 전용 처리
         parser.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
     print_run_header(account_id, date_str=None)

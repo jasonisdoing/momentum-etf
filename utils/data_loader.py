@@ -44,7 +44,7 @@ from utils.cache_utils import load_cached_frame, save_cached_frame
 from utils.stock_list_io import get_etfs
 from settings.common import REALTIME_PRICE_ENABLED
 
-# from utils.notify import send_verbose_log_to_slack
+# from utils.notification import send_verbose_log_to_slack
 
 import warnings
 
@@ -58,7 +58,7 @@ warnings.filterwarnings(
 
 
 class _PykrxLogFilter(logging.Filter):
-    """Suppress malformed pykrx util logs that break formatting."""  # pragma: no cover - log hygiene
+    """형식이 무너지는 pykrx util 로그를 억제한다."""  # pragma: no cover - 로그 정리 목적
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.msg
@@ -491,8 +491,8 @@ def _fetch_ohlcv_with_cache(
         if cache_end is not None and _should_skip_pykrx_fetch(country_code, cache_end, miss_start):
             continue
 
-        # Check if there are any trading days in the missing range before attempting to fetch.
-        # This prevents errors when the gap consists only of non-trading days (weekends, holidays).
+        # 누락 구간에 실제 거래일이 존재하는지 먼저 확인한다.
+        # 주말·휴장일만 존재하는 구간이면 불필요한 조회 오류를 방지한다.
         trading_days_in_gap = get_trading_days(
             miss_start.strftime("%Y-%m-%d"), miss_end.strftime("%Y-%m-%d"), country_code
         )
@@ -754,7 +754,7 @@ def _fetch_ohlcv_core(
             if df.empty:
                 return None
 
-            # MultiIndex 컬럼을 정리합니다.
+            # 멀티 인덱스 형태로 저장된 컬럼을 단일 인덱스로 정리합니다.
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
                 df = df.loc[:, ~df.columns.duplicated()]

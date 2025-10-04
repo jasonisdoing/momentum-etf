@@ -71,7 +71,7 @@ def migrate_account_id(old_account_id: str, new_account_id: str) -> dict[str, in
         {"$set": {"account": new_norm}},
     )
 
-    # legacy country 필드가 남아 있는 경우를 대비해 동일하게 갱신
+    # 과거 country 필드가 남아 있는 경우를 대비해 동일하게 갱신한다.
     result_country = db.trades.update_many(
         {"country": old_norm},
         {"$set": {"country": new_norm}},

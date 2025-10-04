@@ -1,4 +1,4 @@
-"""Utility helpers for presenting backtest results."""
+"""백테스트 결과를 표시하기 위한 유틸리티 모음."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def _default_months_range() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Console summary helpers
+# 콘솔 요약 출력 관련 헬퍼
 # ---------------------------------------------------------------------------
 
 
@@ -66,7 +66,7 @@ def print_backtest_summary(
 ) -> None:
     """Print a concise summary for an account backtest run."""
 
-    # Lazy import to avoid circular dependency during settings import
+    # 설정 모듈 로딩 시 순환 의존성을 피하기 위한 지연 임포트
     from settings import common as common_settings
 
     account_settings = get_account_settings(account_id)
@@ -90,7 +90,7 @@ def print_backtest_summary(
         strategy_static = (
             strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
         )
-    else:  # 구 포맷과의 호환성
+    else:  # 구 포맷과의 호환성 유지
         strategy_tuning = strategy_cfg
         strategy_static = strategy_cfg
 
@@ -306,7 +306,7 @@ def print_backtest_summary(
 
 
 # ---------------------------------------------------------------------------
-# Backtest log helpers
+# 백테스트 로그 출력 헬퍼
 # ---------------------------------------------------------------------------
 
 
