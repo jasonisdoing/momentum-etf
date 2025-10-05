@@ -33,7 +33,7 @@ from utils.logger import get_app_logger
 from dotenv import load_dotenv
 
 load_dotenv()
-APP_DATE_TIME = "2025-10-05-10"
+APP_DATE_TIME = "2025-10-05-23"
 APP_TYPE = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 
 _LAST_ERROR: Optional[str] = None
