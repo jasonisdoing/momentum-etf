@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from collections import Counter
 
 import requests
-import settings as global_settings
 
 try:
     from slack_sdk import WebClient  # type: ignore
@@ -34,10 +33,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 APP_DATE_TIME = "2025-10-05-23"
-APP_TYPE = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
+APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 
 _LAST_ERROR: Optional[str] = None
-APP_LABEL = getattr(global_settings, "APP_TYPE")
 logger = get_app_logger()
 
 
