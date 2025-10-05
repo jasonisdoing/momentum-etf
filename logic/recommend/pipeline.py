@@ -522,12 +522,6 @@ def generate_account_recommendation_report(
     else:
         strategy_static = strategy_cfg
 
-    stop_loss_raw = strategy_static.get(
-        "HOLDING_STOP_LOSS_PCT",
-        strategy_cfg.get("HOLDING_STOP_LOSS_PCT"),
-    )
-    if stop_loss_raw is None:
-        raise ValueError("strategy 설정에 'HOLDING_STOP_LOSS_PCT' 값이 필요합니다.")
     max_per_category = int(
         strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0
     )
@@ -536,7 +530,8 @@ def generate_account_recommendation_report(
         or 0
     )
 
-    stop_loss_pct = -abs(float(stop_loss_raw))
+    # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
+    stop_loss_pct = -abs(float(portfolio_topn))
 
     # ETF 목록 가져오기
     etf_universe = get_etfs(country_code) or []

@@ -315,10 +315,8 @@ def _build_backtest_kwargs(
     prefetched_data: Optional[Mapping[str, pd.DataFrame]],
     quiet: bool,
 ) -> Dict[str, Any]:
-    stop_loss_raw = strategy_settings.get("HOLDING_STOP_LOSS_PCT")
-    if stop_loss_raw is None:
-        raise ValueError("strategy 설정에 'HOLDING_STOP_LOSS_PCT' 값이 필요합니다.")
-    stop_loss_pct = -abs(float(stop_loss_raw))
+    # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
+    stop_loss_pct = -abs(float(strategy_rules.portfolio_topn))
     cooldown_days = int(strategy_settings.get("COOLDOWN_DAYS", 0) or 0)
 
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))

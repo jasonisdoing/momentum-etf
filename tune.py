@@ -26,9 +26,9 @@ TUNING_CONFIG: dict[str, dict] = {
         "MARKET_REGIME_FILTER_MA_PERIOD": np.arange(1, 31, 1),
     },
     "kor": {
-        "MA_RANGE": np.arange(10, 61, 1),
+        "MA_RANGE": np.arange(10, 101, 1),
         "PORTFOLIO_TOPN": [10],
-        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "REPLACE_SCORE_THRESHOLD": [0.0],
         "MARKET_REGIME_FILTER_MA_PERIOD": np.arange(1, 31, 1),
     },
     # "kor": {

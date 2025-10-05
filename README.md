@@ -179,7 +179,7 @@ python scripts/find.py --type etf --min-change 3.0
   - **손절**: 보유 수익률이 손절 기준을 하회할 때
 
 ### 공통 리스크 관리 규칙 (백테스트)
-- **가격기반손절(CUT)**: 보유수익률 ≤ `HOLDING_STOP_LOSS_PCT`
+- **가격기반손절(CUT)**: 포트폴리오 종목 수(`portfolio_topn`)만큼 해당 종목이 하락하면 손절 (예: TopN=10 → 개인 손절 -10%)
 - **쿨다운**: 매수/매도 후 `COOLDOWN_DAYS` 동안 반대 방향 거래 금지
 
 ## 설정 체계
@@ -187,10 +187,7 @@ python scripts/find.py --type etf --min-change 3.0
 ### 공통 설정
 모든 국가가 동일하게 사용하는 전역 파라미터를 파일에서 관리합니다:
 - `MARKET_REGIME_FILTER_ENABLED`: 시장 레짐 필터 사용 여부 (현재 코드는 항상 활성화 상태)
-- `HOLDING_STOP_LOSS_PCT`: 보유 손절 비율
 - `COOLDOWN_DAYS`: 거래 쿨다운 기간
-
-**주의**: `HOLDING_STOP_LOSS_PCT`는 양수로 입력해도 자동으로 음수로 저장/해석됩니다. (예: 10 → -10)
 
 ### 국가별 전략 파라미터
 - `portfolio_topn`: 포트폴리오 최대 보유 종목 수

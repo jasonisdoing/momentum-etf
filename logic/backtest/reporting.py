@@ -159,13 +159,9 @@ def print_backtest_summary(
     ma_period = merged_strategy["MA_PERIOD"]
     momentum_label = f"{ma_period}일"
 
-    holding_stop_loss_pct = strategy_static.get(
-        "HOLDING_STOP_LOSS_PCT",
-        strategy_cfg.get("HOLDING_STOP_LOSS_PCT"),
-    )
-    if holding_stop_loss_pct is None:
-        raise ValueError("strategy 설정에 'HOLDING_STOP_LOSS_PCT' 값이 필요합니다.")
-    stop_loss_label = f"{holding_stop_loss_pct}%"
+    holding_stop_loss_pct = float(portfolio_topn)
+    # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
+    stop_loss_label = f"{holding_stop_loss_pct:.0f}%"
 
     market_regime_enabled = True
 
