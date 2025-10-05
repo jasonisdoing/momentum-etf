@@ -13,7 +13,6 @@ APScheduler 기반 스케줄러
 - RUN_IMMEDIATELY_ON_START: "1" 이면 시작 시 즉시 한 번 실행 (기본: "0")
 """
 
-import json
 import logging
 import os
 import sys
@@ -24,7 +23,8 @@ os.environ["PYTHONWARNINGS"] = "ignore"
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 import time
 from datetime import datetime
-from pathlib import Path
+
+from utils.recommendation_storage import save_recommendation_report
 
 
 try:
@@ -44,8 +44,6 @@ try:
 except Exception:  # pragma: no cover - 선택적 의존성 처리
     WebClient = None  # type: ignore[assignment]
     SlackApiError = Exception  # type: ignore[assignment]
-
-import pandas as pd
 
 try:  # pragma: no cover - 선택적 의존성 처리
     import numpy as np
@@ -71,73 +69,6 @@ from utils.schedule_config import (
 from utils.settings_loader import get_account_slack_channel
 
 
-RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
-
-
-def _make_json_safe(obj):
-    """Convert non-serializable objects into JSON safe representations."""
-
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-
-    if isinstance(obj, (datetime, pd.Timestamp)):
-        return obj.isoformat()
-
-    if np is not None and isinstance(obj, np.generic):  # numpy scalar types
-        return obj.item()
-
-    if isinstance(obj, dict):
-        return {k: _make_json_safe(v) for k, v in obj.items()}
-
-    if isinstance(obj, (list, tuple, set)):
-        return [_make_json_safe(v) for v in obj]
-
-    if isinstance(obj, pd.Series):
-        return [_make_json_safe(v) for v in obj.tolist()]
-
-    if isinstance(obj, pd.DataFrame):
-        return [
-            {k: _make_json_safe(v) for k, v in rec.items()} for rec in obj.to_dict(orient="records")
-        ]
-
-    return str(obj)
-
-
-def _save_recommendation_result(report: RecommendationReport) -> Path:
-    """Persist recommendation results to JSON for downstream consumers."""
-
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    account_id = (getattr(report, "account_id", "") or "").strip().lower()
-    country_code = (getattr(report, "country_code", "") or "").strip().lower()
-
-    if not account_id or not country_code:
-        raise RuntimeError("Recommendation report must include both account_id and country_code")
-
-    payload = _make_json_safe(report.recommendations)
-
-    account_path = RESULTS_DIR / f"recommendation_{account_id}.json"
-    country_path = RESULTS_DIR / f"recommendation_{country_code}.json"
-
-    try:
-        with account_path.open("w", encoding="utf-8") as fp:
-            json.dump(payload, fp, ensure_ascii=False, indent=2)
-
-        if country_path != account_path:
-            with country_path.open("w", encoding="utf-8") as fp:
-                json.dump(payload, fp, ensure_ascii=False, indent=2)
-    except Exception:
-        logging.error(
-            "Failed to write recommendation results for account=%s country=%s",
-            account_id,
-            country_code,
-            exc_info=True,
-        )
-        raise
-
-    return account_path
-
-
 def _send_slack_notification(
     account_id: str,
     country_code: str,
@@ -160,14 +91,14 @@ def _send_slack_notification(
             return True
         except SlackApiError as exc:  # pragma: no cover - 외부 API 호출 오류
             logging.error(
-                "Slack API error for account=%s: %s",
+                "Slack API 호출 중 오류가 발생했습니다 (account=%s): %s",
                 account_id,
                 getattr(exc, "response", {}).get("error") or str(exc),
                 exc_info=True,
             )
         except Exception:
             logging.error(
-                "Unexpected Slack client failure for account=%s",
+                "Slack 메시지 전송 중 알 수 없는 오류가 발생했습니다 (account=%s)",
                 account_id,
                 exc_info=True,
             )
@@ -185,14 +116,14 @@ def _send_slack_notification(
             return True
 
         logging.error(
-            "Slack webhook delivery failed for account=%s (source=%s)",
+            "Slack 웹훅 전송에 실패했습니다 (account=%s, source=%s)",
             account_id,
             source_name,
         )
 
     if not channel and not webhook_info:
         logging.info(
-            "Slack delivery skipped for account=%s: no channel/webhook configured",
+            "account=%s에 대해 Slack 채널 또는 웹훅이 설정되어 있지 않아 전송을 건너뜁니다.",
             account_id,
         )
 
@@ -270,12 +201,12 @@ def run_recommendation_generation(
 
     account_norm = (account_id or "").strip().lower()
     if not account_norm:
-        logging.error("Account ID is required for recommendation generation.")
+        logging.error("추천 생성을 위해서는 계정 ID가 필요합니다.")
         return
 
     country_norm = (country_code or "").strip().lower()
     if not country_norm:
-        logging.error("Country code is required for recommendation generation.")
+        logging.error("추천 생성을 위해서는 국가 코드가 필요합니다.")
         return
 
     logging.info(
@@ -289,7 +220,7 @@ def run_recommendation_generation(
         report = generate_account_recommendation_report(account_id=account_norm, date_str=None)
     except Exception:
         logging.error(
-            "Signal generation job for account=%s failed",
+            "계정 %s의 추천 생성 작업이 실패했습니다",
             account_norm,
             exc_info=True,
         )
@@ -297,14 +228,14 @@ def run_recommendation_generation(
 
     if not isinstance(report, RecommendationReport):
         logging.error(
-            "Unexpected recommendation report type for account=%s: %s",
+            "계정 %s에 대한 추천 결과 형식이 예상과 다릅니다: %s",
             account_norm,
             type(report).__name__,
         )
         return
 
     if not report.recommendations:
-        logging.warning("No recommendations produced for account=%s", account_norm)
+        logging.warning("계정 %s에 대해 생성된 추천이 없습니다.", account_norm)
         return
 
     duration = time.time() - start_time
@@ -312,7 +243,7 @@ def run_recommendation_generation(
     report_country = (getattr(report, "country_code", "") or "").strip().lower()
     if report_country and report_country != country_norm:
         logging.warning(
-            "Report country mismatch (expected=%s, got=%s)",
+            "추천 결과의 국가 코드가 일치하지 않습니다 (기대값=%s, 실제=%s)",
             country_norm,
             report_country,
         )
@@ -320,16 +251,16 @@ def run_recommendation_generation(
     target_country = report_country or country_norm
 
     try:
-        output_path = _save_recommendation_result(report)
+        output_path = save_recommendation_report(report)
         logging.info(
-            "Saved %s recommendations (%d items) to %s",
+            "%s 추천 %d건을 %s 위치에 저장했습니다.",
             target_country.upper(),
             len(report.recommendations),
             output_path,
         )
     except Exception:
         logging.error(
-            "Skipping Slack notification because saving results failed for account=%s",
+            "계정 %s의 추천 결과를 저장하지 못해 Slack 알림을 건너뜁니다.",
             account_norm,
             exc_info=True,
         )
@@ -373,7 +304,7 @@ def run_recommend_for_country(
     country_norm = (country or "").strip().lower()
 
     if not account_norm:
-        logging.error("Account ID must be provided when scheduling recommendations.")
+        logging.error("스케줄 작업을 위해 계정 ID가 필요합니다.")
         return
 
     try:
@@ -384,7 +315,7 @@ def run_recommend_for_country(
         )
     except Exception:
         logging.error(
-            "Error running recommendation generation for account=%s country=%s",
+            "계정 %s, 국가 %s의 추천 생성 중 오류가 발생했습니다.",
             account_norm,
             country_norm,
             exc_info=True,
@@ -403,7 +334,7 @@ def run_cache_refresh() -> None:
         refresh_all_caches(countries=countries, start_date=start_date)
         logging.info("Cache refresh completed successfully")
     except Exception:
-        logging.error("Cache refresh job failed", exc_info=True)
+        logging.error("가격 캐시 갱신 작업이 실패했습니다.", exc_info=True)
 
 
 def main():
@@ -417,9 +348,9 @@ def main():
     logging.info("Checking for and updating stock names...")
     try:
         update_etf_names()
-        logging.info("Stock name update complete.")
+        logging.info("종목명 업데이트를 완료했습니다.")
     except Exception as e:
-        logging.error(f"Failed to update stock names: {e}", exc_info=True)
+        logging.error(f"종목명 업데이트에 실패했습니다: {e}", exc_info=True)
 
     scheduler = BlockingScheduler()
     # 1. recommendation_cron 와 notify_cron 이 겹치는 경우: 작업도 실행되고, 슬랙도 발송
