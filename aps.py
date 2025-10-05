@@ -23,6 +23,7 @@ os.environ["PYTHONWARNINGS"] = "ignore"
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 import time
 from datetime import datetime
+from typing import Any
 
 from utils.recommendation_storage import save_recommendation_report
 
@@ -72,9 +73,16 @@ from utils.settings_loader import get_account_slack_channel
 def _send_slack_notification(
     account_id: str,
     country_code: str,
-    message: str,
+    payload: dict[str, Any] | str,
 ) -> bool:
     """Send Slack notification via bot token or webhook as a fallback."""
+
+    if isinstance(payload, str):
+        text = payload
+        blocks: list[dict[str, Any]] | None = None
+    else:
+        text = str(payload.get("text", ""))
+        blocks = payload.get("blocks")
 
     channel = get_account_slack_channel(account_id)
     token = os.environ.get("SLACK_BOT_TOKEN")
@@ -82,7 +90,9 @@ def _send_slack_notification(
     if token and channel and WebClient is not None:
         try:
             client = WebClient(token=token)
-            client.chat_postMessage(channel=channel, text=message)
+            client.chat_postMessage(
+                channel=channel, text=text or "Slack notification", blocks=blocks
+            )
             logging.info(
                 "Slack message sent via bot token for account=%s (channel=%s)",
                 account_id,
@@ -106,7 +116,9 @@ def _send_slack_notification(
     webhook_info = get_slack_webhook_url(account_id)
     if webhook_info:
         webhook_url, source_name = webhook_info
-        sent = send_slack_message(message, webhook_url=webhook_url, webhook_name=source_name)
+        sent = send_slack_message(
+            text, blocks=blocks, webhook_url=webhook_url, webhook_name=source_name
+        )
         if sent:
             logging.info(
                 "Slack message sent via webhook for %s (source=%s)",
@@ -266,7 +278,7 @@ def run_recommendation_generation(
         )
         return
 
-    slack_message = compose_recommendation_slack_message(
+    slack_payload = compose_recommendation_slack_message(
         account_norm,
         report,
         duration=duration,
@@ -276,7 +288,7 @@ def run_recommendation_generation(
     notified = _send_slack_notification(
         account_norm,
         target_country,
-        slack_message,
+        slack_payload,
     )
     base_date_str = report.base_date.strftime("%Y-%m-%d")
     if notified:

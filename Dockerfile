@@ -7,9 +7,6 @@ ENV PYTHONDONTWRITEBYTECODE 1
 # 컨테이너의 기본 인코딩을 UTF-8로 설정하여 한글 깨짐을 방지합니다.
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
-ENV STREAMLIT_SERVER_ADDRESS 0.0.0.0
-ENV STREAMLIT_SERVER_PORT 8501
-
 # 3. debconf가 대화형 프롬프트를 표시하지 않도록 설정합니다.
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -31,6 +28,5 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # 8. 나머지 애플리케이션 소스 코드 전체를 작업 디렉토리로 복사합니다.
 COPY . .
 
-# 9. 컨테이너 시작 시 Streamlit 앱을 실행합니다.
-EXPOSE 8501
-CMD ["python", "run.py"]
+# 9. 컨테이너 시작 시 스케줄러를 실행합니다.
+CMD ["python", "aps.py"]

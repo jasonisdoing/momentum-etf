@@ -30,9 +30,14 @@ from utils.account_registry import get_account_settings
 from utils.schedule_config import get_country_schedule
 from utils.report import format_kr_money
 from utils.logger import get_app_logger
+from dotenv import load_dotenv
+
+load_dotenv()
+APP_DATE_TIME = "2025-10-05-10"
+APP_TYPE = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 
 _LAST_ERROR: Optional[str] = None
-APP_LABEL = getattr(global_settings, "APP_TYPE", "APP")
+APP_LABEL = getattr(global_settings, "APP_TYPE")
 logger = get_app_logger()
 
 
@@ -115,10 +120,11 @@ def send_slack_message(
         _LAST_ERROR = "Missing Slack webhook URL"
         return False
 
+    sanitized = text.replace("<pre>", "```").replace("</pre>", "```")
     if blocks:
-        payload = {"blocks": blocks}
+        payload = {"text": sanitized, "blocks": blocks}
     else:
-        payload = {"text": text.replace("<pre>", "```").replace("</pre>", "```")}
+        payload = {"text": sanitized}
 
     try:
         response = requests.post(webhook_url, json=payload, timeout=10)
@@ -143,7 +149,7 @@ def get_last_error() -> Optional[str]:
 def send_slack_message_to_logs(message: str):
     webhook_url = os.environ.get("LOGS_SLACK_WEBHOOK")
     if webhook_url:
-        log_message = f"📜 *[{global_settings.APP_TYPE}]*{message}"
+        log_message = f"📜 *[{APP_LABEL}]*{message}"
         send_slack_message(log_message, webhook_url=webhook_url, webhook_name="LOGS_SLACK_WEBHOOK")
 
 
@@ -196,7 +202,7 @@ def _upload_file_to_slack(
 # def send_verbose_log_to_slack(message: str):
 #     webhook_url = os.environ.get("VERBOSE_LOGS_SLACK_WEBHOOK")
 #     if webhook_url:
-#         log_message = f"📜 *[{global_settings.APP_TYPE}]*{message}"
+#         log_message = f"📜 *[{APP_LABEL}]*{message}"
 #         send_slack_message(
 #             log_message, webhook_url=webhook_url, webhook_name="VERBOSE_LOGS_SLACK_WEBHOOK"
 #         )
@@ -220,30 +226,39 @@ def compose_recommendation_slack_message(
     *,
     duration: float,
     force_notify: bool = False,
-) -> str:
-    """Compose a minimal Slack message with dashboard link for recommendations."""
+) -> dict[str, Any]:
+    """Compose Slack text and Block Kit payload for recommendation updates."""
+
+    account_norm = (account_id or "").strip().lower()
+    account_settings: dict[str, Any] | None = None
+    try:
+        account_settings = get_account_settings(account_norm)
+    except Exception:
+        account_settings = None
+
+    account_label = (
+        str((account_settings or {}).get("name"))
+        if account_settings and (account_settings or {}).get("name")
+        else account_norm.upper()
+    )
 
     base_date = getattr(report, "base_date", None)
     if hasattr(base_date, "strftime"):
         try:
             base_date_str = base_date.strftime("%Y-%m-%d")
-        except Exception:  # pragma: no cover - 방어적 처리
+        except Exception:
             base_date_str = str(base_date)
     elif base_date is not None:
         base_date_str = str(base_date)
     else:
         base_date_str = "N/A"
 
-    headline = f"[{APP_LABEL}] 종목 추천 정보가 갱신되었습니다. ({base_date_str})"
-    account_norm = (account_id or "").strip().lower()
     dashboard_url = (
         f"http://localhost:8501/{account_norm}" if account_norm else "http://localhost:8501/"
     )
 
     recommendations = list(getattr(report, "recommendations", []) or [])
     decision_config = getattr(report, "decision_config", {}) or {}
-
-    lines = [headline, f"생성시간: {duration:.1f}초"]
 
     state_counter: Counter[str] = Counter()
     if isinstance(decision_config, dict):
@@ -262,21 +277,90 @@ def compose_recommendation_slack_message(
                 return 99
         return 99
 
-    state_lines: List[str] = []
-    for state, count in sorted(
-        state_counter.items(), key=lambda pair: (_state_order(pair[0]), pair[0])
-    ):
-        state_lines.append(f"{state}: {count}개")
+    ordered_states = [
+        (state, count)
+        for state, count in sorted(
+            state_counter.items(), key=lambda pair: (_state_order(pair[0]), pair[0])
+        )
+    ]
 
-    if state_lines:
-        lines.extend(state_lines)
+    top_rows: list[str] = []
+    for item in recommendations[:5]:
+        ticker = str(item.get("ticker") or "-")
+        state = str(item.get("state") or "-").upper()
+        score = item.get("score")
+        score_str = f"{score:.1f}" if isinstance(score, (int, float)) else "-"
+        phrase = str(item.get("phrase") or "")
+        context = f" ({phrase})" if phrase else ""
+        top_rows.append(f"• {ticker} · {state} · 점수 {score_str}{context}")
 
+    headline = f"{account_label} 추천 정보가 갱신되었습니다. ({base_date_str})"
+    app_prefix = f"[{APP_LABEL}] " if APP_LABEL else ""
+
+    lines = [app_prefix + headline, f"생성시간: {duration:.1f}초"]
+    if ordered_states:
+        lines.extend([f"{state}: {count}개" for state, count in ordered_states])
+    if top_rows:
+        lines.append("상위 추천:\n" + "\n".join(top_rows))
     lines.append(dashboard_url)
+    fallback_text = "\n".join(lines)
 
-    body = "\n".join(lines)
-    if state_lines:
-        return "<!channel>\n" + body
-    return body
+    blocks: list[dict[str, Any]] = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": f"[{APP_LABEL}] {account_label} 추천 갱신",
+                "emoji": True,
+            },
+        }
+    ]
+
+    fields: list[dict[str, str]] = [
+        {"type": "mrkdwn", "text": f"*환경*: {APP_LABEL}"},
+        {"type": "mrkdwn", "text": f"*계정*: {account_label}"},
+        {"type": "mrkdwn", "text": f"*기준일*: {base_date_str}"},
+        {"type": "mrkdwn", "text": f"*소요시간*: {duration:.1f}초"},
+        {"type": "mrkdwn", "text": f"*추천 개수*: {len(recommendations)}"},
+    ]
+
+    if ordered_states:
+        state_lines = [f"{state}: {count}개" for state, count in ordered_states]
+        fields.append({"type": "mrkdwn", "text": "*상태 요약*:\n" + "\n".join(state_lines)})
+
+    blocks.append({"type": "section", "fields": fields})
+
+    if top_rows:
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*상위 추천 후보*\n" + "\n".join(top_rows),
+                },
+            }
+        )
+
+    blocks.append(
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "대시보드 열기", "emoji": True},
+                    "url": dashboard_url,
+                }
+            ],
+        }
+    )
+
+    if force_notify or ordered_states:
+        blocks.append(
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": "<!channel> 알림"}]}
+        )
+        fallback_text = "<!channel>\n" + fallback_text
+
+    return {"text": fallback_text, "blocks": blocks}
 
 
 def _format_shares_for_country(quantity: Any, country: str) -> str:
