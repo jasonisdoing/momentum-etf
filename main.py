@@ -37,6 +37,16 @@ def load_account_recommendations(
         source_key = country_code
 
     if not file_path.exists():
+        from utils.logger import get_app_logger
+
+        logger = get_app_logger()
+        logger.warning(
+            "추천 파일이 존재하지 않습니다 (account=%s, country=%s). 확인한 경로: %s | 현재 작업 디렉터리: %s",
+            account_norm,
+            country_code,
+            file_path,
+            Path.cwd(),
+        )
         return None, f"데이터 파일을 찾을 수 없습니다: {file_path}", country_code
 
     try:

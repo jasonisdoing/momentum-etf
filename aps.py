@@ -222,7 +222,8 @@ def setup_logging():
     # 로거 설정: 파일과 콘솔에 모두 출력
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
             logging.FileHandler(log_filename, encoding="utf-8"),
             logging.StreamHandler(sys.stdout),
