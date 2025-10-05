@@ -23,7 +23,6 @@ os.environ["PYTHONWARNINGS"] = "ignore"
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 import time
 from datetime import datetime
-from typing import Any
 
 from utils.recommendation_storage import save_recommendation_report
 
@@ -39,13 +38,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-try:
-    from slack_sdk import WebClient
-    from slack_sdk.errors import SlackApiError
-except Exception:  # pragma: no cover - 선택적 의존성 처리
-    WebClient = None  # type: ignore[assignment]
-    SlackApiError = Exception  # type: ignore[assignment]
-
 try:  # pragma: no cover - 선택적 의존성 처리
     import numpy as np
 except Exception:  # pragma: no cover
@@ -59,87 +51,13 @@ from utils.data_updater import update_etf_names
 from utils.env import load_env_if_present
 from utils.notification import (
     compose_recommendation_slack_message,
-    get_slack_webhook_url,
-    send_slack_message,
+    send_recommendation_slack_notification,
 )
 from utils.schedule_config import (
     get_all_country_schedules,
     get_cache_schedule,
     get_global_schedule_settings,
 )
-from utils.settings_loader import get_account_slack_channel
-
-
-def _send_slack_notification(
-    account_id: str,
-    country_code: str,
-    payload: dict[str, Any] | str,
-) -> bool:
-    """Send Slack notification via bot token or webhook as a fallback."""
-
-    if isinstance(payload, str):
-        text = payload
-        blocks: list[dict[str, Any]] | None = None
-    else:
-        text = str(payload.get("text", ""))
-        blocks = payload.get("blocks")
-
-    channel = get_account_slack_channel(account_id)
-    token = os.environ.get("SLACK_BOT_TOKEN")
-
-    if token and channel and WebClient is not None:
-        try:
-            client = WebClient(token=token)
-            client.chat_postMessage(
-                channel=channel, text=text or "Slack notification", blocks=blocks
-            )
-            logging.info(
-                "Slack message sent via bot token for account=%s (channel=%s)",
-                account_id,
-                channel,
-            )
-            return True
-        except SlackApiError as exc:  # pragma: no cover - 외부 API 호출 오류
-            logging.error(
-                "Slack API 호출 중 오류가 발생했습니다 (account=%s): %s",
-                account_id,
-                getattr(exc, "response", {}).get("error") or str(exc),
-                exc_info=True,
-            )
-        except Exception:
-            logging.error(
-                "Slack 메시지 전송 중 알 수 없는 오류가 발생했습니다 (account=%s)",
-                account_id,
-                exc_info=True,
-            )
-
-    webhook_info = get_slack_webhook_url(account_id)
-    if webhook_info:
-        webhook_url, source_name = webhook_info
-        sent = send_slack_message(
-            text, blocks=blocks, webhook_url=webhook_url, webhook_name=source_name
-        )
-        if sent:
-            logging.info(
-                "Slack message sent via webhook for %s (source=%s)",
-                country_code.upper(),
-                source_name,
-            )
-            return True
-
-        logging.error(
-            "Slack 웹훅 전송에 실패했습니다 (account=%s, source=%s)",
-            account_id,
-            source_name,
-        )
-
-    if not channel and not webhook_info:
-        logging.info(
-            "account=%s에 대해 Slack 채널 또는 웹훅이 설정되어 있지 않아 전송을 건너뜁니다.",
-            account_id,
-        )
-
-    return False
 
 
 def setup_logging():
@@ -285,7 +203,7 @@ def run_recommendation_generation(
         force_notify=force_notify,
     )
 
-    notified = _send_slack_notification(
+    notified = send_recommendation_slack_notification(
         account_norm,
         target_country,
         slack_payload,

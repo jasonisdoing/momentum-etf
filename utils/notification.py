@@ -4,12 +4,25 @@ from __future__ import annotations
 
 import os
 import re
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from collections import Counter
+from numbers import Number
+
+import textwrap
 
 import requests
+
+try:
+    import matplotlib
+
+    matplotlib.use("Agg")  # type: ignore[attr-defined]
+    import matplotlib.pyplot as plt
+except Exception:  # pragma: no cover - 선택적 의존성 처리
+    matplotlib = None  # type: ignore[assignment]
+    plt = None  # type: ignore[assignment]
 
 try:
     from slack_sdk import WebClient  # type: ignore
@@ -29,14 +42,18 @@ from utils.account_registry import get_account_settings
 from utils.schedule_config import get_country_schedule
 from utils.report import format_kr_money
 from utils.logger import get_app_logger
+from utils.settings_loader import get_account_slack_channel
 from dotenv import load_dotenv
 
 load_dotenv()
-APP_DATE_TIME = "2025-10-05-23"
+APP_DATE_TIME = "2025-10-06-07"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 
 _LAST_ERROR: Optional[str] = None
 logger = get_app_logger()
+
+
+_DEFAULT_REPORT_IMAGE_DIR = Path(__file__).resolve().parent.parent / "cache" / "slack_reports"
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +274,21 @@ def compose_recommendation_slack_message(
 
     recommendations = list(getattr(report, "recommendations", []) or [])
     decision_config = getattr(report, "decision_config", {}) or {}
+    summary_data = getattr(report, "summary_data", None)
+
+    held_count: int | None = None
+    portfolio_topn: int | None = None
+    if isinstance(summary_data, dict):
+        held_raw = summary_data.get("held_count")
+        topn_raw = summary_data.get("portfolio_topn")
+        try:
+            held_count = int(held_raw) if held_raw is not None else None
+        except (TypeError, ValueError):
+            held_count = None
+        try:
+            portfolio_topn = int(topn_raw) if topn_raw is not None else None
+        except (TypeError, ValueError):
+            portfolio_topn = None
 
     state_counter: Counter[str] = Counter()
     if isinstance(decision_config, dict):
@@ -283,23 +315,47 @@ def compose_recommendation_slack_message(
     ]
 
     top_rows: list[str] = []
-    for item in recommendations[:5]:
+    for item in recommendations[:]:
         ticker = str(item.get("ticker") or "-")
+        name = str(item.get("name") or ticker)
         state = str(item.get("state") or "-").upper()
         score = item.get("score")
         score_str = f"{score:.1f}" if isinstance(score, (int, float)) else "-"
-        phrase = str(item.get("phrase") or "")
-        context = f" ({phrase})" if phrase else ""
-        top_rows.append(f"• {ticker} · {state} · 점수 {score_str}{context}")
+        phrase = str(item.get("phrase") or "").strip()
+        phrase_display = phrase if phrase else "-"
+        top_rows.append(f"• {name}({ticker}) - {state} - 점수 {score_str} - {phrase_display}")
 
     headline = f"{account_label} 추천 정보가 갱신되었습니다. ({base_date_str})"
     app_prefix = f"[{APP_LABEL}] " if APP_LABEL else ""
 
-    lines = [app_prefix + headline, f"생성시간: {duration:.1f}초"]
+    def _format_hold_ratio(held: int | None, topn: int | None) -> str:
+        held_str = str(held) if held is not None else "?"
+        topn_str = str(topn) if topn is not None else "?"
+        return f"{held_str}/{topn_str}"
+
+    if held_count is None:
+        held_count = sum(
+            1 for item in recommendations if str(item.get("state") or "").upper() == "HOLD"
+        )
+    if portfolio_topn is None:
+        topn_candidates = [
+            getattr(report, "portfolio_topn", None),
+            (account_settings or {}).get("portfolio_topn") if account_settings else None,
+        ]
+        for candidate in topn_candidates:
+            try:
+                portfolio_topn = int(candidate)
+                break
+            except (TypeError, ValueError, AttributeError):
+                portfolio_topn = None
+
+    lines = [
+        app_prefix + headline,
+        f"생성시간: {duration:.1f}초",
+        f"보유종목: {_format_hold_ratio(held_count, portfolio_topn)}",
+    ]
     if ordered_states:
         lines.extend([f"{state}: {count}개" for state, count in ordered_states])
-    if top_rows:
-        lines.append("상위 추천:\n" + "\n".join(top_rows))
     lines.append(dashboard_url)
     fallback_text = "\n".join(lines)
 
@@ -308,18 +364,16 @@ def compose_recommendation_slack_message(
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"[{APP_LABEL}] {account_label} 추천 갱신",
+                "text": f"[{APP_LABEL}] {account_label}",
                 "emoji": True,
             },
         }
     ]
 
     fields: list[dict[str, str]] = [
-        {"type": "mrkdwn", "text": f"*환경*: {APP_LABEL}"},
-        {"type": "mrkdwn", "text": f"*계정*: {account_label}"},
         {"type": "mrkdwn", "text": f"*기준일*: {base_date_str}"},
         {"type": "mrkdwn", "text": f"*소요시간*: {duration:.1f}초"},
-        {"type": "mrkdwn", "text": f"*추천 개수*: {len(recommendations)}"},
+        {"type": "mrkdwn", "text": f"*보유*: {_format_hold_ratio(held_count, portfolio_topn)}"},
     ]
 
     if ordered_states:
@@ -328,37 +382,289 @@ def compose_recommendation_slack_message(
 
     blocks.append({"type": "section", "fields": fields})
 
-    if top_rows:
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "*상위 추천 후보*\n" + "\n".join(top_rows),
-                },
-            }
-        )
-
-    blocks.append(
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "대시보드 열기", "emoji": True},
-                    "url": dashboard_url,
-                }
-            ],
-        }
-    )
-
     if force_notify or ordered_states:
         blocks.append(
             {"type": "context", "elements": [{"type": "mrkdwn", "text": "<!channel> 알림"}]}
         )
         fallback_text = "<!channel>\n" + fallback_text
 
-    return {"text": fallback_text, "blocks": blocks}
+    payload: dict[str, Any] = {"text": fallback_text, "blocks": blocks}
+
+    image_path = _generate_recommendation_report_image(
+        report,
+        title=f"{account_label} 추천 결과 ({base_date_str})",
+    )
+    if image_path:
+        payload["report_image_path"] = str(image_path)
+        # comment_lines = [
+        #     textwrap.shorten(row, width=80, placeholder="…")
+        #     for row in (top_rows[:3] if top_rows else [])
+        # ]
+        # comment_header = f"{account_label} 추천 결과 이미지 ({base_date_str})"
+        # if comment_lines:
+        #     payload["report_image_comment"] = comment_header + "\n" + "\n".join(comment_lines)
+        # else:
+        #     payload["report_image_comment"] = comment_header
+        payload["report_image_title"] = f"{account_label} 추천 리포트"
+
+    return payload
+
+
+def _generate_recommendation_report_image(
+    report: Any,
+    *,
+    title: str,
+    max_rows: int = 20,
+) -> Optional[Path]:
+    if plt is None:
+        logger.info("[SLACK] 추천 이미지 생략 - matplotlib 미설치")
+        return None
+
+    detail_headers = getattr(report, "detail_headers", None)
+    detail_rows = getattr(report, "detail_rows", None)
+    if not detail_headers or not detail_rows:
+        logger.info("[SLACK] 추천 이미지 생략 - detail_rows 데이터 없음")
+        return None
+
+    header_index = {name: idx for idx, name in enumerate(detail_headers)}
+
+    column_map: list[tuple[str, str]] = [
+        ("순위", "순위"),
+        ("티커", "티커"),
+        ("종목명", "종목명"),
+        ("상태", "상태"),
+        ("점수", "점수"),
+        ("현재가", "현재가"),
+        ("일간%", "일간수익률"),
+        ("평가%", "평가(%)"),
+        ("누적%", "누적수익률"),
+        ("문구", "문구"),
+    ]
+
+    display_headers: list[str] = []
+    display_indexes: list[int] = []
+    for display_label, source_label in column_map:
+        idx = header_index.get(source_label)
+        if idx is None:
+            continue
+        display_headers.append(display_label)
+        display_indexes.append(idx)
+
+    if len(display_indexes) < 3:
+        logger.info("[SLACK] 추천 이미지 생략 - 표시할 컬럼 수 부족")
+        return None
+
+    cell_rows: list[list[str]] = []
+    for row in detail_rows[:max_rows]:
+        formatted_row = []
+        for idx, label in zip(display_indexes, display_headers):
+            value = row[idx] if idx < len(row) else None
+            formatted_row.append(_format_image_cell_value(label, value))
+        cell_rows.append(formatted_row)
+
+    if not cell_rows:
+        logger.info("[SLACK] 추천 이미지 생략 - 표시할 행 없음")
+        return None
+
+    fig_width = max(8.0, 1.4 * len(display_headers))
+    fig_height = max(2.5, 0.55 * len(cell_rows) + 1.2)
+
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    try:
+        ax.axis("off")
+        ax.set_title(title, fontsize=12, fontweight="bold", loc="left", pad=18)
+
+        table = ax.table(
+            cellText=cell_rows,
+            colLabels=display_headers,
+            loc="center",
+            cellLoc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 1.3)
+
+        for col in range(len(display_headers)):
+            try:
+                table.auto_set_column_width(col)
+            except Exception:
+                pass
+
+        for (row_idx, _col_idx), cell in table.get_celld().items():
+            cell.set_edgecolor("#d0d0d0")
+            if row_idx == 0:
+                cell.set_facecolor("#f2f2f2")
+                cell.set_text_props(weight="bold")
+
+        output_dir = Path(os.environ.get("SLACK_REPORT_IMAGE_DIR", _DEFAULT_REPORT_IMAGE_DIR))
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        account_id = str(getattr(report, "account_id", "account") or "account")
+        account_safe = re.sub(r"[^0-9A-Za-z_-]", "_", account_id)
+
+        base_date = getattr(report, "base_date", None)
+        if hasattr(base_date, "strftime"):
+            base_date_str = base_date.strftime("%Y%m%d")
+        else:
+            base_date_str = str(base_date or "unknown")
+
+        timestamp = datetime.now().strftime("%H%M%S")
+        file_path = output_dir / f"recommend_{account_safe}_{base_date_str}_{timestamp}.png"
+
+        fig.tight_layout(pad=0.6)
+        fig.savefig(file_path, dpi=150)
+        logger.info("[SLACK] 추천 이미지 생성 - %s", file_path)
+        return file_path
+    except Exception as exc:  # pragma: no cover - 시각화 오류 방어
+        logger.warning("[SLACK] 추천 이미지 생성 실패: %s", exc)
+        return None
+    finally:
+        plt.close(fig)
+
+
+def _format_image_cell_value(column_label: str, value: Any) -> str:
+    if value is None:
+        return "-"
+
+    if isinstance(value, str):
+        clean = value.strip()
+        if not clean:
+            return "-"
+        if column_label == "문구":
+            return textwrap.shorten(clean, width=40, placeholder="…")
+        return clean
+
+    if isinstance(value, Number):
+        if isinstance(value, float) and math.isnan(value):
+            return "-"
+
+        if column_label == "순위":
+            return str(int(round(value)))
+        if column_label == "점수":
+            return f"{float(value):.2f}"
+        if column_label == "현재가":
+            return f"{float(value):,.2f}"
+        if column_label in {"일간%", "평가%", "누적%"}:
+            return f"{float(value):+.2f}%"
+        return str(value)
+
+    return str(value)
+
+
+def send_recommendation_slack_notification(
+    account_id: str,
+    country_code: str,
+    payload: dict[str, Any] | str,
+) -> bool:
+    """전달받은 페이로드를 슬랙으로 전송하고 필요 시 이미지 파일을 첨부합니다."""
+
+    image_path_obj: Path | None = None
+    image_comment: Optional[str] = None
+    image_title: Optional[str] = None
+
+    if isinstance(payload, str):
+        text = payload
+        blocks: list[dict[str, Any]] | None = None
+    else:
+        text = str(payload.get("text", ""))
+        blocks = payload.get("blocks")
+        image_raw = payload.get("report_image_path")
+        if isinstance(image_raw, str) and image_raw:
+            image_path_obj = Path(image_raw)
+        image_comment_raw = payload.get("report_image_comment")
+        if isinstance(image_comment_raw, str) and image_comment_raw.strip():
+            image_comment = image_comment_raw.strip()
+        image_title_raw = payload.get("report_image_title")
+        if isinstance(image_title_raw, str) and image_title_raw.strip():
+            image_title = image_title_raw.strip()
+
+    channel = get_account_slack_channel(account_id)
+    token = os.environ.get("SLACK_BOT_TOKEN")
+
+    if token and channel and WebClient is not None:
+        client = WebClient(token=token)
+        try:
+            client.chat_postMessage(
+                channel=channel,
+                text=text or "Slack notification",
+                blocks=blocks,
+            )
+            logger.info(
+                "Slack message sent via bot token for account=%s (channel=%s)",
+                account_id,
+                channel,
+            )
+
+            if image_path_obj:
+                if image_path_obj.exists():
+                    uploaded = _upload_file_to_slack(
+                        channel=channel,
+                        file_path=image_path_obj,
+                        title=image_title or image_path_obj.name,
+                        initial_comment=image_comment,
+                    )
+                    if not uploaded:
+                        logger.warning(
+                            "Slack 이미지 업로드 실패 (account=%s, file=%s)",
+                            account_id,
+                            image_path_obj.name,
+                        )
+                else:
+                    logger.warning(
+                        "Slack 이미지 파일을 찾을 수 없습니다 (account=%s, path=%s)",
+                        account_id,
+                        image_path_obj,
+                    )
+            return True
+        except SlackApiError as exc:  # pragma: no cover - 외부 API 호출 오류
+            logger.error(
+                "Slack API 호출 중 오류가 발생했습니다 (account=%s): %s",
+                account_id,
+                getattr(exc, "response", {}).get("error") or str(exc),
+                exc_info=True,
+            )
+        except Exception:  # pragma: no cover - 방어적 처리
+            logger.error(
+                "Slack 메시지 전송 중 알 수 없는 오류가 발생했습니다 (account=%s)",
+                account_id,
+                exc_info=True,
+            )
+
+    webhook_info = get_slack_webhook_url(account_id)
+    if webhook_info:
+        webhook_url, source_name = webhook_info
+        sent = send_slack_message(
+            text,
+            blocks=blocks,
+            webhook_url=webhook_url,
+            webhook_name=source_name,
+        )
+        if sent:
+            logger.info(
+                "Slack message sent via webhook for %s (source=%s)",
+                country_code.upper() or "UNKNOWN",
+                source_name,
+            )
+            if image_path_obj:
+                logger.info(
+                    "Slack 웹훅 사용 중이어서 이미지 업로드를 건너뜁니다 (account=%s)",
+                    account_id,
+                )
+            return True
+
+        logger.error(
+            "Slack 웹훅 전송에 실패했습니다 (account=%s, source=%s)",
+            account_id,
+            source_name,
+        )
+
+    if not channel and not webhook_info:
+        logger.info(
+            "account=%s에 대해 Slack 채널 또는 웹훅이 설정되어 있지 않아 전송을 건너뜁니다.",
+            account_id,
+        )
+
+    return False
 
 
 def _format_shares_for_country(quantity: Any, country: str) -> str:
@@ -482,6 +788,7 @@ __all__ = [
     "get_slack_webhook_url",
     "send_slack_message_to_logs",
     "send_slack_message",
+    "send_recommendation_slack_notification",
     # "send_verbose_log_to_slack",
     "should_notify_on_schedule",
     "strip_html_tags",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 from utils.account_registry import (
@@ -12,13 +13,19 @@ from utils.account_registry import (
 )
 from logic.recommend.output import (
     dump_json,
-    invoke_account_pipeline,
     print_result_summary,
     print_run_header,
 )
+from logic.recommend.pipeline import (
+    RecommendationReport,
+    generate_account_recommendation_report,
+)
+from utils.notification import (
+    compose_recommendation_slack_message,
+    send_recommendation_slack_notification,
+)
+from utils.recommendation_storage import save_recommendation_report
 from utils.logger import get_app_logger
-
-RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
 
 def _available_account_choices() -> list[str]:
@@ -54,20 +61,82 @@ def main() -> None:
     account_id = args.account.lower()
 
     try:
-        get_account_settings(account_id)
+        account_settings = get_account_settings(account_id)
         get_strategy_rules(account_id)
     except Exception as exc:  # pragma: no cover - 잘못된 입력 방어 전용 처리
         parser.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
+    account_country = str((account_settings or {}).get("country_code", "") or "")
+
     print_run_header(account_id, date_str=args.date)
-    items = invoke_account_pipeline(account_id, date_str=args.date)
+    start_time = time.time()
+
+    report = generate_account_recommendation_report(account_id=account_id, date_str=args.date)
+
+    if not isinstance(report, RecommendationReport):
+        logger.error(
+            "예상한 RecommendationReport 타입이 아닙니다 (account=%s, got=%s)",
+            account_id,
+            type(report).__name__,
+        )
+        return
+
+    if not report.recommendations:
+        logger.warning("%s에 대한 추천 결과가 비어 있습니다.", account_id.upper())
+        return
+
+    duration = time.time() - start_time
+    items = list(report.recommendations)
+
     print_result_summary(items, account_id, args.date)
 
-    output_path = (
-        Path(args.output) if args.output else RESULTS_DIR / f"recommendation_{account_id}.json"
+    try:
+        written_path = save_recommendation_report(report)
+        logger.info("✅ %s 기본 결과를 '%s'에 저장했습니다.", account_id.upper(), written_path)
+    except Exception:
+        logger.error(
+            "기본 추천 결과 저장에 실패했습니다 (account=%s)",
+            account_id,
+            exc_info=True,
+        )
+        written_path = None
+
+    if args.output:
+        custom_path = Path(args.output)
+        dump_json(items, custom_path)
+        logger.info("📄 커스텀 JSON을 '%s'에 저장했습니다.", custom_path)
+
+    slack_payload = compose_recommendation_slack_message(
+        account_id,
+        report,
+        duration=duration,
+        force_notify=False,
     )
-    dump_json(items, output_path)
-    logger.info("✅ %s 결과를 '%s'에 저장했습니다.", account_id.upper(), output_path)
+
+    target_country = (getattr(report, "country_code", "") or account_country or "").strip().lower()
+    notified = send_recommendation_slack_notification(
+        account_id,
+        target_country,
+        slack_payload,
+    )
+
+    base_date = getattr(report, "base_date", None)
+    base_date_str = (
+        base_date.strftime("%Y-%m-%d") if hasattr(base_date, "strftime") else str(base_date)
+    )
+    if notified:
+        logger.info(
+            "[%s/%s] Slack 알림 전송이 완료되었습니다 (소요 %.1fs)",
+            (target_country or account_country or "").upper() or "UNKNOWN",
+            base_date_str,
+            duration,
+        )
+    else:
+        logger.info(
+            "[%s/%s] Slack 알림이 전송되지 않았습니다.",
+            (target_country or account_country or "").upper() or "UNKNOWN",
+            base_date_str,
+        )
 
 
 if __name__ == "__main__":
