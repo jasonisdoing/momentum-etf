@@ -1,6 +1,7 @@
 pandas
 numpy
-streamlit
+streamlit==1.50.0
+streamlit-authenticator
 pykrx
 pymongo
 APScheduler
@@ -11,7 +12,6 @@ yfinance
 pandas_market_calendars
 croniter
 cron-descriptor
-google-generativeai
 flake8
 watchdog
 slack-sdk

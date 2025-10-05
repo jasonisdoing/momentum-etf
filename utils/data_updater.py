@@ -2,9 +2,10 @@ import glob
 import json
 import warnings
 
-import requests
 import yfinance as yf
 from pykrx.stock import get_etf_ticker_name
+
+from utils.logger import get_app_logger
 
 # pkg_resources 워닝 억제
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
@@ -14,29 +15,13 @@ def update_etf_names():
     """Finds all JSON files in the data/ directory, checks for empty 'name' fields,
     and fills them using the appropriate API based on the filename.
     """
+    logger = get_app_logger()
     json_files = glob.glob("data/*/*.json")
-
-    # Prepare Bithumb coin map once
-    coin_map = {}
-    try:
-        url = "https://api.bithumb.com/v1/market/all"
-        headers = {"accept": "application/json"}
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        bithumb_data = response.json()
-        if isinstance(bithumb_data, list):
-            for coin_info in bithumb_data:
-                market = coin_info.get("market")
-                if market and market.startswith("KRW-"):
-                    ticker = market.split("-")[1]
-                    coin_map[ticker] = coin_info.get("korean_name")
-    except Exception as e:
-        print(f"Could not build Bithumb coin map: {e}")
 
     for file_path in json_files:
         if "etf.json" not in file_path:
             continue
-        print(f"Processing {file_path}...")
+        logger.info("%s 파일 처리 중...", file_path)
         with open(file_path, "r", encoding="utf-8") as f:
             original_content = f.read()
             data = json.loads(original_content)
@@ -54,18 +39,15 @@ def update_etf_names():
                             yfinance_ticker = ticker.replace("ASX:", "") + ".AX"
                             stock_info = yf.Ticker(yfinance_ticker).info
                             new_name = stock_info.get("longName", stock_info.get("shortName", ""))
-                        elif "coin" in file_path:
-                            new_name = coin_map.get(ticker, "")
-
                         if new_name:
-                            print(f"  Found name for {ticker}: {new_name}")
+                            logger.info("  %s 이름을 %s로 갱신", ticker, new_name)
                             ticker_info["name"] = new_name
                             changes_made = True
                     except Exception as e:
-                        print(f"  Could not find name for {ticker} in {file_path}: {e}")
+                        logger.warning("  %s에서 %s 이름을 찾지 못했습니다: %s", file_path, ticker, e)
 
         if changes_made:
-            print(f"  Writing updated content to {file_path}")
+            logger.info("  %s 내용을 갱신합니다.", file_path)
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
 

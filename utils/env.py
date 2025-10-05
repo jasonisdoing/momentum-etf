@@ -11,5 +11,5 @@ def load_env_if_present() -> bool:
     env_path = find_dotenv()
     if not env_path:
         return False
-    # Use override=True to refresh values in long-lived processes (e.g., Streamlit)
+    # override=True를 사용해 장시간 실행되는 프로세스(예: Streamlit)에서도 값을 새로 고친다
     return bool(load_dotenv(env_path, override=True))

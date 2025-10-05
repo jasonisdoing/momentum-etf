@@ -1,0 +1,32 @@
+{
+    "order": 20,
+    "icon": "🇦🇺",
+    "name": "호주 ETF",
+    "country_code": "aus",
+    "slack_channel": "C09FAU7SKA8",
+    "initial_date": "2025-10-01",
+    "strategy": {
+        "tuning": {
+            "MA_PERIOD": 30,
+            "PORTFOLIO_TOPN": 5,
+            "REPLACE_SCORE_THRESHOLD": 0.5,
+            "MARKET_REGIME_FILTER_MA_PERIOD": 20
+        },
+        "static": {
+            "COOLDOWN_DAYS": 1,
+            "MAX_PER_CATEGORY": 1,
+            "TRIM_DOWN_SELL_LIMIT": 1,
+            "MARKET_REGIME_FILTER_TICKER": "ASX:SPY"
+        }
+    },
+    "benchmarks": [
+        {
+            "ticker": "ASX:SPY",
+            "name": "SPDR S&P 500 ETF"
+        },
+        {
+            "ticker": "ASX:NDQ",
+            "name": "BetaShares NASDAQ 100 ETF"
+        }
+    ]
+}

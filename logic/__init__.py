@@ -1,7 +1,5 @@
-"""전략 모듈 패키지."""
+"""Logic package."""
 
 from __future__ import annotations
 
-from . import momentum
-
-__all__ = ["momentum"]
+__all__: list[str] = []
