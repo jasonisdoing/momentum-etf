@@ -6,37 +6,40 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 ## 구성 개요 / 폴더 구조
 
-- `logic/`: 매매 전략(로직) 정의 및 시그널 파이프라인
-  - `strategies/momentum/`: 이동평균 기반 모멘텀 전략
+- `logic/`: 매매 전략(로직) 정의 및 추천/백테스트 파이프라인
+  - `strategies/maps/`: 이동평균 기반 모멘텀 전략 구현체
     - `backtest.py`: 백테스트 실행 엔진
-    - `signals.py`: 전략별 시그널 생성 로직(결정 테이블)
+    - `recommend.py`: 전략별 추천 생성 로직 (계정 단위 추천)
     - `shared.py`: 공통 유틸리티
-  - `signals/`: 시그널 파이프라인과 유틸 (루트 signals 이관)
-    - `pipeline.py`: 시그널 생성 파이프라인 진입점(`main`, `generate_signal_report`)
+  - `recommend/`: 추천 파이프라인과 유틸리티
+    - `pipeline.py`: 추천 생성 파이프라인 진입점 (`generate_account_recommendation_report`)
     - `history.py`: 보유일/쿨다운 계산 유틸
-    - `schedule.py`: 개장여부/다음 거래일/스케줄 타깃 날짜 계산
-    - `logger.py`: 시그널 전용 파일 로거
+    - `schedule.py`: 개장 여부/다음 거래일/스케줄 타깃 날짜 계산
+    - `logger.py`: 추천 전용 파일 로거
     - `market.py`: 시장 레짐 상태 문자열 생성(웹 UI 헤더용)
 - `utils/`: 공통 유틸리티 모듈
   - `data_loader.py`: 데이터 로딩 및 API 호출
   - `indicators.py`: 기술적 지표 계산 (이동평균, SuperTrend, ATR 등)
   - `report.py`: 리포트, 로그 포맷팅 및 테이블 렌더링
   - `db_manager.py`: 데이터베이스 관리
-  - `account_registry.py`: 계좌 관리
+  - `account_registry.py`: 계정/국가 설정 로더 및 공통 설정 헬퍼
+  - `country_registry.py`: 구 코드 호환을 위한 래퍼
 - `scripts/`: 각종 유틸리티 및 분석 스크립트 모음
   - `update_price_cache.py`: 국가별 종목 OHLCV 데이터를 캐시에 선다운로드/증분 갱신
   - `categorize_etf.py`: AI를 이용한 ETF 섹터 자동 분류
-- `pages/`: Streamlit 웹앱 페이지들
+- `app_pages/`: Streamlit 웹앱 페이지들
+  - `account_page.py`: 계정별 추천/현황 페이지
+  - `trade.py`: 관리자용 거래 관리 페이지 (로그인 필요)
+  - `migration.py`: 계정 ID/거래 데이터 마이그레이션 페이지 (로그인 필요)
 - `data/`: 데이터 저장소
-  - `kor/`, `aus/`, `coin/`: 국가별 데이터
-- `run.py`: 메인 실행 진입점
-- `test.py`: 과거 구간 백테스트 실행 (로직은 `logic/backtest/runner.py`로 위임)
-- `tune.py`: 파라미터 튜닝 (별도 프로세스 실행, 로직은 `logic/tune/runner.py`에 위치)
-- `settings.py`: 모든 전략에 공통으로 적용되는 전역 설정
+  - `kor/`, `aus/`: 국가별 데이터
+- `run.py`: 메인 실행 진입점 (웹 앱 등에서 사용)
+- `settings/account/*.json`: 계정별 전략/표시 설정
+- `settings/schedule_config.json`: APScheduler 실행 계정 및 크론 설정 (계정 ID·국가 코드 명시)
 
 ## 문서
 
-- [시그널 규칙 명세](docs/signal-rules.md)
+- [추천 규칙 명세](docs/recommend-rules.md)
 - [개발 규칙(개발자 가이드)](docs/development-rules.md)
 
 ## 설치 및 준비
@@ -55,14 +58,12 @@ pip install -r requirements.txt
 `.env` 파일을 생성하여 다음 변수들을 설정할 수 있습니다:
 ```env
 MONGO_DB_CONNECTION_STRING=mongodb://localhost:27017/momentum_etf
-GOOGLE_API_KEY=your_google_api_key
 KOR_SLACK_WEBHOOK=your_slack_webhook_url
 AUS_SLACK_WEBHOOK=your_slack_webhook_url
-COIN_SLACK_WEBHOOK=your_slack_webhook_url
 ```
 
 ### 4) 서버 시간대 설정 (필수)
-배포 서버의 시스템 시간이 KST(Asia/Seoul)와 동기화되어 있어야 시그널 기준일과 로그 파일이 올바르게 생성됩니다.
+배포 서버의 시스템 시간이 KST(Asia/Seoul)와 동기화되어 있어야 추천 기준일과 로그 파일이 올바르게 생성됩니다.
 
 - **시간대 지정**
   ```bash
@@ -83,42 +84,34 @@ COIN_SLACK_WEBHOOK=your_slack_webhook_url
 
 ### 1) 웹앱으로 현황 확인
 웹 브라우저를 통해 오늘의 현황을 시각적으로 확인하고, 거래 내역, 종목 등 데이터를 관리합니다.
+- `/` : 대시보드(빈 페이지)
+- `/<account_id>` : 계정별 추천 페이지 (로그인 불필요)
+- `/admin` : 거래 관리 페이지 (로그인 필요)
+- `/migration` : 계정 ID 마이그레이션 도구 (로그인 필요)
 
 ```bash
 python run.py
 ```
 
-### 2) 실시간 시그널 조회 (CLI)
-과거 시뮬레이션 없이 "현재 보유 + 오늘 신호"를 바탕으로 다음 거래일에 대한 매매 신호를 제안합니다.
+### 2) 실시간 추천 조회 (CLI)
+과거 시뮬레이션 없이 "현재 보유 + 오늘 추천"를 바탕으로 다음 거래일에 대한 매매 추천를 제안합니다.
 
 ```bash
-# 단일 계좌 실행
-python cli.py <계좌코드> --signal
-
-# 국가 단위 전체 실행 (활성 계좌만)
-python cli.py --country kor --signal
-python cli.py --country aus --signal
-python cli.py --country coin --signal
+python recommend.py <account_id> [--date YYYY-MM-DD] [--output 경로]
 ```
 
 ### 3) 백테스트 실행 (CLI)
 과거 구간에 대해 백테스트를 실행합니다.
 
 ```bash
-python cli.py <계좌코드> --test
-```
-
-예시:
-```bash
-python cli.py b1 --test
-python cli.py m1 --test
+python backtest.py <account_id> [--output 경로]
 ```
 
 ### 4) 파라미터 튜닝 (CLI)
-`cli.py`를 통해 파라미터 튜닝을 실행하여 각 전략의 최적 파라미터를 찾습니다.
+`tune.py`를 통해 파라미터 튜닝을 실행하여 각 전략의 최적 파라미터를 찾습니다.
 
 ```bash
-python cli.py <계좌코드> --tune
+python tune.py <account_id> [--output 경로]
 ```
 
 **주의사항:**
@@ -128,18 +121,18 @@ python cli.py <계좌코드> --tune
 
 ### 결과 파일 및 로그 경로
 
-- **시그널 결과(요약/상세) 저장**
+- **추천 결과(요약/상세) 저장**
   - DB 저장: `utils.db_manager.save_signal_report_to_db()`로 저장되어 웹앱에서 조회됩니다
-  - 파일 저장(상세 로그): `results/signal_{account}_{YYYY-MM-DD}.log`
-- **시그널 전용 파일 로그**
-  - 경로: `logs/YYYY-MM-DD.log` (`logic/signals/logger.py`)
-  - 내용: 시그널 생성 과정의 디테일/디버그 로그
+  - 파일 저장(상세 로그): `results/recommendation_{account_id}_{YYYY-MM-DD}.log`
+- **추천 전용 파일 로그**
+  - 경로: `logs/YYYY-MM-DD.log` (`logic/recommend/logger.py`)
+  - 내용: 추천 생성 과정의 디테일/디버그 로그
 - **백테스트 로그**
-  - 경로: `logs/test_{country}_{account}.log`
-  - 트리거: `cli.py --test` 실행 시 `test.py`에서 파일 로깅
+  - 경로: `data/results/backtest_{account_id}.txt` (기본값)
+  - 트리거: `python backtest.py <account_id>` 실행 시 자동 생성
 - **튜닝 로그**
-  - 경로: `logs/tune_{country}_{account}.log`
-  - 트리거: `cli.py --tune` (별도 프로세스 실행)
+  - 경로: `data/results/tune_{account_id}.txt` (기본값)
+  - 트리거: `python tune.py <account_id>` 실행 시 자동 생성
 
 ### 5) ETF 섹터 분류 (AI 사용)
 `scripts/categorize_etf.py` 스크립트를 실행하여 `data/<국가코드>/etf_raw.txt` 파일의 ETF들을 AI를 이용해 섹터별로 자동 분류하고 `data/<국가코드>/etf_categorized.csv` 파일에 저장합니다.
@@ -148,26 +141,21 @@ python cli.py <계좌코드> --tune
 python scripts/categorize_etf.py <국가코드>
 ```
 
-**사전 준비:**
-- `pip install google-generativeai python-dotenv` 라이브러리 설치 필요
-- Google AI Studio에서 API 키 발급 후 `.env` 파일에 `GOOGLE_API_KEY` 설정
 
 ### 6) 스케줄러로 자동 실행 (APScheduler)
-장 마감 이후 자동으로 현황을 계산하고(교체매매 신호 포함) 슬랙(Slack)으로 알림을 보낼 수 있습니다.
+장 마감 이후 자동으로 현황을 계산하고(교체매매 추천 포함) 슬랙(Slack)으로 알림을 보낼 수 있습니다.
 
 1. 의존성 설치: `pip install -r requirements.txt`
 2. (선택) 환경 변수로 스케줄/타임존 설정:
-   - `SCHEDULE_ENABLE_KOR|AUS|COIN` = `1`/`0` (기본 1)
-   - `SCHEDULE_KOR_CRON` = `"10 18 * * 1-5"` (서울 18:10 평일)
-   - `SCHEDULE_AUS_CRON` = `"10 18 * * 1-5"` (시드니 18:10 평일)
-   - `SCHEDULE_COIN_CRON` = `"5 0 * * *"` (매일 00:05)
-   - `SCHEDULE_KOR_TZ` = `Asia/Seoul`, `SCHEDULE_AUS_TZ` = `Australia/Sydney`, `SCHEDULE_COIN_TZ` = `Asia/Seoul`
+   - `SCHEDULE_ENABLE_<KEY>` = `1`/`0` (기본 1, `<KEY>`는 `settings/schedule_config.json` 항목 이름)
+   - `SCHEDULE_<KEY>_CRON` = 크론 표현식
+   - `SCHEDULE_<KEY>_TZ` = 타임존(예: `Asia/Seoul`, `Australia/Sydney`)
    - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
    - `SCHEDULE_ENABLE_CACHE` = `1`/`0` (기본 1)
    - `SCHEDULE_CACHE_CRON` = `"30 3 * * *"` (서울 03:30)
    - `SCHEDULE_CACHE_TZ` = `Asia/Seoul`
    - `CACHE_START_DATE` = `2020-01-01` (캐시 초기화 시작일 기본값)
-   - `CACHE_COUNTRIES` = `kor,aus,coin`
+- `CACHE_COUNTRIES` = `kor,aus`
 3. 실행: `python aps.py`
 
 가격 캐시만 따로 갱신하려면:
@@ -184,50 +172,46 @@ python scripts/find.py --type etf --min-change 3.0
 
 ## 전략/로직 요약
 
-### 매매 신호
-- **매수 신호**: 가격이 지정된 기간의 이동평균선 위에 있을 때
-- **매도 신호**: 
+### 매매 추천
+- **매수 추천**: 가격이 지정된 기간의 이동평균선 위에 있을 때
+- **매도 추천**:
   - **추세이탈**: 가격이 이동평균선 아래로 내려갈 때
   - **손절**: 보유 수익률이 손절 기준을 하회할 때
 
 ### 공통 리스크 관리 규칙 (백테스트)
-- **가격기반손절(CUT)**: 보유수익률 ≤ `HOLDING_STOP_LOSS_PCT`
+- **가격기반손절(CUT)**: 포트폴리오 종목 수(`portfolio_topn`)만큼 해당 종목이 하락하면 손절 (예: TopN=10 → 개인 손절 -10%)
 - **쿨다운**: 매수/매도 후 `COOLDOWN_DAYS` 동안 반대 방향 거래 금지
 
 ## 설정 체계
 
 ### 공통 설정
 모든 국가가 동일하게 사용하는 전역 파라미터를 파일에서 관리합니다:
-- `MARKET_REGIME_FILTER_ENABLED`: 시장 레짐 필터 사용 여부
-- `MARKET_REGIME_FILTER_TICKER`: 레짐 필터 지수 티커
-- `MARKET_REGIME_FILTER_MA_PERIOD`: 레짐 필터 이동평균 기간
-- `HOLDING_STOP_LOSS_PCT`: 보유 손절 비율
+- `MARKET_REGIME_FILTER_ENABLED`: 시장 레짐 필터 사용 여부 (현재 코드는 항상 활성화 상태)
 - `COOLDOWN_DAYS`: 거래 쿨다운 기간
-
-**주의**: `HOLDING_STOP_LOSS_PCT`는 양수로 입력해도 자동으로 음수로 저장/해석됩니다. (예: 10 → -10)
 
 ### 국가별 전략 파라미터
 - `portfolio_topn`: 포트폴리오 최대 보유 종목 수
 - `ma_period`: 이동평균 기간
 - `replace_weaker_stock`: 약한 종목 교체 여부
 - `replace_threshold`: 종목 교체 임계값
+- `MARKET_REGIME_FILTER_TICKER`: 레짐 필터 지수 티커 (`strategy.static`에 정의)
+- `MARKET_REGIME_FILTER_MA_PERIOD`: 레짐 필터 이동평균 기간 (`strategy.tuning`에 정의, 튜닝 대상)
 
 각 국가별로 DB에 저장되어 해당 국가 현황/백테스트에 반영됩니다.
 
 ## 코드 구조 개선사항
 
-### 최근 리팩토링(2025-09)
-1. **signals 분리/이관**: 루트 `signals.py` 삭제. 시그널 파이프라인/스케줄/로거/히스토리/마켓 상태를 `logic/signals/`로 모듈화
-   - 파이프라인: `logic/signals/pipeline.py` (`main`, `generate_signal_report`)
-   - 스케줄: `logic/signals/schedule.py` (거래일/개장여부/스케줄 날짜)
-   - 로거: `logic/signals/logger.py` (파일 로깅)
-   - 히스토리: `logic/signals/history.py` (보유일/쿨다운)
-   - 마켓 상태: `logic/signals/market.py` (웹 UI 헤더용 문자열)
+### 최근 리팩토링(2025-10)
+1. **계정 중심 구조로 전환**: `settings/account/*.json` 기반으로 추천/백테스트가 동작하도록 전면 수정
+2. **Streamlit 페이지 정비**: 거래 관리(`trade.py`)와 계정 마이그레이션(`migration.py`)을 분리하고 로그인 후 접근하도록 구성
+3. **추천 결과 저장 방식 개선**: 계정 ID와 국가 코드 두 경로에 결과를 저장해 UI와 스케줄러가 일관된 데이터를 참조하도록 변경
+   - 히스토리: `logic/recommend/history.py` (보유일/쿨다운)
+   - 마켓 상태: `logic/recommend/market.py` (웹 UI 헤더용 문자열)
 2. **포맷팅/정밀도 일원화**: 금액/퍼센트/표 렌더링은 `utils.report`, 요약 문구는 `utils.notification` 사용으로 통일
 3. **벤치마크/스케줄/로거 분리**: 레이어 간 의존성 정리로 테스트/유지보수 용이성 향상
 4. **백테스트/튜닝 모듈화**:
-   - 백테스트 러너: `logic/backtest/runner.py` (현재 `test.py`를 위임)
-   - 튜닝 러너: `logic/tune/runner.py` (A안: `tune.py`를 별도 프로세스로 실행, 로직은 runner에 위치)
+   - 백테스트 러너: `logic/backtest/country_runner.py`
+   - 튜닝 러너: `logic/tune/runner.py`
 
 ### 최근 개선된 기능들
 1. **중복 코드 제거**: 이동평균 계산 로직을 `utils/indicators.py`의 공통 함수로 통합
@@ -237,7 +221,7 @@ python scripts/find.py --type etf --min-change 3.0
 5. **타입 힌트 개선**: 더 명확한 타입 힌트 추가
 
 ### 주요 공통 함수들
-- `calculate_moving_average_signals()`: 이동평균 기반 시그널 계산
+- `calculate_moving_average_signals()`: 이동평균 기반 추천 계산
 - `calculate_ma_score()`: 이동평균 대비 수익률 점수 계산
 
 ## 주의/제약사항

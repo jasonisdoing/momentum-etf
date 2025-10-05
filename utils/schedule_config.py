@@ -8,8 +8,18 @@ from functools import lru_cache
 from typing import Any, Dict
 
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_CONFIG_PATH = os.path.join(_BASE_DIR, "data", "settings", "schedule_config.json")
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(os.path.dirname(__file__)))
+_CANDIDATE_PATHS = [
+    os.path.join(_PROJECT_ROOT, "settings", "schedule_config.json"),
+    os.path.join(_PROJECT_ROOT, "data", "settings", "schedule_config.json"),
+]
+
+
+def _resolve_config_path() -> str:
+    for path in _CANDIDATE_PATHS:
+        if os.path.exists(path):
+            return path
+    return _CANDIDATE_PATHS[0]
 
 
 class ScheduleConfigError(RuntimeError):
@@ -18,10 +28,11 @@ class ScheduleConfigError(RuntimeError):
 
 @lru_cache(maxsize=1)
 def _load_config() -> Dict[str, Any]:
-    if not os.path.exists(_CONFIG_PATH):
-        raise ScheduleConfigError(f"Schedule config 파일을 찾을 수 없습니다: {_CONFIG_PATH}")
+    config_path = _resolve_config_path()
+    if not os.path.exists(config_path):
+        raise ScheduleConfigError(f"Schedule config 파일을 찾을 수 없습니다: {config_path}")
     try:
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as fp:
+        with open(config_path, "r", encoding="utf-8") as fp:
             return json.load(fp)
     except json.JSONDecodeError as exc:  # pragma: no cover - configuration error
         raise ScheduleConfigError(f"Schedule config JSON 파싱 오류: {exc}") from exc

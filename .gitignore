@@ -4,7 +4,6 @@
 # User Data
 data/kor/
 data/aus/
-data/coin/
 
 
 # Log Data
@@ -26,8 +25,12 @@ venv/
 cache/
 data/stocks/cache/
 
-# 결과 파일
-results/
+# 백테스트 결과
+data/results
+
 
 # 서버에 수동으로 넣어놓음(chmod +x update.sh 충돌때문에)
 update.sh
+
+# Streamlit secrets
+.streamlit/secrets.toml

@@ -1,11 +1,22 @@
 services:
-  scheduler:
-    container_name: etf
+  app:
     build: .
+    command: python run.py
     env_file:
       - .env
     environment:
       - TZ=Asia/Seoul
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./logs:/app/logs
+
+  scheduler:
+    build: .
     command: python aps.py
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Seoul
     volumes:
       - ./logs:/app/logs

@@ -1,0 +1,12 @@
+{
+    "aus": {
+        "currency": "AUD",
+        "qty_precision": 0,
+        "price_precision": 2
+    },
+    "kor": {
+        "currency": "KRW",
+        "qty_precision": 0,
+        "price_precision": 0
+    }
+}
