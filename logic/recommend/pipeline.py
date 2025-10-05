@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
@@ -610,11 +611,24 @@ def generate_account_recommendation_report(
         warmup_days = int(max(ma_period, 1) * 1.5)
         start_date = (base_date - pd.DateOffset(months=months_back)).strftime("%Y-%m-%d")
         end_date = base_date.strftime("%Y-%m-%d")
+        logger.info(
+            "[%s] 가격 데이터 로딩 시작 (기간 %s~%s, 대상 %d개)",
+            account_id.upper(),
+            start_date,
+            end_date,
+            len(tickers_all),
+        )
+        fetch_start = time.perf_counter()
         prefetched_data = fetch_ohlcv_for_tickers(
             tickers_all,
             country_code,
             date_range=[start_date, end_date],
             warmup_days=warmup_days,
+        )
+        logger.info(
+            "[%s] 가격 데이터 로딩 완료 (%.1fs)",
+            account_id.upper(),
+            time.perf_counter() - fetch_start,
         )
     except Exception as exc:
         logger.warning("%s 계정 데이터 로딩 실패: %s", account_id, exc)
@@ -705,6 +719,13 @@ def generate_account_recommendation_report(
     try:
         from strategies.maps import safe_generate_daily_recommendations_for_portfolio
 
+        decision_start = time.perf_counter()
+        logger.info(
+            "[%s] 일일 의사결정 계산 시작 (보유 %d개, 후보 %d개)",
+            account_id.upper(),
+            len(holdings),
+            len(data_by_tkr),
+        )
         decisions = safe_generate_daily_recommendations_for_portfolio(
             account_id=account_id,
             country_code=country_code,
@@ -727,6 +748,12 @@ def generate_account_recommendation_report(
                 strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 5)) or 0
             ),
             max_per_category=max_per_category,
+        )
+        logger.info(
+            "[%s] 일일 의사결정 계산 완료 (%.1fs, 결과 %d개)",
+            account_id.upper(),
+            time.perf_counter() - decision_start,
+            len(decisions) if isinstance(decisions, list) else -1,
         )
     except Exception as exc:
         logger.error("generate_daily_recommendations_for_portfolio 실행 중 오류: %s", exc)

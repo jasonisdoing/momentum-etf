@@ -146,17 +146,7 @@ python scripts/categorize_etf.py <국가코드>
 장 마감 이후 자동으로 현황을 계산하고(교체매매 추천 포함) 슬랙(Slack)으로 알림을 보낼 수 있습니다.
 
 1. 의존성 설치: `pip install -r requirements.txt`
-2. (선택) 환경 변수로 스케줄/타임존 설정:
-   - `SCHEDULE_ENABLE_<KEY>` = `1`/`0` (기본 1, `<KEY>`는 `settings/schedule_config.json` 항목 이름)
-   - `SCHEDULE_<KEY>_CRON` = 크론 표현식
-   - `SCHEDULE_<KEY>_TZ` = 타임존(예: `Asia/Seoul`, `Australia/Sydney`)
-   - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
-   - `SCHEDULE_ENABLE_CACHE` = `1`/`0` (기본 1)
-   - `SCHEDULE_CACHE_CRON` = `"30 3 * * *"` (서울 03:30)
-   - `SCHEDULE_CACHE_TZ` = `Asia/Seoul`
-   - `CACHE_START_DATE` = `2020-01-01` (캐시 초기화 시작일 기본값)
-- `CACHE_COUNTRIES` = `kor,aus`
-3. 실행: `python aps.py`
+2. 실행: `python aps.py`
 
 가격 캐시만 따로 갱신하려면:
 ```bash

@@ -46,7 +46,7 @@ from utils.settings_loader import get_account_slack_channel
 from dotenv import load_dotenv
 
 load_dotenv()
-APP_DATE_TIME = "2025-10-06-07"
+APP_DATE_TIME = "2025-10-06-08"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 
 _LAST_ERROR: Optional[str] = None
@@ -92,17 +92,13 @@ def should_notify_on_schedule(country: str) -> bool:
     if not croniter or not pytz:
         return True
 
-    notify_cron_env = f"NOTIFY_{country.upper()}_CRON"
-    cron_schedule = os.environ.get(notify_cron_env)
     config = get_country_schedule(country)
-    if cron_schedule is None:
-        cron_schedule = config.get("notify_cron")
+    cron_schedule = config.get("notify_cron")
 
     if not cron_schedule:
         return True
 
-    tz_env = f"SCHEDULE_{country.upper()}_TZ"
-    default_tz = (
+    tz_str = (
         config.get("notify_timezone")
         or config.get("timezone")
         or {
@@ -110,7 +106,6 @@ def should_notify_on_schedule(country: str) -> bool:
             "aus": "Australia/Sydney",
         }.get(country, "Asia/Seoul")
     )
-    tz_str = os.environ.get(tz_env, default_tz)
 
     try:
         local_tz = pytz.timezone(tz_str)

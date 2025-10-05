@@ -2,21 +2,15 @@
 APScheduler 기반 스케줄러
 
 [스케줄 설정]
-스케줄은 아래 환경 변수를 통해 설정할 수 있습니다.
-환경 변수가 없으면 각 작업의 기본값(Default)이 사용됩니다.
-
-- SCHEDULE_ENABLE_KOR/AUS: "1" 또는 "0" (기본: "1", 활성화)
-- SCHEDULE_KOR_CRON: 한국 추천 계산 주기
-- SCHEDULE_AUS_CRON: 호주 추천 계산 주기\
-- SCHEDULE_KOR_TZ: 한국 시간대 (기본: "Asia/Seoul")
-- SCHEDULE_AUS_TZ: 호주 시간대 (기본: "Asia/Seoul")\
-- RUN_IMMEDIATELY_ON_START: "1" 이면 시작 시 즉시 한 번 실행 (기본: "0")
+settings/account/<account_id>.json
 """
 
 import logging
 import os
 import sys
 import warnings
+
+TIMEZONE = "Asia/Seoul"
 
 # pkg_resources 워닝 억제
 os.environ["PYTHONWARNINGS"] = "ignore"
@@ -53,11 +47,7 @@ from utils.notification import (
     compose_recommendation_slack_message,
     send_recommendation_slack_notification,
 )
-from utils.schedule_config import (
-    get_all_country_schedules,
-    get_cache_schedule,
-    get_global_schedule_settings,
-)
+from utils.schedule_config import get_all_country_schedules
 
 
 def setup_logging():
@@ -254,9 +244,8 @@ def run_recommend_for_country(
 
 def run_cache_refresh() -> None:
     """모든 국가의 가격 캐시를 갱신합니다."""
-    start_date = os.environ.get("CACHE_START_DATE", "2020-01-01")
-    countries_env = os.environ.get("CACHE_COUNTRIES", "kor,aus")
-    countries = [c.strip().lower() for c in countries_env.split(",") if c.strip()]
+    start_date = "2020-01-01"
+    countries = ["kor", "aus"]
     logging.info("Running cache refresh (start=%s, countries=%s)", start_date, ",".join(countries))
     try:
         from scripts.update_price_cache import refresh_all_caches
@@ -286,30 +275,21 @@ def main():
     # 1. recommendation_cron 와 notify_cron 이 겹치는 경우: 작업도 실행되고, 슬랙도 발송
     # 2. python recommend.py 로 실행되는 경우: 작업도 실행되고, 슬랙도 발송
     # 3. recommendation_cron 에는 해당되지만 notify_cron 에 해당 안되는 경우: 작업은 실행되고, 슬랙은 발송안됨
-    cron_default = "0 0 * * *"
-    tz_default = "Asia/Seoul"
     country_schedules = get_all_country_schedules()
     for schedule_name, cfg in country_schedules.items():
-        enabled_default = bool(cfg.get("enabled", True))
-        if not _bool_env(f"SCHEDULE_ENABLE_{schedule_name.upper()}", enabled_default):
-            logging.info(f"Skipping {schedule_name.upper()} schedule (disabled)")
+        if not cfg.get("enabled", True):
+            logging.info("Skipping %s schedule (disabled)", schedule_name.upper())
             continue
 
-        cron_expr = _get(
-            f"SCHEDULE_{schedule_name.upper()}_CRON",
-            cfg.get("signal_cron") or cfg.get("recommendation_cron") or cron_default,
-        )
-        timezone = _get(
-            f"SCHEDULE_{schedule_name.upper()}_TZ",
-            cfg.get("timezone", tz_default),
-        )
+        cron_expr = cfg.get("signal_cron") or cfg.get("recommendation_cron")
+        timezone = cfg.get("timezone") or TIMEZONE
 
         account_id = (cfg.get("account_id") or "").strip().lower()
         country_code = (cfg.get("country_code") or "").strip().lower()
 
-        if not account_id or not country_code:
+        if not account_id or not country_code or not cron_expr:
             raise RuntimeError(
-                f"Schedule entry '{schedule_name}' must define both account_id and country_code"
+                f"Schedule entry '{schedule_name}' must define account_id, country_code, and recommendation_cron"
             )
 
         scheduler.add_job(
@@ -326,47 +306,40 @@ def main():
             timezone,
         )
 
-    cache_cfg = get_cache_schedule()
-    cache_enabled_default = bool(cache_cfg.get("enabled", True))
-    if _bool_env("SCHEDULE_ENABLE_CACHE", cache_enabled_default):
-        cache_cron = _get("SCHEDULE_CACHE_CRON", cache_cfg.get("cron"))
-        cache_tz = _get("SCHEDULE_CACHE_TZ", cache_cfg.get("timezone", tz_default))
-        scheduler.add_job(
-            run_cache_refresh,
-            CronTrigger.from_crontab(cache_cron, timezone=cache_tz),
-            id="price_cache_refresh",
-        )
-        logging.info(f"Scheduled CACHE: cron='{cache_cron}' tz='{cache_tz}'")
+    # cache run
+    cache_cron = "0 0 * * *"
+    scheduler.add_job(
+        run_cache_refresh,
+        CronTrigger.from_crontab(cache_cron, timezone=TIMEZONE),
+        id="price_cache_refresh",
+    )
+    logging.info(f"Scheduled CACHE: cron='{cache_cron}' tz='{TIMEZONE}'")
 
-    global_schedule = get_global_schedule_settings()
-    run_initial_default = bool(global_schedule.get("run_immediately_on_start", True))
-    if _bool_env("RUN_IMMEDIATELY_ON_START", run_initial_default):
-        logging.info("\n[Initial Run] Starting...")
-        for schedule_name, cfg in country_schedules.items():
-            enabled_default = bool(cfg.get("enabled", True))
-            if not _bool_env(f"SCHEDULE_ENABLE_{schedule_name.upper()}", enabled_default):
-                continue
+    # Initial run
+    logging.info("\n[Initial Run] Starting...")
+    for schedule_name, cfg in country_schedules.items():
+        if not cfg.get("enabled", True):
+            continue
 
-            account_id = (cfg.get("account_id") or "").strip().lower()
-            country_code = (cfg.get("country_code") or "").strip().lower()
+        account_id = (cfg.get("account_id") or "").strip().lower()
+        country_code = (cfg.get("country_code") or "").strip().lower()
 
-            if not account_id or not country_code:
-                raise RuntimeError(
-                    f"Schedule entry '{schedule_name}' must define both account_id and country_code"
-                )
+        if not account_id or not country_code:
+            raise RuntimeError(
+                f"Schedule entry '{schedule_name}' must define both account_id and country_code"
+            )
 
-            try:
-                run_recommend_for_country(account_id, country_code, force_notify=True)
-            except Exception:
-                logging.error(
-                    "Error during initial run for account=%s country=%s",
-                    account_id,
-                    country_code,
-                    exc_info=True,
-                )
-        logging.info("[Initial Run] Complete.")
-    else:
-        logging.info("Initial run skipped (RUN_IMMEDIATELY_ON_START=0)")
+        try:
+            run_recommend_for_country(account_id, country_code, force_notify=True)
+        except Exception:
+            logging.error(
+                "Error during initial run for account=%s country=%s",
+                account_id,
+                country_code,
+                exc_info=True,
+            )
+
+    logging.info("[Initial Run] Complete.")
 
     # 다음 실행 시간 출력
     jobs = scheduler.get_jobs()

@@ -28,5 +28,9 @@
             "ticker": "426030",
             "name": "TIMEFOLIO 미국나스닥100액티브"
         }
-    ]
+    ],
+    "schedule": {
+        "recommendation_cron": "1,11,21,31,41,51 9-16 * * *",
+        "notify_cron": "1,31 9-16 * * 1-5"
+    }
 }
