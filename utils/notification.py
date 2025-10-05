@@ -7,7 +7,7 @@ import re
 import math
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from collections import Counter
 from numbers import Number
 
@@ -59,31 +59,6 @@ _DEFAULT_REPORT_IMAGE_DIR = Path(__file__).resolve().parent.parent / "cache" / "
 # ---------------------------------------------------------------------------
 # 슬랙 웹훅 관련 헬퍼
 # ---------------------------------------------------------------------------
-
-
-def get_slack_webhook_url(country: str) -> Optional[Tuple[str, str]]:
-    """Return (webhook_url, source_name) for the given country.
-
-    Args:
-        country: 국가 코드 (예: 'kor', 'aus')
-
-    Returns:
-        (웹훅 URL, 소스 이름) 튜플 또는 사용 가능한 웹훅이 없으면 None
-    """
-    # 1. 국가 설정에서 웹훅 URL 가져오기
-    country_settings = get_account_settings(country)
-    if country_settings:
-        url = country_settings.get("slack_webhook_url")
-        if url:
-            return url, f"country:{country}"
-
-    # 2. 환경 변수 (국가 단위) 확인
-    env_var_name = f"{country.upper()}_SLACK_WEBHOOK"
-    url = os.environ.get(env_var_name)
-    if url:
-        return url, env_var_name
-
-    return None
 
 
 def should_notify_on_schedule(country: str) -> bool:
@@ -576,90 +551,69 @@ def send_recommendation_slack_notification(
     channel = get_account_slack_channel(account_id)
     token = os.environ.get("SLACK_BOT_TOKEN")
 
-    if token and channel and WebClient is not None:
-        client = WebClient(token=token)
-        try:
-            client.chat_postMessage(
-                channel=channel,
-                text=text or "Slack notification",
-                blocks=blocks,
-            )
-            logger.info(
-                "Slack message sent via bot token for account=%s (channel=%s)",
-                account_id,
-                channel,
-            )
+    if not channel:
+        logger.warning("Slack 채널이 설정되어 있지 않아 전송을 건너뜁니다 (account=%s)", account_id)
+        return False
 
-            if image_path_obj:
-                if image_path_obj.exists():
-                    uploaded = _upload_file_to_slack(
-                        channel=channel,
-                        file_path=image_path_obj,
-                        title=image_title or image_path_obj.name,
-                        initial_comment=image_comment,
-                    )
-                    if not uploaded:
-                        logger.warning(
-                            "Slack 이미지 업로드 실패 (account=%s, file=%s)",
-                            account_id,
-                            image_path_obj.name,
-                        )
-                else:
-                    logger.warning(
-                        "Slack 이미지 파일을 찾을 수 없습니다 (account=%s, path=%s)",
-                        account_id,
-                        image_path_obj,
-                    )
-            return True
-        except SlackApiError as exc:  # pragma: no cover - 외부 API 호출 오류
-            logger.error(
-                "Slack API 호출 중 오류가 발생했습니다 (account=%s): %s",
-                account_id,
-                getattr(exc, "response", {}).get("error") or str(exc),
-                exc_info=True,
-            )
-        except Exception:  # pragma: no cover - 방어적 처리
-            logger.error(
-                "Slack 메시지 전송 중 알 수 없는 오류가 발생했습니다 (account=%s)",
-                account_id,
-                exc_info=True,
-            )
+    if not token:
+        logger.warning("SLACK_BOT_TOKEN 이 설정되지 않아 전송을 건너뜁니다 (account=%s)", account_id)
+        return False
 
-    webhook_info = get_slack_webhook_url(account_id)
-    if webhook_info:
-        webhook_url, source_name = webhook_info
-        sent = send_slack_message(
-            text,
+    if WebClient is None:
+        logger.warning("slack_sdk 가 설치되어 있지 않아 슬랙 전송을 건너뜁니다 (account=%s)", account_id)
+        return False
+
+    client = WebClient(token=token)
+
+    try:
+        client.chat_postMessage(
+            channel=channel,
+            text=text or "Slack notification",
             blocks=blocks,
-            webhook_url=webhook_url,
-            webhook_name=source_name,
         )
-        if sent:
-            logger.info(
-                "Slack message sent via webhook for %s (source=%s)",
-                country_code.upper() or "UNKNOWN",
-                source_name,
-            )
-            if image_path_obj:
-                logger.info(
-                    "Slack 웹훅 사용 중이어서 이미지 업로드를 건너뜁니다 (account=%s)",
-                    account_id,
-                )
-            return True
-
-        logger.error(
-            "Slack 웹훅 전송에 실패했습니다 (account=%s, source=%s)",
-            account_id,
-            source_name,
-        )
-
-    if not channel and not webhook_info:
         logger.info(
-            "account=%s에 대해 Slack 채널 또는 웹훅이 설정되어 있지 않아 전송을 건너뜁니다.",
+            "Slack message sent via bot token for account=%s (channel=%s)",
             account_id,
+            channel,
         )
+    except SlackApiError as exc:  # pragma: no cover - 외부 API 호출 오류
+        logger.error(
+            "Slack API 호출 중 오류가 발생했습니다 (account=%s): %s",
+            account_id,
+            getattr(exc, "response", {}).get("error") or str(exc),
+            exc_info=True,
+        )
+        return False
+    except Exception:  # pragma: no cover - 방어적 처리
+        logger.error(
+            "Slack 메시지 전송 중 알 수 없는 오류가 발생했습니다 (account=%s)",
+            account_id,
+            exc_info=True,
+        )
+        return False
 
-    return False
+    if image_path_obj:
+        if image_path_obj.exists():
+            uploaded = _upload_file_to_slack(
+                channel=channel,
+                file_path=image_path_obj,
+                title=image_title or image_path_obj.name,
+                initial_comment=image_comment,
+            )
+            if not uploaded:
+                logger.warning(
+                    "Slack 이미지 업로드 실패 (account=%s, file=%s)",
+                    account_id,
+                    image_path_obj.name,
+                )
+        else:
+            logger.warning(
+                "Slack 이미지 파일을 찾을 수 없습니다 (account=%s, path=%s)",
+                account_id,
+                image_path_obj,
+            )
+
+    return True
 
 
 def _format_shares_for_country(quantity: Any, country: str) -> str:
@@ -780,7 +734,6 @@ __all__ = [
     "build_summary_line_from_summary_data",
     "build_summary_line_from_header",
     "get_last_error",
-    "get_slack_webhook_url",
     "send_slack_message_to_logs",
     "send_slack_message",
     "send_recommendation_slack_notification",

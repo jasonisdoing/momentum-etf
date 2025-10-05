@@ -58,8 +58,6 @@ pip install -r requirements.txt
 `.env` 파일을 생성하여 다음 변수들을 설정할 수 있습니다:
 ```env
 MONGO_DB_CONNECTION_STRING=mongodb://localhost:27017/momentum_etf
-KOR_SLACK_WEBHOOK=your_slack_webhook_url
-AUS_SLACK_WEBHOOK=your_slack_webhook_url
 ```
 
 ### 4) 서버 시간대 설정 (필수)

@@ -147,8 +147,19 @@ def get_account_slack_channel(account_id: str) -> Optional[str]:
     """슬랙 채널 ID(없으면 None)를 반환합니다."""
 
     settings = get_account_settings(account_id)
-    channel = settings.get("slack_channel")
-    return str(channel) if isinstance(channel, str) and channel.strip() else None
+    channel_value: Optional[str] = None
+
+    if isinstance(settings.get("slack"), dict):
+        channel_field = settings["slack"].get("channel")
+        if isinstance(channel_field, str) and channel_field.strip():
+            channel_value = channel_field.strip()
+
+    if not channel_value:
+        legacy_channel = settings.get("slack_channel")
+        if isinstance(legacy_channel, str) and legacy_channel.strip():
+            channel_value = legacy_channel.strip()
+
+    return channel_value
 
 
 def get_strategy_rules(account_id: str):
