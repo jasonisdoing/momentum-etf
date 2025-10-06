@@ -14,11 +14,12 @@ class AccountSettingsError(RuntimeError):
     """계정 설정 로딩 중 발생하는 예외."""
 
 
-SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "settings"
+SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "data" / "settings"
 ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT / "account"
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
 PRECISION_SETTINGS_PATH = SETTINGS_ROOT / "precision.json"
+BACKTEST_SETTINGS_PATH = SETTINGS_ROOT / "backtest.json"
 logger = get_app_logger()
 
 
@@ -64,9 +65,47 @@ def _load_precision_settings() -> Dict[str, Any]:
     return data
 
 
+@lru_cache(maxsize=1)
+def _load_backtest_settings() -> Dict[str, Any]:
+    try:
+        return _load_json(BACKTEST_SETTINGS_PATH)
+    except AccountSettingsError:
+        return {}
+    except Exception:
+        return {}
+
+
+def get_backtest_settings() -> Dict[str, Any]:
+    return dict(_load_backtest_settings())
+
+
+def get_backtest_months_range(default: int = 36) -> int:
+    settings = _load_backtest_settings()
+    value = settings.get("MONTHS_RANGE")
+    try:
+        months = int(value)
+        if months > 0:
+            return months
+    except (TypeError, ValueError):
+        pass
+    return int(default)
+
+
+def get_backtest_initial_capital(default: float = 100_000_000) -> float:
+    settings = _load_backtest_settings()
+    value = settings.get("INITIAL_CAPITAL")
+    try:
+        capital = float(value)
+        if capital > 0:
+            return capital
+    except (TypeError, ValueError):
+        pass
+    return float(default)
+
+
 @lru_cache(maxsize=None)
 def get_account_settings(account_id: str) -> Dict[str, Any]:
-    """`settings/account/{account}.json` 파일을 로드합니다."""
+    """`data/settings/account/{account}.json` 파일을 로드합니다."""
 
     account = (account_id or "").strip().lower()
     if not account:

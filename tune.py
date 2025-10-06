@@ -13,7 +13,7 @@ from utils.account_registry import (
     list_available_accounts,
 )
 from logic.tune.runner import run_account_tuning
-from settings.common import TEST_MONTHS_RANGE
+from utils.settings_loader import get_backtest_months_range
 from utils.logger import get_app_logger
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
@@ -48,7 +48,7 @@ TUNING_CONFIG: dict[str, dict] = {
 def _available_account_choices() -> list[str]:
     choices = list_available_accounts()
     if not choices:
-        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. settings/account/*.json 파일을 확인하세요.")
+        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. data/settings/account/*.json 파일을 확인하세요.")
     return choices
 
 
@@ -86,7 +86,7 @@ def main() -> None:
         output_path=output_path,
         results_dir=RESULTS_DIR,
         tuning_config=TUNING_CONFIG,
-        months_range=TEST_MONTHS_RANGE,
+        months_range=get_backtest_months_range(),
     )
     logger.info("✅ 튜닝 결과를 '%s'에 저장했습니다.", output_path)
 

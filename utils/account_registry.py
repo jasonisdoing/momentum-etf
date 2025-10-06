@@ -18,7 +18,7 @@ from utils.settings_loader import (
 )
 
 
-_SETTINGS_DIR = Path(__file__).resolve().parent.parent / "settings" / "account"
+_SETTINGS_DIR = Path(__file__).resolve().parent.parent / "data" / "settings" / "account"
 _ICON_FALLBACKS: Dict[str, str] = {
     "kor": "🇰🇷",
     "aus": "🇦🇺",
@@ -40,7 +40,7 @@ def _resolve_order(value: Any) -> float:
 
 
 def list_available_accounts() -> List[str]:
-    """`settings/account`에 존재하는 계정 ID 목록을 반환합니다."""
+    """`data/settings/account`에 존재하는 계정 ID 목록을 반환합니다."""
 
     if not _SETTINGS_DIR.exists():
         logger.warning("계정 설정 디렉터리를 찾을 수 없습니다: %s", _SETTINGS_DIR)
@@ -54,7 +54,7 @@ def list_available_accounts() -> List[str]:
 
 
 def load_account_configs() -> List[Dict[str, Any]]:
-    """`settings/account`에 정의된 계정 정보를 정렬된 리스트로 반환합니다."""
+    """`data/settings/account`에 정의된 계정 정보를 정렬된 리스트로 반환합니다."""
 
     configs: List[Dict[str, Any]] = []
 
@@ -127,7 +127,7 @@ def iter_accounts() -> Iterable[str]:
 
 
 def get_common_file_settings() -> dict[str, Any]:
-    """settings/common.py의 공통 설정을 딕셔너리로 반환합니다."""
+    """data/settings/common.py의 공통 설정을 딕셔너리로 반환합니다."""
 
     return {
         "MARKET_REGIME_FILTER_ENABLED": True,

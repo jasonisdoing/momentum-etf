@@ -7,7 +7,10 @@ from bson import ObjectId
 from dotenv import load_dotenv
 from pymongo import MongoClient
 
-import settings as global_settings
+try:
+    import data.settings as global_settings  # type: ignore
+except ImportError:  # pragma: no cover - 하위 호환
+    global_settings = object()
 from utils.logger import get_app_logger
 
 # .env 파일이 있다면 로드합니다.

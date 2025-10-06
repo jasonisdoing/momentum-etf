@@ -87,7 +87,7 @@ def render_migration_page() -> None:
         return
 
     if not available_accounts:
-        st.info("마이그레이션할 계정이 없습니다. `settings/account/*.json` 파일을 추가하세요.")
+        st.info("마이그레이션할 계정이 없습니다. `data/settings/account/*.json` 파일을 추가하세요.")
         return
 
     with st.form("account_migration_form"):

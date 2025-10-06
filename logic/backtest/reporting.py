@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from settings.common import TEST_MONTHS_RANGE
 from logic.backtest.account_runner import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
@@ -23,13 +22,14 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.logger import get_app_logger
+from utils.settings_loader import get_backtest_months_range
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
 logger = get_app_logger()
 
 
 def _default_months_range() -> int:
-    return TEST_MONTHS_RANGE
+    return get_backtest_months_range()
 
 
 # ---------------------------------------------------------------------------
@@ -742,7 +742,7 @@ def dump_backtest_log(
             f"{country_code.upper()} 시장 ETF를 대상으로 "
             f"{getattr(result, 'months_range', _default_months_range())}개월 기간 백테스트를 실행합니다."
         ),
-        f"계정별 설정 파일(settings/account/{account_id}.json)을 사용하여 전략을 적용합니다.",
+        f"계정별 설정 파일(data/settings/account/{account_id}.json)을 사용하여 전략을 적용합니다.",
         f"실행 시간: {start_stamp} | 테스트 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}",
         "",
     ]

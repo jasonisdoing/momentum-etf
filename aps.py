@@ -2,7 +2,7 @@
 APScheduler 기반 스케줄러
 
 [스케줄 설정]
-settings/account/<account_id>.json
+data/settings/account/<account_id>.json
 """
 
 import logging

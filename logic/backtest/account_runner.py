@@ -8,7 +8,6 @@ import math
 
 import pandas as pd
 
-from settings.common import TEST_INITIAL_CAPITAL, TEST_MONTHS_RANGE
 from logic.entry_point import run_portfolio_backtest, StrategyRules
 from utils.account_registry import get_common_file_settings
 from utils.settings_loader import (
@@ -17,6 +16,8 @@ from utils.settings_loader import (
     get_account_settings,
     get_account_strategy,
     get_strategy_rules,
+    get_backtest_months_range,
+    get_backtest_initial_capital,
 )
 from utils.data_loader import get_latest_trading_day, fetch_ohlcv
 from utils.stock_list_io import get_etfs
@@ -24,11 +25,11 @@ from utils.logger import get_app_logger
 
 
 def _default_test_months_range() -> int:
-    return TEST_MONTHS_RANGE
+    return get_backtest_months_range()
 
 
 def _default_initial_capital() -> float:
-    return float(TEST_INITIAL_CAPITAL)
+    return float(get_backtest_initial_capital())
 
 
 @dataclass

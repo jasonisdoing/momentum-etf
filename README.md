@@ -34,8 +34,8 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 - `data/`: 데이터 저장소
   - `kor/`, `aus/`: 국가별 데이터
 - `run.py`: 메인 실행 진입점 (웹 앱 등에서 사용)
-- `settings/account/*.json`: 계정별 전략/표시 설정
-- `settings/schedule_config.json`: APScheduler 실행 계정 및 크론 설정 (계정 ID·국가 코드 명시)
+- `data/settings/account/*.json`: 계정별 전략/표시 설정
+- `data/settings/schedule_config.json`: APScheduler 실행 계정 및 크론 설정 (계정 ID·국가 코드 명시)
 
 ## 문서
 
@@ -190,7 +190,7 @@ python scripts/find.py --type etf --min-change 3.0
 ## 코드 구조 개선사항
 
 ### 최근 리팩토링(2025-10)
-1. **계정 중심 구조로 전환**: `settings/account/*.json` 기반으로 추천/백테스트가 동작하도록 전면 수정
+1. **계정 중심 구조로 전환**: `data/settings/account/*.json` 기반으로 추천/백테스트가 동작하도록 전면 수정
 2. **Streamlit 페이지 정비**: 거래 관리(`trade.py`)와 계정 마이그레이션(`migration.py`)을 분리하고 로그인 후 접근하도록 구성
 3. **추천 결과 저장 방식 개선**: 계정 ID와 국가 코드 두 경로에 결과를 저장해 UI와 스케줄러가 일관된 데이터를 참조하도록 변경
    - 히스토리: `logic/recommend/history.py` (보유일/쿨다운)

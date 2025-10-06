@@ -5,13 +5,13 @@ from __future__ import annotations
 from functools import lru_cache
 from importlib import import_module
 
-from settings.common import SELECTED_STRATEGY
+from data.settings.common import SELECTED_STRATEGY
 
 
 def _strategy_package_name() -> str:
     strategy = (SELECTED_STRATEGY or "").strip()
     if not strategy:
-        raise ValueError("settings.common.SELECTED_STRATEGY 값이 비어 있습니다.")
+        raise ValueError("data.settings.common.SELECTED_STRATEGY 값이 비어 있습니다.")
     return f"strategies.{strategy}"
 
 

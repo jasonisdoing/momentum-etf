@@ -42,7 +42,7 @@ def main() -> None:
 
     accounts = load_account_configs()
     if not accounts:
-        st.error("사용할 수 있는 계정 설정이 없습니다. `settings/account` 폴더를 확인해주세요.")
+        st.error("사용할 수 있는 계정 설정이 없습니다. `data/settings/account` 폴더를 확인해주세요.")
         st.stop()
 
     default_account = pick_default_account(accounts)

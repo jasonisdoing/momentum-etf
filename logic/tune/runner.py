@@ -11,13 +11,13 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from logic.backtest.account_runner import run_account_backtest
-from settings.common import TEST_MONTHS_RANGE
 from logic.entry_point import StrategyRules
 from utils.account_registry import get_strategy_rules
 from utils.settings_loader import (
     AccountSettingsError,
     get_account_settings,
     get_account_strategy,
+    get_backtest_months_range,
 )
 from utils.logger import get_app_logger
 from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day, fetch_ohlcv
@@ -131,12 +131,13 @@ def run_account_tuning(
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
+    default_months = get_backtest_months_range()
     if months_range is None:
         config_months = config.get("TEST_MONTHS_RANGE") if config else None
         try:
-            months_range = int(config_months) if config_months is not None else TEST_MONTHS_RANGE
+            months_range = int(config_months) if config_months is not None else default_months
         except (TypeError, ValueError):
-            months_range = TEST_MONTHS_RANGE
+            months_range = default_months
     else:
         months_range = int(months_range)
 
