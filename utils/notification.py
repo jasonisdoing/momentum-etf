@@ -46,7 +46,7 @@ from utils.settings_loader import get_account_slack_channel
 from dotenv import load_dotenv
 
 load_dotenv()
-APP_DATE_TIME = "2025-10-06-08"
+APP_DATE_TIME = "2025-10-06-10"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 
 _LAST_ERROR: Optional[str] = None
@@ -129,13 +129,6 @@ def send_slack_message(
 
 def get_last_error() -> Optional[str]:
     return _LAST_ERROR
-
-
-def send_slack_message_to_logs(message: str):
-    webhook_url = os.environ.get("LOGS_SLACK_WEBHOOK")
-    if webhook_url:
-        log_message = f"📜 *[{APP_LABEL}]*{message}"
-        send_slack_message(log_message, webhook_url=webhook_url, webhook_name="LOGS_SLACK_WEBHOOK")
 
 
 def _upload_file_to_slack(
@@ -396,31 +389,10 @@ def _generate_recommendation_report_image(
         logger.info("[SLACK] 추천 이미지 생략 - detail_rows 데이터 없음")
         return None
 
-    header_index = {name: idx for idx, name in enumerate(detail_headers)}
+    display_headers = list(detail_headers)
+    display_indexes = list(range(len(detail_headers)))
 
-    column_map: list[tuple[str, str]] = [
-        ("순위", "순위"),
-        ("티커", "티커"),
-        ("종목명", "종목명"),
-        ("상태", "상태"),
-        ("점수", "점수"),
-        ("현재가", "현재가"),
-        ("일간%", "일간수익률"),
-        ("평가%", "평가(%)"),
-        ("누적%", "누적수익률"),
-        ("문구", "문구"),
-    ]
-
-    display_headers: list[str] = []
-    display_indexes: list[int] = []
-    for display_label, source_label in column_map:
-        idx = header_index.get(source_label)
-        if idx is None:
-            continue
-        display_headers.append(display_label)
-        display_indexes.append(idx)
-
-    if len(display_indexes) < 3:
+    if len(display_headers) < 3:
         logger.info("[SLACK] 추천 이미지 생략 - 표시할 컬럼 수 부족")
         return None
 
@@ -514,7 +486,7 @@ def _format_image_cell_value(column_label: str, value: Any) -> str:
             return f"{float(value):.2f}"
         if column_label == "현재가":
             return f"{float(value):,.2f}"
-        if column_label in {"일간%", "평가%", "누적%"}:
+        if "%" in column_label:
             return f"{float(value):+.2f}%"
         return str(value)
 
@@ -734,10 +706,8 @@ __all__ = [
     "build_summary_line_from_summary_data",
     "build_summary_line_from_header",
     "get_last_error",
-    "send_slack_message_to_logs",
     "send_slack_message",
     "send_recommendation_slack_notification",
-    # "send_verbose_log_to_slack",
     "should_notify_on_schedule",
     "strip_html_tags",
 ]

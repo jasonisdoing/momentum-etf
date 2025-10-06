@@ -10,7 +10,7 @@
             {
                 "ticker": "ASX:GDX",
                 "name": "VanEck Gold Miners ETF",
-                "recommend_enabled": true
+                "recommend_enabled": false
             }
         ]
     },
@@ -200,6 +200,21 @@
         ]
     },
     {
+        "category": "로봇",
+        "tickers": [
+            {
+                "ticker": "ASX:RBTZ",
+                "name": "BetaShares Global Robotics and Artificial Intelligence ETF",
+                "recommend_enabled": true
+            },
+            {
+                "ticker": "ASX:ROBO",
+                "name": "Global X ROBO Global Robotics & Automation ETF",
+                "recommend_enabled": true
+            }
+        ]
+    },
+    {
         "category": "배터리",
         "tickers": [
             {
@@ -240,16 +255,6 @@
             {
                 "ticker": "ASX:QFN",
                 "name": "BetaShares Australian Financials Sector ETF",
-                "recommend_enabled": true
-            },
-            {
-                "ticker": "ASX:RBTZ",
-                "name": "BetaShares Global Robotics and Artificial Intelligence ETF",
-                "recommend_enabled": true
-            },
-            {
-                "ticker": "ASX:ROBO",
-                "name": "Global X ROBO Global Robotics & Automation ETF",
                 "recommend_enabled": true
             },
             {

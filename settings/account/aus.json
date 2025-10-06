@@ -7,7 +7,7 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "tuning": {
-            "MA_PERIOD": 30,
+            "MA_PERIOD": 26,
             "PORTFOLIO_TOPN": 5,
             "REPLACE_SCORE_THRESHOLD": 0.5,
             "MARKET_REGIME_FILTER_MA_PERIOD": 20
@@ -15,7 +15,6 @@
         "static": {
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
-            "TRIM_DOWN_SELL_LIMIT": 1,
             "MARKET_REGIME_FILTER_TICKER": "ASX:SPY"
         }
     },

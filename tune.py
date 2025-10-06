@@ -21,9 +21,9 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
         "MA_RANGE": np.arange(10, 51, 1),
-        "PORTFOLIO_TOPN": np.arange(5, 8, 1),
-        "REPLACE_SCORE_THRESHOLD": [0.5],
-        "MARKET_REGIME_FILTER_MA_PERIOD": np.arange(1, 31, 1),
+        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": [0, 0.5],
+        "MARKET_REGIME_FILTER_MA_PERIOD": np.arange(10, 35, 5),
     },
     "kor": {
         "MA_RANGE": np.arange(10, 101, 1),

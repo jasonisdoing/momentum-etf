@@ -239,9 +239,9 @@ def render_recommendation_table(df: pd.DataFrame, *, account_id: str, country_co
             "카테고리": st.column_config.TextColumn("카테고리", width="small"),  # medium 크기 설정을 small로 조정
             "상태": st.column_config.TextColumn("상태", width="small"),
             "보유일": st.column_config.TextColumn("보유일", width="small"),
-            "현재가": st.column_config.TextColumn("현재가", width="small"),
             "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),
             "평가(%)": st.column_config.NumberColumn("평가(%)", width="small"),
+            "현재가": st.column_config.TextColumn("현재가", width="small"),
             "1주(%)": st.column_config.NumberColumn("1주(%)", width="small"),
             "2주(%)": st.column_config.NumberColumn("2주(%)", width="small"),
             "3주(%)": st.column_config.NumberColumn("3주(%)", width="small"),

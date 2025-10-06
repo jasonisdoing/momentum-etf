@@ -16,13 +16,6 @@ DECISION_CONFIG = {
         "is_recommendation": True,
         "show_slack": True,
     },
-    "SELL_TRIM_DOWN": {
-        "display_name": "<✂️ 포지션 축소>",
-        "order": 20,
-        "is_recommendation": True,
-        "show_slack": True,
-        "background": "#ffd7c2",
-    },
     "SELL_TREND": {
         "display_name": "<📉 추세이탈 매도>",
         "order": 21,

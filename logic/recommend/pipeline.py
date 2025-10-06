@@ -526,11 +526,6 @@ def generate_account_recommendation_report(
     max_per_category = int(
         strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0
     )
-    trim_down_sell_limit = int(
-        strategy_static.get("TRIM_DOWN_SELL_LIMIT", strategy_cfg.get("TRIM_DOWN_SELL_LIMIT", 0))
-        or 0
-    )
-
     # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
     stop_loss_pct = -abs(float(portfolio_topn))
 
@@ -1040,69 +1035,28 @@ def generate_account_recommendation_report(
             },
         )
 
-    if trim_down_sell_limit > 0:
-        sell_state_set = {
-            "SELL_TREND",
-            "SELL_REPLACE",
-            "CUT_STOPLOSS",
-            "SELL_REGIME_FILTER",
-            "SELL_TRIM_DOWN",
-        }
-        buy_state_set = {"BUY", "BUY_REPLACE"}
+    sell_state_set = {
+        "SELL_TREND",
+        "SELL_REPLACE",
+        "CUT_STOPLOSS",
+        "SELL_REGIME_FILTER",
+    }
+    buy_state_set = {"BUY", "BUY_REPLACE"}
 
-        planned_sell_count = sum(
-            1 for item in results if (item.get("state") or "").upper() in sell_state_set
+    planned_sell_count = sum(
+        1 for item in results if (item.get("state") or "").upper() in sell_state_set
+    )
+    planned_buy_count = sum(
+        1 for item in results if (item.get("state") or "").upper() in buy_state_set
+    )
+    projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
+
+    if projected_holdings > portfolio_topn:
+        logger.debug(
+            "Projected holdings (%d) exceed portfolio_topn(%d); trim logic removed",
+            projected_holdings,
+            portfolio_topn,
         )
-        planned_buy_count = sum(
-            1 for item in results if (item.get("state") or "").upper() in buy_state_set
-        )
-        projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
-
-        if projected_holdings > portfolio_topn:
-            trim_needed = projected_holdings - portfolio_topn
-            trim_count = min(trim_down_sell_limit, trim_needed)
-
-            if trim_count > 0:
-
-                def _trim_sort_key(entry: Dict[str, Any]) -> tuple[float, float, int]:
-                    score_raw = entry.get("score")
-                    try:
-                        score_val = float(score_raw)
-                    except (TypeError, ValueError):
-                        score_val = float("inf")
-
-                    eval_raw = entry.get("evaluation_pct")
-                    try:
-                        eval_val = float(eval_raw)
-                    except (TypeError, ValueError):
-                        eval_val = float("inf")
-
-                    holding_days = entry.get("holding_days")
-                    try:
-                        holding_val = int(holding_days)
-                    except (TypeError, ValueError):
-                        holding_val = 0
-
-                    return (score_val, eval_val, -holding_val)
-
-                trim_candidates: list[Dict[str, Any]] = []
-                for item in results:
-                    ticker_key = str(item.get("ticker") or "").strip().upper()
-                    if not ticker_key or ticker_key not in holdings:
-                        continue
-                    state_key = (item.get("state") or "").upper()
-                    if state_key not in {"HOLD"}:
-                        continue
-                    trim_candidates.append(item)
-
-                trim_candidates.sort(key=_trim_sort_key)
-
-                phrase_template = DECISION_MESSAGES.get("SELL_TRIM_DOWN", "✂️ 포지션 축소")
-                for item in trim_candidates[:trim_count]:
-                    item["state"] = "SELL_TRIM_DOWN"
-                    item["phrase"] = phrase_template
-
-                # projected_holdings는 레포트 출력용으로만 사용되므로 이후 계산은 생략
 
     # rank를 점수 순서대로 재설정
     results.sort(key=lambda x: x["score"], reverse=True)
@@ -1127,19 +1081,15 @@ def generate_account_recommendation_report(
         "종목명",
         "카테고리",
         "상태",
-        "점수",
-        "현재가",
-        "일간수익률",
+        "보유일",
+        "일간(%)",
         "평가(%)",
+        "현재가",
         "1주(%)",
         "2주(%)",
         "3주(%)",
-        "보유일",
+        "점수",
         "지속",
-        "비중",
-        "누적수익률",
-        "일간(%)",
-        "고점대비",
         "문구",
     ]
 
@@ -1152,19 +1102,15 @@ def generate_account_recommendation_report(
                 item.get("name"),
                 item.get("category"),
                 item.get("state"),
-                item.get("score"),
-                item.get("price"),
+                item.get("holding_days"),
                 item.get("daily_pct"),
                 item.get("evaluation_pct"),
+                item.get("price"),
                 item.get("return_1w"),
                 item.get("return_2w"),
                 item.get("return_3w"),
-                item.get("holding_days"),
+                item.get("score"),
                 item.get("streak"),
-                item.get("weight", 0.0),
-                item.get("cum_return_pct", 0.0),
-                item.get("daily_pct", 0.0),
-                item.get("drawdown_from_peak", 0.0),
                 item.get("phrase", ""),
             ]
         )

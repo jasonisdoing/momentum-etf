@@ -15,7 +15,6 @@
         "static": {
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
-            "TRIM_DOWN_SELL_LIMIT": 1,
             "MARKET_REGIME_FILTER_TICKER": "^GSPC"
         }
     },
