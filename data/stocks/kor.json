@@ -5,32 +5,38 @@
             {
                 "ticker": "379800",
                 "name": "Kodex 미국S&P500",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2021-04-09"
             },
             {
                 "ticker": "379810",
                 "name": "Kodex 미국나스닥100",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2021-04-09"
             },
             {
                 "ticker": "499150",
                 "name": "SOL 미국S&P500엔화노출(H)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-12-03"
             },
             {
                 "ticker": "426030",
                 "name": "TIMEFOLIO 미국나스닥100액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-05-11"
             },
             {
                 "ticker": "426020",
                 "name": "TIMEFOLIO 미국S&P500액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-05-11"
             },
             {
                 "ticker": "0015B0",
                 "name": "KoAct 미국나스닥성장기업액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-02-25"
             }
         ]
     },
@@ -40,32 +46,38 @@
             {
                 "ticker": "381170",
                 "name": "TIGER 미국테크TOP10 INDXX",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2021-04-09"
             },
             {
                 "ticker": "463690",
                 "name": "KODEX 미국S&P500커뮤니케이션",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-08-01"
             },
             {
                 "ticker": "473460",
                 "name": "KODEX 미국서학개미",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-12-27"
             },
             {
                 "ticker": "0051A0",
                 "name": "KoAct 브로드컴밸류체인액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-05-20"
             },
             {
                 "ticker": "0093D0",
                 "name": "KoAct 팔란티어밸류체인액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-08-26"
             },
             {
                 "ticker": "0041D0",
                 "name": "Kodex 미국AI소프트웨어TOP10",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-04-22"
             }
         ]
     },
@@ -75,22 +87,26 @@
             {
                 "ticker": "0023B0",
                 "name": "PLUS 미국양자컴퓨팅TOP10",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-03-11"
             },
             {
                 "ticker": "0023A0",
                 "name": "SOL 미국양자컴퓨팅TOP10",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-03-11"
             },
             {
                 "ticker": "498270",
                 "name": "KIWOOM 미국양자컴퓨팅",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-12-17"
             },
             {
                 "ticker": "0020H0",
                 "name": "KoAct 글로벌양자컴퓨팅액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-03-11"
             }
         ]
     },
@@ -100,12 +116,14 @@
             {
                 "ticker": "365000",
                 "name": "TIGER 인터넷TOP10",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-10-07"
             },
             {
                 "ticker": "157490",
                 "name": "TIGER 소프트웨어",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -115,22 +133,26 @@
             {
                 "ticker": "069500",
                 "name": "Kodex 200",
-                "recommend_enabled": false
+                "recommend_enabled": false,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "315930",
                 "name": "Kodex Top5Plus TR",
-                "recommend_enabled": false
+                "recommend_enabled": false,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "495060",
                 "name": "TIMEFOLIO 코리아밸류업액티브",
-                "recommend_enabled": false
+                "recommend_enabled": false,
+                "listing_date": "2024-11-04"
             },
             {
                 "ticker": "441800",
                 "name": "TIMEFOLIO Korea플러스배당액티브",
-                "recommend_enabled": false
+                "recommend_enabled": false,
+                "listing_date": "2022-09-27"
             }
         ]
     },
@@ -140,12 +162,14 @@
             {
                 "ticker": "091160",
                 "name": "KODEX 반도체",
-                "recommend_enabled": false
+                "recommend_enabled": false,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "0093A0",
                 "name": "RISE AI반도체TOP10",
-                "recommend_enabled": false
+                "recommend_enabled": false,
+                "listing_date": "2025-08-26"
             }
         ]
     },
@@ -155,37 +179,44 @@
             {
                 "ticker": "390390",
                 "name": "KODEX 미국반도체",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2021-06-30"
             },
             {
                 "ticker": "469060",
                 "name": "RISE 미국반도체NYSE",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-10-24"
             },
             {
                 "ticker": "381180",
                 "name": "TIGER 미국필라델피아반도체나스닥",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2021-04-09"
             },
             {
                 "ticker": "473490",
                 "name": "KIWOOM 글로벌AI반도체",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-12-21"
             },
             {
                 "ticker": "453950",
                 "name": "TIGER TSMC파운드리밸류체인",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-04-04"
             },
             {
                 "ticker": "442580",
                 "name": "PLUS 글로벌HBM반도체",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-09-22"
             },
             {
                 "ticker": "446770",
                 "name": "ACE 글로벌반도체TOP4 Plus",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-11-15"
             }
         ]
     },
@@ -195,17 +226,20 @@
             {
                 "ticker": "456600",
                 "name": "TIMEFOLIO 글로벌AI인공지능액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-05-16"
             },
             {
                 "ticker": "486450",
                 "name": "SOL 미국AI전력인프라",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-07-16"
             },
             {
                 "ticker": "487230",
                 "name": "Kodex 미국AI전력핵심인프라",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-07-09"
             }
         ]
     },
@@ -215,17 +249,20 @@
             {
                 "ticker": "469070",
                 "name": "RISE AI&로봇",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-10-24"
             },
             {
                 "ticker": "0035T0",
                 "name": "PLUS 글로벌휴머노이드로봇액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-04-15"
             },
             {
                 "ticker": "445290",
                 "name": "KODEX 로봇액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-11-15"
             }
         ]
     },
@@ -235,7 +272,8 @@
             {
                 "ticker": "473640",
                 "name": "HANARO 글로벌 금채굴기업",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-01-18"
             }
         ]
     },
@@ -245,12 +283,14 @@
             {
                 "ticker": "0097L0",
                 "name": "KIWOOM 한국고배당&미국AI테크",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-09-02"
             },
             {
                 "ticker": "0107F0",
                 "name": "KIWOOM 미국고배당&AI테크",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-09-23"
             }
         ]
     },
@@ -260,7 +300,8 @@
             {
                 "ticker": "161510",
                 "name": "PLUS 고배당주",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -270,17 +311,20 @@
             {
                 "ticker": "102970",
                 "name": "KODEX 증권",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "498860",
                 "name": "RISE 코리아금융고배당",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-12-10"
             },
             {
                 "ticker": "466940",
                 "name": "TIGER 은행고배당플러스TOP10",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-10-17"
             }
         ]
     },
@@ -290,12 +334,14 @@
             {
                 "ticker": "0013P0",
                 "name": "RISE 미국은행TOP10",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-02-18"
             },
             {
                 "ticker": "0028X0",
                 "name": "Kodex 미국금융테크액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-05-27"
             }
         ]
     },
@@ -305,32 +351,38 @@
             {
                 "ticker": "476690",
                 "name": "TIGER 글로벌비만치료제TOP2Plus",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-02-29"
             },
             {
                 "ticker": "476070",
                 "name": "KODEX 글로벌비만치료제TOP2 Plus",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-02-14"
             },
             {
                 "ticker": "203780",
                 "name": "TIGER 미국나스닥바이오",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "490330",
                 "name": "KoAct 미국뇌질환치료제액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-09-03"
             },
             {
                 "ticker": "483030",
                 "name": "KIWOOM 미국블록버스터바이오테크의약품+",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-05-28"
             },
             {
                 "ticker": "248270",
                 "name": "TIGER S&P글로벌헬스케어(합성)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-08-18"
             }
         ]
     },
@@ -340,12 +392,14 @@
             {
                 "ticker": "463050",
                 "name": "TIMEFOLIO K바이오액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-08-17"
             },
             {
                 "ticker": "0000Z0",
                 "name": "RISE 바이오TOP10액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-12-24"
             }
         ]
     },
@@ -355,12 +409,14 @@
             {
                 "ticker": "487240",
                 "name": "Kodex AI전력핵심설비",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-07-09"
             },
             {
                 "ticker": "434730",
                 "name": "HANARO 원자력iSelect",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-06-28"
             }
         ]
     },
@@ -370,22 +426,26 @@
             {
                 "ticker": "417450",
                 "name": "RISE 글로벌수소경제",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-02-15"
             },
             {
                 "ticker": "419650",
                 "name": "PLUS 글로벌수소&차세대연료전지",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-02-15"
             },
             {
                 "ticker": "399580",
                 "name": "RISE 글로벌클린에너지",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2021-10-21"
             },
             {
                 "ticker": "419420",
                 "name": "KODEX 미국클린에너지나스닥",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-03-22"
             }
         ]
     },
@@ -395,12 +455,14 @@
             {
                 "ticker": "442320",
                 "name": "RISE 글로벌원자력",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-10-13"
             },
             {
                 "ticker": "0051G0",
                 "name": "SOL 미국원자력SMR",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-05-20"
             }
         ]
     },
@@ -410,7 +472,8 @@
             {
                 "ticker": "415920",
                 "name": "PLUS 글로벌희토류&전략자원생산기업",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-01-18"
             }
         ]
     },
@@ -420,17 +483,20 @@
             {
                 "ticker": "449450",
                 "name": "PLUS K방산",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-01-05"
             },
             {
                 "ticker": "0080G0",
                 "name": "Kodex K방산TOP10",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-07-15"
             },
             {
                 "ticker": "494840",
                 "name": "TIGER 미국방산TOP10",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-10-29"
             }
         ]
     },
@@ -440,7 +506,8 @@
             {
                 "ticker": "305720",
                 "name": "Kodex 2차전지산업",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -450,12 +517,14 @@
             {
                 "ticker": "419430",
                 "name": "Kodex 차이나2차전지MSCI(합성)",
-                "recommend_enabled": false
+                "recommend_enabled": false,
+                "listing_date": "2022-03-22"
             },
             {
                 "ticker": "394670",
                 "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2021-07-20"
             }
         ]
     },
@@ -465,12 +534,14 @@
             {
                 "ticker": "466920",
                 "name": "SOL 조선TOP3플러스",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-10-05"
             },
             {
                 "ticker": "445150",
                 "name": "Kodex 친환경조선해운액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-11-15"
             }
         ]
     },
@@ -480,7 +551,8 @@
             {
                 "ticker": "139230",
                 "name": "TIGER 200 중공업",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -490,12 +562,14 @@
             {
                 "ticker": "218420",
                 "name": "KODEX 미국S&P500에너지(합성)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "474800",
                 "name": "KIWOOM 미국원유에너지기업",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-01-16"
             }
         ]
     },
@@ -505,22 +579,26 @@
             {
                 "ticker": "414780",
                 "name": "TIGER 차이나과창판STAR50(합성)",
-                "recommend_enabled": false
+                "recommend_enabled": false,
+                "listing_date": "2022-01-13"
             },
             {
                 "ticker": "413220",
                 "name": "SOL 차이나태양광CSI(합성)",
-                "recommend_enabled": false
+                "recommend_enabled": false,
+                "listing_date": "2021-12-22"
             },
             {
                 "ticker": "256750",
                 "name": "KODEX 차이나심천ChiNext(합성)",
-                "recommend_enabled": false
+                "recommend_enabled": false,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "372330",
                 "name": "Kodex 차이나항셍테크",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-12-16"
             }
         ]
     },
@@ -530,152 +608,182 @@
             {
                 "ticker": "117680",
                 "name": "KODEX 철강",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "091180",
                 "name": "KODEX 자동차",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "102960",
                 "name": "KODEX 기계장비",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "117700",
                 "name": "KODEX 건설",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "140700",
                 "name": "Kodex 보험",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "140710",
                 "name": "KODEX 운송",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "200030",
                 "name": "KODEX 미국S&P500산업재(합성)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "241180",
                 "name": "TIGER 일본니케이225",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "245340",
                 "name": "TIGER 미국다우존스30",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "245350",
                 "name": "TIGER 유로스탁스배당30",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "245710",
                 "name": "ACE 베트남VN30",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "251350",
                 "name": "Kodex MSCI선진국",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "266390",
                 "name": "KODEX 경기소비재",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "266410",
                 "name": "KODEX 필수소비재",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "352540",
                 "name": "Kodex 일본부동산리츠(H)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-05-13"
             },
             {
                 "ticker": "371450",
                 "name": "TIGER 글로벌클라우드컴퓨팅INDXX",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-12-08"
             },
             {
                 "ticker": "410870",
                 "name": "TIMEFOLIO K컬처액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2021-12-15"
             },
             {
                 "ticker": "411860",
                 "name": "KIWOOM 독일DAX",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2021-12-22"
             },
             {
                 "ticker": "453630",
                 "name": "KODEX 미국S&P500필수소비재",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-03-21"
             },
             {
                 "ticker": "453640",
                 "name": "KODEX 미국S&P500헬스케어",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-03-21"
             },
             {
                 "ticker": "453650",
                 "name": "KODEX 미국S&P500금융",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-03-21"
             },
             {
                 "ticker": "453660",
                 "name": "KODEX 미국S&P500경기소비재",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-03-21"
             },
             {
                 "ticker": "456250",
                 "name": "Kodex 유럽명품TOP10 STOXX",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-04-25"
             },
             {
                 "ticker": "460960",
                 "name": "ACE 글로벌인컴TOP10 SOLACTIVE",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-07-11"
             },
             {
                 "ticker": "463640",
                 "name": "KODEX 미국S&P500유틸리티",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-08-01"
             },
             {
                 "ticker": "463680",
                 "name": "KODEX 미국S&P500테크놀로지",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2023-08-01"
             },
             {
                 "ticker": "475050",
                 "name": "ACE KPOP포커스",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-01-30"
             },
             {
                 "ticker": "475350",
                 "name": "RISE 버크셔포트폴리오TOP10",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-02-27"
             },
             {
                 "ticker": "488480",
                 "name": "RISE 일본섹터TOP4Plus",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2024-08-20"
             },
             {
                 "ticker": "266420",
                 "name": "KODEX 헬스케어",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     }

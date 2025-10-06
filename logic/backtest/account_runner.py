@@ -19,7 +19,12 @@ from utils.settings_loader import (
     get_backtest_months_range,
     get_backtest_initial_capital,
 )
-from utils.data_loader import get_latest_trading_day, fetch_ohlcv
+from utils.data_loader import (
+    get_latest_trading_day,
+    fetch_ohlcv,
+    get_aud_to_krw_rate,
+    get_usd_to_krw_rate,
+)
 from utils.stock_list_io import get_etfs
 from utils.logger import get_app_logger
 
@@ -33,6 +38,16 @@ def _default_initial_capital() -> float:
 
 
 @dataclass
+class InitialCapitalInfo:
+    """Container for initial capital values in local currency and KRW."""
+
+    local: float
+    krw: float
+    fx_rate_to_krw: float
+    currency: str
+
+
+@dataclass
 class AccountBacktestResult:
     """계정 기반 백테스트 결과."""
 
@@ -41,6 +56,9 @@ class AccountBacktestResult:
     start_date: pd.Timestamp
     end_date: pd.Timestamp
     initial_capital: float
+    initial_capital_krw: float
+    fx_rate_to_krw: float
+    currency: str
     portfolio_topn: int
     holdings_limit: int
     summary: Dict[str, Any]
@@ -65,6 +83,9 @@ class AccountBacktestResult:
             "start_date": self.start_date.strftime("%Y-%m-%d"),
             "end_date": self.end_date.strftime("%Y-%m-%d"),
             "initial_capital": float(self.initial_capital),
+            "initial_capital_krw": float(self.initial_capital_krw),
+            "fx_rate_to_krw": float(self.fx_rate_to_krw),
+            "currency": self.currency,
             "portfolio_topn": self.portfolio_topn,
             "holdings_limit": self.holdings_limit,
             "summary": self.summary,
@@ -138,12 +159,13 @@ def run_account_backtest(
     end_date = _resolve_end_date(country_code, override_settings)
     start_date = _resolve_start_date(end_date, months_range, override_settings)
 
-    initial_capital_value = _resolve_initial_capital(
+    capital_info = _resolve_initial_capital(
         initial_capital,
         override_settings,
         account_settings,
         precision_settings,
     )
+    initial_capital_value = capital_info.local
 
     _log(f"[백테스트] {account_id.upper()} 계정({country_code.upper()}) ETF 목록을 로드하는 중...")
     etf_universe = get_etfs(country_code)
@@ -169,10 +191,18 @@ def run_account_backtest(
 
     date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
 
-    _log(
-        f"[백테스트] {account_id.upper()}({country_code.upper()}) 백테스트 실행 | "
-        f"기간: {date_range[0]}~{date_range[1]} | 초기 자본: {initial_capital_value:,.0f}"
-    )
+    display_currency = (capital_info.currency or "KRW").upper()
+    if display_currency != "KRW":
+        _log(
+            f"[백테스트] {account_id.upper()}({country_code.upper()}) 백테스트 실행 | "
+            f"기간: {date_range[0]}~{date_range[1]} | 초기 자본: {initial_capital_value:,.0f} {display_currency}"
+            f" (약 {capital_info.krw:,.0f} KRW)"
+        )
+    else:
+        _log(
+            f"[백테스트] {account_id.upper()}({country_code.upper()}) 백테스트 실행 | "
+            f"기간: {date_range[0]}~{date_range[1]} | 초기 자본: {initial_capital_value:,.0f}"
+        )
 
     _log("[백테스트] 포트폴리오 백테스트 실행 중...")
 
@@ -212,6 +242,9 @@ def run_account_backtest(
         start_date=start_date,
         end_date=end_date,
         initial_capital=initial_capital_value,
+        initial_capital_krw=capital_info.krw,
+        fx_rate_to_krw=capital_info.fx_rate_to_krw,
+        currency=display_currency,
         account_settings=account_settings,
         strategy_settings=strategy_settings,
     )
@@ -239,6 +272,9 @@ def run_account_backtest(
         start_date=start_date,
         end_date=end_date,
         initial_capital=initial_capital_value,
+        initial_capital_krw=capital_info.krw,
+        fx_rate_to_krw=capital_info.fx_rate_to_krw,
+        currency=display_currency,
         portfolio_topn=portfolio_topn,
         holdings_limit=holdings_limit,
         summary=summary,
@@ -271,22 +307,75 @@ def _resolve_initial_capital(
     override_settings: Mapping[str, Any],
     account_settings: Mapping[str, Any],
     precision_settings: Mapping[str, Any],
-) -> float:
-    if initial_capital is not None:
-        return float(initial_capital)
-    if "initial_capital" in override_settings:
-        return float(override_settings["initial_capital"])
+) -> InitialCapitalInfo:
+    logger = get_app_logger()
+
+    def _coerce_positive_float(value: Any) -> Optional[float]:
+        try:
+            candidate = float(value)
+        except (TypeError, ValueError):
+            return None
+        return candidate if math.isfinite(candidate) and candidate > 0 else None
+
+    currency = str(
+        precision_settings.get("currency") or account_settings.get("currency") or "KRW"
+    ).upper()
+
+    fx_override = _coerce_positive_float(override_settings.get("fx_rate_to_krw"))
+    if fx_override is None:
+        fx_override = _coerce_positive_float(account_settings.get("fx_rate_to_krw"))
+    if fx_override is None:
+        fx_override = _coerce_positive_float(precision_settings.get("fx_rate_to_krw"))
+
+    fx_rate = 1.0
+    if currency == "AUD":
+        fetched = _coerce_positive_float(get_aud_to_krw_rate())
+        fx_rate = fetched or fx_override or 1.0
+    elif currency == "USD":
+        fetched = _coerce_positive_float(get_usd_to_krw_rate())
+        fx_rate = fetched or fx_override or 1.0
+    else:
+        fx_rate = 1.0
+
+    if fx_rate <= 0 or not math.isfinite(fx_rate):
+        fx_rate = 1.0
+
+    if currency != "KRW" and fx_rate == 1.0 and fx_override is None:
+        logger.warning(
+            "[백테스트] '%s' 통화 환율을 가져오지 못해 KRW와 동일하게 처리합니다.",
+            currency,
+        )
 
     backtest_config = account_settings.get("backtest", {}) if account_settings else {}
-    if isinstance(backtest_config, Mapping) and "initial_capital" in backtest_config:
-        return float(backtest_config["initial_capital"])
+    if not isinstance(backtest_config, Mapping):
+        backtest_config = {}
 
-    currency = str(precision_settings.get("currency", "KRW")).upper()
-    if currency == "AUD":
-        return 200_000.0
-    if currency == "USD":
-        return 150_000.0
-    return _default_initial_capital()
+    local_override = _coerce_positive_float(initial_capital)
+    if local_override is None:
+        local_override = _coerce_positive_float(override_settings.get("initial_capital"))
+    if local_override is None:
+        local_override = _coerce_positive_float(backtest_config.get("initial_capital"))
+
+    krw_override = _coerce_positive_float(override_settings.get("initial_capital_krw"))
+    if krw_override is None:
+        krw_override = _coerce_positive_float(backtest_config.get("initial_capital_krw"))
+
+    if krw_override is None and local_override is not None and currency != "KRW":
+        krw_override = local_override * fx_rate
+
+    base_krw = krw_override if krw_override is not None else _default_initial_capital()
+
+    if local_override is not None:
+        local_capital = local_override
+    else:
+        local_capital = base_krw / fx_rate if fx_rate > 0 else base_krw
+
+    return InitialCapitalInfo(
+        local=float(local_capital),
+        krw=float(base_krw),
+        fx_rate_to_krw=float(fx_rate),
+        currency=currency,
+    )
 
 
 def _resolve_end_date(country_code: str, override_settings: Mapping[str, Any]) -> pd.Timestamp:
@@ -453,6 +542,9 @@ def _build_summary(
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
     initial_capital: float,
+    initial_capital_krw: float,
+    fx_rate_to_krw: float,
+    currency: str,
     account_settings: Mapping[str, Any],
     strategy_settings: Mapping[str, Any],
 ) -> Tuple[
@@ -468,9 +560,13 @@ def _build_summary(
 
     years = max((end_date - start_date).days / 365.25, 0.0)
     final_value = float(final_row["total_value"])
+    initial_capital_local = float(initial_capital)
+    initial_capital_krw = float(initial_capital_krw)
+    fx_rate_to_krw = float(fx_rate_to_krw) if fx_rate_to_krw else 1.0
+    currency = (currency or country_code or "KRW").upper()
     cagr = 0.0
-    if years > 0 and initial_capital > 0:
-        cagr = (final_value / initial_capital) ** (1 / years) - 1
+    if years > 0 and initial_capital_local > 0:
+        cagr = (final_value / initial_capital_local) ** (1 / years) - 1
 
     running_max = pv_series.cummax()
     drawdown_series = (running_max - pv_series) / running_max.replace({0: pd.NA})
@@ -582,12 +678,12 @@ def _build_summary(
     monthly_cum_returns = pd.Series(dtype=float)
     yearly_returns = pd.Series(dtype=float)
     if not pv_series.empty:
-        start_row = pd.Series([initial_capital], index=[start_date - pd.Timedelta(days=1)])
+        start_row = pd.Series([initial_capital_local], index=[start_date - pd.Timedelta(days=1)])
         pv_series_with_start = pd.concat([start_row, pv_series])
         monthly_returns = pv_series_with_start.resample("ME").last().pct_change().dropna()
-        if initial_capital > 0:
+        if initial_capital_local > 0:
             eom_pv = pv_series.resample("ME").last().dropna()
-            monthly_cum_returns = (eom_pv / initial_capital - 1).ffill()
+            monthly_cum_returns = (eom_pv / initial_capital_local - 1).ffill()
         yearly_returns = pv_series_with_start.resample("YE").last().pct_change().dropna()
 
     risk_off_periods = _detect_risk_off_periods(pv_series.index, ticker_timeseries)
@@ -607,9 +703,12 @@ def _build_summary(
     summary = {
         "start_date": start_date.strftime("%Y-%m-%d"),
         "end_date": end_date.strftime("%Y-%m-%d"),
-        "initial_capital": float(initial_capital),
-        "initial_capital_krw": float(initial_capital),
+        "initial_capital": initial_capital_local,
+        "initial_capital_local": initial_capital_local,
+        "initial_capital_krw": initial_capital_krw,
         "final_value": final_value,
+        "final_value_local": final_value,
+        "final_value_krw": final_value * fx_rate_to_krw,
         "cumulative_return_pct": float(final_row["cumulative_return_pct"]),
         "evaluation_return_pct": float(final_row["evaluation_return_pct"]),
         "held_count": int(final_row["held_count"]),
@@ -631,6 +730,8 @@ def _build_summary(
         "monthly_cum_returns": monthly_cum_returns,
         "yearly_returns": yearly_returns,
         "risk_off_periods": risk_off_periods,
+        "fx_rate_to_krw": fx_rate_to_krw,
+        "currency": currency,
     }
 
     return summary, monthly_returns, monthly_cum_returns, yearly_returns, risk_off_periods

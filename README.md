@@ -45,6 +45,33 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 ## 설치 및 준비
 
 ### 1) Python 가상환경 구성 (권장)
+
+#### (A) pyenv + pyenv-virtualenv 사용
+1. pyenv 설치 (macOS/Homebrew 예시)
+   ```bash
+   brew install pyenv pyenv-virtualenv
+   ```
+
+2. 쉘 초기화 스크립트에 pyenv 설정 추가 (예: `~/.zshrc`)
+   ```bash
+   eval "$(pyenv init -)"
+   eval "$(pyenv virtualenv-init -)"
+   ```
+
+3. 이 저장소에서 사용할 Python 버전을 설치하고 가상환경 생성
+   ```bash
+   pyenv install 3.12.11  # 원하는 버전으로 변경 가능
+   pyenv virtualenv 3.12.11 momentum-etf
+   ```
+
+4. 프로젝트 디렉터리에서 로컬 가상환경 지정 후 의존성 설치
+   ```bash
+   cd momentum-etf
+   pyenv local momentum-etf
+   pip install -r requirements.txt
+   ```
+
+#### (B) 표준 venv 사용
 ```bash
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate

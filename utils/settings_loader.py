@@ -94,7 +94,7 @@ def get_backtest_months_range(default: int = 36) -> int:
 
 def get_backtest_initial_capital(default: float = 100_000_000) -> float:
     settings = _load_backtest_settings()
-    value = settings.get("INITIAL_CAPITAL")
+    value = settings.get("INITIAL_CAPITAL_KRW")
     try:
         capital = float(value)
         if capital > 0:

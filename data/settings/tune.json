@@ -17,6 +17,6 @@
                 "source": "long_term"
             }
         ],
-        "INITIAL_CAPITAL": 100000000
+        "INITIAL_CAPITAL_KRW": 100000000
     }
 }

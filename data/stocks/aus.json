@@ -5,7 +5,8 @@
             {
                 "ticker": "ASX:GDX",
                 "name": "VanEck Gold Miners ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -15,17 +16,20 @@
             {
                 "ticker": "ASX:IZZ",
                 "name": "iShares China Large-Cap ETF (AU)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:CNEW",
                 "name": "VanEck China New Economy ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:CETF",
                 "name": "VanEck FTSE China A50 ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -35,17 +39,20 @@
             {
                 "ticker": "ASX:ASIA",
                 "name": "BetaShares Asia Technology Tigers ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:FANG",
                 "name": "Global X FANG+ ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-02-27"
             },
             {
                 "ticker": "ASX:HACK",
                 "name": "BetaShares Global Cybersecurity ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -55,7 +62,8 @@
             {
                 "ticker": "ASX:IAA",
                 "name": "iShares Asia 50 ETF (AU)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -65,22 +73,26 @@
             {
                 "ticker": "ASX:WEMG",
                 "name": "SPDR S&P Emerging Markets Carbon Aware ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:IEM",
                 "name": "iShares MSCI Emerging Markets ETF (AU)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:FEMX",
                 "name": "Fidelity Global Emerging Markets ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VGE",
                 "name": "Vanguard FTSE Emerging Markets Shares ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -110,12 +122,14 @@
             {
                 "ticker": "ASX:IOO",
                 "name": "iShares Global 100 ETF (AU)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VGS",
                 "name": "Vanguard MSCI Index International Shares ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -125,7 +139,8 @@
             {
                 "ticker": "ASX:IKO",
                 "name": "iShares MSCI South Korea ETF (AU)",
-                "recommend_enabled": true
+                "recommend_enabled": false,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -135,17 +150,20 @@
             {
                 "ticker": "ASX:HJPN",
                 "name": "Betashares Japan Currency Hedged ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:IJP",
                 "name": "iShares MSCI Japan ETF (AU)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VAE",
                 "name": "Vanguard FTSE Asia ex Japan Shares Index ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -155,17 +173,20 @@
             {
                 "ticker": "ASX:ATEC",
                 "name": "BetaShares S&P/ASX Australian Technology ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-03-04"
             },
             {
                 "ticker": "ASX:SSO",
                 "name": "SPDR S&P/ASX Small Ordinaries ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:ISO",
                 "name": "iShares S&P/ASX Small Ordinaries ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -175,27 +196,32 @@
             {
                 "ticker": "ASX:NDQ",
                 "name": "BetaShares NASDAQ 100 ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-07-25"
             },
             {
                 "ticker": "ASX:VTS",
                 "name": "Vanguard US Total Market Shares Index ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:HNDQ",
                 "name": "Betashares Nasdaq 100 Currency Hedged ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-07-20"
             },
             {
                 "ticker": "ASX:SPY",
                 "name": "SPDR S&P 500 ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2022-07-25"
             },
             {
                 "ticker": "ASX:IVV",
                 "name": "iShares S&P 500 ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -205,7 +231,8 @@
             {
                 "ticker": "ASX:BNKS",
                 "name": "Betashares Global Banks Currency Hedged ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -215,17 +242,20 @@
             {
                 "ticker": "ASX:MVR",
                 "name": "VanEck Australian Resources ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:QRE",
                 "name": "BetaShares Australian Resources Sector ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:OZR",
                 "name": "SPDR S&P/ASX 200 Resources ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -235,12 +265,14 @@
             {
                 "ticker": "ASX:RBTZ",
                 "name": "BetaShares Global Robotics and Artificial Intelligence ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:ROBO",
                 "name": "Global X ROBO Global Robotics & Automation ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -250,7 +282,8 @@
             {
                 "ticker": "ASX:ACDC",
                 "name": "Global X Battery Tech & Lithium ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -260,12 +293,14 @@
             {
                 "ticker": "ASX:ETHI",
                 "name": "BetaShares Global Sustainability Leaders ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:FAIR",
                 "name": "BetaShares Australian Sustainability Leaders ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:IOO",
@@ -280,77 +315,92 @@
             {
                 "ticker": "ASX:MVB",
                 "name": "VanEck Australian Banks ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:QFN",
                 "name": "BetaShares Australian Financials Sector ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VHY",
                 "name": "Vanguard Australian Shares High Yield ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:WDMF",
                 "name": "iShares World Equity Factor ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:IHOO",
                 "name": "iShares Global 100 AUD Hedged ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:ESTX",
                 "name": "Global X EURO STOXX 50 ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:MVS",
                 "name": "VanEck Small Companies Masters ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VEU",
                 "name": "Vanguard All-World ex-US Shares Index ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VESG",
                 "name": "Vanguard Ethically Conscious International Shares Index ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:AUMF",
                 "name": "iShares Edge MSCI Australia Multifactor ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:GEAR",
                 "name": "Betashares Geared Australian Equities Complex ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:F100",
                 "name": "BetaShares FTSE 100 ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:SYI",
                 "name": "SPDR MSCI Australia Select High Dividend Yield ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:MVE",
                 "name": "VanEck S&P/ASX MidCap ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:INES",
                 "name": "Intelligent Investor Ethical Share ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:QFN",
@@ -360,42 +410,50 @@
             {
                 "ticker": "ASX:IHVV",
                 "name": "iShares S&P 500 AUD Hedged ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:IEU",
                 "name": "iShares Europe ETF (AU)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:DHHF",
                 "name": "BetaShares Diversified All Growth ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:IHD",
                 "name": "iShares S&P/ASX Dividend Opportunities ESG Screened ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:WXHG",
                 "name": "SPDR S&P World ex Australia Carbon Aware (Hedged) ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:WRLD",
                 "name": "Betashares Managed Risk Global Shares Complex ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VEQ",
                 "name": "Vanguard FTSE Europe Shares ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:IVE",
                 "name": "iShares MSCI EAFE ETF (AU)",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:MVB",
@@ -405,57 +463,68 @@
             {
                 "ticker": "ASX:VVLU",
                 "name": "Vanguard Global Value Equity Active ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:OZF",
                 "name": "SPDR S&P/ASX 200 Financials EX A-REIT ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:ZYAU",
                 "name": "Global X S&P/ASX 200 High Dividend ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:MVOL",
                 "name": "iShares Edge MSCI Australia Minimum Volatility ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VDHG",
                 "name": "Vanguard Diversified High Growth Index ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:RDV",
                 "name": "Russell Investments High Dividend Australian Shares ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VSO",
                 "name": "Vanguard MSCI Australian Small Companies Index ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:IHWL",
                 "name": "iShares Core MSCI World ex Australia ESG (AUD Hedged) ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VISM",
                 "name": "Vanguard MSCI International Small Companies Index ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:HEUR",
                 "name": "Betashares Europe Currency Hedged ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             },
             {
                 "ticker": "ASX:VGAD",
                 "name": "Vanguard MSCI Index International Shares (Hedged) ETF",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     }

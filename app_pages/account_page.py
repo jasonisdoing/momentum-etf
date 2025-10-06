@@ -11,7 +11,7 @@ from utils.settings_loader import AccountSettingsError, get_account_settings
 
 _DEFAULT_CAPTIONS: Dict[str, str] = {
     "kor": "내부 알고리즘 기반 10종목 추천",
-    "aus": "data/results/recommendation_aus.json 기반",
+    "aus": "data/results/recommendation_{account}.json",
 }
 
 _DATAFRAME_CSS = """

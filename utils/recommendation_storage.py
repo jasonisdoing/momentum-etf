@@ -51,16 +51,14 @@ def save_recommendation_payload(
     payload: Any,
     *,
     account_id: str,
-    country_code: str,
     results_dir: Path | None = None,
 ) -> Path:
-    """Persist a payload to account and country result files."""
+    """Persist a payload only to the account result file."""
 
     account_norm = (account_id or "").strip().lower()
-    country_norm = (country_code or "").strip().lower()
 
-    if not account_norm or not country_norm:
-        raise RuntimeError("Both account_id and country_code are required to save recommendations")
+    if not account_norm:
+        raise RuntimeError("account_id is required to save recommendations")
 
     target_dir = (results_dir or _RESULTS_DIR).resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -68,14 +66,9 @@ def save_recommendation_payload(
     safe_payload = _make_json_safe(payload)
 
     account_path = target_dir / f"recommendation_{account_norm}.json"
-    country_path = target_dir / f"recommendation_{country_norm}.json"
 
     with account_path.open("w", encoding="utf-8") as fp:
         json.dump(safe_payload, fp, ensure_ascii=False, indent=2)
-
-    if country_path != account_path:
-        with country_path.open("w", encoding="utf-8") as fp:
-            json.dump(safe_payload, fp, ensure_ascii=False, indent=2)
 
     return account_path
 
@@ -88,7 +81,6 @@ def save_recommendation_report(
     """Persist a RecommendationReport-like object and return the written account path."""
 
     account_id = getattr(report, "account_id", "")
-    country_code = getattr(report, "country_code", "")
     recommendations = getattr(report, "recommendations", None)
 
     if recommendations is None:
@@ -97,6 +89,5 @@ def save_recommendation_report(
     return save_recommendation_payload(
         recommendations,
         account_id=str(account_id),
-        country_code=str(country_code),
         results_dir=results_dir,
     )

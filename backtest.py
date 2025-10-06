@@ -78,7 +78,7 @@ def main() -> None:
         account_id=account_id,
         country_code=result.country_code,
         test_months_range=getattr(result, "months_range", get_backtest_months_range()),
-        initial_capital_krw=result.initial_capital,
+        initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),
         core_start_dt=result.start_date,

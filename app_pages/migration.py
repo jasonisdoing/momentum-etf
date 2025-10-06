@@ -12,7 +12,7 @@ from utils.account_registry import list_available_accounts
 from utils.trade_store import migrate_account_id
 from utils.settings_loader import get_account_settings
 
-SETTINGS_DIR = Path(__file__).resolve().parents[1] / "settings" / "account"
+SETTINGS_DIR = Path(__file__).resolve().parents[1] / "data" / "settings" / "account"
 
 
 def _to_plain_dict(value):
@@ -137,7 +137,6 @@ def render_migration_page() -> None:
         "계정 ID 마이그레이션이 완료되었습니다."
         f"\n- 설정 파일: {source_account_id}.json → {target_account_id}.json"
         f"\n- trades 업데이트: {migration_result['modified']}건"
-        f"\n- legacy country 필드 업데이트: {migration_result['legacy_country_updated']}건"
     )
     st.info("변경 사항을 적용하려면 관리자/추천 페이지를 새로고침하세요.")
 

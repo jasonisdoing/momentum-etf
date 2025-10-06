@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from itertools import product
+from os import cpu_count
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import pandas as pd
 from pandas import DataFrame, Timestamp
@@ -193,6 +195,9 @@ def _execute_tuning_for_months(
             continue
 
         summary = bt_result.summary or {}
+        final_value_local = _safe_float(summary.get("final_value"), 0.0)
+        final_value_krw = _safe_float(summary.get("final_value_krw"), final_value_local)
+
         entry = {
             "ma_period": int(ma),
             "portfolio_topn": int(topn),
@@ -204,7 +209,8 @@ def _execute_tuning_for_months(
             "sortino_ratio": _safe_float(summary.get("sortino_ratio"), 0.0),
             "calmar_ratio": _safe_float(summary.get("calmar_ratio"), 0.0),
             "cumulative_return_pct": _safe_float(summary.get("cumulative_return_pct"), 0.0),
-            "final_value": _safe_float(summary.get("final_value"), 0.0),
+            "final_value_local": final_value_local,
+            "final_value": final_value_krw,
             "cui": _safe_float(summary.get("cui"), 0.0),
             "ulcer_index": _safe_float(summary.get("ulcer_index"), 0.0),
         }
@@ -306,6 +312,8 @@ def _build_run_entry(
         entry["results"] = results_payload
 
     tuning_values: Dict[str, Any] = entry["tuning"]
+    weighted_cagr_sum = 0.0
+    weighted_cagr_weight = 0.0
 
     for field, (key, is_int) in param_fields.items():
         details: List[Dict[str, Any]] = []
@@ -322,6 +330,15 @@ def _build_run_entry(
             value = item.get("best", {}).get(key)
             if value is None:
                 continue
+
+            best_result = item.get("best", {})
+            cagr_value = best_result.get("cagr_pct")
+            if cagr_value is not None:
+                try:
+                    weighted_cagr_sum += weight * float(cagr_value)
+                    weighted_cagr_weight += weight
+                except (TypeError, ValueError):
+                    pass
 
             weighted_sum += weight * float(value)
             weight_total += weight
@@ -350,6 +367,11 @@ def _build_run_entry(
         }
         if final_value is not None:
             tuning_values[field] = final_value
+
+    if weighted_cagr_weight > 0:
+        entry["weighted_expected_cagr"] = round(weighted_cagr_sum / weighted_cagr_weight, 6)
+    else:
+        entry["weighted_expected_cagr"] = None
 
     return entry
 
@@ -519,26 +541,49 @@ def run_account_tuning(
             prefetched_map[regime_ticker] = regime_prefetch
 
     results_per_month: List[Dict[str, Any]] = []
-    for item in month_items:
-        single_result = _execute_tuning_for_months(
-            account_norm,
-            months_range=item["months_range"],
-            combos=combos,
-            prefetched_data=prefetched_map,
-            end_date=end_date,
-        )
+    max_workers = min(len(month_items), cpu_count() or 1)
+    futures: Dict[Any, Any] = {}
 
-        if not single_result:
-            continue
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for idx, item in enumerate(month_items):
+            future = executor.submit(
+                _execute_tuning_for_months,
+                account_norm,
+                months_range=item["months_range"],
+                combos=combos,
+                prefetched_data=prefetched_map,
+                end_date=end_date,
+            )
+            futures[future] = (idx, item)
 
-        try:
-            weight = float(item.get("weight", 0.0))
-        except (TypeError, ValueError):
-            weight = 0.0
+        collected: List[Tuple[int, Dict[str, Any]]] = []
+        for future in as_completed(futures):
+            idx, item = futures[future]
+            try:
+                single_result = future.result()
+            except Exception as exc:  # pragma: no cover - 병렬 실행 실패 방어
+                logger.error(
+                    "[튜닝] %s (%s개월) 병렬 실행 실패: %s",
+                    account_norm.upper(),
+                    item.get("months_range"),
+                    exc,
+                )
+                continue
 
-        single_result["weight"] = weight
-        single_result["source"] = item.get("source")
-        results_per_month.append(single_result)
+            if not single_result:
+                continue
+
+            try:
+                weight = float(item.get("weight", 0.0))
+            except (TypeError, ValueError):
+                weight = 0.0
+
+            single_result["weight"] = weight
+            single_result["source"] = item.get("source")
+            collected.append((idx, single_result))
+
+    collected.sort(key=lambda entry: entry[0])
+    results_per_month = [item for _, item in collected]
 
     if not results_per_month:
         logger.warning("[튜닝] 실행 가능한 기간이 없어 결과가 없습니다.")
@@ -580,7 +625,6 @@ def run_account_tuning(
         encoding="utf-8",
     )
 
-    logger.info("[튜닝] 결과를 '%s'에 JSON 형식으로 저장했습니다.", output_path)
     return output_path
 
 

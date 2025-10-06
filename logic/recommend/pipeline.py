@@ -844,7 +844,7 @@ def generate_account_recommendation_report(
                 "category": meta.get("category") or "TBD",
             }
 
-    disabled_note = DECISION_NOTES.get("NO_RECOMMEND", "추천대상에서 의도적 제외")
+    disabled_note = DECISION_NOTES.get("NO_RECOMMEND", "추천 제외")
     results = []
     for decision in decisions:
         ticker = decision["tkr"]
@@ -961,8 +961,9 @@ def generate_account_recommendation_report(
 
         streak_val = int(filter_days or 0)
 
-        if not recommend_enabled and state in {"BUY", "BUY_REPLACE"}:
-            state = "WAIT"
+        if not recommend_enabled:
+            if state in {"BUY", "BUY_REPLACE"}:
+                state = "WAIT"
             phrase = disabled_note
 
         result_entry = {
