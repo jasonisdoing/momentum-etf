@@ -48,6 +48,7 @@ from utils.notification import (
     send_recommendation_slack_notification,
 )
 from utils.schedule_config import get_all_country_schedules
+from utils.data_loader import is_trading_day
 
 
 def setup_logging():
@@ -116,6 +117,7 @@ def run_recommendation_generation(
     *,
     country_code: str,
     force_notify: bool = False,
+    schedule_timezone: str | None = None,
 ) -> None:
     """Generate recommendations, persist them, and notify Slack."""
 
@@ -127,6 +129,24 @@ def run_recommendation_generation(
     country_norm = (country_code or "").strip().lower()
     if not country_norm:
         logging.error("추천 생성을 위해서는 국가 코드가 필요합니다.")
+        return
+
+    tz_to_use = schedule_timezone or TIMEZONE
+    if ZoneInfo is not None:
+        try:
+            now_local = datetime.now(ZoneInfo(tz_to_use))
+        except Exception:
+            now_local = datetime.now()
+    else:
+        now_local = datetime.now()
+
+    if not is_trading_day(country_norm, now_local):
+        logging.info(
+            "Skipping recommendation generation for account=%s (country=%s) on %s - 휴장일",
+            account_norm,
+            country_norm,
+            now_local.strftime("%Y-%m-%d"),
+        )
         return
 
     logging.info(
@@ -219,6 +239,7 @@ def run_recommend_for_country(
     country: str,
     *,
     force_notify: bool = False,
+    schedule_timezone: str | None = None,
 ) -> None:
     account_norm = (account_id or "").strip().lower()
     country_norm = (country or "").strip().lower()
@@ -232,6 +253,7 @@ def run_recommend_for_country(
             account_norm,
             country_code=country_norm,
             force_notify=force_notify,
+            schedule_timezone=schedule_timezone,
         )
     except Exception:
         logging.error(
@@ -296,6 +318,7 @@ def main():
             run_recommend_for_country,
             CronTrigger.from_crontab(cron_expr, timezone=timezone),
             args=[account_id, country_code],
+            kwargs={"schedule_timezone": timezone},
             id=f"{account_id}:{country_code}",
         )
         logging.info(
@@ -323,6 +346,7 @@ def main():
 
         account_id = (cfg.get("account_id") or "").strip().lower()
         country_code = (cfg.get("country_code") or "").strip().lower()
+        init_timezone = cfg.get("timezone") or TIMEZONE
 
         if not account_id or not country_code:
             raise RuntimeError(
@@ -330,7 +354,12 @@ def main():
             )
 
         try:
-            run_recommend_for_country(account_id, country_code, force_notify=True)
+            run_recommend_for_country(
+                account_id,
+                country_code,
+                force_notify=True,
+                schedule_timezone=init_timezone,
+            )
         except Exception:
             logging.error(
                 "Error during initial run for account=%s country=%s",

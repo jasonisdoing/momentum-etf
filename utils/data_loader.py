@@ -343,6 +343,23 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
     return sorted(list(set(final_list)))
 
 
+def is_trading_day(
+    country: str,
+    date: Union[str, datetime, pd.Timestamp, None] = None,
+) -> bool:
+    """주어진 날짜가 해당 국가의 거래일인지 여부를 반환합니다."""
+
+    target = pd.Timestamp(date if date is not None else datetime.now())
+    target = target.tz_localize(None) if getattr(target, "tzinfo", None) else target
+    target_norm = target.normalize()
+    date_str = target_norm.strftime("%Y-%m-%d")
+
+    try:
+        return bool(get_trading_days(date_str, date_str, country))
+    except Exception:
+        return False
+
+
 def count_trading_days(
     country: str,
     start_date: Union[str, datetime, pd.Timestamp],
