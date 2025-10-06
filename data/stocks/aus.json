@@ -3,14 +3,9 @@
         "category": "금",
         "tickers": [
             {
-                "ticker": "ASX:MNRS",
-                "name": "Betashares Global Gold Miners Currency Hedged ETF",
-                "recommend_enabled": true
-            },
-            {
                 "ticker": "ASX:GDX",
                 "name": "VanEck Gold Miners ETF",
-                "recommend_enabled": false
+                "recommend_enabled": true
             }
         ]
     },
@@ -55,18 +50,43 @@
         ]
     },
     {
-        "category": "글로벌(지수)",
+        "category": "아시아(지수)",
         "tickers": [
             {
                 "ticker": "ASX:IAA",
                 "name": "iShares Asia 50 ETF (AU)",
                 "recommend_enabled": true
-            },
+            }
+        ]
+    },
+    {
+        "category": "이머징(지수)",
+        "tickers": [
             {
-                "ticker": "ASX:VAE",
-                "name": "Vanguard FTSE Asia ex Japan Shares Index ETF",
+                "ticker": "ASX:WEMG",
+                "name": "SPDR S&P Emerging Markets Carbon Aware ETF",
                 "recommend_enabled": true
             },
+            {
+                "ticker": "ASX:IEM",
+                "name": "iShares MSCI Emerging Markets ETF (AU)",
+                "recommend_enabled": true
+            },
+            {
+                "ticker": "ASX:FEMX",
+                "name": "Fidelity Global Emerging Markets ETF",
+                "recommend_enabled": true
+            },
+            {
+                "ticker": "ASX:VGE",
+                "name": "Vanguard FTSE Emerging Markets Shares ETF",
+                "recommend_enabled": true
+            }
+        ]
+    },
+    {
+        "category": "글로벌(지수)",
+        "tickers": [
             {
                 "ticker": "ASX:WEMG",
                 "name": "SPDR S&P Emerging Markets Carbon Aware ETF",
@@ -105,7 +125,7 @@
             {
                 "ticker": "ASX:IKO",
                 "name": "iShares MSCI South Korea ETF (AU)",
-                "recommend_enabled": false
+                "recommend_enabled": true
             }
         ]
     },
@@ -115,6 +135,16 @@
             {
                 "ticker": "ASX:HJPN",
                 "name": "Betashares Japan Currency Hedged ETF",
+                "recommend_enabled": true
+            },
+            {
+                "ticker": "ASX:IJP",
+                "name": "iShares MSCI Japan ETF (AU)",
+                "recommend_enabled": true
+            },
+            {
+                "ticker": "ASX:VAE",
+                "name": "Vanguard FTSE Asia ex Japan Shares Index ETF",
                 "recommend_enabled": true
             }
         ]
@@ -305,11 +335,6 @@
             {
                 "ticker": "ASX:F100",
                 "name": "BetaShares FTSE 100 ETF",
-                "recommend_enabled": true
-            },
-            {
-                "ticker": "ASX:IJP",
-                "name": "iShares MSCI Japan ETF (AU)",
                 "recommend_enabled": true
             },
             {
