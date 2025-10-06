@@ -2,118 +2,21 @@
     "COMMON_CONSTANTS": {
         "MONTHS_CONFIG": [
             {
-                "period": 6,
+                "MONTHS_RANGE": 6,
                 "weight": 0.5,
                 "source": "short_term"
             },
             {
-                "period": 12,
+                "MONTHS_RANGE": 12,
                 "weight": 0.3,
                 "source": "mid_term"
             },
             {
-                "period": 36,
+                "MONTHS_RANGE": 36,
                 "weight": 0.2,
                 "source": "long_term"
             }
         ],
         "INITIAL_CAPITAL": 100000000
-    },
-    "RESULTS": [
-        {
-            "run_date": "2025-10-06",
-            "MA_PERIOD": {
-                "details": [
-                    {
-                        "period": 6,
-                        "value": 26,
-                        "weight": 0.5,
-                        "weighted_value": 13.0
-                    },
-                    {
-                        "period": 12,
-                        "value": 36,
-                        "weight": 0.3,
-                        "weighted_value": 10.8
-                    },
-                    {
-                        "period": 36,
-                        "value": 65,
-                        "weight": 0.2,
-                        "weighted_value": 13.0
-                    }
-                ],
-                "final_value": 36.8
-            },
-            "PORTFOLIO_TOPN": {
-                "details": [
-                    {
-                        "period": 6,
-                        "value": 18,
-                        "weight": 0.5,
-                        "weighted_value": 9.0
-                    },
-                    {
-                        "period": 12,
-                        "value": 32,
-                        "weight": 0.3,
-                        "weighted_value": 9.6
-                    },
-                    {
-                        "period": 36,
-                        "value": 50,
-                        "weight": 0.2,
-                        "weighted_value": 10.0
-                    }
-                ],
-                "final_value": 28.6
-            },
-            "REPLACE_SCORE_THRESHOLD": {
-                "details": [
-                    {
-                        "period": 6,
-                        "value": 14,
-                        "weight": 0.5,
-                        "weighted_value": 7.0
-                    },
-                    {
-                        "period": 12,
-                        "value": 24,
-                        "weight": 0.3,
-                        "weighted_value": 7.2
-                    },
-                    {
-                        "period": 36,
-                        "value": 55,
-                        "weight": 0.2,
-                        "weighted_value": 11.0
-                    }
-                ],
-                "final_value": 25.2
-            },
-            "MARKET_REGIME_FILTER_MA_PERIOD": {
-                "details": [
-                    {
-                        "period": 6,
-                        "value": 28,
-                        "weight": 0.5,
-                        "weighted_value": 14.0
-                    },
-                    {
-                        "period": 12,
-                        "value": 34,
-                        "weight": 0.3,
-                        "weighted_value": 10.2
-                    },
-                    {
-                        "period": 36,
-                        "value": 60,
-                        "weight": 0.2,
-                        "weighted_value": 12.0
-                    }
-                ],
-                "final_value": 36.2
-            }
-        }
-    ]
+    }
 }

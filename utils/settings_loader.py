@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from utils.logger import get_app_logger
 
@@ -20,6 +20,7 @@ COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
 PRECISION_SETTINGS_PATH = SETTINGS_ROOT / "precision.json"
 BACKTEST_SETTINGS_PATH = SETTINGS_ROOT / "backtest.json"
+TUNE_SETTINGS_PATH = SETTINGS_ROOT / "tune.json"
 logger = get_app_logger()
 
 
@@ -101,6 +102,59 @@ def get_backtest_initial_capital(default: float = 100_000_000) -> float:
     except (TypeError, ValueError):
         pass
     return float(default)
+
+
+@lru_cache(maxsize=1)
+def _load_tune_settings() -> Dict[str, Any]:
+    try:
+        return _load_json(TUNE_SETTINGS_PATH)
+    except AccountSettingsError:
+        return {}
+    except Exception:
+        return {}
+
+
+def get_tune_month_configs() -> List[Dict[str, Any]]:
+    settings = _load_tune_settings()
+    root = settings.get("COMMON_CONSTANTS")
+    if not isinstance(root, dict):
+        return []
+
+    entries = root.get("MONTHS_CONFIG")
+    if not isinstance(entries, list):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+
+        months_raw = item.get("MONTHS_RANGE")
+        weight_raw = item.get("weight", 0)
+        source = item.get("source")
+
+        try:
+            months_range = int(months_raw)
+        except (TypeError, ValueError):
+            continue
+
+        if months_range <= 0:
+            continue
+
+        try:
+            weight = float(weight_raw)
+        except (TypeError, ValueError):
+            weight = 0.0
+
+        normalized.append(
+            {
+                "months_range": months_range,
+                "weight": weight,
+                "source": source,
+            }
+        )
+
+    return normalized
 
 
 @lru_cache(maxsize=None)

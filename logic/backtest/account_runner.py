@@ -160,7 +160,6 @@ def run_account_backtest(
 
     _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
     backtest_kwargs = _build_backtest_kwargs(
-        country_code=country_code,
         strategy_rules=strategy_rules,
         common_settings=common_settings,
         strategy_settings=strategy_settings,
@@ -222,7 +221,6 @@ def run_account_backtest(
     ticker_summaries = _build_ticker_summaries(
         ticker_timeseries,
         ticker_meta,
-        start_date,
     )
 
     _log("[백테스트] 설정 스냅샷을 생성하는 중...")
@@ -309,7 +307,6 @@ def _resolve_start_date(
 
 def _build_backtest_kwargs(
     *,
-    country_code: str,
     strategy_rules,
     common_settings: Mapping[str, Any],
     strategy_settings: Mapping[str, Any],
@@ -715,7 +712,6 @@ def _detect_risk_off_periods(
 def _build_ticker_summaries(
     ticker_timeseries: Mapping[str, pd.DataFrame],
     ticker_meta: Mapping[str, Dict[str, Any]],
-    core_start_dt: pd.Timestamp,
 ) -> List[Dict[str, Any]]:
     sell_decisions = {
         "SELL_MOMENTUM",

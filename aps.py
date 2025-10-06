@@ -116,7 +116,6 @@ def run_recommendation_generation(
     account_id: str,
     *,
     country_code: str,
-    force_notify: bool = False,
     schedule_timezone: str | None = None,
 ) -> None:
     """Generate recommendations, persist them, and notify Slack."""
@@ -210,12 +209,10 @@ def run_recommendation_generation(
         account_norm,
         report,
         duration=duration,
-        force_notify=force_notify,
     )
 
     notified = send_recommendation_slack_notification(
         account_norm,
-        target_country,
         slack_payload,
     )
     base_date_str = report.base_date.strftime("%Y-%m-%d")
@@ -238,7 +235,6 @@ def run_recommend_for_country(
     account_id: str,
     country: str,
     *,
-    force_notify: bool = False,
     schedule_timezone: str | None = None,
 ) -> None:
     account_norm = (account_id or "").strip().lower()
@@ -252,7 +248,6 @@ def run_recommend_for_country(
         run_recommendation_generation(
             account_norm,
             country_code=country_norm,
-            force_notify=force_notify,
             schedule_timezone=schedule_timezone,
         )
     except Exception:
@@ -357,7 +352,6 @@ def main():
             run_recommend_for_country(
                 account_id,
                 country_code,
-                force_notify=True,
                 schedule_timezone=init_timezone,
             )
         except Exception:

@@ -224,7 +224,7 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     return styled
 
 
-def render_recommendation_table(df: pd.DataFrame, *, account_id: str, country_code: str) -> None:
+def render_recommendation_table(df: pd.DataFrame, *, country_code: str) -> None:
     styled_df = _style_rows_by_state(df, country_code=country_code)
 
     st.dataframe(
@@ -280,7 +280,6 @@ def main():
 
     render_recommendation_table(
         df,
-        account_id=default_account,
         country_code=country_code or default_account,
     )
 

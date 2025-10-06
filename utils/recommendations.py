@@ -220,7 +220,7 @@ def _score_style(value: Any) -> str:
     return ""
 
 
-def style_recommendations_dataframe(country: str, df: pd.DataFrame) -> Styler:
+def style_recommendations_dataframe(df: pd.DataFrame) -> Styler:
     styled = df.style
     styled = styled.set_table_styles(
         [
@@ -265,4 +265,4 @@ def get_recommendations_dataframe(country: str, *, source_key: str | None = None
 
 def get_recommendations_styler(country: str) -> tuple[pd.DataFrame, Styler]:
     df = get_recommendations_dataframe(country)
-    return df, style_recommendations_dataframe(country, df)
+    return df, style_recommendations_dataframe(df)

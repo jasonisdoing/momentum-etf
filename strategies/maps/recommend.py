@@ -18,11 +18,44 @@ logger = get_app_logger()
 from utils.data_loader import count_trading_days
 
 
+def _resolve_entry_price(series: Any, buy_date: Optional[pd.Timestamp]) -> Optional[float]:
+    """Return the entry price by locating the first available close on/after the buy date."""
+
+    if buy_date is None:
+        return None
+
+    if not isinstance(series, pd.Series) or series.empty:
+        return None
+
+    try:
+        buy_ts = pd.to_datetime(buy_date).normalize()
+    except Exception:
+        return None
+
+    cleaned = series.dropna().copy()
+    if cleaned.empty:
+        return None
+
+    try:
+        cleaned.index = pd.to_datetime(cleaned.index).normalize()
+    except Exception:
+        return None
+
+    future_slice = cleaned.loc[cleaned.index >= buy_ts]
+    if future_slice.empty:
+        return float(cleaned.iloc[-1])
+
+    entry_val = future_slice.iloc[0]
+    try:
+        return float(entry_val)
+    except (TypeError, ValueError):
+        return None
+
+
 def generate_daily_recommendations_for_portfolio(
     account_id: str,
     country_code: str,
     base_date: pd.Timestamp,
-    portfolio_settings: Dict,
     strategy_rules: StrategyRules,
     data_by_tkr: Dict[str, Any],
     holdings: Dict[str, Dict[str, float]],
@@ -33,11 +66,8 @@ def generate_daily_recommendations_for_portfolio(
     total_cash: float,
     pairs: List[Tuple[str, str]],
     consecutive_holding_info: Dict[str, Dict],
-    stop_loss: Optional[float],
-    DECISION_CONFIG: Dict[str, Any],
     trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
     cooldown_days: int,
-    max_per_category: int,
 ) -> List[Dict[str, Any]]:
     """
     주어진 데이터를 기반으로 포트폴리오의 일일 매매 추천를 생성합니다.
@@ -93,6 +123,10 @@ def generate_daily_recommendations_for_portfolio(
     if denom <= 0:
         raise ValueError(f"'{account_id}' 계좌의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
     replace_threshold = strategy_rules.replace_threshold
+    try:
+        stop_loss_threshold = -abs(float(denom))
+    except (TypeError, ValueError):
+        stop_loss_threshold = None
 
     # 현재 보유 종목의 카테고리 (TBD 제외)
     held_categories = set()
@@ -203,13 +237,26 @@ def generate_daily_recommendations_for_portfolio(
                     evaluation_date,
                 )
 
+        holding_return_pct: Optional[float] = None
+        if is_effectively_held:
+            entry_price = _resolve_entry_price(d.get("close"), buy_date)
+            if entry_price and entry_price > 0 and price and price > 0:
+                holding_return_pct = ((price / entry_price) - 1.0) * 100.0
+
         if state == "HOLD":
             price_ma, ma = d["price"], d["s1"]
-            if not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
+            if (
+                holding_return_pct is not None
+                and stop_loss_threshold is not None
+                and holding_return_pct <= float(stop_loss_threshold)
+            ):
+                state = "CUT_STOPLOSS"
+                phrase = DECISION_MESSAGES.get("CUT_STOPLOSS", "손절매도")
+            elif not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
                 state = "SELL_TREND"
                 phrase = DECISION_NOTES["TREND_BREAK"]
 
-            if sell_block_info and state in {"SELL_TREND", "CUT_STOPLOSS"}:
+            if sell_block_info and state == "SELL_TREND":
                 state = "HOLD"
                 phrase = _format_cooldown_phrase("최근 매수", sell_block_info.get("last_buy"))
 
@@ -258,7 +305,7 @@ def generate_daily_recommendations_for_portfolio(
             day_ret,
             1 if is_effectively_held else 0,
             amount,
-            0.0,
+            round(holding_return_pct, 2) if holding_return_pct is not None else 0.0,
             position_weight_pct,
             (
                 f"{d.get('drawdown_from_peak'):.1f}%"
@@ -284,6 +331,7 @@ def generate_daily_recommendations_for_portfolio(
                 "is_held": is_effectively_held,
                 "filter": d.get("filter"),
                 "recommend_enabled": bool(etf_meta.get(tkr, {}).get("recommend_enabled", True)),
+                "hold_return_pct": holding_return_pct,
             }
         )
 
@@ -443,7 +491,6 @@ def generate_daily_recommendations_for_portfolio(
                 buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
                 if buy_price > 0:
                     best_new["row"][-1] = build_buy_replace_note(
-                        country_code,
                         ticker_to_sell,
                         full_etf_meta.get(ticker_to_sell, {}).get("name", ticker_to_sell),
                     )

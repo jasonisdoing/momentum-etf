@@ -410,7 +410,6 @@ def _format_date_kor(ts: pd.Timestamp) -> str:
 def _build_daily_table_rows(
     *,
     result: AccountBacktestResult,
-    account_settings: Dict[str, Any],
     target_date: pd.Timestamp,
     total_value: float,
     total_cash: float,
@@ -691,7 +690,6 @@ def _generate_daily_report_lines(
 
         rows = _build_daily_table_rows(
             result=result,
-            account_settings=account_settings,
             target_date=target_date,
             total_value=total_value,
             total_cash=total_cash,

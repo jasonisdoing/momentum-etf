@@ -46,7 +46,7 @@ from utils.settings_loader import get_account_slack_channel
 from dotenv import load_dotenv
 
 load_dotenv()
-APP_DATE_TIME = "2025-10-06-12"
+APP_DATE_TIME = "2025-10-06-15"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 
 _LAST_ERROR: Optional[str] = None
@@ -203,7 +203,6 @@ def compose_recommendation_slack_message(
     report: Any,
     *,
     duration: float,
-    force_notify: bool = False,
 ) -> dict[str, Any]:
     """Compose Slack text and Block Kit payload for recommendation updates."""
 
@@ -502,7 +501,6 @@ def _format_image_cell_value(column_label: str, value: Any) -> str:
 
 def send_recommendation_slack_notification(
     account_id: str,
-    country_code: str,
     payload: dict[str, Any] | str,
 ) -> bool:
     """전달받은 페이로드를 슬랙으로 전송하고 필요 시 이미지 파일을 첨부합니다."""
@@ -595,7 +593,7 @@ def send_recommendation_slack_notification(
     return True
 
 
-def _format_shares_for_country(quantity: Any, country: str) -> str:
+def _format_shares_for_country(quantity: Any) -> str:
     if not isinstance(quantity, (int, float)):
         return str(quantity)
     return f"{quantity:,.0f}"

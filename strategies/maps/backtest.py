@@ -95,7 +95,6 @@ def run_portfolio_backtest(
     cooldown_days: int = 5,
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
-    **kwargs,
 ) -> Dict[str, pd.DataFrame]:
     """
     이동평균 기반 모멘텀 전략으로 포트폴리오 백테스트를 실행합니다.
@@ -269,7 +268,6 @@ def run_portfolio_backtest(
             progress_callback(i + 1, total_days)
 
         # 당일 시작 시점 보유 수량 스냅샷(순매수/순매도 판단용)
-        prev_holdings_map = {t: float(state["shares"]) for t, state in position_state.items()}
         buy_trades_today_map: Dict[str, List[Dict[str, float]]] = {}
         sell_trades_today_map: Dict[str, List[Dict[str, float]]] = {}
 
@@ -883,7 +881,6 @@ def run_portfolio_backtest(
                 continue
             last_row = rows[-1]
             overrides = compute_net_trade_note(
-                country=country,
                 tkr=tkr,
                 data_by_tkr={
                     tkr: {
@@ -893,7 +890,6 @@ def run_portfolio_backtest(
                 },
                 buy_trades_today_map=buy_trades_today_map,
                 sell_trades_today_map=sell_trades_today_map,
-                prev_holdings_map=prev_holdings_map,
                 current_decision=str(last_row.get("decision")),
             )
             if overrides:

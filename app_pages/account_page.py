@@ -76,7 +76,7 @@ def render_account_page(account_id: str) -> None:
     if updated_at:
         st.caption(f"데이터 업데이트: {updated_at}")
 
-    render_recommendation_table(df, account_id=account_id, country_code=country_code)
+    render_recommendation_table(df, country_code=country_code)
 
     st.markdown(_DATAFRAME_CSS, unsafe_allow_html=True)
 

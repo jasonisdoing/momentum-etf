@@ -210,7 +210,6 @@ def _flush_persisted_alerts() -> None:
 def _show_delete_dialog(
     checked_indices: list[int],
     table_rows: list,
-    username: str,
     country_filter: str,
     editor_key: str,
 ) -> None:
@@ -292,7 +291,7 @@ def _render_trade_table() -> None:
     pass
 
 
-def _render_trade_history(username: str, account_id: str, country_code: str) -> None:
+def _render_trade_history(account_id: str, country_code: str) -> None:
     """계정별 트레이드 히스토리를 표시합니다."""
 
     _flush_persisted_alerts()
@@ -422,7 +421,7 @@ def _render_account_section(current_user: str, account_id: str) -> None:
             st.session_state[sell_key] = not st.session_state.get(sell_key, False)
             st.rerun()
 
-    _render_trade_history(current_user, account_id, country_code)
+    _render_trade_history(account_id, country_code)
 
     if st.session_state.get(buy_key, False):
         _render_buy_form(current_user, account_id, country_code)

@@ -526,8 +526,6 @@ def generate_account_recommendation_report(
     max_per_category = int(
         strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0
     )
-    # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
-    stop_loss_pct = -abs(float(portfolio_topn))
 
     # ETF 목록 가져오기
     etf_universe = get_etfs(country_code) or []
@@ -698,8 +696,6 @@ def generate_account_recommendation_report(
                 "ret_3w": 0.0,
             }
 
-    # 전략 설정
-    portfolio_settings = {}
     regime_info = None
 
     # 쿨다운 정보 계산
@@ -725,7 +721,6 @@ def generate_account_recommendation_report(
             account_id=account_id,
             country_code=country_code,
             base_date=base_date,
-            portfolio_settings=portfolio_settings,
             strategy_rules=strategy_rules,
             data_by_tkr=data_by_tkr,
             holdings=holdings,
@@ -736,13 +731,10 @@ def generate_account_recommendation_report(
             total_cash=total_cash,
             pairs=pairs,
             consecutive_holding_info=consecutive_holding_info,
-            stop_loss=stop_loss_pct,
-            DECISION_CONFIG=DECISION_CONFIG,
             trade_cooldown_info=trade_cooldown_info,
             cooldown_days=int(
                 strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 5)) or 0
             ),
-            max_per_category=max_per_category,
         )
         logger.info(
             "[%s] 일일 의사결정 계산 완료 (%.1fs, 결과 %d개)",
