@@ -231,10 +231,6 @@ def compose_recommendation_slack_message(
     else:
         base_date_str = "N/A"
 
-    dashboard_url = (
-        f"http://localhost:8501/{account_norm}" if account_norm else "http://localhost:8501/"
-    )
-
     recommendations = list(getattr(report, "recommendations", []) or [])
     decision_config = getattr(report, "decision_config", {}) or {}
     summary_data = getattr(report, "summary_data", None)
@@ -304,6 +300,16 @@ def compose_recommendation_slack_message(
         topn_candidates = [
             getattr(report, "portfolio_topn", None),
             (account_settings or {}).get("portfolio_topn") if account_settings else None,
+            ((account_settings or {}).get("strategy", {}) or {})
+            .get("tuning", {})
+            .get("PORTFOLIO_TOPN")
+            if account_settings
+            else None,
+            ((account_settings or {}).get("strategy", {}) or {})
+            .get("static", {})
+            .get("PORTFOLIO_TOPN")
+            if account_settings
+            else None,
         ]
         for candidate in topn_candidates:
             try:
@@ -319,7 +325,6 @@ def compose_recommendation_slack_message(
     ]
     if ordered_states:
         lines.extend([f"{state}: {count}개" for state, count in ordered_states])
-    lines.append(dashboard_url)
     fallback_text = "\n".join(lines)
 
     blocks: list[dict[str, Any]] = [
@@ -345,7 +350,9 @@ def compose_recommendation_slack_message(
 
     blocks.append({"type": "section", "fields": fields})
 
-    if force_notify or ordered_states:
+    add_channel_mention = bool(ordered_states)
+
+    if add_channel_mention:
         blocks.append(
             {"type": "context", "elements": [{"type": "mrkdwn", "text": "<!channel> 알림"}]}
         )
