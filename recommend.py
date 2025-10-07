@@ -91,15 +91,19 @@ def main() -> None:
     print_result_summary(items, account_id, args.date)
 
     try:
-        written_path = save_recommendation_report(report)
-        logger.info("✅ %s 기본 결과를 '%s'에 저장했습니다.", account_id.upper(), written_path)
+        meta = save_recommendation_report(report)
+        logger.info(
+            "✅ %s 추천 결과를 MongoDB에 저장했습니다. document_id=%s",
+            account_id.upper(),
+            meta.get("document_id") if isinstance(meta, dict) else meta,
+        )
     except Exception:
         logger.error(
             "기본 추천 결과 저장에 실패했습니다 (account=%s)",
             account_id,
             exc_info=True,
         )
-        written_path = None
+        meta = None
 
     if args.output:
         custom_path = Path(args.output)

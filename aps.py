@@ -190,12 +190,12 @@ def run_recommendation_generation(
     target_country = report_country or country_norm
 
     try:
-        output_path = save_recommendation_report(report)
+        meta = save_recommendation_report(report)
         logging.info(
-            "%s 추천 %d건을 %s 위치에 저장했습니다.",
+            "%s 추천 %d건을 MongoDB에 저장했습니다. document_id=%s",
             target_country.upper(),
             len(report.recommendations),
-            output_path,
+            meta.get("document_id") if isinstance(meta, dict) else meta,
         )
     except Exception:
         logging.error(

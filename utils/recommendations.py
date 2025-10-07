@@ -1,7 +1,4 @@
 from __future__ import annotations
-
-import json
-from pathlib import Path
 from typing import Any, Iterable
 
 import pandas as pd
@@ -9,10 +6,9 @@ from pandas.io.formats.style import Styler
 
 from strategies.maps.constants import DECISION_CONFIG
 from utils.logger import get_app_logger
+from utils.recommendation_storage import fetch_latest_recommendations
 
 
-_BASE_DIR = Path(__file__).resolve().parent.parent
-_DATA_DIR = _BASE_DIR / "data" / "results"
 logger = get_app_logger()
 
 _DISPLAY_COLUMNS = [
@@ -34,33 +30,20 @@ _DISPLAY_COLUMNS = [
 ]
 
 
-def load_recommendations(country: str) -> list[dict[str, Any]]:
-    """지정한 국가의 추천 종목 JSON을 로드합니다."""
+def load_recommendations(account_key: str) -> list[dict[str, Any]]:
+    """지정한 계정/국가의 추천 종목 스냅샷을 로드합니다."""
 
-    # 캐시 무효화를 위해 파일의 마지막 수정 시간을 확인
-    normalized_country = country.strip().lower()
-    path = _DATA_DIR / f"recommendation_{normalized_country}.json"
+    normalized_key = (account_key or "").strip().lower()
+    if not normalized_key:
+        raise ValueError("account_key is required to load recommendations")
 
-    # 파일이 존재하지 않으면 빈 리스트 반환
-    if not path.exists():
-        raise FileNotFoundError(f"추천 종목 파일을 찾을 수 없습니다: {path}")
+    doc = fetch_latest_recommendations(normalized_key)
+    if doc is None:
+        raise FileNotFoundError(f"추천 스냅샷을 찾을 수 없습니다: {normalized_key}")
 
-    # 파일의 마지막 수정 시간을 기반으로 캐시 키 생성
-    file_mtime = path.stat().st_mtime
-    cache_key = f"{normalized_country}_{file_mtime}"
-
-    # 캐시된 결과가 있으면 반환
-    if hasattr(load_recommendations, "_cache") and cache_key in load_recommendations._cache:
-        return load_recommendations._cache[cache_key]
-
-    # 파일에서 데이터 로드
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"추천 종목 JSON 파싱 실패: {path.name}") from exc
-
+    raw = doc.get("recommendations") or []
     if not isinstance(raw, list):
-        raise ValueError(f"추천 종목 JSON은 리스트 형태여야 합니다: {path.name}")
+        raise ValueError("추천 스냅샷 데이터가 리스트 형태가 아닙니다.")
 
     normalized: list[dict[str, Any]] = []
     for entry in raw:
@@ -68,12 +51,6 @@ def load_recommendations(country: str) -> list[dict[str, Any]]:
             normalized.append(entry.copy())
 
     normalized.sort(key=lambda row: row.get("rank", 0))
-
-    # 결과를 캐시에 저장 (함수 객체에 캐시 딕셔너리 추가)
-    if not hasattr(load_recommendations, "_cache"):
-        load_recommendations._cache = {}
-    load_recommendations._cache[cache_key] = normalized
-
     return normalized
 
 

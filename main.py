@@ -1,98 +1,18 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 from utils.logger import get_app_logger
-from utils.recommendations import get_recommendations_dataframe
+from utils.recommendations import recommendations_to_dataframe
 from utils.settings_loader import get_account_settings
 from strategies.maps.constants import DECISION_CONFIG
+from utils.recommendation_storage import fetch_latest_recommendations
 
 
-DATA_DIR = Path(__file__).resolve().parent / "data" / "results"
 logger = get_app_logger()
-
-
-def _regenerate_recommendations(account_id: str, country_code: str) -> tuple[bool, str | None]:
-    account_norm = (account_id or "").strip().lower()
-    country_norm = (country_code or "").strip().lower()
-
-    if not account_norm:
-        return False, "계정 ID가 필요합니다."
-
-    try:
-        from logic.recommend.pipeline import (
-            RecommendationReport,
-            generate_account_recommendation_report,
-        )
-    except Exception as exc:  # pragma: no cover - Streamlit 오류 메시지 전용
-        logger.error(
-            "추천 파이프라인 모듈을 불러오지 못했습니다 (account=%s, country=%s): %s",
-            account_norm,
-            country_norm,
-            exc,
-            exc_info=True,
-        )
-        return False, f"추천 데이터를 생성하기 위한 모듈을 불러오지 못했습니다: {exc}"
-
-    try:
-        report = generate_account_recommendation_report(account_id=account_norm, date_str=None)
-    except Exception as exc:  # pragma: no cover - Streamlit 오류 메시지 전용
-        logger.error(
-            "추천 데이터를 생성하는 중 오류가 발생했습니다 (account=%s, country=%s): %s",
-            account_norm,
-            country_norm,
-            exc,
-            exc_info=True,
-        )
-        return False, f"추천 데이터를 생성하는 중 오류가 발생했습니다: {exc}"
-
-    if not isinstance(report, RecommendationReport):
-        logger.error(
-            "추천 결과 타입이 예상과 다릅니다 (account=%s, type=%s)",
-            account_norm,
-            type(report).__name__,
-        )
-        return False, "추천 데이터 생성 결과의 형식이 올바르지 않습니다."
-
-    recommendations = getattr(report, "recommendations", None)
-    if recommendations is None:
-        logger.error(
-            "추천 결과에 recommendations 항목이 없습니다 (account=%s)",
-            account_norm,
-        )
-        return False, "추천 데이터 생성 결과에 추천 목록이 포함되어 있지 않습니다."
-
-    try:
-        from utils.recommendation_storage import save_recommendation_report
-
-        save_recommendation_report(report)
-    except Exception as exc:  # pragma: no cover - Streamlit 오류 메시지 전용
-        logger.error(
-            "추천 데이터를 저장하는 중 오류가 발생했습니다 (account=%s, country=%s): %s",
-            account_norm,
-            country_norm,
-            exc,
-            exc_info=True,
-        )
-        return False, f"추천 데이터를 저장하는 중 오류가 발생했습니다: {exc}"
-
-    if not recommendations:
-        logger.warning(
-            "추천 데이터가 비어 있지만 빈 파일을 생성했습니다 (account=%s, country=%s)",
-            account_norm,
-            country_norm,
-        )
-
-    logger.info(
-        "추천 데이터를 자동으로 생성했습니다 (account=%s, country=%s)",
-        account_norm,
-        country_norm,
-    )
-    return True, None
 
 
 def load_account_recommendations(
@@ -109,49 +29,32 @@ def load_account_recommendations(
 
     country_code = (account_settings.get("country_code") or account_norm).strip().lower()
 
-    account_file = DATA_DIR / f"recommendation_{account_norm}.json"
-    country_file = DATA_DIR / f"recommendation_{country_code}.json"
-
-    file_path: Path | None = None
-    source_key = country_code
-
-    if account_file.exists():
-        file_path = account_file
-        source_key = account_norm
-    elif country_file.exists():
-        file_path = country_file
-
-    if file_path is None:
-        logger.warning(
-            "추천 파일이 존재하지 않아 자동 생성을 시도합니다 (account=%s, country=%s). 확인한 경로: %s / %s | 현재 작업 디렉터리: %s",
-            account_norm,
-            country_code,
-            account_file,
-            country_file,
-            Path.cwd(),
-        )
-        success, error_message = _regenerate_recommendations(account_norm, country_code)
-        if not success:
-            message = error_message or f"데이터 파일을 찾을 수 없습니다: {account_file}"
-            return None, message, country_code
-
-        if account_file.exists():
-            file_path = account_file
-            source_key = account_norm
-        elif country_file.exists():
-            file_path = country_file
-
-    if file_path is None or not file_path.exists():
-        target_path = file_path or account_file
-        return None, f"데이터 파일을 찾을 수 없습니다: {target_path}", country_code
-
     try:
-        df = get_recommendations_dataframe(country_code, source_key=source_key)
-    except Exception as exc:  # pragma: no cover - Streamlit 오류 메시지 전용
-        return None, f"추천 데이터를 불러오지 못했습니다: {exc}", country_code
+        snapshot = fetch_latest_recommendations(account_norm)
+    except Exception as exc:
+        return None, f"추천 스냅샷을 불러오지 못했습니다: {exc}", country_code
 
-    updated_at = datetime.fromtimestamp(file_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-    return df, updated_at, country_code
+    if snapshot is None:
+        message = (
+            "추천 스냅샷을 찾을 수 없습니다. CLI에서 " f"`python recommend.py {account_norm}` 명령으로 데이터를 생성해 주세요."
+        )
+        logger.warning("추천 스냅샷을 찾을 수 없습니다 (account=%s)", account_norm)
+        return None, message, country_code
+
+    rows = snapshot.get("recommendations") or []
+    try:
+        df = recommendations_to_dataframe(country_code, rows)
+    except Exception as exc:
+        return None, f"추천 데이터를 변환하는 중 오류가 발생했습니다: {exc}", country_code
+
+    updated_dt = snapshot.get("updated_at") or snapshot.get("created_at")
+    if isinstance(updated_dt, datetime):
+        updated_at = updated_dt.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        updated_at = str(updated_dt) if updated_dt else None
+
+    loaded_country_code = snapshot.get("country_code") or country_code
+    return df, updated_at, str(loaded_country_code or country_code)
 
 
 TABLE_VISIBLE_ROWS = 16  # 헤더 1줄 + 내용 15줄

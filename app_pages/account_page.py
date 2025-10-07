@@ -11,7 +11,7 @@ from utils.settings_loader import AccountSettingsError, get_account_settings
 
 _DEFAULT_CAPTIONS: Dict[str, str] = {
     "kor": "내부 알고리즘 기반 10종목 추천",
-    "aus": "data/results/recommendation_{account}.json",
+    "aus": "MongoDB stock_recommendations 컬렉션 기반",
 }
 
 _DATAFRAME_CSS = """
@@ -38,7 +38,7 @@ def _resolve_caption(settings: Dict[str, Any], country_code: str) -> str:
         return raw.strip()
     return _DEFAULT_CAPTIONS.get(
         country_code,
-        f"data/results/recommendation_{country_code}.json 기반",
+        "MongoDB stock_recommendations 컬렉션 기반",
     )
 
 
