@@ -197,7 +197,7 @@
                 "ticker": "ASX:NDQ",
                 "name": "BetaShares NASDAQ 100 ETF",
                 "recommend_enabled": true,
-                "listing_date": "2022-07-25"
+                "listing_date": "2025-10-06"
             },
             {
                 "ticker": "ASX:VTS",
@@ -215,7 +215,7 @@
                 "ticker": "ASX:SPY",
                 "name": "SPDR S&P 500 ETF",
                 "recommend_enabled": true,
-                "listing_date": "2022-07-25"
+                "listing_date": "2025-10-06"
             },
             {
                 "ticker": "ASX:IVV",

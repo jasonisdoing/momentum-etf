@@ -210,7 +210,7 @@ python scripts/find.py --type etf --min-change 3.0
 - `replace_weaker_stock`: 약한 종목 교체 여부
 - `replace_threshold`: 종목 교체 임계값
 - `MARKET_REGIME_FILTER_TICKER`: 레짐 필터 지수 티커 (`strategy.static`에 정의)
-- `MARKET_REGIME_FILTER_MA_PERIOD`: 레짐 필터 이동평균 기간 (`strategy.tuning`에 정의, 튜닝 대상)
+- `MARKET_REGIME_FILTER_MA_PERIOD`: 레짐 필터 이동평균 기간 (`strategy.static`에 정의, 고정값)
 
 각 국가별로 DB에 저장되어 해당 국가 현황/백테스트에 반영됩니다.
 

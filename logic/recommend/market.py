@@ -45,11 +45,11 @@ def get_market_regime_status_string() -> Optional[str]:
             or tuning.get("MARKET_REGIME_FILTER_TICKER")
             or ""
         ).strip()
-        regime_ma_raw = (
-            tuning.get("MARKET_REGIME_FILTER_MA_PERIOD") if isinstance(tuning, dict) else None
-        )
-        if regime_ma_raw is None and isinstance(static, dict):
+        regime_ma_raw = None
+        if isinstance(static, dict):
             regime_ma_raw = static.get("MARKET_REGIME_FILTER_MA_PERIOD")
+        if regime_ma_raw is None and isinstance(tuning, dict):
+            regime_ma_raw = tuning.get("MARKET_REGIME_FILTER_MA_PERIOD")
 
         if not regime_ticker or regime_ma_raw is None:
             return '<span style="color:grey">시장 상태: 비활성화</span>'

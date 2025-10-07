@@ -2,17 +2,17 @@
     "COMMON_CONSTANTS": {
         "MONTHS_CONFIG": [
             {
-                "MONTHS_RANGE": 3,
+                "MONTHS_RANGE": 6,
                 "weight": 0.5,
                 "source": "short_term"
             },
             {
-                "MONTHS_RANGE": 6,
+                "MONTHS_RANGE": 12,
                 "weight": 0.3,
                 "source": "mid_term"
             },
             {
-                "MONTHS_RANGE": 9,
+                "MONTHS_RANGE": 24,
                 "weight": 0.2,
                 "source": "long_term"
             }

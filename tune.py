@@ -22,19 +22,16 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_RANGE": np.arange(10, 51, 1),
         "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": np.arange(0.1, 1.1, 0.1),
-        "MARKET_REGIME_FILTER_MA_PERIOD": np.arange(10, 51, 1),
     },
     "kor": {
-        "MA_RANGE": np.arange(10, 101, 1),
+        "MA_RANGE": np.arange(10, 51, 1),
         "PORTFOLIO_TOPN": [10],
-        "REPLACE_SCORE_THRESHOLD": [0.5],
-        "MARKET_REGIME_FILTER_MA_PERIOD": np.arange(10, 51, 1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0.1, 1.1, 0.1),
     },
     "us": {
         "MA_RANGE": np.arange(5, 31, 1),
         "PORTFOLIO_TOPN": np.arange(5, 11, 1),
         "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
-        "MARKET_REGIME_FILTER_MA_PERIOD": [20],
     },
 }
 
@@ -55,6 +52,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         help="튜닝 결과 저장 경로 (기본값: data/results/tune_<account>.json)",
+    )
+    parser.add_argument(
+        "--n-trials",
+        type=int,
+        help="Optuna 시도 횟수 제한 (기본값: 탐색 공간 전체)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        help="월별 튜닝 시간 제한(초)",
     )
     return parser
 
@@ -80,6 +87,8 @@ def main() -> None:
         output_path=output_path,
         results_dir=RESULTS_DIR,
         tuning_config=TUNING_CONFIG,
+        n_trials=args.n_trials,
+        timeout=args.timeout,
     )
     logger.info("✅ 튜닝 결과를 '%s'에 저장했습니다.", output_path)
 

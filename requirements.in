@@ -13,5 +13,6 @@ pandas_market_calendars
 croniter
 cron-descriptor
 flake8
+optuna
 watchdog
 slack-sdk
