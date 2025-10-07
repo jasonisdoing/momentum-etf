@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from utils.logger import get_app_logger
+from utils.settings_loader import load_common_settings
 
 from utils.settings_loader import (
     AccountSettingsError,
@@ -129,10 +130,11 @@ def iter_accounts() -> Iterable[str]:
 def get_common_file_settings() -> dict[str, Any]:
     """data/settings/common.py의 공통 설정을 딕셔너리로 반환합니다."""
 
-    return {
-        "MARKET_REGIME_FILTER_ENABLED": True,
-        "REALTIME_PRICE_ENABLED": True,
-    }
+    try:
+        return load_common_settings()
+    except Exception as exc:
+        logger.warning("공통 설정 로드 실패: %s", exc)
+        return {}
 
 
 __all__ = [

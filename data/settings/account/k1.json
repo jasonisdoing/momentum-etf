@@ -9,7 +9,7 @@
         "tuning": {
             "MA_PERIOD": 10,
             "PORTFOLIO_TOPN": 10,
-            "REPLACE_SCORE_THRESHOLD": 0.84
+            "REPLACE_SCORE_THRESHOLD": 0.0
         },
         "static": {
             "COOLDOWN_DAYS": 1,

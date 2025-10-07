@@ -255,6 +255,34 @@ def get_account_slack_channel(account_id: str) -> Optional[str]:
     return channel_value
 
 
+@lru_cache(maxsize=1)
+def load_common_settings() -> Dict[str, Any]:
+    """data/settings/common.py 모듈을 로드하여 딕셔너리 형태로 반환합니다."""
+
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "settings_common",
+            (SETTINGS_ROOT / "common.py"),
+        )
+        if spec is None or spec.loader is None:
+            return {}
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # type: ignore[attr-defined]
+    except FileNotFoundError:
+        raise AccountSettingsError(f"공통 설정 파일이 없습니다: {SETTINGS_ROOT / 'common.py'}")
+    except Exception as exc:
+        raise AccountSettingsError(f"공통 설정을 로드하지 못했습니다: {exc}") from exc
+
+    data = {
+        key: getattr(module, key)
+        for key in dir(module)
+        if key.isupper() and not key.startswith("_")
+    }
+    return data
+
+
 def get_strategy_rules(account_id: str):
     """계정별 전략 설정을 `StrategyRules` 객체로 반환합니다."""
 

@@ -261,7 +261,10 @@ def run_recommend_for_country(
 
 def run_cache_refresh() -> None:
     """모든 국가의 가격 캐시를 갱신합니다."""
-    start_date = "2020-01-01"
+    from utils.account_registry import get_common_file_settings
+
+    common_settings = get_common_file_settings()
+    start_date = str(common_settings.get("CACHE_START_DATE") or "2020-01-01")
     countries = ["kor", "aus"]
     logging.info("Running cache refresh (start=%s, countries=%s)", start_date, ",".join(countries))
     try:

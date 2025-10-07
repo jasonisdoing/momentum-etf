@@ -553,6 +553,10 @@ def _fetch_ohlcv_with_cache(
         request_start_dt = listing_ts
 
     cached_df = load_cached_frame(country_code, ticker)
+    cache_seed_dt = _get_cache_start_dt()
+    if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
+        if request_start_dt > cache_seed_dt:
+            request_start_dt = cache_seed_dt
     missing_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
     cache_start: Optional[pd.Timestamp] = None
     cache_end: Optional[pd.Timestamp] = None
@@ -667,7 +671,7 @@ def _fetch_ohlcv_with_cache(
         return None
 
     first_available = combined_df.index.min().normalize()
-    if listing_ts is None or first_available != listing_ts:
+    if listing_ts is None or first_available < listing_ts:
         try:
             set_listing_date(
                 country_code,
