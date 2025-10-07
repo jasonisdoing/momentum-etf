@@ -148,6 +148,7 @@ def render_recommendation_table(df: pd.DataFrame, *, country_code: str) -> None:
             "1주(%)": st.column_config.NumberColumn("1주(%)", width="small"),
             "2주(%)": st.column_config.NumberColumn("2주(%)", width="small"),
             "3주(%)": st.column_config.NumberColumn("3주(%)", width="small"),
+            "추세(3주)": st.column_config.LineChartColumn("추세(3주)", width="small"),
             "점수": st.column_config.NumberColumn("점수", width="small"),  # 문자열 대신 수치형 컬럼으로 표시
             "문구": st.column_config.TextColumn("문구", width="large"),  # 기본값 -> large
         },

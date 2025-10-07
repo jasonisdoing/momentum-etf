@@ -664,6 +664,13 @@ def generate_account_recommendation_report(
             ma_score_series = calculate_ma_score(df["Close"], moving_average)
             score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
 
+            pct_changes = df["Close"].pct_change().dropna() * 100
+            trend_series = (
+                [round(float(val), 2) for val in pct_changes.tail(15).tolist()]
+                if not pct_changes.empty
+                else []
+            )
+
             data_by_tkr[ticker] = {
                 "price": latest_close,
                 "prev_close": prev_close,
@@ -678,6 +685,7 @@ def generate_account_recommendation_report(
                 "ret_1w": _compute_trailing_return(df["Close"], 5),
                 "ret_2w": _compute_trailing_return(df["Close"], 10),
                 "ret_3w": _compute_trailing_return(df["Close"], 15),
+                "trend_returns": trend_series,
             }
         else:
             # 데이터가 없을 경우 기본값
@@ -694,6 +702,7 @@ def generate_account_recommendation_report(
                 "ret_1w": 0.0,
                 "ret_2w": 0.0,
                 "ret_3w": 0.0,
+                "trend_returns": [],
             }
 
     regime_info = None
@@ -978,6 +987,7 @@ def generate_account_recommendation_report(
             "return_1w": ret_1w,
             "return_2w": ret_2w,
             "return_3w": ret_3w,
+            "trend_returns": ticker_data.get("trend_returns", []),
             "score": score_val,
             "streak": streak_val,
             "base_date": base_date.strftime("%Y-%m-%d"),

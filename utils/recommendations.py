@@ -24,6 +24,7 @@ _DISPLAY_COLUMNS = [
     "1주(%)",
     "2주(%)",
     "3주(%)",
+    "추세(3주)",
     "점수",
     "지속",
     "문구",
@@ -108,6 +109,19 @@ def _format_days(value: Any) -> str:
     return f"{days}일"
 
 
+def _trend_series(row: dict[str, Any]) -> list[float]:
+    raw_series = row.get("trend_returns")
+    if isinstance(raw_series, (list, tuple)):
+        values: list[float] = []
+        for raw in raw_series:
+            try:
+                values.append(float(raw))
+            except (TypeError, ValueError):
+                continue
+        return values
+    return []
+
+
 def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -> pd.DataFrame:
     """추천 종목 데이터를 표 렌더링에 적합한 DataFrame으로 변환합니다."""
 
@@ -142,6 +156,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "1주(%)": return_1w,
                 "2주(%)": return_2w,
                 "3주(%)": return_3w,
+                "추세(3주)": _trend_series(row),
                 "점수": score,
                 "지속": streak,
                 "문구": phrase or row.get("phrase", ""),
