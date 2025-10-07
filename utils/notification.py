@@ -46,7 +46,7 @@ from utils.settings_loader import get_account_slack_channel
 from dotenv import load_dotenv
 
 load_dotenv()
-APP_DATE_TIME = "2025-10-07-09"
+APP_DATE_TIME = "2025-10-07-10"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 
 _LAST_ERROR: Optional[str] = None
@@ -414,13 +414,13 @@ def _generate_recommendation_report_image(
         logger.info("[SLACK] 추천 이미지 생략 - 표시할 행 없음")
         return None
 
-    fig_width = max(8.0, 1.4 * len(display_headers))
-    fig_height = max(2.5, 0.55 * len(cell_rows) + 1.2)
+    fig_width = max(8.0, 1.2 * len(display_headers))
+    fig_height = max(2.5, 0.45 * len(cell_rows) + 1.0)
 
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     try:
         ax.axis("off")
-        ax.set_title(title, fontsize=12, fontweight="bold", loc="left", pad=18)
+        ax.set_title(title, fontsize=12, fontweight="bold", loc="left", pad=12)
 
         table = ax.table(
             cellText=cell_rows,
@@ -430,7 +430,7 @@ def _generate_recommendation_report_image(
         )
         table.auto_set_font_size(False)
         table.set_fontsize(9)
-        table.scale(1, 1.3)
+        table.scale(1.2, 1.6)
 
         for col in range(len(display_headers)):
             try:
@@ -443,6 +443,9 @@ def _generate_recommendation_report_image(
             if row_idx == 0:
                 cell.set_facecolor("#f2f2f2")
                 cell.set_text_props(weight="bold")
+
+        # Reduce surrounding whitespace while keeping the table readable.
+        fig.subplots_adjust(left=0.02, right=0.98, top=0.88, bottom=0.05)
 
         output_dir = Path(os.environ.get("SLACK_REPORT_IMAGE_DIR", _DEFAULT_REPORT_IMAGE_DIR))
         output_dir.mkdir(parents=True, exist_ok=True)
