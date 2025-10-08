@@ -46,6 +46,7 @@ from utils.env import load_env_if_present
 from utils.notification import (
     compose_recommendation_slack_message,
     send_recommendation_slack_notification,
+    should_notify_on_schedule,
 )
 from utils.schedule_config import get_all_country_schedules
 from utils.data_loader import is_trading_day
@@ -205,29 +206,37 @@ def run_recommendation_generation(
         )
         return
 
-    slack_payload = compose_recommendation_slack_message(
-        account_norm,
-        report,
-        duration=duration,
-    )
-
-    notified = send_recommendation_slack_notification(
-        account_norm,
-        slack_payload,
-    )
-    base_date_str = report.base_date.strftime("%Y-%m-%d")
-    if notified:
-        logging.info(
-            "[%s/%s] Slack notification completed in %.1fs",
-            target_country.upper(),
-            base_date_str,
-            duration,
+    # notify_cron 스케줄에 따라 알림을 보낼지 결정
+    if should_notify_on_schedule(target_country):
+        logging.info("Sending Slack notification for %s as per notify_cron schedule.", account_norm)
+        slack_payload = compose_recommendation_slack_message(
+            account_norm,
+            report,
+            duration=duration,
         )
+
+        notified = send_recommendation_slack_notification(
+            account_norm,
+            slack_payload,
+        )
+        base_date_str = report.base_date.strftime("%Y-%m-%d")
+        if notified:
+            logging.info(
+                "[%s/%s] Slack notification completed in %.1fs",
+                target_country.upper(),
+                base_date_str,
+                duration,
+            )
+        else:
+            logging.info(
+                "[%s/%s] Slack notification skipped or failed",
+                target_country.upper(),
+                base_date_str,
+            )
     else:
         logging.info(
-            "[%s/%s] Slack notification skipped or failed",
-            target_country.upper(),
-            base_date_str,
+            "Skipping Slack notification for %s as it's not a scheduled notification time.",
+            account_norm,
         )
 
 
