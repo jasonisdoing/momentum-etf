@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from os import cpu_count
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple
 
 import optuna
 import pandas as pd
@@ -30,7 +30,6 @@ from utils.data_loader import (
     fetch_ohlcv_for_tickers,
     get_latest_trading_day,
     fetch_ohlcv,
-    PriceDataUnavailable,
 )
 from utils.stock_list_io import get_etfs
 
@@ -135,6 +134,7 @@ def _execute_tuning_for_months(
     months_range: int,
     search_space: Mapping[str, List[Any]],
     prefetched_data: Mapping[str, DataFrame],
+    excluded_tickers: Optional[Collection[str]],
     end_date: Timestamp,
     combo_count: int,
     n_trials: Optional[int],
@@ -257,10 +257,8 @@ def _execute_tuning_for_months(
                 },
                 prefetched_data=prefetched_data,
                 strategy_override=override_rules,
+                excluded_tickers=excluded_tickers,
             )
-        except PriceDataUnavailable as exc:
-            logger.error("[튜닝] %s 데이터가 부족하여 튜닝을 중단합니다: %s", account_norm.upper(), exc)
-            raise
         except Exception as exc:  # pragma: no cover - 백테스트 예외 방어
             failures.append(
                 {
@@ -771,17 +769,12 @@ def run_account_tuning(
         warmup_days,
     )
 
-    try:
-        prefetched = fetch_ohlcv_for_tickers(
-            tickers,
-            country_code,
-            date_range=date_range_prefetch,
-            warmup_days=warmup_days,
-        )
-    except PriceDataUnavailable as exc:
-        logger.error("[튜닝] 데이터 프리패치에 실패했습니다: %s", exc)
-        return None
-
+    prefetched, missing_prefetch = fetch_ohlcv_for_tickers(
+        tickers,
+        country_code,
+        date_range=date_range_prefetch,
+        warmup_days=warmup_days,
+    )
     prefetched_map: Dict[str, DataFrame] = dict(prefetched)
 
     regime_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
@@ -793,6 +786,21 @@ def run_account_tuning(
         )
         if regime_prefetch is not None and not regime_prefetch.empty:
             prefetched_map[regime_ticker] = regime_prefetch
+        else:
+            missing_prefetch.append(regime_ticker)
+
+    excluded_ticker_set: set[str] = {
+        str(ticker).strip().upper()
+        for ticker in missing_prefetch
+        if isinstance(ticker, str) and str(ticker).strip()
+    }
+    if excluded_ticker_set:
+        logger.warning(
+            "[튜닝] %s 데이터 부족으로 제외할 종목 (%d): %s",
+            account_norm.upper(),
+            len(excluded_ticker_set),
+            ", ".join(sorted(excluded_ticker_set)),
+        )
 
     if timeout is not None:
         try:
@@ -840,6 +848,7 @@ def run_account_tuning(
                 months_range=months_value,
                 search_space=search_space,
                 prefetched_data=prefetched_map,
+                excluded_tickers=excluded_ticker_set,
                 end_date=end_date,
                 combo_count=combo_count,
                 n_trials=trials_limit,
@@ -854,14 +863,6 @@ def run_account_tuning(
             idx, item = futures[future]
             try:
                 single_result = future.result()
-            except PriceDataUnavailable as exc:
-                logger.error(
-                    "[튜닝] %s (%s개월) 데이터 부족으로 튜닝을 중단합니다: %s",
-                    account_norm.upper(),
-                    item.get("months_range"),
-                    exc,
-                )
-                return None
             except Exception as exc:  # pragma: no cover - 병렬 실행 실패 방어
                 logger.error(
                     "[튜닝] %s (%s개월) 병렬 실행 실패: %s",

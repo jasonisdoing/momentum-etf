@@ -21,17 +21,17 @@ TUNING_CONFIG: dict[str, dict] = {
     "aus": {
         "MA_RANGE": np.arange(1, 101, 1),
         "PORTFOLIO_TOPN": [5],
-        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 1.1, 0.1),
     },
     "kor": {
         "MA_RANGE": np.arange(1, 101, 1),
         "PORTFOLIO_TOPN": [10],
-        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 1.1, 0.1),
     },
     "us": {
         "MA_RANGE": np.arange(5, 31, 1),
         "PORTFOLIO_TOPN": np.arange(5, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 1.1, 0.1),
     },
 }
 

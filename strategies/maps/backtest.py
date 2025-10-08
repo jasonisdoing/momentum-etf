@@ -10,7 +10,7 @@ from typing import Callable, Dict, List, Optional, Set
 
 import pandas as pd
 
-from utils.data_loader import fetch_ohlcv, PriceDataUnavailable
+from utils.data_loader import fetch_ohlcv
 from utils.indicators import calculate_moving_average_signals, calculate_ma_score
 from utils.report import format_kr_money, format_aud_money
 from utils.logger import get_app_logger
@@ -161,7 +161,12 @@ def run_portfolio_backtest(
                 regime_filter_ticker, country=country, date_range=fetch_date_range
             )
         if market_regime_df is None or market_regime_df.empty:
-            raise PriceDataUnavailable(regime_filter_ticker, "시장 레짐 필터 데이터가 비어 있습니다.")
+            logger.warning(
+                "시장 레짐 필터 티커(%s)의 데이터를 가져올 수 없어 필터를 비활성화합니다.",
+                regime_filter_ticker,
+            )
+            regime_filter_enabled = False
+            market_regime_df = None
         market_regime_df = market_regime_df.sort_index()
         market_regime_df["MA"] = (
             market_regime_df["Close"].rolling(window=regime_filter_ma_period).mean()
@@ -178,8 +183,6 @@ def run_portfolio_backtest(
         # 미리 로드된 데이터가 있으면 사용하고, 없으면 새로 조회
         if prefetched_data and ticker in prefetched_data:
             df = prefetched_data[ticker]
-            if df is None or df.empty:
-                raise PriceDataUnavailable(ticker, "사전 로드된 데이터가 비어 있습니다.")
         else:
             # prefetched_data가 없으면 date_range를 사용하여 직접 조회
             df = fetch_ohlcv(ticker, country=country, date_range=fetch_date_range)
@@ -193,7 +196,7 @@ def run_portfolio_backtest(
 
     missing_metrics = [t for t in tickers_to_process if t not in metrics_by_ticker]
     if missing_metrics:
-        raise PriceDataUnavailable(missing_metrics)
+        logger.warning("가격 데이터 부족으로 제외된 종목: %s", ", ".join(sorted(set(missing_metrics))))
 
     # 모든 종목의 거래일을 합집합하여 전체 백테스트 기간을 설정합니다.
     union_index = pd.DatetimeIndex([])

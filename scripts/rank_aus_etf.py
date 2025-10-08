@@ -21,7 +21,7 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.data_loader import fetch_ohlcv, fetch_yfinance_name, PriceDataUnavailable
+from utils.data_loader import fetch_ohlcv, fetch_yfinance_name
 from utils.stock_list_io import get_etfs
 from utils.logger import get_app_logger
 
@@ -41,10 +41,7 @@ def calculate_annual_return(ticker: str) -> tuple[float | None, str | None]:
     date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
 
     # 데이터 로더를 사용하여 OHLCV 데이터 조회
-    try:
-        df = fetch_ohlcv(ticker, country="aus", date_range=date_range)
-    except PriceDataUnavailable:
-        return None, None
+    df = fetch_ohlcv(ticker, country="aus", date_range=date_range)
 
     if df is None or df.empty or len(df) < 2:
         return None, None

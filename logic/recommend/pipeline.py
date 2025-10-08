@@ -33,7 +33,6 @@ from utils.data_loader import (
     get_latest_trading_day,
     get_next_trading_day,
     count_trading_days,
-    PriceDataUnavailable,
 )
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
@@ -138,26 +137,40 @@ def _fetch_dataframe(
     base_date: Optional[pd.Timestamp],
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Optional[pd.DataFrame]:
-    if prefetched_data and ticker in prefetched_data:
-        df = prefetched_data[ticker]
-    else:
-        months_back = max(12, ma_period)  # 최소 1년치 데이터 요청
-        df = fetch_ohlcv(
-            ticker,
-            country=country,
-            months_back=months_back,
-            base_date=base_date,
-        )
+    try:
+        if prefetched_data and ticker in prefetched_data:
+            df = prefetched_data[ticker]
+        else:
+            months_back = max(12, ma_period)  # 최소 1년치 데이터 요청
+            df = fetch_ohlcv(
+                ticker,
+                country=country,
+                months_back=months_back,
+                base_date=base_date,
+            )
 
-    if "Close" not in df.columns:
-        raise PriceDataUnavailable(ticker, "종가(Close) 컬럼이 없습니다.")
+        if df is None or df.empty:
+            logger.warning("%s에 대한 데이터를 가져오지 못했습니다.", ticker)
+            return None
 
-    df = df.dropna(subset=["Close"])
+        if "Close" not in df.columns:
+            logger.warning("%s에 대한 종가(Close) 데이터가 없습니다.", ticker)
+            return None
 
-    if df.empty:
-        raise PriceDataUnavailable(ticker, "유효한 종가 데이터가 없습니다.")
+        df = df.dropna(subset=["Close"])
 
-    return df
+        if df.empty:
+            logger.warning("%s에 대한 유효한 데이터가 없습니다.", ticker)
+            return None
+
+        return df
+
+    except Exception as e:
+        logger.warning("%s 데이터 처리 중 오류 발생: %s", ticker, e)
+        import traceback
+
+        traceback.print_exc()
+        return None
 
 
 def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
@@ -595,23 +608,27 @@ def generate_account_recommendation_report(
         len(tickers_all),
     )
     fetch_start = time.perf_counter()
-    try:
-        prefetched_data = fetch_ohlcv_for_tickers(
-            tickers_all,
-            country_code,
-            date_range=[start_date, end_date],
-            warmup_days=warmup_days,
-        )
-    except PriceDataUnavailable as exc:
-        logger.error("%s 계정 데이터 로딩 실패: %s", account_id.upper(), exc)
-        raise
+    prefetched_data, missing_prefetch = fetch_ohlcv_for_tickers(
+        tickers_all,
+        country_code,
+        date_range=[start_date, end_date],
+        warmup_days=warmup_days,
+    )
     logger.info(
         "[%s] 가격 데이터 로딩 완료 (%.1fs)",
         account_id.upper(),
         time.perf_counter() - fetch_start,
     )
+    missing_logged = set(missing_prefetch)
+    if missing_prefetch:
+        logger.warning(
+            "[%s] 다음 종목의 가격 데이터를 확보하지 못해 제외합니다: %s",
+            account_id.upper(),
+            ", ".join(sorted(missing_logged)),
+        )
 
     data_by_tkr = {}
+    missing_data_tickers: List[str] = list(missing_prefetch)
     for stock in etf_universe:
         ticker = stock["ticker"]
         # 실제 데이터 가져오기
@@ -672,22 +689,17 @@ def generate_account_recommendation_report(
                 "trend_prices": trend_prices,
             }
         else:
-            # 데이터가 없을 경우 기본값
-            data_by_tkr[ticker] = {
-                "price": 0.0,
-                "prev_close": 0.0,
-                "daily_pct": 0.0,
-                "close": pd.Series(),  # 빈 Series
-                "s1": None,
-                "s2": None,
-                "score": 0.0,
-                "filter": 0,
-                "drawdown_from_peak": None,
-                "ret_1w": 0.0,
-                "ret_2w": 0.0,
-                "ret_3w": 0.0,
-                "trend_prices": [],
-            }
+            missing_data_tickers.append(ticker)
+
+    if missing_data_tickers:
+        extra_missing = set(missing_data_tickers) - missing_logged
+        if extra_missing:
+            logger.warning(
+                "[%s] 분석 중 추가로 제외된 종목: %s",
+                account_id.upper(),
+                ", ".join(sorted(extra_missing)),
+            )
+        missing_logged.update(missing_data_tickers)
 
     regime_info = None
 

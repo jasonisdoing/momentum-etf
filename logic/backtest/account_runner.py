@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional, List, Tuple
+from typing import Any, Collection, Dict, Mapping, Optional, List, Tuple
 import math
 
 import pandas as pd
@@ -24,7 +24,6 @@ from utils.data_loader import (
     fetch_ohlcv,
     get_aud_to_krw_rate,
     get_usd_to_krw_rate,
-    PriceDataUnavailable,
 )
 from utils.stock_list_io import get_etfs
 from utils.logger import get_app_logger
@@ -114,6 +113,7 @@ def run_account_backtest(
     prefetched_data: Optional[Mapping[str, pd.DataFrame]] = None,
     override_settings: Optional[Dict[str, Any]] = None,
     strategy_override: Optional[StrategyRules] = None,  # type: ignore
+    excluded_tickers: Optional[Collection[str]] = None,
 ) -> AccountBacktestResult:
     """계정 ID를 기반으로 백테스트를 실행합니다."""
 
@@ -169,9 +169,31 @@ def run_account_backtest(
     initial_capital_value = capital_info.local
 
     _log(f"[백테스트] {account_id.upper()} 계정({country_code.upper()}) ETF 목록을 로드하는 중...")
+    excluded_upper: set[str] = set()
+    if excluded_tickers:
+        excluded_upper = {
+            str(ticker).strip().upper()
+            for ticker in excluded_tickers
+            if isinstance(ticker, str) and str(ticker).strip()
+        }
+
     etf_universe = get_etfs(country_code)
     if not etf_universe:
         raise AccountSettingsError(f"'data/stocks/{country_code}.json' 파일에서 종목을 찾을 수 없습니다.")
+
+    if excluded_upper:
+        before_count = len(etf_universe)
+        etf_universe = [
+            stock
+            for stock in etf_universe
+            if str(stock.get("ticker", "")).strip().upper() not in excluded_upper
+        ]
+        removed = before_count - len(etf_universe)
+        if removed > 0:
+            _log(f"[백테스트] 데이터 부족으로 제외된 {removed}개 종목을 유니버스에서 제거합니다.")
+    if not etf_universe:
+        raise RuntimeError("백테스트에 사용할 유효한 종목이 없습니다.")
+
     _log(f"[백테스트] {len(etf_universe)}개의 ETF를 찾았습니다.")
 
     ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
@@ -604,10 +626,13 @@ def _build_summary(
             date_range=[start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         )
 
+        if benchmark_df is None or benchmark_df.empty:
+            return None
+
         benchmark_df = benchmark_df.sort_index()
         benchmark_df = benchmark_df.loc[benchmark_df.index.intersection(pv_series.index)]
         if benchmark_df.empty:
-            raise PriceDataUnavailable(ticker, "벤치마크 데이터가 비어 있습니다.")
+            return None
 
         start_price = float(benchmark_df["Close"].iloc[0])
         end_price = float(benchmark_df["Close"].iloc[-1])
