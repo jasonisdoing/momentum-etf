@@ -105,9 +105,7 @@ def delete_account_trades(account_id: str) -> dict[str, int]:
     }
 
 
-def fetch_recent_trades(
-    account_id: str | None = None, *, limit: int = 100, include_deleted: bool = False
-) -> List[dict[str, Any]]:
+def fetch_recent_trades(account_id: str | None = None, *, limit: int = 100, include_deleted: bool = False) -> List[dict[str, Any]]:
     """최근 트레이드 목록을 반환합니다."""
     db = get_db_connection()
     if db is None:
@@ -122,11 +120,7 @@ def fetch_recent_trades(
     if account_id:
         query["account"] = account_id.strip().lower()
 
-    cursor = (
-        db.trades.find(query)
-        .sort([("executed_at", DESCENDING), ("_id", DESCENDING)])
-        .limit(int(limit))
-    )
+    cursor = db.trades.find(query).sort([("executed_at", DESCENDING), ("_id", DESCENDING)]).limit(int(limit))
 
     trades: List[dict[str, Any]] = []
     for doc in cursor:

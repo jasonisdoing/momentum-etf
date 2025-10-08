@@ -123,9 +123,7 @@ def main() -> None:
     )
 
     base_date = getattr(report, "base_date", None)
-    base_date_str = (
-        base_date.strftime("%Y-%m-%d") if hasattr(base_date, "strftime") else str(base_date)
-    )
+    base_date_str = base_date.strftime("%Y-%m-%d") if hasattr(base_date, "strftime") else str(base_date)
     if notified:
         logger.info(
             "[%s/%s] Slack 알림 전송이 완료되었습니다 (소요 %.1fs)",

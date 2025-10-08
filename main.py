@@ -35,9 +35,7 @@ def load_account_recommendations(
         return None, f"추천 스냅샷을 불러오지 못했습니다: {exc}", country_code
 
     if snapshot is None:
-        message = (
-            "추천 스냅샷을 찾을 수 없습니다. CLI에서 " f"`python recommend.py {account_norm}` 명령으로 데이터를 생성해 주세요."
-        )
+        message = "추천 스냅샷을 찾을 수 없습니다. CLI에서 " f"`python recommend.py {account_norm}` 명령으로 데이터를 생성해 주세요."
         logger.warning("추천 스냅샷을 찾을 수 없습니다 (account=%s)", account_norm)
         return None, message, country_code
 
@@ -89,11 +87,7 @@ def _load_account_ui_settings(account_id: str) -> tuple[str, str]:
 def _resolve_row_colors(country_code: str) -> dict[str, str]:
     country_code = (country_code or "").strip().lower()
     # 기본값: DECISION_CONFIG의 background를 기반으로 구성
-    base_colors = {
-        key.upper(): cfg.get("background")
-        for key, cfg in DECISION_CONFIG.items()
-        if isinstance(cfg, dict) and cfg.get("background")
-    }
+    base_colors = {key.upper(): cfg.get("background") for key, cfg in DECISION_CONFIG.items() if isinstance(cfg, dict) and cfg.get("background")}
 
     return base_colors
 

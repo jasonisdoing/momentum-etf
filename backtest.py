@@ -1,6 +1,5 @@
 """국가별 백테스트 실행 스크립트."""
 
-
 from __future__ import annotations
 
 import argparse

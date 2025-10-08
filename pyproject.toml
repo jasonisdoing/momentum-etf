@@ -1,6 +1,6 @@
 [tool.black]
 # black의 기본 줄 길이는 88자입니다.
-line-length = 100
+line-length = 150
 # target-version = ['py312'] # 특정 파이썬 버전에 맞출 경우
 
 [tool.isort]

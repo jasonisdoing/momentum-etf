@@ -54,14 +54,10 @@ def _load_precision_settings() -> Dict[str, Any]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise AccountSettingsError(
-            f"정밀도 설정 파일이 올바른 JSON 형식이 아닙니다: {PRECISION_SETTINGS_PATH}"
-        ) from exc
+        raise AccountSettingsError(f"정밀도 설정 파일이 올바른 JSON 형식이 아닙니다: {PRECISION_SETTINGS_PATH}") from exc
 
     if not isinstance(data, dict):
-        raise AccountSettingsError(
-            f"정밀도 설정 파일의 루트는 객체(JSON object)여야 합니다: {PRECISION_SETTINGS_PATH}"
-        )
+        raise AccountSettingsError(f"정밀도 설정 파일의 루트는 객체(JSON object)여야 합니다: {PRECISION_SETTINGS_PATH}")
 
     return data
 
@@ -275,11 +271,7 @@ def load_common_settings() -> Dict[str, Any]:
     except Exception as exc:
         raise AccountSettingsError(f"공통 설정을 로드하지 못했습니다: {exc}") from exc
 
-    data = {
-        key: getattr(module, key)
-        for key in dir(module)
-        if key.isupper() and not key.startswith("_")
-    }
+    data = {key: getattr(module, key) for key in dir(module) if key.isupper() and not key.startswith("_")}
     return data
 
 

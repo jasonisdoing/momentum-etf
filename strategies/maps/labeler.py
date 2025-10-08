@@ -1,4 +1,5 @@
 """Shared labeler for signal/backtest to keep messages/states consistent."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -20,23 +21,10 @@ def compute_net_trade_note(
     Returns a dict possibly containing keys: state, row4, note.
     """
     trades_buys = buy_trades_today_map.get(tkr, [])
-    total_buy_amount = (
-        sum(
-            float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0)
-            for tr in trades_buys
-        )
-        if trades_buys
-        else 0.0
-    )
+    total_buy_amount = sum(float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0) for tr in trades_buys) if trades_buys else 0.0
 
     sells = sell_trades_today_map.get(tkr, [])
-    total_sold_amount = (
-        sum(
-            float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0) for tr in sells
-        )
-        if sells
-        else 0.0
-    )
+    total_sold_amount = sum(float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0) for tr in sells) if sells else 0.0
     d = data_by_tkr.get(tkr) or {}
     current_shares_now = float(d.get("shares", 0.0) or 0.0)
 

@@ -180,9 +180,7 @@ def _execute_tuning_for_months(
         return None
 
     requested_trials = n_trials if n_trials is not None else combo_count
-    effective_trials = min(
-        max(requested_trials, 1), combo_count if combo_count > 0 else requested_trials
-    )
+    effective_trials = min(max(requested_trials, 1), combo_count if combo_count > 0 else requested_trials)
     progress_interval = max(1, effective_trials // 100)
 
     sampler = optuna.samplers.TPESampler(multivariate=True, group=True, seed=sampler_seed)
@@ -303,9 +301,7 @@ def _execute_tuning_for_months(
             "sharpe_ratio": _round_float(_safe_float(summary.get("sharpe_ratio"), 0.0)),
             "sortino_ratio": _round_float(_safe_float(summary.get("sortino_ratio"), 0.0)),
             "calmar_ratio": _round_float(_safe_float(summary.get("calmar_ratio"), 0.0)),
-            "cumulative_return_pct": _round_float(
-                _safe_float(summary.get("cumulative_return_pct"), 0.0)
-            ),
+            "cumulative_return_pct": _round_float(_safe_float(summary.get("cumulative_return_pct"), 0.0)),
             "final_value_local": final_value_local,
             "final_value": final_value_krw,
             "cui": _round_float(_safe_float(summary.get("cui"), 0.0)),
@@ -408,9 +404,7 @@ def _build_run_entry(
             mdd_values.append(mdd_val)
 
         period_return_val = _safe_float(best.get("cumulative_return_pct"), float("nan"))
-        period_return_display = (
-            _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None
-        )
+        period_return_display = _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None
         cagr_display = _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None
         mdd_display = _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None
 
@@ -584,9 +578,7 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
             cleaned["MDD"] = None
 
         period_val = _safe_float(item.get("period_return"), float("nan"))
-        cleaned["period_return"] = (
-            _round_float_places(period_val, 2) if math.isfinite(period_val) else None
-        )
+        cleaned["period_return"] = _round_float_places(period_val, 2) if math.isfinite(period_val) else None
 
         cleaned_results.append(cleaned)
 
@@ -661,12 +653,8 @@ def run_account_tuning(
 
     base_rules = get_strategy_rules(account_norm)
     strategy_settings = get_account_strategy(account_norm)
-    ma_values = _normalize_tuning_values(
-        config.get("MA_RANGE"), dtype=int, fallback=base_rules.ma_period
-    )
-    topn_values = _normalize_tuning_values(
-        config.get("PORTFOLIO_TOPN"), dtype=int, fallback=base_rules.portfolio_topn
-    )
+    ma_values = _normalize_tuning_values(config.get("MA_RANGE"), dtype=int, fallback=base_rules.ma_period)
+    topn_values = _normalize_tuning_values(config.get("PORTFOLIO_TOPN"), dtype=int, fallback=base_rules.portfolio_topn)
     replace_values = _normalize_tuning_values(
         config.get("REPLACE_SCORE_THRESHOLD"),
         dtype=float,
@@ -763,8 +751,7 @@ def run_account_tuning(
     valid_month_ranges = [
         int(item.get("months_range", 0))
         for item in month_items
-        if isinstance(item.get("months_range"), (int, float))
-        and int(item.get("months_range", 0)) > 0
+        if isinstance(item.get("months_range"), (int, float)) and int(item.get("months_range", 0)) > 0
     ]
     if not valid_month_ranges:
         logger.error("[튜닝] 유효한 기간 정보가 없습니다.")
@@ -812,11 +799,7 @@ def run_account_tuning(
         else:
             missing_prefetch.append(regime_ticker)
 
-    excluded_ticker_set: set[str] = {
-        str(ticker).strip().upper()
-        for ticker in missing_prefetch
-        if isinstance(ticker, str) and str(ticker).strip()
-    }
+    excluded_ticker_set: set[str] = {str(ticker).strip().upper() for ticker in missing_prefetch if isinstance(ticker, str) and str(ticker).strip()}
     if excluded_ticker_set:
         logger.warning(
             "[튜닝] %s 데이터 부족으로 제외할 종목 (%d): %s",

@@ -2,6 +2,7 @@
 
 Moved from the root signals module to avoid circular imports and duplication.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -71,9 +72,7 @@ def _canonical_ticker_key(ticker: str) -> str:
     return value.strip()
 
 
-def calculate_consecutive_holding_info(
-    held_tickers: List[str], account_id: str, as_of_date: datetime
-) -> Dict[str, Dict]:
+def calculate_consecutive_holding_info(held_tickers: List[str], account_id: str, as_of_date: datetime) -> Dict[str, Dict]:
     """
     Scan `trades` collection and compute consecutive holding start date per ticker
     for the given account. Uses a single query to avoid N+1 access.
@@ -199,9 +198,7 @@ def calculate_trade_cooldown_info(
     Returns:
         Dictionary mapping tickers to their trade cooldown info
     """
-    info: Dict[str, Dict[str, Optional[datetime]]] = {
-        tkr: {"last_buy": None, "last_sell": None} for tkr in tickers
-    }
+    info: Dict[str, Dict[str, Optional[datetime]]] = {tkr: {"last_buy": None, "last_sell": None} for tkr in tickers}
     if not tickers:
         return info
 

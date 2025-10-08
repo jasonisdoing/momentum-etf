@@ -110,10 +110,7 @@ class PykrxDataUnavailable(Exception):
         self.start_dt = start_dt
         self.end_dt = end_dt
         self.detail = detail
-        message = (
-            f"[{country.upper()}] pykrx data unavailable "
-            f"({start_dt.date()}~{end_dt.date()}): {detail}"
-        )
+        message = f"[{country.upper()}] pykrx data unavailable " f"({start_dt.date()}~{end_dt.date()}): {detail}"
         super().__init__(message)
 
 
@@ -405,9 +402,7 @@ def count_trading_days(
 
     country_code = (country or "").strip().lower()
 
-    days = get_trading_days(
-        start_ts.strftime("%Y-%m-%d"), end_ts.strftime("%Y-%m-%d"), country_code
-    )
+    days = get_trading_days(start_ts.strftime("%Y-%m-%d"), end_ts.strftime("%Y-%m-%d"), country_code)
     return len(days)
 
 
@@ -466,9 +461,7 @@ def get_next_trading_day(
     ref = (reference_date or pd.Timestamp.now()).normalize()
     search_end = ref + pd.DateOffset(days=search_horizon_days)
 
-    trading_days = get_trading_days(
-        ref.strftime("%Y-%m-%d"), search_end.strftime("%Y-%m-%d"), country_code
-    )
+    trading_days = get_trading_days(ref.strftime("%Y-%m-%d"), search_end.strftime("%Y-%m-%d"), country_code)
     for day in trading_days:
         day_norm = pd.Timestamp(day).normalize()
         if day_norm > ref:
@@ -605,9 +598,7 @@ def _fetch_ohlcv_with_cache(
         if cache_end is not None and _should_skip_pykrx_fetch(country_code, cache_end, miss_start):
             continue
 
-        trading_days_in_gap = get_trading_days(
-            miss_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d"), country_code
-        )
+        trading_days_in_gap = get_trading_days(miss_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d"), country_code)
         if not trading_days_in_gap:
             continue
 
@@ -779,9 +770,7 @@ def _fetch_ohlcv_core(
         except Exception as e:
             logger.warning("%s의 데이터 조회 중 오류: %s", ticker, e)
             if existing_df is not None and not existing_df.empty:
-                fallback_df = existing_df[
-                    (existing_df.index >= start_dt) & (existing_df.index <= end_dt)
-                ]
+                fallback_df = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
                 if not fallback_df.empty:
                     return fallback_df
             return None
@@ -794,9 +783,7 @@ def _fetch_ohlcv_core(
     if country_code == "kor":
         # pykrx에 데이터를 요청하기 전에, 해당 기간에 거래일이 있는지 먼저 확인합니다.
         # 거래일이 없는 기간(예: 주말, 연휴)에 대해 불필요한 예외 발생을 방지합니다.
-        trading_days_in_range = get_trading_days(
-            start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), country_code
-        )
+        trading_days_in_range = get_trading_days(start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), country_code)
         if not trading_days_in_range:
             return None  # 거래일이 없으므로 데이터를 가져올 수 없는 것이 정상입니다.
 
@@ -806,9 +793,7 @@ def _fetch_ohlcv_core(
 
         current_start = start_dt
         while current_start <= end_dt:
-            current_end = min(
-                current_start + pd.DateOffset(years=1) - pd.DateOffset(days=1), end_dt
-            )
+            current_end = min(current_start + pd.DateOffset(years=1) - pd.DateOffset(days=1), end_dt)
             start_str = current_start.strftime("%Y%m%d")
             end_str = current_end.strftime("%Y%m%d")
 

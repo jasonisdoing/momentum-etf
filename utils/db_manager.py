@@ -33,19 +33,13 @@ def get_db_connection():
         return _db_connection
 
     try:
-        connection_string = os.environ.get("MONGO_DB_CONNECTION_STRING") or getattr(
-            global_settings, "MONGO_DB_CONNECTION_STRING", None
-        )
-        db_name = os.environ.get("MONGO_DB_NAME") or getattr(
-            global_settings, "MONGO_DB_NAME", "momentum_etf_db"
-        )
+        connection_string = os.environ.get("MONGO_DB_CONNECTION_STRING") or getattr(global_settings, "MONGO_DB_CONNECTION_STRING", None)
+        db_name = os.environ.get("MONGO_DB_NAME") or getattr(global_settings, "MONGO_DB_NAME", "momentum_etf_db")
         # 연결 풀 관련 환경 변수(선택 사항)를 반영한다.
         max_pool = int(os.environ.get("MONGO_DB_MAX_POOL_SIZE", "20"))
         min_pool = int(os.environ.get("MONGO_DB_MIN_POOL_SIZE", "0"))
         max_idle = int(os.environ.get("MONGO_DB_MAX_IDLE_TIME_MS", "0"))  # 0 = driver default
-        wait_q_timeout = int(
-            os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "0")
-        )  # 0 = driver default
+        wait_q_timeout = int(os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "0"))  # 0 = driver default
 
         if not connection_string:
             raise ValueError("MongoDB 연결 문자열이 설정되지 않았습니다. (MONGO_DB_CONNECTION_STRING)")

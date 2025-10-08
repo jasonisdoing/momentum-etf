@@ -49,10 +49,7 @@ def _make_json_safe(obj: Any) -> Any:
         return [_make_json_safe(v) for v in obj.tolist()]
 
     if isinstance(obj, pd.DataFrame):
-        return [
-            {k: _make_json_safe(v) for k, v in record.items()}
-            for record in obj.to_dict(orient="records")
-        ]
+        return [{k: _make_json_safe(v) for k, v in record.items()} for record in obj.to_dict(orient="records")]
 
     return str(obj)
 

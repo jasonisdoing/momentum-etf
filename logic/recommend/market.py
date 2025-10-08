@@ -2,6 +2,7 @@
 
 Moved from the root signals module.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -40,11 +41,7 @@ def get_market_regime_status_string() -> Optional[str]:
             return '<span style="color:grey">시장 상태: 계정 식별 실패</span>'
 
         tuning, static = get_account_strategy_sections(account_id)
-        regime_ticker = str(
-            static.get("MARKET_REGIME_FILTER_TICKER")
-            or tuning.get("MARKET_REGIME_FILTER_TICKER")
-            or ""
-        ).strip()
+        regime_ticker = str(static.get("MARKET_REGIME_FILTER_TICKER") or tuning.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
         regime_ma_raw = None
         if isinstance(static, dict):
             regime_ma_raw = static.get("MARKET_REGIME_FILTER_MA_PERIOD")
@@ -118,10 +115,7 @@ def get_market_regime_status_string() -> Optional[str]:
 
         if completed_periods:
             recent_periods = completed_periods[-1:]
-            period_strings = [
-                f"{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}"
-                for start, end in recent_periods
-            ]
+            period_strings = [f"{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}" for start, end in recent_periods]
             if period_strings:
                 risk_off_periods_str = f" (최근 중단: {', '.join(period_strings)})"
 
@@ -134,9 +128,6 @@ def get_market_regime_status_string() -> Optional[str]:
 
         status_text = "위험" if is_risk_off else "안전"
         color = "orange" if is_risk_off else "green"
-        return (
-            f'시장: <span style="color:{color}">{status_text} ({proximity_pct:+.1f}%)</span>'
-            f"{risk_off_periods_str}"
-        )
+        return f'시장: <span style="color:{color}">{status_text} ({proximity_pct:+.1f}%)</span>' f"{risk_off_periods_str}"
 
     return f'<span style="color:grey">시장 상태: 계산 불가</span>{risk_off_periods_str}'

@@ -178,11 +178,7 @@ def _state_style(value: Any) -> str:
     return ""
 
 
-_STATE_BACKGROUND_MAP = {
-    key.upper(): cfg.get("background")
-    for key, cfg in DECISION_CONFIG.items()
-    if isinstance(cfg, dict)
-}
+_STATE_BACKGROUND_MAP = {key.upper(): cfg.get("background") for key, cfg in DECISION_CONFIG.items() if isinstance(cfg, dict)}
 
 
 def _row_background_styles(row: pd.Series) -> pd.Series:

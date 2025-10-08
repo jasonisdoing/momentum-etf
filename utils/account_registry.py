@@ -47,11 +47,7 @@ def list_available_accounts() -> List[str]:
         logger.warning("계정 설정 디렉터리를 찾을 수 없습니다: %s", _SETTINGS_DIR)
         return []
 
-    return [
-        path.stem.lower()
-        for path in sorted(_SETTINGS_DIR.glob("*.json"))
-        if path.is_file() and path.suffix.lower() == ".json"
-    ]
+    return [path.stem.lower() for path in sorted(_SETTINGS_DIR.glob("*.json")) if path.is_file() and path.suffix.lower() == ".json"]
 
 
 def load_account_configs() -> List[Dict[str, Any]]:

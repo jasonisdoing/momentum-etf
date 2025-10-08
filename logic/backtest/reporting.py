@@ -35,9 +35,7 @@ def _default_months_range() -> int:
 # ---------------------------------------------------------------------------
 
 
-def format_period_return_with_listing_date(
-    series_summary: Dict[str, Any], core_start_dt: pd.Timestamp
-) -> str:
+def format_period_return_with_listing_date(series_summary: Dict[str, Any], core_start_dt: pd.Timestamp) -> str:
     """Format period return percentage, optionally appending listing date."""
 
     period_return_pct = series_summary.get("period_return_pct", 0.0)
@@ -82,9 +80,7 @@ def print_backtest_summary(
 
     account_settings = get_account_settings(account_id)
     currency = str(summary.get("currency") or account_settings.get("currency", "KRW")).upper()
-    precision = account_settings.get("precision", {}).get(
-        "amt_precision", 0
-    ) or account_settings.get("amt_precision", 0)
+    precision = account_settings.get("precision", {}).get("amt_precision", 0) or account_settings.get("amt_precision", 0)
     try:
         precision = int(precision)
     except (TypeError, ValueError):
@@ -95,12 +91,8 @@ def print_backtest_summary(
         strategy_cfg = {}
 
     if "tuning" in strategy_cfg or "static" in strategy_cfg:
-        strategy_tuning = (
-            strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
-        )
-        strategy_static = (
-            strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
-        )
+        strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
+        strategy_static = strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
     else:  # 구 포맷과의 호환성 유지
         strategy_tuning = strategy_cfg
         strategy_static = strategy_cfg
@@ -108,16 +100,12 @@ def print_backtest_summary(
     merged_strategy = dict(strategy_static)
     merged_strategy.update(strategy_tuning)
 
-    cooldown_days = int(
-        strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 0)) or 0
-    )
+    cooldown_days = int(strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 0)) or 0)
     replace_threshold = strategy_tuning.get("REPLACE_SCORE_THRESHOLD")
     if replace_threshold is None:
         replace_threshold = strategy_cfg.get("REPLACE_SCORE_THRESHOLD", 0.5)
 
-    initial_capital_local = float(
-        summary.get("initial_capital_local", summary.get("initial_capital", initial_capital_krw))
-    )
+    initial_capital_local = float(summary.get("initial_capital_local", summary.get("initial_capital", initial_capital_krw)))
     initial_capital_krw_value = float(summary.get("initial_capital_krw", initial_capital_krw))
     final_value_local = float(summary.get("final_value_local", summary.get("final_value", 0.0)))
     final_value_krw_value = float(summary.get("final_value_krw", final_value_local))
@@ -154,10 +142,7 @@ def print_backtest_summary(
         diff_days = (end_ts - start_ts).days
         trading_days = diff_days + 1 if diff_days >= 0 else 0
 
-        add(
-            f"| 투자 중단: {start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')}"
-            f" ({trading_days} 거래일)"
-        )
+        add(f"| 투자 중단: {start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')}" f" ({trading_days} 거래일)")
 
     add_section_heading("사용된 설정값")
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
@@ -291,9 +276,7 @@ def print_backtest_summary(
             "기간수익률",
         ]
 
-        sorted_summaries = sorted(
-            ticker_summaries, key=lambda x: x["total_contribution"], reverse=True
-        )
+        sorted_summaries = sorted(ticker_summaries, key=lambda x: x["total_contribution"], reverse=True)
 
         rows = [
             [
@@ -517,9 +500,7 @@ def _build_daily_table_rows(
 
         daily_ret = ((price / prev_price) - 1.0) * 100.0 if prev_price else 0.0
         pv_safe = pv if _is_finite_number(pv) else 0.0
-        total_value_safe = (
-            total_value if _is_finite_number(total_value) and total_value > 0 else 0.0
-        )
+        total_value_safe = total_value if _is_finite_number(total_value) and total_value > 0 else 0.0
         weight = (pv_safe / total_value_safe * 100.0) if total_value_safe > 0 else 0.0
 
         if ticker_key not in buy_date_map:
@@ -553,18 +534,10 @@ def _build_daily_table_rows(
         evaluated_profit = evaluation.get("realized_profit", 0.0)
         cumulative_profit_value = evaluated_profit + eval_profit_value
         evaluated_profit_display = money_formatter(eval_profit_value)
-        evaluated_pct = (
-            (eval_profit_value / cost_basis * 100.0)
-            if cost_basis > 0 and _is_finite_number(eval_profit_value)
-            else 0.0
-        )
+        evaluated_pct = (eval_profit_value / cost_basis * 100.0) if cost_basis > 0 and _is_finite_number(eval_profit_value) else 0.0
         evaluated_pct_display = f"{evaluated_pct:+.1f}%" if cost_basis > 0 else "-"
         initial_value = evaluation.get("initial_value") or cost_basis
-        cumulative_pct = (
-            (cumulative_profit_value / initial_value * 100.0)
-            if initial_value and _is_finite_number(cumulative_profit_value)
-            else 0.0
-        )
+        cumulative_pct = (cumulative_profit_value / initial_value * 100.0) if initial_value and _is_finite_number(cumulative_profit_value) else 0.0
         cumulative_pct_display = f"{cumulative_pct:+.1f}%" if initial_value else "-"
         score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
         weight_display = f"{weight:.0f}%"
@@ -788,9 +761,7 @@ def dump_backtest_log(
     lines.extend(legacy_header)
 
     lines.append(f"백테스트 로그 생성: {datetime.now().isoformat(timespec='seconds')}")
-    lines.append(
-        f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}"
-    )
+    lines.append(f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}")
     base_line = f"초기 자본: {result.initial_capital:,.0f} {result.currency or 'KRW'}"
     if (result.currency or "KRW").upper() != "KRW":
         base_line += f" (≈ {result.initial_capital_krw:,.0f} KRW)"

@@ -46,11 +46,7 @@ def main() -> None:
         st.stop()
 
     default_account = pick_default_account(accounts)
-    default_icon = (
-        default_account.get("icon")
-        or get_icon_fallback(default_account.get("country_code", ""))
-        or "📈"
-    )
+    default_icon = default_account.get("icon") or get_icon_fallback(default_account.get("country_code", "")) or "📈"
 
     st.set_page_config(
         page_title=default_account.get("name") or "Momentum ETF",

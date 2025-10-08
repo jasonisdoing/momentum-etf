@@ -150,9 +150,7 @@ def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_c
         st.info("표시할 벤치마크 수익률이 없습니다.")
         return
 
-    trading_days = get_trading_days(
-        start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), country_code
-    )
+    trading_days = get_trading_days(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), country_code)
     day_count = len(trading_days)
     st.markdown(f"**벤치마크 누적 수익률 ({start_date.strftime('%Y년 %m월 %d일')} 이후 {day_count} 거래일)**")
     st.table(table_df)
@@ -165,9 +163,7 @@ def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_c
         ts_text = cached_kst.strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         ts_text = str(cached_iso)
-    st.caption(
-        f"Momentum ETF 의 수익률은 기간 내 매수/보유/매도한 모든 종목의 실현·미실현 수익을 포함해서 계산합니다. 데이터 업데이트: {ts_text}"
-    )
+    st.caption(f"Momentum ETF 의 수익률은 기간 내 매수/보유/매도한 모든 종목의 실현·미실현 수익을 포함해서 계산합니다. 데이터 업데이트: {ts_text}")
 
 
 __all__ = ["render_account_page"]

@@ -131,9 +131,7 @@ def get_last_error() -> Optional[str]:
     return _LAST_ERROR
 
 
-def _upload_file_to_slack(
-    *, channel: Optional[str], file_path: Path, title: str, initial_comment: Optional[str] = None
-) -> bool:
+def _upload_file_to_slack(*, channel: Optional[str], file_path: Path, title: str, initial_comment: Optional[str] = None) -> bool:
     """Upload a file to Slack using the Web API if a bot token is available."""
 
     token = os.environ.get("SLACK_BOT_TOKEN")
@@ -213,11 +211,7 @@ def compose_recommendation_slack_message(
     except Exception:
         account_settings = None
 
-    account_label = (
-        str((account_settings or {}).get("name"))
-        if account_settings and (account_settings or {}).get("name")
-        else account_norm.upper()
-    )
+    account_label = str((account_settings or {}).get("name")) if account_settings and (account_settings or {}).get("name") else account_norm.upper()
 
     base_date = getattr(report, "base_date", None)
     if hasattr(base_date, "strftime"):
@@ -265,12 +259,7 @@ def compose_recommendation_slack_message(
                 return 99
         return 99
 
-    ordered_states = [
-        (state, count)
-        for state, count in sorted(
-            state_counter.items(), key=lambda pair: (_state_order(pair[0]), pair[0])
-        )
-    ]
+    ordered_states = [(state, count) for state, count in sorted(state_counter.items(), key=lambda pair: (_state_order(pair[0]), pair[0]))]
 
     top_rows: list[str] = []
     for item in recommendations[:]:
@@ -292,23 +281,13 @@ def compose_recommendation_slack_message(
         return f"{held_str}/{topn_str}"
 
     if held_count is None:
-        held_count = sum(
-            1 for item in recommendations if str(item.get("state") or "").upper() == "HOLD"
-        )
+        held_count = sum(1 for item in recommendations if str(item.get("state") or "").upper() == "HOLD")
     if portfolio_topn is None:
         topn_candidates = [
             getattr(report, "portfolio_topn", None),
             (account_settings or {}).get("portfolio_topn") if account_settings else None,
-            ((account_settings or {}).get("strategy", {}) or {})
-            .get("tuning", {})
-            .get("PORTFOLIO_TOPN")
-            if account_settings
-            else None,
-            ((account_settings or {}).get("strategy", {}) or {})
-            .get("static", {})
-            .get("PORTFOLIO_TOPN")
-            if account_settings
-            else None,
+            (((account_settings or {}).get("strategy", {}) or {}).get("tuning", {}).get("PORTFOLIO_TOPN") if account_settings else None),
+            (((account_settings or {}).get("strategy", {}) or {}).get("static", {}).get("PORTFOLIO_TOPN") if account_settings else None),
         ]
         for candidate in topn_candidates:
             try:
@@ -352,9 +331,7 @@ def compose_recommendation_slack_message(
     add_channel_mention = bool(ordered_states)
 
     if add_channel_mention:
-        blocks.append(
-            {"type": "context", "elements": [{"type": "mrkdwn", "text": "<!channel> 알림"}]}
-        )
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "<!channel> 알림"}]})
         fallback_text = "<!channel>\n" + fallback_text
 
     payload: dict[str, Any] = {"text": fallback_text, "blocks": blocks}

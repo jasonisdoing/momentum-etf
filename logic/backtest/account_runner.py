@@ -96,9 +96,7 @@ class AccountBacktestResult:
             "monthly_returns": self.monthly_returns.to_dict(),
             "monthly_cum_returns": self.monthly_cum_returns.to_dict(),
             "yearly_returns": self.yearly_returns.to_dict(),
-            "risk_off_periods": [
-                (s.strftime("%Y-%m-%d"), e.strftime("%Y-%m-%d")) for s, e in self.risk_off_periods
-            ],
+            "risk_off_periods": [(s.strftime("%Y-%m-%d"), e.strftime("%Y-%m-%d")) for s, e in self.risk_off_periods],
             "ticker_summaries": self.ticker_summaries,
             "settings_snapshot": self.settings_snapshot,
             "months_range": self.months_range,
@@ -173,11 +171,7 @@ def run_account_backtest(
     _log(f"[백테스트] {account_id.upper()} 계정({country_code.upper()}) ETF 목록을 로드하는 중...")
     excluded_upper: set[str] = set()
     if excluded_tickers:
-        excluded_upper = {
-            str(ticker).strip().upper()
-            for ticker in excluded_tickers
-            if isinstance(ticker, str) and str(ticker).strip()
-        }
+        excluded_upper = {str(ticker).strip().upper() for ticker in excluded_tickers if isinstance(ticker, str) and str(ticker).strip()}
 
     etf_universe = get_etfs(country_code)
     if not etf_universe:
@@ -185,11 +179,7 @@ def run_account_backtest(
 
     if excluded_upper:
         before_count = len(etf_universe)
-        etf_universe = [
-            stock
-            for stock in etf_universe
-            if str(stock.get("ticker", "")).strip().upper() not in excluded_upper
-        ]
+        etf_universe = [stock for stock in etf_universe if str(stock.get("ticker", "")).strip().upper() not in excluded_upper]
         removed = before_count - len(etf_universe)
         if removed > 0:
             _log(f"[백테스트] 데이터 부족으로 제외된 {removed}개 종목을 유니버스에서 제거합니다.")
@@ -352,9 +342,7 @@ def _resolve_initial_capital(
             return None
         return candidate if math.isfinite(candidate) and candidate > 0 else None
 
-    currency = str(
-        precision_settings.get("currency") or account_settings.get("currency") or "KRW"
-    ).upper()
+    currency = str(precision_settings.get("currency") or account_settings.get("currency") or "KRW").upper()
 
     fx_override = _coerce_positive_float(override_settings.get("fx_rate_to_krw"))
     if fx_override is None:
@@ -541,9 +529,7 @@ def _build_portfolio_timeseries(
         if prev_total_value is None:
             prev_total_value = total_value
 
-        cumulative_return_pct = (
-            ((total_value / initial_capital) - 1.0) * 100.0 if initial_capital > 0 else 0.0
-        )
+        cumulative_return_pct = ((total_value / initial_capital) - 1.0) * 100.0 if initial_capital > 0 else 0.0
 
         eval_profit_loss = total_holdings - total_cost if total_cost > 0 else 0.0
         eval_return_pct = (total_holdings / total_cost - 1.0) * 100.0 if total_cost > 0 else 0.0
@@ -629,9 +615,7 @@ def _build_summary(
         ulcer_index = float((drawdowns_pct.pow(2).mean()) ** 0.5)
     cui = calmar_ratio / ulcer_index if ulcer_index > 0 else 0.0
 
-    def _calc_benchmark_performance(
-        *, ticker: str, name: str, country: str
-    ) -> Optional[Dict[str, Any]]:
+    def _calc_benchmark_performance(*, ticker: str, name: str, country: str) -> Optional[Dict[str, Any]]:
         benchmark_df = fetch_ohlcv(
             ticker,
             country=country,
@@ -678,10 +662,7 @@ def _build_summary(
                 continue
 
             name_value = str(entry.get("name") or ticker_value).strip() or ticker_value
-            bench_country = (
-                str(entry.get("country") or entry.get("market") or country_code).strip()
-                or country_code
-            )
+            bench_country = str(entry.get("country") or entry.get("market") or country_code).strip() or country_code
             perf = _calc_benchmark_performance(
                 ticker=ticker_value,
                 name=name_value,
@@ -770,7 +751,7 @@ def _build_summary(
 
 
 def _compute_evaluated_records(
-    ticker_timeseries: Mapping[str, pd.DataFrame]
+    ticker_timeseries: Mapping[str, pd.DataFrame],
 ) -> Dict[str, Dict[str, Any]]:
     records: Dict[str, Dict[str, Any]] = {}
     for ticker, df in ticker_timeseries.items():
@@ -787,11 +768,7 @@ def _compute_evaluated_records(
                 realized_profit += float(trade_profit)
 
             pv_val = row.get("pv")
-            pv = (
-                float(pv_val)
-                if isinstance(pv_val, (int, float)) and math.isfinite(float(pv_val))
-                else 0.0
-            )
+            pv = float(pv_val) if isinstance(pv_val, (int, float)) and math.isfinite(float(pv_val)) else 0.0
             if initial_value is None and pv > 0:
                 initial_value = pv
 
@@ -861,22 +838,10 @@ def _build_ticker_summaries(
             continue
 
         df_sorted = df.sort_index()
-        trades = (
-            df_sorted[df_sorted["decision"].isin(sell_decisions)]
-            if "decision" in df_sorted.columns
-            else pd.DataFrame()
-        )
-        realized_profit = (
-            float(trades.get("trade_profit", pd.Series(dtype=float)).sum())
-            if not trades.empty
-            else 0.0
-        )
+        trades = df_sorted[df_sorted["decision"].isin(sell_decisions)] if "decision" in df_sorted.columns else pd.DataFrame()
+        realized_profit = float(trades.get("trade_profit", pd.Series(dtype=float)).sum()) if not trades.empty else 0.0
         total_trades = int(len(trades)) if not trades.empty else 0
-        winning_trades = (
-            int((trades.get("trade_profit", pd.Series(dtype=float)) > 0).sum())
-            if not trades.empty
-            else 0
-        )
+        winning_trades = int((trades.get("trade_profit", pd.Series(dtype=float)) > 0).sum()) if not trades.empty else 0
 
         last_row = df_sorted.iloc[-1]
         final_shares = float(last_row.get("shares", 0.0) or 0.0)
@@ -902,11 +867,7 @@ def _build_ticker_summaries(
                 if isinstance(first_date, pd.Timestamp):
                     listing_date = first_date.strftime("%Y-%m-%d")
 
-        if (
-            total_trades == 0
-            and final_shares <= 0
-            and math.isclose(total_contribution, 0.0, abs_tol=1e-9)
-        ):
+        if total_trades == 0 and final_shares <= 0 and math.isclose(total_contribution, 0.0, abs_tol=1e-9):
             continue
 
         win_rate = (winning_trades / total_trades) * 100.0 if total_trades > 0 else 0.0

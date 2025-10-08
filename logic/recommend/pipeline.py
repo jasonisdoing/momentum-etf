@@ -208,9 +208,7 @@ def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
 
         # 일간 수익률 계산 (이전 종가가 없거나 0 이하면 0%로 처리)
         daily_pct = 0.0
-        raw_prev_close = (
-            float(raw_close.iloc[-2]) if len(raw_close) >= 2 else float(raw_close.iloc[-1])
-        )
+        raw_prev_close = float(raw_close.iloc[-2]) if len(raw_close) >= 2 else float(raw_close.iloc[-1])
         raw_latest_close = float(raw_close.iloc[-1])
         if raw_prev_close and raw_prev_close > 0:
             daily_pct = ((raw_latest_close / raw_prev_close) - 1.0) * 100
@@ -226,9 +224,7 @@ def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
 
         # 연속 상승일 계산
         streak = 0
-        for price, ma_entry in zip(
-            reversed(price_series.iloc[-ma_period:]), reversed(ma.iloc[-ma_period:])
-        ):
+        for price, ma_entry in zip(reversed(price_series.iloc[-ma_period:]), reversed(ma.iloc[-ma_period:])):
             if pd.isna(ma_entry) or pd.isna(price) or price < ma_entry:
                 break
             streak += 1
@@ -488,9 +484,7 @@ def _fetch_trades_for_date(account_id: str, base_date: pd.Timestamp) -> List[Dic
     return trades
 
 
-def generate_account_recommendation_report(
-    account_id: str, date_str: Optional[str] = None
-) -> RecommendationReport:
+def generate_account_recommendation_report(account_id: str, date_str: Optional[str] = None) -> RecommendationReport:
     """계정 단위 추천 종목 리스트를 반환합니다."""
     if not account_id:
         raise ValueError("account_id 인자가 필요합니다.")
@@ -514,15 +508,11 @@ def generate_account_recommendation_report(
         strategy_cfg = {}
 
     if "tuning" in strategy_cfg or "static" in strategy_cfg:
-        strategy_static = (
-            strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
-        )
+        strategy_static = strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
     else:
         strategy_static = strategy_cfg
 
-    max_per_category = int(
-        strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0
-    )
+    max_per_category = int(strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0)
 
     # ETF 목록 가져오기
     etf_universe = get_etfs(country_code) or []
@@ -531,14 +521,8 @@ def generate_account_recommendation_report(
         account_id.upper(),
         len(etf_universe),
     )
-    disabled_tickers = {
-        str(stock.get("ticker") or "").strip().upper()
-        for stock in etf_universe
-        if not bool(stock.get("recommend_enabled", True))
-    }
-    pairs = [
-        (stock.get("ticker"), stock.get("name")) for stock in etf_universe if stock.get("ticker")
-    ]
+    disabled_tickers = {str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if not bool(stock.get("recommend_enabled", True))}
+    pairs = [(stock.get("ticker"), stock.get("name")) for stock in etf_universe if stock.get("ticker")]
 
     # 실제 포트폴리오 데이터 준비
     holdings: Dict[str, Dict[str, float]] = {}
@@ -585,9 +569,7 @@ def generate_account_recommendation_report(
         holdings = {}
 
     # 연속 보유 정보 계산
-    consecutive_holding_info = calculate_consecutive_holding_info(
-        list(holdings.keys()), account_id, base_date.to_pydatetime()
-    )
+    consecutive_holding_info = calculate_consecutive_holding_info(list(holdings.keys()), account_id, base_date.to_pydatetime())
 
     # 현재 자산/현금 정보 (임시값 - 실제 계산 필요)
     current_equity = 100_000_000  # 임시값
@@ -666,11 +648,7 @@ def generate_account_recommendation_report(
             score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
 
             recent_prices = df["Close"].tail(15)
-            trend_prices = (
-                [round(float(val), 6) for val in recent_prices.tolist()]
-                if not recent_prices.empty
-                else []
-            )
+            trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
 
             data_by_tkr[ticker] = {
                 "price": latest_close,
@@ -680,9 +658,7 @@ def generate_account_recommendation_report(
                 "s1": moving_average.iloc[-1] if not moving_average.empty else None,
                 "s2": None,
                 "score": score,
-                "filter": int(consecutive_buy_days.iloc[-1])
-                if not consecutive_buy_days.empty
-                else 0,
+                "filter": (int(consecutive_buy_days.iloc[-1]) if not consecutive_buy_days.empty else 0),
                 "ret_1w": _compute_trailing_return(df["Close"], 5),
                 "ret_2w": _compute_trailing_return(df["Close"], 10),
                 "ret_3w": _compute_trailing_return(df["Close"], 15),
@@ -737,9 +713,7 @@ def generate_account_recommendation_report(
             pairs=pairs,
             consecutive_holding_info=consecutive_holding_info,
             trade_cooldown_info=trade_cooldown_info,
-            cooldown_days=int(
-                strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 5)) or 0
-            ),
+            cooldown_days=int(strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 5)) or 0),
         )
         logger.info(
             "[%s] 일일 의사결정 계산 완료 (%.1fs, 결과 %d개)",
@@ -793,8 +767,7 @@ def generate_account_recommendation_report(
                 ticker_data.get("daily_pct", 0.0)
                 if "daily_pct" in ticker_data
                 else (
-                    ((ticker_data.get("price", 0.0) / ticker_data.get("prev_close", 1.0)) - 1.0)
-                    * 100
+                    ((ticker_data.get("price", 0.0) / ticker_data.get("prev_close", 1.0)) - 1.0) * 100
                     if ticker_data.get("prev_close", 0.0) > 0
                     else 0.0
                 )
@@ -914,9 +887,7 @@ def generate_account_recommendation_report(
                     )
 
         if latest_buy_date_norm is None:
-            fallback_buy_date = (
-                holdings.get(ticker, {}).get("buy_date") if ticker in holdings else None
-            )
+            fallback_buy_date = holdings.get(ticker, {}).get("buy_date") if ticker in holdings else None
             fallback_norm = _normalize_buy_date(fallback_buy_date)
             if fallback_norm is not None:
                 latest_buy_date_norm = fallback_norm
@@ -934,9 +905,7 @@ def generate_account_recommendation_report(
             elif is_currently_held:
                 holding_days_val = 1
                 if not bought_today:
-                    bought_today = (
-                        latest_buy_date_norm is not None and latest_buy_date_norm >= base_norm
-                    )
+                    bought_today = latest_buy_date_norm is not None and latest_buy_date_norm >= base_norm
 
         if bought_today and is_currently_held:
             phrase = new_buy_phrase
@@ -952,9 +921,7 @@ def generate_account_recommendation_report(
             ticker_data.get("daily_pct", 0.0)
             if "daily_pct" in ticker_data
             else (
-                ((ticker_data.get("price", 0.0) / ticker_data.get("prev_close", 1.0)) - 1.0) * 100
-                if ticker_data.get("prev_close", 0.0) > 0
-                else 0.0
+                ((ticker_data.get("price", 0.0) / ticker_data.get("prev_close", 1.0)) - 1.0) * 100 if ticker_data.get("prev_close", 0.0) > 0 else 0.0
             )
         )
         score_val = decision.get("score", 0.0)
@@ -987,11 +954,7 @@ def generate_account_recommendation_report(
             filter_days_row = decision.get("row") or []
             if len(filter_days_row) >= 16:
                 try:
-                    filter_days = (
-                        int(str(filter_days_row[15]).replace("일", ""))
-                        if filter_days_row[15] not in ("-", None)
-                        else 0
-                    )
+                    filter_days = int(str(filter_days_row[15]).replace("일", "")) if filter_days_row[15] not in ("-", None) else 0
                 except Exception:
                     filter_days = 0
             else:
@@ -1032,9 +995,7 @@ def generate_account_recommendation_report(
     wait_items = [
         item
         for item in results
-        if item["state"] == "WAIT"
-        and item.get("phrase") != DECISION_NOTES.get("CATEGORY_DUP")
-        and item.get("recommend_enabled", True)
+        if item["state"] == "WAIT" and item.get("phrase") != DECISION_NOTES.get("CATEGORY_DUP") and item.get("recommend_enabled", True)
     ]
     wait_items.sort(key=lambda x: x["score"], reverse=True)
 
@@ -1075,12 +1036,8 @@ def generate_account_recommendation_report(
     }
     buy_state_set = {"BUY", "BUY_REPLACE"}
 
-    planned_sell_count = sum(
-        1 for item in results if (item.get("state") or "").upper() in sell_state_set
-    )
-    planned_buy_count = sum(
-        1 for item in results if (item.get("state") or "").upper() in buy_state_set
-    )
+    planned_sell_count = sum(1 for item in results if (item.get("state") or "").upper() in sell_state_set)
+    planned_buy_count = sum(1 for item in results if (item.get("state") or "").upper() in buy_state_set)
     projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
 
     if projected_holdings > portfolio_topn:

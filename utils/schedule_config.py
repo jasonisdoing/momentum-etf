@@ -42,16 +42,8 @@ def _build_schedule_entry(account_id: str) -> Dict[str, Any] | None:
     enabled_raw = schedule.get("enabled")
     enabled_flag = True if enabled_raw is None else bool(enabled_raw)
 
-    timezone_value = (
-        schedule.get("timezone")
-        or schedule.get("recommendation_timezone")
-        or _default_timezone(country_code)
-    )
-    notify_timezone_value = (
-        schedule.get("notify_timezone")
-        or schedule.get("timezone")
-        or _default_timezone(country_code)
-    )
+    timezone_value = schedule.get("timezone") or schedule.get("recommendation_timezone") or _default_timezone(country_code)
+    notify_timezone_value = schedule.get("notify_timezone") or schedule.get("timezone") or _default_timezone(country_code)
 
     entry: Dict[str, Any] = {
         "account_id": account_id,
@@ -91,9 +83,7 @@ def get_global_schedule_settings() -> Dict[str, Any]:
     """Return global schedule metadata derived from account configs."""
 
     values = [
-        entry.get("run_immediately_on_start")
-        for entry in _load_account_schedules().values()
-        if entry.get("run_immediately_on_start") is not None
+        entry.get("run_immediately_on_start") for entry in _load_account_schedules().values() if entry.get("run_immediately_on_start") is not None
     ]
     if not values:
         return {}

@@ -126,9 +126,7 @@ def render_account_delete_page() -> None:
         pass
 
     st.success(
-        "계정 삭제가 완료되었습니다."
-        f"\n- trades 삭제: {trade_result['deleted']}건"
-        f"\n- 설정 파일 삭제: {'성공' if file_removed else '파일 없음'}"
+        "계정 삭제가 완료되었습니다." f"\n- trades 삭제: {trade_result['deleted']}건" f"\n- 설정 파일 삭제: {'성공' if file_removed else '파일 없음'}"
     )
     st.info("사이드바 메뉴에서 다른 페이지로 이동하거나 새로고침하여 변경 사항을 반영하세요.")
 

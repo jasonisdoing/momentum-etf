@@ -62,9 +62,7 @@ def print_run_header(account_id: str, *, date_str: Optional[str]) -> None:
     logger.info("기준일: %s", date_str or "auto (latest trading day)")
 
 
-def print_result_summary(
-    items: List[Dict[str, Any]], account_id: str, date_str: Optional[str] = None
-) -> None:
+def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str: Optional[str] = None) -> None:
     """Emit a condensed summary of recommendation results to stdout."""
 
     if not items:
@@ -81,15 +79,23 @@ def print_result_summary(
     preview_count = min(10, len(items))
     if preview_count > 0:
         logger.info("상위 %d개 항목 미리보기:", preview_count)
-        headers = ["순위", "티커", "종목명", "카테고리", "상태", "점수", "일간수익률", "보유일", "문구"]
+        headers = [
+            "순위",
+            "티커",
+            "종목명",
+            "카테고리",
+            "상태",
+            "점수",
+            "일간수익률",
+            "보유일",
+            "문구",
+        ]
         aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "left"]
         rows: List[List[str]] = []
 
         for item in items[:preview_count]:
             holding_days = item.get("holding_days")
-            holding_days_str = (
-                f"{int(holding_days)}" if isinstance(holding_days, (int, float)) else "-"
-            )
+            holding_days_str = f"{int(holding_days)}" if isinstance(holding_days, (int, float)) else "-"
 
             rows.append(
                 [
@@ -98,12 +104,8 @@ def print_result_summary(
                     str(item.get("name", "-")),
                     str(item.get("category", "-")),
                     str(item.get("state", "-")),
-                    f"{item.get('score', 0):.2f}"
-                    if isinstance(item.get("score"), (int, float))
-                    else "-",
-                    f"{item.get('daily_pct', 0):.2f}%"
-                    if isinstance(item.get("daily_pct"), (int, float))
-                    else "-",
+                    (f"{item.get('score', 0):.2f}" if isinstance(item.get("score"), (int, float)) else "-"),
+                    (f"{item.get('daily_pct', 0):.2f}%" if isinstance(item.get("daily_pct"), (int, float)) else "-"),
                     holding_days_str,
                     str(item.get("phrase", "")),
                 ]

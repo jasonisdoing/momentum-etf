@@ -1,4 +1,5 @@
 """Schedule and trading-day helpers for signals logic (self-contained)."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -44,9 +45,7 @@ def is_market_open(country: str = "kor") -> bool:
         now_local = datetime.now(local_tz)
 
         today_str_for_util = now_local.strftime("%Y-%m-%d")
-        is_trading_day_today = bool(
-            get_trading_days(today_str_for_util, today_str_for_util, country)
-        )
+        is_trading_day_today = bool(get_trading_days(today_str_for_util, today_str_for_util, country))
         if not is_trading_day_today:
             return False
 

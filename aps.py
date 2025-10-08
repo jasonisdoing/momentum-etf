@@ -308,9 +308,7 @@ def main():
         country_code = (cfg.get("country_code") or "").strip().lower()
 
         if not account_id or not country_code or not cron_expr:
-            raise RuntimeError(
-                f"Schedule entry '{schedule_name}' must define account_id, country_code, and recommendation_cron"
-            )
+            raise RuntimeError(f"Schedule entry '{schedule_name}' must define account_id, country_code, and recommendation_cron")
 
         scheduler.add_job(
             run_recommend_for_country,
@@ -347,9 +345,7 @@ def main():
         init_timezone = cfg.get("timezone") or TIMEZONE
 
         if not account_id or not country_code:
-            raise RuntimeError(
-                f"Schedule entry '{schedule_name}' must define both account_id and country_code"
-            )
+            raise RuntimeError(f"Schedule entry '{schedule_name}' must define both account_id and country_code")
 
         try:
             run_recommend_for_country(
