@@ -7,6 +7,12 @@
                 "name": "VanEck Gold Miners ETF",
                 "recommend_enabled": true,
                 "listing_date": "2020-01-02"
+            },
+            {
+                "ticker": "ASX:MNRS",
+                "name": "Betashares Global Gold Miners Currency Hedged ETF",
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -333,12 +339,6 @@
             {
                 "ticker": "ASX:VHY",
                 "name": "Vanguard Australian Shares High Yield ETF",
-                "recommend_enabled": true,
-                "listing_date": "2020-01-02"
-            },
-            {
-                "ticker": "ASX:WDMF",
-                "name": "iShares World Equity Factor ETF",
                 "recommend_enabled": true,
                 "listing_date": "2020-01-02"
             },

@@ -61,6 +61,21 @@ def render_account_page(account_id: str) -> None:
 
     if updated_at:
         st.caption(f"데이터 업데이트: {updated_at}")
+        strategy_tuning = (account_settings.get("strategy", {}) or {}).get("tuning", {})
+        if isinstance(strategy_tuning, dict):
+            params_to_show = {
+                "MA": strategy_tuning.get("MA_PERIOD"),
+                "TopN": strategy_tuning.get("PORTFOLIO_TOPN"),
+                "교체점수": strategy_tuning.get("REPLACE_SCORE_THRESHOLD"),
+            }
+            param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
+        else:
+            param_strs = "N/A"
+
+        st.caption(f"설정: {param_strs}")
+    else:
+        # updated_at이 없는 경우에 대한 폴백
+        st.caption("데이터를 찾을 수 없습니다.")
 
     render_recommendation_table(df, country_code=country_code)
     _render_benchmark_table(account_id, account_settings, country_code)

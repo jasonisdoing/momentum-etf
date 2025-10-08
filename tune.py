@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from datetime import datetime
 
 import numpy as np
 
@@ -20,8 +21,8 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
         "MA_RANGE": np.arange(1, 51, 1),
-        "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "PORTFOLIO_TOPN": [8],
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
     },
     "kor": {
         "MA_RANGE": np.arange(1, 51, 1),
@@ -80,7 +81,12 @@ def main() -> None:
     except Exception as exc:  # pragma: no cover - 잘못된 입력 방어 전용 처리
         parser.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
-    output_path = Path(args.output) if args.output else RESULTS_DIR / f"tune_{account_id}.json"
+    if args.output:
+        output_path = Path(args.output)
+    else:
+        # 파일명에 YYYYMMDD 형식의 날짜 추가
+        date_str = datetime.now().strftime("%Y%m%d")
+        output_path = RESULTS_DIR / f"tune_{account_id}_{date_str}.json"
 
     output = run_account_tuning(
         account_id,

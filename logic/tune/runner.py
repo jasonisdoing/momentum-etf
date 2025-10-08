@@ -929,7 +929,9 @@ def run_account_tuning(
 
     base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
     if output_path is None:
-        output_path = base_dir / f"tune_{account_norm}.json"
+        # 파일명에 YYYYMMDD 형식의 날짜 추가
+        date_str = datetime.now().strftime("%Y%m%d")
+        output_path = base_dir / f"tune_{account_norm}_{date_str}.json"
     else:
         output_path = Path(output_path)
         if not output_path.is_absolute():
@@ -937,13 +939,9 @@ def run_account_tuning(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    existing = _read_existing_results(output_path)
-    filtered = [item for item in existing if item.get("run_date") != run_date]
-    filtered.append(entry)
-    filtered.sort(key=lambda data: data.get("run_date", ""), reverse=True)
-
+    # 날짜별로 파일을 생성하므로, 기존 내용을 읽지 않고 새로운 결과만 저장
     output_path.write_text(
-        json.dumps(filtered, ensure_ascii=False, indent=4),
+        json.dumps([entry], ensure_ascii=False, indent=4),
         encoding="utf-8",
     )
 

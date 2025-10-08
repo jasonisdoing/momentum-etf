@@ -46,7 +46,7 @@ from utils.settings_loader import get_account_slack_channel
 from dotenv import load_dotenv
 
 load_dotenv()
-APP_DATE_TIME = "2025-10-09-07"
+APP_DATE_TIME = "2025-10-09-08"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
 
 _LAST_ERROR: Optional[str] = None
@@ -321,6 +321,22 @@ def compose_recommendation_slack_message(
         {"type": "mrkdwn", "text": f"*소요시간*: {duration:.1f}초"},
         {"type": "mrkdwn", "text": f"*보유*: {_format_hold_ratio(held_count, portfolio_topn)}"},
     ]
+
+    # 튜닝 파라미터 표시
+    strategy_params = getattr(report, "strategy_params", {})
+    if isinstance(strategy_params, dict):
+        ma_period = strategy_params.get("MA_PERIOD")
+        topn = strategy_params.get("PORTFOLIO_TOPN")
+        replace_threshold = strategy_params.get("REPLACE_SCORE_THRESHOLD")
+
+        params_str_parts = []
+        if ma_period is not None:
+            params_str_parts.append(f"MA: {ma_period}")
+        if topn is not None:
+            params_str_parts.append(f"TopN: {topn}")
+        if replace_threshold is not None:
+            params_str_parts.append(f"교체점수: {replace_threshold}")
+        fields.append({"type": "mrkdwn", "text": f"*전략*: {', '.join(params_str_parts)}"})
 
     if ordered_states:
         state_lines = [f"{state}: {count}개" for state, count in ordered_states]
