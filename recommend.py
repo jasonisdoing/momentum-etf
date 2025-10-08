@@ -25,6 +25,7 @@ from utils.notification import (
     send_recommendation_slack_notification,
 )
 from utils.recommendation_storage import save_recommendation_report
+from utils.data_loader import PriceDataUnavailable
 from utils.logger import get_app_logger
 
 
@@ -71,7 +72,11 @@ def main() -> None:
     print_run_header(account_id, date_str=args.date)
     start_time = time.time()
 
-    report = generate_account_recommendation_report(account_id=account_id, date_str=args.date)
+    try:
+        report = generate_account_recommendation_report(account_id=account_id, date_str=args.date)
+    except PriceDataUnavailable as exc:
+        logger.error("데이터가 부족하여 추천을 생성하지 못했습니다: %s", exc)
+        return
 
     if not isinstance(report, RecommendationReport):
         logger.error(

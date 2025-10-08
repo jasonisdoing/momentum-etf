@@ -110,7 +110,9 @@ def _format_days(value: Any) -> str:
 
 
 def _trend_series(row: dict[str, Any]) -> list[float]:
-    raw_series = row.get("trend_returns")
+    raw_series = row.get("trend_prices")
+    if raw_series is None:
+        raw_series = row.get("trend_returns")
     if isinstance(raw_series, (list, tuple)):
         values: list[float] = []
         for raw in raw_series:

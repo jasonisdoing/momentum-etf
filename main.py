@@ -49,9 +49,22 @@ def load_account_recommendations(
 
     updated_dt = snapshot.get("updated_at") or snapshot.get("created_at")
     if isinstance(updated_dt, datetime):
-        updated_at = updated_dt.strftime("%Y-%m-%d %H:%M:%S")
+        ts = pd.Timestamp(updated_dt)
+        if ts.tzinfo is None or ts.tzinfo.utcoffset(ts) is None:
+            ts = ts.tz_localize("UTC").tz_convert("Asia/Seoul")
+        else:
+            ts = ts.tz_convert("Asia/Seoul")
+        updated_at = ts.strftime("%Y-%m-%d %H:%M:%S")
     else:
-        updated_at = str(updated_dt) if updated_dt else None
+        try:
+            parsed = pd.to_datetime(updated_dt)
+            if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
+                parsed = parsed.tz_localize("UTC").tz_convert("Asia/Seoul")
+            else:
+                parsed = parsed.tz_convert("Asia/Seoul")
+            updated_at = parsed.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            updated_at = str(updated_dt) if updated_dt else None
 
     loaded_country_code = snapshot.get("country_code") or country_code
     return df, updated_at, str(loaded_country_code or country_code)
@@ -65,10 +78,10 @@ TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT
 def _load_account_ui_settings(account_id: str) -> tuple[str, str]:
     try:
         settings = get_account_settings(account_id)
-        name = settings.get("name") or account_id.upper()
+        name = "Momentum ETF"
         icon = settings.get("icon") or ""
     except Exception:
-        name = account_id.upper()
+        name = "Momentum ETF"
         icon = ""
     return name, icon
 

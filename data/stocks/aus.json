@@ -139,7 +139,7 @@
             {
                 "ticker": "ASX:IKO",
                 "name": "iShares MSCI South Korea ETF (AU)",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2020-01-02"
             }
         ]

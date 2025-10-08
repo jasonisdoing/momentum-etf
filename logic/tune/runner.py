@@ -26,7 +26,12 @@ from utils.settings_loader import (
     get_tune_month_configs,
 )
 from utils.logger import get_app_logger
-from utils.data_loader import fetch_ohlcv_for_tickers, get_latest_trading_day, fetch_ohlcv
+from utils.data_loader import (
+    fetch_ohlcv_for_tickers,
+    get_latest_trading_day,
+    fetch_ohlcv,
+    PriceDataUnavailable,
+)
 from utils.stock_list_io import get_etfs
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
@@ -253,6 +258,9 @@ def _execute_tuning_for_months(
                 prefetched_data=prefetched_data,
                 strategy_override=override_rules,
             )
+        except PriceDataUnavailable as exc:
+            logger.error("[튜닝] %s 데이터가 부족하여 튜닝을 중단합니다: %s", account_norm.upper(), exc)
+            raise
         except Exception as exc:  # pragma: no cover - 백테스트 예외 방어
             failures.append(
                 {
@@ -346,15 +354,46 @@ def _build_run_entry(
 
     entry: Dict[str, Any] = {
         "run_date": run_date,
-        "tuning": {},
+        "result": {},
     }
 
-    results_payload: List[Dict[str, Any]] = []
+    raw_data_payload: List[Dict[str, Any]] = []
+    weighted_cagr_sum = 0.0
+    weighted_cagr_weight = 0.0
+    weighted_mdd_sum = 0.0
+    weighted_mdd_weight = 0.0
+    cagr_values: List[float] = []
+    mdd_values: List[float] = []
+
     for item in months_results:
         best = item.get("best") or {}
         months = item.get("months_range")
         if not best or months is None:
             continue
+
+        try:
+            weight = float(item.get("weight", 0.0))
+        except (TypeError, ValueError):
+            weight = 0.0
+
+        cagr_val = _safe_float(best.get("cagr_pct"), float("nan"))
+        if math.isfinite(cagr_val):
+            weighted_cagr_sum += weight * cagr_val
+            weighted_cagr_weight += weight
+            cagr_values.append(cagr_val)
+
+        mdd_val = _safe_float(best.get("mdd_pct"), float("nan"))
+        if math.isfinite(mdd_val):
+            weighted_mdd_sum += weight * mdd_val
+            weighted_mdd_weight += weight
+            mdd_values.append(mdd_val)
+
+        period_return_val = _safe_float(best.get("cumulative_return_pct"), float("nan"))
+        period_return_display = (
+            _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None
+        )
+        cagr_display = _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None
+        mdd_display = _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None
 
         def _to_int(val: Any) -> Optional[int]:
             try:
@@ -387,79 +426,61 @@ def _build_run_entry(
             if converted is not None:
                 tuning_snapshot[field] = converted
 
-        results_payload.append(
+        raw_data_payload.append(
             {
                 "MONTHS_RANGE": months,
-                "CAGR": _round_float_places(best.get("cagr_pct"), 2),
-                "period_return": _round_float_places(best.get("cumulative_return_pct"), 2),
+                "CAGR": cagr_display,
+                "MDD": mdd_display,
+                "period_return": period_return_display,
                 "tuning": tuning_snapshot,
             }
         )
 
-    if results_payload:
-        entry["results"] = results_payload
+    if weighted_cagr_weight > 0:
+        entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
+    elif cagr_values:
+        entry["weighted_expected_CAGR"] = _round_float(sum(cagr_values) / len(cagr_values))
 
-    tuning_values: Dict[str, Any] = entry["tuning"]
-    weighted_cagr_sum = 0.0
-    weighted_cagr_weight = 0.0
+    if weighted_mdd_weight > 0:
+        entry["weighted_expected_MDD"] = _round_float(-(weighted_mdd_sum / weighted_mdd_weight))
+    elif mdd_values:
+        entry["weighted_expected_MDD"] = _round_float(-(sum(mdd_values) / len(mdd_values)))
+
+    if raw_data_payload:
+        entry["raw_data"] = raw_data_payload
+
+    result_values: Dict[str, Any] = entry["result"]
 
     for field, (key, is_int) in param_fields.items():
-        details: List[Dict[str, Any]] = []
-        weighted_sum = 0.0
-        weight_total = 0.0
+        values: List[float] = []
+        weights: List[float] = []
 
         for item in months_results:
-            weight_raw = item.get("weight", 0.0)
-            try:
-                weight = float(weight_raw)
-            except (TypeError, ValueError):
-                weight = 0.0
-
-            value = item.get("best", {}).get(key)
+            best = item.get("best", {})
+            value = best.get(key)
             if value is None:
                 continue
+            try:
+                value_float = float(value)
+            except (TypeError, ValueError):
+                continue
+            values.append(value_float)
+            try:
+                weights.append(float(item.get("weight", 0.0)))
+            except (TypeError, ValueError):
+                weights.append(0.0)
 
-            best_result = item.get("best", {})
-            cagr_value = best_result.get("cagr_pct")
-            if cagr_value is not None:
-                try:
-                    weighted_cagr_sum += weight * float(cagr_value)
-                    weighted_cagr_weight += weight
-                except (TypeError, ValueError):
-                    pass
+        if not values:
+            continue
 
-            weighted_sum += weight * float(value)
-            weight_total += weight
-
-            details.append(
-                {
-                    "period": item.get("months_range"),
-                    "value": value,
-                    "weight": weight,
-                    "weighted_value": round(weight * float(value), 4),
-                }
-            )
-
-        if not details:
-            final_value = None
+        weight_total = sum(w for w in weights if w > 0)
+        if weight_total > 0:
+            raw = sum(v * w for v, w in zip(values, weights)) / weight_total
         else:
-            if weight_total <= 0:
-                raw = sum(float(detail["value"]) for detail in details) / len(details)
-            else:
-                raw = weighted_sum / weight_total
-            final_value = int(round(raw)) if is_int else round(raw, 3)
+            raw = sum(values) / len(values)
 
-        entry[field] = {
-            "details": details,
-            "final_value": final_value,
-        }
-        if final_value is not None:
-            tuning_values[field] = final_value
-
-    if weighted_cagr_weight > 0:
-        entry["weighted_expected_cagr"] = round(weighted_cagr_sum / weighted_cagr_weight, 6)
-    else:
-        entry["weighted_expected_cagr"] = None
+        final_value = int(round(raw)) if is_int else round(raw, 3)
+        result_values[field] = final_value
 
     return entry
 
@@ -479,8 +500,113 @@ def _read_existing_results(path: Path) -> List[Dict[str, Any]]:
         return []
 
     if isinstance(data, list):
-        return data
+        return [_ensure_entry_schema(item) for item in data]
     return []
+
+
+def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
+    if not isinstance(entry, dict):
+        return {}
+
+    normalized = dict(entry)
+
+    run_date = normalized.get("run_date")
+
+    result_map: Dict[str, Any] = {}
+    existing_result = normalized.get("result")
+    if isinstance(existing_result, dict):
+        result_map.update(existing_result)
+    legacy_tuning = normalized.pop("tuning", None)
+    if isinstance(legacy_tuning, dict):
+        result_map.update(legacy_tuning)
+
+    normalized.pop("result", None)
+
+    for field in ("MA_PERIOD", "PORTFOLIO_TOPN", "REPLACE_SCORE_THRESHOLD"):
+        normalized.pop(field, None)
+
+    raw_results = normalized.get("raw_data")
+    legacy_results = normalized.pop("results", None)
+    if not isinstance(raw_results, list):
+        raw_results = []
+    if isinstance(legacy_results, list):
+        raw_results.extend(legacy_results)
+
+    cleaned_results: List[Dict[str, Any]] = []
+    cagr_values: List[float] = []
+    mdd_positive_values: List[float] = []
+
+    for item in raw_results:
+        if not isinstance(item, dict):
+            continue
+
+        cleaned: Dict[str, Any] = {
+            "MONTHS_RANGE": item.get("MONTHS_RANGE"),
+            "tuning": item.get("tuning", {}),
+        }
+
+        cagr_val = _safe_float(item.get("CAGR"), float("nan"))
+        if math.isfinite(cagr_val):
+            cleaned["CAGR"] = _round_float_places(cagr_val, 2)
+            cagr_values.append(cagr_val)
+        else:
+            cleaned["CAGR"] = None
+
+        mdd_source = item.get("MDD")
+        if mdd_source is None and item.get("mdd_pct") is not None:
+            mdd_source = -_safe_float(item.get("mdd_pct"), float("nan"))
+        mdd_val = _safe_float(mdd_source, float("nan"))
+        if math.isfinite(mdd_val):
+            cleaned["MDD"] = _round_float_places(mdd_val, 2)
+            mdd_positive_values.append(abs(mdd_val))
+        else:
+            cleaned["MDD"] = None
+
+        period_val = _safe_float(item.get("period_return"), float("nan"))
+        cleaned["period_return"] = (
+            _round_float_places(period_val, 2) if math.isfinite(period_val) else None
+        )
+
+        cleaned_results.append(cleaned)
+
+    def _normalize_float(value: Any) -> Optional[float]:
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(num):
+            return None
+        return num
+
+    weighted_cagr = _normalize_float(normalized.pop("weighted_expected_cagr", None))
+    weighted_cagr = _normalize_float(normalized.pop("weighted_expected_CAGR", weighted_cagr))
+
+    weighted_mdd = _normalize_float(normalized.pop("weighted_expected_MDD", None))
+
+    if weighted_cagr is None and cagr_values:
+        weighted_cagr = sum(cagr_values) / len(cagr_values)
+
+    if weighted_mdd is None and mdd_positive_values:
+        weighted_mdd = -(sum(mdd_positive_values) / len(mdd_positive_values))
+
+    ordered: Dict[str, Any] = {}
+    if run_date is not None:
+        ordered["run_date"] = run_date
+    else:
+        ordered["run_date"] = normalized.get("run_date")
+
+    ordered["result"] = result_map
+
+    if weighted_cagr is not None:
+        ordered["weighted_expected_CAGR"] = _round_float(weighted_cagr)
+
+    if weighted_mdd is not None:
+        ordered["weighted_expected_MDD"] = _round_float(weighted_mdd)
+
+    if cleaned_results:
+        ordered["raw_data"] = cleaned_results
+
+    return ordered
 
 
 def run_account_tuning(
@@ -645,29 +771,26 @@ def run_account_tuning(
         warmup_days,
     )
 
-    prefetched = fetch_ohlcv_for_tickers(
-        tickers,
-        country_code,
-        date_range=date_range_prefetch,
-        warmup_days=warmup_days,
-    )
-    if not prefetched:
-        logger.error("[튜닝] 데이터 프리패치에 실패했습니다.")
+    try:
+        prefetched = fetch_ohlcv_for_tickers(
+            tickers,
+            country_code,
+            date_range=date_range_prefetch,
+            warmup_days=warmup_days,
+        )
+    except PriceDataUnavailable as exc:
+        logger.error("[튜닝] 데이터 프리패치에 실패했습니다: %s", exc)
         return None
 
     prefetched_map: Dict[str, DataFrame] = dict(prefetched)
 
     regime_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
     if regime_ticker and regime_ticker not in prefetched_map:
-        try:
-            regime_prefetch = fetch_ohlcv(
-                regime_ticker,
-                country=country_code,
-                date_range=date_range_prefetch,
-            )
-        except Exception:  # pragma: no cover - 데이터 로딩 실패 방어
-            regime_prefetch = None
-
+        regime_prefetch = fetch_ohlcv(
+            regime_ticker,
+            country=country_code,
+            date_range=date_range_prefetch,
+        )
         if regime_prefetch is not None and not regime_prefetch.empty:
             prefetched_map[regime_ticker] = regime_prefetch
 
@@ -731,6 +854,14 @@ def run_account_tuning(
             idx, item = futures[future]
             try:
                 single_result = future.result()
+            except PriceDataUnavailable as exc:
+                logger.error(
+                    "[튜닝] %s (%s개월) 데이터 부족으로 튜닝을 중단합니다: %s",
+                    account_norm.upper(),
+                    item.get("months_range"),
+                    exc,
+                )
+                return None
             except Exception as exc:  # pragma: no cover - 병렬 실행 실패 방어
                 logger.error(
                     "[튜닝] %s (%s개월) 병렬 실행 실패: %s",
@@ -788,7 +919,7 @@ def run_account_tuning(
     existing = _read_existing_results(output_path)
     filtered = [item for item in existing if item.get("run_date") != run_date]
     filtered.append(entry)
-    filtered.sort(key=lambda data: data.get("run_date", ""))
+    filtered.sort(key=lambda data: data.get("run_date", ""), reverse=True)
 
     output_path.write_text(
         json.dumps(filtered, ensure_ascii=False, indent=4),

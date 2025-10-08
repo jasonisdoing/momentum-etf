@@ -21,12 +21,12 @@ TUNING_CONFIG: dict[str, dict] = {
     "aus": {
         "MA_RANGE": np.arange(1, 101, 1),
         "PORTFOLIO_TOPN": [5],
-        "REPLACE_SCORE_THRESHOLD": [0],
+        "REPLACE_SCORE_THRESHOLD": [0.5],
     },
     "kor": {
         "MA_RANGE": np.arange(1, 101, 1),
         "PORTFOLIO_TOPN": [10],
-        "REPLACE_SCORE_THRESHOLD": [0],
+        "REPLACE_SCORE_THRESHOLD": [0.5],
     },
     "us": {
         "MA_RANGE": np.arange(5, 31, 1),
@@ -82,7 +82,7 @@ def main() -> None:
 
     output_path = Path(args.output) if args.output else RESULTS_DIR / f"tune_{account_id}.json"
 
-    run_account_tuning(
+    output = run_account_tuning(
         account_id,
         output_path=output_path,
         results_dir=RESULTS_DIR,
@@ -90,7 +90,10 @@ def main() -> None:
         n_trials=args.n_trials,
         timeout=args.timeout,
     )
-    logger.info("✅ 튜닝 결과를 '%s'에 저장했습니다.", output_path)
+    if output is None:
+        logger.error("튜닝이 실패하여 결과를 저장하지 않습니다.")
+    else:
+        logger.info("✅ 튜닝 결과를 '%s'에 저장했습니다.", output)
 
 
 if __name__ == "__main__":

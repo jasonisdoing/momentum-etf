@@ -18,8 +18,13 @@ def invoke_account_pipeline(account_id: str, *, date_str: str | None) -> List[Di
     """Run the recommendation pipeline and return raw recommendation rows."""
 
     from logic.recommend import generate_recommendation_report
+    from utils.data_loader import PriceDataUnavailable
 
-    result = generate_recommendation_report(account_id=account_id, date_str=date_str)
+    try:
+        result = generate_recommendation_report(account_id=account_id, date_str=date_str)
+    except PriceDataUnavailable as exc:
+        logger.error("추천 데이터를 생성하지 못했습니다 (%s): %s", account_id.upper(), exc)
+        return []
 
     if not result:
         logger.warning("%s에 대한 추천을 생성하지 못했습니다.", account_id.upper())

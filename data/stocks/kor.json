@@ -280,6 +280,24 @@
                 "name": "HANARO 글로벌 금채굴기업",
                 "recommend_enabled": true,
                 "listing_date": "2024-01-18"
+            },
+            {
+                "ticker": "0064K0",
+                "name": "Kodex 금액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-06-17"
+            },
+            {
+                "ticker": "132030",
+                "name": "Kodex 골드선물(H)",
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
+            },
+            {
+                "ticker": "144600",
+                "name": "Kodex 은선물(H)",
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
@@ -395,6 +413,12 @@
                 "name": "TIMEFOLIO 글로벌안티에이징바이오액티브",
                 "recommend_enabled": true,
                 "listing_date": "2024-07-02"
+            },
+            {
+                "ticker": "453640",
+                "name": "KODEX 미국S&P500헬스케어",
+                "recommend_enabled": true,
+                "listing_date": "2023-03-21"
             }
         ]
     },
@@ -740,12 +764,6 @@
             {
                 "ticker": "453630",
                 "name": "KODEX 미국S&P500필수소비재",
-                "recommend_enabled": true,
-                "listing_date": "2023-03-21"
-            },
-            {
-                "ticker": "453640",
-                "name": "KODEX 미국S&P500헬스케어",
                 "recommend_enabled": true,
                 "listing_date": "2023-03-21"
             },

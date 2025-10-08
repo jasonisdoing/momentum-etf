@@ -14,6 +14,11 @@ except Exception:  # pragma: no cover
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
+
 logger = get_app_logger()
 
 COLLECTION_NAME = "stock_recommendations"
@@ -70,6 +75,15 @@ def _normalize_datetime(value: Any) -> Optional[datetime]:
     return None
 
 
+def _now_kst() -> datetime:
+    if ZoneInfo is not None:
+        try:
+            return datetime.now(ZoneInfo("Asia/Seoul"))
+        except Exception:
+            pass
+    return datetime.utcnow()
+
+
 def _get_collection():
     db = get_db_connection()
     if db is None:
@@ -96,7 +110,7 @@ def save_recommendation_payload(
     safe_payload = _make_json_safe(payload)
     safe_summary = _make_json_safe(summary) if summary is not None else None
     base_datetime = _normalize_datetime(base_date)
-    now = datetime.utcnow()
+    now = _now_kst()
 
     update_doc: Dict[str, Any] = {
         "account_id": account_norm,

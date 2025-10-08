@@ -117,6 +117,19 @@ class PykrxDataUnavailable(Exception):
         super().__init__(message)
 
 
+class PriceDataUnavailable(RuntimeError):
+    """필수 가격 데이터를 조회하지 못했을 때 발생하는 예외."""
+
+    def __init__(self, tickers: Union[str, List[str]], message: Optional[str] = None):
+        if isinstance(tickers, str):
+            tickers_list = [tickers]
+        else:
+            tickers_list = list(tickers)
+        self.tickers = tickers_list
+        base_message = message or f"가격 데이터를 가져오지 못했습니다: {', '.join(tickers_list)}"
+        super().__init__(base_message)
+
+
 def _get_cache_start_dt() -> Optional[pd.Timestamp]:
     """환경 변수 또는 기본값에서 캐시 시작 날짜를 로드합니다."""
     raw = os.environ.get("CACHE_START_DATE", CACHE_START_DATE_FALLBACK)
@@ -524,7 +537,7 @@ def fetch_ohlcv(
     df = _fetch_ohlcv_with_cache(ticker, country_code, start_dt.normalize(), end_dt.normalize())
 
     if df is None or df.empty:
-        return df
+        raise PriceDataUnavailable(ticker, f"{ticker} ({country_code}) 데이터가 비어 있습니다.")
 
     if _should_use_realtime_price(country_code):
         df = _overlay_realtime_price(df, ticker, country_code)
@@ -958,7 +971,7 @@ def fetch_ohlcv_for_tickers(
     """
     주어진 티커 목록에 대해 OHLCV 데이터를 직렬로 조회합니다.
     """
-    prefetched_data = {}
+    prefetched_data: Dict[str, pd.DataFrame] = {}
 
     if not date_range or len(date_range) != 2:
         return {}
@@ -967,10 +980,17 @@ def fetch_ohlcv_for_tickers(
     warmup_start = core_start - pd.DateOffset(days=warmup_days)
     adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
 
+    missing: List[str] = []
+
     for tkr in tickers:
-        df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range)
-        if df is not None and not df.empty:
+        try:
+            df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range)
             prefetched_data[tkr] = df
+        except PriceDataUnavailable as exc:
+            missing.extend(exc.tickers)
+
+    if missing:
+        raise PriceDataUnavailable(missing)
 
     return prefetched_data
 

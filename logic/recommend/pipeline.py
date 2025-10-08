@@ -33,6 +33,7 @@ from utils.data_loader import (
     get_latest_trading_day,
     get_next_trading_day,
     count_trading_days,
+    PriceDataUnavailable,
 )
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
@@ -137,43 +138,26 @@ def _fetch_dataframe(
     base_date: Optional[pd.Timestamp],
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
 ) -> Optional[pd.DataFrame]:
-    try:
-        if prefetched_data and ticker in prefetched_data:
-            df = prefetched_data[ticker]
-        else:
-            months_back = max(12, ma_period)  # 최소 1년치 데이터 요청
-            df = fetch_ohlcv(
-                ticker,
-                country=country,
-                months_back=months_back,
-                base_date=base_date,
-            )
+    if prefetched_data and ticker in prefetched_data:
+        df = prefetched_data[ticker]
+    else:
+        months_back = max(12, ma_period)  # 최소 1년치 데이터 요청
+        df = fetch_ohlcv(
+            ticker,
+            country=country,
+            months_back=months_back,
+            base_date=base_date,
+        )
 
-        if df is None or df.empty:
-            logger.warning("%s에 대한 데이터를 가져오지 못했습니다.", ticker)
-            return None
+    if "Close" not in df.columns:
+        raise PriceDataUnavailable(ticker, "종가(Close) 컬럼이 없습니다.")
 
-        # Close 컬럼이 없으면 에러 메시지와 함께 None 반환
-        if "Close" not in df.columns:
-            logger.warning("%s에 대한 종가(Close) 데이터가 없습니다.", ticker)
-            return None
+    df = df.dropna(subset=["Close"])
 
-        # Close가 NaN인 행 제거
-        df = df.dropna(subset=["Close"])
+    if df.empty:
+        raise PriceDataUnavailable(ticker, "유효한 종가 데이터가 없습니다.")
 
-        if df.empty:
-            logger.warning("%s에 대한 유효한 데이터가 없습니다.", ticker)
-            return None
-
-        # 데이터가 충분하지 않아도 계속 진행 (나중에 _calc_metrics에서 처리)
-        return df
-
-    except Exception as e:
-        logger.warning("%s 데이터 처리 중 오류 발생: %s", ticker, e)
-        import traceback
-
-        traceback.print_exc()
-        return None
+    return df
 
 
 def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
@@ -599,33 +583,33 @@ def generate_account_recommendation_report(
     # 각 티커의 현재 데이터 준비 (실제 OHLCV 데이터 사용)
     tickers_all = [stock.get("ticker") for stock in etf_universe if stock.get("ticker")]
     prefetched_data: Dict[str, pd.DataFrame] = {}
+    months_back = max(12, ma_period)
+    warmup_days = int(max(ma_period, 1) * 1.5)
+    start_date = (base_date - pd.DateOffset(months=months_back)).strftime("%Y-%m-%d")
+    end_date = base_date.strftime("%Y-%m-%d")
+    logger.info(
+        "[%s] 가격 데이터 로딩 시작 (기간 %s~%s, 대상 %d개)",
+        account_id.upper(),
+        start_date,
+        end_date,
+        len(tickers_all),
+    )
+    fetch_start = time.perf_counter()
     try:
-        months_back = max(12, ma_period)
-        warmup_days = int(max(ma_period, 1) * 1.5)
-        start_date = (base_date - pd.DateOffset(months=months_back)).strftime("%Y-%m-%d")
-        end_date = base_date.strftime("%Y-%m-%d")
-        logger.info(
-            "[%s] 가격 데이터 로딩 시작 (기간 %s~%s, 대상 %d개)",
-            account_id.upper(),
-            start_date,
-            end_date,
-            len(tickers_all),
-        )
-        fetch_start = time.perf_counter()
         prefetched_data = fetch_ohlcv_for_tickers(
             tickers_all,
             country_code,
             date_range=[start_date, end_date],
             warmup_days=warmup_days,
         )
-        logger.info(
-            "[%s] 가격 데이터 로딩 완료 (%.1fs)",
-            account_id.upper(),
-            time.perf_counter() - fetch_start,
-        )
-    except Exception as exc:
-        logger.warning("%s 계정 데이터 로딩 실패: %s", account_id, exc)
-        prefetched_data = {}
+    except PriceDataUnavailable as exc:
+        logger.error("%s 계정 데이터 로딩 실패: %s", account_id.upper(), exc)
+        raise
+    logger.info(
+        "[%s] 가격 데이터 로딩 완료 (%.1fs)",
+        account_id.upper(),
+        time.perf_counter() - fetch_start,
+    )
 
     data_by_tkr = {}
     for stock in etf_universe:
@@ -664,10 +648,10 @@ def generate_account_recommendation_report(
             ma_score_series = calculate_ma_score(df["Close"], moving_average)
             score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
 
-            pct_changes = df["Close"].pct_change().dropna() * 100
-            trend_series = (
-                [round(float(val), 2) for val in pct_changes.tail(15).tolist()]
-                if not pct_changes.empty
+            recent_prices = df["Close"].tail(15)
+            trend_prices = (
+                [round(float(val), 6) for val in recent_prices.tolist()]
+                if not recent_prices.empty
                 else []
             )
 
@@ -685,7 +669,7 @@ def generate_account_recommendation_report(
                 "ret_1w": _compute_trailing_return(df["Close"], 5),
                 "ret_2w": _compute_trailing_return(df["Close"], 10),
                 "ret_3w": _compute_trailing_return(df["Close"], 15),
-                "trend_returns": trend_series,
+                "trend_prices": trend_prices,
             }
         else:
             # 데이터가 없을 경우 기본값
@@ -702,7 +686,7 @@ def generate_account_recommendation_report(
                 "ret_1w": 0.0,
                 "ret_2w": 0.0,
                 "ret_3w": 0.0,
-                "trend_returns": [],
+                "trend_prices": [],
             }
 
     regime_info = None
@@ -987,7 +971,7 @@ def generate_account_recommendation_report(
             "return_1w": ret_1w,
             "return_2w": ret_2w,
             "return_3w": ret_3w,
-            "trend_returns": ticker_data.get("trend_returns", []),
+            "trend_prices": ticker_data.get("trend_prices", []),
             "score": score_val,
             "streak": streak_val,
             "base_date": base_date.strftime("%Y-%m-%d"),

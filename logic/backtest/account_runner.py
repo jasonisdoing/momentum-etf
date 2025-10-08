@@ -24,6 +24,7 @@ from utils.data_loader import (
     fetch_ohlcv,
     get_aud_to_krw_rate,
     get_usd_to_krw_rate,
+    PriceDataUnavailable,
 )
 from utils.stock_list_io import get_etfs
 from utils.logger import get_app_logger
@@ -597,22 +598,16 @@ def _build_summary(
     def _calc_benchmark_performance(
         *, ticker: str, name: str, country: str
     ) -> Optional[Dict[str, Any]]:
-        try:
-            benchmark_df = fetch_ohlcv(
-                ticker,
-                country=country,
-                date_range=[start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
-            )
-        except Exception:
-            benchmark_df = None
-
-        if benchmark_df is None or benchmark_df.empty:
-            return None
+        benchmark_df = fetch_ohlcv(
+            ticker,
+            country=country,
+            date_range=[start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
+        )
 
         benchmark_df = benchmark_df.sort_index()
         benchmark_df = benchmark_df.loc[benchmark_df.index.intersection(pv_series.index)]
         if benchmark_df.empty:
-            return None
+            raise PriceDataUnavailable(ticker, "벤치마크 데이터가 비어 있습니다.")
 
         start_price = float(benchmark_df["Close"].iloc[0])
         end_price = float(benchmark_df["Close"].iloc[-1])

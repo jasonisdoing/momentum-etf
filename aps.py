@@ -48,7 +48,7 @@ from utils.notification import (
     send_recommendation_slack_notification,
 )
 from utils.schedule_config import get_all_country_schedules
-from utils.data_loader import is_trading_day
+from utils.data_loader import is_trading_day, PriceDataUnavailable
 
 
 def setup_logging():
@@ -157,6 +157,13 @@ def run_recommendation_generation(
 
     try:
         report = generate_account_recommendation_report(account_id=account_norm, date_str=None)
+    except PriceDataUnavailable as exc:
+        logging.error(
+            "계정 %s의 추천 생성이 중단되었습니다. 필요한 가격 데이터를 확보하지 못했습니다: %s",
+            account_norm,
+            exc,
+        )
+        return
     except Exception:
         logging.error(
             "계정 %s의 추천 생성 작업이 실패했습니다",

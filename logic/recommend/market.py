@@ -13,7 +13,7 @@ try:  # 선택적 의존성 로딩
 except Exception:  # pragma: no cover
     yf = None
 
-from utils.data_loader import fetch_ohlcv
+from utils.data_loader import fetch_ohlcv, PriceDataUnavailable
 from utils.account_registry import (
     load_account_configs,
     pick_default_account,
@@ -67,11 +67,14 @@ def get_market_regime_status_string() -> Optional[str]:
     required_months = max(3, (required_days // 22) + 2)
 
     # 데이터 조회
-    df_regime = fetch_ohlcv(
-        regime_ticker,
-        country="kor",
-        months_range=[required_months, 0],  # 지수 조회에서는 country 인자가 의미 없습니다.
-    )
+    try:
+        df_regime = fetch_ohlcv(
+            regime_ticker,
+            country="kor",
+            months_range=[required_months, 0],  # 지수 조회에서는 country 인자가 의미 없습니다.
+        )
+    except PriceDataUnavailable:
+        return '<span style="color:grey">시장 상태: 데이터 부족</span>'
 
     # --- 인덱스 정규화 추가 ---
     if df_regime is not None and not df_regime.empty:
@@ -83,7 +86,14 @@ def get_market_regime_status_string() -> Optional[str]:
 
     # 만약 데이터가 부족하면, 기간을 늘려 한 번 더 시도합니다.
     if df_regime is None or df_regime.empty or len(df_regime) < regime_ma_period:
-        df_regime = fetch_ohlcv(regime_ticker, country="kor", months_range=[required_months * 2, 0])
+        try:
+            df_regime = fetch_ohlcv(
+                regime_ticker,
+                country="kor",
+                months_range=[required_months * 2, 0],
+            )
+        except PriceDataUnavailable:
+            return '<span style="color:grey">시장 상태: 데이터 부족</span>'
 
     if df_regime is None or df_regime.empty or len(df_regime) < regime_ma_period:
         return '<span style="color:grey">시장 상태: 데이터 부족</span>'

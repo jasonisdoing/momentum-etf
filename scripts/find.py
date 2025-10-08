@@ -28,7 +28,7 @@ from pykrx import stock
 
 # --- 설정 ---
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
-EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "선물", "ETN"]
+EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "ETN"]
 
 
 def get_latest_trading_day() -> str:
