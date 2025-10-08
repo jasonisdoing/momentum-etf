@@ -35,6 +35,8 @@ from utils.stock_list_io import get_etfs
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
 
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+
 
 def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:
     if values is None:
@@ -126,6 +128,20 @@ def _round_float_places(value: Any, digits: int) -> float:
     if not math.isfinite(num):
         return float("nan")
     return float(round(num, digits))
+
+
+def _round_up_float_places(value: Any, digits: int) -> float:
+    """Round float up (ceiling) to the specified number of decimal places."""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    if not math.isfinite(num):
+        return float("nan")
+    if digits <= 0:
+        return float(math.ceil(num))
+    factor = 10**digits
+    return float(math.ceil(num * factor) / factor)
 
 
 def _execute_tuning_for_months(
@@ -281,7 +297,7 @@ def _execute_tuning_for_months(
         entry = {
             "ma_period": ma_int,
             "portfolio_topn": topn_int,
-            "replace_threshold": _round_float(threshold_float),
+            "replace_threshold": _round_up_float_places(threshold_float, 1),
             "cagr_pct": _round_float(_safe_float(summary.get("cagr_pct"), 0.0)),
             "mdd_pct": _round_float(_safe_float(summary.get("mdd_pct"), 0.0)),
             "sharpe_ratio": _round_float(_safe_float(summary.get("sharpe_ratio"), 0.0)),
@@ -423,11 +439,13 @@ def _build_run_entry(
             if value is None:
                 continue
             if field == "REPLACE_SCORE_THRESHOLD":
-                converted = _to_float(value)
+                rounded_up = _round_up_float_places(value, 1)
+                if math.isfinite(rounded_up):
+                    tuning_snapshot[field] = rounded_up
             else:
                 converted = _to_int(value)
-            if converted is not None:
-                tuning_snapshot[field] = converted
+                if converted is not None:
+                    tuning_snapshot[field] = converted
 
         raw_data_payload.append(
             {
@@ -482,7 +500,7 @@ def _build_run_entry(
         else:
             raw = sum(values) / len(values)
 
-        final_value = int(round(raw)) if is_int else round(raw, 3)
+        final_value = int(round(raw)) if is_int else _round_up_float_places(raw, 1)
         result_values[field] = final_value
 
     return entry
