@@ -95,6 +95,7 @@ def run_portfolio_backtest(
     cooldown_days: int = 5,
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    missing_ticker_sink: Optional[Set[str]] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     이동평균 기반 모멘텀 전략으로 포트폴리오 백테스트를 실행합니다.
@@ -196,7 +197,15 @@ def run_portfolio_backtest(
 
     missing_metrics = [t for t in tickers_to_process if t not in metrics_by_ticker]
     if missing_metrics:
-        logger.warning("가격 데이터 부족으로 제외된 종목: %s", ", ".join(sorted(set(missing_metrics))))
+        missing_set = {
+            str(ticker).strip().upper()
+            for ticker in missing_metrics
+            if isinstance(ticker, str) and str(ticker).strip()
+        }
+        if missing_ticker_sink is not None:
+            missing_ticker_sink.update(missing_set)
+        else:
+            logger.warning("가격 데이터 부족으로 제외된 종목: %s", ", ".join(sorted(missing_set)))
 
     # 모든 종목의 거래일을 합집합하여 전체 백테스트 기간을 설정합니다.
     union_index = pd.DatetimeIndex([])

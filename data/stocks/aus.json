@@ -53,6 +53,12 @@
                 "name": "BetaShares Global Cybersecurity ETF",
                 "recommend_enabled": true,
                 "listing_date": "2020-01-02"
+            },
+            {
+                "ticker": "ASX:TECH",
+                "name": "Morningstar Global Technology ETF",
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },

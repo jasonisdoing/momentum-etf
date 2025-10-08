@@ -12,7 +12,7 @@
                 "source": "mid_term"
             },
             {
-                "MONTHS_RANGE": 9,
+                "MONTHS_RANGE": 12,
                 "weight": 0.2,
                 "source": "long_term"
             }

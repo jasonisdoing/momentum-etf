@@ -73,6 +73,7 @@ class AccountBacktestResult:
     ticker_summaries: List[Dict[str, Any]]
     settings_snapshot: Dict[str, Any]
     months_range: int
+    missing_tickers: List[str]
 
     def to_dict(self) -> Dict[str, Any]:
         df = self.portfolio_timeseries.copy()
@@ -101,6 +102,7 @@ class AccountBacktestResult:
             "ticker_summaries": self.ticker_summaries,
             "settings_snapshot": self.settings_snapshot,
             "months_range": self.months_range,
+            "missing_tickers": self.missing_tickers,
         }
 
 
@@ -228,6 +230,7 @@ def run_account_backtest(
         )
 
     _log("[백테스트] 포트폴리오 백테스트 실행 중...")
+    runtime_missing_tickers: set[str] = set()
 
     ticker_timeseries = (
         run_portfolio_backtest(
@@ -237,6 +240,7 @@ def run_account_backtest(
             top_n=portfolio_topn,
             date_range=date_range,
             country=country_code,
+            missing_ticker_sink=runtime_missing_tickers,
             **backtest_kwargs,
         )
         or {}
@@ -289,6 +293,13 @@ def run_account_backtest(
         initial_capital=initial_capital_value,
     )
 
+    missing_sorted = sorted(runtime_missing_tickers)
+    if missing_sorted and not quiet:
+        logger.warning(
+            "[백테스트] 가격 데이터 부족으로 제외된 종목: %s",
+            ", ".join(missing_sorted),
+        )
+
     return AccountBacktestResult(
         account_id=account_id,
         country_code=country_code,
@@ -312,6 +323,7 @@ def run_account_backtest(
         ticker_summaries=ticker_summaries,
         settings_snapshot=settings_snapshot,
         months_range=months_range,
+        missing_tickers=missing_sorted,
     )
 
 

@@ -754,76 +754,85 @@ def generate_account_recommendation_report(
     # 당일 SELL 트레이드를 결과에 추가하여 SOLD 상태로 노출
     trades_today = _fetch_trades_for_date(account_id, base_date)
     sold_entries: List[Dict[str, Any]] = []
+    buy_traded_today: set[str] = set()
     for trade in trades_today:
-        if trade.get("action") != "SELL":
-            continue
+        action = (trade.get("action") or "").strip().upper()
         ticker = (trade.get("ticker") or "").strip().upper()
         if not ticker:
             continue
-        if ticker in holdings:
-            # 여전히 보유 중이면 SOLD로 표시하지 않음
-            continue
 
-        existing = next((d for d in decisions if d.get("tkr") == ticker), None)
-        if existing:
-            existing["state"] = "SOLD"
-            if existing.get("row"):
-                existing["row"][4] = "SOLD"
-                existing["row"][-1] = DECISION_MESSAGES["SOLD"]
-            existing["buy_signal"] = False
-            continue
+        if action == "SELL":
+            if ticker in holdings:
+                # 여전히 보유 중이면 SOLD로 표시하지 않음
+                continue
 
-        name = trade.get("name") or ticker
-        ticker_data = data_by_tkr.get(ticker, {})
-        if not ticker_data:
-            meta_info = next(
-                (stock for stock in etf_universe if stock.get("ticker", "").upper() == ticker),
-                None,
+            existing = next((d for d in decisions if d.get("tkr") == ticker), None)
+            if existing:
+                existing["state"] = "SOLD"
+                if existing.get("row"):
+                    existing["row"][4] = "SOLD"
+                    existing["row"][-1] = DECISION_MESSAGES["SOLD"]
+                existing["buy_signal"] = False
+                continue
+
+            name = trade.get("name") or ticker
+            ticker_data = data_by_tkr.get(ticker, {})
+            if not ticker_data:
+                meta_info = next(
+                    (stock for stock in etf_universe if stock.get("ticker", "").upper() == ticker),
+                    None,
+                )
+                if meta_info:
+                    name = meta_info.get("name") or name
+                else:
+                    logger.warning("SOLD 종목 메타데이터 없음: %s", ticker)
+                    name = ticker
+
+            price_val = ticker_data.get("price", 0.0)
+            daily_pct_val = (
+                ticker_data.get("daily_pct", 0.0)
+                if "daily_pct" in ticker_data
+                else (
+                    ((ticker_data.get("price", 0.0) / ticker_data.get("prev_close", 1.0)) - 1.0)
+                    * 100
+                    if ticker_data.get("prev_close", 0.0) > 0
+                    else 0.0
+                )
             )
-            if meta_info:
-                name = meta_info.get("name") or name
-            else:
-                logger.warning("SOLD 종목 메타데이터 없음: %s", ticker)
-                name = ticker
+            score_val = float(ticker_data.get("score", 0.0) or 0.0)
 
-        price_val = ticker_data.get("price", 0.0)
-        daily_pct_val = (
-            ticker_data.get("daily_pct", 0.0)
-            if "daily_pct" in ticker_data
-            else (
-                ((ticker_data.get("price", 0.0) / ticker_data.get("prev_close", 1.0)) - 1.0) * 100
-                if ticker_data.get("prev_close", 0.0) > 0
-                else 0.0
+            sold_entries.append(
+                {
+                    "state": "SOLD",
+                    "tkr": ticker,
+                    "score": score_val,
+                    "buy_signal": False,
+                    "row": [
+                        0,
+                        ticker,
+                        name,
+                        "-",
+                        "SOLD",
+                        "-",
+                        price_val,
+                        daily_pct_val,
+                        0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        "-",
+                        score_val,
+                        "-",
+                        DECISION_MESSAGES["SOLD"],
+                    ],
+                }
             )
-        )
-        score_val = float(ticker_data.get("score", 0.0) or 0.0)
 
-        sold_entries.append(
-            {
-                "state": "SOLD",
-                "tkr": ticker,
-                "score": score_val,
-                "buy_signal": False,
-                "row": [
-                    0,
-                    ticker,
-                    name,
-                    "-",
-                    "SOLD",
-                    "-",
-                    price_val,
-                    daily_pct_val,
-                    0,
-                    0.0,
-                    0.0,
-                    0.0,
-                    "-",
-                    score_val,
-                    "-",
-                    DECISION_MESSAGES["SOLD"],
-                ],
-            }
-        )
+        elif action == "BUY":
+            buy_traded_today.add(ticker)
+
+        else:
+            continue
 
     # 결과 포맷팅
     etf_meta_map: Dict[str, Dict[str, Any]] = {}
@@ -876,42 +885,66 @@ def generate_account_recommendation_report(
         recommend_enabled = ticker_upper not in disabled_tickers
 
         # 보유일 계산
+        base_norm = base_date.normalize()
         holding_days_val = 0
+        latest_buy_date_norm: Optional[pd.Timestamp] = None
         if ticker in holdings:
             current_date = pd.Timestamp.now().normalize()
             raw_buy_date = consecutive_holding_info.get(ticker, {}).get("buy_date")
             if raw_buy_date:
                 buy_timestamp = pd.to_datetime(raw_buy_date).normalize()
-                if pd.notna(buy_timestamp) and buy_timestamp <= current_date:
-                    holding_days_val = count_trading_days(
-                        country_code,
-                        buy_timestamp,
-                        current_date,
-                    )
+                if pd.notna(buy_timestamp):
+                    latest_buy_date_norm = buy_timestamp
+                    if buy_timestamp <= current_date:
+                        holding_days_val = count_trading_days(
+                            country_code,
+                            buy_timestamp,
+                            current_date,
+                        )
         elif ticker in consecutive_holding_info:
             buy_date = consecutive_holding_info[ticker].get("buy_date")
             if buy_date:
                 buy_timestamp = pd.to_datetime(buy_date).normalize()
-                base_norm = base_date.normalize()
                 if pd.notna(buy_timestamp) and buy_timestamp <= base_norm:
+                    latest_buy_date_norm = buy_timestamp
                     holding_days_val = count_trading_days(
                         country_code,
                         buy_timestamp,
                         base_norm,
                     )
 
+        if latest_buy_date_norm is None:
+            fallback_buy_date = (
+                holdings.get(ticker, {}).get("buy_date") if ticker in holdings else None
+            )
+            fallback_norm = _normalize_buy_date(fallback_buy_date)
+            if fallback_norm is not None:
+                latest_buy_date_norm = fallback_norm
+
         # 당일 신규 편입 종목은 최소 1일 보유로 표시 및 문구 유지
         new_buy_phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
         bought_today = False
+        if latest_buy_date_norm is not None and latest_buy_date_norm >= base_norm:
+            bought_today = True
+
         if holding_days_val == 0:
             if raw_state in {"BUY", "BUY_REPLACE"}:
                 holding_days_val = 1
                 bought_today = True
             elif is_currently_held:
                 holding_days_val = 1
-                bought_today = True
+                if not bought_today:
+                    bought_today = (
+                        latest_buy_date_norm is not None and latest_buy_date_norm >= base_norm
+                    )
+
         if bought_today and is_currently_held:
             phrase = new_buy_phrase
+
+        if ticker in buy_traded_today:
+            phrase = new_buy_phrase
+            if state == "WAIT":
+                state = "HOLD"
 
         ticker_data = data_by_tkr.get(ticker, {})
         price_val = ticker_data.get("price", 0.0)

@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from os import cpu_count
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple, Set
 
 import optuna
 import pandas as pd
@@ -153,6 +153,7 @@ def _execute_tuning_for_months(
     best_entry: Optional[Dict[str, Any]] = None
     best_key = (float("-inf"), float("inf"))
     evaluated_cache: Dict[Tuple[int, int, float], Dict[str, Any]] = {}
+    encountered_missing: Set[str] = set()
 
     ma_candidates = list(search_space.get("MA_PERIOD", []))
     topn_candidates = list(search_space.get("PORTFOLIO_TOPN", []))
@@ -270,6 +271,9 @@ def _execute_tuning_for_months(
             )
             raise optuna.TrialPruned(str(exc))
 
+        if getattr(bt_result, "missing_tickers", None):
+            encountered_missing.update(bt_result.missing_tickers)
+
         summary = bt_result.summary or {}
         final_value_local = _safe_float(summary.get("final_value"), 0.0)
         final_value_krw = _safe_float(summary.get("final_value_krw"), final_value_local)
@@ -331,6 +335,7 @@ def _execute_tuning_for_months(
         "failures": failures,
         "success_count": success_count,
         "regime_ma_period": regime_ma_period,
+        "missing_tickers": sorted(encountered_missing),
         "study": {
             "trials_requested": effective_trials,
             "trials_completed": len(study.trials),
@@ -816,6 +821,7 @@ def run_account_tuning(
     results_per_month: List[Dict[str, Any]] = []
     max_workers = min(len(month_items), cpu_count() or 1)
     futures: Dict[Any, Any] = {}
+    runtime_missing_registry: Set[str] = set()
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for idx, item in enumerate(month_items):
@@ -882,6 +888,9 @@ def run_account_tuning(
 
             single_result["weight"] = weight
             single_result["source"] = item.get("source")
+            missing_in_result = single_result.get("missing_tickers") or []
+            if missing_in_result:
+                runtime_missing_registry.update(missing_in_result)
             collected.append((idx, single_result))
 
     collected.sort(key=lambda entry: entry[0])
@@ -892,6 +901,16 @@ def run_account_tuning(
         return None
 
     run_date = datetime.now().strftime("%Y-%m-%d")
+    if runtime_missing_registry:
+        unseen_missing = sorted(set(runtime_missing_registry) - set(excluded_ticker_set or []))
+        if unseen_missing:
+            logger.warning(
+                "[튜닝] %s 실행 중 데이터가 부족해 제외된 추가 종목 (%d): %s",
+                account_norm.upper(),
+                len(unseen_missing),
+                ", ".join(unseen_missing),
+            )
+
     for item in results_per_month:
         best = item.get("best", {})
         logger.info(
