@@ -41,7 +41,6 @@ from logic.recommend.pipeline import (
     RecommendationReport,
     generate_account_recommendation_report,
 )
-from utils.data_updater import update_etf_names
 from utils.env import load_env_if_present
 from utils.notification import (
     compose_recommendation_slack_message,
@@ -304,14 +303,6 @@ def main():
     # Load .env for API keys, DB, etc.
     load_env_if_present()
 
-    # Update stock names before scheduling
-    logging.info("Checking for and updating stock names...")
-    try:
-        update_etf_names()
-        logging.info("종목명 업데이트를 완료했습니다.")
-    except Exception as e:
-        logging.error(f"종목명 업데이트에 실패했습니다: {e}", exc_info=True)
-
     scheduler = BlockingScheduler()
     # 1. recommendation_cron 와 notify_cron 이 겹치는 경우: 작업도 실행되고, 슬랙도 발송
     # 2. python recommend.py 로 실행되는 경우: 작업도 실행되고, 슬랙도 발송
@@ -370,7 +361,7 @@ def main():
     # Initial run for stock metadata
     try:
         logging.info("[Initial Run] Updating stock metadata...")
-        run_stock_stats_update()
+        # run_stock_stats_update()
     except Exception:
         logging.error("Error during initial run for stock metadata update", exc_info=True)
 

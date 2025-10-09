@@ -83,7 +83,7 @@ def _update_metadata_for_country(country_code: str):
                 else:
                     stock["1_week_avg_volume"] = None
                     stock["1_week_avg_turnover"] = None
-
+                logger.info(f"[{country_code.upper()}/{ticker}] 메타데이터 획득")
                 updated_count += 1
                 time.sleep(0.2)  # API 호출 속도 조절
 
