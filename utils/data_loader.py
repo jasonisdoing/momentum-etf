@@ -429,21 +429,24 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
             # 타임존 처리 실패 시 안전하게 폴백
             pass
 
-    # end_dt부터 과거로 하루씩 이동하며 거래일을 찾습니다.
-    for i in range(15):
-        check_date = end_dt - pd.DateOffset(days=i)
-        check_date_str = check_date.strftime("%Y-%m-%d")
-        try:
-            if get_trading_days(check_date_str, check_date_str, country_code):
-                return check_date.normalize()
-        except Exception as e:
-            logger.warning("거래일 조회 중 오류 발생(%s): %s", check_date_str, e)
-            # 오류 발생 시 다음 날짜로 계속 탐색
-            continue
+    # 최근 10일간의 거래일을 한 번에 조회 (효율성 개선)
+    start_date = (end_dt - pd.DateOffset(days=10)).strftime("%Y-%m-%d")
+    end_date = end_dt.strftime("%Y-%m-%d")
 
-    # 15일 동안 거래일을 찾지 못하면 오늘 날짜를 정규화하여 반환합니다.
+    try:
+        # 최근 10일간의 모든 거래일을 한 번에 가져옴
+        trading_days = get_trading_days(start_date, end_date, country_code)
+
+        if trading_days:
+            # 가장 최근 거래일을 반환
+            latest_trading_day = max(trading_days)
+            return latest_trading_day.normalize()
+    except Exception as e:
+        logger.warning("거래일 일괄 조회 중 오류 발생: %s", e)
+
+    # 폴백: 10일간 거래일을 찾지 못하면 오늘 날짜를 정규화하여 반환합니다.
     logger.warning(
-        "최근 15일 내에 거래일을 찾지 못했습니다. 오늘 날짜(%s)를 사용합니다.",
+        "최근 10일 내에 거래일을 찾지 못했습니다. 오늘 날짜(%s)를 사용합니다.",
         end_dt.strftime("%Y-%m-%d"),
     )
     return end_dt.normalize()
