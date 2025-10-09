@@ -169,7 +169,7 @@
             {
                 "ticker": "069500",
                 "name": "Kodex 200",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2007-01-29",
                 "1_week_avg_volume": 11269375,
                 "1_week_avg_turnover": 543547937671
@@ -177,7 +177,7 @@
             {
                 "ticker": "315930",
                 "name": "Kodex Top5Plus TR",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2019-01-22",
                 "1_week_avg_volume": 73553,
                 "1_week_avg_turnover": 2299165865
@@ -185,7 +185,7 @@
             {
                 "ticker": "495060",
                 "name": "TIMEFOLIO 코리아밸류업액티브",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2024-11-04",
                 "1_week_avg_volume": 48329,
                 "1_week_avg_turnover": 640809250
@@ -193,7 +193,7 @@
             {
                 "ticker": "441800",
                 "name": "TIMEFOLIO Korea플러스배당액티브",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2022-09-27",
                 "1_week_avg_volume": 141310,
                 "1_week_avg_turnover": 2397715748
@@ -206,7 +206,7 @@
             {
                 "ticker": "091160",
                 "name": "KODEX 반도체",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2007-01-29",
                 "1_week_avg_volume": 1891741,
                 "1_week_avg_turnover": 89025481367
@@ -214,7 +214,7 @@
             {
                 "ticker": "0093A0",
                 "name": "RISE AI반도체TOP10",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2025-08-26",
                 "1_week_avg_volume": 501602,
                 "1_week_avg_turnover": 6949679272
@@ -699,7 +699,7 @@
             {
                 "ticker": "419430",
                 "name": "Kodex 차이나2차전지MSCI(합성)",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2022-03-22",
                 "1_week_avg_volume": 294851,
                 "1_week_avg_turnover": 2989101086
@@ -775,7 +775,7 @@
             {
                 "ticker": "414780",
                 "name": "TIGER 차이나과창판STAR50(합성)",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2022-01-13",
                 "1_week_avg_volume": 1278873,
                 "1_week_avg_turnover": 15151011630
@@ -783,7 +783,7 @@
             {
                 "ticker": "413220",
                 "name": "SOL 차이나태양광CSI(합성)",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2021-12-22",
                 "1_week_avg_volume": 32818,
                 "1_week_avg_turnover": 170961457
@@ -791,7 +791,7 @@
             {
                 "ticker": "256750",
                 "name": "KODEX 차이나심천ChiNext(합성)",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2016-11-08",
                 "1_week_avg_volume": 307107,
                 "1_week_avg_turnover": 4372782283
