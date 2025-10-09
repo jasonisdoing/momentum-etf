@@ -1,38 +1,42 @@
-# .github/workflows/deploy.yml
-name: Deploy to Lightsail
+name: Deploy to Oracle VM
 
 on:
   push:
     branches:
-      # - main # main 브랜치에 push 이벤트가 발생할 때마다 이 워크플로우를 실행합니다.
-      - upgrade # upgrade 브랜치에 push 이벤트가 발생할 때마다 이 워크플로우를 실행합니다.
+      - upgrade   # upgrade 브랜치에 push 시 자동 배포
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to server
+      - name: Deploy to Oracle VM
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.LIGHTSAIL_SSH_HOST }}
-          username: ${{ secrets.LIGHTSAIL_SSH_USERNAME }}
-          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          host: ${{ secrets.ORACLE_VM_HOST }}
+          username: ${{ secrets.ORACLE_VM_USERNAME }}
+          key: ${{ secrets.ORACLE_VM_SSH_KEY }}
           script: |
-            echo ">>> Connecting to Lightsail and starting deployment..."
-            cd /home/ubuntu/momentum-etf
-            chmod +x update.sh
-            ./update.sh
-            echo ">>> Deployment script finished."
+            echo ">>> Connecting to Oracle VM and starting deployment..."
+            cd ~/apps/momentum-etf
+            if [ ! -d .git ]; then
+              git clone https://github.com/jasonisdoing/momentum-etf.git .
+            else
+              git pull origin upgrade
+            fi
+            sudo docker compose down
+            sudo docker compose up -d --build
+            echo ">>> Oracle VM deployment completed."
+
       - name: Notify Slack (deploy succeeded)
-        if: ${{ success() }}          # 이전 단계들이 모두 성공했을 때만 실행
+        if: ${{ success() }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"<!channel> ✅ Lightsail 배포 완료\\nRepo: ${{ github.repository }}\\nCommit: ${{ github.sha }}\"}" \
+            --data "{\"text\":\"✅ Oracle VM 배포 완료 (branch: upgrade)\\nRepo: ${{ github.repository }}\\nCommit: ${{ github.sha }}\"}" \
             ${{ secrets.LOGS_SLACK_WEBHOOK }}
+
       - name: Notify Slack (deploy failed)
         if: ${{ failure() }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"<!channel> ❌ Lightsail 배포 실패\\nRepo: ${{ github.repository }}\\nCommit: ${{ github.sha }}\"}" \
+            --data "{\"text\":\"❌ Oracle VM 배포 실패 (branch: upgrade)\\nRepo: ${{ github.repository }}\\nCommit: ${{ github.sha }}\"}" \
             ${{ secrets.LOGS_SLACK_WEBHOOK }}
-
