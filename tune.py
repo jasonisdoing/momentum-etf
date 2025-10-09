@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from datetime import datetime
 
 import numpy as np
 
@@ -81,16 +80,9 @@ def main() -> None:
     except Exception as exc:  # pragma: no cover - 잘못된 입력 방어 전용 처리
         parser.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
-    if args.output:
-        output_path = Path(args.output)
-    else:
-        # 파일명에 YYYYMMDD 형식의 날짜 추가
-        date_str = datetime.now().strftime("%Y%m%d")
-        output_path = RESULTS_DIR / f"tune_{account_id}_{date_str}.json"
-
     output = run_account_tuning(
         account_id,
-        output_path=output_path,
+        output_path=Path(args.output) if args.output else None,
         results_dir=RESULTS_DIR,
         tuning_config=TUNING_CONFIG,
         n_trials=args.n_trials,

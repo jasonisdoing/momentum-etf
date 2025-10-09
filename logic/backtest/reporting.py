@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -746,21 +745,7 @@ def dump_backtest_log(
     path = base_dir / f"backtest_{account_id}.txt"
     lines: List[str] = []
 
-    start_stamp = datetime.now().isoformat(timespec="seconds")
-    legacy_header = [
-        f"백테스트 결과가 다음 파일에 저장됩니다: data/results/backtest_{account_id}.txt",
-        "",
-        (
-            f"{country_code.upper()} 시장 ETF를 대상으로 "
-            f"{getattr(result, 'months_range', _default_months_range())}개월 기간 백테스트를 실행합니다."
-        ),
-        f"계정별 설정 파일(data/settings/account/{account_id}.json)을 사용하여 전략을 적용합니다.",
-        f"실행 시간: {start_stamp} | 테스트 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}",
-        "",
-    ]
-    lines.extend(legacy_header)
-
-    lines.append(f"백테스트 로그 생성: {datetime.now().isoformat(timespec='seconds')}")
+    lines.append(f"백테스트 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")
     lines.append(f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}")
     base_line = f"초기 자본: {result.initial_capital:,.0f} {result.currency or 'KRW'}"
     if (result.currency or "KRW").upper() != "KRW":

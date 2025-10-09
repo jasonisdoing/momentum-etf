@@ -76,7 +76,7 @@ def get_etfs(country: str) -> List[Dict[str, str]]:
             new_item["ticker"] = ticker_norm
             new_item["type"] = "etf"
             new_item["category"] = category_name
-            new_item["recommend_enabled"] = not (item.get("recommend_enabled") is False)
+            new_item["recommend_enabled"] = item.get("recommend_enabled") is not False
             if item.get("listing_date"):
                 new_item["listing_date"] = item["listing_date"]
             all_etfs.append(new_item)

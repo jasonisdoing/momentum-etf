@@ -357,8 +357,6 @@ def _execute_tuning_for_months(
 
 
 def _build_run_entry(
-    *,
-    run_date: str,
     months_results: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     param_fields = {
@@ -368,7 +366,6 @@ def _build_run_entry(
     }
 
     entry: Dict[str, Any] = {
-        "run_date": run_date,
         "result": {},
     }
 
@@ -525,8 +522,6 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
 
     normalized = dict(entry)
 
-    run_date = normalized.get("run_date")
-
     result_map: Dict[str, Any] = {}
     existing_result = normalized.get("result")
     if isinstance(existing_result, dict):
@@ -603,11 +598,7 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
         weighted_mdd = -(sum(mdd_positive_values) / len(mdd_positive_values))
 
     ordered: Dict[str, Any] = {}
-    if run_date is not None:
-        ordered["run_date"] = run_date
-    else:
-        ordered["run_date"] = normalized.get("run_date")
-
+    ordered["run_date"] = normalized.get("run_date")
     ordered["result"] = result_map
 
     if weighted_cagr is not None:
@@ -618,6 +609,9 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
 
     if cleaned_results:
         ordered["raw_data"] = cleaned_results
+
+    if ordered.get("run_date") is None:
+        ordered.pop("run_date", None)
 
     return ordered
 
@@ -901,7 +895,6 @@ def run_account_tuning(
         logger.warning("[튜닝] 실행 가능한 기간이 없어 결과가 없습니다.")
         return None
 
-    run_date = datetime.now().strftime("%Y-%m-%d")
     if runtime_missing_registry:
         unseen_missing = sorted(set(runtime_missing_registry) - set(excluded_ticker_set or []))
         if unseen_missing:
@@ -925,12 +918,12 @@ def run_account_tuning(
             best.get("cagr_pct", 0.0),
         )
 
-    entry = _build_run_entry(run_date=run_date, months_results=results_per_month)
+    entry = _build_run_entry(months_results=results_per_month)
 
     base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
     if output_path is None:
         # 파일명에 YYYYMMDD 형식의 날짜 추가
-        date_str = datetime.now().strftime("%Y%m%d")
+        date_str = datetime.now().strftime("%Y-%m-%d")
         output_path = base_dir / f"tune_{account_norm}_{date_str}.json"
     else:
         output_path = Path(output_path)
