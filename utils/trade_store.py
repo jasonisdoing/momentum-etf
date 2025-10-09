@@ -74,22 +74,38 @@ def migrate_account_id(old_account_id: str, new_account_id: str) -> dict[str, in
         {"$set": {"account": new_norm}},
     )
 
-    # 과거 country 필드가 남아 있는 경우를 대비해 동일하게 갱신한다.
-    result_country = db.trades.update_many(
-        {"country": old_norm},
-        {"$set": {"country": new_norm}},
-    )
-
     return {
         "matched": int(result_account.matched_count),
         "modified": int(result_account.modified_count),
-        "legacy_country_updated": int(result_country.modified_count),
     }
 
 
-def fetch_recent_trades(
-    account_id: str | None = None, *, limit: int = 100, include_deleted: bool = False
-) -> List[dict[str, Any]]:
+def delete_account_trades(account_id: str) -> dict[str, int]:
+    """지정한 계정 ID의 거래 이력을 모두 삭제합니다."""
+
+    account_norm = (account_id or "").strip().lower()
+    if not account_norm:
+        raise ValueError("account_id는 비어 있을 수 없습니다.")
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결을 초기화할 수 없습니다.")
+
+    result_account = db.trades.delete_many({"account": account_norm})
+    deleted_count = int(result_account.deleted_count)
+
+    logger.info(
+        "trades 컬렉션에서 계정 '%s' 데이터를 삭제했습니다. deleted=%d",
+        account_norm,
+        deleted_count,
+    )
+
+    return {
+        "deleted": deleted_count,
+    }
+
+
+def fetch_recent_trades(account_id: str | None = None, *, limit: int = 100, include_deleted: bool = False) -> List[dict[str, Any]]:
     """최근 트레이드 목록을 반환합니다."""
     db = get_db_connection()
     if db is None:
@@ -104,11 +120,7 @@ def fetch_recent_trades(
     if account_id:
         query["account"] = account_id.strip().lower()
 
-    cursor = (
-        db.trades.find(query)
-        .sort([("executed_at", DESCENDING), ("_id", DESCENDING)])
-        .limit(int(limit))
-    )
+    cursor = db.trades.find(query).sort([("executed_at", DESCENDING), ("_id", DESCENDING)]).limit(int(limit))
 
     trades: List[dict[str, Any]] = []
     for doc in cursor:

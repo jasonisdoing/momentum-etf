@@ -110,19 +110,13 @@ def render_table_eaw(headers: List[str], rows: List[List[str]], aligns: List[str
         else:  # 왼쪽 정렬
             return s_str + " " * pad
 
-    widths = [
-        max(_disp_width_eaw(v) for v in [headers[j]] + [r[j] for r in rows])
-        for j in range(len(headers))
-    ]
+    widths = [max(_disp_width_eaw(v) for v in [headers[j]] + [r[j] for r in rows]) for j in range(len(headers))]
 
     def _hline():
         return "+" + "+".join("-" * (w + 2) for w in widths) + "+"
 
     out = [_hline()]
-    header_cells = [
-        _pad(headers[j], widths[j], "center" if aligns[j] == "center" else "left")
-        for j in range(len(headers))
-    ]
+    header_cells = [_pad(headers[j], widths[j], "center" if aligns[j] == "center" else "left") for j in range(len(headers))]
     out.append("| " + " | ".join(header_cells) + " |")
     out.append(_hline())
     for r in rows:

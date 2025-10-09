@@ -34,8 +34,8 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 - `data/`: 데이터 저장소
   - `kor/`, `aus/`: 국가별 데이터
 - `run.py`: 메인 실행 진입점 (웹 앱 등에서 사용)
-- `settings/account/*.json`: 계정별 전략/표시 설정
-- `settings/schedule_config.json`: APScheduler 실행 계정 및 크론 설정 (계정 ID·국가 코드 명시)
+- `data/settings/account/*.json`: 계정별 전략/표시 설정
+- `data/settings/schedule_config.json`: APScheduler 실행 계정 및 크론 설정 (계정 ID·국가 코드 명시)
 
 ## 문서
 
@@ -45,6 +45,33 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 ## 설치 및 준비
 
 ### 1) Python 가상환경 구성 (권장)
+
+#### (A) pyenv + pyenv-virtualenv 사용
+1. pyenv 설치 (macOS/Homebrew 예시)
+   ```bash
+   brew install pyenv pyenv-virtualenv
+   ```
+
+2. 쉘 초기화 스크립트에 pyenv 설정 추가 (예: `~/.zshrc`)
+   ```bash
+   eval "$(pyenv init -)"
+   eval "$(pyenv virtualenv-init -)"
+   ```
+
+3. 이 저장소에서 사용할 Python 버전을 설치하고 가상환경 생성
+   ```bash
+   pyenv install 3.12.11  # 원하는 버전으로 변경 가능
+   pyenv virtualenv 3.12.11 momentum-etf
+   ```
+
+4. 프로젝트 디렉터리에서 로컬 가상환경 지정 후 의존성 설치
+   ```bash
+   cd momentum-etf
+   pyenv local momentum-etf
+   pip install -r requirements.txt
+   ```
+
+#### (B) 표준 venv 사용
 ```bash
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
@@ -58,8 +85,6 @@ pip install -r requirements.txt
 `.env` 파일을 생성하여 다음 변수들을 설정할 수 있습니다:
 ```env
 MONGO_DB_CONNECTION_STRING=mongodb://localhost:27017/momentum_etf
-KOR_SLACK_WEBHOOK=your_slack_webhook_url
-AUS_SLACK_WEBHOOK=your_slack_webhook_url
 ```
 
 ### 4) 서버 시간대 설정 (필수)
@@ -146,17 +171,7 @@ python scripts/categorize_etf.py <국가코드>
 장 마감 이후 자동으로 현황을 계산하고(교체매매 추천 포함) 슬랙(Slack)으로 알림을 보낼 수 있습니다.
 
 1. 의존성 설치: `pip install -r requirements.txt`
-2. (선택) 환경 변수로 스케줄/타임존 설정:
-   - `SCHEDULE_ENABLE_<KEY>` = `1`/`0` (기본 1, `<KEY>`는 `settings/schedule_config.json` 항목 이름)
-   - `SCHEDULE_<KEY>_CRON` = 크론 표현식
-   - `SCHEDULE_<KEY>_TZ` = 타임존(예: `Asia/Seoul`, `Australia/Sydney`)
-   - `RUN_IMMEDIATELY_ON_START` = `1` 이면 시작 시 즉시 한 번 실행
-   - `SCHEDULE_ENABLE_CACHE` = `1`/`0` (기본 1)
-   - `SCHEDULE_CACHE_CRON` = `"30 3 * * *"` (서울 03:30)
-   - `SCHEDULE_CACHE_TZ` = `Asia/Seoul`
-   - `CACHE_START_DATE` = `2020-01-01` (캐시 초기화 시작일 기본값)
-- `CACHE_COUNTRIES` = `kor,aus`
-3. 실행: `python aps.py`
+2. 실행: `python aps.py`
 
 가격 캐시만 따로 갱신하려면:
 ```bash
@@ -195,14 +210,14 @@ python scripts/find.py --type etf --min-change 3.0
 - `replace_weaker_stock`: 약한 종목 교체 여부
 - `replace_threshold`: 종목 교체 임계값
 - `MARKET_REGIME_FILTER_TICKER`: 레짐 필터 지수 티커 (`strategy.static`에 정의)
-- `MARKET_REGIME_FILTER_MA_PERIOD`: 레짐 필터 이동평균 기간 (`strategy.tuning`에 정의, 튜닝 대상)
+- `MARKET_REGIME_FILTER_MA_PERIOD`: 레짐 필터 이동평균 기간 (`strategy.static`에 정의, 고정값)
 
 각 국가별로 DB에 저장되어 해당 국가 현황/백테스트에 반영됩니다.
 
 ## 코드 구조 개선사항
 
 ### 최근 리팩토링(2025-10)
-1. **계정 중심 구조로 전환**: `settings/account/*.json` 기반으로 추천/백테스트가 동작하도록 전면 수정
+1. **계정 중심 구조로 전환**: `data/settings/account/*.json` 기반으로 추천/백테스트가 동작하도록 전면 수정
 2. **Streamlit 페이지 정비**: 거래 관리(`trade.py`)와 계정 마이그레이션(`migration.py`)을 분리하고 로그인 후 접근하도록 구성
 3. **추천 결과 저장 방식 개선**: 계정 ID와 국가 코드 두 경로에 결과를 저장해 UI와 스케줄러가 일관된 데이터를 참조하도록 변경
    - 히스토리: `logic/recommend/history.py` (보유일/쿨다운)

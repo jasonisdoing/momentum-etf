@@ -1,4 +1,5 @@
 """신호 모듈에서 분리한 표시·정밀도 보조 함수 모음."""
+
 from __future__ import annotations
 from typing import Dict, Any, Callable
 
@@ -25,9 +26,7 @@ def load_account_precision(country_code: str) -> Dict[str, Any]:
         "stock_currency": precision_settings.get("currency", "KRW"),
         "stock_qty_precision": int(precision_settings.get("qty_precision", 0)),
         "stock_price_precision": int(precision_settings.get("price_precision", 0)),
-        "stock_amt_precision": int(precision_settings.get("amt_precision", 0))
-        if "amt_precision" in precision_settings
-        else 0,
+        "stock_amt_precision": (int(precision_settings.get("amt_precision", 0)) if "amt_precision" in precision_settings else 0),
     }
 
 

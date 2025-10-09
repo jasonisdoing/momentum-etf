@@ -29,7 +29,7 @@ def _normalize_display_name(name: str) -> str:
     return name
 
 
-def build_buy_replace_note(country: str, ticker_to_sell: str, ticker_to_sell_name: str) -> str:
+def build_buy_replace_note(ticker_to_sell: str, ticker_to_sell_name: str) -> str:
     """Build note for BUY_REPLACE: "🔄 교체매수 -종목명(티커) 대체" (no angle brackets)"""
     raw = DECISION_CONFIG["BUY_REPLACE"]["display_name"]
     disp = _normalize_display_name(raw)
@@ -53,7 +53,7 @@ def build_sell_replace_note(
     return f"교체매도 {amt} {profit_label} {prof} 손익률 {sign_pct} ({replacement_ticker}(으)로 교체)"
 
 
-def build_partial_sell_note(country: str, amount: float) -> str:
+def build_partial_sell_note() -> str:
     """Build note for partial sell with amount."""
     tmpl = DECISION_MESSAGES["SOLD"]
     return tmpl

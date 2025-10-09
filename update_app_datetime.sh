@@ -1,5 +1,5 @@
 #!/bin/bash
-SETTINGS_FILE="settings.py"
+SETTINGS_FILE="utils/notification.py"
 CURRENT_TIME=$(date +"%Y-%m-%d-%H")
 
 if grep -q '^APP_DATE_TIME = ' "$SETTINGS_FILE"; then

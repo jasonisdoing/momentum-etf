@@ -1,4 +1,5 @@
 """Schedule and trading-day helpers for signals logic (self-contained)."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -10,17 +11,12 @@ try:  # 선택적 의존성 로딩
 except Exception:  # pragma: no cover
     pytz = None
 
-from utils.data_loader import get_trading_days
+from utils.data_loader import get_trading_days, is_trading_day
 
 
 def _is_trading_day(country: str, a_date: datetime) -> bool:
     """지정 일자가 해당 국가 기준 거래일인지 확인합니다."""
-    try:
-        day_str = a_date.strftime("%Y-%m-%d")
-        days = get_trading_days(day_str, day_str, country)
-        return any(pd.Timestamp(d).date() == a_date.date() for d in days)
-    except Exception:
-        return False
+    return is_trading_day(country, a_date)
 
 
 def is_market_open(country: str = "kor") -> bool:
@@ -49,9 +45,7 @@ def is_market_open(country: str = "kor") -> bool:
         now_local = datetime.now(local_tz)
 
         today_str_for_util = now_local.strftime("%Y-%m-%d")
-        is_trading_day_today = bool(
-            get_trading_days(today_str_for_util, today_str_for_util, country)
-        )
+        is_trading_day_today = bool(get_trading_days(today_str_for_util, today_str_for_util, country))
         if not is_trading_day_today:
             return False
 

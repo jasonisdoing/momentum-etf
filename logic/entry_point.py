@@ -26,9 +26,7 @@ run_single_ticker_backtest = getattr(_backtest_mod, "run_single_ticker_backtest"
 DECISION_CONFIG = getattr(_constants_mod, "DECISION_CONFIG")
 
 # 추천 함수
-generate_daily_recommendations_for_portfolio = getattr(
-    _recommend_mod, "generate_daily_recommendations_for_portfolio"
-)
+generate_daily_recommendations_for_portfolio = getattr(_recommend_mod, "generate_daily_recommendations_for_portfolio")
 
 __all__ = [
     "StrategyRules",

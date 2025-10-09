@@ -16,13 +16,6 @@ DECISION_CONFIG = {
         "is_recommendation": True,
         "show_slack": True,
     },
-    "SELL_TRIM_DOWN": {
-        "display_name": "<✂️ 포지션 축소>",
-        "order": 20,
-        "is_recommendation": True,
-        "show_slack": True,
-        "background": "#ffd7c2",
-    },
     "SELL_TREND": {
         "display_name": "<📉 추세이탈 매도>",
         "order": 21,
@@ -111,7 +104,7 @@ DECISION_NOTES = {
     "TREND_BREAK": "추세 이탈",
     "REPLACE_SELL": "교체 매도",
     "PRICE_DATA_FAIL": "가격 데이터 조회 실패",
-    "NO_RECOMMEND": "추천대상에서 의도적 제외",
+    "NO_RECOMMEND": "추천 제외",
     # 템플릿
     "COOLDOWN_GENERIC": "쿨다운 {days}일 대기중",
     "COOLDOWN_WITH_ACTION": "쿨다운 {days}일 대기중 ({action} {date})",

@@ -1,22 +1,21 @@
 {
     "order": 10,
     "icon": "🇰🇷",
-    "name": "ETF 10종목",
+    "name": "한국 ETF",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",
     "strategy": {
         "tuning": {
-            "MA_PERIOD": 49,
+            "MA_PERIOD": 9,
             "PORTFOLIO_TOPN": 10,
-            "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MARKET_REGIME_FILTER_MA_PERIOD": 0
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "static": {
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
-            "TRIM_DOWN_SELL_LIMIT": 1,
-            "MARKET_REGIME_FILTER_TICKER": "^GSPC"
+            "MARKET_REGIME_FILTER_TICKER": "^GSPC",
+            "MARKET_REGIME_FILTER_MA_PERIOD": 20
         }
     },
     "benchmarks": [
@@ -28,5 +27,12 @@
             "ticker": "426030",
             "name": "TIMEFOLIO 미국나스닥100액티브"
         }
-    ]
+    ],
+    "schedule": {
+        "recommendation_cron": "1,11,21,31,41,51 9-16 * * 1-5",
+        "notify_cron": "1,31 9-16 * * 1-5"
+    },
+    "slack": {
+        "channel": "C09FAU2NHM2"
+    }
 }

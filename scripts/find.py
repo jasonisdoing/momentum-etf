@@ -28,7 +28,7 @@ from pykrx import stock
 
 # --- 설정 ---
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
-EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "선물", "ETN"]
+EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "ETN"]
 
 
 def get_latest_trading_day() -> str:
@@ -104,9 +104,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
                     )
 
                     # 등락률을 계산합니다. 0으로 나누는 경우를 방지합니다.
-                    df_merged["등락률"] = (
-                        ((df_merged["price_today"] / df_merged["price_yest"]) - 1) * 100
-                    ).where(df_merged["price_yest"] > 0, 0)
+                    df_merged["등락률"] = (((df_merged["price_today"] / df_merged["price_yest"]) - 1) * 100).where(df_merged["price_yest"] > 0, 0)
 
                     # 필요한 컬럼만 선택하여 df_change에 추가합니다.
                     df_etf_filtered = df_merged[["등락률"]].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
@@ -119,9 +117,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             logger.info("일반 주식의 가격 변동 정보를 가져오는 중입니다...")
             try:
                 # get_market_price_change_by_ticker는 '등락률' 컬럼을 포함합니다.
-                df_stock = stock.get_market_price_change_by_ticker(
-                    latest_day, latest_day, market="ALL"
-                )
+                df_stock = stock.get_market_price_change_by_ticker(latest_day, latest_day, market="ALL")
                 # 필요한 컬럼만 선택하여 df_change에 추가합니다.
                 df_stock_filtered = df_stock[["등락률"]].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
                 df_change = pd.concat([df_change, df_stock_filtered], ignore_index=True)

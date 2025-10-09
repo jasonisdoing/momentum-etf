@@ -136,9 +136,7 @@ def _notify(
     persist: bool = False,
 ) -> None:
     if persist:
-        st.session_state.setdefault("trade_alerts", []).append(
-            {"message": message, "kind": kind, "icon": icon}
-        )
+        st.session_state.setdefault("trade_alerts", []).append({"message": message, "kind": kind, "icon": icon})
         return
 
     _show_notification(message, kind=kind, icon=icon)
@@ -210,7 +208,6 @@ def _flush_persisted_alerts() -> None:
 def _show_delete_dialog(
     checked_indices: list[int],
     table_rows: list,
-    username: str,
     country_filter: str,
     editor_key: str,
 ) -> None:
@@ -276,7 +273,10 @@ def _show_delete_dialog(
             # 결과 알림
             if success_count > 0:
                 _notify(
-                    f"총 {success_count}건의 트레이드를 삭제했습니다.", kind="success", icon="✅", persist=True
+                    f"총 {success_count}건의 트레이드를 삭제했습니다.",
+                    kind="success",
+                    icon="✅",
+                    persist=True,
                 )
 
             if error_count > 0:
@@ -292,7 +292,7 @@ def _render_trade_table() -> None:
     pass
 
 
-def _render_trade_history(username: str, account_id: str, country_code: str) -> None:
+def _render_trade_history(account_id: str, country_code: str) -> None:
     """계정별 트레이드 히스토리를 표시합니다."""
 
     _flush_persisted_alerts()
@@ -422,7 +422,7 @@ def _render_account_section(current_user: str, account_id: str) -> None:
             st.session_state[sell_key] = not st.session_state.get(sell_key, False)
             st.rerun()
 
-    _render_trade_history(current_user, account_id, country_code)
+    _render_trade_history(account_id, country_code)
 
     if st.session_state.get(buy_key, False):
         _render_buy_form(current_user, account_id, country_code)
@@ -440,9 +440,7 @@ def _render_account_section(current_user: str, account_id: str) -> None:
 
 def _render_buy_form(username: str, account_id: str, country_code: str) -> None:
     holdings = list_open_positions(account_id or "") if account_id else []
-    holding_tickers = {
-        (pos.get("ticker") or "").strip().upper() for pos in holdings if pos.get("ticker")
-    }
+    holding_tickers = {(pos.get("ticker") or "").strip().upper() for pos in holdings if pos.get("ticker")}
 
     key_suffix = (account_id or country_code or "global").strip().lower() or "global"
 
@@ -610,12 +608,8 @@ def _render_sell_section(username: str, account_id: str, country_code: str) -> N
             key=f"sell-position-select-{key_suffix}",
         )
 
-        executed_date = st.date_input(
-            "매도 날짜", value=datetime.today(), key=f"sell-date-{key_suffix}"
-        )
-        executed_date = (
-            executed_date.date() if isinstance(executed_date, datetime) else executed_date
-        )
+        executed_date = st.date_input("매도 날짜", value=datetime.today(), key=f"sell-date-{key_suffix}")
+        executed_date = executed_date.date() if isinstance(executed_date, datetime) else executed_date
         memo = st.text_area(
             "메모",
             placeholder="매도 사유 등을 기록하세요.",
