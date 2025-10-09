@@ -4,6 +4,8 @@ from typing import Any, Callable, Dict
 
 import streamlit as st
 
+from utils.notification import APP_VERSION
+
 from app_pages.account_page import render_account_page
 
 from utils.account_registry import (
@@ -29,7 +31,8 @@ def _build_account_page(page_cls: Callable[..., object], account: Dict[str, Any]
 
 
 def _render_home_page() -> None:
-    st.title("대시보드")
+    st.title("Momentum ETF")
+    st.text(f"버전: Alpha-{APP_VERSION}")
     st.caption("서비스 진입점입니다. 좌측 메뉴에서 계정을 선택하세요.")
 
 
@@ -45,11 +48,10 @@ def main() -> None:
         st.error("사용할 수 있는 계정 설정이 없습니다. `data/settings/account` 폴더를 확인해주세요.")
         st.stop()
 
-    default_account = pick_default_account(accounts)
-    default_icon = default_account.get("icon") or get_icon_fallback(default_account.get("country_code", "")) or "📈"
+    default_icon = "📈"
 
     st.set_page_config(
-        page_title=default_account.get("name") or "Momentum ETF",
+        page_title="Momentum ETF",
         page_icon=default_icon,
         layout="wide",
         initial_sidebar_state="expanded",
@@ -93,8 +95,6 @@ def main() -> None:
     #     )
     # )
 
-    navigation(pages).run()
-
     st.markdown(
         """
         <style>
@@ -127,6 +127,8 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    navigation(pages).run()
 
 
 if __name__ == "__main__":

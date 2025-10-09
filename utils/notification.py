@@ -46,8 +46,8 @@ from utils.settings_loader import get_account_slack_channel
 from dotenv import load_dotenv
 
 load_dotenv()
-APP_DATE_TIME = "2025-10-10-07"
-APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
+APP_VERSION = "2025-10-10-08"
+APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
 _LAST_ERROR: Optional[str] = None
 logger = get_app_logger()
