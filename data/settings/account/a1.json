@@ -20,8 +20,8 @@
     },
     "benchmarks": [
         {
-            "ticker": "ASX:SPY",
-            "name": "SPDR S&P 500 ETF"
+            "ticker": "ASX:IVV",
+            "name": "iShares S&P 500 ETF"
         },
         {
             "ticker": "ASX:NDQ",

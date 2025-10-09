@@ -8,3 +8,6 @@ font="sans serif" # 깔끔한 산세리프 폰트
 
 [client]
 toolbarMode = "minimal"
+
+[server]
+port = 80
