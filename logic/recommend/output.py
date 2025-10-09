@@ -19,7 +19,11 @@ def invoke_account_pipeline(account_id: str, *, date_str: str | None) -> List[Di
 
     from logic.recommend import generate_recommendation_report
 
-    result = generate_recommendation_report(account_id=account_id, date_str=date_str)
+    try:
+        result = generate_recommendation_report(account_id=account_id, date_str=date_str)
+    except Exception as exc:  # pragma: no cover - 파이프라인 예외 방어
+        logger.error("%s 추천 데이터 생성 중 오류가 발생했습니다: %s", account_id.upper(), exc)
+        return []
 
     if not result:
         logger.warning("%s에 대한 추천을 생성하지 못했습니다.", account_id.upper())
@@ -54,14 +58,11 @@ def dump_json(data: Any, path: Path) -> None:
 
 def print_run_header(account_id: str, *, date_str: Optional[str]) -> None:
     banner = f"=== {account_id.upper()} 추천 생성 ==="
-    logger.info("")
     logger.info("%s", banner)
     logger.info("기준일: %s", date_str or "auto (latest trading day)")
 
 
-def print_result_summary(
-    items: List[Dict[str, Any]], account_id: str, date_str: Optional[str] = None
-) -> None:
+def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str: Optional[str] = None) -> None:
     """Emit a condensed summary of recommendation results to stdout."""
 
     if not items:
@@ -73,21 +74,28 @@ def print_result_summary(
 
     base_date = items[0].get("base_date") if items else (date_str or "N/A")
 
-    logger.info("\n=== %s 추천 요약 (기준일: %s) ===", account_id.upper(), base_date)
+    logger.info("=== %s 추천 요약 (기준일: %s) ===", account_id.upper(), base_date)
 
     preview_count = min(10, len(items))
     if preview_count > 0:
-        logger.info("")
         logger.info("상위 %d개 항목 미리보기:", preview_count)
-        headers = ["순위", "티커", "종목명", "카테고리", "상태", "점수", "일간수익률", "보유일", "문구"]
+        headers = [
+            "순위",
+            "티커",
+            "종목명",
+            "카테고리",
+            "상태",
+            "점수",
+            "일간수익률",
+            "보유일",
+            "문구",
+        ]
         aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "left"]
         rows: List[List[str]] = []
 
         for item in items[:preview_count]:
             holding_days = item.get("holding_days")
-            holding_days_str = (
-                f"{int(holding_days)}" if isinstance(holding_days, (int, float)) else "-"
-            )
+            holding_days_str = f"{int(holding_days)}" if isinstance(holding_days, (int, float)) else "-"
 
             rows.append(
                 [
@@ -96,12 +104,8 @@ def print_result_summary(
                     str(item.get("name", "-")),
                     str(item.get("category", "-")),
                     str(item.get("state", "-")),
-                    f"{item.get('score', 0):.2f}"
-                    if isinstance(item.get("score"), (int, float))
-                    else "-",
-                    f"{item.get('daily_pct', 0):.2f}%"
-                    if isinstance(item.get("daily_pct"), (int, float))
-                    else "-",
+                    (f"{item.get('score', 0):.2f}" if isinstance(item.get("score"), (int, float)) else "-"),
+                    (f"{item.get('daily_pct', 0):.2f}%" if isinstance(item.get("daily_pct"), (int, float)) else "-"),
                     holding_days_str,
                     str(item.get("phrase", "")),
                 ]
@@ -111,10 +115,8 @@ def print_result_summary(
             logger.info("%s", line)
 
     if state_summary:
-        logger.info("")
         logger.info("상태 요약: %s", state_summary)
     buy_count = sum(1 for item in items if item.get("state") == "BUY")
-    logger.info("")
     logger.info("매수 추천: %d개, 대기: %d개", buy_count, len(items) - buy_count)
     logger.info("결과가 성공적으로 생성되었습니다. (총 %d개 항목)", len(items))
 

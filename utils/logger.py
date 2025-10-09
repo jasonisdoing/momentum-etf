@@ -31,9 +31,7 @@ def get_app_logger() -> logging.Logger:
         handler.setFormatter(formatter)
 
         logger.addHandler(handler)
-        logger.setLevel(
-            LOG_LEVEL if LOG_LEVEL in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"} else "INFO"
-        )
+        logger.setLevel(LOG_LEVEL if LOG_LEVEL in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"} else "INFO")
         logger.propagate = False
 
     _LOGGER = logger

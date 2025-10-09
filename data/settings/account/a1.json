@@ -8,15 +8,14 @@
     "strategy": {
         "tuning": {
             "MA_PERIOD": 30,
-            "PORTFOLIO_TOPN": 5,
-            "REPLACE_SCORE_THRESHOLD": 0.5,
-            "MARKET_REGIME_FILTER_MA_PERIOD": 20
+            "PORTFOLIO_TOPN": 7,
+            "REPLACE_SCORE_THRESHOLD": 1.0
         },
         "static": {
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
-            "TRIM_DOWN_SELL_LIMIT": 1,
-            "MARKET_REGIME_FILTER_TICKER": "ASX:SPY"
+            "MARKET_REGIME_FILTER_TICKER": "^GSPC",
+            "MARKET_REGIME_FILTER_MA_PERIOD": 20
         }
     },
     "benchmarks": [
@@ -28,5 +27,12 @@
             "ticker": "ASX:NDQ",
             "name": "BetaShares NASDAQ 100 ETF"
         }
-    ]
+    ],
+    "schedule": {
+        "recommendation_cron": "1,11,21,31,41,51 8-15 * * 1-5",
+        "notify_cron": "1,31 8-15 * * 1-5"
+    },
+    "slack": {
+        "channel": "C09FAU7SKA8"
+    }
 }

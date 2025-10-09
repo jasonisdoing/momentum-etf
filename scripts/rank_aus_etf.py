@@ -78,9 +78,7 @@ def main():
         return
 
     # 'TBD' 카테고리에 속하는 ETF 티커만 필터링합니다.
-    tickers = [
-        s["ticker"] for s in all_aus_etfs if s.get("category") == "TBD" and s.get("type") == "etf"
-    ]
+    tickers = [s["ticker"] for s in all_aus_etfs if s.get("category") == "TBD" and s.get("type") == "etf"]
 
     if not tickers:
         logger.info("분석할 'TBD' 카테고리의 ETF가 없습니다.")

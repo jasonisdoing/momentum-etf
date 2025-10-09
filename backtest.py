@@ -1,6 +1,5 @@
 """국가별 백테스트 실행 스크립트."""
 
-
 from __future__ import annotations
 
 import argparse
@@ -15,7 +14,7 @@ from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
 from logic.recommend.output import print_run_header
 from utils.logger import get_app_logger
 
-from settings.common import TEST_MONTHS_RANGE
+from utils.settings_loader import get_backtest_months_range
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
@@ -23,7 +22,7 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 def _available_account_choices() -> list[str]:
     choices = list_available_accounts()
     if not choices:
-        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. settings/account/*.json 파일을 확인하세요.")
+        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. data/settings/account/*.json 파일을 확인하세요.")
     return choices
 
 
@@ -77,8 +76,8 @@ def main() -> None:
         summary=result.summary,
         account_id=account_id,
         country_code=result.country_code,
-        test_months_range=getattr(result, "months_range", TEST_MONTHS_RANGE),
-        initial_capital_krw=result.initial_capital,
+        test_months_range=getattr(result, "months_range", get_backtest_months_range()),
+        initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),
         core_start_dt=result.start_date,

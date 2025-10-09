@@ -1,4 +1,5 @@
 """신호 관련 로그를 담당하는 독립형 로거."""
+
 from __future__ import annotations
 
 import logging

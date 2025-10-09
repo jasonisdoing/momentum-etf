@@ -83,11 +83,7 @@ def select_candidates_by_category(
         # 보유 중인 카테고리 집합 생성
         held_set = set()
         if skip_held_categories and held_categories:
-            held_set = {
-                str(cat).strip().upper()
-                for cat in held_categories
-                if cat and str(cat).strip().upper() != "TBD"
-            }
+            held_set = {str(cat).strip().upper() for cat in held_categories if cat and str(cat).strip().upper() != "TBD"}
 
         # 후보 처리
         best_per_category = {}
@@ -136,11 +132,7 @@ def select_candidates_by_category(
                     rejected.append((cand, "better_candidate"))
 
         # 최종 선택된 후보 목록 생성
-        selected_candidates = [
-            item["cand"]
-            for item in best_per_category.values()
-            if item["category"] not in held_set or not skip_held_categories
-        ]
+        selected_candidates = [item["cand"] for item in best_per_category.values() if item["category"] not in held_set or not skip_held_categories]
 
         # 점수 순으로 정렬
         selected_candidates.sort(key=lambda x: x.get("score", float("-inf")), reverse=True)

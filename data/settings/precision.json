@@ -2,11 +2,13 @@
     "aus": {
         "currency": "AUD",
         "qty_precision": 0,
-        "price_precision": 2
+        "price_precision": 2,
+        "fx_rate_to_krw": 920.0
     },
     "kor": {
         "currency": "KRW",
         "qty_precision": 0,
-        "price_precision": 0
+        "price_precision": 0,
+        "fx_rate_to_krw": 1.0
     }
 }

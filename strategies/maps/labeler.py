@@ -1,4 +1,5 @@
 """Shared labeler for signal/backtest to keep messages/states consistent."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -9,12 +10,10 @@ from .constants import DECISION_MESSAGES
 
 def compute_net_trade_note(
     *,
-    country: str,
     tkr: str,
     data_by_tkr: Dict[str, Any],
     buy_trades_today_map: Dict[str, List[Dict[str, Any]]],
     sell_trades_today_map: Dict[str, List[Dict[str, Any]]],
-    prev_holdings_map: Dict[str, float],
     current_decision: str | None = None,
 ) -> Dict[str, Any]:
     """Compute per-ticker net buy/sell note and state overrides for the day.
@@ -22,23 +21,10 @@ def compute_net_trade_note(
     Returns a dict possibly containing keys: state, row4, note.
     """
     trades_buys = buy_trades_today_map.get(tkr, [])
-    total_buy_amount = (
-        sum(
-            float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0)
-            for tr in trades_buys
-        )
-        if trades_buys
-        else 0.0
-    )
+    total_buy_amount = sum(float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0) for tr in trades_buys) if trades_buys else 0.0
 
     sells = sell_trades_today_map.get(tkr, [])
-    total_sold_amount = (
-        sum(
-            float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0) for tr in sells
-        )
-        if sells
-        else 0.0
-    )
+    total_sold_amount = sum(float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0) for tr in sells) if sells else 0.0
     d = data_by_tkr.get(tkr) or {}
     current_shares_now = float(d.get("shares", 0.0) or 0.0)
 
@@ -58,7 +44,7 @@ def compute_net_trade_note(
         return {"note": DECISION_MESSAGES["NEW_BUY"]}
     if net_amount < 0:
         # net sell, keep HOLD state
-        note = build_partial_sell_note(country, abs(net_amount))
+        note = build_partial_sell_note()
         return {"state": "HOLD", "row4": "HOLD", "note": note}
 
     # net zero: no override

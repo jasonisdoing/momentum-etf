@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from utils.logger import get_app_logger
 
@@ -14,11 +14,13 @@ class AccountSettingsError(RuntimeError):
     """계정 설정 로딩 중 발생하는 예외."""
 
 
-SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "settings"
+SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "data" / "settings"
 ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT / "account"
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
 PRECISION_SETTINGS_PATH = SETTINGS_ROOT / "precision.json"
+BACKTEST_SETTINGS_PATH = SETTINGS_ROOT / "backtest.json"
+TUNE_SETTINGS_PATH = SETTINGS_ROOT / "tune.json"
 logger = get_app_logger()
 
 
@@ -52,21 +54,108 @@ def _load_precision_settings() -> Dict[str, Any]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise AccountSettingsError(
-            f"정밀도 설정 파일이 올바른 JSON 형식이 아닙니다: {PRECISION_SETTINGS_PATH}"
-        ) from exc
+        raise AccountSettingsError(f"정밀도 설정 파일이 올바른 JSON 형식이 아닙니다: {PRECISION_SETTINGS_PATH}") from exc
 
     if not isinstance(data, dict):
-        raise AccountSettingsError(
-            f"정밀도 설정 파일의 루트는 객체(JSON object)여야 합니다: {PRECISION_SETTINGS_PATH}"
-        )
+        raise AccountSettingsError(f"정밀도 설정 파일의 루트는 객체(JSON object)여야 합니다: {PRECISION_SETTINGS_PATH}")
 
     return data
 
 
+@lru_cache(maxsize=1)
+def _load_backtest_settings() -> Dict[str, Any]:
+    try:
+        return _load_json(BACKTEST_SETTINGS_PATH)
+    except AccountSettingsError:
+        return {}
+    except Exception:
+        return {}
+
+
+def get_backtest_settings() -> Dict[str, Any]:
+    return dict(_load_backtest_settings())
+
+
+def get_backtest_months_range(default: int = 36) -> int:
+    settings = _load_backtest_settings()
+    value = settings.get("MONTHS_RANGE")
+    try:
+        months = int(value)
+        if months > 0:
+            return months
+    except (TypeError, ValueError):
+        pass
+    return int(default)
+
+
+def get_backtest_initial_capital(default: float = 100_000_000) -> float:
+    settings = _load_backtest_settings()
+    value = settings.get("INITIAL_CAPITAL_KRW")
+    try:
+        capital = float(value)
+        if capital > 0:
+            return capital
+    except (TypeError, ValueError):
+        pass
+    return float(default)
+
+
+@lru_cache(maxsize=1)
+def _load_tune_settings() -> Dict[str, Any]:
+    try:
+        return _load_json(TUNE_SETTINGS_PATH)
+    except AccountSettingsError:
+        return {}
+    except Exception:
+        return {}
+
+
+def get_tune_month_configs() -> List[Dict[str, Any]]:
+    settings = _load_tune_settings()
+    root = settings.get("COMMON_CONSTANTS")
+    if not isinstance(root, dict):
+        return []
+
+    entries = root.get("MONTHS_CONFIG")
+    if not isinstance(entries, list):
+        return []
+
+    normalized: List[Dict[str, Any]] = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+
+        months_raw = item.get("MONTHS_RANGE")
+        weight_raw = item.get("weight", 0)
+        source = item.get("source")
+
+        try:
+            months_range = int(months_raw)
+        except (TypeError, ValueError):
+            continue
+
+        if months_range <= 0:
+            continue
+
+        try:
+            weight = float(weight_raw)
+        except (TypeError, ValueError):
+            weight = 0.0
+
+        normalized.append(
+            {
+                "months_range": months_range,
+                "weight": weight,
+                "source": source,
+            }
+        )
+
+    return normalized
+
+
 @lru_cache(maxsize=None)
 def get_account_settings(account_id: str) -> Dict[str, Any]:
-    """`settings/account/{account}.json` 파일을 로드합니다."""
+    """`data/settings/account/{account}.json` 파일을 로드합니다."""
 
     account = (account_id or "").strip().lower()
     if not account:
@@ -147,8 +236,43 @@ def get_account_slack_channel(account_id: str) -> Optional[str]:
     """슬랙 채널 ID(없으면 None)를 반환합니다."""
 
     settings = get_account_settings(account_id)
-    channel = settings.get("slack_channel")
-    return str(channel) if isinstance(channel, str) and channel.strip() else None
+    channel_value: Optional[str] = None
+
+    if isinstance(settings.get("slack"), dict):
+        channel_field = settings["slack"].get("channel")
+        if isinstance(channel_field, str) and channel_field.strip():
+            channel_value = channel_field.strip()
+
+    if not channel_value:
+        legacy_channel = settings.get("slack_channel")
+        if isinstance(legacy_channel, str) and legacy_channel.strip():
+            channel_value = legacy_channel.strip()
+
+    return channel_value
+
+
+@lru_cache(maxsize=1)
+def load_common_settings() -> Dict[str, Any]:
+    """data/settings/common.py 모듈을 로드하여 딕셔너리 형태로 반환합니다."""
+
+    try:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "settings_common",
+            (SETTINGS_ROOT / "common.py"),
+        )
+        if spec is None or spec.loader is None:
+            return {}
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # type: ignore[attr-defined]
+    except FileNotFoundError:
+        raise AccountSettingsError(f"공통 설정 파일이 없습니다: {SETTINGS_ROOT / 'common.py'}")
+    except Exception as exc:
+        raise AccountSettingsError(f"공통 설정을 로드하지 못했습니다: {exc}") from exc
+
+    data = {key: getattr(module, key) for key in dir(module) if key.isupper() and not key.startswith("_")}
+    return data
 
 
 def get_strategy_rules(account_id: str):

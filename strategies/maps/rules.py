@@ -52,11 +52,18 @@ class StrategyRules:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> "StrategyRules":
+        def _resolve(*keys: str) -> Any:
+            sentinel = object()
+            for key in keys:
+                value = mapping.get(key, sentinel)
+                if value is not sentinel:
+                    return value
+            return None
+
         return cls.from_values(
-            ma_period=mapping.get("MA_PERIOD") or mapping.get("ma_period"),
-            portfolio_topn=mapping.get("PORTFOLIO_TOPN") or mapping.get("portfolio_topn"),
-            replace_threshold=mapping.get("REPLACE_SCORE_THRESHOLD")
-            or mapping.get("replace_threshold"),
+            ma_period=_resolve("MA_PERIOD", "ma_period"),
+            portfolio_topn=_resolve("PORTFOLIO_TOPN", "portfolio_topn"),
+            replace_threshold=_resolve("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -9,27 +9,25 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from settings.common import TEST_MONTHS_RANGE
 from logic.backtest.account_runner import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
 from utils.notification import build_summary_line_from_summary_data
 from utils.report import (
     format_aud_money,
-    format_aud_price,
     format_kr_money,
     format_usd_money,
-    format_usd_price,
     render_table_eaw,
 )
 from utils.logger import get_app_logger
+from utils.settings_loader import get_backtest_months_range, get_account_precision
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
 logger = get_app_logger()
 
 
 def _default_months_range() -> int:
-    return TEST_MONTHS_RANGE
+    return get_backtest_months_range()
 
 
 # ---------------------------------------------------------------------------
@@ -37,9 +35,7 @@ def _default_months_range() -> int:
 # ---------------------------------------------------------------------------
 
 
-def format_period_return_with_listing_date(
-    series_summary: Dict[str, Any], core_start_dt: pd.Timestamp
-) -> str:
+def format_period_return_with_listing_date(series_summary: Dict[str, Any], core_start_dt: pd.Timestamp) -> str:
     """Format period return percentage, optionally appending listing date."""
 
     period_return_pct = series_summary.get("period_return_pct", 0.0)
@@ -83,10 +79,8 @@ def print_backtest_summary(
     """
 
     account_settings = get_account_settings(account_id)
-    currency = account_settings.get("currency", "KRW")
-    precision = account_settings.get("precision", {}).get(
-        "amt_precision", 0
-    ) or account_settings.get("amt_precision", 0)
+    currency = str(summary.get("currency") or account_settings.get("currency", "KRW")).upper()
+    precision = account_settings.get("precision", {}).get("amt_precision", 0) or account_settings.get("amt_precision", 0)
     try:
         precision = int(precision)
     except (TypeError, ValueError):
@@ -97,12 +91,8 @@ def print_backtest_summary(
         strategy_cfg = {}
 
     if "tuning" in strategy_cfg or "static" in strategy_cfg:
-        strategy_tuning = (
-            strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
-        )
-        strategy_static = (
-            strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
-        )
+        strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
+        strategy_static = strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
     else:  # 구 포맷과의 호환성 유지
         strategy_tuning = strategy_cfg
         strategy_static = strategy_cfg
@@ -110,12 +100,16 @@ def print_backtest_summary(
     merged_strategy = dict(strategy_static)
     merged_strategy.update(strategy_tuning)
 
-    cooldown_days = int(
-        strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 0)) or 0
-    )
+    cooldown_days = int(strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 0)) or 0)
     replace_threshold = strategy_tuning.get("REPLACE_SCORE_THRESHOLD")
     if replace_threshold is None:
         replace_threshold = strategy_cfg.get("REPLACE_SCORE_THRESHOLD", 0.5)
+
+    initial_capital_local = float(summary.get("initial_capital_local", summary.get("initial_capital", initial_capital_krw)))
+    initial_capital_krw_value = float(summary.get("initial_capital_krw", initial_capital_krw))
+    final_value_local = float(summary.get("final_value_local", summary.get("final_value", 0.0)))
+    final_value_krw_value = float(summary.get("final_value_krw", final_value_local))
+    fx_rate_to_krw = float(summary.get("fx_rate_to_krw", 1.0) or 1.0)
 
     if currency == "AUD":
         money_formatter = format_aud_money
@@ -148,10 +142,7 @@ def print_backtest_summary(
         diff_days = (end_ts - start_ts).days
         trading_days = diff_days + 1 if diff_days >= 0 else 0
 
-        add(
-            f"| 투자 중단: {start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')}"
-            f" ({trading_days} 거래일)"
-        )
+        add(f"| 투자 중단: {start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')}" f" ({trading_days} 거래일)")
 
     add_section_heading("사용된 설정값")
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
@@ -181,7 +172,7 @@ def print_backtest_summary(
         "계정": account_id.upper(),
         "시장 코드": country_code.upper(),
         "테스트 기간": f"최근 {test_months_range}개월",
-        "초기 자본": money_formatter(initial_capital_krw),
+        "초기 자본": money_formatter(initial_capital_local),
         "포트폴리오 종목 수 (TopN)": portfolio_topn,
         "모멘텀 스코어 MA 기간": momentum_label,
         "교체 매매 점수 임계값": replace_threshold,
@@ -191,6 +182,12 @@ def print_backtest_summary(
         "시장 위험 필터 티커": regime_filter_ticker,
         "시장 위험 필터 MA 기간": f"{regime_filter_ma_period}일",
     }
+
+    if currency != "KRW":
+        used_settings["초기 자본 (KRW 환산)"] = format_kr_money(initial_capital_krw_value)
+
+    if currency != "KRW" and fx_rate_to_krw != 1.0:
+        used_settings["적용 환율 (KRW)"] = f"1 {currency} ≈ {format_kr_money(fx_rate_to_krw)}"
 
     for key, value in used_settings.items():
         add(f"| {key}: {value}")
@@ -279,9 +276,7 @@ def print_backtest_summary(
             "기간수익률",
         ]
 
-        sorted_summaries = sorted(
-            ticker_summaries, key=lambda x: x["total_contribution"], reverse=True
-        )
+        sorted_summaries = sorted(ticker_summaries, key=lambda x: x["total_contribution"], reverse=True)
 
         rows = [
             [
@@ -318,8 +313,12 @@ def print_backtest_summary(
     else:
         add("| 투자 중단: N/A")
 
-    add(f"| 초기 자본: {money_formatter(summary['initial_capital_krw'])}")
-    add(f"| 최종 자산: {money_formatter(summary['final_value'])}")
+    add(f"| 초기 자본: {money_formatter(initial_capital_local)}")
+    if currency != "KRW":
+        add(f"| 초기 자본 (KRW): {format_kr_money(initial_capital_krw_value)}")
+    add(f"| 최종 자산: {money_formatter(final_value_local)}")
+    if currency != "KRW":
+        add(f"| 최종 자산 (KRW): {format_kr_money(final_value_krw_value)}")
     add(f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}%")
 
     benchmarks_info = summary.get("benchmarks")
@@ -384,22 +383,50 @@ def _format_quantity(amount: float, precision: int) -> str:
 
 
 def _resolve_formatters(account_settings: Dict[str, Any]):
-    precision = account_settings.get("precision", {})
-    currency = str(precision.get("currency") or account_settings.get("currency", "KRW")).upper()
+    account_id = str(account_settings.get("account") or "").strip().lower()
+    try:
+        precision = get_account_precision(account_id)
+    except Exception:
+        precision = {}
+
+    if not isinstance(precision, dict):
+        precision = {}
+
+    currency = str(precision.get("currency") or account_settings.get("currency") or "KRW").upper()
     qty_precision = int(precision.get("qty_precision", 0) or 0)
     price_precision = int(precision.get("price_precision", 0) or 0)
 
+    digits = max(price_precision, 0)
+
+    def _format_price(value: float) -> str:
+        if not _is_finite_number(value):
+            return "-"
+        return f"{float(value):,.{digits}f}"
+
     if currency == "AUD":
-        return currency, format_aud_money, format_aud_price, qty_precision, price_precision
+
+        def _aud_money(value: float) -> str:
+            if not _is_finite_number(value):
+                return "-"
+            return f"A${float(value):,.2f}"
+
+        return currency, _aud_money, _format_price, qty_precision, digits
+
     if currency == "USD":
-        return currency, format_usd_money, format_usd_price, qty_precision, price_precision
+
+        def _usd_money(value: float) -> str:
+            if not _is_finite_number(value):
+                return "-"
+            return f"${float(value):,.2f}"
+
+        return currency, _usd_money, _format_price, qty_precision, digits
 
     def _krw_price(value: float) -> str:
         if not _is_finite_number(value):
             return "-"
         return f"{int(round(value)):,}"
 
-    return currency, format_kr_money, _krw_price, qty_precision, price_precision
+    return currency, format_kr_money, _krw_price, qty_precision, digits
 
 
 def _format_date_kor(ts: pd.Timestamp) -> str:
@@ -410,7 +437,6 @@ def _format_date_kor(ts: pd.Timestamp) -> str:
 def _build_daily_table_rows(
     *,
     result: AccountBacktestResult,
-    account_settings: Dict[str, Any],
     target_date: pd.Timestamp,
     total_value: float,
     total_cash: float,
@@ -474,9 +500,7 @@ def _build_daily_table_rows(
 
         daily_ret = ((price / prev_price) - 1.0) * 100.0 if prev_price else 0.0
         pv_safe = pv if _is_finite_number(pv) else 0.0
-        total_value_safe = (
-            total_value if _is_finite_number(total_value) and total_value > 0 else 0.0
-        )
+        total_value_safe = total_value if _is_finite_number(total_value) and total_value > 0 else 0.0
         weight = (pv_safe / total_value_safe * 100.0) if total_value_safe > 0 else 0.0
 
         if ticker_key not in buy_date_map:
@@ -499,13 +523,10 @@ def _build_daily_table_rows(
 
         holding_days_display = str(holding_days_map.get(ticker_key, 0))
 
-        price_display = (
-            "1"
-            if is_cash
-            else price_formatter(price)
-            if _is_finite_number(price) and price > 0
-            else "-"
-        )
+        if is_cash:
+            price_display = "1"
+        else:
+            price_display = price_formatter(price) if _is_finite_number(price) else "-"
         shares_display = "1" if is_cash else _format_quantity(shares, qty_precision)
         pv_display = money_formatter(pv)
         cost_basis = avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 else 0.0
@@ -513,18 +534,10 @@ def _build_daily_table_rows(
         evaluated_profit = evaluation.get("realized_profit", 0.0)
         cumulative_profit_value = evaluated_profit + eval_profit_value
         evaluated_profit_display = money_formatter(eval_profit_value)
-        evaluated_pct = (
-            (eval_profit_value / cost_basis * 100.0)
-            if cost_basis > 0 and _is_finite_number(eval_profit_value)
-            else 0.0
-        )
+        evaluated_pct = (eval_profit_value / cost_basis * 100.0) if cost_basis > 0 and _is_finite_number(eval_profit_value) else 0.0
         evaluated_pct_display = f"{evaluated_pct:+.1f}%" if cost_basis > 0 else "-"
         initial_value = evaluation.get("initial_value") or cost_basis
-        cumulative_pct = (
-            (cumulative_profit_value / initial_value * 100.0)
-            if initial_value and _is_finite_number(cumulative_profit_value)
-            else 0.0
-        )
+        cumulative_pct = (cumulative_profit_value / initial_value * 100.0) if initial_value and _is_finite_number(cumulative_profit_value) else 0.0
         cumulative_pct_display = f"{cumulative_pct:+.1f}%" if initial_value else "-"
         score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
         weight_display = f"{weight:.0f}%"
@@ -691,7 +704,6 @@ def _generate_daily_report_lines(
 
         rows = _build_daily_table_rows(
             result=result,
-            account_settings=account_settings,
             target_date=target_date,
             total_value=total_value,
             total_cash=total_cash,
@@ -742,17 +754,19 @@ def dump_backtest_log(
             f"{country_code.upper()} 시장 ETF를 대상으로 "
             f"{getattr(result, 'months_range', _default_months_range())}개월 기간 백테스트를 실행합니다."
         ),
-        f"계정별 설정 파일(settings/account/{account_id}.json)을 사용하여 전략을 적용합니다.",
+        f"계정별 설정 파일(data/settings/account/{account_id}.json)을 사용하여 전략을 적용합니다.",
         f"실행 시간: {start_stamp} | 테스트 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}",
         "",
     ]
     lines.extend(legacy_header)
 
     lines.append(f"백테스트 로그 생성: {datetime.now().isoformat(timespec='seconds')}")
-    lines.append(
-        f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}"
-    )
-    lines.append(f"초기 자본: {result.initial_capital:,.0f} | 포트폴리오 TOPN: {result.portfolio_topn}")
+    lines.append(f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}")
+    base_line = f"초기 자본: {result.initial_capital:,.0f} {result.currency or 'KRW'}"
+    if (result.currency or "KRW").upper() != "KRW":
+        base_line += f" (≈ {result.initial_capital_krw:,.0f} KRW)"
+    base_line += f" | 포트폴리오 TOPN: {result.portfolio_topn}"
+    lines.append(base_line)
     lines.append("")
 
     daily_lines = _generate_daily_report_lines(result, account_settings)
@@ -763,7 +777,7 @@ def dump_backtest_log(
         account_id=account_id,
         country_code=country_code,
         test_months_range=getattr(result, "months_range", _default_months_range()),
-        initial_capital_krw=result.initial_capital,
+        initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),
         core_start_dt=result.start_date,

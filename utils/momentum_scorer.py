@@ -74,9 +74,7 @@ def momentum_score_yf(ticker: str, end_date: str = None) -> float | None:
         momentum_return = total_return - recent_return
 
         # .last() is deprecated. Use .loc with a date offset instead.
-        daily_ret_df = df_close.loc[
-            df_close.index >= (df_close.index[-1] - pd.DateOffset(days=365))
-        ]
+        daily_ret_df = df_close.loc[df_close.index >= (df_close.index[-1] - pd.DateOffset(days=365))]
         daily_ret = np.log(daily_ret_df / daily_ret_df.shift(1)).dropna()
         if len(daily_ret) < 20:
             return None
@@ -107,9 +105,7 @@ def momentum_score_krx(ticker: str, end_date: str = None) -> float | None:
     start_date = end_date - pd.DateOffset(months=13)
 
     try:
-        df = stock.get_etf_ohlcv_by_date(
-            start_date.strftime("%Y%m%d"), end_date.strftime("%Y%m%d"), ticker
-        )
+        df = stock.get_etf_ohlcv_by_date(start_date.strftime("%Y%m%d"), end_date.strftime("%Y%m%d"), ticker)
         if df.empty:
             return None
         df_close = df["종가"]
@@ -126,9 +122,7 @@ def momentum_score_krx(ticker: str, end_date: str = None) -> float | None:
         momentum_return = total_return - recent_return
 
         # .last() is deprecated. Use .loc with a date offset instead.
-        daily_ret_df = df_close.loc[
-            df_close.index >= (df_close.index[-1] - pd.DateOffset(days=365))
-        ]
+        daily_ret_df = df_close.loc[df_close.index >= (df_close.index[-1] - pd.DateOffset(days=365))]
         daily_ret = np.log(daily_ret_df / daily_ret_df.shift(1)).dropna()
         if len(daily_ret) < 20:
             return None
