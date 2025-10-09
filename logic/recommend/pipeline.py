@@ -892,28 +892,28 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             if fallback_norm is not None:
                 latest_buy_date_norm = fallback_norm
 
-        # 당일 신규 편입 종목은 최소 1일 보유로 표시 및 문구 유지
-        new_buy_phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
+        # 상태 및 문구 재정의
         bought_today = False
         if latest_buy_date_norm is not None and latest_buy_date_norm >= base_norm:
             bought_today = True
 
-        if holding_days_val == 0:
-            if raw_state in {"BUY", "BUY_REPLACE"}:
-                holding_days_val = 1
-                bought_today = True
-            elif is_currently_held:
-                holding_days_val = 1
-                if not bought_today:
-                    bought_today = latest_buy_date_norm is not None and latest_buy_date_norm >= base_norm
-
-        if bought_today and is_currently_held:
-            phrase = new_buy_phrase
-
+        # 당일 매수 체결된 종목 처리
         if ticker in buy_traded_today:
-            phrase = new_buy_phrase
-            if state == "WAIT":
-                state = "HOLD"
+            state = "HOLD"
+            phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            if holding_days_val == 0:
+                holding_days_val = 1
+        # 추천에 따라 오늘 신규 매수해야 할 종목
+        elif state in {"BUY", "BUY_REPLACE"}:
+            phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
+            if holding_days_val == 0:
+                holding_days_val = 1
+        # 이미 보유 중인 종목이 오늘 신규 편입된 경우
+        elif is_currently_held and bought_today:
+            state = "HOLD"
+            phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            if holding_days_val == 0:
+                holding_days_val = 1
 
         ticker_data = data_by_tkr.get(ticker, {})
         price_val = ticker_data.get("price", 0.0)

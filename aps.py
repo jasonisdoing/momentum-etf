@@ -285,6 +285,18 @@ def run_cache_refresh() -> None:
         logging.error("가격 캐시 갱신 작업이 실패했습니다.", exc_info=True)
 
 
+def run_stock_stats_update() -> None:
+    """종목 파일의 메타데이터(상장일, 거래량 등)를 갱신합니다."""
+    logging.info("Running stock metadata update...")
+    try:
+        from utils.stock_meta_updater import update_stock_metadata
+
+        update_stock_metadata()
+        logging.info("Stock metadata update completed successfully.")
+    except Exception:
+        logging.error("종목 메타데이터 갱신 작업이 실패했습니다.", exc_info=True)
+
+
 def main():
     # 로깅 설정
     setup_logging()
@@ -343,8 +355,25 @@ def main():
     )
     logging.info(f"Scheduled CACHE: cron='{cache_cron}' tz='{TIMEZONE}'")
 
+    # Stock stats update run
+    stats_cron = "0 18 * * 1-5"  # 평일 18:00
+    scheduler.add_job(
+        run_stock_stats_update,
+        CronTrigger.from_crontab(stats_cron, timezone=TIMEZONE),
+        id="stock_stats_update",
+    )
+    logging.info(f"Scheduled STATS UPDATE: cron='{stats_cron}' tz='{TIMEZONE}'")
+
     # Initial run
     logging.info("\n[Initial Run] Starting...")
+
+    # Initial run for stock metadata
+    try:
+        logging.info("[Initial Run] Updating stock metadata...")
+        run_stock_stats_update()
+    except Exception:
+        logging.error("Error during initial run for stock metadata update", exc_info=True)
+
     for schedule_name, cfg in country_schedules.items():
         if not cfg.get("enabled", True):
             continue
