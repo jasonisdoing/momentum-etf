@@ -24,7 +24,8 @@ jobs:
             if [ ! -d .git ]; then
               git clone https://github.com/jasonisdoing/momentum-etf.git .
             else
-              git pull origin upgrade
+              git fetch origin upgrade
+              git reset --hard origin/upgrade
             fi
             sudo docker compose down
             sudo docker compose up -d --build
@@ -35,7 +36,7 @@ jobs:
         run: |
           VERSION=$(python -c "from pathlib import Path; import re; content = Path('utils/notification.py').read_text(encoding='utf-8'); match = re.search(r'APP_VERSION\\s*=\\s*[\'\"]([^\'\"]+)[\'\"]', content); print(match.group(1) if match else '')")
           if [ -z "$VERSION" ]; then
-            echo "APP_VERSION not found" >&2
+            echo 'APP_VERSION not found' >&2
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

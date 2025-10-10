@@ -415,15 +415,13 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
 
     end_dt = pd.Timestamp.now()
 
-    # 한국 시장의 경우, 장 마감 데이터가 집계되기 전(오후 4시 이전)이라면,
-    # 조회 기준일을 하루 전으로 설정하여 어제까지의 데이터만 사용하도록 합니다.
     if country_code == "kor":
         try:
             if ZoneInfo is not None:
                 local_now = datetime.now(ZoneInfo("Asia/Seoul"))
             else:  # pragma: no cover
                 local_now = datetime.now()
-            if local_now.hour < 16:
+            if local_now.hour < 9:
                 end_dt = end_dt - pd.DateOffset(days=1)
         except Exception:
             # 타임존 처리 실패 시 안전하게 폴백
