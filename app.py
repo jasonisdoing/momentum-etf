@@ -77,8 +77,6 @@ def _render_home_page() -> None:
                         pass
                 return str(value)
 
-            # rows: List[Dict[str, Any]] = []
-
             status_styles: Dict[int, str] = {}
             position_styles: Dict[int, str] = {}
 
