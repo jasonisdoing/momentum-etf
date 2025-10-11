@@ -18,6 +18,7 @@ from utils.settings_loader import (
     AccountSettingsError,
     get_account_settings,
     get_strategy_rules,
+    load_common_settings,
 )
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 from strategies.maps.shared import sort_decisions_by_order_and_score
@@ -35,6 +36,7 @@ from utils.data_loader import (
     count_trading_days,
 )
 from utils.db_manager import get_db_connection
+from logic.recommend.market import get_market_regime_status_info
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -678,6 +680,23 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         missing_logged.update(missing_data_tickers)
 
     regime_info = None
+    regime_filter_enabled = True
+    try:
+        common_settings = load_common_settings()
+    except Exception as exc:
+        logger.warning("시장 레짐 공통 설정 로드 실패: %s", exc)
+        common_settings = None
+    else:
+        regime_filter_enabled = bool((common_settings or {}).get("MARKET_REGIME_FILTER_ENABLED", True))
+
+    if regime_filter_enabled:
+        try:
+            regime_info_candidate, _ = get_market_regime_status_info()
+        except Exception as exc:
+            logger.warning("시장 레짐 정보 계산 실패: %s", exc)
+        else:
+            if regime_info_candidate:
+                regime_info = regime_info_candidate
 
     # 쿨다운 정보 계산
     trade_cooldown_info = calculate_trade_cooldown_info(

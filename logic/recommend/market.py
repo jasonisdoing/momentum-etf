@@ -240,7 +240,7 @@ def get_market_regime_status_info(ma_period_override: Optional[int] = None) -> T
         return None, '<span style="color:grey">시장 상태: 설정 파일 오류</span>'
 
     try:
-        ticker, ma_period, country = get_market_regime_settings()
+        ticker, ma_period, country, _ = get_market_regime_settings()
     except AccountSettingsError as exc:
         logger.error("시장 레짐 공통 설정 로딩 실패: %s", exc)
         return None, '<span style="color:grey">시장 상태: 설정 파일 오류</span>'
@@ -266,7 +266,7 @@ def get_market_regime_aux_status_infos(ma_period_override: Optional[int] = None)
     """보조 시장 레짐 상태 목록을 반환합니다 (유효한 항목만)."""
 
     try:
-        ticker_main, ma_period, country = get_market_regime_settings()
+        ticker_main, ma_period, country, _ = get_market_regime_settings()
     except AccountSettingsError as exc:
         logger.error("시장 레짐 공통 설정 로딩 실패: %s", exc)
         return []

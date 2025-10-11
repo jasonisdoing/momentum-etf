@@ -315,7 +315,7 @@ def get_country_slack_channel(country: str) -> Optional[str]:  # pragma: no cove
     return get_account_slack_channel(country)
 
 
-def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str]:
+def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str, int]:
     """공통 설정에서 메인 시장 레짐 필터 설정을 반환합니다."""
 
     if isinstance(common_settings, Mapping):
@@ -343,7 +343,16 @@ def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = No
     country_raw = settings_view.get("MARKET_REGIME_FILTER_COUNTRY")
     country = str(country_raw or "us").strip().lower() or "us"
 
-    return ticker, ma_period, country
+    delay_raw = settings_view.get("MARKET_REGIME_FILTER_DELAY_DAY", 0)
+    try:
+        delay_days = int(delay_raw)
+    except (TypeError, ValueError):
+        delay_days = 0
+    else:
+        if delay_days < 0:
+            delay_days = 0
+
+    return ticker, ma_period, country, delay_days
 
 
 def get_market_regime_aux_tickers(common_settings: Optional[Mapping[str, Any]] = None) -> List[str]:

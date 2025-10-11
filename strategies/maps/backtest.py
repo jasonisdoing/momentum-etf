@@ -87,6 +87,7 @@ def run_portfolio_backtest(
     regime_filter_ticker: str = "^GSPC",
     regime_filter_ma_period: int = 200,
     regime_filter_country: str = "",
+    regime_filter_delay_days: int = 0,
     regime_behavior: str = "sell_all",
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
@@ -111,6 +112,7 @@ def run_portfolio_backtest(
         regime_filter_ticker: 레짐 필터 지수 티커
         regime_filter_ma_period: 레짐 필터 이동평균 기간
         regime_behavior: 레짐 필터 동작 방식
+        regime_filter_delay_days: 레짐 필터 적용 시 참조할 지연 거래일 수
         stop_loss_pct: 손절 비율 (%)
         cooldown_days: 거래 쿨다운 기간
 
@@ -241,6 +243,14 @@ def run_portfolio_backtest(
     else:
         market_regime_df = None
 
+    try:
+        regime_delay_offset = int(regime_filter_delay_days)
+    except (TypeError, ValueError):
+        regime_delay_offset = 0
+    else:
+        if regime_delay_offset < 0:
+            regime_delay_offset = 0
+
     # 시뮬레이션 상태 변수 초기화
     position_state = {
         ticker: {
@@ -296,10 +306,12 @@ def run_portfolio_backtest(
         # --- 시장 레짐 필터 적용 (리스크 오프 조건 확인) ---
         is_risk_off = False
         if regime_filter_enabled and market_close_arr is not None:
-            market_price = market_close_arr[i]
-            market_ma = market_ma_arr[i]
-            if not pd.isna(market_price) and not pd.isna(market_ma) and market_price < market_ma:
-                is_risk_off = True
+            market_idx = i - regime_delay_offset
+            if market_idx >= 0:
+                market_price = market_close_arr[market_idx]
+                market_ma = market_ma_arr[market_idx] if market_ma_arr is not None else float("nan")
+                if not pd.isna(market_price) and not pd.isna(market_ma) and market_price < market_ma:
+                    is_risk_off = True
 
         force_regime_sell = is_risk_off and regime_behavior == "sell_all"
         allow_individual_sells = (not is_risk_off) or regime_behavior == "hold_block_buy"

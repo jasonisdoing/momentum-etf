@@ -432,7 +432,12 @@ def _build_backtest_kwargs(
     cooldown_days = int(strategy_settings.get("COOLDOWN_DAYS", 0) or 0)
 
     try:
-        regime_filter_ticker, regime_filter_ma_period, regime_filter_country = get_market_regime_settings(common_settings)
+        (
+            regime_filter_ticker,
+            regime_filter_ma_period,
+            regime_filter_country,
+            regime_filter_delay_days,
+        ) = get_market_regime_settings(common_settings)
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
 
@@ -446,6 +451,7 @@ def _build_backtest_kwargs(
         "regime_filter_ticker": regime_filter_ticker,
         "regime_filter_ma_period": regime_filter_ma_period,
         "regime_filter_country": regime_filter_country,
+        "regime_filter_delay_days": regime_filter_delay_days,
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
         "quiet": quiet,
@@ -699,7 +705,12 @@ def _build_summary(
     risk_off_periods = _detect_risk_off_periods(pv_series.index, ticker_timeseries)
 
     try:
-        regime_filter_ticker, regime_filter_ma_period, regime_filter_country = get_market_regime_settings(common_settings)
+        (
+            regime_filter_ticker,
+            regime_filter_ma_period,
+            regime_filter_country,
+            regime_filter_delay_days,
+        ) = get_market_regime_settings(common_settings)
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
 
@@ -732,6 +743,7 @@ def _build_summary(
         "regime_filter_ticker": regime_filter_ticker,
         "regime_filter_ma_period": regime_filter_ma_period,
         "regime_filter_country": regime_filter_country,
+        "regime_filter_delay_days": regime_filter_delay_days,
         "monthly_returns": monthly_returns,
         "monthly_cum_returns": monthly_cum_returns,
         "yearly_returns": yearly_returns,

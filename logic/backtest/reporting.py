@@ -161,7 +161,12 @@ def print_backtest_summary(
 
     try:
         common_settings = load_common_settings()
-        regime_filter_ticker, regime_filter_ma_period, regime_filter_country = get_market_regime_settings(common_settings)
+        (
+            regime_filter_ticker,
+            regime_filter_ma_period,
+            regime_filter_country,
+            regime_filter_delay_days,
+        ) = get_market_regime_settings(common_settings)
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
 
@@ -181,6 +186,7 @@ def print_backtest_summary(
         "시장 위험 필터 티커": regime_filter_ticker,
         "시장 위험 필터 MA 기간": f"{regime_filter_ma_period}일",
         "시장 위험 필터 시장": regime_filter_country.upper(),
+        "시장 위험 필터 적용 지연": f"{regime_filter_delay_days}일",
     }
 
     if currency != "KRW":

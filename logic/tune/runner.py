@@ -690,7 +690,7 @@ def run_account_tuning(
     }
 
     try:
-        regime_ticker, regime_ma_period, regime_country = get_market_regime_settings()
+        regime_ticker, regime_ma_period, regime_country, _regime_delay_days = get_market_regime_settings()
     except AccountSettingsError as exc:
         logger.error("[튜닝] 공통 시장 레짐 설정을 불러오지 못했습니다: %s", exc)
         return None

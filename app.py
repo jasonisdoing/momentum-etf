@@ -41,7 +41,7 @@ def _render_home_page() -> None:
     st.text(f"버전: Alpha-{APP_VERSION}")
     st.caption("서비스 진입점입니다. 좌측 메뉴에서 계정을 선택하세요.")
 
-    _, default_ma_period, _ = get_market_regime_settings()
+    _, default_ma_period, _, _ = get_market_regime_settings()
     ma_period_input = st.number_input(
         "레짐 이동평균 기간 (1-200) - 시스템은 20을 이용하고 있습니다.",
         min_value=1,
