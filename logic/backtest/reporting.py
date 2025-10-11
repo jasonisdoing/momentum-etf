@@ -19,7 +19,13 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.logger import get_app_logger
-from utils.settings_loader import get_backtest_months_range, get_account_precision
+from utils.settings_loader import (
+    AccountSettingsError,
+    get_backtest_months_range,
+    get_account_precision,
+    get_market_regime_settings,
+    load_common_settings,
+)
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
 logger = get_app_logger()
@@ -153,19 +159,13 @@ def print_backtest_summary(
     # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
     stop_loss_label = f"{holding_stop_loss_pct:.0f}%"
 
-    market_regime_enabled = True
-
-    regime_filter_ticker = merged_strategy.get("MARKET_REGIME_FILTER_TICKER")
-    if not regime_filter_ticker:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_TICKER' 값이 필요합니다.")
-
-    regime_filter_ma_raw = merged_strategy.get("MARKET_REGIME_FILTER_MA_PERIOD")
-    if regime_filter_ma_raw is None:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
     try:
-        regime_filter_ma_period = int(regime_filter_ma_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
+        common_settings = load_common_settings()
+        regime_filter_ticker, regime_filter_ma_period, regime_filter_country = get_market_regime_settings(common_settings)
+    except AccountSettingsError as exc:
+        raise ValueError(str(exc)) from exc
+
+    market_regime_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
     used_settings = {
         "계정": account_id.upper(),
@@ -180,6 +180,7 @@ def print_backtest_summary(
         "시장 위험 필터": "활성" if market_regime_enabled else "비활성",
         "시장 위험 필터 티커": regime_filter_ticker,
         "시장 위험 필터 MA 기간": f"{regime_filter_ma_period}일",
+        "시장 위험 필터 시장": regime_filter_country.upper(),
     }
 
     if currency != "KRW":

@@ -86,6 +86,7 @@ def run_portfolio_backtest(
     regime_filter_enabled: bool = False,
     regime_filter_ticker: str = "^GSPC",
     regime_filter_ma_period: int = 200,
+    regime_filter_country: str = "",
     regime_behavior: str = "sell_all",
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
@@ -151,10 +152,16 @@ def run_portfolio_backtest(
     # --- 시장 레짐 필터 데이터 로딩 ---
     market_regime_df = None
     if regime_filter_enabled:
+        regime_country_code = (regime_filter_country or country_code).strip().lower() or country_code
         if prefetched_data and regime_filter_ticker in prefetched_data:
             market_regime_df = prefetched_data.get(regime_filter_ticker)
         if market_regime_df is None or market_regime_df.empty:
-            market_regime_df = fetch_ohlcv(regime_filter_ticker, country=country, date_range=fetch_date_range)
+            market_regime_df = fetch_ohlcv(
+                regime_filter_ticker,
+                country=regime_country_code,
+                date_range=fetch_date_range,
+                cache_country="common",
+            )
         if market_regime_df is None or market_regime_df.empty:
             logger.warning(
                 "시장 레짐 필터 티커(%s)의 데이터를 가져올 수 없어 필터를 비활성화합니다.",

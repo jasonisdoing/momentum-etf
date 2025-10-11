@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Mapping
 
 from utils.logger import get_app_logger
 
@@ -313,3 +313,52 @@ def get_country_precision(country: str) -> Dict[str, Any]:  # pragma: no cover
 
 def get_country_slack_channel(country: str) -> Optional[str]:  # pragma: no cover
     return get_account_slack_channel(country)
+
+
+def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str]:
+    """공통 설정에서 메인 시장 레짐 필터 설정을 반환합니다."""
+
+    if isinstance(common_settings, Mapping):
+        settings_view: Mapping[str, Any] = common_settings
+    else:
+        settings_view = load_common_settings()
+
+    ticker_raw = settings_view.get("MARKET_REGIME_FILTER_TICKER_MAIN")
+    ticker = str(ticker_raw or "").strip()
+    if not ticker:
+        raise AccountSettingsError("공통 설정에 'MARKET_REGIME_FILTER_TICKER_MAIN' 값이 필요합니다.")
+
+    ma_raw = settings_view.get("MARKET_REGIME_FILTER_MA_PERIOD")
+    if ma_raw is None:
+        raise AccountSettingsError("공통 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
+
+    try:
+        ma_period = int(ma_raw)
+    except (TypeError, ValueError) as exc:  # noqa: PERF203
+        raise AccountSettingsError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
+
+    if ma_period <= 0:
+        raise AccountSettingsError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 0보다 커야 합니다.")
+
+    country_raw = settings_view.get("MARKET_REGIME_FILTER_COUNTRY")
+    country = str(country_raw or "us").strip().lower() or "us"
+
+    return ticker, ma_period, country
+
+
+def get_market_regime_aux_tickers(common_settings: Optional[Mapping[str, Any]] = None) -> List[str]:
+    """공통 설정에 정의된 보조 레짐 필터 티커 목록을 반환합니다."""
+
+    if isinstance(common_settings, Mapping):
+        settings_view: Mapping[str, Any] = common_settings
+    else:
+        settings_view = load_common_settings()
+
+    aux_raw = settings_view.get("MARKET_REGIME_FILTER_TICKERS_AUX", [])
+    tickers: List[str] = []
+    if isinstance(aux_raw, (list, tuple)):
+        for value in aux_raw:
+            ticker = str(value or "").strip()
+            if ticker:
+                tickers.append(ticker)
+    return tickers

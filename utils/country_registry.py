@@ -32,7 +32,6 @@ def get_common_file_settings() -> dict[str, Any]:
     """data/settings/common.py 설정을 딕셔너리로 반환합니다."""
 
     return {
-        "MARKET_REGIME_FILTER_ENABLED": True,
         "REALTIME_PRICE_ENABLED": True,
     }
 

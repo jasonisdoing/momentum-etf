@@ -20,10 +20,9 @@ from utils.account_registry import get_strategy_rules
 from utils.settings_loader import (
     AccountSettingsError,
     get_account_settings,
-    get_account_strategy,
-    get_account_strategy_sections,
     get_backtest_months_range,
     get_tune_month_configs,
+    get_market_regime_settings,
 )
 from utils.logger import get_app_logger
 from utils.data_loader import (
@@ -646,7 +645,6 @@ def run_account_tuning(
         return None
 
     base_rules = get_strategy_rules(account_norm)
-    strategy_settings = get_account_strategy(account_norm)
     ma_values = _normalize_tuning_values(config.get("MA_RANGE"), dtype=int, fallback=base_rules.ma_period)
     topn_values = _normalize_tuning_values(config.get("PORTFOLIO_TOPN"), dtype=int, fallback=base_rules.portfolio_topn)
     replace_values = _normalize_tuning_values(
@@ -691,27 +689,24 @@ def run_account_tuning(
         "REPLACE_SCORE_THRESHOLD": replace_values,
     }
 
-    _, static_strategy = get_account_strategy_sections(account_norm)
-    regime_ma_raw = None
-    if isinstance(static_strategy, dict):
-        regime_ma_raw = static_strategy.get("MARKET_REGIME_FILTER_MA_PERIOD")
-    if regime_ma_raw is None:
-        regime_ma_raw = strategy_settings.get("MARKET_REGIME_FILTER_MA_PERIOD")
+    try:
+        regime_ticker, regime_ma_period, regime_country = get_market_regime_settings()
+    except AccountSettingsError as exc:
+        logger.error("[튜닝] 공통 시장 레짐 설정을 불러오지 못했습니다: %s", exc)
+        return None
 
     try:
-        regime_ma_period = int(regime_ma_raw)
+        regime_ma_period = int(regime_ma_period)
     except (TypeError, ValueError):
         logger.warning(
-            "[튜닝] %s 정적 레짐 MA 기간을 확인할 수 없어 기본값(%d)을 사용합니다.",
-            account_norm.upper(),
+            "[튜닝] 공통 레짐 MA 기간을 확인할 수 없어 기본값(%d)을 사용합니다.",
             base_rules.ma_period,
         )
         regime_ma_period = base_rules.ma_period
     else:
         if regime_ma_period <= 0:
             logger.warning(
-                "[튜닝] %s 레짐 MA 기간이 0 이하(%d)로 설정되어 기본값(%d)으로 대체합니다.",
-                account_norm.upper(),
+                "[튜닝] 공통 레짐 MA 기간이 0 이하(%d)로 설정되어 기본값(%d)으로 대체합니다.",
                 regime_ma_period,
                 base_rules.ma_period,
             )
@@ -781,12 +776,12 @@ def run_account_tuning(
     )
     prefetched_map: Dict[str, DataFrame] = dict(prefetched)
 
-    regime_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
     if regime_ticker and regime_ticker not in prefetched_map:
         regime_prefetch = fetch_ohlcv(
             regime_ticker,
-            country=country_code,
+            country=regime_country,
             date_range=date_range_prefetch,
+            cache_country="common",
         )
         if regime_prefetch is not None and not regime_prefetch.empty:
             prefetched_map[regime_ticker] = regime_prefetch

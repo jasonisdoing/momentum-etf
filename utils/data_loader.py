@@ -477,6 +477,8 @@ def fetch_ohlcv(
     months_range: Optional[List[int]] = None,
     date_range: Optional[List[Optional[str]]] = None,
     base_date: Optional[pd.Timestamp] = None,
+    *,
+    cache_country: Optional[str] = None,
 ) -> Optional[pd.DataFrame]:
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
 
@@ -515,7 +517,13 @@ def fetch_ohlcv(
         # 보정 후 시작일이 종료일보다 미래가 될 수 있으므로, 이 경우 데이터를 조회하지 않습니다.
         return None
 
-    df = _fetch_ohlcv_with_cache(ticker, country_code, start_dt.normalize(), end_dt.normalize())
+    df = _fetch_ohlcv_with_cache(
+        ticker,
+        country_code,
+        start_dt.normalize(),
+        end_dt.normalize(),
+        cache_country_override=cache_country,
+    )
 
     if df is None or df.empty:
         logger.warning("%s (%s) 가격 데이터를 가져오지 못했습니다.", ticker, country_code.upper())
@@ -532,8 +540,11 @@ def _fetch_ohlcv_with_cache(
     country: str,
     start_dt: pd.Timestamp,
     end_dt: pd.Timestamp,
+    *,
+    cache_country_override: Optional[str] = None,
 ) -> Optional[pd.DataFrame]:
     country_code = (country or "").strip().lower()
+    cache_country_code = (cache_country_override or country_code).strip().lower() or country_code
 
     listing_date_str = get_listing_date(country_code, ticker)
     listing_ts = None
@@ -547,7 +558,9 @@ def _fetch_ohlcv_with_cache(
     if listing_ts is not None and start_dt < listing_ts:
         request_start_dt = listing_ts
 
-    cached_df = load_cached_frame(country_code, ticker)
+    cache_country_display = cache_country_code.upper()
+
+    cached_df = load_cached_frame(cache_country_code, ticker)
     cache_seed_dt = _get_cache_start_dt()
     if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
         if request_start_dt > cache_seed_dt:
@@ -579,7 +592,7 @@ def _fetch_ohlcv_with_cache(
                 continue
             logger.info(
                 "[CACHE] %s/%s 오늘 개장 전이므로 조회 범위를 조정합니다: %s ~ %s",
-                country_code.upper(),
+                cache_country_display,
                 ticker,
                 miss_start.strftime("%Y-%m-%d"),
                 effective_end.strftime("%Y-%m-%d"),
@@ -587,7 +600,7 @@ def _fetch_ohlcv_with_cache(
         else:
             logger.info(
                 "[CACHE] %s/%s 누락 구간을 조회합니다: %s ~ %s",
-                country_code.upper(),
+                cache_country_display,
                 ticker,
                 miss_start.strftime("%Y-%m-%d"),
                 miss_end.strftime("%Y-%m-%d"),
@@ -630,7 +643,7 @@ def _fetch_ohlcv_with_cache(
         combined_df = pd.concat(frames)
         combined_df.sort_index(inplace=True)
         combined_df = combined_df[~combined_df.index.duplicated(keep="last")]
-        save_cached_frame(country_code, ticker, combined_df)
+        save_cached_frame(cache_country_code, ticker, combined_df)
 
         # new_total = combined_df.shape[0]
         # added_count = max(0, new_total - prev_count)

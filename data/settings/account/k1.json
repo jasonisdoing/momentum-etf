@@ -13,9 +13,7 @@
         },
         "static": {
             "COOLDOWN_DAYS": 1,
-            "MAX_PER_CATEGORY": 1,
-            "MARKET_REGIME_FILTER_TICKER": "^GSPC",
-            "MARKET_REGIME_FILTER_MA_PERIOD": 20
+            "MAX_PER_CATEGORY": 1
         }
     },
     "benchmarks": [

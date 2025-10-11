@@ -18,6 +18,7 @@ from utils.settings_loader import (
     get_strategy_rules,
     get_backtest_months_range,
     get_backtest_initial_capital,
+    get_market_regime_settings,
 )
 from utils.data_loader import (
     get_latest_trading_day,
@@ -264,6 +265,7 @@ def run_account_backtest(
         currency=display_currency,
         account_settings=account_settings,
         strategy_settings=strategy_settings,
+        common_settings=common_settings,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries)
@@ -429,19 +431,12 @@ def _build_backtest_kwargs(
     stop_loss_pct = -abs(float(strategy_rules.portfolio_topn))
     cooldown_days = int(strategy_settings.get("COOLDOWN_DAYS", 0) or 0)
 
-    regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
-
-    regime_filter_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
-    if not regime_filter_ticker:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_TICKER' 값이 필요합니다.")
-
-    regime_filter_ma_raw = strategy_settings.get("MARKET_REGIME_FILTER_MA_PERIOD")
-    if regime_filter_ma_raw is None:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
     try:
-        regime_filter_ma_period = int(regime_filter_ma_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
+        regime_filter_ticker, regime_filter_ma_period, regime_filter_country = get_market_regime_settings(common_settings)
+    except AccountSettingsError as exc:
+        raise ValueError(str(exc)) from exc
+
+    regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
@@ -450,6 +445,7 @@ def _build_backtest_kwargs(
         "regime_filter_enabled": regime_filter_enabled,
         "regime_filter_ticker": regime_filter_ticker,
         "regime_filter_ma_period": regime_filter_ma_period,
+        "regime_filter_country": regime_filter_country,
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
         "quiet": quiet,
@@ -568,6 +564,7 @@ def _build_summary(
     currency: str,
     account_settings: Mapping[str, Any],
     strategy_settings: Mapping[str, Any],
+    common_settings: Mapping[str, Any],
 ) -> Tuple[
     Dict[str, Any],
     pd.Series,
@@ -701,17 +698,12 @@ def _build_summary(
 
     risk_off_periods = _detect_risk_off_periods(pv_series.index, ticker_timeseries)
 
-    regime_filter_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
-    if not regime_filter_ticker:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_TICKER' 값이 필요합니다.")
-
-    regime_filter_ma_raw = strategy_settings.get("MARKET_REGIME_FILTER_MA_PERIOD")
-    if regime_filter_ma_raw is None:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
     try:
-        regime_filter_ma_period = int(regime_filter_ma_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
+        regime_filter_ticker, regime_filter_ma_period, regime_filter_country = get_market_regime_settings(common_settings)
+    except AccountSettingsError as exc:
+        raise ValueError(str(exc)) from exc
+
+    regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
     summary = {
         "start_date": start_date.strftime("%Y-%m-%d"),
@@ -736,9 +728,10 @@ def _build_summary(
         "benchmark_cagr_pct": benchmark_cagr_pct,
         "benchmarks": benchmarks_summary,
         "benchmark_name": benchmarks_summary[0]["name"] if benchmarks_summary else "S&P 500",
-        "regime_filter_enabled": True,
+        "regime_filter_enabled": regime_filter_enabled,
         "regime_filter_ticker": regime_filter_ticker,
         "regime_filter_ma_period": regime_filter_ma_period,
+        "regime_filter_country": regime_filter_country,
         "monthly_returns": monthly_returns,
         "monthly_cum_returns": monthly_cum_returns,
         "yearly_returns": yearly_returns,
