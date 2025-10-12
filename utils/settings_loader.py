@@ -352,16 +352,19 @@ def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = No
         if delay_days < 0:
             delay_days = 0
 
-    ratio_raw = settings_view.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO", 100)
-    try:
-        risk_off_ratio = int(ratio_raw)
-    except (TypeError, ValueError):
-        risk_off_ratio = 100
+    ratio_raw = settings_view.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+    if ratio_raw is not None:
+        try:
+            risk_off_ratio = int(ratio_raw)
+        except (TypeError, ValueError):
+            risk_off_ratio = None
+        else:
+            if risk_off_ratio < 0:
+                risk_off_ratio = 0
+            elif risk_off_ratio > 100:
+                risk_off_ratio = 100
     else:
-        if risk_off_ratio < 0:
-            risk_off_ratio = 0
-        elif risk_off_ratio > 100:
-            risk_off_ratio = 100
+        risk_off_ratio = None
 
     return ticker, ma_period, country, delay_days, risk_off_ratio
 

@@ -590,7 +590,7 @@ def _fetch_ohlcv_with_cache(
             effective_end = miss_end - pd.Timedelta(days=1)
             if effective_end < miss_start:
                 continue
-            logger.info(
+            logger.debug(
                 "[CACHE] %s/%s 오늘 개장 전이므로 조회 범위를 조정합니다: %s ~ %s",
                 cache_country_display,
                 ticker,

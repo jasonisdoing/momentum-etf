@@ -516,6 +516,17 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     max_per_category = int(strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0)
 
+    regime_filter_equity_ratio = strategy_static.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+    try:
+        regime_filter_equity_ratio = int(regime_filter_equity_ratio)
+    except (TypeError, ValueError):
+        regime_filter_equity_ratio = None
+    else:
+        if regime_filter_equity_ratio < 0:
+            regime_filter_equity_ratio = 0
+        elif regime_filter_equity_ratio > 100:
+            regime_filter_equity_ratio = 100
+
     # ETF 목록 가져오기
     etf_universe = get_etfs(country_code) or []
     logger.info(
@@ -681,7 +692,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     regime_info = None
     regime_filter_enabled = True
-    regime_filter_equity_ratio = 100
+    regime_filter_equity_ratio = None
     try:
         common_settings = load_common_settings()
     except Exception as exc:
@@ -689,16 +700,30 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         common_settings = None
     else:
         regime_filter_enabled = bool((common_settings or {}).get("MARKET_REGIME_FILTER_ENABLED", True))
-        ratio_raw = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO", 100)
-        try:
-            regime_filter_equity_ratio = int(ratio_raw)
-        except (TypeError, ValueError):
-            regime_filter_equity_ratio = 100
-        else:
-            if regime_filter_equity_ratio < 0:
-                regime_filter_equity_ratio = 0
-            elif regime_filter_equity_ratio > 100:
-                regime_filter_equity_ratio = 100
+        ratio_raw = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+        if ratio_raw is not None:
+            try:
+                regime_filter_equity_ratio = int(ratio_raw)
+            except (TypeError, ValueError):
+                regime_filter_equity_ratio = None
+            else:
+                if regime_filter_equity_ratio < 0:
+                    regime_filter_equity_ratio = 0
+                elif regime_filter_equity_ratio > 100:
+                    regime_filter_equity_ratio = 100
+
+    if regime_filter_equity_ratio is None and regime_filter_enabled:
+        ratio_raw = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+        if ratio_raw is not None:
+            try:
+                regime_filter_equity_ratio = int(ratio_raw)
+            except (TypeError, ValueError):
+                regime_filter_equity_ratio = None
+            else:
+                if regime_filter_equity_ratio < 0:
+                    regime_filter_equity_ratio = 0
+                elif regime_filter_equity_ratio > 100:
+                    regime_filter_equity_ratio = 100
 
     if regime_filter_enabled:
         try:

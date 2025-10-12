@@ -36,17 +36,20 @@ from utils.stock_list_io import get_etfs
 
 # ==== 설정 (필요 시 수정) ====
 MONTHS = 12
-MA_MIN = 50
-MA_MAX = 50
-MA_STEP = 1
+MA_MIN = 10
+MA_MAX = 100
+MA_STEP = 10
 
 RATIO_MIN = 0
 RATIO_MAX = 100
-RATIO_STEP = 1
+RATIO_STEP = 10
 
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
 
-SORT_KEY = "cagr_pct"
+SORT_KEYS = [
+    ("cagr_pct", "CAGR"),
+    ("sharpe_ratio", "Sharpe"),
+]
 
 RESULTS_DIR = Path(ROOT_DIR) / "data" / "results"
 PREFETCH_WARMUP_MONTHS = 12
@@ -130,7 +133,6 @@ def _evaluate_single_combination(payload: Tuple[str, int, MutableMapping[str, An
     account_id, months_range, base_common, ma_period, ratio = payload
     override_common: MutableMapping[str, Any] = deepcopy(base_common)
     override_common["MARKET_REGIME_FILTER_MA_PERIOD"] = ma_period
-    override_common["MARKET_REGIME_RISK_OFF_EQUITY_RATIO"] = ratio
 
     with ExitStack() as stack:
         stack.enter_context(
@@ -150,6 +152,11 @@ def _evaluate_single_combination(payload: Tuple[str, int, MutableMapping[str, An
             account_id,
             months_range=months_range,
             quiet=True,
+            override_settings={
+                "strategy_overrides": {
+                    "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": ratio,
+                }
+            },
         )
 
     summary = backtest.summary or {}
@@ -160,6 +167,7 @@ def _evaluate_single_combination(payload: Tuple[str, int, MutableMapping[str, An
         "mdd_pct": summary.get("mdd_pct"),
         "calmar_ratio": summary.get("calmar_ratio"),
         "sharpe_ratio": summary.get("sharpe_ratio"),
+        "cui": summary.get("cui"),
         "final_value": summary.get("final_value"),
         "risk_off_periods": summary.get("risk_off_periods"),
     }
@@ -244,20 +252,30 @@ def _evaluate_combinations(
     return results
 
 
-def _sort_results(rows: List[Dict[str, Any]]) -> None:
-    if SORT_KEY == "mdd_pct":
-        rows.sort(
+def _sort_rows(rows: List[Dict[str, Any]], key: str) -> List[Dict[str, Any]]:
+    if key == "mdd_pct":
+        return sorted(
+            rows,
             key=lambda row: (row.get("mdd_pct") is None, float(row.get("mdd_pct") or float("inf"))),
         )
-    else:
-        rows.sort(
-            key=lambda row: float(row.get(SORT_KEY) or float("-inf")),
-            reverse=True,
-        )
+    return sorted(
+        rows,
+        key=lambda row: float(row.get(key) or float("-inf")),
+        reverse=True,
+    )
 
 
 def _render_results_table(rows: List[Dict[str, Any]]) -> List[str]:
-    headers = ["MA", "Ratio(%)", "CAGR(%)", "MDD(%)", "Calmar", "Sharpe", "Final Value"]
+    headers = [
+        "MA",
+        "Ratio(%)",
+        "CAGR(%)",
+        "MDD(%)",
+        "Calmar",
+        "Sharpe",
+        "CUI",
+        "Final Value",
+    ]
     lines = [" | ".join(headers), "-" * 72]
     for row in rows:
         line = [
@@ -267,6 +285,7 @@ def _render_results_table(rows: List[Dict[str, Any]]) -> List[str]:
             f"{_format_float(row.get('mdd_pct')):>8}",
             f"{_format_float(row.get('calmar_ratio')):>7}",
             f"{_format_float(row.get('sharpe_ratio')):>7}",
+            f"{_format_float(row.get('cui')):>7}",
             f"{_format_float(row.get('final_value'), digits=0):>12}",
         ]
         lines.append(" | ".join(line))
@@ -316,21 +335,28 @@ def main() -> None:
         logger.warning("평가 결과가 비어 있습니다.")
         return
 
-    _sort_results(rows)
+    sorted_tables: List[Tuple[str, List[str], Dict[str, Any]]] = []
+    for key, label in SORT_KEYS:
+        sorted_rows = _sort_rows(rows, key)
+        best = sorted_rows[0]
+        logger.info(
+            "[%s] 최적 조합: MA=%d / RATIO=%d%% (CAGR=%s%%, MDD=%s%%, Calmar=%s, CUI=%s)",
+            label,
+            best["ma_period"],
+            best.get("risk_off_ratio", 0),
+            _format_float(best.get("cagr_pct")),
+            _format_float(best.get("mdd_pct")),
+            _format_float(best.get("calmar_ratio")),
+            _format_float(best.get("cui")),
+        )
+        table_lines = _render_results_table(sorted_rows)
+        title = f"정렬 기준: {label}"
+        sorted_tables.append((title, table_lines, best))
 
-    best = rows[0]
-    logger.info(
-        "최적 조합: MA=%d / RATIO=%d%% (CAGR=%s%%, MDD=%s%%, Calmar=%s)",
-        best["ma_period"],
-        best.get("risk_off_ratio", 0),
-        _format_float(best.get("cagr_pct")),
-        _format_float(best.get("mdd_pct")),
-        _format_float(best.get("calmar_ratio")),
-    )
-
-    table_lines = _render_results_table(rows)
-    for line in table_lines:
-        print(line)
+    for title, table_lines, _ in sorted_tables:
+        print(f"\n=== {title} ===")
+        for line in table_lines:
+            print(line)
 
     try:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -346,9 +372,6 @@ def main() -> None:
         f"기간: 최근 {MONTHS}개월",
         f"MA 범위: {MA_MIN}~{MA_MAX} (step={MA_STEP})",
         f"비중 범위: {RATIO_MIN}~{RATIO_MAX}% (step={RATIO_STEP}%)",
-        f"정렬 기준: {SORT_KEY}",
-        "",
-        f"최적 조합: MA={best['ma_period']} / 비중={best.get('risk_off_ratio', 0)}%",
         "",
     ]
 
@@ -356,9 +379,19 @@ def main() -> None:
         with result_path.open("w", encoding="utf-8") as fp:
             for line in summary_lines:
                 fp.write(line + "\n")
-            for line in table_lines:
-                fp.write(line + "\n")
-        logger.info("요약 결과를 '%s'에 기록했습니다.", result_path)
+            for title, table_lines, best in sorted_tables:
+                fp.write(f"=== {title} ===\n")
+                fp.write(
+                    f"최적 조합: MA={best['ma_period']} / 비중={best.get('risk_off_ratio', 0)}%"
+                    f" / CAGR={_format_float(best.get('cagr_pct'))}%"
+                    f" / MDD={_format_float(best.get('mdd_pct'))}%"
+                    f" / Calmar={_format_float(best.get('calmar_ratio'))}"
+                    f" / CUI={_format_float(best.get('cui'))}\n"
+                )
+                for line in table_lines:
+                    fp.write(line + "\n")
+                fp.write("\n")
+        logger.info("요약 결과를 %s 에 기록했습니다.", result_path)
     except Exception as exc:  # pragma: no cover - 기록 실패 방어
         logger.warning("결과 파일 기록에 실패했습니다: %s", exc)
 

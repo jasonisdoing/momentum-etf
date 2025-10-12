@@ -141,7 +141,9 @@ def _round_up_float_places(value: Any, digits: int) -> float:
     return float(math.ceil(num * factor) / factor)
 
 
-def _evaluate_single_combo(payload: Tuple[str, int, Tuple[str, str], int, int, int, float, Tuple[str, ...]]) -> Tuple[str, Any, List[str]]:
+def _evaluate_single_combo(
+    payload: Tuple[str, int, Tuple[str, str], int, int, int, float, Tuple[str, ...], Mapping[str, DataFrame]]
+) -> Tuple[str, Any, List[str]]:
     (
         account_norm,
         months_range,
@@ -151,6 +153,7 @@ def _evaluate_single_combo(payload: Tuple[str, int, Tuple[str, str], int, int, i
         topn_int,
         threshold_float,
         excluded_tickers,
+        prefetched_data,
     ) = payload
 
     try:
@@ -185,6 +188,7 @@ def _evaluate_single_combo(payload: Tuple[str, int, Tuple[str, str], int, int, i
                 "end_date": date_range[1],
                 "strategy_overrides": strategy_overrides,
             },
+            prefetched_data=prefetched_data,
             strategy_override=override_rules,
             excluded_tickers=set(excluded_tickers) if excluded_tickers else None,
         )
@@ -232,6 +236,7 @@ def _execute_tuning_for_months(
     end_date: Timestamp,
     regime_ma_period: int,
     excluded_tickers: Optional[Collection[str]],
+    prefetched_data: Mapping[str, DataFrame],
 ) -> Optional[Dict[str, Any]]:
     logger = get_app_logger()
 
@@ -276,6 +281,7 @@ def _execute_tuning_for_months(
             int(topn),
             float(replace),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
+            prefetched_data,
         )
         for ma, topn, replace in combos
     ]
@@ -805,6 +811,7 @@ def run_account_tuning(
             end_date=end_date,
             regime_ma_period=regime_ma_period,
             excluded_tickers=excluded_ticker_set,
+            prefetched_data=prefetched_map,
         )
 
         if not single_result:

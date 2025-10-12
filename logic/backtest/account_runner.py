@@ -442,6 +442,18 @@ def _build_backtest_kwargs(
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
 
+    if regime_filter_equity_ratio is None:
+        ratio_raw = strategy_settings.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+        try:
+            regime_filter_equity_ratio = int(ratio_raw)
+        except (TypeError, ValueError):
+            regime_filter_equity_ratio = 100
+        else:
+            if regime_filter_equity_ratio < 0:
+                regime_filter_equity_ratio = 0
+            elif regime_filter_equity_ratio > 100:
+                regime_filter_equity_ratio = 100
+
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
     kwargs: Dict[str, Any] = {
@@ -715,11 +727,24 @@ def _build_summary(
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
 
+    if regime_filter_equity_ratio is None:
+        ratio_raw = strategy_settings.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+        try:
+            regime_filter_equity_ratio = int(ratio_raw)
+        except (TypeError, ValueError):
+            regime_filter_equity_ratio = 100
+        else:
+            if regime_filter_equity_ratio < 0:
+                regime_filter_equity_ratio = 0
+            elif regime_filter_equity_ratio > 100:
+                regime_filter_equity_ratio = 100
+
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
+    risk_off_ratio_for_periods = 100 if regime_filter_equity_ratio is None else regime_filter_equity_ratio
     risk_off_periods = _detect_risk_off_periods(
         pv_series.index,
         ticker_timeseries,
-        regime_filter_equity_ratio=regime_filter_equity_ratio,
+        regime_filter_equity_ratio=risk_off_ratio_for_periods,
     )
 
     summary = {
@@ -827,19 +852,21 @@ def _detect_risk_off_periods(
     start: Optional[pd.Timestamp] = None
     prev_dt: Optional[pd.Timestamp] = None
 
+    ratio_value = 100 if regime_filter_equity_ratio is None else int(regime_filter_equity_ratio)
+
     for dt, is_off in risk_off_series.items():
         if is_off and not in_period:
             in_period = True
             start = dt
         elif not is_off and in_period:
             if start is not None and prev_dt is not None:
-                periods.append((start, prev_dt, int(regime_filter_equity_ratio)))
+                periods.append((start, prev_dt, ratio_value))
             in_period = False
             start = None
         prev_dt = dt
 
     if in_period and start is not None and prev_dt is not None:
-        periods.append((start, prev_dt, int(regime_filter_equity_ratio)))
+        periods.append((start, prev_dt, ratio_value))
 
     return periods
 

@@ -101,6 +101,7 @@ def _compute_market_regime_status(
 ) -> Tuple[Optional[Dict[str, Any]], str]:
     required_days = int(ma_period) + 30
     required_months = max(3, (required_days // 22) + 2)
+    required_months = max(required_months, 60)
 
     _prepare_regime_cache(ticker, country)
 
@@ -154,7 +155,7 @@ def _compute_market_regime_status(
     proximity_pct = ((current_price / current_ma) - 1) * 100
     is_risk_off = bool(current_price < current_ma)
     status_label = "경고" if is_risk_off else "건강"
-    status_color = "orange" if is_risk_off else "green"
+    status_color = "red" if is_risk_off else "green"
     status_key = "warning" if is_risk_off else "healthy"
 
     is_risk_off_series = df_regime[price_column] < df_regime["MA"]
