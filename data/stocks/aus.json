@@ -9,14 +9,6 @@
                 "listing_date": "2015-06-24",
                 "1_week_avg_volume": 50172,
                 "1_week_avg_turnover": 5922117
-            },
-            {
-                "ticker": "ASX:MNRS",
-                "name": "Betashares Global Gold Miners Currency Hedged ETF",
-                "recommend_enabled": true,
-                "listing_date": "2016-07-27",
-                "1_week_avg_volume": 205674,
-                "1_week_avg_turnover": 2858987
             }
         ]
     },
