@@ -38,6 +38,16 @@ def _default_initial_capital() -> float:
     return float(get_backtest_initial_capital())
 
 
+def _parse_regime_ratio_value(raw_value: Any, *, source: str) -> int:
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError) as exc:  # noqa: PERF203
+        raise ValueError(f"{source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 정수가 아닙니다.") from exc
+    if not (0 <= parsed <= 100):
+        raise ValueError(f"{source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
+    return parsed
+
+
 @dataclass
 class InitialCapitalInfo:
     """Container for initial capital values in local currency and KRW."""
@@ -444,15 +454,11 @@ def _build_backtest_kwargs(
 
     if regime_filter_equity_ratio is None:
         ratio_raw = strategy_settings.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-        try:
-            regime_filter_equity_ratio = int(ratio_raw)
-        except (TypeError, ValueError):
-            regime_filter_equity_ratio = 100
-        else:
-            if regime_filter_equity_ratio < 0:
-                regime_filter_equity_ratio = 0
-            elif regime_filter_equity_ratio > 100:
-                regime_filter_equity_ratio = 100
+        if ratio_raw is None:
+            raise ValueError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정이 필요합니다.")
+        regime_filter_equity_ratio = _parse_regime_ratio_value(ratio_raw, source="전략 설정")
+    else:
+        regime_filter_equity_ratio = _parse_regime_ratio_value(regime_filter_equity_ratio, source="공통 설정")
 
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
@@ -729,18 +735,14 @@ def _build_summary(
 
     if regime_filter_equity_ratio is None:
         ratio_raw = strategy_settings.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-        try:
-            regime_filter_equity_ratio = int(ratio_raw)
-        except (TypeError, ValueError):
-            regime_filter_equity_ratio = 100
-        else:
-            if regime_filter_equity_ratio < 0:
-                regime_filter_equity_ratio = 0
-            elif regime_filter_equity_ratio > 100:
-                regime_filter_equity_ratio = 100
+        if ratio_raw is None:
+            raise ValueError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정이 필요합니다.")
+        regime_filter_equity_ratio = _parse_regime_ratio_value(ratio_raw, source="전략 설정")
+    else:
+        regime_filter_equity_ratio = _parse_regime_ratio_value(regime_filter_equity_ratio, source="공통 설정")
 
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
-    risk_off_ratio_for_periods = 100 if regime_filter_equity_ratio is None else regime_filter_equity_ratio
+    risk_off_ratio_for_periods = regime_filter_equity_ratio
     risk_off_periods = _detect_risk_off_periods(
         pv_series.index,
         ticker_timeseries,
@@ -832,17 +834,13 @@ def _detect_risk_off_periods(
         if df is None or df.empty or "note" not in df.columns:
             continue
         note_series = df["note"].fillna("")
-        decision_series = df.get("decision")
         contains_risk_off = note_series.str.contains("시장위험회피", na=False)
         if not contains_risk_off.any():
             contains_risk_off = note_series.str.contains("시장 위험 회피", na=False)
         if not contains_risk_off.any():
             no_space = note_series.str.replace(" ", "", regex=False)
             contains_risk_off = no_space.str.contains("시장위험회피", na=False)
-        decision_mask = (
-            decision_series.fillna("").eq("SELL_REGIME_FILTER") if isinstance(decision_series, pd.Series) else pd.Series(False, index=df.index)
-        )
-        combined_mask = contains_risk_off | decision_mask
+        combined_mask = contains_risk_off
         if combined_mask.any():
             intersect_index = df.index[combined_mask].intersection(risk_off_series.index)
             risk_off_series.loc[intersect_index] = True
@@ -880,7 +878,6 @@ def _build_ticker_summaries(
         "SELL_TREND",
         "CUT_STOPLOSS",
         "SELL_REPLACE",
-        "SELL_REGIME_FILTER",
     }
 
     summaries: List[Dict[str, Any]] = []
@@ -890,7 +887,22 @@ def _build_ticker_summaries(
             continue
 
         df_sorted = df.sort_index()
-        trades = df_sorted[df_sorted["decision"].isin(sell_decisions)] if "decision" in df_sorted.columns else pd.DataFrame()
+        if "decision" in df_sorted.columns:
+            trades_mask = df_sorted["decision"].isin(sell_decisions)
+        else:
+            trades_mask = pd.Series(False, index=df_sorted.index)
+
+        note_series = df_sorted.get("note")
+        if isinstance(note_series, pd.Series):
+            note_text_series = note_series.fillna("").astype(str)
+            risk_off_mask = (
+                note_text_series.str.contains("시장위험회피", na=False)
+                | note_text_series.str.contains("시장 위험 회피", na=False)
+                | note_text_series.str.replace(" ", "", regex=False).str.contains("시장위험회피", na=False)
+            )
+            trades_mask = trades_mask | risk_off_mask
+
+        trades = df_sorted[trades_mask] if trades_mask.any() else pd.DataFrame()
         realized_profit = float(trades.get("trade_profit", pd.Series(dtype=float)).sum()) if not trades.empty else 0.0
         total_trades = int(len(trades)) if not trades.empty else 0
         winning_trades = int((trades.get("trade_profit", pd.Series(dtype=float)) > 0).sum()) if not trades.empty else 0

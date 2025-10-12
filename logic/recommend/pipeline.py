@@ -359,6 +359,22 @@ def _format_sell_replace_phrase(phrase: str, *, etf_meta: Dict[str, Dict[str, An
     return f"교체매도 {ratio_text} - {target_name}({target_ticker})로 교체"
 
 
+def _append_risk_off_suffix(phrase: str, ratio: Optional[int]) -> str:
+    if ratio is None:
+        return phrase
+    try:
+        ratio_int = int(ratio)
+    except (TypeError, ValueError):
+        return phrase
+    if not (0 <= ratio_int <= 100) or ratio_int >= 100:
+        return phrase
+    phrase_str = str(phrase or "")
+    if "시장위험회피" in phrase_str:
+        return phrase_str
+    suffix = f"❗시장위험회피 매도❗ (목표 {ratio_int}%)"
+    return f"{phrase_str} | {suffix}" if phrase_str else suffix
+
+
 def _normalize_buy_date(value: Any) -> Optional[pd.Timestamp]:
     """Convert various buy date formats into a normalized pandas Timestamp."""
 
@@ -516,16 +532,19 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     max_per_category = int(strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0)
 
-    regime_filter_equity_ratio = strategy_static.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-    try:
-        regime_filter_equity_ratio = int(regime_filter_equity_ratio)
-    except (TypeError, ValueError):
-        regime_filter_equity_ratio = None
-    else:
-        if regime_filter_equity_ratio < 0:
-            regime_filter_equity_ratio = 0
-        elif regime_filter_equity_ratio > 100:
-            regime_filter_equity_ratio = 100
+    def _parse_regime_ratio(raw_value: Any, *, source: str) -> int:
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError) as exc:  # noqa: PERF203
+            raise ValueError(f"{account_id} 계좌의 {source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 유효한 정수가 아닙니다.") from exc
+        if not (0 <= parsed <= 100):
+            raise ValueError(f"{account_id} 계좌의 {source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
+        return parsed
+
+    regime_filter_equity_ratio: Optional[int] = None
+    ratio_raw_from_strategy = strategy_static.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+    if ratio_raw_from_strategy is not None:
+        regime_filter_equity_ratio = _parse_regime_ratio(ratio_raw_from_strategy, source="전략(static)")
 
     # ETF 목록 가져오기
     etf_universe = get_etfs(country_code) or []
@@ -692,7 +711,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     regime_info = None
     regime_filter_enabled = True
-    regime_filter_equity_ratio = None
+    common_ratio_value: Optional[Any] = None
     try:
         common_settings = load_common_settings()
     except Exception as exc:
@@ -700,30 +719,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         common_settings = None
     else:
         regime_filter_enabled = bool((common_settings or {}).get("MARKET_REGIME_FILTER_ENABLED", True))
-        ratio_raw = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-        if ratio_raw is not None:
-            try:
-                regime_filter_equity_ratio = int(ratio_raw)
-            except (TypeError, ValueError):
-                regime_filter_equity_ratio = None
-            else:
-                if regime_filter_equity_ratio < 0:
-                    regime_filter_equity_ratio = 0
-                elif regime_filter_equity_ratio > 100:
-                    regime_filter_equity_ratio = 100
+        common_ratio_value = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
 
-    if regime_filter_equity_ratio is None and regime_filter_enabled:
-        ratio_raw = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-        if ratio_raw is not None:
-            try:
-                regime_filter_equity_ratio = int(ratio_raw)
-            except (TypeError, ValueError):
-                regime_filter_equity_ratio = None
-            else:
-                if regime_filter_equity_ratio < 0:
-                    regime_filter_equity_ratio = 0
-                elif regime_filter_equity_ratio > 100:
-                    regime_filter_equity_ratio = 100
+    if regime_filter_equity_ratio is None and common_ratio_value is not None:
+        regime_filter_equity_ratio = _parse_regime_ratio(common_ratio_value, source="공통 설정")
+
+    if regime_filter_enabled and regime_filter_equity_ratio is None:
+        raise ValueError(f"{account_id} 계좌에서 시장 레짐 필터가 활성화되어 있지만 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정을 찾을 수 없습니다.")
 
     if regime_filter_enabled:
         try:
@@ -957,18 +959,26 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         # 당일 매수 체결된 종목 처리
         if ticker in buy_traded_today:
             state = "HOLD"
-            phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            phrase_str = str(phrase)
+            if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
+                phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
             if holding_days_val == 0:
                 holding_days_val = 1
         # 추천에 따라 오늘 신규 매수해야 할 종목
         elif state in {"BUY", "BUY_REPLACE"}:
-            phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
+            phrase_str = str(phrase)
+            if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
+                phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
             if holding_days_val == 0:
                 holding_days_val = 1
+            if state == "BUY_REPLACE":
+                phrase = _append_risk_off_suffix(phrase, decision.get("risk_off_target_ratio"))
         # 이미 보유 중인 종목이 오늘 신규 편입된 경우
         elif is_currently_held and bought_today:
             state = "HOLD"
-            phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            phrase_str = str(phrase)
+            if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
+                phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
             if holding_days_val == 0:
                 holding_days_val = 1
 
@@ -1066,7 +1076,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                     category_counts[category] = category_counts.get(category, 0) + 1
 
     current_holdings_count = len(holdings)
-    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_REGIME_FILTER"}
+    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS"}
     buy_state_set = {"BUY", "BUY_REPLACE"}
     planned_sell_count = sum(1 for item in results if item["state"] in sell_state_set)
     planned_buy_count = sum(1 for item in results if item["state"] in buy_state_set)
@@ -1089,7 +1099,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         "SELL_TREND",
         "SELL_REPLACE",
         "CUT_STOPLOSS",
-        "SELL_REGIME_FILTER",
     }
     buy_state_set = {"BUY", "BUY_REPLACE"}
 

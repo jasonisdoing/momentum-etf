@@ -353,18 +353,15 @@ def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = No
             delay_days = 0
 
     ratio_raw = settings_view.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-    if ratio_raw is not None:
+    if ratio_raw is None:
+        risk_off_ratio = None
+    else:
         try:
             risk_off_ratio = int(ratio_raw)
-        except (TypeError, ValueError):
-            risk_off_ratio = None
-        else:
-            if risk_off_ratio < 0:
-                risk_off_ratio = 0
-            elif risk_off_ratio > 100:
-                risk_off_ratio = 100
-    else:
-        risk_off_ratio = None
+        except (TypeError, ValueError) as exc:  # noqa: PERF203
+            raise AccountSettingsError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 정수가 아닙니다.") from exc
+        if not (0 <= risk_off_ratio <= 100):
+            raise AccountSettingsError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
 
     return ticker, ma_period, country, delay_days, risk_off_ratio
 

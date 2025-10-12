@@ -438,16 +438,17 @@ def run_portfolio_backtest(
                     row = daily_records_by_ticker[held_ticker][-1]
                     prev_trade_amount = float(row.get("trade_amount") or 0.0)
                     prev_trade_profit = float(row.get("trade_profit") or 0.0)
+                    note_text = f"{DECISION_NOTES['RISK_OFF_SELL']} (목표 {int(risk_off_equity_ratio_pct)}%)"
                     row.update(
                         {
-                            "decision": "SELL_REGIME_FILTER",
+                            "decision": "HOLD",
                             "trade_amount": prev_trade_amount + trade_amount,
                             "trade_profit": prev_trade_profit + trade_profit,
                             "trade_pl_pct": hold_ret,
                             "shares": remaining_shares,
                             "pv": remaining_shares * price_now,
                             "avg_cost": held_state["avg_cost"],
-                            "note": f"{DECISION_NOTES['RISK_OFF_SELL']} (목표 {int(risk_off_equity_ratio_pct)}%)",
+                            "note": note_text,
                         }
                     )
 
@@ -475,7 +476,7 @@ def run_portfolio_backtest(
                         row = daily_records_by_ticker[held_ticker][-1]
                         row.update(
                             {
-                                "decision": "SELL_REGIME_FILTER",
+                                "decision": "SOLD",
                                 "trade_amount": trade_amount,
                                 "trade_profit": trade_profit,
                                 "trade_pl_pct": hold_ret,
@@ -907,6 +908,9 @@ def run_portfolio_backtest(
             risk_off_note_for_day = f"{DECISION_NOTES['RISK_OFF']} (목표 {int(risk_off_equity_ratio_pct)}%)"
             for rows in daily_records_by_ticker.values():
                 if not rows:
+                    continue
+                last_decision = str(rows[-1].get("decision") or "").upper()
+                if last_decision not in {"HOLD", "BUY", "BUY_REPLACE"}:
                     continue
                 record_note = str(rows[-1].get("note") or "")
                 if "시장위험회피" not in record_note:
