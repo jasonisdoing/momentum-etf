@@ -681,6 +681,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     regime_info = None
     regime_filter_enabled = True
+    regime_filter_equity_ratio = 100
     try:
         common_settings = load_common_settings()
     except Exception as exc:
@@ -688,6 +689,16 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         common_settings = None
     else:
         regime_filter_enabled = bool((common_settings or {}).get("MARKET_REGIME_FILTER_ENABLED", True))
+        ratio_raw = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO", 100)
+        try:
+            regime_filter_equity_ratio = int(ratio_raw)
+        except (TypeError, ValueError):
+            regime_filter_equity_ratio = 100
+        else:
+            if regime_filter_equity_ratio < 0:
+                regime_filter_equity_ratio = 0
+            elif regime_filter_equity_ratio > 100:
+                regime_filter_equity_ratio = 100
 
     if regime_filter_enabled:
         try:
@@ -696,6 +707,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             logger.warning("시장 레짐 정보 계산 실패: %s", exc)
         else:
             if regime_info_candidate:
+                regime_info_candidate["risk_off_equity_ratio"] = regime_filter_equity_ratio
                 regime_info = regime_info_candidate
 
     # 쿨다운 정보 계산
@@ -733,6 +745,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             consecutive_holding_info=consecutive_holding_info,
             trade_cooldown_info=trade_cooldown_info,
             cooldown_days=int(strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 5)) or 0),
+            risk_off_equity_ratio=regime_filter_equity_ratio,
         )
         logger.info(
             "[%s] 일일 의사결정 계산 완료 (%.1fs, 결과 %d개)",

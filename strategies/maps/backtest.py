@@ -88,6 +88,7 @@ def run_portfolio_backtest(
     regime_filter_ma_period: int = 200,
     regime_filter_country: str = "",
     regime_filter_delay_days: int = 0,
+    regime_filter_equity_ratio: int = 100,
     regime_behavior: str = "sell_all",
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
@@ -113,6 +114,7 @@ def run_portfolio_backtest(
         regime_filter_ma_period: 레짐 필터 이동평균 기간
         regime_behavior: 레짐 필터 동작 방식
         regime_filter_delay_days: 레짐 필터 적용 시 참조할 지연 거래일 수
+        regime_filter_equity_ratio: 레짐 위험 회피 구간에서 유지할 목표 주식 비중 (0~100)
         stop_loss_pct: 손절 비율 (%)
         cooldown_days: 거래 쿨다운 기간
 
@@ -143,12 +145,11 @@ def run_portfolio_backtest(
     etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
 
     # 이동평균 계산에 필요한 과거 데이터를 확보하기 위한 추가 조회 범위(웜업)
+    WARMUP_MONTHS = 12
     fetch_date_range = date_range
     if date_range and len(date_range) == 2 and date_range[0] is not None:
-        max_ma_period = max(etf_ma_period, stock_ma_period, regime_filter_ma_period)
-        warmup_days = int(max_ma_period * 1.5)
         core_start = pd.to_datetime(date_range[0])
-        warmup_start = core_start - pd.DateOffset(days=warmup_days)
+        warmup_start = core_start - pd.DateOffset(months=WARMUP_MONTHS)
         fetch_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
 
     # --- 시장 레짐 필터 데이터 로딩 ---
@@ -251,6 +252,13 @@ def run_portfolio_backtest(
         if regime_delay_offset < 0:
             regime_delay_offset = 0
 
+    try:
+        risk_off_equity_ratio_pct = float(int(regime_filter_equity_ratio))
+    except (TypeError, ValueError):
+        risk_off_equity_ratio_pct = 100.0
+    risk_off_equity_ratio_pct = min(100.0, max(0.0, risk_off_equity_ratio_pct))
+    risk_off_equity_ratio = risk_off_equity_ratio_pct / 100.0
+
     # 시뮬레이션 상태 변수 초기화
     position_state = {
         ticker: {
@@ -313,9 +321,12 @@ def run_portfolio_backtest(
                 if not pd.isna(market_price) and not pd.isna(market_ma) and market_price < market_ma:
                     is_risk_off = True
 
-        force_regime_sell = is_risk_off and regime_behavior == "sell_all"
-        allow_individual_sells = (not is_risk_off) or regime_behavior == "hold_block_buy"
-        allow_new_buys = not is_risk_off
+        risk_off_effective = is_risk_off and risk_off_equity_ratio < 1.0 and regime_behavior == "sell_all"
+        full_exit = is_risk_off and regime_behavior == "sell_all" and risk_off_equity_ratio <= 0.0
+        partial_regime_active = risk_off_effective and risk_off_equity_ratio > 0.0
+        force_regime_sell = full_exit
+        allow_individual_sells = True
+        allow_new_buys = not full_exit
 
         # 현재 총 보유 자산 가치를 계산합니다.
         current_holdings_value = 0
@@ -386,6 +397,62 @@ def run_portfolio_backtest(
 
             daily_records_by_ticker[ticker].append(record)
 
+        # --- 1-1. 위험 회피 구간에서 목표 비중 유지 (부분 청산) ---
+        if partial_regime_active and current_holdings_value > 0:
+            desired_holdings_value = equity * risk_off_equity_ratio
+            tolerance = max(1e-6 * max(1.0, equity), 1e-6)
+            if desired_holdings_value < current_holdings_value - tolerance and current_holdings_value > 0:
+                scale_factor = desired_holdings_value / current_holdings_value if current_holdings_value > 0 else 0.0
+                scale_factor = max(0.0, min(1.0, scale_factor))
+
+                for held_ticker, held_state in position_state.items():
+                    shares_before = float(held_state["shares"])
+                    if shares_before <= 0:
+                        continue
+
+                    price_now = today_prices.get(held_ticker)
+                    if not pd.notna(price_now) or price_now <= 0:
+                        continue
+
+                    target_shares = shares_before * scale_factor
+                    sell_qty = shares_before - target_shares
+                    if sell_qty <= 1e-8:
+                        continue
+
+                    avg_cost_before = float(held_state["avg_cost"])
+                    trade_amount = sell_qty * price_now
+                    trade_profit = (price_now - avg_cost_before) * sell_qty if avg_cost_before > 0 else 0.0
+                    hold_ret = (price_now / avg_cost_before - 1.0) * 100.0 if avg_cost_before > 0 else 0.0
+
+                    sell_trades_today_map.setdefault(held_ticker, []).append({"shares": float(sell_qty), "price": float(price_now)})
+
+                    remaining_shares = target_shares
+                    if remaining_shares <= 1e-6:
+                        remaining_shares = 0.0
+                        held_state["avg_cost"] = 0.0
+                    held_state["shares"] = remaining_shares
+
+                    cash += trade_amount
+                    current_holdings_value = max(0.0, current_holdings_value - trade_amount)
+
+                    row = daily_records_by_ticker[held_ticker][-1]
+                    prev_trade_amount = float(row.get("trade_amount") or 0.0)
+                    prev_trade_profit = float(row.get("trade_profit") or 0.0)
+                    row.update(
+                        {
+                            "decision": "SELL_REGIME_FILTER",
+                            "trade_amount": prev_trade_amount + trade_amount,
+                            "trade_profit": prev_trade_profit + trade_profit,
+                            "trade_pl_pct": hold_ret,
+                            "shares": remaining_shares,
+                            "pv": remaining_shares * price_now,
+                            "avg_cost": held_state["avg_cost"],
+                            "note": f"{DECISION_NOTES['RISK_OFF_SELL']} (목표 {int(risk_off_equity_ratio_pct)}%)",
+                        }
+                    )
+
+            equity = cash + current_holdings_value
+
         # --- 2. 매도 로직 ---
         # (a) 시장 레짐 필터
         if force_regime_sell:
@@ -401,6 +468,7 @@ def run_portfolio_backtest(
                         sell_trades_today_map.setdefault(held_ticker, []).append({"shares": float(qty), "price": float(price)})
 
                         cash += trade_amount
+                        current_holdings_value = max(0.0, current_holdings_value - trade_amount)
                         held_state["shares"], held_state["avg_cost"] = 0, 0.0
 
                         # 이미 만들어둔 행을 업데이트
@@ -445,6 +513,7 @@ def run_portfolio_backtest(
                         sell_trades_today_map.setdefault(ticker, []).append({"shares": float(qty), "price": float(price)})
 
                         cash += trade_amount
+                        current_holdings_value = max(0.0, current_holdings_value - trade_amount)
                         ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
                         if cooldown_days > 0:
                             ticker_state["buy_block_until"] = i + cooldown_days
@@ -462,6 +531,8 @@ def run_portfolio_backtest(
                                 "avg_cost": 0,
                             }
                         )
+
+        equity = cash + current_holdings_value
 
         # --- 3. 매수 로직 (리스크 온일 때만) ---
         if allow_new_buys:
@@ -519,7 +590,7 @@ def run_portfolio_backtest(
                     if pd.isna(price):
                         continue
 
-                    equity_base = equity
+                    equity_base = cash + current_holdings_value
                     min_val = 1.0 / (top_n * 2.0) * equity_base
                     max_val = 1.0 / top_n * equity_base
                     budget = min(max_val, cash)
@@ -527,12 +598,24 @@ def run_portfolio_backtest(
                     if budget <= 0 or budget < min_val:
                         continue
 
+                    if risk_off_effective:
+                        total_equity_now = cash + current_holdings_value
+                        target_holdings_limit = total_equity_now * risk_off_equity_ratio
+                        remaining_capacity = max(0.0, target_holdings_limit - current_holdings_value)
+                        if remaining_capacity <= 0:
+                            continue
+                        budget = min(budget, remaining_capacity)
+                        if budget <= 0:
+                            continue
+
                     req_qty = budget / price if price > 0 else 0
                     trade_amount = budget
 
                     if trade_amount <= cash + 1e-9 and req_qty > 0:
                         ticker_state = position_state[ticker_to_buy]
                         cash -= trade_amount
+                        current_holdings_value += trade_amount
+                        equity = cash + current_holdings_value
                         ticker_state["shares"] += req_qty
                         ticker_state["avg_cost"] = price
                         if cooldown_days > 0:
@@ -645,6 +728,7 @@ def run_portfolio_backtest(
                             trade_profit = (sell_price - weakest_state["avg_cost"]) * sell_qty if weakest_state["avg_cost"] > 0 else 0.0
 
                             cash += sell_amount
+                            current_holdings_value = max(0.0, current_holdings_value - sell_amount)
                             weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
                             if cooldown_days > 0:
                                 weakest_state["buy_block_until"] = i + cooldown_days
@@ -654,7 +738,7 @@ def run_portfolio_backtest(
                                 row.update(
                                     {
                                         "decision": "SELL_REPLACE",
-                                        "trade_amount": trade_amount,
+                                        "trade_amount": sell_amount,
                                         "trade_profit": trade_profit,
                                         "trade_pl_pct": hold_ret,
                                         "shares": 0,
@@ -665,12 +749,21 @@ def run_portfolio_backtest(
                                 )
 
                             # (b) 새 종목 매수 (기준 자산 기반 예산)
-                            equity_base = equity
+                            equity_base = cash + current_holdings_value
                             min_val = 1.0 / (top_n * 2.0) * equity_base
                             max_val = 1.0 / top_n * equity_base
                             budget = min(max_val, cash)
                             if budget <= 0 or budget < min_val:
                                 continue
+                            if risk_off_effective:
+                                total_equity_now = cash + current_holdings_value
+                                target_holdings_limit = total_equity_now * risk_off_equity_ratio
+                                remaining_capacity = max(0.0, target_holdings_limit - current_holdings_value)
+                                if remaining_capacity <= 0:
+                                    continue
+                                budget = min(budget, remaining_capacity)
+                                if budget <= 0:
+                                    continue
                             # 수량/금액 산정
                             if country_code == "aus":
                                 req_qty = (budget / buy_price) if buy_price > 0 else 0
@@ -685,6 +778,8 @@ def run_portfolio_backtest(
                             if req_qty > 0 and buy_amount <= cash + 1e-9:
                                 new_ticker_state = position_state[replacement_ticker]
                                 cash -= buy_amount
+                                current_holdings_value += buy_amount
+                                equity = cash + current_holdings_value
                                 new_ticker_state["shares"], new_ticker_state["avg_cost"] = (
                                     req_qty,
                                     buy_price,
@@ -807,6 +902,16 @@ def run_portfolio_backtest(
                 if overrides.get("note") is not None:
                     last_row["note"] = overrides["note"]
 
+        risk_off_note_for_day = ""
+        if is_risk_off:
+            risk_off_note_for_day = f"{DECISION_NOTES['RISK_OFF']} (목표 {int(risk_off_equity_ratio_pct)}%)"
+            for rows in daily_records_by_ticker.values():
+                if not rows:
+                    continue
+                record_note = str(rows[-1].get("note") or "")
+                if "시장위험회피" not in record_note:
+                    rows[-1]["note"] = f"{record_note} | {risk_off_note_for_day}".strip(" |") if record_note else risk_off_note_for_day
+
         out_cash.append(
             {
                 "date": dt,
@@ -815,6 +920,7 @@ def run_portfolio_backtest(
                 "shares": 0,
                 "pv": cash,
                 "decision": "HOLD",
+                "note": risk_off_note_for_day,
             }
         )
 

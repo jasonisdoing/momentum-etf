@@ -437,6 +437,7 @@ def _build_backtest_kwargs(
             regime_filter_ma_period,
             regime_filter_country,
             regime_filter_delay_days,
+            regime_filter_equity_ratio,
         ) = get_market_regime_settings(common_settings)
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
@@ -452,6 +453,7 @@ def _build_backtest_kwargs(
         "regime_filter_ma_period": regime_filter_ma_period,
         "regime_filter_country": regime_filter_country,
         "regime_filter_delay_days": regime_filter_delay_days,
+        "regime_filter_equity_ratio": regime_filter_equity_ratio,
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
         "quiet": quiet,
@@ -702,19 +704,23 @@ def _build_summary(
             monthly_cum_returns = (eom_pv / initial_capital_local - 1).ffill()
         yearly_returns = pv_series_with_start.resample("YE").last().pct_change().dropna()
 
-    risk_off_periods = _detect_risk_off_periods(pv_series.index, ticker_timeseries)
-
     try:
         (
             regime_filter_ticker,
             regime_filter_ma_period,
             regime_filter_country,
             regime_filter_delay_days,
+            regime_filter_equity_ratio,
         ) = get_market_regime_settings(common_settings)
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
 
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
+    risk_off_periods = _detect_risk_off_periods(
+        pv_series.index,
+        ticker_timeseries,
+        regime_filter_equity_ratio=regime_filter_equity_ratio,
+    )
 
     summary = {
         "start_date": start_date.strftime("%Y-%m-%d"),
@@ -744,6 +750,7 @@ def _build_summary(
         "regime_filter_ma_period": regime_filter_ma_period,
         "regime_filter_country": regime_filter_country,
         "regime_filter_delay_days": regime_filter_delay_days,
+        "regime_filter_equity_ratio": regime_filter_equity_ratio,
         "monthly_returns": monthly_returns,
         "monthly_cum_returns": monthly_cum_returns,
         "yearly_returns": yearly_returns,
@@ -788,7 +795,9 @@ def _compute_evaluated_records(
 def _detect_risk_off_periods(
     index: pd.Index,
     ticker_timeseries: Mapping[str, pd.DataFrame],
-) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+    *,
+    regime_filter_equity_ratio: int,
+) -> List[Tuple[pd.Timestamp, pd.Timestamp, int]]:
     if not isinstance(index, pd.DatetimeIndex):
         index = pd.to_datetime(index)
 
@@ -797,12 +806,23 @@ def _detect_risk_off_periods(
     for df in ticker_timeseries.values():
         if df is None or df.empty or "note" not in df.columns:
             continue
-        note_mask = df["note"].fillna("") == "시장 위험 회피"
-        if note_mask.any():
-            intersect_index = df.index[note_mask].intersection(risk_off_series.index)
+        note_series = df["note"].fillna("")
+        decision_series = df.get("decision")
+        contains_risk_off = note_series.str.contains("시장위험회피", na=False)
+        if not contains_risk_off.any():
+            contains_risk_off = note_series.str.contains("시장 위험 회피", na=False)
+        if not contains_risk_off.any():
+            no_space = note_series.str.replace(" ", "", regex=False)
+            contains_risk_off = no_space.str.contains("시장위험회피", na=False)
+        decision_mask = (
+            decision_series.fillna("").eq("SELL_REGIME_FILTER") if isinstance(decision_series, pd.Series) else pd.Series(False, index=df.index)
+        )
+        combined_mask = contains_risk_off | decision_mask
+        if combined_mask.any():
+            intersect_index = df.index[combined_mask].intersection(risk_off_series.index)
             risk_off_series.loc[intersect_index] = True
 
-    periods: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    periods: List[Tuple[pd.Timestamp, pd.Timestamp, int]] = []
     in_period = False
     start: Optional[pd.Timestamp] = None
     prev_dt: Optional[pd.Timestamp] = None
@@ -813,13 +833,13 @@ def _detect_risk_off_periods(
             start = dt
         elif not is_off and in_period:
             if start is not None and prev_dt is not None:
-                periods.append((start, prev_dt))
+                periods.append((start, prev_dt, int(regime_filter_equity_ratio)))
             in_period = False
             start = None
         prev_dt = dt
 
     if in_period and start is not None and prev_dt is not None:
-        periods.append((start, prev_dt))
+        periods.append((start, prev_dt, int(regime_filter_equity_ratio)))
 
     return periods
 

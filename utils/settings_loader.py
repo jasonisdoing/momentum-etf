@@ -315,7 +315,7 @@ def get_country_slack_channel(country: str) -> Optional[str]:  # pragma: no cove
     return get_account_slack_channel(country)
 
 
-def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str, int]:
+def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str, int, int]:
     """공통 설정에서 메인 시장 레짐 필터 설정을 반환합니다."""
 
     if isinstance(common_settings, Mapping):
@@ -352,7 +352,18 @@ def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = No
         if delay_days < 0:
             delay_days = 0
 
-    return ticker, ma_period, country, delay_days
+    ratio_raw = settings_view.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO", 100)
+    try:
+        risk_off_ratio = int(ratio_raw)
+    except (TypeError, ValueError):
+        risk_off_ratio = 100
+    else:
+        if risk_off_ratio < 0:
+            risk_off_ratio = 0
+        elif risk_off_ratio > 100:
+            risk_off_ratio = 100
+
+    return ticker, ma_period, country, delay_days, risk_off_ratio
 
 
 def get_market_regime_aux_tickers(common_settings: Optional[Mapping[str, Any]] = None) -> List[str]:

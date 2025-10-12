@@ -68,6 +68,7 @@ def generate_daily_recommendations_for_portfolio(
     consecutive_holding_info: Dict[str, Dict],
     trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
     cooldown_days: int,
+    risk_off_equity_ratio: int = 100,
 ) -> List[Dict[str, Any]]:
     """
     주어진 데이터를 기반으로 포트폴리오의 일일 매매 추천를 생성합니다.
@@ -322,12 +323,20 @@ def generate_daily_recommendations_for_portfolio(
     universe_tickers = {etf["ticker"] for etf in full_etf_meta.values()}  # Use full_etf_meta for universe
 
     is_risk_off = regime_info and regime_info.get("is_risk_off", False)
+    try:
+        risk_off_target_ratio = int(risk_off_equity_ratio)
+    except (TypeError, ValueError):
+        risk_off_target_ratio = 100
+    risk_off_target_ratio = min(100, max(0, risk_off_target_ratio))
+    risk_off_effective = is_risk_off and risk_off_target_ratio < 100
+    full_risk_off_exit = risk_off_effective and risk_off_target_ratio <= 0
+    partial_risk_off = risk_off_effective and risk_off_target_ratio > 0
 
     # WAIT 후보 목록과 남은 슬롯 수는 모든 시나리오에서 참조되므로 기본값을 미리 정의합니다.
     wait_candidates_raw: List[Dict] = []
     slots_to_fill = denom - held_count
 
-    if is_risk_off:
+    if risk_off_effective:
         for decision in decisions:
             if decision["state"] == "HOLD":
                 decision["state"] = "SELL_REGIME_FILTER"
@@ -335,9 +344,13 @@ def generate_daily_recommendations_for_portfolio(
 
                 d_sell = data_by_tkr.get(decision["tkr"])
                 if d_sell:
-                    decision["row"][-1] = DECISION_NOTES["RISK_OFF_SELL"]
+                    note_text = DECISION_NOTES["RISK_OFF_SELL"]
+                    if partial_risk_off:
+                        note_text = f"{note_text} (목표 {risk_off_target_ratio}%)"
+                    decision["row"][-1] = note_text
+                decision["risk_off_target_ratio"] = risk_off_target_ratio
 
-            if decision.get("buy_signal"):
+            if decision.get("buy_signal") and full_risk_off_exit:
                 decision["buy_signal"] = False
                 if decision["state"] == "WAIT":
                     original_phrase = decision["row"][-1]

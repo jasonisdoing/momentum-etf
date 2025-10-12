@@ -136,18 +136,19 @@ def print_backtest_summary(
         ensure_blank_line()
         add(f"========= {title} ==========")
 
-    def append_risk_off_period(start_dt: pd.Timestamp, end_dt: pd.Timestamp) -> None:
+    def append_risk_off_period(start_dt: pd.Timestamp, end_dt: pd.Timestamp, ratio: Optional[int] = None) -> None:
         start_ts = pd.to_datetime(start_dt)
         end_ts = pd.to_datetime(end_dt)
 
         if pd.isna(start_ts) or pd.isna(end_ts):
-            add("| 투자 중단: N/A")
+            add("| 투자 축소: N/A")
             return
 
         diff_days = (end_ts - start_ts).days
         trading_days = diff_days + 1 if diff_days >= 0 else 0
 
-        add(f"| 투자 중단: {start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')}" f" ({trading_days} 거래일)")
+        invest_ratio = 100 if ratio is None else max(0, min(100, int(ratio)))
+        add(f"| 투자 축소({invest_ratio}% 투자): " f"{start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')} ({trading_days} 거래일)")
 
     add_section_heading("사용된 설정값")
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
@@ -166,6 +167,7 @@ def print_backtest_summary(
             regime_filter_ma_period,
             regime_filter_country,
             regime_filter_delay_days,
+            regime_filter_equity_ratio,
         ) = get_market_regime_settings(common_settings)
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
@@ -187,6 +189,7 @@ def print_backtest_summary(
         "시장 위험 필터 MA 기간": f"{regime_filter_ma_period}일",
         "시장 위험 필터 시장": regime_filter_country.upper(),
         "시장 위험 필터 적용 지연": f"{regime_filter_delay_days}일",
+        "위험 회피 시 목표 주식 비중": f"{regime_filter_equity_ratio}%",
     }
 
     if currency != "KRW":
@@ -307,17 +310,22 @@ def print_backtest_summary(
     add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
 
     risk_off_periods = summary.get("risk_off_periods")
+    regime_equity_ratio = summary.get("regime_filter_equity_ratio")
     if isinstance(risk_off_periods, pd.DataFrame):
         if not risk_off_periods.empty:
             for _, row in risk_off_periods.iterrows():
-                append_risk_off_period(row.get("start"), row.get("end"))
+                append_risk_off_period(row.get("start"), row.get("end"), regime_equity_ratio)
         else:
-            add("| 투자 중단: N/A")
+            add("| 투자 축소: N/A")
     elif risk_off_periods:
-        for start, end in risk_off_periods:
-            append_risk_off_period(start, end)
+        for period in risk_off_periods:
+            if isinstance(period, (list, tuple)):
+                if len(period) >= 3:
+                    append_risk_off_period(period[0], period[1], period[2])
+                elif len(period) == 2:
+                    append_risk_off_period(period[0], period[1], regime_equity_ratio)
     else:
-        add("| 투자 중단: N/A")
+        add("| 투자 축소: N/A")
 
     add(f"| 초기 자본: {money_formatter(initial_capital_local)}")
     if currency != "KRW":

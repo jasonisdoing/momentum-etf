@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 import math
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from os import cpu_count
 from pathlib import Path
 from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple, Set
 
-import optuna
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
@@ -33,8 +32,7 @@ from utils.data_loader import (
 from utils.stock_list_io import get_etfs
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
-
-optuna.logging.set_verbosity(optuna.logging.WARNING)
+WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
 
 
 def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:
@@ -143,32 +141,99 @@ def _round_up_float_places(value: Any, digits: int) -> float:
     return float(math.ceil(num * factor) / factor)
 
 
+def _evaluate_single_combo(payload: Tuple[str, int, Tuple[str, str], int, int, int, float, Tuple[str, ...]]) -> Tuple[str, Any, List[str]]:
+    (
+        account_norm,
+        months_range,
+        date_range,
+        regime_ma_period,
+        ma_int,
+        topn_int,
+        threshold_float,
+        excluded_tickers,
+    ) = payload
+
+    try:
+        override_rules = StrategyRules.from_values(
+            ma_period=int(ma_int),
+            portfolio_topn=int(topn_int),
+            replace_threshold=float(threshold_float),
+        )
+    except ValueError as exc:
+        return (
+            "failure",
+            {
+                "ma_period": ma_int,
+                "portfolio_topn": topn_int,
+                "replace_threshold": threshold_float,
+                "error": str(exc),
+            },
+            [],
+        )
+
+    strategy_overrides: Dict[str, Any] = {}
+    if regime_ma_period > 0:
+        strategy_overrides["MARKET_REGIME_FILTER_MA_PERIOD"] = regime_ma_period
+
+    try:
+        bt_result = run_account_backtest(
+            account_norm,
+            months_range=months_range,
+            quiet=True,
+            override_settings={
+                "start_date": date_range[0],
+                "end_date": date_range[1],
+                "strategy_overrides": strategy_overrides,
+            },
+            strategy_override=override_rules,
+            excluded_tickers=set(excluded_tickers) if excluded_tickers else None,
+        )
+    except Exception as exc:
+        return (
+            "failure",
+            {
+                "ma_period": ma_int,
+                "portfolio_topn": topn_int,
+                "replace_threshold": threshold_float,
+                "error": str(exc),
+            },
+            [],
+        )
+
+    summary = bt_result.summary or {}
+    final_value_local = _safe_float(summary.get("final_value"), 0.0)
+    final_value_krw = _safe_float(summary.get("final_value_krw"), final_value_local)
+
+    entry = {
+        "ma_period": ma_int,
+        "portfolio_topn": topn_int,
+        "replace_threshold": float(threshold_float),
+        "cagr_pct": _round_float(_safe_float(summary.get("cagr_pct"), 0.0)),
+        "mdd_pct": _round_float(_safe_float(summary.get("mdd_pct"), 0.0)),
+        "sharpe_ratio": _round_float(_safe_float(summary.get("sharpe_ratio"), 0.0)),
+        "sortino_ratio": _round_float(_safe_float(summary.get("sortino_ratio"), 0.0)),
+        "calmar_ratio": _round_float(_safe_float(summary.get("calmar_ratio"), 0.0)),
+        "cumulative_return_pct": _round_float(_safe_float(summary.get("cumulative_return_pct"), 0.0)),
+        "final_value_local": final_value_local,
+        "final_value": final_value_krw,
+        "cui": _round_float(_safe_float(summary.get("cui"), 0.0)),
+        "ulcer_index": _round_float(_safe_float(summary.get("ulcer_index"), 0.0)),
+    }
+
+    missing = getattr(bt_result, "missing_tickers", []) or []
+    return ("success", entry, list(missing))
+
+
 def _execute_tuning_for_months(
     account_norm: str,
     *,
     months_range: int,
     search_space: Mapping[str, List[Any]],
-    prefetched_data: Mapping[str, DataFrame],
-    excluded_tickers: Optional[Collection[str]],
     end_date: Timestamp,
-    combo_count: int,
-    n_trials: Optional[int],
-    timeout: Optional[float],
-    sampler_seed: Optional[int],
     regime_ma_period: int,
+    excluded_tickers: Optional[Collection[str]],
 ) -> Optional[Dict[str, Any]]:
     logger = get_app_logger()
-
-    start_date = end_date - pd.DateOffset(months=months_range)
-    date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
-    logger.info("[튜닝] %s (%d개월) Optuna 튜닝 시작", account_norm.upper(), months_range)
-
-    failures: List[Dict[str, Any]] = []
-    success_entries: List[Dict[str, Any]] = []
-    best_entry: Optional[Dict[str, Any]] = None
-    best_key = (float("-inf"), float("inf"))
-    evaluated_cache: Dict[Tuple[int, int, float], Dict[str, Any]] = {}
-    encountered_missing: Set[str] = set()
 
     ma_candidates = list(search_space.get("MA_PERIOD", []))
     topn_candidates = list(search_space.get("PORTFOLIO_TOPN", []))
@@ -178,180 +243,103 @@ def _execute_tuning_for_months(
         logger.warning("[튜닝] %s (%d개월) 유효한 탐색 공간이 없습니다.", account_norm.upper(), months_range)
         return None
 
-    requested_trials = n_trials if n_trials is not None else combo_count
-    effective_trials = min(max(requested_trials, 1), combo_count if combo_count > 0 else requested_trials)
-    progress_interval = max(1, effective_trials // 100)
+    combos: List[Tuple[int, int, float]] = [(ma, topn, replace) for ma in ma_candidates for topn in topn_candidates for replace in replace_candidates]
 
-    sampler = optuna.samplers.TPESampler(multivariate=True, group=True, seed=sampler_seed)
-    study = optuna.create_study(directions=["maximize", "minimize"], sampler=sampler)
+    if not combos:
+        logger.warning("[튜닝] %s (%d개월) 평가할 조합이 없습니다.", account_norm.upper(), months_range)
+        return None
 
-    evaluated_success = 0
+    start_date = end_date - pd.DateOffset(months=months_range)
+    date_range = (start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
 
-    def _log_progress() -> None:
-        if evaluated_success == 0:
-            return
-        if evaluated_success % progress_interval == 0 or evaluated_success == effective_trials:
-            logger.info(
-                "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%)",
-                account_norm.upper(),
-                months_range,
-                evaluated_success,
-                effective_trials,
-                (evaluated_success / effective_trials) * 100,
-            )
+    logger.info(
+        "[튜닝] %s (%d개월) 전수조사 시작 (조합 %d개)",
+        account_norm.upper(),
+        months_range,
+        len(combos),
+    )
 
-    def objective(trial: optuna.Trial) -> Tuple[float, float]:
-        nonlocal best_entry, best_key, evaluated_success
+    workers = WORKERS or (cpu_count() or 1)
+    workers = max(1, min(workers, len(combos)))
 
-        ma = trial.suggest_categorical("MA_PERIOD", ma_candidates)
-        topn = trial.suggest_categorical("PORTFOLIO_TOPN", topn_candidates)
-        threshold = trial.suggest_categorical("REPLACE_SCORE_THRESHOLD", replace_candidates)
-        try:
-            ma_int = int(ma)
-            topn_int = int(topn)
-            threshold_float = float(threshold)
-        except (TypeError, ValueError):
-            failures.append(
-                {
-                    "ma_period": ma,
-                    "portfolio_topn": topn,
-                    "replace_threshold": threshold,
-                    "error": "파라미터 캐스팅 실패",
-                }
-            )
-            raise optuna.TrialPruned("Invalid parameter cast")
+    success_entries: List[Dict[str, Any]] = []
+    failures: List[Dict[str, Any]] = []
+    encountered_missing: Set[str] = set()
 
-        params_key = (ma_int, topn_int, threshold_float)
-        cached = evaluated_cache.get(params_key)
-        if cached is not None:
-            trial.set_user_attr("entry", cached)
-            return cached["cagr_pct"], -cached["mdd_pct"]
+    payloads = [
+        (
+            account_norm,
+            months_range,
+            date_range,
+            regime_ma_period,
+            int(ma),
+            int(topn),
+            float(replace),
+            tuple(excluded_tickers) if excluded_tickers else tuple(),
+        )
+        for ma, topn, replace in combos
+    ]
 
-        if topn_int <= 0:
-            failures.append(
-                {
-                    "ma_period": ma_int,
-                    "portfolio_topn": topn_int,
-                    "replace_threshold": threshold_float,
-                    "error": "PORTFOLIO_TOPN must be > 0",
-                }
-            )
-            raise optuna.TrialPruned("Invalid PORTFOLIO_TOPN")
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        future_map = {executor.submit(_evaluate_single_combo, payload): payload for payload in payloads}
+        for idx, future in enumerate(as_completed(future_map), 1):
+            status, data, missing = future.result()
+            if status == "success":
+                success_entries.append(data)
+                encountered_missing.update(missing)
+            else:
+                failures.append(data)
 
-        try:
-            override_rules = StrategyRules.from_values(
-                ma_period=ma_int,
-                portfolio_topn=topn_int,
-                replace_threshold=threshold_float,
-            )
-        except ValueError as exc:
-            failures.append(
-                {
-                    "ma_period": ma_int,
-                    "portfolio_topn": topn_int,
-                    "replace_threshold": threshold_float,
-                    "error": str(exc),
-                }
-            )
-            raise optuna.TrialPruned(str(exc))
+            if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
+                logger.info(
+                    "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%)",
+                    account_norm.upper(),
+                    months_range,
+                    idx,
+                    len(combos),
+                    (idx / len(combos)) * 100,
+                )
 
-        strategy_overrides = {}
-        if regime_ma_period > 0:
-            strategy_overrides["MARKET_REGIME_FILTER_MA_PERIOD"] = regime_ma_period
-
-        try:
-            bt_result = run_account_backtest(
-                account_norm,
-                months_range=months_range,
-                quiet=True,
-                override_settings={
-                    "start_date": date_range[0],
-                    "end_date": date_range[1],
-                    "strategy_overrides": strategy_overrides,
-                },
-                prefetched_data=prefetched_data,
-                strategy_override=override_rules,
-                excluded_tickers=excluded_tickers,
-            )
-        except Exception as exc:  # pragma: no cover - 백테스트 예외 방어
-            failures.append(
-                {
-                    "ma_period": ma_int,
-                    "portfolio_topn": topn_int,
-                    "replace_threshold": threshold_float,
-                    "error": str(exc),
-                }
-            )
-            raise optuna.TrialPruned(str(exc))
-
-        if getattr(bt_result, "missing_tickers", None):
-            encountered_missing.update(bt_result.missing_tickers)
-
-        summary = bt_result.summary or {}
-        final_value_local = _safe_float(summary.get("final_value"), 0.0)
-        final_value_krw = _safe_float(summary.get("final_value_krw"), final_value_local)
-
-        entry = {
-            "ma_period": ma_int,
-            "portfolio_topn": topn_int,
-            "replace_threshold": _round_up_float_places(threshold_float, 1),
-            "cagr_pct": _round_float(_safe_float(summary.get("cagr_pct"), 0.0)),
-            "mdd_pct": _round_float(_safe_float(summary.get("mdd_pct"), 0.0)),
-            "sharpe_ratio": _round_float(_safe_float(summary.get("sharpe_ratio"), 0.0)),
-            "sortino_ratio": _round_float(_safe_float(summary.get("sortino_ratio"), 0.0)),
-            "calmar_ratio": _round_float(_safe_float(summary.get("calmar_ratio"), 0.0)),
-            "cumulative_return_pct": _round_float(_safe_float(summary.get("cumulative_return_pct"), 0.0)),
-            "final_value_local": final_value_local,
-            "final_value": final_value_krw,
-            "cui": _round_float(_safe_float(summary.get("cui"), 0.0)),
-            "ulcer_index": _round_float(_safe_float(summary.get("ulcer_index"), 0.0)),
-        }
-
-        evaluated_cache[params_key] = entry
-        success_entries.append(entry)
-        evaluated_success = len(success_entries)
-        trial.set_user_attr("entry", entry)
-
-        cagr = entry["cagr_pct"]
-        mdd = entry["mdd_pct"]
-        key = (cagr, -mdd)
-        if best_entry is None or key > best_key:
-            best_entry = entry
-            best_key = key
-
-        _log_progress()
-        return cagr, -mdd
-
-    study.optimize(objective, n_trials=effective_trials, timeout=timeout)
-
-    success_count = len(success_entries)
-
-    if best_entry is None:
+    if not success_entries:
         logger.warning("[튜닝] %s (%d개월) 성공한 조합이 없습니다.", account_norm.upper(), months_range)
         return None
 
-    logger.info(
-        "[튜닝] %s (%d개월) 완료: 성공 %d개 / 실패 %d개 (요청 %d회, 처리 %d회)",
-        account_norm.upper(),
-        months_range,
-        success_count,
-        len(failures),
-        effective_trials,
-        len(study.trials),
-    )
+    def _sort_key(entry: Dict[str, Any]) -> Tuple[float, float]:
+        cagr = _safe_float(entry.get("cagr_pct"), float("-inf"))
+        mdd = _safe_float(entry.get("mdd_pct"), float("inf"))
+        return (cagr, -mdd)
+
+    success_entries.sort(key=_sort_key, reverse=True)
+    best_entry = success_entries[0]
+
+    raw_data_payload: List[Dict[str, Any]] = []
+    for item in success_entries:
+        cagr_val = _safe_float(item.get("cagr_pct"), float("nan"))
+        mdd_val = _safe_float(item.get("mdd_pct"), float("nan"))
+        period_return_val = _safe_float(item.get("cumulative_return_pct"), float("nan"))
+
+        raw_data_payload.append(
+            {
+                "MONTHS_RANGE": months_range,
+                "CAGR": _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None,
+                "MDD": _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None,
+                "period_return": _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None,
+                "tuning": {
+                    "MA_PERIOD": int(item.get("ma_period", 0)),
+                    "PORTFOLIO_TOPN": int(item.get("portfolio_topn", 0)),
+                    "REPLACE_SCORE_THRESHOLD": _round_up_float_places(item.get("replace_threshold", 0.0), 1),
+                },
+            }
+        )
 
     return {
         "months_range": months_range,
         "best": best_entry,
         "failures": failures,
-        "success_count": success_count,
+        "success_count": len(success_entries),
         "regime_ma_period": regime_ma_period,
         "missing_tickers": sorted(encountered_missing),
-        "study": {
-            "trials_requested": effective_trials,
-            "trials_completed": len(study.trials),
-            "failures": len(failures),
-        },
+        "raw_data": raw_data_payload,
     }
 
 
@@ -672,17 +660,6 @@ def run_account_tuning(
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
         return None
 
-    if n_trials is not None:
-        try:
-            trials_limit = int(n_trials)
-        except (TypeError, ValueError):
-            trials_limit = combo_count
-        else:
-            if trials_limit <= 0:
-                trials_limit = combo_count
-    else:
-        trials_limit = None
-
     search_space = {
         "MA_PERIOD": ma_values,
         "PORTFOLIO_TOPN": topn_values,
@@ -690,7 +667,7 @@ def run_account_tuning(
     }
 
     try:
-        regime_ticker, regime_ma_period, regime_country, _regime_delay_days = get_market_regime_settings()
+        regime_ticker, regime_ma_period, regime_country, _regime_delay_days, _regime_equity_ratio = get_market_regime_settings()
     except AccountSettingsError as exc:
         logger.error("[튜닝] 공통 시장 레짐 설정을 불러오지 못했습니다: %s", exc)
         return None
@@ -715,14 +692,12 @@ def run_account_tuning(
     ma_count = len(ma_values)
     topn_count = len(topn_values)
     replace_count = len(replace_values)
-    requested_trials = trials_limit if trials_limit is not None else combo_count
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × TH %d개 = %d개 조합 (요청 시도 %d회)",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × TH %d개 = %d개 조합",
         ma_count,
         topn_count,
         replace_count,
         combo_count,
-        requested_trials,
     )
 
     try:
@@ -797,94 +772,55 @@ def run_account_tuning(
             ", ".join(sorted(excluded_ticker_set)),
         )
 
-    if timeout is not None:
-        try:
-            timeout_sec = float(timeout)
-        except (TypeError, ValueError):
-            timeout_sec = None
-        else:
-            if timeout_sec <= 0:
-                timeout_sec = None
-    else:
-        timeout_sec = None
-
-    results_per_month: List[Dict[str, Any]] = []
-    max_workers = min(len(month_items), cpu_count() or 1)
-    futures: Dict[Any, Any] = {}
     runtime_missing_registry: Set[str] = set()
+    results_per_month: List[Dict[str, Any]] = []
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for idx, item in enumerate(month_items):
-            months_raw = item.get("months_range")
-            try:
-                months_value = int(months_raw)
-            except (TypeError, ValueError):
-                logger.warning(
-                    "[튜닝] %s (%s) 월 범위를 정수로 변환할 수 없습니다. 항목을 건너뜁니다.",
-                    account_norm.upper(),
-                    months_raw,
-                )
-                continue
-
-            if months_value <= 0:
-                logger.warning(
-                    "[튜닝] %s (%s) 유효하지 않은 월 범위입니다. 항목을 건너뜁니다.",
-                    account_norm.upper(),
-                    months_raw,
-                )
-                continue
-
-            sanitized_item = dict(item)
-            sanitized_item["months_range"] = months_value
-            seed = abs(hash((account_norm, months_value, idx))) % (2**32)
-
-            future = executor.submit(
-                _execute_tuning_for_months,
-                account_norm,
-                months_range=months_value,
-                search_space=search_space,
-                prefetched_data=prefetched_map,
-                excluded_tickers=excluded_ticker_set,
-                end_date=end_date,
-                combo_count=combo_count,
-                n_trials=trials_limit,
-                timeout=timeout_sec,
-                sampler_seed=seed,
-                regime_ma_period=regime_ma_period,
+    for item in month_items:
+        months_raw = item.get("months_range")
+        try:
+            months_value = int(months_raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "[튜닝] %s (%s) 월 범위를 정수로 변환할 수 없습니다. 항목을 건너뜁니다.",
+                account_norm.upper(),
+                months_raw,
             )
-            futures[future] = (idx, sanitized_item)
+            continue
 
-        collected: List[Tuple[int, Dict[str, Any]]] = []
-        for future in as_completed(futures):
-            idx, item = futures[future]
-            try:
-                single_result = future.result()
-            except Exception as exc:  # pragma: no cover - 병렬 실행 실패 방어
-                logger.error(
-                    "[튜닝] %s (%s개월) 병렬 실행 실패: %s",
-                    account_norm.upper(),
-                    item.get("months_range"),
-                    exc,
-                )
-                continue
+        if months_value <= 0:
+            logger.warning(
+                "[튜닝] %s (%s) 유효하지 않은 월 범위입니다. 항목을 건너뜁니다.",
+                account_norm.upper(),
+                months_raw,
+            )
+            continue
 
-            if not single_result:
-                continue
+        sanitized_item = dict(item)
+        sanitized_item["months_range"] = months_value
 
-            try:
-                weight = float(item.get("weight", 0.0))
-            except (TypeError, ValueError):
-                weight = 0.0
+        single_result = _execute_tuning_for_months(
+            account_norm,
+            months_range=months_value,
+            search_space=search_space,
+            end_date=end_date,
+            regime_ma_period=regime_ma_period,
+            excluded_tickers=excluded_ticker_set,
+        )
 
-            single_result["weight"] = weight
-            single_result["source"] = item.get("source")
-            missing_in_result = single_result.get("missing_tickers") or []
-            if missing_in_result:
-                runtime_missing_registry.update(missing_in_result)
-            collected.append((idx, single_result))
+        if not single_result:
+            continue
 
-    collected.sort(key=lambda entry: entry[0])
-    results_per_month = [item for _, item in collected]
+        try:
+            weight = float(item.get("weight", 0.0))
+        except (TypeError, ValueError):
+            weight = 0.0
+
+        single_result["weight"] = weight
+        single_result["source"] = item.get("source")
+        missing_in_result = single_result.get("missing_tickers") or []
+        if missing_in_result:
+            runtime_missing_registry.update(missing_in_result)
+        results_per_month.append(single_result)
 
     if not results_per_month:
         logger.warning("[튜닝] 실행 가능한 기간이 없어 결과가 없습니다.")
