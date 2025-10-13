@@ -44,9 +44,10 @@ from utils.report import format_kr_money
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_slack_channel
 from dotenv import load_dotenv
+from utils.cron_utils import normalize_cron_weekdays
 
 load_dotenv()
-APP_VERSION = "2025-10-13-08"
+APP_VERSION = "2025-10-13-11"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
 _LAST_ERROR: Optional[str] = None
@@ -73,14 +74,9 @@ def should_notify_on_schedule(country: str) -> bool:
     if not cron_schedule:
         return True
 
-    tz_str = (
-        config.get("notify_timezone")
-        or config.get("timezone")
-        or {
-            "kor": "Asia/Seoul",
-            "aus": "Australia/Sydney",
-        }.get(country, "Asia/Seoul")
-    )
+    cron_schedule = normalize_cron_weekdays(cron_schedule, target="croniter")
+
+    tz_str = "Asia/Seoul"
 
     try:
         local_tz = pytz.timezone(tz_str)

@@ -49,6 +49,7 @@ from utils.notification import (
 )
 from utils.schedule_config import get_all_country_schedules
 from utils.data_loader import is_trading_day
+from utils.cron_utils import normalize_cron_weekdays
 
 
 def setup_logging():
@@ -313,14 +314,22 @@ def main():
             logging.info("Skipping %s schedule (disabled)", schedule_name.upper())
             continue
 
-        cron_expr = cfg.get("signal_cron") or cfg.get("recommendation_cron")
+        cron_expr_raw = cfg.get("signal_cron") or cfg.get("recommendation_cron")
         timezone = cfg.get("timezone") or TIMEZONE
 
         account_id = (cfg.get("account_id") or "").strip().lower()
         country_code = (cfg.get("country_code") or "").strip().lower()
 
-        if not account_id or not country_code or not cron_expr:
+        if not account_id or not country_code or not cron_expr_raw:
             raise RuntimeError(f"Schedule entry '{schedule_name}' must define account_id, country_code, and recommendation_cron")
+
+        cron_expr = normalize_cron_weekdays(cron_expr_raw, target="apscheduler")
+        if cron_expr != cron_expr_raw:
+            logging.info(
+                "Adjusted cron expression from '%s' to '%s' for APScheduler compatibility.",
+                cron_expr_raw,
+                cron_expr,
+            )
 
         scheduler.add_job(
             run_recommend_for_country,
