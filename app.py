@@ -141,7 +141,7 @@ def _render_home_page() -> None:
             if not main_df.empty:
                 styled_main = main_df.style.apply(lambda col: _style_status(col, main_status), subset=["건강도"], axis=0)
                 styled_main = styled_main.apply(lambda col: _style_position(col, main_position), subset=["위치"], axis=0)
-                st.dataframe(styled_main, hide_index=True, use_container_width=True)
+                st.dataframe(styled_main, hide_index=True, width="stretch")
 
             if aux_infos:
                 aux_rows: List[Dict[str, Any]] = []
@@ -155,7 +155,7 @@ def _render_home_page() -> None:
                 styled_aux = aux_df.style.apply(lambda col: _style_status(col, aux_status), subset=["건강도"], axis=0)
                 styled_aux = styled_aux.apply(lambda col: _style_position(col, aux_position), subset=["위치"], axis=0)
                 st.caption("아래 보조 지표는 단순 참고를 위한 정보입니다. 시스템은 메인 지수만을 이용하고 있습니다.")
-                st.dataframe(styled_aux, hide_index=True, use_container_width=True)
+                st.dataframe(styled_aux, hide_index=True, width="stretch")
 
 
 def main() -> None:
