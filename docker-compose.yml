@@ -10,6 +10,7 @@ services:
       - "80:80"
     volumes:
       - ./logs:/app/logs
+      - ./cache:/app/cache
       - ./.streamlit:/app/.streamlit
 
   scheduler:
@@ -21,3 +22,4 @@ services:
       - TZ=Asia/Seoul
     volumes:
       - ./logs:/app/logs
+      - ./cache:/app/cache
