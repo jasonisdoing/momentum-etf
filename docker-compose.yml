@@ -6,8 +6,9 @@ services:
       - .env
     environment:
       - TZ=Asia/Seoul
-    ports:
-      - "80:80"
+      - VIRTUAL_HOST=etf.dojason.com
+      - LETSENCRYPT_HOST=etf.dojason.com
+      - LETSENCRYPT_EMAIL=kimwootak@catholic.ac.kr
     volumes:
       - ./logs:/app/logs
       - ./cache:/app/cache
