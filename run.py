@@ -47,6 +47,24 @@ def main():
     args = ["run", script_path] + sys.argv[1:]
     sys.argv = ["streamlit"] + args
 
+    # Streamlit 페이지 설정 및 Open Graph 메타 태그 추가
+    import streamlit as st
+
+    st.set_page_config(page_title="ETF 모멘텀 자동분석", page_icon="📈")
+    st.markdown(
+        """
+    <head>
+      <meta property="og:title" content="ETF 모멘텀 자동분석" />
+      <meta property="og:description" content="ETF 자동 분석 플랫폼 – 최신 데이터를 제공합니다." />
+      <meta property="og:image" content="https://etf.dojason.com/thumbnail.png" />
+      <meta property="og:url" content="https://etf.dojason.com/" />
+      <meta property="og:type" content="website" />
+      <meta name="twitter:card" content="summary_large_image" />
+    </head>
+    """,
+        unsafe_allow_html=True,
+    )
+
     # Streamlit의 메인 CLI 함수를 호출합니다.
     sys.exit(stcli.main())
 
