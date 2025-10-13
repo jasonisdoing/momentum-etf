@@ -13,7 +13,7 @@ services:
       - LETSENCRYPT_EMAIL=kimwootak@catholic.ac.kr
     volumes:
       - ./logs:/app/logs
-      - ./cache:/app/cache
+      - ./data/stocks/cache:/app/data/stocks/cache
       - ./.streamlit:/app/.streamlit
 
   scheduler:
@@ -25,4 +25,4 @@ services:
       - TZ=Asia/Seoul
     volumes:
       - ./logs:/app/logs
-      - ./cache:/app/cache
+      - ./data/stocks/cache:/app/data/stocks/cache

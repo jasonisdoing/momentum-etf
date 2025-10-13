@@ -21,7 +21,6 @@ venv/
 .DS_Store
 
 # 캐시 파일
-cache/
 data/stocks/cache/
 
 # 백테스트 결과
