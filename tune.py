@@ -15,15 +15,20 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
-        "MA_RANGE": np.arange(1, 51, 1),
-        "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 1.1, 0.1),
+        "MA_RANGE": np.arange(10, 105, 5),
+        "PORTFOLIO_TOPN": np.arange(3, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
     },
     "kor": {
-        "MA_RANGE": np.arange(1, 51, 1),
-        "PORTFOLIO_TOPN": [10],
-        "REPLACE_SCORE_THRESHOLD": [0.5],
+        "MA_RANGE": np.arange(10, 105, 5),
+        "PORTFOLIO_TOPN": np.arange(7, 11, 1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
     },
+    # "kor": {
+    #     "MA_RANGE": np.arange(10, 105, 5),
+    #     "PORTFOLIO_TOPN": [10],
+    #     "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
+    # },
     "us": {
         "MA_RANGE": np.arange(5, 31, 1),
         "PORTFOLIO_TOPN": np.arange(5, 11, 1),
@@ -57,8 +62,6 @@ def main() -> None:
     )
     if output is None:
         logger.error("튜닝이 실패하여 결과를 저장하지 않습니다.")
-    else:
-        logger.info("✅ 튜닝 결과를 '%s'에 저장했습니다.", output)
 
 
 if __name__ == "__main__":

@@ -374,6 +374,15 @@ def main():
     except Exception:
         logging.error("Error during initial run for stock metadata update", exc_info=True)
 
+    # Initial run to refresh price caches
+    try:
+        logging.info("[Initial Run] Refreshing price caches...")
+        from scripts.update_price_cache import main as refresh_price_cache
+
+        refresh_price_cache()
+    except Exception:
+        logging.error("Error during initial run for price cache refresh", exc_info=True)
+
     for schedule_name, cfg in country_schedules.items():
         if not cfg.get("enabled", True):
             continue

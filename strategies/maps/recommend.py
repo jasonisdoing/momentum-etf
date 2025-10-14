@@ -451,10 +451,21 @@ def generate_daily_recommendations_for_portfolio(
             # 3. 교체 실행
             d_weakest = data_by_tkr.get(ticker_to_sell)
             if d_weakest:
-                sell_phrase = DECISION_NOTES["REPLACE_SELL"]
+                replacement_name = best_new.get("row", [None, None, None])[2]
+                if not replacement_name:
+                    replacement_name = (
+                        etf_meta.get(best_new["tkr"], {}).get("name") or full_etf_meta.get(best_new["tkr"], {}).get("name") or best_new["tkr"]
+                    )
+                sell_base = DECISION_MESSAGES.get("SELL_REPLACE", DECISION_NOTES.get("REPLACE_SELL", "교체 매도"))
 
                 for d_item in decisions:
                     if d_item["tkr"] == ticker_to_sell:
+                        pl_raw = d_item.get("hold_return_pct")
+                        try:
+                            pl_pct = float(pl_raw)
+                        except (TypeError, ValueError):
+                            pl_pct = 0.0
+                        sell_phrase = f"{sell_base} 손익률 {pl_pct:+.2f}% - {replacement_name}({best_new['tkr']}) 교체"
                         d_item["state"], d_item["row"][4], d_item["row"][-1] = (
                             "SELL_REPLACE",
                             "SELL_REPLACE",

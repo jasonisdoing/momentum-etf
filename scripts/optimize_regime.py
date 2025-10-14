@@ -29,7 +29,7 @@ from unittest.mock import patch
 
 from logic.backtest.account_runner import run_account_backtest
 from utils.account_registry import get_account_settings
-from utils.data_loader import fetch_ohlcv, fetch_ohlcv_for_tickers, get_latest_trading_day
+from utils.data_loader import fetch_ohlcv, prepare_price_data, get_latest_trading_day
 from utils.logger import get_app_logger
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
@@ -108,10 +108,11 @@ def _prefetch_common_data(account_id: str, months_range: int, base_common: Mutab
         warmup_days,
     )
 
-    fetch_ohlcv_for_tickers(
-        tickers,
-        country_code,
-        date_range=date_range,
+    prepare_price_data(
+        tickers=tickers,
+        country=country_code,
+        start_date=date_range[0],
+        end_date=date_range[1],
         warmup_days=warmup_days,
     )
 

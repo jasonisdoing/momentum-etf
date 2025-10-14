@@ -30,7 +30,7 @@ from logic.recommend.history import (
 )
 from utils.data_loader import (
     fetch_ohlcv,
-    fetch_ohlcv_for_tickers,
+    prepare_price_data,
     get_latest_trading_day,
     get_next_trading_day,
     count_trading_days,
@@ -612,7 +612,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     prefetched_data: Dict[str, pd.DataFrame] = {}
     months_back = max(12, ma_period)
     warmup_days = int(max(ma_period, 1) * 1.5)
-    start_date = (base_date - pd.DateOffset(months=months_back)).strftime("%Y-%m-%d")
+
+    common_settings = load_common_settings()
+    cache_seed_raw = (common_settings or {}).get("CACHE_START_DATE")
+    prefetch_start_dt = base_date - pd.DateOffset(months=months_back)
+    if cache_seed_raw:
+        try:
+            cache_seed_dt = pd.to_datetime(cache_seed_raw).normalize()
+            if cache_seed_dt > prefetch_start_dt:
+                prefetch_start_dt = cache_seed_dt
+        except Exception:
+            pass
+    start_date = prefetch_start_dt.strftime("%Y-%m-%d")
     end_date = base_date.strftime("%Y-%m-%d")
     logger.info(
         "[%s] 가격 데이터 로딩 시작 (기간 %s~%s, 대상 %d개)",
@@ -622,10 +633,11 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         len(tickers_all),
     )
     fetch_start = time.perf_counter()
-    prefetched_data, missing_prefetch = fetch_ohlcv_for_tickers(
-        tickers_all,
-        country_code,
-        date_range=[start_date, end_date],
+    prefetched_data, missing_prefetch = prepare_price_data(
+        tickers=tickers_all,
+        country=country_code,
+        start_date=start_date,
+        end_date=end_date,
         warmup_days=warmup_days,
     )
     logger.info(
@@ -967,12 +979,12 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         # 추천에 따라 오늘 신규 매수해야 할 종목
         elif state in {"BUY", "BUY_REPLACE"}:
             phrase_str = str(phrase)
-            if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
+            if state == "BUY" and "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
                 phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
+            elif state == "BUY_REPLACE":
+                phrase = _append_risk_off_suffix(phrase, decision.get("risk_off_target_ratio"))
             if holding_days_val == 0:
                 holding_days_val = 1
-            if state == "BUY_REPLACE":
-                phrase = _append_risk_off_suffix(phrase, decision.get("risk_off_target_ratio"))
         # 이미 보유 중인 종목이 오늘 신규 편입된 경우
         elif is_currently_held and bought_today:
             state = "HOLD"
