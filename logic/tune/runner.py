@@ -883,8 +883,6 @@ def _compose_tuning_report(
         "",
     ]
 
-    aggregated_map: Dict[Tuple[int, int, float], Dict[str, float]] = {}
-
     for item in sorted(month_results, key=lambda x: int(x.get("months_range", 0))):
         months_range = item.get("months_range")
         if months_range is None:
@@ -914,91 +912,10 @@ def _compose_tuning_report(
                 }
             )
 
-            try:
-                ma_int = int(ma_val) if ma_val is not None else None
-                topn_int = int(topn_val) if topn_val is not None else None
-                threshold_float = float(threshold_val) if threshold_val is not None else None
-                threshold_norm = float(round(threshold_float, 4)) if threshold_float is not None else None
-                key = (ma_int, topn_int, threshold_norm)
-            except (TypeError, ValueError):
-                key = (None, None, None)
-
-            if None in key:
-                continue
-
-            agg_entry = aggregated_map.setdefault(
-                key,
-                {
-                    "cagr_sum": 0.0,
-                    "cagr_weight": 0.0,
-                    "mdd_sum": 0.0,
-                    "mdd_weight": 0.0,
-                    "period_sum": 0.0,
-                    "period_weight": 0.0,
-                    "samples": 0.0,
-                },
-            )
-
-            weight = _safe_float(item.get("weight"), 0.0)
-            cagr_float = _safe_float(cagr_val, float("nan"))
-            if math.isfinite(cagr_float):
-                agg_entry["cagr_sum"] += cagr_float * weight
-                agg_entry["cagr_weight"] += weight
-
-            mdd_float = _safe_float(mdd_val, float("nan"))
-            if math.isfinite(mdd_float):
-                agg_entry["mdd_sum"] += mdd_float * weight
-                agg_entry["mdd_weight"] += weight
-
-            period_float = _safe_float(period_val, float("nan"))
-            if math.isfinite(period_float):
-                agg_entry["period_sum"] += period_float * weight
-                agg_entry["period_weight"] += weight
-
-            agg_entry["samples"] += 1
-
         normalized_rows.sort(key=lambda row: _safe_float(row.get("cagr"), float("-inf")), reverse=True)
         lines.append(f"=== 최근 {months_range}개월 결과 - 정렬 기준: CAGR ===")
         lines.extend(_render_tuning_table(normalized_rows))
         lines.append("")
-
-    aggregated_rows: List[Dict[str, Any]] = []
-    for (ma_val, topn_val, threshold_val), payload in aggregated_map.items():
-        weight_total = payload["cagr_weight"]
-        if weight_total <= 0:
-            continue
-
-        aggregated_rows.append(
-            {
-                "ma_period": ma_val,
-                "portfolio_topn": topn_val,
-                "replace_threshold": threshold_val,
-                "cagr": payload["cagr_sum"] / weight_total if weight_total > 0 else None,
-                "mdd": payload["mdd_sum"] / payload["mdd_weight"] if payload["mdd_weight"] > 0 else None,
-                "period_return": payload["period_sum"] / payload["period_weight"] if payload["period_weight"] > 0 else None,
-                "samples": payload["samples"],
-            }
-        )
-
-    aggregated_rows.sort(key=lambda row: _safe_float(row.get("cagr"), float("-inf")), reverse=True)
-    lines.append("=== 가중 - 정렬 기준: CAGR ===")
-    if aggregated_rows:
-        lines.extend(_render_tuning_table(aggregated_rows, include_samples=True))
-    else:
-        lines.append("결과가 없습니다.")
-    lines.append("")
-
-    best_result = aggregated_entry.get("result", {})
-    weighted_cagr = aggregated_entry.get("weighted_expected_CAGR")
-    weighted_mdd = aggregated_entry.get("weighted_expected_MDD")
-
-    lines.append(
-        "추천 조합: "
-        f"MA={best_result.get('MA_PERIOD', '-')}, "
-        f"TOPN={best_result.get('PORTFOLIO_TOPN', '-')}, "
-        f"TH={_format_threshold(best_result.get('REPLACE_SCORE_THRESHOLD'))}"
-    )
-    lines.append("가중 기대값: " f"CAGR={_format_table_float(weighted_cagr)}%, " f"MDD={_format_table_float(weighted_mdd)}%")
 
     return lines
 

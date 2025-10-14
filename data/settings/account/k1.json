@@ -7,15 +7,16 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "tuning": {
-            "MA_PERIOD": 18,
-            "PORTFOLIO_TOPN": 10,
-            "REPLACE_SCORE_THRESHOLD": 1.0
+            "MA_PERIOD": 100,
+            "PORTFOLIO_TOPN": 9,
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "static": {
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
-            "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 70
-        }
+            "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 90
+        },
+        "expected_cagr": 111.61
     },
     "benchmarks": [
         {

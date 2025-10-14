@@ -48,7 +48,6 @@ WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 �
 
 SORT_KEYS = [
     ("cagr_pct", "CAGR"),
-    ("sharpe_ratio", "Sharpe"),
 ]
 
 RESULTS_DIR = Path(ROOT_DIR) / "data" / "results"
@@ -285,7 +284,6 @@ def _render_results_table(rows: List[Dict[str, Any]]) -> List[str]:
             f"{_format_float(row.get('cagr_pct')):>8}",
             f"{_format_float(row.get('mdd_pct')):>8}",
             f"{_format_float(row.get('calmar_ratio')):>7}",
-            f"{_format_float(row.get('sharpe_ratio')):>7}",
             f"{_format_float(row.get('cui')):>7}",
             f"{_format_float(row.get('final_value'), digits=0):>12}",
         ]

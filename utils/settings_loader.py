@@ -112,45 +112,56 @@ def _load_tune_settings() -> Dict[str, Any]:
 
 def get_tune_month_configs() -> List[Dict[str, Any]]:
     settings = _load_tune_settings()
-    root = settings.get("COMMON_CONSTANTS")
-    if not isinstance(root, dict):
-        return []
-
-    entries = root.get("MONTHS_CONFIG")
-    if not isinstance(entries, list):
-        return []
-
     normalized: List[Dict[str, Any]] = []
-    for item in entries:
-        if not isinstance(item, dict):
-            continue
 
-        months_raw = item.get("MONTHS_RANGE")
-        weight_raw = item.get("weight", 0)
-        source = item.get("source")
-
+    def _append(months_raw: Any, *, weight: float = 1.0, source: Any = None) -> None:
         try:
             months_range = int(months_raw)
         except (TypeError, ValueError):
-            continue
-
+            return
         if months_range <= 0:
-            continue
-
-        try:
-            weight = float(weight_raw)
-        except (TypeError, ValueError):
-            weight = 0.0
-
+            return
         normalized.append(
             {
                 "months_range": months_range,
-                "weight": weight,
+                "weight": float(weight),
                 "source": source,
             }
         )
 
-    return normalized
+    if isinstance(settings, dict):
+        top_level_months = settings.get("MONTHS_RANGE")
+        if top_level_months is not None:
+            _append(top_level_months, weight=1.0, source="default")
+
+        root = settings.get("COMMON_CONSTANTS")
+        if isinstance(root, dict):
+            entries = root.get("MONTHS_CONFIG")
+            if isinstance(entries, list):
+                for item in entries:
+                    if not isinstance(item, dict):
+                        continue
+                    weight_raw = item.get("weight", 0.0)
+                    try:
+                        weight_val = float(weight_raw)
+                    except (TypeError, ValueError):
+                        weight_val = 0.0
+                    _append(
+                        item.get("MONTHS_RANGE"),
+                        weight=weight_val,
+                        source=item.get("source"),
+                    )
+
+    if not normalized:
+        return []
+
+    seen: Dict[int, Dict[str, Any]] = {}
+    for entry in normalized:
+        months_range = entry["months_range"]
+        if months_range not in seen:
+            seen[months_range] = entry
+
+    return list(seen.values())
 
 
 @lru_cache(maxsize=None)

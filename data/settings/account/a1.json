@@ -15,7 +15,8 @@
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
             "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 100
-        }
+        },
+        "expected_cagr": 55.11
     },
     "benchmarks": [
         {
