@@ -59,7 +59,7 @@
                 "ticker": "463690",
                 "name": "KODEX 미국S&P500커뮤니케이션",
                 "recommend_enabled": true,
-                "listing_date": "2023-08-03",
+                "listing_date": "2023-08-01",
                 "1_week_avg_volume": 2319,
                 "1_week_avg_turnover": 43505593
             },
@@ -347,7 +347,7 @@
                 "ticker": "473640",
                 "name": "HANARO 글로벌 금채굴기업",
                 "recommend_enabled": true,
-                "listing_date": "2024-01-19",
+                "listing_date": "2024-01-18",
                 "1_week_avg_volume": 159724,
                 "1_week_avg_turnover": 4425111675
             },
@@ -468,7 +468,7 @@
                 "ticker": "476690",
                 "name": "TIGER 글로벌비만치료제TOP2Plus",
                 "recommend_enabled": true,
-                "listing_date": "2024-03-04",
+                "listing_date": "2024-02-29",
                 "1_week_avg_volume": 142675,
                 "1_week_avg_turnover": 1322859873
             },
@@ -711,7 +711,7 @@
                 "ticker": "461950",
                 "name": "KODEX 2차전지핵심소재10",
                 "recommend_enabled": true,
-                "listing_date": "2023-07-07",
+                "listing_date": "2023-07-04",
                 "1_week_avg_volume": 934765,
                 "1_week_avg_turnover": 3756622449
             },
@@ -808,7 +808,7 @@
                 "ticker": "414780",
                 "name": "TIGER 차이나과창판STAR50(합성)",
                 "recommend_enabled": true,
-                "listing_date": "2022-03-16",
+                "listing_date": "2022-01-13",
                 "1_week_avg_volume": 941722,
                 "1_week_avg_turnover": 11249638097
             },
@@ -965,7 +965,7 @@
                 "ticker": "352540",
                 "name": "Kodex 일본부동산리츠(H)",
                 "recommend_enabled": true,
-                "listing_date": "2024-06-19",
+                "listing_date": "2020-05-13",
                 "1_week_avg_volume": 70413,
                 "1_week_avg_turnover": 862773712
             },
@@ -1029,7 +1029,7 @@
                 "ticker": "460960",
                 "name": "ACE 글로벌인컴TOP10 SOLACTIVE",
                 "recommend_enabled": true,
-                "listing_date": "2023-07-14",
+                "listing_date": "2023-07-11",
                 "1_week_avg_volume": 53357,
                 "1_week_avg_turnover": 602372847
             },
@@ -1037,7 +1037,7 @@
                 "ticker": "463640",
                 "name": "KODEX 미국S&P500유틸리티",
                 "recommend_enabled": true,
-                "listing_date": "2023-08-03",
+                "listing_date": "2023-08-01",
                 "1_week_avg_volume": 6639,
                 "1_week_avg_turnover": 97944619
             },
@@ -1045,7 +1045,7 @@
                 "ticker": "463680",
                 "name": "KODEX 미국S&P500테크놀로지",
                 "recommend_enabled": true,
-                "listing_date": "2023-08-03",
+                "listing_date": "2023-08-01",
                 "1_week_avg_volume": 46157,
                 "1_week_avg_turnover": 810395814
             },
