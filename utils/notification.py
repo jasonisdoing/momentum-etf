@@ -47,7 +47,7 @@ from dotenv import load_dotenv
 from utils.cron_utils import normalize_cron_weekdays
 
 load_dotenv()
-APP_VERSION = "2025-10-13-21"
+APP_VERSION = "2025-10-14-10"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
 _LAST_ERROR: Optional[str] = None
@@ -575,6 +575,21 @@ def send_recommendation_slack_notification(
                     account_id,
                     image_path_obj.name,
                 )
+            else:
+                try:
+                    image_path_obj.unlink(missing_ok=True)
+                    logger.debug(
+                        "Slack 이미지 업로드 후 임시 파일 삭제 완료 (account=%s, file=%s)",
+                        account_id,
+                        image_path_obj.name,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Slack 이미지 임시 파일 삭제 실패 (account=%s, file=%s)",
+                        account_id,
+                        image_path_obj,
+                        exc_info=True,
+                    )
         else:
             logger.warning(
                 "Slack 이미지 파일을 찾을 수 없습니다 (account=%s, path=%s)",
