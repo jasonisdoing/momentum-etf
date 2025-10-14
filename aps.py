@@ -84,13 +84,6 @@ def setup_logging():
     )
 
 
-def _bool_env(name: str, default: bool = True) -> bool:
-    v = os.environ.get(name)
-    if v is None:
-        return default
-    return str(v).strip() not in ("0", "false", "False", "no", "NO")
-
-
 def _get(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
@@ -118,12 +111,8 @@ def run_recommendation_generation(
     *,
     country_code: str,
     schedule_timezone: str | None = None,
-    allowing_empty: bool = False,
-    allow_slack: bool = True,
 ) -> RecommendationReport:
     """Run portfolio recommendation and optionally notify Slack."""
-
-    allow_slack = bool(allow_slack and _bool_env("ENABLE_SLACK", default=True))
 
     start_ts = time.time()
     logging.info("[APS] 추천 생성 시작: account=%s country=%s", account_id.upper(), country_code.upper())
@@ -150,17 +139,16 @@ def run_recommendation_generation(
     except Exception:
         logging.error("추천 보고서를 저장하는 중 오류", exc_info=True)
 
-    if allow_slack:
-        try:
-            if should_notify_on_schedule(account_id, country_code, schedule_timezone):
-                message = compose_recommendation_slack_message(report)
-                send_recommendation_slack_notification(
-                    account_id,
-                    message,
-                    report=report,
-                )
-        except Exception:
-            logging.error("Slack 알림 전송 실패", exc_info=True)
+    try:
+        if should_notify_on_schedule(account_id, country_code, schedule_timezone):
+            message = compose_recommendation_slack_message(report)
+            send_recommendation_slack_notification(
+                account_id,
+                message,
+                report=report,
+            )
+    except Exception:
+        logging.error("Slack 알림 전송 실패", exc_info=True)
 
     return report
 
@@ -231,8 +219,11 @@ def main():
         scheduler.add_job(
             run_recommendation_generation,
             CronTrigger.from_crontab(cron_expr, timezone=timezone),
-            args=[account_id, country_code],
-            kwargs={"schedule_timezone": timezone},
+            kwargs={
+                "account_id": account_id,
+                "country_code": country_code,
+                "schedule_timezone": timezone,
+            },
             id=f"{account_id}:{country_code}",
         )
 
