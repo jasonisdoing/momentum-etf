@@ -70,9 +70,30 @@ def render_account_page(account_id: str) -> None:
             }
             param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
         else:
-            param_strs = "N/A"
+            param_strs = []
 
-        st.caption(f"설정: {param_strs}")
+        caption_parts: list[str] = []
+        if param_strs:
+            param_display = ", ".join(param_strs)
+            caption_parts.append(f"설정: [{param_display}]")
+        else:
+            caption_parts.append("설정: N/A")
+
+        try:
+            hold_states = {"HOLD", "SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS"}
+            buy_states = {"BUY", "BUY_REPLACE"}
+            sell_states = {"SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS"}
+            current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
+            exits = int(df[df["상태"].isin(sell_states)].shape[0])
+            buys = int(df[df["상태"].isin(buy_states)].shape[0])
+            future_holdings = current_holdings - exits + buys
+            target_topn = strategy_tuning.get("PORTFOLIO_TOPN") if isinstance(strategy_tuning, dict) else None
+            if target_topn:
+                caption_parts.append(f"보유종목 수 {future_holdings}/{target_topn}")
+        except Exception:
+            pass
+
+        st.caption(", ".join(caption_parts))
     else:
         # updated_at이 없는 경우에 대한 폴백
         st.caption("데이터를 찾을 수 없습니다.")
