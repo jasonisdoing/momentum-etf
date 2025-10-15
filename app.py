@@ -146,10 +146,14 @@ def _render_home_page() -> None:
                         break
 
                 if price_col is not None:
-                    latest_raw_date = df_debug.index[-1]
-                    latest_raw_close = float(df_debug.iloc[-1][price_col])
-                    ma_raw = df_debug[price_col].rolling(window=ma_period_debug).mean().iloc[-1]
-                    debug_lines.append(f"Raw latest: {latest_raw_date} | Close={latest_raw_close:,.4f} | MA={ma_raw:,.4f}")
+                    raw_close_series = df_debug.loc[:, price_col]
+                    raw_ma_series = raw_close_series.rolling(window=ma_period_debug).mean()
+
+                    latest_raw_date = raw_close_series.index[-1]
+                    latest_raw_close = float(raw_close_series.iloc[-1])
+                    ma_raw = float(raw_ma_series.iloc[-1])
+
+                    debug_lines.append("Raw latest (yfinance): " f"{latest_raw_date} | Close={latest_raw_close:,.4f} | MA={ma_raw:,.4f}")
 
                     try:
                         row_raw_full = df_debug.loc[latest_raw_date]
@@ -157,23 +161,13 @@ def _render_home_page() -> None:
                     except Exception:
                         pass
 
-                    if delay_days > 0 and len(df_debug) > delay_days:
-                        df_delayed = df_debug.iloc[:-delay_days]
-                    else:
-                        df_delayed = df_debug
+                    # Placeholder for future filtered data
+                    debug_lines.append("Filtered latest: (미적용 - 향후 계산 값)")
 
-                    latest_delay_date = df_delayed.index[-1]
-                    latest_delay_close = float(df_delayed.iloc[-1][price_col])
-                    ma_delay = df_delayed[price_col].rolling(window=ma_period_debug).mean().iloc[-1]
-                    divergence_delay = ((latest_delay_close / ma_delay) - 1) * 100 if ma_delay else float("nan")
-                    debug_lines.append(
-                        f"Delayed latest: {latest_delay_date} | Close={latest_delay_close:,.4f} | MA={ma_delay:,.4f} | Divergence={divergence_delay:+.3f}%"
-                    )
-
-                    raw_tail = df_debug.loc[:, price_col].tail(5).to_string()
-                    delay_tail = df_delayed.loc[:, price_col].tail(5).to_string()
+                    raw_tail = raw_close_series.tail(5).to_string()
                     debug_lines.append("Raw tail (Close):\n" + raw_tail)
-                    debug_lines.append("Delayed tail (Close):\n" + delay_tail)
+
+                    debug_lines.append("Filtered tail (미적용)")
                 else:
                     debug_lines.append("가격 컬럼을 찾을 수 없습니다.")
             else:
