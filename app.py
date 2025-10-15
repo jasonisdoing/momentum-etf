@@ -119,9 +119,9 @@ def _render_home_page() -> None:
                     "지수": index_label,
                     "건강도": str(payload.get("status_label", "-")),
                     "위치": f"기준 {basis_period}일선 {abs(proximity_pct):.1f}% {direction}",
-                    "마지막 거래중단 기간": risk_text,
-                    "이전 거래중단 기간 1": prev_text,
-                    "이전 거래중단 기간 2": prev2_text,
+                    "마지막 시장위험 기간": risk_text,
+                    "이전 시장위험 기간 1": prev_text,
+                    "이전 시장위험 기간 2": prev2_text,
                     "_status_color": "red" if payload.get("status") == "warning" else "green",
                     "_position_color": "red" if proximity_pct < 0 else "green",
                 }

@@ -1079,13 +1079,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     wait_items.sort(key=lambda x: x["score"], reverse=True)
 
     # 카테고리 보유 제한이 있는 경우, 동일 카테고리 수를 체크
-    category_counts = {}
-    if max_per_category and max_per_category > 0:
-        for item in results:
-            if item["state"] in {"HOLD", "BUY", "BUY_REPLACE"}:
-                category = str(item.get("category") or "").strip()
-                if category:
-                    category_counts[category] = category_counts.get(category, 0) + 1
+    category_counts: Dict[str, int] = {}
+    category_counts_normalized: Dict[str, int] = {}
+    category_limit = max_per_category if max_per_category and max_per_category > 0 else 1
+    for item in results:
+        if item["state"] in {"HOLD", "BUY", "BUY_REPLACE"}:
+            category_raw = item.get("category")
+            category = str(category_raw or "").strip()
+            if category:
+                category_counts[category] = category_counts.get(category, 0) + 1
+            category_key = _normalize_category_value(category_raw)
+            if category_key:
+                category_counts_normalized[category_key] = category_counts_normalized.get(category_key, 0) + 1
 
     current_holdings_count = len(holdings)
     sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS"}
@@ -1096,9 +1101,28 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
     additional_buy_slots = max(0, portfolio_topn - projected_holdings)
 
-    for i, item in enumerate(wait_items[:additional_buy_slots]):
+    promoted = 0
+    for item in wait_items:
+        if promoted >= additional_buy_slots:
+            break
+
+        category_raw = item.get("category")
+        category = str(category_raw or "").strip()
+        category_key = _normalize_category_value(category_raw)
+
+        if category_key and category_counts_normalized.get(category_key, 0) >= category_limit:
+            item["phrase"] = DECISION_NOTES["CATEGORY_DUP"]
+            continue
+
         item["state"] = "BUY"
         item["phrase"] = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
+        promoted += 1
+
+        if category:
+            category_counts[category] = category_counts.get(category, 0) + 1
+        if category_key:
+            category_counts_normalized[category_key] = category_counts_normalized.get(category_key, 0) + 1
+
         # 신규 매수로 전환된 종목은 holdings 정보가 없으므로 기본값 추가
         holdings.setdefault(
             item["ticker"],
@@ -1207,3 +1231,13 @@ __all__ = [
     "generate_account_recommendation_report",
     "generate_country_recommendation_report",
 ]
+
+
+def _normalize_category_value(category: Optional[str]) -> Optional[str]:
+    """Normalize category strings for comparison."""
+    if category is None:
+        return None
+    category_str = str(category).strip()
+    if not category_str:
+        return None
+    return category_str.upper()
