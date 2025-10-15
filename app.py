@@ -12,6 +12,7 @@ from app_pages.account_page import render_account_page
 from logic.recommend.market import (
     get_market_regime_status_info,
     get_market_regime_aux_status_infos,
+    _overlay_recent_history,
 )
 from utils.settings_loader import get_market_regime_settings, load_common_settings
 from utils.data_loader import fetch_ohlcv
@@ -118,7 +119,9 @@ def _render_home_page() -> None:
             country = regime_info.get("country") or "us"
 
             try:
-                df_debug = fetch_ohlcv(ticker, country=country, months_range=[12, 0], cache_country="common")
+                df_debug = fetch_ohlcv(ticker, country=country, months_range=[12, 0], cache_country="regime")
+                if df_debug is None or df_debug.empty:
+                    df_debug = fetch_ohlcv(ticker, country=country, months_range=[12, 0], cache_country="common")
             except Exception as exc:  # pragma: no cover - 진단용 출력
                 debug_lines.append(f"fetch_ohlcv 오류: {exc}")
                 df_debug = None
@@ -130,6 +133,7 @@ def _render_home_page() -> None:
                 except Exception:
                     pass
                 df_debug = df_debug[~df_debug.index.duplicated(keep="last")]
+                df_debug = _overlay_recent_history(df_debug, ticker)
 
                 column_lookup: Dict[str, Any] = {}
                 if isinstance(df_debug.columns, pd.MultiIndex):
@@ -146,7 +150,7 @@ def _render_home_page() -> None:
                         break
 
                 if price_col is not None:
-                    raw_close_series = df_debug.loc[:, price_col]
+                    raw_close_series = df_debug.loc[:, price_col].astype(float)
                     raw_ma_series = raw_close_series.rolling(window=ma_period_debug).mean()
 
                     latest_raw_date = raw_close_series.index[-1]
@@ -161,24 +165,59 @@ def _render_home_page() -> None:
                     except Exception:
                         pass
 
-                    # Placeholder for future filtered data
-                    debug_lines.append("Filtered latest: (미적용 - 향후 계산 값)")
+                    country_lower = (country or "").strip().lower()
+                    tz_map = {
+                        "us": "America/New_York",
+                        "usa": "America/New_York",
+                        "kor": "Asia/Seoul",
+                        "korea": "Asia/Seoul",
+                        "kr": "Asia/Seoul",
+                        "aus": "Australia/Sydney",
+                        "au": "Australia/Sydney",
+                    }
+                    tz_name = tz_map.get(country_lower, "UTC")
+                    cutoff = pd.Timestamp.now(tz=tz_name).normalize() - pd.Timedelta(days=int(delay_days))
+                    try:
+                        cutoff = cutoff.tz_localize(None)
+                    except AttributeError:
+                        pass
+
+                    filtered_close_series = raw_close_series[raw_close_series.index <= cutoff]
+
+                    if not filtered_close_series.empty:
+                        filtered_ma_series = filtered_close_series.rolling(window=ma_period_debug).mean()
+                        latest_filtered_date = filtered_close_series.index[-1]
+                        latest_filtered_close = float(filtered_close_series.iloc[-1])
+                        latest_filtered_ma = float(filtered_ma_series.iloc[-1]) if not pd.isna(filtered_ma_series.iloc[-1]) else float("nan")
+                        divergence_filtered = ((latest_filtered_close / latest_filtered_ma) - 1) * 100 if latest_filtered_ma else float("nan")
+
+                        debug_lines.append(
+                            "Filtered latest (used in regime): "
+                            f"{latest_filtered_date} | Close={latest_filtered_close:,.4f} | "
+                            f"MA={latest_filtered_ma:,.4f} | Divergence={divergence_filtered:+.3f}%"
+                        )
+
+                        debug_lines.append("Filtered tail (Close):\n" + filtered_close_series.tail(5).to_string())
+                    else:
+                        debug_lines.append("Filtered latest (used in regime): 데이터 없음")
 
                     raw_tail = raw_close_series.tail(5).to_string()
                     debug_lines.append("Raw tail (Close):\n" + raw_tail)
-
-                    debug_lines.append("Filtered tail (미적용)")
                 else:
                     debug_lines.append("가격 컬럼을 찾을 수 없습니다.")
             else:
                 debug_lines.append("가격 데이터를 가져오지 못했습니다.")
 
-            cache_path = get_cache_path("common", ticker)
-            if cache_path.exists():
-                mtime = datetime.fromtimestamp(cache_path.stat().st_mtime)
-                debug_lines.append(f"Cache file: {cache_path} (mtime={mtime})")
-            else:
-                debug_lines.append("Cache file not found.")
+            cache_paths = [
+                ("regime", get_cache_path("regime", ticker)),
+                ("common", get_cache_path("common", ticker)),
+            ]
+            for label, cache_path in cache_paths:
+                if cache_path.exists():
+                    mtime = datetime.fromtimestamp(cache_path.stat().st_mtime)
+                    debug_lines.append(f"Cache file[{label}]: {cache_path} (mtime={mtime})")
+                else:
+                    debug_lines.append(f"Cache file[{label}]: not found")
 
             if yf is not None:
                 try:

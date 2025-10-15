@@ -13,6 +13,7 @@ except Exception:  # pragma: no cover
     yf = None
 
 from utils.data_loader import fetch_ohlcv
+from utils.cache_utils import save_cached_frame
 from utils.account_registry import (
     load_account_configs,
     pick_default_account,
@@ -86,6 +87,41 @@ def _prepare_regime_cache(ticker: str, country: str) -> None:
     _PREPARED_TICKERS.add(key)
 
 
+def _overlay_recent_history(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    if df is None or df.empty or yf is None:
+        return df
+
+    try:
+        recent = yf.Ticker(ticker).history(period="7d", interval="1d")
+    except Exception as exc:  # pragma: no cover - 진단용
+        logger.debug("yfinance history fetch 실패(%s): %s", ticker, exc)
+        return df
+
+    if recent is None or recent.empty:
+        return df
+
+    if isinstance(recent.columns, pd.MultiIndex):
+        recent.columns = recent.columns.get_level_values(0)
+        recent = recent.loc[:, ~recent.columns.duplicated()]
+
+    if recent.index.tz is not None:
+        recent.index = recent.index.tz_localize(None)
+
+    recent = recent.rename(columns={"Adj Close": "Adj Close"})
+
+    df_updated = df.copy()
+    for column in recent.columns:
+        if column not in df_updated.columns:
+            df_updated[column] = pd.NA
+
+    for date, row in recent.iterrows():
+        df_updated.loc[date, row.index] = row.values
+
+    df_updated.sort_index(inplace=True)
+    df_updated = df_updated[~df_updated.index.duplicated(keep="last")]
+    return df_updated
+
+
 def _ensure_accounts_available() -> None:
     account_configs = load_account_configs()
     if not account_configs:
@@ -110,8 +146,17 @@ def _compute_market_regime_status(
         ticker,
         country=country,
         months_range=[required_months, 0],
-        cache_country="common",
+        cache_country="regime",
+        force_refresh=True,
     )
+
+    if df_regime is None or df_regime.empty:
+        df_regime = fetch_ohlcv(
+            ticker,
+            country=country,
+            months_range=[required_months, 0],
+            cache_country="common",
+        )
 
     if df_regime is not None and not df_regime.empty:
         try:
@@ -125,6 +170,15 @@ def _compute_market_regime_status(
             ticker,
             country=country,
             months_range=[required_months * 2, 0],
+            cache_country="regime",
+            force_refresh=True,
+        )
+
+    if df_regime is None or df_regime.empty:
+        df_regime = fetch_ohlcv(
+            ticker,
+            country=country,
+            months_range=[required_months * 2, 0],
             cache_country="common",
         )
 
@@ -132,11 +186,34 @@ def _compute_market_regime_status(
         return None, '<span style="color:grey">시장 상태: 데이터 부족</span>'
 
     df_regime = df_regime.sort_index()
+    df_regime = _overlay_recent_history(df_regime, ticker)
+    try:
+        save_cached_frame("regime", ticker, df_regime)
+    except Exception:
+        pass
 
     if delay_days and delay_days > 0:
-        if len(df_regime) <= delay_days:
-            return None, '<span style="color:grey">시장 상태: 데이터 부족</span>'
-        df_regime = df_regime.iloc[:-delay_days]
+        country_lower = (country or "").strip().lower()
+        tz_map = {
+            "us": "America/New_York",
+            "usa": "America/New_York",
+            "kor": "Asia/Seoul",
+            "korea": "Asia/Seoul",
+            "kr": "Asia/Seoul",
+            "aus": "Australia/Sydney",
+            "au": "Australia/Sydney",
+        }
+        tz_name = tz_map.get(country_lower, "UTC")
+        cutoff = pd.Timestamp.now(tz=tz_name).normalize() - pd.Timedelta(days=int(delay_days))
+        try:
+            cutoff = cutoff.tz_localize(None)
+        except AttributeError:
+            pass
+
+        df_filtered = df_regime[df_regime.index <= cutoff]
+        if df_filtered is not None and not df_filtered.empty:
+            df_regime = df_filtered
+
         if df_regime is None or df_regime.empty or len(df_regime) < ma_period:
             return None, '<span style="color:grey">시장 상태: 데이터 부족</span>'
 

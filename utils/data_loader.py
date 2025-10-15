@@ -512,6 +512,7 @@ def fetch_ohlcv(
     base_date: Optional[pd.Timestamp] = None,
     *,
     cache_country: Optional[str] = None,
+    force_refresh: bool = False,
 ) -> Optional[pd.DataFrame]:
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
 
@@ -556,6 +557,7 @@ def fetch_ohlcv(
         start_dt.normalize(),
         end_dt.normalize(),
         cache_country_override=cache_country,
+        force_refresh=force_refresh,
     )
 
     if df is None or df.empty:
@@ -572,6 +574,7 @@ def _fetch_ohlcv_with_cache(
     end_dt: pd.Timestamp,
     *,
     cache_country_override: Optional[str] = None,
+    force_refresh: bool = False,
 ) -> Optional[pd.DataFrame]:
     country_code = (country or "").strip().lower()
     cache_country_code = (cache_country_override or country_code).strip().lower() or country_code
@@ -590,25 +593,32 @@ def _fetch_ohlcv_with_cache(
 
     cache_country_display = cache_country_code.upper()
 
-    cached_df = load_cached_frame(cache_country_code, ticker)
-    cache_seed_dt = _get_cache_start_dt()
-    if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
-        if request_start_dt > cache_seed_dt:
-            request_start_dt = cache_seed_dt
     missing_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
     cache_start: Optional[pd.Timestamp] = None
     cache_end: Optional[pd.Timestamp] = None
-    if cached_df is None or cached_df.empty:
+    cache_seed_dt = None
+
+    if force_refresh:
         cached_df = None
         missing_ranges.append((request_start_dt, end_dt))
     else:
-        cache_start = cached_df.index.min().normalize()
-        cache_end = cached_df.index.max().normalize()
+        cached_df = load_cached_frame(cache_country_code, ticker)
+        cache_seed_dt = _get_cache_start_dt()
+        if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
+            if request_start_dt > cache_seed_dt:
+                request_start_dt = cache_seed_dt
 
-        if request_start_dt < cache_start:
-            missing_ranges.append((request_start_dt, cache_start - pd.Timedelta(days=1)))
-        if end_dt > cache_end:
-            missing_ranges.append((cache_end + pd.Timedelta(days=1), end_dt))
+        if cached_df is None or cached_df.empty:
+            cached_df = None
+            missing_ranges.append((request_start_dt, end_dt))
+        else:
+            cache_start = cached_df.index.min().normalize()
+            cache_end = cached_df.index.max().normalize()
+
+            if request_start_dt < cache_start:
+                missing_ranges.append((request_start_dt, cache_start - pd.Timedelta(days=1)))
+            if end_dt > cache_end:
+                missing_ranges.append((cache_end + pd.Timedelta(days=1), end_dt))
 
     new_frames: List[pd.DataFrame] = []
     unfilled_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
