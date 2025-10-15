@@ -3,8 +3,10 @@
 """
 
 import json
+import os
 import time
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import yfinance as yf
@@ -14,6 +16,25 @@ from utils.logger import get_app_logger
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STOCKS_DIR = PROJECT_ROOT / "data" / "stocks"
+CACHE_START_DATE_FALLBACK = "2020-01-01"
+
+
+def _get_cache_start_date() -> Optional[pd.Timestamp]:
+    """환경 변수에서 캐시 시작일을 불러오거나 기본값을 반환합니다."""
+    raw = os.environ.get("CACHE_START_DATE", CACHE_START_DATE_FALLBACK)
+    if not raw:
+        return None
+    try:
+        ts = pd.to_datetime(raw).normalize()
+    except Exception:
+        return None
+    if isinstance(ts, pd.DatetimeIndex):
+        ts = ts[0]
+    if isinstance(ts, pd.Timestamp):
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        return ts.normalize()
+    return None
 
 
 def _update_metadata_for_country(country_code: str):
@@ -32,6 +53,7 @@ def _update_metadata_for_country(country_code: str):
         logger.error(f"'{stock_file}' 파일 로딩 실패: {e}")
         return
 
+    cache_start_ts = _get_cache_start_date()
     updated_count = 0
     for category in stock_data:
         for stock in category.get("tickers", []):
@@ -66,8 +88,23 @@ def _update_metadata_for_country(country_code: str):
                     data = data[~data.index.duplicated(keep="last")]
 
                 # 1. 상장일 업데이트
-                first_trading_day = data.index.min().strftime("%Y-%m-%d")
-                stock["listing_date"] = first_trading_day
+                first_trading_ts = pd.Timestamp(data.index.min()).normalize()
+                listing_target_ts = first_trading_ts
+
+                existing_listing_raw = stock.get("listing_date")
+                existing_listing_ts: Optional[pd.Timestamp] = None
+                if existing_listing_raw:
+                    try:
+                        existing_listing_ts = pd.to_datetime(existing_listing_raw).normalize()
+                    except Exception:
+                        existing_listing_ts = None
+
+                if existing_listing_ts is not None and existing_listing_ts < listing_target_ts:
+                    listing_target_ts = existing_listing_ts
+
+                if cache_start_ts is not None and listing_target_ts < cache_start_ts:
+                    listing_target_ts = cache_start_ts
+                stock["listing_date"] = listing_target_ts.strftime("%Y-%m-%d")
 
                 # 2. 주간 평균 거래량/거래대금 업데이트
                 if len(data) >= 7:
@@ -83,7 +120,7 @@ def _update_metadata_for_country(country_code: str):
                 else:
                     stock["1_week_avg_volume"] = None
                     stock["1_week_avg_turnover"] = None
-
+                logger.info(f"[{country_code.upper()}/{ticker}] 메타데이터 획득")
                 updated_count += 1
                 time.sleep(0.2)  # API 호출 속도 조절
 

@@ -90,7 +90,7 @@ def render_account_delete_page() -> None:
             "계정 ID를 다시 입력해 삭제를 확인하세요",
             placeholder="계정 ID를 입력하세요",
         )
-        submitted = st.form_submit_button("계정 삭제", use_container_width=True)
+        submitted = st.form_submit_button("계정 삭제", width="stretch")
 
     if not submitted:
         return

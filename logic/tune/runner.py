@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import math
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from os import cpu_count
 from pathlib import Path
 from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple, Set
 
-import optuna
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
@@ -20,22 +20,23 @@ from utils.account_registry import get_strategy_rules
 from utils.settings_loader import (
     AccountSettingsError,
     get_account_settings,
-    get_account_strategy,
-    get_account_strategy_sections,
     get_backtest_months_range,
+    load_common_settings,
     get_tune_month_configs,
+    get_market_regime_settings,
 )
 from utils.logger import get_app_logger
 from utils.data_loader import (
-    fetch_ohlcv_for_tickers,
+    prepare_price_data,
     get_latest_trading_day,
     fetch_ohlcv,
 )
 from utils.stock_list_io import get_etfs
+from utils.cache_utils import save_cached_frame
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
-
-optuna.logging.set_verbosity(optuna.logging.WARNING)
+WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
+MAX_TABLE_ROWS = 20
 
 
 def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:
@@ -144,32 +145,342 @@ def _round_up_float_places(value: Any, digits: int) -> float:
     return float(math.ceil(num * factor) / factor)
 
 
+def _format_table_float(value: Any, *, digits: int = 2) -> str:
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if not math.isfinite(num):
+        return "-"
+    fmt = f"{{:.{digits}f}}"
+    return fmt.format(num)
+
+
+def _format_threshold(value: Any) -> str:
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if not math.isfinite(num):
+        return "-"
+    if abs(num - round(num)) < 1e-9:
+        return f"{int(round(num))}"
+    return f"{num:.1f}"
+
+
+def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = False) -> List[str]:
+    headers = ["MA", "TopN", "Threshold", "CAGR(%)", "MDD(%)", "Period(%)"]
+    if include_samples:
+        headers.append("Samples")
+
+    header_line = " | ".join(headers)
+    lines = [header_line, "-" * len(header_line)]
+    for row in rows[:MAX_TABLE_ROWS]:
+        ma_val = row.get("ma_period")
+        topn_val = row.get("portfolio_topn")
+        threshold_val = row.get("replace_threshold")
+        line_parts = [
+            f"{int(ma_val):>3}" if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
+            f"{int(topn_val):>4}" if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
+            f"{_format_threshold(threshold_val):>9}",
+            f"{_format_table_float(row.get('cagr')):>8}",
+            f"{_format_table_float(row.get('mdd')):>8}",
+            f"{_format_table_float(row.get('period_return')):>8}",
+        ]
+        if include_samples:
+            samples_val = row.get("samples")
+            if isinstance(samples_val, (int, float)) and math.isfinite(float(samples_val)):
+                line_parts.append(f"{int(samples_val):>7}")
+            else:
+                line_parts.append("   -")
+        lines.append(" | ".join(line_parts))
+    if len(rows) > MAX_TABLE_ROWS:
+        lines.append(f"... (총 {len(rows)}개 중 상위 {MAX_TABLE_ROWS}개 표시)")
+    return lines
+
+
+def _save_dataframe_csv(df: DataFrame, path: Path) -> None:
+    df_copy = df.copy()
+    df_copy.index = df_copy.index.astype(str)
+    df_copy.to_csv(path)
+
+
+def _export_prefetched_data(debug_dir: Path, prefetched_data: Mapping[str, DataFrame]) -> None:
+    prefetch_dir = debug_dir / "prefetched_data"
+    prefetch_dir.mkdir(parents=True, exist_ok=True)
+    for ticker, frame in prefetched_data.items():
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            continue
+        _save_dataframe_csv(frame, prefetch_dir / f"{ticker}.csv")
+
+
+def _extract_summary(result) -> Dict[str, Any]:
+    summary = result.summary or {}
+    return {
+        "cagr": float(summary.get("cagr_pct") or 0.0),
+        "mdd": float(summary.get("mdd_pct") or 0.0),
+        "calmar": float(summary.get("calmar_ratio") or 0.0),
+        "sharpe": float(summary.get("sharpe_ratio") or 0.0),
+        "period_return": float(summary.get("cumulative_return_pct") or 0.0),
+        "start_date": result.start_date.strftime("%Y-%m-%d"),
+        "end_date": result.end_date.strftime("%Y-%m-%d"),
+        "excluded": list(result.missing_tickers),
+    }
+
+
+def _export_combo_debug(
+    combo_dir: Path,
+    *,
+    recorded_metrics: Dict[str, Any],
+    result_prefetch,
+    result_live,
+) -> Dict[str, Any]:
+    combo_dir.mkdir(parents=True, exist_ok=True)
+
+    combo_dir.joinpath("recorded_metrics.json").write_text(json.dumps(recorded_metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    metrics_prefetch = _extract_summary(result_prefetch)
+    metrics_live = _extract_summary(result_live)
+
+    combo_dir.joinpath("metrics_prefetch.json").write_text(json.dumps(metrics_prefetch, ensure_ascii=False, indent=2), encoding="utf-8")
+    combo_dir.joinpath("metrics_live.json").write_text(json.dumps(metrics_live, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    diff_payload = {
+        "delta_cagr": metrics_live["cagr"] - recorded_metrics.get("cagr", 0.0) if recorded_metrics.get("cagr") is not None else None,
+        "delta_mdd": metrics_live["mdd"] - recorded_metrics.get("mdd", 0.0) if recorded_metrics.get("mdd") is not None else None,
+        "delta_period_return": (
+            metrics_live["period_return"] - recorded_metrics.get("period_return", 0.0) if recorded_metrics.get("period_return") is not None else None
+        ),
+    }
+    combo_dir.joinpath("metrics_diff.json").write_text(json.dumps(diff_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    _save_dataframe_csv(result_prefetch.portfolio_timeseries, combo_dir / "portfolio_prefetch.csv")
+    _save_dataframe_csv(result_live.portfolio_timeseries, combo_dir / "portfolio_live.csv")
+
+    prefetch_ticker_dir = combo_dir / "ticker_prefetch"
+    live_ticker_dir = combo_dir / "ticker_live"
+    prefetch_ticker_dir.mkdir(exist_ok=True)
+    live_ticker_dir.mkdir(exist_ok=True)
+
+    for ticker, frame in result_prefetch.ticker_timeseries.items():
+        if isinstance(frame, pd.DataFrame) and not frame.empty:
+            _save_dataframe_csv(frame, prefetch_ticker_dir / f"{ticker}.csv")
+
+    for ticker, frame in result_live.ticker_timeseries.items():
+        if isinstance(frame, pd.DataFrame) and not frame.empty:
+            _save_dataframe_csv(frame, live_ticker_dir / f"{ticker}.csv")
+
+    combo_dir.joinpath("ticker_meta_prefetch.json").write_text(
+        json.dumps(result_prefetch.ticker_meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    combo_dir.joinpath("ticker_meta_live.json").write_text(json.dumps(result_live.ticker_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {
+        "metrics_prefetch": metrics_prefetch,
+        "metrics_live": metrics_live,
+        "diff": diff_payload,
+    }
+
+
+def _export_debug_month(
+    debug_dir: Path,
+    *,
+    account_id: str,
+    months_range: int,
+    raw_rows: List[Dict[str, Any]],
+    prefetched_data: Mapping[str, DataFrame],
+    capture_top_n: int,
+) -> List[Dict[str, Any]]:
+    if capture_top_n <= 0 or not raw_rows:
+        return []
+
+    try:
+        capture_top_n = int(capture_top_n)
+    except (TypeError, ValueError):
+        capture_top_n = 1
+    capture_top_n = max(1, capture_top_n)
+
+    sorted_rows = sorted(
+        raw_rows,
+        key=lambda row: float(row.get("CAGR") or float("-inf")),
+        reverse=True,
+    )
+
+    summary_rows: List[Dict[str, Any]] = []
+    month_dir = debug_dir / f"months_{months_range:02d}"
+
+    for idx, row in enumerate(sorted_rows[:capture_top_n], 1):
+        tuning = row.get("tuning") or {}
+        try:
+            ma = int(tuning.get("MA_PERIOD"))
+            topn = int(tuning.get("PORTFOLIO_TOPN"))
+            threshold = float(tuning.get("REPLACE_SCORE_THRESHOLD"))
+        except (TypeError, ValueError):
+            continue
+
+        recorded_metrics = {
+            "cagr": float(row.get("CAGR")) if row.get("CAGR") is not None else None,
+            "mdd": float(row.get("MDD")) if row.get("MDD") is not None else None,
+            "period_return": float(row.get("period_return")) if row.get("period_return") is not None else None,
+        }
+
+        strategy_rules = StrategyRules.from_values(
+            ma_period=ma,
+            portfolio_topn=topn,
+            replace_threshold=threshold,
+        )
+
+        result_prefetch = run_account_backtest(
+            account_id,
+            months_range=months_range,
+            quiet=True,
+            prefetched_data=prefetched_data,
+            strategy_override=strategy_rules,
+        )
+
+        result_live = run_account_backtest(
+            account_id,
+            months_range=months_range,
+            quiet=True,
+            strategy_override=strategy_rules,
+        )
+
+        combo_dir = month_dir / f"combo_{idx:02d}_MA{ma}_TOPN{topn}_TH{threshold:.3f}"
+        combo_metrics = _export_combo_debug(
+            combo_dir,
+            recorded_metrics=recorded_metrics,
+            result_prefetch=result_prefetch,
+            result_live=result_live,
+        )
+
+        metrics_prefetch = combo_metrics["metrics_prefetch"]
+        metrics_live = combo_metrics["metrics_live"]
+
+        summary_rows.append(
+            {
+                "months_range": months_range,
+                "ma_period": ma,
+                "topn": topn,
+                "threshold": threshold,
+                "recorded_cagr": recorded_metrics["cagr"],
+                "prefetch_cagr": metrics_prefetch["cagr"],
+                "live_cagr": metrics_live["cagr"],
+                "prefetch_minus_recorded": (metrics_prefetch["cagr"] - recorded_metrics["cagr"]) if recorded_metrics["cagr"] is not None else None,
+                "live_minus_recorded": (metrics_live["cagr"] - recorded_metrics["cagr"]) if recorded_metrics["cagr"] is not None else None,
+                "recorded_mdd": recorded_metrics["mdd"],
+                "prefetch_mdd": metrics_prefetch["mdd"],
+                "live_mdd": metrics_live["mdd"],
+                "recorded_period_return": recorded_metrics["period_return"],
+                "prefetch_period_return": metrics_prefetch["period_return"],
+                "live_period_return": metrics_live["period_return"],
+                "current_start_date": metrics_live["start_date"],
+                "current_end_date": metrics_live["end_date"],
+                "current_excluded_count": len(metrics_live["excluded"]),
+                "artifact_path": str(combo_dir.relative_to(debug_dir)),
+            }
+        )
+
+    return summary_rows
+
+
+def _evaluate_single_combo(
+    payload: Tuple[str, int, Tuple[str, str], int, int, int, float, Tuple[str, ...], Mapping[str, DataFrame]]
+) -> Tuple[str, Any, List[str]]:
+    (
+        account_norm,
+        months_range,
+        date_range,
+        regime_ma_period,
+        ma_int,
+        topn_int,
+        threshold_float,
+        excluded_tickers,
+        prefetched_data,
+    ) = payload
+
+    try:
+        override_rules = StrategyRules.from_values(
+            ma_period=int(ma_int),
+            portfolio_topn=int(topn_int),
+            replace_threshold=float(threshold_float),
+        )
+    except ValueError as exc:
+        return (
+            "failure",
+            {
+                "ma_period": ma_int,
+                "portfolio_topn": topn_int,
+                "replace_threshold": threshold_float,
+                "error": str(exc),
+            },
+            [],
+        )
+
+    strategy_overrides: Dict[str, Any] = {}
+    if regime_ma_period > 0:
+        strategy_overrides["MARKET_REGIME_FILTER_MA_PERIOD"] = regime_ma_period
+
+    try:
+        bt_result = run_account_backtest(
+            account_norm,
+            months_range=months_range,
+            quiet=True,
+            override_settings={
+                "start_date": date_range[0],
+                "end_date": date_range[1],
+                "strategy_overrides": strategy_overrides,
+            },
+            prefetched_data=prefetched_data,
+            strategy_override=override_rules,
+            excluded_tickers=set(excluded_tickers) if excluded_tickers else None,
+        )
+    except Exception as exc:
+        return (
+            "failure",
+            {
+                "ma_period": ma_int,
+                "portfolio_topn": topn_int,
+                "replace_threshold": threshold_float,
+                "error": str(exc),
+            },
+            [],
+        )
+
+    summary = bt_result.summary or {}
+    final_value_local = _safe_float(summary.get("final_value"), 0.0)
+    final_value_krw = _safe_float(summary.get("final_value_krw"), final_value_local)
+
+    entry = {
+        "ma_period": ma_int,
+        "portfolio_topn": topn_int,
+        "replace_threshold": float(threshold_float),
+        "cagr_pct": _round_float(_safe_float(summary.get("cagr_pct"), 0.0)),
+        "mdd_pct": _round_float(_safe_float(summary.get("mdd_pct"), 0.0)),
+        "sharpe_ratio": _round_float(_safe_float(summary.get("sharpe_ratio"), 0.0)),
+        "sortino_ratio": _round_float(_safe_float(summary.get("sortino_ratio"), 0.0)),
+        "calmar_ratio": _round_float(_safe_float(summary.get("calmar_ratio"), 0.0)),
+        "cumulative_return_pct": _round_float(_safe_float(summary.get("cumulative_return_pct"), 0.0)),
+        "final_value_local": final_value_local,
+        "final_value": final_value_krw,
+        "cui": _round_float(_safe_float(summary.get("cui"), 0.0)),
+        "ulcer_index": _round_float(_safe_float(summary.get("ulcer_index"), 0.0)),
+    }
+
+    missing = getattr(bt_result, "missing_tickers", []) or []
+    return ("success", entry, list(missing))
+
+
 def _execute_tuning_for_months(
     account_norm: str,
     *,
     months_range: int,
     search_space: Mapping[str, List[Any]],
-    prefetched_data: Mapping[str, DataFrame],
-    excluded_tickers: Optional[Collection[str]],
     end_date: Timestamp,
-    combo_count: int,
-    n_trials: Optional[int],
-    timeout: Optional[float],
-    sampler_seed: Optional[int],
     regime_ma_period: int,
+    excluded_tickers: Optional[Collection[str]],
+    prefetched_data: Mapping[str, DataFrame],
 ) -> Optional[Dict[str, Any]]:
     logger = get_app_logger()
-
-    start_date = end_date - pd.DateOffset(months=months_range)
-    date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
-    logger.info("[튜닝] %s (%d개월) Optuna 튜닝 시작", account_norm.upper(), months_range)
-
-    failures: List[Dict[str, Any]] = []
-    success_entries: List[Dict[str, Any]] = []
-    best_entry: Optional[Dict[str, Any]] = None
-    best_key = (float("-inf"), float("inf"))
-    evaluated_cache: Dict[Tuple[int, int, float], Dict[str, Any]] = {}
-    encountered_missing: Set[str] = set()
 
     ma_candidates = list(search_space.get("MA_PERIOD", []))
     topn_candidates = list(search_space.get("PORTFOLIO_TOPN", []))
@@ -179,186 +490,127 @@ def _execute_tuning_for_months(
         logger.warning("[튜닝] %s (%d개월) 유효한 탐색 공간이 없습니다.", account_norm.upper(), months_range)
         return None
 
-    requested_trials = n_trials if n_trials is not None else combo_count
-    effective_trials = min(max(requested_trials, 1), combo_count if combo_count > 0 else requested_trials)
-    progress_interval = max(1, effective_trials // 100)
+    combos: List[Tuple[int, int, float]] = [(ma, topn, replace) for ma in ma_candidates for topn in topn_candidates for replace in replace_candidates]
 
-    sampler = optuna.samplers.TPESampler(multivariate=True, group=True, seed=sampler_seed)
-    study = optuna.create_study(directions=["maximize", "minimize"], sampler=sampler)
+    if not combos:
+        logger.warning("[튜닝] %s (%d개월) 평가할 조합이 없습니다.", account_norm.upper(), months_range)
+        return None
 
-    evaluated_success = 0
+    start_date = end_date - pd.DateOffset(months=months_range)
+    date_range = (start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
 
-    def _log_progress() -> None:
-        if evaluated_success == 0:
-            return
-        if evaluated_success % progress_interval == 0 or evaluated_success == effective_trials:
-            logger.info(
-                "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%)",
-                account_norm.upper(),
-                months_range,
-                evaluated_success,
-                effective_trials,
-                (evaluated_success / effective_trials) * 100,
-            )
+    logger.info(
+        "[튜닝] %s (%d개월) 전수조사 시작 (조합 %d개)",
+        account_norm.upper(),
+        months_range,
+        len(combos),
+    )
 
-    def objective(trial: optuna.Trial) -> Tuple[float, float]:
-        nonlocal best_entry, best_key, evaluated_success
+    workers = WORKERS or (cpu_count() or 1)
+    workers = max(1, min(workers, len(combos)))
 
-        ma = trial.suggest_categorical("MA_PERIOD", ma_candidates)
-        topn = trial.suggest_categorical("PORTFOLIO_TOPN", topn_candidates)
-        threshold = trial.suggest_categorical("REPLACE_SCORE_THRESHOLD", replace_candidates)
-        try:
-            ma_int = int(ma)
-            topn_int = int(topn)
-            threshold_float = float(threshold)
-        except (TypeError, ValueError):
-            failures.append(
-                {
-                    "ma_period": ma,
-                    "portfolio_topn": topn,
-                    "replace_threshold": threshold,
-                    "error": "파라미터 캐스팅 실패",
-                }
-            )
-            raise optuna.TrialPruned("Invalid parameter cast")
+    success_entries: List[Dict[str, Any]] = []
+    failures: List[Dict[str, Any]] = []
+    encountered_missing: Set[str] = set()
 
-        params_key = (ma_int, topn_int, threshold_float)
-        cached = evaluated_cache.get(params_key)
-        if cached is not None:
-            trial.set_user_attr("entry", cached)
-            return cached["cagr_pct"], -cached["mdd_pct"]
+    payloads = [
+        (
+            account_norm,
+            months_range,
+            date_range,
+            regime_ma_period,
+            int(ma),
+            int(topn),
+            float(replace),
+            tuple(excluded_tickers) if excluded_tickers else tuple(),
+            prefetched_data,
+        )
+        for ma, topn, replace in combos
+    ]
 
-        if topn_int <= 0:
-            failures.append(
-                {
-                    "ma_period": ma_int,
-                    "portfolio_topn": topn_int,
-                    "replace_threshold": threshold_float,
-                    "error": "PORTFOLIO_TOPN must be > 0",
-                }
-            )
-            raise optuna.TrialPruned("Invalid PORTFOLIO_TOPN")
+    if workers <= 1:
+        for idx, payload in enumerate(payloads, 1):
+            status, data, missing = _evaluate_single_combo(payload)
+            if status == "success":
+                success_entries.append(data)
+                encountered_missing.update(missing)
+            else:
+                failures.append(data)
 
-        try:
-            override_rules = StrategyRules.from_values(
-                ma_period=ma_int,
-                portfolio_topn=topn_int,
-                replace_threshold=threshold_float,
-            )
-        except ValueError as exc:
-            failures.append(
-                {
-                    "ma_period": ma_int,
-                    "portfolio_topn": topn_int,
-                    "replace_threshold": threshold_float,
-                    "error": str(exc),
-                }
-            )
-            raise optuna.TrialPruned(str(exc))
+            if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
+                logger.info(
+                    "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%)",
+                    account_norm.upper(),
+                    months_range,
+                    idx,
+                    len(combos),
+                    (idx / len(combos)) * 100,
+                )
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            future_map = {executor.submit(_evaluate_single_combo, payload): payload for payload in payloads}
+            for idx, future in enumerate(as_completed(future_map), 1):
+                status, data, missing = future.result()
+                if status == "success":
+                    success_entries.append(data)
+                    encountered_missing.update(missing)
+                else:
+                    failures.append(data)
 
-        strategy_overrides = {}
-        if regime_ma_period > 0:
-            strategy_overrides["MARKET_REGIME_FILTER_MA_PERIOD"] = regime_ma_period
+                if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
+                    logger.info(
+                        "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%)",
+                        account_norm.upper(),
+                        months_range,
+                        idx,
+                        len(combos),
+                        (idx / len(combos)) * 100,
+                    )
 
-        try:
-            bt_result = run_account_backtest(
-                account_norm,
-                months_range=months_range,
-                quiet=True,
-                override_settings={
-                    "start_date": date_range[0],
-                    "end_date": date_range[1],
-                    "strategy_overrides": strategy_overrides,
-                },
-                prefetched_data=prefetched_data,
-                strategy_override=override_rules,
-                excluded_tickers=excluded_tickers,
-            )
-        except Exception as exc:  # pragma: no cover - 백테스트 예외 방어
-            failures.append(
-                {
-                    "ma_period": ma_int,
-                    "portfolio_topn": topn_int,
-                    "replace_threshold": threshold_float,
-                    "error": str(exc),
-                }
-            )
-            raise optuna.TrialPruned(str(exc))
-
-        if getattr(bt_result, "missing_tickers", None):
-            encountered_missing.update(bt_result.missing_tickers)
-
-        summary = bt_result.summary or {}
-        final_value_local = _safe_float(summary.get("final_value"), 0.0)
-        final_value_krw = _safe_float(summary.get("final_value_krw"), final_value_local)
-
-        entry = {
-            "ma_period": ma_int,
-            "portfolio_topn": topn_int,
-            "replace_threshold": _round_up_float_places(threshold_float, 1),
-            "cagr_pct": _round_float(_safe_float(summary.get("cagr_pct"), 0.0)),
-            "mdd_pct": _round_float(_safe_float(summary.get("mdd_pct"), 0.0)),
-            "sharpe_ratio": _round_float(_safe_float(summary.get("sharpe_ratio"), 0.0)),
-            "sortino_ratio": _round_float(_safe_float(summary.get("sortino_ratio"), 0.0)),
-            "calmar_ratio": _round_float(_safe_float(summary.get("calmar_ratio"), 0.0)),
-            "cumulative_return_pct": _round_float(_safe_float(summary.get("cumulative_return_pct"), 0.0)),
-            "final_value_local": final_value_local,
-            "final_value": final_value_krw,
-            "cui": _round_float(_safe_float(summary.get("cui"), 0.0)),
-            "ulcer_index": _round_float(_safe_float(summary.get("ulcer_index"), 0.0)),
-        }
-
-        evaluated_cache[params_key] = entry
-        success_entries.append(entry)
-        evaluated_success = len(success_entries)
-        trial.set_user_attr("entry", entry)
-
-        cagr = entry["cagr_pct"]
-        mdd = entry["mdd_pct"]
-        key = (cagr, -mdd)
-        if best_entry is None or key > best_key:
-            best_entry = entry
-            best_key = key
-
-        _log_progress()
-        return cagr, -mdd
-
-    study.optimize(objective, n_trials=effective_trials, timeout=timeout)
-
-    success_count = len(success_entries)
-
-    if best_entry is None:
+    if not success_entries:
         logger.warning("[튜닝] %s (%d개월) 성공한 조합이 없습니다.", account_norm.upper(), months_range)
         return None
 
-    logger.info(
-        "[튜닝] %s (%d개월) 완료: 성공 %d개 / 실패 %d개 (요청 %d회, 처리 %d회)",
-        account_norm.upper(),
-        months_range,
-        success_count,
-        len(failures),
-        effective_trials,
-        len(study.trials),
-    )
+    def _sort_key(entry: Dict[str, Any]) -> Tuple[float, float]:
+        cagr = _safe_float(entry.get("cagr_pct"), float("-inf"))
+        mdd = _safe_float(entry.get("mdd_pct"), float("inf"))
+        return (cagr, -mdd)
+
+    success_entries.sort(key=_sort_key, reverse=True)
+    best_entry = success_entries[0]
+
+    raw_data_payload: List[Dict[str, Any]] = []
+    for item in success_entries:
+        cagr_val = _safe_float(item.get("cagr_pct"), float("nan"))
+        mdd_val = _safe_float(item.get("mdd_pct"), float("nan"))
+        period_return_val = _safe_float(item.get("cumulative_return_pct"), float("nan"))
+
+        raw_data_payload.append(
+            {
+                "MONTHS_RANGE": months_range,
+                "CAGR": _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None,
+                "MDD": _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None,
+                "period_return": _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None,
+                "tuning": {
+                    "MA_PERIOD": int(item.get("ma_period", 0)),
+                    "PORTFOLIO_TOPN": int(item.get("portfolio_topn", 0)),
+                    "REPLACE_SCORE_THRESHOLD": _round_up_float_places(item.get("replace_threshold", 0.0), 1),
+                },
+            }
+        )
 
     return {
         "months_range": months_range,
         "best": best_entry,
         "failures": failures,
-        "success_count": success_count,
+        "success_count": len(success_entries),
         "regime_ma_period": regime_ma_period,
         "missing_tickers": sorted(encountered_missing),
-        "study": {
-            "trials_requested": effective_trials,
-            "trials_completed": len(study.trials),
-            "failures": len(failures),
-        },
+        "raw_data": raw_data_payload,
     }
 
 
 def _build_run_entry(
-    *,
-    run_date: str,
     months_results: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     param_fields = {
@@ -368,7 +620,6 @@ def _build_run_entry(
     }
 
     entry: Dict[str, Any] = {
-        "run_date": run_date,
         "result": {},
     }
 
@@ -525,8 +776,6 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
 
     normalized = dict(entry)
 
-    run_date = normalized.get("run_date")
-
     result_map: Dict[str, Any] = {}
     existing_result = normalized.get("result")
     if isinstance(existing_result, dict):
@@ -603,11 +852,7 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
         weighted_mdd = -(sum(mdd_positive_values) / len(mdd_positive_values))
 
     ordered: Dict[str, Any] = {}
-    if run_date is not None:
-        ordered["run_date"] = run_date
-    else:
-        ordered["run_date"] = normalized.get("run_date")
-
+    ordered["run_date"] = normalized.get("run_date")
     ordered["result"] = result_map
 
     if weighted_cagr is not None:
@@ -619,7 +864,60 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
     if cleaned_results:
         ordered["raw_data"] = cleaned_results
 
+    if ordered.get("run_date") is None:
+        ordered.pop("run_date", None)
+
     return ordered
+
+
+def _compose_tuning_report(
+    account_id: str,
+    *,
+    month_results: List[Dict[str, Any]],
+    aggregated_entry: Dict[str, Any],
+) -> List[str]:
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines: List[str] = [
+        f"실행 시각: {timestamp}",
+        f"계정: {account_id.upper()}",
+        "",
+    ]
+
+    for item in sorted(month_results, key=lambda x: int(x.get("months_range", 0))):
+        months_range = item.get("months_range")
+        if months_range is None:
+            continue
+
+        raw_rows = item.get("raw_data") or []
+        normalized_rows: List[Dict[str, Any]] = []
+
+        for entry in raw_rows:
+            tuning = entry.get("tuning") or {}
+            ma_val = tuning.get("MA_PERIOD")
+            topn_val = tuning.get("PORTFOLIO_TOPN")
+            threshold_val = tuning.get("REPLACE_SCORE_THRESHOLD")
+
+            cagr_val = entry.get("CAGR")
+            mdd_val = entry.get("MDD")
+            period_val = entry.get("period_return")
+
+            normalized_rows.append(
+                {
+                    "ma_period": ma_val,
+                    "portfolio_topn": topn_val,
+                    "replace_threshold": threshold_val,
+                    "cagr": cagr_val,
+                    "mdd": mdd_val,
+                    "period_return": period_val,
+                }
+            )
+
+        normalized_rows.sort(key=lambda row: _safe_float(row.get("cagr"), float("-inf")), reverse=True)
+        lines.append(f"=== 최근 {months_range}개월 결과 - 정렬 기준: CAGR ===")
+        lines.extend(_render_tuning_table(normalized_rows))
+        lines.append("")
+
+    return lines
 
 
 def run_account_tuning(
@@ -631,6 +929,8 @@ def run_account_tuning(
     months_range: Optional[int] = None,
     n_trials: Optional[int] = None,
     timeout: Optional[float] = None,
+    debug_export_dir: Optional[Path | str] = None,
+    debug_capture_top_n: int = 1,
 ) -> Optional[Path]:
     """Execute parameter tuning for the given account and return the output path."""
 
@@ -651,8 +951,20 @@ def run_account_tuning(
         logger.warning("[튜닝] '%s' 계정에 대한 튜닝 설정이 없습니다.", account_norm.upper())
         return None
 
+    debug_dir: Optional[Path] = None
+    capture_top_n = 0
+    if debug_export_dir is not None:
+        debug_dir = Path(debug_export_dir)
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            capture_top_n = max(1, int(debug_capture_top_n))
+        except (TypeError, ValueError):
+            capture_top_n = 1
+        logger.info("[튜닝] 디버그 아티팩트를 '%s'에 저장합니다.", debug_dir)
+    debug_diff_rows: List[Dict[str, Any]] = []
+    debug_month_configs: List[Dict[str, Any]] = []
+
     base_rules = get_strategy_rules(account_norm)
-    strategy_settings = get_account_strategy(account_norm)
     ma_values = _normalize_tuning_values(config.get("MA_RANGE"), dtype=int, fallback=base_rules.ma_period)
     topn_values = _normalize_tuning_values(config.get("PORTFOLIO_TOPN"), dtype=int, fallback=base_rules.portfolio_topn)
     replace_values = _normalize_tuning_values(
@@ -680,44 +992,30 @@ def run_account_tuning(
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
         return None
 
-    if n_trials is not None:
-        try:
-            trials_limit = int(n_trials)
-        except (TypeError, ValueError):
-            trials_limit = combo_count
-        else:
-            if trials_limit <= 0:
-                trials_limit = combo_count
-    else:
-        trials_limit = None
-
     search_space = {
         "MA_PERIOD": ma_values,
         "PORTFOLIO_TOPN": topn_values,
         "REPLACE_SCORE_THRESHOLD": replace_values,
     }
 
-    _, static_strategy = get_account_strategy_sections(account_norm)
-    regime_ma_raw = None
-    if isinstance(static_strategy, dict):
-        regime_ma_raw = static_strategy.get("MARKET_REGIME_FILTER_MA_PERIOD")
-    if regime_ma_raw is None:
-        regime_ma_raw = strategy_settings.get("MARKET_REGIME_FILTER_MA_PERIOD")
+    try:
+        regime_ticker, regime_ma_period, regime_country, _regime_delay_days, _regime_equity_ratio = get_market_regime_settings()
+    except AccountSettingsError as exc:
+        logger.error("[튜닝] 공통 시장 레짐 설정을 불러오지 못했습니다: %s", exc)
+        return None
 
     try:
-        regime_ma_period = int(regime_ma_raw)
+        regime_ma_period = int(regime_ma_period)
     except (TypeError, ValueError):
         logger.warning(
-            "[튜닝] %s 정적 레짐 MA 기간을 확인할 수 없어 기본값(%d)을 사용합니다.",
-            account_norm.upper(),
+            "[튜닝] 공통 레짐 MA 기간을 확인할 수 없어 기본값(%d)을 사용합니다.",
             base_rules.ma_period,
         )
         regime_ma_period = base_rules.ma_period
     else:
         if regime_ma_period <= 0:
             logger.warning(
-                "[튜닝] %s 레짐 MA 기간이 0 이하(%d)로 설정되어 기본값(%d)으로 대체합니다.",
-                account_norm.upper(),
+                "[튜닝] 공통 레짐 MA 기간이 0 이하(%d)로 설정되어 기본값(%d)으로 대체합니다.",
                 regime_ma_period,
                 base_rules.ma_period,
             )
@@ -726,14 +1024,12 @@ def run_account_tuning(
     ma_count = len(ma_values)
     topn_count = len(topn_values)
     replace_count = len(replace_values)
-    requested_trials = trials_limit if trials_limit is not None else combo_count
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × TH %d개 = %d개 조합 (요청 시도 %d회)",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × TH %d개 = %d개 조합",
         ma_count,
         topn_count,
         replace_count,
         combo_count,
-        requested_trials,
     )
 
     try:
@@ -779,23 +1075,41 @@ def run_account_tuning(
         warmup_days,
     )
 
-    prefetched, missing_prefetch = fetch_ohlcv_for_tickers(
-        tickers,
-        country_code,
-        date_range=date_range_prefetch,
+    common_settings = load_common_settings()
+    cache_seed_raw = (common_settings or {}).get("CACHE_START_DATE")
+    cache_seed_dt = None
+    if cache_seed_raw:
+        try:
+            cache_seed_dt = pd.to_datetime(cache_seed_raw).normalize()
+        except Exception:
+            cache_seed_dt = None
+
+    if cache_seed_dt is not None and cache_seed_dt < start_date_prefetch:
+        start_date_prefetch = cache_seed_dt
+        date_range_prefetch = [start_date_prefetch.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
+
+    prefetched, missing_prefetch = prepare_price_data(
+        tickers=tickers,
+        country=country_code,
+        start_date=date_range_prefetch[0],
+        end_date=date_range_prefetch[1],
         warmup_days=warmup_days,
     )
     prefetched_map: Dict[str, DataFrame] = dict(prefetched)
 
-    regime_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
+    for ticker, frame in prefetched_map.items():
+        save_cached_frame(country_code, ticker, frame)
+
     if regime_ticker and regime_ticker not in prefetched_map:
         regime_prefetch = fetch_ohlcv(
             regime_ticker,
-            country=country_code,
+            country=regime_country,
             date_range=date_range_prefetch,
+            cache_country="common",
         )
         if regime_prefetch is not None and not regime_prefetch.empty:
             prefetched_map[regime_ticker] = regime_prefetch
+            save_cached_frame("common", regime_ticker, regime_prefetch)
         else:
             missing_prefetch.append(regime_ticker)
 
@@ -808,100 +1122,105 @@ def run_account_tuning(
             ", ".join(sorted(excluded_ticker_set)),
         )
 
-    if timeout is not None:
-        try:
-            timeout_sec = float(timeout)
-        except (TypeError, ValueError):
-            timeout_sec = None
-        else:
-            if timeout_sec <= 0:
-                timeout_sec = None
-    else:
-        timeout_sec = None
+    if debug_dir is not None:
+        _export_prefetched_data(debug_dir, prefetched_map)
 
-    results_per_month: List[Dict[str, Any]] = []
-    max_workers = min(len(month_items), cpu_count() or 1)
-    futures: Dict[Any, Any] = {}
     runtime_missing_registry: Set[str] = set()
+    results_per_month: List[Dict[str, Any]] = []
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for idx, item in enumerate(month_items):
-            months_raw = item.get("months_range")
-            try:
-                months_value = int(months_raw)
-            except (TypeError, ValueError):
-                logger.warning(
-                    "[튜닝] %s (%s) 월 범위를 정수로 변환할 수 없습니다. 항목을 건너뜁니다.",
-                    account_norm.upper(),
-                    months_raw,
-                )
-                continue
-
-            if months_value <= 0:
-                logger.warning(
-                    "[튜닝] %s (%s) 유효하지 않은 월 범위입니다. 항목을 건너뜁니다.",
-                    account_norm.upper(),
-                    months_raw,
-                )
-                continue
-
-            sanitized_item = dict(item)
-            sanitized_item["months_range"] = months_value
-            seed = abs(hash((account_norm, months_value, idx))) % (2**32)
-
-            future = executor.submit(
-                _execute_tuning_for_months,
-                account_norm,
-                months_range=months_value,
-                search_space=search_space,
-                prefetched_data=prefetched_map,
-                excluded_tickers=excluded_ticker_set,
-                end_date=end_date,
-                combo_count=combo_count,
-                n_trials=trials_limit,
-                timeout=timeout_sec,
-                sampler_seed=seed,
-                regime_ma_period=regime_ma_period,
+    for item in month_items:
+        months_raw = item.get("months_range")
+        try:
+            months_value = int(months_raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "[튜닝] %s (%s) 월 범위를 정수로 변환할 수 없습니다. 항목을 건너뜁니다.",
+                account_norm.upper(),
+                months_raw,
             )
-            futures[future] = (idx, sanitized_item)
+            continue
 
-        collected: List[Tuple[int, Dict[str, Any]]] = []
-        for future in as_completed(futures):
-            idx, item = futures[future]
-            try:
-                single_result = future.result()
-            except Exception as exc:  # pragma: no cover - 병렬 실행 실패 방어
-                logger.error(
-                    "[튜닝] %s (%s개월) 병렬 실행 실패: %s",
-                    account_norm.upper(),
-                    item.get("months_range"),
-                    exc,
+        if months_value <= 0:
+            logger.warning(
+                "[튜닝] %s (%s) 유효하지 않은 월 범위입니다. 항목을 건너뜁니다.",
+                account_norm.upper(),
+                months_raw,
+            )
+            continue
+
+        sanitized_item = dict(item)
+        sanitized_item["months_range"] = months_value
+        if debug_dir is not None:
+            debug_month_configs.append(
+                {
+                    "months_range": months_value,
+                    "weight": float(item.get("weight", 0.0) or 0.0),
+                    "source": item.get("source"),
+                }
+            )
+
+        # Adjust prefetched window to honor CACHE_START_DATE if provided
+        if cache_seed_dt is not None and cache_seed_dt < start_date_prefetch:
+            adjusted_start = cache_seed_dt
+        else:
+            adjusted_start = start_date_prefetch
+
+        adjusted_date_range = [adjusted_start.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
+
+        prefetched_adjusted, additional_missing = prepare_price_data(
+            tickers=tickers,
+            country=country_code,
+            start_date=adjusted_date_range[0],
+            end_date=adjusted_date_range[1],
+            warmup_days=warmup_days,
+        )
+        prefetched_map.update(prefetched_adjusted)
+        for ticker, frame in prefetched_adjusted.items():
+            save_cached_frame(country_code, ticker, frame)
+        missing_prefetch.extend(additional_missing)
+
+        single_result = _execute_tuning_for_months(
+            account_norm,
+            months_range=months_value,
+            search_space=search_space,
+            end_date=end_date,
+            regime_ma_period=regime_ma_period,
+            excluded_tickers=excluded_ticker_set,
+            prefetched_data=prefetched_map,
+        )
+
+        if not single_result:
+            continue
+
+        try:
+            weight = float(item.get("weight", 0.0))
+        except (TypeError, ValueError):
+            weight = 0.0
+
+        single_result["weight"] = weight
+        single_result["source"] = item.get("source")
+        missing_in_result = single_result.get("missing_tickers") or []
+        if missing_in_result:
+            runtime_missing_registry.update(missing_in_result)
+        results_per_month.append(single_result)
+
+        if debug_dir is not None and capture_top_n > 0:
+            raw_rows = single_result.get("raw_data") or []
+            debug_diff_rows.extend(
+                _export_debug_month(
+                    debug_dir,
+                    account_id=account_norm,
+                    months_range=months_value,
+                    raw_rows=raw_rows,
+                    prefetched_data=prefetched_map,
+                    capture_top_n=capture_top_n,
                 )
-                continue
-
-            if not single_result:
-                continue
-
-            try:
-                weight = float(item.get("weight", 0.0))
-            except (TypeError, ValueError):
-                weight = 0.0
-
-            single_result["weight"] = weight
-            single_result["source"] = item.get("source")
-            missing_in_result = single_result.get("missing_tickers") or []
-            if missing_in_result:
-                runtime_missing_registry.update(missing_in_result)
-            collected.append((idx, single_result))
-
-    collected.sort(key=lambda entry: entry[0])
-    results_per_month = [item for _, item in collected]
+            )
 
     if not results_per_month:
         logger.warning("[튜닝] 실행 가능한 기간이 없어 결과가 없습니다.")
         return None
 
-    run_date = datetime.now().strftime("%Y-%m-%d")
     if runtime_missing_registry:
         unseen_missing = sorted(set(runtime_missing_registry) - set(excluded_ticker_set or []))
         if unseen_missing:
@@ -925,27 +1244,97 @@ def run_account_tuning(
             best.get("cagr_pct", 0.0),
         )
 
-    entry = _build_run_entry(run_date=run_date, months_results=results_per_month)
+    entry = _build_run_entry(months_results=results_per_month)
+
+    if debug_dir is not None:
+        meta_payload: Dict[str, Any] = {
+            "account": account_norm,
+            "country": country_code,
+            "run_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "combo_count": combo_count,
+            "search_space": {
+                "MA_RANGE": ma_values,
+                "PORTFOLIO_TOPN": topn_values,
+                "REPLACE_SCORE_THRESHOLD": replace_values,
+            },
+            "month_configs": debug_month_configs,
+            "excluded_tickers_initial": sorted(excluded_ticker_set),
+            "runtime_missing_tickers": sorted(runtime_missing_registry),
+            "debug_capture_top_n": capture_top_n,
+            "tuning_entry": entry,
+        }
+        (debug_dir / "meta.json").write_text(json.dumps(meta_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        if debug_diff_rows:
+            summary_fields = [
+                "months_range",
+                "ma_period",
+                "topn",
+                "threshold",
+                "recorded_cagr",
+                "prefetch_cagr",
+                "live_cagr",
+                "prefetch_minus_recorded",
+                "live_minus_recorded",
+                "recorded_mdd",
+                "prefetch_mdd",
+                "live_mdd",
+                "recorded_period_return",
+                "prefetch_period_return",
+                "live_period_return",
+                "current_start_date",
+                "current_end_date",
+                "current_excluded_count",
+                "artifact_path",
+            ]
+
+            (debug_dir / "diff_summary.json").write_text(json.dumps(debug_diff_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            with (debug_dir / "diff_summary.csv").open("w", newline="", encoding="utf-8") as fp:
+                writer = csv.DictWriter(fp, fieldnames=summary_fields)
+                writer.writeheader()
+                writer.writerows(debug_diff_rows)
+    report_lines = _compose_tuning_report(
+        account_norm,
+        month_results=results_per_month,
+        aggregated_entry=entry,
+    )
 
     base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
     if output_path is None:
-        # 파일명에 YYYYMMDD 형식의 날짜 추가
-        date_str = datetime.now().strftime("%Y%m%d")
-        output_path = base_dir / f"tune_{account_norm}_{date_str}.json"
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        txt_path = base_dir / f"tune_{account_norm}_{date_str}.txt"
     else:
-        output_path = Path(output_path)
-        if not output_path.is_absolute():
-            output_path = Path.cwd() / output_path
+        txt_path = Path(output_path)
+        if txt_path.suffix.lower() != ".txt":
+            txt_path = txt_path.with_suffix(".txt")
+        if not txt_path.is_absolute():
+            txt_path = Path.cwd() / txt_path
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    txt_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 날짜별로 파일을 생성하므로, 기존 내용을 읽지 않고 새로운 결과만 저장
-    output_path.write_text(
-        json.dumps([entry], ensure_ascii=False, indent=4),
+    # Remove any existing tuning files for this account to avoid mixing stale results.
+    try:
+        pattern = f"tune_{account_norm}_*.txt"
+        for existing in txt_path.parent.glob(pattern):
+            try:
+                existing.unlink()
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+    txt_path.write_text(
+        "\n".join(report_lines) + "\n",
         encoding="utf-8",
     )
 
-    return output_path
+    for line in report_lines:
+        print(line)
+
+    logger.info("튜닝 요약을 '%s'에 기록했습니다.", txt_path)
+
+    return txt_path
 
 
 __all__ = ["run_account_tuning"]

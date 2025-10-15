@@ -18,6 +18,7 @@ from utils.settings_loader import (
     get_strategy_rules,
     get_backtest_months_range,
     get_backtest_initial_capital,
+    get_market_regime_settings,
 )
 from utils.data_loader import (
     get_latest_trading_day,
@@ -35,6 +36,16 @@ def _default_test_months_range() -> int:
 
 def _default_initial_capital() -> float:
     return float(get_backtest_initial_capital())
+
+
+def _parse_regime_ratio_value(raw_value: Any, *, source: str) -> int:
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError) as exc:  # noqa: PERF203
+        raise ValueError(f"{source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 정수가 아닙니다.") from exc
+    if not (0 <= parsed <= 100):
+        raise ValueError(f"{source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
+    return parsed
 
 
 @dataclass
@@ -264,6 +275,7 @@ def run_account_backtest(
         currency=display_currency,
         account_settings=account_settings,
         strategy_settings=strategy_settings,
+        common_settings=common_settings,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries)
@@ -429,19 +441,26 @@ def _build_backtest_kwargs(
     stop_loss_pct = -abs(float(strategy_rules.portfolio_topn))
     cooldown_days = int(strategy_settings.get("COOLDOWN_DAYS", 0) or 0)
 
-    regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
-
-    regime_filter_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
-    if not regime_filter_ticker:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_TICKER' 값이 필요합니다.")
-
-    regime_filter_ma_raw = strategy_settings.get("MARKET_REGIME_FILTER_MA_PERIOD")
-    if regime_filter_ma_raw is None:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
     try:
-        regime_filter_ma_period = int(regime_filter_ma_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
+        (
+            regime_filter_ticker,
+            regime_filter_ma_period,
+            regime_filter_country,
+            regime_filter_delay_days,
+            regime_filter_equity_ratio,
+        ) = get_market_regime_settings(common_settings)
+    except AccountSettingsError as exc:
+        raise ValueError(str(exc)) from exc
+
+    if regime_filter_equity_ratio is None:
+        ratio_raw = strategy_settings.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+        if ratio_raw is None:
+            raise ValueError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정이 필요합니다.")
+        regime_filter_equity_ratio = _parse_regime_ratio_value(ratio_raw, source="전략 설정")
+    else:
+        regime_filter_equity_ratio = _parse_regime_ratio_value(regime_filter_equity_ratio, source="공통 설정")
+
+    regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
@@ -450,6 +469,9 @@ def _build_backtest_kwargs(
         "regime_filter_enabled": regime_filter_enabled,
         "regime_filter_ticker": regime_filter_ticker,
         "regime_filter_ma_period": regime_filter_ma_period,
+        "regime_filter_country": regime_filter_country,
+        "regime_filter_delay_days": regime_filter_delay_days,
+        "regime_filter_equity_ratio": regime_filter_equity_ratio,
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
         "quiet": quiet,
@@ -568,6 +590,7 @@ def _build_summary(
     currency: str,
     account_settings: Mapping[str, Any],
     strategy_settings: Mapping[str, Any],
+    common_settings: Mapping[str, Any],
 ) -> Tuple[
     Dict[str, Any],
     pd.Series,
@@ -699,19 +722,32 @@ def _build_summary(
             monthly_cum_returns = (eom_pv / initial_capital_local - 1).ffill()
         yearly_returns = pv_series_with_start.resample("YE").last().pct_change().dropna()
 
-    risk_off_periods = _detect_risk_off_periods(pv_series.index, ticker_timeseries)
-
-    regime_filter_ticker = str(strategy_settings.get("MARKET_REGIME_FILTER_TICKER") or "").strip()
-    if not regime_filter_ticker:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_TICKER' 값이 필요합니다.")
-
-    regime_filter_ma_raw = strategy_settings.get("MARKET_REGIME_FILTER_MA_PERIOD")
-    if regime_filter_ma_raw is None:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
     try:
-        regime_filter_ma_period = int(regime_filter_ma_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
+        (
+            regime_filter_ticker,
+            regime_filter_ma_period,
+            regime_filter_country,
+            regime_filter_delay_days,
+            regime_filter_equity_ratio,
+        ) = get_market_regime_settings(common_settings)
+    except AccountSettingsError as exc:
+        raise ValueError(str(exc)) from exc
+
+    if regime_filter_equity_ratio is None:
+        ratio_raw = strategy_settings.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+        if ratio_raw is None:
+            raise ValueError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정이 필요합니다.")
+        regime_filter_equity_ratio = _parse_regime_ratio_value(ratio_raw, source="전략 설정")
+    else:
+        regime_filter_equity_ratio = _parse_regime_ratio_value(regime_filter_equity_ratio, source="공통 설정")
+
+    regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
+    risk_off_ratio_for_periods = regime_filter_equity_ratio
+    risk_off_periods = _detect_risk_off_periods(
+        pv_series.index,
+        ticker_timeseries,
+        regime_filter_equity_ratio=risk_off_ratio_for_periods,
+    )
 
     summary = {
         "start_date": start_date.strftime("%Y-%m-%d"),
@@ -736,9 +772,12 @@ def _build_summary(
         "benchmark_cagr_pct": benchmark_cagr_pct,
         "benchmarks": benchmarks_summary,
         "benchmark_name": benchmarks_summary[0]["name"] if benchmarks_summary else "S&P 500",
-        "regime_filter_enabled": True,
+        "regime_filter_enabled": regime_filter_enabled,
         "regime_filter_ticker": regime_filter_ticker,
         "regime_filter_ma_period": regime_filter_ma_period,
+        "regime_filter_country": regime_filter_country,
+        "regime_filter_delay_days": regime_filter_delay_days,
+        "regime_filter_equity_ratio": regime_filter_equity_ratio,
         "monthly_returns": monthly_returns,
         "monthly_cum_returns": monthly_cum_returns,
         "yearly_returns": yearly_returns,
@@ -783,7 +822,9 @@ def _compute_evaluated_records(
 def _detect_risk_off_periods(
     index: pd.Index,
     ticker_timeseries: Mapping[str, pd.DataFrame],
-) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+    *,
+    regime_filter_equity_ratio: int,
+) -> List[Tuple[pd.Timestamp, pd.Timestamp, int]]:
     if not isinstance(index, pd.DatetimeIndex):
         index = pd.to_datetime(index)
 
@@ -792,15 +833,24 @@ def _detect_risk_off_periods(
     for df in ticker_timeseries.values():
         if df is None or df.empty or "note" not in df.columns:
             continue
-        note_mask = df["note"].fillna("") == "시장 위험 회피"
-        if note_mask.any():
-            intersect_index = df.index[note_mask].intersection(risk_off_series.index)
+        note_series = df["note"].fillna("")
+        contains_risk_off = note_series.str.contains("시장위험회피", na=False)
+        if not contains_risk_off.any():
+            contains_risk_off = note_series.str.contains("시장 위험 회피", na=False)
+        if not contains_risk_off.any():
+            no_space = note_series.str.replace(" ", "", regex=False)
+            contains_risk_off = no_space.str.contains("시장위험회피", na=False)
+        combined_mask = contains_risk_off
+        if combined_mask.any():
+            intersect_index = df.index[combined_mask].intersection(risk_off_series.index)
             risk_off_series.loc[intersect_index] = True
 
-    periods: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    periods: List[Tuple[pd.Timestamp, pd.Timestamp, int]] = []
     in_period = False
     start: Optional[pd.Timestamp] = None
     prev_dt: Optional[pd.Timestamp] = None
+
+    ratio_value = 100 if regime_filter_equity_ratio is None else int(regime_filter_equity_ratio)
 
     for dt, is_off in risk_off_series.items():
         if is_off and not in_period:
@@ -808,13 +858,13 @@ def _detect_risk_off_periods(
             start = dt
         elif not is_off and in_period:
             if start is not None and prev_dt is not None:
-                periods.append((start, prev_dt))
+                periods.append((start, prev_dt, ratio_value))
             in_period = False
             start = None
         prev_dt = dt
 
     if in_period and start is not None and prev_dt is not None:
-        periods.append((start, prev_dt))
+        periods.append((start, prev_dt, ratio_value))
 
     return periods
 
@@ -828,7 +878,6 @@ def _build_ticker_summaries(
         "SELL_TREND",
         "CUT_STOPLOSS",
         "SELL_REPLACE",
-        "SELL_REGIME_FILTER",
     }
 
     summaries: List[Dict[str, Any]] = []
@@ -838,7 +887,22 @@ def _build_ticker_summaries(
             continue
 
         df_sorted = df.sort_index()
-        trades = df_sorted[df_sorted["decision"].isin(sell_decisions)] if "decision" in df_sorted.columns else pd.DataFrame()
+        if "decision" in df_sorted.columns:
+            trades_mask = df_sorted["decision"].isin(sell_decisions)
+        else:
+            trades_mask = pd.Series(False, index=df_sorted.index)
+
+        note_series = df_sorted.get("note")
+        if isinstance(note_series, pd.Series):
+            note_text_series = note_series.fillna("").astype(str)
+            risk_off_mask = (
+                note_text_series.str.contains("시장위험회피", na=False)
+                | note_text_series.str.contains("시장 위험 회피", na=False)
+                | note_text_series.str.replace(" ", "", regex=False).str.contains("시장위험회피", na=False)
+            )
+            trades_mask = trades_mask | risk_off_mask
+
+        trades = df_sorted[trades_mask] if trades_mask.any() else pd.DataFrame()
         realized_profit = float(trades.get("trade_profit", pd.Series(dtype=float)).sum()) if not trades.empty else 0.0
         total_trades = int(len(trades)) if not trades.empty else 0
         winning_trades = int((trades.get("trade_profit", pd.Series(dtype=float)) > 0).sum()) if not trades.empty else 0

@@ -29,12 +29,6 @@ DECISION_CONFIG = {
         "show_slack": True,
         "background": "#ffc1cc",
     },
-    "SELL_REGIME_FILTER": {
-        "display_name": "<🛡️ 시장위험회피 매도>",
-        "order": 23,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
     "BUY_REPLACE": {
         "display_name": "<🔄 교체매수>",
         "order": 30,
@@ -100,7 +94,7 @@ DECISION_NOTES = {
     "INSUFFICIENT_CASH": "현금 부족",
     "NO_PRICE": "가격 정보 없음",
     "RISK_OFF": "시장 위험 회피",
-    "RISK_OFF_SELL": "시장위험회피 매도",
+    "RISK_OFF_SELL": "❗시장위험회피 매도❗",
     "TREND_BREAK": "추세 이탈",
     "REPLACE_SELL": "교체 매도",
     "PRICE_DATA_FAIL": "가격 데이터 조회 실패",

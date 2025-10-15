@@ -44,10 +44,11 @@ from utils.report import format_kr_money
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_slack_channel
 from dotenv import load_dotenv
+from utils.cron_utils import normalize_cron_weekdays
 
 load_dotenv()
-APP_DATE_TIME = "2025-10-09-10"
-APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_DATE_TIME}")
+APP_VERSION = "2025-10-15-20"
+APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
 _LAST_ERROR: Optional[str] = None
 logger = get_app_logger()
@@ -73,14 +74,9 @@ def should_notify_on_schedule(country: str) -> bool:
     if not cron_schedule:
         return True
 
-    tz_str = (
-        config.get("notify_timezone")
-        or config.get("timezone")
-        or {
-            "kor": "Asia/Seoul",
-            "aus": "Australia/Sydney",
-        }.get(country, "Asia/Seoul")
-    )
+    cron_schedule = normalize_cron_weekdays(cron_schedule, target="croniter")
+
+    tz_str = "Asia/Seoul"
 
     try:
         local_tz = pytz.timezone(tz_str)
@@ -579,6 +575,21 @@ def send_recommendation_slack_notification(
                     account_id,
                     image_path_obj.name,
                 )
+            else:
+                try:
+                    image_path_obj.unlink(missing_ok=True)
+                    logger.debug(
+                        "Slack 이미지 업로드 후 임시 파일 삭제 완료 (account=%s, file=%s)",
+                        account_id,
+                        image_path_obj.name,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Slack 이미지 임시 파일 삭제 실패 (account=%s, file=%s)",
+                        account_id,
+                        image_path_obj,
+                        exc_info=True,
+                    )
         else:
             logger.warning(
                 "Slack 이미지 파일을 찾을 수 없습니다 (account=%s, path=%s)",

@@ -62,10 +62,6 @@
             "italic": false
         }
     ],
-    "cursorpyright.analysis.extraPaths": [
-        "./src",
-        "./app"
-    ],
     "editor.formatOnSave": true,
     "files.trimTrailingWhitespace": true,
     "files.insertFinalNewline": true,
