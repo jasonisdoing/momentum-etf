@@ -126,27 +126,28 @@ def run_recommendation_generation(
     if not isinstance(report, RecommendationReport):
         raise TypeError("예상한 RecommendationReport 타입이 아닙니다.")
 
+    elapsed = time.time() - start_ts
     logging.info(
         "[APS] 추천 생성 완료(account=%s, country=%s, elapsed=%.2fs)",
         account_id.upper(),
         country_code.upper(),
-        time.time() - start_ts,
+        elapsed,
     )
 
     logging.info("[APS] 보고서 저장 중...")
     try:
-        save_recommendation_report(account_id, report)
+        save_recommendation_report(report)
     except Exception:
         logging.error("추천 보고서를 저장하는 중 오류", exc_info=True)
 
     try:
-        if should_notify_on_schedule(account_id, country_code, schedule_timezone):
-            message = compose_recommendation_slack_message(report)
-            send_recommendation_slack_notification(
+        if should_notify_on_schedule(country_code):
+            message = compose_recommendation_slack_message(
                 account_id,
-                message,
-                report=report,
+                report,
+                duration=elapsed,
             )
+            send_recommendation_slack_notification(account_id, message)
     except Exception:
         logging.error("Slack 알림 전송 실패", exc_info=True)
 
@@ -246,13 +247,14 @@ def main():
     # Initial run
     logging.info("\n[Initial Run] Starting...")
 
-    # Initial run for stock metadata
-    try:
-        run_stock_stats_update()
-        # 서버 캐시 제거하고 싶을때 해제
-        # run_cache_refresh()
-    except Exception:
-        logging.error("Error during initial run for stock metadata update", exc_info=True)
+    # Initial run for stock metadata/cache refresh
+    # try:
+    #     # 메타 데이터 갱신하고 싶을 때 해제
+    #     run_stock_stats_update()
+    #     # 서버 캐시 제거하고 싶을 때 해제
+    #     run_cache_refresh()
+    # except Exception:
+    #     logging.error("Error during initial run for stock metadata update/cache refresh", exc_info=True)
 
     for schedule_name, cfg in country_schedules.items():
         if not cfg.get("enabled", True):
