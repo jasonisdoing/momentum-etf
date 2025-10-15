@@ -438,12 +438,6 @@ def generate_daily_recommendations_for_portfolio(
         wait_stock_category = etf_meta.get(best_new["tkr"], {}).get("category")
         wait_stock_category_key = _normalize_category_value(wait_stock_category)
 
-        if wait_stock_category_key and wait_stock_category_key in held_category_keys:
-            best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
-            best_new["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
-            best_new["buy_signal"] = False
-            continue
-
         # 2-1. 동일 카테고리 보유 종목과 비교
         held_stock_same_category = next(
             (
