@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 """전체 OHLCV 캐시를 초기화한 뒤 설정된 시작일 이후 데이터를 다시 받아옵니다."""
 
+from __future__ import annotations
+
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -59,15 +62,41 @@ def refresh_all_caches(countries: list[str], start_date: str):
         logger.info("-> %s 국가의 캐시 갱신 완료.", country.upper())
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="OHLCV 캐시 갱신 스크립트",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--countries",
+        nargs="+",
+        help="캐시를 갱신할 국가 코드 목록 (예: kor aus us). 지정하지 않으면 기본 목록 사용.",
+    )
+    parser.add_argument(
+        "--start",
+        help="데이터 조회 시작일 (YYYY-MM-DD). 지정하지 않으면 공통 설정 또는 2020-01-01 사용.",
+    )
+    return parser
+
+
 def main():
     """CLI 진입점"""
     logger = get_app_logger()
 
     load_env_if_present()
 
-    start_date = _determine_start_date()
+    parser = _build_parser()
+    args = parser.parse_args()
 
-    countries = ["kor", "aus"]
+    start_date = args.start or _determine_start_date()
+    if args.countries:
+        countries = [country.strip().lower() for country in args.countries if country.strip()]
+    else:
+        countries = ["kor", "aus"]
+
+    if not countries:
+        parser.error("갱신할 국가를 최소 하나 이상 지정해야 합니다.")
+
     logger.info("입력 파라미터: countries=%s, start=%s", countries, start_date)
     refresh_all_caches(countries, start_date)
 

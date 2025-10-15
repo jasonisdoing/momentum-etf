@@ -98,6 +98,7 @@ def _compute_market_regime_status(
     *,
     ma_period: int,
     country: str,
+    delay_days: int = 0,
 ) -> Tuple[Optional[Dict[str, Any]], str]:
     required_days = int(ma_period) + 30
     required_months = max(3, (required_days // 22) + 2)
@@ -131,6 +132,13 @@ def _compute_market_regime_status(
         return None, '<span style="color:grey">시장 상태: 데이터 부족</span>'
 
     df_regime = df_regime.sort_index()
+
+    if delay_days and delay_days > 0:
+        if len(df_regime) <= delay_days:
+            return None, '<span style="color:grey">시장 상태: 데이터 부족</span>'
+        df_regime = df_regime.iloc[:-delay_days]
+        if df_regime is None or df_regime.empty or len(df_regime) < ma_period:
+            return None, '<span style="color:grey">시장 상태: 데이터 부족</span>'
 
     price_column = None
     for candidate in ("Close", "Adj Close", "Price"):
@@ -241,7 +249,7 @@ def get_market_regime_status_info(ma_period_override: Optional[int] = None) -> T
         return None, '<span style="color:grey">시장 상태: 설정 파일 오류</span>'
 
     try:
-        ticker, ma_period, country, _, _ = get_market_regime_settings()
+        ticker, ma_period, country, delay_days, _ = get_market_regime_settings()
     except AccountSettingsError as exc:
         logger.error("시장 레짐 공통 설정 로딩 실패: %s", exc)
         return None, '<span style="color:grey">시장 상태: 설정 파일 오류</span>'
@@ -260,6 +268,7 @@ def get_market_regime_status_info(ma_period_override: Optional[int] = None) -> T
         ticker,
         ma_period=ma_period,
         country=country,
+        delay_days=int(delay_days or 0),
     )
 
 
@@ -267,7 +276,7 @@ def get_market_regime_aux_status_infos(ma_period_override: Optional[int] = None)
     """보조 시장 레짐 상태 목록을 반환합니다 (유효한 항목만)."""
 
     try:
-        ticker_main, ma_period, country, _, _ = get_market_regime_settings()
+        ticker_main, ma_period, country, delay_days, _ = get_market_regime_settings()
     except AccountSettingsError as exc:
         logger.error("시장 레짐 공통 설정 로딩 실패: %s", exc)
         return []
@@ -291,6 +300,7 @@ def get_market_regime_aux_status_infos(ma_period_override: Optional[int] = None)
             ticker,
             ma_period=ma_period,
             country=country,
+            delay_days=int(delay_days or 0),
         )
         if info is not None:
             results.append(info)
