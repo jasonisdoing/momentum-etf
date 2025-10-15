@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,7 +19,13 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.logger import get_app_logger
-from utils.settings_loader import get_backtest_months_range, get_account_precision
+from utils.settings_loader import (
+    AccountSettingsError,
+    get_backtest_months_range,
+    get_account_precision,
+    get_market_regime_settings,
+    load_common_settings,
+)
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
 logger = get_app_logger()
@@ -131,18 +136,19 @@ def print_backtest_summary(
         ensure_blank_line()
         add(f"========= {title} ==========")
 
-    def append_risk_off_period(start_dt: pd.Timestamp, end_dt: pd.Timestamp) -> None:
+    def append_risk_off_period(start_dt: pd.Timestamp, end_dt: pd.Timestamp, ratio: Optional[int] = None) -> None:
         start_ts = pd.to_datetime(start_dt)
         end_ts = pd.to_datetime(end_dt)
 
         if pd.isna(start_ts) or pd.isna(end_ts):
-            add("| 투자 중단: N/A")
+            add("| 투자 축소: N/A")
             return
 
         diff_days = (end_ts - start_ts).days
         trading_days = diff_days + 1 if diff_days >= 0 else 0
 
-        add(f"| 투자 중단: {start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')}" f" ({trading_days} 거래일)")
+        invest_ratio = 100 if ratio is None else max(0, min(100, int(ratio)))
+        add(f"| 투자 축소({invest_ratio}% 투자): " f"{start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')} ({trading_days} 거래일)")
 
     add_section_heading("사용된 설정값")
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
@@ -154,19 +160,19 @@ def print_backtest_summary(
     # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
     stop_loss_label = f"{holding_stop_loss_pct:.0f}%"
 
-    market_regime_enabled = True
-
-    regime_filter_ticker = merged_strategy.get("MARKET_REGIME_FILTER_TICKER")
-    if not regime_filter_ticker:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_TICKER' 값이 필요합니다.")
-
-    regime_filter_ma_raw = merged_strategy.get("MARKET_REGIME_FILTER_MA_PERIOD")
-    if regime_filter_ma_raw is None:
-        raise ValueError("strategy 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
     try:
-        regime_filter_ma_period = int(regime_filter_ma_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
+        common_settings = load_common_settings()
+        (
+            regime_filter_ticker,
+            regime_filter_ma_period,
+            regime_filter_country,
+            regime_filter_delay_days,
+            regime_filter_equity_ratio,
+        ) = get_market_regime_settings(common_settings)
+    except AccountSettingsError as exc:
+        raise ValueError(str(exc)) from exc
+
+    market_regime_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
     used_settings = {
         "계정": account_id.upper(),
@@ -181,6 +187,9 @@ def print_backtest_summary(
         "시장 위험 필터": "활성" if market_regime_enabled else "비활성",
         "시장 위험 필터 티커": regime_filter_ticker,
         "시장 위험 필터 MA 기간": f"{regime_filter_ma_period}일",
+        "시장 위험 필터 시장": regime_filter_country.upper(),
+        "시장 위험 필터 적용 지연": f"{regime_filter_delay_days}일",
+        "위험 회피 시 목표 주식 비중": f"{regime_filter_equity_ratio}%",
     }
 
     if currency != "KRW":
@@ -301,17 +310,22 @@ def print_backtest_summary(
     add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
 
     risk_off_periods = summary.get("risk_off_periods")
+    regime_equity_ratio = summary.get("regime_filter_equity_ratio")
     if isinstance(risk_off_periods, pd.DataFrame):
         if not risk_off_periods.empty:
             for _, row in risk_off_periods.iterrows():
-                append_risk_off_period(row.get("start"), row.get("end"))
+                append_risk_off_period(row.get("start"), row.get("end"), regime_equity_ratio)
         else:
-            add("| 투자 중단: N/A")
+            add("| 투자 축소: N/A")
     elif risk_off_periods:
-        for start, end in risk_off_periods:
-            append_risk_off_period(start, end)
+        for period in risk_off_periods:
+            if isinstance(period, (list, tuple)):
+                if len(period) >= 3:
+                    append_risk_off_period(period[0], period[1], period[2])
+                elif len(period) == 2:
+                    append_risk_off_period(period[0], period[1], regime_equity_ratio)
     else:
-        add("| 투자 중단: N/A")
+        add("| 투자 축소: N/A")
 
     add(f"| 초기 자본: {money_formatter(initial_capital_local)}")
     if currency != "KRW":
@@ -746,21 +760,7 @@ def dump_backtest_log(
     path = base_dir / f"backtest_{account_id}.txt"
     lines: List[str] = []
 
-    start_stamp = datetime.now().isoformat(timespec="seconds")
-    legacy_header = [
-        f"백테스트 결과가 다음 파일에 저장됩니다: data/results/backtest_{account_id}.txt",
-        "",
-        (
-            f"{country_code.upper()} 시장 ETF를 대상으로 "
-            f"{getattr(result, 'months_range', _default_months_range())}개월 기간 백테스트를 실행합니다."
-        ),
-        f"계정별 설정 파일(data/settings/account/{account_id}.json)을 사용하여 전략을 적용합니다.",
-        f"실행 시간: {start_stamp} | 테스트 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}",
-        "",
-    ]
-    lines.extend(legacy_header)
-
-    lines.append(f"백테스트 로그 생성: {datetime.now().isoformat(timespec='seconds')}")
+    lines.append(f"백테스트 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")
     lines.append(f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}")
     base_line = f"초기 자본: {result.initial_capital:,.0f} {result.currency or 'KRW'}"
     if (result.currency or "KRW").upper() != "KRW":

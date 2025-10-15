@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Mapping
 
 from utils.logger import get_app_logger
 
@@ -112,45 +112,56 @@ def _load_tune_settings() -> Dict[str, Any]:
 
 def get_tune_month_configs() -> List[Dict[str, Any]]:
     settings = _load_tune_settings()
-    root = settings.get("COMMON_CONSTANTS")
-    if not isinstance(root, dict):
-        return []
-
-    entries = root.get("MONTHS_CONFIG")
-    if not isinstance(entries, list):
-        return []
-
     normalized: List[Dict[str, Any]] = []
-    for item in entries:
-        if not isinstance(item, dict):
-            continue
 
-        months_raw = item.get("MONTHS_RANGE")
-        weight_raw = item.get("weight", 0)
-        source = item.get("source")
-
+    def _append(months_raw: Any, *, weight: float = 1.0, source: Any = None) -> None:
         try:
             months_range = int(months_raw)
         except (TypeError, ValueError):
-            continue
-
+            return
         if months_range <= 0:
-            continue
-
-        try:
-            weight = float(weight_raw)
-        except (TypeError, ValueError):
-            weight = 0.0
-
+            return
         normalized.append(
             {
                 "months_range": months_range,
-                "weight": weight,
+                "weight": float(weight),
                 "source": source,
             }
         )
 
-    return normalized
+    if isinstance(settings, dict):
+        top_level_months = settings.get("MONTHS_RANGE")
+        if top_level_months is not None:
+            _append(top_level_months, weight=1.0, source="default")
+
+        root = settings.get("COMMON_CONSTANTS")
+        if isinstance(root, dict):
+            entries = root.get("MONTHS_CONFIG")
+            if isinstance(entries, list):
+                for item in entries:
+                    if not isinstance(item, dict):
+                        continue
+                    weight_raw = item.get("weight", 0.0)
+                    try:
+                        weight_val = float(weight_raw)
+                    except (TypeError, ValueError):
+                        weight_val = 0.0
+                    _append(
+                        item.get("MONTHS_RANGE"),
+                        weight=weight_val,
+                        source=item.get("source"),
+                    )
+
+    if not normalized:
+        return []
+
+    seen: Dict[int, Dict[str, Any]] = {}
+    for entry in normalized:
+        months_range = entry["months_range"]
+        if months_range not in seen:
+            seen[months_range] = entry
+
+    return list(seen.values())
 
 
 @lru_cache(maxsize=None)
@@ -313,3 +324,72 @@ def get_country_precision(country: str) -> Dict[str, Any]:  # pragma: no cover
 
 def get_country_slack_channel(country: str) -> Optional[str]:  # pragma: no cover
     return get_account_slack_channel(country)
+
+
+def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str, int, int]:
+    """공통 설정에서 메인 시장 레짐 필터 설정을 반환합니다."""
+
+    if isinstance(common_settings, Mapping):
+        settings_view: Mapping[str, Any] = common_settings
+    else:
+        settings_view = load_common_settings()
+
+    ticker_raw = settings_view.get("MARKET_REGIME_FILTER_TICKER_MAIN")
+    ticker = str(ticker_raw or "").strip()
+    if not ticker:
+        raise AccountSettingsError("공통 설정에 'MARKET_REGIME_FILTER_TICKER_MAIN' 값이 필요합니다.")
+
+    ma_raw = settings_view.get("MARKET_REGIME_FILTER_MA_PERIOD")
+    if ma_raw is None:
+        raise AccountSettingsError("공통 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
+
+    try:
+        ma_period = int(ma_raw)
+    except (TypeError, ValueError) as exc:  # noqa: PERF203
+        raise AccountSettingsError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
+
+    if ma_period <= 0:
+        raise AccountSettingsError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 0보다 커야 합니다.")
+
+    country_raw = settings_view.get("MARKET_REGIME_FILTER_COUNTRY")
+    country = str(country_raw or "us").strip().lower() or "us"
+
+    delay_raw = settings_view.get("MARKET_REGIME_FILTER_DELAY_DAY", 0)
+    try:
+        delay_days = int(delay_raw)
+    except (TypeError, ValueError):
+        delay_days = 0
+    else:
+        if delay_days < 0:
+            delay_days = 0
+
+    ratio_raw = settings_view.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+    if ratio_raw is None:
+        risk_off_ratio = None
+    else:
+        try:
+            risk_off_ratio = int(ratio_raw)
+        except (TypeError, ValueError) as exc:  # noqa: PERF203
+            raise AccountSettingsError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 정수가 아닙니다.") from exc
+        if not (0 <= risk_off_ratio <= 100):
+            raise AccountSettingsError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
+
+    return ticker, ma_period, country, delay_days, risk_off_ratio
+
+
+def get_market_regime_aux_tickers(common_settings: Optional[Mapping[str, Any]] = None) -> List[str]:
+    """공통 설정에 정의된 보조 레짐 필터 티커 목록을 반환합니다."""
+
+    if isinstance(common_settings, Mapping):
+        settings_view: Mapping[str, Any] = common_settings
+    else:
+        settings_view = load_common_settings()
+
+    aux_raw = settings_view.get("MARKET_REGIME_FILTER_TICKERS_AUX", [])
+    tickers: List[str] = []
+    if isinstance(aux_raw, (list, tuple)):
+        for value in aux_raw:
+            ticker = str(value or "").strip()
+            if ticker:
+                tickers.append(ticker)
+    return tickers

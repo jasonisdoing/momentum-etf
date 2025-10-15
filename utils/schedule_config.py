@@ -11,7 +11,7 @@ from utils.settings_loader import AccountSettingsError, get_account_settings
 
 _DEFAULT_TIMEZONES: Dict[str, str] = {
     "kor": "Asia/Seoul",
-    "aus": "Australia/Sydney",
+    "aus": "Asia/Seoul",  # 한국 시간으로 사용 변경 금지!
 }
 
 

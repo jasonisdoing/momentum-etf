@@ -21,15 +21,11 @@ venv/
 .DS_Store
 
 # 캐시 파일
-cache/
 data/stocks/cache/
 
 # 백테스트 결과
 data/results
 
-
-# 서버에 수동으로 넣어놓음(chmod +x update.sh 충돌때문에)
-update.sh
 
 # Streamlit secrets
 .streamlit/secrets.toml

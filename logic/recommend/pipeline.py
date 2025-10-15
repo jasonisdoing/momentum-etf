@@ -18,6 +18,7 @@ from utils.settings_loader import (
     AccountSettingsError,
     get_account_settings,
     get_strategy_rules,
+    load_common_settings,
 )
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 from strategies.maps.shared import sort_decisions_by_order_and_score
@@ -29,12 +30,13 @@ from logic.recommend.history import (
 )
 from utils.data_loader import (
     fetch_ohlcv,
-    fetch_ohlcv_for_tickers,
+    prepare_price_data,
     get_latest_trading_day,
     get_next_trading_day,
     count_trading_days,
 )
 from utils.db_manager import get_db_connection
+from logic.recommend.market import get_market_regime_status_info
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -339,6 +341,19 @@ def _resolve_state_order(state: str) -> int:
     return int(cfg.get("order", 99))
 
 
+def _join_phrase_parts(*parts: Optional[str]) -> str:
+    """Join non-empty phrase components with a separator."""
+
+    cleaned: List[str] = []
+    for part in parts:
+        if part is None:
+            continue
+        text = str(part).strip()
+        if text:
+            cleaned.append(text)
+    return " | ".join(cleaned)
+
+
 def _format_sell_replace_phrase(phrase: str, *, etf_meta: Dict[str, Dict[str, Any]]) -> str:
     if not phrase or "교체매도" not in phrase:
         return phrase
@@ -355,6 +370,22 @@ def _format_sell_replace_phrase(phrase: str, *, etf_meta: Dict[str, Dict[str, An
     target_name = target_meta.get("name") or target_ticker
 
     return f"교체매도 {ratio_text} - {target_name}({target_ticker})로 교체"
+
+
+def _append_risk_off_suffix(phrase: str, ratio: Optional[int]) -> str:
+    if ratio is None:
+        return phrase
+    try:
+        ratio_int = int(ratio)
+    except (TypeError, ValueError):
+        return phrase
+    if not (0 <= ratio_int <= 100) or ratio_int >= 100:
+        return phrase
+    phrase_str = str(phrase or "")
+    if "시장위험회피" in phrase_str:
+        return phrase_str
+    suffix = f"❗시장위험회피 매도❗ (목표 {ratio_int}%)"
+    return f"{phrase_str} | {suffix}" if phrase_str else suffix
 
 
 def _normalize_buy_date(value: Any) -> Optional[pd.Timestamp]:
@@ -514,6 +545,20 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     max_per_category = int(strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0)
 
+    def _parse_regime_ratio(raw_value: Any, *, source: str) -> int:
+        try:
+            parsed = int(raw_value)
+        except (TypeError, ValueError) as exc:  # noqa: PERF203
+            raise ValueError(f"{account_id} 계좌의 {source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 유효한 정수가 아닙니다.") from exc
+        if not (0 <= parsed <= 100):
+            raise ValueError(f"{account_id} 계좌의 {source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
+        return parsed
+
+    regime_filter_equity_ratio: Optional[int] = None
+    ratio_raw_from_strategy = strategy_static.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+    if ratio_raw_from_strategy is not None:
+        regime_filter_equity_ratio = _parse_regime_ratio(ratio_raw_from_strategy, source="전략(static)")
+
     # ETF 목록 가져오기
     etf_universe = get_etfs(country_code) or []
     logger.info(
@@ -580,7 +625,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     prefetched_data: Dict[str, pd.DataFrame] = {}
     months_back = max(12, ma_period)
     warmup_days = int(max(ma_period, 1) * 1.5)
-    start_date = (base_date - pd.DateOffset(months=months_back)).strftime("%Y-%m-%d")
+
+    common_settings = load_common_settings()
+    cache_seed_raw = (common_settings or {}).get("CACHE_START_DATE")
+    prefetch_start_dt = base_date - pd.DateOffset(months=months_back)
+    if cache_seed_raw:
+        try:
+            cache_seed_dt = pd.to_datetime(cache_seed_raw).normalize()
+            if cache_seed_dt > prefetch_start_dt:
+                prefetch_start_dt = cache_seed_dt
+        except Exception:
+            pass
+    start_date = prefetch_start_dt.strftime("%Y-%m-%d")
     end_date = base_date.strftime("%Y-%m-%d")
     logger.info(
         "[%s] 가격 데이터 로딩 시작 (기간 %s~%s, 대상 %d개)",
@@ -590,10 +646,11 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         len(tickers_all),
     )
     fetch_start = time.perf_counter()
-    prefetched_data, missing_prefetch = fetch_ohlcv_for_tickers(
-        tickers_all,
-        country_code,
-        date_range=[start_date, end_date],
+    prefetched_data, missing_prefetch = prepare_price_data(
+        tickers=tickers_all,
+        country=country_code,
+        start_date=start_date,
+        end_date=end_date,
         warmup_days=warmup_days,
     )
     logger.info(
@@ -678,6 +735,32 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         missing_logged.update(missing_data_tickers)
 
     regime_info = None
+    regime_filter_enabled = True
+    common_ratio_value: Optional[Any] = None
+    try:
+        common_settings = load_common_settings()
+    except Exception as exc:
+        logger.warning("시장 레짐 공통 설정 로드 실패: %s", exc)
+        common_settings = None
+    else:
+        regime_filter_enabled = bool((common_settings or {}).get("MARKET_REGIME_FILTER_ENABLED", True))
+        common_ratio_value = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
+
+    if regime_filter_equity_ratio is None and common_ratio_value is not None:
+        regime_filter_equity_ratio = _parse_regime_ratio(common_ratio_value, source="공통 설정")
+
+    if regime_filter_enabled and regime_filter_equity_ratio is None:
+        raise ValueError(f"{account_id} 계좌에서 시장 레짐 필터가 활성화되어 있지만 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정을 찾을 수 없습니다.")
+
+    if regime_filter_enabled:
+        try:
+            regime_info_candidate, _ = get_market_regime_status_info()
+        except Exception as exc:
+            logger.warning("시장 레짐 정보 계산 실패: %s", exc)
+        else:
+            if regime_info_candidate:
+                regime_info_candidate["risk_off_equity_ratio"] = regime_filter_equity_ratio
+                regime_info = regime_info_candidate
 
     # 쿨다운 정보 계산
     trade_cooldown_info = calculate_trade_cooldown_info(
@@ -714,6 +797,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             consecutive_holding_info=consecutive_holding_info,
             trade_cooldown_info=trade_cooldown_info,
             cooldown_days=int(strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 5)) or 0),
+            risk_off_equity_ratio=regime_filter_equity_ratio,
         )
         logger.info(
             "[%s] 일일 의사결정 계산 완료 (%.1fs, 결과 %d개)",
@@ -900,18 +984,35 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         # 당일 매수 체결된 종목 처리
         if ticker in buy_traded_today:
             state = "HOLD"
-            phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
             if holding_days_val == 0:
                 holding_days_val = 1
         # 추천에 따라 오늘 신규 매수해야 할 종목
         elif state in {"BUY", "BUY_REPLACE"}:
-            phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
+            phrase_str = str(phrase)
+            risk_off_ratio = decision.get("risk_off_target_ratio")
+
+            if state == "BUY_REPLACE":
+                replacement_note = phrase_str if phrase_str else ""
+                combined_phrase = _join_phrase_parts(DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수"), replacement_note)
+                phrase = _append_risk_off_suffix(combined_phrase, risk_off_ratio)
+            else:  # state == "BUY"
+                base_new_phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
+                if "시장위험회피" in phrase_str or phrase_str == DECISION_NOTES.get("RISK_OFF_SELL"):
+                    chosen_phrase = base_new_phrase
+                elif phrase_str:
+                    chosen_phrase = phrase_str
+                else:
+                    chosen_phrase = base_new_phrase
+                phrase = _append_risk_off_suffix(chosen_phrase, risk_off_ratio)
             if holding_days_val == 0:
                 holding_days_val = 1
         # 이미 보유 중인 종목이 오늘 신규 편입된 경우
         elif is_currently_held and bought_today:
             state = "HOLD"
-            phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
             if holding_days_val == 0:
                 holding_days_val = 1
 
@@ -1000,16 +1101,21 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     wait_items.sort(key=lambda x: x["score"], reverse=True)
 
     # 카테고리 보유 제한이 있는 경우, 동일 카테고리 수를 체크
-    category_counts = {}
-    if max_per_category and max_per_category > 0:
-        for item in results:
-            if item["state"] in {"HOLD", "BUY", "BUY_REPLACE"}:
-                category = str(item.get("category") or "").strip()
-                if category:
-                    category_counts[category] = category_counts.get(category, 0) + 1
+    category_counts: Dict[str, int] = {}
+    category_counts_normalized: Dict[str, int] = {}
+    category_limit = max_per_category if max_per_category and max_per_category > 0 else 1
+    for item in results:
+        if item["state"] in {"HOLD", "BUY", "BUY_REPLACE"}:
+            category_raw = item.get("category")
+            category = str(category_raw or "").strip()
+            if category:
+                category_counts[category] = category_counts.get(category, 0) + 1
+            category_key = _normalize_category_value(category_raw)
+            if category_key:
+                category_counts_normalized[category_key] = category_counts_normalized.get(category_key, 0) + 1
 
     current_holdings_count = len(holdings)
-    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_REGIME_FILTER"}
+    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS"}
     buy_state_set = {"BUY", "BUY_REPLACE"}
     planned_sell_count = sum(1 for item in results if item["state"] in sell_state_set)
     planned_buy_count = sum(1 for item in results if item["state"] in buy_state_set)
@@ -1017,9 +1123,28 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
     additional_buy_slots = max(0, portfolio_topn - projected_holdings)
 
-    for i, item in enumerate(wait_items[:additional_buy_slots]):
+    promoted = 0
+    for item in wait_items:
+        if promoted >= additional_buy_slots:
+            break
+
+        category_raw = item.get("category")
+        category = str(category_raw or "").strip()
+        category_key = _normalize_category_value(category_raw)
+
+        if category_key and category_counts_normalized.get(category_key, 0) >= category_limit:
+            item["phrase"] = DECISION_NOTES["CATEGORY_DUP"]
+            continue
+
         item["state"] = "BUY"
         item["phrase"] = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
+        promoted += 1
+
+        if category:
+            category_counts[category] = category_counts.get(category, 0) + 1
+        if category_key:
+            category_counts_normalized[category_key] = category_counts_normalized.get(category_key, 0) + 1
+
         # 신규 매수로 전환된 종목은 holdings 정보가 없으므로 기본값 추가
         holdings.setdefault(
             item["ticker"],
@@ -1032,7 +1157,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         "SELL_TREND",
         "SELL_REPLACE",
         "CUT_STOPLOSS",
-        "SELL_REGIME_FILTER",
     }
     buy_state_set = {"BUY", "BUY_REPLACE"}
 
@@ -1129,3 +1253,13 @@ __all__ = [
     "generate_account_recommendation_report",
     "generate_country_recommendation_report",
 ]
+
+
+def _normalize_category_value(category: Optional[str]) -> Optional[str]:
+    """Normalize category strings for comparison."""
+    if category is None:
+        return None
+    category_str = str(category).strip()
+    if not category_str:
+        return None
+    return category_str.upper()

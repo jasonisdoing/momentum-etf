@@ -93,7 +93,7 @@ def render_migration_page() -> None:
     with st.form("account_migration_form"):
         source_account = st.selectbox("변경할 계정 ID", available_accounts)
         target_account_input = st.text_input("새 계정 ID", placeholder="예: new_account")
-        submitted = st.form_submit_button("확인", use_container_width=True)
+        submitted = st.form_submit_button("확인", width="stretch")
 
     if not submitted:
         return

@@ -18,6 +18,16 @@ logger = get_app_logger()
 from utils.data_loader import count_trading_days
 
 
+def _normalize_category_value(category: Optional[str]) -> Optional[str]:
+    """Return an uppercase trimmed category key for comparisons."""
+    if category is None:
+        return None
+    category_str = str(category).strip()
+    if not category_str:
+        return None
+    return category_str.upper()
+
+
 def _resolve_entry_price(series: Any, buy_date: Optional[pd.Timestamp]) -> Optional[float]:
     """Return the entry price by locating the first available close on/after the buy date."""
 
@@ -68,6 +78,7 @@ def generate_daily_recommendations_for_portfolio(
     consecutive_holding_info: Dict[str, Dict],
     trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
     cooldown_days: int,
+    risk_off_equity_ratio: int = 100,
 ) -> List[Dict[str, Any]]:
     """
     주어진 데이터를 기반으로 포트폴리오의 일일 매매 추천를 생성합니다.
@@ -128,10 +139,14 @@ def generate_daily_recommendations_for_portfolio(
 
     # 현재 보유 종목의 카테고리 (TBD 제외)
     held_categories = set()
+    held_category_keys = set()
     for tkr in holdings.keys():
         category = etf_meta.get(tkr, {}).get("category")
         if category and category != "TBD":
             held_categories.add(category)
+            normalized = _normalize_category_value(category)
+            if normalized:
+                held_category_keys.add(normalized)
 
     # 포지션 비중 가이드라인: 모든 국가 동일 규칙 적용 (min_pos는 현재 신규 매수 로직에서 미사용)
     # min_pos = 1.0 / (denom * 2.0)  # 최소 편입 비중
@@ -322,22 +337,37 @@ def generate_daily_recommendations_for_portfolio(
     universe_tickers = {etf["ticker"] for etf in full_etf_meta.values()}  # Use full_etf_meta for universe
 
     is_risk_off = regime_info and regime_info.get("is_risk_off", False)
+    if risk_off_equity_ratio is None:
+        raise ValueError("risk_off_equity_ratio 값이 필요합니다.")
+    try:
+        risk_off_target_ratio = int(risk_off_equity_ratio)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("risk_off_equity_ratio 값은 정수여야 합니다.") from exc
+    if not (0 <= risk_off_target_ratio <= 100):
+        raise ValueError("risk_off_equity_ratio 값은 0부터 100 사이여야 합니다.")
+    risk_off_effective = is_risk_off and risk_off_target_ratio < 100
+    full_risk_off_exit = risk_off_effective and risk_off_target_ratio <= 0
+    partial_risk_off = risk_off_effective and risk_off_target_ratio > 0
 
     # WAIT 후보 목록과 남은 슬롯 수는 모든 시나리오에서 참조되므로 기본값을 미리 정의합니다.
     wait_candidates_raw: List[Dict] = []
     slots_to_fill = denom - held_count
 
-    if is_risk_off:
+    wait_candidates_raw: List[Dict] = [
+        d for d in decisions if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] in universe_tickers and d.get("recommend_enabled", True)
+    ]
+
+    if risk_off_effective:
         for decision in decisions:
+            decision["risk_off_target_ratio"] = risk_off_target_ratio
             if decision["state"] == "HOLD":
-                decision["state"] = "SELL_REGIME_FILTER"
-                decision["row"][4] = "SELL_REGIME_FILTER"
+                note_text = DECISION_NOTES["RISK_OFF_SELL"]
+                if partial_risk_off:
+                    note_text = f"{note_text} (목표 {risk_off_target_ratio}%)"
+                decision["row"][-1] = note_text
+                decision["row"][4] = "HOLD"
 
-                d_sell = data_by_tkr.get(decision["tkr"])
-                if d_sell:
-                    decision["row"][-1] = DECISION_NOTES["RISK_OFF_SELL"]
-
-            if decision.get("buy_signal"):
+            if decision.get("buy_signal") and full_risk_off_exit:
                 decision["buy_signal"] = False
                 if decision["state"] == "WAIT":
                     original_phrase = decision["row"][-1]
@@ -345,137 +375,158 @@ def generate_daily_recommendations_for_portfolio(
                         decision["row"][-1] = f"{DECISION_NOTES['RISK_OFF']} ({original_phrase})"
                     else:
                         decision["row"][-1] = DECISION_NOTES["RISK_OFF"]
-    else:
-        # 모든 'WAIT' 상태의 매수 후보 목록을 미리 정의합니다.
-        wait_candidates_raw = [
-            d for d in decisions if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] in universe_tickers and d.get("recommend_enabled", True)
-        ]
-
-        # 신규 매수 로직: 빈 슬롯이 있을 때 실행
-        if slots_to_fill > 0:
-            selected_candidates, rejected_candidates = select_candidates_by_category(
-                wait_candidates_raw,
-                etf_meta,
-                held_categories=held_categories,
-                max_count=slots_to_fill,
-                skip_held_categories=True,
-            )
-
-            for cand, reason in rejected_candidates:
-                if reason == "category_held":
-                    cand["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
-
-            for cand in selected_candidates:
-                cand_category = etf_meta.get(cand["tkr"], {}).get("category")
-                # 매수 실행
-                cand["state"], cand["row"][4] = "BUY", "BUY"
-                buy_price = float(data_by_tkr.get(cand["tkr"], {}).get("price", 0))
-                if buy_price > 0:
-                    budget = (current_equity / denom) if denom > 0 else 0
-                    if budget > total_cash:
-                        budget = total_cash
-
-                    if budget > 0:
-                        cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
-                        if cand_category and cand_category != "TBD":
-                            held_categories.add(cand_category)
-                    else:
-                        cand["row"][-1] = DECISION_NOTES["INSUFFICIENT_CASH"]
-                else:
-                    cand["row"][-1] = DECISION_NOTES["NO_PRICE"]
-
-        # 교체 매매 로직: 포트폴리오에 빈 슬롯이 있더라도, 더 좋은 종목으로 교체할 기회가 있으면 실행
-        replacement_candidates, _ = select_candidates_by_category(
-            [cand for cand in wait_candidates_raw if cand.get("state") != "BUY"],
+    # 신규 매수 로직: 리스크 오프가 아닐 때만 실행
+    if not risk_off_effective and slots_to_fill > 0:
+        selected_candidates, rejected_candidates = select_candidates_by_category(
+            wait_candidates_raw,
             etf_meta,
-            held_categories=None,
-            max_count=None,
-            skip_held_categories=False,
+            held_categories=held_categories,
+            max_count=slots_to_fill,
+            skip_held_categories=True,
         )
 
-        # 2. 교체 로직 실행
-        current_held_stocks = [d for d in decisions if d["state"] == "HOLD"]
-        current_held_stocks.sort(key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"))
+        for cand, reason in rejected_candidates:
+            if reason == "category_held":
+                cand["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
 
-        for best_new in replacement_candidates:
-            if not current_held_stocks:
-                break
+        for cand in selected_candidates:
+            cand_category = etf_meta.get(cand["tkr"], {}).get("category")
+            cand_category_key = _normalize_category_value(cand_category)
 
-            wait_stock_category = etf_meta.get(best_new["tkr"], {}).get("category")
+            if cand_category_key and cand_category_key in held_category_keys:
+                cand["state"], cand["row"][4] = "WAIT", "WAIT"
+                cand["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
+                cand["buy_signal"] = False
+                continue
 
-            # 2-1. 동일 카테고리 보유 종목과 비교
-            held_stock_same_category = next(
-                (
-                    s
-                    for s in current_held_stocks
-                    if wait_stock_category and wait_stock_category != "TBD" and etf_meta.get(s["tkr"], {}).get("category") == wait_stock_category
-                ),
-                None,
-            )
+            # 매수 실행
+            cand["state"], cand["row"][4] = "BUY", "BUY"
+            buy_price = float(data_by_tkr.get(cand["tkr"], {}).get("price", 0))
+            if buy_price > 0:
+                budget = (current_equity / denom) if denom > 0 else 0
+                if budget > total_cash:
+                    budget = total_cash
 
-            ticker_to_sell = None
-            if held_stock_same_category:
-                # 동일 카테고리 보유 종목이 있으면, 점수만 비교 (임계값 미적용)
-                if (
-                    pd.notna(best_new["score"])
-                    and pd.notna(held_stock_same_category["score"])
-                    and best_new["score"] > held_stock_same_category["score"] + replace_threshold
-                ):
-                    ticker_to_sell = held_stock_same_category["tkr"]
+                if budget > 0:
+                    cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
+                    if cand_category and cand_category != "TBD":
+                        held_categories.add(cand_category)
+                        if cand_category_key:
+                            held_category_keys.add(cand_category_key)
                 else:
-                    # 점수가 더 높지 않으면 교체하지 않음. 루프는 계속 진행하여 다른 카테고리 교체 가능성 확인
-                    pass
+                    cand["row"][-1] = DECISION_NOTES["INSUFFICIENT_CASH"]
             else:
-                # 2-2. 동일 카테고리가 없으면, 가장 약한 보유 종목과 비교 (임계값 적용)
-                if current_held_stocks:
-                    weakest_held = current_held_stocks[0]
-                    if (
-                        pd.notna(best_new["score"])
-                        and pd.notna(weakest_held["score"])
-                        and best_new["score"] > weakest_held["score"] + replace_threshold
-                    ):
-                        ticker_to_sell = weakest_held["tkr"]
+                cand["row"][-1] = DECISION_NOTES["NO_PRICE"]
 
-            if ticker_to_sell:
-                sell_block_for_candidate = sell_cooldown_block.get(ticker_to_sell)
-                if sell_block_for_candidate and cooldown_days > 0:
-                    blocked_name = etf_meta.get(ticker_to_sell, {}).get("name") or ticker_to_sell
-                    best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
-                    best_new["row"][-1] = f"쿨다운 {cooldown_days}일 대기중 - {blocked_name}"
-                    best_new["buy_signal"] = False
-                    continue
+    # 교체 매매 로직: 포트폴리오에 빈 슬롯이 있더라도, 더 좋은 종목으로 교체할 기회가 있으면 실행
+    replacement_candidates, _ = select_candidates_by_category(
+        [cand for cand in wait_candidates_raw if cand.get("state") != "BUY"],
+        etf_meta,
+        held_categories=None,
+        max_count=None,
+        skip_held_categories=False,
+    )
 
-                # 3. 교체 실행
-                d_weakest = data_by_tkr.get(ticker_to_sell)
-                if d_weakest:
-                    sell_phrase = DECISION_NOTES["REPLACE_SELL"]
+    # 2. 교체 로직 실행
+    current_held_stocks = [d for d in decisions if d["state"] == "HOLD"]
+    current_held_stocks.sort(key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"))
 
-                    for d_item in decisions:
-                        if d_item["tkr"] == ticker_to_sell:
-                            d_item["state"], d_item["row"][4], d_item["row"][-1] = (
-                                "SELL_REPLACE",
-                                "SELL_REPLACE",
-                                sell_phrase,
-                            )
-                            break
+    for best_new in replacement_candidates:
+        if not current_held_stocks:
+            break
 
-                # (b) 매수 추천 생성
-                best_new["state"], best_new["row"][4] = "BUY_REPLACE", "BUY_REPLACE"
-                buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
-                if buy_price > 0:
-                    best_new["row"][-1] = build_buy_replace_note(
-                        ticker_to_sell,
-                        full_etf_meta.get(ticker_to_sell, {}).get("name", ticker_to_sell),
+        wait_stock_category = etf_meta.get(best_new["tkr"], {}).get("category")
+        wait_stock_category_key = _normalize_category_value(wait_stock_category)
+
+        # 2-1. 동일 카테고리 보유 종목과 비교
+        held_stock_same_category = next(
+            (
+                s
+                for s in current_held_stocks
+                if wait_stock_category and wait_stock_category != "TBD" and etf_meta.get(s["tkr"], {}).get("category") == wait_stock_category
+            ),
+            None,
+        )
+
+        ticker_to_sell = None
+        if held_stock_same_category:
+            # 동일 카테고리 보유 종목이 있으면, 점수만 비교 (임계값 미적용)
+            if (
+                pd.notna(best_new["score"])
+                and pd.notna(held_stock_same_category["score"])
+                and best_new["score"] > held_stock_same_category["score"] + replace_threshold
+            ):
+                ticker_to_sell = held_stock_same_category["tkr"]
+        else:
+            # 2-2. 동일 카테고리가 없으면, 가장 약한 보유 종목과 비교 (임계값 적용)
+            if current_held_stocks:
+                weakest_held = current_held_stocks[0]
+                if pd.notna(best_new["score"]) and pd.notna(weakest_held["score"]) and best_new["score"] > weakest_held["score"] + replace_threshold:
+                    ticker_to_sell = weakest_held["tkr"]
+
+        if ticker_to_sell:
+            sell_block_for_candidate = sell_cooldown_block.get(ticker_to_sell)
+            if sell_block_for_candidate and cooldown_days > 0:
+                blocked_name = etf_meta.get(ticker_to_sell, {}).get("name") or ticker_to_sell
+                best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
+                best_new["row"][-1] = f"쿨다운 {cooldown_days}일 대기중 - {blocked_name}"
+                best_new["buy_signal"] = False
+                continue
+
+            # 3. 교체 실행
+            d_weakest = data_by_tkr.get(ticker_to_sell)
+            if d_weakest:
+                replacement_name = best_new.get("row", [None, None, None])[2]
+                if not replacement_name:
+                    replacement_name = (
+                        etf_meta.get(best_new["tkr"], {}).get("name") or full_etf_meta.get(best_new["tkr"], {}).get("name") or best_new["tkr"]
                     )
-                else:
-                    best_new["row"][-1] = f"{ticker_to_sell}(을)를 대체 (가격정보 없음)"
-                current_held_stocks = [s for s in current_held_stocks if s["tkr"] != ticker_to_sell]
-                best_new_as_held = best_new.copy()
-                best_new_as_held["state"] = "HOLD"
-                current_held_stocks.append(best_new_as_held)
-                current_held_stocks.sort(key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"))
+                sell_base = DECISION_MESSAGES.get("SELL_REPLACE", DECISION_NOTES.get("REPLACE_SELL", "교체 매도"))
 
-    SELL_STATE_SET = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_REGIME_FILTER"}
+                for d_item in decisions:
+                    if d_item["tkr"] == ticker_to_sell:
+                        pl_raw = d_item.get("hold_return_pct")
+                        try:
+                            pl_pct = float(pl_raw)
+                        except (TypeError, ValueError):
+                            pl_pct = 0.0
+                        sell_phrase = f"{sell_base} 손익률 {pl_pct:+.2f}% - {replacement_name}({best_new['tkr']}) 교체"
+                        d_item["state"], d_item["row"][4], d_item["row"][-1] = (
+                            "SELL_REPLACE",
+                            "SELL_REPLACE",
+                            sell_phrase,
+                        )
+                        break
+
+            # (b) 매수 추천 생성
+            best_new["state"], best_new["row"][4] = "BUY_REPLACE", "BUY_REPLACE"
+            buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
+            if buy_price > 0:
+                best_new["row"][-1] = build_buy_replace_note(
+                    ticker_to_sell,
+                    full_etf_meta.get(ticker_to_sell, {}).get("name", ticker_to_sell),
+                )
+            else:
+                best_new["row"][-1] = f"{ticker_to_sell}(을)를 대체 (가격정보 없음)"
+
+            sold_category = etf_meta.get(ticker_to_sell, {}).get("category")
+            if sold_category and sold_category in held_categories:
+                held_categories.discard(sold_category)
+                sold_key = _normalize_category_value(sold_category)
+                if sold_key:
+                    held_category_keys.discard(sold_key)
+            if wait_stock_category and wait_stock_category != "TBD":
+                held_categories.add(wait_stock_category)
+            if wait_stock_category_key:
+                held_category_keys.add(wait_stock_category_key)
+
+            current_held_stocks = [s for s in current_held_stocks if s["tkr"] != ticker_to_sell]
+            best_new_as_held = best_new.copy()
+            best_new_as_held["state"] = "HOLD"
+            current_held_stocks.append(best_new_as_held)
+            current_held_stocks.sort(key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"))
+
+    SELL_STATE_SET = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS"}
     BUY_STATE_SET = {"BUY", "BUY_REPLACE"}
 
     if cooldown_days and cooldown_days > 0:
@@ -489,13 +540,17 @@ def generate_daily_recommendations_for_portfolio(
                     continue
                 d["state"] = "HOLD"
                 d["row"][4] = "HOLD"
-                d["row"][-1] = _format_cooldown_phrase("최근 매수", sell_info.get("last_buy"))
+                phrase_str = str(d["row"][-1] or "")
+                if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
+                    d["row"][-1] = _format_cooldown_phrase("최근 매수", sell_info.get("last_buy"))
                 d["buy_signal"] = False
 
             if buy_info and d["state"] in BUY_STATE_SET:
                 d["state"] = "WAIT"
                 d["row"][4] = "WAIT"
-                d["row"][-1] = _format_cooldown_phrase("최근 매도", buy_info.get("last_sell"))
+                phrase_str = str(d["row"][-1] or "")
+                if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
+                    d["row"][-1] = _format_cooldown_phrase("최근 매도", buy_info.get("last_sell"))
                 d["buy_signal"] = False
 
     # 최종 목록에서는 WAIT 종목도 모두 노출해, 카테고리별 대표만 보여주는 형태를 피한다.
@@ -503,13 +558,15 @@ def generate_daily_recommendations_for_portfolio(
 
     # 포트폴리오가 가득 찼을 때, 매수 추천되지 않은 WAIT 종목에 사유 기록
     if slots_to_fill <= 0:
-        held_categories = {etf_meta.get(d["tkr"], {}).get("category") for d in decisions if d["state"] == "HOLD"}
+        held_categories_for_full = {etf_meta.get(d["tkr"], {}).get("category") for d in decisions if d["state"] == "HOLD"}
+        held_category_keys_for_full = {_normalize_category_value(cat) for cat in held_categories_for_full if cat and cat != "TBD"}
         for d in final_decisions:
             if d["state"] == "WAIT" and d.get("buy_signal"):
                 # 이미 교체매매 로직에서 사유가 기록된 경우는 제외
                 if not d["row"][-1]:
                     wait_category = etf_meta.get(d["tkr"], {}).get("category")
-                    if wait_category and wait_category != "TBD" and wait_category in held_categories:
+                    wait_category_key = _normalize_category_value(wait_category)
+                    if wait_category_key and wait_category_key in held_category_keys_for_full:
                         # 동일 카테고리 보유로 인한 중복
                         d["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
                     else:
