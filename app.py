@@ -92,6 +92,14 @@ def _render_home_page() -> None:
         if regime_info is None:
             st.markdown(regime_message, unsafe_allow_html=True)
         else:
+            st.caption(
+                "디버그: "
+                f"Ticker={regime_info.get('ticker')} | "
+                f"MA Period={regime_info.get('ma_period')} | "
+                f"Delay Days={load_common_settings().get('MARKET_REGIME_FILTER_DELAY_DAY', 0)} | "
+                f"Last Date={regime_info.get('last_risk_off_start')} -> {regime_info.get('last_risk_off_end')} | "
+                f"Divergence={regime_info.get('proximity_pct'):+.3f}%"
+            )
 
             def _fmt_date(value: Any) -> Optional[str]:
                 if value is None:
