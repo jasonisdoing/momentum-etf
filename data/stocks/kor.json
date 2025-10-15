@@ -374,6 +374,12 @@
                 "listing_date": "2020-01-01",
                 "1_week_avg_volume": 3018283,
                 "1_week_avg_turnover": 25116859240
+            },
+            {
+                "ticker": "334690",
+                "name": "RISE 팔라듐선물(H)",
+                "recommend_enabled": true,
+                "listing_date": "2020-01-02"
             }
         ]
     },
