@@ -341,7 +341,7 @@
         ]
     },
     {
-        "category": "금",
+        "category": "금/은",
         "tickers": [
             {
                 "ticker": "473640",
@@ -395,6 +395,19 @@
                 "listing_date": "2025-09-23",
                 "1_week_avg_volume": 360086,
                 "1_week_avg_turnover": 3588355635
+            }
+        ]
+    },
+    {
+        "category": "베트남",
+        "tickers": [
+            {
+                "ticker": "245710",
+                "name": "ACE 베트남VN30",
+                "recommend_enabled": true,
+                "listing_date": "2020-01-01",
+                "1_week_avg_volume": 130733,
+                "1_week_avg_turnover": 3811373508
             }
         ]
     },
@@ -928,14 +941,6 @@
                 "listing_date": "2020-01-01",
                 "1_week_avg_volume": 11684,
                 "1_week_avg_turnover": 197435605
-            },
-            {
-                "ticker": "245710",
-                "name": "ACE 베트남VN30",
-                "recommend_enabled": true,
-                "listing_date": "2020-01-01",
-                "1_week_avg_volume": 130733,
-                "1_week_avg_turnover": 3811373508
             },
             {
                 "ticker": "251350",

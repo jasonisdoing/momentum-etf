@@ -7,7 +7,8 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "tuning": {
-            "MA_PERIOD": 100,
+            "MA_PERIOD": 40,
+            "_MA_PERIOD": 100,
             "PORTFOLIO_TOPN": 9,
             "REPLACE_SCORE_THRESHOLD": 0.5
         },
