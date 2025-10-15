@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional, List, Tuple
+from datetime import datetime
 
 import streamlit as st
 import pandas as pd
@@ -14,6 +15,12 @@ from logic.recommend.market import (
 )
 from utils.settings_loader import get_market_regime_settings, load_common_settings
 from utils.data_loader import fetch_ohlcv
+from utils.cache_utils import get_cache_path
+
+try:  # pragma: no cover - yfinance는 환경에 따라 설치되지 않을 수 있음
+    import yfinance as yf
+except Exception:  # pragma: no cover
+    yf = None
 
 from utils.account_registry import (
     get_icon_fallback,
@@ -124,10 +131,18 @@ def _render_home_page() -> None:
                     pass
                 df_debug = df_debug[~df_debug.index.duplicated(keep="last")]
 
+                column_lookup: Dict[str, Any] = {}
+                if isinstance(df_debug.columns, pd.MultiIndex):
+                    for col in df_debug.columns:
+                        if isinstance(col, tuple) and len(col) > 0 and col[0]:
+                            column_lookup.setdefault(str(col[0]), col)
+                else:
+                    column_lookup = {str(col): col for col in df_debug.columns}
+
                 price_col = None
                 for candidate in ("Close", "Adj Close", "Price"):
-                    if candidate in df_debug.columns:
-                        price_col = candidate
+                    if candidate in column_lookup:
+                        price_col = column_lookup[candidate]
                         break
 
                 if price_col is not None:
@@ -135,6 +150,12 @@ def _render_home_page() -> None:
                     latest_raw_close = float(df_debug.iloc[-1][price_col])
                     ma_raw = df_debug[price_col].rolling(window=ma_period_debug).mean().iloc[-1]
                     debug_lines.append(f"Raw latest: {latest_raw_date} | Close={latest_raw_close:,.4f} | MA={ma_raw:,.4f}")
+
+                    try:
+                        row_raw_full = df_debug.loc[latest_raw_date]
+                        debug_lines.append("Raw row data: " + row_raw_full.to_dict().__repr__())
+                    except Exception:
+                        pass
 
                     if delay_days > 0 and len(df_debug) > delay_days:
                         df_delayed = df_debug.iloc[:-delay_days]
@@ -149,14 +170,34 @@ def _render_home_page() -> None:
                         f"Delayed latest: {latest_delay_date} | Close={latest_delay_close:,.4f} | MA={ma_delay:,.4f} | Divergence={divergence_delay:+.3f}%"
                     )
 
-                    raw_tail = df_debug.tail(5)[price_col].to_string()
-                    delay_tail = df_delayed.tail(5)[price_col].to_string()
+                    raw_tail = df_debug.loc[:, price_col].tail(5).to_string()
+                    delay_tail = df_delayed.loc[:, price_col].tail(5).to_string()
                     debug_lines.append("Raw tail (Close):\n" + raw_tail)
                     debug_lines.append("Delayed tail (Close):\n" + delay_tail)
                 else:
                     debug_lines.append("가격 컬럼을 찾을 수 없습니다.")
             else:
                 debug_lines.append("가격 데이터를 가져오지 못했습니다.")
+
+            cache_path = get_cache_path("common", ticker)
+            if cache_path.exists():
+                mtime = datetime.fromtimestamp(cache_path.stat().st_mtime)
+                debug_lines.append(f"Cache file: {cache_path} (mtime={mtime})")
+            else:
+                debug_lines.append("Cache file not found.")
+
+            if yf is not None:
+                try:
+                    yf_hist = yf.Ticker(ticker).history(period="5d", interval="1d")
+                    if not yf_hist.empty:
+                        last_idx = yf_hist.index[-1]
+                        last_row = yf_hist.iloc[-1]
+                        close_val = float(last_row.get("Close", float("nan")))
+                        adj_val = float(last_row.get("Adj Close", close_val))
+                        debug_lines.append(f"yfinance latest: {last_idx} | Close={close_val:,.4f} | Adj Close={adj_val:,.4f}")
+                        debug_lines.append("yfinance tail (Close):\n" + yf_hist["Close"].tail(5).to_string())
+                except Exception as exc:  # pragma: no cover - 진단용 출력
+                    debug_lines.append(f"yfinance fetch 오류: {exc}")
 
             if debug_lines:
                 st.code("\n\n".join(debug_lines), language="text")
