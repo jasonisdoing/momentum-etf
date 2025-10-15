@@ -115,98 +115,104 @@ def _render_home_page() -> None:
 
             debug_lines = []
             ticker = regime_info.get("ticker")
-            ma_period_debug = int(regime_info.get("ma_period") or ma_period)
-            country = regime_info.get("country") or "us"
+            # ma_period_debug = int(regime_info.get("ma_period") or ma_period)
+            # country = regime_info.get("country") or "us"
 
-            try:
-                df_debug = fetch_ohlcv(ticker, country=country, months_range=[12, 0], cache_country="regime")
-                if df_debug is None or df_debug.empty:
-                    df_debug = fetch_ohlcv(ticker, country=country, months_range=[12, 0], cache_country="common")
-            except Exception as exc:  # pragma: no cover - 진단용 출력
-                debug_lines.append(f"fetch_ohlcv 오류: {exc}")
-                df_debug = None
-
-            if df_debug is not None and not df_debug.empty:
-                df_debug = df_debug.sort_index()
-                try:
-                    df_debug.index = pd.to_datetime(df_debug.index).normalize()
-                except Exception:
-                    pass
-                df_debug = df_debug[~df_debug.index.duplicated(keep="last")]
-                df_debug = _overlay_recent_history(df_debug, ticker)
-
-                column_lookup: Dict[str, Any] = {}
-                if isinstance(df_debug.columns, pd.MultiIndex):
-                    for col in df_debug.columns:
-                        if isinstance(col, tuple) and len(col) > 0 and col[0]:
-                            column_lookup.setdefault(str(col[0]), col)
-                else:
-                    column_lookup = {str(col): col for col in df_debug.columns}
-
-                price_col = None
-                for candidate in ("Close", "Adj Close", "Price"):
-                    if candidate in column_lookup:
-                        price_col = column_lookup[candidate]
-                        break
-
-                if price_col is not None:
-                    raw_close_series = df_debug.loc[:, price_col].astype(float)
-                    raw_ma_series = raw_close_series.rolling(window=ma_period_debug).mean()
-
-                    latest_raw_date = raw_close_series.index[-1]
-                    latest_raw_close = float(raw_close_series.iloc[-1])
-                    ma_raw = float(raw_ma_series.iloc[-1])
-
-                    debug_lines.append("Raw latest (yfinance): " f"{latest_raw_date} | Close={latest_raw_close:,.4f} | MA={ma_raw:,.4f}")
-
-                    try:
-                        row_raw_full = df_debug.loc[latest_raw_date]
-                        debug_lines.append("Raw row data: " + row_raw_full.to_dict().__repr__())
-                    except Exception:
-                        pass
-
-                    country_lower = (country or "").strip().lower()
-                    tz_map = {
-                        "us": "America/New_York",
-                        "usa": "America/New_York",
-                        "kor": "Asia/Seoul",
-                        "korea": "Asia/Seoul",
-                        "kr": "Asia/Seoul",
-                        "aus": "Australia/Sydney",
-                        "au": "Australia/Sydney",
-                    }
-                    tz_name = tz_map.get(country_lower, "UTC")
-                    cutoff = pd.Timestamp.now(tz=tz_name).normalize() - pd.Timedelta(days=int(delay_days))
-                    try:
-                        cutoff = cutoff.tz_localize(None)
-                    except AttributeError:
-                        pass
-
-                    filtered_close_series = raw_close_series[raw_close_series.index <= cutoff]
-
-                    if not filtered_close_series.empty:
-                        filtered_ma_series = filtered_close_series.rolling(window=ma_period_debug).mean()
-                        latest_filtered_date = filtered_close_series.index[-1]
-                        latest_filtered_close = float(filtered_close_series.iloc[-1])
-                        latest_filtered_ma = float(filtered_ma_series.iloc[-1]) if not pd.isna(filtered_ma_series.iloc[-1]) else float("nan")
-                        divergence_filtered = ((latest_filtered_close / latest_filtered_ma) - 1) * 100 if latest_filtered_ma else float("nan")
-
-                        debug_lines.append(
-                            "Filtered latest (used in regime): "
-                            f"{latest_filtered_date} | Close={latest_filtered_close:,.4f} | "
-                            f"MA={latest_filtered_ma:,.4f} | Divergence={divergence_filtered:+.3f}%"
-                        )
-
-                        debug_lines.append("Filtered tail (Close):\n" + filtered_close_series.tail(5).to_string())
-                    else:
-                        debug_lines.append("Filtered latest (used in regime): 데이터 없음")
-
-                    raw_tail = raw_close_series.tail(5).to_string()
-                    debug_lines.append("Raw tail (Close):\n" + raw_tail)
-                else:
-                    debug_lines.append("가격 컬럼을 찾을 수 없습니다.")
-            else:
-                debug_lines.append("가격 데이터를 가져오지 못했습니다.")
+            # 디버그 출력을 활성화하려면 아래 주석을 해제하세요.
+            # try:
+            #     df_debug = fetch_ohlcv(ticker, country=country, months_range=[12, 0], cache_country="regime")
+            #     if df_debug is None or df_debug.empty:
+            #         df_debug = fetch_ohlcv(ticker, country=country, months_range=[12, 0], cache_country="common")
+            # except Exception as exc:  # pragma: no cover - 진단용 출력
+            #     debug_lines.append(f"fetch_ohlcv 오류: {exc}")
+            #     df_debug = None
+            #
+            # if df_debug is not None and not df_debug.empty:
+            #     df_debug = df_debug.sort_index()
+            #     try:
+            #         df_debug.index = pd.to_datetime(df_debug.index).normalize()
+            #     except Exception:
+            #         pass
+            #     df_debug = df_debug[~df_debug.index.duplicated(keep="last")]
+            #     df_debug = _overlay_recent_history(df_debug, ticker)
+            #
+            #     column_lookup: Dict[str, Any] = {}
+            #     if isinstance(df_debug.columns, pd.MultiIndex):
+            #         for col in df_debug.columns:
+            #             if isinstance(col, tuple) and len(col) > 0 and col[0]:
+            #                 column_lookup.setdefault(str(col[0]), col)
+            #     else:
+            #         column_lookup = {str(col): col for col in df_debug.columns}
+            #
+            #     price_col = None
+            #     for candidate in ("Close", "Adj Close", "Price"):
+            #         if candidate in column_lookup:
+            #             price_col = column_lookup[candidate]
+            #             break
+            #
+            #     if price_col is not None:
+            #         raw_close_series = df_debug.loc[:, price_col].astype(float)
+            #         raw_ma_series = raw_close_series.rolling(window=ma_period_debug).mean()
+            #
+            #         latest_raw_date = raw_close_series.index[-1]
+            #         latest_raw_close = float(raw_close_series.iloc[-1])
+            #         ma_raw = float(raw_ma_series.iloc[-1])
+            #
+            #         debug_lines.append(
+            #             "Raw latest (yfinance): "
+            #             f"{latest_raw_date} | Close={latest_raw_close:,.4f} | MA={ma_raw:,.4f}"
+            #         )
+            #
+            #         try:
+            #             row_raw_full = df_debug.loc[latest_raw_date]
+            #             debug_lines.append("Raw row data: " + row_raw_full.to_dict().__repr__())
+            #         except Exception:
+            #             pass
+            #
+            #         country_lower = (country or "").strip().lower()
+            #         tz_map = {
+            #             "us": "America/New_York",
+            #             "usa": "America/New_York",
+            #             "kor": "Asia/Seoul",
+            #             "korea": "Asia/Seoul",
+            #             "kr": "Asia/Seoul",
+            #             "aus": "Australia/Sydney",
+            #             "au": "Australia/Sydney",
+            #         }
+            #         tz_name = tz_map.get(country_lower, "UTC")
+            #         cutoff = pd.Timestamp.now(tz=tz_name).normalize() - pd.Timedelta(days=int(delay_days))
+            #         try:
+            #             cutoff = cutoff.tz_localize(None)
+            #         except AttributeError:
+            #             pass
+            #
+            #         filtered_close_series = raw_close_series[raw_close_series.index <= cutoff]
+            #
+            #         if not filtered_close_series.empty:
+            #             filtered_ma_series = filtered_close_series.rolling(window=ma_period_debug).mean()
+            #             latest_filtered_date = filtered_close_series.index[-1]
+            #             latest_filtered_close = float(filtered_close_series.iloc[-1])
+            #             latest_filtered_ma = float(filtered_ma_series.iloc[-1]) if not pd.isna(filtered_ma_series.iloc[-1]) else float("nan")
+            #             divergence_filtered = (
+            #                 (latest_filtered_close / latest_filtered_ma) - 1
+            #             ) * 100 if latest_filtered_ma else float("nan")
+            #
+            #             debug_lines.append(
+            #                 "Filtered latest (used in regime): "
+            #                 f"{latest_filtered_date} | Close={latest_filtered_close:,.4f} | "
+            #                 f"MA={latest_filtered_ma:,.4f} | Divergence={divergence_filtered:+.3f}%"
+            #             )
+            #
+            #             debug_lines.append("Filtered tail (Close):\n" + filtered_close_series.tail(5).to_string())
+            #         else:
+            #             debug_lines.append("Filtered latest (used in regime): 데이터 없음")
+            #
+            #         raw_tail = raw_close_series.tail(5).to_string()
+            #         debug_lines.append("Raw tail (Close):\n" + raw_tail)
+            #     else:
+            #         debug_lines.append("가격 컬럼을 찾을 수 없습니다.")
+            # else:
+            #     debug_lines.append("가격 데이터를 가져오지 못했습니다.")
 
             cache_paths = [
                 ("regime", get_cache_path("regime", ticker)),
