@@ -13,6 +13,7 @@ from logic.recommend.market import (
     get_market_regime_aux_status_infos,
 )
 from utils.settings_loader import get_market_regime_settings, load_common_settings
+from utils.data_loader import fetch_ohlcv
 
 from utils.account_registry import (
     get_icon_fallback,
@@ -78,9 +79,11 @@ def _render_home_page() -> None:
     )
     ma_period = int(ma_period_input)
     try:
-        cache_start_cfg = load_common_settings().get("CACHE_START_DATE")
+        common_settings = load_common_settings() or {}
     except Exception:
-        cache_start_cfg = None
+        common_settings = {}
+
+    cache_start_cfg = common_settings.get("CACHE_START_DATE")
     cache_start_text = str(cache_start_cfg) if cache_start_cfg else "-"
 
     with st.spinner("시장 레짐 정보를 계산 중입니다..."):
@@ -92,14 +95,71 @@ def _render_home_page() -> None:
         if regime_info is None:
             st.markdown(regime_message, unsafe_allow_html=True)
         else:
+            delay_days = int(common_settings.get("MARKET_REGIME_FILTER_DELAY_DAY", 0) or 0)
             st.caption(
                 "디버그: "
                 f"Ticker={regime_info.get('ticker')} | "
                 f"MA Period={regime_info.get('ma_period')} | "
-                f"Delay Days={load_common_settings().get('MARKET_REGIME_FILTER_DELAY_DAY', 0)} | "
+                f"Delay Days={delay_days} | "
                 f"Last Date={regime_info.get('last_risk_off_start')} -> {regime_info.get('last_risk_off_end')} | "
                 f"Divergence={regime_info.get('proximity_pct'):+.3f}%"
             )
+
+            debug_lines = []
+            ticker = regime_info.get("ticker")
+            ma_period_debug = int(regime_info.get("ma_period") or ma_period)
+            country = regime_info.get("country") or "us"
+
+            try:
+                df_debug = fetch_ohlcv(ticker, country=country, months_range=[12, 0], cache_country="common")
+            except Exception as exc:  # pragma: no cover - 진단용 출력
+                debug_lines.append(f"fetch_ohlcv 오류: {exc}")
+                df_debug = None
+
+            if df_debug is not None and not df_debug.empty:
+                df_debug = df_debug.sort_index()
+                try:
+                    df_debug.index = pd.to_datetime(df_debug.index).normalize()
+                except Exception:
+                    pass
+                df_debug = df_debug[~df_debug.index.duplicated(keep="last")]
+
+                price_col = None
+                for candidate in ("Close", "Adj Close", "Price"):
+                    if candidate in df_debug.columns:
+                        price_col = candidate
+                        break
+
+                if price_col is not None:
+                    latest_raw_date = df_debug.index[-1]
+                    latest_raw_close = float(df_debug.iloc[-1][price_col])
+                    ma_raw = df_debug[price_col].rolling(window=ma_period_debug).mean().iloc[-1]
+                    debug_lines.append(f"Raw latest: {latest_raw_date} | Close={latest_raw_close:,.4f} | MA={ma_raw:,.4f}")
+
+                    if delay_days > 0 and len(df_debug) > delay_days:
+                        df_delayed = df_debug.iloc[:-delay_days]
+                    else:
+                        df_delayed = df_debug
+
+                    latest_delay_date = df_delayed.index[-1]
+                    latest_delay_close = float(df_delayed.iloc[-1][price_col])
+                    ma_delay = df_delayed[price_col].rolling(window=ma_period_debug).mean().iloc[-1]
+                    divergence_delay = ((latest_delay_close / ma_delay) - 1) * 100 if ma_delay else float("nan")
+                    debug_lines.append(
+                        f"Delayed latest: {latest_delay_date} | Close={latest_delay_close:,.4f} | MA={ma_delay:,.4f} | Divergence={divergence_delay:+.3f}%"
+                    )
+
+                    raw_tail = df_debug.tail(5)[price_col].to_string()
+                    delay_tail = df_delayed.tail(5)[price_col].to_string()
+                    debug_lines.append("Raw tail (Close):\n" + raw_tail)
+                    debug_lines.append("Delayed tail (Close):\n" + delay_tail)
+                else:
+                    debug_lines.append("가격 컬럼을 찾을 수 없습니다.")
+            else:
+                debug_lines.append("가격 데이터를 가져오지 못했습니다.")
+
+            if debug_lines:
+                st.code("\n\n".join(debug_lines), language="text")
 
             def _fmt_date(value: Any) -> Optional[str]:
                 if value is None:
