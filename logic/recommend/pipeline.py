@@ -341,6 +341,19 @@ def _resolve_state_order(state: str) -> int:
     return int(cfg.get("order", 99))
 
 
+def _join_phrase_parts(*parts: Optional[str]) -> str:
+    """Join non-empty phrase components with a separator."""
+
+    cleaned: List[str] = []
+    for part in parts:
+        if part is None:
+            continue
+        text = str(part).strip()
+        if text:
+            cleaned.append(text)
+    return " | ".join(cleaned)
+
+
 def _format_sell_replace_phrase(phrase: str, *, etf_meta: Dict[str, Dict[str, Any]]) -> str:
     if not phrase or "교체매도" not in phrase:
         return phrase
@@ -971,26 +984,35 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         # 당일 매수 체결된 종목 처리
         if ticker in buy_traded_today:
             state = "HOLD"
-            phrase_str = str(phrase)
-            if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
-                phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
             if holding_days_val == 0:
                 holding_days_val = 1
         # 추천에 따라 오늘 신규 매수해야 할 종목
         elif state in {"BUY", "BUY_REPLACE"}:
             phrase_str = str(phrase)
-            if state == "BUY" and "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
-                phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
-            elif state == "BUY_REPLACE":
-                phrase = _append_risk_off_suffix(phrase, decision.get("risk_off_target_ratio"))
+            risk_off_ratio = decision.get("risk_off_target_ratio")
+
+            if state == "BUY_REPLACE":
+                replacement_note = phrase_str if phrase_str else ""
+                combined_phrase = _join_phrase_parts(DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수"), replacement_note)
+                phrase = _append_risk_off_suffix(combined_phrase, risk_off_ratio)
+            else:  # state == "BUY"
+                base_new_phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
+                if "시장위험회피" in phrase_str or phrase_str == DECISION_NOTES.get("RISK_OFF_SELL"):
+                    chosen_phrase = base_new_phrase
+                elif phrase_str:
+                    chosen_phrase = phrase_str
+                else:
+                    chosen_phrase = base_new_phrase
+                phrase = _append_risk_off_suffix(chosen_phrase, risk_off_ratio)
             if holding_days_val == 0:
                 holding_days_val = 1
         # 이미 보유 중인 종목이 오늘 신규 편입된 경우
         elif is_currently_held and bought_today:
             state = "HOLD"
-            phrase_str = str(phrase)
-            if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
-                phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+            phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
             if holding_days_val == 0:
                 holding_days_val = 1
 

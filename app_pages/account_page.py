@@ -88,15 +88,15 @@ def render_account_page(account_id: str) -> None:
 
         try:
             hold_states = {"HOLD", "SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS"}
-            buy_states = {"BUY", "BUY_REPLACE"}
-            sell_states = {"SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS"}
+            # buy_states = {"BUY", "BUY_REPLACE"}
+            # sell_states = {"SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS"}
             current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-            exits = int(df[df["상태"].isin(sell_states)].shape[0])
-            buys = int(df[df["상태"].isin(buy_states)].shape[0])
-            future_holdings = current_holdings - exits + buys
+            # exits = int(df[df["상태"].isin(sell_states)].shape[0])
+            # buys = int(df[df["상태"].isin(buy_states)].shape[0])
+            # future_holdings = current_holdings - exits + buys
             target_topn = strategy_tuning.get("PORTFOLIO_TOPN") if isinstance(strategy_tuning, dict) else None
             if target_topn:
-                caption_parts.append(f"보유종목 수 {future_holdings}/{target_topn}")
+                caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
         except Exception:
             pass
 
