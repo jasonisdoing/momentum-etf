@@ -47,7 +47,7 @@ from dotenv import load_dotenv
 from utils.cron_utils import normalize_cron_weekdays
 
 load_dotenv()
-APP_VERSION = "2025-10-16-10"
+APP_VERSION = "2025-10-17-07"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
 _LAST_ERROR: Optional[str] = None

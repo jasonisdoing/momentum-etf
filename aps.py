@@ -248,13 +248,13 @@ def main():
     logging.info("\n[Initial Run] Starting...")
 
     # Initial run for stock metadata/cache refresh
-    try:
-        # 메타 데이터 갱신하고 싶을 때 해제
-        # run_stock_stats_update()
-        # 서버 캐시 제거하고 싶을 때 해제
-        run_cache_refresh()
-    except Exception:
-        logging.error("Error during initial run for stock metadata update/cache refresh", exc_info=True)
+    # try:
+    # 메타 데이터 갱신하고 싶을 때 해제
+    # run_stock_stats_update()
+    # 서버 캐시 제거하고 싶을 때 해제
+    # run_cache_refresh()
+    # except Exception:
+    #     logging.error("Error during initial run for stock metadata update/cache refresh", exc_info=True)
 
     for schedule_name, cfg in country_schedules.items():
         if not cfg.get("enabled", True):
