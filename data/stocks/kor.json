@@ -283,7 +283,7 @@
         ]
     },
     {
-        "category": "글로벌AI",
+        "category": "액티브",
         "tickers": [
             {
                 "ticker": "456600",
@@ -292,7 +292,12 @@
                 "listing_date": "2023-05-16",
                 "1_week_avg_volume": 648599,
                 "1_week_avg_turnover": 24694673368
-            },
+            }
+        ]
+    },
+    {
+        "category": "AI전력",
+        "tickers": [
             {
                 "ticker": "486450",
                 "name": "SOL 미국AI전력인프라",
@@ -308,6 +313,22 @@
                 "listing_date": "2024-07-09",
                 "1_week_avg_volume": 4074563,
                 "1_week_avg_turnover": 80604427221
+            },
+            {
+                "ticker": "487240",
+                "name": "Kodex AI전력핵심설비",
+                "recommend_enabled": true,
+                "listing_date": "2024-07-09",
+                "1_week_avg_volume": 2871559,
+                "1_week_avg_turnover": 52522817202
+            },
+            {
+                "ticker": "434730",
+                "name": "HANARO 원자력iSelect",
+                "recommend_enabled": true,
+                "listing_date": "2022-06-28",
+                "1_week_avg_volume": 953372,
+                "1_week_avg_turnover": 38441923111
             }
         ]
     },
@@ -341,7 +362,7 @@
         ]
     },
     {
-        "category": "금/은",
+        "category": "금",
         "tickers": [
             {
                 "ticker": "473640",
@@ -570,27 +591,6 @@
         ]
     },
     {
-        "category": "한국AI전력",
-        "tickers": [
-            {
-                "ticker": "487240",
-                "name": "Kodex AI전력핵심설비",
-                "recommend_enabled": true,
-                "listing_date": "2024-07-09",
-                "1_week_avg_volume": 2871559,
-                "1_week_avg_turnover": 52522817202
-            },
-            {
-                "ticker": "434730",
-                "name": "HANARO 원자력iSelect",
-                "recommend_enabled": true,
-                "listing_date": "2022-06-28",
-                "1_week_avg_volume": 953372,
-                "1_week_avg_turnover": 38441923111
-            }
-        ]
-    },
-    {
         "category": "수소/클린에너지",
         "tickers": [
             {
@@ -707,7 +707,7 @@
         ]
     },
     {
-        "category": "한국2차전지",
+        "category": "2차전지",
         "tickers": [
             {
                 "ticker": "305720",
@@ -740,12 +740,7 @@
                 "listing_date": "2020-10-07",
                 "1_week_avg_volume": 3400983,
                 "1_week_avg_turnover": 28314419850
-            }
-        ]
-    },
-    {
-        "category": "글로벌2차전지",
-        "tickers": [
+            },
             {
                 "ticker": "419430",
                 "name": "Kodex 차이나2차전지MSCI(합성)",
@@ -765,7 +760,7 @@
         ]
     },
     {
-        "category": "한국조선",
+        "category": "조선",
         "tickers": [
             {
                 "ticker": "466920",
