@@ -8,7 +8,7 @@
     "strategy": {
         "tuning": {
             "MA_PERIOD": 35,
-            "PORTFOLIO_TOPN": 4,
+            "PORTFOLIO_TOPN": 3,
             "REPLACE_SCORE_THRESHOLD": 0.7
         },
         "static": {
