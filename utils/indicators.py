@@ -43,20 +43,37 @@ def calculate_moving_average_signals(close_prices: pd.Series, moving_average_per
     return moving_average, buy_signal_active, consecutive_buy_days
 
 
-def calculate_ma_score(close_prices: pd.Series, moving_average: pd.Series) -> pd.Series:
+def calculate_ma_score(
+    close_prices: pd.Series,
+    moving_average: pd.Series,
+    normalize: bool = False,
+    normalize_config: dict | None = None,
+) -> pd.Series:
     """
     이동평균 대비 수익률 점수를 계산합니다.
 
     Args:
         close_prices: 종가 시리즈
         moving_average: 이동평균 시리즈
+        normalize: 0~100 스케일로 정규화 여부 (기본값: False)
+        normalize_config: 정규화 설정 (normalize=True일 때만 사용)
+            - eligibility_threshold: 투자 적격 기준점 (기본값: 0.0)
+            - max_bound: 최대 점수 경계 (기본값: 30.0)
 
     Returns:
-        pd.Series: 이동평균 대비 수익률 (%)
+        pd.Series: 이동평균 대비 수익률 (%) 또는 정규화된 점수 (0~100)
     """
     # 0으로 나누기 방지를 위해 0을 NaN으로 변경
     safe_moving_average = moving_average.replace(0, np.nan)
     ma_score = ((close_prices / safe_moving_average) - 1.0) * 100
     # 무한대 값을 0으로 변경
     ma_score = ma_score.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    # 정규화 적용
+    if normalize:
+        from strategies.maps.scoring import normalize_ma_score_with_config
+
+        config = normalize_config or {"enabled": True, "eligibility_threshold": 0.0, "max_bound": 30.0}
+        ma_score = normalize_ma_score_with_config(ma_score, config)
+
     return ma_score

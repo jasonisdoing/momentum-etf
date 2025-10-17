@@ -85,7 +85,7 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
             "종목명",
             "카테고리",
             "상태",
-            "점수",
+            "MAPS 점수",
             "일간수익률",
             "보유일",
             "문구",

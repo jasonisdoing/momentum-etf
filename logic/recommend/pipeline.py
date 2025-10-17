@@ -22,12 +22,12 @@ from utils.settings_loader import (
 )
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 from strategies.maps.shared import sort_decisions_by_order_and_score
-from utils.stock_list_io import get_etfs
-from utils.trade_store import list_open_positions
-from logic.recommend.history import (
+from strategies.maps.history import (
     calculate_consecutive_holding_info,
     calculate_trade_cooldown_info,
 )
+from utils.stock_list_io import get_etfs
+from utils.trade_store import list_open_positions
 from utils.data_loader import (
     fetch_ohlcv,
     prepare_price_data,
@@ -695,13 +695,15 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
             # 이동평균 신호 계산
             from utils.indicators import calculate_moving_average_signals, calculate_ma_score
+            from data.settings.common import SCORE_NORMALIZATION_CONFIG
 
             (
                 moving_average,
                 buy_signal_active,
                 consecutive_buy_days,
             ) = calculate_moving_average_signals(df["Close"], ma_period)
-            ma_score_series = calculate_ma_score(df["Close"], moving_average)
+
+            ma_score_series = calculate_ma_score(df["Close"], moving_average, normalize=True, normalize_config=SCORE_NORMALIZATION_CONFIG)
             score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
 
             recent_prices = df["Close"].tail(15)

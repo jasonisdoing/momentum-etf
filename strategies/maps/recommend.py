@@ -11,7 +11,7 @@ from .rules import StrategyRules
 from .constants import DECISION_MESSAGES, DECISION_NOTES
 from .messages import build_buy_replace_note
 from .shared import select_candidates_by_category, sort_decisions_by_order_and_score
-from logic.recommend.formatting import load_account_precision
+from .formatting import load_account_precision
 from utils.logger import get_app_logger
 
 logger = get_app_logger()

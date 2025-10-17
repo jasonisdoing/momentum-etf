@@ -61,8 +61,10 @@ def _process_ticker_data(ticker: str, df: pd.DataFrame, etf_tickers: set, etf_ma
     close_prices = price_series.astype(float)
 
     # 공통 함수 사용
+    from data.settings.common import SCORE_NORMALIZATION_CONFIG
+
     moving_average, buy_signal_active, consecutive_buy_days = calculate_moving_average_signals(close_prices, current_ma_period)
-    ma_score = calculate_ma_score(close_prices, moving_average)
+    ma_score = calculate_ma_score(close_prices, moving_average, normalize=True, normalize_config=SCORE_NORMALIZATION_CONFIG)
 
     return {
         "df": df,

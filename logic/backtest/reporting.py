@@ -633,7 +633,7 @@ def _generate_daily_report_lines(
         "누적손익",
         "누적(%)",
         "비중",
-        "점수",
+        "MAPS 점수",
         "지속",
         "문구",
     ]
