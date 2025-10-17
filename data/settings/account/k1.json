@@ -8,8 +8,8 @@
     "strategy": {
         "tuning": {
             "MA_PERIOD": 50,
-            "PORTFOLIO_TOPN": 8,
-            "REPLACE_SCORE_THRESHOLD": 1.0
+            "PORTFOLIO_TOPN": 7,
+            "REPLACE_SCORE_THRESHOLD": 0.5
         },
         "static": {
             "COOLDOWN_DAYS": 1,
