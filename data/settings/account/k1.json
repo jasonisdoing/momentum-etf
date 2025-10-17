@@ -9,14 +9,14 @@
         "tuning": {
             "MA_PERIOD": 50,
             "PORTFOLIO_TOPN": 8,
-            "REPLACE_SCORE_THRESHOLD": 1.5
+            "REPLACE_SCORE_THRESHOLD": 1.0
         },
         "static": {
             "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
             "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 90
         },
-        "expected_cagr": 98.77
+        "expected_cagr": 99.11
     },
     "benchmarks": [
         {
