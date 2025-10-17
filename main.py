@@ -144,9 +144,9 @@ def render_recommendation_table(df: pd.DataFrame, *, country_code: str) -> None:
         height=TABLE_HEIGHT,
         column_config={
             "#": st.column_config.TextColumn("#", width="small"),
-            "티커": st.column_config.TextColumn("티커", width="small"),  # medium 크기 설정을 small로 조정
-            "종목명": st.column_config.TextColumn("종목명", width="medium"),  # large 크기 설정을 medium으로 조정
-            "카테고리": st.column_config.TextColumn("카테고리", width="small"),  # medium 크기 설정을 small로 조정
+            "티커": st.column_config.TextColumn("티커", width="small"),
+            "종목명": st.column_config.TextColumn("종목명", width="medium"),
+            "카테고리": st.column_config.TextColumn("카테고리", width="small"),
             "상태": st.column_config.TextColumn("상태", width="small"),
             "보유일": st.column_config.TextColumn("보유일", width="small"),
             "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),
@@ -156,8 +156,11 @@ def render_recommendation_table(df: pd.DataFrame, *, country_code: str) -> None:
             "2주(%)": st.column_config.NumberColumn("2주(%)", width="small"),
             "3주(%)": st.column_config.NumberColumn("3주(%)", width="small"),
             "추세(3주)": st.column_config.LineChartColumn("추세(3주)", width="small"),
-            "점수": st.column_config.NumberColumn("점수", width="small"),  # 문자열 대신 수치형 컬럼으로 표시
-            "문구": st.column_config.TextColumn("문구", width="large"),  # 기본값 -> large
+            "MAPS": st.column_config.NumberColumn("MAPS", width="small"),
+            "RSI": st.column_config.NumberColumn("RSI", width="small"),
+            "종합": st.column_config.NumberColumn("종합", width="small"),
+            "지속": st.column_config.TextColumn("지속", width="small"),
+            "문구": st.column_config.TextColumn("문구", width="large"),
         },
     )
 

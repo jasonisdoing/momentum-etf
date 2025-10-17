@@ -95,12 +95,16 @@ def select_candidates_by_category(
             if not ticker:
                 continue
 
-            # 점수 추출
+            # 점수 추출 (composite_score 우선, 없으면 score 사용)
+            composite_score_raw = cand.get("composite_score")
             score_raw = cand.get("score")
             try:
+                composite_score_val = float(composite_score_raw) if composite_score_raw is not None else float("-inf")
                 score_val = float(score_raw) if score_raw is not None else float("-inf")
+                # composite_score가 있으면 우선 사용, 없으면 score 사용
+                final_score_val = composite_score_val if composite_score_val > float("-inf") else score_val
             except (TypeError, ValueError):
-                score_val = float("-inf")
+                final_score_val = float("-inf")
 
             # 카테고리 확인
             category, internal_key = _resolve_category(ticker, etf_meta)
@@ -111,19 +115,19 @@ def select_candidates_by_category(
                 if category not in held_set:
                     best_per_category[internal_key] = {
                         "cand": cand,
-                        "score": score_val,
+                        "score": final_score_val,
                         "category": category,
                     }
                 elif skip_held_categories:
                     rejected.append((cand, "category_held"))
             else:
-                # 기존 카테고리와 비교
-                if score_val > existing["score"]:
+                # 기존 카테고리와 비교 (종합 점수 우선)
+                if final_score_val > existing["score"]:
                     if existing["category"] not in held_set:
                         rejected.append((existing["cand"], "better_candidate"))
                         best_per_category[internal_key] = {
                             "cand": cand,
-                            "score": score_val,
+                            "score": final_score_val,
                             "category": category,
                         }
                     else:
@@ -155,16 +159,18 @@ from .constants import DECISION_CONFIG
 
 
 def sort_decisions_by_order_and_score(decisions: List[Dict[str, Any]]) -> None:
-    """DECISION_CONFIG의 order 순으로 정렬하고, 같은 order 내에서는 score 역순으로 정렬합니다.
+    """DECISION_CONFIG의 order 순으로 정렬하고, 같은 order 내에서는 composite_score > score 역순으로 정렬합니다.
 
     백테스트와 추천에서 공통으로 사용되는 정렬 함수입니다.
     """
 
     def sort_key(item_dict):
         state = item_dict["state"]
+        composite_score = item_dict.get("composite_score", 0.0)
         score = item_dict.get("score", 0.0)
         ticker = item_dict.get("ticker") or item_dict.get("tkr", "")
         order = DECISION_CONFIG.get(state, {}).get("order", 99)
-        return (order, -score, ticker)
+        # composite_score 우선, 그 다음 MAPS score, 마지막으로 ticker
+        return (order, -composite_score, -score, ticker)
 
     decisions.sort(key=sort_key)

@@ -38,6 +38,8 @@ from utils.data_loader import (
 from utils.db_manager import get_db_connection
 from logic.recommend.market import get_market_regime_status_info
 from utils.logger import get_app_logger
+from strategies.composite import calculate_composite_score
+from data.settings.common import COMPOSITE_SCORE_CONFIG
 
 logger = get_app_logger()
 
@@ -710,8 +712,14 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             from strategies.rsi.recommend import calculate_rsi_for_ticker
 
             rsi_score = calculate_rsi_for_ticker(df["Close"])
-            if rsi_score > 0:
-                logger.info(f"[RSI] {ticker}: {rsi_score:.2f}")
+
+            # 종합 점수 계산
+            composite_score = calculate_composite_score(
+                maps_score=score,
+                rsi_score=rsi_score,
+                method=COMPOSITE_SCORE_CONFIG.get("method", "rsi_adjusted"),
+                config=COMPOSITE_SCORE_CONFIG,
+            )
 
             recent_prices = df["Close"].tail(15)
             trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
@@ -725,6 +733,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 "s2": None,
                 "score": score,
                 "rsi_score": rsi_score,
+                "composite_score": composite_score,
                 "filter": (int(consecutive_buy_days.iloc[-1]) if not consecutive_buy_days.empty else 0),
                 "ret_1w": _compute_trailing_return(df["Close"], 5),
                 "ret_2w": _compute_trailing_return(df["Close"], 10),
@@ -1080,6 +1089,14 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
         rsi_score_val = decision.get("rsi_score", 0.0)
 
+        # 종합 점수 계산
+        composite_score_val = calculate_composite_score(
+            maps_score=score_val,
+            rsi_score=rsi_score_val,
+            method=COMPOSITE_SCORE_CONFIG.get("method", "rsi_adjusted"),
+            config=COMPOSITE_SCORE_CONFIG,
+        )
+
         result_entry = {
             "rank": len(results) + 1,
             "ticker": ticker,
@@ -1095,6 +1112,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             "trend_prices": ticker_data.get("trend_prices", []),
             "score": score_val,
             "rsi_score": rsi_score_val,
+            "composite_score": composite_score_val,
             "streak": streak_val,
             "base_date": base_date.strftime("%Y-%m-%d"),
             "holding_days": holding_days_val,
@@ -1111,7 +1129,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         for item in results
         if item["state"] == "WAIT" and item.get("phrase") != DECISION_NOTES.get("CATEGORY_DUP") and item.get("recommend_enabled", True)
     ]
-    wait_items.sort(key=lambda x: x["score"], reverse=True)
+    # 종합 점수 기반 정렬 (composite_score > MAPS score 순)
+    wait_items.sort(key=lambda x: (x.get("composite_score", 0.0), x.get("score", 0.0)), reverse=True)
 
     # 카테고리 보유 제한이 있는 경우, 동일 카테고리 수를 체크
     category_counts: Dict[str, int] = {}
@@ -1184,8 +1203,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             portfolio_topn,
         )
 
-    # rank를 점수 순서대로 재설정
-    results.sort(key=lambda x: x["score"], reverse=True)
+    # rank를 종합 점수 순서대로 재설정 (composite_score > MAPS score 순)
+    results.sort(key=lambda x: (x.get("composite_score", 0.0), x.get("score", 0.0)), reverse=True)
     for i, item in enumerate(results, 1):
         item["rank"] = i
 

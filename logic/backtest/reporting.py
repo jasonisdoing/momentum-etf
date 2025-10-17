@@ -563,15 +563,22 @@ def _build_daily_table_rows(
 
         decision_order = DECISION_CONFIG.get(decision, {}).get("order", 99)
         score_val = float(score) if _is_finite_number(score) else float("-inf")
+        composite_score = row.get("composite_score")
+        composite_score_val = float(composite_score) if _is_finite_number(composite_score) else float("-inf")
         sort_key = (
             0 if is_cash else 1,
             decision_order,
-            -score_val,
+            -composite_score_val,  # 종합 점수 우선
+            -score_val,  # 그 다음 MAPS 점수
             ticker_key,
         )
 
         rsi_score = row.get("rsi_score")
         rsi_score_display = f"{float(rsi_score):.1f}" if _is_finite_number(rsi_score) else "-"
+
+        # 종합 점수
+        composite_score = row.get("composite_score")
+        composite_score_display = f"{float(composite_score):.1f}" if _is_finite_number(composite_score) else "-"
 
         row_data = [
             "0",
@@ -591,6 +598,7 @@ def _build_daily_table_rows(
             weight_display,
             score_display,
             rsi_score_display,
+            composite_score_display,
             f"{int(filter_val)}일" if _is_finite_number(filter_val) else "-",
             phrase,
         ]
@@ -637,8 +645,9 @@ def _generate_daily_report_lines(
         "누적손익",
         "누적(%)",
         "비중",
-        "MAPS 점수",
-        "RSI 점수",
+        "MAPS",
+        "RSI",
+        "종합",
         "지속",
         "문구",
     ]
@@ -658,8 +667,9 @@ def _generate_daily_report_lines(
         "right",  # 누적손익
         "right",  # 누적(%)
         "right",  # 비중
-        "right",  # MAPS 점수
-        "right",  # RSI 점수
+        "right",  # MAPS
+        "right",  # RSI
+        "right",  # 종합
         "right",  # 지속
         "left",  # 문구
     ]

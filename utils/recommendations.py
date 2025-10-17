@@ -25,8 +25,9 @@ _DISPLAY_COLUMNS = [
     "2주(%)",
     "3주(%)",
     "추세(3주)",
-    "MAPS 점수",
-    "RSI 점수",
+    "MAPS",
+    "RSI",
+    "종합",
     "지속",
     "문구",
 ]
@@ -146,6 +147,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         streak = _format_days(row.get("streak"))
         phrase = _resolve_phrase(row)
         rsi_score = _format_score(row.get("rsi_score", 0.0))
+        composite_score = _format_score(row.get("composite_score", 0.0))  # 종합 점수 (일단 비워둠)
         display_rows.append(
             {
                 "#": rank if rank is not None else "-",
@@ -161,8 +163,9 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "2주(%)": return_2w,
                 "3주(%)": return_3w,
                 "추세(3주)": _trend_series(row),
-                "MAPS 점수": score,
-                "RSI 점수": rsi_score,
+                "MAPS": score,
+                "RSI": rsi_score,
+                "종합": composite_score,
                 "지속": streak,
                 "문구": phrase or row.get("phrase", ""),
             }
@@ -230,8 +233,9 @@ def style_recommendations_dataframe(df: pd.DataFrame) -> Styler:
     styled = styled.set_properties(subset=["종목명"], **{"text-align": "left"})
     styled = styled.applymap(_state_style, subset=["상태"])
     styled = styled.applymap(_pct_style, subset=["일간(%)"])
-    styled = styled.applymap(_score_style, subset=["MAPS 점수"])
-    styled = styled.applymap(_score_style, subset=["RSI 점수"])
+    styled = styled.applymap(_score_style, subset=["MAPS"])
+    styled = styled.applymap(_score_style, subset=["RSI"])
+    styled = styled.applymap(_score_style, subset=["종합"])
     styled = styled.apply(_row_background_styles, axis=1)
     return styled
 

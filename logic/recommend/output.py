@@ -85,13 +85,14 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
             "종목명",
             "카테고리",
             "상태",
-            "MAPS 점수",
-            "RSI 점수",
+            "MAPS",
+            "RSI",
+            "종합",
             "일간수익률",
             "보유일",
             "문구",
         ]
-        aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "right", "left"]
+        aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "right", "right", "left"]
         rows: List[List[str]] = []
 
         for item in items[:preview_count]:
@@ -107,6 +108,7 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
                     str(item.get("state", "-")),
                     (f"{item.get('score', 0):.2f}" if isinstance(item.get("score"), (int, float)) else "-"),
                     (f"{item.get('rsi_score', 0):.2f}" if isinstance(item.get("rsi_score"), (int, float)) else "-"),
+                    (f"{item.get('composite_score', 0):.2f}" if isinstance(item.get("composite_score"), (int, float)) else "-"),
                     (f"{item.get('daily_pct', 0):.2f}%" if isinstance(item.get("daily_pct"), (int, float)) else "-"),
                     holding_days_str,
                     str(item.get("phrase", "")),

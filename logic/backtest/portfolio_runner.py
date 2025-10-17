@@ -315,6 +315,7 @@ def run_portfolio_backtest(
         ma_today: Dict[str, float] = {}
         score_today: Dict[str, float] = {}
         rsi_score_today: Dict[str, float] = {}
+        composite_score_today: Dict[str, float] = {}
         buy_signal_today: Dict[str, int] = {}
 
         for ticker, ticker_metrics in metrics_by_ticker.items():
@@ -332,6 +333,18 @@ def run_portfolio_backtest(
             score_today[ticker] = float(score_val) if not pd.isna(score_val) else 0.0
             rsi_score_today[ticker] = float(rsi_score_val) if not pd.isna(rsi_score_val) else 0.0
             buy_signal_today[ticker] = int(buy_signal_val) if not pd.isna(buy_signal_val) else 0
+
+            # 종합 점수 계산
+            from strategies.composite import calculate_composite_score
+            from data.settings.common import COMPOSITE_SCORE_CONFIG
+
+            composite_score_val = calculate_composite_score(
+                maps_score=score_today[ticker],
+                rsi_score=rsi_score_today[ticker],
+                method=COMPOSITE_SCORE_CONFIG.get("method", "rsi_adjusted"),
+                config=COMPOSITE_SCORE_CONFIG,
+            )
+            composite_score_today[ticker] = composite_score_val
 
             if available:
                 tickers_available_today.append(ticker)
@@ -388,6 +401,7 @@ def run_portfolio_backtest(
                 ma_value = ma_today.get(ticker, float("nan"))
                 score_value = score_today.get(ticker, 0.0)
                 rsi_score_value = rsi_score_today.get(ticker, 0.0)
+                composite_score_value = composite_score_today.get(ticker, 0.0)
                 filter_value = buy_signal_today.get(ticker, 0) if available_today else None
 
                 if available_today:
@@ -407,6 +421,7 @@ def run_portfolio_backtest(
                         "signal2": None,
                         "score": score_value if not pd.isna(score_value) else None,
                         "rsi_score": rsi_score_value if not pd.isna(rsi_score_value) else None,
+                        "composite_score": composite_score_value if not pd.isna(composite_score_value) else None,
                         "filter": filter_value,
                     }
                 else:
@@ -428,6 +443,7 @@ def run_portfolio_backtest(
                         "signal2": None,
                         "score": score_value if not pd.isna(score_value) else None,
                         "rsi_score": rsi_score_value if not pd.isna(rsi_score_value) else None,
+                        "composite_score": composite_score_value if not pd.isna(composite_score_value) else None,
                         "filter": None,
                     }
 
@@ -574,18 +590,25 @@ def run_portfolio_backtest(
 
             # --- 3. 매수 로직 (리스크 온일 때만) ---
             if allow_new_buys:
-                # 1. 매수 후보 선정
+                # 1. 매수 후보 선정 (종합 점수 기준)
                 buy_ranked_candidates = []
                 for candidate_ticker in tickers_available_today:
                     ticker_state_cand = position_state[candidate_ticker]
                     buy_signal_days_today = buy_signal_today.get(candidate_ticker, 0)
 
                     if ticker_state_cand["shares"] == 0 and i >= ticker_state_cand["buy_block_until"] and buy_signal_days_today > 0:
+                        # 종합 점수 우선, 없으면 MAPS 점수 사용
+                        composite_score_cand = composite_score_today.get(candidate_ticker, float("nan"))
                         score_cand = score_today.get(candidate_ticker, float("nan"))
-                        if pd.isna(score_cand):
-                            score_cand = -float("inf")
 
-                        buy_ranked_candidates.append((score_cand, candidate_ticker))
+                        if not pd.isna(composite_score_cand):
+                            final_score = composite_score_cand
+                        elif not pd.isna(score_cand):
+                            final_score = score_cand
+                        else:
+                            final_score = -float("inf")
+
+                        buy_ranked_candidates.append((final_score, candidate_ticker))
                 buy_ranked_candidates.sort(reverse=True)
 
                 # 2. 매수 실행 (신규 또는 교체)
@@ -599,7 +622,9 @@ def run_portfolio_backtest(
                         cat for tkr, state in position_state.items() if state["shares"] > 0 and (cat := ticker_to_category.get(tkr)) and cat != "TBD"
                     }
 
-                    helper_candidates = [{"tkr": ticker, "score": float(score)} for score, ticker in buy_ranked_candidates]
+                    helper_candidates = [
+                        {"tkr": ticker, "composite_score": float(score), "score": float(score)} for score, ticker in buy_ranked_candidates
+                    ]
 
                     selected_candidates, rejected_candidates = select_candidates_by_category(
                         helper_candidates,
