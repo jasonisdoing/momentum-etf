@@ -570,6 +570,9 @@ def _build_daily_table_rows(
             ticker_key,
         )
 
+        rsi_score = row.get("rsi_score")
+        rsi_score_display = f"{float(rsi_score):.1f}" if _is_finite_number(rsi_score) else "-"
+
         row_data = [
             "0",
             ticker_key,
@@ -587,6 +590,7 @@ def _build_daily_table_rows(
             cumulative_pct_display,
             weight_display,
             score_display,
+            rsi_score_display,
             f"{int(filter_val)}일" if _is_finite_number(filter_val) else "-",
             phrase,
         ]
@@ -634,28 +638,30 @@ def _generate_daily_report_lines(
         "누적(%)",
         "비중",
         "MAPS 점수",
+        "RSI 점수",
         "지속",
         "문구",
     ]
     aligns = [
-        "right",
-        "left",
-        "left",
-        "left",
-        "center",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "left",
+        "right",  # #
+        "left",  # 티커
+        "left",  # 종목명
+        "left",  # 카테고리
+        "center",  # 상태
+        "right",  # 보유일
+        "right",  # 현재가
+        "right",  # 일간(%)
+        "right",  # 보유수량
+        "right",  # 보유금액
+        "right",  # 평가손익
+        "right",  # 평가(%)
+        "right",  # 누적손익
+        "right",  # 누적(%)
+        "right",  # 비중
+        "right",  # MAPS 점수
+        "right",  # RSI 점수
+        "right",  # 지속
+        "left",  # 문구
     ]
 
     buy_date_map: Dict[str, Optional[pd.Timestamp]] = {}

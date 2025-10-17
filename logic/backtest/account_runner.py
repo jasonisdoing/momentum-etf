@@ -490,9 +490,10 @@ def _build_portfolio_timeseries(
     if not non_empty:
         raise RuntimeError("백테스트 결과에 유효한 시계열이 없습니다.")
 
+    # 교집합 대신 합집합 사용 (모든 거래일 포함)
     common_index = non_empty[0]
     for idx in non_empty[1:]:
-        common_index = common_index.intersection(idx)
+        common_index = common_index.union(idx)
 
     if common_index.empty:
         raise RuntimeError("종목들 간에 공통된 거래일이 없습니다.")
@@ -507,6 +508,10 @@ def _build_portfolio_timeseries(
         cash_value = 0.0
 
         for ticker, ts in ticker_timeseries.items():
+            # 해당 날짜에 데이터가 없으면 스킵
+            if dt not in ts.index:
+                continue
+
             row = ts.loc[dt]
             pv_val = row.get("pv")
             if pd.notna(pv_val):

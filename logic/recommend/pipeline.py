@@ -693,9 +693,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 prev_close = latest_close
                 daily_pct = 0.0
 
-            # 이동평균 신호 계산
+            # MAPS 전략 계산
             from utils.indicators import calculate_moving_average_signals, calculate_ma_score
-            from data.settings.common import SCORE_NORMALIZATION_CONFIG
+            from data.settings.common import MAPS_SCORE_NORMALIZATION_CONFIG
 
             (
                 moving_average,
@@ -703,8 +703,15 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 consecutive_buy_days,
             ) = calculate_moving_average_signals(df["Close"], ma_period)
 
-            ma_score_series = calculate_ma_score(df["Close"], moving_average, normalize=True, normalize_config=SCORE_NORMALIZATION_CONFIG)
+            ma_score_series = calculate_ma_score(df["Close"], moving_average, normalize=True, normalize_config=MAPS_SCORE_NORMALIZATION_CONFIG)
             score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
+
+            # RSI 전략 계산 (strategies/rsi/recommend.py에서 처리)
+            from strategies.rsi.recommend import calculate_rsi_for_ticker
+
+            rsi_score = calculate_rsi_for_ticker(df["Close"])
+            if rsi_score > 0:
+                logger.info(f"[RSI] {ticker}: {rsi_score:.2f}")
 
             recent_prices = df["Close"].tail(15)
             trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
@@ -717,6 +724,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 "s1": moving_average.iloc[-1] if not moving_average.empty else None,
                 "s2": None,
                 "score": score,
+                "rsi_score": rsi_score,
                 "filter": (int(consecutive_buy_days.iloc[-1]) if not consecutive_buy_days.empty else 0),
                 "ret_1w": _compute_trailing_return(df["Close"], 5),
                 "ret_2w": _compute_trailing_return(df["Close"], 10),
@@ -1070,6 +1078,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 state = "WAIT"
             phrase = disabled_note
 
+        rsi_score_val = decision.get("rsi_score", 0.0)
+
         result_entry = {
             "rank": len(results) + 1,
             "ticker": ticker,
@@ -1084,6 +1094,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             "return_3w": ret_3w,
             "trend_prices": ticker_data.get("trend_prices", []),
             "score": score_val,
+            "rsi_score": rsi_score_val,
             "streak": streak_val,
             "base_date": base_date.strftime("%Y-%m-%d"),
             "holding_days": holding_days_val,

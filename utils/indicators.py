@@ -50,7 +50,7 @@ def calculate_ma_score(
     normalize_config: dict | None = None,
 ) -> pd.Series:
     """
-    이동평균 대비 수익률 점수를 계산합니다.
+    MAPS(Moving Average Position Score) 점수를 계산합니다.
 
     Args:
         close_prices: 종가 시리즈
@@ -63,17 +63,33 @@ def calculate_ma_score(
     Returns:
         pd.Series: 이동평균 대비 수익률 (%) 또는 정규화된 점수 (0~100)
     """
-    # 0으로 나누기 방지를 위해 0을 NaN으로 변경
-    safe_moving_average = moving_average.replace(0, np.nan)
-    ma_score = ((close_prices / safe_moving_average) - 1.0) * 100
-    # 무한대 값을 0으로 변경
-    ma_score = ma_score.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    from strategies.maps.scoring import calculate_maps_score
 
-    # 정규화 적용
-    if normalize:
-        from strategies.maps.scoring import normalize_ma_score_with_config
+    return calculate_maps_score(close_prices, moving_average, normalize, normalize_config)
 
-        config = normalize_config or {"enabled": True, "eligibility_threshold": 0.0, "max_bound": 30.0}
-        ma_score = normalize_ma_score_with_config(ma_score, config)
 
-    return ma_score
+def calculate_rsi_score(
+    close_prices: pd.Series,
+    period: int = 14,
+    ema_smoothing: float = 2.0,
+    normalize: bool = False,
+    normalize_config: dict | None = None,
+) -> pd.Series:
+    """
+    RSI 점수를 계산합니다 (EMA 기반).
+
+    Args:
+        close_prices: 종가 시리즈
+        period: RSI 계산 기간 (기본값: 14)
+        ema_smoothing: EMA 평활화 계수 (기본값: 2.0)
+        normalize: 0~100 스케일로 정규화 여부 (기본값: False)
+        normalize_config: 정규화 설정 (normalize=True일 때만 사용)
+            - oversold_threshold: 과매도 기준 (기본값: 30.0)
+            - overbought_threshold: 과매수 기준 (기본값: 70.0)
+
+    Returns:
+        pd.Series: RSI 값 (0~100) 또는 정규화된 점수 (0~100)
+    """
+    from strategies.rsi.scoring import calculate_rsi_score as _calculate_rsi_score
+
+    return _calculate_rsi_score(close_prices, period, ema_smoothing, normalize, normalize_config)

@@ -1,4 +1,4 @@
-"""MAPS 전략 점수 정규화 함수."""
+"""MAPS 전략 점수 계산 및 정규화 함수."""
 
 from __future__ import annotations
 
@@ -93,7 +93,51 @@ def normalize_ma_score_with_config(
     return normalize_ma_score(scores, eligibility_threshold, max_bound)
 
 
+def calculate_maps_score(
+    close_prices: pd.Series,
+    moving_average: pd.Series,
+    normalize: bool = False,
+    normalize_config: dict | None = None,
+) -> pd.Series:
+    """
+    MAPS(Moving Average Position Score) 점수를 계산합니다.
+
+    Args:
+        close_prices: 종가 시리즈
+        moving_average: 이동평균 시리즈
+        normalize: 0~100 스케일로 정규화 여부 (기본값: False)
+        normalize_config: 정규화 설정 (normalize=True일 때만 사용)
+            - eligibility_threshold: 투자 적격 기준점 (기본값: 0.0)
+            - max_bound: 최대 점수 경계 (기본값: 30.0)
+
+    Returns:
+        pd.Series: 이동평균 대비 수익률 (%) 또는 정규화된 점수 (0~100)
+
+    Examples:
+        >>> close = pd.Series([110, 115, 120])
+        >>> ma = pd.Series([100, 100, 100])
+        >>> calculate_maps_score(close, ma)
+        0    10.0
+        1    15.0
+        2    20.0
+        dtype: float64
+    """
+    # 0으로 나누기 방지
+    safe_moving_average = moving_average.replace(0, np.nan)
+    ma_score = ((close_prices / safe_moving_average) - 1.0) * 100
+    # 무한대 값 처리
+    ma_score = ma_score.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    # 정규화 적용
+    if normalize:
+        config = normalize_config or {"enabled": True, "eligibility_threshold": 0.0, "max_bound": 30.0}
+        ma_score = normalize_ma_score_with_config(ma_score, config)
+
+    return ma_score
+
+
 __all__ = [
+    "calculate_maps_score",
     "normalize_ma_score",
     "normalize_ma_score_with_config",
 ]
