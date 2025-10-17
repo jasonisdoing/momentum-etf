@@ -22,7 +22,7 @@ TUNING_CONFIG: dict[str, dict] = {
     "kor": {
         "MA_RANGE": np.arange(10, 105, 5),
         "PORTFOLIO_TOPN": np.arange(7, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),
     },
     # "kor": {
     #     "MA_RANGE": np.arange(10, 105, 5),
