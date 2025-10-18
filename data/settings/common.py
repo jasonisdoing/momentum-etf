@@ -21,8 +21,5 @@ RSI_CALCULATION_CONFIG = {
     "ema_smoothing": 3.0,  # EMA 평활화 계수
 }
 
-# RSI 기반 매도 설정
-RSI_SELL_CONFIG = {
-    "enabled": True,  # RSI 과매수 매도 활성화
-    "overbought_sell_threshold": 10.0,  # RSI 점수가 이 값 이하면 매도 (0~100 스케일)
-}
+# RSI 과매수 매도는 항상 활성화됨
+# overbought_sell_threshold는 계좌별 strategy.tuning.OVERBOUGHT_SELL_THRESHOLD에서 설정 (정수)

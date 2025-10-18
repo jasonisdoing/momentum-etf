@@ -21,7 +21,7 @@ from utils.settings_loader import (
     load_common_settings,
 )
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
-from strategies.maps.shared import sort_decisions_by_order_and_score, filter_category_duplicates
+from logic.common import sort_decisions_by_order_and_score, filter_category_duplicates
 from strategies.maps.history import (
     calculate_consecutive_holding_info,
     calculate_trade_cooldown_info,
@@ -545,6 +545,16 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     max_per_category = int(strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0)
 
+    # RSI 과매수 매도 임계값 로드 (계좌별 설정)
+    strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
+    rsi_sell_threshold_raw = strategy_tuning.get("OVERBOUGHT_SELL_THRESHOLD", 10)
+    try:
+        rsi_sell_threshold = int(rsi_sell_threshold_raw)
+    except (TypeError, ValueError):
+        rsi_sell_threshold = 10
+    if not (0 <= rsi_sell_threshold <= 100):
+        rsi_sell_threshold = 10
+
     def _parse_regime_ratio(raw_value: Any, *, source: str) -> int:
         try:
             parsed = int(raw_value)
@@ -694,16 +704,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 daily_pct = 0.0
 
             # MAPS 전략 계산
-            from utils.indicators import calculate_moving_average_signals, calculate_ma_score
+            from utils.indicators import calculate_ma_score
+            from logic.common import get_buy_signal_streak
 
-            (
-                moving_average,
-                buy_signal_active,
-                consecutive_buy_days,
-            ) = calculate_moving_average_signals(df["Close"], ma_period)
+            # 이동평균 계산
+            moving_average = df["Close"].rolling(window=ma_period).mean()
 
+            # 점수 계산
             ma_score_series = calculate_ma_score(df["Close"], moving_average, normalize=False)
             score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
+
+            # 지속일 계산 (점수 기반)
+            consecutive_buy_days = get_buy_signal_streak(score, ma_score_series)
 
             # RSI 전략 계산 (strategies/rsi/recommend.py에서 처리)
             from strategies.rsi.recommend import calculate_rsi_for_ticker
@@ -722,7 +734,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 "s2": None,
                 "score": score,
                 "rsi_score": rsi_score,
-                "filter": (int(consecutive_buy_days.iloc[-1]) if not consecutive_buy_days.empty else 0),
+                "filter": consecutive_buy_days,
                 "ret_1w": _compute_trailing_return(df["Close"], 5),
                 "ret_2w": _compute_trailing_return(df["Close"], 10),
                 "ret_3w": _compute_trailing_return(df["Close"], 15),
@@ -805,6 +817,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             trade_cooldown_info=trade_cooldown_info,
             cooldown_days=int(strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 5)) or 0),
             risk_off_equity_ratio=regime_filter_equity_ratio,
+            rsi_sell_threshold=rsi_sell_threshold,
         )
         logger.info(
             "[%s] 추천 계산 완료 (%.1fs, 결과 %d개)",
@@ -1108,13 +1121,14 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     wait_items.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
     # 카테고리 보유 제한이 있는 경우, 동일 카테고리 수를 체크 (매도 예정 종목 제외)
+    from logic.common import should_exclude_from_category_count
+
     category_counts: Dict[str, int] = {}
     category_counts_normalized: Dict[str, int] = {}
     category_limit = max_per_category if max_per_category and max_per_category > 0 else 1
-    sell_state_set_for_category = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI_OVERBOUGHT"}
     for item in results:
         # 매도 예정 종목은 카테고리 카운트에서 제외
-        if item["state"] in {"HOLD", "BUY", "BUY_REPLACE"} and item["state"] not in sell_state_set_for_category:
+        if not should_exclude_from_category_count(item["state"]) and item["state"] in {"HOLD", "BUY", "BUY_REPLACE"}:
             category_raw = item.get("category")
             category = str(category_raw or "").strip()
             if category:
@@ -1141,22 +1155,22 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         category = str(category_raw or "").strip()
         category_key = _normalize_category_value(category_raw)
 
-        if category_key and category_counts_normalized.get(category_key, 0) >= category_limit:
+        # 카테고리 중복 체크 시, 매도 예정 종목은 제외
+        # 같은 카테고리의 매도 예정 종목이 있으면 해당 카테고리 슬롯이 비게 됨
+        sell_in_same_category = sum(
+            1 for r in results if r["state"] in sell_state_set and _normalize_category_value(r.get("category")) == category_key
+        )
+        effective_category_count = category_counts_normalized.get(category_key, 0) - sell_in_same_category
+
+        if category_key and effective_category_count >= category_limit:
             # 카테고리 중복인 경우 BUY로 변경하지 않고 WAIT 상태 유지
             # filter_category_duplicates에서 필터링됨
             continue
 
         # RSI 과매수 종목 매수 차단
-        from data.settings.common import RSI_SELL_CONFIG
-
-        rsi_sell_enabled = RSI_SELL_CONFIG.get("enabled", False)
-        rsi_sell_threshold = RSI_SELL_CONFIG.get("overbought_sell_threshold", 10.0)
-        item_rsi_score = item.get("rsi_score", 100.0)
-
-        if rsi_sell_enabled and item_rsi_score <= rsi_sell_threshold:
-            # RSI 과매수 종목은 BUY로 변경하지 않고 WAIT 상태 유지
-            item["phrase"] = f"⚠️ RSI 과매수 (RSI점수: {item_rsi_score:.1f})"
-            continue
+        # rsi_sell_threshold는 계좌별 설정에서 로드됨 (이 함수 외부에서 처리)
+        # 여기서는 이미 portfolio.py에서 처리되므로 추가 체크 불필요
+        pass
 
         item["state"] = "BUY"
         item["phrase"] = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")

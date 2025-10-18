@@ -9,7 +9,8 @@
         "tuning": {
             "MA_PERIOD": 45,
             "PORTFOLIO_TOPN": 7,
-            "REPLACE_SCORE_THRESHOLD": 1
+            "REPLACE_SCORE_THRESHOLD": 1,
+            "OVERBOUGHT_SELL_THRESHOLD": 10
         },
         "static": {
             "COOLDOWN_DAYS": 2,

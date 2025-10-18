@@ -1,29 +1,10 @@
-"""Momentum 전략 모듈에서 공통으로 사용하는 유틸리티."""
+"""추천과 백테스트에서 공통으로 사용하는 필터링 로직."""
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Callable
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Callable
 
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
-
-SIGNAL_TABLE_HEADERS: Sequence[str] = [
-    "#",
-    "티커",
-    "종목명",
-    "카테고리",
-    "상태",
-    "보유일",
-    "현재가",
-    "일간(%)",
-    "보유수량",
-    "금액",
-    "누적수익률",
-    "비중",
-    "고점대비",
-    "점수",
-    "지속",
-    "문구",
-]
 
 
 def _resolve_category(
@@ -155,14 +136,12 @@ def select_candidates_by_category(
         return [], []
 
 
-from .constants import DECISION_CONFIG
-
-
 def sort_decisions_by_order_and_score(decisions: List[Dict[str, Any]]) -> None:
     """DECISION_CONFIG의 order 순으로 정렬하고, 같은 order 내에서는 composite_score > score 역순으로 정렬합니다.
 
     백테스트와 추천에서 공통으로 사용되는 정렬 함수입니다.
     """
+    from strategies.maps.constants import DECISION_CONFIG
 
     def sort_key(item_dict):
         state = item_dict["state"]
@@ -192,6 +171,8 @@ def filter_category_duplicates(
     Returns:
         필터링된 항목 리스트
     """
+    from logic.common import should_exclude_from_category_count
+
     filtered_results = []
     category_best_map = {}  # 카테고리별 최고 점수 종목 추적
     replacement_tickers = set()  # 교체 매매 관련 티커
@@ -209,7 +190,7 @@ def filter_category_duplicates(
                 replacement_tickers.add(ticker)
 
         # HOLD, BUY 상태의 카테고리 수집 (매도 예정 종목 제외)
-        if state in {"HOLD", "BUY", "BUY_REPLACE"}:
+        if not should_exclude_from_category_count(state) and state in {"HOLD", "BUY", "BUY_REPLACE"}:
             if category_key and category_key != "TBD":
                 held_categories.add(category_key)
 
@@ -218,7 +199,8 @@ def filter_category_duplicates(
         ticker = item.get("ticker") or item.get("tkr")
         category = item.get("category", "")
         state = item.get("state", "")
-        composite_score = item.get("composite_score", 0.0)
+        # composite_score 우선, 없으면 score 사용
+        composite_score = item.get("composite_score") or item.get("score", 0.0)
 
         # 교체 매매 관련 종목은 무조건 포함
         if ticker in replacement_tickers:
@@ -228,6 +210,17 @@ def filter_category_duplicates(
         # HOLD, BUY, SELL 상태는 무조건 포함
         if state in {"HOLD", "BUY", "BUY_REPLACE", "SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI_OVERBOUGHT"}:
             filtered_results.append(item)
+            # 매도 예정 종목은 category_best_map에 포함하지 않음 (WAIT 종목이 표시될 수 있도록)
+            if not should_exclude_from_category_count(state):
+                # HOLD, BUY 상태만 category_best_map에 추가
+                category_key = category_key_getter(category)
+                if category_key and category_key != "TBD":
+                    # 기존 WAIT 종목보다 우선
+                    if category_key in category_best_map:
+                        existing_item = category_best_map[category_key]
+                        if existing_item in filtered_results:
+                            filtered_results.remove(existing_item)
+                    category_best_map[category_key] = item
             continue
 
         # WAIT 상태: 카테고리별 최고 점수만 포함
@@ -237,7 +230,7 @@ def filter_category_duplicates(
                 # 카테고리가 없는 경우 모두 포함
                 filtered_results.append(item)
             else:
-                # 이미 보유 중인 카테고리는 제외
+                # 이미 보유 중인 카테고리는 제외 (단, 매도 예정 종목은 held_categories에서 이미 제거됨)
                 if category_key in held_categories:
                     continue
 
@@ -247,7 +240,8 @@ def filter_category_duplicates(
                     filtered_results.append(item)
                 else:
                     # 이미 더 높은 점수가 있으면 제외
-                    existing_score = category_best_map[category_key].get("composite_score", 0.0)
+                    existing_item = category_best_map[category_key]
+                    existing_score = existing_item.get("composite_score") or existing_item.get("score", 0.0)
                     if composite_score > existing_score:
                         # 기존 항목 제거하고 새 항목 추가
                         filtered_results.remove(category_best_map[category_key])
@@ -258,3 +252,10 @@ def filter_category_duplicates(
             filtered_results.append(item)
 
     return filtered_results
+
+
+__all__ = [
+    "select_candidates_by_category",
+    "sort_decisions_by_order_and_score",
+    "filter_category_duplicates",
+]

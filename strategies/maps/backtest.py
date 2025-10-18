@@ -9,7 +9,6 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 from utils.data_loader import fetch_ohlcv
-from utils.indicators import calculate_moving_average_signals
 from utils.logger import get_app_logger
 from logic.backtest.portfolio_runner import run_portfolio_backtest, _process_ticker_data
 

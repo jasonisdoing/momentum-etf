@@ -18,16 +18,18 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_RANGE": np.arange(20, 55, 5),
         "PORTFOLIO_TOPN": np.arange(3, 11, 1),
         "REPLACE_SCORE_THRESHOLD": np.arange(0, 1.1, 0.1),
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 25, 5),
     },
     "kor": {
         "MA_RANGE": np.arange(10, 105, 5),
         "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 5.5, 0.5),
+        "REPLACE_SCORE_THRESHOLD": [1],
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 25, 5),
     },
     # "kor": {
     #     "MA_RANGE": np.arange(10, 105, 5),
     #     "PORTFOLIO_TOPN": [10],
-    #     "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
+    # "REPLACE_SCORE_THRESHOLD": np.arange(0, 5.5, 0.5),
     # },
     "us": {
         "MA_RANGE": np.arange(5, 31, 1),

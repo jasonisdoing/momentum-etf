@@ -462,6 +462,15 @@ def _build_backtest_kwargs(
 
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
+    # RSI 과매수 매도 임계값 로드
+    rsi_sell_threshold_raw = strategy_settings.get("OVERBOUGHT_SELL_THRESHOLD", 10)
+    try:
+        rsi_sell_threshold = int(rsi_sell_threshold_raw)
+    except (TypeError, ValueError):
+        rsi_sell_threshold = 10
+    if not (0 <= rsi_sell_threshold <= 100):
+        rsi_sell_threshold = 10
+
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "ma_period": strategy_rules.ma_period,
@@ -474,6 +483,7 @@ def _build_backtest_kwargs(
         "regime_filter_equity_ratio": regime_filter_equity_ratio,
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
+        "rsi_sell_threshold": rsi_sell_threshold,
         "quiet": quiet,
     }
 

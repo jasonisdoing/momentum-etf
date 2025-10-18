@@ -599,7 +599,7 @@ def _build_daily_table_rows(
     entries.sort(key=lambda item: item[0])
 
     # 카테고리별 최고 점수 필터링을 위해 딕셔너리 형태로 변환
-    from strategies.maps.shared import filter_category_duplicates
+    from logic.common import filter_category_duplicates
 
     items_for_filter = []
     for sort_key, row_data in entries:

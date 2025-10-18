@@ -133,6 +133,7 @@ def _create_decision_entry(
     country_code: str,
     current_equity: float,
     stop_loss_threshold: Optional[float],
+    rsi_sell_threshold: float = 10.0,
 ) -> Dict[str, Any]:
     """개별 종목의 의사결정 엔트리를 생성합니다."""
     # 순환 import 방지
@@ -177,15 +178,10 @@ def _create_decision_entry(
         price_ma, ma = data["price"], data["s1"]
 
         # RSI 과매수 매도 조건 체크
-        from data.settings.common import RSI_SELL_CONFIG
-
-        rsi_sell_enabled = RSI_SELL_CONFIG.get("enabled", False)
-        rsi_sell_threshold = RSI_SELL_CONFIG.get("overbought_sell_threshold", 10.0)
-
         if holding_return_pct is not None and stop_loss_threshold is not None and holding_return_pct <= float(stop_loss_threshold):
             state = "CUT_STOPLOSS"
             phrase = DECISION_MESSAGES.get("CUT_STOPLOSS", "손절매도")
-        elif rsi_sell_enabled and rsi_score_value <= rsi_sell_threshold:
+        elif rsi_score_value <= rsi_sell_threshold:
             state = "SELL_RSI_OVERBOUGHT"
             phrase = f"{DECISION_MESSAGES.get('SELL_RSI_OVERBOUGHT', 'RSI 과매수 매도')} (RSI점수: {rsi_score_value:.1f})"
         elif not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
@@ -197,8 +193,11 @@ def _create_decision_entry(
             phrase = "쿨다운 대기중"
 
     elif state == "WAIT":
-        buy_signal_days_today = data["filter"]
-        if buy_signal_days_today > 0:
+        # 점수 기반 매수 시그널 판단
+        from logic.common import has_buy_signal
+
+        score_value = data.get("score", 0.0)
+        if has_buy_signal(score_value):
             buy_signal = True
             if buy_block_info:
                 buy_signal = False
@@ -277,6 +276,7 @@ def generate_daily_recommendations_for_portfolio(
     trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
     cooldown_days: int,
     risk_off_equity_ratio: int = 100,
+    rsi_sell_threshold: float = 10.0,
 ) -> List[Dict[str, Any]]:
     """
     주어진 데이터를 기반으로 포트폴리오의 일일 매매 추천을 생성합니다.
@@ -287,7 +287,7 @@ def generate_daily_recommendations_for_portfolio(
     # 순환 import 방지를 위해 함수 내부에서 import
     from strategies.maps.constants import DECISION_MESSAGES, DECISION_NOTES
     from strategies.maps.messages import build_buy_replace_note
-    from strategies.maps.shared import select_candidates_by_category, sort_decisions_by_order_and_score
+    from logic.common import select_candidates_by_category, sort_decisions_by_order_and_score
 
     # 전략 설정
     denom = strategy_rules.portfolio_topn
@@ -351,6 +351,7 @@ def generate_daily_recommendations_for_portfolio(
             country_code,
             current_equity,
             stop_loss_threshold,
+            rsi_sell_threshold,
         )
         decisions.append(decision)
 
@@ -377,6 +378,9 @@ def generate_daily_recommendations_for_portfolio(
         d for d in decisions if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] in universe_tickers and d.get("recommend_enabled", True)
     ]
 
+    # 점수순으로 정렬 (높은 점수가 우선)
+    wait_candidates_raw.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+
     # 실제 보유 중인 종목 수 계산 (매도 예정 종목 제외)
     held_count = sum(1 for d in decisions if d["state"] == "HOLD")
     slots_to_fill = denom - held_count
@@ -399,12 +403,15 @@ def generate_daily_recommendations_for_portfolio(
     # 신규 매수 로직 (리스크 오프 상태에서도 허용, 비중만 제한)
     if slots_to_fill > 0:
         # 매도 예정 종목을 제외한 held_categories 재계산
-        held_categories_for_buy = set()
-        for d in decisions:
-            if d["state"] == "HOLD":
-                category = etf_meta.get(d["tkr"], {}).get("category")
-                if category and category != "TBD":
-                    held_categories_for_buy.add(category)
+        from logic.common import get_held_categories_excluding_sells
+
+        held_categories_for_buy = get_held_categories_excluding_sells(
+            decisions,
+            get_category_func=lambda d: etf_meta.get(d["tkr"], {}).get("category"),
+            get_state_func=lambda d: d["state"],
+            get_ticker_func=lambda d: d["tkr"],
+            holdings=set(holdings.keys()),
+        )
 
         # 점수가 양수인 모든 매수 시그널 종목을 순서대로 시도 (이미 점수순 정렬됨)
         successful_buys = 0
@@ -420,13 +427,9 @@ def generate_daily_recommendations_for_portfolio(
                 continue
 
             # RSI 과매수 종목 매수 차단
-            from data.settings.common import RSI_SELL_CONFIG
-
-            rsi_sell_enabled = RSI_SELL_CONFIG.get("enabled", False)
-            rsi_sell_threshold = RSI_SELL_CONFIG.get("overbought_sell_threshold", 10.0)
             cand_rsi_score = cand.get("rsi_score", 100.0)
 
-            if rsi_sell_enabled and cand_rsi_score <= rsi_sell_threshold:
+            if cand_rsi_score <= rsi_sell_threshold:
                 cand["state"], cand["row"][4] = "WAIT", "WAIT"
                 cand["row"][-1] = f"RSI 과매수 (RSI점수: {cand_rsi_score:.1f})"
                 cand["buy_signal"] = False
@@ -586,15 +589,10 @@ def generate_daily_recommendations_for_portfolio(
     final_decisions = list(decisions)
 
     # RSI 과매수 종목 문구 추가 (WAIT 상태)
-    from data.settings.common import RSI_SELL_CONFIG
-
-    rsi_sell_enabled = RSI_SELL_CONFIG.get("enabled", False)
-    rsi_sell_threshold = RSI_SELL_CONFIG.get("overbought_sell_threshold", 10.0)
-
     for d in final_decisions:
         if d["state"] == "WAIT" and d.get("buy_signal"):
             rsi_score = d.get("rsi_score", 100.0)
-            if rsi_sell_enabled and rsi_score <= rsi_sell_threshold:
+            if rsi_score <= rsi_sell_threshold:
                 if not d["row"][-1] or d["row"][-1] == "":
                     d["row"][-1] = f"RSI 과매수 (RSI점수: {rsi_score:.1f})"
 

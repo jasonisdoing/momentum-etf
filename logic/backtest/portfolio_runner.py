@@ -9,11 +9,11 @@ from typing import Callable, Dict, List, Optional, Set
 import pandas as pd
 
 from utils.data_loader import fetch_ohlcv
-from utils.indicators import calculate_moving_average_signals, calculate_ma_score
+from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
 from utils.report import format_kr_money, format_aud_money
 from strategies.maps.labeler import compute_net_trade_note
-from strategies.maps.shared import select_candidates_by_category
+from logic.common import select_candidates_by_category
 from strategies.maps.constants import DECISION_NOTES, DECISION_CONFIG
 
 logger = get_app_logger()
@@ -58,8 +58,13 @@ def _process_ticker_data(ticker: str, df: pd.DataFrame, etf_tickers: set, etf_ma
     close_prices = price_series.astype(float)
 
     # MAPS 전략 지표 계산
-    moving_average, buy_signal_active, consecutive_buy_days = calculate_moving_average_signals(close_prices, current_ma_period)
+    moving_average = close_prices.rolling(window=current_ma_period).mean()
     ma_score = calculate_ma_score(close_prices, moving_average, normalize=False)
+
+    # 점수 기반 매수 시그널 지속일 계산
+    from logic.common import calculate_consecutive_days
+
+    consecutive_buy_days = calculate_consecutive_days(ma_score)
 
     # RSI 전략 지표 계산
     from strategies.rsi.backtest import process_ticker_data_rsi
@@ -96,6 +101,7 @@ def run_portfolio_backtest(
     regime_behavior: str = "sell_all",
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
+    rsi_sell_threshold: float = 10.0,
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     missing_ticker_sink: Optional[Set[str]] = None,
@@ -335,11 +341,7 @@ def run_portfolio_backtest(
                 tickers_available_today.append(ticker)
 
         # --- 시장 레짐 필터 적용 (리스크 오프 조건 확인) ---
-        # RSI 설정 로드 (루프 밖에서 한 번만)
-        from data.settings.common import RSI_SELL_CONFIG
-
-        rsi_sell_enabled = RSI_SELL_CONFIG.get("enabled", False)
-        rsi_sell_threshold = RSI_SELL_CONFIG.get("overbought_sell_threshold", 10.0)
+        # RSI 과매수 매도는 항상 활성화됨 (rsi_sell_threshold는 파라미터로 받음)
 
         is_risk_off = False
         if regime_filter_enabled and market_close_arr is not None:
@@ -551,7 +553,7 @@ def run_portfolio_backtest(
 
                         if stop_loss_threshold is not None and hold_ret <= float(stop_loss_threshold):
                             decision = "CUT_STOPLOSS"
-                        elif rsi_sell_enabled and rsi_score_current <= rsi_sell_threshold:
+                        elif rsi_score_current <= rsi_sell_threshold:
                             decision = "SELL_RSI_OVERBOUGHT"
                         elif price < ma_today[ticker]:
                             decision = "SELL_TREND"
@@ -635,7 +637,7 @@ def run_portfolio_backtest(
                         # RSI 과매수 종목 매수 차단
                         rsi_score_buy_candidate = rsi_score_today.get(ticker_to_buy, 100.0)
 
-                        if rsi_sell_enabled and rsi_score_buy_candidate <= rsi_sell_threshold:
+                        if rsi_score_buy_candidate <= rsi_sell_threshold:
                             # RSI 과매수 종목은 매수하지 않음
                             if daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt:
                                 daily_records_by_ticker[ticker_to_buy][-1]["note"] = f"RSI 과매수 (RSI점수: {rsi_score_buy_candidate:.1f})"
@@ -773,7 +775,7 @@ def run_portfolio_backtest(
                             # RSI 과매수 종목 교체 매수 차단
                             rsi_score_replace_candidate = rsi_score_today.get(replacement_ticker, 100.0)
 
-                            if rsi_sell_enabled and rsi_score_replace_candidate <= rsi_sell_threshold:
+                            if rsi_score_replace_candidate <= rsi_sell_threshold:
                                 # RSI 과매수 종목은 교체 매수하지 않음
                                 if daily_records_by_ticker[replacement_ticker] and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt:
                                     daily_records_by_ticker[replacement_ticker][-1][
