@@ -143,6 +143,13 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
 def render_recommendation_table(df: pd.DataFrame, *, country_code: str) -> None:
     styled_df = _style_rows_by_state(df, country_code=country_code)
 
+    # 국가별 현재가 포맷 설정
+    country_lower = (country_code or "").strip().lower()
+    if country_lower == "aus":
+        price_format = "%.2f"  # 호주: 소수점 2자리
+    else:
+        price_format = "%.0f"  # 한국: 정수
+
     st.dataframe(
         styled_df,
         hide_index=True,
@@ -157,7 +164,7 @@ def render_recommendation_table(df: pd.DataFrame, *, country_code: str) -> None:
             "보유일": st.column_config.NumberColumn("보유일", width=50),
             "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),
             "평가(%)": st.column_config.NumberColumn("평가(%)", width="small"),
-            "현재가": st.column_config.NumberColumn("현재가", width="small"),
+            "현재가": st.column_config.NumberColumn("현재가", width="small", format=price_format),
             "1주(%)": st.column_config.NumberColumn("1주(%)", width="small"),
             "2주(%)": st.column_config.NumberColumn("2주(%)", width="small"),
             "3주(%)": st.column_config.NumberColumn("3주(%)", width="small"),
