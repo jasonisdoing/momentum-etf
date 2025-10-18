@@ -58,10 +58,8 @@ def _process_ticker_data(ticker: str, df: pd.DataFrame, etf_tickers: set, etf_ma
     close_prices = price_series.astype(float)
 
     # MAPS 전략 지표 계산
-    from data.settings.common import MAPS_SCORE_NORMALIZATION_CONFIG
-
     moving_average, buy_signal_active, consecutive_buy_days = calculate_moving_average_signals(close_prices, current_ma_period)
-    ma_score = calculate_ma_score(close_prices, moving_average, normalize=True, normalize_config=MAPS_SCORE_NORMALIZATION_CONFIG)
+    ma_score = calculate_ma_score(close_prices, moving_average, normalize=False)
 
     # RSI 전략 지표 계산
     from strategies.rsi.backtest import process_ticker_data_rsi
@@ -315,7 +313,6 @@ def run_portfolio_backtest(
         ma_today: Dict[str, float] = {}
         score_today: Dict[str, float] = {}
         rsi_score_today: Dict[str, float] = {}
-        composite_score_today: Dict[str, float] = {}
         buy_signal_today: Dict[str, int] = {}
 
         for ticker, ticker_metrics in metrics_by_ticker.items():
@@ -334,22 +331,16 @@ def run_portfolio_backtest(
             rsi_score_today[ticker] = float(rsi_score_val) if not pd.isna(rsi_score_val) else 0.0
             buy_signal_today[ticker] = int(buy_signal_val) if not pd.isna(buy_signal_val) else 0
 
-            # 종합 점수 계산
-            from strategies.composite import calculate_composite_score
-            from data.settings.common import COMPOSITE_SCORE_CONFIG
-
-            composite_score_val = calculate_composite_score(
-                maps_score=score_today[ticker],
-                rsi_score=rsi_score_today[ticker],
-                method=COMPOSITE_SCORE_CONFIG.get("method", "rsi_adjusted"),
-                config=COMPOSITE_SCORE_CONFIG,
-            )
-            composite_score_today[ticker] = composite_score_val
-
             if available:
                 tickers_available_today.append(ticker)
 
         # --- 시장 레짐 필터 적용 (리스크 오프 조건 확인) ---
+        # RSI 설정 로드 (루프 밖에서 한 번만)
+        from data.settings.common import RSI_SELL_CONFIG
+
+        rsi_sell_enabled = RSI_SELL_CONFIG.get("enabled", False)
+        rsi_sell_threshold = RSI_SELL_CONFIG.get("overbought_sell_threshold", 10.0)
+
         is_risk_off = False
         if regime_filter_enabled and market_close_arr is not None:
             market_idx = i - regime_delay_offset
@@ -370,7 +361,8 @@ def run_portfolio_backtest(
             partial_regime_active = risk_off_effective and risk_off_equity_ratio > 0.0
             force_regime_sell = full_exit
             allow_individual_sells = True
-            allow_new_buys = not full_exit
+            # 리스크 오프 상태에서도 신규 매수와 교체 매매 허용 (비중만 제한)
+            allow_new_buys = True
 
             # 현재 총 보유 자산 가치를 계산합니다.
             current_holdings_value = 0
@@ -401,8 +393,7 @@ def run_portfolio_backtest(
                 ma_value = ma_today.get(ticker, float("nan"))
                 score_value = score_today.get(ticker, 0.0)
                 rsi_score_value = rsi_score_today.get(ticker, 0.0)
-                composite_score_value = composite_score_today.get(ticker, 0.0)
-                filter_value = buy_signal_today.get(ticker, 0) if available_today else None
+                filter_value = buy_signal_today.get(ticker, 0)
 
                 if available_today:
                     pv_value = position_snapshot["shares"] * price
@@ -421,7 +412,6 @@ def run_portfolio_backtest(
                         "signal2": None,
                         "score": score_value if not pd.isna(score_value) else None,
                         "rsi_score": rsi_score_value if not pd.isna(rsi_score_value) else None,
-                        "composite_score": composite_score_value if not pd.isna(composite_score_value) else None,
                         "filter": filter_value,
                     }
                 else:
@@ -443,8 +433,7 @@ def run_portfolio_backtest(
                         "signal2": None,
                         "score": score_value if not pd.isna(score_value) else None,
                         "rsi_score": rsi_score_value if not pd.isna(rsi_score_value) else None,
-                        "composite_score": composite_score_value if not pd.isna(composite_score_value) else None,
-                        "filter": None,
+                        "filter": filter_value,
                     }
 
                 daily_records_by_ticker[ticker].append(record)
@@ -491,7 +480,7 @@ def run_portfolio_backtest(
                         row = daily_records_by_ticker[held_ticker][-1]
                         prev_trade_amount = float(row.get("trade_amount") or 0.0)
                         prev_trade_profit = float(row.get("trade_profit") or 0.0)
-                        note_text = f"{DECISION_NOTES['RISK_OFF_SELL']} (목표 {int(risk_off_equity_ratio_pct)}%)"
+                        note_text = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 {int(risk_off_equity_ratio_pct)}%)"
                         row.update(
                             {
                                 "decision": "HOLD",
@@ -506,6 +495,10 @@ def run_portfolio_backtest(
                         )
 
                 equity = cash + current_holdings_value
+
+                # 부분 청산 이후 slots_to_fill 재계산
+                held_count = sum(1 for pos in position_state.values() if pos["shares"] > 0)
+                slots_to_fill = max(0, top_n - held_count)
 
             # --- 2. 매도 로직 ---
             # (a) 시장 레짐 필터
@@ -536,7 +529,7 @@ def run_portfolio_backtest(
                                     "shares": 0,
                                     "pv": 0,
                                     "avg_cost": 0,
-                                    "note": DECISION_NOTES["RISK_OFF"],
+                                    "note": f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 {int(risk_off_equity_ratio_pct)}%)",
                                 }
                             )
             # (b) 개별 종목 매도
@@ -553,8 +546,13 @@ def run_portfolio_backtest(
                         decision = None
                         hold_ret = (price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0
 
+                        # RSI 과매수 매도 조건 체크
+                        rsi_score_current = rsi_score_today.get(ticker, 100.0)
+
                         if stop_loss_threshold is not None and hold_ret <= float(stop_loss_threshold):
                             decision = "CUT_STOPLOSS"
+                        elif rsi_sell_enabled and rsi_score_current <= rsi_sell_threshold:
+                            decision = "SELL_RSI_OVERBOUGHT"
                         elif price < ma_today[ticker]:
                             decision = "SELL_TREND"
 
@@ -597,17 +595,9 @@ def run_portfolio_backtest(
                     buy_signal_days_today = buy_signal_today.get(candidate_ticker, 0)
 
                     if ticker_state_cand["shares"] == 0 and i >= ticker_state_cand["buy_block_until"] and buy_signal_days_today > 0:
-                        # 종합 점수 우선, 없으면 MAPS 점수 사용
-                        composite_score_cand = composite_score_today.get(candidate_ticker, float("nan"))
+                        # MAPS 점수 사용
                         score_cand = score_today.get(candidate_ticker, float("nan"))
-
-                        if not pd.isna(composite_score_cand):
-                            final_score = composite_score_cand
-                        elif not pd.isna(score_cand):
-                            final_score = score_cand
-                        else:
-                            final_score = -float("inf")
-
+                        final_score = score_cand if not pd.isna(score_cand) else -float("inf")
                         buy_ranked_candidates.append((final_score, candidate_ticker))
                 buy_ranked_candidates.sort(reverse=True)
 
@@ -618,39 +608,37 @@ def run_portfolio_backtest(
                 purchased_today: Set[str] = set()
 
                 if slots_to_fill > 0 and buy_ranked_candidates:
+                    # 보유 중인 카테고리 (매수 시 중복 체크용)
                     held_categories = {
                         cat for tkr, state in position_state.items() if state["shares"] > 0 and (cat := ticker_to_category.get(tkr)) and cat != "TBD"
                     }
 
-                    helper_candidates = [
-                        {"tkr": ticker, "composite_score": float(score), "score": float(score)} for score, ticker in buy_ranked_candidates
-                    ]
-
-                    selected_candidates, rejected_candidates = select_candidates_by_category(
-                        helper_candidates,
-                        etf_meta,
-                        held_categories=held_categories,
-                        max_count=slots_to_fill,
-                        skip_held_categories=True,
-                    )
-
-                    for cand, reason in rejected_candidates:
-                        if reason != "category_held":
-                            continue
-                        ticker_rejected = cand.get("tkr")
-                        if not ticker_rejected:
-                            continue
-                        records = daily_records_by_ticker.get(ticker_rejected)
-                        if records and records[-1]["date"] == dt and records[-1].get("decision") == "WAIT":
-                            records[-1]["note"] = DECISION_NOTES["CATEGORY_DUP"]
-
-                    for cand in selected_candidates:
+                    # 점수가 양수인 모든 매수 시그널 종목을 candidates에 넣기 (이미 정렬됨)
+                    successful_buys = 0
+                    for score, ticker_to_buy in buy_ranked_candidates:
+                        if successful_buys >= slots_to_fill:
+                            break
                         if cash <= 0:
                             break
 
-                        ticker_to_buy = cand["tkr"]
                         price = today_prices.get(ticker_to_buy)
                         if pd.isna(price):
+                            continue
+
+                        # 카테고리 중복 체크
+                        category = ticker_to_category.get(ticker_to_buy)
+                        if category and category != "TBD" and category in held_categories:
+                            if daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt:
+                                daily_records_by_ticker[ticker_to_buy][-1]["note"] = f"{DECISION_NOTES['CATEGORY_DUP']}"
+                            continue
+
+                        # RSI 과매수 종목 매수 차단
+                        rsi_score_buy_candidate = rsi_score_today.get(ticker_to_buy, 100.0)
+
+                        if rsi_sell_enabled and rsi_score_buy_candidate <= rsi_sell_threshold:
+                            # RSI 과매수 종목은 매수하지 않음
+                            if daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt:
+                                daily_records_by_ticker[ticker_to_buy][-1]["note"] = f"RSI 과매수 (RSI점수: {rsi_score_buy_candidate:.1f})"
                             continue
 
                         equity_base = cash + current_holdings_value
@@ -684,7 +672,6 @@ def run_portfolio_backtest(
                             if cooldown_days > 0:
                                 ticker_state["sell_block_until"] = max(ticker_state["sell_block_until"], i + cooldown_days)
 
-                            category = ticker_to_category.get(ticker_to_buy)
                             if category and category != "TBD":
                                 held_categories.add(category)
 
@@ -702,8 +689,10 @@ def run_portfolio_backtest(
                             purchased_today.add(ticker_to_buy)
                             # 순매수 집계
                             buy_trades_today_map.setdefault(ticker_to_buy, []).append({"shares": float(req_qty), "price": float(price)})
+                            successful_buys += 1
 
                 elif slots_to_fill <= 0 and buy_ranked_candidates:
+                    # 종합 점수를 사용 (buy_ranked_candidates는 이미 종합 점수로 정렬됨)
                     helper_candidates = [{"tkr": ticker, "score": score} for score, ticker in buy_ranked_candidates if ticker not in purchased_today]
 
                     replacement_candidates, _ = select_candidates_by_category(
@@ -717,7 +706,9 @@ def run_portfolio_backtest(
                     held_stocks_with_scores = []
                     for held_ticker, held_position in position_state.items():
                         if held_position["shares"] > 0:
+                            # MAPS 점수 사용
                             score_h = score_today.get(held_ticker, float("nan"))
+
                             if not pd.isna(score_h):
                                 held_stocks_with_scores.append(
                                     {
@@ -779,6 +770,17 @@ def run_portfolio_backtest(
 
                         # 교체할 종목이 결정되었으면 매도/매수 진행
                         if ticker_to_sell:
+                            # RSI 과매수 종목 교체 매수 차단
+                            rsi_score_replace_candidate = rsi_score_today.get(replacement_ticker, 100.0)
+
+                            if rsi_sell_enabled and rsi_score_replace_candidate <= rsi_sell_threshold:
+                                # RSI 과매수 종목은 교체 매수하지 않음
+                                if daily_records_by_ticker[replacement_ticker] and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt:
+                                    daily_records_by_ticker[replacement_ticker][-1][
+                                        "note"
+                                    ] = f"RSI 과매수 (RSI점수: {rsi_score_replace_candidate:.1f})"
+                                continue  # 다음 교체 후보로 넘어감
+
                             sell_price = today_prices.get(ticker_to_sell)
                             buy_price = today_prices.get(replacement_ticker)
 
@@ -921,12 +923,20 @@ def run_portfolio_backtest(
                     for ticker_symbol, records in daily_records_by_ticker.items()
                     if records and records[-1]["date"] == dt and records[-1]["decision"] in ("BUY", "BUY_REPLACE")
                 }
+
                 for _, candidate_ticker in buy_ranked_candidates:
                     if candidate_ticker not in bought_tickers_today:
                         if daily_records_by_ticker[candidate_ticker] and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt:
-                            daily_records_by_ticker[candidate_ticker][-1]["note"] = (
-                                DECISION_NOTES["PORTFOLIO_FULL"] if slots_to_fill <= 0 else DECISION_NOTES["INSUFFICIENT_CASH"]
-                            )
+                            # RSI 차단이나 카테고리 중복 등 이미 note가 설정된 경우 덮어쓰지 않음
+                            current_note = daily_records_by_ticker[candidate_ticker][-1].get("note", "")
+                            if not current_note or current_note == "":
+                                # 포트폴리오 가득 참
+                                if slots_to_fill <= 0:
+                                    daily_records_by_ticker[candidate_ticker][-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
+                                else:
+                                    # 매수 시도했지만 실패 (RSI, 카테고리 중복, 리스크 오프 등은 이미 note 설정됨)
+                                    # note가 없으면 포트폴리오 가득 참으로 표시
+                                    daily_records_by_ticker[candidate_ticker][-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
             else:  # 리스크 오프 상태
                 # 매수 후보가 있더라도, 시장이 위험 회피 상태이므로 매수하지 않음
                 # 후보들에게 사유 기록
@@ -940,13 +950,21 @@ def run_portfolio_backtest(
 
                 for candidate_ticker in risk_off_candidates:
                     if daily_records_by_ticker[candidate_ticker] and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt:
-                        daily_records_by_ticker[candidate_ticker][-1]["note"] = DECISION_NOTES["RISK_OFF"]
+                        daily_records_by_ticker[candidate_ticker][-1][
+                            "note"
+                        ] = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 {int(risk_off_equity_ratio_pct)}%)"
 
             # --- 당일 최종 라벨 오버라이드 (공용 라벨러) ---
             for tkr, rows in daily_records_by_ticker.items():
                 if not rows:
                     continue
                 last_row = rows[-1]
+                current_note = str(last_row.get("note") or "")
+
+                # 리스크 오프 비중 조절 문구가 있으면 덮어쓰지 않음
+                if "시장위험회피" in current_note:
+                    continue
+
                 overrides = compute_net_trade_note(
                     tkr=tkr,
                     data_by_tkr={
@@ -967,7 +985,7 @@ def run_portfolio_backtest(
 
             risk_off_note_for_day = ""
             if is_risk_off:
-                risk_off_note_for_day = f"{DECISION_NOTES['RISK_OFF']} (목표 {int(risk_off_equity_ratio_pct)}%)"
+                risk_off_note_for_day = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 {int(risk_off_equity_ratio_pct)}%)"
                 for rows in daily_records_by_ticker.values():
                     if not rows:
                         continue
@@ -986,13 +1004,9 @@ def run_portfolio_backtest(
                     "shares": 0,
                     "pv": cash,
                     "decision": "HOLD",
-                    "note": risk_off_note_for_day,
+                    "note": "",  # CASH는 문구 없음
                 }
             )
-
-        # 디버깅: 첫 3일만 로그
-        if i < 3:
-            logger.info(f"[백테스트] Day {i} 완료: {records_added_this_day}개 레코드 추가")
 
     total_records = sum(len(v) for v in daily_records_by_ticker.values())
     expected_records = len(metrics_by_ticker) * len(union_index)

@@ -563,22 +563,15 @@ def _build_daily_table_rows(
 
         decision_order = DECISION_CONFIG.get(decision, {}).get("order", 99)
         score_val = float(score) if _is_finite_number(score) else float("-inf")
-        composite_score = row.get("composite_score")
-        composite_score_val = float(composite_score) if _is_finite_number(composite_score) else float("-inf")
         sort_key = (
             0 if is_cash else 1,
             decision_order,
-            -composite_score_val,  # 종합 점수 우선
-            -score_val,  # 그 다음 MAPS 점수
+            -score_val,  # MAPS 점수
             ticker_key,
         )
 
         rsi_score = row.get("rsi_score")
         rsi_score_display = f"{float(rsi_score):.1f}" if _is_finite_number(rsi_score) else "-"
-
-        # 종합 점수
-        composite_score = row.get("composite_score")
-        composite_score_display = f"{float(composite_score):.1f}" if _is_finite_number(composite_score) else "-"
 
         row_data = [
             "0",
@@ -598,7 +591,6 @@ def _build_daily_table_rows(
             weight_display,
             score_display,
             rsi_score_display,
-            composite_score_display,
             f"{int(filter_val)}일" if _is_finite_number(filter_val) else "-",
             phrase,
         ]
@@ -606,8 +598,37 @@ def _build_daily_table_rows(
 
     entries.sort(key=lambda item: item[0])
 
+    # 카테고리별 최고 점수 필터링을 위해 딕셔너리 형태로 변환
+    from strategies.maps.shared import filter_category_duplicates
+
+    items_for_filter = []
+    for sort_key, row_data in entries:
+        # row_data: [순위, 티커, 종목명, 카테고리, 상태, ...]
+        # sort_key: (is_cash, decision_order, -score, ticker)
+        score_val = -sort_key[2] if len(sort_key) > 2 else 0.0  # 음수로 저장되어 있으므로 다시 양수로
+        item_dict = {
+            "ticker": row_data[1],  # 티커
+            "category": row_data[3],  # 카테고리
+            "state": row_data[4],  # 상태
+            "score": score_val,
+            "row_data": row_data,
+            "sort_key": sort_key,
+        }
+        items_for_filter.append(item_dict)
+
+    # 카테고리 정규화 함수
+    def normalize_category(category: str) -> str:
+        if not category or category == "-":
+            return ""
+        return str(category).strip().upper()
+
+    # 필터링 적용
+    filtered_items = filter_category_duplicates(items_for_filter, category_key_getter=normalize_category)
+
+    # 다시 row 형태로 변환
     sorted_rows: List[List[str]] = []
-    for idx, (_, row) in enumerate(entries, 1):
+    for idx, item in enumerate(filtered_items, 1):
+        row = item["row_data"]
         row[0] = str(idx)
         sorted_rows.append(row)
 
@@ -645,9 +666,8 @@ def _generate_daily_report_lines(
         "누적손익",
         "누적(%)",
         "비중",
-        "MAPS",
+        "점수",
         "RSI",
-        "종합",
         "지속",
         "문구",
     ]
@@ -667,9 +687,8 @@ def _generate_daily_report_lines(
         "right",  # 누적손익
         "right",  # 누적(%)
         "right",  # 비중
-        "right",  # MAPS
+        "right",  # 점수
         "right",  # RSI
-        "right",  # 종합
         "right",  # 지속
         "left",  # 문구
     ]
@@ -773,7 +792,7 @@ def dump_backtest_log(
     account_id = result.account_id
     country_code = result.country_code
 
-    path = base_dir / f"backtest_{account_id}.txt"
+    path = base_dir / f"backtest_{account_id}.log"
     lines: List[str] = []
 
     lines.append(f"백테스트 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")

@@ -321,6 +321,62 @@
                 "listing_date": "2022-06-28",
                 "1_week_avg_volume": 938860,
                 "1_week_avg_turnover": 38000463404
+            },
+            {
+                "ticker": "417450",
+                "name": "RISE 글로벌수소경제",
+                "recommend_enabled": true,
+                "listing_date": "2022-02-15",
+                "1_week_avg_volume": 73666,
+                "1_week_avg_turnover": 965378390
+            },
+            {
+                "ticker": "419650",
+                "name": "PLUS 글로벌수소&차세대연료전지",
+                "recommend_enabled": true,
+                "listing_date": "2022-02-15",
+                "1_week_avg_volume": 333974,
+                "1_week_avg_turnover": 1756546377
+            },
+            {
+                "ticker": "399580",
+                "name": "RISE 글로벌클린에너지",
+                "recommend_enabled": true,
+                "listing_date": "2021-10-21",
+                "1_week_avg_volume": 20247,
+                "1_week_avg_turnover": 177322210
+            },
+            {
+                "ticker": "419420",
+                "name": "KODEX 미국클린에너지나스닥",
+                "recommend_enabled": true,
+                "listing_date": "2022-03-22",
+                "1_week_avg_volume": 28370,
+                "1_week_avg_turnover": 241252625
+            },
+            {
+                "ticker": "442320",
+                "name": "RISE 글로벌원자력",
+                "recommend_enabled": true,
+                "listing_date": "2022-10-13",
+                "1_week_avg_volume": 446559,
+                "1_week_avg_turnover": 18139246364
+            },
+            {
+                "ticker": "0051G0",
+                "name": "SOL 미국원자력SMR",
+                "recommend_enabled": true,
+                "listing_date": "2025-05-20",
+                "1_week_avg_volume": 1396741,
+                "1_week_avg_turnover": 27649452875
+            },
+            {
+                "ticker": "0007G0",
+                "name": "PLUS 글로벌원자력밸류체인",
+                "recommend_enabled": true,
+                "listing_date": "2025-01-14",
+                "1_week_avg_volume": 197301,
+                "1_week_avg_turnover": 3454370128
             }
         ]
     },
@@ -574,72 +630,6 @@
                 "listing_date": "2024-12-24",
                 "1_week_avg_volume": 42146,
                 "1_week_avg_turnover": 552902492
-            }
-        ]
-    },
-    {
-        "category": "수소/클린에너지",
-        "tickers": [
-            {
-                "ticker": "417450",
-                "name": "RISE 글로벌수소경제",
-                "recommend_enabled": true,
-                "listing_date": "2022-02-15",
-                "1_week_avg_volume": 73666,
-                "1_week_avg_turnover": 965378390
-            },
-            {
-                "ticker": "419650",
-                "name": "PLUS 글로벌수소&차세대연료전지",
-                "recommend_enabled": true,
-                "listing_date": "2022-02-15",
-                "1_week_avg_volume": 333974,
-                "1_week_avg_turnover": 1756546377
-            },
-            {
-                "ticker": "399580",
-                "name": "RISE 글로벌클린에너지",
-                "recommend_enabled": true,
-                "listing_date": "2021-10-21",
-                "1_week_avg_volume": 20247,
-                "1_week_avg_turnover": 177322210
-            },
-            {
-                "ticker": "419420",
-                "name": "KODEX 미국클린에너지나스닥",
-                "recommend_enabled": true,
-                "listing_date": "2022-03-22",
-                "1_week_avg_volume": 28370,
-                "1_week_avg_turnover": 241252625
-            }
-        ]
-    },
-    {
-        "category": "글로벌원자력",
-        "tickers": [
-            {
-                "ticker": "442320",
-                "name": "RISE 글로벌원자력",
-                "recommend_enabled": true,
-                "listing_date": "2022-10-13",
-                "1_week_avg_volume": 446559,
-                "1_week_avg_turnover": 18139246364
-            },
-            {
-                "ticker": "0051G0",
-                "name": "SOL 미국원자력SMR",
-                "recommend_enabled": true,
-                "listing_date": "2025-05-20",
-                "1_week_avg_volume": 1396741,
-                "1_week_avg_turnover": 27649452875
-            },
-            {
-                "ticker": "0007G0",
-                "name": "PLUS 글로벌원자력밸류체인",
-                "recommend_enabled": true,
-                "listing_date": "2025-01-14",
-                "1_week_avg_volume": 197301,
-                "1_week_avg_turnover": 3454370128
             }
         ]
     },

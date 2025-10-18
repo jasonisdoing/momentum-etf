@@ -116,9 +116,9 @@ def main() -> None:
         excluded_tickers=excluded if excluded else None,
     )
 
-    # 날짜를 포함한 파일명 생성
-    date_str = end_date.strftime("%Y_%m_%d")
-    target_path = RESULTS_DIR / f"backtest_{account_id}_{date_str}.txt"
+    # 날짜를 포함한 파일명 생성 (실제 실행 날짜 사용)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    target_path = RESULTS_DIR / f"backtest_{account_id}_{date_str}.log"
 
     generated_path = dump_backtest_log(
         result,

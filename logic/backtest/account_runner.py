@@ -939,6 +939,11 @@ def _build_ticker_summaries(
         if total_trades == 0 and final_shares <= 0 and math.isclose(total_contribution, 0.0, abs_tol=1e-9):
             continue
 
+        # 점수가 음수인 종목 제외
+        last_score = float(last_row.get("score", 0.0) or 0.0)
+        if last_score < 0:
+            continue
+
         win_rate = (winning_trades / total_trades) * 100.0 if total_trades > 0 else 0.0
         meta = ticker_meta.get(ticker_key, {})
 

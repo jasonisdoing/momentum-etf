@@ -22,9 +22,16 @@ DECISION_CONFIG = {
         "is_recommendation": True,
         "show_slack": True,
     },
+    "SELL_RSI_OVERBOUGHT": {
+        "display_name": "<🔥 RSI 과매수 매도>",
+        "order": 22,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#ffb6c1",
+    },
     "SELL_REPLACE": {
         "display_name": "<🔄 교체매도>",
-        "order": 22,
+        "order": 23,
         "is_recommendation": True,
         "show_slack": True,
         "background": "#ffc1cc",
@@ -72,6 +79,7 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
     "SOLD": "🔚 매도 완료",
     "BUY_REPLACE": "🔄 교체매수",
     "SELL_REPLACE": "🔄 교체매도",
+    "SELL_RSI_OVERBOUGHT": "🔥 RSI 과매수 매도",
 }
 
 
@@ -93,8 +101,7 @@ DECISION_NOTES = {
     "PORTFOLIO_FULL": "포트폴리오 가득 참",
     "INSUFFICIENT_CASH": "현금 부족",
     "NO_PRICE": "가격 정보 없음",
-    "RISK_OFF": "시장 위험 회피",
-    "RISK_OFF_SELL": "❗시장위험회피 매도❗",
+    "RISK_OFF_TRIM": "❗시장위험회피 비중조절❗",
     "TREND_BREAK": "추세 이탈",
     "REPLACE_SELL": "교체 매도",
     "PRICE_DATA_FAIL": "가격 데이터 조회 실패",

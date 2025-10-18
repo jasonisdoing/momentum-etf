@@ -83,7 +83,7 @@ def _calculate_cooldown_blocks(
                 last_buy_ts = pd.to_datetime(last_buy).normalize()
                 if last_buy_ts <= base_date_norm:
                     days_since_buy = max(
-                        count_trading_days(country_code, last_buy_ts, base_date_norm) - 1,
+                        count_trading_days(country_code, last_buy_ts, base_date_norm),
                         0,
                     )
                     if days_since_buy < cooldown_days:
@@ -96,7 +96,7 @@ def _calculate_cooldown_blocks(
                 last_sell_ts = pd.to_datetime(last_sell).normalize()
                 if last_sell_ts <= base_date_norm:
                     days_since_sell = max(
-                        count_trading_days(country_code, last_sell_ts, base_date_norm) - 1,
+                        count_trading_days(country_code, last_sell_ts, base_date_norm),
                         0,
                     )
                     if days_since_sell < cooldown_days:
@@ -175,14 +175,24 @@ def _create_decision_entry(
     # 매매 의사결정
     if state == "HOLD":
         price_ma, ma = data["price"], data["s1"]
+
+        # RSI 과매수 매도 조건 체크
+        from data.settings.common import RSI_SELL_CONFIG
+
+        rsi_sell_enabled = RSI_SELL_CONFIG.get("enabled", False)
+        rsi_sell_threshold = RSI_SELL_CONFIG.get("overbought_sell_threshold", 10.0)
+
         if holding_return_pct is not None and stop_loss_threshold is not None and holding_return_pct <= float(stop_loss_threshold):
             state = "CUT_STOPLOSS"
             phrase = DECISION_MESSAGES.get("CUT_STOPLOSS", "손절매도")
+        elif rsi_sell_enabled and rsi_score_value <= rsi_sell_threshold:
+            state = "SELL_RSI_OVERBOUGHT"
+            phrase = f"{DECISION_MESSAGES.get('SELL_RSI_OVERBOUGHT', 'RSI 과매수 매도')} (RSI점수: {rsi_score_value:.1f})"
         elif not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
             state = "SELL_TREND"
             phrase = DECISION_NOTES["TREND_BREAK"]
 
-        if sell_block_info and state == "SELL_TREND":
+        if sell_block_info and state in ("SELL_TREND", "SELL_RSI_OVERBOUGHT"):
             state = "HOLD"
             phrase = "쿨다운 대기중"
 
@@ -301,7 +311,6 @@ def generate_daily_recommendations_for_portfolio(
             if normalized:
                 held_category_keys.add(normalized)
 
-    held_count = len(holdings)
     decisions = []
 
     # 쿨다운 블록 계산
@@ -368,44 +377,58 @@ def generate_daily_recommendations_for_portfolio(
         d for d in decisions if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] in universe_tickers and d.get("recommend_enabled", True)
     ]
 
+    # 실제 보유 중인 종목 수 계산 (매도 예정 종목 제외)
+    held_count = sum(1 for d in decisions if d["state"] == "HOLD")
     slots_to_fill = denom - held_count
 
     if risk_off_effective:
         for decision in decisions:
             decision["risk_off_target_ratio"] = risk_off_target_ratio
             if decision["state"] == "HOLD":
-                note_text = DECISION_NOTES["RISK_OFF_SELL"]
+                note_text = DECISION_NOTES["RISK_OFF_TRIM"]
                 if partial_risk_off:
-                    note_text = f"{note_text} (목표 {risk_off_target_ratio}%)"
+                    note_text = f"{note_text} (보유목표 {risk_off_target_ratio}%)"
                 decision["row"][-1] = note_text
                 decision["row"][4] = "HOLD"
 
             if decision.get("buy_signal") and full_risk_off_exit:
                 decision["buy_signal"] = False
                 if decision["state"] == "WAIT":
-                    original_phrase = decision["row"][-1]
-                    if original_phrase and "추세진입" in original_phrase:
-                        decision["row"][-1] = f"{DECISION_NOTES['RISK_OFF']} ({original_phrase})"
-                    else:
-                        decision["row"][-1] = DECISION_NOTES["RISK_OFF"]
+                    decision["row"][-1] = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 {risk_off_target_ratio}%)"
 
-    # 신규 매수 로직
-    if not risk_off_effective and slots_to_fill > 0:
-        selected_candidates, rejected_candidates = select_candidates_by_category(
-            wait_candidates_raw, etf_meta, held_categories=held_categories, max_count=slots_to_fill, skip_held_categories=True
-        )
+    # 신규 매수 로직 (리스크 오프 상태에서도 허용, 비중만 제한)
+    if slots_to_fill > 0:
+        # 매도 예정 종목을 제외한 held_categories 재계산
+        held_categories_for_buy = set()
+        for d in decisions:
+            if d["state"] == "HOLD":
+                category = etf_meta.get(d["tkr"], {}).get("category")
+                if category and category != "TBD":
+                    held_categories_for_buy.add(category)
 
-        for cand, reason in rejected_candidates:
-            if reason == "category_held":
-                cand["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
+        # 점수가 양수인 모든 매수 시그널 종목을 순서대로 시도 (이미 점수순 정렬됨)
+        successful_buys = 0
+        for cand in wait_candidates_raw:
+            if successful_buys >= slots_to_fill:
+                break
 
-        for cand in selected_candidates:
             cand_category = etf_meta.get(cand["tkr"], {}).get("category")
             cand_category_key = _normalize_category_value(cand_category)
 
-            if cand_category_key and cand_category_key in held_category_keys:
+            # 카테고리 중복 체크
+            if cand_category and cand_category != "TBD" and cand_category in held_categories_for_buy:
+                continue
+
+            # RSI 과매수 종목 매수 차단
+            from data.settings.common import RSI_SELL_CONFIG
+
+            rsi_sell_enabled = RSI_SELL_CONFIG.get("enabled", False)
+            rsi_sell_threshold = RSI_SELL_CONFIG.get("overbought_sell_threshold", 10.0)
+            cand_rsi_score = cand.get("rsi_score", 100.0)
+
+            if rsi_sell_enabled and cand_rsi_score <= rsi_sell_threshold:
                 cand["state"], cand["row"][4] = "WAIT", "WAIT"
-                cand["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
+                cand["row"][-1] = f"RSI 과매수 (RSI점수: {cand_rsi_score:.1f})"
                 cand["buy_signal"] = False
                 continue
 
@@ -420,8 +443,10 @@ def generate_daily_recommendations_for_portfolio(
                     cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
                     if cand_category and cand_category != "TBD":
                         held_categories.add(cand_category)
+                        held_categories_for_buy.add(cand_category)
                         if cand_category_key:
                             held_category_keys.add(cand_category_key)
+                    successful_buys += 1
                 else:
                     cand["row"][-1] = DECISION_NOTES["INSUFFICIENT_CASH"]
             else:
@@ -437,7 +462,8 @@ def generate_daily_recommendations_for_portfolio(
     )
 
     current_held_stocks = [d for d in decisions if d["state"] == "HOLD"]
-    current_held_stocks.sort(key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"))
+    # MAPS 점수 사용
+    current_held_stocks.sort(key=lambda x: x.get("score", 0.0) if pd.notna(x.get("score")) else -float("inf"))
 
     for best_new in replacement_candidates:
         if not current_held_stocks:
@@ -456,17 +482,20 @@ def generate_daily_recommendations_for_portfolio(
         )
 
         ticker_to_sell = None
+        # MAPS 점수 사용
+        best_new_score = best_new.get("score")
+
         if held_stock_same_category:
-            if (
-                pd.notna(best_new["score"])
-                and pd.notna(held_stock_same_category["score"])
-                and best_new["score"] > held_stock_same_category["score"] + replace_threshold
-            ):
+            held_score = held_stock_same_category.get("score")
+
+            if pd.notna(best_new_score) and pd.notna(held_score) and best_new_score > held_score + replace_threshold:
                 ticker_to_sell = held_stock_same_category["tkr"]
         else:
             if current_held_stocks:
                 weakest_held = current_held_stocks[0]
-                if pd.notna(best_new["score"]) and pd.notna(weakest_held["score"]) and best_new["score"] > weakest_held["score"] + replace_threshold:
+                weakest_score = weakest_held.get("score")
+
+                if pd.notna(best_new_score) and pd.notna(weakest_score) and best_new_score > weakest_score + replace_threshold:
                     ticker_to_sell = weakest_held["tkr"]
 
         if ticker_to_sell:
@@ -523,10 +552,11 @@ def generate_daily_recommendations_for_portfolio(
             best_new_as_held = best_new.copy()
             best_new_as_held["state"] = "HOLD"
             current_held_stocks.append(best_new_as_held)
-            current_held_stocks.sort(key=lambda x: x["score"] if pd.notna(x["score"]) else -float("inf"))
+            # MAPS 점수 사용
+            current_held_stocks.sort(key=lambda x: x.get("score", 0.0) if pd.notna(x.get("score")) else -float("inf"))
 
     # 쿨다운 최종 적용
-    SELL_STATE_SET = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS"}
+    SELL_STATE_SET = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI_OVERBOUGHT"}
     BUY_STATE_SET = {"BUY", "BUY_REPLACE"}
 
     if cooldown_days and cooldown_days > 0:
@@ -555,19 +585,25 @@ def generate_daily_recommendations_for_portfolio(
 
     final_decisions = list(decisions)
 
+    # RSI 과매수 종목 문구 추가 (WAIT 상태)
+    from data.settings.common import RSI_SELL_CONFIG
+
+    rsi_sell_enabled = RSI_SELL_CONFIG.get("enabled", False)
+    rsi_sell_threshold = RSI_SELL_CONFIG.get("overbought_sell_threshold", 10.0)
+
+    for d in final_decisions:
+        if d["state"] == "WAIT" and d.get("buy_signal"):
+            rsi_score = d.get("rsi_score", 100.0)
+            if rsi_sell_enabled and rsi_score <= rsi_sell_threshold:
+                if not d["row"][-1] or d["row"][-1] == "":
+                    d["row"][-1] = f"RSI 과매수 (RSI점수: {rsi_score:.1f})"
+
     # 포트폴리오 가득 찬 경우 처리
     if slots_to_fill <= 0:
-        held_categories_for_full = {etf_meta.get(d["tkr"], {}).get("category") for d in decisions if d["state"] == "HOLD"}
-        held_category_keys_for_full = {_normalize_category_value(cat) for cat in held_categories_for_full if cat and cat != "TBD"}
         for d in final_decisions:
             if d["state"] == "WAIT" and d.get("buy_signal"):
                 if not d["row"][-1]:
-                    wait_category = etf_meta.get(d["tkr"], {}).get("category")
-                    wait_category_key = _normalize_category_value(wait_category)
-                    if wait_category_key and wait_category_key in held_category_keys_for_full:
-                        d["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
-                    else:
-                        d["row"][-1] = DECISION_NOTES["PORTFOLIO_FULL"]
+                    d["row"][-1] = DECISION_NOTES["PORTFOLIO_FULL"]
 
     sort_decisions_by_order_and_score(final_decisions)
     return final_decisions

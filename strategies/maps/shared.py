@@ -1,6 +1,6 @@
 """Momentum 전략 모듈에서 공통으로 사용하는 유틸리티."""
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Callable
 
 from utils.logger import get_app_logger
 
@@ -174,3 +174,87 @@ def sort_decisions_by_order_and_score(decisions: List[Dict[str, Any]]) -> None:
         return (order, -composite_score, -score, ticker)
 
     decisions.sort(key=sort_key)
+
+
+def filter_category_duplicates(
+    items: List[Dict[str, Any]],
+    *,
+    category_key_getter: Callable[[str], Optional[str]],
+) -> List[Dict[str, Any]]:
+    """카테고리별 최고 점수 1개만 남기고 필터링합니다.
+
+    교체 매매(SELL_REPLACE/BUY_REPLACE)는 2개 모두 표시합니다.
+
+    Args:
+        items: 필터링할 항목 리스트
+        category_key_getter: 카테고리를 정규화하는 함수
+
+    Returns:
+        필터링된 항목 리스트
+    """
+    filtered_results = []
+    category_best_map = {}  # 카테고리별 최고 점수 종목 추적
+    replacement_tickers = set()  # 교체 매매 관련 티커
+    held_categories = set()  # 이미 보유/매수 중인 카테고리
+
+    # 1단계: 교체 매매 티커 수집 및 보유 카테고리 수집
+    for item in items:
+        state = item.get("state", "")
+        category = item.get("category", "")
+        category_key = category_key_getter(category)
+
+        if state in {"SELL_REPLACE", "BUY_REPLACE"}:
+            ticker = item.get("ticker") or item.get("tkr")
+            if ticker:
+                replacement_tickers.add(ticker)
+
+        # HOLD, BUY 상태의 카테고리 수집 (매도 예정 종목 제외)
+        if state in {"HOLD", "BUY", "BUY_REPLACE"}:
+            if category_key and category_key != "TBD":
+                held_categories.add(category_key)
+
+    # 2단계: 필터링
+    for item in items:
+        ticker = item.get("ticker") or item.get("tkr")
+        category = item.get("category", "")
+        state = item.get("state", "")
+        composite_score = item.get("composite_score", 0.0)
+
+        # 교체 매매 관련 종목은 무조건 포함
+        if ticker in replacement_tickers:
+            filtered_results.append(item)
+            continue
+
+        # HOLD, BUY, SELL 상태는 무조건 포함
+        if state in {"HOLD", "BUY", "BUY_REPLACE", "SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI_OVERBOUGHT"}:
+            filtered_results.append(item)
+            continue
+
+        # WAIT 상태: 카테고리별 최고 점수만 포함
+        if state == "WAIT":
+            category_key = category_key_getter(category)
+            if not category_key or category == "TBD":
+                # 카테고리가 없는 경우 모두 포함
+                filtered_results.append(item)
+            else:
+                # 이미 보유 중인 카테고리는 제외
+                if category_key in held_categories:
+                    continue
+
+                # 카테고리별 최고 점수 체크
+                if category_key not in category_best_map:
+                    category_best_map[category_key] = item
+                    filtered_results.append(item)
+                else:
+                    # 이미 더 높은 점수가 있으면 제외
+                    existing_score = category_best_map[category_key].get("composite_score", 0.0)
+                    if composite_score > existing_score:
+                        # 기존 항목 제거하고 새 항목 추가
+                        filtered_results.remove(category_best_map[category_key])
+                        category_best_map[category_key] = item
+                        filtered_results.append(item)
+        else:
+            # 기타 상태는 모두 포함
+            filtered_results.append(item)
+
+    return filtered_results

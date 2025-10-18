@@ -7,12 +7,12 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "tuning": {
-            "MA_PERIOD": 50,
+            "MA_PERIOD": 45,
             "PORTFOLIO_TOPN": 7,
-            "REPLACE_SCORE_THRESHOLD": 0.5
+            "REPLACE_SCORE_THRESHOLD": 1
         },
         "static": {
-            "COOLDOWN_DAYS": 1,
+            "COOLDOWN_DAYS": 2,
             "MAX_PER_CATEGORY": 1,
             "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 90
         },
