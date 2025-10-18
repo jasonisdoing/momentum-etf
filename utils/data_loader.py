@@ -88,7 +88,6 @@ if not any(isinstance(f, _PykrxLogFilter) for f in _root_logger.filters):
 
 logger = get_app_logger()
 
-CACHE_START_DATE_FALLBACK = "2020-01-01"
 
 try:
     from zoneinfo import ZoneInfo
@@ -126,7 +125,7 @@ class RateLimitException(Exception):
 
 def _get_cache_start_dt() -> Optional[pd.Timestamp]:
     """환경 변수 또는 기본값에서 캐시 시작 날짜를 로드합니다."""
-    raw = os.environ.get("CACHE_START_DATE", CACHE_START_DATE_FALLBACK)
+    raw = os.environ.get("CACHE_START_DATE")
     if not raw:
         return None
     try:

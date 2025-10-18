@@ -24,12 +24,11 @@ def get_cache_file_path(country: str, ticker: str) -> Path:
     return project_root / "data" / "stocks" / "cache" / country / f"{ticker}.pkl"
 
 
-def _determine_start_date(fallback: str = "2020-01-01") -> str:
+def _determine_start_date() -> str:
     settings = load_common_settings() or {}
     start = settings.get("CACHE_START_DATE")
     if start:
         return str(start)
-    return fallback
 
 
 def refresh_all_caches(countries: list[str], start_date: str):
@@ -74,7 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--start",
-        help="데이터 조회 시작일 (YYYY-MM-DD). 지정하지 않으면 공통 설정 또는 2020-01-01 사용.",
+        help="데이터 조회 시작일 (YYYY-MM-DD). 지정하지 않으면 공통 설정",
     )
     return parser
 

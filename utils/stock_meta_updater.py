@@ -16,12 +16,11 @@ from utils.logger import get_app_logger
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STOCKS_DIR = PROJECT_ROOT / "data" / "stocks"
-CACHE_START_DATE_FALLBACK = "2020-01-01"
 
 
 def _get_cache_start_date() -> Optional[pd.Timestamp]:
     """환경 변수에서 캐시 시작일을 불러오거나 기본값을 반환합니다."""
-    raw = os.environ.get("CACHE_START_DATE", CACHE_START_DATE_FALLBACK)
+    raw = os.environ.get("CACHE_START_DATE")
     if not raw:
         return None
     try:
