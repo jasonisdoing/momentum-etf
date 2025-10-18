@@ -7,8 +7,8 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "tuning": {
-            "MA_PERIOD": 50,
-            "PORTFOLIO_TOPN": 7,
+            "MA_PERIOD": 15,
+            "PORTFOLIO_TOPN": 5,
             "REPLACE_SCORE_THRESHOLD": 1,
             "OVERBOUGHT_SELL_THRESHOLD": 15
         },
@@ -17,7 +17,7 @@
             "MAX_PER_CATEGORY": 1,
             "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 90
         },
-        "expected_cagr": 103.25
+        "expected_cagr": 119.72
     },
     "benchmarks": [
         {

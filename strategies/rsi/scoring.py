@@ -37,26 +37,43 @@ def calculate_rsi_ema(
     gains = delta.where(delta > 0, 0.0)
     losses = -delta.where(delta < 0, 0.0)
 
-    # EMA 계산
-    alpha = ema_smoothing / (period + 1)
+    # Wilder's Smoothing (EMA 방식)
+    # alpha = 1 / period for Wilder's method
+    # or use custom ema_smoothing parameter
+    alpha = 1.0 / period  # Wilder's original method
 
-    # 초기 평균 (SMA)
-    avg_gain = gains.rolling(window=period, min_periods=period).mean()
-    avg_loss = losses.rolling(window=period, min_periods=period).mean()
+    # 초기 평균 계산 (첫 period개의 SMA)
+    avg_gain = pd.Series(index=close_prices.index, dtype=float)
+    avg_loss = pd.Series(index=close_prices.index, dtype=float)
 
-    # EMA 방식으로 평활화
-    for i in range(period, len(gains)):
+    # 첫 period개 값은 NaN
+    avg_gain.iloc[:period] = np.nan
+    avg_loss.iloc[:period] = np.nan
+
+    # period번째 값은 SMA
+    avg_gain.iloc[period] = gains.iloc[1 : period + 1].mean()
+    avg_loss.iloc[period] = losses.iloc[1 : period + 1].mean()
+
+    # period+1번째부터는 EMA
+    for i in range(period + 1, len(close_prices)):
         avg_gain.iloc[i] = (gains.iloc[i] * alpha) + (avg_gain.iloc[i - 1] * (1 - alpha))
         avg_loss.iloc[i] = (losses.iloc[i] * alpha) + (avg_loss.iloc[i - 1] * (1 - alpha))
 
-    # RS 계산 (0으로 나누기 방지)
-    rs = avg_gain / avg_loss.replace(0, np.nan)
+    # RS 계산 및 RSI 계산
+    # avg_loss가 0이면 RSI = 100 (완전 상승)
+    # avg_gain이 0이면 RSI = 0 (완전 하락)
+    rsi = pd.Series(index=close_prices.index, dtype=float)
 
-    # RSI 계산
-    rsi = 100 - (100 / (1 + rs))
-
-    # NaN 처리 (초기 period 구간)
-    rsi = rsi.fillna(50.0)  # 중립값으로 초기화
+    for i in range(len(avg_gain)):
+        if pd.isna(avg_gain.iloc[i]) or pd.isna(avg_loss.iloc[i]):
+            rsi.iloc[i] = np.nan
+        elif avg_loss.iloc[i] == 0:
+            rsi.iloc[i] = 100.0  # 완전 상승
+        elif avg_gain.iloc[i] == 0:
+            rsi.iloc[i] = 0.0  # 완전 하락
+        else:
+            rs = avg_gain.iloc[i] / avg_loss.iloc[i]
+            rsi.iloc[i] = 100 - (100 / (1 + rs))
 
     return rsi
 
@@ -95,7 +112,7 @@ def normalize_rsi_score(
 
     def _normalize_single(rsi_val: float) -> float:
         if pd.isna(rsi_val):
-            return 50.0  # 중립값
+            return float("nan")  # NaN 유지
 
         if rsi_val <= oversold_threshold:
             # 과매도 구간: 70~100점

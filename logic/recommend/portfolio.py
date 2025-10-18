@@ -472,6 +472,14 @@ def generate_daily_recommendations_for_portfolio(
         if not current_held_stocks:
             break
 
+        # RSI 과매수 종목 교체 매수 차단
+        best_new_rsi_score = best_new.get("rsi_score", 100.0)
+        if best_new_rsi_score <= rsi_sell_threshold:
+            best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
+            best_new["row"][-1] = f"RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})"
+            best_new["buy_signal"] = False
+            continue
+
         wait_stock_category = etf_meta.get(best_new["tkr"], {}).get("category")
         wait_stock_category_key = _normalize_category_value(wait_stock_category)
 
