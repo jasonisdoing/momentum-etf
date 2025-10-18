@@ -19,23 +19,27 @@ TUNING_CONFIG: dict[str, dict] = {
         "PORTFOLIO_TOPN": np.arange(3, 9, 1),
         "REPLACE_SCORE_THRESHOLD": np.arange(0, 5.5, 0.5),
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 25, 5),
+        "COOLDOWN_DAYS": np.arange(0, 6, 1),  # 0~5일
     },
     # "kor": {
-    #     "MA_RANGE": [15],
-    #     "PORTFOLIO_TOPN": np.arange(5, 9, 1),
-    #     "REPLACE_SCORE_THRESHOLD": [1],
-    #     "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 25, 5),
+    #     "MA_RANGE": [50],
+    #     "PORTFOLIO_TOPN": np.arange(5, 8, 1),
+    #     "REPLACE_SCORE_THRESHOLD": [0],
+    #     "OVERBOUGHT_SELL_THRESHOLD": [20],
+    #     "COOLDOWN_DAYS": np.arange(0, 6, 1),  # 0~5일
     # },
     "kor": {
-        "MA_RANGE": np.arange(10, 105, 5),
-        "PORTFOLIO_TOPN": np.arange(5, 9, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 5.5, 0.5),
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 25, 5),
+        "MA_RANGE": np.arange(10, 75, 5),  # 10~70
+        "PORTFOLIO_TOPN": np.arange(5, 8, 1),  # 5~7
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.5, 0.5),  # 0~2.0
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 35, 5),  # 5~30
+        "COOLDOWN_DAYS": np.arange(0, 4, 1),  # 0~3
     },
     "us": {
         "MA_RANGE": np.arange(5, 31, 1),
         "PORTFOLIO_TOPN": np.arange(5, 11, 1),
         "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
+        "COOLDOWN_DAYS": np.arange(0, 6, 1),  # 0~5일
     },
 }
 

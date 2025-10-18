@@ -9,10 +9,10 @@
         "tuning": {
             "MA_PERIOD": 35,
             "PORTFOLIO_TOPN": 3,
-            "REPLACE_SCORE_THRESHOLD": 0.7
+            "REPLACE_SCORE_THRESHOLD": 0.7,
+            "COOLDOWN_DAYS": 1
         },
         "static": {
-            "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
             "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 100
         },

@@ -63,9 +63,11 @@ def render_account_page(account_id: str) -> None:
         st.caption(f"데이터 업데이트: {updated_at}")
         strategy_cfg = account_settings.get("strategy", {}) or {}
         expected_cagr = None
+        backtested_date = None
         strategy_tuning: dict[str, Any] = {}
         if isinstance(strategy_cfg, dict):
             expected_cagr = strategy_cfg.get("expected_cagr")
+            backtested_date = strategy_cfg.get("backtested_date")
             tuning_cfg = strategy_cfg.get("tuning")
             if isinstance(tuning_cfg, dict):
                 strategy_tuning = tuning_cfg
@@ -75,6 +77,7 @@ def render_account_page(account_id: str) -> None:
                 "TopN": strategy_tuning.get("PORTFOLIO_TOPN"),
                 "교체점수": strategy_tuning.get("REPLACE_SCORE_THRESHOLD"),
                 "과매수 지표": strategy_tuning.get("OVERBOUGHT_SELL_THRESHOLD"),
+                "쿨다운 일자": strategy_tuning.get("COOLDOWN_DAYS"),
             }
             param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
         else:
@@ -102,19 +105,20 @@ def render_account_page(account_id: str) -> None:
             pass
 
         caption_text = ", ".join(caption_parts)
+        if caption_text:
+            st.caption(caption_text)
+        else:
+            st.caption("설정 정보를 찾을 수 없습니다.")
+
         if expected_cagr is not None:
             try:
                 expected_val = float(expected_cagr)
             except (TypeError, ValueError):
                 expected_val = None
-            if expected_val is not None:
-                expected_html = f"<span style='color:#d32f2f;'>예상 CAGR (연간 복리 성장률): {expected_val:+.2f}%</span>"
-                caption_text = f"{caption_text}, {expected_html}" if caption_text else expected_html
-
-        if caption_text:
-            st.markdown(f"<small>{caption_text}</small>", unsafe_allow_html=True)
-        else:
-            st.caption("설정 정보를 찾을 수 없습니다.")
+            expected_html = (
+                f"<span style='color:#d32f2f;'>예상 CAGR (연간 복리 성장률): {expected_val:+.2f}%, 백테스트 일자: {backtested_date}</span>"
+            )
+            st.markdown(f"<small>{expected_html}</small>", unsafe_allow_html=True)
     else:
         # updated_at이 없는 경우에 대한 폴백
         st.caption("데이터를 찾을 수 없습니다.")
