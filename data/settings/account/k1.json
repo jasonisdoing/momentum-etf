@@ -10,7 +10,7 @@
             "MA_PERIOD": 15,
             "PORTFOLIO_TOPN": 5,
             "REPLACE_SCORE_THRESHOLD": 1,
-            "OVERBOUGHT_SELL_THRESHOLD": 15
+            "OVERBOUGHT_SELL_THRESHOLD": 20
         },
         "static": {
             "COOLDOWN_DAYS": 2,

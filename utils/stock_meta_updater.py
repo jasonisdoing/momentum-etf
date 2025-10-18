@@ -86,23 +86,14 @@ def _update_metadata_for_country(country_code: str):
                 if not data.index.is_unique:
                     data = data[~data.index.duplicated(keep="last")]
 
-                # 1. 상장일 업데이트
+                # 1. 상장일 업데이트 (항상 yfinance 데이터로 갱신)
                 first_trading_ts = pd.Timestamp(data.index.min()).normalize()
                 listing_target_ts = first_trading_ts
 
-                existing_listing_raw = stock.get("listing_date")
-                existing_listing_ts: Optional[pd.Timestamp] = None
-                if existing_listing_raw:
-                    try:
-                        existing_listing_ts = pd.to_datetime(existing_listing_raw).normalize()
-                    except Exception:
-                        existing_listing_ts = None
-
-                if existing_listing_ts is not None and existing_listing_ts < listing_target_ts:
-                    listing_target_ts = existing_listing_ts
-
+                # CACHE_START_DATE보다 이전이면 CACHE_START_DATE로 제한
                 if cache_start_ts is not None and listing_target_ts < cache_start_ts:
                     listing_target_ts = cache_start_ts
+
                 stock["listing_date"] = listing_target_ts.strftime("%Y-%m-%d")
 
                 # 2. 주간 평균 거래량/거래대금 업데이트
