@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None
 
 
 LOG_LEVEL = os.environ.get("APP_LOG_LEVEL", "INFO").upper()
@@ -23,14 +30,35 @@ def get_app_logger() -> logging.Logger:
 
     logger = logging.getLogger("momentum_etf")
     if not logger.handlers:
-        handler = logging.StreamHandler()
+        # 포매터 설정
         formatter = logging.Formatter(
             "%(asctime)s [%(levelname)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
-        handler.setFormatter(formatter)
 
-        logger.addHandler(handler)
+        # 콘솔 핸들러
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
+        # 파일 핸들러 (logs/YYYY-MM-DD.log)
+        project_root = Path(__file__).resolve().parents[1]
+        log_dir = project_root / "logs"
+        log_dir.mkdir(exist_ok=True)
+
+        if ZoneInfo is not None:
+            try:
+                now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+            except Exception:
+                now_kst = datetime.now()
+        else:
+            now_kst = datetime.now()
+
+        log_path = log_dir / f"{now_kst.strftime('%Y-%m-%d')}.log"
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
         logger.setLevel(LOG_LEVEL if LOG_LEVEL in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"} else "INFO")
         logger.propagate = False
 
