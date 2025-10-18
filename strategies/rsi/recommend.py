@@ -26,7 +26,7 @@ def calculate_rsi_for_ticker(close_prices: pd.Series) -> float:
 
     # 데이터 길이 확인
     if len(close_prices) < 15:
-        logger.warning("[RSI] 데이터 길이 부족: {len(close_prices)}개 (최소 15개 필요)")
+        logger.warning(f"[RSI] 데이터 길이 부족: {len(close_prices)}개 (최소 15개 필요)")
         return 0.0
 
     try:

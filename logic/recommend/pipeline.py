@@ -722,6 +722,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
             rsi_score = calculate_rsi_for_ticker(df["Close"])
 
+            # RSI 계산 실패 시 디버깅 로그
+            if rsi_score == 0.0 and len(df["Close"]) < 15:
+                logger.warning(f"[RSI] {ticker} 데이터 부족: {len(df['Close'])}개 (최소 15개 필요)")
+
             recent_prices = df["Close"].tail(15)
             trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
 
