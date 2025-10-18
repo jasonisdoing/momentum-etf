@@ -1138,7 +1138,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 category_counts_normalized[category_key] = category_counts_normalized.get(category_key, 0) + 1
 
     current_holdings_count = len(holdings)
-    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI_OVERBOUGHT"}
+    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
     buy_state_set = {"BUY", "BUY_REPLACE"}
     planned_sell_count = sum(1 for item in results if item["state"] in sell_state_set)
     planned_buy_count = sum(1 for item in results if item["state"] in buy_state_set)

@@ -208,7 +208,7 @@ def filter_category_duplicates(
             continue
 
         # HOLD, BUY, SELL 상태는 무조건 포함
-        if state in {"HOLD", "BUY", "BUY_REPLACE", "SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI_OVERBOUGHT"}:
+        if state in {"HOLD", "BUY", "BUY_REPLACE", "SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}:
             filtered_results.append(item)
             # 매도 예정 종목은 category_best_map에 포함하지 않음 (WAIT 종목이 표시될 수 있도록)
             if not should_exclude_from_category_count(state):

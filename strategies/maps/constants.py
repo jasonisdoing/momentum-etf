@@ -22,7 +22,7 @@ DECISION_CONFIG = {
         "is_recommendation": True,
         "show_slack": True,
     },
-    "SELL_RSI_OVERBOUGHT": {
+    "SELL_RSI": {
         "display_name": "<🔥 RSI 과매수 매도>",
         "order": 22,
         "is_recommendation": True,
@@ -79,7 +79,7 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
     "SOLD": "🔚 매도 완료",
     "BUY_REPLACE": "🔄 교체매수",
     "SELL_REPLACE": "🔄 교체매도",
-    "SELL_RSI_OVERBOUGHT": "🔥 RSI 과매수 매도",
+    "SELL_RSI": "🔥 RSI 과매수 매도",
 }
 
 

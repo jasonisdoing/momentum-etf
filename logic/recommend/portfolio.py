@@ -182,13 +182,13 @@ def _create_decision_entry(
             state = "CUT_STOPLOSS"
             phrase = DECISION_MESSAGES.get("CUT_STOPLOSS", "손절매도")
         elif rsi_score_value <= rsi_sell_threshold:
-            state = "SELL_RSI_OVERBOUGHT"
-            phrase = f"{DECISION_MESSAGES.get('SELL_RSI_OVERBOUGHT', 'RSI 과매수 매도')} (RSI점수: {rsi_score_value:.1f})"
+            state = "SELL_RSI"
+            phrase = f"{DECISION_MESSAGES.get('SELL_RSI', 'RSI 과매수 매도')} (RSI점수: {rsi_score_value:.1f})"
         elif not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
             state = "SELL_TREND"
             phrase = DECISION_NOTES["TREND_BREAK"]
 
-        if sell_block_info and state in ("SELL_TREND", "SELL_RSI_OVERBOUGHT"):
+        if sell_block_info and state in ("SELL_TREND", "SELL_RSI"):
             state = "HOLD"
             phrase = "쿨다운 대기중"
 
@@ -559,7 +559,7 @@ def generate_daily_recommendations_for_portfolio(
             current_held_stocks.sort(key=lambda x: x.get("score", 0.0) if pd.notna(x.get("score")) else -float("inf"))
 
     # 쿨다운 최종 적용
-    SELL_STATE_SET = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI_OVERBOUGHT"}
+    SELL_STATE_SET = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
     BUY_STATE_SET = {"BUY", "BUY_REPLACE"}
 
     if cooldown_days and cooldown_days > 0:

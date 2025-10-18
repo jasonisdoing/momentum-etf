@@ -25,7 +25,7 @@ def get_held_categories_excluding_sells(
     Returns:
         매도 예정이 아닌 보유 종목의 카테고리 집합
     """
-    sell_states = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI_OVERBOUGHT"}
+    sell_states = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
     held_categories = set()
 
     for item in items:
@@ -60,7 +60,7 @@ def should_exclude_from_category_count(state: str) -> bool:
     Returns:
         True if 매도 예정 종목 (카운트에서 제외), False otherwise
     """
-    sell_states = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI_OVERBOUGHT"}
+    sell_states = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
     return state in sell_states
 
 
@@ -70,4 +70,4 @@ def get_sell_states() -> Set[str]:
     Returns:
         매도 상태 문자열 집합
     """
-    return {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI_OVERBOUGHT"}
+    return {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}

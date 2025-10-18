@@ -554,7 +554,7 @@ def run_portfolio_backtest(
                         if stop_loss_threshold is not None and hold_ret <= float(stop_loss_threshold):
                             decision = "CUT_STOPLOSS"
                         elif rsi_score_current <= rsi_sell_threshold:
-                            decision = "SELL_RSI_OVERBOUGHT"
+                            decision = "SELL_RSI"
                         elif price < ma_today[ticker]:
                             decision = "SELL_TREND"
 
