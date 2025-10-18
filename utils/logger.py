@@ -7,12 +7,17 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
 
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
     ZoneInfo = None
 
+load_dotenv()
+
+APP_VERSION = "2025-10-18-17"
+APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
 LOG_LEVEL = os.environ.get("APP_LOG_LEVEL", "INFO").upper()
 DEBUG_ENABLED = LOG_LEVEL == "DEBUG"

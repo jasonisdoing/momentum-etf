@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from collections import Counter
 from numbers import Number
+from notification import APP_LABEL
 
 import textwrap
 
@@ -43,12 +44,8 @@ from utils.schedule_config import get_country_schedule
 from utils.report import format_kr_money
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_slack_channel
-from dotenv import load_dotenv
 from utils.cron_utils import normalize_cron_weekdays
 
-load_dotenv()
-APP_VERSION = "2025-10-18-17"
-APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
 _LAST_ERROR: Optional[str] = None
 logger = get_app_logger()
