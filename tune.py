@@ -22,8 +22,8 @@ TUNING_CONFIG: dict[str, dict] = {
     },
     "kor": {
         "MA_RANGE": np.arange(10, 105, 5),
-        "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": [1],
+        "PORTFOLIO_TOPN": np.arange(5, 9, 1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 5.5, 0.5),
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 25, 5),
     },
     # "kor": {
@@ -59,8 +59,6 @@ def main() -> None:
         output_path=None,
         results_dir=RESULTS_DIR,
         tuning_config=TUNING_CONFIG,
-        n_trials=None,
-        timeout=None,
     )
     if output is None:
         logger.error("튜닝이 실패하여 결과를 저장하지 않습니다.")

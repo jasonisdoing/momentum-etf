@@ -74,6 +74,7 @@ def render_account_page(account_id: str) -> None:
                 "MA": strategy_tuning.get("MA_PERIOD"),
                 "TopN": strategy_tuning.get("PORTFOLIO_TOPN"),
                 "교체점수": strategy_tuning.get("REPLACE_SCORE_THRESHOLD"),
+                "과매수 지표": strategy_tuning.get("OVERBOUGHT_SELL_THRESHOLD"),
             }
             param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
         else:
