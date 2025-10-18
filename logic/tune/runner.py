@@ -171,7 +171,9 @@ def _format_threshold(value: Any) -> str:
 
 
 def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = False, months_range: Optional[int] = None) -> List[str]:
-    headers = ["MA_RANGE", "PORTFOLIO_TOPN", "REPLACE_SCORE_THRESHOLD", "OVERBOUGHT_SELL_THRESHOLD", "COOLDOWN_DAYS", "CAGR(%)", "MDD(%)"]
+    from utils.report import render_table_eaw
+
+    headers = ["MA", "TOPN", "교체점수", "과매수", "쿨다운", "CAGR(%)", "MDD(%)"]
     if months_range:
         headers.append(f"{months_range}개월(%)")
     else:
@@ -179,33 +181,44 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
     if include_samples:
         headers.append("Samples")
 
-    header_line = " | ".join(headers)
-    lines = [header_line, "-" * len(header_line)]
+    # 정렬 방향 설정 (right: 오른쪽 정렬, left: 왼쪽 정렬, center: 가운데 정렬)
+    aligns = ["right", "right", "right", "right", "right", "right", "right", "right"]
+    if include_samples:
+        aligns.append("right")
+
+    table_rows = []
     for row in rows[:MAX_TABLE_ROWS]:
         ma_val = row.get("ma_period")
         topn_val = row.get("portfolio_topn")
         threshold_val = row.get("replace_threshold")
         rsi_threshold_val = row.get("rsi_sell_threshold")
         cooldown_val = row.get("cooldown_days")
-        line_parts = [
-            f"{int(ma_val):>8}" if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
-            f"{int(topn_val):>14}" if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-            f"{_format_threshold(threshold_val):>23}",
-            f"{int(rsi_threshold_val):>25}" if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val)) else "-",
-            f"{int(cooldown_val):>14}" if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val)) else "-",
-            f"{_format_table_float(row.get('cagr')):>8}",
-            f"{_format_table_float(row.get('mdd')):>7}",
-            f"{_format_table_float(row.get('period_return')):>10}",
+
+        row_data = [
+            str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
+            str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
+            _format_threshold(threshold_val),
+            str(int(rsi_threshold_val)) if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val)) else "-",
+            str(int(cooldown_val)) if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val)) else "-",
+            _format_table_float(row.get("cagr")),
+            _format_table_float(row.get("mdd")),
+            _format_table_float(row.get("period_return")),
         ]
+
         if include_samples:
             samples_val = row.get("samples")
             if isinstance(samples_val, (int, float)) and math.isfinite(float(samples_val)):
-                line_parts.append(f"{int(samples_val):>7}")
+                row_data.append(str(int(samples_val)))
             else:
-                line_parts.append("   -")
-        lines.append(" | ".join(line_parts))
+                row_data.append("-")
+
+        table_rows.append(row_data)
+
+    lines = render_table_eaw(headers, table_rows, aligns)
+
     if len(rows) > MAX_TABLE_ROWS:
         lines.append(f"... (총 {len(rows)}개 중 상위 {MAX_TABLE_ROWS}개 표시)")
+
     return lines
 
 
@@ -941,6 +954,7 @@ def _compose_tuning_report(
     month_results: List[Dict[str, Any]],
     aggregated_entry: Dict[str, Any],
     progress_info: Optional[Dict[str, Any]] = None,
+    tuning_metadata: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines: List[str] = [
@@ -954,6 +968,65 @@ def _compose_tuning_report(
         if total > 0:
             pct = (completed / total) * 100
             lines.append(f"진행률: {completed}/{total} ({pct:.1f}%) - 중간 결과")
+
+    # 튜닝 메타 정보 추가
+    if tuning_metadata:
+        lines.append("")
+        lines.append("=== 튜닝 설정 ===")
+
+        # 탐색 공간
+        search_space = tuning_metadata.get("search_space", {})
+        if search_space:
+            ma_range = search_space.get("MA_RANGE", [])
+            topn_range = search_space.get("PORTFOLIO_TOPN", [])
+            threshold_range = search_space.get("REPLACE_SCORE_THRESHOLD", [])
+            rsi_range = search_space.get("OVERBOUGHT_SELL_THRESHOLD", [])
+            cooldown_range = search_space.get("COOLDOWN_DAYS", [])
+
+            lines.append(
+                f"탐색 공간: MA {len(ma_range)}개 × TOPN {len(topn_range)}개 × TH {len(threshold_range)}개 × RSI {len(rsi_range)}개 × COOLDOWN {len(cooldown_range)}개 = {tuning_metadata.get('combo_count', 0)}개 조합"
+            )
+
+            # 각 파라미터 범위 표시
+            if ma_range:
+                ma_min, ma_max = min(ma_range), max(ma_range)
+                lines.append(f"  MA_RANGE: {ma_min}~{ma_max}")
+            if topn_range:
+                topn_min, topn_max = min(topn_range), max(topn_range)
+                lines.append(f"  PORTFOLIO_TOPN: {topn_min}~{topn_max}")
+            if threshold_range:
+                th_min, th_max = min(threshold_range), max(threshold_range)
+                lines.append(f"  REPLACE_SCORE_THRESHOLD: {th_min}~{th_max}")
+            if rsi_range:
+                rsi_min, rsi_max = min(rsi_range), max(rsi_range)
+                lines.append(f"  OVERBOUGHT_SELL_THRESHOLD: {rsi_min}~{rsi_max}")
+            if cooldown_range:
+                cd_min, cd_max = min(cooldown_range), max(cooldown_range)
+                lines.append(f"  COOLDOWN_DAYS: {cd_min}~{cd_max}")
+
+        # 종목 수
+        ticker_count = tuning_metadata.get("ticker_count", 0)
+        if ticker_count > 0:
+            lines.append(f"대상 종목: {ticker_count}개")
+
+        # 제외된 종목
+        excluded_tickers = tuning_metadata.get("excluded_tickers", [])
+        if excluded_tickers:
+            lines.append(f"제외된 종목: {len(excluded_tickers)}개 ({', '.join(excluded_tickers)})")
+
+        # 테스트 기간
+        test_periods = tuning_metadata.get("test_periods", [])
+        data_period = tuning_metadata.get("data_period", {})
+        if test_periods:
+            # 날짜 정보가 있으면 함께 표시
+            if data_period:
+                start_date = data_period.get("start_date", "")
+                end_date = data_period.get("end_date", "")
+                period_strs = [f"{start_date} ~ {end_date} ({p}개월)" for p in test_periods]
+                lines.append(f"테스트 기간: {', '.join(period_strs)}")
+            else:
+                period_str = ", ".join([f"{p}개월" for p in test_periods])
+                lines.append(f"테스트 기간: {period_str}")
 
     lines.append("")
 
@@ -1005,6 +1078,7 @@ def _save_intermediate_results(
     month_results: List[Dict[str, Any]],
     aggregated_entry: Dict[str, Any],
     progress_info: Optional[Dict[str, Any]] = None,
+    tuning_metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
     """중간 결과를 임시 파일에 쓰고 atomic rename으로 안전하게 저장합니다."""
     try:
@@ -1013,6 +1087,7 @@ def _save_intermediate_results(
             month_results=month_results,
             aggregated_entry=aggregated_entry,
             progress_info=progress_info,
+            tuning_metadata=tuning_metadata,
         )
 
         # 임시 파일에 먼저 쓰기
@@ -1266,6 +1341,25 @@ def run_account_tuning(
             txt_path = Path.cwd() / txt_path
     txt_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # 튜닝 메타데이터 생성
+    tuning_metadata = {
+        "combo_count": combo_count,
+        "search_space": {
+            "MA_RANGE": list(ma_values),
+            "PORTFOLIO_TOPN": list(topn_values),
+            "REPLACE_SCORE_THRESHOLD": list(replace_values),
+            "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
+            "COOLDOWN_DAYS": list(cooldown_values),
+        },
+        "data_period": {
+            "start_date": date_range_prefetch[0],
+            "end_date": date_range_prefetch[1],
+        },
+        "ticker_count": len(tickers),
+        "excluded_tickers": sorted(excluded_ticker_set),
+        "test_periods": valid_month_ranges,
+    }
+
     for item in month_items:
         months_raw = item.get("months_range")
         try:
@@ -1357,6 +1451,7 @@ def run_account_tuning(
                     "months_range": months_value,
                     "progress_pct": progress_pct,
                 },
+                tuning_metadata=tuning_metadata,
             )
 
         single_result = _execute_tuning_for_months(
@@ -1398,6 +1493,7 @@ def run_account_tuning(
                     "completed": len(results_per_month),
                     "total": len(month_items),
                 },
+                tuning_metadata=tuning_metadata,
             )
             logger.info(
                 "[튜닝] %s 중간 결과 저장 완료 (%d/%d 기간)",
@@ -1503,6 +1599,7 @@ def run_account_tuning(
         account_norm,
         month_results=results_per_month,
         aggregated_entry=entry,
+        tuning_metadata=tuning_metadata,
     )
 
     # Remove any existing tuning files for this account to avoid mixing stale results.
