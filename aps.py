@@ -215,9 +215,9 @@ def main():
     try:
         logging.info("\n[Initial Run] Starting...")
         # 메타 데이터 갱신하고 싶을 때 해제
-        run_stock_stats_update()
+        # run_stock_stats_update()
         # 서버 캐시 제거하고 싶을 때 해제
-        run_cache_refresh()
+        # run_cache_refresh()
     except Exception:
         logging.error("Error during initial run for stock metadata update/cache refresh", exc_info=True)
 
