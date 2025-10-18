@@ -124,10 +124,18 @@ class RateLimitException(Exception):
 
 
 def _get_cache_start_dt() -> Optional[pd.Timestamp]:
-    """환경 변수 또는 기본값에서 캐시 시작 날짜를 로드합니다."""
-    raw = os.environ.get("CACHE_START_DATE")
+    """data/settings/common.py에서 캐시 시작 날짜를 로드합니다."""
+    try:
+        from utils.settings_loader import load_common_settings
+
+        common_settings = load_common_settings()
+        raw = common_settings.get("CACHE_START_DATE")
+    except Exception:
+        return None
+
     if not raw:
         return None
+
     try:
         dt = pd.to_datetime(raw)
     except Exception:

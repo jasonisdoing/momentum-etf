@@ -19,10 +19,18 @@ STOCKS_DIR = PROJECT_ROOT / "data" / "stocks"
 
 
 def _get_cache_start_date() -> Optional[pd.Timestamp]:
-    """환경 변수에서 캐시 시작일을 불러오거나 기본값을 반환합니다."""
-    raw = os.environ.get("CACHE_START_DATE")
+    """data/settings/common.py에서 캐시 시작일을 불러옵니다."""
+    try:
+        from utils.settings_loader import load_common_settings
+
+        common_settings = load_common_settings()
+        raw = common_settings.get("CACHE_START_DATE")
+    except Exception:
+        return None
+
     if not raw:
         return None
+
     try:
         ts = pd.to_datetime(raw).normalize()
     except Exception:
