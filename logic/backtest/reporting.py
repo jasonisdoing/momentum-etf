@@ -483,7 +483,6 @@ def _build_daily_table_rows(
         row = ts.loc[target_date]
         ticker_key = str(ticker).upper()
         meta = result.ticker_meta.get(ticker_key, {})
-        evaluation = result.evaluated_records.get(ticker_key, {})
 
         price_val = row.get("price")
         shares_val = row.get("shares")
@@ -545,14 +544,14 @@ def _build_daily_table_rows(
         pv_display = money_formatter(pv)
         cost_basis = avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 else 0.0
         eval_profit_value = 0.0 if is_cash else pv - cost_basis
-        evaluated_profit = evaluation.get("realized_profit", 0.0)
-        cumulative_profit_value = evaluated_profit + eval_profit_value
+        # 누적 손익 = 평가 손익 (현재 보유분만 계산, 실현 손익은 제외)
+        # 이유: 백테스트 시작일 이전의 실현 손익이 포함되는 문제를 방지
+        cumulative_profit_value = eval_profit_value
         evaluated_profit_display = money_formatter(eval_profit_value)
         evaluated_pct = (eval_profit_value / cost_basis * 100.0) if cost_basis > 0 and _is_finite_number(eval_profit_value) else 0.0
         evaluated_pct_display = f"{evaluated_pct:+.1f}%" if cost_basis > 0 else "-"
-        initial_value = evaluation.get("initial_value") or cost_basis
-        cumulative_pct = (cumulative_profit_value / initial_value * 100.0) if initial_value and _is_finite_number(cumulative_profit_value) else 0.0
-        cumulative_pct_display = f"{cumulative_pct:+.1f}%" if initial_value else "-"
+        # 누적 수익률 = 평가 수익률 (현재 보유분 기준)
+        cumulative_pct_display = evaluated_pct_display
         score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
         weight_display = f"{weight:.0f}%"
         if is_cash and total_value_safe > 0:

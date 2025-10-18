@@ -16,8 +16,8 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
         "MA_RANGE": np.arange(20, 55, 5),
-        "PORTFOLIO_TOPN": np.arange(3, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 1.1, 0.1),
+        "PORTFOLIO_TOPN": np.arange(3, 9, 1),
+        "REPLACE_SCORE_THRESHOLD": np.arange(0, 5.5, 0.5),
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 25, 5),
     },
     # "kor": {

@@ -278,7 +278,7 @@ def run_account_backtest(
         common_settings=common_settings,
     )
 
-    evaluated_records = _compute_evaluated_records(ticker_timeseries)
+    evaluated_records = _compute_evaluated_records(ticker_timeseries, start_date)
 
     ticker_summaries = _build_ticker_summaries(
         ticker_timeseries,
@@ -806,17 +806,28 @@ def _build_summary(
 
 def _compute_evaluated_records(
     ticker_timeseries: Mapping[str, pd.DataFrame],
+    start_date: pd.Timestamp,
 ) -> Dict[str, Dict[str, Any]]:
+    """백테스트 시작일 이후의 거래 손익만 집계합니다.
+
+    주의: 이 함수는 현재 사용되지 않습니다.
+    누적 손익은 reporting.py에서 cost_basis 기준으로 직접 계산됩니다.
+    """
     records: Dict[str, Dict[str, Any]] = {}
+    start_date_norm = start_date.normalize()
+
     for ticker, df in ticker_timeseries.items():
         if df is None or df.empty:
             continue
 
         df_sorted = df.sort_index()
+        # 백테스트 시작일 이후 데이터만 필터링
+        df_filtered = df_sorted[df_sorted.index >= start_date_norm]
+
         realized_profit = 0.0
         initial_value: Optional[float] = None
 
-        for _, row in df_sorted.iterrows():
+        for idx, row in df_filtered.iterrows():
             trade_profit = row.get("trade_profit")
             if isinstance(trade_profit, (int, float)) and math.isfinite(float(trade_profit)):
                 realized_profit += float(trade_profit)
