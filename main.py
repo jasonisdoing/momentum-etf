@@ -46,6 +46,8 @@ def load_account_recommendations(
         return None, f"추천 데이터를 변환하는 중 오류가 발생했습니다: {exc}", country_code
 
     updated_dt = snapshot.get("updated_at") or snapshot.get("created_at")
+    updated_by = snapshot.get("updated_by", "")
+
     if isinstance(updated_dt, datetime):
         ts = pd.Timestamp(updated_dt)
         if ts.tzinfo is None or ts.tzinfo.utcoffset(ts) is None:
@@ -63,6 +65,10 @@ def load_account_recommendations(
             updated_at = parsed.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             updated_at = str(updated_dt) if updated_dt else None
+
+    # updated_by 정보를 updated_at에 추가
+    if updated_at and updated_by:
+        updated_at = f"{updated_at}, {updated_by}"
 
     loaded_country_code = snapshot.get("country_code") or country_code
     return df, updated_at, str(loaded_country_code or country_code)

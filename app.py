@@ -6,7 +6,7 @@ from datetime import datetime
 import streamlit as st
 import pandas as pd
 
-from utils.notification import APP_VERSION
+from utils.logger import APP_VERSION
 
 from app_pages.account_page import render_account_page
 from logic.recommend.market import (

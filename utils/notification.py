@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from collections import Counter
 from numbers import Number
-from notification import APP_LABEL
 
 import textwrap
 
@@ -42,7 +41,7 @@ except ImportError:  # pragma: no cover - 선택적 의존성 처리
 from utils.account_registry import get_account_settings
 from utils.schedule_config import get_country_schedule
 from utils.report import format_kr_money
-from utils.logger import get_app_logger
+from utils.logger import get_app_logger, APP_LABEL
 from utils.settings_loader import get_account_slack_channel
 from utils.cron_utils import normalize_cron_weekdays
 
