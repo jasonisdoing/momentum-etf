@@ -87,6 +87,12 @@ def _calculate_cooldown_blocks(
                         0,
                     )
                     if days_since_buy < cooldown_days:
+                        from utils.logger import get_app_logger
+
+                        logger = get_app_logger()
+                        logger.info(
+                            f"[COOLDOWN BLOCK] {tkr}: last_buy={last_buy_ts.strftime('%Y-%m-%d')}, base_date={base_date_norm.strftime('%Y-%m-%d')}, days_since={days_since_buy}, cooldown_days={cooldown_days}"
+                        )
                         sell_cooldown_block[tkr] = {
                             "last_buy": last_buy_ts,
                             "days_since": days_since_buy,
@@ -159,6 +165,15 @@ def _create_decision_entry(
     consecutive_info = consecutive_holding_info.get(tkr)
     buy_date = consecutive_info.get("buy_date") if consecutive_info else None
 
+    # DEBUG: 쿨다운 문제 디버깅
+    if sell_block_info and tkr == "473640":
+        from utils.logger import get_app_logger
+
+        logger = get_app_logger()
+        logger.info(
+            f"[DEBUG 473640] buy_date(consecutive)={buy_date}, last_buy(cooldown)={sell_block_info.get('last_buy')}, days_since={sell_block_info.get('days_since')}"
+        )
+
     evaluation_date = max(base_date.normalize(), pd.Timestamp.now().normalize())
 
     if is_held and buy_date:
@@ -190,7 +205,13 @@ def _create_decision_entry(
 
         if sell_block_info and state in ("SELL_TREND", "SELL_RSI"):
             state = "HOLD"
-            phrase = "쿨다운 대기중"
+            days_since = sell_block_info.get("days_since", 0)
+            last_buy = sell_block_info.get("last_buy")
+            if last_buy:
+                last_buy_str = last_buy.strftime("%m/%d")
+                phrase = f"쿨다운 대기중 (매수일: {last_buy_str}, {days_since}일 경과)"
+            else:
+                phrase = f"쿨다운 대기중 ({days_since}일 경과)"
 
     elif state == "WAIT":
         # 점수 기반 매수 시그널 판단

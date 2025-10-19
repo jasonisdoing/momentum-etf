@@ -105,10 +105,9 @@ def print_backtest_summary(
     merged_strategy = dict(strategy_static)
     merged_strategy.update(strategy_tuning)
 
-    cooldown_days = int(strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 0)) or 0)
-    replace_threshold = strategy_tuning.get("REPLACE_SCORE_THRESHOLD")
-    if replace_threshold is None:
-        replace_threshold = strategy_cfg.get("REPLACE_SCORE_THRESHOLD", 0.5)
+    # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
+    cooldown_days = int(strategy_tuning["COOLDOWN_DAYS"])
+    replace_threshold = strategy_tuning["REPLACE_SCORE_THRESHOLD"]
 
     initial_capital_local = float(summary.get("initial_capital_local", summary.get("initial_capital", initial_capital_krw)))
     initial_capital_krw_value = float(summary.get("initial_capital_krw", initial_capital_krw))
@@ -407,8 +406,8 @@ def _resolve_formatters(account_settings: Dict[str, Any]):
         precision = {}
 
     currency = str(precision.get("currency") or account_settings.get("currency") or "KRW").upper()
-    qty_precision = int(precision.get("qty_precision", 0) or 0)
-    price_precision = int(precision.get("price_precision", 0) or 0)
+    qty_precision = int(precision.get("qty_precision", 0))
+    price_precision = int(precision.get("price_precision", 0))
 
     digits = max(price_precision, 0)
 

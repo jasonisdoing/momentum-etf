@@ -540,34 +540,15 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     if "tuning" in strategy_cfg or "static" in strategy_cfg:
         strategy_static = strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
+        strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
     else:
         strategy_static = strategy_cfg
+        strategy_tuning = strategy_cfg
 
-    max_per_category = int(strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0)
-
-    # RSI 과매수 매도 임계값 로드 (계좌별 설정)
-    strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
-    rsi_sell_threshold_raw = strategy_tuning.get("OVERBOUGHT_SELL_THRESHOLD", 10)
-    try:
-        rsi_sell_threshold = int(rsi_sell_threshold_raw)
-    except (TypeError, ValueError):
-        rsi_sell_threshold = 10
-    if not (0 <= rsi_sell_threshold <= 100):
-        rsi_sell_threshold = 10
-
-    def _parse_regime_ratio(raw_value: Any, *, source: str) -> int:
-        try:
-            parsed = int(raw_value)
-        except (TypeError, ValueError) as exc:  # noqa: PERF203
-            raise ValueError(f"{account_id} 계좌의 {source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 유효한 정수가 아닙니다.") from exc
-        if not (0 <= parsed <= 100):
-            raise ValueError(f"{account_id} 계좌의 {source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
-        return parsed
-
-    regime_filter_equity_ratio: Optional[int] = None
-    ratio_raw_from_strategy = strategy_static.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-    if ratio_raw_from_strategy is not None:
-        regime_filter_equity_ratio = _parse_regime_ratio(ratio_raw_from_strategy, source="전략(static)")
+    # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
+    max_per_category = int(strategy_static["MAX_PER_CATEGORY"])
+    rsi_sell_threshold = int(strategy_tuning["OVERBOUGHT_SELL_THRESHOLD"])
+    regime_filter_equity_ratio = int(strategy_static["MARKET_REGIME_RISK_OFF_EQUITY_RATIO"])
 
     # ETF 목록 가져오기
     etf_universe = get_etfs(country_code) or []
@@ -759,7 +740,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     regime_info = None
     regime_filter_enabled = True
-    common_ratio_value: Optional[Any] = None
     try:
         common_settings = load_common_settings()
     except Exception as exc:
@@ -768,12 +748,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     else:
         regime_filter_enabled = bool((common_settings or {}).get("MARKET_REGIME_FILTER_ENABLED", True))
         common_ratio_value = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-
-    if regime_filter_equity_ratio is None and common_ratio_value is not None:
-        regime_filter_equity_ratio = _parse_regime_ratio(common_ratio_value, source="공통 설정")
-
-    if regime_filter_enabled and regime_filter_equity_ratio is None:
-        raise ValueError(f"{account_id} 계좌에서 시장 레짐 필터가 활성화되어 있지만 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정을 찾을 수 없습니다.")
+        # 공통 설정에 값이 있으면 사용 (검증은 이미 완료됨)
+        if regime_filter_equity_ratio is None and common_ratio_value is not None:
+            regime_filter_equity_ratio = int(common_ratio_value)
 
     if regime_filter_enabled:
         try:
@@ -798,11 +775,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         from strategies.maps import safe_generate_daily_recommendations_for_portfolio
 
         decision_start = time.perf_counter()
+        actual_cooldown_days = int(strategy_tuning["COOLDOWN_DAYS"])
         logger.info(
-            "[%s] 추천 계산 시작 (보유 %d개, 후보 %d개)",
+            "[%s] 추천 계산 시작 (보유 %d개, 후보 %d개, cooldown_days=%d)",
             account_id.upper(),
             len(holdings),
             len(data_by_tkr),
+            actual_cooldown_days,
         )
         decisions = safe_generate_daily_recommendations_for_portfolio(
             account_id=account_id,
@@ -819,7 +798,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             pairs=pairs,
             consecutive_holding_info=consecutive_holding_info,
             trade_cooldown_info=trade_cooldown_info,
-            cooldown_days=int(strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 5)) or 0),
+            cooldown_days=actual_cooldown_days,
             risk_off_equity_ratio=regime_filter_equity_ratio,
             rsi_sell_threshold=rsi_sell_threshold,
         )
@@ -1085,7 +1064,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             else:
                 filter_days = 0
 
-        streak_val = int(filter_days or 0)
+        streak_val = int(filter_days)
 
         if not recommend_enabled:
             if state in {"BUY", "BUY_REPLACE"}:

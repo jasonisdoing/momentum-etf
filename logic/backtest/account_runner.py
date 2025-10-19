@@ -202,8 +202,9 @@ def run_account_backtest(
     ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
     ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금", "category": "-"}
 
+    # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
     portfolio_topn = strategy_rules.portfolio_topn
-    holdings_limit = int(strategy_settings.get("MAX_PER_CATEGORY", 0) or 0)
+    holdings_limit = int(strategy_settings["MAX_PER_CATEGORY"])
     _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}, 카테고리당 최대 보유 수: {holdings_limit}")
 
     _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
@@ -439,7 +440,20 @@ def _build_backtest_kwargs(
 ) -> Dict[str, Any]:
     # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
     stop_loss_pct = -abs(float(strategy_rules.portfolio_topn))
-    cooldown_days = int(strategy_settings.get("COOLDOWN_DAYS", 0) or 0)
+
+    # 필수 설정 검증
+    if "COOLDOWN_DAYS" not in strategy_settings:
+        raise ValueError("strategy_settings에 COOLDOWN_DAYS 설정이 필요합니다.")
+    if "OVERBOUGHT_SELL_THRESHOLD" not in strategy_settings:
+        raise ValueError("strategy_settings에 OVERBOUGHT_SELL_THRESHOLD 설정이 필요합니다.")
+    if "MARKET_REGIME_RISK_OFF_EQUITY_RATIO" not in strategy_settings:
+        raise ValueError("strategy_settings에 MARKET_REGIME_RISK_OFF_EQUITY_RATIO 설정이 필요합니다.")
+
+    cooldown_days = int(strategy_settings["COOLDOWN_DAYS"])
+    rsi_sell_threshold = int(strategy_settings["OVERBOUGHT_SELL_THRESHOLD"])
+
+    if not (0 <= rsi_sell_threshold <= 100):
+        raise ValueError(f"OVERBOUGHT_SELL_THRESHOLD는 0~100 사이여야 합니다. (현재값: {rsi_sell_threshold})")
 
     try:
         (
@@ -453,23 +467,11 @@ def _build_backtest_kwargs(
         raise ValueError(str(exc)) from exc
 
     if regime_filter_equity_ratio is None:
-        ratio_raw = strategy_settings.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-        if ratio_raw is None:
-            raise ValueError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정이 필요합니다.")
-        regime_filter_equity_ratio = _parse_regime_ratio_value(ratio_raw, source="전략 설정")
+        regime_filter_equity_ratio = _parse_regime_ratio_value(strategy_settings["MARKET_REGIME_RISK_OFF_EQUITY_RATIO"], source="전략 설정")
     else:
         regime_filter_equity_ratio = _parse_regime_ratio_value(regime_filter_equity_ratio, source="공통 설정")
 
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
-
-    # RSI 과매수 매도 임계값 로드
-    rsi_sell_threshold_raw = strategy_settings.get("OVERBOUGHT_SELL_THRESHOLD", 10)
-    try:
-        rsi_sell_threshold = int(rsi_sell_threshold_raw)
-    except (TypeError, ValueError):
-        rsi_sell_threshold = 10
-    if not (0 <= rsi_sell_threshold <= 100):
-        rsi_sell_threshold = 10
 
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
@@ -938,9 +940,9 @@ def _build_ticker_summaries(
         winning_trades = int((trades.get("trade_profit", pd.Series(dtype=float)) > 0).sum()) if not trades.empty else 0
 
         last_row = df_sorted.iloc[-1]
-        final_shares = float(last_row.get("shares", 0.0) or 0.0)
-        final_price = float(last_row.get("price", 0.0) or 0.0)
-        avg_cost = float(last_row.get("avg_cost", 0.0) or 0.0)
+        final_shares = float(last_row.get("shares", 0.0))
+        final_price = float(last_row.get("price", 0.0))
+        avg_cost = float(last_row.get("avg_cost", 0.0))
 
         unrealized_profit = 0.0
         if final_shares > 0 and avg_cost > 0:
@@ -965,7 +967,7 @@ def _build_ticker_summaries(
             continue
 
         # 점수가 음수인 종목 제외
-        last_score = float(last_row.get("score", 0.0) or 0.0)
+        last_score = float(last_row.get("score", 0.0))
         if last_score < 0:
             continue
 

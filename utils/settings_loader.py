@@ -202,7 +202,11 @@ def _split_strategy_sections(strategy: Dict[str, Any]) -> Tuple[Dict[str, Any], 
 
 
 def get_account_strategy_sections(account_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """계정 전략 설정을 (튜닝용, 고정값)으로 분리해 반환합니다."""
+    """계정 전략 설정을 (튜닝용, 고정값)으로 분리해 반환합니다.
+
+    설정을 반환하기 전에 모든 필수 항목을 검증합니다.
+    """
+    from utils.strategy_validator import validate_strategy_settings
 
     settings = get_account_settings(account_id)
     strategy = settings.get("strategy")
@@ -210,10 +214,15 @@ def get_account_strategy_sections(account_id: str) -> Tuple[Dict[str, Any], Dict
         raise AccountSettingsError(f"'{account_id}' 설정에서 'strategy' 항목이 누락되었거나 잘못되었습니다.")
 
     if "tuning" in strategy or "static" in strategy:
-        return _split_strategy_sections(strategy)
+        tuning, static = _split_strategy_sections(strategy)
+    else:
+        # 이전 포맷과의 호환성: 모든 값을 튜닝 영역으로 간주
+        tuning, static = dict(strategy), {}
 
-    # 이전 포맷과의 호환성: 모든 값을 튜닝 영역으로 간주
-    return dict(strategy), {}
+    # 전략 설정 검증 (한 번만 수행)
+    validate_strategy_settings(static, tuning, account_id)
+
+    return tuning, static
 
 
 def get_account_strategy(account_id: str) -> Dict[str, Any]:
