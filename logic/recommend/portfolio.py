@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 import pandas as pd
 
@@ -381,6 +381,14 @@ def generate_daily_recommendations_for_portfolio(
     # 점수순으로 정렬 (높은 점수가 우선)
     wait_candidates_raw.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
+    # SELL_RSI로 매도하는 카테고리 추적 (같은 날 매수 금지)
+    sell_rsi_categories_today: Set[str] = set()
+    for d in decisions:
+        if d["state"] == "SELL_RSI":
+            category = etf_meta.get(d["tkr"], {}).get("category")
+            if category and category != "TBD":
+                sell_rsi_categories_today.add(category)
+
     # 실제 보유 중인 종목 수 계산 (매도 예정 종목 제외)
     held_count = sum(1 for d in decisions if d["state"] == "HOLD")
     slots_to_fill = denom - held_count
@@ -424,6 +432,13 @@ def generate_daily_recommendations_for_portfolio(
 
             # 카테고리 중복 체크
             if cand_category and cand_category != "TBD" and cand_category in held_categories_for_buy:
+                continue
+
+            # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
+            if cand_category and cand_category != "TBD" and cand_category in sell_rsi_categories_today:
+                cand["state"], cand["row"][4] = "WAIT", "WAIT"
+                cand["row"][-1] = f"RSI 과매수 매도 카테고리 ({cand_category})"
+                cand["buy_signal"] = False
                 continue
 
             # RSI 과매수 종목 매수 차단
@@ -491,6 +506,13 @@ def generate_daily_recommendations_for_portfolio(
             ),
             None,
         )
+
+        # SELL_RSI로 매도한 카테고리는 같은 날 교체 매수 금지
+        if wait_stock_category and wait_stock_category != "TBD" and wait_stock_category in sell_rsi_categories_today:
+            best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
+            best_new["row"][-1] = f"RSI 과매수 매도 카테고리 ({wait_stock_category})"
+            best_new["buy_signal"] = False
+            continue
 
         ticker_to_sell = None
         # MAPS 점수 사용

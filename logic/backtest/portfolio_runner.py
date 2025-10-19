@@ -382,6 +382,9 @@ def run_portfolio_backtest(
         buy_trades_today_map: Dict[str, List[Dict[str, float]]] = {}
         sell_trades_today_map: Dict[str, List[Dict[str, float]]] = {}
 
+        # SELL_RSI로 매도한 카테고리 추적 (같은 날 매수 금지)
+        sell_rsi_categories_today: Set[str] = set()
+
         tickers_available_today: List[str] = []
         today_prices: Dict[str, float] = {}
         ma_today: Dict[str, float] = {}
@@ -647,6 +650,12 @@ def run_portfolio_backtest(
                             # 순매도 집계
                             sell_trades_today_map.setdefault(ticker, []).append({"shares": float(qty), "price": float(sell_price)})
 
+                            # SELL_RSI인 경우 해당 카테고리 추적
+                            if decision == "SELL_RSI":
+                                sold_category = ticker_to_category.get(ticker)
+                                if sold_category and sold_category != "TBD":
+                                    sell_rsi_categories_today.add(sold_category)
+
                             cash += trade_amount
                             current_holdings_value = max(0.0, current_holdings_value - trade_amount)
                             ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
@@ -713,6 +722,12 @@ def run_portfolio_backtest(
                         if category and category != "TBD" and category in held_categories:
                             if daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt:
                                 daily_records_by_ticker[ticker_to_buy][-1]["note"] = f"{DECISION_NOTES['CATEGORY_DUP']}"
+                            continue
+
+                        # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
+                        if category and category != "TBD" and category in sell_rsi_categories_today:
+                            if daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt:
+                                daily_records_by_ticker[ticker_to_buy][-1]["note"] = f"RSI 과매수 매도 카테고리 ({category})"
                             continue
 
                         # RSI 과매수 종목 매수 차단
@@ -865,6 +880,13 @@ def run_portfolio_backtest(
 
                         # 교체할 종목이 결정되었으면 매도/매수 진행
                         if ticker_to_sell:
+                            # SELL_RSI로 매도한 카테고리는 같은 날 교체 매수 금지
+                            replacement_category = ticker_to_category.get(replacement_ticker)
+                            if replacement_category and replacement_category != "TBD" and replacement_category in sell_rsi_categories_today:
+                                if daily_records_by_ticker[replacement_ticker] and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt:
+                                    daily_records_by_ticker[replacement_ticker][-1]["note"] = f"RSI 과매수 매도 카테고리 ({replacement_category})"
+                                continue  # 다음 교체 후보로 넘어감
+
                             # RSI 과매수 종목 교체 매수 차단
                             rsi_score_replace_candidate = rsi_score_today.get(replacement_ticker, 100.0)
 

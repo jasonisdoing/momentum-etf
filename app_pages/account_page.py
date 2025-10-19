@@ -200,16 +200,14 @@ def _cached_benchmark_data(
     # Momentum ETF 수익률: 실제 거래 우선, 없으면 백테스트
     if actual_perf:
         account_return = actual_perf.get("cumulative_return_pct")
-        method = "실제 거래"
     else:
         account_return = summary.get("cumulative_return_pct")
-        method = "백테스트"
 
     if account_return is not None:
         rows.append(
             {
                 "티커": "-",
-                "종목": f"Momentum ETF ({method})",
+                "종목": "Momentum ETF",
                 "누적 수익률": f"{float(account_return):+.2f}%",
             }
         )
