@@ -28,7 +28,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "PORTFOLIO_TOPN": [7],  # 7
         "REPLACE_SCORE_THRESHOLD": [1],
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 21, 1),  # 5~20
-        "COOLDOWN_DAYS": [1],
+        "COOLDOWN_DAYS": [1, 2],
     },
     # "kor": {
     #     "_설명": "최대 삼세한 넓은 범위",
