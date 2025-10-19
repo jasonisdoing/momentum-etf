@@ -6,17 +6,28 @@
     "slack_channel": "C09FAU7SKA8",
     "initial_date": "2025-10-01",
     "strategy": {
+        "expected_cagr": 53.46,
+        "backtested_date": "2025-10-19",
         "tuning": {
-            "MA_PERIOD": 35,
+            "MA_PERIOD": 40,
             "PORTFOLIO_TOPN": 3,
-            "REPLACE_SCORE_THRESHOLD": 0.7,
+            "REPLACE_SCORE_THRESHOLD": 1,
+            "OVERBOUGHT_SELL_THRESHOLD": 10,
+            "COOLDOWN_DAYS": 1
+        },
+        "_tuning": {
+            "expected_cagr": 53.46,
+            "backtested_date": "2025-10-19",
+            "MA_PERIOD": 40,
+            "PORTFOLIO_TOPN": 3,
+            "REPLACE_SCORE_THRESHOLD": 1,
+            "OVERBOUGHT_SELL_THRESHOLD": 10,
             "COOLDOWN_DAYS": 1
         },
         "static": {
             "MAX_PER_CATEGORY": 1,
             "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 100
-        },
-        "expected_cagr": 54.94
+        }
     },
     "benchmarks": [
         {

@@ -25,6 +25,7 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
+import numpy as np
 from unittest.mock import patch
 
 from logic.backtest.account_runner import run_account_backtest
@@ -36,15 +37,22 @@ from utils.stock_list_io import get_etfs
 
 # ==== 설정 (필요 시 수정) ====
 MONTHS = 12
-MA_MIN = 10
-MA_MAX = 100
-MA_STEP = 10
-
-RATIO_MIN = 0
-RATIO_MAX = 100
-RATIO_STEP = 10
-
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
+
+OPTIMIZE_CONFIG: dict[str, dict] = {
+    "kor": {
+        "MA_RANGE": np.arange(10, 110, 10),  # 10~100
+        "RATIO_RANGE": np.arange(0, 110, 10),  # 0~100%
+    },
+    "aus": {
+        "MA_RANGE": np.arange(10, 110, 10),  # 10~100
+        "RATIO_RANGE": np.arange(0, 110, 10),  # 0~100%
+    },
+    "us": {
+        "MA_RANGE": np.arange(10, 110, 10),  # 10~100
+        "RATIO_RANGE": np.arange(0, 110, 10),  # 0~100%
+    },
+}
 
 SORT_KEYS = [
     ("cagr_pct", "CAGR"),
@@ -52,14 +60,6 @@ SORT_KEYS = [
 
 RESULTS_DIR = Path(ROOT_DIR) / "data" / "results"
 PREFETCH_WARMUP_MONTHS = 12
-
-
-def _build_ma_series(start: int, end: int, step: int) -> List[int]:
-    if step <= 0:
-        raise ValueError("증가 단위(step)는 1 이상의 정수여야 합니다.")
-    if end < start:
-        raise ValueError("범위 끝 값은 시작 값 이상이어야 합니다.")
-    return list(range(start, end + 1, step))
 
 
 def _format_float(value: Optional[float], digits: int = 2) -> str:
@@ -174,22 +174,31 @@ def _evaluate_single_combination(payload: Tuple[str, int, MutableMapping[str, An
     return row
 
 
-def _evaluate_combinations(
+def run_optimization(
     account_id: str,
-    ma_values: Iterable[int],
-    ratio_values: Iterable[int],
-    *,
     months_range: int,
-    base_common: MutableMapping[str, Any],
+    config: dict,
     workers: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     주어진 MA/비중 조합에 대해 백테스트를 수행하고 핵심 지표를 반환합니다.
     """
     logger = get_app_logger()
-    ma_list = list(ma_values)
-    ratio_list = list(ratio_values)
-    combos: List[Tuple[int, int]] = [(ma, ratio) for ma in ma_list for ratio in ratio_list]
+    logger.info("최적화 시작: 계정=%s, 기간=%d개월", account_id, months_range)
+
+    ma_range = config.get("MA_RANGE", np.arange(10, 110, 10))
+    ratio_range = config.get("RATIO_RANGE", np.arange(0, 110, 10))
+
+    ma_series = list(ma_range)
+    ratio_series = list(ratio_range)
+
+    logger.info("MA 범위: %s", ma_series)
+    logger.info("비중 범위: %s", ratio_series)
+
+    base_common = load_common_settings()
+    _prefetch_common_data(account_id, months_range, base_common)
+
+    combos: List[Tuple[int, int]] = [(ma, ratio) for ma in ma_series for ratio in ratio_series]
     total_runs = max(1, len(combos))
 
     results: List[Dict[str, Any]] = []
@@ -304,46 +313,49 @@ def _save_json(rows: List[Dict[str, Any]], path: str) -> None:
 
 
 def main() -> None:
+    logger = get_app_logger()
+
     if len(sys.argv) < 2:
         print("Usage: python scripts/optimize_regime.py <account_id>")
         raise SystemExit(1)
 
     account_id = sys.argv[1].strip().lower()
-    logger = get_app_logger()
 
     try:
-        ma_values = _build_ma_series(MA_MIN, MA_MAX, MA_STEP)
-        ratio_values = _build_ma_series(RATIO_MIN, RATIO_MAX, RATIO_STEP)
-    except ValueError as exc:
-        raise SystemExit(str(exc))
+        account_settings = get_account_settings(account_id)
+    except Exception as exc:  # pragma: no cover - 잘못된 입력 방어 전용 처리
+        raise SystemExit(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
-    logger.info(
-        "계정 '%s'에 대해 MA %s, 비중 %s 값을 최근 %d개월 구간에서 평가합니다.",
-        account_id,
-        ", ".join(map(str, ma_values)),
-        ", ".join(map(str, ratio_values)),
-        MONTHS,
-    )
+    country_code = account_settings.get("country_code", account_id)
+
+    logger.info("계정: %s (국가: %s)", account_id.upper(), country_code.upper())
+
+    # Get config for this account/country
+    config = OPTIMIZE_CONFIG.get(account_id) or OPTIMIZE_CONFIG.get(country_code)
+    if not config:
+        logger.warning("'%s' 계정에 대한 최적화 설정이 없습니다. 기본값을 사용합니다.", account_id.upper())
+        config = {
+            "MA_RANGE": np.arange(10, 110, 10),
+            "RATIO_RANGE": np.arange(0, 110, 10),
+        }
 
     base_common = load_common_settings()
     _prefetch_common_data(account_id, MONTHS, base_common)
 
-    rows = _evaluate_combinations(
-        account_id,
-        ma_values,
-        ratio_values,
+    results = run_optimization(
+        account_id=account_id,
         months_range=MONTHS,
-        base_common=base_common,
+        config=config,
         workers=WORKERS,
     )
 
-    if not rows:
+    if not results:
         logger.warning("평가 결과가 비어 있습니다.")
         return
 
     sorted_tables: List[Tuple[str, List[str], Dict[str, Any]]] = []
     for key, label in SORT_KEYS:
-        sorted_rows = _sort_rows(rows, key)
+        sorted_rows = _sort_rows(results, key)
         best = sorted_rows[0]
         logger.info(
             "[%s] 최적 조합: MA=%d / RATIO=%d%% (CAGR=%s%%, MDD=%s%%, Calmar=%s, CUI=%s)",
@@ -373,12 +385,18 @@ def main() -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     date_str = datetime.now().strftime("%Y-%m-%d")
     result_path = RESULTS_DIR / f"optimize_regime_{account_id}_{date_str}.log"
+
+    ma_range = config.get("MA_RANGE", [])
+    ratio_range = config.get("RATIO_RANGE", [])
+    ma_desc = f"{int(min(ma_range))}~{int(max(ma_range))}" if len(ma_range) > 0 else "N/A"
+    ratio_desc = f"{int(min(ratio_range))}~{int(max(ratio_range))}%" if len(ratio_range) > 0 else "N/A"
+
     summary_lines = [
         f"실행 시각: {timestamp}",
         f"계정: {account_id}",
         f"기간: 최근 {MONTHS}개월",
-        f"MA 범위: {MA_MIN}~{MA_MAX} (step={MA_STEP})",
-        f"비중 범위: {RATIO_MIN}~{RATIO_MAX}% (step={RATIO_STEP}%)",
+        f"MA 범위: {ma_desc}",
+        f"비중 범위: {ratio_desc}",
         "",
     ]
 

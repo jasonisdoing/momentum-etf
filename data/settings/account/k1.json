@@ -6,23 +6,23 @@
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",
     "strategy": {
-        "expected_cagr": 102.81,
+        "expected_cagr": 90.12,
         "backtested_date": "2025-10-19",
         "tuning": {
             "MA_PERIOD": 50,
-            "PORTFOLIO_TOPN": 5,
-            "REPLACE_SCORE_THRESHOLD": 1.5,
-            "OVERBOUGHT_SELL_THRESHOLD": 20,
-            "COOLDOWN_DAYS": 2
+            "PORTFOLIO_TOPN": 7,
+            "REPLACE_SCORE_THRESHOLD": 2,
+            "OVERBOUGHT_SELL_THRESHOLD": 10,
+            "COOLDOWN_DAYS": 1
         },
         "_tuning": {
-            "_MA_PERIOD": 55,
-            "_PORTFOLIO_TOPN": 5,
-            "_REPLACE_SCORE_THRESHOLD": 0,
-            "_OVERBOUGHT_SELL_THRESHOLD": 20,
-            "_COOLDOWN_DAYS": 2,
-            "_expected_cagr": 120.96,
-            "_backtested_date": "2025-10-18"
+            "expected_cagr": 90.12,
+            "backtested_date": "2025-10-19",
+            "MA_PERIOD": 50,
+            "PORTFOLIO_TOPN": 7,
+            "REPLACE_SCORE_THRESHOLD": 2,
+            "OVERBOUGHT_SELL_THRESHOLD": 10,
+            "COOLDOWN_DAYS": 1
         },
         "static": {
             "MAX_PER_CATEGORY": 1,

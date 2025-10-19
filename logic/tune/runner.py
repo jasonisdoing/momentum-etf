@@ -1602,14 +1602,10 @@ def run_account_tuning(
         tuning_metadata=tuning_metadata,
     )
 
-    # Remove any existing tuning files for this account to avoid mixing stale results.
+    # Remove only the exact output file if it exists (preserve backup copies)
     try:
-        pattern = f"tune_{account_norm}_*.log"
-        for existing in txt_path.parent.glob(pattern):
-            try:
-                existing.unlink()
-            except OSError:
-                continue
+        if txt_path.exists():
+            txt_path.unlink()
     except OSError:
         pass
 
