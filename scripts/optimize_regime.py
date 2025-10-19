@@ -266,29 +266,36 @@ def _sort_rows(rows: List[Dict[str, Any]], key: str) -> List[Dict[str, Any]]:
 
 
 def _render_results_table(rows: List[Dict[str, Any]]) -> List[str]:
+    from utils.report import render_table_eaw
+
     headers = [
         "MA",
-        "Ratio(%)",
+        "비중(%)",
         "CAGR(%)",
         "MDD(%)",
         "Calmar",
         "Sharpe",
         "CUI",
-        "Final Value",
+        "최종자산",
     ]
-    lines = [" | ".join(headers), "-" * 72]
+
+    aligns = ["right", "right", "right", "right", "right", "right", "right", "right"]
+
+    table_rows = []
     for row in rows:
-        line = [
-            f"{row['ma_period']:>3d}",
-            f"{int(row.get('risk_off_ratio', 0)):>9}",
-            f"{_format_float(row.get('cagr_pct')):>8}",
-            f"{_format_float(row.get('mdd_pct')):>8}",
-            f"{_format_float(row.get('calmar_ratio')):>7}",
-            f"{_format_float(row.get('cui')):>7}",
-            f"{_format_float(row.get('final_value'), digits=0):>12}",
+        row_data = [
+            str(row["ma_period"]),
+            str(int(row.get("risk_off_ratio", 0))),
+            _format_float(row.get("cagr_pct")),
+            _format_float(row.get("mdd_pct")),
+            _format_float(row.get("calmar_ratio")),
+            _format_float(row.get("sharpe_ratio")),
+            _format_float(row.get("cui")),
+            _format_float(row.get("final_value"), digits=0),
         ]
-        lines.append(" | ".join(line))
-    return lines
+        table_rows.append(row_data)
+
+    return render_table_eaw(headers, table_rows, aligns)
 
 
 def _save_json(rows: List[Dict[str, Any]], path: str) -> None:
@@ -364,7 +371,8 @@ def main() -> None:
         return
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    result_path = RESULTS_DIR / f"optimize_regime_{account_id}.txt"
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    result_path = RESULTS_DIR / f"optimize_regime_{account_id}_{date_str}.log"
     summary_lines = [
         f"실행 시각: {timestamp}",
         f"계정: {account_id}",

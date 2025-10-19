@@ -90,6 +90,18 @@ def render_account_page(account_id: str) -> None:
         else:
             caption_parts.append("설정: N/A")
 
+        # 슬리피지 정보 추가
+        from data.settings.common import BACKTEST_SLIPPAGE
+
+        slippage_config = BACKTEST_SLIPPAGE.get(country_code, {})
+        buy_slip = slippage_config.get("buy_pct")
+        sell_slip = slippage_config.get("sell_pct")
+        if buy_slip is not None and sell_slip is not None:
+            if buy_slip == sell_slip:
+                caption_parts.append(f"슬리피지: ±{buy_slip}%")
+            else:
+                caption_parts.append(f"슬리피지: 매수+{buy_slip}%/매도-{sell_slip}%")
+
         try:
             hold_states = {"HOLD", "SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS"}
             # buy_states = {"BUY", "BUY_REPLACE"}
@@ -142,6 +154,36 @@ def _cached_benchmark_data(
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
 ) -> Tuple[pd.DataFrame, float]:
+    from utils.performance import calculate_actual_performance
+    from utils.account_registry import get_account_settings
+
+    # 계정 설정 로드
+    account_settings = get_account_settings(account_id)
+    country_code = account_settings.get("country_code", "kor")
+
+    # 전략 설정에서 포트폴리오 수 가져오기
+    strategy = account_settings.get("strategy", {})
+    tuning = strategy.get("tuning", {})
+    portfolio_topn = tuning.get("PORTFOLIO_TOPN", 5)
+
+    # 초기 자본 가져오기
+    initial_capital_raw = account_settings.get("initial_capital", 100_000_000)
+    try:
+        initial_capital = float(initial_capital_raw)
+    except (TypeError, ValueError):
+        initial_capital = 100_000_000.0
+
+    # 실제 거래 기반 수익률 계산 시도
+    actual_perf = calculate_actual_performance(
+        account_id=account_id,
+        start_date=start_date,
+        end_date=end_date,
+        initial_capital=initial_capital,
+        portfolio_topn=portfolio_topn,
+        country_code=country_code,
+    )
+
+    # 벤치마크 정보를 위해 항상 백테스트 실행
     result = run_account_backtest(
         account_id,
         quiet=True,
@@ -150,30 +192,41 @@ def _cached_benchmark_data(
             "end_date": end_date.strftime("%Y-%m-%d"),
         },
     )
-
     summary = result.summary or {}
-    account_return = summary.get("cumulative_return_pct")
+    benchmarks = summary.get("benchmarks") or []
+
     rows: list[dict[str, str]] = []
+
+    # Momentum ETF 수익률: 실제 거래 우선, 없으면 백테스트
+    if actual_perf:
+        account_return = actual_perf.get("cumulative_return_pct")
+        method = "실제 거래"
+    else:
+        account_return = summary.get("cumulative_return_pct")
+        method = "백테스트"
 
     if account_return is not None:
         rows.append(
             {
-                "종목": "Momentum ETF",
+                "티커": "-",
+                "종목": f"Momentum ETF ({method})",
                 "누적 수익률": f"{float(account_return):+.2f}%",
             }
         )
 
-    benchmarks = summary.get("benchmarks") or []
+    # 벤치마크 정보 (항상 표시)
     for entry in benchmarks:
         if not isinstance(entry, dict):
             continue
         ret = entry.get("cumulative_return_pct")
+        ticker = entry.get("ticker", "-")
         name = entry.get("name") or entry.get("ticker")
         if ret is None or name is None:
             continue
         rows.append(
             {
-                "종목": str(name),
+                "티커": str(ticker),
+                "종목": f"{name} (Buy & Hold)",
                 "누적 수익률": f"{float(ret):+.2f}%",
             }
         )

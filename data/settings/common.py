@@ -23,3 +23,20 @@ RSI_CALCULATION_CONFIG = {
 
 # RSI 과매수 매도는 항상 활성화됨
 # overbought_sell_threshold는 계좌별 strategy.tuning.OVERBOUGHT_SELL_THRESHOLD에서 설정 (정수)
+
+# 백테스트 슬리피지 설정 (%)
+# 매수/매도 시 시초가 대비 불리한 가격으로 체결된다고 가정
+BACKTEST_SLIPPAGE = {
+    "kor": {
+        "buy_pct": 0.5,  # 매수 시 시초가 + 0.5%
+        "sell_pct": 0.5,  # 매도 시 시초가 - 0.5%
+    },
+    "aus": {
+        "buy_pct": 1.0,  # 매수 시 시초가 + 1.0%
+        "sell_pct": 1.0,  # 매도 시 시초가 - 1.0%
+    },
+    "us": {
+        "buy_pct": 0.3,  # 매수 시 시초가 + 0.3%
+        "sell_pct": 0.3,  # 매도 시 시초가 - 0.3%
+    },
+}

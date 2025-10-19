@@ -668,8 +668,12 @@ def _build_summary(
         if benchmark_df.empty:
             return None
 
+        # 시작 가격: 백테스트 시작일 종가 (슬리피지 없음)
         start_price = float(benchmark_df["Close"].iloc[0])
+
+        # 종료 가격: 최신 거래일 종가 (슬리피지 없음)
         end_price = float(benchmark_df["Close"].iloc[-1])
+
         if start_price <= 0:
             return None
 

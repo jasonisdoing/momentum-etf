@@ -19,6 +19,60 @@ from strategies.maps.constants import DECISION_NOTES, DECISION_CONFIG
 logger = get_app_logger()
 
 
+def _calculate_trade_price(
+    current_index: int,
+    total_days: int,
+    open_values: any,
+    close_values: any,
+    country_code: str,
+    is_buy: bool,
+) -> float:
+    """
+    거래 가격 계산: 다음날 시초가 + 슬리피지
+
+    Args:
+        current_index: 현재 인덱스 (i)
+        total_days: 전체 거래일 수
+        open_values: Open 가격 배열
+        close_values: Close 가격 배열
+        country_code: 국가 코드
+        is_buy: 매수 여부 (True: 매수, False: 매도)
+
+    Returns:
+        거래 가격
+    """
+    from data.settings.common import BACKTEST_SLIPPAGE
+
+    # 다음날 시초가 사용
+    if current_index + 1 < total_days:
+        next_open = open_values[current_index + 1]
+        if pd.notna(next_open):
+            base_price = float(next_open)
+        else:
+            # 다음날 시초가가 없으면 당일 종가 사용
+            base_price = float(close_values[current_index]) if pd.notna(close_values[current_index]) else 0.0
+    else:
+        # 마지막 날은 당일 종가 사용
+        base_price = float(close_values[current_index]) if pd.notna(close_values[current_index]) else 0.0
+
+    if base_price <= 0:
+        return 0.0
+
+    # 슬리피지 적용
+    slippage_config = BACKTEST_SLIPPAGE.get(country_code, BACKTEST_SLIPPAGE.get("kor", {}))
+
+    if is_buy:
+        # 매수: 시초가보다 높은 가격
+        slippage_pct = slippage_config.get("buy_pct", 0.5)
+        trade_price = base_price * (1 + slippage_pct / 100)
+    else:
+        # 매도: 시초가보다 낮은 가격
+        slippage_pct = slippage_config.get("sell_pct", 0.5)
+        trade_price = base_price * (1 - slippage_pct / 100)
+
+    return trade_price
+
+
 def _process_ticker_data(ticker: str, df: pd.DataFrame, etf_tickers: set, etf_ma_period: int, stock_ma_period: int) -> Optional[Dict]:
     """
     개별 종목의 데이터를 처리하고 지표를 계산합니다.
@@ -57,6 +111,16 @@ def _process_ticker_data(ticker: str, df: pd.DataFrame, etf_tickers: set, etf_ma
         price_series = price_series.iloc[:, 0]
     close_prices = price_series.astype(float)
 
+    # Open 가격 추출 (시초가 거래용)
+    open_series = None
+    if "Open" in df.columns:
+        open_series = df["Open"]
+        if isinstance(open_series, pd.DataFrame):
+            open_series = open_series.iloc[:, 0]
+        open_prices = open_series.astype(float)
+    else:
+        open_prices = close_prices.copy()  # Open 데이터 없으면 Close 사용
+
     # MAPS 전략 지표 계산
     moving_average = close_prices.rolling(window=current_ma_period).mean()
     ma_score = calculate_ma_score(close_prices, moving_average, normalize=False)
@@ -75,6 +139,7 @@ def _process_ticker_data(ticker: str, df: pd.DataFrame, etf_tickers: set, etf_ma
     return {
         "df": df,
         "close": close_prices,
+        "open": open_prices,  # 시초가 추가
         "ma": moving_average,
         "ma_score": ma_score,
         "rsi_score": rsi_score,
@@ -241,6 +306,7 @@ def run_portfolio_backtest(
 
     for ticker, ticker_metrics in metrics_by_ticker.items():
         close_series = ticker_metrics["close"].reindex(union_index)
+        open_series = ticker_metrics["open"].reindex(union_index)
         ma_series = ticker_metrics["ma"].reindex(union_index)
         ma_score_series = ticker_metrics["ma_score"].reindex(union_index)
         rsi_score_series = ticker_metrics.get("rsi_score", pd.Series(dtype=float)).reindex(union_index)
@@ -248,6 +314,8 @@ def run_portfolio_backtest(
 
         ticker_metrics["close_series"] = close_series
         ticker_metrics["close_values"] = close_series.to_numpy()
+        ticker_metrics["open_series"] = open_series
+        ticker_metrics["open_values"] = open_series.to_numpy()
         ticker_metrics["available_mask"] = close_series.notna().to_numpy()
         ticker_metrics["ma_values"] = ma_series.to_numpy()
         ticker_metrics["ma_score_values"] = ma_score_series.to_numpy()
@@ -559,12 +627,25 @@ def run_portfolio_backtest(
                             decision = "SELL_TREND"
 
                         if decision:
+                            # 다음날 시초가 + 슬리피지로 매도 가격 계산
+                            sell_price = _calculate_trade_price(
+                                i,
+                                total_days,
+                                metrics_by_ticker[ticker]["open_values"],
+                                metrics_by_ticker[ticker]["close_values"],
+                                country_code,
+                                is_buy=False,
+                            )
+                            if sell_price <= 0:
+                                continue
+
                             qty = ticker_state["shares"]
-                            trade_amount = qty * price
-                            trade_profit = (price - ticker_state["avg_cost"]) * qty if ticker_state["avg_cost"] > 0 else 0.0
+                            trade_amount = qty * sell_price
+                            trade_profit = (sell_price - ticker_state["avg_cost"]) * qty if ticker_state["avg_cost"] > 0 else 0.0
+                            hold_ret = (sell_price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0
 
                             # 순매도 집계
-                            sell_trades_today_map.setdefault(ticker, []).append({"shares": float(qty), "price": float(price)})
+                            sell_trades_today_map.setdefault(ticker, []).append({"shares": float(qty), "price": float(sell_price)})
 
                             cash += trade_amount
                             current_holdings_value = max(0.0, current_holdings_value - trade_amount)
@@ -661,7 +742,19 @@ def run_portfolio_backtest(
                             if budget <= 0:
                                 continue
 
-                        req_qty = budget / price if price > 0 else 0
+                        # 다음날 시초가 + 슬리피지로 매수 가격 계산
+                        buy_price = _calculate_trade_price(
+                            i,
+                            total_days,
+                            metrics_by_ticker[ticker_to_buy]["open_values"],
+                            metrics_by_ticker[ticker_to_buy]["close_values"],
+                            country_code,
+                            is_buy=True,
+                        )
+                        if buy_price <= 0:
+                            continue
+
+                        req_qty = budget / buy_price if buy_price > 0 else 0
                         trade_amount = budget
 
                         if trade_amount <= cash + 1e-9 and req_qty > 0:
@@ -670,7 +763,7 @@ def run_portfolio_backtest(
                             current_holdings_value += trade_amount
                             equity = cash + current_holdings_value
                             ticker_state["shares"] += req_qty
-                            ticker_state["avg_cost"] = price
+                            ticker_state["avg_cost"] = buy_price
                             if cooldown_days > 0:
                                 ticker_state["sell_block_until"] = max(ticker_state["sell_block_until"], i + cooldown_days)
 
