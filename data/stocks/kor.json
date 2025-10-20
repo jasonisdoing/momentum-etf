@@ -378,28 +378,12 @@
                 "1_week_avg_turnover": 40906712598
             },
             {
-                "ticker": "442320",
-                "name": "RISE 글로벌원자력",
-                "recommend_enabled": true,
-                "listing_date": "2022-10-13",
-                "1_week_avg_volume": 527858,
-                "1_week_avg_turnover": 21503278485
-            },
-            {
                 "ticker": "0051G0",
                 "name": "SOL 미국원자력SMR",
                 "recommend_enabled": true,
                 "listing_date": "2025-05-20",
                 "1_week_avg_volume": 1612630,
                 "1_week_avg_turnover": 31903990220
-            },
-            {
-                "ticker": "0007G0",
-                "name": "PLUS 글로벌원자력밸류체인",
-                "recommend_enabled": true,
-                "listing_date": "2025-01-14",
-                "1_week_avg_volume": 232980,
-                "1_week_avg_turnover": 4077824662
             }
         ]
     },
