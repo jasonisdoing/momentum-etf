@@ -10,6 +10,8 @@ from datetime import datetime
 from os import cpu_count
 from pathlib import Path
 from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple, Set
+import tempfile
+import shutil
 
 import pandas as pd
 from pandas import DataFrame, Timestamp
@@ -168,34 +170,57 @@ def _format_threshold(value: Any) -> str:
     return f"{num:.1f}"
 
 
-def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = False) -> List[str]:
-    headers = ["MA", "TopN", "Threshold", "CAGR(%)", "MDD(%)", "Period(%)"]
+def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = False, months_range: Optional[int] = None) -> List[str]:
+    from utils.report import render_table_eaw
+
+    headers = ["MA", "MA타입", "TOPN", "교체점수", "과매수", "쿨다운", "CAGR(%)", "MDD(%)"]
+    if months_range:
+        headers.append(f"{months_range}개월(%)")
+    else:
+        headers.append("Period(%)")
     if include_samples:
         headers.append("Samples")
 
-    header_line = " | ".join(headers)
-    lines = [header_line, "-" * len(header_line)]
+    # 정렬 방향 설정 (right: 오른쪽 정렬, left: 왼쪽 정렬, center: 가운데 정렬)
+    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right"]
+    if include_samples:
+        aligns.append("right")
+
+    table_rows = []
     for row in rows[:MAX_TABLE_ROWS]:
         ma_val = row.get("ma_period")
+        ma_type_val = row.get("ma_type", "SMA")
         topn_val = row.get("portfolio_topn")
         threshold_val = row.get("replace_threshold")
-        line_parts = [
-            f"{int(ma_val):>3}" if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
-            f"{int(topn_val):>4}" if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-            f"{_format_threshold(threshold_val):>9}",
-            f"{_format_table_float(row.get('cagr')):>8}",
-            f"{_format_table_float(row.get('mdd')):>8}",
-            f"{_format_table_float(row.get('period_return')):>8}",
+        rsi_threshold_val = row.get("rsi_sell_threshold")
+        cooldown_val = row.get("cooldown_days")
+
+        row_data = [
+            str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
+            str(ma_type_val) if ma_type_val else "SMA",
+            str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
+            _format_threshold(threshold_val),
+            str(int(rsi_threshold_val)) if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val)) else "-",
+            str(int(cooldown_val)) if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val)) else "-",
+            _format_table_float(row.get("cagr")),
+            _format_table_float(row.get("mdd")),
+            _format_table_float(row.get("period_return")),
         ]
+
         if include_samples:
             samples_val = row.get("samples")
             if isinstance(samples_val, (int, float)) and math.isfinite(float(samples_val)):
-                line_parts.append(f"{int(samples_val):>7}")
+                row_data.append(str(int(samples_val)))
             else:
-                line_parts.append("   -")
-        lines.append(" | ".join(line_parts))
+                row_data.append("-")
+
+        table_rows.append(row_data)
+
+    lines = render_table_eaw(headers, table_rows, aligns)
+
     if len(rows) > MAX_TABLE_ROWS:
         lines.append(f"... (총 {len(rows)}개 중 상위 {MAX_TABLE_ROWS}개 표시)")
+
     return lines
 
 
@@ -384,7 +409,7 @@ def _export_debug_month(
 
 
 def _evaluate_single_combo(
-    payload: Tuple[str, int, Tuple[str, str], int, int, int, float, Tuple[str, ...], Mapping[str, DataFrame]]
+    payload: Tuple[str, int, Tuple[str, str], int, int, int, float, int, int, str, Tuple[str, ...], Mapping[str, DataFrame]]
 ) -> Tuple[str, Any, List[str]]:
     (
         account_norm,
@@ -394,6 +419,9 @@ def _evaluate_single_combo(
         ma_int,
         topn_int,
         threshold_float,
+        rsi_int,
+        cooldown_int,
+        ma_type_str,
         excluded_tickers,
         prefetched_data,
     ) = payload
@@ -403,6 +431,7 @@ def _evaluate_single_combo(
             ma_period=int(ma_int),
             portfolio_topn=int(topn_int),
             replace_threshold=float(threshold_float),
+            ma_type=str(ma_type_str),
         )
     except ValueError as exc:
         return (
@@ -411,6 +440,8 @@ def _evaluate_single_combo(
                 "ma_period": ma_int,
                 "portfolio_topn": topn_int,
                 "replace_threshold": threshold_float,
+                "rsi_sell_threshold": rsi_int,
+                "ma_type": ma_type_str,
                 "error": str(exc),
             },
             [],
@@ -419,6 +450,8 @@ def _evaluate_single_combo(
     strategy_overrides: Dict[str, Any] = {}
     if regime_ma_period > 0:
         strategy_overrides["MARKET_REGIME_FILTER_MA_PERIOD"] = regime_ma_period
+    strategy_overrides["OVERBOUGHT_SELL_THRESHOLD"] = rsi_int
+    strategy_overrides["COOLDOWN_DAYS"] = cooldown_int
 
     try:
         bt_result = run_account_backtest(
@@ -441,6 +474,7 @@ def _evaluate_single_combo(
                 "ma_period": ma_int,
                 "portfolio_topn": topn_int,
                 "replace_threshold": threshold_float,
+                "rsi_sell_threshold": rsi_int,
                 "error": str(exc),
             },
             [],
@@ -454,6 +488,9 @@ def _evaluate_single_combo(
         "ma_period": ma_int,
         "portfolio_topn": topn_int,
         "replace_threshold": float(threshold_float),
+        "rsi_sell_threshold": rsi_int,
+        "cooldown_days": cooldown_int,
+        "ma_type": ma_type_str,
         "cagr_pct": _round_float(_safe_float(summary.get("cagr_pct"), 0.0)),
         "mdd_pct": _round_float(_safe_float(summary.get("mdd_pct"), 0.0)),
         "sharpe_ratio": _round_float(_safe_float(summary.get("sharpe_ratio"), 0.0)),
@@ -479,18 +516,31 @@ def _execute_tuning_for_months(
     regime_ma_period: int,
     excluded_tickers: Optional[Collection[str]],
     prefetched_data: Mapping[str, DataFrame],
+    output_path: Optional[Path] = None,
+    progress_callback: Optional[callable] = None,
 ) -> Optional[Dict[str, Any]]:
     logger = get_app_logger()
 
     ma_candidates = list(search_space.get("MA_PERIOD", []))
     topn_candidates = list(search_space.get("PORTFOLIO_TOPN", []))
     replace_candidates = list(search_space.get("REPLACE_SCORE_THRESHOLD", []))
+    rsi_candidates = list(search_space.get("OVERBOUGHT_SELL_THRESHOLD", []))
+    cooldown_candidates = list(search_space.get("COOLDOWN_DAYS", []))
+    ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
 
-    if not ma_candidates or not topn_candidates or not replace_candidates:
+    if not ma_candidates or not topn_candidates or not replace_candidates or not rsi_candidates or not cooldown_candidates or not ma_type_candidates:
         logger.warning("[튜닝] %s (%d개월) 유효한 탐색 공간이 없습니다.", account_norm.upper(), months_range)
         return None
 
-    combos: List[Tuple[int, int, float]] = [(ma, topn, replace) for ma in ma_candidates for topn in topn_candidates for replace in replace_candidates]
+    combos: List[Tuple[int, int, float, int, int, str]] = [
+        (ma, topn, replace, rsi, cooldown, ma_type)
+        for ma in ma_candidates
+        for topn in topn_candidates
+        for replace in replace_candidates
+        for rsi in rsi_candidates
+        for cooldown in cooldown_candidates
+        for ma_type in ma_type_candidates
+    ]
 
     if not combos:
         logger.warning("[튜닝] %s (%d개월) 평가할 조합이 없습니다.", account_norm.upper(), months_range)
@@ -512,6 +562,7 @@ def _execute_tuning_for_months(
     success_entries: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
     encountered_missing: Set[str] = set()
+    best_cagr_so_far = float("-inf")
 
     payloads = [
         (
@@ -522,10 +573,13 @@ def _execute_tuning_for_months(
             int(ma),
             int(topn),
             float(replace),
+            int(rsi),
+            int(cooldown),
+            str(ma_type),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             prefetched_data,
         )
-        for ma, topn, replace in combos
+        for ma, topn, replace, rsi, cooldown, ma_type in combos
     ]
 
     if workers <= 1:
@@ -546,6 +600,20 @@ def _execute_tuning_for_months(
                     len(combos),
                     (idx / len(combos)) * 100,
                 )
+
+                # 1%마다 중간 저장 (성공한 조합이 있을 때만)
+                if success_entries and output_path and progress_callback:
+                    current_best_cagr = max(_safe_float(entry.get("cagr_pct"), float("-inf")) for entry in success_entries)
+                    if current_best_cagr > best_cagr_so_far:
+                        best_cagr_so_far = current_best_cagr
+
+                    # 중간 결과 저장 콜백 호출
+                    progress_callback(
+                        success_entries=success_entries,
+                        progress_pct=(idx / len(combos)) * 100,
+                        completed=idx,
+                        total=len(combos),
+                    )
     else:
         with ProcessPoolExecutor(max_workers=workers) as executor:
             future_map = {executor.submit(_evaluate_single_combo, payload): payload for payload in payloads}
@@ -566,6 +634,20 @@ def _execute_tuning_for_months(
                         len(combos),
                         (idx / len(combos)) * 100,
                     )
+
+                    # 1%마다 중간 저장 (성공한 조합이 있을 때만)
+                    if success_entries and output_path and progress_callback:
+                        current_best_cagr = max(_safe_float(entry.get("cagr_pct"), float("-inf")) for entry in success_entries)
+                        if current_best_cagr > best_cagr_so_far:
+                            best_cagr_so_far = current_best_cagr
+
+                        # 중간 결과 저장 콜백 호출
+                        progress_callback(
+                            success_entries=success_entries,
+                            progress_pct=(idx / len(combos)) * 100,
+                            completed=idx,
+                            total=len(combos),
+                        )
 
     if not success_entries:
         logger.warning("[튜닝] %s (%d개월) 성공한 조합이 없습니다.", account_norm.upper(), months_range)
@@ -593,8 +675,11 @@ def _execute_tuning_for_months(
                 "period_return": _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None,
                 "tuning": {
                     "MA_PERIOD": int(item.get("ma_period", 0)),
+                    "MA_TYPE": str(item.get("ma_type", "SMA")),
                     "PORTFOLIO_TOPN": int(item.get("portfolio_topn", 0)),
                     "REPLACE_SCORE_THRESHOLD": _round_up_float_places(item.get("replace_threshold", 0.0), 1),
+                    "OVERBOUGHT_SELL_THRESHOLD": int(item.get("rsi_sell_threshold", 10)),
+                    "COOLDOWN_DAYS": int(item.get("cooldown_days", 2)),
                 },
             }
         )
@@ -617,6 +702,7 @@ def _build_run_entry(
         "MA_PERIOD": ("ma_period", True),
         "PORTFOLIO_TOPN": ("portfolio_topn", True),
         "REPLACE_SCORE_THRESHOLD": ("replace_threshold", False),
+        "OVERBOUGHT_SELL_THRESHOLD": ("rsi_sell_threshold", True),
     }
 
     entry: Dict[str, Any] = {
@@ -679,6 +765,8 @@ def _build_run_entry(
             ("MA_PERIOD", "ma_period"),
             ("PORTFOLIO_TOPN", "portfolio_topn"),
             ("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
+            ("OVERBOUGHT_SELL_THRESHOLD", "rsi_sell_threshold"),
+            ("COOLDOWN_DAYS", "cooldown_days"),
         ):
             value = best.get(key)
             if value is None:
@@ -875,13 +963,91 @@ def _compose_tuning_report(
     *,
     month_results: List[Dict[str, Any]],
     aggregated_entry: Dict[str, Any],
+    progress_info: Optional[Dict[str, Any]] = None,
+    tuning_metadata: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines: List[str] = [
         f"실행 시각: {timestamp}",
         f"계정: {account_id.upper()}",
-        "",
     ]
+
+    if progress_info:
+        completed = progress_info.get("completed", 0)
+        total = progress_info.get("total", 0)
+        if total > 0:
+            pct = (completed / total) * 100
+            lines.append(f"진행률: {completed}/{total} ({pct:.1f}%) - 중간 결과")
+
+    # 튜닝 메타 정보 추가
+    if tuning_metadata:
+        lines.append("")
+        lines.append("=== 튜닝 설정 ===")
+
+        # 탐색 공간
+        search_space = tuning_metadata.get("search_space", {})
+        if search_space:
+            ma_range = search_space.get("MA_RANGE", [])
+            ma_type_range = search_space.get("MA_TYPE", [])
+            topn_range = search_space.get("PORTFOLIO_TOPN", [])
+            threshold_range = search_space.get("REPLACE_SCORE_THRESHOLD", [])
+            rsi_range = search_space.get("OVERBOUGHT_SELL_THRESHOLD", [])
+            cooldown_range = search_space.get("COOLDOWN_DAYS", [])
+
+            # MA_TYPE이 있으면 포함해서 표시
+            if ma_type_range and len(ma_type_range) > 1:
+                lines.append(
+                    f"탐색 공간: MA {len(ma_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 × TH {len(threshold_range)}개 × RSI {len(rsi_range)}개 × COOLDOWN {len(cooldown_range)}개 = {tuning_metadata.get('combo_count', 0)}개 조합"
+                )
+            else:
+                lines.append(
+                    f"탐색 공간: MA {len(ma_range)}개 × TOPN {len(topn_range)}개 × TH {len(threshold_range)}개 × RSI {len(rsi_range)}개 × COOLDOWN {len(cooldown_range)}개 = {tuning_metadata.get('combo_count', 0)}개 조합"
+                )
+
+            # 각 파라미터 범위 표시
+            if ma_range:
+                ma_min, ma_max = min(ma_range), max(ma_range)
+                lines.append(f"  MA_RANGE: {ma_min}~{ma_max}")
+            if ma_type_range:
+                lines.append(f"  MA_TYPE: {', '.join(ma_type_range)}")
+            if topn_range:
+                topn_min, topn_max = min(topn_range), max(topn_range)
+                lines.append(f"  PORTFOLIO_TOPN: {topn_min}~{topn_max}")
+            if threshold_range:
+                th_min, th_max = min(threshold_range), max(threshold_range)
+                lines.append(f"  REPLACE_SCORE_THRESHOLD: {th_min}~{th_max}")
+            if rsi_range:
+                rsi_min, rsi_max = min(rsi_range), max(rsi_range)
+                lines.append(f"  OVERBOUGHT_SELL_THRESHOLD: {rsi_min}~{rsi_max}")
+            if cooldown_range:
+                cd_min, cd_max = min(cooldown_range), max(cooldown_range)
+                lines.append(f"  COOLDOWN_DAYS: {cd_min}~{cd_max}")
+
+        # 종목 수
+        ticker_count = tuning_metadata.get("ticker_count", 0)
+        if ticker_count > 0:
+            lines.append(f"대상 종목: {ticker_count}개")
+
+        # 제외된 종목
+        excluded_tickers = tuning_metadata.get("excluded_tickers", [])
+        if excluded_tickers:
+            lines.append(f"제외된 종목: {len(excluded_tickers)}개 ({', '.join(excluded_tickers)})")
+
+        # 테스트 기간
+        test_periods = tuning_metadata.get("test_periods", [])
+        data_period = tuning_metadata.get("data_period", {})
+        if test_periods:
+            # 날짜 정보가 있으면 함께 표시
+            if data_period:
+                start_date = data_period.get("start_date", "")
+                end_date = data_period.get("end_date", "")
+                period_strs = [f"{start_date} ~ {end_date} ({p}개월)" for p in test_periods]
+                lines.append(f"테스트 기간: {', '.join(period_strs)}")
+            else:
+                period_str = ", ".join([f"{p}개월" for p in test_periods])
+                lines.append(f"테스트 기간: {period_str}")
+
+    lines.append("")
 
     for item in sorted(month_results, key=lambda x: int(x.get("months_range", 0))):
         months_range = item.get("months_range")
@@ -894,8 +1060,11 @@ def _compose_tuning_report(
         for entry in raw_rows:
             tuning = entry.get("tuning") or {}
             ma_val = tuning.get("MA_PERIOD")
+            ma_type_val = tuning.get("MA_TYPE", "SMA")
             topn_val = tuning.get("PORTFOLIO_TOPN")
             threshold_val = tuning.get("REPLACE_SCORE_THRESHOLD")
+            rsi_val = tuning.get("OVERBOUGHT_SELL_THRESHOLD")
+            cooldown_val = tuning.get("COOLDOWN_DAYS")
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -904,8 +1073,11 @@ def _compose_tuning_report(
             normalized_rows.append(
                 {
                     "ma_period": ma_val,
+                    "ma_type": ma_type_val,
                     "portfolio_topn": topn_val,
                     "replace_threshold": threshold_val,
+                    "rsi_sell_threshold": rsi_val,
+                    "cooldown_days": cooldown_val,
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
@@ -914,10 +1086,45 @@ def _compose_tuning_report(
 
         normalized_rows.sort(key=lambda row: _safe_float(row.get("cagr"), float("-inf")), reverse=True)
         lines.append(f"=== 최근 {months_range}개월 결과 - 정렬 기준: CAGR ===")
-        lines.extend(_render_tuning_table(normalized_rows))
+        lines.extend(_render_tuning_table(normalized_rows, months_range=months_range))
         lines.append("")
 
     return lines
+
+
+def _save_intermediate_results(
+    output_path: Path,
+    *,
+    account_id: str,
+    month_results: List[Dict[str, Any]],
+    aggregated_entry: Dict[str, Any],
+    progress_info: Optional[Dict[str, Any]] = None,
+    tuning_metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """중간 결과를 임시 파일에 쓰고 atomic rename으로 안전하게 저장합니다."""
+    try:
+        report_lines = _compose_tuning_report(
+            account_id,
+            month_results=month_results,
+            aggregated_entry=aggregated_entry,
+            progress_info=progress_info,
+            tuning_metadata=tuning_metadata,
+        )
+
+        # 임시 파일에 먼저 쓰기
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output_path.parent, delete=False, suffix=".tmp") as tmp_file:
+            tmp_file.write("\n".join(report_lines) + "\n")
+            tmp_path = Path(tmp_file.name)
+
+        # Atomic rename (기존 파일 덮어쓰기)
+        shutil.move(str(tmp_path), str(output_path))
+    except Exception:
+        # 중간 저장 실패는 무시 (최종 저장은 별도로 수행)
+        if "tmp_path" in locals() and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 def run_account_tuning(
@@ -927,8 +1134,6 @@ def run_account_tuning(
     results_dir: Optional[Path | str] = None,
     tuning_config: Optional[Dict[str, Dict[str, Any]]] = None,
     months_range: Optional[int] = None,
-    n_trials: Optional[int] = None,
-    timeout: Optional[float] = None,
     debug_export_dir: Optional[Path | str] = None,
     debug_capture_top_n: int = 1,
 ) -> Optional[Path]:
@@ -972,8 +1177,30 @@ def run_account_tuning(
         dtype=float,
         fallback=base_rules.replace_threshold,
     )
+    rsi_sell_values = _normalize_tuning_values(
+        config.get("OVERBOUGHT_SELL_THRESHOLD"),
+        dtype=int,
+        fallback=10,
+    )
+    cooldown_values = _normalize_tuning_values(
+        config.get("COOLDOWN_DAYS"),
+        dtype=int,
+        fallback=2,
+    )
 
-    if not ma_values or not topn_values or not replace_values:
+    # MA_TYPE 처리: 문자열 리스트로 받음
+    ma_type_raw = config.get("MA_TYPE")
+    if ma_type_raw is None:
+        ma_type_values = [base_rules.ma_type]
+    elif isinstance(ma_type_raw, (list, tuple)):
+        ma_type_values = [str(v).upper() for v in ma_type_raw if v]
+    else:
+        ma_type_values = [str(ma_type_raw).upper()]
+
+    if not ma_type_values:
+        ma_type_values = [base_rules.ma_type]
+
+    if not ma_values or not topn_values or not replace_values or not rsi_sell_values or not cooldown_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
@@ -987,7 +1214,7 @@ def run_account_tuning(
         logger.error("[튜닝] '%s' 유효한 티커가 없습니다.", country_code)
         return None
 
-    combo_count = len(ma_values) * len(topn_values) * len(replace_values)
+    combo_count = len(ma_values) * len(topn_values) * len(replace_values) * len(rsi_sell_values) * len(cooldown_values) * len(ma_type_values)
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
         return None
@@ -996,6 +1223,9 @@ def run_account_tuning(
         "MA_PERIOD": ma_values,
         "PORTFOLIO_TOPN": topn_values,
         "REPLACE_SCORE_THRESHOLD": replace_values,
+        "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
+        "COOLDOWN_DAYS": cooldown_values,
+        "MA_TYPE": ma_type_values,
     }
 
     try:
@@ -1024,11 +1254,15 @@ def run_account_tuning(
     ma_count = len(ma_values)
     topn_count = len(topn_values)
     replace_count = len(replace_values)
+    rsi_count = len(rsi_sell_values)
+    cooldown_count = len(cooldown_values)
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × TH %d개 = %d개 조합",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × TH %d개 × RSI %d개 × COOLDOWN %d개 = %d개 조합",
         ma_count,
         topn_count,
         replace_count,
+        rsi_count,
+        cooldown_count,
         combo_count,
     )
 
@@ -1128,6 +1362,39 @@ def run_account_tuning(
     runtime_missing_registry: Set[str] = set()
     results_per_month: List[Dict[str, Any]] = []
 
+    # 출력 경로 미리 결정 (중간 저장용)
+    base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
+    if output_path is None:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        txt_path = base_dir / f"tune_{account_norm}_{date_str}.log"
+    else:
+        txt_path = Path(output_path)
+        if txt_path.suffix.lower() not in (".log", ".txt"):
+            txt_path = txt_path.with_suffix(".log")
+        if not txt_path.is_absolute():
+            txt_path = Path.cwd() / txt_path
+    txt_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 튜닝 메타데이터 생성
+    tuning_metadata = {
+        "combo_count": combo_count,
+        "search_space": {
+            "MA_RANGE": list(ma_values),
+            "MA_TYPE": list(ma_type_values),
+            "PORTFOLIO_TOPN": list(topn_values),
+            "REPLACE_SCORE_THRESHOLD": list(replace_values),
+            "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
+            "COOLDOWN_DAYS": list(cooldown_values),
+        },
+        "data_period": {
+            "start_date": date_range_prefetch[0],
+            "end_date": date_range_prefetch[1],
+        },
+        "ticker_count": len(tickers),
+        "excluded_tickers": sorted(excluded_ticker_set),
+        "test_periods": valid_month_ranges,
+    }
+
     for item in month_items:
         months_raw = item.get("months_range")
         try:
@@ -1179,6 +1446,50 @@ def run_account_tuning(
             save_cached_frame(country_code, ticker, frame)
         missing_prefetch.extend(additional_missing)
 
+        # 중간 저장 콜백 함수 정의
+        def save_progress_callback(success_entries, progress_pct, completed, total):
+            """1%마다 호출되는 중간 저장 콜백"""
+            # 현재까지의 결과로 임시 결과 생성
+            temp_result = {
+                "months_range": months_value,
+                "best": success_entries[0] if success_entries else {},
+                "weight": item.get("weight", 0.0),
+                "source": item.get("source"),
+                "raw_data": [
+                    {
+                        "MONTHS_RANGE": months_value,
+                        "CAGR": _round_float_places(entry.get("cagr_pct", 0.0), 2),
+                        "MDD": _round_float_places(-entry.get("mdd_pct", 0.0), 2),
+                        "period_return": _round_float_places(entry.get("cumulative_return_pct", 0.0), 2),
+                        "tuning": {
+                            "MA_PERIOD": int(entry.get("ma_period", 0)),
+                            "MA_TYPE": str(entry.get("ma_type", "SMA")),
+                            "PORTFOLIO_TOPN": int(entry.get("portfolio_topn", 0)),
+                            "REPLACE_SCORE_THRESHOLD": _round_up_float_places(entry.get("replace_threshold", 0.0), 1),
+                            "OVERBOUGHT_SELL_THRESHOLD": int(entry.get("rsi_sell_threshold", 10)),
+                            "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
+                        },
+                    }
+                    for entry in sorted(success_entries, key=lambda e: _safe_float(e.get("cagr_pct"), float("-inf")), reverse=True)
+                ],
+            }
+
+            temp_results = results_per_month + [temp_result]
+            intermediate_entry = _build_run_entry(months_results=temp_results)
+            _save_intermediate_results(
+                txt_path,
+                account_id=account_norm,
+                month_results=temp_results,
+                aggregated_entry=intermediate_entry,
+                progress_info={
+                    "completed": completed,
+                    "total": total,
+                    "months_range": months_value,
+                    "progress_pct": progress_pct,
+                },
+                tuning_metadata=tuning_metadata,
+            )
+
         single_result = _execute_tuning_for_months(
             account_norm,
             months_range=months_value,
@@ -1187,6 +1498,8 @@ def run_account_tuning(
             regime_ma_period=regime_ma_period,
             excluded_tickers=excluded_ticker_set,
             prefetched_data=prefetched_map,
+            output_path=txt_path,
+            progress_callback=save_progress_callback,
         )
 
         if not single_result:
@@ -1203,6 +1516,27 @@ def run_account_tuning(
         if missing_in_result:
             runtime_missing_registry.update(missing_in_result)
         results_per_month.append(single_result)
+
+        # 각 기간 완료 시마다 중간 결과 저장
+        if results_per_month:
+            intermediate_entry = _build_run_entry(months_results=results_per_month)
+            _save_intermediate_results(
+                txt_path,
+                account_id=account_norm,
+                month_results=results_per_month,
+                aggregated_entry=intermediate_entry,
+                progress_info={
+                    "completed": len(results_per_month),
+                    "total": len(month_items),
+                },
+                tuning_metadata=tuning_metadata,
+            )
+            logger.info(
+                "[튜닝] %s 중간 결과 저장 완료 (%d/%d 기간)",
+                account_norm.upper(),
+                len(results_per_month),
+                len(month_items),
+            )
 
         if debug_dir is not None and capture_top_n > 0:
             raw_rows = single_result.get("raw_data") or []
@@ -1234,12 +1568,14 @@ def run_account_tuning(
     for item in results_per_month:
         best = item.get("best", {})
         logger.info(
-            "[튜닝] %s (%d개월) 최적 조합: MA=%d / TOPN=%d / TH=%.3f / REGIME_MA=%d / CAGR=%.2f%%",
+            "[튜닝] %s (%d개월) 최적 조합: MA=%d / TOPN=%d / TH=%.3f / RSI=%d / COOLDOWN=%d / REGIME_MA=%d / CAGR=%.2f%%",
             account_norm.upper(),
             item.get("months_range"),
             best.get("ma_period", 0),
             best.get("portfolio_topn", 0),
             best.get("replace_threshold", 0.0),
+            best.get("rsi_sell_threshold", 10),
+            best.get("cooldown_days", 2),
             item.get("regime_ma_period", 0),
             best.get("cagr_pct", 0.0),
         )
@@ -1256,6 +1592,7 @@ def run_account_tuning(
                 "MA_RANGE": ma_values,
                 "PORTFOLIO_TOPN": topn_values,
                 "REPLACE_SCORE_THRESHOLD": replace_values,
+                "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
             },
             "month_configs": debug_month_configs,
             "excluded_tickers_initial": sorted(excluded_ticker_set),
@@ -1298,29 +1635,13 @@ def run_account_tuning(
         account_norm,
         month_results=results_per_month,
         aggregated_entry=entry,
+        tuning_metadata=tuning_metadata,
     )
 
-    base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
-    if output_path is None:
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        txt_path = base_dir / f"tune_{account_norm}_{date_str}.txt"
-    else:
-        txt_path = Path(output_path)
-        if txt_path.suffix.lower() != ".txt":
-            txt_path = txt_path.with_suffix(".txt")
-        if not txt_path.is_absolute():
-            txt_path = Path.cwd() / txt_path
-
-    txt_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Remove any existing tuning files for this account to avoid mixing stale results.
+    # Remove only the exact output file if it exists (preserve backup copies)
     try:
-        pattern = f"tune_{account_norm}_*.txt"
-        for existing in txt_path.parent.glob(pattern):
-            try:
-                existing.unlink()
-            except OSError:
-                continue
+        if txt_path.exists():
+            txt_path.unlink()
     except OSError:
         pass
 

@@ -18,8 +18,9 @@ _rules_mod = get_rules_module()
 # 전략 규칙 클래스
 StrategyRules = getattr(_rules_mod, "StrategyRules")
 
-# 백테스트 함수들
-run_portfolio_backtest = getattr(_backtest_mod, "run_portfolio_backtest")
+# 백테스트 함수들 - portfolio_runner에서 직접 import
+from logic.backtest.portfolio_runner import run_portfolio_backtest
+
 run_single_ticker_backtest = getattr(_backtest_mod, "run_single_ticker_backtest")
 
 # 상수

@@ -345,7 +345,7 @@ def get_market_regime_status_info(ma_period_override: Optional[int] = None) -> T
         ticker,
         ma_period=ma_period,
         country=country,
-        delay_days=int(delay_days or 0),
+        delay_days=int(delay_days),
     )
 
 
@@ -377,7 +377,7 @@ def get_market_regime_aux_status_infos(ma_period_override: Optional[int] = None)
             ticker,
             ma_period=ma_period,
             country=country,
-            delay_days=int(delay_days or 0),
+            delay_days=int(delay_days),
         )
         if info is not None:
             results.append(info)

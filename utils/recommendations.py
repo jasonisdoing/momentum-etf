@@ -26,6 +26,7 @@ _DISPLAY_COLUMNS = [
     "3주(%)",
     "추세(3주)",
     "점수",
+    "RSI",
     "지속",
     "문구",
 ]
@@ -62,21 +63,15 @@ def _resolve_phrase(row: dict[str, Any]) -> str:
     return str(phrase)
 
 
-def _format_currency(value: Any, country: str) -> str:
+def _format_currency(value: Any, country: str) -> float | None:
+    """현재가를 숫자로 반환합니다 (NumberColumn 사용을 위해)."""
     if value is None:
-        return "-"
+        return None
     try:
         amount = float(value)
+        return amount
     except (TypeError, ValueError):
-        return str(value)
-
-    country_code = (country or "").strip().lower()
-
-    if country_code == "kor":
-        return f"{int(round(amount)):,}원"
-    if country_code == "aus":
-        return f"A${amount:,.2f}"
-    return f"{amount:,.2f}"
+        return None
 
 
 def _format_percent(value: Any) -> str:
@@ -99,14 +94,15 @@ def _format_score(value: Any) -> str:
     return f"{score:.1f}"
 
 
-def _format_days(value: Any) -> str:
-    if value in (None, "", "-"):
-        return "-"
+def _format_days(value: Any) -> int | None:
+    """지속일을 숫자로 반환합니다 (NumberColumn 사용을 위해)."""
+    if value is None:
+        return None
     try:
         days = int(value)
+        return days
     except (TypeError, ValueError):
-        return str(value)
-    return f"{days}일"
+        return None
 
 
 def _trend_series(row: dict[str, Any]) -> list[float]:
@@ -135,7 +131,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         category = row.get("category", "-")
         state = row.get("state", "-").upper()
         holding_days = _format_days(row.get("holding_days"))
-        price = _format_currency(row.get("price"), country)
+        price = _format_currency(row.get("price"), country)  # 숫자 값 반환
         daily_pct = _format_percent(row.get("daily_pct"))
         evaluation_pct = _format_percent(row.get("evaluation_pct", 0.0))
         return_1w = _format_percent(row.get("return_1w", 0.0))
@@ -144,6 +140,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         score = _format_score(row.get("score"))
         streak = _format_days(row.get("streak"))
         phrase = _resolve_phrase(row)
+        rsi_score = _format_score(row.get("rsi_score", 0.0))
         display_rows.append(
             {
                 "#": rank if rank is not None else "-",
@@ -160,6 +157,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "3주(%)": return_3w,
                 "추세(3주)": _trend_series(row),
                 "점수": score,
+                "RSI": rsi_score,
                 "지속": streak,
                 "문구": phrase or row.get("phrase", ""),
             }
@@ -228,6 +226,7 @@ def style_recommendations_dataframe(df: pd.DataFrame) -> Styler:
     styled = styled.applymap(_state_style, subset=["상태"])
     styled = styled.applymap(_pct_style, subset=["일간(%)"])
     styled = styled.applymap(_score_style, subset=["점수"])
+    styled = styled.applymap(_score_style, subset=["RSI"])
     styled = styled.apply(_row_background_styles, axis=1)
     return styled
 

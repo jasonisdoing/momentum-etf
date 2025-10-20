@@ -105,10 +105,9 @@ def print_backtest_summary(
     merged_strategy = dict(strategy_static)
     merged_strategy.update(strategy_tuning)
 
-    cooldown_days = int(strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 0)) or 0)
-    replace_threshold = strategy_tuning.get("REPLACE_SCORE_THRESHOLD")
-    if replace_threshold is None:
-        replace_threshold = strategy_cfg.get("REPLACE_SCORE_THRESHOLD", 0.5)
+    # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
+    cooldown_days = int(strategy_tuning["COOLDOWN_DAYS"])
+    replace_threshold = strategy_tuning["REPLACE_SCORE_THRESHOLD"]
 
     initial_capital_local = float(summary.get("initial_capital_local", summary.get("initial_capital", initial_capital_krw)))
     initial_capital_krw_value = float(summary.get("initial_capital_krw", initial_capital_krw))
@@ -407,8 +406,8 @@ def _resolve_formatters(account_settings: Dict[str, Any]):
         precision = {}
 
     currency = str(precision.get("currency") or account_settings.get("currency") or "KRW").upper()
-    qty_precision = int(precision.get("qty_precision", 0) or 0)
-    price_precision = int(precision.get("price_precision", 0) or 0)
+    qty_precision = int(precision.get("qty_precision", 0))
+    price_precision = int(precision.get("price_precision", 0))
 
     digits = max(price_precision, 0)
 
@@ -483,7 +482,6 @@ def _build_daily_table_rows(
         row = ts.loc[target_date]
         ticker_key = str(ticker).upper()
         meta = result.ticker_meta.get(ticker_key, {})
-        evaluation = result.evaluated_records.get(ticker_key, {})
 
         price_val = row.get("price")
         shares_val = row.get("shares")
@@ -545,14 +543,14 @@ def _build_daily_table_rows(
         pv_display = money_formatter(pv)
         cost_basis = avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 else 0.0
         eval_profit_value = 0.0 if is_cash else pv - cost_basis
-        evaluated_profit = evaluation.get("realized_profit", 0.0)
-        cumulative_profit_value = evaluated_profit + eval_profit_value
+        # 누적 손익 = 평가 손익 (현재 보유분만 계산, 실현 손익은 제외)
+        # 이유: 백테스트 시작일 이전의 실현 손익이 포함되는 문제를 방지
+        cumulative_profit_value = eval_profit_value
         evaluated_profit_display = money_formatter(eval_profit_value)
         evaluated_pct = (eval_profit_value / cost_basis * 100.0) if cost_basis > 0 and _is_finite_number(eval_profit_value) else 0.0
         evaluated_pct_display = f"{evaluated_pct:+.1f}%" if cost_basis > 0 else "-"
-        initial_value = evaluation.get("initial_value") or cost_basis
-        cumulative_pct = (cumulative_profit_value / initial_value * 100.0) if initial_value and _is_finite_number(cumulative_profit_value) else 0.0
-        cumulative_pct_display = f"{cumulative_pct:+.1f}%" if initial_value else "-"
+        # 누적 수익률 = 평가 수익률 (현재 보유분 기준)
+        cumulative_pct_display = evaluated_pct_display
         score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
         weight_display = f"{weight:.0f}%"
         if is_cash and total_value_safe > 0:
@@ -566,9 +564,12 @@ def _build_daily_table_rows(
         sort_key = (
             0 if is_cash else 1,
             decision_order,
-            -score_val,
+            -score_val,  # MAPS 점수
             ticker_key,
         )
+
+        rsi_score = row.get("rsi_score")
+        rsi_score_display = f"{float(rsi_score):.1f}" if _is_finite_number(rsi_score) else "-"
 
         row_data = [
             "0",
@@ -587,6 +588,7 @@ def _build_daily_table_rows(
             cumulative_pct_display,
             weight_display,
             score_display,
+            rsi_score_display,
             f"{int(filter_val)}일" if _is_finite_number(filter_val) else "-",
             phrase,
         ]
@@ -594,8 +596,37 @@ def _build_daily_table_rows(
 
     entries.sort(key=lambda item: item[0])
 
+    # 카테고리별 최고 점수 필터링을 위해 딕셔너리 형태로 변환
+    from logic.common import filter_category_duplicates
+
+    items_for_filter = []
+    for sort_key, row_data in entries:
+        # row_data: [순위, 티커, 종목명, 카테고리, 상태, ...]
+        # sort_key: (is_cash, decision_order, -score, ticker)
+        score_val = -sort_key[2] if len(sort_key) > 2 else 0.0  # 음수로 저장되어 있으므로 다시 양수로
+        item_dict = {
+            "ticker": row_data[1],  # 티커
+            "category": row_data[3],  # 카테고리
+            "state": row_data[4],  # 상태
+            "score": score_val,
+            "row_data": row_data,
+            "sort_key": sort_key,
+        }
+        items_for_filter.append(item_dict)
+
+    # 카테고리 정규화 함수
+    def normalize_category(category: str) -> str:
+        if not category or category == "-":
+            return ""
+        return str(category).strip().upper()
+
+    # 필터링 적용
+    filtered_items = filter_category_duplicates(items_for_filter, category_key_getter=normalize_category)
+
+    # 다시 row 형태로 변환
     sorted_rows: List[List[str]] = []
-    for idx, (_, row) in enumerate(entries, 1):
+    for idx, item in enumerate(filtered_items, 1):
+        row = item["row_data"]
         row[0] = str(idx)
         sorted_rows.append(row)
 
@@ -634,28 +665,30 @@ def _generate_daily_report_lines(
         "누적(%)",
         "비중",
         "점수",
+        "RSI",
         "지속",
         "문구",
     ]
     aligns = [
-        "right",
-        "left",
-        "left",
-        "left",
-        "center",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "left",
+        "right",  # #
+        "left",  # 티커
+        "left",  # 종목명
+        "left",  # 카테고리
+        "center",  # 상태
+        "right",  # 보유일
+        "right",  # 현재가
+        "right",  # 일간(%)
+        "right",  # 보유수량
+        "right",  # 보유금액
+        "right",  # 평가손익
+        "right",  # 평가(%)
+        "right",  # 누적손익
+        "right",  # 누적(%)
+        "right",  # 비중
+        "right",  # 점수
+        "right",  # RSI
+        "right",  # 지속
+        "left",  # 문구
     ]
 
     buy_date_map: Dict[str, Optional[pd.Timestamp]] = {}
@@ -757,7 +790,7 @@ def dump_backtest_log(
     account_id = result.account_id
     country_code = result.country_code
 
-    path = base_dir / f"backtest_{account_id}.txt"
+    path = base_dir / f"backtest_{account_id}.log"
     lines: List[str] = []
 
     lines.append(f"백테스트 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")

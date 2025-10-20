@@ -13,6 +13,7 @@ from utils.account_registry import (
 )
 from logic.recommend.output import (
     dump_json,
+    dump_recommendation_log,
     print_result_summary,
     print_run_header,
 )
@@ -109,6 +110,13 @@ def main() -> None:
         custom_path = Path(args.output)
         dump_json(items, custom_path)
         logger.info("📄 커스텀 JSON을 '%s'에 저장했습니다.", custom_path)
+
+    # 로그 파일 저장
+    try:
+        log_path = dump_recommendation_log(report)
+        logger.info("✅ 추천 로그를 '%s'에 저장했습니다.", log_path)
+    except Exception:
+        logger.error("추천 로그 저장에 실패했습니다 (account=%s)", account_id, exc_info=True)
 
     slack_payload = compose_recommendation_slack_message(
         account_id,

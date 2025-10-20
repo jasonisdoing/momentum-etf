@@ -6,18 +6,31 @@
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",
     "strategy": {
+        "expected_cagr": 93.51,
+        "backtested_date": "2025-10-19",
         "tuning": {
-            "MA_PERIOD": 45,
-            "_MA_PERIOD": 55,
-            "PORTFOLIO_TOPN": 5,
-            "REPLACE_SCORE_THRESHOLD": 0.5
+            "MA_PERIOD": 48,
+            "MA_TYPE": "SMA",
+            "PORTFOLIO_TOPN": 7,
+            "REPLACE_SCORE_THRESHOLD": 1,
+            "OVERBOUGHT_SELL_THRESHOLD": 16,
+            "COOLDOWN_DAYS": 1
+        },
+        "_tuning": {
+            "expected_cagr": 93.51,
+            "backtested_date": "2025-10-19",
+            "TEST_MONTHS_RANGE": 3,
+            "MA_PERIOD": 48,
+            "MA_TYPE": "SMA",
+            "PORTFOLIO_TOPN": 7,
+            "REPLACE_SCORE_THRESHOLD": 1,
+            "OVERBOUGHT_SELL_THRESHOLD": 16,
+            "COOLDOWN_DAYS": 1
         },
         "static": {
-            "COOLDOWN_DAYS": 1,
             "MAX_PER_CATEGORY": 1,
             "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 90
-        },
-        "expected_cagr": 111.61
+        }
     },
     "benchmarks": [
         {
@@ -27,6 +40,10 @@
         {
             "ticker": "426030",
             "name": "TIMEFOLIO 미국나스닥100액티브"
+        },
+        {
+            "ticker": "456600",
+            "name": "TIMEFOLIO 글로벌AI인공지능액티브"
         }
     ],
     "schedule": {

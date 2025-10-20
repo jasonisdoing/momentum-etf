@@ -20,8 +20,8 @@ venv/
 # OS
 .DS_Store
 
-# 캐시 파일
-data/stocks/cache/
+# 캐시 파일 (Git에 포함하여 배포 시 즉시 사용 가능하도록 함)
+# data/stocks/cache/
 
 # 백테스트 결과
 data/results

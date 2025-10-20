@@ -34,7 +34,7 @@ jobs:
       - name: Extract APP_VERSION
         id: app_version
         run: |
-          VERSION=$(python -c "from pathlib import Path; import re; content = Path('utils/notification.py').read_text(encoding='utf-8'); match = re.search(r'APP_VERSION\\s*=\\s*[\'\"]([^\'\"]+)[\'\"]', content); print(match.group(1) if match else '')")
+          VERSION=$(python -c "from pathlib import Path; import re; content = Path('utils/logger.py').read_text(encoding='utf-8'); match = re.search(r'APP_VERSION\\s*=\\s*[\'\"]([^\'\"]+)[\'\"]', content); print(match.group(1) if match else '')")
           if [ -z "$VERSION" ]; then
             echo 'APP_VERSION not found' >&2
             exit 1

@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 
@@ -21,13 +21,13 @@ from utils.settings_loader import (
     load_common_settings,
 )
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
-from strategies.maps.shared import sort_decisions_by_order_and_score
-from utils.stock_list_io import get_etfs
-from utils.trade_store import list_open_positions
-from logic.recommend.history import (
+from logic.common import sort_decisions_by_order_and_score, filter_category_duplicates
+from strategies.maps.history import (
     calculate_consecutive_holding_info,
     calculate_trade_cooldown_info,
 )
+from utils.stock_list_io import get_etfs
+from utils.trade_store import list_open_positions
 from utils.data_loader import (
     fetch_ohlcv,
     prepare_price_data,
@@ -384,7 +384,7 @@ def _append_risk_off_suffix(phrase: str, ratio: Optional[int]) -> str:
     phrase_str = str(phrase or "")
     if "시장위험회피" in phrase_str:
         return phrase_str
-    suffix = f"❗시장위험회피 매도❗ (목표 {ratio_int}%)"
+    suffix = f"❗시장위험회피 비중조절❗ (보유목표 {ratio_int}%)"
     return f"{phrase_str} | {suffix}" if phrase_str else suffix
 
 
@@ -533,6 +533,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     ma_period = int(strategy_rules.ma_period)
     portfolio_topn = int(strategy_rules.portfolio_topn)
+    ma_type = str(strategy_rules.ma_type)
 
     strategy_cfg = account_settings.get("strategy", {}) or {}
     if not isinstance(strategy_cfg, dict):
@@ -540,24 +541,15 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     if "tuning" in strategy_cfg or "static" in strategy_cfg:
         strategy_static = strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
+        strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
     else:
         strategy_static = strategy_cfg
+        strategy_tuning = strategy_cfg
 
-    max_per_category = int(strategy_static.get("MAX_PER_CATEGORY", strategy_cfg.get("MAX_PER_CATEGORY", 0)) or 0)
-
-    def _parse_regime_ratio(raw_value: Any, *, source: str) -> int:
-        try:
-            parsed = int(raw_value)
-        except (TypeError, ValueError) as exc:  # noqa: PERF203
-            raise ValueError(f"{account_id} 계좌의 {source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 유효한 정수가 아닙니다.") from exc
-        if not (0 <= parsed <= 100):
-            raise ValueError(f"{account_id} 계좌의 {source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
-        return parsed
-
-    regime_filter_equity_ratio: Optional[int] = None
-    ratio_raw_from_strategy = strategy_static.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-    if ratio_raw_from_strategy is not None:
-        regime_filter_equity_ratio = _parse_regime_ratio(ratio_raw_from_strategy, source="전략(static)")
+    # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
+    max_per_category = int(strategy_static["MAX_PER_CATEGORY"])
+    rsi_sell_threshold = int(strategy_tuning["OVERBOUGHT_SELL_THRESHOLD"])
+    regime_filter_equity_ratio = int(strategy_static["MARKET_REGIME_RISK_OFF_EQUITY_RATIO"])
 
     # ETF 목록 가져오기
     etf_universe = get_etfs(country_code) or []
@@ -608,7 +600,23 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                         "buy_date": None,
                     }
 
-        logger.debug("계산된 holdings: %d개 종목", len(holdings))
+        # 종목명과 티커를 함께 표시
+        holdings_display = []
+        for ticker in sorted(holdings.keys()):
+            # etf_universe에서 종목명 찾기
+            name = ticker
+            for stock in etf_universe:
+                if stock.get("ticker", "").upper() == ticker:
+                    name = stock.get("name") or ticker
+                    break
+            holdings_display.append(f"{name}({ticker})")
+
+        logger.info(
+            "[%s] 계산된 holdings: %d개 종목 - %s",
+            account_id.upper(),
+            len(holdings),
+            ", ".join(holdings_display) if holdings_display else "(없음)",
+        )
     except Exception as e:
         logger.error("포트폴리오 데이터 조회 실패: %s", e)
         holdings = {}
@@ -693,16 +701,29 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 prev_close = latest_close
                 daily_pct = 0.0
 
-            # 이동평균 신호 계산
-            from utils.indicators import calculate_moving_average_signals, calculate_ma_score
+            # MAPS 전략 계산
+            from utils.indicators import calculate_ma_score
+            from utils.moving_averages import calculate_moving_average
+            from logic.common import get_buy_signal_streak
 
-            (
-                moving_average,
-                buy_signal_active,
-                consecutive_buy_days,
-            ) = calculate_moving_average_signals(df["Close"], ma_period)
-            ma_score_series = calculate_ma_score(df["Close"], moving_average)
+            # 이동평균 계산 (MA_TYPE 파라미터 사용)
+            moving_average = calculate_moving_average(df["Close"], ma_period, ma_type)
+
+            # 점수 계산
+            ma_score_series = calculate_ma_score(df["Close"], moving_average, normalize=False)
             score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
+
+            # 지속일 계산 (점수 기반)
+            consecutive_buy_days = get_buy_signal_streak(score, ma_score_series)
+
+            # RSI 전략 계산 (strategies/rsi/recommend.py에서 처리)
+            from strategies.rsi.recommend import calculate_rsi_for_ticker
+
+            rsi_score = calculate_rsi_for_ticker(df["Close"])
+
+            # RSI 계산 실패 시 디버깅 로그
+            if rsi_score == 0.0 and len(df["Close"]) < 15:
+                logger.warning(f"[RSI] {ticker} 데이터 부족: {len(df['Close'])}개 (최소 15개 필요)")
 
             recent_prices = df["Close"].tail(15)
             trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
@@ -715,7 +736,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 "s1": moving_average.iloc[-1] if not moving_average.empty else None,
                 "s2": None,
                 "score": score,
-                "filter": (int(consecutive_buy_days.iloc[-1]) if not consecutive_buy_days.empty else 0),
+                "rsi_score": rsi_score,
+                "filter": consecutive_buy_days,
                 "ret_1w": _compute_trailing_return(df["Close"], 5),
                 "ret_2w": _compute_trailing_return(df["Close"], 10),
                 "ret_3w": _compute_trailing_return(df["Close"], 15),
@@ -736,7 +758,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     regime_info = None
     regime_filter_enabled = True
-    common_ratio_value: Optional[Any] = None
     try:
         common_settings = load_common_settings()
     except Exception as exc:
@@ -745,12 +766,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     else:
         regime_filter_enabled = bool((common_settings or {}).get("MARKET_REGIME_FILTER_ENABLED", True))
         common_ratio_value = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-
-    if regime_filter_equity_ratio is None and common_ratio_value is not None:
-        regime_filter_equity_ratio = _parse_regime_ratio(common_ratio_value, source="공통 설정")
-
-    if regime_filter_enabled and regime_filter_equity_ratio is None:
-        raise ValueError(f"{account_id} 계좌에서 시장 레짐 필터가 활성화되어 있지만 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정을 찾을 수 없습니다.")
+        # 공통 설정에 값이 있으면 사용 (검증은 이미 완료됨)
+        if regime_filter_equity_ratio is None and common_ratio_value is not None:
+            regime_filter_equity_ratio = int(common_ratio_value)
 
     if regime_filter_enabled:
         try:
@@ -775,11 +793,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         from strategies.maps import safe_generate_daily_recommendations_for_portfolio
 
         decision_start = time.perf_counter()
+        actual_cooldown_days = int(strategy_tuning["COOLDOWN_DAYS"])
         logger.info(
-            "[%s] 일일 의사결정 계산 시작 (보유 %d개, 후보 %d개)",
+            "[%s] 추천 계산 시작 (보유 %d개, 후보 %d개, cooldown_days=%d)",
             account_id.upper(),
             len(holdings),
             len(data_by_tkr),
+            actual_cooldown_days,
         )
         decisions = safe_generate_daily_recommendations_for_portfolio(
             account_id=account_id,
@@ -796,11 +816,12 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             pairs=pairs,
             consecutive_holding_info=consecutive_holding_info,
             trade_cooldown_info=trade_cooldown_info,
-            cooldown_days=int(strategy_static.get("COOLDOWN_DAYS", strategy_cfg.get("COOLDOWN_DAYS", 5)) or 0),
+            cooldown_days=actual_cooldown_days,
             risk_off_equity_ratio=regime_filter_equity_ratio,
+            rsi_sell_threshold=rsi_sell_threshold,
         )
         logger.info(
-            "[%s] 일일 의사결정 계산 완료 (%.1fs, 결과 %d개)",
+            "[%s] 추천 계산 완료 (%.1fs, 결과 %d개)",
             account_id.upper(),
             time.perf_counter() - decision_start,
             len(decisions) if isinstance(decisions, list) else -1,
@@ -820,10 +841,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             continue
 
         if action == "SELL":
-            if ticker in holdings:
-                # 여전히 보유 중이면 SOLD로 표시하지 않음
-                continue
-
+            # 매도 거래가 있으면 SOLD 처리 (부분 매도 여부는 보유 수량으로 판단)
             existing = next((d for d in decisions if d.get("tkr") == ticker), None)
             if existing:
                 existing["state"] = "SOLD"
@@ -999,7 +1017,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 phrase = _append_risk_off_suffix(combined_phrase, risk_off_ratio)
             else:  # state == "BUY"
                 base_new_phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
-                if "시장위험회피" in phrase_str or phrase_str == DECISION_NOTES.get("RISK_OFF_SELL"):
+                if "시장위험회피" in phrase_str or phrase_str == DECISION_NOTES.get("RISK_OFF_TRIM"):
                     chosen_phrase = base_new_phrase
                 elif phrase_str:
                     chosen_phrase = phrase_str
@@ -1061,12 +1079,14 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             else:
                 filter_days = 0
 
-        streak_val = int(filter_days or 0)
+        streak_val = int(filter_days)
 
         if not recommend_enabled:
             if state in {"BUY", "BUY_REPLACE"}:
                 state = "WAIT"
             phrase = disabled_note
+
+        rsi_score_val = decision.get("rsi_score", 0.0)
 
         result_entry = {
             "rank": len(results) + 1,
@@ -1082,6 +1102,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             "return_3w": ret_3w,
             "trend_prices": ticker_data.get("trend_prices", []),
             "score": score_val,
+            "rsi_score": rsi_score_val,
             "streak": streak_val,
             "base_date": base_date.strftime("%Y-%m-%d"),
             "holding_days": holding_days_val,
@@ -1093,19 +1114,19 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         results.append(result_entry)
 
     # BUY 종목 생성: 상위 점수의 WAIT 종목들을 BUY로 변경
-    wait_items = [
-        item
-        for item in results
-        if item["state"] == "WAIT" and item.get("phrase") != DECISION_NOTES.get("CATEGORY_DUP") and item.get("recommend_enabled", True)
-    ]
-    wait_items.sort(key=lambda x: x["score"], reverse=True)
+    wait_items = [item for item in results if item["state"] == "WAIT" and item.get("recommend_enabled", True)]
+    # MAPS 점수 기반 정렬
+    wait_items.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
-    # 카테고리 보유 제한이 있는 경우, 동일 카테고리 수를 체크
+    # 카테고리 보유 제한이 있는 경우, 동일 카테고리 수를 체크 (매도 예정 종목 제외)
+    from logic.common import should_exclude_from_category_count
+
     category_counts: Dict[str, int] = {}
     category_counts_normalized: Dict[str, int] = {}
     category_limit = max_per_category if max_per_category and max_per_category > 0 else 1
     for item in results:
-        if item["state"] in {"HOLD", "BUY", "BUY_REPLACE"}:
+        # 매도 예정 종목은 카테고리 카운트에서 제외
+        if not should_exclude_from_category_count(item["state"]) and item["state"] in {"HOLD", "BUY", "BUY_REPLACE"}:
             category_raw = item.get("category")
             category = str(category_raw or "").strip()
             if category:
@@ -1115,10 +1136,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 category_counts_normalized[category_key] = category_counts_normalized.get(category_key, 0) + 1
 
     current_holdings_count = len(holdings)
-    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS"}
+    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
     buy_state_set = {"BUY", "BUY_REPLACE"}
     planned_sell_count = sum(1 for item in results if item["state"] in sell_state_set)
     planned_buy_count = sum(1 for item in results if item["state"] in buy_state_set)
+
+    # SELL_RSI로 매도되는 카테고리 추적 (같은 날 매수 금지)
+    sell_rsi_categories: Set[str] = set()
+    for item in results:
+        if item["state"] == "SELL_RSI":
+            category = item.get("category")
+            if category and category != "TBD":
+                sell_rsi_categories.add(category)
 
     projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
     additional_buy_slots = max(0, portfolio_topn - projected_holdings)
@@ -1132,9 +1161,27 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         category = str(category_raw or "").strip()
         category_key = _normalize_category_value(category_raw)
 
-        if category_key and category_counts_normalized.get(category_key, 0) >= category_limit:
-            item["phrase"] = DECISION_NOTES["CATEGORY_DUP"]
+        # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
+        if category and category != "TBD" and category in sell_rsi_categories:
+            logger.info(f"[PIPELINE BUY BLOCKED] {item.get('ticker')} 매수 차단 - '{category}' 카테고리가 SELL_RSI로 매도됨")
             continue
+
+        # 카테고리 중복 체크 시, 매도 예정 종목은 제외
+        # 같은 카테고리의 매도 예정 종목이 있으면 해당 카테고리 슬롯이 비게 됨
+        sell_in_same_category = sum(
+            1 for r in results if r["state"] in sell_state_set and _normalize_category_value(r.get("category")) == category_key
+        )
+        effective_category_count = category_counts_normalized.get(category_key, 0) - sell_in_same_category
+
+        if category_key and effective_category_count >= category_limit:
+            # 카테고리 중복인 경우 BUY로 변경하지 않고 WAIT 상태 유지
+            # filter_category_duplicates에서 필터링됨
+            continue
+
+        # RSI 과매수 종목 매수 차단
+        # rsi_sell_threshold는 계좌별 설정에서 로드됨 (이 함수 외부에서 처리)
+        # 여기서는 이미 portfolio.py에서 처리되므로 추가 체크 불필요
+        pass
 
         item["state"] = "BUY"
         item["phrase"] = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
@@ -1171,8 +1218,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             portfolio_topn,
         )
 
-    # rank를 점수 순서대로 재설정
-    results.sort(key=lambda x: x["score"], reverse=True)
+    # rank를 MAPS 점수 순서대로 재설정
+    results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
     for i, item in enumerate(results, 1):
         item["rank"] = i
 
@@ -1185,6 +1232,16 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     sort_decisions_by_order_and_score(results)
 
     # sort 후 rank 재설정
+    for i, item in enumerate(results, 1):
+        item["rank"] = i
+
+    # 카테고리별 최고 점수만 표시 (교체 매매 제외)
+    results = filter_category_duplicates(results, category_key_getter=_normalize_category_value)
+
+    # 점수가 음수인 종목 제외
+    results = [item for item in results if item.get("score", 0.0) >= 0]
+
+    # rank 재설정
     for i, item in enumerate(results, 1):
         item["rank"] = i
 

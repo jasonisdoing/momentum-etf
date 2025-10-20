@@ -162,8 +162,10 @@ def run_account_backtest(
             ma_period=strategy_override.ma_period,
             portfolio_topn=strategy_override.portfolio_topn,
             replace_threshold=strategy_override.replace_threshold,
+            ma_type=strategy_override.ma_type,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
+        strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
 
@@ -202,8 +204,9 @@ def run_account_backtest(
     ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
     ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금", "category": "-"}
 
+    # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
     portfolio_topn = strategy_rules.portfolio_topn
-    holdings_limit = int(strategy_settings.get("MAX_PER_CATEGORY", 0) or 0)
+    holdings_limit = int(strategy_settings["MAX_PER_CATEGORY"])
     _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}, 카테고리당 최대 보유 수: {holdings_limit}")
 
     _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
@@ -278,7 +281,7 @@ def run_account_backtest(
         common_settings=common_settings,
     )
 
-    evaluated_records = _compute_evaluated_records(ticker_timeseries)
+    evaluated_records = _compute_evaluated_records(ticker_timeseries, start_date)
 
     ticker_summaries = _build_ticker_summaries(
         ticker_timeseries,
@@ -439,7 +442,20 @@ def _build_backtest_kwargs(
 ) -> Dict[str, Any]:
     # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
     stop_loss_pct = -abs(float(strategy_rules.portfolio_topn))
-    cooldown_days = int(strategy_settings.get("COOLDOWN_DAYS", 0) or 0)
+
+    # 필수 설정 검증
+    if "COOLDOWN_DAYS" not in strategy_settings:
+        raise ValueError("strategy_settings에 COOLDOWN_DAYS 설정이 필요합니다.")
+    if "OVERBOUGHT_SELL_THRESHOLD" not in strategy_settings:
+        raise ValueError("strategy_settings에 OVERBOUGHT_SELL_THRESHOLD 설정이 필요합니다.")
+    if "MARKET_REGIME_RISK_OFF_EQUITY_RATIO" not in strategy_settings:
+        raise ValueError("strategy_settings에 MARKET_REGIME_RISK_OFF_EQUITY_RATIO 설정이 필요합니다.")
+
+    cooldown_days = int(strategy_settings["COOLDOWN_DAYS"])
+    rsi_sell_threshold = int(strategy_settings["OVERBOUGHT_SELL_THRESHOLD"])
+
+    if not (0 <= rsi_sell_threshold <= 100):
+        raise ValueError(f"OVERBOUGHT_SELL_THRESHOLD는 0~100 사이여야 합니다. (현재값: {rsi_sell_threshold})")
 
     try:
         (
@@ -453,10 +469,7 @@ def _build_backtest_kwargs(
         raise ValueError(str(exc)) from exc
 
     if regime_filter_equity_ratio is None:
-        ratio_raw = strategy_settings.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-        if ratio_raw is None:
-            raise ValueError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정이 필요합니다.")
-        regime_filter_equity_ratio = _parse_regime_ratio_value(ratio_raw, source="전략 설정")
+        regime_filter_equity_ratio = _parse_regime_ratio_value(strategy_settings["MARKET_REGIME_RISK_OFF_EQUITY_RATIO"], source="전략 설정")
     else:
         regime_filter_equity_ratio = _parse_regime_ratio_value(regime_filter_equity_ratio, source="공통 설정")
 
@@ -465,6 +478,7 @@ def _build_backtest_kwargs(
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "ma_period": strategy_rules.ma_period,
+        "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
         "regime_filter_enabled": regime_filter_enabled,
         "regime_filter_ticker": regime_filter_ticker,
@@ -474,6 +488,7 @@ def _build_backtest_kwargs(
         "regime_filter_equity_ratio": regime_filter_equity_ratio,
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
+        "rsi_sell_threshold": rsi_sell_threshold,
         "quiet": quiet,
     }
 
@@ -490,9 +505,10 @@ def _build_portfolio_timeseries(
     if not non_empty:
         raise RuntimeError("백테스트 결과에 유효한 시계열이 없습니다.")
 
+    # 교집합 대신 합집합 사용 (모든 거래일 포함)
     common_index = non_empty[0]
     for idx in non_empty[1:]:
-        common_index = common_index.intersection(idx)
+        common_index = common_index.union(idx)
 
     if common_index.empty:
         raise RuntimeError("종목들 간에 공통된 거래일이 없습니다.")
@@ -507,6 +523,10 @@ def _build_portfolio_timeseries(
         cash_value = 0.0
 
         for ticker, ts in ticker_timeseries.items():
+            # 해당 날짜에 데이터가 없으면 스킵
+            if dt not in ts.index:
+                continue
+
             row = ts.loc[dt]
             pv_val = row.get("pv")
             if pd.notna(pv_val):
@@ -653,8 +673,12 @@ def _build_summary(
         if benchmark_df.empty:
             return None
 
+        # 시작 가격: 백테스트 시작일 종가 (슬리피지 없음)
         start_price = float(benchmark_df["Close"].iloc[0])
+
+        # 종료 가격: 최신 거래일 종가 (슬리피지 없음)
         end_price = float(benchmark_df["Close"].iloc[-1])
+
         if start_price <= 0:
             return None
 
@@ -791,17 +815,28 @@ def _build_summary(
 
 def _compute_evaluated_records(
     ticker_timeseries: Mapping[str, pd.DataFrame],
+    start_date: pd.Timestamp,
 ) -> Dict[str, Dict[str, Any]]:
+    """백테스트 시작일 이후의 거래 손익만 집계합니다.
+
+    주의: 이 함수는 현재 사용되지 않습니다.
+    누적 손익은 reporting.py에서 cost_basis 기준으로 직접 계산됩니다.
+    """
     records: Dict[str, Dict[str, Any]] = {}
+    start_date_norm = start_date.normalize()
+
     for ticker, df in ticker_timeseries.items():
         if df is None or df.empty:
             continue
 
         df_sorted = df.sort_index()
+        # 백테스트 시작일 이후 데이터만 필터링
+        df_filtered = df_sorted[df_sorted.index >= start_date_norm]
+
         realized_profit = 0.0
         initial_value: Optional[float] = None
 
-        for _, row in df_sorted.iterrows():
+        for idx, row in df_filtered.iterrows():
             trade_profit = row.get("trade_profit")
             if isinstance(trade_profit, (int, float)) and math.isfinite(float(trade_profit)):
                 realized_profit += float(trade_profit)
@@ -908,9 +943,9 @@ def _build_ticker_summaries(
         winning_trades = int((trades.get("trade_profit", pd.Series(dtype=float)) > 0).sum()) if not trades.empty else 0
 
         last_row = df_sorted.iloc[-1]
-        final_shares = float(last_row.get("shares", 0.0) or 0.0)
-        final_price = float(last_row.get("price", 0.0) or 0.0)
-        avg_cost = float(last_row.get("avg_cost", 0.0) or 0.0)
+        final_shares = float(last_row.get("shares", 0.0))
+        final_price = float(last_row.get("price", 0.0))
+        avg_cost = float(last_row.get("avg_cost", 0.0))
 
         unrealized_profit = 0.0
         if final_shares > 0 and avg_cost > 0:
@@ -932,6 +967,11 @@ def _build_ticker_summaries(
                     listing_date = first_date.strftime("%Y-%m-%d")
 
         if total_trades == 0 and final_shares <= 0 and math.isclose(total_contribution, 0.0, abs_tol=1e-9):
+            continue
+
+        # 점수가 음수인 종목 제외
+        last_score = float(last_row.get("score", 0.0))
+        if last_score < 0:
             continue
 
         win_rate = (winning_trades / total_trades) * 100.0 if total_trades > 0 else 0.0

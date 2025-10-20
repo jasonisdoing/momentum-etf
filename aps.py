@@ -48,7 +48,6 @@ from utils.notification import (
     should_notify_on_schedule,
 )
 from utils.schedule_config import get_all_country_schedules
-from utils.data_loader import is_trading_day
 from utils.cron_utils import normalize_cron_weekdays
 
 
@@ -84,33 +83,10 @@ def setup_logging():
     )
 
 
-def _get(name: str, default: str) -> str:
-    return os.environ.get(name, default)
-
-
-def _format_korean_datetime(dt: datetime) -> str:
-    """날짜-시간 객체를 'YYYY년 MM월 DD일(요일) 오전/오후 HH시 MM분' 형식으로 변환합니다."""
-    weekday_map = ["월", "화", "수", "목", "금", "토", "일"]
-    weekday_str = weekday_map[dt.weekday()]
-
-    hour12 = dt.hour
-    if hour12 >= 12:
-        ampm_str = "오후"
-        if hour12 > 12:
-            hour12 -= 12
-    else:
-        ampm_str = "오전"
-    if hour12 == 0:
-        hour12 = 12
-
-    return f"{dt.strftime('%Y년 %m월 %d일')}(" f"{weekday_str}) {ampm_str} {hour12}시 {dt.minute:02d}분"
-
-
 def run_recommendation_generation(
     account_id: str,
     *,
     country_code: str,
-    schedule_timezone: str | None = None,
 ) -> RecommendationReport:
     """Run portfolio recommendation and optionally notify Slack."""
 
@@ -141,13 +117,25 @@ def run_recommendation_generation(
         logging.error("추천 보고서를 저장하는 중 오류", exc_info=True)
 
     try:
-        if should_notify_on_schedule(country_code):
-            message = compose_recommendation_slack_message(
-                account_id,
-                report,
-                duration=elapsed,
+        message = compose_recommendation_slack_message(
+            account_id,
+            report,
+            duration=elapsed,
+        )
+        notified = send_recommendation_slack_notification(account_id, message)
+        if notified:
+            logging.info(
+                "[%s/%s] Slack 알림 전송이 완료되었습니다 (소요 %.2fs)",
+                country_code.upper(),
+                getattr(report, "base_date", "N/A"),
+                elapsed,
             )
-            send_recommendation_slack_notification(account_id, message)
+        else:
+            logging.info(
+                "[%s/%s] Slack 알림이 전송되지 않았습니다.",
+                country_code.upper(),
+                getattr(report, "base_date", "N/A"),
+            )
     except Exception:
         logging.error("Slack 알림 전송 실패", exc_info=True)
 
@@ -159,7 +147,7 @@ def run_cache_refresh() -> None:
     from utils.account_registry import get_common_file_settings
 
     common_settings = get_common_file_settings()
-    start_date = str(common_settings.get("CACHE_START_DATE") or "2020-01-01")
+    start_date = str(common_settings.get("CACHE_START_DATE"))
     countries = ["kor", "aus"]
     logging.info("Running cache refresh (start=%s, countries=%s)", start_date, ",".join(countries))
     try:
@@ -223,20 +211,11 @@ def main():
             kwargs={
                 "account_id": account_id,
                 "country_code": country_code,
-                "schedule_timezone": timezone,
             },
             id=f"{account_id}:{country_code}",
         )
 
-    stats_cron = "0 1 * * *"  # 매일 새벽 1시에 종목 메타데이터 갱신
-    scheduler.add_job(
-        run_stock_stats_update,
-        CronTrigger.from_crontab(stats_cron, timezone=TIMEZONE),
-        id="stock_stats_update",
-    )
-    logging.info(f"Scheduled STATS UPDATE: cron='{stats_cron}' tz='{TIMEZONE}'")
-
-    cache_cron = "0 2 * * *"  # 매일 새벽 2시에 가격 캐시 갱신
+    cache_cron = "0 1 * * *"  # 매일 새벽 1시에 가격 캐시 갱신
     scheduler.add_job(
         run_cache_refresh,
         CronTrigger.from_crontab(cache_cron, timezone=TIMEZONE),
@@ -244,15 +223,13 @@ def main():
     )
     logging.info(f"Scheduled CACHE REFRESH: cron='{cache_cron}' tz='{TIMEZONE}'")
 
-    # Initial run
-    logging.info("\n[Initial Run] Starting...")
-
     # Initial run for stock metadata/cache refresh
     try:
+        logging.info("\n[Initial Run] Starting...")
         # 메타 데이터 갱신하고 싶을 때 해제
         # run_stock_stats_update()
         # 서버 캐시 제거하고 싶을 때 해제
-        run_cache_refresh()
+        # run_cache_refresh()
     except Exception:
         logging.error("Error during initial run for stock metadata update/cache refresh", exc_info=True)
 
@@ -262,7 +239,6 @@ def main():
 
         account_id = (cfg.get("account_id") or "").strip().lower()
         country_code = (cfg.get("country_code") or "").strip().lower()
-        init_timezone = cfg.get("timezone") or TIMEZONE
 
         if not account_id or not country_code:
             raise RuntimeError(f"Schedule entry '{schedule_name}' must define both account_id and country_code")
@@ -271,7 +247,6 @@ def main():
             run_recommendation_generation(
                 account_id,
                 country_code=country_code,
-                schedule_timezone=init_timezone,
             )
         except Exception:
             logging.error(

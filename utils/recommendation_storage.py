@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover
     np = None  # type: ignore[assignment]
 
 from utils.db_manager import get_db_connection
-from utils.logger import get_app_logger
+from utils.logger import get_app_logger, APP_LABEL
 
 try:
     from zoneinfo import ZoneInfo
@@ -116,6 +116,7 @@ def save_recommendation_payload(
         "summary": safe_summary,
         "base_date": base_datetime,
         "updated_at": now,
+        "updated_by": APP_LABEL,
     }
 
     update_operations: Dict[str, Any] = {
