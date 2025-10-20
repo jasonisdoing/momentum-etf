@@ -16,16 +16,16 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
         "_설명": "최소한의 최적 범위",
-        "MA_RANGE": np.arange(15, 61, 1),  # 20~50
+        "MA_RANGE": np.arange(30, 51, 1),
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [3, 4],
-        "REPLACE_SCORE_THRESHOLD": [0.5, 1, 1.5, 2],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 26, 1),  # 5~25
+        "REPLACE_SCORE_THRESHOLD": [0.5, 1, 1.5],
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 15, 1),  # 5~25
         "COOLDOWN_DAYS": [1, 2],
     },
     "kor": {
         "_설명": "최소한의 최적 범위",
-        "MA_RANGE": np.arange(40, 61, 1),
+        "MA_RANGE": np.arange(45, 51, 1),
         # "MA_RANGE": [15],
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [6, 7],

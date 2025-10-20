@@ -11,8 +11,8 @@ MARKET_REGIME_FILTER_MA_PERIOD = 50
 # RSI 점수 정규화 설정 (0~100 스케일)
 RSI_NORMALIZATION_CONFIG = {
     "enabled": True,
-    "oversold_threshold": 30.0,  # 과매도 기준 (RSI < 30)
-    "overbought_threshold": 70.0,  # 과매수 기준 (RSI > 70)
+    "oversold_threshold": 30.0,  # 과매도 기준 (현재 미사용)
+    "overbought_threshold": 70.0,  # 과매수 기준 (매도 트리거로 사용)
 }
 
 # RSI 계산 설정
