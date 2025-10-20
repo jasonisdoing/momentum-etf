@@ -16,20 +16,21 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
         "_설명": "최소한의 최적 범위",
-        "MA_RANGE": np.arange(20, 60, 10),  # 20~50
-        "PORTFOLIO_TOPN": np.arange(3, 5, 1),  # 3~4
-        "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 21, 1),  # 5~20
-        "COOLDOWN_DAYS": [1],
+        "MA_RANGE": np.arange(20, 61, 1),  # 20~50
+        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+        "PORTFOLIO_TOPN": [3, 4],
+        "REPLACE_SCORE_THRESHOLD": [1, 2],
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 5~21
+        "COOLDOWN_DAYS": [1, 2],
     },
     "kor": {
         "_설명": "최소한의 최적 범위",
-        "MA_RANGE": np.arange(30, 61, 1),
-        "MA_TYPE": ["SMA"],
-        "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": [1],
+        "MA_RANGE": np.arange(20, 61, 1),
+        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+        "PORTFOLIO_TOPN": [7, 8],
+        "REPLACE_SCORE_THRESHOLD": [1, 2],
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 5~21
-        "COOLDOWN_DAYS": [1],
+        "COOLDOWN_DAYS": [1, 2],
     },
     # "kor": {
     #     "_설명": "최대 삼세한 넓은 범위",

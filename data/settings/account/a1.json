@@ -10,6 +10,7 @@
         "backtested_date": "2025-10-19",
         "tuning": {
             "MA_PERIOD": 40,
+            "MA_TYPE": "SMA",
             "PORTFOLIO_TOPN": 3,
             "REPLACE_SCORE_THRESHOLD": 1,
             "OVERBOUGHT_SELL_THRESHOLD": 10,
