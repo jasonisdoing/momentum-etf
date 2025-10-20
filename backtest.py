@@ -111,10 +111,14 @@ def main() -> None:
     excluded = set(missing)
     result = run_account_backtest(
         account_id,
+        months_range=months_range,
         prefetched_data=prefetched_map,
         excluded_tickers=excluded if excluded else None,
     )
-    target_path = RESULTS_DIR / f"backtest_{account_id}.txt"
+
+    # 날짜를 포함한 파일명 생성 (실제 실행 날짜 사용)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    target_path = RESULTS_DIR / f"backtest_{account_id}_{date_str}.log"
 
     generated_path = dump_backtest_log(
         result,

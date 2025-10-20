@@ -15,24 +15,36 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
-        "MA_RANGE": np.arange(10, 105, 5),
-        "PORTFOLIO_TOPN": np.arange(3, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
+        "_설명": "최소한의 최적 범위",
+        "MA_RANGE": np.arange(20, 60, 10),  # 20~50
+        "PORTFOLIO_TOPN": np.arange(3, 5, 1),  # 3~4
+        "REPLACE_SCORE_THRESHOLD": [1],
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 21, 1),  # 5~20
+        "COOLDOWN_DAYS": [1],
     },
     "kor": {
-        "MA_RANGE": np.arange(10, 105, 5),
-        "PORTFOLIO_TOPN": [9],
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
+        "_설명": "최소한의 최적 범위",
+        "MA_RANGE": np.arange(30, 61, 1),
+        "MA_TYPE": ["SMA"],
+        "PORTFOLIO_TOPN": [7],
+        "REPLACE_SCORE_THRESHOLD": [1],
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 5~21
+        "COOLDOWN_DAYS": [1],
     },
     # "kor": {
-    #     "MA_RANGE": np.arange(10, 105, 5),
-    #     "PORTFOLIO_TOPN": [10],
-    #     "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
+    #     "_설명": "최대 삼세한 넓은 범위",
+    #     "MA_RANGE": np.arange(10, 71, 1),  # 10~70
+    #     "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+    #     "PORTFOLIO_TOPN": np.arange(5, 8, 1),  # 5~7
+    #     "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),  # 0~2.0
+    #     "OVERBOUGHT_SELL_THRESHOLD": np.arange(1, 21, 1),  # 1~21
+    #     "COOLDOWN_DAYS": np.arange(0, 3, 1),  # 0~2
     # },
     "us": {
         "MA_RANGE": np.arange(5, 31, 1),
         "PORTFOLIO_TOPN": np.arange(5, 11, 1),
         "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
+        "COOLDOWN_DAYS": np.arange(0, 6, 1),  # 0~5일
     },
 }
 
@@ -57,8 +69,6 @@ def main() -> None:
         output_path=None,
         results_dir=RESULTS_DIR,
         tuning_config=TUNING_CONFIG,
-        n_trials=None,
-        timeout=None,
     )
     if output is None:
         logger.error("튜닝이 실패하여 결과를 저장하지 않습니다.")

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import pandas as pd
 
 from utils.notification import strip_html_tags
 from utils.report import render_table_eaw
@@ -86,11 +89,12 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
             "카테고리",
             "상태",
             "점수",
+            "RSI",
             "일간수익률",
             "보유일",
             "문구",
         ]
-        aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "left"]
+        aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "right", "left"]
         rows: List[List[str]] = []
 
         for item in items[:preview_count]:
@@ -105,6 +109,7 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
                     str(item.get("category", "-")),
                     str(item.get("state", "-")),
                     (f"{item.get('score', 0):.2f}" if isinstance(item.get("score"), (int, float)) else "-"),
+                    (f"{item.get('rsi_score', 0):.2f}" if isinstance(item.get("rsi_score"), (int, float)) else "-"),
                     (f"{item.get('daily_pct', 0):.2f}%" if isinstance(item.get("daily_pct"), (int, float)) else "-"),
                     holding_days_str,
                     str(item.get("phrase", "")),
@@ -121,11 +126,132 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
     logger.info("결과가 성공적으로 생성되었습니다. (총 %d개 항목)", len(items))
 
 
+def dump_recommendation_log(
+    report: Any,
+    *,
+    results_dir: Optional[Path | str] = None,
+) -> Path:
+    """추천 결과를 로그 파일로 저장합니다."""
+    from pathlib import Path
+
+    account_id = getattr(report, "account_id", "unknown")
+    base_date = getattr(report, "base_date", None)
+    recommendations = getattr(report, "recommendations", [])
+
+    # 기본 디렉토리 설정
+    if results_dir is None:
+        # 프로젝트 루트의 data/results 디렉토리
+        base_dir = Path(__file__).parent.parent.parent / "data" / "results"
+    else:
+        base_dir = Path(results_dir)
+
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    # 파일명 생성 (실제 실행 날짜 사용)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    path = base_dir / f"recommend_{account_id}_{date_str}.log"
+
+    lines: List[str] = []
+
+    # 헤더
+    lines.append(f"추천 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")
+    base_date_str = base_date.strftime("%Y-%m-%d") if hasattr(base_date, "strftime") else str(base_date)
+    lines.append(f"계정: {account_id.upper()} | 기준일: {base_date_str}")
+    lines.append("")
+
+    # 상태별 카운트
+    state_counts = Counter(item.get("state", "UNKNOWN") for item in recommendations)
+    lines.append("=== 상태 요약 ===")
+    for state, count in sorted(state_counts.items()):
+        lines.append(f"  {state}: {count}개")
+    lines.append("")
+
+    # 추천 목록 (테이블 형식)
+    lines.append("=== 추천 목록 ===")
+    lines.append("")
+
+    # 테이블 헤더 (화면 UI와 동일)
+    headers = [
+        "#",
+        "티커",
+        "종목명",
+        "카테고리",
+        "상태",
+        "보유일",
+        "일간(%)",
+        "평가(%)",
+        "점수",
+        "RSI",
+        "지속",
+        "문구",
+    ]
+
+    aligns = [
+        "right",  # #
+        "left",  # 티커
+        "left",  # 종목명
+        "left",  # 카테고리
+        "center",  # 상태
+        "right",  # 보유일
+        "right",  # 일간(%)
+        "right",  # 평가(%)
+        "right",  # 점수
+        "right",  # RSI
+        "right",  # 지속
+        "left",  # 문구
+    ]
+
+    # 테이블 데이터
+    rows: List[List[str]] = []
+    for item in recommendations:
+        rank = item.get("rank", 0)
+        ticker = item.get("ticker", "-")
+        name = item.get("name", "-")
+        category = item.get("category", "-")
+        state = item.get("state", "-")
+        holding_days = item.get("holding_days", 0)
+        daily_pct = item.get("daily_pct", 0)
+        evaluation_pct = item.get("evaluation_pct", 0)
+        score = item.get("score", 0)
+        rsi_score = item.get("rsi_score", 0)
+        streak = item.get("streak", 0)
+        phrase = item.get("phrase", "")
+
+        rows.append(
+            [
+                str(rank),
+                ticker,
+                name,
+                category,
+                state,
+                str(holding_days) if holding_days > 0 else "-",
+                f"{daily_pct:+.2f}%" if isinstance(daily_pct, (int, float)) else "-",
+                f"{evaluation_pct:+.2f}%" if isinstance(evaluation_pct, (int, float)) and evaluation_pct != 0 else "-",
+                f"{score:.1f}" if isinstance(score, (int, float)) else "-",
+                f"{rsi_score:.1f}" if isinstance(rsi_score, (int, float)) else "-",
+                f"{streak}일" if streak > 0 else "-",
+                phrase,
+            ]
+        )
+
+    # 테이블 렌더링
+    table_lines = render_table_eaw(headers, rows, aligns)
+    lines.extend(table_lines)
+    lines.append("")
+
+    # 파일 저장
+    with path.open("w", encoding="utf-8") as fp:
+        fp.write("\n".join(lines) + "\n")
+
+    return path
+
+
 invoke_country_pipeline = invoke_account_pipeline  # 하위 호환
 
 
 __all__ = [
     "dump_json",
+    "dump_recommendation_log",
     "invoke_account_pipeline",
     "invoke_country_pipeline",
     "print_result_summary",

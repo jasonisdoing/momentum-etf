@@ -63,17 +63,22 @@ def render_account_page(account_id: str) -> None:
         st.caption(f"데이터 업데이트: {updated_at}")
         strategy_cfg = account_settings.get("strategy", {}) or {}
         expected_cagr = None
+        backtested_date = None
         strategy_tuning: dict[str, Any] = {}
         if isinstance(strategy_cfg, dict):
             expected_cagr = strategy_cfg.get("expected_cagr")
+            backtested_date = strategy_cfg.get("backtested_date")
             tuning_cfg = strategy_cfg.get("tuning")
             if isinstance(tuning_cfg, dict):
                 strategy_tuning = tuning_cfg
         if strategy_tuning:
             params_to_show = {
                 "MA": strategy_tuning.get("MA_PERIOD"),
+                "MA타입": strategy_tuning.get("MA_TYPE"),
                 "TopN": strategy_tuning.get("PORTFOLIO_TOPN"),
                 "교체점수": strategy_tuning.get("REPLACE_SCORE_THRESHOLD"),
+                "과매수 지표": strategy_tuning.get("OVERBOUGHT_SELL_THRESHOLD"),
+                "쿨다운 일자": strategy_tuning.get("COOLDOWN_DAYS"),
             }
             param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
         else:
@@ -85,6 +90,18 @@ def render_account_page(account_id: str) -> None:
             caption_parts.append(f"설정: [{param_display}]")
         else:
             caption_parts.append("설정: N/A")
+
+        # 슬리피지 정보 추가
+        from data.settings.common import BACKTEST_SLIPPAGE
+
+        slippage_config = BACKTEST_SLIPPAGE.get(country_code, {})
+        buy_slip = slippage_config.get("buy_pct")
+        sell_slip = slippage_config.get("sell_pct")
+        if buy_slip is not None and sell_slip is not None:
+            if buy_slip == sell_slip:
+                caption_parts.append(f"슬리피지: ±{buy_slip}%")
+            else:
+                caption_parts.append(f"슬리피지: 매수+{buy_slip}%/매도-{sell_slip}%")
 
         try:
             hold_states = {"HOLD", "SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS"}
@@ -101,19 +118,20 @@ def render_account_page(account_id: str) -> None:
             pass
 
         caption_text = ", ".join(caption_parts)
+        if caption_text:
+            st.caption(caption_text)
+        else:
+            st.caption("설정 정보를 찾을 수 없습니다.")
+
         if expected_cagr is not None:
             try:
                 expected_val = float(expected_cagr)
             except (TypeError, ValueError):
                 expected_val = None
-            if expected_val is not None:
-                expected_html = f"<span style='color:#d32f2f;'>예상 CAGR (연간 복리 성장률): {expected_val:+.2f}%</span>"
-                caption_text = f"{caption_text}, {expected_html}" if caption_text else expected_html
-
-        if caption_text:
-            st.markdown(f"<small>{caption_text}</small>", unsafe_allow_html=True)
-        else:
-            st.caption("설정 정보를 찾을 수 없습니다.")
+            expected_html = (
+                f"<span style='color:#d32f2f;'>예상 CAGR (연간 복리 성장률): {expected_val:+.2f}%, 백테스트 일자: {backtested_date}</span>"
+            )
+            st.markdown(f"<small>{expected_html}</small>", unsafe_allow_html=True)
     else:
         # updated_at이 없는 경우에 대한 폴백
         st.caption("데이터를 찾을 수 없습니다.")
@@ -137,6 +155,36 @@ def _cached_benchmark_data(
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
 ) -> Tuple[pd.DataFrame, float]:
+    from utils.performance import calculate_actual_performance
+    from utils.account_registry import get_account_settings
+
+    # 계정 설정 로드
+    account_settings = get_account_settings(account_id)
+    country_code = account_settings.get("country_code", "kor")
+
+    # 전략 설정에서 포트폴리오 수 가져오기
+    strategy = account_settings.get("strategy", {})
+    tuning = strategy.get("tuning", {})
+    portfolio_topn = tuning.get("PORTFOLIO_TOPN", 5)
+
+    # 초기 자본 가져오기
+    initial_capital_raw = account_settings.get("initial_capital", 100_000_000)
+    try:
+        initial_capital = float(initial_capital_raw)
+    except (TypeError, ValueError):
+        initial_capital = 100_000_000.0
+
+    # 실제 거래 기반 수익률 계산 시도
+    actual_perf = calculate_actual_performance(
+        account_id=account_id,
+        start_date=start_date,
+        end_date=end_date,
+        initial_capital=initial_capital,
+        portfolio_topn=portfolio_topn,
+        country_code=country_code,
+    )
+
+    # 벤치마크 정보를 위해 항상 백테스트 실행
     result = run_account_backtest(
         account_id,
         quiet=True,
@@ -145,30 +193,39 @@ def _cached_benchmark_data(
             "end_date": end_date.strftime("%Y-%m-%d"),
         },
     )
-
     summary = result.summary or {}
-    account_return = summary.get("cumulative_return_pct")
+    benchmarks = summary.get("benchmarks") or []
+
     rows: list[dict[str, str]] = []
+
+    # Momentum ETF 수익률: 실제 거래 우선, 없으면 백테스트
+    if actual_perf:
+        account_return = actual_perf.get("cumulative_return_pct")
+    else:
+        account_return = summary.get("cumulative_return_pct")
 
     if account_return is not None:
         rows.append(
             {
+                "티커": "-",
                 "종목": "Momentum ETF",
                 "누적 수익률": f"{float(account_return):+.2f}%",
             }
         )
 
-    benchmarks = summary.get("benchmarks") or []
+    # 벤치마크 정보 (항상 표시)
     for entry in benchmarks:
         if not isinstance(entry, dict):
             continue
         ret = entry.get("cumulative_return_pct")
+        ticker = entry.get("ticker", "-")
         name = entry.get("name") or entry.get("ticker")
         if ret is None or name is None:
             continue
         rows.append(
             {
-                "종목": str(name),
+                "티커": str(ticker),
+                "종목": f"{name} (Buy & Hold)",
                 "누적 수익률": f"{float(ret):+.2f}%",
             }
         )

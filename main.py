@@ -46,6 +46,8 @@ def load_account_recommendations(
         return None, f"추천 데이터를 변환하는 중 오류가 발생했습니다: {exc}", country_code
 
     updated_dt = snapshot.get("updated_at") or snapshot.get("created_at")
+    updated_by = snapshot.get("updated_by", "")
+
     if isinstance(updated_dt, datetime):
         ts = pd.Timestamp(updated_dt)
         if ts.tzinfo is None or ts.tzinfo.utcoffset(ts) is None:
@@ -63,6 +65,10 @@ def load_account_recommendations(
             updated_at = parsed.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             updated_at = str(updated_dt) if updated_dt else None
+
+    # updated_by 정보를 updated_at에 추가
+    if updated_at and updated_by:
+        updated_at = f"{updated_at}, {updated_by}"
 
     loaded_country_code = snapshot.get("country_code") or country_code
     return df, updated_at, str(loaded_country_code or country_code)
@@ -137,27 +143,36 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
 def render_recommendation_table(df: pd.DataFrame, *, country_code: str) -> None:
     styled_df = _style_rows_by_state(df, country_code=country_code)
 
+    # 국가별 현재가 포맷 설정
+    country_lower = (country_code or "").strip().lower()
+    if country_lower == "aus":
+        price_format = "%.2f"  # 호주: 소수점 2자리
+    else:
+        price_format = "%.0f"  # 한국: 정수
+
     st.dataframe(
         styled_df,
         hide_index=True,
         width="stretch",
         height=TABLE_HEIGHT,
         column_config={
-            "#": st.column_config.TextColumn("#", width="small"),
-            "티커": st.column_config.TextColumn("티커", width="small"),  # medium 크기 설정을 small로 조정
-            "종목명": st.column_config.TextColumn("종목명", width="medium"),  # large 크기 설정을 medium으로 조정
-            "카테고리": st.column_config.TextColumn("카테고리", width="small"),  # medium 크기 설정을 small로 조정
-            "상태": st.column_config.TextColumn("상태", width="small"),
-            "보유일": st.column_config.TextColumn("보유일", width="small"),
+            "#": st.column_config.TextColumn("#", width=30),
+            "티커": st.column_config.TextColumn("티커", width=60),
+            "종목명": st.column_config.TextColumn("종목명", width="medium"),
+            "카테고리": st.column_config.TextColumn("카테고리", width=100),
+            "상태": st.column_config.TextColumn("상태", width=80),
+            "보유일": st.column_config.NumberColumn("보유일", width=50),
             "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),
             "평가(%)": st.column_config.NumberColumn("평가(%)", width="small"),
-            "현재가": st.column_config.TextColumn("현재가", width="small"),
+            "현재가": st.column_config.NumberColumn("현재가", width="small", format=price_format),
             "1주(%)": st.column_config.NumberColumn("1주(%)", width="small"),
             "2주(%)": st.column_config.NumberColumn("2주(%)", width="small"),
             "3주(%)": st.column_config.NumberColumn("3주(%)", width="small"),
             "추세(3주)": st.column_config.LineChartColumn("추세(3주)", width="small"),
-            "점수": st.column_config.NumberColumn("점수", width="small"),  # 문자열 대신 수치형 컬럼으로 표시
-            "문구": st.column_config.TextColumn("문구", width="large"),  # 기본값 -> large
+            "점수": st.column_config.NumberColumn("점수", width=50),
+            "RSI": st.column_config.NumberColumn("RSI", width=50),
+            "지속": st.column_config.NumberColumn("지속", width=50),
+            "문구": st.column_config.TextColumn("문구", width="large"),
         },
     )
 

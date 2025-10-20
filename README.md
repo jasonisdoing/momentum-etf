@@ -26,16 +26,26 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
   - `country_registry.py`: 구 코드 호환을 위한 래퍼
 - `scripts/`: 각종 유틸리티 및 분석 스크립트 모음
   - `update_price_cache.py`: 국가별 종목 OHLCV 데이터를 캐시에 선다운로드/증분 갱신
-  - `categorize_etf.py`: AI를 이용한 ETF 섹터 자동 분류
+  - `optimize_regime.py`: 시장 레짐 파라미터(MA 기간, 투자 비중) 최적화
+  - `find.py`: 급등 ETF 검색 도구
+  - `regime_check.py`: 시장 레짐 상태 확인 도구
 - `app_pages/`: Streamlit 웹앱 페이지들
   - `account_page.py`: 계정별 추천/현황 페이지
   - `trade.py`: 관리자용 거래 관리 페이지 (로그인 필요)
   - `migration.py`: 계정 ID/거래 데이터 마이그레이션 페이지 (로그인 필요)
 - `data/`: 데이터 저장소
-  - `kor/`, `aus/`: 국가별 데이터
-- `run.py`: 메인 실행 진입점 (웹 앱 등에서 사용)
-- `data/settings/account/*.json`: 계정별 전략/표시 설정
-- `data/settings/schedule_config.json`: APScheduler 실행 계정 및 크론 설정 (계정 ID·국가 코드 명시)
+  - `settings/`: 설정 파일
+    - `account/*.json`: 계정별 전략 설정
+    - `common.py`: 공통 설정
+    - `schedule_config.json`: APScheduler 설정
+  - `stocks/`: 국가별 종목 리스트 (aus.json, kor.json, us.json)
+  - `results/`: 백테스트/튜닝 결과 로그
+- `app.py`: Streamlit 웹앱 메인 진입점
+- `run.py`: 웹앱 실행 스크립트 (app.py 래퍼)
+- `recommend.py`: CLI 추천 생성 스크립트
+- `backtest.py`: CLI 백테스트 실행 스크립트
+- `tune.py`: CLI 파라미터 튜닝 스크립트
+- `aps.py`: APScheduler 자동 실행 스크립트
 
 ## 문서
 
@@ -159,12 +169,16 @@ python tune.py <account_id> [--output 경로]
   - 경로: `data/results/tune_{account_id}.txt` (기본값)
   - 트리거: `python tune.py <account_id>` 실행 시 자동 생성
 
-### 5) ETF 섹터 분류 (AI 사용)
-`scripts/categorize_etf.py` 스크립트를 실행하여 `data/<국가코드>/etf_raw.txt` 파일의 ETF들을 AI를 이용해 섹터별로 자동 분류하고 `data/<국가코드>/etf_categorized.csv` 파일에 저장합니다.
+### 5) 시장 레짐 파라미터 최적화
+시장 레짐 필터의 MA 기간과 위험 시 투자 비중을 최적화합니다.
 
 ```bash
-python scripts/categorize_etf.py <국가코드>
+python scripts/optimize_regime.py <account_id>
 ```
+
+**설정 방법:**
+- `scripts/optimize_regime.py` 상단의 `OPTIMIZE_CONFIG`에서 계정별 탐색 범위 설정
+- 결과는 `data/results/optimize_regime_{account_id}_{날짜}.log`에 저장
 
 
 ### 6) 스케줄러로 자동 실행 (APScheduler)
@@ -178,24 +192,126 @@ python scripts/categorize_etf.py <국가코드>
 python scripts/update_price_cache.py --country all --start 2020-01-01
 ```
 
-### 7) 급등주 찾기 (선택사항)
+### 7) 시장 레짐 상태 확인
+현재 시장 레짐 상태를 CLI에서 확인합니다.
+
+```bash
+python scripts/regime_check.py
+```
+
+### 8) 급등주 찾기 (선택사항)
 pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 찾아봅니다.
 
 ```bash
 python scripts/find.py --type etf --min-change 3.0
 ```
 
-## 전략/로직 요약
+## 시스템 아키텍처
 
-### 매매 추천
-- **매수 추천**: 가격이 지정된 기간의 이동평균선 위에 있을 때
-- **매도 추천**:
-  - **추세이탈**: 가격이 이동평균선 아래로 내려갈 때
-  - **손절**: 보유 수익률이 손절 기준을 하회할 때
+### 핵심 개념
+이 시스템은 **ETF 모멘텀 추세 추종 전략**을 기반으로 한 반자동 포트폴리오 운용 시스템입니다.
+이동평균선 대비 가격 위치, 최근 수익률, 연속 상승 일수 등을 종합해 ETF별 점수를 계산하고,
+상위 종목을 자동으로 추천하며 시장 위험을 감지하여 리스크를 관리합니다.
 
-### 공통 리스크 관리 규칙 (백테스트)
-- **가격기반손절(CUT)**: 포트폴리오 종목 수(`portfolio_topn`)만큼 해당 종목이 하락하면 손절 (예: TopN=10 → 개인 손절 -10%)
-- **쿨다운**: 매수/매도 후 `COOLDOWN_DAYS` 동안 반대 방향 거래 금지
+### 주요 컴포넌트
+
+#### 1. 추세 분석 엔진 (MAPS Strategy)
+- **위치**: `strategies/maps/`
+- **기능**: 이동평균 기반 모멘텀 점수 계산
+- **입력**: OHLCV 데이터, MA 기간, 포트폴리오 크기
+- **출력**: ETF별 추천 점수 및 포지션 상태
+
+#### 2. RSI 과매수 감지
+- **위치**: `strategies/rsi/`
+- **기능**: RSI 지표로 과열 종목 감지 및 매도 신호 생성
+- **임계값**: 계정별 설정 가능 (일반적으로 5~30)
+
+#### 3. 시장 레짐 모니터링
+- **위치**: `logic/recommend/market.py`
+- **기능**: 주요 지수(S&P 500, NASDAQ 등)의 이동평균 대비 위치 추적
+- **동작**: 
+  - 시장 위험 시: 신규 매수 차단 또는 투자 비중 축소
+  - 시장 안정 시: 정상 운영
+
+#### 4. 포지션 관리 시스템
+ETF별로 다음 상태를 추적하고 관리합니다:
+
+| 상태 | 설명 | 트리거 조건 |
+|------|------|------------|
+| `WAIT` | 대기 | 조건 미충족, 제약 발생 |
+| `BUY` | 신규 매수 | 상승세 뚜렷, 리스크 낮음, 슬롯 여유 |
+| `HOLD` | 보유 유지 | 추세 유지 중 |
+| `SELL_TREND` | 추세 이탈 매도 | 가격이 이동평균선 아래로 하락 |
+| `SELL_TRIM` | 과매수 일부 매도 | RSI 임계값 이하 |
+| `CUT_STOPLOSS` | 손절 | 손실률이 설정 한도 초과 |
+| `BUY_REPLACE` | 교체 매수 | 기존 종목보다 점수가 임계값 이상 높음 |
+| `SELL_REPLACE` | 교체 매도 | 더 나은 후보로 교체 |
+
+#### 5. 리스크 관리 레이어
+다층 방어 체계로 리스크를 제어합니다:
+
+- **카테고리 중복 방지**: 동일 섹터 ETF 중복 편입 차단
+- **시장 레짐 필터**: 시장 위험 시 신규 매수 차단 또는 비중 축소
+- **쿨다운 메커니즘**: 최근 거래 후 일정 기간 재거래 제한
+- **RSI 과매수 관리**: 과열 종목 자동 감지 및 매도
+- **데이터 검증**: 가격 데이터 누락 시 거래 중단
+- **현금 관리**: 투자 가능 현금 범위 내에서만 매수
+
+### 데이터 플로우
+
+```
+1. 데이터 수집 (yfinance, cache)
+   ↓
+2. 기술적 지표 계산 (MA, RSI, 수익률)
+   ↓
+3. 시장 레짐 판단 (주요 지수 분석)
+   ↓
+4. ETF별 점수 계산 (MAPS + RSI)
+   ↓
+5. 포지션 상태 결정 (BUY/HOLD/SELL/REPLACE)
+   ↓
+6. 리스크 필터 적용 (카테고리, 쿨다운, 현금)
+   ↓
+7. 최종 추천 생성 및 저장 (DB + 파일)
+```
+
+### 수익률 측정 방식
+
+시스템은 세 가지 방식으로 성과를 측정합니다:
+
+#### (1) 백테스트
+- **목적**: 전략 검증 및 파라미터 최적화
+- **가격**: 다음날 시초가
+- **슬리피지**: 한국 0.5%, 호주 1%, 미국 0.3%
+- **특징**: 실제보다 불리한 조건으로 보수적 추정
+
+#### (2) 실제 거래 수익률 (Momentum ETF)
+- **목적**: 실제 투자 성과 측정
+- **가격**: 거래일 종가
+- **슬리피지**: 없음 (벤치마크와 동일 조건)
+- **리밸런싱**: 동적 균등 분배
+
+#### (3) 벤치마크 (Buy & Hold)
+- **목적**: 단순 보유 전략 대비 성과 비교
+- **가격**: 시작일 종가 → 최신 종가
+- **슬리피지**: 없음
+- **리밸런싱**: 없음
+
+### 전략 파라미터
+
+주요 튜닝 가능 파라미터:
+
+| 파라미터 | 설명 | 범위 | 위치 |
+|---------|------|------|------|
+| `MA_PERIOD` | 이동평균 기간 | 10~100일 | `data/settings/account/*.json` |
+| `PORTFOLIO_TOPN` | 포트폴리오 목표 종목 수 | 3~10개 | 계정 설정 |
+| `REPLACE_SCORE_THRESHOLD` | 교체 점수 임계값 | 0~3점 | 계정 설정 |
+| `OVERBOUGHT_SELL_THRESHOLD` | RSI 과매수 임계값 | 5~30점 | 계정 설정 |
+| `COOLDOWN_DAYS` | 쿨다운 기간 | 0~5일 | `data/settings/common.py` |
+| `MARKET_REGIME_MA` | 시장 레짐 MA 기간 | 10~100일 | 공통 설정 |
+| `MARKET_REGIME_RISK_OFF_EQUITY_RATIO` | 위험 시 투자 비중 | 0~100% | 계정 설정 |
+
+파라미터 최적화는 `tune.py`를 통해 수행합니다.
 
 ## 설정 체계
 
@@ -207,17 +323,26 @@ python scripts/find.py --type etf --min-change 3.0
 - `MARKET_REGIME_FILTER_MA_PERIOD`: 시장 레짐 필터 이동평균 기간
 - `MARKET_REGIME_FILTER_COUNTRY`: 레짐 필터 데이터 조회에 사용할 시장 코드(`kor`, `us` 등)
 
-### 국가별 전략 파라미터
-- `portfolio_topn`: 포트폴리오 최대 보유 종목 수
-- `ma_period`: 이동평균 기간
-- `replace_weaker_stock`: 약한 종목 교체 여부
-- `replace_threshold`: 종목 교체 임계값
-- `MARKET_REGIME_FILTER_TICKER_MAIN`: (공통 설정 사용)
-- `MARKET_REGIME_FILTER_TICKERS_AUX`: (공통 설정 사용)
-- `MARKET_REGIME_FILTER_MA_PERIOD`: (공통 설정 사용)
-- `MARKET_REGIME_FILTER_COUNTRY`: (공통 설정 사용)
+### 계정별 전략 파라미터
+각 계정의 설정은 `data/settings/account/{account_id}.json`에 저장됩니다:
 
-각 국가별로 DB에 저장되어 해당 국가 현황/백테스트에 반영됩니다.
+**전략 설정 (`strategy`):**
+- `tuning`: 튜닝으로 찾은 최적 파라미터
+  - `MA_PERIOD`: 이동평균 기간
+  - `PORTFOLIO_TOPN`: 포트폴리오 목표 종목 수
+  - `REPLACE_SCORE_THRESHOLD`: 교체 점수 임계값
+  - `OVERBOUGHT_SELL_THRESHOLD`: RSI 과매수 임계값
+  - `COOLDOWN_DAYS`: 쿨다운 기간
+  - `MARKET_REGIME_MA_PERIOD`: 시장 레짐 MA 기간
+  - `MARKET_REGIME_RISK_OFF_EQUITY_RATIO`: 위험 시 투자 비중
+- `static`: 수동으로 설정한 고정 파라미터 (선택사항)
+
+**표시 설정:**
+- `name`: 계정 표시 이름
+- `country_code`: 국가 코드 (kor, aus, us)
+- `icon`: 아이콘 (이모지)
+- `initial_cash`: 초기 자본금
+- `slack_channel`: 슬랙 알림 채널 ID
 
 ## 코드 구조 개선사항
 
@@ -230,8 +355,16 @@ python scripts/find.py --type etf --min-change 3.0
 2. **포맷팅/정밀도 일원화**: 금액/퍼센트/표 렌더링은 `utils.report`, 요약 문구는 `utils.notification` 사용으로 통일
 3. **벤치마크/스케줄/로거 분리**: 레이어 간 의존성 정리로 테스트/유지보수 용이성 향상
 4. **백테스트/튜닝 모듈화**:
-   - 백테스트 러너: `logic/backtest/country_runner.py`
+   - 백테스트 러너: `logic/backtest/account_runner.py`, `logic/backtest/portfolio_runner.py`
    - 튜닝 러너: `logic/tune/runner.py`
+5. **수익률 계산 개선 (2025-10-19)**:
+   - 백테스트: 다음날 시초가 + 슬리피지 (보수적)
+   - 실제 거래: 당일 종가, 슬리피지 없음, 동적 리밸런싱
+   - 벤치마크: 시작일 종가 → 최신 종가 (Buy & Hold)
+6. **시스템 문서화**:
+   - `SYSTEM_SUMMARY.md`: 투자자용 시스템 요약
+   - `SYSTEM_DETAILS.md`: 투자자용 상세 매뉴얼
+   - 웹앱에서 마크다운 파일 기반으로 설명 표시
 
 ### 최근 개선된 기능들
 1. **중복 코드 제거**: 이동평균 계산 로직을 `utils/indicators.py`의 공통 함수로 통합
@@ -246,14 +379,15 @@ python scripts/find.py --type etf --min-change 3.0
 
 ## 주의/제약사항
 
-- 거래일 판정/개장여부는 `logic/signals/schedule.py`에서 처리합니다. 캘린더/공휴일 변동 시 판단이 달라질 수 있습니다.
-- 장중 실시간 가격 조회(네이버/거래소 API 등)는 외부 사이트 변경 시 실패할 수 있습니다. 비공식 소스는 안정성을 보장하지 않습니다.
+- 거래일 판정/개장여부는 `logic/recommend/schedule.py`에서 처리합니다. 캘린더/공휴일 변동 시 판단이 달라질 수 있습니다.
+- 장중 실시간 가격 조회는 외부 API(yfinance 등) 의존적이므로 서비스 변경 시 실패할 수 있습니다.
 - 모든 결과는 참고용이며, 실거래 적용 전 리스크/수수료/세금/체결 슬리피지 등을 반드시 반영해 재검증하세요.
+- 백테스트는 보수적 추정(시초가 + 슬리피지)이므로 실제 성과와 차이가 있을 수 있습니다.
 
 ## 개발 참고사항 (Developer Notes)
 
 ### 데이터 조회 로직 (Data Fetching Logic)
-`logic/signals/pipeline.py`에서 여러 종목의 시세 데이터를 조회할 때, 외부 API(yfinance 등)의 특성상 반드시 **순차 처리**해야 할 구간이 있습니다. 무분별한 병렬화는 요청 실패나 데이터 오염을 유발할 수 있으니 주의하세요.
+`logic/recommend/pipeline.py`에서 여러 종목의 시세 데이터를 조회할 때, 외부 API(yfinance 등)의 특성상 반드시 **순차 처리**해야 할 구간이 있습니다. 무분별한 병렬화는 요청 실패나 데이터 오염을 유발할 수 있으니 주의하세요.
 
 ### 코드 스타일 가이드
 - 함수명과 변수명은 명확하고 직관적으로 작성

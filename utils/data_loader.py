@@ -88,7 +88,6 @@ if not any(isinstance(f, _PykrxLogFilter) for f in _root_logger.filters):
 
 logger = get_app_logger()
 
-CACHE_START_DATE_FALLBACK = "2020-01-01"
 
 try:
     from zoneinfo import ZoneInfo
@@ -114,11 +113,29 @@ class PykrxDataUnavailable(Exception):
         super().__init__(message)
 
 
+class RateLimitException(Exception):
+    """API rate limit에 도달했을 때 사용되는 예외."""
+
+    def __init__(self, ticker: str, detail: str) -> None:
+        self.ticker = ticker
+        self.detail = detail
+        message = f"Rate limit exceeded for {ticker}: {detail}"
+        super().__init__(message)
+
+
 def _get_cache_start_dt() -> Optional[pd.Timestamp]:
-    """환경 변수 또는 기본값에서 캐시 시작 날짜를 로드합니다."""
-    raw = os.environ.get("CACHE_START_DATE", CACHE_START_DATE_FALLBACK)
+    """data/settings/common.py에서 캐시 시작 날짜를 로드합니다."""
+    try:
+        from utils.settings_loader import load_common_settings
+
+        common_settings = load_common_settings()
+        raw = common_settings.get("CACHE_START_DATE")
+    except Exception:
+        return None
+
     if not raw:
         return None
+
     try:
         dt = pd.to_datetime(raw)
     except Exception:
@@ -251,6 +268,10 @@ def get_aud_to_krw_rate() -> Optional[float]:
         if not data.empty:
             return data["Close"].iloc[-1]
     except Exception as e:
+        error_msg = str(e)
+        if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
+            logger.error("AUD/KRW 환율 조회 Rate Limit 에러: %s", e)
+            raise RateLimitException("AUDKRW=X", error_msg)
         logger.warning("AUD/KRW 환율 정보를 가져오는 데 실패했습니다: %s", e)
         return None
     return None
@@ -272,6 +293,10 @@ def get_usd_to_krw_rate() -> Optional[float]:
         if not data.empty:
             return data["Close"].iloc[-1]
     except Exception as e:
+        error_msg = str(e)
+        if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
+            logger.error("USD/KRW 환율 조회 Rate Limit 에러: %s", e)
+            raise RateLimitException("USDKRW=X", error_msg)
         logger.warning("USD/KRW 환율 정보를 가져오는 데 실패했습니다: %s", e)
     return None
 
@@ -870,6 +895,10 @@ def _fetch_ohlcv_core(
                 df.index = df.index.tz_localize(None)
             return df
         except Exception as e:
+            error_msg = str(e)
+            if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
+                logger.error("%s 데이터 조회 Rate Limit 에러: %s", ticker, e)
+                raise RateLimitException(ticker, error_msg)
             logger.warning("%s의 데이터 조회 중 오류: %s", ticker, e)
             if existing_df is not None and not existing_df.empty:
                 fallback_df = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
@@ -1001,6 +1030,10 @@ def _fetch_ohlcv_core(
                 df.index = df.index.tz_localize(None)
             return df
         except Exception as e:
+            error_msg = str(e)
+            if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
+                logger.error("%s 데이터 조회 Rate Limit 에러: %s", ticker, e)
+                raise RateLimitException(ticker, error_msg)
             logger.warning("%s의 데이터 조회 중 오류: %s", ticker, e)
             return None
 
@@ -1030,6 +1063,10 @@ def _fetch_ohlcv_core(
                 df.index = df.index.tz_localize(None)
             return df
         except Exception as e:
+            error_msg = str(e)
+            if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
+                logger.error("%s 데이터 조회 Rate Limit 에러: %s", ticker, e)
+                raise RateLimitException(ticker, error_msg)
             logger.warning("%s의 데이터 조회 중 오류: %s", ticker, e)
             return None
 
@@ -1108,6 +1145,11 @@ def fetch_au_realtime_price(ticker: str) -> Optional[float]:
         if price:
             return float(price)
     except Exception as e_yf:
+        error_msg = str(e_yf)
+        # Rate limit 에러 감지
+        if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
+            logger.error("%s의 호주 실시간 가격 조회(yfinance) Rate Limit 에러: %s", ticker, e_yf)
+            raise RateLimitException(ticker, error_msg)
         logger.warning("%s의 호주 실시간 가격 조회(yfinance) 실패: %s", ticker, e_yf)
     return None
 
@@ -1211,6 +1253,10 @@ def fetch_yfinance_name(ticker: str) -> str:
         _yfinance_name_cache[cache_key] = name
         return name
     except Exception as e:
+        error_msg = str(e)
+        if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
+            logger.error("%s 이름 조회 Rate Limit 에러: %s", cache_key, e)
+            raise RateLimitException(ticker, error_msg)
         logger.warning("%s의 이름 조회 중 오류 발생: %s", cache_key, e)
         _yfinance_name_cache[cache_key] = ""  # 실패도 캐시하여 재시도 방지
     return ""
@@ -1334,6 +1380,10 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
             return None
 
     except Exception as e:
+        error_msg = str(e)
+        if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
+            logger.error("yfinance Rate Limit 에러: %s (날짜: %s) - %s", yfinance_ticker, date_str_for_log, e)
+            raise RateLimitException(yfinance_ticker, error_msg)
         logger.error(
             "yfinance 다운로드 실패: %s (날짜: %s) - %s",
             yfinance_ticker,

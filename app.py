@@ -6,7 +6,7 @@ from datetime import datetime
 import streamlit as st
 import pandas as pd
 
-from utils.notification import APP_VERSION
+from utils.logger import APP_VERSION
 
 from app_pages.account_page import render_account_page
 from logic.recommend.market import (
@@ -103,15 +103,15 @@ def _render_home_page() -> None:
         if regime_info is None:
             st.markdown(regime_message, unsafe_allow_html=True)
         else:
-            delay_days = int(common_settings.get("MARKET_REGIME_FILTER_DELAY_DAY", 0) or 0)
-            st.caption(
-                "디버그: "
-                f"Ticker={regime_info.get('ticker')} | "
-                f"MA Period={regime_info.get('ma_period')} | "
-                f"Delay Days={delay_days} | "
-                f"Last Date={regime_info.get('last_risk_off_start')} -> {regime_info.get('last_risk_off_end')} | "
-                f"Divergence={regime_info.get('proximity_pct'):+.3f}%"
-            )
+            # delay_days = int(common_settings.get("MARKET_REGIME_FILTER_DELAY_DAY", 0) or 0)
+            # st.caption(
+            #     "디버그: "
+            #     f"Ticker={regime_info.get('ticker')} | "
+            #     f"MA Period={regime_info.get('ma_period')} | "
+            #     f"Delay Days={delay_days} | "
+            #     f"Last Date={regime_info.get('last_risk_off_start')} -> {regime_info.get('last_risk_off_end')} | "
+            #     f"Divergence={regime_info.get('proximity_pct'):+.3f}%"
+            # )
 
             debug_lines = []
             ticker = regime_info.get("ticker")
@@ -238,8 +238,8 @@ def _render_home_page() -> None:
                 except Exception as exc:  # pragma: no cover - 진단용 출력
                     debug_lines.append(f"yfinance fetch 오류: {exc}")
 
-            if debug_lines:
-                st.code("\n\n".join(debug_lines), language="text")
+            # if debug_lines:
+            #     st.code("\n\n".join(debug_lines), language="text")
 
             def _fmt_date(value: Any) -> Optional[str]:
                 if value is None:
@@ -330,6 +330,33 @@ def _render_home_page() -> None:
                 styled_aux = styled_aux.apply(lambda col: _style_position(col, aux_position), subset=["위치"], axis=0)
                 st.caption("아래 보조 지표는 단순 참고를 위한 정보입니다. 시스템은 메인 지수만을 이용하고 있습니다.")
                 st.dataframe(styled_aux, hide_index=True, width="stretch")
+                st.markdown("**ETF 추천 전략 설명**")
+
+                # Load system documentation from markdown files
+                from pathlib import Path
+
+                summary_path = Path(__file__).parent / "SYSTEM_SUMMARY.md"
+                details_path = Path(__file__).parent / "SYSTEM_DETAILS.md"
+
+                with st.expander("요약 보기", expanded=False):
+                    try:
+                        if summary_path.exists():
+                            summary_content = summary_path.read_text(encoding="utf-8")
+                            st.markdown(summary_content, unsafe_allow_html=False)
+                        else:
+                            st.warning("시스템 요약 문서를 찾을 수 없습니다.")
+                    except Exception as e:
+                        st.error(f"시스템 요약 문서를 로드하는 중 오류가 발생했습니다: {e}")
+
+                with st.expander("상세 보기", expanded=False):
+                    try:
+                        if details_path.exists():
+                            details_content = details_path.read_text(encoding="utf-8")
+                            st.markdown(details_content, unsafe_allow_html=False)
+                        else:
+                            st.warning("시스템 상세 문서를 찾을 수 없습니다.")
+                    except Exception as e:
+                        st.error(f"시스템 상세 문서를 로드하는 중 오류가 발생했습니다: {e}")
 
 
 def main() -> None:
