@@ -409,6 +409,10 @@ def generate_daily_recommendations_for_portfolio(
             category = etf_meta.get(d["tkr"], {}).get("category")
             if category and category != "TBD":
                 sell_rsi_categories_today.add(category)
+                from utils.logger import get_app_logger
+
+                logger = get_app_logger()
+                logger.info(f"[SELL_RSI CATEGORY] {d['tkr']} 매도로 인해 '{category}' 카테고리 매수 차단")
 
     # 실제 보유 중인 종목 수 계산 (매도 예정 종목 제외)
     held_count = sum(1 for d in decisions if d["state"] == "HOLD")
@@ -457,6 +461,10 @@ def generate_daily_recommendations_for_portfolio(
 
             # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
             if cand_category and cand_category != "TBD" and cand_category in sell_rsi_categories_today:
+                from utils.logger import get_app_logger
+
+                logger = get_app_logger()
+                logger.info(f"[BUY BLOCKED] {cand['tkr']} 매수 차단 - '{cand_category}' 카테고리가 SELL_RSI로 매도됨")
                 cand["state"], cand["row"][4] = "WAIT", "WAIT"
                 cand["row"][-1] = f"RSI 과매수 매도 카테고리 ({cand_category})"
                 cand["buy_signal"] = False
@@ -554,11 +562,20 @@ def generate_daily_recommendations_for_portfolio(
 
         if ticker_to_sell:
             sell_block_for_candidate = sell_cooldown_block.get(ticker_to_sell)
+            from utils.logger import get_app_logger
+
+            logger = get_app_logger()
+            logger.info(
+                f"[REPLACE CHECK] ticker_to_sell={ticker_to_sell}, "
+                f"sell_block_for_candidate={sell_block_for_candidate}, "
+                f"cooldown_days={cooldown_days}"
+            )
             if sell_block_for_candidate and cooldown_days > 0:
                 blocked_name = etf_meta.get(ticker_to_sell, {}).get("name") or ticker_to_sell
                 best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
                 best_new["row"][-1] = f"쿨다운 {cooldown_days}일 대기중 - {blocked_name}"
                 best_new["buy_signal"] = False
+                logger.info(f"[REPLACE BLOCKED] {ticker_to_sell} 교체 차단 (쿨다운)")
                 continue
 
             d_weakest = data_by_tkr.get(ticker_to_sell)

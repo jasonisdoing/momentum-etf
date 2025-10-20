@@ -162,8 +162,10 @@ def run_account_backtest(
             ma_period=strategy_override.ma_period,
             portfolio_topn=strategy_override.portfolio_topn,
             replace_threshold=strategy_override.replace_threshold,
+            ma_type=strategy_override.ma_type,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
+        strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
 
@@ -476,6 +478,7 @@ def _build_backtest_kwargs(
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "ma_period": strategy_rules.ma_period,
+        "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
         "regime_filter_enabled": regime_filter_enabled,
         "regime_filter_ticker": regime_filter_ticker,

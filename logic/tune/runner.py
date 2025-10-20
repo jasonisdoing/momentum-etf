@@ -173,7 +173,7 @@ def _format_threshold(value: Any) -> str:
 def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = False, months_range: Optional[int] = None) -> List[str]:
     from utils.report import render_table_eaw
 
-    headers = ["MA", "TOPN", "교체점수", "과매수", "쿨다운", "CAGR(%)", "MDD(%)"]
+    headers = ["MA", "MA타입", "TOPN", "교체점수", "과매수", "쿨다운", "CAGR(%)", "MDD(%)"]
     if months_range:
         headers.append(f"{months_range}개월(%)")
     else:
@@ -182,13 +182,14 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
         headers.append("Samples")
 
     # 정렬 방향 설정 (right: 오른쪽 정렬, left: 왼쪽 정렬, center: 가운데 정렬)
-    aligns = ["right", "right", "right", "right", "right", "right", "right", "right"]
+    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right"]
     if include_samples:
         aligns.append("right")
 
     table_rows = []
     for row in rows[:MAX_TABLE_ROWS]:
         ma_val = row.get("ma_period")
+        ma_type_val = row.get("ma_type", "SMA")
         topn_val = row.get("portfolio_topn")
         threshold_val = row.get("replace_threshold")
         rsi_threshold_val = row.get("rsi_sell_threshold")
@@ -196,6 +197,7 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
 
         row_data = [
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
+            str(ma_type_val) if ma_type_val else "SMA",
             str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
             _format_threshold(threshold_val),
             str(int(rsi_threshold_val)) if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val)) else "-",
@@ -407,7 +409,7 @@ def _export_debug_month(
 
 
 def _evaluate_single_combo(
-    payload: Tuple[str, int, Tuple[str, str], int, int, int, float, int, int, Tuple[str, ...], Mapping[str, DataFrame]]
+    payload: Tuple[str, int, Tuple[str, str], int, int, int, float, int, int, str, Tuple[str, ...], Mapping[str, DataFrame]]
 ) -> Tuple[str, Any, List[str]]:
     (
         account_norm,
@@ -419,6 +421,7 @@ def _evaluate_single_combo(
         threshold_float,
         rsi_int,
         cooldown_int,
+        ma_type_str,
         excluded_tickers,
         prefetched_data,
     ) = payload
@@ -428,6 +431,7 @@ def _evaluate_single_combo(
             ma_period=int(ma_int),
             portfolio_topn=int(topn_int),
             replace_threshold=float(threshold_float),
+            ma_type=str(ma_type_str),
         )
     except ValueError as exc:
         return (
@@ -437,6 +441,7 @@ def _evaluate_single_combo(
                 "portfolio_topn": topn_int,
                 "replace_threshold": threshold_float,
                 "rsi_sell_threshold": rsi_int,
+                "ma_type": ma_type_str,
                 "error": str(exc),
             },
             [],
@@ -485,6 +490,7 @@ def _evaluate_single_combo(
         "replace_threshold": float(threshold_float),
         "rsi_sell_threshold": rsi_int,
         "cooldown_days": cooldown_int,
+        "ma_type": ma_type_str,
         "cagr_pct": _round_float(_safe_float(summary.get("cagr_pct"), 0.0)),
         "mdd_pct": _round_float(_safe_float(summary.get("mdd_pct"), 0.0)),
         "sharpe_ratio": _round_float(_safe_float(summary.get("sharpe_ratio"), 0.0)),
@@ -520,18 +526,20 @@ def _execute_tuning_for_months(
     replace_candidates = list(search_space.get("REPLACE_SCORE_THRESHOLD", []))
     rsi_candidates = list(search_space.get("OVERBOUGHT_SELL_THRESHOLD", []))
     cooldown_candidates = list(search_space.get("COOLDOWN_DAYS", []))
+    ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
 
-    if not ma_candidates or not topn_candidates or not replace_candidates or not rsi_candidates or not cooldown_candidates:
+    if not ma_candidates or not topn_candidates or not replace_candidates or not rsi_candidates or not cooldown_candidates or not ma_type_candidates:
         logger.warning("[튜닝] %s (%d개월) 유효한 탐색 공간이 없습니다.", account_norm.upper(), months_range)
         return None
 
-    combos: List[Tuple[int, int, float, int, int]] = [
-        (ma, topn, replace, rsi, cooldown)
+    combos: List[Tuple[int, int, float, int, int, str]] = [
+        (ma, topn, replace, rsi, cooldown, ma_type)
         for ma in ma_candidates
         for topn in topn_candidates
         for replace in replace_candidates
         for rsi in rsi_candidates
         for cooldown in cooldown_candidates
+        for ma_type in ma_type_candidates
     ]
 
     if not combos:
@@ -567,10 +575,11 @@ def _execute_tuning_for_months(
             float(replace),
             int(rsi),
             int(cooldown),
+            str(ma_type),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             prefetched_data,
         )
-        for ma, topn, replace, rsi, cooldown in combos
+        for ma, topn, replace, rsi, cooldown, ma_type in combos
     ]
 
     if workers <= 1:
@@ -666,6 +675,7 @@ def _execute_tuning_for_months(
                 "period_return": _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None,
                 "tuning": {
                     "MA_PERIOD": int(item.get("ma_period", 0)),
+                    "MA_TYPE": str(item.get("ma_type", "SMA")),
                     "PORTFOLIO_TOPN": int(item.get("portfolio_topn", 0)),
                     "REPLACE_SCORE_THRESHOLD": _round_up_float_places(item.get("replace_threshold", 0.0), 1),
                     "OVERBOUGHT_SELL_THRESHOLD": int(item.get("rsi_sell_threshold", 10)),
@@ -978,19 +988,28 @@ def _compose_tuning_report(
         search_space = tuning_metadata.get("search_space", {})
         if search_space:
             ma_range = search_space.get("MA_RANGE", [])
+            ma_type_range = search_space.get("MA_TYPE", [])
             topn_range = search_space.get("PORTFOLIO_TOPN", [])
             threshold_range = search_space.get("REPLACE_SCORE_THRESHOLD", [])
             rsi_range = search_space.get("OVERBOUGHT_SELL_THRESHOLD", [])
             cooldown_range = search_space.get("COOLDOWN_DAYS", [])
 
-            lines.append(
-                f"탐색 공간: MA {len(ma_range)}개 × TOPN {len(topn_range)}개 × TH {len(threshold_range)}개 × RSI {len(rsi_range)}개 × COOLDOWN {len(cooldown_range)}개 = {tuning_metadata.get('combo_count', 0)}개 조합"
-            )
+            # MA_TYPE이 있으면 포함해서 표시
+            if ma_type_range and len(ma_type_range) > 1:
+                lines.append(
+                    f"탐색 공간: MA {len(ma_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 × TH {len(threshold_range)}개 × RSI {len(rsi_range)}개 × COOLDOWN {len(cooldown_range)}개 = {tuning_metadata.get('combo_count', 0)}개 조합"
+                )
+            else:
+                lines.append(
+                    f"탐색 공간: MA {len(ma_range)}개 × TOPN {len(topn_range)}개 × TH {len(threshold_range)}개 × RSI {len(rsi_range)}개 × COOLDOWN {len(cooldown_range)}개 = {tuning_metadata.get('combo_count', 0)}개 조합"
+                )
 
             # 각 파라미터 범위 표시
             if ma_range:
                 ma_min, ma_max = min(ma_range), max(ma_range)
                 lines.append(f"  MA_RANGE: {ma_min}~{ma_max}")
+            if ma_type_range:
+                lines.append(f"  MA_TYPE: {', '.join(ma_type_range)}")
             if topn_range:
                 topn_min, topn_max = min(topn_range), max(topn_range)
                 lines.append(f"  PORTFOLIO_TOPN: {topn_min}~{topn_max}")
@@ -1041,6 +1060,7 @@ def _compose_tuning_report(
         for entry in raw_rows:
             tuning = entry.get("tuning") or {}
             ma_val = tuning.get("MA_PERIOD")
+            ma_type_val = tuning.get("MA_TYPE", "SMA")
             topn_val = tuning.get("PORTFOLIO_TOPN")
             threshold_val = tuning.get("REPLACE_SCORE_THRESHOLD")
             rsi_val = tuning.get("OVERBOUGHT_SELL_THRESHOLD")
@@ -1053,6 +1073,7 @@ def _compose_tuning_report(
             normalized_rows.append(
                 {
                     "ma_period": ma_val,
+                    "ma_type": ma_type_val,
                     "portfolio_topn": topn_val,
                     "replace_threshold": threshold_val,
                     "rsi_sell_threshold": rsi_val,
@@ -1167,7 +1188,19 @@ def run_account_tuning(
         fallback=2,
     )
 
-    if not ma_values or not topn_values or not replace_values or not rsi_sell_values or not cooldown_values:
+    # MA_TYPE 처리: 문자열 리스트로 받음
+    ma_type_raw = config.get("MA_TYPE")
+    if ma_type_raw is None:
+        ma_type_values = [base_rules.ma_type]
+    elif isinstance(ma_type_raw, (list, tuple)):
+        ma_type_values = [str(v).upper() for v in ma_type_raw if v]
+    else:
+        ma_type_values = [str(ma_type_raw).upper()]
+
+    if not ma_type_values:
+        ma_type_values = [base_rules.ma_type]
+
+    if not ma_values or not topn_values or not replace_values or not rsi_sell_values or not cooldown_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
@@ -1181,7 +1214,7 @@ def run_account_tuning(
         logger.error("[튜닝] '%s' 유효한 티커가 없습니다.", country_code)
         return None
 
-    combo_count = len(ma_values) * len(topn_values) * len(replace_values) * len(rsi_sell_values) * len(cooldown_values)
+    combo_count = len(ma_values) * len(topn_values) * len(replace_values) * len(rsi_sell_values) * len(cooldown_values) * len(ma_type_values)
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
         return None
@@ -1192,6 +1225,7 @@ def run_account_tuning(
         "REPLACE_SCORE_THRESHOLD": replace_values,
         "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
         "COOLDOWN_DAYS": cooldown_values,
+        "MA_TYPE": ma_type_values,
     }
 
     try:
@@ -1346,6 +1380,7 @@ def run_account_tuning(
         "combo_count": combo_count,
         "search_space": {
             "MA_RANGE": list(ma_values),
+            "MA_TYPE": list(ma_type_values),
             "PORTFOLIO_TOPN": list(topn_values),
             "REPLACE_SCORE_THRESHOLD": list(replace_values),
             "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
@@ -1428,6 +1463,7 @@ def run_account_tuning(
                         "period_return": _round_float_places(entry.get("cumulative_return_pct", 0.0), 2),
                         "tuning": {
                             "MA_PERIOD": int(entry.get("ma_period", 0)),
+                            "MA_TYPE": str(entry.get("ma_type", "SMA")),
                             "PORTFOLIO_TOPN": int(entry.get("portfolio_topn", 0)),
                             "REPLACE_SCORE_THRESHOLD": _round_up_float_places(entry.get("replace_threshold", 0.0), 1),
                             "OVERBOUGHT_SELL_THRESHOLD": int(entry.get("rsi_sell_threshold", 10)),

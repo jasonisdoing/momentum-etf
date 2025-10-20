@@ -73,7 +73,14 @@ def _calculate_trade_price(
     return trade_price
 
 
-def _process_ticker_data(ticker: str, df: pd.DataFrame, etf_tickers: set, etf_ma_period: int, stock_ma_period: int) -> Optional[Dict]:
+def _process_ticker_data(
+    ticker: str,
+    df: pd.DataFrame,
+    etf_tickers: set,
+    etf_ma_period: int,
+    stock_ma_period: int,
+    ma_type: str = "SMA",
+) -> Optional[Dict]:
     """
     개별 종목의 데이터를 처리하고 지표를 계산합니다.
 
@@ -83,6 +90,7 @@ def _process_ticker_data(ticker: str, df: pd.DataFrame, etf_tickers: set, etf_ma
         etf_tickers: ETF 티커 집합
         etf_ma_period: ETF 이동평균 기간
         stock_ma_period: 주식 이동평균 기간
+        ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA)
 
     Returns:
         Dict: 계산된 지표들 또는 None (처리 실패 시)
@@ -122,7 +130,9 @@ def _process_ticker_data(ticker: str, df: pd.DataFrame, etf_tickers: set, etf_ma
         open_prices = close_prices.copy()  # Open 데이터 없으면 Close 사용
 
     # MAPS 전략 지표 계산
-    moving_average = close_prices.rolling(window=current_ma_period).mean()
+    from utils.moving_averages import calculate_moving_average
+
+    moving_average = calculate_moving_average(close_prices, current_ma_period, ma_type)
     ma_score = calculate_ma_score(close_prices, moving_average, normalize=False)
 
     # 점수 기반 매수 시그널 지속일 계산
@@ -156,6 +166,7 @@ def run_portfolio_backtest(
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     ma_period: int = 20,
+    ma_type: str = "SMA",
     replace_threshold: float = 0.0,
     regime_filter_enabled: bool = False,
     regime_filter_ticker: str = "^GSPC",
@@ -266,7 +277,7 @@ def run_portfolio_backtest(
             df = fetch_ohlcv(ticker, country=country, date_range=fetch_date_range)
 
         # 공통 함수를 사용하여 데이터 처리 및 지표 계산
-        ticker_metrics = _process_ticker_data(ticker, df, etf_tickers, etf_ma_period, stock_ma_period)
+        ticker_metrics = _process_ticker_data(ticker, df, etf_tickers, etf_ma_period, stock_ma_period, ma_type)
         if ticker_metrics:
             metrics_by_ticker[ticker] = ticker_metrics
 

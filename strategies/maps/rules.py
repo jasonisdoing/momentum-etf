@@ -12,10 +12,13 @@ class StrategyRules:
 
     # 기본 MA 기간 (이동평균 기간)
     DEFAULT_MA_PERIOD = 20
+    # 기본 MA 타입 (이동평균 종류)
+    DEFAULT_MA_TYPE = "SMA"
 
     ma_period: int
     portfolio_topn: int
     replace_threshold: float
+    ma_type: str = "SMA"
 
     @classmethod
     def from_values(
@@ -24,6 +27,7 @@ class StrategyRules:
         ma_period: Any,
         portfolio_topn: Any,
         replace_threshold: Any,
+        ma_type: Any = None,
     ) -> "StrategyRules":
         try:
             ma_period_int = int(ma_period)
@@ -44,10 +48,17 @@ class StrategyRules:
         except (TypeError, ValueError):
             raise ValueError("REPLACE_SCORE_THRESHOLD는 숫자여야 합니다.") from None
 
+        # MA 타입 검증
+        ma_type_str = str(ma_type or cls.DEFAULT_MA_TYPE).upper()
+        valid_ma_types = {"SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"}
+        if ma_type_str not in valid_ma_types:
+            raise ValueError(f"MA_TYPE은 {valid_ma_types} 중 하나여야 합니다. (입력값: {ma_type_str})")
+
         return cls(
             ma_period=ma_period_int,
             portfolio_topn=portfolio_topn_int,
             replace_threshold=replace_threshold_float,
+            ma_type=ma_type_str,
         )
 
     @classmethod
@@ -64,6 +75,7 @@ class StrategyRules:
             ma_period=_resolve("MA_PERIOD", "ma_period"),
             portfolio_topn=_resolve("PORTFOLIO_TOPN", "portfolio_topn"),
             replace_threshold=_resolve("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
+            ma_type=_resolve("MA_TYPE", "ma_type"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -71,6 +83,7 @@ class StrategyRules:
             "ma_period": self.ma_period,
             "portfolio_topn": self.portfolio_topn,
             "replace_threshold": self.replace_threshold,
+            "ma_type": self.ma_type,
         }
         return d
 

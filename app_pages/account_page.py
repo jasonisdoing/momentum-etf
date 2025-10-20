@@ -74,6 +74,7 @@ def render_account_page(account_id: str) -> None:
         if strategy_tuning:
             params_to_show = {
                 "MA": strategy_tuning.get("MA_PERIOD"),
+                "MA타입": strategy_tuning.get("MA_TYPE"),
                 "TopN": strategy_tuning.get("PORTFOLIO_TOPN"),
                 "교체점수": strategy_tuning.get("REPLACE_SCORE_THRESHOLD"),
                 "과매수 지표": strategy_tuning.get("OVERBOUGHT_SELL_THRESHOLD"),

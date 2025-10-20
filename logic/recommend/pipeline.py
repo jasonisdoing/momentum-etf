@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 
@@ -533,6 +533,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     ma_period = int(strategy_rules.ma_period)
     portfolio_topn = int(strategy_rules.portfolio_topn)
+    ma_type = str(strategy_rules.ma_type)
 
     strategy_cfg = account_settings.get("strategy", {}) or {}
     if not isinstance(strategy_cfg, dict):
@@ -702,10 +703,11 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
             # MAPS 전략 계산
             from utils.indicators import calculate_ma_score
+            from utils.moving_averages import calculate_moving_average
             from logic.common import get_buy_signal_streak
 
-            # 이동평균 계산
-            moving_average = df["Close"].rolling(window=ma_period).mean()
+            # 이동평균 계산 (MA_TYPE 파라미터 사용)
+            moving_average = calculate_moving_average(df["Close"], ma_period, ma_type)
 
             # 점수 계산
             ma_score_series = calculate_ma_score(df["Close"], moving_average, normalize=False)
@@ -1139,6 +1141,14 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     planned_sell_count = sum(1 for item in results if item["state"] in sell_state_set)
     planned_buy_count = sum(1 for item in results if item["state"] in buy_state_set)
 
+    # SELL_RSI로 매도되는 카테고리 추적 (같은 날 매수 금지)
+    sell_rsi_categories: Set[str] = set()
+    for item in results:
+        if item["state"] == "SELL_RSI":
+            category = item.get("category")
+            if category and category != "TBD":
+                sell_rsi_categories.add(category)
+
     projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
     additional_buy_slots = max(0, portfolio_topn - projected_holdings)
 
@@ -1150,6 +1160,11 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         category_raw = item.get("category")
         category = str(category_raw or "").strip()
         category_key = _normalize_category_value(category_raw)
+
+        # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
+        if category and category != "TBD" and category in sell_rsi_categories:
+            logger.info(f"[PIPELINE BUY BLOCKED] {item.get('ticker')} 매수 차단 - '{category}' 카테고리가 SELL_RSI로 매도됨")
+            continue
 
         # 카테고리 중복 체크 시, 매도 예정 종목은 제외
         # 같은 카테고리의 매도 예정 종목이 있으면 해당 카테고리 슬롯이 비게 됨
