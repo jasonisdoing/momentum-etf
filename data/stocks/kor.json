@@ -167,22 +167,6 @@
                 "1_week_avg_turnover": 151838274
             },
             {
-                "ticker": "289260",
-                "name": "TIGER MSCI KOREA ESG리더스",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 14509,
-                "1_week_avg_turnover": 200061185
-            },
-            {
-                "ticker": "315930",
-                "name": "Kodex Top5Plus TR",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 101991,
-                "1_week_avg_turnover": 3491631667
-            },
-            {
                 "ticker": "069500",
                 "name": "Kodex 200",
                 "recommend_enabled": true,
