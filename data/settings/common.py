@@ -17,7 +17,7 @@ RSI_NORMALIZATION_CONFIG = {
 
 # RSI 계산 설정
 RSI_CALCULATION_CONFIG = {
-    "period": 14,  # RSI 계산 기간
+    "period": 15,  # RSI 계산 기간
     "ema_smoothing": 2.0,  # EMA 평활화 계수
 }
 

@@ -6,14 +6,14 @@
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",
     "strategy": {
-        "expected_cagr": 93.51,
-        "backtested_date": "2025-10-19",
+        "expected_cagr": 101.86,
+        "backtested_date": "2025-10-20",
         "tuning": {
             "MA_PERIOD": 48,
             "MA_TYPE": "SMA",
             "PORTFOLIO_TOPN": 7,
             "REPLACE_SCORE_THRESHOLD": 1,
-            "OVERBOUGHT_SELL_THRESHOLD": 16,
+            "OVERBOUGHT_SELL_THRESHOLD": 21,
             "COOLDOWN_DAYS": 1
         },
         "_tuning": {

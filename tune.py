@@ -16,21 +16,22 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
         "_설명": "최소한의 최적 범위",
-        "MA_RANGE": np.arange(20, 61, 1),  # 20~50
-        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+        "MA_RANGE": np.arange(15, 61, 1),  # 20~50
+        "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [3, 4],
-        "REPLACE_SCORE_THRESHOLD": [1, 2],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 5~21
+        "REPLACE_SCORE_THRESHOLD": [0.5, 1, 1.5, 2],
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 26, 1),  # 5~25
         "COOLDOWN_DAYS": [1, 2],
     },
     "kor": {
         "_설명": "최소한의 최적 범위",
-        "MA_RANGE": np.arange(20, 61, 1),
-        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "PORTFOLIO_TOPN": [7, 8],
-        "REPLACE_SCORE_THRESHOLD": [1, 2],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 5~21
-        "COOLDOWN_DAYS": [1, 2],
+        "MA_RANGE": np.arange(40, 61, 1),
+        # "MA_RANGE": [15],
+        "MA_TYPE": ["SMA"],
+        "PORTFOLIO_TOPN": [6, 7],
+        "REPLACE_SCORE_THRESHOLD": [0.5, 1, 1.5],
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 15~25
+        "COOLDOWN_DAYS": [1],
     },
     # "kor": {
     #     "_설명": "최대 삼세한 넓은 범위",
