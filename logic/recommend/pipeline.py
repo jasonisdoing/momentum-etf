@@ -599,7 +599,23 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                         "buy_date": None,
                     }
 
-        logger.debug("계산된 holdings: %d개 종목", len(holdings))
+        # 종목명과 티커를 함께 표시
+        holdings_display = []
+        for ticker in sorted(holdings.keys()):
+            # etf_universe에서 종목명 찾기
+            name = ticker
+            for stock in etf_universe:
+                if stock.get("ticker", "").upper() == ticker:
+                    name = stock.get("name") or ticker
+                    break
+            holdings_display.append(f"{name}({ticker})")
+
+        logger.info(
+            "[%s] 계산된 holdings: %d개 종목 - %s",
+            account_id.upper(),
+            len(holdings),
+            ", ".join(holdings_display) if holdings_display else "(없음)",
+        )
     except Exception as e:
         logger.error("포트폴리오 데이터 조회 실패: %s", e)
         holdings = {}

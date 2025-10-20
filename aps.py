@@ -117,13 +117,25 @@ def run_recommendation_generation(
         logging.error("추천 보고서를 저장하는 중 오류", exc_info=True)
 
     try:
-        if should_notify_on_schedule(country_code):
-            message = compose_recommendation_slack_message(
-                account_id,
-                report,
-                duration=elapsed,
+        message = compose_recommendation_slack_message(
+            account_id,
+            report,
+            duration=elapsed,
+        )
+        notified = send_recommendation_slack_notification(account_id, message)
+        if notified:
+            logging.info(
+                "[%s/%s] Slack 알림 전송이 완료되었습니다 (소요 %.2fs)",
+                country_code.upper(),
+                getattr(report, "base_date", "N/A"),
+                elapsed,
             )
-            send_recommendation_slack_notification(account_id, message)
+        else:
+            logging.info(
+                "[%s/%s] Slack 알림이 전송되지 않았습니다.",
+                country_code.upper(),
+                getattr(report, "base_date", "N/A"),
+            )
     except Exception:
         logging.error("Slack 알림 전송 실패", exc_info=True)
 
