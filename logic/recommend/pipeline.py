@@ -823,10 +823,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             continue
 
         if action == "SELL":
-            if ticker in holdings:
-                # 여전히 보유 중이면 SOLD로 표시하지 않음
-                continue
-
+            # 매도 거래가 있으면 SOLD 처리 (부분 매도 여부는 보유 수량으로 판단)
             existing = next((d for d in decisions if d.get("tkr") == ticker), None)
             if existing:
                 existing["state"] = "SOLD"
