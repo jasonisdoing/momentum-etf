@@ -9,11 +9,11 @@
         "expected_cagr": 97.28,
         "backtested_date": "2025-10-21",
         "tuning": {
-            "MA_PERIOD": 47,
+            "MA_PERIOD": 22,
             "MA_TYPE": "SMA",
-            "PORTFOLIO_TOPN": 6,
+            "PORTFOLIO_TOPN": 3,
             "REPLACE_SCORE_THRESHOLD": 1,
-            "OVERBOUGHT_SELL_THRESHOLD": 16,
+            "OVERBOUGHT_SELL_THRESHOLD": 20,
             "COOLDOWN_DAYS": 1,
             "CORE_HOLDINGS": [
                 "395160",

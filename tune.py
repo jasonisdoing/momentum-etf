@@ -28,7 +28,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "_설명": "최소한의 최적 범위",
         "MA_RANGE": np.arange(20, 61, 1),
         "MA_TYPE": ["SMA"],
-        "PORTFOLIO_TOPN": [6],
+        "PORTFOLIO_TOPN": [6, 7],
         "REPLACE_SCORE_THRESHOLD": [1],
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 15~25
         "CORE_HOLDINGS": ["395160", "426030", "473640"],

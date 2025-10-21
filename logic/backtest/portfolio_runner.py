@@ -894,6 +894,9 @@ def run_portfolio_backtest(
 
                     held_stocks_with_scores = []
                     for held_ticker, held_position in position_state.items():
+                        # 핵심 보유 종목은 교체 매매 대상에서 제외
+                        if held_ticker in valid_core_holdings:
+                            continue
                         if held_position["shares"] > 0:
                             # MAPS 점수 사용
                             score_h = score_today.get(held_ticker, float("nan"))
