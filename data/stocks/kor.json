@@ -17,22 +17,6 @@
                 "listing_date": "2022-01-01",
                 "1_week_avg_volume": 2034097,
                 "1_week_avg_turnover": 47665247596
-            },
-            {
-                "ticker": "426020",
-                "name": "TIMEFOLIO 미국S&P500액티브",
-                "recommend_enabled": true,
-                "listing_date": "2022-05-11",
-                "1_week_avg_volume": 171492,
-                "1_week_avg_turnover": 4550561087
-            },
-            {
-                "ticker": "0015B0",
-                "name": "KoAct 미국나스닥성장기업액티브",
-                "recommend_enabled": true,
-                "listing_date": "2025-02-25",
-                "1_week_avg_volume": 52669,
-                "1_week_avg_turnover": 728766972
             }
         ]
     },

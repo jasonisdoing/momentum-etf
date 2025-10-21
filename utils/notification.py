@@ -273,7 +273,7 @@ def compose_recommendation_slack_message(
         return f"{held_str}/{topn_str}"
 
     if held_count is None:
-        held_count = sum(1 for item in recommendations if str(item.get("state") or "").upper() == "HOLD")
+        held_count = sum(1 for item in recommendations if str(item.get("state") or "").upper() in {"HOLD", "HOLD_CORE"})
     if portfolio_topn is None:
         topn_candidates = [
             getattr(report, "portfolio_topn", None),
