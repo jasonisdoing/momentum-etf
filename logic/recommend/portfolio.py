@@ -87,9 +87,6 @@ def _calculate_cooldown_blocks(
                         0,
                     )
                     if days_since_buy < cooldown_days:
-                        from utils.logger import get_app_logger
-
-                        logger = get_app_logger()
                         logger.info(
                             f"[COOLDOWN BLOCK] {tkr}: last_buy={last_buy_ts.strftime('%Y-%m-%d')}, base_date={base_date_norm.strftime('%Y-%m-%d')}, days_since={days_since_buy}, cooldown_days={cooldown_days}"
                         )
@@ -167,9 +164,6 @@ def _create_decision_entry(
 
     # DEBUG: 쿨다운 문제 디버깅
     if sell_block_info and tkr == "473640":
-        from utils.logger import get_app_logger
-
-        logger = get_app_logger()
         logger.info(
             f"[DEBUG 473640] buy_date(consecutive)={buy_date}, last_buy(cooldown)={sell_block_info.get('last_buy')}, days_since={sell_block_info.get('days_since')}"
         )
@@ -321,6 +315,20 @@ def generate_daily_recommendations_for_portfolio(
     except (TypeError, ValueError):
         stop_loss_threshold = None
 
+    # 핵심 보유 종목 (강제 보유, TOPN 포함)
+    core_holdings_tickers = set(strategy_rules.core_holdings or [])
+
+    # Universe 유효성 검증
+    universe_tickers_set = {ticker for ticker, _ in pairs}
+    invalid_core_tickers = core_holdings_tickers - universe_tickers_set
+    if invalid_core_tickers:
+        logger.warning(f"[{account_id.upper()}] CORE_HOLDINGS에 Universe에 없는 종목이 포함됨: {invalid_core_tickers}")
+
+    # 유효한 핵심 보유 종목만 사용
+    valid_core_holdings = core_holdings_tickers & universe_tickers_set
+    if valid_core_holdings:
+        logger.info(f"[{account_id.upper()}] 핵심 보유 종목 (TOPN 포함): {sorted(valid_core_holdings)}")
+
     # 현재 보유 종목의 카테고리
     held_categories = set()
     held_category_keys = set()
@@ -376,6 +384,62 @@ def generate_daily_recommendations_for_portfolio(
         )
         decisions.append(decision)
 
+    # 1. 핵심 보유 종목 매도 신호 무시 (강제 HOLD_CORE)
+    for decision in decisions:
+        ticker = decision["tkr"]
+        if ticker in valid_core_holdings:
+            # 매도 신호를 HOLD_CORE로 강제 변경
+            if decision["state"] in {"SELL_TREND", "SELL_RSI", "CUT_STOPLOSS", "SELL_REPLACE"}:
+                decision["state"] = "HOLD_CORE"
+                decision["row"][4] = "HOLD_CORE"
+                decision["row"][-1] = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
+            # 이미 보유 중인 핵심 종목도 HOLD_CORE로 표시
+            elif decision["state"] == "HOLD":
+                decision["state"] = "HOLD_CORE"
+                decision["row"][4] = "HOLD_CORE"
+                if not decision["row"][-1] or decision["row"][-1] == "":
+                    decision["row"][-1] = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
+
+    # 2. 핵심 보유 종목 미보유 시 자동 매수
+    for core_ticker in valid_core_holdings:
+        if core_ticker not in holdings:
+            # 이미 decision이 있는지 확인
+            existing_decision = next((d for d in decisions if d["tkr"] == core_ticker), None)
+            if existing_decision:
+                # WAIT 상태를 BUY로 변경
+                if existing_decision["state"] == "WAIT":
+                    existing_decision["state"] = "BUY"
+                    existing_decision["row"][4] = "BUY"
+                    existing_decision["row"][-1] = "🔒 핵심 보유 (자동 매수)"
+                    existing_decision["buy_signal"] = True
+            else:
+                # decision이 없으면 새로 생성 (data_by_tkr에 있는 경우만)
+                if core_ticker in data_by_tkr:
+                    core_data = data_by_tkr[core_ticker]
+                    core_name = etf_meta.get(core_ticker, {}).get("name") or core_ticker
+                    core_decision = _create_decision_entry(
+                        core_ticker,
+                        core_name,
+                        core_data,
+                        False,  # is_held
+                        holdings,
+                        etf_meta,
+                        full_etf_meta,
+                        consecutive_holding_info,
+                        sell_cooldown_block,
+                        buy_cooldown_block,
+                        base_date,
+                        country_code,
+                        current_equity,
+                        stop_loss_threshold,
+                        rsi_sell_threshold,
+                    )
+                    core_decision["state"] = "BUY"
+                    core_decision["row"][4] = "BUY"
+                    core_decision["row"][-1] = "🔒 핵심 보유 (자동 매수)"
+                    core_decision["buy_signal"] = True
+                    decisions.append(core_decision)
+
     universe_tickers = {etf["ticker"] for etf in full_etf_meta.values()}
 
     # 리스크 오프 처리
@@ -403,19 +467,28 @@ def generate_daily_recommendations_for_portfolio(
     wait_candidates_raw.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
     # SELL_RSI로 매도하는 카테고리 추적 (같은 날 매수 금지)
+    # 매도 전에도 RSI 과매수 경고가 있는 보유 종목의 카테고리는 차단
     sell_rsi_categories_today: Set[str] = set()
     for d in decisions:
+        # 1. 이미 SELL_RSI 상태인 경우
         if d["state"] == "SELL_RSI":
             category = etf_meta.get(d["tkr"], {}).get("category")
             if category and category != "TBD":
                 sell_rsi_categories_today.add(category)
-                from utils.logger import get_app_logger
-
-                logger = get_app_logger()
                 logger.info(f"[SELL_RSI CATEGORY] {d['tkr']} 매도로 인해 '{category}' 카테고리 매수 차단")
+        # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
+        elif d["state"] in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 100.0) <= rsi_sell_threshold:
+            category = etf_meta.get(d["tkr"], {}).get("category")
+            if category and category != "TBD":
+                sell_rsi_categories_today.add(category)
+                logger.info(
+                    f"[RSI WARNING CATEGORY] {d['tkr']} RSI 과매수 경고로 '{category}' 카테고리 매수 차단 (RSI점수: {d.get('rsi_score', 0):.1f})"
+                )
 
-    # 실제 보유 중인 종목 수 계산 (매도 예정 종목 제외)
-    held_count = sum(1 for d in decisions if d["state"] == "HOLD")
+    # 실제 보유 중인 종목 수 계산 (CORE 포함)
+    # HOLD + HOLD_CORE = 전체 보유 종목
+    held_count = sum(1 for d in decisions if d["state"] in {"HOLD", "HOLD_CORE"})
+    # 추가 매수 가능 슬롯 = TOPN - 전체 보유 수
     slots_to_fill = denom - held_count
 
     if risk_off_effective:
@@ -461,9 +534,6 @@ def generate_daily_recommendations_for_portfolio(
 
             # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
             if cand_category and cand_category != "TBD" and cand_category in sell_rsi_categories_today:
-                from utils.logger import get_app_logger
-
-                logger = get_app_logger()
                 logger.info(f"[BUY BLOCKED] {cand['tkr']} 매수 차단 - '{cand_category}' 카테고리가 SELL_RSI로 매도됨")
                 cand["state"], cand["row"][4] = "WAIT", "WAIT"
                 cand["row"][-1] = f"RSI 과매수 매도 카테고리 ({cand_category})"
@@ -508,6 +578,7 @@ def generate_daily_recommendations_for_portfolio(
         skip_held_categories=False,
     )
 
+    # 핵심 보유 종목은 교체 매매 대상에서 제외 (HOLD만 대상, HOLD_CORE 제외)
     current_held_stocks = [d for d in decisions if d["state"] == "HOLD"]
     # MAPS 점수 사용
     current_held_stocks.sort(key=lambda x: x.get("score", 0.0) if pd.notna(x.get("score")) else -float("inf"))
@@ -526,6 +597,18 @@ def generate_daily_recommendations_for_portfolio(
 
         wait_stock_category = etf_meta.get(best_new["tkr"], {}).get("category")
         wait_stock_category_key = _normalize_category_value(wait_stock_category)
+
+        # 핵심 보유 종목의 카테고리는 교체 매수 차단
+        core_holdings_categories = {
+            etf_meta.get(ticker, {}).get("category")
+            for ticker in valid_core_holdings
+            if etf_meta.get(ticker, {}).get("category") and etf_meta.get(ticker, {}).get("category") != "TBD"
+        }
+        if wait_stock_category and wait_stock_category != "TBD" and wait_stock_category in core_holdings_categories:
+            best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
+            best_new["row"][-1] = f"핵심 보유 카테고리 ({wait_stock_category})"
+            best_new["buy_signal"] = False
+            continue
 
         held_stock_same_category = next(
             (
@@ -562,9 +645,6 @@ def generate_daily_recommendations_for_portfolio(
 
         if ticker_to_sell:
             sell_block_for_candidate = sell_cooldown_block.get(ticker_to_sell)
-            from utils.logger import get_app_logger
-
-            logger = get_app_logger()
             logger.info(
                 f"[REPLACE CHECK] ticker_to_sell={ticker_to_sell}, "
                 f"sell_block_for_candidate={sell_block_for_candidate}, "

@@ -10,6 +10,13 @@ DECISION_CONFIG = {
         "show_slack": True,
         "background": None,
     },
+    "HOLD_CORE": {
+        "display_name": "<🔒 핵심보유>",
+        "order": 2,
+        "is_recommendation": False,
+        "show_slack": True,
+        "background": "#e8f5e9",
+    },
     "CUT_STOPLOSS": {
         "display_name": "<🚨 손절매도>",
         "order": 10,
@@ -80,6 +87,7 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
     "BUY_REPLACE": "🔄 교체매수",
     "SELL_REPLACE": "🔄 교체매도",
     "SELL_RSI": "🔥 RSI 과매수 매도",
+    "HOLD_CORE": "🔒 핵심 보유",
 }
 
 

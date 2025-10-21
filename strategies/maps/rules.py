@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Mapping
+from dataclasses import dataclass, field
+from typing import Any, List, Mapping
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,7 @@ class StrategyRules:
     portfolio_topn: int
     replace_threshold: float
     ma_type: str = "SMA"
+    core_holdings: List[str] = field(default_factory=list)
 
     @classmethod
     def from_values(
@@ -28,6 +29,7 @@ class StrategyRules:
         portfolio_topn: Any,
         replace_threshold: Any,
         ma_type: Any = None,
+        core_holdings: Any = None,
     ) -> "StrategyRules":
         try:
             ma_period_int = int(ma_period)
@@ -54,11 +56,21 @@ class StrategyRules:
         if ma_type_str not in valid_ma_types:
             raise ValueError(f"MA_TYPE은 {valid_ma_types} 중 하나여야 합니다. (입력값: {ma_type_str})")
 
+        # 핵심 보유 종목 검증
+        core_holdings_list: List[str] = []
+        if core_holdings is not None:
+            if isinstance(core_holdings, (list, tuple)):
+                core_holdings_list = [str(ticker).strip().upper() for ticker in core_holdings if ticker]
+            elif isinstance(core_holdings, str):
+                # 쉼표로 구분된 문자열 지원
+                core_holdings_list = [ticker.strip().upper() for ticker in core_holdings.split(",") if ticker.strip()]
+
         return cls(
             ma_period=ma_period_int,
             portfolio_topn=portfolio_topn_int,
             replace_threshold=replace_threshold_float,
             ma_type=ma_type_str,
+            core_holdings=core_holdings_list,
         )
 
     @classmethod
@@ -76,6 +88,7 @@ class StrategyRules:
             portfolio_topn=_resolve("PORTFOLIO_TOPN", "portfolio_topn"),
             replace_threshold=_resolve("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
+            core_holdings=_resolve("CORE_HOLDINGS", "core_holdings"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -84,6 +97,7 @@ class StrategyRules:
             "portfolio_topn": self.portfolio_topn,
             "replace_threshold": self.replace_threshold,
             "ma_type": self.ma_type,
+            "core_holdings": list(self.core_holdings),
         }
         return d
 

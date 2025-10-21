@@ -150,7 +150,4 @@ def update_stock_metadata():
 
 
 if __name__ == "__main__":
-    from utils.logger import setup_file_logger
-
-    setup_file_logger()
     update_stock_metadata()

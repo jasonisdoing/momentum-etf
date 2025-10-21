@@ -45,7 +45,6 @@ from utils.env import load_env_if_present
 from utils.notification import (
     compose_recommendation_slack_message,
     send_recommendation_slack_notification,
-    should_notify_on_schedule,
 )
 from utils.schedule_config import get_all_country_schedules
 from utils.cron_utils import normalize_cron_weekdays

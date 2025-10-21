@@ -6,25 +6,29 @@
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",
     "strategy": {
-        "expected_cagr": 93.51,
-        "backtested_date": "2025-10-19",
+        "expected_cagr": 89.32,
+        "backtested_date": "2025-10-21",
         "tuning": {
-            "MA_PERIOD": 48,
+            "MA_PERIOD": 28,
             "MA_TYPE": "SMA",
-            "PORTFOLIO_TOPN": 7,
+            "PORTFOLIO_TOPN": 6,
             "REPLACE_SCORE_THRESHOLD": 1,
-            "OVERBOUGHT_SELL_THRESHOLD": 16,
-            "COOLDOWN_DAYS": 1
+            "OVERBOUGHT_SELL_THRESHOLD": 17,
+            "COOLDOWN_DAYS": 1,
+            "CORE_HOLDINGS": [
+                "395160",
+                "426030",
+                "473640"
+            ]
         },
         "_tuning": {
-            "expected_cagr": 93.51,
-            "backtested_date": "2025-10-19",
-            "TEST_MONTHS_RANGE": 3,
-            "MA_PERIOD": 48,
+            "expected_cagr": 107.44,
+            "backtested_date": "2025-10-21",
+            "MA_PERIOD": 47,
             "MA_TYPE": "SMA",
-            "PORTFOLIO_TOPN": 7,
-            "REPLACE_SCORE_THRESHOLD": 1,
-            "OVERBOUGHT_SELL_THRESHOLD": 16,
+            "PORTFOLIO_TOPN": 6,
+            "REPLACE_SCORE_THRESHOLD": 0.5,
+            "OVERBOUGHT_SELL_THRESHOLD": 17,
             "COOLDOWN_DAYS": 1
         },
         "static": {
@@ -38,12 +42,12 @@
             "name": "Kodex 미국S&P500"
         },
         {
-            "ticker": "426030",
-            "name": "TIMEFOLIO 미국나스닥100액티브"
+            "ticker": "379810",
+            "name": "Kodex 미국나스닥100"
         },
         {
-            "ticker": "456600",
-            "name": "TIMEFOLIO 글로벌AI인공지능액티브"
+            "ticker": "426030",
+            "name": "TIMEFOLIO 미국나스닥100액티브"
         }
     ],
     "schedule": {

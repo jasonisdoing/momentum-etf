@@ -178,11 +178,12 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
         headers.append(f"{months_range}개월(%)")
     else:
         headers.append("Period(%)")
+    headers.extend(["Sharpe", "Sortino", "Calmar", "Ulcer", "CUI"])
     if include_samples:
         headers.append("Samples")
 
     # 정렬 방향 설정 (right: 오른쪽 정렬, left: 왼쪽 정렬, center: 가운데 정렬)
-    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right"]
+    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right", "right", "right", "right", "right", "right"]
     if include_samples:
         aligns.append("right")
 
@@ -205,6 +206,11 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),
             _format_table_float(row.get("period_return")),
+            _format_table_float(row.get("sharpe")),
+            _format_table_float(row.get("sortino")),
+            _format_table_float(row.get("calmar")),
+            _format_table_float(row.get("ulcer")),
+            _format_table_float(row.get("cui")),
         ]
 
         if include_samples:
@@ -409,7 +415,7 @@ def _export_debug_month(
 
 
 def _evaluate_single_combo(
-    payload: Tuple[str, int, Tuple[str, str], int, int, int, float, int, int, str, Tuple[str, ...], Mapping[str, DataFrame]]
+    payload: Tuple[str, int, Tuple[str, str], int, int, int, float, int, int, str, Tuple[str, ...], Tuple[str, ...], Mapping[str, DataFrame]]
 ) -> Tuple[str, Any, List[str]]:
     (
         account_norm,
@@ -423,6 +429,7 @@ def _evaluate_single_combo(
         cooldown_int,
         ma_type_str,
         excluded_tickers,
+        core_holdings_tuple,
         prefetched_data,
     ) = payload
 
@@ -432,6 +439,7 @@ def _evaluate_single_combo(
             portfolio_topn=int(topn_int),
             replace_threshold=float(threshold_float),
             ma_type=str(ma_type_str),
+            core_holdings=list(core_holdings_tuple) if core_holdings_tuple else [],
         )
     except ValueError as exc:
         return (
@@ -564,6 +572,9 @@ def _execute_tuning_for_months(
     encountered_missing: Set[str] = set()
     best_cagr_so_far = float("-inf")
 
+    # search_space에서 core_holdings 가져오기
+    core_holdings_from_space = search_space.get("CORE_HOLDINGS", [])
+
     payloads = [
         (
             account_norm,
@@ -577,6 +588,7 @@ def _execute_tuning_for_months(
             int(cooldown),
             str(ma_type),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
+            tuple(core_holdings_from_space) if core_holdings_from_space else tuple(),
             prefetched_data,
         )
         for ma, topn, replace, rsi, cooldown, ma_type in combos
@@ -666,6 +678,11 @@ def _execute_tuning_for_months(
         cagr_val = _safe_float(item.get("cagr_pct"), float("nan"))
         mdd_val = _safe_float(item.get("mdd_pct"), float("nan"))
         period_return_val = _safe_float(item.get("cumulative_return_pct"), float("nan"))
+        sharpe_val = _safe_float(item.get("sharpe_ratio"), float("nan"))
+        sortino_val = _safe_float(item.get("sortino_ratio"), float("nan"))
+        calmar_val = _safe_float(item.get("calmar_ratio"), float("nan"))
+        ulcer_val = _safe_float(item.get("ulcer_index"), float("nan"))
+        cui_val = _safe_float(item.get("cui"), float("nan"))
 
         raw_data_payload.append(
             {
@@ -673,6 +690,11 @@ def _execute_tuning_for_months(
                 "CAGR": _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None,
                 "MDD": _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None,
                 "period_return": _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None,
+                "sharpe_ratio": _round_float_places(sharpe_val, 2) if math.isfinite(sharpe_val) else None,
+                "sortino_ratio": _round_float_places(sortino_val, 2) if math.isfinite(sortino_val) else None,
+                "calmar_ratio": _round_float_places(calmar_val, 2) if math.isfinite(calmar_val) else None,
+                "ulcer_index": _round_float_places(ulcer_val, 2) if math.isfinite(ulcer_val) else None,
+                "cui": _round_float_places(cui_val, 2) if math.isfinite(cui_val) else None,
                 "tuning": {
                     "MA_PERIOD": int(item.get("ma_period", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
@@ -745,6 +767,22 @@ def _build_run_entry(
         cagr_display = _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None
         mdd_display = _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None
 
+        # 추가 지표 추출
+        sharpe_val = _safe_float(best.get("sharpe_ratio"), float("nan"))
+        sharpe_display = _round_float_places(sharpe_val, 2) if math.isfinite(sharpe_val) else None
+
+        sortino_val = _safe_float(best.get("sortino_ratio"), float("nan"))
+        sortino_display = _round_float_places(sortino_val, 2) if math.isfinite(sortino_val) else None
+
+        calmar_val = _safe_float(best.get("calmar_ratio"), float("nan"))
+        calmar_display = _round_float_places(calmar_val, 2) if math.isfinite(calmar_val) else None
+
+        ulcer_val = _safe_float(best.get("ulcer_index"), float("nan"))
+        ulcer_display = _round_float_places(ulcer_val, 2) if math.isfinite(ulcer_val) else None
+
+        cui_val = _safe_float(best.get("cui"), float("nan"))
+        cui_display = _round_float_places(cui_val, 2) if math.isfinite(cui_val) else None
+
         def _to_int(val: Any) -> Optional[int]:
             try:
                 return int(val)
@@ -786,6 +824,11 @@ def _build_run_entry(
                 "CAGR": cagr_display,
                 "MDD": mdd_display,
                 "period_return": period_return_display,
+                "sharpe_ratio": sharpe_display,
+                "sortino_ratio": sortino_display,
+                "calmar_ratio": calmar_display,
+                "ulcer_index": ulcer_display,
+                "cui": cui_display,
                 "tuning": tuning_snapshot,
             }
         )
@@ -1023,6 +1066,37 @@ def _compose_tuning_report(
                 cd_min, cd_max = min(cooldown_range), max(cooldown_range)
                 lines.append(f"  COOLDOWN_DAYS: {cd_min}~{cd_max}")
 
+            # CORE_HOLDINGS 표시 (빈 리스트도 표시)
+            core_holdings = search_space.get("CORE_HOLDINGS", [])
+            if core_holdings is not None:
+                if core_holdings:
+                    # 종목명 가져오기
+                    from utils.stock_list_io import get_etfs
+
+                    try:
+                        # tuning_metadata에서 country_code 추출
+                        lookup_country = tuning_metadata.get("country_code", "kor") if tuning_metadata else "kor"
+                        etf_list = get_etfs(lookup_country)
+                        ticker_to_name = {str(etf.get("ticker")): etf.get("name", "") for etf in etf_list if etf.get("ticker")}
+
+                        core_holdings_display = []
+                        for ticker in core_holdings:
+                            name = ticker_to_name.get(str(ticker), "")
+                            if name:
+                                core_holdings_display.append(f"{name}({ticker})")
+                            else:
+                                core_holdings_display.append(str(ticker))
+
+                        lines.append(f"  CORE_HOLDINGS: {', '.join(core_holdings_display)}")
+                    except Exception as e:
+                        # 종목명을 가져오지 못하면 티커만 표시
+                        logger = get_app_logger()
+                        logger.debug(f"[튜닝] CORE_HOLDINGS 종목명 조회 실패: {e}")
+                        lines.append(f"  CORE_HOLDINGS: {', '.join(map(str, core_holdings))}")
+                else:
+                    # 빈 리스트인 경우
+                    lines.append("  CORE_HOLDINGS: (없음)")
+
         # 종목 수
         ticker_count = tuning_metadata.get("ticker_count", 0)
         if ticker_count > 0:
@@ -1069,6 +1143,11 @@ def _compose_tuning_report(
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
             period_val = entry.get("period_return")
+            sharpe_val = entry.get("sharpe_ratio")
+            sortino_val = entry.get("sortino_ratio")
+            calmar_val = entry.get("calmar_ratio")
+            ulcer_val = entry.get("ulcer_index")
+            cui_val = entry.get("cui")
 
             normalized_rows.append(
                 {
@@ -1081,6 +1160,11 @@ def _compose_tuning_report(
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
+                    "sharpe": sharpe_val,
+                    "sortino": sortino_val,
+                    "calmar": calmar_val,
+                    "ulcer": ulcer_val,
+                    "cui": cui_val,
                 }
             )
 
@@ -1118,8 +1202,10 @@ def _save_intermediate_results(
 
         # Atomic rename (기존 파일 덮어쓰기)
         shutil.move(str(tmp_path), str(output_path))
-    except Exception:
-        # 중간 저장 실패는 무시 (최종 저장은 별도로 수행)
+    except Exception as e:
+        # 중간 저장 실패 로그 출력
+        logger = get_app_logger()
+        logger.warning("[튜닝] 중간 결과 저장 실패: %s", e)
         if "tmp_path" in locals() and tmp_path.exists():
             try:
                 tmp_path.unlink()
@@ -1188,6 +1274,15 @@ def run_account_tuning(
         fallback=2,
     )
 
+    # CORE_HOLDINGS 처리: tune.py에서 지정 가능, 없으면 base_rules에서 가져옴
+    core_holdings_raw = config.get("CORE_HOLDINGS")
+    if core_holdings_raw is None:
+        core_holdings = base_rules.core_holdings or []
+    elif isinstance(core_holdings_raw, (list, tuple)):
+        core_holdings = [str(v).strip() for v in core_holdings_raw if v]
+    else:
+        core_holdings = []
+
     # MA_TYPE 처리: 문자열 리스트로 받음
     ma_type_raw = config.get("MA_TYPE")
     if ma_type_raw is None:
@@ -1226,6 +1321,7 @@ def run_account_tuning(
         "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
         "COOLDOWN_DAYS": cooldown_values,
         "MA_TYPE": ma_type_values,
+        "CORE_HOLDINGS": core_holdings,
     }
 
     try:
@@ -1378,6 +1474,7 @@ def run_account_tuning(
     # 튜닝 메타데이터 생성
     tuning_metadata = {
         "combo_count": combo_count,
+        "country_code": country_code,
         "search_space": {
             "MA_RANGE": list(ma_values),
             "MA_TYPE": list(ma_type_values),
@@ -1385,6 +1482,7 @@ def run_account_tuning(
             "REPLACE_SCORE_THRESHOLD": list(replace_values),
             "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
             "COOLDOWN_DAYS": list(cooldown_values),
+            "CORE_HOLDINGS": list(core_holdings) if core_holdings else [],
         },
         "data_period": {
             "start_date": date_range_prefetch[0],
@@ -1461,6 +1559,11 @@ def run_account_tuning(
                         "CAGR": _round_float_places(entry.get("cagr_pct", 0.0), 2),
                         "MDD": _round_float_places(-entry.get("mdd_pct", 0.0), 2),
                         "period_return": _round_float_places(entry.get("cumulative_return_pct", 0.0), 2),
+                        "sharpe_ratio": _round_float_places(entry.get("sharpe_ratio", 0.0), 2),
+                        "sortino_ratio": _round_float_places(entry.get("sortino_ratio", 0.0), 2),
+                        "calmar_ratio": _round_float_places(entry.get("calmar_ratio", 0.0), 2),
+                        "ulcer_index": _round_float_places(entry.get("ulcer_index", 0.0), 2),
+                        "cui": _round_float_places(entry.get("cui", 0.0), 2),
                         "tuning": {
                             "MA_PERIOD": int(entry.get("ma_period", 0)),
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),

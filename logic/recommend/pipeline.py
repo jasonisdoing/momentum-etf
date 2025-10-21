@@ -1001,9 +1001,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
         # 당일 매수 체결된 종목 처리
         if ticker in buy_traded_today:
-            state = "HOLD"
-            new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
-            phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
+            # HOLD_CORE는 유지하고 항상 "🔒 핵심 보유" 표시
+            if state == "HOLD_CORE":
+                phrase = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
+            else:
+                state = "HOLD"
+                new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+                phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
             if holding_days_val == 0:
                 holding_days_val = 1
         # 추천에 따라 오늘 신규 매수해야 할 종목
@@ -1028,9 +1032,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 holding_days_val = 1
         # 이미 보유 중인 종목이 오늘 신규 편입된 경우
         elif is_currently_held and bought_today:
-            state = "HOLD"
-            new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
-            phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
+            # HOLD_CORE는 유지하고 항상 "🔒 핵심 보유" 표시
+            if state == "HOLD_CORE":
+                phrase = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
+            else:
+                state = "HOLD"
+                new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+                phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
             if holding_days_val == 0:
                 holding_days_val = 1
 
@@ -1126,7 +1134,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     category_limit = max_per_category if max_per_category and max_per_category > 0 else 1
     for item in results:
         # 매도 예정 종목은 카테고리 카운트에서 제외
-        if not should_exclude_from_category_count(item["state"]) and item["state"] in {"HOLD", "BUY", "BUY_REPLACE"}:
+        # HOLD + HOLD_CORE = 보유 종목
+        if not should_exclude_from_category_count(item["state"]) and item["state"] in {"HOLD", "HOLD_CORE", "BUY", "BUY_REPLACE"}:
             category_raw = item.get("category")
             category = str(category_raw or "").strip()
             if category:
