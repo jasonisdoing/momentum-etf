@@ -336,7 +336,7 @@
             {
                 "ticker": "419420",
                 "name": "KODEX 미국클린에너지나스닥",
-                "recommend_enabled": true,
+                "recommend_enabled": false,
                 "listing_date": "2022-03-22",
                 "1_week_avg_volume": 25664,
                 "1_week_avg_turnover": 222449646
@@ -344,7 +344,7 @@
             {
                 "ticker": "434730",
                 "name": "HANARO 원자력iSelect",
-                "recommend_enabled": true,
+                "recommend_enabled": false,
                 "listing_date": "2022-06-28",
                 "1_week_avg_volume": 857417,
                 "1_week_avg_turnover": 35608986911
@@ -352,7 +352,7 @@
             {
                 "ticker": "0051G0",
                 "name": "SOL 미국원자력SMR",
-                "recommend_enabled": true,
+                "recommend_enabled": false,
                 "listing_date": "2025-05-20",
                 "1_week_avg_volume": 1574429,
                 "1_week_avg_turnover": 31572618804
