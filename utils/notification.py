@@ -274,11 +274,9 @@ def compose_recommendation_slack_message(
 
     if held_count is None:
         # 현재 물리적으로 보유 중인 종목 수 (매도 예정 포함)
-        held_count = sum(
-            1
-            for item in recommendations
-            if str(item.get("state") or "").upper() in {"HOLD", "HOLD_CORE", "SELL_RSI", "SELL_REPLACE", "SELL_TREND", "CUT_STOPLOSS"}
-        )
+        from logic.common import count_current_holdings
+
+        held_count = count_current_holdings(recommendations)
     if portfolio_topn is None:
         topn_candidates = [
             getattr(report, "portfolio_topn", None),
