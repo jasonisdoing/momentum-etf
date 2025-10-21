@@ -467,13 +467,23 @@ def generate_daily_recommendations_for_portfolio(
     wait_candidates_raw.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
     # SELL_RSI로 매도하는 카테고리 추적 (같은 날 매수 금지)
+    # 매도 전에도 RSI 과매수 경고가 있는 보유 종목의 카테고리는 차단
     sell_rsi_categories_today: Set[str] = set()
     for d in decisions:
+        # 1. 이미 SELL_RSI 상태인 경우
         if d["state"] == "SELL_RSI":
             category = etf_meta.get(d["tkr"], {}).get("category")
             if category and category != "TBD":
                 sell_rsi_categories_today.add(category)
                 logger.info(f"[SELL_RSI CATEGORY] {d['tkr']} 매도로 인해 '{category}' 카테고리 매수 차단")
+        # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
+        elif d["state"] in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 100.0) <= rsi_sell_threshold:
+            category = etf_meta.get(d["tkr"], {}).get("category")
+            if category and category != "TBD":
+                sell_rsi_categories_today.add(category)
+                logger.info(
+                    f"[RSI WARNING CATEGORY] {d['tkr']} RSI 과매수 경고로 '{category}' 카테고리 매수 차단 (RSI점수: {d.get('rsi_score', 0):.1f})"
+                )
 
     # 실제 보유 중인 종목 수 계산 (CORE 포함)
     # HOLD + HOLD_CORE = 전체 보유 종목

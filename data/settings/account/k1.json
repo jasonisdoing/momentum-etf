@@ -42,12 +42,12 @@
             "name": "Kodex 미국S&P500"
         },
         {
-            "ticker": "426030",
-            "name": "TIMEFOLIO 미국나스닥100액티브"
+            "ticker": "379810",
+            "name": "Kodex 미국나스닥100"
         },
         {
-            "ticker": "456600",
-            "name": "TIMEFOLIO 글로벌AI인공지능액티브"
+            "ticker": "426030",
+            "name": "TIMEFOLIO 미국나스닥100액티브"
         }
     ],
     "schedule": {
