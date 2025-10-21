@@ -7,8 +7,8 @@
                 "name": "VanEck Gold Miners ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 136656,
-                "1_week_avg_turnover": 16917089
+                "1_week_avg_volume": 138971,
+                "1_week_avg_turnover": 17197554
             }
         ]
     },
@@ -20,16 +20,16 @@
                 "name": "iShares China Large-Cap ETF (AU)",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 38854,
-                "1_week_avg_turnover": 2343463
+                "1_week_avg_volume": 39758,
+                "1_week_avg_turnover": 2398572
             },
             {
                 "ticker": "ASX:CNEW",
                 "name": "VanEck China New Economy ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 52396,
-                "1_week_avg_turnover": 421265
+                "1_week_avg_volume": 53776,
+                "1_week_avg_turnover": 432695
             }
         ]
     },
@@ -41,24 +41,24 @@
                 "name": "BetaShares Asia Technology Tigers ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 446746,
-                "1_week_avg_turnover": 6466278
+                "1_week_avg_volume": 457710,
+                "1_week_avg_turnover": 6627894
             },
             {
                 "ticker": "ASX:FANG",
                 "name": "Global X FANG+ ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 372886,
-                "1_week_avg_turnover": 13555987
+                "1_week_avg_volume": 376177,
+                "1_week_avg_turnover": 13677054
             },
             {
                 "ticker": "ASX:HACK",
                 "name": "BetaShares Global Cybersecurity ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 168463,
-                "1_week_avg_turnover": 2608607
+                "1_week_avg_volume": 176033,
+                "1_week_avg_turnover": 2726212
             }
         ]
     },
@@ -70,8 +70,8 @@
                 "name": "iShares Asia 50 ETF (AU)",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 10283,
-                "1_week_avg_turnover": 1491229
+                "1_week_avg_volume": 10708,
+                "1_week_avg_turnover": 1554680
             }
         ]
     },
@@ -83,24 +83,24 @@
                 "name": "iShares MSCI Emerging Markets ETF (AU)",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 28780,
-                "1_week_avg_turnover": 2392673
+                "1_week_avg_volume": 30394,
+                "1_week_avg_turnover": 2529626
             },
             {
                 "ticker": "ASX:FEMX",
                 "name": "Fidelity Global Emerging Markets ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 47363,
-                "1_week_avg_turnover": 343125
+                "1_week_avg_volume": 48700,
+                "1_week_avg_turnover": 352989
             },
             {
                 "ticker": "ASX:VGE",
                 "name": "Vanguard FTSE Emerging Markets Shares ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 22796,
-                "1_week_avg_turnover": 2092465
+                "1_week_avg_volume": 23683,
+                "1_week_avg_turnover": 2175216
             }
         ]
     },
@@ -112,16 +112,16 @@
                 "name": "iShares Global 100 ETF (AU)",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 34683,
-                "1_week_avg_turnover": 6332202
+                "1_week_avg_volume": 35905,
+                "1_week_avg_turnover": 6556939
             },
             {
                 "ticker": "ASX:VGS",
                 "name": "Vanguard MSCI Index International Shares ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 164716,
-                "1_week_avg_turnover": 25114820
+                "1_week_avg_volume": 168151,
+                "1_week_avg_turnover": 25645070
             }
         ]
     },
@@ -133,8 +133,8 @@
                 "name": "iShares MSCI South Korea ETF (AU)",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 24230,
-                "1_week_avg_turnover": 3348013
+                "1_week_avg_volume": 24372,
+                "1_week_avg_turnover": 3367596
             }
         ]
     },
@@ -146,24 +146,24 @@
                 "name": "Betashares Japan Currency Hedged ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 28487,
-                "1_week_avg_turnover": 666983
+                "1_week_avg_volume": 29669,
+                "1_week_avg_turnover": 695544
             },
             {
                 "ticker": "ASX:IJP",
                 "name": "iShares MSCI Japan ETF (AU)",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 16824,
-                "1_week_avg_turnover": 2091602
+                "1_week_avg_volume": 18123,
+                "1_week_avg_turnover": 2254026
             },
             {
                 "ticker": "ASX:VAE",
                 "name": "Vanguard FTSE Asia ex Japan Shares Index ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 11043,
-                "1_week_avg_turnover": 1051781
+                "1_week_avg_volume": 11175,
+                "1_week_avg_turnover": 1064522
             }
         ]
     },
@@ -175,16 +175,16 @@
                 "name": "BetaShares S&P/ASX Australian Technology ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 38953,
-                "1_week_avg_turnover": 1229330
+                "1_week_avg_volume": 39701,
+                "1_week_avg_turnover": 1252848
             },
             {
                 "ticker": "ASX:ISO",
                 "name": "iShares S&P/ASX Small Ordinaries ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 43175,
-                "1_week_avg_turnover": 252872
+                "1_week_avg_volume": 43432,
+                "1_week_avg_turnover": 254355
             }
         ]
     },
@@ -196,24 +196,24 @@
                 "name": "BetaShares NASDAQ 100 ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 291236,
-                "1_week_avg_turnover": 16317541
+                "1_week_avg_volume": 297015,
+                "1_week_avg_turnover": 16646152
             },
             {
                 "ticker": "ASX:HNDQ",
                 "name": "Betashares Nasdaq 100 Currency Hedged ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 28949,
-                "1_week_avg_turnover": 1409277
+                "1_week_avg_volume": 30342,
+                "1_week_avg_turnover": 1478261
             },
             {
                 "ticker": "ASX:IVV",
                 "name": "iShares S&P 500 ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 384178,
-                "1_week_avg_turnover": 26161960
+                "1_week_avg_volume": 390016,
+                "1_week_avg_turnover": 26564398
             }
         ]
     },
@@ -225,8 +225,8 @@
                 "name": "Betashares Global Banks Currency Hedged ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 45458,
-                "1_week_avg_turnover": 489787
+                "1_week_avg_volume": 47559,
+                "1_week_avg_turnover": 512714
             }
         ]
     },
@@ -238,24 +238,24 @@
                 "name": "VanEck Australian Resources ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 39385,
-                "1_week_avg_turnover": 1624381
+                "1_week_avg_volume": 40171,
+                "1_week_avg_turnover": 1656331
             },
             {
                 "ticker": "ASX:QRE",
                 "name": "BetaShares Australian Resources Sector ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 117331,
-                "1_week_avg_turnover": 973098
+                "1_week_avg_volume": 118738,
+                "1_week_avg_turnover": 984841
             },
             {
                 "ticker": "ASX:OZR",
                 "name": "SPDR S&P/ASX 200 Resources ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 28699,
-                "1_week_avg_turnover": 407496
+                "1_week_avg_volume": 29132,
+                "1_week_avg_turnover": 413663
             }
         ]
     },
@@ -267,16 +267,16 @@
                 "name": "BetaShares Global Robotics and Artificial Intelligence ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 84062,
-                "1_week_avg_turnover": 1332618
+                "1_week_avg_volume": 86044,
+                "1_week_avg_turnover": 1363844
             },
             {
                 "ticker": "ASX:ROBO",
                 "name": "Global X ROBO Global Robotics & Automation ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 18463,
-                "1_week_avg_turnover": 1678348
+                "1_week_avg_volume": 18592,
+                "1_week_avg_turnover": 1690230
             }
         ]
     },
@@ -288,8 +288,8 @@
                 "name": "Global X Battery Tech & Lithium ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 11538,
-                "1_week_avg_turnover": 1466434
+                "1_week_avg_volume": 11890,
+                "1_week_avg_turnover": 1511303
             }
         ]
     },
@@ -301,216 +301,216 @@
                 "name": "BetaShares Global Sustainability Leaders ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 113882,
-                "1_week_avg_turnover": 1892002
+                "1_week_avg_volume": 177486,
+                "1_week_avg_turnover": 2959046
             },
             {
                 "ticker": "ASX:FAIR",
                 "name": "BetaShares Australian Sustainability Leaders ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 35784,
-                "1_week_avg_turnover": 784766
+                "1_week_avg_volume": 38685,
+                "1_week_avg_turnover": 848762
             },
             {
                 "ticker": "ASX:IHOO",
                 "name": "iShares Global 100 AUD Hedged ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 39135,
-                "1_week_avg_turnover": 8403857
+                "1_week_avg_volume": 39287,
+                "1_week_avg_turnover": 8437017
             },
             {
                 "ticker": "ASX:ESTX",
                 "name": "Global X EURO STOXX 50 ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 6022,
-                "1_week_avg_turnover": 662964
+                "1_week_avg_volume": 6143,
+                "1_week_avg_turnover": 676541
             },
             {
                 "ticker": "ASX:MVS",
                 "name": "VanEck Small Companies Masters ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 62628,
-                "1_week_avg_turnover": 1449315
+                "1_week_avg_volume": 63062,
+                "1_week_avg_turnover": 1459602
             },
             {
                 "ticker": "ASX:VEU",
                 "name": "Vanguard All-World ex-US Shares Index ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 69465,
-                "1_week_avg_turnover": 7703670
+                "1_week_avg_volume": 71706,
+                "1_week_avg_turnover": 7954818
             },
             {
                 "ticker": "ASX:VESG",
                 "name": "Vanguard Ethically Conscious International Shares Index ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 12672,
-                "1_week_avg_turnover": 1411976
+                "1_week_avg_volume": 12770,
+                "1_week_avg_turnover": 1422839
             },
             {
                 "ticker": "ASX:GEAR",
                 "name": "Betashares Geared Australian Equities Complex ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 169680,
-                "1_week_avg_turnover": 6436497
+                "1_week_avg_volume": 172099,
+                "1_week_avg_turnover": 6529589
             },
             {
                 "ticker": "ASX:F100",
                 "name": "BetaShares FTSE 100 ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 70719,
-                "1_week_avg_turnover": 1033254
+                "1_week_avg_volume": 179683,
+                "1_week_avg_turnover": 2629614
             },
             {
                 "ticker": "ASX:SYI",
                 "name": "SPDR MSCI Australia Select High Dividend Yield ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 35096,
-                "1_week_avg_turnover": 1054216
+                "1_week_avg_volume": 36556,
+                "1_week_avg_turnover": 1098379
             },
             {
                 "ticker": "ASX:MVB",
                 "name": "VanEck Australian Banks ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 13906,
-                "1_week_avg_turnover": 611383
+                "1_week_avg_volume": 14639,
+                "1_week_avg_turnover": 644224
             },
             {
                 "ticker": "ASX:MVE",
                 "name": "VanEck S&P/ASX MidCap ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 16540,
-                "1_week_avg_turnover": 775926
+                "1_week_avg_volume": 19706,
+                "1_week_avg_turnover": 924615
             },
             {
                 "ticker": "ASX:INES",
                 "name": "Intelligent Investor Ethical Share ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 15258,
-                "1_week_avg_turnover": 58823
+                "1_week_avg_volume": 8839,
+                "1_week_avg_turnover": 33964
             },
             {
                 "ticker": "ASX:QFN",
                 "name": "BetaShares Australian Financials Sector ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 8393,
-                "1_week_avg_turnover": 153888
+                "1_week_avg_volume": 8407,
+                "1_week_avg_turnover": 154126
             },
             {
                 "ticker": "ASX:IHVV",
                 "name": "iShares S&P 500 AUD Hedged ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 136243,
-                "1_week_avg_turnover": 8241448
+                "1_week_avg_volume": 138710,
+                "1_week_avg_turnover": 8392435
             },
             {
                 "ticker": "ASX:IEU",
                 "name": "iShares Europe ETF (AU)",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 16026,
-                "1_week_avg_turnover": 1603172
+                "1_week_avg_volume": 16258,
+                "1_week_avg_turnover": 1627001
             },
             {
                 "ticker": "ASX:DHHF",
                 "name": "BetaShares Diversified All Growth ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 73926,
-                "1_week_avg_turnover": 2958426
+                "1_week_avg_volume": 75760,
+                "1_week_avg_turnover": 3032844
             },
             {
                 "ticker": "ASX:IHD",
                 "name": "iShares S&P/ASX Dividend Opportunities ESG Screened ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 21259,
-                "1_week_avg_turnover": 344111
+                "1_week_avg_volume": 22023,
+                "1_week_avg_turnover": 356682
             },
             {
                 "ticker": "ASX:VEQ",
                 "name": "Vanguard FTSE Europe Shares ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 14025,
-                "1_week_avg_turnover": 1228798
+                "1_week_avg_volume": 14600,
+                "1_week_avg_turnover": 1279407
             },
             {
                 "ticker": "ASX:VVLU",
                 "name": "Vanguard Global Value Equity Active ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 50125,
-                "1_week_avg_turnover": 3851349
+                "1_week_avg_volume": 50769,
+                "1_week_avg_turnover": 3901437
             },
             {
                 "ticker": "ASX:ZYAU",
                 "name": "Global X S&P/ASX 200 High Dividend ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 44790,
-                "1_week_avg_turnover": 438159
+                "1_week_avg_volume": 44977,
+                "1_week_avg_turnover": 439969
             },
             {
                 "ticker": "ASX:VDHG",
                 "name": "Vanguard Diversified High Growth Index ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 65710,
-                "1_week_avg_turnover": 4878224
+                "1_week_avg_volume": 67428,
+                "1_week_avg_turnover": 5007357
             },
             {
                 "ticker": "ASX:RDV",
                 "name": "Russell Investments High Dividend Australian Shares ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 5984,
-                "1_week_avg_turnover": 209662
+                "1_week_avg_volume": 6756,
+                "1_week_avg_turnover": 237049
             },
             {
                 "ticker": "ASX:VSO",
                 "name": "Vanguard MSCI Australian Small Companies Index ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 21693,
-                "1_week_avg_turnover": 1713169
+                "1_week_avg_volume": 22371,
+                "1_week_avg_turnover": 1766600
             },
             {
                 "ticker": "ASX:IHWL",
                 "name": "iShares Core MSCI World ex Australia ESG (AUD Hedged) ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 17064,
-                "1_week_avg_turnover": 1015284
+                "1_week_avg_volume": 17757,
+                "1_week_avg_turnover": 1057011
             },
             {
                 "ticker": "ASX:VISM",
                 "name": "Vanguard MSCI International Small Companies Index ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 17269,
-                "1_week_avg_turnover": 1274228
+                "1_week_avg_volume": 18371,
+                "1_week_avg_turnover": 1355783
             },
             {
                 "ticker": "ASX:VGAD",
                 "name": "Vanguard MSCI Index International Shares (Hedged) ETF",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-01",
-                "1_week_avg_volume": 72882,
-                "1_week_avg_turnover": 8467325
+                "1_week_avg_volume": 77603,
+                "1_week_avg_turnover": 9021118
             }
         ]
     }
