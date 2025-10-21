@@ -313,12 +313,7 @@
                 "listing_date": "2024-07-09",
                 "1_week_avg_volume": 2973548,
                 "1_week_avg_turnover": 54966696285
-            }
-        ]
-    },
-    {
-        "category": "수소",
-        "tickers": [
+            },
             {
                 "ticker": "417450",
                 "name": "RISE 글로벌수소경제",
@@ -326,12 +321,7 @@
                 "listing_date": "2022-02-15",
                 "1_week_avg_volume": 84278,
                 "1_week_avg_turnover": 1104188130
-            }
-        ]
-    },
-    {
-        "category": "클린에너지",
-        "tickers": [
+            },
             {
                 "ticker": "399580",
                 "name": "RISE 글로벌클린에너지",
@@ -347,12 +337,7 @@
                 "listing_date": "2022-03-22",
                 "1_week_avg_volume": 30787,
                 "1_week_avg_turnover": 262286392
-            }
-        ]
-    },
-    {
-        "category": "원자력",
-        "tickers": [
+            },
             {
                 "ticker": "434730",
                 "name": "HANARO 원자력iSelect",
