@@ -163,11 +163,13 @@ def run_account_backtest(
             portfolio_topn=strategy_override.portfolio_topn,
             replace_threshold=strategy_override.replace_threshold,
             ma_type=strategy_override.ma_type,
+            core_holdings=strategy_override.core_holdings,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
+        strategy_settings["CORE_HOLDINGS"] = strategy_rules.core_holdings
 
     months_range = _resolve_months_range(months_range, override_settings)
     end_date = _resolve_end_date(country_code, override_settings)
@@ -489,6 +491,7 @@ def _build_backtest_kwargs(
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
         "rsi_sell_threshold": rsi_sell_threshold,
+        "core_holdings": strategy_rules.core_holdings,
         "quiet": quiet,
     }
 

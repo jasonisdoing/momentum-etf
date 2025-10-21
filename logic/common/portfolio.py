@@ -35,9 +35,9 @@ def get_held_categories_excluding_sells(
         if state in sell_states:
             continue
 
-        # HOLD 상태이거나, 보유 중인 종목만 포함
+        # HOLD 또는 HOLD_CORE 상태이거나, 보유 중인 종목만 포함
         is_held = False
-        if state == "HOLD":
+        if state in {"HOLD", "HOLD_CORE"}:
             is_held = True
         elif holdings and get_ticker_func:
             ticker = get_ticker_func(item)

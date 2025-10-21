@@ -16,21 +16,22 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
         "_설명": "최소한의 최적 범위",
-        "MA_RANGE": np.arange(30, 51, 1),
+        "MA_RANGE": np.arange(30, 41, 1),
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [3, 4],
-        "REPLACE_SCORE_THRESHOLD": [0.5, 1, 1.5],
+        "REPLACE_SCORE_THRESHOLD": [1],
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(5, 15, 1),  # 5~25
-        "COOLDOWN_DAYS": [1, 2],
+        "CORE_HOLDINGS": ["ASX:GDX"],
+        "COOLDOWN_DAYS": [1],
     },
     "kor": {
         "_설명": "최소한의 최적 범위",
-        "MA_RANGE": np.arange(45, 51, 1),
-        # "MA_RANGE": [15],
+        "MA_RANGE": np.arange(20, 61, 1),
         "MA_TYPE": ["SMA"],
-        "PORTFOLIO_TOPN": [6, 7],
+        "PORTFOLIO_TOPN": [5, 6, 7, 8],
         "REPLACE_SCORE_THRESHOLD": [0.5, 1, 1.5],
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 15~25
+        "CORE_HOLDINGS": ["395160", "426030", "473640"],
         "COOLDOWN_DAYS": [1],
     },
     # "kor": {
