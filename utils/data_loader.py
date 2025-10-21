@@ -586,7 +586,7 @@ def fetch_ohlcv(
     )
 
     if df is None or df.empty:
-        logger.warning("%s (%s) 가격 데이터를 가져오지 못했습니다.", ticker, country_code.upper())
+        logger.debug("%s (%s) 가격 데이터를 가져오지 못했습니다.", ticker, country_code.upper())
         return None
 
     return df
@@ -877,13 +877,25 @@ def _fetch_ohlcv_core(
             return None
         try:
             with _silence_yfinance_logs():
-                df = yf.download(
-                    ticker,
-                    start=start_dt,
-                    end=end_dt + pd.Timedelta(days=1),
-                    auto_adjust=True,
-                    progress=False,
-                )
+                import signal
+
+                def timeout_handler(signum, frame):
+                    raise TimeoutError("yfinance download timeout")
+
+                # 30초 타임아웃 설정
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(30)
+
+                try:
+                    df = yf.download(
+                        ticker,
+                        start=start_dt,
+                        end=end_dt + pd.Timedelta(days=1),
+                        auto_adjust=True,
+                        progress=False,
+                    )
+                finally:
+                    signal.alarm(0)  # 타임아웃 해제
             if df.empty:
                 return None
             if isinstance(df.columns, pd.MultiIndex):
@@ -894,6 +906,13 @@ def _fetch_ohlcv_core(
             if df.index.tz is not None:
                 df.index = df.index.tz_localize(None)
             return df
+        except TimeoutError as e:
+            logger.warning("%s 데이터 조회 타임아웃 (30초): %s", ticker, e)
+            if existing_df is not None and not existing_df.empty:
+                fallback_df = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
+                if not fallback_df.empty:
+                    return fallback_df
+            return None
         except Exception as e:
             error_msg = str(e)
             if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:

@@ -220,7 +220,28 @@ python scripts/optimize_regime.py <account_id>
 python scripts/update_price_cache.py --country all --start 2020-01-01
 ```
 
-### 7) 시장 레짐 상태 확인
+### 7) 최적 룩백 기간 탐색 (Walk-Forward Analysis)
+
+롤링 방식으로 최적의 파라미터 최적화 룩백 기간을 찾습니다.
+
+```bash
+# 기본 실행 (최근 12개월, 3/6/9/12/18/24개월 룩백 기간 테스트)
+python scripts/optimize_lookback.py k1
+
+# 커스텀 설정 (코드 내 DEFAULT_LOOKBACK_PERIODS 수정)
+# DEFAULT_LOOKBACK_PERIODS = [3, 6, 9, 12, 18, 24]
+```
+
+**결과 예시:**
+
+```
+룩백기간    평균수익률  승률(%)  평균Sharpe  평균MDD
+참조 3개월  +2.1%      58%      0.85       -8.2%
+참조 6개월  +3.4%      67%      1.12       -6.5%  ← 최적
+참조 12개월 +2.3%      50%      0.78       -9.3%
+```
+
+### 8) 시장 레짐 상태 확인
 
 현재 시장 레짐 상태를 CLI에서 확인합니다.
 
@@ -228,7 +249,7 @@ python scripts/update_price_cache.py --country all --start 2020-01-01
 python scripts/regime_check.py
 ```
 
-### 8) 급등주 찾기 (선택사항)
+### 9) 급등주 찾기 (선택사항)
 
 pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 찾아봅니다.
 

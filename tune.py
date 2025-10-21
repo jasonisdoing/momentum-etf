@@ -20,7 +20,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [3, 4],
         "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 15~25
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),
         "CORE_HOLDINGS": ["ASX:GDX"],
         "COOLDOWN_DAYS": [1],
     },
@@ -30,7 +30,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [6, 7],
         "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 15~25
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),
         "CORE_HOLDINGS": ["395160", "426030", "473640"],
         "COOLDOWN_DAYS": [1],
     },
