@@ -336,7 +336,7 @@
             {
                 "ticker": "419420",
                 "name": "KODEX 미국클린에너지나스닥",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2022-03-22",
                 "1_week_avg_volume": 25664,
                 "1_week_avg_turnover": 222449646
