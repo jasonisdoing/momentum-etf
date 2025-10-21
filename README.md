@@ -57,24 +57,29 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 ### 1) Python 가상환경 구성 (권장)
 
 #### (A) pyenv + pyenv-virtualenv 사용
+
 1. pyenv 설치 (macOS/Homebrew 예시)
+
    ```bash
    brew install pyenv pyenv-virtualenv
    ```
 
 2. 쉘 초기화 스크립트에 pyenv 설정 추가 (예: `~/.zshrc`)
+
    ```bash
    eval "$(pyenv init -)"
    eval "$(pyenv virtualenv-init -)"
    ```
 
 3. 이 저장소에서 사용할 Python 버전을 설치하고 가상환경 생성
+
    ```bash
    pyenv install 3.12.11  # 원하는 버전으로 변경 가능
    pyenv virtualenv 3.12.11 momentum-etf
    ```
 
 4. 프로젝트 디렉터리에서 로컬 가상환경 지정 후 의존성 설치
+
    ```bash
    cd momentum-etf
    pyenv local momentum-etf
@@ -82,6 +87,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
    ```
 
 #### (B) 표준 venv 사용
+
 ```bash
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
@@ -89,26 +95,35 @@ pip install -r requirements.txt
 ```
 
 ### 2) 데이터베이스 준비
+
 - **MongoDB**: 연결 정보(`MONGO_DB_CONNECTION_STRING`)를 환경 변수에 설정
 
 ### 3) 환경 변수 설정 (선택사항)
+
 `.env` 파일을 생성하여 다음 변수들을 설정할 수 있습니다:
+
 ```env
 MONGO_DB_CONNECTION_STRING=mongodb://localhost:27017/momentum_etf
 ```
 
 ### 4) 서버 시간대 설정 (필수)
+
 배포 서버의 시스템 시간이 KST(Asia/Seoul)와 동기화되어 있어야 추천 기준일과 로그 파일이 올바르게 생성됩니다.
 
 - **시간대 지정**
+
   ```bash
   sudo timedatectl set-timezone Asia/Seoul
   ```
+
 - **NTP 동기화 활성화**
+
   ```bash
   sudo timedatectl set-ntp true
   ```
+
 - **설정 확인**
+
   ```bash
   timedatectl status
   ```
@@ -118,7 +133,9 @@ MONGO_DB_CONNECTION_STRING=mongodb://localhost:27017/momentum_etf
 ## 주요 사용법
 
 ### 1) 웹앱으로 현황 확인
+
 웹 브라우저를 통해 오늘의 현황을 시각적으로 확인하고, 거래 내역, 종목 등 데이터를 관리합니다.
+
 - `/` : 대시보드(빈 페이지)
 - `/<account_id>` : 계정별 추천 페이지 (로그인 불필요)
 - `/admin` : 거래 관리 페이지 (로그인 필요)
@@ -129,6 +146,7 @@ python run.py
 ```
 
 ### 2) 실시간 추천 조회 (CLI)
+
 과거 시뮬레이션 없이 "현재 보유 + 오늘 추천"를 바탕으로 다음 거래일에 대한 매매 추천를 제안합니다.
 
 ```bash
@@ -136,6 +154,7 @@ python recommend.py <account_id> [--date YYYY-MM-DD] [--output 경로]
 ```
 
 ### 3) 백테스트 실행 (CLI)
+
 과거 구간에 대해 백테스트를 실행합니다.
 
 ```bash
@@ -143,6 +162,7 @@ python backtest.py <account_id> [--output 경로]
 ```
 
 ### 4) 파라미터 튜닝 (CLI)
+
 `tune.py`를 통해 파라미터 튜닝을 실행하여 각 전략의 최적 파라미터를 찾습니다.
 
 ```bash
@@ -150,6 +170,7 @@ python tune.py <account_id> [--output 경로]
 ```
 
 **주의사항:**
+
 - 매우 많은 조합을 테스트하므로 실행에 오랜 시간이 걸릴 수 있습니다
 - 스크립트 상단에서 테스트할 파라미터 범위를 조절할 수 있습니다
 - 최종적으로 최고 CAGR, 최저 MDD, 최고 Calmar Ratio(위험 조정 수익률) 등을 기록한 파라미터와 성과를 각각 출력합니다
@@ -170,6 +191,7 @@ python tune.py <account_id> [--output 경로]
   - 트리거: `python tune.py <account_id>` 실행 시 자동 생성
 
 ### 5) 시장 레짐 파라미터 최적화
+
 시장 레짐 필터의 MA 기간과 위험 시 투자 비중을 최적화합니다.
 
 ```bash
@@ -177,22 +199,25 @@ python scripts/optimize_regime.py <account_id>
 ```
 
 **설정 방법:**
+
 - `scripts/optimize_regime.py` 상단의 `OPTIMIZE_CONFIG`에서 계정별 탐색 범위 설정
 - 결과는 `data/results/optimize_regime_{account_id}_{날짜}.log`에 저장
 
-
 ### 6) 스케줄러로 자동 실행 (APScheduler)
+
 장 마감 이후 자동으로 현황을 계산하고(교체매매 추천 포함) 슬랙(Slack)으로 알림을 보낼 수 있습니다.
 
 1. 의존성 설치: `pip install -r requirements.txt`
 2. 실행: `python aps.py`
 
 가격 캐시만 따로 갱신하려면:
+
 ```bash
 python scripts/update_price_cache.py --country all --start 2020-01-01
 ```
 
 ### 7) 시장 레짐 상태 확인
+
 현재 시장 레짐 상태를 CLI에서 확인합니다.
 
 ```bash
@@ -200,6 +225,7 @@ python scripts/regime_check.py
 ```
 
 ### 8) 급등주 찾기 (선택사항)
+
 pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 찾아봅니다.
 
 ```bash
@@ -209,6 +235,7 @@ python scripts/find.py --type etf --min-change 3.0
 ## 시스템 아키텍처
 
 ### 핵심 개념
+
 이 시스템은 **ETF 모멘텀 추세 추종 전략**을 기반으로 한 반자동 포트폴리오 운용 시스템입니다.
 이동평균선 대비 가격 위치, 최근 수익률, 연속 상승 일수 등을 종합해 ETF별 점수를 계산하고,
 상위 종목을 자동으로 추천하며 시장 위험을 감지하여 리스크를 관리합니다.
@@ -216,24 +243,28 @@ python scripts/find.py --type etf --min-change 3.0
 ### 주요 컴포넌트
 
 #### 1. 추세 분석 엔진 (MAPS Strategy)
+
 - **위치**: `strategies/maps/`
 - **기능**: 이동평균 기반 모멘텀 점수 계산
 - **입력**: OHLCV 데이터, MA 기간, 포트폴리오 크기
 - **출력**: ETF별 추천 점수 및 포지션 상태
 
 #### 2. RSI 과매수 감지
+
 - **위치**: `strategies/rsi/`
 - **기능**: RSI 지표로 과열 종목 감지 및 매도 신호 생성
 - **임계값**: 계정별 설정 가능 (일반적으로 5~30)
 
 #### 3. 시장 레짐 모니터링
+
 - **위치**: `logic/recommend/market.py`
 - **기능**: 주요 지수(S&P 500, NASDAQ 등)의 이동평균 대비 위치 추적
-- **동작**: 
+- **동작**:
   - 시장 위험 시: 신규 매수 차단 또는 투자 비중 축소
   - 시장 안정 시: 정상 운영
 
 #### 4. 포지션 관리 시스템
+
 ETF별로 다음 상태를 추적하고 관리합니다:
 
 | 상태 | 설명 | 트리거 조건 |
@@ -248,6 +279,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 | `SELL_REPLACE` | 교체 매도 | 더 나은 후보로 교체 |
 
 #### 5. 리스크 관리 레이어
+
 다층 방어 체계로 리스크를 제어합니다:
 
 - **카테고리 중복 방지**: 동일 섹터 ETF 중복 편입 차단
@@ -280,18 +312,21 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 시스템은 세 가지 방식으로 성과를 측정합니다:
 
 #### (1) 백테스트
+
 - **목적**: 전략 검증 및 파라미터 최적화
 - **가격**: 다음날 시초가
 - **슬리피지**: 한국 0.5%, 호주 1%, 미국 0.3%
 - **특징**: 실제보다 불리한 조건으로 보수적 추정
 
 #### (2) 실제 거래 수익률 (Momentum ETF)
+
 - **목적**: 실제 투자 성과 측정
 - **가격**: 거래일 종가
 - **슬리피지**: 없음 (벤치마크와 동일 조건)
 - **리밸런싱**: 동적 균등 분배
 
 #### (3) 벤치마크 (Buy & Hold)
+
 - **목적**: 단순 보유 전략 대비 성과 비교
 - **가격**: 시작일 종가 → 최신 종가
 - **슬리피지**: 없음
@@ -316,7 +351,9 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 ## 설정 체계
 
 ### 공통 설정
+
 모든 국가가 동일하게 사용하는 전역 파라미터를 `data/settings/common.py`에서 관리합니다:
+
 - `COOLDOWN_DAYS`: 거래 쿨다운 기간
 - `MARKET_REGIME_FILTER_TICKER_MAIN`: 전략에 적용되는 주요 레짐 필터 지수 티커
 - `MARKET_REGIME_FILTER_TICKERS_AUX`: 대시보드에 참고용으로 노출할 보조 지수 리스트
@@ -324,9 +361,11 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 - `MARKET_REGIME_FILTER_COUNTRY`: 레짐 필터 데이터 조회에 사용할 시장 코드(`kor`, `us` 등)
 
 ### 계정별 전략 파라미터
+
 각 계정의 설정은 `data/settings/account/{account_id}.json`에 저장됩니다:
 
 **전략 설정 (`strategy`):**
+
 - `tuning`: 튜닝으로 찾은 최적 파라미터
   - `MA_PERIOD`: 이동평균 기간
   - `PORTFOLIO_TOPN`: 포트폴리오 목표 종목 수
@@ -338,6 +377,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 - `static`: 수동으로 설정한 고정 파라미터 (선택사항)
 
 **표시 설정:**
+
 - `name`: 계정 표시 이름
 - `country_code`: 국가 코드 (kor, aus, us)
 - `icon`: 아이콘 (이모지)
@@ -347,6 +387,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 ## 코드 구조 개선사항
 
 ### 최근 리팩토링(2025-10)
+
 1. **계정 중심 구조로 전환**: `data/settings/account/*.json` 기반으로 추천/백테스트가 동작하도록 전면 수정
 2. **Streamlit 페이지 정비**: 거래 관리(`trade.py`)와 계정 마이그레이션(`migration.py`)을 분리하고 로그인 후 접근하도록 구성
 3. **추천 결과 저장 방식 개선**: 계정 ID와 국가 코드 두 경로에 결과를 저장해 UI와 스케줄러가 일관된 데이터를 참조하도록 변경
@@ -367,6 +408,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
    - 웹앱에서 마크다운 파일 기반으로 설명 표시
 
 ### 최근 개선된 기능들
+
 1. **중복 코드 제거**: 이동평균 계산 로직을 `utils/indicators.py`의 공통 함수로 통합
 2. **함수명 개선**: 더 직관적이고 이해하기 쉬운 함수명과 변수명 사용
 3. **주석 한글화**: 모든 주석을 한글로 번역하고 상세한 설명 추가
@@ -374,6 +416,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 5. **타입 힌트 개선**: 더 명확한 타입 힌트 추가
 
 ### 주요 공통 함수들
+
 - `calculate_moving_average_signals()`: 이동평균 기반 추천 계산
 - `calculate_ma_score()`: 이동평균 대비 수익률 점수 계산
 
@@ -387,9 +430,11 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 ## 개발 참고사항 (Developer Notes)
 
 ### 데이터 조회 로직 (Data Fetching Logic)
+
 `logic/recommend/pipeline.py`에서 여러 종목의 시세 데이터를 조회할 때, 외부 API(yfinance 등)의 특성상 반드시 **순차 처리**해야 할 구간이 있습니다. 무분별한 병렬화는 요청 실패나 데이터 오염을 유발할 수 있으니 주의하세요.
 
 ### 코드 스타일 가이드
+
 - 함수명과 변수명은 명확하고 직관적으로 작성
 - 모든 함수에는 상세한 docstring 추가
 - 주석은 한글로 작성하여 가독성 향상

@@ -178,6 +178,7 @@ def run_portfolio_backtest(
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
     rsi_sell_threshold: float = 10.0,
+    core_holdings: Optional[List[str]] = None,
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     missing_ticker_sink: Optional[Set[str]] = None,
@@ -226,6 +227,16 @@ def run_portfolio_backtest(
 
     if top_n <= 0:
         raise ValueError("PORTFOLIO_TOPN (top_n)은 0보다 커야 합니다.")
+
+    # 핵심 보유 종목 (강제 보유, TOPN 포함)
+    core_holdings_tickers = set(core_holdings or [])
+    universe_tickers_set = {stock["ticker"] for stock in stocks}
+    invalid_core_tickers = core_holdings_tickers - universe_tickers_set
+    if invalid_core_tickers:
+        _log(f"[백테스트] CORE_HOLDINGS에 Universe에 없는 종목이 포함됨: {invalid_core_tickers}")
+    valid_core_holdings = core_holdings_tickers & universe_tickers_set
+    if valid_core_holdings:
+        _log(f"[백테스트] 핵심 보유 종목 (TOPN 포함): {sorted(valid_core_holdings)}")
 
     # ETF와 주식을 구분하여 처리
     etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
@@ -466,13 +477,22 @@ def run_portfolio_backtest(
                 price = today_prices.get(ticker, float("nan"))
                 available_today = ticker in tickers_available_today and not pd.isna(price)
 
-                decision_out = "HOLD" if position_snapshot["shares"] > 0 else "WAIT"
+                # 핵심 보유 종목은 HOLD_CORE로 표시
+                if position_snapshot["shares"] > 0:
+                    decision_out = "HOLD_CORE" if ticker in valid_core_holdings else "HOLD"
+                else:
+                    decision_out = "WAIT"
+
                 note = ""
-                if decision_out in ("WAIT", "HOLD"):
+                if decision_out in ("WAIT", "HOLD", "HOLD_CORE"):
                     if position_snapshot["shares"] > 0 and i < position_snapshot["sell_block_until"]:
                         note = "매도 쿨다운"
                     elif position_snapshot["shares"] == 0 and i < position_snapshot["buy_block_until"]:
                         note = "매수 쿨다운"
+
+                # 핵심 보유 종목 표시
+                if decision_out == "HOLD_CORE" and not note:
+                    note = "🔒 핵심 보유"
 
                 ma_value = ma_today.get(ticker, float("nan"))
                 score_value = score_today.get(ticker, 0.0)
@@ -532,6 +552,10 @@ def run_portfolio_backtest(
                     scale_factor = max(0.0, min(1.0, scale_factor))
 
                     for held_ticker, held_state in position_state.items():
+                        # 핵심 보유 종목은 부분 청산에서도 제외
+                        if held_ticker in valid_core_holdings:
+                            continue
+
                         shares_before = float(held_state["shares"])
                         if shares_before <= 0:
                             continue
@@ -580,7 +604,7 @@ def run_portfolio_backtest(
 
                 equity = cash + current_holdings_value
 
-                # 부분 청산 이후 slots_to_fill 재계산
+                # 부분 청산 이후 slots_to_fill 재계산 (CORE 포함)
                 held_count = sum(1 for pos in position_state.values() if pos["shares"] > 0)
                 slots_to_fill = max(0, top_n - held_count)
 
@@ -588,6 +612,9 @@ def run_portfolio_backtest(
             # (a) 시장 레짐 필터
             if force_regime_sell:
                 for held_ticker, held_state in position_state.items():
+                    # 핵심 보유 종목은 시장 레짐 필터 매도에서도 제외
+                    if held_ticker in valid_core_holdings:
+                        continue
                     if held_state["shares"] > 0:
                         price = today_prices.get(held_ticker)
                         if pd.notna(price):
@@ -640,6 +667,10 @@ def run_portfolio_backtest(
                         elif price < ma_today[ticker]:
                             decision = "SELL_TREND"
 
+                        # 핵심 보유 종목은 매도 신호 무시
+                        if decision and ticker in valid_core_holdings:
+                            decision = None
+
                         if decision:
                             # 다음날 시초가 + 슬리피지로 매도 가격 계산
                             sell_price = _calculate_trade_price(
@@ -689,6 +720,43 @@ def run_portfolio_backtest(
 
             equity = cash + current_holdings_value
 
+            # --- 3-1. 핵심 보유 종목 자동 매수 (최우선) ---
+            for core_ticker in valid_core_holdings:
+                if position_state[core_ticker]["shares"] == 0:
+                    # 핵심 보유 종목이 미보유 상태면 자동 매수
+                    if core_ticker in tickers_available_today:
+                        price = today_prices.get(core_ticker)
+                        if pd.notna(price) and price > 0 and cash > 0:
+                            # 균등 분할 매수 (전체 자산 / TOPN)
+                            total_slots = top_n
+                            budget = equity / total_slots if total_slots > 0 else 0
+                            shares_to_buy = budget / price if price > 0 else 0
+
+                            if shares_to_buy > 0 and budget <= cash:
+                                trade_amount = shares_to_buy * price
+                                cash -= trade_amount
+                                position_state[core_ticker]["shares"] = shares_to_buy
+                                position_state[core_ticker]["avg_cost"] = price
+                                position_state[core_ticker]["buy_block_until"] = i + cooldown_days
+
+                                buy_trades_today_map.setdefault(core_ticker, []).append({"shares": float(shares_to_buy), "price": float(price)})
+
+                                # 레코드 업데이트
+                                if daily_records_by_ticker[core_ticker] and daily_records_by_ticker[core_ticker][-1]["date"] == dt:
+                                    row = daily_records_by_ticker[core_ticker][-1]
+                                    row.update(
+                                        {
+                                            "decision": "HOLD_CORE",
+                                            "shares": shares_to_buy,
+                                            "pv": shares_to_buy * price,
+                                            "avg_cost": price,
+                                            "trade_amount": trade_amount,
+                                            "note": "🔒 핵심 보유 (자동 매수)",
+                                        }
+                                    )
+
+                                current_holdings_value += trade_amount
+
             # --- 3. 매수 로직 (리스크 온일 때만) ---
             if allow_new_buys:
                 # 1. 매수 후보 선정 (종합 점수 기준)
@@ -704,7 +772,7 @@ def run_portfolio_backtest(
                         buy_ranked_candidates.append((final_score, candidate_ticker))
                 buy_ranked_candidates.sort(reverse=True)
 
-                # 2. 매수 실행 (신규 또는 교체)
+                # 2. 매수 실행 (신규 또는 교체) (CORE 포함)
                 held_count = sum(1 for pos in position_state.values() if pos["shares"] > 0)
                 slots_to_fill = max(0, top_n - held_count)
 
@@ -826,6 +894,9 @@ def run_portfolio_backtest(
 
                     held_stocks_with_scores = []
                     for held_ticker, held_position in position_state.items():
+                        # 핵심 보유 종목은 교체 매매 대상에서 제외
+                        if held_ticker in valid_core_holdings:
+                            continue
                         if held_position["shares"] > 0:
                             # MAPS 점수 사용
                             score_h = score_today.get(held_ticker, float("nan"))

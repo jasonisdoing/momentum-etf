@@ -11,13 +11,13 @@ MARKET_REGIME_FILTER_MA_PERIOD = 50
 # RSI 점수 정규화 설정 (0~100 스케일)
 RSI_NORMALIZATION_CONFIG = {
     "enabled": True,
-    "oversold_threshold": 30.0,  # 과매도 기준 (RSI < 30)
-    "overbought_threshold": 70.0,  # 과매수 기준 (RSI > 70)
+    "oversold_threshold": 30.0,  # 과매도 기준 (현재 미사용)
+    "overbought_threshold": 70.0,  # 과매수 기준 (매도 트리거로 사용)
 }
 
 # RSI 계산 설정
 RSI_CALCULATION_CONFIG = {
-    "period": 14,  # RSI 계산 기간
+    "period": 15,  # RSI 계산 기간
     "ema_smoothing": 2.0,  # EMA 평활화 계수
 }
 
@@ -28,15 +28,15 @@ RSI_CALCULATION_CONFIG = {
 # 매수/매도 시 시초가 대비 불리한 가격으로 체결된다고 가정
 BACKTEST_SLIPPAGE = {
     "kor": {
-        "buy_pct": 0.5,  # 매수 시 시초가 + 0.5%
-        "sell_pct": 0.5,  # 매도 시 시초가 - 0.5%
+        "buy_pct": 0.25,  # 매수 시 시초가 + X%
+        "sell_pct": 0.25,  # 매도 시 시초가 - X%
     },
     "aus": {
-        "buy_pct": 1.0,  # 매수 시 시초가 + 1.0%
-        "sell_pct": 1.0,  # 매도 시 시초가 - 1.0%
+        "buy_pct": 0.5,  # 매수 시 시초가 + X%
+        "sell_pct": 0.5,  # 매도 시 시초가 - X%
     },
     "us": {
-        "buy_pct": 0.3,  # 매수 시 시초가 + 0.3%
-        "sell_pct": 0.3,  # 매도 시 시초가 - 0.3%
+        "buy_pct": 0.15,  # 매수 시 시초가 + X%
+        "sell_pct": 0.15,  # 매도 시 시초가 - X%
     },
 }

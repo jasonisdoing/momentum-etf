@@ -4,6 +4,8 @@ from .portfolio import (
     get_held_categories_excluding_sells,
     should_exclude_from_category_count,
     get_sell_states,
+    get_hold_states,
+    count_current_holdings,
 )
 from .signals import (
     has_buy_signal,
@@ -20,6 +22,8 @@ __all__ = [
     "get_held_categories_excluding_sells",
     "should_exclude_from_category_count",
     "get_sell_states",
+    "get_hold_states",
+    "count_current_holdings",
     "has_buy_signal",
     "calculate_consecutive_days",
     "get_buy_signal_streak",
