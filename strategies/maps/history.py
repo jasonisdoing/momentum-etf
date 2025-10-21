@@ -10,8 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from pymongo import DESCENDING, ASCENDING
 
-from utils.trade_store import list_open_positions
-from utils.db_manager import get_db_connection
+from utils.db_manager import get_db_connection, list_open_positions
 from utils.settings_loader import get_account_settings
 from utils.logger import get_app_logger
 

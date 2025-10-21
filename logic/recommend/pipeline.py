@@ -27,7 +27,6 @@ from strategies.maps.history import (
     calculate_trade_cooldown_info,
 )
 from utils.stock_list_io import get_etfs
-from utils.trade_store import list_open_positions
 from utils.data_loader import (
     fetch_ohlcv,
     prepare_price_data,
@@ -35,7 +34,7 @@ from utils.data_loader import (
     get_next_trading_day,
     count_trading_days,
 )
-from utils.db_manager import get_db_connection
+from utils.db_manager import get_db_connection, list_open_positions
 from logic.recommend.market import get_market_regime_status_info
 from utils.logger import get_app_logger
 

@@ -17,6 +17,10 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
     - `schedule.py`: 개장 여부/다음 거래일/스케줄 타깃 날짜 계산
     - `logger.py`: 추천 전용 파일 로거
     - `market.py`: 시장 레짐 상태 문자열 생성(웹 UI 헤더용)
+  - `common/`: 추천과 백테스트에서 공통으로 사용하는 로직
+    - `portfolio.py`: 보유 종목 상태 계산 공통 함수 (`count_current_holdings`, `get_hold_states` 등)
+    - `signals.py`: 매수 신호 판단 공통 함수
+    - `filtering.py`: 카테고리 중복 필터링 공통 함수
 - `utils/`: 공통 유틸리티 모듈
   - `data_loader.py`: 데이터 로딩 및 API 호출
   - `indicators.py`: 기술적 지표 계산 (이동평균, SuperTrend, ATR 등)
@@ -273,7 +277,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 | `BUY` | 신규 매수 | 상승세 뚜렷, 리스크 낮음, 슬롯 여유 |
 | `HOLD` | 보유 유지 | 추세 유지 중 |
 | `SELL_TREND` | 추세 이탈 매도 | 가격이 이동평균선 아래로 하락 |
-| `SELL_TRIM` | 과매수 일부 매도 | RSI 임계값 이하 |
+| `SELL_RSI` | RSI 과매수 매도 | RSI 임계값 이하 |
 | `CUT_STOPLOSS` | 손절 | 손실률이 설정 한도 초과 |
 | `BUY_REPLACE` | 교체 매수 | 기존 종목보다 점수가 임계값 이상 높음 |
 | `SELL_REPLACE` | 교체 매도 | 더 나은 후보로 교체 |

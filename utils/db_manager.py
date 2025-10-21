@@ -1,11 +1,11 @@
 import os
 from datetime import datetime
 import math
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from bson import ObjectId
 from dotenv import load_dotenv
-from pymongo import MongoClient
+from pymongo import DESCENDING, MongoClient
 
 try:
     import data.settings as global_settings  # type: ignore
@@ -91,109 +91,264 @@ def get_db_connection():
         return None
 
 
-def save_trade(trade_data: Dict) -> bool:
-    """단일 거래 내역을 'trades' 컬렉션에 저장합니다."""
+def insert_trade_event(
+    *,
+    account_id: str,
+    ticker: str,
+    name: str | None = None,
+    action: str,
+    executed_at: datetime,
+    memo: str | None,
+    created_by: str,
+    source: str = "streamlit",
+    country_code: str | None = None,
+) -> str:
+    """`trades` 컬렉션에 매수/매도 이벤트를 기록합니다."""
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결을 초기화할 수 없습니다.")
+
+    account_norm = (account_id or "").strip().lower()
+    country_norm = (country_code or account_norm).strip().lower()
+    if not account_norm:
+        raise ValueError("계정 ID를 지정해야 합니다.")
+
+    doc = {
+        "account": account_norm,
+        "country_code": country_norm,
+        "ticker": ticker,
+        "action": action.upper(),
+        "name": (name or "").strip(),
+        "executed_at": executed_at,
+        "memo": memo or "",
+        "created_by": created_by,
+        "source": source,
+        "created_at": datetime.utcnow(),
+    }
+
+    if not doc["name"] and action.upper() == "SELL":
+        doc.pop("name")
+
+    result = db.trades.insert_one(doc)
+    return str(result.inserted_id)
+
+
+def migrate_account_id(old_account_id: str, new_account_id: str) -> dict[str, int]:
+    """`trades` 컬렉션에서 계정 ID를 일괄 변경합니다."""
+
+    old_norm = (old_account_id or "").strip().lower()
+    new_norm = (new_account_id or "").strip().lower()
+    if not old_norm or not new_norm:
+        raise ValueError("old_account_id와 new_account_id는 비어 있을 수 없습니다.")
+    if old_norm == new_norm:
+        return {"matched": 0, "modified": 0}
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결을 초기화할 수 없습니다.")
+
+    result_account = db.trades.update_many(
+        {"account": old_norm},
+        {"$set": {"account": new_norm}},
+    )
+
+    return {
+        "matched": int(result_account.matched_count),
+        "modified": int(result_account.modified_count),
+    }
+
+
+def delete_account_trades(account_id: str) -> dict[str, int]:
+    """지정한 계정 ID의 거래 이력을 모두 삭제합니다."""
+
+    account_norm = (account_id or "").strip().lower()
+    if not account_norm:
+        raise ValueError("account_id는 비어 있을 수 없습니다.")
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결을 초기화할 수 없습니다.")
+
+    result_account = db.trades.delete_many({"account": account_norm})
+    deleted_count = int(result_account.deleted_count)
+
+    logger.info(
+        "trades 컬렉션에서 계정 '%s' 데이터를 삭제했습니다. deleted=%d",
+        account_norm,
+        deleted_count,
+    )
+
+    return {
+        "deleted": deleted_count,
+    }
+
+
+def fetch_recent_trades(account_id: str | None = None, *, limit: int = 100, include_deleted: bool = False) -> List[dict[str, Any]]:
+    """최근 트레이드 목록을 반환합니다."""
+    db = get_db_connection()
+    if db is None:
+        return []
+
+    query: dict[str, Any] = {}
+    if not include_deleted:
+        query["deleted_at"] = {"$exists": False}
+    else:
+        query["deleted_at"] = {"$exists": True}
+
+    if account_id:
+        query["account"] = account_id.strip().lower()
+
+    cursor = db.trades.find(query).sort([("executed_at", DESCENDING), ("_id", DESCENDING)]).limit(int(limit))
+
+    trades: List[dict[str, Any]] = []
+    for doc in cursor:
+        trades.append(
+            {
+                "id": str(doc.get("_id")),
+                "account": str(doc.get("account") or ""),
+                "country_code": str(doc.get("country_code") or ""),
+                "ticker": str(doc.get("ticker") or ""),
+                "action": str(doc.get("action") or ""),
+                "name": str(doc.get("name") or ""),
+                "executed_at": doc.get("executed_at"),
+                "memo": doc.get("memo", ""),
+                "created_by": doc.get("created_by"),
+                "deleted_at": doc.get("deleted_at"),
+                "is_deleted": "deleted_at" in doc,
+            }
+        )
+    return trades
+
+
+def list_open_positions(account_id: str) -> List[dict[str, Any]]:
+    """특정 계정의 최신 매수 상태(미매도) 종목 목록을 반환합니다."""
+
+    account_norm = (account_id or "").strip().lower()
+    if not account_norm:
+        return []
+
+    db = get_db_connection()
+    if db is None:
+        return []
+
+    pipeline = [
+        {
+            "$match": {
+                "account": account_norm,
+                "ticker": {"$ne": None},
+                "deleted_at": {"$exists": False},
+            }
+        },
+        {"$sort": {"executed_at": 1, "_id": 1}},
+        {
+            "$group": {
+                "_id": "$ticker",
+                "last_action": {"$last": "$action"},
+                "last_doc": {"$last": "$$ROOT"},
+            }
+        },
+        {"$match": {"last_action": "BUY"}},
+        {"$sort": {"_id": 1}},
+    ]
+
+    try:
+        results = list(db.trades.aggregate(pipeline))
+    except Exception:
+        return []
+
+    holdings: List[dict[str, Any]] = []
+    for item in results:
+        last_doc = item.get("last_doc") or {}
+        holdings.append(
+            {
+                "id": str(last_doc.get("_id")) if last_doc.get("_id") else "",
+                "ticker": str(item.get("_id") or "").upper(),
+                "last_action": item.get("last_action"),
+                "executed_at": last_doc.get("executed_at"),
+                "name": str(last_doc.get("name", "")),
+                "memo": last_doc.get("memo", ""),
+            }
+        )
+    return holdings
+
+
+def update_trade_event(
+    trade_id: str,
+    *,
+    account_id: Optional[str] = None,
+    ticker: Optional[str] = None,
+    action: Optional[str] = None,
+    executed_at: Optional[datetime] = None,
+    memo: Optional[str] = None,
+) -> bool:
+    """트레이드 문서를 업데이트합니다."""
+
+    trade_id = (trade_id or "").strip()
+    if not trade_id:
+        return False
+
     db = get_db_connection()
     if db is None:
         return False
 
     try:
-        trade_data["created_at"] = datetime.now()
-        db.trades.insert_one(trade_data)
-        account = str(trade_data.get("account") or "").upper()
-        logger.info("%s 계정의 거래를 저장했습니다: %s", account or "UNKNOWN", trade_data)
-        return True
-    except Exception as e:
-        logger.error("거래 내역 저장 중 오류 발생: %s", e)
+        object_id = ObjectId(trade_id)
+    except Exception:
         return False
 
+    fields: dict[str, Any] = {}
+    if account_id is not None:
+        fields["account"] = account_id.strip().lower()
+    if ticker is not None:
+        fields["ticker"] = ticker.strip()
+    if action is not None:
+        fields["action"] = action.upper()
+    if executed_at is not None:
+        fields["executed_at"] = executed_at
+    if memo is not None:
+        fields["memo"] = memo
 
-def delete_trade_by_id(trade_id: str) -> bool:
-    """ID를 기준으로 'trades' 컬렉션에서 단일 거래 내역을 삭제합니다."""
+    if not fields:
+        return False
+
+    result = db.trades.update_one({"_id": object_id}, {"$set": fields})
+    return result.modified_count > 0
+
+
+def soft_delete_trade(trade_id: str) -> bool:
+    """트레이드 문서를 소프트 삭제합니다."""
     db = get_db_connection()
-    if db is None:
+    if not db:
         return False
 
     try:
-        obj_id = ObjectId(trade_id)
-        result = db.trades.delete_one({"_id": obj_id})
-        if result.deleted_count > 0:
-            logger.info("거래 ID %s 를 삭제했습니다.", trade_id)
-            return True
-        else:
-            logger.warning("삭제할 거래 ID %s 를 찾지 못했습니다.", trade_id)
-            return False  # 삭제할 문서가 없으면 실패로 간주
+        result = db.trades.update_one(
+            {"_id": ObjectId(trade_id)},
+            {"$set": {"deleted_at": datetime.utcnow()}},
+        )
+        return result.modified_count > 0
     except Exception as e:
-        logger.error("거래 내역 삭제 중 오류 발생: %s", e)
+        logger.error("소프트 삭제 실패 (trade_id=%s): %s", trade_id, e)
         return False
 
 
-def update_trade_by_id(trade_id: str, update_data: Dict) -> bool:
-    """ID를 기준으로 'trades' 컬렉션에서 단일 거래 내역을 업데이트합니다."""
-    db = get_db_connection()
-    if db is None:
-        return False
-
-    try:
-        obj_id = ObjectId(trade_id)
-        # 업데이트할 데이터에 수정 시간을 추가합니다.
-        update_doc = {"$set": {**update_data, "updated_at": datetime.now()}}
-        result = db.trades.update_one({"_id": obj_id}, update_doc)
-        if result.modified_count > 0:
-            logger.info("거래 ID %s 를 업데이트했습니다.", trade_id)
-            return True
-        else:
-            logger.warning("업데이트할 거래 ID %s 를 찾지 못했거나 변경된 내용이 없습니다.", trade_id)
-            return False
-    except Exception as e:
-        logger.error("거래 내역 업데이트 중 오류 발생: %s", e)
-        return False
-
-
-def infer_trade_from_state_change(
-    q_old: float,
-    avg_old: float,
-    q_new: float,
-    avg_new: float,
-) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-    """
-    보유 수량 및 평균 단가 변경 전/후 상태를 기반으로 발생한 거래(BUY 또는 SELL)를 추론합니다.
+def delete_trade(trade_id: str) -> bool:
+    """트레이드 문서를 완전히 삭제합니다.
 
     Args:
-        q_old: 기존 보유 수량
-        avg_old: 기존 평균 단가
-        q_new: 새로운 보유 수량
-        avg_new: 새로운 평균 단가
+        trade_id: 삭제할 트레이드의 ID
 
     Returns:
-        Tuple: (추론된 거래 정보 딕셔너리, 메시지)
-        - 성공 시: ({"action": "BUY/SELL", ...}, None)
-        - 수량 변경 없을 시: (None, "변경 사항이 없습니다.")
-        - 오류 발생 시: (None, "오류 메시지")
+        삭제 성공 여부 (True/False)
     """
-    delta_q = q_new - q_old
-
-    if abs(delta_q) < 1e-9:  # 수량 변화가 거의 없으면 거래 없음
-        return None, "변경 사항이 없습니다."
+    db = get_db_connection()
+    if db is None:
+        return False
 
     try:
-        if delta_q > 0:  # 수량 증가 -> BUY
-            # 매수 가격 추론: p = (new_total_cost - old_total_cost) / delta_q
-            numerator = (q_new * avg_new) - (q_old * avg_old)
-            price = numerator / delta_q
-            if math.isfinite(price) and price >= 0:  # 0원 매수도 허용 (증여 등)
-                return {"action": "BUY", "shares": delta_q, "price": price}, None
-
-        elif delta_q < 0:  # 수량 감소 -> SELL
-            # 매도 가격 추론: p = (old_total_cost - new_total_cost) / abs(delta_q)
-            # 매도 후 남은 주식의 평균 단가는 변하지 않아야 하므로, avg_new는 avg_old와 같아야 합니다.
-            # 하지만 사용자가 다른 값을 입력할 수 있으므로, 이를 기반으로 매도 가격을 역산합니다.
-            numerator = (q_old * avg_old) - (q_new * avg_new)
-            price = numerator / abs(delta_q)
-            if math.isfinite(price) and price >= 0:
-                return {"action": "SELL", "shares": abs(delta_q), "price": price}, None
-
-    except (ValueError, TypeError, ZeroDivisionError) as e:
-        return None, f"거래 계산 중 오류가 발생했습니다: {e}"
-
-    return None, "알 수 없는 오류로 거래를 추론할 수 없습니다."
+        result = db.trades.delete_one({"_id": ObjectId(trade_id)})
+        return result.deleted_count > 0
+    except Exception as e:
+        logger.error("거래 삭제 실패 (trade_id=%s): %s", trade_id, e)
+        return False
