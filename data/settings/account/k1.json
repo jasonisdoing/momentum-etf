@@ -9,7 +9,7 @@
         "expected_cagr": 82.37,
         "backtested_date": "2025-10-21",
         "tuning": {
-            "MA_PERIOD": 20,
+            "MA_PERIOD": 30,
             "MA_TYPE": "SMA",
             "PORTFOLIO_TOPN": 6,
             "REPLACE_SCORE_THRESHOLD": 1,

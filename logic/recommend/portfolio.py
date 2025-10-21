@@ -315,7 +315,7 @@ def generate_daily_recommendations_for_portfolio(
     except (TypeError, ValueError):
         stop_loss_threshold = None
 
-    # 핵심 보유 종목 (강제 보유, TOPN 제외)
+    # 핵심 보유 종목 (강제 보유, TOPN 포함)
     core_holdings_tickers = set(strategy_rules.core_holdings or [])
 
     # Universe 유효성 검증
@@ -327,7 +327,7 @@ def generate_daily_recommendations_for_portfolio(
     # 유효한 핵심 보유 종목만 사용
     valid_core_holdings = core_holdings_tickers & universe_tickers_set
     if valid_core_holdings:
-        logger.info(f"[{account_id.upper()}] 핵심 보유 종목 (TOPN 제외): {sorted(valid_core_holdings)}")
+        logger.info(f"[{account_id.upper()}] 핵심 보유 종목 (TOPN 포함): {sorted(valid_core_holdings)}")
 
     # 현재 보유 종목의 카테고리
     held_categories = set()
@@ -475,15 +475,11 @@ def generate_daily_recommendations_for_portfolio(
                 sell_rsi_categories_today.add(category)
                 logger.info(f"[SELL_RSI CATEGORY] {d['tkr']} 매도로 인해 '{category}' 카테고리 매수 차단")
 
-    # 실제 보유 중인 종목 수 계산 (매도 예정 종목 제외, 핵심 보유 종목 제외)
+    # 실제 보유 중인 종목 수 계산 (CORE 포함)
     # HOLD + HOLD_CORE = 전체 보유 종목
     held_count = sum(1 for d in decisions if d["state"] in {"HOLD", "HOLD_CORE"})
-    # 핵심 보유 종목 수 계산
-    core_held_count = sum(1 for d in decisions if d["state"] == "HOLD_CORE")
-    # 일반 종목 보유 수 = 전체 보유 - 핵심 보유
-    regular_held_count = held_count - core_held_count
-    # 추가 매수 가능 슬롯 = TOPN - 일반 종목 보유 수
-    slots_to_fill = denom - regular_held_count
+    # 추가 매수 가능 슬롯 = TOPN - 전체 보유 수
+    slots_to_fill = denom - held_count
 
     if risk_off_effective:
         for decision in decisions:

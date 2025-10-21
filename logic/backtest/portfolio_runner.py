@@ -228,7 +228,7 @@ def run_portfolio_backtest(
     if top_n <= 0:
         raise ValueError("PORTFOLIO_TOPN (top_n)은 0보다 커야 합니다.")
 
-    # 핵심 보유 종목 (강제 보유, TOPN 제외)
+    # 핵심 보유 종목 (강제 보유, TOPN 포함)
     core_holdings_tickers = set(core_holdings or [])
     universe_tickers_set = {stock["ticker"] for stock in stocks}
     invalid_core_tickers = core_holdings_tickers - universe_tickers_set
@@ -236,7 +236,7 @@ def run_portfolio_backtest(
         _log(f"[백테스트] CORE_HOLDINGS에 Universe에 없는 종목이 포함됨: {invalid_core_tickers}")
     valid_core_holdings = core_holdings_tickers & universe_tickers_set
     if valid_core_holdings:
-        _log(f"[백테스트] 핵심 보유 종목 (TOPN 제외): {sorted(valid_core_holdings)}")
+        _log(f"[백테스트] 핵심 보유 종목 (TOPN 포함): {sorted(valid_core_holdings)}")
 
     # ETF와 주식을 구분하여 처리
     etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
@@ -604,11 +604,9 @@ def run_portfolio_backtest(
 
                 equity = cash + current_holdings_value
 
-                # 부분 청산 이후 slots_to_fill 재계산 (핵심 보유 종목 제외)
+                # 부분 청산 이후 slots_to_fill 재계산 (CORE 포함)
                 held_count = sum(1 for pos in position_state.values() if pos["shares"] > 0)
-                core_held_count = sum(1 for tkr, pos in position_state.items() if pos["shares"] > 0 and tkr in valid_core_holdings)
-                regular_held_count = held_count - core_held_count
-                slots_to_fill = max(0, top_n - regular_held_count)
+                slots_to_fill = max(0, top_n - held_count)
 
             # --- 2. 매도 로직 ---
             # (a) 시장 레짐 필터
@@ -729,8 +727,8 @@ def run_portfolio_backtest(
                     if core_ticker in tickers_available_today:
                         price = today_prices.get(core_ticker)
                         if pd.notna(price) and price > 0 and cash > 0:
-                            # 균등 분할 매수 (전체 자산 / (TOPN + 핵심 보유 종목 수))
-                            total_slots = top_n + len(valid_core_holdings)
+                            # 균등 분할 매수 (전체 자산 / TOPN)
+                            total_slots = top_n
                             budget = equity / total_slots if total_slots > 0 else 0
                             shares_to_buy = budget / price if price > 0 else 0
 
@@ -774,11 +772,9 @@ def run_portfolio_backtest(
                         buy_ranked_candidates.append((final_score, candidate_ticker))
                 buy_ranked_candidates.sort(reverse=True)
 
-                # 2. 매수 실행 (신규 또는 교체) (핵심 보유 종목 제외)
+                # 2. 매수 실행 (신규 또는 교체) (CORE 포함)
                 held_count = sum(1 for pos in position_state.values() if pos["shares"] > 0)
-                core_held_count = sum(1 for tkr, pos in position_state.items() if pos["shares"] > 0 and tkr in valid_core_holdings)
-                regular_held_count = held_count - core_held_count
-                slots_to_fill = max(0, top_n - regular_held_count)
+                slots_to_fill = max(0, top_n - held_count)
 
                 purchased_today: Set[str] = set()
 
