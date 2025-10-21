@@ -29,7 +29,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_RANGE": np.arange(20, 61, 1),
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [5, 6, 7, 8],
-        "REPLACE_SCORE_THRESHOLD": [0.5, 1, 1.5],
+        "REPLACE_SCORE_THRESHOLD": [1],
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 15~25
         "CORE_HOLDINGS": ["395160", "426030", "473640"],
         "COOLDOWN_DAYS": [1],

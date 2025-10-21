@@ -159,14 +159,6 @@
         "category": "한국지수",
         "tickers": [
             {
-                "ticker": "395160",
-                "name": "KODEX AI반도체",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 2055562,
-                "1_week_avg_turnover": 30948583549
-            },
-            {
                 "ticker": "275280",
                 "name": "Kodex 모멘텀주",
                 "recommend_enabled": true,
@@ -195,6 +187,14 @@
     {
         "category": "반도체",
         "tickers": [
+            {
+                "ticker": "395160",
+                "name": "KODEX AI반도체",
+                "recommend_enabled": true,
+                "listing_date": "2022-01-01",
+                "1_week_avg_volume": 2055562,
+                "1_week_avg_turnover": 30948583549
+            },
             {
                 "ticker": "091160",
                 "name": "KODEX 반도체",
