@@ -273,7 +273,12 @@ def compose_recommendation_slack_message(
         return f"{held_str}/{topn_str}"
 
     if held_count is None:
-        held_count = sum(1 for item in recommendations if str(item.get("state") or "").upper() in {"HOLD", "HOLD_CORE"})
+        # 현재 물리적으로 보유 중인 종목 수 (매도 예정 포함)
+        held_count = sum(
+            1
+            for item in recommendations
+            if str(item.get("state") or "").upper() in {"HOLD", "HOLD_CORE", "SELL_RSI", "SELL_REPLACE", "SELL_TREND", "CUT_STOPLOSS"}
+        )
     if portfolio_topn is None:
         topn_candidates = [
             getattr(report, "portfolio_topn", None),

@@ -104,7 +104,7 @@ def render_account_page(account_id: str) -> None:
                 caption_parts.append(f"슬리피지: 매수+{buy_slip}%/매도-{sell_slip}%")
 
         try:
-            hold_states = {"HOLD", "HOLD_CORE", "SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS"}
+            hold_states = {"HOLD", "HOLD_CORE", "SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS", "SELL_RSI"}
             # buy_states = {"BUY", "BUY_REPLACE"}
             # sell_states = {"SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS"}
             current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
