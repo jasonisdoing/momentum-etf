@@ -321,14 +321,6 @@
                 "1_week_avg_turnover": 8437017
             },
             {
-                "ticker": "ASX:ESTX",
-                "name": "Global X EURO STOXX 50 ETF",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 6143,
-                "1_week_avg_turnover": 676541
-            },
-            {
                 "ticker": "ASX:MVS",
                 "name": "VanEck Small Companies Masters ETF",
                 "recommend_enabled": true,
