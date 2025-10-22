@@ -1256,8 +1256,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     # 카테고리별 최고 점수만 표시 (교체 매매 제외)
     results = filter_category_duplicates(results, category_key_getter=_normalize_category_value)
 
-    # 점수가 음수인 종목 제외 (단, 보유 종목은 유지)
-    holding_states = {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_RSI", "SELL_REPLACE", "CUT_STOPLOSS"}
+    # 점수가 음수인 종목 제외 (단, 보유/매도 종목은 유지)
+    holding_states = {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_RSI", "SELL_REPLACE", "CUT_STOPLOSS", "SOLD"}
     results = [item for item in results if item.get("score", 0.0) >= 0 or item.get("state") in holding_states]
 
     # rank 재설정
