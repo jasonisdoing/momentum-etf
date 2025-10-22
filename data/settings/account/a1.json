@@ -6,11 +6,11 @@
     "slack_channel": "C09FAU7SKA8",
     "initial_date": "2025-10-01",
     "strategy": {
-        "MONTHS_RANGE": 12,
-        "expected_cagr": 35.27,
+        "MONTHS_RANGE": 3,
+        "expected_cagr": 63.84,
         "backtested_date": "2025-10-22",
         "tuning": {
-            "MA_PERIOD": 38,
+            "MA_PERIOD": 40,
             "MA_TYPE": "SMA",
             "PORTFOLIO_TOPN": 8,
             "REPLACE_SCORE_THRESHOLD": 1,

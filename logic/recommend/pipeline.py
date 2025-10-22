@@ -1134,9 +1134,12 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     category_counts: Dict[str, int] = {}
     category_counts_normalized: Dict[str, int] = {}
     category_limit = max_per_category if max_per_category and max_per_category > 0 else 1
+
+    # 매도 예정 종목의 카테고리는 제외하고 카운트
+    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
     for item in results:
         # 매도 예정 종목은 카테고리 카운트에서 제외
-        # HOLD + HOLD_CORE = 보유 종목
+        # HOLD + HOLD_CORE + BUY + BUY_REPLACE = 보유/매수 예정 종목
         if not should_exclude_from_category_count(item["state"]) and item["state"] in {"HOLD", "HOLD_CORE", "BUY", "BUY_REPLACE"}:
             category_raw = item.get("category")
             category = str(category_raw or "").strip()
@@ -1177,16 +1180,20 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             logger.info(f"[PIPELINE BUY BLOCKED] {item.get('ticker')} 매수 차단 - '{category}' 카테고리가 SELL_RSI로 매도됨")
             continue
 
-        # 카테고리 중복 체크 시, 매도 예정 종목은 제외
+        # 카테고리 중복 체크 시, 매도 예정 종목은 제외하고 매수 예정 종목은 포함
         # 같은 카테고리의 매도 예정 종목이 있으면 해당 카테고리 슬롯이 비게 됨
         sell_in_same_category = sum(
             1 for r in results if r["state"] in sell_state_set and _normalize_category_value(r.get("category")) == category_key
         )
-        effective_category_count = category_counts_normalized.get(category_key, 0) - sell_in_same_category
+        # BUY_REPLACE로 이미 추가된 같은 카테고리 종목도 카운트
+        buy_replace_in_same_category = sum(
+            1 for r in results if r["state"] == "BUY_REPLACE" and _normalize_category_value(r.get("category")) == category_key
+        )
+        effective_category_count = category_counts_normalized.get(category_key, 0) - sell_in_same_category + buy_replace_in_same_category
 
         if category_key and effective_category_count >= category_limit:
             # 카테고리 중복인 경우 BUY로 변경하지 않고 WAIT 상태 유지
-            # filter_category_duplicates에서 필터링됨
+            logger.info(f"[PIPELINE BUY BLOCKED] {item.get('ticker')} 매수 차단 - '{category}' 카테고리 중복 (현재 {effective_category_count}개)")
             continue
 
         # RSI 과매수 종목 매수 차단
