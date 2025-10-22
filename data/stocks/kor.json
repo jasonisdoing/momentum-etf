@@ -439,6 +439,29 @@
         ]
     },
     {
+        "category": "인도",
+        "tickers": [
+            {
+                "ticker": "453870",
+                "name": "TIGER 인도니프티50",
+                "recommend_enabled": true,
+                "listing_date": "2023-04-14"
+            },
+            {
+                "ticker": "453810",
+                "name": "KODEX 인도Nifty50",
+                "recommend_enabled": true,
+                "listing_date": "2023-04-21"
+            },
+            {
+                "ticker": "479730",
+                "name": "TIGER 인도빌리언컨슈머",
+                "recommend_enabled": true,
+                "listing_date": "2024-05-14"
+            }
+        ]
+    },
+    {
         "category": "베트남",
         "tickers": [
             {

@@ -214,7 +214,7 @@ def main():
             id=f"{account_id}:{country_code}",
         )
 
-    cache_cron = "0 1 * * *"  # 매일 새벽 1시에 가격 캐시 갱신
+    cache_cron = "0 4 * * *"  # 매일 새벽 4시에 가격 캐시 갱신
     scheduler.add_job(
         run_cache_refresh,
         CronTrigger.from_crontab(cache_cron, timezone=TIMEZONE),
