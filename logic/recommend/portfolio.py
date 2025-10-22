@@ -349,6 +349,18 @@ def generate_daily_recommendations_for_portfolio(
     # 쿨다운 블록 계산
     sell_cooldown_block, buy_cooldown_block = _calculate_cooldown_blocks(trade_cooldown_info, cooldown_days, base_date, country_code)
 
+    # 오늘 매수한 종목도 매도 쿨다운에 추가 (consecutive_holding_info 기반)
+    base_date_norm = base_date.normalize()
+    for tkr, holding_info in (consecutive_holding_info or {}).items():
+        buy_date = holding_info.get("buy_date")
+        if buy_date and pd.to_datetime(buy_date).normalize() == base_date_norm:
+            if tkr not in sell_cooldown_block:
+                sell_cooldown_block[tkr] = {
+                    "last_buy": base_date_norm,
+                    "days_since": 0,
+                }
+                logger.info(f"[COOLDOWN BLOCK TODAY] {tkr}: 오늘 매수 → 매도 쿨다운 추가")
+
     # 각 종목에 대한 의사결정 생성
     for tkr, name in pairs:
         d = data_by_tkr.get(tkr)
