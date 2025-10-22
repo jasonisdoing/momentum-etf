@@ -43,7 +43,7 @@
                 "ticker": "463690",
                 "name": "KODEX 미국S&P500커뮤니케이션",
                 "recommend_enabled": true,
-                "listing_date": "2023-08-03",
+                "listing_date": "2023-08-01",
                 "1_week_avg_volume": 4100,
                 "1_week_avg_turnover": 77061804
             },
@@ -387,7 +387,7 @@
                 "ticker": "473640",
                 "name": "HANARO 글로벌 금채굴기업",
                 "recommend_enabled": true,
-                "listing_date": "2024-01-19",
+                "listing_date": "2024-01-18",
                 "1_week_avg_volume": 236946,
                 "1_week_avg_turnover": 6866871302
             },
@@ -521,7 +521,7 @@
                 "ticker": "476690",
                 "name": "TIGER 글로벌비만치료제TOP2Plus",
                 "recommend_enabled": true,
-                "listing_date": "2024-03-04",
+                "listing_date": "2024-02-29",
                 "1_week_avg_volume": 100779,
                 "1_week_avg_turnover": 934733083
             },
@@ -661,7 +661,7 @@
                 "ticker": "462010",
                 "name": "TIGER 2차전지소재Fn",
                 "recommend_enabled": true,
-                "listing_date": "2023-07-14",
+                "listing_date": "2023-07-13",
                 "1_week_avg_volume": 13168274,
                 "1_week_avg_turnover": 66954160830
             },
@@ -753,7 +753,7 @@
                 "ticker": "414780",
                 "name": "TIGER 차이나과창판STAR50(합성)",
                 "recommend_enabled": true,
-                "listing_date": "2022-03-16",
+                "listing_date": "2022-01-13",
                 "1_week_avg_volume": 813553,
                 "1_week_avg_turnover": 9292883627
             },
@@ -952,7 +952,7 @@
                 "ticker": "463640",
                 "name": "KODEX 미국S&P500유틸리티",
                 "recommend_enabled": true,
-                "listing_date": "2023-08-03",
+                "listing_date": "2023-08-01",
                 "1_week_avg_volume": 4532,
                 "1_week_avg_turnover": 68901712
             },
@@ -960,7 +960,7 @@
                 "ticker": "463680",
                 "name": "KODEX 미국S&P500테크놀로지",
                 "recommend_enabled": true,
-                "listing_date": "2023-08-03",
+                "listing_date": "2023-08-01",
                 "1_week_avg_volume": 50106,
                 "1_week_avg_turnover": 891113633
             },
