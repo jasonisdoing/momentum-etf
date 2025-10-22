@@ -79,9 +79,15 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
 
     logger.info("=== %s 추천 요약 (기준일: %s) ===", account_id.upper(), base_date)
 
-    preview_count = min(10, len(items))
-    if preview_count > 0:
-        logger.info("상위 %d개 항목 미리보기:", preview_count)
+    # 보유 종목(HOLD, SELL_*)은 항상 포함, 나머지는 상위 10개
+    holding_states = {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_RSI", "SELL_REPLACE", "CUT_STOPLOSS"}
+    held_items = [item for item in items if item.get("state") in holding_states]
+    other_items = [item for item in items if item.get("state") not in holding_states]
+
+    preview_items = held_items + other_items[: max(0, 10 - len(held_items))]
+
+    if preview_items:
+        logger.info("상위 %d개 항목 미리보기 (보유 %d개 포함):", len(preview_items), len(held_items))
         headers = [
             "순위",
             "티커",
@@ -97,7 +103,7 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
         aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "right", "left"]
         rows: List[List[str]] = []
 
-        for item in items[:preview_count]:
+        for item in preview_items:
             holding_days = item.get("holding_days")
             holding_days_str = f"{int(holding_days)}" if isinstance(holding_days, (int, float)) else "-"
 

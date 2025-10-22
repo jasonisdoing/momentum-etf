@@ -240,14 +240,8 @@ def _should_use_realtime_price(country: str) -> bool:
             return False
 
     if country_code == "aus":
-        now_syd = _now_with_zone("Australia/Sydney")
-        if not _is_aus_realtime_window(now_syd):
-            return False
-        today_str = now_syd.strftime("%Y-%m-%d")
-        try:
-            return bool(get_trading_days(today_str, today_str, "aus"))
-        except Exception:
-            return False
+        # 호주는 yfinance Rate Limit 문제로 실시간 가격 조회 비활성화
+        return False
 
     return False
 

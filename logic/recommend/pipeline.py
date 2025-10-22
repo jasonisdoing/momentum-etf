@@ -653,12 +653,15 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         len(tickers_all),
     )
     fetch_start = time.perf_counter()
+    # 호주는 실시간 가격 조회 시 Rate Limit 발생하므로 비활성화
+    skip_realtime = country_code == "aus"
     prefetched_data, missing_prefetch = prepare_price_data(
         tickers=tickers_all,
         country=country_code,
         start_date=start_date,
         end_date=end_date,
         warmup_days=warmup_days,
+        skip_realtime=skip_realtime,
     )
     logger.info(
         "[%s] 가격 데이터 로딩 완료 (%.1fs)",
@@ -1246,8 +1249,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     # 카테고리별 최고 점수만 표시 (교체 매매 제외)
     results = filter_category_duplicates(results, category_key_getter=_normalize_category_value)
 
-    # 점수가 음수인 종목 제외
-    results = [item for item in results if item.get("score", 0.0) >= 0]
+    # 점수가 음수인 종목 제외 (단, 보유 종목은 유지)
+    holding_states = {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_RSI", "SELL_REPLACE", "CUT_STOPLOSS"}
+    results = [item for item in results if item.get("score", 0.0) >= 0 or item.get("state") in holding_states]
 
     # rank 재설정
     for i, item in enumerate(results, 1):
