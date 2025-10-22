@@ -48,12 +48,12 @@ LOOKBACK_CONFIG: dict[str, dict] = {
         "COOLDOWN_DAYS": [1],
     },
     "kor": {
-        "MA_RANGE": np.arange(20, 61, 1),
-        "MA_TYPE": ["SMA"],
-        "PORTFOLIO_TOPN": [6],
+        "MA_RANGE": np.arange(80, 102, 2),
+        "MA_TYPE": ["TEMA"],
+        "PORTFOLIO_TOPN": [8],
         "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),
-        "CORE_HOLDINGS": ["395160", "426030", "473640"],
+        "OVERBOUGHT_SELL_THRESHOLD": [14, 15, 16],
+        "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1],
     },
     "us": {
@@ -69,7 +69,7 @@ logger = get_app_logger()
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[1] / "data" / "results"
 # DEFAULT_LOOKBACK_PERIODS = [3, 6, 9, 12, 18, 24]
-DEFAULT_LOOKBACK_PERIODS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+DEFAULT_LOOKBACK_PERIODS = [3, 6, 9, 12]
 DEFAULT_TEST_MONTHS = 12
 DEFAULT_TEST_PERIOD_MONTHS = 1
 
@@ -191,8 +191,8 @@ def _find_best_params_simple(
                             )
 
                             if result and result.summary:
-                                # CAGR 계산: summary에 cagr이 없으므로 직접 계산
-                                cumulative_return = result.summary.get("cumulative_return_pct", 0.0)
+                                # CAGR 계산
+                                cumulative_return = result.summary.get("period_return", 0.0)
                                 start_date = result.summary.get("start_date")
                                 end_date = result.summary.get("end_date")
 
@@ -316,7 +316,7 @@ def _run_single_walk_forward_test(
         )
 
         if test_result and test_result.summary:
-            logger.info(f"[테스트 완료] 룩백 {lookback_months}개월, 수익률: {test_result.summary.get('cumulative_return_pct', 0):.2f}%")
+            logger.info(f"[테스트 완료] 룩백 {lookback_months}개월, 수익률: {test_result.summary.get('period_return', 0):.2f}%")
 
         if not test_result or not test_result.summary:
             logger.warning(f"백테스트 실패: 룩백 {lookback_months}개월")
@@ -343,12 +343,11 @@ def _run_single_walk_forward_test(
             "test_start": test_start_date,
             "test_end": test_end_date,
             "best_params": best_params,
-            "total_return": summary.get("cumulative_return_pct", summary.get("total_return", 0.0)),
-            "cagr": summary.get("cagr_pct", summary.get("cagr", 0.0)),
-            "sharpe": summary.get("sharpe_ratio", summary.get("sharpe", 0.0)),
-            "sortino": summary.get("sortino_ratio", summary.get("sortino", 0.0)),
-            "mdd": summary.get("mdd_pct", summary.get("mdd", 0.0)),
-            "calmar": summary.get("calmar_ratio", summary.get("calmar", 0.0)),
+            "total_return": summary.get("period_return", 0.0),
+            "cagr": summary.get("cagr", 0.0),
+            "sharpe": summary.get("sharpe", 0.0),
+            "sharpe_to_mdd": summary.get("sharpe_to_mdd", 0.0),
+            "mdd": summary.get("mdd", 0.0),
             "win_rate": summary.get("win_rate", 0.0),
             "error": None,
         }
@@ -521,9 +520,8 @@ def run_walk_forward_analysis(
             {
                 "total_return": ["mean", "std", "min", "max"],
                 "sharpe": ["mean", "std"],
-                "sortino": ["mean"],
+                "sharpe_to_mdd": ["mean"],
                 "mdd": ["mean", "min", "max"],
-                "calmar": ["mean"],
                 "win_rate": ["mean"],
             }
         )
@@ -563,6 +561,7 @@ def _save_progress(results: List[Dict], summary_file: Path, details_file: Path, 
                 {
                     "total_return": ["mean", "count"],
                     "sharpe": ["mean"],
+                    "sharpe_to_mdd": ["mean"],
                 }
             )
             .round(2)
@@ -574,8 +573,12 @@ def _save_progress(results: List[Dict], summary_file: Path, details_file: Path, 
             count = int(row[("total_return", "count")])
             avg_return = row[("total_return", "mean")]
             avg_sharpe = row[("sharpe", "mean")]
+            avg_sdr = row[("sharpe_to_mdd", "mean")]
 
-            summary_lines.append(f"  참조 {lookback_months:2d}개월: 월평균수익률 {avg_return:+6.2f}%, " f"Sharpe {avg_sharpe:5.2f} ({count}개 완료)")
+            summary_lines.append(
+                f"  참조 {lookback_months:2d}개월: 월평균수익률 {avg_return:+6.2f}%, "
+                f"Sharpe {avg_sharpe:5.2f}, SDR {avg_sdr:5.3f} ({count}개 완료)"
+            )
 
         summary_file.write_text("\n".join(summary_lines), encoding="utf-8")
 
@@ -649,12 +652,11 @@ def print_summary_table(summary: pd.DataFrame) -> None:
         "최대수익률",
         "승률",
         "평균Sharpe",
-        "평균Sortino",
+        "평균SDR",
         "평균MDD",
-        "평균Calmar",
     ]
 
-    aligns = ["center", "right", "right", "right", "right", "right", "right", "right", "right", "right"]
+    aligns = ["center", "right", "right", "right", "right", "right", "right", "right", "right"]
 
     rows = []
     for lookback_months in summary.index:
@@ -669,9 +671,8 @@ def print_summary_table(summary: pd.DataFrame) -> None:
                 f"{row_data[('total_return', 'max')]:+.2f}%",
                 f"{row_data[('win_rate_pct', 'calc')]:.1f}%",
                 f"{row_data[('sharpe', 'mean')]:.2f}",
-                f"{row_data[('sortino', 'mean')]:.2f}",
+                f"{row_data[('sharpe_to_mdd', 'mean')]:.3f}",
                 f"{row_data[('mdd', 'mean')]:.2f}%",
-                f"{row_data[('calmar', 'mean')]:.2f}",
             ]
         )
 
@@ -679,15 +680,16 @@ def print_summary_table(summary: pd.DataFrame) -> None:
     for line in table_lines:
         print(line)
 
-    # 최적 룩백 기간 찾기 (평균 수익률 기준)
-    best_idx = summary[("total_return", "mean")].idxmax()
+    # 최적 룩백 기간 찾기 (평균 SDR 기준)
+    best_idx = summary[("sharpe_to_mdd", "mean")].idxmax()
     best_return = summary.loc[best_idx, ("total_return", "mean")]
     best_win_rate = summary.loc[best_idx, ("win_rate_pct", "calc")]
     best_sharpe = summary.loc[best_idx, ("sharpe", "mean")]
+    best_sdr = summary.loc[best_idx, ("sharpe_to_mdd", "mean")]
 
     print("\n" + "=" * 120)
-    print(f"✅ 최적 룩백 기간: 참조 {best_idx}개월")
-    print(f"   평균 수익률: {best_return:+.2f}% | 승률: {best_win_rate:.1f}% | Sharpe: {best_sharpe:.2f}")
+    print(f"✅ 최적 룩백 기간: 참조 {best_idx}개월 (SDR 기준)")
+    print(f"   평균 수익률: {best_return:+.2f}% | 승률: {best_win_rate:.1f}% | Sharpe: {best_sharpe:.2f} | SDR: {best_sdr:.3f}")
     print("=" * 120 + "\n")
 
 
@@ -725,12 +727,11 @@ def save_results(
         "최대수익률",
         "승률",
         "평균Sharpe",
-        "평균Sortino",
+        "평균SDR",
         "평균MDD",
-        "평균Calmar",
     ]
 
-    aligns = ["center", "right", "right", "right", "right", "right", "right", "right", "right", "right"]
+    aligns = ["center", "right", "right", "right", "right", "right", "right", "right", "right"]
 
     rows = []
     for lookback_months in summary.index:
@@ -745,9 +746,8 @@ def save_results(
                 f"{row_data[('total_return', 'max')]:+.2f}%",
                 f"{row_data[('win_rate_pct', 'calc')]:.1f}%",
                 f"{row_data[('sharpe', 'mean')]:.2f}",
-                f"{row_data[('sortino', 'mean')]:.2f}",
+                f"{row_data[('sharpe_to_mdd', 'mean')]:.3f}",
                 f"{row_data[('mdd', 'mean')]:.2f}%",
-                f"{row_data[('calmar', 'mean')]:.2f}",
             ]
         )
 
@@ -755,15 +755,16 @@ def save_results(
     summary_lines.extend(table_lines)
 
     # 최적 룩백 기간
-    best_idx = summary[("total_return", "mean")].idxmax()
+    best_idx = summary[("sharpe_to_mdd", "mean")].idxmax()
     best_return = summary.loc[best_idx, ("total_return", "mean")]
     best_win_rate = summary.loc[best_idx, ("win_rate_pct", "calc")]
     best_sharpe = summary.loc[best_idx, ("sharpe", "mean")]
+    best_sdr = summary.loc[best_idx, ("sharpe_to_mdd", "mean")]
 
     summary_lines.append("")
     summary_lines.append("=" * 120)
-    summary_lines.append(f"✅ 최적 룩백 기간: 참조 {best_idx}개월")
-    summary_lines.append(f"   평균 수익률: {best_return:+.2f}% | 승률: {best_win_rate:.1f}% | Sharpe: {best_sharpe:.2f}")
+    summary_lines.append(f"✅ 최적 룩백 기간: 참조 {best_idx}개월 (SDR 기준)")
+    summary_lines.append(f"   평균 수익률: {best_return:+.2f}% | 승률: {best_win_rate:.1f}% | Sharpe: {best_sharpe:.2f} | SDR: {best_sdr:.3f}")
     summary_lines.append("=" * 120)
 
     summary_file.write_text("\n".join(summary_lines), encoding="utf-8")
@@ -828,9 +829,9 @@ def save_results(
                     details_lines.append(
                         f"  월수익률: {row.get('total_return', 0):+6.2f}% | "
                         f"Sharpe: {row.get('sharpe', 0):5.2f} | "
-                        f"Sortino: {row.get('sortino', 0):5.2f}"
+                        f"SDR: {row.get('sharpe_to_mdd', 0):5.3f}"
                     )
-                    details_lines.append(f"  MDD: {row.get('mdd', 0):6.2f}% | " f"Calmar: {row.get('calmar', 0):5.2f}")
+                    details_lines.append(f"  MDD: {row.get('mdd', 0):6.2f}%")
 
     details_file.write_text("\n".join(details_lines), encoding="utf-8")
     logger.info(f"상세 결과 저장: {details_file}")

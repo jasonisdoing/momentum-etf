@@ -6,6 +6,7 @@
     "slack_channel": "C09FAU7SKA8",
     "initial_date": "2025-10-01",
     "strategy": {
+        "MONTHS_RANGE": 12,
         "expected_cagr": 63.86,
         "backtested_date": "2025-10-21",
         "tuning": {

@@ -642,24 +642,15 @@ def _build_summary(
 
     daily_returns = pv_series.pct_change().dropna()
     sharpe_ratio = 0.0
-    sortino_ratio = 0.0
     if not daily_returns.empty:
         mean_ret = daily_returns.mean()
         std_ret = daily_returns.std()
         if std_ret and math.isfinite(std_ret) and std_ret > 0:
             sharpe_ratio = (mean_ret / std_ret) * (252**0.5)
-        downside_returns = daily_returns[daily_returns < 0]
-        if not downside_returns.empty:
-            downside_std = downside_returns.std()
-            if downside_std and math.isfinite(downside_std) and downside_std > 0:
-                sortino_ratio = (mean_ret / downside_std) * (252**0.5)
 
-    calmar_ratio = (cagr / max_drawdown) if max_drawdown > 0 else 0.0
-    drawdowns_pct = drawdown_series * 100.0
-    ulcer_index = 0.0
-    if not drawdowns_pct.empty:
-        ulcer_index = float((drawdowns_pct.pow(2).mean()) ** 0.5)
-    cui = calmar_ratio / ulcer_index if ulcer_index > 0 else 0.0
+    # Sharpe/MDD 비율 계산 (SDR)
+    mdd_pct = max_drawdown * 100
+    sharpe_to_mdd = (sharpe_ratio / mdd_pct) if mdd_pct > 0 else 0.0
 
     def _calc_benchmark_performance(*, ticker: str, name: str, country: str) -> Optional[Dict[str, Any]]:
         benchmark_df = fetch_ohlcv(
@@ -690,12 +681,33 @@ def _build_summary(
         if years > 0:
             cagr_pct = ((end_price / start_price) ** (1 / years) - 1) * 100
 
+        # 벤치마크 Sharpe 및 MDD 계산
+        bench_series = benchmark_df["Close"].astype(float)
+        bench_running_max = bench_series.cummax()
+        bench_drawdown_series = (bench_running_max - bench_series) / bench_running_max.replace({0: pd.NA})
+        bench_drawdown_series = bench_drawdown_series.fillna(0.0)
+        bench_mdd = float(bench_drawdown_series.max()) if not bench_drawdown_series.empty else 0.0
+        bench_mdd_pct = bench_mdd * 100
+
+        bench_daily_returns = bench_series.pct_change().dropna()
+        bench_sharpe = 0.0
+        if not bench_daily_returns.empty:
+            bench_mean_ret = bench_daily_returns.mean()
+            bench_std_ret = bench_daily_returns.std()
+            if bench_std_ret and math.isfinite(bench_std_ret) and bench_std_ret > 0:
+                bench_sharpe = (bench_mean_ret / bench_std_ret) * (252**0.5)
+
+        bench_sharpe_to_mdd = (bench_sharpe / bench_mdd_pct) if bench_mdd_pct > 0 else 0.0
+
         return {
             "ticker": ticker,
             "name": name,
             "country": country,
             "cumulative_return_pct": cum_ret_pct,
             "cagr_pct": cagr_pct,
+            "sharpe": bench_sharpe,
+            "mdd": bench_mdd_pct,
+            "sharpe_to_mdd": bench_sharpe_to_mdd,
         }
 
     benchmark_cum_ret_pct = 0.0
@@ -785,16 +797,13 @@ def _build_summary(
         "final_value": final_value,
         "final_value_local": final_value,
         "final_value_krw": final_value * fx_rate_to_krw,
-        "cumulative_return_pct": float(final_row["cumulative_return_pct"]),
+        "period_return": float(final_row["cumulative_return_pct"]),
         "evaluation_return_pct": float(final_row["evaluation_return_pct"]),
         "held_count": int(final_row["held_count"]),
-        "cagr_pct": cagr * 100,
-        "mdd_pct": max_drawdown * 100,
-        "sharpe_ratio": sharpe_ratio,
-        "sortino_ratio": sortino_ratio,
-        "calmar_ratio": calmar_ratio,
-        "ulcer_index": ulcer_index,
-        "cui": cui,
+        "cagr": cagr * 100,
+        "mdd": mdd_pct,
+        "sharpe": sharpe_ratio,
+        "sharpe_to_mdd": sharpe_to_mdd,
         "benchmark_cum_ret_pct": benchmark_cum_ret_pct,
         "benchmark_cagr_pct": benchmark_cagr_pct,
         "benchmarks": benchmarks_summary,

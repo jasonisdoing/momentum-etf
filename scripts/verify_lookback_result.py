@@ -81,11 +81,11 @@ def verify_single_result(
     logger.info("=" * 80)
     logger.info("검증 결과")
     logger.info("=" * 80)
-    logger.info(f"수익률: {summary.get('cumulative_return_pct', 0):.2f}%")
-    logger.info(f"Sharpe: {summary.get('sharpe_ratio', 0):.2f}")
-    logger.info(f"Sortino: {summary.get('sortino_ratio', 0):.2f}")
-    logger.info(f"MDD: {summary.get('mdd_pct', 0):.2f}%")
-    logger.info(f"Calmar: {summary.get('calmar_ratio', 0):.2f}")
+    logger.info(f"기간수익률(%): {summary.get('period_return', 0):.2f}%")
+    logger.info(f"CAGR(%): {summary.get('cagr', 0):.2f}%")
+    logger.info(f"MDD(%): {summary.get('mdd', 0):.2f}%")
+    logger.info(f"Sharpe: {summary.get('sharpe', 0):.2f}")
+    logger.info(f"SDR (Sharpe/MDD): {summary.get('sharpe_to_mdd', 0):.3f}")
     logger.info("=" * 80)
 
     return summary

@@ -200,11 +200,8 @@ def print_backtest_summary(
     for key, value in used_settings.items():
         add(f"| {key}: {value}")
     add_section_heading("지표 설명")
-    add("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
-    add("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
-    add("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
-    add("  - Ulcer Index (얼서 지수): 고점 대비 낙폭의 지속성과 깊이를 반영. 낮을수록 안정적.")
-    add("  - CUI (칼마/얼서): Calmar Ratio를 Ulcer Index로 나눈 값. 상승률 대비 낙폭 위험을 동시에 고려하며, 높을수록 우수.")
+    add("  - Sharpe: 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
+    add("  - SDR (Sharpe/MDD): Sharpe를 MDD(%)로 나눈 값. 수익 대비 최대 낙폭 효율성. 높을수록 우수 (기준: >0.2 양호, >0.3 우수).")
 
     if "monthly_returns" in summary and not summary["monthly_returns"].empty:
         add_section_heading("월별 성과 요약")
@@ -332,11 +329,10 @@ def print_backtest_summary(
     add(f"| 최종 자산: {money_formatter(final_value_local)}")
     if currency != "KRW":
         add(f"| 최종 자산 (KRW): {format_kr_money(final_value_krw_value)}")
-    add(f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}%")
 
     benchmarks_info = summary.get("benchmarks")
     if isinstance(benchmarks_info, list) and benchmarks_info:
-        add("| 벤치마크")
+        add("| 벤치마크 기간수익률(%)")
         for idx, bench in enumerate(benchmarks_info, start=1):
             name = str(bench.get("name") or bench.get("ticker") or "-").strip()
             ticker = str(bench.get("ticker") or "-").strip()
@@ -347,12 +343,10 @@ def print_backtest_summary(
         benchmark_name = summary.get("benchmark_name") or "S&P 500"
         bench_ret = summary.get("benchmark_cum_ret_pct")
         if bench_ret is not None:
-            add(f"| 벤치마크: {benchmark_name}: {bench_ret:+.2f}%")
-
-    add(f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}%")
+            add(f"| 벤치마크 기간수익률(%): {benchmark_name}: {bench_ret:+.2f}%")
 
     if isinstance(benchmarks_info, list) and benchmarks_info:
-        add("| 벤치마크 CAGR")
+        add("| 벤치마크 CAGR(%)")
         for idx, bench in enumerate(benchmarks_info, start=1):
             name = str(bench.get("name") or bench.get("ticker") or "-").strip()
             ticker = str(bench.get("ticker") or "-").strip()
@@ -363,13 +357,22 @@ def print_backtest_summary(
         benchmark_name = summary.get("benchmark_name") or "S&P 500"
         bench_cagr = summary.get("benchmark_cagr_pct")
         if bench_cagr is not None:
-            add(f"| 벤치마크 CAGR: {benchmark_name}: {bench_cagr:+.2f}%")
-    add(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
-    add(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
-    add(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")
-    add(f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}")
-    add(f"| Ulcer Index: {summary.get('ulcer_index', 0.0):.2f}")
-    add(f"| CUI (Calmar/Ulcer): {summary.get('cui', 0.0):.2f}")
+            add(f"| 벤치마크 CAGR(%): {benchmark_name}: {bench_cagr:+.2f}%")
+
+    if isinstance(benchmarks_info, list) and benchmarks_info:
+        add("| 벤치마크 SDR(Sharpe/MDD)")
+        for idx, bench in enumerate(benchmarks_info, start=1):
+            name = str(bench.get("name") or bench.get("ticker") or "-").strip()
+            ticker = str(bench.get("ticker") or "-").strip()
+            sdr = bench.get("sharpe_to_mdd")
+            sdr_label = f"{float(sdr):.3f}" if sdr is not None else "N/A"
+            add(f"| {idx}. {name}({ticker}): {sdr_label}")
+
+    add(f"| 기간수익률(%): {summary['period_return']:+.2f}%")
+    add(f"| CAGR(%): {summary['cagr']:+.2f}%")
+    add(f"| MDD(%): {-summary['mdd']:.2f}%")
+    add(f"| Sharpe: {summary.get('sharpe', 0.0):.2f}")
+    add(f"| SDR (Sharpe/MDD): {summary.get('sharpe_to_mdd', 0.0):.3f}")
 
     if emit_to_logger:
         for line in output_lines:

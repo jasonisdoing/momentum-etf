@@ -202,9 +202,9 @@ def _cached_benchmark_data(
 
     # Momentum ETF 수익률: 실제 거래 우선, 없으면 백테스트
     if actual_perf:
-        account_return = actual_perf.get("cumulative_return_pct")
+        account_return = actual_perf.get("cumulative_return_pct")  # 실제 거래는 기존 키 사용
     else:
-        account_return = summary.get("cumulative_return_pct")
+        account_return = summary.get("period_return")  # 백테스트는 새 키 사용
 
     if account_return is not None:
         rows.append(

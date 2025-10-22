@@ -6,20 +6,17 @@
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",
     "strategy": {
-        "expected_cagr": 89.32,
-        "backtested_date": "2025-10-21",
+        "MONTHS_RANGE": 3,
+        "expected_cagr": 118.94,
+        "backtested_date": "2025-10-22",
         "tuning": {
-            "MA_PERIOD": 28,
-            "MA_TYPE": "SMA",
-            "PORTFOLIO_TOPN": 6,
+            "MA_PERIOD": 84,
+            "MA_TYPE": "TEMA",
+            "PORTFOLIO_TOPN": 8,
             "REPLACE_SCORE_THRESHOLD": 1,
-            "OVERBOUGHT_SELL_THRESHOLD": 17,
+            "OVERBOUGHT_SELL_THRESHOLD": 15,
             "COOLDOWN_DAYS": 1,
-            "CORE_HOLDINGS": [
-                "395160",
-                "426030",
-                "473640"
-            ]
+            "CORE_HOLDINGS": []
         },
         "_tuning": {
             "expected_cagr": 107.44,

@@ -20,7 +20,6 @@ COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
 PRECISION_SETTINGS_PATH = SETTINGS_ROOT / "precision.json"
 BACKTEST_SETTINGS_PATH = SETTINGS_ROOT / "backtest.json"
-TUNE_SETTINGS_PATH = SETTINGS_ROOT / "tune.json"
 logger = get_app_logger()
 
 
@@ -100,18 +99,11 @@ def get_backtest_initial_capital(default: float = 100_000_000) -> float:
     return float(default)
 
 
-@lru_cache(maxsize=1)
-def _load_tune_settings() -> Dict[str, Any]:
-    try:
-        return _load_json(TUNE_SETTINGS_PATH)
-    except AccountSettingsError:
-        return {}
-    except Exception:
-        return {}
+def get_tune_month_configs(account_id: str = None) -> List[Dict[str, Any]]:
+    """튜닝용 MONTHS_RANGE 설정을 반환합니다.
 
-
-def get_tune_month_configs() -> List[Dict[str, Any]]:
-    settings = _load_tune_settings()
+    계정별 strategy.MONTHS_RANGE를 사용합니다.
+    """
     normalized: List[Dict[str, Any]] = []
 
     def _append(months_raw: Any, *, weight: float = 1.0, source: Any = None) -> None:
@@ -129,28 +121,16 @@ def get_tune_month_configs() -> List[Dict[str, Any]]:
             }
         )
 
-    if isinstance(settings, dict):
-        top_level_months = settings.get("MONTHS_RANGE")
-        if top_level_months is not None:
-            _append(top_level_months, weight=1.0, source="default")
-
-        root = settings.get("COMMON_CONSTANTS")
-        if isinstance(root, dict):
-            entries = root.get("MONTHS_CONFIG")
-            if isinstance(entries, list):
-                for item in entries:
-                    if not isinstance(item, dict):
-                        continue
-                    weight_raw = item.get("weight", 0.0)
-                    try:
-                        weight_val = float(weight_raw)
-                    except (TypeError, ValueError):
-                        weight_val = 0.0
-                    _append(
-                        item.get("MONTHS_RANGE"),
-                        weight=weight_val,
-                        source=item.get("source"),
-                    )
+    # 계정별 strategy.MONTHS_RANGE 사용
+    if account_id:
+        try:
+            account_settings = get_account_settings(account_id)
+            strategy = account_settings.get("strategy", {})
+            account_months = strategy.get("MONTHS_RANGE")
+            if account_months is not None:
+                _append(account_months, weight=1.0, source=f"account_{account_id}")
+        except Exception:
+            pass
 
     if not normalized:
         return []
