@@ -696,9 +696,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             if prev_close and prev_close > 0:
                 daily_pct = ((latest_close / prev_close) - 1.0) * 100
 
+            # base_date가 최신 데이터보다 미래인 경우에도 전일 대비 수익률은 유지
             if base_norm > latest_data_date:
                 prev_close = latest_close
-                daily_pct = 0.0
 
             # MAPS 전략 계산
             from utils.indicators import calculate_ma_score
