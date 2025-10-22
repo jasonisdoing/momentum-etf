@@ -657,6 +657,7 @@ def _build_summary(
             ticker,
             country=country,
             date_range=[start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
+            skip_realtime=True,
         )
 
         if benchmark_df is None or benchmark_df.empty:

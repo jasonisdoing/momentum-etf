@@ -15,11 +15,11 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
-        "MA_RANGE": np.arange(30, 52, 2),
-        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "PORTFOLIO_TOPN": [6, 8, 10],
+        "MA_RANGE": np.arange(34, 41, 1),  # 34~40
+        "MA_TYPE": ["SMA"],  # 호주는 SMA가 구조적 우위
+        "PORTFOLIO_TOPN": [8, 10],  # 기본 8, 보조 10
         "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(12, 22, 2),
+        "OVERBOUGHT_SELL_THRESHOLD": [14, 16, 18, 20],
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1],
     },

@@ -39,12 +39,12 @@ import numpy as np
 # Walk-Forward 분석 전용 설정 (최소 범위)
 LOOKBACK_CONFIG: dict[str, dict] = {
     "aus": {
-        "MA_RANGE": np.arange(30, 41, 10),  # 30, 40
-        "MA_TYPE": ["SMA"],
-        "PORTFOLIO_TOPN": [3],
+        "MA_RANGE": np.arange(34, 41, 1),  # 34~40
+        "MA_TYPE": ["SMA"],  # 호주는 SMA가 구조적 우위
+        "PORTFOLIO_TOPN": [8, 10],  # 기본 8, 보조 10
         "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 10),  # 10, 20
-        "CORE_HOLDINGS": ["ASX:GDX"],
+        "OVERBOUGHT_SELL_THRESHOLD": [14, 16, 18, 20],
+        "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1],
     },
     "kor": {
@@ -389,12 +389,28 @@ def run_walk_forward_analysis(
     account_settings = get_account_settings(account_id)
     country_code = account_settings.get("country_code", "kor")
 
-    # 최신 거래일 가져오기
-    latest_date = get_latest_trading_day(country_code)
+    # 최신 거래일 가져오기 (백테스트는 확정된 과거 데이터만 사용)
+    latest_trading_day = get_latest_trading_day(country_code)
+    today = pd.Timestamp.now().normalize()
+
+    # 오늘 날짜가 최신 거래일과 같으면 전일 거래일 사용 (종가 미확정)
+    if latest_trading_day >= today:
+        from utils.data_loader import get_trading_days
+
+        # 전일 거래일 찾기
+        past_30_days = (today - pd.DateOffset(days=30)).strftime("%Y-%m-%d")
+        today_str = today.strftime("%Y-%m-%d")
+        recent_trading_days = get_trading_days(past_30_days, today_str, country_code)
+        if len(recent_trading_days) >= 2:
+            latest_date = pd.to_datetime(recent_trading_days[-2]).normalize()
+        else:
+            latest_date = latest_trading_day - pd.DateOffset(days=1)
+    else:
+        latest_date = latest_trading_day
 
     logger.info("=== Walk-Forward Analysis 시작 ===")
     logger.info(f"계정: {account_id} ({country_code})")
-    logger.info(f"기준일: {latest_date:%Y-%m-%d}")
+    logger.info(f"기준일: {latest_date:%Y-%m-%d} (백테스트용 확정 데이터)")
     logger.info(f"테스트 기간: 최근 {test_months}개월")
     logger.info(f"룩백 기간 후보: {lookback_periods}")
     logger.info(f"각 테스트 기간: {test_period_months}개월")
@@ -418,13 +434,14 @@ def run_walk_forward_analysis(
     etf_universe = get_etfs(country_code)
     tickers = [str(item.get("ticker")) for item in etf_universe if item.get("ticker")]
 
-    # 데이터 프리패치
+    # 데이터 프리패치 (백테스트이므로 실시간 가격 조회 비활성화)
     prefetched_data, missing_tickers = prepare_price_data(
         tickers=tickers,
         country=country_code,
         start_date=earliest_date.strftime("%Y-%m-%d"),
         end_date=latest_date.strftime("%Y-%m-%d"),
         warmup_days=100,
+        skip_realtime=True,
     )
 
     # 캐시에 저장

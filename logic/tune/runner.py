@@ -1393,6 +1393,7 @@ def run_account_tuning(
         start_date=date_range_prefetch[0],
         end_date=date_range_prefetch[1],
         warmup_days=warmup_days,
+        skip_realtime=True,
     )
     prefetched_map: Dict[str, DataFrame] = dict(prefetched)
 
@@ -1405,6 +1406,7 @@ def run_account_tuning(
             country=regime_country,
             date_range=date_range_prefetch,
             cache_country="common",
+            skip_realtime=True,
         )
         if regime_prefetch is not None and not regime_prefetch.empty:
             prefetched_map[regime_ticker] = regime_prefetch
@@ -1507,6 +1509,7 @@ def run_account_tuning(
             start_date=adjusted_date_range[0],
             end_date=adjusted_date_range[1],
             warmup_days=warmup_days,
+            skip_realtime=True,
         )
         prefetched_map.update(prefetched_adjusted)
         for ticker, frame in prefetched_adjusted.items():

@@ -261,6 +261,7 @@ def run_portfolio_backtest(
                 country=regime_country_code,
                 date_range=fetch_date_range,
                 cache_country="common",
+                skip_realtime=True,
             )
         if market_regime_df is None or market_regime_df.empty:
             logger.warning(
@@ -285,7 +286,7 @@ def run_portfolio_backtest(
             df = prefetched_data[ticker]
         else:
             # prefetched_data가 없으면 date_range를 사용하여 직접 조회
-            df = fetch_ohlcv(ticker, country=country, date_range=fetch_date_range)
+            df = fetch_ohlcv(ticker, country=country, date_range=fetch_date_range, skip_realtime=True)
 
         # 공통 함수를 사용하여 데이터 처리 및 지표 계산
         ticker_metrics = _process_ticker_data(ticker, df, etf_tickers, etf_ma_period, stock_ma_period, ma_type)

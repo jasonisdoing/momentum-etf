@@ -538,6 +538,7 @@ def fetch_ohlcv(
     *,
     cache_country: Optional[str] = None,
     force_refresh: bool = False,
+    skip_realtime: bool = False,
 ) -> Optional[pd.DataFrame]:
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
 
@@ -583,6 +584,7 @@ def fetch_ohlcv(
         end_dt.normalize(),
         cache_country_override=cache_country,
         force_refresh=force_refresh,
+        skip_realtime=skip_realtime,
     )
 
     if df is None or df.empty:
@@ -600,6 +602,7 @@ def _fetch_ohlcv_with_cache(
     *,
     cache_country_override: Optional[str] = None,
     force_refresh: bool = False,
+    skip_realtime: bool = False,
 ) -> Optional[pd.DataFrame]:
     country_code = (country or "").strip().lower()
     cache_country_code = (cache_country_override or country_code).strip().lower() or country_code
@@ -756,7 +759,7 @@ def _fetch_ohlcv_with_cache(
 
     effective_end = end_dt if end_dt <= cache_max else cache_max
 
-    if _should_use_realtime_price(cache_country_code):
+    if not skip_realtime and _should_use_realtime_price(cache_country_code):
         updated_df = _overlay_realtime_price(combined_df, ticker, cache_country_code)
         if not updated_df.equals(combined_df):
             combined_df = updated_df
@@ -1098,6 +1101,7 @@ def fetch_ohlcv_for_tickers(
     country: str,
     date_range: Optional[List[str]] = None,
     warmup_days: int = 0,
+    skip_realtime: bool = False,
 ) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
     """
     주어진 티커 목록에 대해 OHLCV 데이터를 직렬로 조회합니다.
@@ -1114,7 +1118,7 @@ def fetch_ohlcv_for_tickers(
     missing: List[str] = []
 
     for tkr in tickers:
-        df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range)
+        df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range, skip_realtime=skip_realtime)
         if df is None or df.empty:
             missing.append(tkr)
             continue
@@ -1130,6 +1134,7 @@ def prepare_price_data(
     start_date: str,
     end_date: str,
     warmup_days: int = 0,
+    skip_realtime: bool = False,
 ) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
     """Shared helper to populate cache-backed OHLCV data consistently across workflows."""
 
@@ -1143,6 +1148,7 @@ def prepare_price_data(
         country,
         date_range=date_range,
         warmup_days=warmup_days,
+        skip_realtime=skip_realtime,
     )
     return prefetched, missing
 

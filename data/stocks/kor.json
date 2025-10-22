@@ -95,7 +95,7 @@
             {
                 "ticker": "0023B0",
                 "name": "PLUS 미국양자컴퓨팅TOP10",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2025-03-11",
                 "1_week_avg_volume": 136713,
                 "1_week_avg_turnover": 2978165527
@@ -103,7 +103,7 @@
             {
                 "ticker": "0023A0",
                 "name": "SOL 미국양자컴퓨팅TOP10",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2025-03-11",
                 "1_week_avg_volume": 1716223,
                 "1_week_avg_turnover": 53717226675
@@ -111,7 +111,7 @@
             {
                 "ticker": "498270",
                 "name": "KIWOOM 미국양자컴퓨팅",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2024-12-17",
                 "1_week_avg_volume": 1135555,
                 "1_week_avg_turnover": 18489509702
@@ -119,7 +119,7 @@
             {
                 "ticker": "0020H0",
                 "name": "KoAct 글로벌양자컴퓨팅액티브",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2025-03-11",
                 "1_week_avg_volume": 202249,
                 "1_week_avg_turnover": 4656300847
@@ -336,7 +336,7 @@
             {
                 "ticker": "434730",
                 "name": "HANARO 원자력iSelect",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2022-06-28",
                 "1_week_avg_volume": 903501,
                 "1_week_avg_turnover": 37573351520
@@ -344,7 +344,7 @@
             {
                 "ticker": "0051G0",
                 "name": "SOL 미국원자력SMR",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2025-05-20",
                 "1_week_avg_volume": 1645946,
                 "1_week_avg_turnover": 32943002679
