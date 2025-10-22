@@ -874,25 +874,15 @@ def _fetch_ohlcv_core(
             return None
         try:
             with _silence_yfinance_logs():
-                import signal
-
-                def timeout_handler(signum, frame):
-                    raise TimeoutError("yfinance download timeout")
-
-                # 30초 타임아웃 설정
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(30)
-
-                try:
-                    df = yf.download(
-                        ticker,
-                        start=start_dt,
-                        end=end_dt + pd.Timedelta(days=1),
-                        auto_adjust=True,
-                        progress=False,
-                    )
-                finally:
-                    signal.alarm(0)  # 타임아웃 해제
+                # signal 대신 간단하게 yfinance 자체 타임아웃 사용
+                df = yf.download(
+                    ticker,
+                    start=start_dt,
+                    end=end_dt + pd.Timedelta(days=1),
+                    auto_adjust=True,
+                    progress=False,
+                    timeout=30,
+                )
             if df.empty:
                 return None
             if isinstance(df.columns, pd.MultiIndex):
