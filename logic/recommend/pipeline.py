@@ -1008,8 +1008,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 phrase = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
             else:
                 state = "HOLD"
-                new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
-                phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
+                # RSI 과매수 문구가 있으면 유지, 없으면 신규 편입 표시
+                if not phrase or "RSI" not in phrase:
+                    new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+                    phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
             if holding_days_val == 0:
                 holding_days_val = 1
         # 추천에 따라 오늘 신규 매수해야 할 종목
@@ -1039,8 +1041,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 phrase = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
             else:
                 state = "HOLD"
-                new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
-                phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
+                # RSI 과매수 문구가 있으면 유지, 없으면 신규 편입 표시
+                if not phrase or "RSI" not in phrase:
+                    new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+                    phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
             if holding_days_val == 0:
                 holding_days_val = 1
 

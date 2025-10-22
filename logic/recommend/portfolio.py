@@ -197,7 +197,11 @@ def _create_decision_entry(
             state = "SELL_TREND"
             phrase = DECISION_NOTES["TREND_BREAK"]
 
-        if sell_block_info and state in ("SELL_TREND", "SELL_RSI"):
+        # SELL_RSI는 쿨다운 여부와 무관하게 항상 HOLD로 전환
+        if state == "SELL_RSI":
+            state = "HOLD"
+            phrase = f"⚠️ RSI 과매수 (쿨다운 대기중, RSI점수: {rsi_score_value:.1f})"
+        elif sell_block_info and state == "SELL_TREND":
             state = "HOLD"
             days_since = sell_block_info.get("days_since", 0)
             last_buy = sell_block_info.get("last_buy")
@@ -486,10 +490,22 @@ def generate_daily_recommendations_for_portfolio(
                 )
 
     # 실제 보유 중인 종목 수 계산 (CORE 포함)
-    # HOLD + HOLD_CORE = 전체 보유 종목
-    held_count = sum(1 for d in decisions if d["state"] in {"HOLD", "HOLD_CORE"})
+    # HOLD + HOLD_CORE + SELL_RSI(쿨다운으로 HOLD 유지) 포함
+    # SELL_RSI는 항상 쿨다운으로 HOLD가 되므로 무조건 카운트
+    # 다른 SELL 상태는 쿨다운 블록에 있을 때만 카운트
+    SELL_STATE_SET_FOR_COUNT = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS"}
+    held_count = sum(
+        1
+        for d in decisions
+        if d["state"] in {"HOLD", "HOLD_CORE", "SELL_RSI"} or (d["state"] in SELL_STATE_SET_FOR_COUNT and d["tkr"] in sell_cooldown_block)
+    )
     # 추가 매수 가능 슬롯 = TOPN - 전체 보유 수
     slots_to_fill = denom - held_count
+
+    logger.info(
+        f"[PORTFOLIO DEBUG] held_count={held_count}, denom={denom}, slots_to_fill={slots_to_fill}, "
+        f"sell_cooldown_block={list(sell_cooldown_block.keys())}"
+    )
 
     if risk_off_effective:
         for decision in decisions:
@@ -578,18 +594,28 @@ def generate_daily_recommendations_for_portfolio(
         skip_held_categories=False,
     )
 
+    logger.info(f"[REPLACE DEBUG] replacement_candidates count={len(replacement_candidates)}")
+
     # 핵심 보유 종목은 교체 매매 대상에서 제외 (HOLD만 대상, HOLD_CORE 제외)
     current_held_stocks = [d for d in decisions if d["state"] == "HOLD"]
     # MAPS 점수 사용
     current_held_stocks.sort(key=lambda x: x.get("score", 0.0) if pd.notna(x.get("score")) else -float("inf"))
 
+    logger.info(f"[REPLACE DEBUG] current_held_stocks count={len(current_held_stocks)}")
+
+    replace_loop_count = 0
     for best_new in replacement_candidates:
+        replace_loop_count += 1
+        logger.info(f"[REPLACE LOOP] iteration={replace_loop_count}, ticker={best_new.get('tkr')}")
+
         if not current_held_stocks:
+            logger.info(f"[REPLACE STOP] current_held_stocks is empty")
             break
 
         # RSI 과매수 종목 교체 매수 차단
         best_new_rsi_score = best_new.get("rsi_score", 100.0)
         if best_new_rsi_score <= rsi_sell_threshold:
+            logger.info(f"[REPLACE BLOCKED RSI] {best_new['tkr']} RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})")
             best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
             best_new["row"][-1] = f"RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})"
             best_new["buy_signal"] = False
@@ -632,25 +658,35 @@ def generate_daily_recommendations_for_portfolio(
 
         if held_stock_same_category:
             held_score = held_stock_same_category.get("score")
-
+            logger.info(
+                f"[REPLACE EVAL SAME_CAT] new={best_new['tkr']}({best_new_score:.2f}), "
+                f"held={held_stock_same_category['tkr']}({held_score:.2f}), "
+                f"diff={best_new_score - held_score:.2f}, threshold={replace_threshold}"
+            )
             if pd.notna(best_new_score) and pd.notna(held_score) and best_new_score > held_score + replace_threshold:
                 ticker_to_sell = held_stock_same_category["tkr"]
         else:
             if current_held_stocks:
                 weakest_held = current_held_stocks[0]
                 weakest_score = weakest_held.get("score")
-
+                logger.info(
+                    f"[REPLACE EVAL WEAKEST] new={best_new['tkr']}({best_new_score:.2f}), "
+                    f"weakest={weakest_held['tkr']}({weakest_score:.2f}), "
+                    f"diff={best_new_score - weakest_score:.2f}, threshold={replace_threshold}"
+                )
                 if pd.notna(best_new_score) and pd.notna(weakest_score) and best_new_score > weakest_score + replace_threshold:
                     ticker_to_sell = weakest_held["tkr"]
 
         if ticker_to_sell:
             sell_block_for_candidate = sell_cooldown_block.get(ticker_to_sell)
+            buy_block_for_candidate = buy_cooldown_block.get(ticker_to_sell)
             logger.info(
                 f"[REPLACE CHECK] ticker_to_sell={ticker_to_sell}, "
-                f"sell_block_for_candidate={sell_block_for_candidate}, "
+                f"sell_block={sell_block_for_candidate}, buy_block={buy_block_for_candidate}, "
                 f"cooldown_days={cooldown_days}"
             )
-            if sell_block_for_candidate and cooldown_days > 0:
+            # 매도 쿨다운 또는 매수 쿨다운 중이면 교체 매도 차단
+            if (sell_block_for_candidate or buy_block_for_candidate) and cooldown_days > 0:
                 blocked_name = etf_meta.get(ticker_to_sell, {}).get("name") or ticker_to_sell
                 best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
                 best_new["row"][-1] = f"쿨다운 {cooldown_days}일 대기중 - {blocked_name}"
@@ -719,11 +755,17 @@ def generate_daily_recommendations_for_portfolio(
             if sell_info and d["state"] in SELL_STATE_SET:
                 if d["state"] == "SELL_REPLACE":
                     continue
+                original_state = d["state"]
                 d["state"] = "HOLD"
                 d["row"][4] = "HOLD"
                 phrase_str = str(d["row"][-1] or "")
                 if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
-                    d["row"][-1] = "쿨다운 대기중"
+                    # SELL_RSI인 경우 RSI 과매수 문구 추가
+                    if original_state == "SELL_RSI":
+                        rsi_score = d.get("rsi_score", 0.0)
+                        d["row"][-1] = f"⚠️ RSI 과매수 (쿨다운 대기중, RSI점수: {rsi_score:.1f})"
+                    else:
+                        d["row"][-1] = "쿨다운 대기중"
                 d["buy_signal"] = False
 
             if buy_info and d["state"] in BUY_STATE_SET:
