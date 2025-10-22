@@ -658,36 +658,12 @@
         "category": "2차전지",
         "tickers": [
             {
-                "ticker": "305720",
-                "name": "Kodex 2차전지산업",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 10865406,
-                "1_week_avg_turnover": 149676963174
-            },
-            {
-                "ticker": "461950",
-                "name": "KODEX 2차전지핵심소재10",
-                "recommend_enabled": true,
-                "listing_date": "2023-07-04",
-                "1_week_avg_volume": 5432572,
-                "1_week_avg_turnover": 27302684203
-            },
-            {
                 "ticker": "462010",
                 "name": "TIGER 2차전지소재Fn",
                 "recommend_enabled": true,
                 "listing_date": "2023-07-13",
                 "1_week_avg_volume": 12019240,
                 "1_week_avg_turnover": 59602667494
-            },
-            {
-                "ticker": "364980",
-                "name": "TIGER 2차전지TOP10",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 5884525,
-                "1_week_avg_turnover": 53035929750
             },
             {
                 "ticker": "419430",
