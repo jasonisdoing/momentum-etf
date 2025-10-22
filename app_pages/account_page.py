@@ -157,17 +157,12 @@ def _cached_benchmark_data(
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
 ) -> Tuple[pd.DataFrame, float]:
-    from utils.performance import calculate_actual_performance
+    from logic.performance import calculate_actual_performance
     from utils.account_registry import get_account_settings
 
     # 계정 설정 로드
     account_settings = get_account_settings(account_id)
     country_code = account_settings.get("country_code", "kor")
-
-    # 전략 설정에서 포트폴리오 수 가져오기
-    strategy = account_settings.get("strategy", {})
-    tuning = strategy.get("tuning", {})
-    portfolio_topn = tuning.get("PORTFOLIO_TOPN", 5)
 
     # 초기 자본 가져오기
     initial_capital_raw = account_settings.get("initial_capital", 100_000_000)
@@ -182,7 +177,6 @@ def _cached_benchmark_data(
         start_date=start_date,
         end_date=end_date,
         initial_capital=initial_capital,
-        portfolio_topn=portfolio_topn,
         country_code=country_code,
     )
 
@@ -206,15 +200,6 @@ def _cached_benchmark_data(
     else:
         account_return = summary.get("period_return")  # 백테스트는 새 키 사용
 
-    if account_return is not None:
-        rows.append(
-            {
-                "티커": "-",
-                "종목": "Momentum ETF",
-                "누적 수익률": f"{float(account_return):+.2f}%",
-            }
-        )
-
     # 벤치마크 정보 (항상 표시)
     for entry in benchmarks:
         if not isinstance(entry, dict):
@@ -234,7 +219,7 @@ def _cached_benchmark_data(
 
     table_df = pd.DataFrame(rows)
     cached_at = pd.Timestamp.now(tz="Asia/Seoul")
-    return table_df, cached_at.isoformat()
+    return table_df, account_return, cached_at.isoformat()
 
 
 def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_code: str) -> None:
@@ -256,7 +241,7 @@ def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_c
         return
 
     try:
-        table_df, cached_iso = _cached_benchmark_data(account_id, start_date, end_date)
+        table_df, account_return, cached_iso = _cached_benchmark_data(account_id, start_date, end_date)
     except Exception as exc:
         st.warning(f"벤치마크 성과를 계산하지 못했습니다: {exc}")
         return
@@ -268,6 +253,8 @@ def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_c
     trading_days = get_trading_days(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), country_code)
     day_count = len(trading_days)
     st.markdown(f"**벤치마크 누적 수익률 ({start_date.strftime('%Y년 %m월 %d일')} 이후 {day_count} 거래일)**")
+    if account_return is not None:
+        st.markdown(f"**가상 거래 수익률 (Momentum ETF): {account_return:+.2f}%**")
     st.table(table_df)
     try:
         cached_kst = pd.to_datetime(cached_iso)

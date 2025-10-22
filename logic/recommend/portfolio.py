@@ -691,6 +691,13 @@ def generate_daily_recommendations_for_portfolio(
                 best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
                 best_new["row"][-1] = f"쿨다운 {cooldown_days}일 대기중 - {blocked_name}"
                 best_new["buy_signal"] = False
+
+                # 교체 대상 종목의 문구도 업데이트
+                d_to_sell = data_by_tkr.get(ticker_to_sell)
+                if d_to_sell and d_to_sell.get("state") == "HOLD":
+                    new_candidate_name = etf_meta.get(best_new["tkr"], {}).get("name") or best_new["tkr"]
+                    d_to_sell["row"][-1] = f"⚠️ 교체 대상 (쿨다운 대기중) - {new_candidate_name}({best_new['tkr']})"
+
                 logger.info(f"[REPLACE BLOCKED] {ticker_to_sell} 교체 차단 (쿨다운)")
                 continue
 

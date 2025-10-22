@@ -19,7 +19,6 @@ def calculate_actual_performance(
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
     initial_capital: float,
-    portfolio_topn: int,
     country_code: str = "kor",
 ) -> Optional[Dict[str, Any]]:
     """
@@ -30,7 +29,6 @@ def calculate_actual_performance(
         start_date: 시작일
         end_date: 종료일
         initial_capital: 초기 자본
-        portfolio_topn: 포트폴리오 최대 보유 종목 수
         country_code: 국가 코드
 
     Returns:
