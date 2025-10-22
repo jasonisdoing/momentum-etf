@@ -232,44 +232,53 @@ def list_open_positions(account_id: str) -> List[dict[str, Any]]:
     if db is None:
         return []
 
-    pipeline = [
-        {
-            "$match": {
-                "account": account_norm,
-                "ticker": {"$ne": None},
-                "deleted_at": {"$exists": False},
-            }
-        },
-        {"$sort": {"executed_at": 1, "_id": 1}},
-        {
-            "$group": {
-                "_id": "$ticker",
-                "last_action": {"$last": "$action"},
-                "last_doc": {"$last": "$$ROOT"},
-            }
-        },
-        {"$match": {"last_action": "BUY"}},
-        {"$sort": {"_id": 1}},
-    ]
-
+    # 모든 거래를 가져와서 Python에서 처리
     try:
-        results = list(db.trades.aggregate(pipeline))
+        all_trades = list(
+            db.trades.find(
+                {
+                    "account": account_norm,
+                    "ticker": {"$ne": None},
+                    "deleted_at": {"$exists": False},
+                },
+                projection={"ticker": 1, "action": 1, "executed_at": 1, "created_at": 1, "name": 1, "memo": 1, "_id": 1},
+            ).sort([("ticker", 1), ("executed_at", 1), ("created_at", 1), ("_id", 1)])
+        )
     except Exception:
         return []
 
+    # 티커별로 마지막 거래 찾기
+    from collections import defaultdict
+
+    ticker_trades = defaultdict(list)
+    for trade in all_trades:
+        ticker = str(trade.get("ticker") or "").upper()
+        if ticker:
+            ticker_trades[ticker].append(trade)
+
     holdings: List[dict[str, Any]] = []
-    for item in results:
-        last_doc = item.get("last_doc") or {}
-        holdings.append(
-            {
-                "id": str(last_doc.get("_id")) if last_doc.get("_id") else "",
-                "ticker": str(item.get("_id") or "").upper(),
-                "last_action": item.get("last_action"),
-                "executed_at": last_doc.get("executed_at"),
-                "name": str(last_doc.get("name", "")),
-                "memo": last_doc.get("memo", ""),
-            }
-        )
+    for ticker, trades in ticker_trades.items():
+        if not trades:
+            continue
+        # 마지막 거래 (이미 정렬됨)
+        last_trade = trades[-1]
+        last_action = str(last_trade.get("action") or "").upper()
+
+        # 마지막 거래가 BUY인 경우만 포함
+        if last_action == "BUY":
+            holdings.append(
+                {
+                    "id": str(last_trade.get("_id")) if last_trade.get("_id") else "",
+                    "ticker": ticker,
+                    "last_action": last_action,
+                    "executed_at": last_trade.get("executed_at"),
+                    "name": str(last_trade.get("name", "")),
+                    "memo": last_trade.get("memo", ""),
+                }
+            )
+
+    # 티커 순으로 정렬
+    holdings.sort(key=lambda x: x.get("ticker", ""))
     return holdings
 
 

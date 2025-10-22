@@ -239,7 +239,7 @@ def render_recommendation_table(
     st.dataframe(
         styled_df,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         height=table_height,
         column_config=selected_column_config,
     )

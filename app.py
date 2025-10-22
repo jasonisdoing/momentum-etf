@@ -447,13 +447,22 @@ def main() -> None:
             margin-top: 0 !important;
         }
 
-        section[data-testid="stSidebar"] {
+        section[data-testid="stSidebar"][aria-expanded="true"] {
             width: 12rem !important;
             min-width: 12rem !important;
         }
 
-        section[data-testid="stSidebar"] > div {
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+            width: 0 !important;
+            min-width: 0 !important;
+        }
+
+        section[data-testid="stSidebar"][aria-expanded="true"] > div {
             width: 12rem !important;
+        }
+
+        section[data-testid="stSidebar"][aria-expanded="false"] > div {
+            width: 0 !important;
         }
         </style>
         """,

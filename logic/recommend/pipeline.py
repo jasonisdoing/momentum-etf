@@ -565,6 +565,12 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     try:
         # 현재 미매도 포지션만 조회
         open_positions = list_open_positions(account_id)
+        logger.info(
+            "[%s] list_open_positions 결과: %d개 - %s",
+            account_id.upper(),
+            len(open_positions),
+            ", ".join([p.get("ticker", "") for p in open_positions]) if open_positions else "(없음)",
+        )
         if open_positions:
             for position in open_positions:
                 ticker = (position.get("ticker") or "").strip().upper()
@@ -581,23 +587,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                     "buy_date": buy_date,
                 }
 
-        # 예외적으로 포지션이 비어 있을 경우를 대비해 기존 BUY 집계를 백업으로 사용
+        # holdings가 비어있으면 에러
         if not holdings:
-            db = get_db_connection()
-            if db is not None:
-                pipeline = [
-                    {"$match": {"account": account_id, "action": "BUY"}},
-                    {"$group": {"_id": "$ticker"}},
-                    {"$project": {"ticker": "$_id", "_id": 0}},
-                ]
-                holdings_tickers = [item["ticker"] for item in db.trades.aggregate(pipeline)]
-                for ticker in holdings_tickers:
-                    ticker_norm = (ticker or "").strip().upper()
-                    if not ticker_norm:
-                        continue
-                    holdings[ticker_norm] = {
-                        "buy_date": None,
-                    }
+            logger.error(f"[{account_id.upper()}] 보유 종목이 없습니다. 거래 내역을 확인하세요.")
+            return []
 
         # 종목명과 티커를 함께 표시
         holdings_display = []
@@ -836,6 +829,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     trades_today = _fetch_trades_for_date(account_id, base_date)
     sold_entries: List[Dict[str, Any]] = []
     buy_traded_today: set[str] = set()
+    sell_traded_today: set[str] = set()
+
+    # 먼저 SELL 종목 수집
+    for trade in trades_today:
+        action = (trade.get("action") or "").strip().upper()
+        ticker = (trade.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        if action == "SELL":
+            sell_traded_today.add(ticker)
+
+    # 이제 거래 처리
     for trade in trades_today:
         action = (trade.get("action") or "").strip().upper()
         ticker = (trade.get("ticker") or "").strip().upper()
@@ -906,7 +911,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             )
 
         elif action == "BUY":
-            buy_traded_today.add(ticker)
+            # 당일 SELL이 없는 경우만 BUY로 추가
+            if ticker not in sell_traded_today:
+                buy_traded_today.add(ticker)
 
         else:
             continue
