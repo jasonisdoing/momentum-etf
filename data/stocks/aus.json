@@ -37,14 +37,6 @@
         "category": "테크(일반)",
         "tickers": [
             {
-                "ticker": "ASX:ASIA",
-                "name": "BetaShares Asia Technology Tigers ETF",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 457710,
-                "1_week_avg_turnover": 6627894
-            },
-            {
                 "ticker": "ASX:FANG",
                 "name": "Global X FANG+ ETF",
                 "recommend_enabled": true,
@@ -72,6 +64,14 @@
                 "listing_date": "2022-01-01",
                 "1_week_avg_volume": 10708,
                 "1_week_avg_turnover": 1554680
+            },
+            {
+                "ticker": "ASX:ASIA",
+                "name": "BetaShares Asia Technology Tigers ETF",
+                "recommend_enabled": true,
+                "listing_date": "2022-01-01",
+                "1_week_avg_volume": 457710,
+                "1_week_avg_turnover": 6627894
             }
         ]
     },
