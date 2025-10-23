@@ -55,7 +55,7 @@ def refresh_all_caches(countries: list[str], start_date: str):
             try:
                 # fetch_ohlcv는 캐시가 없으면 자동으로 데이터를 조회하고 저장합니다.
                 # date_range의 두 번째 인자를 None으로 주면 오늘까지 조회합니다.
-                fetch_ohlcv(ticker, country, date_range=[start_date, None])
+                fetch_ohlcv(ticker, country, date_range=[start_date, None], update_listing_meta=True)
             except Exception as e:
                 logger.warning("%s 데이터 처리 중 오류 발생: %s", ticker, e)
         logger.info("-> %s 국가의 캐시 갱신 완료.", country.upper())

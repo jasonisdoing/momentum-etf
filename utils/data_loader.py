@@ -533,6 +533,7 @@ def fetch_ohlcv(
     cache_country: Optional[str] = None,
     force_refresh: bool = False,
     skip_realtime: bool = False,
+    update_listing_meta: bool = False,
 ) -> Optional[pd.DataFrame]:
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
 
@@ -579,6 +580,7 @@ def fetch_ohlcv(
         cache_country_override=cache_country,
         force_refresh=force_refresh,
         skip_realtime=skip_realtime,
+        update_listing_meta=update_listing_meta,
     )
 
     if df is None or df.empty:
@@ -597,6 +599,7 @@ def _fetch_ohlcv_with_cache(
     cache_country_override: Optional[str] = None,
     force_refresh: bool = False,
     skip_realtime: bool = False,
+    update_listing_meta: bool = False,
 ) -> Optional[pd.DataFrame]:
     country_code = (country or "").strip().lower()
     cache_country_code = (cache_country_override or country_code).strip().lower() or country_code
@@ -780,7 +783,7 @@ def _fetch_ohlcv_with_cache(
         elif cache_seed_dt is not None and listing_ts < cache_seed_dt <= target_listing_ts:
             should_update_listing = True
 
-    if should_update_listing:
+    if should_update_listing and update_listing_meta:
         try:
             set_listing_date(
                 country_code,
