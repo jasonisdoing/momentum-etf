@@ -156,14 +156,6 @@
                 "listing_date": "2022-01-01",
                 "1_week_avg_volume": 29133,
                 "1_week_avg_turnover": 3672664
-            },
-            {
-                "ticker": "ASX:VAE",
-                "name": "Vanguard FTSE Asia ex Japan Shares Index ETF",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 8958,
-                "1_week_avg_turnover": 867640
             }
         ]
     },
@@ -269,14 +261,6 @@
                 "listing_date": "2022-01-01",
                 "1_week_avg_volume": 82623,
                 "1_week_avg_turnover": 1319499
-            },
-            {
-                "ticker": "ASX:ROBO",
-                "name": "Global X ROBO Global Robotics & Automation ETF",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 4939,
-                "1_week_avg_turnover": 452782
             }
         ]
     },
@@ -311,14 +295,6 @@
                 "listing_date": "2022-01-01",
                 "1_week_avg_volume": 38605,
                 "1_week_avg_turnover": 848677
-            },
-            {
-                "ticker": "ASX:IHOO",
-                "name": "iShares Global 100 AUD Hedged ETF",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 3520,
-                "1_week_avg_turnover": 760351
             },
             {
                 "ticker": "ASX:MVS",
@@ -393,14 +369,6 @@
                 "1_week_avg_turnover": 46608
             },
             {
-                "ticker": "ASX:QFN",
-                "name": "BetaShares Australian Financials Sector ETF",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 7856,
-                "1_week_avg_turnover": 144404
-            },
-            {
                 "ticker": "ASX:IHVV",
                 "name": "iShares S&P 500 AUD Hedged ETF",
                 "recommend_enabled": true,
@@ -463,14 +431,6 @@
                 "listing_date": "2022-01-01",
                 "1_week_avg_volume": 58828,
                 "1_week_avg_turnover": 4388606
-            },
-            {
-                "ticker": "ASX:RDV",
-                "name": "Russell Investments High Dividend Australian Shares ETF",
-                "recommend_enabled": true,
-                "listing_date": "2022-01-01",
-                "1_week_avg_volume": 7196,
-                "1_week_avg_turnover": 254305
             },
             {
                 "ticker": "ASX:VSO",
