@@ -8,12 +8,12 @@ import logging
 import os
 import warnings
 from datetime import datetime, time
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from contextlib import contextmanager
 
 import pandas as pd
 
-from config import ETF_PRICE_SOURCE
+from config import KOR_REALTIME_ETF_PRICE_SOURCE
 
 # pkg_resources 워닝 억제 (가장 강력한 방법)
 os.environ["PYTHONWARNINGS"] = "ignore"
@@ -90,11 +90,18 @@ if not any(isinstance(f, _PykrxLogFilter) for f in _root_logger.filters):
 
 logger = get_app_logger()
 
-_NAVER_PRICE_SOURCE_NORMALIZED = (ETF_PRICE_SOURCE or "").strip().lower()
-_NAVER_ALLOWED_PRICE_SOURCES = {"price", "nav"}
+_KOR_PRICE_SOURCE_NORMALIZED = (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower()
+_KOR_ALLOWED_PRICE_SOURCES = {"price", "nav"}
 
-if _NAVER_PRICE_SOURCE_NORMALIZED not in _NAVER_ALLOWED_PRICE_SOURCES:
-    raise ValueError("ETF_PRICE_SOURCE must be one of {'Price', 'Nav'}")
+if _KOR_PRICE_SOURCE_NORMALIZED not in _KOR_ALLOWED_PRICE_SOURCES:
+    raise ValueError("KOR_REALTIME_ETF_PRICE_SOURCE must be one of {'Price', 'Nav'}")
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 try:
@@ -807,13 +814,18 @@ def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.D
     country_code = (country or "").strip().lower()
 
     price: Optional[float] = None
+    nav_value: Optional[float] = None
+
     if country_code == "kor":
         # 네이버 실시간 가격은 한국 상장 종목(숫자/알파벳 코드)에만 적용
         if ticker.startswith("^"):
             return df
         snapshot_entry = get_cached_naver_etf_snapshot_entry(ticker)
         if snapshot_entry:
-            price = float(snapshot_entry.get("price", 0.0))
+            price_candidate = _safe_float(snapshot_entry.get("nowVal"))
+            nav_candidate = _safe_float(snapshot_entry.get("nav"))
+            price = price_candidate if price_candidate is not None else _safe_float(snapshot_entry.get("price"))
+            nav_value = nav_candidate
         if price is None or price <= 0:
             price = fetch_naver_realtime_price(ticker)
     elif country_code == "aus":
@@ -848,6 +860,13 @@ def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.D
         for col in ("Open", "High", "Low", "Close", "Adj Close"):
             if col in df.columns:
                 new_row[col] = price
+        if country_code == "kor" and (nav_value is not None or _KOR_PRICE_SOURCE_NORMALIZED == "nav"):
+            effective_nav = nav_value if nav_value is not None else price
+            if "NAV" in df.columns:
+                new_row["NAV"] = effective_nav
+            else:
+                new_row = new_row.reindex(list(new_row.index) + ["NAV"])
+                new_row["NAV"] = effective_nav
         if "Volume" in new_row.index:
             new_row["Volume"] = 0.0
         target_idx = today
@@ -861,6 +880,11 @@ def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.D
         for col in ("Close", "Adj Close", "Open", "High", "Low"):
             if col in df.columns:
                 df.loc[target_idx, col] = price
+        if country_code == "kor" and (nav_value is not None or _KOR_PRICE_SOURCE_NORMALIZED == "nav"):
+            effective_nav = nav_value if nav_value is not None else price
+            if "NAV" not in df.columns:
+                df["NAV"] = pd.NA
+            df.loc[target_idx, "NAV"] = effective_nav
 
     return df
 
@@ -1273,7 +1297,7 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> Dict[str, Dict[str,
 
         deviation = ((price_value / nav_value) - 1.0) * 100.0
 
-        selected_price = price_value if _NAVER_PRICE_SOURCE_NORMALIZED == "price" else nav_value
+        selected_price = price_value if _KOR_PRICE_SOURCE_NORMALIZED == "price" else nav_value
 
         snapshot[code] = {
             "nav": nav_value,

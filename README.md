@@ -384,7 +384,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 - `MARKET_REGIME_FILTER_TICKERS_AUX`: 대시보드에 참고용으로 노출할 보조 지수 리스트
 - `MARKET_REGIME_FILTER_MA_PERIOD`: 시장 레짐 필터 이동평균 기간
 - `MARKET_REGIME_FILTER_COUNTRY`: 레짐 필터 데이터 조회에 사용할 시장 코드(`kor`, `us` 등)
-- `ETF_PRICE_SOURCE`: 한국 ETF 실시간 가격을 `Price` 또는 `Nav` 중 어떤 값을 사용할지 지정
+- `KOR_REALTIME_ETF_PRICE_SOURCE`: 한국 ETF 실시간 가격을 `Price` 또는 `Nav` 중 어떤 값을 사용할지 지정
 
 ### 계정별 전략 파라미터
 

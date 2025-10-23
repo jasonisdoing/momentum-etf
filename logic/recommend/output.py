@@ -14,8 +14,8 @@ import pandas as pd
 from utils.notification import strip_html_tags
 from utils.report import render_table_eaw
 from utils.logger import get_app_logger
-from utils.labels import get_price_column_label
 from utils.formatters import format_price_deviation, format_price
+from config import KOR_REALTIME_ETF_PRICE_SOURCE
 
 logger = get_app_logger()
 
@@ -181,7 +181,11 @@ def dump_recommendation_log(
 
     # 테이블 헤더 (화면 UI와 동일)
     country_code = getattr(report, "country_code", "")
-    price_header = get_price_column_label(country_code)
+    country_lower = (country_code or "").strip().lower()
+    nav_mode = country_lower in {"kr", "kor"} and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav"
+    show_deviation = country_lower in {"kr", "kor"}
+
+    price_header = "현재가"
 
     headers = [
         "#",
@@ -193,29 +197,29 @@ def dump_recommendation_log(
         "일간(%)",
         "평가(%)",
         price_header,
-        "괴리율",
-        "점수",
-        "RSI",
-        "지속",
-        "문구",
     ]
+    if nav_mode:
+        headers.append("Nav")
+    if show_deviation:
+        headers.append("괴리율")
+    headers.extend(["점수", "RSI", "지속", "문구"])
 
     aligns = [
-        "right",  # #
-        "left",  # 티커
-        "left",  # 종목명
-        "left",  # 카테고리
-        "center",  # 상태
-        "right",  # 보유일
-        "right",  # 일간(%)
-        "right",  # 평가(%)
-        "right",  # 현재가 계열
-        "right",  # 괴리율
-        "right",  # 점수
-        "right",  # RSI
-        "right",  # 지속
-        "left",  # 문구
+        "right",
+        "left",
+        "left",
+        "left",
+        "center",
+        "right",
+        "right",
+        "right",
+        "right",
     ]
+    if nav_mode:
+        aligns.append("right")
+    if show_deviation:
+        aligns.append("right")
+    aligns.extend(["right", "right", "right", "left"])
 
     # 테이블 데이터
     rows: List[List[str]] = []
@@ -229,30 +233,37 @@ def dump_recommendation_log(
         daily_pct = item.get("daily_pct", 0)
         evaluation_pct = item.get("evaluation_pct", 0)
         price = item.get("price")
+        nav_price = item.get("nav_price")
         price_deviation = item.get("price_deviation")
         score = item.get("score", 0)
         rsi_score = item.get("rsi_score", 0)
         streak = item.get("streak", 0)
         phrase = item.get("phrase", "")
 
-        rows.append(
+        row = [
+            str(rank),
+            ticker,
+            name,
+            category,
+            state,
+            str(holding_days) if holding_days > 0 else "-",
+            f"{daily_pct:+.2f}%" if isinstance(daily_pct, (int, float)) else "-",
+            f"{evaluation_pct:+.2f}%" if isinstance(evaluation_pct, (int, float)) and evaluation_pct != 0 else "-",
+            format_price(price, country_code),
+        ]
+        if nav_mode:
+            row.append(format_price(nav_price, country_code))
+        if show_deviation:
+            row.append(format_price_deviation(price_deviation))
+        row.extend(
             [
-                str(rank),
-                ticker,
-                name,
-                category,
-                state,
-                str(holding_days) if holding_days > 0 else "-",
-                f"{daily_pct:+.2f}%" if isinstance(daily_pct, (int, float)) else "-",
-                f"{evaluation_pct:+.2f}%" if isinstance(evaluation_pct, (int, float)) and evaluation_pct != 0 else "-",
-                format_price(price, country_code),
-                format_price_deviation(price_deviation),
                 f"{score:.1f}" if isinstance(score, (int, float)) else "-",
                 f"{rsi_score:.1f}" if isinstance(rsi_score, (int, float)) else "-",
                 f"{streak}일" if streak > 0 else "-",
                 phrase,
             ]
         )
+        rows.append(row)
 
     # 테이블 렌더링
     table_lines = render_table_eaw(headers, rows, aligns)

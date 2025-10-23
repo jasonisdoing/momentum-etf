@@ -19,7 +19,6 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.logger import get_app_logger
-from utils.labels import get_price_column_label
 from utils.settings_loader import (
     AccountSettingsError,
     get_backtest_months_range,
@@ -652,8 +651,7 @@ def _generate_daily_report_lines(
     portfolio_df = result.portfolio_timeseries
     lines: List[str] = []
 
-    country_code = (account_settings.get("country_code") or "").strip().lower()
-    price_header = get_price_column_label(country_code)
+    price_header = "현재가"
 
     headers = [
         "#",

@@ -35,10 +35,10 @@ from utils.data_loader import (
     count_trading_days,
     fetch_naver_etf_inav_snapshot,
 )
-from utils.labels import get_price_column_label
 from utils.db_manager import get_db_connection, list_open_positions
 from logic.recommend.market import get_market_regime_status_info
 from utils.logger import get_app_logger
+from config import KOR_REALTIME_ETF_PRICE_SOURCE
 
 logger = get_app_logger()
 
@@ -286,6 +286,27 @@ def _fetch_price_deviation_kr(ticker: str, date_candidates: List[pd.Timestamp]) 
                 continue
 
     return None
+
+
+def _select_price_series(df: pd.DataFrame, country_code: str) -> pd.Series:
+    """한국 실시간 설정에 따라 가격 시리즈를 선택합니다."""
+
+    close_series = pd.to_numeric(df.get("Close"), errors="coerce") if "Close" in df.columns else None
+    country_lower = (country_code or "").strip().lower()
+    use_nav = (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav" and country_lower in {"kr", "kor"}
+
+    if use_nav and "NAV" in df.columns:
+        nav_series = pd.to_numeric(df["NAV"], errors="coerce")
+        if close_series is not None:
+            nav_series = nav_series.fillna(close_series)
+        nav_series = nav_series.fillna(method="ffill").fillna(method="bfill")
+        if nav_series.notna().any():
+            return nav_series
+
+    if close_series is None:
+        raise ValueError("가격 시리즈를 찾을 수 없습니다 (Close 열 없음).")
+
+    return close_series.fillna(method="ffill").fillna(method="bfill")
 
 
 def _build_score(meta: _TickerMeta, metrics) -> _TickerScore:
@@ -719,7 +740,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     data_by_tkr = {}
     realtime_inav_snapshot: Dict[str, Dict[str, float]] = {}
-    is_kor_market = (country_code or "").strip().lower() in {"kr", "kor"}
+    country_lower = (country_code or "").strip().lower()
+    is_kor_market = country_lower in {"kr", "kor"}
+    nav_display_enabled = is_kor_market and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav"
     if is_kor_market:
         try:
             realtime_inav_snapshot = fetch_naver_etf_inav_snapshot([stock["ticker"] for stock in etf_universe])
@@ -738,82 +761,91 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             prefetched_data=prefetched_data,
         )
         if df is not None and not df.empty:
-            # 최신 가격 정보
-            latest_close = df["Close"].iloc[-1]
-            prev_close = df["Close"].iloc[-2] if len(df) > 1 else latest_close
+            price_series = _select_price_series(df, country_code)
+            score_latest = float(price_series.iloc[-1])
+
+            market_series = pd.to_numeric(df.get("Close"), errors="coerce") if "Close" in df.columns else price_series
+            market_series = market_series.fillna(method="ffill").fillna(method="bfill")
+            market_latest = float(market_series.iloc[-1]) if not market_series.empty else score_latest
+            market_prev = float(market_series.iloc[-2]) if len(market_series) > 1 else market_latest
+
+            nav_latest: Optional[float] = None
+            if "NAV" in df.columns:
+                nav_series = pd.to_numeric(df["NAV"], errors="coerce").dropna()
+                if not nav_series.empty:
+                    nav_latest = float(nav_series.iloc[-1])
+            if nav_latest is None and is_kor_market:
+                ticker_key_upper = str(ticker).strip().upper()
+                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
+                if realtime_entry:
+                    nav_candidate = realtime_entry.get("nav")
+                    if isinstance(nav_candidate, (int, float)):
+                        nav_latest = float(nav_candidate)
+
             latest_data_date = pd.to_datetime(df.index[-1]).normalize()
             base_norm = base_date.normalize()
 
             daily_pct = 0.0
-            if prev_close and prev_close > 0:
-                daily_pct = ((latest_close / prev_close) - 1.0) * 100
+            if market_prev and market_prev > 0:
+                daily_pct = ((market_latest / market_prev) - 1.0) * 100
 
-            # base_date가 최신 데이터보다 미래인 경우에도 전일 대비 수익률은 유지
             if base_norm > latest_data_date:
-                prev_close = latest_close
+                market_prev = market_latest
 
-            # MAPS 전략 계산
             from utils.indicators import calculate_ma_score
             from utils.moving_averages import calculate_moving_average
             from logic.common import get_buy_signal_streak
 
-            # 이동평균 계산 (MA_TYPE 파라미터 사용)
-            moving_average = calculate_moving_average(df["Close"], ma_period, ma_type)
-
-            # 점수 계산
-            ma_score_series = calculate_ma_score(df["Close"], moving_average, normalize=False)
+            moving_average = calculate_moving_average(price_series, ma_period, ma_type)
+            ma_score_series = calculate_ma_score(price_series, moving_average, normalize=False)
             score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
-
-            # 지속일 계산 (점수 기반)
             consecutive_buy_days = get_buy_signal_streak(score, ma_score_series)
 
-            # RSI 전략 계산 (strategies/rsi/recommend.py에서 처리)
             from strategies.rsi.recommend import calculate_rsi_for_ticker
 
-            rsi_score = calculate_rsi_for_ticker(df["Close"])
+            rsi_score = calculate_rsi_for_ticker(price_series)
+            if rsi_score == 0.0 and len(price_series) < 15:
+                logger.warning(f"[RSI] {ticker} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
 
-            # RSI 계산 실패 시 디버깅 로그
-            if rsi_score == 0.0 and len(df["Close"]) < 15:
-                logger.warning(f"[RSI] {ticker} 데이터 부족: {len(df['Close'])}개 (최소 15개 필요)")
-
-            recent_prices = df["Close"].tail(15)
+            recent_prices = market_series.tail(15)
             trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
 
-            price_deviation = None
+            price_deviation: Optional[float] = None
             if is_kor_market:
-                ticker_key_upper = str(ticker).strip().upper()
-                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
-                if realtime_entry:
-                    deviation_raw = realtime_entry.get("deviation")
-                    if isinstance(deviation_raw, (int, float)):
-                        price_deviation = round(float(deviation_raw), 2)
+                if nav_latest and nav_latest > 0 and market_latest:
+                    price_deviation = round(((market_latest / nav_latest) - 1.0) * 100, 2)
+                else:
+                    ticker_key_upper = str(ticker).strip().upper()
+                    realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
+                    if realtime_entry:
+                        deviation_raw = realtime_entry.get("deviation")
+                        if isinstance(deviation_raw, (int, float)):
+                            price_deviation = round(float(deviation_raw), 2)
 
-                if price_deviation is None:
-                    fetched_deviation = _fetch_price_deviation_kr(
-                        ticker,
-                        [
-                            base_date,
-                            latest_data_date,
-                        ],
-                    )
-                    if fetched_deviation is not None:
-                        price_deviation = round(float(fetched_deviation), 2)
+                    if price_deviation is None:
+                        fetched_deviation = _fetch_price_deviation_kr(
+                            ticker,
+                            [base_date, latest_data_date],
+                        )
+                        if fetched_deviation is not None:
+                            price_deviation = round(float(fetched_deviation), 2)
 
             data_by_tkr[ticker] = {
-                "price": latest_close,
-                "prev_close": prev_close,
+                "price": market_latest,
+                "nav_price": nav_latest,
+                "prev_close": market_prev,
                 "daily_pct": round(daily_pct, 2),
-                "close": df["Close"],  # 백테스트용 close 데이터 추가
+                "close": price_series,
                 "s1": moving_average.iloc[-1] if not moving_average.empty else None,
                 "s2": None,
                 "score": score,
                 "rsi_score": rsi_score,
                 "filter": consecutive_buy_days,
-                "ret_1w": _compute_trailing_return(df["Close"], 5),
-                "ret_2w": _compute_trailing_return(df["Close"], 10),
-                "ret_3w": _compute_trailing_return(df["Close"], 15),
+                "ret_1w": _compute_trailing_return(price_series, 5),
+                "ret_2w": _compute_trailing_return(price_series, 10),
+                "ret_3w": _compute_trailing_return(price_series, 15),
                 "trend_prices": trend_prices,
-                "price_deviation": price_deviation,
+                "price_deviation": price_deviation if is_kor_market else None,
             }
         else:
             missing_data_tickers.append(ticker)
@@ -1353,7 +1385,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     for i, item in enumerate(results, 1):
         item["rank"] = i
 
-    price_header = get_price_column_label(country_code)
+    price_header = "현재가"
+    for item in results:
+        ticker_key = item.get("ticker")
+        source_entry = data_by_tkr.get(ticker_key, {}) if ticker_key else {}
+        if "nav_price" in source_entry and item.get("nav_price") is None:
+            item["nav_price"] = source_entry.get("nav_price")
+        if item.get("price") is None and source_entry.get("price") is not None:
+            item["price"] = source_entry.get("price")
+        if item.get("price_deviation") is None and source_entry.get("price_deviation") is not None:
+            item["price_deviation"] = source_entry.get("price_deviation")
+
+    show_deviation = country_lower in {"kr", "kor"}
 
     detail_headers = [
         "순위",
@@ -1365,29 +1408,32 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         "일간(%)",
         "평가(%)",
         price_header,
-        "괴리율",
-        "1주(%)",
-        "2주(%)",
-        "3주(%)",
-        "점수",
-        "지속",
-        "문구",
     ]
+    if nav_display_enabled:
+        detail_headers.append("Nav")
+    if show_deviation:
+        detail_headers.append("괴리율")
+    detail_headers.extend(["1주(%)", "2주(%)", "3주(%)", "점수", "지속", "문구"])
 
     detail_rows: List[List[Any]] = []
     for item in results:
-        detail_rows.append(
+        row = [
+            item.get("rank", 0),
+            item.get("ticker"),
+            item.get("name"),
+            item.get("category"),
+            item.get("state"),
+            item.get("holding_days"),
+            item.get("daily_pct"),
+            item.get("evaluation_pct"),
+            item.get("price"),
+        ]
+        if nav_display_enabled:
+            row.append(item.get("nav_price"))
+        if show_deviation:
+            row.append(item.get("price_deviation"))
+        row.extend(
             [
-                item.get("rank", 0),
-                item.get("ticker"),
-                item.get("name"),
-                item.get("category"),
-                item.get("state"),
-                item.get("holding_days"),
-                item.get("daily_pct"),
-                item.get("evaluation_pct"),
-                item.get("price"),
-                item.get("price_deviation"),
                 item.get("return_1w"),
                 item.get("return_2w"),
                 item.get("return_3w"),
@@ -1396,6 +1442,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 item.get("phrase", ""),
             ]
         )
+        detail_rows.append(row)
 
     report = RecommendationReport(
         account_id=account_id,

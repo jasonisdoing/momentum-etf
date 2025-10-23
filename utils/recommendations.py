@@ -5,8 +5,8 @@ import pandas as pd
 from pandas.io.formats.style import Styler
 
 from strategies.maps.constants import DECISION_CONFIG
-from utils.labels import get_price_column_label
 from utils.formatters import format_price_deviation, format_price
+from config import KOR_REALTIME_ETF_PRICE_SOURCE
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 
@@ -23,7 +23,6 @@ _BASE_DISPLAY_COLUMNS = [
     "일간(%)",
     "평가(%)",
     "현재가",
-    "괴리율",
     "1주(%)",
     "2주(%)",
     "3주(%)",
@@ -126,7 +125,10 @@ def _trend_series(row: dict[str, Any]) -> list[float]:
 def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -> pd.DataFrame:
     """추천 종목 데이터를 표 렌더링에 적합한 DataFrame으로 변환합니다."""
 
-    price_label = get_price_column_label(country)
+    country_lower = (country or "").strip().lower()
+    price_label = "현재가"
+    nav_mode = country_lower in {"kr", "kor"} and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav"
+    show_deviation = country_lower in {"kr", "kor"}
 
     display_rows: list[dict[str, Any]] = []
     for row in rows:
@@ -139,7 +141,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         price_display = format_price(row.get("price"), country)
         daily_pct = _format_percent(row.get("daily_pct"))
         evaluation_pct = _format_percent(row.get("evaluation_pct", 0.0))
-        price_deviation = format_price_deviation(row.get("price_deviation"))
+        price_deviation = format_price_deviation(row.get("price_deviation")) if show_deviation else None
         return_1w = _format_percent(row.get("return_1w", 0.0))
         return_2w = _format_percent(row.get("return_2w", 0.0))
         return_3w = _format_percent(row.get("return_3w", 0.0))
@@ -158,7 +160,8 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "일간(%)": daily_pct,
                 "평가(%)": evaluation_pct,
                 price_label: price_display,
-                "괴리율": price_deviation,
+                **({"Nav": format_price(row.get("nav_price"), country)} if nav_mode else {}),
+                **({"괴리율": price_deviation} if show_deviation else {}),
                 "1주(%)": return_1w,
                 "2주(%)": return_2w,
                 "3주(%)": return_3w,
@@ -174,6 +177,12 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
     if "현재가" in columns:
         idx = columns.index("현재가")
         columns[idx] = price_label
+    if nav_mode and "Nav" not in columns:
+        insert_pos = columns.index(price_label) + 1
+        columns.insert(insert_pos, "Nav")
+    if show_deviation and "괴리율" not in columns:
+        insert_pos = columns.index(price_label) + (2 if nav_mode else 1)
+        columns.insert(insert_pos, "괴리율")
     df = pd.DataFrame(display_rows, columns=columns)
     return df
 
@@ -260,10 +269,15 @@ def get_recommendations_dataframe(country: str, *, source_key: str | None = None
     except Exception as e:
         logger.error("추천 데이터를 불러오지 못했습니다 (%s): %s", country, e)
         # 오류 발생 시 빈 데이터프레임 반환
-        columns = list(_BASE_DISPLAY_COLUMNS)
+        columns = [col for col in _BASE_DISPLAY_COLUMNS if col != "괴리율" or country.lower() in {"kr", "kor"}]
         if "현재가" in columns:
             idx = columns.index("현재가")
-            columns[idx] = get_price_column_label(country)
+            columns[idx] = "현재가"
+        if country.lower() in {"kr", "kor"} and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav":
+            insert_pos = columns.index("현재가") + 1
+            columns.insert(insert_pos, "Nav")
+        if country.lower() not in {"kr", "kor"} and "괴리율" in columns:
+            columns.remove("괴리율")
         return pd.DataFrame(columns=columns)
 
 
