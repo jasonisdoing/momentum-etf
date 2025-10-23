@@ -370,7 +370,7 @@
         ]
     },
     {
-        "category": "로봇",
+        "category": "한국로봇",
         "tickers": [
             {
                 "ticker": "469070",
@@ -381,20 +381,25 @@
                 "1_week_avg_turnover": 14992342967
             },
             {
-                "ticker": "0035T0",
-                "name": "PLUS 글로벌휴머노이드로봇액티브",
-                "recommend_enabled": true,
-                "listing_date": "2025-04-15",
-                "1_week_avg_volume": 109580,
-                "1_week_avg_turnover": 1725194511
-            },
-            {
                 "ticker": "445290",
                 "name": "KODEX 로봇액티브",
                 "recommend_enabled": true,
                 "listing_date": "2022-11-15",
                 "1_week_avg_volume": 882263,
                 "1_week_avg_turnover": 18795429779
+            }
+        ]
+    },
+    {
+        "category": "미국로봇",
+        "tickers": [
+            {
+                "ticker": "0035T0",
+                "name": "PLUS 글로벌휴머노이드로봇액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-04-15",
+                "1_week_avg_volume": 109580,
+                "1_week_avg_turnover": 1725194511
             }
         ]
     },
