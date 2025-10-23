@@ -646,8 +646,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         len(tickers_all),
     )
     fetch_start = time.perf_counter()
-    # 호주는 실시간 가격 조회 시 Rate Limit 발생하므로 비활성화
-    skip_realtime = country_code == "aus"
+    skip_realtime = False
     prefetched_data, missing_prefetch = prepare_price_data(
         tickers=tickers_all,
         country=country_code,

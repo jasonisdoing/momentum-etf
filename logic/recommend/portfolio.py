@@ -359,7 +359,7 @@ def generate_daily_recommendations_for_portfolio(
                     "last_buy": base_date_norm,
                     "days_since": 0,
                 }
-                logger.info(f"[COOLDOWN BLOCK TODAY] {tkr}: 오늘 매수 → 매도 쿨다운 추가")
+                # logger.info(f"[COOLDOWN BLOCK TODAY] {tkr}: 오늘 매수 → 매도 쿨다운 추가")
 
     # 각 종목에 대한 의사결정 생성
     for tkr, name in pairs:
@@ -514,10 +514,10 @@ def generate_daily_recommendations_for_portfolio(
     # 추가 매수 가능 슬롯 = TOPN - 전체 보유 수
     slots_to_fill = denom - held_count
 
-    logger.info(
-        f"[PORTFOLIO DEBUG] held_count={held_count}, denom={denom}, slots_to_fill={slots_to_fill}, "
-        f"sell_cooldown_block={list(sell_cooldown_block.keys())}"
-    )
+    # logger.info(
+    #     f"[PORTFOLIO DEBUG] held_count={held_count}, denom={denom}, slots_to_fill={slots_to_fill}, "
+    #     f"sell_cooldown_block={list(sell_cooldown_block.keys())}"
+    # )
 
     if risk_off_effective:
         for decision in decisions:
@@ -606,28 +606,28 @@ def generate_daily_recommendations_for_portfolio(
         skip_held_categories=False,
     )
 
-    logger.info(f"[REPLACE DEBUG] replacement_candidates count={len(replacement_candidates)}")
+    # logger.info(f"[REPLACE DEBUG] replacement_candidates count={len(replacement_candidates)}")
 
     # 핵심 보유 종목은 교체 매매 대상에서 제외 (HOLD만 대상, HOLD_CORE 제외)
     current_held_stocks = [d for d in decisions if d["state"] == "HOLD"]
     # MAPS 점수 사용
     current_held_stocks.sort(key=lambda x: x.get("score", 0.0) if pd.notna(x.get("score")) else -float("inf"))
 
-    logger.info(f"[REPLACE DEBUG] current_held_stocks count={len(current_held_stocks)}")
+    # logger.info(f"[REPLACE DEBUG] current_held_stocks count={len(current_held_stocks)}")
 
     replace_loop_count = 0
     for best_new in replacement_candidates:
         replace_loop_count += 1
-        logger.info(f"[REPLACE LOOP] iteration={replace_loop_count}, ticker={best_new.get('tkr')}")
+        # logger.info(f"[REPLACE LOOP] iteration={replace_loop_count}, ticker={best_new.get('tkr')}")
 
         if not current_held_stocks:
-            logger.info(f"[REPLACE STOP] current_held_stocks is empty")
+            # logger.info(f"[REPLACE STOP] current_held_stocks is empty")
             break
 
         # RSI 과매수 종목 교체 매수 차단
         best_new_rsi_score = best_new.get("rsi_score", 100.0)
         if best_new_rsi_score <= rsi_sell_threshold:
-            logger.info(f"[REPLACE BLOCKED RSI] {best_new['tkr']} RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})")
+            # logger.info(f"[REPLACE BLOCKED RSI] {best_new['tkr']} RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})")
             best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
             best_new["row"][-1] = f"RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})"
             best_new["buy_signal"] = False
@@ -670,33 +670,33 @@ def generate_daily_recommendations_for_portfolio(
 
         if held_stock_same_category:
             held_score = held_stock_same_category.get("score")
-            logger.info(
-                f"[REPLACE EVAL SAME_CAT] new={best_new['tkr']}({best_new_score:.2f}), "
-                f"held={held_stock_same_category['tkr']}({held_score:.2f}), "
-                f"diff={best_new_score - held_score:.2f}, threshold={replace_threshold}"
-            )
+            # logger.info(
+            #     f"[REPLACE EVAL SAME_CAT] new={best_new['tkr']}({best_new_score:.2f}), "
+            #     f"held={held_stock_same_category['tkr']}({held_score:.2f}), "
+            #     f"diff={best_new_score - held_score:.2f}, threshold={replace_threshold}"
+            # )
             if pd.notna(best_new_score) and pd.notna(held_score) and best_new_score > held_score + replace_threshold:
                 ticker_to_sell = held_stock_same_category["tkr"]
         else:
             if current_held_stocks:
                 weakest_held = current_held_stocks[0]
                 weakest_score = weakest_held.get("score")
-                logger.info(
-                    f"[REPLACE EVAL WEAKEST] new={best_new['tkr']}({best_new_score:.2f}), "
-                    f"weakest={weakest_held['tkr']}({weakest_score:.2f}), "
-                    f"diff={best_new_score - weakest_score:.2f}, threshold={replace_threshold}"
-                )
+                # logger.info(
+                #     f"[REPLACE EVAL WEAKEST] new={best_new['tkr']}({best_new_score:.2f}), "
+                #     f"weakest={weakest_held['tkr']}({weakest_score:.2f}), "
+                #     f"diff={best_new_score - weakest_score:.2f}, threshold={replace_threshold}"
+                # )
                 if pd.notna(best_new_score) and pd.notna(weakest_score) and best_new_score > weakest_score + replace_threshold:
                     ticker_to_sell = weakest_held["tkr"]
 
         if ticker_to_sell:
             sell_block_for_candidate = sell_cooldown_block.get(ticker_to_sell)
             buy_block_for_candidate = buy_cooldown_block.get(ticker_to_sell)
-            logger.info(
-                f"[REPLACE CHECK] ticker_to_sell={ticker_to_sell}, "
-                f"sell_block={sell_block_for_candidate}, buy_block={buy_block_for_candidate}, "
-                f"cooldown_days={cooldown_days}"
-            )
+            # logger.info(
+            #     f"[REPLACE CHECK] ticker_to_sell={ticker_to_sell}, "
+            #     f"sell_block={sell_block_for_candidate}, buy_block={buy_block_for_candidate}, "
+            #     f"cooldown_days={cooldown_days}"
+            # )
             # 매도 쿨다운 또는 매수 쿨다운 중이면 교체 매도 차단
             if (sell_block_for_candidate or buy_block_for_candidate) and cooldown_days > 0:
                 blocked_name = etf_meta.get(ticker_to_sell, {}).get("name") or ticker_to_sell

@@ -7,10 +7,10 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "MONTHS_RANGE": 3,
-        "expected_cagr": 118.94,
+        "expected_cagr": 194.05,
         "backtested_date": "2025-10-22",
         "tuning": {
-            "MA_PERIOD": 84,
+            "MA_PERIOD": 88,
             "MA_TYPE": "TEMA",
             "PORTFOLIO_TOPN": 8,
             "REPLACE_SCORE_THRESHOLD": 1,

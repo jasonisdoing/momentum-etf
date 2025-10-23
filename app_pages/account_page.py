@@ -255,9 +255,7 @@ def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_c
 
     st.caption(f"**벤치마크 누적 수익률 ({start_date.strftime('%Y년 %m월 %d일')} 이후 {day_count} 거래일)**")
     if account_return is not None:
-        st.markdown(
-            f"**<small><span style='color:#d32f2f;'>가상 거래 수익률 (Momentum ETF): {account_return:+.2f}%</span><small>**", unsafe_allow_html=True
-        )
+        st.markdown(f"**<span style='color:#d32f2f;'>가상 거래 수익률 (Momentum ETF): {account_return:+.2f}%</span>**", unsafe_allow_html=True)
     st.table(table_df)
     try:
         cached_kst = pd.to_datetime(cached_iso)
