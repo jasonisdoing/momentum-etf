@@ -184,7 +184,7 @@ def _now_with_zone(tz_name: str) -> datetime:
 
 MARKET_OPEN_INFO = {
     "kor": ("Asia/Seoul", time(9, 0)),
-    "aus": ("Australia/Sydney", time(10, 0)),
+    "aus": ("Asia/Seoul", time(8, 0)),
     "us": ("America/New_York", time(9, 30)),
 }
 
@@ -212,17 +212,8 @@ def _should_skip_today_range(country_code: str, target_end: pd.Timestamp) -> boo
     return True
 
 
-def _is_kor_realtime_window(now_kst: datetime) -> bool:
-    start = time(9, 0)
-    end = time(23, 59, 59)
-    current = now_kst.time()
-    return start <= current <= end
-
-
-def _is_aus_realtime_window(now_syd: datetime) -> bool:
-    start = time(8, 0)
-    end = time(23, 59, 59)
-    current = now_syd.time()
+def _is_time_in_window(now_dt: datetime, start: time, end: time) -> bool:
+    current = now_dt.time()
     return start <= current <= end
 
 
@@ -231,7 +222,7 @@ def _should_use_realtime_price(country: str) -> bool:
 
     if country_code == "kor":
         now_kst = _now_with_zone("Asia/Seoul")
-        if not _is_kor_realtime_window(now_kst):
+        if not _is_time_in_window(now_kst, time(9, 0), time(23, 59, 59)):
             return False
         today_str = now_kst.strftime("%Y-%m-%d")
         try:
@@ -240,8 +231,14 @@ def _should_use_realtime_price(country: str) -> bool:
             return False
 
     if country_code == "aus":
-        # 호주는 yfinance Rate Limit 문제로 실시간 가격 조회 비활성화
-        return False
+        now_kst = _now_with_zone("Asia/Seoul")
+        if not _is_time_in_window(now_kst, time(10, 0), time(23, 59, 59)):
+            return False
+        today_str = now_kst.strftime("%Y-%m-%d")
+        try:
+            return bool(get_trading_days(today_str, today_str, "aus"))
+        except Exception:
+            return False
 
     return False
 

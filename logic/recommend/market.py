@@ -200,8 +200,8 @@ def _compute_market_regime_status(
             "kor": "Asia/Seoul",
             "korea": "Asia/Seoul",
             "kr": "Asia/Seoul",
-            "aus": "Australia/Sydney",
-            "au": "Australia/Sydney",
+            "aus": "Asia/Seoul",
+            "au": "Asia/Seoul",
         }
         tz_name = tz_map.get(country_lower, "UTC")
         cutoff = pd.Timestamp.now(tz=tz_name).normalize() - pd.Timedelta(days=int(delay_days))

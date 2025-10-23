@@ -1,14 +1,22 @@
 """
-APScheduler 기반 스케줄러
+APScheduler 기반 자동화 작업 모음
 
-[스케줄 설정]
-<data/settings/account/<account_id>.json>
+작업 요약 (모두 KST 기준):
+- K1(한국 ETF) 추천: 월~금 09:01~16:51, 10분 간격으로 실행
+- A1(호주 ETF) 추천: 월~금 08:01~15:51, 10분 간격으로 실행
+- 가격 캐시 갱신: 매일 04:00 실행
+- 프로세스 기동 시 모든 계정 추천 1회 즉시 실행(설정 허용 시)
+
+스케줄 정의는 data/settings/account/<account>.json 의 schedule 섹션을 참고합니다.
 """
 
+# 프로젝트 루트를 Python 경로에 추가
 import logging
 import os
 import sys
 import warnings
+from dataclasses import dataclass
+from typing import Dict, Iterable, Optional, Tuple
 
 TIMEZONE = "Asia/Seoul"
 
@@ -26,7 +34,6 @@ try:
 except Exception:  # pragma: no cover
     ZoneInfo = None
 
-# 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -37,20 +44,14 @@ try:  # pragma: no cover - 선택적 의존성 처리
 except Exception:  # pragma: no cover
     np = None  # type: ignore[assignment]
 
-from logic.recommend.pipeline import (
-    RecommendationReport,
-    generate_account_recommendation_report,
-)
-from utils.env import load_env_if_present
-from utils.notification import (
-    compose_recommendation_slack_message,
-    send_recommendation_slack_notification,
-)
-from utils.schedule_config import get_all_country_schedules
+from logic.recommend.pipeline import RecommendationReport, generate_account_recommendation_report
 from utils.cron_utils import normalize_cron_weekdays
+from utils.env import load_env_if_present
+from utils.notification import compose_recommendation_slack_message, send_recommendation_slack_notification
+from utils.schedule_config import get_all_country_schedules, get_global_schedule_settings
 
 
-def setup_logging():
+def setup_logging() -> None:
     """
     로그 파일을 설정합니다. logs/YYYY-MM-DD.log 형식으로 생성됩니다.
     프로세스가 시작될 때의 날짜를 기준으로 파일명이 정해집니다.
@@ -60,13 +61,7 @@ def setup_logging():
     os.makedirs(log_dir, exist_ok=True)
 
     # YYYY-MM-DD.log 파일명 설정
-    if ZoneInfo is not None:
-        try:
-            now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
-        except Exception:
-            now_kst = datetime.now()
-    else:
-        now_kst = datetime.now()
+    now_kst = _now_kst()
 
     log_filename = os.path.join(log_dir, f"{now_kst.strftime('%Y-%m-%d')}.log")
 
@@ -82,11 +77,7 @@ def setup_logging():
     )
 
 
-def run_recommendation_generation(
-    account_id: str,
-    *,
-    country_code: str,
-) -> RecommendationReport:
+def run_recommendation_generation(account_id: str, *, country_code: str) -> RecommendationReport:
     """Run portfolio recommendation and optionally notify Slack."""
 
     start_ts = time.time()
@@ -170,7 +161,144 @@ def run_stock_stats_update() -> None:
         logging.error("종목 메타데이터 갱신 작업이 실패했습니다.", exc_info=True)
 
 
-def main():
+@dataclass(frozen=True)
+class RecommendationJobConfig:
+    schedule_name: str
+    account_id: str
+    country_code: str
+    cron_expr: str
+    timezone: str
+    run_immediately: bool
+
+
+def _now_kst() -> datetime:
+    if ZoneInfo is not None:
+        try:
+            return datetime.now(ZoneInfo(TIMEZONE))
+        except Exception:
+            pass
+    return datetime.now()
+
+
+def _validate_timezone(tz_value: Optional[str]) -> str:
+    tz = (tz_value or "").strip()
+    if not tz:
+        return TIMEZONE
+    if tz != TIMEZONE:
+        logging.warning("Timezone '%s'은 지원하지 않아 '%s'로 대체합니다.", tz, TIMEZONE)
+        return TIMEZONE
+    return tz
+
+
+def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
+    schedules = get_all_country_schedules()
+    global_settings = get_global_schedule_settings()
+    run_immediately_default = bool(global_settings.get("run_immediately_on_start", False))
+
+    jobs: list[RecommendationJobConfig] = []
+    for schedule_name, cfg in schedules.items():
+        if not cfg.get("enabled", True):
+            logging.info("Skipping %s schedule (disabled)", schedule_name.upper())
+            continue
+
+        cron_expr_raw = cfg.get("signal_cron") or cfg.get("recommendation_cron")
+        if not cron_expr_raw:
+            logging.warning("Schedule '%s'에 추천 실행 크론 표현식이 없어 건너뜁니다.", schedule_name)
+            continue
+
+        account_id = (cfg.get("account_id") or "").strip().lower()
+        country_code = (cfg.get("country_code") or "").strip().lower()
+        if not account_id or not country_code:
+            logging.warning("Schedule '%s'에 account_id/country_code가 없어 건너뜁니다.", schedule_name)
+            continue
+
+        cron_expr = normalize_cron_weekdays(cron_expr_raw, target="apscheduler")
+        if cron_expr != cron_expr_raw:
+            logging.info(
+                "Adjusted cron expression from '%s' to '%s' for schedule '%s'.",
+                cron_expr_raw,
+                cron_expr,
+                schedule_name,
+            )
+
+        timezone = _validate_timezone(cfg.get("timezone"))
+        run_immediately = bool(cfg.get("run_immediately_on_start", run_immediately_default))
+
+        jobs.append(
+            RecommendationJobConfig(
+                schedule_name=schedule_name,
+                account_id=account_id,
+                country_code=country_code,
+                cron_expr=cron_expr,
+                timezone=timezone,
+                run_immediately=run_immediately,
+            )
+        )
+
+    return tuple(jobs)
+
+
+def _register_recommendation_jobs(scheduler: BlockingScheduler, jobs: Iterable[RecommendationJobConfig]) -> None:
+    for job in jobs:
+        scheduler.add_job(
+            run_recommendation_generation,
+            CronTrigger.from_crontab(job.cron_expr, timezone=job.timezone),
+            kwargs={"account_id": job.account_id, "country_code": job.country_code},
+            id=f"{job.account_id}:{job.country_code}",
+        )
+        logging.info(
+            "Scheduled RECOMMENDATION: schedule=%s account=%s country=%s cron='%s' tz='%s'",
+            job.schedule_name.upper(),
+            job.account_id.upper(),
+            job.country_code.upper(),
+            job.cron_expr,
+            job.timezone,
+        )
+
+
+def _register_cache_job(scheduler: BlockingScheduler, *, cron_expr: str = "0 4 * * *") -> None:
+    scheduler.add_job(
+        run_cache_refresh,
+        CronTrigger.from_crontab(cron_expr, timezone=TIMEZONE),
+        id="cache_refresh",
+    )
+    logging.info("Scheduled CACHE REFRESH: cron='%s' tz='%s'", cron_expr, TIMEZONE)
+
+
+def _run_initial_recommendations(jobs: Iterable[RecommendationJobConfig]) -> None:
+    executable = [job for job in jobs if job.run_immediately]
+    if not executable:
+        logging.info("Initial recommendation run skipped (no job opted-in).")
+        return
+
+    logging.info("[Initial Run] Executing %d recommendation job(s)...", len(executable))
+    for job in executable:
+        try:
+            run_recommendation_generation(job.account_id, country_code=job.country_code)
+        except Exception:
+            logging.error(
+                "Error during initial run for account=%s country=%s",
+                job.account_id,
+                job.country_code,
+                exc_info=True,
+            )
+    logging.info("[Initial Run] Complete.")
+
+
+def _log_next_runs(scheduler: BlockingScheduler) -> None:
+    jobs = scheduler.get_jobs()
+    if not jobs:
+        logging.info("No jobs registered.")
+        return
+
+    logging.info("Next scheduled run times:")
+    for job in jobs:
+        next_time = getattr(job, "next_run_time", None)
+        if next_time is not None:
+            logging.info("- %s: %s", job.id, next_time.strftime("%Y-%m-%d %H:%M:%S"))
+
+
+def main() -> None:
     # 로깅 설정
     setup_logging()
 
@@ -178,94 +306,16 @@ def main():
     load_env_if_present()
 
     scheduler = BlockingScheduler()
-    # 1. recommendation_cron 와 notify_cron 이 겹치는 경우: 작업도 실행되고, 슬랙도 발송
-    # 2. python recommend.py 로 실행되는 경우: 작업도 실행되고, 슬랙도 발송
-    # 3. recommendation_cron 에는 해당되지만 notify_cron 에 해당 안되는 경우: 작업은 실행되고, 슬랙은 발송안됨
-    country_schedules = get_all_country_schedules()
-    for schedule_name, cfg in country_schedules.items():
-        if not cfg.get("enabled", True):
-            logging.info("Skipping %s schedule (disabled)", schedule_name.upper())
-            continue
 
-        cron_expr_raw = cfg.get("signal_cron") or cfg.get("recommendation_cron")
-        timezone = cfg.get("timezone") or TIMEZONE
+    jobs = _load_recommendation_jobs()
+    if not jobs:
+        logging.warning("등록 가능한 추천 잡이 없습니다. 설정을 확인하세요.")
 
-        account_id = (cfg.get("account_id") or "").strip().lower()
-        country_code = (cfg.get("country_code") or "").strip().lower()
+    _register_recommendation_jobs(scheduler, jobs)
+    _register_cache_job(scheduler)
 
-        if not account_id or not country_code or not cron_expr_raw:
-            raise RuntimeError(f"Schedule entry '{schedule_name}' must define account_id, country_code, and recommendation_cron")
-
-        cron_expr = normalize_cron_weekdays(cron_expr_raw, target="apscheduler")
-        if cron_expr != cron_expr_raw:
-            logging.info(
-                "Adjusted cron expression from '%s' to '%s' for APScheduler compatibility.",
-                cron_expr_raw,
-                cron_expr,
-            )
-
-        scheduler.add_job(
-            run_recommendation_generation,
-            CronTrigger.from_crontab(cron_expr, timezone=timezone),
-            kwargs={
-                "account_id": account_id,
-                "country_code": country_code,
-            },
-            id=f"{account_id}:{country_code}",
-        )
-
-    cache_cron = "0 4 * * *"  # 매일 새벽 4시에 가격 캐시 갱신
-    scheduler.add_job(
-        run_cache_refresh,
-        CronTrigger.from_crontab(cache_cron, timezone=TIMEZONE),
-        id="cache_refresh",
-    )
-    logging.info(f"Scheduled CACHE REFRESH: cron='{cache_cron}' tz='{TIMEZONE}'")
-
-    # Initial run for stock metadata/cache refresh
-    try:
-        logging.info("\n[Initial Run] Starting...")
-        # 메타 데이터 갱신하고 싶을 때 해제
-        # run_stock_stats_update()
-        # 서버 캐시 제거하고 싶을 때 해제
-        # run_cache_refresh()
-    except Exception:
-        logging.error("Error during initial run for stock metadata update/cache refresh", exc_info=True)
-
-    for schedule_name, cfg in country_schedules.items():
-        if not cfg.get("enabled", True):
-            continue
-
-        account_id = (cfg.get("account_id") or "").strip().lower()
-        country_code = (cfg.get("country_code") or "").strip().lower()
-
-        if not account_id or not country_code:
-            raise RuntimeError(f"Schedule entry '{schedule_name}' must define both account_id and country_code")
-
-        try:
-            run_recommendation_generation(
-                account_id,
-                country_code=country_code,
-            )
-        except Exception:
-            logging.error(
-                "Error during initial run for account=%s country=%s",
-                account_id,
-                country_code,
-                exc_info=True,
-            )
-
-    logging.info("[Initial Run] Complete.")
-
-    # 다음 실행 시간 출력
-    jobs = scheduler.get_jobs()
-    if jobs:
-        logging.info("\nNext scheduled run times:")
-        for job in jobs:
-            # 3.x: job.next_run_time
-            next_time = getattr(job, "next_run_time", None)
-            if next_time is not None:
-                logging.info("- %s: %s", job.id, next_time.strftime("%Y-%m-%d %H:%M:%S"))
+    _run_initial_recommendations(jobs)
+    _log_next_runs(scheduler)
 
     logging.info("[APS] Scheduler started. Press Ctrl+C to exit.")
 
