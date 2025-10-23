@@ -33,7 +33,9 @@ from utils.data_loader import (
     get_latest_trading_day,
     get_next_trading_day,
     count_trading_days,
+    fetch_naver_etf_inav_snapshot,
 )
+from utils.labels import get_price_column_label
 from utils.db_manager import get_db_connection, list_open_positions
 from logic.recommend.market import get_market_regime_status_info
 from utils.logger import get_app_logger
@@ -237,6 +239,53 @@ def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
     except Exception as e:
         logger.exception("메트릭 계산 중 오류 발생: %s", e)
         return None
+
+
+def _fetch_price_deviation_kr(ticker: str, date_candidates: List[pd.Timestamp]) -> Optional[float]:
+    """pykrx에서 한국 ETF 괴리율(%)을 조회합니다."""
+
+    try:
+        from pykrx import stock as pykrx_stock  # type: ignore
+    except ImportError:
+        logger.debug("pykrx 미설치로 괴리율 조회를 건너뜁니다.")
+        return None
+
+    for candidate in date_candidates:
+        if candidate is None:
+            continue
+        try:
+            date_norm = pd.Timestamp(candidate).normalize()
+        except Exception:
+            continue
+
+        date_str = date_norm.strftime("%Y%m%d")
+        try:
+            df_deviation = pykrx_stock.get_etf_price_deviation(date_str, date_str, ticker)
+        except Exception as exc:  # pragma: no cover - 외부 API 예외 방어
+            logger.debug("pykrx 괴리율 조회 실패 (%s, %s): %s", ticker, date_str, exc)
+            continue
+
+        if df_deviation is None or df_deviation.empty:
+            continue
+
+        try:
+            raw_value = df_deviation.iloc[-1].get("괴리율")
+        except Exception:  # pragma: no cover - 방어 로직
+            raw_value = None
+
+        if raw_value is None:
+            continue
+
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            try:
+                sanitized = str(raw_value).replace("%", "").strip()
+                return float(sanitized) if sanitized else None
+            except (TypeError, ValueError):
+                continue
+
+    return None
 
 
 def _build_score(meta: _TickerMeta, metrics) -> _TickerScore:
@@ -669,6 +718,14 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         )
 
     data_by_tkr = {}
+    realtime_inav_snapshot: Dict[str, Dict[str, float]] = {}
+    is_kor_market = (country_code or "").strip().lower() in {"kr", "kor"}
+    if is_kor_market:
+        try:
+            realtime_inav_snapshot = fetch_naver_etf_inav_snapshot([stock["ticker"] for stock in etf_universe])
+        except Exception as exc:
+            logger.warning("[KOR] 네이버 iNAV 스냅샷 조회 실패: %s", exc)
+            realtime_inav_snapshot = {}
     missing_data_tickers: List[str] = list(missing_prefetch)
     for stock in etf_universe:
         ticker = stock["ticker"]
@@ -722,6 +779,26 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             recent_prices = df["Close"].tail(15)
             trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
 
+            price_deviation = None
+            if is_kor_market:
+                ticker_key_upper = str(ticker).strip().upper()
+                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
+                if realtime_entry:
+                    deviation_raw = realtime_entry.get("deviation")
+                    if isinstance(deviation_raw, (int, float)):
+                        price_deviation = round(float(deviation_raw), 2)
+
+                if price_deviation is None:
+                    fetched_deviation = _fetch_price_deviation_kr(
+                        ticker,
+                        [
+                            base_date,
+                            latest_data_date,
+                        ],
+                    )
+                    if fetched_deviation is not None:
+                        price_deviation = round(float(fetched_deviation), 2)
+
             data_by_tkr[ticker] = {
                 "price": latest_close,
                 "prev_close": prev_close,
@@ -736,6 +813,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 "ret_2w": _compute_trailing_return(df["Close"], 10),
                 "ret_3w": _compute_trailing_return(df["Close"], 15),
                 "trend_prices": trend_prices,
+                "price_deviation": price_deviation,
             }
         else:
             missing_data_tickers.append(ticker)
@@ -1115,6 +1193,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             "category": category,
             "state": state,
             "price": price_val,
+            "price_deviation": ticker_data.get("price_deviation"),
             "daily_pct": daily_pct_val,
             "evaluation_pct": evaluation_pct_val,
             "return_1w": ret_1w,
@@ -1274,6 +1353,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     for i, item in enumerate(results, 1):
         item["rank"] = i
 
+    price_header = get_price_column_label(country_code)
+
     detail_headers = [
         "순위",
         "티커",
@@ -1283,7 +1364,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         "보유일",
         "일간(%)",
         "평가(%)",
-        "현재가",
+        price_header,
+        "괴리율",
         "1주(%)",
         "2주(%)",
         "3주(%)",
@@ -1305,6 +1387,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 item.get("daily_pct"),
                 item.get("evaluation_pct"),
                 item.get("price"),
+                item.get("price_deviation"),
                 item.get("return_1w"),
                 item.get("return_2w"),
                 item.get("return_3w"),

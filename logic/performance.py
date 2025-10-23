@@ -6,10 +6,10 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
+from config import BACKTEST_SLIPPAGE
 from utils.data_loader import fetch_ohlcv
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
-from data.settings.common import BACKTEST_SLIPPAGE
 
 logger = get_app_logger()
 

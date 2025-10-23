@@ -253,25 +253,18 @@ def get_account_slack_channel(account_id: str) -> Optional[str]:
 
 @lru_cache(maxsize=1)
 def load_common_settings() -> Dict[str, Any]:
-    """data/settings/common.py 모듈을 로드하여 딕셔너리 형태로 반환합니다."""
+    """config.py 모듈에서 공통 설정을 추출해 딕셔너리로 반환합니다."""
 
     try:
-        import importlib.util
+        import importlib
 
-        spec = importlib.util.spec_from_file_location(
-            "settings_common",
-            (SETTINGS_ROOT / "common.py"),
-        )
-        if spec is None or spec.loader is None:
-            return {}
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)  # type: ignore[attr-defined]
-    except FileNotFoundError:
-        raise AccountSettingsError(f"공통 설정 파일이 없습니다: {SETTINGS_ROOT / 'common.py'}")
+        config_module = importlib.import_module("config")
+    except ModuleNotFoundError as exc:
+        raise AccountSettingsError("공통 설정 모듈(config.py)을 찾을 수 없습니다.") from exc
     except Exception as exc:
         raise AccountSettingsError(f"공통 설정을 로드하지 못했습니다: {exc}") from exc
 
-    data = {key: getattr(module, key) for key in dir(module) if key.isupper() and not key.startswith("_")}
+    data = {key: getattr(config_module, key) for key in dir(config_module) if key.isupper() and not key.startswith("_")}
     return data
 
 

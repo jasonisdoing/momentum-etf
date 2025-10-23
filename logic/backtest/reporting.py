@@ -19,6 +19,7 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.logger import get_app_logger
+from utils.labels import get_price_column_label
 from utils.settings_loader import (
     AccountSettingsError,
     get_backtest_months_range,
@@ -651,6 +652,9 @@ def _generate_daily_report_lines(
     portfolio_df = result.portfolio_timeseries
     lines: List[str] = []
 
+    country_code = (account_settings.get("country_code") or "").strip().lower()
+    price_header = get_price_column_label(country_code)
+
     headers = [
         "#",
         "티커",
@@ -658,7 +662,7 @@ def _generate_daily_report_lines(
         "카테고리",
         "상태",
         "보유일",
-        "현재가",
+        price_header,
         "일간(%)",
         "보유수량",
         "보유금액",
@@ -679,7 +683,7 @@ def _generate_daily_report_lines(
         "left",  # 카테고리
         "center",  # 상태
         "right",  # 보유일
-        "right",  # 현재가
+        "right",  # 현재가 계열
         "right",  # 일간(%)
         "right",  # 보유수량
         "right",  # 보유금액

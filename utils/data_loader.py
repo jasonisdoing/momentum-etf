@@ -13,6 +13,8 @@ from contextlib import contextmanager
 
 import pandas as pd
 
+from config import ETF_PRICE_SOURCE
+
 # pkg_resources 워닝 억제 (가장 강력한 방법)
 os.environ["PYTHONWARNINGS"] = "ignore"
 warnings.simplefilter("ignore")
@@ -88,6 +90,12 @@ if not any(isinstance(f, _PykrxLogFilter) for f in _root_logger.filters):
 
 logger = get_app_logger()
 
+_NAVER_PRICE_SOURCE_NORMALIZED = (ETF_PRICE_SOURCE or "").strip().lower()
+_NAVER_ALLOWED_PRICE_SOURCES = {"price", "nav"}
+
+if _NAVER_PRICE_SOURCE_NORMALIZED not in _NAVER_ALLOWED_PRICE_SOURCES:
+    raise ValueError("ETF_PRICE_SOURCE must be one of {'Price', 'Nav'}")
+
 
 try:
     from zoneinfo import ZoneInfo
@@ -124,7 +132,7 @@ class RateLimitException(Exception):
 
 
 def _get_cache_start_dt() -> Optional[pd.Timestamp]:
-    """data/settings/common.py에서 캐시 시작 날짜를 로드합니다."""
+    """config.py에서 캐시 시작 날짜를 로드합니다."""
     try:
         from utils.settings_loader import load_common_settings
 
@@ -803,7 +811,11 @@ def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.D
         # 네이버 실시간 가격은 한국 상장 종목(숫자/알파벳 코드)에만 적용
         if ticker.startswith("^"):
             return df
-        price = fetch_naver_realtime_price(ticker)
+        snapshot_entry = get_cached_naver_etf_snapshot_entry(ticker)
+        if snapshot_entry:
+            price = float(snapshot_entry.get("price", 0.0))
+        if price is None or price <= 0:
+            price = fetch_naver_realtime_price(ticker)
     elif country_code == "aus":
         # ASX 지수 티커(예: ^AXJO)는 그대로 둡니다.
         if ticker.startswith("^"):
@@ -1101,6 +1113,13 @@ def fetch_ohlcv_for_tickers(
 
     missing: List[str] = []
 
+    is_kor_market = (country or "").strip().lower() in {"kr", "kor"}
+    if is_kor_market and not skip_realtime:
+        try:
+            prime_naver_etf_realtime_snapshot(tickers)
+        except Exception as exc:  # pragma: no cover - 방어 목적
+            logger.debug("네이버 실시간 스냅샷 초기화 실패(%s): %s", country, exc)
+
     for tkr in tickers:
         df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range, skip_realtime=skip_realtime)
         if df is None or df.empty:
@@ -1190,6 +1209,112 @@ def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
     except Exception as e:
         logger.warning("%s의 실시간 가격 조회 중 오류 발생: %s", ticker, e)
     return None
+
+
+def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> Dict[str, Dict[str, float]]:
+    """네이버 API에서 한국 ETF의 실시간 NAV 정보를 조회합니다."""
+
+    normalized_codes = {str(t).strip().upper() for t in tickers if str(t or "").strip()}
+    if not normalized_codes:
+        return {}
+
+    if not _should_use_realtime_price("kor"):
+        return {}
+
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 네이버 iNAV 조회를 건너뜁니다.")
+        return {}
+
+    url = "https://finance.naver.com/api/sise/etfItemList.nhn"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Referer": "https://finance.naver.com/sise/etfList.nhn",
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
+    except Exception as exc:
+        logger.warning("네이버 ETF iNAV 조회 실패: %s", exc)
+        return {}
+
+    try:
+        payload = response.json()
+    except Exception as exc:
+        logger.warning("네이버 ETF iNAV 응답 파싱 실패: %s", exc)
+        return {}
+
+    items = payload.get("result", {}).get("etfItemList")
+    if not isinstance(items, list):
+        return {}
+
+    snapshot: Dict[str, Dict[str, float]] = {}
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        code = str(item.get("itemcode") or "").strip().upper()
+        if not code or code not in normalized_codes:
+            continue
+
+        nav_raw = item.get("nav")
+        price_raw = item.get("nowVal")
+
+        try:
+            nav_value = float(str(nav_raw).replace(",", ""))
+            price_value = float(str(price_raw).replace(",", ""))
+        except (TypeError, ValueError):
+            continue
+
+        if nav_value <= 0 or price_value <= 0:
+            continue
+
+        deviation = ((price_value / nav_value) - 1.0) * 100.0
+
+        selected_price = price_value if _NAVER_PRICE_SOURCE_NORMALIZED == "price" else nav_value
+
+        snapshot[code] = {
+            "nav": nav_value,
+            "nowVal": price_value,
+            "price": selected_price,
+            "deviation": deviation,
+        }
+
+    return snapshot
+
+
+_NAVER_ETF_SNAPSHOT_CACHE: Dict[str, Dict[str, float]] = {}
+_NAVER_ETF_SNAPSHOT_FETCHED_AT: Optional[pd.Timestamp] = None
+
+
+def prime_naver_etf_realtime_snapshot(tickers: Sequence[str]) -> None:
+    """Fetch and cache real-time NAV/price snapshot for given Korean ETF tickers."""
+
+    global _NAVER_ETF_SNAPSHOT_CACHE, _NAVER_ETF_SNAPSHOT_FETCHED_AT
+
+    try:
+        snapshot = fetch_naver_etf_inav_snapshot(tickers)
+    except Exception as exc:  # pragma: no cover - 외부 요청 방어
+        logger.warning("네이버 ETF 실시간 스냅샷 조회 실패: %s", exc)
+        return
+
+    if snapshot:
+        _NAVER_ETF_SNAPSHOT_CACHE = snapshot
+        _NAVER_ETF_SNAPSHOT_FETCHED_AT = pd.Timestamp.now()
+    else:
+        _NAVER_ETF_SNAPSHOT_CACHE = {}
+        _NAVER_ETF_SNAPSHOT_FETCHED_AT = None
+
+
+def get_cached_naver_etf_snapshot_entry(ticker: str) -> Optional[Dict[str, float]]:
+    """Return cached NAV snapshot entry for the given Korean ETF ticker."""
+
+    key = str(ticker or "").strip().upper()
+    if not key:
+        return None
+    return _NAVER_ETF_SNAPSHOT_CACHE.get(key)
 
 
 _pykrx_name_cache: Dict[str, str] = {}

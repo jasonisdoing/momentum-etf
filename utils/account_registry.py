@@ -124,7 +124,7 @@ def iter_accounts() -> Iterable[str]:
 
 
 def get_common_file_settings() -> dict[str, Any]:
-    """data/settings/common.py의 공통 설정을 딕셔너리로 반환합니다."""
+    """config.py의 공통 설정을 딕셔너리로 반환합니다."""
 
     try:
         return load_common_settings()

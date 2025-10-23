@@ -8,6 +8,7 @@ from typing import Callable, Dict, List, Optional, Set
 
 import pandas as pd
 
+from config import BACKTEST_SLIPPAGE
 from utils.data_loader import fetch_ohlcv
 from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
@@ -41,8 +42,6 @@ def _calculate_trade_price(
     Returns:
         거래 가격
     """
-    from data.settings.common import BACKTEST_SLIPPAGE
-
     # 다음날 시초가 사용
     if current_index + 1 < total_days:
         next_open = open_values[current_index + 1]

@@ -29,7 +29,7 @@ def iter_countries() -> Iterable[str]:  # pragma: no cover - 호환 함수
 
 
 def get_common_file_settings() -> dict[str, Any]:
-    """data/settings/common.py 설정을 딕셔너리로 반환합니다."""
+    """config.py 설정을 딕셔너리로 반환합니다."""
 
     return {
         "REALTIME_PRICE_ENABLED": True,

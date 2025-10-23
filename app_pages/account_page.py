@@ -92,7 +92,7 @@ def render_account_page(account_id: str) -> None:
             caption_parts.append("설정: N/A")
 
         # 슬리피지 정보 추가
-        from data.settings.common import BACKTEST_SLIPPAGE
+        from config import BACKTEST_SLIPPAGE
 
         slippage_config = BACKTEST_SLIPPAGE.get(country_code, {})
         buy_slip = slippage_config.get("buy_pct")

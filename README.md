@@ -367,7 +367,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 | `PORTFOLIO_TOPN` | 포트폴리오 목표 종목 수 | 3~10개 | 계정 설정 |
 | `REPLACE_SCORE_THRESHOLD` | 교체 점수 임계값 | 0~3점 | 계정 설정 |
 | `OVERBOUGHT_SELL_THRESHOLD` | RSI 과매수 임계값 | 5~30점 | 계정 설정 |
-| `COOLDOWN_DAYS` | 쿨다운 기간 | 0~5일 | `data/settings/common.py` |
+| `COOLDOWN_DAYS` | 쿨다운 기간 | 0~5일 | `config.py` |
 | `MARKET_REGIME_MA` | 시장 레짐 MA 기간 | 10~100일 | 공통 설정 |
 | `MARKET_REGIME_RISK_OFF_EQUITY_RATIO` | 위험 시 투자 비중 | 0~100% | 계정 설정 |
 
@@ -377,13 +377,14 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 
 ### 공통 설정
 
-모든 국가가 동일하게 사용하는 전역 파라미터를 `data/settings/common.py`에서 관리합니다:
+모든 국가가 동일하게 사용하는 전역 파라미터를 `config.py`에서 관리합니다:
 
 - `COOLDOWN_DAYS`: 거래 쿨다운 기간
 - `MARKET_REGIME_FILTER_TICKER_MAIN`: 전략에 적용되는 주요 레짐 필터 지수 티커
 - `MARKET_REGIME_FILTER_TICKERS_AUX`: 대시보드에 참고용으로 노출할 보조 지수 리스트
 - `MARKET_REGIME_FILTER_MA_PERIOD`: 시장 레짐 필터 이동평균 기간
 - `MARKET_REGIME_FILTER_COUNTRY`: 레짐 필터 데이터 조회에 사용할 시장 코드(`kor`, `us` 등)
+- `ETF_PRICE_SOURCE`: 한국 ETF 실시간 가격을 `Price` 또는 `Nav` 중 어떤 값을 사용할지 지정
 
 ### 계정별 전략 파라미터
 

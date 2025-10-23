@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from importlib import import_module
 
-from data.settings.common import SELECTED_STRATEGY
+from config import SELECTED_STRATEGY
 
 
 def _strategy_package_name() -> str:

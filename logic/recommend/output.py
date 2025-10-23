@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import numbers
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,8 @@ import pandas as pd
 from utils.notification import strip_html_tags
 from utils.report import render_table_eaw
 from utils.logger import get_app_logger
+from utils.labels import get_price_column_label
+from utils.formatters import format_price_deviation, format_price
 
 logger = get_app_logger()
 
@@ -177,6 +180,9 @@ def dump_recommendation_log(
     lines.append("")
 
     # 테이블 헤더 (화면 UI와 동일)
+    country_code = getattr(report, "country_code", "")
+    price_header = get_price_column_label(country_code)
+
     headers = [
         "#",
         "티커",
@@ -186,6 +192,8 @@ def dump_recommendation_log(
         "보유일",
         "일간(%)",
         "평가(%)",
+        price_header,
+        "괴리율",
         "점수",
         "RSI",
         "지속",
@@ -201,6 +209,8 @@ def dump_recommendation_log(
         "right",  # 보유일
         "right",  # 일간(%)
         "right",  # 평가(%)
+        "right",  # 현재가 계열
+        "right",  # 괴리율
         "right",  # 점수
         "right",  # RSI
         "right",  # 지속
@@ -218,6 +228,8 @@ def dump_recommendation_log(
         holding_days = item.get("holding_days", 0)
         daily_pct = item.get("daily_pct", 0)
         evaluation_pct = item.get("evaluation_pct", 0)
+        price = item.get("price")
+        price_deviation = item.get("price_deviation")
         score = item.get("score", 0)
         rsi_score = item.get("rsi_score", 0)
         streak = item.get("streak", 0)
@@ -233,6 +245,8 @@ def dump_recommendation_log(
                 str(holding_days) if holding_days > 0 else "-",
                 f"{daily_pct:+.2f}%" if isinstance(daily_pct, (int, float)) else "-",
                 f"{evaluation_pct:+.2f}%" if isinstance(evaluation_pct, (int, float)) and evaluation_pct != 0 else "-",
+                format_price(price, country_code),
+                format_price_deviation(price_deviation),
                 f"{score:.1f}" if isinstance(score, (int, float)) else "-",
                 f"{rsi_score:.1f}" if isinstance(rsi_score, (int, float)) else "-",
                 f"{streak}일" if streak > 0 else "-",

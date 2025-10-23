@@ -710,7 +710,7 @@ def generate_daily_recommendations_for_portfolio(
                     new_candidate_name = etf_meta.get(best_new["tkr"], {}).get("name") or best_new["tkr"]
                     d_to_sell["row"][-1] = f"⚠️ 교체 대상 (쿨다운 대기중) - {new_candidate_name}({best_new['tkr']})"
 
-                logger.info(f"[REPLACE BLOCKED] {ticker_to_sell} 교체 차단 (쿨다운)")
+                # logger.info(f"[REPLACE BLOCKED] {ticker_to_sell} 교체 차단 (쿨다운)")
                 continue
 
             d_weakest = data_by_tkr.get(ticker_to_sell)

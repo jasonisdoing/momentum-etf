@@ -10,6 +10,7 @@ from utils.recommendations import recommendations_to_dataframe
 from utils.settings_loader import get_account_settings
 from strategies.maps.constants import DECISION_CONFIG
 from utils.recommendation_storage import fetch_latest_recommendations
+from utils.labels import get_price_column_label
 
 
 logger = get_app_logger()
@@ -78,7 +79,7 @@ TABLE_VISIBLE_ROWS = 16  # 헤더 1줄 + 내용 15줄
 TABLE_ROW_HEIGHT = 33
 TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT
 
-DEFAULT_COMPACT_COLUMNS = [
+DEFAULT_COMPACT_COLUMNS_BASE = [
     "#",
     "티커",
     "종목명",
@@ -198,12 +199,7 @@ def render_recommendation_table(
 ) -> None:
     styled_df = _style_rows_by_state(df, country_code=country_code)
 
-    # 국가별 현재가 포맷 설정
-    country_lower = (country_code or "").strip().lower()
-    if country_lower == "aus":
-        price_format = "%.2f"  # 호주: 소수점 2자리
-    else:
-        price_format = "%.0f"  # 한국: 정수
+    price_label = get_price_column_label(country_code)
 
     column_config_map: dict[str, st.column_config.BaseColumn] = {
         "#": st.column_config.TextColumn("#", width=30),
@@ -214,7 +210,7 @@ def render_recommendation_table(
         "보유일": st.column_config.NumberColumn("보유일", width=50),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small"),
-        "현재가": st.column_config.NumberColumn("현재가", width="small", format=price_format),
+        price_label: st.column_config.TextColumn(price_label, width="small"),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small"),
         "2주(%)": st.column_config.NumberColumn("2주(%)", width="small"),
         "3주(%)": st.column_config.NumberColumn("3주(%)", width="small"),
@@ -273,6 +269,9 @@ def main():
     if updated_at:
         st.caption(f"데이터 업데이트: {updated_at}")
 
+    price_label = get_price_column_label(country_code)
+    default_compact_columns = [price_label if col == "현재가" else col for col in DEFAULT_COMPACT_COLUMNS_BASE]
+
     compact_mode_label = "모바일(핵심만 보기)"
     view_mode = st.radio(
         "테이블 보기 모드 선택",
@@ -283,7 +282,7 @@ def main():
     )
 
     if view_mode == compact_mode_label:
-        base_columns = [col for col in DEFAULT_COMPACT_COLUMNS if col in df.columns]
+        base_columns = [col for col in default_compact_columns if col in df.columns]
         extra_candidates = [col for col in df.columns if col not in base_columns]
         if extra_candidates:
             extra_columns = st.multiselect(
