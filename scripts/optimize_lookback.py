@@ -48,13 +48,13 @@ LOOKBACK_CONFIG: dict[str, dict] = {
         "COOLDOWN_DAYS": [1],
     },
     "kor": {
-        "MA_RANGE": np.arange(80, 102, 2),
-        "MA_TYPE": ["TEMA"],
-        "PORTFOLIO_TOPN": [8],
-        "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": [14, 15, 16],
+        "MA_RANGE": np.arange(70, 102, 2),
+        "MA_TYPE": ["HMA"],
+        "PORTFOLIO_TOPN": [8, 10],
+        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5],
+        "OVERBOUGHT_SELL_THRESHOLD": [13, 14, 15, 16],
         "CORE_HOLDINGS": [],
-        "COOLDOWN_DAYS": [1],
+        "COOLDOWN_DAYS": [1, 2],
     },
     "us": {
         "MA_RANGE": np.arange(5, 31, 10),  # 5, 15, 25

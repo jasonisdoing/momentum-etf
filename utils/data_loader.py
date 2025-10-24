@@ -647,15 +647,24 @@ def _fetch_ohlcv_with_cache(
 
         if cached_df is None or cached_df.empty:
             cached_df = None
+            if listing_ts is not None and end_dt < listing_ts:
+                missing_ranges = []
+                return None
             missing_ranges.append((request_start_dt, end_dt))
         else:
             cache_start = cached_df.index.min().normalize()
             cache_end = cached_df.index.max().normalize()
 
             if request_start_dt < cache_start:
-                missing_ranges.append((request_start_dt, cache_start - pd.Timedelta(days=1)))
+                lower_bound = request_start_dt
+                if listing_ts is not None and cache_start > listing_ts:
+                    lower_bound = max(request_start_dt, listing_ts)
+                missing_ranges.append((lower_bound, cache_start - pd.Timedelta(days=1)))
             if end_dt > cache_end:
-                missing_ranges.append((cache_end + pd.Timedelta(days=1), end_dt))
+                upper_bound = end_dt
+                if listing_ts is not None and listing_ts > cache_end:
+                    upper_bound = max(end_dt, listing_ts)
+                missing_ranges.append((cache_end + pd.Timedelta(days=1), upper_bound))
 
     new_frames: List[pd.DataFrame] = []
     unfilled_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
