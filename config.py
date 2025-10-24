@@ -49,5 +49,5 @@ BACKTEST_SLIPPAGE = {
 }
 
 # Real-time ETF quote source selection, Allowed values: "Price", "Nav"
-KOR_REALTIME_ETF_PRICE_SOURCE = "Price"
-# KOR_REALTIME_ETF_PRICE_SOURCE = "Nav"
+# KOR_REALTIME_ETF_PRICE_SOURCE = "Price"
+KOR_REALTIME_ETF_PRICE_SOURCE = "Nav"
