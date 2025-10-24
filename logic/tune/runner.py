@@ -1429,11 +1429,15 @@ def run_account_tuning(
     runtime_missing_registry: Set[str] = set()
     results_per_month: List[Dict[str, Any]] = []
 
-    # 출력 경로 미리 결정 (중간 저장용)
-    base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
+    # 출력 경로 미리 결정 (중간 저장용) - 계정별 폴더
+    if results_dir is not None:
+        base_dir = Path(results_dir) / account_norm
+    else:
+        base_dir = DEFAULT_RESULTS_DIR / account_norm
+
     if output_path is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
-        txt_path = base_dir / f"tune_{account_norm}_{date_str}.log"
+        txt_path = base_dir / f"tune_{date_str}.log"
     else:
         txt_path = Path(output_path)
         if txt_path.suffix.lower() not in (".log", ".txt"):

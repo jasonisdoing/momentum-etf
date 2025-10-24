@@ -116,21 +116,12 @@ def main() -> None:
         excluded_tickers=excluded if excluded else None,
     )
 
-    # 날짜를 포함한 파일명 생성 (실제 실행 날짜 사용)
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    target_path = RESULTS_DIR / f"backtest_{account_id}_{date_str}.log"
-
-    generated_path = dump_backtest_log(
+    # dump_backtest_log가 계정별 폴더 구조로 저장
+    log_path = dump_backtest_log(
         result,
         account_settings,
-        results_dir=target_path.parent,
+        results_dir=RESULTS_DIR,
     )
-
-    if generated_path != target_path:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        generated_path.replace(target_path)
-    else:
-        target_path = generated_path
 
     print_backtest_summary(
         summary=result.summary,
@@ -142,7 +133,7 @@ def main() -> None:
         ticker_summaries=getattr(result, "ticker_summaries", []),
         core_start_dt=result.start_date,
     )
-    logger.info("✅ 백테스트 로그를 '%s'에 저장했습니다.", target_path)
+    logger.info("✅ 백테스트 로그를 '%s'에 저장했습니다.", log_path)
 
 
 if __name__ == "__main__":

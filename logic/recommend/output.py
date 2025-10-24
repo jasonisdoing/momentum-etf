@@ -147,18 +147,18 @@ def dump_recommendation_log(
     base_date = getattr(report, "base_date", None)
     recommendations = getattr(report, "recommendations", [])
 
-    # 기본 디렉토리 설정
+    # 기본 디렉토리 설정 (계정별 폴더)
     if results_dir is None:
-        # 프로젝트 루트의 data/results 디렉토리
-        base_dir = Path(__file__).parent.parent.parent / "data" / "results"
+        # 프로젝트 루트의 data/results/<account> 디렉토리
+        base_dir = Path(__file__).parent.parent.parent / "data" / "results" / account_id
     else:
-        base_dir = Path(results_dir)
+        base_dir = Path(results_dir) / account_id
 
     base_dir.mkdir(parents=True, exist_ok=True)
 
     # 파일명 생성 (실제 실행 날짜 사용)
     date_str = datetime.now().strftime("%Y-%m-%d")
-    path = base_dir / f"recommend_{account_id}_{date_str}.log"
+    path = base_dir / f"recommend_{date_str}.log"
 
     lines: List[str] = []
 

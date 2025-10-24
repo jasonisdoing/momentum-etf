@@ -376,15 +376,17 @@ def main() -> None:
         for line in table_lines:
             print(line)
 
+    # 계정별 폴더 생성
+    account_dir = RESULTS_DIR / account_id
     try:
-        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        account_dir.mkdir(parents=True, exist_ok=True)
     except Exception as exc:  # pragma: no cover - 디렉토리 생성 실패 방어
         logger.warning("결과 디렉토리를 생성하지 못했습니다: %s", exc)
         return
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     date_str = datetime.now().strftime("%Y-%m-%d")
-    result_path = RESULTS_DIR / f"optimize_regime_{account_id}_{date_str}.log"
+    result_path = account_dir / f"optimize_regime_{date_str}.log"
 
     ma_range = config.get("MA_RANGE", [])
     ratio_range = config.get("RATIO_RANGE", [])

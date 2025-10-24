@@ -39,7 +39,7 @@ def format_price_deviation(value: Any) -> str:
         return str(value)
 
     prefix = ""
-    if deviation > 2.0:
+    if deviation > 3.0:
         prefix = "💀"
     elif deviation < -2.0:
         prefix = "👍"

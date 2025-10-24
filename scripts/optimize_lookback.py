@@ -39,19 +39,19 @@ import numpy as np
 # Walk-Forward 분석 전용 설정 (최소 범위)
 LOOKBACK_CONFIG: dict[str, dict] = {
     "aus": {
-        "MA_RANGE": np.arange(30, 52, 2),
+        "MA_RANGE": np.arange(30, 62, 2),
         "MA_TYPE": ["SMA"],  # 호주는 SMA가 구조적 우위
-        "PORTFOLIO_TOPN": [7, 8, 9, 10],
-        "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": [14, 16, 18, 20, 22],
+        "PORTFOLIO_TOPN": [8],
+        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5],
+        "OVERBOUGHT_SELL_THRESHOLD": [16, 18, 20, 22, 24],
         "CORE_HOLDINGS": [],
-        "COOLDOWN_DAYS": [1],
+        "COOLDOWN_DAYS": [1, 2],
     },
     "kor": {
         "MA_RANGE": np.arange(70, 102, 2),
         "MA_TYPE": ["HMA"],
-        "PORTFOLIO_TOPN": [8, 10],
-        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5],
+        "PORTFOLIO_TOPN": [10],
+        "REPLACE_SCORE_THRESHOLD": [0, 0.5, 1.0, 1.5],
         "OVERBOUGHT_SELL_THRESHOLD": [13, 14, 15, 16],
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1, 2],
@@ -478,11 +478,12 @@ def run_walk_forward_analysis(
     total_tasks = len(tasks)
     logger.info(f"총 {total_tasks}개 작업 실행 (병렬 처리)")
 
-    # 중간 결과 저장 경로
-    DEFAULT_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    # 중간 결과 저장 경로 (계정별 폴더)
+    account_dir = DEFAULT_RESULTS_DIR / account_id
+    account_dir.mkdir(parents=True, exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d")
-    summary_file = DEFAULT_RESULTS_DIR / f"lookback_{account_id}_summary_{date_str}.log"
-    details_file = DEFAULT_RESULTS_DIR / f"lookback_{account_id}_details_{date_str}.log"
+    summary_file = account_dir / f"lookback_summary_{date_str}.log"
+    details_file = account_dir / f"lookback_details_{date_str}.log"
 
     # 병렬 실행
     results = []

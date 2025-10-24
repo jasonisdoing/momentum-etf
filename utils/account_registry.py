@@ -63,7 +63,21 @@ def load_account_configs() -> List[Dict[str, Any]]:
             continue
 
         country_code = _normalize_code(settings.get("country_code"), account_id)
-        name = settings.get("name") or account_id.upper()
+        base_name = settings.get("name") or account_id.upper()
+
+        # PORTFOLIO_TOPN을 이름에 추가
+        portfolio_topn = None
+        strategy = settings.get("strategy", {})
+        if isinstance(strategy, dict):
+            tuning = strategy.get("tuning", {})
+            if isinstance(tuning, dict):
+                portfolio_topn = tuning.get("PORTFOLIO_TOPN")
+
+        if portfolio_topn is not None:
+            name = f"{base_name}({portfolio_topn} 종목 포트폴리오)"
+        else:
+            name = base_name
+
         icon = settings.get("icon") or _ICON_FALLBACKS.get(country_code, "")
         is_default = bool(settings.get("default", False))
         order = _resolve_order(settings.get("order"))

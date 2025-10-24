@@ -15,31 +15,31 @@ RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
 TUNING_CONFIG: dict[str, dict] = {
     "aus": {
-        "MA_RANGE": np.arange(30, 52, 2),
+        "MA_RANGE": np.arange(30, 62, 2),
         "MA_TYPE": ["SMA"],  # 호주는 SMA가 구조적 우위
-        "PORTFOLIO_TOPN": [8, 9, 10],
-        "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": [14, 16, 18, 20, 22],
+        "PORTFOLIO_TOPN": [8],
+        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5],
+        "OVERBOUGHT_SELL_THRESHOLD": [16, 18, 20, 22, 24],
         "CORE_HOLDINGS": [],
-        "COOLDOWN_DAYS": [1],
+        "COOLDOWN_DAYS": [1, 2],
     },
     "kor": {
         "MA_RANGE": np.arange(70, 102, 2),
-        "MA_TYPE": ["HMA"],
-        "PORTFOLIO_TOPN": [8, 10],
-        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5],
+        "MA_TYPE": ["HMA"],  # 한국은 HMA가 구조적 우위
+        "PORTFOLIO_TOPN": [10],
+        "REPLACE_SCORE_THRESHOLD": [0, 0.5, 1.0, 1.5],
         "OVERBOUGHT_SELL_THRESHOLD": [13, 14, 15, 16],
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1, 2],
     },
     # "kor": {
-    #     "_설명": "최대 삼세한 넓은 범위",
-    #     "MA_RANGE": np.arange(10, 71, 1),  # 10~70
-    #     "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-    #     "PORTFOLIO_TOPN": np.arange(5, 8, 1),  # 5~7
-    #     "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),  # 0~2.0
-    #     "OVERBOUGHT_SELL_THRESHOLD": np.arange(1, 21, 1),  # 1~21
-    #     "COOLDOWN_DAYS": np.arange(0, 3, 1),  # 0~2
+    #     "MA_RANGE": np.arange(70, 102, 2),
+    #     "MA_TYPE": ["HMA"],
+    #     "PORTFOLIO_TOPN": [5],
+    #     "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5],
+    #     "OVERBOUGHT_SELL_THRESHOLD": [13, 14, 15, 16],
+    #     "CORE_HOLDINGS": [],
+    #     "COOLDOWN_DAYS": [1, 2],
     # },
     "us": {
         "MA_RANGE": np.arange(5, 31, 1),

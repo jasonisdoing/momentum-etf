@@ -181,18 +181,25 @@ python tune.py <account_id> [--output 경로]
 
 ### 결과 파일 및 로그 경로
 
+모든 결과 로그는 계정별 폴더로 구조화되어 저장됩니다: `data/results/<account_id>/`
+
 - **추천 결과(요약/상세) 저장**
   - DB 저장: `utils.db_manager.save_signal_report_to_db()`로 저장되어 웹앱에서 조회됩니다
-  - 파일 저장(상세 로그): `results/recommendation_{account_id}_{YYYY-MM-DD}.log`
+  - 파일 저장(상세 로그): `data/results/<account_id>/recommend_{YYYY-MM-DD}.log`
 - **추천 전용 파일 로그**
   - 경로: `logs/YYYY-MM-DD.log` (`logic/recommend/logger.py`)
   - 내용: 추천 생성 과정의 디테일/디버그 로그
 - **백테스트 로그**
-  - 경로: `data/results/backtest_{account_id}.txt` (기본값)
+  - 경로: `data/results/<account_id>/backtest_{YYYY-MM-DD}.log`
   - 트리거: `python backtest.py <account_id>` 실행 시 자동 생성
 - **튜닝 로그**
-  - 경로: `data/results/tune_{account_id}.txt` (기본값)
+  - 경로: `data/results/<account_id>/tune_{YYYY-MM-DD}.log`
   - 트리거: `python tune.py <account_id>` 실행 시 자동 생성
+- **룩백 최적화 로그**
+  - 요약: `data/results/<account_id>/lookback_summary_{YYYY-MM-DD}.log`
+  - 상세: `data/results/<account_id>/lookback_details_{YYYY-MM-DD}.log`
+- **시장 레짐 최적화 로그**
+  - 경로: `data/results/<account_id>/optimize_regime_{YYYY-MM-DD}.log`
 
 ### 5) 시장 레짐 파라미터 최적화
 
@@ -205,7 +212,7 @@ python scripts/optimize_regime.py <account_id>
 **설정 방법:**
 
 - `scripts/optimize_regime.py` 상단의 `OPTIMIZE_CONFIG`에서 계정별 탐색 범위 설정
-- 결과는 `data/results/optimize_regime_{account_id}_{날짜}.log`에 저장
+- 결과는 `data/results/<account_id>/optimize_regime_{YYYY-MM-DD}.log`에 저장
 
 ### 6) 스케줄러로 자동 실행 (APScheduler)
 

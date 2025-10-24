@@ -790,12 +790,20 @@ def dump_backtest_log(
 ) -> Path:
     """Write a detailed backtest log to disk and return the file path."""
 
-    base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
-    base_dir.mkdir(parents=True, exist_ok=True)
     account_id = result.account_id
     country_code = result.country_code
 
-    path = base_dir / f"backtest_{account_id}.log"
+    # 계정별 폴더 생성
+    if results_dir is not None:
+        base_dir = Path(results_dir) / account_id
+    else:
+        base_dir = DEFAULT_RESULTS_DIR / account_id
+
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    # 파일명에 날짜 추가
+    date_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+    path = base_dir / f"backtest_{date_str}.log"
     lines: List[str] = []
 
     lines.append(f"백테스트 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")
