@@ -34,11 +34,15 @@ def _build_schedule_entry(account_id: str) -> Dict[str, Any] | None:
     except AccountSettingsError as exc:  # pragma: no cover - 설정 오류 방어
         raise ScheduleConfigError(str(exc)) from exc
 
+    country_code = _normalize_country(settings.get("country_code"), account_id)
+
+    # schedule 섹션이 없으면 기본값으로 활성화
     schedule = settings.get("schedule")
-    if not isinstance(schedule, dict) or not schedule:
+    if schedule is None:
+        schedule = {}
+    elif not isinstance(schedule, dict):
         return None
 
-    country_code = _normalize_country(settings.get("country_code"), account_id)
     enabled_raw = schedule.get("enabled")
     enabled_flag = True if enabled_raw is None else bool(enabled_raw)
 

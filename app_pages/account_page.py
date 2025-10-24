@@ -212,7 +212,7 @@ def _cached_benchmark_data(
         rows.append(
             {
                 "티커": str(ticker),
-                "종목": f"{name} (Buy & Hold)",
+                "종목": f"{name}",
                 "누적 수익률": f"{float(ret):+.2f}%",
             }
         )

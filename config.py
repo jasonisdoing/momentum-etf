@@ -26,11 +26,21 @@ RSI_CALCULATION_CONFIG = {
 }
 
 
-# Market open times (local)
-KOR_MARKET_OPEN_TIME = time(9, 5)
-KOR_MARKET_CLOSE_TIME = time(16, 0)
-AUS_MARKET_OPEN_TIME = time(8, 20)
-AUS_MARKET_CLOSE_TIME = time(15, 0)
+# Market schedules (centralized)
+MARKET_SCHEDULES = {
+    "kor": {
+        "open": time(9, 10),
+        "close": time(15, 50),
+        "interval_minutes": 10,
+        "timezone": "Asia/Seoul",
+    },
+    "aus": {
+        "open": time(8, 20),
+        "close": time(14, 20),
+        "interval_minutes": 10,
+        "timezone": "Asia/Seoul",
+    },
+}
 
 # Backtest slippage assumptions (%)
 BACKTEST_SLIPPAGE = {

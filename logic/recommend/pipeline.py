@@ -38,11 +38,8 @@ from utils.data_loader import (
 from utils.db_manager import get_db_connection, list_open_positions
 from logic.recommend.market import get_market_regime_status_info
 from utils.logger import get_app_logger
-from config import (
-    KOR_REALTIME_ETF_PRICE_SOURCE,
-    KOR_MARKET_OPEN_TIME,
-    AUS_MARKET_OPEN_TIME,
-)
+from config import KOR_REALTIME_ETF_PRICE_SOURCE
+from utils.market_schedule import get_market_open_time
 
 logger = get_app_logger()
 
@@ -795,10 +792,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
             if country_lower in {"kr", "kor", "aus", "au"}:
                 now_kst = pd.Timestamp.now(tz="Asia/Seoul")
-                if country_lower in {"kr", "kor"}:
-                    market_open = KOR_MARKET_OPEN_TIME
-                else:
-                    market_open = AUS_MARKET_OPEN_TIME
+                # 국가 코드 정규화
+                country_for_market = "kor" if country_lower in {"kr", "kor"} else "aus"
+                market_open = get_market_open_time(country_for_market)
                 if now_kst.time() < market_open:
                     daily_pct = 0.0
 

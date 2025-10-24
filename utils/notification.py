@@ -41,30 +41,6 @@ logger = get_app_logger()
 # ---------------------------------------------------------------------------
 
 
-def should_notify_on_schedule(country: str) -> bool:
-    """Check notification schedule (CRON)."""
-
-    if not croniter or not pytz:
-        return True
-
-    config = get_country_schedule(country)
-    cron_schedule = config.get("notify_cron")
-
-    if not cron_schedule:
-        return True
-
-    cron_schedule = normalize_cron_weekdays(cron_schedule, target="croniter")
-
-    tz_str = "Asia/Seoul"
-
-    try:
-        local_tz = pytz.timezone(tz_str)
-        now = datetime.now(local_tz)
-        return croniter.match(cron_schedule, now)
-    except Exception:
-        return True
-
-
 def send_slack_message(
     text: str,
     blocks: Optional[List[dict]] = None,
@@ -463,6 +439,5 @@ __all__ = [
     "get_last_error",
     "send_slack_message",
     "send_recommendation_slack_notification",
-    "should_notify_on_schedule",
     "strip_html_tags",
 ]

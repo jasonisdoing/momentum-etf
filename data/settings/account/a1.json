@@ -33,10 +33,6 @@
             "name": "BetaShares NASDAQ 100 ETF"
         }
     ],
-    "schedule": {
-        "recommendation_cron": "1,11,21,31,41,51 8-15 * * 1-5",
-        "notify_cron": "1,31 8-15 * * 1-5"
-    },
     "slack": {
         "channel": "C09FAU7SKA8"
     }
