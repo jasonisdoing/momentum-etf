@@ -182,7 +182,7 @@ def dump_recommendation_log(
     # 테이블 헤더 (화면 UI와 동일)
     country_code = getattr(report, "country_code", "")
     country_lower = (country_code or "").strip().lower()
-    nav_mode = country_lower in {"kr", "kor"} and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav"
+    nav_mode = country_lower in {"kr", "kor"}
     show_deviation = country_lower in {"kr", "kor"}
 
     price_header = "현재가"

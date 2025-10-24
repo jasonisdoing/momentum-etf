@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -38,7 +38,11 @@ from utils.data_loader import (
 from utils.db_manager import get_db_connection, list_open_positions
 from logic.recommend.market import get_market_regime_status_info
 from utils.logger import get_app_logger
-from config import KOR_REALTIME_ETF_PRICE_SOURCE
+from config import (
+    KOR_REALTIME_ETF_PRICE_SOURCE,
+    KOR_MARKET_OPEN_TIME,
+    AUS_MARKET_OPEN_TIME,
+)
 
 logger = get_app_logger()
 
@@ -788,6 +792,15 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             daily_pct = 0.0
             if market_prev and market_prev > 0:
                 daily_pct = ((market_latest / market_prev) - 1.0) * 100
+
+            if country_lower in {"kr", "kor", "aus", "au"}:
+                now_kst = pd.Timestamp.now(tz="Asia/Seoul")
+                if country_lower in {"kr", "kor"}:
+                    market_open = KOR_MARKET_OPEN_TIME
+                else:
+                    market_open = AUS_MARKET_OPEN_TIME
+                if now_kst.time() < market_open:
+                    daily_pct = 0.0
 
             if base_norm > latest_data_date:
                 market_prev = market_latest

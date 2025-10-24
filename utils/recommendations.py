@@ -127,7 +127,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
 
     country_lower = (country or "").strip().lower()
     price_label = "현재가"
-    nav_mode = country_lower in {"kr", "kor"} and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav"
+    nav_mode = country_lower in {"kr", "kor"}
     show_deviation = country_lower in {"kr", "kor"}
 
     display_rows: list[dict[str, Any]] = []
@@ -273,7 +273,7 @@ def get_recommendations_dataframe(country: str, *, source_key: str | None = None
         if "현재가" in columns:
             idx = columns.index("현재가")
             columns[idx] = "현재가"
-        if country.lower() in {"kr", "kor"} and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav":
+        if country.lower() in {"kr", "kor"}:
             insert_pos = columns.index("현재가") + 1
             columns.insert(insert_pos, "Nav")
         if country.lower() not in {"kr", "kor"} and "괴리율" in columns:

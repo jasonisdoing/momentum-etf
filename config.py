@@ -1,5 +1,7 @@
 """Global configuration values used across the project."""
 
+from datetime import time
+
 CACHE_START_DATE = "2022-01-01"
 SELECTED_STRATEGY = "maps"
 
@@ -22,6 +24,13 @@ RSI_CALCULATION_CONFIG = {
     "period": 15,
     "ema_smoothing": 2.0,
 }
+
+
+# Market open times (local)
+KOR_MARKET_OPEN_TIME = time(9, 5)
+KOR_MARKET_CLOSE_TIME = time(16, 0)
+AUS_MARKET_OPEN_TIME = time(8, 20)
+AUS_MARKET_CLOSE_TIME = time(15, 0)
 
 # Backtest slippage assumptions (%)
 BACKTEST_SLIPPAGE = {

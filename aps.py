@@ -24,9 +24,16 @@ TIMEZONE = "Asia/Seoul"
 os.environ["PYTHONWARNINGS"] = "ignore"
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 import time
-from datetime import datetime
+from datetime import datetime, time as dt_time
 
 from utils.recommendation_storage import save_recommendation_report
+
+from config import (
+    KOR_MARKET_OPEN_TIME,
+    KOR_MARKET_CLOSE_TIME,
+    AUS_MARKET_OPEN_TIME,
+    AUS_MARKET_CLOSE_TIME,
+)
 
 
 try:
@@ -161,6 +168,23 @@ def run_stock_stats_update() -> None:
         logging.error("종목 메타데이터 갱신 작업이 실패했습니다.", exc_info=True)
 
 
+def _build_market_cron(open_time: dt_time, close_time: dt_time) -> str:
+    if close_time <= open_time:
+        raise ValueError("Market close time must be after open time")
+    hours = f"{open_time.hour}-{close_time.hour}"
+    minutes = "1,11,21,31,41,51"
+    return f"{minutes} {hours} * * 1-5"
+
+
+def _resolve_recommendation_cron(country_code: str, fallback: str) -> str:
+    code = (country_code or "").strip().lower()
+    if code in {"kr", "kor"}:
+        return _build_market_cron(KOR_MARKET_OPEN_TIME, KOR_MARKET_CLOSE_TIME)
+    if code in {"aus", "au"}:
+        return _build_market_cron(AUS_MARKET_OPEN_TIME, AUS_MARKET_CLOSE_TIME)
+    return fallback
+
+
 @dataclass(frozen=True)
 class RecommendationJobConfig:
     schedule_name: str
@@ -220,6 +244,8 @@ def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
                 cron_expr,
                 schedule_name,
             )
+
+        cron_expr = _resolve_recommendation_cron(country_code, cron_expr)
 
         timezone = _validate_timezone(cfg.get("timezone"))
         run_immediately = bool(cfg.get("run_immediately_on_start", run_immediately_default))

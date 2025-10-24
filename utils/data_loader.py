@@ -666,6 +666,10 @@ def _fetch_ohlcv_with_cache(
         effective_end = miss_end
         log_pending = False
         start_str = miss_start.strftime("%Y-%m-%d")
+        today_norm = pd.Timestamp.now().normalize()
+        if skip_realtime and effective_end >= today_norm:
+            effective_end = today_norm - pd.Timedelta(days=1)
+            log_pending = False
         end_str = miss_end.strftime("%Y-%m-%d")
         if _should_skip_today_range(country_code, miss_end):
             effective_end = miss_end - pd.Timedelta(days=1)

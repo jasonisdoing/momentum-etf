@@ -39,9 +39,9 @@ import numpy as np
 # Walk-Forward 분석 전용 설정 (최소 범위)
 LOOKBACK_CONFIG: dict[str, dict] = {
     "aus": {
-        "MA_RANGE": np.arange(30, 42, 2),  # 30~40
+        "MA_RANGE": np.arange(30, 52, 2),
         "MA_TYPE": ["SMA"],  # 호주는 SMA가 구조적 우위
-        "PORTFOLIO_TOPN": [8, 10],  # 기본 8, 보조 10
+        "PORTFOLIO_TOPN": [7, 8, 9, 10],
         "REPLACE_SCORE_THRESHOLD": [1],
         "OVERBOUGHT_SELL_THRESHOLD": [14, 16, 18, 20, 22],
         "CORE_HOLDINGS": [],
