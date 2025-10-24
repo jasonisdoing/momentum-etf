@@ -433,6 +433,17 @@ def run_portfolio_backtest(
             if available:
                 tickers_available_today.append(ticker)
 
+        # RSI 과매수 경고 카테고리도 추적 (쿨다운으로 아직 매도 안 했지만 RSI 낮은 경우)
+        for ticker, ticker_state in position_state.items():
+            if ticker_state["shares"] > 0:
+                rsi_val = rsi_score_today.get(ticker, 100.0)
+                if rsi_val <= rsi_sell_threshold:
+                    # 쿨다운으로 매도하지 못한 경우에도 카테고리 차단
+                    if i < ticker_state["sell_block_until"]:
+                        category = ticker_to_category.get(ticker)
+                        if category and category != "TBD":
+                            sell_rsi_categories_today.add(category)
+
         # --- 시장 레짐 필터 적용 (리스크 오프 조건 확인) ---
         # RSI 과매수 매도는 항상 활성화됨 (rsi_sell_threshold는 파라미터로 받음)
 
