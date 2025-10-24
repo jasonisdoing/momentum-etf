@@ -28,7 +28,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_TYPE": ["TEMA"],
         "PORTFOLIO_TOPN": [7, 8, 9, 10],
         "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": [14, 15, 16],
+        "OVERBOUGHT_SELL_THRESHOLD": [13, 14, 15, 16],
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1],
     },

@@ -7,7 +7,7 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "MONTHS_RANGE": 6,
-        "expected_cagr": 53.64,
+        "expected_cagr": 25.83,
         "backtested_date": "2025-10-24",
         "tuning": {
             "MA_PERIOD": 46,
