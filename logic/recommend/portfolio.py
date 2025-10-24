@@ -197,11 +197,8 @@ def _create_decision_entry(
             state = "SELL_TREND"
             phrase = DECISION_NOTES["TREND_BREAK"]
 
-        # SELL_RSI는 쿨다운 여부와 무관하게 항상 HOLD로 전환
-        if state == "SELL_RSI":
-            state = "HOLD"
-            phrase = f"⚠️ RSI 과매수 (쿨다운 대기중, RSI점수: {rsi_score_value:.1f})"
-        elif sell_block_info and state == "SELL_TREND":
+        # 쿨다운 체크: SELL_RSI와 SELL_TREND 모두 동일하게 적용
+        if sell_block_info and state in ("SELL_RSI", "SELL_TREND"):
             state = "HOLD"
             days_since = sell_block_info.get("days_since", 0)
             last_buy = sell_block_info.get("last_buy")
