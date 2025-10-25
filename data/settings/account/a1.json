@@ -18,10 +18,6 @@
             "OVERBOUGHT_SELL_THRESHOLD": 20,
             "COOLDOWN_DAYS": 1,
             "CORE_HOLDINGS": []
-        },
-        "static": {
-            "MAX_PER_CATEGORY": 1,
-            "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 100
         }
     },
     "benchmarks": [

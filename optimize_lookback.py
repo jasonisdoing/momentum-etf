@@ -26,6 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from config import ACCOUNT_PARAMETER_SEARCH_CONFIG
 from logic.backtest.account_runner import run_account_backtest
 from utils.account_registry import get_strategy_rules
 from utils.data_loader import get_latest_trading_day, prepare_price_data
@@ -34,38 +35,6 @@ from utils.report import render_table_eaw
 from utils.settings_loader import get_account_settings
 from utils.stock_list_io import get_etfs
 from utils.cache_utils import save_cached_frame
-import numpy as np
-
-# Walk-Forward 분석 전용 설정 (계좌별)
-LOOKBACK_CONFIG: dict[str, dict] = {
-    "a1": {
-        "MA_RANGE": np.arange(30, 62, 2),
-        "MA_TYPE": ["SMA"],  # 호주는 SMA가 구조적 우위
-        "PORTFOLIO_TOPN": [7, 8, 9, 10],
-        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5, 2.0],
-        "OVERBOUGHT_SELL_THRESHOLD": [14, 16, 18, 20, 22],
-        "CORE_HOLDINGS": ["ASX:IVV", "ASX:NDQ", "ASX:IOO"],
-        "COOLDOWN_DAYS": [1, 2],
-    },
-    "k1": {
-        "MA_RANGE": np.arange(70, 102, 2),
-        "MA_TYPE": ["HMA"],  # 한국은 HMA가 구조적 우위
-        "PORTFOLIO_TOPN": [8],
-        "REPLACE_SCORE_THRESHOLD": [0, 0.5, 1.0, 1.5],
-        "OVERBOUGHT_SELL_THRESHOLD": [13, 14, 15, 16],
-        "CORE_HOLDINGS": [],
-        "COOLDOWN_DAYS": [1, 2],
-    },
-    "k2": {
-        "MA_RANGE": np.arange(70, 102, 2),
-        "MA_TYPE": ["HMA"],  # 한국은 HMA가 구조적 우위
-        "PORTFOLIO_TOPN": [5],
-        "REPLACE_SCORE_THRESHOLD": [0, 0.5, 1.0, 1.5],
-        "OVERBOUGHT_SELL_THRESHOLD": [13, 14, 15, 16],
-        "CORE_HOLDINGS": [],
-        "COOLDOWN_DAYS": [1, 2],
-    },
-}
 
 logger = get_app_logger()
 
@@ -114,24 +83,28 @@ def _find_best_params_simple(
     Returns:
         (best_params, best_cagr)
     """
-    # LOOKBACK_CONFIG 전용 설정 사용
-    config = LOOKBACK_CONFIG.get(account_id)
-    if not config:
-        # 기본 파라미터 사용
-        base_rules = get_strategy_rules(account_id)
-        return {
-            "ma_period": base_rules.ma_period,
-            "portfolio_topn": base_rules.portfolio_topn,
-            "replace_threshold": base_rules.replace_threshold,
-            "ma_type": base_rules.ma_type,
-        }, 0.0
+    # 공통 계정별 설정 사용 (없으면 즉시 오류)
+    config = ACCOUNT_PARAMETER_SEARCH_CONFIG.get(account_id)
+    if config is None:
+        raise KeyError(f"계정 {account_id}에 대한 ACCOUNT_PARAMETER_SEARCH_CONFIG 항목이 없습니다.")
 
-    # 탐색 공간 - LOOKBACK_CONFIG 직접 사용
-    ma_values = list(config.get("MA_RANGE", [20]))
-    topn_values = list(config.get("PORTFOLIO_TOPN", [5]))
-    threshold_values = list(config.get("REPLACE_SCORE_THRESHOLD", [1.0]))
-    rsi_values = list(config.get("OVERBOUGHT_SELL_THRESHOLD", [10]))
-    cooldown_values = list(config.get("COOLDOWN_DAYS", [1]))
+    required_keys = [
+        "MA_RANGE",
+        "PORTFOLIO_TOPN",
+        "REPLACE_SCORE_THRESHOLD",
+        "OVERBOUGHT_SELL_THRESHOLD",
+        "COOLDOWN_DAYS",
+    ]
+    missing_keys = [key for key in required_keys if key not in config]
+    if missing_keys:
+        raise KeyError(f"ACCOUNT_PARAMETER_SEARCH_CONFIG[{account_id}]에 필수 키가 없습니다: {', '.join(missing_keys)}")
+
+    # 탐색 공간 - 공통 설정 직접 사용
+    ma_values = list(config["MA_RANGE"])
+    topn_values = list(config["PORTFOLIO_TOPN"])
+    threshold_values = list(config["REPLACE_SCORE_THRESHOLD"])
+    rsi_values = list(config["OVERBOUGHT_SELL_THRESHOLD"])
+    cooldown_values = list(config["COOLDOWN_DAYS"])
 
     best_params = None
     best_cagr = float("-inf")
