@@ -896,7 +896,6 @@ def run_portfolio_backtest(
                     cash=cash,
                     current_holdings_value=current_holdings_value,
                     top_n=top_n,
-                    risk_off_effective=False,
                 )
 
                 if budget <= 0:

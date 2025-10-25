@@ -177,7 +177,6 @@ def calculate_buy_budget(
     cash: float,
     current_holdings_value: float,
     top_n: int,
-    risk_off_effective: bool = False,
 ) -> float:
     """매수 예산 계산
 
@@ -185,7 +184,6 @@ def calculate_buy_budget(
         cash: 현금
         current_holdings_value: 현재 보유 자산 가치
         top_n: 최대 보유 종목 수
-        risk_off_effective: 리스크 오프 모드 활성화 여부 (항상 False, 제거 예정)
 
     Returns:
         매수 예산
@@ -197,16 +195,6 @@ def calculate_buy_budget(
 
     if budget <= 0 or budget < min_val:
         return 0.0
-
-    # 리스크 오프 로직 제거됨 (항상 100% 투자)
-    # risk_off_effective는 항상 False이므로 아래 로직은 실행되지 않음
-    if risk_off_effective:
-        total_equity_now = cash + current_holdings_value
-        target_holdings_limit = total_equity_now * 1.0  # 100%
-        remaining_capacity = max(0.0, target_holdings_limit - current_holdings_value)
-        if remaining_capacity <= 0:
-            return 0.0
-        budget = min(budget, remaining_capacity)
 
     return budget
 

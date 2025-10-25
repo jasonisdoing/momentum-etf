@@ -444,22 +444,6 @@ def _format_sell_replace_phrase(phrase: str, *, etf_meta: Dict[str, Dict[str, An
     return f"교체매도 {ratio_text} - {target_name}({target_ticker})로 교체"
 
 
-def _append_risk_off_suffix(phrase: str, ratio: Optional[int]) -> str:
-    if ratio is None:
-        return phrase
-    try:
-        ratio_int = int(ratio)
-    except (TypeError, ValueError):
-        return phrase
-    if not (0 <= ratio_int <= 100) or ratio_int >= 100:
-        return phrase
-    phrase_str = str(phrase or "")
-    if "시장위험회피" in phrase_str:
-        return phrase_str
-    suffix = f"❗시장위험회피 비중조절❗ (보유목표 {ratio_int}%)"
-    return f"{phrase_str} | {suffix}" if phrase_str else suffix
-
-
 def _normalize_buy_date(value: Any) -> Optional[pd.Timestamp]:
     """Convert various buy date formats into a normalized pandas Timestamp."""
 
@@ -1118,28 +1102,24 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 state = "HOLD"
                 # RSI 과매수 문구가 있으면 유지, 없으면 신규 편입 표시
                 if not phrase or "RSI" not in phrase:
-                    new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
-                    phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
+                    phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
             if holding_days_val == 0:
                 holding_days_val = 1
         # 추천에 따라 오늘 신규 매수해야 할 종목
         elif state in {"BUY", "BUY_REPLACE"}:
             phrase_str = str(phrase)
-            risk_off_ratio = decision.get("risk_off_target_ratio")
 
             if state == "BUY_REPLACE":
                 replacement_note = phrase_str if phrase_str else ""
-                combined_phrase = _join_phrase_parts(DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수"), replacement_note)
-                phrase = _append_risk_off_suffix(combined_phrase, risk_off_ratio)
+                phrase = _join_phrase_parts(DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수"), replacement_note)
             else:  # state == "BUY"
                 base_new_phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
                 if "시장위험회피" in phrase_str or phrase_str == DECISION_NOTES.get("RISK_OFF_TRIM"):
-                    chosen_phrase = base_new_phrase
+                    phrase = base_new_phrase
                 elif phrase_str:
-                    chosen_phrase = phrase_str
+                    phrase = phrase_str
                 else:
-                    chosen_phrase = base_new_phrase
-                phrase = _append_risk_off_suffix(chosen_phrase, risk_off_ratio)
+                    phrase = base_new_phrase
             if holding_days_val == 0:
                 holding_days_val = 1
         # 이미 보유 중인 종목이 오늘 신규 편입된 경우
@@ -1151,8 +1131,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 state = "HOLD"
                 # RSI 과매수 문구가 있으면 유지, 없으면 신규 편입 표시
                 if not phrase or "RSI" not in phrase:
-                    new_phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
-                    phrase = _append_risk_off_suffix(new_phrase, decision.get("risk_off_target_ratio"))
+                    phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
             if holding_days_val == 0:
                 holding_days_val = 1
 
