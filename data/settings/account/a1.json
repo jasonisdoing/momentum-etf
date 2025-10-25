@@ -2,17 +2,18 @@
     "order": 20,
     "icon": "🇦🇺",
     "name": "호주 ETF",
+    "desc": "금액이 충분히 있는 계좌를 위한 19종목 포트폴리오입니다.",
     "country_code": "aus",
     "slack_channel": "C09FAU7SKA8",
     "initial_date": "2025-10-01",
     "strategy": {
-        "MONTHS_RANGE": 6,
-        "expected_cagr": 25.83,
-        "backtested_date": "2025-10-24",
+        "MONTHS_RANGE": 12,
+        "expected_cagr": 40.29,
+        "backtested_date": "2025-10-25",
         "tuning": {
-            "MA_PERIOD": 46,
+            "MA_PERIOD": 38,
             "MA_TYPE": "SMA",
-            "PORTFOLIO_TOPN": 10,
+            "PORTFOLIO_TOPN": 7,
             "REPLACE_SCORE_THRESHOLD": 1,
             "OVERBOUGHT_SELL_THRESHOLD": 20,
             "COOLDOWN_DAYS": 1,
@@ -31,6 +32,10 @@
         {
             "ticker": "ASX:NDQ",
             "name": "BetaShares NASDAQ 100 ETF"
+        },
+        {
+            "ticker": "ASX:IOO",
+            "name": "iShares Global 100 ETF"
         }
     ],
     "slack": {
