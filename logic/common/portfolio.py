@@ -276,3 +276,41 @@ def calculate_held_count(position_state: Dict) -> int:
         보유 중인 종목 수
     """
     return sum(1 for pos in position_state.values() if pos.get("shares", 0) > 0)
+
+
+def calculate_held_categories_from_holdings(
+    holdings: Dict[str, Any],
+    etf_meta: Dict[str, Any],
+) -> Set[str]:
+    """보유 종목의 카테고리 집합 계산 (추천용)
+
+    Args:
+        holdings: 보유 종목 딕셔너리
+        etf_meta: ETF 메타 정보
+
+    Returns:
+        보유 중인 카테고리 집합
+    """
+    held_categories = set()
+    for tkr in holdings.keys():
+        category = etf_meta.get(tkr, {}).get("category")
+        if category and category != "TBD":
+            held_categories.add(category)
+    return held_categories
+
+
+def validate_portfolio_topn(topn: int, account_id: str = "") -> None:
+    """포트폴리오 최대 보유 종목 수 검증
+
+    Args:
+        topn: 최대 보유 종목 수
+        account_id: 계정 ID (선택)
+
+    Raises:
+        ValueError: topn이 0 이하인 경우
+    """
+    if topn <= 0:
+        if account_id:
+            raise ValueError(f"'{account_id}' 계정의 PORTFOLIO_TOPN은 0보다 커야 합니다.")
+        else:
+            raise ValueError("PORTFOLIO_TOPN은 0보다 커야 합니다.")

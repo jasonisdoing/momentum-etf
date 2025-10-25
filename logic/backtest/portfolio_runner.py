@@ -4,7 +4,7 @@
 전략 중립적인 포트폴리오 백테스트 로직을 제공합니다.
 """
 
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
@@ -329,6 +329,33 @@ def _execute_individual_sells(
                 )
 
     return cash, current_holdings_value
+
+
+def _rank_buy_candidates(
+    tickers_available_today: Set[str],
+    position_state: Dict,
+    buy_signal_today: Dict[str, int],
+    score_today: Dict[str, float],
+    i: int,
+) -> List[Tuple[float, str]]:
+    """매수 후보를 점수 순으로 정렬
+
+    Returns:
+        [(score, ticker), ...] 점수 내림차순 정렬
+    """
+    buy_ranked_candidates = []
+    for candidate_ticker in tickers_available_today:
+        ticker_state_cand = position_state[candidate_ticker]
+        buy_signal_days_today = buy_signal_today.get(candidate_ticker, 0)
+
+        if ticker_state_cand["shares"] == 0 and i >= ticker_state_cand["buy_block_until"] and buy_signal_days_today > 0:
+            # MAPS 점수 사용
+            score_cand = score_today.get(candidate_ticker, float("nan"))
+            final_score = score_cand if not pd.isna(score_cand) else -float("inf")
+            buy_ranked_candidates.append((final_score, candidate_ticker))
+
+    buy_ranked_candidates.sort(reverse=True)
+    return buy_ranked_candidates
 
 
 def _execute_replacement_trades(
@@ -672,11 +699,11 @@ def run_portfolio_backtest(
     if regime_behavior not in valid_regime_behaviors:
         raise ValueError("regime_behavior must be one of {'sell_all', 'hold_block_buy'}")
 
-    if top_n <= 0:
-        raise ValueError("PORTFOLIO_TOPN (top_n)은 0보다 커야 합니다.")
+    from logic.common import validate_portfolio_topn, validate_core_holdings
+
+    validate_portfolio_topn(top_n)
 
     # 핵심 보유 종목 (강제 보유, TOPN 포함)
-    from logic.common import validate_core_holdings
 
     core_holdings_tickers = set(core_holdings or [])
     universe_tickers_set = {stock["ticker"] for stock in stocks}
@@ -1084,17 +1111,13 @@ def run_portfolio_backtest(
             # --- 3. 매수 로직 (리스크 온일 때만) ---
             if allow_new_buys:
                 # 1. 매수 후보 선정 (종합 점수 기준)
-                buy_ranked_candidates = []
-                for candidate_ticker in tickers_available_today:
-                    ticker_state_cand = position_state[candidate_ticker]
-                    buy_signal_days_today = buy_signal_today.get(candidate_ticker, 0)
-
-                    if ticker_state_cand["shares"] == 0 and i >= ticker_state_cand["buy_block_until"] and buy_signal_days_today > 0:
-                        # MAPS 점수 사용
-                        score_cand = score_today.get(candidate_ticker, float("nan"))
-                        final_score = score_cand if not pd.isna(score_cand) else -float("inf")
-                        buy_ranked_candidates.append((final_score, candidate_ticker))
-                buy_ranked_candidates.sort(reverse=True)
+                buy_ranked_candidates = _rank_buy_candidates(
+                    tickers_available_today=tickers_available_today,
+                    position_state=position_state,
+                    buy_signal_today=buy_signal_today,
+                    score_today=score_today,
+                    i=i,
+                )
 
                 # 2. 매수 실행 (신규 또는 교체) (CORE 포함)
                 from logic.common import calculate_held_count

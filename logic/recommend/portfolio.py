@@ -339,9 +339,10 @@ def run_portfolio_recommend(
     from logic.common import select_candidates_by_category, sort_decisions_by_order_and_score
 
     # 전략 설정
+    from logic.common import validate_portfolio_topn
+
     denom = strategy_rules.portfolio_topn
-    if denom <= 0:
-        raise ValueError(f"'{account_id}' 계좌의 최대 보유 종목 수(portfolio_topn)는 0보다 커야 합니다.")
+    validate_portfolio_topn(denom, account_id)
 
     replace_threshold = strategy_rules.replace_threshold
     try:
@@ -357,15 +358,14 @@ def run_portfolio_recommend(
     valid_core_holdings = validate_core_holdings(core_holdings_tickers, universe_tickers_set, account_id)
 
     # 현재 보유 종목의 카테고리
-    held_categories = set()
+    from logic.common import calculate_held_categories_from_holdings
+
+    held_categories = calculate_held_categories_from_holdings(holdings, etf_meta)
     held_category_keys = set()
-    for tkr in holdings.keys():
-        category = etf_meta.get(tkr, {}).get("category")
-        if category and category != "TBD":
-            held_categories.add(category)
-            normalized = _normalize_category_value(category)
-            if normalized:
-                held_category_keys.add(normalized)
+    for category in held_categories:
+        normalized = _normalize_category_value(category)
+        if normalized:
+            held_category_keys.add(normalized)
 
     decisions = []
 
