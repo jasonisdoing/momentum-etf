@@ -133,20 +133,9 @@ if ticker in core_holdings:
 
 ### 6. 시장 레짐 필터
 
-**규칙:**
-- 리스크 오프 시 매수 중단 또는 축소
-- 매도는 항상 활성화 (RSI 과매수 매도 포함)
-
-| 항목 | 추천 | 백테스트 |
-|------|------|---------|
-| 파일 | `portfolio.py` | `portfolio_runner.py` |
-| 위치 | 458-473줄 | 447-470줄 |
 
 **설정:**
-- `MARKET_REGIME_RISK_OFF_EQUITY_RATIO`: 리스크 오프 시 투자 비율 (0-100%)
-  - 100: 정상 투자
-  - 90: 90% 투자 (10% 현금)
-  - 0: 전량 매도
+- 시장 레짐 감지는 대시보드 참고용으로만 사용
 
 ---
 
@@ -240,7 +229,7 @@ python tune.py k1
 **시장 레짐 필터 수정 시:**
 - [ ] `portfolio.py` 458-473줄 수정
 - [ ] `portfolio_runner.py` 447-470줄 동일하게 수정
-- [ ] `risk_off_equity_ratio` 설정 확인
+- [ ] ~~`risk_off_equity_ratio` 설정 확인~~ (항상 100%)
 
 **카테고리 중복 제한 수정 시:**
 - [ ] `portfolio.py` 334-342줄, `pipeline.py` 1163-1166줄 수정

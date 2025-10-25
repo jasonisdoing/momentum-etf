@@ -16,7 +16,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
     - `history.py`: 보유일/쿨다운 계산 유틸
     - `schedule.py`: 개장 여부/다음 거래일/스케줄 타깃 날짜 계산
     - `logger.py`: 추천 전용 파일 로거
-    - `market.py`: 시장 레짐 상태 문자열 생성(웹 UI 헤더용)
+    - `market.py`: 시장 레짐 상태 조회 (대시보드 참고용)
   - `common/`: 추천과 백테스트에서 공통으로 사용하는 로직
     - `portfolio.py`: 보유 종목 상태 계산 공통 함수 (`count_current_holdings`, `get_hold_states` 등)
     - `signals.py`: 매수 신호 판단 공통 함수
@@ -30,9 +30,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
   - `country_registry.py`: 구 코드 호환을 위한 래퍼
 - `scripts/`: 각종 유틸리티 및 분석 스크립트 모음
   - `update_price_cache.py`: 국가별 종목 OHLCV 데이터를 캐시에 선다운로드/증분 갱신
-  - `optimize_regime.py`: 시장 레짐 파라미터(MA 기간, 투자 비중) 최적화
   - `find.py`: 급등 ETF 검색 도구
-  - `regime_check.py`: 시장 레짐 상태 확인 도구
 - `app_pages/`: Streamlit 웹앱 페이지들
   - `account_page.py`: 계정별 추천/현황 페이지
   - `trade.py`: 관리자용 거래 관리 페이지 (로그인 필요)
@@ -198,23 +196,8 @@ python tune.py <account_id> [--output 경로]
 - **룩백 최적화 로그**
   - 요약: `data/results/<account_id>/lookback_summary_{YYYY-MM-DD}.log`
   - 상세: `data/results/<account_id>/lookback_details_{YYYY-MM-DD}.log`
-- **시장 레짐 최적화 로그**
-  - 경로: `data/results/<account_id>/optimize_regime_{YYYY-MM-DD}.log`
 
-### 5) 시장 레짐 파라미터 최적화
-
-시장 레짐 필터의 MA 기간과 위험 시 투자 비중을 최적화합니다.
-
-```bash
-python scripts/optimize_regime.py <account_id>
-```
-
-**설정 방법:**
-
-- `scripts/optimize_regime.py` 상단의 `OPTIMIZE_CONFIG`에서 계정별 탐색 범위 설정
-- 결과는 `data/results/<account_id>/optimize_regime_{YYYY-MM-DD}.log`에 저장
-
-### 6) 스케줄러로 자동 실행 (APScheduler)
+### 5) 스케줄러로 자동 실행 (APScheduler)
 
 장 마감 이후 자동으로 현황을 계산하고(교체매매 추천 포함) 슬랙(Slack)으로 알림을 보낼 수 있습니다.
 
@@ -227,7 +210,7 @@ python scripts/optimize_regime.py <account_id>
 python scripts/update_price_cache.py --country all --start 2020-01-01
 ```
 
-### 7) 최적 룩백 기간 탐색 (Walk-Forward Analysis)
+### 6) 최적 룩백 기간 탐색 (Walk-Forward Analysis)
 
 롤링 방식으로 최적의 파라미터 최적화 룩백 기간을 찾습니다.
 
@@ -248,13 +231,6 @@ python scripts/optimize_lookback.py k1
 참조 12개월 +2.3%      50%      0.78       -9.3%
 ```
 
-### 8) 시장 레짐 상태 확인
-
-현재 시장 레짐 상태를 CLI에서 확인합니다.
-
-```bash
-python scripts/regime_check.py
-```
 
 ### 9) 급등주 찾기 (선택사항)
 
@@ -315,11 +291,12 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 다층 방어 체계로 리스크를 제어합니다:
 
 - **카테고리 중복 방지**: 동일 섹터 ETF 중복 편입 차단
-- **시장 레짐 필터**: 시장 위험 시 신규 매수 차단 또는 비중 축소
 - **쿨다운 메커니즘**: 최근 거래 후 일정 기간 재거래 제한
 - **RSI 과매수 관리**: 과열 종목 자동 감지 및 매도
 - **데이터 검증**: 가격 데이터 누락 시 거래 중단
 - **현금 관리**: 투자 가능 현금 범위 내에서만 매수
+
+**참고**: 시장 레짐 정보는 대시보드에서 참고용으로만 표시되며, 실제 매매에는 영향을 주지 않습니다.
 
 ### 데이터 플로우
 
@@ -328,15 +305,13 @@ ETF별로 다음 상태를 추적하고 관리합니다:
    ↓
 2. 기술적 지표 계산 (MA, RSI, 수익률)
    ↓
-3. 시장 레짐 판단 (주요 지수 분석)
+3. ETF별 점수 계산 (MAPS + RSI)
    ↓
-4. ETF별 점수 계산 (MAPS + RSI)
+4. 포지션 상태 결정 (BUY/HOLD/SELL/REPLACE)
    ↓
-5. 포지션 상태 결정 (BUY/HOLD/SELL/REPLACE)
+5. 리스크 필터 적용 (카테고리, 쿨다운, 현금)
    ↓
-6. 리스크 필터 적용 (카테고리, 쿨다운, 현금)
-   ↓
-7. 최종 추천 생성 및 저장 (DB + 파일)
+6. 최종 추천 생성 및 저장 (DB + 파일)
 ```
 
 ### 수익률 측정 방식
@@ -375,10 +350,9 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 | `REPLACE_SCORE_THRESHOLD` | 교체 점수 임계값 | 0~3점 | 계정 설정 |
 | `OVERBOUGHT_SELL_THRESHOLD` | RSI 과매수 임계값 | 5~30점 | 계정 설정 |
 | `COOLDOWN_DAYS` | 쿨다운 기간 | 0~5일 | `config.py` |
-| `MARKET_REGIME_MA` | 시장 레짐 MA 기간 | 10~100일 | 공통 설정 |
-| `MARKET_REGIME_RISK_OFF_EQUITY_RATIO` | 위험 시 투자 비중 | 0~100% | 계정 설정 |
+| `MARKET_REGIME_MA` | 시장 레짐 MA 기간 (참고용) | 10~100일 | 공통 설정 |
 
-파라미터 최적화는 `tune.py`를 통해 수행합니다.
+파라미터 최적화는 `optimize_lookback.py`를 통해 수행합니다.
 
 ## 설정 체계
 
@@ -401,13 +375,12 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 
 - `tuning`: 튜닝으로 찾은 최적 파라미터
   - `MA_PERIOD`: 이동평균 기간
+  - `MA_TYPE`: 이동평균 타입 (SMA, EMA, HMA 등)
   - `PORTFOLIO_TOPN`: 포트폴리오 목표 종목 수
   - `REPLACE_SCORE_THRESHOLD`: 교체 점수 임계값
   - `OVERBOUGHT_SELL_THRESHOLD`: RSI 과매수 임계값
   - `COOLDOWN_DAYS`: 쿨다운 기간
-  - `MARKET_REGIME_MA_PERIOD`: 시장 레짐 MA 기간
-  - `MARKET_REGIME_RISK_OFF_EQUITY_RATIO`: 위험 시 투자 비중
-- `static`: 수동으로 설정한 고정 파라미터 (선택사항)
+  - `CORE_HOLDINGS`: 핵심 보유 종목 리스트
 
 **표시 설정:**
 

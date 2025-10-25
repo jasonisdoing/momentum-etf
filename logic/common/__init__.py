@@ -6,6 +6,9 @@ from .portfolio import (
     get_sell_states,
     get_hold_states,
     count_current_holdings,
+    validate_core_holdings,
+    check_buy_candidate_filters,
+    calculate_buy_budget,
 )
 from .signals import (
     has_buy_signal,
@@ -24,6 +27,9 @@ __all__ = [
     "get_sell_states",
     "get_hold_states",
     "count_current_holdings",
+    "validate_core_holdings",
+    "check_buy_candidate_filters",
+    "calculate_buy_budget",
     "has_buy_signal",
     "calculate_consecutive_days",
     "get_buy_signal_streak",

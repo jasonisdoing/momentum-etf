@@ -1,6 +1,9 @@
 """포트폴리오 추천 및 백테스트에서 공통으로 사용하는 헬퍼 함수들."""
 
 from typing import Dict, Set, Any
+from utils.logger import get_app_logger
+
+logger = get_app_logger()
 
 
 def get_held_categories_excluding_sells(
@@ -104,3 +107,106 @@ def count_current_holdings(items: list, *, get_state_func=None) -> int:
     else:
         # dict 형태의 item인 경우
         return sum(1 for item in items if isinstance(item, dict) and str(item.get("state", "")).upper() in hold_states)
+
+
+def validate_core_holdings(
+    core_holdings_tickers: Set[str],
+    universe_tickers_set: Set[str],
+    account_id: str = "",
+) -> Set[str]:
+    """핵심 보유 종목 유효성 검증
+
+    Args:
+        core_holdings_tickers: 핵심 보유 종목 티커 집합
+        universe_tickers_set: Universe 티커 집합
+        account_id: 계좌 ID (로깅용)
+
+    Returns:
+        유효한 핵심 보유 종목 티커 집합
+    """
+    invalid_core_tickers = core_holdings_tickers - universe_tickers_set
+    if invalid_core_tickers:
+        account_prefix = f"[{account_id.upper()}] " if account_id else ""
+        logger.warning(f"{account_prefix}CORE_HOLDINGS에 Universe에 없는 종목이 포함됨: {invalid_core_tickers}")
+
+    valid_core_holdings = core_holdings_tickers & universe_tickers_set
+    if valid_core_holdings:
+        account_prefix = f"[{account_id.upper()}] " if account_id else "[백테스트] "
+        logger.info(f"{account_prefix}핵심 보유 종목 (TOPN 포함): {sorted(valid_core_holdings)}")
+
+    return valid_core_holdings
+
+
+def check_buy_candidate_filters(
+    ticker: str,
+    category: str,
+    held_categories: Set[str],
+    sell_rsi_categories_today: Set[str],
+    rsi_score: float,
+    rsi_sell_threshold: float,
+) -> tuple[bool, str]:
+    """매수 후보 필터링 체크
+
+    Args:
+        ticker: 종목 티커
+        category: 종목 카테고리
+        held_categories: 현재 보유 카테고리 집합
+        sell_rsi_categories_today: 오늘 RSI 매도한 카테고리 집합
+        rsi_score: RSI 점수
+        rsi_sell_threshold: RSI 매도 임계값
+
+    Returns:
+        (통과 여부, 차단 사유)
+    """
+    # 카테고리 중복 체크
+    if category and category != "TBD" and category in held_categories:
+        return False, f"카테고리 중복 ({category})"
+
+    # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
+    if category and category != "TBD" and category in sell_rsi_categories_today:
+        return False, f"RSI 과매수 매도 카테고리 ({category})"
+
+    # RSI 과매수 종목 매수 차단
+    if rsi_score <= rsi_sell_threshold:
+        return False, f"RSI 과매수 (RSI점수: {rsi_score:.1f})"
+
+    return True, ""
+
+
+def calculate_buy_budget(
+    cash: float,
+    current_holdings_value: float,
+    top_n: int,
+    risk_off_effective: bool = False,
+    risk_off_equity_ratio: float = 1.0,
+) -> float:
+    """매수 예산 계산
+
+    Args:
+        cash: 현금
+        current_holdings_value: 현재 보유 자산 가치
+        top_n: 최대 보유 종목 수
+        risk_off_effective: 리스크 오프 모드 활성화 여부
+        risk_off_equity_ratio: 리스크 오프 목표 주식 비중 (0~1)
+
+    Returns:
+        매수 예산
+    """
+    equity_base = cash + current_holdings_value
+    min_val = 1.0 / (top_n * 2.0) * equity_base
+    max_val = 1.0 / top_n * equity_base
+    budget = min(max_val, cash)
+
+    if budget <= 0 or budget < min_val:
+        return 0.0
+
+    # 리스크 오프 모드에서 비중 제한
+    if risk_off_effective:
+        total_equity_now = cash + current_holdings_value
+        target_holdings_limit = total_equity_now * risk_off_equity_ratio
+        remaining_capacity = max(0.0, target_holdings_limit - current_holdings_value)
+        if remaining_capacity <= 0:
+            return 0.0
+        budget = min(budget, remaining_capacity)
+
+    return budget
