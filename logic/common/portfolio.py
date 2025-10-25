@@ -1,6 +1,6 @@
 """포트폴리오 추천 및 백테스트에서 공통으로 사용하는 헬퍼 함수들."""
 
-from typing import Dict, Set, Any
+from typing import Dict, Set, Any, List
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -210,3 +210,69 @@ def calculate_buy_budget(
         budget = min(budget, remaining_capacity)
 
     return budget
+
+
+def calculate_held_categories(
+    position_state: Dict,
+    ticker_to_category: Dict[str, str],
+) -> Set[str]:
+    """현재 보유 중인 카테고리 집합 계산
+
+    Args:
+        position_state: 포지션 상태 (백테스트용)
+        ticker_to_category: 티커 -> 카테고리 매핑
+
+    Returns:
+        보유 중인 카테고리 집합
+    """
+    held_categories = set()
+    for ticker, state in position_state.items():
+        if state.get("shares", 0) > 0:
+            category = ticker_to_category.get(ticker)
+            if category and category != "TBD":
+                held_categories.add(category)
+    return held_categories
+
+
+def track_sell_rsi_categories(
+    decisions: List[Dict],
+    etf_meta: Dict[str, Any],
+    rsi_sell_threshold: float,
+) -> Set[str]:
+    """SELL_RSI로 매도하는 카테고리 추적
+
+    Args:
+        decisions: 의사결정 리스트
+        etf_meta: ETF 메타 정보
+        rsi_sell_threshold: RSI 매도 임계값
+
+    Returns:
+        SELL_RSI로 매도하는 카테고리 집합
+    """
+    sell_rsi_categories = set()
+
+    for d in decisions:
+        # 1. 이미 SELL_RSI 상태인 경우
+        if d.get("state") == "SELL_RSI":
+            category = etf_meta.get(d["tkr"], {}).get("category")
+            if category and category != "TBD":
+                sell_rsi_categories.add(category)
+        # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
+        elif d.get("state") in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 100.0) <= rsi_sell_threshold:
+            category = etf_meta.get(d["tkr"], {}).get("category")
+            if category and category != "TBD":
+                sell_rsi_categories.add(category)
+
+    return sell_rsi_categories
+
+
+def calculate_held_count(position_state: Dict) -> int:
+    """현재 보유 중인 종목 수 계산 (백테스트용)
+
+    Args:
+        position_state: 포지션 상태 딕셔너리
+
+    Returns:
+        보유 중인 종목 수
+    """
+    return sum(1 for pos in position_state.values() if pos.get("shares", 0) > 0)

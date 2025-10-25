@@ -9,6 +9,9 @@ from .portfolio import (
     validate_core_holdings,
     check_buy_candidate_filters,
     calculate_buy_budget,
+    calculate_held_categories,
+    track_sell_rsi_categories,
+    calculate_held_count,
 )
 from .signals import (
     has_buy_signal,
@@ -30,6 +33,9 @@ __all__ = [
     "validate_core_holdings",
     "check_buy_candidate_filters",
     "calculate_buy_budget",
+    "calculate_held_categories",
+    "track_sell_rsi_categories",
+    "calculate_held_count",
     "has_buy_signal",
     "calculate_consecutive_days",
     "get_buy_signal_streak",
