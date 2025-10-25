@@ -38,7 +38,6 @@ from utils.data_loader import (
     fetch_naver_etf_inav_snapshot,
 )
 from utils.db_manager import get_db_connection, list_open_positions
-from logic.recommend.market import get_market_regime_status_info
 from utils.logger import get_app_logger
 from config import KOR_REALTIME_ETF_PRICE_SOURCE
 from utils.market_schedule import get_market_open_time
@@ -852,15 +851,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             )
         missing_logged.update(missing_data_tickers)
 
-    # 시장 레짐 필터는 제거되었지만, 대시보드용 정보는 유지
-    regime_info = None
-    try:
-        regime_info_candidate, _ = get_market_regime_status_info()
-        if regime_info_candidate:
-            regime_info = regime_info_candidate
-    except Exception as exc:
-        logger.warning("시장 레짐 정보 계산 실패: %s", exc)
-
     # 쿨다운 정보 계산
     trade_cooldown_info = calculate_trade_cooldown_info(
         [stock["ticker"] for stock in etf_universe],
@@ -891,7 +881,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             holdings=holdings,
             etf_meta={stock["ticker"]: stock for stock in etf_universe},
             full_etf_meta={stock["ticker"]: stock for stock in etf_universe},
-            regime_info=regime_info,
             current_equity=current_equity,
             total_cash=total_cash,
             pairs=pairs,
@@ -1110,16 +1099,12 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             phrase_str = str(phrase)
 
             if state == "BUY_REPLACE":
-                replacement_note = phrase_str if phrase_str else ""
+                replacement_note = phrase_str
                 phrase = _join_phrase_parts(DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수"), replacement_note)
-            else:  # state == "BUY"
-                base_new_phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
-                if "시장위험회피" in phrase_str or phrase_str == DECISION_NOTES.get("RISK_OFF_TRIM"):
-                    phrase = base_new_phrase
-                elif phrase_str:
-                    phrase = phrase_str
-                else:
-                    phrase = base_new_phrase
+            elif phrase_str:
+                phrase = phrase_str
+            else:
+                phrase = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
             if holding_days_val == 0:
                 holding_days_val = 1
         # 이미 보유 중인 종목이 오늘 신규 편입된 경우

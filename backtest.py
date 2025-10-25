@@ -18,7 +18,7 @@ from logic.recommend.output import print_run_header
 from utils.logger import get_app_logger
 from utils.stock_list_io import get_etfs
 from utils.data_loader import prepare_price_data, fetch_ohlcv, get_latest_trading_day
-from utils.settings_loader import get_backtest_months_range, get_market_regime_settings, load_common_settings
+from utils.settings_loader import get_backtest_months_range, load_common_settings
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
@@ -40,14 +40,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _determine_warmup_days(ma_period: int, regime_ma_period: int | None) -> int:
-    pivot = max(ma_period, regime_ma_period or ma_period)
-    return int(max(0, pivot) * 1.5)
-
-
 def main() -> None:
     logger = get_app_logger()
 
+    # 파서 생성 및 인자 파싱
     parser = build_parser()
     args = parser.parse_args()
 
@@ -66,8 +62,8 @@ def main() -> None:
         end_date = pd.Timestamp.now().normalize()
     start_date = end_date - pd.DateOffset(months=months_range)
 
-    regime_ticker, regime_ma_period, regime_country = get_market_regime_settings()
-    warmup_days = _determine_warmup_days(strategy_rules.ma_period, regime_ma_period)
+    # 웜업 기간을 전략의 MA_PERIOD로 설정
+    warmup_days = strategy_rules.ma_period
 
     tickers = [etf["ticker"] for etf in get_etfs(country_code)]
     common_settings = load_common_settings()
@@ -93,16 +89,6 @@ def main() -> None:
     )
     if missing:
         logger.warning("데이터가 부족한 종목 (%d): %s", len(missing), ", ".join(missing))
-
-    if regime_ticker:
-        regime_df = fetch_ohlcv(
-            regime_ticker,
-            country=regime_country,
-            date_range=date_range_prefetch,
-            cache_country="common",
-        )
-        if regime_df is not None and not regime_df.empty:
-            prefetched_map[regime_ticker] = regime_df
 
     print_run_header(account_id, date_str=None)
 

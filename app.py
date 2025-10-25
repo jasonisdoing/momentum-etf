@@ -9,7 +9,7 @@ import pandas as pd
 from utils.logger import APP_VERSION
 
 from app_pages.account_page import render_account_page
-from logic.recommend.market import (
+from logic.dashboard.market import (
     get_market_regime_status_info,
     get_market_regime_aux_status_infos,
     _overlay_recent_history,

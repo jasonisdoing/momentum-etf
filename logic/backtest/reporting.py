@@ -23,7 +23,6 @@ from utils.settings_loader import (
     AccountSettingsError,
     get_backtest_months_range,
     get_account_precision,
-    get_market_regime_settings,
     load_common_settings,
 )
 
@@ -132,19 +131,6 @@ def print_backtest_summary(
         ensure_blank_line()
         add(f"========= {title} ==========")
 
-    def append_risk_off_period(start_dt: pd.Timestamp, end_dt: pd.Timestamp) -> None:
-        start_ts = pd.to_datetime(start_dt)
-        end_ts = pd.to_datetime(end_dt)
-
-        if pd.isna(start_ts) or pd.isna(end_ts):
-            add("|  시장 위험 감지: N/A")
-            return
-
-        diff_days = (end_ts - start_ts).days
-        trading_days = diff_days + 1 if diff_days >= 0 else 0
-
-        add(f"|  시장 위험 감지: {start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')} ({trading_days} 거래일)")
-
     add_section_heading("사용된 설정값")
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
         raise ValueError(f"'{account_id}' 계정 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
@@ -154,18 +140,6 @@ def print_backtest_summary(
     holding_stop_loss_pct = float(portfolio_topn)
     # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
     stop_loss_label = f"{holding_stop_loss_pct:.0f}%"
-
-    try:
-        common_settings = load_common_settings()
-        (
-            regime_filter_ticker,
-            regime_filter_ma_period,
-            regime_filter_country,
-        ) = get_market_regime_settings(common_settings)
-    except AccountSettingsError as exc:
-        raise ValueError(str(exc)) from exc
-
-    market_regime_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
     used_settings = {
         "계정": account_id.upper(),
@@ -177,10 +151,6 @@ def print_backtest_summary(
         "교체 매매 점수 임계값": replace_threshold,
         "개별 종목 손절매": stop_loss_label,
         "매도 후 재매수 금지 기간": f"{cooldown_days}일",
-        "시장 위험 필터": "활성" if market_regime_enabled else "비활성",
-        "시장 위험 필터 티커": regime_filter_ticker,
-        "시장 위험 필터 MA 기간": f"{regime_filter_ma_period}일",
-        "시장 위험 필터 시장": regime_filter_country.upper(),
     }
 
     if currency != "KRW":
@@ -296,20 +266,6 @@ def print_backtest_summary(
 
     add_section_heading("백테스트 결과 요약")
     add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
-
-    risk_off_periods = summary.get("risk_off_periods")
-    if isinstance(risk_off_periods, pd.DataFrame):
-        if not risk_off_periods.empty:
-            for _, row in risk_off_periods.iterrows():
-                append_risk_off_period(row.get("start"), row.get("end"))
-        else:
-            add("|  시장 위험 감지: N/A")
-    elif risk_off_periods:
-        for period in risk_off_periods:
-            if isinstance(period, (list, tuple)) and len(period) >= 2:
-                append_risk_off_period(period[0], period[1])
-    else:
-        add("|  시장 위험 감지: N/A")
 
     add(f"| 초기 자본: {money_formatter(initial_capital_local)}")
     if currency != "KRW":

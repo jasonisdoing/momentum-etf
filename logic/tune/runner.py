@@ -25,7 +25,6 @@ from utils.settings_loader import (
     get_backtest_months_range,
     load_common_settings,
     get_tune_month_configs,
-    get_market_regime_settings,
 )
 from utils.logger import get_app_logger
 from utils.data_loader import (
