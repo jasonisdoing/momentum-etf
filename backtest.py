@@ -66,7 +66,7 @@ def main() -> None:
         end_date = pd.Timestamp.now().normalize()
     start_date = end_date - pd.DateOffset(months=months_range)
 
-    regime_ticker, regime_ma_period, regime_country, regime_delay, regime_equity_ratio = get_market_regime_settings()
+    regime_ticker, regime_ma_period, regime_country = get_market_regime_settings()
     warmup_days = _determine_warmup_days(strategy_rules.ma_period, regime_ma_period)
 
     tickers = [etf["ticker"] for etf in get_etfs(country_code)]

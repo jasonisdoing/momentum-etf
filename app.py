@@ -50,40 +50,15 @@ def _render_home_page() -> None:
     st.text(f"버전: Alpha-{APP_VERSION}")
     st.caption("서비스 진입점입니다. 좌측 메뉴에서 계정을 선택하세요.")
 
-    _, default_ma_period, _, _, risk_off_ratio_common = get_market_regime_settings()
+    _, default_ma_period, _ = get_market_regime_settings()
 
-    risk_off_ratio = risk_off_ratio_common
-    try:
-        account_configs = load_account_configs()
-        default_account = pick_default_account(account_configs)
-    except Exception:
-        default_account = None
-
-    if default_account:
-        account_settings = default_account.get("settings") or {}
-        strategy_cfg = account_settings.get("strategy") or {}
-        static_cfg = strategy_cfg.get("static") or {}
-        tuning_cfg = strategy_cfg.get("tuning") or {}
-        ratio_candidate = (
-            static_cfg.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-            or tuning_cfg.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-            or strategy_cfg.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-        )
-        try:
-            ratio_candidate_int = int(ratio_candidate)
-        except (TypeError, ValueError):
-            ratio_candidate_int = None
-        if ratio_candidate_int is not None:
-            risk_off_ratio = ratio_candidate_int
-
-    ratio_text = "?" if risk_off_ratio is None else str(risk_off_ratio)
     ma_period_input = st.number_input(
-        f"레짐 이동평균 기간 (1-200) - 시스템은 {default_ma_period} 이용하고 있습니다. 경고 기간에는 현금의 {ratio_text}% 만 투자합니다",
+        "레짐 이동평균 기간 (1-200) - 시장 리스크를 참고하기 위한 페이지 입니다",
         min_value=1,
         max_value=200,
         value=int(default_ma_period),
         step=1,
-        help="전략 및 보조 지수 표시용 이동평균 기간을 설정합니다.",
+        help="시장 레짐 상태를 확인하기 위한 이동평균 기간을 설정합니다.",
     )
     ma_period = int(ma_period_input)
     try:

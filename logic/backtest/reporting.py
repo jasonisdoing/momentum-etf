@@ -97,13 +97,10 @@ def print_backtest_summary(
 
     if "tuning" in strategy_cfg or "static" in strategy_cfg:
         strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
-        strategy_static = strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
     else:  # 구 포맷과의 호환성 유지
         strategy_tuning = strategy_cfg
-        strategy_static = strategy_cfg
 
-    merged_strategy = dict(strategy_static)
-    merged_strategy.update(strategy_tuning)
+    merged_strategy = dict(strategy_tuning)
 
     # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
     cooldown_days = int(strategy_tuning["COOLDOWN_DAYS"])
@@ -165,11 +162,13 @@ def print_backtest_summary(
             regime_filter_ticker,
             regime_filter_ma_period,
             regime_filter_country,
-            regime_filter_delay_days,
-            regime_filter_equity_ratio,
         ) = get_market_regime_settings(common_settings)
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
+
+    # DELAY_DAYS와 EQUITY_RATIO는 제거됨 - 기본값 사용
+    regime_filter_delay_days = 0
+    regime_filter_equity_ratio = 100
 
     market_regime_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 

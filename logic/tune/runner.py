@@ -412,13 +412,12 @@ def _export_debug_month(
 
 
 def _evaluate_single_combo(
-    payload: Tuple[str, int, Tuple[str, str], int, int, int, float, int, int, str, Tuple[str, ...], Tuple[str, ...], Mapping[str, DataFrame]]
+    payload: Tuple[str, int, Tuple[str, str], int, int, float, int, int, str, Tuple[str, ...], Tuple[str, ...], Mapping[str, DataFrame]]
 ) -> Tuple[str, Any, List[str]]:
     (
         account_norm,
         months_range,
         date_range,
-        regime_ma_period,
         ma_int,
         topn_int,
         threshold_float,
@@ -452,11 +451,10 @@ def _evaluate_single_combo(
             [],
         )
 
-    strategy_overrides: Dict[str, Any] = {}
-    if regime_ma_period > 0:
-        strategy_overrides["MARKET_REGIME_FILTER_MA_PERIOD"] = regime_ma_period
-    strategy_overrides["OVERBOUGHT_SELL_THRESHOLD"] = rsi_int
-    strategy_overrides["COOLDOWN_DAYS"] = cooldown_int
+    strategy_overrides: Dict[str, Any] = {
+        "OVERBOUGHT_SELL_THRESHOLD": rsi_int,
+        "COOLDOWN_DAYS": cooldown_int,
+    }
 
     try:
         bt_result = run_account_backtest(
@@ -515,7 +513,6 @@ def _execute_tuning_for_months(
     months_range: int,
     search_space: Mapping[str, List[Any]],
     end_date: Timestamp,
-    regime_ma_period: int,
     excluded_tickers: Optional[Collection[str]],
     prefetched_data: Mapping[str, DataFrame],
     output_path: Optional[Path] = None,
@@ -574,7 +571,6 @@ def _execute_tuning_for_months(
             account_norm,
             months_range,
             date_range,
-            regime_ma_period,
             int(ma),
             int(topn),
             float(replace),
@@ -698,7 +694,6 @@ def _execute_tuning_for_months(
         "best": best_entry,
         "failures": failures,
         "success_count": len(success_entries),
-        "regime_ma_period": regime_ma_period,
         "missing_tickers": sorted(encountered_missing),
         "raw_data": raw_data_payload,
     }
@@ -1203,13 +1198,14 @@ def run_account_tuning(
         logger.error("[튜닝] 계정 설정 로딩 실패: %s", exc)
         return None
 
-    country_code = (account_settings.get("country_code") or account_norm).strip().lower()
-
     config_map = tuning_config or {}
-    config = config_map.get(account_norm) or config_map.get(country_code)
+    config = config_map.get(account_norm)
     if not config:
         logger.warning("[튜닝] '%s' 계정에 대한 튜닝 설정이 없습니다.", account_norm.upper())
         return None
+
+    # country_code는 ETF 리스트 조회용으로 필요
+    country_code = (account_settings.get("country_code") or account_norm).strip().lower()
 
     debug_dir: Optional[Path] = None
     capture_top_n = 0
@@ -1293,29 +1289,6 @@ def run_account_tuning(
         "CORE_HOLDINGS": core_holdings,
     }
 
-    try:
-        regime_ticker, regime_ma_period, regime_country, _regime_delay_days, _regime_equity_ratio = get_market_regime_settings()
-    except AccountSettingsError as exc:
-        logger.error("[튜닝] 공통 시장 레짐 설정을 불러오지 못했습니다: %s", exc)
-        return None
-
-    try:
-        regime_ma_period = int(regime_ma_period)
-    except (TypeError, ValueError):
-        logger.warning(
-            "[튜닝] 공통 레짐 MA 기간을 확인할 수 없어 기본값(%d)을 사용합니다.",
-            base_rules.ma_period,
-        )
-        regime_ma_period = base_rules.ma_period
-    else:
-        if regime_ma_period <= 0:
-            logger.warning(
-                "[튜닝] 공통 레짐 MA 기간이 0 이하(%d)로 설정되어 기본값(%d)으로 대체합니다.",
-                regime_ma_period,
-                base_rules.ma_period,
-            )
-            regime_ma_period = base_rules.ma_period
-
     ma_count = len(ma_values)
     topn_count = len(topn_values)
     replace_count = len(replace_values)
@@ -1335,8 +1308,6 @@ def run_account_tuning(
         ma_max = max([base_rules.ma_period, *ma_values])
     except ValueError:
         ma_max = base_rules.ma_period
-
-    regime_ma_max = max(regime_ma_period, 1)
 
     month_items = _resolve_month_configs(months_range, account_id=account_id)
     if not month_items:
@@ -1364,7 +1335,7 @@ def run_account_tuning(
         end_date.strftime("%Y-%m-%d"),
     ]
 
-    warmup_days = int(max(ma_max, base_rules.ma_period, regime_ma_max) * 1.5)
+    warmup_days = int(max(ma_max, base_rules.ma_period) * 1.5)
 
     logger.info(
         "[튜닝] 데이터 프리패치: 티커 %d개, 기간 %s~%s, 웜업 %d일",
@@ -1399,20 +1370,6 @@ def run_account_tuning(
 
     for ticker, frame in prefetched_map.items():
         save_cached_frame(country_code, ticker, frame)
-
-    if regime_ticker and regime_ticker not in prefetched_map:
-        regime_prefetch = fetch_ohlcv(
-            regime_ticker,
-            country=regime_country,
-            date_range=date_range_prefetch,
-            cache_country="common",
-            skip_realtime=True,
-        )
-        if regime_prefetch is not None and not regime_prefetch.empty:
-            prefetched_map[regime_ticker] = regime_prefetch
-            save_cached_frame("common", regime_ticker, regime_prefetch)
-        else:
-            missing_prefetch.append(regime_ticker)
 
     excluded_ticker_set: set[str] = {str(ticker).strip().upper() for ticker in missing_prefetch if isinstance(ticker, str) and str(ticker).strip()}
     if excluded_ticker_set:
@@ -1571,7 +1528,6 @@ def run_account_tuning(
             months_range=months_value,
             search_space=search_space,
             end_date=end_date,
-            regime_ma_period=regime_ma_period,
             excluded_tickers=excluded_ticker_set,
             prefetched_data=prefetched_map,
             output_path=txt_path,
@@ -1644,7 +1600,7 @@ def run_account_tuning(
     for item in results_per_month:
         best = item.get("best", {})
         logger.info(
-            "[튜닝] %s (%d개월) 최적 조합: MA=%d / TOPN=%d / TH=%.3f / RSI=%d / COOLDOWN=%d / REGIME_MA=%d / CAGR=%.2f%%",
+            "[튜닝] %s (%d개월) 최적 조합: MA=%d / TOPN=%d / TH=%.3f / RSI=%d / COOLDOWN=%d / CAGR=%.2f%%",
             account_norm.upper(),
             item.get("months_range"),
             best.get("ma_period", 0),
@@ -1652,7 +1608,6 @@ def run_account_tuning(
             best.get("replace_threshold", 0.0),
             best.get("rsi_sell_threshold", 10),
             best.get("cooldown_days", 2),
-            item.get("regime_ma_period", 0),
             best.get("cagr_pct", 0.0),
         )
 

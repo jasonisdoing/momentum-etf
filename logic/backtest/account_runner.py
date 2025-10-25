@@ -8,6 +8,7 @@ import math
 
 import pandas as pd
 
+import config
 from logic.entry_point import run_portfolio_backtest, StrategyRules
 from utils.account_registry import get_common_file_settings
 from utils.settings_loader import (
@@ -36,16 +37,6 @@ def _default_test_months_range() -> int:
 
 def _default_initial_capital() -> float:
     return float(get_backtest_initial_capital())
-
-
-def _parse_regime_ratio_value(raw_value: Any, *, source: str) -> int:
-    try:
-        parsed = int(raw_value)
-    except (TypeError, ValueError) as exc:  # noqa: PERF203
-        raise ValueError(f"{source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 정수가 아닙니다.") from exc
-    if not (0 <= parsed <= 100):
-        raise ValueError(f"{source}에 설정된 'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
-    return parsed
 
 
 @dataclass
@@ -208,7 +199,7 @@ def run_account_backtest(
 
     # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
     portfolio_topn = strategy_rules.portfolio_topn
-    holdings_limit = int(strategy_settings["MAX_PER_CATEGORY"])
+    holdings_limit = strategy_settings.get("MAX_PER_CATEGORY", config.MAX_PER_CATEGORY)
     _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}, 카테고리당 최대 보유 수: {holdings_limit}")
 
     _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
@@ -450,8 +441,6 @@ def _build_backtest_kwargs(
         raise ValueError("strategy_settings에 COOLDOWN_DAYS 설정이 필요합니다.")
     if "OVERBOUGHT_SELL_THRESHOLD" not in strategy_settings:
         raise ValueError("strategy_settings에 OVERBOUGHT_SELL_THRESHOLD 설정이 필요합니다.")
-    if "MARKET_REGIME_RISK_OFF_EQUITY_RATIO" not in strategy_settings:
-        raise ValueError("strategy_settings에 MARKET_REGIME_RISK_OFF_EQUITY_RATIO 설정이 필요합니다.")
 
     cooldown_days = int(strategy_settings["COOLDOWN_DAYS"])
     rsi_sell_threshold = int(strategy_settings["OVERBOUGHT_SELL_THRESHOLD"])
@@ -464,16 +453,13 @@ def _build_backtest_kwargs(
             regime_filter_ticker,
             regime_filter_ma_period,
             regime_filter_country,
-            regime_filter_delay_days,
-            regime_filter_equity_ratio,
         ) = get_market_regime_settings(common_settings)
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
 
-    if regime_filter_equity_ratio is None:
-        regime_filter_equity_ratio = _parse_regime_ratio_value(strategy_settings["MARKET_REGIME_RISK_OFF_EQUITY_RATIO"], source="전략 설정")
-    else:
-        regime_filter_equity_ratio = _parse_regime_ratio_value(regime_filter_equity_ratio, source="공통 설정")
+    # DELAY_DAYS와 EQUITY_RATIO는 제거됨 - 기본값 사용
+    regime_filter_delay_days = 0
+    regime_filter_equity_ratio = 100
 
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
@@ -767,19 +753,13 @@ def _build_summary(
             regime_filter_ticker,
             regime_filter_ma_period,
             regime_filter_country,
-            regime_filter_delay_days,
-            regime_filter_equity_ratio,
         ) = get_market_regime_settings(common_settings)
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
 
-    if regime_filter_equity_ratio is None:
-        ratio_raw = strategy_settings.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-        if ratio_raw is None:
-            raise ValueError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 설정이 필요합니다.")
-        regime_filter_equity_ratio = _parse_regime_ratio_value(ratio_raw, source="전략 설정")
-    else:
-        regime_filter_equity_ratio = _parse_regime_ratio_value(regime_filter_equity_ratio, source="공통 설정")
+    # DELAY_DAYS와 EQUITY_RATIO는 제거됨 - 기본값 사용
+    regime_filter_delay_days = 0
+    regime_filter_equity_ratio = 100
 
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
     risk_off_ratio_for_periods = regime_filter_equity_ratio

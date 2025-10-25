@@ -36,32 +36,34 @@ from utils.stock_list_io import get_etfs
 from utils.cache_utils import save_cached_frame
 import numpy as np
 
-# Walk-Forward 분석 전용 설정 (최소 범위)
+# Walk-Forward 분석 전용 설정 (계좌별)
 LOOKBACK_CONFIG: dict[str, dict] = {
-    "aus": {
+    "a1": {
         "MA_RANGE": np.arange(30, 62, 2),
         "MA_TYPE": ["SMA"],  # 호주는 SMA가 구조적 우위
-        "PORTFOLIO_TOPN": [8],
-        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5],
-        "OVERBOUGHT_SELL_THRESHOLD": [16, 18, 20, 22, 24],
-        "CORE_HOLDINGS": [],
+        "PORTFOLIO_TOPN": [7, 8, 9, 10],
+        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5, 2.0],
+        "OVERBOUGHT_SELL_THRESHOLD": [14, 16, 18, 20, 22],
+        "CORE_HOLDINGS": ["ASX:IVV", "ASX:NDQ", "ASX:IOO"],
         "COOLDOWN_DAYS": [1, 2],
     },
-    "kor": {
+    "k1": {
         "MA_RANGE": np.arange(70, 102, 2),
-        "MA_TYPE": ["HMA"],
-        "PORTFOLIO_TOPN": [10],
+        "MA_TYPE": ["HMA"],  # 한국은 HMA가 구조적 우위
+        "PORTFOLIO_TOPN": [8],
         "REPLACE_SCORE_THRESHOLD": [0, 0.5, 1.0, 1.5],
         "OVERBOUGHT_SELL_THRESHOLD": [13, 14, 15, 16],
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1, 2],
     },
-    "us": {
-        "MA_RANGE": np.arange(5, 31, 10),  # 5, 15, 25
+    "k2": {
+        "MA_RANGE": np.arange(70, 102, 2),
+        "MA_TYPE": ["HMA"],  # 한국은 HMA가 구조적 우위
         "PORTFOLIO_TOPN": [5],
-        "REPLACE_SCORE_THRESHOLD": [0, 1],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 10),  # 10, 20
-        "COOLDOWN_DAYS": [0, 2],
+        "REPLACE_SCORE_THRESHOLD": [0, 0.5, 1.0, 1.5],
+        "OVERBOUGHT_SELL_THRESHOLD": [13, 14, 15, 16],
+        "CORE_HOLDINGS": [],
+        "COOLDOWN_DAYS": [1, 2],
     },
 }
 
@@ -104,7 +106,6 @@ def _find_best_params_simple(
     account_id: str,
     lookback_start: Timestamp,
     lookback_end: Timestamp,
-    country_code: str,
     prefetched_data: Dict[str, pd.DataFrame],
 ) -> Tuple[Optional[Dict[str, Any]], float]:
     """
@@ -114,7 +115,7 @@ def _find_best_params_simple(
         (best_params, best_cagr)
     """
     # LOOKBACK_CONFIG 전용 설정 사용
-    config = LOOKBACK_CONFIG.get(account_id) or LOOKBACK_CONFIG.get(country_code)
+    config = LOOKBACK_CONFIG.get(account_id)
     if not config:
         # 기본 파라미터 사용
         base_rules = get_strategy_rules(account_id)
@@ -233,7 +234,6 @@ def _run_single_walk_forward_test(
     lookback_months: int,
     test_start_date: Timestamp,
     test_end_date: Timestamp,
-    country_code: str,
     prefetched_data: Dict[str, pd.DataFrame],
 ) -> Dict[str, Any]:
     """
@@ -264,7 +264,6 @@ def _run_single_walk_forward_test(
             account_id=account_id,
             lookback_start=lookback_start_date,
             lookback_end=lookback_end_date,
-            country_code=country_code,
             prefetched_data=prefetched_data,
         )
 
@@ -470,7 +469,6 @@ def run_walk_forward_analysis(
                     "lookback_months": lookback_months,
                     "test_start_date": test_start,
                     "test_end_date": test_end,
-                    "country_code": country_code,
                     "prefetched_data": prefetched_data,
                 }
             )

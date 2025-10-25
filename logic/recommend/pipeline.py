@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 
+import config
+
 # 데이터 디렉토리 경로 설정
 DATA_DIR = Path(__file__).parent.parent.parent / "data" / "stocks"
 from utils.settings_loader import (
@@ -610,16 +612,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         strategy_cfg = {}
 
     if "tuning" in strategy_cfg or "static" in strategy_cfg:
-        strategy_static = strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
         strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
     else:
-        strategy_static = strategy_cfg
         strategy_tuning = strategy_cfg
 
     # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
-    max_per_category = int(strategy_static["MAX_PER_CATEGORY"])
+    max_per_category = config.MAX_PER_CATEGORY
     rsi_sell_threshold = int(strategy_tuning["OVERBOUGHT_SELL_THRESHOLD"])
-    regime_filter_equity_ratio = int(strategy_static["MARKET_REGIME_RISK_OFF_EQUITY_RATIO"])
 
     # ETF 목록 가져오기
     etf_universe = get_etfs(country_code) or []
@@ -869,29 +868,14 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             )
         missing_logged.update(missing_data_tickers)
 
+    # 시장 레짐 필터는 제거되었지만, 대시보드용 정보는 유지
     regime_info = None
-    regime_filter_enabled = True
     try:
-        common_settings = load_common_settings()
+        regime_info_candidate, _ = get_market_regime_status_info()
+        if regime_info_candidate:
+            regime_info = regime_info_candidate
     except Exception as exc:
-        logger.warning("시장 레짐 공통 설정 로드 실패: %s", exc)
-        common_settings = None
-    else:
-        regime_filter_enabled = bool((common_settings or {}).get("MARKET_REGIME_FILTER_ENABLED", True))
-        common_ratio_value = (common_settings or {}).get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-        # 공통 설정에 값이 있으면 사용 (검증은 이미 완료됨)
-        if regime_filter_equity_ratio is None and common_ratio_value is not None:
-            regime_filter_equity_ratio = int(common_ratio_value)
-
-    if regime_filter_enabled:
-        try:
-            regime_info_candidate, _ = get_market_regime_status_info()
-        except Exception as exc:
-            logger.warning("시장 레짐 정보 계산 실패: %s", exc)
-        else:
-            if regime_info_candidate:
-                regime_info_candidate["risk_off_equity_ratio"] = regime_filter_equity_ratio
-                regime_info = regime_info_candidate
+        logger.warning("시장 레짐 정보 계산 실패: %s", exc)
 
     # 쿨다운 정보 계산
     trade_cooldown_info = calculate_trade_cooldown_info(
@@ -930,7 +914,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             consecutive_holding_info=consecutive_holding_info,
             trade_cooldown_info=trade_cooldown_info,
             cooldown_days=actual_cooldown_days,
-            risk_off_equity_ratio=regime_filter_equity_ratio,
+            risk_off_equity_ratio=100,
             rsi_sell_threshold=rsi_sell_threshold,
         )
         logger.info(

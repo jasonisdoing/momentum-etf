@@ -200,7 +200,7 @@ def get_account_strategy_sections(account_id: str) -> Tuple[Dict[str, Any], Dict
         tuning, static = dict(strategy), {}
 
     # 전략 설정 검증 (한 번만 수행)
-    validate_strategy_settings(static, tuning, account_id)
+    validate_strategy_settings(tuning, account_id)
 
     return tuning, static
 
@@ -308,7 +308,7 @@ def get_country_slack_channel(country: str) -> Optional[str]:  # pragma: no cove
     return get_account_slack_channel(country)
 
 
-def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str, int, int]:
+def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str]:
     """공통 설정에서 메인 시장 레짐 필터 설정을 반환합니다."""
 
     if isinstance(common_settings, Mapping):
@@ -336,27 +336,7 @@ def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = No
     country_raw = settings_view.get("MARKET_REGIME_FILTER_COUNTRY")
     country = str(country_raw or "us").strip().lower() or "us"
 
-    delay_raw = settings_view.get("MARKET_REGIME_FILTER_DELAY_DAY", 0)
-    try:
-        delay_days = int(delay_raw)
-    except (TypeError, ValueError):
-        delay_days = 0
-    else:
-        if delay_days < 0:
-            delay_days = 0
-
-    ratio_raw = settings_view.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-    if ratio_raw is None:
-        risk_off_ratio = None
-    else:
-        try:
-            risk_off_ratio = int(ratio_raw)
-        except (TypeError, ValueError) as exc:  # noqa: PERF203
-            raise AccountSettingsError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 정수가 아닙니다.") from exc
-        if not (0 <= risk_off_ratio <= 100):
-            raise AccountSettingsError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
-
-    return ticker, ma_period, country, delay_days, risk_off_ratio
+    return ticker, ma_period, country
 
 
 def get_market_regime_aux_tickers(common_settings: Optional[Mapping[str, Any]] = None) -> List[str]:

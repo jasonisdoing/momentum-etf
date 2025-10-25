@@ -326,7 +326,7 @@ def get_market_regime_status_info(ma_period_override: Optional[int] = None) -> T
         return None, '<span style="color:grey">시장 상태: 설정 파일 오류</span>'
 
     try:
-        ticker, ma_period, country, delay_days, _ = get_market_regime_settings()
+        ticker, ma_period, country = get_market_regime_settings()
     except AccountSettingsError as exc:
         logger.error("시장 레짐 공통 설정 로딩 실패: %s", exc)
         return None, '<span style="color:grey">시장 상태: 설정 파일 오류</span>'
@@ -341,19 +341,21 @@ def get_market_regime_status_info(ma_period_override: Optional[int] = None) -> T
                 override_val = ma_period
         ma_period = override_val
 
-    return _compute_market_regime_status(
+    info, message = _compute_market_regime_status(
         ticker,
         ma_period=ma_period,
         country=country,
-        delay_days=int(delay_days),
+        delay_days=0,
     )
+
+    return info, message
 
 
 def get_market_regime_aux_status_infos(ma_period_override: Optional[int] = None) -> List[Dict[str, Any]]:
     """보조 시장 레짐 상태 목록을 반환합니다 (유효한 항목만)."""
 
     try:
-        ticker_main, ma_period, country, delay_days, _ = get_market_regime_settings()
+        ticker_main, ma_period, country = get_market_regime_settings()
     except AccountSettingsError as exc:
         logger.error("시장 레짐 공통 설정 로딩 실패: %s", exc)
         return []
@@ -369,6 +371,9 @@ def get_market_regime_aux_status_infos(ma_period_override: Optional[int] = None)
         ma_period = override_val
 
     aux_tickers = get_market_regime_aux_tickers()
+    if not aux_tickers:
+        return []
+
     results: List[Dict[str, Any]] = []
     for ticker in aux_tickers:
         if ticker.strip().upper() == ticker_main.strip().upper():
@@ -377,7 +382,7 @@ def get_market_regime_aux_status_infos(ma_period_override: Optional[int] = None)
             ticker,
             ma_period=ma_period,
             country=country,
-            delay_days=int(delay_days),
+            delay_days=0,
         )
         if info is not None:
             results.append(info)
