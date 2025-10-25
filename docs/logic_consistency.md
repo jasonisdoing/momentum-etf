@@ -133,9 +133,9 @@ if ticker in core_holdings:
 
 ### 6. 시장 레짐 필터
 
-
 **설정:**
 - 시장 레짐 감지는 대시보드 참고용으로만 사용
+- 추천/백테스트 실행 로직에서는 항상 100% 투자
 
 ---
 
@@ -227,9 +227,8 @@ python tune.py k1
 - [ ] 매도 무시 + 자동 매수 로직 확인
 
 **시장 레짐 필터 수정 시:**
-- [ ] `portfolio.py` 458-473줄 수정
-- [ ] `portfolio_runner.py` 447-470줄 동일하게 수정
-- [ ] ~~`risk_off_equity_ratio` 설정 확인~~ (항상 100%)
+- [ ] 대시보드 표시용으로만 사용
+- [ ] 추천/백테스트 실행 로직에는 영향 없음 (항상 100% 투자)
 
 **카테고리 중복 제한 수정 시:**
 - [ ] `portfolio.py` 334-342줄, `pipeline.py` 1163-1166줄 수정
@@ -238,9 +237,49 @@ python tune.py k1
 
 ---
 
+## 📦 공통 함수 (logic/common/)
+
+추천과 백테스트에서 공통으로 사용하는 헬퍼 함수들입니다.
+
+### 포트폴리오 관리 (`logic/common/portfolio.py`)
+
+| 함수 | 설명 | 사용처 |
+|------|------|--------|
+| `get_held_categories_excluding_sells()` | 매도 예정 종목을 제외한 보유 카테고리 계산 | 추천, 백테스트 |
+| `should_exclude_from_category_count()` | 카테고리 카운트 제외 여부 확인 | 추천, 백테스트 |
+| `get_sell_states()` | 매도 상태 집합 반환 | 추천, 백테스트 |
+| `get_hold_states()` | 보유 상태 집합 반환 (매도 예정 포함) | 추천, 백테스트 |
+| `count_current_holdings()` | 현재 물리적 보유 종목 수 계산 | 추천, 백테스트 |
+| `validate_core_holdings()` | 핵심 보유 종목 검증 | 추천, 백테스트 |
+| `check_buy_candidate_filters()` | 매수 후보 필터링 체크 | 추천, 백테스트 |
+| `calculate_buy_budget()` | 매수 예산 계산 | 백테스트 |
+| `calculate_held_categories()` | 보유 카테고리 계산 | 백테스트 |
+| `calculate_held_categories_from_holdings()` | holdings dict에서 카테고리 계산 | 추천 |
+| `track_sell_rsi_categories()` | SELL_RSI 카테고리 추적 | 추천, 백테스트 |
+| `calculate_held_count()` | 보유 종목 수 계산 | 백테스트 |
+| `validate_portfolio_topn()` | TOPN 값 검증 | 추천, 백테스트 |
+
+### 시그널 처리 (`logic/common/signals.py`)
+
+| 함수 | 설명 | 사용처 |
+|------|------|--------|
+| `has_buy_signal()` | 매수 시그널 여부 확인 | 추천, 백테스트 |
+| `calculate_consecutive_days()` | 연속 보유 일수 계산 | 추천 |
+| `get_buy_signal_streak()` | 매수 시그널 연속 일수 계산 | 추천 |
+
+### 필터링 (`logic/common/filtering.py`)
+
+| 함수 | 설명 | 사용처 |
+|------|------|--------|
+| `select_candidates_by_category()` | 카테고리별 후보 선택 | 추천, 백테스트 |
+| `sort_decisions_by_order_and_score()` | 의사결정 정렬 | 추천 |
+| `filter_category_duplicates()` | 카테고리 중복 필터링 | 추천, 백테스트 |
+
+---
+
 ## 🚀 향후 개선 (선택사항)
 
-### 공통 함수 추출 고려 시점
+### 추가 공통화 후보
 
 다음 상황이 발생하면 공통화를 고려하세요:
 
@@ -248,25 +287,77 @@ python tune.py k1
 2. **새로운 전략(예: MAPS2)을 추가할 때**
 3. **로직 불일치로 인한 버그가 실제로 발생했을 때**
 
-### 공통화 후보
+**후보 함수:**
 
 1. **매도 조건 판단 함수**
    ```python
-   # logic/common_decisions.py
+   # logic/common/decisions.py
    def determine_sell_decision(...) -> Optional[str]
    ```
 
 2. **쿨다운 상태 계산 함수**
    ```python
-   # strategies/maps/cooldown.py
+   # logic/common/cooldown.py
    def calculate_cooldown_status(...) -> Dict[str, Any]
    ```
 
 3. **SELL_RSI 카테고리 수집 함수**
    ```python
-   # logic/common_decisions.py
+   # logic/common/decisions.py
    def collect_sell_rsi_categories(...) -> Set[str]
    ```
+
+---
+
+## 📋 핵심 함수 시그니처
+
+### 추천 함수
+
+```python
+def run_portfolio_recommend(
+    account_id: str,
+    country_code: str,
+    base_date: pd.Timestamp,
+    strategy_rules: Any,
+    data_by_tkr: Dict[str, Any],
+    holdings: Dict[str, Dict[str, float]],
+    etf_meta: Dict[str, Any],
+    full_etf_meta: Dict[str, Any],
+    regime_info: Optional[Dict],  # 대시보드 표시용
+    current_equity: float,
+    total_cash: float,
+    pairs: List[Tuple[str, str]],
+    consecutive_holding_info: Dict[str, Dict],
+    trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
+    cooldown_days: int,
+    risk_off_equity_ratio: int = 100,  # 항상 100
+    rsi_sell_threshold: float = 10.0,
+) -> List[Dict[str, Any]]
+```
+
+### 백테스트 함수
+
+```python
+def run_portfolio_backtest(
+    stocks: List[Dict],
+    initial_capital: float = 100_000_000.0,
+    core_start_date: Optional[pd.Timestamp] = None,
+    top_n: int = 10,
+    date_range: Optional[List[str]] = None,
+    country: str = "kor",
+    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    ma_period: int = 20,
+    ma_type: str = "SMA",
+    replace_threshold: float = 0.0,
+    stop_loss_pct: float = -10.0,
+    cooldown_days: int = 5,
+    rsi_sell_threshold: float = 10.0,
+    core_holdings: Optional[List[str]] = None,
+    quiet: bool = False,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    missing_ticker_sink: Optional[Set[str]] = None,
+) -> Dict[str, pd.DataFrame]
+```
 
 ---
 
@@ -274,4 +365,5 @@ python tune.py k1
 
 - **메모리:** "추천/백테스트 로직 일관성 체크리스트" 참고
 - **코드:** `logic/recommend/portfolio.py`, `logic/backtest/portfolio_runner.py`
+- **공통 함수:** `logic/common/portfolio.py`, `logic/common/signals.py`, `logic/common/filtering.py`
 - **설정:** `data/settings/account/k1.json`

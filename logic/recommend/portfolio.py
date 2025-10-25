@@ -324,7 +324,6 @@ def run_portfolio_recommend(
     consecutive_holding_info: Dict[str, Dict],
     trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
     cooldown_days: int,
-    risk_off_equity_ratio: int = 100,
     rsi_sell_threshold: float = 10.0,
 ) -> List[Dict[str, Any]]:
     """
@@ -481,23 +480,6 @@ def run_portfolio_recommend(
 
     universe_tickers = {etf["ticker"] for etf in full_etf_meta.values()}
 
-    # 리스크 오프 처리
-    is_risk_off = regime_info and regime_info.get("is_risk_off", False)
-    if risk_off_equity_ratio is None:
-        raise ValueError("risk_off_equity_ratio 값이 필요합니다.")
-
-    try:
-        risk_off_target_ratio = int(risk_off_equity_ratio)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("risk_off_equity_ratio 값은 정수여야 합니다.") from exc
-
-    if not (0 <= risk_off_target_ratio <= 100):
-        raise ValueError("risk_off_equity_ratio 값은 0부터 100 사이여야 합니다.")
-
-    risk_off_effective = is_risk_off and risk_off_target_ratio < 100
-    full_risk_off_exit = risk_off_effective and risk_off_target_ratio <= 0
-    partial_risk_off = risk_off_effective and risk_off_target_ratio > 0
-
     wait_candidates_raw: List[Dict] = [
         d for d in decisions if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] in universe_tickers and d.get("recommend_enabled", True)
     ]
@@ -541,23 +523,6 @@ def run_portfolio_recommend(
     #     f"[PORTFOLIO DEBUG] held_count={held_count}, denom={denom}, slots_to_fill={slots_to_fill}, "
     #     f"sell_cooldown_block={list(sell_cooldown_block.keys())}"
     # )
-
-    if risk_off_effective:
-        for decision in decisions:
-            decision["risk_off_target_ratio"] = risk_off_target_ratio
-            if decision["state"] == "HOLD":
-                note_text = DECISION_NOTES["RISK_OFF_TRIM"]
-                if partial_risk_off:
-                    note_text = f"{note_text} (보유목표 {risk_off_target_ratio}%)"
-                decision["row"][-1] = note_text
-                decision["row"][4] = "HOLD"
-
-            if decision.get("buy_signal") and full_risk_off_exit:
-                decision["buy_signal"] = False
-                if decision["state"] == "WAIT":
-                    decision["row"][-1] = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 {risk_off_target_ratio}%)"
-
-    # 신규 매수 로직 (리스크 오프 상태에서도 허용, 비중만 제한)
     if slots_to_fill > 0:
         # 매도 예정 종목을 제외한 held_categories 재계산
         from logic.common import get_held_categories_excluding_sells

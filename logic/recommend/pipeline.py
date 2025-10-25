@@ -914,7 +914,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             consecutive_holding_info=consecutive_holding_info,
             trade_cooldown_info=trade_cooldown_info,
             cooldown_days=actual_cooldown_days,
-            risk_off_equity_ratio=100,
             rsi_sell_threshold=rsi_sell_threshold,
         )
         logger.info(

@@ -448,27 +448,13 @@ def _build_backtest_kwargs(
     if not (0 <= rsi_sell_threshold <= 100):
         raise ValueError(f"OVERBOUGHT_SELL_THRESHOLD는 0~100 사이여야 합니다. (현재값: {rsi_sell_threshold})")
 
-    try:
-        (
-            regime_filter_ticker,
-            regime_filter_ma_period,
-            regime_filter_country,
-        ) = get_market_regime_settings(common_settings)
-    except AccountSettingsError as exc:
-        raise ValueError(str(exc)) from exc
-
-    # DELAY_DAYS와 EQUITY_RATIO는 제거됨 (함수 내부에서 하드코딩)
-    regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
+    # 시장 레짐 필터 제거됨 (항상 100% 투자)
 
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "ma_period": strategy_rules.ma_period,
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
-        "regime_filter_enabled": regime_filter_enabled,
-        "regime_filter_ticker": regime_filter_ticker,
-        "regime_filter_ma_period": regime_filter_ma_period,
-        "regime_filter_country": regime_filter_country,
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
         "rsi_sell_threshold": rsi_sell_threshold,
