@@ -457,10 +457,7 @@ def _build_backtest_kwargs(
     except AccountSettingsError as exc:
         raise ValueError(str(exc)) from exc
 
-    # DELAY_DAYS와 EQUITY_RATIO는 제거됨 - 기본값 사용
-    regime_filter_delay_days = 0
-    regime_filter_equity_ratio = 100
-
+    # DELAY_DAYS와 EQUITY_RATIO는 제거됨 (함수 내부에서 하드코딩)
     regime_filter_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
 
     kwargs: Dict[str, Any] = {
@@ -472,8 +469,6 @@ def _build_backtest_kwargs(
         "regime_filter_ticker": regime_filter_ticker,
         "regime_filter_ma_period": regime_filter_ma_period,
         "regime_filter_country": regime_filter_country,
-        "regime_filter_delay_days": regime_filter_delay_days,
-        "regime_filter_equity_ratio": regime_filter_equity_ratio,
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
         "rsi_sell_threshold": rsi_sell_threshold,

@@ -117,14 +117,13 @@ def _execute_partial_regime_trim(
     valid_core_holdings: Set[str],
     current_holdings_value: float,
     equity: float,
-    risk_off_equity_ratio: float,
-    risk_off_equity_ratio_pct: float,
     today_prices: Dict[str, float],
     sell_trades_today_map: Dict,
     daily_records_by_ticker: Dict,
     cash: float,
 ) -> tuple[float, float]:
     """위험 회피 구간에서 목표 비중 유지 (부분 청산)"""
+    risk_off_equity_ratio = 1.0  # 100% (제거됨)
     desired_holdings_value = equity * risk_off_equity_ratio
     tolerance = max(1e-6 * max(1.0, equity), 1e-6)
 
@@ -171,7 +170,7 @@ def _execute_partial_regime_trim(
         row = daily_records_by_ticker[held_ticker][-1]
         prev_trade_amount = float(row.get("trade_amount") or 0.0)
         prev_trade_profit = float(row.get("trade_profit") or 0.0)
-        note_text = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 {int(risk_off_equity_ratio_pct)}%)"
+        note_text = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 100%)"
         row.update(
             {
                 "decision": "HOLD",
@@ -194,7 +193,6 @@ def _execute_regime_sell(
     today_prices: Dict[str, float],
     sell_trades_today_map: Dict,
     daily_records_by_ticker: Dict,
-    risk_off_equity_ratio_pct: float,
     cash: float,
     current_holdings_value: float,
 ) -> tuple[float, float]:
@@ -228,7 +226,7 @@ def _execute_regime_sell(
                         "shares": 0,
                         "pv": 0,
                         "avg_cost": 0,
-                        "note": f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 {int(risk_off_equity_ratio_pct)}%)",
+                        "note": f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 100%)",
                     }
                 )
     return cash, current_holdings_value
@@ -646,8 +644,6 @@ def run_portfolio_backtest(
     regime_filter_ticker: str = "^GSPC",
     regime_filter_ma_period: int = 200,
     regime_filter_country: str = "",
-    regime_filter_delay_days: int = 0,
-    regime_filter_equity_ratio: int = 100,
     regime_behavior: str = "sell_all",
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
@@ -674,8 +670,6 @@ def run_portfolio_backtest(
         regime_filter_ticker: 레짐 필터 지수 티커
         regime_filter_ma_period: 레짐 필터 이동평균 기간
         regime_behavior: 레짐 필터 동작 방식
-        regime_filter_delay_days: 레짐 필터 적용 시 참조할 지연 거래일 수
-        regime_filter_equity_ratio: 레짐 위험 회피 구간에서 유지할 목표 주식 비중 (0~100)
         stop_loss_pct: 손절 비율 (%)
         cooldown_days: 거래 쿨다운 기간
 
@@ -816,20 +810,7 @@ def run_portfolio_backtest(
     else:
         market_regime_df = None
 
-    try:
-        regime_delay_offset = int(regime_filter_delay_days)
-    except (TypeError, ValueError):
-        regime_delay_offset = 0
-    else:
-        if regime_delay_offset < 0:
-            regime_delay_offset = 0
-
-    try:
-        risk_off_equity_ratio_pct = float(int(regime_filter_equity_ratio))
-    except (TypeError, ValueError):
-        risk_off_equity_ratio_pct = 100.0
-    risk_off_equity_ratio_pct = min(100.0, max(0.0, risk_off_equity_ratio_pct))
-    risk_off_equity_ratio = risk_off_equity_ratio_pct / 100.0
+    # 리스크 오프 관련 변수 제거됨 (항상 100% 투자)
 
     # 시뮬레이션 상태 변수 초기화
     position_state = {
@@ -910,22 +891,17 @@ def run_portfolio_backtest(
 
         is_risk_off = False
         if regime_filter_enabled and market_close_arr is not None:
-            market_idx = i - regime_delay_offset
+            market_idx = i
             if market_idx >= 0:
                 market_price = market_close_arr[market_idx]
                 market_ma = market_ma_arr[market_idx] if market_ma_arr is not None else float("nan")
                 if not pd.isna(market_price) and not pd.isna(market_ma) and market_price < market_ma:
                     is_risk_off = True
-                market_idx = i - regime_delay_offset
-                if market_idx >= 0:
-                    market_price = market_close_arr[market_idx]
-                    market_ma = market_ma_arr[market_idx] if market_ma_arr is not None else float("nan")
-                    if not pd.isna(market_price) and not pd.isna(market_ma) and market_price < market_ma:
-                        is_risk_off = True
 
-            risk_off_effective = is_risk_off and risk_off_equity_ratio < 1.0 and regime_behavior == "sell_all"
-            full_exit = is_risk_off and regime_behavior == "sell_all" and risk_off_equity_ratio <= 0.0
-            partial_regime_active = risk_off_effective and risk_off_equity_ratio > 0.0
+            # risk_off_equity_ratio = 1.0 (100%, 제거됨) - 항상 False
+            risk_off_effective = False
+            full_exit = False
+            partial_regime_active = False
             force_regime_sell = full_exit
             allow_individual_sells = True
             # 리스크 오프 상태에서도 신규 매수와 교체 매매 허용 (비중만 제한)
@@ -1022,8 +998,6 @@ def run_portfolio_backtest(
                     valid_core_holdings=valid_core_holdings,
                     current_holdings_value=current_holdings_value,
                     equity=equity,
-                    risk_off_equity_ratio=risk_off_equity_ratio,
-                    risk_off_equity_ratio_pct=risk_off_equity_ratio_pct,
                     today_prices=today_prices,
                     sell_trades_today_map=sell_trades_today_map,
                     daily_records_by_ticker=daily_records_by_ticker,
@@ -1043,7 +1017,6 @@ def run_portfolio_backtest(
                     today_prices=today_prices,
                     sell_trades_today_map=sell_trades_today_map,
                     daily_records_by_ticker=daily_records_by_ticker,
-                    risk_off_equity_ratio_pct=risk_off_equity_ratio_pct,
                     cash=cash,
                     current_holdings_value=current_holdings_value,
                 )
@@ -1171,7 +1144,6 @@ def run_portfolio_backtest(
                             current_holdings_value=current_holdings_value,
                             top_n=top_n,
                             risk_off_effective=risk_off_effective,
-                            risk_off_equity_ratio=risk_off_equity_ratio,
                         )
 
                         if budget <= 0:
@@ -1362,7 +1334,7 @@ def run_portfolio_backtest(
                                     continue
                                 if risk_off_effective:
                                     total_equity_now = cash + current_holdings_value
-                                    target_holdings_limit = total_equity_now * risk_off_equity_ratio
+                                    target_holdings_limit = total_equity_now * 1.0  # 100% (제거됨)
                                     remaining_capacity = max(0.0, target_holdings_limit - current_holdings_value)
                                     if remaining_capacity <= 0:
                                         continue
@@ -1490,9 +1462,7 @@ def run_portfolio_backtest(
 
                 for candidate_ticker in risk_off_candidates:
                     if daily_records_by_ticker[candidate_ticker] and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt:
-                        daily_records_by_ticker[candidate_ticker][-1][
-                            "note"
-                        ] = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 {int(risk_off_equity_ratio_pct)}%)"
+                        daily_records_by_ticker[candidate_ticker][-1]["note"] = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 100%)"
 
             # --- 당일 최종 라벨 오버라이드 (공용 라벨러) ---
             for tkr, rows in daily_records_by_ticker.items():
@@ -1525,7 +1495,8 @@ def run_portfolio_backtest(
 
             risk_off_note_for_day = ""
             if is_risk_off:
-                risk_off_note_for_day = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 {int(risk_off_equity_ratio_pct)}%)"
+                # risk_off_equity_ratio = 1.0 (100%, 제거됨)
+                risk_off_note_for_day = f"{DECISION_NOTES['RISK_OFF_TRIM']} (보유목표 100%)"
                 for rows in daily_records_by_ticker.values():
                     if not rows:
                         continue
