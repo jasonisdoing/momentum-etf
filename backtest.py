@@ -17,7 +17,7 @@ from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
 from logic.recommend.output import print_run_header
 from utils.logger import get_app_logger
 from utils.stock_list_io import get_etfs
-from utils.data_loader import prepare_price_data, fetch_ohlcv, get_latest_trading_day
+from utils.data_loader import prepare_price_data, get_latest_trading_day
 from utils.settings_loader import get_backtest_months_range, load_common_settings
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"

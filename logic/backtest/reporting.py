@@ -62,6 +62,7 @@ def print_backtest_summary(
     ticker_summaries: List[Dict[str, Any]],
     core_start_dt: pd.Timestamp,
     emit_to_logger: bool = True,
+    section_start_index: int = 1,
 ) -> List[str]:
     """Return a formatted summary for an account backtest run.
 
@@ -117,6 +118,7 @@ def print_backtest_summary(
         money_formatter = format_kr_money
 
     output_lines: List[str] = []
+    section_counter = section_start_index
 
     def add(line: str = "") -> None:
         output_lines.append(line)
@@ -126,8 +128,10 @@ def print_backtest_summary(
             add("")
 
     def add_section_heading(title: str) -> None:
+        nonlocal section_counter
         ensure_blank_line()
-        add(f"========= {title} ==========")
+        add(f"{section_counter}. ========= {title} ==========")
+        section_counter += 1
 
     add_section_heading("사용된 설정값")
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
@@ -163,9 +167,53 @@ def print_backtest_summary(
     add("  - Sharpe: 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
     add("  - SDR (Sharpe/MDD): Sharpe를 MDD(%)로 나눈 값. 수익 대비 최대 낙폭 효율성. 높을수록 우수 (기준: >0.2 양호, >0.3 우수).")
 
-    if "monthly_returns" in summary and not summary["monthly_returns"].empty:
-        add_section_heading("월별 성과 요약")
+    def _align_korean_money_for_weekly(text: str) -> str:
+        if currency != "KRW" or not isinstance(text, str):
+            return text
+        stripped = text.strip()
+        sign = ""
+        if stripped.startswith("-"):
+            sign = "-"
+            stripped = stripped[1:].strip()
 
+        if "억" in stripped and "만원" in stripped:
+            eok_part, remainder = stripped.split("억", 1)
+            eok_part = eok_part.strip()
+            remainder = remainder.strip()
+            man_part = remainder.replace("만원", "").strip()
+            # 5칸 폭으로 오른쪽 정렬 (콤마 포함)
+            man_part_padded = man_part.rjust(5)
+            return f"{sign}{eok_part}억 {man_part_padded}만원"
+        return text
+
+    add_section_heading("주별 성과 요약")
+    weekly_summary_rows = summary.get("weekly_summary") or []
+    if isinstance(weekly_summary_rows, list) and weekly_summary_rows:
+        headers = ["주차(종료일)", "평가금액", "주간 수익률", "누적 수익률"]
+        table_rows = []
+        for item in weekly_summary_rows:
+            week_label = item.get("week_end") or "-"
+            value = item.get("value")
+            weekly_ret = item.get("weekly_return_pct")
+            cum_ret = item.get("cumulative_return_pct")
+            value_display = money_formatter(value) if _is_finite_number(value) else "-"
+            value_display = _align_korean_money_for_weekly(value_display)
+            table_rows.append(
+                [
+                    week_label,
+                    value_display,
+                    f"{weekly_ret:+.2f}%" if _is_finite_number(weekly_ret) else "-",
+                    f"{cum_ret:+.2f}%" if _is_finite_number(cum_ret) else "-",
+                ]
+            )
+        aligns = ["left", "right", "right", "right"]
+        for line in render_table_eaw(headers, table_rows, aligns):
+            add(line)
+    else:
+        add("| 주별 성과 데이터를 찾을 수 없습니다.")
+
+    add_section_heading("월별 성과 요약")
+    if "monthly_returns" in summary and not summary["monthly_returns"].empty:
         monthly_returns = summary["monthly_returns"]
         yearly_returns = summary["yearly_returns"]
         monthly_cum_returns = summary.get("monthly_cum_returns")
@@ -227,9 +275,11 @@ def print_backtest_summary(
         aligns = ["left"] + ["right"] * (len(headers) - 1)
         for line in render_table_eaw(headers, rows_data, aligns):
             add(line)
+    else:
+        add("| 월별 성과 데이터가 없어 표시할 수 없습니다.")
 
+    add_section_heading("종목별 성과 요약")
     if ticker_summaries:
-        add_section_heading("종목별 성과 요약")
         headers = [
             "티커",
             "종목명",
@@ -261,6 +311,8 @@ def print_backtest_summary(
         table_lines = render_table_eaw(headers, rows, aligns)
         for line in table_lines:
             add(line)
+    else:
+        add("| 종목별 성과 데이터가 없어 표시할 수 없습니다.")
 
     add_section_heading("백테스트 결과 요약")
     add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
@@ -749,6 +801,7 @@ def dump_backtest_log(
     lines: List[str] = []
 
     lines.append(f"백테스트 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")
+    lines.append("1. ========= 기본정보 ==========")
     lines.append(f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}")
     base_line = f"초기 자본: {result.initial_capital:,.0f} {result.currency or 'KRW'}"
     if (result.currency or "KRW").upper() != "KRW":
@@ -756,6 +809,7 @@ def dump_backtest_log(
     base_line += f" | 포트폴리오 TOPN: {result.portfolio_topn}"
     lines.append(base_line)
     lines.append("")
+    lines.append("2. ========= 일자별 성과 상세 ==========")
 
     daily_lines = _generate_daily_report_lines(result, account_settings)
     lines.extend(daily_lines)
@@ -770,6 +824,7 @@ def dump_backtest_log(
         ticker_summaries=getattr(result, "ticker_summaries", []),
         core_start_dt=result.start_date,
         emit_to_logger=False,
+        section_start_index=3,
     )
     if summary_section:
         lines.extend(summary_section)

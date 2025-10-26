@@ -703,12 +703,29 @@ def _build_summary(
         benchmark_cum_ret_pct = float(benchmarks_summary[0]["cumulative_return_pct"])
         benchmark_cagr_pct = float(benchmarks_summary[0]["cagr_pct"])
 
+    weekly_summary_rows: List[Dict[str, Any]] = []
     monthly_returns = pd.Series(dtype=float)
     monthly_cum_returns = pd.Series(dtype=float)
     yearly_returns = pd.Series(dtype=float)
     if not pv_series.empty:
         start_row = pd.Series([initial_capital_local], index=[start_date - pd.Timedelta(days=1)])
         pv_series_with_start = pd.concat([start_row, pv_series])
+        weekly_values = pv_series_with_start.resample("W-FRI").last().dropna()
+        if not weekly_values.empty:
+            weekly_return_pct = weekly_values.pct_change().mul(100).fillna(0.0)
+            if initial_capital_local > 0:
+                weekly_cum_pct = (weekly_values / initial_capital_local - 1).mul(100)
+            else:
+                weekly_cum_pct = pd.Series([0.0] * len(weekly_values), index=weekly_values.index)
+            for dt, value in weekly_values.items():
+                weekly_summary_rows.append(
+                    {
+                        "week_end": dt.strftime("%Y-%m-%d"),
+                        "value": float(value),
+                        "weekly_return_pct": float(weekly_return_pct.loc[dt]),
+                        "cumulative_return_pct": float(weekly_cum_pct.loc[dt]),
+                    }
+                )
         monthly_returns = pv_series_with_start.resample("ME").last().pct_change().dropna()
         if initial_capital_local > 0:
             eom_pv = pv_series.resample("ME").last().dropna()
@@ -735,6 +752,7 @@ def _build_summary(
         "benchmark_cagr_pct": benchmark_cagr_pct,
         "benchmarks": benchmarks_summary,
         "benchmark_name": benchmarks_summary[0]["name"] if benchmarks_summary else "S&P 500",
+        "weekly_summary": weekly_summary_rows,
         "monthly_returns": monthly_returns,
         "monthly_cum_returns": monthly_cum_returns,
         "yearly_returns": yearly_returns,

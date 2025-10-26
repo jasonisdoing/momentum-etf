@@ -37,7 +37,7 @@ from utils.cache_utils import save_cached_frame
 
 logger = get_app_logger()
 
-DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[1] / "data" / "results"
+RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 # DEFAULT_LOOKBACK_PERIODS = [3, 6, 9, 12, 18, 24]
 DEFAULT_LOOKBACK_PERIODS = [3, 6, 9, 12]
 DEFAULT_TEST_MONTHS = 12
@@ -449,7 +449,7 @@ def run_walk_forward_analysis(
     logger.info(f"총 {total_tasks}개 작업 실행 (병렬 처리)")
 
     # 중간 결과 저장 경로 (계정별 폴더)
-    account_dir = DEFAULT_RESULTS_DIR / account_id
+    account_dir = RESULTS_DIR / account_id
     account_dir.mkdir(parents=True, exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d")
     summary_file = account_dir / f"lookback_summary_{date_str}.log"
@@ -845,7 +845,7 @@ def main():
     print_summary_table(summary)
 
     # 결과 저장
-    account_dir = DEFAULT_RESULTS_DIR / account_id
+    account_dir = RESULTS_DIR / account_id
     save_results(df, summary, account_id, output_dir=account_dir)
 
 
