@@ -20,10 +20,8 @@ from utils.report import (
 )
 from utils.logger import get_app_logger
 from utils.settings_loader import (
-    AccountSettingsError,
     get_backtest_months_range,
     get_account_precision,
-    load_common_settings,
 )
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"

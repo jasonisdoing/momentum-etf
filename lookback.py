@@ -7,7 +7,7 @@ Walk-Forward Analysis를 통한 최적 룩백 기간 탐색
 - 어떤 룩백 기간이 평균적으로 최적인지 분석
 
 사용법:
-    python scripts/optimize_lookback.py k1
+    python lookback.py k1
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from config import ACCOUNT_PARAMETER_SEARCH_CONFIG
 from logic.backtest.account_runner import run_account_backtest
-from utils.account_registry import get_strategy_rules
 from utils.data_loader import get_latest_trading_day, prepare_price_data
 from utils.logger import get_app_logger
 from utils.report import render_table_eaw
@@ -686,12 +685,9 @@ def save_results(
     df: pd.DataFrame,
     summary: pd.DataFrame,
     account_id: str,
-    output_dir: Path = None,
+    output_dir: Path,
 ) -> None:
     """결과를 요약/상세 2개 .log 파일로 저장"""
-
-    if output_dir is None:
-        output_dir = DEFAULT_RESULTS_DIR
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -828,10 +824,10 @@ def save_results(
 
 def main():
     if len(sys.argv) < 2:
-        print("사용법: python scripts/optimize_lookback.py <account_id>")
+        print("사용법: python lookback.py <account_id>")
         print()
         print("예시:")
-        print("  python scripts/optimize_lookback.py k1")
+        print("  python lookback.py k1")
         sys.exit(1)
 
     account_id = sys.argv[1].strip().lower()
@@ -849,7 +845,8 @@ def main():
     print_summary_table(summary)
 
     # 결과 저장
-    save_results(df, summary, account_id, output_dir=None)
+    account_dir = DEFAULT_RESULTS_DIR / account_id
+    save_results(df, summary, account_id, output_dir=account_dir)
 
 
 if __name__ == "__main__":

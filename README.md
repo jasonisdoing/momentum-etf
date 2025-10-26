@@ -216,7 +216,7 @@ python scripts/update_price_cache.py --country all --start 2020-01-01
 
 ```bash
 # 기본 실행 (최근 12개월, 3/6/9/12/18/24개월 룩백 기간 테스트)
-python scripts/optimize_lookback.py k1
+python lookback.py k1
 
 # 커스텀 설정 (코드 내 DEFAULT_LOOKBACK_PERIODS 수정)
 # DEFAULT_LOOKBACK_PERIODS = [3, 6, 9, 12, 18, 24]
@@ -352,7 +352,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 | `COOLDOWN_DAYS` | 쿨다운 기간 | 0~5일 | `config.py` |
 | `MARKET_REGIME_MA` | 시장 레짐 MA 기간 (참고용) | 10~100일 | 공통 설정 |
 
-파라미터 최적화는 `optimize_lookback.py`를 통해 수행합니다.
+파라미터 최적화는 `lookback.py`를 통해 수행합니다.
 
 ## 설정 체계
 
@@ -450,6 +450,5 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 ### 데이터 사용 시점
 
 - **추천/실시간 파이프라인**은 해당일 장중 가격(네이버/ yfinance 실시간)을 시계열에 덮어씌운 뒤 점수와 현재가를 계산합니다.
-- **백테스트, 튜닝, 룩백**은 `skip_realtime=True` 설정으로 실시간 오버레이를 비활성화하여 
+- **백테스트, 튜닝, 룩백**은 `skip_realtime=True` 설정으로 실시간 오버레이를 비활성화하여
   **최근 거래일 종가까지의 데이터**만 사용합니다.
-

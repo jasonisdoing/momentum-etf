@@ -676,7 +676,7 @@ def _execute_tuning_for_months(
                 "MDD": _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None,
                 "period_return": _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None,
                 "sharpe": _round_float_places(sharpe_val, 2) if math.isfinite(sharpe_val) else None,
-                "sharpe_to_mdd": _round_float_places(sharpe_to_mdd_val, 2) if math.isfinite(sharpe_to_mdd_val) else None,
+                "sharpe_to_mdd": _round_float_places(sharpe_to_mdd_val, 3) if math.isfinite(sharpe_to_mdd_val) else None,
                 "tuning": {
                     "MA_PERIOD": int(item.get("ma_period", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
@@ -1489,7 +1489,7 @@ def run_account_tuning(
                         "MDD": _round_float_places(-entry.get("mdd", 0.0), 2),
                         "period_return": _round_float_places(entry.get("period_return", 0.0), 2),
                         "sharpe": _round_float_places(entry.get("sharpe", 0.0), 2),
-                        "sharpe_to_mdd": _round_float_places(entry.get("sharpe_to_mdd", 0.0), 2),
+                        "sharpe_to_mdd": _round_float_places(entry.get("sharpe_to_mdd", 0.0), 3),
                         "tuning": {
                             "MA_PERIOD": int(entry.get("ma_period", 0)),
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
