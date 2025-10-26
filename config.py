@@ -4,9 +4,7 @@ from datetime import time
 
 import numpy as np
 
-CACHE_START_DATE = "2022-01-01"
-SELECTED_STRATEGY = "maps"
-
+CACHE_START_DATE = "2024-01-01"
 # 포트폴리오 카테고리별 최대 보유 수
 MAX_PER_CATEGORY = 1
 
