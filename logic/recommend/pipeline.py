@@ -640,10 +640,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                     "buy_date": buy_date,
                 }
 
-        # holdings가 비어있으면 에러
+        # holdings가 비어있어도 신규 계좌의 첫 실행일 수 있으므로 빈 상태로 계속 진행
         if not holdings:
-            logger.error(f"[{account_id.upper()}] 보유 종목이 없습니다. 거래 내역을 확인하세요.")
-            return []
+            logger.warning(f"[{account_id.upper()}] 보유 종목이 없어 빈 포트폴리오로 추천을 생성합니다.")
 
         # 종목명과 티커를 함께 표시
         holdings_display = []

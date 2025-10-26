@@ -69,11 +69,11 @@ def render_account_page(account_id: str) -> None:
     df, updated_at, loaded_country_code = load_account_recommendations(account_id)
     country_code = loaded_country_code or country_code
 
-    render_recommendation_table(df, country_code=country_code)
-
     if df is None:
-        st.error(updated_at or "데이터를 불러오지 못했습니다.")
+        st.error(updated_at or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요.")
         return
+
+    render_recommendation_table(df, country_code=country_code)
 
     if updated_at:
         st.caption(f"데이터 업데이트: {updated_at}")
