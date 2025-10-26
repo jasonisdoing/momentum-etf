@@ -74,7 +74,7 @@ def load_account_configs() -> List[Dict[str, Any]]:
                 portfolio_topn = tuning.get("PORTFOLIO_TOPN")
 
         if portfolio_topn is not None:
-            name = f"{base_name}({portfolio_topn} 종목 포트폴리오)"
+            name = f"{base_name}({portfolio_topn} 종목)"
         else:
             name = base_name
 
