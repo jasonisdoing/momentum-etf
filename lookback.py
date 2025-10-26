@@ -507,6 +507,7 @@ def run_walk_forward_analysis(
         .agg(
             {
                 "total_return": ["mean", "std", "min", "max"],
+                "cagr": ["mean"],
                 "sharpe": ["mean", "std"],
                 "sharpe_to_mdd": ["mean"],
                 "mdd": ["mean", "min", "max"],
@@ -548,6 +549,7 @@ def _save_progress(results: List[Dict], summary_file: Path, details_file: Path, 
             .agg(
                 {
                     "total_return": ["mean", "count"],
+                    "cagr": ["mean"],
                     "sharpe": ["mean"],
                     "sharpe_to_mdd": ["mean"],
                 }
@@ -669,15 +671,18 @@ def print_summary_table(summary: pd.DataFrame) -> None:
         print(line)
 
     # 최적 룩백 기간 찾기 (평균 SDR 기준)
-    best_idx = summary[("sharpe_to_mdd", "mean")].idxmax()
+    best_idx = summary[("cagr", "mean")].idxmax()
     best_return = summary.loc[best_idx, ("total_return", "mean")]
     best_win_rate = summary.loc[best_idx, ("win_rate_pct", "calc")]
     best_sharpe = summary.loc[best_idx, ("sharpe", "mean")]
     best_sdr = summary.loc[best_idx, ("sharpe_to_mdd", "mean")]
+    best_cagr = summary.loc[best_idx, ("cagr", "mean")]
 
     print("\n" + "=" * 120)
-    print(f"✅ 최적 룩백 기간: 참조 {best_idx}개월 (SDR 기준)")
-    print(f"   평균 수익률: {best_return:+.2f}% | 승률: {best_win_rate:.1f}% | Sharpe: {best_sharpe:.2f} | SDR: {best_sdr:.3f}")
+    print(f"✅ 최적 룩백 기간: 참조 {best_idx}개월 (CAGR 기준)")
+    print(
+        f"   평균 수익률: {best_return:+.2f}% | 승률: {best_win_rate:.1f}% | Sharpe: {best_sharpe:.2f} | SDR: {best_sdr:.3f} | CAGR: {best_cagr:+.2f}%"
+    )
     print("=" * 120 + "\n")
 
 
@@ -740,16 +745,19 @@ def save_results(
     summary_lines.extend(table_lines)
 
     # 최적 룩백 기간
-    best_idx = summary[("sharpe_to_mdd", "mean")].idxmax()
+    best_idx = summary[("cagr", "mean")].idxmax()
     best_return = summary.loc[best_idx, ("total_return", "mean")]
     best_win_rate = summary.loc[best_idx, ("win_rate_pct", "calc")]
     best_sharpe = summary.loc[best_idx, ("sharpe", "mean")]
     best_sdr = summary.loc[best_idx, ("sharpe_to_mdd", "mean")]
+    best_cagr = summary.loc[best_idx, ("cagr", "mean")]
 
     summary_lines.append("")
     summary_lines.append("=" * 120)
-    summary_lines.append(f"✅ 최적 룩백 기간: 참조 {best_idx}개월 (SDR 기준)")
-    summary_lines.append(f"   평균 수익률: {best_return:+.2f}% | 승률: {best_win_rate:.1f}% | Sharpe: {best_sharpe:.2f} | SDR: {best_sdr:.3f}")
+    summary_lines.append(f"✅ 최적 룩백 기간: 참조 {best_idx}개월 (CAGR 기준)")
+    summary_lines.append(
+        f"   평균 수익률: {best_return:+.2f}% | 승률: {best_win_rate:.1f}% | Sharpe: {best_sharpe:.2f} | SDR: {best_sdr:.3f} | CAGR: {best_cagr:+.2f}%"
+    )
     summary_lines.append("=" * 120)
 
     summary_file.write_text("\n".join(summary_lines), encoding="utf-8")

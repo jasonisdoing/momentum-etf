@@ -76,7 +76,7 @@ ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
         "COOLDOWN_DAYS": [1],
     },
     "k1": {
-        "MA_RANGE": np.arange(80, 115, 5),
+        "MA_RANGE": np.arange(70, 105, 5),
         "MA_TYPE": ["HMA"],
         "PORTFOLIO_TOPN": [8],
         "REPLACE_SCORE_THRESHOLD": [0.1, 0.5, 1.0, 1.5, 2.0],
@@ -85,7 +85,7 @@ ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
         "COOLDOWN_DAYS": [1],
     },
     "k2": {
-        "MA_RANGE": np.arange(80, 115, 5),
+        "MA_RANGE": np.arange(70, 105, 5),
         "MA_TYPE": ["HMA"],
         "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": [0.1, 0.5, 1.0, 1.5, 2.0],
