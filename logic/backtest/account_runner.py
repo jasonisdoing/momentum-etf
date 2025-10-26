@@ -423,7 +423,6 @@ def _resolve_start_date(
 def _build_backtest_kwargs(
     *,
     strategy_rules,
-    common_settings: Mapping[str, Any],
     strategy_settings: Mapping[str, Any],
     prefetched_data: Optional[Mapping[str, pd.DataFrame]],
     quiet: bool,
@@ -565,7 +564,6 @@ def _build_portfolio_timeseries(
 def _build_summary(
     portfolio_df: pd.DataFrame,
     *,
-    ticker_timeseries: Mapping[str, pd.DataFrame],
     country_code: str,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
@@ -574,8 +572,6 @@ def _build_summary(
     fx_rate_to_krw: float,
     currency: str,
     account_settings: Mapping[str, Any],
-    strategy_settings: Mapping[str, Any],
-    common_settings: Mapping[str, Any],
 ) -> Tuple[
     Dict[str, Any],
     pd.Series,

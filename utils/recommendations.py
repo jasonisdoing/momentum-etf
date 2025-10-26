@@ -65,17 +65,6 @@ def _resolve_phrase(row: dict[str, Any]) -> str:
     return str(phrase)
 
 
-def _format_currency(value: Any, country: str) -> float | None:
-    """현재가를 숫자로 반환합니다 (NumberColumn 사용을 위해)."""
-    if value is None:
-        return None
-    try:
-        amount = float(value)
-        return amount
-    except (TypeError, ValueError):
-        return None
-
-
 def _format_percent(value: Any) -> str:
     if value is None:
         return "-"

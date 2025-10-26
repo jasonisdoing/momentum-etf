@@ -166,10 +166,8 @@ def _determine_sell_decision(
 
 def _create_decision_entry(
     tkr: str,
-    name: str,
     data: Dict[str, Any],
     is_held: bool,
-    holdings: Dict,
     etf_meta: Dict,
     full_etf_meta: Dict,
     consecutive_holding_info: Dict,
@@ -317,7 +315,6 @@ def run_portfolio_recommend(
     holdings: Dict[str, Dict[str, float]],
     etf_meta: Dict[str, Any],
     full_etf_meta: Dict[str, Any],
-    regime_info: Optional[Dict],
     current_equity: float,
     total_cash: float,
     pairs: List[Tuple[str, str]],

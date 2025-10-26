@@ -138,7 +138,6 @@ def validate_core_holdings(
 
 
 def check_buy_candidate_filters(
-    ticker: str,
     category: str,
     held_categories: Set[str],
     sell_rsi_categories_today: Set[str],

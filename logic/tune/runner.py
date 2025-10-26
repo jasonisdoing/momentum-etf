@@ -974,7 +974,6 @@ def _compose_tuning_report(
     account_id: str,
     *,
     month_results: List[Dict[str, Any]],
-    aggregated_entry: Dict[str, Any],
     progress_info: Optional[Dict[str, Any]] = None,
     tuning_metadata: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
