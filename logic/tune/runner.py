@@ -1143,7 +1143,6 @@ def _save_intermediate_results(
     *,
     account_id: str,
     month_results: List[Dict[str, Any]],
-    aggregated_entry: Dict[str, Any],
     progress_info: Optional[Dict[str, Any]] = None,
     tuning_metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -1152,7 +1151,6 @@ def _save_intermediate_results(
         report_lines = _compose_tuning_report(
             account_id,
             month_results=month_results,
-            aggregated_entry=aggregated_entry,
             progress_info=progress_info,
             tuning_metadata=tuning_metadata,
         )
@@ -1506,12 +1504,10 @@ def run_account_tuning(
             }
 
             temp_results = results_per_month + [temp_result]
-            intermediate_entry = _build_run_entry(months_results=temp_results)
             _save_intermediate_results(
                 txt_path,
                 account_id=account_norm,
                 month_results=temp_results,
-                aggregated_entry=intermediate_entry,
                 progress_info={
                     "completed": completed,
                     "total": total,
@@ -1549,12 +1545,10 @@ def run_account_tuning(
 
         # 각 기간 완료 시마다 중간 결과 저장
         if results_per_month:
-            intermediate_entry = _build_run_entry(months_results=results_per_month)
             _save_intermediate_results(
                 txt_path,
                 account_id=account_norm,
                 month_results=results_per_month,
-                aggregated_entry=intermediate_entry,
                 progress_info={
                     "completed": len(results_per_month),
                     "total": len(month_items),
@@ -1663,7 +1657,6 @@ def run_account_tuning(
     report_lines = _compose_tuning_report(
         account_norm,
         month_results=results_per_month,
-        aggregated_entry=entry,
         tuning_metadata=tuning_metadata,
     )
 

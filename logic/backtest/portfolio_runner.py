@@ -878,7 +878,6 @@ def run_portfolio_backtest(
                 rsi_score_buy_candidate = rsi_score_today.get(ticker_to_buy, 100.0)
 
                 can_buy, block_reason = check_buy_candidate_filters(
-                    ticker=ticker_to_buy,
                     category=category,
                     held_categories=held_categories,
                     sell_rsi_categories_today=sell_rsi_categories_today,

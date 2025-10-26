@@ -202,7 +202,6 @@ def run_account_backtest(
     _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
     backtest_kwargs = _build_backtest_kwargs(
         strategy_rules=strategy_rules,
-        common_settings=common_settings,
         strategy_settings=strategy_settings,
         prefetched_data=prefetched_data,
         quiet=quiet,
@@ -257,7 +256,6 @@ def run_account_backtest(
         yearly_returns,
     ) = _build_summary(
         portfolio_df,
-        ticker_timeseries=ticker_timeseries,
         country_code=country_code,
         start_date=start_date,
         end_date=end_date,
@@ -266,8 +264,6 @@ def run_account_backtest(
         fx_rate_to_krw=capital_info.fx_rate_to_krw,
         currency=display_currency,
         account_settings=account_settings,
-        strategy_settings=strategy_settings,
-        common_settings=common_settings,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries, start_date)

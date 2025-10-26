@@ -68,10 +68,10 @@ KOR_REALTIME_ETF_PRICE_SOURCE = "Nav"
 ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
     "a1": {
         "MA_RANGE": np.arange(30, 62, 2),
-        "MA_TYPE": ["SMA"],
+        "MA_TYPE": ["SMA", "EMA", "WMA"],
         "PORTFOLIO_TOPN": [7],
         "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5, 2.0],
-        "OVERBOUGHT_SELL_THRESHOLD": [14, 16, 18, 20, 22],
+        "OVERBOUGHT_SELL_THRESHOLD": [14, 16, 18, 20],
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1],
     },
@@ -86,7 +86,7 @@ ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
     },
     "k2": {
         "MA_RANGE": np.arange(70, 102, 2),
-        "MA_TYPE": ["HMA"],
+        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
         "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": [0, 0.5, 1.0, 1.5],
         "OVERBOUGHT_SELL_THRESHOLD": [13, 14, 15, 16],

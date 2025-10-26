@@ -147,7 +147,6 @@ def check_buy_candidate_filters(
     """매수 후보 필터링 체크
 
     Args:
-        ticker: 종목 티커
         category: 종목 카테고리
         held_categories: 현재 보유 카테고리 집합
         sell_rsi_categories_today: 오늘 RSI 매도한 카테고리 집합

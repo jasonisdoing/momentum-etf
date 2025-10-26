@@ -323,14 +323,12 @@ def run_portfolio_recommend(
     holdings: Dict[str, Dict[str, float]],
     etf_meta: Dict[str, Any],
     full_etf_meta: Dict[str, Any],
-    regime_info: Optional[Dict],  # 대시보드 표시용
     current_equity: float,
     total_cash: float,
     pairs: List[Tuple[str, str]],
     consecutive_holding_info: Dict[str, Dict],
     trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
     cooldown_days: int,
-    risk_off_equity_ratio: int = 100,  # 항상 100
     rsi_sell_threshold: float = 10.0,
 ) -> List[Dict[str, Any]]
 ```

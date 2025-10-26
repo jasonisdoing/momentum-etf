@@ -381,7 +381,7 @@ def run_portfolio_recommend(
                 # logger.info(f"[COOLDOWN BLOCK TODAY] {tkr}: 오늘 매수 → 매도 쿨다운 추가")
 
     # 각 종목에 대한 의사결정 생성
-    for tkr, name in pairs:
+    for tkr, _ in pairs:
         d = data_by_tkr.get(tkr)
         is_effectively_held = tkr in holdings
 
@@ -402,10 +402,8 @@ def run_portfolio_recommend(
 
         decision = _create_decision_entry(
             tkr,
-            name,
             d,
             is_effectively_held,
-            holdings,
             etf_meta,
             full_etf_meta,
             consecutive_holding_info,
@@ -451,13 +449,10 @@ def run_portfolio_recommend(
                 # decision이 없으면 새로 생성 (data_by_tkr에 있는 경우만)
                 if core_ticker in data_by_tkr:
                     core_data = data_by_tkr[core_ticker]
-                    core_name = etf_meta.get(core_ticker, {}).get("name") or core_ticker
                     core_decision = _create_decision_entry(
                         core_ticker,
-                        core_name,
                         core_data,
                         False,  # is_held
-                        holdings,
                         etf_meta,
                         full_etf_meta,
                         consecutive_holding_info,
@@ -546,7 +541,6 @@ def run_portfolio_recommend(
             cand_rsi_score = cand.get("rsi_score", 100.0)
 
             can_buy, block_reason = check_buy_candidate_filters(
-                ticker=cand["tkr"],
                 category=cand_category,
                 held_categories=held_categories_for_buy,
                 sell_rsi_categories_today=sell_rsi_categories_today,
