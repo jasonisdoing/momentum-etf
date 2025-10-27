@@ -8,8 +8,8 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "MONTHS_RANGE": 3,
-        "expected_cagr": 82.32,
-        "backtested_date": "2025-10-27",
+        "expected_cagr": 94.65,
+        "backtested_date": "2025-10-28 08:00",
         "tuning": {
             "MA_PERIOD": 50,
             "MA_TYPE": "SMA",

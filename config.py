@@ -70,7 +70,7 @@ ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
         "MA_RANGE": np.arange(30, 65, 5),
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": [0.1, 0.5, 1.0, 1.5, 2.0],
+        "REPLACE_SCORE_THRESHOLD": [0.1, 0.5, 1.0, 1.5, 2.0, 2.5],
         "OVERBOUGHT_SELL_THRESHOLD": [0],
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1],
