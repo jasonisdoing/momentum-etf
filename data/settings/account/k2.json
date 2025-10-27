@@ -5,7 +5,7 @@
     "desc": "금액이 작은 계좌를 위한 5종목 포트폴리오입니다.",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
-    "initial_date": "2025-10-24",
+    "initial_date": "2025-10-27",
     "strategy": {
         "MONTHS_RANGE": 3,
         "expected_cagr": 189.75,
