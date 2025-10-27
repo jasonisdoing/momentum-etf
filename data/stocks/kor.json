@@ -395,6 +395,14 @@
                 "listing_date": "2025-10-21",
                 "1_week_avg_volume": null,
                 "1_week_avg_turnover": null
+            },
+            {
+                "ticker": "457990",
+                "name": "PLUS 태양광&ESS",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-01",
+                "1_week_avg_volume": 122219,
+                "1_week_avg_turnover": 2521858622
             }
         ]
     },
@@ -841,27 +849,6 @@
         ]
     },
     {
-        "category": "태양광",
-        "tickers": [
-            {
-                "ticker": "413220",
-                "name": "SOL 차이나태양광CSI(합성)",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-01",
-                "1_week_avg_volume": 26795,
-                "1_week_avg_turnover": 136985646
-            },
-            {
-                "ticker": "457990",
-                "name": "PLUS 태양광&ESS",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-01",
-                "1_week_avg_volume": 122219,
-                "1_week_avg_turnover": 2521858622
-            }
-        ]
-    },
-    {
         "category": "중국지수",
         "tickers": [
             {
@@ -895,6 +882,14 @@
                 "listing_date": "2025-05-13",
                 "1_week_avg_volume": 352050,
                 "1_week_avg_turnover": 4880612012
+            },
+            {
+                "ticker": "413220",
+                "name": "SOL 차이나태양광CSI(합성)",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-01",
+                "1_week_avg_volume": 26795,
+                "1_week_avg_turnover": 136985646
             }
         ]
     },
@@ -1101,5 +1096,9 @@
                 "1_week_avg_turnover": 12843382372
             }
         ]
+    },
+    {
+        "category": "TBD",
+        "tickers": []
     }
 ]
