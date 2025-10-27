@@ -1093,26 +1093,5 @@
                 "1_week_avg_turnover": 10599786797
             }
         ]
-    },
-    {
-        "category": "유럽",
-        "tickers": [
-            {
-                "ticker": "411860",
-                "name": "KIWOOM 독일DAX",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-01",
-                "1_week_avg_volume": 5575,
-                "1_week_avg_turnover": 95455392
-            },
-            {
-                "ticker": "456250",
-                "name": "Kodex 유럽명품TOP10 STOXX",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-01",
-                "1_week_avg_volume": 14068,
-                "1_week_avg_turnover": 156015617
-            }
-        ]
     }
 ]
