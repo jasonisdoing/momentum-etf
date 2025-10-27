@@ -77,6 +77,7 @@ def setup_logging() -> None:
             logging.StreamHandler(sys.stdout),
         ],
     )
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 def run_recommendation_generation(account_id: str, *, country_code: str) -> RecommendationReport:
@@ -244,12 +245,19 @@ def _register_recommendation_jobs(scheduler: BlockingScheduler, jobs: Iterable[R
                 kwargs={"account_id": job.account_id, "country_code": job.country_code},
                 id=f"{job.account_id}:{job.country_code}:{index}",
             )
+
+        if job.cron_exprs:
+            if len(job.cron_exprs) == 1:
+                cron_summary = job.cron_exprs[0]
+            else:
+                cron_summary = f"{job.cron_exprs[0]} … {job.cron_exprs[-1]}"
             logging.info(
-                "Scheduled RECOMMENDATION: schedule=%s account=%s country=%s cron='%s' tz='%s'",
+                "Scheduled RECOMMENDATION: schedule=%s account=%s country=%s cron='%s' (total %d slots) tz='%s'",
                 job.schedule_name.upper(),
                 job.account_id.upper(),
                 job.country_code.upper(),
-                cron_expr,
+                cron_summary,
+                len(job.cron_exprs),
                 job.timezone,
             )
 
