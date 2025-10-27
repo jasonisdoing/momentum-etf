@@ -6,17 +6,16 @@
 
 ---
 
-## 📦 서버 배포 3단계
+## 📦 Nginx 설정 (1회만 필요)
 
-### 1️⃣ 파일 업로드
-```bash
-# 서버로 static 폴더 업로드
-scp -r static/ user@etf.dojason.com:/home/ubuntu/momentum-etf/
-```
+> **참고:** 코드 변경은 `upgrade` 브랜치에 push하면 GitHub Actions가 자동 배포합니다.
 
-### 2️⃣ Nginx 설정 수정
+### Nginx 설정 추가
 ```bash
-ssh user@etf.dojason.com
+# Oracle VM 서버 접속
+ssh -i "~/DEV/ssh-key-2025-10-09.key" ubuntu@134.185.109.82
+
+# Nginx 설정 파일 수정
 sudo nano /etc/nginx/sites-available/etf.dojason.com
 ```
 
@@ -28,8 +27,8 @@ location / {
     
     # 메타 태그 주입 (이 부분 추가)
     sub_filter '</head>' '
-    <meta property="og:title" content="Momentum ETF - 모멘텀 투자 전략 대시보드" />
-    <meta property="og:description" content="데이터 기반 모멘텀 투자 전략으로 포트폴리오를 관리하세요. 실시간 추천 및 성과 분석을 제공합니다." />
+    <meta property="og:title" content="Momentum ETF" />
+    <meta property="og:description" content="추세추종 전략 기반 ETF 투자" />
     <meta property="og:image" content="https://etf.dojason.com/static/og-image.png" />
     <meta property="og:url" content="https://etf.dojason.com/" />
     <meta property="og:type" content="website" />
@@ -42,15 +41,15 @@ location / {
 
 # 정적 파일 제공 (이 블록 추가)
 location /static/ {
-    alias /home/ubuntu/momentum-etf/static/;
+    alias /home/ubuntu/apps/momentum-etf/static/;
     expires 30d;
     add_header Cache-Control "public, immutable";
 }
 ```
 
-### 3️⃣ Nginx 재시작
+### Nginx 재시작
 ```bash
-sudo nginx -t          # 설정 테스트
+sudo nginx -t
 sudo systemctl restart nginx
 ```
 
@@ -77,8 +76,8 @@ curl -I https://etf.dojason.com/static/og-image.png
 ## 📝 예상 결과
 
 메신저에서 링크 공유 시:
-- **제목**: "Momentum ETF - 모멘텀 투자 전략 대시보드"
-- **설명**: "데이터 기반 모멘텀 투자 전략으로..."
+- **제목**: "Momentum ETF"
+- **설명**: "추세추종 전략 기반 ETF 투자"
 - **이미지**: 브랜드 컬러(#D94D2B)가 포함된 1200x630 이미지
 
 ---
@@ -92,7 +91,7 @@ sudo tail -f /var/log/nginx/error.log
 
 **이미지가 안 보이면:**
 ```bash
-chmod 644 /home/ubuntu/momentum-etf/static/og-image.png
+chmod 644 /home/ubuntu/apps/momentum-etf/static/og-image.png
 ```
 
 **캐시 문제:**

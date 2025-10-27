@@ -12,41 +12,15 @@
 
 ---
 
-## 📦 1단계: 파일 준비
+## 🔧 Nginx 설정
 
-### 1.1 OG 이미지 확인
-
-로컬에서 이미 생성되었습니다:
-```bash
-ls -lh static/og-image.png
-```
-
-### 1.2 서버로 파일 업로드
+### 서버 접속 및 설정 파일 수정
 
 ```bash
-# 서버로 static 폴더 업로드
-scp -r static/ user@etf.dojason.com:/path/to/momentum-etf/
+# Oracle VM 서버 접속
+ssh -i "~/DEV/ssh-key-2025-10-09.key" ubuntu@134.185.109.82
 
-# 또는 git을 통해
-git add static/og-image.png
-git commit -m "Add Open Graph image"
-git push
-```
-
----
-
-## 🔧 2단계: Nginx 설정
-
-### 2.1 현재 Nginx 설정 확인
-
-```bash
-ssh user@etf.dojason.com
-sudo cat /etc/nginx/sites-available/etf.dojason.com
-```
-
-### 2.2 Nginx 설정 파일 수정
-
-```bash
+# Nginx 설정 파일 수정
 sudo nano /etc/nginx/sites-available/etf.dojason.com
 ```
 
@@ -111,7 +85,7 @@ server {
 }
 ```
 
-### 2.3 Nginx 설정 테스트 및 재시작
+### Nginx 재시작
 
 ```bash
 # 설정 파일 문법 체크
@@ -126,22 +100,16 @@ sudo systemctl status nginx
 
 ---
 
-## ✅ 3단계: 테스트
+## ✅ 테스트
 
-### 3.1 메타 태그 확인
+### 메타 태그 확인
 
 ```bash
-curl -I https://etf.dojason.com/ | grep -i "content-type"
 curl https://etf.dojason.com/ | grep -i "og:title"
-```
-
-### 3.2 이미지 접근 확인
-
-```bash
 curl -I https://etf.dojason.com/static/og-image.png
 ```
 
-### 3.3 온라인 도구로 테스트
+### 온라인 도구로 테스트
 
 1. **Facebook Sharing Debugger**
    - https://developers.facebook.com/tools/debug/
