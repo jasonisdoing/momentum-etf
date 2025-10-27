@@ -259,6 +259,23 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
 
+    # Open Graph 메타 태그 추가 (링크 미리보기용)
+    st.markdown(
+        """
+        <meta property="og:title" content="Momentum ETF - 모멘텀 투자 전략 대시보드" />
+        <meta property="og:description" content="데이터 기반 모멘텀 투자 전략으로 포트폴리오를 관리하세요. 실시간 추천 및 성과 분석을 제공합니다." />
+        <meta property="og:image" content="https://etf.dojason.com/og-image.png" />
+        <meta property="og:url" content="https://etf.dojason.com/" />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="Momentum ETF" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Momentum ETF - 모멘텀 투자 전략 대시보드" />
+        <meta name="twitter:description" content="데이터 기반 모멘텀 투자 전략으로 포트폴리오를 관리하세요." />
+        <meta name="twitter:image" content="https://etf.dojason.com/og-image.png" />
+        """,
+        unsafe_allow_html=True,
+    )
+
     pages = [
         page_cls(
             _render_home_page,
