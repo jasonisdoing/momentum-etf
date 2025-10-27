@@ -274,10 +274,10 @@ def _register_cache_job(scheduler: BlockingScheduler, *, cron_expr: str = "0 4 *
 def _run_initial_recommendations(jobs: Iterable[RecommendationJobConfig]) -> None:
     executable = [job for job in jobs if job.run_immediately]
     if not executable:
-        logging.info("Initial recommendation run skipped (no job opted-in).")
-        return
-
-    logging.info("[Initial Run] Executing %d recommendation job(s)...", len(executable))
+        logging.info("[Initial Run] Executing %d recommendation job(s)...", len(jobs))
+        executable = list(jobs)
+    else:
+        logging.info("[Initial Run] Executing %d recommendation job(s)...", len(executable))
     for job in executable:
         try:
             run_recommendation_generation(job.account_id, country_code=job.country_code)

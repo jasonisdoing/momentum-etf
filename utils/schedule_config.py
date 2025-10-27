@@ -73,7 +73,7 @@ def _build_schedule_entry(account_id: str) -> Dict[str, Any] | None:
         "recommendation_cron": cron_list[0] if cron_list else None,
         "timezone": timezone_value,
         "notify_timezone": notify_timezone_value,
-        "run_immediately_on_start": schedule.get("run_immediately_on_start"),
+        "run_immediately_on_start": True,
     }
 
     label = settings.get("name")
