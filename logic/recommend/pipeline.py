@@ -924,10 +924,19 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             # 매도 거래가 있으면 SOLD 처리 (부분 매도 여부는 보유 수량으로 판단)
             existing = next((d for d in decisions if d.get("tkr") == ticker), None)
             if existing:
+                # 원래 상태 저장 (SELL_RSI 판단용)
+                original_state = existing.get("state")
+                existing["original_state"] = original_state
                 existing["state"] = "SOLD"
                 if existing.get("row"):
                     existing["row"][4] = "SOLD"
-                    existing["row"][-1] = DECISION_MESSAGES["SOLD"]
+                    # RSI 과매수 조건 확인하여 메시지 추가
+                    rsi_score = existing.get("rsi_score", 100.0)
+                    base_msg = DECISION_MESSAGES["SOLD"]
+                    if rsi_score <= rsi_sell_threshold:
+                        existing["row"][-1] = f"{base_msg} | RSI 과매수 (RSI점수: {rsi_score:.1f})"
+                    else:
+                        existing["row"][-1] = base_msg
                 existing["buy_signal"] = False
                 continue
 
@@ -1088,9 +1097,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 phrase = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
             else:
                 state = "HOLD"
-                # RSI 과매수 문구가 있으면 유지, 없으면 신규 편입 표시
-                if not phrase or "RSI" not in phrase:
-                    phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+                # RSI 과매도 조건 확인하여 메시지 추가
+                rsi_score_val = decision.get("rsi_score", 0.0)
+                base_msg = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+                if rsi_score_val <= rsi_sell_threshold:
+                    phrase = f"{base_msg} | RSI 과매수 (RSI점수: {rsi_score_val:.1f})"
+                else:
+                    phrase = base_msg
             if holding_days_val == 0:
                 holding_days_val = 1
         # 추천에 따라 오늘 신규 매수해야 할 종목
@@ -1113,9 +1126,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 phrase = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
             else:
                 state = "HOLD"
-                # RSI 과매수 문구가 있으면 유지, 없으면 신규 편입 표시
-                if not phrase or "RSI" not in phrase:
-                    phrase = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+                # RSI 과매도 조건 확인하여 메시지 추가
+                rsi_score_val = decision.get("rsi_score", 0.0)
+                base_msg = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
+                if rsi_score_val <= rsi_sell_threshold:
+                    phrase = f"{base_msg} | RSI 과매수 (RSI점수: {rsi_score_val:.1f})"
+                else:
+                    phrase = base_msg
             if holding_days_val == 0:
                 holding_days_val = 1
 
@@ -1232,15 +1249,44 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     planned_buy_count = sum(1 for item in results if item["state"] in buy_state_set)
 
     # SELL_RSI로 매도되는 카테고리 추적 (같은 날 매수 금지)
+    # SOLD 상태도 포함 (RSI 과매수로 매도 완료된 경우)
     sell_rsi_categories: Set[str] = set()
     for item in results:
         if item["state"] == "SELL_RSI":
             category = item.get("category")
             if category and category != "TBD":
                 sell_rsi_categories.add(category)
+                logger.info(f"[PIPELINE SELL_RSI CAT] {item.get('ticker')} SELL_RSI로 '{category}' 카테고리 추가")
+        elif item["state"] == "SOLD":
+            # SOLD 상태 중 원래 SELL_RSI였거나 RSI 과매수로 매도된 경우
+            original_state = item.get("original_state")
+            rsi_score = item.get("rsi_score", 100.0)
+            if original_state == "SELL_RSI" or rsi_score <= rsi_sell_threshold:
+                category = item.get("category")
+                if category and category != "TBD":
+                    sell_rsi_categories.add(category)
+                    logger.info(
+                        f"[PIPELINE SOLD RSI CAT] {item.get('ticker')} SOLD(original={original_state}, RSI={rsi_score:.1f})로 '{category}' 카테고리 추가"
+                    )
+
+    # BUY 상태 종목 중 SELL_RSI 카테고리에 해당하는 것은 WAIT로 되돌림
+    for item in results:
+        if item["state"] in {"BUY", "BUY_REPLACE"}:
+            category = item.get("category")
+            if category and category != "TBD" and category in sell_rsi_categories:
+                logger.info(f"[PIPELINE BUY REVERTED] {item.get('ticker')} BUY→WAIT 변경 - '{category}' 카테고리가 SELL_RSI로 매도됨")
+                item["state"] = "WAIT"
+                item["phrase"] = f"RSI 과매수 매도 카테고리 ({category})"
+
+    # BUY 상태가 변경되었으므로 planned_buy_count 재계산
+    planned_buy_count = sum(1 for item in results if item["state"] in buy_state_set)
 
     projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
     additional_buy_slots = max(0, portfolio_topn - projected_holdings)
+
+    logger.info(
+        f"[PIPELINE] 매수 슬롯 계산: current={current_holdings_count}, sell={planned_sell_count}, buy={planned_buy_count}, projected={projected_holdings}, topn={portfolio_topn}, slots={additional_buy_slots}, wait_items={len(wait_items)}"
+    )
 
     promoted = 0
     for item in wait_items:

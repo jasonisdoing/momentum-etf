@@ -145,7 +145,7 @@ def _determine_sell_decision(
         phrase = DECISION_MESSAGES.get("CUT_STOPLOSS", "손절매도")
     elif rsi_score_value <= rsi_sell_threshold:
         state = "SELL_RSI"
-        phrase = f"{DECISION_MESSAGES.get('SELL_RSI', 'RSI 과매수 매도')} (RSI점수: {rsi_score_value:.1f})"
+        phrase = f"RSI 과매수 (RSI점수: {rsi_score_value:.1f})"
     elif not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
         state = "SELL_TREND"
         phrase = DECISION_NOTES["TREND_BREAK"]
@@ -758,7 +758,7 @@ def run_portfolio_recommend(
                 d["row"][4] = "HOLD"
                 phrase_str = str(d["row"][-1] or "")
                 if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
-                    # SELL_RSI인 경우 RSI 과매수 문구 추가
+                    # SELL_RSI인 경우 RSI 과매수 문구 유지
                     if original_state == "SELL_RSI":
                         rsi_score = d.get("rsi_score", 0.0)
                         d["row"][-1] = f"⚠️ RSI 과매수 (쿨다운 대기중, RSI점수: {rsi_score:.1f})"
