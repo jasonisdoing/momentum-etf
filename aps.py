@@ -28,7 +28,7 @@ from datetime import datetime, time as dt_time
 
 from utils.recommendation_storage import save_recommendation_report
 
-from utils.market_schedule import get_market_cron
+from utils.market_schedule import generate_market_cron_expressions
 
 
 try:
@@ -168,7 +168,7 @@ class RecommendationJobConfig:
     schedule_name: str
     account_id: str
     country_code: str
-    cron_expr: str
+    cron_exprs: Tuple[str, ...]
     timezone: str
     run_immediately: bool
 
@@ -210,11 +210,13 @@ def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
             continue
 
         # config.py의 MARKET_SCHEDULES에서 크론 표현식 자동 생성
-        try:
-            cron_expr = get_market_cron(country_code)
-        except ValueError as exc:
-            logging.warning("Schedule '%s': %s", schedule_name, exc)
-            continue
+        cron_list = tuple(cfg.get("recommendation_cron_list") or [])
+        if not cron_list:
+            try:
+                cron_list = tuple(generate_market_cron_expressions(country_code))
+            except ValueError as exc:
+                logging.warning("Schedule '%s': %s", schedule_name, exc)
+                continue
 
         timezone = _validate_timezone(cfg.get("timezone"))
         run_immediately = bool(cfg.get("run_immediately_on_start", run_immediately_default))
@@ -224,7 +226,7 @@ def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
                 schedule_name=schedule_name,
                 account_id=account_id,
                 country_code=country_code,
-                cron_expr=cron_expr,
+                cron_exprs=cron_list,
                 timezone=timezone,
                 run_immediately=run_immediately,
             )
@@ -235,20 +237,21 @@ def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
 
 def _register_recommendation_jobs(scheduler: BlockingScheduler, jobs: Iterable[RecommendationJobConfig]) -> None:
     for job in jobs:
-        scheduler.add_job(
-            run_recommendation_generation,
-            CronTrigger.from_crontab(job.cron_expr, timezone=job.timezone),
-            kwargs={"account_id": job.account_id, "country_code": job.country_code},
-            id=f"{job.account_id}:{job.country_code}",
-        )
-        logging.info(
-            "Scheduled RECOMMENDATION: schedule=%s account=%s country=%s cron='%s' tz='%s'",
-            job.schedule_name.upper(),
-            job.account_id.upper(),
-            job.country_code.upper(),
-            job.cron_expr,
-            job.timezone,
-        )
+        for index, cron_expr in enumerate(job.cron_exprs, start=1):
+            scheduler.add_job(
+                run_recommendation_generation,
+                CronTrigger.from_crontab(cron_expr, timezone=job.timezone),
+                kwargs={"account_id": job.account_id, "country_code": job.country_code},
+                id=f"{job.account_id}:{job.country_code}:{index}",
+            )
+            logging.info(
+                "Scheduled RECOMMENDATION: schedule=%s account=%s country=%s cron='%s' tz='%s'",
+                job.schedule_name.upper(),
+                job.account_id.upper(),
+                job.country_code.upper(),
+                cron_expr,
+                job.timezone,
+            )
 
 
 def _register_cache_job(scheduler: BlockingScheduler, *, cron_expr: str = "0 4 * * *") -> None:

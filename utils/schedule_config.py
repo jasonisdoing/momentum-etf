@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from utils.account_registry import list_available_accounts
 from utils.settings_loader import AccountSettingsError, get_account_settings
+from utils.market_schedule import generate_market_cron_expressions
 
 
 _DEFAULT_TIMEZONES: Dict[str, str] = {
@@ -49,12 +50,27 @@ def _build_schedule_entry(account_id: str) -> Dict[str, Any] | None:
     timezone_value = schedule.get("timezone") or schedule.get("recommendation_timezone") or _default_timezone(country_code)
     notify_timezone_value = schedule.get("notify_timezone") or schedule.get("timezone") or _default_timezone(country_code)
 
+    cron_value = schedule.get("recommendation_cron")
+    cron_list: list[str] = []
+    if isinstance(cron_value, str) and cron_value.strip():
+        cron_list = [cron_value.strip()]
+    elif isinstance(cron_value, (list, tuple)):
+        for item in cron_value:
+            text = str(item).strip()
+            if text:
+                cron_list.append(text)
+    if not cron_list:
+        try:
+            cron_list = list(generate_market_cron_expressions(country_code))
+        except ValueError:
+            cron_list = []
+
     entry: Dict[str, Any] = {
         "account_id": account_id,
         "country_code": country_code,
         "enabled": enabled_flag,
-        "recommendation_cron": schedule.get("recommendation_cron"),
-        "notify_cron": schedule.get("notify_cron"),
+        "recommendation_cron_list": tuple(cron_list),
+        "recommendation_cron": cron_list[0] if cron_list else None,
         "timezone": timezone_value,
         "notify_timezone": notify_timezone_value,
         "run_immediately_on_start": schedule.get("run_immediately_on_start"),
@@ -77,7 +93,7 @@ def _load_account_schedules() -> Dict[str, Dict[str, Any]]:
         except ScheduleConfigError:
             continue
 
-        if entry and entry.get("recommendation_cron"):
+        if entry and entry.get("recommendation_cron_list"):
             schedules[account_id] = entry
 
     return schedules
