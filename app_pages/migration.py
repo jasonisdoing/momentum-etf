@@ -9,7 +9,7 @@ import streamlit_authenticator as stauth
 from collections.abc import Mapping
 
 from utils.account_registry import list_available_accounts
-from utils.trade_store import migrate_account_id
+from utils.db_manager import migrate_account_id
 from utils.settings_loader import get_account_settings
 
 SETTINGS_DIR = Path(__file__).resolve().parents[1] / "data" / "settings" / "account"

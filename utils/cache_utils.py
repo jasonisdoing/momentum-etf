@@ -11,7 +11,7 @@ CACHE_ROOT = Path(__file__).resolve().parents[1] / "data" / "stocks" / "cache"
 
 
 def _get_cache_start_date() -> Optional[pd.Timestamp]:
-    """data/settings/common.py에서 CACHE_START_DATE를 로드하여 Timestamp로 반환합니다."""
+    """config.py에서 CACHE_START_DATE를 로드하여 Timestamp로 반환합니다."""
     try:
         from utils.settings_loader import load_common_settings
 

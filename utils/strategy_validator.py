@@ -4,7 +4,6 @@ from typing import Dict, Any, Optional
 
 
 def validate_strategy_settings(
-    strategy_static: Dict[str, Any],
     strategy_tuning: Dict[str, Any],
     account_id: Optional[str] = None,
 ) -> None:
@@ -14,7 +13,6 @@ def validate_strategy_settings(
     이 함수를 한 번만 호출하면 이후 모든 설정 값을 안전하게 사용할 수 있습니다.
 
     Args:
-        strategy_static: strategy.static 설정
         strategy_tuning: strategy.tuning 설정
         account_id: 계정 ID (에러 메시지용, 선택사항)
 
@@ -23,13 +21,6 @@ def validate_strategy_settings(
     """
     prefix = f"{account_id} 계좌의 " if account_id else ""
     errors = []
-
-    # strategy.static 필수 항목 검증
-    if "MAX_PER_CATEGORY" not in strategy_static:
-        errors.append("strategy.static.MAX_PER_CATEGORY")
-
-    if "MARKET_REGIME_RISK_OFF_EQUITY_RATIO" not in strategy_static:
-        errors.append("strategy.static.MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
 
     # strategy.tuning 필수 항목 검증
     if "COOLDOWN_DAYS" not in strategy_tuning:
@@ -47,20 +38,6 @@ def validate_strategy_settings(
         raise ValueError(f"{prefix}필수 설정이 누락되었습니다: {missing_fields}")
 
     # 값 범위 검증
-    try:
-        max_per_category = int(strategy_static["MAX_PER_CATEGORY"])
-        if max_per_category < 0:
-            raise ValueError(f"{prefix}MAX_PER_CATEGORY는 0 이상이어야 합니다.")
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{prefix}MAX_PER_CATEGORY 값이 유효하지 않습니다.") from exc
-
-    try:
-        risk_off_ratio = int(strategy_static["MARKET_REGIME_RISK_OFF_EQUITY_RATIO"])
-        if not (0 <= risk_off_ratio <= 100):
-            raise ValueError(f"{prefix}MARKET_REGIME_RISK_OFF_EQUITY_RATIO는 0~100 사이여야 합니다.")
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{prefix}MARKET_REGIME_RISK_OFF_EQUITY_RATIO 값이 유효하지 않습니다.") from exc
-
     try:
         cooldown_days = int(strategy_tuning["COOLDOWN_DAYS"])
         if cooldown_days < 0:

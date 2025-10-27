@@ -20,7 +20,6 @@ COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
 PRECISION_SETTINGS_PATH = SETTINGS_ROOT / "precision.json"
 BACKTEST_SETTINGS_PATH = SETTINGS_ROOT / "backtest.json"
-TUNE_SETTINGS_PATH = SETTINGS_ROOT / "tune.json"
 logger = get_app_logger()
 
 
@@ -100,18 +99,11 @@ def get_backtest_initial_capital(default: float = 100_000_000) -> float:
     return float(default)
 
 
-@lru_cache(maxsize=1)
-def _load_tune_settings() -> Dict[str, Any]:
-    try:
-        return _load_json(TUNE_SETTINGS_PATH)
-    except AccountSettingsError:
-        return {}
-    except Exception:
-        return {}
+def get_tune_month_configs(account_id: str = None) -> List[Dict[str, Any]]:
+    """튜닝용 MONTHS_RANGE 설정을 반환합니다.
 
-
-def get_tune_month_configs() -> List[Dict[str, Any]]:
-    settings = _load_tune_settings()
+    계정별 strategy.MONTHS_RANGE를 사용합니다.
+    """
     normalized: List[Dict[str, Any]] = []
 
     def _append(months_raw: Any, *, weight: float = 1.0, source: Any = None) -> None:
@@ -129,28 +121,16 @@ def get_tune_month_configs() -> List[Dict[str, Any]]:
             }
         )
 
-    if isinstance(settings, dict):
-        top_level_months = settings.get("MONTHS_RANGE")
-        if top_level_months is not None:
-            _append(top_level_months, weight=1.0, source="default")
-
-        root = settings.get("COMMON_CONSTANTS")
-        if isinstance(root, dict):
-            entries = root.get("MONTHS_CONFIG")
-            if isinstance(entries, list):
-                for item in entries:
-                    if not isinstance(item, dict):
-                        continue
-                    weight_raw = item.get("weight", 0.0)
-                    try:
-                        weight_val = float(weight_raw)
-                    except (TypeError, ValueError):
-                        weight_val = 0.0
-                    _append(
-                        item.get("MONTHS_RANGE"),
-                        weight=weight_val,
-                        source=item.get("source"),
-                    )
+    # 계정별 strategy.MONTHS_RANGE 사용
+    if account_id:
+        try:
+            account_settings = get_account_settings(account_id)
+            strategy = account_settings.get("strategy", {})
+            account_months = strategy.get("MONTHS_RANGE")
+            if account_months is not None:
+                _append(account_months, weight=1.0, source=f"account_{account_id}")
+        except Exception:
+            pass
 
     if not normalized:
         return []
@@ -220,7 +200,7 @@ def get_account_strategy_sections(account_id: str) -> Tuple[Dict[str, Any], Dict
         tuning, static = dict(strategy), {}
 
     # 전략 설정 검증 (한 번만 수행)
-    validate_strategy_settings(static, tuning, account_id)
+    validate_strategy_settings(tuning, account_id)
 
     return tuning, static
 
@@ -273,25 +253,18 @@ def get_account_slack_channel(account_id: str) -> Optional[str]:
 
 @lru_cache(maxsize=1)
 def load_common_settings() -> Dict[str, Any]:
-    """data/settings/common.py 모듈을 로드하여 딕셔너리 형태로 반환합니다."""
+    """config.py 모듈에서 공통 설정을 추출해 딕셔너리로 반환합니다."""
 
     try:
-        import importlib.util
+        import importlib
 
-        spec = importlib.util.spec_from_file_location(
-            "settings_common",
-            (SETTINGS_ROOT / "common.py"),
-        )
-        if spec is None or spec.loader is None:
-            return {}
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)  # type: ignore[attr-defined]
-    except FileNotFoundError:
-        raise AccountSettingsError(f"공통 설정 파일이 없습니다: {SETTINGS_ROOT / 'common.py'}")
+        config_module = importlib.import_module("config")
+    except ModuleNotFoundError as exc:
+        raise AccountSettingsError("공통 설정 모듈(config.py)을 찾을 수 없습니다.") from exc
     except Exception as exc:
         raise AccountSettingsError(f"공통 설정을 로드하지 못했습니다: {exc}") from exc
 
-    data = {key: getattr(module, key) for key in dir(module) if key.isupper() and not key.startswith("_")}
+    data = {key: getattr(config_module, key) for key in dir(config_module) if key.isupper() and not key.startswith("_")}
     return data
 
 
@@ -335,7 +308,7 @@ def get_country_slack_channel(country: str) -> Optional[str]:  # pragma: no cove
     return get_account_slack_channel(country)
 
 
-def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str, int, int]:
+def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str]:
     """공통 설정에서 메인 시장 레짐 필터 설정을 반환합니다."""
 
     if isinstance(common_settings, Mapping):
@@ -363,27 +336,7 @@ def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = No
     country_raw = settings_view.get("MARKET_REGIME_FILTER_COUNTRY")
     country = str(country_raw or "us").strip().lower() or "us"
 
-    delay_raw = settings_view.get("MARKET_REGIME_FILTER_DELAY_DAY", 0)
-    try:
-        delay_days = int(delay_raw)
-    except (TypeError, ValueError):
-        delay_days = 0
-    else:
-        if delay_days < 0:
-            delay_days = 0
-
-    ratio_raw = settings_view.get("MARKET_REGIME_RISK_OFF_EQUITY_RATIO")
-    if ratio_raw is None:
-        risk_off_ratio = None
-    else:
-        try:
-            risk_off_ratio = int(ratio_raw)
-        except (TypeError, ValueError) as exc:  # noqa: PERF203
-            raise AccountSettingsError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값이 정수가 아닙니다.") from exc
-        if not (0 <= risk_off_ratio <= 100):
-            raise AccountSettingsError("'MARKET_REGIME_RISK_OFF_EQUITY_RATIO' 값은 0부터 100 사이여야 합니다.")
-
-    return ticker, ma_period, country, delay_days, risk_off_ratio
+    return ticker, ma_period, country
 
 
 def get_market_regime_aux_tickers(common_settings: Optional[Mapping[str, Any]] = None) -> List[str]:

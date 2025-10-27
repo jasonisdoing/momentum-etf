@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 from .scoring import calculate_rsi_score
-from data.settings.common import RSI_NORMALIZATION_CONFIG, RSI_CALCULATION_CONFIG
+from config import RSI_NORMALIZATION_CONFIG, RSI_CALCULATION_CONFIG
 from utils.logger import get_app_logger
 
 logger = get_app_logger()

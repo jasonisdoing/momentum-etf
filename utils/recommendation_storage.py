@@ -148,8 +148,6 @@ def save_recommendation_payload(
 
 def save_recommendation_report(
     report: Any,
-    *,
-    results_dir: Any | None = None,  # 유지: 기존 시그니처 호환
 ) -> Dict[str, Any]:
     """Persist a RecommendationReport-like object and return Mongo metadata."""
 

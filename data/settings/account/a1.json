@@ -2,37 +2,22 @@
     "order": 20,
     "icon": "🇦🇺",
     "name": "호주 ETF",
+    "desc": "금액이 충분히 있는 계좌를 위한 19종목 포트폴리오입니다.",
     "country_code": "aus",
     "slack_channel": "C09FAU7SKA8",
     "initial_date": "2025-10-01",
     "strategy": {
-        "expected_cagr": 63.86,
-        "backtested_date": "2025-10-21",
+        "MONTHS_RANGE": 3,
+        "expected_cagr": 82.32,
+        "backtested_date": "2025-10-27",
         "tuning": {
-            "MA_PERIOD": 36,
+            "MA_PERIOD": 50,
             "MA_TYPE": "SMA",
-            "PORTFOLIO_TOPN": 3,
-            "REPLACE_SCORE_THRESHOLD": 1,
-            "OVERBOUGHT_SELL_THRESHOLD": 10,
+            "PORTFOLIO_TOPN": 7,
+            "REPLACE_SCORE_THRESHOLD": 2,
+            "OVERBOUGHT_SELL_THRESHOLD": 0,
             "COOLDOWN_DAYS": 1,
-            "CORE_HOLDINGS": [
-                "ASX:GDX"
-            ]
-        },
-        "_tuning": {
-            "expected_cagr": 53.46,
-            "backtested_date": "2025-10-19",
-            "TEST_MONTHS_RANGE": 3,
-            "MA_PERIOD": 40,
-            "MA_TYPE": "SMA",
-            "PORTFOLIO_TOPN": 3,
-            "REPLACE_SCORE_THRESHOLD": 1,
-            "OVERBOUGHT_SELL_THRESHOLD": 10,
-            "COOLDOWN_DAYS": 1
-        },
-        "static": {
-            "MAX_PER_CATEGORY": 1,
-            "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 100
+            "CORE_HOLDINGS": []
         }
     },
     "benchmarks": [
@@ -43,12 +28,12 @@
         {
             "ticker": "ASX:NDQ",
             "name": "BetaShares NASDAQ 100 ETF"
+        },
+        {
+            "ticker": "ASX:IOO",
+            "name": "iShares Global 100 ETF"
         }
     ],
-    "schedule": {
-        "recommendation_cron": "1,11,21,31,41,51 8-15 * * 1-5",
-        "notify_cron": "1,31 8-15 * * 1-5"
-    },
     "slack": {
         "channel": "C09FAU7SKA8"
     }

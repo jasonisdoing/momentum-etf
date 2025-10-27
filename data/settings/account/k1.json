@@ -2,41 +2,29 @@
     "order": 10,
     "icon": "🇰🇷",
     "name": "한국 ETF",
+    "desc": "금액이 충분히 있는 계좌를 위한 19종목 포트폴리오입니다.",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",
     "strategy": {
-        "expected_cagr": 89.32,
-        "backtested_date": "2025-10-21",
+        "MONTHS_RANGE": 3,
+        "expected_cagr": 348.89,
+        "backtested_date": "2025-10-26",
         "tuning": {
-            "MA_PERIOD": 28,
-            "MA_TYPE": "SMA",
-            "PORTFOLIO_TOPN": 6,
-            "REPLACE_SCORE_THRESHOLD": 1,
-            "OVERBOUGHT_SELL_THRESHOLD": 17,
+            "MA_PERIOD": 95,
+            "MA_TYPE": "HMA",
+            "PORTFOLIO_TOPN": 8,
+            "REPLACE_SCORE_THRESHOLD": 0.1,
+            "OVERBOUGHT_SELL_THRESHOLD": 13,
             "COOLDOWN_DAYS": 1,
-            "CORE_HOLDINGS": [
-                "395160",
-                "426030",
-                "473640"
-            ]
-        },
-        "_tuning": {
-            "expected_cagr": 107.44,
-            "backtested_date": "2025-10-21",
-            "MA_PERIOD": 47,
-            "MA_TYPE": "SMA",
-            "PORTFOLIO_TOPN": 6,
-            "REPLACE_SCORE_THRESHOLD": 0.5,
-            "OVERBOUGHT_SELL_THRESHOLD": 17,
-            "COOLDOWN_DAYS": 1
-        },
-        "static": {
-            "MAX_PER_CATEGORY": 1,
-            "MARKET_REGIME_RISK_OFF_EQUITY_RATIO": 90
+            "CORE_HOLDINGS": []
         }
     },
     "benchmarks": [
+        {
+            "ticker": "0097L0",
+            "name": "KIWOOM 한국고배당&미국AI테크"
+        },
         {
             "ticker": "379800",
             "name": "Kodex 미국S&P500"
@@ -48,12 +36,12 @@
         {
             "ticker": "426030",
             "name": "TIMEFOLIO 미국나스닥100액티브"
+        },
+        {
+            "ticker": "456600",
+            "name": "TIMEFOLIO 글로벌AI인공지능액티브"
         }
     ],
-    "schedule": {
-        "recommendation_cron": "1,11,21,31,41,51 9-16 * * 1-5",
-        "notify_cron": "1,31 9-16 * * 1-5"
-    },
     "slack": {
         "channel": "C09FAU2NHM2"
     }

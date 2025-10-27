@@ -20,11 +20,8 @@ from utils.report import (
 )
 from utils.logger import get_app_logger
 from utils.settings_loader import (
-    AccountSettingsError,
     get_backtest_months_range,
     get_account_precision,
-    get_market_regime_settings,
-    load_common_settings,
 )
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
@@ -65,6 +62,7 @@ def print_backtest_summary(
     ticker_summaries: List[Dict[str, Any]],
     core_start_dt: pd.Timestamp,
     emit_to_logger: bool = True,
+    section_start_index: int = 1,
 ) -> List[str]:
     """Return a formatted summary for an account backtest run.
 
@@ -97,13 +95,10 @@ def print_backtest_summary(
 
     if "tuning" in strategy_cfg or "static" in strategy_cfg:
         strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
-        strategy_static = strategy_cfg.get("static") if isinstance(strategy_cfg.get("static"), dict) else {}
     else:  # 구 포맷과의 호환성 유지
         strategy_tuning = strategy_cfg
-        strategy_static = strategy_cfg
 
-    merged_strategy = dict(strategy_static)
-    merged_strategy.update(strategy_tuning)
+    merged_strategy = dict(strategy_tuning)
 
     # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
     cooldown_days = int(strategy_tuning["COOLDOWN_DAYS"])
@@ -123,6 +118,7 @@ def print_backtest_summary(
         money_formatter = format_kr_money
 
     output_lines: List[str] = []
+    section_counter = section_start_index
 
     def add(line: str = "") -> None:
         output_lines.append(line)
@@ -132,22 +128,10 @@ def print_backtest_summary(
             add("")
 
     def add_section_heading(title: str) -> None:
+        nonlocal section_counter
         ensure_blank_line()
-        add(f"========= {title} ==========")
-
-    def append_risk_off_period(start_dt: pd.Timestamp, end_dt: pd.Timestamp, ratio: Optional[int] = None) -> None:
-        start_ts = pd.to_datetime(start_dt)
-        end_ts = pd.to_datetime(end_dt)
-
-        if pd.isna(start_ts) or pd.isna(end_ts):
-            add("| 투자 축소: N/A")
-            return
-
-        diff_days = (end_ts - start_ts).days
-        trading_days = diff_days + 1 if diff_days >= 0 else 0
-
-        invest_ratio = 100 if ratio is None else max(0, min(100, int(ratio)))
-        add(f"| 투자 축소({invest_ratio}% 투자): " f"{start_ts.strftime('%Y-%m-%d')} ~ {end_ts.strftime('%Y-%m-%d')} ({trading_days} 거래일)")
+        add(f"{section_counter}. ========= {title} ==========")
+        section_counter += 1
 
     add_section_heading("사용된 설정값")
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
@@ -159,20 +143,6 @@ def print_backtest_summary(
     # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
     stop_loss_label = f"{holding_stop_loss_pct:.0f}%"
 
-    try:
-        common_settings = load_common_settings()
-        (
-            regime_filter_ticker,
-            regime_filter_ma_period,
-            regime_filter_country,
-            regime_filter_delay_days,
-            regime_filter_equity_ratio,
-        ) = get_market_regime_settings(common_settings)
-    except AccountSettingsError as exc:
-        raise ValueError(str(exc)) from exc
-
-    market_regime_enabled = bool(common_settings.get("MARKET_REGIME_FILTER_ENABLED", True))
-
     used_settings = {
         "계정": account_id.upper(),
         "시장 코드": country_code.upper(),
@@ -183,12 +153,6 @@ def print_backtest_summary(
         "교체 매매 점수 임계값": replace_threshold,
         "개별 종목 손절매": stop_loss_label,
         "매도 후 재매수 금지 기간": f"{cooldown_days}일",
-        "시장 위험 필터": "활성" if market_regime_enabled else "비활성",
-        "시장 위험 필터 티커": regime_filter_ticker,
-        "시장 위험 필터 MA 기간": f"{regime_filter_ma_period}일",
-        "시장 위험 필터 시장": regime_filter_country.upper(),
-        "시장 위험 필터 적용 지연": f"{regime_filter_delay_days}일",
-        "위험 회피 시 목표 주식 비중": f"{regime_filter_equity_ratio}%",
     }
 
     if currency != "KRW":
@@ -200,15 +164,56 @@ def print_backtest_summary(
     for key, value in used_settings.items():
         add(f"| {key}: {value}")
     add_section_heading("지표 설명")
-    add("  - Sharpe Ratio (샤프 지수): 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
-    add("  - Sortino Ratio (소티노 지수): 하락 위험 대비 수익률. 높을수록 좋음 (기준: >2 양호, >3 우수).")
-    add("  - Calmar Ratio (칼마 지수): 최대 낙폭 대비 연간 수익률. 높을수록 좋음 (기준: >1 양호, >3 우수).")
-    add("  - Ulcer Index (얼서 지수): 고점 대비 낙폭의 지속성과 깊이를 반영. 낮을수록 안정적.")
-    add("  - CUI (칼마/얼서): Calmar Ratio를 Ulcer Index로 나눈 값. 상승률 대비 낙폭 위험을 동시에 고려하며, 높을수록 우수.")
+    add("  - Sharpe: 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
+    add("  - SDR (Sharpe/MDD): Sharpe를 MDD(%)로 나눈 값. 수익 대비 최대 낙폭 효율성. 높을수록 우수 (기준: >0.2 양호, >0.3 우수).")
 
+    def _align_korean_money_for_weekly(text: str) -> str:
+        if currency != "KRW" or not isinstance(text, str):
+            return text
+        stripped = text.strip()
+        sign = ""
+        if stripped.startswith("-"):
+            sign = "-"
+            stripped = stripped[1:].strip()
+
+        if "억" in stripped and "만원" in stripped:
+            eok_part, remainder = stripped.split("억", 1)
+            eok_part = eok_part.strip()
+            remainder = remainder.strip()
+            man_part = remainder.replace("만원", "").strip()
+            # 5칸 폭으로 오른쪽 정렬 (콤마 포함)
+            man_part_padded = man_part.rjust(5)
+            return f"{sign}{eok_part}억 {man_part_padded}만원"
+        return text
+
+    add_section_heading("주별 성과 요약")
+    weekly_summary_rows = summary.get("weekly_summary") or []
+    if isinstance(weekly_summary_rows, list) and weekly_summary_rows:
+        headers = ["주차(종료일)", "평가금액", "주간 수익률", "누적 수익률"]
+        table_rows = []
+        for item in weekly_summary_rows:
+            week_label = item.get("week_end") or "-"
+            value = item.get("value")
+            weekly_ret = item.get("weekly_return_pct")
+            cum_ret = item.get("cumulative_return_pct")
+            value_display = money_formatter(value) if _is_finite_number(value) else "-"
+            value_display = _align_korean_money_for_weekly(value_display)
+            table_rows.append(
+                [
+                    week_label,
+                    value_display,
+                    f"{weekly_ret:+.2f}%" if _is_finite_number(weekly_ret) else "-",
+                    f"{cum_ret:+.2f}%" if _is_finite_number(cum_ret) else "-",
+                ]
+            )
+        aligns = ["left", "right", "right", "right"]
+        for line in render_table_eaw(headers, table_rows, aligns):
+            add(line)
+    else:
+        add("| 주별 성과 데이터를 찾을 수 없습니다.")
+
+    add_section_heading("월별 성과 요약")
     if "monthly_returns" in summary and not summary["monthly_returns"].empty:
-        add_section_heading("월별 성과 요약")
-
         monthly_returns = summary["monthly_returns"]
         yearly_returns = summary["yearly_returns"]
         monthly_cum_returns = summary.get("monthly_cum_returns")
@@ -270,9 +275,11 @@ def print_backtest_summary(
         aligns = ["left"] + ["right"] * (len(headers) - 1)
         for line in render_table_eaw(headers, rows_data, aligns):
             add(line)
+    else:
+        add("| 월별 성과 데이터가 없어 표시할 수 없습니다.")
 
+    add_section_heading("종목별 성과 요약")
     if ticker_summaries:
-        add_section_heading("종목별 성과 요약")
         headers = [
             "티커",
             "종목명",
@@ -304,27 +311,11 @@ def print_backtest_summary(
         table_lines = render_table_eaw(headers, rows, aligns)
         for line in table_lines:
             add(line)
+    else:
+        add("| 종목별 성과 데이터가 없어 표시할 수 없습니다.")
 
     add_section_heading("백테스트 결과 요약")
     add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
-
-    risk_off_periods = summary.get("risk_off_periods")
-    regime_equity_ratio = summary.get("regime_filter_equity_ratio")
-    if isinstance(risk_off_periods, pd.DataFrame):
-        if not risk_off_periods.empty:
-            for _, row in risk_off_periods.iterrows():
-                append_risk_off_period(row.get("start"), row.get("end"), regime_equity_ratio)
-        else:
-            add("| 투자 축소: N/A")
-    elif risk_off_periods:
-        for period in risk_off_periods:
-            if isinstance(period, (list, tuple)):
-                if len(period) >= 3:
-                    append_risk_off_period(period[0], period[1], period[2])
-                elif len(period) == 2:
-                    append_risk_off_period(period[0], period[1], regime_equity_ratio)
-    else:
-        add("| 투자 축소: N/A")
 
     add(f"| 초기 자본: {money_formatter(initial_capital_local)}")
     if currency != "KRW":
@@ -332,11 +323,10 @@ def print_backtest_summary(
     add(f"| 최종 자산: {money_formatter(final_value_local)}")
     if currency != "KRW":
         add(f"| 최종 자산 (KRW): {format_kr_money(final_value_krw_value)}")
-    add(f"| 누적 수익률: {summary['cumulative_return_pct']:+.2f}%")
 
     benchmarks_info = summary.get("benchmarks")
     if isinstance(benchmarks_info, list) and benchmarks_info:
-        add("| 벤치마크")
+        add("| 벤치마크 기간수익률(%)")
         for idx, bench in enumerate(benchmarks_info, start=1):
             name = str(bench.get("name") or bench.get("ticker") or "-").strip()
             ticker = str(bench.get("ticker") or "-").strip()
@@ -347,12 +337,10 @@ def print_backtest_summary(
         benchmark_name = summary.get("benchmark_name") or "S&P 500"
         bench_ret = summary.get("benchmark_cum_ret_pct")
         if bench_ret is not None:
-            add(f"| 벤치마크: {benchmark_name}: {bench_ret:+.2f}%")
-
-    add(f"| CAGR (연간 복리 성장률): {summary['cagr_pct']:+.2f}%")
+            add(f"| 벤치마크 기간수익률(%): {benchmark_name}: {bench_ret:+.2f}%")
 
     if isinstance(benchmarks_info, list) and benchmarks_info:
-        add("| 벤치마크 CAGR")
+        add("| 벤치마크 CAGR(%)")
         for idx, bench in enumerate(benchmarks_info, start=1):
             name = str(bench.get("name") or bench.get("ticker") or "-").strip()
             ticker = str(bench.get("ticker") or "-").strip()
@@ -363,13 +351,22 @@ def print_backtest_summary(
         benchmark_name = summary.get("benchmark_name") or "S&P 500"
         bench_cagr = summary.get("benchmark_cagr_pct")
         if bench_cagr is not None:
-            add(f"| 벤치마크 CAGR: {benchmark_name}: {bench_cagr:+.2f}%")
-    add(f"| MDD (최대 낙폭): {-summary['mdd_pct']:.2f}%")
-    add(f"| Sharpe Ratio: {summary.get('sharpe_ratio', 0.0):.2f}")
-    add(f"| Sortino Ratio: {summary.get('sortino_ratio', 0.0):.2f}")
-    add(f"| Calmar Ratio: {summary.get('calmar_ratio', 0.0):.2f}")
-    add(f"| Ulcer Index: {summary.get('ulcer_index', 0.0):.2f}")
-    add(f"| CUI (Calmar/Ulcer): {summary.get('cui', 0.0):.2f}")
+            add(f"| 벤치마크 CAGR(%): {benchmark_name}: {bench_cagr:+.2f}%")
+
+    if isinstance(benchmarks_info, list) and benchmarks_info:
+        add("| 벤치마크 SDR(Sharpe/MDD)")
+        for idx, bench in enumerate(benchmarks_info, start=1):
+            name = str(bench.get("name") or bench.get("ticker") or "-").strip()
+            ticker = str(bench.get("ticker") or "-").strip()
+            sdr = bench.get("sharpe_to_mdd")
+            sdr_label = f"{float(sdr):.3f}" if sdr is not None else "N/A"
+            add(f"| {idx}. {name}({ticker}): {sdr_label}")
+
+    add(f"| 기간수익률(%): {summary['period_return']:+.2f}%")
+    add(f"| CAGR(%): {summary['cagr']:+.2f}%")
+    add(f"| MDD(%): {-summary['mdd']:.2f}%")
+    add(f"| Sharpe: {summary.get('sharpe', 0.0):.2f}")
+    add(f"| SDR (Sharpe/MDD): {summary.get('sharpe_to_mdd', 0.0):.3f}")
 
     if emit_to_logger:
         for line in output_lines:
@@ -648,6 +645,8 @@ def _generate_daily_report_lines(
     portfolio_df = result.portfolio_timeseries
     lines: List[str] = []
 
+    price_header = "현재가"
+
     headers = [
         "#",
         "티커",
@@ -655,7 +654,7 @@ def _generate_daily_report_lines(
         "카테고리",
         "상태",
         "보유일",
-        "현재가",
+        price_header,
         "일간(%)",
         "보유수량",
         "보유금액",
@@ -676,7 +675,7 @@ def _generate_daily_report_lines(
         "left",  # 카테고리
         "center",  # 상태
         "right",  # 보유일
-        "right",  # 현재가
+        "right",  # 현재가 계열
         "right",  # 일간(%)
         "right",  # 보유수량
         "right",  # 보유금액
@@ -785,15 +784,24 @@ def dump_backtest_log(
 ) -> Path:
     """Write a detailed backtest log to disk and return the file path."""
 
-    base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
-    base_dir.mkdir(parents=True, exist_ok=True)
     account_id = result.account_id
     country_code = result.country_code
 
-    path = base_dir / f"backtest_{account_id}.log"
+    # 계정별 폴더 생성
+    if results_dir is not None:
+        base_dir = Path(results_dir) / account_id
+    else:
+        base_dir = DEFAULT_RESULTS_DIR / account_id
+
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    # 파일명에 날짜 추가
+    date_str = pd.Timestamp.now().strftime("%Y-%m-%d")
+    path = base_dir / f"backtest_{date_str}.log"
     lines: List[str] = []
 
     lines.append(f"백테스트 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")
+    lines.append("1. ========= 기본정보 ==========")
     lines.append(f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}")
     base_line = f"초기 자본: {result.initial_capital:,.0f} {result.currency or 'KRW'}"
     if (result.currency or "KRW").upper() != "KRW":
@@ -801,6 +809,7 @@ def dump_backtest_log(
     base_line += f" | 포트폴리오 TOPN: {result.portfolio_topn}"
     lines.append(base_line)
     lines.append("")
+    lines.append("2. ========= 일자별 성과 상세 ==========")
 
     daily_lines = _generate_daily_report_lines(result, account_settings)
     lines.extend(daily_lines)
@@ -815,6 +824,7 @@ def dump_backtest_log(
         ticker_summaries=getattr(result, "ticker_summaries", []),
         core_start_dt=result.start_date,
         emit_to_logger=False,
+        section_start_index=3,
     )
     if summary_section:
         lines.extend(summary_section)

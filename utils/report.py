@@ -41,25 +41,11 @@ def format_aud_money(value: float) -> str:
     return f"A${value:,.2f}"
 
 
-def format_aud_price(value: float) -> str:
-    """호주 주식 가격을 소수점 4자리까지 포맷합니다."""
-    if value is None:
-        return "-"
-    return f"{value:,.4f}"
-
-
 def format_usd_money(value: float) -> str:
     """금액을 미국 달러($) 형식의 문자열로 포맷합니다."""
     if value is None:
         return "-"
     return f"${value:,.2f}"
-
-
-def format_usd_price(value: float) -> str:
-    """미국 주식 가격을 소수점 2자리까지 포맷합니다."""
-    if value is None:
-        return "-"
-    return f"{value:,.2f}"
 
 
 def render_table_eaw(headers: List[str], rows: List[List[str]], aligns: List[str]) -> List[str]:
@@ -124,24 +110,3 @@ def render_table_eaw(headers: List[str], rows: List[List[str]], aligns: List[str
         out.append("| " + " | ".join(cells) + " |")
     out.append(_hline())
     return out
-
-
-def render_table_html(headers: List[str], rows: List[List[str]], aligns: List[str]) -> str:
-    """리스트 데이터를 HTML 테이블 문자열로 렌더링합니다. (행 높이 여유 있게 표시)"""
-    html = '<table border="1" style="border-collapse: collapse; width: 100%;">'
-    # Header
-    html += "<thead><tr>"
-    for i, h in enumerate(headers):
-        align_style = f"text-align: {aligns[i]};" if i < len(aligns) else ""
-        html += f'<th style="padding: 8px; {align_style} line-height: 2;">{h}</th>'
-    html += "</tr></thead>"
-    # Body
-    html += "<tbody>"
-    for r in rows:
-        html += "<tr>"
-        for i, cell in enumerate(r):
-            align_style = f"text-align: {aligns[i]};" if i < len(aligns) else ""
-            html += f'<td style="padding: 8px; {align_style} line-height: 2;">{cell}</td>'
-        html += "</tr>"
-    html += "</tbody></table>"
-    return html

@@ -25,7 +25,6 @@ from utils.settings_loader import (
     get_backtest_months_range,
     load_common_settings,
     get_tune_month_configs,
-    get_market_regime_settings,
 )
 from utils.logger import get_app_logger
 from utils.data_loader import (
@@ -69,7 +68,7 @@ def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:
     return list(dict.fromkeys(normalized))
 
 
-def _resolve_month_configs(months_range: Optional[int]) -> List[Dict[str, Any]]:
+def _resolve_month_configs(months_range: Optional[int], account_id: str = None) -> List[Dict[str, Any]]:
     if months_range is not None:
         try:
             months = int(months_range)
@@ -85,7 +84,7 @@ def _resolve_month_configs(months_range: Optional[int]) -> List[Dict[str, Any]]:
             }
         ]
 
-    configs = get_tune_month_configs()
+    configs = get_tune_month_configs(account_id=account_id)
     if configs:
         return configs
 
@@ -177,13 +176,13 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
     if months_range:
         headers.append(f"{months_range}개월(%)")
     else:
-        headers.append("Period(%)")
-    headers.extend(["Sharpe", "Sortino", "Calmar", "Ulcer", "CUI"])
+        headers.append("기간수익률(%)")
+    headers.extend(["Sharpe", "SDR(Sharpe/MDD)"])
     if include_samples:
         headers.append("Samples")
 
     # 정렬 방향 설정 (right: 오른쪽 정렬, left: 왼쪽 정렬, center: 가운데 정렬)
-    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right", "right", "right", "right", "right", "right"]
+    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right", "right", "right"]
     if include_samples:
         aligns.append("right")
 
@@ -207,10 +206,7 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
             _format_table_float(row.get("mdd")),
             _format_table_float(row.get("period_return")),
             _format_table_float(row.get("sharpe")),
-            _format_table_float(row.get("sortino")),
-            _format_table_float(row.get("calmar")),
-            _format_table_float(row.get("ulcer")),
-            _format_table_float(row.get("cui")),
+            _format_table_float(row.get("sharpe_to_mdd"), digits=3),
         ]
 
         if include_samples:
@@ -248,11 +244,11 @@ def _export_prefetched_data(debug_dir: Path, prefetched_data: Mapping[str, DataF
 def _extract_summary(result) -> Dict[str, Any]:
     summary = result.summary or {}
     return {
-        "cagr": float(summary.get("cagr_pct") or 0.0),
-        "mdd": float(summary.get("mdd_pct") or 0.0),
-        "calmar": float(summary.get("calmar_ratio") or 0.0),
-        "sharpe": float(summary.get("sharpe_ratio") or 0.0),
-        "period_return": float(summary.get("cumulative_return_pct") or 0.0),
+        "cagr": float(summary.get("cagr") or 0.0),
+        "mdd": float(summary.get("mdd") or 0.0),
+        "sharpe": float(summary.get("sharpe") or 0.0),
+        "sharpe_to_mdd": float(summary.get("sharpe_to_mdd") or 0.0),
+        "period_return": float(summary.get("period_return") or 0.0),
         "start_date": result.start_date.strftime("%Y-%m-%d"),
         "end_date": result.end_date.strftime("%Y-%m-%d"),
         "excluded": list(result.missing_tickers),
@@ -415,13 +411,12 @@ def _export_debug_month(
 
 
 def _evaluate_single_combo(
-    payload: Tuple[str, int, Tuple[str, str], int, int, int, float, int, int, str, Tuple[str, ...], Tuple[str, ...], Mapping[str, DataFrame]]
+    payload: Tuple[str, int, Tuple[str, str], int, int, float, int, int, str, Tuple[str, ...], Tuple[str, ...], Mapping[str, DataFrame]]
 ) -> Tuple[str, Any, List[str]]:
     (
         account_norm,
         months_range,
         date_range,
-        regime_ma_period,
         ma_int,
         topn_int,
         threshold_float,
@@ -455,11 +450,10 @@ def _evaluate_single_combo(
             [],
         )
 
-    strategy_overrides: Dict[str, Any] = {}
-    if regime_ma_period > 0:
-        strategy_overrides["MARKET_REGIME_FILTER_MA_PERIOD"] = regime_ma_period
-    strategy_overrides["OVERBOUGHT_SELL_THRESHOLD"] = rsi_int
-    strategy_overrides["COOLDOWN_DAYS"] = cooldown_int
+    strategy_overrides: Dict[str, Any] = {
+        "OVERBOUGHT_SELL_THRESHOLD": rsi_int,
+        "COOLDOWN_DAYS": cooldown_int,
+    }
 
     try:
         bt_result = run_account_backtest(
@@ -499,16 +493,13 @@ def _evaluate_single_combo(
         "rsi_sell_threshold": rsi_int,
         "cooldown_days": cooldown_int,
         "ma_type": ma_type_str,
-        "cagr_pct": _round_float(_safe_float(summary.get("cagr_pct"), 0.0)),
-        "mdd_pct": _round_float(_safe_float(summary.get("mdd_pct"), 0.0)),
-        "sharpe_ratio": _round_float(_safe_float(summary.get("sharpe_ratio"), 0.0)),
-        "sortino_ratio": _round_float(_safe_float(summary.get("sortino_ratio"), 0.0)),
-        "calmar_ratio": _round_float(_safe_float(summary.get("calmar_ratio"), 0.0)),
-        "cumulative_return_pct": _round_float(_safe_float(summary.get("cumulative_return_pct"), 0.0)),
+        "cagr": _round_float(_safe_float(summary.get("cagr"), 0.0)),
+        "mdd": _round_float(_safe_float(summary.get("mdd"), 0.0)),
+        "sharpe": _round_float(_safe_float(summary.get("sharpe"), 0.0)),
+        "sharpe_to_mdd": _round_float(_safe_float(summary.get("sharpe_to_mdd"), 0.0)),
+        "period_return": _round_float(_safe_float(summary.get("period_return"), 0.0)),
         "final_value_local": final_value_local,
         "final_value": final_value_krw,
-        "cui": _round_float(_safe_float(summary.get("cui"), 0.0)),
-        "ulcer_index": _round_float(_safe_float(summary.get("ulcer_index"), 0.0)),
     }
 
     missing = getattr(bt_result, "missing_tickers", []) or []
@@ -521,7 +512,6 @@ def _execute_tuning_for_months(
     months_range: int,
     search_space: Mapping[str, List[Any]],
     end_date: Timestamp,
-    regime_ma_period: int,
     excluded_tickers: Optional[Collection[str]],
     prefetched_data: Mapping[str, DataFrame],
     output_path: Optional[Path] = None,
@@ -580,7 +570,6 @@ def _execute_tuning_for_months(
             account_norm,
             months_range,
             date_range,
-            regime_ma_period,
             int(ma),
             int(topn),
             float(replace),
@@ -615,7 +604,7 @@ def _execute_tuning_for_months(
 
                 # 1%마다 중간 저장 (성공한 조합이 있을 때만)
                 if success_entries and output_path and progress_callback:
-                    current_best_cagr = max(_safe_float(entry.get("cagr_pct"), float("-inf")) for entry in success_entries)
+                    current_best_cagr = max(_safe_float(entry.get("cagr"), float("-inf")) for entry in success_entries)
                     if current_best_cagr > best_cagr_so_far:
                         best_cagr_so_far = current_best_cagr
 
@@ -649,7 +638,7 @@ def _execute_tuning_for_months(
 
                     # 1%마다 중간 저장 (성공한 조합이 있을 때만)
                     if success_entries and output_path and progress_callback:
-                        current_best_cagr = max(_safe_float(entry.get("cagr_pct"), float("-inf")) for entry in success_entries)
+                        current_best_cagr = max(_safe_float(entry.get("cagr"), float("-inf")) for entry in success_entries)
                         if current_best_cagr > best_cagr_so_far:
                             best_cagr_so_far = current_best_cagr
 
@@ -665,24 +654,20 @@ def _execute_tuning_for_months(
         logger.warning("[튜닝] %s (%d개월) 성공한 조합이 없습니다.", account_norm.upper(), months_range)
         return None
 
-    def _sort_key(entry: Dict[str, Any]) -> Tuple[float, float]:
-        cagr = _safe_float(entry.get("cagr_pct"), float("-inf"))
-        mdd = _safe_float(entry.get("mdd_pct"), float("inf"))
-        return (cagr, -mdd)
+    def _sort_key(entry: Dict[str, Any]) -> float:
+        sharpe_to_mdd = _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
+        return sharpe_to_mdd
 
     success_entries.sort(key=_sort_key, reverse=True)
     best_entry = success_entries[0]
 
     raw_data_payload: List[Dict[str, Any]] = []
     for item in success_entries:
-        cagr_val = _safe_float(item.get("cagr_pct"), float("nan"))
-        mdd_val = _safe_float(item.get("mdd_pct"), float("nan"))
-        period_return_val = _safe_float(item.get("cumulative_return_pct"), float("nan"))
-        sharpe_val = _safe_float(item.get("sharpe_ratio"), float("nan"))
-        sortino_val = _safe_float(item.get("sortino_ratio"), float("nan"))
-        calmar_val = _safe_float(item.get("calmar_ratio"), float("nan"))
-        ulcer_val = _safe_float(item.get("ulcer_index"), float("nan"))
-        cui_val = _safe_float(item.get("cui"), float("nan"))
+        cagr_val = _safe_float(item.get("cagr"), float("nan"))
+        mdd_val = _safe_float(item.get("mdd"), float("nan"))
+        period_return_val = _safe_float(item.get("period_return"), float("nan"))
+        sharpe_val = _safe_float(item.get("sharpe"), float("nan"))
+        sharpe_to_mdd_val = _safe_float(item.get("sharpe_to_mdd"), float("nan"))
 
         raw_data_payload.append(
             {
@@ -690,11 +675,8 @@ def _execute_tuning_for_months(
                 "CAGR": _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None,
                 "MDD": _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None,
                 "period_return": _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None,
-                "sharpe_ratio": _round_float_places(sharpe_val, 2) if math.isfinite(sharpe_val) else None,
-                "sortino_ratio": _round_float_places(sortino_val, 2) if math.isfinite(sortino_val) else None,
-                "calmar_ratio": _round_float_places(calmar_val, 2) if math.isfinite(calmar_val) else None,
-                "ulcer_index": _round_float_places(ulcer_val, 2) if math.isfinite(ulcer_val) else None,
-                "cui": _round_float_places(cui_val, 2) if math.isfinite(cui_val) else None,
+                "sharpe": _round_float_places(sharpe_val, 2) if math.isfinite(sharpe_val) else None,
+                "sharpe_to_mdd": _round_float_places(sharpe_to_mdd_val, 3) if math.isfinite(sharpe_to_mdd_val) else None,
                 "tuning": {
                     "MA_PERIOD": int(item.get("ma_period", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
@@ -711,7 +693,6 @@ def _execute_tuning_for_months(
         "best": best_entry,
         "failures": failures,
         "success_count": len(success_entries),
-        "regime_ma_period": regime_ma_period,
         "missing_tickers": sorted(encountered_missing),
         "raw_data": raw_data_payload,
     }
@@ -750,38 +731,29 @@ def _build_run_entry(
         except (TypeError, ValueError):
             weight = 0.0
 
-        cagr_val = _safe_float(best.get("cagr_pct"), float("nan"))
+        cagr_val = _safe_float(best.get("cagr"), float("nan"))
         if math.isfinite(cagr_val):
             weighted_cagr_sum += weight * cagr_val
             weighted_cagr_weight += weight
             cagr_values.append(cagr_val)
 
-        mdd_val = _safe_float(best.get("mdd_pct"), float("nan"))
+        mdd_val = _safe_float(best.get("mdd"), float("nan"))
         if math.isfinite(mdd_val):
             weighted_mdd_sum += weight * mdd_val
             weighted_mdd_weight += weight
             mdd_values.append(mdd_val)
 
-        period_return_val = _safe_float(best.get("cumulative_return_pct"), float("nan"))
+        period_return_val = _safe_float(best.get("period_return"), float("nan"))
         period_return_display = _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None
         cagr_display = _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None
         mdd_display = _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None
 
         # 추가 지표 추출
-        sharpe_val = _safe_float(best.get("sharpe_ratio"), float("nan"))
+        sharpe_val = _safe_float(best.get("sharpe"), float("nan"))
         sharpe_display = _round_float_places(sharpe_val, 2) if math.isfinite(sharpe_val) else None
 
-        sortino_val = _safe_float(best.get("sortino_ratio"), float("nan"))
-        sortino_display = _round_float_places(sortino_val, 2) if math.isfinite(sortino_val) else None
-
-        calmar_val = _safe_float(best.get("calmar_ratio"), float("nan"))
-        calmar_display = _round_float_places(calmar_val, 2) if math.isfinite(calmar_val) else None
-
-        ulcer_val = _safe_float(best.get("ulcer_index"), float("nan"))
-        ulcer_display = _round_float_places(ulcer_val, 2) if math.isfinite(ulcer_val) else None
-
-        cui_val = _safe_float(best.get("cui"), float("nan"))
-        cui_display = _round_float_places(cui_val, 2) if math.isfinite(cui_val) else None
+        sharpe_to_mdd_val = _safe_float(best.get("sharpe_to_mdd"), float("nan"))
+        sharpe_to_mdd_display = _round_float_places(sharpe_to_mdd_val, 2) if math.isfinite(sharpe_to_mdd_val) else None
 
         def _to_int(val: Any) -> Optional[int]:
             try:
@@ -824,11 +796,8 @@ def _build_run_entry(
                 "CAGR": cagr_display,
                 "MDD": mdd_display,
                 "period_return": period_return_display,
-                "sharpe_ratio": sharpe_display,
-                "sortino_ratio": sortino_display,
-                "calmar_ratio": calmar_display,
-                "ulcer_index": ulcer_display,
-                "cui": cui_display,
+                "sharpe": sharpe_display,
+                "sharpe_to_mdd": sharpe_to_mdd_display,
                 "tuning": tuning_snapshot,
             }
         )
@@ -1005,7 +974,6 @@ def _compose_tuning_report(
     account_id: str,
     *,
     month_results: List[Dict[str, Any]],
-    aggregated_entry: Dict[str, Any],
     progress_info: Optional[Dict[str, Any]] = None,
     tuning_metadata: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
@@ -1143,11 +1111,8 @@ def _compose_tuning_report(
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
             period_val = entry.get("period_return")
-            sharpe_val = entry.get("sharpe_ratio")
-            sortino_val = entry.get("sortino_ratio")
-            calmar_val = entry.get("calmar_ratio")
-            ulcer_val = entry.get("ulcer_index")
-            cui_val = entry.get("cui")
+            sharpe_val = entry.get("sharpe")
+            sharpe_to_mdd_val = entry.get("sharpe_to_mdd")
 
             normalized_rows.append(
                 {
@@ -1161,15 +1126,12 @@ def _compose_tuning_report(
                     "mdd": mdd_val,
                     "period_return": period_val,
                     "sharpe": sharpe_val,
-                    "sortino": sortino_val,
-                    "calmar": calmar_val,
-                    "ulcer": ulcer_val,
-                    "cui": cui_val,
+                    "sharpe_to_mdd": sharpe_to_mdd_val,
                 }
             )
 
-        normalized_rows.sort(key=lambda row: _safe_float(row.get("cagr"), float("-inf")), reverse=True)
-        lines.append(f"=== 최근 {months_range}개월 결과 - 정렬 기준: CAGR ===")
+        normalized_rows.sort(key=lambda row: _safe_float(row.get("sharpe_to_mdd"), float("-inf")), reverse=True)
+        lines.append(f"=== 최근 {months_range}개월 결과 - 정렬 기준: SDR(Sharpe/MDD) ===")
         lines.extend(_render_tuning_table(normalized_rows, months_range=months_range))
         lines.append("")
 
@@ -1181,7 +1143,6 @@ def _save_intermediate_results(
     *,
     account_id: str,
     month_results: List[Dict[str, Any]],
-    aggregated_entry: Dict[str, Any],
     progress_info: Optional[Dict[str, Any]] = None,
     tuning_metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -1190,7 +1151,6 @@ def _save_intermediate_results(
         report_lines = _compose_tuning_report(
             account_id,
             month_results=month_results,
-            aggregated_entry=aggregated_entry,
             progress_info=progress_info,
             tuning_metadata=tuning_metadata,
         )
@@ -1234,13 +1194,14 @@ def run_account_tuning(
         logger.error("[튜닝] 계정 설정 로딩 실패: %s", exc)
         return None
 
-    country_code = (account_settings.get("country_code") or account_norm).strip().lower()
-
     config_map = tuning_config or {}
-    config = config_map.get(account_norm) or config_map.get(country_code)
+    config = config_map.get(account_norm)
     if not config:
         logger.warning("[튜닝] '%s' 계정에 대한 튜닝 설정이 없습니다.", account_norm.upper())
         return None
+
+    # country_code는 ETF 리스트 조회용으로 필요
+    country_code = (account_settings.get("country_code") or account_norm).strip().lower()
 
     debug_dir: Optional[Path] = None
     capture_top_n = 0
@@ -1324,29 +1285,6 @@ def run_account_tuning(
         "CORE_HOLDINGS": core_holdings,
     }
 
-    try:
-        regime_ticker, regime_ma_period, regime_country, _regime_delay_days, _regime_equity_ratio = get_market_regime_settings()
-    except AccountSettingsError as exc:
-        logger.error("[튜닝] 공통 시장 레짐 설정을 불러오지 못했습니다: %s", exc)
-        return None
-
-    try:
-        regime_ma_period = int(regime_ma_period)
-    except (TypeError, ValueError):
-        logger.warning(
-            "[튜닝] 공통 레짐 MA 기간을 확인할 수 없어 기본값(%d)을 사용합니다.",
-            base_rules.ma_period,
-        )
-        regime_ma_period = base_rules.ma_period
-    else:
-        if regime_ma_period <= 0:
-            logger.warning(
-                "[튜닝] 공통 레짐 MA 기간이 0 이하(%d)로 설정되어 기본값(%d)으로 대체합니다.",
-                regime_ma_period,
-                base_rules.ma_period,
-            )
-            regime_ma_period = base_rules.ma_period
-
     ma_count = len(ma_values)
     topn_count = len(topn_values)
     replace_count = len(replace_values)
@@ -1367,9 +1305,7 @@ def run_account_tuning(
     except ValueError:
         ma_max = base_rules.ma_period
 
-    regime_ma_max = max(regime_ma_period, 1)
-
-    month_items = _resolve_month_configs(months_range)
+    month_items = _resolve_month_configs(months_range, account_id=account_id)
     if not month_items:
         logger.error("[튜닝] 테스트할 기간 설정이 없습니다.")
         return None
@@ -1395,7 +1331,7 @@ def run_account_tuning(
         end_date.strftime("%Y-%m-%d"),
     ]
 
-    warmup_days = int(max(ma_max, base_rules.ma_period, regime_ma_max) * 1.5)
+    warmup_days = int(max(ma_max, base_rules.ma_period) * 1.5)
 
     logger.info(
         "[튜닝] 데이터 프리패치: 티커 %d개, 기간 %s~%s, 웜업 %d일",
@@ -1424,24 +1360,12 @@ def run_account_tuning(
         start_date=date_range_prefetch[0],
         end_date=date_range_prefetch[1],
         warmup_days=warmup_days,
+        skip_realtime=True,
     )
     prefetched_map: Dict[str, DataFrame] = dict(prefetched)
 
     for ticker, frame in prefetched_map.items():
         save_cached_frame(country_code, ticker, frame)
-
-    if regime_ticker and regime_ticker not in prefetched_map:
-        regime_prefetch = fetch_ohlcv(
-            regime_ticker,
-            country=regime_country,
-            date_range=date_range_prefetch,
-            cache_country="common",
-        )
-        if regime_prefetch is not None and not regime_prefetch.empty:
-            prefetched_map[regime_ticker] = regime_prefetch
-            save_cached_frame("common", regime_ticker, regime_prefetch)
-        else:
-            missing_prefetch.append(regime_ticker)
 
     excluded_ticker_set: set[str] = {str(ticker).strip().upper() for ticker in missing_prefetch if isinstance(ticker, str) and str(ticker).strip()}
     if excluded_ticker_set:
@@ -1458,11 +1382,15 @@ def run_account_tuning(
     runtime_missing_registry: Set[str] = set()
     results_per_month: List[Dict[str, Any]] = []
 
-    # 출력 경로 미리 결정 (중간 저장용)
-    base_dir = Path(results_dir) if results_dir is not None else DEFAULT_RESULTS_DIR
+    # 출력 경로 미리 결정 (중간 저장용) - 계정별 폴더
+    if results_dir is not None:
+        base_dir = Path(results_dir) / account_norm
+    else:
+        base_dir = DEFAULT_RESULTS_DIR / account_norm
+
     if output_path is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
-        txt_path = base_dir / f"tune_{account_norm}_{date_str}.log"
+        txt_path = base_dir / f"tune_{date_str}.log"
     else:
         txt_path = Path(output_path)
         if txt_path.suffix.lower() not in (".log", ".txt"):
@@ -1538,6 +1466,7 @@ def run_account_tuning(
             start_date=adjusted_date_range[0],
             end_date=adjusted_date_range[1],
             warmup_days=warmup_days,
+            skip_realtime=True,
         )
         prefetched_map.update(prefetched_adjusted)
         for ticker, frame in prefetched_adjusted.items():
@@ -1556,14 +1485,11 @@ def run_account_tuning(
                 "raw_data": [
                     {
                         "MONTHS_RANGE": months_value,
-                        "CAGR": _round_float_places(entry.get("cagr_pct", 0.0), 2),
-                        "MDD": _round_float_places(-entry.get("mdd_pct", 0.0), 2),
-                        "period_return": _round_float_places(entry.get("cumulative_return_pct", 0.0), 2),
-                        "sharpe_ratio": _round_float_places(entry.get("sharpe_ratio", 0.0), 2),
-                        "sortino_ratio": _round_float_places(entry.get("sortino_ratio", 0.0), 2),
-                        "calmar_ratio": _round_float_places(entry.get("calmar_ratio", 0.0), 2),
-                        "ulcer_index": _round_float_places(entry.get("ulcer_index", 0.0), 2),
-                        "cui": _round_float_places(entry.get("cui", 0.0), 2),
+                        "CAGR": _round_float_places(entry.get("cagr", 0.0), 2),
+                        "MDD": _round_float_places(-entry.get("mdd", 0.0), 2),
+                        "period_return": _round_float_places(entry.get("period_return", 0.0), 2),
+                        "sharpe": _round_float_places(entry.get("sharpe", 0.0), 2),
+                        "sharpe_to_mdd": _round_float_places(entry.get("sharpe_to_mdd", 0.0), 3),
                         "tuning": {
                             "MA_PERIOD": int(entry.get("ma_period", 0)),
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
@@ -1573,17 +1499,15 @@ def run_account_tuning(
                             "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
                         },
                     }
-                    for entry in sorted(success_entries, key=lambda e: _safe_float(e.get("cagr_pct"), float("-inf")), reverse=True)
+                    for entry in sorted(success_entries, key=lambda e: _safe_float(e.get("sharpe_to_mdd"), float("-inf")), reverse=True)
                 ],
             }
 
             temp_results = results_per_month + [temp_result]
-            intermediate_entry = _build_run_entry(months_results=temp_results)
             _save_intermediate_results(
                 txt_path,
                 account_id=account_norm,
                 month_results=temp_results,
-                aggregated_entry=intermediate_entry,
                 progress_info={
                     "completed": completed,
                     "total": total,
@@ -1598,7 +1522,6 @@ def run_account_tuning(
             months_range=months_value,
             search_space=search_space,
             end_date=end_date,
-            regime_ma_period=regime_ma_period,
             excluded_tickers=excluded_ticker_set,
             prefetched_data=prefetched_map,
             output_path=txt_path,
@@ -1622,12 +1545,10 @@ def run_account_tuning(
 
         # 각 기간 완료 시마다 중간 결과 저장
         if results_per_month:
-            intermediate_entry = _build_run_entry(months_results=results_per_month)
             _save_intermediate_results(
                 txt_path,
                 account_id=account_norm,
                 month_results=results_per_month,
-                aggregated_entry=intermediate_entry,
                 progress_info={
                     "completed": len(results_per_month),
                     "total": len(month_items),
@@ -1671,7 +1592,7 @@ def run_account_tuning(
     for item in results_per_month:
         best = item.get("best", {})
         logger.info(
-            "[튜닝] %s (%d개월) 최적 조합: MA=%d / TOPN=%d / TH=%.3f / RSI=%d / COOLDOWN=%d / REGIME_MA=%d / CAGR=%.2f%%",
+            "[튜닝] %s (%d개월) 최적 조합: MA=%d / TOPN=%d / TH=%.3f / RSI=%d / COOLDOWN=%d / CAGR=%.2f%%",
             account_norm.upper(),
             item.get("months_range"),
             best.get("ma_period", 0),
@@ -1679,7 +1600,6 @@ def run_account_tuning(
             best.get("replace_threshold", 0.0),
             best.get("rsi_sell_threshold", 10),
             best.get("cooldown_days", 2),
-            item.get("regime_ma_period", 0),
             best.get("cagr_pct", 0.0),
         )
 
@@ -1737,7 +1657,6 @@ def run_account_tuning(
     report_lines = _compose_tuning_report(
         account_norm,
         month_results=results_per_month,
-        aggregated_entry=entry,
         tuning_metadata=tuning_metadata,
     )
 

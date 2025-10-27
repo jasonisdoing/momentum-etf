@@ -1,19 +1,11 @@
-"""선택된 전략을 전략 로더를 통해 노출하는 엔트리 포인트."""
+"""MAPS 전략 컴포넌트를 노출하는 엔트리 포인트."""
 
 from __future__ import annotations
 
-from logic.strategy_loader import (
-    get_backtest_module,
-    get_constants_module,
-    get_recommend_module,
-    get_rules_module,
-)
-
-# 모듈 로드
-_backtest_mod = get_backtest_module()
-_constants_mod = get_constants_module()
-_recommend_mod = get_recommend_module()
-_rules_mod = get_rules_module()
+from strategies.maps import backtest as _backtest_mod
+from strategies.maps import constants as _constants_mod
+from strategies.maps import recommend as _recommend_mod
+from strategies.maps import rules as _rules_mod
 
 # 전략 규칙 클래스
 StrategyRules = getattr(_rules_mod, "StrategyRules")

@@ -4,7 +4,7 @@
 개별 종목에 대한 백테스트를 수행합니다.
 """
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import pandas as pd
 

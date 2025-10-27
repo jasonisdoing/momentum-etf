@@ -17,8 +17,8 @@ from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
 from logic.recommend.output import print_run_header
 from utils.logger import get_app_logger
 from utils.stock_list_io import get_etfs
-from utils.data_loader import prepare_price_data, fetch_ohlcv, get_latest_trading_day
-from utils.settings_loader import get_backtest_months_range, get_market_regime_settings, load_common_settings
+from utils.data_loader import prepare_price_data, get_latest_trading_day
+from utils.settings_loader import get_backtest_months_range, load_common_settings
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
@@ -40,14 +40,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _determine_warmup_days(ma_period: int, regime_ma_period: int | None) -> int:
-    pivot = max(ma_period, regime_ma_period or ma_period)
-    return int(max(0, pivot) * 1.5)
-
-
 def main() -> None:
     logger = get_app_logger()
 
+    # 파서 생성 및 인자 파싱
     parser = build_parser()
     args = parser.parse_args()
 
@@ -66,8 +62,8 @@ def main() -> None:
         end_date = pd.Timestamp.now().normalize()
     start_date = end_date - pd.DateOffset(months=months_range)
 
-    regime_ticker, regime_ma_period, regime_country, regime_delay, regime_equity_ratio = get_market_regime_settings()
-    warmup_days = _determine_warmup_days(strategy_rules.ma_period, regime_ma_period)
+    # 웜업 기간을 전략의 MA_PERIOD로 설정
+    warmup_days = strategy_rules.ma_period
 
     tickers = [etf["ticker"] for etf in get_etfs(country_code)]
     common_settings = load_common_settings()
@@ -94,16 +90,6 @@ def main() -> None:
     if missing:
         logger.warning("데이터가 부족한 종목 (%d): %s", len(missing), ", ".join(missing))
 
-    if regime_ticker:
-        regime_df = fetch_ohlcv(
-            regime_ticker,
-            country=regime_country,
-            date_range=date_range_prefetch,
-            cache_country="common",
-        )
-        if regime_df is not None and not regime_df.empty:
-            prefetched_map[regime_ticker] = regime_df
-
     print_run_header(account_id, date_str=None)
 
     from logic.backtest.account_runner import run_account_backtest
@@ -116,21 +102,12 @@ def main() -> None:
         excluded_tickers=excluded if excluded else None,
     )
 
-    # 날짜를 포함한 파일명 생성 (실제 실행 날짜 사용)
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    target_path = RESULTS_DIR / f"backtest_{account_id}_{date_str}.log"
-
-    generated_path = dump_backtest_log(
+    # dump_backtest_log가 계정별 폴더 구조로 저장
+    log_path = dump_backtest_log(
         result,
         account_settings,
-        results_dir=target_path.parent,
+        results_dir=RESULTS_DIR,
     )
-
-    if generated_path != target_path:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        generated_path.replace(target_path)
-    else:
-        target_path = generated_path
 
     print_backtest_summary(
         summary=result.summary,
@@ -142,7 +119,7 @@ def main() -> None:
         ticker_summaries=getattr(result, "ticker_summaries", []),
         core_start_dt=result.start_date,
     )
-    logger.info("✅ 백테스트 로그를 '%s'에 저장했습니다.", target_path)
+    logger.info("✅ 백테스트 로그를 '%s'에 저장했습니다.", log_path)
 
 
 if __name__ == "__main__":

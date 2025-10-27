@@ -5,51 +5,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import numpy as np
-
+from config import ACCOUNT_PARAMETER_SEARCH_CONFIG
 from utils.account_registry import get_account_settings, get_strategy_rules
 from logic.tune.runner import run_account_tuning
 from utils.logger import get_app_logger
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
-
-TUNING_CONFIG: dict[str, dict] = {
-    "aus": {
-        "_설명": "최소한의 최적 범위",
-        "MA_RANGE": np.arange(30, 41, 1),
-        "MA_TYPE": ["SMA"],
-        "PORTFOLIO_TOPN": [3, 4],
-        "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 15~25
-        "CORE_HOLDINGS": ["ASX:GDX"],
-        "COOLDOWN_DAYS": [1],
-    },
-    "kor": {
-        "_설명": "최소한의 최적 범위",
-        "MA_RANGE": np.arange(20, 61, 1),
-        "MA_TYPE": ["SMA"],
-        "PORTFOLIO_TOPN": [6, 7],
-        "REPLACE_SCORE_THRESHOLD": [1],
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(10, 21, 1),  # 15~25
-        "CORE_HOLDINGS": ["395160", "426030", "473640"],
-        "COOLDOWN_DAYS": [1],
-    },
-    # "kor": {
-    #     "_설명": "최대 삼세한 넓은 범위",
-    #     "MA_RANGE": np.arange(10, 71, 1),  # 10~70
-    #     "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-    #     "PORTFOLIO_TOPN": np.arange(5, 8, 1),  # 5~7
-    #     "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),  # 0~2.0
-    #     "OVERBOUGHT_SELL_THRESHOLD": np.arange(1, 21, 1),  # 1~21
-    #     "COOLDOWN_DAYS": np.arange(0, 3, 1),  # 0~2
-    # },
-    "us": {
-        "MA_RANGE": np.arange(5, 31, 1),
-        "PORTFOLIO_TOPN": np.arange(5, 11, 1),
-        "REPLACE_SCORE_THRESHOLD": np.arange(0, 2.1, 0.1),
-        "COOLDOWN_DAYS": np.arange(0, 6, 1),  # 0~5일
-    },
-}
 
 
 def main() -> None:
@@ -71,7 +32,7 @@ def main() -> None:
         account_id,
         output_path=None,
         results_dir=RESULTS_DIR,
-        tuning_config=TUNING_CONFIG,
+        tuning_config=ACCOUNT_PARAMETER_SEARCH_CONFIG,
     )
     if output is None:
         logger.error("튜닝이 실패하여 결과를 저장하지 않습니다.")

@@ -6,7 +6,7 @@ from typing import Dict, Optional
 import pandas as pd
 
 from .scoring import calculate_rsi_score
-from data.settings.common import RSI_NORMALIZATION_CONFIG, RSI_CALCULATION_CONFIG
+from config import RSI_NORMALIZATION_CONFIG, RSI_CALCULATION_CONFIG
 
 
 def process_ticker_data_rsi(close_prices: pd.Series) -> Optional[Dict]:
