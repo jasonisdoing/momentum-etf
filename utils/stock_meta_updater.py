@@ -19,7 +19,7 @@ STOCKS_DIR = PROJECT_ROOT / "data" / "stocks"
 
 
 def _get_cache_start_date() -> Optional[pd.Timestamp]:
-    """data/settings/common.py에서 캐시 시작일을 불러옵니다."""
+    """config.py에서 캐시 시작일을 불러옵니다."""
     try:
         from utils.settings_loader import load_common_settings
 

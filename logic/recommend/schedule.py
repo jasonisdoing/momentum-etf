@@ -24,7 +24,7 @@ def is_market_open(country: str = "kor") -> bool:
     if not pytz:
         return False
 
-    timezones = {"kor": "Asia/Seoul", "aus": "Australia/Sydney"}
+    timezones = {"kor": "Asia/Seoul", "aus": "Asia/Seoul"}
     market_hours = {
         "kor": (
             datetime.strptime("09:00", "%H:%M").time(),

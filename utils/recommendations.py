@@ -5,13 +5,15 @@ import pandas as pd
 from pandas.io.formats.style import Styler
 
 from strategies.maps.constants import DECISION_CONFIG
+from utils.formatters import format_price_deviation, format_price
+from config import KOR_REALTIME_ETF_PRICE_SOURCE
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 
 
 logger = get_app_logger()
 
-_DISPLAY_COLUMNS = [
+_BASE_DISPLAY_COLUMNS = [
     "#",
     "티커",
     "종목명",
@@ -63,17 +65,6 @@ def _resolve_phrase(row: dict[str, Any]) -> str:
     return str(phrase)
 
 
-def _format_currency(value: Any, country: str) -> float | None:
-    """현재가를 숫자로 반환합니다 (NumberColumn 사용을 위해)."""
-    if value is None:
-        return None
-    try:
-        amount = float(value)
-        return amount
-    except (TypeError, ValueError):
-        return None
-
-
 def _format_percent(value: Any) -> str:
     if value is None:
         return "-"
@@ -123,6 +114,11 @@ def _trend_series(row: dict[str, Any]) -> list[float]:
 def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -> pd.DataFrame:
     """추천 종목 데이터를 표 렌더링에 적합한 DataFrame으로 변환합니다."""
 
+    country_lower = (country or "").strip().lower()
+    price_label = "현재가"
+    nav_mode = country_lower in {"kr", "kor"}
+    show_deviation = country_lower in {"kr", "kor"}
+
     display_rows: list[dict[str, Any]] = []
     for row in rows:
         rank = row.get("rank")
@@ -131,9 +127,10 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         category = row.get("category", "-")
         state = row.get("state", "-").upper()
         holding_days = _format_days(row.get("holding_days"))
-        price = _format_currency(row.get("price"), country)  # 숫자 값 반환
+        price_display = format_price(row.get("price"), country)
         daily_pct = _format_percent(row.get("daily_pct"))
         evaluation_pct = _format_percent(row.get("evaluation_pct", 0.0))
+        price_deviation = format_price_deviation(row.get("price_deviation")) if show_deviation else None
         return_1w = _format_percent(row.get("return_1w", 0.0))
         return_2w = _format_percent(row.get("return_2w", 0.0))
         return_3w = _format_percent(row.get("return_3w", 0.0))
@@ -151,7 +148,9 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "보유일": holding_days,
                 "일간(%)": daily_pct,
                 "평가(%)": evaluation_pct,
-                "현재가": price,
+                price_label: price_display,
+                **({"Nav": format_price(row.get("nav_price"), country)} if nav_mode else {}),
+                **({"괴리율": price_deviation} if show_deviation else {}),
                 "1주(%)": return_1w,
                 "2주(%)": return_2w,
                 "3주(%)": return_3w,
@@ -163,7 +162,17 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
             }
         )
 
-    df = pd.DataFrame(display_rows, columns=_DISPLAY_COLUMNS)
+    columns = list(_BASE_DISPLAY_COLUMNS)
+    if "현재가" in columns:
+        idx = columns.index("현재가")
+        columns[idx] = price_label
+    if nav_mode and "Nav" not in columns:
+        insert_pos = columns.index(price_label) + 1
+        columns.insert(insert_pos, "Nav")
+    if show_deviation and "괴리율" not in columns:
+        insert_pos = columns.index(price_label) + (2 if nav_mode else 1)
+        columns.insert(insert_pos, "괴리율")
+    df = pd.DataFrame(display_rows, columns=columns)
     return df
 
 
@@ -249,7 +258,16 @@ def get_recommendations_dataframe(country: str, *, source_key: str | None = None
     except Exception as e:
         logger.error("추천 데이터를 불러오지 못했습니다 (%s): %s", country, e)
         # 오류 발생 시 빈 데이터프레임 반환
-        return pd.DataFrame(columns=_DISPLAY_COLUMNS)
+        columns = [col for col in _BASE_DISPLAY_COLUMNS if col != "괴리율" or country.lower() in {"kr", "kor"}]
+        if "현재가" in columns:
+            idx = columns.index("현재가")
+            columns[idx] = "현재가"
+        if country.lower() in {"kr", "kor"}:
+            insert_pos = columns.index("현재가") + 1
+            columns.insert(insert_pos, "Nav")
+        if country.lower() not in {"kr", "kor"} and "괴리율" in columns:
+            columns.remove("괴리율")
+        return pd.DataFrame(columns=columns)
 
 
 def get_recommendations_styler(country: str) -> tuple[pd.DataFrame, Styler]:

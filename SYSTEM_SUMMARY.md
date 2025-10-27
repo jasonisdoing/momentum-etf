@@ -26,7 +26,7 @@ ETF의 가격 추세를 분석해 상승세가 강한 종목을 자동 추천합
 | BUY | 신규 매수 제안 |
 | HOLD | 보유 유지 |
 | SELL_TREND | 추세 약화로 매도 제안 |
-| SELL_TRIM | RSI 과매수로 일부 매도 |
+| SELL_RSI | RSI 과매수로 매도 제안 |
 | CUT_STOPLOSS | 손절 지시 |
 | BUY_REPLACE | 교체 매수 제안 |
 | SELL_REPLACE | 교체 매도 제안 |

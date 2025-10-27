@@ -13,7 +13,7 @@ from utils.account_registry import (
     pick_default_account,
 )
 from utils.stock_list_io import get_etfs
-from utils.trade_store import (
+from utils.db_manager import (
     fetch_recent_trades,
     insert_trade_event,
     list_open_positions,

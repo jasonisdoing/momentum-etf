@@ -7,7 +7,7 @@ import streamlit as st
 import streamlit_authenticator as stauth
 
 from utils.account_registry import list_available_accounts
-from utils.trade_store import delete_account_trades
+from utils.db_manager import delete_account_trades
 from utils.settings_loader import get_account_settings
 
 SETTINGS_DIR = Path(__file__).resolve().parent.parent / "data" / "settings" / "account"

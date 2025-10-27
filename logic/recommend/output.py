@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import numbers
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +14,8 @@ import pandas as pd
 from utils.notification import strip_html_tags
 from utils.report import render_table_eaw
 from utils.logger import get_app_logger
+from utils.formatters import format_price_deviation, format_price
+from config import KOR_REALTIME_ETF_PRICE_SOURCE
 
 logger = get_app_logger()
 
@@ -79,9 +82,15 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
 
     logger.info("=== %s 추천 요약 (기준일: %s) ===", account_id.upper(), base_date)
 
-    preview_count = min(10, len(items))
-    if preview_count > 0:
-        logger.info("상위 %d개 항목 미리보기:", preview_count)
+    # 보유 종목(HOLD, SELL_*)은 항상 포함, 나머지는 상위 10개
+    holding_states = {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_RSI", "SELL_REPLACE", "CUT_STOPLOSS"}
+    held_items = [item for item in items if item.get("state") in holding_states]
+    other_items = [item for item in items if item.get("state") not in holding_states]
+
+    preview_items = held_items + other_items[: max(0, 10 - len(held_items))]
+
+    if preview_items:
+        logger.info("상위 %d개 항목 미리보기 (보유 %d개 포함):", len(preview_items), len(held_items))
         headers = [
             "순위",
             "티커",
@@ -97,7 +106,7 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
         aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "right", "left"]
         rows: List[List[str]] = []
 
-        for item in items[:preview_count]:
+        for item in preview_items:
             holding_days = item.get("holding_days")
             holding_days_str = f"{int(holding_days)}" if isinstance(holding_days, (int, float)) else "-"
 
@@ -138,18 +147,18 @@ def dump_recommendation_log(
     base_date = getattr(report, "base_date", None)
     recommendations = getattr(report, "recommendations", [])
 
-    # 기본 디렉토리 설정
+    # 기본 디렉토리 설정 (계정별 폴더)
     if results_dir is None:
-        # 프로젝트 루트의 data/results 디렉토리
-        base_dir = Path(__file__).parent.parent.parent / "data" / "results"
+        # 프로젝트 루트의 data/results/<account> 디렉토리
+        base_dir = Path(__file__).parent.parent.parent / "data" / "results" / account_id
     else:
-        base_dir = Path(results_dir)
+        base_dir = Path(results_dir) / account_id
 
     base_dir.mkdir(parents=True, exist_ok=True)
 
     # 파일명 생성 (실제 실행 날짜 사용)
     date_str = datetime.now().strftime("%Y-%m-%d")
-    path = base_dir / f"recommend_{account_id}_{date_str}.log"
+    path = base_dir / f"recommend_{date_str}.log"
 
     lines: List[str] = []
 
@@ -171,6 +180,13 @@ def dump_recommendation_log(
     lines.append("")
 
     # 테이블 헤더 (화면 UI와 동일)
+    country_code = getattr(report, "country_code", "")
+    country_lower = (country_code or "").strip().lower()
+    nav_mode = country_lower in {"kr", "kor"}
+    show_deviation = country_lower in {"kr", "kor"}
+
+    price_header = "현재가"
+
     headers = [
         "#",
         "티커",
@@ -180,26 +196,30 @@ def dump_recommendation_log(
         "보유일",
         "일간(%)",
         "평가(%)",
-        "점수",
-        "RSI",
-        "지속",
-        "문구",
+        price_header,
     ]
+    if nav_mode:
+        headers.append("Nav")
+    if show_deviation:
+        headers.append("괴리율")
+    headers.extend(["점수", "RSI", "지속", "문구"])
 
     aligns = [
-        "right",  # #
-        "left",  # 티커
-        "left",  # 종목명
-        "left",  # 카테고리
-        "center",  # 상태
-        "right",  # 보유일
-        "right",  # 일간(%)
-        "right",  # 평가(%)
-        "right",  # 점수
-        "right",  # RSI
-        "right",  # 지속
-        "left",  # 문구
+        "right",
+        "left",
+        "left",
+        "left",
+        "center",
+        "right",
+        "right",
+        "right",
+        "right",
     ]
+    if nav_mode:
+        aligns.append("right")
+    if show_deviation:
+        aligns.append("right")
+    aligns.extend(["right", "right", "right", "left"])
 
     # 테이블 데이터
     rows: List[List[str]] = []
@@ -212,27 +232,38 @@ def dump_recommendation_log(
         holding_days = item.get("holding_days", 0)
         daily_pct = item.get("daily_pct", 0)
         evaluation_pct = item.get("evaluation_pct", 0)
+        price = item.get("price")
+        nav_price = item.get("nav_price")
+        price_deviation = item.get("price_deviation")
         score = item.get("score", 0)
         rsi_score = item.get("rsi_score", 0)
         streak = item.get("streak", 0)
         phrase = item.get("phrase", "")
 
-        rows.append(
+        row = [
+            str(rank),
+            ticker,
+            name,
+            category,
+            state,
+            str(holding_days) if holding_days > 0 else "-",
+            f"{daily_pct:+.2f}%" if isinstance(daily_pct, (int, float)) else "-",
+            f"{evaluation_pct:+.2f}%" if isinstance(evaluation_pct, (int, float)) and evaluation_pct != 0 else "-",
+            format_price(price, country_code),
+        ]
+        if nav_mode:
+            row.append(format_price(nav_price, country_code))
+        if show_deviation:
+            row.append(format_price_deviation(price_deviation))
+        row.extend(
             [
-                str(rank),
-                ticker,
-                name,
-                category,
-                state,
-                str(holding_days) if holding_days > 0 else "-",
-                f"{daily_pct:+.2f}%" if isinstance(daily_pct, (int, float)) else "-",
-                f"{evaluation_pct:+.2f}%" if isinstance(evaluation_pct, (int, float)) and evaluation_pct != 0 else "-",
                 f"{score:.1f}" if isinstance(score, (int, float)) else "-",
                 f"{rsi_score:.1f}" if isinstance(rsi_score, (int, float)) else "-",
                 f"{streak}일" if streak > 0 else "-",
                 phrase,
             ]
         )
+        rows.append(row)
 
     # 테이블 렌더링
     table_lines = render_table_eaw(headers, rows, aligns)

@@ -8,10 +8,12 @@ import logging
 import os
 import warnings
 from datetime import datetime, time
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from contextlib import contextmanager
 
 import pandas as pd
+
+from config import KOR_REALTIME_ETF_PRICE_SOURCE
 
 # pkg_resources 워닝 억제 (가장 강력한 방법)
 os.environ["PYTHONWARNINGS"] = "ignore"
@@ -88,6 +90,19 @@ if not any(isinstance(f, _PykrxLogFilter) for f in _root_logger.filters):
 
 logger = get_app_logger()
 
+_KOR_PRICE_SOURCE_NORMALIZED = (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower()
+_KOR_ALLOWED_PRICE_SOURCES = {"price", "nav"}
+
+if _KOR_PRICE_SOURCE_NORMALIZED not in _KOR_ALLOWED_PRICE_SOURCES:
+    raise ValueError("KOR_REALTIME_ETF_PRICE_SOURCE must be one of {'Price', 'Nav'}")
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
 
 try:
     from zoneinfo import ZoneInfo
@@ -124,7 +139,7 @@ class RateLimitException(Exception):
 
 
 def _get_cache_start_dt() -> Optional[pd.Timestamp]:
-    """data/settings/common.py에서 캐시 시작 날짜를 로드합니다."""
+    """config.py에서 캐시 시작 날짜를 로드합니다."""
     try:
         from utils.settings_loader import load_common_settings
 
@@ -184,7 +199,7 @@ def _now_with_zone(tz_name: str) -> datetime:
 
 MARKET_OPEN_INFO = {
     "kor": ("Asia/Seoul", time(9, 0)),
-    "aus": ("Australia/Sydney", time(10, 0)),
+    "aus": ("Asia/Seoul", time(8, 0)),
     "us": ("America/New_York", time(9, 30)),
 }
 
@@ -212,17 +227,8 @@ def _should_skip_today_range(country_code: str, target_end: pd.Timestamp) -> boo
     return True
 
 
-def _is_kor_realtime_window(now_kst: datetime) -> bool:
-    start = time(9, 0)
-    end = time(23, 59, 59)
-    current = now_kst.time()
-    return start <= current <= end
-
-
-def _is_aus_realtime_window(now_syd: datetime) -> bool:
-    start = time(8, 0)
-    end = time(23, 59, 59)
-    current = now_syd.time()
+def _is_time_in_window(now_dt: datetime, start: time, end: time) -> bool:
+    current = now_dt.time()
     return start <= current <= end
 
 
@@ -231,7 +237,7 @@ def _should_use_realtime_price(country: str) -> bool:
 
     if country_code == "kor":
         now_kst = _now_with_zone("Asia/Seoul")
-        if not _is_kor_realtime_window(now_kst):
+        if not _is_time_in_window(now_kst, time(9, 0), time(23, 59, 59)):
             return False
         today_str = now_kst.strftime("%Y-%m-%d")
         try:
@@ -240,10 +246,10 @@ def _should_use_realtime_price(country: str) -> bool:
             return False
 
     if country_code == "aus":
-        now_syd = _now_with_zone("Australia/Sydney")
-        if not _is_aus_realtime_window(now_syd):
+        now_kst = _now_with_zone("Asia/Seoul")
+        if not _is_time_in_window(now_kst, time(10, 0), time(23, 59, 59)):
             return False
-        today_str = now_syd.strftime("%Y-%m-%d")
+        today_str = now_kst.strftime("%Y-%m-%d")
         try:
             return bool(get_trading_days(today_str, today_str, "aus"))
         except Exception:
@@ -538,6 +544,8 @@ def fetch_ohlcv(
     *,
     cache_country: Optional[str] = None,
     force_refresh: bool = False,
+    skip_realtime: bool = False,
+    update_listing_meta: bool = False,
 ) -> Optional[pd.DataFrame]:
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
 
@@ -583,10 +591,12 @@ def fetch_ohlcv(
         end_dt.normalize(),
         cache_country_override=cache_country,
         force_refresh=force_refresh,
+        skip_realtime=skip_realtime,
+        update_listing_meta=update_listing_meta,
     )
 
     if df is None or df.empty:
-        logger.warning("%s (%s) 가격 데이터를 가져오지 못했습니다.", ticker, country_code.upper())
+        logger.debug("%s (%s) 가격 데이터를 가져오지 못했습니다.", ticker, country_code.upper())
         return None
 
     return df
@@ -600,6 +610,8 @@ def _fetch_ohlcv_with_cache(
     *,
     cache_country_override: Optional[str] = None,
     force_refresh: bool = False,
+    skip_realtime: bool = False,
+    update_listing_meta: bool = False,
 ) -> Optional[pd.DataFrame]:
     country_code = (country or "").strip().lower()
     cache_country_code = (cache_country_override or country_code).strip().lower() or country_code
@@ -635,15 +647,24 @@ def _fetch_ohlcv_with_cache(
 
         if cached_df is None or cached_df.empty:
             cached_df = None
+            if listing_ts is not None and end_dt < listing_ts:
+                missing_ranges = []
+                return None
             missing_ranges.append((request_start_dt, end_dt))
         else:
             cache_start = cached_df.index.min().normalize()
             cache_end = cached_df.index.max().normalize()
 
             if request_start_dt < cache_start:
-                missing_ranges.append((request_start_dt, cache_start - pd.Timedelta(days=1)))
+                lower_bound = request_start_dt
+                if listing_ts is not None and cache_start > listing_ts:
+                    lower_bound = max(request_start_dt, listing_ts)
+                missing_ranges.append((lower_bound, cache_start - pd.Timedelta(days=1)))
             if end_dt > cache_end:
-                missing_ranges.append((cache_end + pd.Timedelta(days=1), end_dt))
+                upper_bound = end_dt
+                if listing_ts is not None and listing_ts > cache_end:
+                    upper_bound = max(end_dt, listing_ts)
+                missing_ranges.append((cache_end + pd.Timedelta(days=1), upper_bound))
 
     new_frames: List[pd.DataFrame] = []
     unfilled_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
@@ -654,6 +675,10 @@ def _fetch_ohlcv_with_cache(
         effective_end = miss_end
         log_pending = False
         start_str = miss_start.strftime("%Y-%m-%d")
+        today_norm = pd.Timestamp.now().normalize()
+        if skip_realtime and effective_end >= today_norm:
+            effective_end = today_norm - pd.Timedelta(days=1)
+            log_pending = False
         end_str = miss_end.strftime("%Y-%m-%d")
         if _should_skip_today_range(country_code, miss_end):
             effective_end = miss_end - pd.Timedelta(days=1)
@@ -756,7 +781,7 @@ def _fetch_ohlcv_with_cache(
 
     effective_end = end_dt if end_dt <= cache_max else cache_max
 
-    if _should_use_realtime_price(cache_country_code):
+    if not skip_realtime and _should_use_realtime_price(cache_country_code):
         updated_df = _overlay_realtime_price(combined_df, ticker, cache_country_code)
         if not updated_df.equals(combined_df):
             combined_df = updated_df
@@ -783,7 +808,7 @@ def _fetch_ohlcv_with_cache(
         elif cache_seed_dt is not None and listing_ts < cache_seed_dt <= target_listing_ts:
             should_update_listing = True
 
-    if should_update_listing:
+    if should_update_listing and update_listing_meta:
         try:
             set_listing_date(
                 country_code,
@@ -802,11 +827,20 @@ def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.D
     country_code = (country or "").strip().lower()
 
     price: Optional[float] = None
+    nav_value: Optional[float] = None
+
     if country_code == "kor":
         # 네이버 실시간 가격은 한국 상장 종목(숫자/알파벳 코드)에만 적용
         if ticker.startswith("^"):
             return df
-        price = fetch_naver_realtime_price(ticker)
+        snapshot_entry = get_cached_naver_etf_snapshot_entry(ticker)
+        if snapshot_entry:
+            price_candidate = _safe_float(snapshot_entry.get("nowVal"))
+            nav_candidate = _safe_float(snapshot_entry.get("nav"))
+            price = price_candidate if price_candidate is not None else _safe_float(snapshot_entry.get("price"))
+            nav_value = nav_candidate
+        if price is None or price <= 0:
+            price = fetch_naver_realtime_price(ticker)
     elif country_code == "aus":
         # ASX 지수 티커(예: ^AXJO)는 그대로 둡니다.
         if ticker.startswith("^"):
@@ -839,6 +873,13 @@ def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.D
         for col in ("Open", "High", "Low", "Close", "Adj Close"):
             if col in df.columns:
                 new_row[col] = price
+        if country_code == "kor" and (nav_value is not None or _KOR_PRICE_SOURCE_NORMALIZED == "nav"):
+            effective_nav = nav_value if nav_value is not None else price
+            if "NAV" in df.columns:
+                new_row["NAV"] = effective_nav
+            else:
+                new_row = new_row.reindex(list(new_row.index) + ["NAV"])
+                new_row["NAV"] = effective_nav
         if "Volume" in new_row.index:
             new_row["Volume"] = 0.0
         target_idx = today
@@ -852,6 +893,11 @@ def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.D
         for col in ("Close", "Adj Close", "Open", "High", "Low"):
             if col in df.columns:
                 df.loc[target_idx, col] = price
+        if country_code == "kor" and (nav_value is not None or _KOR_PRICE_SOURCE_NORMALIZED == "nav"):
+            effective_nav = nav_value if nav_value is not None else price
+            if "NAV" not in df.columns:
+                df["NAV"] = pd.NA
+            df.loc[target_idx, "NAV"] = effective_nav
 
     return df
 
@@ -877,12 +923,14 @@ def _fetch_ohlcv_core(
             return None
         try:
             with _silence_yfinance_logs():
+                # signal 대신 간단하게 yfinance 자체 타임아웃 사용
                 df = yf.download(
                     ticker,
                     start=start_dt,
                     end=end_dt + pd.Timedelta(days=1),
                     auto_adjust=True,
                     progress=False,
+                    timeout=30,
                 )
             if df.empty:
                 return None
@@ -894,6 +942,13 @@ def _fetch_ohlcv_core(
             if df.index.tz is not None:
                 df.index = df.index.tz_localize(None)
             return df
+        except TimeoutError as e:
+            logger.warning("%s 데이터 조회 타임아웃 (30초): %s", ticker, e)
+            if existing_df is not None and not existing_df.empty:
+                fallback_df = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
+                if not fallback_df.empty:
+                    return fallback_df
+            return None
         except Exception as e:
             error_msg = str(e)
             if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
@@ -1079,6 +1134,7 @@ def fetch_ohlcv_for_tickers(
     country: str,
     date_range: Optional[List[str]] = None,
     warmup_days: int = 0,
+    skip_realtime: bool = False,
 ) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
     """
     주어진 티커 목록에 대해 OHLCV 데이터를 직렬로 조회합니다.
@@ -1094,8 +1150,15 @@ def fetch_ohlcv_for_tickers(
 
     missing: List[str] = []
 
+    is_kor_market = (country or "").strip().lower() in {"kr", "kor"}
+    if is_kor_market and not skip_realtime:
+        try:
+            prime_naver_etf_realtime_snapshot(tickers)
+        except Exception as exc:  # pragma: no cover - 방어 목적
+            logger.debug("네이버 실시간 스냅샷 초기화 실패(%s): %s", country, exc)
+
     for tkr in tickers:
-        df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range)
+        df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range, skip_realtime=skip_realtime)
         if df is None or df.empty:
             missing.append(tkr)
             continue
@@ -1111,6 +1174,7 @@ def prepare_price_data(
     start_date: str,
     end_date: str,
     warmup_days: int = 0,
+    skip_realtime: bool = False,
 ) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
     """Shared helper to populate cache-backed OHLCV data consistently across workflows."""
 
@@ -1124,6 +1188,7 @@ def prepare_price_data(
         country,
         date_range=date_range,
         warmup_days=warmup_days,
+        skip_realtime=skip_realtime,
     )
     return prefetched, missing
 
@@ -1181,6 +1246,112 @@ def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
     except Exception as e:
         logger.warning("%s의 실시간 가격 조회 중 오류 발생: %s", ticker, e)
     return None
+
+
+def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> Dict[str, Dict[str, float]]:
+    """네이버 API에서 한국 ETF의 실시간 NAV 정보를 조회합니다."""
+
+    normalized_codes = {str(t).strip().upper() for t in tickers if str(t or "").strip()}
+    if not normalized_codes:
+        return {}
+
+    if not _should_use_realtime_price("kor"):
+        return {}
+
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 네이버 iNAV 조회를 건너뜁니다.")
+        return {}
+
+    url = "https://finance.naver.com/api/sise/etfItemList.nhn"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Referer": "https://finance.naver.com/sise/etfList.nhn",
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=5)
+        response.raise_for_status()
+    except Exception as exc:
+        logger.warning("네이버 ETF iNAV 조회 실패: %s", exc)
+        return {}
+
+    try:
+        payload = response.json()
+    except Exception as exc:
+        logger.warning("네이버 ETF iNAV 응답 파싱 실패: %s", exc)
+        return {}
+
+    items = payload.get("result", {}).get("etfItemList")
+    if not isinstance(items, list):
+        return {}
+
+    snapshot: Dict[str, Dict[str, float]] = {}
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        code = str(item.get("itemcode") or "").strip().upper()
+        if not code or code not in normalized_codes:
+            continue
+
+        nav_raw = item.get("nav")
+        price_raw = item.get("nowVal")
+
+        try:
+            nav_value = float(str(nav_raw).replace(",", ""))
+            price_value = float(str(price_raw).replace(",", ""))
+        except (TypeError, ValueError):
+            continue
+
+        if nav_value <= 0 or price_value <= 0:
+            continue
+
+        deviation = ((price_value / nav_value) - 1.0) * 100.0
+
+        selected_price = price_value if _KOR_PRICE_SOURCE_NORMALIZED == "price" else nav_value
+
+        snapshot[code] = {
+            "nav": nav_value,
+            "nowVal": price_value,
+            "price": selected_price,
+            "deviation": deviation,
+        }
+
+    return snapshot
+
+
+_NAVER_ETF_SNAPSHOT_CACHE: Dict[str, Dict[str, float]] = {}
+_NAVER_ETF_SNAPSHOT_FETCHED_AT: Optional[pd.Timestamp] = None
+
+
+def prime_naver_etf_realtime_snapshot(tickers: Sequence[str]) -> None:
+    """Fetch and cache real-time NAV/price snapshot for given Korean ETF tickers."""
+
+    global _NAVER_ETF_SNAPSHOT_CACHE, _NAVER_ETF_SNAPSHOT_FETCHED_AT
+
+    try:
+        snapshot = fetch_naver_etf_inav_snapshot(tickers)
+    except Exception as exc:  # pragma: no cover - 외부 요청 방어
+        logger.warning("네이버 ETF 실시간 스냅샷 조회 실패: %s", exc)
+        return
+
+    if snapshot:
+        _NAVER_ETF_SNAPSHOT_CACHE = snapshot
+        _NAVER_ETF_SNAPSHOT_FETCHED_AT = pd.Timestamp.now()
+    else:
+        _NAVER_ETF_SNAPSHOT_CACHE = {}
+        _NAVER_ETF_SNAPSHOT_FETCHED_AT = None
+
+
+def get_cached_naver_etf_snapshot_entry(ticker: str) -> Optional[Dict[str, float]]:
+    """Return cached NAV snapshot entry for the given Korean ETF ticker."""
+
+    key = str(ticker or "").strip().upper()
+    if not key:
+        return None
+    return _NAVER_ETF_SNAPSHOT_CACHE.get(key)
 
 
 _pykrx_name_cache: Dict[str, str] = {}
