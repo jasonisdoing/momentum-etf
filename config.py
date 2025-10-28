@@ -78,7 +78,7 @@ ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
     "k1": {
         "MA_RANGE": np.arange(70, 105, 5),
         "MA_TYPE": ["HMA"],
-        "PORTFOLIO_TOPN": [8],
+        "PORTFOLIO_TOPN": [10],
         "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
         "OVERBOUGHT_SELL_THRESHOLD": [10, 11, 12, 13, 14, 15, 16],
         "CORE_HOLDINGS": [],
