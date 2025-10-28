@@ -771,16 +771,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             if market_prev and market_prev > 0:
                 daily_pct = ((market_latest / market_prev) - 1.0) * 100
 
-            if country_lower in {"kr", "kor", "aus", "au"}:
+            # 데이터가 오늘 것이 아니면 일간 수익률을 0으로 설정
+            if base_norm > latest_data_date:
+                daily_pct = 0.0
+                market_prev = market_latest
+            elif country_lower in {"kr", "kor", "aus", "au"}:
+                # 데이터가 오늘 것이지만 장 시작 전이면 일간 수익률을 0으로 설정
                 now_kst = pd.Timestamp.now(tz="Asia/Seoul")
                 # 국가 코드 정규화
                 country_for_market = "kor" if country_lower in {"kr", "kor"} else "aus"
                 market_open = get_market_open_time(country_for_market)
                 if now_kst.time() < market_open:
                     daily_pct = 0.0
-
-            if base_norm > latest_data_date:
-                market_prev = market_latest
 
             from utils.indicators import calculate_ma_score
             from utils.moving_averages import calculate_moving_average
