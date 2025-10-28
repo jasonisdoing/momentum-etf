@@ -1321,9 +1321,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             continue
 
         # RSI 과매수 종목 매수 차단
-        # rsi_sell_threshold는 계좌별 설정에서 로드됨 (이 함수 외부에서 처리)
-        # 여기서는 이미 portfolio.py에서 처리되므로 추가 체크 불필요
-        pass
+        rsi_score = item.get("rsi_score", 100.0)
+        if rsi_score <= rsi_sell_threshold:
+            logger.info(f"[PIPELINE BUY BLOCKED] {item.get('ticker')} 매수 차단 - RSI 과매수 (RSI점수: {rsi_score:.1f})")
+            continue
 
         item["state"] = "BUY"
         item["phrase"] = DECISION_MESSAGES.get("NEW_BUY", "✅ 신규 매수")
