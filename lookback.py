@@ -105,11 +105,16 @@ def _find_best_params_simple(
     rsi_values = list(config["OVERBOUGHT_SELL_THRESHOLD"])
     cooldown_values = list(config["COOLDOWN_DAYS"])
 
+    # 최적화 지표 선택
+    optimization_metric = config.get("OPTIMIZATION_METRIC", "SDR").upper()
+
     best_params = None
-    best_cagr = float("-inf")
+    best_metric_value = float("-inf")
 
     total_combos = len(ma_values) * len(topn_values) * len(threshold_values) * len(rsi_values) * len(cooldown_values)
-    logger.info(f"[최적화 시작] 파라미터 조합 수: {total_combos}개 (MA:{len(ma_values)} × TOPN:{len(topn_values)} × RSI:{len(rsi_values)})")
+    logger.info(
+        f"[최적화 시작] 파라미터 조합 수: {total_combos}개 (MA:{len(ma_values)} × TOPN:{len(topn_values)} × RSI:{len(rsi_values)}) | 기준: {optimization_metric}"
+    )
 
     current_combo = 0
     last_log_pct = 0
@@ -180,11 +185,23 @@ def _find_best_params_simple(
                                 else:
                                     cagr = 0.0
 
-                                logger.debug(f"  MA={ma}, TOPN={topn}, RSI={rsi} → CAGR={cagr:.2f}% (수익률={cumulative_return:.2f}%)")
-                                if cagr > best_cagr:
-                                    best_cagr = cagr
+                                # 최적화 지표 선택
+                                sharpe = result.summary.get("sharpe", 0.0)
+                                mdd = abs(result.summary.get("mdd", 0.0))
+                                sdr = sharpe / mdd if mdd > 0 else 0.0
+
+                                if optimization_metric == "CAGR":
+                                    metric_value = cagr
+                                elif optimization_metric == "SHARPE":
+                                    metric_value = sharpe
+                                else:  # SDR
+                                    metric_value = sdr
+
+                                logger.debug(f"  MA={ma}, TOPN={topn}, RSI={rsi} → CAGR={cagr:.2f}%, Sharpe={sharpe:.2f}, SDR={sdr:.3f}")
+                                if metric_value > best_metric_value:
+                                    best_metric_value = metric_value
                                     best_params = params
-                                    logger.debug("  ✓ 새로운 최적 파라미터 발견!")
+                                    logger.debug(f"  ✓ 새로운 최적 파라미터 발견! ({optimization_metric}={metric_value:.3f})")
                         except Exception as e:
                             logger.debug(f"백테스트 실패 (MA={ma}, TOPN={topn}, TH={threshold}, RSI={rsi}, CD={cooldown}): {e}")
                             continue
@@ -193,12 +210,12 @@ def _find_best_params_simple(
         logger.debug(
             f"[최적화 완료] 최적 파라미터: MA={best_params['ma_period']}, "
             f"TOPN={best_params['portfolio_topn']}, RSI={best_params.get('rsi_sell_threshold', 10)}, "
-            f"최고 CAGR={best_cagr:.2f}%"
+            f"최고 {optimization_metric}={best_metric_value:.3f}"
         )
     else:
-        logger.warning("[최적화 완료] 유효한 파라미터를 찾지 못했습니다")
+        logger.warning("[최적화 실패] 유효한 파라미터를 찾지 못했습니다.")
 
-    return best_params, best_cagr
+    return best_params, best_metric_value
 
 
 def _run_single_walk_forward_test(
@@ -623,15 +640,19 @@ def _save_progress(results: List[Dict], summary_file: Path, details_file: Path, 
         logger.warning(f"중간 저장 실패: {e}")
 
 
-def print_summary_table(summary: pd.DataFrame) -> None:
+def print_summary_table(summary: pd.DataFrame, account_id: str) -> None:
     """요약 결과를 테이블로 출력 (render_table_eaw 사용)"""
 
     if summary.empty:
         print("결과가 없습니다.")
         return
 
+    # 최적화 지표 가져오기
+    config = ACCOUNT_PARAMETER_SEARCH_CONFIG.get(account_id, {})
+    optimization_metric = config.get("OPTIMIZATION_METRIC", "SDR").upper()
+
     print("\n" + "=" * 120)
-    print("Walk-Forward Analysis 요약 결과")
+    print(f"Walk-Forward Analysis 요약 결과 (최적화 기준: {optimization_metric})")
     print("=" * 120)
 
     headers = [
@@ -670,8 +691,14 @@ def print_summary_table(summary: pd.DataFrame) -> None:
     for line in table_lines:
         print(line)
 
-    # 최적 룩백 기간 찾기 (평균 SDR 기준)
-    best_idx = summary[("cagr", "mean")].idxmax()
+    # 최적 룩백 기간 찾기 (최적화 지표 기준)
+    if optimization_metric == "CAGR":
+        best_idx = summary[("cagr", "mean")].idxmax()
+    elif optimization_metric == "SHARPE":
+        best_idx = summary[("sharpe", "mean")].idxmax()
+    else:  # SDR
+        best_idx = summary[("sharpe_to_mdd", "mean")].idxmax()
+
     best_return = summary.loc[best_idx, ("total_return", "mean")]
     best_win_rate = summary.loc[best_idx, ("win_rate_pct", "calc")]
     best_sharpe = summary.loc[best_idx, ("sharpe", "mean")]
@@ -679,7 +706,7 @@ def print_summary_table(summary: pd.DataFrame) -> None:
     best_cagr = summary.loc[best_idx, ("cagr", "mean")]
 
     print("\n" + "=" * 120)
-    print(f"✅ 최적 룩백 기간: 참조 {best_idx}개월 (CAGR 기준)")
+    print(f"✅ 최적 룩백 기간: 참조 {best_idx}개월 ({optimization_metric} 기준)")
     print(
         f"   평균 수익률: {best_return:+.2f}% | 승률: {best_win_rate:.1f}% | Sharpe: {best_sharpe:.2f} | SDR: {best_sdr:.3f} | CAGR: {best_cagr:+.2f}%"
     )
@@ -744,8 +771,18 @@ def save_results(
     table_lines = render_table_eaw(headers, rows, aligns)
     summary_lines.extend(table_lines)
 
+    # 최적화 지표 가져오기
+    config = ACCOUNT_PARAMETER_SEARCH_CONFIG.get(account_id, {})
+    optimization_metric = config.get("OPTIMIZATION_METRIC", "SDR").upper()
+
     # 최적 룩백 기간
-    best_idx = summary[("cagr", "mean")].idxmax()
+    if optimization_metric == "CAGR":
+        best_idx = summary[("cagr", "mean")].idxmax()
+    elif optimization_metric == "SHARPE":
+        best_idx = summary[("sharpe", "mean")].idxmax()
+    else:  # SDR
+        best_idx = summary[("sharpe_to_mdd", "mean")].idxmax()
+
     best_return = summary.loc[best_idx, ("total_return", "mean")]
     best_win_rate = summary.loc[best_idx, ("win_rate_pct", "calc")]
     best_sharpe = summary.loc[best_idx, ("sharpe", "mean")]
@@ -754,7 +791,7 @@ def save_results(
 
     summary_lines.append("")
     summary_lines.append("=" * 120)
-    summary_lines.append(f"✅ 최적 룩백 기간: 참조 {best_idx}개월 (CAGR 기준)")
+    summary_lines.append(f"✅ 최적 룩백 기간: 참조 {best_idx}개월 ({optimization_metric} 기준)")
     summary_lines.append(
         f"   평균 수익률: {best_return:+.2f}% | 승률: {best_win_rate:.1f}% | Sharpe: {best_sharpe:.2f} | SDR: {best_sdr:.3f} | CAGR: {best_cagr:+.2f}%"
     )
@@ -850,7 +887,7 @@ def main():
     )
 
     # 결과 출력
-    print_summary_table(summary)
+    print_summary_table(summary, account_id)
 
     # 결과 저장
     account_dir = RESULTS_DIR / account_id

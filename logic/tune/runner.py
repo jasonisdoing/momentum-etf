@@ -654,9 +654,16 @@ def _execute_tuning_for_months(
         logger.warning("[튜닝] %s (%d개월) 성공한 조합이 없습니다.", account_norm.upper(), months_range)
         return None
 
+    # 최적화 지표 선택 (config에서 가져오기)
+    optimization_metric = search_space.get("OPTIMIZATION_METRIC").upper()
+
     def _sort_key(entry: Dict[str, Any]) -> float:
-        sharpe_to_mdd = _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
-        return sharpe_to_mdd
+        if optimization_metric == "CAGR":
+            return _safe_float(entry.get("cagr"), float("-inf"))
+        elif optimization_metric == "SHARPE":
+            return _safe_float(entry.get("sharpe"), float("-inf"))
+        else:  # SDR (default)
+            return _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
 
     success_entries.sort(key=_sort_key, reverse=True)
     best_entry = success_entries[0]
@@ -1091,6 +1098,29 @@ def _compose_tuning_report(
 
     lines.append("")
 
+    # 최적화 지표 가져오기
+    optimization_metric = None
+    if tuning_metadata:
+        search_space = tuning_metadata.get("search_space", {})
+        optimization_metric = search_space.get("OPTIMIZATION_METRIC")
+
+    # OPTIMIZATION_METRIC이 없으면 에러
+    if not optimization_metric:
+        raise ValueError("OPTIMIZATION_METRIC이 tuning_metadata에 없습니다.")
+
+    # 정렬 키 함수 정의
+    def _get_sort_key(row):
+        if optimization_metric == "CAGR":
+            return _safe_float(row.get("cagr"), float("-inf"))
+        elif optimization_metric == "SHARPE":
+            return _safe_float(row.get("sharpe"), float("-inf"))
+        else:  # SDR
+            return _safe_float(row.get("sharpe_to_mdd"), float("-inf"))
+
+    # 지표 이름 매핑
+    metric_names = {"CAGR": "CAGR", "SHARPE": "Sharpe", "SDR": "SDR(Sharpe/MDD)"}
+    metric_display = metric_names.get(optimization_metric, "SDR(Sharpe/MDD)")
+
     for item in sorted(month_results, key=lambda x: int(x.get("months_range", 0))):
         months_range = item.get("months_range")
         if months_range is None:
@@ -1130,8 +1160,8 @@ def _compose_tuning_report(
                 }
             )
 
-        normalized_rows.sort(key=lambda row: _safe_float(row.get("sharpe_to_mdd"), float("-inf")), reverse=True)
-        lines.append(f"=== 최근 {months_range}개월 결과 - 정렬 기준: SDR(Sharpe/MDD) ===")
+        normalized_rows.sort(key=_get_sort_key, reverse=True)
+        lines.append(f"=== 최근 {months_range}개월 결과 - 정렬 기준: {metric_display} ===")
         lines.extend(_render_tuning_table(normalized_rows, months_range=months_range))
         lines.append("")
 
@@ -1275,6 +1305,12 @@ def run_account_tuning(
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
         return None
 
+    # OPTIMIZATION_METRIC 필수 확인
+    optimization_metric = config.get("OPTIMIZATION_METRIC")
+    if not optimization_metric:
+        logger.error("[튜닝] '%s' 계정에 OPTIMIZATION_METRIC 설정이 없습니다. config.py에 추가해주세요.", account_norm.upper())
+        return None
+
     search_space = {
         "MA_PERIOD": ma_values,
         "PORTFOLIO_TOPN": topn_values,
@@ -1283,6 +1319,7 @@ def run_account_tuning(
         "COOLDOWN_DAYS": cooldown_values,
         "MA_TYPE": ma_type_values,
         "CORE_HOLDINGS": core_holdings,
+        "OPTIMIZATION_METRIC": optimization_metric,
     }
 
     ma_count = len(ma_values)
@@ -1411,6 +1448,7 @@ def run_account_tuning(
             "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
             "COOLDOWN_DAYS": list(cooldown_values),
             "CORE_HOLDINGS": list(core_holdings) if core_holdings else [],
+            "OPTIMIZATION_METRIC": optimization_metric,
         },
         "data_period": {
             "start_date": date_range_prefetch[0],
@@ -1473,6 +1511,18 @@ def run_account_tuning(
             save_cached_frame(country_code, ticker, frame)
         missing_prefetch.extend(additional_missing)
 
+        # 최적화 지표에 따른 정렬 함수 정의
+        optimization_metric = search_space.get("OPTIMIZATION_METRIC").upper()
+
+        def _sort_key_local(entry):
+            """최적화 지표에 따른 정렬 키"""
+            if optimization_metric == "CAGR":
+                return _safe_float(entry.get("cagr"), float("-inf"))
+            elif optimization_metric == "SHARPE":
+                return _safe_float(entry.get("sharpe"), float("-inf"))
+            else:  # SDR (default)
+                return _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
+
         # 중간 저장 콜백 함수 정의
         def save_progress_callback(success_entries, progress_pct, completed, total):
             """1%마다 호출되는 중간 저장 콜백"""
@@ -1499,7 +1549,7 @@ def run_account_tuning(
                             "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
                         },
                     }
-                    for entry in sorted(success_entries, key=lambda e: _safe_float(e.get("sharpe_to_mdd"), float("-inf")), reverse=True)
+                    for entry in sorted(success_entries, key=_sort_key_local, reverse=True)
                 ],
             }
 
@@ -1589,18 +1639,24 @@ def run_account_tuning(
                 ", ".join(unseen_missing),
             )
 
+    # 최적화 지표 가져오기
+    optimization_metric = search_space.get("OPTIMIZATION_METRIC").upper()
+
     for item in results_per_month:
         best = item.get("best", {})
         logger.info(
-            "[튜닝] %s (%d개월) 최적 조합: MA=%d / TOPN=%d / TH=%.3f / RSI=%d / COOLDOWN=%d / CAGR=%.2f%%",
+            "[튜닝] %s (%d개월) 최적 조합 (%s 기준): MA=%d / TOPN=%d / TH=%.3f / RSI=%d / COOLDOWN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
             account_norm.upper(),
             item.get("months_range"),
+            optimization_metric,
             best.get("ma_period", 0),
             best.get("portfolio_topn", 0),
             best.get("replace_threshold", 0.0),
             best.get("rsi_sell_threshold", 10),
             best.get("cooldown_days", 2),
             best.get("cagr_pct", 0.0),
+            best.get("sharpe", 0.0),
+            best.get("sharpe_to_mdd", 0.0),
         )
 
     entry = _build_run_entry(months_results=results_per_month)

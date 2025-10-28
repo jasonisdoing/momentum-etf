@@ -84,8 +84,8 @@ def render_account_page(account_id: str) -> None:
             backtested_date = None
             strategy_tuning: dict[str, Any] = {}
             if isinstance(strategy_cfg, dict):
-                expected_cagr = strategy_cfg.get("expected_cagr")
-                backtested_date = strategy_cfg.get("backtested_date")
+                expected_cagr = strategy_cfg.get("EXPECTED_CAGR")
+                backtested_date = strategy_cfg.get("BACKTESTED_DATE")
                 tuning_cfg = strategy_cfg.get("tuning")
                 if isinstance(tuning_cfg, dict):
                     strategy_tuning = tuning_cfg
