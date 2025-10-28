@@ -67,21 +67,23 @@ KOR_REALTIME_ETF_PRICE_SOURCE = "Nav"
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
     "a1": {
-        "MA_RANGE": np.arange(30, 65, 5),
+        "MA_RANGE": np.arange(20, 65, 5),
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": [0.1, 0.5, 1.0, 1.5, 2.0],
+        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5],
         "OVERBOUGHT_SELL_THRESHOLD": [0],
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1],
+        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
     "k1": {
         "MA_RANGE": np.arange(70, 105, 5),
         "MA_TYPE": ["HMA"],
-        "PORTFOLIO_TOPN": [8],
-        "REPLACE_SCORE_THRESHOLD": [0.1, 0.5, 1.0, 1.5, 2.0],
+        "PORTFOLIO_TOPN": [10],
+        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
         "OVERBOUGHT_SELL_THRESHOLD": [10, 11, 12, 13, 14, 15, 16],
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1],
+        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
 }
