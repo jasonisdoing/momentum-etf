@@ -6,36 +6,36 @@
                 "ticker": "QTUM",
                 "name": "Defiance Quantum ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 794285,
-                "1_week_avg_turnover": 87278144
+                "1_week_avg_volume": 803209,
+                "1_week_avg_turnover": 88669006
             },
             {
                 "ticker": "KSTR",
                 "name": "KraneShares SSE STAR Market 50 Index ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 147671,
-                "1_week_avg_turnover": 2754128
+                "1_week_avg_volume": 143408,
+                "1_week_avg_turnover": 2684675
             },
             {
                 "ticker": "VNM",
                 "name": "VanEck Vietnam ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 1405114,
-                "1_week_avg_turnover": 25972554
+                "1_week_avg_volume": 1457951,
+                "1_week_avg_turnover": 26659788
             },
             {
                 "ticker": "ARKQ",
                 "name": "ARK Autonomous Technology & Robotics ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 281100,
-                "1_week_avg_turnover": 32992617
+                "1_week_avg_volume": 266204,
+                "1_week_avg_turnover": 31339356
             },
             {
                 "ticker": "ARKK",
                 "name": "ARK Innovation ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 9433542,
-                "1_week_avg_turnover": 823813728
+                "1_week_avg_volume": 8894118,
+                "1_week_avg_turnover": 780480828
             },
             {
                 "ticker": "XEM",
@@ -48,197 +48,197 @@
                 "ticker": "URA",
                 "name": "Global X Uranium ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 8445500,
-                "1_week_avg_turnover": 438454544
+                "1_week_avg_volume": 7839886,
+                "1_week_avg_turnover": 400355659
             },
             {
                 "ticker": "SHLD",
                 "name": "Global X Defense ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 1055600,
-                "1_week_avg_turnover": 70658301
+                "1_week_avg_volume": 1048220,
+                "1_week_avg_turnover": 70439447
             },
             {
                 "ticker": "SIL",
                 "name": "Global X Silver Miners ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 3902171,
-                "1_week_avg_turnover": 276476911
+                "1_week_avg_volume": 4130742,
+                "1_week_avg_turnover": 285335245
             },
             {
                 "ticker": "LIT",
                 "name": "Global X Lithium & Battery Tech ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 494100,
-                "1_week_avg_turnover": 28600372
+                "1_week_avg_volume": 459988,
+                "1_week_avg_turnover": 26740747
             },
             {
                 "ticker": "KWEB",
                 "name": "KraneShares CSI China Internet ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 23971914,
-                "1_week_avg_turnover": 957189679
+                "1_week_avg_volume": 24297848,
+                "1_week_avg_turnover": 975295878
             },
             {
                 "ticker": "SPMO",
                 "name": "Invesco S&P 500 Momentum ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 1775114,
-                "1_week_avg_turnover": 213844640
+                "1_week_avg_volume": 1695400,
+                "1_week_avg_turnover": 204912684
             },
             {
                 "ticker": "BLOK",
                 "name": "Amplify Transformational Data Sharing ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 787614,
-                "1_week_avg_turnover": 54462153
+                "1_week_avg_volume": 731562,
+                "1_week_avg_turnover": 50708107
             },
             {
                 "ticker": "GDX",
                 "name": "VanEck Gold Miners ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 44177614,
-                "1_week_avg_turnover": 3378439855
+                "1_week_avg_volume": 45722909,
+                "1_week_avg_turnover": 3403895790
             },
             {
                 "ticker": "REMX",
                 "name": "VanEck Rare Earth/Strategic Metals ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 1971142,
-                "1_week_avg_turnover": 141148373
+                "1_week_avg_volume": 1827693,
+                "1_week_avg_turnover": 129771688
             },
             {
                 "ticker": "IAI",
                 "name": "iShares US Broker-Dealers & Securities Exch ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 66442,
-                "1_week_avg_turnover": 11395104
+                "1_week_avg_volume": 80331,
+                "1_week_avg_turnover": 13952486
             },
             {
                 "ticker": "SMH",
                 "name": "VanEck Semiconductor ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 6900314,
-                "1_week_avg_turnover": 2375432932
+                "1_week_avg_volume": 6461315,
+                "1_week_avg_turnover": 2238926901
             },
             {
                 "ticker": "SOXX",
                 "name": "iShares Semiconductor ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 5905671,
-                "1_week_avg_turnover": 1711233602
+                "1_week_avg_volume": 5539683,
+                "1_week_avg_turnover": 1615929329
             },
             {
                 "ticker": "SKYY",
                 "name": "First Trust Cloud Computing ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 89971,
-                "1_week_avg_turnover": 12163732
+                "1_week_avg_volume": 87616,
+                "1_week_avg_turnover": 11924273
             },
             {
                 "ticker": "AIG",
                 "name": "American International Group Inc.",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 4403742,
-                "1_week_avg_turnover": 343146728
+                "1_week_avg_volume": 3319564,
+                "1_week_avg_turnover": 260561791
             },
             {
                 "ticker": "CIBR",
                 "name": "First Trust NASDAQ Cybersecurity ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 582257,
-                "1_week_avg_turnover": 44407267
+                "1_week_avg_volume": 562253,
+                "1_week_avg_turnover": 43146409
             },
             {
                 "ticker": "BOTZ",
                 "name": "Global X Robotics & Artificial Intelligence ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 716071,
-                "1_week_avg_turnover": 26532956
+                "1_week_avg_volume": 757268,
+                "1_week_avg_turnover": 28219455
             },
             {
                 "ticker": "XLB",
                 "name": "Materials Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 5800557,
-                "1_week_avg_turnover": 513663866
+                "1_week_avg_volume": 5694276,
+                "1_week_avg_turnover": 505087957
             },
             {
                 "ticker": "XLC",
                 "name": "Communication Services Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 4852314,
-                "1_week_avg_turnover": 560785441
+                "1_week_avg_volume": 4931874,
+                "1_week_avg_turnover": 572106986
             },
             {
                 "ticker": "XLY",
                 "name": "Consumer Discretionary Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 5168257,
-                "1_week_avg_turnover": 1221041102
+                "1_week_avg_volume": 4765902,
+                "1_week_avg_turnover": 1132105588
             },
             {
                 "ticker": "XLP",
                 "name": "Consumer Staples Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 13556785,
-                "1_week_avg_turnover": 1075882103
+                "1_week_avg_volume": 13604245,
+                "1_week_avg_turnover": 1080690995
             },
             {
                 "ticker": "XLE",
                 "name": "Energy Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 14700342,
-                "1_week_avg_turnover": 1282967782
+                "1_week_avg_volume": 14012020,
+                "1_week_avg_turnover": 1228458518
             },
             {
                 "ticker": "XLF",
                 "name": "Financial Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 46222214,
-                "1_week_avg_turnover": 2420321671
+                "1_week_avg_volume": 37681046,
+                "1_week_avg_turnover": 1983979709
             },
             {
                 "ticker": "XLV",
                 "name": "Health Care Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 9208528,
-                "1_week_avg_turnover": 1332799760
+                "1_week_avg_volume": 8529993,
+                "1_week_avg_turnover": 1239959099
             },
             {
                 "ticker": "XLI",
                 "name": "Industrial Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 10504942,
-                "1_week_avg_turnover": 1610095112
+                "1_week_avg_volume": 9359905,
+                "1_week_avg_turnover": 1439967844
             },
             {
                 "ticker": "XLRE",
                 "name": "Real Estate Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 7948200,
-                "1_week_avg_turnover": 336242664
+                "1_week_avg_volume": 7571900,
+                "1_week_avg_turnover": 321468185
             },
             {
                 "ticker": "XLK",
                 "name": "Technology Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 8713671,
-                "1_week_avg_turnover": 2501740478
+                "1_week_avg_volume": 8139396,
+                "1_week_avg_turnover": 2354009168
             },
             {
                 "ticker": "XLU",
                 "name": "Utilities Select Sector SPDR Fund",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 11103628,
-                "1_week_avg_turnover": 1012549012
+                "1_week_avg_volume": 10155488,
+                "1_week_avg_turnover": 925141442
             },
             {
                 "ticker": "AIQ",
                 "name": "Global X Artificial Intelligence & Technology ETF",
                 "listing_date": "2024-01-01",
-                "1_week_avg_volume": 1503157,
-                "1_week_avg_turnover": 76578764
+                "1_week_avg_volume": 1448094,
+                "1_week_avg_turnover": 74467553
             }
         ]
     }

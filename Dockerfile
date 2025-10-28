@@ -15,8 +15,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# ✅ 메타 태그 추가 스크립트 복사 및 실행
+COPY add_meta_tags.py .
+RUN python add_meta_tags.py
+
 # ✅ 프로젝트 소스 복사
 COPY . .
 
-# ✅ Streamlit 설정 파일 복사 (이 줄 추가)
+# ✅ Streamlit 설정 파일 복사
 COPY .streamlit /app/.streamlit

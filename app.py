@@ -259,6 +259,25 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
 
+    # Open Graph 메타 태그 추가 (링크 미리보기용)
+    # 참고: Streamlit의 제약으로 st.markdown()으로 추가한 메타 태그는 <body>에 들어가므로
+    # 실제로는 Nginx sub_filter를 통해 <head>에 주입해야 합니다.
+    st.markdown(
+        """
+        <meta property="og:title" content="Momentum ETF" />
+        <meta property="og:description" content="추세추종 전략 기반 ETF 투자" />
+        <meta property="og:image" content="https://etf.dojason.com/static/og-image.png" />
+        <meta property="og:url" content="https://etf.dojason.com/" />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="Momentum ETF" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Momentum ETF" />
+        <meta name="twitter:description" content="추세추종 전략 기반 ETF 투자" />
+        <meta name="twitter:image" content="https://etf.dojason.com/static/og-image.png" />
+        """,
+        unsafe_allow_html=True,
+    )
+
     pages = [
         page_cls(
             _render_home_page,
