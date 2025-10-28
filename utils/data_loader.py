@@ -624,23 +624,31 @@ def _fetch_ohlcv_with_cache(
         except Exception:
             listing_ts = None
 
+    # 캐시 시작일 가져오기
+    cache_seed_dt = _get_cache_start_dt()
+
+    # 데이터 다운로드 시작일 결정: max(요청 시작일, 실제 상장일, CACHE_START_DATE)
     request_start_dt = start_dt
     if listing_ts is not None and start_dt < listing_ts:
         request_start_dt = listing_ts
+
+    # CACHE_START_DATE가 있고, 실제 상장일보다 늦으면 CACHE_START_DATE 사용
+    if cache_seed_dt is not None:
+        if listing_ts is None or cache_seed_dt > listing_ts:
+            request_start_dt = max(request_start_dt, cache_seed_dt)
 
     cache_country_display = cache_country_code.upper()
 
     missing_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
     cache_start: Optional[pd.Timestamp] = None
     cache_end: Optional[pd.Timestamp] = None
-    cache_seed_dt = None
 
     if force_refresh:
         cached_df = None
         missing_ranges.append((request_start_dt, end_dt))
     else:
         cached_df = load_cached_frame(cache_country_code, ticker)
-        cache_seed_dt = _get_cache_start_dt()
+        # cache_seed_dt는 이미 위에서 가져왔으므로 중복 제거
         if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
             if request_start_dt > cache_seed_dt:
                 request_start_dt = cache_seed_dt

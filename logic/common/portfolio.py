@@ -165,7 +165,7 @@ def check_buy_candidate_filters(
         return False, f"RSI 과매수 매도 카테고리 ({category})"
 
     # RSI 과매수 종목 매수 차단
-    if rsi_score <= rsi_sell_threshold:
+    if rsi_score >= rsi_sell_threshold:
         return False, f"RSI 과매수 (RSI점수: {rsi_score:.1f})"
 
     return True, ""
@@ -243,7 +243,7 @@ def track_sell_rsi_categories(
             if category and category != "TBD":
                 sell_rsi_categories.add(category)
         # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
-        elif d.get("state") in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 100.0) <= rsi_sell_threshold:
+        elif d.get("state") in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
             category = etf_meta.get(d["tkr"], {}).get("category")
             if category and category != "TBD":
                 sell_rsi_categories.add(category)

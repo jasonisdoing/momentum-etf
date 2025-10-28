@@ -87,9 +87,9 @@ def _calculate_cooldown_blocks(
                         0,
                     )
                     if days_since_buy < cooldown_days:
-                        logger.info(
-                            f"[COOLDOWN BLOCK] {tkr}: last_buy={last_buy_ts.strftime('%Y-%m-%d')}, base_date={base_date_norm.strftime('%Y-%m-%d')}, days_since={days_since_buy}, cooldown_days={cooldown_days}"
-                        )
+                        # logger.info(
+                        #     f"[COOLDOWN BLOCK] {tkr}: last_buy={last_buy_ts.strftime('%Y-%m-%d')}, base_date={base_date_norm.strftime('%Y-%m-%d')}, days_since={days_since_buy}, cooldown_days={cooldown_days}"
+                        # )
                         sell_cooldown_block[tkr] = {
                             "last_buy": last_buy_ts,
                             "days_since": days_since_buy,
@@ -143,7 +143,7 @@ def _determine_sell_decision(
     if holding_return_pct is not None and stop_loss_threshold is not None and holding_return_pct <= float(stop_loss_threshold):
         state = "CUT_STOPLOSS"
         phrase = DECISION_MESSAGES.get("CUT_STOPLOSS", "손절매도")
-    elif rsi_score_value <= rsi_sell_threshold:
+    elif rsi_score_value >= rsi_sell_threshold:
         state = "SELL_RSI"
         phrase = f"RSI 과매수 (RSI점수: {rsi_score_value:.1f})"
     elif not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
@@ -490,7 +490,7 @@ def run_portfolio_recommend(
                 sell_rsi_categories_today.add(category)
                 logger.info(f"[SELL_RSI CATEGORY] {d['tkr']} 매도로 인해 '{category}' 카테고리 매수 차단")
         # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
-        elif d["state"] in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 100.0) <= rsi_sell_threshold:
+        elif d["state"] in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
             category = etf_meta.get(d["tkr"], {}).get("category")
             if category and category != "TBD":
                 sell_rsi_categories_today.add(category)
@@ -604,8 +604,8 @@ def run_portfolio_recommend(
             break
 
         # RSI 과매수 종목 교체 매수 차단
-        best_new_rsi_score = best_new.get("rsi_score", 100.0)
-        if best_new_rsi_score <= rsi_sell_threshold:
+        best_new_rsi_score = best_new.get("rsi_score", 0.0)
+        if best_new_rsi_score >= rsi_sell_threshold:
             # logger.info(f"[REPLACE BLOCKED RSI] {best_new['tkr']} RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})")
             best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
             best_new["row"][-1] = f"RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})"
@@ -779,8 +779,8 @@ def run_portfolio_recommend(
     # RSI 과매수 종목 문구 추가 (WAIT 상태)
     for d in final_decisions:
         if d["state"] == "WAIT" and d.get("buy_signal"):
-            rsi_score = d.get("rsi_score", 100.0)
-            if rsi_score <= rsi_sell_threshold:
+            rsi_score = d.get("rsi_score", 0.0)
+            if rsi_score >= rsi_sell_threshold:
                 if not d["row"][-1] or d["row"][-1] == "":
                     d["row"][-1] = f"RSI 과매수 (RSI점수: {rsi_score:.1f})"
 

@@ -724,8 +724,8 @@ def save_results(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     date_str = datetime.now().strftime("%Y-%m-%d")
-    summary_file = output_dir / f"lookback_{account_id}_summary_{date_str}.log"
-    details_file = output_dir / f"lookback_{account_id}_details_{date_str}.log"
+    summary_file = output_dir / f"lookback_summary_{date_str}.log"
+    details_file = output_dir / f"lookback_details_{date_str}.log"
 
     # === 1. 요약 파일 ===
     summary_lines = []

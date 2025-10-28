@@ -106,11 +106,11 @@ def _execute_individual_sells(
             hold_ret = (price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0
 
             # RSI 과매수 매도 조건 체크
-            rsi_score_current = rsi_score_today.get(ticker, 100.0)
+            rsi_score_current = rsi_score_today.get(ticker, 0.0)
 
             if stop_loss_threshold is not None and hold_ret <= float(stop_loss_threshold):
                 decision = "CUT_STOPLOSS"
-            elif rsi_score_current <= rsi_sell_threshold:
+            elif rsi_score_current >= rsi_sell_threshold:
                 decision = "SELL_RSI"
             elif price < ma_today[ticker]:
                 decision = "SELL_TREND"
@@ -289,7 +289,7 @@ def _execute_replacement_trades(
             from logic.common import check_buy_candidate_filters
 
             replacement_category = ticker_to_category.get(replacement_ticker)
-            rsi_score_replace = rsi_score_today.get(replacement_ticker, 100.0)
+            rsi_score_replace = rsi_score_today.get(replacement_ticker, 0.0)
 
             # SELL_RSI 카테고리와 RSI 과매수만 체크 (카테고리 중복은 이미 교체 로직에서 처리됨)
             if replacement_category and replacement_category != "TBD" and replacement_category in sell_rsi_categories_today:
@@ -297,7 +297,7 @@ def _execute_replacement_trades(
                     daily_records_by_ticker[replacement_ticker][-1]["note"] = f"RSI 과매수 매도 카테고리 ({replacement_category})"
                 continue
 
-            if rsi_score_replace <= rsi_sell_threshold:
+            if rsi_score_replace >= rsi_sell_threshold:
                 if daily_records_by_ticker[replacement_ticker] and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt:
                     daily_records_by_ticker[replacement_ticker][-1]["note"] = f"RSI 과매수 (RSI점수: {rsi_score_replace:.1f})"
                 continue
@@ -679,11 +679,11 @@ def run_portfolio_backtest(
             if available:
                 tickers_available_today.append(ticker)
 
-        # RSI 과매수 경고 카테고리도 추적 (쿨다운으로 아직 매도 안 했지만 RSI 낮은 경우)
+        # RSI 과매수 경고 카테고리도 추적 (쿨다운으로 아직 매도 안 했지만 RSI 높은 경우)
         for ticker, ticker_state in position_state.items():
             if ticker_state["shares"] > 0:
-                rsi_val = rsi_score_today.get(ticker, 100.0)
-                if rsi_val <= rsi_sell_threshold:
+                rsi_val = rsi_score_today.get(ticker, 0.0)
+                if rsi_val >= rsi_sell_threshold:
                     # 쿨다운으로 매도하지 못한 경우에도 카테고리 차단
                     if i < ticker_state["sell_block_until"]:
                         category = ticker_to_category.get(ticker)
@@ -875,7 +875,7 @@ def run_portfolio_backtest(
                 from logic.common import check_buy_candidate_filters, calculate_buy_budget
 
                 category = ticker_to_category.get(ticker_to_buy)
-                rsi_score_buy_candidate = rsi_score_today.get(ticker_to_buy, 100.0)
+                rsi_score_buy_candidate = rsi_score_today.get(ticker_to_buy, 0.0)
 
                 can_buy, block_reason = check_buy_candidate_filters(
                     category=category,
@@ -1034,9 +1034,9 @@ def run_portfolio_backtest(
                         continue  # 다음 교체 후보로 넘어감
 
                     # RSI 과매수 종목 교체 매수 차단
-                    rsi_score_replace_candidate = rsi_score_today.get(replacement_ticker, 100.0)
+                    rsi_score_replace_candidate = rsi_score_today.get(replacement_ticker, 0.0)
 
-                    if rsi_score_replace_candidate <= rsi_sell_threshold:
+                    if rsi_score_replace_candidate >= rsi_sell_threshold:
                         # RSI 과매수 종목은 교체 매수하지 않음
                         if daily_records_by_ticker[replacement_ticker] and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt:
                             daily_records_by_ticker[replacement_ticker][-1]["note"] = f"RSI 과매수 (RSI점수: {rsi_score_replace_candidate:.1f})"

@@ -14,14 +14,7 @@ MARKET_REGIME_FILTER_TICKERS_AUX = ["^IXIC", "NQ=F", "^DJI"]
 MARKET_REGIME_FILTER_COUNTRY = "us"
 MARKET_REGIME_FILTER_MA_PERIOD = 50
 
-# RSI 표준화 설정 (0~100 스케일)
-RSI_NORMALIZATION_CONFIG = {
-    "enabled": True,
-    "oversold_threshold": 30.0,  # currently unused
-    "overbought_threshold": 70.0,  # used as sell trigger
-}
-
-# RSI 계산 파라미터
+# RSI 계산 파라미터 (원본 RSI 사용: 70 이상 과매수, 30 이하 과매도)
 RSI_CALCULATION_CONFIG = {
     "period": 15,
     "ema_smoothing": 2.0,
@@ -67,21 +60,21 @@ KOR_REALTIME_ETF_PRICE_SOURCE = "Nav"
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
     "a1": {
-        "MA_RANGE": np.arange(20, 65, 5),
+        "MA_RANGE": np.arange(30, 55, 5),
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5],
-        "OVERBOUGHT_SELL_THRESHOLD": [0],
+        "REPLACE_SCORE_THRESHOLD": np.arange(2, 8, 1),
+        "OVERBOUGHT_SELL_THRESHOLD": [100],
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
     "k1": {
-        "MA_RANGE": np.arange(70, 105, 5),
+        "MA_RANGE": np.arange(80, 105, 5),
         "MA_TYPE": ["HMA"],
         "PORTFOLIO_TOPN": [10],
-        "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
-        "OVERBOUGHT_SELL_THRESHOLD": [10, 11, 12, 13, 14, 15, 16],
+        "REPLACE_SCORE_THRESHOLD": np.arange(2, 8, 1),
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
         "CORE_HOLDINGS": [],
         "COOLDOWN_DAYS": [1],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택

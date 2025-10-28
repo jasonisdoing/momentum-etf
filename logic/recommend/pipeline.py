@@ -933,9 +933,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 if existing.get("row"):
                     existing["row"][4] = "SOLD"
                     # RSI 과매수 조건 확인하여 메시지 추가
-                    rsi_score = existing.get("rsi_score", 100.0)
+                    rsi_score = existing.get("rsi_score", 0.0)
                     base_msg = DECISION_MESSAGES["SOLD"]
-                    if rsi_score <= rsi_sell_threshold:
+                    if rsi_score >= rsi_sell_threshold:
                         existing["row"][-1] = f"{base_msg} | RSI 과매수 (RSI점수: {rsi_score:.1f})"
                     else:
                         existing["row"][-1] = base_msg
@@ -1099,10 +1099,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 phrase = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
             else:
                 state = "HOLD"
-                # RSI 과매도 조건 확인하여 메시지 추가
+                # RSI 과매수 조건 확인하여 메시지 추가
                 rsi_score_val = decision.get("rsi_score", 0.0)
                 base_msg = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
-                if rsi_score_val <= rsi_sell_threshold:
+                if rsi_score_val >= rsi_sell_threshold:
                     phrase = f"{base_msg} | RSI 과매수 (RSI점수: {rsi_score_val:.1f})"
                 else:
                     phrase = base_msg
@@ -1128,10 +1128,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 phrase = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
             else:
                 state = "HOLD"
-                # RSI 과매도 조건 확인하여 메시지 추가
+                # RSI 과매수 조건 확인하여 메시지 추가
                 rsi_score_val = decision.get("rsi_score", 0.0)
                 base_msg = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
-                if rsi_score_val <= rsi_sell_threshold:
+                if rsi_score_val >= rsi_sell_threshold:
                     phrase = f"{base_msg} | RSI 과매수 (RSI점수: {rsi_score_val:.1f})"
                 else:
                     phrase = base_msg
@@ -1262,8 +1262,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         elif item["state"] == "SOLD":
             # SOLD 상태 중 원래 SELL_RSI였거나 RSI 과매수로 매도된 경우
             original_state = item.get("original_state")
-            rsi_score = item.get("rsi_score", 100.0)
-            if original_state == "SELL_RSI" or rsi_score <= rsi_sell_threshold:
+            rsi_score = item.get("rsi_score", 0.0)
+            if original_state == "SELL_RSI" or rsi_score >= rsi_sell_threshold:
                 category = item.get("category")
                 if category and category != "TBD":
                     sell_rsi_categories.add(category)
@@ -1321,8 +1321,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             continue
 
         # RSI 과매수 종목 매수 차단
-        rsi_score = item.get("rsi_score", 100.0)
-        if rsi_score <= rsi_sell_threshold:
+        rsi_score = item.get("rsi_score", 0.0)
+        if rsi_score >= rsi_sell_threshold:
             logger.info(f"[PIPELINE BUY BLOCKED] {item.get('ticker')} 매수 차단 - RSI 과매수 (RSI점수: {rsi_score:.1f})")
             continue
 
