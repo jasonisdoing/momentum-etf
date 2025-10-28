@@ -67,7 +67,7 @@ KOR_REALTIME_ETF_PRICE_SOURCE = "Nav"
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
     "a1": {
-        "MA_RANGE": np.arange(30, 65, 5),
+        "MA_RANGE": np.arange(20, 65, 5),
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [7],
         "REPLACE_SCORE_THRESHOLD": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5],
