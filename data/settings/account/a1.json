@@ -10,7 +10,7 @@
         "MONTHS_RANGE": 3,
         "EXPECTED_CAGR": 91.56,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-10-29 08:00",
+        "BACKTESTED_DATE": "2025-10-29 20:00",
         "tuning": {
             "MA_PERIOD": 40,
             "MA_TYPE": "SMA",
