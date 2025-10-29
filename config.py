@@ -54,8 +54,8 @@ BACKTEST_SLIPPAGE = {
 }
 
 # 실시간 ETF 시세 소스 선택, 허용 값: "Price", "Nav"
-# KOR_REALTIME_ETF_PRICE_SOURCE = "Price"
-KOR_REALTIME_ETF_PRICE_SOURCE = "Nav"
+KOR_REALTIME_ETF_PRICE_SOURCE = "Price"
+# KOR_REALTIME_ETF_PRICE_SOURCE = "Nav"
 
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
