@@ -21,7 +21,9 @@ python scripts/find.py --min-change 10.0
 """
 
 import argparse
+import json
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional, List, Dict
 
 import pandas as pd
@@ -31,6 +33,35 @@ from pykrx import stock
 # --- 설정 ---
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
 EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "ETN"]
+
+
+def _load_stock_metadata() -> Dict[str, Dict]:
+    """
+    data/stocks/*.json 파일에서 3개월 수익률 정보를 로드합니다.
+
+    Returns:
+        {ticker: {"3_month_earn_rate": float, ...}} 형태의 딕셔너리
+    """
+    metadata = {}
+    stocks_dir = Path(__file__).parent.parent / "data" / "stocks"
+
+    for json_file in stocks_dir.glob("*.json"):
+        try:
+            with open(json_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            for category in data:
+                for stock_info in category.get("tickers", []):
+                    ticker = stock_info.get("ticker")
+                    if ticker:
+                        metadata[ticker] = {
+                            "3_month_earn_rate": stock_info.get("3_month_earn_rate"),
+                            "1_week_avg_volume": stock_info.get("1_week_avg_volume"),
+                        }
+        except Exception:
+            continue
+
+    return metadata
 
 
 def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
@@ -65,17 +96,48 @@ def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
             ticker = str(item.get("itemcode", "")).strip()
             name = str(item.get("itemname", "")).strip()
             change_rate = item.get("changeRate", 0)
+            volume = item.get("quant", 0)  # 거래량
+            risefall_rate = item.get("risefallRate")  # 괴리율 (None 허용)
+            three_month_rate = item.get("threeMonthEarnRate")  # 3개월 수익률 (None 허용)
+            now_val = item.get("nowVal")  # 현재가
+            nav = item.get("nav")  # NAV
 
             # 등락률이 기준 이상인 종목만 추가
             try:
                 change_rate_float = float(change_rate)
+                volume_int = int(volume) if volume else 0
+
+                # 괴리율: API에서 제공하면 사용, 없으면 nowVal/nav로 계산
+                risefall_float = None
+                if risefall_rate is not None:
+                    risefall_float = float(risefall_rate)
+                elif now_val is not None and nav is not None:
+                    try:
+                        now_val_float = float(now_val)
+                        nav_float = float(nav)
+                        if nav_float > 0:
+                            risefall_float = ((now_val_float / nav_float) - 1.0) * 100.0
+                    except (TypeError, ValueError):
+                        pass
+
+                three_month_float = float(three_month_rate) if three_month_rate is not None else None
+
                 if change_rate_float >= min_change_pct:
-                    gainers_list.append({"티커": ticker, "종목명": name, "등락률": change_rate_float})
+                    gainers_list.append(
+                        {
+                            "티커": ticker,
+                            "종목명": name,
+                            "등락률": change_rate_float,
+                            "거래량": volume_int,
+                            "괴리율": risefall_float,
+                            "3개월수익률": three_month_float,
+                        }
+                    )
             except (TypeError, ValueError):
                 continue
 
         if not gainers_list:
-            return pd.DataFrame(columns=["티커", "종목명", "등락률"])
+            return pd.DataFrame(columns=["티커", "종목명", "등락률", "거래량", "괴리율"])
 
         df = pd.DataFrame(gainers_list)
         logger.info(f"네이버 API에서 {len(df)}개 종목 데이터를 가져왔습니다.")
@@ -131,13 +193,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
     try:
         latest_day = get_latest_trading_day()
         type_str = f" ({asset_type.upper()})"
-        logger.info(
-            "기준일: %s-%s-%s%s",
-            latest_day[:4],
-            latest_day[4:6],
-            latest_day[6:],
-            type_str,
-        )
+        print(f"기준일: {latest_day[:4]}-{latest_day[4:6]}-{latest_day[6:]}{type_str}")
 
         df_change = pd.DataFrame()
         top_gainers = pd.DataFrame()
@@ -150,7 +206,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             if naver_df is not None and not naver_df.empty:
                 # 네이버 API 성공
                 top_gainers = naver_df
-                logger.info(f"✅ 네이버 API 사용 (빠른 조회 성공)")
+                print(f"✅ 네이버 API 사용 (빠른 조회 성공)")
             else:
                 # 1-2. pykrx 폴백 (느리지만 안정적)
                 logger.info("⚠️  네이버 API 실패, pykrx로 폴백합니다...")
@@ -209,14 +265,10 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
                 logger.warning("일반 주식 정보 조회 중 오류가 발생했습니다: %s", e)
 
         if top_gainers.empty:
-            logger.info("등락률 %.2f%% 이상 상승한 종목이 없습니다.", min_change_pct)
+            print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목이 없습니다.")
             return
 
-        logger.info(
-            "등락률 %.2f%% 이상 상승한 종목 %d개를 찾았습니다.",
-            min_change_pct,
-            len(top_gainers),
-        )
+        print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
 
         # 키워드 기반 필터링
         if EXCLUDE_KEYWORDS:
@@ -227,25 +279,44 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             top_gainers = top_gainers[~top_gainers["종목명"].str.contains(exclude_pattern, na=False)]
             filtered_count = initial_count - len(top_gainers)
             if filtered_count > 0:
-                logger.info(
-                    "제외 키워드(%s)에 따라 %d개 종목을 제외했습니다.",
-                    ", ".join(EXCLUDE_KEYWORDS),
-                    filtered_count,
-                )
+                print(f"제외 키워드({", ".join(EXCLUDE_KEYWORDS)})에 따라 {filtered_count}개 종목을 제외했습니다.")
 
         # 등락률 순으로 정렬
         sorted_gainers = top_gainers.sort_values(by="등락률", ascending=False)
 
-        logger.info("\n--- 급등주 목록 ---")
+        print("\n--- 상승중인 ETF 목록 ---")
         for _, row in sorted_gainers.iterrows():
-            logger.info("  - %s (%s): +%.2f%%", row["종목명"], row["티커"], row["등락률"])
+            ticker = row["티커"]
+            name = row["종목명"]
+            change_rate = row["등락률"]
+
+            # 추가 정보 가져오기
+            volume = row.get("거래량", 0)
+            risefall = row.get("괴리율", None)
+
+            # 3개월 수익률: 네이버 API만 사용
+            three_month_rate = row.get("3개월수익률", None)
+
+            # 거래량 포맷팅 (천 단위 구분)
+            volume_str = f"{volume:,}" if volume else "N/A"
+
+            # 3개월 수익률 포맷팅
+            if three_month_rate is not None and pd.notna(three_month_rate):
+                three_month_str = f"{three_month_rate:+.2f}%"
+            else:
+                three_month_str = "아직없음"
+
+            # 괴리율 포맷팅
+            risefall_str = f"{risefall:+.2f}%" if risefall is not None else "N/A"
+
+            print(f"  - {name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}")
 
     except Exception as e:
         logger.error("오류가 발생했습니다: %s", e)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="금일 급등주를 보여줍니다.")
+    parser = argparse.ArgumentParser(description="금일 상승중인 ETF를 보여줍니다.")
     parser.add_argument("--min-change", type=float, default=3.0, help="검색할 최소 등락률 (기본값: 5.0)")
     parser.add_argument(
         "--type",
