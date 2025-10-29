@@ -1270,12 +1270,10 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> Dict[str, Dict[str,
         logger.debug("requests 라이브러리가 없어 네이버 iNAV 조회를 건너뜁니다.")
         return {}
 
-    url = "https://finance.naver.com/api/sise/etfItemList.nhn"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        "Referer": "https://finance.naver.com/sise/etfList.nhn",
-        "Accept": "application/json, text/plain, */*",
-    }
+    from config import NAVER_FINANCE_ETF_API_URL, NAVER_FINANCE_HEADERS
+
+    url = NAVER_FINANCE_ETF_API_URL
+    headers = NAVER_FINANCE_HEADERS
 
     try:
         response = requests.get(url, headers=headers, timeout=5)

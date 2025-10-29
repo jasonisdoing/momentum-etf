@@ -38,13 +38,11 @@ def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
     네이버 금융 API에서 ETF 데이터를 가져옵니다.
     실패 시 None을 반환합니다.
     """
+    from config import NAVER_FINANCE_ETF_API_URL, NAVER_FINANCE_HEADERS
+
     logger = get_app_logger()
-    url = "https://finance.naver.com/api/sise/etfItemList.nhn"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        "Referer": "https://finance.naver.com/sise/etfList.nhn",
-        "Accept": "application/json, text/plain, */*",
-    }
+    url = NAVER_FINANCE_ETF_API_URL
+    headers = NAVER_FINANCE_HEADERS
 
     try:
         logger.info("네이버 API에서 ETF 데이터를 가져오는 중입니다...")

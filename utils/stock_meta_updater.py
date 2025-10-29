@@ -30,8 +30,10 @@ def _fetch_naver_listing_date(ticker: str) -> Optional[str]:
     Returns:
         상장일 문자열 (YYYY-MM-DD) 또는 None
     """
+    from config import NAVER_FINANCE_CHART_API_URL
+
     logger = get_app_logger()
-    url = f"https://fchart.stock.naver.com/sise.nhn?symbol={ticker}&timeframe=day&count=1&requestType=0"
+    url = f"{NAVER_FINANCE_CHART_API_URL}?symbol={ticker}&timeframe=day&count=1&requestType=0"
 
     try:
         response = requests.get(url, timeout=5)
@@ -97,7 +99,6 @@ def _update_metadata_for_country(country_code: str):
         logger.error(f"'{stock_file}' 파일 로딩 실패: {e}")
         return
 
-    cache_start_ts = _get_cache_start_date()
     updated_count = 0
     for category in stock_data:
         for stock in category.get("tickers", []):
@@ -120,6 +121,7 @@ def _update_metadata_for_country(country_code: str):
 
             try:
                 listing_date_str = None
+                data = None  # 각 종목마다 data 변수 초기화
 
                 # 이미 상장일이 있으면 스킵 (거래량/거래대금만 업데이트)
                 if has_listing_date:
@@ -158,11 +160,13 @@ def _update_metadata_for_country(country_code: str):
                 # 상장일 저장
                 stock["listing_date"] = listing_date_str
 
-                # 주간 평균 거래량/거래대금은 yfinance 데이터 필요
-                if country_code != "kor" or not listing_date_str or "data" not in locals():
-                    # 한국이고 네이버 API로 상장일만 가져온 경우, yfinance로 거래량 데이터 조회
-                    if country_code == "kor" and listing_date_str and "data" not in locals():
-                        data = yf.download(yfinance_ticker, period="7d", progress=False, auto_adjust=False)
+                # 주간 평균 거래량/거래대금 및 3개월 수익률은 항상 업데이트 (yfinance 데이터 필요)
+                if data is None:
+                    # 상장일이 이미 있어서 data가 없는 경우, yfinance로 3개월 데이터 조회
+                    data = yf.download(yfinance_ticker, period="3mo", progress=False, auto_adjust=False)
+                    if data.empty:
+                        logger.warning(f"[{country_code.upper()}/{ticker}] 거래량/수익률 데이터를 가져올 수 없습니다.")
+                    else:
                         if isinstance(data.columns, pd.MultiIndex):
                             data.columns = data.columns.get_level_values(0)
                             data = data.loc[:, ~data.columns.duplicated()]
@@ -170,7 +174,7 @@ def _update_metadata_for_country(country_code: str):
                             data = data[~data.index.duplicated(keep="last")]
 
                 # 2. 주간 평균 거래량/거래대금 업데이트
-                if "data" in locals() and not data.empty and len(data) >= 1:
+                if data is not None and not data.empty and len(data) >= 1:
                     # 거래대금 컬럼 추가
                     data["Turnover"] = data["Close"] * data["Volume"]
                     last_7_days = data.tail(7)
@@ -180,9 +184,22 @@ def _update_metadata_for_country(country_code: str):
 
                     stock["1_week_avg_volume"] = int(avg_volume) if pd.notna(avg_volume) else None
                     stock["1_week_avg_turnover"] = int(avg_turnover) if pd.notna(avg_turnover) else None
+
+                    # 3. 3개월 수익률 계산 (yfinance 데이터 사용)
+                    if len(data) >= 2 and "Close" in data.columns:
+                        price_start = data.iloc[0]["Close"]
+                        price_end = data.iloc[-1]["Close"]
+                        if pd.notna(price_start) and pd.notna(price_end) and price_start > 0:
+                            earn_rate = ((price_end - price_start) / price_start) * 100
+                            stock["3_month_earn_rate"] = round(earn_rate, 4)
+                        else:
+                            stock["3_month_earn_rate"] = None
+                    else:
+                        stock["3_month_earn_rate"] = None
                 else:
                     stock["1_week_avg_volume"] = None
                     stock["1_week_avg_turnover"] = None
+                    stock["3_month_earn_rate"] = None
                 logger.info(f"[{country_code.upper()}/{ticker}] 메타데이터 획득")
                 updated_count += 1
                 time.sleep(0.2)  # API 호출 속도 조절

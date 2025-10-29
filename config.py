@@ -8,6 +8,15 @@ CACHE_START_DATE = "2024-01-01"
 # 포트폴리오 카테고리별 최대 보유 수
 MAX_PER_CATEGORY = 1
 
+# 네이버 금융 API 설정 (비공식 API)
+NAVER_FINANCE_ETF_API_URL = "https://finance.naver.com/api/sise/etfItemList.nhn"
+NAVER_FINANCE_CHART_API_URL = "https://fchart.stock.naver.com/sise.nhn"
+NAVER_FINANCE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Referer": "https://finance.naver.com/sise/etfList.nhn",
+    "Accept": "application/json, text/plain, */*",
+}
+
 MARKET_REGIME_FILTER_TICKER_MAIN = "^GSPC"
 MARKET_REGIME_FILTER_TICKERS_AUX = ["^IXIC", "NQ=F", "^DJI"]
 
