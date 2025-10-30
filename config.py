@@ -62,6 +62,14 @@ BACKTEST_SLIPPAGE = {
     },
 }
 
+# 시장 지수 기반 타이밍에 사용할 지수 티커 (정보성 데이터만)
+MARKET_TIMING_INDEX = {
+    "kor": "^KS11",  # 코스피 200 ETF
+    "aus": "^AXJO",  # ASX 200
+}
+# 한국 종목은 pykrx + 네이버 비공식 API
+# 호주 종목은 yfinance
+
 # 실시간 ETF 시세 소스 선택, 허용 값: "Price", "Nav"
 KOR_REALTIME_ETF_PRICE_SOURCE = "Price"
 # KOR_REALTIME_ETF_PRICE_SOURCE = "Nav"

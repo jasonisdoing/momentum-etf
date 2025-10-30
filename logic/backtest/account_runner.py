@@ -72,6 +72,8 @@ class AccountBacktestResult:
     ticker_summaries: List[Dict[str, Any]]
     settings_snapshot: Dict[str, Any]
     months_range: int
+    market_index_data: Optional[pd.DataFrame]
+    market_index_ticker: Optional[str]
     missing_tickers: List[str]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -312,6 +314,8 @@ def run_account_backtest(
         ticker_summaries=ticker_summaries,
         settings_snapshot=settings_snapshot,
         months_range=months_range,
+        market_index_data=ticker_timeseries.get("__market_index_data__"),
+        market_index_ticker=ticker_timeseries.get("__market_index_ticker__"),
         missing_tickers=missing_sorted,
     )
 
@@ -461,9 +465,12 @@ def _build_portfolio_timeseries(
     initial_capital: float,
     portfolio_topn: int,
 ) -> pd.DataFrame:
-    non_empty = [ts.index for ts in ticker_timeseries.values() if not ts.empty]
-    if not non_empty:
+    # DataFrame만 필터링 (메타데이터 문자열 제외)
+    dataframes = [ts for ts in ticker_timeseries.values() if isinstance(ts, pd.DataFrame) and not ts.empty]
+    if not dataframes:
         raise RuntimeError("백테스트 결과에 유효한 시계열이 없습니다.")
+
+    non_empty = [ts.index for ts in dataframes]
 
     # 교집합 대신 합집합 사용 (모든 거래일 포함)
     common_index = non_empty[0]
@@ -483,6 +490,9 @@ def _build_portfolio_timeseries(
         cash_value = 0.0
 
         for ticker, ts in ticker_timeseries.items():
+            # DataFrame만 처리 (메타데이터 문자열 제외)
+            if not isinstance(ts, pd.DataFrame):
+                continue
             # 해당 날짜에 데이터가 없으면 스킵
             if dt not in ts.index:
                 continue
@@ -776,7 +786,8 @@ def _compute_evaluated_records(
     start_date_norm = start_date.normalize()
 
     for ticker, df in ticker_timeseries.items():
-        if df is None or df.empty:
+        # DataFrame만 처리 (메타데이터 문자열 제외)
+        if not isinstance(df, pd.DataFrame) or df.empty:
             continue
 
         df_sorted = df.sort_index()
@@ -818,7 +829,8 @@ def _build_ticker_summaries(
     summaries: List[Dict[str, Any]] = []
     for ticker, df in ticker_timeseries.items():
         ticker_key = str(ticker).upper()
-        if ticker_key == "CASH" or df is None or df.empty:
+        # DataFrame만 처리 (메타데이터 문자열 제외)
+        if ticker_key == "CASH" or not isinstance(df, pd.DataFrame) or df.empty:
             continue
 
         df_sorted = df.sort_index()
