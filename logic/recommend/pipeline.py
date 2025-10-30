@@ -1286,9 +1286,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
     additional_buy_slots = max(0, portfolio_topn - projected_holdings)
 
-    logger.info(
-        f"[PIPELINE] 매수 슬롯 계산: current={current_holdings_count}, sell={planned_sell_count}, buy={planned_buy_count}, projected={projected_holdings}, topn={portfolio_topn}, slots={additional_buy_slots}, wait_items={len(wait_items)}"
-    )
+    # logger.info(
+    #     f"[PIPELINE] 매수 슬롯 계산: current={current_holdings_count}, sell={planned_sell_count}, buy={planned_buy_count}, projected={projected_holdings}, topn={portfolio_topn}, slots={additional_buy_slots}, wait_items={len(wait_items)}"
+    # )
 
     promoted = 0
     for item in wait_items:
