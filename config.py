@@ -33,15 +33,15 @@ RSI_CALCULATION_CONFIG = {
 # 통합 시장 거래 시간표
 MARKET_SCHEDULES = {
     "kor": {
-        "open": time(9, 10),
-        "close": time(15, 50),
-        "interval_minutes": 10,
+        "open": time(9, 00),
+        "close": time(14, 00),
+        "interval_minutes": 60,
         "timezone": "Asia/Seoul",
     },
     "aus": {
-        "open": time(8, 20),
-        "close": time(14, 20),
-        "interval_minutes": 10,
+        "open": time(8, 00),
+        "close": time(15, 00),
+        "interval_minutes": 60,
         "timezone": "Asia/Seoul",
     },
 }
@@ -70,10 +70,6 @@ MARKET_TIMING_INDEX = {
 # 한국 종목은 pykrx + 네이버 비공식 API
 # 호주 종목은 yfinance
 
-# 실시간 ETF 시세 소스 선택, 허용 값: "Price", "Nav"
-KOR_REALTIME_ETF_PRICE_SOURCE = "Price"
-# KOR_REALTIME_ETF_PRICE_SOURCE = "Nav"
-
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
     "a1": {
@@ -92,7 +88,7 @@ ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
         "PORTFOLIO_TOPN": [10],
         "REPLACE_SCORE_THRESHOLD": np.arange(2, 8, 1),
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
-        "CORE_HOLDINGS": [],
+        "CORE_HOLDINGS": [102970, 395160, 442580],
         "COOLDOWN_DAYS": [2],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },

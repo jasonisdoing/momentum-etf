@@ -10,7 +10,6 @@ from utils.recommendations import recommendations_to_dataframe
 from utils.settings_loader import get_account_settings
 from strategies.maps.constants import DECISION_CONFIG
 from utils.recommendation_storage import fetch_latest_recommendations
-from config import KOR_REALTIME_ETF_PRICE_SOURCE
 
 
 logger = get_app_logger()
@@ -201,7 +200,6 @@ def render_recommendation_table(
 
     price_label = "현재가"
     country_lower = (country_code or "").strip().lower()
-    nav_mode = country_lower in {"kr", "kor"} and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav"
     show_deviation = country_lower in {"kr", "kor"}
 
     column_config_map: dict[str, st.column_config.BaseColumn] = {
@@ -223,8 +221,6 @@ def render_recommendation_table(
         "지속": st.column_config.NumberColumn("지속", width=50),
         "문구": st.column_config.TextColumn("문구", width="large"),
     }
-    if nav_mode and "Nav" in df.columns:
-        column_config_map["Nav"] = st.column_config.TextColumn("Nav", width="small")
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.TextColumn("괴리율", width="small")
 
@@ -278,11 +274,6 @@ def main():
 
     price_label = "현재가"
     default_compact_columns = [price_label if col == "현재가" else col for col in DEFAULT_COMPACT_COLUMNS_BASE]
-    country_lower = (country_code or "").strip().lower()
-    nav_mode = country_lower in {"kr", "kor"} and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav"
-    if nav_mode and "Nav" in df.columns and "Nav" not in default_compact_columns:
-        insert_pos = default_compact_columns.index(price_label) + 1 if price_label in default_compact_columns else len(default_compact_columns)
-        default_compact_columns.insert(insert_pos, "Nav")
 
     compact_mode_label = "모바일(핵심만 보기)"
     view_mode = st.radio(

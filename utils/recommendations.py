@@ -6,7 +6,6 @@ from pandas.io.formats.style import Styler
 
 from strategies.maps.constants import DECISION_CONFIG
 from utils.formatters import format_price_deviation, format_price
-from config import KOR_REALTIME_ETF_PRICE_SOURCE
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 

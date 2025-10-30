@@ -429,7 +429,6 @@ def run_walk_forward_analysis(
         start_date=earliest_date.strftime("%Y-%m-%d"),
         end_date=latest_date.strftime("%Y-%m-%d"),
         warmup_days=100,
-        skip_realtime=True,
     )
 
     # 캐시에 저장

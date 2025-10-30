@@ -507,7 +507,7 @@ def run_portfolio_backtest(
         else:
             index_date_range = date_range
 
-        market_index_df = fetch_ohlcv(index_ticker, country=country_code, date_range=index_date_range, skip_realtime=True)
+        market_index_df = fetch_ohlcv(index_ticker, country=country_code, date_range=index_date_range)
         if market_index_df is not None and not market_index_df.empty:
             # 일별 등락 계산 (전일 대비)
             market_index_df["prev_close"] = market_index_df["Close"].shift(1)
@@ -544,7 +544,7 @@ def run_portfolio_backtest(
             df = prefetched_data[ticker]
         else:
             # prefetched_data가 없으면 date_range를 사용하여 직접 조회
-            df = fetch_ohlcv(ticker, country=country, date_range=fetch_date_range, skip_realtime=True)
+            df = fetch_ohlcv(ticker, country=country, date_range=fetch_date_range)
 
         # 공통 함수를 사용하여 데이터 처리 및 지표 계산
         ticker_metrics = _process_ticker_data(ticker, df, etf_tickers, etf_ma_period, stock_ma_period, ma_type)

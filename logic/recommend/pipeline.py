@@ -39,7 +39,6 @@ from utils.data_loader import (
 )
 from utils.db_manager import get_db_connection, list_open_positions
 from utils.logger import get_app_logger
-from config import KOR_REALTIME_ETF_PRICE_SOURCE
 from utils.market_schedule import get_market_open_time
 
 logger = get_app_logger()
@@ -291,19 +290,8 @@ def _fetch_price_deviation_kr(ticker: str, date_candidates: List[pd.Timestamp]) 
 
 
 def _select_price_series(df: pd.DataFrame, country_code: str) -> pd.Series:
-    """한국 실시간 설정에 따라 가격 시리즈를 선택합니다."""
-
+    """Close 가격 시리즈를 반환합니다."""
     close_series = pd.to_numeric(df.get("Close"), errors="coerce") if "Close" in df.columns else None
-    country_lower = (country_code or "").strip().lower()
-    use_nav = (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav" and country_lower in {"kr", "kor"}
-
-    if use_nav and "NAV" in df.columns:
-        nav_series = pd.to_numeric(df["NAV"], errors="coerce")
-        if close_series is not None:
-            nav_series = nav_series.fillna(close_series)
-        nav_series = nav_series.fillna(method="ffill").fillna(method="bfill")
-        if nav_series.notna().any():
-            return nav_series
 
     if close_series is None:
         raise ValueError("가격 시리즈를 찾을 수 없습니다 (Close 열 없음).")
@@ -698,14 +686,12 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         len(tickers_all),
     )
     fetch_start = time.perf_counter()
-    skip_realtime = False
     prefetched_data, missing_prefetch = prepare_price_data(
         tickers=tickers_all,
         country=country_code,
         start_date=start_date,
         end_date=end_date,
         warmup_days=warmup_days,
-        skip_realtime=skip_realtime,
     )
     logger.info(
         "[%s] 가격 데이터 로딩 완료 (%.1fs)",
@@ -724,7 +710,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     realtime_inav_snapshot: Dict[str, Dict[str, float]] = {}
     country_lower = (country_code or "").strip().lower()
     is_kor_market = country_lower in {"kr", "kor"}
-    nav_display_enabled = is_kor_market and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav"
     if is_kor_market:
         try:
             realtime_inav_snapshot = fetch_naver_etf_inav_snapshot([stock["ticker"] for stock in etf_universe])
@@ -764,25 +749,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                     if isinstance(nav_candidate, (int, float)):
                         nav_latest = float(nav_candidate)
 
+            # 데이터의 최신 날짜 추출
             latest_data_date = pd.to_datetime(df.index[-1]).normalize()
-            base_norm = base_date.normalize()
 
+            # 일간 수익률: 최근 거래일 대비 전 거래일 변화율
             daily_pct = 0.0
             if market_prev and market_prev > 0:
                 daily_pct = ((market_latest / market_prev) - 1.0) * 100
-
-            # 데이터가 오늘 것이 아니면 일간 수익률을 0으로 설정
-            if base_norm > latest_data_date:
-                daily_pct = 0.0
-                market_prev = market_latest
-            elif country_lower in {"kr", "kor", "aus", "au"}:
-                # 데이터가 오늘 것이지만 장 시작 전이면 일간 수익률을 0으로 설정
-                now_kst = pd.Timestamp.now(tz="Asia/Seoul")
-                # 국가 코드 정규화
-                country_for_market = "kor" if country_lower in {"kr", "kor"} else "aus"
-                market_open = get_market_open_time(country_for_market)
-                if now_kst.time() < market_open:
-                    daily_pct = 0.0
 
             from utils.indicators import calculate_ma_score
             from utils.moving_averages import calculate_moving_average
@@ -1413,8 +1386,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         "평가(%)",
         price_header,
     ]
-    if nav_display_enabled:
-        detail_headers.append("Nav")
     if show_deviation:
         detail_headers.append("괴리율")
     detail_headers.extend(["1주(%)", "2주(%)", "3주(%)", "점수", "지속", "문구"])
@@ -1432,8 +1403,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             item.get("evaluation_pct"),
             item.get("price"),
         ]
-        if nav_display_enabled:
-            row.append(item.get("nav_price"))
         if show_deviation:
             row.append(item.get("price_deviation"))
         row.extend(
