@@ -268,8 +268,6 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목이 없습니다.")
             return
 
-        print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
-
         # 키워드 기반 필터링
         if EXCLUDE_KEYWORDS:
             initial_count = len(top_gainers)
@@ -280,6 +278,13 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             filtered_count = initial_count - len(top_gainers)
             if filtered_count > 0:
                 print(f"제외 키워드({", ".join(EXCLUDE_KEYWORDS)})에 따라 {filtered_count}개 종목을 제외했습니다.")
+
+        print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
+
+        # 필터링 후 결과 확인
+        if top_gainers.empty:
+            print(f"\n제외 키워드 필터링 후 남은 종목이 없습니다.")
+            return
 
         # 등락률 순으로 정렬
         sorted_gainers = top_gainers.sort_values(by="등락률", ascending=False)

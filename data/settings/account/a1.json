@@ -17,7 +17,7 @@
             "PORTFOLIO_TOPN": 7,
             "REPLACE_SCORE_THRESHOLD": 7,
             "OVERBOUGHT_SELL_THRESHOLD": 100,
-            "COOLDOWN_DAYS": 1,
+            "COOLDOWN_DAYS": 2,
             "CORE_HOLDINGS": [
                 "ASX:HNDQ",
                 "ASX:IOO",

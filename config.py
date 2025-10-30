@@ -75,7 +75,7 @@ ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
         "REPLACE_SCORE_THRESHOLD": np.arange(2, 8, 1),
         "OVERBOUGHT_SELL_THRESHOLD": [100],
         "CORE_HOLDINGS": ["ASX:HNDQ", "ASX:IOO", "ASX:FANG"],
-        "COOLDOWN_DAYS": [1, 2],
+        "COOLDOWN_DAYS": [2],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
     "k1": {
@@ -85,7 +85,7 @@ ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
         "REPLACE_SCORE_THRESHOLD": np.arange(2, 8, 1),
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
         "CORE_HOLDINGS": [],
-        "COOLDOWN_DAYS": [1, 2],
+        "COOLDOWN_DAYS": [2],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
 }
