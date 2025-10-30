@@ -194,9 +194,6 @@ python tune.py <account_id> [--output 경로]
 - **튜닝 로그**
   - 경로: `data/results/<account_id>/tune_{YYYY-MM-DD}.log`
   - 트리거: `python tune.py <account_id>` 실행 시 자동 생성
-- **룩백 최적화 로그**
-  - 요약: `data/results/<account_id>/lookback_summary_{YYYY-MM-DD}.log`
-  - 상세: `data/results/<account_id>/lookback_details_{YYYY-MM-DD}.log`
 
 ### 5) 스케줄러로 자동 실행 (APScheduler)
 
@@ -211,29 +208,7 @@ python tune.py <account_id> [--output 경로]
 python scripts/update_price_cache.py --country all --start 2020-01-01
 ```
 
-### 6) 최적 룩백 기간 탐색 (Walk-Forward Analysis)
-
-롤링 방식으로 최적의 파라미터 최적화 룩백 기간을 찾습니다.
-
-```bash
-# 기본 실행 (최근 12개월, 3/6/9/12/18/24개월 룩백 기간 테스트)
-python lookback.py k1
-
-# 커스텀 설정 (코드 내 DEFAULT_LOOKBACK_PERIODS 수정)
-# DEFAULT_LOOKBACK_PERIODS = [3, 6, 9, 12, 18, 24]
-```
-
-**결과 예시:**
-
-```
-룩백기간    평균수익률  승률(%)  평균Sharpe  평균MDD
-참조 3개월  +2.1%      58%      0.85       -8.2%
-참조 6개월  +3.4%      67%      1.12       -6.5%  ← 최적
-참조 12개월 +2.3%      50%      0.78       -9.3%
-```
-
-
-### 9) 상승중인 ETF 찾기 (선택사항)
+### 6) 상승중인 ETF 찾기 (선택사항)
 
 pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 찾아봅니다.
 
@@ -353,7 +328,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 | `COOLDOWN_DAYS` | 쿨다운 기간 | 0~5일 | `config.py` |
 | `MARKET_REGIME_MA` | 시장 레짐 MA 기간 (참고용) | 10~100일 | 공통 설정 |
 
-파라미터 최적화는 `lookback.py`를 통해 수행합니다.
+파라미터 최적화는 `tune.py`를 통해 수행합니다.
 
 ## 설정 체계
 
@@ -449,6 +424,6 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 
 ### 데이터 사용 시점
 
-- **추천, 백테스트, 튜닝, 룩백 모두 동일한 로직 사용**: 최근 마감된 거래일의 종가까지만 사용합니다.
+- **추천, 백테스트, 튜닝 모두 동일한 로직 사용**: 최근 마감된 거래일의 종가까지만 사용합니다.
 - **의사결정 일관성**: 추천과 백테스트가 동일한 데이터와 로직을 사용하여 재현성을 보장합니다.
 - **정보성 실시간 데이터**: 화면 표시용으로 네이버/yfinance API를 통해 현재가, NAV, 괴리율을 조회하지만, 이는 매매 의사결정에 영향을 주지 않습니다.

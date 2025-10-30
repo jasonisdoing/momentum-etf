@@ -7,15 +7,15 @@
     "slack_channel": "C09FAU7SKA8",
     "initial_date": "2025-10-01",
     "strategy": {
-        "MONTHS_RANGE": 6,
-        "EXPECTED_CAGR": 35.07,
+        "MONTHS_RANGE": 12,
+        "EXPECTED_CAGR": 36.66,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-10-30 13:00",
+        "BACKTESTED_DATE": "2025-10-30 23:00",
         "tuning": {
-            "MA_PERIOD": 35,
+            "MA_PERIOD": 45,
             "MA_TYPE": "SMA",
             "PORTFOLIO_TOPN": 7,
-            "REPLACE_SCORE_THRESHOLD": 7,
+            "REPLACE_SCORE_THRESHOLD": 2,
             "OVERBOUGHT_SELL_THRESHOLD": 100,
             "COOLDOWN_DAYS": 2,
             "CORE_HOLDINGS": [

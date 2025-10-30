@@ -69,27 +69,3 @@ MARKET_TIMING_INDEX = {
 }
 # 한국 종목은 pykrx + 네이버 비공식 API
 # 호주 종목은 yfinance
-
-# 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
-ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
-    "a1": {
-        "MA_RANGE": np.arange(30, 65, 5),
-        "MA_TYPE": ["SMA"],
-        "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": np.arange(2, 8, 1),
-        "OVERBOUGHT_SELL_THRESHOLD": [100],
-        "CORE_HOLDINGS": ["ASX:HNDQ", "ASX:IOO", "ASX:FANG"],
-        "COOLDOWN_DAYS": [2],
-        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    },
-    "k1": {
-        "MA_RANGE": np.arange(80, 105, 5),
-        "MA_TYPE": ["HMA"],
-        "PORTFOLIO_TOPN": [10],
-        "REPLACE_SCORE_THRESHOLD": np.arange(2, 8, 1),
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
-        "CORE_HOLDINGS": [102970, 395160, 442580],
-        "COOLDOWN_DAYS": [2],
-        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    },
-}

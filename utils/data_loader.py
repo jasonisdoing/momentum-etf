@@ -419,10 +419,14 @@ def count_trading_days(
     return len(days)
 
 
-@functools.lru_cache(maxsize=5)
-def get_latest_trading_day(country: str) -> pd.Timestamp:
+@functools.lru_cache(maxsize=50)
+def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp:
     """
-    오늘 또는 가장 가까운 과거의 '데이터가 있을 것으로 예상되는' 거래일을 pd.Timestamp 형식으로 반환합니다.
+    내부 캐시 함수: 날짜/시간 기반 캐시 키를 사용하여 최신 거래일을 반환합니다.
+
+    Args:
+        country: 국가 코드
+        cache_key: 캐시 무효화용 키 (날짜_시간 형식)
     """
     country_code = (country or "").strip().lower()
 
@@ -478,6 +482,19 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
         end_dt.strftime("%Y-%m-%d"),
     )
     return end_dt.normalize()
+
+
+def get_latest_trading_day(country: str) -> pd.Timestamp:
+    """
+    오늘 또는 가장 가까운 과거의 '데이터가 있을 것으로 예상되는' 거래일을 pd.Timestamp 형식으로 반환합니다.
+
+    시간 기반 캐시를 사용하여 날짜가 바뀌거나 시간이 지나면 자동으로 캐시가 무효화됩니다.
+    """
+    # 현재 날짜와 시간(시 단위)을 캐시 키로 사용
+    # 이렇게 하면 매 시간마다 캐시가 갱신되어 장 시작 전/후 데이터 차이를 반영
+    now = pd.Timestamp.now()
+    cache_key = f"{now.strftime('%Y-%m-%d')}_{now.hour}"
+    return _get_latest_trading_day_cached(country, cache_key)
 
 
 def get_next_trading_day(
@@ -646,12 +663,12 @@ def _fetch_ohlcv_with_cache(
         effective_end = miss_end
         log_pending = False
         start_str = miss_start.strftime("%Y-%m-%d")
-        today_norm = pd.Timestamp.now().normalize()
-        # 항상 전날까지만 조회 (실시간 데이터 사용 안 함)
-        if effective_end >= today_norm:
-            effective_end = today_norm - pd.Timedelta(days=1)
+        # 장 마감 후에는 오늘 데이터 포함, 장 시작 전에는 전날까지만
+        latest_trading_day = get_latest_trading_day(country_code)
+        if effective_end > latest_trading_day:
+            effective_end = latest_trading_day
             log_pending = False
-        end_str = miss_end.strftime("%Y-%m-%d")
+        end_str = effective_end.strftime("%Y-%m-%d")
         if _should_skip_today_range(country_code, miss_end):
             effective_end = miss_end - pd.Timedelta(days=1)
             if effective_end < miss_start:
