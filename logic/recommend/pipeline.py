@@ -753,8 +753,12 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             latest_data_date = pd.to_datetime(df.index[-1]).normalize()
 
             # 일간 수익률: 최근 거래일 대비 전 거래일 변화율
+            # 단, 장 개시 전(latest_data_date < base_date)이면 0%
             daily_pct = 0.0
-            if market_prev and market_prev > 0:
+            if latest_data_date < base_date:
+                # 장 개시 전: 아직 당일 데이터가 없으므로 일간 변동 없음
+                daily_pct = 0.0
+            elif market_prev and market_prev > 0:
                 daily_pct = ((market_latest / market_prev) - 1.0) * 100
 
             from utils.indicators import calculate_ma_score

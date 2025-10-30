@@ -438,8 +438,17 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
         try:
             local_now = _now_with_zone(tz_name)
             candidate_date = local_now.date()
+
+            # 장 개시 전: 오늘이 거래일이면 오늘, 아니면 전날 거래일
+            # 장 개시 후: 오늘
             if local_now.time() < open_time:
-                candidate_date = candidate_date - pd.Timedelta(days=1)
+                # 오늘이 거래일인지 확인
+                today_str = candidate_date.strftime("%Y-%m-%d")
+                trading_days_today = get_trading_days(today_str, today_str, country_code)
+                if not trading_days_today:
+                    # 오늘이 거래일이 아니면 전날로
+                    candidate_date = candidate_date - pd.Timedelta(days=1)
+
             end_dt = pd.Timestamp(candidate_date)
         except Exception:
             # 타임존 처리 실패 시 안전하게 폴백
