@@ -415,7 +415,14 @@ def count_trading_days(
 
     country_code = (country or "").strip().lower()
 
-    days = get_trading_days(start_ts.strftime("%Y-%m-%d"), end_ts.strftime("%Y-%m-%d"), country_code)
+    # 캐시를 위해 문자열로 변환하여 내부 함수 호출
+    return _count_trading_days_cached(country_code, start_ts.strftime("%Y-%m-%d"), end_ts.strftime("%Y-%m-%d"))
+
+
+@functools.lru_cache(maxsize=500)
+def _count_trading_days_cached(country_code: str, start_str: str, end_str: str) -> int:
+    """캐시된 거래일 수 계산 (내부 함수)"""
+    days = get_trading_days(start_str, end_str, country_code)
     return len(days)
 
 
