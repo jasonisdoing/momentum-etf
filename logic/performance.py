@@ -65,6 +65,10 @@ def calculate_actual_performance(
     positions = {}  # {ticker: {"shares": float, "avg_cost": float}}
     cash = initial_capital
 
+    # 날짜별 수익률 추적
+    daily_records = []
+    prev_value = initial_capital
+
     # 날짜별로 거래 그룹화
     from collections import defaultdict
 
@@ -73,11 +77,17 @@ def calculate_actual_performance(
         trade_date = pd.to_datetime(trade["executed_at"]).normalize()
         trades_by_date[trade_date].append(trade)
 
-    # 날짜별로 처리
-    for trade_date in sorted(trades_by_date.keys()):
-        day_trades = trades_by_date[trade_date]
+    # 거래일 목록 생성 (시작일부터 종료일까지)
+    from utils.data_loader import get_trading_days
 
-        # 당일 종가 기준 평가액 계산
+    all_trading_days = get_trading_days(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), country_code)
+
+    # 날짜별로 처리
+    for current_date in all_trading_days:
+        trade_date = pd.to_datetime(current_date).normalize()
+        day_trades = trades_by_date.get(trade_date, [])
+
+        # 당일 종가 기준 평가액 계산 (거래 전)
         current_value = cash
         for ticker, pos in positions.items():
             if pos["shares"] > 0 and ticker in price_cache:
@@ -143,8 +153,42 @@ def calculate_actual_performance(
 
                 price = base_price * (1 + buy_slippage)
 
-                # 최종 보유 종목 수로 균등 분배
-                shares = (current_value / final_holdings) / price
+                # 매번 현재 보유 자산 평가액 계산 (백테스트 방식)
+                current_holdings_value = 0
+                for t, p in positions.items():
+                    if p["shares"] > 0 and t in price_cache:
+                        df_temp = price_cache[t]
+                        if trade_date in df_temp.index:
+                            temp_price = float(df_temp.loc[trade_date, "Close"])
+                        else:
+                            valid_temp_dates = df_temp.index[df_temp.index <= trade_date]
+                            if len(valid_temp_dates) > 0:
+                                temp_price = float(df_temp.loc[valid_temp_dates[-1], "Close"])
+                            else:
+                                temp_price = p["avg_cost"]
+                        current_holdings_value += p["shares"] * temp_price
+
+                # 현재 equity 기준으로 예산 계산
+                equity = cash + current_holdings_value
+                target_amount = equity / final_holdings
+                budget = min(target_amount, cash)
+
+                # 예산이 너무 작으면 스킵
+                min_budget = equity / (final_holdings * 2.0)
+                if budget <= 0 or budget < min_budget:
+                    continue
+
+                # 한국: 정수 단위만 매수
+                if country_code in ("kor", "kr"):
+                    shares = int(budget // price) if price > 0 else 0
+                    buy_amount = shares * price
+                else:
+                    # 호주: 소수점 매수 가능
+                    shares = budget / price if price > 0 else 0
+                    buy_amount = budget
+
+                if shares <= 0 or buy_amount <= 0:
+                    continue
 
                 if ticker not in positions:
                     positions[ticker] = {"shares": 0, "avg_cost": 0}
@@ -156,7 +200,41 @@ def calculate_actual_performance(
                 new_cost = (old_shares * old_cost + shares * price) / new_shares if new_shares > 0 else price
 
                 positions[ticker] = {"shares": new_shares, "avg_cost": new_cost}
-                cash -= shares * price
+                cash -= buy_amount
+
+        # 거래 후 최종 평가액 계산
+        final_value = cash
+        for ticker, pos in positions.items():
+            if pos["shares"] > 0 and ticker in price_cache:
+                df = price_cache[ticker]
+                if trade_date in df.index:
+                    close_price = float(df.loc[trade_date, "Close"])
+                else:
+                    valid_dates = df.index[df.index <= trade_date]
+                    if len(valid_dates) > 0:
+                        close_price = float(df.loc[valid_dates[-1], "Close"])
+                    else:
+                        close_price = pos["avg_cost"]
+                final_value += pos["shares"] * close_price
+
+        # 일별 수익률 계산
+        daily_return_pct = ((final_value / prev_value) - 1) * 100 if prev_value > 0 else 0.0
+        cumulative_return_pct = ((final_value / initial_capital) - 1) * 100 if initial_capital > 0 else 0.0
+
+        # 일별 기록 저장
+        daily_records.append(
+            {
+                "date": trade_date,
+                "total_value": final_value,
+                "cash": cash,
+                "holdings_value": final_value - cash,
+                "daily_return_pct": daily_return_pct,
+                "cumulative_return_pct": cumulative_return_pct,
+                "trade_count": len(day_trades),
+            }
+        )
+
+        prev_value = final_value
 
     # 현재 평가액 계산
     current_value = cash
@@ -176,6 +254,7 @@ def calculate_actual_performance(
         "cash": cash,
         "positions": positions,
         "trade_count": len(trades),
+        "daily_records": daily_records,  # 일별 수익률 기록
         "method": "actual_trades",  # 실제 거래 기반
     }
 
