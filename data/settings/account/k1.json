@@ -8,9 +8,9 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "MONTHS_RANGE": 3,
-        "EXPECTED_CAGR": 87.69,
+        "EXPECTED_CAGR": 91.79,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-10-30 10:30",
+        "BACKTESTED_DATE": "2025-10-30 11:30",
         "tuning": {
             "MA_PERIOD": 95,
             "MA_TYPE": "HMA",

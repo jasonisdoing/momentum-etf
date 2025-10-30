@@ -69,13 +69,13 @@ KOR_REALTIME_ETF_PRICE_SOURCE = "Price"
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
     "a1": {
-        "MA_RANGE": np.arange(30, 55, 5),
+        "MA_RANGE": np.arange(30, 65, 5),
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [7],
         "REPLACE_SCORE_THRESHOLD": np.arange(2, 8, 1),
         "OVERBOUGHT_SELL_THRESHOLD": [100],
-        "CORE_HOLDINGS": [],
-        "COOLDOWN_DAYS": [1],
+        "CORE_HOLDINGS": ["ASX:HNDQ", "ASX:IOO", "ASX:FANG"],
+        "COOLDOWN_DAYS": [1, 2],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
     "k1": {
@@ -85,7 +85,7 @@ ACCOUNT_PARAMETER_SEARCH_CONFIG: dict[str, dict] = {
         "REPLACE_SCORE_THRESHOLD": np.arange(2, 8, 1),
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
         "CORE_HOLDINGS": [],
-        "COOLDOWN_DAYS": [1],
+        "COOLDOWN_DAYS": [1, 2],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
 }
