@@ -200,22 +200,34 @@ def calculate_buy_budget(
 def calculate_held_categories(
     position_state: Dict,
     ticker_to_category: Dict[str, str],
+    core_holdings: Set[str] = None,
 ) -> Set[str]:
-    """현재 보유 중인 카테고리 집합 계산
+    """현재 보유 중인 카테고리 집합 계산 (고정 종목 포함)
 
     Args:
         position_state: 포지션 상태 (백테스트용)
         ticker_to_category: 티커 -> 카테고리 매핑
+        core_holdings: 고정 종목 티커 집합 (선택)
 
     Returns:
-        보유 중인 카테고리 집합
+        보유 중인 카테고리 집합 (고정 종목 카테고리 포함)
     """
     held_categories = set()
+
+    # 실제 보유 종목의 카테고리
     for ticker, state in position_state.items():
         if state.get("shares", 0) > 0:
             category = ticker_to_category.get(ticker)
             if category and category != "TBD":
                 held_categories.add(category)
+
+    # 고정 종목의 카테고리도 추가 (미보유 시에도 카테고리 차단)
+    if core_holdings:
+        for ticker in core_holdings:
+            category = ticker_to_category.get(ticker)
+            if category and category != "TBD":
+                held_categories.add(category)
+
     return held_categories
 
 
@@ -266,21 +278,32 @@ def calculate_held_count(position_state: Dict) -> int:
 def calculate_held_categories_from_holdings(
     holdings: Dict[str, Any],
     etf_meta: Dict[str, Any],
+    core_holdings: Set[str] = None,
 ) -> Set[str]:
-    """보유 종목의 카테고리 집합 계산 (추천용)
+    """보유 종목의 카테고리 집합 계산 (추천용, 고정 종목 포함)
 
     Args:
         holdings: 보유 종목 딕셔너리
         etf_meta: ETF 메타 정보
+        core_holdings: 고정 종목 티커 집합 (선택)
 
     Returns:
-        보유 중인 카테고리 집합
+        보유 중인 카테고리 집합 (고정 종목 카테고리 포함)
     """
     held_categories = set()
+
+    # 실제 보유 종목의 카테고리
     for tkr in holdings.keys():
         category = etf_meta.get(tkr, {}).get("category")
         if category and category != "TBD":
             held_categories.add(category)
+
+    # 고정 종목의 카테고리도 추가 (미보유 시에도 카테고리 차단)
+    if core_holdings:
+        for tkr in core_holdings:
+            category = etf_meta.get(tkr, {}).get("category")
+            if category and category != "TBD":
+                held_categories.add(category)
     return held_categories
 
 

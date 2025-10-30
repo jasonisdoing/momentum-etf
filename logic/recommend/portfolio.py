@@ -353,10 +353,10 @@ def run_portfolio_recommend(
     universe_tickers_set = {ticker for ticker, _ in pairs}
     valid_core_holdings = validate_core_holdings(core_holdings_tickers, universe_tickers_set, account_id)
 
-    # 현재 보유 종목의 카테고리
+    # 현재 보유 종목의 카테고리 (고정 종목 카테고리 포함)
     from logic.common import calculate_held_categories_from_holdings
 
-    held_categories = calculate_held_categories_from_holdings(holdings, etf_meta)
+    held_categories = calculate_held_categories_from_holdings(holdings, etf_meta, valid_core_holdings)
     held_category_keys = set()
     for category in held_categories:
         normalized = _normalize_category_value(category)
