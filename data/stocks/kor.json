@@ -306,15 +306,6 @@
                 "1_week_avg_volume": 354218,
                 "1_week_avg_turnover": 8752969082,
                 "3_month_earn_rate": 23.7427
-            },
-            {
-                "ticker": "473590",
-                "name": "ACE 미국주식베스트셀러",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 71044,
-                "1_week_avg_turnover": 1610146936,
-                "3_month_earn_rate": 25.8644
             }
         ]
     },
