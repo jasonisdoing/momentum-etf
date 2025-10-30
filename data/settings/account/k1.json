@@ -16,7 +16,7 @@
             "MA_TYPE": "HMA",
             "PORTFOLIO_TOPN": 10,
             "REPLACE_SCORE_THRESHOLD": 4,
-            "OVERBOUGHT_SELL_THRESHOLD": 95,
+            "OVERBOUGHT_SELL_THRESHOLD": 92,
             "COOLDOWN_DAYS": 1,
             "CORE_HOLDINGS": [
                 102970,
