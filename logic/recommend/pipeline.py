@@ -752,14 +752,28 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             # 데이터의 최신 날짜 추출
             latest_data_date = pd.to_datetime(df.index[-1]).normalize()
 
-            # 일간 수익률: 최근 거래일 대비 전 거래일 변화율
-            # 단, 장 개시 전(latest_data_date < base_date)이면 0%
+            # 일간 수익률 계산
             daily_pct = 0.0
-            if latest_data_date < base_date:
-                # 장 개시 전: 아직 당일 데이터가 없으므로 일간 변동 없음
-                daily_pct = 0.0
-            elif market_prev and market_prev > 0:
+
+            # 실시간 가격이 있으면 사용 (장 시작 후)
+            realtime_price = None
+            if is_kor_market:
+                ticker_key_upper = str(ticker).strip().upper()
+                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
+                if realtime_entry:
+                    price_candidate = realtime_entry.get("nowVal")
+                    if isinstance(price_candidate, (int, float)) and price_candidate > 0:
+                        realtime_price = float(price_candidate)
+
+            # 실시간 가격이 있으면 전일 종가 대비 계산
+            if realtime_price and market_latest and market_latest > 0:
+                daily_pct = ((realtime_price / market_latest) - 1.0) * 100
+            # 실시간 가격이 없고 DB에 오늘 데이터가 있으면 DB 데이터 사용
+            elif latest_data_date >= base_date and market_prev and market_prev > 0:
                 daily_pct = ((market_latest / market_prev) - 1.0) * 100
+            # 그 외의 경우 (장 개시 전 또는 데이터 없음) 0%
+            else:
+                daily_pct = 0.0
 
             from utils.indicators import calculate_ma_score
             from utils.moving_averages import calculate_moving_average
