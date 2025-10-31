@@ -149,13 +149,13 @@
         "category": "한국지수",
         "tickers": [
             {
-                "ticker": "275280",
-                "name": "Kodex 모멘텀주",
+                "ticker": "315960",
+                "name": "RISE 대형고배당10TR",
                 "recommend_enabled": true,
                 "listing_date": "2024-01-02",
-                "1_week_avg_volume": 3910,
-                "1_week_avg_turnover": 90195747,
-                "3_month_earn_rate": 22.5874
+                "1_week_avg_volume": 52371,
+                "1_week_avg_turnover": 1790648436,
+                "3_month_earn_rate": 45.2258
             },
             {
                 "ticker": "069500",
@@ -590,15 +590,6 @@
                 "1_week_avg_volume": 999996,
                 "1_week_avg_turnover": 20061930912,
                 "3_month_earn_rate": 1.3265
-            },
-            {
-                "ticker": "315960",
-                "name": "RISE 대형고배당10TR",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 52371,
-                "1_week_avg_turnover": 1790648436,
-                "3_month_earn_rate": 45.2258
             }
         ]
     },
