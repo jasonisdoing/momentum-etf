@@ -242,53 +242,6 @@ def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
         return None
 
 
-def _fetch_price_deviation_kr(ticker: str, date_candidates: List[pd.Timestamp]) -> Optional[float]:
-    """pykrx에서 한국 ETF 괴리율(%)을 조회합니다."""
-
-    try:
-        from pykrx import stock as pykrx_stock  # type: ignore
-    except ImportError:
-        logger.debug("pykrx 미설치로 괴리율 조회를 건너뜁니다.")
-        return None
-
-    for candidate in date_candidates:
-        if candidate is None:
-            continue
-        try:
-            date_norm = pd.Timestamp(candidate).normalize()
-        except Exception:
-            continue
-
-        date_str = date_norm.strftime("%Y%m%d")
-        try:
-            df_deviation = pykrx_stock.get_etf_price_deviation(date_str, date_str, ticker)
-        except Exception as exc:  # pragma: no cover - 외부 API 예외 방어
-            logger.debug("pykrx 괴리율 조회 실패 (%s, %s): %s", ticker, date_str, exc)
-            continue
-
-        if df_deviation is None or df_deviation.empty:
-            continue
-
-        try:
-            raw_value = df_deviation.iloc[-1].get("괴리율")
-        except Exception:  # pragma: no cover - 방어 로직
-            raw_value = None
-
-        if raw_value is None:
-            continue
-
-        try:
-            return float(raw_value)
-        except (TypeError, ValueError):
-            try:
-                sanitized = str(raw_value).replace("%", "").strip()
-                return float(sanitized) if sanitized else None
-            except (TypeError, ValueError):
-                continue
-
-    return None
-
-
 def _select_price_series(df: pd.DataFrame, country_code: str) -> pd.Series:
     """Close 가격 시리즈를 반환합니다."""
     close_series = pd.to_numeric(df.get("Close"), errors="coerce") if "Close" in df.columns else None
@@ -733,47 +686,39 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
             market_series = pd.to_numeric(df.get("Close"), errors="coerce") if "Close" in df.columns else price_series
             market_series = market_series.fillna(method="ffill").fillna(method="bfill")
-            market_latest = float(market_series.iloc[-1]) if not market_series.empty else score_latest
-            market_prev = float(market_series.iloc[-2]) if len(market_series) > 1 else market_latest
+            # 전일 종가 (일간 수익률 계산용)
+            market_prev = float(market_series.iloc[-1]) if not market_series.empty else score_latest
 
+            # 한국 시장: 현재가, NAV, 일간 수익률은 네이버 API만 사용 (fallback 없음)
+            market_latest: Optional[float] = None
             nav_latest: Optional[float] = None
-            if "NAV" in df.columns:
-                nav_series = pd.to_numeric(df["NAV"], errors="coerce").dropna()
-                if not nav_series.empty:
-                    nav_latest = float(nav_series.iloc[-1])
-            if nav_latest is None and is_kor_market:
-                ticker_key_upper = str(ticker).strip().upper()
-                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
-                if realtime_entry:
-                    nav_candidate = realtime_entry.get("nav")
-                    if isinstance(nav_candidate, (int, float)):
-                        nav_latest = float(nav_candidate)
-
-            # 데이터의 최신 날짜 추출
-            latest_data_date = pd.to_datetime(df.index[-1]).normalize()
-
-            # 일간 수익률 계산
             daily_pct = 0.0
 
-            # 실시간 가격이 있으면 사용 (장 시작 후)
-            realtime_price = None
             if is_kor_market:
                 ticker_key_upper = str(ticker).strip().upper()
                 realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
                 if realtime_entry:
+                    # 현재가
                     price_candidate = realtime_entry.get("nowVal")
                     if isinstance(price_candidate, (int, float)) and price_candidate > 0:
-                        realtime_price = float(price_candidate)
+                        market_latest = float(price_candidate)
 
-            # 실시간 가격이 있으면 전일 종가 대비 계산
-            if realtime_price and market_latest and market_latest > 0:
-                daily_pct = ((realtime_price / market_latest) - 1.0) * 100
-            # 실시간 가격이 없고 DB에 오늘 데이터가 있으면 DB 데이터 사용
-            elif latest_data_date >= base_date and market_prev and market_prev > 0:
-                daily_pct = ((market_latest / market_prev) - 1.0) * 100
-            # 그 외의 경우 (장 개시 전 또는 데이터 없음) 0%
+                    # NAV
+                    nav_candidate = realtime_entry.get("nav")
+                    if isinstance(nav_candidate, (int, float)) and nav_candidate > 0:
+                        nav_latest = float(nav_candidate)
+
+                    # 일간 수익률 (현재가 / 전일 종가 - 1)
+                    if market_latest and market_prev and market_prev > 0:
+                        daily_pct = ((market_latest / market_prev) - 1.0) * 100
             else:
-                daily_pct = 0.0
+                # 해외 시장: 캐시 데이터 사용
+                market_latest = float(market_series.iloc[-1]) if not market_series.empty else score_latest
+                market_prev_for_calc = float(market_series.iloc[-2]) if len(market_series) > 1 else market_latest
+
+                latest_data_date = pd.to_datetime(df.index[-1]).normalize()
+                if latest_data_date >= base_date and market_prev_for_calc and market_prev_for_calc > 0:
+                    daily_pct = ((market_latest / market_prev_for_calc) - 1.0) * 100
 
             from utils.indicators import calculate_ma_score
             from utils.moving_averages import calculate_moving_average
@@ -795,23 +740,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
             price_deviation: Optional[float] = None
             if is_kor_market:
-                if nav_latest and nav_latest > 0 and market_latest:
-                    price_deviation = round(((market_latest / nav_latest) - 1.0) * 100, 2)
-                else:
-                    ticker_key_upper = str(ticker).strip().upper()
-                    realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
-                    if realtime_entry:
-                        deviation_raw = realtime_entry.get("deviation")
-                        if isinstance(deviation_raw, (int, float)):
-                            price_deviation = round(float(deviation_raw), 2)
-
-                    if price_deviation is None:
-                        fetched_deviation = _fetch_price_deviation_kr(
-                            ticker,
-                            [base_date, latest_data_date],
-                        )
-                        if fetched_deviation is not None:
-                            price_deviation = round(float(fetched_deviation), 2)
+                # 괴리율은 네이버 API의 실시간 데이터만 사용
+                ticker_key_upper = str(ticker).strip().upper()
+                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
+                if realtime_entry:
+                    deviation_raw = realtime_entry.get("deviation")
+                    if isinstance(deviation_raw, (int, float)):
+                        price_deviation = round(float(deviation_raw), 2)
 
             data_by_tkr[ticker] = {
                 "price": market_latest,
