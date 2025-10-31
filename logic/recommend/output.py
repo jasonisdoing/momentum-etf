@@ -15,7 +15,6 @@ from utils.notification import strip_html_tags
 from utils.report import render_table_eaw
 from utils.logger import get_app_logger
 from utils.formatters import format_price_deviation, format_price
-from config import KOR_REALTIME_ETF_PRICE_SOURCE
 
 logger = get_app_logger()
 

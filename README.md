@@ -147,9 +147,10 @@ MONGO_DB_CONNECTION_STRING=mongodb://localhost:27017/momentum_etf
 python run.py
 ```
 
-### 2) 실시간 추천 조회 (CLI)
+### 2) 추천 조회 (CLI)
 
 과거 시뮬레이션 없이 "현재 보유 + 오늘 추천"를 바탕으로 다음 거래일에 대한 매매 추천를 제안합니다.
+추천은 전날 종가 기준으로 계산되어 백테스트와 동일한 로직을 사용합니다.
 
 ```bash
 python recommend.py <account_id> [--date YYYY-MM-DD] [--output 경로]
@@ -193,9 +194,6 @@ python tune.py <account_id> [--output 경로]
 - **튜닝 로그**
   - 경로: `data/results/<account_id>/tune_{YYYY-MM-DD}.log`
   - 트리거: `python tune.py <account_id>` 실행 시 자동 생성
-- **룩백 최적화 로그**
-  - 요약: `data/results/<account_id>/lookback_summary_{YYYY-MM-DD}.log`
-  - 상세: `data/results/<account_id>/lookback_details_{YYYY-MM-DD}.log`
 
 ### 5) 스케줄러로 자동 실행 (APScheduler)
 
@@ -210,29 +208,7 @@ python tune.py <account_id> [--output 경로]
 python scripts/update_price_cache.py --country all --start 2020-01-01
 ```
 
-### 6) 최적 룩백 기간 탐색 (Walk-Forward Analysis)
-
-롤링 방식으로 최적의 파라미터 최적화 룩백 기간을 찾습니다.
-
-```bash
-# 기본 실행 (최근 12개월, 3/6/9/12/18/24개월 룩백 기간 테스트)
-python lookback.py k1
-
-# 커스텀 설정 (코드 내 DEFAULT_LOOKBACK_PERIODS 수정)
-# DEFAULT_LOOKBACK_PERIODS = [3, 6, 9, 12, 18, 24]
-```
-
-**결과 예시:**
-
-```
-룩백기간    평균수익률  승률(%)  평균Sharpe  평균MDD
-참조 3개월  +2.1%      58%      0.85       -8.2%
-참조 6개월  +3.4%      67%      1.12       -6.5%  ← 최적
-참조 12개월 +2.3%      50%      0.78       -9.3%
-```
-
-
-### 9) 급등주 찾기 (선택사항)
+### 6) 상승중인 ETF 찾기 (선택사항)
 
 pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 찾아봅니다.
 
@@ -352,7 +328,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 | `COOLDOWN_DAYS` | 쿨다운 기간 | 0~5일 | `config.py` |
 | `MARKET_REGIME_MA` | 시장 레짐 MA 기간 (참고용) | 10~100일 | 공통 설정 |
 
-파라미터 최적화는 `lookback.py`를 통해 수행합니다.
+파라미터 최적화는 `tune.py`를 통해 수행합니다.
 
 ## 설정 체계
 
@@ -365,7 +341,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 - `MARKET_REGIME_FILTER_TICKERS_AUX`: 대시보드에 참고용으로 노출할 보조 지수 리스트
 - `MARKET_REGIME_FILTER_MA_PERIOD`: 시장 레짐 필터 이동평균 기간
 - `MARKET_REGIME_FILTER_COUNTRY`: 레짐 필터 데이터 조회에 사용할 시장 코드(`kor`, `us` 등)
-- `KOR_REALTIME_ETF_PRICE_SOURCE`: 한국 ETF 실시간 가격을 `Price` 또는 `Nav` 중 어떤 값을 사용할지 지정
+- `MARKET_SCHEDULES`: 국가별 시장 거래 시간표 (한국: 9:00-14:00, 호주: 8:00-15:00, 간격: 60분)
 
 ### 계정별 전략 파라미터
 
@@ -429,7 +405,6 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 ## 주의/제약사항
 
 - 거래일 판정/개장여부는 `logic/recommend/schedule.py`에서 처리합니다. 캘린더/공휴일 변동 시 판단이 달라질 수 있습니다.
-- 장중 실시간 가격 조회는 외부 API(yfinance 등) 의존적이므로 서비스 변경 시 실패할 수 있습니다.
 - 모든 결과는 참고용이며, 실거래 적용 전 리스크/수수료/세금/체결 슬리피지 등을 반드시 반영해 재검증하세요.
 - 백테스트는 보수적 추정(시초가 + 슬리피지)이므로 실제 성과와 차이가 있을 수 있습니다.
 
@@ -449,6 +424,6 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 
 ### 데이터 사용 시점
 
-- **추천/실시간 파이프라인**은 해당일 장중 가격(네이버/ yfinance 실시간)을 시계열에 덮어씌운 뒤 점수와 현재가를 계산합니다.
-- **백테스트, 튜닝, 룩백**은 `skip_realtime=True` 설정으로 실시간 오버레이를 비활성화하여
-  **최근 거래일 종가까지의 데이터**만 사용합니다.
+- **추천, 백테스트, 튜닝 모두 동일한 로직 사용**: 최근 마감된 거래일의 종가까지만 사용합니다.
+- **의사결정 일관성**: 추천과 백테스트가 동일한 데이터와 로직을 사용하여 재현성을 보장합니다.
+- **정보성 실시간 데이터**: 화면 표시용으로 네이버/yfinance API를 통해 현재가, NAV, 괴리율을 조회하지만, 이는 매매 의사결정에 영향을 주지 않습니다.

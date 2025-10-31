@@ -1397,7 +1397,6 @@ def run_account_tuning(
         start_date=date_range_prefetch[0],
         end_date=date_range_prefetch[1],
         warmup_days=warmup_days,
-        skip_realtime=True,
     )
     prefetched_map: Dict[str, DataFrame] = dict(prefetched)
 
@@ -1504,7 +1503,6 @@ def run_account_tuning(
             start_date=adjusted_date_range[0],
             end_date=adjusted_date_range[1],
             warmup_days=warmup_days,
-            skip_realtime=True,
         )
         prefetched_map.update(prefetched_adjusted)
         for ticker, frame in prefetched_adjusted.items():

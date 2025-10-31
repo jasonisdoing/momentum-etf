@@ -214,8 +214,20 @@ def _cached_benchmark_data(
     # Momentum ETF 수익률: 실제 거래 우선, 없으면 백테스트
     if actual_perf:
         account_return = actual_perf.get("cumulative_return_pct")  # 실제 거래는 기존 키 사용
+        performance_detail = actual_perf  # 상세 정보 저장
     else:
         account_return = summary.get("period_return")  # 백테스트는 새 키 사용
+        performance_detail = None
+
+    # Momentum ETF를 벤치마크 테이블 맨 위에 추가
+    if account_return is not None:
+        rows.append(
+            {
+                "티커": "-",
+                "종목": "Momentum ETF",
+                "누적 수익률": f"{float(account_return):+.2f}%",
+            }
+        )
 
     # 벤치마크 정보 (항상 표시)
     for entry in benchmarks:
@@ -236,7 +248,7 @@ def _cached_benchmark_data(
 
     table_df = pd.DataFrame(rows)
     cached_at = pd.Timestamp.now(tz="Asia/Seoul")
-    return table_df, account_return, cached_at.isoformat()
+    return table_df, account_return, performance_detail, cached_at.isoformat()
 
 
 def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_code: str) -> None:
@@ -258,7 +270,7 @@ def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_c
         return
 
     try:
-        table_df, account_return, cached_iso = _cached_benchmark_data(account_id, start_date, end_date)
+        table_df, account_return, performance_detail, cached_iso = _cached_benchmark_data(account_id, start_date, end_date)
     except Exception as exc:
         st.warning(f"벤치마크 성과를 계산하지 못했습니다: {exc}")
         return
@@ -270,20 +282,52 @@ def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_c
     trading_days = get_trading_days(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), country_code)
     day_count = len(trading_days)
 
+    try:
+        cached_kst = pd.to_datetime(cached_iso)
+        if cached_kst.tzinfo is None or cached_kst.tzinfo.utcoffset(cached_kst) is None:
+            cached_kst = cached_kst.tz_localize("UTC").tz_convert("Asia/Seoul")
+        else:
+            cached_kst = cached_kst.tz_convert("Asia/Seoul")
+        ts_text = cached_kst.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        ts_text = str(cached_iso)
+
     with st.expander("벤치마크", expanded=True):
         st.caption(f"벤치마크 누적 수익률 ({start_date.strftime('%Y년 %m월 %d일')} 이후 {day_count} 거래일)")
+        st.table(table_df)
+        st.caption(f"데이터 업데이트: {ts_text}")
+
+    with st.expander("퍼포먼스(상세)", expanded=False):
         if account_return is not None:
             st.markdown(f"<span style='color:#d32f2f;'>가상 거래 수익률 (Momentum ETF): {account_return:+.2f}%</span>", unsafe_allow_html=True)
-        st.table(table_df)
-        try:
-            cached_kst = pd.to_datetime(cached_iso)
-            if cached_kst.tzinfo is None or cached_kst.tzinfo.utcoffset(cached_kst) is None:
-                cached_kst = cached_kst.tz_localize("UTC").tz_convert("Asia/Seoul")
-            else:
-                cached_kst = cached_kst.tz_convert("Asia/Seoul")
-            ts_text = cached_kst.strftime("%Y-%m-%d %H:%M:%S")
-        except Exception:
-            ts_text = str(cached_iso)
+
+        # 상세 정보 표시
+        if performance_detail:
+            daily_records = performance_detail.get("daily_records", [])
+
+            # 국가별 통화 기호
+            currency_symbol = "$" if country_code == "aus" else "₩"
+
+            # 일별 수익률 테이블
+            if daily_records:
+                st.markdown("**일별 수익률 변화**")
+                daily_rows = []
+                for record in daily_records:
+                    daily_rows.append(
+                        {
+                            "날짜": record["date"].strftime("%Y-%m-%d"),
+                            "총 평가액": f"{currency_symbol}{record['total_value']:,.0f}",
+                            "현금": f"{currency_symbol}{record['cash']:,.0f}",
+                            "보유자산": f"{currency_symbol}{record['holdings_value']:,.0f}",
+                            "일간 수익률": f"{record['daily_return_pct']:+.2f}%",
+                            "누적 수익률": f"{record['cumulative_return_pct']:+.2f}%",
+                            "거래": f"{record['trade_count']}건" if record["trade_count"] > 0 else "-",
+                        }
+                    )
+
+                daily_df = pd.DataFrame(daily_rows)
+                st.dataframe(daily_df, width="stretch", hide_index=True, height=400)
+
         st.caption(
             f"Momentum ETF 의 수익률은 기간 내 매수/보유/매도한 모든 종목의 실현·미실현 수익을 포함해서 계산합니다. 데이터 업데이트: {ts_text}"
         )

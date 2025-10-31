@@ -39,7 +39,6 @@ from utils.data_loader import (
 )
 from utils.db_manager import get_db_connection, list_open_positions
 from utils.logger import get_app_logger
-from config import KOR_REALTIME_ETF_PRICE_SOURCE
 from utils.market_schedule import get_market_open_time
 
 logger = get_app_logger()
@@ -243,67 +242,9 @@ def _calc_metrics(df: pd.DataFrame, ma_period: int) -> Optional[tuple]:
         return None
 
 
-def _fetch_price_deviation_kr(ticker: str, date_candidates: List[pd.Timestamp]) -> Optional[float]:
-    """pykrx에서 한국 ETF 괴리율(%)을 조회합니다."""
-
-    try:
-        from pykrx import stock as pykrx_stock  # type: ignore
-    except ImportError:
-        logger.debug("pykrx 미설치로 괴리율 조회를 건너뜁니다.")
-        return None
-
-    for candidate in date_candidates:
-        if candidate is None:
-            continue
-        try:
-            date_norm = pd.Timestamp(candidate).normalize()
-        except Exception:
-            continue
-
-        date_str = date_norm.strftime("%Y%m%d")
-        try:
-            df_deviation = pykrx_stock.get_etf_price_deviation(date_str, date_str, ticker)
-        except Exception as exc:  # pragma: no cover - 외부 API 예외 방어
-            logger.debug("pykrx 괴리율 조회 실패 (%s, %s): %s", ticker, date_str, exc)
-            continue
-
-        if df_deviation is None or df_deviation.empty:
-            continue
-
-        try:
-            raw_value = df_deviation.iloc[-1].get("괴리율")
-        except Exception:  # pragma: no cover - 방어 로직
-            raw_value = None
-
-        if raw_value is None:
-            continue
-
-        try:
-            return float(raw_value)
-        except (TypeError, ValueError):
-            try:
-                sanitized = str(raw_value).replace("%", "").strip()
-                return float(sanitized) if sanitized else None
-            except (TypeError, ValueError):
-                continue
-
-    return None
-
-
 def _select_price_series(df: pd.DataFrame, country_code: str) -> pd.Series:
-    """한국 실시간 설정에 따라 가격 시리즈를 선택합니다."""
-
+    """Close 가격 시리즈를 반환합니다."""
     close_series = pd.to_numeric(df.get("Close"), errors="coerce") if "Close" in df.columns else None
-    country_lower = (country_code or "").strip().lower()
-    use_nav = (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav" and country_lower in {"kr", "kor"}
-
-    if use_nav and "NAV" in df.columns:
-        nav_series = pd.to_numeric(df["NAV"], errors="coerce")
-        if close_series is not None:
-            nav_series = nav_series.fillna(close_series)
-        nav_series = nav_series.fillna(method="ffill").fillna(method="bfill")
-        if nav_series.notna().any():
-            return nav_series
 
     if close_series is None:
         raise ValueError("가격 시리즈를 찾을 수 없습니다 (Close 열 없음).")
@@ -698,14 +639,12 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         len(tickers_all),
     )
     fetch_start = time.perf_counter()
-    skip_realtime = False
     prefetched_data, missing_prefetch = prepare_price_data(
         tickers=tickers_all,
         country=country_code,
         start_date=start_date,
         end_date=end_date,
         warmup_days=warmup_days,
-        skip_realtime=skip_realtime,
     )
     logger.info(
         "[%s] 가격 데이터 로딩 완료 (%.1fs)",
@@ -724,7 +663,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     realtime_inav_snapshot: Dict[str, Dict[str, float]] = {}
     country_lower = (country_code or "").strip().lower()
     is_kor_market = country_lower in {"kr", "kor"}
-    nav_display_enabled = is_kor_market and (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower() == "nav"
     if is_kor_market:
         try:
             realtime_inav_snapshot = fetch_naver_etf_inav_snapshot([stock["ticker"] for stock in etf_universe])
@@ -748,41 +686,48 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
             market_series = pd.to_numeric(df.get("Close"), errors="coerce") if "Close" in df.columns else price_series
             market_series = market_series.fillna(method="ffill").fillna(method="bfill")
-            market_latest = float(market_series.iloc[-1]) if not market_series.empty else score_latest
-            market_prev = float(market_series.iloc[-2]) if len(market_series) > 1 else market_latest
 
+            # 데이터의 최신 날짜 추출
+            latest_data_date = pd.to_datetime(df.index[-1]).normalize()
+            base_date_norm = pd.to_datetime(base_date).normalize()
+
+            # 전일 종가 (일간 수익률 계산용)
+            # 캐시에 오늘 데이터가 있으면 전일(iloc[-2]), 없으면 마지막(iloc[-1])
+            if latest_data_date >= base_date_norm and len(market_series) > 1:
+                market_prev = float(market_series.iloc[-2])
+            else:
+                market_prev = float(market_series.iloc[-1]) if not market_series.empty else score_latest
+
+            # 한국 시장: 현재가, NAV, 일간 수익률은 네이버 API만 사용 (fallback 없음)
+            market_latest: Optional[float] = None
             nav_latest: Optional[float] = None
-            if "NAV" in df.columns:
-                nav_series = pd.to_numeric(df["NAV"], errors="coerce").dropna()
-                if not nav_series.empty:
-                    nav_latest = float(nav_series.iloc[-1])
-            if nav_latest is None and is_kor_market:
+            daily_pct = 0.0
+
+            if is_kor_market:
                 ticker_key_upper = str(ticker).strip().upper()
                 realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
                 if realtime_entry:
+                    # 현재가
+                    price_candidate = realtime_entry.get("nowVal")
+                    if isinstance(price_candidate, (int, float)) and price_candidate > 0:
+                        market_latest = float(price_candidate)
+
+                    # NAV
                     nav_candidate = realtime_entry.get("nav")
-                    if isinstance(nav_candidate, (int, float)):
+                    if isinstance(nav_candidate, (int, float)) and nav_candidate > 0:
                         nav_latest = float(nav_candidate)
 
-            latest_data_date = pd.to_datetime(df.index[-1]).normalize()
-            base_norm = base_date.normalize()
+                    # 일간 수익률 (현재가 / 전일 종가 - 1)
+                    if market_latest and market_prev and market_prev > 0:
+                        daily_pct = ((market_latest / market_prev) - 1.0) * 100
+            else:
+                # 해외 시장: 캐시 데이터 사용
+                market_latest = float(market_series.iloc[-1]) if not market_series.empty else score_latest
+                market_prev_for_calc = float(market_series.iloc[-2]) if len(market_series) > 1 else market_latest
 
-            daily_pct = 0.0
-            if market_prev and market_prev > 0:
-                daily_pct = ((market_latest / market_prev) - 1.0) * 100
-
-            # 데이터가 오늘 것이 아니면 일간 수익률을 0으로 설정
-            if base_norm > latest_data_date:
-                daily_pct = 0.0
-                market_prev = market_latest
-            elif country_lower in {"kr", "kor", "aus", "au"}:
-                # 데이터가 오늘 것이지만 장 시작 전이면 일간 수익률을 0으로 설정
-                now_kst = pd.Timestamp.now(tz="Asia/Seoul")
-                # 국가 코드 정규화
-                country_for_market = "kor" if country_lower in {"kr", "kor"} else "aus"
-                market_open = get_market_open_time(country_for_market)
-                if now_kst.time() < market_open:
-                    daily_pct = 0.0
+                latest_data_date = pd.to_datetime(df.index[-1]).normalize()
+                if latest_data_date >= base_date and market_prev_for_calc and market_prev_for_calc > 0:
+                    daily_pct = ((market_latest / market_prev_for_calc) - 1.0) * 100
 
             from utils.indicators import calculate_ma_score
             from utils.moving_averages import calculate_moving_average
@@ -804,23 +749,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
             price_deviation: Optional[float] = None
             if is_kor_market:
-                if nav_latest and nav_latest > 0 and market_latest:
-                    price_deviation = round(((market_latest / nav_latest) - 1.0) * 100, 2)
-                else:
-                    ticker_key_upper = str(ticker).strip().upper()
-                    realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
-                    if realtime_entry:
-                        deviation_raw = realtime_entry.get("deviation")
-                        if isinstance(deviation_raw, (int, float)):
-                            price_deviation = round(float(deviation_raw), 2)
-
-                    if price_deviation is None:
-                        fetched_deviation = _fetch_price_deviation_kr(
-                            ticker,
-                            [base_date, latest_data_date],
-                        )
-                        if fetched_deviation is not None:
-                            price_deviation = round(float(fetched_deviation), 2)
+                # 괴리율은 네이버 API의 실시간 데이터만 사용
+                ticker_key_upper = str(ticker).strip().upper()
+                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
+                if realtime_entry:
+                    deviation_raw = realtime_entry.get("deviation")
+                    if isinstance(deviation_raw, (int, float)):
+                        price_deviation = round(float(deviation_raw), 2)
 
             data_by_tkr[ticker] = {
                 "price": market_latest,
@@ -933,9 +868,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 if existing.get("row"):
                     existing["row"][4] = "SOLD"
                     # RSI 과매수 조건 확인하여 메시지 추가
-                    rsi_score = existing.get("rsi_score", 100.0)
+                    rsi_score = existing.get("rsi_score", 0.0)
                     base_msg = DECISION_MESSAGES["SOLD"]
-                    if rsi_score <= rsi_sell_threshold:
+                    if rsi_score >= rsi_sell_threshold:
                         existing["row"][-1] = f"{base_msg} | RSI 과매수 (RSI점수: {rsi_score:.1f})"
                     else:
                         existing["row"][-1] = base_msg
@@ -1099,10 +1034,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 phrase = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
             else:
                 state = "HOLD"
-                # RSI 과매도 조건 확인하여 메시지 추가
+                # RSI 과매수 조건 확인하여 메시지 추가
                 rsi_score_val = decision.get("rsi_score", 0.0)
                 base_msg = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
-                if rsi_score_val <= rsi_sell_threshold:
+                if rsi_score_val >= rsi_sell_threshold:
                     phrase = f"{base_msg} | RSI 과매수 (RSI점수: {rsi_score_val:.1f})"
                 else:
                     phrase = base_msg
@@ -1128,10 +1063,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 phrase = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
             else:
                 state = "HOLD"
-                # RSI 과매도 조건 확인하여 메시지 추가
+                # RSI 과매수 조건 확인하여 메시지 추가
                 rsi_score_val = decision.get("rsi_score", 0.0)
                 base_msg = DECISION_MESSAGES.get("NEWLY_ADDED", "🆕 신규 편입")
-                if rsi_score_val <= rsi_sell_threshold:
+                if rsi_score_val >= rsi_sell_threshold:
                     phrase = f"{base_msg} | RSI 과매수 (RSI점수: {rsi_score_val:.1f})"
                 else:
                     phrase = base_msg
@@ -1262,8 +1197,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         elif item["state"] == "SOLD":
             # SOLD 상태 중 원래 SELL_RSI였거나 RSI 과매수로 매도된 경우
             original_state = item.get("original_state")
-            rsi_score = item.get("rsi_score", 100.0)
-            if original_state == "SELL_RSI" or rsi_score <= rsi_sell_threshold:
+            rsi_score = item.get("rsi_score", 0.0)
+            if original_state == "SELL_RSI" or rsi_score >= rsi_sell_threshold:
                 category = item.get("category")
                 if category and category != "TBD":
                     sell_rsi_categories.add(category)
@@ -1286,9 +1221,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     projected_holdings = current_holdings_count - planned_sell_count + planned_buy_count
     additional_buy_slots = max(0, portfolio_topn - projected_holdings)
 
-    logger.info(
-        f"[PIPELINE] 매수 슬롯 계산: current={current_holdings_count}, sell={planned_sell_count}, buy={planned_buy_count}, projected={projected_holdings}, topn={portfolio_topn}, slots={additional_buy_slots}, wait_items={len(wait_items)}"
-    )
+    # logger.info(
+    #     f"[PIPELINE] 매수 슬롯 계산: current={current_holdings_count}, sell={planned_sell_count}, buy={planned_buy_count}, projected={projected_holdings}, topn={portfolio_topn}, slots={additional_buy_slots}, wait_items={len(wait_items)}"
+    # )
 
     promoted = 0
     for item in wait_items:
@@ -1321,8 +1256,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             continue
 
         # RSI 과매수 종목 매수 차단
-        rsi_score = item.get("rsi_score", 100.0)
-        if rsi_score <= rsi_sell_threshold:
+        rsi_score = item.get("rsi_score", 0.0)
+        if rsi_score >= rsi_sell_threshold:
             logger.info(f"[PIPELINE BUY BLOCKED] {item.get('ticker')} 매수 차단 - RSI 과매수 (RSI점수: {rsi_score:.1f})")
             continue
 
@@ -1413,8 +1348,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         "평가(%)",
         price_header,
     ]
-    if nav_display_enabled:
-        detail_headers.append("Nav")
     if show_deviation:
         detail_headers.append("괴리율")
     detail_headers.extend(["1주(%)", "2주(%)", "3주(%)", "점수", "지속", "문구"])
@@ -1432,8 +1365,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             item.get("evaluation_pct"),
             item.get("price"),
         ]
-        if nav_display_enabled:
-            row.append(item.get("nav_price"))
         if show_deviation:
             row.append(item.get("price_deviation"))
         row.extend(
