@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 from .scoring import calculate_rsi_score
-from config import RSI_NORMALIZATION_CONFIG, RSI_CALCULATION_CONFIG
+from config import RSI_CALCULATION_CONFIG
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -18,7 +18,7 @@ def calculate_rsi_for_ticker(close_prices: pd.Series) -> float:
         close_prices: 종가 시리즈
 
     Returns:
-        float: 정규화된 RSI 점수 (0~100)
+        float: RSI 값 (0~100, 70 이상 과매수)
     """
     if close_prices is None or close_prices.empty:
         logger.warning("[RSI] 가격 데이터 없음 (None 또는 empty)")
@@ -38,9 +38,9 @@ def calculate_rsi_for_ticker(close_prices: pd.Series) -> float:
         rsi_period = RSI_CALCULATION_CONFIG.get("period", 14)
         rsi_ema_smoothing = RSI_CALCULATION_CONFIG.get("ema_smoothing", 2.0)
 
-        # RSI 점수 계산 (정규화 포함)
+        # RSI 값 계산 (원본 RSI)
         rsi_score_series = calculate_rsi_score(
-            close_prices, period=rsi_period, ema_smoothing=rsi_ema_smoothing, normalize=True, normalize_config=RSI_NORMALIZATION_CONFIG
+            close_prices, period=rsi_period, ema_smoothing=rsi_ema_smoothing, normalize=False, normalize_config=None
         )
 
         # 최신 값 반환

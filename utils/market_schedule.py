@@ -61,15 +61,3 @@ def generate_market_cron_expressions(country_code: str) -> tuple[str, ...]:
         expressions.append(f"{minutes} {hour} * * 1-5")
 
     return tuple(expressions)
-    schedule = MARKET_SCHEDULES.get(country_code.lower())
-    if not schedule:
-        raise ValueError(f"Unknown country: {country_code}")
-
-    open_hour = schedule["open"].hour
-    close_hour = schedule["close"].hour
-
-    # 매 10분마다: 1, 11, 21, 31, 41, 51분
-    minutes = "1,11,21,31,41,51"
-    hours = f"{open_hour}-{close_hour}"
-
-    return f"{minutes} {hours} * * 1-5"

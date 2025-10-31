@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 DECISION_CONFIG = {
-    "HOLD": {
-        "display_name": "<💼 보유>",
-        "order": 1,
-        "is_recommendation": False,
-        "show_slack": True,
-        "background": None,
-    },
     "HOLD_CORE": {
         "display_name": "<🔒 핵심보유>",
-        "order": 2,
+        "order": 1,
         "is_recommendation": False,
         "show_slack": True,
         "background": "#e8f5e9",
     },
+    "HOLD": {
+        "display_name": "<💼 보유>",
+        "order": 10,
+        "is_recommendation": False,
+        "show_slack": True,
+        "background": None,
+    },
     "CUT_STOPLOSS": {
         "display_name": "<🚨 손절매도>",
-        "order": 10,
+        "order": 11,
         "is_recommendation": True,
         "show_slack": True,
     },

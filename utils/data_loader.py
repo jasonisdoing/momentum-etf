@@ -13,8 +13,6 @@ from contextlib import contextmanager
 
 import pandas as pd
 
-from config import KOR_REALTIME_ETF_PRICE_SOURCE
-
 # pkg_resources 워닝 억제 (가장 강력한 방법)
 os.environ["PYTHONWARNINGS"] = "ignore"
 warnings.simplefilter("ignore")
@@ -89,12 +87,6 @@ if not any(isinstance(f, _PykrxLogFilter) for f in _root_logger.filters):
     _root_logger.addFilter(_PykrxLogFilter())
 
 logger = get_app_logger()
-
-_KOR_PRICE_SOURCE_NORMALIZED = (KOR_REALTIME_ETF_PRICE_SOURCE or "").strip().lower()
-_KOR_ALLOWED_PRICE_SOURCES = {"price", "nav"}
-
-if _KOR_PRICE_SOURCE_NORMALIZED not in _KOR_ALLOWED_PRICE_SOURCES:
-    raise ValueError("KOR_REALTIME_ETF_PRICE_SOURCE must be one of {'Price', 'Nav'}")
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -230,32 +222,6 @@ def _should_skip_today_range(country_code: str, target_end: pd.Timestamp) -> boo
 def _is_time_in_window(now_dt: datetime, start: time, end: time) -> bool:
     current = now_dt.time()
     return start <= current <= end
-
-
-def _should_use_realtime_price(country: str) -> bool:
-    country_code = (country or "").strip().lower()
-
-    if country_code == "kor":
-        now_kst = _now_with_zone("Asia/Seoul")
-        if not _is_time_in_window(now_kst, time(9, 0), time(23, 59, 59)):
-            return False
-        today_str = now_kst.strftime("%Y-%m-%d")
-        try:
-            return bool(get_trading_days(today_str, today_str, "kor"))
-        except Exception:
-            return False
-
-    if country_code == "aus":
-        now_kst = _now_with_zone("Asia/Seoul")
-        if not _is_time_in_window(now_kst, time(10, 0), time(23, 59, 59)):
-            return False
-        today_str = now_kst.strftime("%Y-%m-%d")
-        try:
-            return bool(get_trading_days(today_str, today_str, "aus"))
-        except Exception:
-            return False
-
-    return False
 
 
 @functools.lru_cache(maxsize=1)
@@ -449,14 +415,25 @@ def count_trading_days(
 
     country_code = (country or "").strip().lower()
 
-    days = get_trading_days(start_ts.strftime("%Y-%m-%d"), end_ts.strftime("%Y-%m-%d"), country_code)
+    # 캐시를 위해 문자열로 변환하여 내부 함수 호출
+    return _count_trading_days_cached(country_code, start_ts.strftime("%Y-%m-%d"), end_ts.strftime("%Y-%m-%d"))
+
+
+@functools.lru_cache(maxsize=500)
+def _count_trading_days_cached(country_code: str, start_str: str, end_str: str) -> int:
+    """캐시된 거래일 수 계산 (내부 함수)"""
+    days = get_trading_days(start_str, end_str, country_code)
     return len(days)
 
 
-@functools.lru_cache(maxsize=5)
-def get_latest_trading_day(country: str) -> pd.Timestamp:
+@functools.lru_cache(maxsize=50)
+def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp:
     """
-    오늘 또는 가장 가까운 과거의 '데이터가 있을 것으로 예상되는' 거래일을 pd.Timestamp 형식으로 반환합니다.
+    내부 캐시 함수: 날짜/시간 기반 캐시 키를 사용하여 최신 거래일을 반환합니다.
+
+    Args:
+        country: 국가 코드
+        cache_key: 캐시 무효화용 키 (날짜_시간 형식)
     """
     country_code = (country or "").strip().lower()
 
@@ -468,8 +445,17 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
         try:
             local_now = _now_with_zone(tz_name)
             candidate_date = local_now.date()
+
+            # 장 개시 전: 오늘이 거래일이면 오늘, 아니면 전날 거래일
+            # 장 개시 후: 오늘
             if local_now.time() < open_time:
-                candidate_date = candidate_date - pd.Timedelta(days=1)
+                # 오늘이 거래일인지 확인
+                today_str = candidate_date.strftime("%Y-%m-%d")
+                trading_days_today = get_trading_days(today_str, today_str, country_code)
+                if not trading_days_today:
+                    # 오늘이 거래일이 아니면 전날로
+                    candidate_date = candidate_date - pd.Timedelta(days=1)
+
             end_dt = pd.Timestamp(candidate_date)
         except Exception:
             # 타임존 처리 실패 시 안전하게 폴백
@@ -514,6 +500,19 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
     return end_dt.normalize()
 
 
+def get_latest_trading_day(country: str) -> pd.Timestamp:
+    """
+    오늘 또는 가장 가까운 과거의 '데이터가 있을 것으로 예상되는' 거래일을 pd.Timestamp 형식으로 반환합니다.
+
+    시간 기반 캐시를 사용하여 날짜가 바뀌거나 시간이 지나면 자동으로 캐시가 무효화됩니다.
+    """
+    # 현재 날짜와 시간(시 단위)을 캐시 키로 사용
+    # 이렇게 하면 매 시간마다 캐시가 갱신되어 장 시작 전/후 데이터 차이를 반영
+    now = pd.Timestamp.now()
+    cache_key = f"{now.strftime('%Y-%m-%d')}_{now.hour}"
+    return _get_latest_trading_day_cached(country, cache_key)
+
+
 def get_next_trading_day(
     country: str,
     reference_date: Optional[pd.Timestamp] = None,
@@ -544,7 +543,6 @@ def fetch_ohlcv(
     *,
     cache_country: Optional[str] = None,
     force_refresh: bool = False,
-    skip_realtime: bool = False,
     update_listing_meta: bool = False,
 ) -> Optional[pd.DataFrame]:
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
@@ -591,7 +589,6 @@ def fetch_ohlcv(
         end_dt.normalize(),
         cache_country_override=cache_country,
         force_refresh=force_refresh,
-        skip_realtime=skip_realtime,
         update_listing_meta=update_listing_meta,
     )
 
@@ -610,7 +607,6 @@ def _fetch_ohlcv_with_cache(
     *,
     cache_country_override: Optional[str] = None,
     force_refresh: bool = False,
-    skip_realtime: bool = False,
     update_listing_meta: bool = False,
 ) -> Optional[pd.DataFrame]:
     country_code = (country or "").strip().lower()
@@ -624,23 +620,31 @@ def _fetch_ohlcv_with_cache(
         except Exception:
             listing_ts = None
 
+    # 캐시 시작일 가져오기
+    cache_seed_dt = _get_cache_start_dt()
+
+    # 데이터 다운로드 시작일 결정: max(요청 시작일, 실제 상장일, CACHE_START_DATE)
     request_start_dt = start_dt
     if listing_ts is not None and start_dt < listing_ts:
         request_start_dt = listing_ts
+
+    # CACHE_START_DATE가 있고, 실제 상장일보다 늦으면 CACHE_START_DATE 사용
+    if cache_seed_dt is not None:
+        if listing_ts is None or cache_seed_dt > listing_ts:
+            request_start_dt = max(request_start_dt, cache_seed_dt)
 
     cache_country_display = cache_country_code.upper()
 
     missing_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
     cache_start: Optional[pd.Timestamp] = None
     cache_end: Optional[pd.Timestamp] = None
-    cache_seed_dt = None
 
     if force_refresh:
         cached_df = None
         missing_ranges.append((request_start_dt, end_dt))
     else:
         cached_df = load_cached_frame(cache_country_code, ticker)
-        cache_seed_dt = _get_cache_start_dt()
+        # cache_seed_dt는 이미 위에서 가져왔으므로 중복 제거
         if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
             if request_start_dt > cache_seed_dt:
                 request_start_dt = cache_seed_dt
@@ -675,11 +679,12 @@ def _fetch_ohlcv_with_cache(
         effective_end = miss_end
         log_pending = False
         start_str = miss_start.strftime("%Y-%m-%d")
-        today_norm = pd.Timestamp.now().normalize()
-        if skip_realtime and effective_end >= today_norm:
-            effective_end = today_norm - pd.Timedelta(days=1)
+        # 장 마감 후에는 오늘 데이터 포함, 장 시작 전에는 전날까지만
+        latest_trading_day = get_latest_trading_day(country_code)
+        if effective_end > latest_trading_day:
+            effective_end = latest_trading_day
             log_pending = False
-        end_str = miss_end.strftime("%Y-%m-%d")
+        end_str = effective_end.strftime("%Y-%m-%d")
         if _should_skip_today_range(country_code, miss_end):
             effective_end = miss_end - pd.Timedelta(days=1)
             if effective_end < miss_start:
@@ -781,14 +786,6 @@ def _fetch_ohlcv_with_cache(
 
     effective_end = end_dt if end_dt <= cache_max else cache_max
 
-    if not skip_realtime and _should_use_realtime_price(cache_country_code):
-        updated_df = _overlay_realtime_price(combined_df, ticker, cache_country_code)
-        if not updated_df.equals(combined_df):
-            combined_df = updated_df
-            save_cached_frame(cache_country_code, ticker, combined_df)
-        else:
-            combined_df = updated_df
-
     mask = (combined_df.index >= effective_start) & (combined_df.index <= effective_end)
     sliced = combined_df.loc[mask].copy()
     if sliced.empty:
@@ -819,87 +816,6 @@ def _fetch_ohlcv_with_cache(
             logger.debug("[CACHE] 상장일 저장 실패 (%s/%s): %s", country_code.upper(), ticker, exc)
 
     return sliced
-
-
-def _overlay_realtime_price(df: pd.DataFrame, ticker: str, country: str) -> pd.DataFrame:
-    """개장 이후 실시간 가격을 캐시 데이터에 덧씌웁니다."""
-
-    country_code = (country or "").strip().lower()
-
-    price: Optional[float] = None
-    nav_value: Optional[float] = None
-
-    if country_code == "kor":
-        # 네이버 실시간 가격은 한국 상장 종목(숫자/알파벳 코드)에만 적용
-        if ticker.startswith("^"):
-            return df
-        snapshot_entry = get_cached_naver_etf_snapshot_entry(ticker)
-        if snapshot_entry:
-            price_candidate = _safe_float(snapshot_entry.get("nowVal"))
-            nav_candidate = _safe_float(snapshot_entry.get("nav"))
-            price = price_candidate if price_candidate is not None else _safe_float(snapshot_entry.get("price"))
-            nav_value = nav_candidate
-        if price is None or price <= 0:
-            price = fetch_naver_realtime_price(ticker)
-    elif country_code == "aus":
-        # ASX 지수 티커(예: ^AXJO)는 그대로 둡니다.
-        if ticker.startswith("^"):
-            return df
-        price = fetch_au_realtime_price(ticker)
-    else:
-        return df
-
-    if price is None or price <= 0:
-        return df
-
-    df = df.copy()
-    df.sort_index(inplace=True)
-
-    now_kst = _now_with_zone("Asia/Seoul")
-    today = pd.Timestamp(now_kst.date())
-
-    if not isinstance(df.index, pd.DatetimeIndex):
-        return df
-
-    last_idx = df.index[-1]
-    last_date = pd.Timestamp(last_idx).normalize()
-
-    target_idx = None
-    if last_date == today:
-        target_idx = last_idx
-    elif last_date < today:
-        # 새로운 거래일 행을 추가합니다.
-        new_row = df.iloc[-1].copy()
-        for col in ("Open", "High", "Low", "Close", "Adj Close"):
-            if col in df.columns:
-                new_row[col] = price
-        if country_code == "kor" and (nav_value is not None or _KOR_PRICE_SOURCE_NORMALIZED == "nav"):
-            effective_nav = nav_value if nav_value is not None else price
-            if "NAV" in df.columns:
-                new_row["NAV"] = effective_nav
-            else:
-                new_row = new_row.reindex(list(new_row.index) + ["NAV"])
-                new_row["NAV"] = effective_nav
-        if "Volume" in new_row.index:
-            new_row["Volume"] = 0.0
-        target_idx = today
-        df.loc[target_idx] = new_row
-        df.sort_index(inplace=True)
-    else:
-        # 미래 날짜가 이미 존재하는 경우는 그대로 둡니다.
-        return df
-
-    if target_idx is not None:
-        for col in ("Close", "Adj Close", "Open", "High", "Low"):
-            if col in df.columns:
-                df.loc[target_idx, col] = price
-        if country_code == "kor" and (nav_value is not None or _KOR_PRICE_SOURCE_NORMALIZED == "nav"):
-            effective_nav = nav_value if nav_value is not None else price
-            if "NAV" not in df.columns:
-                df["NAV"] = pd.NA
-            df.loc[target_idx, "NAV"] = effective_nav
-
-    return df
 
 
 def _fetch_ohlcv_core(
@@ -1134,7 +1050,6 @@ def fetch_ohlcv_for_tickers(
     country: str,
     date_range: Optional[List[str]] = None,
     warmup_days: int = 0,
-    skip_realtime: bool = False,
 ) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
     """
     주어진 티커 목록에 대해 OHLCV 데이터를 직렬로 조회합니다.
@@ -1150,15 +1065,8 @@ def fetch_ohlcv_for_tickers(
 
     missing: List[str] = []
 
-    is_kor_market = (country or "").strip().lower() in {"kr", "kor"}
-    if is_kor_market and not skip_realtime:
-        try:
-            prime_naver_etf_realtime_snapshot(tickers)
-        except Exception as exc:  # pragma: no cover - 방어 목적
-            logger.debug("네이버 실시간 스냅샷 초기화 실패(%s): %s", country, exc)
-
     for tkr in tickers:
-        df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range, skip_realtime=skip_realtime)
+        df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range)
         if df is None or df.empty:
             missing.append(tkr)
             continue
@@ -1174,7 +1082,6 @@ def prepare_price_data(
     start_date: str,
     end_date: str,
     warmup_days: int = 0,
-    skip_realtime: bool = False,
 ) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
     """Shared helper to populate cache-backed OHLCV data consistently across workflows."""
 
@@ -1188,7 +1095,6 @@ def prepare_price_data(
         country,
         date_range=date_range,
         warmup_days=warmup_days,
-        skip_realtime=skip_realtime,
     )
     return prefetched, missing
 
@@ -1255,19 +1161,14 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> Dict[str, Dict[str,
     if not normalized_codes:
         return {}
 
-    if not _should_use_realtime_price("kor"):
-        return {}
-
     if not requests:
         logger.debug("requests 라이브러리가 없어 네이버 iNAV 조회를 건너뜁니다.")
         return {}
 
-    url = "https://finance.naver.com/api/sise/etfItemList.nhn"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-        "Referer": "https://finance.naver.com/sise/etfList.nhn",
-        "Accept": "application/json, text/plain, */*",
-    }
+    from config import NAVER_FINANCE_ETF_API_URL, NAVER_FINANCE_HEADERS
+
+    url = NAVER_FINANCE_ETF_API_URL
+    headers = NAVER_FINANCE_HEADERS
 
     try:
         response = requests.get(url, headers=headers, timeout=5)
@@ -1310,12 +1211,9 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> Dict[str, Dict[str,
 
         deviation = ((price_value / nav_value) - 1.0) * 100.0
 
-        selected_price = price_value if _KOR_PRICE_SOURCE_NORMALIZED == "price" else nav_value
-
         snapshot[code] = {
             "nav": nav_value,
             "nowVal": price_value,
-            "price": selected_price,
             "deviation": deviation,
         }
 

@@ -6,7 +6,7 @@ from typing import Dict, Optional
 import pandas as pd
 
 from .scoring import calculate_rsi_score
-from config import RSI_NORMALIZATION_CONFIG, RSI_CALCULATION_CONFIG
+from config import RSI_CALCULATION_CONFIG
 
 
 def process_ticker_data_rsi(close_prices: pd.Series) -> Optional[Dict]:
@@ -30,10 +30,8 @@ def process_ticker_data_rsi(close_prices: pd.Series) -> Optional[Dict]:
     if len(close_prices) < rsi_period + 1:
         return None
 
-    # RSI 점수 계산 (정규화 포함)
-    rsi_score = calculate_rsi_score(
-        close_prices, period=rsi_period, ema_smoothing=rsi_ema_smoothing, normalize=True, normalize_config=RSI_NORMALIZATION_CONFIG
-    )
+    # RSI 값 계산 (원본 RSI)
+    rsi_score = calculate_rsi_score(close_prices, period=rsi_period, ema_smoothing=rsi_ema_smoothing, normalize=False, normalize_config=None)
 
     return {
         "rsi_score": rsi_score,
