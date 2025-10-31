@@ -35,13 +35,13 @@ MARKET_SCHEDULES = {
     "kor": {
         "open": time(9, 00),
         "close": time(14, 00),
-        "interval_minutes": 60,
+        "interval_minutes": 20,
         "timezone": "Asia/Seoul",
     },
     "aus": {
         "open": time(8, 00),
         "close": time(15, 00),
-        "interval_minutes": 60,
+        "interval_minutes": 20,
         "timezone": "Asia/Seoul",
     },
 }
