@@ -34,7 +34,7 @@ RSI_CALCULATION_CONFIG = {
 MARKET_SCHEDULES = {
     "kor": {
         "open": time(9, 00),
-        "close": time(14, 00),
+        "close": time(16, 00),
         "interval_minutes": 20,
         "timezone": "Asia/Seoul",
     },

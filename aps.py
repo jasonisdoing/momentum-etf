@@ -16,7 +16,7 @@ import os
 import sys
 import warnings
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 TIMEZONE = "Asia/Seoul"
 
