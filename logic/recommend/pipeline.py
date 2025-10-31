@@ -686,8 +686,17 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
             market_series = pd.to_numeric(df.get("Close"), errors="coerce") if "Close" in df.columns else price_series
             market_series = market_series.fillna(method="ffill").fillna(method="bfill")
+
+            # 데이터의 최신 날짜 추출
+            latest_data_date = pd.to_datetime(df.index[-1]).normalize()
+            base_date_norm = pd.to_datetime(base_date).normalize()
+
             # 전일 종가 (일간 수익률 계산용)
-            market_prev = float(market_series.iloc[-1]) if not market_series.empty else score_latest
+            # 캐시에 오늘 데이터가 있으면 전일(iloc[-2]), 없으면 마지막(iloc[-1])
+            if latest_data_date >= base_date_norm and len(market_series) > 1:
+                market_prev = float(market_series.iloc[-2])
+            else:
+                market_prev = float(market_series.iloc[-1]) if not market_series.empty else score_latest
 
             # 한국 시장: 현재가, NAV, 일간 수익률은 네이버 API만 사용 (fallback 없음)
             market_latest: Optional[float] = None
