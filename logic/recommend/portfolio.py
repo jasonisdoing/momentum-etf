@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from strategies.maps.rules import StrategyRules
 from utils.logger import get_app_logger
-from utils.data_loader import count_trading_days
+from utils.data_loader import count_trading_days, get_trading_days
 
 logger = get_app_logger()
 
@@ -71,6 +71,54 @@ def _calculate_cooldown_blocks(
     buy_cooldown_block: Dict[str, Dict[str, Any]] = {}
     base_date_norm = base_date.normalize()
 
+    trading_day_lookup: Dict[pd.Timestamp, int] = {}
+    base_day_index: Optional[int] = None
+
+    if cooldown_days and cooldown_days > 0:
+        relevant_dates: Set[pd.Timestamp] = {base_date_norm}
+        for trade_info in (trade_cooldown_info or {}).values():
+            if not isinstance(trade_info, dict):
+                continue
+            for key in ("last_buy", "last_sell"):
+                raw_value = trade_info.get(key)
+                if raw_value is None:
+                    continue
+                try:
+                    ts = pd.to_datetime(raw_value).normalize()
+                except Exception:
+                    continue
+                if ts <= base_date_norm:
+                    relevant_dates.add(ts)
+
+        if len(relevant_dates) > 1 and country_code:
+            try:
+                earliest = min(relevant_dates)
+                trading_days = get_trading_days(
+                    earliest.strftime("%Y-%m-%d"),
+                    base_date_norm.strftime("%Y-%m-%d"),
+                    country_code,
+                )
+                if trading_days:
+                    trading_day_lookup = {day.normalize(): idx for idx, day in enumerate(trading_days)}
+                    for day in reversed(trading_days):
+                        day_norm = day.normalize()
+                        if day_norm <= base_date_norm:
+                            base_day_index = trading_day_lookup.get(day_norm)
+                            if base_day_index is not None:
+                                break
+            except Exception:
+                trading_day_lookup = {}
+                base_day_index = None
+
+    def _cached_trading_day_diff(target_ts: pd.Timestamp) -> Optional[int]:
+        if not trading_day_lookup or base_day_index is None:
+            return None
+        idx = trading_day_lookup.get(target_ts)
+        if idx is None:
+            return None
+        diff = base_day_index - idx + 1
+        return diff if diff >= 0 else 0
+
     if cooldown_days and cooldown_days > 0:
         for tkr, trade_info in (trade_cooldown_info or {}).items():
             if not isinstance(trade_info, dict):
@@ -82,10 +130,10 @@ def _calculate_cooldown_blocks(
             if last_buy is not None:
                 last_buy_ts = pd.to_datetime(last_buy).normalize()
                 if last_buy_ts <= base_date_norm:
-                    days_since_buy = max(
-                        count_trading_days(country_code, last_buy_ts, base_date_norm),
-                        0,
-                    )
+                    cached_days = _cached_trading_day_diff(last_buy_ts)
+                    if cached_days is None:
+                        cached_days = count_trading_days(country_code, last_buy_ts, base_date_norm)
+                    days_since_buy = max(cached_days, 0)
                     if days_since_buy < cooldown_days:
                         # logger.info(
                         #     f"[COOLDOWN BLOCK] {tkr}: last_buy={last_buy_ts.strftime('%Y-%m-%d')}, base_date={base_date_norm.strftime('%Y-%m-%d')}, days_since={days_since_buy}, cooldown_days={cooldown_days}"
@@ -98,10 +146,10 @@ def _calculate_cooldown_blocks(
             if last_sell is not None:
                 last_sell_ts = pd.to_datetime(last_sell).normalize()
                 if last_sell_ts <= base_date_norm:
-                    days_since_sell = max(
-                        count_trading_days(country_code, last_sell_ts, base_date_norm),
-                        0,
-                    )
+                    cached_days = _cached_trading_day_diff(last_sell_ts)
+                    if cached_days is None:
+                        cached_days = count_trading_days(country_code, last_sell_ts, base_date_norm)
+                    days_since_sell = max(cached_days, 0)
                     if days_since_sell < cooldown_days:
                         buy_cooldown_block[tkr] = {
                             "last_sell": last_sell_ts,
@@ -321,8 +369,7 @@ def run_portfolio_recommend(
     consecutive_holding_info: Dict[str, Dict],
     trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
     cooldown_days: int,
-    rsi_sell_threshold: float = 10.0,
-    rebalance_threshold: float = 0.3,  # 호환성 유지 (사용하지 않음)
+    rsi_sell_threshold: float,
 ) -> List[Dict[str, Any]]:
     """
     주어진 데이터를 기반으로 포트폴리오의 일일 매매 추천을 생성합니다.

@@ -555,9 +555,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     country_code = account_settings.get("country_code")
 
-    # 거래일 캐시 워밍업 (국가별 1회만 실행)
-    _warmup_trading_days_cache(country_code)
-
     ma_period = int(strategy_rules.ma_period)
     portfolio_topn = int(strategy_rules.portfolio_topn)
     ma_type = str(strategy_rules.ma_type)
