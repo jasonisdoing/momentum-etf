@@ -322,6 +322,7 @@ def run_portfolio_recommend(
     trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
     cooldown_days: int,
     rsi_sell_threshold: float = 10.0,
+    rebalance_threshold: float = 0.3,  # 호환성 유지 (사용하지 않음)
 ) -> List[Dict[str, Any]]:
     """
     주어진 데이터를 기반으로 포트폴리오의 일일 매매 추천을 생성합니다.

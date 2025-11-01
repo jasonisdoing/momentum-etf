@@ -438,6 +438,7 @@ def _build_backtest_kwargs(
 
     cooldown_days = int(strategy_settings["COOLDOWN_DAYS"])
     rsi_sell_threshold = int(strategy_settings["OVERBOUGHT_SELL_THRESHOLD"])
+    rebalance_threshold = float(strategy_settings.get("REBALANCE_THRESHOLD", 0.3))
 
     if not (0 <= rsi_sell_threshold <= 100):
         raise ValueError(f"OVERBOUGHT_SELL_THRESHOLD는 0~100 사이여야 합니다. (현재값: {rsi_sell_threshold})")
@@ -452,6 +453,7 @@ def _build_backtest_kwargs(
         "stop_loss_pct": stop_loss_pct,
         "cooldown_days": cooldown_days,
         "rsi_sell_threshold": rsi_sell_threshold,
+        "rebalance_threshold": rebalance_threshold,
         "core_holdings": strategy_rules.core_holdings,
         "quiet": quiet,
     }

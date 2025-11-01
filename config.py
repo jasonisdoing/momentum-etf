@@ -2,8 +2,6 @@
 
 from datetime import time
 
-import numpy as np
-
 CACHE_START_DATE = "2024-01-01"
 # 포트폴리오 카테고리별 최대 보유 수
 MAX_PER_CATEGORY = 1
@@ -49,16 +47,16 @@ MARKET_SCHEDULES = {
 # 백테스트 체결 슬리피지 가정치 (%)
 BACKTEST_SLIPPAGE = {
     "kor": {
-        "buy_pct": 0.25,
-        "sell_pct": 0.25,
-    },
-    "aus": {
         "buy_pct": 0.5,
         "sell_pct": 0.5,
     },
+    "aus": {
+        "buy_pct": 1.0,
+        "sell_pct": 1.0,
+    },
     "us": {
-        "buy_pct": 0.15,
-        "sell_pct": 0.15,
+        "buy_pct": 0.3,
+        "sell_pct": 0.3,
     },
 }
 

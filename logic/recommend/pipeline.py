@@ -36,12 +36,40 @@ from utils.data_loader import (
     get_next_trading_day,
     count_trading_days,
     fetch_naver_etf_inav_snapshot,
+    get_trading_days,
 )
 from utils.db_manager import get_db_connection, list_open_positions
 from utils.logger import get_app_logger
 from utils.market_schedule import get_market_open_time
 
 logger = get_app_logger()
+
+# 거래일 캐시 워밍업 플래그 (전역 변수, 한 번만 실행)
+_trading_days_cache_warmed_up = set()
+
+
+def _warmup_trading_days_cache(country_code: str) -> None:
+    """거래일 캐시를 미리 로딩하여 성능 향상 (국가별 1회만 실행)"""
+    if country_code in _trading_days_cache_warmed_up:
+        return
+
+    try:
+        warmup_start = time.perf_counter()
+        # 과거 5년 + 미래 2년치 거래일 미리 조회
+        start_date = (pd.Timestamp.now() - pd.DateOffset(years=5)).strftime("%Y-%m-%d")
+        end_date = (pd.Timestamp.now() + pd.DateOffset(years=2)).strftime("%Y-%m-%d")
+
+        trading_days = get_trading_days(start_date, end_date, country_code)
+        _trading_days_cache_warmed_up.add(country_code)
+
+        logger.info(
+            "[%s] 거래일 캐시 워밍업 완료 (%.2fs, %d개 거래일)",
+            country_code.upper(),
+            time.perf_counter() - warmup_start,
+            len(trading_days),
+        )
+    except Exception as e:
+        logger.warning("[%s] 거래일 캐시 워밍업 실패: %s", country_code.upper(), e)
 
 
 @dataclass
@@ -526,6 +554,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         raise ValueError(str(exc)) from exc
 
     country_code = account_settings.get("country_code")
+
+    # 거래일 캐시 워밍업 (국가별 1회만 실행)
+    _warmup_trading_days_cache(country_code)
 
     ma_period = int(strategy_rules.ma_period)
     portfolio_topn = int(strategy_rules.portfolio_topn)

@@ -20,6 +20,8 @@ def calculate_actual_performance(
     end_date: pd.Timestamp,
     initial_capital: float,
     country_code: str = "kor",
+    portfolio_topn: int = 12,
+    rebalance_threshold: float = 0.3,
 ) -> Optional[Dict[str, Any]]:
     """
     실제 거래 내역 기반으로 수익률을 계산합니다.
@@ -30,6 +32,8 @@ def calculate_actual_performance(
         end_date: 종료일
         initial_capital: 초기 자본
         country_code: 국가 코드
+        portfolio_topn: 포트폴리오 최대 종목 수
+        rebalance_threshold: 리밸런싱 임계값 (비중 편차 %)
 
     Returns:
         수익률 정보 딕셔너리 또는 None (거래 내역 없음)
@@ -201,6 +205,127 @@ def calculate_actual_performance(
 
                 positions[ticker] = {"shares": new_shares, "avg_cost": new_cost}
                 cash -= buy_amount
+
+        # 매일 리밸런싱 체크 (백테스트와 동일)
+        # 보유 종목 수 계산
+        held_count = sum(1 for p in positions.values() if p["shares"] > 0)
+
+        if held_count > 0:
+            # 현재 보유 자산 평가액 계산
+            current_holdings_value = 0
+            today_prices = {}
+            for t, p in positions.items():
+                if p["shares"] > 0 and t in price_cache:
+                    df_temp = price_cache[t]
+                    if trade_date in df_temp.index:
+                        temp_price = float(df_temp.loc[trade_date, "Close"])
+                    else:
+                        valid_temp_dates = df_temp.index[df_temp.index <= trade_date]
+                        if len(valid_temp_dates) > 0:
+                            temp_price = float(df_temp.loc[valid_temp_dates[-1], "Close"])
+                        else:
+                            temp_price = p["avg_cost"]
+                    today_prices[t] = temp_price
+                    current_holdings_value += p["shares"] * temp_price
+
+            # 총 자산 및 목표 비중 계산
+            total_equity = cash + current_holdings_value
+            target_weight = 100.0 / portfolio_topn if portfolio_topn > 0 else 0.0
+            max_weight_diff = 0.0
+
+            # 각 종목의 비중 편차 계산
+            if total_equity > 0:
+                for ticker, pos in positions.items():
+                    if pos["shares"] > 0 and ticker in today_prices:
+                        current_value = pos["shares"] * today_prices[ticker]
+                        current_weight = (current_value / total_equity) * 100.0
+                        weight_diff = abs(current_weight - target_weight)
+                        max_weight_diff = max(max_weight_diff, weight_diff)
+
+            # 리밸런싱 조건: 매수/매도 발생 또는 비중 편차가 임계값 초과
+            trades_occurred = bool(day_trades)
+            should_rebalance = trades_occurred or max_weight_diff > rebalance_threshold
+
+            if should_rebalance:
+                # 균등 비중 리밸런싱 실행
+                target_value_per_stock = total_equity / portfolio_topn
+                target_cash = total_equity * 0.01  # 목표 현금 1%
+
+                # 최대 5회 반복
+                for iteration in range(5):
+                    if cash <= target_cash:
+                        break
+
+                    # 1단계: 과다 보유 종목 매도
+                    for ticker in list(positions.keys()):
+                        pos = positions[ticker]
+                        if pos["shares"] <= 0:
+                            continue
+
+                        price = today_prices.get(ticker)
+                        if not price or price <= 0:
+                            continue
+
+                        current_value = pos["shares"] * price
+                        value_diff = current_value - target_value_per_stock
+
+                        if value_diff > price:  # 과다 보유
+                            shares_to_sell = value_diff / price
+                            if country_code not in ("aus", "au"):
+                                shares_to_sell = int(shares_to_sell)
+
+                            if shares_to_sell > 0:
+                                sell_amount = shares_to_sell * price
+                                cash += sell_amount
+                                pos["shares"] -= shares_to_sell
+
+                    # 2단계: 과소 보유 종목 매수 (비례 배분)
+                    underweight_tickers = []
+                    for ticker, pos in positions.items():
+                        if pos["shares"] <= 0:
+                            continue
+
+                        price = today_prices.get(ticker)
+                        if not price or price <= 0:
+                            continue
+
+                        current_value = pos["shares"] * price
+                        value_diff = current_value - target_value_per_stock
+
+                        if value_diff < -price:  # 과소 보유
+                            needed_amount = abs(value_diff)
+                            underweight_tickers.append(
+                                {
+                                    "ticker": ticker,
+                                    "price": price,
+                                    "needed": needed_amount,
+                                }
+                            )
+
+                    # 총 필요 금액 계산
+                    total_needed = sum(item["needed"] for item in underweight_tickers)
+
+                    # 현금을 비례 배분하여 매수
+                    if total_needed > 0 and cash > 0:
+                        for item in underweight_tickers:
+                            ticker = item["ticker"]
+                            price = item["price"]
+                            needed = item["needed"]
+
+                            # 비례 배분
+                            allocated_cash = (needed / total_needed) * cash
+                            shares_to_buy = allocated_cash / price
+
+                            if country_code not in ("aus", "au"):
+                                shares_to_buy = int(shares_to_buy)
+
+                            if shares_to_buy > 0:
+                                buy_amount = shares_to_buy * price
+
+                                if buy_amount <= cash + 1e-9:
+                                    pos = positions[ticker]
+                                    cash -= buy_amount
+                                    pos["shares"] += shares_to_buy
 
         # 거래 후 최종 평가액 계산
         final_value = cash

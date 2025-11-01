@@ -132,7 +132,7 @@ def validate_core_holdings(
     valid_core_holdings = core_holdings_tickers & universe_tickers_set
     if valid_core_holdings:
         account_prefix = f"[{account_id.upper()}] " if account_id else "[백테스트] "
-        logger.info(f"{account_prefix}핵심 보유 종목 (TOPN 포함): {sorted(valid_core_holdings)}")
+        # logger.info(f"{account_prefix}핵심 보유 종목 (TOPN 포함): {sorted(valid_core_holdings)}")
 
     return valid_core_holdings
 
@@ -173,28 +173,23 @@ def check_buy_candidate_filters(
 
 def calculate_buy_budget(
     cash: float,
-    current_holdings_value: float,
     top_n: int,
+    initial_capital: float = 0.0,
 ) -> float:
-    """매수 예산 계산
+    """매수 예산 계산 (무조건 균등 비중: 초기자본 / TOPN)
 
     Args:
         cash: 현금
-        current_holdings_value: 현재 보유 자산 가치
         top_n: 최대 보유 종목 수
+        initial_capital: 초기 자본금
 
     Returns:
-        매수 예산
+        매수 예산 (초기자본 / TOPN, 현금 부족 시 현금만큼만)
     """
-    equity_base = cash + current_holdings_value
-    min_val = 1.0 / (top_n * 2.0) * equity_base
-    max_val = 1.0 / top_n * equity_base
-    budget = min(max_val, cash)
-
-    if budget <= 0 or budget < min_val:
-        return 0.0
-
-    return budget
+    if initial_capital > 0:
+        budget = initial_capital / top_n
+        return min(budget, cash) if cash > 0 else 0.0
+    return 0.0
 
 
 def calculate_held_categories(

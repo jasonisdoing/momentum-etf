@@ -17,8 +17,9 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_RANGE": np.arange(30, 65, 5),
         "MA_TYPE": ["SMA"],
         "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": [2, 3, 4, 5],
+        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
         "OVERBOUGHT_SELL_THRESHOLD": [100],
+        "REBALANCE_THRESHOLD": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
         "CORE_HOLDINGS": ["ASX:HNDQ", "ASX:IOO", "ASX:FANG"],
         "COOLDOWN_DAYS": [1, 2, 3, 4, 5],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
@@ -37,10 +38,12 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_RANGE": np.arange(80, 105, 5),
         "MA_TYPE": ["HMA"],
         "PORTFOLIO_TOPN": [12],
-        "REPLACE_SCORE_THRESHOLD": [3, 4, 5],
+        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
-        "CORE_HOLDINGS": [102970, 395160, 442580],
-        "COOLDOWN_DAYS": [3, 4, 5],
+        "REBALANCE_THRESHOLD": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        "CORE_HOLDINGS": [442580, 395160, 102970],
+        # "CORE_HOLDINGS": [],
+        "COOLDOWN_DAYS": [1, 2, 3, 4, 5],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
 }

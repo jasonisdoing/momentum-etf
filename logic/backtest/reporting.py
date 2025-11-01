@@ -550,10 +550,10 @@ def _build_daily_table_rows(
         # 누적 수익률 = 평가 수익률 (현재 보유분 기준)
         cumulative_pct_display = evaluated_pct_display
         score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
-        weight_display = f"{weight:.0f}%"
+        weight_display = f"{weight:.1f}%"
         if is_cash and total_value_safe > 0:
             cash_ratio = (total_cash / total_value_safe) if _is_finite_number(total_cash) else 0.0
-            weight_display = f"{cash_ratio * 100.0:.0f}%"
+            weight_display = f"{cash_ratio * 100.0:.1f}%"
 
         phrase = note or str(row.get("phrase", ""))
 

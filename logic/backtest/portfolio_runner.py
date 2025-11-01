@@ -20,6 +20,145 @@ from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
 logger = get_app_logger()
 
 
+def _rebalance_portfolio_equal_weight(
+    position_state: Dict,
+    today_prices: Dict[str, float],
+    top_n: int,
+    cash: float,
+    current_holdings_value: float,
+    daily_records_by_ticker: Dict,
+    dt: pd.Timestamp,
+    country_code: str,
+    max_iterations: int = 5,
+    target_cash: float = 100000.0,
+) -> Tuple[float, float]:
+    """균등 비중 리밸런싱: 모든 보유 종목을 현재 총자산/TOPN으로 재조정하고 현금 최소화
+
+    Args:
+        position_state: 포지션 상태
+        today_prices: 당일 가격
+        initial_capital: 초기 자본금 (사용 안 함, 현재 총자산 기준)
+        top_n: 포트폴리오 최대 종목 수
+        cash: 현금
+        current_holdings_value: 현재 보유 자산 가치
+        daily_records_by_ticker: 일별 기록
+        dt: 날짜
+        country_code: 국가 코드
+        max_iterations: 최대 반복 횟수
+        target_cash: 목표 현금 (기본 10만원)
+
+    Returns:
+        (cash, current_holdings_value) 리밸런싱 후 현금과 보유 자산 가치
+    """
+    # 보유 중인 종목 찾기
+    held_tickers = [ticker for ticker, state in position_state.items() if state["shares"] > 0]
+
+    if not held_tickers:
+        return cash, current_holdings_value
+
+    # 목표 현금에 도달할 때까지 반복
+    for iteration in range(max_iterations):
+        if cash <= target_cash:
+            break
+
+        # 현재 총자산 기준으로 목표 비중 계산 (TOPN 기준)
+        total_equity = cash + current_holdings_value
+        target_value_per_stock = total_equity / top_n
+
+        # 1단계: 과다 보유 종목 매도 (현금 확보)
+        for ticker in held_tickers:
+            state = position_state[ticker]
+            price = today_prices.get(ticker)
+
+            if pd.isna(price) or price <= 0:
+                continue
+
+            current_value = state["shares"] * price
+            value_diff = current_value - target_value_per_stock
+
+            if value_diff > price:  # 과다 보유
+                shares_to_sell = value_diff / price
+                if country_code != "aus":
+                    shares_to_sell = int(shares_to_sell)
+
+                if shares_to_sell > 0:
+                    sell_amount = shares_to_sell * price
+                    cash += sell_amount
+                    current_holdings_value -= sell_amount
+                    state["shares"] -= shares_to_sell
+
+                    # 레코드 업데이트 (첫 반복에서만 문구 추가)
+                    if daily_records_by_ticker[ticker] and daily_records_by_ticker[ticker][-1]["date"] == dt:
+                        row = daily_records_by_ticker[ticker][-1]
+                        current_note = row.get("note", "")
+                        if iteration == 0 and "[리밸런싱 매도]" not in current_note:
+                            new_note = current_note + " [리밸런싱 매도]"
+                        else:
+                            new_note = current_note
+                        row.update({"shares": state["shares"], "pv": state["shares"] * price, "note": new_note})
+
+        # 2단계: 과소 보유 종목 매수 (현금 소진) - 비례 배분 방식
+        # 먼저 과소 보유 종목들과 필요 금액 계산
+        underweight_tickers = []
+        for ticker in held_tickers:
+            state = position_state[ticker]
+            price = today_prices.get(ticker)
+
+            if pd.isna(price) or price <= 0:
+                continue
+
+            current_value = state["shares"] * price
+            value_diff = current_value - target_value_per_stock
+
+            if value_diff < -price:  # 과소 보유
+                needed_amount = abs(value_diff)
+                underweight_tickers.append(
+                    {
+                        "ticker": ticker,
+                        "price": price,
+                        "needed": needed_amount,
+                    }
+                )
+
+        # 총 필요 금액 계산
+        total_needed = sum(item["needed"] for item in underweight_tickers)
+
+        # 현금을 비례 배분하여 매수
+        if total_needed > 0 and cash > 0:
+            for item in underweight_tickers:
+                ticker = item["ticker"]
+                price = item["price"]
+                needed = item["needed"]
+
+                # 비례 배분: (필요 금액 / 총 필요 금액) * 현금
+                allocated_cash = (needed / total_needed) * cash
+                shares_to_buy = allocated_cash / price
+
+                if country_code != "aus":
+                    shares_to_buy = int(shares_to_buy)
+
+                if shares_to_buy > 0:
+                    buy_amount = shares_to_buy * price
+
+                    if buy_amount <= cash + 1e-9:
+                        state = position_state[ticker]
+                        cash -= buy_amount
+                        current_holdings_value += buy_amount
+                        state["shares"] += shares_to_buy
+
+                        # 레코드 업데이트 (첫 반복에서만 문구 추가)
+                        if daily_records_by_ticker[ticker] and daily_records_by_ticker[ticker][-1]["date"] == dt:
+                            row = daily_records_by_ticker[ticker][-1]
+                            current_note = row.get("note", "")
+                            if iteration == 0 and "[리밸런싱 매수]" not in current_note:
+                                new_note = current_note + " [리밸런싱 매수]"
+                            else:
+                                new_note = current_note
+                            row.update({"shares": state["shares"], "pv": state["shares"] * price, "note": new_note})
+
+    return cash, current_holdings_value
+
+
 def _calculate_trade_price(
     current_index: int,
     total_days: int,
@@ -234,6 +373,7 @@ def _execute_new_buys(
     total_days: int,
     dt: pd.Timestamp,
     country_code: str,
+    initial_capital: float = 0.0,
 ) -> Tuple[float, float, Set[str], Set[str]]:
     """신규 매수 실행
 
@@ -284,8 +424,8 @@ def _execute_new_buys(
         # 매수 예산 계산
         budget = calculate_buy_budget(
             cash=cash,
-            current_holdings_value=current_holdings_value,
             top_n=top_n,
+            initial_capital=initial_capital,
         )
 
         if budget <= 0:
@@ -435,6 +575,7 @@ def run_portfolio_backtest(
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
     rsi_sell_threshold: float = 10.0,
+    rebalance_threshold: float = 0.3,
     core_holdings: Optional[List[str]] = None,
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
@@ -686,9 +827,6 @@ def run_portfolio_backtest(
                 if pd.notna(price_h):
                     current_holdings_value += held_state["shares"] * price_h
 
-        # 총 평가금액(현금 + 주식)을 계산합니다.
-        equity = cash + current_holdings_value
-
         # --- 1. 기본 정보 및 출력 행 생성 ---
         records_added_this_day = 0
         for ticker, ticker_metrics in metrics_by_ticker.items():
@@ -784,8 +922,6 @@ def run_portfolio_backtest(
             current_holdings_value=current_holdings_value,
         )
 
-        equity = cash + current_holdings_value
-
         # --- 3-1. 핵심 보유 종목 자동 매수 (최우선) ---
         for core_ticker in valid_core_holdings:
             if position_state[core_ticker]["shares"] == 0:
@@ -793,9 +929,10 @@ def run_portfolio_backtest(
                 if core_ticker in tickers_available_today:
                     price = today_prices.get(core_ticker)
                     if pd.notna(price) and price > 0 and cash > 0:
-                        # 균등 분할 매수 (전체 자산 / TOPN)
-                        total_slots = top_n
-                        budget = equity / total_slots if total_slots > 0 else 0
+                        # 무조건 균등 비중: 초기자본 / TOPN
+                        budget = initial_capital / top_n if top_n > 0 else 0
+
+                        budget = min(budget, cash)  # 현금 부족 시 현금만큼만
                         shares_to_buy = budget / price if price > 0 else 0
 
                         if shares_to_buy > 0 and budget <= cash:
@@ -859,10 +996,13 @@ def run_portfolio_backtest(
             total_days=total_days,
             dt=dt,
             country_code=country_code,
+            initial_capital=initial_capital,
         )
 
         # 3. 교체 매수 실행 (포트폴리오가 가득 찬 경우)
         if len(purchased_today) == 0 and buy_ranked_candidates:
+            from logic.common import calculate_buy_budget
+
             # 종합 점수를 사용 (buy_ranked_candidates는 이미 종합 점수로 정렬됨)
             helper_candidates = [{"tkr": ticker, "score": score} for score, ticker in buy_ranked_candidates if ticker not in purchased_today]
 
@@ -1012,11 +1152,12 @@ def run_portfolio_backtest(
                             )
 
                         # (b) 새 종목 매수 (기준 자산 기반 예산)
-                        equity_base = cash + current_holdings_value
-                        min_val = 1.0 / (top_n * 2.0) * equity_base
-                        max_val = 1.0 / top_n * equity_base
-                        budget = min(max_val, cash)
-                        if budget <= 0 or budget < min_val:
+                        budget = calculate_buy_budget(
+                            cash=cash,
+                            top_n=top_n,
+                            initial_capital=initial_capital,
+                        )
+                        if budget <= 0:
                             continue
                         # 수량/금액 산정
                         if country_code == "aus":
@@ -1025,7 +1166,7 @@ def run_portfolio_backtest(
                         else:
                             req_qty = int(budget // buy_price) if buy_price > 0 else 0
                             buy_amount = req_qty * buy_price
-                            if req_qty <= 0 or buy_amount + 1e-9 < min_val:
+                            if req_qty <= 0:
                                 continue
 
                         # 체결 반영
@@ -1033,7 +1174,6 @@ def run_portfolio_backtest(
                             new_ticker_state = position_state[replacement_ticker]
                             cash -= buy_amount
                             current_holdings_value += buy_amount
-                            equity = cash + current_holdings_value
                             new_ticker_state["shares"], new_ticker_state["avg_cost"] = (
                                 req_qty,
                                 buy_price,
@@ -1126,6 +1266,46 @@ def run_portfolio_backtest(
                                 # 매수 시도했지만 실패 (RSI, 카테고리 중복, 리스크 오프 등은 이미 note 설정됨)
                                 # note가 없으면 포트폴리오 가득 참으로 표시
                                 daily_records_by_ticker[candidate_ticker][-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
+
+        # --- 4. 균등 비중 리밸런싱 (매일 실행) ---
+        # 무조건 균등 비중 (1/TOPN) 방식 사용
+        if True:
+            # 보유 종목이 있고, 비중 편차가 임계값을 초과하면 리밸런싱
+            held_count = sum(1 for state in position_state.values() if state["shares"] > 0)
+            total_equity = cash + current_holdings_value
+
+            # 각 종목의 비중 편차 계산
+            target_weight = 100.0 / top_n if top_n > 0 else 0.0  # 목표 비중 (예: 12종목이면 8.33%)
+            max_weight_diff = 0.0
+
+            if total_equity > 0:
+                for ticker, state in position_state.items():
+                    if state["shares"] > 0:
+                        price = today_prices.get(ticker, 0)
+                        if price > 0:
+                            current_value = state["shares"] * price
+                            current_weight = (current_value / total_equity) * 100.0
+                            weight_diff = abs(current_weight - target_weight)
+                            max_weight_diff = max(max_weight_diff, weight_diff)
+
+            # 리밸런싱 조건: 매수/매도 발생 또는 비중 편차가 임계값 초과
+            trades_occurred = bool(buy_trades_today_map or sell_trades_today_map)
+            should_rebalance = held_count > 0 and (trades_occurred or max_weight_diff > rebalance_threshold)
+
+            if should_rebalance:
+                # 목표 현금은 총자산의 1% 정도로 설정 (리밸런싱 함수 내부에서 사용)
+                target_cash = total_equity * 0.01
+                cash, current_holdings_value = _rebalance_portfolio_equal_weight(
+                    position_state=position_state,
+                    today_prices=today_prices,
+                    top_n=top_n,
+                    cash=cash,
+                    current_holdings_value=current_holdings_value,
+                    daily_records_by_ticker=daily_records_by_ticker,
+                    dt=dt,
+                    country_code=country_code,
+                    target_cash=target_cash,
+                )
 
         # --- 당일 최종 라벨 오버라이드 (공용 라벨러) ---
         for tkr, rows in daily_records_by_ticker.items():
