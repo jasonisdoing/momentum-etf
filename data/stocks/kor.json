@@ -23,7 +23,7 @@
         ]
     },
     {
-        "category": "미국테크",
+        "category": "해외테크",
         "tickers": [
             {
                 "ticker": "485540",
@@ -165,7 +165,12 @@
                 "1_week_avg_volume": 16864437,
                 "1_week_avg_turnover": 954477684178,
                 "3_month_earn_rate": 32.3734
-            },
+            }
+        ]
+    },
+    {
+        "category": "한국밸류업",
+        "tickers": [
             {
                 "ticker": "495060",
                 "name": "TIMEFOLIO 코리아밸류업액티브",
@@ -174,11 +179,29 @@
                 "1_week_avg_volume": 76327,
                 "1_week_avg_turnover": 1157661824,
                 "3_month_earn_rate": 25.3737
+            },
+            {
+                "ticker": "495230",
+                "name": "KoAct 코리아밸류업액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-12-09",
+                "1_week_avg_volume": 129636,
+                "1_week_avg_turnover": 2159706040,
+                "3_month_earn_rate": 87.1444
+            },
+            {
+                "ticker": "495050",
+                "name": "RISE 코리아밸류업",
+                "recommend_enabled": true,
+                "listing_date": "2024-11-06",
+                "1_week_avg_volume": 1223762,
+                "1_week_avg_turnover": 19939130482,
+                "3_month_earn_rate": 69.0826
             }
         ]
     },
     {
-        "category": "미국반도체",
+        "category": "해외반도체",
         "tickers": [
             {
                 "ticker": "390390",
@@ -278,7 +301,7 @@
         ]
     },
     {
-        "category": "미국지수-액티브",
+        "category": "해외지수-액티브",
         "tickers": [
             {
                 "ticker": "456600",
@@ -310,7 +333,7 @@
         ]
     },
     {
-        "category": "미국AI전력",
+        "category": "해외AI전력",
         "tickers": [
             {
                 "ticker": "486450",
@@ -338,12 +361,25 @@
                 "1_week_avg_volume": 1308868,
                 "1_week_avg_turnover": 24630927982,
                 "3_month_earn_rate": 32.4497
-            }
-        ]
-    },
-    {
-        "category": "글로벌AI전력",
-        "tickers": [
+            },
+            {
+                "ticker": "419430",
+                "name": "Kodex 차이나2차전지MSCI(합성)",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 63908,
+                "1_week_avg_turnover": 688538564,
+                "3_month_earn_rate": 53.8028
+            },
+            {
+                "ticker": "394670",
+                "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 245867,
+                "1_week_avg_turnover": 2343621836,
+                "3_month_earn_rate": 54.2587
+            },
             {
                 "ticker": "417450",
                 "name": "RISE 글로벌수소경제",
@@ -429,6 +465,15 @@
                 "1_week_avg_volume": 740159,
                 "1_week_avg_turnover": 9724678855,
                 "3_month_earn_rate": 34.6959
+            },
+            {
+                "ticker": "462010",
+                "name": "TIGER 2차전지소재Fn",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 11628947,
+                "1_week_avg_turnover": 69099659102,
+                "3_month_earn_rate": 41.14
             }
         ]
     },
@@ -456,7 +501,7 @@
         ]
     },
     {
-        "category": "미국로봇",
+        "category": "해외로봇",
         "tickers": [
             {
                 "ticker": "0035T0",
@@ -626,7 +671,7 @@
         ]
     },
     {
-        "category": "미국금융",
+        "category": "해외금융",
         "tickers": [
             {
                 "ticker": "0013P0",
@@ -649,7 +694,7 @@
         ]
     },
     {
-        "category": "미국바이오",
+        "category": "해외바이오",
         "tickers": [
             {
                 "ticker": "476690",
@@ -763,7 +808,7 @@
         ]
     },
     {
-        "category": "미국방산",
+        "category": "해외방산",
         "tickers": [
             {
                 "ticker": "494840",
@@ -809,43 +854,6 @@
         ]
     },
     {
-        "category": "미국2차전지",
-        "tickers": [
-            {
-                "ticker": "419430",
-                "name": "Kodex 차이나2차전지MSCI(합성)",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 63908,
-                "1_week_avg_turnover": 688538564,
-                "3_month_earn_rate": 53.8028
-            },
-            {
-                "ticker": "394670",
-                "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 245867,
-                "1_week_avg_turnover": 2343621836,
-                "3_month_earn_rate": 54.2587
-            }
-        ]
-    },
-    {
-        "category": "한국2차전지",
-        "tickers": [
-            {
-                "ticker": "462010",
-                "name": "TIGER 2차전지소재Fn",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 11628947,
-                "1_week_avg_turnover": 69099659102,
-                "3_month_earn_rate": 41.14
-            }
-        ]
-    },
-    {
         "category": "한국조선",
         "tickers": [
             {
@@ -874,20 +882,6 @@
                 "1_week_avg_volume": 136873,
                 "1_week_avg_turnover": 4623758400,
                 "3_month_earn_rate": 24.4293
-            }
-        ]
-    },
-    {
-        "category": "미국원유",
-        "tickers": [
-            {
-                "ticker": "474800",
-                "name": "KIWOOM 미국원유에너지기업",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-16",
-                "1_week_avg_volume": 35249,
-                "1_week_avg_turnover": 420676647,
-                "3_month_earn_rate": 4.0835
             }
         ]
     },

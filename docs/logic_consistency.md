@@ -162,38 +162,20 @@ if ticker in core_holdings:
 
 ### 8. 리밸런싱 (백테스트/퍼포먼스 전용)
 
-**규칙:** 매일 균등 비중 리밸런싱 체크 및 실행
+**규칙:** 각 주의 마지막 거래일(금요일이 휴장이라면 직전 거래일) 종가 기준으로 한 번 균등 비중으로 재조정합니다.
 
 | 항목 | 백테스트 | 퍼포먼스 | 추천 |
 |------|---------|---------|------|
 | 파일 | `portfolio_runner.py` | `performance.py` | ❌ **없음** |
-| 리밸런싱 함수 | 23-163줄 (`_rebalance_portfolio_equal_weight`) | 250-326줄 (인라인) | - |
-| 조건 체크 | 1303-1305줄 | 245-247줄 | - |
-
-**리밸런싱 조건:**
-```python
-# 매일 체크
-trades_occurred = bool(매수매도_발생)
-should_rebalance = trades_occurred or max_weight_diff > rebalance_threshold
-```
+| 리밸런싱 함수 | `_rebalance_portfolio_equal_weight` | `_rebalance_positions_weekly` | - |
+| 트리거 | `_is_weekly_rebalance_day` | `_is_weekly_rebalance_day` | - |
 
 **동작:**
-1. **매일 비중 계산**: 각 보유 종목의 현재 비중과 목표 비중(`100% / PORTFOLIO_TOPN`) 비교
-2. **리밸런싱 조건 판단**:
-   - 매수/매도 발생 **OR**
-   - 비중 편차가 `REBALANCE_THRESHOLD` (기본 0.3%) 초과
-3. **균등 비중 리밸런싱 실행** (최대 5회 반복):
-   - **1단계**: 과다 보유 종목 매도 (현금 확보)
-   - **2단계**: 과소 보유 종목 매수 (비례 배분)
-   - 목표 현금: 총자산의 1%
+1. 주간 마지막 거래일을 판별하고 해당 날짜에만 리밸런싱 루틴을 실행한다.
+2. 목표 비중은 `총자산 / 현재 보유 종목 수`로 계산한다.
+3. 과다 비중 종목은 목표 비중까지 매도하고, 남은 현금을 과소 비중 종목에 비례 배분하여 매수한다.
 
-**파라미터:**
-- `REBALANCE_THRESHOLD`: 리밸런싱 임계값 (기본 0.3%)
-- `PORTFOLIO_TOPN`: 포트폴리오 최대 종목 수 (목표 비중 = 100% / TOPN)
-
-**백테스트 레이블:**
-- `[리밸런싱 매수]`: 과소 보유 종목 추가 매수
-- `[리밸런싱 매도]`: 과다 보유 종목 일부 매도
+이 과정은 한 번의 패스로 끝나지만, 과다/과소 종목을 모두 조정하기 때문에 거의 균등 비중에 도달한다.
 
 #### ❓ 왜 추천에는 리밸런싱 로직이 없나요?
 
@@ -206,7 +188,7 @@ should_rebalance = trades_occurred or max_weight_diff > rebalance_threshold
 3. **실행 시스템**: 실제 리밸런싱은 별도 실행 시스템에서 처리
 
 **호환성:**
-- `run_portfolio_recommend()` 함수는 `rebalance_threshold` 파라미터를 받지만 사용하지 않음 (호환성 유지)
+- 추천 파이프라인은 실제 보유 수량·현금 정보를 알 수 없으므로 리밸런싱을 수행하지 않는다.
 
 ---
 
@@ -292,8 +274,6 @@ python tune.py k1
 - [ ] `portfolio_runner.py` 23-163줄, 1303-1305줄 수정
 - [ ] `performance.py` 245-326줄 동일하게 수정
 - [ ] ⚠️ **추천 시스템은 수정하지 않음** (리밸런싱 로직 없음)
-- [ ] `REBALANCE_THRESHOLD` 파라미터 확인
-- [ ] 매일 체크 조건: `trades_occurred or max_weight_diff > rebalance_threshold`
 
 ---
 
@@ -312,7 +292,7 @@ python tune.py k1
 | `count_current_holdings()` | 현재 물리적 보유 종목 수 계산 | 추천, 백테스트 |
 | `validate_core_holdings()` | 핵심 보유 종목 검증 | 추천, 백테스트 |
 | `check_buy_candidate_filters()` | 매수 후보 필터링 체크 | 추천, 백테스트 |
-| `calculate_buy_budget()` | 매수 예산 계산 | 백테스트 |
+| `calculate_buy_budget()` | 총자산/TOPN 기반 균등 매수 예산 | 백테스트 |
 | `calculate_held_categories()` | 보유 카테고리 계산 | 백테스트 |
 | `calculate_held_categories_from_holdings()` | holdings dict에서 카테고리 계산 | 추천 |
 | `track_sell_rsi_categories()` | SELL_RSI 카테고리 추적 | 추천, 백테스트 |
@@ -390,7 +370,6 @@ def run_portfolio_recommend(
     trade_cooldown_info: Dict[str, Dict[str, Optional[pd.Timestamp]]],
     cooldown_days: int,
     rsi_sell_threshold: float = 10.0,
-    rebalance_threshold: float = 0.3,  # 호환성 유지 (사용하지 않음)
 ) -> List[Dict[str, Any]]
 ```
 
@@ -411,7 +390,6 @@ def run_portfolio_backtest(
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
     rsi_sell_threshold: float = 10.0,
-    rebalance_threshold: float = 0.3,  # 균등 비중 리밸런싱 임계값
     core_holdings: Optional[List[str]] = None,
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
@@ -429,7 +407,6 @@ def calculate_actual_performance(
     initial_capital: float,
     country_code: str = "kor",
     portfolio_topn: int = 12,
-    rebalance_threshold: float = 0.3,  # 균등 비중 리밸런싱 임계값
 ) -> Optional[Dict[str, Any]]
 ```
 

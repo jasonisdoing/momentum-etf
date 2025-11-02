@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import numbers
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -381,7 +382,13 @@ def print_backtest_summary(
 
 
 def _is_finite_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not math.isnan(value) and not math.isinf(value)
+    if not isinstance(value, numbers.Number):
+        return False
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(numeric)
 
 
 def _format_quantity(amount: float, precision: int) -> str:
@@ -441,7 +448,9 @@ def _resolve_formatters(account_settings: Dict[str, Any]):
 
 def _format_date_kor(ts: pd.Timestamp) -> str:
     ts = pd.to_datetime(ts)
-    return f"{ts.year}년 {ts.month}월 {ts.day}일"
+    weekday_map = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
+    weekday = weekday_map.get(ts.weekday(), "")
+    return f"{ts.year}년 {ts.month}월 {ts.day}일({weekday})"
 
 
 def _build_daily_table_rows(

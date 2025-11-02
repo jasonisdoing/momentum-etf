@@ -1,6 +1,9 @@
 """포트폴리오 추천 및 백테스트에서 공통으로 사용하는 헬퍼 함수들."""
 
-from typing import Dict, Set, Any, List
+from typing import Dict, Set, Any, List, Iterable, Tuple, Optional
+
+import pandas as pd
+
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -173,23 +176,80 @@ def check_buy_candidate_filters(
 
 def calculate_buy_budget(
     cash: float,
+    current_holdings_value: float,
     top_n: int,
-    initial_capital: float = 0.0,
 ) -> float:
-    """매수 예산 계산 (무조건 균등 비중: 초기자본 / TOPN)
+    """총자산/TOPN 기준으로 균등 비중 매수 예산을 계산합니다.
 
     Args:
-        cash: 현금
-        top_n: 최대 보유 종목 수
-        initial_capital: 초기 자본금
+        cash: 현재 보유 현금
+        current_holdings_value: 현재 보유 자산 가치
+        top_n: 목표 포트폴리오 종목 수
 
     Returns:
-        매수 예산 (초기자본 / TOPN, 현금 부족 시 현금만큼만)
+        매수 예산 (총자산 / TOPN, 단 보유 현금 한도를 넘지 않음)
     """
-    if initial_capital > 0:
-        budget = initial_capital / top_n
-        return min(budget, cash) if cash > 0 else 0.0
-    return 0.0
+    if cash <= 0 or top_n <= 0:
+        return 0.0
+
+    total_equity = cash + max(current_holdings_value, 0.0)
+    if total_equity <= 0:
+        return 0.0
+
+    target_value = total_equity / top_n
+    if target_value <= 0:
+        return 0.0
+
+    return min(target_value, cash)
+
+
+def build_weekly_rebalance_cache(
+    trading_days: Iterable[Any],
+) -> Dict[Tuple[int, int], Optional[pd.Timestamp]]:
+    """주간 리밸런싱을 위한 (연도, 주) -> 마지막 거래일 매핑을 생성합니다.
+
+    Args:
+        trading_days: 거래일 iterable (문자열, datetime, pandas Timestamp 등 허용)
+
+    Returns:
+        (iso_year, iso_week) -> 마지막 거래일(Timestamp) 딕셔너리
+    """
+    cache: Dict[Tuple[int, int], Optional[pd.Timestamp]] = {}
+    if trading_days is None:
+        return cache
+
+    if isinstance(trading_days, (pd.Series, pd.Index)):
+        if len(trading_days) == 0:
+            return cache
+        iterable: Iterable[Any] = trading_days
+    else:
+        # list(...) to support generators/iterators and allow length check without ambiguity
+        materialized = list(trading_days)
+        if len(materialized) == 0:
+            return cache
+        iterable = materialized
+
+    for raw_dt in iterable:
+        if raw_dt is None:
+            continue
+
+        try:
+            dt = pd.Timestamp(raw_dt)
+        except Exception:
+            continue
+
+        if pd.isna(dt):
+            continue
+
+        normalized = dt.normalize()
+        iso_year, iso_week, _ = normalized.isocalendar()
+        key = (int(iso_year), int(iso_week))
+
+        existing = cache.get(key)
+        if existing is None or normalized > existing:
+            cache[key] = normalized
+
+    return cache
 
 
 def calculate_held_categories(

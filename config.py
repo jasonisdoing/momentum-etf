@@ -47,16 +47,16 @@ MARKET_SCHEDULES = {
 # 백테스트 체결 슬리피지 가정치 (%)
 BACKTEST_SLIPPAGE = {
     "kor": {
+        "buy_pct": 0.25,
+        "sell_pct": 0.25,
+    },
+    "aus": {
         "buy_pct": 0.5,
         "sell_pct": 0.5,
     },
-    "aus": {
-        "buy_pct": 1.0,
-        "sell_pct": 1.0,
-    },
     "us": {
-        "buy_pct": 0.3,
-        "sell_pct": 0.3,
+        "buy_pct": 0.25,
+        "sell_pct": 0.25,
     },
 }
 

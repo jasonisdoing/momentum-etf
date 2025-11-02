@@ -4,20 +4,58 @@
 전략 중립적인 포트폴리오 백테스트 로직을 제공합니다.
 """
 
-from typing import Callable, Dict, List, Optional, Set, Tuple
+import math
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
 from config import BACKTEST_SLIPPAGE, MARKET_TIMING_INDEX
-from utils.data_loader import fetch_ohlcv
+from utils.data_loader import fetch_ohlcv, get_trading_days
 from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
 from utils.report import format_kr_money, format_aud_money
 from strategies.maps.labeler import compute_net_trade_note
-from logic.common import select_candidates_by_category
+from logic.common import build_weekly_rebalance_cache, select_candidates_by_category
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
 
 logger = get_app_logger()
+
+
+def _is_weekly_rebalance_day(
+    date: pd.Timestamp,
+    country_code: str,
+    cache: Dict[Tuple[int, int], Optional[pd.Timestamp]],
+) -> bool:
+    """해당 날짜가 그 주의 마지막 거래일인지 확인합니다."""
+
+    if not isinstance(date, pd.Timestamp):
+        return False
+
+    iso_year, iso_week, _ = date.isocalendar()
+    key = (iso_year, iso_week)
+
+    cached = cache.get(key)
+    if cached is None:
+        week_start = date - pd.Timedelta(days=date.weekday())
+        week_end = week_start + pd.Timedelta(days=6)
+        try:
+            trading_days = get_trading_days(
+                week_start.strftime("%Y-%m-%d"),
+                week_end.strftime("%Y-%m-%d"),
+                country_code,
+            )
+        except Exception:
+            trading_days = []
+
+        if trading_days:
+            cached = pd.Timestamp(trading_days[-1]).normalize()
+        else:
+            cached = pd.NaT
+        cache[key] = cached
+
+    if pd.isna(cached):
+        return False
+    return pd.Timestamp(date).normalize() == cached
 
 
 def _rebalance_portfolio_equal_weight(
@@ -29,132 +67,189 @@ def _rebalance_portfolio_equal_weight(
     daily_records_by_ticker: Dict,
     dt: pd.Timestamp,
     country_code: str,
-    max_iterations: int = 5,
-    target_cash: float = 100000.0,
 ) -> Tuple[float, float]:
-    """균등 비중 리밸런싱: 모든 보유 종목을 현재 총자산/TOPN으로 재조정하고 현금 최소화
+    """보유 종목을 한 차례 순회하며 균등 비중에 가깝게 리밸런싱합니다."""
 
-    Args:
-        position_state: 포지션 상태
-        today_prices: 당일 가격
-        initial_capital: 초기 자본금 (사용 안 함, 현재 총자산 기준)
-        top_n: 포트폴리오 최대 종목 수
-        cash: 현금
-        current_holdings_value: 현재 보유 자산 가치
-        daily_records_by_ticker: 일별 기록
-        dt: 날짜
-        country_code: 국가 코드
-        max_iterations: 최대 반복 횟수
-        target_cash: 목표 현금 (기본 10만원)
-
-    Returns:
-        (cash, current_holdings_value) 리밸런싱 후 현금과 보유 자산 가치
-    """
-    # 보유 중인 종목 찾기
-    held_tickers = [ticker for ticker, state in position_state.items() if state["shares"] > 0]
+    # top_n 파라미터는 과거 인터페이스 호환을 위해 유지합니다.
+    fractional_allowed = str(country_code).lower() in ("aus", "au")
+    held_tickers = [ticker for ticker, state in position_state.items() if state["shares"] > 0 and today_prices.get(ticker, 0.0) > 0]
 
     if not held_tickers:
         return cash, current_holdings_value
 
-    # 목표 현금에 도달할 때까지 반복
-    for iteration in range(max_iterations):
-        if cash <= target_cash:
-            break
+    # 실제 보유 종목 수 기준으로 목표 비중을 계산합니다.
+    total_holdings_value = sum(position_state[t]["shares"] * today_prices[t] for t in held_tickers)
+    total_equity = cash + total_holdings_value
+    if total_equity <= 0:
+        return cash, current_holdings_value
 
-        # 현재 총자산 기준으로 목표 비중 계산 (TOPN 기준)
-        total_equity = cash + current_holdings_value
-        target_value_per_stock = total_equity / top_n
+    target_value_per_stock = total_equity / len(held_tickers)
 
-        # 1단계: 과다 보유 종목 매도 (현금 확보)
-        for ticker in held_tickers:
-            state = position_state[ticker]
-            price = today_prices.get(ticker)
+    sell_actions: List[Dict[str, Any]] = []
+    # 과다 보유 종목부터 매도해 현금을 확보합니다.
+    for ticker in sorted(held_tickers, key=lambda t: position_state[t]["shares"] * today_prices[t], reverse=True):
+        state = position_state[ticker]
+        price = today_prices[ticker]
 
-            if pd.isna(price) or price <= 0:
+        desired_shares = target_value_per_stock / price
+        if not fractional_allowed:
+            desired_shares = math.floor(desired_shares)
+
+        desired_shares = max(desired_shares, 0.0)
+        current_shares = state["shares"]
+
+        if current_shares <= desired_shares + 1e-9:
+            continue
+
+        shares_to_sell = current_shares - desired_shares
+        if not fractional_allowed:
+            shares_to_sell = int(math.floor(shares_to_sell))
+
+        if shares_to_sell <= 0:
+            continue
+
+        shares_to_sell = min(current_shares, shares_to_sell)
+        sell_amount = shares_to_sell * price
+
+        cash += sell_amount
+        state["shares"] = current_shares - shares_to_sell
+        if state["shares"] <= 0:
+            state["shares"] = 0
+            state["avg_cost"] = 0.0
+
+        current_holdings_value = max(0.0, current_holdings_value - sell_amount)
+        sell_actions.append({"ticker": ticker, "shares": shares_to_sell, "price": price, "amount": sell_amount})
+
+        if daily_records_by_ticker.get(ticker) and daily_records_by_ticker[ticker][-1]["date"] == dt:
+            row = daily_records_by_ticker[ticker][-1]
+            note = row.get("note", "")
+            if "[리밸런싱 매도]" not in note:
+                note = (note + " [리밸런싱 매도]").strip()
+            row.update({"shares": state["shares"], "pv": state["shares"] * price, "note": note})
+
+    # 매도 이후 실제 보유 종목 목록과 목표 비중을 다시 계산합니다.
+    held_tickers = [ticker for ticker, state in position_state.items() if state["shares"] > 0 and today_prices.get(ticker, 0.0) > 0]
+    if not held_tickers:
+        logger.debug(
+            "[BACKTEST][%s] 주간 리밸런싱 결과: 모든 포지션 정리, 현금 %.0f원",
+            dt.strftime("%Y-%m-%d"),
+            cash,
+        )
+        return cash, 0.0
+
+    total_holdings_value = sum(position_state[t]["shares"] * today_prices[t] for t in held_tickers)
+    total_equity = cash + total_holdings_value
+    if total_equity <= 0:
+        return cash, total_holdings_value
+
+    target_value_per_stock = total_equity / len(held_tickers)
+
+    buy_candidates: List[Dict[str, Any]] = []
+    for ticker in held_tickers:
+        state = position_state[ticker]
+        price = today_prices[ticker]
+
+        desired_shares = target_value_per_stock / price
+        if not fractional_allowed:
+            desired_shares = math.floor(desired_shares)
+        desired_shares = max(desired_shares, 0.0)
+
+        current_shares = state["shares"]
+        if current_shares >= desired_shares - 1e-9:
+            continue
+
+        needed_shares = desired_shares - current_shares
+        needed_value = needed_shares * price
+        if needed_value <= 0:
+            continue
+
+        buy_candidates.append(
+            {
+                "ticker": ticker,
+                "price": price,
+                "needed_value": needed_value,
+                "needed_shares": needed_shares,
+            }
+        )
+
+    buy_actions: List[Dict[str, Any]] = []
+    if buy_candidates and cash > 0:
+        buy_candidates.sort(key=lambda item: item["needed_value"], reverse=True)
+        total_needed_value = sum(item["needed_value"] for item in buy_candidates)
+        remaining_cash = cash
+
+        for item in buy_candidates:
+            if remaining_cash <= 0 or total_needed_value <= 0:
+                break
+
+            allocation_ratio = item["needed_value"] / total_needed_value
+            allocated_cash = remaining_cash * allocation_ratio
+            price = item["price"]
+
+            if price <= 0 or allocated_cash <= 0:
+                total_needed_value -= item["needed_value"]
                 continue
 
-            current_value = state["shares"] * price
-            value_diff = current_value - target_value_per_stock
+            if fractional_allowed:
+                shares_to_buy = min(item["needed_shares"], allocated_cash / price)
+            else:
+                shares_to_buy = int(allocated_cash / price)
+                shares_to_buy = min(shares_to_buy, int(math.floor(item["needed_shares"])))
 
-            if value_diff > price:  # 과다 보유
-                shares_to_sell = value_diff / price
-                if country_code != "aus":
-                    shares_to_sell = int(shares_to_sell)
-
-                if shares_to_sell > 0:
-                    sell_amount = shares_to_sell * price
-                    cash += sell_amount
-                    current_holdings_value -= sell_amount
-                    state["shares"] -= shares_to_sell
-
-                    # 레코드 업데이트 (첫 반복에서만 문구 추가)
-                    if daily_records_by_ticker[ticker] and daily_records_by_ticker[ticker][-1]["date"] == dt:
-                        row = daily_records_by_ticker[ticker][-1]
-                        current_note = row.get("note", "")
-                        if iteration == 0 and "[리밸런싱 매도]" not in current_note:
-                            new_note = current_note + " [리밸런싱 매도]"
-                        else:
-                            new_note = current_note
-                        row.update({"shares": state["shares"], "pv": state["shares"] * price, "note": new_note})
-
-        # 2단계: 과소 보유 종목 매수 (현금 소진) - 비례 배분 방식
-        # 먼저 과소 보유 종목들과 필요 금액 계산
-        underweight_tickers = []
-        for ticker in held_tickers:
-            state = position_state[ticker]
-            price = today_prices.get(ticker)
-
-            if pd.isna(price) or price <= 0:
+            if shares_to_buy <= 0:
+                total_needed_value -= item["needed_value"]
                 continue
 
-            current_value = state["shares"] * price
-            value_diff = current_value - target_value_per_stock
+            buy_amount = shares_to_buy * price
+            if buy_amount <= 0:
+                total_needed_value -= item["needed_value"]
+                continue
 
-            if value_diff < -price:  # 과소 보유
-                needed_amount = abs(value_diff)
-                underweight_tickers.append(
-                    {
-                        "ticker": ticker,
-                        "price": price,
-                        "needed": needed_amount,
-                    }
-                )
+            if buy_amount > remaining_cash:
+                buy_amount = remaining_cash
+                if fractional_allowed:
+                    shares_to_buy = buy_amount / price
+                else:
+                    shares_to_buy = int(buy_amount / price)
 
-        # 총 필요 금액 계산
-        total_needed = sum(item["needed"] for item in underweight_tickers)
+            if shares_to_buy <= 0:
+                total_needed_value -= item["needed_value"]
+                continue
 
-        # 현금을 비례 배분하여 매수
-        if total_needed > 0 and cash > 0:
-            for item in underweight_tickers:
-                ticker = item["ticker"]
-                price = item["price"]
-                needed = item["needed"]
+            ticker = item["ticker"]
+            state = position_state[ticker]
+            old_shares = state["shares"]
+            state["shares"] = old_shares + shares_to_buy
 
-                # 비례 배분: (필요 금액 / 총 필요 금액) * 현금
-                allocated_cash = (needed / total_needed) * cash
-                shares_to_buy = allocated_cash / price
+            if state["shares"] > 0:
+                old_cost = state.get("avg_cost", 0.0)
+                state["avg_cost"] = ((old_shares * old_cost) + buy_amount) / state["shares"]
 
-                if country_code != "aus":
-                    shares_to_buy = int(shares_to_buy)
+            remaining_cash -= buy_amount
+            buy_actions.append({"ticker": ticker, "shares": shares_to_buy, "price": price, "amount": buy_amount})
 
-                if shares_to_buy > 0:
-                    buy_amount = shares_to_buy * price
+            if daily_records_by_ticker.get(ticker) and daily_records_by_ticker[ticker][-1]["date"] == dt:
+                row = daily_records_by_ticker[ticker][-1]
+                note = row.get("note", "")
+                if "[리밸런싱 매수]" not in note:
+                    note = (note + " [리밸런싱 매수]").strip()
+                row.update({"shares": state["shares"], "pv": state["shares"] * price, "note": note})
 
-                    if buy_amount <= cash + 1e-9:
-                        state = position_state[ticker]
-                        cash -= buy_amount
-                        current_holdings_value += buy_amount
-                        state["shares"] += shares_to_buy
+            total_needed_value -= item["needed_value"]
 
-                        # 레코드 업데이트 (첫 반복에서만 문구 추가)
-                        if daily_records_by_ticker[ticker] and daily_records_by_ticker[ticker][-1]["date"] == dt:
-                            row = daily_records_by_ticker[ticker][-1]
-                            current_note = row.get("note", "")
-                            if iteration == 0 and "[리밸런싱 매수]" not in current_note:
-                                new_note = current_note + " [리밸런싱 매수]"
-                            else:
-                                new_note = current_note
-                            row.update({"shares": state["shares"], "pv": state["shares"] * price, "note": new_note})
+        cash = remaining_cash
+
+    # 리밸런싱 이후 보유 자산 가치를 다시 계산합니다.
+    current_holdings_value = sum(state["shares"] * today_prices.get(ticker, 0.0) for ticker, state in position_state.items() if state["shares"] > 0)
+
+    if sell_actions or buy_actions:
+        logger.debug(
+            "[BACKTEST][%s] 주간 리밸런싱: 매도 %s, 매수 %s, 잔여 현금 %.0f원",
+            dt.strftime("%Y-%m-%d"),
+            sell_actions,
+            buy_actions,
+            cash,
+        )
 
     return cash, current_holdings_value
 
@@ -421,11 +516,11 @@ def _execute_new_buys(
             _update_ticker_note(daily_records_by_ticker, ticker_to_buy, dt, block_reason)
             continue
 
-        # 매수 예산 계산
+        # 매수 예산 계산 (총자산 / TOPN 기준)
         budget = calculate_buy_budget(
             cash=cash,
+            current_holdings_value=current_holdings_value,
             top_n=top_n,
-            initial_capital=initial_capital,
         )
 
         if budget <= 0:
@@ -575,7 +670,6 @@ def run_portfolio_backtest(
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
     rsi_sell_threshold: float = 10.0,
-    rebalance_threshold: float = 0.3,
     core_holdings: Optional[List[str]] = None,
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
@@ -758,6 +852,20 @@ def run_portfolio_backtest(
     cash = float(initial_capital)
     daily_records_by_ticker = {ticker: [] for ticker in metrics_by_ticker.keys()}
     out_cash = []
+    # 주간 리밸런싱 캘린더를 한 번만 구축해 재사용합니다.
+    weekly_rebalance_cache: Dict[Tuple[int, int], Optional[pd.Timestamp]]
+    try:
+        rebalance_trading_days = get_trading_days(
+            union_index[0].strftime("%Y-%m-%d"),
+            union_index[-1].strftime("%Y-%m-%d"),
+            country_code,
+        )
+    except Exception:
+        rebalance_trading_days = None
+
+    weekly_rebalance_cache = build_weekly_rebalance_cache(rebalance_trading_days or union_index)
+    if not weekly_rebalance_cache:
+        weekly_rebalance_cache = build_weekly_rebalance_cache(union_index)
 
     # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     total_days = len(union_index)
@@ -1154,8 +1262,8 @@ def run_portfolio_backtest(
                         # (b) 새 종목 매수 (기준 자산 기반 예산)
                         budget = calculate_buy_budget(
                             cash=cash,
+                            current_holdings_value=current_holdings_value,
                             top_n=top_n,
-                            initial_capital=initial_capital,
                         )
                         if budget <= 0:
                             continue
@@ -1267,45 +1375,19 @@ def run_portfolio_backtest(
                                 # note가 없으면 포트폴리오 가득 참으로 표시
                                 daily_records_by_ticker[candidate_ticker][-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
 
-        # --- 4. 균등 비중 리밸런싱 (매일 실행) ---
-        # 무조건 균등 비중 (1/TOPN) 방식 사용
-        if True:
-            # 보유 종목이 있고, 비중 편차가 임계값을 초과하면 리밸런싱
-            held_count = sum(1 for state in position_state.values() if state["shares"] > 0)
-            total_equity = cash + current_holdings_value
-
-            # 각 종목의 비중 편차 계산
-            target_weight = 100.0 / top_n if top_n > 0 else 0.0  # 목표 비중 (예: 12종목이면 8.33%)
-            max_weight_diff = 0.0
-
-            if total_equity > 0:
-                for ticker, state in position_state.items():
-                    if state["shares"] > 0:
-                        price = today_prices.get(ticker, 0)
-                        if price > 0:
-                            current_value = state["shares"] * price
-                            current_weight = (current_value / total_equity) * 100.0
-                            weight_diff = abs(current_weight - target_weight)
-                            max_weight_diff = max(max_weight_diff, weight_diff)
-
-            # 리밸런싱 조건: 매수/매도 발생 또는 비중 편차가 임계값 초과
-            trades_occurred = bool(buy_trades_today_map or sell_trades_today_map)
-            should_rebalance = held_count > 0 and (trades_occurred or max_weight_diff > rebalance_threshold)
-
-            if should_rebalance:
-                # 목표 현금은 총자산의 1% 정도로 설정 (리밸런싱 함수 내부에서 사용)
-                target_cash = total_equity * 0.01
-                cash, current_holdings_value = _rebalance_portfolio_equal_weight(
-                    position_state=position_state,
-                    today_prices=today_prices,
-                    top_n=top_n,
-                    cash=cash,
-                    current_holdings_value=current_holdings_value,
-                    daily_records_by_ticker=daily_records_by_ticker,
-                    dt=dt,
-                    country_code=country_code,
-                    target_cash=target_cash,
-                )
+        # --- 4. 주간 균등 비중 리밸런싱 (주 마지막 거래일에 실행) ---
+        held_count = sum(1 for state in position_state.values() if state["shares"] > 0)
+        if held_count > 0 and _is_weekly_rebalance_day(dt, country_code, weekly_rebalance_cache):
+            cash, current_holdings_value = _rebalance_portfolio_equal_weight(
+                position_state=position_state,
+                today_prices=today_prices,
+                top_n=top_n,
+                cash=cash,
+                current_holdings_value=current_holdings_value,
+                daily_records_by_ticker=daily_records_by_ticker,
+                dt=dt,
+                country_code=country_code,
+            )
 
         # --- 당일 최종 라벨 오버라이드 (공용 라벨러) ---
         for tkr, rows in daily_records_by_ticker.items():

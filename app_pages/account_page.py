@@ -196,7 +196,6 @@ def _cached_benchmark_data(
         strategy_tuning = strategy_cfg
 
     portfolio_topn = int(strategy_tuning.get("PORTFOLIO_TOPN", 12))
-    rebalance_threshold = float(strategy_tuning.get("REBALANCE_THRESHOLD", 0.3))
 
     # 실제 거래 기반 수익률 계산 시도
     actual_perf = calculate_actual_performance(
@@ -206,7 +205,6 @@ def _cached_benchmark_data(
         initial_capital=initial_capital,
         country_code=country_code,
         portfolio_topn=portfolio_topn,
-        rebalance_threshold=rebalance_threshold,
     )
 
     # 벤치마크 정보를 위해 항상 백테스트 실행
