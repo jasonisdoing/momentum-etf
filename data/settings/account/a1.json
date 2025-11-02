@@ -19,7 +19,7 @@
             "OVERBOUGHT_SELL_THRESHOLD": 100,
             "COOLDOWN_DAYS": 3,
             "CORE_HOLDINGS": [
-                "ASX:HNDQ",
+                "ASX:NDQ",
                 "ASX:IOO"
             ]
         }
