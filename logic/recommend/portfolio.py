@@ -231,7 +231,8 @@ def _create_decision_entry(
     # 순환 import 방지
     from strategies.maps.constants import DECISION_MESSAGES, DECISION_NOTES
 
-    price = data.get("price", 0.0)
+    price_raw = data.get("price", 0.0)
+    price = float(price_raw) if price_raw not in (None, float("nan")) else 0.0
     score_value = _parse_score_value(data.get("score", 0.0))
     rsi_score_value = _parse_score_value(data.get("rsi_score", 0.0))
 
@@ -308,13 +309,15 @@ def _create_decision_entry(
         holding_days = 1
 
     # 일간 수익률
-    prev_close = data.get("prev_close", 0.0)
+    prev_close_raw = data.get("prev_close", 0.0)
+    prev_close = float(prev_close_raw) if prev_close_raw not in (None, float("nan")) else 0.0
     day_ret = ((price / prev_close) - 1.0) * 100.0 if pd.notna(price) and pd.notna(prev_close) and prev_close > 0 else 0.0
     day_ret = round(day_ret, 2)
 
     holding_days_display = str(holding_days) if holding_days > 0 else "-"
     amount = price if is_held else 0.0
-    position_weight_pct = (amount / current_equity) * 100.0 if current_equity > 0 else 0.0
+    equity_base = float(current_equity) if current_equity not in (None, float("nan")) else 0.0
+    position_weight_pct = (amount / equity_base) * 100.0 if equity_base > 0 else 0.0
     position_weight_pct = round(position_weight_pct, 2)
 
     current_row = [
