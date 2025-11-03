@@ -263,33 +263,6 @@
         "category": "한국반도체",
         "tickers": [
             {
-                "ticker": "395160",
-                "name": "KODEX AI반도체",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 2497071,
-                "1_week_avg_turnover": 41859995628,
-                "3_month_earn_rate": 69.1794
-            },
-            {
-                "ticker": "091160",
-                "name": "KODEX 반도체",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 2893694,
-                "1_week_avg_turnover": 167813234848,
-                "3_month_earn_rate": 69.772
-            },
-            {
-                "ticker": "0093A0",
-                "name": "RISE AI반도체TOP10",
-                "recommend_enabled": true,
-                "listing_date": "2025-08-26",
-                "1_week_avg_volume": 278956,
-                "1_week_avg_turnover": 4763124867,
-                "3_month_earn_rate": 69.6558
-            },
-            {
                 "ticker": "469150",
                 "name": "ACE AI반도체포커스",
                 "recommend_enabled": true,
