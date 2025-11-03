@@ -959,29 +959,6 @@
         ]
     },
     {
-        "category": "K컬처",
-        "tickers": [
-            {
-                "ticker": "410870",
-                "name": "TIMEFOLIO K컬처액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 202072,
-                "1_week_avg_turnover": 2506536542,
-                "3_month_earn_rate": -0.5161
-            },
-            {
-                "ticker": "475050",
-                "name": "ACE KPOP포커스",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-30",
-                "1_week_avg_volume": 1227138,
-                "1_week_avg_turnover": 15392796512,
-                "3_month_earn_rate": 8.5232
-            }
-        ]
-    },
-    {
         "category": "TBD",
         "tickers": []
     }
