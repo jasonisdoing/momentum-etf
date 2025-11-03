@@ -296,10 +296,21 @@ def _log_next_runs(scheduler: BlockingScheduler) -> None:
     if not jobs:
         logging.info("No jobs registered.")
         return
+    now = datetime.now(ZoneInfo(TIMEZONE)) if ZoneInfo else datetime.now()
 
     logging.info("Next scheduled run times:")
     for job in jobs:
-        next_time = getattr(job, "next_run_time", None)
+        try:
+            next_time = job.next_run_time
+        except AttributeError:
+            next_time = None
+
+        if next_time is None:
+            try:
+                next_time = job.trigger.get_next_fire_time(None, now)
+            except Exception:
+                next_time = None
+
         if next_time is not None:
             logging.info("- %s: %s", job.id, next_time.strftime("%Y-%m-%d %H:%M:%S"))
 
