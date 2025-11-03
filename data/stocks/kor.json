@@ -478,7 +478,7 @@
         ]
     },
     {
-        "category": "한국로봇",
+        "category": "로봇",
         "tickers": [
             {
                 "ticker": "469070",
@@ -497,12 +497,7 @@
                 "1_week_avg_volume": 750710,
                 "1_week_avg_turnover": 16960473053,
                 "3_month_earn_rate": 48.3411
-            }
-        ]
-    },
-    {
-        "category": "해외로봇",
-        "tickers": [
+            },
             {
                 "ticker": "0035T0",
                 "name": "PLUS 글로벌휴머노이드로봇액티브",
