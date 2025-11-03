@@ -15,6 +15,161 @@ from logic.common import build_weekly_rebalance_cache
 logger = get_app_logger()
 
 
+def _extract_trade_quantity(trade: Dict[str, Any], price: Optional[float] = None) -> Optional[float]:
+    """거래 문서에서 수량 정보를 추출합니다."""
+
+    for key in ("shares", "quantity", "qty", "units"):
+        value = trade.get(key)
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+
+    amount = trade.get("amount")
+    if amount is None:
+        amount = trade.get("trade_amount")
+
+    if amount is not None and price and price > 0:
+        try:
+            return float(amount) / float(price)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+
+    return None
+
+
+def _trade_sort_key(trade: Dict[str, Any]) -> Tuple[pd.Timestamp, pd.Timestamp, str]:
+    executed_ts = pd.to_datetime(trade.get("executed_at"), errors="coerce")
+    created_ts = pd.to_datetime(trade.get("created_at"), errors="coerce")
+
+    if pd.isna(executed_ts):
+        executed_ts = created_ts
+    if pd.isna(created_ts):
+        created_ts = executed_ts
+
+    idx = trade.get("_id")
+    idx_str = str(idx) if idx is not None else ""
+
+    return executed_ts, created_ts, idx_str
+
+
+def _get_price_for_date(df: pd.DataFrame, date: pd.Timestamp) -> float:
+    if df is None or df.empty:
+        return 0.0
+    date_norm = pd.to_datetime(date).normalize()
+    if date_norm in df.index:
+        return float(df.loc[date_norm, "Close"])
+    valid_dates = df.index[df.index <= date_norm]
+    if len(valid_dates) > 0:
+        return float(df.loc[valid_dates[-1], "Close"])
+    valid_dates_future = df.index[df.index > date_norm]
+    if len(valid_dates_future) > 0:
+        return float(df.loc[valid_dates_future[0], "Close"])
+    return 0.0
+
+
+def _compute_trade_price(
+    price_cache: Dict[str, pd.DataFrame],
+    ticker: str,
+    trade_date: pd.Timestamp,
+    buy_slippage: float,
+    sell_slippage: float,
+    is_buy: bool,
+) -> Optional[float]:
+    df = price_cache.get(ticker)
+    if df is None or df.empty:
+        return None
+
+    date_norm = pd.to_datetime(trade_date).normalize()
+    if date_norm in df.index:
+        base_price = float(df.loc[date_norm, "Close"])
+    else:
+        valid_dates = df.index[df.index <= date_norm]
+        if len(valid_dates) == 0:
+            return None
+        base_price = float(df.loc[valid_dates[-1], "Close"])
+
+    if base_price <= 0:
+        return None
+
+    if is_buy:
+        return base_price * (1 + buy_slippage)
+    return base_price * (1 - sell_slippage)
+
+
+def _determine_initial_holdings(seed_trades: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """start_date 이전의 거래를 기반으로 마지막 액션이 BUY인 종목을 반환합니다."""
+
+    holdings_state: Dict[str, Dict[str, Any]] = {}
+    for trade in sorted(seed_trades, key=_trade_sort_key):
+        ticker = str(trade.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        action = str(trade.get("action") or "").upper()
+        holdings_state[ticker] = {"action": action, "trade": trade}
+
+    initial_holdings: Dict[str, Dict[str, Any]] = {}
+    for ticker, info in holdings_state.items():
+        if info.get("action") == "BUY":
+            initial_holdings[ticker] = info.get("trade") or {}
+    return initial_holdings
+
+
+def _seed_positions_from_holdings(
+    initial_holdings: Dict[str, Dict[str, Any]],
+    price_cache: Dict[str, pd.DataFrame],
+    start_date: pd.Timestamp,
+    initial_capital: float,
+    country_code: str,
+    portfolio_topn: int,
+) -> Tuple[Dict[str, Dict[str, float]], float]:
+    """초기 보유 종목을 균등 비중으로 배분해 포지션과 잔여 현금을 반환합니다."""
+
+    if not initial_holdings:
+        return {}, initial_capital
+
+    fractional_allowed = str(country_code).lower() not in {"kor", "kr"}
+    tickers = list(initial_holdings.keys())
+    target_count = len(tickers)
+    if target_count <= 0:
+        return {}, initial_capital
+
+    equal_value = initial_capital / target_count if target_count > 0 else 0.0
+    positions: Dict[str, Dict[str, float]] = {}
+    cash = initial_capital
+
+    for ticker in tickers:
+        df = price_cache.get(ticker)
+        price = _get_price_for_date(df, start_date) if df is not None else 0.0
+        if price <= 0:
+            continue
+
+        if fractional_allowed:
+            shares = equal_value / price
+        else:
+            shares = math.floor(equal_value / price)
+
+        if shares <= 0:
+            continue
+
+        buy_amount = shares * price
+        if buy_amount > cash + 1e-9:
+            buy_amount = cash
+            shares = buy_amount / price if fractional_allowed else math.floor(buy_amount / price)
+            if shares <= 0:
+                continue
+            buy_amount = shares * price
+
+        positions[ticker] = {"shares": float(shares), "avg_cost": float(price)}
+        cash -= buy_amount
+
+    if cash < 0:
+        cash = 0.0
+    return positions, cash
+
+
 def _is_weekly_rebalance_day(
     date: pd.Timestamp,
     country_code: str,
@@ -231,16 +386,26 @@ def calculate_actual_performance(
         return None
 
     # 거래 내역 조회
-    trades = list(db.trades.find({"account": account_id.lower(), "executed_at": {"$gte": start_date, "$lte": end_date}}).sort("executed_at", 1))
+    trades = list(db.trades.find({"account": account_id.lower(), "executed_at": {"$gte": start_date, "$lte": end_date}}))
+    trades.sort(key=_trade_sort_key)
+
+    # start_date 이전 거래로 초기 보유 상태 파악
+    seed_trades = list(db.trades.find({"account": account_id.lower(), "executed_at": {"$lt": start_date}}))
+    seed_trades.sort(key=_trade_sort_key)
+    initial_holdings = _determine_initial_holdings(seed_trades)
 
     if not trades:
         logger.info(f"[{account_id}] 거래 내역이 없습니다.")
-        return None
+        if not initial_holdings:
+            return None
 
     logger.info(f"[{account_id}] {len(trades)}개의 거래 내역을 찾았습니다.")
 
     # 필요한 종목별 가격 데이터 조회
-    tickers = list(set(t["ticker"] for t in trades))
+    tickers = set(t["ticker"] for t in trades)
+    tickers.update(initial_holdings.keys())
+    tickers.discard(None)
+    tickers = list(tickers)
     price_cache = {}
 
     for ticker in tickers:
@@ -253,12 +418,25 @@ def calculate_actual_performance(
     sell_slippage = 0.0
 
     # 포지션 추적
-    positions = {}  # {ticker: {"shares": float, "avg_cost": float}}
-    cash = initial_capital
+    positions, cash = _seed_positions_from_holdings(
+        initial_holdings=initial_holdings,
+        price_cache=price_cache,
+        start_date=start_date,
+        initial_capital=initial_capital,
+        country_code=country_code,
+        portfolio_topn=portfolio_topn,
+    )
 
     # 날짜별 수익률 추적
     daily_records = []
-    prev_value = initial_capital
+
+    initial_prev_value = cash
+    for ticker, pos in positions.items():
+        df = price_cache.get(ticker)
+        price = _get_price_for_date(df, start_date) if df is not None else 0.0
+        if price > 0:
+            initial_prev_value += pos["shares"] * price
+    prev_value = initial_prev_value if positions else initial_capital
 
     # 날짜별로 거래 그룹화
     from collections import defaultdict
@@ -292,105 +470,83 @@ def calculate_actual_performance(
                         close_price = pos["avg_cost"]
                 current_value += pos["shares"] * close_price
 
-        # 매도 먼저 처리
-        for trade in day_trades:
-            if trade["action"].upper() != "SELL":
+        ordered_trades = sorted(day_trades, key=_trade_sort_key)
+
+        from collections import deque
+
+        implicit_indices = deque(
+            idx
+            for idx, trade in enumerate(ordered_trades)
+            if str(trade.get("action", "")).upper() == "BUY"
+            and _extract_trade_quantity(trade, None) is None
+            and str(trade.get("ticker") or "").upper() in price_cache
+        )
+
+        fractional_allowed = str(country_code).lower() not in {"kor", "kr"}
+
+        for idx, trade in enumerate(ordered_trades):
+            action = str(trade.get("action", "")).upper()
+            ticker = str(trade.get("ticker") or "").upper()
+            if not ticker or ticker not in price_cache or action not in {"BUY", "SELL"}:
                 continue
 
-            ticker = trade["ticker"]
-            if ticker not in price_cache:
+            trade_price = _compute_trade_price(
+                price_cache=price_cache,
+                ticker=ticker,
+                trade_date=trade_date,
+                buy_slippage=buy_slippage,
+                sell_slippage=sell_slippage,
+                is_buy=action == "BUY",
+            )
+            if trade_price is None or trade_price <= 0:
                 continue
 
-            df = price_cache[ticker]
-            if trade_date in df.index:
-                base_price = float(df.loc[trade_date, "Close"])
-            else:
-                valid_dates = df.index[df.index <= trade_date]
-                if len(valid_dates) == 0:
+            if implicit_indices and implicit_indices[0] < idx:
+                implicit_indices.popleft()
+
+            if action == "SELL":
+                if ticker in positions and positions[ticker]["shares"] > 0:
+                    qty = _extract_trade_quantity(trade, trade_price)
+                    sell_shares = positions[ticker]["shares"] if qty is None else min(float(qty), positions[ticker]["shares"])
+                    if sell_shares <= 0:
+                        continue
+                    cash += sell_shares * trade_price
+                    positions[ticker]["shares"] -= sell_shares
+                    if positions[ticker]["shares"] <= 0:
+                        positions[ticker] = {"shares": 0, "avg_cost": 0}
+                continue
+
+            qty = _extract_trade_quantity(trade, trade_price)
+            if qty is not None:
+                shares = max(float(qty), 0.0)
+                buy_amount = shares * trade_price
+                if shares <= 0 or buy_amount > cash + 1e-9:
                     continue
-                base_price = float(df.loc[valid_dates[-1], "Close"])
+            else:
+                remaining_implicits = len(implicit_indices) if implicit_indices else 1
+                budget = cash / remaining_implicits if remaining_implicits > 0 else cash
+                if fractional_allowed:
+                    shares = budget / trade_price
+                    buy_amount = shares * trade_price
+                else:
+                    shares = int(budget // trade_price) if trade_price > 0 else 0
+                    if shares <= 0 and budget >= trade_price:
+                        shares = 1
+                    buy_amount = shares * trade_price
+                if implicit_indices and implicit_indices[0] == idx:
+                    implicit_indices.popleft()
+                if shares <= 0 or buy_amount <= 0 or buy_amount > cash + 1e-9:
+                    continue
 
-            price = base_price * (1 - sell_slippage)
-
-            if ticker in positions and positions[ticker]["shares"] > 0:
-                # 전량 매도
-                sell_shares = positions[ticker]["shares"]
-                cash += sell_shares * price
+            if ticker not in positions:
                 positions[ticker] = {"shares": 0, "avg_cost": 0}
 
-        # 매도 후 보유 종목 수 계산
-        current_holdings_after_sell = sum(1 for p in positions.values() if p["shares"] > 0)
-
-        # 매수 처리
-        buy_trades = [t for t in day_trades if t["action"].upper() == "BUY"]
-        if buy_trades:
-            # 매수 후 최종 보유 종목 수
-            final_holdings = current_holdings_after_sell + len(buy_trades)
-
-            for trade in buy_trades:
-                ticker = trade["ticker"]
-                if ticker not in price_cache:
-                    continue
-
-                df = price_cache[ticker]
-                if trade_date in df.index:
-                    base_price = float(df.loc[trade_date, "Close"])
-                else:
-                    valid_dates = df.index[df.index <= trade_date]
-                    if len(valid_dates) == 0:
-                        continue
-                    base_price = float(df.loc[valid_dates[-1], "Close"])
-
-                price = base_price * (1 + buy_slippage)
-
-                # 매번 현재 보유 자산 평가액 계산 (백테스트 방식)
-                current_holdings_value = 0
-                for t, p in positions.items():
-                    if p["shares"] > 0 and t in price_cache:
-                        df_temp = price_cache[t]
-                        if trade_date in df_temp.index:
-                            temp_price = float(df_temp.loc[trade_date, "Close"])
-                        else:
-                            valid_temp_dates = df_temp.index[df_temp.index <= trade_date]
-                            if len(valid_temp_dates) > 0:
-                                temp_price = float(df_temp.loc[valid_temp_dates[-1], "Close"])
-                            else:
-                                temp_price = p["avg_cost"]
-                        current_holdings_value += p["shares"] * temp_price
-
-                # 현재 equity 기준으로 예산 계산
-                equity = cash + current_holdings_value
-                target_amount = equity / final_holdings
-                budget = min(target_amount, cash)
-
-                # 예산이 너무 작으면 스킵
-                min_budget = equity / (final_holdings * 2.0)
-                if budget <= 0 or budget < min_budget:
-                    continue
-
-                # 한국: 정수 단위만 매수
-                if country_code in ("kor", "kr"):
-                    shares = int(budget // price) if price > 0 else 0
-                    buy_amount = shares * price
-                else:
-                    # 호주: 소수점 매수 가능
-                    shares = budget / price if price > 0 else 0
-                    buy_amount = budget
-
-                if shares <= 0 or buy_amount <= 0:
-                    continue
-
-                if ticker not in positions:
-                    positions[ticker] = {"shares": 0, "avg_cost": 0}
-
-                old_shares = positions[ticker]["shares"]
-                old_cost = positions[ticker]["avg_cost"]
-
-                new_shares = old_shares + shares
-                new_cost = (old_shares * old_cost + shares * price) / new_shares if new_shares > 0 else price
-
-                positions[ticker] = {"shares": new_shares, "avg_cost": new_cost}
-                cash -= buy_amount
+            old_shares = positions[ticker]["shares"]
+            old_cost = positions[ticker]["avg_cost"]
+            new_shares = old_shares + shares
+            new_cost = ((old_shares * old_cost) + (shares * trade_price)) / new_shares if new_shares > 0 else trade_price
+            positions[ticker] = {"shares": new_shares, "avg_cost": new_cost}
+            cash -= buy_amount
 
         # 주간 리밸런싱 (주 마지막 거래일에만 실행)
         held_count = sum(1 for p in positions.values() if p["shares"] > 0)
@@ -433,20 +589,84 @@ def calculate_actual_performance(
                         today_prices[t] = temp_price
                         current_holdings_value += p["shares"] * temp_price
 
-        # 거래 후 최종 평가액 계산
-        final_value = cash
+        # 거래 상세 정보 정리
+        trade_details: List[Dict[str, Any]] = []
+        for trade in day_trades:
+            detail: Dict[str, Any] = {
+                "ticker": trade.get("ticker"),
+                "action": str(trade.get("action", "")).upper(),
+            }
+            shares_raw = trade.get("shares") or trade.get("quantity") or trade.get("qty")
+            if shares_raw is not None:
+                try:
+                    detail["shares"] = float(shares_raw)
+                except (TypeError, ValueError):
+                    detail["shares"] = shares_raw
+            price_raw = trade.get("price") or trade.get("executed_price") or trade.get("execution_price")
+            if price_raw is not None:
+                try:
+                    detail["price"] = float(price_raw)
+                except (TypeError, ValueError):
+                    detail["price"] = price_raw
+            amount_raw = trade.get("amount")
+            if amount_raw is None and isinstance(detail.get("shares"), (int, float)) and isinstance(detail.get("price"), (int, float)):
+                amount_raw = detail["shares"] * detail["price"]
+            if amount_raw is not None:
+                try:
+                    detail["amount"] = float(amount_raw)
+                except (TypeError, ValueError):
+                    detail["amount"] = amount_raw
+            memo = trade.get("memo")
+            if memo:
+                detail["memo"] = memo
+            detail["raw"] = trade
+            trade_details.append(detail)
+
+        # 거래 후 최종 평가액 및 보유 현황 계산
+        holdings_snapshot: List[Dict[str, Any]] = []
+        holdings_total = 0.0
         for ticker, pos in positions.items():
-            if pos["shares"] > 0 and ticker in price_cache:
-                df = price_cache[ticker]
+            if pos["shares"] <= 0:
+                continue
+
+            df = price_cache.get(ticker)
+            if df is not None:
                 if trade_date in df.index:
-                    close_price = float(df.loc[trade_date, "Close"])
+                    price = float(df.loc[trade_date, "Close"])
                 else:
                     valid_dates = df.index[df.index <= trade_date]
                     if len(valid_dates) > 0:
-                        close_price = float(df.loc[valid_dates[-1], "Close"])
+                        price = float(df.loc[valid_dates[-1], "Close"])
                     else:
-                        close_price = pos["avg_cost"]
-                final_value += pos["shares"] * close_price
+                        price = float(pos.get("avg_cost", 0.0))
+            else:
+                price = float(pos.get("avg_cost", 0.0))
+
+            shares = float(pos["shares"])
+            value = shares * price
+            avg_cost = float(pos.get("avg_cost", 0.0))
+            book_value = shares * avg_cost
+            profit = value - book_value
+            profit_pct = (profit / book_value * 100) if book_value > 0 else 0.0
+
+            holdings_snapshot.append(
+                {
+                    "ticker": ticker,
+                    "shares": shares,
+                    "price": price,
+                    "value": value,
+                    "avg_cost": avg_cost,
+                    "book_value": book_value,
+                    "profit": profit,
+                    "profit_pct": profit_pct,
+                }
+            )
+            holdings_total += value
+
+        final_value = cash + holdings_total
+        for item in holdings_snapshot:
+            value = item["value"]
+            item["weight_pct"] = (value / final_value * 100) if final_value > 0 else 0.0
 
         # 일별 수익률 계산
         daily_return_pct = ((final_value / prev_value) - 1) * 100 if prev_value > 0 else 0.0
@@ -458,10 +678,12 @@ def calculate_actual_performance(
                 "date": trade_date,
                 "total_value": final_value,
                 "cash": cash,
-                "holdings_value": final_value - cash,
+                "holdings_value": holdings_total,
                 "daily_return_pct": daily_return_pct,
                 "cumulative_return_pct": cumulative_return_pct,
                 "trade_count": len(day_trades),
+                "holdings": holdings_snapshot,
+                "trades": trade_details,
             }
         )
 
@@ -481,11 +703,15 @@ def calculate_actual_performance(
     return {
         "cumulative_return_pct": cumulative_return_pct,
         "initial_capital": initial_capital,
+        "final_value": current_value,
         "current_value": current_value,
         "cash": cash,
         "positions": positions,
         "trade_count": len(trades),
         "daily_records": daily_records,  # 일별 수익률 기록
+        "start_date": start_date,
+        "end_date": end_date,
+        "currency": country_code,
         "method": "actual_trades",  # 실제 거래 기반
     }
 

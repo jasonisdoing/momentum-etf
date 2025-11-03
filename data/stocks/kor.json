@@ -859,7 +859,7 @@
             {
                 "ticker": "494670",
                 "name": "TIGER 조선TOP10",
-                "recommend_enabled": true,
+                "recommend_enabled": false,
                 "listing_date": "2024-10-22",
                 "1_week_avg_volume": 3561833,
                 "1_week_avg_turnover": 108257050037,
@@ -868,7 +868,7 @@
             {
                 "ticker": "466920",
                 "name": "SOL 조선TOP3플러스",
-                "recommend_enabled": true,
+                "recommend_enabled": false,
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 5267789,
                 "1_week_avg_turnover": 204338739416,
@@ -877,7 +877,7 @@
             {
                 "ticker": "445150",
                 "name": "Kodex 친환경조선해운액티브",
-                "recommend_enabled": true,
+                "recommend_enabled": false,
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 136873,
                 "1_week_avg_turnover": 4623758400,

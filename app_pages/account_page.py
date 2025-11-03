@@ -9,6 +9,7 @@ from main import load_account_recommendations, render_recommendation_table
 from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.settings_loader import AccountSettingsError, get_account_settings
 from logic.backtest.account_runner import run_account_backtest
+from logic.performance_reporting import build_performance_log_lines
 from utils.data_loader import get_latest_trading_day, get_trading_days
 
 
@@ -311,36 +312,14 @@ def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_c
         if account_return is not None:
             st.markdown(f"<span style='color:#d32f2f;'>가상 거래 수익률 (Momentum ETF): {account_return:+.2f}%</span>", unsafe_allow_html=True)
 
-        # 상세 정보 표시
         if performance_detail:
-            daily_records = performance_detail.get("daily_records", [])
+            try:
+                log_lines = build_performance_log_lines(account_id, performance_detail, settings)
+                st.text("\n".join(log_lines))
+            except Exception as exc:
+                st.warning(f"퍼포먼스 상세 로그를 표시하지 못했습니다: {exc}")
 
-            # 국가별 통화 기호
-            currency_symbol = "$" if country_code == "aus" else "₩"
-
-            # 일별 수익률 테이블
-            if daily_records:
-                st.markdown("**일별 수익률 변화**")
-                daily_rows = []
-                for record in daily_records:
-                    daily_rows.append(
-                        {
-                            "날짜": record["date"].strftime("%Y-%m-%d"),
-                            "총 평가액": f"{currency_symbol}{record['total_value']:,.0f}",
-                            "현금": f"{currency_symbol}{record['cash']:,.0f}",
-                            "보유자산": f"{currency_symbol}{record['holdings_value']:,.0f}",
-                            "일간 수익률": f"{record['daily_return_pct']:+.2f}%",
-                            "누적 수익률": f"{record['cumulative_return_pct']:+.2f}%",
-                            "거래": f"{record['trade_count']}건" if record["trade_count"] > 0 else "-",
-                        }
-                    )
-
-                daily_df = pd.DataFrame(daily_rows)
-                st.dataframe(daily_df, width="stretch", hide_index=True, height=400)
-
-        st.caption(
-            f"Momentum ETF 의 수익률은 기간 내 매수/보유/매도한 모든 종목의 실현·미실현 수익을 포함해서 계산합니다. 데이터 업데이트: {ts_text}"
-        )
+        st.caption("Momentum ETF 의 수익률은 기간 내 매수/보유/매도한 모든 종목의 실현·미실현 수익을 포함해서 계산합니다.")
 
 
 __all__ = ["render_account_page"]
