@@ -317,6 +317,9 @@ def main() -> None:
     if not jobs:
         logging.warning("등록 가능한 추천 잡이 없습니다. 설정을 확인하세요.")
 
+    logging.info("Running initial price cache refresh before scheduling recommendations...")
+    run_cache_refresh()
+
     _register_recommendation_jobs(scheduler, jobs)
     _register_cache_job(scheduler)
 
