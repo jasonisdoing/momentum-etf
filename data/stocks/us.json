@@ -43,14 +43,6 @@
                 "3_month_earn_rate": 19.8397
             },
             {
-                "ticker": "XEM",
-                "name": "SPDR S&P Metals & Mining ETF",
-                "listing_date": "2007-10-30",
-                "1_week_avg_volume": null,
-                "1_week_avg_turnover": null,
-                "3_month_earn_rate": null
-            },
-            {
                 "ticker": "URA",
                 "name": "Global X Uranium ETF",
                 "listing_date": "2010-11-05",

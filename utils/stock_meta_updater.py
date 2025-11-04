@@ -6,7 +6,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 import xml.etree.ElementTree as ET
 
 import pandas as pd
@@ -57,6 +57,63 @@ def _fetch_naver_listing_date(ticker: str) -> Optional[str]:
     return None
 
 
+def _fetch_naver_etf_snapshot() -> Dict[str, Dict[str, Any]]:
+    """
+    네이버 ETF 리스트 API에서 한국 ETF 메타데이터를 한 번에 가져옵니다.
+
+    Returns:
+        {ticker: raw_payload_dict} 형태의 딕셔너리. 실패 시 빈 dict.
+    """
+    logger = get_app_logger()
+
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 네이버 ETF 스냅샷 조회를 건너뜁니다.")
+        return {}
+
+    try:
+        from config import NAVER_FINANCE_ETF_API_URL, NAVER_FINANCE_HEADERS
+    except Exception:
+        logger.debug("네이버 ETF API 설정을 불러오지 못했습니다.")
+        return {}
+
+    try:
+        response = requests.get(NAVER_FINANCE_ETF_API_URL, headers=NAVER_FINANCE_HEADERS, timeout=5)
+        response.raise_for_status()
+    except Exception as exc:
+        logger.warning("네이버 ETF 스냅샷 조회 실패: %s", exc)
+        return {}
+
+    try:
+        payload = response.json()
+    except Exception as exc:
+        logger.warning("네이버 ETF 스냅샷 파싱 실패: %s", exc)
+        return {}
+
+    items = payload.get("result", {}).get("etfItemList")
+    if not isinstance(items, list):
+        return {}
+
+    snapshot: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        ticker = str(item.get("itemcode") or "").strip().upper()
+        if not ticker:
+            continue
+        snapshot[ticker] = item
+    return snapshot
+
+
+def _try_parse_float(value: Any) -> Optional[float]:
+    """문자열/숫자 값을 안전하게 float로 변환합니다."""
+    if value is None:
+        return None
+    try:
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
 def _get_cache_start_date() -> Optional[pd.Timestamp]:
     """config.py에서 캐시 시작일을 불러옵니다."""
     try:
@@ -98,6 +155,10 @@ def _update_metadata_for_country(country_code: str):
     except Exception as e:
         logger.error(f"'{stock_file}' 파일 로딩 실패: {e}")
         return
+
+    naver_etf_snapshot: Dict[str, Dict[str, Any]] = {}
+    if country_code == "kor":
+        naver_etf_snapshot = _fetch_naver_etf_snapshot()
 
     updated_count = 0
     for category in stock_data:
@@ -161,7 +222,7 @@ def _update_metadata_for_country(country_code: str):
                 stock["listing_date"] = listing_date_str
 
                 # 주간 평균 거래량/거래대금 및 3개월 수익률은 항상 업데이트 (yfinance 데이터 필요)
-                if data is None:
+                if data is None and country_code != "kor":
                     # 상장일이 이미 있어서 data가 없는 경우, yfinance로 3개월 데이터 조회
                     data = yf.download(yfinance_ticker, period="3mo", progress=False, auto_adjust=False)
                     if data.empty:
@@ -173,8 +234,12 @@ def _update_metadata_for_country(country_code: str):
                         if not data.index.is_unique:
                             data = data[~data.index.duplicated(keep="last")]
 
-                # 2. 주간 평균 거래량/거래대금 업데이트
-                if data is not None and not data.empty and len(data) >= 1:
+                stock["1_week_avg_volume"] = None
+                stock["1_week_avg_turnover"] = None
+                stock["3_month_earn_rate"] = None
+
+                # 호주/미국 등 비한국 종목만 yfinance 기반 지표 계산
+                if country_code != "kor" and data is not None and not data.empty and len(data) >= 1:
                     # 거래대금 컬럼 추가
                     data["Turnover"] = data["Close"] * data["Volume"]
                     last_7_days = data.tail(7)
@@ -182,8 +247,10 @@ def _update_metadata_for_country(country_code: str):
                     avg_volume = last_7_days["Volume"].mean()
                     avg_turnover = last_7_days["Turnover"].mean()
 
-                    stock["1_week_avg_volume"] = int(avg_volume) if pd.notna(avg_volume) else None
-                    stock["1_week_avg_turnover"] = int(avg_turnover) if pd.notna(avg_turnover) else None
+                    if pd.notna(avg_volume):
+                        stock["1_week_avg_volume"] = int(avg_volume)
+                    if pd.notna(avg_turnover):
+                        stock["1_week_avg_turnover"] = int(avg_turnover)
 
                     # 3. 3개월 수익률 계산 (yfinance 데이터 사용)
                     if len(data) >= 2 and "Close" in data.columns:
@@ -192,14 +259,22 @@ def _update_metadata_for_country(country_code: str):
                         if pd.notna(price_start) and pd.notna(price_end) and price_start > 0:
                             earn_rate = ((price_end - price_start) / price_start) * 100
                             stock["3_month_earn_rate"] = round(earn_rate, 4)
-                        else:
-                            stock["3_month_earn_rate"] = None
-                    else:
-                        stock["3_month_earn_rate"] = None
-                else:
-                    stock["1_week_avg_volume"] = None
-                    stock["1_week_avg_turnover"] = None
-                    stock["3_month_earn_rate"] = None
+
+                if country_code == "kor":
+                    naver_item = naver_etf_snapshot.get(str(ticker).strip().upper())
+                    if naver_item:
+                        three_month_from_naver = _try_parse_float(naver_item.get("threeMonthEarnRate"))
+                        if three_month_from_naver is not None:
+                            stock["3_month_earn_rate"] = round(three_month_from_naver, 4)
+
+                        quant_from_naver = _try_parse_float(naver_item.get("quant"))
+                        if quant_from_naver is not None:
+                            stock["1_week_avg_volume"] = int(quant_from_naver)
+
+                        amount_from_naver = _try_parse_float(naver_item.get("amonut"))
+                        if amount_from_naver is not None:
+                            stock["1_week_avg_turnover"] = round(amount_from_naver / 100.0, 4)
+
                 logger.info(f"[{country_code.upper()}/{ticker}] 메타데이터 획득")
                 updated_count += 1
                 time.sleep(0.2)  # API 호출 속도 조절
