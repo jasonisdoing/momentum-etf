@@ -21,6 +21,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "OVERBOUGHT_SELL_THRESHOLD": [100],
         "CORE_HOLDINGS": ["ASX:HNDQ", "ASX:IOO"],
         "COOLDOWN_DAYS": [3, 4, 5],
+        "STOP_LOSS_PCT": np.arange(3, 11, 1),
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
     "k1": {
@@ -31,6 +32,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
         "CORE_HOLDINGS": [442580, 315960],
         "COOLDOWN_DAYS": [3, 4, 5],
+        "STOP_LOSS_PCT": np.arange(3, 11, 1),
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
     # "k1": {

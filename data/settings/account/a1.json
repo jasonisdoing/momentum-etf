@@ -18,6 +18,7 @@
             "REPLACE_SCORE_THRESHOLD": 3,
             "OVERBOUGHT_SELL_THRESHOLD": 100,
             "COOLDOWN_DAYS": 3,
+            "STOP_LOSS_PCT": 10,
             "CORE_HOLDINGS": [
                 "ASX:NDQ",
                 "ASX:IOO"

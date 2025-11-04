@@ -18,6 +18,7 @@
             "REPLACE_SCORE_THRESHOLD": 0,
             "OVERBOUGHT_SELL_THRESHOLD": 96,
             "COOLDOWN_DAYS": 5,
+            "STOP_LOSS_PCT": 10,
             "CORE_HOLDINGS": [
                 442580,
                 102970

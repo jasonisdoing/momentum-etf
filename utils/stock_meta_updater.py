@@ -222,7 +222,7 @@ def _update_metadata_for_country(country_code: str):
                 stock["listing_date"] = listing_date_str
 
                 # 주간 평균 거래량/거래대금 및 3개월 수익률은 항상 업데이트 (yfinance 데이터 필요)
-                if data is None and country_code != "kor":
+                if data is None:
                     # 상장일이 이미 있어서 data가 없는 경우, yfinance로 3개월 데이터 조회
                     data = yf.download(yfinance_ticker, period="3mo", progress=False, auto_adjust=False)
                     if data.empty:
@@ -238,8 +238,8 @@ def _update_metadata_for_country(country_code: str):
                 stock["1_week_avg_turnover"] = None
                 stock["3_month_earn_rate"] = None
 
-                # 호주/미국 등 비한국 종목만 yfinance 기반 지표 계산
-                if country_code != "kor" and data is not None and not data.empty and len(data) >= 1:
+                # yfinance 기반 지표 계산
+                if data is not None and not data.empty and len(data) >= 1:
                     # 거래대금 컬럼 추가
                     data["Turnover"] = data["Close"] * data["Volume"]
                     last_7_days = data.tail(7)
@@ -266,14 +266,6 @@ def _update_metadata_for_country(country_code: str):
                         three_month_from_naver = _try_parse_float(naver_item.get("threeMonthEarnRate"))
                         if three_month_from_naver is not None:
                             stock["3_month_earn_rate"] = round(three_month_from_naver, 4)
-
-                        quant_from_naver = _try_parse_float(naver_item.get("quant"))
-                        if quant_from_naver is not None:
-                            stock["1_week_avg_volume"] = int(quant_from_naver)
-
-                        amount_from_naver = _try_parse_float(naver_item.get("amonut"))
-                        if amount_from_naver is not None:
-                            stock["1_week_avg_turnover"] = round(amount_from_naver / 100.0, 4)
 
                 logger.info(f"[{country_code.upper()}/{ticker}] 메타데이터 획득")
                 updated_count += 1
