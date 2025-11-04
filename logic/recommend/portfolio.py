@@ -608,7 +608,11 @@ def run_portfolio_recommend(
                 continue
 
             cand["state"], cand["row"][4] = "BUY", "BUY"
-            buy_price = float(data_by_tkr.get(cand["tkr"], {}).get("price", 0))
+            price_value = data_by_tkr.get(cand["tkr"], {}).get("price")
+            try:
+                buy_price = float(price_value)
+            except (TypeError, ValueError):
+                buy_price = 0.0
             if buy_price > 0:
                 budget = (current_equity / denom) if denom > 0 else 0
                 if budget > total_cash:
