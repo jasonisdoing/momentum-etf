@@ -172,15 +172,6 @@
         "category": "한국밸류업",
         "tickers": [
             {
-                "ticker": "495060",
-                "name": "TIMEFOLIO 코리아밸류업액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-11-04",
-                "1_week_avg_volume": 100459,
-                "1_week_avg_turnover": 1559798960,
-                "3_month_earn_rate": 36.2526
-            },
-            {
                 "ticker": "495230",
                 "name": "KoAct 코리아밸류업액티브",
                 "recommend_enabled": true,
@@ -204,42 +195,6 @@
         "category": "해외반도체",
         "tickers": [
             {
-                "ticker": "390390",
-                "name": "KODEX 미국반도체",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 504818,
-                "1_week_avg_turnover": 17948903351,
-                "3_month_earn_rate": 29.8051
-            },
-            {
-                "ticker": "381180",
-                "name": "TIGER 미국필라델피아반도체나스닥",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 1575000,
-                "1_week_avg_turnover": 42819463417,
-                "3_month_earn_rate": 33.1132
-            },
-            {
-                "ticker": "473490",
-                "name": "KIWOOM 글로벌AI반도체",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 37268,
-                "1_week_avg_turnover": 841815219,
-                "3_month_earn_rate": 16.9239
-            },
-            {
-                "ticker": "453950",
-                "name": "TIGER TSMC파운드리밸류체인",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 25309,
-                "1_week_avg_turnover": 553024825,
-                "3_month_earn_rate": 29.3818
-            },
-            {
                 "ticker": "442580",
                 "name": "PLUS 글로벌HBM반도체",
                 "recommend_enabled": true,
@@ -247,15 +202,6 @@
                 "1_week_avg_volume": 92215,
                 "1_week_avg_turnover": 3403069986,
                 "3_month_earn_rate": 91.6645
-            },
-            {
-                "ticker": "446770",
-                "name": "ACE 글로벌반도체TOP4 Plus",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 665893,
-                "1_week_avg_turnover": 30259598914,
-                "3_month_earn_rate": 52.4409
             }
         ]
     },
@@ -670,15 +616,6 @@
         "category": "해외바이오",
         "tickers": [
             {
-                "ticker": "476690",
-                "name": "TIGER 글로벌비만치료제TOP2Plus",
-                "recommend_enabled": true,
-                "listing_date": "2024-02-29",
-                "1_week_avg_volume": 99662,
-                "1_week_avg_turnover": 911484833,
-                "3_month_earn_rate": 10.1993
-            },
-            {
                 "ticker": "476070",
                 "name": "KODEX 글로벌비만치료제TOP2 Plus",
                 "recommend_enabled": true,
@@ -715,15 +652,6 @@
                 "3_month_earn_rate": 11.5151
             },
             {
-                "ticker": "248270",
-                "name": "TIGER S&P글로벌헬스케어(합성)",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 7857,
-                "1_week_avg_turnover": 188929464,
-                "3_month_earn_rate": 11.4018
-            },
-            {
                 "ticker": "485810",
                 "name": "TIMEFOLIO 글로벌안티에이징바이오액티브",
                 "recommend_enabled": true,
@@ -747,19 +675,10 @@
                 "3_month_earn_rate": 27.8702
             },
             {
-                "ticker": "261070",
-                "name": "TIGER 코스닥150바이오테크",
-                "recommend_enabled": true,
-                "listing_date": "2016-12-15",
-                "1_week_avg_volume": 218483,
-                "1_week_avg_turnover": 3742491648,
-                "3_month_earn_rate": 11.596
-            },
-            {
                 "ticker": "244580",
                 "name": "KODEX 바이오",
                 "recommend_enabled": true,
-                "listing_date": "2016-05-13",
+                "listing_date": "2024-01-02",
                 "1_week_avg_volume": 3075383,
                 "1_week_avg_turnover": 34151143131,
                 "3_month_earn_rate": 22.6622
@@ -768,7 +687,7 @@
                 "ticker": "266420",
                 "name": "KODEX 헬스케어",
                 "recommend_enabled": true,
-                "listing_date": "2017-03-28",
+                "listing_date": "2024-01-02",
                 "1_week_avg_volume": 251936,
                 "1_week_avg_turnover": 5156905177,
                 "3_month_earn_rate": 13.5607
@@ -839,15 +758,6 @@
         "category": "한국조선",
         "tickers": [
             {
-                "ticker": "494670",
-                "name": "TIGER 조선TOP10",
-                "recommend_enabled": true,
-                "listing_date": "2024-10-22",
-                "1_week_avg_volume": 3669651,
-                "1_week_avg_turnover": 112584774760,
-                "3_month_earn_rate": 30.7103
-            },
-            {
                 "ticker": "466920",
                 "name": "SOL 조선TOP3플러스",
                 "recommend_enabled": true,
@@ -855,15 +765,6 @@
                 "1_week_avg_volume": 5701894,
                 "1_week_avg_turnover": 223096014317,
                 "3_month_earn_rate": 32.7868
-            },
-            {
-                "ticker": "445150",
-                "name": "Kodex 친환경조선해운액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 139997,
-                "1_week_avg_turnover": 4746175902,
-                "3_month_earn_rate": 28.3412
             }
         ]
     },

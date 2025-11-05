@@ -298,12 +298,21 @@ def main() -> None:
         )
     )
 
+    # pages.append(
+    #     page_cls(
+    #         "app_pages/stocks.py",
+    #         title="[Admin] 종목 정보",
+    #         icon="📊",
+    #         url_path="stocks",
+    #     )
+    # )
+
     pages.append(
         page_cls(
-            "app_pages/stocks.py",
-            title="[Admin] 종목 정보",
-            icon="📊",
-            url_path="stocks",
+            "app_pages/cache_admin.py",
+            title="[Admin] 종목 캐시",
+            icon="🗃️",
+            url_path="cache",
         )
     )
 
