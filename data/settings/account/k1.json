@@ -12,12 +12,12 @@
         "OPTIMIZATION_METRIC": "CAGR",
         "BACKTESTED_DATE": "2025-11-05 10:00",
         "tuning": {
-            "MA_PERIOD": 100,
+            "MA_PERIOD": 90,
             "MA_TYPE": "HMA",
             "PORTFOLIO_TOPN": 12,
-            "REPLACE_SCORE_THRESHOLD": 0,
-            "STOP_LOSS_PCT": 7,
-            "OVERBOUGHT_SELL_THRESHOLD": 97,
+            "REPLACE_SCORE_THRESHOLD": 2,
+            "STOP_LOSS_PCT": 4,
+            "OVERBOUGHT_SELL_THRESHOLD": 91,
             "COOLDOWN_DAYS": 4,
             "CORE_HOLDINGS": []
         }
