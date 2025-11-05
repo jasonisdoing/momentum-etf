@@ -20,17 +20,10 @@ from utils.report import (
     render_table_eaw,
 )
 from utils.logger import get_app_logger
-from utils.settings_loader import (
-    get_backtest_months_range,
-    get_account_precision,
-)
+from utils.settings_loader import get_account_precision
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
 logger = get_app_logger()
-
-
-def _default_months_range() -> int:
-    return get_backtest_months_range()
 
 
 # ---------------------------------------------------------------------------
@@ -869,11 +862,21 @@ def dump_backtest_log(
     daily_lines = _generate_daily_report_lines(result, account_settings)
     lines.extend(daily_lines)
 
+    months_range_value = getattr(result, "months_range", None)
+    if months_range_value is None:
+        backtest_cfg = account_settings.get("backtest", {}) if isinstance(account_settings, dict) else {}
+        months_range_value = backtest_cfg.get("months_range")
+        if months_range_value is None:
+            months_range_value = account_settings.get("strategy", {}).get("MONTHS_RANGE") if isinstance(account_settings, dict) else None
+    if months_range_value is None:
+        raise ValueError("MONTHS_RANGE 설정이 필요합니다. 계정 설정의 backtest.months_range 또는 strategy.MONTHS_RANGE 값을 확인하세요.")
+    months_range_value = int(months_range_value)
+
     summary_section = print_backtest_summary(
         summary=result.summary,
         account_id=account_id,
         country_code=country_code,
-        test_months_range=getattr(result, "months_range", _default_months_range()),
+        test_months_range=months_range_value,
         initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),

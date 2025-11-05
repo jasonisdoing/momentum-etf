@@ -16,8 +16,6 @@ from utils.settings_loader import (
     get_account_precision,
     get_account_settings,
     get_strategy_rules,
-    get_backtest_months_range,
-    get_backtest_initial_capital,
 )
 from utils.data_loader import (
     get_latest_trading_day,
@@ -27,14 +25,6 @@ from utils.data_loader import (
 )
 from utils.stock_list_io import get_etfs
 from utils.logger import get_app_logger
-
-
-def _default_test_months_range() -> int:
-    return get_backtest_months_range()
-
-
-def _default_initial_capital() -> float:
-    return float(get_backtest_initial_capital())
 
 
 @dataclass
@@ -164,7 +154,7 @@ def run_account_backtest(
         if strategy_rules.stop_loss_pct is not None:
             strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
 
-    months_range = _resolve_months_range(months_range, override_settings)
+    months_range = _resolve_months_range(months_range, override_settings, account_settings)
     end_date = _resolve_end_date(country_code, override_settings)
     start_date = _resolve_start_date(end_date, months_range, override_settings)
 
@@ -323,14 +313,24 @@ def run_account_backtest(
     )
 
 
-def _resolve_months_range(months_range: Optional[int], override_settings: Mapping[str, Any]) -> int:
+def _resolve_months_range(
+    months_range: Optional[int],
+    override_settings: Mapping[str, Any],
+    account_settings: Mapping[str, Any],
+) -> int:
     if months_range is not None:
         return int(months_range)
     if "months_range" in override_settings:
         return int(override_settings["months_range"])
     if "test_months_range" in override_settings:
         return int(override_settings["test_months_range"])
-    return _default_test_months_range()
+    account_months = account_settings.get("strategy", {}).get("MONTHS_RANGE") if account_settings else None
+    if account_months is not None:
+        try:
+            return int(account_months)
+        except (TypeError, ValueError):
+            pass
+    raise ValueError("MONTHS_RANGE 설정이 필요합니다. 계정 설정의 strategy.MONTHS_RANGE 값을 확인하세요.")
 
 
 def _resolve_initial_capital(
@@ -349,6 +349,17 @@ def _resolve_initial_capital(
         return candidate if math.isfinite(candidate) and candidate > 0 else None
 
     currency = str(precision_settings.get("currency") or account_settings.get("currency") or "KRW").upper()
+
+    backtest_config = account_settings.get("backtest", {}) if account_settings else {}
+    if not isinstance(backtest_config, Mapping):
+        backtest_config = {}
+
+    krw_override = _coerce_positive_float(override_settings.get("initial_capital_krw"))
+    if krw_override is None:
+        krw_override = _coerce_positive_float(backtest_config.get("initial_capital_krw"))
+
+    if krw_override is None:
+        raise ValueError("initial_capital_krw 설정이 필요합니다. 계정 설정의 backtest.initial_capital_krw 값을 확인하세요.")
 
     fx_override = _coerce_positive_float(override_settings.get("fx_rate_to_krw"))
     if fx_override is None:
@@ -375,33 +386,23 @@ def _resolve_initial_capital(
             currency,
         )
 
-    backtest_config = account_settings.get("backtest", {}) if account_settings else {}
-    if not isinstance(backtest_config, Mapping):
-        backtest_config = {}
+    local_overrides = [initial_capital, override_settings.get("initial_capital"), backtest_config.get("initial_capital")]
+    local_override = None
+    for candidate in local_overrides:
+        local_override = _coerce_positive_float(candidate)
+        if local_override is not None:
+            break
 
-    local_override = _coerce_positive_float(initial_capital)
-    if local_override is None:
-        local_override = _coerce_positive_float(override_settings.get("initial_capital"))
-    if local_override is None:
-        local_override = _coerce_positive_float(backtest_config.get("initial_capital"))
-
-    krw_override = _coerce_positive_float(override_settings.get("initial_capital_krw"))
-    if krw_override is None:
-        krw_override = _coerce_positive_float(backtest_config.get("initial_capital_krw"))
-
-    if krw_override is None and local_override is not None and currency != "KRW":
-        krw_override = local_override * fx_rate
-
-    base_krw = krw_override if krw_override is not None else _default_initial_capital()
+    local_capital = float(krw_override)
+    if currency != "KRW":
+        local_capital = local_capital / fx_rate if fx_rate > 0 else local_capital
 
     if local_override is not None:
-        local_capital = local_override
-    else:
-        local_capital = base_krw / fx_rate if fx_rate > 0 else base_krw
+        local_capital = float(local_override)
 
     return InitialCapitalInfo(
         local=float(local_capital),
-        krw=float(base_krw),
+        krw=float(krw_override),
         fx_rate_to_krw=float(fx_rate),
         currency=currency,
     )

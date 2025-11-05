@@ -19,7 +19,6 @@ ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT / "account"
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
 PRECISION_SETTINGS_PATH = SETTINGS_ROOT / "precision.json"
-BACKTEST_SETTINGS_PATH = SETTINGS_ROOT / "backtest.json"
 logger = get_app_logger()
 
 
@@ -59,44 +58,6 @@ def _load_precision_settings() -> Dict[str, Any]:
         raise AccountSettingsError(f"정밀도 설정 파일의 루트는 객체(JSON object)여야 합니다: {PRECISION_SETTINGS_PATH}")
 
     return data
-
-
-@lru_cache(maxsize=1)
-def _load_backtest_settings() -> Dict[str, Any]:
-    try:
-        return _load_json(BACKTEST_SETTINGS_PATH)
-    except AccountSettingsError:
-        return {}
-    except Exception:
-        return {}
-
-
-def get_backtest_settings() -> Dict[str, Any]:
-    return dict(_load_backtest_settings())
-
-
-def get_backtest_months_range(default: int = 36) -> int:
-    settings = _load_backtest_settings()
-    value = settings.get("MONTHS_RANGE")
-    try:
-        months = int(value)
-        if months > 0:
-            return months
-    except (TypeError, ValueError):
-        pass
-    return int(default)
-
-
-def get_backtest_initial_capital(default: float = 100_000_000) -> float:
-    settings = _load_backtest_settings()
-    value = settings.get("INITIAL_CAPITAL_KRW")
-    try:
-        capital = float(value)
-        if capital > 0:
-            return capital
-    except (TypeError, ValueError):
-        pass
-    return float(default)
 
 
 def get_tune_month_configs(account_id: str = None) -> List[Dict[str, Any]]:

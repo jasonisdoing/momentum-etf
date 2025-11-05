@@ -18,7 +18,7 @@ from logic.recommend.output import print_run_header
 from utils.logger import get_app_logger
 from utils.stock_list_io import get_etfs
 from utils.data_loader import prepare_price_data, get_latest_trading_day
-from utils.settings_loader import get_backtest_months_range, load_common_settings
+from utils.settings_loader import load_common_settings
 
 RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
 
@@ -56,7 +56,16 @@ def main() -> None:
         parser.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
-    months_range = get_backtest_months_range()
+    backtest_cfg = account_settings.get("backtest", {}) or {}
+    months_range = backtest_cfg.get("months_range")
+    if months_range is None:
+        months_range = account_settings.get("strategy", {}).get("MONTHS_RANGE")
+    if months_range is None:
+        parser.error("계정 설정에 'backtest.months_range' 또는 'strategy.MONTHS_RANGE' 값을 지정해야 합니다.")
+    try:
+        months_range = int(months_range)
+    except (TypeError, ValueError):
+        parser.error("MONTHS_RANGE 설정이 올바른 숫자여야 합니다.")
     end_date = get_latest_trading_day(country_code)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()

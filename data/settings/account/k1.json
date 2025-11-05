@@ -8,7 +8,7 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "MONTHS_RANGE": 12,
-        "EXPECTED_CAGR": 90.50,
+        "EXPECTED_CAGR": 90.54,
         "OPTIMIZATION_METRIC": "CAGR",
         "BACKTESTED_DATE": "2025-11-05 19:30",
         "tuning": {
@@ -46,5 +46,9 @@
     ],
     "slack": {
         "channel": "C09FAU2NHM2"
+    },
+    "backtest": {
+        "initial_capital_krw": "400000000",
+        "months_range": 12
     }
 }

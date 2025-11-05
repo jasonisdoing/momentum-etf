@@ -22,7 +22,6 @@ from utils.account_registry import get_strategy_rules
 from utils.settings_loader import (
     AccountSettingsError,
     get_account_settings,
-    get_backtest_months_range,
     load_common_settings,
     get_tune_month_configs,
 )
@@ -88,16 +87,30 @@ def _resolve_month_configs(months_range: Optional[int], account_id: str = None) 
     if configs:
         return configs
 
-    fallback = get_backtest_months_range()
-    if fallback <= 0:
-        return []
-    return [
-        {
-            "months_range": int(fallback),
-            "weight": 1.0,
-            "source": "fallback",
-        }
-    ]
+    if account_id:
+        try:
+            account_settings = get_account_settings(account_id)
+            backtest_cfg = account_settings.get("backtest", {}) or {}
+            fallback = backtest_cfg.get("months_range")
+            if fallback is None:
+                fallback = account_settings.get("strategy", {}).get("MONTHS_RANGE")
+            if fallback is not None:
+                try:
+                    fallback_val = int(fallback)
+                    if fallback_val > 0:
+                        return [
+                            {
+                                "months_range": fallback_val,
+                                "weight": 1.0,
+                                "source": f"account_{account_id}",
+                            }
+                        ]
+                except (TypeError, ValueError):
+                    pass
+        except Exception:
+            pass
+
+    return []
 
 
 def _safe_float(value: Any, default: float = float("nan")) -> float:

@@ -38,5 +38,9 @@
     ],
     "slack": {
         "channel": "C09FAU7SKA8"
+    },
+    "backtest": {
+        "initial_capital_krw": "100000000",
+        "months_range": 12
     }
 }
