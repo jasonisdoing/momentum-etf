@@ -140,9 +140,17 @@ def print_backtest_summary(
     ma_period = merged_strategy["MA_PERIOD"]
     momentum_label = f"{ma_period}일"
 
-    holding_stop_loss_pct = float(portfolio_topn)
+    stop_loss_source = strategy_tuning.get("STOP_LOSS_PCT")
+    try:
+        holding_stop_loss_pct = float(stop_loss_source if stop_loss_source is not None else portfolio_topn)
+    except (TypeError, ValueError):
+        holding_stop_loss_pct = float(portfolio_topn)
+
     # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
-    stop_loss_label = f"{holding_stop_loss_pct:.0f}%"
+    if abs(holding_stop_loss_pct - round(holding_stop_loss_pct)) < 1e-6:
+        stop_loss_label = f"{int(round(holding_stop_loss_pct))}%"
+    else:
+        stop_loss_label = f"{holding_stop_loss_pct:.2f}%"
 
     used_settings = {
         "계정": account_id.upper(),

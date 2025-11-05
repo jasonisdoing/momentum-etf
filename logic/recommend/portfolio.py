@@ -392,8 +392,12 @@ def run_portfolio_recommend(
     validate_portfolio_topn(denom, account_id)
 
     replace_threshold = strategy_rules.replace_threshold
+    stop_loss_threshold = None
     try:
-        stop_loss_threshold = -abs(float(denom))
+        if strategy_rules.stop_loss_pct is not None:
+            stop_loss_threshold = -abs(float(strategy_rules.stop_loss_pct))
+        else:
+            stop_loss_threshold = -abs(float(denom))
     except (TypeError, ValueError):
         stop_loss_threshold = None
 

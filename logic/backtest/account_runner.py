@@ -154,12 +154,15 @@ def run_account_backtest(
             replace_threshold=strategy_override.replace_threshold,
             ma_type=strategy_override.ma_type,
             core_holdings=strategy_override.core_holdings,
+            stop_loss_pct=strategy_override.stop_loss_pct,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
         strategy_settings["CORE_HOLDINGS"] = strategy_rules.core_holdings
+        if strategy_rules.stop_loss_pct is not None:
+            strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
 
     months_range = _resolve_months_range(months_range, override_settings)
     end_date = _resolve_end_date(country_code, override_settings)
@@ -427,8 +430,13 @@ def _build_backtest_kwargs(
     prefetched_data: Optional[Mapping[str, pd.DataFrame]],
     quiet: bool,
 ) -> Dict[str, Any]:
-    # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
-    stop_loss_pct = -abs(float(strategy_rules.portfolio_topn))
+    try:
+        configured_stop_loss = (
+            float(strategy_rules.stop_loss_pct) if strategy_rules.stop_loss_pct is not None else float(strategy_rules.portfolio_topn)
+        )
+    except (TypeError, ValueError):
+        configured_stop_loss = float(strategy_rules.portfolio_topn)
+    stop_loss_threshold = -abs(configured_stop_loss)
 
     # 필수 설정 검증
     if "COOLDOWN_DAYS" not in strategy_settings:
@@ -449,7 +457,7 @@ def _build_backtest_kwargs(
         "ma_period": strategy_rules.ma_period,
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
-        "stop_loss_pct": stop_loss_pct,
+        "stop_loss_pct": stop_loss_threshold,
         "cooldown_days": cooldown_days,
         "rsi_sell_threshold": rsi_sell_threshold,
         "core_holdings": strategy_rules.core_holdings,

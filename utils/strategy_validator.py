@@ -52,5 +52,13 @@ def validate_strategy_settings(
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{prefix}OVERBOUGHT_SELL_THRESHOLD 값이 유효하지 않습니다.") from exc
 
+    if "STOP_LOSS_PCT" in strategy_tuning and strategy_tuning["STOP_LOSS_PCT"] is not None:
+        try:
+            stop_loss_pct = float(strategy_tuning["STOP_LOSS_PCT"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{prefix}STOP_LOSS_PCT 값이 유효하지 않습니다.") from exc
+        if stop_loss_pct <= 0:
+            raise ValueError(f"{prefix}STOP_LOSS_PCT는 0보다 커야 합니다. (현재값: {stop_loss_pct})")
+
 
 __all__ = ["validate_strategy_settings"]
