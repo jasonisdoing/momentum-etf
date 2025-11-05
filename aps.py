@@ -262,13 +262,17 @@ def _register_recommendation_jobs(scheduler: BlockingScheduler, jobs: Iterable[R
             )
 
 
-def _register_cache_job(scheduler: BlockingScheduler, *, cron_expr: str = "0 4 * * *") -> None:
+def _register_cache_job(
+    scheduler: BlockingScheduler,
+    *,
+    hourly_cron_expr: str = "0 * * * *",
+) -> None:
     scheduler.add_job(
         run_cache_refresh,
-        CronTrigger.from_crontab(cron_expr, timezone=TIMEZONE),
-        id="cache_refresh",
+        CronTrigger.from_crontab(hourly_cron_expr, timezone=TIMEZONE),
+        id="cache_refresh_hourly",
     )
-    logging.info("Scheduled CACHE REFRESH: cron='%s' tz='%s'", cron_expr, TIMEZONE)
+    logging.info("Scheduled CACHE REFRESH (hourly): cron='%s' tz='%s'", hourly_cron_expr, TIMEZONE)
 
 
 def _run_initial_recommendations(jobs: Iterable[RecommendationJobConfig]) -> None:

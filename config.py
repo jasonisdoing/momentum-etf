@@ -15,12 +15,6 @@ NAVER_FINANCE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
-MARKET_REGIME_FILTER_TICKER_MAIN = "^GSPC"
-MARKET_REGIME_FILTER_TICKERS_AUX = ["^IXIC", "NQ=F", "^DJI"]
-
-MARKET_REGIME_FILTER_COUNTRY = "us"
-MARKET_REGIME_FILTER_MA_PERIOD = 50
-
 # RSI 계산 파라미터 (원본 RSI 사용: 70 이상 과매수, 30 이하 과매도)
 RSI_CALCULATION_CONFIG = {
     "period": 15,

@@ -1,13 +1,27 @@
-"""OHLCV 데이터를 디스크에 캐싱하고 관리하기 위한 헬퍼 함수 모음입니다."""
+"""OHLCV 데이터를 MongoDB에 캐싱하고 관리하기 위한 헬퍼 함수 모음입니다."""
 
-import os
+from __future__ import annotations
+
+import pickle
 import re
-from pathlib import Path
-from typing import Optional, Tuple
+from datetime import datetime
+from typing import List, Optional, Tuple
 
+from bson.binary import Binary
+from pymongo.errors import PyMongoError
 import pandas as pd
 
-CACHE_ROOT = Path(__file__).resolve().parents[1] / "data" / "stocks" / "cache"
+from utils.db_manager import get_db_connection
+from utils.logger import get_app_logger
+
+logger = get_app_logger()
+
+_COLLECTION_NAME_MAP = {
+    "kor": "cache_kor_stocks",
+    "aus": "cache_aus_stocks",
+}
+
+_TEMP_SUFFIX_SANITIZE = re.compile(r"[^a-z0-9_-]", re.IGNORECASE)
 
 
 def _get_cache_start_date() -> Optional[pd.Timestamp]:
@@ -37,29 +51,57 @@ def _get_cache_start_date() -> Optional[pd.Timestamp]:
     return None
 
 
-def _sanitize_ticker(ticker: str) -> str:
-    """파일 시스템에 안전하게 저장할 수 있는 티커 문자열을 생성합니다."""
-    if not ticker:
-        return "unknown"
-    return re.sub(r"[^A-Za-z0-9._-]", "_", ticker.upper())
+def _resolve_collection_name(country_token: str) -> str:
+    token = (country_token or "global").strip().lower() or "global"
+    if token in _COLLECTION_NAME_MAP:
+        return _COLLECTION_NAME_MAP[token]
+    if "_tmp_" in token:
+        base, _, suffix = token.partition("_tmp_")
+        base_collection = _COLLECTION_NAME_MAP.get(base, f"cache_{base}_stocks")
+        suffix_clean = _TEMP_SUFFIX_SANITIZE.sub("", suffix)
+        if not suffix_clean:
+            raise ValueError(f"잘못된 임시 컬렉션 토큰: {country_token}")
+        return f"{base_collection}_tmp_{suffix_clean}"
+    return f"cache_{token}_stocks"
 
 
-def get_cache_path(country: str, ticker: str) -> Path:
-    """캐시 파일 경로를 반환합니다. (존재하지 않으면 생성하지 않습니다.)"""
-    safe_country = (country or "global").lower()
-    safe_ticker = _sanitize_ticker(ticker)
-    return CACHE_ROOT / safe_country / f"{safe_ticker}.pkl"
+def _get_collection(country: str):
+    db = get_db_connection()
+    if db is None:
+        return None
+    collection_name = _resolve_collection_name(country)
+    collection = db[collection_name]
+    # 보조 인덱스 생성 (존재 시 무시)
+    try:
+        collection.create_index("ticker", unique=True, name="ticker_unique", background=True)
+    except Exception:
+        pass
+    return collection
 
 
 def load_cached_frame(country: str, ticker: str) -> Optional[pd.DataFrame]:
     """저장된 캐시 DataFrame을 로드하고, CACHE_START_DATE 이전 데이터를 필터링합니다."""
-    path = get_cache_path(country, ticker)
-    if not path.exists():
+    collection = _get_collection(country)
+    if collection is None:
         return None
+
     try:
-        df = pd.read_pickle(path)
+        doc = collection.find_one({"ticker": (ticker or "").strip().upper()})
     except Exception:
         return None
+
+    if not doc:
+        return None
+
+    payload = doc.get("data")
+    if payload is None:
+        return None
+
+    try:
+        df = pickle.loads(payload)
+    except Exception:
+        return None
+
     if df is None or df.empty:
         return None
     if not isinstance(df.index, pd.DatetimeIndex):
@@ -86,6 +128,10 @@ def save_cached_frame(country: str, ticker: str, df: pd.DataFrame) -> None:
     if df is None or df.empty:
         return
 
+    collection = _get_collection(country)
+    if collection is None:
+        return
+
     df_to_save = df.copy()
     df_to_save.sort_index(inplace=True)
     df_to_save = df_to_save[~df_to_save.index.duplicated(keep="first")]
@@ -98,9 +144,76 @@ def save_cached_frame(country: str, ticker: str, df: pd.DataFrame) -> None:
     if df_to_save.empty:
         return
 
-    path = get_cache_path(country, ticker)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df_to_save.to_pickle(path)
+    try:
+        payload = Binary(pickle.dumps(df_to_save, protocol=pickle.HIGHEST_PROTOCOL))
+        collection.update_one(
+            {"ticker": (ticker or "").strip().upper()},
+            {
+                "$set": {
+                    "ticker": (ticker or "").strip().upper(),
+                    "data": payload,
+                    "updated_at": datetime.utcnow(),
+                    "row_count": int(df_to_save.shape[0]),
+                    "columns": df_to_save.columns.astype(str).tolist(),
+                }
+            },
+            upsert=True,
+        )
+    except Exception:
+        return
+
+
+def delete_cached_frame(country: str, ticker: str) -> None:
+    collection = _get_collection(country)
+    if collection is None:
+        return
+    try:
+        collection.delete_one({"ticker": (ticker or "").strip().upper()})
+    except Exception:
+        return
+
+
+def drop_cache_collection(country: str) -> None:
+    db = get_db_connection()
+    if db is None:
+        return
+    collection_name = _resolve_collection_name(country)
+    try:
+        db[collection_name].drop()
+    except Exception:
+        return
+
+
+def swap_cache_collection(country: str, temp_country_token: str) -> None:
+    """임시 컬렉션을 메인 캐시 컬렉션으로 원자적으로 교체합니다."""
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결을 초기화할 수 없습니다.")
+
+    client = db.client
+    db_name = db.name
+    main_collection_name = _resolve_collection_name(country)
+    temp_collection_name = _resolve_collection_name(temp_country_token)
+
+    if temp_collection_name not in db.list_collection_names():
+        raise ValueError(f"임시 컬렉션 '{temp_collection_name}'을 찾을 수 없습니다.")
+
+    try:
+        client.admin.command(
+            {
+                "renameCollection": f"{db_name}.{temp_collection_name}",
+                "to": f"{db_name}.{main_collection_name}",
+                "dropTarget": True,
+            }
+        )
+        # rename 후 새 컬렉션 핸들을 초기화하여 (재)인덱스 보장
+        _get_collection(country)
+    except PyMongoError as exc:
+        logger.error("캐시 컬렉션 교체 실패 (%s <- %s): %s", main_collection_name, temp_collection_name, exc)
+        raise
+    except Exception as exc:
+        logger.error("캐시 컬렉션 교체 중 예외 발생: %s", exc)
+        raise
 
 
 def get_cached_date_range(country: str, ticker: str) -> Optional[Tuple[pd.Timestamp, pd.Timestamp]]:
@@ -108,3 +221,37 @@ def get_cached_date_range(country: str, ticker: str) -> Optional[Tuple[pd.Timest
     if df is None or df.empty:
         return None
     return df.index.min(), df.index.max()
+
+
+def list_cached_countries() -> List[str]:
+    db = get_db_connection()
+    if db is None:
+        return []
+
+    available: List[str] = []
+    try:
+        existing = set(db.list_collection_names())
+    except Exception:
+        existing = set()
+
+    for country, coll in _COLLECTION_NAME_MAP.items():
+        if coll in existing:
+            try:
+                if db[coll].estimated_document_count() > 0:
+                    available.append(country)
+            except Exception:
+                continue
+    if not available:
+        available = sorted(_COLLECTION_NAME_MAP.keys())
+    return available
+
+
+def list_cached_tickers(country: str) -> List[str]:
+    collection = _get_collection(country)
+    if collection is None:
+        return []
+    try:
+        tickers = collection.distinct("ticker")
+    except Exception:
+        return []
+    return sorted(str(ticker or "").upper() for ticker in tickers if ticker)

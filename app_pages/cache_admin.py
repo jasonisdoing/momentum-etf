@@ -2,49 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from functools import lru_cache
-from pathlib import Path
 from typing import Dict, List
 
 import pandas as pd
 import streamlit as st
 import streamlit_authenticator as stauth
 
+from utils.cache_utils import (
+    list_cached_countries,
+    list_cached_tickers,
+    load_cached_frame,
+)
 from utils.stock_list_io import get_etfs
-
-
-CACHE_ROOT = Path(__file__).resolve().parent.parent / "data" / "stocks" / "cache"
-
-
-def _list_available_countries() -> List[str]:
-    if not CACHE_ROOT.exists():
-        return []
-    return sorted([entry.name for entry in CACHE_ROOT.iterdir() if entry.is_dir()])
-
-
-def _list_tickers(country: str) -> List[str]:
-    cache_dir = CACHE_ROOT / country
-    if not cache_dir.exists():
-        return []
-    return sorted([file.stem for file in cache_dir.glob("*.pkl")])
-
-
-def _load_cache_df(country: str, ticker: str) -> pd.DataFrame:
-    cache_path = CACHE_ROOT / country / f"{ticker}.pkl"
-    if not cache_path.exists():
-        raise FileNotFoundError(f"캐시 파일을 찾을 수 없습니다: {cache_path}")
-
-    with cache_path.open("rb") as handle:
-        obj = pd.read_pickle(handle)
-
-    if isinstance(obj, pd.DataFrame):
-        df = obj
-    else:
-        df = pd.DataFrame(obj)
-
-    if not isinstance(df.index, pd.DatetimeIndex):
-        df = df.reset_index(drop=True)
-
-    return df
 
 
 @lru_cache(maxsize=8)
@@ -112,14 +81,14 @@ def render_cache_admin_page() -> None:
     st.sidebar.write("")
     authenticator.logout(button_name="로그아웃", location="sidebar")
 
-    countries = _list_available_countries()
+    countries = list_cached_countries()
     if not countries:
-        st.warning("캐시 디렉터리에 사용 가능한 국가가 없습니다.")
+        st.warning("캐시 데이터가 저장된 국가가 없습니다.")
         return
 
     selected_country = st.selectbox("국가 선택", countries, index=0, key="cache_country_selector")
 
-    tickers = _list_tickers(selected_country)
+    tickers = list_cached_tickers(selected_country)
     if not tickers:
         st.warning(f"{selected_country.upper()} 국가에 대한 캐시가 없습니다.")
         return
@@ -145,7 +114,9 @@ def render_cache_admin_page() -> None:
         return
 
     try:
-        df = _load_cache_df(selected_country, selected_tkr)
+        df = load_cached_frame(selected_country, selected_tkr)
+        if df is None or df.empty:
+            raise RuntimeError("저장된 캐시가 없거나 비어 있습니다.")
     except Exception as exc:
         st.error(f"캐시 데이터를 불러오는 중 오류가 발생했습니다: {exc}")
         return
