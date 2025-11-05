@@ -83,38 +83,6 @@
         ]
     },
     {
-        "category": "이머징(지수)",
-        "tickers": [
-            {
-                "ticker": "ASX:IEM",
-                "name": "iShares MSCI Emerging Markets ETF (AU)",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 39741,
-                "1_week_avg_turnover": 3386085,
-                "3_month_earn_rate": 11.5162
-            },
-            {
-                "ticker": "ASX:FEMX",
-                "name": "Fidelity Global Emerging Markets ETF",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 22579,
-                "1_week_avg_turnover": 165668,
-                "3_month_earn_rate": 9.5455
-            },
-            {
-                "ticker": "ASX:VGE",
-                "name": "Vanguard FTSE Emerging Markets Shares ETF",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 21541,
-                "1_week_avg_turnover": 2006073,
-                "3_month_earn_rate": 7.8098
-            }
-        ]
-    },
-    {
         "category": "글로벌(지수)",
         "tickers": [
             {

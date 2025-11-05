@@ -10,15 +10,15 @@
         "MONTHS_RANGE": 12,
         "EXPECTED_CAGR": 41.25,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-11-05 19:30",
+        "BACKTESTED_DATE": "2025-11-05 21:00",
         "tuning": {
-            "MA_PERIOD": 45,
+            "MA_PERIOD": 40,
             "MA_TYPE": "SMA",
             "PORTFOLIO_TOPN": 7,
-            "REPLACE_SCORE_THRESHOLD": 1,
+            "REPLACE_SCORE_THRESHOLD": 0,
             "STOP_LOSS_PCT": 6,
             "OVERBOUGHT_SELL_THRESHOLD": 100,
-            "COOLDOWN_DAYS": 5,
+            "COOLDOWN_DAYS": 3,
             "CORE_HOLDINGS": []
         }
     },
