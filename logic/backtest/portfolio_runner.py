@@ -330,12 +330,8 @@ def _execute_individual_sells(
     for ticker, ticker_metrics in metrics_by_ticker.items():
         ticker_state, price = position_state[ticker], today_prices.get(ticker)
 
-        if (
-            ticker_state["shares"] > 0
-            and pd.notna(price)
-            and i >= ticker_state["sell_block_until"]
-            and metrics_by_ticker[ticker]["available_mask"][i]
-        ):
+        if ticker_state["shares"] > 0 and pd.notna(price) and metrics_by_ticker[ticker]["available_mask"][i]:
+            in_cooldown = i < ticker_state["sell_block_until"]
             decision = None
             hold_ret = (price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0
 
@@ -352,6 +348,12 @@ def _execute_individual_sells(
             # 핵심 보유 종목은 매도 신호 무시
             if decision and ticker in valid_core_holdings:
                 decision = None
+
+            if not decision:
+                continue
+
+            if in_cooldown and decision != "CUT_STOPLOSS":
+                continue
 
             if decision:
                 # 다음날 시초가 + 슬리피지로 매도 가격 계산

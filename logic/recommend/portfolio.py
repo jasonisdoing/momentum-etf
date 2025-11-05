@@ -800,7 +800,7 @@ def run_portfolio_recommend(
             current_held_stocks.sort(key=lambda x: x.get("score", 0.0) if pd.notna(x.get("score")) else -float("inf"))
 
     # 쿨다운 최종 적용
-    SELL_STATE_SET = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
+    SELL_STATE_SET = {"SELL_TREND", "SELL_REPLACE", "SELL_RSI"}
     BUY_STATE_SET = {"BUY", "BUY_REPLACE"}
 
     if cooldown_days and cooldown_days > 0:

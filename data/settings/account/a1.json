@@ -8,17 +8,17 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "MONTHS_RANGE": 12,
-        "EXPECTED_CAGR": 41.52,
+        "EXPECTED_CAGR": 41.98,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-11-05 09:00",
+        "BACKTESTED_DATE": "2025-11-05 09:30",
         "tuning": {
             "MA_PERIOD": 45,
             "MA_TYPE": "SMA",
             "PORTFOLIO_TOPN": 7,
-            "REPLACE_SCORE_THRESHOLD": 4,
+            "REPLACE_SCORE_THRESHOLD": 1,
             "STOP_LOSS_PCT": 4,
             "OVERBOUGHT_SELL_THRESHOLD": 100,
-            "COOLDOWN_DAYS": 5,
+            "COOLDOWN_DAYS": 4,
             "CORE_HOLDINGS": [
                 "ASX:NDQ",
                 "ASX:IOO"
