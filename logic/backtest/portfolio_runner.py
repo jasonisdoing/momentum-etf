@@ -1382,6 +1382,26 @@ def run_portfolio_backtest(
         # --- 4. 주간 균등 비중 리밸런싱 (주 마지막 거래일에 실행) ---
         held_count = sum(1 for state in position_state.values() if state["shares"] > 0)
         if held_count > 0 and _is_weekly_rebalance_day(dt, country_code, weekly_rebalance_cache):
+            # 백테스트가 주 중간에 종료되는 경우(마지막 날짜가 주간 마지막 거래일이 아님) 리밸런싱을 건너뜁니다.
+            if i == total_days - 1:
+                try:
+                    week_start = dt - pd.Timedelta(days=dt.weekday())
+                    week_end = week_start + pd.Timedelta(days=6)
+                    remaining_days = get_trading_days(
+                        (dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+                        week_end.strftime("%Y-%m-%d"),
+                        country_code,
+                    )
+                    if remaining_days:
+                        logger.debug(
+                            "[BACKTEST] 주간 리밸런싱 건너뜀 (%s): 이후 거래일 존재 %s",
+                            dt.strftime("%Y-%m-%d"),
+                            [d.strftime("%Y-%m-%d") for d in remaining_days],
+                        )
+                        continue
+                except Exception:
+                    pass
+
             cash, current_holdings_value = _rebalance_portfolio_equal_weight(
                 position_state=position_state,
                 today_prices=today_prices,
