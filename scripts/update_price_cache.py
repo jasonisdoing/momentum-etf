@@ -78,7 +78,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--countries",
         nargs="+",
-        help="캐시를 갱신할 국가 코드 목록 (예: kor aus us). 지정하지 않으면 기본 목록 사용.",
+        help="캐시를 갱신할 국가 코드 목록 (예: kor). 지정하지 않으면 기본 목록 사용.",
     )
     parser.add_argument(
         "--start",
@@ -100,7 +100,7 @@ def main():
     if args.countries:
         countries = [country.strip().lower() for country in args.countries if country.strip()]
     else:
-        countries = ["kor", "aus"]
+        countries = ["kor"]
 
     if not countries:
         parser.error("갱신할 국가를 최소 하나 이상 지정해야 합니다.")

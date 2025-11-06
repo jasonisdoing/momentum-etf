@@ -211,7 +211,6 @@ def _rebalance_positions_weekly(
     cash: float,
     country_code: str,
 ) -> float:
-    fractional_allowed = str(country_code).lower() in ("aus", "au")
     active = [ticker for ticker, pos in positions.items() if pos.get("shares", 0) > 0 and today_prices.get(ticker, 0.0) > 0]
     if not active:
         return cash
@@ -228,17 +227,13 @@ def _rebalance_positions_weekly(
         price = today_prices[ticker]
         current_shares = pos["shares"]
 
-        desired_shares = target_value / price
-        if not fractional_allowed:
-            desired_shares = math.floor(desired_shares)
+        desired_shares = math.floor(target_value / price)
         desired_shares = max(desired_shares, 0.0)
 
         if current_shares <= desired_shares + 1e-9:
             continue
 
-        shares_to_sell = current_shares - desired_shares
-        if not fractional_allowed:
-            shares_to_sell = int(math.floor(shares_to_sell))
+        shares_to_sell = int(math.floor(current_shares - desired_shares))
 
         if shares_to_sell <= 0:
             continue
@@ -270,9 +265,7 @@ def _rebalance_positions_weekly(
         pos = positions[ticker]
         price = today_prices[ticker]
 
-        desired_shares = target_value / price
-        if not fractional_allowed:
-            desired_shares = math.floor(desired_shares)
+        desired_shares = math.floor(target_value / price)
         desired_shares = max(desired_shares, 0.0)
 
         current_shares = pos["shares"]
@@ -315,11 +308,8 @@ def _rebalance_positions_weekly(
             total_needed_value -= item["needed_value"]
             continue
 
-        if fractional_allowed:
-            shares_to_buy = min(item["needed_shares"], allocated_cash / price)
-        else:
-            shares_to_buy = int(allocated_cash / price)
-            shares_to_buy = min(shares_to_buy, int(math.floor(item["needed_shares"])))
+        shares_to_buy = int(allocated_cash / price)
+        shares_to_buy = min(shares_to_buy, int(math.floor(item["needed_shares"])))
 
         if shares_to_buy <= 0:
             total_needed_value -= item["needed_value"]
@@ -327,11 +317,11 @@ def _rebalance_positions_weekly(
 
         buy_amount = shares_to_buy * price
         if buy_amount > remaining_cash:
-            buy_amount = remaining_cash
-            if fractional_allowed:
-                shares_to_buy = buy_amount / price
-            else:
-                shares_to_buy = int(buy_amount / price)
+            shares_to_buy = int(remaining_cash // price)
+            if shares_to_buy <= 0:
+                total_needed_value -= item["needed_value"]
+                continue
+            buy_amount = shares_to_buy * price
 
         if shares_to_buy <= 0:
             total_needed_value -= item["needed_value"]

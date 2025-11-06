@@ -3,7 +3,6 @@ APScheduler 기반 자동화 작업 모음
 
 작업 요약 (모두 KST 기준):
 - K1(한국 ETF) 추천: 월~금 09:01~16:51, 10분 간격으로 실행
-- A1(호주 ETF) 추천: 월~금 08:01~15:51, 10분 간격으로 실행
 - 가격 캐시 갱신: 매일 04:00 실행
 - 프로세스 기동 시 모든 계정 추천 1회 즉시 실행(설정 허용 시)
 
@@ -141,7 +140,7 @@ def run_cache_refresh() -> None:
 
     common_settings = get_common_file_settings()
     start_date = str(common_settings.get("CACHE_START_DATE"))
-    countries = ["kor", "aus"]
+    countries = ["kor"]
     logging.info("Running cache refresh (start=%s, countries=%s)", start_date, ",".join(countries))
     try:
         from scripts.update_price_cache import refresh_all_caches

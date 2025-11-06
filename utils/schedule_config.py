@@ -12,7 +12,6 @@ from utils.market_schedule import generate_market_cron_expressions
 
 _DEFAULT_TIMEZONES: Dict[str, str] = {
     "kor": "Asia/Seoul",
-    "aus": "Asia/Seoul",  # 한국 시간으로 사용 변경 금지!
 }
 
 

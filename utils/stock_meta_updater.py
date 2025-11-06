@@ -171,14 +171,7 @@ def _update_metadata_for_country(country_code: str):
             existing_listing_date = stock.get("listing_date")
             has_listing_date = bool(existing_listing_date)
 
-            yfinance_ticker = ticker
-            if country_code == "aus":
-                if ticker.upper().startswith("ASX:"):
-                    yfinance_ticker = f"{ticker[4:]}.AX"
-                elif not ticker.endswith(".AX"):
-                    yfinance_ticker = f"{ticker}.AX"
-            elif country_code == "kor":
-                yfinance_ticker = f"{ticker}.KS"
+            yfinance_ticker = f"{ticker}.KS"
 
             try:
                 listing_date_str = None
@@ -189,13 +182,11 @@ def _update_metadata_for_country(country_code: str):
                     listing_date_str = existing_listing_date
                     logger.debug(f"[{country_code.upper()}/{ticker}] 상장일 이미 존재: {listing_date_str}, 스킵")
                 else:
-                    # 한국 ETF의 경우 네이버 API 우선 시도
-                    if country_code == "kor":
-                        listing_date_str = _fetch_naver_listing_date(ticker)
-                        if listing_date_str:
-                            logger.info(f"[{country_code.upper()}/{ticker}] 네이버 API에서 상장일 획득: {listing_date_str}")
+                    listing_date_str = _fetch_naver_listing_date(ticker)
+                    if listing_date_str:
+                        logger.info(f"[{country_code.upper()}/{ticker}] 네이버 API에서 상장일 획득: {listing_date_str}")
 
-                # 네이버 API 실패 시 또는 호주 ETF인 경우 yfinance 폴백
+                # 네이버 API 실패 시 yfinance 폴백
                 if not listing_date_str:
                     logger.debug(f"[{country_code.upper()}/{ticker}] yfinance로 폴백하여 상장일 조회")
                     # yfinance를 통해 전체 기간 데이터 다운로드
@@ -288,7 +279,7 @@ def update_stock_metadata():
     logger = get_app_logger()
     logger.info("종목 메타데이터 업데이트를 시작합니다...")
 
-    supported_countries = ["aus", "kor", "us"]  # 필요에 따라 국가 추가
+    supported_countries = ["kor"]
     for country in supported_countries:
         stock_file = STOCKS_DIR / f"{country}.json"
         if stock_file.exists():

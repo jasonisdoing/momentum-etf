@@ -13,18 +13,6 @@ from utils.logger import get_app_logger
 
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
-    "a1": {
-        "MA_RANGE": np.arange(30, 65, 5),
-        "MA_TYPE": ["SMA"],
-        "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3],
-        "STOP_LOSS_PCT": np.arange(5, 11, 1),
-        "OVERBOUGHT_SELL_THRESHOLD": [100],
-        "COOLDOWN_DAYS": [3, 4, 5],
-        "CORE_HOLDINGS": [],
-        # "CORE_HOLDINGS": ["ASX:NDQ", "ASX:IOO"],
-        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    },
     "k1": {
         "MA_RANGE": np.arange(90, 125, 5),
         "MA_TYPE": ["HMA"],

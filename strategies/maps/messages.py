@@ -2,22 +2,16 @@
 
 from __future__ import annotations
 
-from utils.report import format_kr_money, format_aud_money
+from utils.report import format_kr_money
 from .constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 
 
 def money_str(country: str, amount: float) -> str:
-    """Return formatted money string by country stock currency.
-    - aus -> AUD (A$)
-    - others -> KRW
-    """
+    """Return formatted money string by country stock currency (KRW only)."""
     try:
         val = float(amount or 0.0)
     except Exception:
         val = 0.0
-    country_code = (country or "").strip().lower()
-    if country_code == "aus":
-        return format_aud_money(val)
     return format_kr_money(val)
 
 

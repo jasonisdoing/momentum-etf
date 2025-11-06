@@ -13,12 +13,7 @@ from logic.backtest.account_runner import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
 from utils.notification import build_summary_line_from_summary_data
-from utils.report import (
-    format_aud_money,
-    format_kr_money,
-    format_usd_money,
-    render_table_eaw,
-)
+from utils.report import format_kr_money, render_table_eaw
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_precision
 
@@ -104,12 +99,7 @@ def print_backtest_summary(
     final_value_krw_value = float(summary.get("final_value_krw", final_value_local))
     fx_rate_to_krw = float(summary.get("fx_rate_to_krw", 1.0) or 1.0)
 
-    if currency == "AUD":
-        money_formatter = format_aud_money
-    elif currency == "USD":
-        money_formatter = format_usd_money
-    else:
-        money_formatter = format_kr_money
+    money_formatter = format_kr_money
 
     output_lines: List[str] = []
     section_counter = section_start_index
@@ -410,7 +400,7 @@ def _resolve_formatters(account_settings: Dict[str, Any]):
     if not isinstance(precision, dict):
         precision = {}
 
-    currency = str(precision.get("currency") or account_settings.get("currency") or "KRW").upper()
+    currency = "KRW"
     qty_precision = int(precision.get("qty_precision", 0))
     price_precision = int(precision.get("price_precision", 0))
 
@@ -420,24 +410,6 @@ def _resolve_formatters(account_settings: Dict[str, Any]):
         if not _is_finite_number(value):
             return "-"
         return f"{float(value):,.{digits}f}"
-
-    if currency == "AUD":
-
-        def _aud_money(value: float) -> str:
-            if not _is_finite_number(value):
-                return "-"
-            return f"A${float(value):,.2f}"
-
-        return currency, _aud_money, _format_price, qty_precision, digits
-
-    if currency == "USD":
-
-        def _usd_money(value: float) -> str:
-            if not _is_finite_number(value):
-                return "-"
-            return f"${float(value):,.2f}"
-
-        return currency, _usd_money, _format_price, qty_precision, digits
 
     def _krw_price(value: float) -> str:
         if not _is_finite_number(value):

@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 import pandas as pd
 
 from utils.logger import get_app_logger
-from utils.report import format_aud_money, format_kr_money, format_usd_money
+from utils.report import format_kr_money
 from utils.stock_list_io import get_etfs
 
 logger = get_app_logger()
@@ -17,11 +17,6 @@ DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[1] / "data" / "results"
 
 
 def _resolve_money_formatter(currency: str):
-    currency_upper = (currency or "").strip().upper()
-    if currency_upper in {"AUD", "AUS"}:
-        return format_aud_money, "A$"
-    if currency_upper in {"USD", "US"}:
-        return format_usd_money, "$"
     return format_kr_money, "₩"
 
 

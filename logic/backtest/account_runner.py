@@ -17,12 +17,7 @@ from utils.settings_loader import (
     get_account_settings,
     get_strategy_rules,
 )
-from utils.data_loader import (
-    get_latest_trading_day,
-    fetch_ohlcv,
-    get_aud_to_krw_rate,
-    get_usd_to_krw_rate,
-)
+from utils.data_loader import get_latest_trading_day, fetch_ohlcv
 from utils.stock_list_io import get_etfs
 from utils.logger import get_app_logger
 
@@ -339,7 +334,6 @@ def _resolve_initial_capital(
     account_settings: Mapping[str, Any],
     precision_settings: Mapping[str, Any],
 ) -> InitialCapitalInfo:
-    logger = get_app_logger()
 
     def _coerce_positive_float(value: Any) -> Optional[float]:
         try:
@@ -349,6 +343,9 @@ def _resolve_initial_capital(
         return candidate if math.isfinite(candidate) and candidate > 0 else None
 
     currency = str(precision_settings.get("currency") or account_settings.get("currency") or "KRW").upper()
+    if currency not in {"KRW", "KR"}:
+        raise ValueError(f"지원하지 않는 통화 코드입니다: {currency}")
+    currency = "KRW"
 
     backtest_config = account_settings.get("backtest", {}) if account_settings else {}
     if not isinstance(backtest_config, Mapping):
@@ -361,30 +358,7 @@ def _resolve_initial_capital(
     if krw_override is None:
         raise ValueError("initial_capital_krw 설정이 필요합니다. 계정 설정의 backtest.initial_capital_krw 값을 확인하세요.")
 
-    fx_override = _coerce_positive_float(override_settings.get("fx_rate_to_krw"))
-    if fx_override is None:
-        fx_override = _coerce_positive_float(account_settings.get("fx_rate_to_krw"))
-    if fx_override is None:
-        fx_override = _coerce_positive_float(precision_settings.get("fx_rate_to_krw"))
-
     fx_rate = 1.0
-    if currency == "AUD":
-        fetched = _coerce_positive_float(get_aud_to_krw_rate())
-        fx_rate = fetched or fx_override or 1.0
-    elif currency == "USD":
-        fetched = _coerce_positive_float(get_usd_to_krw_rate())
-        fx_rate = fetched or fx_override or 1.0
-    else:
-        fx_rate = 1.0
-
-    if fx_rate <= 0 or not math.isfinite(fx_rate):
-        fx_rate = 1.0
-
-    if currency != "KRW" and fx_rate == 1.0 and fx_override is None:
-        logger.warning(
-            "[백테스트] '%s' 통화 환율을 가져오지 못해 KRW와 동일하게 처리합니다.",
-            currency,
-        )
 
     local_overrides = [initial_capital, override_settings.get("initial_capital"), backtest_config.get("initial_capital")]
     local_override = None
@@ -394,9 +368,6 @@ def _resolve_initial_capital(
             break
 
     local_capital = float(krw_override)
-    if currency != "KRW":
-        local_capital = local_capital / fx_rate if fx_rate > 0 else local_capital
-
     if local_override is not None:
         local_capital = float(local_override)
 

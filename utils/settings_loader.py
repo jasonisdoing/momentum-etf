@@ -18,7 +18,6 @@ SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "data" / "settings"
 ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT / "account"
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
-PRECISION_SETTINGS_PATH = SETTINGS_ROOT / "precision.json"
 logger = get_app_logger()
 
 
@@ -37,26 +36,6 @@ def _load_json(path: Path) -> Dict[str, Any]:
 
     if not isinstance(data, dict):
         raise AccountSettingsError(f"설정 파일의 루트는 객체(JSON object)여야 합니다: {path}")
-    return data
-
-
-@lru_cache(maxsize=1)
-def _load_precision_settings() -> Dict[str, Any]:
-    try:
-        raw = PRECISION_SETTINGS_PATH.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:
-        raise AccountSettingsError(f"정밀도 설정 파일을 찾을 수 없습니다: {PRECISION_SETTINGS_PATH}") from exc
-    except OSError as exc:
-        raise AccountSettingsError(f"정밀도 설정 파일을 읽을 수 없습니다: {PRECISION_SETTINGS_PATH}") from exc
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise AccountSettingsError(f"정밀도 설정 파일이 올바른 JSON 형식이 아닙니다: {PRECISION_SETTINGS_PATH}") from exc
-
-    if not isinstance(data, dict):
-        raise AccountSettingsError(f"정밀도 설정 파일의 루트는 객체(JSON object)여야 합니다: {PRECISION_SETTINGS_PATH}")
-
     return data
 
 
@@ -183,14 +162,15 @@ def get_account_precision(account_id: str) -> Dict[str, Any]:
 
     settings = get_account_settings(account_id)
     country_code = (settings.get("country_code") or account_id).strip().lower()
+    if country_code not in ("kor", "kr"):
+        raise AccountSettingsError(f"지원하지 않는 국가 코드입니다: {country_code}")
 
-    precision_map = _load_precision_settings()
-    precision = precision_map.get(country_code)
-
-    if precision is None or not isinstance(precision, dict):
-        raise AccountSettingsError(f"'{account_id}'(국가 코드: {country_code})에 대한 정밀도 설정을 찾을 수 없습니다.")
-
-    return dict(precision)
+    return {
+        "currency": "KRW",
+        "qty_precision": 0,
+        "price_precision": 0,
+        "fx_rate_to_krw": 1.0,
+    }
 
 
 def get_account_slack_channel(account_id: str) -> Optional[str]:

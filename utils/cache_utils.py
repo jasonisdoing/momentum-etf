@@ -18,7 +18,6 @@ logger = get_app_logger()
 
 _COLLECTION_NAME_MAP = {
     "kor": "cache_kor_stocks",
-    "aus": "cache_aus_stocks",
 }
 
 _TEMP_SUFFIX_SANITIZE = re.compile(r"[^a-z0-9_-]", re.IGNORECASE)

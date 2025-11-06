@@ -13,7 +13,7 @@ from config import BACKTEST_SLIPPAGE, MARKET_TIMING_INDEX
 from utils.data_loader import fetch_ohlcv, get_trading_days
 from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
-from utils.report import format_kr_money, format_aud_money
+from utils.report import format_kr_money
 from strategies.maps.labeler import compute_net_trade_note
 from logic.common import build_weekly_rebalance_cache, select_candidates_by_category
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
@@ -71,7 +71,7 @@ def _rebalance_portfolio_equal_weight(
     """보유 종목을 한 차례 순회하며 균등 비중에 가깝게 리밸런싱합니다."""
 
     # top_n 파라미터는 과거 인터페이스 호환을 위해 유지합니다.
-    fractional_allowed = str(country_code).lower() in ("aus", "au")
+    fractional_allowed = False
     held_tickers = [ticker for ticker, state in position_state.items() if state["shares"] > 0 and today_prices.get(ticker, 0.0) > 0]
 
     if not held_tickers:
@@ -686,7 +686,7 @@ def run_portfolio_backtest(
         core_start_date: 백테스트 시작일
         top_n: 포트폴리오 최대 보유 종목 수
         date_range: 백테스트 기간 [시작일, 종료일]
-        country: 시장 국가 코드 (예: kor, aus)
+        country: 시장 국가 코드 (예: kor)
         prefetched_data: 미리 로드된 가격 데이터
         ma_period: 이동평균 기간
         replace_threshold: 종목 교체 임계값
@@ -1270,14 +1270,10 @@ def run_portfolio_backtest(
                         if budget <= 0:
                             continue
                         # 수량/금액 산정
-                        if country_code == "aus":
-                            req_qty = (budget / buy_price) if buy_price > 0 else 0
-                            buy_amount = budget
-                        else:
-                            req_qty = int(budget // buy_price) if buy_price > 0 else 0
-                            buy_amount = req_qty * buy_price
-                            if req_qty <= 0:
-                                continue
+                        req_qty = int(budget // buy_price) if buy_price > 0 else 0
+                        if req_qty <= 0:
+                            continue
+                        buy_amount = req_qty * buy_price
 
                         # 체결 반영
                         if req_qty > 0 and buy_amount <= cash + 1e-9:
@@ -1307,7 +1303,7 @@ def run_portfolio_backtest(
                                         "avg_cost": buy_price,
                                         # 추천/리포트와 동일 포맷: 디스플레이명 + 금액 + 대체 정보
                                         "note": f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} "
-                                        f"{format_aud_money(buy_amount) if country_code == 'aus' else format_kr_money(buy_amount)} "
+                                        f"{format_kr_money(buy_amount)} "
                                         f"({ticker_to_sell} 대체)",
                                     }
                                 )

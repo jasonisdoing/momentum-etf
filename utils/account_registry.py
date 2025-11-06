@@ -22,7 +22,6 @@ from utils.settings_loader import (
 _SETTINGS_DIR = Path(__file__).resolve().parent.parent / "data" / "settings" / "account"
 _ICON_FALLBACKS: Dict[str, str] = {
     "kor": "🇰🇷",
-    "aus": "🇦🇺",
 }
 
 logger = get_app_logger()
