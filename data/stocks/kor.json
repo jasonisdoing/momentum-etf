@@ -632,33 +632,6 @@
                 "1_week_avg_volume": 39872,
                 "1_week_avg_turnover": 1108865263,
                 "3_month_earn_rate": 23.7886
-            },
-            {
-                "ticker": "490330",
-                "name": "KoAct 미국치매&뇌질환치료제액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-09-03",
-                "1_week_avg_volume": 14984,
-                "1_week_avg_turnover": 166255587,
-                "3_month_earn_rate": 29.5375
-            },
-            {
-                "ticker": "483030",
-                "name": "KIWOOM 미국블록버스터바이오테크의약품+",
-                "recommend_enabled": true,
-                "listing_date": "2024-05-28",
-                "1_week_avg_volume": 6518,
-                "1_week_avg_turnover": 64636693,
-                "3_month_earn_rate": 11.5151
-            },
-            {
-                "ticker": "485810",
-                "name": "TIMEFOLIO 글로벌안티에이징바이오액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-07-02",
-                "1_week_avg_volume": 15949,
-                "1_week_avg_turnover": 150089355,
-                "3_month_earn_rate": 17.6836
             }
         ]
     },
