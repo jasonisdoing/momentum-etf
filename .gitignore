@@ -1,10 +1,6 @@
 # .env
 .env
 
-# User Data
-data/kor/
-data/aus/
-
 # Log Data
 logs/
 

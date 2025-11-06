@@ -8,15 +8,15 @@
     "initial_date": "2025-10-01",
     "strategy": {
         "MONTHS_RANGE": 12,
-        "EXPECTED_CAGR": 98.73,
+        "EXPECTED_CAGR": 94.27,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-11-05 21:00",
+        "BACKTESTED_DATE": "2025-11-06 12:50",
         "tuning": {
             "MA_PERIOD": 110,
             "MA_TYPE": "HMA",
             "PORTFOLIO_TOPN": 12,
             "REPLACE_SCORE_THRESHOLD": 0,
-            "STOP_LOSS_PCT": 5,
+            "STOP_LOSS_PCT": 8,
             "OVERBOUGHT_SELL_THRESHOLD": 97,
             "COOLDOWN_DAYS": 5,
             "CORE_HOLDINGS": []
