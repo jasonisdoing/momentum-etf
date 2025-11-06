@@ -39,9 +39,3 @@ BACKTEST_SLIPPAGE = {
         "sell_pct": 0.25,
     },
 }
-
-# 시장 지수 기반 타이밍에 사용할 지수 티커 (정보성 데이터만)
-MARKET_TIMING_INDEX = {
-    "kor": "^KS11",  # 코스피 200 ETF
-}
-# 한국 종목은 pykrx + 네이버 비공식 API

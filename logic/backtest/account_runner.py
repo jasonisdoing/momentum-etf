@@ -57,8 +57,6 @@ class AccountBacktestResult:
     ticker_summaries: List[Dict[str, Any]]
     settings_snapshot: Dict[str, Any]
     months_range: int
-    market_index_data: Optional[pd.DataFrame]
-    market_index_ticker: Optional[str]
     missing_tickers: List[str]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -302,8 +300,6 @@ def run_account_backtest(
         ticker_summaries=ticker_summaries,
         settings_snapshot=settings_snapshot,
         months_range=months_range,
-        market_index_data=ticker_timeseries.get("__market_index_data__"),
-        market_index_ticker=ticker_timeseries.get("__market_index_ticker__"),
         missing_tickers=missing_sorted,
     )
 

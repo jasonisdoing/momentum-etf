@@ -628,10 +628,6 @@ def _generate_daily_report_lines(
     portfolio_df = result.portfolio_timeseries
     lines: List[str] = []
 
-    # 시장 지수 데이터
-    market_index_data = result.market_index_data
-    market_index_ticker = result.market_index_ticker
-
     price_header = "현재가"
 
     headers = [
@@ -752,36 +748,6 @@ def _generate_daily_report_lines(
 
         lines.append("")
         lines.append(summary_line)
-
-        # 시장 지수 정보 추가
-        if market_index_data is not None and market_index_ticker:
-            if target_date in market_index_data.index:
-                index_row = market_index_data.loc[target_date]
-                change_pct = index_row.get("change_pct")
-                close_value = index_row.get("Close")
-                is_up = index_row.get("is_up")
-                consecutive_days = index_row.get("consecutive_days")
-
-                if pd.notna(change_pct) and pd.notna(close_value):
-                    # 연속 일수 정보 추가
-                    streak_text = ""
-                    if pd.notna(is_up) and pd.notna(consecutive_days):
-                        direction = "상승" if is_up else "하락"
-                        streak_text = f"({int(consecutive_days)}연속 {direction})"
-
-                    # 종가 값을 천 단위 구분자와 함께 표시
-                    index_line = f"[MARKET_TIMING] {close_value:,.2f}, {change_pct:+.2f}%{streak_text}"
-                    lines.append(index_line)
-                elif pd.notna(close_value):
-                    # 등락률은 없지만 종가는 있는 경우
-                    index_line = f"[MARKET_TIMING] {close_value:,.2f}, 데이터 없음 (전일 종가 없음)"
-                    lines.append(index_line)
-                else:
-                    # 전일 데이터가 없는 경우 (백테스트 첫날이지만 지수 데이터도 없음)
-                    lines.append(f"[MARKET_TIMING] {market_index_ticker}: 데이터 없음 (전일 종가 없음)")
-            else:
-                # 해당 날짜의 지수 데이터가 없는 경우
-                lines.append(f"[MARKET_TIMING] {market_index_ticker}: 데이터 없음 (장 마감 전 또는 휴장일)")
 
         lines.extend(table_lines)
 

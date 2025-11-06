@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
-from config import BACKTEST_SLIPPAGE, MARKET_TIMING_INDEX
+from config import BACKTEST_SLIPPAGE
 from utils.data_loader import fetch_ohlcv, get_trading_days
 from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
@@ -732,42 +732,6 @@ def run_portfolio_backtest(
 
     # 시장 레짐 필터 제거됨 (항상 100% 투자)
 
-    # 시장 지수 데이터 로드 (정보성 목적, 하루 전 데이터 포함)
-    market_index_data = None
-    index_ticker = MARKET_TIMING_INDEX.get(country_code)
-    if index_ticker:
-        _log(f"[백테스트] 시장 지수 정보 로드: {index_ticker}")
-        # 시장 지수는 정보성이므로 실제 백테스트 기간 + 하루 전 데이터 로드 (첫날 등락률 계산용)
-        if date_range and len(date_range) == 2:
-            index_start = pd.to_datetime(date_range[0]) - pd.Timedelta(days=5)  # 주말 고려하여 5일 전부터
-            index_date_range = [index_start.strftime("%Y-%m-%d"), date_range[1]]
-        else:
-            index_date_range = date_range
-
-        market_index_df = fetch_ohlcv(index_ticker, country=country_code, date_range=index_date_range)
-        if market_index_df is not None and not market_index_df.empty:
-            # 일별 등락 계산 (전일 대비)
-            market_index_df["prev_close"] = market_index_df["Close"].shift(1)
-            market_index_df["is_up"] = market_index_df["Close"] > market_index_df["prev_close"]
-            market_index_df["change_pct"] = ((market_index_df["Close"] / market_index_df["prev_close"]) - 1) * 100
-
-            # 연속 상승/하락 일수 계산
-            # 상승(True)/하락(False)이 바뀔 때마다 그룹을 나눔
-            market_index_df["streak_group"] = (market_index_df["is_up"] != market_index_df["is_up"].shift()).cumsum()
-            # 각 그룹 내에서 누적 카운트
-            market_index_df["consecutive_days"] = market_index_df.groupby("streak_group").cumcount() + 1
-
-            # 백테스트 시작일 이후 데이터만 유지 (하지만 전일 데이터는 포함)
-            if core_start_date:
-                # 백테스트 시작일 이후 데이터만 필터링
-                market_index_df = market_index_df[market_index_df.index >= core_start_date]
-
-            # Close 값, 상승/하락 여부, 등락률, 연속 일수 포함하여 저장
-            market_index_data = market_index_df[["Close", "is_up", "change_pct", "consecutive_days"]].copy()
-            _log(f"[백테스트] 시장 지수 데이터 로드 완료: {len(market_index_data)}일")
-        else:
-            logger.warning(f"[백테스트] 시장 지수 데이터 로드 실패: {index_ticker}")
-
     # 개별 종목 데이터 로딩 및 지표 계산
     # 티커별 카테고리 매핑 생성 (성능 최적화를 위해 딕셔너리로 변환)
     ticker_to_category = {stock["ticker"]: stock.get("category") for stock in stocks}
@@ -1441,9 +1405,5 @@ def run_portfolio_backtest(
             result[ticker_symbol] = pd.DataFrame(records).set_index("date")
     if out_cash:
         result["CASH"] = pd.DataFrame(out_cash).set_index("date")
-
-    # 시장 지수 데이터 추가 (메타데이터)
-    result["__market_index_data__"] = market_index_data
-    result["__market_index_ticker__"] = MARKET_TIMING_INDEX.get(country_code)
 
     return result
