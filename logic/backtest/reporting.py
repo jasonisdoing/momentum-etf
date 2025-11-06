@@ -17,7 +17,7 @@ from utils.report import format_kr_money, render_table_eaw
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_precision
 
-DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
+DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
 logger = get_app_logger()
 
 

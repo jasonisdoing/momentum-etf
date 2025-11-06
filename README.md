@@ -179,19 +179,19 @@ python tune.py <account_id> [--output 경로]
 
 ### 결과 파일 및 로그 경로
 
-모든 결과 로그는 계정별 폴더로 구조화되어 저장됩니다: `data/results/<account_id>/`
+모든 결과 로그는 계정별 폴더로 구조화되어 저장됩니다: `zresults/<account_id>/`
 
 - **추천 결과(요약/상세) 저장**
   - DB 저장: `utils.db_manager.save_signal_report_to_db()`로 저장되어 웹앱에서 조회됩니다
-  - 파일 저장(상세 로그): `data/results/<account_id>/recommend_{YYYY-MM-DD}.log`
+  - 파일 저장(상세 로그): `zresults/<account_id>/recommend_{YYYY-MM-DD}.log`
 - **추천 전용 파일 로그**
   - 경로: `logs/YYYY-MM-DD.log` (`logic/recommend/logger.py`)
   - 내용: 추천 생성 과정의 디테일/디버그 로그
 - **백테스트 로그**
-  - 경로: `data/results/<account_id>/backtest_{YYYY-MM-DD}.log`
+  - 경로: `zresults/<account_id>/backtest_{YYYY-MM-DD}.log`
   - 트리거: `python backtest.py <account_id>` 실행 시 자동 생성
 - **튜닝 로그**
-  - 경로: `data/results/<account_id>/tune_{YYYY-MM-DD}.log`
+  - 경로: `zresults/<account_id>/tune_{YYYY-MM-DD}.log`
   - 트리거: `python tune.py <account_id>` 실행 시 자동 생성
 
 ### 5) 스케줄러로 자동 실행 (APScheduler)
@@ -313,7 +313,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 
 | 파라미터 | 설명 | 범위 | 위치 |
 |---------|------|------|------|
-| `MA_PERIOD` | 이동평균 기간 | 10~100일 | `data/settings/account/*.json` |
+| `MA_PERIOD` | 이동평균 기간 | 10~100일 | `zsettings/account/*.json` |
 | `PORTFOLIO_TOPN` | 포트폴리오 목표 종목 수 | 3~10개 | 계정 설정 |
 | `REPLACE_SCORE_THRESHOLD` | 교체 점수 임계값 | 0~3점 | 계정 설정 |
 | `OVERBOUGHT_SELL_THRESHOLD` | RSI 과매수 임계값 | 5~30점 | 계정 설정 |
@@ -332,7 +332,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 
 ### 계정별 전략 파라미터
 
-각 계정의 설정은 `data/settings/account/{account_id}.json`에 저장됩니다:
+각 계정의 설정은 `zsettings/account/{account_id}.json`에 저장됩니다:
 
 **전략 설정 (`strategy`):**
 
@@ -357,7 +357,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 
 ### 최근 리팩토링(2025-10)
 
-1. **계정 중심 구조로 전환**: `data/settings/account/*.json` 기반으로 추천/백테스트가 동작하도록 전면 수정
+1. **계정 중심 구조로 전환**: `zsettings/account/*.json` 기반으로 추천/백테스트가 동작하도록 전면 수정
 2. **Streamlit 페이지 정비**: 거래 관리(`trade.py`)와 계정 마이그레이션(`migration.py`)을 분리하고 로그인 후 접근하도록 구성
 3. **추천 결과 저장 방식 개선**: 계정 ID와 국가 코드 두 경로에 결과를 저장해 UI와 스케줄러가 일관된 데이터를 참조하도록 변경
    - 히스토리: `logic/recommend/history.py` (보유일/쿨다운)

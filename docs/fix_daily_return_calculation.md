@@ -82,7 +82,7 @@ Match: ✓
 
 ## 관련 이슈
 
-- 캐시 파일 위치: `data/stocks/cache/kor/{ticker}.pkl`
+- 캐시 파일 위치: `zsettings/stocks/cache/kor/{ticker}.pkl`
 - 캐시는 정상적으로 작동하며, 전일(10/30)까지의 데이터를 포함하고 있음
 - 문제는 캐시가 아닌 일간 수익률 계산 로직에 있었음
 

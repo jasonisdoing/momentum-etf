@@ -14,7 +14,7 @@ class AccountSettingsError(RuntimeError):
     """계정 설정 로딩 중 발생하는 예외."""
 
 
-SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "data" / "settings"
+SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "zsettings"
 ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT / "account"
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
@@ -86,7 +86,7 @@ def get_tune_month_configs(account_id: str = None) -> List[Dict[str, Any]]:
 
 @lru_cache(maxsize=None)
 def get_account_settings(account_id: str) -> Dict[str, Any]:
-    """`data/settings/account/{account}.json` 파일을 로드합니다."""
+    """`zsettings/account/{account}.json` 파일을 로드합니다."""
 
     account = (account_id or "").strip().lower()
     if not account:

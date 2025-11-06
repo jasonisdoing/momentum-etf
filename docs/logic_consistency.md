@@ -418,7 +418,7 @@ def calculate_actual_performance(
     3. 수량이 없는 **BUY**는 남은 현금을 “남은 BUY 개수”로 나눠 균등 비중으로 편입합니다. \
        (한국 계좌는 최소 1주 단위, 해외 계좌는 소수점 허용)
 - 동일 날짜에 `BUY → SELL`이 연속으로 등장하더라도 순차적으로 처리되기 때문에, 최종 포지션은 추천/실계좌 상태와 일치합니다.
-- 일별 결과(`daily_records`)는 [performance_reporting.py]에서 백테스트 로그와 같은 텍스트 형식으로 변환해 웹 UI 및 로그 파일(`data/results/<account>/performance_YYYY-MM-DD.log`)에 그대로 사용합니다.
+- 일별 결과(`daily_records`)는 [performance_reporting.py]에서 백테스트 로그와 같은 텍스트 형식으로 변환해 웹 UI 및 로그 파일(`zresults/<account>/performance_YYYY-MM-DD.log`)에 그대로 사용합니다.
 
 ---
 
@@ -427,4 +427,4 @@ def calculate_actual_performance(
 - **메모리:** "추천/백테스트 로직 일관성 체크리스트" 참고
 - **코드:** `logic/recommend/portfolio.py`, `logic/backtest/portfolio_runner.py`
 - **공통 함수:** `logic/common/portfolio.py`, `logic/common/signals.py`, `logic/common/filtering.py`
-- **설정:** `data/settings/account/k1.json`
+- **설정:** `zsettings/account/k1.json`

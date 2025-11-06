@@ -19,7 +19,7 @@ from utils.settings_loader import (
 )
 
 
-_SETTINGS_DIR = Path(__file__).resolve().parent.parent / "data" / "settings" / "account"
+_SETTINGS_DIR = Path(__file__).resolve().parent.parent / "zsettings" / "account"
 _ICON_FALLBACKS: Dict[str, str] = {
     "kor": "🇰🇷",
 }
@@ -40,7 +40,7 @@ def _resolve_order(value: Any) -> float:
 
 
 def list_available_accounts() -> List[str]:
-    """`data/settings/account`에 존재하는 계정 ID 목록을 반환합니다."""
+    """`zsettings/account`에 존재하는 계정 ID 목록을 반환합니다."""
 
     if not _SETTINGS_DIR.exists():
         logger.warning("계정 설정 디렉터리를 찾을 수 없습니다: %s", _SETTINGS_DIR)
@@ -50,7 +50,7 @@ def list_available_accounts() -> List[str]:
 
 
 def load_account_configs() -> List[Dict[str, Any]]:
-    """`data/settings/account`에 정의된 계정 정보를 정렬된 리스트로 반환합니다."""
+    """`zsettings/account`에 정의된 계정 정보를 정렬된 리스트로 반환합니다."""
 
     configs: List[Dict[str, Any]] = []
 

@@ -6,7 +6,7 @@ APScheduler 기반 자동화 작업 모음
 - 가격 캐시 갱신: 매일 04:00 실행
 - 프로세스 기동 시 모든 계정 추천 1회 즉시 실행(설정 허용 시)
 
-스케줄 정의는 data/settings/account/<account>.json 의 schedule 섹션을 참고합니다.
+스케줄 정의는 zsettings/account/<account>.json 의 schedule 섹션을 참고합니다.
 """
 
 # 프로젝트 루트를 Python 경로에 추가

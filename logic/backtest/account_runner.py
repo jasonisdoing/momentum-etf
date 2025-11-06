@@ -166,7 +166,7 @@ def run_account_backtest(
 
     etf_universe = get_etfs(country_code)
     if not etf_universe:
-        raise AccountSettingsError(f"'data/stocks/{country_code}.json' 파일에서 종목을 찾을 수 없습니다.")
+        raise AccountSettingsError(f"'zsettings/stocks/{country_code}.json' 파일에서 종목을 찾을 수 없습니다.")
 
     if excluded_upper:
         before_count = len(etf_universe)

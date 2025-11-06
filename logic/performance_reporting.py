@@ -13,7 +13,7 @@ from utils.stock_list_io import get_etfs
 
 logger = get_app_logger()
 
-DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[1] / "data" / "results"
+DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[1] / "zresults"
 
 
 def _resolve_money_formatter(currency: str):

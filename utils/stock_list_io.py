@@ -8,9 +8,9 @@ logger = get_app_logger()
 
 
 def _get_data_dir():
-    """Helper to get the absolute path to the 'data' directory."""
+    """Helper to get the absolute path to the 'zsettings' directory."""
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(project_root, "data")
+    return os.path.join(project_root, "zsettings")
 
 
 _COUNTRY_RAW_CACHE: Dict[str, List[Dict]] = {}
@@ -45,7 +45,7 @@ def _load_country_raw(country: str) -> List[Dict]:
 
 def get_etfs(country: str) -> List[Dict[str, str]]:
     """
-    'data/stocks/{country}.json' 파일에서 종목 목록을 반환합니다.
+    'zsettings/stocks/{country}.json' 파일에서 종목 목록을 반환합니다.
     """
     all_etfs = []
     seen_tickers = set()
@@ -86,7 +86,7 @@ def get_etfs(country: str) -> List[Dict[str, str]]:
 
 def save_etfs(country: str, data: List[Dict]):
     """
-    주어진 데이터를 'data/stocks/{country}.json' 파일에 저장합니다.
+    주어진 데이터를 'zsettings/stocks/{country}.json' 파일에 저장합니다.
     """
     stocks_data_dir = os.path.join(_get_data_dir(), "stocks")
     os.makedirs(stocks_data_dir, exist_ok=True)

@@ -34,7 +34,7 @@ from utils.data_loader import (
 from utils.stock_list_io import get_etfs
 from utils.cache_utils import save_cached_frame
 
-DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
+DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
 MAX_TABLE_ROWS = 20
 

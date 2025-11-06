@@ -23,23 +23,12 @@ TUNING_CONFIG: dict[str, dict] = {
         "COOLDOWN_DAYS": [3, 4, 5],
         "CORE_HOLDINGS": [],
         # "CORE_HOLDINGS": [442580, 315960],
-        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
+        "OPTIMIZATION_METRIC": "SDR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
-    # "k1": {
-    #     "MA_RANGE": np.arange(80, 125, 5),
-    #     "MA_TYPE": ["HMA"],
-    #     "PORTFOLIO_TOPN": [12],
-    #     "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
-    #     "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
-    #     "CORE_HOLDINGS": [442580, 395160, 102970],
-    #     # "CORE_HOLDINGS": [],
-    #     "COOLDOWN_DAYS": [1, 2, 3, 4, 5],
-    #     "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    # },
 }
 
 
-RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
+RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
 
 
 def main() -> None:

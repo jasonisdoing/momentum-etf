@@ -20,13 +20,13 @@ from utils.stock_list_io import get_etfs
 from utils.data_loader import prepare_price_data, get_latest_trading_day
 from utils.settings_loader import load_common_settings
 
-RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
+RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
 
 
 def _available_account_choices() -> list[str]:
     choices = list_available_accounts()
     if not choices:
-        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. data/settings/account/*.json 파일을 확인하세요.")
+        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. zsettings/account/*.json 파일을 확인하세요.")
     return choices
 
 

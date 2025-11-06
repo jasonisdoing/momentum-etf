@@ -20,7 +20,7 @@ venv/
 data/stocks/cache/
 
 # 백테스트 결과
-data/results
+zresults
 
 
 # Streamlit secrets
