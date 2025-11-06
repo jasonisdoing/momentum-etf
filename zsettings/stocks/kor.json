@@ -26,15 +26,6 @@
         "category": "미국테크",
         "tickers": [
             {
-                "ticker": "485540",
-                "name": "Kodex 미국AI테크TOP10",
-                "recommend_enabled": true,
-                "listing_date": "2024-06-25",
-                "1_week_avg_volume": 752924,
-                "1_week_avg_turnover": 11321499901,
-                "3_month_earn_rate": 17.8545
-            },
-            {
                 "ticker": "0051A0",
                 "name": "KoAct 브로드컴밸류체인액티브",
                 "recommend_enabled": true,
@@ -44,13 +35,22 @@
                 "3_month_earn_rate": 26.1359
             },
             {
-                "ticker": "0093D0",
-                "name": "KoAct 팔란티어밸류체인액티브",
+                "ticker": "479620",
+                "name": "SOL 미국AI반도체칩메이커",
                 "recommend_enabled": true,
-                "listing_date": "2025-08-26",
-                "1_week_avg_volume": 181381,
-                "1_week_avg_turnover": 2371149861,
-                "3_month_earn_rate": 32.2418
+                "listing_date": "2024-05-07",
+                "1_week_avg_volume": 62248,
+                "1_week_avg_turnover": 973127384,
+                "3_month_earn_rate": 25.9966
+            },
+            {
+                "ticker": "485540",
+                "name": "Kodex 미국AI테크TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2024-06-25",
+                "1_week_avg_volume": 752924,
+                "1_week_avg_turnover": 11321499901,
+                "3_month_earn_rate": 17.8545
             },
             {
                 "ticker": "0041D0",
@@ -153,8 +153,8 @@
                 "name": "Kodex 200",
                 "recommend_enabled": true,
                 "listing_date": "2024-01-02",
-                "1_week_avg_volume": 21630385,
-                "1_week_avg_turnover": 1249102691985,
+                "1_week_avg_volume": 21630384,
+                "1_week_avg_turnover": 1249102626871,
                 "3_month_earn_rate": 31.4746
             },
             {
