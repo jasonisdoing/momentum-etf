@@ -17,6 +17,16 @@ from utils.data_loader import count_trading_days, get_trading_days
 logger = get_app_logger()
 
 
+def _calc_days_left(block_info: Optional[Dict], cooldown_days: Optional[int]) -> Optional[int]:
+    """쿨다운 블록 정보에서 남은 일수를 계산합니다."""
+    if not cooldown_days or cooldown_days <= 0 or not isinstance(block_info, dict):
+        return None
+    try:
+        return max(cooldown_days - int(block_info.get("days_since", 0)), 0)
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_category_value(category: Optional[str]) -> Optional[str]:
     """카테고리 값을 정규화합니다."""
     if category is None:
@@ -178,6 +188,7 @@ def _determine_sell_decision(
     price_ma: float,
     ma: float,
     sell_block_info: Optional[Dict],
+    cooldown_days: Optional[int],
     DECISION_MESSAGES: Dict,
     DECISION_NOTES: Dict,
 ) -> tuple[str, str]:
@@ -201,13 +212,14 @@ def _determine_sell_decision(
     # 쿨다운 체크: SELL_RSI와 SELL_TREND 모두 동일하게 적용
     if sell_block_info and state in ("SELL_RSI", "SELL_TREND"):
         state = "HOLD"
-        days_since = sell_block_info.get("days_since", 0)
-        last_buy = sell_block_info.get("last_buy")
-        if last_buy:
-            last_buy_str = last_buy.strftime("%m/%d")
-            phrase = f"쿨다운 대기중 (매수일: {last_buy_str}, {days_since}일 경과)"
+        days_left = _calc_days_left(sell_block_info, cooldown_days)
+        if days_left is not None:
+            if days_left > 0:
+                phrase = f"쿨다운 대기중({days_left}일 후 매도 가능)"
+            else:
+                phrase = "쿨다운 종료"
         else:
-            phrase = f"쿨다운 대기중 ({days_since}일 경과)"
+            phrase = "쿨다운 대기중"
 
     return state, phrase
 
@@ -225,6 +237,7 @@ def _create_decision_entry(
     country_code: str,
     current_equity: float,
     stop_loss_threshold: Optional[float],
+    cooldown_days: Optional[int],
     rsi_sell_threshold: float = 10.0,
 ) -> Dict[str, Any]:
     """개별 종목의 의사결정 엔트리를 생성합니다."""
@@ -284,6 +297,7 @@ def _create_decision_entry(
             price_ma=price_ma,
             ma=ma,
             sell_block_info=sell_block_info,
+            cooldown_days=cooldown_days,
             DECISION_MESSAGES=DECISION_MESSAGES,
             DECISION_NOTES=DECISION_NOTES,
         )
@@ -297,7 +311,14 @@ def _create_decision_entry(
             buy_signal = True
             if buy_block_info:
                 buy_signal = False
-                phrase = "쿨다운 대기중"
+                days_left_buy = _calc_days_left(buy_block_info, cooldown_days)
+                if days_left_buy is not None:
+                    if days_left_buy > 0:
+                        phrase = f"쿨다운 대기중({days_left_buy}일 후 매수 가능)"
+                    else:
+                        phrase = "쿨다운 대기중(오늘 매수 가능)"
+                else:
+                    phrase = "쿨다운 대기중"
 
     # 메타 정보
     meta = etf_meta.get(tkr) or full_etf_meta.get(tkr, {}) or {}
@@ -468,6 +489,7 @@ def run_portfolio_recommend(
             country_code,
             current_equity,
             stop_loss_threshold,
+            cooldown_days,
             rsi_sell_threshold,
         )
         decisions.append(decision)
@@ -517,6 +539,7 @@ def run_portfolio_recommend(
                         country_code,
                         current_equity,
                         stop_loss_threshold,
+                        cooldown_days,
                         rsi_sell_threshold,
                     )
                     core_decision["state"] = "BUY"
@@ -736,17 +759,30 @@ def run_portfolio_recommend(
             #     f"cooldown_days={cooldown_days}"
             # )
             # 매도 쿨다운 또는 매수 쿨다운 중이면 교체 매도 차단
-            if (sell_block_for_candidate or buy_block_for_candidate) and cooldown_days > 0:
+            if (sell_block_for_candidate or buy_block_for_candidate) and cooldown_days and cooldown_days > 0:
                 blocked_name = etf_meta.get(ticker_to_sell, {}).get("name") or ticker_to_sell
                 best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
-                best_new["row"][-1] = f"쿨다운 {cooldown_days}일 대기중 - {blocked_name}"
+                block_info = sell_block_for_candidate or buy_block_for_candidate
+                days_left_block = _calc_days_left(block_info, cooldown_days)
+                if days_left_block is not None:
+                    if days_left_block > 0:
+                        best_new["row"][-1] = f"쿨다운 대기중({days_left_block}일 후 교체 가능) - {blocked_name}"
+                    else:
+                        best_new["row"][-1] = f"쿨다운 종료 - {blocked_name}"
+                else:
+                    best_new["row"][-1] = f"쿨다운 대기중 - {blocked_name}"
                 best_new["buy_signal"] = False
 
                 # 교체 대상 종목의 문구도 업데이트
                 d_to_sell = data_by_tkr.get(ticker_to_sell)
                 if d_to_sell and d_to_sell.get("state") == "HOLD":
                     new_candidate_name = etf_meta.get(best_new["tkr"], {}).get("name") or best_new["tkr"]
-                    d_to_sell["row"][-1] = f"⚠️ 교체 대상 (쿨다운 대기중) - {new_candidate_name}({best_new['tkr']})"
+                    if days_left_block is not None and days_left_block > 0:
+                        d_to_sell["row"][-1] = f"⚠️ 교체 대상 (쿨다운 대기중, {days_left_block}일 후 가능) - {new_candidate_name}({best_new['tkr']})"
+                    elif days_left_block == 0:
+                        d_to_sell["row"][-1] = f"⚠️ 교체 대상 (쿨다운 종료) - {new_candidate_name}({best_new['tkr']})"
+                    else:
+                        d_to_sell["row"][-1] = f"⚠️ 교체 대상 (쿨다운 대기중) - {new_candidate_name}({best_new['tkr']})"
 
                 # logger.info(f"[REPLACE BLOCKED] {ticker_to_sell} 교체 차단 (쿨다운)")
                 continue
@@ -817,29 +853,24 @@ def run_portfolio_recommend(
                 d["row"][4] = "HOLD"
                 phrase_str = str(d["row"][-1] or "")
                 if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
+                    days_left_sell = _calc_days_left(sell_info, cooldown_days)
                     if original_state == "SELL_RSI":
                         rsi_score = d.get("rsi_score", 0.0)
-                        if sell_info and sell_info.get("available_from"):
-                            days_left = (pd.to_datetime(sell_info["available_from"]).normalize() - base_date_norm).days
-                            if days_left > 0:
-                                d["row"][-1] = f"⚠️ RSI 과매수 (쿨다운 대기중, {days_left}일 후 매도 가능, RSI점수: {rsi_score:.1f})"
+                        if days_left_sell is not None:
+                            if days_left_sell > 0:
+                                d["row"][-1] = f"⚠️ RSI 과매수 (쿨다운 대기중, {days_left_sell}일 후 매도 가능, RSI점수: {rsi_score:.1f})"
                             else:
                                 d["row"][-1] = f"⚠️ RSI 과매수 (쿨다운 종료, RSI점수: {rsi_score:.1f})"
                         else:
                             d["row"][-1] = f"⚠️ RSI 과매수 (쿨다운 대기중, RSI점수: {rsi_score:.1f})"
                     else:
-                        if sell_info and sell_info.get("available_from"):
-                            days_left = (pd.to_datetime(sell_info["available_from"]).normalize() - base_date_norm).days
-                            if days_left > 0:
-                                d["row"][-1] = f"쿨다운 대기중({days_left}일 후 매도 가능)"
+                        if days_left_sell is not None:
+                            if days_left_sell > 0:
+                                d["row"][-1] = f"쿨다운 대기중({days_left_sell}일 후 매도 가능)"
                             else:
                                 d["row"][-1] = "쿨다운 종료"
                         else:
-                            days_left = (pd.to_datetime(sell_info["available_from"]).normalize() - base_date_norm).days
-                            if days_left > 0:
-                                d["row"][-1] = f"쿨다운 대기중({days_left}일 후 매수 가능)"
-                            else:
-                                d["row"][-1] = "쿨다운 대기중(오늘 매수 가능)"
+                            d["row"][-1] = "쿨다운 대기중"
                 d["buy_signal"] = False
 
             if buy_info and d["state"] in BUY_STATE_SET:
@@ -847,10 +878,10 @@ def run_portfolio_recommend(
                 d["row"][4] = "WAIT"
                 phrase_str = str(d["row"][-1] or "")
                 if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
-                    if buy_info and buy_info.get("available_from"):
-                        days_left = (pd.to_datetime(buy_info["available_from"]).normalize() - base_date_norm).days
-                        if days_left > 0:
-                            d["row"][-1] = f"쿨다운 대기중({days_left}일 후 매수 가능)"
+                    days_left_buy = _calc_days_left(buy_info, cooldown_days)
+                    if days_left_buy is not None:
+                        if days_left_buy > 0:
+                            d["row"][-1] = f"쿨다운 대기중({days_left_buy}일 후 매수 가능)"
                         else:
                             d["row"][-1] = "쿨다운 대기중(오늘 매수 가능)"
                     else:

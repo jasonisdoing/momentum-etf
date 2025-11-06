@@ -959,9 +959,11 @@ def run_portfolio_backtest(
             note = ""
             if decision_out in ("WAIT", "HOLD", "HOLD_CORE"):
                 if position_snapshot["shares"] > 0 and i < position_snapshot["sell_block_until"]:
-                    note = "매도 쿨다운"
+                    remaining = int(position_snapshot["sell_block_until"] - i)
+                    note = f"쿨다운 대기중({remaining}일 후 매도 가능)" if remaining > 0 else "쿨다운 종료"
                 elif position_snapshot["shares"] == 0 and i < position_snapshot["buy_block_until"]:
-                    note = "매수 쿨다운"
+                    remaining_buy = int(position_snapshot["buy_block_until"] - i)
+                    note = f"쿨다운 대기중({remaining_buy}일 후 매수 가능)" if remaining_buy > 0 else "쿨다운 종료"
 
             # 핵심 보유 종목 표시
             if decision_out == "HOLD_CORE" and not note:
