@@ -1117,19 +1117,34 @@ def _compose_tuning_report(
         if excluded_tickers:
             lines.append(f"제외된 종목: {len(excluded_tickers)}개 ({', '.join(excluded_tickers)})")
 
-        # 테스트 기간
-        test_periods = tuning_metadata.get("test_periods", [])
+        # 테스트 기간 및 데이터 범위
         data_period = tuning_metadata.get("data_period", {})
-        if test_periods:
-            # 날짜 정보가 있으면 함께 표시
-            if data_period:
-                start_date = data_period.get("start_date", "")
-                end_date = data_period.get("end_date", "")
-                period_strs = [f"{start_date} ~ {end_date} ({p}개월)" for p in test_periods]
-                lines.append(f"테스트 기간: {', '.join(period_strs)}")
-            else:
-                period_str = ", ".join([f"{p}개월" for p in test_periods])
-                lines.append(f"테스트 기간: {period_str}")
+        test_period_ranges = tuning_metadata.get("test_period_ranges", [])
+        test_periods = tuning_metadata.get("test_periods", [])
+
+        period_lines: List[str] = []
+        for entry in test_period_ranges:
+            start_date = entry.get("start_date")
+            end_date = entry.get("end_date")
+            months = entry.get("months")
+            if start_date and end_date and months:
+                try:
+                    months_int = int(months)
+                except (TypeError, ValueError):
+                    months_int = months
+                period_lines.append(f"{start_date} ~ {end_date} ({months_int}개월)")
+
+        if period_lines:
+            lines.append(f"테스트 기간: {', '.join(period_lines)}")
+        elif test_periods:
+            period_str = ", ".join([f"{p}개월" for p in test_periods])
+            lines.append(f"테스트 기간: {period_str}")
+
+        if data_period:
+            data_start = data_period.get("start_date")
+            data_end = data_period.get("end_date")
+            if data_start and data_end:
+                lines.append(f"사용 데이터 범위: {data_start} ~ {data_end}")
 
     lines.append("")
 
@@ -1420,11 +1435,29 @@ def run_account_tuning(
         logger.error("[튜닝] 유효한 기간 정보가 없습니다.")
         return None
 
-    longest_months = max(valid_month_ranges)
-
     end_date = get_latest_trading_day(country_code)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()
+    else:
+        end_date = end_date.normalize()
+
+    unique_month_ranges = sorted(set(valid_month_ranges))
+    test_period_ranges: List[Dict[str, Any]] = []
+    for months in unique_month_ranges:
+        try:
+            months_int = int(months)
+        except (TypeError, ValueError):
+            continue
+        start_dt = (end_date - pd.DateOffset(months=months_int)).normalize()
+        test_period_ranges.append(
+            {
+                "months": months_int,
+                "start_date": start_dt.strftime("%Y-%m-%d"),
+                "end_date": end_date.strftime("%Y-%m-%d"),
+            }
+        )
+
+    longest_months = max(valid_month_ranges)
 
     start_date_prefetch = end_date - pd.DateOffset(months=longest_months)
     date_range_prefetch = [
@@ -1521,6 +1554,7 @@ def run_account_tuning(
         "ticker_count": len(tickers),
         "excluded_tickers": sorted(excluded_ticker_set),
         "test_periods": valid_month_ranges,
+        "test_period_ranges": test_period_ranges,
     }
 
     for item in month_items:
