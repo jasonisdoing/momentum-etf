@@ -90,10 +90,7 @@ def _resolve_month_configs(months_range: Optional[int], account_id: str = None) 
     if account_id:
         try:
             account_settings = get_account_settings(account_id)
-            backtest_cfg = account_settings.get("backtest", {}) or {}
-            fallback = backtest_cfg.get("months_range")
-            if fallback is None:
-                fallback = account_settings.get("strategy", {}).get("MONTHS_RANGE")
+            fallback = account_settings.get("strategy", {}).get("MONTHS_RANGE")
             if fallback is not None:
                 try:
                     fallback_val = int(fallback)

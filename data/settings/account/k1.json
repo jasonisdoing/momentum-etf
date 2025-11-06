@@ -6,6 +6,7 @@
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_date": "2025-10-01",
+    "initial_capital_krw": "400000000",
     "strategy": {
         "MONTHS_RANGE": 12,
         "EXPECTED_CAGR": 108.47,
@@ -43,12 +44,5 @@
             "ticker": "456600",
             "name": "TIMEFOLIO 글로벌AI인공지능액티브"
         }
-    ],
-    "slack": {
-        "channel": "C09FAU2NHM2"
-    },
-    "backtest": {
-        "initial_capital_krw": "400000000",
-        "months_range": 12
-    }
+    ]
 }

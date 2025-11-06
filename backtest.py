@@ -56,12 +56,10 @@ def main() -> None:
         parser.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
-    backtest_cfg = account_settings.get("backtest", {}) or {}
-    months_range = backtest_cfg.get("months_range")
+    strategy_cfg = account_settings.get("strategy", {}) or {}
+    months_range = strategy_cfg.get("MONTHS_RANGE")
     if months_range is None:
-        months_range = account_settings.get("strategy", {}).get("MONTHS_RANGE")
-    if months_range is None:
-        parser.error("계정 설정에 'backtest.months_range' 또는 'strategy.MONTHS_RANGE' 값을 지정해야 합니다.")
+        parser.error("계정 설정에 'strategy.MONTHS_RANGE' 값을 지정해야 합니다.")
     try:
         months_range = int(months_range)
     except (TypeError, ValueError):

@@ -802,12 +802,10 @@ def dump_backtest_log(
 
     months_range_value = getattr(result, "months_range", None)
     if months_range_value is None:
-        backtest_cfg = account_settings.get("backtest", {}) if isinstance(account_settings, dict) else {}
-        months_range_value = backtest_cfg.get("months_range")
-        if months_range_value is None:
-            months_range_value = account_settings.get("strategy", {}).get("MONTHS_RANGE") if isinstance(account_settings, dict) else None
+        if isinstance(account_settings, dict):
+            months_range_value = account_settings.get("strategy", {}).get("MONTHS_RANGE")
     if months_range_value is None:
-        raise ValueError("MONTHS_RANGE 설정이 필요합니다. 계정 설정의 backtest.months_range 또는 strategy.MONTHS_RANGE 값을 확인하세요.")
+        raise ValueError("MONTHS_RANGE 설정이 필요합니다. 계정 설정의 strategy.MONTHS_RANGE 값을 확인하세요.")
     months_range_value = int(months_range_value)
 
     summary_section = print_backtest_summary(

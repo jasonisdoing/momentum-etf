@@ -343,20 +343,20 @@ def _resolve_initial_capital(
         raise ValueError(f"지원하지 않는 통화 코드입니다: {currency}")
     currency = "KRW"
 
-    backtest_config = account_settings.get("backtest", {}) if account_settings else {}
-    if not isinstance(backtest_config, Mapping):
-        backtest_config = {}
-
     krw_override = _coerce_positive_float(override_settings.get("initial_capital_krw"))
     if krw_override is None:
-        krw_override = _coerce_positive_float(backtest_config.get("initial_capital_krw"))
+        krw_override = _coerce_positive_float(account_settings.get("initial_capital_krw") if account_settings else None)
 
     if krw_override is None:
-        raise ValueError("initial_capital_krw 설정이 필요합니다. 계정 설정의 backtest.initial_capital_krw 값을 확인하세요.")
+        raise ValueError("initial_capital_krw 설정이 필요합니다. 계정 설정의 'initial_capital_krw' 값을 확인하세요.")
 
     fx_rate = 1.0
 
-    local_overrides = [initial_capital, override_settings.get("initial_capital"), backtest_config.get("initial_capital")]
+    local_overrides = [
+        initial_capital,
+        override_settings.get("initial_capital"),
+        account_settings.get("initial_capital") if account_settings else None,
+    ]
     local_override = None
     for candidate in local_overrides:
         local_override = _coerce_positive_float(candidate)

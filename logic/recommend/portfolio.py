@@ -817,12 +817,29 @@ def run_portfolio_recommend(
                 d["row"][4] = "HOLD"
                 phrase_str = str(d["row"][-1] or "")
                 if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
-                    # SELL_RSI인 경우 RSI 과매수 문구 유지
                     if original_state == "SELL_RSI":
                         rsi_score = d.get("rsi_score", 0.0)
-                        d["row"][-1] = f"⚠️ RSI 과매수 (쿨다운 대기중, RSI점수: {rsi_score:.1f})"
+                        if sell_info and sell_info.get("available_from"):
+                            days_left = (pd.to_datetime(sell_info["available_from"]).normalize() - base_date_norm).days
+                            if days_left > 0:
+                                d["row"][-1] = f"⚠️ RSI 과매수 (쿨다운 대기중, {days_left}일 후 매도 가능, RSI점수: {rsi_score:.1f})"
+                            else:
+                                d["row"][-1] = f"⚠️ RSI 과매수 (쿨다운 종료, RSI점수: {rsi_score:.1f})"
+                        else:
+                            d["row"][-1] = f"⚠️ RSI 과매수 (쿨다운 대기중, RSI점수: {rsi_score:.1f})"
                     else:
-                        d["row"][-1] = "쿨다운 대기중"
+                        if sell_info and sell_info.get("available_from"):
+                            days_left = (pd.to_datetime(sell_info["available_from"]).normalize() - base_date_norm).days
+                            if days_left > 0:
+                                d["row"][-1] = f"쿨다운 대기중({days_left}일 후 매도 가능)"
+                            else:
+                                d["row"][-1] = "쿨다운 종료"
+                        else:
+                            days_left = (pd.to_datetime(sell_info["available_from"]).normalize() - base_date_norm).days
+                            if days_left > 0:
+                                d["row"][-1] = f"쿨다운 대기중({days_left}일 후 매수 가능)"
+                            else:
+                                d["row"][-1] = "쿨다운 대기중(오늘 매수 가능)"
                 d["buy_signal"] = False
 
             if buy_info and d["state"] in BUY_STATE_SET:
@@ -830,7 +847,14 @@ def run_portfolio_recommend(
                 d["row"][4] = "WAIT"
                 phrase_str = str(d["row"][-1] or "")
                 if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
-                    d["row"][-1] = "쿨다운 대기중"
+                    if buy_info and buy_info.get("available_from"):
+                        days_left = (pd.to_datetime(buy_info["available_from"]).normalize() - base_date_norm).days
+                        if days_left > 0:
+                            d["row"][-1] = f"쿨다운 대기중({days_left}일 후 매수 가능)"
+                        else:
+                            d["row"][-1] = "쿨다운 대기중(오늘 매수 가능)"
+                    else:
+                        d["row"][-1] = "쿨다운 대기중"
                 d["buy_signal"] = False
 
     final_decisions = list(decisions)
