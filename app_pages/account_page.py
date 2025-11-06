@@ -281,7 +281,8 @@ def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_c
         return
 
     try:
-        table_df, account_return, performance_detail, cached_iso = _cached_benchmark_data(account_id, start_date, end_date)
+        with st.spinner("벤치마크/퍼포먼스 데이터를 계산하는 중입니다…"):
+            table_df, account_return, performance_detail, cached_iso = _cached_benchmark_data(account_id, start_date, end_date)
     except Exception as exc:
         st.warning(f"벤치마크 성과를 계산하지 못했습니다: {exc}")
         return

@@ -41,11 +41,12 @@ def refresh_all_caches(countries: list[str], start_date: Optional[str]):
         temp_token = f"{country}_tmp_{suffix}"
         drop_cache_collection(temp_token)
 
-        tickers = [etf["ticker"] for etf in all_etfs_from_file]
-        total_tickers = len(tickers)
+        total_tickers = len(all_etfs_from_file)
         try:
-            for i, ticker in enumerate(tickers, 1):
-                logger.debug("  -> 처리 중: %d/%d (%s)", i, total_tickers, ticker)
+            for i, etf in enumerate(all_etfs_from_file, 1):
+                ticker = etf.get("ticker")
+                name = etf.get("name") or "-"
+                logger.info(" -> 처리 중: %d/%d - %s(%s)", i, total_tickers, name, ticker)
 
                 try:
                     range_start = start_date or "1990-01-01"
