@@ -165,12 +165,7 @@
                 "1_week_avg_volume": 20161916,
                 "1_week_avg_turnover": 1165169775418,
                 "3_month_earn_rate": 31.4746
-            }
-        ]
-    },
-    {
-        "category": "한국밸류업",
-        "tickers": [
+            },
             {
                 "ticker": "495230",
                 "name": "KoAct 코리아밸류업액티브",
