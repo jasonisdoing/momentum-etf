@@ -848,7 +848,12 @@ def run_portfolio_recommend(
         for d in final_decisions:
             if d["state"] == "WAIT" and d.get("buy_signal"):
                 if not d["row"][-1]:
-                    d["row"][-1] = DECISION_NOTES["PORTFOLIO_FULL"]
+                    category = etf_meta.get(d["tkr"], {}).get("category")
+                    normalized = _normalize_category_value(category)
+                    if category and category != "TBD" and (category in held_categories or (normalized and normalized in held_category_keys)):
+                        d["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
+                    else:
+                        d["row"][-1] = DECISION_NOTES["PORTFOLIO_FULL"]
 
     sort_decisions_by_order_and_score(final_decisions)
     return final_decisions

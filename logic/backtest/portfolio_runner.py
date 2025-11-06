@@ -15,7 +15,7 @@ from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
 from utils.report import format_kr_money
 from strategies.maps.labeler import compute_net_trade_note
-from logic.common import build_weekly_rebalance_cache, select_candidates_by_category
+from logic.common import build_weekly_rebalance_cache, select_candidates_by_category, calculate_held_categories
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
 
 logger = get_app_logger()
@@ -450,6 +450,33 @@ def _update_ticker_note(
         daily_records_by_ticker[ticker][-1]["note"] = note
 
 
+def _apply_wait_note_if_empty(
+    daily_records_by_ticker: Dict,
+    ticker: str,
+    dt: pd.Timestamp,
+    ticker_to_category: Dict[str, str],
+    held_categories: Set[str],
+    held_categories_normalized: Set[str],
+) -> None:
+    """WAIT 상태 종목에 대해 카테고리 중복 여부에 따라 노트를 설정합니다."""
+
+    records = daily_records_by_ticker.get(ticker)
+    if not (records and records[-1]["date"] == dt):
+        return
+
+    current_note = str(records[-1].get("note") or "").strip()
+    if current_note:
+        return
+
+    category = ticker_to_category.get(ticker)
+    normalized = str(category).strip().upper() if category else ""
+
+    if category and category != "TBD" and (category in held_categories or (normalized and normalized in held_categories_normalized)):
+        records[-1]["note"] = DECISION_NOTES["CATEGORY_DUP"]
+    else:
+        records[-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
+
+
 def _execute_new_buys(
     buy_ranked_candidates: List[Tuple[float, str]],
     position_state: Dict,
@@ -485,10 +512,22 @@ def _execute_new_buys(
 
     if slots_to_fill <= 0 or not buy_ranked_candidates:
         held_categories = calculate_held_categories(position_state, ticker_to_category, valid_core_holdings)
+        if slots_to_fill <= 0 and buy_ranked_candidates:
+            held_categories_normalized = {str(cat).strip().upper() for cat in held_categories if isinstance(cat, str)}
+            for _, candidate_ticker in buy_ranked_candidates:
+                _apply_wait_note_if_empty(
+                    daily_records_by_ticker,
+                    candidate_ticker,
+                    dt,
+                    ticker_to_category,
+                    held_categories,
+                    held_categories_normalized,
+                )
         return cash, current_holdings_value, purchased_today, held_categories
 
     # 보유 중인 카테고리 (매수 시 중복 체크용, 고정 종목 카테고리 포함)
     held_categories = calculate_held_categories(position_state, ticker_to_category, valid_core_holdings)
+    held_categories_normalized = {str(cat).strip().upper() for cat in held_categories if isinstance(cat, str)}
 
     # 점수가 양수인 모든 매수 시그널 종목을 candidates에 넣기 (이미 정렬됨)
     successful_buys = 0
@@ -554,6 +593,9 @@ def _execute_new_buys(
 
             if category and category != "TBD":
                 held_categories.add(category)
+                normalized_category = str(category).strip().upper()
+                if normalized_category:
+                    held_categories_normalized.add(normalized_category)
 
             if daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt:
                 row = daily_records_by_ticker[ticker_to_buy][-1]
@@ -1045,11 +1087,6 @@ def run_portfolio_backtest(
         )
 
         # 2. 매수 실행 (신규 매수)
-        from logic.common import calculate_held_count
-
-        held_count = calculate_held_count(position_state)
-        slots_to_fill = max(0, top_n - held_count)
-
         cash, current_holdings_value, purchased_today, held_categories = _execute_new_buys(
             buy_ranked_candidates=buy_ranked_candidates,
             position_state=position_state,
@@ -1323,19 +1360,22 @@ def run_portfolio_backtest(
                 if records and records[-1]["date"] == dt and records[-1]["decision"] in ("BUY", "BUY_REPLACE")
             }
 
+            held_categories_snapshot = calculate_held_categories(position_state, ticker_to_category, valid_core_holdings)
+            held_categories_normalized = {str(cat).strip().upper() for cat in held_categories_snapshot if isinstance(cat, str)}
             for _, candidate_ticker in buy_ranked_candidates:
                 if candidate_ticker not in bought_tickers_today:
                     if daily_records_by_ticker[candidate_ticker] and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt:
                         # RSI 차단이나 카테고리 중복 등 이미 note가 설정된 경우 덮어쓰지 않음
                         current_note = daily_records_by_ticker[candidate_ticker][-1].get("note", "")
                         if not current_note or current_note == "":
-                            # 포트폴리오 가득 참
-                            if slots_to_fill <= 0:
-                                daily_records_by_ticker[candidate_ticker][-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
-                            else:
-                                # 매수 시도했지만 실패 (RSI, 카테고리 중복, 리스크 오프 등은 이미 note 설정됨)
-                                # note가 없으면 포트폴리오 가득 참으로 표시
-                                daily_records_by_ticker[candidate_ticker][-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
+                            _apply_wait_note_if_empty(
+                                daily_records_by_ticker,
+                                candidate_ticker,
+                                dt,
+                                ticker_to_category,
+                                held_categories_snapshot,
+                                held_categories_normalized,
+                            )
 
         # --- 4. 주간 균등 비중 리밸런싱 (주 마지막 거래일에 실행) ---
         held_count = sum(1 for state in position_state.values() if state["shares"] > 0)

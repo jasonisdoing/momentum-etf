@@ -5,6 +5,7 @@ from typing import Dict, Set, Any, List, Iterable, Tuple, Optional
 import pandas as pd
 
 from utils.logger import get_app_logger
+from strategies.maps.constants import DECISION_NOTES
 
 logger = get_app_logger()
 
@@ -161,7 +162,7 @@ def check_buy_candidate_filters(
     """
     # 카테고리 중복 체크
     if category and category != "TBD" and category in held_categories:
-        return False, f"카테고리 중복 ({category})"
+        return False, DECISION_NOTES["CATEGORY_DUP"]
 
     # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
     if category and category != "TBD" and category in sell_rsi_categories_today:

@@ -23,7 +23,7 @@
         ]
     },
     {
-        "category": "해외테크",
+        "category": "미국테크",
         "tickers": [
             {
                 "ticker": "485540",
@@ -33,15 +33,6 @@
                 "1_week_avg_volume": 719784,
                 "1_week_avg_turnover": 10826065851,
                 "3_month_earn_rate": 17.8545
-            },
-            {
-                "ticker": "381170",
-                "name": "TIGER 미국테크TOP10 INDXX",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 3036851,
-                "1_week_avg_turnover": 94778280745,
-                "3_month_earn_rate": 18.064
             },
             {
                 "ticker": "0051A0",
@@ -187,7 +178,7 @@
         ]
     },
     {
-        "category": "해외반도체",
+        "category": "미국반도체",
         "tickers": [
             {
                 "ticker": "442580",
@@ -215,7 +206,7 @@
         ]
     },
     {
-        "category": "해외지수-액티브",
+        "category": "미국지수-액티브",
         "tickers": [
             {
                 "ticker": "456600",
@@ -247,7 +238,7 @@
         ]
     },
     {
-        "category": "해외AI전력",
+        "category": "미국AI전력",
         "tickers": [
             {
                 "ticker": "486450",
@@ -415,7 +406,7 @@
         ]
     },
     {
-        "category": "해외로봇",
+        "category": "미국로봇",
         "tickers": [
             {
                 "ticker": "0035T0",
@@ -585,7 +576,7 @@
         ]
     },
     {
-        "category": "해외금융",
+        "category": "미국금융",
         "tickers": [
             {
                 "ticker": "0013P0",
@@ -608,7 +599,7 @@
         ]
     },
     {
-        "category": "해외바이오",
+        "category": "미국바이오",
         "tickers": [
             {
                 "ticker": "476070",
@@ -677,7 +668,7 @@
         ]
     },
     {
-        "category": "해외방산",
+        "category": "미국방산",
         "tickers": [
             {
                 "ticker": "494840",
