@@ -810,29 +810,6 @@
         ]
     },
     {
-        "category": "한국화장품",
-        "tickers": [
-            {
-                "ticker": "0008T0",
-                "name": "SOL 화장품TOP3플러스",
-                "recommend_enabled": true,
-                "listing_date": "2025-01-21",
-                "1_week_avg_volume": 898798,
-                "1_week_avg_turnover": 12241612365,
-                "3_month_earn_rate": -18.7815
-            },
-            {
-                "ticker": "228790",
-                "name": "TIGER 화장품",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 9032876,
-                "1_week_avg_turnover": 33246210853,
-                "3_month_earn_rate": -16.8709
-            }
-        ]
-    },
-    {
         "category": "TBD",
         "tickers": []
     }
