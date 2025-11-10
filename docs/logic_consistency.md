@@ -4,17 +4,17 @@
 
 ## 📂 파일 매핑
 
-| 추천 (Recommend) | 백테스트 (Backtest) | 퍼포먼스 (Performance) | 역할 |
-|-----------------|-------------------|----------------------|------|
-| `logic/recommend/portfolio.py` | `logic/backtest/portfolio_runner.py` | - | 매매 의사결정 로직 |
-| `logic/recommend/pipeline.py` | `logic/backtest/account_runner.py` | - | 데이터 준비 및 실행 |
-| ❌ **없음** | `portfolio_runner.py` (23-163줄, 1303-1305줄) | `performance.py` (245-326줄) | 균등 비중 리밸런싱 |
+| 추천 (Recommend) | 백테스트 (Backtest) | 역할 |
+|-----------------|-------------------|------|
+| `logic/recommend/portfolio.py` | `logic/backtest/portfolio_runner.py` | 매매 의사결정 로직 |
+| `logic/recommend/pipeline.py` | `logic/backtest/account_runner.py` | 데이터 준비 및 실행 |
+| ❌ **없음** | `portfolio_runner.py` (23-163줄, 1303-1305줄) | 균등 비중 리밸런싱 |
 
 ---
 
 ## ✅ 동일해야 하는 핵심 로직 (7개)
 
-> **참고:** 리밸런싱 로직은 백테스트/퍼포먼스에만 존재하며, 추천 시스템에는 없습니다. 자세한 내용은 [8. 리밸런싱 (백테스트/퍼포먼스 전용)](#8-리밸런싱-백테스트퍼포먼스-전용)을 참고하세요.
+> **참고:** 리밸런싱 로직은 백테스트에만 존재하며, 추천 시스템에는 없습니다. 자세한 내용은 [8. 리밸런싱 (백테스트 전용)](#8-리밸런싱-백테스트-전용)을 참고하세요.
 
 ### 1. 매도 조건 판단 순서
 
@@ -160,15 +160,15 @@ if ticker in core_holdings:
 
 ---
 
-### 8. 리밸런싱 (백테스트/퍼포먼스 전용)
+### 8. 리밸런싱 (백테스트 전용)
 
 **규칙:** 각 주의 마지막 거래일(금요일이 휴장이라면 직전 거래일) 종가 기준으로 한 번 균등 비중으로 재조정합니다.
 
-| 항목 | 백테스트 | 퍼포먼스 | 추천 |
-|------|---------|---------|------|
-| 파일 | `portfolio_runner.py` | `performance.py` | ❌ **없음** |
-| 리밸런싱 함수 | `_rebalance_portfolio_equal_weight` | `_rebalance_positions_weekly` | - |
-| 트리거 | `_is_weekly_rebalance_day` | `_is_weekly_rebalance_day` | - |
+| 항목 | 백테스트 | 추천 |
+|------|---------|------|
+| 파일 | `portfolio_runner.py` | ❌ **없음** |
+| 리밸런싱 함수 | `_rebalance_portfolio_equal_weight` | - |
+| 트리거 | `_is_weekly_rebalance_day` | - |
 
 **동작:**
 1. 주간 마지막 거래일을 판별하고 해당 날짜에만 리밸런싱 루틴을 실행한다.
@@ -181,10 +181,9 @@ if ticker in core_holdings:
 
 **이유:**
 1. **정보 부족**: 추천 시스템은 실제 보유 수량 정보가 없어 정확한 비중 계산 불가
-2. **역할 분리**: 
+2. **역할 분리**:
    - **추천**: 어떤 종목을 사고팔지 판단 (매수/매도 신호)
    - **백테스트**: 과거 데이터로 전략 검증 (리밸런싱 효과 측정)
-   - **퍼포먼스**: 실제 거래 기반 성과 계산 (리밸런싱 반영)
 3. **실행 시스템**: 실제 리밸런싱은 별도 실행 시스템에서 처리
 
 **호환성:**
@@ -272,7 +271,6 @@ python tune.py k1
 
 **리밸런싱 로직 수정 시:**
 - [ ] `portfolio_runner.py` 23-163줄, 1303-1305줄 수정
-- [ ] `performance.py` 245-326줄 동일하게 수정
 - [ ] ⚠️ **추천 시스템은 수정하지 않음** (리밸런싱 로직 없음)
 
 ---
@@ -396,31 +394,6 @@ def run_portfolio_backtest(
     missing_ticker_sink: Optional[Set[str]] = None,
 ) -> Dict[str, pd.DataFrame]
 ```
-
-### 퍼포먼스 함수
-
-```python
-def calculate_actual_performance(
-    account_id: str,
-    start_date: pd.Timestamp,
-    end_date: pd.Timestamp,
-    initial_capital: float,
-    country_code: str = "kor",
-    portfolio_topn: int = 12,
-) -> Optional[Dict[str, Any]]
-```
-
-- 시작일 이전 거래를 조회해 마지막 액션이 `BUY`인 종목을 **초기 보유 포지션**으로 복원합니다. \
-  → 동일한 예산(총자산 ÷ 초기 보유 종목 수)으로 주수를 추정합니다.
-- 하루의 거래는 `executed_at → created_at → _id` 순으로 정렬해 **실제 기록된 순서대로** 재현합니다.
-    1. **SELL**을 먼저 처리해 포지션을 줄이고 현금을 확보합니다 (수량 정보가 없으면 전량 매도).
-    2. 수량이 명시된 **BUY**는 그대로 반영합니다.
-    3. 수량이 없는 **BUY**는 남은 현금을 “남은 BUY 개수”로 나눠 균등 비중으로 편입합니다. \
-       (한국 계좌는 최소 1주 단위, 해외 계좌는 소수점 허용)
-- 동일 날짜에 `BUY → SELL`이 연속으로 등장하더라도 순차적으로 처리되기 때문에, 최종 포지션은 추천/실계좌 상태와 일치합니다.
-- 일별 결과(`daily_records`)는 [performance_reporting.py]에서 백테스트 로그와 같은 텍스트 형식으로 변환해 웹 UI 및 로그 파일(`zresults/<account>/performance_YYYY-MM-DD.log`)에 그대로 사용합니다.
-
----
 
 ## 📚 참고
 

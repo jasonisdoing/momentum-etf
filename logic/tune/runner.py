@@ -624,6 +624,8 @@ def _execute_tuning_for_months(
         for ma, topn, replace, stop_loss, rsi, cooldown, ma_type in combos
     ]
 
+    worker_desc = "순차 실행" if workers <= 1 else f"{workers}개의 CPU 병렬 처리 중..."
+
     if workers <= 1:
         for idx, payload in enumerate(payloads, 1):
             status, data, missing = _evaluate_single_combo(payload)
@@ -635,12 +637,13 @@ def _execute_tuning_for_months(
 
             if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
                 logger.info(
-                    "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%)",
+                    "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%) | %s",
                     account_norm.upper(),
                     months_range,
                     idx,
                     len(combos),
                     (idx / len(combos)) * 100,
+                    worker_desc,
                 )
 
                 # 1%마다 중간 저장 (성공한 조합이 있을 때만)
@@ -669,12 +672,13 @@ def _execute_tuning_for_months(
 
                 if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
                     logger.info(
-                        "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%)",
+                        "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%) | %s",
                         account_norm.upper(),
                         months_range,
                         idx,
                         len(combos),
                         (idx / len(combos)) * 100,
+                        worker_desc,
                     )
 
                     # 1%마다 중간 저장 (성공한 조합이 있을 때만)

@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Tuple
+from typing import Any
 
 import streamlit as st
-import pandas as pd
 
 from main import load_account_recommendations, render_recommendation_table
 from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.settings_loader import AccountSettingsError, get_account_settings
-from logic.backtest.account_runner import run_account_backtest
-from logic.performance_reporting import build_performance_log_lines
-from utils.data_loader import get_latest_trading_day, get_trading_days
 
 
 _DATAFRAME_CSS = """
@@ -157,7 +153,6 @@ def render_account_page(account_id: str) -> None:
         # updated_at이 없는 경우에 대한 폴백
         st.caption("데이터를 찾을 수 없습니다.")
 
-    _render_benchmark_table(account_id, account_settings, country_code)
     # st.markdown(_DATAFRAME_CSS, unsafe_allow_html=True)
     st.markdown("---")
     st.markdown(
@@ -167,160 +162,6 @@ def render_account_page(account_id: str) -> None:
         - 투자에는 원금 손실 가능성이 있으며, 투자자는 스스로 리스크를 검토해야 합니다.
         """
     )
-
-
-@st.cache_data(show_spinner=False)
-def _cached_benchmark_data(
-    account_id: str,
-    start_date: pd.Timestamp,
-    end_date: pd.Timestamp,
-) -> Tuple[pd.DataFrame, float]:
-    from logic.performance import calculate_actual_performance
-    from utils.account_registry import get_account_settings
-
-    # 계정 설정 로드
-    account_settings = get_account_settings(account_id)
-    country_code = account_settings.get("country_code", "kor")
-
-    # 초기 자본 가져오기
-    initial_capital_raw = account_settings.get("initial_capital", 100_000_000)
-    try:
-        initial_capital = float(initial_capital_raw)
-    except (TypeError, ValueError):
-        initial_capital = 100_000_000.0
-
-    # 전략 설정 가져오기
-    strategy_cfg = account_settings.get("strategy", {}) or {}
-    if "tuning" in strategy_cfg:
-        strategy_tuning = strategy_cfg.get("tuning", {})
-    else:
-        strategy_tuning = strategy_cfg
-
-    portfolio_topn = int(strategy_tuning.get("PORTFOLIO_TOPN", 12))
-
-    # 실제 거래 기반 수익률 계산 시도
-    actual_perf = calculate_actual_performance(
-        account_id=account_id,
-        start_date=start_date,
-        end_date=end_date,
-        initial_capital=initial_capital,
-        country_code=country_code,
-        portfolio_topn=portfolio_topn,
-    )
-
-    # 벤치마크 정보를 위해 항상 백테스트 실행
-    result = run_account_backtest(
-        account_id,
-        quiet=True,
-        override_settings={
-            "start_date": start_date.strftime("%Y-%m-%d"),
-            "end_date": end_date.strftime("%Y-%m-%d"),
-        },
-    )
-    summary = result.summary or {}
-    benchmarks = summary.get("benchmarks") or []
-
-    rows: list[dict[str, str]] = []
-
-    # Momentum ETF 수익률: 실제 거래 우선, 없으면 백테스트
-    if actual_perf:
-        account_return = actual_perf.get("cumulative_return_pct")  # 실제 거래는 기존 키 사용
-        performance_detail = actual_perf  # 상세 정보 저장
-    else:
-        account_return = summary.get("period_return")  # 백테스트는 새 키 사용
-        performance_detail = None
-
-    # Momentum ETF를 벤치마크 테이블 맨 위에 추가
-    if account_return is not None:
-        rows.append(
-            {
-                "티커": "-",
-                "종목": "Momentum ETF",
-                "누적 수익률": f"{float(account_return):+.2f}%",
-            }
-        )
-
-    # 벤치마크 정보 (항상 표시)
-    for entry in benchmarks:
-        if not isinstance(entry, dict):
-            continue
-        ret = entry.get("cumulative_return_pct")
-        ticker = entry.get("ticker", "-")
-        name = entry.get("name") or entry.get("ticker")
-        if ret is None or name is None:
-            continue
-        rows.append(
-            {
-                "티커": str(ticker),
-                "종목": f"{name}",
-                "누적 수익률": f"{float(ret):+.2f}%",
-            }
-        )
-
-    table_df = pd.DataFrame(rows)
-    cached_at = pd.Timestamp.now(tz="Asia/Seoul")
-    return table_df, account_return, performance_detail, cached_at.isoformat()
-
-
-def _render_benchmark_table(account_id: str, settings: dict[str, Any], country_code: str) -> None:
-    start_raw = settings.get("initial_date")
-    if not start_raw:
-        st.info("계정 설정에 시작일(initial_date)이 없어 벤치마크를 표시할 수 없습니다.")
-        return
-
-    try:
-        start_date = pd.to_datetime(start_raw).normalize()
-    except Exception:
-        st.warning(f"시작일을 해석할 수 없습니다: {start_raw}")
-        return
-
-    try:
-        end_date = get_latest_trading_day(country_code)
-    except Exception as exc:
-        st.warning(f"최근 거래일 정보를 불러오지 못했습니다: {exc}")
-        return
-
-    try:
-        with st.spinner("벤치마크/퍼포먼스 데이터를 계산하는 중입니다…"):
-            table_df, account_return, performance_detail, cached_iso = _cached_benchmark_data(account_id, start_date, end_date)
-    except Exception as exc:
-        st.warning(f"벤치마크 성과를 계산하지 못했습니다: {exc}")
-        return
-
-    if table_df.empty:
-        st.info("표시할 벤치마크 수익률이 없습니다.")
-        return
-
-    trading_days = get_trading_days(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"), country_code)
-    day_count = len(trading_days)
-
-    try:
-        cached_kst = pd.to_datetime(cached_iso)
-        if cached_kst.tzinfo is None or cached_kst.tzinfo.utcoffset(cached_kst) is None:
-            cached_kst = cached_kst.tz_localize("UTC").tz_convert("Asia/Seoul")
-        else:
-            cached_kst = cached_kst.tz_convert("Asia/Seoul")
-        ts_text = cached_kst.strftime("%Y-%m-%d %H:%M:%S")
-    except Exception:
-        ts_text = str(cached_iso)
-
-    with st.expander("벤치마크", expanded=True):
-        st.caption(f"벤치마크 누적 수익률 ({start_date.strftime('%Y년 %m월 %d일')} 이후 {day_count} 거래일)")
-        st.table(table_df)
-        st.caption(f"데이터 업데이트: {ts_text}")
-
-    with st.expander("퍼포먼스(상세)", expanded=False):
-        if account_return is not None:
-            st.markdown(f"<span style='color:#d32f2f;'>가상 거래 수익률 (Momentum ETF): {account_return:+.2f}%</span>", unsafe_allow_html=True)
-
-        if performance_detail:
-            try:
-                log_lines = build_performance_log_lines(account_id, performance_detail, settings)
-                st.text("\n".join(log_lines))
-            except Exception as exc:
-                st.warning(f"퍼포먼스 상세 로그를 표시하지 못했습니다: {exc}")
-
-        st.caption("Momentum ETF 의 수익률은 기간 내 매수/보유/매도한 모든 종목의 실현·미실현 수익을 포함해서 계산합니다.")
 
 
 __all__ = ["render_account_page"]
