@@ -17,12 +17,13 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_RANGE": np.arange(90, 115, 5),
         "MA_TYPE": ["HMA"],
         "PORTFOLIO_TOPN": [10],
-        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
+        "REPLACE_SCORE_THRESHOLD": [1],
         "STOP_LOSS_PCT": np.arange(5, 11, 1),
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
         "COOLDOWN_DAYS": [3, 4, 5],
-        "CORE_HOLDINGS": [],
-        # "CORE_HOLDINGS": ["379800", "442580", "479620"],
+        # "CORE_HOLDINGS": [],
+        # "CORE_HOLDINGS": ["473640"],
+        "CORE_HOLDINGS": ["473640", "442580", "479620"],
         "OPTIMIZATION_METRIC": "SDR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
 }

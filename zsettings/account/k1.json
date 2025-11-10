@@ -9,19 +9,21 @@
     "initial_capital_krw": "300000000",
     "strategy": {
         "MONTHS_RANGE": 12,
-        "EXPECTED_CAGR": 90.45,
+        "EXPECTED_CAGR": 100.077,
         "OPTIMIZATION_METRIC": "SDR",
-        "BACKTESTED_DATE": "2025-11-10 09:50",
+        "BACKTESTED_DATE": "2025-11-10 10:10",
         "tuning": {
-            "MA_PERIOD": 100,
+            "MA_PERIOD": 105,
             "MA_TYPE": "HMA",
             "PORTFOLIO_TOPN": 10,
-            "REPLACE_SCORE_THRESHOLD": 4,
+            "REPLACE_SCORE_THRESHOLD": 1,
             "STOP_LOSS_PCT": 7,
             "OVERBOUGHT_SELL_THRESHOLD": 93,
             "COOLDOWN_DAYS": 3,
             "CORE_HOLDINGS": [
-                "473640"
+                "473640",
+                "442580",
+                "479620"
             ]
         }
     },
