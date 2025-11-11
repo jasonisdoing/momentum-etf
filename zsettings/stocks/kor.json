@@ -9,7 +9,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 4092274,
                 "1_week_avg_turnover": 91168814459,
-                "3_month_earn_rate": 11.9558
+                "3_month_earn_rate": 11.7353
             },
             {
                 "ticker": "379810",
@@ -18,7 +18,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 2040122,
                 "1_week_avg_turnover": 50042515780,
-                "3_month_earn_rate": 13.8489
+                "3_month_earn_rate": 13.1843
             }
         ]
     },
@@ -32,7 +32,7 @@
                 "listing_date": "2025-05-20",
                 "1_week_avg_volume": 25928,
                 "1_week_avg_turnover": 416356482,
-                "3_month_earn_rate": 28.4329
+                "3_month_earn_rate": 26.3157
             },
             {
                 "ticker": "479620",
@@ -41,7 +41,7 @@
                 "listing_date": "2024-05-07",
                 "1_week_avg_volume": 65888,
                 "1_week_avg_turnover": 1018645194,
-                "3_month_earn_rate": 30.0675
+                "3_month_earn_rate": 28.8156
             },
             {
                 "ticker": "485540",
@@ -50,7 +50,7 @@
                 "listing_date": "2024-06-25",
                 "1_week_avg_volume": 670078,
                 "1_week_avg_turnover": 9964903021,
-                "3_month_earn_rate": 16.1182
+                "3_month_earn_rate": 15.7003
             },
             {
                 "ticker": "0041D0",
@@ -59,7 +59,7 @@
                 "listing_date": "2025-04-22",
                 "1_week_avg_volume": 154559,
                 "1_week_avg_turnover": 2489666537,
-                "3_month_earn_rate": 13.4155
+                "3_month_earn_rate": 14.653
             },
             {
                 "ticker": "371450",
@@ -68,7 +68,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 12451,
                 "1_week_avg_turnover": 153543136,
-                "3_month_earn_rate": 9.0305
+                "3_month_earn_rate": 12.5168
             }
         ]
     },
@@ -82,7 +82,7 @@
                 "listing_date": "2025-03-11",
                 "1_week_avg_volume": 1070635,
                 "1_week_avg_turnover": 31063258363,
-                "3_month_earn_rate": 67.497
+                "3_month_earn_rate": 70.1908
             },
             {
                 "ticker": "0020H0",
@@ -91,7 +91,7 @@
                 "listing_date": "2025-03-11",
                 "1_week_avg_volume": 106746,
                 "1_week_avg_turnover": 2330326821,
-                "3_month_earn_rate": 52.8008
+                "3_month_earn_rate": 57.7793
             }
         ]
     },
@@ -105,7 +105,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 1651124,
                 "1_week_avg_turnover": 8053122637,
-                "3_month_earn_rate": 2.7352
+                "3_month_earn_rate": 5.5617
             },
             {
                 "ticker": "157490",
@@ -114,7 +114,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 1200848,
                 "1_week_avg_turnover": 11907971368,
-                "3_month_earn_rate": 0.4687
+                "3_month_earn_rate": 2.3646
             },
             {
                 "ticker": "0105D0",
@@ -146,25 +146,25 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 140867,
                 "1_week_avg_turnover": 5084703330,
-                "3_month_earn_rate": 47.5902
+                "3_month_earn_rate": 54.0046
             },
             {
                 "ticker": "315930",
                 "name": "KODEX Top5Plus TR",
                 "recommend_enabled": true,
-                "listing_date": "2019-01-22",
+                "listing_date": "2024-01-02",
                 "1_week_avg_volume": 79641,
                 "1_week_avg_turnover": 3181567757,
-                "3_month_earn_rate": 45.1774
+                "3_month_earn_rate": 49.6279
             },
             {
                 "ticker": "069500",
                 "name": "Kodex 200",
                 "recommend_enabled": true,
                 "listing_date": "2024-01-02",
-                "1_week_avg_volume": 21274735,
-                "1_week_avg_turnover": 1224460449098,
-                "3_month_earn_rate": 28.7757
+                "1_week_avg_volume": 21274734,
+                "1_week_avg_turnover": 1224460383207,
+                "3_month_earn_rate": 33.0326
             },
             {
                 "ticker": "495230",
@@ -173,7 +173,7 @@
                 "listing_date": "2024-11-04",
                 "1_week_avg_volume": 280737,
                 "1_week_avg_turnover": 4860789734,
-                "3_month_earn_rate": 32.3435
+                "3_month_earn_rate": 36.7303
             },
             {
                 "ticker": "495050",
@@ -182,7 +182,7 @@
                 "listing_date": "2024-11-04",
                 "1_week_avg_volume": 1404542,
                 "1_week_avg_turnover": 23558419365,
-                "3_month_earn_rate": 30.6603
+                "3_month_earn_rate": 35.4948
             }
         ]
     },
@@ -196,16 +196,16 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 103428,
                 "1_week_avg_turnover": 3875192729,
-                "3_month_earn_rate": 86.8934
+                "3_month_earn_rate": 88.7734
             },
             {
                 "ticker": "390390",
                 "name": "KODEX 미국반도체",
                 "recommend_enabled": true,
-                "listing_date": "2021-06-30",
+                "listing_date": "2024-01-02",
                 "1_week_avg_volume": 476531,
                 "1_week_avg_turnover": 16786436815,
-                "3_month_earn_rate": 28.4292
+                "3_month_earn_rate": 27.6565
             }
         ]
     },
@@ -213,13 +213,13 @@
         "category": "한국반도체",
         "tickers": [
             {
-                "ticker": "469150",
-                "name": "ACE AI반도체포커스",
+                "ticker": "091160",
+                "name": "KODEX 반도체",
                 "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 1192213,
-                "1_week_avg_turnover": 30427985810,
-                "3_month_earn_rate": 61.0423
+                "listing_date": "2007-01-29",
+                "1_week_avg_volume": 3400112,
+                "1_week_avg_turnover": 200075608783,
+                "3_month_earn_rate": 58.8441
             }
         ]
     },
@@ -230,10 +230,10 @@
                 "ticker": "446690",
                 "name": "KODEX 아시아AI반도체exChina액티브",
                 "recommend_enabled": true,
-                "listing_date": "2023-02-01",
+                "listing_date": "2024-01-02",
                 "1_week_avg_volume": 4415,
                 "1_week_avg_turnover": 125332115,
-                "3_month_earn_rate": 52.4408
+                "3_month_earn_rate": 53.4088
             },
             {
                 "ticker": "464920",
@@ -242,7 +242,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 19617,
                 "1_week_avg_turnover": 359770283,
-                "3_month_earn_rate": 44.4267
+                "3_month_earn_rate": 42.1134
             }
         ]
     },
@@ -256,7 +256,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 581669,
                 "1_week_avg_turnover": 22058371417,
-                "3_month_earn_rate": 14.9239
+                "3_month_earn_rate": 17.5541
             },
             {
                 "ticker": "426030",
@@ -265,7 +265,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 682238,
                 "1_week_avg_turnover": 25019476752,
-                "3_month_earn_rate": 13.7555
+                "3_month_earn_rate": 14.8593
             },
             {
                 "ticker": "473460",
@@ -274,7 +274,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 440195,
                 "1_week_avg_turnover": 11028868137,
-                "3_month_earn_rate": 19.2353
+                "3_month_earn_rate": 18.966
             }
         ]
     },
@@ -288,7 +288,7 @@
                 "listing_date": "2024-07-16",
                 "1_week_avg_volume": 406006,
                 "1_week_avg_turnover": 8588199136,
-                "3_month_earn_rate": 14.7188
+                "3_month_earn_rate": 18.016
             },
             {
                 "ticker": "487230",
@@ -297,7 +297,7 @@
                 "listing_date": "2024-07-09",
                 "1_week_avg_volume": 3164190,
                 "1_week_avg_turnover": 60563181705,
-                "3_month_earn_rate": 5.7691
+                "3_month_earn_rate": 10.1718
             },
             {
                 "ticker": "0051G0",
@@ -306,7 +306,7 @@
                 "listing_date": "2025-05-20",
                 "1_week_avg_volume": 1142067,
                 "1_week_avg_turnover": 21156804982,
-                "3_month_earn_rate": 14.9027
+                "3_month_earn_rate": 21.0841
             },
             {
                 "ticker": "419430",
@@ -315,7 +315,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 69730,
                 "1_week_avg_turnover": 759130406,
-                "3_month_earn_rate": 58.169
+                "3_month_earn_rate": 52.6315
             },
             {
                 "ticker": "394670",
@@ -324,7 +324,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 242614,
                 "1_week_avg_turnover": 2335675596,
-                "3_month_earn_rate": 51.8808
+                "3_month_earn_rate": 46.7778
             },
             {
                 "ticker": "417450",
@@ -333,7 +333,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 63317,
                 "1_week_avg_turnover": 841692925,
-                "3_month_earn_rate": 62.9921
+                "3_month_earn_rate": 65.429
             },
             {
                 "ticker": "0007G0",
@@ -342,7 +342,7 @@
                 "listing_date": "2025-01-14",
                 "1_week_avg_volume": 202699,
                 "1_week_avg_turnover": 3381924434,
-                "3_month_earn_rate": 17.6208
+                "3_month_earn_rate": 21.1409
             }
         ]
     },
@@ -356,7 +356,7 @@
                 "listing_date": "2024-07-09",
                 "1_week_avg_volume": 7790469,
                 "1_week_avg_turnover": 202184829419,
-                "3_month_earn_rate": 46.4232
+                "3_month_earn_rate": 56.4491
             },
             {
                 "ticker": "434730",
@@ -365,21 +365,12 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 1178473,
                 "1_week_avg_turnover": 59658692596,
-                "3_month_earn_rate": 24.457
-            },
-            {
-                "ticker": "0092B0",
-                "name": "SOL 한국원자력SMR",
-                "recommend_enabled": true,
-                "listing_date": "2025-08-19",
-                "1_week_avg_volume": 463283,
-                "1_week_avg_turnover": 5098028089,
-                "3_month_earn_rate": 13.714
+                "3_month_earn_rate": 32.6265
             },
             {
                 "ticker": "0117V0",
                 "name": "TIGER 코리아AI전력기기TOP3플러스",
-                "recommend_enabled": false,
+                "recommend_enabled": true,
                 "listing_date": "2025-10-21",
                 "1_week_avg_volume": 7555341,
                 "1_week_avg_turnover": 103967241190,
@@ -391,7 +382,7 @@
                 "recommend_enabled": true,
                 "1_week_avg_volume": 212203,
                 "1_week_avg_turnover": 4946804229,
-                "3_month_earn_rate": 24.6219,
+                "3_month_earn_rate": 31.9528,
                 "listing_date": "2024-01-02"
             },
             {
@@ -400,7 +391,7 @@
                 "recommend_enabled": true,
                 "1_week_avg_volume": 324267,
                 "1_week_avg_turnover": 6388830082,
-                "3_month_earn_rate": 26.7078,
+                "3_month_earn_rate": 32.0277,
                 "listing_date": "2024-01-02"
             },
             {
@@ -419,7 +410,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 7675913,
                 "1_week_avg_turnover": 43972214397,
-                "3_month_earn_rate": 31.1004
+                "3_month_earn_rate": 35.4216
             }
         ]
     },
@@ -433,7 +424,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 3298844,
                 "1_week_avg_turnover": 41748442887,
-                "3_month_earn_rate": 19.2189
+                "3_month_earn_rate": 21.0227
             },
             {
                 "ticker": "445290",
@@ -442,7 +433,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 2087814,
                 "1_week_avg_turnover": 50061333911,
-                "3_month_earn_rate": 35.075
+                "3_month_earn_rate": 37.9206
             }
         ]
     },
@@ -456,7 +447,7 @@
                 "listing_date": "2025-04-15",
                 "1_week_avg_volume": 120953,
                 "1_week_avg_turnover": 2009462492,
-                "3_month_earn_rate": 34.6446
+                "3_month_earn_rate": 34.9219
             },
             {
                 "ticker": "0038A0",
@@ -465,7 +456,7 @@
                 "listing_date": "2025-04-15",
                 "1_week_avg_volume": 663538,
                 "1_week_avg_turnover": 10626809817,
-                "3_month_earn_rate": 18.673
+                "3_month_earn_rate": 19.018
             }
         ]
     },
@@ -479,7 +470,7 @@
                 "listing_date": "2024-01-18",
                 "1_week_avg_volume": 54250,
                 "1_week_avg_turnover": 1427507646,
-                "3_month_earn_rate": 31.7483
+                "3_month_earn_rate": 31.7678
             },
             {
                 "ticker": "0064K0",
@@ -488,7 +479,7 @@
                 "listing_date": "2025-06-17",
                 "1_week_avg_volume": 692724,
                 "1_week_avg_turnover": 8413251932,
-                "3_month_earn_rate": 23.8504
+                "3_month_earn_rate": 23.4243
             },
             {
                 "ticker": "144600",
@@ -497,7 +488,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 888670,
                 "1_week_avg_turnover": 7386927369,
-                "3_month_earn_rate": 24.8498
+                "3_month_earn_rate": 26.7511
             }
         ]
     },
@@ -534,7 +525,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 240456,
                 "1_week_avg_turnover": 3341991551,
-                "3_month_earn_rate": 9.4615
+                "3_month_earn_rate": 8.8613
             },
             {
                 "ticker": "453810",
@@ -543,7 +534,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 194295,
                 "1_week_avg_turnover": 2743634062,
-                "3_month_earn_rate": 8.9838
+                "3_month_earn_rate": 8.3408
             },
             {
                 "ticker": "479730",
@@ -552,7 +543,7 @@
                 "listing_date": "2024-05-14",
                 "1_week_avg_volume": 39025,
                 "1_week_avg_turnover": 428635242,
-                "3_month_earn_rate": 11.6751
+                "3_month_earn_rate": 11.0047
             },
             {
                 "ticker": "498610",
@@ -561,7 +552,7 @@
                 "listing_date": "2025-04-01",
                 "1_week_avg_volume": 2922,
                 "1_week_avg_turnover": 30399488,
-                "3_month_earn_rate": 7.3045
+                "3_month_earn_rate": 6.4795
             }
         ]
     },
@@ -575,7 +566,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 87908,
                 "1_week_avg_turnover": 2553036950,
-                "3_month_earn_rate": 12.3178
+                "3_month_earn_rate": 10.7585
             }
         ]
     },
@@ -589,7 +580,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 2099814,
                 "1_week_avg_turnover": 42873388039,
-                "3_month_earn_rate": 4.7741
+                "3_month_earn_rate": 8.8517
             }
         ]
     },
@@ -603,7 +594,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 4290362,
                 "1_week_avg_turnover": 67062362809,
-                "3_month_earn_rate": 13.8432
+                "3_month_earn_rate": 21.7909
             },
             {
                 "ticker": "498860",
@@ -612,7 +603,7 @@
                 "listing_date": "2024-12-10",
                 "1_week_avg_volume": 153760,
                 "1_week_avg_turnover": 2287131102,
-                "3_month_earn_rate": 9.0428
+                "3_month_earn_rate": 15.2785
             },
             {
                 "ticker": "466940",
@@ -621,7 +612,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 1934230,
                 "1_week_avg_turnover": 39789550810,
-                "3_month_earn_rate": 7.053
+                "3_month_earn_rate": 10.8851
             }
         ]
     },
@@ -635,7 +626,7 @@
                 "listing_date": "2025-02-18",
                 "1_week_avg_volume": 24651,
                 "1_week_avg_turnover": 281863705,
-                "3_month_earn_rate": 16.0254
+                "3_month_earn_rate": 17.0864
             },
             {
                 "ticker": "0028X0",
@@ -644,7 +635,7 @@
                 "listing_date": "2025-05-27",
                 "1_week_avg_volume": 24765,
                 "1_week_avg_turnover": 308000741,
-                "3_month_earn_rate": 3.4013
+                "3_month_earn_rate": 5.53
             }
         ]
     },
@@ -658,7 +649,7 @@
                 "listing_date": "2024-02-14",
                 "1_week_avg_volume": 73883,
                 "1_week_avg_turnover": 765612973,
-                "3_month_earn_rate": 19.915
+                "3_month_earn_rate": 20.4444
             },
             {
                 "ticker": "203780",
@@ -667,7 +658,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 41256,
                 "1_week_avg_turnover": 1159138854,
-                "3_month_earn_rate": 25.3764
+                "3_month_earn_rate": 24.9779
             }
         ]
     },
@@ -681,7 +672,7 @@
                 "listing_date": "2024-12-24",
                 "1_week_avg_volume": 157879,
                 "1_week_avg_turnover": 2314575107,
-                "3_month_earn_rate": 23.0899
+                "3_month_earn_rate": 23.4123
             },
             {
                 "ticker": "244580",
@@ -690,7 +681,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 3395005,
                 "1_week_avg_turnover": 38545038561,
-                "3_month_earn_rate": 19.2926
+                "3_month_earn_rate": 18.8197
             },
             {
                 "ticker": "266420",
@@ -699,7 +690,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 329968,
                 "1_week_avg_turnover": 6854082010,
-                "3_month_earn_rate": 11.9086
+                "3_month_earn_rate": 11.5509
             }
         ]
     },
@@ -713,7 +704,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 511014,
                 "1_week_avg_turnover": 3319374300,
-                "3_month_earn_rate": 25.2243
+                "3_month_earn_rate": 29.5366
             }
         ]
     },
@@ -727,7 +718,7 @@
                 "listing_date": "2024-10-29",
                 "1_week_avg_volume": 50480,
                 "1_week_avg_turnover": 622959204,
-                "3_month_earn_rate": 9.4714
+                "3_month_earn_rate": 9.8878
             },
             {
                 "ticker": "478150",
@@ -736,7 +727,7 @@
                 "listing_date": "2024-04-23",
                 "1_week_avg_volume": 145226,
                 "1_week_avg_turnover": 2932094450,
-                "3_month_earn_rate": 8.3904
+                "3_month_earn_rate": 9.2434
             }
         ]
     },
@@ -750,7 +741,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 1800297,
                 "1_week_avg_turnover": 100251839967,
-                "3_month_earn_rate": -3.4295
+                "3_month_earn_rate": 5.0218
             },
             {
                 "ticker": "0080G0",
@@ -759,7 +750,7 @@
                 "listing_date": "2025-07-15",
                 "1_week_avg_volume": 2469123,
                 "1_week_avg_turnover": 25378166242,
-                "3_month_earn_rate": -8.7518
+                "3_month_earn_rate": 1.7948
             }
         ]
     },
@@ -773,7 +764,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 4282211,
                 "1_week_avg_turnover": 158839707089,
-                "3_month_earn_rate": 13.595
+                "3_month_earn_rate": 16.3238
             }
         ]
     },
@@ -787,7 +778,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 1049433,
                 "1_week_avg_turnover": 12214601112,
-                "3_month_earn_rate": 43.0127
+                "3_month_earn_rate": 41.9059
             },
             {
                 "ticker": "256750",
@@ -796,7 +787,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 194205,
                 "1_week_avg_turnover": 2794729510,
-                "3_month_earn_rate": 46.3731
+                "3_month_earn_rate": 42.5173
             },
             {
                 "ticker": "372330",
@@ -805,7 +796,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 428817,
                 "1_week_avg_turnover": 4009245936,
-                "3_month_earn_rate": 12.0725
+                "3_month_earn_rate": 13.8191
             },
             {
                 "ticker": "0043Y0",
@@ -814,7 +805,7 @@
                 "listing_date": "2025-05-13",
                 "1_week_avg_volume": 362006,
                 "1_week_avg_turnover": 5050261723,
-                "3_month_earn_rate": 27.2563
+                "3_month_earn_rate": 26.2437
             },
             {
                 "ticker": "413220",
@@ -823,7 +814,7 @@
                 "listing_date": "2024-01-02",
                 "1_week_avg_volume": 50723,
                 "1_week_avg_turnover": 301342976,
-                "3_month_earn_rate": 58.2051
+                "3_month_earn_rate": 52.327
             }
         ]
     },
