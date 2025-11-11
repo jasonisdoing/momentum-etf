@@ -8,11 +8,12 @@
     "initial_capital_krw": "100000000",
     "strategy": {
         "MONTHS_RANGE": 3,
-        "EXPECTED_CAGR": 310.38,
-        "OPTIMIZATION_METRIC": "SDR",
-        "BACKTESTED_DATE": "2025-11-11 14:00",
+        "AGR": 277.80,
+        "MDD": 277.80,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "BACKTESTED_DATE": "2025-11-12 08:40",
         "tuning": {
-            "MA_PERIOD": 110,
+            "MA_PERIOD": 90,
             "MA_TYPE": "HMA",
             "PORTFOLIO_TOPN": 10,
             "REPLACE_SCORE_THRESHOLD": 0,
