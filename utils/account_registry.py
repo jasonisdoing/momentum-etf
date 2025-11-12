@@ -16,6 +16,7 @@ from utils.settings_loader import (
     get_account_strategy,
     get_account_strategy_sections,
     get_strategy_rules,
+    resolve_strategy_params,
 )
 
 
@@ -68,9 +69,8 @@ def load_account_configs() -> List[Dict[str, Any]]:
         portfolio_topn = None
         strategy = settings.get("strategy", {})
         if isinstance(strategy, dict):
-            tuning = strategy.get("tuning", {})
-            if isinstance(tuning, dict):
-                portfolio_topn = tuning.get("PORTFOLIO_TOPN")
+            params = resolve_strategy_params(strategy)
+            portfolio_topn = params.get("PORTFOLIO_TOPN")
 
         if portfolio_topn is not None:
             name = f"{base_name}({portfolio_topn} 종목)"

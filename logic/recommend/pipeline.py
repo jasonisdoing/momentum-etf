@@ -21,6 +21,7 @@ from utils.settings_loader import (
     get_account_settings,
     get_strategy_rules,
     load_common_settings,
+    resolve_strategy_params,
 )
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 from logic.common import sort_decisions_by_order_and_score, filter_category_duplicates
@@ -563,10 +564,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     if not isinstance(strategy_cfg, dict):
         strategy_cfg = {}
 
-    if "tuning" in strategy_cfg or "static" in strategy_cfg:
-        strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
-    else:
-        strategy_tuning = strategy_cfg
+    strategy_tuning = resolve_strategy_params(strategy_cfg)
 
     # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
     max_per_category = config.MAX_PER_CATEGORY

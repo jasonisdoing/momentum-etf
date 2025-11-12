@@ -13,7 +13,7 @@ def validate_strategy_settings(
     이 함수를 한 번만 호출하면 이후 모든 설정 값을 안전하게 사용할 수 있습니다.
 
     Args:
-        strategy_tuning: strategy.tuning 설정
+        strategy_tuning: 전략 파라미터(dict)
         account_id: 계정 ID (에러 메시지용, 선택사항)
 
     Raises:
@@ -22,15 +22,15 @@ def validate_strategy_settings(
     prefix = f"{account_id} 계좌의 " if account_id else ""
     errors = []
 
-    # strategy.tuning 필수 항목 검증
+    # strategy 필수 항목 검증
     if "COOLDOWN_DAYS" not in strategy_tuning:
-        errors.append("strategy.tuning.COOLDOWN_DAYS")
+        errors.append("strategy.COOLDOWN_DAYS")
 
     if "OVERBOUGHT_SELL_THRESHOLD" not in strategy_tuning:
-        errors.append("strategy.tuning.OVERBOUGHT_SELL_THRESHOLD")
+        errors.append("strategy.OVERBOUGHT_SELL_THRESHOLD")
 
     if "REPLACE_SCORE_THRESHOLD" not in strategy_tuning:
-        errors.append("strategy.tuning.REPLACE_SCORE_THRESHOLD")
+        errors.append("strategy.REPLACE_SCORE_THRESHOLD")
 
     # 에러가 있으면 한 번에 보고
     if errors:

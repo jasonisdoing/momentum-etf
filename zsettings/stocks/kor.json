@@ -654,7 +654,8 @@
             {
                 "ticker": "0113G0",
                 "name": "KoAct 미국바이오헬스케어액티브",
-                "recommend_enabled": true
+                "recommend_enabled": true,
+                "listing_date": "2025-11-11"
             }
         ]
     },

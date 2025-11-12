@@ -16,6 +16,7 @@ from utils.settings_loader import (
     get_account_precision,
     get_account_settings,
     get_strategy_rules,
+    resolve_strategy_params,
 )
 from utils.data_loader import get_latest_trading_day, fetch_ohlcv
 from utils.stock_list_io import get_etfs
@@ -123,7 +124,8 @@ def run_account_backtest(
     strategy_rules = StrategyRules.from_mapping(base_strategy_rules.to_dict())
     precision_settings = get_account_precision(account_id)
     account_settings_data = get_account_settings(account_id)
-    strategy_settings = dict(account_settings_data.get("strategy", {}).get("tuning", {}))
+    strategy_source = account_settings_data.get("strategy", {})
+    strategy_settings = dict(resolve_strategy_params(strategy_source))
     common_settings = get_common_file_settings()
 
     strategy_overrides_extra = override_settings.get("strategy_overrides")

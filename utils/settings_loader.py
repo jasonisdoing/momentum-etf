@@ -121,6 +121,22 @@ def _split_strategy_sections(strategy: Dict[str, Any]) -> Tuple[Dict[str, Any], 
     return tuning, static
 
 
+def resolve_strategy_params(strategy_cfg: Any) -> Dict[str, Any]:
+    """전략 설정에서 실제 파라미터(dict)를 추출합니다.
+
+    최신 포맷은 strategy 하위에 바로 값을 두고, 구 포맷은 strategy.tuning에 둡니다.
+    """
+
+    if not isinstance(strategy_cfg, dict):
+        return {}
+
+    tuning = strategy_cfg.get("tuning")
+    if isinstance(tuning, dict) and tuning:
+        return dict(tuning)
+
+    return dict(strategy_cfg)
+
+
 def get_account_strategy_sections(account_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """계정 전략 설정을 (튜닝용, 고정값)으로 분리해 반환합니다.
 

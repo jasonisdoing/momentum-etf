@@ -6,7 +6,7 @@ import streamlit as st
 
 from main import load_account_recommendations, render_recommendation_table
 from utils.account_registry import get_icon_fallback, load_account_configs
-from utils.settings_loader import AccountSettingsError, get_account_settings
+from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
 
 
 _DATAFRAME_CSS = """
@@ -83,9 +83,7 @@ def render_account_page(account_id: str) -> None:
             if isinstance(strategy_cfg, dict):
                 expected_cagr = strategy_cfg.get("EXPECTED_CAGR")
                 backtested_date = strategy_cfg.get("BACKTESTED_DATE")
-                tuning_cfg = strategy_cfg.get("tuning")
-                if isinstance(tuning_cfg, dict):
-                    strategy_tuning = tuning_cfg
+                strategy_tuning = resolve_strategy_params(strategy_cfg)
             if strategy_tuning:
                 params_to_show = {
                     "MA": strategy_tuning.get("MA_PERIOD"),

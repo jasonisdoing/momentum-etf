@@ -28,7 +28,7 @@ from utils.account_registry import get_account_settings
 from utils.schedule_config import get_country_schedule
 from utils.report import format_kr_money
 from utils.logger import get_app_logger, APP_LABEL
-from utils.settings_loader import get_account_slack_channel
+from utils.settings_loader import get_account_slack_channel, resolve_strategy_params
 from utils.cron_utils import normalize_cron_weekdays
 
 
@@ -182,11 +182,11 @@ def compose_recommendation_slack_message(
 
         held_count = count_current_holdings(recommendations)
     if portfolio_topn is None:
+        strategy_params = resolve_strategy_params((account_settings or {}).get("strategy", {})) if account_settings else {}
         topn_candidates = [
             getattr(report, "portfolio_topn", None),
             (account_settings or {}).get("portfolio_topn") if account_settings else None,
-            (((account_settings or {}).get("strategy", {}) or {}).get("tuning", {}).get("PORTFOLIO_TOPN") if account_settings else None),
-            (((account_settings or {}).get("strategy", {}) or {}).get("static", {}).get("PORTFOLIO_TOPN") if account_settings else None),
+            strategy_params.get("PORTFOLIO_TOPN"),
         ]
         for candidate in topn_candidates:
             try:

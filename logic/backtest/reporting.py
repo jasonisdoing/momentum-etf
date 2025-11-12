@@ -15,7 +15,7 @@ from utils.account_registry import get_account_settings
 from utils.notification import build_summary_line_from_summary_data
 from utils.report import format_kr_money, render_table_eaw
 from utils.logger import get_app_logger
-from utils.settings_loader import get_account_precision
+from utils.settings_loader import get_account_precision, resolve_strategy_params
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
 logger = get_app_logger()
@@ -82,10 +82,7 @@ def print_backtest_summary(
     if not isinstance(strategy_cfg, dict):
         strategy_cfg = {}
 
-    if "tuning" in strategy_cfg or "static" in strategy_cfg:
-        strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
-    else:  # 구 포맷과의 호환성 유지
-        strategy_tuning = strategy_cfg
+    strategy_tuning = resolve_strategy_params(strategy_cfg)
 
     merged_strategy = dict(strategy_tuning)
 

@@ -21,6 +21,7 @@ from logic.entry_point import StrategyRules
 from utils.account_registry import get_strategy_rules
 from utils.settings_loader import (
     AccountSettingsError,
+    ACCOUNT_SETTINGS_DIR,
     get_account_settings,
     load_common_settings,
     get_tune_month_configs,
@@ -259,6 +260,72 @@ def _export_prefetched_data(debug_dir: Path, prefetched_data: Mapping[str, DataF
         if not isinstance(frame, pd.DataFrame) or frame.empty:
             continue
         _save_dataframe_csv(frame, prefetch_dir / f"{ticker}.csv")
+
+
+def _apply_tuning_to_strategy_file(account_id: str, entry: Dict[str, Any]) -> None:
+    """Persist the final tuning result back into the account strategy file."""
+
+    logger = get_app_logger()
+    result_params = entry.get("result")
+    if not isinstance(result_params, dict) or not result_params:
+        logger.warning("[튜닝] %s 계정 결과에 반영할 파라미터가 없습니다.", account_id.upper())
+        return
+
+    settings_path = ACCOUNT_SETTINGS_DIR / f"{account_id}.json"
+    try:
+        raw = settings_path.read_text(encoding="utf-8")
+        settings_data = json.loads(raw)
+    except Exception as exc:  # pragma: no cover - 파일 접근 오류
+        logger.error("[튜닝] %s 계정 설정을 읽지 못해 갱신을 건너뜁니다: %s", account_id.upper(), exc)
+        return
+
+    if not isinstance(settings_data, dict):
+        logger.error("[튜닝] %s 계정 설정 형식이 잘못되어 갱신을 건너뜁니다.", account_id.upper())
+        return
+
+    strategy_cfg = settings_data.get("strategy")
+    if isinstance(strategy_cfg, dict):
+        strategy_data = dict(strategy_cfg)
+    else:
+        strategy_data = {}
+
+    legacy_tuning = strategy_data.pop("tuning", None)
+    if isinstance(legacy_tuning, dict):
+        strategy_data.update(legacy_tuning)
+
+    for key, value in result_params.items():
+        if value is None:
+            continue
+        strategy_data[key] = value
+
+    weighted_cagr = entry.get("weighted_expected_CAGR")
+    if weighted_cagr is not None:
+        strategy_data["CAGR"] = _round_float(weighted_cagr)
+
+    weighted_mdd = entry.get("weighted_expected_MDD")
+    if weighted_mdd is not None:
+        strategy_data["MDD"] = _round_float(weighted_mdd)
+
+    strategy_data["BACKTESTED_DATE"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    settings_data["strategy"] = strategy_data
+
+    tmp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=str(settings_path.parent), delete=False, suffix=".tmp") as tmp_file:
+            json.dump(settings_data, tmp_file, ensure_ascii=False, indent=4)
+            tmp_file.write("\n")
+            tmp_path = Path(tmp_file.name)
+        shutil.move(str(tmp_path), str(settings_path))
+        get_account_settings.cache_clear()
+        logger.info("[튜닝] %s 계정 전략 설정을 최신 결과로 갱신했습니다.", account_id.upper())
+    except Exception as exc:  # pragma: no cover - 파일 쓰기 오류
+        logger.error("[튜닝] %s 계정 설정을 갱신하지 못했습니다: %s", account_id.upper(), exc)
+        if tmp_path and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 def _extract_summary(result) -> Dict[str, Any]:
@@ -760,6 +827,7 @@ def _build_run_entry(
         "REPLACE_SCORE_THRESHOLD": ("replace_threshold", False),
         "STOP_LOSS_PCT": ("stop_loss_pct", False),
         "OVERBOUGHT_SELL_THRESHOLD": ("rsi_sell_threshold", True),
+        "COOLDOWN_DAYS": ("cooldown_days", True),
     }
 
     entry: Dict[str, Any] = {
@@ -767,6 +835,7 @@ def _build_run_entry(
     }
 
     raw_data_payload: List[Dict[str, Any]] = []
+    ma_type_weights: Dict[str, float] = {}
     weighted_cagr_sum = 0.0
     weighted_cagr_weight = 0.0
     weighted_mdd_sum = 0.0
@@ -862,6 +931,11 @@ def _build_run_entry(
                 "tuning": tuning_snapshot,
             }
         )
+        ma_type_val = best.get("ma_type")
+        if ma_type_val:
+            weight_for_type = weight if weight > 0 else 1.0
+            key = str(ma_type_val)
+            ma_type_weights[key] = ma_type_weights.get(key, 0.0) + weight_for_type
 
     if weighted_cagr_weight > 0:
         entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
@@ -909,6 +983,9 @@ def _build_run_entry(
         final_value = int(round(raw)) if is_int else _round_up_float_places(raw, 1)
         result_values[field] = final_value
 
+    if ma_type_weights:
+        result_values["MA_TYPE"] = max(ma_type_weights.items(), key=lambda item: (item[1], item[0]))[0]
+
     return entry
 
 
@@ -928,7 +1005,7 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
 
     normalized.pop("result", None)
 
-    for field in ("MA_PERIOD", "PORTFOLIO_TOPN", "REPLACE_SCORE_THRESHOLD", "STOP_LOSS_PCT"):
+    for field in ("MA_PERIOD", "PORTFOLIO_TOPN", "REPLACE_SCORE_THRESHOLD", "STOP_LOSS_PCT", "COOLDOWN_DAYS", "MA_TYPE"):
         normalized.pop(field, None)
 
     raw_results = normalized.get("raw_data")
@@ -1762,6 +1839,7 @@ def run_account_tuning(
         )
 
     entry = _build_run_entry(months_results=results_per_month)
+    _apply_tuning_to_strategy_file(account_norm, entry)
 
     if debug_dir is not None:
         meta_payload: Dict[str, Any] = {
