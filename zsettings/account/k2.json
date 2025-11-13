@@ -6,6 +6,7 @@
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_capital_krw": "100000000",
+    "show_hold_only": true,
     "strategy": {
         "MONTHS_RANGE": 3,
         "AGR": 277.8,

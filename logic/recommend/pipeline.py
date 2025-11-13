@@ -1350,6 +1350,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     for i, item in enumerate(results, 1):
         item["rank"] = i
 
+    # 계정 설정에 따라 HOLD/HOLD_CORE만 표시
+    show_hold_only = bool(
+        account_settings.get("show_hold_only")
+        or account_settings.get("show_held_only")
+        or (isinstance(strategy_cfg, dict) and strategy_cfg.get("SHOW_HOLD_ONLY"))
+    )
+    if show_hold_only:
+        allowed_states = {"HOLD", "HOLD_CORE"}
+        results = [item for item in results if (item.get("state") or "").upper() in allowed_states]
+        for i, item in enumerate(results, 1):
+            item["rank"] = i
+
     price_header = "현재가"
     for item in results:
         ticker_key = item.get("ticker")
