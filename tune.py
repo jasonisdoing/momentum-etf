@@ -14,7 +14,7 @@ from utils.logger import get_app_logger
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
     "k1": {
-        "MA_RANGE": np.arange(90, 130, 10),
+        "MA_RANGE": np.arange(90, 110, 10),
         "MA_TYPE": ["HMA"],
         "PORTFOLIO_TOPN": [10],
         "REPLACE_SCORE_THRESHOLD": [0],
