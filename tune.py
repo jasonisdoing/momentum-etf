@@ -20,7 +20,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "REPLACE_SCORE_THRESHOLD": [0],
         "STOP_LOSS_PCT": np.arange(5, 11, 1),
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
-        "COOLDOWN_DAYS": [3, 4, 5],
+        "COOLDOWN_DAYS": [2, 3, 4, 5],
         "CORE_HOLDINGS": [],
         # "CORE_HOLDINGS": ["473640"],
         # "CORE_HOLDINGS": ["473640", "442580", "446690", "479620"],

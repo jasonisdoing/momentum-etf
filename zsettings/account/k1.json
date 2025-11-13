@@ -9,20 +9,20 @@
     "strategy": {
         "MONTHS_RANGE": 3,
         "AGR": 277.8,
-        "MDD": -5.518419,
+        "MDD": -6.134893,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-11-12 10:47",
-        "MA_PERIOD": 110,
+        "BACKTESTED_DATE": "2025-11-13 10:02",
+        "MA_PERIOD": 90,
         "MA_TYPE": "HMA",
         "PORTFOLIO_TOPN": 10,
         "REPLACE_SCORE_THRESHOLD": 0.0,
         "STOP_LOSS_PCT": 7.0,
-        "OVERBOUGHT_SELL_THRESHOLD": 97,
+        "OVERBOUGHT_SELL_THRESHOLD": 92,
         "COOLDOWN_DAYS": 4,
         "CORE_HOLDINGS": [
             "0113G0"
         ],
-        "CAGR": 271.763146
+        "CAGR": 289.924611
     },
     "benchmarks": [
         {

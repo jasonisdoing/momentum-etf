@@ -802,6 +802,12 @@ def run_portfolio_backtest(
         else:
             logger.warning("가격 데이터 부족으로 제외된 종목: %s", ", ".join(sorted(missing_set)))
 
+    cores_before_filter = len(valid_core_holdings)
+    valid_core_holdings = {ticker for ticker in valid_core_holdings if ticker in metrics_by_ticker}
+    if cores_before_filter != len(valid_core_holdings):
+        dropped = cores_before_filter - len(valid_core_holdings)
+        logger.warning("[백테스트] 핵심 보유 종목 중 %d개는 가격 데이터가 없어 제외되었습니다.", dropped)
+
     if not quiet:
         logger.info(f"[백테스트] metrics_by_ticker: {len(metrics_by_ticker)}개 종목 처리 완료")
 
