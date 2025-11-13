@@ -53,14 +53,14 @@ def _build_home_page(accounts: list[Dict[str, Any]]):
                 continue
 
             render_recommendation_table(filtered, country_code=country_code)
-            st.markdown("---")
-            st.markdown(
-                """
-                - 본 웹사이트에서 제공되는 종목 정보 및 추천은 단순 정보 제공을 목적으로 하며, 특정 종목의 매매를 권유하는 것이 아닙니다.
-                - 본 정보를 이용한 투자 판단 및 매매 결과에 대하여 웹사이트 운영자는 어떠한 책임도 지지 않습니다.
-                - 투자에는 원금 손실 가능성이 있으며, 투자자는 스스로 리스크를 검토해야 합니다.
-                """
-            )
+        st.markdown("---")
+        st.markdown(
+            """
+            - 본 웹사이트에서 제공되는 종목 정보 및 추천은 단순 정보 제공을 목적으로 하며, 특정 종목의 매매를 권유하는 것이 아닙니다.
+            - 본 정보를 이용한 투자 판단 및 매매 결과에 대하여 웹사이트 운영자는 어떠한 책임도 지지 않습니다.
+            - 투자에는 원금 손실 가능성이 있으며, 투자자는 스스로 리스크를 검토해야 합니다.
+            """
+        )
 
     return _render_home_page
 
