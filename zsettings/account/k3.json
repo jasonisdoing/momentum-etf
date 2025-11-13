@@ -2,7 +2,7 @@
     "order": 30,
     "icon": "💰",
     "name": "배당/헷징",
-    "desc": "배당/헷징 전용",
+    "desc": "배당/헷징 고정",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_capital_krw": "100000000",

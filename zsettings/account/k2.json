@@ -2,7 +2,7 @@
     "order": 20,
     "icon": "💻",
     "name": "반도체",
-    "desc": "반도체 전용",
+    "desc": "반도체 고정",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_capital_krw": "100000000",

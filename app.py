@@ -7,12 +7,11 @@ import streamlit as st
 from utils.logger import APP_VERSION
 
 from app_pages.account_page import render_account_page
-from utils.settings_loader import load_common_settings
+from main import load_account_recommendations, render_recommendation_table
 
 from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
-    pick_default_account,
 )
 
 
@@ -31,13 +30,32 @@ def _build_account_page(page_cls: Callable[..., object], account: Dict[str, Any]
     )
 
 
-def _render_home_page() -> None:
-    st.title("Momentum ETF")
-    st.text(f"버전: Alpha-{APP_VERSION}")
-    st.caption("서비스 진입점입니다. 좌측 메뉴에서 계정을 선택하세요.")
+def _build_home_page(accounts: list[Dict[str, Any]]):
+    allowed_states = {"HOLD", "HOLD_CORE"}
 
-    st.markdown("**시스템 안내**")
-    st.caption("- 본 서비스는 추세 기반 ETF 자동 추천 시스템입니다.\n" "- 좌측 메뉴에서 원하는 계정을 선택하여 추천 결과를 확인하세요.")
+    def _render_home_page() -> None:
+        st.title("Momentum ETF")
+
+        for account in accounts:
+            account_id = account["account_id"]
+            account_name = account.get("name") or account_id.upper()
+            df, updated_at, country_code = load_account_recommendations(account_id)
+
+            st.text(f"{account_name} ({account_id.upper()})")
+
+            if df is None or df.empty:
+                st.info("표시할 추천 데이터가 없습니다.")
+                continue
+
+            filtered = df[df["상태"].str.upper().isin(allowed_states)]
+            if filtered.empty:
+                st.info("현재 HOLD/HOLD_CORE 상태의 종목이 없습니다.")
+                continue
+
+            render_recommendation_table(filtered, country_code=country_code)
+            st.markdown("---")
+
+    return _render_home_page
 
 
 def main() -> None:
@@ -82,8 +100,8 @@ def main() -> None:
 
     pages = [
         page_cls(
-            _render_home_page,
-            title="대시보드",
+            _build_home_page(accounts),
+            title="보유종목",
             icon="🏠",
             default=True,
         )
