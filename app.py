@@ -1,32 +1,17 @@
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional, List, Tuple
-from datetime import datetime
 
 import streamlit as st
-import pandas as pd
 
 from utils.logger import APP_VERSION
 
 from app_pages.account_page import render_account_page
-from logic.dashboard.market import (
-    get_market_regime_status_info,
-    get_market_regime_aux_status_infos,
-    _overlay_recent_history,
-)
-from utils.settings_loader import get_market_regime_settings, load_common_settings
-from utils.data_loader import fetch_ohlcv
-from utils.cache_utils import get_cache_path
-
-try:  # pragma: no cover - yfinance는 환경에 따라 설치되지 않을 수 있음
-    import yfinance as yf
-except Exception:  # pragma: no cover
-    yf = None
+from main import load_account_recommendations, render_recommendation_table
 
 from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
-    pick_default_account,
 )
 
 
@@ -45,197 +30,39 @@ def _build_account_page(page_cls: Callable[..., object], account: Dict[str, Any]
     )
 
 
-def _render_home_page() -> None:
-    st.title("Momentum ETF")
-    st.text(f"버전: Alpha-{APP_VERSION}")
-    st.caption("서비스 진입점입니다. 좌측 메뉴에서 계정을 선택하세요.")
+def _build_home_page(accounts: list[Dict[str, Any]]):
+    allowed_states = {"HOLD", "HOLD_CORE"}
 
-    _, default_ma_period, _ = get_market_regime_settings()
+    def _render_home_page() -> None:
+        st.title("Momentum ETF")
 
-    ma_period_input = st.number_input(
-        "레짐 이동평균 기간 (1-200) - 시장 리스크를 참고하기 위한 페이지 입니다",
-        min_value=1,
-        max_value=200,
-        value=int(default_ma_period),
-        step=1,
-        help="시장 레짐 상태를 확인하기 위한 이동평균 기간을 설정합니다.",
-    )
-    ma_period = int(ma_period_input)
-    try:
-        common_settings = load_common_settings() or {}
-    except Exception:
-        common_settings = {}
+        for account in accounts:
+            account_id = account["account_id"]
+            account_name = account.get("name") or account_id.upper()
+            df, updated_at, country_code = load_account_recommendations(account_id)
 
-    cache_start_cfg = common_settings.get("CACHE_START_DATE")
-    cache_start_text = str(cache_start_cfg) if cache_start_cfg else "-"
+            st.text(f"{account_name} ({account_id.upper()})")
 
-    with st.spinner("시장 레짐 정보를 계산 중입니다..."):
-        regime_info, regime_message = get_market_regime_status_info(ma_period_override=ma_period)
-        aux_infos = get_market_regime_aux_status_infos(ma_period_override=ma_period)
+            if df is None or df.empty:
+                st.info("표시할 추천 데이터가 없습니다.")
+                continue
 
-    with st.container():
-        st.markdown("**시장 레짐 요약**")
-        if regime_info is None:
-            st.markdown(regime_message, unsafe_allow_html=True)
-        else:
-            # delay_days = int(common_settings.get("MARKET_REGIME_FILTER_DELAY_DAY", 0) or 0)
-            # st.caption(
-            #     "디버그: "
-            #     f"Ticker={regime_info.get('ticker')} | "
-            #     f"MA Period={regime_info.get('ma_period')} | "
-            #     f"Delay Days={delay_days} | "
-            #     f"Last Date={regime_info.get('last_risk_off_start')} -> {regime_info.get('last_risk_off_end')} | "
-            #     f"Divergence={regime_info.get('proximity_pct'):+.3f}%"
-            # )
+            filtered = df[df["상태"].str.upper().isin(allowed_states)]
+            if filtered.empty:
+                st.info("현재 HOLD/HOLD_CORE 상태의 종목이 없습니다.")
+                continue
 
-            debug_lines = []
-            ticker = regime_info.get("ticker")
-            # ma_period_debug = int(regime_info.get("ma_period") or ma_period)
-            # country = regime_info.get("country") or "us"
+            render_recommendation_table(filtered, country_code=country_code)
+        st.markdown("---")
+        st.markdown(
+            """
+            - 본 웹사이트에서 제공되는 종목 정보 및 추천은 단순 정보 제공을 목적으로 하며, 특정 종목의 매매를 권유하는 것이 아닙니다.
+            - 본 정보를 이용한 투자 판단 및 매매 결과에 대하여 웹사이트 운영자는 어떠한 책임도 지지 않습니다.
+            - 투자에는 원금 손실 가능성이 있으며, 투자자는 스스로 리스크를 검토해야 합니다.
+            """
+        )
 
-            cache_paths = [
-                ("regime", get_cache_path("regime", ticker)),
-                ("common", get_cache_path("common", ticker)),
-            ]
-            for label, cache_path in cache_paths:
-                if cache_path.exists():
-                    mtime = datetime.fromtimestamp(cache_path.stat().st_mtime)
-                    debug_lines.append(f"Cache file[{label}]: {cache_path} (mtime={mtime})")
-                else:
-                    debug_lines.append(f"Cache file[{label}]: not found")
-
-            if yf is not None:
-                try:
-                    yf_hist = yf.Ticker(ticker).history(period="5d", interval="1d")
-                    if not yf_hist.empty:
-                        last_idx = yf_hist.index[-1]
-                        last_row = yf_hist.iloc[-1]
-                        close_val = float(last_row.get("Close", float("nan")))
-                        adj_val = float(last_row.get("Adj Close", close_val))
-                        debug_lines.append(f"yfinance latest: {last_idx} | Close={close_val:,.4f} | Adj Close={adj_val:,.4f}")
-                        debug_lines.append("yfinance tail (Close):\n" + yf_hist["Close"].tail(5).to_string())
-                except Exception as exc:  # pragma: no cover - 진단용 출력
-                    debug_lines.append(f"yfinance fetch 오류: {exc}")
-
-            # if debug_lines:
-            #     st.code("\n\n".join(debug_lines), language="text")
-
-            def _fmt_date(value: Any) -> Optional[str]:
-                if value is None:
-                    return None
-                if hasattr(value, "strftime"):
-                    try:
-                        return value.strftime("%Y-%m-%d")
-                    except Exception:  # pragma: no cover - 방어적 처리
-                        pass
-                return str(value)
-
-            def _format_period(period: Optional[Tuple[pd.Timestamp, Optional[pd.Timestamp]]]) -> str:
-                if not period or not period[0]:
-                    if cache_start_text and cache_start_text != "-":
-                        return f"{cache_start_text} 이후 없음"
-                    return "-"
-                start_dt, end_dt = period
-                start_str = _fmt_date(start_dt) or "알 수 없음"
-                if end_dt is None:
-                    end_str = "현재"
-                else:
-                    end_str = _fmt_date(end_dt) or "알 수 없음"
-                return f"{start_str} ~ {end_str}"
-
-            def _build_row(label: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-                ticker_text = payload["ticker"]
-                name_text = payload.get("name")
-                if isinstance(name_text, str) and name_text.strip():
-                    index_label = f"{name_text.strip()}({ticker_text})"
-                else:
-                    index_label = ticker_text
-
-                proximity_pct = float(payload.get("proximity_pct", 0.0))
-                direction = "아래" if proximity_pct < 0 else "위"
-                basis_period = int(payload.get("ma_period", regime_info["ma_period"]))
-
-                start_raw = payload.get("last_risk_off_start")
-                risk_text = _format_period(
-                    (
-                        start_raw,
-                        payload.get("last_risk_off_end"),
-                    )
-                    if start_raw is not None
-                    else None
-                )
-                prev_text = _format_period(payload.get("last_risk_off_prev"))
-                prev2_text = _format_period(payload.get("last_risk_off_prev2"))
-
-                return {
-                    "구분": label,
-                    "지수": index_label,
-                    "건강도": str(payload.get("status_label", "-")),
-                    "위치": f"기준 {basis_period}일선 {abs(proximity_pct):.1f}% {direction}",
-                    "마지막 시장위험 기간": risk_text,
-                    "이전 시장위험 기간 1": prev_text,
-                    "이전 시장위험 기간 2": prev2_text,
-                    "_status_color": "red" if payload.get("status") == "warning" else "green",
-                    "_position_color": "red" if proximity_pct < 0 else "green",
-                }
-
-            main_row = _build_row("메인", regime_info)
-            main_df = pd.DataFrame([main_row])
-            main_status = main_df["_status_color"].to_dict()
-            main_position = main_df["_position_color"].to_dict()
-            main_df = main_df.drop(columns=["_status_color", "_position_color"])
-
-            def _style_status(col: pd.Series, mapping: Dict[Any, str]) -> List[str]:
-                return [f"color: {mapping.get(idx, '')}" for idx in col.index]
-
-            def _style_position(col: pd.Series, mapping: Dict[Any, str]) -> List[str]:
-                return [f"color: {mapping.get(idx, '')}" for idx in col.index]
-
-            if not main_df.empty:
-                styled_main = main_df.style.apply(lambda col: _style_status(col, main_status), subset=["건강도"], axis=0)
-                styled_main = styled_main.apply(lambda col: _style_position(col, main_position), subset=["위치"], axis=0)
-                st.dataframe(styled_main, hide_index=True, width="stretch")
-
-            if aux_infos:
-                aux_rows: List[Dict[str, Any]] = []
-                for offset, aux in enumerate(aux_infos, start=1):
-                    aux_rows.append(_build_row(f"보조 {offset}", aux))
-
-                aux_df = pd.DataFrame(aux_rows)
-                aux_status = aux_df["_status_color"].to_dict()
-                aux_position = aux_df["_position_color"].to_dict()
-                aux_df = aux_df.drop(columns=["_status_color", "_position_color"])
-                styled_aux = aux_df.style.apply(lambda col: _style_status(col, aux_status), subset=["건강도"], axis=0)
-                styled_aux = styled_aux.apply(lambda col: _style_position(col, aux_position), subset=["위치"], axis=0)
-                st.caption("아래 보조 지표는 단순 참고를 위한 정보입니다. 시스템은 메인 지수만을 이용하고 있습니다.")
-                st.dataframe(styled_aux, hide_index=True, width="stretch")
-                st.markdown("**ETF 추천 전략 설명**")
-
-                # Load system documentation from markdown files
-                from pathlib import Path
-
-                summary_path = Path(__file__).parent / "SYSTEM_SUMMARY.md"
-                details_path = Path(__file__).parent / "SYSTEM_DETAILS.md"
-
-                with st.expander("요약 보기", expanded=False):
-                    try:
-                        if summary_path.exists():
-                            summary_content = summary_path.read_text(encoding="utf-8")
-                            st.markdown(summary_content, unsafe_allow_html=False)
-                        else:
-                            st.warning("시스템 요약 문서를 찾을 수 없습니다.")
-                    except Exception as e:
-                        st.error(f"시스템 요약 문서를 로드하는 중 오류가 발생했습니다: {e}")
-
-                with st.expander("상세 보기", expanded=False):
-                    try:
-                        if details_path.exists():
-                            details_content = details_path.read_text(encoding="utf-8")
-                            st.markdown(details_content, unsafe_allow_html=False)
-                        else:
-                            st.warning("시스템 상세 문서를 찾을 수 없습니다.")
-                    except Exception as e:
-                        st.error(f"시스템 상세 문서를 로드하는 중 오류가 발생했습니다: {e}")
+    return _render_home_page
 
 
 def main() -> None:
@@ -247,7 +74,7 @@ def main() -> None:
 
     accounts = load_account_configs()
     if not accounts:
-        st.error("사용할 수 있는 계정 설정이 없습니다. `data/settings/account` 폴더를 확인해주세요.")
+        st.error("사용할 수 있는 계정 설정이 없습니다. `zsettings/account` 폴더를 확인해주세요.")
         st.stop()
 
     default_icon = "📈"
@@ -280,8 +107,8 @@ def main() -> None:
 
     pages = [
         page_cls(
-            _render_home_page,
-            title="대시보드",
+            _build_home_page(accounts),
+            title="보유종목",
             icon="🏠",
             default=True,
         )
@@ -306,6 +133,15 @@ def main() -> None:
     #         url_path="stocks",
     #     )
     # )
+
+    pages.append(
+        page_cls(
+            "app_pages/cache_admin.py",
+            title="[Admin] 종목 캐시",
+            icon="🗃️",
+            url_path="cache",
+        )
+    )
 
     # pages.append(
     #     page_cls(

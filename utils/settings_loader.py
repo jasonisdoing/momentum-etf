@@ -14,12 +14,10 @@ class AccountSettingsError(RuntimeError):
     """계정 설정 로딩 중 발생하는 예외."""
 
 
-SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "data" / "settings"
+SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "zsettings"
 ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT / "account"
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
-PRECISION_SETTINGS_PATH = SETTINGS_ROOT / "precision.json"
-BACKTEST_SETTINGS_PATH = SETTINGS_ROOT / "backtest.json"
 logger = get_app_logger()
 
 
@@ -39,64 +37,6 @@ def _load_json(path: Path) -> Dict[str, Any]:
     if not isinstance(data, dict):
         raise AccountSettingsError(f"설정 파일의 루트는 객체(JSON object)여야 합니다: {path}")
     return data
-
-
-@lru_cache(maxsize=1)
-def _load_precision_settings() -> Dict[str, Any]:
-    try:
-        raw = PRECISION_SETTINGS_PATH.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:
-        raise AccountSettingsError(f"정밀도 설정 파일을 찾을 수 없습니다: {PRECISION_SETTINGS_PATH}") from exc
-    except OSError as exc:
-        raise AccountSettingsError(f"정밀도 설정 파일을 읽을 수 없습니다: {PRECISION_SETTINGS_PATH}") from exc
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise AccountSettingsError(f"정밀도 설정 파일이 올바른 JSON 형식이 아닙니다: {PRECISION_SETTINGS_PATH}") from exc
-
-    if not isinstance(data, dict):
-        raise AccountSettingsError(f"정밀도 설정 파일의 루트는 객체(JSON object)여야 합니다: {PRECISION_SETTINGS_PATH}")
-
-    return data
-
-
-@lru_cache(maxsize=1)
-def _load_backtest_settings() -> Dict[str, Any]:
-    try:
-        return _load_json(BACKTEST_SETTINGS_PATH)
-    except AccountSettingsError:
-        return {}
-    except Exception:
-        return {}
-
-
-def get_backtest_settings() -> Dict[str, Any]:
-    return dict(_load_backtest_settings())
-
-
-def get_backtest_months_range(default: int = 36) -> int:
-    settings = _load_backtest_settings()
-    value = settings.get("MONTHS_RANGE")
-    try:
-        months = int(value)
-        if months > 0:
-            return months
-    except (TypeError, ValueError):
-        pass
-    return int(default)
-
-
-def get_backtest_initial_capital(default: float = 100_000_000) -> float:
-    settings = _load_backtest_settings()
-    value = settings.get("INITIAL_CAPITAL_KRW")
-    try:
-        capital = float(value)
-        if capital > 0:
-            return capital
-    except (TypeError, ValueError):
-        pass
-    return float(default)
 
 
 def get_tune_month_configs(account_id: str = None) -> List[Dict[str, Any]]:
@@ -146,7 +86,7 @@ def get_tune_month_configs(account_id: str = None) -> List[Dict[str, Any]]:
 
 @lru_cache(maxsize=None)
 def get_account_settings(account_id: str) -> Dict[str, Any]:
-    """`data/settings/account/{account}.json` 파일을 로드합니다."""
+    """`zsettings/account/{account}.json` 파일을 로드합니다."""
 
     account = (account_id or "").strip().lower()
     if not account:
@@ -179,6 +119,22 @@ def _split_strategy_sections(strategy: Dict[str, Any]) -> Tuple[Dict[str, Any], 
         raise AccountSettingsError("'strategy.static' 항목은 객체(dict)여야 합니다.")
 
     return tuning, static
+
+
+def resolve_strategy_params(strategy_cfg: Any) -> Dict[str, Any]:
+    """전략 설정에서 실제 파라미터(dict)를 추출합니다.
+
+    최신 포맷은 strategy 하위에 바로 값을 두고, 구 포맷은 strategy.tuning에 둡니다.
+    """
+
+    if not isinstance(strategy_cfg, dict):
+        return {}
+
+    tuning = strategy_cfg.get("tuning")
+    if isinstance(tuning, dict) and tuning:
+        return dict(tuning)
+
+    return dict(strategy_cfg)
 
 
 def get_account_strategy_sections(account_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -222,14 +178,15 @@ def get_account_precision(account_id: str) -> Dict[str, Any]:
 
     settings = get_account_settings(account_id)
     country_code = (settings.get("country_code") or account_id).strip().lower()
+    if country_code not in ("kor", "kr"):
+        raise AccountSettingsError(f"지원하지 않는 국가 코드입니다: {country_code}")
 
-    precision_map = _load_precision_settings()
-    precision = precision_map.get(country_code)
-
-    if precision is None or not isinstance(precision, dict):
-        raise AccountSettingsError(f"'{account_id}'(국가 코드: {country_code})에 대한 정밀도 설정을 찾을 수 없습니다.")
-
-    return dict(precision)
+    return {
+        "currency": "KRW",
+        "qty_precision": 0,
+        "price_precision": 0,
+        "fx_rate_to_krw": 1.0,
+    }
 
 
 def get_account_slack_channel(account_id: str) -> Optional[str]:
@@ -306,52 +263,3 @@ def get_country_precision(country: str) -> Dict[str, Any]:  # pragma: no cover
 
 def get_country_slack_channel(country: str) -> Optional[str]:  # pragma: no cover
     return get_account_slack_channel(country)
-
-
-def get_market_regime_settings(common_settings: Optional[Mapping[str, Any]] = None) -> Tuple[str, int, str]:
-    """공통 설정에서 메인 시장 레짐 필터 설정을 반환합니다."""
-
-    if isinstance(common_settings, Mapping):
-        settings_view: Mapping[str, Any] = common_settings
-    else:
-        settings_view = load_common_settings()
-
-    ticker_raw = settings_view.get("MARKET_REGIME_FILTER_TICKER_MAIN")
-    ticker = str(ticker_raw or "").strip()
-    if not ticker:
-        raise AccountSettingsError("공통 설정에 'MARKET_REGIME_FILTER_TICKER_MAIN' 값이 필요합니다.")
-
-    ma_raw = settings_view.get("MARKET_REGIME_FILTER_MA_PERIOD")
-    if ma_raw is None:
-        raise AccountSettingsError("공통 설정에 'MARKET_REGIME_FILTER_MA_PERIOD' 값이 필요합니다.")
-
-    try:
-        ma_period = int(ma_raw)
-    except (TypeError, ValueError) as exc:  # noqa: PERF203
-        raise AccountSettingsError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 정수여야 합니다.") from exc
-
-    if ma_period <= 0:
-        raise AccountSettingsError("'MARKET_REGIME_FILTER_MA_PERIOD' 값은 0보다 커야 합니다.")
-
-    country_raw = settings_view.get("MARKET_REGIME_FILTER_COUNTRY")
-    country = str(country_raw or "us").strip().lower() or "us"
-
-    return ticker, ma_period, country
-
-
-def get_market_regime_aux_tickers(common_settings: Optional[Mapping[str, Any]] = None) -> List[str]:
-    """공통 설정에 정의된 보조 레짐 필터 티커 목록을 반환합니다."""
-
-    if isinstance(common_settings, Mapping):
-        settings_view: Mapping[str, Any] = common_settings
-    else:
-        settings_view = load_common_settings()
-
-    aux_raw = settings_view.get("MARKET_REGIME_FILTER_TICKERS_AUX", [])
-    tickers: List[str] = []
-    if isinstance(aux_raw, (list, tuple)):
-        for value in aux_raw:
-            ticker = str(value or "").strip()
-            if ticker:
-                tickers.append(ticker)
-    return tickers

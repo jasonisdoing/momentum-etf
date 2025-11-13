@@ -13,40 +13,23 @@ from utils.logger import get_app_logger
 
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
-    "a1": {
-        "MA_RANGE": np.arange(30, 65, 5),
-        "MA_TYPE": ["SMA"],
-        "PORTFOLIO_TOPN": [7],
-        "REPLACE_SCORE_THRESHOLD": [2, 3, 4, 5],
-        "OVERBOUGHT_SELL_THRESHOLD": [100],
-        "CORE_HOLDINGS": ["ASX:HNDQ", "ASX:IOO", "ASX:FANG"],
-        "COOLDOWN_DAYS": [1, 2, 3, 4, 5],
-        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    },
-    # "k1": {
-    #     "MA_RANGE": np.arange(80, 105, 5),
-    #     "MA_TYPE": ["HMA"],
-    #     "PORTFOLIO_TOPN": [12],
-    #     "REPLACE_SCORE_THRESHOLD": [5],
-    #     "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
-    #     "CORE_HOLDINGS": [102970, 395160, 442580],
-    #     "COOLDOWN_DAYS": [3, 4, 5],
-    #     "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    # },
     "k1": {
-        "MA_RANGE": np.arange(80, 105, 5),
+        "MA_RANGE": np.arange(90, 130, 10),
         "MA_TYPE": ["HMA"],
-        "PORTFOLIO_TOPN": [12],
-        "REPLACE_SCORE_THRESHOLD": [3, 4, 5],
+        "PORTFOLIO_TOPN": [10],
+        "REPLACE_SCORE_THRESHOLD": [0],
+        "STOP_LOSS_PCT": np.arange(5, 11, 1),
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
-        "CORE_HOLDINGS": [102970, 395160, 442580],
-        "COOLDOWN_DAYS": [3, 4, 5],
+        "COOLDOWN_DAYS": [2, 3, 4, 5],
+        "CORE_HOLDINGS": [],
+        # "CORE_HOLDINGS": ["473640"],
+        # "CORE_HOLDINGS": ["473640", "442580", "446690", "479620"],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
 }
 
 
-RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
+RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
 
 
 def main() -> None:

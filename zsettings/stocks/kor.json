@@ -1,0 +1,833 @@
+[
+    {
+        "category": "미국지수",
+        "tickers": [
+            {
+                "ticker": "379800",
+                "name": "Kodex 미국S&P500",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 3464121,
+                "1_week_avg_turnover": 77875039324,
+                "3_month_earn_rate": 13.6841
+            },
+            {
+                "ticker": "379810",
+                "name": "Kodex 미국나스닥100",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 1998085,
+                "1_week_avg_turnover": 49282167077,
+                "3_month_earn_rate": 14.975
+            },
+            {
+                "ticker": "245340",
+                "name": "TIGER 미국다우존스30",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 16111,
+                "1_week_avg_turnover": 545693312,
+                "3_month_earn_rate": 15.1534
+            }
+        ]
+    },
+    {
+        "category": "미국테크",
+        "tickers": [
+            {
+                "ticker": "0051A0",
+                "name": "KoAct 브로드컴밸류체인액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-05-20",
+                "1_week_avg_volume": 18603,
+                "1_week_avg_turnover": 297411281,
+                "3_month_earn_rate": 27.3514
+            },
+            {
+                "ticker": "479620",
+                "name": "SOL 미국AI반도체칩메이커",
+                "recommend_enabled": true,
+                "listing_date": "2024-05-07",
+                "1_week_avg_volume": 60311,
+                "1_week_avg_turnover": 933782796,
+                "3_month_earn_rate": 28.6358
+            },
+            {
+                "ticker": "485540",
+                "name": "Kodex 미국AI테크TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2024-06-25",
+                "1_week_avg_volume": 725100,
+                "1_week_avg_turnover": 10821130284,
+                "3_month_earn_rate": 17.5387
+            },
+            {
+                "ticker": "0041D0",
+                "name": "Kodex 미국AI소프트웨어TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2025-04-22",
+                "1_week_avg_volume": 136395,
+                "1_week_avg_turnover": 2186800000,
+                "3_month_earn_rate": 17.0926
+            },
+            {
+                "ticker": "371450",
+                "name": "TIGER 글로벌클라우드컴퓨팅INDXX",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 12556,
+                "1_week_avg_turnover": 156977843,
+                "3_month_earn_rate": 21.8839
+            }
+        ]
+    },
+    {
+        "category": "양자컴퓨터",
+        "tickers": [
+            {
+                "ticker": "0023A0",
+                "name": "SOL 미국양자컴퓨팅TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2025-03-11",
+                "1_week_avg_volume": 1006694,
+                "1_week_avg_turnover": 28459066294,
+                "3_month_earn_rate": 64.119
+            },
+            {
+                "ticker": "0020H0",
+                "name": "KoAct 글로벌양자컴퓨팅액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-03-11",
+                "1_week_avg_volume": 90814,
+                "1_week_avg_turnover": 1934794658,
+                "3_month_earn_rate": 50.3711
+            }
+        ]
+    },
+    {
+        "category": "한국테크",
+        "tickers": [
+            {
+                "ticker": "444200",
+                "name": "SOL 코리아메가테크액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 607951,
+                "1_week_avg_turnover": 18655242359,
+                "3_month_earn_rate": 35.9337
+            },
+            {
+                "ticker": "365000",
+                "name": "TIGER 인터넷TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 1276360,
+                "1_week_avg_turnover": 6171019698,
+                "3_month_earn_rate": 11.2994
+            },
+            {
+                "ticker": "157490",
+                "name": "TIGER 소프트웨어",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 852789,
+                "1_week_avg_turnover": 8348991930,
+                "3_month_earn_rate": 5.2826
+            },
+            {
+                "ticker": "0105D0",
+                "name": "SOL 한국AI소프트웨어",
+                "recommend_enabled": true,
+                "listing_date": "2025-09-23",
+                "1_week_avg_volume": 252469,
+                "1_week_avg_turnover": 2621835204,
+                "3_month_earn_rate": 3.7147
+            },
+            {
+                "ticker": "0103T0",
+                "name": "1Q K소버린AI",
+                "recommend_enabled": true,
+                "listing_date": "2025-09-30",
+                "1_week_avg_volume": 349755,
+                "1_week_avg_turnover": 3614587471,
+                "3_month_earn_rate": 1.1656
+            }
+        ]
+    },
+    {
+        "category": "한국지수",
+        "tickers": [
+            {
+                "ticker": "315960",
+                "name": "RISE 대형고배당10TR",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 142695,
+                "1_week_avg_turnover": 5178776741,
+                "3_month_earn_rate": 55.4658
+            },
+            {
+                "ticker": "315930",
+                "name": "KODEX Top5Plus TR",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 66645,
+                "1_week_avg_turnover": 2666727576,
+                "3_month_earn_rate": 51.6614
+            },
+            {
+                "ticker": "069500",
+                "name": "Kodex 200",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 17753119,
+                "1_week_avg_turnover": 1016423424851,
+                "3_month_earn_rate": 36.0817
+            },
+            {
+                "ticker": "495230",
+                "name": "KoAct 코리아밸류업액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-11-04",
+                "1_week_avg_volume": 198869,
+                "1_week_avg_turnover": 3398096592,
+                "3_month_earn_rate": 38.7122
+            },
+            {
+                "ticker": "495050",
+                "name": "RISE 코리아밸류업",
+                "recommend_enabled": true,
+                "listing_date": "2024-11-04",
+                "1_week_avg_volume": 1206479,
+                "1_week_avg_turnover": 20232344743,
+                "3_month_earn_rate": 37.868
+            }
+        ]
+    },
+    {
+        "category": "글로벌반도체",
+        "tickers": [
+            {
+                "ticker": "442580",
+                "name": "PLUS 글로벌HBM반도체",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 94711,
+                "1_week_avg_turnover": 3592673003,
+                "3_month_earn_rate": 82.507
+            },
+            {
+                "ticker": "446770",
+                "name": "ACE 글로벌반도체TOP4 Plus",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 419977,
+                "1_week_avg_turnover": 19216305711,
+                "3_month_earn_rate": 48.4088
+            },
+            {
+                "ticker": "390390",
+                "name": "KODEX 미국반도체",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 495264,
+                "1_week_avg_turnover": 17488400362,
+                "3_month_earn_rate": 28.0985
+            },
+            {
+                "ticker": "464920",
+                "name": "PLUS 일본반도체소부장",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 17036,
+                "1_week_avg_turnover": 307500555,
+                "3_month_earn_rate": 36.9548
+            },
+            {
+                "ticker": "446690",
+                "name": "KODEX 아시아AI반도체exChina액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 4614,
+                "1_week_avg_turnover": 131198090,
+                "3_month_earn_rate": 50.9834
+            }
+        ]
+    },
+    {
+        "category": "한국반도체",
+        "tickers": [
+            {
+                "ticker": "091160",
+                "name": "KODEX 반도체",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 3225400,
+                "1_week_avg_turnover": 189281287222,
+                "3_month_earn_rate": 59.1654
+            }
+        ]
+    },
+    {
+        "category": "미국지수-액티브",
+        "tickers": [
+            {
+                "ticker": "456600",
+                "name": "TIMEFOLIO 글로벌AI인공지능액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 510703,
+                "1_week_avg_turnover": 19187899887,
+                "3_month_earn_rate": 17.9298
+            },
+            {
+                "ticker": "426030",
+                "name": "TIMEFOLIO 미국나스닥100액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 654774,
+                "1_week_avg_turnover": 23973626253,
+                "3_month_earn_rate": 14.813
+            },
+            {
+                "ticker": "473460",
+                "name": "KODEX 미국서학개미",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 433829,
+                "1_week_avg_turnover": 10777816139,
+                "3_month_earn_rate": 18.1871
+            }
+        ]
+    },
+    {
+        "category": "글로벌AI전력",
+        "tickers": [
+            {
+                "ticker": "486450",
+                "name": "SOL 미국AI전력인프라",
+                "recommend_enabled": true,
+                "listing_date": "2024-07-16",
+                "1_week_avg_volume": 343047,
+                "1_week_avg_turnover": 7190844275,
+                "3_month_earn_rate": 17.2822
+            },
+            {
+                "ticker": "487230",
+                "name": "Kodex 미국AI전력핵심인프라",
+                "recommend_enabled": true,
+                "listing_date": "2024-07-09",
+                "1_week_avg_volume": 3113219,
+                "1_week_avg_turnover": 58025382520,
+                "3_month_earn_rate": 8.755
+            },
+            {
+                "ticker": "0051G0",
+                "name": "SOL 미국원자력SMR",
+                "recommend_enabled": true,
+                "listing_date": "2025-05-20",
+                "1_week_avg_volume": 1062959,
+                "1_week_avg_turnover": 19027664800,
+                "3_month_earn_rate": 19.6306
+            },
+            {
+                "ticker": "419430",
+                "name": "Kodex 차이나2차전지MSCI(합성)",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 64856,
+                "1_week_avg_turnover": 720519530,
+                "3_month_earn_rate": 48.4683
+            },
+            {
+                "ticker": "394670",
+                "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 254691,
+                "1_week_avg_turnover": 2495082747,
+                "3_month_earn_rate": 41.0092
+            },
+            {
+                "ticker": "417450",
+                "name": "RISE 글로벌수소경제",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 46124,
+                "1_week_avg_turnover": 622094987,
+                "3_month_earn_rate": 67.8484
+            },
+            {
+                "ticker": "0007G0",
+                "name": "PLUS 글로벌원자력밸류체인",
+                "recommend_enabled": true,
+                "listing_date": "2025-01-14",
+                "1_week_avg_volume": 206686,
+                "1_week_avg_turnover": 3302825790,
+                "3_month_earn_rate": 20.1532
+            }
+        ]
+    },
+    {
+        "category": "한국AI전력",
+        "tickers": [
+            {
+                "ticker": "487240",
+                "name": "Kodex AI전력핵심설비",
+                "recommend_enabled": true,
+                "listing_date": "2024-07-09",
+                "1_week_avg_volume": 6156168,
+                "1_week_avg_turnover": 157594487262,
+                "3_month_earn_rate": 57.9109
+            },
+            {
+                "ticker": "0117V0",
+                "name": "TIGER 코리아AI전력기기TOP3플러스",
+                "recommend_enabled": true,
+                "listing_date": "2025-10-21",
+                "1_week_avg_volume": 5556472,
+                "1_week_avg_turnover": 75263824563,
+                "3_month_earn_rate": 34.5561
+            },
+            {
+                "ticker": "457990",
+                "name": "PLUS 태양광&ESS",
+                "recommend_enabled": true,
+                "1_week_avg_volume": 152640,
+                "1_week_avg_turnover": 3485313488,
+                "3_month_earn_rate": 36.2573,
+                "listing_date": "2024-01-02"
+            },
+            {
+                "ticker": "377990",
+                "name": "TIGER Fn신재생에너지",
+                "recommend_enabled": true,
+                "1_week_avg_volume": 225915,
+                "1_week_avg_turnover": 4318540261,
+                "3_month_earn_rate": 34.5544,
+                "listing_date": "2024-01-02"
+            },
+            {
+                "ticker": "0101N0",
+                "name": "RISE AI전력인프라",
+                "recommend_enabled": true,
+                "listing_date": "2025-09-23",
+                "1_week_avg_volume": 503846,
+                "1_week_avg_turnover": 6769742797,
+                "3_month_earn_rate": 34.995
+            },
+            {
+                "ticker": "462010",
+                "name": "TIGER 2차전지소재Fn",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 6725631,
+                "1_week_avg_turnover": 38326103414,
+                "3_month_earn_rate": 31.9681
+            }
+        ]
+    },
+    {
+        "category": "한국로봇",
+        "tickers": [
+            {
+                "ticker": "469070",
+                "name": "RISE AI&로봇",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 1972010,
+                "1_week_avg_turnover": 23654700297,
+                "3_month_earn_rate": 22.6825
+            },
+            {
+                "ticker": "445290",
+                "name": "KODEX 로봇액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 1161602,
+                "1_week_avg_turnover": 26919413332,
+                "3_month_earn_rate": 39.577
+            }
+        ]
+    },
+    {
+        "category": "미국로봇",
+        "tickers": [
+            {
+                "ticker": "0035T0",
+                "name": "PLUS 글로벌휴머노이드로봇액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-04-15",
+                "1_week_avg_volume": 83912,
+                "1_week_avg_turnover": 1357422088,
+                "3_month_earn_rate": 33.5274
+            },
+            {
+                "ticker": "0038A0",
+                "name": "KODEX 미국휴머노이드로봇",
+                "recommend_enabled": true,
+                "listing_date": "2025-04-15",
+                "1_week_avg_volume": 502736,
+                "1_week_avg_turnover": 8042802510,
+                "3_month_earn_rate": 21.5679
+            }
+        ]
+    },
+    {
+        "category": "금/은",
+        "tickers": [
+            {
+                "ticker": "473640",
+                "name": "HANARO 글로벌 금채굴기업",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-18",
+                "1_week_avg_volume": 50491,
+                "1_week_avg_turnover": 1400579015,
+                "3_month_earn_rate": 40.1272
+            },
+            {
+                "ticker": "0064K0",
+                "name": "Kodex 금액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-06-17",
+                "1_week_avg_volume": 690301,
+                "1_week_avg_turnover": 8618223204,
+                "3_month_earn_rate": 29.226
+            },
+            {
+                "ticker": "144600",
+                "name": "Kodex 은선물(H)",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 1041262,
+                "1_week_avg_turnover": 9090716457,
+                "3_month_earn_rate": 33.3838
+            }
+        ]
+    },
+    {
+        "category": "배당안정",
+        "tickers": [
+            {
+                "ticker": "0097L0",
+                "name": "KIWOOM 한국고배당&미국AI테크",
+                "recommend_enabled": true,
+                "listing_date": "2025-09-02",
+                "1_week_avg_volume": 192072,
+                "1_week_avg_turnover": 2099525833,
+                "3_month_earn_rate": 13.5976
+            },
+            {
+                "ticker": "0115C0",
+                "name": "RISE 미국고배당다우존스TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2025-10-21",
+                "1_week_avg_volume": 289823,
+                "1_week_avg_turnover": 3000095592,
+                "3_month_earn_rate": 6.4452
+            },
+            {
+                "ticker": "441640",
+                "name": "KODEX 미국배당커버드콜액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 994937,
+                "1_week_avg_turnover": 12676865971,
+                "3_month_earn_rate": 12.3049
+            }
+        ]
+    },
+    {
+        "category": "인도",
+        "tickers": [
+            {
+                "ticker": "453870",
+                "name": "TIGER 인도니프티50",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 207325,
+                "1_week_avg_turnover": 2914746614,
+                "3_month_earn_rate": 10.3506
+            },
+            {
+                "ticker": "453810",
+                "name": "KODEX 인도Nifty50",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 164598,
+                "1_week_avg_turnover": 2356717936,
+                "3_month_earn_rate": 9.9416
+            },
+            {
+                "ticker": "479730",
+                "name": "TIGER 인도빌리언컨슈머",
+                "recommend_enabled": true,
+                "listing_date": "2024-05-14",
+                "1_week_avg_volume": 30500,
+                "1_week_avg_turnover": 338943382,
+                "3_month_earn_rate": 12.0622
+            },
+            {
+                "ticker": "498610",
+                "name": "RISE 인도디지털성장",
+                "recommend_enabled": true,
+                "listing_date": "2025-04-01",
+                "1_week_avg_volume": 8706,
+                "1_week_avg_turnover": 93674063,
+                "3_month_earn_rate": 9.4827
+            }
+        ]
+    },
+    {
+        "category": "베트남",
+        "tickers": [
+            {
+                "ticker": "245710",
+                "name": "ACE 베트남VN30",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 90224,
+                "1_week_avg_turnover": 2623464655,
+                "3_month_earn_rate": 10.9205
+            }
+        ]
+    },
+    {
+        "category": "한국금융",
+        "tickers": [
+            {
+                "ticker": "102970",
+                "name": "KODEX 증권",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 3927939,
+                "1_week_avg_turnover": 61165658425,
+                "3_month_earn_rate": 24.5573
+            },
+            {
+                "ticker": "498860",
+                "name": "RISE 코리아금융고배당",
+                "recommend_enabled": true,
+                "listing_date": "2024-12-10",
+                "1_week_avg_volume": 191449,
+                "1_week_avg_turnover": 2915835620,
+                "3_month_earn_rate": 18.391
+            },
+            {
+                "ticker": "466940",
+                "name": "TIGER 은행고배당플러스TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 1898438,
+                "1_week_avg_turnover": 39741161885,
+                "3_month_earn_rate": 13.1926
+            }
+        ]
+    },
+    {
+        "category": "미국금융",
+        "tickers": [
+            {
+                "ticker": "0013P0",
+                "name": "RISE 미국은행TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2025-02-18",
+                "1_week_avg_volume": 41712,
+                "1_week_avg_turnover": 485419167,
+                "3_month_earn_rate": 17.1788
+            },
+            {
+                "ticker": "0028X0",
+                "name": "Kodex 미국금융테크액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-05-27",
+                "1_week_avg_volume": 26198,
+                "1_week_avg_turnover": 329581396,
+                "3_month_earn_rate": 9.2873
+            }
+        ]
+    },
+    {
+        "category": "미국바이오",
+        "tickers": [
+            {
+                "ticker": "203780",
+                "name": "TIGER 미국나스닥바이오",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 46822,
+                "1_week_avg_turnover": 1352055112,
+                "3_month_earn_rate": 31.1164
+            },
+            {
+                "ticker": "0113G0",
+                "name": "KoAct 미국바이오헬스케어액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-11-11",
+                "1_week_avg_volume": 533387,
+                "1_week_avg_turnover": 5641987506,
+                "3_month_earn_rate": 1.0651
+            }
+        ]
+    },
+    {
+        "category": "한국바이오",
+        "tickers": [
+            {
+                "ticker": "0000Z0",
+                "name": "RISE 바이오TOP10액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-12-24",
+                "1_week_avg_volume": 150110,
+                "1_week_avg_turnover": 2249792257,
+                "3_month_earn_rate": 31.2765
+            },
+            {
+                "ticker": "244580",
+                "name": "KODEX 바이오",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 2829334,
+                "1_week_avg_turnover": 32496905843,
+                "3_month_earn_rate": 26.0729
+            },
+            {
+                "ticker": "266420",
+                "name": "KODEX 헬스케어",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 275612,
+                "1_week_avg_turnover": 5794722765,
+                "3_month_earn_rate": 17.7966
+            }
+        ]
+    },
+    {
+        "category": "희토류",
+        "tickers": [
+            {
+                "ticker": "415920",
+                "name": "PLUS 글로벌희토류&전략자원생산기업",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 406980,
+                "1_week_avg_turnover": 2686794238,
+                "3_month_earn_rate": 26.3206
+            }
+        ]
+    },
+    {
+        "category": "미국방산",
+        "tickers": [
+            {
+                "ticker": "494840",
+                "name": "TIGER 미국방산TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2024-10-29",
+                "1_week_avg_volume": 59779,
+                "1_week_avg_turnover": 739949973,
+                "3_month_earn_rate": 13.2057
+            },
+            {
+                "ticker": "478150",
+                "name": "TIMEFOLIO 글로벌우주테크&방산액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-04-23",
+                "1_week_avg_volume": 104946,
+                "1_week_avg_turnover": 2100027130,
+                "3_month_earn_rate": 12.3295
+            }
+        ]
+    },
+    {
+        "category": "한국방산",
+        "tickers": [
+            {
+                "ticker": "449450",
+                "name": "PLUS K방산",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 1559179,
+                "1_week_avg_turnover": 83545548066,
+                "3_month_earn_rate": 8.5667
+            },
+            {
+                "ticker": "0080G0",
+                "name": "Kodex K방산TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2025-07-15",
+                "1_week_avg_volume": 2245015,
+                "1_week_avg_turnover": 22199688470,
+                "3_month_earn_rate": 3.0639
+            }
+        ]
+    },
+    {
+        "category": "한국조선",
+        "tickers": [
+            {
+                "ticker": "466920",
+                "name": "SOL 조선TOP3플러스",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 3021940,
+                "1_week_avg_turnover": 106940671752,
+                "3_month_earn_rate": 19.9112
+            }
+        ]
+    },
+    {
+        "category": "중국지수",
+        "tickers": [
+            {
+                "ticker": "414780",
+                "name": "TIGER 차이나과창판STAR50(합성)",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 641703,
+                "1_week_avg_turnover": 7515212025,
+                "3_month_earn_rate": 37.3143
+            },
+            {
+                "ticker": "256750",
+                "name": "KODEX 차이나심천ChiNext(합성)",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 170221,
+                "1_week_avg_turnover": 2464766332,
+                "3_month_earn_rate": 38.8321
+            },
+            {
+                "ticker": "372330",
+                "name": "Kodex 차이나항셍테크",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 343322,
+                "1_week_avg_turnover": 3250238865,
+                "3_month_earn_rate": 15.9598
+            },
+            {
+                "ticker": "0043Y0",
+                "name": "TIMEFOLIO 차이나AI테크액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-05-13",
+                "1_week_avg_volume": 293565,
+                "1_week_avg_turnover": 4091717693,
+                "3_month_earn_rate": 25.8401
+            },
+            {
+                "ticker": "413220",
+                "name": "SOL 차이나태양광CSI(합성)",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 62760,
+                "1_week_avg_turnover": 377620199,
+                "3_month_earn_rate": 44.8828
+            }
+        ]
+    },
+    {
+        "category": "TBD",
+        "tickers": []
+    }
+]

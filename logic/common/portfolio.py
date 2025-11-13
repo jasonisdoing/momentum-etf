@@ -1,7 +1,11 @@
 """포트폴리오 추천 및 백테스트에서 공통으로 사용하는 헬퍼 함수들."""
 
-from typing import Dict, Set, Any, List
+from typing import Dict, Set, Any, List, Iterable, Tuple, Optional
+
+import pandas as pd
+
 from utils.logger import get_app_logger
+from strategies.maps.constants import DECISION_NOTES
 
 logger = get_app_logger()
 
@@ -132,7 +136,7 @@ def validate_core_holdings(
     valid_core_holdings = core_holdings_tickers & universe_tickers_set
     if valid_core_holdings:
         account_prefix = f"[{account_id.upper()}] " if account_id else "[백테스트] "
-        logger.info(f"{account_prefix}핵심 보유 종목 (TOPN 포함): {sorted(valid_core_holdings)}")
+        # logger.info(f"{account_prefix}핵심 보유 종목 (TOPN 포함): {sorted(valid_core_holdings)}")
 
     return valid_core_holdings
 
@@ -158,7 +162,7 @@ def check_buy_candidate_filters(
     """
     # 카테고리 중복 체크
     if category and category != "TBD" and category in held_categories:
-        return False, f"카테고리 중복 ({category})"
+        return False, DECISION_NOTES["CATEGORY_DUP"]
 
     # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
     if category and category != "TBD" and category in sell_rsi_categories_today:
@@ -176,25 +180,77 @@ def calculate_buy_budget(
     current_holdings_value: float,
     top_n: int,
 ) -> float:
-    """매수 예산 계산
+    """총자산/TOPN 기준으로 균등 비중 매수 예산을 계산합니다.
 
     Args:
-        cash: 현금
+        cash: 현재 보유 현금
         current_holdings_value: 현재 보유 자산 가치
-        top_n: 최대 보유 종목 수
+        top_n: 목표 포트폴리오 종목 수
 
     Returns:
-        매수 예산
+        매수 예산 (총자산 / TOPN, 단 보유 현금 한도를 넘지 않음)
     """
-    equity_base = cash + current_holdings_value
-    min_val = 1.0 / (top_n * 2.0) * equity_base
-    max_val = 1.0 / top_n * equity_base
-    budget = min(max_val, cash)
-
-    if budget <= 0 or budget < min_val:
+    if cash <= 0 or top_n <= 0:
         return 0.0
 
-    return budget
+    total_equity = cash + max(current_holdings_value, 0.0)
+    if total_equity <= 0:
+        return 0.0
+
+    target_value = total_equity / top_n
+    if target_value <= 0:
+        return 0.0
+
+    return min(target_value, cash)
+
+
+def build_weekly_rebalance_cache(
+    trading_days: Iterable[Any],
+) -> Dict[Tuple[int, int], Optional[pd.Timestamp]]:
+    """주간 리밸런싱을 위한 (연도, 주) -> 마지막 거래일 매핑을 생성합니다.
+
+    Args:
+        trading_days: 거래일 iterable (문자열, datetime, pandas Timestamp 등 허용)
+
+    Returns:
+        (iso_year, iso_week) -> 마지막 거래일(Timestamp) 딕셔너리
+    """
+    cache: Dict[Tuple[int, int], Optional[pd.Timestamp]] = {}
+    if trading_days is None:
+        return cache
+
+    if isinstance(trading_days, (pd.Series, pd.Index)):
+        if len(trading_days) == 0:
+            return cache
+        iterable: Iterable[Any] = trading_days
+    else:
+        # list(...) to support generators/iterators and allow length check without ambiguity
+        materialized = list(trading_days)
+        if len(materialized) == 0:
+            return cache
+        iterable = materialized
+
+    for raw_dt in iterable:
+        if raw_dt is None:
+            continue
+
+        try:
+            dt = pd.Timestamp(raw_dt)
+        except Exception:
+            continue
+
+        if pd.isna(dt):
+            continue
+
+        normalized = dt.normalize()
+        iso_year, iso_week, _ = normalized.isocalendar()
+        key = (int(iso_year), int(iso_week))
+
+        existing = cache.get(key)
+        if existing is None or normalized > existing:
+            cache[key] = normalized
+
+    return cache
 
 
 def calculate_held_categories(

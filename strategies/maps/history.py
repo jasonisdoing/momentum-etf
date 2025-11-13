@@ -78,7 +78,7 @@ def calculate_consecutive_holding_info(held_tickers: List[str], account_id: str,
 
     Args:
         held_tickers: List of tickers to check
-        account_id: 계정 ID (예: 'kor', 'aus')
+        account_id: 계정 ID (예: 'kor')
         as_of_date: Date to calculate holding info as of
 
     Returns:
@@ -190,7 +190,7 @@ def calculate_trade_cooldown_info(
 
     Args:
         tickers: List of tickers to check
-        account_id: 계정 ID (예: 'kor', 'aus')
+        account_id: 계정 ID (예: 'kor')
         country_code: 계정이 참조하는 시장 코드 (구 데이터 호환용, 옵션)
         as_of_date: Date to calculate cooldown as of
 

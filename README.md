@@ -16,7 +16,6 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
     - `history.py`: 보유일/쿨다운 계산 유틸
     - `schedule.py`: 개장 여부/다음 거래일/스케줄 타깃 날짜 계산
     - `logger.py`: 추천 전용 파일 로거
-    - `market.py`: 시장 레짐 상태 조회 (대시보드 참고용)
   - `common/`: 추천과 백테스트에서 공통으로 사용하는 로직
     - `portfolio.py`: 보유 종목 상태 계산 공통 함수 (`count_current_holdings`, `get_hold_states` 등)
     - `signals.py`: 매수 신호 판단 공통 함수
@@ -40,7 +39,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
     - `account/*.json`: 계정별 전략 설정
     - `common.py`: 공통 설정
     - `schedule_config.json`: APScheduler 설정
-  - `stocks/`: 국가별 종목 리스트 (aus.json, kor.json, us.json)
+  - `stocks/`: 국가별 종목 리스트 (kor.json)
   - `results/`: 백테스트/튜닝 결과 로그
 - `app.py`: Streamlit 웹앱 메인 진입점
 - `run.py`: 웹앱 실행 스크립트 (app.py 래퍼)
@@ -180,19 +179,19 @@ python tune.py <account_id> [--output 경로]
 
 ### 결과 파일 및 로그 경로
 
-모든 결과 로그는 계정별 폴더로 구조화되어 저장됩니다: `data/results/<account_id>/`
+모든 결과 로그는 계정별 폴더로 구조화되어 저장됩니다: `zresults/<account_id>/`
 
 - **추천 결과(요약/상세) 저장**
   - DB 저장: `utils.db_manager.save_signal_report_to_db()`로 저장되어 웹앱에서 조회됩니다
-  - 파일 저장(상세 로그): `data/results/<account_id>/recommend_{YYYY-MM-DD}.log`
+  - 파일 저장(상세 로그): `zresults/<account_id>/recommend_{YYYY-MM-DD}.log`
 - **추천 전용 파일 로그**
   - 경로: `logs/YYYY-MM-DD.log` (`logic/recommend/logger.py`)
   - 내용: 추천 생성 과정의 디테일/디버그 로그
 - **백테스트 로그**
-  - 경로: `data/results/<account_id>/backtest_{YYYY-MM-DD}.log`
+  - 경로: `zresults/<account_id>/backtest_{YYYY-MM-DD}.log`
   - 트리거: `python backtest.py <account_id>` 실행 시 자동 생성
 - **튜닝 로그**
-  - 경로: `data/results/<account_id>/tune_{YYYY-MM-DD}.log`
+  - 경로: `zresults/<account_id>/tune_{YYYY-MM-DD}.log`
   - 트리거: `python tune.py <account_id>` 실행 시 자동 생성
 
 ### 5) 스케줄러로 자동 실행 (APScheduler)
@@ -239,14 +238,6 @@ python scripts/find.py --type etf --min-change 3.0
 - **기능**: RSI 지표로 과열 종목 감지 및 매도 신호 생성
 - **임계값**: 계정별 설정 가능 (일반적으로 5~30)
 
-#### 3. 시장 레짐 모니터링
-
-- **위치**: `logic/recommend/market.py`
-- **기능**: 주요 지수(S&P 500, NASDAQ 등)의 이동평균 대비 위치 추적
-- **동작**:
-  - 시장 위험 시: 신규 매수 차단 또는 투자 비중 축소
-  - 시장 안정 시: 정상 운영
-
 #### 4. 포지션 관리 시스템
 
 ETF별로 다음 상태를 추적하고 관리합니다:
@@ -272,8 +263,6 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 - **데이터 검증**: 가격 데이터 누락 시 거래 중단
 - **현금 관리**: 투자 가능 현금 범위 내에서만 매수
 
-**참고**: 시장 레짐 정보는 대시보드에서 참고용으로만 표시되며, 실제 매매에는 영향을 주지 않습니다.
-
 ### 데이터 플로우
 
 ```
@@ -292,28 +281,24 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 
 ### 수익률 측정 방식
 
-시스템은 세 가지 방식으로 성과를 측정합니다:
+시스템은 두 가지 방식으로 성과를 점검합니다:
 
 #### (1) 백테스트
 
 - **목적**: 전략 검증 및 파라미터 최적화
 - **가격**: 다음날 시초가
-- **슬리피지**: 한국 0.5%, 호주 1%, 미국 0.3%
+- **슬리피지**: 0.25%
+- **리밸런싱**: 주별 균등 비중 (해당 주 마지막 거래일에 실행)
 - **특징**: 실제보다 불리한 조건으로 보수적 추정
 
-#### (2) 가상 거래 수익률 (Momentum ETF)
-
-- **목적**: 실제 투자 성과 측정
-- **가격**: 거래일 종가
-- **슬리피지**: 없음 (벤치마크와 동일 조건)
-- **리밸런싱**: 동적 균등 분배
-
-#### (3) 벤치마크 (Buy & Hold)
+#### (2) 벤치마크 (Buy & Hold)
 
 - **목적**: 단순 보유 전략 대비 성과 비교
 - **가격**: 시작일 종가 → 최신 종가
 - **슬리피지**: 없음
 - **리밸런싱**: 없음
+
+> **참고**: 추천 시스템은 리밸런싱 로직이 없습니다. 리밸런싱은 백테스트에서만 적용됩니다.
 
 ### 전략 파라미터
 
@@ -321,12 +306,11 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 
 | 파라미터 | 설명 | 범위 | 위치 |
 |---------|------|------|------|
-| `MA_PERIOD` | 이동평균 기간 | 10~100일 | `data/settings/account/*.json` |
+| `MA_PERIOD` | 이동평균 기간 | 10~100일 | `zsettings/account/*.json` |
 | `PORTFOLIO_TOPN` | 포트폴리오 목표 종목 수 | 3~10개 | 계정 설정 |
 | `REPLACE_SCORE_THRESHOLD` | 교체 점수 임계값 | 0~3점 | 계정 설정 |
 | `OVERBOUGHT_SELL_THRESHOLD` | RSI 과매수 임계값 | 5~30점 | 계정 설정 |
-| `COOLDOWN_DAYS` | 쿨다운 기간 | 0~5일 | `config.py` |
-| `MARKET_REGIME_MA` | 시장 레짐 MA 기간 (참고용) | 10~100일 | 공통 설정 |
+| `COOLDOWN_DAYS` | 쿨다운 기간 | 0~5일 | 계정 설정 |
 
 파라미터 최적화는 `tune.py`를 통해 수행합니다.
 
@@ -337,15 +321,11 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 모든 국가가 동일하게 사용하는 전역 파라미터를 `config.py`에서 관리합니다:
 
 - `COOLDOWN_DAYS`: 거래 쿨다운 기간
-- `MARKET_REGIME_FILTER_TICKER_MAIN`: 전략에 적용되는 주요 레짐 필터 지수 티커
-- `MARKET_REGIME_FILTER_TICKERS_AUX`: 대시보드에 참고용으로 노출할 보조 지수 리스트
-- `MARKET_REGIME_FILTER_MA_PERIOD`: 시장 레짐 필터 이동평균 기간
-- `MARKET_REGIME_FILTER_COUNTRY`: 레짐 필터 데이터 조회에 사용할 시장 코드(`kor`, `us` 등)
-- `MARKET_SCHEDULES`: 국가별 시장 거래 시간표 (한국: 9:00-14:00, 호주: 8:00-15:00, 간격: 60분)
+- `MARKET_SCHEDULES`: 시장 거래 시간표 (한국: 09:00-16:00, 간격 20분)
 
 ### 계정별 전략 파라미터
 
-각 계정의 설정은 `data/settings/account/{account_id}.json`에 저장됩니다:
+각 계정의 설정은 `zsettings/account/{account_id}.json`에 저장됩니다:
 
 **전략 설정 (`strategy`):**
 
@@ -361,7 +341,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 **표시 설정:**
 
 - `name`: 계정 표시 이름
-- `country_code`: 국가 코드 (kor, aus, us)
+- `country_code`: 국가 코드 (kor)
 - `icon`: 아이콘 (이모지)
 - `initial_cash`: 초기 자본금
 - `slack_channel`: 슬랙 알림 채널 ID
@@ -370,7 +350,7 @@ ETF별로 다음 상태를 추적하고 관리합니다:
 
 ### 최근 리팩토링(2025-10)
 
-1. **계정 중심 구조로 전환**: `data/settings/account/*.json` 기반으로 추천/백테스트가 동작하도록 전면 수정
+1. **계정 중심 구조로 전환**: `zsettings/account/*.json` 기반으로 추천/백테스트가 동작하도록 전면 수정
 2. **Streamlit 페이지 정비**: 거래 관리(`trade.py`)와 계정 마이그레이션(`migration.py`)을 분리하고 로그인 후 접근하도록 구성
 3. **추천 결과 저장 방식 개선**: 계정 ID와 국가 코드 두 경로에 결과를 저장해 UI와 스케줄러가 일관된 데이터를 참조하도록 변경
    - 히스토리: `logic/recommend/history.py` (보유일/쿨다운)

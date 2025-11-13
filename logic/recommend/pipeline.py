@@ -21,6 +21,7 @@ from utils.settings_loader import (
     get_account_settings,
     get_strategy_rules,
     load_common_settings,
+    resolve_strategy_params,
 )
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 from logic.common import sort_decisions_by_order_and_score, filter_category_duplicates
@@ -36,12 +37,40 @@ from utils.data_loader import (
     get_next_trading_day,
     count_trading_days,
     fetch_naver_etf_inav_snapshot,
+    get_trading_days,
 )
 from utils.db_manager import get_db_connection, list_open_positions
 from utils.logger import get_app_logger
 from utils.market_schedule import get_market_open_time
 
 logger = get_app_logger()
+
+# 거래일 캐시 워밍업 플래그 (전역 변수, 한 번만 실행)
+_trading_days_cache_warmed_up = set()
+
+
+def _warmup_trading_days_cache(country_code: str) -> None:
+    """거래일 캐시를 미리 로딩하여 성능 향상 (국가별 1회만 실행)"""
+    if country_code in _trading_days_cache_warmed_up:
+        return
+
+    try:
+        warmup_start = time.perf_counter()
+        # 과거 5년 + 미래 2년치 거래일 미리 조회
+        start_date = (pd.Timestamp.now() - pd.DateOffset(years=5)).strftime("%Y-%m-%d")
+        end_date = (pd.Timestamp.now() + pd.DateOffset(years=2)).strftime("%Y-%m-%d")
+
+        trading_days = get_trading_days(start_date, end_date, country_code)
+        _trading_days_cache_warmed_up.add(country_code)
+
+        logger.info(
+            "[%s] 거래일 캐시 워밍업 완료 (%.2fs, %d개 거래일)",
+            country_code.upper(),
+            time.perf_counter() - warmup_start,
+            len(trading_days),
+        )
+    except Exception as e:
+        logger.warning("[%s] 거래일 캐시 워밍업 실패: %s", country_code.upper(), e)
 
 
 @dataclass
@@ -535,10 +564,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     if not isinstance(strategy_cfg, dict):
         strategy_cfg = {}
 
-    if "tuning" in strategy_cfg or "static" in strategy_cfg:
-        strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
-    else:
-        strategy_tuning = strategy_cfg
+    strategy_tuning = resolve_strategy_params(strategy_cfg)
 
     # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
     max_per_category = config.MAX_PER_CATEGORY
@@ -1323,6 +1349,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     # rank 재설정
     for i, item in enumerate(results, 1):
         item["rank"] = i
+
+    # 계정 설정에 따라 HOLD/HOLD_CORE만 표시
+    show_hold_only = bool(
+        account_settings.get("show_hold_only")
+        or account_settings.get("show_held_only")
+        or (isinstance(strategy_cfg, dict) and strategy_cfg.get("SHOW_HOLD_ONLY"))
+    )
+    if show_hold_only:
+        allowed_states = {"HOLD", "HOLD_CORE"}
+        results = [item for item in results if (item.get("state") or "").upper() in allowed_states]
+        for i, item in enumerate(results, 1):
+            item["rank"] = i
 
     price_header = "현재가"
     for item in results:

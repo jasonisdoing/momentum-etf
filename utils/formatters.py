@@ -20,10 +20,6 @@ def format_price(value: Any, country_code: str) -> str:
 
     if country_norm in {"kr", "kor"}:
         return f"{amount:,.0f}원"
-    if country_norm in {"aus", "au", "australia"}:
-        return f"A${amount:,.2f}"
-    if country_norm in {"us", "usa", "united states"}:
-        return f"${amount:,.2f}"
 
     return f"{amount:,.2f}"
 

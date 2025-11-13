@@ -1,29 +1,28 @@
 {
     "order": 10,
     "icon": "🇰🇷",
-    "name": "한국 ETF",
+    "name": "모멘텀 ETF",
     "desc": "한국 일반계좌에서 운영종인 포트폴리오 입니다.",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
-    "initial_date": "2025-10-01",
+    "initial_capital_krw": "100000000",
+    "show_hold_only": false,
     "strategy": {
-        "MONTHS_RANGE": 12,
-        "EXPECTED_CAGR": 93.87,
+        "MONTHS_RANGE": 3,
+        "CAGR": 292.52955,
+        "MDD": -6.238066,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-10-30 23:00",
-        "tuning": {
-            "MA_PERIOD": 90,
-            "MA_TYPE": "HMA",
-            "PORTFOLIO_TOPN": 12,
-            "REPLACE_SCORE_THRESHOLD": 5,
-            "OVERBOUGHT_SELL_THRESHOLD": 97,
-            "COOLDOWN_DAYS": 5,
-            "CORE_HOLDINGS": [
-                102970,
-                395160,
-                442580
-            ]
-        }
+        "BACKTESTED_DATE": "2025-11-13 18:05",
+        "MA_PERIOD": 110,
+        "MA_TYPE": "HMA",
+        "PORTFOLIO_TOPN": 10,
+        "REPLACE_SCORE_THRESHOLD": 0.0,
+        "STOP_LOSS_PCT": 5.0,
+        "OVERBOUGHT_SELL_THRESHOLD": 91,
+        "COOLDOWN_DAYS": 4,
+        "CORE_HOLDINGS": [
+            "0113G0"
+        ]
     },
     "benchmarks": [
         {
@@ -46,8 +45,5 @@
             "ticker": "456600",
             "name": "TIMEFOLIO 글로벌AI인공지능액티브"
         }
-    ],
-    "slack": {
-        "channel": "C09FAU2NHM2"
-    }
+    ]
 }

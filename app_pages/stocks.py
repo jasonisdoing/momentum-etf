@@ -157,7 +157,7 @@ def render_stocks_admin_page() -> None:
 
     accounts = _account_options()
     if not accounts:
-        st.info("사용 가능한 계정이 없습니다. `data/settings/account` 폴더를 확인하세요.")
+        st.info("사용 가능한 계정이 없습니다. `zsettings/account` 폴더를 확인하세요.")
         return
 
     if "stocks_selected_account" not in st.session_state:

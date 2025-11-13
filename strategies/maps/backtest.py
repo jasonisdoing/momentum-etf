@@ -137,11 +137,7 @@ def run_single_ticker_backtest(
         if decision is None and held_shares == 0 and i >= buy_cooldown_until:
             consecutive_buy_days_today = consecutive_buy_days.iloc[i]
             if consecutive_buy_days_today > 0:
-                if country_code == "aus":
-                    # 소수점 4자리까지 허용
-                    buy_quantity = round(available_cash / current_price, 4) if current_price > 0 else 0.0
-                else:
-                    buy_quantity = int(available_cash // current_price)
+                buy_quantity = int(available_cash // current_price)
                 if buy_quantity > 0:
                     trade_amount = float(buy_quantity) * current_price
                     available_cash -= trade_amount

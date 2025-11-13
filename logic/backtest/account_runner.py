@@ -16,25 +16,11 @@ from utils.settings_loader import (
     get_account_precision,
     get_account_settings,
     get_strategy_rules,
-    get_backtest_months_range,
-    get_backtest_initial_capital,
+    resolve_strategy_params,
 )
-from utils.data_loader import (
-    get_latest_trading_day,
-    fetch_ohlcv,
-    get_aud_to_krw_rate,
-    get_usd_to_krw_rate,
-)
+from utils.data_loader import get_latest_trading_day, fetch_ohlcv
 from utils.stock_list_io import get_etfs
 from utils.logger import get_app_logger
-
-
-def _default_test_months_range() -> int:
-    return get_backtest_months_range()
-
-
-def _default_initial_capital() -> float:
-    return float(get_backtest_initial_capital())
 
 
 @dataclass
@@ -72,8 +58,6 @@ class AccountBacktestResult:
     ticker_summaries: List[Dict[str, Any]]
     settings_snapshot: Dict[str, Any]
     months_range: int
-    market_index_data: Optional[pd.DataFrame]
-    market_index_ticker: Optional[str]
     missing_tickers: List[str]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -140,7 +124,8 @@ def run_account_backtest(
     strategy_rules = StrategyRules.from_mapping(base_strategy_rules.to_dict())
     precision_settings = get_account_precision(account_id)
     account_settings_data = get_account_settings(account_id)
-    strategy_settings = dict(account_settings_data.get("strategy", {}).get("tuning", {}))
+    strategy_source = account_settings_data.get("strategy", {})
+    strategy_settings = dict(resolve_strategy_params(strategy_source))
     common_settings = get_common_file_settings()
 
     strategy_overrides_extra = override_settings.get("strategy_overrides")
@@ -154,14 +139,17 @@ def run_account_backtest(
             replace_threshold=strategy_override.replace_threshold,
             ma_type=strategy_override.ma_type,
             core_holdings=strategy_override.core_holdings,
+            stop_loss_pct=strategy_override.stop_loss_pct,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
         strategy_settings["CORE_HOLDINGS"] = strategy_rules.core_holdings
+        if strategy_rules.stop_loss_pct is not None:
+            strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
 
-    months_range = _resolve_months_range(months_range, override_settings)
+    months_range = _resolve_months_range(months_range, override_settings, account_settings)
     end_date = _resolve_end_date(country_code, override_settings)
     start_date = _resolve_start_date(end_date, months_range, override_settings)
 
@@ -180,7 +168,7 @@ def run_account_backtest(
 
     etf_universe = get_etfs(country_code)
     if not etf_universe:
-        raise AccountSettingsError(f"'data/stocks/{country_code}.json' 파일에서 종목을 찾을 수 없습니다.")
+        raise AccountSettingsError(f"'zsettings/stocks/{country_code}.json' 파일에서 종목을 찾을 수 없습니다.")
 
     if excluded_upper:
         before_count = len(etf_universe)
@@ -314,20 +302,28 @@ def run_account_backtest(
         ticker_summaries=ticker_summaries,
         settings_snapshot=settings_snapshot,
         months_range=months_range,
-        market_index_data=ticker_timeseries.get("__market_index_data__"),
-        market_index_ticker=ticker_timeseries.get("__market_index_ticker__"),
         missing_tickers=missing_sorted,
     )
 
 
-def _resolve_months_range(months_range: Optional[int], override_settings: Mapping[str, Any]) -> int:
+def _resolve_months_range(
+    months_range: Optional[int],
+    override_settings: Mapping[str, Any],
+    account_settings: Mapping[str, Any],
+) -> int:
     if months_range is not None:
         return int(months_range)
     if "months_range" in override_settings:
         return int(override_settings["months_range"])
     if "test_months_range" in override_settings:
         return int(override_settings["test_months_range"])
-    return _default_test_months_range()
+    account_months = account_settings.get("strategy", {}).get("MONTHS_RANGE") if account_settings else None
+    if account_months is not None:
+        try:
+            return int(account_months)
+        except (TypeError, ValueError):
+            pass
+    raise ValueError("MONTHS_RANGE 설정이 필요합니다. 계정 설정의 strategy.MONTHS_RANGE 값을 확인하세요.")
 
 
 def _resolve_initial_capital(
@@ -336,7 +332,6 @@ def _resolve_initial_capital(
     account_settings: Mapping[str, Any],
     precision_settings: Mapping[str, Any],
 ) -> InitialCapitalInfo:
-    logger = get_app_logger()
 
     def _coerce_positive_float(value: Any) -> Optional[float]:
         try:
@@ -346,59 +341,37 @@ def _resolve_initial_capital(
         return candidate if math.isfinite(candidate) and candidate > 0 else None
 
     currency = str(precision_settings.get("currency") or account_settings.get("currency") or "KRW").upper()
-
-    fx_override = _coerce_positive_float(override_settings.get("fx_rate_to_krw"))
-    if fx_override is None:
-        fx_override = _coerce_positive_float(account_settings.get("fx_rate_to_krw"))
-    if fx_override is None:
-        fx_override = _coerce_positive_float(precision_settings.get("fx_rate_to_krw"))
-
-    fx_rate = 1.0
-    if currency == "AUD":
-        fetched = _coerce_positive_float(get_aud_to_krw_rate())
-        fx_rate = fetched or fx_override or 1.0
-    elif currency == "USD":
-        fetched = _coerce_positive_float(get_usd_to_krw_rate())
-        fx_rate = fetched or fx_override or 1.0
-    else:
-        fx_rate = 1.0
-
-    if fx_rate <= 0 or not math.isfinite(fx_rate):
-        fx_rate = 1.0
-
-    if currency != "KRW" and fx_rate == 1.0 and fx_override is None:
-        logger.warning(
-            "[백테스트] '%s' 통화 환율을 가져오지 못해 KRW와 동일하게 처리합니다.",
-            currency,
-        )
-
-    backtest_config = account_settings.get("backtest", {}) if account_settings else {}
-    if not isinstance(backtest_config, Mapping):
-        backtest_config = {}
-
-    local_override = _coerce_positive_float(initial_capital)
-    if local_override is None:
-        local_override = _coerce_positive_float(override_settings.get("initial_capital"))
-    if local_override is None:
-        local_override = _coerce_positive_float(backtest_config.get("initial_capital"))
+    if currency not in {"KRW", "KR"}:
+        raise ValueError(f"지원하지 않는 통화 코드입니다: {currency}")
+    currency = "KRW"
 
     krw_override = _coerce_positive_float(override_settings.get("initial_capital_krw"))
     if krw_override is None:
-        krw_override = _coerce_positive_float(backtest_config.get("initial_capital_krw"))
+        krw_override = _coerce_positive_float(account_settings.get("initial_capital_krw") if account_settings else None)
 
-    if krw_override is None and local_override is not None and currency != "KRW":
-        krw_override = local_override * fx_rate
+    if krw_override is None:
+        raise ValueError("initial_capital_krw 설정이 필요합니다. 계정 설정의 'initial_capital_krw' 값을 확인하세요.")
 
-    base_krw = krw_override if krw_override is not None else _default_initial_capital()
+    fx_rate = 1.0
 
+    local_overrides = [
+        initial_capital,
+        override_settings.get("initial_capital"),
+        account_settings.get("initial_capital") if account_settings else None,
+    ]
+    local_override = None
+    for candidate in local_overrides:
+        local_override = _coerce_positive_float(candidate)
+        if local_override is not None:
+            break
+
+    local_capital = float(krw_override)
     if local_override is not None:
-        local_capital = local_override
-    else:
-        local_capital = base_krw / fx_rate if fx_rate > 0 else base_krw
+        local_capital = float(local_override)
 
     return InitialCapitalInfo(
         local=float(local_capital),
-        krw=float(base_krw),
+        krw=float(krw_override),
         fx_rate_to_krw=float(fx_rate),
         currency=currency,
     )
@@ -427,8 +400,13 @@ def _build_backtest_kwargs(
     prefetched_data: Optional[Mapping[str, pd.DataFrame]],
     quiet: bool,
 ) -> Dict[str, Any]:
-    # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
-    stop_loss_pct = -abs(float(strategy_rules.portfolio_topn))
+    try:
+        configured_stop_loss = (
+            float(strategy_rules.stop_loss_pct) if strategy_rules.stop_loss_pct is not None else float(strategy_rules.portfolio_topn)
+        )
+    except (TypeError, ValueError):
+        configured_stop_loss = float(strategy_rules.portfolio_topn)
+    stop_loss_threshold = -abs(configured_stop_loss)
 
     # 필수 설정 검증
     if "COOLDOWN_DAYS" not in strategy_settings:
@@ -449,7 +427,7 @@ def _build_backtest_kwargs(
         "ma_period": strategy_rules.ma_period,
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
-        "stop_loss_pct": stop_loss_pct,
+        "stop_loss_pct": stop_loss_threshold,
         "cooldown_days": cooldown_days,
         "rsi_sell_threshold": rsi_sell_threshold,
         "core_holdings": strategy_rules.core_holdings,

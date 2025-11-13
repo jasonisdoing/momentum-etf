@@ -3,11 +3,10 @@ APScheduler 기반 자동화 작업 모음
 
 작업 요약 (모두 KST 기준):
 - K1(한국 ETF) 추천: 월~금 09:01~16:51, 10분 간격으로 실행
-- A1(호주 ETF) 추천: 월~금 08:01~15:51, 10분 간격으로 실행
 - 가격 캐시 갱신: 매일 04:00 실행
 - 프로세스 기동 시 모든 계정 추천 1회 즉시 실행(설정 허용 시)
 
-스케줄 정의는 data/settings/account/<account>.json 의 schedule 섹션을 참고합니다.
+스케줄 정의는 zsettings/account/<account>.json 의 schedule 섹션을 참고합니다.
 """
 
 # 프로젝트 루트를 Python 경로에 추가
@@ -141,7 +140,7 @@ def run_cache_refresh() -> None:
 
     common_settings = get_common_file_settings()
     start_date = str(common_settings.get("CACHE_START_DATE"))
-    countries = ["kor", "aus"]
+    countries = ["kor"]
     logging.info("Running cache refresh (start=%s, countries=%s)", start_date, ",".join(countries))
     try:
         from scripts.update_price_cache import refresh_all_caches
@@ -262,13 +261,17 @@ def _register_recommendation_jobs(scheduler: BlockingScheduler, jobs: Iterable[R
             )
 
 
-def _register_cache_job(scheduler: BlockingScheduler, *, cron_expr: str = "0 4 * * *") -> None:
+def _register_cache_job(
+    scheduler: BlockingScheduler,
+    *,
+    hourly_cron_expr: str = "0 * * * *",
+) -> None:
     scheduler.add_job(
         run_cache_refresh,
-        CronTrigger.from_crontab(cron_expr, timezone=TIMEZONE),
-        id="cache_refresh",
+        CronTrigger.from_crontab(hourly_cron_expr, timezone=TIMEZONE),
+        id="cache_refresh_hourly",
     )
-    logging.info("Scheduled CACHE REFRESH: cron='%s' tz='%s'", cron_expr, TIMEZONE)
+    logging.info("Scheduled CACHE REFRESH (hourly): cron='%s' tz='%s'", hourly_cron_expr, TIMEZONE)
 
 
 def _run_initial_recommendations(jobs: Iterable[RecommendationJobConfig]) -> None:
@@ -296,10 +299,21 @@ def _log_next_runs(scheduler: BlockingScheduler) -> None:
     if not jobs:
         logging.info("No jobs registered.")
         return
+    now = datetime.now(ZoneInfo(TIMEZONE)) if ZoneInfo else datetime.now()
 
     logging.info("Next scheduled run times:")
     for job in jobs:
-        next_time = getattr(job, "next_run_time", None)
+        try:
+            next_time = job.next_run_time
+        except AttributeError:
+            next_time = None
+
+        if next_time is None:
+            try:
+                next_time = job.trigger.get_next_fire_time(None, now)
+            except Exception:
+                next_time = None
+
         if next_time is not None:
             logging.info("- %s: %s", job.id, next_time.strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -316,6 +330,9 @@ def main() -> None:
     jobs = _load_recommendation_jobs()
     if not jobs:
         logging.warning("등록 가능한 추천 잡이 없습니다. 설정을 확인하세요.")
+
+    logging.info("Running initial price cache refresh before scheduling recommendations...")
+    run_cache_refresh()
 
     _register_recommendation_jobs(scheduler, jobs)
     _register_cache_job(scheduler)

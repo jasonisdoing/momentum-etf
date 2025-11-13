@@ -1,0 +1,53 @@
+{
+    "order": 20,
+    "icon": "💻",
+    "name": "반도체",
+    "desc": "반도체 고정",
+    "country_code": "kor",
+    "slack_channel": "C09FAU2NHM2",
+    "initial_capital_krw": "100000000",
+    "show_hold_only": true,
+    "strategy": {
+        "MONTHS_RANGE": 3,
+        "CAGR": 0,
+        "MDD": 0,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "BACKTESTED_DATE": "2025-11-12 00:00",
+        "MA_PERIOD": 100,
+        "MA_TYPE": "HMA",
+        "PORTFOLIO_TOPN": 5,
+        "REPLACE_SCORE_THRESHOLD": 0.0,
+        "STOP_LOSS_PCT": 7.0,
+        "OVERBOUGHT_SELL_THRESHOLD": 90,
+        "COOLDOWN_DAYS": 5,
+        "CORE_HOLDINGS": [
+            "442580",
+            "446690",
+            "091160",
+            "446770",
+            "479620"
+        ]
+    },
+    "benchmarks": [
+        {
+            "ticker": "0097L0",
+            "name": "KIWOOM 한국고배당&미국AI테크"
+        },
+        {
+            "ticker": "379800",
+            "name": "Kodex 미국S&P500"
+        },
+        {
+            "ticker": "379810",
+            "name": "Kodex 미국나스닥100"
+        },
+        {
+            "ticker": "426030",
+            "name": "TIMEFOLIO 미국나스닥100액티브"
+        },
+        {
+            "ticker": "456600",
+            "name": "TIMEFOLIO 글로벌AI인공지능액티브"
+        }
+    ]
+}

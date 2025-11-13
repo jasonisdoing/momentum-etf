@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Mapping
+from typing import Any, List, Mapping, Optional
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,7 @@ class StrategyRules:
     replace_threshold: float
     ma_type: str = "SMA"
     core_holdings: List[str] = field(default_factory=list)
+    stop_loss_pct: Optional[float] = None
 
     @classmethod
     def from_values(
@@ -30,6 +31,7 @@ class StrategyRules:
         replace_threshold: Any,
         ma_type: Any = None,
         core_holdings: Any = None,
+        stop_loss_pct: Any = None,
     ) -> "StrategyRules":
         try:
             ma_period_int = int(ma_period)
@@ -65,12 +67,22 @@ class StrategyRules:
                 # 쉼표로 구분된 문자열 지원
                 core_holdings_list = [ticker.strip().upper() for ticker in core_holdings.split(",") if ticker.strip()]
 
+        stop_loss_value: Optional[float] = None
+        if stop_loss_pct is not None:
+            try:
+                stop_loss_value = float(stop_loss_pct)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("STOP_LOSS_PCT는 숫자여야 합니다.") from exc
+            if not (stop_loss_value > 0):
+                raise ValueError("STOP_LOSS_PCT는 0보다 커야 합니다.")
+
         return cls(
             ma_period=ma_period_int,
             portfolio_topn=portfolio_topn_int,
             replace_threshold=replace_threshold_float,
             ma_type=ma_type_str,
             core_holdings=core_holdings_list,
+            stop_loss_pct=stop_loss_value,
         )
 
     @classmethod
@@ -89,6 +101,7 @@ class StrategyRules:
             replace_threshold=_resolve("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
             core_holdings=_resolve("CORE_HOLDINGS", "core_holdings"),
+            stop_loss_pct=_resolve("STOP_LOSS_PCT", "stop_loss_pct"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -98,6 +111,7 @@ class StrategyRules:
             "replace_threshold": self.replace_threshold,
             "ma_type": self.ma_type,
             "core_holdings": list(self.core_holdings),
+            "stop_loss_pct": self.stop_loss_pct,
         }
         return d
 

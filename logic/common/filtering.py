@@ -199,8 +199,6 @@ def filter_category_duplicates(
         ticker = item.get("ticker") or item.get("tkr")
         category = item.get("category", "")
         state = item.get("state", "")
-        # composite_score 우선, 없으면 score 사용
-        composite_score = item.get("composite_score") or item.get("score", 0.0)
 
         # 교체 매매 관련 종목은 무조건 포함
         if ticker in replacement_tickers:
@@ -225,33 +223,8 @@ def filter_category_duplicates(
                     category_best_map[category_key] = item
             continue
 
-        # WAIT 상태: 카테고리별 최고 점수만 포함
-        if state == "WAIT":
-            category_key = category_key_getter(category)
-            if not category_key or category == "TBD":
-                # 카테고리가 없는 경우 모두 포함
-                filtered_results.append(item)
-            else:
-                # 이미 보유 중인 카테고리는 제외 (단, 매도 예정 종목은 held_categories에서 이미 제거됨)
-                if category_key in held_categories:
-                    continue
-
-                # 카테고리별 최고 점수 체크
-                if category_key not in category_best_map:
-                    category_best_map[category_key] = item
-                    filtered_results.append(item)
-                else:
-                    # 이미 더 높은 점수가 있으면 제외
-                    existing_item = category_best_map[category_key]
-                    existing_score = existing_item.get("composite_score") or existing_item.get("score", 0.0)
-                    if composite_score > existing_score:
-                        # 기존 항목 제거하고 새 항목 추가
-                        filtered_results.remove(category_best_map[category_key])
-                        category_best_map[category_key] = item
-                        filtered_results.append(item)
-        else:
-            # 기타 상태는 모두 포함
-            filtered_results.append(item)
+        # WAIT 상태도 그대로 노출하여 동일 카테고리의 후보를 모두 확인할 수 있도록 한다.
+        filtered_results.append(item)
 
     return filtered_results
 
