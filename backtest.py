@@ -18,15 +18,15 @@ from logic.recommend.output import print_run_header
 from utils.logger import get_app_logger
 from utils.stock_list_io import get_etfs
 from utils.data_loader import prepare_price_data, get_latest_trading_day
-from utils.settings_loader import get_backtest_months_range, load_common_settings
+from utils.settings_loader import load_common_settings
 
-RESULTS_DIR = Path(__file__).resolve().parent / "data" / "results"
+RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
 
 
 def _available_account_choices() -> list[str]:
     choices = list_available_accounts()
     if not choices:
-        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. data/settings/account/*.json 파일을 확인하세요.")
+        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. zsettings/account/*.json 파일을 확인하세요.")
     return choices
 
 
@@ -56,7 +56,14 @@ def main() -> None:
         parser.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
-    months_range = get_backtest_months_range()
+    strategy_cfg = account_settings.get("strategy", {}) or {}
+    months_range = strategy_cfg.get("MONTHS_RANGE")
+    if months_range is None:
+        parser.error("계정 설정에 'strategy.MONTHS_RANGE' 값을 지정해야 합니다.")
+    try:
+        months_range = int(months_range)
+    except (TypeError, ValueError):
+        parser.error("MONTHS_RANGE 설정이 올바른 숫자여야 합니다.")
     end_date = get_latest_trading_day(country_code)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()

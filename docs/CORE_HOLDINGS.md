@@ -33,7 +33,7 @@
 
 ## 설정 방법
 
-### 계정 설정 파일 (예: `data/settings/account/k1.json`)
+### 계정 설정 파일 (예: `zsettings/account/k1.json`)
 
 ```json
 {

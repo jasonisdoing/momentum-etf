@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import numbers
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,24 +13,12 @@ from logic.backtest.account_runner import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
 from utils.notification import build_summary_line_from_summary_data
-from utils.report import (
-    format_aud_money,
-    format_kr_money,
-    format_usd_money,
-    render_table_eaw,
-)
+from utils.report import format_kr_money, render_table_eaw
 from utils.logger import get_app_logger
-from utils.settings_loader import (
-    get_backtest_months_range,
-    get_account_precision,
-)
+from utils.settings_loader import get_account_precision, resolve_strategy_params
 
-DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "data" / "results"
+DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
 logger = get_app_logger()
-
-
-def _default_months_range() -> int:
-    return get_backtest_months_range()
 
 
 # ---------------------------------------------------------------------------
@@ -93,10 +82,7 @@ def print_backtest_summary(
     if not isinstance(strategy_cfg, dict):
         strategy_cfg = {}
 
-    if "tuning" in strategy_cfg or "static" in strategy_cfg:
-        strategy_tuning = strategy_cfg.get("tuning") if isinstance(strategy_cfg.get("tuning"), dict) else {}
-    else:  # 구 포맷과의 호환성 유지
-        strategy_tuning = strategy_cfg
+    strategy_tuning = resolve_strategy_params(strategy_cfg)
 
     merged_strategy = dict(strategy_tuning)
 
@@ -110,12 +96,7 @@ def print_backtest_summary(
     final_value_krw_value = float(summary.get("final_value_krw", final_value_local))
     fx_rate_to_krw = float(summary.get("fx_rate_to_krw", 1.0) or 1.0)
 
-    if currency == "AUD":
-        money_formatter = format_aud_money
-    elif currency == "USD":
-        money_formatter = format_usd_money
-    else:
-        money_formatter = format_kr_money
+    money_formatter = format_kr_money
 
     output_lines: List[str] = []
     section_counter = section_start_index
@@ -139,9 +120,17 @@ def print_backtest_summary(
     ma_period = merged_strategy["MA_PERIOD"]
     momentum_label = f"{ma_period}일"
 
-    holding_stop_loss_pct = float(portfolio_topn)
+    stop_loss_source = strategy_tuning.get("STOP_LOSS_PCT")
+    try:
+        holding_stop_loss_pct = float(stop_loss_source if stop_loss_source is not None else portfolio_topn)
+    except (TypeError, ValueError):
+        holding_stop_loss_pct = float(portfolio_topn)
+
     # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
-    stop_loss_label = f"{holding_stop_loss_pct:.0f}%"
+    if abs(holding_stop_loss_pct - round(holding_stop_loss_pct)) < 1e-6:
+        stop_loss_label = f"{int(round(holding_stop_loss_pct))}%"
+    else:
+        stop_loss_label = f"{holding_stop_loss_pct:.2f}%"
 
     used_settings = {
         "계정": account_id.upper(),
@@ -381,7 +370,13 @@ def print_backtest_summary(
 
 
 def _is_finite_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not math.isnan(value) and not math.isinf(value)
+    if not isinstance(value, numbers.Number):
+        return False
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(numeric)
 
 
 def _format_quantity(amount: float, precision: int) -> str:
@@ -402,7 +397,7 @@ def _resolve_formatters(account_settings: Dict[str, Any]):
     if not isinstance(precision, dict):
         precision = {}
 
-    currency = str(precision.get("currency") or account_settings.get("currency") or "KRW").upper()
+    currency = "KRW"
     qty_precision = int(precision.get("qty_precision", 0))
     price_precision = int(precision.get("price_precision", 0))
 
@@ -412,24 +407,6 @@ def _resolve_formatters(account_settings: Dict[str, Any]):
         if not _is_finite_number(value):
             return "-"
         return f"{float(value):,.{digits}f}"
-
-    if currency == "AUD":
-
-        def _aud_money(value: float) -> str:
-            if not _is_finite_number(value):
-                return "-"
-            return f"A${float(value):,.2f}"
-
-        return currency, _aud_money, _format_price, qty_precision, digits
-
-    if currency == "USD":
-
-        def _usd_money(value: float) -> str:
-            if not _is_finite_number(value):
-                return "-"
-            return f"${float(value):,.2f}"
-
-        return currency, _usd_money, _format_price, qty_precision, digits
 
     def _krw_price(value: float) -> str:
         if not _is_finite_number(value):
@@ -441,7 +418,9 @@ def _resolve_formatters(account_settings: Dict[str, Any]):
 
 def _format_date_kor(ts: pd.Timestamp) -> str:
     ts = pd.to_datetime(ts)
-    return f"{ts.year}년 {ts.month}월 {ts.day}일"
+    weekday_map = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
+    weekday = weekday_map.get(ts.weekday(), "")
+    return f"{ts.year}년 {ts.month}월 {ts.day}일({weekday})"
 
 
 def _build_daily_table_rows(
@@ -550,10 +529,10 @@ def _build_daily_table_rows(
         # 누적 수익률 = 평가 수익률 (현재 보유분 기준)
         cumulative_pct_display = evaluated_pct_display
         score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
-        weight_display = f"{weight:.0f}%"
+        weight_display = f"{weight:.1f}%"
         if is_cash and total_value_safe > 0:
             cash_ratio = (total_cash / total_value_safe) if _is_finite_number(total_cash) else 0.0
-            weight_display = f"{cash_ratio * 100.0:.0f}%"
+            weight_display = f"{cash_ratio * 100.0:.1f}%"
 
         phrase = note or str(row.get("phrase", ""))
 
@@ -645,10 +624,6 @@ def _generate_daily_report_lines(
 
     portfolio_df = result.portfolio_timeseries
     lines: List[str] = []
-
-    # 시장 지수 데이터
-    market_index_data = result.market_index_data
-    market_index_ticker = result.market_index_ticker
 
     price_header = "현재가"
 
@@ -771,36 +746,6 @@ def _generate_daily_report_lines(
         lines.append("")
         lines.append(summary_line)
 
-        # 시장 지수 정보 추가
-        if market_index_data is not None and market_index_ticker:
-            if target_date in market_index_data.index:
-                index_row = market_index_data.loc[target_date]
-                change_pct = index_row.get("change_pct")
-                close_value = index_row.get("Close")
-                is_up = index_row.get("is_up")
-                consecutive_days = index_row.get("consecutive_days")
-
-                if pd.notna(change_pct) and pd.notna(close_value):
-                    # 연속 일수 정보 추가
-                    streak_text = ""
-                    if pd.notna(is_up) and pd.notna(consecutive_days):
-                        direction = "상승" if is_up else "하락"
-                        streak_text = f"({int(consecutive_days)}연속 {direction})"
-
-                    # 종가 값을 천 단위 구분자와 함께 표시
-                    index_line = f"[MARKET_TIMING] {close_value:,.2f}, {change_pct:+.2f}%{streak_text}"
-                    lines.append(index_line)
-                elif pd.notna(close_value):
-                    # 등락률은 없지만 종가는 있는 경우
-                    index_line = f"[MARKET_TIMING] {close_value:,.2f}, 데이터 없음 (전일 종가 없음)"
-                    lines.append(index_line)
-                else:
-                    # 전일 데이터가 없는 경우 (백테스트 첫날이지만 지수 데이터도 없음)
-                    lines.append(f"[MARKET_TIMING] {market_index_ticker}: 데이터 없음 (전일 종가 없음)")
-            else:
-                # 해당 날짜의 지수 데이터가 없는 경우
-                lines.append(f"[MARKET_TIMING] {market_index_ticker}: 데이터 없음 (장 마감 전 또는 휴장일)")
-
         lines.extend(table_lines)
 
         for ticker_key, ts in result.ticker_timeseries.items():
@@ -852,11 +797,19 @@ def dump_backtest_log(
     daily_lines = _generate_daily_report_lines(result, account_settings)
     lines.extend(daily_lines)
 
+    months_range_value = getattr(result, "months_range", None)
+    if months_range_value is None:
+        if isinstance(account_settings, dict):
+            months_range_value = account_settings.get("strategy", {}).get("MONTHS_RANGE")
+    if months_range_value is None:
+        raise ValueError("MONTHS_RANGE 설정이 필요합니다. 계정 설정의 strategy.MONTHS_RANGE 값을 확인하세요.")
+    months_range_value = int(months_range_value)
+
     summary_section = print_backtest_summary(
         summary=result.summary,
         account_id=account_id,
         country_code=country_code,
-        test_months_range=getattr(result, "months_range", _default_months_range()),
+        test_months_range=months_range_value,
         initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),

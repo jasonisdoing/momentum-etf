@@ -32,12 +32,12 @@ from pykrx import stock
 
 # --- 설정 ---
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
-EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "ETN"]
+EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN"]
 
 
 def _load_stock_metadata() -> Dict[str, Dict]:
     """
-    data/stocks/*.json 파일에서 3개월 수익률 정보를 로드합니다.
+    zsettings/stocks/*.json 파일에서 3개월 수익률 정보를 로드합니다.
 
     Returns:
         {ticker: {"3_month_earn_rate": float, ...}} 형태의 딕셔너리

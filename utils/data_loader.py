@@ -191,8 +191,6 @@ def _now_with_zone(tz_name: str) -> datetime:
 
 MARKET_OPEN_INFO = {
     "kor": ("Asia/Seoul", time(9, 0)),
-    "aus": ("Asia/Seoul", time(8, 0)),
-    "us": ("America/New_York", time(9, 30)),
 }
 
 
@@ -224,55 +222,6 @@ def _is_time_in_window(now_dt: datetime, start: time, end: time) -> bool:
     return start <= current <= end
 
 
-@functools.lru_cache(maxsize=1)
-def get_aud_to_krw_rate() -> Optional[float]:
-    """yfinance를 사용하여 AUD/KRW 환율을 조회합니다."""
-    if not yf:
-        return None
-    try:
-        ticker = yf.Ticker("AUDKRW=X")
-        # 가장 최근 가격을 가져오기 위해 2일간의 1분 단위 데이터 시도
-        data = ticker.history(period="2d", interval="1m")
-        if not data.empty:
-            return data["Close"].iloc[-1]
-        # 1m 데이터가 없으면 일 단위 데이터로 폴백
-        data = ticker.history(period="2d")
-        if not data.empty:
-            return data["Close"].iloc[-1]
-    except Exception as e:
-        error_msg = str(e)
-        if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
-            logger.error("AUD/KRW 환율 조회 Rate Limit 에러: %s", e)
-            raise RateLimitException("AUDKRW=X", error_msg)
-        logger.warning("AUD/KRW 환율 정보를 가져오는 데 실패했습니다: %s", e)
-        return None
-    return None
-
-
-@functools.lru_cache(maxsize=1)
-def get_usd_to_krw_rate() -> Optional[float]:
-    """yfinance를 사용하여 USD/KRW 환율을 조회합니다."""
-    if not yf:
-        return None
-    try:
-        ticker = yf.Ticker("USDKRW=X")
-        # 가장 최근 가격을 가져오기 위해 2일간의 1분 단위 데이터 시도
-        data = ticker.history(period="2d", interval="1m")
-        if not data.empty:
-            return data["Close"].iloc[-1]
-        # 1m 데이터가 없으면 일 단위 데이터로 폴백
-        data = ticker.history(period="2d")
-        if not data.empty:
-            return data["Close"].iloc[-1]
-    except Exception as e:
-        error_msg = str(e)
-        if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
-            logger.error("USD/KRW 환율 조회 Rate Limit 에러: %s", e)
-            raise RateLimitException("USDKRW=X", error_msg)
-        logger.warning("USD/KRW 환율 정보를 가져오는 데 실패했습니다: %s", e)
-    return None
-
-
 @contextmanager
 def _silence_yfinance_logs():
     import logging
@@ -292,18 +241,6 @@ def _silence_yfinance_logs():
             lg.setLevel(lvl)
 
 
-def format_aus_ticker_for_yfinance(ticker: str) -> str:
-    """'ASX:BHP' 또는 'BHP' 같은 티커를 yfinance API 형식인 'BHP.AX'로 변환합니다."""
-    # 지수 티커(예: ^AXJO)는 변환하지 않습니다.
-    if ticker.startswith("^"):
-        return ticker
-    if ticker.upper().startswith("ASX:"):
-        ticker = ticker[4:]
-    if not ticker.upper().endswith(".AX"):
-        ticker = f"{ticker.upper()}.AX"
-    return ticker
-
-
 def get_today_str() -> str:
     """오늘 날짜를 'YYYYMMDD' 형식의 문자열로 반환합니다."""
     return datetime.now().strftime("%Y%m%d")
@@ -313,14 +250,14 @@ def get_today_str() -> str:
 def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Timestamp]:
     """
     지정된 기간 내의 모든 거래일을 pd.Timestamp 리스트로 반환합니다.
-    한국(KRX), 호주(ASX)는 pandas_market_calendars만 사용합니다.
+    한국(KRX)는 pandas_market_calendars만 사용합니다.
     """
     trading_days_ts: List[pd.Timestamp] = []
 
     def _pmc(country_code: str) -> List[pd.Timestamp]:
         import pandas_market_calendars as mcal  # type: ignore
 
-        cal_code = {"kor": "XKRX", "aus": "ASX", "us": "NYSE"}.get(country_code)
+        cal_code = {"kor": "XKRX"}.get(country_code)
         if not cal_code:
             return []
         try:
@@ -367,10 +304,6 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
 
     if country_code == "kor":
         trading_days_ts = _pmc("kor")
-    elif country_code == "aus":
-        trading_days_ts = _pmc("aus")
-    elif country_code == "us":
-        trading_days_ts = _pmc("us")
     else:
         logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
         return []
@@ -961,86 +894,6 @@ def _fetch_ohlcv_core(
             }
         )
 
-    if country_code == "aus":
-        if yf is None:
-            logger.error("yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
-            return None
-
-        ticker_yf = format_aus_ticker_for_yfinance(ticker)
-        try:
-            # yfinance에서 데이터를 가져올 때 auto_adjust=False로 설정하고, 수동으로 조정합니다.
-            df = yf.download(
-                ticker_yf,
-                start=start_dt,
-                end=end_dt + pd.Timedelta(days=1),
-                auto_adjust=False,  # 수동으로 조정
-                progress=False,
-            )
-            if df.empty:
-                return None
-
-            # 멀티 인덱스 형태로 저장된 컬럼을 단일 인덱스로 정리합니다.
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-                df = df.loc[:, ~df.columns.duplicated()]
-
-            # 조정되지 않은 종가를 백업
-            if "Close" in df.columns:
-                df["unadjusted_close"] = df["Close"]
-
-            # 조정된 종가가 있으면 사용하고, 없으면 원본 종가를 사용
-            if "Adj Close" in df.columns and not df["Adj Close"].isnull().all():
-                df["Close"] = df["Adj Close"]
-
-            # 필요한 컬럼만 남기고 나머지는 제거
-            required_columns = ["Open", "High", "Low", "Close", "Volume", "unadjusted_close"]
-            df = df[[col for col in required_columns if col in df.columns]]
-            if not df.index.is_unique:
-                df = df[~df.index.duplicated(keep="first")]
-            if df.index.tz is not None:
-                df.index = df.index.tz_localize(None)
-            return df
-        except Exception as e:
-            error_msg = str(e)
-            if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
-                logger.error("%s 데이터 조회 Rate Limit 에러: %s", ticker, e)
-                raise RateLimitException(ticker, error_msg)
-            logger.warning("%s의 데이터 조회 중 오류: %s", ticker, e)
-            return None
-
-    if country_code == "us":
-        if yf is None:
-            logger.error("yfinance 라이브러리가 설치되지 않았습니다. 'pip install yfinance'로 설치해주세요.")
-            return None
-
-        try:
-            df = yf.download(
-                ticker,
-                start=start_dt,
-                end=end_dt + pd.Timedelta(days=1),
-                auto_adjust=True,  # 수정 종가 사용
-                progress=False,
-            )
-            if df.empty:
-                return None
-
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-                df = df.loc[:, ~df.columns.duplicated()]
-
-            if not df.index.is_unique:
-                df = df[~df.index.duplicated(keep="first")]
-            if df.index.tz is not None:
-                df.index = df.index.tz_localize(None)
-            return df
-        except Exception as e:
-            error_msg = str(e)
-            if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
-                logger.error("%s 데이터 조회 Rate Limit 에러: %s", ticker, e)
-                raise RateLimitException(ticker, error_msg)
-            logger.warning("%s의 데이터 조회 중 오류: %s", ticker, e)
-            return None
-
     logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
     return None
 
@@ -1097,32 +950,6 @@ def prepare_price_data(
         warmup_days=warmup_days,
     )
     return prefetched, missing
-
-
-def fetch_au_realtime_price(ticker: str) -> Optional[float]:
-    """
-    yfinance 라이브러리를 통해 호주 종목의 실시간 현재가를 조회합니다.
-    """
-    if not yf:
-        return None
-
-    ticker_yf = format_aus_ticker_for_yfinance(ticker)
-    try:
-        # yfinance 라이브러리를 사용하여 가격 정보를 가져옵니다.
-        stock = yf.Ticker(ticker_yf)
-        # 'regularMarketPrice'는 장중 실시간 가격, 'previousClose'는 전일 종가입니다.
-        # 실시간 데이터가 없을 경우를 대비하여 두 값을 모두 확인합니다.
-        price = stock.info.get("regularMarketPrice") or stock.info.get("previousClose")
-        if price:
-            return float(price)
-    except Exception as e_yf:
-        error_msg = str(e_yf)
-        # Rate limit 에러 감지
-        if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
-            logger.error("%s의 호주 실시간 가격 조회(yfinance) Rate Limit 에러: %s", ticker, e_yf)
-            raise RateLimitException(ticker, error_msg)
-        logger.warning("%s의 호주 실시간 가격 조회(yfinance) 실패: %s", ticker, e_yf)
-    return None
 
 
 def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
@@ -1300,35 +1127,7 @@ def fetch_pykrx_name(ticker: str) -> str:
     return name
 
 
-_yfinance_name_cache: Dict[str, str] = {}
 _etf_name_cache: Dict[Tuple[str, str], str] = {}
-
-
-def fetch_yfinance_name(ticker: str) -> str:
-    """
-    yfinance를 통해 종목의 이름을 가져옵니다. 결과를 캐시하여 중복 요청을 방지합니다.
-    """
-    if yf is None:
-        return ""
-
-    cache_key = ticker
-    if cache_key in _yfinance_name_cache:
-        return _yfinance_name_cache[cache_key]
-
-    try:
-        ticker_yf = format_aus_ticker_for_yfinance(ticker)
-        stock = yf.Ticker(ticker_yf)
-        name = stock.info.get("longName") or stock.info.get("shortName") or ""
-        _yfinance_name_cache[cache_key] = name
-        return name
-    except Exception as e:
-        error_msg = str(e)
-        if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
-            logger.error("%s 이름 조회 Rate Limit 에러: %s", cache_key, e)
-            raise RateLimitException(ticker, error_msg)
-        logger.warning("%s의 이름 조회 중 오류 발생: %s", cache_key, e)
-        _yfinance_name_cache[cache_key] = ""  # 실패도 캐시하여 재시도 방지
-    return ""
 
 
 def resolve_security_name(country: str, ticker: str) -> str:
@@ -1345,8 +1144,6 @@ def resolve_security_name(country: str, ticker: str) -> str:
     name = ""
     if country_lower == "kor":
         name = fetch_pykrx_name(ticker_upper)
-    elif country_lower == "aus":
-        name = fetch_yfinance_name(ticker_upper)
 
     if not name:
         name = _get_display_name(country_lower, ticker_upper)
@@ -1387,8 +1184,6 @@ def _get_display_name(country: str, ticker: str) -> str:
         try:
             if country_code == "kor":
                 name = fetch_pykrx_name(ticker)
-            elif country_code == "aus":
-                name = fetch_yfinance_name(ticker)
         except Exception:
             pass
 
@@ -1402,14 +1197,13 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
         return None
 
     country_code = (country or "").strip().lower() or "kor"
+    if country_code not in {"kor", "kr"}:
+        logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
+        return None
 
     yfinance_ticker = ticker
-    if country_code == "aus":
-        if not ticker.upper().endswith(".AX"):
-            yfinance_ticker = f"{ticker.upper()}.AX"
-    elif country_code == "kor":
-        if ticker.isdigit() and len(ticker) == 6:
-            yfinance_ticker = f"{ticker.KS}"
+    if ticker.isdigit() and len(ticker) == 6:
+        yfinance_ticker = f"{ticker}.KS"
 
     latest_trade_day = get_latest_trading_day(country_code)
     if not latest_trade_day:

@@ -81,7 +81,7 @@ def render_account_delete_page() -> None:
         return
 
     if not available_accounts:
-        st.info("삭제할 계정이 없습니다. `data/settings/account/*.json` 파일을 확인하세요.")
+        st.info("삭제할 계정이 없습니다. `zsettings/account/*.json` 파일을 확인하세요.")
         return
 
     with st.form("account_delete_form"):
