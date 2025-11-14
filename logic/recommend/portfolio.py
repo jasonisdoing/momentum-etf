@@ -269,12 +269,6 @@ def _create_decision_entry(
     consecutive_info = consecutive_holding_info.get(tkr)
     buy_date = consecutive_info.get("buy_date") if consecutive_info else None
 
-    # DEBUG: 쿨다운 문제 디버깅
-    if sell_block_info and tkr == "473640":
-        logger.info(
-            f"[DEBUG 473640] buy_date(consecutive)={buy_date}, last_buy(cooldown)={sell_block_info.get('last_buy')}, days_since={sell_block_info.get('days_since')}"
-        )
-
     evaluation_date = max(base_date.normalize(), pd.Timestamp.now().normalize())
 
     if is_held and buy_date:
@@ -429,7 +423,9 @@ def run_portfolio_recommend(
     except (TypeError, ValueError):
         stop_loss_threshold = None
 
-    min_buy_score = getattr(strategy_rules, "min_buy_score", 0.0) or 0.0
+    if not hasattr(strategy_rules, "min_buy_score"):
+        raise ValueError("StrategyRules에 MIN_BUY_SCORE가 없습니다.")
+    min_buy_score = float(strategy_rules.min_buy_score)
 
     # 핵심 보유 종목 (강제 보유, TOPN 포함)
     from logic.common import validate_core_holdings
