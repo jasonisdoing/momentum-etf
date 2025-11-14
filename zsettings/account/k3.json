@@ -1,26 +1,31 @@
 {
-    "order": 10,
-    "icon": "🇰🇷",
-    "name": "모멘텀 ETF",
-    "desc": "한국 일반계좌에서 운영종인 포트폴리오 입니다.",
+    "order": 30,
+    "icon": "🐶",
+    "name": "안정투자",
+    "desc": "고배당 + 안정 + 헷징",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_capital_krw": "100000000",
-    "show_hold_only": false,
+    "show_hold_only": true,
     "strategy": {
         "MONTHS_RANGE": 3,
-        "CAGR": 283.823861,
-        "MDD": -6.404062,
+        "CAGR": 0,
+        "MDD": 0,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-11-14 11:49",
+        "BACKTESTED_DATE": "2025-11-12 00:00",
         "MA_PERIOD": 60,
         "MA_TYPE": "HMA",
-        "PORTFOLIO_TOPN": 9,
+        "PORTFOLIO_TOPN": 4,
         "REPLACE_SCORE_THRESHOLD": 0.0,
-        "STOP_LOSS_PCT": 8.0,
+        "STOP_LOSS_PCT": 7.0,
         "OVERBOUGHT_SELL_THRESHOLD": 92,
         "COOLDOWN_DAYS": 5,
-        "CORE_HOLDINGS": []
+        "CORE_HOLDINGS": [
+            "0097L0",
+            "0115C0",
+            "441640",
+            "473640"
+        ]
     },
     "benchmarks": [
         {

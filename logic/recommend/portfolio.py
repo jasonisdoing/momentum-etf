@@ -207,7 +207,7 @@ def _determine_sell_decision(
         phrase = f"RSI 과매수 (RSI점수: {rsi_score_value:.1f})"
     elif not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
         state = "SELL_TREND"
-        phrase = DECISION_NOTES["TREND_BREAK"]
+        phrase = f"{DECISION_NOTES['TREND_BREAK']}({ma:,.0f}원 이하)"
 
     # 쿨다운 체크: SELL_RSI와 SELL_TREND 모두 동일하게 적용
     if sell_block_info and state in ("SELL_RSI", "SELL_TREND"):
