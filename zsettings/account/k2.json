@@ -1,7 +1,7 @@
 {
     "order": 20,
     "icon": "💾",
-    "name": "반도체 + 안정",
+    "name": "고정",
     "desc": "여러종목에 분산해서 고정투자",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
