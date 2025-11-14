@@ -676,7 +676,7 @@ def _process_ticker_data(
     from utils.moving_averages import calculate_moving_average
 
     moving_average = calculate_moving_average(close_prices, current_ma_period, ma_type)
-    ma_score = calculate_ma_score(close_prices, moving_average, normalize=False)
+    ma_score = calculate_ma_score(close_prices, moving_average)
 
     # 점수 기반 매수 시그널 지속일 계산
     from logic.common import calculate_consecutive_days

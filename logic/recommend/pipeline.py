@@ -760,7 +760,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             from logic.common import get_buy_signal_streak
 
             moving_average = calculate_moving_average(price_series, ma_period, ma_type)
-            ma_score_series = calculate_ma_score(price_series, moving_average, normalize=False)
+            ma_score_series = calculate_ma_score(price_series, moving_average)
             score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
             consecutive_buy_days = get_buy_signal_streak(score, ma_score_series)
 
