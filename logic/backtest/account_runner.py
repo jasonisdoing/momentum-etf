@@ -432,6 +432,7 @@ def _build_backtest_kwargs(
         "rsi_sell_threshold": rsi_sell_threshold,
         "core_holdings": strategy_rules.core_holdings,
         "quiet": quiet,
+        "min_buy_score": strategy_rules.min_buy_score,
     }
 
     clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}

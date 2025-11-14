@@ -4,7 +4,7 @@ from typing import Optional
 import pandas as pd
 
 
-def has_buy_signal(score: float) -> bool:
+def has_buy_signal(score: float, min_score: float = 0.0) -> bool:
     """점수를 기반으로 매수 시그널 여부를 판단합니다.
 
     Args:
@@ -13,11 +13,12 @@ def has_buy_signal(score: float) -> bool:
     Returns:
         True if 매수 시그널 있음 (점수 > 0), False otherwise
     """
-    return score > 0
+    return score > min_score
 
 
 def calculate_consecutive_days(
     scores: pd.Series,
+    min_score: float = 0.0,
 ) -> pd.Series:
     """점수 시리즈를 기반으로 매수 시그널 지속일을 계산합니다.
 
@@ -28,7 +29,7 @@ def calculate_consecutive_days(
         매수 시그널이 연속으로 활성화된 일수 시리즈
     """
     # 점수가 양수인 경우 매수 시그널 활성화
-    buy_signal_active = scores > 0
+    buy_signal_active = scores > min_score
 
     # 매수 시그널이 연속으로 활성화된 일수 계산
     consecutive_days = buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum()).cumsum().fillna(0).astype(int)
@@ -36,7 +37,7 @@ def calculate_consecutive_days(
     return consecutive_days
 
 
-def get_buy_signal_streak(score: float, score_series: Optional[pd.Series] = None) -> int:
+def get_buy_signal_streak(score: float, score_series: Optional[pd.Series] = None, min_score: float = 0.0) -> int:
     """현재 점수와 점수 시리즈를 기반으로 매수 시그널 지속일을 반환합니다.
 
     Args:
@@ -46,11 +47,11 @@ def get_buy_signal_streak(score: float, score_series: Optional[pd.Series] = None
     Returns:
         매수 시그널 지속일 (점수 <= 0이면 0)
     """
-    if score <= 0:
+    if score <= min_score:
         return 0
 
     if score_series is not None and not score_series.empty:
-        consecutive_days = calculate_consecutive_days(score_series)
+        consecutive_days = calculate_consecutive_days(score_series, min_score)
         return int(consecutive_days.iloc[-1])
 
     # score_series가 없으면 최소 1일로 반환 (점수가 양수이므로)

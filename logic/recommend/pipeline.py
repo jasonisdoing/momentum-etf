@@ -565,6 +565,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         strategy_cfg = {}
 
     strategy_tuning = resolve_strategy_params(strategy_cfg)
+    try:
+        min_buy_score = float(strategy_tuning.get("MIN_BUY_SCORE", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        min_buy_score = 0.0
 
     # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
     max_per_category = config.MAX_PER_CATEGORY
@@ -762,7 +766,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             moving_average = calculate_moving_average(price_series, ma_period, ma_type)
             ma_score_series = calculate_ma_score(price_series, moving_average)
             score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
-            consecutive_buy_days = get_buy_signal_streak(score, ma_score_series)
+            consecutive_buy_days = get_buy_signal_streak(score, ma_score_series, min_buy_score)
 
             from strategies.rsi.recommend import calculate_rsi_for_ticker
 

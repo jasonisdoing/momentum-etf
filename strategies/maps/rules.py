@@ -21,6 +21,7 @@ class StrategyRules:
     ma_type: str = "SMA"
     core_holdings: List[str] = field(default_factory=list)
     stop_loss_pct: Optional[float] = None
+    min_buy_score: float = 0.0
 
     @classmethod
     def from_values(
@@ -32,6 +33,7 @@ class StrategyRules:
         ma_type: Any = None,
         core_holdings: Any = None,
         stop_loss_pct: Any = None,
+        min_buy_score: Any = None,
     ) -> "StrategyRules":
         try:
             ma_period_int = int(ma_period)
@@ -76,6 +78,13 @@ class StrategyRules:
             if not (stop_loss_value > 0):
                 raise ValueError("STOP_LOSS_PCT는 0보다 커야 합니다.")
 
+        min_buy_score_value = 0.0
+        if min_buy_score is not None:
+            try:
+                min_buy_score_value = float(min_buy_score)
+            except (TypeError, ValueError):
+                min_buy_score_value = 0.0
+
         return cls(
             ma_period=ma_period_int,
             portfolio_topn=portfolio_topn_int,
@@ -83,6 +92,7 @@ class StrategyRules:
             ma_type=ma_type_str,
             core_holdings=core_holdings_list,
             stop_loss_pct=stop_loss_value,
+            min_buy_score=min_buy_score_value,
         )
 
     @classmethod
@@ -102,6 +112,7 @@ class StrategyRules:
             ma_type=_resolve("MA_TYPE", "ma_type"),
             core_holdings=_resolve("CORE_HOLDINGS", "core_holdings"),
             stop_loss_pct=_resolve("STOP_LOSS_PCT", "stop_loss_pct"),
+            min_buy_score=_resolve("MIN_BUY_SCORE", "min_buy_score"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -112,6 +123,7 @@ class StrategyRules:
             "ma_type": self.ma_type,
             "core_holdings": list(self.core_holdings),
             "stop_loss_pct": self.stop_loss_pct,
+            "min_buy_score": self.min_buy_score,
         }
         return d
 

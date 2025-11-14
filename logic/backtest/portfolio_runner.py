@@ -342,6 +342,7 @@ def _execute_individual_sells(
     cash: float,
     current_holdings_value: float,
     ma_period: int,
+    min_buy_score: float,
 ) -> tuple[float, float]:
     """개별 종목 매도 로직 (손절, RSI, 추세)"""
     for ticker, ticker_metrics in metrics_by_ticker.items():
@@ -360,11 +361,12 @@ def _execute_individual_sells(
                 decision = "CUT_STOPLOSS"
             elif rsi_score_current >= rsi_sell_threshold:
                 decision = "SELL_RSI"
-            elif not pd.isna(score_today.get(ticker, float("nan"))) and score_today.get(ticker, 0.0) <= 0:
+            elif not pd.isna(score_today.get(ticker, float("nan"))) and score_today.get(ticker, 0.0) <= min_buy_score:
                 decision = "SELL_TREND"
                 ma_val_today = ticker_metrics["ma_values"][i]
                 ma_val = float(ma_val_today) if not pd.isna(ma_val_today) else None
-                trend_phrase = _format_trend_break_phrase(ma_val, price, ma_period)
+                ticker_ma_period = ticker_metrics.get("ma_period", ma_period)
+                trend_phrase = _format_trend_break_phrase(ma_val, price, ticker_ma_period)
 
             # 핵심 보유 종목은 매도 신호 무시
             if decision and ticker in valid_core_holdings:
@@ -647,6 +649,7 @@ def _process_ticker_data(
     etf_ma_period: int,
     stock_ma_period: int,
     ma_type: str = "SMA",
+    min_buy_score: float = 0.0,
 ) -> Optional[Dict]:
     """
     개별 종목의 데이터를 처리하고 지표를 계산합니다.
@@ -705,7 +708,7 @@ def _process_ticker_data(
     # 점수 기반 매수 시그널 지속일 계산
     from logic.common import calculate_consecutive_days
 
-    consecutive_buy_days = calculate_consecutive_days(ma_score)
+    consecutive_buy_days = calculate_consecutive_days(ma_score, min_buy_score)
 
     # RSI 전략 지표 계산
     from strategies.rsi.backtest import process_ticker_data_rsi
@@ -721,6 +724,7 @@ def _process_ticker_data(
         "ma_score": ma_score,
         "rsi_score": rsi_score,
         "buy_signal_days": consecutive_buy_days,
+        "ma_period": current_ma_period,
     }
 
 
@@ -742,6 +746,7 @@ def run_portfolio_backtest(
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     missing_ticker_sink: Optional[Set[str]] = None,
+    min_buy_score: float = 0.0,
 ) -> Dict[str, pd.DataFrame]:
     """
     이동평균 기반 모멘텀 전략으로 포트폴리오 백테스트를 실행합니다.
@@ -814,7 +819,15 @@ def run_portfolio_backtest(
             df = fetch_ohlcv(ticker, country=country, date_range=fetch_date_range)
 
         # 공통 함수를 사용하여 데이터 처리 및 지표 계산
-        ticker_metrics = _process_ticker_data(ticker, df, etf_tickers, etf_ma_period, stock_ma_period, ma_type)
+        ticker_metrics = _process_ticker_data(
+            ticker,
+            df,
+            etf_tickers,
+            etf_ma_period,
+            stock_ma_period,
+            ma_type,
+            min_buy_score,
+        )
         if ticker_metrics:
             metrics_by_ticker[ticker] = ticker_metrics
 
@@ -1068,6 +1081,7 @@ def run_portfolio_backtest(
             cash=cash,
             current_holdings_value=current_holdings_value,
             ma_period=ma_period,
+            min_buy_score=min_buy_score,
         )
 
         # --- 3-1. 핵심 보유 종목 자동 매수 (최우선) ---

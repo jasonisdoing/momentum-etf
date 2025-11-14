@@ -20,6 +20,7 @@
         "STOP_LOSS_PCT": 7.0,
         "OVERBOUGHT_SELL_THRESHOLD": 92,
         "COOLDOWN_DAYS": 5,
+        "MIN_BUY_SCORE": 0.0,
         "CORE_HOLDINGS": [
             "0097L0",
             "0115C0",

@@ -189,6 +189,7 @@ def _determine_sell_decision(
     price_value: Optional[float],
     ma: float,
     ma_period: Optional[int],
+    min_score_threshold: float,
     sell_block_info: Optional[Dict],
     cooldown_days: Optional[int],
     DECISION_MESSAGES: Dict,
@@ -207,7 +208,7 @@ def _determine_sell_decision(
     elif rsi_score_value >= rsi_sell_threshold:
         state = "SELL_RSI"
         phrase = f"RSI 과매수 (RSI점수: {rsi_score_value:.1f})"
-    elif score_value is not None and score_value <= 0:
+    elif score_value is not None and score_value <= min_score_threshold:
         state = "SELL_TREND"
         phrase = _build_trend_break_phrase(ma, price_value, ma_period, DECISION_NOTES)
 
@@ -240,6 +241,7 @@ def _create_decision_entry(
     current_equity: float,
     stop_loss_threshold: Optional[float],
     cooldown_days: Optional[int],
+    min_buy_score: float,
     rsi_sell_threshold: float = 10.0,
 ) -> Dict[str, Any]:
     """개별 종목의 의사결정 엔트리를 생성합니다."""
@@ -300,6 +302,7 @@ def _create_decision_entry(
             price_value=price,
             ma=ma,
             ma_period=data.get("ma_period"),
+            min_score_threshold=min_buy_score,
             sell_block_info=sell_block_info,
             cooldown_days=cooldown_days,
             DECISION_MESSAGES=DECISION_MESSAGES,
@@ -311,7 +314,7 @@ def _create_decision_entry(
         from logic.common import has_buy_signal
 
         score_value = data.get("score", 0.0)
-        if has_buy_signal(score_value):
+        if has_buy_signal(score_value, min_buy_score):
             buy_signal = True
             if buy_block_info:
                 buy_signal = False
@@ -426,6 +429,8 @@ def run_portfolio_recommend(
     except (TypeError, ValueError):
         stop_loss_threshold = None
 
+    min_buy_score = getattr(strategy_rules, "min_buy_score", 0.0) or 0.0
+
     # 핵심 보유 종목 (강제 보유, TOPN 포함)
     from logic.common import validate_core_holdings
 
@@ -478,6 +483,7 @@ def run_portfolio_recommend(
                 "rsi_score": 0.0,
                 "filter": 0,
                 "close": pd.Series(),
+                "ma_period": strategy_rules.ma_period,
             }
 
         decision = _create_decision_entry(
@@ -494,6 +500,7 @@ def run_portfolio_recommend(
             current_equity,
             stop_loss_threshold,
             cooldown_days,
+            min_buy_score,
             rsi_sell_threshold,
         )
         decisions.append(decision)
@@ -544,6 +551,7 @@ def run_portfolio_recommend(
                         current_equity,
                         stop_loss_threshold,
                         cooldown_days,
+                        min_buy_score,
                         rsi_sell_threshold,
                     )
                     core_decision["state"] = "BUY"
