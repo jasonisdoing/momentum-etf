@@ -799,6 +799,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 "ret_3w": _compute_trailing_return(price_series, 15),
                 "trend_prices": trend_prices,
                 "price_deviation": price_deviation if is_kor_market else None,
+                "ma_period": ma_period,
             }
         else:
             missing_data_tickers.append(ticker)

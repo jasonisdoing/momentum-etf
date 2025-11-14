@@ -185,8 +185,10 @@ def _determine_sell_decision(
     stop_loss_threshold: Optional[float],
     rsi_score_value: float,
     rsi_sell_threshold: float,
-    price_ma: float,
+    score_value: Optional[float],
+    price_value: Optional[float],
     ma: float,
+    ma_period: Optional[int],
     sell_block_info: Optional[Dict],
     cooldown_days: Optional[int],
     DECISION_MESSAGES: Dict,
@@ -205,9 +207,9 @@ def _determine_sell_decision(
     elif rsi_score_value >= rsi_sell_threshold:
         state = "SELL_RSI"
         phrase = f"RSI 과매수 (RSI점수: {rsi_score_value:.1f})"
-    elif not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
+    elif score_value is not None and score_value <= 0:
         state = "SELL_TREND"
-        phrase = f"{DECISION_NOTES['TREND_BREAK']}({ma:,.0f}원 이하)"
+        phrase = _build_trend_break_phrase(ma, price_value, ma_period, DECISION_NOTES)
 
     # 쿨다운 체크: SELL_RSI와 SELL_TREND 모두 동일하게 적용
     if sell_block_info and state in ("SELL_RSI", "SELL_TREND"):
@@ -287,15 +289,17 @@ def _create_decision_entry(
 
     # 매매 의사결정
     if state == "HOLD":
-        price_ma, ma = data["price"], data["s1"]
+        ma = data["s1"]
         state, phrase = _determine_sell_decision(
             state=state,
             holding_return_pct=holding_return_pct,
             stop_loss_threshold=stop_loss_threshold,
             rsi_score_value=rsi_score_value,
             rsi_sell_threshold=rsi_sell_threshold,
-            price_ma=price_ma,
+            score_value=score_value,
+            price_value=price,
             ma=ma,
+            ma_period=data.get("ma_period"),
             sell_block_info=sell_block_info,
             cooldown_days=cooldown_days,
             DECISION_MESSAGES=DECISION_MESSAGES,
@@ -934,3 +938,24 @@ __all__ = [
     "generate_daily_recommendations_for_portfolio",  # 호환성
     "safe_generate_daily_recommendations_for_portfolio",  # 호환성
 ]
+
+
+def _build_trend_break_phrase(
+    ma_value: Optional[float],
+    price_value: Optional[float],
+    ma_period: Optional[int],
+    DECISION_NOTES: Dict,
+) -> str:
+    if ma_value is None or pd.isna(ma_value) or price_value is None or pd.isna(price_value):
+        threshold = ma_value if (ma_value is not None and not pd.isna(ma_value)) else 0.0
+        return f"{DECISION_NOTES['TREND_BREAK']}({threshold:,.0f}원 이하)"
+
+    diff = ma_value - price_value
+    direction = "낮습니다" if diff >= 0 else "높습니다"
+    period_text = ""
+    if ma_period:
+        try:
+            period_text = f"{int(ma_period)}일 "
+        except (TypeError, ValueError):
+            period_text = ""
+    return f"{DECISION_NOTES['TREND_BREAK']}({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"

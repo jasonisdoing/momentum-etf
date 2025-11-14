@@ -21,6 +21,22 @@ from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
 logger = get_app_logger()
 
 
+def _format_trend_break_phrase(ma_value: float | None, price_value: float | None, ma_period: Optional[int]) -> str:
+    if ma_value is None or pd.isna(ma_value) or price_value is None or pd.isna(price_value):
+        threshold = ma_value if (ma_value is not None and not pd.isna(ma_value)) else 0.0
+        return f"{DECISION_NOTES['TREND_BREAK']}({threshold:,.0f}원 이하)"
+
+    diff = ma_value - price_value
+    direction = "낮습니다" if diff >= 0 else "높습니다"
+    period_text = ""
+    if ma_period:
+        try:
+            period_text = f"{int(ma_period)}일 "
+        except (TypeError, ValueError):
+            period_text = ""
+    return f"{DECISION_NOTES['TREND_BREAK']}({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"
+
+
 def _is_weekly_rebalance_day(
     date: pd.Timestamp,
     country_code: str,
@@ -311,7 +327,7 @@ def _execute_individual_sells(
     valid_core_holdings: Set[str],
     metrics_by_ticker: Dict,
     today_prices: Dict[str, float],
-    ma_today: Dict[str, float],
+    score_today: Dict[str, float],
     rsi_score_today: Dict[str, float],
     ticker_to_category: Dict[str, str],
     sell_rsi_categories_today: Set[str],
@@ -325,6 +341,7 @@ def _execute_individual_sells(
     cooldown_days: int,
     cash: float,
     current_holdings_value: float,
+    ma_period: int,
 ) -> tuple[float, float]:
     """개별 종목 매도 로직 (손절, RSI, 추세)"""
     for ticker, ticker_metrics in metrics_by_ticker.items():
@@ -334,6 +351,7 @@ def _execute_individual_sells(
             in_cooldown = i < ticker_state["sell_block_until"]
             decision = None
             hold_ret = (price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0
+            trend_phrase = DECISION_NOTES["TREND_BREAK"]
 
             # RSI 과매수 매도 조건 체크
             rsi_score_current = rsi_score_today.get(ticker, 0.0)
@@ -342,8 +360,11 @@ def _execute_individual_sells(
                 decision = "CUT_STOPLOSS"
             elif rsi_score_current >= rsi_sell_threshold:
                 decision = "SELL_RSI"
-            elif price < ma_today[ticker]:
+            elif not pd.isna(score_today.get(ticker, float("nan"))) and score_today.get(ticker, 0.0) <= 0:
                 decision = "SELL_TREND"
+                ma_val_today = ticker_metrics["ma_values"][i]
+                ma_val = float(ma_val_today) if not pd.isna(ma_val_today) else None
+                trend_phrase = _format_trend_break_phrase(ma_val, price, ma_period)
 
             # 핵심 보유 종목은 매도 신호 무시
             if decision and ticker in valid_core_holdings:
@@ -401,6 +422,9 @@ def _execute_individual_sells(
                         "avg_cost": 0,
                     }
                 )
+                if decision == "SELL_TREND":
+                    note_text = trend_phrase if trend_phrase else DECISION_NOTES["TREND_BREAK"]
+                    row["note"] = note_text
 
     return cash, current_holdings_value
 
@@ -906,7 +930,6 @@ def run_portfolio_backtest(
 
         tickers_available_today: List[str] = []
         today_prices: Dict[str, float] = {}
-        ma_today: Dict[str, float] = {}
         score_today: Dict[str, float] = {}
         rsi_score_today: Dict[str, float] = {}
         buy_signal_today: Dict[str, int] = {}
@@ -922,7 +945,6 @@ def run_portfolio_backtest(
             rsi_score_val = ticker_metrics.get("rsi_score_values", [float("nan")] * len(union_index))[i]
             buy_signal_val = ticker_metrics["buy_signal_values"][i]
 
-            ma_today[ticker] = float(ma_val) if not pd.isna(ma_val) else float("nan")
             score_today[ticker] = float(score_val) if not pd.isna(score_val) else 0.0
             rsi_score_today[ticker] = float(rsi_score_val) if not pd.isna(rsi_score_val) else 0.0
             buy_signal_today[ticker] = int(buy_signal_val) if not pd.isna(buy_signal_val) else 0
@@ -975,7 +997,8 @@ def run_portfolio_backtest(
             if decision_out == "HOLD_CORE" and not note:
                 note = "🔒 핵심 보유"
 
-            ma_value = ma_today.get(ticker, float("nan"))
+            ma_val = ticker_metrics["ma_values"][i]
+            ma_value = float(ma_val) if not pd.isna(ma_val) else float("nan")
             score_value = score_today.get(ticker, 0.0)
             rsi_score_value = rsi_score_today.get(ticker, 0.0)
             filter_value = buy_signal_today.get(ticker, 0)
@@ -1030,7 +1053,7 @@ def run_portfolio_backtest(
             valid_core_holdings=valid_core_holdings,
             metrics_by_ticker=metrics_by_ticker,
             today_prices=today_prices,
-            ma_today=ma_today,
+            score_today=score_today,
             rsi_score_today=rsi_score_today,
             ticker_to_category=ticker_to_category,
             sell_rsi_categories_today=sell_rsi_categories_today,
@@ -1044,6 +1067,7 @@ def run_portfolio_backtest(
             cooldown_days=cooldown_days,
             cash=cash,
             current_holdings_value=current_holdings_value,
+            ma_period=ma_period,
         )
 
         # --- 3-1. 핵심 보유 종목 자동 매수 (최우선) ---
@@ -1446,7 +1470,10 @@ def run_portfolio_backtest(
                 if overrides.get("state") == "SOLD":
                     last_row["decision"] = "SOLD"
                 if overrides.get("note") is not None:
-                    last_row["note"] = overrides["note"]
+                    new_note = overrides["note"]
+                    if current_note:
+                        new_note = f"{new_note} | {current_note}"
+                    last_row["note"] = new_note
 
         out_cash.append(
             {
