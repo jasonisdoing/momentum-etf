@@ -5,7 +5,7 @@
 """
 
 import math
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 import pandas as pd
 
@@ -660,6 +660,7 @@ def _process_ticker_data(
     etf_tickers: set,
     etf_ma_period: int,
     stock_ma_period: int,
+    precomputed_entry: Optional[Mapping[str, Any]] = None,
     ma_type: str = "SMA",
     *,
     min_buy_score: float,
@@ -678,45 +679,77 @@ def _process_ticker_data(
     Returns:
         Dict: 계산된 지표들 또는 None (처리 실패 시)
     """
-    if df is None:
+    if df is None and precomputed_entry is None:
         return None
 
-    # yfinance MultiIndex 컬럼 처리
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-        df = df.loc[:, ~df.columns.duplicated()]
+    working_df = df
+    if working_df is None and precomputed_entry:
+        # Dummy frame to keep downstream logic consistent
+        working_df = pd.DataFrame()
+
+    if working_df is not None and isinstance(working_df.columns, pd.MultiIndex):
+        working_df = working_df.copy()
+        working_df.columns = working_df.columns.get_level_values(0)
+        working_df = working_df.loc[:, ~working_df.columns.duplicated()]
 
     # 티커 유형에 따라 이동평균 기간 결정
     current_ma_period = etf_ma_period if ticker in etf_tickers else stock_ma_period
 
-    if len(df) < current_ma_period:
-        return None
+    close_prices = None
+    open_prices = None
+    if isinstance(precomputed_entry, Mapping):
+        close_prices = precomputed_entry.get("close")
+        open_prices = precomputed_entry.get("open")
 
-    price_series = None
-    if "unadjusted_close" in df.columns:
-        price_series = df["unadjusted_close"]
-    else:
-        price_series = df["Close"]
+    if close_prices is None:
+        if working_df is None or len(working_df) < current_ma_period:
+            return None
 
-    if isinstance(price_series, pd.DataFrame):
-        price_series = price_series.iloc[:, 0]
-    close_prices = price_series.astype(float)
+        price_series = None
+        if isinstance(working_df.columns, pd.MultiIndex):
+            cols = working_df.columns.get_level_values(0)
+            working_df = working_df.copy()
+            working_df.columns = cols
+            working_df = working_df.loc[:, ~working_df.columns.duplicated()]
 
-    # Open 가격 추출 (시초가 거래용)
-    open_series = None
-    if "Open" in df.columns:
-        open_series = df["Open"]
-        if isinstance(open_series, pd.DataFrame):
-            open_series = open_series.iloc[:, 0]
-        open_prices = open_series.astype(float)
-    else:
-        open_prices = close_prices.copy()  # Open 데이터 없으면 Close 사용
+        if "unadjusted_close" in working_df.columns:
+            price_series = working_df["unadjusted_close"]
+        else:
+            price_series = working_df["Close"]
+
+        if isinstance(price_series, pd.DataFrame):
+            price_series = price_series.iloc[:, 0]
+        close_prices = price_series.astype(float)
+
+        if len(close_prices) < current_ma_period:
+            return None
+
+    if open_prices is None:
+        if working_df is not None and "Open" in working_df.columns:
+            open_series = working_df["Open"]
+            if isinstance(open_series, pd.DataFrame):
+                open_series = open_series.iloc[:, 0]
+            open_prices = open_series.astype(float)
+        else:
+            open_prices = close_prices.copy()
 
     # MAPS 전략 지표 계산
     from utils.moving_averages import calculate_moving_average
 
-    moving_average = calculate_moving_average(close_prices, current_ma_period, ma_type)
-    ma_score = calculate_ma_score(close_prices, moving_average)
+    ma_type_key = (ma_type or "SMA").upper()
+    ma_key = f"{ma_type_key}_{int(current_ma_period)}"
+    moving_average = None
+    ma_score = None
+    if isinstance(precomputed_entry, Mapping):
+        ma_cache = precomputed_entry.get("ma") or {}
+        ma_score_cache = precomputed_entry.get("ma_score") or {}
+        moving_average = ma_cache.get(ma_key)
+        ma_score = ma_score_cache.get(ma_key)
+
+    if moving_average is None:
+        moving_average = calculate_moving_average(close_prices, current_ma_period, ma_type)
+    if ma_score is None:
+        ma_score = calculate_ma_score(close_prices, moving_average)
 
     # 점수 기반 매수 시그널 지속일 계산
     from logic.common import calculate_consecutive_days
@@ -726,11 +759,15 @@ def _process_ticker_data(
     # RSI 전략 지표 계산
     from strategies.rsi.backtest import process_ticker_data_rsi
 
-    rsi_data = process_ticker_data_rsi(close_prices)
-    rsi_score = rsi_data.get("rsi_score") if rsi_data else pd.Series(dtype=float)
+    rsi_score = None
+    if isinstance(precomputed_entry, Mapping):
+        rsi_score = precomputed_entry.get("rsi_score")
+    if rsi_score is None or isinstance(rsi_score, float):
+        rsi_data = process_ticker_data_rsi(close_prices)
+        rsi_score = rsi_data.get("rsi_score") if rsi_data else pd.Series(dtype=float)
 
     return {
-        "df": df,
+        "df": working_df if working_df is not None else df,
         "close": close_prices,
         "open": open_prices,  # 시초가 추가
         "ma": moving_average,
@@ -749,6 +786,7 @@ def run_portfolio_backtest(
     date_range: Optional[List[str]] = None,
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
     ma_period: int = 20,
     ma_type: str = "SMA",
     replace_threshold: float = 0.0,
@@ -833,6 +871,7 @@ def run_portfolio_backtest(
             df = fetch_ohlcv(ticker, country=country, date_range=fetch_date_range)
 
         # 공통 함수를 사용하여 데이터 처리 및 지표 계산
+        precomputed_entry = prefetched_metrics.get(ticker) if prefetched_metrics else None
         ticker_metrics = _process_ticker_data(
             ticker,
             df,
@@ -840,6 +879,7 @@ def run_portfolio_backtest(
             etf_ma_period,
             stock_ma_period,
             ma_type=ma_type,
+            precomputed_entry=precomputed_entry,
             min_buy_score=min_buy_score,
         )
         if ticker_metrics:

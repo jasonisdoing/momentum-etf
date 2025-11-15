@@ -39,6 +39,107 @@ DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
 MAX_TABLE_ROWS = 20
 
+_WORKER_PREFETCHED_DATA: Optional[Mapping[str, DataFrame]] = None
+_WORKER_PREFETCHED_METRICS: Optional[Mapping[str, Dict[str, Any]]] = None
+_WORKER_PREFETCHED_UNIVERSE: Optional[Sequence[Mapping[str, Any]]] = None
+
+
+def _init_worker_prefetch(
+    prefetched_data: Mapping[str, DataFrame] | None,
+    prefetched_metrics: Mapping[str, Dict[str, Any]] | None,
+    prefetched_universe: Sequence[Mapping[str, Any]] | None,
+) -> None:
+    """ProcessPoolExecutor initializer to reuse prefetched artifacts."""
+
+    global _WORKER_PREFETCHED_DATA, _WORKER_PREFETCHED_METRICS, _WORKER_PREFETCHED_UNIVERSE
+    _WORKER_PREFETCHED_DATA = prefetched_data
+    _WORKER_PREFETCHED_METRICS = prefetched_metrics
+    _WORKER_PREFETCHED_UNIVERSE = prefetched_universe
+
+
+def _extract_price_series_for_prefetch(df: pd.DataFrame) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
+    if df is None or df.empty:
+        return None, None
+
+    working = df
+    if isinstance(working.columns, pd.MultiIndex):
+        working = working.copy()
+        working.columns = working.columns.get_level_values(0)
+        working = working.loc[:, ~working.columns.duplicated()]
+
+    close_series = None
+    for candidate in ("unadjusted_close", "Close", "close"):
+        if candidate in working.columns:
+            series = working[candidate]
+            if isinstance(series, pd.DataFrame):
+                series = series.iloc[:, 0]
+            close_series = series.astype(float)
+            break
+    if close_series is None:
+        return None, None
+
+    open_series = None
+    if "Open" in working.columns:
+        open_col = working["Open"]
+        if isinstance(open_col, pd.DataFrame):
+            open_col = open_col.iloc[:, 0]
+        open_series = open_col.astype(float)
+
+    return close_series, open_series
+
+
+def _build_prefetched_metric_cache(
+    prefetched_data: Mapping[str, pd.DataFrame],
+    *,
+    ma_periods: Sequence[int],
+    ma_types: Sequence[str],
+) -> Dict[str, Dict[str, Any]]:
+    if not prefetched_data:
+        return {}
+
+    period_pool = sorted({int(p) for p in ma_periods if isinstance(p, (int, float)) and int(p) > 0})
+    type_pool = sorted({(t or "SMA").upper() for t in ma_types if isinstance(t, str) and t})
+    if not period_pool or not type_pool:
+        return {}
+
+    from utils.moving_averages import calculate_moving_average
+    from utils.indicators import calculate_ma_score
+    from strategies.rsi.backtest import process_ticker_data_rsi
+
+    cache: Dict[str, Dict[str, Any]] = {}
+    for ticker, df in prefetched_data.items():
+        if df is None or df.empty:
+            continue
+        close_series, open_series = _extract_price_series_for_prefetch(df)
+        if close_series is None or close_series.empty:
+            continue
+
+        entry: Dict[str, Any] = {
+            "close": close_series,
+            "open": open_series if open_series is not None else close_series.copy(),
+            "ma": {},
+            "ma_score": {},
+        }
+
+        rsi_payload = process_ticker_data_rsi(close_series)
+        if rsi_payload:
+            entry["rsi_score"] = rsi_payload.get("rsi_score")
+
+        for ma_type in type_pool:
+            for period in period_pool:
+                if len(close_series) < period:
+                    continue
+                ma_series = calculate_moving_average(close_series, period, ma_type)
+                if ma_series is None:
+                    continue
+                ma_key = f"{ma_type}_{period}"
+                entry["ma"][ma_key] = ma_series
+                entry["ma_score"][ma_key] = calculate_ma_score(close_series, ma_series)
+
+        cache[ticker] = entry
+
+    return cache
+
 
 def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:
     if values is None:
@@ -408,6 +509,7 @@ def _export_debug_month(
     prefetched_data: Mapping[str, DataFrame],
     capture_top_n: int,
     prefetched_etf_universe: Sequence[Mapping[str, Any]],
+    prefetched_metrics: Mapping[str, Dict[str, Any]] | None,
 ) -> List[Dict[str, Any]]:
     if capture_top_n <= 0 or not raw_rows:
         return []
@@ -458,6 +560,7 @@ def _export_debug_month(
             prefetched_data=prefetched_data,
             strategy_override=strategy_rules,
             prefetched_etf_universe=prefetched_etf_universe,
+            prefetched_metrics=prefetched_metrics,
         )
 
         result_live = run_account_backtest(
@@ -466,6 +569,7 @@ def _export_debug_month(
             quiet=True,
             strategy_override=strategy_rules,
             prefetched_etf_universe=prefetched_etf_universe,
+            prefetched_metrics=None,
         )
 
         stop_loss_dir_part = f"SL{stop_loss_value:.2f}" if stop_loss_value is not None else "SLauto"
@@ -525,6 +629,7 @@ def _evaluate_single_combo(
         Tuple[str, ...],
         Mapping[str, DataFrame],
         Sequence[Mapping[str, Any]],
+        Mapping[str, Dict[str, Any]],
     ]
 ) -> Tuple[str, Any, List[str]]:
     (
@@ -543,7 +648,12 @@ def _evaluate_single_combo(
         core_holdings_tuple,
         prefetched_data,
         prefetched_etf_universe,
+        prefetched_metrics,
     ) = payload
+
+    data_source = prefetched_data or _WORKER_PREFETCHED_DATA or {}
+    metrics_source = prefetched_metrics or _WORKER_PREFETCHED_METRICS or {}
+    universe_source = prefetched_etf_universe or _WORKER_PREFETCHED_UNIVERSE or ()
 
     try:
         override_rules = StrategyRules.from_values(
@@ -586,10 +696,11 @@ def _evaluate_single_combo(
                 "end_date": date_range[1],
                 "strategy_overrides": strategy_overrides,
             },
-            prefetched_data=prefetched_data,
+            prefetched_data=data_source,
             strategy_override=override_rules,
             excluded_tickers=set(excluded_tickers) if excluded_tickers else None,
-            prefetched_etf_universe=prefetched_etf_universe,
+            prefetched_etf_universe=universe_source,
+            prefetched_metrics=metrics_source,
         )
     except Exception as exc:
         return (
@@ -643,6 +754,7 @@ def _execute_tuning_for_months(
     output_path: Optional[Path] = None,
     progress_callback: Optional[callable] = None,
     prefetched_etf_universe: Sequence[Mapping[str, Any]],
+    prefetched_metrics: Mapping[str, Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     logger = get_app_logger()
 
@@ -705,6 +817,10 @@ def _execute_tuning_for_months(
     # search_space에서 core_holdings 가져오기
     core_holdings_from_space = search_space.get("CORE_HOLDINGS", [])
 
+    serialized_prefetched_data = prefetched_data if workers <= 1 else None
+    serialized_prefetched_metrics = prefetched_metrics if workers <= 1 else None
+    serialized_universe = prefetched_etf_universe if workers <= 1 else None
+
     payloads = [
         (
             account_norm,
@@ -720,8 +836,9 @@ def _execute_tuning_for_months(
             float(min_score),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             tuple(core_holdings_from_space) if core_holdings_from_space else tuple(),
-            prefetched_data,
-            prefetched_etf_universe,
+            serialized_prefetched_data,
+            serialized_universe,
+            serialized_prefetched_metrics,
         )
         for ma, topn, replace, stop_loss, rsi, cooldown, ma_type, min_score in combos
     ]
@@ -762,7 +879,8 @@ def _execute_tuning_for_months(
                         total=len(combos),
                     )
     else:
-        with ProcessPoolExecutor(max_workers=workers) as executor:
+        init_args = (prefetched_data, prefetched_metrics, prefetched_etf_universe)
+        with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker_prefetch, initargs=init_args) as executor:
             future_map = {executor.submit(_evaluate_single_combo, payload): payload for payload in payloads}
             for idx, future in enumerate(as_completed(future_map), 1):
                 status, data, missing = future.result()
@@ -1136,12 +1254,24 @@ def _compose_tuning_report(
     month_results: List[Dict[str, Any]],
     progress_info: Optional[Dict[str, Any]] = None,
     tuning_metadata: Optional[Dict[str, Any]] = None,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
 ) -> List[str]:
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    lines: List[str] = [
-        f"실행 시각: {timestamp}",
-        f"계정: {account_id.upper()}",
-    ]
+    start_ts = start_time or datetime.now()
+    start_str = start_ts.strftime("%Y-%m-%d %H:%M:%S")
+    lines: List[str] = [f"실행 시각: {start_str}"]
+
+    if end_time is not None:
+        end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(f"종료 시각: {end_str}")
+        elapsed = end_time - start_ts
+        elapsed_seconds = max(int(elapsed.total_seconds()), 0)
+        hours = elapsed_seconds // 3600
+        minutes = (elapsed_seconds % 3600) // 60
+        seconds = elapsed_seconds % 60
+        lines.append(f"걸린 시간: {hours}시간 {minutes}분 {seconds}초")
+
+    lines.append(f"계정: {account_id.upper()}")
 
     if progress_info:
         completed = progress_info.get("completed", 0)
@@ -1403,6 +1533,7 @@ def run_account_tuning(
 
     account_norm = (account_id or "").strip().lower()
     logger = get_app_logger()
+    tuning_start_ts = datetime.now()
 
     try:
         account_settings = get_account_settings(account_norm)
@@ -1700,6 +1831,8 @@ def run_account_tuning(
         "test_period_ranges": test_period_ranges,
     }
 
+    normalized_month_items: List[Dict[str, Any]] = []
+
     for item in month_items:
         months_raw = item.get("months_range")
         try:
@@ -1750,18 +1883,34 @@ def run_account_tuning(
         for ticker, frame in prefetched_adjusted.items():
             save_cached_frame(country_code, ticker, frame)
         missing_prefetch.extend(additional_missing)
+        normalized_month_items.append(sanitized_item)
 
-        # 최적화 지표에 따른 정렬 함수 정의
-        optimization_metric = search_space.get("OPTIMIZATION_METRIC").upper()
+    ma_period_pool = sorted({int(base_rules.ma_period), *[int(v) for v in ma_values]})
+    ma_type_pool = sorted({(base_rules.ma_type or "SMA").upper(), *[(mt or "SMA").upper() for mt in ma_type_values]})
+    prefetched_metrics_map = _build_prefetched_metric_cache(
+        prefetched_map,
+        ma_periods=ma_period_pool,
+        ma_types=ma_type_pool,
+    )
 
-        def _sort_key_local(entry):
-            """최적화 지표에 따른 정렬 키"""
-            if optimization_metric == "CAGR":
-                return _safe_float(entry.get("cagr"), float("-inf"))
-            elif optimization_metric == "SHARPE":
-                return _safe_float(entry.get("sharpe"), float("-inf"))
-            else:  # SDR (default)
-                return _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
+    if not normalized_month_items:
+        logger.warning("[튜닝] 실행 가능한 기간 항목이 없습니다.")
+        return None
+
+    # 최적화 지표에 따른 정렬 함수 정의
+    optimization_metric = search_space.get("OPTIMIZATION_METRIC").upper()
+
+    def _sort_key_local(entry):
+        """최적화 지표에 따른 정렬 키"""
+        if optimization_metric == "CAGR":
+            return _safe_float(entry.get("cagr"), float("-inf"))
+        elif optimization_metric == "SHARPE":
+            return _safe_float(entry.get("sharpe"), float("-inf"))
+        else:  # SDR (default)
+            return _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
+
+    for idx, item in enumerate(normalized_month_items, 1):
+        months_value = item.get("months_range", 0)
 
         # 중간 저장 콜백 함수 정의
         def save_progress_callback(success_entries, progress_pct, completed, total):
@@ -1819,6 +1968,7 @@ def run_account_tuning(
             output_path=txt_path,
             progress_callback=save_progress_callback,
             prefetched_etf_universe=etf_universe,
+            prefetched_metrics=prefetched_metrics_map,
         )
 
         if not single_result:
@@ -1844,7 +1994,7 @@ def run_account_tuning(
                 month_results=results_per_month,
                 progress_info={
                     "completed": len(results_per_month),
-                    "total": len(month_items),
+                    "total": len(normalized_month_items),
                 },
                 tuning_metadata=tuning_metadata,
             )
@@ -1852,7 +2002,7 @@ def run_account_tuning(
                 "[튜닝] %s 중간 결과 저장 완료 (%d/%d 기간)",
                 account_norm.upper(),
                 len(results_per_month),
-                len(month_items),
+                len(normalized_month_items),
             )
 
         if debug_dir is not None and capture_top_n > 0:
@@ -1866,6 +2016,7 @@ def run_account_tuning(
                     prefetched_data=prefetched_map,
                     capture_top_n=capture_top_n,
                     prefetched_etf_universe=etf_universe,
+                    prefetched_metrics=prefetched_metrics_map,
                 )
             )
 
@@ -1955,10 +2106,14 @@ def run_account_tuning(
                 writer = csv.DictWriter(fp, fieldnames=summary_fields)
                 writer.writeheader()
                 writer.writerows(debug_diff_rows)
+    tuning_end_ts = datetime.now()
+
     report_lines = _compose_tuning_report(
         account_norm,
         month_results=results_per_month,
         tuning_metadata=tuning_metadata,
+        start_time=tuning_start_ts,
+        end_time=tuning_end_ts,
     )
 
     # Remove only the exact output file if it exists (preserve backup copies)
@@ -1977,6 +2132,12 @@ def run_account_tuning(
         print(line)
 
     logger.info("튜닝 요약을 '%s'에 기록했습니다.", txt_path)
+    elapsed = tuning_end_ts - tuning_start_ts
+    elapsed_seconds = int(elapsed.total_seconds())
+    hours = elapsed_seconds // 3600
+    minutes = (elapsed_seconds % 3600) // 60
+    seconds = elapsed_seconds % 60
+    logger.info("[튜닝] 총 소요 시간: %d시간 %d분 %d초", hours, minutes, seconds)
 
     return txt_path
 

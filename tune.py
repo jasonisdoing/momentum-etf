@@ -28,7 +28,7 @@ TUNING_CONFIG: dict[str, dict] = {
     "k2": {
         "MA_RANGE": np.arange(15, 55, 5),
         "MA_TYPE": ["TEMA", "HMA"],
-        "PORTFOLIO_TOPN": [5, 6, 7, 8, 9, 10],
+        "PORTFOLIO_TOPN": [7, 8, 9, 10],
         "REPLACE_SCORE_THRESHOLD": [0],
         "STOP_LOSS_PCT": [3, 5, 7, 10],
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(80, 105, 5),

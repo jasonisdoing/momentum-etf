@@ -99,6 +99,7 @@ def run_account_backtest(
     strategy_override: Optional[StrategyRules] = None,  # type: ignore
     excluded_tickers: Optional[Collection[str]] = None,
     prefetched_etf_universe: Optional[Sequence[Mapping[str, Any]]] = None,
+    prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
 ) -> AccountBacktestResult:
     """계정 ID를 기반으로 백테스트를 실행합니다."""
 
@@ -201,6 +202,7 @@ def run_account_backtest(
         strategy_rules=strategy_rules,
         strategy_settings=strategy_settings,
         prefetched_data=prefetched_data,
+        prefetched_metrics=prefetched_metrics,
         quiet=quiet,
     )
 
@@ -405,6 +407,7 @@ def _build_backtest_kwargs(
     strategy_rules,
     strategy_settings: Mapping[str, Any],
     prefetched_data: Optional[Mapping[str, pd.DataFrame]],
+    prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]],
     quiet: bool,
 ) -> Dict[str, Any]:
     try:
@@ -431,6 +434,7 @@ def _build_backtest_kwargs(
 
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
+        "prefetched_metrics": prefetched_metrics,
         "ma_period": strategy_rules.ma_period,
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
