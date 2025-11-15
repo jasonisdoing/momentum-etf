@@ -37,6 +37,18 @@ def _format_trend_break_phrase(ma_value: float | None, price_value: float | None
     return f"{DECISION_NOTES['TREND_BREAK']}({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"
 
 
+def _format_min_score_phrase(score_value: Optional[float], min_buy_score: float) -> str:
+    template = DECISION_NOTES.get("MIN_SCORE", "최소 {min_buy_score:.1f}점수 미만")
+    try:
+        base = template.format(min_buy_score=min_buy_score)
+    except Exception:
+        base = f"최소 {min_buy_score:.1f}점수 미만"
+
+    if score_value is None or pd.isna(score_value):
+        return f"{base} (현재 점수 없음)"
+    return f"{base} (현재 {score_value:.1f})"
+
+
 def _is_weekly_rebalance_day(
     date: pd.Timestamp,
     country_code: str,
@@ -649,7 +661,8 @@ def _process_ticker_data(
     etf_ma_period: int,
     stock_ma_period: int,
     ma_type: str = "SMA",
-    min_buy_score: float = 0.0,
+    *,
+    min_buy_score: float,
 ) -> Optional[Dict]:
     """
     개별 종목의 데이터를 처리하고 지표를 계산합니다.
@@ -746,7 +759,8 @@ def run_portfolio_backtest(
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     missing_ticker_sink: Optional[Set[str]] = None,
-    min_buy_score: float = 0.0,
+    *,
+    min_buy_score: float,
 ) -> Dict[str, pd.DataFrame]:
     """
     이동평균 기반 모멘텀 전략으로 포트폴리오 백테스트를 실행합니다.
@@ -825,8 +839,8 @@ def run_portfolio_backtest(
             etf_tickers,
             etf_ma_period,
             stock_ma_period,
-            ma_type,
-            min_buy_score,
+            ma_type=ma_type,
+            min_buy_score=min_buy_score,
         )
         if ticker_metrics:
             metrics_by_ticker[ticker] = ticker_metrics
@@ -1005,6 +1019,10 @@ def run_portfolio_backtest(
                 elif position_snapshot["shares"] == 0 and i < position_snapshot["buy_block_until"]:
                     remaining_buy = int(position_snapshot["buy_block_until"] - i)
                     note = f"쿨다운 대기중({remaining_buy}일 후 매수 가능)" if remaining_buy > 0 else "쿨다운 종료"
+                elif decision_out == "WAIT":
+                    score_check = score_today.get(ticker, float("nan"))
+                    if pd.isna(score_check) or score_check <= min_buy_score:
+                        note = _format_min_score_phrase(score_check, min_buy_score)
 
             # 핵심 보유 종목 표시
             if decision_out == "HOLD_CORE" and not note:
@@ -1227,23 +1245,17 @@ def run_portfolio_backtest(
                         replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체 (동일 카테고리)"
                     else:
                         # 점수가 더 높지 않으면 교체하지 않고 다음 대기 종목으로 넘어감
-                        stock_info = next((s for s in stocks if s["ticker"] == replacement_ticker), {})
-                        stock_name = stock_info.get("name", replacement_ticker)
-                        _update_ticker_note(
-                            daily_records_by_ticker, replacement_ticker, dt, f"{DECISION_NOTES['CATEGORY_DUP']} - {stock_name}({replacement_ticker})"
-                        )
+                        _update_ticker_note(daily_records_by_ticker, replacement_ticker, dt, DECISION_NOTES["CATEGORY_DUP"])
                         continue  # 다음 buy_ranked_candidate로 넘어감
                 elif weakest_held_stock:
                     # 다른 카테고리: 고정 종목 카테고리와 중복 체크 (이미 루프 밖에서 계산됨)
                     # 교체 대상 종목이 고정 종목 카테고리와 중복되면 차단
                     if wait_stock_category and wait_stock_category in core_categories:
-                        stock_info = next((s for s in stocks if s["ticker"] == replacement_ticker), {})
-                        stock_name = stock_info.get("name", replacement_ticker)
                         _update_ticker_note(
                             daily_records_by_ticker,
                             replacement_ticker,
                             dt,
-                            f"{DECISION_NOTES['CATEGORY_DUP']} (고정 종목) - {stock_name}({replacement_ticker})",
+                            DECISION_NOTES["CATEGORY_DUP"],
                         )
                         continue  # 다음 교체 후보로 넘어감
 

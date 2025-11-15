@@ -9,7 +9,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from os import cpu_count
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple, Set
+from typing import Any, Collection, Dict, List, Mapping, Optional, Sequence, Tuple, Set
 import tempfile
 import shutil
 
@@ -407,6 +407,7 @@ def _export_debug_month(
     raw_rows: List[Dict[str, Any]],
     prefetched_data: Mapping[str, DataFrame],
     capture_top_n: int,
+    prefetched_etf_universe: Sequence[Mapping[str, Any]],
 ) -> List[Dict[str, Any]]:
     if capture_top_n <= 0 or not raw_rows:
         return []
@@ -456,6 +457,7 @@ def _export_debug_month(
             quiet=True,
             prefetched_data=prefetched_data,
             strategy_override=strategy_rules,
+            prefetched_etf_universe=prefetched_etf_universe,
         )
 
         result_live = run_account_backtest(
@@ -463,6 +465,7 @@ def _export_debug_month(
             months_range=months_range,
             quiet=True,
             strategy_override=strategy_rules,
+            prefetched_etf_universe=prefetched_etf_universe,
         )
 
         stop_loss_dir_part = f"SL{stop_loss_value:.2f}" if stop_loss_value is not None else "SLauto"
@@ -506,7 +509,23 @@ def _export_debug_month(
 
 
 def _evaluate_single_combo(
-    payload: Tuple[str, int, Tuple[str, str], int, int, float, float, int, int, str, float, Tuple[str, ...], Tuple[str, ...], Mapping[str, DataFrame]]
+    payload: Tuple[
+        str,
+        int,
+        Tuple[str, str],
+        int,
+        int,
+        float,
+        float,
+        int,
+        int,
+        str,
+        float,
+        Tuple[str, ...],
+        Tuple[str, ...],
+        Mapping[str, DataFrame],
+        Sequence[Mapping[str, Any]],
+    ]
 ) -> Tuple[str, Any, List[str]]:
     (
         account_norm,
@@ -523,6 +542,7 @@ def _evaluate_single_combo(
         excluded_tickers,
         core_holdings_tuple,
         prefetched_data,
+        prefetched_etf_universe,
     ) = payload
 
     try:
@@ -569,6 +589,7 @@ def _evaluate_single_combo(
             prefetched_data=prefetched_data,
             strategy_override=override_rules,
             excluded_tickers=set(excluded_tickers) if excluded_tickers else None,
+            prefetched_etf_universe=prefetched_etf_universe,
         )
     except Exception as exc:
         return (
@@ -621,6 +642,7 @@ def _execute_tuning_for_months(
     prefetched_data: Mapping[str, DataFrame],
     output_path: Optional[Path] = None,
     progress_callback: Optional[callable] = None,
+    prefetched_etf_universe: Sequence[Mapping[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     logger = get_app_logger()
 
@@ -699,6 +721,7 @@ def _execute_tuning_for_months(
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             tuple(core_holdings_from_space) if core_holdings_from_space else tuple(),
             prefetched_data,
+            prefetched_etf_universe,
         )
         for ma, topn, replace, stop_loss, rsi, cooldown, ma_type, min_score in combos
     ]
@@ -800,6 +823,10 @@ def _execute_tuning_for_months(
         sharpe_val = _safe_float(item.get("sharpe"), float("nan"))
         sharpe_to_mdd_val = _safe_float(item.get("sharpe_to_mdd"), float("nan"))
 
+        min_score_raw = item.get("min_buy_score")
+        if min_score_raw is None:
+            raise ValueError("튜닝 결과에 MIN_BUY_SCORE 값이 없습니다.")
+
         raw_data_payload.append(
             {
                 "MONTHS_RANGE": months_range,
@@ -816,7 +843,7 @@ def _execute_tuning_for_months(
                     "STOP_LOSS_PCT": _round_up_float_places(item.get("stop_loss_pct"), 1) if item.get("stop_loss_pct") is not None else None,
                     "OVERBOUGHT_SELL_THRESHOLD": int(item.get("rsi_sell_threshold", 10)),
                     "COOLDOWN_DAYS": int(item.get("cooldown_days", 2)),
-                    "MIN_BUY_SCORE": _round_up_float_places(item.get("min_buy_score", 0.0), 2),
+                    "MIN_BUY_SCORE": _round_up_float_places(min_score_raw, 2),
                 },
             }
         )
@@ -1289,7 +1316,11 @@ def _compose_tuning_report(
                 stop_loss_val = tuning.get("STOP_LOSS_PCT")
             rsi_val = tuning.get("OVERBOUGHT_SELL_THRESHOLD")
             cooldown_val = tuning.get("COOLDOWN_DAYS")
-            min_score_val = tuning.get("MIN_BUY_SCORE", entry.get("min_buy_score"))
+            min_score_val = tuning.get("MIN_BUY_SCORE")
+            if min_score_val is None:
+                min_score_val = entry.get("min_buy_score")
+            if min_score_val is None:
+                raise ValueError("MIN_BUY_SCORE 값을 찾을 수 없습니다.")
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -1428,7 +1459,7 @@ def run_account_tuning(
     min_buy_score_values = _normalize_tuning_values(
         config.get("MIN_BUY_SCORE"),
         dtype=float,
-        fallback=getattr(base_rules, "min_buy_score", 0.0),
+        fallback=base_rules.min_buy_score,
     )
 
     # CORE_HOLDINGS 처리: tune.py에서 지정 가능, 없으면 base_rules에서 가져옴
@@ -1757,7 +1788,7 @@ def run_account_tuning(
                             "STOP_LOSS_PCT": _round_up_float_places(entry.get("stop_loss_pct", 0.0), 1),
                             "OVERBOUGHT_SELL_THRESHOLD": int(entry.get("rsi_sell_threshold", 10)),
                             "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
-                            "MIN_BUY_SCORE": _round_up_float_places(entry.get("min_buy_score", 0.0), 2),
+                            "MIN_BUY_SCORE": _round_up_float_places(entry["min_buy_score"], 2),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)
@@ -1787,6 +1818,7 @@ def run_account_tuning(
             prefetched_data=prefetched_map,
             output_path=txt_path,
             progress_callback=save_progress_callback,
+            prefetched_etf_universe=etf_universe,
         )
 
         if not single_result:
@@ -1833,6 +1865,7 @@ def run_account_tuning(
                     raw_rows=raw_rows,
                     prefetched_data=prefetched_map,
                     capture_top_n=capture_top_n,
+                    prefetched_etf_universe=etf_universe,
                 )
             )
 

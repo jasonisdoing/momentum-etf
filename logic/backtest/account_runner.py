@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Collection, Dict, Mapping, Optional, List, Tuple
+from typing import Any, Collection, Dict, Mapping, Optional, List, Sequence, Tuple
 import math
 
 import pandas as pd
@@ -98,6 +98,7 @@ def run_account_backtest(
     override_settings: Optional[Dict[str, Any]] = None,
     strategy_override: Optional[StrategyRules] = None,  # type: ignore
     excluded_tickers: Optional[Collection[str]] = None,
+    prefetched_etf_universe: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> AccountBacktestResult:
     """계정 ID를 기반으로 백테스트를 실행합니다."""
 
@@ -140,6 +141,7 @@ def run_account_backtest(
             ma_type=strategy_override.ma_type,
             core_holdings=strategy_override.core_holdings,
             stop_loss_pct=strategy_override.stop_loss_pct,
+            min_buy_score=strategy_override.min_buy_score,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
@@ -148,6 +150,7 @@ def run_account_backtest(
         strategy_settings["CORE_HOLDINGS"] = strategy_rules.core_holdings
         if strategy_rules.stop_loss_pct is not None:
             strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
+        strategy_settings["MIN_BUY_SCORE"] = strategy_rules.min_buy_score
 
     months_range = _resolve_months_range(months_range, override_settings, account_settings)
     end_date = _resolve_end_date(country_code, override_settings)
@@ -166,7 +169,11 @@ def run_account_backtest(
     if excluded_tickers:
         excluded_upper = {str(ticker).strip().upper() for ticker in excluded_tickers if isinstance(ticker, str) and str(ticker).strip()}
 
-    etf_universe = get_etfs(country_code)
+    if prefetched_etf_universe is not None:
+        etf_universe = [dict(stock) for stock in prefetched_etf_universe if isinstance(stock, Mapping)]
+        _log(f"[백테스트] 사전 추려진 ETF 대표군 {len(etf_universe)}개를 재사용합니다.")
+    else:
+        etf_universe = get_etfs(country_code)
     if not etf_universe:
         raise AccountSettingsError(f"'zsettings/stocks/{country_code}.json' 파일에서 종목을 찾을 수 없습니다.")
 

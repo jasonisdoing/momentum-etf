@@ -40,7 +40,7 @@ try:
 except Exception:
     _stock = None
 
-from utils.cache_utils import load_cached_frame, save_cached_frame
+from utils.cache_utils import load_cached_frame, load_cached_frames_bulk, save_cached_frame
 from utils.stock_list_io import get_etfs, get_listing_date, set_listing_date
 from utils.logger import get_app_logger
 
@@ -913,17 +913,39 @@ def fetch_ohlcv_for_tickers(
         return {}, []
 
     core_start = pd.to_datetime(date_range[0])
-    warmup_start = core_start - pd.DateOffset(days=warmup_days)
+    warmup_start = (core_start - pd.DateOffset(days=warmup_days)).normalize()
     adjusted_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
+    try:
+        required_end = pd.to_datetime(adjusted_date_range[1]).normalize()
+    except Exception:
+        required_end = pd.Timestamp.now().normalize()
 
+    cached_frames = load_cached_frames_bulk(country, tickers)
     missing: List[str] = []
 
-    for tkr in tickers:
-        df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range)
-        if df is None or df.empty:
-            missing.append(tkr)
+    for raw_ticker in tickers:
+        key = (raw_ticker or "").strip()
+        if not key:
             continue
-        prefetched_data[tkr] = df
+        tkr = key.upper()
+
+        cached_df = cached_frames.get(tkr)
+        needs_fetch = True
+        if cached_df is not None and not cached_df.empty:
+            cache_start = cached_df.index.min().normalize()
+            cache_end = cached_df.index.max().normalize()
+            if cache_start <= warmup_start and cache_end >= required_end:
+                sliced = cached_df.loc[(cached_df.index >= warmup_start) & (cached_df.index <= required_end)].copy()
+                if not sliced.empty:
+                    prefetched_data[key] = sliced
+                    needs_fetch = False
+
+        if needs_fetch:
+            df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range)
+            if df is None or df.empty:
+                missing.append(tkr)
+                continue
+            prefetched_data[key] = df
 
     return prefetched_data, missing
 

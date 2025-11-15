@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from strategies.maps.rules import StrategyRules
+from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 from utils.logger import get_app_logger
 from utils.data_loader import count_trading_days, get_trading_days
 
@@ -246,8 +247,6 @@ def _create_decision_entry(
 ) -> Dict[str, Any]:
     """개별 종목의 의사결정 엔트리를 생성합니다."""
     # 순환 import 방지
-    from strategies.maps.constants import DECISION_MESSAGES, DECISION_NOTES
-
     price_raw = data.get("price", 0.0)
     price = float(price_raw) if price_raw not in (None, float("nan")) else 0.0
     score_value = _parse_score_value(data.get("score", 0.0))
@@ -320,6 +319,8 @@ def _create_decision_entry(
                         phrase = "쿨다운 대기중(오늘 매수 가능)"
                 else:
                     phrase = "쿨다운 대기중"
+        else:
+            phrase = _format_min_score_phrase(score_value, min_buy_score)
 
     # 메타 정보
     meta = etf_meta.get(tkr) or full_etf_meta.get(tkr, {}) or {}
@@ -403,7 +404,6 @@ def run_portfolio_recommend(
     data_by_tkr에 포함된 모든 전략의 점수를 사용하여 포트폴리오 의사결정을 수행합니다.
     """
     # 순환 import 방지를 위해 함수 내부에서 import
-    from strategies.maps.constants import DECISION_MESSAGES, DECISION_NOTES
     from strategies.maps.messages import build_buy_replace_note
     from logic.common import select_candidates_by_category, sort_decisions_by_order_and_score
 
@@ -612,7 +612,6 @@ def run_portfolio_recommend(
             get_ticker_func=lambda d: d["tkr"],
             holdings=set(holdings.keys()),
         )
-
         # 점수가 양수인 모든 매수 시그널 종목을 순서대로 시도 (이미 점수순 정렬됨)
         successful_buys = 0
         for cand in wait_candidates_raw:
@@ -625,6 +624,12 @@ def run_portfolio_recommend(
             cand_category = etf_meta.get(cand["tkr"], {}).get("category")
             cand_category_key = _normalize_category_value(cand_category)
             cand_rsi_score = cand.get("rsi_score", 100.0)
+            score_val = cand.get("score", float("nan"))
+            if pd.isna(score_val) or score_val <= min_buy_score:
+                cand["state"], cand["row"][4] = "WAIT", "WAIT"
+                cand["row"][-1] = _format_min_score_phrase(score_val, min_buy_score)
+                cand["buy_signal"] = False
+                continue
 
             can_buy, block_reason = check_buy_candidate_filters(
                 category=cand_category,
@@ -668,7 +673,7 @@ def run_portfolio_recommend(
 
     # 교체 매매 로직
     replacement_candidates, _ = select_candidates_by_category(
-        [cand for cand in wait_candidates_raw if cand.get("state") != "BUY"],
+        [cand for cand in wait_candidates_raw if cand.get("state") != "BUY" and cand.get("buy_signal")],
         etf_meta,
         held_categories=None,
         max_count=None,
@@ -699,6 +704,13 @@ def run_portfolio_recommend(
             # logger.info(f"[REPLACE BLOCKED RSI] {best_new['tkr']} RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})")
             best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
             best_new["row"][-1] = f"RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})"
+            best_new["buy_signal"] = False
+            continue
+
+        score_val = best_new.get("score", float("nan"))
+        if pd.isna(score_val) or score_val <= min_buy_score:
+            best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
+            best_new["row"][-1] = _format_min_score_phrase(score_val, min_buy_score)
             best_new["buy_signal"] = False
             continue
 
@@ -963,3 +975,15 @@ def _build_trend_break_phrase(
         except (TypeError, ValueError):
             period_text = ""
     return f"{DECISION_NOTES['TREND_BREAK']}({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"
+
+
+def _format_min_score_phrase(score_value: Optional[float], min_buy_score: float) -> str:
+    template = DECISION_NOTES.get("MIN_SCORE", "최소 {min_buy_score:.1f}점수 미만")
+    try:
+        base = template.format(min_buy_score=min_buy_score)
+    except Exception:
+        base = f"최소 {min_buy_score:.1f}점수 미만"
+
+    if score_value is None or pd.isna(score_value):
+        return f"{base} (현재 점수 없음)"
+    return f"{base} (현재 {score_value:.1f})"

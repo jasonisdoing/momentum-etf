@@ -1,8 +1,8 @@
 {
     "order": 20,
     "icon": "💾",
-    "name": "고정",
-    "desc": "여러종목에 분산해서 고정투자",
+    "name": "안정",
+    "desc": "안정적인 수익을 목표로 하는 ",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_capital_krw": "100000000",

@@ -413,6 +413,18 @@ def _format_sell_replace_phrase(phrase: str, *, etf_meta: Dict[str, Dict[str, An
     return f"교체매도 {ratio_text} - {target_name}({target_ticker})로 교체"
 
 
+def _format_min_score_phrase(score_value: Optional[float], min_buy_score: float) -> str:
+    template = DECISION_NOTES.get("MIN_SCORE", "최소 {min_buy_score:.1f}점수 미만")
+    try:
+        base = template.format(min_buy_score=min_buy_score)
+    except Exception:
+        base = f"최소 {min_buy_score:.1f}점수 미만"
+
+    if score_value is None or pd.isna(score_value):
+        return f"{base} (현재 점수 없음)"
+    return f"{base} (현재 {score_value:.1f})"
+
+
 def _normalize_buy_date(value: Any) -> Optional[pd.Timestamp]:
     """Convert various buy date formats into a normalized pandas Timestamp."""
 
@@ -565,10 +577,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         strategy_cfg = {}
 
     strategy_tuning = resolve_strategy_params(strategy_cfg)
-    try:
-        min_buy_score = float(strategy_tuning.get("MIN_BUY_SCORE", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        min_buy_score = 0.0
+    min_buy_score = float(strategy_rules.min_buy_score)
 
     # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
     max_per_category = config.MAX_PER_CATEGORY
@@ -993,6 +1002,12 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             }
 
     disabled_note = DECISION_NOTES.get("NO_RECOMMEND", "추천 제외")
+    held_category_names: Set[str] = set()
+    for held_ticker in holdings.keys():
+        meta_info = etf_meta_map.get(held_ticker) or {}
+        category_value = meta_info.get("category")
+        if category_value and category_value != "TBD":
+            held_category_names.add(str(category_value).strip())
     results = []
     for decision in decisions:
         ticker = decision["tkr"]
@@ -1002,6 +1017,15 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         is_currently_held = ticker in holdings
 
         state = raw_state
+        if state in {"BUY", "BUY_REPLACE"}:
+            score_val_final = decision.get("score", float("nan"))
+            if pd.isna(score_val_final) or score_val_final <= min_buy_score:
+                state = "WAIT"
+                if decision.get("row"):
+                    decision["row"][4] = "WAIT"
+                    decision["row"][-1] = _format_min_score_phrase(score_val_final, min_buy_score)
+                    phrase = decision["row"][-1]
+                decision["buy_signal"] = False
         if is_currently_held and raw_state in {"WAIT"}:
             state = "HOLD"
 
@@ -1184,8 +1208,27 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
         results.append(result_entry)
 
+    for entry in results:
+        if entry.get("state") in {"BUY", "BUY_REPLACE"}:
+            score_val_final = entry.get("score", float("nan"))
+            if pd.isna(score_val_final) or score_val_final <= min_buy_score:
+                entry["state"] = "WAIT"
+                entry["phrase"] = _format_min_score_phrase(score_val_final, min_buy_score)
+
+        if entry.get("state") == "WAIT" and not entry.get("phrase"):
+            category_value = str(entry.get("category") or "").strip()
+            if category_value and category_value in held_category_names:
+                entry["phrase"] = DECISION_NOTES.get("CATEGORY_DUP", "")
+
     # BUY 종목 생성: 상위 점수의 WAIT 종목들을 BUY로 변경
-    wait_items = [item for item in results if item["state"] == "WAIT" and item.get("recommend_enabled", True)]
+    wait_items = [
+        item
+        for item in results
+        if item["state"] == "WAIT"
+        and item.get("recommend_enabled", True)
+        and not pd.isna(item.get("score"))
+        and item.get("score", float("nan")) > min_buy_score
+    ]
     # MAPS 점수 기반 정렬
     wait_items.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
