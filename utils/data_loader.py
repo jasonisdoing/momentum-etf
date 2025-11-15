@@ -8,7 +8,7 @@ import logging
 import os
 import warnings
 from datetime import datetime, time
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Iterable
 from contextlib import contextmanager
 
 import pandas as pd
@@ -127,6 +127,29 @@ class RateLimitException(Exception):
         self.ticker = ticker
         self.detail = detail
         message = f"Rate limit exceeded for {ticker}: {detail}"
+        super().__init__(message)
+
+
+class MissingPriceDataError(RuntimeError):
+    """필수 가격 데이터가 비어 있을 때 발생시키는 예외."""
+
+    def __init__(
+        self,
+        *,
+        country: str,
+        start_date: Optional[Union[str, pd.Timestamp]],
+        end_date: Optional[Union[str, pd.Timestamp]],
+        tickers: Iterable[str],
+    ) -> None:
+        self.country = (country or "").strip().lower()
+        self.start_date = pd.to_datetime(start_date).strftime("%Y-%m-%d") if start_date else None
+        self.end_date = pd.to_datetime(end_date).strftime("%Y-%m-%d") if end_date else None
+        normalized = sorted({str(t).strip().upper() for t in tickers if str(t).strip()})
+        self.tickers = normalized
+        period = ""
+        if self.start_date or self.end_date:
+            period = f" ({self.start_date or '?'}~{self.end_date or '?'})"
+        message = f"[{(self.country or 'unknown').upper()}] " f"가격 데이터 누락{period}: {len(normalized)}개 종목 미존재 ({', '.join(normalized)})"
         super().__init__(message)
 
 
@@ -903,9 +926,12 @@ def fetch_ohlcv_for_tickers(
     country: str,
     date_range: Optional[List[str]] = None,
     warmup_days: int = 0,
+    *,
+    allow_remote_fetch: bool = False,
 ) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
     """
-    주어진 티커 목록에 대해 OHLCV 데이터를 직렬로 조회합니다.
+    주어진 티커 목록에 대해 캐시된 OHLCV 데이터를 조회합니다.
+    allow_remote_fetch=True로 설정하면 캐시에 없는 종목만 원천에서 조회합니다.
     """
     prefetched_data: Dict[str, pd.DataFrame] = {}
 
@@ -929,19 +955,37 @@ def fetch_ohlcv_for_tickers(
             continue
         tkr = key.upper()
 
+        ticker_start = warmup_start
+        listing_date_str = None
+        try:
+            listing_date_str = get_listing_date(country, tkr)
+        except Exception:
+            listing_date_str = None
+        if listing_date_str:
+            try:
+                listing_dt = pd.to_datetime(listing_date_str).normalize()
+                if listing_dt > ticker_start:
+                    ticker_start = listing_dt
+            except Exception:
+                pass
+
         cached_df = cached_frames.get(tkr)
         needs_fetch = True
         if cached_df is not None and not cached_df.empty:
             cache_start = cached_df.index.min().normalize()
             cache_end = cached_df.index.max().normalize()
-            if cache_start <= warmup_start and cache_end >= required_end:
-                sliced = cached_df.loc[(cached_df.index >= warmup_start) & (cached_df.index <= required_end)].copy()
+            if cache_start <= ticker_start and cache_end >= required_end:
+                sliced = cached_df.loc[(cached_df.index >= ticker_start) & (cached_df.index <= required_end)].copy()
                 if not sliced.empty:
                     prefetched_data[key] = sliced
                     needs_fetch = False
 
         if needs_fetch:
-            df = fetch_ohlcv(ticker=tkr, country=country, date_range=adjusted_date_range)
+            if not allow_remote_fetch:
+                missing.append(tkr)
+                continue
+            ticker_date_range = [ticker_start.strftime("%Y-%m-%d"), adjusted_date_range[1]]
+            df = fetch_ohlcv(ticker=tkr, country=country, date_range=ticker_date_range)
             if df is None or df.empty:
                 missing.append(tkr)
                 continue
@@ -957,6 +1001,7 @@ def prepare_price_data(
     start_date: str,
     end_date: str,
     warmup_days: int = 0,
+    allow_remote_fetch: bool = False,
 ) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
     """Shared helper to populate cache-backed OHLCV data consistently across workflows."""
 
@@ -970,6 +1015,7 @@ def prepare_price_data(
         country,
         date_range=date_range,
         warmup_days=warmup_days,
+        allow_remote_fetch=allow_remote_fetch,
     )
     return prefetched, missing
 

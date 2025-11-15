@@ -5,18 +5,18 @@
 """
 
 import math
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import pandas as pd
 
 from config import BACKTEST_SLIPPAGE
-from utils.data_loader import fetch_ohlcv, get_trading_days
 from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
 from utils.report import format_kr_money
 from strategies.maps.labeler import compute_net_trade_note
 from logic.common import build_weekly_rebalance_cache, select_candidates_by_category, calculate_held_categories
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
+from utils.memmap_store import MemmapPriceStore
 
 logger = get_app_logger()
 
@@ -51,7 +51,6 @@ def _format_min_score_phrase(score_value: Optional[float], min_buy_score: float)
 
 def _is_weekly_rebalance_day(
     date: pd.Timestamp,
-    country_code: str,
     cache: Dict[Tuple[int, int], Optional[pd.Timestamp]],
 ) -> bool:
     """해당 날짜가 그 주의 마지막 거래일인지 확인합니다."""
@@ -64,22 +63,7 @@ def _is_weekly_rebalance_day(
 
     cached = cache.get(key)
     if cached is None:
-        week_start = date - pd.Timedelta(days=date.weekday())
-        week_end = week_start + pd.Timedelta(days=6)
-        try:
-            trading_days = get_trading_days(
-                week_start.strftime("%Y-%m-%d"),
-                week_end.strftime("%Y-%m-%d"),
-                country_code,
-            )
-        except Exception:
-            trading_days = []
-
-        if trading_days:
-            cached = pd.Timestamp(trading_days[-1]).normalize()
-        else:
-            cached = pd.NaT
-        cache[key] = cached
+        return False
 
     if pd.isna(cached):
         return False
@@ -787,6 +771,8 @@ def run_portfolio_backtest(
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
+    price_store: Optional["MemmapPriceStore"] = None,
+    trading_calendar: Optional[Sequence[pd.Timestamp]] = None,
     ma_period: int = 20,
     ma_type: str = "SMA",
     replace_threshold: float = 0.0,
@@ -846,12 +832,7 @@ def run_portfolio_backtest(
     etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
 
     # 이동평균 계산에 필요한 과거 데이터를 확보하기 위한 추가 조회 범위(웜업)
-    WARMUP_MONTHS = 12
-    fetch_date_range = date_range
-    if date_range and len(date_range) == 2 and date_range[0] is not None:
-        core_start = pd.to_datetime(date_range[0])
-        warmup_start = core_start - pd.DateOffset(months=WARMUP_MONTHS)
-        fetch_date_range = [warmup_start.strftime("%Y-%m-%d"), date_range[1]]
+    # (실제 데이터 요청은 상위 프리패치 단계에서 수행)
 
     # 시장 레짐 필터 제거됨 (항상 100% 투자)
 
@@ -863,14 +844,15 @@ def run_portfolio_backtest(
     tickers_to_process = [s["ticker"] for s in stocks]
 
     for ticker in tickers_to_process:
-        # 미리 로드된 데이터가 있으면 사용하고, 없으면 새로 조회
+        df = None
         if prefetched_data and ticker in prefetched_data:
             df = prefetched_data[ticker]
-        else:
-            # prefetched_data가 없으면 date_range를 사용하여 직접 조회
-            df = fetch_ohlcv(ticker, country=country, date_range=fetch_date_range)
+        elif price_store is not None:
+            df = price_store.get_frame(ticker)
 
-        # 공통 함수를 사용하여 데이터 처리 및 지표 계산
+        if df is None:
+            raise RuntimeError(f"[백테스트] '{ticker}' 데이터가 프리패치/메모리맵에 없습니다. 튜닝 프리패치 단계를 확인하세요.")
+
         precomputed_entry = prefetched_metrics.get(ticker) if prefetched_metrics else None
         ticker_metrics = _process_ticker_data(
             ticker,
@@ -958,17 +940,21 @@ def run_portfolio_backtest(
     daily_records_by_ticker = {ticker: [] for ticker in metrics_by_ticker.keys()}
     out_cash = []
     # 주간 리밸런싱 캘린더를 한 번만 구축해 재사용합니다.
-    weekly_rebalance_cache: Dict[Tuple[int, int], Optional[pd.Timestamp]]
-    try:
-        rebalance_trading_days = get_trading_days(
-            union_index[0].strftime("%Y-%m-%d"),
-            union_index[-1].strftime("%Y-%m-%d"),
-            country_code,
-        )
-    except Exception:
-        rebalance_trading_days = None
+    if trading_calendar is None:
+        raise RuntimeError("trading_calendar must be provided to run_portfolio_backtest.")
+    normalized_calendar: List[pd.Timestamp] = []
+    for raw in trading_calendar:
+        try:
+            dt = pd.Timestamp(raw)
+        except Exception:
+            continue
+        if pd.isna(dt):
+            continue
+        normalized_calendar.append(dt.normalize())
+    if not normalized_calendar:
+        raise RuntimeError("trading_calendar is empty after normalization.")
 
-    weekly_rebalance_cache = build_weekly_rebalance_cache(rebalance_trading_days or union_index)
+    weekly_rebalance_cache = build_weekly_rebalance_cache(normalized_calendar)
     if not weekly_rebalance_cache:
         weekly_rebalance_cache = build_weekly_rebalance_cache(union_index)
 
@@ -1477,17 +1463,13 @@ def run_portfolio_backtest(
 
         # --- 4. 주간 균등 비중 리밸런싱 (주 마지막 거래일에 실행) ---
         held_count = sum(1 for state in position_state.values() if state["shares"] > 0)
-        if held_count > 0 and _is_weekly_rebalance_day(dt, country_code, weekly_rebalance_cache):
+        if held_count > 0 and _is_weekly_rebalance_day(dt, weekly_rebalance_cache):
             # 백테스트가 주 중간에 종료되는 경우(마지막 날짜가 주간 마지막 거래일이 아님) 리밸런싱을 건너뜁니다.
             if i == total_days - 1:
                 try:
                     week_start = dt - pd.Timedelta(days=dt.weekday())
                     week_end = week_start + pd.Timedelta(days=6)
-                    remaining_days = get_trading_days(
-                        (dt + pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
-                        week_end.strftime("%Y-%m-%d"),
-                        country_code,
-                    )
+                    remaining_days = [d for d in normalized_calendar if (dt < d <= week_end)]
                     if remaining_days:
                         logger.debug(
                             "[BACKTEST] 주간 리밸런싱 건너뜀 (%s): 이후 거래일 존재 %s",

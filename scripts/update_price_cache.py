@@ -82,7 +82,8 @@ def refresh_all_caches(countries: list[str], start_date: Optional[str]):
                         cache_country=temp_token,
                     )
                 except Exception as e:
-                    logger.warning("%s 데이터 처리 중 오류 발생: %s", ticker, e)
+                    logger.error("%s 데이터 처리 중 오류 발생: %s", ticker, e)
+                    raise
 
             swap_cache_collection(country, temp_token)
             logger.info("-> %s 국가의 캐시 갱신 완료.", country.upper())

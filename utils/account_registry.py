@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Mapping
 
 from utils.logger import get_app_logger
 from utils.settings_loader import load_common_settings
@@ -118,6 +118,25 @@ def get_icon_fallback(country_code: str) -> str:
     return _ICON_FALLBACKS.get((country_code or "").strip().lower(), "")
 
 
+def get_benchmark_tickers(account_settings: Mapping[str, Any]) -> List[str]:
+    """계정 설정에서 벤치마크 티커 목록을 추출합니다."""
+
+    entries = account_settings.get("benchmarks")
+    if not isinstance(entries, list):
+        return []
+
+    tickers: List[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        ticker = str(entry.get("ticker") or "").strip().upper()
+        if ticker and ticker not in seen:
+            tickers.append(ticker)
+            seen.add(ticker)
+    return tickers
+
+
 def build_account_meta(accounts: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
     meta: Dict[str, Dict[str, str]] = {}
     for account in accounts:
@@ -154,6 +173,7 @@ __all__ = [
     "pick_default_account",
     "build_account_meta",
     "get_icon_fallback",
+    "get_benchmark_tickers",
     "get_account_settings",
     "get_account_strategy",
     "get_account_strategy_sections",

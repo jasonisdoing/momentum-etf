@@ -6,6 +6,7 @@ import csv
 import json
 import math
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import os
 from datetime import datetime
 from os import cpu_count
 from pathlib import Path
@@ -15,10 +16,11 @@ import shutil
 
 import pandas as pd
 from pandas import DataFrame, Timestamp
+import numpy as np
 
 from logic.backtest.account_runner import run_account_backtest
 from logic.entry_point import StrategyRules
-from utils.account_registry import get_strategy_rules
+from utils.account_registry import get_strategy_rules, get_benchmark_tickers
 from utils.settings_loader import (
     AccountSettingsError,
     ACCOUNT_SETTINGS_DIR,
@@ -30,10 +32,12 @@ from utils.logger import get_app_logger
 from utils.data_loader import (
     prepare_price_data,
     get_latest_trading_day,
-    fetch_ohlcv,
+    get_trading_days,
+    MissingPriceDataError,
 )
 from utils.stock_list_io import get_etfs
 from utils.cache_utils import save_cached_frame
+from utils.memmap_store import create_memmap_store, MemmapPriceStore
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
@@ -42,19 +46,39 @@ MAX_TABLE_ROWS = 20
 _WORKER_PREFETCHED_DATA: Optional[Mapping[str, DataFrame]] = None
 _WORKER_PREFETCHED_METRICS: Optional[Mapping[str, Dict[str, Any]]] = None
 _WORKER_PREFETCHED_UNIVERSE: Optional[Sequence[Mapping[str, Any]]] = None
+_WORKER_MEMMAP_STORE: Optional[MemmapPriceStore] = None
 
 
 def _init_worker_prefetch(
     prefetched_data: Mapping[str, DataFrame] | None,
     prefetched_metrics: Mapping[str, Dict[str, Any]] | None,
     prefetched_universe: Sequence[Mapping[str, Any]] | None,
+    memmap_catalog: Optional[Dict[str, Any]] = None,
 ) -> None:
     """ProcessPoolExecutor initializer to reuse prefetched artifacts."""
 
-    global _WORKER_PREFETCHED_DATA, _WORKER_PREFETCHED_METRICS, _WORKER_PREFETCHED_UNIVERSE
+    global _WORKER_PREFETCHED_DATA, _WORKER_PREFETCHED_METRICS, _WORKER_PREFETCHED_UNIVERSE, _WORKER_MEMMAP_STORE
     _WORKER_PREFETCHED_DATA = prefetched_data
     _WORKER_PREFETCHED_METRICS = prefetched_metrics
     _WORKER_PREFETCHED_UNIVERSE = prefetched_universe
+    _WORKER_MEMMAP_STORE = create_memmap_store(memmap_catalog)
+
+
+def _filter_trading_days(
+    calendar: Optional[Sequence[pd.Timestamp]],
+    start_str: str,
+    end_str: str,
+) -> Optional[List[pd.Timestamp]]:
+    if not calendar:
+        return None
+    start_ts = pd.to_datetime(start_str)
+    end_ts = pd.to_datetime(end_str)
+    filtered = []
+    for raw in calendar:
+        dt = pd.Timestamp(raw)
+        if start_ts <= dt <= end_ts:
+            filtered.append(dt)
+    return filtered or None
 
 
 def _extract_price_series_for_prefetch(df: pd.DataFrame) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
@@ -139,6 +163,86 @@ def _build_prefetched_metric_cache(
         cache[ticker] = entry
 
     return cache
+
+
+def _write_memmap_array(
+    base_dir: Path,
+    *,
+    ticker: str,
+    label: str,
+    array: np.ndarray,
+    dtype: np.dtype,
+) -> Dict[str, Any]:
+    base_dir.mkdir(parents=True, exist_ok=True)
+    safe_ticker = "".join(ch for ch in ticker if ch.isalnum() or ch in ("_", "-")) or "TICKER"
+    filename = f"{safe_ticker}_{label}.dat"
+    path = base_dir / filename
+
+    memmap = np.memmap(path, mode="w+", dtype=dtype, shape=array.shape)
+    memmap[:] = array
+    memmap.flush()
+    del memmap
+
+    return {
+        "path": str(path),
+        "dtype": np.dtype(dtype).str,
+        "shape": array.shape,
+    }
+
+
+def _persist_prefetched_memmaps(
+    account_id: str,
+    prefetched_data: Mapping[str, pd.DataFrame],
+    *,
+    base_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Convert prefetched price frames to memmap-backed arrays for later reuse.
+    """
+
+    if base_dir is None:
+        base_dir = Path(tempfile.gettempdir()) / "momentum-etf-memmap" / account_id
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    memmap_meta: Dict[str, Dict[str, Any]] = {}
+    for ticker, frame in prefetched_data.items():
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            continue
+        try:
+            index_values = frame.index.astype("int64").to_numpy()
+            close_col_name = "unadjusted_close" if "unadjusted_close" in frame.columns else "Close"
+            close_series = frame[close_col_name]
+            if isinstance(close_series, pd.DataFrame):
+                close_series = close_series.iloc[:, 0]
+            close_values = close_series.astype("float64").to_numpy()
+            if "Open" in frame.columns:
+                open_series = frame["Open"]
+                if isinstance(open_series, pd.DataFrame):
+                    open_series = open_series.iloc[:, 0]
+                open_values = open_series.astype("float64").to_numpy()
+            else:
+                open_values = close_values.copy()
+
+            ticker_dir = base_dir / ticker
+            index_meta = _write_memmap_array(ticker_dir, ticker=ticker, label="index", array=index_values, dtype=np.int64)
+            close_meta = _write_memmap_array(ticker_dir, ticker=ticker, label="close", array=close_values, dtype=np.float64)
+            close_meta["column"] = close_col_name
+            open_meta = _write_memmap_array(ticker_dir, ticker=ticker, label="open", array=open_values, dtype=np.float64)
+
+            memmap_meta[ticker] = {
+                "index": index_meta,
+                "close": close_meta,
+                "open": open_meta,
+            }
+        except Exception as exc:
+            logger = get_app_logger()
+            logger.warning("[튜닝] %s 티커 memmap 생성 실패: %s", ticker, exc)
+            continue
+
+    return {
+        "base_dir": str(base_dir),
+        "tickers": memmap_meta,
+    }
 
 
 def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:
@@ -510,6 +614,8 @@ def _export_debug_month(
     capture_top_n: int,
     prefetched_etf_universe: Sequence[Mapping[str, Any]],
     prefetched_metrics: Mapping[str, Dict[str, Any]] | None,
+    price_store: Optional[MemmapPriceStore],
+    trading_calendar: Optional[Sequence[pd.Timestamp]],
 ) -> List[Dict[str, Any]]:
     if capture_top_n <= 0 or not raw_rows:
         return []
@@ -561,6 +667,8 @@ def _export_debug_month(
             strategy_override=strategy_rules,
             prefetched_etf_universe=prefetched_etf_universe,
             prefetched_metrics=prefetched_metrics,
+            price_store=price_store,
+            trading_calendar=trading_calendar,
         )
 
         result_live = run_account_backtest(
@@ -570,6 +678,8 @@ def _export_debug_month(
             strategy_override=strategy_rules,
             prefetched_etf_universe=prefetched_etf_universe,
             prefetched_metrics=None,
+            price_store=price_store,
+            trading_calendar=trading_calendar,
         )
 
         stop_loss_dir_part = f"SL{stop_loss_value:.2f}" if stop_loss_value is not None else "SLauto"
@@ -630,6 +740,8 @@ def _evaluate_single_combo(
         Mapping[str, DataFrame],
         Sequence[Mapping[str, Any]],
         Mapping[str, Dict[str, Any]],
+        Optional[Dict[str, Any]],
+        Optional[Sequence[pd.Timestamp]],
     ]
 ) -> Tuple[str, Any, List[str]]:
     (
@@ -649,11 +761,15 @@ def _evaluate_single_combo(
         prefetched_data,
         prefetched_etf_universe,
         prefetched_metrics,
+        memmap_catalog,
+        trading_calendar,
     ) = payload
 
     data_source = prefetched_data or _WORKER_PREFETCHED_DATA or {}
     metrics_source = prefetched_metrics or _WORKER_PREFETCHED_METRICS or {}
     universe_source = prefetched_etf_universe or _WORKER_PREFETCHED_UNIVERSE or ()
+    price_store = _WORKER_MEMMAP_STORE or create_memmap_store(memmap_catalog)
+    calendar_source = trading_calendar
 
     try:
         override_rules = StrategyRules.from_values(
@@ -701,8 +817,21 @@ def _evaluate_single_combo(
             excluded_tickers=set(excluded_tickers) if excluded_tickers else None,
             prefetched_etf_universe=universe_source,
             prefetched_metrics=metrics_source,
+            price_store=price_store,
+            trading_calendar=calendar_source,
         )
     except Exception as exc:
+        logger = get_app_logger()
+        logger.warning(
+            "[튜닝] 조합 실행 실패 months=%d MA=%s TOPN=%s STOP=%.2f RSI=%d score=%.2f error=%s",
+            months_range,
+            ma_int,
+            topn_int,
+            stop_loss_float,
+            rsi_int,
+            min_score_float,
+            exc,
+        )
         return (
             "failure",
             {
@@ -755,6 +884,9 @@ def _execute_tuning_for_months(
     progress_callback: Optional[callable] = None,
     prefetched_etf_universe: Sequence[Mapping[str, Any]],
     prefetched_metrics: Mapping[str, Dict[str, Any]],
+    memmap_catalog: Optional[Dict[str, Any]],
+    price_store: Optional[MemmapPriceStore],
+    trading_calendar: Optional[Sequence[pd.Timestamp]],
 ) -> Optional[Dict[str, Any]]:
     logger = get_app_logger()
 
@@ -806,6 +938,10 @@ def _execute_tuning_for_months(
         len(combos),
     )
 
+    filtered_calendar = _filter_trading_days(trading_calendar, date_range[0], date_range[1])
+    if filtered_calendar is None:
+        raise RuntimeError(f"[튜닝] {account_norm.upper()} ({months_range}개월) 구간의 거래일 정보를 준비하지 못했습니다.")
+
     workers = WORKERS or (cpu_count() or 1)
     workers = max(1, min(workers, len(combos)))
 
@@ -820,6 +956,8 @@ def _execute_tuning_for_months(
     serialized_prefetched_data = prefetched_data if workers <= 1 else None
     serialized_prefetched_metrics = prefetched_metrics if workers <= 1 else None
     serialized_universe = prefetched_etf_universe if workers <= 1 else None
+    serialized_memmap = memmap_catalog if workers <= 1 else None
+    serialized_calendar = filtered_calendar
 
     payloads = [
         (
@@ -839,6 +977,8 @@ def _execute_tuning_for_months(
             serialized_prefetched_data,
             serialized_universe,
             serialized_prefetched_metrics,
+            serialized_memmap,
+            serialized_calendar,
         )
         for ma, topn, replace, stop_loss, rsi, cooldown, ma_type, min_score in combos
     ]
@@ -846,8 +986,18 @@ def _execute_tuning_for_months(
     worker_desc = "순차 실행" if workers <= 1 else f"{workers}개의 CPU 병렬 처리 중..."
 
     if workers <= 1:
-        for idx, payload in enumerate(payloads, 1):
-            status, data, missing = _evaluate_single_combo(payload)
+        global _WORKER_MEMMAP_STORE
+        _WORKER_MEMMAP_STORE = price_store
+        iterator = map(_evaluate_single_combo, payloads)
+    else:
+        init_args = (prefetched_data, prefetched_metrics, prefetched_etf_universe, memmap_catalog)
+        chunksize = max(1, len(payloads) // (workers * 4)) if len(payloads) > workers else 1
+        executor = ProcessPoolExecutor(max_workers=workers, initializer=_init_worker_prefetch, initargs=init_args)
+        iterator = executor.map(_evaluate_single_combo, payloads, chunksize=chunksize)
+
+    try:
+        for idx, result in enumerate(iterator, 1):
+            status, data, missing = result
             if status == "success":
                 success_entries.append(data)
                 encountered_missing.update(missing)
@@ -865,55 +1015,20 @@ def _execute_tuning_for_months(
                     worker_desc,
                 )
 
-                # 1%마다 중간 저장 (성공한 조합이 있을 때만)
                 if success_entries and output_path and progress_callback:
                     current_best_cagr = max(_safe_float(entry.get("cagr"), float("-inf")) for entry in success_entries)
                     if current_best_cagr > best_cagr_so_far:
                         best_cagr_so_far = current_best_cagr
 
-                    # 중간 결과 저장 콜백 호출
                     progress_callback(
                         success_entries=success_entries,
                         progress_pct=(idx / len(combos)) * 100,
                         completed=idx,
                         total=len(combos),
                     )
-    else:
-        init_args = (prefetched_data, prefetched_metrics, prefetched_etf_universe)
-        with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker_prefetch, initargs=init_args) as executor:
-            future_map = {executor.submit(_evaluate_single_combo, payload): payload for payload in payloads}
-            for idx, future in enumerate(as_completed(future_map), 1):
-                status, data, missing = future.result()
-                if status == "success":
-                    success_entries.append(data)
-                    encountered_missing.update(missing)
-                else:
-                    failures.append(data)
-
-                if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
-                    logger.info(
-                        "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%) | %s",
-                        account_norm.upper(),
-                        months_range,
-                        idx,
-                        len(combos),
-                        (idx / len(combos)) * 100,
-                        worker_desc,
-                    )
-
-                    # 1%마다 중간 저장 (성공한 조합이 있을 때만)
-                    if success_entries and output_path and progress_callback:
-                        current_best_cagr = max(_safe_float(entry.get("cagr"), float("-inf")) for entry in success_entries)
-                        if current_best_cagr > best_cagr_so_far:
-                            best_cagr_so_far = current_best_cagr
-
-                        # 중간 결과 저장 콜백 호출
-                        progress_callback(
-                            success_entries=success_entries,
-                            progress_pct=(idx / len(combos)) * 100,
-                            completed=idx,
-                            total=len(combos),
-                        )
+    finally:
+        if workers > 1:
+            executor.shutdown(wait=True, cancel_futures=False)
 
     if not success_entries:
         logger.warning("[튜닝] %s (%d개월) 성공한 조합이 없습니다.", account_norm.upper(), months_range)
@@ -1636,6 +1751,14 @@ def run_account_tuning(
     if not tickers:
         logger.error("[튜닝] '%s' 유효한 티커가 없습니다.", country_code)
         return None
+    benchmark_tickers = get_benchmark_tickers(account_settings)
+    if benchmark_tickers:
+        normalized = {str(t).strip().upper() for t in tickers if t}
+        for bench in benchmark_tickers:
+            bench_norm = str(bench or "").strip().upper()
+            if bench_norm and bench_norm not in normalized:
+                tickers.append(bench_norm)
+                normalized.add(bench_norm)
 
     combo_count = (
         len(ma_values)
@@ -1768,19 +1891,20 @@ def run_account_tuning(
         end_date=date_range_prefetch[1],
         warmup_days=warmup_days,
     )
+    if missing_prefetch:
+        raise MissingPriceDataError(
+            country=country_code,
+            start_date=date_range_prefetch[0],
+            end_date=date_range_prefetch[1],
+            tickers=missing_prefetch,
+        )
     prefetched_map: Dict[str, DataFrame] = dict(prefetched)
 
-    for ticker, frame in prefetched_map.items():
-        save_cached_frame(country_code, ticker, frame)
+    if SAVE_CACHE_DURING_TUNE:
+        for ticker, frame in prefetched_map.items():
+            save_cached_frame(country_code, ticker, frame)
 
-    excluded_ticker_set: set[str] = {str(ticker).strip().upper() for ticker in missing_prefetch if isinstance(ticker, str) and str(ticker).strip()}
-    if excluded_ticker_set:
-        logger.warning(
-            "[튜닝] %s 데이터 부족으로 제외할 종목 (%d): %s",
-            account_norm.upper(),
-            len(excluded_ticker_set),
-            ", ".join(sorted(excluded_ticker_set)),
-        )
+    excluded_ticker_set: set[str] = set()
 
     if debug_dir is not None:
         _export_prefetched_data(debug_dir, prefetched_map)
@@ -1879,11 +2003,37 @@ def run_account_tuning(
             end_date=adjusted_date_range[1],
             warmup_days=warmup_days,
         )
+        if additional_missing:
+            raise MissingPriceDataError(
+                country=country_code,
+                start_date=adjusted_date_range[0],
+                end_date=adjusted_date_range[1],
+                tickers=additional_missing,
+            )
         prefetched_map.update(prefetched_adjusted)
-        for ticker, frame in prefetched_adjusted.items():
-            save_cached_frame(country_code, ticker, frame)
-        missing_prefetch.extend(additional_missing)
+        if SAVE_CACHE_DURING_TUNE:
+            for ticker, frame in prefetched_adjusted.items():
+                save_cached_frame(country_code, ticker, frame)
         normalized_month_items.append(sanitized_item)
+
+    memmap_run_dir = Path(tempfile.gettempdir()) / "momentum-etf-memmap" / f"{account_norm}_{tuning_start_ts.strftime('%Y%m%d_%H%M%S')}"
+    prefetched_memmap_catalog = _persist_prefetched_memmaps(
+        account_norm,
+        prefetched_map,
+        base_dir=memmap_run_dir,
+    )
+    price_store_main = create_memmap_store(prefetched_memmap_catalog)
+    tuning_metadata["memmap_catalog"] = prefetched_memmap_catalog
+
+    prefetched_trading_days = get_trading_days(
+        date_range_prefetch[0],
+        date_range_prefetch[1],
+        country_code,
+    )
+    if not prefetched_trading_days:
+        raise RuntimeError(
+            f"[튜닝] {account_norm.upper()} 기간 {date_range_prefetch[0]}~{date_range_prefetch[1]}의 거래일 정보를 로드하지 못했습니다."
+        )
 
     ma_period_pool = sorted({int(base_rules.ma_period), *[int(v) for v in ma_values]})
     ma_type_pool = sorted({(base_rules.ma_type or "SMA").upper(), *[(mt or "SMA").upper() for mt in ma_type_values]})
@@ -1969,6 +2119,9 @@ def run_account_tuning(
             progress_callback=save_progress_callback,
             prefetched_etf_universe=etf_universe,
             prefetched_metrics=prefetched_metrics_map,
+            memmap_catalog=prefetched_memmap_catalog,
+            price_store=price_store_main,
+            trading_calendar=prefetched_trading_days,
         )
 
         if not single_result:
@@ -2007,6 +2160,12 @@ def run_account_tuning(
 
         if debug_dir is not None and capture_top_n > 0:
             raw_rows = single_result.get("raw_data") or []
+            month_start = (end_date - pd.DateOffset(months=months_value)).strftime("%Y-%m-%d")
+            month_end = end_date.strftime("%Y-%m-%d")
+            calendar_for_month = _filter_trading_days(prefetched_trading_days, month_start, month_end)
+            if calendar_for_month is None:
+                raise RuntimeError(f"[튜닝] {account_norm.upper()} ({months_value}개월) 구간의 거래일 정보를 준비하지 못했습니다.")
+
             debug_diff_rows.extend(
                 _export_debug_month(
                     debug_dir,
@@ -2017,6 +2176,8 @@ def run_account_tuning(
                     capture_top_n=capture_top_n,
                     prefetched_etf_universe=etf_universe,
                     prefetched_metrics=prefetched_metrics_map,
+                    price_store=price_store_main,
+                    trading_calendar=calendar_for_month,
                 )
             )
 
@@ -2143,3 +2304,4 @@ def run_account_tuning(
 
 
 __all__ = ["run_account_tuning"]
+SAVE_CACHE_DURING_TUNE = os.environ.get("TUNE_SAVE_CACHE", "0").lower() in ("1", "true", "yes")

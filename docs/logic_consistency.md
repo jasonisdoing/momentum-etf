@@ -396,6 +396,9 @@ def run_portfolio_backtest(
     date_range: Optional[List[str]] = None,
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
+    price_store: Optional[MemmapPriceStore] = None,
+    trading_calendar: Sequence[pd.Timestamp],
     ma_period: int = 20,
     ma_type: str = "SMA",
     replace_threshold: float = 0.0,
@@ -406,8 +409,13 @@ def run_portfolio_backtest(
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     missing_ticker_sink: Optional[Set[str]] = None,
+    *,
+    min_buy_score: float,
 ) -> Dict[str, pd.DataFrame]
 ```
+
+- `trading_calendar`는 필수이며, `date_range` 전체를 덮는 거래일 리스트를 호출자가 프리패치 단계에서 준비해 전달해야 한다. 내부에서는 더 이상 `get_trading_days()`로 보조 조회를 하지 않는다.
+- `prefetched_data`/`prefetched_metrics`/`price_store`도 반드시 준비된 상태여야 하며, 백테스트 중에는 원본 데이터 소스(Mongo/pykrx)를 호출하지 않는다. 부족 데이터가 발견되면 즉시 실패한다.
 
 ## 📚 참고
 

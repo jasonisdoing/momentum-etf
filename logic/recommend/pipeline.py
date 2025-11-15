@@ -31,13 +31,13 @@ from strategies.maps.history import (
 )
 from utils.stock_list_io import get_etfs
 from utils.data_loader import (
-    fetch_ohlcv,
     prepare_price_data,
     get_latest_trading_day,
     get_next_trading_day,
     count_trading_days,
     fetch_naver_etf_inav_snapshot,
     get_trading_days,
+    MissingPriceDataError,
 )
 from utils.db_manager import get_db_connection, list_open_positions
 from utils.logger import get_app_logger
@@ -169,17 +169,24 @@ def _fetch_dataframe(
     ma_period: int,
     base_date: Optional[pd.Timestamp],
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    data_window: Optional[tuple[str, str]] = None,
 ) -> Optional[pd.DataFrame]:
+    window_start: Optional[str]
+    window_end: Optional[str]
+    if data_window:
+        window_start, window_end = data_window
+    else:
+        window_start = None
+        window_end = None
     try:
         if prefetched_data and ticker in prefetched_data:
             df = prefetched_data[ticker]
         else:
-            months_back = max(12, ma_period)  # 최소 1년치 데이터 요청
-            df = fetch_ohlcv(
-                ticker,
+            raise MissingPriceDataError(
                 country=country,
-                months_back=months_back,
-                base_date=base_date,
+                start_date=window_start,
+                end_date=window_end or (base_date.strftime("%Y-%m-%d") if base_date is not None else None),
+                tickers=[ticker],
             )
 
         if df is None or df.empty:
@@ -350,15 +357,8 @@ def _resolve_base_date(account_id: str, date_str: Optional[str]) -> pd.Timestamp
     else:
         account_settings = get_account_settings(account_id)
         country_code = (account_settings.get("country_code") or account_id).strip().lower()
-        today_norm = pd.Timestamp.now().normalize()
         latest_trading_day = get_latest_trading_day(country_code)
-        latest_norm = latest_trading_day.normalize()
-
-        if latest_norm >= today_norm:
-            base = latest_norm
-        else:
-            next_trading_day = get_next_trading_day(country_code, reference_date=today_norm)
-            base = next_trading_day if next_trading_day is not None else latest_norm
+        base = latest_trading_day.normalize()
 
     return base.normalize()
 
@@ -685,18 +685,18 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         end_date=end_date,
         warmup_days=warmup_days,
     )
+    if missing_prefetch:
+        raise MissingPriceDataError(
+            country=country_code,
+            start_date=start_date,
+            end_date=end_date,
+            tickers=missing_prefetch,
+        )
     logger.info(
         "[%s] 가격 데이터 로딩 완료 (%.1fs)",
         account_id.upper(),
         time.perf_counter() - fetch_start,
     )
-    missing_logged = set(missing_prefetch)
-    if missing_prefetch:
-        logger.warning(
-            "[%s] 다음 종목의 가격 데이터를 확보하지 못해 제외합니다: %s",
-            account_id.upper(),
-            ", ".join(sorted(missing_logged)),
-        )
 
     data_by_tkr = {}
     realtime_inav_snapshot: Dict[str, Dict[str, float]] = {}
@@ -708,7 +708,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         except Exception as exc:
             logger.warning("[KOR] 네이버 iNAV 스냅샷 조회 실패: %s", exc)
             realtime_inav_snapshot = {}
-    missing_data_tickers: List[str] = list(missing_prefetch)
+    missing_data_tickers: List[str] = []
+    missing_logged: Set[str] = set()
     for stock in etf_universe:
         ticker = stock["ticker"]
         # 실제 데이터 가져오기
@@ -718,6 +719,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             ma_period=ma_period,
             base_date=base_date,
             prefetched_data=prefetched_data,
+            data_window=(start_date, end_date),
         )
         if df is not None and not df.empty:
             price_series = _select_price_series(df, country_code)
