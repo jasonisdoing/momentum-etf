@@ -39,8 +39,14 @@ def _fetch_naver_listing_date(ticker: str) -> Optional[str]:
         response = requests.get(url, timeout=5)
         response.raise_for_status()
 
+        # 네이버 차트 API는 EUC-KR 기반 XML을 반환하므로 명시적으로 디코딩
+        try:
+            text = response.content.decode("euc-kr")
+        except Exception:
+            text = response.text
+
         # XML 파싱
-        root = ET.fromstring(response.content)
+        root = ET.fromstring(text)
         chartdata = root.find("chartdata")
 
         if chartdata is not None:
@@ -52,7 +58,7 @@ def _fetch_naver_listing_date(ticker: str) -> Optional[str]:
                 return listing_date
 
     except Exception as e:
-        logger.debug(f"[네이버 API] {ticker} 상장일 조회 실패: {e}")
+        logger.info(f"[네이버 API] {ticker} 상장일 조회 실패: {e}")
 
     return None
 

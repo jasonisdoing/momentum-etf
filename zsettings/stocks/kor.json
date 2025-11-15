@@ -497,7 +497,7 @@
         ]
     },
     {
-        "category": "배당주",
+        "category": "배당성장합성",
         "tickers": [
             {
                 "ticker": "0097L0",
@@ -508,6 +508,20 @@
                 "1_week_avg_turnover": 2184113773,
                 "3_month_earn_rate": 10.286
             },
+            {
+                "ticker": "0107F0",
+                "name": "KIWOOM 미국고배당&AI테크",
+                "recommend_enabled": true,
+                "listing_date": "2025-09-23",
+                "1_week_avg_volume": 229008,
+                "1_week_avg_turnover": 2323437277,
+                "3_month_earn_rate": 1.9539
+            }
+        ]
+    },
+    {
+        "category": "배당주",
+        "tickers": [
             {
                 "ticker": "0115C0",
                 "name": "RISE 미국고배당다우존스TOP10",
@@ -534,6 +548,56 @@
                 "1_week_avg_volume": 2498036,
                 "1_week_avg_turnover": 52564177692,
                 "3_month_earn_rate": 9.8385
+            },
+            {
+                "ticker": "498860",
+                "name": "RISE 코리아금융고배당",
+                "recommend_enabled": true,
+                "listing_date": "2024-12-10",
+                "1_week_avg_volume": 191774,
+                "1_week_avg_turnover": 2937303940,
+                "3_month_earn_rate": 13.0501
+            },
+            {
+                "ticker": "466940",
+                "name": "TIGER 은행고배당플러스TOP10",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 1904233,
+                "1_week_avg_turnover": 40229271675,
+                "3_month_earn_rate": 10.6768
+            }
+        ]
+    },
+    {
+        "category": "한국금융",
+        "tickers": [
+            {
+                "ticker": "091170",
+                "name": "KODEX 은행",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 2798252,
+                "1_week_avg_turnover": 35586080072,
+                "3_month_earn_rate": 8.8915
+            },
+            {
+                "ticker": "102970",
+                "name": "KODEX 증권",
+                "recommend_enabled": true,
+                "listing_date": "2008-05-29",
+                "1_week_avg_volume": 3632324,
+                "1_week_avg_turnover": 56843184121,
+                "3_month_earn_rate": 20.2307
+            },
+            {
+                "ticker": "140700",
+                "name": "KODEX 보험",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-02",
+                "1_week_avg_volume": 384516,
+                "1_week_avg_turnover": 4963436042,
+                "3_month_earn_rate": 8.8946
             }
         ]
     },
@@ -589,38 +653,6 @@
                 "1_week_avg_volume": 72265,
                 "1_week_avg_turnover": 2091225471,
                 "3_month_earn_rate": 8.7544
-            }
-        ]
-    },
-    {
-        "category": "한국금융",
-        "tickers": [
-            {
-                "ticker": "102970",
-                "name": "KODEX 증권",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 3632324,
-                "1_week_avg_turnover": 56843184121,
-                "3_month_earn_rate": 20.2307
-            },
-            {
-                "ticker": "498860",
-                "name": "RISE 코리아금융고배당",
-                "recommend_enabled": true,
-                "listing_date": "2024-12-10",
-                "1_week_avg_volume": 191774,
-                "1_week_avg_turnover": 2937303940,
-                "3_month_earn_rate": 13.0501
-            },
-            {
-                "ticker": "466940",
-                "name": "TIGER 은행고배당플러스TOP10",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-02",
-                "1_week_avg_volume": 1904233,
-                "1_week_avg_turnover": 40229271675,
-                "3_month_earn_rate": 10.6768
             }
         ]
     },
@@ -793,8 +825,8 @@
                 "name": "TIGER 차이나과창판STAR50(합성)",
                 "recommend_enabled": true,
                 "listing_date": "2024-01-02",
-                "1_week_avg_volume": 599137,
-                "1_week_avg_turnover": 7029036207,
+                "1_week_avg_volume": null,
+                "1_week_avg_turnover": null,
                 "3_month_earn_rate": 34.9678
             },
             {
