@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.cache_utils import drop_cache_collection, swap_cache_collection, clean_temp_cache_collections
 from utils.data_loader import fetch_ohlcv
-from utils.stock_list_io import get_etfs
+from utils.stock_list_io import get_etfs, get_all_etfs
 from utils.account_registry import list_available_accounts, get_account_settings
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
@@ -58,7 +58,20 @@ def refresh_all_caches(countries: list[str], start_date: Optional[str]):
                 country.upper(),
                 removed,
             )
-        all_etfs_from_file = get_etfs(country, include_extra_tickers=benchmark_tickers)
+        all_etfs_from_file = get_all_etfs(country)
+        all_map = {str(item.get("ticker") or "").strip().upper(): item for item in all_etfs_from_file if item.get("ticker")}
+        for bench in benchmark_tickers:
+            norm = str(bench or "").strip().upper()
+            if not norm or norm in all_map:
+                continue
+            all_map[norm] = {
+                "ticker": norm,
+                "name": norm,
+                "category": "BENCHMARK",
+                "type": "etf",
+                "recommend_enabled": True,
+            }
+        all_etfs_from_file = list(all_map.values())
 
         suffix = f"{os.getpid()}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
         temp_token = f"{country}_tmp_{suffix}"

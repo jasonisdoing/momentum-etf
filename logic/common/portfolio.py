@@ -204,55 +204,6 @@ def calculate_buy_budget(
     return min(target_value, cash)
 
 
-def build_weekly_rebalance_cache(
-    trading_days: Iterable[Any],
-) -> Dict[Tuple[int, int], Optional[pd.Timestamp]]:
-    """주간 리밸런싱을 위한 (연도, 주) -> 마지막 거래일 매핑을 생성합니다.
-
-    Args:
-        trading_days: 거래일 iterable (문자열, datetime, pandas Timestamp 등 허용)
-
-    Returns:
-        (iso_year, iso_week) -> 마지막 거래일(Timestamp) 딕셔너리
-    """
-    cache: Dict[Tuple[int, int], Optional[pd.Timestamp]] = {}
-    if trading_days is None:
-        return cache
-
-    if isinstance(trading_days, (pd.Series, pd.Index)):
-        if len(trading_days) == 0:
-            return cache
-        iterable: Iterable[Any] = trading_days
-    else:
-        # list(...) to support generators/iterators and allow length check without ambiguity
-        materialized = list(trading_days)
-        if len(materialized) == 0:
-            return cache
-        iterable = materialized
-
-    for raw_dt in iterable:
-        if raw_dt is None:
-            continue
-
-        try:
-            dt = pd.Timestamp(raw_dt)
-        except Exception:
-            continue
-
-        if pd.isna(dt):
-            continue
-
-        normalized = dt.normalize()
-        iso_year, iso_week, _ = normalized.isocalendar()
-        key = (int(iso_year), int(iso_week))
-
-        existing = cache.get(key)
-        if existing is None or normalized > existing:
-            cache[key] = normalized
-
-    return cache
-
-
 def calculate_held_categories(
     position_state: Dict,
     ticker_to_category: Dict[str, str],

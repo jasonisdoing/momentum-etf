@@ -8,14 +8,14 @@ import time
 from datetime import datetime, timedelta, time as dt_time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
 import config
 
 # 데이터 디렉토리 경로 설정
-DATA_DIR = Path(__file__).parent.parent.parent / "data" / "stocks"
+STOCKS_DIR = Path(__file__).resolve().parents[2] / "zsettings" / "stocks"
 from utils.settings_loader import (
     AccountSettingsError,
     get_account_settings,
@@ -110,7 +110,7 @@ class _TickerScore:
 def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
     """Load metadata for all ETFs including recommend_disabled ones."""
 
-    file_path = DATA_DIR / f"{country_code}.json"
+    file_path = STOCKS_DIR / f"{country_code}.json"
     if not file_path.exists():
         return {}
 
@@ -590,8 +590,29 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         account_id.upper(),
         len(etf_universe),
     )
+    raw_full_meta = _load_full_etf_meta(country_code)
+    full_meta_map: Dict[str, Dict[str, Any]] = {}
+    for ticker, meta in raw_full_meta.items():
+        norm = str(ticker or "").strip().upper()
+        if not norm:
+            continue
+        entry = dict(meta)
+        entry["ticker"] = norm
+        entry.setdefault("name", norm)
+        entry.setdefault("category", "TBD")
+        full_meta_map[norm] = entry
+
     disabled_tickers = {str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if not bool(stock.get("recommend_enabled", True))}
-    pairs = [(stock.get("ticker"), stock.get("name")) for stock in etf_universe if stock.get("ticker")]
+    pairs: List[Tuple[str, str]] = []
+    pair_seen: Set[str] = set()
+    for stock in etf_universe:
+        ticker_value = stock.get("ticker")
+        if not ticker_value:
+            continue
+        ticker_upper = str(ticker_value).strip().upper()
+        name_value = stock.get("name") or ticker_upper
+        pairs.append((ticker_upper, name_value))
+        pair_seen.add(ticker_upper)
 
     # 실제 포트폴리오 데이터 준비
     holdings: Dict[str, Dict[str, float]] = {}
@@ -627,12 +648,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         # 종목명과 티커를 함께 표시
         holdings_display = []
         for ticker in sorted(holdings.keys()):
-            # etf_universe에서 종목명 찾기
-            name = ticker
-            for stock in etf_universe:
-                if stock.get("ticker", "").upper() == ticker:
-                    name = stock.get("name") or ticker
-                    break
+            meta_entry = full_meta_map.get(ticker) or {}
+            name = meta_entry.get("name") or ticker
             holdings_display.append(f"{name}({ticker})")
 
         logger.info(
@@ -652,8 +669,45 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     current_equity = 100_000_000  # 임시값
     total_cash = 100_000_000  # 임시값
 
+    # 당일 거래 내역 확보 (SOLD 표시용)
+    trades_today = _fetch_trades_for_date(account_id, base_date)
+
+    rep_ticker_set = {str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if stock.get("ticker")}
+
+    # 보유/거래 티커를 pairs에만 포함
+    def _ensure_additional_pair(ticker: Any) -> None:
+        text = str(ticker or "").strip().upper()
+        if not text:
+            return
+        if text not in pair_seen:
+            meta_entry = full_meta_map.get(text, {})
+            name_value = meta_entry.get("name") or text
+            pairs.append((text, name_value))
+            pair_seen.add(text)
+
+    for held_ticker in holdings.keys():
+        _ensure_additional_pair(held_ticker)
+    for trade_entry in trades_today:
+        _ensure_additional_pair(trade_entry.get("ticker"))
+
     # 각 티커의 현재 데이터 준비 (실제 OHLCV 데이터 사용)
-    tickers_all = [stock.get("ticker") for stock in etf_universe if stock.get("ticker")]
+    tickers_all: List[str] = []
+    tickers_seen: Set[str] = set()
+
+    def _append_prefetch_ticker(raw: Any) -> None:
+        text = str(raw or "").strip().upper()
+        if not text or text in tickers_seen:
+            return
+        tickers_seen.add(text)
+        tickers_all.append(text)
+
+    for stock in etf_universe:
+        _append_prefetch_ticker(stock.get("ticker"))
+    for ticker_key in holdings.keys():
+        _append_prefetch_ticker(ticker_key)
+    for trade_entry in trades_today:
+        _append_prefetch_ticker(trade_entry.get("ticker"))
+
     prefetched_data: Dict[str, pd.DataFrame] = {}
     months_back = max(12, ma_period)
     warmup_days = int(max(ma_period, 1) * 1.5)
@@ -670,6 +724,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             pass
     start_date = prefetch_start_dt.strftime("%Y-%m-%d")
     end_date = base_date.strftime("%Y-%m-%d")
+    primary_tickers = [ticker for ticker in tickers_all if ticker in rep_ticker_set]
+    extra_tickers = [ticker for ticker in tickers_all if ticker not in rep_ticker_set]
+
     logger.info(
         "[%s] 가격 데이터 로딩 시작 (기간 %s~%s, 대상 %d개)",
         account_id.upper(),
@@ -678,20 +735,43 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         len(tickers_all),
     )
     fetch_start = time.perf_counter()
-    prefetched_data, missing_prefetch = prepare_price_data(
-        tickers=tickers_all,
-        country=country_code,
-        start_date=start_date,
-        end_date=end_date,
-        warmup_days=warmup_days,
-    )
-    if missing_prefetch:
-        raise MissingPriceDataError(
+    prefetched_data: Dict[str, pd.DataFrame] = {}
+
+    if primary_tickers:
+        pref_primary, missing_primary = prepare_price_data(
+            tickers=primary_tickers,
             country=country_code,
             start_date=start_date,
             end_date=end_date,
-            tickers=missing_prefetch,
+            warmup_days=warmup_days,
+            allow_remote_fetch=False,
         )
+        if missing_primary:
+            raise MissingPriceDataError(
+                country=country_code,
+                start_date=start_date,
+                end_date=end_date,
+                tickers=missing_primary,
+            )
+        prefetched_data.update(pref_primary)
+
+    if extra_tickers:
+        pref_extra, missing_extra = prepare_price_data(
+            tickers=extra_tickers,
+            country=country_code,
+            start_date=start_date,
+            end_date=end_date,
+            warmup_days=warmup_days,
+            allow_remote_fetch=True,
+        )
+        if missing_extra:
+            raise MissingPriceDataError(
+                country=country_code,
+                start_date=start_date,
+                end_date=end_date,
+                tickers=missing_extra,
+            )
+        prefetched_data.update(pref_extra)
     logger.info(
         "[%s] 가격 데이터 로딩 완료 (%.1fs)",
         account_id.upper(),
@@ -711,7 +791,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     missing_data_tickers: List[str] = []
     missing_logged: Set[str] = set()
     for stock in etf_universe:
-        ticker = stock["ticker"]
+        raw_ticker = stock["ticker"]
+        ticker = str(raw_ticker or "").strip().upper()
         # 실제 데이터 가져오기
         df = _fetch_dataframe(
             ticker,
@@ -829,15 +910,67 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             )
         missing_logged.update(missing_data_tickers)
 
+    supplemental_tickers = tickers_seen - set(data_by_tkr.keys())
+    base_date_norm = pd.to_datetime(base_date).normalize()
+    for ticker in supplemental_tickers:
+        df_extra = prefetched_data.get(ticker)
+        if df_extra is None or df_extra.empty:
+            continue
+        df_extra = df_extra.sort_index()
+        price_series = _select_price_series(df_extra, country_code)
+        if price_series is None or price_series.empty:
+            continue
+        score_latest = float(price_series.iloc[-1])
+        market_series = pd.to_numeric(df_extra.get("Close"), errors="coerce") if "Close" in df_extra.columns else price_series
+        market_series = market_series.fillna(method="ffill").fillna(method="bfill")
+        latest_data_date = pd.to_datetime(df_extra.index[-1]).normalize()
+        if latest_data_date >= base_date_norm and len(market_series) > 1:
+            market_prev = float(market_series.iloc[-2])
+        else:
+            market_prev = float(market_series.iloc[-1]) if not market_series.empty else score_latest
+        data_by_tkr[ticker] = {
+            "price": float(price_series.iloc[-1]),
+            "nav_price": None,
+            "prev_close": market_prev,
+            "daily_pct": 0.0,
+            "close": price_series,
+            "s1": None,
+            "s2": None,
+            "score": score_latest,
+            "rsi_score": 0.0,
+            "filter": 0,
+            "ret_1w": _compute_trailing_return(price_series, 5),
+            "ret_2w": _compute_trailing_return(price_series, 10),
+            "ret_3w": _compute_trailing_return(price_series, 15),
+            "trend_prices": [],
+            "price_deviation": None,
+            "ma_period": ma_period,
+        }
+
     # 쿨다운 정보 계산
     trade_cooldown_info = calculate_trade_cooldown_info(
-        [stock["ticker"] for stock in etf_universe],
+        sorted(tickers_seen),
         account_id,
         base_date.to_pydatetime(),
         country_code=country_code,
     )
 
     # generate_daily_recommendations_for_portfolio 호출
+    etf_meta_map: Dict[str, Dict[str, Any]] = {}
+    for stock in etf_universe:
+        ticker_value = stock.get("ticker")
+        ticker_upper = str(ticker_value or "").strip().upper()
+        if not ticker_upper:
+            continue
+        entry = dict(stock)
+        entry["ticker"] = ticker_upper
+        entry.setdefault("name", ticker_upper)
+        entry.setdefault("category", stock.get("category") or "TBD")
+        etf_meta_map[ticker_upper] = entry
+    for ticker_upper, meta in full_meta_map.items():
+        if ticker_upper not in etf_meta_map:
+            etf_meta_map[ticker_upper] = dict(meta)
+
     try:
         from strategies.maps import safe_generate_daily_recommendations_for_portfolio
 
@@ -857,8 +990,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             strategy_rules=strategy_rules,
             data_by_tkr=data_by_tkr,
             holdings=holdings,
-            etf_meta={stock["ticker"]: stock for stock in etf_universe},
-            full_etf_meta={stock["ticker"]: stock for stock in etf_universe},
+            etf_meta=etf_meta_map,
+            full_etf_meta=full_meta_map,
             current_equity=current_equity,
             total_cash=total_cash,
             pairs=pairs,
@@ -878,7 +1011,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         return []
 
     # 당일 SELL 트레이드를 결과에 추가하여 SOLD 상태로 노출
-    trades_today = _fetch_trades_for_date(account_id, base_date)
     sold_entries: List[Dict[str, Any]] = []
     buy_traded_today: set[str] = set()
     sell_traded_today: set[str] = set()
@@ -926,6 +1058,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                     (stock for stock in etf_universe if stock.get("ticker", "").upper() == ticker),
                     None,
                 )
+                if not meta_info:
+                    meta_info = full_meta_map.get(ticker) or full_meta_map.get(ticker.upper())
                 if meta_info:
                     name = meta_info.get("name") or name
                 else:
@@ -980,29 +1114,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             continue
 
     # 결과 포맷팅
-    etf_meta_map: Dict[str, Dict[str, Any]] = {}
-    for stock in etf_universe:
-        ticker = stock.get("ticker")
-        if not ticker:
-            continue
-        upper = str(ticker).upper()
-        etf_meta_map[upper] = {
-            "ticker": upper,
-            "name": stock.get("name") or upper,
-            "category": stock.get("category") or "TBD",
-        }
-
-    # 추천 비활성 티커도 메타데이터 보완용으로 포함한다
-    full_meta_map = _load_full_etf_meta(country_code)
-    for ticker, meta in full_meta_map.items():
-        upper_ticker = ticker.upper()
-        if upper_ticker not in etf_meta_map:
-            etf_meta_map[upper_ticker] = {
-                "ticker": upper_ticker,
-                "name": meta.get("name") or upper_ticker,
-                "category": meta.get("category") or "TBD",
-            }
-
     disabled_note = DECISION_NOTES.get("NO_RECOMMEND", "추천 제외")
     held_category_names: Set[str] = set()
     for held_ticker in holdings.keys():

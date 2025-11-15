@@ -134,6 +134,41 @@ def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None
     return filtered
 
 
+def get_all_etfs(country: str) -> List[Dict[str, Any]]:
+    """Return every ETF entry defined in zsettings/stocks/{country}.json without filtering."""
+
+    raw_data = _load_country_raw(country)
+    if not raw_data:
+        return []
+
+    results: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for category_block in raw_data:
+        if not isinstance(category_block, dict):
+            continue
+        raw_category = category_block.get("category", "TBD")
+        if isinstance(raw_category, (list, set, tuple)):
+            raw_category = next(iter(raw_category), "") if raw_category else ""
+        category_name = str(raw_category or "TBD").strip() or "TBD"
+        tickers_list = category_block.get("tickers", [])
+        if not isinstance(tickers_list, list):
+            continue
+        for item in tickers_list:
+            if not isinstance(item, dict):
+                continue
+            ticker = str(item.get("ticker") or "").strip()
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            entry = dict(item)
+            entry["ticker"] = ticker
+            entry.setdefault("type", "etf")
+            entry.setdefault("category", category_name)
+            entry["recommend_enabled"] = item.get("recommend_enabled") is not False
+            results.append(entry)
+    return results
+
+
 def save_etfs(country: str, data: List[Dict]):
     """
     주어진 데이터를 'zsettings/stocks/{country}.json' 파일에 저장합니다.
