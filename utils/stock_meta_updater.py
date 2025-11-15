@@ -178,47 +178,18 @@ def _update_metadata_for_country(country_code: str):
         if not ticker:
             continue
 
-        # 이미 상장일이 있는지 확인
-        existing_listing_date = stock.get("listing_date")
-        has_listing_date = bool(existing_listing_date)
-
         yfinance_ticker = f"{ticker}.KS"
 
         try:
             listing_date_str = None
             data = None  # 각 종목마다 data 변수 초기화
+            listing_date_str = _fetch_naver_listing_date(ticker)
+            if listing_date_str:
+                logger.debug(f"[{country_code.upper()}/{ticker}] 네이버 API에서 상장일 획득: {listing_date_str}")
 
-            # 이미 상장일이 있으면 스킵 (거래량/거래대금만 업데이트)
-            if has_listing_date:
-                listing_date_str = existing_listing_date
-                logger.debug(f"[{country_code.upper()}/{ticker}] 상장일 이미 존재: {listing_date_str}, 스킵")
-            else:
-                listing_date_str = _fetch_naver_listing_date(ticker)
-                if listing_date_str:
-                    logger.info(f"[{country_code.upper()}/{ticker}] 네이버 API에서 상장일 획득: {listing_date_str}")
-
-            # 네이버 API 실패 시 yfinance 폴백
             if not listing_date_str:
-                logger.debug(f"[{country_code.upper()}/{ticker}] yfinance로 폴백하여 상장일 조회")
-                # yfinance를 통해 전체 기간 데이터 다운로드
-                data = yf.download(yfinance_ticker, period="max", progress=False, auto_adjust=False)
-                if data.empty:
-                    logger.warning(f"[{country_code.upper()}/{ticker}] 데이터를 가져올 수 없습니다.")
-                    continue
-
-                # yfinance가 MultiIndex 컬럼을 반환하는 경우 단일 레벨로 정리
-                if isinstance(data.columns, pd.MultiIndex):
-                    data.columns = data.columns.get_level_values(0)
-                    data = data.loc[:, ~data.columns.duplicated()]
-
-                # 중복된 인덱스가 있을 경우 마지막 항목만 남김
-                if not data.index.is_unique:
-                    data = data[~data.index.duplicated(keep="last")]
-
-                # 1. 상장일 업데이트 (실제 상장일 저장)
-                first_trading_ts = pd.Timestamp(data.index.min()).normalize()
-                listing_date_str = first_trading_ts.strftime("%Y-%m-%d")
-                logger.info(f"[{country_code.upper()}/{ticker}] yfinance에서 상장일 획득: {listing_date_str}")
+                logger.warning(f"[{country_code.upper()}/{ticker}] 상장일을 가져오지 못해 스킵합니다.")
+                continue
 
             # 상장일 저장
             stock["listing_date"] = listing_date_str
