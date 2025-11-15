@@ -24,7 +24,11 @@ from utils.settings_loader import (
     resolve_strategy_params,
 )
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
-from logic.common import sort_decisions_by_order_and_score, filter_category_duplicates
+from logic.common import (
+    sort_decisions_by_order_and_score,
+    filter_category_duplicates,
+    get_buy_signal_streak,
+)
 from strategies.maps.history import (
     calculate_consecutive_holding_info,
     calculate_trade_cooldown_info,
@@ -39,6 +43,9 @@ from utils.data_loader import (
     get_trading_days,
     MissingPriceDataError,
 )
+from utils.indicators import calculate_ma_score
+from utils.moving_averages import calculate_moving_average
+from strategies.rsi.recommend import calculate_rsi_for_ticker
 from utils.db_manager import get_db_connection, list_open_positions
 from utils.logger import get_app_logger
 from utils.market_schedule import get_market_open_time
@@ -518,6 +525,105 @@ def _compute_trailing_return(
     return round(((latest_price / prev_price) - 1.0) * 100.0, 2)
 
 
+def _build_ticker_timeseries_entry(
+    *,
+    ticker: str,
+    df: pd.DataFrame,
+    country_code: str,
+    base_date: pd.Timestamp,
+    ma_period: int,
+    ma_type: str,
+    min_buy_score: float,
+    realtime_inav_snapshot: Optional[Dict[str, Dict[str, float]]] = None,
+) -> Optional[Dict[str, Any]]:
+    """대표군 여부와 상관없이 동일한 방식으로 점수/지표를 계산합니다."""
+
+    ticker_upper = str(ticker or "").strip().upper()
+    if not ticker_upper or df is None or df.empty:
+        return None
+
+    df_sorted = df.sort_index()
+    price_series = _select_price_series(df_sorted, country_code)
+    if price_series is None or price_series.empty:
+        return None
+    price_series = price_series.dropna()
+    if price_series.empty:
+        return None
+
+    market_series = pd.to_numeric(df_sorted.get("Close"), errors="coerce") if "Close" in df_sorted.columns else price_series
+    market_series = market_series.fillna(method="ffill").fillna(method="bfill")
+
+    base_date_norm = pd.to_datetime(base_date).normalize()
+    latest_data_date = pd.to_datetime(df_sorted.index[-1]).normalize()
+    if latest_data_date >= base_date_norm and len(market_series) > 1:
+        market_prev = float(market_series.iloc[-2])
+    else:
+        market_prev = float(market_series.iloc[-1]) if not market_series.empty else None
+
+    market_latest = float(market_series.iloc[-1]) if not market_series.empty else None
+    nav_latest: Optional[float] = None
+    price_deviation: Optional[float] = None
+    daily_pct = 0.0
+
+    country_lower = (country_code or "").strip().lower()
+    is_kor_market = country_lower in {"kr", "kor"}
+    snapshot_entry = realtime_inav_snapshot.get(ticker_upper) if realtime_inav_snapshot else None
+
+    if is_kor_market and snapshot_entry:
+        price_candidate = snapshot_entry.get("nowVal")
+        if isinstance(price_candidate, (int, float)) and price_candidate > 0:
+            market_latest = float(price_candidate)
+
+        nav_candidate = snapshot_entry.get("nav")
+        if isinstance(nav_candidate, (int, float)) and nav_candidate > 0:
+            nav_latest = float(nav_candidate)
+
+        deviation_raw = snapshot_entry.get("deviation")
+        if isinstance(deviation_raw, (int, float)):
+            price_deviation = round(float(deviation_raw), 2)
+
+    if market_latest and market_prev and market_prev > 0:
+        try:
+            daily_pct = ((market_latest / market_prev) - 1.0) * 100
+        except ZeroDivisionError:
+            daily_pct = 0.0
+
+    if is_kor_market and not snapshot_entry:
+        nav_latest = None
+        price_deviation = None
+
+    moving_average = calculate_moving_average(price_series, ma_period, ma_type)
+    ma_score_series = calculate_ma_score(price_series, moving_average)
+    score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
+    consecutive_buy_days = get_buy_signal_streak(score_value, ma_score_series, min_buy_score)
+
+    rsi_score = calculate_rsi_for_ticker(price_series)
+    if rsi_score == 0.0 and len(price_series) < 15:
+        logger.warning(f"[RSI] {ticker_upper} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
+
+    recent_prices = market_series.tail(15)
+    trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
+
+    return {
+        "price": market_latest,
+        "nav_price": nav_latest,
+        "prev_close": market_prev if market_prev is not None else market_latest,
+        "daily_pct": round(daily_pct, 2),
+        "close": price_series,
+        "s1": moving_average.iloc[-1] if not moving_average.empty else None,
+        "s2": None,
+        "score": score_value,
+        "rsi_score": rsi_score,
+        "filter": consecutive_buy_days,
+        "ret_1w": _compute_trailing_return(price_series, 5),
+        "ret_2w": _compute_trailing_return(price_series, 10),
+        "ret_3w": _compute_trailing_return(price_series, 15),
+        "trend_prices": trend_prices,
+        "price_deviation": price_deviation,
+        "ma_period": ma_period,
+    }
+
+
 def _fetch_trades_for_date(account_id: str, base_date: pd.Timestamp) -> List[Dict[str, Any]]:
     """Retrieve trades executed on the given base_date."""
 
@@ -778,22 +884,25 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         time.perf_counter() - fetch_start,
     )
 
-    data_by_tkr = {}
-    realtime_inav_snapshot: Dict[str, Dict[str, float]] = {}
+    data_by_tkr: Dict[str, Dict[str, Any]] = {}
     country_lower = (country_code or "").strip().lower()
     is_kor_market = country_lower in {"kr", "kor"}
-    if is_kor_market:
+    realtime_inav_snapshot: Dict[str, Dict[str, float]] = {}
+    snapshot_targets = (
+        [t for t in tickers_all if t]
+        if tickers_all
+        else [str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if stock.get("ticker")]
+    )
+    if is_kor_market and snapshot_targets:
         try:
-            realtime_inav_snapshot = fetch_naver_etf_inav_snapshot([stock["ticker"] for stock in etf_universe])
+            realtime_inav_snapshot = fetch_naver_etf_inav_snapshot(snapshot_targets)
         except Exception as exc:
             logger.warning("[KOR] 네이버 iNAV 스냅샷 조회 실패: %s", exc)
             realtime_inav_snapshot = {}
+
     missing_data_tickers: List[str] = []
     missing_logged: Set[str] = set()
-    for stock in etf_universe:
-        raw_ticker = stock["ticker"]
-        ticker = str(raw_ticker or "").strip().upper()
-        # 실제 데이터 가져오기
+    for ticker in sorted(tickers_seen):
         df = _fetch_dataframe(
             ticker,
             country=country_code,
@@ -802,103 +911,25 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             prefetched_data=prefetched_data,
             data_window=(start_date, end_date),
         )
-        if df is not None and not df.empty:
-            price_series = _select_price_series(df, country_code)
-            score_latest = float(price_series.iloc[-1])
-
-            market_series = pd.to_numeric(df.get("Close"), errors="coerce") if "Close" in df.columns else price_series
-            market_series = market_series.fillna(method="ffill").fillna(method="bfill")
-
-            # 데이터의 최신 날짜 추출
-            latest_data_date = pd.to_datetime(df.index[-1]).normalize()
-            base_date_norm = pd.to_datetime(base_date).normalize()
-
-            # 전일 종가 (일간 수익률 계산용)
-            # 캐시에 오늘 데이터가 있으면 전일(iloc[-2]), 없으면 마지막(iloc[-1])
-            if latest_data_date >= base_date_norm and len(market_series) > 1:
-                market_prev = float(market_series.iloc[-2])
-            else:
-                market_prev = float(market_series.iloc[-1]) if not market_series.empty else score_latest
-
-            # 한국 시장: 현재가, NAV, 일간 수익률은 네이버 API만 사용 (fallback 없음)
-            market_latest: Optional[float] = None
-            nav_latest: Optional[float] = None
-            daily_pct = 0.0
-
-            if is_kor_market:
-                ticker_key_upper = str(ticker).strip().upper()
-                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
-                if realtime_entry:
-                    # 현재가
-                    price_candidate = realtime_entry.get("nowVal")
-                    if isinstance(price_candidate, (int, float)) and price_candidate > 0:
-                        market_latest = float(price_candidate)
-
-                    # NAV
-                    nav_candidate = realtime_entry.get("nav")
-                    if isinstance(nav_candidate, (int, float)) and nav_candidate > 0:
-                        nav_latest = float(nav_candidate)
-
-                    # 일간 수익률 (현재가 / 전일 종가 - 1)
-                    if market_latest and market_prev and market_prev > 0:
-                        daily_pct = ((market_latest / market_prev) - 1.0) * 100
-            else:
-                # 해외 시장: 캐시 데이터 사용
-                market_latest = float(market_series.iloc[-1]) if not market_series.empty else score_latest
-                market_prev_for_calc = float(market_series.iloc[-2]) if len(market_series) > 1 else market_latest
-
-                latest_data_date = pd.to_datetime(df.index[-1]).normalize()
-                if latest_data_date >= base_date and market_prev_for_calc and market_prev_for_calc > 0:
-                    daily_pct = ((market_latest / market_prev_for_calc) - 1.0) * 100
-
-            from utils.indicators import calculate_ma_score
-            from utils.moving_averages import calculate_moving_average
-            from logic.common import get_buy_signal_streak
-
-            moving_average = calculate_moving_average(price_series, ma_period, ma_type)
-            ma_score_series = calculate_ma_score(price_series, moving_average)
-            score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
-            consecutive_buy_days = get_buy_signal_streak(score, ma_score_series, min_buy_score)
-
-            from strategies.rsi.recommend import calculate_rsi_for_ticker
-
-            rsi_score = calculate_rsi_for_ticker(price_series)
-            if rsi_score == 0.0 and len(price_series) < 15:
-                logger.warning(f"[RSI] {ticker} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
-
-            recent_prices = market_series.tail(15)
-            trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
-
-            price_deviation: Optional[float] = None
-            if is_kor_market:
-                # 괴리율은 네이버 API의 실시간 데이터만 사용
-                ticker_key_upper = str(ticker).strip().upper()
-                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
-                if realtime_entry:
-                    deviation_raw = realtime_entry.get("deviation")
-                    if isinstance(deviation_raw, (int, float)):
-                        price_deviation = round(float(deviation_raw), 2)
-
-            data_by_tkr[ticker] = {
-                "price": market_latest,
-                "nav_price": nav_latest,
-                "prev_close": market_prev,
-                "daily_pct": round(daily_pct, 2),
-                "close": price_series,
-                "s1": moving_average.iloc[-1] if not moving_average.empty else None,
-                "s2": None,
-                "score": score,
-                "rsi_score": rsi_score,
-                "filter": consecutive_buy_days,
-                "ret_1w": _compute_trailing_return(price_series, 5),
-                "ret_2w": _compute_trailing_return(price_series, 10),
-                "ret_3w": _compute_trailing_return(price_series, 15),
-                "trend_prices": trend_prices,
-                "price_deviation": price_deviation if is_kor_market else None,
-                "ma_period": ma_period,
-            }
-        else:
+        if df is None or df.empty:
             missing_data_tickers.append(ticker)
+            continue
+
+        entry = _build_ticker_timeseries_entry(
+            ticker=ticker,
+            df=df,
+            country_code=country_code,
+            base_date=base_date,
+            ma_period=ma_period,
+            ma_type=ma_type,
+            min_buy_score=min_buy_score,
+            realtime_inav_snapshot=realtime_inav_snapshot if is_kor_market else None,
+        )
+        if entry is None:
+            missing_data_tickers.append(ticker)
+            continue
+
+        data_by_tkr[ticker] = entry
 
     if missing_data_tickers:
         extra_missing = set(missing_data_tickers) - missing_logged
@@ -909,43 +940,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 ", ".join(sorted(extra_missing)),
             )
         missing_logged.update(missing_data_tickers)
-
-    supplemental_tickers = tickers_seen - set(data_by_tkr.keys())
-    base_date_norm = pd.to_datetime(base_date).normalize()
-    for ticker in supplemental_tickers:
-        df_extra = prefetched_data.get(ticker)
-        if df_extra is None or df_extra.empty:
-            continue
-        df_extra = df_extra.sort_index()
-        price_series = _select_price_series(df_extra, country_code)
-        if price_series is None or price_series.empty:
-            continue
-        score_latest = float(price_series.iloc[-1])
-        market_series = pd.to_numeric(df_extra.get("Close"), errors="coerce") if "Close" in df_extra.columns else price_series
-        market_series = market_series.fillna(method="ffill").fillna(method="bfill")
-        latest_data_date = pd.to_datetime(df_extra.index[-1]).normalize()
-        if latest_data_date >= base_date_norm and len(market_series) > 1:
-            market_prev = float(market_series.iloc[-2])
-        else:
-            market_prev = float(market_series.iloc[-1]) if not market_series.empty else score_latest
-        data_by_tkr[ticker] = {
-            "price": float(price_series.iloc[-1]),
-            "nav_price": None,
-            "prev_close": market_prev,
-            "daily_pct": 0.0,
-            "close": price_series,
-            "s1": None,
-            "s2": None,
-            "score": score_latest,
-            "rsi_score": 0.0,
-            "filter": 0,
-            "ret_1w": _compute_trailing_return(price_series, 5),
-            "ret_2w": _compute_trailing_return(price_series, 10),
-            "ret_3w": _compute_trailing_return(price_series, 15),
-            "trend_prices": [],
-            "price_deviation": None,
-            "ma_period": ma_period,
-        }
 
     # 쿨다운 정보 계산
     trade_cooldown_info = calculate_trade_cooldown_info(
@@ -1502,10 +1496,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     # 카테고리별 최고 점수만 표시 (교체 매매 제외)
     results = filter_category_duplicates(results, category_key_getter=_normalize_category_value)
-
-    # 점수가 음수인 종목 제외 (단, 보유/매도 종목은 유지)
-    holding_states = {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_RSI", "SELL_REPLACE", "CUT_STOPLOSS", "SOLD"}
-    results = [item for item in results if item.get("score", 0.0) >= 0 or item.get("state") in holding_states]
 
     # rank 재설정
     for i, item in enumerate(results, 1):
