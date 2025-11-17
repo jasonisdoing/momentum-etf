@@ -142,7 +142,7 @@ def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
             raw_category = next(iter(raw_category), "") if raw_category else ""
         category_name = str(raw_category or "").strip()
         if not category_name:
-            category_name = "미분류"
+            raise ValueError(f"카테고리 블록에 카테고리 이름이 없습니다. 모든 카테고리 블록은 'category' 필드가 있어야 합니다.")
 
         tickers = block.get("tickers") or []
         if not isinstance(tickers, list):
@@ -161,7 +161,7 @@ def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
                 raw_item_category = next(iter(raw_item_category), "") if raw_item_category else ""
             item_category = str(raw_item_category or category_name or "").strip()
             if not item_category:
-                item_category = "미분류"
+                raise ValueError(f"종목 {ticker}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
 
             name = str(item.get("name") or ticker).strip() or ticker
 
@@ -711,7 +711,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         entry = dict(meta)
         entry["ticker"] = norm
         entry.setdefault("name", norm)
-        entry.setdefault("category", "미분류")
+        if "category" not in entry or not entry["category"]:
+            raise ValueError(f"종목 {norm}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
         full_meta_map[norm] = entry
 
     disabled_tickers = {str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if not bool(stock.get("recommend_enabled", True))}
@@ -967,7 +968,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         entry.setdefault("name", ticker_upper)
         category = stock.get("category") or ""
         if not str(category).strip():
-            category = "미분류"
+            raise ValueError(f"종목 {ticker_upper}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
         entry.setdefault("category", category)
         etf_meta_map[ticker_upper] = entry
     for ticker_upper, meta in full_meta_map.items():
@@ -1154,7 +1155,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
         meta_info = etf_meta_map.get(ticker) or {}
         name = meta_info.get("name", ticker)
-        category = meta_info.get("category", "미분류")
+        category = meta_info.get("category")
+        if not category:
+            raise ValueError(f"종목 {ticker}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
         ticker_upper = str(ticker).upper()
         recommend_enabled = ticker_upper not in disabled_tickers
 

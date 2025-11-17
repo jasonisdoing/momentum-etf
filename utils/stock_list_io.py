@@ -91,7 +91,7 @@ def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None
     for item in all_etfs:
         category = str(item.get("category") or "").strip()
         if not category:
-            category = "미분류"
+            raise ValueError(f"종목 {item.get('ticker')}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
         grouped.setdefault(category, []).append(item)
 
     filtered: List[Dict[str, Any]] = []
@@ -159,7 +159,7 @@ def get_all_etfs(country: str) -> List[Dict[str, Any]]:
             raw_category = next(iter(raw_category), "") if raw_category else ""
         category_name = str(raw_category or "").strip()
         if not category_name:
-            category_name = "미분류"
+            raise ValueError(f"카테고리 블록에 카테고리 이름이 없습니다. 모든 카테고리 블록은 'category' 필드가 있어야 합니다.")
         tickers_list = category_block.get("tickers", [])
         if not isinstance(tickers_list, list):
             continue

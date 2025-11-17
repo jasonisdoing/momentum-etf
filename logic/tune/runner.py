@@ -1751,14 +1751,16 @@ def run_account_tuning(
     if not tickers:
         logger.error("[튜닝] '%s' 유효한 티커가 없습니다.", country_code)
         return None
+
+    # 벤치마크 종목도 프리패치에 포함 (백테스트 결과 비교용)
     benchmark_tickers = get_benchmark_tickers(account_settings)
     if benchmark_tickers:
-        normalized = {str(t).strip().upper() for t in tickers if t}
-        for bench in benchmark_tickers:
-            bench_norm = str(bench or "").strip().upper()
-            if bench_norm and bench_norm not in normalized:
-                tickers.append(bench_norm)
-                normalized.add(bench_norm)
+        tickers_set = set(tickers)
+        for bench_ticker in benchmark_tickers:
+            if bench_ticker and bench_ticker not in tickers_set:
+                tickers.append(bench_ticker)
+                tickers_set.add(bench_ticker)
+        logger.info("[튜닝] 벤치마크 %d개 종목을 프리패치에 추가합니다: %s", len(benchmark_tickers), ", ".join(benchmark_tickers))
 
     combo_count = (
         len(ma_values)

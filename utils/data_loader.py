@@ -956,7 +956,7 @@ def fetch_ohlcv_for_tickers(
         except Exception:
             is_trading_day = False
 
-        # 시장 개장 시간 확인
+        # 시장 개장 시간 확인 (장 시작 ~ 장 마감 사이)
         is_market_open_time = False
         if is_trading_day:
             try:
@@ -970,13 +970,15 @@ def fetch_ohlcv_for_tickers(
                     tz = pytz.timezone(tz_name)
                     now_local = datetime.now(tz)
                     market_open = schedule["open"]
+                    market_close = schedule["close"]
 
-                    # 장 시작 시간 이후인지 확인
-                    is_market_open_time = now_local.time() >= market_open
+                    # 장 시작 ~ 장 마감 사이인지 확인
+                    current_time = now_local.time()
+                    is_market_open_time = market_open <= current_time <= market_close
             except Exception:
                 is_market_open_time = False
 
-        # 거래일이고 장 시작 이후에만 실시간 데이터 조회
+        # 거래일이고 장 시작 ~ 장 마감 사이에만 실시간 데이터 조회
         if is_trading_day and is_market_open_time:
             try:
                 realtime_data = fetch_naver_etf_inav_snapshot(tickers)
@@ -1030,8 +1032,12 @@ def fetch_ohlcv_for_tickers(
                     cache_end = cached_df.index.max().normalize()
                     logger.info(f"[실시간] {tkr} 오늘 데이터를 실시간 가격({rt_price:,.0f})으로 보완")
 
-            if cache_start <= ticker_start and cache_end >= required_end:
-                sliced = cached_df.loc[(cached_df.index >= ticker_start) & (cached_df.index <= required_end)].copy()
+            # 캐시 범위가 요청 범위를 충분히 커버하는지 확인
+            # ticker_start가 cache_start보다 이전이어도, cache_end가 required_end를 커버하면 OK
+            if cache_end >= required_end:
+                # ticker_start와 cache_start 중 더 늦은 날짜부터 슬라이싱
+                effective_start = max(ticker_start, cache_start)
+                sliced = cached_df.loc[(cached_df.index >= effective_start) & (cached_df.index <= required_end)].copy()
                 if not sliced.empty:
                     prefetched_data[key] = sliced
                     needs_fetch = False
