@@ -65,15 +65,31 @@ def load_account_configs() -> List[Dict[str, Any]]:
         country_code = _normalize_code(settings.get("country_code"), account_id)
         base_name = settings.get("name") or account_id.upper()
 
-        # PORTFOLIO_TOPN을 이름에 추가
+        # 현재 보유 종목 수와 PORTFOLIO_TOPN을 이름에 추가
         portfolio_topn = None
         strategy = settings.get("strategy", {})
         if isinstance(strategy, dict):
             params = resolve_strategy_params(strategy)
             portfolio_topn = params.get("PORTFOLIO_TOPN")
 
+        # 현재 보유 종목 수 조회 (추천 결과에서 HOLD/HOLD_CORE 상태 종목 수 계산)
+        holdings_count = 0
+        try:
+            from utils.recommendation_storage import fetch_latest_recommendations
+
+            latest_rec = fetch_latest_recommendations(account_id)
+            if latest_rec and "recommendations" in latest_rec:
+                recommendations = latest_rec["recommendations"]
+                if isinstance(recommendations, list):
+                    # HOLD + HOLD_CORE 상태인 종목 수 계산
+                    holdings_count = sum(1 for rec in recommendations if rec.get("state") in {"HOLD", "HOLD_CORE"})
+        except Exception as e:
+            # MongoDB 연결 실패 등의 이유로 조회 실패 시 로그 출력
+            logger.debug(f"[{account_id}] 보유 종목 수 조회 실패: {e}")
+            holdings_count = 0
+
         if portfolio_topn is not None:
-            name = f"{base_name}({portfolio_topn} 종목)"
+            name = f"{base_name}({holdings_count}/{portfolio_topn})"
         else:
             name = base_name
 
