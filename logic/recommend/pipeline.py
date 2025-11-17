@@ -28,6 +28,7 @@ from logic.common import (
     sort_decisions_by_order_and_score,
     filter_category_duplicates,
     get_buy_signal_streak,
+    is_category_exception,
 )
 from strategies.maps.history import (
     calculate_consecutive_holding_info,
@@ -139,7 +140,9 @@ def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
         raw_category = block.get("category")
         if isinstance(raw_category, (list, set, tuple)):
             raw_category = next(iter(raw_category), "") if raw_category else ""
-        category_name = str(raw_category or "TBD").strip() or "TBD"
+        category_name = str(raw_category or "").strip()
+        if not category_name:
+            category_name = "미분류"
 
         tickers = block.get("tickers") or []
         if not isinstance(tickers, list):
@@ -156,7 +159,9 @@ def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
             raw_item_category = item.get("category", category_name)
             if isinstance(raw_item_category, (list, set, tuple)):
                 raw_item_category = next(iter(raw_item_category), "") if raw_item_category else ""
-            item_category = str(raw_item_category or category_name or "TBD").strip() or "TBD"
+            item_category = str(raw_item_category or category_name or "").strip()
+            if not item_category:
+                item_category = "미분류"
 
             name = str(item.get("name") or ticker).strip() or ticker
 
@@ -706,7 +711,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         entry = dict(meta)
         entry["ticker"] = norm
         entry.setdefault("name", norm)
-        entry.setdefault("category", "TBD")
+        entry.setdefault("category", "미분류")
         full_meta_map[norm] = entry
 
     disabled_tickers = {str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if not bool(stock.get("recommend_enabled", True))}
@@ -960,7 +965,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         entry = dict(stock)
         entry["ticker"] = ticker_upper
         entry.setdefault("name", ticker_upper)
-        entry.setdefault("category", stock.get("category") or "TBD")
+        category = stock.get("category") or ""
+        if not str(category).strip():
+            category = "미분류"
+        entry.setdefault("category", category)
         etf_meta_map[ticker_upper] = entry
     for ticker_upper, meta in full_meta_map.items():
         if ticker_upper not in etf_meta_map:
@@ -1114,7 +1122,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     for held_ticker in holdings.keys():
         meta_info = etf_meta_map.get(held_ticker) or {}
         category_value = meta_info.get("category")
-        if category_value and category_value != "TBD":
+        if category_value and not is_category_exception(category_value):
             held_category_names.add(str(category_value).strip())
     results = []
     for decision in decisions:
@@ -1146,7 +1154,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
         meta_info = etf_meta_map.get(ticker) or {}
         name = meta_info.get("name", ticker)
-        category = meta_info.get("category", "TBD")
+        category = meta_info.get("category", "미분류")
         ticker_upper = str(ticker).upper()
         recommend_enabled = ticker_upper not in disabled_tickers
 
@@ -1373,7 +1381,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     for item in results:
         if item["state"] == "SELL_RSI":
             category = item.get("category")
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 sell_rsi_categories.add(category)
                 logger.info(f"[PIPELINE SELL_RSI CAT] {item.get('ticker')} SELL_RSI로 '{category}' 카테고리 추가")
         elif item["state"] == "SOLD":
@@ -1382,7 +1390,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             rsi_score = item.get("rsi_score", 0.0)
             if original_state == "SELL_RSI" or rsi_score >= rsi_sell_threshold:
                 category = item.get("category")
-                if category and category != "TBD":
+                if category and not is_category_exception(category):
                     sell_rsi_categories.add(category)
                     logger.info(
                         f"[PIPELINE SOLD RSI CAT] {item.get('ticker')} SOLD(original={original_state}, RSI={rsi_score:.1f})로 '{category}' 카테고리 추가"
@@ -1392,7 +1400,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     for item in results:
         if item["state"] in {"BUY", "BUY_REPLACE"}:
             category = item.get("category")
-            if category and category != "TBD" and category in sell_rsi_categories:
+            if category and not is_category_exception(category) and category in sell_rsi_categories:
                 logger.info(f"[PIPELINE BUY REVERTED] {item.get('ticker')} BUY→WAIT 변경 - '{category}' 카테고리가 SELL_RSI로 매도됨")
                 item["state"] = "WAIT"
                 item["phrase"] = f"RSI 과매수 매도 카테고리 ({category})"
@@ -1417,7 +1425,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         category_key = _normalize_category_value(category_raw)
 
         # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
-        if category and category != "TBD" and category in sell_rsi_categories:
+        if category and not is_category_exception(category) and category in sell_rsi_categories:
             logger.info(f"[PIPELINE BUY BLOCKED] {item.get('ticker')} 매수 차단 - '{category}' 카테고리가 SELL_RSI로 매도됨")
             continue
 

@@ -13,7 +13,7 @@ from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
 from utils.report import format_kr_money
 from strategies.maps.labeler import compute_net_trade_note
-from logic.common import select_candidates_by_category, calculate_held_categories
+from logic.common import select_candidates_by_category, calculate_held_categories, is_category_exception
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
 from utils.memmap_store import MemmapPriceStore
 
@@ -180,7 +180,7 @@ def _execute_individual_sells(
                 # SELL_RSI인 경우 해당 카테고리 추적
                 if decision == "SELL_RSI":
                     sold_category = ticker_to_category.get(ticker)
-                    if sold_category and sold_category != "TBD":
+                    if sold_category and not is_category_exception(sold_category):
                         sell_rsi_categories_today.add(sold_category)
 
                 cash += trade_amount
@@ -275,7 +275,11 @@ def _apply_wait_note_if_empty(
     category = ticker_to_category.get(ticker)
     normalized = str(category).strip().upper() if category else ""
 
-    if category and category != "TBD" and (category in held_categories or (normalized and normalized in held_categories_normalized)):
+    if (
+        category
+        and not is_category_exception(category)
+        and (category in held_categories or (normalized and normalized in held_categories_normalized))
+    ):
         records[-1]["note"] = DECISION_NOTES["CATEGORY_DUP"]
     else:
         records[-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
@@ -395,7 +399,7 @@ def _execute_new_buys(
             if cooldown_days > 0:
                 ticker_state["sell_block_until"] = max(ticker_state["sell_block_until"], i + cooldown_days)
 
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 held_categories.add(category)
                 normalized_category = str(category).strip().upper()
                 if normalized_category:
@@ -779,7 +783,7 @@ def run_portfolio_backtest(
                     # 쿨다운으로 매도하지 못한 경우에도 카테고리 차단
                     if i < ticker_state["sell_block_until"]:
                         category = ticker_to_category.get(ticker)
-                        if category and category != "TBD":
+                        if category and not is_category_exception(category):
                             sell_rsi_categories_today.add(category)
 
         # 현재 총 보유 자산 가치를 계산합니다.
@@ -1005,7 +1009,7 @@ def run_portfolio_backtest(
             core_categories = set()
             for core_ticker in valid_core_holdings:
                 core_cat = ticker_to_category.get(core_ticker)
-                if core_cat and core_cat != "TBD":
+                if core_cat and not is_category_exception(core_cat):
                     core_categories.add(core_cat)
 
             for candidate in replacement_candidates:
@@ -1066,7 +1070,7 @@ def run_portfolio_backtest(
                 if ticker_to_sell:
                     # SELL_RSI로 매도한 카테고리는 같은 날 교체 매수 금지
                     replacement_category = ticker_to_category.get(replacement_ticker)
-                    if replacement_category and replacement_category != "TBD" and replacement_category in sell_rsi_categories_today:
+                    if replacement_category and not is_category_exception(replacement_category) and replacement_category in sell_rsi_categories_today:
                         if daily_records_by_ticker[replacement_ticker] and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt:
                             daily_records_by_ticker[replacement_ticker][-1]["note"] = f"RSI 과매수 매도 카테고리 ({replacement_category})"
                         continue  # 다음 교체 후보로 넘어감

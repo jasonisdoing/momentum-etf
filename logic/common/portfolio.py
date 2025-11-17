@@ -6,8 +6,23 @@ import pandas as pd
 
 from utils.logger import get_app_logger
 from strategies.maps.constants import DECISION_NOTES
+from config import CATEGORY_EXCEPTIONS
 
 logger = get_app_logger()
+
+
+def is_category_exception(category: Optional[str]) -> bool:
+    """카테고리가 중복 제한에서 예외인지 확인합니다.
+
+    Args:
+        category: 확인할 카테고리 이름
+
+    Returns:
+        True if 예외 카테고리, False otherwise
+    """
+    if not category:
+        return False
+    return str(category).strip() in CATEGORY_EXCEPTIONS
 
 
 def get_held_categories_excluding_sells(
@@ -52,7 +67,7 @@ def get_held_categories_excluding_sells(
 
         if is_held or state in {"BUY", "BUY_REPLACE"}:
             category = get_category_func(item)
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 held_categories.add(category)
 
     return held_categories
@@ -161,11 +176,11 @@ def check_buy_candidate_filters(
         (통과 여부, 차단 사유)
     """
     # 카테고리 중복 체크
-    if category and category != "TBD" and category in held_categories:
+    if category and not is_category_exception(category) and category in held_categories:
         return False, DECISION_NOTES["CATEGORY_DUP"]
 
     # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
-    if category and category != "TBD" and category in sell_rsi_categories_today:
+    if category and not is_category_exception(category) and category in sell_rsi_categories_today:
         return False, f"RSI 과매수 매도 카테고리 ({category})"
 
     # RSI 과매수 종목 매수 차단
@@ -225,14 +240,14 @@ def calculate_held_categories(
     for ticker, state in position_state.items():
         if state.get("shares", 0) > 0:
             category = ticker_to_category.get(ticker)
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 held_categories.add(category)
 
     # 고정 종목의 카테고리도 추가 (미보유 시에도 카테고리 차단)
     if core_holdings:
         for ticker in core_holdings:
             category = ticker_to_category.get(ticker)
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 held_categories.add(category)
 
     return held_categories
@@ -259,12 +274,12 @@ def track_sell_rsi_categories(
         # 1. 이미 SELL_RSI 상태인 경우
         if d.get("state") == "SELL_RSI":
             category = etf_meta.get(d["tkr"], {}).get("category")
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 sell_rsi_categories.add(category)
         # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
         elif d.get("state") in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
             category = etf_meta.get(d["tkr"], {}).get("category")
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 sell_rsi_categories.add(category)
 
     return sell_rsi_categories
@@ -302,14 +317,14 @@ def calculate_held_categories_from_holdings(
     # 실제 보유 종목의 카테고리
     for tkr in holdings.keys():
         category = etf_meta.get(tkr, {}).get("category")
-        if category and category != "TBD":
+        if category and not is_category_exception(category):
             held_categories.add(category)
 
     # 고정 종목의 카테고리도 추가 (미보유 시에도 카테고리 차단)
     if core_holdings:
         for tkr in core_holdings:
             category = etf_meta.get(tkr, {}).get("category")
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 held_categories.add(category)
     return held_categories
 

@@ -15,7 +15,7 @@
 
 1. **대표 ETF 필터링**
    - `utils/stock_list_io.get_etfs()` 가 추천·백테스트·튜닝·캐시 갱신의 공통 진입점이다.
-   - 카테고리별로 `3_month_earn_rate` 가 가장 높은 1개만 유지하고, `TBD` 카테고리와 계좌별 벤치마크 티커는 무조건 포함한다.
+   - 카테고리별로 `3_month_earn_rate` 가 가장 높은 1개만 유지하고, `config.CATEGORY_EXCEPTIONS` 에 정의된 예외 카테고리와 계좌별 벤치마크 티커는 무조건 포함한다.
    - 어느 경로든 티커 목록이 다르면 안 되므로, 새로운 기능 추가 시 반드시 이 함수를 사용한다.
 
 2. **최소 점수( `MIN_BUY_SCORE` ) 허들**
@@ -170,6 +170,10 @@ if ticker in core_holdings:
 # → 이미 보유 중이면 같은 카테고리 다른 종목 매수 불가
 ```
 
+**예외 카테고리:**
+- `config.CATEGORY_EXCEPTIONS` 에 정의된 카테고리는 중복 제한에서 제외됨
+- 예외 카테고리 확인: `logic.common.portfolio.is_category_exception()` 함수 사용
+
 ---
 
 ## 🔧 수정 시 절차
@@ -258,6 +262,7 @@ python tune.py k1
 
 | 함수 | 설명 | 사용처 |
 |------|------|--------|
+| `is_category_exception()` | 카테고리가 중복 제한 예외인지 확인 | 추천, 백테스트 |
 | `get_held_categories_excluding_sells()` | 매도 예정 종목을 제외한 보유 카테고리 계산 | 추천, 백테스트 |
 | `should_exclude_from_category_count()` | 카테고리 카운트 제외 여부 확인 | 추천, 백테스트 |
 | `get_sell_states()` | 매도 상태 집합 반환 | 추천, 백테스트 |

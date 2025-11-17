@@ -3,6 +3,7 @@ import os
 from typing import Any, Dict, Iterable, List, Optional
 
 from utils.logger import get_app_logger
+import config
 
 logger = get_app_logger()
 
@@ -85,16 +86,21 @@ def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None
     if not all_etfs:
         return all_etfs
 
-    # 카테고리별 대표 종목 선택 (TBD는 전체 포함)
+    # 카테고리별 대표 종목 선택 (예외 카테고리는 전체 포함)
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for item in all_etfs:
-        category = str(item.get("category") or "TBD").strip() or "TBD"
+        category = str(item.get("category") or "").strip()
+        if not category:
+            category = "미분류"
         grouped.setdefault(category, []).append(item)
 
     filtered: List[Dict[str, Any]] = []
+    exception_count = 0
     for category, items in grouped.items():
-        if category.upper() == "TBD":
+        # CATEGORY_EXCEPTIONS에 정의된 카테고리는 모두 포함
+        if category in config.CATEGORY_EXCEPTIONS:
             filtered.extend(items)
+            exception_count += len(items)
             continue
 
         best_idx = -1
@@ -112,12 +118,14 @@ def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None
         if best_idx >= 0:
             filtered.append(items[best_idx])
 
+    exception_names = ", ".join(config.CATEGORY_EXCEPTIONS) if config.CATEGORY_EXCEPTIONS else "없음"
     logger.info(
-        "[%s] 카테고리 대표 추려진 종목 수: %d → %d (TBD 포함 %d개 유지)",
+        "[%s] 카테고리 대표 추려진 종목 수: %d → %d (예외 카테고리 [%s] %d개 유지)",
         (country or "").upper(),
         len(all_etfs),
         len(filtered),
-        len(grouped.get("TBD", [])),
+        exception_names,
+        exception_count,
     )
 
     if include_extra_tickers:
@@ -146,10 +154,12 @@ def get_all_etfs(country: str) -> List[Dict[str, Any]]:
     for category_block in raw_data:
         if not isinstance(category_block, dict):
             continue
-        raw_category = category_block.get("category", "TBD")
+        raw_category = category_block.get("category", "")
         if isinstance(raw_category, (list, set, tuple)):
             raw_category = next(iter(raw_category), "") if raw_category else ""
-        category_name = str(raw_category or "TBD").strip() or "TBD"
+        category_name = str(raw_category or "").strip()
+        if not category_name:
+            category_name = "미분류"
         tickers_list = category_block.get("tickers", [])
         if not isinstance(tickers_list, list):
             continue

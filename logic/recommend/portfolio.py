@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 from utils.logger import get_app_logger
 from utils.data_loader import count_trading_days, get_trading_days
+from logic.common.portfolio import is_category_exception
 
 logger = get_app_logger()
 
@@ -326,7 +327,7 @@ def _create_decision_entry(
     meta = etf_meta.get(tkr) or full_etf_meta.get(tkr, {}) or {}
     display_name = str(meta.get("name") or tkr)
     raw_category = meta.get("category")
-    display_category = str(raw_category) if raw_category and str(raw_category).upper() != "TBD" else "-"
+    display_category = str(raw_category) if raw_category and not is_category_exception(str(raw_category)) else "-"
 
     if holding_days == 0 and state in {"BUY", "BUY_REPLACE"}:
         holding_days = 1
@@ -572,13 +573,13 @@ def run_portfolio_recommend(
         # 1. 이미 SELL_RSI 상태인 경우
         if d["state"] == "SELL_RSI":
             category = etf_meta.get(d["tkr"], {}).get("category")
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 sell_rsi_categories_today.add(category)
                 logger.info(f"[SELL_RSI CATEGORY] {d['tkr']} 매도로 인해 '{category}' 카테고리 매수 차단")
         # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
         elif d["state"] in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
             category = etf_meta.get(d["tkr"], {}).get("category")
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 sell_rsi_categories_today.add(category)
                 logger.info(
                     f"[RSI WARNING CATEGORY] {d['tkr']} RSI 과매수 경고로 '{category}' 카테고리 매수 차단 (RSI점수: {d.get('rsi_score', 0):.1f})"
@@ -660,7 +661,7 @@ def run_portfolio_recommend(
 
                 if budget > 0:
                     cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
-                    if cand_category and cand_category != "TBD":
+                    if cand_category and not is_category_exception(cand_category):
                         held_categories.add(cand_category)
                         held_categories_for_buy.add(cand_category)
                         if cand_category_key:
@@ -721,9 +722,9 @@ def run_portfolio_recommend(
         core_holdings_categories = {
             etf_meta.get(ticker, {}).get("category")
             for ticker in valid_core_holdings
-            if etf_meta.get(ticker, {}).get("category") and etf_meta.get(ticker, {}).get("category") != "TBD"
+            if etf_meta.get(ticker, {}).get("category") and not is_category_exception(etf_meta.get(ticker, {}).get("category"))
         }
-        if wait_stock_category and wait_stock_category != "TBD" and wait_stock_category in core_holdings_categories:
+        if wait_stock_category and not is_category_exception(wait_stock_category) and wait_stock_category in core_holdings_categories:
             best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
             best_new["row"][-1] = f"핵심 보유 카테고리 ({wait_stock_category})"
             best_new["buy_signal"] = False
@@ -733,13 +734,15 @@ def run_portfolio_recommend(
             (
                 s
                 for s in current_held_stocks
-                if wait_stock_category and wait_stock_category != "TBD" and etf_meta.get(s["tkr"], {}).get("category") == wait_stock_category
+                if wait_stock_category
+                and not is_category_exception(wait_stock_category)
+                and etf_meta.get(s["tkr"], {}).get("category") == wait_stock_category
             ),
             None,
         )
 
         # 교체 매수 후보 필터링 (SELL_RSI 카테고리만 체크)
-        if wait_stock_category and wait_stock_category != "TBD" and wait_stock_category in sell_rsi_categories_today:
+        if wait_stock_category and not is_category_exception(wait_stock_category) and wait_stock_category in sell_rsi_categories_today:
             best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
             best_new["row"][-1] = f"RSI 과매수 매도 카테고리 ({wait_stock_category})"
             best_new["buy_signal"] = False
@@ -843,7 +846,7 @@ def run_portfolio_recommend(
                 sold_key = _normalize_category_value(sold_category)
                 if sold_key:
                     held_category_keys.discard(sold_key)
-            if wait_stock_category and wait_stock_category != "TBD":
+            if wait_stock_category and not is_category_exception(wait_stock_category):
                 held_categories.add(wait_stock_category)
             if wait_stock_category_key:
                 held_category_keys.add(wait_stock_category_key)
@@ -925,7 +928,11 @@ def run_portfolio_recommend(
                 if not d["row"][-1]:
                     category = etf_meta.get(d["tkr"], {}).get("category")
                     normalized = _normalize_category_value(category)
-                    if category and category != "TBD" and (category in held_categories or (normalized and normalized in held_category_keys)):
+                    if (
+                        category
+                        and not is_category_exception(category)
+                        and (category in held_categories or (normalized and normalized in held_category_keys))
+                    ):
                         d["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
                     else:
                         d["row"][-1] = DECISION_NOTES["PORTFOLIO_FULL"]
