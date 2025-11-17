@@ -13,9 +13,10 @@ from typing import Optional
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.cache_utils import drop_cache_collection, swap_cache_collection
+from utils.cache_utils import drop_cache_collection, swap_cache_collection, clean_temp_cache_collections
 from utils.data_loader import fetch_ohlcv
-from utils.stock_list_io import get_etfs
+from utils.stock_list_io import get_etfs, get_all_etfs
+from utils.account_registry import list_available_accounts, get_account_settings
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
 from utils.settings_loader import load_common_settings
@@ -28,14 +29,49 @@ def _determine_start_date() -> str:
         return str(start)
 
 
+def _collect_benchmark_tickers() -> list[str]:
+    tickers = set()
+    for account in list_available_accounts():
+        try:
+            settings = get_account_settings(account)
+        except Exception:
+            continue
+        for bm in settings.get("benchmarks", []) or []:
+            ticker = str(bm.get("ticker") or "").strip().upper()
+            if ticker:
+                tickers.add(ticker)
+    return sorted(tickers)
+
+
 def refresh_all_caches(countries: list[str], start_date: Optional[str]):
     """지정된 국가의 모든 종목에 대한 가격 데이터 캐시를 새로 고칩니다."""
     logger = get_app_logger()
     logger.info("캐시 갱신 시작 (국가: %s, 시작일: %s)", ", ".join(countries), start_date)
+    benchmark_tickers = _collect_benchmark_tickers()
 
     for country in countries:
         logger.info("[%s] 국가의 캐시를 갱신합니다...", country.upper())
-        all_etfs_from_file = get_etfs(country)
+        removed = clean_temp_cache_collections(country, max_age_seconds=3600)
+        if removed:
+            logger.info(
+                "[%s] 기존 임시 컬렉션 %d개를 삭제했습니다. (1시간 이상 경과분)",
+                country.upper(),
+                removed,
+            )
+        all_etfs_from_file = get_all_etfs(country)
+        all_map = {str(item.get("ticker") or "").strip().upper(): item for item in all_etfs_from_file if item.get("ticker")}
+        for bench in benchmark_tickers:
+            norm = str(bench or "").strip().upper()
+            if not norm or norm in all_map:
+                continue
+            all_map[norm] = {
+                "ticker": norm,
+                "name": norm,
+                "category": "BENCHMARK",
+                "type": "etf",
+                "recommend_enabled": True,
+            }
+        all_etfs_from_file = list(all_map.values())
 
         suffix = f"{os.getpid()}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
         temp_token = f"{country}_tmp_{suffix}"
@@ -54,12 +90,13 @@ def refresh_all_caches(countries: list[str], start_date: Optional[str]):
                         ticker,
                         country,
                         date_range=[range_start, None],
-                        update_listing_meta=True,
+                        update_listing_meta=False,  # listing_date는 stock_meta_updater에서만 업데이트
                         force_refresh=True,
                         cache_country=temp_token,
                     )
                 except Exception as e:
-                    logger.warning("%s 데이터 처리 중 오류 발생: %s", ticker, e)
+                    logger.error("%s 데이터 처리 중 오류 발생: %s", ticker, e)
+                    raise
 
             swap_cache_collection(country, temp_token)
             logger.info("-> %s 국가의 캐시 갱신 완료.", country.upper())

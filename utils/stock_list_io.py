@@ -1,8 +1,9 @@
 import json
 import os
-from typing import Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from utils.logger import get_app_logger
+import config
 
 logger = get_app_logger()
 
@@ -43,15 +44,15 @@ def _load_country_raw(country: str) -> List[Dict]:
     return []
 
 
-def get_etfs(country: str) -> List[Dict[str, str]]:
+def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None) -> List[Dict[str, str]]:
     """
     'zsettings/stocks/{country}.json' 파일에서 종목 목록을 반환합니다.
     """
-    all_etfs = []
+    all_etfs: List[Dict[str, Any]] = []
     seen_tickers = set()
 
     data = _load_country_raw(country)
-
+    by_ticker: Dict[str, Dict[str, Any]] = {}
     for category_block in data:
         if not isinstance(category_block, dict) or "tickers" not in category_block:
             continue
@@ -80,8 +81,102 @@ def get_etfs(country: str) -> List[Dict[str, str]]:
             if item.get("listing_date"):
                 new_item["listing_date"] = item["listing_date"]
             all_etfs.append(new_item)
+            by_ticker[ticker_norm.upper()] = new_item
 
-    return all_etfs
+    if not all_etfs:
+        return all_etfs
+
+    # 카테고리별 대표 종목 선택 (예외 카테고리는 전체 포함)
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for item in all_etfs:
+        category = str(item.get("category") or "").strip()
+        if not category:
+            raise ValueError(f"종목 {item.get('ticker')}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
+        grouped.setdefault(category, []).append(item)
+
+    filtered: List[Dict[str, Any]] = []
+    exception_count = 0
+    for category, items in grouped.items():
+        # CATEGORY_EXCEPTIONS에 정의된 카테고리는 모두 포함
+        if category in config.CATEGORY_EXCEPTIONS:
+            filtered.extend(items)
+            exception_count += len(items)
+            continue
+
+        best_idx = -1
+        best_score = float("-inf")
+        for idx, entry in enumerate(items):
+            score_raw = entry.get("3_month_earn_rate")
+            try:
+                score_val = float(score_raw)
+            except (TypeError, ValueError):
+                score_val = float("-inf")
+
+            if best_idx == -1 or score_val > best_score:
+                best_idx = idx
+                best_score = score_val
+        if best_idx >= 0:
+            filtered.append(items[best_idx])
+
+    exception_names = ", ".join(config.CATEGORY_EXCEPTIONS) if config.CATEGORY_EXCEPTIONS else "없음"
+    logger.info(
+        "[%s] 카테고리 대표 추려진 종목 수: %d → %d (예외 카테고리 [%s] %d개 유지)",
+        (country or "").upper(),
+        len(all_etfs),
+        len(filtered),
+        exception_names,
+        exception_count,
+    )
+
+    if include_extra_tickers:
+        existing = {item["ticker"].upper() for item in filtered}
+        for ticker in include_extra_tickers:
+            norm = str(ticker or "").strip().upper()
+            if not norm or norm in existing:
+                continue
+            src = by_ticker.get(norm)
+            if src:
+                filtered.append(src)
+                existing.add(norm)
+
+    return filtered
+
+
+def get_all_etfs(country: str) -> List[Dict[str, Any]]:
+    """Return every ETF entry defined in zsettings/stocks/{country}.json without filtering."""
+
+    raw_data = _load_country_raw(country)
+    if not raw_data:
+        return []
+
+    results: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for category_block in raw_data:
+        if not isinstance(category_block, dict):
+            continue
+        raw_category = category_block.get("category", "")
+        if isinstance(raw_category, (list, set, tuple)):
+            raw_category = next(iter(raw_category), "") if raw_category else ""
+        category_name = str(raw_category or "").strip()
+        if not category_name:
+            raise ValueError(f"카테고리 블록에 카테고리 이름이 없습니다. 모든 카테고리 블록은 'category' 필드가 있어야 합니다.")
+        tickers_list = category_block.get("tickers", [])
+        if not isinstance(tickers_list, list):
+            continue
+        for item in tickers_list:
+            if not isinstance(item, dict):
+                continue
+            ticker = str(item.get("ticker") or "").strip()
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            entry = dict(item)
+            entry["ticker"] = ticker
+            entry.setdefault("type", "etf")
+            entry.setdefault("category", category_name)
+            entry["recommend_enabled"] = item.get("recommend_enabled") is not False
+            results.append(entry)
+    return results
 
 
 def save_etfs(country: str, data: List[Dict]):

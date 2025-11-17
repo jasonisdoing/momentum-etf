@@ -9,23 +9,23 @@ from pathlib import Path
 from utils.account_registry import get_account_settings, get_strategy_rules
 from logic.tune.runner import run_account_tuning
 from utils.logger import get_app_logger
+from utils.data_loader import MissingPriceDataError
 
 
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
     "k1": {
-        "MA_RANGE": np.arange(90, 130, 10),
+        "MA_RANGE": np.arange(10, 160, 10),
         "MA_TYPE": ["HMA"],
         "PORTFOLIO_TOPN": [10],
         "REPLACE_SCORE_THRESHOLD": [0],
         "STOP_LOSS_PCT": np.arange(5, 11, 1),
-        "OVERBOUGHT_SELL_THRESHOLD": np.arange(90, 101, 1),
-        "COOLDOWN_DAYS": [2, 3, 4, 5],
+        "OVERBOUGHT_SELL_THRESHOLD": np.arange(70, 110, 10),
+        "COOLDOWN_DAYS": [3, 4, 5],
+        "MIN_BUY_SCORE": np.arange(0, 6, 1),
         "CORE_HOLDINGS": [],
-        # "CORE_HOLDINGS": ["473640"],
-        # "CORE_HOLDINGS": ["473640", "442580", "446690", "479620"],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    },
+    }
 }
 
 
@@ -47,12 +47,16 @@ def main() -> None:
     except Exception as exc:  # pragma: no cover - 잘못된 입력 방어 전용 처리
         raise SystemExit(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
-    output = run_account_tuning(
-        account_id,
-        output_path=None,
-        results_dir=RESULTS_DIR,
-        tuning_config=TUNING_CONFIG,
-    )
+    try:
+        output = run_account_tuning(
+            account_id,
+            output_path=None,
+            results_dir=RESULTS_DIR,
+            tuning_config=TUNING_CONFIG,
+        )
+    except MissingPriceDataError as exc:
+        logger.error(str(exc))
+        raise SystemExit(1)
     if output is None:
         logger.error("튜닝이 실패하여 결과를 저장하지 않습니다.")
 

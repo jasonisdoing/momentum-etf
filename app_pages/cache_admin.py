@@ -13,14 +13,14 @@ from utils.cache_utils import (
     list_cached_tickers,
     load_cached_frame,
 )
-from utils.stock_list_io import get_etfs
+from utils.stock_list_io import get_all_etfs
 
 
 @lru_cache(maxsize=8)
 def _ticker_name_map(country: str) -> Dict[str, str]:
     mapping: Dict[str, str] = {}
     try:
-        items = get_etfs(country)
+        items = get_all_etfs(country)
     except Exception:
         return mapping
 

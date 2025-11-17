@@ -18,6 +18,7 @@ class StrategyRules:
     ma_period: int
     portfolio_topn: int
     replace_threshold: float
+    min_buy_score: float
     ma_type: str = "SMA"
     core_holdings: List[str] = field(default_factory=list)
     stop_loss_pct: Optional[float] = None
@@ -32,6 +33,7 @@ class StrategyRules:
         ma_type: Any = None,
         core_holdings: Any = None,
         stop_loss_pct: Any = None,
+        min_buy_score: Any = None,
     ) -> "StrategyRules":
         try:
             ma_period_int = int(ma_period)
@@ -76,10 +78,18 @@ class StrategyRules:
             if not (stop_loss_value > 0):
                 raise ValueError("STOP_LOSS_PCT는 0보다 커야 합니다.")
 
+        if min_buy_score is None:
+            raise ValueError("MIN_BUY_SCORE 설정이 필요합니다.")
+        try:
+            min_buy_score_value = float(min_buy_score)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("MIN_BUY_SCORE 값이 유효하지 않습니다.") from exc
+
         return cls(
             ma_period=ma_period_int,
             portfolio_topn=portfolio_topn_int,
             replace_threshold=replace_threshold_float,
+            min_buy_score=min_buy_score_value,
             ma_type=ma_type_str,
             core_holdings=core_holdings_list,
             stop_loss_pct=stop_loss_value,
@@ -102,6 +112,7 @@ class StrategyRules:
             ma_type=_resolve("MA_TYPE", "ma_type"),
             core_holdings=_resolve("CORE_HOLDINGS", "core_holdings"),
             stop_loss_pct=_resolve("STOP_LOSS_PCT", "stop_loss_pct"),
+            min_buy_score=_resolve("MIN_BUY_SCORE", "min_buy_score"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -109,6 +120,7 @@ class StrategyRules:
             "ma_period": self.ma_period,
             "portfolio_topn": self.portfolio_topn,
             "replace_threshold": self.replace_threshold,
+            "min_buy_score": self.min_buy_score,
             "ma_type": self.ma_type,
             "core_holdings": list(self.core_holdings),
             "stop_loss_pct": self.stop_loss_pct,

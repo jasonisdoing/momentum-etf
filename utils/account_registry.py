@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Mapping
 
 from utils.logger import get_app_logger
 from utils.settings_loader import load_common_settings
@@ -65,15 +65,31 @@ def load_account_configs() -> List[Dict[str, Any]]:
         country_code = _normalize_code(settings.get("country_code"), account_id)
         base_name = settings.get("name") or account_id.upper()
 
-        # PORTFOLIO_TOPN을 이름에 추가
+        # 현재 보유 종목 수와 PORTFOLIO_TOPN을 이름에 추가
         portfolio_topn = None
         strategy = settings.get("strategy", {})
         if isinstance(strategy, dict):
             params = resolve_strategy_params(strategy)
             portfolio_topn = params.get("PORTFOLIO_TOPN")
 
+        # 현재 보유 종목 수 조회 (추천 결과에서 HOLD/HOLD_CORE 상태 종목 수 계산)
+        holdings_count = 0
+        try:
+            from utils.recommendation_storage import fetch_latest_recommendations
+
+            latest_rec = fetch_latest_recommendations(account_id)
+            if latest_rec and "recommendations" in latest_rec:
+                recommendations = latest_rec["recommendations"]
+                if isinstance(recommendations, list):
+                    # HOLD + HOLD_CORE 상태인 종목 수 계산
+                    holdings_count = sum(1 for rec in recommendations if rec.get("state") in {"HOLD", "HOLD_CORE"})
+        except Exception as e:
+            # MongoDB 연결 실패 등의 이유로 조회 실패 시 로그 출력
+            logger.debug(f"[{account_id}] 보유 종목 수 조회 실패: {e}")
+            holdings_count = 0
+
         if portfolio_topn is not None:
-            name = f"{base_name}({portfolio_topn} 종목)"
+            name = f"{base_name}({holdings_count}/{portfolio_topn})"
         else:
             name = base_name
 
@@ -118,6 +134,25 @@ def get_icon_fallback(country_code: str) -> str:
     return _ICON_FALLBACKS.get((country_code or "").strip().lower(), "")
 
 
+def get_benchmark_tickers(account_settings: Mapping[str, Any]) -> List[str]:
+    """계정 설정에서 벤치마크 티커 목록을 추출합니다."""
+
+    entries = account_settings.get("benchmarks")
+    if not isinstance(entries, list):
+        return []
+
+    tickers: List[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        ticker = str(entry.get("ticker") or "").strip().upper()
+        if ticker and ticker not in seen:
+            tickers.append(ticker)
+            seen.add(ticker)
+    return tickers
+
+
 def build_account_meta(accounts: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
     meta: Dict[str, Dict[str, str]] = {}
     for account in accounts:
@@ -154,6 +189,7 @@ __all__ = [
     "pick_default_account",
     "build_account_meta",
     "get_icon_fallback",
+    "get_benchmark_tickers",
     "get_account_settings",
     "get_account_strategy",
     "get_account_strategy_sections",

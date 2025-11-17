@@ -1,8 +1,8 @@
 {
     "order": 30,
-    "icon": "💰",
-    "name": "배당/헷징",
-    "desc": "배당/헷징 고정",
+    "icon": "🏛️",
+    "name": "절세계좌",
+    "desc": "지수인덱스 + 고배당",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_capital_krw": "100000000",
@@ -15,17 +15,19 @@
         "BACKTESTED_DATE": "2025-11-12 00:00",
         "MA_PERIOD": 100,
         "MA_TYPE": "HMA",
-        "PORTFOLIO_TOPN": 5,
+        "PORTFOLIO_TOPN": 6,
         "REPLACE_SCORE_THRESHOLD": 0.0,
         "STOP_LOSS_PCT": 7.0,
         "OVERBOUGHT_SELL_THRESHOLD": 90,
         "COOLDOWN_DAYS": 5,
+        "MIN_BUY_SCORE": 0.0,
         "CORE_HOLDINGS": [
-            "473640",
             "0097L0",
             "0115C0",
+            "161510",
+            "379800",
             "441640",
-            "379800"
+            "498400"
         ]
     },
     "benchmarks": [

@@ -11,8 +11,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from strategies.maps.rules import StrategyRules
+from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 from utils.logger import get_app_logger
 from utils.data_loader import count_trading_days, get_trading_days
+from logic.common.portfolio import is_category_exception
 
 logger = get_app_logger()
 
@@ -185,8 +187,11 @@ def _determine_sell_decision(
     stop_loss_threshold: Optional[float],
     rsi_score_value: float,
     rsi_sell_threshold: float,
-    price_ma: float,
+    score_value: Optional[float],
+    price_value: Optional[float],
     ma: float,
+    ma_period: Optional[int],
+    min_score_threshold: float,
     sell_block_info: Optional[Dict],
     cooldown_days: Optional[int],
     DECISION_MESSAGES: Dict,
@@ -205,9 +210,9 @@ def _determine_sell_decision(
     elif rsi_score_value >= rsi_sell_threshold:
         state = "SELL_RSI"
         phrase = f"RSI 과매수 (RSI점수: {rsi_score_value:.1f})"
-    elif not pd.isna(price_ma) and not pd.isna(ma) and price_ma < ma:
+    elif score_value is not None and score_value <= min_score_threshold:
         state = "SELL_TREND"
-        phrase = DECISION_NOTES["TREND_BREAK"]
+        phrase = _build_trend_break_phrase(ma, price_value, ma_period, DECISION_NOTES)
 
     # 쿨다운 체크: SELL_RSI와 SELL_TREND 모두 동일하게 적용
     if sell_block_info and state in ("SELL_RSI", "SELL_TREND"):
@@ -238,12 +243,11 @@ def _create_decision_entry(
     current_equity: float,
     stop_loss_threshold: Optional[float],
     cooldown_days: Optional[int],
+    min_buy_score: float,
     rsi_sell_threshold: float = 10.0,
 ) -> Dict[str, Any]:
     """개별 종목의 의사결정 엔트리를 생성합니다."""
     # 순환 import 방지
-    from strategies.maps.constants import DECISION_MESSAGES, DECISION_NOTES
-
     price_raw = data.get("price", 0.0)
     price = float(price_raw) if price_raw not in (None, float("nan")) else 0.0
     score_value = _parse_score_value(data.get("score", 0.0))
@@ -265,12 +269,6 @@ def _create_decision_entry(
     consecutive_info = consecutive_holding_info.get(tkr)
     buy_date = consecutive_info.get("buy_date") if consecutive_info else None
 
-    # DEBUG: 쿨다운 문제 디버깅
-    if sell_block_info and tkr == "473640":
-        logger.info(
-            f"[DEBUG 473640] buy_date(consecutive)={buy_date}, last_buy(cooldown)={sell_block_info.get('last_buy')}, days_since={sell_block_info.get('days_since')}"
-        )
-
     evaluation_date = max(base_date.normalize(), pd.Timestamp.now().normalize())
 
     if is_held and buy_date:
@@ -287,15 +285,18 @@ def _create_decision_entry(
 
     # 매매 의사결정
     if state == "HOLD":
-        price_ma, ma = data["price"], data["s1"]
+        ma = data["s1"]
         state, phrase = _determine_sell_decision(
             state=state,
             holding_return_pct=holding_return_pct,
             stop_loss_threshold=stop_loss_threshold,
             rsi_score_value=rsi_score_value,
             rsi_sell_threshold=rsi_sell_threshold,
-            price_ma=price_ma,
+            score_value=score_value,
+            price_value=price,
             ma=ma,
+            ma_period=data.get("ma_period"),
+            min_score_threshold=min_buy_score,
             sell_block_info=sell_block_info,
             cooldown_days=cooldown_days,
             DECISION_MESSAGES=DECISION_MESSAGES,
@@ -307,7 +308,7 @@ def _create_decision_entry(
         from logic.common import has_buy_signal
 
         score_value = data.get("score", 0.0)
-        if has_buy_signal(score_value):
+        if has_buy_signal(score_value, min_buy_score):
             buy_signal = True
             if buy_block_info:
                 buy_signal = False
@@ -319,12 +320,14 @@ def _create_decision_entry(
                         phrase = "쿨다운 대기중(오늘 매수 가능)"
                 else:
                     phrase = "쿨다운 대기중"
+        else:
+            phrase = _format_min_score_phrase(score_value, min_buy_score)
 
     # 메타 정보
     meta = etf_meta.get(tkr) or full_etf_meta.get(tkr, {}) or {}
     display_name = str(meta.get("name") or tkr)
     raw_category = meta.get("category")
-    display_category = str(raw_category) if raw_category and str(raw_category).upper() != "TBD" else "-"
+    display_category = str(raw_category) if raw_category and not is_category_exception(str(raw_category)) else "-"
 
     if holding_days == 0 and state in {"BUY", "BUY_REPLACE"}:
         holding_days = 1
@@ -402,7 +405,6 @@ def run_portfolio_recommend(
     data_by_tkr에 포함된 모든 전략의 점수를 사용하여 포트폴리오 의사결정을 수행합니다.
     """
     # 순환 import 방지를 위해 함수 내부에서 import
-    from strategies.maps.constants import DECISION_MESSAGES, DECISION_NOTES
     from strategies.maps.messages import build_buy_replace_note
     from logic.common import select_candidates_by_category, sort_decisions_by_order_and_score
 
@@ -421,6 +423,10 @@ def run_portfolio_recommend(
             stop_loss_threshold = -abs(float(denom))
     except (TypeError, ValueError):
         stop_loss_threshold = None
+
+    if not hasattr(strategy_rules, "min_buy_score"):
+        raise ValueError("StrategyRules에 MIN_BUY_SCORE가 없습니다.")
+    min_buy_score = float(strategy_rules.min_buy_score)
 
     # 핵심 보유 종목 (강제 보유, TOPN 포함)
     from logic.common import validate_core_holdings
@@ -474,6 +480,7 @@ def run_portfolio_recommend(
                 "rsi_score": 0.0,
                 "filter": 0,
                 "close": pd.Series(),
+                "ma_period": strategy_rules.ma_period,
             }
 
         decision = _create_decision_entry(
@@ -490,6 +497,7 @@ def run_portfolio_recommend(
             current_equity,
             stop_loss_threshold,
             cooldown_days,
+            min_buy_score,
             rsi_sell_threshold,
         )
         decisions.append(decision)
@@ -540,6 +548,7 @@ def run_portfolio_recommend(
                         current_equity,
                         stop_loss_threshold,
                         cooldown_days,
+                        min_buy_score,
                         rsi_sell_threshold,
                     )
                     core_decision["state"] = "BUY"
@@ -564,13 +573,13 @@ def run_portfolio_recommend(
         # 1. 이미 SELL_RSI 상태인 경우
         if d["state"] == "SELL_RSI":
             category = etf_meta.get(d["tkr"], {}).get("category")
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 sell_rsi_categories_today.add(category)
                 logger.info(f"[SELL_RSI CATEGORY] {d['tkr']} 매도로 인해 '{category}' 카테고리 매수 차단")
         # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
         elif d["state"] in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
             category = etf_meta.get(d["tkr"], {}).get("category")
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 sell_rsi_categories_today.add(category)
                 logger.info(
                     f"[RSI WARNING CATEGORY] {d['tkr']} RSI 과매수 경고로 '{category}' 카테고리 매수 차단 (RSI점수: {d.get('rsi_score', 0):.1f})"
@@ -604,7 +613,6 @@ def run_portfolio_recommend(
             get_ticker_func=lambda d: d["tkr"],
             holdings=set(holdings.keys()),
         )
-
         # 점수가 양수인 모든 매수 시그널 종목을 순서대로 시도 (이미 점수순 정렬됨)
         successful_buys = 0
         for cand in wait_candidates_raw:
@@ -617,6 +625,12 @@ def run_portfolio_recommend(
             cand_category = etf_meta.get(cand["tkr"], {}).get("category")
             cand_category_key = _normalize_category_value(cand_category)
             cand_rsi_score = cand.get("rsi_score", 100.0)
+            score_val = cand.get("score", float("nan"))
+            if pd.isna(score_val) or score_val <= min_buy_score:
+                cand["state"], cand["row"][4] = "WAIT", "WAIT"
+                cand["row"][-1] = _format_min_score_phrase(score_val, min_buy_score)
+                cand["buy_signal"] = False
+                continue
 
             can_buy, block_reason = check_buy_candidate_filters(
                 category=cand_category,
@@ -647,7 +661,7 @@ def run_portfolio_recommend(
 
                 if budget > 0:
                     cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
-                    if cand_category and cand_category != "TBD":
+                    if cand_category and not is_category_exception(cand_category):
                         held_categories.add(cand_category)
                         held_categories_for_buy.add(cand_category)
                         if cand_category_key:
@@ -660,7 +674,7 @@ def run_portfolio_recommend(
 
     # 교체 매매 로직
     replacement_candidates, _ = select_candidates_by_category(
-        [cand for cand in wait_candidates_raw if cand.get("state") != "BUY"],
+        [cand for cand in wait_candidates_raw if cand.get("state") != "BUY" and cand.get("buy_signal")],
         etf_meta,
         held_categories=None,
         max_count=None,
@@ -694,6 +708,13 @@ def run_portfolio_recommend(
             best_new["buy_signal"] = False
             continue
 
+        score_val = best_new.get("score", float("nan"))
+        if pd.isna(score_val) or score_val <= min_buy_score:
+            best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
+            best_new["row"][-1] = _format_min_score_phrase(score_val, min_buy_score)
+            best_new["buy_signal"] = False
+            continue
+
         wait_stock_category = etf_meta.get(best_new["tkr"], {}).get("category")
         wait_stock_category_key = _normalize_category_value(wait_stock_category)
 
@@ -701,9 +722,9 @@ def run_portfolio_recommend(
         core_holdings_categories = {
             etf_meta.get(ticker, {}).get("category")
             for ticker in valid_core_holdings
-            if etf_meta.get(ticker, {}).get("category") and etf_meta.get(ticker, {}).get("category") != "TBD"
+            if etf_meta.get(ticker, {}).get("category") and not is_category_exception(etf_meta.get(ticker, {}).get("category"))
         }
-        if wait_stock_category and wait_stock_category != "TBD" and wait_stock_category in core_holdings_categories:
+        if wait_stock_category and not is_category_exception(wait_stock_category) and wait_stock_category in core_holdings_categories:
             best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
             best_new["row"][-1] = f"핵심 보유 카테고리 ({wait_stock_category})"
             best_new["buy_signal"] = False
@@ -713,13 +734,15 @@ def run_portfolio_recommend(
             (
                 s
                 for s in current_held_stocks
-                if wait_stock_category and wait_stock_category != "TBD" and etf_meta.get(s["tkr"], {}).get("category") == wait_stock_category
+                if wait_stock_category
+                and not is_category_exception(wait_stock_category)
+                and etf_meta.get(s["tkr"], {}).get("category") == wait_stock_category
             ),
             None,
         )
 
         # 교체 매수 후보 필터링 (SELL_RSI 카테고리만 체크)
-        if wait_stock_category and wait_stock_category != "TBD" and wait_stock_category in sell_rsi_categories_today:
+        if wait_stock_category and not is_category_exception(wait_stock_category) and wait_stock_category in sell_rsi_categories_today:
             best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
             best_new["row"][-1] = f"RSI 과매수 매도 카테고리 ({wait_stock_category})"
             best_new["buy_signal"] = False
@@ -823,7 +846,7 @@ def run_portfolio_recommend(
                 sold_key = _normalize_category_value(sold_category)
                 if sold_key:
                     held_category_keys.discard(sold_key)
-            if wait_stock_category and wait_stock_category != "TBD":
+            if wait_stock_category and not is_category_exception(wait_stock_category):
                 held_categories.add(wait_stock_category)
             if wait_stock_category_key:
                 held_category_keys.add(wait_stock_category_key)
@@ -905,7 +928,11 @@ def run_portfolio_recommend(
                 if not d["row"][-1]:
                     category = etf_meta.get(d["tkr"], {}).get("category")
                     normalized = _normalize_category_value(category)
-                    if category and category != "TBD" and (category in held_categories or (normalized and normalized in held_category_keys)):
+                    if (
+                        category
+                        and not is_category_exception(category)
+                        and (category in held_categories or (normalized and normalized in held_category_keys))
+                    ):
                         d["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
                     else:
                         d["row"][-1] = DECISION_NOTES["PORTFOLIO_FULL"]
@@ -934,3 +961,36 @@ __all__ = [
     "generate_daily_recommendations_for_portfolio",  # 호환성
     "safe_generate_daily_recommendations_for_portfolio",  # 호환성
 ]
+
+
+def _build_trend_break_phrase(
+    ma_value: Optional[float],
+    price_value: Optional[float],
+    ma_period: Optional[int],
+    DECISION_NOTES: Dict,
+) -> str:
+    if ma_value is None or pd.isna(ma_value) or price_value is None or pd.isna(price_value):
+        threshold = ma_value if (ma_value is not None and not pd.isna(ma_value)) else 0.0
+        return f"{DECISION_NOTES['TREND_BREAK']}({threshold:,.0f}원 이하)"
+
+    diff = ma_value - price_value
+    direction = "낮습니다" if diff >= 0 else "높습니다"
+    period_text = ""
+    if ma_period:
+        try:
+            period_text = f"{int(ma_period)}일 "
+        except (TypeError, ValueError):
+            period_text = ""
+    return f"{DECISION_NOTES['TREND_BREAK']}({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"
+
+
+def _format_min_score_phrase(score_value: Optional[float], min_buy_score: float) -> str:
+    template = DECISION_NOTES.get("MIN_SCORE", "최소 {min_buy_score:.1f}점수 미만")
+    try:
+        base = template.format(min_buy_score=min_buy_score)
+    except Exception:
+        base = f"최소 {min_buy_score:.1f}점수 미만"
+
+    if score_value is None or pd.isna(score_value):
+        return f"{base} (현재 점수 없음)"
+    return f"{base} (현재 {score_value:.1f})"

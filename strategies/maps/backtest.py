@@ -10,7 +10,7 @@ import pandas as pd
 
 from utils.data_loader import fetch_ohlcv
 from utils.logger import get_app_logger
-from logic.backtest.portfolio_runner import run_portfolio_backtest, _process_ticker_data
+from logic.backtest.portfolio_runner import run_portfolio_backtest, process_ticker_data
 
 logger = get_app_logger()
 
@@ -26,6 +26,8 @@ def run_single_ticker_backtest(
     ma_period: int = 20,
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
+    *,
+    min_buy_score: float,
 ) -> pd.DataFrame:
     """
     단일 종목에 대해 이동평균선 교차 전략 백테스트를 실행합니다.
@@ -62,7 +64,14 @@ def run_single_ticker_backtest(
 
     # 공통 함수를 사용하여 데이터 처리 및 지표 계산
     etf_tickers = {ticker} if stock_type == "etf" else set()
-    ticker_metrics = _process_ticker_data(ticker, df, etf_tickers, current_ma_period, current_ma_period)
+    ticker_metrics = process_ticker_data(
+        ticker,
+        df,
+        etf_tickers,
+        current_ma_period,
+        current_ma_period,
+        min_buy_score=min_buy_score,
+    )
 
     if not ticker_metrics:
         return pd.DataFrame()
