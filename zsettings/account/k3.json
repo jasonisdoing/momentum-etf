@@ -1,8 +1,8 @@
 {
     "order": 30,
-    "icon": "🐶",
-    "name": "배당투자",
-    "desc": "고배당 + 안정 + 헷징",
+    "icon": "🏛️",
+    "name": "절세계좌",
+    "desc": "지수인덱스 + 고배당",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
     "initial_capital_krw": "100000000",
