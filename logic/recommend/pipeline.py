@@ -510,7 +510,8 @@ def _compute_trailing_return(
     if valid.empty:
         return 0.0
 
-    if len(valid) <= periods_back:
+    # 데이터가 충분하지 않으면 0.0 반환 (최소 periods_back + 1개 필요)
+    if len(valid) < periods_back + 1:
         return 0.0
 
     try:
@@ -850,7 +851,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             start_date=start_date,
             end_date=end_date,
             warmup_days=warmup_days,
-            allow_remote_fetch=False,
+            allow_remote_fetch=True,  # 캐시가 없으면 원격 조회 허용 (1,2,3주 수익률 계산을 위해 필요)
         )
         if missing_primary:
             raise MissingPriceDataError(

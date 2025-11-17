@@ -945,13 +945,43 @@ def fetch_ohlcv_for_tickers(
     today = pd.Timestamp.now().normalize()
     is_today = required_end == today
 
-    # 실시간 데이터 가져오기 (오늘 날짜인 경우에만)
+    # 실시간 데이터 가져오기 (거래일 + 장 시작 이후에만)
     realtime_data = {}
     if is_today and country.lower() == "kor":
+        # 거래일 여부 확인
         try:
-            realtime_data = fetch_naver_etf_inav_snapshot(tickers)
-        except Exception as e:
-            logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
+            today_str = today.strftime("%Y-%m-%d")
+            trading_days = get_trading_days(today_str, today_str, country)
+            is_trading_day = len(trading_days) > 0
+        except Exception:
+            is_trading_day = False
+
+        # 시장 개장 시간 확인
+        is_market_open_time = False
+        if is_trading_day:
+            try:
+                from config import MARKET_SCHEDULES
+                from datetime import datetime
+                import pytz
+
+                schedule = MARKET_SCHEDULES.get(country.lower())
+                if schedule:
+                    tz_name = schedule.get("timezone", "Asia/Seoul")
+                    tz = pytz.timezone(tz_name)
+                    now_local = datetime.now(tz)
+                    market_open = schedule["open"]
+
+                    # 장 시작 시간 이후인지 확인
+                    is_market_open_time = now_local.time() >= market_open
+            except Exception:
+                is_market_open_time = False
+
+        # 거래일이고 장 시작 이후에만 실시간 데이터 조회
+        if is_trading_day and is_market_open_time:
+            try:
+                realtime_data = fetch_naver_etf_inav_snapshot(tickers)
+            except Exception as e:
+                logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
 
     cached_frames = load_cached_frames_bulk(country, tickers)
     missing: List[str] = []

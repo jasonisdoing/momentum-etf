@@ -90,7 +90,7 @@ def refresh_all_caches(countries: list[str], start_date: Optional[str]):
                         ticker,
                         country,
                         date_range=[range_start, None],
-                        update_listing_meta=True,
+                        update_listing_meta=False,  # listing_date는 stock_meta_updater에서만 업데이트
                         force_refresh=True,
                         cache_country=temp_token,
                     )

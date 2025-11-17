@@ -15,7 +15,7 @@
         "BACKTESTED_DATE": "2025-11-12 00:00",
         "MA_PERIOD": 60,
         "MA_TYPE": "HMA",
-        "PORTFOLIO_TOPN": 4,
+        "PORTFOLIO_TOPN": 6,
         "REPLACE_SCORE_THRESHOLD": 0.0,
         "STOP_LOSS_PCT": 7.0,
         "OVERBOUGHT_SELL_THRESHOLD": 92,
