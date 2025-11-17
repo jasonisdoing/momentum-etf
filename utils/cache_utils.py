@@ -5,7 +5,7 @@ from __future__ import annotations
 import pickle
 import re
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from bson.binary import Binary
 from pymongo.errors import PyMongoError
@@ -78,17 +78,8 @@ def _get_collection(country: str):
     return collection
 
 
-def load_cached_frame(country: str, ticker: str) -> Optional[pd.DataFrame]:
-    """저장된 캐시 DataFrame을 로드하고, CACHE_START_DATE 이전 데이터를 필터링합니다."""
-    collection = _get_collection(country)
-    if collection is None:
-        return None
-
-    try:
-        doc = collection.find_one({"ticker": (ticker or "").strip().upper()})
-    except Exception:
-        return None
-
+def _deserialize_cached_doc(doc: Dict[str, Any]) -> Optional[pd.DataFrame]:
+    """공통 캐시 문서 역직렬화 로직."""
     if not doc:
         return None
 
@@ -111,15 +102,59 @@ def load_cached_frame(country: str, ticker: str) -> Optional[pd.DataFrame]:
     df = df.sort_index()
     df = df[~df.index.duplicated(keep="first")]
 
-    # CACHE_START_DATE 이전 데이터 필터링
     cache_start = _get_cache_start_date()
     if cache_start is not None:
         df = df[df.index >= cache_start]
 
     if df.empty:
         return None
-
     return df
+
+
+def load_cached_frame(country: str, ticker: str) -> Optional[pd.DataFrame]:
+    """저장된 캐시 DataFrame을 로드하고, CACHE_START_DATE 이전 데이터를 필터링합니다."""
+    collection = _get_collection(country)
+    if collection is None:
+        return None
+
+    try:
+        doc = collection.find_one({"ticker": (ticker or "").strip().upper()})
+    except Exception:
+        return None
+
+    return _deserialize_cached_doc(doc)
+
+
+def load_cached_frames_bulk(country: str, tickers: Iterable[str]) -> Dict[str, pd.DataFrame]:
+    """다수의 티커를 한 번의 질의로 가져와 역직렬화합니다."""
+    normalized = []
+    for t in tickers:
+        norm = (t or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    collection = _get_collection(country)
+    if collection is None:
+        return {}
+
+    frames: Dict[str, pd.DataFrame] = {}
+    try:
+        cursor = collection.find({"ticker": {"$in": list(set(normalized))}})
+    except Exception:
+        return {}
+
+    for doc in cursor:
+        ticker = (doc.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        df = _deserialize_cached_doc(doc)
+        if df is None:
+            continue
+        frames[ticker] = df
+
+    return frames
 
 
 def save_cached_frame(country: str, ticker: str, df: pd.DataFrame) -> None:
@@ -181,6 +216,37 @@ def drop_cache_collection(country: str) -> None:
         db[collection_name].drop()
     except Exception:
         return
+
+
+def clean_temp_cache_collections(country: str, *, max_age_seconds: Optional[int] = None) -> int:
+    """남아 있는 임시 캐시 컬렉션을 조건에 맞게 삭제합니다."""
+    db = get_db_connection()
+    if db is None:
+        return 0
+    base_name = _COLLECTION_NAME_MAP.get(country.strip().lower(), f"cache_{country}_stocks")
+    removed = 0
+    try:
+        threshold = None
+        if max_age_seconds is not None and max_age_seconds > 0:
+            threshold = datetime.utcnow().timestamp() - max_age_seconds
+
+        for coll_name in db.list_collection_names():
+            if not coll_name.startswith(f"{base_name}_tmp_"):
+                continue
+            if threshold is not None:
+                parts = coll_name.rsplit("_", 2)
+                if len(parts) >= 2:
+                    try:
+                        ts_val = int(parts[-2])
+                        if ts_val >= threshold:
+                            continue
+                    except ValueError:
+                        pass
+            db[coll_name].drop()
+            removed += 1
+    except Exception:
+        return removed
+    return removed
 
 
 def swap_cache_collection(country: str, temp_country_token: str) -> None:

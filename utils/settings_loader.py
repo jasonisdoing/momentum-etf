@@ -228,7 +228,7 @@ def load_common_settings() -> Dict[str, Any]:
 def get_strategy_rules(account_id: str):
     """계정별 전략 설정을 `StrategyRules` 객체로 반환합니다."""
 
-    from logic.entry_point import StrategyRules
+    from strategies.maps.rules import StrategyRules
 
     tuning, _ = get_account_strategy_sections(account_id)
     return StrategyRules.from_mapping(tuning)

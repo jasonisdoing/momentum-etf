@@ -113,6 +113,7 @@ DECISION_NOTES = {
     "REPLACE_SELL": "교체 매도",
     "PRICE_DATA_FAIL": "가격 데이터 조회 실패",
     "NO_RECOMMEND": "추천 제외",
+    "MIN_SCORE": "최소 {min_buy_score:.1f}점수 미만",
     # 템플릿
     "COOLDOWN_GENERIC": "쿨다운 {days}일 대기중",
     "COOLDOWN_WITH_ACTION": "쿨다운 {days}일 대기중 ({action} {date})",

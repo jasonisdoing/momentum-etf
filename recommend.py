@@ -27,6 +27,7 @@ from utils.notification import (
 )
 from utils.recommendation_storage import save_recommendation_report
 from utils.logger import get_app_logger
+from utils.data_loader import MissingPriceDataError
 
 
 def _available_account_choices() -> list[str]:
@@ -72,7 +73,11 @@ def main() -> None:
     print_run_header(account_id, date_str=args.date)
     start_time = time.time()
 
-    report = generate_account_recommendation_report(account_id=account_id, date_str=args.date)
+    try:
+        report = generate_account_recommendation_report(account_id=account_id, date_str=args.date)
+    except MissingPriceDataError as exc:
+        logger.error(str(exc))
+        raise SystemExit(1)
 
     if not isinstance(report, RecommendationReport):
         logger.error(
@@ -145,6 +150,22 @@ def main() -> None:
             (target_country or account_country or "").upper() or "UNKNOWN",
             base_date_str,
         )
+
+    elapsed_total = int(time.time() - start_time)
+    hours, remainder = divmod(elapsed_total, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours}시간")
+    if minutes:
+        parts.append(f"{minutes}분")
+    if seconds or not parts:
+        parts.append(f"{seconds}초")
+    logger.info(
+        "[%s] 총 소요 시간: %s",
+        account_id.upper(),
+        " ".join(parts),
+    )
 
 
 if __name__ == "__main__":

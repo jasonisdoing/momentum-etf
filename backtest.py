@@ -11,13 +11,14 @@ import pandas as pd
 from utils.account_registry import (
     get_account_settings,
     get_strategy_rules,
+    get_benchmark_tickers,
     list_available_accounts,
 )
 from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
 from logic.recommend.output import print_run_header
 from utils.logger import get_app_logger
 from utils.stock_list_io import get_etfs
-from utils.data_loader import prepare_price_data, get_latest_trading_day
+from utils.data_loader import prepare_price_data, get_latest_trading_day, MissingPriceDataError
 from utils.settings_loader import load_common_settings
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
@@ -42,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     logger = get_app_logger()
+    run_start = datetime.now()
 
     # 파서 생성 및 인자 파싱
     parser = build_parser()
@@ -72,7 +74,9 @@ def main() -> None:
     # 웜업 기간을 전략의 MA_PERIOD로 설정
     warmup_days = strategy_rules.ma_period
 
-    tickers = [etf["ticker"] for etf in get_etfs(country_code)]
+    universe_tickers = [etf["ticker"] for etf in get_etfs(country_code) if etf.get("ticker")]
+    benchmark_tickers = get_benchmark_tickers(account_settings)
+    tickers = sorted({*(str(t).strip().upper() for t in universe_tickers if t), *benchmark_tickers})
     common_settings = load_common_settings()
     cache_seed_raw = (common_settings or {}).get("CACHE_START_DATE")
     cache_seed_dt = None
@@ -95,18 +99,21 @@ def main() -> None:
         warmup_days=0,
     )
     if missing:
-        logger.warning("데이터가 부족한 종목 (%d): %s", len(missing), ", ".join(missing))
+        raise MissingPriceDataError(
+            country=country_code,
+            start_date=date_range_prefetch[0],
+            end_date=date_range_prefetch[1],
+            tickers=missing,
+        )
 
     print_run_header(account_id, date_str=None)
 
     from logic.backtest.account_runner import run_account_backtest
 
-    excluded = set(missing)
     result = run_account_backtest(
         account_id,
         months_range=months_range,
         prefetched_data=prefetched_map,
-        excluded_tickers=excluded if excluded else None,
     )
 
     # dump_backtest_log가 계정별 폴더 구조로 저장
@@ -127,7 +134,28 @@ def main() -> None:
         core_start_dt=result.start_date,
     )
     logger.info("✅ 백테스트 로그를 '%s'에 저장했습니다.", log_path)
+    elapsed = datetime.now() - run_start
+    total_seconds = int(elapsed.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours}시간")
+    if minutes:
+        parts.append(f"{minutes}분")
+    if seconds or not parts:
+        parts.append(f"{seconds}초")
+    logger.info(
+        "[%s] 총 소요 시간: %s",
+        account_id.upper(),
+        " ".join(parts),
+    )
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except MissingPriceDataError as exc:
+        logger = get_app_logger()
+        logger.error(str(exc))
+        raise SystemExit(1)

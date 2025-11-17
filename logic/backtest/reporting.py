@@ -636,8 +636,8 @@ def _generate_daily_report_lines(
         "보유일",
         price_header,
         "일간(%)",
-        "보유수량",
-        "보유금액",
+        "수량",
+        "금액",
         "평가손익",
         "평가(%)",
         "누적손익",
@@ -657,8 +657,8 @@ def _generate_daily_report_lines(
         "right",  # 보유일
         "right",  # 현재가 계열
         "right",  # 일간(%)
-        "right",  # 보유수량
-        "right",  # 보유금액
+        "right",  # 수량
+        "right",  # 금액
         "right",  # 평가손익
         "right",  # 평가(%)
         "right",  # 누적손익

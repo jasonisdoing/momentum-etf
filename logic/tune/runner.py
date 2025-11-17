@@ -6,19 +6,21 @@ import csv
 import json
 import math
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import os
 from datetime import datetime
 from os import cpu_count
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple, Set
+from typing import Any, Collection, Dict, List, Mapping, Optional, Sequence, Tuple, Set
 import tempfile
 import shutil
 
 import pandas as pd
 from pandas import DataFrame, Timestamp
+import numpy as np
 
 from logic.backtest.account_runner import run_account_backtest
 from logic.entry_point import StrategyRules
-from utils.account_registry import get_strategy_rules
+from utils.account_registry import get_strategy_rules, get_benchmark_tickers
 from utils.settings_loader import (
     AccountSettingsError,
     ACCOUNT_SETTINGS_DIR,
@@ -30,14 +32,217 @@ from utils.logger import get_app_logger
 from utils.data_loader import (
     prepare_price_data,
     get_latest_trading_day,
-    fetch_ohlcv,
+    get_trading_days,
+    MissingPriceDataError,
 )
 from utils.stock_list_io import get_etfs
 from utils.cache_utils import save_cached_frame
+from utils.memmap_store import create_memmap_store, MemmapPriceStore
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
 MAX_TABLE_ROWS = 20
+
+_WORKER_PREFETCHED_DATA: Optional[Mapping[str, DataFrame]] = None
+_WORKER_PREFETCHED_METRICS: Optional[Mapping[str, Dict[str, Any]]] = None
+_WORKER_PREFETCHED_UNIVERSE: Optional[Sequence[Mapping[str, Any]]] = None
+_WORKER_MEMMAP_STORE: Optional[MemmapPriceStore] = None
+
+
+def _init_worker_prefetch(
+    prefetched_data: Mapping[str, DataFrame] | None,
+    prefetched_metrics: Mapping[str, Dict[str, Any]] | None,
+    prefetched_universe: Sequence[Mapping[str, Any]] | None,
+    memmap_catalog: Optional[Dict[str, Any]] = None,
+) -> None:
+    """ProcessPoolExecutor initializer to reuse prefetched artifacts."""
+
+    global _WORKER_PREFETCHED_DATA, _WORKER_PREFETCHED_METRICS, _WORKER_PREFETCHED_UNIVERSE, _WORKER_MEMMAP_STORE
+    _WORKER_PREFETCHED_DATA = prefetched_data
+    _WORKER_PREFETCHED_METRICS = prefetched_metrics
+    _WORKER_PREFETCHED_UNIVERSE = prefetched_universe
+    _WORKER_MEMMAP_STORE = create_memmap_store(memmap_catalog)
+
+
+def _filter_trading_days(
+    calendar: Optional[Sequence[pd.Timestamp]],
+    start_str: str,
+    end_str: str,
+) -> Optional[List[pd.Timestamp]]:
+    if not calendar:
+        return None
+    start_ts = pd.to_datetime(start_str)
+    end_ts = pd.to_datetime(end_str)
+    filtered = []
+    for raw in calendar:
+        dt = pd.Timestamp(raw)
+        if start_ts <= dt <= end_ts:
+            filtered.append(dt)
+    return filtered or None
+
+
+def _extract_price_series_for_prefetch(df: pd.DataFrame) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
+    if df is None or df.empty:
+        return None, None
+
+    working = df
+    if isinstance(working.columns, pd.MultiIndex):
+        working = working.copy()
+        working.columns = working.columns.get_level_values(0)
+        working = working.loc[:, ~working.columns.duplicated()]
+
+    close_series = None
+    for candidate in ("unadjusted_close", "Close", "close"):
+        if candidate in working.columns:
+            series = working[candidate]
+            if isinstance(series, pd.DataFrame):
+                series = series.iloc[:, 0]
+            close_series = series.astype(float)
+            break
+    if close_series is None:
+        return None, None
+
+    open_series = None
+    if "Open" in working.columns:
+        open_col = working["Open"]
+        if isinstance(open_col, pd.DataFrame):
+            open_col = open_col.iloc[:, 0]
+        open_series = open_col.astype(float)
+
+    return close_series, open_series
+
+
+def _build_prefetched_metric_cache(
+    prefetched_data: Mapping[str, pd.DataFrame],
+    *,
+    ma_periods: Sequence[int],
+    ma_types: Sequence[str],
+) -> Dict[str, Dict[str, Any]]:
+    if not prefetched_data:
+        return {}
+
+    period_pool = sorted({int(p) for p in ma_periods if isinstance(p, (int, float)) and int(p) > 0})
+    type_pool = sorted({(t or "SMA").upper() for t in ma_types if isinstance(t, str) and t})
+    if not period_pool or not type_pool:
+        return {}
+
+    from utils.moving_averages import calculate_moving_average
+    from utils.indicators import calculate_ma_score
+    from strategies.rsi.backtest import process_ticker_data_rsi
+
+    cache: Dict[str, Dict[str, Any]] = {}
+    for ticker, df in prefetched_data.items():
+        if df is None or df.empty:
+            continue
+        close_series, open_series = _extract_price_series_for_prefetch(df)
+        if close_series is None or close_series.empty:
+            continue
+
+        entry: Dict[str, Any] = {
+            "close": close_series,
+            "open": open_series if open_series is not None else close_series.copy(),
+            "ma": {},
+            "ma_score": {},
+        }
+
+        rsi_payload = process_ticker_data_rsi(close_series)
+        if rsi_payload:
+            entry["rsi_score"] = rsi_payload.get("rsi_score")
+
+        for ma_type in type_pool:
+            for period in period_pool:
+                if len(close_series) < period:
+                    continue
+                ma_series = calculate_moving_average(close_series, period, ma_type)
+                if ma_series is None:
+                    continue
+                ma_key = f"{ma_type}_{period}"
+                entry["ma"][ma_key] = ma_series
+                entry["ma_score"][ma_key] = calculate_ma_score(close_series, ma_series)
+
+        cache[ticker] = entry
+
+    return cache
+
+
+def _write_memmap_array(
+    base_dir: Path,
+    *,
+    ticker: str,
+    label: str,
+    array: np.ndarray,
+    dtype: np.dtype,
+) -> Dict[str, Any]:
+    base_dir.mkdir(parents=True, exist_ok=True)
+    safe_ticker = "".join(ch for ch in ticker if ch.isalnum() or ch in ("_", "-")) or "TICKER"
+    filename = f"{safe_ticker}_{label}.dat"
+    path = base_dir / filename
+
+    memmap = np.memmap(path, mode="w+", dtype=dtype, shape=array.shape)
+    memmap[:] = array
+    memmap.flush()
+    del memmap
+
+    return {
+        "path": str(path),
+        "dtype": np.dtype(dtype).str,
+        "shape": array.shape,
+    }
+
+
+def _persist_prefetched_memmaps(
+    account_id: str,
+    prefetched_data: Mapping[str, pd.DataFrame],
+    *,
+    base_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Convert prefetched price frames to memmap-backed arrays for later reuse.
+    """
+
+    if base_dir is None:
+        base_dir = Path(tempfile.gettempdir()) / "momentum-etf-memmap" / account_id
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    memmap_meta: Dict[str, Dict[str, Any]] = {}
+    for ticker, frame in prefetched_data.items():
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            continue
+        try:
+            index_values = frame.index.astype("int64").to_numpy()
+            close_col_name = "unadjusted_close" if "unadjusted_close" in frame.columns else "Close"
+            close_series = frame[close_col_name]
+            if isinstance(close_series, pd.DataFrame):
+                close_series = close_series.iloc[:, 0]
+            close_values = close_series.astype("float64").to_numpy()
+            if "Open" in frame.columns:
+                open_series = frame["Open"]
+                if isinstance(open_series, pd.DataFrame):
+                    open_series = open_series.iloc[:, 0]
+                open_values = open_series.astype("float64").to_numpy()
+            else:
+                open_values = close_values.copy()
+
+            ticker_dir = base_dir / ticker
+            index_meta = _write_memmap_array(ticker_dir, ticker=ticker, label="index", array=index_values, dtype=np.int64)
+            close_meta = _write_memmap_array(ticker_dir, ticker=ticker, label="close", array=close_values, dtype=np.float64)
+            close_meta["column"] = close_col_name
+            open_meta = _write_memmap_array(ticker_dir, ticker=ticker, label="open", array=open_values, dtype=np.float64)
+
+            memmap_meta[ticker] = {
+                "index": index_meta,
+                "close": close_meta,
+                "open": open_meta,
+            }
+        except Exception as exc:
+            logger = get_app_logger()
+            logger.warning("[튜닝] %s 티커 memmap 생성 실패: %s", ticker, exc)
+            continue
+
+    return {
+        "base_dir": str(base_dir),
+        "tickers": memmap_meta,
+    }
 
 
 def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:
@@ -183,8 +388,8 @@ def _format_threshold(value: Any) -> str:
 def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = False, months_range: Optional[int] = None) -> List[str]:
     from utils.report import render_table_eaw
 
-    headers = ["MA", "MA타입", "TOPN", "교체점수", "손절", "과매수", "쿨다운", "CAGR(%)", "MDD(%)"]
-    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right"]
+    headers = ["MA", "MA타입", "TOPN", "교체점수", "손절", "과매수", "쿨다운", "최소점수", "CAGR(%)", "MDD(%)"]
+    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right", "right"]
 
     if months_range:
         headers.append(f"{months_range}개월(%)")
@@ -215,6 +420,8 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
         rsi_threshold_val = row.get("rsi_sell_threshold")
         cooldown_val = row.get("cooldown_days")
 
+        min_score_val = row.get("min_buy_score")
+
         row_data = [
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
             str(ma_type_val) if ma_type_val else "SMA",
@@ -223,6 +430,7 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
             stop_loss_display,
             str(int(rsi_threshold_val)) if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val)) else "-",
             str(int(cooldown_val)) if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val)) else "-",
+            _format_threshold(min_score_val),
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),
             _format_table_float(row.get("period_return")),
@@ -404,6 +612,10 @@ def _export_debug_month(
     raw_rows: List[Dict[str, Any]],
     prefetched_data: Mapping[str, DataFrame],
     capture_top_n: int,
+    prefetched_etf_universe: Sequence[Mapping[str, Any]],
+    prefetched_metrics: Mapping[str, Dict[str, Any]] | None,
+    price_store: Optional[MemmapPriceStore],
+    trading_calendar: Optional[Sequence[pd.Timestamp]],
 ) -> List[Dict[str, Any]]:
     if capture_top_n <= 0 or not raw_rows:
         return []
@@ -453,6 +665,10 @@ def _export_debug_month(
             quiet=True,
             prefetched_data=prefetched_data,
             strategy_override=strategy_rules,
+            prefetched_etf_universe=prefetched_etf_universe,
+            prefetched_metrics=prefetched_metrics,
+            price_store=price_store,
+            trading_calendar=trading_calendar,
         )
 
         result_live = run_account_backtest(
@@ -460,6 +676,10 @@ def _export_debug_month(
             months_range=months_range,
             quiet=True,
             strategy_override=strategy_rules,
+            prefetched_etf_universe=prefetched_etf_universe,
+            prefetched_metrics=None,
+            price_store=price_store,
+            trading_calendar=trading_calendar,
         )
 
         stop_loss_dir_part = f"SL{stop_loss_value:.2f}" if stop_loss_value is not None else "SLauto"
@@ -503,7 +723,26 @@ def _export_debug_month(
 
 
 def _evaluate_single_combo(
-    payload: Tuple[str, int, Tuple[str, str], int, int, float, float, int, int, str, Tuple[str, ...], Tuple[str, ...], Mapping[str, DataFrame]]
+    payload: Tuple[
+        str,
+        int,
+        Tuple[str, str],
+        int,
+        int,
+        float,
+        float,
+        int,
+        int,
+        str,
+        float,
+        Tuple[str, ...],
+        Tuple[str, ...],
+        Mapping[str, DataFrame],
+        Sequence[Mapping[str, Any]],
+        Mapping[str, Dict[str, Any]],
+        Optional[Dict[str, Any]],
+        Optional[Sequence[pd.Timestamp]],
+    ]
 ) -> Tuple[str, Any, List[str]]:
     (
         account_norm,
@@ -516,10 +755,21 @@ def _evaluate_single_combo(
         rsi_int,
         cooldown_int,
         ma_type_str,
+        min_score_float,
         excluded_tickers,
         core_holdings_tuple,
         prefetched_data,
+        prefetched_etf_universe,
+        prefetched_metrics,
+        memmap_catalog,
+        trading_calendar,
     ) = payload
+
+    data_source = prefetched_data or _WORKER_PREFETCHED_DATA or {}
+    metrics_source = prefetched_metrics or _WORKER_PREFETCHED_METRICS or {}
+    universe_source = prefetched_etf_universe or _WORKER_PREFETCHED_UNIVERSE or ()
+    price_store = _WORKER_MEMMAP_STORE or create_memmap_store(memmap_catalog)
+    calendar_source = trading_calendar
 
     try:
         override_rules = StrategyRules.from_values(
@@ -529,6 +779,7 @@ def _evaluate_single_combo(
             ma_type=str(ma_type_str),
             core_holdings=list(core_holdings_tuple) if core_holdings_tuple else [],
             stop_loss_pct=float(stop_loss_float),
+            min_buy_score=float(min_score_float),
         )
     except ValueError as exc:
         return (
@@ -540,6 +791,7 @@ def _evaluate_single_combo(
                 "replace_threshold": threshold_float,
                 "rsi_sell_threshold": rsi_int,
                 "ma_type": ma_type_str,
+                "min_buy_score": min_score_float,
                 "error": str(exc),
             },
             [],
@@ -560,11 +812,26 @@ def _evaluate_single_combo(
                 "end_date": date_range[1],
                 "strategy_overrides": strategy_overrides,
             },
-            prefetched_data=prefetched_data,
+            prefetched_data=data_source,
             strategy_override=override_rules,
             excluded_tickers=set(excluded_tickers) if excluded_tickers else None,
+            prefetched_etf_universe=universe_source,
+            prefetched_metrics=metrics_source,
+            price_store=price_store,
+            trading_calendar=calendar_source,
         )
     except Exception as exc:
+        logger = get_app_logger()
+        logger.warning(
+            "[튜닝] 조합 실행 실패 months=%d MA=%s TOPN=%s STOP=%.2f RSI=%d score=%.2f error=%s",
+            months_range,
+            ma_int,
+            topn_int,
+            stop_loss_float,
+            rsi_int,
+            min_score_float,
+            exc,
+        )
         return (
             "failure",
             {
@@ -573,6 +840,7 @@ def _evaluate_single_combo(
                 "stop_loss_pct": stop_loss_float,
                 "replace_threshold": threshold_float,
                 "rsi_sell_threshold": rsi_int,
+                "min_buy_score": min_score_float,
                 "error": str(exc),
             },
             [],
@@ -590,6 +858,7 @@ def _evaluate_single_combo(
         "rsi_sell_threshold": rsi_int,
         "cooldown_days": cooldown_int,
         "ma_type": ma_type_str,
+        "min_buy_score": float(min_score_float),
         "cagr": _round_float(_safe_float(summary.get("cagr"), 0.0)),
         "mdd": _round_float(_safe_float(summary.get("mdd"), 0.0)),
         "sharpe": _round_float(_safe_float(summary.get("sharpe"), 0.0)),
@@ -613,6 +882,11 @@ def _execute_tuning_for_months(
     prefetched_data: Mapping[str, DataFrame],
     output_path: Optional[Path] = None,
     progress_callback: Optional[callable] = None,
+    prefetched_etf_universe: Sequence[Mapping[str, Any]],
+    prefetched_metrics: Mapping[str, Dict[str, Any]],
+    memmap_catalog: Optional[Dict[str, Any]],
+    price_store: Optional[MemmapPriceStore],
+    trading_calendar: Optional[Sequence[pd.Timestamp]],
 ) -> Optional[Dict[str, Any]]:
     logger = get_app_logger()
 
@@ -636,8 +910,10 @@ def _execute_tuning_for_months(
         logger.warning("[튜닝] %s (%d개월) 유효한 탐색 공간이 없습니다.", account_norm.upper(), months_range)
         return None
 
-    combos: List[Tuple[int, int, float, float, int, int, str]] = [
-        (ma, topn, replace, stop_loss, rsi, cooldown, ma_type)
+    min_score_candidates = list(search_space.get("MIN_BUY_SCORE", [0.0]))
+
+    combos: List[Tuple[int, int, float, float, int, int, str, float]] = [
+        (ma, topn, replace, stop_loss, rsi, cooldown, ma_type, min_score)
         for ma in ma_candidates
         for topn in topn_candidates
         for replace in replace_candidates
@@ -645,6 +921,7 @@ def _execute_tuning_for_months(
         for rsi in rsi_candidates
         for cooldown in cooldown_candidates
         for ma_type in ma_type_candidates
+        for min_score in min_score_candidates
     ]
 
     if not combos:
@@ -661,6 +938,10 @@ def _execute_tuning_for_months(
         len(combos),
     )
 
+    filtered_calendar = _filter_trading_days(trading_calendar, date_range[0], date_range[1])
+    if filtered_calendar is None:
+        raise RuntimeError(f"[튜닝] {account_norm.upper()} ({months_range}개월) 구간의 거래일 정보를 준비하지 못했습니다.")
+
     workers = WORKERS or (cpu_count() or 1)
     workers = max(1, min(workers, len(combos)))
 
@@ -671,6 +952,12 @@ def _execute_tuning_for_months(
 
     # search_space에서 core_holdings 가져오기
     core_holdings_from_space = search_space.get("CORE_HOLDINGS", [])
+
+    serialized_prefetched_data = prefetched_data if workers <= 1 else None
+    serialized_prefetched_metrics = prefetched_metrics if workers <= 1 else None
+    serialized_universe = prefetched_etf_universe if workers <= 1 else None
+    serialized_memmap = memmap_catalog if workers <= 1 else None
+    serialized_calendar = filtered_calendar
 
     payloads = [
         (
@@ -684,18 +971,33 @@ def _execute_tuning_for_months(
             int(rsi),
             int(cooldown),
             str(ma_type),
+            float(min_score),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             tuple(core_holdings_from_space) if core_holdings_from_space else tuple(),
-            prefetched_data,
+            serialized_prefetched_data,
+            serialized_universe,
+            serialized_prefetched_metrics,
+            serialized_memmap,
+            serialized_calendar,
         )
-        for ma, topn, replace, stop_loss, rsi, cooldown, ma_type in combos
+        for ma, topn, replace, stop_loss, rsi, cooldown, ma_type, min_score in combos
     ]
 
     worker_desc = "순차 실행" if workers <= 1 else f"{workers}개의 CPU 병렬 처리 중..."
 
     if workers <= 1:
-        for idx, payload in enumerate(payloads, 1):
-            status, data, missing = _evaluate_single_combo(payload)
+        global _WORKER_MEMMAP_STORE
+        _WORKER_MEMMAP_STORE = price_store
+        iterator = map(_evaluate_single_combo, payloads)
+    else:
+        init_args = (prefetched_data, prefetched_metrics, prefetched_etf_universe, memmap_catalog)
+        chunksize = max(1, len(payloads) // (workers * 4)) if len(payloads) > workers else 1
+        executor = ProcessPoolExecutor(max_workers=workers, initializer=_init_worker_prefetch, initargs=init_args)
+        iterator = executor.map(_evaluate_single_combo, payloads, chunksize=chunksize)
+
+    try:
+        for idx, result in enumerate(iterator, 1):
+            status, data, missing = result
             if status == "success":
                 success_entries.append(data)
                 encountered_missing.update(missing)
@@ -713,54 +1015,20 @@ def _execute_tuning_for_months(
                     worker_desc,
                 )
 
-                # 1%마다 중간 저장 (성공한 조합이 있을 때만)
                 if success_entries and output_path and progress_callback:
                     current_best_cagr = max(_safe_float(entry.get("cagr"), float("-inf")) for entry in success_entries)
                     if current_best_cagr > best_cagr_so_far:
                         best_cagr_so_far = current_best_cagr
 
-                    # 중간 결과 저장 콜백 호출
                     progress_callback(
                         success_entries=success_entries,
                         progress_pct=(idx / len(combos)) * 100,
                         completed=idx,
                         total=len(combos),
                     )
-    else:
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            future_map = {executor.submit(_evaluate_single_combo, payload): payload for payload in payloads}
-            for idx, future in enumerate(as_completed(future_map), 1):
-                status, data, missing = future.result()
-                if status == "success":
-                    success_entries.append(data)
-                    encountered_missing.update(missing)
-                else:
-                    failures.append(data)
-
-                if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
-                    logger.info(
-                        "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%) | %s",
-                        account_norm.upper(),
-                        months_range,
-                        idx,
-                        len(combos),
-                        (idx / len(combos)) * 100,
-                        worker_desc,
-                    )
-
-                    # 1%마다 중간 저장 (성공한 조합이 있을 때만)
-                    if success_entries and output_path and progress_callback:
-                        current_best_cagr = max(_safe_float(entry.get("cagr"), float("-inf")) for entry in success_entries)
-                        if current_best_cagr > best_cagr_so_far:
-                            best_cagr_so_far = current_best_cagr
-
-                        # 중간 결과 저장 콜백 호출
-                        progress_callback(
-                            success_entries=success_entries,
-                            progress_pct=(idx / len(combos)) * 100,
-                            completed=idx,
-                            total=len(combos),
-                        )
+    finally:
+        if workers > 1:
+            executor.shutdown(wait=True, cancel_futures=False)
 
     if not success_entries:
         logger.warning("[튜닝] %s (%d개월) 성공한 조합이 없습니다.", account_norm.upper(), months_range)
@@ -788,6 +1056,10 @@ def _execute_tuning_for_months(
         sharpe_val = _safe_float(item.get("sharpe"), float("nan"))
         sharpe_to_mdd_val = _safe_float(item.get("sharpe_to_mdd"), float("nan"))
 
+        min_score_raw = item.get("min_buy_score")
+        if min_score_raw is None:
+            raise ValueError("튜닝 결과에 MIN_BUY_SCORE 값이 없습니다.")
+
         raw_data_payload.append(
             {
                 "MONTHS_RANGE": months_range,
@@ -804,6 +1076,7 @@ def _execute_tuning_for_months(
                     "STOP_LOSS_PCT": _round_up_float_places(item.get("stop_loss_pct"), 1) if item.get("stop_loss_pct") is not None else None,
                     "OVERBOUGHT_SELL_THRESHOLD": int(item.get("rsi_sell_threshold", 10)),
                     "COOLDOWN_DAYS": int(item.get("cooldown_days", 2)),
+                    "MIN_BUY_SCORE": _round_up_float_places(min_score_raw, 2),
                 },
             }
         )
@@ -828,6 +1101,7 @@ def _build_run_entry(
         "STOP_LOSS_PCT": ("stop_loss_pct", False),
         "OVERBOUGHT_SELL_THRESHOLD": ("rsi_sell_threshold", True),
         "COOLDOWN_DAYS": ("cooldown_days", True),
+        "MIN_BUY_SCORE": ("min_buy_score", False),
     }
 
     entry: Dict[str, Any] = {
@@ -1005,7 +1279,7 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
 
     normalized.pop("result", None)
 
-    for field in ("MA_PERIOD", "PORTFOLIO_TOPN", "REPLACE_SCORE_THRESHOLD", "STOP_LOSS_PCT", "COOLDOWN_DAYS", "MA_TYPE"):
+    for field in ("MA_PERIOD", "PORTFOLIO_TOPN", "REPLACE_SCORE_THRESHOLD", "STOP_LOSS_PCT", "COOLDOWN_DAYS", "MA_TYPE", "MIN_BUY_SCORE"):
         normalized.pop(field, None)
 
     raw_results = normalized.get("raw_data")
@@ -1095,12 +1369,24 @@ def _compose_tuning_report(
     month_results: List[Dict[str, Any]],
     progress_info: Optional[Dict[str, Any]] = None,
     tuning_metadata: Optional[Dict[str, Any]] = None,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
 ) -> List[str]:
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    lines: List[str] = [
-        f"실행 시각: {timestamp}",
-        f"계정: {account_id.upper()}",
-    ]
+    start_ts = start_time or datetime.now()
+    start_str = start_ts.strftime("%Y-%m-%d %H:%M:%S")
+    lines: List[str] = [f"실행 시각: {start_str}"]
+
+    if end_time is not None:
+        end_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(f"종료 시각: {end_str}")
+        elapsed = end_time - start_ts
+        elapsed_seconds = max(int(elapsed.total_seconds()), 0)
+        hours = elapsed_seconds // 3600
+        minutes = (elapsed_seconds % 3600) // 60
+        seconds = elapsed_seconds % 60
+        lines.append(f"걸린 시간: {hours}시간 {minutes}분 {seconds}초")
+
+    lines.append(f"계정: {account_id.upper()}")
 
     if progress_info:
         completed = progress_info.get("completed", 0)
@@ -1124,15 +1410,16 @@ def _compose_tuning_report(
             stop_loss_range = search_space.get("STOP_LOSS_PCT", [])
             rsi_range = search_space.get("OVERBOUGHT_SELL_THRESHOLD", [])
             cooldown_range = search_space.get("COOLDOWN_DAYS", [])
+            min_score_range = search_space.get("MIN_BUY_SCORE", [])
 
             # MA_TYPE이 있으면 포함해서 표시
             if ma_type_range and len(ma_type_range) > 1:
                 lines.append(
-                    f"탐색 공간: MA {len(ma_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 × 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 × RSI {len(rsi_range)}개 × COOLDOWN {len(cooldown_range)}개 = {tuning_metadata.get('combo_count', 0)}개 조합"
+                    f"탐색 공간: MA {len(ma_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 × 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 × RSI {len(rsi_range)}개 × COOLDOWN {len(cooldown_range)}개 × MIN_SCORE {len(min_score_range)}개 = {tuning_metadata.get('combo_count', 0)}개 조합"
                 )
             else:
                 lines.append(
-                    f"탐색 공간: MA {len(ma_range)}개 × TOPN {len(topn_range)}개 × 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 × RSI {len(rsi_range)}개 × COOLDOWN {len(cooldown_range)}개 = {tuning_metadata.get('combo_count', 0)}개 조합"
+                    f"탐색 공간: MA {len(ma_range)}개 × TOPN {len(topn_range)}개 × 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 × RSI {len(rsi_range)}개 × COOLDOWN {len(cooldown_range)}개 × MIN_SCORE {len(min_score_range)}개 = {tuning_metadata.get('combo_count', 0)}개 조합"
                 )
 
             # 각 파라미터 범위 표시
@@ -1156,6 +1443,9 @@ def _compose_tuning_report(
             if cooldown_range:
                 cd_min, cd_max = min(cooldown_range), max(cooldown_range)
                 lines.append(f"  COOLDOWN_DAYS: {cd_min}~{cd_max}")
+            if min_score_range:
+                min_min, min_max = min(min_score_range), max(min_score_range)
+                lines.append(f"  MIN_BUY_SCORE: {min_min}~{min_max}")
 
             # CORE_HOLDINGS 표시 (빈 리스트도 표시)
             core_holdings = search_space.get("CORE_HOLDINGS", [])
@@ -1271,6 +1561,11 @@ def _compose_tuning_report(
                 stop_loss_val = tuning.get("STOP_LOSS_PCT")
             rsi_val = tuning.get("OVERBOUGHT_SELL_THRESHOLD")
             cooldown_val = tuning.get("COOLDOWN_DAYS")
+            min_score_val = tuning.get("MIN_BUY_SCORE")
+            if min_score_val is None:
+                min_score_val = entry.get("min_buy_score")
+            if min_score_val is None:
+                raise ValueError("MIN_BUY_SCORE 값을 찾을 수 없습니다.")
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -1287,6 +1582,7 @@ def _compose_tuning_report(
                     "stop_loss_pct": stop_loss_val,
                     "rsi_sell_threshold": rsi_val,
                     "cooldown_days": cooldown_val,
+                    "min_buy_score": min_score_val,
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
@@ -1352,6 +1648,7 @@ def run_account_tuning(
 
     account_norm = (account_id or "").strip().lower()
     logger = get_app_logger()
+    tuning_start_ts = datetime.now()
 
     try:
         account_settings = get_account_settings(account_norm)
@@ -1405,6 +1702,11 @@ def run_account_tuning(
         dtype=int,
         fallback=2,
     )
+    min_buy_score_values = _normalize_tuning_values(
+        config.get("MIN_BUY_SCORE"),
+        dtype=float,
+        fallback=base_rules.min_buy_score,
+    )
 
     # CORE_HOLDINGS 처리: tune.py에서 지정 가능, 없으면 base_rules에서 가져옴
     core_holdings_raw = config.get("CORE_HOLDINGS")
@@ -1435,6 +1737,7 @@ def run_account_tuning(
         or not rsi_sell_values
         or not cooldown_values
         or not ma_type_values
+        or not min_buy_score_values
     ):
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
@@ -1449,6 +1752,16 @@ def run_account_tuning(
         logger.error("[튜닝] '%s' 유효한 티커가 없습니다.", country_code)
         return None
 
+    # 벤치마크 종목도 프리패치에 포함 (백테스트 결과 비교용)
+    benchmark_tickers = get_benchmark_tickers(account_settings)
+    if benchmark_tickers:
+        tickers_set = set(tickers)
+        for bench_ticker in benchmark_tickers:
+            if bench_ticker and bench_ticker not in tickers_set:
+                tickers.append(bench_ticker)
+                tickers_set.add(bench_ticker)
+        logger.info("[튜닝] 벤치마크 %d개 종목을 프리패치에 추가합니다: %s", len(benchmark_tickers), ", ".join(benchmark_tickers))
+
     combo_count = (
         len(ma_values)
         * len(topn_values)
@@ -1457,6 +1770,7 @@ def run_account_tuning(
         * len(rsi_sell_values)
         * len(cooldown_values)
         * len(ma_type_values)
+        * len(min_buy_score_values)
     )
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
@@ -1476,6 +1790,7 @@ def run_account_tuning(
         "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
         "COOLDOWN_DAYS": cooldown_values,
         "MA_TYPE": ma_type_values,
+        "MIN_BUY_SCORE": min_buy_score_values,
         "CORE_HOLDINGS": core_holdings,
         "OPTIMIZATION_METRIC": optimization_metric,
     }
@@ -1485,8 +1800,9 @@ def run_account_tuning(
     replace_count = len(replace_values)
     rsi_count = len(rsi_sell_values)
     cooldown_count = len(cooldown_values)
+    min_score_count = len(min_buy_score_values)
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × 교체점수 %d개 × 손절 %d개 × RSI %d개 × COOLDOWN %d개 × MA_TYPE %d개 = %d개 조합",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × 교체점수 %d개 × 손절 %d개 × RSI %d개 × COOLDOWN %d개 × MA_TYPE %d개 × MIN_SCORE %d개 = %d개 조합",
         ma_count,
         topn_count,
         replace_count,
@@ -1494,6 +1810,7 @@ def run_account_tuning(
         rsi_count,
         cooldown_count,
         len(ma_type_values),
+        min_score_count,
         combo_count,
     )
 
@@ -1576,19 +1893,20 @@ def run_account_tuning(
         end_date=date_range_prefetch[1],
         warmup_days=warmup_days,
     )
+    if missing_prefetch:
+        raise MissingPriceDataError(
+            country=country_code,
+            start_date=date_range_prefetch[0],
+            end_date=date_range_prefetch[1],
+            tickers=missing_prefetch,
+        )
     prefetched_map: Dict[str, DataFrame] = dict(prefetched)
 
-    for ticker, frame in prefetched_map.items():
-        save_cached_frame(country_code, ticker, frame)
+    if SAVE_CACHE_DURING_TUNE:
+        for ticker, frame in prefetched_map.items():
+            save_cached_frame(country_code, ticker, frame)
 
-    excluded_ticker_set: set[str] = {str(ticker).strip().upper() for ticker in missing_prefetch if isinstance(ticker, str) and str(ticker).strip()}
-    if excluded_ticker_set:
-        logger.warning(
-            "[튜닝] %s 데이터 부족으로 제외할 종목 (%d): %s",
-            account_norm.upper(),
-            len(excluded_ticker_set),
-            ", ".join(sorted(excluded_ticker_set)),
-        )
+    excluded_ticker_set: set[str] = set()
 
     if debug_dir is not None:
         _export_prefetched_data(debug_dir, prefetched_map)
@@ -1625,6 +1943,7 @@ def run_account_tuning(
             "STOP_LOSS_PCT": list(stop_loss_values),
             "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
             "COOLDOWN_DAYS": list(cooldown_values),
+            "MIN_BUY_SCORE": list(min_buy_score_values),
             "CORE_HOLDINGS": list(core_holdings) if core_holdings else [],
             "OPTIMIZATION_METRIC": optimization_metric,
         },
@@ -1637,6 +1956,8 @@ def run_account_tuning(
         "test_periods": valid_month_ranges,
         "test_period_ranges": test_period_ranges,
     }
+
+    normalized_month_items: List[Dict[str, Any]] = []
 
     for item in month_items:
         months_raw = item.get("months_range")
@@ -1684,22 +2005,64 @@ def run_account_tuning(
             end_date=adjusted_date_range[1],
             warmup_days=warmup_days,
         )
+        if additional_missing:
+            raise MissingPriceDataError(
+                country=country_code,
+                start_date=adjusted_date_range[0],
+                end_date=adjusted_date_range[1],
+                tickers=additional_missing,
+            )
         prefetched_map.update(prefetched_adjusted)
-        for ticker, frame in prefetched_adjusted.items():
-            save_cached_frame(country_code, ticker, frame)
-        missing_prefetch.extend(additional_missing)
+        if SAVE_CACHE_DURING_TUNE:
+            for ticker, frame in prefetched_adjusted.items():
+                save_cached_frame(country_code, ticker, frame)
+        normalized_month_items.append(sanitized_item)
 
-        # 최적화 지표에 따른 정렬 함수 정의
-        optimization_metric = search_space.get("OPTIMIZATION_METRIC").upper()
+    memmap_run_dir = Path(tempfile.gettempdir()) / "momentum-etf-memmap" / f"{account_norm}_{tuning_start_ts.strftime('%Y%m%d_%H%M%S')}"
+    prefetched_memmap_catalog = _persist_prefetched_memmaps(
+        account_norm,
+        prefetched_map,
+        base_dir=memmap_run_dir,
+    )
+    price_store_main = create_memmap_store(prefetched_memmap_catalog)
+    tuning_metadata["memmap_catalog"] = prefetched_memmap_catalog
 
-        def _sort_key_local(entry):
-            """최적화 지표에 따른 정렬 키"""
-            if optimization_metric == "CAGR":
-                return _safe_float(entry.get("cagr"), float("-inf"))
-            elif optimization_metric == "SHARPE":
-                return _safe_float(entry.get("sharpe"), float("-inf"))
-            else:  # SDR (default)
-                return _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
+    prefetched_trading_days = get_trading_days(
+        date_range_prefetch[0],
+        date_range_prefetch[1],
+        country_code,
+    )
+    if not prefetched_trading_days:
+        raise RuntimeError(
+            f"[튜닝] {account_norm.upper()} 기간 {date_range_prefetch[0]}~{date_range_prefetch[1]}의 거래일 정보를 로드하지 못했습니다."
+        )
+
+    ma_period_pool = sorted({int(base_rules.ma_period), *[int(v) for v in ma_values]})
+    ma_type_pool = sorted({(base_rules.ma_type or "SMA").upper(), *[(mt or "SMA").upper() for mt in ma_type_values]})
+    prefetched_metrics_map = _build_prefetched_metric_cache(
+        prefetched_map,
+        ma_periods=ma_period_pool,
+        ma_types=ma_type_pool,
+    )
+
+    if not normalized_month_items:
+        logger.warning("[튜닝] 실행 가능한 기간 항목이 없습니다.")
+        return None
+
+    # 최적화 지표에 따른 정렬 함수 정의
+    optimization_metric = search_space.get("OPTIMIZATION_METRIC").upper()
+
+    def _sort_key_local(entry):
+        """최적화 지표에 따른 정렬 키"""
+        if optimization_metric == "CAGR":
+            return _safe_float(entry.get("cagr"), float("-inf"))
+        elif optimization_metric == "SHARPE":
+            return _safe_float(entry.get("sharpe"), float("-inf"))
+        else:  # SDR (default)
+            return _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
+
+    for idx, item in enumerate(normalized_month_items, 1):
+        months_value = item.get("months_range", 0)
 
         # 중간 저장 콜백 함수 정의
         def save_progress_callback(success_entries, progress_pct, completed, total):
@@ -1726,6 +2089,7 @@ def run_account_tuning(
                             "STOP_LOSS_PCT": _round_up_float_places(entry.get("stop_loss_pct", 0.0), 1),
                             "OVERBOUGHT_SELL_THRESHOLD": int(entry.get("rsi_sell_threshold", 10)),
                             "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
+                            "MIN_BUY_SCORE": _round_up_float_places(entry["min_buy_score"], 2),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)
@@ -1755,6 +2119,11 @@ def run_account_tuning(
             prefetched_data=prefetched_map,
             output_path=txt_path,
             progress_callback=save_progress_callback,
+            prefetched_etf_universe=etf_universe,
+            prefetched_metrics=prefetched_metrics_map,
+            memmap_catalog=prefetched_memmap_catalog,
+            price_store=price_store_main,
+            trading_calendar=prefetched_trading_days,
         )
 
         if not single_result:
@@ -1780,7 +2149,7 @@ def run_account_tuning(
                 month_results=results_per_month,
                 progress_info={
                     "completed": len(results_per_month),
-                    "total": len(month_items),
+                    "total": len(normalized_month_items),
                 },
                 tuning_metadata=tuning_metadata,
             )
@@ -1788,11 +2157,17 @@ def run_account_tuning(
                 "[튜닝] %s 중간 결과 저장 완료 (%d/%d 기간)",
                 account_norm.upper(),
                 len(results_per_month),
-                len(month_items),
+                len(normalized_month_items),
             )
 
         if debug_dir is not None and capture_top_n > 0:
             raw_rows = single_result.get("raw_data") or []
+            month_start = (end_date - pd.DateOffset(months=months_value)).strftime("%Y-%m-%d")
+            month_end = end_date.strftime("%Y-%m-%d")
+            calendar_for_month = _filter_trading_days(prefetched_trading_days, month_start, month_end)
+            if calendar_for_month is None:
+                raise RuntimeError(f"[튜닝] {account_norm.upper()} ({months_value}개월) 구간의 거래일 정보를 준비하지 못했습니다.")
+
             debug_diff_rows.extend(
                 _export_debug_month(
                     debug_dir,
@@ -1801,6 +2176,10 @@ def run_account_tuning(
                     raw_rows=raw_rows,
                     prefetched_data=prefetched_map,
                     capture_top_n=capture_top_n,
+                    prefetched_etf_universe=etf_universe,
+                    prefetched_metrics=prefetched_metrics_map,
+                    price_store=price_store_main,
+                    trading_calendar=calendar_for_month,
                 )
             )
 
@@ -1890,10 +2269,14 @@ def run_account_tuning(
                 writer = csv.DictWriter(fp, fieldnames=summary_fields)
                 writer.writeheader()
                 writer.writerows(debug_diff_rows)
+    tuning_end_ts = datetime.now()
+
     report_lines = _compose_tuning_report(
         account_norm,
         month_results=results_per_month,
         tuning_metadata=tuning_metadata,
+        start_time=tuning_start_ts,
+        end_time=tuning_end_ts,
     )
 
     # Remove only the exact output file if it exists (preserve backup copies)
@@ -1912,8 +2295,15 @@ def run_account_tuning(
         print(line)
 
     logger.info("튜닝 요약을 '%s'에 기록했습니다.", txt_path)
+    elapsed = tuning_end_ts - tuning_start_ts
+    elapsed_seconds = int(elapsed.total_seconds())
+    hours = elapsed_seconds // 3600
+    minutes = (elapsed_seconds % 3600) // 60
+    seconds = elapsed_seconds % 60
+    logger.info("[튜닝] 총 소요 시간: %d시간 %d분 %d초", hours, minutes, seconds)
 
     return txt_path
 
 
 __all__ = ["run_account_tuning"]
+SAVE_CACHE_DURING_TUNE = os.environ.get("TUNE_SAVE_CACHE", "0").lower() in ("1", "true", "yes")

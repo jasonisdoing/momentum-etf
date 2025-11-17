@@ -8,13 +8,25 @@
 |-----------------|-------------------|------|
 | `logic/recommend/portfolio.py` | `logic/backtest/portfolio_runner.py` | 매매 의사결정 로직 |
 | `logic/recommend/pipeline.py` | `logic/backtest/account_runner.py` | 데이터 준비 및 실행 |
-| ❌ **없음** | `portfolio_runner.py` (23-163줄, 1303-1305줄) | 균등 비중 리밸런싱 |
+
+---
+
+## 🎯 후보군·설정 일관성
+
+1. **대표 ETF 필터링**
+   - `utils/stock_list_io.get_etfs()` 가 추천·백테스트·튜닝·캐시 갱신의 공통 진입점이다.
+   - 카테고리별로 `3_month_earn_rate` 가 가장 높은 1개만 유지하고, `config.CATEGORY_EXCEPTIONS` 에 정의된 예외 카테고리와 계좌별 벤치마크 티커는 무조건 포함한다.
+   - 어느 경로든 티커 목록이 다르면 안 되므로, 새로운 기능 추가 시 반드시 이 함수를 사용한다.
+
+2. **최소 점수( `MIN_BUY_SCORE` ) 허들**
+   - `StrategyRules.min_buy_score` 를 추천·백테스트·튜닝에서 모두 동일하게 참조한다.
+   - 점수가 임계값 미만이면 `WAIT` 상태와 `최소 X점수 미만` 문구가 표시되며, 매수/교체 로직이 바로 차단된다.
+   - 튜닝 탐색 공간에도 `MIN_BUY_SCORE` 값이 포함되어야 하며, 결과 요약/중간 보고서에 해당 값이 기록돼야 한다.
 
 ---
 
 ## ✅ 동일해야 하는 핵심 로직 (7개)
 
-> **참고:** 리밸런싱 로직은 백테스트에만 존재하며, 추천 시스템에는 없습니다. 자세한 내용은 [8. 리밸런싱 (백테스트 전용)](#8-리밸런싱-백테스트-전용)을 참고하세요.
 
 ### 1. 매도 조건 판단 순서
 
@@ -158,36 +170,9 @@ if ticker in core_holdings:
 # → 이미 보유 중이면 같은 카테고리 다른 종목 매수 불가
 ```
 
----
-
-### 8. 리밸런싱 (백테스트 전용)
-
-**규칙:** 각 주의 마지막 거래일(금요일이 휴장이라면 직전 거래일) 종가 기준으로 한 번 균등 비중으로 재조정합니다.
-
-| 항목 | 백테스트 | 추천 |
-|------|---------|------|
-| 파일 | `portfolio_runner.py` | ❌ **없음** |
-| 리밸런싱 함수 | `_rebalance_portfolio_equal_weight` | - |
-| 트리거 | `_is_weekly_rebalance_day` | - |
-
-**동작:**
-1. 주간 마지막 거래일을 판별하고 해당 날짜에만 리밸런싱 루틴을 실행한다.
-2. 목표 비중은 `총자산 / 현재 보유 종목 수`로 계산한다.
-3. 과다 비중 종목은 목표 비중까지 매도하고, 남은 현금을 과소 비중 종목에 비례 배분하여 매수한다.
-
-이 과정은 한 번의 패스로 끝나지만, 과다/과소 종목을 모두 조정하기 때문에 거의 균등 비중에 도달한다.
-
-#### ❓ 왜 추천에는 리밸런싱 로직이 없나요?
-
-**이유:**
-1. **정보 부족**: 추천 시스템은 실제 보유 수량 정보가 없어 정확한 비중 계산 불가
-2. **역할 분리**:
-   - **추천**: 어떤 종목을 사고팔지 판단 (매수/매도 신호)
-   - **백테스트**: 과거 데이터로 전략 검증 (리밸런싱 효과 측정)
-3. **실행 시스템**: 실제 리밸런싱은 별도 실행 시스템에서 처리
-
-**호환성:**
-- 추천 파이프라인은 실제 보유 수량·현금 정보를 알 수 없으므로 리밸런싱을 수행하지 않는다.
+**예외 카테고리:**
+- `config.CATEGORY_EXCEPTIONS` 에 정의된 카테고리는 중복 제한에서 제외됨
+- 예외 카테고리 확인: `logic.common.portfolio.is_category_exception()` 함수 사용
 
 ---
 
@@ -269,12 +254,6 @@ python tune.py k1
 - [ ] `portfolio_runner.py` 783-785줄 동일하게 수정
 - [ ] `MAX_PER_CATEGORY` 설정 확인
 
-**리밸런싱 로직 수정 시:**
-- [ ] `portfolio_runner.py` 23-163줄, 1303-1305줄 수정
-- [ ] ⚠️ **추천 시스템은 수정하지 않음** (리밸런싱 로직 없음)
-
----
-
 ## 📦 공통 함수 (logic/common/)
 
 추천과 백테스트에서 공통으로 사용하는 헬퍼 함수들입니다.
@@ -283,6 +262,7 @@ python tune.py k1
 
 | 함수 | 설명 | 사용처 |
 |------|------|--------|
+| `is_category_exception()` | 카테고리가 중복 제한 예외인지 확인 | 추천, 백테스트 |
 | `get_held_categories_excluding_sells()` | 매도 예정 종목을 제외한 보유 카테고리 계산 | 추천, 백테스트 |
 | `should_exclude_from_category_count()` | 카테고리 카운트 제외 여부 확인 | 추천, 백테스트 |
 | `get_sell_states()` | 매도 상태 집합 반환 | 추천, 백테스트 |
@@ -382,6 +362,9 @@ def run_portfolio_backtest(
     date_range: Optional[List[str]] = None,
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
+    price_store: Optional[MemmapPriceStore] = None,
+    trading_calendar: Sequence[pd.Timestamp],
     ma_period: int = 20,
     ma_type: str = "SMA",
     replace_threshold: float = 0.0,
@@ -392,8 +375,13 @@ def run_portfolio_backtest(
     quiet: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     missing_ticker_sink: Optional[Set[str]] = None,
+    *,
+    min_buy_score: float,
 ) -> Dict[str, pd.DataFrame]
 ```
+
+- `trading_calendar`는 필수이며, `date_range` 전체를 덮는 거래일 리스트를 호출자가 프리패치 단계에서 준비해 전달해야 한다. 내부에서는 더 이상 `get_trading_days()`로 보조 조회를 하지 않는다.
+- `prefetched_data`/`prefetched_metrics`/`price_store`도 반드시 준비된 상태여야 하며, 백테스트 중에는 원본 데이터 소스(Mongo/pykrx)를 호출하지 않는다. 부족 데이터가 발견되면 즉시 실패한다.
 
 ## 📚 참고
 

@@ -74,7 +74,7 @@ def load_account_recommendations(
     return df, updated_at, str(loaded_country_code or country_code)
 
 
-TABLE_VISIBLE_ROWS = 16  # 헤더 1줄 + 내용 15줄
+TABLE_VISIBLE_ROWS = 26  # 헤더 1줄 + 내용 15줄
 TABLE_ROW_HEIGHT = 35
 TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT
 

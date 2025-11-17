@@ -8,14 +8,14 @@ import time
 from datetime import datetime, timedelta, time as dt_time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
 import config
 
 # 데이터 디렉토리 경로 설정
-DATA_DIR = Path(__file__).parent.parent.parent / "data" / "stocks"
+STOCKS_DIR = Path(__file__).resolve().parents[2] / "zsettings" / "stocks"
 from utils.settings_loader import (
     AccountSettingsError,
     get_account_settings,
@@ -24,21 +24,29 @@ from utils.settings_loader import (
     resolve_strategy_params,
 )
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
-from logic.common import sort_decisions_by_order_and_score, filter_category_duplicates
+from logic.common import (
+    sort_decisions_by_order_and_score,
+    filter_category_duplicates,
+    get_buy_signal_streak,
+    is_category_exception,
+)
 from strategies.maps.history import (
     calculate_consecutive_holding_info,
     calculate_trade_cooldown_info,
 )
 from utils.stock_list_io import get_etfs
 from utils.data_loader import (
-    fetch_ohlcv,
     prepare_price_data,
     get_latest_trading_day,
     get_next_trading_day,
     count_trading_days,
     fetch_naver_etf_inav_snapshot,
     get_trading_days,
+    MissingPriceDataError,
 )
+from utils.indicators import calculate_ma_score
+from utils.moving_averages import calculate_moving_average
+from strategies.rsi.recommend import calculate_rsi_for_ticker
 from utils.db_manager import get_db_connection, list_open_positions
 from utils.logger import get_app_logger
 from utils.market_schedule import get_market_open_time
@@ -110,7 +118,7 @@ class _TickerScore:
 def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
     """Load metadata for all ETFs including recommend_disabled ones."""
 
-    file_path = DATA_DIR / f"{country_code}.json"
+    file_path = STOCKS_DIR / f"{country_code}.json"
     if not file_path.exists():
         return {}
 
@@ -132,7 +140,9 @@ def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
         raw_category = block.get("category")
         if isinstance(raw_category, (list, set, tuple)):
             raw_category = next(iter(raw_category), "") if raw_category else ""
-        category_name = str(raw_category or "TBD").strip() or "TBD"
+        category_name = str(raw_category or "").strip()
+        if not category_name:
+            raise ValueError(f"카테고리 블록에 카테고리 이름이 없습니다. 모든 카테고리 블록은 'category' 필드가 있어야 합니다.")
 
         tickers = block.get("tickers") or []
         if not isinstance(tickers, list):
@@ -149,7 +159,9 @@ def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
             raw_item_category = item.get("category", category_name)
             if isinstance(raw_item_category, (list, set, tuple)):
                 raw_item_category = next(iter(raw_item_category), "") if raw_item_category else ""
-            item_category = str(raw_item_category or category_name or "TBD").strip() or "TBD"
+            item_category = str(raw_item_category or category_name or "").strip()
+            if not item_category:
+                raise ValueError(f"종목 {ticker}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
 
             name = str(item.get("name") or ticker).strip() or ticker
 
@@ -169,17 +181,24 @@ def _fetch_dataframe(
     ma_period: int,
     base_date: Optional[pd.Timestamp],
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
+    data_window: Optional[tuple[str, str]] = None,
 ) -> Optional[pd.DataFrame]:
+    window_start: Optional[str]
+    window_end: Optional[str]
+    if data_window:
+        window_start, window_end = data_window
+    else:
+        window_start = None
+        window_end = None
     try:
         if prefetched_data and ticker in prefetched_data:
             df = prefetched_data[ticker]
         else:
-            months_back = max(12, ma_period)  # 최소 1년치 데이터 요청
-            df = fetch_ohlcv(
-                ticker,
+            raise MissingPriceDataError(
                 country=country,
-                months_back=months_back,
-                base_date=base_date,
+                start_date=window_start,
+                end_date=window_end or (base_date.strftime("%Y-%m-%d") if base_date is not None else None),
+                tickers=[ticker],
             )
 
         if df is None or df.empty:
@@ -350,15 +369,8 @@ def _resolve_base_date(account_id: str, date_str: Optional[str]) -> pd.Timestamp
     else:
         account_settings = get_account_settings(account_id)
         country_code = (account_settings.get("country_code") or account_id).strip().lower()
-        today_norm = pd.Timestamp.now().normalize()
         latest_trading_day = get_latest_trading_day(country_code)
-        latest_norm = latest_trading_day.normalize()
-
-        if latest_norm >= today_norm:
-            base = latest_norm
-        else:
-            next_trading_day = get_next_trading_day(country_code, reference_date=today_norm)
-            base = next_trading_day if next_trading_day is not None else latest_norm
+        base = latest_trading_day.normalize()
 
     return base.normalize()
 
@@ -411,6 +423,18 @@ def _format_sell_replace_phrase(phrase: str, *, etf_meta: Dict[str, Dict[str, An
     target_name = target_meta.get("name") or target_ticker
 
     return f"교체매도 {ratio_text} - {target_name}({target_ticker})로 교체"
+
+
+def _format_min_score_phrase(score_value: Optional[float], min_buy_score: float) -> str:
+    template = DECISION_NOTES.get("MIN_SCORE", "최소 {min_buy_score:.1f}점수 미만")
+    try:
+        base = template.format(min_buy_score=min_buy_score)
+    except Exception:
+        base = f"최소 {min_buy_score:.1f}점수 미만"
+
+    if score_value is None or pd.isna(score_value):
+        return f"{base} (현재 점수 없음)"
+    return f"{base} (현재 {score_value:.1f})"
 
 
 def _normalize_buy_date(value: Any) -> Optional[pd.Timestamp]:
@@ -491,7 +515,8 @@ def _compute_trailing_return(
     if valid.empty:
         return 0.0
 
-    if len(valid) <= periods_back:
+    # 데이터가 충분하지 않으면 0.0 반환 (최소 periods_back + 1개 필요)
+    if len(valid) < periods_back + 1:
         return 0.0
 
     try:
@@ -504,6 +529,105 @@ def _compute_trailing_return(
         return 0.0
 
     return round(((latest_price / prev_price) - 1.0) * 100.0, 2)
+
+
+def _build_ticker_timeseries_entry(
+    *,
+    ticker: str,
+    df: pd.DataFrame,
+    country_code: str,
+    base_date: pd.Timestamp,
+    ma_period: int,
+    ma_type: str,
+    min_buy_score: float,
+    realtime_inav_snapshot: Optional[Dict[str, Dict[str, float]]] = None,
+) -> Optional[Dict[str, Any]]:
+    """대표군 여부와 상관없이 동일한 방식으로 점수/지표를 계산합니다."""
+
+    ticker_upper = str(ticker or "").strip().upper()
+    if not ticker_upper or df is None or df.empty:
+        return None
+
+    df_sorted = df.sort_index()
+    price_series = _select_price_series(df_sorted, country_code)
+    if price_series is None or price_series.empty:
+        return None
+    price_series = price_series.dropna()
+    if price_series.empty:
+        return None
+
+    market_series = pd.to_numeric(df_sorted.get("Close"), errors="coerce") if "Close" in df_sorted.columns else price_series
+    market_series = market_series.fillna(method="ffill").fillna(method="bfill")
+
+    base_date_norm = pd.to_datetime(base_date).normalize()
+    latest_data_date = pd.to_datetime(df_sorted.index[-1]).normalize()
+    if latest_data_date >= base_date_norm and len(market_series) > 1:
+        market_prev = float(market_series.iloc[-2])
+    else:
+        market_prev = float(market_series.iloc[-1]) if not market_series.empty else None
+
+    market_latest = float(market_series.iloc[-1]) if not market_series.empty else None
+    nav_latest: Optional[float] = None
+    price_deviation: Optional[float] = None
+    daily_pct = 0.0
+
+    country_lower = (country_code or "").strip().lower()
+    is_kor_market = country_lower in {"kr", "kor"}
+    snapshot_entry = realtime_inav_snapshot.get(ticker_upper) if realtime_inav_snapshot else None
+
+    if is_kor_market and snapshot_entry:
+        price_candidate = snapshot_entry.get("nowVal")
+        if isinstance(price_candidate, (int, float)) and price_candidate > 0:
+            market_latest = float(price_candidate)
+
+        nav_candidate = snapshot_entry.get("nav")
+        if isinstance(nav_candidate, (int, float)) and nav_candidate > 0:
+            nav_latest = float(nav_candidate)
+
+        deviation_raw = snapshot_entry.get("deviation")
+        if isinstance(deviation_raw, (int, float)):
+            price_deviation = round(float(deviation_raw), 2)
+
+    if market_latest and market_prev and market_prev > 0:
+        try:
+            daily_pct = ((market_latest / market_prev) - 1.0) * 100
+        except ZeroDivisionError:
+            daily_pct = 0.0
+
+    if is_kor_market and not snapshot_entry:
+        nav_latest = None
+        price_deviation = None
+
+    moving_average = calculate_moving_average(price_series, ma_period, ma_type)
+    ma_score_series = calculate_ma_score(price_series, moving_average)
+    score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
+    consecutive_buy_days = get_buy_signal_streak(score_value, ma_score_series, min_buy_score)
+
+    rsi_score = calculate_rsi_for_ticker(price_series)
+    if rsi_score == 0.0 and len(price_series) < 15:
+        logger.warning(f"[RSI] {ticker_upper} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
+
+    recent_prices = market_series.tail(15)
+    trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
+
+    return {
+        "price": market_latest,
+        "nav_price": nav_latest,
+        "prev_close": market_prev if market_prev is not None else market_latest,
+        "daily_pct": round(daily_pct, 2),
+        "close": price_series,
+        "s1": moving_average.iloc[-1] if not moving_average.empty else None,
+        "s2": None,
+        "score": score_value,
+        "rsi_score": rsi_score,
+        "filter": consecutive_buy_days,
+        "ret_1w": _compute_trailing_return(price_series, 5),
+        "ret_2w": _compute_trailing_return(price_series, 10),
+        "ret_3w": _compute_trailing_return(price_series, 15),
+        "trend_prices": trend_prices,
+        "price_deviation": price_deviation,
+        "ma_period": ma_period,
+    }
 
 
 def _fetch_trades_for_date(account_id: str, base_date: pd.Timestamp) -> List[Dict[str, Any]]:
@@ -565,6 +689,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         strategy_cfg = {}
 
     strategy_tuning = resolve_strategy_params(strategy_cfg)
+    min_buy_score = float(strategy_rules.min_buy_score)
 
     # 검증은 get_account_strategy_sections에서 이미 완료됨 - 바로 사용
     max_per_category = config.MAX_PER_CATEGORY
@@ -577,8 +702,30 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         account_id.upper(),
         len(etf_universe),
     )
+    raw_full_meta = _load_full_etf_meta(country_code)
+    full_meta_map: Dict[str, Dict[str, Any]] = {}
+    for ticker, meta in raw_full_meta.items():
+        norm = str(ticker or "").strip().upper()
+        if not norm:
+            continue
+        entry = dict(meta)
+        entry["ticker"] = norm
+        entry.setdefault("name", norm)
+        if "category" not in entry or not entry["category"]:
+            raise ValueError(f"종목 {norm}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
+        full_meta_map[norm] = entry
+
     disabled_tickers = {str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if not bool(stock.get("recommend_enabled", True))}
-    pairs = [(stock.get("ticker"), stock.get("name")) for stock in etf_universe if stock.get("ticker")]
+    pairs: List[Tuple[str, str]] = []
+    pair_seen: Set[str] = set()
+    for stock in etf_universe:
+        ticker_value = stock.get("ticker")
+        if not ticker_value:
+            continue
+        ticker_upper = str(ticker_value).strip().upper()
+        name_value = stock.get("name") or ticker_upper
+        pairs.append((ticker_upper, name_value))
+        pair_seen.add(ticker_upper)
 
     # 실제 포트폴리오 데이터 준비
     holdings: Dict[str, Dict[str, float]] = {}
@@ -614,12 +761,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         # 종목명과 티커를 함께 표시
         holdings_display = []
         for ticker in sorted(holdings.keys()):
-            # etf_universe에서 종목명 찾기
-            name = ticker
-            for stock in etf_universe:
-                if stock.get("ticker", "").upper() == ticker:
-                    name = stock.get("name") or ticker
-                    break
+            meta_entry = full_meta_map.get(ticker) or {}
+            name = meta_entry.get("name") or ticker
             holdings_display.append(f"{name}({ticker})")
 
         logger.info(
@@ -639,8 +782,45 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     current_equity = 100_000_000  # 임시값
     total_cash = 100_000_000  # 임시값
 
+    # 당일 거래 내역 확보 (SOLD 표시용)
+    trades_today = _fetch_trades_for_date(account_id, base_date)
+
+    rep_ticker_set = {str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if stock.get("ticker")}
+
+    # 보유/거래 티커를 pairs에만 포함
+    def _ensure_additional_pair(ticker: Any) -> None:
+        text = str(ticker or "").strip().upper()
+        if not text:
+            return
+        if text not in pair_seen:
+            meta_entry = full_meta_map.get(text, {})
+            name_value = meta_entry.get("name") or text
+            pairs.append((text, name_value))
+            pair_seen.add(text)
+
+    for held_ticker in holdings.keys():
+        _ensure_additional_pair(held_ticker)
+    for trade_entry in trades_today:
+        _ensure_additional_pair(trade_entry.get("ticker"))
+
     # 각 티커의 현재 데이터 준비 (실제 OHLCV 데이터 사용)
-    tickers_all = [stock.get("ticker") for stock in etf_universe if stock.get("ticker")]
+    tickers_all: List[str] = []
+    tickers_seen: Set[str] = set()
+
+    def _append_prefetch_ticker(raw: Any) -> None:
+        text = str(raw or "").strip().upper()
+        if not text or text in tickers_seen:
+            return
+        tickers_seen.add(text)
+        tickers_all.append(text)
+
+    for stock in etf_universe:
+        _append_prefetch_ticker(stock.get("ticker"))
+    for ticker_key in holdings.keys():
+        _append_prefetch_ticker(ticker_key)
+    for trade_entry in trades_today:
+        _append_prefetch_ticker(trade_entry.get("ticker"))
+
     prefetched_data: Dict[str, pd.DataFrame] = {}
     months_back = max(12, ma_period)
     warmup_days = int(max(ma_period, 1) * 1.5)
@@ -657,6 +837,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             pass
     start_date = prefetch_start_dt.strftime("%Y-%m-%d")
     end_date = base_date.strftime("%Y-%m-%d")
+    primary_tickers = [ticker for ticker in tickers_all if ticker in rep_ticker_set]
+    extra_tickers = [ticker for ticker in tickers_all if ticker not in rep_ticker_set]
+
     logger.info(
         "[%s] 가격 데이터 로딩 시작 (기간 %s~%s, 대상 %d개)",
         account_id.upper(),
@@ -665,143 +848,95 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         len(tickers_all),
     )
     fetch_start = time.perf_counter()
-    prefetched_data, missing_prefetch = prepare_price_data(
-        tickers=tickers_all,
-        country=country_code,
-        start_date=start_date,
-        end_date=end_date,
-        warmup_days=warmup_days,
-    )
+    prefetched_data: Dict[str, pd.DataFrame] = {}
+
+    if primary_tickers:
+        pref_primary, missing_primary = prepare_price_data(
+            tickers=primary_tickers,
+            country=country_code,
+            start_date=start_date,
+            end_date=end_date,
+            warmup_days=warmup_days,
+            allow_remote_fetch=True,  # 캐시가 없으면 원격 조회 허용 (1,2,3주 수익률 계산을 위해 필요)
+        )
+        if missing_primary:
+            raise MissingPriceDataError(
+                country=country_code,
+                start_date=start_date,
+                end_date=end_date,
+                tickers=missing_primary,
+            )
+        prefetched_data.update(pref_primary)
+
+    if extra_tickers:
+        pref_extra, missing_extra = prepare_price_data(
+            tickers=extra_tickers,
+            country=country_code,
+            start_date=start_date,
+            end_date=end_date,
+            warmup_days=warmup_days,
+            allow_remote_fetch=True,
+        )
+        if missing_extra:
+            raise MissingPriceDataError(
+                country=country_code,
+                start_date=start_date,
+                end_date=end_date,
+                tickers=missing_extra,
+            )
+        prefetched_data.update(pref_extra)
     logger.info(
         "[%s] 가격 데이터 로딩 완료 (%.1fs)",
         account_id.upper(),
         time.perf_counter() - fetch_start,
     )
-    missing_logged = set(missing_prefetch)
-    if missing_prefetch:
-        logger.warning(
-            "[%s] 다음 종목의 가격 데이터를 확보하지 못해 제외합니다: %s",
-            account_id.upper(),
-            ", ".join(sorted(missing_logged)),
-        )
 
-    data_by_tkr = {}
-    realtime_inav_snapshot: Dict[str, Dict[str, float]] = {}
+    data_by_tkr: Dict[str, Dict[str, Any]] = {}
     country_lower = (country_code or "").strip().lower()
     is_kor_market = country_lower in {"kr", "kor"}
-    if is_kor_market:
+    realtime_inav_snapshot: Dict[str, Dict[str, float]] = {}
+    snapshot_targets = (
+        [t for t in tickers_all if t]
+        if tickers_all
+        else [str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if stock.get("ticker")]
+    )
+    if is_kor_market and snapshot_targets:
         try:
-            realtime_inav_snapshot = fetch_naver_etf_inav_snapshot([stock["ticker"] for stock in etf_universe])
+            realtime_inav_snapshot = fetch_naver_etf_inav_snapshot(snapshot_targets)
         except Exception as exc:
             logger.warning("[KOR] 네이버 iNAV 스냅샷 조회 실패: %s", exc)
             realtime_inav_snapshot = {}
-    missing_data_tickers: List[str] = list(missing_prefetch)
-    for stock in etf_universe:
-        ticker = stock["ticker"]
-        # 실제 데이터 가져오기
+
+    missing_data_tickers: List[str] = []
+    missing_logged: Set[str] = set()
+    for ticker in sorted(tickers_seen):
         df = _fetch_dataframe(
             ticker,
             country=country_code,
             ma_period=ma_period,
             base_date=base_date,
             prefetched_data=prefetched_data,
+            data_window=(start_date, end_date),
         )
-        if df is not None and not df.empty:
-            price_series = _select_price_series(df, country_code)
-            score_latest = float(price_series.iloc[-1])
-
-            market_series = pd.to_numeric(df.get("Close"), errors="coerce") if "Close" in df.columns else price_series
-            market_series = market_series.fillna(method="ffill").fillna(method="bfill")
-
-            # 데이터의 최신 날짜 추출
-            latest_data_date = pd.to_datetime(df.index[-1]).normalize()
-            base_date_norm = pd.to_datetime(base_date).normalize()
-
-            # 전일 종가 (일간 수익률 계산용)
-            # 캐시에 오늘 데이터가 있으면 전일(iloc[-2]), 없으면 마지막(iloc[-1])
-            if latest_data_date >= base_date_norm and len(market_series) > 1:
-                market_prev = float(market_series.iloc[-2])
-            else:
-                market_prev = float(market_series.iloc[-1]) if not market_series.empty else score_latest
-
-            # 한국 시장: 현재가, NAV, 일간 수익률은 네이버 API만 사용 (fallback 없음)
-            market_latest: Optional[float] = None
-            nav_latest: Optional[float] = None
-            daily_pct = 0.0
-
-            if is_kor_market:
-                ticker_key_upper = str(ticker).strip().upper()
-                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
-                if realtime_entry:
-                    # 현재가
-                    price_candidate = realtime_entry.get("nowVal")
-                    if isinstance(price_candidate, (int, float)) and price_candidate > 0:
-                        market_latest = float(price_candidate)
-
-                    # NAV
-                    nav_candidate = realtime_entry.get("nav")
-                    if isinstance(nav_candidate, (int, float)) and nav_candidate > 0:
-                        nav_latest = float(nav_candidate)
-
-                    # 일간 수익률 (현재가 / 전일 종가 - 1)
-                    if market_latest and market_prev and market_prev > 0:
-                        daily_pct = ((market_latest / market_prev) - 1.0) * 100
-            else:
-                # 해외 시장: 캐시 데이터 사용
-                market_latest = float(market_series.iloc[-1]) if not market_series.empty else score_latest
-                market_prev_for_calc = float(market_series.iloc[-2]) if len(market_series) > 1 else market_latest
-
-                latest_data_date = pd.to_datetime(df.index[-1]).normalize()
-                if latest_data_date >= base_date and market_prev_for_calc and market_prev_for_calc > 0:
-                    daily_pct = ((market_latest / market_prev_for_calc) - 1.0) * 100
-
-            from utils.indicators import calculate_ma_score
-            from utils.moving_averages import calculate_moving_average
-            from logic.common import get_buy_signal_streak
-
-            moving_average = calculate_moving_average(price_series, ma_period, ma_type)
-            ma_score_series = calculate_ma_score(price_series, moving_average, normalize=False)
-            score = ma_score_series.iloc[-1] if not ma_score_series.empty else 0.0
-            consecutive_buy_days = get_buy_signal_streak(score, ma_score_series)
-
-            from strategies.rsi.recommend import calculate_rsi_for_ticker
-
-            rsi_score = calculate_rsi_for_ticker(price_series)
-            if rsi_score == 0.0 and len(price_series) < 15:
-                logger.warning(f"[RSI] {ticker} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
-
-            recent_prices = market_series.tail(15)
-            trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
-
-            price_deviation: Optional[float] = None
-            if is_kor_market:
-                # 괴리율은 네이버 API의 실시간 데이터만 사용
-                ticker_key_upper = str(ticker).strip().upper()
-                realtime_entry = realtime_inav_snapshot.get(ticker_key_upper)
-                if realtime_entry:
-                    deviation_raw = realtime_entry.get("deviation")
-                    if isinstance(deviation_raw, (int, float)):
-                        price_deviation = round(float(deviation_raw), 2)
-
-            data_by_tkr[ticker] = {
-                "price": market_latest,
-                "nav_price": nav_latest,
-                "prev_close": market_prev,
-                "daily_pct": round(daily_pct, 2),
-                "close": price_series,
-                "s1": moving_average.iloc[-1] if not moving_average.empty else None,
-                "s2": None,
-                "score": score,
-                "rsi_score": rsi_score,
-                "filter": consecutive_buy_days,
-                "ret_1w": _compute_trailing_return(price_series, 5),
-                "ret_2w": _compute_trailing_return(price_series, 10),
-                "ret_3w": _compute_trailing_return(price_series, 15),
-                "trend_prices": trend_prices,
-                "price_deviation": price_deviation if is_kor_market else None,
-            }
-        else:
+        if df is None or df.empty:
             missing_data_tickers.append(ticker)
+            continue
+
+        entry = _build_ticker_timeseries_entry(
+            ticker=ticker,
+            df=df,
+            country_code=country_code,
+            base_date=base_date,
+            ma_period=ma_period,
+            ma_type=ma_type,
+            min_buy_score=min_buy_score,
+            realtime_inav_snapshot=realtime_inav_snapshot if is_kor_market else None,
+        )
+        if entry is None:
+            missing_data_tickers.append(ticker)
+            continue
+
+        data_by_tkr[ticker] = entry
 
     if missing_data_tickers:
         extra_missing = set(missing_data_tickers) - missing_logged
@@ -815,13 +950,31 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     # 쿨다운 정보 계산
     trade_cooldown_info = calculate_trade_cooldown_info(
-        [stock["ticker"] for stock in etf_universe],
+        sorted(tickers_seen),
         account_id,
         base_date.to_pydatetime(),
         country_code=country_code,
     )
 
     # generate_daily_recommendations_for_portfolio 호출
+    etf_meta_map: Dict[str, Dict[str, Any]] = {}
+    for stock in etf_universe:
+        ticker_value = stock.get("ticker")
+        ticker_upper = str(ticker_value or "").strip().upper()
+        if not ticker_upper:
+            continue
+        entry = dict(stock)
+        entry["ticker"] = ticker_upper
+        entry.setdefault("name", ticker_upper)
+        category = stock.get("category") or ""
+        if not str(category).strip():
+            raise ValueError(f"종목 {ticker_upper}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
+        entry.setdefault("category", category)
+        etf_meta_map[ticker_upper] = entry
+    for ticker_upper, meta in full_meta_map.items():
+        if ticker_upper not in etf_meta_map:
+            etf_meta_map[ticker_upper] = dict(meta)
+
     try:
         from strategies.maps import safe_generate_daily_recommendations_for_portfolio
 
@@ -841,8 +994,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             strategy_rules=strategy_rules,
             data_by_tkr=data_by_tkr,
             holdings=holdings,
-            etf_meta={stock["ticker"]: stock for stock in etf_universe},
-            full_etf_meta={stock["ticker"]: stock for stock in etf_universe},
+            etf_meta=etf_meta_map,
+            full_etf_meta=full_meta_map,
             current_equity=current_equity,
             total_cash=total_cash,
             pairs=pairs,
@@ -862,7 +1015,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         return []
 
     # 당일 SELL 트레이드를 결과에 추가하여 SOLD 상태로 노출
-    trades_today = _fetch_trades_for_date(account_id, base_date)
     sold_entries: List[Dict[str, Any]] = []
     buy_traded_today: set[str] = set()
     sell_traded_today: set[str] = set()
@@ -910,6 +1062,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                     (stock for stock in etf_universe if stock.get("ticker", "").upper() == ticker),
                     None,
                 )
+                if not meta_info:
+                    meta_info = full_meta_map.get(ticker) or full_meta_map.get(ticker.upper())
                 if meta_info:
                     name = meta_info.get("name") or name
                 else:
@@ -964,30 +1118,13 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             continue
 
     # 결과 포맷팅
-    etf_meta_map: Dict[str, Dict[str, Any]] = {}
-    for stock in etf_universe:
-        ticker = stock.get("ticker")
-        if not ticker:
-            continue
-        upper = str(ticker).upper()
-        etf_meta_map[upper] = {
-            "ticker": upper,
-            "name": stock.get("name") or upper,
-            "category": stock.get("category") or "TBD",
-        }
-
-    # 추천 비활성 티커도 메타데이터 보완용으로 포함한다
-    full_meta_map = _load_full_etf_meta(country_code)
-    for ticker, meta in full_meta_map.items():
-        upper_ticker = ticker.upper()
-        if upper_ticker not in etf_meta_map:
-            etf_meta_map[upper_ticker] = {
-                "ticker": upper_ticker,
-                "name": meta.get("name") or upper_ticker,
-                "category": meta.get("category") or "TBD",
-            }
-
     disabled_note = DECISION_NOTES.get("NO_RECOMMEND", "추천 제외")
+    held_category_names: Set[str] = set()
+    for held_ticker in holdings.keys():
+        meta_info = etf_meta_map.get(held_ticker) or {}
+        category_value = meta_info.get("category")
+        if category_value and not is_category_exception(category_value):
+            held_category_names.add(str(category_value).strip())
     results = []
     for decision in decisions:
         ticker = decision["tkr"]
@@ -997,6 +1134,15 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         is_currently_held = ticker in holdings
 
         state = raw_state
+        if state in {"BUY", "BUY_REPLACE"}:
+            score_val_final = decision.get("score", float("nan"))
+            if pd.isna(score_val_final) or score_val_final <= min_buy_score:
+                state = "WAIT"
+                if decision.get("row"):
+                    decision["row"][4] = "WAIT"
+                    decision["row"][-1] = _format_min_score_phrase(score_val_final, min_buy_score)
+                    phrase = decision["row"][-1]
+                decision["buy_signal"] = False
         if is_currently_held and raw_state in {"WAIT"}:
             state = "HOLD"
 
@@ -1009,7 +1155,9 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
         meta_info = etf_meta_map.get(ticker) or {}
         name = meta_info.get("name", ticker)
-        category = meta_info.get("category", "TBD")
+        category = meta_info.get("category")
+        if not category:
+            raise ValueError(f"종목 {ticker}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
         ticker_upper = str(ticker).upper()
         recommend_enabled = ticker_upper not in disabled_tickers
 
@@ -1179,8 +1327,27 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
         results.append(result_entry)
 
+    for entry in results:
+        if entry.get("state") in {"BUY", "BUY_REPLACE"}:
+            score_val_final = entry.get("score", float("nan"))
+            if pd.isna(score_val_final) or score_val_final <= min_buy_score:
+                entry["state"] = "WAIT"
+                entry["phrase"] = _format_min_score_phrase(score_val_final, min_buy_score)
+
+        if entry.get("state") == "WAIT" and not entry.get("phrase"):
+            category_value = str(entry.get("category") or "").strip()
+            if category_value and category_value in held_category_names:
+                entry["phrase"] = DECISION_NOTES.get("CATEGORY_DUP", "")
+
     # BUY 종목 생성: 상위 점수의 WAIT 종목들을 BUY로 변경
-    wait_items = [item for item in results if item["state"] == "WAIT" and item.get("recommend_enabled", True)]
+    wait_items = [
+        item
+        for item in results
+        if item["state"] == "WAIT"
+        and item.get("recommend_enabled", True)
+        and not pd.isna(item.get("score"))
+        and item.get("score", float("nan")) > min_buy_score
+    ]
     # MAPS 점수 기반 정렬
     wait_items.sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
@@ -1217,7 +1384,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     for item in results:
         if item["state"] == "SELL_RSI":
             category = item.get("category")
-            if category and category != "TBD":
+            if category and not is_category_exception(category):
                 sell_rsi_categories.add(category)
                 logger.info(f"[PIPELINE SELL_RSI CAT] {item.get('ticker')} SELL_RSI로 '{category}' 카테고리 추가")
         elif item["state"] == "SOLD":
@@ -1226,7 +1393,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             rsi_score = item.get("rsi_score", 0.0)
             if original_state == "SELL_RSI" or rsi_score >= rsi_sell_threshold:
                 category = item.get("category")
-                if category and category != "TBD":
+                if category and not is_category_exception(category):
                     sell_rsi_categories.add(category)
                     logger.info(
                         f"[PIPELINE SOLD RSI CAT] {item.get('ticker')} SOLD(original={original_state}, RSI={rsi_score:.1f})로 '{category}' 카테고리 추가"
@@ -1236,7 +1403,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     for item in results:
         if item["state"] in {"BUY", "BUY_REPLACE"}:
             category = item.get("category")
-            if category and category != "TBD" and category in sell_rsi_categories:
+            if category and not is_category_exception(category) and category in sell_rsi_categories:
                 logger.info(f"[PIPELINE BUY REVERTED] {item.get('ticker')} BUY→WAIT 변경 - '{category}' 카테고리가 SELL_RSI로 매도됨")
                 item["state"] = "WAIT"
                 item["phrase"] = f"RSI 과매수 매도 카테고리 ({category})"
@@ -1261,7 +1428,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         category_key = _normalize_category_value(category_raw)
 
         # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
-        if category and category != "TBD" and category in sell_rsi_categories:
+        if category and not is_category_exception(category) and category in sell_rsi_categories:
             logger.info(f"[PIPELINE BUY BLOCKED] {item.get('ticker')} 매수 차단 - '{category}' 카테고리가 SELL_RSI로 매도됨")
             continue
 
@@ -1341,10 +1508,6 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
     # 카테고리별 최고 점수만 표시 (교체 매매 제외)
     results = filter_category_duplicates(results, category_key_getter=_normalize_category_value)
-
-    # 점수가 음수인 종목 제외 (단, 보유/매도 종목은 유지)
-    holding_states = {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_RSI", "SELL_REPLACE", "CUT_STOPLOSS", "SOLD"}
-    results = [item for item in results if item.get("score", 0.0) >= 0 or item.get("state") in holding_states]
 
     # rank 재설정
     for i, item in enumerate(results, 1):

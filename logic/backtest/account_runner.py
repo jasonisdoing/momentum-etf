@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Collection, Dict, Mapping, Optional, List, Tuple
+from typing import Any, Collection, Dict, Mapping, Optional, List, Sequence, Tuple
 import math
 
 import pandas as pd
@@ -18,9 +18,10 @@ from utils.settings_loader import (
     get_strategy_rules,
     resolve_strategy_params,
 )
-from utils.data_loader import get_latest_trading_day, fetch_ohlcv
+from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.stock_list_io import get_etfs
 from utils.logger import get_app_logger
+from utils.memmap_store import MemmapPriceStore
 
 
 @dataclass
@@ -98,6 +99,10 @@ def run_account_backtest(
     override_settings: Optional[Dict[str, Any]] = None,
     strategy_override: Optional[StrategyRules] = None,  # type: ignore
     excluded_tickers: Optional[Collection[str]] = None,
+    prefetched_etf_universe: Optional[Sequence[Mapping[str, Any]]] = None,
+    prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
+    price_store: Optional[MemmapPriceStore] = None,
+    trading_calendar: Optional[Sequence[pd.Timestamp]] = None,
 ) -> AccountBacktestResult:
     """계정 ID를 기반으로 백테스트를 실행합니다."""
 
@@ -140,6 +145,7 @@ def run_account_backtest(
             ma_type=strategy_override.ma_type,
             core_holdings=strategy_override.core_holdings,
             stop_loss_pct=strategy_override.stop_loss_pct,
+            min_buy_score=strategy_override.min_buy_score,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
@@ -148,6 +154,7 @@ def run_account_backtest(
         strategy_settings["CORE_HOLDINGS"] = strategy_rules.core_holdings
         if strategy_rules.stop_loss_pct is not None:
             strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
+        strategy_settings["MIN_BUY_SCORE"] = strategy_rules.min_buy_score
 
     months_range = _resolve_months_range(months_range, override_settings, account_settings)
     end_date = _resolve_end_date(country_code, override_settings)
@@ -166,7 +173,11 @@ def run_account_backtest(
     if excluded_tickers:
         excluded_upper = {str(ticker).strip().upper() for ticker in excluded_tickers if isinstance(ticker, str) and str(ticker).strip()}
 
-    etf_universe = get_etfs(country_code)
+    if prefetched_etf_universe is not None:
+        etf_universe = [dict(stock) for stock in prefetched_etf_universe if isinstance(stock, Mapping)]
+        _log(f"[백테스트] 사전 추려진 ETF 대표군 {len(etf_universe)}개를 재사용합니다.")
+    else:
+        etf_universe = get_etfs(country_code)
     if not etf_universe:
         raise AccountSettingsError(f"'zsettings/stocks/{country_code}.json' 파일에서 종목을 찾을 수 없습니다.")
 
@@ -194,6 +205,8 @@ def run_account_backtest(
         strategy_rules=strategy_rules,
         strategy_settings=strategy_settings,
         prefetched_data=prefetched_data,
+        prefetched_metrics=prefetched_metrics,
+        price_store=price_store,
         quiet=quiet,
     )
 
@@ -215,6 +228,24 @@ def run_account_backtest(
     _log("[백테스트] 포트폴리오 백테스트 실행 중...")
     runtime_missing_tickers: set[str] = set()
 
+    if trading_calendar:
+        calendar_arg: Optional[List[pd.Timestamp]] = []
+        for raw in trading_calendar:
+            try:
+                dt = pd.Timestamp(raw)
+            except Exception:
+                continue
+            if pd.isna(dt):
+                continue
+            if start_date <= dt <= end_date:
+                calendar_arg.append(dt.normalize())
+        if not calendar_arg:
+            calendar_arg = None
+    else:
+        calendar_arg = get_trading_days(date_range[0], date_range[1], country_code)
+        if not calendar_arg:
+            raise RuntimeError(f"{account_id.upper()} 기간 {date_range[0]}~{date_range[1]}의 거래일 정보를 로드하지 못했습니다.")
+
     ticker_timeseries = (
         run_portfolio_backtest(
             stocks=etf_universe,
@@ -225,6 +256,7 @@ def run_account_backtest(
             country=country_code,
             missing_ticker_sink=runtime_missing_tickers,
             **backtest_kwargs,
+            trading_calendar=calendar_arg,
         )
         or {}
     )
@@ -254,6 +286,8 @@ def run_account_backtest(
         fx_rate_to_krw=capital_info.fx_rate_to_krw,
         currency=display_currency,
         account_settings=account_settings,
+        prefetched_data=prefetched_data,
+        price_store=price_store,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries, start_date)
@@ -398,6 +432,8 @@ def _build_backtest_kwargs(
     strategy_rules,
     strategy_settings: Mapping[str, Any],
     prefetched_data: Optional[Mapping[str, pd.DataFrame]],
+    prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]],
+    price_store: Optional[MemmapPriceStore],
     quiet: bool,
 ) -> Dict[str, Any]:
     try:
@@ -424,6 +460,8 @@ def _build_backtest_kwargs(
 
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
+        "prefetched_metrics": prefetched_metrics,
+        "price_store": price_store,
         "ma_period": strategy_rules.ma_period,
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
@@ -432,6 +470,7 @@ def _build_backtest_kwargs(
         "rsi_sell_threshold": rsi_sell_threshold,
         "core_holdings": strategy_rules.core_holdings,
         "quiet": quiet,
+        "min_buy_score": strategy_rules.min_buy_score,
     }
 
     clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
@@ -556,6 +595,8 @@ def _build_summary(
     fx_rate_to_krw: float,
     currency: str,
     account_settings: Mapping[str, Any],
+    prefetched_data: Optional[Mapping[str, pd.DataFrame]] = None,
+    price_store: Optional[MemmapPriceStore] = None,
 ) -> Tuple[
     Dict[str, Any],
     pd.Series,
@@ -593,19 +634,39 @@ def _build_summary(
     mdd_pct = max_drawdown * 100
     sharpe_to_mdd = (sharpe_ratio / mdd_pct) if mdd_pct > 0 else 0.0
 
-    def _calc_benchmark_performance(*, ticker: str, name: str, country: str) -> Optional[Dict[str, Any]]:
-        benchmark_df = fetch_ohlcv(
-            ticker,
-            country=country,
-            date_range=[start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
-        )
+    def _load_benchmark_frame(ticker: str) -> Optional[pd.DataFrame]:
+        candidates: List[str] = []
+        norm = str(ticker or "").strip()
+        if not norm:
+            return None
+        candidates.extend({norm, norm.upper(), norm.lower()})
 
+        if prefetched_data:
+            for candidate in candidates:
+                frame = prefetched_data.get(candidate)
+                if isinstance(frame, pd.DataFrame) and not frame.empty:
+                    return frame
+
+        if price_store is not None:
+            frame = price_store.get_frame(norm.upper())
+            if frame is not None and not frame.empty:
+                return frame
+
+        return None
+
+    def _calc_benchmark_performance(*, ticker: str, name: str, country: str) -> Optional[Dict[str, Any]]:
+        benchmark_df = _load_benchmark_frame(ticker)
         if benchmark_df is None or benchmark_df.empty:
+            local_logger = get_app_logger()
+            local_logger.warning("[백테스트] 벤치마크 '%s' 데이터를 프리패치에서 찾을 수 없습니다.", ticker)
             return None
 
         benchmark_df = benchmark_df.sort_index()
+        benchmark_df.index = pd.to_datetime(benchmark_df.index)
+        mask = (benchmark_df.index >= start_date) & (benchmark_df.index <= end_date)
+        benchmark_df = benchmark_df.loc[mask]
         benchmark_df = benchmark_df.loc[benchmark_df.index.intersection(pv_series.index)]
-        if benchmark_df.empty:
+        if benchmark_df.empty or "Close" not in benchmark_df.columns:
             return None
 
         # 시작 가격: 백테스트 시작일 종가 (슬리피지 없음)
@@ -846,11 +907,6 @@ def _build_ticker_summaries(
                     listing_date = first_date.strftime("%Y-%m-%d")
 
         if total_trades == 0 and final_shares <= 0 and math.isclose(total_contribution, 0.0, abs_tol=1e-9):
-            continue
-
-        # 점수가 음수인 종목 제외
-        last_score = float(last_row.get("score", 0.0))
-        if last_score < 0:
             continue
 
         win_rate = (winning_trades / total_trades) * 100.0 if total_trades > 0 else 0.0

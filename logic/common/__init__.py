@@ -1,6 +1,7 @@
 """추천과 백테스트에서 공통으로 사용하는 로직."""
 
 from .portfolio import (
+    is_category_exception,
     get_held_categories_excluding_sells,
     should_exclude_from_category_count,
     get_sell_states,
@@ -9,7 +10,6 @@ from .portfolio import (
     validate_core_holdings,
     check_buy_candidate_filters,
     calculate_buy_budget,
-    build_weekly_rebalance_cache,
     calculate_held_categories,
     calculate_held_categories_from_holdings,
     track_sell_rsi_categories,
@@ -28,6 +28,7 @@ from .filtering import (
 )
 
 __all__ = [
+    "is_category_exception",
     "get_held_categories_excluding_sells",
     "should_exclude_from_category_count",
     "get_sell_states",
@@ -36,7 +37,6 @@ __all__ = [
     "validate_core_holdings",
     "check_buy_candidate_filters",
     "calculate_buy_budget",
-    "build_weekly_rebalance_cache",
     "calculate_held_categories",
     "calculate_held_categories_from_holdings",
     "track_sell_rsi_categories",
@@ -46,6 +46,6 @@ __all__ = [
     "calculate_consecutive_days",
     "get_buy_signal_streak",
     "select_candidates_by_category",
-    "sort_decisions_by_order_and_score",
+    "sort_decisions_by_order_and_sort_decisions_by_order_and_score",
     "filter_category_duplicates",
 ]

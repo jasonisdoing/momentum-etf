@@ -12,7 +12,7 @@ from utils.account_registry import (
     load_account_configs,
     pick_default_account,
 )
-from utils.stock_list_io import get_etfs
+from utils.stock_list_io import get_all_etfs
 from utils.db_manager import (
     fetch_recent_trades,
     insert_trade_event,
@@ -153,7 +153,7 @@ def _ticker_name_map(country_code: str) -> dict[str, str]:
         return {}
 
     try:
-        items = get_etfs(country_norm)
+        items = get_all_etfs(country_norm)
     except Exception:
         return {}
 

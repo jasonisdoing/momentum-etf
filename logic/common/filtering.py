@@ -3,6 +3,7 @@
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Callable
 
 from utils.logger import get_app_logger
+from logic.common.portfolio import is_category_exception
 
 logger = get_app_logger()
 
@@ -13,7 +14,7 @@ def _resolve_category(
 ) -> Tuple[Optional[str], str]:
     """주어진 티커의 카테고리를 반환합니다.
 
-    반환값은 (표시용 카테고리, 내부 키) 튜플입니다. 카테고리가 없거나 'TBD'라면
+    반환값은 (표시용 카테고리, 내부 키) 튜플입니다. 카테고리가 없거나 CATEGORY_EXCEPTIONS 라면
     내부 키는 티커 기반의 고유 값으로 대체하여 카테고리 충돌을 방지합니다.
     """
 
@@ -25,10 +26,10 @@ def _resolve_category(
     if raw_category is not None:
         raw_category = str(raw_category).strip()
 
-    if raw_category and raw_category.upper() != "TBD":
+    if raw_category and not is_category_exception(raw_category):
         return raw_category, raw_category
 
-    # 카테고리가 없거나 'TBD'라면, 티커 기반의 내부 키를 만들어 카테고리 중복을 방지합니다.
+    # 카테고리가 없거나 예외 카테고리라면, 티커 기반의 내부 키를 만들어 카테고리 중복을 방지합니다.
     internal_key = f"__i_{ticker.upper()}"
     return None, internal_key
 
@@ -64,7 +65,7 @@ def select_candidates_by_category(
         # 보유 중인 카테고리 집합 생성
         held_set = set()
         if skip_held_categories and held_categories:
-            held_set = {str(cat).strip().upper() for cat in held_categories if cat and str(cat).strip().upper() != "TBD"}
+            held_set = {str(cat).strip().upper() for cat in held_categories if cat and not is_category_exception(str(cat).strip())}
 
         # 후보 처리
         best_per_category = {}
@@ -191,7 +192,7 @@ def filter_category_duplicates(
 
         # HOLD, HOLD_CORE, BUY 상태의 카테고리 수집 (매도 예정 종목 제외)
         if not should_exclude_from_category_count(state) and state in {"HOLD", "HOLD_CORE", "BUY", "BUY_REPLACE"}:
-            if category_key and category_key != "TBD":
+            if category_key and not is_category_exception(category_key):
                 held_categories.add(category_key)
 
     # 2단계: 필터링
@@ -212,7 +213,7 @@ def filter_category_duplicates(
             if not should_exclude_from_category_count(state):
                 # HOLD, BUY 상태만 category_best_map에 추가
                 category_key = category_key_getter(category)
-                if category_key and category_key != "TBD":
+                if category_key and not is_category_exception(category_key):
                     # 기존 WAIT 종목만 제거 (HOLD/BUY 종목은 유지)
                     if category_key in category_best_map:
                         existing_item = category_best_map[category_key]
