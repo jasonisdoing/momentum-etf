@@ -35,35 +35,6 @@ from pykrx import stock
 EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN"]
 
 
-def _load_stock_metadata() -> Dict[str, Dict]:
-    """
-    zsettings/stocks/*.json 파일에서 3개월 수익률 정보를 로드합니다.
-
-    Returns:
-        {ticker: {"3_month_earn_rate": float, ...}} 형태의 딕셔너리
-    """
-    metadata = {}
-    stocks_dir = Path(__file__).parent.parent / "data" / "stocks"
-
-    for json_file in stocks_dir.glob("*.json"):
-        try:
-            with open(json_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            for category in data:
-                for stock_info in category.get("tickers", []):
-                    ticker = stock_info.get("ticker")
-                    if ticker:
-                        metadata[ticker] = {
-                            "3_month_earn_rate": stock_info.get("3_month_earn_rate"),
-                            "1_week_avg_volume": stock_info.get("1_week_avg_volume"),
-                        }
-        except Exception:
-            continue
-
-    return metadata
-
-
 def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
     """
     네이버 금융 API에서 ETF 데이터를 가져옵니다.
@@ -307,7 +278,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="금일 상승중인 ETF를 보여줍니다.")
-    parser.add_argument("--min-change", type=float, default=3.0, help="검색할 최소 등락률 (기본값: 5.0)")
+    parser.add_argument("--min-change", type=float, default=3.0, help="검색할 최소 등락률 (기본값: 3.0)")
     parser.add_argument(
         "--type",
         type=str,
