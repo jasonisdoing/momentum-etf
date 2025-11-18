@@ -85,6 +85,11 @@ def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
 
         if not isinstance(items, list) or not items:
             logger.warning("네이버 API 응답에 ETF 데이터가 없습니다.")
+            logger.warning(f"응답 구조: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
+            if isinstance(data, dict) and "result" in data:
+                logger.warning(
+                    f"result 내부 키: {list(data['result'].keys()) if isinstance(data['result'], dict) else type(data['result']).__name__}"
+                )
             return None
 
         # DataFrame 생성
@@ -137,17 +142,35 @@ def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
                 continue
 
         if not gainers_list:
+            logger.warning(f"등락률 {min_change_pct:.2f}% 이상인 종목이 없습니다. (전체 ETF 수: {len(items)}개)")
             return pd.DataFrame(columns=["티커", "종목명", "등락률", "거래량", "괴리율"])
 
         df = pd.DataFrame(gainers_list)
-        logger.info(f"네이버 API에서 {len(df)}개 종목 데이터를 가져왔습니다.")
+        logger.info(f"네이버 API에서 {len(df)}개 종목 데이터를 가져왔습니다. (전체 ETF 수: {len(items)}개)")
         return df
 
+    except requests.exceptions.Timeout as e:
+        logger.error(f"네이버 API 타임아웃 (5초 초과): {e}")
+        return None
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"네이버 API HTTP 에러 (상태 코드: {response.status_code}): {e}")
+        logger.error(f"응답 내용 (처음 500자): {response.text[:500]}")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"네이버 API 연결 실패 (네트워크 확인 필요): {e}")
+        return None
     except requests.exceptions.RequestException as e:
-        logger.warning(f"네이버 API 요청 실패: {e}")
+        logger.error(f"네이버 API 요청 실패: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"네이버 API 응답이 JSON 형식이 아닙니다: {e}")
+        logger.error(f"응답 내용 (처음 500자): {response.text[:500]}")
         return None
     except Exception as e:
-        logger.warning(f"네이버 API 데이터 처리 실패: {e}")
+        logger.error(f"네이버 API 데이터 처리 중 예상치 못한 오류: {type(e).__name__}: {e}")
+        import traceback
+
+        logger.error(f"상세 오류:\n{traceback.format_exc()}")
         return None
 
 
@@ -200,7 +223,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
 
         # 1. ETF 데이터 가져오기
         if asset_type == "etf":
-            # 1-1. 네이버 API 시도 (빠름)
+            # 네이버 API 시도 (빠름)
             naver_df = fetch_naver_etf_data(min_change_pct)
 
             if naver_df is not None and not naver_df.empty:
@@ -208,49 +231,10 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
                 top_gainers = naver_df
                 print(f"✅ 네이버 API 사용 (빠른 조회 성공)")
             else:
-                # 1-2. pykrx 폴백 (느리지만 안정적)
-                logger.info("⚠️  네이버 API 실패, pykrx로 폴백합니다...")
-                try:
-                    # 등락률 계산을 위해 이전 거래일이 필요합니다.
-                    prev_day = get_previous_trading_day(latest_day)
-
-                    # get_etf_ohlcv_by_ticker는 특정일의 모든 ETF OHLCV를 반환합니다.
-                    df_today = stock.get_etf_ohlcv_by_ticker(latest_day)
-                    df_yest = stock.get_etf_ohlcv_by_ticker(prev_day)
-
-                    if not df_today.empty and not df_yest.empty:
-                        # '종가' 컬럼만 사용하여 데이터프레임을 합칩니다.
-                        df_merged = pd.merge(
-                            df_today[["종가"]].rename(columns={"종가": "price_today"}),
-                            df_yest[["종가"]].rename(columns={"종가": "price_yest"}),
-                            left_index=True,  # 인덱스가 티커입니다.
-                            right_index=True,
-                            how="inner",  # 양일 모두 거래된 ETF만 대상으로 합니다.
-                        )
-
-                        # 등락률을 계산합니다. 0으로 나누는 경우를 방지합니다.
-                        df_merged["등락률"] = (((df_merged["price_today"] / df_merged["price_yest"]) - 1) * 100).where(df_merged["price_yest"] > 0, 0)
-
-                        # 필요한 컬럼만 선택하여 df_change에 추가합니다.
-                        df_etf_filtered = df_merged[["등락률"]].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
-                        df_change = pd.concat([df_change, df_etf_filtered], ignore_index=True)
-
-                        # 등락률 필터링
-                        top_gainers = df_change[df_change["등락률"] >= min_change_pct].copy()
-
-                        # 종목명 추가
-                        etf_ticker_list = set(stock.get_etf_ticker_list(latest_day))
-
-                        def get_name(ticker):
-                            if ticker in etf_ticker_list:
-                                return stock.get_etf_ticker_name(ticker)
-                            else:
-                                return stock.get_market_ticker_name(ticker)
-
-                        top_gainers["종목명"] = top_gainers["티커"].apply(get_name)
-                        logger.info(f"✅ pykrx 폴백 성공")
-                except Exception as e:
-                    logger.warning("pykrx ETF 정보 조회 중 오류가 발생했습니다: %s", e)
+                # 네이버 API 실패 시 종료
+                logger.error("❌ 네이버 API 실패. 스크립트를 종료합니다.")
+                print("❌ 네이버 API에서 데이터를 가져올 수 없습니다.")
+                return
 
         # 2. 일반 주식 데이터 가져오기
         if asset_type == "stock":
