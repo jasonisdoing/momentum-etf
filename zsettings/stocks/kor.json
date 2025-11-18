@@ -937,16 +937,6 @@
     },
     {
         "category": "기타",
-        "tickers": [
-            {
-                "ticker": "307520",
-                "name": "TIGER 지주회사",
-                "recommend_enabled": true,
-                "listing_date": "2018-11-08",
-                "1_week_avg_volume": 1115552,
-                "1_week_avg_turnover": 18540710632,
-                "3_month_earn_rate": 23.6034
-            }
-        ]
+        "tickers": []
     }
 ]

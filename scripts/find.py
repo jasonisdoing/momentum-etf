@@ -226,15 +226,16 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             # 네이버 API 시도 (빠름)
             naver_df = fetch_naver_etf_data(min_change_pct)
 
-            if naver_df is not None and not naver_df.empty:
-                # 네이버 API 성공
-                top_gainers = naver_df
-                print(f"✅ 네이버 API 사용 (빠른 조회 성공)")
-            else:
-                # 네이버 API 실패 시 종료
+            if naver_df is None:
+                # 네이버 API 실패 시 종료 (None 반환)
                 logger.error("❌ 네이버 API 실패. 스크립트를 종료합니다.")
                 print("❌ 네이버 API에서 데이터를 가져올 수 없습니다.")
                 return
+
+            # 네이버 API 성공 (빈 DataFrame도 성공)
+            top_gainers = naver_df
+            if not naver_df.empty:
+                print(f"✅ 네이버 API 사용 (빠른 조회 성공)")
 
         # 2. 일반 주식 데이터 가져오기
         if asset_type == "stock":
