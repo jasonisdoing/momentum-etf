@@ -15,7 +15,6 @@ from utils.report import format_kr_money
 from strategies.maps.labeler import compute_net_trade_note
 from logic.common import select_candidates_by_category, calculate_held_categories, is_category_exception
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
-from utils.memmap_store import MemmapPriceStore
 
 logger = get_app_logger()
 
@@ -472,7 +471,7 @@ def process_ticker_data(
         open_prices = precomputed_entry.get("open")
 
     if close_prices is None:
-        if working_df is None or len(working_df) < current_ma_period:
+        if working_df is None:
             return None
 
         price_series = None
@@ -491,9 +490,6 @@ def process_ticker_data(
             price_series = price_series.iloc[:, 0]
         close_prices = price_series.astype(float)
 
-        if len(close_prices) < current_ma_period:
-            return None
-
     if open_prices is None:
         if working_df is not None and "Open" in working_df.columns:
             open_series = working_df["Open"]
@@ -502,6 +498,12 @@ def process_ticker_data(
             open_prices = open_series.astype(float)
         else:
             open_prices = close_prices.copy()
+
+    # 데이터 충분성 검증: MA 계산에 필요한 최소 데이터 확인
+    # EMA/TEMA 등은 적은 데이터로도 계산되지만, 신뢰성을 위해 최소 기간의 70% 이상 필요
+    min_required_data = int(current_ma_period * 0.7)
+    if len(close_prices) < min_required_data:
+        return None
 
     # MAPS 전략 지표 계산
     from utils.moving_averages import calculate_moving_average
@@ -557,7 +559,6 @@ def run_portfolio_backtest(
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
-    price_store: Optional["MemmapPriceStore"] = None,
     trading_calendar: Optional[Sequence[pd.Timestamp]] = None,
     ma_period: int = 20,
     ma_type: str = "SMA",
@@ -633,11 +634,9 @@ def run_portfolio_backtest(
         df = None
         if prefetched_data and ticker in prefetched_data:
             df = prefetched_data[ticker]
-        elif price_store is not None:
-            df = price_store.get_frame(ticker)
 
         if df is None:
-            raise RuntimeError(f"[백테스트] '{ticker}' 데이터가 프리패치/메모리맵에 없습니다. 튜닝 프리패치 단계를 확인하세요.")
+            raise RuntimeError(f"[백테스트] '{ticker}' 데이터가 프리패치에 없습니다. 튜닝 프리패치 단계를 확인하세요.")
 
         precomputed_entry = prefetched_metrics.get(ticker) if prefetched_metrics else None
         ticker_metrics = process_ticker_data(

@@ -598,6 +598,13 @@ def _build_ticker_timeseries_entry(
         nav_latest = None
         price_deviation = None
 
+    # 데이터 충분성 검증: MA 계산에 필요한 최소 데이터 확인
+    # EMA/TEMA 등은 적은 데이터로도 계산되지만, 신뢰성을 위해 최소 기간의 70% 이상 필요
+    min_required_data = int(ma_period * 0.7)
+    if len(price_series) < min_required_data:
+        logger.warning(f"[{ticker_upper}] 데이터 부족으로 제외 (보유: {len(price_series)}개, 필요: {min_required_data}개 이상, MA기간: {ma_period})")
+        return None
+
     moving_average = calculate_moving_average(price_series, ma_period, ma_type)
     ma_score_series = calculate_ma_score(price_series, moving_average)
     score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0

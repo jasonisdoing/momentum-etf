@@ -23,6 +23,13 @@
    - 점수가 임계값 미만이면 `WAIT` 상태와 `최소 X점수 미만` 문구가 표시되며, 매수/교체 로직이 바로 차단된다.
    - 튜닝 탐색 공간에도 `MIN_BUY_SCORE` 값이 포함되어야 하며, 결과 요약/중간 보고서에 해당 값이 기록돼야 한다.
 
+3. **데이터 충분성 검증**
+   - 이동평균 계산에 필요한 최소 데이터: `MA기간 × 0.7` 이상
+   - EMA/TEMA 등은 적은 데이터로도 계산되지만, 신뢰성을 위해 최소 기간 필요
+   - 데이터가 부족한 종목(신규 상장 등)은 추천과 백테스트 모두에서 제외
+   - **추천:** `logic/recommend/pipeline.py` 601-608줄
+   - **백테스트:** `logic/backtest/portfolio_runner.py` 502-509줄
+
 ---
 
 ## ✅ 동일해야 하는 핵심 로직 (7개)
@@ -363,7 +370,6 @@ def run_portfolio_backtest(
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
-    price_store: Optional[MemmapPriceStore] = None,
     trading_calendar: Sequence[pd.Timestamp],
     ma_period: int = 20,
     ma_type: str = "SMA",
@@ -381,7 +387,7 @@ def run_portfolio_backtest(
 ```
 
 - `trading_calendar`는 필수이며, `date_range` 전체를 덮는 거래일 리스트를 호출자가 프리패치 단계에서 준비해 전달해야 한다. 내부에서는 더 이상 `get_trading_days()`로 보조 조회를 하지 않는다.
-- `prefetched_data`/`prefetched_metrics`/`price_store`도 반드시 준비된 상태여야 하며, 백테스트 중에는 원본 데이터 소스(Mongo/pykrx)를 호출하지 않는다. 부족 데이터가 발견되면 즉시 실패한다.
+- `prefetched_data`/`prefetched_metrics`도 반드시 준비된 상태여야 하며, 백테스트 중에는 원본 데이터 소스(Mongo/pykrx)를 호출하지 않는다. 부족 데이터가 발견되면 즉시 실패한다.
 
 ## 📚 참고
 
