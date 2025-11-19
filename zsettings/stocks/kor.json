@@ -299,7 +299,7 @@
         ]
     },
     {
-        "category": "AI전력",
+        "category": "한국AI전력",
         "tickers": [
             {
                 "ticker": "487240",
@@ -355,6 +355,20 @@
                 "1_week_avg_turnover": 29017766062,
                 "3_month_earn_rate": 23.13
             },
+            {
+                "ticker": "404120",
+                "name": "TIMEFOLIO K신재생에너지액티브",
+                "recommend_enabled": true,
+                "listing_date": "2021-10-29",
+                "1_week_avg_volume": 9316,
+                "1_week_avg_turnover": 165391720,
+                "3_month_earn_rate": 12.844
+            }
+        ]
+    },
+    {
+        "category": "글로벌AI전력",
+        "tickers": [
             {
                 "ticker": "486450",
                 "name": "SOL 미국AI전력인프라",
@@ -444,7 +458,39 @@
         ]
     },
     {
-        "category": "바이오",
+        "category": "미국바이오",
+        "tickers": [
+            {
+                "ticker": "203780",
+                "name": "TIGER 미국나스닥바이오",
+                "recommend_enabled": true,
+                "listing_date": "2014-08-27",
+                "1_week_avg_volume": 44195,
+                "1_week_avg_turnover": 1301545842,
+                "3_month_earn_rate": 26.0383
+            },
+            {
+                "ticker": "0113G0",
+                "name": "KoAct 미국바이오헬스케어액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-11-11",
+                "1_week_avg_volume": 377717,
+                "1_week_avg_turnover": 3974417754,
+                "3_month_earn_rate": -0.3329
+            },
+            {
+                "ticker": "485810",
+                "name": "TIMEFOLIO 글로벌바이오액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-07-02",
+                "1_week_avg_volume": 59131,
+                "1_week_avg_turnover": 611965764,
+                "3_month_earn_rate": 23.8208
+            }
+        ]
+    },
+    {
+        "category": "한국바이오",
         "tickers": [
             {
                 "ticker": "0000Z0",
@@ -483,24 +529,6 @@
                 "3_month_earn_rate": 35.7964
             },
             {
-                "ticker": "203780",
-                "name": "TIGER 미국나스닥바이오",
-                "recommend_enabled": true,
-                "listing_date": "2014-08-27",
-                "1_week_avg_volume": 44195,
-                "1_week_avg_turnover": 1301545842,
-                "3_month_earn_rate": 26.0383
-            },
-            {
-                "ticker": "0113G0",
-                "name": "KoAct 미국바이오헬스케어액티브",
-                "recommend_enabled": true,
-                "listing_date": "2025-11-11",
-                "1_week_avg_volume": 377717,
-                "1_week_avg_turnover": 3974417754,
-                "3_month_earn_rate": -0.3329
-            },
-            {
                 "ticker": "463050",
                 "name": "TIMEFOLIO K바이오액티브",
                 "recommend_enabled": true,
@@ -508,24 +536,6 @@
                 "1_week_avg_volume": 3268230,
                 "1_week_avg_turnover": 59624382974,
                 "3_month_earn_rate": 38.2886
-            },
-            {
-                "ticker": "485810",
-                "name": "TIMEFOLIO 글로벌바이오액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-07-02",
-                "1_week_avg_volume": 59131,
-                "1_week_avg_turnover": 611965764,
-                "3_month_earn_rate": 23.8208
-            },
-            {
-                "ticker": "404120",
-                "name": "TIMEFOLIO K신재생에너지액티브",
-                "recommend_enabled": true,
-                "listing_date": "2021-10-29",
-                "1_week_avg_volume": 9316,
-                "1_week_avg_turnover": 165391720,
-                "3_month_earn_rate": 12.844
             }
         ]
     },
