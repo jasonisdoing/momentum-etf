@@ -26,6 +26,7 @@ _BASE_DISPLAY_COLUMNS = [
     "2주(%)",
     "1달(%)",
     "3달(%)",
+    "고점대비",
     "추세(3달)",
     "점수",
     "RSI",
@@ -135,6 +136,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         return_2w = _format_percent(row.get("return_2w", 0.0))
         return_1m = _format_percent(row.get("return_1m", 0.0))
         return_3m = _format_percent(row.get("return_3m", 0.0))
+        drawdown_from_high = _format_percent(row.get("drawdown_from_high", 0.0))
         score = _format_score(row.get("score"))
         streak = _format_days(row.get("streak"))
         phrase = _resolve_phrase(row)
@@ -156,6 +158,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "2주(%)": return_2w,
                 "1달(%)": return_1m,
                 "3달(%)": return_3m,
+                "고점대비": drawdown_from_high,
                 "추세(3달)": _trend_series(row),
                 "점수": score,
                 "RSI": rsi_score,

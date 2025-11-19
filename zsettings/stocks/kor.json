@@ -493,24 +493,6 @@
                 "3_month_earn_rate": 36.6976
             },
             {
-                "ticker": "244580",
-                "name": "Kodex 바이오",
-                "recommend_enabled": true,
-                "listing_date": "2016-05-13",
-                "1_month_avg_volume": 2586889,
-                "1_month_earn_rate": 14.8457,
-                "3_month_earn_rate": 27.7185
-            },
-            {
-                "ticker": "266420",
-                "name": "Kodex 헬스케어",
-                "recommend_enabled": true,
-                "listing_date": "2017-03-28",
-                "1_month_avg_volume": 221734,
-                "1_month_earn_rate": 12.6943,
-                "3_month_earn_rate": 18.5265
-            },
-            {
                 "ticker": "462900",
                 "name": "KoAct 바이오헬스케어액티브",
                 "recommend_enabled": true,

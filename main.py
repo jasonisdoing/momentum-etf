@@ -75,7 +75,7 @@ def load_account_recommendations(
 
 
 TABLE_VISIBLE_ROWS = 26  # 헤더 1줄 + 내용 15줄
-TABLE_ROW_HEIGHT = 35
+TABLE_ROW_HEIGHT = 36
 TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT
 
 DEFAULT_COMPACT_COLUMNS_BASE = [
@@ -182,7 +182,7 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
             return "color: blue"
         return "color: black"
 
-    pct_columns = ["일간(%)", "평가(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)"]
+    pct_columns = ["일간(%)", "평가(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "고점대비"]
     for col in pct_columns:
         if col in df.columns:
             styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, col])
@@ -216,6 +216,7 @@ def render_recommendation_table(
         "2주(%)": st.column_config.NumberColumn("2주(%)", width="small"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small"),
+        "고점대비": st.column_config.NumberColumn("고점대비", width="small"),
         "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width="small"),
         "점수": st.column_config.NumberColumn("점수", width=50),
         "RSI": st.column_config.NumberColumn("RSI", width=50),

@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, 
 
 import pandas as pd
 
-from config import BACKTEST_SLIPPAGE
+from config import BACKTEST_SLIPPAGE, CATEGORY_EXCEPTIONS
 from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
 from utils.report import format_kr_money

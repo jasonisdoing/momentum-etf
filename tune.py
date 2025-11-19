@@ -23,8 +23,8 @@ TUNING_CONFIG: dict[str, dict] = {
         "REPLACE_SCORE_THRESHOLD": [0],
         "STOP_LOSS_PCT": np.arange(5, 11, 1),
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(70, 110, 10),
-        # "COOLDOWN_DAYS": [3, 4, 5],
-        "COOLDOWN_DAYS": [1],
+        # "COOLDOWN_DAYS": [1, 2, 3, 4, 5],
+        "COOLDOWN_DAYS": [1, 2],
         "MIN_BUY_SCORE": np.arange(0, 6, 1),
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택

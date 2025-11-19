@@ -610,7 +610,20 @@ def _build_ticker_timeseries_entry(
     recent_prices = market_series.tail(63)
     trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
 
-    return {
+    drawdown_from_high_pct = 0.0
+    if isinstance(price_series, pd.Series):
+        price_valid = price_series.dropna()
+        if not price_valid.empty:
+            try:
+                latest_price = float(market_latest) if market_latest is not None else float(price_valid.iloc[-1])
+                highest_price = float(price_valid.max())
+            except (TypeError, ValueError):
+                latest_price = None
+                highest_price = None
+            if latest_price is not None and highest_price and highest_price > 0:
+                drawdown_from_high_pct = round(((latest_price / highest_price) - 1.0) * 100, 2)
+
+    ticker_data = {
         "price": market_latest,
         "nav_price": nav_latest,
         "prev_close": market_prev if market_prev is not None else market_latest,
@@ -628,7 +641,9 @@ def _build_ticker_timeseries_entry(
         "trend_prices": trend_prices,
         "price_deviation": price_deviation,
         "ma_period": ma_period,
+        "drawdown_from_high": drawdown_from_high_pct,
     }
+    return ticker_data
 
 
 def _fetch_trades_for_date(account_id: str, base_date: pd.Timestamp) -> List[Dict[str, Any]]:
@@ -1313,6 +1328,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             "price_deviation": ticker_data.get("price_deviation"),
             "daily_pct": daily_pct_val,
             "evaluation_pct": evaluation_pct_val,
+            "drawdown_from_high": ticker_data.get("drawdown_from_high", 0.0),
             "return_1w": ret_1w,
             "return_2w": ret_2w,
             "return_1m": ret_1m,
@@ -1554,7 +1570,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     ]
     if show_deviation:
         detail_headers.append("괴리율")
-    detail_headers.extend(["1주(%)", "2주(%)", "1달(%)", "3달(%)", "점수", "지속", "문구"])
+    detail_headers.extend(["1주(%)", "2주(%)", "1달(%)", "3달(%)", "고점대비", "점수", "지속", "문구"])
 
     detail_rows: List[List[Any]] = []
     for item in results:
@@ -1577,6 +1593,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
                 item.get("return_2w"),
                 item.get("return_1m"),
                 item.get("return_3m"),
+                item.get("drawdown_from_high"),
                 item.get("score"),
                 item.get("streak"),
                 item.get("phrase", ""),
