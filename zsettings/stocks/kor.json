@@ -12,15 +12,6 @@
                 "3_month_earn_rate": 47.364
             },
             {
-                "ticker": "315930",
-                "name": "Kodex Top5Plus TR",
-                "recommend_enabled": true,
-                "listing_date": "2019-01-22",
-                "1_week_avg_volume": 45935,
-                "1_week_avg_turnover": 1842868860,
-                "3_month_earn_rate": 44.68
-            },
-            {
                 "ticker": "069500",
                 "name": "Kodex 200",
                 "recommend_enabled": true,

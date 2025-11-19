@@ -607,7 +607,7 @@ def _build_ticker_timeseries_entry(
     if rsi_score == 0.0 and len(price_series) < 15:
         logger.warning(f"[RSI] {ticker_upper} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
 
-    recent_prices = market_series.tail(15)
+    recent_prices = market_series.tail(63)
     trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
 
     return {
@@ -623,7 +623,8 @@ def _build_ticker_timeseries_entry(
         "filter": consecutive_buy_days,
         "ret_1w": _compute_trailing_return(price_series, 5),
         "ret_2w": _compute_trailing_return(price_series, 10),
-        "ret_3w": _compute_trailing_return(price_series, 15),
+        "ret_1m": _compute_trailing_return(price_series, 21),
+        "ret_3m": _compute_trailing_return(price_series, 63),
         "trend_prices": trend_prices,
         "price_deviation": price_deviation,
         "ma_period": ma_period,
@@ -1279,7 +1280,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
 
         ret_1w = ticker_data.get("ret_1w", 0.0)
         ret_2w = ticker_data.get("ret_2w", 0.0)
-        ret_3w = ticker_data.get("ret_3w", 0.0)
+        ret_1m = ticker_data.get("ret_1m", 0.0)
+        ret_3m = ticker_data.get("ret_3m", 0.0)
 
         filter_days = decision.get("filter")
         if filter_days is None:
@@ -1313,7 +1315,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             "evaluation_pct": evaluation_pct_val,
             "return_1w": ret_1w,
             "return_2w": ret_2w,
-            "return_3w": ret_3w,
+            "return_1m": ret_1m,
+            "return_3m": ret_3m,
             "trend_prices": ticker_data.get("trend_prices", []),
             "score": score_val,
             "rsi_score": rsi_score_val,
@@ -1551,7 +1554,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     ]
     if show_deviation:
         detail_headers.append("괴리율")
-    detail_headers.extend(["1주(%)", "2주(%)", "3주(%)", "점수", "지속", "문구"])
+    detail_headers.extend(["1주(%)", "2주(%)", "1달(%)", "3달(%)", "점수", "지속", "문구"])
 
     detail_rows: List[List[Any]] = []
     for item in results:
@@ -1572,7 +1575,8 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             [
                 item.get("return_1w"),
                 item.get("return_2w"),
-                item.get("return_3w"),
+                item.get("return_1m"),
+                item.get("return_3m"),
                 item.get("score"),
                 item.get("streak"),
                 item.get("phrase", ""),
