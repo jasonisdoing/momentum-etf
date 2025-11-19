@@ -897,8 +897,9 @@ def _execute_tuning_for_months(
     else:
         # 멀티 프로세스: worker 초기화 시 데이터 한 번만 전달
         init_args = (prefetched_data, prefetched_metrics, prefetched_etf_universe, filtered_calendar)
-        # chunksize를 크게 설정하여 IPC 오버헤드 감소 (workers * 2 대신 workers * 1.5 사용)
-        chunksize = max(10, len(payloads) // (workers * 2)) if len(payloads) > workers else 10
+        # chunksize를 적절히 설정: IPC 오버헤드와 로드 밸런싱 균형
+        # 너무 크면 느린 조합으로 인한 대기 발생, 너무 작으면 IPC 오버헤드 증가
+        chunksize = max(10, len(payloads) // (workers * 10)) if len(payloads) > workers else 10
         executor = ProcessPoolExecutor(max_workers=workers, initializer=_init_worker_prefetch, initargs=init_args)
         iterator = executor.map(_evaluate_single_combo, payloads, chunksize=chunksize)
 

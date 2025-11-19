@@ -2,7 +2,7 @@
 
 from datetime import time
 
-CACHE_START_DATE = "2024-11-01"
+CACHE_START_DATE = "2024-01-02"
 # 포트폴리오 카테고리별 최대 보유 수
 MAX_PER_CATEGORY = 1
 
