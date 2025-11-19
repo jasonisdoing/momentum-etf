@@ -285,6 +285,7 @@ def run_account_backtest(
         initial_capital_krw=capital_info.krw,
         fx_rate_to_krw=capital_info.fx_rate_to_krw,
         currency=display_currency,
+        portfolio_topn=portfolio_topn,
         account_settings=account_settings,
         prefetched_data=prefetched_data,
         price_store=price_store,
@@ -594,6 +595,7 @@ def _build_summary(
     initial_capital_krw: float,
     fx_rate_to_krw: float,
     currency: str,
+    portfolio_topn: int,
     account_settings: Mapping[str, Any],
     prefetched_data: Optional[Mapping[str, pd.DataFrame]] = None,
     price_store: Optional[MemmapPriceStore] = None,
@@ -766,10 +768,35 @@ def _build_summary(
             else:
                 weekly_cum_pct = pd.Series([0.0] * len(weekly_values), index=weekly_values.index)
             for dt, value in weekly_values.items():
+                # 해당 날짜의 보유종목 수 가져오기
+                held_count = 0
+                max_topn = portfolio_topn
+                actual_date = dt
+
+                # 해당 날짜가 portfolio_df에 없으면 가장 가까운 이전 날짜 찾기
+                if dt not in portfolio_df.index:
+                    # portfolio_df에서 dt 이전의 가장 가까운 날짜 찾기
+                    earlier_dates = portfolio_df.index[portfolio_df.index <= dt]
+                    if len(earlier_dates) > 0:
+                        actual_date = earlier_dates[-1]
+                        held_count = int(portfolio_df.loc[actual_date, "held_count"]) if pd.notna(portfolio_df.loc[actual_date, "held_count"]) else 0
+                else:
+                    held_count = int(portfolio_df.loc[dt, "held_count"]) if pd.notna(portfolio_df.loc[dt, "held_count"]) else 0
+
+                # 날짜 포맷: 금요일이 아니면 요일 표시
+                weekday_map = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
+                weekday = weekday_map.get(actual_date.weekday(), "")
+                if actual_date.weekday() == 4:  # 금요일
+                    date_display = actual_date.strftime("%Y-%m-%d")
+                else:
+                    date_display = f"{actual_date.strftime('%Y-%m-%d')}({weekday})"
+
                 weekly_summary_rows.append(
                     {
-                        "week_end": dt.strftime("%Y-%m-%d"),
+                        "week_end": date_display,
                         "value": float(value),
+                        "held_count": held_count,
+                        "max_topn": max_topn,
                         "weekly_return_pct": float(weekly_return_pct.loc[dt]),
                         "cumulative_return_pct": float(weekly_cum_pct.loc[dt]),
                     }

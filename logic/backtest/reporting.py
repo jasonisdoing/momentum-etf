@@ -178,24 +178,28 @@ def print_backtest_summary(
     add_section_heading("주별 성과 요약")
     weekly_summary_rows = summary.get("weekly_summary") or []
     if isinstance(weekly_summary_rows, list) and weekly_summary_rows:
-        headers = ["주차(종료일)", "평가금액", "주간 수익률", "누적 수익률"]
+        headers = ["주차(종료일)", "보유종목", "평가금액", "주간 수익률", "누적 수익률"]
         table_rows = []
         for item in weekly_summary_rows:
             week_label = item.get("week_end") or "-"
             value = item.get("value")
+            held_count = item.get("held_count", 0)
+            max_topn = item.get("max_topn", 0)
             weekly_ret = item.get("weekly_return_pct")
             cum_ret = item.get("cumulative_return_pct")
             value_display = money_formatter(value) if _is_finite_number(value) else "-"
             value_display = _align_korean_money_for_weekly(value_display)
+            holdings_display = f"{held_count}/{max_topn}" if max_topn > 0 else "-"
             table_rows.append(
                 [
                     week_label,
+                    holdings_display,
                     value_display,
                     f"{weekly_ret:+.2f}%" if _is_finite_number(weekly_ret) else "-",
                     f"{cum_ret:+.2f}%" if _is_finite_number(cum_ret) else "-",
                 ]
             )
-        aligns = ["left", "right", "right", "right"]
+        aligns = ["left", "center", "right", "right", "right"]
         for line in render_table_eaw(headers, table_rows, aligns):
             add(line)
     else:
