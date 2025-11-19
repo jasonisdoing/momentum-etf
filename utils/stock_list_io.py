@@ -106,7 +106,7 @@ def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None
         best_idx = -1
         best_score = float("-inf")
         for idx, entry in enumerate(items):
-            score_raw = entry.get("3_month_earn_rate")
+            score_raw = entry.get("1_month_earn_rate")
             try:
                 score_val = float(score_raw)
             except (TypeError, ValueError):

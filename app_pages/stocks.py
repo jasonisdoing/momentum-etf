@@ -121,8 +121,7 @@ def _render_cache_summary_table(country_code: str) -> None:
                 "종목명": item.get("name") or "-",
                 "추천 사용": bool(item.get("recommend_enabled", True)),
                 "상장일": item.get("listing_date") or "-",
-                "1주 평균 거래량": item.get("1_week_avg_volume") or 0,
-                "1주 평균 거래대금": item.get("1_week_avg_turnover") or 0,
+                "1달 평균 거래량": item.get("1_month_avg_volume") or 0,
                 "캐시 시작": cache_start,
                 "캐시 종료": cache_end,
             }
@@ -135,8 +134,7 @@ def _render_cache_summary_table(country_code: str) -> None:
         hide_index=True,
         width="stretch",
         column_config={
-            "1주 평균 거래량": st.column_config.NumberColumn("1주 평균 거래량", format="%,d"),
-            "1주 평균 거래대금": st.column_config.NumberColumn("1주 평균 거래대금", format="%,d"),
+            "1달 평균 거래량": st.column_config.NumberColumn("1달 평균 거래량", format=",d"),
         },
     )
 
