@@ -185,6 +185,7 @@ def _execute_individual_sells(
                 cash += trade_amount
                 current_holdings_value = max(0.0, current_holdings_value - trade_amount)
                 ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
+                # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                 if cooldown_days > 0:
                     ticker_state["buy_block_until"] = i + cooldown_days
 
@@ -395,8 +396,7 @@ def _execute_new_buys(
             current_holdings_value += trade_amount
             ticker_state["shares"] += req_qty
             ticker_state["avg_cost"] = buy_price
-            if cooldown_days > 0:
-                ticker_state["sell_block_until"] = max(ticker_state["sell_block_until"], i + cooldown_days)
+            # 매도 쿨다운 제거: 매수 후 바로 매도 가능 (조건 충족 시)
 
             if category and not is_category_exception(category):
                 held_categories.add(category)
@@ -932,6 +932,7 @@ def run_portfolio_backtest(
                             cash -= trade_amount
                             position_state[core_ticker]["shares"] = shares_to_buy
                             position_state[core_ticker]["avg_cost"] = price
+                            # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                             position_state[core_ticker]["buy_block_until"] = i + cooldown_days
 
                             buy_trades_today_map.setdefault(core_ticker, []).append({"shares": float(shares_to_buy), "price": float(price)})
@@ -1114,6 +1115,7 @@ def run_portfolio_backtest(
                         cash += sell_amount
                         current_holdings_value = max(0.0, current_holdings_value - sell_amount)
                         weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
+                        # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                         if cooldown_days > 0:
                             weakest_state["buy_block_until"] = i + cooldown_days
 
@@ -1155,8 +1157,7 @@ def run_portfolio_backtest(
                                 req_qty,
                                 buy_price,
                             )
-                            if cooldown_days > 0:
-                                new_ticker_state["sell_block_until"] = max(new_ticker_state["sell_block_until"], i + cooldown_days)
+                            # 매도 쿨다운 제거: 매수 후 바로 매도 가능 (조건 충족 시)
 
                             # 결과 행 업데이트: 없으면 새로 추가
                             if (

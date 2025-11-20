@@ -136,25 +136,10 @@ def _calculate_cooldown_blocks(
             if not isinstance(trade_info, dict):
                 continue
 
-            last_buy = trade_info.get("last_buy")
             last_sell = trade_info.get("last_sell")
 
-            if last_buy is not None:
-                last_buy_ts = pd.to_datetime(last_buy).normalize()
-                if last_buy_ts <= base_date_norm:
-                    cached_days = _cached_trading_day_diff(last_buy_ts)
-                    if cached_days is None:
-                        cached_days = count_trading_days(country_code, last_buy_ts, base_date_norm)
-                    days_since_buy = max(cached_days, 0)
-                    if days_since_buy < cooldown_days:
-                        # logger.info(
-                        #     f"[COOLDOWN BLOCK] {tkr}: last_buy={last_buy_ts.strftime('%Y-%m-%d')}, base_date={base_date_norm.strftime('%Y-%m-%d')}, days_since={days_since_buy}, cooldown_days={cooldown_days}"
-                        # )
-                        sell_cooldown_block[tkr] = {
-                            "last_buy": last_buy_ts,
-                            "days_since": days_since_buy,
-                        }
-
+            # 매도 쿨다운 제거: 매수 후 바로 매도 가능
+            # 매수 쿨다운만 유지: 매도 후 재매수 금지 기간
             if last_sell is not None:
                 last_sell_ts = pd.to_datetime(last_sell).normalize()
                 if last_sell_ts <= base_date_norm:
@@ -450,17 +435,8 @@ def run_portfolio_recommend(
     # 쿨다운 블록 계산
     sell_cooldown_block, buy_cooldown_block = _calculate_cooldown_blocks(trade_cooldown_info, cooldown_days, base_date, country_code)
 
-    # 오늘 매수한 종목도 매도 쿨다운에 추가 (consecutive_holding_info 기반)
-    base_date_norm = base_date.normalize()
-    for tkr, holding_info in (consecutive_holding_info or {}).items():
-        buy_date = holding_info.get("buy_date")
-        if buy_date and pd.to_datetime(buy_date).normalize() == base_date_norm:
-            if tkr not in sell_cooldown_block:
-                sell_cooldown_block[tkr] = {
-                    "last_buy": base_date_norm,
-                    "days_since": 0,
-                }
-                # logger.info(f"[COOLDOWN BLOCK TODAY] {tkr}: 오늘 매수 → 매도 쿨다운 추가")
+    # 매도 쿨다운 제거: 오늘 매수한 종목도 조건이 맞으면 바로 매도 가능
+    # (consecutive_holding_info 기반 매도 쿨다운 추가 로직 제거)
 
     # 각 종목에 대한 의사결정 생성
     for tkr, _ in pairs:

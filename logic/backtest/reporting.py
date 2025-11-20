@@ -141,7 +141,7 @@ def print_backtest_summary(
         "모멘텀 스코어 MA 기간": momentum_label,
         "교체 매매 점수 임계값": replace_threshold,
         "개별 종목 손절매": stop_loss_label,
-        "매도 후 재매수 금지 기간": f"{cooldown_days}일",
+        "매도 후 재매수 금지 기간": f"{cooldown_days}일 (매수 후 매도는 즉시 가능)",
     }
 
     if currency != "KRW":

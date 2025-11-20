@@ -73,21 +73,23 @@ elif current_price < ma_value:
 
 ### 2. 쿨다운 로직
 
-**규칙:** `days_since < cooldown_days` → 거래 차단
+**규칙:** 매도 후 재매수만 쿨다운 적용 (매수 후 매도는 즉시 가능)
 
 | 항목 | 추천 | 백테스트 |
 |------|------|---------|
 | 파일 | `portfolio.py` | `portfolio_runner.py` |
-| 매수 후 매도 쿨다운 | 63-111줄 (`_calculate_cooldown_blocks`) | 654줄 (`sell_block_until`) |
-| 매도 후 매수 쿨다운 | 63-111줄 (`_calculate_cooldown_blocks`) | 768줄 (`buy_block_until`) |
+| 매수 후 매도 쿨다운 | **제거됨** (즉시 매도 가능) | **제거됨** (즉시 매도 가능) |
+| 매도 후 매수 쿨다운 | 134-154줄 (`_calculate_cooldown_blocks`) | 190줄, 1120줄 (`buy_block_until`) |
 
-**COOLDOWN_DAYS=1 의미:**
-- **당일 (0일):** 반대 거래 차단
-- **다음날 (1일 이상):** 반대 거래 허용
+**COOLDOWN_DAYS=3 의미:**
+- **매도 당일 (0일):** 재매수 차단
+- **매도 후 1-2일:** 재매수 차단
+- **매도 후 3일 이상:** 재매수 허용
 
-**구현 차이 (결과는 동일):**
-- **추천:** 매도 결정 후 쿨다운 체크 → HOLD로 전환
-- **백테스트:** 매도 전 쿨다운 사전 체크 → 매도 로직 진입 안 함
+**매수 후 매도:**
+- **쿨다운 없음** - 조건이 맞으면 매수 당일에도 즉시 매도 가능
+- **백테스트:** 다음 거래일에 매도 (시뮬레이션 특성)
+- **추천:** 당일 조건 충족 시 즉시 매도 추천
 
 ---
 
@@ -245,9 +247,9 @@ python tune.py k1
 - [ ] 순서 확인: CUT_STOPLOSS → SELL_RSI → SELL_TREND
 
 **쿨다운 로직 수정 시:**
-- [ ] `portfolio.py` 63-111줄 수정
-- [ ] `portfolio_runner.py` 654줄, 768줄 동일하게 수정
-- [ ] `days_since < cooldown_days` 조건 확인
+- [ ] `portfolio.py` 134-154줄 수정 (매도 후 재매수 금지만)
+- [ ] `portfolio_runner.py` 190줄, 1120줄 동일하게 수정
+- [ ] 매수 후 매도는 쿨다운 없음 (즉시 가능)
 
 **RSI 카테고리 차단 수정 시:**
 - [ ] `portfolio.py` 484-499줄 수정

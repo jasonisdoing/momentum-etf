@@ -7,7 +7,7 @@
                 "name": "Kodex 미국S&P500",
                 "recommend_enabled": true,
                 "listing_date": "2021-04-09",
-                "1_month_avg_volume": 3721578,
+                "1_month_avg_volume": 3719851,
                 "1_month_earn_rate": 1.7914,
                 "3_month_earn_rate": 8.492
             },
@@ -16,7 +16,7 @@
                 "name": "Kodex 미국나스닥100",
                 "recommend_enabled": true,
                 "listing_date": "2021-04-09",
-                "1_month_avg_volume": 2084069,
+                "1_month_avg_volume": 2082874,
                 "1_month_earn_rate": 2.363,
                 "3_month_earn_rate": 8.9756
             },
@@ -25,7 +25,7 @@
                 "name": "TIMEFOLIO 미국나스닥100액티브",
                 "recommend_enabled": true,
                 "listing_date": "2022-05-11",
-                "1_month_avg_volume": 639208,
+                "1_month_avg_volume": 638268,
                 "1_month_earn_rate": -0.3968,
                 "3_month_earn_rate": 4.5546
             }
@@ -39,7 +39,7 @@
                 "name": "Kodex 미국AI테크TOP10",
                 "recommend_enabled": true,
                 "listing_date": "2024-06-25",
-                "1_month_avg_volume": 625982,
+                "1_month_avg_volume": 625699,
                 "1_month_earn_rate": 3.6803,
                 "3_month_earn_rate": 10.3312
             },
@@ -57,7 +57,7 @@
                 "name": "TIMEFOLIO 글로벌AI인공지능액티브",
                 "recommend_enabled": true,
                 "listing_date": "2023-05-16",
-                "1_month_avg_volume": 574353,
+                "1_month_avg_volume": 574150,
                 "1_month_earn_rate": -1.0286,
                 "3_month_earn_rate": 8.5215
             }
@@ -71,7 +71,7 @@
                 "name": "TIGER 미국테크TOP10 INDXX",
                 "recommend_enabled": true,
                 "listing_date": "2021-04-09",
-                "1_month_avg_volume": 2653328,
+                "1_month_avg_volume": 2649320,
                 "1_month_earn_rate": 5.0819,
                 "3_month_earn_rate": 10.9632
             },
@@ -94,7 +94,7 @@
                 "name": "PLUS 글로벌HBM반도체",
                 "recommend_enabled": true,
                 "listing_date": "2022-09-22",
-                "1_month_avg_volume": 84369,
+                "1_month_avg_volume": 84362,
                 "1_month_earn_rate": 13.7418,
                 "3_month_earn_rate": 73.4216
             },
@@ -103,7 +103,7 @@
                 "name": "SOL 미국AI반도체칩메이커",
                 "recommend_enabled": true,
                 "listing_date": "2024-04-16",
-                "1_month_avg_volume": 56906,
+                "1_month_avg_volume": 56863,
                 "1_month_earn_rate": 4.1412,
                 "3_month_earn_rate": 18.7755
             },
@@ -112,7 +112,7 @@
                 "name": "ACE 글로벌반도체TOP4 Plus",
                 "recommend_enabled": true,
                 "listing_date": "2022-11-15",
-                "1_month_avg_volume": 473572,
+                "1_month_avg_volume": 472675,
                 "1_month_earn_rate": 8.2306,
                 "3_month_earn_rate": 38.308
             },
@@ -121,7 +121,7 @@
                 "name": "Kodex 미국반도체",
                 "recommend_enabled": true,
                 "listing_date": "2021-06-30",
-                "1_month_avg_volume": 495179,
+                "1_month_avg_volume": 494936,
                 "1_month_earn_rate": 5.0075,
                 "3_month_earn_rate": 17.9414
             },
@@ -130,7 +130,7 @@
                 "name": "ACE 엔비디아밸류체인액티브",
                 "recommend_enabled": true,
                 "listing_date": "2024-06-11",
-                "1_month_avg_volume": 868098,
+                "1_month_avg_volume": 868004,
                 "1_month_earn_rate": 9.004,
                 "3_month_earn_rate": 26.4194
             }
@@ -144,7 +144,7 @@
                 "name": "SOL 미국AI전력인프라",
                 "recommend_enabled": true,
                 "listing_date": "2024-07-16",
-                "1_month_avg_volume": 403239,
+                "1_month_avg_volume": 403219,
                 "1_month_earn_rate": 3.1825,
                 "3_month_earn_rate": 12.5215
             },
@@ -153,7 +153,7 @@
                 "name": "Kodex 미국AI전력핵심인프라",
                 "recommend_enabled": true,
                 "listing_date": "2024-07-09",
-                "1_month_avg_volume": 3343365,
+                "1_month_avg_volume": 3338945,
                 "1_month_earn_rate": 0.027,
                 "3_month_earn_rate": 3.7645
             },
@@ -171,7 +171,7 @@
                 "name": "Kodex 차이나2차전지MSCI(합성)",
                 "recommend_enabled": true,
                 "listing_date": "2022-03-22",
-                "1_month_avg_volume": 58049,
+                "1_month_avg_volume": 58012,
                 "1_month_earn_rate": 5.4305,
                 "3_month_earn_rate": 44.6357
             },
@@ -180,7 +180,7 @@
                 "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
                 "recommend_enabled": true,
                 "listing_date": "2021-07-20",
-                "1_month_avg_volume": 238698,
+                "1_month_avg_volume": 238637,
                 "1_month_earn_rate": 13.0,
                 "3_month_earn_rate": 42.5531
             },
@@ -189,7 +189,7 @@
                 "name": "RISE 글로벌수소경제",
                 "recommend_enabled": true,
                 "listing_date": "2022-02-15",
-                "1_month_avg_volume": 72478,
+                "1_month_avg_volume": 72474,
                 "1_month_earn_rate": 5.1271,
                 "3_month_earn_rate": 37.6993
             },
@@ -207,7 +207,7 @@
                 "name": "TIGER 글로벌AI전력인프라액티브",
                 "recommend_enabled": true,
                 "listing_date": "2024-09-10",
-                "1_month_avg_volume": 425387,
+                "1_month_avg_volume": 425239,
                 "1_month_earn_rate": 1.9314,
                 "3_month_earn_rate": 13.0764
             },
@@ -271,7 +271,7 @@
                 "name": "TIMEFOLIO 글로벌바이오액티브",
                 "recommend_enabled": true,
                 "listing_date": "2024-07-02",
-                "1_month_avg_volume": 34370,
+                "1_month_avg_volume": 34353,
                 "1_month_earn_rate": 15.898,
                 "3_month_earn_rate": 24.3467
             }
@@ -308,7 +308,7 @@
                 "name": "HANARO 글로벌 금채굴기업",
                 "recommend_enabled": true,
                 "listing_date": "2024-01-18",
-                "1_month_avg_volume": 103275,
+                "1_month_avg_volume": 103253,
                 "1_month_earn_rate": 6.6506,
                 "3_month_earn_rate": 35.7603
             }
@@ -382,7 +382,7 @@
                 "name": "TIGER 인도니프티50",
                 "recommend_enabled": true,
                 "listing_date": "2023-04-14",
-                "1_month_avg_volume": 220337,
+                "1_month_avg_volume": 220240,
                 "1_month_earn_rate": 1.2924,
                 "3_month_earn_rate": 8.1511
             }
@@ -396,7 +396,7 @@
                 "name": "PLUS 글로벌희토류&전략자원생산기업",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-18",
-                "1_month_avg_volume": 635269,
+                "1_month_avg_volume": 634338,
                 "1_month_earn_rate": 9.2956,
                 "3_month_earn_rate": 24.0692
             },
@@ -419,7 +419,7 @@
                 "name": "TIGER 미국방산TOP10",
                 "recommend_enabled": true,
                 "listing_date": "2024-10-29",
-                "1_month_avg_volume": 43699,
+                "1_month_avg_volume": 43698,
                 "1_month_earn_rate": -1.5513,
                 "3_month_earn_rate": 9.5591
             },
@@ -428,7 +428,7 @@
                 "name": "TIMEFOLIO 글로벌우주테크&방산액티브",
                 "recommend_enabled": true,
                 "listing_date": "2024-04-23",
-                "1_month_avg_volume": 139669,
+                "1_month_avg_volume": 139630,
                 "1_month_earn_rate": -5.1351,
                 "3_month_earn_rate": 5.1586
             }
@@ -442,7 +442,7 @@
                 "name": "TIGER 차이나과창판STAR50(합성)",
                 "recommend_enabled": true,
                 "listing_date": "2022-01-13",
-                "1_month_avg_volume": 664842,
+                "1_month_avg_volume": 664841,
                 "1_month_earn_rate": -1.4348,
                 "3_month_earn_rate": 30.3775
             },
