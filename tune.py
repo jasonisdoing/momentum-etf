@@ -19,7 +19,7 @@ TUNING_CONFIG: dict[str, dict] = {
         # "MA_RANGE": [50],
         # "MA_TYPE": ["TEMA"],
         "MA_TYPE": ["TEMA", "HMA"],
-        "PORTFOLIO_TOPN": [10],
+        "PORTFOLIO_TOPN": [7],
         "REPLACE_SCORE_THRESHOLD": [0],
         # "STOP_LOSS_PCT": np.arange(5, 11, 1),
         "STOP_LOSS_PCT": [10],

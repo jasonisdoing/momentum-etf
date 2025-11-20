@@ -518,25 +518,6 @@
     },
     {
         "category": "기타",
-        "tickers": [
-            {
-                "ticker": "463050",
-                "name": "TIMEFOLIO K바이오액티브",
-                "recommend_enabled": true,
-                "listing_date": "2023-08-17",
-                "1_month_avg_volume": 2471678,
-                "1_month_earn_rate": 31.9502,
-                "3_month_earn_rate": 38.2592
-            },
-            {
-                "ticker": "161510",
-                "name": "PLUS 고배당주",
-                "recommend_enabled": true,
-                "listing_date": "2012-08-29",
-                "1_month_avg_volume": 1689608,
-                "1_month_earn_rate": 3.8183,
-                "3_month_earn_rate": 8.7734
-            }
-        ]
+        "tickers": []
     }
 ]

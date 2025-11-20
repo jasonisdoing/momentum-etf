@@ -16,7 +16,7 @@ except ImportError:
 
 load_dotenv()
 
-APP_VERSION = "2025-11-20-11"
+APP_VERSION = "2025-11-20-13"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
 LOG_LEVEL = os.environ.get("APP_LOG_LEVEL", "INFO").upper()
