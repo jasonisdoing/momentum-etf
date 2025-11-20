@@ -32,7 +32,14 @@ from pykrx import stock
 
 # --- 설정 ---
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
+# EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN", "코리아", "한국", "200", "삼성", "코스닥", "코스피"]
 EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN"]
+# 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
+# INCLUDE_KEYWORDS = ["글로벌", "미국"]
+INCLUDE_KEYWORDS = []
+# 최소 거래량 (0이면 필터링 안 함)
+# MIN_VOLUME = 100000
+MIN_VOLUME = 0
 
 
 def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
@@ -225,15 +232,32 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             return
 
         # 키워드 기반 필터링
+        initial_count = len(top_gainers)
+
+        # INCLUDE_KEYWORDS 필터링 (OR 조건: 하나라도 포함되면 포함)
+        if INCLUDE_KEYWORDS:
+            include_pattern = "|".join(INCLUDE_KEYWORDS)
+            top_gainers = top_gainers[top_gainers["종목명"].str.contains(include_pattern, na=False)]
+            include_filtered_count = initial_count - len(top_gainers)
+            if include_filtered_count > 0:
+                print(f"포함 키워드({', '.join(INCLUDE_KEYWORDS)})에 따라 {include_filtered_count}개 종목을 제외했습니다.")
+
+        # EXCLUDE_KEYWORDS 필터링
         if EXCLUDE_KEYWORDS:
-            initial_count = len(top_gainers)
-            # '|'로 키워드를 연결하여 정규식 OR 조건 생성
+            before_exclude = len(top_gainers)
             exclude_pattern = "|".join(EXCLUDE_KEYWORDS)
-            # '종목명'에 키워드가 포함되지 않은 행만 남김
             top_gainers = top_gainers[~top_gainers["종목명"].str.contains(exclude_pattern, na=False)]
-            filtered_count = initial_count - len(top_gainers)
-            if filtered_count > 0:
-                print(f"제외 키워드({", ".join(EXCLUDE_KEYWORDS)})에 따라 {filtered_count}개 종목을 제외했습니다.")
+            exclude_filtered_count = before_exclude - len(top_gainers)
+            if exclude_filtered_count > 0:
+                print(f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {exclude_filtered_count}개 종목을 제외했습니다.")
+
+        # 거래량 필터링
+        if MIN_VOLUME > 0 and "거래량" in top_gainers.columns:
+            before_volume = len(top_gainers)
+            top_gainers = top_gainers[top_gainers["거래량"] >= MIN_VOLUME]
+            volume_filtered_count = before_volume - len(top_gainers)
+            if volume_filtered_count > 0:
+                print(f"최소 거래량({MIN_VOLUME:,})에 따라 {volume_filtered_count}개 종목을 제외했습니다.")
 
         print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
 
