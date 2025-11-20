@@ -588,7 +588,23 @@ def _build_ticker_timeseries_entry(
         if isinstance(deviation_raw, (int, float)):
             price_deviation = round(float(deviation_raw), 2)
 
-    if market_latest and market_prev and market_prev > 0:
+    # 일간 변동률 계산: 개장 중이거나 실시간 데이터가 있을 때만 계산
+    # 개장 전(자정~09:00) 또는 휴장일에는 0으로 표시
+    should_calculate_daily_change = False
+    if is_kor_market:
+        # 한국 시장: 실시간 스냅샷이 있으면 개장 중으로 간주
+        if snapshot_entry:
+            should_calculate_daily_change = True
+        else:
+            # 실시간 데이터가 없으면 시장 개장 여부 확인
+            from logic.recommend.schedule import is_market_open
+
+            should_calculate_daily_change = is_market_open(country_code)
+    else:
+        # 해외 시장: 일단 계산 (추후 확장 가능)
+        should_calculate_daily_change = True
+
+    if should_calculate_daily_change and market_latest and market_prev and market_prev > 0:
         try:
             daily_pct = ((market_latest / market_prev) - 1.0) * 100
         except ZeroDivisionError:
@@ -598,9 +614,30 @@ def _build_ticker_timeseries_entry(
         nav_latest = None
         price_deviation = None
 
-    # 데이터 충분성 검증: MA 계산에 필요한 최소 데이터 확인
-    # EMA/TEMA 등은 적은 데이터로도 계산되지만, 신뢰성을 위해 최소 기간의 70% 이상 필요
-    min_required_data = int(ma_period * 0.7)
+    # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
+    ma_type_upper = (ma_type or "SMA").upper()
+    if ma_type_upper == "TEMA":
+        ideal_multiplier = 3.0
+    elif ma_type_upper in {"HMA", "EMA", "DEMA"}:
+        ideal_multiplier = 2.0
+    else:  # SMA, WMA 등
+        ideal_multiplier = 1.0
+
+    ideal_data_required = int(ma_period * ideal_multiplier)
+
+    # 데이터가 이상적인 양보다 적으면 완화된 기준 적용 (신규 상장 ETF 대응)
+    if len(price_series) < ideal_data_required:
+        # 완화된 기준: multiplier의 절반 (최소 1배)
+        relaxed_multiplier = max(ideal_multiplier / 2.0, 1.0)
+        min_required_data = int(ma_period * relaxed_multiplier)
+        logger.info(
+            f"[{ticker_upper}] 데이터 부족으로 완화된 기준 적용 (보유: {len(price_series)}개, "
+            f"이상: {ideal_data_required}개, 최소: {min_required_data}개, MA타입: {ma_type_upper})"
+        )
+    else:
+        # 충분한 데이터가 있으면 이상적인 기준 적용
+        min_required_data = ideal_data_required
+
     if len(price_series) < min_required_data:
         logger.warning(f"[{ticker_upper}] 데이터 부족으로 제외 (보유: {len(price_series)}개, 필요: {min_required_data}개 이상, MA기간: {ma_period})")
         return None
@@ -661,8 +698,8 @@ def _fetch_trades_for_date(account_id: str, base_date: pd.Timestamp) -> List[Dic
         return []
 
     start = base_date.to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0)
-    # 최신 추천 실행 시 실제 거래 시간이 기준일 다음 날일 수도 있으므로 현재 시각까지 확장
-    end = max(start + timedelta(days=1), datetime.utcnow())
+    # 기준일 당일의 거래만 조회 (00:00 ~ 23:59:59)
+    end = start + timedelta(days=1)
 
     account_norm = (account_id or "").strip().lower()
 
@@ -923,12 +960,16 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         if tickers_all
         else [str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if stock.get("ticker")]
     )
+    # 실시간 스냅샷은 개장 시간에만 조회 (개장 전/휴장일에는 일간 변동률 0 표시)
     if is_kor_market and snapshot_targets:
-        try:
-            realtime_inav_snapshot = fetch_naver_etf_inav_snapshot(snapshot_targets)
-        except Exception as exc:
-            logger.warning("[KOR] 네이버 iNAV 스냅샷 조회 실패: %s", exc)
-            realtime_inav_snapshot = {}
+        from logic.recommend.schedule import is_market_open
+
+        if is_market_open(country_code):
+            try:
+                realtime_inav_snapshot = fetch_naver_etf_inav_snapshot(snapshot_targets)
+            except Exception as exc:
+                logger.warning("[KOR] 네이버 iNAV 스냅샷 조회 실패: %s", exc)
+                realtime_inav_snapshot = {}
 
     missing_data_tickers: List[str] = []
     missing_logged: Set[str] = set()
@@ -1184,7 +1225,7 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         ticker_upper = str(ticker).upper()
         recommend_enabled = ticker_upper not in disabled_tickers
 
-        # 보유일 계산
+        # 보유일 계산 (현재 날짜 기준)
         base_norm = base_date.normalize()
         holding_days_val = 0
         latest_buy_date_norm: Optional[pd.Timestamp] = None

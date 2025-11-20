@@ -499,9 +499,26 @@ def process_ticker_data(
         else:
             open_prices = close_prices.copy()
 
-    # 데이터 충분성 검증: MA 계산에 필요한 최소 데이터 확인
-    # EMA/TEMA 등은 적은 데이터로도 계산되지만, 신뢰성을 위해 최소 기간의 70% 이상 필요
-    min_required_data = int(current_ma_period * 0.7)
+    # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
+    ma_type_upper = (ma_type or "SMA").upper()
+    if ma_type_upper == "TEMA":
+        ideal_multiplier = 3.0
+    elif ma_type_upper in {"HMA", "EMA", "DEMA"}:
+        ideal_multiplier = 2.0
+    else:  # SMA, WMA 등
+        ideal_multiplier = 1.0
+
+    ideal_data_required = int(current_ma_period * ideal_multiplier)
+
+    # 데이터가 이상적인 양보다 적으면 완화된 기준 적용 (신규 상장 ETF 대응)
+    if len(close_prices) < ideal_data_required:
+        # 완화된 기준: multiplier의 절반 (최소 1배)
+        relaxed_multiplier = max(ideal_multiplier / 2.0, 1.0)
+        min_required_data = int(current_ma_period * relaxed_multiplier)
+    else:
+        # 충분한 데이터가 있으면 이상적인 기준 적용
+        min_required_data = ideal_data_required
+
     if len(close_prices) < min_required_data:
         return None
 

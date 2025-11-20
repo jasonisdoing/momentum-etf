@@ -9,21 +9,27 @@
     "show_hold_only": false,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "CAGR": 88.239066,
-        "MDD": -12.456612,
+        "CAGR": 87.22892,
+        "MDD": -11.235766,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-11-19 22:27",
-        "MA_PERIOD": 90,
+        "BACKTESTED_DATE": "2025-11-20 10:03",
+        "MA_PERIOD": 95,
         "MA_TYPE": "TEMA",
         "PORTFOLIO_TOPN": 10,
         "REPLACE_SCORE_THRESHOLD": 2.0,
         "STOP_LOSS_PCT": 10.0,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
-        "COOLDOWN_DAYS": 1,
+        "COOLDOWN_DAYS": 3,
         "MIN_BUY_SCORE": 0.0,
-        "CORE_HOLDINGS": []
+        "CORE_HOLDINGS": [
+            "455030"
+        ]
     },
     "benchmarks": [
+        {
+            "ticker": "455030",
+            "name": "KODEX 미국달러SOFR"
+        },
         {
             "ticker": "0097L0",
             "name": "KIWOOM 한국고배당&미국AI테크"

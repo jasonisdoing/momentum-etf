@@ -15,9 +15,9 @@ from utils.data_loader import MissingPriceDataError
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
     "k1": {
-        "MA_RANGE": np.arange(20, 110, 10),
+        "MA_RANGE": np.arange(20, 105, 5),
         # "MA_RANGE": [50],
-        # "MA_TYPE": ["HMA"],
+        # "MA_TYPE": ["TEMA"],
         "MA_TYPE": ["TEMA", "HMA"],
         "PORTFOLIO_TOPN": [10],
         "REPLACE_SCORE_THRESHOLD": [0, 1, 2],
@@ -25,7 +25,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "STOP_LOSS_PCT": [10],
         "OVERBOUGHT_SELL_THRESHOLD": np.arange(80, 110, 10),
         # "COOLDOWN_DAYS": [1, 2, 3, 4, 5],
-        "COOLDOWN_DAYS": [1],
+        "COOLDOWN_DAYS": [1, 2, 3],
         "MIN_BUY_SCORE": [0],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
