@@ -844,16 +844,6 @@
     },
     {
         "category": "기타",
-        "tickers": [
-            {
-                "ticker": "455030",
-                "name": "KODEX 미국달러SOFR",
-                "recommend_enabled": true,
-                "listing_date": "2023-04-04",
-                "1_month_avg_volume": 97099,
-                "1_month_earn_rate": 1.937,
-                "3_month_earn_rate": 6.3523
-            }
-        ]
+        "tickers": []
     }
 ]
