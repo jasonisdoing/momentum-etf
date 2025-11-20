@@ -424,7 +424,7 @@ def _format_date_kor(ts: pd.Timestamp) -> str:
     ts = pd.to_datetime(ts)
     weekday_map = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
     weekday = weekday_map.get(ts.weekday(), "")
-    return f"{ts.year}년 {ts.month}월 {ts.day}일({weekday})"
+    return f"{ts.strftime('%Y-%m-%d')}({weekday})"
 
 
 def _build_daily_table_rows(

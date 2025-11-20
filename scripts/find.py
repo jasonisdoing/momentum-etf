@@ -17,20 +17,22 @@ pykrx 라이브러리를 사용하여 지정된 등락률 이상 상승한 종�
 
 [사용법]
 python scripts/find.py
-python scripts/find.py --min-change 10.0
+
+[설정 변경]
+최소 등락률을 변경하려면 파일 상단의 MIN_CHANGE_PCT 상수를 수정하세요.
 """
 
-import argparse
 import json
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional
 
 import pandas as pd
 import requests
 from pykrx import stock
 
 # --- 설정 ---
+# 최소 등락률 (%)
+MIN_CHANGE_PCT = 3.0
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
 # EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN", "코리아", "한국", "200", "삼성", "코스닥", "코스피"]
 EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN"]
@@ -301,14 +303,4 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="금일 상승중인 ETF를 보여줍니다.")
-    parser.add_argument("--min-change", type=float, default=3.0, help="검색할 최소 등락률 (기본값: 3.0)")
-    parser.add_argument(
-        "--type",
-        type=str,
-        choices=["stock", "etf"],
-        default="etf",
-        help="검색할 종목 유형 (stock: 일반 주식, etf: ETF (기본값))",
-    )
-    args = parser.parse_args()
-    find_top_gainers(min_change_pct=args.min_change, asset_type=args.type)
+    find_top_gainers(min_change_pct=MIN_CHANGE_PCT, asset_type="etf")
