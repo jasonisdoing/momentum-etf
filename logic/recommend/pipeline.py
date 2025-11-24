@@ -691,14 +691,19 @@ def _build_ticker_timeseries_entry(
 
 
 def _fetch_trades_for_date(account_id: str, base_date: pd.Timestamp) -> List[Dict[str, Any]]:
-    """Retrieve trades executed on the given base_date."""
+    """Retrieve trades executed TODAY (actual current date), not base_date.
+
+    This ensures that before market open, we don't show previous day's trades as SOLD.
+    Only trades actually executed today should be marked as SOLD.
+    """
 
     db = get_db_connection()
     if db is None:
         return []
 
-    start = base_date.to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0)
-    # 기준일 당일의 거래만 조회 (00:00 ~ 23:59:59)
+    # 현재 날짜 기준으로 오늘 체결된 거래만 조회 (개장 전에는 빈 리스트 반환)
+    now = datetime.now()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=1)
 
     account_norm = (account_id or "").strip().lower()
