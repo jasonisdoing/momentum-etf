@@ -615,32 +615,35 @@ def _build_ticker_timeseries_entry(
         price_deviation = None
 
     # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
-    ma_type_upper = (ma_type or "SMA").upper()
-    if ma_type_upper == "TEMA":
-        ideal_multiplier = 3.0
-    elif ma_type_upper in {"HMA", "EMA", "DEMA"}:
-        ideal_multiplier = 2.0
-    else:  # SMA, WMA 등
-        ideal_multiplier = 1.0
+    if config.ENABLE_DATA_SUFFICIENCY_CHECK:
+        ma_type_upper = (ma_type or "SMA").upper()
+        if ma_type_upper == "TEMA":
+            ideal_multiplier = 3.0
+        elif ma_type_upper in {"HMA", "EMA", "DEMA"}:
+            ideal_multiplier = 2.0
+        else:  # SMA, WMA 등
+            ideal_multiplier = 1.0
 
-    ideal_data_required = int(ma_period * ideal_multiplier)
+        ideal_data_required = int(ma_period * ideal_multiplier)
 
-    # 데이터가 이상적인 양보다 적으면 완화된 기준 적용 (신규 상장 ETF 대응)
-    if len(price_series) < ideal_data_required:
-        # 완화된 기준: multiplier의 절반 (최소 1배)
-        relaxed_multiplier = max(ideal_multiplier / 2.0, 1.0)
-        min_required_data = int(ma_period * relaxed_multiplier)
-        logger.info(
-            f"[{ticker_upper}] 데이터 부족으로 완화된 기준 적용 (보유: {len(price_series)}개, "
-            f"이상: {ideal_data_required}개, 최소: {min_required_data}개, MA타입: {ma_type_upper})"
-        )
-    else:
-        # 충분한 데이터가 있으면 이상적인 기준 적용
-        min_required_data = ideal_data_required
+        # 데이터가 이상적인 양보다 적으면 완화된 기준 적용 (신규 상장 ETF 대응)
+        if len(price_series) < ideal_data_required:
+            # 완화된 기준: multiplier의 절반 (최소 1배)
+            relaxed_multiplier = max(ideal_multiplier / 2.0, 1.0)
+            min_required_data = int(ma_period * relaxed_multiplier)
+            logger.info(
+                f"[{ticker_upper}] 데이터 부족으로 완화된 기준 적용 (보유: {len(price_series)}개, "
+                f"이상: {ideal_data_required}개, 최소: {min_required_data}개, MA타입: {ma_type_upper})"
+            )
+        else:
+            # 충분한 데이터가 있으면 이상적인 기준 적용
+            min_required_data = ideal_data_required
 
-    if len(price_series) < min_required_data:
-        logger.warning(f"[{ticker_upper}] 데이터 부족으로 제외 (보유: {len(price_series)}개, 필요: {min_required_data}개 이상, MA기간: {ma_period})")
-        return None
+        if len(price_series) < min_required_data:
+            logger.warning(
+                f"[{ticker_upper}] 데이터 부족으로 제외 (보유: {len(price_series)}개, 필요: {min_required_data}개 이상, MA기간: {ma_period})"
+            )
+            return None
 
     moving_average = calculate_moving_average(price_series, ma_period, ma_type)
     ma_score_series = calculate_ma_score(price_series, moving_average)

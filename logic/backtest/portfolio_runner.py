@@ -8,7 +8,8 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, 
 
 import pandas as pd
 
-from config import BACKTEST_SLIPPAGE, CATEGORY_EXCEPTIONS
+import config
+from config import BACKTEST_SLIPPAGE
 from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
 from utils.report import format_kr_money
@@ -500,27 +501,28 @@ def process_ticker_data(
             open_prices = close_prices.copy()
 
     # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
-    ma_type_upper = (ma_type or "SMA").upper()
-    if ma_type_upper == "TEMA":
-        ideal_multiplier = 3.0
-    elif ma_type_upper in {"HMA", "EMA", "DEMA"}:
-        ideal_multiplier = 2.0
-    else:  # SMA, WMA 등
-        ideal_multiplier = 1.0
+    if config.ENABLE_DATA_SUFFICIENCY_CHECK:
+        ma_type_upper = (ma_type or "SMA").upper()
+        if ma_type_upper == "TEMA":
+            ideal_multiplier = 3.0
+        elif ma_type_upper in {"HMA", "EMA", "DEMA"}:
+            ideal_multiplier = 2.0
+        else:  # SMA, WMA 등
+            ideal_multiplier = 1.0
 
-    ideal_data_required = int(current_ma_period * ideal_multiplier)
+        ideal_data_required = int(current_ma_period * ideal_multiplier)
 
-    # 데이터가 이상적인 양보다 적으면 완화된 기준 적용 (신규 상장 ETF 대응)
-    if len(close_prices) < ideal_data_required:
-        # 완화된 기준: multiplier의 절반 (최소 1배)
-        relaxed_multiplier = max(ideal_multiplier / 2.0, 1.0)
-        min_required_data = int(current_ma_period * relaxed_multiplier)
-    else:
-        # 충분한 데이터가 있으면 이상적인 기준 적용
-        min_required_data = ideal_data_required
+        # 데이터가 이상적인 양보다 적으면 완화된 기준 적용 (신규 상장 ETF 대응)
+        if len(close_prices) < ideal_data_required:
+            # 완화된 기준: multiplier의 절반 (최소 1배)
+            relaxed_multiplier = max(ideal_multiplier / 2.0, 1.0)
+            min_required_data = int(current_ma_period * relaxed_multiplier)
+        else:
+            # 충분한 데이터가 있으면 이상적인 기준 적용
+            min_required_data = ideal_data_required
 
-    if len(close_prices) < min_required_data:
-        return None
+        if len(close_prices) < min_required_data:
+            return None
 
     # MAPS 전략 지표 계산
     from utils.moving_averages import calculate_moving_average
