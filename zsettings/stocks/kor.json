@@ -1,6 +1,6 @@
 [
     {
-        "category": "지수",
+        "category": "미국지수",
         "tickers": [
             {
                 "ticker": "379800",
@@ -549,7 +549,7 @@
         ]
     },
     {
-        "category": "기타",
+        "category": "한국고배당",
         "tickers": [
             {
                 "ticker": "161510",
@@ -579,5 +579,9 @@
                 "3_month_earn_rate": 1.9155
             }
         ]
+    },
+    {
+        "category": "기타",
+        "tickers": []
     }
 ]
