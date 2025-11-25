@@ -13,11 +13,11 @@
         "MDD": -10,
         "OPTIMIZATION_METRIC": "CAGR",
         "BACKTESTED_DATE": "2025-11-24 00:00",
-        "MA_PERIOD": 50,
+        "MA_PERIOD": 60,
         "MA_TYPE": "TEMA",
-        "PORTFOLIO_TOPN": 7,
+        "PORTFOLIO_TOPN": 6,
         "REPLACE_SCORE_THRESHOLD": 0.0,
-        "STOP_LOSS_PCT": 7.0,
+        "STOP_LOSS_PCT": 6.0,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 1,
         "MIN_BUY_SCORE": 0.0,
@@ -25,12 +25,9 @@
             "379810",
             "379800",
             "473640",
-            "468380",
             "0013P0",
             "0107F0",
-            "0097L0",
-            "498860",
-            "0098N0"
+            "0097L0"
         ]
     },
     "benchmarks": [
