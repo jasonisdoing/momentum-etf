@@ -86,16 +86,15 @@ def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None
     if not all_etfs:
         return all_etfs
 
-    # 카테고리별 대표 종목 선택 (동적 유니버스 구성을 위해 정적 필터링 비활성화)
-    # 모든 종목을 그대로 반환하여 백테스트/추천 로직에서 매일 동적으로 1등을 선정하도록 함
-    filtered: List[Dict[str, Any]] = []
-    for item in all_etfs:
-        filtered.append(item)
+    # 추천 제외 플래그가 설정된 종목은 기본 유니버스에서 제거
+    filtered: List[Dict[str, Any]] = [item for item in all_etfs if item.get("recommend_enabled", True)]
+    disabled_count = len(all_etfs) - len(filtered)
 
     logger.info(
-        "[%s] 전체 ETF 유니버스 로딩: %d개 종목 (정적 필터링 비활성화됨)",
+        "[%s] 전체 ETF 유니버스 로딩: %d개 종목 (추천 제외 %d개 필터링)",
         (country or "").upper(),
         len(filtered),
+        disabled_count,
     )
 
     if include_extra_tickers:
@@ -105,7 +104,7 @@ def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None
             if not norm or norm in existing:
                 continue
             src = by_ticker.get(norm)
-            if src:
+            if src and src.get("recommend_enabled", True):
                 filtered.append(src)
                 existing.add(norm)
 

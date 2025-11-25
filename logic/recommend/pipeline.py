@@ -169,6 +169,7 @@ def _load_full_etf_meta(country_code: str) -> Dict[str, Dict[str, Any]]:
                 "ticker": ticker,
                 "name": name,
                 "category": item_category,
+                "recommend_enabled": item.get("recommend_enabled") is not False,
             }
 
     return meta_map
@@ -781,9 +782,10 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
         entry.setdefault("name", norm)
         if "category" not in entry or not entry["category"]:
             raise ValueError(f"종목 {norm}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
+        entry["recommend_enabled"] = meta.get("recommend_enabled", True)
         full_meta_map[norm] = entry
 
-    disabled_tickers = {str(stock.get("ticker") or "").strip().upper() for stock in etf_universe if not bool(stock.get("recommend_enabled", True))}
+    disabled_tickers = {ticker for ticker, meta in full_meta_map.items() if not bool(meta.get("recommend_enabled", True))}
     pairs: List[Tuple[str, str]] = []
     pair_seen: Set[str] = set()
     for stock in etf_universe:
