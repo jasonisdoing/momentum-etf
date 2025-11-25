@@ -12,7 +12,7 @@
         "CAGR": 56.586598,
         "MDD": -10.325252,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-11-26 08:32",
+        "BACKTESTED_DATE": "2025-11-26 08:38",
         "MA_PERIOD": 90,
         "MA_TYPE": "TEMA",
         "PORTFOLIO_TOPN": 10,

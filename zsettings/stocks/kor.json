@@ -455,20 +455,6 @@
         ]
     },
     {
-        "category": "채권",
-        "tickers": [
-            {
-                "ticker": "468380",
-                "name": "KODEX iShares미국하이일드액티브",
-                "recommend_enabled": true,
-                "listing_date": "2023-10-19",
-                "1_month_avg_volume": 168321,
-                "1_month_earn_rate": 1.5332,
-                "3_month_earn_rate": 7.7193
-            }
-        ]
-    },
-    {
         "category": "배당성장합성",
         "tickers": [
             {
