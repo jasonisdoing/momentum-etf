@@ -23,6 +23,20 @@
    - 점수가 임계값 미만이면 `WAIT` 상태와 `최소 X점수 미만` 문구가 표시되며, 매수/교체 로직이 바로 차단된다.
    - 튜닝 탐색 공간에도 `MIN_BUY_SCORE` 값이 포함되어야 하며, 결과 요약/중간 보고서에 해당 값이 기록돼야 한다.
 
+3. **데이터 충분성 검증**
+   - 이동평균 계산에 필요한 최소 데이터: **데이터 가용량에 따라 적응적으로 적용**
+   - **이상적인 데이터 요구량** (충분한 데이터가 있는 경우):
+     - TEMA: `MA기간 × 3` (270일)
+     - HMA/EMA/DEMA: `MA기간 × 2` (180일)
+     - SMA/WMA: `MA기간 × 1` (90일)
+   - **완화된 데이터 요구량** (데이터가 부족한 신규 ETF):
+     - TEMA: `MA기간 × 1.5` (135일) - multiplier의 절반
+     - HMA/EMA/DEMA: `MA기간 × 1` (90일) - multiplier의 절반
+     - SMA/WMA: `MA기간 × 1` (90일) - 최소 1배 유지
+   - 완화된 기준도 충족하지 못하면 제외
+   - **추천:** `logic/recommend/pipeline.py` 616-644줄
+   - **백테스트:** `logic/backtest/portfolio_runner.py` 502-523줄
+
 ---
 
 ## ✅ 동일해야 하는 핵심 로직 (7개)
@@ -59,21 +73,23 @@ elif current_price < ma_value:
 
 ### 2. 쿨다운 로직
 
-**규칙:** `days_since < cooldown_days` → 거래 차단
+**규칙:** 매도 후 재매수만 쿨다운 적용 (매수 후 매도는 즉시 가능)
 
 | 항목 | 추천 | 백테스트 |
 |------|------|---------|
 | 파일 | `portfolio.py` | `portfolio_runner.py` |
-| 매수 후 매도 쿨다운 | 63-111줄 (`_calculate_cooldown_blocks`) | 654줄 (`sell_block_until`) |
-| 매도 후 매수 쿨다운 | 63-111줄 (`_calculate_cooldown_blocks`) | 768줄 (`buy_block_until`) |
+| 매수 후 매도 쿨다운 | **제거됨** (즉시 매도 가능) | **제거됨** (즉시 매도 가능) |
+| 매도 후 매수 쿨다운 | 134-154줄 (`_calculate_cooldown_blocks`) | 190줄, 1120줄 (`buy_block_until`) |
 
-**COOLDOWN_DAYS=1 의미:**
-- **당일 (0일):** 반대 거래 차단
-- **다음날 (1일 이상):** 반대 거래 허용
+**COOLDOWN_DAYS=3 의미:**
+- **매도 당일 (0일):** 재매수 차단
+- **매도 후 1-2일:** 재매수 차단
+- **매도 후 3일 이상:** 재매수 허용
 
-**구현 차이 (결과는 동일):**
-- **추천:** 매도 결정 후 쿨다운 체크 → HOLD로 전환
-- **백테스트:** 매도 전 쿨다운 사전 체크 → 매도 로직 진입 안 함
+**매수 후 매도:**
+- **쿨다운 없음** - 조건이 맞으면 매수 당일에도 즉시 매도 가능
+- **백테스트:** 다음 거래일에 매도 (시뮬레이션 특성)
+- **추천:** 당일 조건 충족 시 즉시 매도 추천
 
 ---
 
@@ -231,9 +247,9 @@ python tune.py k1
 - [ ] 순서 확인: CUT_STOPLOSS → SELL_RSI → SELL_TREND
 
 **쿨다운 로직 수정 시:**
-- [ ] `portfolio.py` 63-111줄 수정
-- [ ] `portfolio_runner.py` 654줄, 768줄 동일하게 수정
-- [ ] `days_since < cooldown_days` 조건 확인
+- [ ] `portfolio.py` 134-154줄 수정 (매도 후 재매수 금지만)
+- [ ] `portfolio_runner.py` 190줄, 1120줄 동일하게 수정
+- [ ] 매수 후 매도는 쿨다운 없음 (즉시 가능)
 
 **RSI 카테고리 차단 수정 시:**
 - [ ] `portfolio.py` 484-499줄 수정
@@ -363,7 +379,6 @@ def run_portfolio_backtest(
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
-    price_store: Optional[MemmapPriceStore] = None,
     trading_calendar: Sequence[pd.Timestamp],
     ma_period: int = 20,
     ma_type: str = "SMA",
@@ -381,7 +396,7 @@ def run_portfolio_backtest(
 ```
 
 - `trading_calendar`는 필수이며, `date_range` 전체를 덮는 거래일 리스트를 호출자가 프리패치 단계에서 준비해 전달해야 한다. 내부에서는 더 이상 `get_trading_days()`로 보조 조회를 하지 않는다.
-- `prefetched_data`/`prefetched_metrics`/`price_store`도 반드시 준비된 상태여야 하며, 백테스트 중에는 원본 데이터 소스(Mongo/pykrx)를 호출하지 않는다. 부족 데이터가 발견되면 즉시 실패한다.
+- `prefetched_data`/`prefetched_metrics`도 반드시 준비된 상태여야 하며, 백테스트 중에는 원본 데이터 소스(Mongo/pykrx)를 호출하지 않는다. 부족 데이터가 발견되면 즉시 실패한다.
 
 ## 📚 참고
 

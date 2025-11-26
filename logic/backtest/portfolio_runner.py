@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, 
 
 import pandas as pd
 
+import config
 from config import BACKTEST_SLIPPAGE
 from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
@@ -15,7 +16,6 @@ from utils.report import format_kr_money
 from strategies.maps.labeler import compute_net_trade_note
 from logic.common import select_candidates_by_category, calculate_held_categories, is_category_exception
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
-from utils.memmap_store import MemmapPriceStore
 
 logger = get_app_logger()
 
@@ -186,6 +186,7 @@ def _execute_individual_sells(
                 cash += trade_amount
                 current_holdings_value = max(0.0, current_holdings_value - trade_amount)
                 ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
+                # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                 if cooldown_days > 0:
                     ticker_state["buy_block_until"] = i + cooldown_days
 
@@ -396,8 +397,7 @@ def _execute_new_buys(
             current_holdings_value += trade_amount
             ticker_state["shares"] += req_qty
             ticker_state["avg_cost"] = buy_price
-            if cooldown_days > 0:
-                ticker_state["sell_block_until"] = max(ticker_state["sell_block_until"], i + cooldown_days)
+            # 매도 쿨다운 제거: 매수 후 바로 매도 가능 (조건 충족 시)
 
             if category and not is_category_exception(category):
                 held_categories.add(category)
@@ -472,7 +472,7 @@ def process_ticker_data(
         open_prices = precomputed_entry.get("open")
 
     if close_prices is None:
-        if working_df is None or len(working_df) < current_ma_period:
+        if working_df is None:
             return None
 
         price_series = None
@@ -491,9 +491,6 @@ def process_ticker_data(
             price_series = price_series.iloc[:, 0]
         close_prices = price_series.astype(float)
 
-        if len(close_prices) < current_ma_period:
-            return None
-
     if open_prices is None:
         if working_df is not None and "Open" in working_df.columns:
             open_series = working_df["Open"]
@@ -502,6 +499,30 @@ def process_ticker_data(
             open_prices = open_series.astype(float)
         else:
             open_prices = close_prices.copy()
+
+    # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
+    if config.ENABLE_DATA_SUFFICIENCY_CHECK:
+        ma_type_upper = (ma_type or "SMA").upper()
+        if ma_type_upper == "TEMA":
+            ideal_multiplier = 3.0
+        elif ma_type_upper in {"HMA", "EMA", "DEMA"}:
+            ideal_multiplier = 2.0
+        else:  # SMA, WMA 등
+            ideal_multiplier = 1.0
+
+        ideal_data_required = int(current_ma_period * ideal_multiplier)
+
+        # 데이터가 이상적인 양보다 적으면 완화된 기준 적용 (신규 상장 ETF 대응)
+        if len(close_prices) < ideal_data_required:
+            # 완화된 기준: multiplier의 절반 (최소 1배)
+            relaxed_multiplier = max(ideal_multiplier / 2.0, 1.0)
+            min_required_data = int(current_ma_period * relaxed_multiplier)
+        else:
+            # 충분한 데이터가 있으면 이상적인 기준 적용
+            min_required_data = ideal_data_required
+
+        if len(close_prices) < min_required_data:
+            return None
 
     # MAPS 전략 지표 계산
     from utils.moving_averages import calculate_moving_average
@@ -557,7 +578,6 @@ def run_portfolio_backtest(
     country: str = "kor",
     prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
     prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
-    price_store: Optional["MemmapPriceStore"] = None,
     trading_calendar: Optional[Sequence[pd.Timestamp]] = None,
     ma_period: int = 20,
     ma_type: str = "SMA",
@@ -633,11 +653,9 @@ def run_portfolio_backtest(
         df = None
         if prefetched_data and ticker in prefetched_data:
             df = prefetched_data[ticker]
-        elif price_store is not None:
-            df = price_store.get_frame(ticker)
 
         if df is None:
-            raise RuntimeError(f"[백테스트] '{ticker}' 데이터가 프리패치/메모리맵에 없습니다. 튜닝 프리패치 단계를 확인하세요.")
+            raise RuntimeError(f"[백테스트] '{ticker}' 데이터가 프리패치에 없습니다. 튜닝 프리패치 단계를 확인하세요.")
 
         precomputed_entry = prefetched_metrics.get(ticker) if prefetched_metrics else None
         ticker_metrics = process_ticker_data(
@@ -916,6 +934,7 @@ def run_portfolio_backtest(
                             cash -= trade_amount
                             position_state[core_ticker]["shares"] = shares_to_buy
                             position_state[core_ticker]["avg_cost"] = price
+                            # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                             position_state[core_ticker]["buy_block_until"] = i + cooldown_days
 
                             buy_trades_today_map.setdefault(core_ticker, []).append({"shares": float(shares_to_buy), "price": float(price)})
@@ -1098,6 +1117,7 @@ def run_portfolio_backtest(
                         cash += sell_amount
                         current_holdings_value = max(0.0, current_holdings_value - sell_amount)
                         weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
+                        # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                         if cooldown_days > 0:
                             weakest_state["buy_block_until"] = i + cooldown_days
 
@@ -1139,8 +1159,7 @@ def run_portfolio_backtest(
                                 req_qty,
                                 buy_price,
                             )
-                            if cooldown_days > 0:
-                                new_ticker_state["sell_block_until"] = max(new_ticker_state["sell_block_until"], i + cooldown_days)
+                            # 매도 쿨다운 제거: 매수 후 바로 매도 가능 (조건 충족 시)
 
                             # 결과 행 업데이트: 없으면 새로 추가
                             if (

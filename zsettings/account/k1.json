@@ -2,28 +2,32 @@
     "order": 10,
     "icon": "🇰🇷",
     "name": "모멘텀 ETF",
-    "desc": "한국 일반계좌에서 운영종인 포트폴리오 입니다.",
+    "desc": "한국 일반계좌에서 운영종인 10개 포트폴리오 입니다.",
     "country_code": "kor",
     "slack_channel": "C09FAU2NHM2",
-    "initial_capital_krw": "200000000",
+    "initial_capital_krw": "100000000",
     "show_hold_only": false,
     "strategy": {
-        "MONTHS_RANGE": 3,
-        "CAGR": 326.437516,
-        "MDD": -3.606015,
+        "MONTHS_RANGE": 12,
+        "CAGR": 70.73878,
+        "MDD": -11.719168,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BACKTESTED_DATE": "2025-11-17 18:50",
+        "BACKTESTED_DATE": "2025-11-27 08:39",
         "MA_PERIOD": 90,
-        "MA_TYPE": "HMA",
+        "MA_TYPE": "TEMA",
         "PORTFOLIO_TOPN": 10,
-        "REPLACE_SCORE_THRESHOLD": 0.0,
-        "STOP_LOSS_PCT": 9.0,
-        "OVERBOUGHT_SELL_THRESHOLD": 80,
+        "REPLACE_SCORE_THRESHOLD": 2.0,
+        "STOP_LOSS_PCT": 8.0,
+        "OVERBOUGHT_SELL_THRESHOLD": 95,
         "COOLDOWN_DAYS": 4,
-        "MIN_BUY_SCORE": 1.0,
+        "MIN_BUY_SCORE": 0.0,
         "CORE_HOLDINGS": []
     },
     "benchmarks": [
+        {
+            "ticker": "455030",
+            "name": "KODEX 미국달러SOFR"
+        },
         {
             "ticker": "0097L0",
             "name": "KIWOOM 한국고배당&미국AI테크"

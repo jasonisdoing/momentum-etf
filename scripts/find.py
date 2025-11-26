@@ -17,51 +17,31 @@ pykrx 라이브러리를 사용하여 지정된 등락률 이상 상승한 종�
 
 [사용법]
 python scripts/find.py
-python scripts/find.py --min-change 10.0
+
+[설정 변경]
+최소 등락률을 변경하려면 파일 상단의 MIN_CHANGE_PCT 상수를 수정하세요.
 """
 
-import argparse
 import json
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional
 
 import pandas as pd
 import requests
 from pykrx import stock
 
 # --- 설정 ---
+# 최소 등락률 (%)
+MIN_CHANGE_PCT = 3.0
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
+# EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN", "코리아", "한국", "200", "삼성", "코스닥", "코스피"]
 EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN"]
-
-
-def _load_stock_metadata() -> Dict[str, Dict]:
-    """
-    zsettings/stocks/*.json 파일에서 3개월 수익률 정보를 로드합니다.
-
-    Returns:
-        {ticker: {"3_month_earn_rate": float, ...}} 형태의 딕셔너리
-    """
-    metadata = {}
-    stocks_dir = Path(__file__).parent.parent / "data" / "stocks"
-
-    for json_file in stocks_dir.glob("*.json"):
-        try:
-            with open(json_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            for category in data:
-                for stock_info in category.get("tickers", []):
-                    ticker = stock_info.get("ticker")
-                    if ticker:
-                        metadata[ticker] = {
-                            "3_month_earn_rate": stock_info.get("3_month_earn_rate"),
-                            "1_week_avg_volume": stock_info.get("1_week_avg_volume"),
-                        }
-        except Exception:
-            continue
-
-    return metadata
+# 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
+# INCLUDE_KEYWORDS = ["글로벌", "미국"]
+INCLUDE_KEYWORDS = []
+# 최소 거래량 (0이면 필터링 안 함)
+# MIN_VOLUME = 100000
+MIN_VOLUME = 0
 
 
 def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
@@ -85,6 +65,11 @@ def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
 
         if not isinstance(items, list) or not items:
             logger.warning("네이버 API 응답에 ETF 데이터가 없습니다.")
+            logger.warning(f"응답 구조: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
+            if isinstance(data, dict) and "result" in data:
+                logger.warning(
+                    f"result 내부 키: {list(data['result'].keys()) if isinstance(data['result'], dict) else type(data['result']).__name__}"
+                )
             return None
 
         # DataFrame 생성
@@ -137,17 +122,35 @@ def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
                 continue
 
         if not gainers_list:
+            logger.warning(f"등락률 {min_change_pct:.2f}% 이상인 종목이 없습니다. (전체 ETF 수: {len(items)}개)")
             return pd.DataFrame(columns=["티커", "종목명", "등락률", "거래량", "괴리율"])
 
         df = pd.DataFrame(gainers_list)
-        logger.info(f"네이버 API에서 {len(df)}개 종목 데이터를 가져왔습니다.")
+        logger.info(f"네이버 API에서 {len(df)}개 종목 데이터를 가져왔습니다. (전체 ETF 수: {len(items)}개)")
         return df
 
+    except requests.exceptions.Timeout as e:
+        logger.error(f"네이버 API 타임아웃 (5초 초과): {e}")
+        return None
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"네이버 API HTTP 에러 (상태 코드: {response.status_code}): {e}")
+        logger.error(f"응답 내용 (처음 500자): {response.text[:500]}")
+        return None
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"네이버 API 연결 실패 (네트워크 확인 필요): {e}")
+        return None
     except requests.exceptions.RequestException as e:
-        logger.warning(f"네이버 API 요청 실패: {e}")
+        logger.error(f"네이버 API 요청 실패: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"네이버 API 응답이 JSON 형식이 아닙니다: {e}")
+        logger.error(f"응답 내용 (처음 500자): {response.text[:500]}")
         return None
     except Exception as e:
-        logger.warning(f"네이버 API 데이터 처리 실패: {e}")
+        logger.error(f"네이버 API 데이터 처리 중 예상치 못한 오류: {type(e).__name__}: {e}")
+        import traceback
+
+        logger.error(f"상세 오류:\n{traceback.format_exc()}")
         return None
 
 
@@ -200,57 +203,19 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
 
         # 1. ETF 데이터 가져오기
         if asset_type == "etf":
-            # 1-1. 네이버 API 시도 (빠름)
+            # 네이버 API 시도 (빠름)
             naver_df = fetch_naver_etf_data(min_change_pct)
 
-            if naver_df is not None and not naver_df.empty:
-                # 네이버 API 성공
-                top_gainers = naver_df
+            if naver_df is None:
+                # 네이버 API 실패 시 종료 (None 반환)
+                logger.error("❌ 네이버 API 실패. 스크립트를 종료합니다.")
+                print("❌ 네이버 API에서 데이터를 가져올 수 없습니다.")
+                return
+
+            # 네이버 API 성공 (빈 DataFrame도 성공)
+            top_gainers = naver_df
+            if not naver_df.empty:
                 print(f"✅ 네이버 API 사용 (빠른 조회 성공)")
-            else:
-                # 1-2. pykrx 폴백 (느리지만 안정적)
-                logger.info("⚠️  네이버 API 실패, pykrx로 폴백합니다...")
-                try:
-                    # 등락률 계산을 위해 이전 거래일이 필요합니다.
-                    prev_day = get_previous_trading_day(latest_day)
-
-                    # get_etf_ohlcv_by_ticker는 특정일의 모든 ETF OHLCV를 반환합니다.
-                    df_today = stock.get_etf_ohlcv_by_ticker(latest_day)
-                    df_yest = stock.get_etf_ohlcv_by_ticker(prev_day)
-
-                    if not df_today.empty and not df_yest.empty:
-                        # '종가' 컬럼만 사용하여 데이터프레임을 합칩니다.
-                        df_merged = pd.merge(
-                            df_today[["종가"]].rename(columns={"종가": "price_today"}),
-                            df_yest[["종가"]].rename(columns={"종가": "price_yest"}),
-                            left_index=True,  # 인덱스가 티커입니다.
-                            right_index=True,
-                            how="inner",  # 양일 모두 거래된 ETF만 대상으로 합니다.
-                        )
-
-                        # 등락률을 계산합니다. 0으로 나누는 경우를 방지합니다.
-                        df_merged["등락률"] = (((df_merged["price_today"] / df_merged["price_yest"]) - 1) * 100).where(df_merged["price_yest"] > 0, 0)
-
-                        # 필요한 컬럼만 선택하여 df_change에 추가합니다.
-                        df_etf_filtered = df_merged[["등락률"]].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
-                        df_change = pd.concat([df_change, df_etf_filtered], ignore_index=True)
-
-                        # 등락률 필터링
-                        top_gainers = df_change[df_change["등락률"] >= min_change_pct].copy()
-
-                        # 종목명 추가
-                        etf_ticker_list = set(stock.get_etf_ticker_list(latest_day))
-
-                        def get_name(ticker):
-                            if ticker in etf_ticker_list:
-                                return stock.get_etf_ticker_name(ticker)
-                            else:
-                                return stock.get_market_ticker_name(ticker)
-
-                        top_gainers["종목명"] = top_gainers["티커"].apply(get_name)
-                        logger.info(f"✅ pykrx 폴백 성공")
-                except Exception as e:
-                    logger.warning("pykrx ETF 정보 조회 중 오류가 발생했습니다: %s", e)
 
         # 2. 일반 주식 데이터 가져오기
         if asset_type == "stock":
@@ -269,15 +234,32 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             return
 
         # 키워드 기반 필터링
+        initial_count = len(top_gainers)
+
+        # INCLUDE_KEYWORDS 필터링 (OR 조건: 하나라도 포함되면 포함)
+        if INCLUDE_KEYWORDS:
+            include_pattern = "|".join(INCLUDE_KEYWORDS)
+            top_gainers = top_gainers[top_gainers["종목명"].str.contains(include_pattern, na=False)]
+            include_filtered_count = initial_count - len(top_gainers)
+            if include_filtered_count > 0:
+                print(f"포함 키워드({', '.join(INCLUDE_KEYWORDS)})에 따라 {include_filtered_count}개 종목을 제외했습니다.")
+
+        # EXCLUDE_KEYWORDS 필터링
         if EXCLUDE_KEYWORDS:
-            initial_count = len(top_gainers)
-            # '|'로 키워드를 연결하여 정규식 OR 조건 생성
+            before_exclude = len(top_gainers)
             exclude_pattern = "|".join(EXCLUDE_KEYWORDS)
-            # '종목명'에 키워드가 포함되지 않은 행만 남김
             top_gainers = top_gainers[~top_gainers["종목명"].str.contains(exclude_pattern, na=False)]
-            filtered_count = initial_count - len(top_gainers)
-            if filtered_count > 0:
-                print(f"제외 키워드({", ".join(EXCLUDE_KEYWORDS)})에 따라 {filtered_count}개 종목을 제외했습니다.")
+            exclude_filtered_count = before_exclude - len(top_gainers)
+            if exclude_filtered_count > 0:
+                print(f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {exclude_filtered_count}개 종목을 제외했습니다.")
+
+        # 거래량 필터링
+        if MIN_VOLUME > 0 and "거래량" in top_gainers.columns:
+            before_volume = len(top_gainers)
+            top_gainers = top_gainers[top_gainers["거래량"] >= MIN_VOLUME]
+            volume_filtered_count = before_volume - len(top_gainers)
+            if volume_filtered_count > 0:
+                print(f"최소 거래량({MIN_VOLUME:,})에 따라 {volume_filtered_count}개 종목을 제외했습니다.")
 
         print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
 
@@ -321,14 +303,4 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="금일 상승중인 ETF를 보여줍니다.")
-    parser.add_argument("--min-change", type=float, default=3.0, help="검색할 최소 등락률 (기본값: 5.0)")
-    parser.add_argument(
-        "--type",
-        type=str,
-        choices=["stock", "etf"],
-        default="etf",
-        help="검색할 종목 유형 (stock: 일반 주식, etf: ETF (기본값))",
-    )
-    args = parser.parse_args()
-    find_top_gainers(min_change_pct=args.min_change, asset_type=args.type)
+    find_top_gainers(min_change_pct=MIN_CHANGE_PCT, asset_type="etf")

@@ -34,8 +34,6 @@ def _build_home_page(accounts: list[Dict[str, Any]]):
     allowed_states = {"HOLD", "HOLD_CORE"}
 
     def _render_home_page() -> None:
-        st.title("Momentum ETF")
-
         for account in accounts:
             account_id = account["account_id"]
             account_name = account.get("name") or account_id.upper()
@@ -203,7 +201,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    navigation(pages).run()
+    navigation(pages, position="top").run()
 
 
 if __name__ == "__main__":
