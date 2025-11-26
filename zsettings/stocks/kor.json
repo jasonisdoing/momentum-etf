@@ -545,7 +545,7 @@
         ]
     },
     {
-        "category": "TIMEFOLIO",
+        "category": "TIMEFOLIO액티브",
         "tickers": [
             {
                 "ticker": "426020",
@@ -604,7 +604,7 @@
         ]
     },
     {
-        "category": "KoAct",
+        "category": "KoAct액티브",
         "tickers": [
             {
                 "ticker": "0015B0",
