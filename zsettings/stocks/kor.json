@@ -698,15 +698,6 @@
                 "3_month_earn_rate": 25.4601
             },
             {
-                "ticker": "471040",
-                "name": "KoAct 글로벌AI&로봇액티브",
-                "recommend_enabled": true,
-                "listing_date": "2023-11-21",
-                "1_month_avg_volume": 208518,
-                "1_month_earn_rate": -3.7647,
-                "3_month_earn_rate": 25.4601
-            },
-            {
                 "ticker": "0093D0",
                 "name": "KoAct 팔란티어밸류체인액티브",
                 "recommend_enabled": true,
