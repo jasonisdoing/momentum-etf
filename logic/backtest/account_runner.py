@@ -21,7 +21,6 @@ from utils.settings_loader import (
 from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.stock_list_io import get_etfs
 from utils.logger import get_app_logger
-from utils.memmap_store import MemmapPriceStore
 
 
 @dataclass
@@ -101,7 +100,6 @@ def run_account_backtest(
     excluded_tickers: Optional[Collection[str]] = None,
     prefetched_etf_universe: Optional[Sequence[Mapping[str, Any]]] = None,
     prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
-    price_store: Optional[MemmapPriceStore] = None,
     trading_calendar: Optional[Sequence[pd.Timestamp]] = None,
 ) -> AccountBacktestResult:
     """계정 ID를 기반으로 백테스트를 실행합니다."""
@@ -119,19 +117,37 @@ def run_account_backtest(
     if not account_id:
         raise AccountSettingsError("계정 ID를 지정해야 합니다.")
 
-    _log(f"[백테스트] {account_id.upper()} 백테스트를 시작합니다...")
+    # 튜닝 최적화: 모든 데이터가 프리패치되어 있으면 설정 로드 건너뛰기
+    is_tuning_fast_path = (
+        quiet
+        and prefetched_data is not None
+        and prefetched_etf_universe is not None
+        and prefetched_metrics is not None
+        and trading_calendar is not None
+        and strategy_override is not None
+    )
 
-    _log("[백테스트] 설정을 로드하는 중...")
+    if not is_tuning_fast_path:
+        _log(f"[백테스트] {account_id.upper()} 백테스트를 시작합니다...")
+        _log("[백테스트] 설정을 로드하는 중...")
+
     account_settings = get_account_settings(account_id)
     country_code = (account_settings.get("country_code") or account_id).strip().lower() or "kor"
 
-    base_strategy_rules = get_strategy_rules(account_id)
-    strategy_rules = StrategyRules.from_mapping(base_strategy_rules.to_dict())
-    precision_settings = get_account_precision(account_id)
-    account_settings_data = get_account_settings(account_id)
-    strategy_source = account_settings_data.get("strategy", {})
-    strategy_settings = dict(resolve_strategy_params(strategy_source))
-    common_settings = get_common_file_settings()
+    if is_tuning_fast_path:
+        # 튜닝 고속 경로: 최소한의 설정만 로드
+        strategy_rules = strategy_override
+        strategy_settings = dict(resolve_strategy_params(account_settings.get("strategy", {})))
+        precision_settings = get_account_precision(account_id)
+        common_settings = {}
+    else:
+        base_strategy_rules = get_strategy_rules(account_id)
+        strategy_rules = StrategyRules.from_mapping(base_strategy_rules.to_dict())
+        precision_settings = get_account_precision(account_id)
+        account_settings_data = get_account_settings(account_id)
+        strategy_source = account_settings_data.get("strategy", {})
+        strategy_settings = dict(resolve_strategy_params(strategy_source))
+        common_settings = get_common_file_settings()
 
     strategy_overrides_extra = override_settings.get("strategy_overrides")
     if isinstance(strategy_overrides_extra, Mapping):
@@ -168,14 +184,16 @@ def run_account_backtest(
     )
     initial_capital_value = capital_info.local
 
-    _log(f"[백테스트] {account_id.upper()} 계정({country_code.upper()}) ETF 목록을 로드하는 중...")
+    if not is_tuning_fast_path:
+        _log(f"[백테스트] {account_id.upper()} 계정({country_code.upper()}) ETF 목록을 로드하는 중...")
     excluded_upper: set[str] = set()
     if excluded_tickers:
         excluded_upper = {str(ticker).strip().upper() for ticker in excluded_tickers if isinstance(ticker, str) and str(ticker).strip()}
 
     if prefetched_etf_universe is not None:
         etf_universe = [dict(stock) for stock in prefetched_etf_universe if isinstance(stock, Mapping)]
-        _log(f"[백테스트] 사전 추려진 ETF 대표군 {len(etf_universe)}개를 재사용합니다.")
+        if not is_tuning_fast_path:
+            _log(f"[백테스트] 사전 추려진 ETF 대표군 {len(etf_universe)}개를 재사용합니다.")
     else:
         etf_universe = get_etfs(country_code)
     if not etf_universe:
@@ -185,12 +203,13 @@ def run_account_backtest(
         before_count = len(etf_universe)
         etf_universe = [stock for stock in etf_universe if str(stock.get("ticker", "")).strip().upper() not in excluded_upper]
         removed = before_count - len(etf_universe)
-        if removed > 0:
+        if removed > 0 and not is_tuning_fast_path:
             _log(f"[백테스트] 데이터 부족으로 제외된 {removed}개 종목을 유니버스에서 제거합니다.")
     if not etf_universe:
         raise RuntimeError("백테스트에 사용할 유효한 종목이 없습니다.")
 
-    _log(f"[백테스트] {len(etf_universe)}개의 ETF를 찾았습니다.")
+    if not is_tuning_fast_path:
+        _log(f"[백테스트] {len(etf_universe)}개의 ETF를 찾았습니다.")
 
     ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
     ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금", "category": "-"}
@@ -198,34 +217,37 @@ def run_account_backtest(
     # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
     portfolio_topn = strategy_rules.portfolio_topn
     holdings_limit = strategy_settings.get("MAX_PER_CATEGORY", config.MAX_PER_CATEGORY)
-    _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}, 카테고리당 최대 보유 수: {holdings_limit}")
+    if not is_tuning_fast_path:
+        _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}, 카테고리당 최대 보유 수: {holdings_limit}")
 
-    _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
+    if not is_tuning_fast_path:
+        _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
     backtest_kwargs = _build_backtest_kwargs(
         strategy_rules=strategy_rules,
         strategy_settings=strategy_settings,
         prefetched_data=prefetched_data,
         prefetched_metrics=prefetched_metrics,
-        price_store=price_store,
         quiet=quiet,
     )
 
     date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
 
     display_currency = (capital_info.currency or "KRW").upper()
-    if display_currency != "KRW":
-        _log(
-            f"[백테스트] {account_id.upper()}({country_code.upper()}) 백테스트 실행 | "
-            f"기간: {date_range[0]}~{date_range[1]} | 초기 자본: {initial_capital_value:,.0f} {display_currency}"
-            f" (약 {capital_info.krw:,.0f} KRW)"
-        )
-    else:
-        _log(
-            f"[백테스트] {account_id.upper()}({country_code.upper()}) 백테스트 실행 | "
-            f"기간: {date_range[0]}~{date_range[1]} | 초기 자본: {initial_capital_value:,.0f}"
-        )
 
-    _log("[백테스트] 포트폴리오 백테스트 실행 중...")
+    if not is_tuning_fast_path:
+        if display_currency != "KRW":
+            _log(
+                f"[백테스트] {account_id.upper()}({country_code.upper()}) 백테스트 실행 | "
+                f"기간: {date_range[0]}~{date_range[1]} | 초기 자본: {initial_capital_value:,.0f} {display_currency}"
+                f" (약 {capital_info.krw:,.0f} KRW)"
+            )
+        else:
+            _log(
+                f"[백테스트] {account_id.upper()}({country_code.upper()}) 백테스트 실행 | "
+                f"기간: {date_range[0]}~{date_range[1]} | 초기 자본: {initial_capital_value:,.0f}"
+            )
+
+        _log("[백테스트] 포트폴리오 백테스트 실행 중...")
     runtime_missing_tickers: set[str] = set()
 
     if trading_calendar:
@@ -285,9 +307,9 @@ def run_account_backtest(
         initial_capital_krw=capital_info.krw,
         fx_rate_to_krw=capital_info.fx_rate_to_krw,
         currency=display_currency,
+        portfolio_topn=portfolio_topn,
         account_settings=account_settings,
         prefetched_data=prefetched_data,
-        price_store=price_store,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries, start_date)
@@ -433,7 +455,6 @@ def _build_backtest_kwargs(
     strategy_settings: Mapping[str, Any],
     prefetched_data: Optional[Mapping[str, pd.DataFrame]],
     prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]],
-    price_store: Optional[MemmapPriceStore],
     quiet: bool,
 ) -> Dict[str, Any]:
     try:
@@ -461,7 +482,6 @@ def _build_backtest_kwargs(
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "prefetched_metrics": prefetched_metrics,
-        "price_store": price_store,
         "ma_period": strategy_rules.ma_period,
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
@@ -594,9 +614,9 @@ def _build_summary(
     initial_capital_krw: float,
     fx_rate_to_krw: float,
     currency: str,
+    portfolio_topn: int,
     account_settings: Mapping[str, Any],
     prefetched_data: Optional[Mapping[str, pd.DataFrame]] = None,
-    price_store: Optional[MemmapPriceStore] = None,
 ) -> Tuple[
     Dict[str, Any],
     pd.Series,
@@ -646,11 +666,6 @@ def _build_summary(
                 frame = prefetched_data.get(candidate)
                 if isinstance(frame, pd.DataFrame) and not frame.empty:
                     return frame
-
-        if price_store is not None:
-            frame = price_store.get_frame(norm.upper())
-            if frame is not None and not frame.empty:
-                return frame
 
         return None
 
@@ -766,10 +781,35 @@ def _build_summary(
             else:
                 weekly_cum_pct = pd.Series([0.0] * len(weekly_values), index=weekly_values.index)
             for dt, value in weekly_values.items():
+                # 해당 날짜의 보유종목 수 가져오기
+                held_count = 0
+                max_topn = portfolio_topn
+                actual_date = dt
+
+                # 해당 날짜가 portfolio_df에 없으면 가장 가까운 이전 날짜 찾기
+                if dt not in portfolio_df.index:
+                    # portfolio_df에서 dt 이전의 가장 가까운 날짜 찾기
+                    earlier_dates = portfolio_df.index[portfolio_df.index <= dt]
+                    if len(earlier_dates) > 0:
+                        actual_date = earlier_dates[-1]
+                        held_count = int(portfolio_df.loc[actual_date, "held_count"]) if pd.notna(portfolio_df.loc[actual_date, "held_count"]) else 0
+                else:
+                    held_count = int(portfolio_df.loc[dt, "held_count"]) if pd.notna(portfolio_df.loc[dt, "held_count"]) else 0
+
+                # 날짜 포맷: 금요일이 아니면 요일 표시
+                weekday_map = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
+                weekday = weekday_map.get(actual_date.weekday(), "")
+                if actual_date.weekday() == 4:  # 금요일
+                    date_display = actual_date.strftime("%Y-%m-%d")
+                else:
+                    date_display = f"{actual_date.strftime('%Y-%m-%d')}({weekday})"
+
                 weekly_summary_rows.append(
                     {
-                        "week_end": dt.strftime("%Y-%m-%d"),
+                        "week_end": date_display,
                         "value": float(value),
+                        "held_count": held_count,
+                        "max_topn": max_topn,
                         "weekly_return_pct": float(weekly_return_pct.loc[dt]),
                         "cumulative_return_pct": float(weekly_cum_pct.loc[dt]),
                     }

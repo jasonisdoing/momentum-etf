@@ -24,8 +24,10 @@ _BASE_DISPLAY_COLUMNS = [
     "현재가",
     "1주(%)",
     "2주(%)",
-    "3주(%)",
-    "추세(3주)",
+    "1달(%)",
+    "3달(%)",
+    "고점대비",
+    "추세(3달)",
     "점수",
     "RSI",
     "지속",
@@ -132,7 +134,9 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         price_deviation = format_price_deviation(row.get("price_deviation")) if show_deviation else None
         return_1w = _format_percent(row.get("return_1w", 0.0))
         return_2w = _format_percent(row.get("return_2w", 0.0))
-        return_3w = _format_percent(row.get("return_3w", 0.0))
+        return_1m = _format_percent(row.get("return_1m", 0.0))
+        return_3m = _format_percent(row.get("return_3m", 0.0))
+        drawdown_from_high = _format_percent(row.get("drawdown_from_high", 0.0))
         score = _format_score(row.get("score"))
         streak = _format_days(row.get("streak"))
         phrase = _resolve_phrase(row)
@@ -152,8 +156,10 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 **({"괴리율": price_deviation} if show_deviation else {}),
                 "1주(%)": return_1w,
                 "2주(%)": return_2w,
-                "3주(%)": return_3w,
-                "추세(3주)": _trend_series(row),
+                "1달(%)": return_1m,
+                "3달(%)": return_3m,
+                "고점대비": drawdown_from_high,
+                "추세(3달)": _trend_series(row),
                 "점수": score,
                 "RSI": rsi_score,
                 "지속": streak,

@@ -141,7 +141,7 @@ def print_backtest_summary(
         "모멘텀 스코어 MA 기간": momentum_label,
         "교체 매매 점수 임계값": replace_threshold,
         "개별 종목 손절매": stop_loss_label,
-        "매도 후 재매수 금지 기간": f"{cooldown_days}일",
+        "매도 후 재매수 금지 기간": f"{cooldown_days}일 (매수 후 매도는 즉시 가능)",
     }
 
     if currency != "KRW":
@@ -178,24 +178,28 @@ def print_backtest_summary(
     add_section_heading("주별 성과 요약")
     weekly_summary_rows = summary.get("weekly_summary") or []
     if isinstance(weekly_summary_rows, list) and weekly_summary_rows:
-        headers = ["주차(종료일)", "평가금액", "주간 수익률", "누적 수익률"]
+        headers = ["주차(종료일)", "보유종목", "평가금액", "주간 수익률", "누적 수익률"]
         table_rows = []
         for item in weekly_summary_rows:
             week_label = item.get("week_end") or "-"
             value = item.get("value")
+            held_count = item.get("held_count", 0)
+            max_topn = item.get("max_topn", 0)
             weekly_ret = item.get("weekly_return_pct")
             cum_ret = item.get("cumulative_return_pct")
             value_display = money_formatter(value) if _is_finite_number(value) else "-"
             value_display = _align_korean_money_for_weekly(value_display)
+            holdings_display = f"{held_count}/{max_topn}" if max_topn > 0 else "-"
             table_rows.append(
                 [
                     week_label,
+                    holdings_display,
                     value_display,
                     f"{weekly_ret:+.2f}%" if _is_finite_number(weekly_ret) else "-",
                     f"{cum_ret:+.2f}%" if _is_finite_number(cum_ret) else "-",
                 ]
             )
-        aligns = ["left", "right", "right", "right"]
+        aligns = ["left", "center", "right", "right", "right"]
         for line in render_table_eaw(headers, table_rows, aligns):
             add(line)
     else:
@@ -420,7 +424,7 @@ def _format_date_kor(ts: pd.Timestamp) -> str:
     ts = pd.to_datetime(ts)
     weekday_map = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
     weekday = weekday_map.get(ts.weekday(), "")
-    return f"{ts.year}년 {ts.month}월 {ts.day}일({weekday})"
+    return f"{ts.strftime('%Y-%m-%d')}({weekday})"
 
 
 def _build_daily_table_rows(

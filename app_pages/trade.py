@@ -652,28 +652,36 @@ def _render_sell_section(username: str, account_id: str, country_code: str) -> N
 
 authenticator = _load_authenticator()
 _flush_persisted_alerts()
-name, auth_status, username = authenticator.login(key="trade_login", location="sidebar")
+name, auth_status, username = authenticator.login(key="trade_login", location="main")
 
 if auth_status is False:
     st.error("로그인에 실패했습니다. 자격 증명을 확인하세요.")
 elif auth_status is None:
     st.info("로그인이 필요합니다.")
 else:
-    authenticator.logout(button_name="로그아웃", location="sidebar")
     current_user = username or name or "unknown"
 
     default_account = st.session_state.get("trade_selected_account", _default_account_id())
     if "trade_selected_account_radio" not in st.session_state:
         st.session_state["trade_selected_account_radio"] = default_account
 
-    with st.sidebar:
-        st.markdown("### 관리자")
-        selected_account = st.radio(
-            "계정 선택",
-            options=_account_options(),
-            format_func=_format_account_label,
-            key="trade_selected_account_radio",
-        )
+    # 상단 컨트롤 영역: 로그아웃 및 계정 선택
+    top_controls = st.container()
+    with top_controls:
+        header_col, logout_col = st.columns([4, 1])
+
+        with header_col:
+            selected_account = st.radio(
+                "계정 선택",
+                options=_account_options(),
+                format_func=_format_account_label,
+                key="trade_selected_account_radio",
+                help="관리할 계정을 선택하세요.",
+                horizontal=True,
+            )
+
+        with logout_col:
+            authenticator.logout(button_name="로그아웃", location="main", key="trade_logout")
 
     st.session_state["trade_selected_account"] = selected_account
 

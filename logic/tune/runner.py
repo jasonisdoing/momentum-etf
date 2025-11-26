@@ -37,31 +37,30 @@ from utils.data_loader import (
 )
 from utils.stock_list_io import get_etfs
 from utils.cache_utils import save_cached_frame
-from utils.memmap_store import create_memmap_store, MemmapPriceStore
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
 MAX_TABLE_ROWS = 20
 
+# Worker 글로벌 변수 - 프로세스당 한 번만 초기화
 _WORKER_PREFETCHED_DATA: Optional[Mapping[str, DataFrame]] = None
 _WORKER_PREFETCHED_METRICS: Optional[Mapping[str, Dict[str, Any]]] = None
 _WORKER_PREFETCHED_UNIVERSE: Optional[Sequence[Mapping[str, Any]]] = None
-_WORKER_MEMMAP_STORE: Optional[MemmapPriceStore] = None
+_WORKER_TRADING_CALENDAR: Optional[Sequence[pd.Timestamp]] = None
 
 
 def _init_worker_prefetch(
-    prefetched_data: Mapping[str, DataFrame] | None,
-    prefetched_metrics: Mapping[str, Dict[str, Any]] | None,
-    prefetched_universe: Sequence[Mapping[str, Any]] | None,
-    memmap_catalog: Optional[Dict[str, Any]] = None,
+    prefetched_data: Mapping[str, DataFrame],
+    prefetched_metrics: Mapping[str, Dict[str, Any]],
+    prefetched_universe: Sequence[Mapping[str, Any]],
+    trading_calendar: Sequence[pd.Timestamp],
 ) -> None:
-    """ProcessPoolExecutor initializer to reuse prefetched artifacts."""
-
-    global _WORKER_PREFETCHED_DATA, _WORKER_PREFETCHED_METRICS, _WORKER_PREFETCHED_UNIVERSE, _WORKER_MEMMAP_STORE
+    """ProcessPoolExecutor initializer - 각 worker 프로세스당 한 번만 실행"""
+    global _WORKER_PREFETCHED_DATA, _WORKER_PREFETCHED_METRICS, _WORKER_PREFETCHED_UNIVERSE, _WORKER_TRADING_CALENDAR
     _WORKER_PREFETCHED_DATA = prefetched_data
     _WORKER_PREFETCHED_METRICS = prefetched_metrics
     _WORKER_PREFETCHED_UNIVERSE = prefetched_universe
-    _WORKER_MEMMAP_STORE = create_memmap_store(memmap_catalog)
+    _WORKER_TRADING_CALENDAR = trading_calendar
 
 
 def _filter_trading_days(
@@ -163,86 +162,6 @@ def _build_prefetched_metric_cache(
         cache[ticker] = entry
 
     return cache
-
-
-def _write_memmap_array(
-    base_dir: Path,
-    *,
-    ticker: str,
-    label: str,
-    array: np.ndarray,
-    dtype: np.dtype,
-) -> Dict[str, Any]:
-    base_dir.mkdir(parents=True, exist_ok=True)
-    safe_ticker = "".join(ch for ch in ticker if ch.isalnum() or ch in ("_", "-")) or "TICKER"
-    filename = f"{safe_ticker}_{label}.dat"
-    path = base_dir / filename
-
-    memmap = np.memmap(path, mode="w+", dtype=dtype, shape=array.shape)
-    memmap[:] = array
-    memmap.flush()
-    del memmap
-
-    return {
-        "path": str(path),
-        "dtype": np.dtype(dtype).str,
-        "shape": array.shape,
-    }
-
-
-def _persist_prefetched_memmaps(
-    account_id: str,
-    prefetched_data: Mapping[str, pd.DataFrame],
-    *,
-    base_dir: Optional[Path] = None,
-) -> Dict[str, Any]:
-    """
-    Convert prefetched price frames to memmap-backed arrays for later reuse.
-    """
-
-    if base_dir is None:
-        base_dir = Path(tempfile.gettempdir()) / "momentum-etf-memmap" / account_id
-    base_dir.mkdir(parents=True, exist_ok=True)
-
-    memmap_meta: Dict[str, Dict[str, Any]] = {}
-    for ticker, frame in prefetched_data.items():
-        if not isinstance(frame, pd.DataFrame) or frame.empty:
-            continue
-        try:
-            index_values = frame.index.astype("int64").to_numpy()
-            close_col_name = "unadjusted_close" if "unadjusted_close" in frame.columns else "Close"
-            close_series = frame[close_col_name]
-            if isinstance(close_series, pd.DataFrame):
-                close_series = close_series.iloc[:, 0]
-            close_values = close_series.astype("float64").to_numpy()
-            if "Open" in frame.columns:
-                open_series = frame["Open"]
-                if isinstance(open_series, pd.DataFrame):
-                    open_series = open_series.iloc[:, 0]
-                open_values = open_series.astype("float64").to_numpy()
-            else:
-                open_values = close_values.copy()
-
-            ticker_dir = base_dir / ticker
-            index_meta = _write_memmap_array(ticker_dir, ticker=ticker, label="index", array=index_values, dtype=np.int64)
-            close_meta = _write_memmap_array(ticker_dir, ticker=ticker, label="close", array=close_values, dtype=np.float64)
-            close_meta["column"] = close_col_name
-            open_meta = _write_memmap_array(ticker_dir, ticker=ticker, label="open", array=open_values, dtype=np.float64)
-
-            memmap_meta[ticker] = {
-                "index": index_meta,
-                "close": close_meta,
-                "open": open_meta,
-            }
-        except Exception as exc:
-            logger = get_app_logger()
-            logger.warning("[튜닝] %s 티커 memmap 생성 실패: %s", ticker, exc)
-            continue
-
-    return {
-        "base_dir": str(base_dir),
-        "tickers": memmap_meta,
-    }
 
 
 def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:
@@ -614,7 +533,6 @@ def _export_debug_month(
     capture_top_n: int,
     prefetched_etf_universe: Sequence[Mapping[str, Any]],
     prefetched_metrics: Mapping[str, Dict[str, Any]] | None,
-    price_store: Optional[MemmapPriceStore],
     trading_calendar: Optional[Sequence[pd.Timestamp]],
 ) -> List[Dict[str, Any]]:
     if capture_top_n <= 0 or not raw_rows:
@@ -667,7 +585,6 @@ def _export_debug_month(
             strategy_override=strategy_rules,
             prefetched_etf_universe=prefetched_etf_universe,
             prefetched_metrics=prefetched_metrics,
-            price_store=price_store,
             trading_calendar=trading_calendar,
         )
 
@@ -678,7 +595,6 @@ def _export_debug_month(
             strategy_override=strategy_rules,
             prefetched_etf_universe=prefetched_etf_universe,
             prefetched_metrics=None,
-            price_store=price_store,
             trading_calendar=trading_calendar,
         )
 
@@ -737,11 +653,6 @@ def _evaluate_single_combo(
         float,
         Tuple[str, ...],
         Tuple[str, ...],
-        Mapping[str, DataFrame],
-        Sequence[Mapping[str, Any]],
-        Mapping[str, Dict[str, Any]],
-        Optional[Dict[str, Any]],
-        Optional[Sequence[pd.Timestamp]],
     ]
 ) -> Tuple[str, Any, List[str]]:
     (
@@ -758,18 +669,13 @@ def _evaluate_single_combo(
         min_score_float,
         excluded_tickers,
         core_holdings_tuple,
-        prefetched_data,
-        prefetched_etf_universe,
-        prefetched_metrics,
-        memmap_catalog,
-        trading_calendar,
     ) = payload
 
-    data_source = prefetched_data or _WORKER_PREFETCHED_DATA or {}
-    metrics_source = prefetched_metrics or _WORKER_PREFETCHED_METRICS or {}
-    universe_source = prefetched_etf_universe or _WORKER_PREFETCHED_UNIVERSE or ()
-    price_store = _WORKER_MEMMAP_STORE or create_memmap_store(memmap_catalog)
-    calendar_source = trading_calendar
+    # Worker 글로벌 변수에서 데이터 가져오기 (프로세스당 한 번만 pickle됨)
+    data_source = _WORKER_PREFETCHED_DATA
+    metrics_source = _WORKER_PREFETCHED_METRICS
+    universe_source = _WORKER_PREFETCHED_UNIVERSE
+    calendar_source = _WORKER_TRADING_CALENDAR
 
     try:
         override_rules = StrategyRules.from_values(
@@ -817,7 +723,6 @@ def _evaluate_single_combo(
             excluded_tickers=set(excluded_tickers) if excluded_tickers else None,
             prefetched_etf_universe=universe_source,
             prefetched_metrics=metrics_source,
-            price_store=price_store,
             trading_calendar=calendar_source,
         )
     except Exception as exc:
@@ -884,8 +789,6 @@ def _execute_tuning_for_months(
     progress_callback: Optional[callable] = None,
     prefetched_etf_universe: Sequence[Mapping[str, Any]],
     prefetched_metrics: Mapping[str, Dict[str, Any]],
-    memmap_catalog: Optional[Dict[str, Any]],
-    price_store: Optional[MemmapPriceStore],
     trading_calendar: Optional[Sequence[pd.Timestamp]],
 ) -> Optional[Dict[str, Any]]:
     logger = get_app_logger()
@@ -953,12 +856,7 @@ def _execute_tuning_for_months(
     # search_space에서 core_holdings 가져오기
     core_holdings_from_space = search_space.get("CORE_HOLDINGS", [])
 
-    serialized_prefetched_data = prefetched_data if workers <= 1 else None
-    serialized_prefetched_metrics = prefetched_metrics if workers <= 1 else None
-    serialized_universe = prefetched_etf_universe if workers <= 1 else None
-    serialized_memmap = memmap_catalog if workers <= 1 else None
-    serialized_calendar = filtered_calendar
-
+    # 각 payload에는 파라미터만 포함 (데이터는 worker 초기화 시 한 번만 전달)
     payloads = [
         (
             account_norm,
@@ -974,24 +872,34 @@ def _execute_tuning_for_months(
             float(min_score),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             tuple(core_holdings_from_space) if core_holdings_from_space else tuple(),
-            serialized_prefetched_data,
-            serialized_universe,
-            serialized_prefetched_metrics,
-            serialized_memmap,
-            serialized_calendar,
         )
         for ma, topn, replace, stop_loss, rsi, cooldown, ma_type, min_score in combos
     ]
 
+    logger.info(
+        "[튜닝] %s (%d개월) 백테스트 워커 초기화 중... (조합 %d개, 거래일 %d일)",
+        account_norm.upper(),
+        months_range,
+        len(combos),
+        len(filtered_calendar) if filtered_calendar else 0,
+    )
+
     worker_desc = "순차 실행" if workers <= 1 else f"{workers}개의 CPU 병렬 처리 중..."
 
     if workers <= 1:
-        global _WORKER_MEMMAP_STORE
-        _WORKER_MEMMAP_STORE = price_store
+        # 단일 프로세스: 글로벌 변수 직접 설정
+        global _WORKER_PREFETCHED_DATA, _WORKER_PREFETCHED_METRICS, _WORKER_PREFETCHED_UNIVERSE, _WORKER_TRADING_CALENDAR
+        _WORKER_PREFETCHED_DATA = prefetched_data
+        _WORKER_PREFETCHED_METRICS = prefetched_metrics
+        _WORKER_PREFETCHED_UNIVERSE = prefetched_etf_universe
+        _WORKER_TRADING_CALENDAR = filtered_calendar
         iterator = map(_evaluate_single_combo, payloads)
     else:
-        init_args = (prefetched_data, prefetched_metrics, prefetched_etf_universe, memmap_catalog)
-        chunksize = max(1, len(payloads) // (workers * 4)) if len(payloads) > workers else 1
+        # 멀티 프로세스: worker 초기화 시 데이터 한 번만 전달
+        init_args = (prefetched_data, prefetched_metrics, prefetched_etf_universe, filtered_calendar)
+        # chunksize를 적절히 설정: IPC 오버헤드와 로드 밸런싱 균형
+        # 너무 크면 느린 조합으로 인한 대기 발생, 너무 작으면 IPC 오버헤드 증가
+        chunksize = max(10, len(payloads) // (workers * 10)) if len(payloads) > workers else 10
         executor = ProcessPoolExecutor(max_workers=workers, initializer=_init_worker_prefetch, initargs=init_args)
         iterator = executor.map(_evaluate_single_combo, payloads, chunksize=chunksize)
 
@@ -1990,42 +1898,7 @@ def run_account_tuning(
                 }
             )
 
-        # Adjust prefetched window to honor CACHE_START_DATE if provided
-        if cache_seed_dt is not None and cache_seed_dt < start_date_prefetch:
-            adjusted_start = cache_seed_dt
-        else:
-            adjusted_start = start_date_prefetch
-
-        adjusted_date_range = [adjusted_start.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
-
-        prefetched_adjusted, additional_missing = prepare_price_data(
-            tickers=tickers,
-            country=country_code,
-            start_date=adjusted_date_range[0],
-            end_date=adjusted_date_range[1],
-            warmup_days=warmup_days,
-        )
-        if additional_missing:
-            raise MissingPriceDataError(
-                country=country_code,
-                start_date=adjusted_date_range[0],
-                end_date=adjusted_date_range[1],
-                tickers=additional_missing,
-            )
-        prefetched_map.update(prefetched_adjusted)
-        if SAVE_CACHE_DURING_TUNE:
-            for ticker, frame in prefetched_adjusted.items():
-                save_cached_frame(country_code, ticker, frame)
         normalized_month_items.append(sanitized_item)
-
-    memmap_run_dir = Path(tempfile.gettempdir()) / "momentum-etf-memmap" / f"{account_norm}_{tuning_start_ts.strftime('%Y%m%d_%H%M%S')}"
-    prefetched_memmap_catalog = _persist_prefetched_memmaps(
-        account_norm,
-        prefetched_map,
-        base_dir=memmap_run_dir,
-    )
-    price_store_main = create_memmap_store(prefetched_memmap_catalog)
-    tuning_metadata["memmap_catalog"] = prefetched_memmap_catalog
 
     prefetched_trading_days = get_trading_days(
         date_range_prefetch[0],
@@ -2037,8 +1910,15 @@ def run_account_tuning(
             f"[튜닝] {account_norm.upper()} 기간 {date_range_prefetch[0]}~{date_range_prefetch[1]}의 거래일 정보를 로드하지 못했습니다."
         )
 
-    ma_period_pool = sorted({int(base_rules.ma_period), *[int(v) for v in ma_values]})
-    ma_type_pool = sorted({(base_rules.ma_type or "SMA").upper(), *[(mt or "SMA").upper() for mt in ma_type_values]})
+    # 실제 탐색 공간에서 사용되는 MA_PERIOD와 MA_TYPE 조합만 캐시
+    ma_period_pool = sorted(set(ma_values))  # 탐색 공간의 MA_PERIOD만 사용
+    ma_type_pool = sorted(set(ma_type_values))  # 탐색 공간의 MA_TYPE만 사용
+    logger.info(
+        "[튜닝] MA 지표 캐시 생성: %d개 MA_PERIOD × %d개 MA_TYPE = %d개 조합",
+        len(ma_period_pool),
+        len(ma_type_pool),
+        len(ma_period_pool) * len(ma_type_pool),
+    )
     prefetched_metrics_map = _build_prefetched_metric_cache(
         prefetched_map,
         ma_periods=ma_period_pool,
@@ -2121,8 +2001,6 @@ def run_account_tuning(
             progress_callback=save_progress_callback,
             prefetched_etf_universe=etf_universe,
             prefetched_metrics=prefetched_metrics_map,
-            memmap_catalog=prefetched_memmap_catalog,
-            price_store=price_store_main,
             trading_calendar=prefetched_trading_days,
         )
 
@@ -2178,7 +2056,6 @@ def run_account_tuning(
                     capture_top_n=capture_top_n,
                     prefetched_etf_universe=etf_universe,
                     prefetched_metrics=prefetched_metrics_map,
-                    price_store=price_store_main,
                     trading_calendar=calendar_for_month,
                 )
             )

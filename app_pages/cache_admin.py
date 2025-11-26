@@ -68,18 +68,18 @@ def _load_authenticator() -> stauth.Authenticate:
 
 def render_cache_admin_page() -> None:
     st.set_page_config(page_title="[Admin] 종목 캐시", page_icon="🗃️", layout="wide")
-    st.title("[Admin] 종목 캐시")
     st.caption("종목 가격 데이터 캐시를 조회하는 관리용 페이지입니다.")
 
     authenticator = _load_authenticator()
-    _, auth_status, _ = authenticator.login(key="cache_login", location="sidebar")
+    _, auth_status, _ = authenticator.login(key="cache_login", location="main")
 
     if not auth_status:
         st.warning("이 페이지에 접근하려면 로그인이 필요합니다.")
         return
 
-    st.sidebar.write("")
-    authenticator.logout(button_name="로그아웃", location="sidebar")
+    header_col, logout_col = st.columns([5, 1])
+    with logout_col:
+        authenticator.logout(button_name="로그아웃", location="main", key="cache_logout")
 
     countries = list_cached_countries()
     if not countries:

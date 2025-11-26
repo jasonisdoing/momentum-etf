@@ -1,9 +1,11 @@
 """추천과 백테스트에서 공통으로 사용하는 필터링 로직."""
 
+from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Callable
 
-from utils.logger import get_app_logger
+import config
 from logic.common.portfolio import is_category_exception
+from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
@@ -178,6 +180,20 @@ def filter_category_duplicates(
     category_best_map = {}  # 카테고리별 최고 점수 종목 추적
     replacement_tickers = set()  # 교체 매매 관련 티커
     held_categories = set()  # 이미 보유/매수 중인 카테고리
+    wait_candidates_by_category: Dict[str, List[Tuple[float, int, Dict[str, Any]]]] = defaultdict(list)
+    max_per_category = getattr(config, "MAX_PER_CATEGORY", 1) or 1
+
+    def _resolve_item_score(entry: Dict[str, Any]) -> float:
+        composite = entry.get("composite_score")
+        score = entry.get("score")
+        try:
+            if composite is not None:
+                return float(composite)
+            if score is not None:
+                return float(score)
+            return float("-inf")
+        except (TypeError, ValueError):
+            return float("-inf")
 
     # 1단계: 교체 매매 티커 수집 및 보유 카테고리 수집
     for item in items:
@@ -196,7 +212,7 @@ def filter_category_duplicates(
                 held_categories.add(category_key)
 
     # 2단계: 필터링
-    for item in items:
+    for order_idx, item in enumerate(items):
         ticker = item.get("ticker") or item.get("tkr")
         category = item.get("category", "")
         state = item.get("state", "")
@@ -224,8 +240,28 @@ def filter_category_duplicates(
                     category_best_map[category_key] = item
             continue
 
-        # WAIT 상태도 그대로 노출하여 동일 카테고리의 후보를 모두 확인할 수 있도록 한다.
-        filtered_results.append(item)
+        category_key = category_key_getter(category)
+
+        # 카테고리가 없거나 예외 카테고리는 그대로 표시
+        if not category_key or is_category_exception(category_key):
+            filtered_results.append(item)
+            continue
+
+        # 이미 보유 중인 카테고리는 숨김 (카테고리 중복 노출 대신)
+        if category_key in held_categories:
+            continue
+
+        score_val = _resolve_item_score(item)
+        wait_candidates_by_category[category_key].append((score_val, order_idx, item))
+
+    selected_wait_items: List[Tuple[float, int, Dict[str, Any]]] = []
+    for category_key, entries in wait_candidates_by_category.items():
+        entries.sort(key=lambda entry: (-entry[0], entry[1]))
+        limit = max(1, int(max_per_category))
+        selected_wait_items.extend(entries[:limit])
+
+    selected_wait_items.sort(key=lambda entry: entry[1])
+    filtered_results.extend([entry[2] for entry in selected_wait_items])
 
     return filtered_results
 

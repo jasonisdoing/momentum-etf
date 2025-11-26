@@ -86,46 +86,15 @@ def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None
     if not all_etfs:
         return all_etfs
 
-    # 카테고리별 대표 종목 선택 (예외 카테고리는 전체 포함)
-    grouped: Dict[str, List[Dict[str, Any]]] = {}
-    for item in all_etfs:
-        category = str(item.get("category") or "").strip()
-        if not category:
-            raise ValueError(f"종목 {item.get('ticker')}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
-        grouped.setdefault(category, []).append(item)
+    # 추천 제외 플래그가 설정된 종목은 기본 유니버스에서 제거
+    filtered: List[Dict[str, Any]] = [item for item in all_etfs if item.get("recommend_enabled", True)]
+    disabled_count = len(all_etfs) - len(filtered)
 
-    filtered: List[Dict[str, Any]] = []
-    exception_count = 0
-    for category, items in grouped.items():
-        # CATEGORY_EXCEPTIONS에 정의된 카테고리는 모두 포함
-        if category in config.CATEGORY_EXCEPTIONS:
-            filtered.extend(items)
-            exception_count += len(items)
-            continue
-
-        best_idx = -1
-        best_score = float("-inf")
-        for idx, entry in enumerate(items):
-            score_raw = entry.get("3_month_earn_rate")
-            try:
-                score_val = float(score_raw)
-            except (TypeError, ValueError):
-                score_val = float("-inf")
-
-            if best_idx == -1 or score_val > best_score:
-                best_idx = idx
-                best_score = score_val
-        if best_idx >= 0:
-            filtered.append(items[best_idx])
-
-    exception_names = ", ".join(config.CATEGORY_EXCEPTIONS) if config.CATEGORY_EXCEPTIONS else "없음"
     logger.info(
-        "[%s] 카테고리 대표 추려진 종목 수: %d → %d (예외 카테고리 [%s] %d개 유지)",
+        "[%s] 전체 ETF 유니버스 로딩: %d개 종목 (추천 제외 %d개 필터링)",
         (country or "").upper(),
-        len(all_etfs),
         len(filtered),
-        exception_names,
-        exception_count,
+        disabled_count,
     )
 
     if include_extra_tickers:
@@ -135,7 +104,7 @@ def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None
             if not norm or norm in existing:
                 continue
             src = by_ticker.get(norm)
-            if src:
+            if src and src.get("recommend_enabled", True):
                 filtered.append(src)
                 existing.add(norm)
 

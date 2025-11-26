@@ -207,23 +207,30 @@ def _update_metadata_for_country(country_code: str):
                     if not data.index.is_unique:
                         data = data[~data.index.duplicated(keep="last")]
 
-            stock["1_week_avg_volume"] = None
-            stock["1_week_avg_turnover"] = None
+            stock.pop("1_week_avg_volume", None)
+            stock.pop("1_week_avg_turnover", None)
+            stock.pop("1_month_avg_turnover", None)
+            stock["1_month_avg_volume"] = None
+            stock["1_month_earn_rate"] = None
             stock["3_month_earn_rate"] = None
 
             # yfinance 기반 지표 계산
             if data is not None and not data.empty and len(data) >= 1:
                 # 거래대금 컬럼 추가
-                data["Turnover"] = data["Close"] * data["Volume"]
-                last_7_days = data.tail(7)
+                last_month = data.tail(21)
 
-                avg_volume = last_7_days["Volume"].mean()
-                avg_turnover = last_7_days["Turnover"].mean()
+                avg_volume = last_month["Volume"].mean()
 
                 if pd.notna(avg_volume):
-                    stock["1_week_avg_volume"] = int(avg_volume)
-                if pd.notna(avg_turnover):
-                    stock["1_week_avg_turnover"] = int(avg_turnover)
+                    stock["1_month_avg_volume"] = int(avg_volume)
+
+                # 2. 1개월 수익률 (최근 21거래일 기준)
+                if len(last_month) >= 2 and "Close" in data.columns:
+                    month_start = last_month.iloc[0]["Close"]
+                    month_end = last_month.iloc[-1]["Close"]
+                    if pd.notna(month_start) and pd.notna(month_end) and month_start > 0:
+                        month_earn_rate = ((month_end - month_start) / month_start) * 100
+                        stock["1_month_earn_rate"] = round(month_earn_rate, 4)
 
                 # 3. 3개월 수익률 계산 (yfinance 데이터 사용)
                 if len(data) >= 2 and "Close" in data.columns:
@@ -239,6 +246,16 @@ def _update_metadata_for_country(country_code: str):
                     three_month_from_naver = _try_parse_float(naver_item.get("threeMonthEarnRate"))
                     if three_month_from_naver is not None:
                         stock["3_month_earn_rate"] = round(three_month_from_naver, 4)
+
+            # 필드 순서 정렬: 1M 거래량 → 1M 수익률 → 3M 수익률
+            ordered_fields = ["1_month_avg_volume", "1_month_earn_rate", "3_month_earn_rate"]
+            preserved_values = {}
+            for key in ordered_fields:
+                if key in stock:
+                    preserved_values[key] = stock.pop(key)
+            for key in ordered_fields:
+                if key in preserved_values:
+                    stock[key] = preserved_values[key]
 
             name = stock.get("name") or "-"
             logger.info(f"  -> 메타데이터 획득 중: {idx}/{total_count} - {name}({ticker})")
