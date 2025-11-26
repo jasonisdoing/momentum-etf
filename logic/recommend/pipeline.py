@@ -623,18 +623,24 @@ def _build_ticker_timeseries_entry(
 
         if len(price_series) < min_required_data:
             logger.warning(
-                f"[{ticker_upper}] 데이터 부족으로 제외 (보유: {len(price_series)}개, 필요: {min_required_data}개 이상, MA기간: {ma_period})"
+                f"[{ticker_upper}] 데이터 부족 - 점수/RSI/지속 계산 불가 (보유: {len(price_series)}개, 필요: {min_required_data}개 이상, MA기간: {ma_period})"
             )
-            return None
+            # 데이터 부족이지만 가격 정보는 포함 (점수/RSI/지속만 0으로 설정)
+            data_insufficient = True
+            moving_average = pd.Series()
+            score_value = 0.0
+            consecutive_buy_days = 0
+            rsi_score = 0.0
+        else:
+            data_insufficient = False
+            moving_average = calculate_moving_average(price_series, ma_period, ma_type)
+            ma_score_series = calculate_ma_score(price_series, moving_average)
+            score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
+            consecutive_buy_days = get_buy_signal_streak(score_value, ma_score_series, min_buy_score)
 
-    moving_average = calculate_moving_average(price_series, ma_period, ma_type)
-    ma_score_series = calculate_ma_score(price_series, moving_average)
-    score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
-    consecutive_buy_days = get_buy_signal_streak(score_value, ma_score_series, min_buy_score)
-
-    rsi_score = calculate_rsi_for_ticker(price_series)
-    if rsi_score == 0.0 and len(price_series) < 15:
-        logger.warning(f"[RSI] {ticker_upper} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
+            rsi_score = calculate_rsi_for_ticker(price_series)
+            if rsi_score == 0.0 and len(price_series) < 15:
+                logger.warning(f"[RSI] {ticker_upper} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
 
     recent_prices = market_series.tail(63)
     trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
@@ -679,6 +685,7 @@ def _build_ticker_timeseries_entry(
         "price_deviation": price_deviation,
         "ma_period": ma_period,
         "drawdown_from_high": drawdown_from_high_pct,
+        "data_insufficient": data_insufficient if "data_insufficient" in locals() else False,
     }
     return ticker_data
 
