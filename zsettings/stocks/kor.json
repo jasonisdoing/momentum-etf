@@ -333,7 +333,7 @@
         ]
     },
     {
-        "category": "원자재",
+        "category": "희토류",
         "tickers": [
             {
                 "ticker": "415920",
@@ -343,15 +343,6 @@
                 "1_month_avg_volume": 550897,
                 "1_month_earn_rate": 4.3316,
                 "3_month_earn_rate": 24.3243
-            },
-            {
-                "ticker": "276000",
-                "name": "TIGER 글로벌자원생산기업(합성 H)",
-                "recommend_enabled": true,
-                "listing_date": "2017-08-01",
-                "1_month_avg_volume": 1366,
-                "1_month_earn_rate": -0.3998,
-                "3_month_earn_rate": 3.4838
             }
         ]
     },
