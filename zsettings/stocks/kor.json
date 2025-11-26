@@ -19,24 +19,6 @@
                 "1_month_avg_volume": 2269572,
                 "1_month_earn_rate": -1.6171,
                 "3_month_earn_rate": 12.1428
-            },
-            {
-                "ticker": "426030",
-                "name": "TIMEFOLIO 미국나스닥100액티브",
-                "recommend_enabled": true,
-                "listing_date": "2022-05-11",
-                "1_month_avg_volume": 621661,
-                "1_month_earn_rate": -7.6625,
-                "3_month_earn_rate": 8.6049
-            },
-            {
-                "ticker": "426020",
-                "name": "TIMEFOLIO 미국S&P500액티브",
-                "recommend_enabled": true,
-                "listing_date": "2022-05-11",
-                "1_month_avg_volume": 106781,
-                "1_month_earn_rate": -1.2279,
-                "3_month_earn_rate": 13.7843
             }
         ]
     },
@@ -146,15 +128,6 @@
                 "1_month_avg_volume": 118349,
                 "1_month_earn_rate": -11.9084,
                 "3_month_earn_rate": 8.5933
-            },
-            {
-                "ticker": "456600",
-                "name": "TIMEFOLIO 글로벌AI인공지능액티브",
-                "recommend_enabled": true,
-                "listing_date": "2023-05-16",
-                "1_month_avg_volume": 533839,
-                "1_month_earn_rate": -9.5151,
-                "3_month_earn_rate": 10.8937
             },
             {
                 "ticker": "466950",
@@ -391,15 +364,6 @@
                 "3_month_earn_rate": 3.281
             },
             {
-                "ticker": "485810",
-                "name": "TIMEFOLIO 글로벌바이오액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-07-02",
-                "1_month_avg_volume": 37298,
-                "1_month_earn_rate": 15.323,
-                "3_month_earn_rate": 28.275
-            },
-            {
                 "ticker": "476070",
                 "name": "KODEX 글로벌비만치료제TOP2 Plus",
                 "recommend_enabled": true,
@@ -554,15 +518,6 @@
                 "1_month_avg_volume": 40288,
                 "1_month_earn_rate": -4.7731,
                 "3_month_earn_rate": 7.4472
-            },
-            {
-                "ticker": "478150",
-                "name": "TIMEFOLIO 글로벌우주테크&방산액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-04-23",
-                "1_month_avg_volume": 129572,
-                "1_month_earn_rate": -9.7443,
-                "3_month_earn_rate": 5.1864
             }
         ]
     },
@@ -604,6 +559,56 @@
                 "1_month_avg_volume": 42576,
                 "1_month_earn_rate": 3.9272,
                 "3_month_earn_rate": 22.5287
+            }
+        ]
+    },
+    {
+        "category": "TIMEFOLIO",
+        "tickers": [
+            {
+                "ticker": "426020",
+                "name": "TIMEFOLIO 미국S&P500액티브",
+                "recommend_enabled": true,
+                "listing_date": "2022-05-11",
+                "1_month_avg_volume": 106781,
+                "1_month_earn_rate": -1.2279,
+                "3_month_earn_rate": 13.7843
+            },
+            {
+                "ticker": "426030",
+                "name": "TIMEFOLIO 미국나스닥100액티브",
+                "recommend_enabled": true,
+                "listing_date": "2022-05-11",
+                "1_month_avg_volume": 621661,
+                "1_month_earn_rate": -7.6625,
+                "3_month_earn_rate": 8.6049
+            },
+            {
+                "ticker": "456600",
+                "name": "TIMEFOLIO 글로벌AI인공지능액티브",
+                "recommend_enabled": true,
+                "listing_date": "2023-05-16",
+                "1_month_avg_volume": 533839,
+                "1_month_earn_rate": -9.5151,
+                "3_month_earn_rate": 10.8937
+            },
+            {
+                "ticker": "478150",
+                "name": "TIMEFOLIO 글로벌우주테크&방산액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-04-23",
+                "1_month_avg_volume": 129572,
+                "1_month_earn_rate": -9.7443,
+                "3_month_earn_rate": 5.1864
+            },
+            {
+                "ticker": "485810",
+                "name": "TIMEFOLIO 글로벌바이오액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-07-02",
+                "1_month_avg_volume": 37298,
+                "1_month_earn_rate": 15.323,
+                "3_month_earn_rate": 28.275
             },
             {
                 "ticker": "0043Y0",
