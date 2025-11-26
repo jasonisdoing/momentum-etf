@@ -589,31 +589,12 @@ def _build_ticker_timeseries_entry(
         if isinstance(deviation_raw, (int, float)):
             price_deviation = round(float(deviation_raw), 2)
 
-    # 일간 변동률 계산: 개장 중이거나 실시간 데이터가 있을 때만 계산
-    # 개장 전(자정~09:00) 또는 휴장일에는 0으로 표시
-    should_calculate_daily_change = False
-    if is_kor_market:
-        # 한국 시장: 실시간 스냅샷이 있으면 개장 중으로 간주
-        if snapshot_entry:
-            should_calculate_daily_change = True
-        else:
-            # 실시간 데이터가 없으면 시장 개장 여부 확인
-            from logic.recommend.schedule import is_market_open
-
-            should_calculate_daily_change = is_market_open(country_code)
-    else:
-        # 해외 시장: 일단 계산 (추후 확장 가능)
-        should_calculate_daily_change = True
-
-    if should_calculate_daily_change and market_latest and market_prev and market_prev > 0:
+    # 일간 변동률 계산: 장 마감 후에도 당일 변동률 표시
+    if market_latest and market_prev and market_prev > 0:
         try:
             daily_pct = ((market_latest / market_prev) - 1.0) * 100
         except ZeroDivisionError:
             daily_pct = 0.0
-
-    if is_kor_market and not snapshot_entry:
-        nav_latest = None
-        price_deviation = None
 
     # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
     if config.ENABLE_DATA_SUFFICIENCY_CHECK:
@@ -671,11 +652,19 @@ def _build_ticker_timeseries_entry(
             if latest_price is not None and highest_price and highest_price > 0:
                 drawdown_from_high_pct = round(((latest_price / highest_price) - 1.0) * 100, 2)
 
+    # 시초가 데이터 추출 (당일 매수 종목의 평가손익 계산용)
+    open_price = None
+    if "Open" in df_sorted.columns:
+        open_series = pd.to_numeric(df_sorted["Open"], errors="coerce").dropna()
+        if not open_series.empty:
+            open_price = float(open_series.iloc[-1])
+
     ticker_data = {
         "price": market_latest,
         "nav_price": nav_latest,
         "prev_close": market_prev if market_prev is not None else market_latest,
         "daily_pct": round(daily_pct, 2),
+        "open": open_price,
         "close": price_series,
         "s1": moving_average.iloc[-1] if not moving_average.empty else None,
         "s2": None,
@@ -972,14 +961,12 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
     )
     # 실시간 스냅샷은 개장 시간에만 조회 (개장 전/휴장일에는 일간 변동률 0 표시)
     if is_kor_market and snapshot_targets:
-        from logic.recommend.schedule import is_market_open
-
-        if is_market_open(country_code):
-            try:
-                realtime_inav_snapshot = fetch_naver_etf_inav_snapshot(snapshot_targets)
-            except Exception as exc:
-                logger.warning("[KOR] 네이버 iNAV 스냅샷 조회 실패: %s", exc)
-                realtime_inav_snapshot = {}
+        # 장 마감 후에도 Nav/괴리율 데이터 조회 (당일 종가 기준)
+        try:
+            realtime_inav_snapshot = fetch_naver_etf_inav_snapshot(snapshot_targets)
+        except Exception as exc:
+            logger.warning("[KOR] 네이버 iNAV 스냅샷 조회 실패: %s", exc)
+            realtime_inav_snapshot = {}
 
     missing_data_tickers: List[str] = []
     missing_logged: Set[str] = set()
@@ -1342,11 +1329,25 @@ def generate_account_recommendation_report(account_id: str, date_str: Optional[s
             if buy_date_norm is None and bought_today:
                 buy_date_norm = base_date.normalize()
 
-            buy_price = _resolve_buy_price(
-                ticker_data,
-                buy_date_norm,
-                fallback_price=float(price_val) if price_val else None,
-            )
+            # 당일 매수한 경우 시초가 + 슬리피지로 매수가 계산
+            if bought_today:
+                open_price = ticker_data.get("open")
+                if open_price and open_price > 0:
+                    slippage_config = config.BACKTEST_SLIPPAGE.get(country_code, config.BACKTEST_SLIPPAGE.get("kor", {}))
+                    buy_slippage_pct = slippage_config.get("buy_pct", 0.25)
+                    buy_price = float(open_price) * (1 + buy_slippage_pct / 100)
+                else:
+                    buy_price = _resolve_buy_price(
+                        ticker_data,
+                        buy_date_norm,
+                        fallback_price=float(price_val) if price_val else None,
+                    )
+            else:
+                buy_price = _resolve_buy_price(
+                    ticker_data,
+                    buy_date_norm,
+                    fallback_price=float(price_val) if price_val else None,
+                )
 
             if buy_price and buy_price > 0 and price_val:
                 evaluation_pct_val = round(((float(price_val) / buy_price) - 1.0) * 100, 2)
