@@ -596,12 +596,22 @@ def _build_ticker_timeseries_entry(
         except ZeroDivisionError:
             daily_pct = 0.0
 
-    # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
+    # 변수 초기화 (UnboundLocalError 방지)
+    data_insufficient = False
+    moving_average = pd.Series()
+    score_value = 0.0
+    consecutive_buy_days = 0
+    rsi_score = 0.0
+
+    # 데이터 충분성 검증 (config 설정에 따라 활성화/비활성화)
     if config.ENABLE_DATA_SUFFICIENCY_CHECK:
-        ma_type_upper = (ma_type or "SMA").upper()
-        if ma_type_upper == "TEMA":
+        # MA 타입에 따라 필요한 데이터 양 결정
+        ma_type_upper = ma_type.upper()
+        if ma_type_upper in {"EMA", "DEMA", "TEMA"}:
+            # 지수 이동평균은 더 많은 데이터 필요 (안정화를 위해)
             ideal_multiplier = 3.0
-        elif ma_type_upper in {"HMA", "EMA", "DEMA"}:
+        elif ma_type_upper == "HMA":
+            # Hull MA는 중간 정도
             ideal_multiplier = 2.0
         else:  # SMA, WMA 등
             ideal_multiplier = 1.0
@@ -641,6 +651,17 @@ def _build_ticker_timeseries_entry(
             rsi_score = calculate_rsi_for_ticker(price_series)
             if rsi_score == 0.0 and len(price_series) < 15:
                 logger.warning(f"[RSI] {ticker_upper} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
+    else:
+        # ENABLE_DATA_SUFFICIENCY_CHECK = False인 경우 모든 종목에 대해 계산 시도
+        data_insufficient = False
+        moving_average = calculate_moving_average(price_series, ma_period, ma_type)
+        ma_score_series = calculate_ma_score(price_series, moving_average)
+        score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
+        consecutive_buy_days = get_buy_signal_streak(score_value, ma_score_series, min_buy_score)
+
+        rsi_score = calculate_rsi_for_ticker(price_series)
+        if rsi_score == 0.0 and len(price_series) < 15:
+            logger.warning(f"[RSI] {ticker_upper} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
 
     recent_prices = market_series.tail(63)
     trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []

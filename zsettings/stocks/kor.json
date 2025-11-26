@@ -573,7 +573,7 @@
         ]
     },
     {
-        "category": "TIMEFOLIO",
+        "category": "[타임폴리오]",
         "tickers": [
             {
                 "ticker": "426020",
@@ -632,7 +632,7 @@
         ]
     },
     {
-        "category": "KoAct",
+        "category": "[삼성액티브]",
         "tickers": [
             {
                 "ticker": "0015B0",
