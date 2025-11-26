@@ -52,12 +52,6 @@ def render_account_page(account_id: str) -> None:
 
     st.set_page_config(page_title=page_title, page_icon=page_icon or "📈", layout="wide")
 
-    title_text = page_title
-    if page_icon:
-        title_text = f"{page_icon} {page_title}".strip()
-
-    st.title(title_text)
-
     # 계좌 설명 표시
     account_desc = account_settings.get("desc")
     if account_desc:
