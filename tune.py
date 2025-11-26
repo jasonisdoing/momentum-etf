@@ -15,7 +15,7 @@ from utils.data_loader import MissingPriceDataError
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
     "k1": {
-        "MA_RANGE": np.arange(50, 160, 10),
+        "MA_RANGE": np.arange(50, 155, 5),
         # "MA_RANGE": [100],
         "MA_TYPE": ["TEMA"],
         # "MA_TYPE": ["TEMA", "HMA"],
