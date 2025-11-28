@@ -31,7 +31,8 @@ def _build_account_page(page_cls: Callable[..., object], account: Dict[str, Any]
 
 
 def _build_home_page(accounts: list[Dict[str, Any]]):
-    allowed_states = {"HOLD", "HOLD_CORE"}
+    # 보유 중인 종목: HOLD, HOLD_CORE + 매도 신호가 있지만 아직 보유 중인 종목
+    allowed_states = {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_RSI", "CUT_STOPLOSS"}
 
     def _render_home_page() -> None:
         for account in accounts:
@@ -47,7 +48,7 @@ def _build_home_page(accounts: list[Dict[str, Any]]):
 
             filtered = df[df["상태"].str.upper().isin(allowed_states)]
             if filtered.empty:
-                st.info("현재 HOLD/HOLD_CORE 상태의 종목이 없습니다.")
+                st.info("현재 보유 중인 종목이 없습니다.")
                 continue
 
             render_recommendation_table(filtered, country_code=country_code)
