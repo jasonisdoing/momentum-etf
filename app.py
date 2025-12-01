@@ -117,6 +117,15 @@ def main() -> None:
 
     pages.append(
         page_cls(
+            "app_pages/all_stocks.py",
+            title="전체 종목",
+            icon="📊",
+            url_path="all",
+        )
+    )
+
+    pages.append(
+        page_cls(
             "app_pages/trade.py",
             title="[Admin] trade",
             icon="📝",
