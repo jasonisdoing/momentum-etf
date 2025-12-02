@@ -164,7 +164,7 @@ def _calculate_cooldown_blocks(
                     if cached_days is None:
                         cached_days = count_trading_days(country_code, last_buy_ts, base_date_norm)
                     days_since_buy = max(cached_days, 0)
-                    if days_since_buy < cooldown_days:
+                    if days_since_buy <= cooldown_days:
                         sell_cooldown_block[tkr] = {
                             "last_buy": last_buy_ts,
                             "days_since": days_since_buy,
@@ -178,7 +178,7 @@ def _calculate_cooldown_blocks(
                     if cached_days is None:
                         cached_days = count_trading_days(country_code, last_sell_ts, base_date_norm)
                     days_since_sell = max(cached_days, 0)
-                    if days_since_sell < cooldown_days:
+                    if days_since_sell <= cooldown_days:
                         buy_cooldown_block[tkr] = {
                             "last_sell": last_sell_ts,
                             "days_since": days_since_sell,

@@ -188,7 +188,7 @@ def _execute_individual_sells(
                 ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
                 # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                 if cooldown_days > 0:
-                    ticker_state["buy_block_until"] = i + cooldown_days
+                    ticker_state["buy_block_until"] = i + cooldown_days + 1
 
                 # 행 업데이트
                 row = daily_records_by_ticker[ticker][-1]
@@ -400,7 +400,7 @@ def _execute_new_buys(
 
             # 매도 쿨다운 설정: 매수 후 N일간 매도 금지 (손절 제외)
             if cooldown_days > 0:
-                ticker_state["sell_block_until"] = i + cooldown_days
+                ticker_state["sell_block_until"] = i + cooldown_days + 1
 
             if category and not is_category_exception(category):
                 held_categories.add(category)
@@ -939,7 +939,7 @@ def run_portfolio_backtest(
                             position_state[core_ticker]["shares"] = shares_to_buy
                             position_state[core_ticker]["avg_cost"] = price
                             # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
-                            position_state[core_ticker]["buy_block_until"] = i + cooldown_days
+                            position_state[core_ticker]["buy_block_until"] = i + cooldown_days + 1
 
                             buy_trades_today_map.setdefault(core_ticker, []).append({"shares": float(shares_to_buy), "price": float(price)})
 
@@ -1123,7 +1123,7 @@ def run_portfolio_backtest(
                         weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
                         # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                         if cooldown_days > 0:
-                            weakest_state["buy_block_until"] = i + cooldown_days
+                            weakest_state["buy_block_until"] = i + cooldown_days + 1
 
                         if daily_records_by_ticker[ticker_to_sell] and daily_records_by_ticker[ticker_to_sell][-1]["date"] == dt:
                             row = daily_records_by_ticker[ticker_to_sell][-1]

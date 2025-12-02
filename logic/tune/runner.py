@@ -343,7 +343,7 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
             str(ma_type_val) if ma_type_val else "SMA",
             str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-            _format_threshold(threshold_val),
+            str(int(threshold_val)) if isinstance(threshold_val, (int, float)) and math.isfinite(float(threshold_val)) else "-",
             stop_loss_display,
             str(int(rsi_threshold_val)) if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val)) else "-",
             str(int(cooldown_val)) if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val)) else "-",
