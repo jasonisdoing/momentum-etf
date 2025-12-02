@@ -188,17 +188,17 @@ def _build_all_stocks_table(country: str = "kor") -> pd.DataFrame:
                 "종목명": name,
                 "카테고리": category,
                 "일간(%)": daily_pct,
-                "현재가": format_price(current_price, country),
-                "Nav": format_price(nav_price, country),
-                "괴리율": format_price_deviation(deviation),
+                "현재가": int(current_price) if pd.notna(current_price) else None,
+                "Nav": int(nav_price) if pd.notna(nav_price) else None,
+                "괴리율": deviation,
                 "1주(%)": return_1w,
                 "2주(%)": return_2w,
                 "1달(%)": return_1m,
                 "3달(%)": return_3m,
                 "고점대비": drawdown,
                 "추세(3달)": trend_data,
-                "점수": _format_score(score_value),
-                "RSI": _format_score(rsi_score),
+                "점수": score_value,
+                "RSI": rsi_score,
                 "지속": consecutive_days,
             }
         )
@@ -214,14 +214,13 @@ def _build_all_stocks_table(country: str = "kor") -> pd.DataFrame:
     return df
 
 
-def _style_percentage_columns(df: pd.DataFrame) -> pd.io.formats.style.Styler:
-    """퍼센트 컬럼에 색상 스타일 적용 (양수=빨강, 음수=파랑)."""
+def _style_dataframe(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+    """DataFrame에 스타일 적용 (색상 및 포맷)."""
 
     def _color_pct(val: float | str) -> str:
         if val is None:
             return ""
         try:
-            # NumberColumn format="%.2f%%" uses ratio, so 0 is 0
             num = float(val)
         except (TypeError, ValueError):
             return ""
@@ -233,10 +232,20 @@ def _style_percentage_columns(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         return "color: black"
 
     styled = df.style
-    pct_columns = ["일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "고점대비"]
+    pct_columns = ["일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "고점대비", "괴리율"]
     for col in pct_columns:
         if col in df.columns:
             styled = styled.map(_color_pct, subset=pd.IndexSlice[:, col])
+
+    # 가격 컬럼 포맷팅 (천 단위 콤마 + 원)
+    format_dict = {}
+    if "현재가" in df.columns:
+        format_dict["현재가"] = "{:,.0f}원"
+    if "Nav" in df.columns:
+        format_dict["Nav"] = "{:,.0f}원"
+
+    if format_dict:
+        styled = styled.format(format_dict)
 
     return styled
 
@@ -269,22 +278,22 @@ def render_all_stocks_page() -> None:
         "종목명": st.column_config.TextColumn("종목명", width="medium"),
         "카테고리": st.column_config.TextColumn("카테고리", width=100),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width=70, format="%.2f%%"),
-        "현재가": st.column_config.TextColumn("현재가", width=80),
-        "Nav": st.column_config.TextColumn("Nav", width=80),
-        "괴리율": st.column_config.TextColumn("괴리율", width=70),
+        "현재가": st.column_config.NumberColumn("현재가", width=80),
+        "Nav": st.column_config.NumberColumn("Nav", width=80),
+        "괴리율": st.column_config.NumberColumn("괴리율", width=70, format="%.2f%%"),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width=70, format="%.2f%%"),
         "2주(%)": st.column_config.NumberColumn("2주(%)", width=70, format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width=70, format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width=70, format="%.2f%%"),
         "고점대비": st.column_config.NumberColumn("고점대비", width=80, format="%.2f%%"),
         "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width=100),
-        "점수": st.column_config.TextColumn("점수", width=60),
-        "RSI": st.column_config.TextColumn("RSI", width=60),
+        "점수": st.column_config.NumberColumn("점수", width=60, format="%.1f"),
+        "RSI": st.column_config.NumberColumn("RSI", width=60, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
     }
 
     # 스타일 적용
-    styled_df = _style_percentage_columns(df)
+    styled_df = _style_dataframe(df)
 
     # 테이블 표시
     st.dataframe(

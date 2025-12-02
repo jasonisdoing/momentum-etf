@@ -128,19 +128,19 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         category = row.get("category", "-")
         state = row.get("state", "-").upper()
         holding_days = _format_days(row.get("holding_days"))
-        price_display = format_price(row.get("price"), country)
-        daily_pct = _format_percent(row.get("daily_pct"))
-        evaluation_pct = _format_percent(row.get("evaluation_pct", 0.0))
-        price_deviation = format_price_deviation(row.get("price_deviation")) if show_deviation else None
-        return_1w = _format_percent(row.get("return_1w", 0.0))
-        return_2w = _format_percent(row.get("return_2w", 0.0))
-        return_1m = _format_percent(row.get("return_1m", 0.0))
-        return_3m = _format_percent(row.get("return_3m", 0.0))
-        drawdown_from_high = _format_percent(row.get("drawdown_from_high", 0.0))
-        score = _format_score(row.get("score"))
+        price_display = row.get("price")
+        daily_pct = row.get("daily_pct")
+        evaluation_pct = row.get("evaluation_pct", 0.0)
+        price_deviation = row.get("price_deviation") if show_deviation else None
+        return_1w = row.get("return_1w", 0.0)
+        return_2w = row.get("return_2w", 0.0)
+        return_1m = row.get("return_1m", 0.0)
+        return_3m = row.get("return_3m", 0.0)
+        drawdown_from_high = row.get("drawdown_from_high", 0.0)
+        score = row.get("score")
         streak = _format_days(row.get("streak"))
         phrase = _resolve_phrase(row)
-        rsi_score = _format_score(row.get("rsi_score", 0.0))
+        rsi_score = row.get("rsi_score", 0.0)
         display_rows.append(
             {
                 "#": rank if rank is not None else "-",
@@ -152,7 +152,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "일간(%)": daily_pct,
                 "평가(%)": evaluation_pct,
                 price_label: price_display,
-                **({"Nav": format_price(row.get("nav_price"), country)} if nav_mode else {}),
+                **({"Nav": row.get("nav_price")} if nav_mode else {}),
                 **({"괴리율": price_deviation} if show_deviation else {}),
                 "1주(%)": return_1w,
                 "2주(%)": return_2w,
