@@ -187,33 +187,29 @@ def _build_all_stocks_table(country: str = "kor") -> pd.DataFrame:
                 "티커": ticker,
                 "종목명": name,
                 "카테고리": category,
-                "일간(%)": _format_percent(daily_pct),
+                "일간(%)": daily_pct,
                 "현재가": format_price(current_price, country),
                 "Nav": format_price(nav_price, country),
                 "괴리율": format_price_deviation(deviation),
-                "1주(%)": _format_percent(return_1w),
-                "2주(%)": _format_percent(return_2w),
-                "1달(%)": _format_percent(return_1m),
-                "3달(%)": _format_percent(return_3m),
-                "고점대비": _format_percent(drawdown),
+                "1주(%)": return_1w,
+                "2주(%)": return_2w,
+                "1달(%)": return_1m,
+                "3달(%)": return_3m,
+                "고점대비": drawdown,
                 "추세(3달)": trend_data,
                 "점수": _format_score(score_value),
                 "RSI": _format_score(rsi_score),
                 "지속": consecutive_days,
-                "_daily_pct_raw": daily_pct,  # 정렬용 숫자 값
             }
         )
 
     df = pd.DataFrame(rows)
 
     # 일간(%) 내림차순으로 정렬
-    df = df.sort_values(by="_daily_pct_raw", ascending=False)
+    df = df.sort_values(by="일간(%)", ascending=False)
 
     # 정렬 후 순번 재부여
     df["#"] = range(1, len(df) + 1)
-
-    # 정렬용 컬럼 제거
-    df = df.drop(columns=["_daily_pct_raw"])
 
     return df
 
@@ -224,19 +220,12 @@ def _style_percentage_columns(df: pd.DataFrame) -> pd.io.formats.style.Styler:
     def _color_pct(val: float | str) -> str:
         if val is None:
             return ""
-        if isinstance(val, str):
-            cleaned = val.replace("%", "").replace(",", "").strip()
-            if not cleaned:
-                return ""
-            try:
-                num = float(cleaned)
-            except ValueError:
-                return ""
-        else:
-            try:
-                num = float(val)
-            except (TypeError, ValueError):
-                return ""
+        try:
+            # NumberColumn format="%.2f%%" uses ratio, so 0 is 0
+            num = float(val)
+        except (TypeError, ValueError):
+            return ""
+
         if num > 0:
             return "color: red"
         if num < 0:
@@ -279,15 +268,15 @@ def render_all_stocks_page() -> None:
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width="medium"),
         "카테고리": st.column_config.TextColumn("카테고리", width=100),
-        "일간(%)": st.column_config.TextColumn("일간(%)", width=70),
+        "일간(%)": st.column_config.NumberColumn("일간(%)", width=70, format="%.2f%%"),
         "현재가": st.column_config.TextColumn("현재가", width=80),
         "Nav": st.column_config.TextColumn("Nav", width=80),
         "괴리율": st.column_config.TextColumn("괴리율", width=70),
-        "1주(%)": st.column_config.TextColumn("1주(%)", width=70),
-        "2주(%)": st.column_config.TextColumn("2주(%)", width=70),
-        "1달(%)": st.column_config.TextColumn("1달(%)", width=70),
-        "3달(%)": st.column_config.TextColumn("3달(%)", width=70),
-        "고점대비": st.column_config.TextColumn("고점대비", width=80),
+        "1주(%)": st.column_config.NumberColumn("1주(%)", width=70, format="%.2f%%"),
+        "2주(%)": st.column_config.NumberColumn("2주(%)", width=70, format="%.2f%%"),
+        "1달(%)": st.column_config.NumberColumn("1달(%)", width=70, format="%.2f%%"),
+        "3달(%)": st.column_config.NumberColumn("3달(%)", width=70, format="%.2f%%"),
+        "고점대비": st.column_config.NumberColumn("고점대비", width=80, format="%.2f%%"),
         "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width=100),
         "점수": st.column_config.TextColumn("점수", width=60),
         "RSI": st.column_config.TextColumn("RSI", width=60),

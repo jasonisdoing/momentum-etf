@@ -923,8 +923,9 @@ def run_portfolio_backtest(
                 if core_ticker in tickers_available_today:
                     price = today_prices.get(core_ticker)
                     if pd.notna(price) and price > 0 and cash > 0:
-                        # 무조건 균등 비중: 초기자본 / TOPN
-                        budget = initial_capital / top_n if top_n > 0 else 0
+                        # 무조건 균등 비중: 현재 총자산 / TOPN
+                        current_total_equity = cash + current_holdings_value
+                        budget = current_total_equity / top_n if top_n > 0 else 0
 
                         budget = min(budget, cash)  # 현금 부족 시 현금만큼만
                         shares_to_buy = budget / price if price > 0 else 0
