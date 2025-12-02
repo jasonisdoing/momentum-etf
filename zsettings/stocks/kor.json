@@ -273,15 +273,6 @@
                 "1_month_avg_volume": 639210,
                 "1_month_earn_rate": -16.1647,
                 "3_month_earn_rate": -19.5568
-            },
-            {
-                "ticker": "0028X0",
-                "name": "Kodex 미국금융테크액티브",
-                "recommend_enabled": true,
-                "listing_date": "2025-05-27",
-                "1_month_avg_volume": 17875,
-                "1_month_earn_rate": 0.1201,
-                "3_month_earn_rate": 2.3841
             }
         ]
     },

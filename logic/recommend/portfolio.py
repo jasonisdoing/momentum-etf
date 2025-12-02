@@ -25,7 +25,7 @@ def _calc_days_left(block_info: Optional[Dict], cooldown_days: Optional[int]) ->
     if not cooldown_days or cooldown_days <= 0 or not isinstance(block_info, dict):
         return None
     try:
-        return max(cooldown_days - int(block_info.get("days_since", 0)), 0)
+        return max(cooldown_days - int(block_info.get("days_since", 0)) + 1, 0)
     except (TypeError, ValueError):
         return None
 
@@ -43,7 +43,7 @@ def _format_cooldown_message(days_left: Optional[int], action: str = "") -> str:
             # 예: "쿨다운 3일 대기중"
             return DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중").replace("{days}", str(days_left))
     else:
-        return "쿨다운 종료"
+        return DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중").replace("{days}", "0")
 
 
 def _normalize_category_value(category: Optional[str]) -> Optional[str]:

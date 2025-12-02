@@ -332,8 +332,7 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
         stop_loss_val = row.get("stop_loss_pct")
         stop_loss_num = _safe_float(stop_loss_val, float("nan"))
         if math.isfinite(stop_loss_num):
-            stop_loss_display = _format_threshold(stop_loss_num)
-            stop_loss_display = f"{stop_loss_display}%"
+            stop_loss_display = f"{int(stop_loss_num)}%"
         else:
             stop_loss_display = "-"
         rsi_threshold_val = row.get("rsi_sell_threshold")
@@ -417,10 +416,28 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: Dict[str, Any]) -> No
     if isinstance(legacy_tuning, dict):
         strategy_data.update(legacy_tuning)
 
+    INTEGER_KEYS = {
+        "REPLACE_SCORE_THRESHOLD",
+        "MIN_BUY_SCORE",
+        "STOP_LOSS_PCT",
+        "COOLDOWN_DAYS",
+        "PORTFOLIO_TOPN",
+        "OVERBOUGHT_SELL_THRESHOLD",
+        "MA_PERIOD",
+    }
+
     for key, value in result_params.items():
         if value is None:
             continue
         strategy_data[key] = value
+
+    # 정수형이어야 하는 필드들 강제 형변환 (튜닝 여부와 무관하게)
+    for key in INTEGER_KEYS:
+        if key in strategy_data and strategy_data[key] is not None:
+            try:
+                strategy_data[key] = int(float(strategy_data[key]))
+            except (ValueError, TypeError):
+                pass
 
     weighted_cagr = entry.get("weighted_expected_CAGR")
     if weighted_cagr is not None:
