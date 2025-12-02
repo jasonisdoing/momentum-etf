@@ -19,33 +19,6 @@
                 "1_month_avg_volume": 2250976,
                 "1_month_earn_rate": 0.1829,
                 "3_month_earn_rate": 13.9965
-            },
-            {
-                "ticker": "426020",
-                "name": "TIMEFOLIO 미국S&P500액티브",
-                "recommend_enabled": true,
-                "listing_date": "2022-05-11",
-                "1_month_avg_volume": 80263,
-                "1_month_earn_rate": -0.4318,
-                "3_month_earn_rate": 15.6047
-            },
-            {
-                "ticker": "426030",
-                "name": "TIMEFOLIO 미국나스닥100액티브",
-                "recommend_enabled": true,
-                "listing_date": "2022-05-11",
-                "1_month_avg_volume": 538732,
-                "1_month_earn_rate": -6.1012,
-                "3_month_earn_rate": 11.4853
-            },
-            {
-                "ticker": "0015B0",
-                "name": "KoAct 미국나스닥성장기업액티브",
-                "recommend_enabled": true,
-                "listing_date": "2025-02-25",
-                "1_month_avg_volume": 134347,
-                "1_month_earn_rate": -5.5407,
-                "3_month_earn_rate": 22.4578
             }
         ]
     },
@@ -173,33 +146,6 @@
                 "1_month_avg_volume": 60748,
                 "1_month_earn_rate": -8.0494,
                 "3_month_earn_rate": 18.2539
-            },
-            {
-                "ticker": "456600",
-                "name": "TIMEFOLIO 글로벌AI인공지능액티브",
-                "recommend_enabled": true,
-                "listing_date": "2023-05-16",
-                "1_month_avg_volume": 445927,
-                "1_month_earn_rate": -9.6832,
-                "3_month_earn_rate": 13.0743
-            },
-            {
-                "ticker": "0051A0",
-                "name": "KoAct 브로드컴밸류체인액티브",
-                "recommend_enabled": true,
-                "listing_date": "2025-05-20",
-                "1_month_avg_volume": 33647,
-                "1_month_earn_rate": -0.7592,
-                "3_month_earn_rate": 32.2006
-            },
-            {
-                "ticker": "0093D0",
-                "name": "KoAct 팔란티어밸류체인액티브",
-                "recommend_enabled": true,
-                "listing_date": "2025-08-26",
-                "1_month_avg_volume": 107353,
-                "1_month_earn_rate": -8.9352,
-                "3_month_earn_rate": 22.9145
             }
         ]
     },
@@ -241,24 +187,6 @@
                 "1_month_avg_volume": 2059413,
                 "1_month_earn_rate": -17.5013,
                 "3_month_earn_rate": -17.5013
-            },
-            {
-                "ticker": "497780",
-                "name": "KoAct 미국천연가스인프라액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-12-10",
-                "1_month_avg_volume": 33175,
-                "1_month_earn_rate": 5.5169,
-                "3_month_earn_rate": 7.5507
-            },
-            {
-                "ticker": "475070",
-                "name": "KoAct 글로벌친환경전력인프라액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-01-18",
-                "1_month_avg_volume": 28496,
-                "1_month_earn_rate": -5.2151,
-                "3_month_earn_rate": 25.0
             }
         ]
     },
@@ -438,15 +366,6 @@
                 "1_month_avg_volume": 953648,
                 "1_month_earn_rate": -14.3701,
                 "3_month_earn_rate": 54.3465
-            },
-            {
-                "ticker": "0020H0",
-                "name": "KoAct 글로벌양자컴퓨팅액티브",
-                "recommend_enabled": true,
-                "listing_date": "2025-03-11",
-                "1_month_avg_volume": 70281,
-                "1_month_earn_rate": -16.3319,
-                "3_month_earn_rate": 41.2979
             }
         ]
     },
@@ -470,33 +389,6 @@
                 "1_month_avg_volume": 158135,
                 "1_month_earn_rate": 13.7597,
                 "3_month_earn_rate": 26.3415
-            },
-            {
-                "ticker": "485810",
-                "name": "TIMEFOLIO 글로벌바이오액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-07-02",
-                "1_month_avg_volume": 40137,
-                "1_month_earn_rate": 16.9312,
-                "3_month_earn_rate": 30.5375
-            },
-            {
-                "ticker": "490330",
-                "name": "KoAct 미국치매&뇌질환치료제액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-09-03",
-                "1_month_avg_volume": 8190,
-                "1_month_earn_rate": 9.9151,
-                "3_month_earn_rate": 43.666
-            },
-            {
-                "ticker": "0113G0",
-                "name": "KoAct 미국바이오헬스케어액티브",
-                "recommend_enabled": true,
-                "listing_date": "2025-11-11",
-                "1_month_avg_volume": 398896,
-                "1_month_earn_rate": 4.3272,
-                "3_month_earn_rate": 4.3272
             }
         ]
     },
@@ -538,15 +430,6 @@
                 "1_month_avg_volume": 12903,
                 "1_month_earn_rate": -0.7362,
                 "3_month_earn_rate": 11.914
-            },
-            {
-                "ticker": "471040",
-                "name": "KoAct 글로벌AI&로봇액티브",
-                "recommend_enabled": true,
-                "listing_date": "2023-11-21",
-                "1_month_avg_volume": 152682,
-                "1_month_earn_rate": -5.711,
-                "3_month_earn_rate": 26.8441
             }
         ]
     },
@@ -626,15 +509,6 @@
                 "1_month_avg_volume": 32003,
                 "1_month_earn_rate": -0.9639,
                 "3_month_earn_rate": 6.5888
-            },
-            {
-                "ticker": "478150",
-                "name": "TIMEFOLIO 글로벌우주테크&방산액티브",
-                "recommend_enabled": true,
-                "listing_date": "2024-04-23",
-                "1_month_avg_volume": 94274,
-                "1_month_earn_rate": -7.511,
-                "3_month_earn_rate": 3.6303
             }
         ]
     },
@@ -676,6 +550,56 @@
                 "1_month_avg_volume": 37345,
                 "1_month_earn_rate": -4.645,
                 "3_month_earn_rate": 20.8888
+            }
+        ]
+    },
+    {
+        "category": "[타임폴리오]",
+        "tickers": [
+            {
+                "ticker": "426020",
+                "name": "TIMEFOLIO 미국S&P500액티브",
+                "recommend_enabled": true,
+                "listing_date": "2022-05-11",
+                "1_month_avg_volume": 80263,
+                "1_month_earn_rate": -0.4318,
+                "3_month_earn_rate": 15.6047
+            },
+            {
+                "ticker": "426030",
+                "name": "TIMEFOLIO 미국나스닥100액티브",
+                "recommend_enabled": true,
+                "listing_date": "2022-05-11",
+                "1_month_avg_volume": 538732,
+                "1_month_earn_rate": -6.1012,
+                "3_month_earn_rate": 11.4853
+            },
+            {
+                "ticker": "456600",
+                "name": "TIMEFOLIO 글로벌AI인공지능액티브",
+                "recommend_enabled": true,
+                "listing_date": "2023-05-16",
+                "1_month_avg_volume": 445927,
+                "1_month_earn_rate": -9.6832,
+                "3_month_earn_rate": 13.0743
+            },
+            {
+                "ticker": "478150",
+                "name": "TIMEFOLIO 글로벌우주테크&방산액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-04-23",
+                "1_month_avg_volume": 94274,
+                "1_month_earn_rate": -7.511,
+                "3_month_earn_rate": 3.6303
+            },
+            {
+                "ticker": "485810",
+                "name": "TIMEFOLIO 글로벌바이오액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-07-02",
+                "1_month_avg_volume": 40137,
+                "1_month_earn_rate": 16.9312,
+                "3_month_earn_rate": 30.5375
             },
             {
                 "ticker": "0043Y0",
@@ -685,6 +609,92 @@
                 "1_month_avg_volume": 259694,
                 "1_month_earn_rate": -2.2581,
                 "3_month_earn_rate": 5.2083
+            }
+        ]
+    },
+    {
+        "category": "[삼성액티브]",
+        "tickers": [
+            {
+                "ticker": "0015B0",
+                "name": "KoAct 미국나스닥성장기업액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-02-25",
+                "1_month_avg_volume": 134347,
+                "1_month_earn_rate": -5.5407,
+                "3_month_earn_rate": 22.4578
+            },
+            {
+                "ticker": "490330",
+                "name": "KoAct 미국치매&뇌질환치료제액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-09-03",
+                "1_month_avg_volume": 8190,
+                "1_month_earn_rate": 9.9151,
+                "3_month_earn_rate": 43.666
+            },
+            {
+                "ticker": "0051A0",
+                "name": "KoAct 브로드컴밸류체인액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-05-20",
+                "1_month_avg_volume": 33647,
+                "1_month_earn_rate": -0.7592,
+                "3_month_earn_rate": 32.2006
+            },
+            {
+                "ticker": "0113G0",
+                "name": "KoAct 미국바이오헬스케어액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-11-11",
+                "1_month_avg_volume": 398896,
+                "1_month_earn_rate": 4.3272,
+                "3_month_earn_rate": 4.3272
+            },
+            {
+                "ticker": "0020H0",
+                "name": "KoAct 글로벌양자컴퓨팅액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-03-11",
+                "1_month_avg_volume": 70281,
+                "1_month_earn_rate": -16.3319,
+                "3_month_earn_rate": 41.2979
+            },
+            {
+                "ticker": "497780",
+                "name": "KoAct 미국천연가스인프라액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-12-10",
+                "1_month_avg_volume": 33175,
+                "1_month_earn_rate": 5.5169,
+                "3_month_earn_rate": 7.5507
+            },
+            {
+                "ticker": "471040",
+                "name": "KoAct 글로벌AI&로봇액티브",
+                "recommend_enabled": true,
+                "listing_date": "2023-11-21",
+                "1_month_avg_volume": 152682,
+                "1_month_earn_rate": -5.711,
+                "3_month_earn_rate": 26.8441
+            },
+            {
+                "ticker": "0093D0",
+                "name": "KoAct 팔란티어밸류체인액티브",
+                "recommend_enabled": true,
+                "listing_date": "2025-08-26",
+                "1_month_avg_volume": 107353,
+                "1_month_earn_rate": -8.9352,
+                "3_month_earn_rate": 22.9145
+            },
+            {
+                "ticker": "475070",
+                "name": "KoAct 글로벌친환경전력인프라액티브",
+                "recommend_enabled": true,
+                "listing_date": "2024-01-18",
+                "1_month_avg_volume": 28496,
+                "1_month_earn_rate": -5.2151,
+                "3_month_earn_rate": 25.0
             }
         ]
     },
