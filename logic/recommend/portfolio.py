@@ -154,9 +154,23 @@ def _calculate_cooldown_blocks(
                 continue
 
             last_sell = trade_info.get("last_sell")
+            last_buy = trade_info.get("last_buy")
 
-            # 매도 쿨다운 제거: 매수 후 바로 매도 가능
-            # 매수 쿨다운만 유지: 매도 후 재매수 금지 기간
+            # 1. 매도 쿨다운: 매수 후 N일간 매도 금지 (손절 제외)
+            if last_buy is not None:
+                last_buy_ts = pd.to_datetime(last_buy).normalize()
+                if last_buy_ts <= base_date_norm:
+                    cached_days = _cached_trading_day_diff(last_buy_ts)
+                    if cached_days is None:
+                        cached_days = count_trading_days(country_code, last_buy_ts, base_date_norm)
+                    days_since_buy = max(cached_days, 0)
+                    if days_since_buy < cooldown_days:
+                        sell_cooldown_block[tkr] = {
+                            "last_buy": last_buy_ts,
+                            "days_since": days_since_buy,
+                        }
+
+            # 2. 매수 쿨다운: 매도 후 N일간 재매수 금지
             if last_sell is not None:
                 last_sell_ts = pd.to_datetime(last_sell).normalize()
                 if last_sell_ts <= base_date_norm:

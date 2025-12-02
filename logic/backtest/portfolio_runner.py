@@ -397,7 +397,10 @@ def _execute_new_buys(
             current_holdings_value += trade_amount
             ticker_state["shares"] += req_qty
             ticker_state["avg_cost"] = buy_price
-            # 매도 쿨다운 제거: 매수 후 바로 매도 가능 (조건 충족 시)
+
+            # 매도 쿨다운 설정: 매수 후 N일간 매도 금지 (손절 제외)
+            if cooldown_days > 0:
+                ticker_state["sell_block_until"] = i + cooldown_days
 
             if category and not is_category_exception(category):
                 held_categories.add(category)

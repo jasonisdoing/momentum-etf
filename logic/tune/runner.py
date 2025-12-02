@@ -307,8 +307,8 @@ def _format_threshold(value: Any) -> str:
 def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = False, months_range: Optional[int] = None) -> List[str]:
     from utils.report import render_table_eaw
 
-    headers = ["MA", "MA타입", "TOPN", "교체점수", "손절", "과매수", "쿨다운", "최소점수", "CAGR(%)", "MDD(%)"]
-    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right", "right"]
+    headers = ["MA", "MA타입", "TOPN", "교체점수", "손절", "과매수", "쿨다운", "CAGR(%)", "MDD(%)"]
+    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right"]
 
     if months_range:
         headers.append(f"{months_range}개월(%)")
@@ -339,8 +339,6 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
         rsi_threshold_val = row.get("rsi_sell_threshold")
         cooldown_val = row.get("cooldown_days")
 
-        min_score_val = row.get("min_buy_score")
-
         row_data = [
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
             str(ma_type_val) if ma_type_val else "SMA",
@@ -349,7 +347,6 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
             stop_loss_display,
             str(int(rsi_threshold_val)) if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val)) else "-",
             str(int(cooldown_val)) if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val)) else "-",
-            _format_threshold(min_score_val),
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),
             _format_table_float(row.get("period_return")),
@@ -653,7 +650,7 @@ def _evaluate_single_combo(
         float,
         Tuple[str, ...],
         Tuple[str, ...],
-    ]
+    ],
 ) -> Tuple[str, Any, List[str]]:
     (
         account_norm,
