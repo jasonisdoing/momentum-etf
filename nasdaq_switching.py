@@ -27,7 +27,8 @@ DEFAULT_SETTINGS = {
     "slippage": 0.05,
     "backtested_date": "2025-12-02",
     "defense_ticker": "GDX",
-    "drawdown_cutoff": 1.3,
+    "drawdown_buy_cutoff": 0.3,
+    "drawdown_sell_cutoff": 0.4,
     "benchmarks": [
         {"ticker": "SPMO", "name": "모멘텀"},
         {"ticker": "VOO", "name": "S&P 500"},
@@ -145,19 +146,31 @@ def compute_signals(prices: pd.Series, settings: Dict) -> pd.DataFrame:
     return df.dropna()
 
 
-def pick_target(row, settings: Dict) -> str:
-    """신호 행을 받아 매수 대상 티커를 결정합니다."""
-    dd_cutoff_raw = settings["drawdown_cutoff"]
-    dd_cutoff = dd_cutoff_raw / 100 if dd_cutoff_raw > 1 else dd_cutoff_raw
+def pick_target(row, prev_target: str, settings: Dict) -> str:
+    """
+    신호 행과 이전 타깃을 받아 매수 대상 티커를 결정합니다 (이중 임계값 적용).
+
+    - drawdown_buy_cutoff (예: 1.0 -> -1.0%): 이보다 높으면(회복되면) 공격 자산 매수
+    - drawdown_sell_cutoff (예: 2.0 -> -2.0%): 이보다 낮으면(악화되면) 공격 자산 매도
+    """
+    buy_cut = -settings["drawdown_buy_cutoff"] / 100
+    sell_cut = -settings["drawdown_sell_cutoff"] / 100
+
     offense = settings["trade_ticker"]
     defense = settings["defense_ticker"]
 
-    # 방어/공격 두 자산 전환 (방어가 CASH거나 ETF여도 동일 로직)
-    if row["drawdown"] <= -dd_cutoff:
-        return defense
+    current_dd = row["drawdown"]
 
-    # MA 조건 제거: 드로다운 조건만 만족하면 공격 자산 보유
-    return offense
+    if prev_target == offense:
+        # 공격 자산 보유 중: 매도 기준보다 더 떨어지면 방어 전환
+        if current_dd < sell_cut:
+            return defense
+        return offense
+    else:
+        # 방어 자산 보유 중: 매수 기준보다 더 오르면 공격 전환
+        if current_dd > buy_cut:
+            return offense
+        return defense
 
 
 # =============================================================================
@@ -245,8 +258,24 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
     if signal_df.empty:
         raise ValueError("시그널 계산에 필요한 데이터가 없습니다.")
     last_date = signal_df.index.max()
+
+    # 상태 기반 로직을 위해 과거 데이터부터 순차적으로 상태 추적
+    # (백테스트와 동일하게 초기 상태는 offense로 가정)
+    prev_target = settings["trade_ticker"]
+
+    # 마지막 날짜 전까지 상태 진행
+    # (실제로는 전체를 다 돌리고 마지막 날의 target을 구하면 됨)
+    # 효율성을 위해 전체 루프를 돌림
+    targets = []
+    for idx, row in signal_df.iterrows():
+        tgt = pick_target(row, prev_target, settings)
+        targets.append(tgt)
+        prev_target = tgt
+
+    signal_df["target"] = targets
+
     last_row = signal_df.loc[last_date]
-    target = pick_target(last_row, settings)
+    target = last_row["target"]
 
     # 상태 계산: 타깃을 BUY, 나머지 WAIT
     offense = settings["trade_ticker"]
@@ -269,15 +298,17 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
     last_ret = daily_rets.loc[last_date] if last_date in daily_rets.index else pd.Series(dtype=float)
 
     def _gap_message(row, price_today):
-        dd_cut_raw = settings["drawdown_cutoff"]
-        dd_cut = dd_cut_raw / 100 if dd_cut_raw > 1 else dd_cut_raw
-        threshold = -dd_cut
+        # 추천 시점의 '문구'는 보통 "왜 안 샀냐"를 설명하는 용도이므로
+        # 매수 기준(buy_cutoff)을 보여주는 것이 적절함
+        buy_cut_raw = settings["drawdown_buy_cutoff"]
+        buy_cut = buy_cut_raw / 100
+        threshold = -buy_cut
         current_dd = row["drawdown"]
 
         # 드로다운이 임계값보다 낮아서(더 많이 떨어져서) 못 사는 경우
         if current_dd <= threshold:
             needed = threshold - current_dd
-            return f"DD {current_dd*100:.2f}% (컷 {threshold*100:.2f}%, 필요 {needed*100:+.2f}%)"
+            return f"DD {current_dd*100:.2f}% (매수컷 {threshold*100:.2f}%, 필요 {needed*100:+.2f}%)"
         return ""
 
     # 테이블 대신 세로형 카드 포맷 생성
@@ -318,7 +349,8 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
             "statuses": statuses,
             "prices": {sym: prices.at[last_date, sym] for sym in assets if sym in prices.columns},
             "drawdown": last_row["drawdown"],
-            "drawdown_cutoff": settings["drawdown_cutoff"],
+            "drawdown_buy_cutoff": settings["drawdown_buy_cutoff"],
+            "drawdown_sell_cutoff": settings["drawdown_sell_cutoff"],
         },
     }
 
