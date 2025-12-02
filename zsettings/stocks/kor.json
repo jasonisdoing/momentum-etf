@@ -146,6 +146,15 @@
                 "1_month_avg_volume": 60748,
                 "1_month_earn_rate": -8.0494,
                 "3_month_earn_rate": 18.2539
+            },
+            {
+                "ticker": "0127R0",
+                "name": "RISE 미국AI클라우드인프라",
+                "recommend_enabled": true,
+                "listing_date": "2025-11-25",
+                "1_month_avg_volume": 166224,
+                "1_month_earn_rate": 1.885,
+                "3_month_earn_rate": 1.885
             }
         ]
     },
