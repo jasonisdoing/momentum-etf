@@ -506,10 +506,10 @@ def process_ticker_data(
     # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
     if config.ENABLE_DATA_SUFFICIENCY_CHECK:
         ma_type_upper = (ma_type or "SMA").upper()
-        if ma_type_upper == "TEMA":
-            ideal_multiplier = 3.0
-        elif ma_type_upper in {"HMA", "EMA", "DEMA"}:
+        if ma_type_upper in {"EMA", "DEMA", "TEMA"}:
             ideal_multiplier = 2.0
+        elif ma_type_upper == "HMA":
+            ideal_multiplier = 1.5
         else:  # SMA, WMA 등
             ideal_multiplier = 1.0
 

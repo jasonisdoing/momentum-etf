@@ -619,10 +619,10 @@ def _build_ticker_timeseries_entry(
         ma_type_upper = ma_type.upper()
         if ma_type_upper in {"EMA", "DEMA", "TEMA"}:
             # 지수 이동평균은 더 많은 데이터 필요 (안정화를 위해)
-            ideal_multiplier = 3.0
+            ideal_multiplier = 2.0
         elif ma_type_upper == "HMA":
             # Hull MA는 중간 정도
-            ideal_multiplier = 2.0
+            ideal_multiplier = 1.5
         else:  # SMA, WMA 등
             ideal_multiplier = 1.0
 
