@@ -1,16 +1,19 @@
 """
-Nasdaq Leverage Switching Strategy Recommendation Script
-이 파일은 프로젝트의 추천 로직을 단일 파일로 번들링한 것입니다.
-다른 프로젝트에서 import하여 사용하거나 직접 실행할 수 있습니다.
+Nasdaq Leverage Switching Strategy Recommendation Script (Standalone)
+이 파일은 프로젝트의 추천 로직과 튜닝 로직을 단일 파일로 번들링한 것입니다.
+실행 시 자동으로 최적 파라미터를 튜닝하고, 그 결과를 바탕으로 추천을 생성합니다.
 """
 
+import itertools
 import json
+import multiprocessing
 import re
-import os
 import sys
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 from unicodedata import east_asian_width, normalize
 
 import numpy as np
@@ -19,18 +22,18 @@ import yfinance as yf
 
 
 # =============================================================================
-# 1. Settings Logic
+# 1. Settings & Config
 # =============================================================================
 
 DEFAULT_SETTINGS = {
-    "months_range": 12,
+    "months_range": 12,  # 기본 12개월 (튜닝 시에도 이 기간 사용)
     "signal_ticker": "QQQ",
     "trade_ticker": "TQQQ",
     "slippage": 0.05,
-    "backtested_date": "2025-12-02",
-    "defense_ticker": "GDX",
-    "drawdown_buy_cutoff": 0.3,
-    "drawdown_sell_cutoff": 0.4,
+    "backtested_date": datetime.now().strftime("%Y-%m-%d"),
+    "defense_ticker": "GLDM",
+    "drawdown_buy_cutoff": 0.3,  # 초기값 (튜닝으로 덮어씌워짐)
+    "drawdown_sell_cutoff": 0.4,  # 초기값 (튜닝으로 덮어씌워짐)
     "benchmarks": [
         {"ticker": "SPMO", "name": "모멘텀"},
         {"ticker": "VOO", "name": "S&P 500"},
@@ -42,30 +45,26 @@ DEFAULT_SETTINGS = {
     ],
 }
 
+# 튜닝 범위 설정 (tune.py와 동일)
+TUNING_CONFIG = {
+    "drawdown_buy_cutoff": np.round(np.arange(0.1, 3.1, 0.1), 1),
+    "drawdown_sell_cutoff": np.round(np.arange(0.1, 3.1, 0.1), 1),
+    "defense_ticker": [
+        "SCHD",
+        "SGOV",
+        "SPLV",
+        "DIVO",
+        "JEPI",
+        "GLDM",
+    ],
+}
 
-def load_settings(path: Path | str = "settings.json") -> Dict:
+
+def load_settings() -> Dict:
     """
-    설정을 로드합니다.
-    1. path에 지정된 파일이 존재하면 해당 파일을 로드하여 DEFAULT_SETTINGS를 덮어씁니다.
-    2. 파일이 없으면 DEFAULT_SETTINGS를 그대로 반환합니다.
+    기본 설정을 로드합니다.
     """
     settings = DEFAULT_SETTINGS.copy()
-
-    p = Path(path)
-    if p.exists():
-        try:
-            with p.open("r", encoding="utf-8") as f:
-                file_settings = json.load(f)
-            # 프로젝트 루트 경로 추가
-            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            settings.update(file_settings)
-            # print(f"[INFO] 설정 파일 로드됨: {p.absolute()}")
-        except Exception as e:
-            print(f"[WARNING] 설정 파일 로드 실패 ({e}). 기본 설정을 사용합니다.")
-    else:
-        # 파일이 없어도 조용히 기본값 사용 (단일 파일 모드 지원)
-        pass
-
     return settings
 
 
@@ -113,7 +112,18 @@ def _extract_field(data: pd.DataFrame, field: str, tickers: List[str]) -> pd.Dat
 
 
 def download_prices(settings: Dict, start) -> pd.DataFrame:
-    tickers = list({settings["trade_ticker"], settings["signal_ticker"], settings["defense_ticker"]})
+    # 튜닝 시에는 모든 후보군을 다 받아야 함
+    tickers = list(
+        {
+            settings["trade_ticker"],
+            settings["signal_ticker"],
+            settings["defense_ticker"],
+        }
+    )
+    # 튜닝 후보군도 포함
+    tickers.extend(TUNING_CONFIG["defense_ticker"])
+    tickers = list(set(tickers))
+
     # CASH는 다운로드 대상 아님
     tickers = [t for t in tickers if t != "CASH"]
 
@@ -125,8 +135,10 @@ def download_prices(settings: Dict, start) -> pd.DataFrame:
         raise ValueError(f"가격 데이터를 받아오지 못했습니다: {tickers}")
     prices = _extract_field(data, "Close", tickers)
 
-    needed = [t for t in [settings["trade_ticker"], settings["signal_ticker"], settings["defense_ticker"]] if t != "CASH"]
+    # 필수 데이터 체크
+    needed = [settings["trade_ticker"], settings["signal_ticker"]]
     prices = prices.dropna(subset=needed)
+
     if prices.empty:
         raise ValueError(f"가격 데이터가 비어 있습니다: {tickers}")
     return prices
@@ -153,9 +165,6 @@ def compute_signals(prices: pd.Series, settings: Dict) -> pd.DataFrame:
 def pick_target(row, prev_target: str, settings: Dict) -> str:
     """
     신호 행과 이전 타깃을 받아 매수 대상 티커를 결정합니다 (이중 임계값 적용).
-
-    - drawdown_buy_cutoff (예: 1.0 -> -1.0%): 이보다 높으면(회복되면) 공격 자산 매수
-    - drawdown_sell_cutoff (예: 2.0 -> -2.0%): 이보다 낮으면(악화되면) 공격 자산 매도
     """
     buy_cut = -settings["drawdown_buy_cutoff"] / 100
     sell_cut = -settings["drawdown_sell_cutoff"] / 100
@@ -178,7 +187,201 @@ def pick_target(row, prev_target: str, settings: Dict) -> str:
 
 
 # =============================================================================
-# 4. Report Logic
+# 4. Backtest Engine (Internal)
+# =============================================================================
+
+
+class Backtester:
+    def __init__(self, settings: Dict, prices: pd.DataFrame, signal_df: pd.DataFrame):
+        self.settings = settings
+        self.prices = prices
+        self.signal_df = signal_df
+        self.start_date = signal_df.index.min()
+        self.end_date = signal_df.index.max()
+
+    def run(self) -> Dict:
+        """단일 백테스트 실행"""
+        # 초기 자본
+        initial_capital = 10_000_000
+
+        # 상태 추적
+        prev_target = self.settings["trade_ticker"]
+
+        # 일별 수익률 계산을 위한 데이터 준비
+        # 전체 기간에 대해 미리 계산
+        assets = [self.settings["trade_ticker"], self.settings["defense_ticker"]]
+        daily_rets = self.prices[assets].pct_change().fillna(0)
+
+        # 시뮬레이션
+        equity_curve = [initial_capital]
+
+        # 벡터화된 연산을 위해 타깃 시그널 생성
+        targets = []
+        for idx, row in self.signal_df.iterrows():
+            tgt = pick_target(row, prev_target, self.settings)
+            targets.append(tgt)
+            prev_target = tgt
+
+        # 수익률 적용
+        # target[i]는 i일의 종가 기준으로 결정된 포지션 -> i+1일의 수익률에 적용
+        # 여기서는 단순화를 위해 당일 종가 매매 가정 (슬리피지 적용)
+
+        # 실제로는 루프를 돌며 자산 가치 변동을 추적해야 정확함 (특히 전환 시점)
+        current_equity = initial_capital
+        prev_target = self.settings["trade_ticker"]  # 초기 상태
+
+        for date, target in zip(self.signal_df.index, targets):
+            # 전일 대비 수익률 적용 (보유 중인 자산)
+            # 첫날은 변동 없음
+            if date == self.signal_df.index[0]:
+                continue
+
+            # 어제 결정한 타깃을 오늘 보유하고 있음
+            holding_ticker = prev_target
+
+            if holding_ticker == "CASH":
+                ret = 0.0
+            else:
+                ret = daily_rets.at[date, holding_ticker]
+
+            # 자산 변동
+            current_equity *= 1 + ret
+
+            # 교체 비용 (슬리피지)
+            if target != prev_target:
+                slippage = self.settings["slippage"] / 100
+                current_equity *= 1 - slippage
+
+            prev_target = target
+            equity_curve.append(current_equity)
+
+        final_equity = current_equity
+
+        # CAGR 계산
+        days = (self.end_date - self.start_date).days
+        years = days / 365.25
+        cagr = (final_equity / initial_capital) ** (1 / years) - 1 if years > 0 else 0
+
+        # MDD 계산
+        equity_series = pd.Series(equity_curve)
+        peak = equity_series.cummax()
+        drawdown = (equity_series - peak) / peak
+        max_drawdown = drawdown.min()
+
+        # Sharpe Ratio (간이)
+        returns = pd.Series(equity_curve).pct_change().dropna()
+        if returns.std() == 0:
+            sharpe = 0
+        else:
+            sharpe = (returns.mean() / returns.std()) * np.sqrt(252)
+
+        return {
+            "cagr": cagr * 100,
+            "mdd": max_drawdown * 100,
+            "sharpe": sharpe,
+            "final_equity": final_equity,
+            "settings": self.settings,
+        }
+
+
+# =============================================================================
+# 5. Tuning Logic
+# =============================================================================
+
+
+def _worker(args):
+    """병렬 처리를 위한 워커 함수"""
+    case_settings, prices, signal_df = args
+    bt = Backtester(case_settings, prices, signal_df)
+    return bt.run()
+
+
+def run_tuning(base_settings: Dict) -> Dict:
+    """전수 조사 튜닝 실행"""
+    print(f"\n[튜닝 시작] 최적 파라미터 탐색 중... (기간: {base_settings['months_range']}개월)")
+
+    # 데이터 준비
+    start_bound, warmup_start, end_bound = compute_bounds(base_settings)
+    prices_full = download_prices(base_settings, warmup_start)
+
+    # Signal Ticker 데이터 (QQQ)
+    signal_prices = prices_full[base_settings["signal_ticker"]]
+    signal_df_full = compute_signals(signal_prices, base_settings)
+
+    # 유효 기간 필터링
+    valid_index = prices_full.index[prices_full.index >= start_bound]
+    prices = prices_full.loc[valid_index]
+    signal_df = signal_df_full.loc[valid_index]
+
+    if signal_df.empty:
+        raise ValueError("튜닝을 위한 데이터가 부족합니다.")
+
+    # 조합 생성
+    keys = list(TUNING_CONFIG.keys())
+    values = list(TUNING_CONFIG.values())
+    combinations = list(itertools.product(*values))
+
+    total_cases = len(combinations)
+    print(f"[튜닝 설정] 총 조합: {total_cases}개")
+
+    tasks = []
+    for combo in combinations:
+        # 조합을 설정 딕셔너리로 변환
+        case_settings = base_settings.copy()
+        for k, v in zip(keys, combo):
+            case_settings[k] = v
+
+        # 유효성 검사 (buy < sell)
+        if case_settings["drawdown_buy_cutoff"] >= case_settings["drawdown_sell_cutoff"]:
+            continue
+
+        tasks.append((case_settings, prices, signal_df))
+
+    valid_cases = len(tasks)
+    print(f"[튜닝 진행] 유효 조합: {valid_cases}개 (Buy < Sell 조건 적용)")
+
+    results = []
+    completed = 0
+
+    # 병렬 처리
+    with ProcessPoolExecutor() as executor:
+        # 청크 단위로 제출하지 않고 map 사용 시 진행률 표시가 어려우므로 submit 사용
+        futures = [executor.submit(_worker, task) for task in tasks]
+
+        for future in as_completed(futures):
+            try:
+                res = future.result()
+                results.append(res)
+            except Exception:
+                pass
+
+            completed += 1
+            if completed % 100 == 0 or completed == valid_cases:
+                progress = (completed / valid_cases) * 100
+                sys.stdout.write(f"\r[튜닝 진행] {progress:.1f}% ({completed}/{valid_cases})")
+                sys.stdout.flush()
+
+    print("\n[튜닝 완료] 결과 정렬 중...")
+
+    # 정렬: CAGR 내림차순
+    results.sort(key=lambda x: x["cagr"], reverse=True)
+
+    best_result = results[0]
+    best_settings = best_result["settings"]
+
+    print("\n=== 🏆 최적 파라미터 (CAGR 기준) ===")
+    print(f"Defense Ticker : {best_settings['defense_ticker']}")
+    print(f"Buy Cutoff     : {best_settings['drawdown_buy_cutoff']}%")
+    print(f"Sell Cutoff    : {best_settings['drawdown_sell_cutoff']}%")
+    print(f"CAGR           : {best_result['cagr']:.2f}%")
+    print(f"MDD            : {best_result['mdd']:.2f}%")
+    print("====================================\n")
+
+    return best_result
+
+
+# =============================================================================
+# 6. Report Logic
 # =============================================================================
 
 
@@ -247,7 +450,7 @@ def render_table_eaw(headers: List[str], rows: List[List[str]], aligns: List[str
 
 
 # =============================================================================
-# 5. Recommendation Runner Logic
+# 7. Recommendation Runner Logic
 # =============================================================================
 
 
@@ -360,25 +563,67 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
 
 
 # =============================================================================
-# 6. Public Interface
+# 8. Public Interface
 # =============================================================================
 
 
-def get_recommendation(settings_path: str = "settings.json") -> Dict:
+def get_result() -> Dict:
     """
-    외부에서 호출 가능한 추천 함수.
+    외부에서 호출 가능한 함수.
+    자동으로 튜닝을 수행하고 최적의 파라미터로 추천 결과와 튜닝 결과를 반환합니다.
 
     Returns:
-        Dict: 추천 결과 리포트 (target, as_of, table_lines 등 포함)
+        Dict: 추천 결과 리포트 (target, as_of, table_lines, tuning_result 등 포함)
     """
-    settings = load_settings(settings_path)
-    return run_recommend(settings)
+    # 1. 설정 로드 (기본값)
+    settings = load_settings()
+
+    # 2. 자동 튜닝 수행
+    tuning_result = run_tuning(settings)
+    best_settings = tuning_result["settings"]
+
+    # 3. 최적 설정 적용
+    settings.update(best_settings)
+
+    # 4. 추천 실행
+    report = run_recommend(settings)
+
+    # 5. 튜닝 결과 포함
+    report["tuning_result"] = {
+        "cagr": tuning_result["cagr"],
+        "mdd": tuning_result["mdd"],
+        "sharpe": tuning_result["sharpe"],
+        "defense_ticker": best_settings["defense_ticker"],
+        "drawdown_buy_cutoff": best_settings["drawdown_buy_cutoff"],
+        "drawdown_sell_cutoff": best_settings["drawdown_sell_cutoff"],
+    }
+
+    return report
+
+
+# =============================================================================
+# 9. Main Entry Point
+# =============================================================================
 
 
 def main():
     """스크립트 직접 실행 시 진입점"""
+    # Windows/macOS 멀티프로세싱 지원을 위해 freeze_support 호출
+    multiprocessing.freeze_support()
+
     try:
-        report = get_recommendation()
+        # 1. 설정 로드 (기본값)
+        settings = load_settings()
+
+        # 2. 자동 튜닝 수행
+        tuning_result = run_tuning(settings)
+        best_settings = tuning_result["settings"]
+
+        # 3. 최적 설정 적용
+        settings.update(best_settings)
+
+        # 4. 추천 실행
+        report = run_recommend(settings)
 
         print("\n=== 추천 목록 ===")
         for line in report["table_lines"]:
@@ -386,9 +631,12 @@ def main():
 
         print(f"\n[INFO] 기준일: {report['as_of']}")
         print(f"[INFO] 최종 타깃: {report['target']}")
+        print(
+            f"[INFO] 적용 파라미터: {settings['defense_ticker']} / Buy {settings['drawdown_buy_cutoff']}% / Sell {settings['drawdown_sell_cutoff']}%"
+        )
 
     except Exception as e:
-        print(f"[ERROR] 추천 실행 중 오류 발생: {e}")
+        print(f"[ERROR] 실행 중 오류 발생: {e}")
         import traceback
 
         traceback.print_exc()
