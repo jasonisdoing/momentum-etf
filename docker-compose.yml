@@ -6,6 +6,7 @@ services:
       - "80"
     env_file:
       - .env
+    restart: always
     environment:
       - TZ=Asia/Seoul
       - VIRTUAL_HOST=etf.dojason.com
@@ -23,6 +24,7 @@ services:
     command: python aps.py
     env_file:
       - .env
+    restart: always
     environment:
       - TZ=Asia/Seoul
     volumes:
