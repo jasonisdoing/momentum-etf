@@ -25,7 +25,7 @@ def _calc_days_left(block_info: Optional[Dict], cooldown_days: Optional[int]) ->
     if not cooldown_days or cooldown_days <= 0 or not isinstance(block_info, dict):
         return None
     try:
-        return max(cooldown_days - int(block_info.get("days_since", 0)), 0)
+        return max(cooldown_days - int(block_info.get("days_since", 0)) + 1, 0)
     except (TypeError, ValueError):
         return None
 
@@ -43,7 +43,7 @@ def _format_cooldown_message(days_left: Optional[int], action: str = "") -> str:
             # 예: "쿨다운 3일 대기중"
             return DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중").replace("{days}", str(days_left))
     else:
-        return "쿨다운 종료"
+        return DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중").replace("{days}", "0")
 
 
 def _normalize_category_value(category: Optional[str]) -> Optional[str]:
@@ -154,9 +154,23 @@ def _calculate_cooldown_blocks(
                 continue
 
             last_sell = trade_info.get("last_sell")
+            last_buy = trade_info.get("last_buy")
 
-            # 매도 쿨다운 제거: 매수 후 바로 매도 가능
-            # 매수 쿨다운만 유지: 매도 후 재매수 금지 기간
+            # 1. 매도 쿨다운: 매수 후 N일간 매도 금지 (손절 제외)
+            if last_buy is not None:
+                last_buy_ts = pd.to_datetime(last_buy).normalize()
+                if last_buy_ts <= base_date_norm:
+                    cached_days = _cached_trading_day_diff(last_buy_ts)
+                    if cached_days is None:
+                        cached_days = count_trading_days(country_code, last_buy_ts, base_date_norm)
+                    days_since_buy = max(cached_days, 0)
+                    if days_since_buy <= cooldown_days:
+                        sell_cooldown_block[tkr] = {
+                            "last_buy": last_buy_ts,
+                            "days_since": days_since_buy,
+                        }
+
+            # 2. 매수 쿨다운: 매도 후 N일간 재매수 금지
             if last_sell is not None:
                 last_sell_ts = pd.to_datetime(last_sell).normalize()
                 if last_sell_ts <= base_date_norm:
@@ -164,7 +178,7 @@ def _calculate_cooldown_blocks(
                     if cached_days is None:
                         cached_days = count_trading_days(country_code, last_sell_ts, base_date_norm)
                     days_since_sell = max(cached_days, 0)
-                    if days_since_sell < cooldown_days:
+                    if days_since_sell <= cooldown_days:
                         buy_cooldown_block[tkr] = {
                             "last_sell": last_sell_ts,
                             "days_since": days_since_sell,

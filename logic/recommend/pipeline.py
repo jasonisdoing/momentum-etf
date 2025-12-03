@@ -589,11 +589,21 @@ def _build_ticker_timeseries_entry(
         if isinstance(deviation_raw, (int, float)):
             price_deviation = round(float(deviation_raw), 2)
 
-    # 일간 변동률 계산: 장 마감 후에도 당일 변동률 표시
+    # 일간 변동률 계산: 개장 시간 이후에만 표시 (개장 전에는 0)
     if market_latest and market_prev and market_prev > 0:
-        try:
-            daily_pct = ((market_latest / market_prev) - 1.0) * 100
-        except ZeroDivisionError:
+        # 현재 시간이 개장 시간 이후인지 확인
+        now = datetime.now()
+        market_schedule = config.MARKET_SCHEDULES.get(country_lower, {})
+        market_open_time = market_schedule.get("open")
+
+        # 개장 시간 이후에만 일간 변동률 계산
+        if market_open_time and now.time() >= market_open_time:
+            try:
+                daily_pct = ((market_latest / market_prev) - 1.0) * 100
+            except ZeroDivisionError:
+                daily_pct = 0.0
+        else:
+            # 개장 전에는 0으로 표시
             daily_pct = 0.0
 
     # 변수 초기화 (UnboundLocalError 방지)
@@ -609,10 +619,10 @@ def _build_ticker_timeseries_entry(
         ma_type_upper = ma_type.upper()
         if ma_type_upper in {"EMA", "DEMA", "TEMA"}:
             # 지수 이동평균은 더 많은 데이터 필요 (안정화를 위해)
-            ideal_multiplier = 3.0
+            ideal_multiplier = 2.0
         elif ma_type_upper == "HMA":
             # Hull MA는 중간 정도
-            ideal_multiplier = 2.0
+            ideal_multiplier = 1.5
         else:  # SMA, WMA 등
             ideal_multiplier = 1.0
 

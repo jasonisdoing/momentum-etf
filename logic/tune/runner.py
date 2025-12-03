@@ -37,6 +37,7 @@ from utils.data_loader import (
 )
 from utils.stock_list_io import get_etfs
 from utils.cache_utils import save_cached_frame
+from config import TUNING_ENSEMBLE_SIZE
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
@@ -307,8 +308,8 @@ def _format_threshold(value: Any) -> str:
 def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = False, months_range: Optional[int] = None) -> List[str]:
     from utils.report import render_table_eaw
 
-    headers = ["MA", "MA타입", "TOPN", "교체점수", "손절", "과매수", "쿨다운", "최소점수", "CAGR(%)", "MDD(%)"]
-    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right", "right"]
+    headers = ["MA", "MA타입", "TOPN", "교체점수", "손절", "과매수", "쿨다운", "CAGR(%)", "MDD(%)"]
+    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right"]
 
     if months_range:
         headers.append(f"{months_range}개월(%)")
@@ -332,24 +333,20 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
         stop_loss_val = row.get("stop_loss_pct")
         stop_loss_num = _safe_float(stop_loss_val, float("nan"))
         if math.isfinite(stop_loss_num):
-            stop_loss_display = _format_threshold(stop_loss_num)
-            stop_loss_display = f"{stop_loss_display}%"
+            stop_loss_display = f"{int(stop_loss_num)}%"
         else:
             stop_loss_display = "-"
         rsi_threshold_val = row.get("rsi_sell_threshold")
         cooldown_val = row.get("cooldown_days")
 
-        min_score_val = row.get("min_buy_score")
-
         row_data = [
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
             str(ma_type_val) if ma_type_val else "SMA",
             str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-            _format_threshold(threshold_val),
+            str(int(threshold_val)) if isinstance(threshold_val, (int, float)) and math.isfinite(float(threshold_val)) else "-",
             stop_loss_display,
             str(int(rsi_threshold_val)) if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val)) else "-",
             str(int(cooldown_val)) if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val)) else "-",
-            _format_threshold(min_score_val),
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),
             _format_table_float(row.get("period_return")),
@@ -420,10 +417,28 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: Dict[str, Any]) -> No
     if isinstance(legacy_tuning, dict):
         strategy_data.update(legacy_tuning)
 
+    INTEGER_KEYS = {
+        "REPLACE_SCORE_THRESHOLD",
+        "MIN_BUY_SCORE",
+        "STOP_LOSS_PCT",
+        "COOLDOWN_DAYS",
+        "PORTFOLIO_TOPN",
+        "OVERBOUGHT_SELL_THRESHOLD",
+        "MA_PERIOD",
+    }
+
     for key, value in result_params.items():
         if value is None:
             continue
         strategy_data[key] = value
+
+    # 정수형이어야 하는 필드들 강제 형변환 (튜닝 여부와 무관하게)
+    for key in INTEGER_KEYS:
+        if key in strategy_data and strategy_data[key] is not None:
+            try:
+                strategy_data[key] = int(float(strategy_data[key]))
+            except (ValueError, TypeError):
+                pass
 
     weighted_cagr = entry.get("weighted_expected_CAGR")
     if weighted_cagr is not None:
@@ -653,7 +668,7 @@ def _evaluate_single_combo(
         float,
         Tuple[str, ...],
         Tuple[str, ...],
-    ]
+    ],
 ) -> Tuple[str, Any, List[str]]:
     (
         account_norm,
@@ -954,7 +969,47 @@ def _execute_tuning_for_months(
             return _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
 
     success_entries.sort(key=_sort_key, reverse=True)
-    best_entry = success_entries[0]
+
+    # --- Top N Ensemble Logic ---
+    # 상위 N개의 결과를 사용하여 파라미터를 결정합니다.
+    # 1. MA_PERIOD: 상위 N개의 평균 (반올림)
+    # 2. 나머지: 상위 N개의 최빈값 (Mode)
+
+    # 앙상블 크기 검증 (홀수만 허용)
+    if TUNING_ENSEMBLE_SIZE % 2 == 0:
+        raise ValueError(f"TUNING_ENSEMBLE_SIZE는 반드시 홀수여야 합니다. (현재값: {TUNING_ENSEMBLE_SIZE})")
+
+    ensemble_size = min(len(success_entries), TUNING_ENSEMBLE_SIZE)
+    top_n_entries = success_entries[:ensemble_size]
+    best_entry = success_entries[0].copy()  # Top 1의 메트릭(CAGR 등)은 유지하되 파라미터만 덮어씀
+
+    if top_n_entries:
+        import statistics
+        from collections import Counter
+
+        def _get_mode(values):
+            if not values:
+                return None
+            # 빈도수가 같으면 먼저 나온 것(순위가 높은 것)을 선호
+            c = Counter(values)
+            return c.most_common(1)[0][0]
+
+        # 1. MA_PERIOD (Average)
+        ma_periods = [e.get("ma_period") for e in top_n_entries if e.get("ma_period") is not None]
+        if ma_periods:
+            best_entry["ma_period"] = int(round(statistics.mean(ma_periods)))
+
+        # 2. Others (Mode)
+        param_keys = ["ma_type", "portfolio_topn", "replace_threshold", "stop_loss_pct", "rsi_sell_threshold", "cooldown_days", "min_buy_score"]
+
+        for key in param_keys:
+            values = [e.get(key) for e in top_n_entries if e.get(key) is not None]
+            mode_val = _get_mode(values)
+            if mode_val is not None:
+                best_entry[key] = mode_val
+
+        logger.info("[튜닝] Top %d 앙상블 적용: MA=%s (Avg), Others=Mode", ensemble_size, best_entry.get("ma_period"))
+    # -----------------------------
 
     raw_data_payload: List[Dict[str, Any]] = []
     for item in success_entries:

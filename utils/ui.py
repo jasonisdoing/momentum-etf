@@ -187,6 +187,17 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         if col in df.columns:
             styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, col])
 
+    # 가격 컬럼 포맷팅 (천 단위 콤마 + 원)
+    format_dict = {}
+    price_label = "현재가"
+    if price_label in df.columns:
+        format_dict[price_label] = "{:,.0f}원"
+    if "Nav" in df.columns:
+        format_dict["Nav"] = "{:,.0f}원"
+
+    if format_dict:
+        styled = styled.format(format_dict)
+
     return styled
 
 
@@ -209,22 +220,22 @@ def render_recommendation_table(
         "카테고리": st.column_config.TextColumn("카테고리", width=100),
         "상태": st.column_config.TextColumn("상태", width=80),
         "보유일": st.column_config.NumberColumn("보유일", width=50),
-        "일간(%)": st.column_config.NumberColumn("일간(%)", width="small"),
-        "평가(%)": st.column_config.NumberColumn("평가(%)", width="small"),
-        price_label: st.column_config.TextColumn(price_label, width="small"),
-        "1주(%)": st.column_config.NumberColumn("1주(%)", width="small"),
-        "2주(%)": st.column_config.NumberColumn("2주(%)", width="small"),
-        "1달(%)": st.column_config.NumberColumn("1달(%)", width="small"),
-        "3달(%)": st.column_config.NumberColumn("3달(%)", width="small"),
-        "고점대비": st.column_config.NumberColumn("고점대비", width="small"),
+        "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
+        "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
+        price_label: st.column_config.NumberColumn(price_label, width="small"),
+        "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+        "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
+        "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
+        "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
+        "고점대비": st.column_config.NumberColumn("고점대비", width="small", format="%.2f%%"),
         "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width="small"),
-        "점수": st.column_config.NumberColumn("점수", width=50),
-        "RSI": st.column_config.NumberColumn("RSI", width=50),
+        "점수": st.column_config.NumberColumn("점수", width=50, format="%.1f"),
+        "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
         "문구": st.column_config.TextColumn("문구", width="large"),
     }
     if show_deviation and "괴리율" in df.columns:
-        column_config_map["괴리율"] = st.column_config.TextColumn("괴리율", width="small")
+        column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")
 
     if visible_columns:
         columns = [col for col in visible_columns if col in df.columns]
@@ -244,88 +255,6 @@ def render_recommendation_table(
         height=table_height,
         column_config=selected_column_config,
     )
-
-
-def main():
-    default_account = "kor"
-    page_title, page_icon = _load_account_ui_settings(default_account)
-    if not page_icon:
-        page_icon = "🇰🇷"
-    if not page_title:
-        page_title = "한국"
-
-    st.set_page_config(
-        page_title=page_title,
-        page_icon=page_icon,
-        layout="wide",
-        initial_sidebar_state="collapsed",
-    )
-    _inject_responsive_styles()
-
-    st.title(f"{page_icon} {page_title}")
-    st.caption("내부 알고리즘 기반으로 계정 추천을 제공합니다.")
-
-    df, updated_at, country_code = load_account_recommendations(default_account)
-
-    if df is None:
-        st.error(updated_at or "데이터를 불러오지 못했습니다.")
-        return
-
-    if updated_at:
-        st.caption(f"데이터 업데이트: {updated_at}")
-
-    price_label = "현재가"
-    default_compact_columns = [price_label if col == "현재가" else col for col in DEFAULT_COMPACT_COLUMNS_BASE]
-
-    compact_mode_label = "모바일(핵심만 보기)"
-    view_mode = st.radio(
-        "테이블 보기 모드 선택",
-        options=(compact_mode_label, "전체 보기"),
-        index=0,
-        horizontal=True,
-        help="모바일에서는 핵심 지표만 먼저 보고 필요한 경우 전체 컬럼을 펼쳐 보세요.",
-    )
-
-    if view_mode == compact_mode_label:
-        base_columns = [col for col in default_compact_columns if col in df.columns]
-        extra_candidates = [col for col in df.columns if col not in base_columns]
-        if extra_candidates:
-            extra_columns = st.multiselect(
-                "추가로 보고 싶은 지표",
-                options=extra_candidates,
-                default=[],
-                help="핵심 컬럼에 더해 보고 싶은 열을 선택하세요.",
-            )
-        else:
-            extra_columns = []
-        visible_columns = base_columns + extra_columns
-    else:
-        visible_columns = list(df.columns)
-
-    render_recommendation_table(
-        df,
-        country_code=country_code or default_account,
-        visible_columns=visible_columns,
-    )
-
-    st.markdown(
-        """
-        <style>
-            .stDataFrame thead tr th {
-                text-align: center;
-            }
-            .stDataFrame tbody tr td {
-                text-align: center;
-                white-space: nowrap;
-            }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-if __name__ == "__main__":
-    main()
 
 
 __all__ = [
