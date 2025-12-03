@@ -13,9 +13,13 @@ from typing import Optional
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.cache_utils import drop_cache_collection, swap_cache_collection, clean_temp_cache_collections
+from utils.cache_utils import (
+    drop_cache_collection,
+    swap_cache_collection,
+    clean_temp_cache_collections,
+)
 from utils.data_loader import fetch_ohlcv
-from utils.stock_list_io import get_etfs, get_all_etfs
+from utils.stock_list_io import get_all_etfs
 from utils.account_registry import list_available_accounts, get_account_settings
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
@@ -46,7 +50,9 @@ def _collect_benchmark_tickers() -> list[str]:
 def refresh_all_caches(countries: list[str], start_date: Optional[str]):
     """지정된 국가의 모든 종목에 대한 가격 데이터 캐시를 새로 고칩니다."""
     logger = get_app_logger()
-    logger.info("캐시 갱신 시작 (국가: %s, 시작일: %s)", ", ".join(countries), start_date)
+    logger.info(
+        "캐시 갱신 시작 (국가: %s, 시작일: %s)", ", ".join(countries), start_date
+    )
     benchmark_tickers = _collect_benchmark_tickers()
 
     for country in countries:
@@ -59,7 +65,11 @@ def refresh_all_caches(countries: list[str], start_date: Optional[str]):
                 removed,
             )
         all_etfs_from_file = get_all_etfs(country)
-        all_map = {str(item.get("ticker") or "").strip().upper(): item for item in all_etfs_from_file if item.get("ticker")}
+        all_map = {
+            str(item.get("ticker") or "").strip().upper(): item
+            for item in all_etfs_from_file
+            if item.get("ticker")
+        }
         for bench in benchmark_tickers:
             norm = str(bench or "").strip().upper()
             if not norm or norm in all_map:
@@ -82,7 +92,9 @@ def refresh_all_caches(countries: list[str], start_date: Optional[str]):
             for i, etf in enumerate(all_etfs_from_file, 1):
                 ticker = etf.get("ticker")
                 name = etf.get("name") or "-"
-                logger.info(" -> 처리 중: %d/%d - %s(%s)", i, total_tickers, name, ticker)
+                logger.info(
+                    " -> 처리 중: %d/%d - %s(%s)", i, total_tickers, name, ticker
+                )
 
                 try:
                     range_start = start_date or "1990-01-01"
@@ -136,7 +148,9 @@ def main():
 
     start_date = args.start or _determine_start_date()
     if args.countries:
-        countries = [country.strip().lower() for country in args.countries if country.strip()]
+        countries = [
+            country.strip().lower() for country in args.countries if country.strip()
+        ]
     else:
         countries = ["kor"]
 

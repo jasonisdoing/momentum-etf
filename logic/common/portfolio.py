@@ -1,8 +1,7 @@
 """포트폴리오 추천 및 백테스트에서 공통으로 사용하는 헬퍼 함수들."""
 
-from typing import Dict, Set, Any, List, Iterable, Tuple, Optional
+from typing import Dict, Set, Any, List, Optional
 
-import pandas as pd
 
 from utils.logger import get_app_logger
 from strategies.maps.constants import DECISION_NOTES
@@ -104,7 +103,14 @@ def get_hold_states() -> Set[str]:
     Returns:
         보유 상태 문자열 집합
     """
-    return {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
+    return {
+        "HOLD",
+        "HOLD_CORE",
+        "SELL_TREND",
+        "SELL_REPLACE",
+        "CUT_STOPLOSS",
+        "SELL_RSI",
+    }
 
 
 def count_current_holdings(items: list, *, get_state_func=None) -> int:
@@ -125,7 +131,12 @@ def count_current_holdings(items: list, *, get_state_func=None) -> int:
         return sum(1 for item in items if get_state_func(item) in hold_states)
     else:
         # dict 형태의 item인 경우
-        return sum(1 for item in items if isinstance(item, dict) and str(item.get("state", "")).upper() in hold_states)
+        return sum(
+            1
+            for item in items
+            if isinstance(item, dict)
+            and str(item.get("state", "")).upper() in hold_states
+        )
 
 
 def validate_core_holdings(
@@ -146,7 +157,9 @@ def validate_core_holdings(
     invalid_core_tickers = core_holdings_tickers - universe_tickers_set
     if invalid_core_tickers:
         account_prefix = f"[{account_id.upper()}] " if account_id else ""
-        logger.warning(f"{account_prefix}CORE_HOLDINGS에 Universe에 없는 종목이 포함됨: {invalid_core_tickers}")
+        logger.warning(
+            f"{account_prefix}CORE_HOLDINGS에 Universe에 없는 종목이 포함됨: {invalid_core_tickers}"
+        )
 
     valid_core_holdings = core_holdings_tickers & universe_tickers_set
     if valid_core_holdings:
@@ -180,7 +193,11 @@ def check_buy_candidate_filters(
         return False, DECISION_NOTES["CATEGORY_DUP"]
 
     # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
-    if category and not is_category_exception(category) and category in sell_rsi_categories_today:
+    if (
+        category
+        and not is_category_exception(category)
+        and category in sell_rsi_categories_today
+    ):
         return False, f"RSI 과매수 매도 카테고리 ({category})"
 
     # RSI 과매수 종목 매수 차단
@@ -277,7 +294,10 @@ def track_sell_rsi_categories(
             if category and not is_category_exception(category):
                 sell_rsi_categories.add(category)
         # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
-        elif d.get("state") in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
+        elif (
+            d.get("state") in {"HOLD", "HOLD_CORE"}
+            and d.get("rsi_score", 0.0) >= rsi_sell_threshold
+        ):
             category = etf_meta.get(d["tkr"], {}).get("category")
             if category and not is_category_exception(category):
                 sell_rsi_categories.add(category)
@@ -341,6 +361,8 @@ def validate_portfolio_topn(topn: int, account_id: str = "") -> None:
     """
     if topn <= 0:
         if account_id:
-            raise ValueError(f"'{account_id}' 계정의 PORTFOLIO_TOPN은 0보다 커야 합니다.")
+            raise ValueError(
+                f"'{account_id}' 계정의 PORTFOLIO_TOPN은 0보다 커야 합니다."
+            )
         else:
             raise ValueError("PORTFOLIO_TOPN은 0보다 커야 합니다.")
