@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-import numpy as np
 from pathlib import Path
 
 from utils.account_registry import get_account_settings, get_strategy_rules

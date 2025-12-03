@@ -3,7 +3,6 @@ import os
 from typing import Any, Dict, Iterable, List, Optional
 
 from utils.logger import get_app_logger
-import config
 
 logger = get_app_logger()
 
@@ -44,7 +43,9 @@ def _load_country_raw(country: str) -> List[Dict]:
     return []
 
 
-def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None) -> List[Dict[str, str]]:
+def get_etfs(
+    country: str, include_extra_tickers: Optional[Iterable[str]] = None
+) -> List[Dict[str, str]]:
     """
     'zsettings/stocks/{country}.json' 파일에서 종목 목록을 반환합니다.
     """
@@ -87,7 +88,9 @@ def get_etfs(country: str, include_extra_tickers: Optional[Iterable[str]] = None
         return all_etfs
 
     # 추천 제외 플래그가 설정된 종목은 기본 유니버스에서 제거
-    filtered: List[Dict[str, Any]] = [item for item in all_etfs if item.get("recommend_enabled", True)]
+    filtered: List[Dict[str, Any]] = [
+        item for item in all_etfs if item.get("recommend_enabled", True)
+    ]
     disabled_count = len(all_etfs) - len(filtered)
 
     logger.info(
@@ -128,7 +131,9 @@ def get_all_etfs(country: str) -> List[Dict[str, Any]]:
             raw_category = next(iter(raw_category), "") if raw_category else ""
         category_name = str(raw_category or "").strip()
         if not category_name:
-            raise ValueError(f"카테고리 블록에 카테고리 이름이 없습니다. 모든 카테고리 블록은 'category' 필드가 있어야 합니다.")
+            raise ValueError(
+                "카테고리 블록에 카테고리 이름이 없습니다. 모든 카테고리 블록은 'category' 필드가 있어야 합니다."
+            )
         tickers_list = category_block.get("tickers", [])
         if not isinstance(tickers_list, list):
             continue
@@ -159,7 +164,9 @@ def save_etfs(country: str, data: List[Dict]):
     try:
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
-        logger.info("%d개 카테고리의 종목 정보가 '%s'에 저장되었습니다.", len(data), file_path)
+        logger.info(
+            "%d개 카테고리의 종목 정보가 '%s'에 저장되었습니다.", len(data), file_path
+        )
         country_norm = (country or "").strip().lower()
         _COUNTRY_RAW_CACHE[country_norm] = data
     except Exception as e:
@@ -182,7 +189,10 @@ def get_etf_categories(country: str) -> List[str]:
             data = json.load(f)
             if isinstance(data, list):
                 for category_block in data:
-                    if isinstance(category_block, dict) and "category" in category_block:
+                    if (
+                        isinstance(category_block, dict)
+                        and "category" in category_block
+                    ):
                         categories.add(category_block["category"])
     except Exception as e:
         logger.warning("'%s' 파일에서 카테고리 읽기 실패: %s", file_path, e)
@@ -199,7 +209,9 @@ def get_listing_date(country: str, ticker: str) -> Optional[str]:
 
     data = _load_country_raw(country_norm)
     for category_block in data:
-        tickers_list = category_block.get("tickers") if isinstance(category_block, dict) else None
+        tickers_list = (
+            category_block.get("tickers") if isinstance(category_block, dict) else None
+        )
         if not isinstance(tickers_list, list):
             continue
         for item in tickers_list:
@@ -226,7 +238,9 @@ def set_listing_date(country: str, ticker: str, listing_date: str) -> None:
     updated = False
     changed = False
     for category_block in data:
-        tickers_list = category_block.get("tickers") if isinstance(category_block, dict) else None
+        tickers_list = (
+            category_block.get("tickers") if isinstance(category_block, dict) else None
+        )
         if not isinstance(tickers_list, list):
             continue
         for item in tickers_list:

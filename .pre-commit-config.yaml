@@ -7,12 +7,18 @@ repos:
         language: system
         stages: [pre-commit, pre-push]
 
-  - repo: https://github.com/psf/black
-    rev: 24.3.0
-    hooks:
-      - id: black
-
   - repo: https://github.com/PyCQA/flake8
     rev: 7.3.0
     hooks:
       - id: flake8
+        exclude: ^(venv|\.venv|__pycache__|\.git|znotes)/
+        args: ['--max-line-length=120', '--extend-ignore=E203,W503']
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.7
+    hooks:
+      - id: ruff
+        args: [--fix, --ignore=E402]
+        exclude: ^(venv|\.venv|__pycache__|\.git|znotes)/
+      - id: ruff-format
+        exclude: ^(venv|\.venv|__pycache__|\.git|znotes)/

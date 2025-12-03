@@ -46,6 +46,6 @@ __all__ = [
     "calculate_consecutive_days",
     "get_buy_signal_streak",
     "select_candidates_by_category",
-    "sort_decisions_by_order_and_sort_decisions_by_order_and_score",
+    "sort_decisions_by_order_and_score",
     "filter_category_duplicates",
 ]

@@ -21,9 +21,11 @@ TIMEZONE = "Asia/Seoul"
 
 # pkg_resources 워닝 억제
 os.environ["PYTHONWARNINGS"] = "ignore"
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+warnings.filterwarnings(
+    "ignore", message="pkg_resources is deprecated", category=UserWarning
+)
 import time
-from datetime import datetime, time as dt_time
+from datetime import datetime
 
 from utils.recommendation_storage import save_recommendation_report
 
@@ -45,11 +47,19 @@ try:  # pragma: no cover - 선택적 의존성 처리
 except Exception:  # pragma: no cover
     np = None  # type: ignore[assignment]
 
-from logic.recommend.pipeline import RecommendationReport, generate_account_recommendation_report
-from utils.cron_utils import normalize_cron_weekdays
+from logic.recommend.pipeline import (
+    RecommendationReport,
+    generate_account_recommendation_report,
+)
 from utils.env import load_env_if_present
-from utils.notification import compose_recommendation_slack_message, send_recommendation_slack_notification
-from utils.schedule_config import get_all_country_schedules, get_global_schedule_settings
+from utils.notification import (
+    compose_recommendation_slack_message,
+    send_recommendation_slack_notification,
+)
+from utils.schedule_config import (
+    get_all_country_schedules,
+    get_global_schedule_settings,
+)
 
 
 def setup_logging() -> None:
@@ -79,11 +89,17 @@ def setup_logging() -> None:
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
-def run_recommendation_generation(account_id: str, *, country_code: str) -> RecommendationReport:
+def run_recommendation_generation(
+    account_id: str, *, country_code: str
+) -> RecommendationReport:
     """Run portfolio recommendation and optionally notify Slack."""
 
     start_ts = time.time()
-    logging.info("[APS] 추천 생성 시작: account=%s country=%s", account_id.upper(), country_code.upper())
+    logging.info(
+        "[APS] 추천 생성 시작: account=%s country=%s",
+        account_id.upper(),
+        country_code.upper(),
+    )
 
     try:
         report = generate_account_recommendation_report(account_id=account_id)
@@ -141,7 +157,11 @@ def run_cache_refresh() -> None:
     common_settings = get_common_file_settings()
     start_date = str(common_settings.get("CACHE_START_DATE"))
     countries = ["kor"]
-    logging.info("Running cache refresh (start=%s, countries=%s)", start_date, ",".join(countries))
+    logging.info(
+        "Running cache refresh (start=%s, countries=%s)",
+        start_date,
+        ",".join(countries),
+    )
     try:
         from scripts.update_price_cache import refresh_all_caches
 
@@ -187,7 +207,9 @@ def _validate_timezone(tz_value: Optional[str]) -> str:
     if not tz:
         return TIMEZONE
     if tz != TIMEZONE:
-        logging.warning("Timezone '%s'은 지원하지 않아 '%s'로 대체합니다.", tz, TIMEZONE)
+        logging.warning(
+            "Timezone '%s'은 지원하지 않아 '%s'로 대체합니다.", tz, TIMEZONE
+        )
         return TIMEZONE
     return tz
 
@@ -195,7 +217,9 @@ def _validate_timezone(tz_value: Optional[str]) -> str:
 def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
     schedules = get_all_country_schedules()
     global_settings = get_global_schedule_settings()
-    run_immediately_default = bool(global_settings.get("run_immediately_on_start", False))
+    run_immediately_default = bool(
+        global_settings.get("run_immediately_on_start", False)
+    )
 
     jobs: list[RecommendationJobConfig] = []
     for schedule_name, cfg in schedules.items():
@@ -206,7 +230,10 @@ def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
         account_id = (cfg.get("account_id") or "").strip().lower()
         country_code = (cfg.get("country_code") or "").strip().lower()
         if not account_id or not country_code:
-            logging.warning("Schedule '%s'에 account_id/country_code가 없어 건너뜁니다.", schedule_name)
+            logging.warning(
+                "Schedule '%s'에 account_id/country_code가 없어 건너뜁니다.",
+                schedule_name,
+            )
             continue
 
         # config.py의 MARKET_SCHEDULES에서 크론 표현식 자동 생성
@@ -219,7 +246,9 @@ def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
                 continue
 
         timezone = _validate_timezone(cfg.get("timezone"))
-        run_immediately = bool(cfg.get("run_immediately_on_start", run_immediately_default))
+        run_immediately = bool(
+            cfg.get("run_immediately_on_start", run_immediately_default)
+        )
 
         jobs.append(
             RecommendationJobConfig(
@@ -235,7 +264,9 @@ def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
     return tuple(jobs)
 
 
-def _register_recommendation_jobs(scheduler: BlockingScheduler, jobs: Iterable[RecommendationJobConfig]) -> None:
+def _register_recommendation_jobs(
+    scheduler: BlockingScheduler, jobs: Iterable[RecommendationJobConfig]
+) -> None:
     for job in jobs:
         for index, cron_expr in enumerate(job.cron_exprs, start=1):
             scheduler.add_job(
@@ -271,7 +302,11 @@ def _register_cache_job(
         CronTrigger.from_crontab(hourly_cron_expr, timezone=TIMEZONE),
         id="cache_refresh_hourly",
     )
-    logging.info("Scheduled CACHE REFRESH (hourly): cron='%s' tz='%s'", hourly_cron_expr, TIMEZONE)
+    logging.info(
+        "Scheduled CACHE REFRESH (hourly): cron='%s' tz='%s'",
+        hourly_cron_expr,
+        TIMEZONE,
+    )
 
 
 def _register_nasdaq_switching_job(scheduler: BlockingScheduler) -> None:
@@ -298,7 +333,9 @@ def _run_initial_recommendations(jobs: Iterable[RecommendationJobConfig]) -> Non
         logging.info("[Initial Run] Executing %d recommendation job(s)...", len(jobs))
         executable = list(jobs)
     else:
-        logging.info("[Initial Run] Executing %d recommendation job(s)...", len(executable))
+        logging.info(
+            "[Initial Run] Executing %d recommendation job(s)...", len(executable)
+        )
     for job in executable:
         try:
             run_recommendation_generation(job.account_id, country_code=job.country_code)
@@ -349,7 +386,9 @@ def main() -> None:
     if not jobs:
         logging.warning("등록 가능한 추천 잡이 없습니다. 설정을 확인하세요.")
 
-    logging.info("Running initial price cache refresh before scheduling recommendations...")
+    logging.info(
+        "Running initial price cache refresh before scheduling recommendations..."
+    )
     run_cache_refresh()
 
     _register_recommendation_jobs(scheduler, jobs)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import numbers
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -19,15 +18,21 @@ from utils.formatters import format_price_deviation, format_price
 logger = get_app_logger()
 
 
-def invoke_account_pipeline(account_id: str, *, date_str: str | None) -> List[Dict[str, Any]]:
+def invoke_account_pipeline(
+    account_id: str, *, date_str: str | None
+) -> List[Dict[str, Any]]:
     """Run the recommendation pipeline and return raw recommendation rows."""
 
     from logic.recommend import generate_recommendation_report
 
     try:
-        result = generate_recommendation_report(account_id=account_id, date_str=date_str)
+        result = generate_recommendation_report(
+            account_id=account_id, date_str=date_str
+        )
     except Exception as exc:  # pragma: no cover - 파이프라인 예외 방어
-        logger.error("%s 추천 데이터 생성 중 오류가 발생했습니다: %s", account_id.upper(), exc)
+        logger.error(
+            "%s 추천 데이터 생성 중 오류가 발생했습니다: %s", account_id.upper(), exc
+        )
         return []
 
     if not result:
@@ -67,7 +72,9 @@ def print_run_header(account_id: str, *, date_str: Optional[str]) -> None:
     logger.info("기준일: %s", date_str or "auto (latest trading day)")
 
 
-def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str: Optional[str] = None) -> None:
+def print_result_summary(
+    items: List[Dict[str, Any]], account_id: str, date_str: Optional[str] = None
+) -> None:
     """Emit a condensed summary of recommendation results to stdout."""
 
     if not items:
@@ -75,21 +82,34 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
         return
 
     state_counts = Counter(item.get("state", "UNKNOWN") for item in items)
-    state_summary = ", ".join(f"{state}: {count}" for state, count in sorted(state_counts.items()))
+    state_summary = ", ".join(
+        f"{state}: {count}" for state, count in sorted(state_counts.items())
+    )
 
     base_date = items[0].get("base_date") if items else (date_str or "N/A")
 
     logger.info("=== %s 추천 요약 (기준일: %s) ===", account_id.upper(), base_date)
 
     # 보유 종목(HOLD, SELL_*)은 항상 포함, 나머지는 상위 10개
-    holding_states = {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_RSI", "SELL_REPLACE", "CUT_STOPLOSS"}
+    holding_states = {
+        "HOLD",
+        "HOLD_CORE",
+        "SELL_TREND",
+        "SELL_RSI",
+        "SELL_REPLACE",
+        "CUT_STOPLOSS",
+    }
     held_items = [item for item in items if item.get("state") in holding_states]
     other_items = [item for item in items if item.get("state") not in holding_states]
 
     preview_items = held_items + other_items[: max(0, 10 - len(held_items))]
 
     if preview_items:
-        logger.info("상위 %d개 항목 미리보기 (보유 %d개 포함):", len(preview_items), len(held_items))
+        logger.info(
+            "상위 %d개 항목 미리보기 (보유 %d개 포함):",
+            len(preview_items),
+            len(held_items),
+        )
         headers = [
             "순위",
             "티커",
@@ -102,12 +122,27 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
             "보유일",
             "문구",
         ]
-        aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "right", "left"]
+        aligns = [
+            "right",
+            "left",
+            "left",
+            "left",
+            "center",
+            "right",
+            "right",
+            "right",
+            "right",
+            "left",
+        ]
         rows: List[List[str]] = []
 
         for item in preview_items:
             holding_days = item.get("holding_days")
-            holding_days_str = f"{int(holding_days)}" if isinstance(holding_days, (int, float)) else "-"
+            holding_days_str = (
+                f"{int(holding_days)}"
+                if isinstance(holding_days, (int, float))
+                else "-"
+            )
 
             rows.append(
                 [
@@ -116,9 +151,21 @@ def print_result_summary(items: List[Dict[str, Any]], account_id: str, date_str:
                     str(item.get("name", "-")),
                     str(item.get("category", "-")),
                     str(item.get("state", "-")),
-                    (f"{item.get('score', 0):.2f}" if isinstance(item.get("score"), (int, float)) else "-"),
-                    (f"{item.get('rsi_score', 0):.2f}" if isinstance(item.get("rsi_score"), (int, float)) else "-"),
-                    (f"{item.get('daily_pct', 0):.2f}%" if isinstance(item.get("daily_pct"), (int, float)) else "-"),
+                    (
+                        f"{item.get('score', 0):.2f}"
+                        if isinstance(item.get("score"), (int, float))
+                        else "-"
+                    ),
+                    (
+                        f"{item.get('rsi_score', 0):.2f}"
+                        if isinstance(item.get("rsi_score"), (int, float))
+                        else "-"
+                    ),
+                    (
+                        f"{item.get('daily_pct', 0):.2f}%"
+                        if isinstance(item.get("daily_pct"), (int, float))
+                        else "-"
+                    ),
                     holding_days_str,
                     str(item.get("phrase", "")),
                 ]
@@ -163,7 +210,11 @@ def dump_recommendation_log(
 
     # 헤더
     lines.append(f"추천 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")
-    base_date_str = base_date.strftime("%Y-%m-%d") if hasattr(base_date, "strftime") else str(base_date)
+    base_date_str = (
+        base_date.strftime("%Y-%m-%d")
+        if hasattr(base_date, "strftime")
+        else str(base_date)
+    )
     lines.append(f"계정: {account_id.upper()} | 기준일: {base_date_str}")
     lines.append("")
 
@@ -247,7 +298,9 @@ def dump_recommendation_log(
             state,
             str(holding_days) if holding_days > 0 else "-",
             f"{daily_pct:+.2f}%" if isinstance(daily_pct, (int, float)) else "-",
-            f"{evaluation_pct:+.2f}%" if isinstance(evaluation_pct, (int, float)) and evaluation_pct != 0 else "-",
+            f"{evaluation_pct:+.2f}%"
+            if isinstance(evaluation_pct, (int, float)) and evaluation_pct != 0
+            else "-",
             format_price(price, country_code),
         ]
         if nav_mode:

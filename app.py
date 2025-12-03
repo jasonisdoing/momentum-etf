@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional, List, Tuple
+from typing import Any, Callable, Dict
 
 import streamlit as st
 
-from utils.logger import APP_VERSION
 
 from app_pages.account_page import render_account_page
 from utils.ui import load_account_recommendations, render_recommendation_table
@@ -73,7 +72,9 @@ def main() -> None:
 
     accounts = load_account_configs()
     if not accounts:
-        st.error("사용할 수 있는 계정 설정이 없습니다. `zsettings/account` 폴더를 확인해주세요.")
+        st.error(
+            "사용할 수 있는 계정 설정이 없습니다. `zsettings/account` 폴더를 확인해주세요."
+        )
         st.stop()
 
     default_icon = "📈"

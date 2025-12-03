@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Mapping
+from typing import Any, Dict, List, Optional, Tuple
 
 from utils.logger import get_app_logger
 
@@ -32,10 +32,14 @@ def _load_json(path: Path) -> Dict[str, Any]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:  # noqa: PERF203
-        raise AccountSettingsError(f"설정 파일이 올바른 JSON 형식이 아닙니다: {path}") from exc
+        raise AccountSettingsError(
+            f"설정 파일이 올바른 JSON 형식이 아닙니다: {path}"
+        ) from exc
 
     if not isinstance(data, dict):
-        raise AccountSettingsError(f"설정 파일의 루트는 객체(JSON object)여야 합니다: {path}")
+        raise AccountSettingsError(
+            f"설정 파일의 루트는 객체(JSON object)여야 합니다: {path}"
+        )
     return data
 
 
@@ -100,7 +104,9 @@ def get_account_settings(account_id: str) -> Dict[str, Any]:
     return settings
 
 
-def _split_strategy_sections(strategy: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def _split_strategy_sections(
+    strategy: Dict[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     tuning_raw = strategy.get("tuning")
     static_raw = strategy.get("static")
 
@@ -137,7 +143,9 @@ def resolve_strategy_params(strategy_cfg: Any) -> Dict[str, Any]:
     return dict(strategy_cfg)
 
 
-def get_account_strategy_sections(account_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def get_account_strategy_sections(
+    account_id: str,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """계정 전략 설정을 (튜닝용, 고정값)으로 분리해 반환합니다.
 
     설정을 반환하기 전에 모든 필수 항목을 검증합니다.
@@ -147,7 +155,9 @@ def get_account_strategy_sections(account_id: str) -> Tuple[Dict[str, Any], Dict
     settings = get_account_settings(account_id)
     strategy = settings.get("strategy")
     if not isinstance(strategy, dict):
-        raise AccountSettingsError(f"'{account_id}' 설정에서 'strategy' 항목이 누락되었거나 잘못되었습니다.")
+        raise AccountSettingsError(
+            f"'{account_id}' 설정에서 'strategy' 항목이 누락되었거나 잘못되었습니다."
+        )
 
     if "tuning" in strategy or "static" in strategy:
         tuning, static = _split_strategy_sections(strategy)
@@ -217,11 +227,17 @@ def load_common_settings() -> Dict[str, Any]:
 
         config_module = importlib.import_module("config")
     except ModuleNotFoundError as exc:
-        raise AccountSettingsError("공통 설정 모듈(config.py)을 찾을 수 없습니다.") from exc
+        raise AccountSettingsError(
+            "공통 설정 모듈(config.py)을 찾을 수 없습니다."
+        ) from exc
     except Exception as exc:
         raise AccountSettingsError(f"공통 설정을 로드하지 못했습니다: {exc}") from exc
 
-    data = {key: getattr(config_module, key) for key in dir(config_module) if key.isupper() and not key.startswith("_")}
+    data = {
+        key: getattr(config_module, key)
+        for key in dir(config_module)
+        if key.isupper() and not key.startswith("_")
+    }
     return data
 
 

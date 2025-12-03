@@ -1,8 +1,35 @@
-[tool.black]
-# black의 기본 줄 길이는 88자입니다.
-line-length = 150
-# target-version = ['py312'] # 특정 파이썬 버전에 맞출 경우
+[tool.ruff]
+# 최대 줄 길이 (flake8의 120과 동일하게 설정)
+line-length = 120
 
-[tool.isort]
-# isort의 프로필을 black과 호환되도록 설정합니다.
-profile = "black"
+# 제외할 디렉토리
+exclude = [
+    "venv",
+    ".venv",
+    "__pycache__",
+    ".git",
+    "znotes",
+]
+
+[tool.ruff.lint]
+# 활성화할 규칙
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+]
+
+# 무시할 규칙
+ignore = [
+    "E402",  # module level import not at top of file
+]
+
+[tool.ruff.format]
+# 문자열 따옴표 스타일
+quote-style = "double"
+
+# 들여쓰기 스타일
+indent-style = "space"

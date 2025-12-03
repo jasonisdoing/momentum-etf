@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import math
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 import os
 from datetime import datetime
 from os import cpu_count
@@ -16,7 +16,6 @@ import shutil
 
 import pandas as pd
 from pandas import DataFrame, Timestamp
-import numpy as np
 
 from logic.backtest.account_runner import run_account_backtest
 from logic.entry_point import StrategyRules
@@ -57,7 +56,11 @@ def _init_worker_prefetch(
     trading_calendar: Sequence[pd.Timestamp],
 ) -> None:
     """ProcessPoolExecutor initializer - 각 worker 프로세스당 한 번만 실행"""
-    global _WORKER_PREFETCHED_DATA, _WORKER_PREFETCHED_METRICS, _WORKER_PREFETCHED_UNIVERSE, _WORKER_TRADING_CALENDAR
+    global \
+        _WORKER_PREFETCHED_DATA, \
+        _WORKER_PREFETCHED_METRICS, \
+        _WORKER_PREFETCHED_UNIVERSE, \
+        _WORKER_TRADING_CALENDAR
     _WORKER_PREFETCHED_DATA = prefetched_data
     _WORKER_PREFETCHED_METRICS = prefetched_metrics
     _WORKER_PREFETCHED_UNIVERSE = prefetched_universe
@@ -81,7 +84,9 @@ def _filter_trading_days(
     return filtered or None
 
 
-def _extract_price_series_for_prefetch(df: pd.DataFrame) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
+def _extract_price_series_for_prefetch(
+    df: pd.DataFrame,
+) -> tuple[Optional[pd.Series], Optional[pd.Series]]:
     if df is None or df.empty:
         return None, None
 
@@ -121,8 +126,12 @@ def _build_prefetched_metric_cache(
     if not prefetched_data:
         return {}
 
-    period_pool = sorted({int(p) for p in ma_periods if isinstance(p, (int, float)) and int(p) > 0})
-    type_pool = sorted({(t or "SMA").upper() for t in ma_types if isinstance(t, str) and t})
+    period_pool = sorted(
+        {int(p) for p in ma_periods if isinstance(p, (int, float)) and int(p) > 0}
+    )
+    type_pool = sorted(
+        {(t or "SMA").upper() for t in ma_types if isinstance(t, str) and t}
+    )
     if not period_pool or not type_pool:
         return {}
 
@@ -193,7 +202,9 @@ def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> List[Any]:
     return list(dict.fromkeys(normalized))
 
 
-def _resolve_month_configs(months_range: Optional[int], account_id: str = None) -> List[Dict[str, Any]]:
+def _resolve_month_configs(
+    months_range: Optional[int], account_id: str = None
+) -> List[Dict[str, Any]]:
     if months_range is not None:
         try:
             months = int(months_range)
@@ -305,11 +316,36 @@ def _format_threshold(value: Any) -> str:
     return f"{num:.1f}"
 
 
-def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = False, months_range: Optional[int] = None) -> List[str]:
+def _render_tuning_table(
+    rows: List[Dict[str, Any]],
+    *,
+    include_samples: bool = False,
+    months_range: Optional[int] = None,
+) -> List[str]:
     from utils.report import render_table_eaw
 
-    headers = ["MA", "MA타입", "TOPN", "교체점수", "손절", "과매수", "쿨다운", "CAGR(%)", "MDD(%)"]
-    aligns = ["right", "center", "right", "right", "right", "right", "right", "right", "right"]
+    headers = [
+        "MA",
+        "MA타입",
+        "TOPN",
+        "교체점수",
+        "손절",
+        "과매수",
+        "쿨다운",
+        "CAGR(%)",
+        "MDD(%)",
+    ]
+    aligns = [
+        "right",
+        "center",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+    ]
 
     if months_range:
         headers.append(f"{months_range}개월(%)")
@@ -340,13 +376,26 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
         cooldown_val = row.get("cooldown_days")
 
         row_data = [
-            str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
+            str(int(ma_val))
+            if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val))
+            else "-",
             str(ma_type_val) if ma_type_val else "SMA",
-            str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-            str(int(threshold_val)) if isinstance(threshold_val, (int, float)) and math.isfinite(float(threshold_val)) else "-",
+            str(int(topn_val))
+            if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val))
+            else "-",
+            str(int(threshold_val))
+            if isinstance(threshold_val, (int, float))
+            and math.isfinite(float(threshold_val))
+            else "-",
             stop_loss_display,
-            str(int(rsi_threshold_val)) if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val)) else "-",
-            str(int(cooldown_val)) if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val)) else "-",
+            str(int(rsi_threshold_val))
+            if isinstance(rsi_threshold_val, (int, float))
+            and math.isfinite(float(rsi_threshold_val))
+            else "-",
+            str(int(cooldown_val))
+            if isinstance(cooldown_val, (int, float))
+            and math.isfinite(float(cooldown_val))
+            else "-",
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),
             _format_table_float(row.get("period_return")),
@@ -356,7 +405,9 @@ def _render_tuning_table(rows: List[Dict[str, Any]], *, include_samples: bool = 
 
         if include_samples:
             samples_val = row.get("samples")
-            if isinstance(samples_val, (int, float)) and math.isfinite(float(samples_val)):
+            if isinstance(samples_val, (int, float)) and math.isfinite(
+                float(samples_val)
+            ):
                 row_data.append(str(int(samples_val)))
             else:
                 row_data.append("-")
@@ -377,7 +428,9 @@ def _save_dataframe_csv(df: DataFrame, path: Path) -> None:
     df_copy.to_csv(path)
 
 
-def _export_prefetched_data(debug_dir: Path, prefetched_data: Mapping[str, DataFrame]) -> None:
+def _export_prefetched_data(
+    debug_dir: Path, prefetched_data: Mapping[str, DataFrame]
+) -> None:
     prefetch_dir = debug_dir / "prefetched_data"
     prefetch_dir.mkdir(parents=True, exist_ok=True)
     for ticker, frame in prefetched_data.items():
@@ -392,7 +445,9 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: Dict[str, Any]) -> No
     logger = get_app_logger()
     result_params = entry.get("result")
     if not isinstance(result_params, dict) or not result_params:
-        logger.warning("[튜닝] %s 계정 결과에 반영할 파라미터가 없습니다.", account_id.upper())
+        logger.warning(
+            "[튜닝] %s 계정 결과에 반영할 파라미터가 없습니다.", account_id.upper()
+        )
         return
 
     settings_path = ACCOUNT_SETTINGS_DIR / f"{account_id}.json"
@@ -400,11 +455,17 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: Dict[str, Any]) -> No
         raw = settings_path.read_text(encoding="utf-8")
         settings_data = json.loads(raw)
     except Exception as exc:  # pragma: no cover - 파일 접근 오류
-        logger.error("[튜닝] %s 계정 설정을 읽지 못해 갱신을 건너뜁니다: %s", account_id.upper(), exc)
+        logger.error(
+            "[튜닝] %s 계정 설정을 읽지 못해 갱신을 건너뜁니다: %s",
+            account_id.upper(),
+            exc,
+        )
         return
 
     if not isinstance(settings_data, dict):
-        logger.error("[튜닝] %s 계정 설정 형식이 잘못되어 갱신을 건너뜁니다.", account_id.upper())
+        logger.error(
+            "[튜닝] %s 계정 설정 형식이 잘못되어 갱신을 건너뜁니다.", account_id.upper()
+        )
         return
 
     strategy_cfg = settings_data.get("strategy")
@@ -454,15 +515,25 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: Dict[str, Any]) -> No
 
     tmp_path: Optional[Path] = None
     try:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=str(settings_path.parent), delete=False, suffix=".tmp") as tmp_file:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=str(settings_path.parent),
+            delete=False,
+            suffix=".tmp",
+        ) as tmp_file:
             json.dump(settings_data, tmp_file, ensure_ascii=False, indent=4)
             tmp_file.write("\n")
             tmp_path = Path(tmp_file.name)
         shutil.move(str(tmp_path), str(settings_path))
         get_account_settings.cache_clear()
-        logger.info("[튜닝] %s 계정 전략 설정을 최신 결과로 갱신했습니다.", account_id.upper())
+        logger.info(
+            "[튜닝] %s 계정 전략 설정을 최신 결과로 갱신했습니다.", account_id.upper()
+        )
     except Exception as exc:  # pragma: no cover - 파일 쓰기 오류
-        logger.error("[튜닝] %s 계정 설정을 갱신하지 못했습니다: %s", account_id.upper(), exc)
+        logger.error(
+            "[튜닝] %s 계정 설정을 갱신하지 못했습니다: %s", account_id.upper(), exc
+        )
         if tmp_path and tmp_path.exists():
             try:
                 tmp_path.unlink()
@@ -493,25 +564,43 @@ def _export_combo_debug(
 ) -> Dict[str, Any]:
     combo_dir.mkdir(parents=True, exist_ok=True)
 
-    combo_dir.joinpath("recorded_metrics.json").write_text(json.dumps(recorded_metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+    combo_dir.joinpath("recorded_metrics.json").write_text(
+        json.dumps(recorded_metrics, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     metrics_prefetch = _extract_summary(result_prefetch)
     metrics_live = _extract_summary(result_live)
 
-    combo_dir.joinpath("metrics_prefetch.json").write_text(json.dumps(metrics_prefetch, ensure_ascii=False, indent=2), encoding="utf-8")
-    combo_dir.joinpath("metrics_live.json").write_text(json.dumps(metrics_live, ensure_ascii=False, indent=2), encoding="utf-8")
+    combo_dir.joinpath("metrics_prefetch.json").write_text(
+        json.dumps(metrics_prefetch, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    combo_dir.joinpath("metrics_live.json").write_text(
+        json.dumps(metrics_live, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     diff_payload = {
-        "delta_cagr": metrics_live["cagr"] - recorded_metrics.get("cagr", 0.0) if recorded_metrics.get("cagr") is not None else None,
-        "delta_mdd": metrics_live["mdd"] - recorded_metrics.get("mdd", 0.0) if recorded_metrics.get("mdd") is not None else None,
+        "delta_cagr": metrics_live["cagr"] - recorded_metrics.get("cagr", 0.0)
+        if recorded_metrics.get("cagr") is not None
+        else None,
+        "delta_mdd": metrics_live["mdd"] - recorded_metrics.get("mdd", 0.0)
+        if recorded_metrics.get("mdd") is not None
+        else None,
         "delta_period_return": (
-            metrics_live["period_return"] - recorded_metrics.get("period_return", 0.0) if recorded_metrics.get("period_return") is not None else None
+            metrics_live["period_return"] - recorded_metrics.get("period_return", 0.0)
+            if recorded_metrics.get("period_return") is not None
+            else None
         ),
     }
-    combo_dir.joinpath("metrics_diff.json").write_text(json.dumps(diff_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    combo_dir.joinpath("metrics_diff.json").write_text(
+        json.dumps(diff_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
-    _save_dataframe_csv(result_prefetch.portfolio_timeseries, combo_dir / "portfolio_prefetch.csv")
-    _save_dataframe_csv(result_live.portfolio_timeseries, combo_dir / "portfolio_live.csv")
+    _save_dataframe_csv(
+        result_prefetch.portfolio_timeseries, combo_dir / "portfolio_prefetch.csv"
+    )
+    _save_dataframe_csv(
+        result_live.portfolio_timeseries, combo_dir / "portfolio_live.csv"
+    )
 
     prefetch_ticker_dir = combo_dir / "ticker_prefetch"
     live_ticker_dir = combo_dir / "ticker_live"
@@ -527,9 +616,13 @@ def _export_combo_debug(
             _save_dataframe_csv(frame, live_ticker_dir / f"{ticker}.csv")
 
     combo_dir.joinpath("ticker_meta_prefetch.json").write_text(
-        json.dumps(result_prefetch.ticker_meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(result_prefetch.ticker_meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
-    combo_dir.joinpath("ticker_meta_live.json").write_text(json.dumps(result_live.ticker_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    combo_dir.joinpath("ticker_meta_live.json").write_text(
+        json.dumps(result_live.ticker_meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     return {
         "metrics_prefetch": metrics_prefetch,
@@ -582,7 +675,9 @@ def _export_debug_month(
         recorded_metrics = {
             "cagr": float(row.get("CAGR")) if row.get("CAGR") is not None else None,
             "mdd": float(row.get("MDD")) if row.get("MDD") is not None else None,
-            "period_return": float(row.get("period_return")) if row.get("period_return") is not None else None,
+            "period_return": float(row.get("period_return"))
+            if row.get("period_return") is not None
+            else None,
         }
 
         strategy_rules = StrategyRules.from_values(
@@ -613,8 +708,13 @@ def _export_debug_month(
             trading_calendar=trading_calendar,
         )
 
-        stop_loss_dir_part = f"SL{stop_loss_value:.2f}" if stop_loss_value is not None else "SLauto"
-        combo_dir = month_dir / f"combo_{idx:02d}_MA{ma}_TOPN{topn}_{stop_loss_dir_part}_TH{threshold:.3f}"
+        stop_loss_dir_part = (
+            f"SL{stop_loss_value:.2f}" if stop_loss_value is not None else "SLauto"
+        )
+        combo_dir = (
+            month_dir
+            / f"combo_{idx:02d}_MA{ma}_TOPN{topn}_{stop_loss_dir_part}_TH{threshold:.3f}"
+        )
         combo_metrics = _export_combo_debug(
             combo_dir,
             recorded_metrics=recorded_metrics,
@@ -635,8 +735,14 @@ def _export_debug_month(
                 "recorded_cagr": recorded_metrics["cagr"],
                 "prefetch_cagr": metrics_prefetch["cagr"],
                 "live_cagr": metrics_live["cagr"],
-                "prefetch_minus_recorded": (metrics_prefetch["cagr"] - recorded_metrics["cagr"]) if recorded_metrics["cagr"] is not None else None,
-                "live_minus_recorded": (metrics_live["cagr"] - recorded_metrics["cagr"]) if recorded_metrics["cagr"] is not None else None,
+                "prefetch_minus_recorded": (
+                    metrics_prefetch["cagr"] - recorded_metrics["cagr"]
+                )
+                if recorded_metrics["cagr"] is not None
+                else None,
+                "live_minus_recorded": (metrics_live["cagr"] - recorded_metrics["cagr"])
+                if recorded_metrics["cagr"] is not None
+                else None,
                 "recorded_mdd": recorded_metrics["mdd"],
                 "prefetch_mdd": metrics_prefetch["mdd"],
                 "live_mdd": metrics_live["mdd"],
@@ -825,7 +931,11 @@ def _execute_tuning_for_months(
         or not cooldown_candidates
         or not ma_type_candidates
     ):
-        logger.warning("[튜닝] %s (%d개월) 유효한 탐색 공간이 없습니다.", account_norm.upper(), months_range)
+        logger.warning(
+            "[튜닝] %s (%d개월) 유효한 탐색 공간이 없습니다.",
+            account_norm.upper(),
+            months_range,
+        )
         return None
 
     min_score_candidates = list(search_space.get("MIN_BUY_SCORE", [0.0]))
@@ -843,7 +953,11 @@ def _execute_tuning_for_months(
     ]
 
     if not combos:
-        logger.warning("[튜닝] %s (%d개월) 평가할 조합이 없습니다.", account_norm.upper(), months_range)
+        logger.warning(
+            "[튜닝] %s (%d개월) 평가할 조합이 없습니다.",
+            account_norm.upper(),
+            months_range,
+        )
         return None
 
     start_date = end_date - pd.DateOffset(months=months_range)
@@ -856,9 +970,13 @@ def _execute_tuning_for_months(
         len(combos),
     )
 
-    filtered_calendar = _filter_trading_days(trading_calendar, date_range[0], date_range[1])
+    filtered_calendar = _filter_trading_days(
+        trading_calendar, date_range[0], date_range[1]
+    )
     if filtered_calendar is None:
-        raise RuntimeError(f"[튜닝] {account_norm.upper()} ({months_range}개월) 구간의 거래일 정보를 준비하지 못했습니다.")
+        raise RuntimeError(
+            f"[튜닝] {account_norm.upper()} ({months_range}개월) 구간의 거래일 정보를 준비하지 못했습니다."
+        )
 
     workers = WORKERS or (cpu_count() or 1)
     workers = max(1, min(workers, len(combos)))
@@ -903,7 +1021,11 @@ def _execute_tuning_for_months(
 
     if workers <= 1:
         # 단일 프로세스: 글로벌 변수 직접 설정
-        global _WORKER_PREFETCHED_DATA, _WORKER_PREFETCHED_METRICS, _WORKER_PREFETCHED_UNIVERSE, _WORKER_TRADING_CALENDAR
+        global \
+            _WORKER_PREFETCHED_DATA, \
+            _WORKER_PREFETCHED_METRICS, \
+            _WORKER_PREFETCHED_UNIVERSE, \
+            _WORKER_TRADING_CALENDAR
         _WORKER_PREFETCHED_DATA = prefetched_data
         _WORKER_PREFETCHED_METRICS = prefetched_metrics
         _WORKER_PREFETCHED_UNIVERSE = prefetched_etf_universe
@@ -911,11 +1033,20 @@ def _execute_tuning_for_months(
         iterator = map(_evaluate_single_combo, payloads)
     else:
         # 멀티 프로세스: worker 초기화 시 데이터 한 번만 전달
-        init_args = (prefetched_data, prefetched_metrics, prefetched_etf_universe, filtered_calendar)
+        init_args = (
+            prefetched_data,
+            prefetched_metrics,
+            prefetched_etf_universe,
+            filtered_calendar,
+        )
         # chunksize를 적절히 설정: IPC 오버헤드와 로드 밸런싱 균형
         # 너무 크면 느린 조합으로 인한 대기 발생, 너무 작으면 IPC 오버헤드 증가
-        chunksize = max(10, len(payloads) // (workers * 10)) if len(payloads) > workers else 10
-        executor = ProcessPoolExecutor(max_workers=workers, initializer=_init_worker_prefetch, initargs=init_args)
+        chunksize = (
+            max(10, len(payloads) // (workers * 10)) if len(payloads) > workers else 10
+        )
+        executor = ProcessPoolExecutor(
+            max_workers=workers, initializer=_init_worker_prefetch, initargs=init_args
+        )
         iterator = executor.map(_evaluate_single_combo, payloads, chunksize=chunksize)
 
     try:
@@ -939,7 +1070,10 @@ def _execute_tuning_for_months(
                 )
 
                 if success_entries and output_path and progress_callback:
-                    current_best_cagr = max(_safe_float(entry.get("cagr"), float("-inf")) for entry in success_entries)
+                    current_best_cagr = max(
+                        _safe_float(entry.get("cagr"), float("-inf"))
+                        for entry in success_entries
+                    )
                     if current_best_cagr > best_cagr_so_far:
                         best_cagr_so_far = current_best_cagr
 
@@ -954,7 +1088,11 @@ def _execute_tuning_for_months(
             executor.shutdown(wait=True, cancel_futures=False)
 
     if not success_entries:
-        logger.warning("[튜닝] %s (%d개월) 성공한 조합이 없습니다.", account_norm.upper(), months_range)
+        logger.warning(
+            "[튜닝] %s (%d개월) 성공한 조합이 없습니다.",
+            account_norm.upper(),
+            months_range,
+        )
         return None
 
     # 최적화 지표 선택 (config에서 가져오기)
@@ -977,11 +1115,15 @@ def _execute_tuning_for_months(
 
     # 앙상블 크기 검증 (홀수만 허용)
     if TUNING_ENSEMBLE_SIZE % 2 == 0:
-        raise ValueError(f"TUNING_ENSEMBLE_SIZE는 반드시 홀수여야 합니다. (현재값: {TUNING_ENSEMBLE_SIZE})")
+        raise ValueError(
+            f"TUNING_ENSEMBLE_SIZE는 반드시 홀수여야 합니다. (현재값: {TUNING_ENSEMBLE_SIZE})"
+        )
 
     ensemble_size = min(len(success_entries), TUNING_ENSEMBLE_SIZE)
     top_n_entries = success_entries[:ensemble_size]
-    best_entry = success_entries[0].copy()  # Top 1의 메트릭(CAGR 등)은 유지하되 파라미터만 덮어씀
+    best_entry = success_entries[
+        0
+    ].copy()  # Top 1의 메트릭(CAGR 등)은 유지하되 파라미터만 덮어씀
 
     if top_n_entries:
         import statistics
@@ -995,12 +1137,22 @@ def _execute_tuning_for_months(
             return c.most_common(1)[0][0]
 
         # 1. MA_PERIOD (Average)
-        ma_periods = [e.get("ma_period") for e in top_n_entries if e.get("ma_period") is not None]
+        ma_periods = [
+            e.get("ma_period") for e in top_n_entries if e.get("ma_period") is not None
+        ]
         if ma_periods:
             best_entry["ma_period"] = int(round(statistics.mean(ma_periods)))
 
         # 2. Others (Mode)
-        param_keys = ["ma_type", "portfolio_topn", "replace_threshold", "stop_loss_pct", "rsi_sell_threshold", "cooldown_days", "min_buy_score"]
+        param_keys = [
+            "ma_type",
+            "portfolio_topn",
+            "replace_threshold",
+            "stop_loss_pct",
+            "rsi_sell_threshold",
+            "cooldown_days",
+            "min_buy_score",
+        ]
 
         for key in param_keys:
             values = [e.get(key) for e in top_n_entries if e.get(key) is not None]
@@ -1008,7 +1160,11 @@ def _execute_tuning_for_months(
             if mode_val is not None:
                 best_entry[key] = mode_val
 
-        logger.info("[튜닝] Top %d 앙상블 적용: MA=%s (Avg), Others=Mode", ensemble_size, best_entry.get("ma_period"))
+        logger.info(
+            "[튜닝] Top %d 앙상블 적용: MA=%s (Avg), Others=Mode",
+            ensemble_size,
+            best_entry.get("ma_period"),
+        )
     # -----------------------------
 
     raw_data_payload: List[Dict[str, Any]] = []
@@ -1026,18 +1182,36 @@ def _execute_tuning_for_months(
         raw_data_payload.append(
             {
                 "MONTHS_RANGE": months_range,
-                "CAGR": _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None,
-                "MDD": _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None,
-                "period_return": _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None,
-                "sharpe": _round_float_places(sharpe_val, 2) if math.isfinite(sharpe_val) else None,
-                "sharpe_to_mdd": _round_float_places(sharpe_to_mdd_val, 3) if math.isfinite(sharpe_to_mdd_val) else None,
+                "CAGR": _round_float_places(cagr_val, 2)
+                if math.isfinite(cagr_val)
+                else None,
+                "MDD": _round_float_places(-mdd_val, 2)
+                if math.isfinite(mdd_val)
+                else None,
+                "period_return": _round_float_places(period_return_val, 2)
+                if math.isfinite(period_return_val)
+                else None,
+                "sharpe": _round_float_places(sharpe_val, 2)
+                if math.isfinite(sharpe_val)
+                else None,
+                "sharpe_to_mdd": _round_float_places(sharpe_to_mdd_val, 3)
+                if math.isfinite(sharpe_to_mdd_val)
+                else None,
                 "tuning": {
                     "MA_PERIOD": int(item.get("ma_period", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
                     "PORTFOLIO_TOPN": int(item.get("portfolio_topn", 0)),
-                    "REPLACE_SCORE_THRESHOLD": _round_up_float_places(item.get("replace_threshold", 0.0), 1),
-                    "STOP_LOSS_PCT": _round_up_float_places(item.get("stop_loss_pct"), 1) if item.get("stop_loss_pct") is not None else None,
-                    "OVERBOUGHT_SELL_THRESHOLD": int(item.get("rsi_sell_threshold", 10)),
+                    "REPLACE_SCORE_THRESHOLD": _round_up_float_places(
+                        item.get("replace_threshold", 0.0), 1
+                    ),
+                    "STOP_LOSS_PCT": _round_up_float_places(
+                        item.get("stop_loss_pct"), 1
+                    )
+                    if item.get("stop_loss_pct") is not None
+                    else None,
+                    "OVERBOUGHT_SELL_THRESHOLD": int(
+                        item.get("rsi_sell_threshold", 10)
+                    ),
                     "COOLDOWN_DAYS": int(item.get("cooldown_days", 2)),
                     "MIN_BUY_SCORE": _round_up_float_places(min_score_raw, 2),
                 },
@@ -1104,16 +1278,30 @@ def _build_run_entry(
             mdd_values.append(mdd_val)
 
         period_return_val = _safe_float(best.get("period_return"), float("nan"))
-        period_return_display = _round_float_places(period_return_val, 2) if math.isfinite(period_return_val) else None
-        cagr_display = _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None
-        mdd_display = _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None
+        period_return_display = (
+            _round_float_places(period_return_val, 2)
+            if math.isfinite(period_return_val)
+            else None
+        )
+        cagr_display = (
+            _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None
+        )
+        mdd_display = (
+            _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None
+        )
 
         # 추가 지표 추출
         sharpe_val = _safe_float(best.get("sharpe"), float("nan"))
-        sharpe_display = _round_float_places(sharpe_val, 2) if math.isfinite(sharpe_val) else None
+        sharpe_display = (
+            _round_float_places(sharpe_val, 2) if math.isfinite(sharpe_val) else None
+        )
 
         sharpe_to_mdd_val = _safe_float(best.get("sharpe_to_mdd"), float("nan"))
-        sharpe_to_mdd_display = _round_float_places(sharpe_to_mdd_val, 2) if math.isfinite(sharpe_to_mdd_val) else None
+        sharpe_to_mdd_display = (
+            _round_float_places(sharpe_to_mdd_val, 2)
+            if math.isfinite(sharpe_to_mdd_val)
+            else None
+        )
 
         def _to_int(val: Any) -> Optional[int]:
             try:
@@ -1175,14 +1363,22 @@ def _build_run_entry(
             ma_type_weights[key] = ma_type_weights.get(key, 0.0) + weight_for_type
 
     if weighted_cagr_weight > 0:
-        entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
+        entry["weighted_expected_CAGR"] = _round_float(
+            weighted_cagr_sum / weighted_cagr_weight
+        )
     elif cagr_values:
-        entry["weighted_expected_CAGR"] = _round_float(sum(cagr_values) / len(cagr_values))
+        entry["weighted_expected_CAGR"] = _round_float(
+            sum(cagr_values) / len(cagr_values)
+        )
 
     if weighted_mdd_weight > 0:
-        entry["weighted_expected_MDD"] = _round_float(-(weighted_mdd_sum / weighted_mdd_weight))
+        entry["weighted_expected_MDD"] = _round_float(
+            -(weighted_mdd_sum / weighted_mdd_weight)
+        )
     elif mdd_values:
-        entry["weighted_expected_MDD"] = _round_float(-(sum(mdd_values) / len(mdd_values)))
+        entry["weighted_expected_MDD"] = _round_float(
+            -(sum(mdd_values) / len(mdd_values))
+        )
 
     if raw_data_payload:
         entry["raw_data"] = raw_data_payload
@@ -1221,7 +1417,9 @@ def _build_run_entry(
         result_values[field] = final_value
 
     if ma_type_weights:
-        result_values["MA_TYPE"] = max(ma_type_weights.items(), key=lambda item: (item[1], item[0]))[0]
+        result_values["MA_TYPE"] = max(
+            ma_type_weights.items(), key=lambda item: (item[1], item[0])
+        )[0]
 
     return entry
 
@@ -1242,7 +1440,15 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
 
     normalized.pop("result", None)
 
-    for field in ("MA_PERIOD", "PORTFOLIO_TOPN", "REPLACE_SCORE_THRESHOLD", "STOP_LOSS_PCT", "COOLDOWN_DAYS", "MA_TYPE", "MIN_BUY_SCORE"):
+    for field in (
+        "MA_PERIOD",
+        "PORTFOLIO_TOPN",
+        "REPLACE_SCORE_THRESHOLD",
+        "STOP_LOSS_PCT",
+        "COOLDOWN_DAYS",
+        "MA_TYPE",
+        "MIN_BUY_SCORE",
+    ):
         normalized.pop(field, None)
 
     raw_results = normalized.get("raw_data")
@@ -1283,7 +1489,9 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
             cleaned["MDD"] = None
 
         period_val = _safe_float(item.get("period_return"), float("nan"))
-        cleaned["period_return"] = _round_float_places(period_val, 2) if math.isfinite(period_val) else None
+        cleaned["period_return"] = (
+            _round_float_places(period_val, 2) if math.isfinite(period_val) else None
+        )
 
         cleaned_results.append(cleaned)
 
@@ -1297,7 +1505,9 @@ def _ensure_entry_schema(entry: Any) -> Dict[str, Any]:
         return num
 
     weighted_cagr = _normalize_float(normalized.pop("weighted_expected_cagr", None))
-    weighted_cagr = _normalize_float(normalized.pop("weighted_expected_CAGR", weighted_cagr))
+    weighted_cagr = _normalize_float(
+        normalized.pop("weighted_expected_CAGR", weighted_cagr)
+    )
 
     weighted_mdd = _normalize_float(normalized.pop("weighted_expected_MDD", None))
 
@@ -1419,9 +1629,17 @@ def _compose_tuning_report(
 
                     try:
                         # tuning_metadata에서 country_code 추출
-                        lookup_country = tuning_metadata.get("country_code", "kor") if tuning_metadata else "kor"
+                        lookup_country = (
+                            tuning_metadata.get("country_code", "kor")
+                            if tuning_metadata
+                            else "kor"
+                        )
                         etf_list = get_etfs(lookup_country)
-                        ticker_to_name = {str(etf.get("ticker")): etf.get("name", "") for etf in etf_list if etf.get("ticker")}
+                        ticker_to_name = {
+                            str(etf.get("ticker")): etf.get("name", "")
+                            for etf in etf_list
+                            if etf.get("ticker")
+                        }
 
                         core_holdings_display = []
                         for ticker in core_holdings:
@@ -1431,12 +1649,16 @@ def _compose_tuning_report(
                             else:
                                 core_holdings_display.append(str(ticker))
 
-                        lines.append(f"  CORE_HOLDINGS: {', '.join(core_holdings_display)}")
+                        lines.append(
+                            f"  CORE_HOLDINGS: {', '.join(core_holdings_display)}"
+                        )
                     except Exception as e:
                         # 종목명을 가져오지 못하면 티커만 표시
                         logger = get_app_logger()
                         logger.debug(f"[튜닝] CORE_HOLDINGS 종목명 조회 실패: {e}")
-                        lines.append(f"  CORE_HOLDINGS: {', '.join(map(str, core_holdings))}")
+                        lines.append(
+                            f"  CORE_HOLDINGS: {', '.join(map(str, core_holdings))}"
+                        )
                 else:
                     # 빈 리스트인 경우
                     lines.append("  CORE_HOLDINGS: (없음)")
@@ -1449,7 +1671,9 @@ def _compose_tuning_report(
         # 제외된 종목
         excluded_tickers = tuning_metadata.get("excluded_tickers", [])
         if excluded_tickers:
-            lines.append(f"제외된 종목: {len(excluded_tickers)}개 ({', '.join(excluded_tickers)})")
+            lines.append(
+                f"제외된 종목: {len(excluded_tickers)}개 ({', '.join(excluded_tickers)})"
+            )
 
         # 테스트 기간 및 데이터 범위
         data_period = tuning_metadata.get("data_period", {})
@@ -1555,7 +1779,9 @@ def _compose_tuning_report(
             )
 
         normalized_rows.sort(key=_get_sort_key, reverse=True)
-        lines.append(f"=== 최근 {months_range}개월 결과 - 정렬 기준: {metric_display} ===")
+        lines.append(
+            f"=== 최근 {months_range}개월 결과 - 정렬 기준: {metric_display} ==="
+        )
         lines.extend(_render_tuning_table(normalized_rows, months_range=months_range))
         lines.append("")
 
@@ -1580,7 +1806,13 @@ def _save_intermediate_results(
         )
 
         # 임시 파일에 먼저 쓰기
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output_path.parent, delete=False, suffix=".tmp") as tmp_file:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_path.parent,
+            delete=False,
+            suffix=".tmp",
+        ) as tmp_file:
             tmp_file.write("\n".join(report_lines) + "\n")
             tmp_path = Path(tmp_file.name)
 
@@ -1622,11 +1854,15 @@ def run_account_tuning(
     config_map = tuning_config or {}
     config = config_map.get(account_norm)
     if not config:
-        logger.warning("[튜닝] '%s' 계정에 대한 튜닝 설정이 없습니다.", account_norm.upper())
+        logger.warning(
+            "[튜닝] '%s' 계정에 대한 튜닝 설정이 없습니다.", account_norm.upper()
+        )
         return None
 
     # country_code는 ETF 리스트 조회용으로 필요
-    country_code = (account_settings.get("country_code") or account_norm).strip().lower()
+    country_code = (
+        (account_settings.get("country_code") or account_norm).strip().lower()
+    )
 
     debug_dir: Optional[Path] = None
     capture_top_n = 0
@@ -1642,14 +1878,22 @@ def run_account_tuning(
     debug_month_configs: List[Dict[str, Any]] = []
 
     base_rules = get_strategy_rules(account_norm)
-    ma_values = _normalize_tuning_values(config.get("MA_RANGE"), dtype=int, fallback=base_rules.ma_period)
-    topn_values = _normalize_tuning_values(config.get("PORTFOLIO_TOPN"), dtype=int, fallback=base_rules.portfolio_topn)
+    ma_values = _normalize_tuning_values(
+        config.get("MA_RANGE"), dtype=int, fallback=base_rules.ma_period
+    )
+    topn_values = _normalize_tuning_values(
+        config.get("PORTFOLIO_TOPN"), dtype=int, fallback=base_rules.portfolio_topn
+    )
     replace_values = _normalize_tuning_values(
         config.get("REPLACE_SCORE_THRESHOLD"),
         dtype=float,
         fallback=base_rules.replace_threshold,
     )
-    stop_loss_fallback = base_rules.stop_loss_pct if base_rules.stop_loss_pct is not None else base_rules.portfolio_topn
+    stop_loss_fallback = (
+        base_rules.stop_loss_pct
+        if base_rules.stop_loss_pct is not None
+        else base_rules.portfolio_topn
+    )
     stop_loss_values = _normalize_tuning_values(
         config.get("STOP_LOSS_PCT"),
         dtype=float,
@@ -1723,7 +1967,11 @@ def run_account_tuning(
             if bench_ticker and bench_ticker not in tickers_set:
                 tickers.append(bench_ticker)
                 tickers_set.add(bench_ticker)
-        logger.info("[튜닝] 벤치마크 %d개 종목을 프리패치에 추가합니다: %s", len(benchmark_tickers), ", ".join(benchmark_tickers))
+        logger.info(
+            "[튜닝] 벤치마크 %d개 종목을 프리패치에 추가합니다: %s",
+            len(benchmark_tickers),
+            ", ".join(benchmark_tickers),
+        )
 
     combo_count = (
         len(ma_values)
@@ -1742,7 +1990,10 @@ def run_account_tuning(
     # OPTIMIZATION_METRIC 필수 확인
     optimization_metric = config.get("OPTIMIZATION_METRIC")
     if not optimization_metric:
-        logger.error("[튜닝] '%s' 계정에 OPTIMIZATION_METRIC 설정이 없습니다. config.py에 추가해주세요.", account_norm.upper())
+        logger.error(
+            "[튜닝] '%s' 계정에 OPTIMIZATION_METRIC 설정이 없습니다. config.py에 추가해주세요.",
+            account_norm.upper(),
+        )
         return None
 
     search_space = {
@@ -1790,7 +2041,8 @@ def run_account_tuning(
     valid_month_ranges = [
         int(item.get("months_range", 0))
         for item in month_items
-        if isinstance(item.get("months_range"), (int, float)) and int(item.get("months_range", 0)) > 0
+        if isinstance(item.get("months_range"), (int, float))
+        and int(item.get("months_range", 0)) > 0
     ]
     if not valid_month_ranges:
         logger.error("[튜닝] 유효한 기간 정보가 없습니다.")
@@ -1847,7 +2099,10 @@ def run_account_tuning(
 
     if cache_seed_dt is not None and cache_seed_dt < start_date_prefetch:
         start_date_prefetch = cache_seed_dt
-        date_range_prefetch = [start_date_prefetch.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
+        date_range_prefetch = [
+            start_date_prefetch.strftime("%Y-%m-%d"),
+            end_date.strftime("%Y-%m-%d"),
+        ]
 
     prefetched, missing_prefetch = prepare_price_data(
         tickers=tickers,
@@ -2013,21 +2268,35 @@ def run_account_tuning(
                         "MONTHS_RANGE": months_value,
                         "CAGR": _round_float_places(entry.get("cagr", 0.0), 2),
                         "MDD": _round_float_places(-entry.get("mdd", 0.0), 2),
-                        "period_return": _round_float_places(entry.get("period_return", 0.0), 2),
+                        "period_return": _round_float_places(
+                            entry.get("period_return", 0.0), 2
+                        ),
                         "sharpe": _round_float_places(entry.get("sharpe", 0.0), 2),
-                        "sharpe_to_mdd": _round_float_places(entry.get("sharpe_to_mdd", 0.0), 3),
+                        "sharpe_to_mdd": _round_float_places(
+                            entry.get("sharpe_to_mdd", 0.0), 3
+                        ),
                         "tuning": {
                             "MA_PERIOD": int(entry.get("ma_period", 0)),
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
                             "PORTFOLIO_TOPN": int(entry.get("portfolio_topn", 0)),
-                            "REPLACE_SCORE_THRESHOLD": _round_up_float_places(entry.get("replace_threshold", 0.0), 1),
-                            "STOP_LOSS_PCT": _round_up_float_places(entry.get("stop_loss_pct", 0.0), 1),
-                            "OVERBOUGHT_SELL_THRESHOLD": int(entry.get("rsi_sell_threshold", 10)),
+                            "REPLACE_SCORE_THRESHOLD": _round_up_float_places(
+                                entry.get("replace_threshold", 0.0), 1
+                            ),
+                            "STOP_LOSS_PCT": _round_up_float_places(
+                                entry.get("stop_loss_pct", 0.0), 1
+                            ),
+                            "OVERBOUGHT_SELL_THRESHOLD": int(
+                                entry.get("rsi_sell_threshold", 10)
+                            ),
                             "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
-                            "MIN_BUY_SCORE": _round_up_float_places(entry["min_buy_score"], 2),
+                            "MIN_BUY_SCORE": _round_up_float_places(
+                                entry["min_buy_score"], 2
+                            ),
                         },
                     }
-                    for entry in sorted(success_entries, key=_sort_key_local, reverse=True)
+                    for entry in sorted(
+                        success_entries, key=_sort_key_local, reverse=True
+                    )
                 ],
             }
 
@@ -2095,11 +2364,17 @@ def run_account_tuning(
 
         if debug_dir is not None and capture_top_n > 0:
             raw_rows = single_result.get("raw_data") or []
-            month_start = (end_date - pd.DateOffset(months=months_value)).strftime("%Y-%m-%d")
+            month_start = (end_date - pd.DateOffset(months=months_value)).strftime(
+                "%Y-%m-%d"
+            )
             month_end = end_date.strftime("%Y-%m-%d")
-            calendar_for_month = _filter_trading_days(prefetched_trading_days, month_start, month_end)
+            calendar_for_month = _filter_trading_days(
+                prefetched_trading_days, month_start, month_end
+            )
             if calendar_for_month is None:
-                raise RuntimeError(f"[튜닝] {account_norm.upper()} ({months_value}개월) 구간의 거래일 정보를 준비하지 못했습니다.")
+                raise RuntimeError(
+                    f"[튜닝] {account_norm.upper()} ({months_value}개월) 구간의 거래일 정보를 준비하지 못했습니다."
+                )
 
             debug_diff_rows.extend(
                 _export_debug_month(
@@ -2120,7 +2395,9 @@ def run_account_tuning(
         return None
 
     if runtime_missing_registry:
-        unseen_missing = sorted(set(runtime_missing_registry) - set(excluded_ticker_set or []))
+        unseen_missing = sorted(
+            set(runtime_missing_registry) - set(excluded_ticker_set or [])
+        )
         if unseen_missing:
             logger.warning(
                 "[튜닝] %s 실행 중 데이터가 부족해 제외된 추가 종목 (%d): %s",
@@ -2170,7 +2447,9 @@ def run_account_tuning(
             "debug_capture_top_n": capture_top_n,
             "tuning_entry": entry,
         }
-        (debug_dir / "meta.json").write_text(json.dumps(meta_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        (debug_dir / "meta.json").write_text(
+            json.dumps(meta_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
         if debug_diff_rows:
             summary_fields = [
@@ -2195,9 +2474,14 @@ def run_account_tuning(
                 "artifact_path",
             ]
 
-            (debug_dir / "diff_summary.json").write_text(json.dumps(debug_diff_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+            (debug_dir / "diff_summary.json").write_text(
+                json.dumps(debug_diff_rows, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
-            with (debug_dir / "diff_summary.csv").open("w", newline="", encoding="utf-8") as fp:
+            with (debug_dir / "diff_summary.csv").open(
+                "w", newline="", encoding="utf-8"
+            ) as fp:
                 writer = csv.DictWriter(fp, fieldnames=summary_fields)
                 writer.writeheader()
                 writer.writerows(debug_diff_rows)
@@ -2238,4 +2522,8 @@ def run_account_tuning(
 
 
 __all__ = ["run_account_tuning"]
-SAVE_CACHE_DURING_TUNE = os.environ.get("TUNE_SAVE_CACHE", "0").lower() in ("1", "true", "yes")
+SAVE_CACHE_DURING_TUNE = os.environ.get("TUNE_SAVE_CACHE", "0").lower() in (
+    "1",
+    "true",
+    "yes",
+)

@@ -17,7 +17,6 @@ from utils.moving_averages import calculate_moving_average
 from utils.indicators import calculate_ma_score
 from strategies.rsi.recommend import calculate_rsi_for_ticker
 from logic.common import get_buy_signal_streak
-from utils.formatters import format_price, format_price_deviation
 from config import MARKET_SCHEDULES
 
 
@@ -132,7 +131,9 @@ def _build_all_stocks_table(country: str = "kor") -> pd.DataFrame:
 
         # 실시간 가격 정보
         snapshot = realtime_snapshot.get(ticker.upper(), {})
-        current_price = snapshot.get("nowVal", float(close_series.iloc[-1]) if not close_series.empty else 0.0)
+        current_price = snapshot.get(
+            "nowVal", float(close_series.iloc[-1]) if not close_series.empty else 0.0
+        )
         nav_price = snapshot.get("nav", 0.0)
         deviation = snapshot.get("deviation", 0.0)
 
@@ -160,7 +161,11 @@ def _build_all_stocks_table(country: str = "kor") -> pd.DataFrame:
         drawdown = _calculate_drawdown_from_high(close_series)
 
         # 추세 (3달 = 63일)
-        trend_data = close_series.tail(63).tolist() if len(close_series) >= 63 else close_series.tolist()
+        trend_data = (
+            close_series.tail(63).tolist()
+            if len(close_series) >= 63
+            else close_series.tolist()
+        )
 
         # 점수 계산 (MA 기반)
         ma_period = 90
@@ -173,10 +178,18 @@ def _build_all_stocks_table(country: str = "kor") -> pd.DataFrame:
 
         if len(close_series) >= ma_period:
             try:
-                moving_average = calculate_moving_average(close_series, ma_period, ma_type)
+                moving_average = calculate_moving_average(
+                    close_series, ma_period, ma_type
+                )
                 ma_score_series = calculate_ma_score(close_series, moving_average)
-                score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
-                consecutive_days = get_buy_signal_streak(score_value, ma_score_series, min_buy_score)
+                score_value = (
+                    float(ma_score_series.iloc[-1])
+                    if not ma_score_series.empty
+                    else 0.0
+                )
+                consecutive_days = get_buy_signal_streak(
+                    score_value, ma_score_series, min_buy_score
+                )
                 rsi_score = calculate_rsi_for_ticker(close_series)
             except Exception:
                 pass
@@ -232,7 +245,15 @@ def _style_dataframe(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         return "color: black"
 
     styled = df.style
-    pct_columns = ["일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "고점대비", "괴리율"]
+    pct_columns = [
+        "일간(%)",
+        "1주(%)",
+        "2주(%)",
+        "1달(%)",
+        "3달(%)",
+        "고점대비",
+        "괴리율",
+    ]
     for col in pct_columns:
         if col in df.columns:
             styled = styled.map(_color_pct, subset=pd.IndexSlice[:, col])
@@ -269,7 +290,9 @@ def render_all_stocks_page() -> None:
         st.error("종목 데이터를 불러올 수 없습니다.")
         return
 
-    st.caption(f"총 {len(df)}개 종목 | 업데이트: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    st.caption(
+        f"총 {len(df)}개 종목 | 업데이트: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
 
     # 컬럼 설정
     column_config = {
@@ -285,7 +308,9 @@ def render_all_stocks_page() -> None:
         "2주(%)": st.column_config.NumberColumn("2주(%)", width=70, format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width=70, format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width=70, format="%.2f%%"),
-        "고점대비": st.column_config.NumberColumn("고점대비", width=80, format="%.2f%%"),
+        "고점대비": st.column_config.NumberColumn(
+            "고점대비", width=80, format="%.2f%%"
+        ),
         "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width=100),
         "점수": st.column_config.NumberColumn("점수", width=60, format="%.1f"),
         "RSI": st.column_config.NumberColumn("RSI", width=60, format="%.1f"),

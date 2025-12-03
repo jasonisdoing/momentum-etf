@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 from collections import Counter
 
@@ -25,11 +24,9 @@ except ImportError:  # pragma: no cover - 선택적 의존성 처리
     pytz = None
 
 from utils.account_registry import get_account_settings
-from utils.schedule_config import get_country_schedule
 from utils.report import format_kr_money
 from utils.logger import get_app_logger, APP_LABEL
 from utils.settings_loader import get_account_slack_channel, resolve_strategy_params
-from utils.cron_utils import normalize_cron_weekdays
 
 
 _LAST_ERROR: Optional[str] = None
@@ -70,7 +67,9 @@ def send_slack_message(
             return True
         _LAST_ERROR = response.text or "unknown"
         return False
-    except requests.exceptions.RequestException as exc:  # pragma: no cover - 단순 위임 예외 처리
+    except (
+        requests.exceptions.RequestException
+    ) as exc:  # pragma: no cover - 단순 위임 예외 처리
         _LAST_ERROR = str(exc)
         return False
     except Exception as exc:  # pragma: no cover - 방어적 처리
@@ -118,7 +117,11 @@ def compose_recommendation_slack_message(
     except Exception:
         account_settings = None
 
-    account_label = str((account_settings or {}).get("name")) if account_settings and (account_settings or {}).get("name") else account_norm.upper()
+    account_label = (
+        str((account_settings or {}).get("name"))
+        if account_settings and (account_settings or {}).get("name")
+        else account_norm.upper()
+    )
 
     base_date = getattr(report, "base_date", None)
     if hasattr(base_date, "strftime"):
@@ -166,7 +169,12 @@ def compose_recommendation_slack_message(
                 return 99
         return 99
 
-    ordered_states = [(state, count) for state, count in sorted(state_counter.items(), key=lambda pair: (_state_order(pair[0]), pair[0]))]
+    ordered_states = [
+        (state, count)
+        for state, count in sorted(
+            state_counter.items(), key=lambda pair: (_state_order(pair[0]), pair[0])
+        )
+    ]
 
     headline = f"{account_label} 추천 정보가 갱신되었습니다. ({base_date_str})"
     app_prefix = f"[{APP_LABEL}] " if APP_LABEL else ""
@@ -182,10 +190,16 @@ def compose_recommendation_slack_message(
 
         held_count = count_current_holdings(recommendations)
     if portfolio_topn is None:
-        strategy_params = resolve_strategy_params((account_settings or {}).get("strategy", {})) if account_settings else {}
+        strategy_params = (
+            resolve_strategy_params((account_settings or {}).get("strategy", {}))
+            if account_settings
+            else {}
+        )
         topn_candidates = [
             getattr(report, "portfolio_topn", None),
-            (account_settings or {}).get("portfolio_topn") if account_settings else None,
+            (account_settings or {}).get("portfolio_topn")
+            if account_settings
+            else None,
             strategy_params.get("PORTFOLIO_TOPN"),
         ]
         for candidate in topn_candidates:
@@ -196,7 +210,11 @@ def compose_recommendation_slack_message(
                 portfolio_topn = None
 
     mobile_account = account_norm or (account_id or "").strip()
-    mobile_url = f"https://etf.dojason.com/{mobile_account}" if mobile_account else "https://etf.dojason.com"
+    mobile_url = (
+        f"https://etf.dojason.com/{mobile_account}"
+        if mobile_account
+        else "https://etf.dojason.com"
+    )
 
     lines = [
         app_prefix + headline,
@@ -222,7 +240,10 @@ def compose_recommendation_slack_message(
     fields: list[dict[str, str]] = [
         {"type": "mrkdwn", "text": f"*기준일*: {base_date_str}"},
         {"type": "mrkdwn", "text": f"*소요시간*: {duration:.1f}초"},
-        {"type": "mrkdwn", "text": f"*보유*: {_format_hold_ratio(held_count, portfolio_topn)}"},
+        {
+            "type": "mrkdwn",
+            "text": f"*보유*: {_format_hold_ratio(held_count, portfolio_topn)}",
+        },
     ]
 
     # 튜닝 파라미터 표시
@@ -239,15 +260,21 @@ def compose_recommendation_slack_message(
             params_str_parts.append(f"TopN: {topn}")
         if replace_threshold is not None:
             params_str_parts.append(f"교체점수: {replace_threshold}")
-        fields.append({"type": "mrkdwn", "text": f"*전략*: {', '.join(params_str_parts)}"})
+        fields.append(
+            {"type": "mrkdwn", "text": f"*전략*: {', '.join(params_str_parts)}"}
+        )
 
     if ordered_states:
         state_lines = [f"{state}: {count}개" for state, count in ordered_states]
-        fields.append({"type": "mrkdwn", "text": "*상태 요약*:\n" + "\n".join(state_lines)})
+        fields.append(
+            {"type": "mrkdwn", "text": "*상태 요약*:\n" + "\n".join(state_lines)}
+        )
 
     blocks.append({"type": "section", "fields": fields})
 
-    context_elements: list[dict[str, str]] = [{"type": "mrkdwn", "text": f"<{mobile_url}|모바일 화면 열기>"}]
+    context_elements: list[dict[str, str]] = [
+        {"type": "mrkdwn", "text": f"<{mobile_url}|모바일 화면 열기>"}
+    ]
     if ordered_states:
         context_elements.append({"type": "mrkdwn", "text": "<!channel> 알림"})
         fallback_text = "<!channel>\n" + fallback_text
@@ -276,15 +303,23 @@ def send_recommendation_slack_notification(
     token = os.environ.get("SLACK_BOT_TOKEN")
 
     if not channel:
-        logger.warning("Slack 채널이 설정되어 있지 않아 전송을 건너뜁니다 (account=%s)", account_id)
+        logger.warning(
+            "Slack 채널이 설정되어 있지 않아 전송을 건너뜁니다 (account=%s)", account_id
+        )
         return False
 
     if not token:
-        logger.warning("SLACK_BOT_TOKEN 이 설정되지 않아 전송을 건너뜁니다 (account=%s)", account_id)
+        logger.warning(
+            "SLACK_BOT_TOKEN 이 설정되지 않아 전송을 건너뜁니다 (account=%s)",
+            account_id,
+        )
         return False
 
     if WebClient is None:
-        logger.warning("slack_sdk 가 설치되어 있지 않아 슬랙 전송을 건너뜁니다 (account=%s)", account_id)
+        logger.warning(
+            "slack_sdk 가 설치되어 있지 않아 슬랙 전송을 건너뜁니다 (account=%s)",
+            account_id,
+        )
         return False
 
     client = WebClient(token=token)
@@ -386,7 +421,9 @@ def build_summary_line_from_summary_data(
     return body
 
 
-def build_summary_line_from_header(header_line: str, prefix: Optional[str] = None) -> str:
+def build_summary_line_from_header(
+    header_line: str, prefix: Optional[str] = None
+) -> str:
     header_line_clean = header_line.split("<br>")[0]
     segments = [seg.strip() for seg in header_line_clean.split("|")]
 
