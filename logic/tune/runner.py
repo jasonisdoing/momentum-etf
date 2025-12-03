@@ -37,6 +37,7 @@ from utils.data_loader import (
 )
 from utils.stock_list_io import get_etfs
 from utils.cache_utils import save_cached_frame
+from config import TUNING_ENSEMBLE_SIZE
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
@@ -968,7 +969,47 @@ def _execute_tuning_for_months(
             return _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
 
     success_entries.sort(key=_sort_key, reverse=True)
-    best_entry = success_entries[0]
+
+    # --- Top N Ensemble Logic ---
+    # 상위 N개의 결과를 사용하여 파라미터를 결정합니다.
+    # 1. MA_PERIOD: 상위 N개의 평균 (반올림)
+    # 2. 나머지: 상위 N개의 최빈값 (Mode)
+
+    # 앙상블 크기 검증 (홀수만 허용)
+    if TUNING_ENSEMBLE_SIZE % 2 == 0:
+        raise ValueError(f"TUNING_ENSEMBLE_SIZE는 반드시 홀수여야 합니다. (현재값: {TUNING_ENSEMBLE_SIZE})")
+
+    ensemble_size = min(len(success_entries), TUNING_ENSEMBLE_SIZE)
+    top_n_entries = success_entries[:ensemble_size]
+    best_entry = success_entries[0].copy()  # Top 1의 메트릭(CAGR 등)은 유지하되 파라미터만 덮어씀
+
+    if top_n_entries:
+        import statistics
+        from collections import Counter
+
+        def _get_mode(values):
+            if not values:
+                return None
+            # 빈도수가 같으면 먼저 나온 것(순위가 높은 것)을 선호
+            c = Counter(values)
+            return c.most_common(1)[0][0]
+
+        # 1. MA_PERIOD (Average)
+        ma_periods = [e.get("ma_period") for e in top_n_entries if e.get("ma_period") is not None]
+        if ma_periods:
+            best_entry["ma_period"] = int(round(statistics.mean(ma_periods)))
+
+        # 2. Others (Mode)
+        param_keys = ["ma_type", "portfolio_topn", "replace_threshold", "stop_loss_pct", "rsi_sell_threshold", "cooldown_days", "min_buy_score"]
+
+        for key in param_keys:
+            values = [e.get(key) for e in top_n_entries if e.get(key) is not None]
+            mode_val = _get_mode(values)
+            if mode_val is not None:
+                best_entry[key] = mode_val
+
+        logger.info("[튜닝] Top %d 앙상블 적용: MA=%s (Avg), Others=Mode", ensemble_size, best_entry.get("ma_period"))
+    # -----------------------------
 
     raw_data_payload: List[Dict[str, Any]] = []
     for item in success_entries:

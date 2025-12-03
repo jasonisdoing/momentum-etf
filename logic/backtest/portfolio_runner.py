@@ -643,8 +643,6 @@ def run_portfolio_backtest(
     # 이동평균 계산에 필요한 과거 데이터를 확보하기 위한 추가 조회 범위(웜업)
     # (실제 데이터 요청은 상위 프리패치 단계에서 수행)
 
-    # 시장 레짐 필터 제거됨 (항상 100% 투자)
-
     # 개별 종목 데이터 로딩 및 지표 계산
     # 티커별 카테고리 매핑 생성 (성능 최적화를 위해 딕셔너리로 변환)
     ticker_to_category = {stock["ticker"]: stock.get("category") for stock in stocks}
@@ -730,8 +728,6 @@ def run_portfolio_backtest(
         ticker_metrics["rsi_score_values"] = rsi_score_series.to_numpy()
         ticker_metrics["buy_signal_series"] = buy_signal_series
         ticker_metrics["buy_signal_values"] = buy_signal_series.to_numpy()
-
-    # 시장 레짐 필터 제거됨 (항상 100% 투자)
 
     # 시뮬레이션 상태 변수 초기화
     position_state = {

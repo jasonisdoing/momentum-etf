@@ -15,21 +15,18 @@ from utils.data_loader import MissingPriceDataError
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
     "k1": {
-        "MA_RANGE": np.arange(30, 110, 10),
-        # "MA_RANGE": [50],
-        # "MA_TYPE": ["TEMA"],
-        # "MA_TYPE": ["SMA"],
-        # "MA_TYPE": ["TEMA", "HMA"],
-        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+        "MA_RANGE": [25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
+        "MA_TYPE": ["EMA"],
         "PORTFOLIO_TOPN": [10],
         "REPLACE_SCORE_THRESHOLD": [0, 1, 2],
         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
-        "OVERBOUGHT_SELL_THRESHOLD": [70, 75, 80, 85, 90, 100],
-        "COOLDOWN_DAYS": [0, 1, 2, 3],
+        "OVERBOUGHT_SELL_THRESHOLD": [70, 75, 80, 85, 90, 95, 100],
+        "COOLDOWN_DAYS": [0, 1, 2],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     }
 }
+# "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
 
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
