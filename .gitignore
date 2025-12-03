@@ -4,9 +4,6 @@
 # Log Data
 logs/
 
-# 노트 파일
-notes/
-
 # Python
 __pycache__/
 .venv/
@@ -16,6 +13,8 @@ venv/
 # OS
 .DS_Store
 
+# 노트 파일
+znotes/
 
 # 백테스트 결과
 zresults
