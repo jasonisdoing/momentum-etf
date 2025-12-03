@@ -477,8 +477,6 @@ def _build_backtest_kwargs(
     if not (0 <= rsi_sell_threshold <= 100):
         raise ValueError(f"OVERBOUGHT_SELL_THRESHOLD는 0~100 사이여야 합니다. (현재값: {rsi_sell_threshold})")
 
-    # 시장 레짐 필터 제거됨 (항상 100% 투자)
-
     kwargs: Dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "prefetched_metrics": prefetched_metrics,

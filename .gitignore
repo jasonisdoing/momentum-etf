@@ -4,9 +4,6 @@
 # Log Data
 logs/
 
-# 메모 파일
-memo*.txt
-
 # Python
 __pycache__/
 .venv/
@@ -16,12 +13,11 @@ venv/
 # OS
 .DS_Store
 
-# 캐시 파일 (자동 생성되므로 Git에서 제외)
-data/stocks/cache/
+# 노트 파일
+znotes/
 
 # 백테스트 결과
 zresults
-
 
 # Streamlit secrets
 .streamlit/secrets.toml

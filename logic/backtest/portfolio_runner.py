@@ -188,7 +188,7 @@ def _execute_individual_sells(
                 ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
                 # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                 if cooldown_days > 0:
-                    ticker_state["buy_block_until"] = i + cooldown_days
+                    ticker_state["buy_block_until"] = i + cooldown_days + 1
 
                 # 행 업데이트
                 row = daily_records_by_ticker[ticker][-1]
@@ -397,7 +397,10 @@ def _execute_new_buys(
             current_holdings_value += trade_amount
             ticker_state["shares"] += req_qty
             ticker_state["avg_cost"] = buy_price
-            # 매도 쿨다운 제거: 매수 후 바로 매도 가능 (조건 충족 시)
+
+            # 매도 쿨다운 설정: 매수 후 N일간 매도 금지 (손절 제외)
+            if cooldown_days > 0:
+                ticker_state["sell_block_until"] = i + cooldown_days + 1
 
             if category and not is_category_exception(category):
                 held_categories.add(category)
@@ -503,10 +506,10 @@ def process_ticker_data(
     # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
     if config.ENABLE_DATA_SUFFICIENCY_CHECK:
         ma_type_upper = (ma_type or "SMA").upper()
-        if ma_type_upper == "TEMA":
-            ideal_multiplier = 3.0
-        elif ma_type_upper in {"HMA", "EMA", "DEMA"}:
+        if ma_type_upper in {"EMA", "DEMA", "TEMA"}:
             ideal_multiplier = 2.0
+        elif ma_type_upper == "HMA":
+            ideal_multiplier = 1.5
         else:  # SMA, WMA 등
             ideal_multiplier = 1.0
 
@@ -640,8 +643,6 @@ def run_portfolio_backtest(
     # 이동평균 계산에 필요한 과거 데이터를 확보하기 위한 추가 조회 범위(웜업)
     # (실제 데이터 요청은 상위 프리패치 단계에서 수행)
 
-    # 시장 레짐 필터 제거됨 (항상 100% 투자)
-
     # 개별 종목 데이터 로딩 및 지표 계산
     # 티커별 카테고리 매핑 생성 (성능 최적화를 위해 딕셔너리로 변환)
     ticker_to_category = {stock["ticker"]: stock.get("category") for stock in stocks}
@@ -727,8 +728,6 @@ def run_portfolio_backtest(
         ticker_metrics["rsi_score_values"] = rsi_score_series.to_numpy()
         ticker_metrics["buy_signal_series"] = buy_signal_series
         ticker_metrics["buy_signal_values"] = buy_signal_series.to_numpy()
-
-    # 시장 레짐 필터 제거됨 (항상 100% 투자)
 
     # 시뮬레이션 상태 변수 초기화
     position_state = {
@@ -923,8 +922,9 @@ def run_portfolio_backtest(
                 if core_ticker in tickers_available_today:
                     price = today_prices.get(core_ticker)
                     if pd.notna(price) and price > 0 and cash > 0:
-                        # 무조건 균등 비중: 초기자본 / TOPN
-                        budget = initial_capital / top_n if top_n > 0 else 0
+                        # 무조건 균등 비중: 현재 총자산 / TOPN
+                        current_total_equity = cash + current_holdings_value
+                        budget = current_total_equity / top_n if top_n > 0 else 0
 
                         budget = min(budget, cash)  # 현금 부족 시 현금만큼만
                         shares_to_buy = budget / price if price > 0 else 0
@@ -935,7 +935,7 @@ def run_portfolio_backtest(
                             position_state[core_ticker]["shares"] = shares_to_buy
                             position_state[core_ticker]["avg_cost"] = price
                             # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
-                            position_state[core_ticker]["buy_block_until"] = i + cooldown_days
+                            position_state[core_ticker]["buy_block_until"] = i + cooldown_days + 1
 
                             buy_trades_today_map.setdefault(core_ticker, []).append({"shares": float(shares_to_buy), "price": float(price)})
 
@@ -1119,7 +1119,7 @@ def run_portfolio_backtest(
                         weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
                         # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                         if cooldown_days > 0:
-                            weakest_state["buy_block_until"] = i + cooldown_days
+                            weakest_state["buy_block_until"] = i + cooldown_days + 1
 
                         if daily_records_by_ticker[ticker_to_sell] and daily_records_by_ticker[ticker_to_sell][-1]["date"] == dt:
                             row = daily_records_by_ticker[ticker_to_sell][-1]

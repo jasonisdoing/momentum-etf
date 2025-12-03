@@ -117,7 +117,6 @@ DECISION_NOTES = {
     "DATA_INSUFFICIENT": "⚠️ 거래일 부족",
     # 템플릿
     "COOLDOWN_GENERIC": "쿨다운 {days}일 대기중",
-    "COOLDOWN_WITH_ACTION": "쿨다운 {days}일 대기중 ({action} {date})",
 }
 
 __all__ = [
