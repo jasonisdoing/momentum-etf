@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
-import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional
 
 from bson import ObjectId
 from dotenv import load_dotenv
@@ -33,16 +32,26 @@ def get_db_connection():
         return _db_connection
 
     try:
-        connection_string = os.environ.get("MONGO_DB_CONNECTION_STRING") or getattr(global_settings, "MONGO_DB_CONNECTION_STRING", None)
-        db_name = os.environ.get("MONGO_DB_NAME") or getattr(global_settings, "MONGO_DB_NAME", "momentum_etf_db")
+        connection_string = os.environ.get("MONGO_DB_CONNECTION_STRING") or getattr(
+            global_settings, "MONGO_DB_CONNECTION_STRING", None
+        )
+        db_name = os.environ.get("MONGO_DB_NAME") or getattr(
+            global_settings, "MONGO_DB_NAME", "momentum_etf_db"
+        )
         # 연결 풀 관련 환경 변수(선택 사항)를 반영한다.
         max_pool = int(os.environ.get("MONGO_DB_MAX_POOL_SIZE", "20"))
         min_pool = int(os.environ.get("MONGO_DB_MIN_POOL_SIZE", "0"))
-        max_idle = int(os.environ.get("MONGO_DB_MAX_IDLE_TIME_MS", "0"))  # 0 = driver default
-        wait_q_timeout = int(os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "0"))  # 0 = driver default
+        max_idle = int(
+            os.environ.get("MONGO_DB_MAX_IDLE_TIME_MS", "0")
+        )  # 0 = driver default
+        wait_q_timeout = int(
+            os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "0")
+        )  # 0 = driver default
 
         if not connection_string:
-            raise ValueError("MongoDB 연결 문자열이 설정되지 않았습니다. (MONGO_DB_CONNECTION_STRING)")
+            raise ValueError(
+                "MongoDB 연결 문자열이 설정되지 않았습니다. (MONGO_DB_CONNECTION_STRING)"
+            )
 
         if _mongo_client is None:
             client_kwargs = dict(
@@ -67,7 +76,9 @@ def get_db_connection():
 
         # 서버 연결 수 정보를 함께 출력한다.
         try:
-            status = client.admin.command("serverStatus")  # Atlas 환경에서는 clusterMonitor 권한 필요
+            status = client.admin.command(
+                "serverStatus"
+            )  # Atlas 환경에서는 clusterMonitor 권한 필요
             conn = status.get("connections", {}) if isinstance(status, dict) else {}
             current = conn.get("current")
             available = conn.get("available")
@@ -184,7 +195,9 @@ def delete_account_trades(account_id: str) -> dict[str, int]:
     }
 
 
-def fetch_recent_trades(account_id: str | None = None, *, limit: int = 100, include_deleted: bool = False) -> List[dict[str, Any]]:
+def fetch_recent_trades(
+    account_id: str | None = None, *, limit: int = 100, include_deleted: bool = False
+) -> List[dict[str, Any]]:
     """최근 트레이드 목록을 반환합니다."""
     db = get_db_connection()
     if db is None:
@@ -199,7 +212,11 @@ def fetch_recent_trades(account_id: str | None = None, *, limit: int = 100, incl
     if account_id:
         query["account"] = account_id.strip().lower()
 
-    cursor = db.trades.find(query).sort([("executed_at", DESCENDING), ("_id", DESCENDING)]).limit(int(limit))
+    cursor = (
+        db.trades.find(query)
+        .sort([("executed_at", DESCENDING), ("_id", DESCENDING)])
+        .limit(int(limit))
+    )
 
     trades: List[dict[str, Any]] = []
     for doc in cursor:
@@ -241,7 +258,15 @@ def list_open_positions(account_id: str) -> List[dict[str, Any]]:
                     "ticker": {"$ne": None},
                     "deleted_at": {"$exists": False},
                 },
-                projection={"ticker": 1, "action": 1, "executed_at": 1, "created_at": 1, "name": 1, "memo": 1, "_id": 1},
+                projection={
+                    "ticker": 1,
+                    "action": 1,
+                    "executed_at": 1,
+                    "created_at": 1,
+                    "name": 1,
+                    "memo": 1,
+                    "_id": 1,
+                },
             ).sort([("ticker", 1), ("executed_at", 1), ("created_at", 1), ("_id", 1)])
         )
     except Exception:

@@ -3,7 +3,6 @@
 """
 
 import json
-import os
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -83,7 +82,9 @@ def _fetch_naver_etf_snapshot() -> Dict[str, Dict[str, Any]]:
         return {}
 
     try:
-        response = requests.get(NAVER_FINANCE_ETF_API_URL, headers=NAVER_FINANCE_HEADERS, timeout=5)
+        response = requests.get(
+            NAVER_FINANCE_ETF_API_URL, headers=NAVER_FINANCE_HEADERS, timeout=5
+        )
         response.raise_for_status()
     except Exception as exc:
         logger.warning("네이버 ETF 스냅샷 조회 실패: %s", exc)
@@ -152,7 +153,9 @@ def _update_metadata_for_country(country_code: str):
     stock_file = STOCKS_DIR / f"{country_code}.json"
 
     if not stock_file.exists():
-        logger.warning(f"'{stock_file}'을 찾을 수 없어 메타데이터 업데이트를 건너<binary data, 1 bytes>니다.")
+        logger.warning(
+            f"'{stock_file}'을 찾을 수 없어 메타데이터 업데이트를 건너<binary data, 1 bytes>니다."
+        )
         return
 
     try:
@@ -185,10 +188,14 @@ def _update_metadata_for_country(country_code: str):
             data = None  # 각 종목마다 data 변수 초기화
             listing_date_str = _fetch_naver_listing_date(ticker)
             if listing_date_str:
-                logger.debug(f"[{country_code.upper()}/{ticker}] 네이버 API에서 상장일 획득: {listing_date_str}")
+                logger.debug(
+                    f"[{country_code.upper()}/{ticker}] 네이버 API에서 상장일 획득: {listing_date_str}"
+                )
 
             if not listing_date_str:
-                logger.warning(f"[{country_code.upper()}/{ticker}] 상장일을 가져오지 못해 스킵합니다.")
+                logger.warning(
+                    f"[{country_code.upper()}/{ticker}] 상장일을 가져오지 못해 스킵합니다."
+                )
                 continue
 
             # 상장일 저장
@@ -197,9 +204,13 @@ def _update_metadata_for_country(country_code: str):
             # 주간 평균 거래량/거래대금 및 3개월 수익률은 항상 업데이트 (yfinance 데이터 필요)
             if data is None:
                 # 상장일이 이미 있어서 data가 없는 경우, yfinance로 3개월 데이터 조회
-                data = yf.download(yfinance_ticker, period="3mo", progress=False, auto_adjust=False)
+                data = yf.download(
+                    yfinance_ticker, period="3mo", progress=False, auto_adjust=False
+                )
                 if data.empty:
-                    logger.warning(f"[{country_code.upper()}/{ticker}] 거래량/수익률 데이터를 가져올 수 없습니다.")
+                    logger.warning(
+                        f"[{country_code.upper()}/{ticker}] 거래량/수익률 데이터를 가져올 수 없습니다."
+                    )
                 else:
                     if isinstance(data.columns, pd.MultiIndex):
                         data.columns = data.columns.get_level_values(0)
@@ -228,27 +239,43 @@ def _update_metadata_for_country(country_code: str):
                 if len(last_month) >= 2 and "Close" in data.columns:
                     month_start = last_month.iloc[0]["Close"]
                     month_end = last_month.iloc[-1]["Close"]
-                    if pd.notna(month_start) and pd.notna(month_end) and month_start > 0:
-                        month_earn_rate = ((month_end - month_start) / month_start) * 100
+                    if (
+                        pd.notna(month_start)
+                        and pd.notna(month_end)
+                        and month_start > 0
+                    ):
+                        month_earn_rate = (
+                            (month_end - month_start) / month_start
+                        ) * 100
                         stock["1_month_earn_rate"] = round(month_earn_rate, 4)
 
                 # 3. 3개월 수익률 계산 (yfinance 데이터 사용)
                 if len(data) >= 2 and "Close" in data.columns:
                     price_start = data.iloc[0]["Close"]
                     price_end = data.iloc[-1]["Close"]
-                    if pd.notna(price_start) and pd.notna(price_end) and price_start > 0:
+                    if (
+                        pd.notna(price_start)
+                        and pd.notna(price_end)
+                        and price_start > 0
+                    ):
                         earn_rate = ((price_end - price_start) / price_start) * 100
                         stock["3_month_earn_rate"] = round(earn_rate, 4)
 
             if country_code == "kor":
                 naver_item = naver_etf_snapshot.get(str(ticker).strip().upper())
                 if naver_item:
-                    three_month_from_naver = _try_parse_float(naver_item.get("threeMonthEarnRate"))
+                    three_month_from_naver = _try_parse_float(
+                        naver_item.get("threeMonthEarnRate")
+                    )
                     if three_month_from_naver is not None:
                         stock["3_month_earn_rate"] = round(three_month_from_naver, 4)
 
             # 필드 순서 정렬: 1M 거래량 → 1M 수익률 → 3M 수익률
-            ordered_fields = ["1_month_avg_volume", "1_month_earn_rate", "3_month_earn_rate"]
+            ordered_fields = [
+                "1_month_avg_volume",
+                "1_month_earn_rate",
+                "3_month_earn_rate",
+            ]
             preserved_values = {}
             for key in ordered_fields:
                 if key in stock:
@@ -258,18 +285,24 @@ def _update_metadata_for_country(country_code: str):
                     stock[key] = preserved_values[key]
 
             name = stock.get("name") or "-"
-            logger.info(f"  -> 메타데이터 획득 중: {idx}/{total_count} - {name}({ticker})")
+            logger.info(
+                f"  -> 메타데이터 획득 중: {idx}/{total_count} - {name}({ticker})"
+            )
             updated_count += 1
             time.sleep(0.2)  # API 호출 속도 조절
 
         except Exception as e:
-            logger.error(f"[{country_code.upper()}/{ticker}] 메타데이터 업데이트 실패: {e}")
+            logger.error(
+                f"[{country_code.upper()}/{ticker}] 메타데이터 업데이트 실패: {e}"
+            )
 
     if updated_count > 0:
         try:
             with stock_file.open("w", encoding="utf-8") as f:
                 json.dump(stock_data, f, ensure_ascii=False, indent=4)
-            logger.info(f"✅ [{country_code.upper()}] {updated_count}개 종목의 메타데이터 업데이트 완료.")
+            logger.info(
+                f"✅ [{country_code.upper()}] {updated_count}개 종목의 메타데이터 업데이트 완료."
+            )
         except Exception as e:
             logger.error(f"'{stock_file}' 파일 저장 실패: {e}")
 

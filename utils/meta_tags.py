@@ -1,6 +1,5 @@
 """Open Graph 메타 태그를 HTML head에 주입하는 유틸리티"""
 
-import streamlit as st
 import streamlit.components.v1 as components
 
 

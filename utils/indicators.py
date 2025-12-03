@@ -4,10 +4,11 @@
 """
 
 import pandas as pd
-import numpy as np
 
 
-def calculate_moving_average_signals(close_prices: pd.Series, moving_average_period: int) -> tuple[pd.Series, pd.Series, pd.Series]:
+def calculate_moving_average_signals(
+    close_prices: pd.Series, moving_average_period: int
+) -> tuple[pd.Series, pd.Series, pd.Series]:
     """
     이동평균 기반 추천을 계산합니다.
 
@@ -38,7 +39,14 @@ def calculate_moving_average_signals(close_prices: pd.Series, moving_average_per
     buy_signal_active = close_prices > moving_average
 
     # 매수 추천이 연속으로 활성화된 일수 계산
-    consecutive_buy_days = buy_signal_active.groupby((buy_signal_active != buy_signal_active.shift()).cumsum()).cumsum().fillna(0).astype(int)
+    consecutive_buy_days = (
+        buy_signal_active.groupby(
+            (buy_signal_active != buy_signal_active.shift()).cumsum()
+        )
+        .cumsum()
+        .fillna(0)
+        .astype(int)
+    )
 
     return moving_average, buy_signal_active, consecutive_buy_days
 
@@ -80,4 +88,6 @@ def calculate_rsi_score(
     """
     from strategies.rsi.scoring import calculate_rsi_score as _calculate_rsi_score
 
-    return _calculate_rsi_score(close_prices, period, ema_smoothing, normalize, normalize_config)
+    return _calculate_rsi_score(
+        close_prices, period, ema_smoothing, normalize, normalize_config
+    )

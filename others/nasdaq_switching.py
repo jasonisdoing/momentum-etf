@@ -5,15 +5,12 @@ Nasdaq Leverage Switching Strategy Recommendation Script (Standalone)
 """
 
 import itertools
-import json
 import multiprocessing
 import re
 import sys
-import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
-from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import Dict, List
 from unicodedata import east_asian_width, normalize
 
 import numpy as np
@@ -100,7 +97,9 @@ def _extract_field(data: pd.DataFrame, field: str, tickers: List[str]) -> pd.Dat
             if level_idx is not None:
                 break
         if level_idx is None:
-            raise ValueError(f"{field} 컬럼을 찾지 못했습니다. 사용 가능 컬럼: {list(data.columns)}")
+            raise ValueError(
+                f"{field} 컬럼을 찾지 못했습니다. 사용 가능 컬럼: {list(data.columns)}"
+            )
         out = data.xs(field_key, axis=1, level=level_idx)
     else:
         candidates = [c for c in [field, field.capitalize()] if c in data.columns]
@@ -298,7 +297,9 @@ def _worker(args):
 
 def run_tuning(base_settings: Dict) -> Dict:
     """전수 조사 튜닝 실행"""
-    print(f"\n[튜닝 시작] 최적 파라미터 탐색 중... (기간: {base_settings['months_range']}개월)")
+    print(
+        f"\n[튜닝 시작] 최적 파라미터 탐색 중... (기간: {base_settings['months_range']}개월)"
+    )
 
     # 데이터 준비
     start_bound, warmup_start, end_bound = compute_bounds(base_settings)
@@ -332,7 +333,10 @@ def run_tuning(base_settings: Dict) -> Dict:
             case_settings[k] = v
 
         # 유효성 검사 (buy < sell)
-        if case_settings["drawdown_buy_cutoff"] >= case_settings["drawdown_sell_cutoff"]:
+        if (
+            case_settings["drawdown_buy_cutoff"]
+            >= case_settings["drawdown_sell_cutoff"]
+        ):
             continue
 
         tasks.append((case_settings, prices, signal_df))
@@ -358,7 +362,9 @@ def run_tuning(base_settings: Dict) -> Dict:
             completed += 1
             if completed % 100 == 0 or completed == valid_cases:
                 progress = (completed / valid_cases) * 100
-                sys.stdout.write(f"\r[튜닝 진행] {progress:.1f}% ({completed}/{valid_cases})")
+                sys.stdout.write(
+                    f"\r[튜닝 진행] {progress:.1f}% ({completed}/{valid_cases})"
+                )
                 sys.stdout.flush()
 
     print("\n[튜닝 완료] 결과 정렬 중...")
@@ -385,7 +391,9 @@ def run_tuning(base_settings: Dict) -> Dict:
 # =============================================================================
 
 
-def render_table_eaw(headers: List[str], rows: List[List[str]], aligns: List[str]) -> List[str]:
+def render_table_eaw(
+    headers: List[str], rows: List[List[str]], aligns: List[str]
+) -> List[str]:
     """
     동아시아 문자 너비를 고려하여 리스트 데이터를 ASCII 테이블 문자열로 렌더링합니다.
     """
@@ -433,13 +441,19 @@ def render_table_eaw(headers: List[str], rows: List[List[str]], aligns: List[str
         else:  # 왼쪽 정렬
             return s_str + " " * pad
 
-    widths = [max(_disp_width_eaw(v) for v in [headers[j]] + [r[j] for r in rows]) for j in range(len(headers))]
+    widths = [
+        max(_disp_width_eaw(v) for v in [headers[j]] + [r[j] for r in rows])
+        for j in range(len(headers))
+    ]
 
     def _hline():
         return "+" + "+".join("-" * (w + 2) for w in widths) + "+"
 
     out = [_hline()]
-    header_cells = [_pad(headers[j], widths[j], "center" if aligns[j] == "center" else "left") for j in range(len(headers))]
+    header_cells = [
+        _pad(headers[j], widths[j], "center" if aligns[j] == "center" else "left")
+        for j in range(len(headers))
+    ]
     out.append("| " + " | ".join(header_cells) + " |")
     out.append(_hline())
     for r in rows:
@@ -502,7 +516,11 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
 
     # 일간 수익률은 전일 대비 종가 기준
     daily_rets = prices[assets].pct_change()
-    last_ret = daily_rets.loc[last_date] if last_date in daily_rets.index else pd.Series(dtype=float)
+    last_ret = (
+        daily_rets.loc[last_date]
+        if last_date in daily_rets.index
+        else pd.Series(dtype=float)
+    )
 
     def _gap_message(row, price_today):
         # 추천 시점의 '문구'는 보통 "왜 안 샀냐"를 설명하는 용도이므로
@@ -515,7 +533,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
         # 드로다운이 임계값보다 낮아서(더 많이 떨어져서) 못 사는 경우
         if current_dd <= threshold:
             needed = threshold - current_dd
-            return f"DD {current_dd*100:.2f}% (매수컷 {threshold*100:.2f}%, 필요 {needed*100:+.2f}%)"
+            return f"DD {current_dd * 100:.2f}% (매수컷 {threshold * 100:.2f}%, 필요 {needed * 100:+.2f}%)"
         return ""
 
     # 테이블 대신 세로형 카드 포맷 생성
@@ -542,7 +560,7 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
         # 세로형 출력 생성
         table_lines.append(f"📌 {sym}")
         table_lines.append(f"  상태: {st} {st_emoji}")
-        table_lines.append(f"  일간: {ret*100:+.2f}%")
+        table_lines.append(f"  일간: {ret * 100:+.2f}%")
         table_lines.append(f"  현재가: ${price:,.2f}")
         if note:
             table_lines.append(f"  비고: {note}")
@@ -554,7 +572,11 @@ def run_recommend(settings: Dict) -> Dict[str, object]:
         "table_lines": table_lines,
         "raw_data": {
             "statuses": statuses,
-            "prices": {sym: prices.at[last_date, sym] for sym in assets if sym in prices.columns},
+            "prices": {
+                sym: prices.at[last_date, sym]
+                for sym in assets
+                if sym in prices.columns
+            },
             "drawdown": last_row["drawdown"],
             "drawdown_buy_cutoff": settings["drawdown_buy_cutoff"],
             "drawdown_sell_cutoff": settings["drawdown_sell_cutoff"],
