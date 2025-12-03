@@ -21,6 +21,7 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
     - `signals.py`: 매수 신호 판단 공통 함수
     - `filtering.py`: 카테고리 중복 필터링 공통 함수
 - `utils/`: 공통 유틸리티 모듈
+  - `ui.py`: Streamlit UI 공통 컴포넌트
   - `data_loader.py`: 데이터 로딩 및 API 호출
   - `indicators.py`: 기술적 지표 계산 (이동평균, SuperTrend, ATR 등)
   - `report.py`: 리포트, 로그 포맷팅 및 테이블 렌더링
@@ -30,6 +31,8 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 - `scripts/`: 각종 유틸리티 및 분석 스크립트 모음
   - `update_price_cache.py`: 국가별 종목 OHLCV 데이터를 캐시에 선다운로드/증분 갱신
   - `find.py`: 급등 ETF 검색 도구
+  - `add_meta_tags.py`: HTML 메타 태그 주입 스크립트
+  - `update_app_datetime.sh`: 앱 버전(날짜) 갱신 스크립트
 - `app_pages/`: Streamlit 웹앱 페이지들
   - `account_page.py`: 계정별 추천/현황 페이지
   - `trade.py`: 관리자용 거래 관리 페이지 (로그인 필요)
@@ -40,7 +43,11 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
     - `common.py`: 공통 설정
     - `schedule_config.json`: APScheduler 설정
   - `stocks/`: 국가별 종목 리스트 (kor.json)
-  - `results/`: 백테스트/튜닝 결과 로그
+    - `results/`: 백테스트/튜닝 결과 로그
+- `notes/`: 메모 및 임시 파일 보관
+- `others/`: 별도 전략 및 모듈
+  - `nasdaq_switching.py`: 나스닥 레버리지 스위칭 전략
+  - `nasdaq_switching_slack.py`: 스위칭 전략 슬랙 알림
 - `app.py`: Streamlit 웹앱 메인 진입점
 - `run.py`: 웹앱 실행 스크립트 (app.py 래퍼)
 - `recommend.py`: CLI 추천 생성 스크립트
@@ -50,8 +57,9 @@ ETF 추세추종 전략 기반의 트레이딩 시뮬레이션 및 분석 도구
 
 ## 문서
 
-- [추천 규칙 명세](docs/recommend-rules.md)
-- [개발 규칙(개발자 가이드)](docs/development-rules.md)
+- [시스템 요약](docs/system_summary.md)
+- [시스템 상세 매뉴얼](docs/system_details.md)
+- [일관성 규칙](docs/logic_consistency.md)
 
 ## 설치 및 준비
 
@@ -213,6 +221,18 @@ pykrx 라이브러리를 사용하여 한국 시장의 급등 ETF를 찾아봅�
 
 ```bash
 python scripts/find.py --type etf --min-change 3.0
+```
+
+### 7) 나스닥 스위칭 전략 (Nasdaq Switching)
+
+나스닥 레버리지(TQQQ)와 금광주(GDX) 간의 스위칭 전략을 실행하고 결과를 확인합니다.
+
+```bash
+# 전략 실행 및 리포트 출력
+python others/nasdaq_switching.py
+
+# 슬랙 알림 전송 (테스트)
+python others/nasdaq_switching_slack.py
 ```
 
 ## 시스템 아키텍처

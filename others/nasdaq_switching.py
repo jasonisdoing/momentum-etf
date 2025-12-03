@@ -6,6 +6,8 @@ Nasdaq Leverage Switching Strategy Recommendation Script
 
 import json
 import re
+import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -54,6 +56,8 @@ def load_settings(path: Path | str = "settings.json") -> Dict:
         try:
             with p.open("r", encoding="utf-8") as f:
                 file_settings = json.load(f)
+            # 프로젝트 루트 경로 추가
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             settings.update(file_settings)
             # print(f"[INFO] 설정 파일 로드됨: {p.absolute()}")
         except Exception as e:

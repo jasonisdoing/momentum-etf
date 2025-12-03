@@ -7,7 +7,7 @@ import streamlit as st
 from utils.logger import APP_VERSION
 
 from app_pages.account_page import render_account_page
-from main import load_account_recommendations, render_recommendation_table
+from utils.ui import load_account_recommendations, render_recommendation_table
 
 from utils.account_registry import (
     get_icon_fallback,

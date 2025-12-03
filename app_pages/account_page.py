@@ -4,7 +4,7 @@ from typing import Any
 
 import streamlit as st
 
-from main import load_account_recommendations, render_recommendation_table
+from utils.ui import load_account_recommendations, render_recommendation_table
 from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
 

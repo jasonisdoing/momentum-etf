@@ -276,7 +276,7 @@ def _register_cache_job(
 
 def _register_nasdaq_switching_job(scheduler: BlockingScheduler) -> None:
     """나스닥 스위칭 전략 알림 스케줄 등록 (06:00, 09:00, 18:00, 22:30)"""
-    from nasdaq_switching_slack import run_nasdaq_switching_notification
+    from others.nasdaq_switching_slack import run_nasdaq_switching_notification
 
     # 시간 목록 (HH:MM)
     run_times = ["06:00", "09:00", "18:00", "22:30"]

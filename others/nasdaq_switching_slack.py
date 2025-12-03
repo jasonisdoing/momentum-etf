@@ -7,9 +7,10 @@ import sys
 from datetime import datetime
 
 # 프로젝트 루트 경로 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 프로젝트 루트 경로 추가 (others/.. -> root)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nasdaq_switching import get_recommendation
+from others.nasdaq_switching import get_recommendation
 from utils.logger import get_app_logger
 
 try:
