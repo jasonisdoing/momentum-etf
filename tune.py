@@ -13,7 +13,7 @@ from utils.logger import get_app_logger
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
     "k1": {
-        "PORTFOLIO_TOPN": [9],
+        "PORTFOLIO_TOPN": [8],
         "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
         "MA_TYPE": ["EMA"],
         "REPLACE_SCORE_THRESHOLD": [3, 4, 5],
