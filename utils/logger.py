@@ -6,7 +6,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+
 from dotenv import load_dotenv
 
 try:
@@ -16,14 +16,14 @@ except ImportError:
 
 load_dotenv()
 
-APP_VERSION = "2025-12-04-07"
+APP_VERSION = "2025-12-04-09"
 APP_LABEL = os.environ.get("APP_TYPE", f"APP-{APP_VERSION}")
 
 LOG_LEVEL = os.environ.get("APP_LOG_LEVEL", "INFO").upper()
 DEBUG_ENABLED = LOG_LEVEL == "DEBUG"
 
 
-_LOGGER: Optional[logging.Logger] = None
+_LOGGER: logging.Logger | None = None
 
 
 def get_app_logger() -> logging.Logger:
