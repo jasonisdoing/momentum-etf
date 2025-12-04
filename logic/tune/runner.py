@@ -2092,7 +2092,7 @@ def run_account_tuning(
         "combo_count": combo_count,
         "country_code": country_code,
         "search_space": {
-            "MA_PERIOD": list(ma_values),
+            "MA_RANGE": list(ma_values),
             "MA_TYPE": list(ma_type_values),
             "PORTFOLIO_TOPN": list(topn_values),
             "REPLACE_SCORE_THRESHOLD": list(replace_values),
