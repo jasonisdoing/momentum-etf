@@ -4,23 +4,24 @@
 전략 중립적인 포트폴리오 백테스트 로직을 제공합니다.
 """
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 import pandas as pd
 
 import config
 from config import BACKTEST_SLIPPAGE
+from logic.common import calculate_held_categories, is_category_exception, select_candidates_by_category
+from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
+from strategies.maps.labeler import compute_net_trade_note
 from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
 from utils.report import format_kr_money
-from strategies.maps.labeler import compute_net_trade_note
-from logic.common import select_candidates_by_category, calculate_held_categories, is_category_exception
-from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
 
 logger = get_app_logger()
 
 
-def _format_trend_break_phrase(ma_value: float | None, price_value: float | None, ma_period: Optional[int]) -> str:
+def _format_trend_break_phrase(ma_value: float | None, price_value: float | None, ma_period: int | None) -> str:
     if ma_value is None or pd.isna(ma_value) or price_value is None or pd.isna(price_value):
         threshold = ma_value if (ma_value is not None and not pd.isna(ma_value)) else 0.0
         return f"{DECISION_NOTES['TREND_BREAK']}({threshold:,.0f}원 이하)"
@@ -33,10 +34,13 @@ def _format_trend_break_phrase(ma_value: float | None, price_value: float | None
             period_text = f"{int(ma_period)}일 "
         except (TypeError, ValueError):
             period_text = ""
-    return f"{DECISION_NOTES['TREND_BREAK']}({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"
+    return (
+        f"{DECISION_NOTES['TREND_BREAK']}"
+        f"({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"
+    )
 
 
-def _format_min_score_phrase(score_value: Optional[float], min_buy_score: float) -> str:
+def _format_min_score_phrase(score_value: float | None, min_buy_score: float) -> str:
     template = DECISION_NOTES.get("MIN_SCORE", "최소 {min_buy_score:.1f}점수 미만")
     try:
         base = template.format(min_buy_score=min_buy_score)
@@ -101,32 +105,37 @@ def _calculate_trade_price(
 
 
 def _execute_individual_sells(
-    position_state: Dict,
-    valid_core_holdings: Set[str],
-    metrics_by_ticker: Dict,
-    today_prices: Dict[str, float],
-    score_today: Dict[str, float],
-    rsi_score_today: Dict[str, float],
-    ticker_to_category: Dict[str, str],
-    sell_rsi_categories_today: Set[str],
-    sell_trades_today_map: Dict,
-    daily_records_by_ticker: Dict,
+    position_state: dict,
+    valid_core_holdings: set[str],
+    metrics_by_ticker: dict,
+    today_prices: dict[str, float],
+    score_today: dict[str, float],
+    rsi_score_today: dict[str, float],
+    ticker_to_category: dict[str, str],
+    sell_rsi_categories_today: set[str],
+    sell_trades_today_map: dict,
+    daily_records_by_ticker: dict,
     i: int,
     total_days: int,
     country_code: str,
-    stop_loss_threshold: Optional[float],
+    stop_loss_threshold: float | None,
     rsi_sell_threshold: float,
+    trailing_stop_pct: float,
     cooldown_days: int,
     cash: float,
     current_holdings_value: float,
     ma_period: int,
     min_buy_score: float,
 ) -> tuple[float, float]:
-    """개별 종목 매도 로직 (손절, RSI, 추세)"""
+    """개별 종목 매도 로직 (손절, RSI, 추세, 트레일링 스탑)"""
     for ticker, ticker_metrics in metrics_by_ticker.items():
         ticker_state, price = position_state[ticker], today_prices.get(ticker)
 
         if ticker_state["shares"] > 0 and pd.notna(price) and metrics_by_ticker[ticker]["available_mask"][i]:
+            # 최고가 갱신 (트레일링 스탑용)
+            if price > ticker_state.get("highest_price", 0.0):
+                ticker_state["highest_price"] = price
+
             in_cooldown = i < ticker_state["sell_block_until"]
             decision = None
             hold_ret = (price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0
@@ -135,8 +144,15 @@ def _execute_individual_sells(
             # RSI 과매수 매도 조건 체크
             rsi_score_current = rsi_score_today.get(ticker, 0.0)
 
+            # 트레일링 스탑 조건 체크
+            highest_price = ticker_state.get("highest_price", price)
+            trailing_stop_price = highest_price * (1.0 - trailing_stop_pct / 100.0)
+            is_trailing_stop = (trailing_stop_pct > 0) and (price < trailing_stop_price)
+
             if stop_loss_threshold is not None and hold_ret <= float(stop_loss_threshold):
                 decision = "CUT_STOPLOSS"
+            elif is_trailing_stop:
+                decision = "SELL_TRAILING"
             elif rsi_score_current >= rsi_sell_threshold:
                 decision = "SELL_RSI"
             elif not pd.isna(score_today.get(ticker, float("nan"))) and score_today.get(ticker, 0.0) <= min_buy_score:
@@ -172,7 +188,9 @@ def _execute_individual_sells(
                 qty = ticker_state["shares"]
                 trade_amount = qty * sell_price
                 trade_profit = (sell_price - ticker_state["avg_cost"]) * qty if ticker_state["avg_cost"] > 0 else 0.0
-                hold_ret = (sell_price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0
+                hold_ret = (
+                    (sell_price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0
+                )
 
                 # 순매도 집계
                 sell_trades_today_map.setdefault(ticker, []).append({"shares": float(qty), "price": float(sell_price)})
@@ -186,6 +204,8 @@ def _execute_individual_sells(
                 cash += trade_amount
                 current_holdings_value = max(0.0, current_holdings_value - trade_amount)
                 ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
+                ticker_state["highest_price"] = 0.0  # 매도 후 최고가 초기화
+
                 # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                 if cooldown_days > 0:
                     ticker_state["buy_block_until"] = i + cooldown_days + 1
@@ -206,17 +226,19 @@ def _execute_individual_sells(
                 if decision == "SELL_TREND":
                     note_text = trend_phrase if trend_phrase else DECISION_NOTES["TREND_BREAK"]
                     row["note"] = note_text
+                elif decision == "SELL_TRAILING":
+                    row["note"] = f"고점({highest_price:,.0f}) 대비 {trailing_stop_pct}% 하락"
 
     return cash, current_holdings_value
 
 
 def _rank_buy_candidates(
-    tickers_available_today: Set[str],
-    position_state: Dict,
-    buy_signal_today: Dict[str, int],
-    score_today: Dict[str, float],
+    tickers_available_today: set[str],
+    position_state: dict,
+    buy_signal_today: dict[str, int],
+    score_today: dict[str, float],
     i: int,
-) -> List[Tuple[float, str]]:
+) -> list[tuple[float, str]]:
     """매수 후보를 점수 순으로 정렬
 
     Returns:
@@ -238,7 +260,7 @@ def _rank_buy_candidates(
 
 
 def _update_ticker_note(
-    daily_records_by_ticker: Dict,
+    daily_records_by_ticker: dict,
     ticker: str,
     dt: pd.Timestamp,
     note: str,
@@ -256,12 +278,15 @@ def _update_ticker_note(
 
 
 def _apply_wait_note_if_empty(
-    daily_records_by_ticker: Dict,
+    daily_records_by_ticker: dict,
     ticker: str,
     dt: pd.Timestamp,
-    ticker_to_category: Dict[str, str],
-    held_categories: Set[str],
-    held_categories_normalized: Set[str],
+    ticker_to_category: dict[str, str],
+    held_categories: set[str],
+    held_categories_normalized: set[str],
+    position_state: dict = None,
+    score_today: dict[str, float] = None,
+    replace_threshold: float = 0.0,
 ) -> None:
     """WAIT 상태 종목에 대해 카테고리 중복 여부에 따라 노트를 설정합니다."""
 
@@ -283,41 +308,62 @@ def _apply_wait_note_if_empty(
     ):
         records[-1]["note"] = DECISION_NOTES["CATEGORY_DUP"]
     else:
-        records[-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
+        # Calculate minimum required score for replacement
+        if position_state and score_today is not None:
+            held_scores = [
+                score_today.get(t, 0.0)
+                for t, state in position_state.items()
+                if state.get("shares", 0) > 0 and t != "CASH"
+            ]
+            if held_scores:
+                weakest_score = min(held_scores)
+                required_score = weakest_score + replace_threshold
+                records[-1]["note"] = DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score)
+            else:
+                records[-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
+        else:
+            records[-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
 
 
 def _execute_new_buys(
-    buy_ranked_candidates: List[Tuple[float, str]],
-    position_state: Dict,
-    valid_core_holdings: Set[str],
-    ticker_to_category: Dict[str, str],
-    sell_rsi_categories_today: Set[str],
-    rsi_score_today: Dict[str, float],
-    today_prices: Dict[str, float],
-    metrics_by_ticker: Dict,
-    daily_records_by_ticker: Dict,
-    buy_trades_today_map: Dict,
+    buy_ranked_candidates: list[tuple[float, str]],
+    position_state: dict,
+    valid_core_holdings: set[str],
+    ticker_to_category: dict[str, str],
+    sell_rsi_categories_today: set[str],
+    rsi_score_today: dict[str, float],
+    today_prices: dict[str, float],
+    metrics_by_ticker: dict,
+    daily_records_by_ticker: dict,
+    buy_trades_today_map: dict,
     cash: float,
     current_holdings_value: float,
     top_n: int,
     rsi_sell_threshold: float,
     cooldown_days: int,
+    replace_threshold: float,
+    score_today: dict[str, float],
     i: int,
     total_days: int,
     dt: pd.Timestamp,
     country_code: str,
     initial_capital: float = 0.0,
-) -> Tuple[float, float, Set[str], Set[str]]:
+) -> tuple[float, float, set[str], set[str]]:
     """신규 매수 실행
 
     Returns:
         (cash, current_holdings_value, purchased_today, held_categories)
     """
-    from logic.common import calculate_held_count, calculate_held_categories, check_buy_candidate_filters, calculate_buy_budget
+    from logic.common import (
+        calculate_buy_budget,
+        calculate_held_categories,
+        calculate_held_count,
+        check_buy_candidate_filters,
+    )
 
     held_count = calculate_held_count(position_state)
     slots_to_fill = max(0, top_n - held_count)
-    purchased_today: Set[str] = set()
+    purchased_today: set[str] = set()
 
     if slots_to_fill <= 0 or not buy_ranked_candidates:
         held_categories = calculate_held_categories(position_state, ticker_to_category, valid_core_holdings)
@@ -331,6 +377,9 @@ def _execute_new_buys(
                     ticker_to_category,
                     held_categories,
                     held_categories_normalized,
+                    position_state,
+                    score_today,
+                    replace_threshold,
                 )
         return cash, current_holdings_value, purchased_today, held_categories
 
@@ -433,11 +482,11 @@ def process_ticker_data(
     etf_tickers: set,
     etf_ma_period: int,
     stock_ma_period: int,
-    precomputed_entry: Optional[Mapping[str, Any]] = None,
+    precomputed_entry: Mapping[str, Any] | None = None,
     ma_type: str = "SMA",
     *,
     min_buy_score: float,
-) -> Optional[Dict]:
+) -> dict | None:
     """
     개별 종목의 데이터를 처리하고 지표를 계산합니다.
 
@@ -573,28 +622,29 @@ def process_ticker_data(
 
 
 def run_portfolio_backtest(
-    stocks: List[Dict],
+    stocks: list[dict],
     initial_capital: float = 100_000_000.0,
-    core_start_date: Optional[pd.Timestamp] = None,
+    core_start_date: pd.Timestamp | None = None,
     top_n: int = 10,
-    date_range: Optional[List[str]] = None,
+    date_range: list[str] | None = None,
     country: str = "kor",
-    prefetched_data: Optional[Dict[str, pd.DataFrame]] = None,
-    prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
-    trading_calendar: Optional[Sequence[pd.Timestamp]] = None,
+    prefetched_data: dict[str, pd.DataFrame] | None = None,
+    prefetched_metrics: Mapping[str, dict[str, Any]] | None = None,
+    trading_calendar: Sequence[pd.Timestamp] | None = None,
     ma_period: int = 20,
     ma_type: str = "SMA",
     replace_threshold: float = 0.0,
     stop_loss_pct: float = -10.0,
+    trailing_stop_pct: float = 0.0,
     cooldown_days: int = 5,
     rsi_sell_threshold: float = 10.0,
-    core_holdings: Optional[List[str]] = None,
+    core_holdings: list[str] | None = None,
     quiet: bool = False,
-    progress_callback: Optional[Callable[[int, int], None]] = None,
-    missing_ticker_sink: Optional[Set[str]] = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+    missing_ticker_sink: set[str] | None = None,
     *,
     min_buy_score: float,
-) -> Dict[str, pd.DataFrame]:
+) -> dict[str, pd.DataFrame]:
     """
     이동평균 기반 모멘텀 전략으로 포트폴리오 백테스트를 실행합니다.
 
@@ -609,6 +659,7 @@ def run_portfolio_backtest(
         ma_period: 이동평균 기간
         replace_threshold: 종목 교체 임계값
         stop_loss_pct: 손절 비율 (%)
+        trailing_stop_pct: 트레일링 스탑 비율 (%)
         cooldown_days: 거래 쿨다운 기간
 
     Returns:
@@ -627,7 +678,7 @@ def run_portfolio_backtest(
     stock_ma_period = ma_period
     stop_loss_threshold = stop_loss_pct
 
-    from logic.common import validate_portfolio_topn, validate_core_holdings
+    from logic.common import validate_core_holdings, validate_portfolio_topn
 
     validate_portfolio_topn(top_n)
 
@@ -674,7 +725,9 @@ def run_portfolio_backtest(
 
     missing_metrics = [t for t in tickers_to_process if t not in metrics_by_ticker]
     if missing_metrics:
-        missing_set = {str(ticker).strip().upper() for ticker in missing_metrics if isinstance(ticker, str) and str(ticker).strip()}
+        missing_set = {
+            str(ticker).strip().upper() for ticker in missing_metrics if isinstance(ticker, str) and str(ticker).strip()
+        }
         if missing_ticker_sink is not None:
             missing_ticker_sink.update(missing_set)
         else:
@@ -699,15 +752,17 @@ def run_portfolio_backtest(
 
     # 요청된 시작일 이후로 인덱스를 필터링합니다.
     if core_start_date:
-        before_filter = len(union_index)
         union_index = union_index[union_index >= core_start_date]
         if not quiet:
             logger.info(
-                f"[백테스트] 시작일 필터링: {before_filter}일 → {len(union_index)}일 (core_start_date={core_start_date.strftime('%Y-%m-%d')})"
+                f"[백테스트] union_index: {len(union_index)}일 (core_start_date={core_start_date.strftime('%Y-%m-%d')})"
             )
 
     if union_index.empty:
-        logger.warning(f"[백테스트] union_index가 비어있습니다. core_start_date={core_start_date}, metrics_by_ticker={len(metrics_by_ticker)}")
+        logger.warning(
+            f"[백테스트] union_index가 비어있습니다. core_start_date={core_start_date}, "
+            f"metrics_by_ticker={len(metrics_by_ticker)}"
+        )
         return {}
 
     for ticker, ticker_metrics in metrics_by_ticker.items():
@@ -734,6 +789,7 @@ def run_portfolio_backtest(
         ticker: {
             "shares": 0,
             "avg_cost": 0.0,
+            "highest_price": 0.0,  # 트레일링 스탑용 최고가
             "buy_block_until": -1,
             "sell_block_until": -1,
         }
@@ -762,17 +818,17 @@ def run_portfolio_backtest(
             logger.info(f"[백테스트] Day {i}: {dt}, metrics_by_ticker={len(metrics_by_ticker)}")
 
         # 당일 시작 시점 보유 수량 스냅샷(순매수/순매도 판단용)
-        buy_trades_today_map: Dict[str, List[Dict[str, float]]] = {}
-        sell_trades_today_map: Dict[str, List[Dict[str, float]]] = {}
+        buy_trades_today_map: dict[str, list[dict[str, float]]] = {}
+        sell_trades_today_map: dict[str, list[dict[str, float]]] = {}
 
         # SELL_RSI로 매도한 카테고리 추적 (같은 날 매수 금지)
-        sell_rsi_categories_today: Set[str] = set()
+        sell_rsi_categories_today: set[str] = set()
 
-        tickers_available_today: List[str] = []
-        today_prices: Dict[str, float] = {}
-        score_today: Dict[str, float] = {}
-        rsi_score_today: Dict[str, float] = {}
-        buy_signal_today: Dict[str, int] = {}
+        tickers_available_today: list[str] = []
+        today_prices: dict[str, float] = {}
+        score_today: dict[str, float] = {}
+        rsi_score_today: dict[str, float] = {}
+        buy_signal_today: dict[str, int] = {}
 
         for ticker, ticker_metrics in metrics_by_ticker.items():
             available = bool(ticker_metrics["available_mask"][i])
@@ -908,6 +964,7 @@ def run_portfolio_backtest(
             country_code=country_code,
             stop_loss_threshold=stop_loss_threshold,
             rsi_sell_threshold=rsi_sell_threshold,
+            trailing_stop_pct=trailing_stop_pct,
             cooldown_days=cooldown_days,
             cash=cash,
             current_holdings_value=current_holdings_value,
@@ -937,10 +994,15 @@ def run_portfolio_backtest(
                             # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                             position_state[core_ticker]["buy_block_until"] = i + cooldown_days + 1
 
-                            buy_trades_today_map.setdefault(core_ticker, []).append({"shares": float(shares_to_buy), "price": float(price)})
+                            buy_trades_today_map.setdefault(core_ticker, []).append(
+                                {"shares": float(shares_to_buy), "price": float(price)}
+                            )
 
                             # 레코드 업데이트
-                            if daily_records_by_ticker[core_ticker] and daily_records_by_ticker[core_ticker][-1]["date"] == dt:
+                            if (
+                                daily_records_by_ticker[core_ticker]
+                                and daily_records_by_ticker[core_ticker][-1]["date"] == dt
+                            ):
                                 row = daily_records_by_ticker[core_ticker][-1]
                                 row.update(
                                     {
@@ -982,6 +1044,8 @@ def run_portfolio_backtest(
             top_n=top_n,
             rsi_sell_threshold=rsi_sell_threshold,
             cooldown_days=cooldown_days,
+            replace_threshold=replace_threshold,
+            score_today=score_today,
             i=i,
             total_days=total_days,
             dt=dt,
@@ -994,7 +1058,11 @@ def run_portfolio_backtest(
             from logic.common import calculate_buy_budget
 
             # 종합 점수를 사용 (buy_ranked_candidates는 이미 종합 점수로 정렬됨)
-            helper_candidates = [{"tkr": ticker, "score": score} for score, ticker in buy_ranked_candidates if ticker not in purchased_today]
+            helper_candidates = [
+                {"tkr": ticker, "score": score}
+                for score, ticker in buy_ranked_candidates
+                if ticker not in purchased_today
+            ]
 
             replacement_candidates, _ = select_candidates_by_category(
                 helper_candidates,
@@ -1060,7 +1128,13 @@ def run_portfolio_backtest(
                         replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체 (동일 카테고리)"
                     else:
                         # 점수가 더 높지 않으면 교체하지 않고 다음 대기 종목으로 넘어감
-                        _update_ticker_note(daily_records_by_ticker, replacement_ticker, dt, DECISION_NOTES["CATEGORY_DUP"])
+                        required_score = held_stock_same_category["score"] + replace_threshold
+                        _update_ticker_note(
+                            daily_records_by_ticker,
+                            replacement_ticker,
+                            dt,
+                            DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score),
+                        )
                         continue  # 다음 buy_ranked_candidate로 넘어감
                 elif weakest_held_stock:
                     # 다른 카테고리: 고정 종목 카테고리와 중복 체크 (이미 루프 밖에서 계산됨)
@@ -1080,6 +1154,13 @@ def run_portfolio_backtest(
                         replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체 (새 카테고리)"
                     else:
                         # 임계값을 넘지 못하면 교체하지 않고 다음 대기 종목으로 넘어감
+                        required_score = weakest_held_stock["score"] + replace_threshold
+                        _update_ticker_note(
+                            daily_records_by_ticker,
+                            replacement_ticker,
+                            dt,
+                            DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score),
+                        )
                         continue  # 다음 buy_ranked_candidate로 넘어감
                 else:
                     # 보유 종목이 없으면 교체할 수 없음
@@ -1089,9 +1170,18 @@ def run_portfolio_backtest(
                 if ticker_to_sell:
                     # SELL_RSI로 매도한 카테고리는 같은 날 교체 매수 금지
                     replacement_category = ticker_to_category.get(replacement_ticker)
-                    if replacement_category and not is_category_exception(replacement_category) and replacement_category in sell_rsi_categories_today:
-                        if daily_records_by_ticker[replacement_ticker] and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt:
-                            daily_records_by_ticker[replacement_ticker][-1]["note"] = f"RSI 과매수 매도 카테고리 ({replacement_category})"
+                    if (
+                        replacement_category
+                        and not is_category_exception(replacement_category)
+                        and replacement_category in sell_rsi_categories_today
+                    ):
+                        if (
+                            daily_records_by_ticker[replacement_ticker]
+                            and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt
+                        ):
+                            daily_records_by_ticker[replacement_ticker][-1]["note"] = (
+                                f"RSI 과매수 매도 카테고리 ({replacement_category})"
+                            )
                         continue  # 다음 교체 후보로 넘어감
 
                     # RSI 과매수 종목 교체 매수 차단
@@ -1099,8 +1189,13 @@ def run_portfolio_backtest(
 
                     if rsi_score_replace_candidate >= rsi_sell_threshold:
                         # RSI 과매수 종목은 교체 매수하지 않음
-                        if daily_records_by_ticker[replacement_ticker] and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt:
-                            daily_records_by_ticker[replacement_ticker][-1]["note"] = f"RSI 과매수 (RSI점수: {rsi_score_replace_candidate:.1f})"
+                        if (
+                            daily_records_by_ticker[replacement_ticker]
+                            and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt
+                        ):
+                            daily_records_by_ticker[replacement_ticker][-1]["note"] = (
+                                f"RSI 과매수 (RSI점수: {rsi_score_replace_candidate:.1f})"
+                            )
                         continue  # 다음 교체 후보로 넘어감
 
                     sell_price = today_prices.get(ticker_to_sell)
@@ -1111,8 +1206,16 @@ def run_portfolio_backtest(
                         weakest_state = position_state[ticker_to_sell]
                         sell_qty = weakest_state["shares"]
                         sell_amount = sell_qty * sell_price
-                        hold_ret = (sell_price / weakest_state["avg_cost"] - 1.0) * 100.0 if weakest_state["avg_cost"] > 0 else 0.0
-                        trade_profit = (sell_price - weakest_state["avg_cost"]) * sell_qty if weakest_state["avg_cost"] > 0 else 0.0
+                        hold_ret = (
+                            (sell_price / weakest_state["avg_cost"] - 1.0) * 100.0
+                            if weakest_state["avg_cost"] > 0
+                            else 0.0
+                        )
+                        trade_profit = (
+                            (sell_price - weakest_state["avg_cost"]) * sell_qty
+                            if weakest_state["avg_cost"] > 0
+                            else 0.0
+                        )
 
                         cash += sell_amount
                         current_holdings_value = max(0.0, current_holdings_value - sell_amount)
@@ -1121,7 +1224,10 @@ def run_portfolio_backtest(
                         if cooldown_days > 0:
                             weakest_state["buy_block_until"] = i + cooldown_days + 1
 
-                        if daily_records_by_ticker[ticker_to_sell] and daily_records_by_ticker[ticker_to_sell][-1]["date"] == dt:
+                        if (
+                            daily_records_by_ticker[ticker_to_sell]
+                            and daily_records_by_ticker[ticker_to_sell][-1]["date"] == dt
+                        ):
                             row = daily_records_by_ticker[ticker_to_sell][-1]
                             row.update(
                                 {
@@ -1202,7 +1308,9 @@ def run_portfolio_backtest(
                                 )
                             # 교체가 성공했으므로, held_stocks_with_scores를 업데이트하여 다음 대기 종목 평가에 반영
                             # 매도된 종목 제거
-                            held_stocks_with_scores = [s for s in held_stocks_with_scores if s["ticker"] != ticker_to_sell]
+                            held_stocks_with_scores = [
+                                s for s in held_stocks_with_scores if s["ticker"] != ticker_to_sell
+                            ]
                             # 새로 매수한 종목 추가
                             held_stocks_with_scores.append(
                                 {
@@ -1212,7 +1320,7 @@ def run_portfolio_backtest(
                                 }
                             )
                             held_stocks_with_scores.sort(key=lambda x: x["score"])  # 다시 정렬
-                            break  # 하나의 대기 종목으로 하나의 교체만 시도하므로, 다음 날로 넘어감
+                            # 다음 대기 종목으로 계속 교체 시도 (하루에 여러 교체 가능)
                         else:
                             # 매수 실패 시, 매도만 실행된 상태가 됨. 다음 날 빈 슬롯에 매수 시도.
                             if (
@@ -1233,11 +1341,18 @@ def run_portfolio_backtest(
                 if records and records[-1]["date"] == dt and records[-1]["decision"] in ("BUY", "BUY_REPLACE")
             }
 
-            held_categories_snapshot = calculate_held_categories(position_state, ticker_to_category, valid_core_holdings)
-            held_categories_normalized = {str(cat).strip().upper() for cat in held_categories_snapshot if isinstance(cat, str)}
+            held_categories_snapshot = calculate_held_categories(
+                position_state, ticker_to_category, valid_core_holdings
+            )
+            held_categories_normalized = {
+                str(cat).strip().upper() for cat in held_categories_snapshot if isinstance(cat, str)
+            }
             for _, candidate_ticker in buy_ranked_candidates:
                 if candidate_ticker not in bought_tickers_today:
-                    if daily_records_by_ticker[candidate_ticker] and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt:
+                    if (
+                        daily_records_by_ticker[candidate_ticker]
+                        and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt
+                    ):
                         # RSI 차단이나 카테고리 중복 등 이미 note가 설정된 경우 덮어쓰지 않음
                         current_note = daily_records_by_ticker[candidate_ticker][-1].get("note", "")
                         if not current_note or current_note == "":
@@ -1248,6 +1363,9 @@ def run_portfolio_backtest(
                                 ticker_to_category,
                                 held_categories_snapshot,
                                 held_categories_normalized,
+                                position_state,
+                                score_today,
+                                replace_threshold,
                             )
 
         # --- 당일 최종 라벨 오버라이드 (공용 라벨러) ---
@@ -1298,10 +1416,11 @@ def run_portfolio_backtest(
     expected_records = len(metrics_by_ticker) * len(union_index)
     if not quiet:
         logger.info(
-            f"[백테스트] daily_records_by_ticker: {len(daily_records_by_ticker)}개 종목, 총 {total_records}개 레코드 (예상: {expected_records}개)"
+            f"[백테스트] daily_records_by_ticker: {len(daily_records_by_ticker)}개 종목, "
+            f"총 {total_records}개 레코드 (예상: {expected_records}개)"
         )
 
-    result: Dict[str, pd.DataFrame] = {}
+    result: dict[str, pd.DataFrame] = {}
     for ticker_symbol, records in daily_records_by_ticker.items():
         if records:
             result[ticker_symbol] = pd.DataFrame(records).set_index("date")

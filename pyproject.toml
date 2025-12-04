@@ -25,6 +25,7 @@ select = [
 # 무시할 규칙
 ignore = [
     "E402",  # module level import not at top of file
+    "E501",
 ]
 
 [tool.ruff.format]

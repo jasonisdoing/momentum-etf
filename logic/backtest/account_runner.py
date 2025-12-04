@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Collection, Dict, Mapping, Optional, List, Sequence, Tuple
 import math
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 import pandas as pd
 
 import config
-from logic.entry_point import run_portfolio_backtest, StrategyRules
+from logic.entry_point import StrategyRules, run_portfolio_backtest
 from utils.account_registry import get_common_file_settings
+from utils.data_loader import get_latest_trading_day, get_trading_days
+from utils.logger import get_app_logger
 from utils.settings_loader import (
     AccountSettingsError,
     get_account_precision,
@@ -18,9 +21,7 @@ from utils.settings_loader import (
     get_strategy_rules,
     resolve_strategy_params,
 )
-from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.stock_list_io import get_etfs
-from utils.logger import get_app_logger
 
 
 @dataclass
@@ -47,20 +48,20 @@ class AccountBacktestResult:
     currency: str
     portfolio_topn: int
     holdings_limit: int
-    summary: Dict[str, Any]
+    summary: dict[str, Any]
     portfolio_timeseries: pd.DataFrame
-    ticker_timeseries: Dict[str, pd.DataFrame]
-    ticker_meta: Dict[str, Dict[str, Any]]
-    evaluated_records: Dict[str, Dict[str, Any]]
+    ticker_timeseries: dict[str, pd.DataFrame]
+    ticker_meta: dict[str, dict[str, Any]]
+    evaluated_records: dict[str, dict[str, Any]]
     monthly_returns: pd.Series
     monthly_cum_returns: pd.Series
     yearly_returns: pd.Series
-    ticker_summaries: List[Dict[str, Any]]
-    settings_snapshot: Dict[str, Any]
+    ticker_summaries: list[dict[str, Any]]
+    settings_snapshot: dict[str, Any]
     months_range: int
-    missing_tickers: List[str]
+    missing_tickers: list[str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         df = self.portfolio_timeseries.copy()
         df.index = df.index.astype(str)
         return {
@@ -91,16 +92,16 @@ class AccountBacktestResult:
 def run_account_backtest(
     account_id: str,
     *,
-    months_range: Optional[int] = None,
-    initial_capital: Optional[float] = None,
+    months_range: int | None = None,
+    initial_capital: float | None = None,
     quiet: bool = False,
-    prefetched_data: Optional[Mapping[str, pd.DataFrame]] = None,
-    override_settings: Optional[Dict[str, Any]] = None,
-    strategy_override: Optional[StrategyRules] = None,  # type: ignore
-    excluded_tickers: Optional[Collection[str]] = None,
-    prefetched_etf_universe: Optional[Sequence[Mapping[str, Any]]] = None,
-    prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]] = None,
-    trading_calendar: Optional[Sequence[pd.Timestamp]] = None,
+    prefetched_data: Mapping[str, pd.DataFrame] | None = None,
+    override_settings: dict[str, Any] | None = None,
+    strategy_override: StrategyRules | None = None,  # type: ignore
+    excluded_tickers: Collection[str] | None = None,
+    prefetched_etf_universe: Sequence[Mapping[str, Any]] | None = None,
+    prefetched_metrics: Mapping[str, dict[str, Any]] | None = None,
+    trading_calendar: Sequence[pd.Timestamp] | None = None,
 ) -> AccountBacktestResult:
     """계정 ID를 기반으로 백테스트를 실행합니다."""
 
@@ -162,6 +163,7 @@ def run_account_backtest(
             core_holdings=strategy_override.core_holdings,
             stop_loss_pct=strategy_override.stop_loss_pct,
             min_buy_score=strategy_override.min_buy_score,
+            trailing_stop_pct=getattr(strategy_override, "trailing_stop_pct", 0.0),
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
@@ -171,6 +173,7 @@ def run_account_backtest(
         if strategy_rules.stop_loss_pct is not None:
             strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
         strategy_settings["MIN_BUY_SCORE"] = strategy_rules.min_buy_score
+        strategy_settings["TRAILING_STOP_PCT"] = strategy_rules.trailing_stop_pct
 
     months_range = _resolve_months_range(months_range, override_settings, account_settings)
     end_date = _resolve_end_date(country_code, override_settings)
@@ -188,7 +191,11 @@ def run_account_backtest(
         _log(f"[백테스트] {account_id.upper()} 계정({country_code.upper()}) ETF 목록을 로드하는 중...")
     excluded_upper: set[str] = set()
     if excluded_tickers:
-        excluded_upper = {str(ticker).strip().upper() for ticker in excluded_tickers if isinstance(ticker, str) and str(ticker).strip()}
+        excluded_upper = {
+            str(ticker).strip().upper()
+            for ticker in excluded_tickers
+            if isinstance(ticker, str) and str(ticker).strip()
+        }
 
     if prefetched_etf_universe is not None:
         etf_universe = [dict(stock) for stock in prefetched_etf_universe if isinstance(stock, Mapping)]
@@ -201,7 +208,9 @@ def run_account_backtest(
 
     if excluded_upper:
         before_count = len(etf_universe)
-        etf_universe = [stock for stock in etf_universe if str(stock.get("ticker", "")).strip().upper() not in excluded_upper]
+        etf_universe = [
+            stock for stock in etf_universe if str(stock.get("ticker", "")).strip().upper() not in excluded_upper
+        ]
         removed = before_count - len(etf_universe)
         if removed > 0 and not is_tuning_fast_path:
             _log(f"[백테스트] 데이터 부족으로 제외된 {removed}개 종목을 유니버스에서 제거합니다.")
@@ -251,7 +260,7 @@ def run_account_backtest(
     runtime_missing_tickers: set[str] = set()
 
     if trading_calendar:
-        calendar_arg: Optional[List[pd.Timestamp]] = []
+        calendar_arg: list[pd.Timestamp] | None = []
         for raw in trading_calendar:
             try:
                 dt = pd.Timestamp(raw)
@@ -266,7 +275,9 @@ def run_account_backtest(
     else:
         calendar_arg = get_trading_days(date_range[0], date_range[1], country_code)
         if not calendar_arg:
-            raise RuntimeError(f"{account_id.upper()} 기간 {date_range[0]}~{date_range[1]}의 거래일 정보를 로드하지 못했습니다.")
+            raise RuntimeError(
+                f"{account_id.upper()} 기간 {date_range[0]}~{date_range[1]}의 거래일 정보를 로드하지 못했습니다."
+            )
 
     ticker_timeseries = (
         run_portfolio_backtest(
@@ -363,7 +374,7 @@ def run_account_backtest(
 
 
 def _resolve_months_range(
-    months_range: Optional[int],
+    months_range: int | None,
     override_settings: Mapping[str, Any],
     account_settings: Mapping[str, Any],
 ) -> int:
@@ -383,13 +394,12 @@ def _resolve_months_range(
 
 
 def _resolve_initial_capital(
-    initial_capital: Optional[float],
+    initial_capital: float | None,
     override_settings: Mapping[str, Any],
     account_settings: Mapping[str, Any],
     precision_settings: Mapping[str, Any],
 ) -> InitialCapitalInfo:
-
-    def _coerce_positive_float(value: Any) -> Optional[float]:
+    def _coerce_positive_float(value: Any) -> float | None:
         try:
             candidate = float(value)
         except (TypeError, ValueError):
@@ -453,13 +463,15 @@ def _build_backtest_kwargs(
     *,
     strategy_rules,
     strategy_settings: Mapping[str, Any],
-    prefetched_data: Optional[Mapping[str, pd.DataFrame]],
-    prefetched_metrics: Optional[Mapping[str, Dict[str, Any]]],
+    prefetched_data: Mapping[str, pd.DataFrame] | None,
+    prefetched_metrics: Mapping[str, dict[str, Any]] | None,
     quiet: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     try:
         configured_stop_loss = (
-            float(strategy_rules.stop_loss_pct) if strategy_rules.stop_loss_pct is not None else float(strategy_rules.portfolio_topn)
+            float(strategy_rules.stop_loss_pct)
+            if strategy_rules.stop_loss_pct is not None
+            else float(strategy_rules.portfolio_topn)
         )
     except (TypeError, ValueError):
         configured_stop_loss = float(strategy_rules.portfolio_topn)
@@ -473,17 +485,19 @@ def _build_backtest_kwargs(
 
     cooldown_days = int(strategy_settings["COOLDOWN_DAYS"])
     rsi_sell_threshold = int(strategy_settings["OVERBOUGHT_SELL_THRESHOLD"])
+    trailing_stop_pct = strategy_rules.trailing_stop_pct
 
     if not (0 <= rsi_sell_threshold <= 100):
         raise ValueError(f"OVERBOUGHT_SELL_THRESHOLD는 0~100 사이여야 합니다. (현재값: {rsi_sell_threshold})")
 
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "prefetched_metrics": prefetched_metrics,
         "ma_period": strategy_rules.ma_period,
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
         "stop_loss_pct": stop_loss_threshold,
+        "trailing_stop_pct": trailing_stop_pct,
         "cooldown_days": cooldown_days,
         "rsi_sell_threshold": rsi_sell_threshold,
         "core_holdings": strategy_rules.core_holdings,
@@ -516,7 +530,7 @@ def _build_portfolio_timeseries(
         raise RuntimeError("종목들 간에 공통된 거래일이 없습니다.")
 
     rows = []
-    prev_total_value: Optional[float] = None
+    prev_total_value: float | None = None
     for dt in common_index:
         total_value = 0.0
         total_holdings = 0.0
@@ -614,9 +628,9 @@ def _build_summary(
     currency: str,
     portfolio_topn: int,
     account_settings: Mapping[str, Any],
-    prefetched_data: Optional[Mapping[str, pd.DataFrame]] = None,
-) -> Tuple[
-    Dict[str, Any],
+    prefetched_data: Mapping[str, pd.DataFrame] | None = None,
+) -> tuple[
+    dict[str, Any],
     pd.Series,
     pd.Series,
     pd.Series,
@@ -652,8 +666,8 @@ def _build_summary(
     mdd_pct = max_drawdown * 100
     sharpe_to_mdd = (sharpe_ratio / mdd_pct) if mdd_pct > 0 else 0.0
 
-    def _load_benchmark_frame(ticker: str) -> Optional[pd.DataFrame]:
-        candidates: List[str] = []
+    def _load_benchmark_frame(ticker: str) -> pd.DataFrame | None:
+        candidates: list[str] = []
         norm = str(ticker or "").strip()
         if not norm:
             return None
@@ -667,7 +681,7 @@ def _build_summary(
 
         return None
 
-    def _calc_benchmark_performance(*, ticker: str, name: str, country: str) -> Optional[Dict[str, Any]]:
+    def _calc_benchmark_performance(*, ticker: str, name: str, country: str) -> dict[str, Any] | None:
         benchmark_df = _load_benchmark_frame(ticker)
         if benchmark_df is None or benchmark_df.empty:
             local_logger = get_app_logger()
@@ -727,7 +741,7 @@ def _build_summary(
 
     benchmark_cum_ret_pct = 0.0
     benchmark_cagr_pct = 0.0
-    benchmarks_summary: List[Dict[str, Any]] = []
+    benchmarks_summary: list[dict[str, Any]] = []
 
     configured_benchmarks = account_settings.get("benchmarks")
     if isinstance(configured_benchmarks, list) and configured_benchmarks:
@@ -764,7 +778,7 @@ def _build_summary(
         benchmark_cum_ret_pct = float(benchmarks_summary[0]["cumulative_return_pct"])
         benchmark_cagr_pct = float(benchmarks_summary[0]["cagr_pct"])
 
-    weekly_summary_rows: List[Dict[str, Any]] = []
+    weekly_summary_rows: list[dict[str, Any]] = []
     monthly_returns = pd.Series(dtype=float)
     monthly_cum_returns = pd.Series(dtype=float)
     yearly_returns = pd.Series(dtype=float)
@@ -790,9 +804,15 @@ def _build_summary(
                     earlier_dates = portfolio_df.index[portfolio_df.index <= dt]
                     if len(earlier_dates) > 0:
                         actual_date = earlier_dates[-1]
-                        held_count = int(portfolio_df.loc[actual_date, "held_count"]) if pd.notna(portfolio_df.loc[actual_date, "held_count"]) else 0
+                        held_count = (
+                            int(portfolio_df.loc[actual_date, "held_count"])
+                            if pd.notna(portfolio_df.loc[actual_date, "held_count"])
+                            else 0
+                        )
                 else:
-                    held_count = int(portfolio_df.loc[dt, "held_count"]) if pd.notna(portfolio_df.loc[dt, "held_count"]) else 0
+                    held_count = (
+                        int(portfolio_df.loc[dt, "held_count"]) if pd.notna(portfolio_df.loc[dt, "held_count"]) else 0
+                    )
 
                 # 날짜 포맷: 금요일이 아니면 요일 표시
                 weekday_map = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
@@ -852,13 +872,13 @@ def _build_summary(
 def _compute_evaluated_records(
     ticker_timeseries: Mapping[str, pd.DataFrame],
     start_date: pd.Timestamp,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """백테스트 시작일 이후의 거래 손익만 집계합니다.
 
     주의: 이 함수는 현재 사용되지 않습니다.
     누적 손익은 reporting.py에서 cost_basis 기준으로 직접 계산됩니다.
     """
-    records: Dict[str, Dict[str, Any]] = {}
+    records: dict[str, dict[str, Any]] = {}
     start_date_norm = start_date.normalize()
 
     for ticker, df in ticker_timeseries.items():
@@ -871,7 +891,7 @@ def _compute_evaluated_records(
         df_filtered = df_sorted[df_sorted.index >= start_date_norm]
 
         realized_profit = 0.0
-        initial_value: Optional[float] = None
+        initial_value: float | None = None
 
         for idx, row in df_filtered.iterrows():
             trade_profit = row.get("trade_profit")
@@ -893,8 +913,8 @@ def _compute_evaluated_records(
 
 def _build_ticker_summaries(
     ticker_timeseries: Mapping[str, pd.DataFrame],
-    ticker_meta: Mapping[str, Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    ticker_meta: Mapping[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
     sell_decisions = {
         "SELL_MOMENTUM",
         "SELL_TREND",
@@ -902,7 +922,7 @@ def _build_ticker_summaries(
         "SELL_REPLACE",
     }
 
-    summaries: List[Dict[str, Any]] = []
+    summaries: list[dict[str, Any]] = []
     for ticker, df in ticker_timeseries.items():
         ticker_key = str(ticker).upper()
         # DataFrame만 처리 (메타데이터 문자열 제외)
@@ -932,7 +952,7 @@ def _build_ticker_summaries(
         total_contribution = realized_profit + unrealized_profit
 
         period_return_pct = 0.0
-        listing_date: Optional[str] = None
+        listing_date: str | None = None
         if "price" in df_sorted.columns:
             valid_prices = df_sorted[df_sorted["price"] > 0]
             if not valid_prices.empty:
@@ -976,7 +996,7 @@ def _build_settings_snapshot(
     common_settings: Mapping[str, Any],
     strategy_settings: Mapping[str, Any],
     initial_capital: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     snapshot = {
         "account_id": account_id.upper(),
         "country_code": country_code.upper(),
