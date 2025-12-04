@@ -15,7 +15,7 @@
         "BACKTESTED_DATE": "2025-12-04 21:32",
         "MA_PERIOD": 20,
         "MA_TYPE": "EMA",
-        "PORTFOLIO_TOPN": 6,
+        "PORTFOLIO_TOPN": 8,
         "REPLACE_SCORE_THRESHOLD": 4,
         "STOP_LOSS_PCT": 8,
         "OVERBOUGHT_SELL_THRESHOLD": 85,
@@ -28,7 +28,9 @@
             "473640",
             "0013P0",
             "0107F0",
-            "0097L0"
+            "0097L0",
+            "459750",
+            "468380"
         ]
     },
     "benchmarks": [
