@@ -13,14 +13,14 @@ from utils.logger import get_app_logger
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
     "k1": {
-        "PORTFOLIO_TOPN": [10],
-        "MA_RANGE": [25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
+        "PORTFOLIO_TOPN": [9],
+        "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
         "MA_TYPE": ["EMA"],
-        "REPLACE_SCORE_THRESHOLD": [2, 3],
+        "REPLACE_SCORE_THRESHOLD": [3, 4, 5],
         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
-        "OVERBOUGHT_SELL_THRESHOLD": [85],
-        "TRAILING_STOP_PCT": [12],
-        "COOLDOWN_DAYS": [2],
+        "OVERBOUGHT_SELL_THRESHOLD": [85, 86],
+        "TRAILING_STOP_PCT": [0],
+        "COOLDOWN_DAYS": [1, 2, 3],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     }
@@ -34,8 +34,8 @@ TUNING_CONFIG: dict[str, dict] = {
 #         "MA_TYPE": ["EMA"],
 #         "REPLACE_SCORE_THRESHOLD": [2, 3],
 #         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
-#         "OVERBOUGHT_SELL_THRESHOLD": [85],
-#         "TRAILING_STOP_PCT": [12],
+#         "OVERBOUGHT_SELL_THRESHOLD": [86],
+#         "TRAILING_STOP_PCT": [0],
 #         "COOLDOWN_DAYS": [2],
 #         "CORE_HOLDINGS": [],
 #         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
@@ -45,13 +45,14 @@ TUNING_CONFIG: dict[str, dict] = {
 # 매달 전체 테스트
 # TUNING_CONFIG: dict[str, dict] = {
 #     "k1": {
-#         "PORTFOLIO_TOPN": [10],
+#         "PORTFOLIO_TOPN": [8],
 #         "MA_RANGE": [25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
+#         # "MA_TYPE": ["EMA"],
 #         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
 #         "REPLACE_SCORE_THRESHOLD": [1, 2, 3, 4, 5],
 #         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
-#         "OVERBOUGHT_SELL_THRESHOLD": [80, 85, 90, 95, 100],
-#         "TRAILING_STOP_PCT": [10, 12, 14, 16],
+#         "OVERBOUGHT_SELL_THRESHOLD": [83, 84, 85, 86, 87, 88, 89, 90],
+#         "TRAILING_STOP_PCT": [0],
 #         "COOLDOWN_DAYS": [0, 1, 2, 3],
 #         "CORE_HOLDINGS": [],
 #         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택

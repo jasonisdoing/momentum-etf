@@ -8,18 +8,18 @@ from pathlib import Path
 
 import pandas as pd
 
-from utils.account_registry import (
-    get_account_settings,
-    get_strategy_rules,
-    get_benchmark_tickers,
-    list_available_accounts,
-)
 from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
 from logic.recommend.output import print_run_header
+from utils.account_registry import (
+    get_account_settings,
+    get_benchmark_tickers,
+    get_strategy_rules,
+    list_available_accounts,
+)
+from utils.data_loader import MissingPriceDataError, get_latest_trading_day, prepare_price_data
 from utils.logger import get_app_logger
-from utils.stock_list_io import get_etfs
-from utils.data_loader import prepare_price_data, get_latest_trading_day, MissingPriceDataError
 from utils.settings_loader import load_common_settings
+from utils.stock_list_io import get_etfs
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
 
@@ -131,6 +131,7 @@ def main() -> None:
         initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),
+        category_summaries=getattr(result, "category_summaries", []),
         core_start_dt=result.start_date,
     )
     logger.info("✅ 백테스트 로그를 '%s'에 저장했습니다.", log_path)

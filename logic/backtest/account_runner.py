@@ -57,6 +57,7 @@ class AccountBacktestResult:
     monthly_cum_returns: pd.Series
     yearly_returns: pd.Series
     ticker_summaries: list[dict[str, Any]]
+    category_summaries: list[dict[str, Any]]
     settings_snapshot: dict[str, Any]
     months_range: int
     missing_tickers: list[str]
@@ -83,6 +84,7 @@ class AccountBacktestResult:
             "monthly_cum_returns": self.monthly_cum_returns.to_dict(),
             "yearly_returns": self.yearly_returns.to_dict(),
             "ticker_summaries": self.ticker_summaries,
+            "category_summaries": self.category_summaries,
             "settings_snapshot": self.settings_snapshot,
             "months_range": self.months_range,
             "missing_tickers": self.missing_tickers,
@@ -330,6 +332,8 @@ def run_account_backtest(
         ticker_meta,
     )
 
+    category_summaries = _build_category_summaries(ticker_summaries)
+
     _log("[백테스트] 설정 스냅샷을 생성하는 중...")
     settings_snapshot = _build_settings_snapshot(
         account_id=account_id,
@@ -367,6 +371,7 @@ def run_account_backtest(
         monthly_cum_returns=monthly_cum_returns,
         yearly_returns=yearly_returns,
         ticker_summaries=ticker_summaries,
+        category_summaries=category_summaries,
         settings_snapshot=settings_snapshot,
         months_range=months_range,
         missing_tickers=missing_sorted,
@@ -920,6 +925,8 @@ def _build_ticker_summaries(
         "SELL_TREND",
         "CUT_STOPLOSS",
         "SELL_REPLACE",
+        "SELL_TRAILING",
+        "SELL_RSI",
     }
 
     summaries: list[dict[str, Any]] = []
@@ -975,12 +982,14 @@ def _build_ticker_summaries(
                 "ticker": ticker_key,
                 "name": meta.get("name") or ticker_key,
                 "total_trades": total_trades,
+                "winning_trades": winning_trades,
                 "win_rate": win_rate,
                 "realized_profit": realized_profit,
                 "unrealized_profit": unrealized_profit,
                 "total_contribution": total_contribution,
                 "period_return_pct": period_return_pct,
                 "listing_date": listing_date,
+                "category": meta.get("category", "-"),
             }
         )
 
@@ -1006,3 +1015,39 @@ def _build_settings_snapshot(
         "strategy_settings": dict(strategy_settings),
     }
     return snapshot
+
+
+def _build_category_summaries(
+    ticker_summaries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    category_stats: dict[str, dict[str, Any]] = {}
+
+    for summary in ticker_summaries:
+        category = summary.get("category", "-")
+        if category not in category_stats:
+            category_stats[category] = {
+                "category": category,
+                "total_contribution": 0.0,
+                "realized_profit": 0.0,
+                "unrealized_profit": 0.0,
+                "total_trades": 0,
+                "winning_trades": 0,
+            }
+
+        stats = category_stats[category]
+        stats["total_contribution"] += summary.get("total_contribution", 0.0)
+        stats["realized_profit"] += summary.get("realized_profit", 0.0)
+        stats["unrealized_profit"] += summary.get("unrealized_profit", 0.0)
+        stats["total_trades"] += summary.get("total_trades", 0)
+        stats["winning_trades"] += summary.get("winning_trades", 0)
+
+    results = []
+    for stats in category_stats.values():
+        total_trades = stats["total_trades"]
+        winning_trades = stats["winning_trades"]
+        win_rate = (winning_trades / total_trades) * 100.0 if total_trades > 0 else 0.0
+        stats["win_rate"] = win_rate
+        results.append(stats)
+
+    results.sort(key=lambda x: x["total_contribution"], reverse=True)
+    return results
