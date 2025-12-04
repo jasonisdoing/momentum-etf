@@ -585,38 +585,6 @@
         ]
     },
     {
-        "category": "🇯🇵 일본",
-        "tickers": [
-            {
-                "ticker": "465660",
-                "name": "TIGER 일본반도체FACTSET",
-                "recommend_enabled": true,
-                "listing_date": "2023-09-19",
-                "1_month_avg_volume": 22014,
-                "1_month_earn_rate": -1.0934,
-                "3_month_earn_rate": 31.2629
-            },
-            {
-                "ticker": "464920",
-                "name": "PLUS 일본반도체소부장",
-                "recommend_enabled": true,
-                "listing_date": "2023-08-31",
-                "1_month_avg_volume": 25008,
-                "1_month_earn_rate": -0.5294,
-                "3_month_earn_rate": 36.6025
-            },
-            {
-                "ticker": "469160",
-                "name": "ACE 일본반도체",
-                "recommend_enabled": true,
-                "listing_date": "2023-10-17",
-                "1_month_avg_volume": 19478,
-                "1_month_earn_rate": -3.515,
-                "3_month_earn_rate": 31.09
-            }
-        ]
-    },
-    {
         "category": "🌎 글로벌",
         "tickers": [
             {
