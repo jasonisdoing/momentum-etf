@@ -66,7 +66,7 @@ DECISION_CONFIG = {
     },
     "SOLD": {
         "display_name": "<✅ 매도 완료>",
-        "order": 50,
+        "order": 100,
         "is_recommendation": False,
         "show_slack": True,
         "background": "#a0a0a0",
