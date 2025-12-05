@@ -16,12 +16,12 @@ import config
 
 # 데이터 디렉토리 경로 설정
 STOCKS_DIR = Path(__file__).resolve().parents[2] / "zsettings" / "stocks"
-from logic.common import (
+from logic.common.filtering import (
     filter_category_duplicates,
-    get_buy_signal_streak,
-    is_category_exception,
     sort_decisions_by_order_and_score,
 )
+from logic.common.portfolio import is_category_exception
+from logic.common.signals import get_buy_signal_streak
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 from strategies.maps.history import (
     calculate_consecutive_holding_info,
@@ -1081,7 +1081,7 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
             etf_meta_map[ticker_upper] = dict(meta)
 
     try:
-        from strategies.maps import safe_generate_daily_recommendations_for_portfolio
+        from logic.recommend.portfolio import safe_generate_daily_recommendations_for_portfolio
 
         decision_start = time.perf_counter()
         actual_cooldown_days = int(strategy_tuning["COOLDOWN_DAYS"])
