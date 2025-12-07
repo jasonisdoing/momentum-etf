@@ -305,10 +305,10 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
                     "filter": int(metrics["buy_signal_days"].iloc[idx]),  # buy_signal_days
                     "drawdown_from_peak": drawdown_from_peak * 100.0,  # Convert to % for display compatibility
                     # Extended Fields for UI
-                    "return_1w": _get_ret(5),
-                    "return_2w": _get_ret(10),
-                    "return_1m": _get_ret(20),
-                    "return_3m": _get_ret(60),
+                    "return_1w": _get_ret(5) * 100.0,
+                    "return_2w": _get_ret(10) * 100.0,
+                    "return_1m": _get_ret(20) * 100.0,
+                    "return_3m": _get_ret(60) * 100.0,
                     "drawdown_from_high": drawdown_from_peak
                     * 100.0,  # Same as drawdown_from_peak but consistent naming
                     "nav_price": nav_val,
