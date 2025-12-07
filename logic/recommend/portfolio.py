@@ -155,8 +155,50 @@ def _create_decision_entry(
     prev_close_raw = data.get("prev_close", 0.0)
     prev_close = float(prev_close_raw) if pd.notna(prev_close_raw) else 0.0
     day_ret = 0.0
+
+    # [Market Status Check]
+    # 일간 수익률은 "실시간 장 운영 중인 날(평일 개장 시간 이후)" 또는 "장 마감 후"에만 표시.
+    # 휴장일(주말, 공휴일)이거나 개장 전이면 0.00%로 표시.
+    from datetime import datetime
+
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo  # type: ignore
+
+    from config import MARKET_SCHEDULES
+    from utils.data_loader import is_trading_day
+
+    def _should_show_daily_return(cc: str) -> bool:
+        cc_lower = cc.lower()
+        if cc_lower not in MARKET_SCHEDULES:
+            return True  # Unknown country, show by default
+
+        schedule = MARKET_SCHEDULES[cc_lower]
+        tz_name = schedule.get("timezone", "UTC")
+        open_time = schedule.get("open")
+
+        try:
+            now_local = datetime.now(ZoneInfo(tz_name))
+        except Exception:
+            now_local = datetime.now()
+
+        # 1. Check if today is trading day
+        # is_trading_day uses string date "YYYY-MM-DD"
+        if not is_trading_day(cc_lower, now_local):
+            return False
+
+        # 2. Check if current time is past open time
+        if open_time and now_local.time() < open_time:
+            return False
+
+        return True
+
     if price > 0 and prev_close > 0:
-        day_ret = round(((price / prev_close) - 1.0) * 100.0, 2)
+        if _should_show_daily_return(country_code):
+            day_ret = round(((price / prev_close) - 1.0) * 100.0, 2)
+        else:
+            day_ret = 0.0
 
     holding_days_display = str(holding_days) if holding_days > 0 else "-"
     amount = price if is_held else 0.0
@@ -195,6 +237,15 @@ def _create_decision_entry(
         "is_held": is_held,
         "filter": data.get("filter"),
         "hold_return_pct": holding_return_pct,
+        # Extended Metrics for UI
+        "return_1w": data.get("return_1w"),
+        "return_2w": data.get("return_2w"),
+        "return_1m": data.get("return_1m"),
+        "return_3m": data.get("return_3m"),
+        "drawdown_from_high": data.get("drawdown_from_high"),
+        "nav_price": data.get("nav_price"),
+        "price_deviation": data.get("price_deviation"),
+        "trend_prices": data.get("trend_prices"),
     }
 
 

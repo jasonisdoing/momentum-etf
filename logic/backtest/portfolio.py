@@ -441,8 +441,6 @@ def run_portfolio_backtest(
         else:
             logger.info(message)
 
-    etf_ma_period = ma_period
-    stock_ma_period = ma_period
     stop_loss_threshold = stop_loss_pct
 
     from logic.common import validate_core_holdings, validate_portfolio_topn
@@ -455,8 +453,8 @@ def run_portfolio_backtest(
     universe_tickers_set = {stock["ticker"] for stock in stocks}
     valid_core_holdings = validate_core_holdings(core_holdings_tickers, universe_tickers_set)
 
-    # ETF와 주식을 구분하여 처리
-    etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
+    # ETF와 주식을 구분하여 처리 (삭제됨)
+    # etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
 
     # 이동평균 계산에 필요한 과거 데이터를 확보하기 위한 추가 조회 범위(웜업)
     # (실제 데이터 요청은 상위 프리패치 단계에서 수행)
@@ -483,9 +481,7 @@ def run_portfolio_backtest(
         ticker_metrics = process_ticker_data(
             ticker,
             df,
-            etf_tickers,
-            etf_ma_period,
-            stock_ma_period,
+            ma_period=ma_period,
             ma_type=ma_type,
             precomputed_entry=precomputed_entry,
             min_buy_score=min_buy_score,

@@ -17,9 +17,7 @@ from utils.moving_averages import calculate_moving_average
 def process_ticker_data(
     ticker: str,
     df: pd.DataFrame,
-    etf_tickers: set,
-    etf_ma_period: int,
-    stock_ma_period: int,
+    ma_period: int,
     precomputed_entry: Mapping[str, Any] | None = None,
     ma_type: str = "SMA",
     *,
@@ -31,9 +29,7 @@ def process_ticker_data(
     Args:
         ticker: 종목 티커
         df: 가격 데이터프레임
-        etf_tickers: ETF 티커 집합
-        etf_ma_period: ETF 이동평균 기간
-        stock_ma_period: 주식 이동평균 기간
+        ma_period: 이동평균 기간
         precomputed_entry: 미리 계산된 캐시 데이터 (옵션)
         ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA)
         min_buy_score: 매수 최소 점수
@@ -54,8 +50,8 @@ def process_ticker_data(
         working_df.columns = working_df.columns.get_level_values(0)
         working_df = working_df.loc[:, ~working_df.columns.duplicated()]
 
-    # 티커 유형에 따른 이동평균 기간 결정
-    current_ma_period = etf_ma_period if ticker in etf_tickers else stock_ma_period
+    # 티커 유형에 따른 이동평균 기간 결정 (단일 기간 사용)
+    current_ma_period = ma_period
 
     close_prices = None
     open_prices = None

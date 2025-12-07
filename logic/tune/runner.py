@@ -447,7 +447,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         logger.warning("[튜닝] %s 계정 결과에 반영할 파라미터가 없습니다.", account_id.upper())
         return
 
-    settings_path = ACCOUNT_SETTINGS_DIR / f"{account_id}.json"
+    settings_path = ACCOUNT_SETTINGS_DIR / account_id / "config.json"
     try:
         raw = settings_path.read_text(encoding="utf-8")
         settings_data = json.loads(raw)
@@ -506,6 +506,40 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         strategy_data["MDD"] = _round_float(weighted_mdd)
 
     strategy_data["BACKTESTED_DATE"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # [Key Reordering]
+    # 사용자가 요청한 순서대로 키를 정렬하여 저장
+    desired_order = [
+        "MONTHS_RANGE",
+        "BACKTESTED_DATE",
+        "CAGR",
+        "MDD",
+        "OPTIMIZATION_METRIC",
+        "PORTFOLIO_TOPN",
+        "MA_PERIOD",
+        "MA_TYPE",
+        "REPLACE_SCORE_THRESHOLD",
+        "STOP_LOSS_PCT",
+        "OVERBOUGHT_SELL_THRESHOLD",
+        "TRAILING_STOP_PCT",
+        "COOLDOWN_DAYS",
+        "MIN_BUY_SCORE",
+        "CORE_HOLDINGS",
+    ]
+
+    ordered_strategy = {}
+
+    # 1. Desired keys first
+    for key in desired_order:
+        if key in strategy_data:
+            ordered_strategy[key] = strategy_data[key]
+
+    # 2. Remaining keys
+    for key, val in strategy_data.items():
+        if key not in ordered_strategy:
+            ordered_strategy[key] = val
+
+    strategy_data = ordered_strategy
 
     settings_data["strategy"] = strategy_data
 

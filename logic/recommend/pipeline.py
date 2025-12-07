@@ -114,11 +114,22 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
 
     # 7. 지표 계산 및 데이터 가공
     from strategies.maps.metrics import process_ticker_data
+    from utils.data_loader import fetch_naver_etf_inav_snapshot
+
+    # [KOR] Fetch Real-time NAV/Price snapshot from Naver (for Disparity)
+    nav_snapshot = {}
+    if country_code == "kor":
+        logger.info(f"[{account_id.upper()}] Naver API에서 실시간 NAV/괴리율 조회 중...")
+        try:
+            nav_snapshot = fetch_naver_etf_inav_snapshot(list(tickers_to_fetch))
+            logger.info(f"[{account_id.upper()}] {len(nav_snapshot)}개 종목의 NAV 정보 수신 완료")
+        except Exception as e:
+            logger.warning(f"Naver NAV 조회 실패: {e}")
 
     data_by_tkr: dict[str, Any] = {}
 
-    # 전체 etf_tickers 집합 (ETF 식별용)
-    all_etf_tickers = {u["ticker"] for u in universe if u.get("type") == "etf"}
+    # 전체 etf_tickers 집합 (ETF 식별용 - Unused)
+    # all_etf_tickers = {u["ticker"] for u in universe if u.get("type") == "etf"}
 
     for tkr, df in price_data_map.items():
         if df.empty:
@@ -127,12 +138,85 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
         metrics = process_ticker_data(
             tkr,
             df,
-            all_etf_tickers,
-            strategy_rules.ma_period,
-            strategy_rules.ma_period,  # stock_ma_period same as etf for now
-            ma_type="SMA",  # 기본값
+            ma_period=strategy_rules.ma_period,
+            ma_type=strategy_rules.ma_type,
             min_buy_score=strategy_rules.min_buy_score,
         )
+
+        if metrics is None and tkr in holdings:
+            # [CRITICAL fallback for held items with insufficient data]
+            # 전략 지표 계산엔 실패했으나(데이터 부족 등), 보유 중인 종목이라면
+            # 현재가와 NAV 정보라도 표시해야 함.
+            if not df.empty:
+                last_row = df.iloc[-1]
+                current_price_fallback = float(last_row["Close"])
+
+                # Try NAV fallback
+                nav_fallback = None
+                dev_fallback = None
+
+                # Check Naver Snapshot first
+                tkr_norm_fb = tkr.strip().upper()
+                if tkr_norm_fb in nav_snapshot:
+                    snap_fb = nav_snapshot[tkr_norm_fb]
+                    nav_fallback = snap_fb.get("nav")
+                    snap_price_fb = snap_fb.get("nowVal")
+                    if snap_price_fb and snap_price_fb > 0:
+                        # For consistency, maybe use closing price?
+                        # But for fallback, getting any valid price is better.
+                        pass
+
+                    if nav_fallback and nav_fallback > 0:
+                        dev_fallback = ((current_price_fallback / nav_fallback) - 1.0) * 100.0
+                    if dev_fallback is None:
+                        dev_fallback = snap_fb.get("deviation")
+
+                # Check DataFrame columns if Naver failed
+                if nav_fallback is None:
+                    if "NAV" in last_row:
+                        nav_fallback = float(last_row["NAV"])
+                    elif "순자산가치(NAV)" in last_row:
+                        nav_fallback = float(last_row["순자산가치(NAV)"])
+
+                    if nav_fallback and nav_fallback > 0:
+                        dev_fallback = (current_price_fallback / nav_fallback - 1.0) * 100.0
+                    elif "괴리율" in last_row:
+                        dev_fallback = float(last_row["괴리율"])
+
+                # Calculate returns using raw dataframe
+                close_series = df["Close"]
+                cur_idx = len(close_series) - 1
+
+                def _calc_ret_fallback(days: int) -> float:
+                    if cur_idx - days >= 0:
+                        prev_val = float(close_series.iloc[cur_idx - days])
+                        if prev_val > 0:
+                            return (current_price_fallback / prev_val) - 1.0
+                    return 0.0
+
+                row_data = {
+                    "price": current_price_fallback,
+                    "prev_close": float(df.iloc[-2]["Close"]) if len(df) > 1 else current_price_fallback,  # Approx
+                    "score": 0.0,  # No score available
+                    "rsi_score": 0.0,
+                    "s1": 0.0,
+                    "ma_value": 0.0,
+                    "ma_period": strategy_rules.ma_period,
+                    "close": df["Close"],
+                    "filter": 0,
+                    "drawdown_from_peak": 0.0,
+                    "nav_price": nav_fallback,
+                    "price_deviation": dev_fallback,
+                    "trend_prices": df["Close"].iloc[-60:].tolist() if not df.empty else [],
+                    "return_1w": _calc_ret_fallback(5),
+                    "return_2w": _calc_ret_fallback(10),
+                    "return_1m": _calc_ret_fallback(20),
+                    "return_3m": _calc_ret_fallback(60),
+                    "drawdown_from_high": 0.0,
+                }
+                data_by_tkr[tkr] = row_data
+            continue
+
         if metrics:
             # 포트폴리오 로직에서 필요한 마지막 날짜(기준일) 데이터 추출
             try:
@@ -146,8 +230,71 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
                     logger.warning(f"{tkr}: 데이터가 너무 오래됨 ({dt_found.date()})")
                     continue
 
+                # Extended Metrics Calculation
+                close_series = metrics["close"]
+                current_price = float(close_series.iloc[idx])
+
+                def _get_ret(days_back: int) -> float:
+                    if idx - days_back >= 0:
+                        prev = float(close_series.iloc[idx - days_back])
+                        if prev > 0:
+                            return (current_price / prev) - 1.0
+                    return 0.0
+
+                # MDD / Drawdown from Peak (Recent 1 year)
+                lookback_window = 252  # 1 year roughly
+                start_idx = max(0, idx - lookback_window)
+                window_max = close_series.iloc[start_idx : idx + 1].max()
+                drawdown_from_peak = (current_price / window_max - 1.0) if window_max > 0 else 0.0
+
+                # NAV and Disparity (KOR only)
+                nav_val = None
+                price_deviation_val = None
+
+                # 1. Try Naver Snapshot first (Priority)
+                tkr_norm = tkr.strip().upper()
+                if tkr_norm in nav_snapshot:
+                    snap = nav_snapshot[tkr_norm]
+                    nav_val = snap.get("nav")
+                    snap_price = snap.get("nowVal")
+
+                    # Update current price with realtime if available and valid
+                    if snap_price and snap_price > 0:
+                        # Optional: override current_price for display consistency?
+                        # For now, we only use it for Disparity calculation correctness relative to NAV
+                        # But user might prefer recommendation to use closing price for signals.
+                        # We will use Snapshot for NAV/Disparity, but keep 'price' as closing price for strategy.
+                        # However, for Disparity display, it makes sense to use the pair (RealPrice, RealNAV).
+
+                        if nav_val and nav_val > 0:
+                            price_deviation_val = ((snap_price / nav_val) - 1.0) * 100.0
+
+                    if price_deviation_val is None:
+                        price_deviation_val = snap.get("deviation")
+
+                # 2. Fallback to pykrx cached data if Naver failed
+                if nav_val is None:
+                    raw_df = metrics.get("df")
+                    if raw_df is not None and not raw_df.empty:
+                        try:
+                            raw_row = raw_df.loc[dt_found]
+                            if isinstance(raw_row, pd.DataFrame):
+                                raw_row = raw_row.iloc[-1]
+
+                            if "NAV" in raw_row:
+                                nav_val = float(raw_row["NAV"])
+                            elif "순자산가치(NAV)" in raw_row:
+                                nav_val = float(raw_row["순자산가치(NAV)"])
+
+                            if nav_val and nav_val > 0:
+                                price_deviation_val = (current_price / nav_val - 1.0) * 100.0
+                            elif "괴리율" in raw_row:
+                                price_deviation_val = float(raw_row["괴리율"])
+                        except KeyError:
+                            pass
+
                 row_data = {
-                    "price": float(metrics["close"].iloc[idx]),
+                    "price": current_price,
                     "prev_close": float(metrics["close"].iloc[idx - 1]) if idx > 0 else 0.0,
                     "score": float(metrics["ma_score"].iloc[idx]),
                     "rsi_score": float(metrics["rsi_score"].iloc[idx]) if "rsi_score" in metrics else 0.0,
@@ -156,7 +303,17 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
                     "ma_period": strategy_rules.ma_period,
                     "close": metrics["close"],  # Series for history check
                     "filter": int(metrics["buy_signal_days"].iloc[idx]),  # buy_signal_days
-                    "drawdown_from_peak": 0.0,  # TODO: Calc if needed
+                    "drawdown_from_peak": drawdown_from_peak * 100.0,  # Convert to % for display compatibility
+                    # Extended Fields for UI
+                    "return_1w": _get_ret(5),
+                    "return_2w": _get_ret(10),
+                    "return_1m": _get_ret(20),
+                    "return_3m": _get_ret(60),
+                    "drawdown_from_high": drawdown_from_peak
+                    * 100.0,  # Same as drawdown_from_peak but consistent naming
+                    "nav_price": nav_val,
+                    "price_deviation": price_deviation_val,
+                    "trend_prices": close_series.iloc[max(0, idx - 60) : idx + 1].tolist(),  # Last 3 months trend
                 }
                 data_by_tkr[tkr] = row_data
             except Exception as e:
