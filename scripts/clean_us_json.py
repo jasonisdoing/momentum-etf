@@ -1,7 +1,7 @@
 import json
 import os
 
-JSON_PATH = "zsettings/stocks/us.json"
+JSON_PATH = "zaccounts/stocks/us.json"
 
 
 def clean_categories():

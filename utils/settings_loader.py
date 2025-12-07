@@ -14,7 +14,7 @@ class AccountSettingsError(RuntimeError):
     """계정 설정 로딩 중 발생하는 예외."""
 
 
-SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "zsettings"
+SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "zaccounts"
 ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT  # Backward compatibility alias
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
@@ -23,7 +23,7 @@ logger = get_app_logger()
 
 def list_available_accounts() -> list[str]:
     """
-    zsettings 디렉토리 하위의 유효한 계정(디렉토리 내 config.json 존재) 목록을 반환합니다.
+    zaccounts 디렉토리 하위의 유효한 계정(디렉토리 내 config.json 존재) 목록을 반환합니다.
     """
     accounts = []
     if not SETTINGS_ROOT.exists():
@@ -103,13 +103,13 @@ def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
 
 @cache
 def get_account_settings(account_id: str) -> dict[str, Any]:
-    """`zsettings/{account}/config.json` 파일을 로드합니다."""
+    """`zaccounts/{account}/config.json` 파일을 로드합니다."""
 
     account = (account_id or "").strip().lower()
     if not account:
         raise AccountSettingsError("계정 식별자를 지정해야 합니다.")
 
-    # New: zsettings/<account>/config.json
+    # New: zaccounts/<account>/config.json
     path = SETTINGS_ROOT / account / "config.json"
     logger.debug("계정 설정 로드: %s", path)
 

@@ -9,9 +9,9 @@ logger = get_app_logger()
 
 
 def _get_data_dir():
-    """Helper to get the absolute path to the 'zsettings' directory."""
+    """Helper to get the absolute path to the 'zaccounts' directory."""
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(project_root, "zsettings")
+    return os.path.join(project_root, "zaccounts")
 
 
 from utils.settings_loader import get_account_settings, list_available_accounts
@@ -57,7 +57,7 @@ def _load_account_stocks_raw(account_id: str) -> list[dict]:
 
 def get_etfs(account_id: str, include_extra_tickers: Iterable[str] | None = None) -> list[dict[str, str]]:
     """
-    'zsettings/<account>/stocks.json' 파일에서 종목 목록을 반환합니다.
+    'zaccounts/<account>/stocks.json' 파일에서 종목 목록을 반환합니다.
     """
     account_norm = (account_id or "").strip().lower()
     if not account_norm:
@@ -223,7 +223,7 @@ def get_etfs_by_country(country: str) -> list[dict[str, Any]]:
 
 
 def get_all_etfs(account_id: str) -> list[dict[str, Any]]:
-    """Return every ETF entry defined in zsettings/<account>/stocks.json."""
+    """Return every ETF entry defined in zaccounts/<account>/stocks.json."""
 
     raw_data = _load_account_stocks_raw(account_id)
     if not raw_data:
@@ -259,7 +259,7 @@ def get_all_etfs(account_id: str) -> list[dict[str, Any]]:
 
 def save_etfs(account_id: str, data: list[dict]):
     """
-    주어진 데이터를 'zsettings/<account>/stocks.json' 파일에 저장합니다.
+    주어진 데이터를 'zaccounts/<account>/stocks.json' 파일에 저장합니다.
     """
     account_norm = (account_id or "").strip().lower()
     if not account_norm:

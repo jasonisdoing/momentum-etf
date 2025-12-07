@@ -27,7 +27,7 @@ RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
 def _available_account_choices() -> list[str]:
     choices = list_available_accounts()
     if not choices:
-        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. zsettings/account/*.json 파일을 확인하세요.")
+        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. zaccounts/account/*.json 파일을 확인하세요.")
     return choices
 
 

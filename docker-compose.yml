@@ -14,7 +14,6 @@ services:
       - LETSENCRYPT_EMAIL=kimwootak@catholic.ac.kr
     volumes:
       - ./logs:/app/logs
-      - ./zsettings/stocks/cache:/app/zsettings/stocks/cache
       - ./.streamlit:/app/.streamlit
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
@@ -29,6 +28,5 @@ services:
       - TZ=Asia/Seoul
     volumes:
       - ./logs:/app/logs
-      - ./zsettings/stocks/cache:/app/zsettings/stocks/cache
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

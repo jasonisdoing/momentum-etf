@@ -71,7 +71,7 @@ def main() -> None:
 
     accounts = load_account_configs()
     if not accounts:
-        st.error("사용할 수 있는 계정 설정이 없습니다. `zsettings/account` 폴더를 확인해주세요.")
+        st.error("사용할 수 있는 계정 설정이 없습니다. `zaccounts/account` 폴더를 확인해주세요.")
         st.stop()
 
     default_icon = "📈"
