@@ -68,7 +68,7 @@ def _try_parse_float(value: Any) -> float | None:
         return None
 
 
-def _update_metadata_for_account(account_id: str):
+def update_account_metadata(account_id: str):
     """지정된 계정의 모든 종목에 대한 메타데이터를 업데이트합니다."""
     logger = get_app_logger()
     account_norm = (account_id or "").strip().lower()
@@ -87,12 +87,6 @@ def _update_metadata_for_account(account_id: str):
 
     updated_count = 0
     ticker_entries: list[dict[str, Any]] = []
-
-    # 구조 Flattening 없이 직접 참조를 가져오기 위해 탐색
-    # 하지만 list iteration 중 modification은 주의해야 함
-    # stock_data는 list[dict] (Category blocks)
-    # 각 block의 'tickers' list의 item들은 dict.
-    # 우리는 item dict를 직접 수정해야 함.
 
     for category in stock_data:
         for stock in category.get("tickers", []):
@@ -137,6 +131,7 @@ def _update_metadata_for_account(account_id: str):
                         except Exception as e:
                             logger.warning(f"[{account_norm.upper()}/{ticker}] 종목명 조회 실패: {e}")
 
+                    # 1. 상장일 조회
                     hist = t.history(period="max")
                     if not hist.empty:
                         first_date = hist.index.min()
@@ -144,6 +139,7 @@ def _update_metadata_for_account(account_id: str):
                         logger.debug(f"[{account_norm.upper()}/{ticker}] yfinance에서 상장일 획득: {listing_date_str}")
                     else:
                         logger.warning(f"[{account_norm.upper()}/{ticker}] yfinance 데이터가 비어있습니다.")
+
                 except Exception as e:
                     logger.warning(f"[{account_norm.upper()}/{ticker}] yfinance 메타데이터 조회 조회 실패: {e}")
 
@@ -151,42 +147,35 @@ def _update_metadata_for_account(account_id: str):
                 # 기존 파일의 listing_date 유지
                 listing_date_str = stock.get("listing_date")
 
-            if not listing_date_str:
-                # logger.warning(f"[{account_norm.upper()}/{ticker}] 상장일을 가져오지 못해 스킵합니다.")
-                pass
-            else:
-                # 상장일 저장
+            if listing_date_str:
                 stock["listing_date"] = listing_date_str
 
             # 주간 평균 거래량/거래대금 및 3개월 수익률은 항상 업데이트 (yfinance 데이터 필요)
             if data is None:
-                # 상장일이 이미 있어서 data가 없는 경우, yfinance로 2년치 데이터 조회 (1년 수익률 계산 확보용)
+                # 상장일이 이미 있어서 data가 없는 경우, yfinance로 2년치 데이터 조회
                 data = yf.download(yfinance_ticker, period="2y", progress=False, auto_adjust=True)
-                if isinstance(data, pd.DataFrame) and data.empty:
-                    pass
-                    # logger.warning(f"[{account_norm.upper()}/{ticker}] 거래량/수익률 데이터를 가져올 수 없습니다.")
-                elif isinstance(data, pd.DataFrame):
+                if isinstance(data, pd.DataFrame) and not data.empty:
                     if isinstance(data.columns, pd.MultiIndex):
                         data.columns = data.columns.get_level_values(0)
                         data = data.loc[:, ~data.columns.duplicated()]
                     if not data.index.is_unique:
                         data = data[~data.index.duplicated(keep="last")]
+                else:
+                    data = None
 
             # 구버전 필드 정리
             stock.pop("1_month_avg_volume", None)
             stock.pop("1_week_avg_turnover", None)
             stock.pop("1_month_avg_turnover", None)
 
-            # 신규 필드 초기화 (기존값 유지 or None)
-            # stock["1_week_avg_volume"] = None # 유지하거나 업데이트
-
             # yfinance 기반 지표 계산
             if data is not None and not data.empty and len(data) >= 1:
                 # 1. 1주 평균 거래량 (최근 5거래일 기준)
-                last_week = data.tail(5)
-                avg_volume = last_week["Volume"].mean()
-                if pd.notna(avg_volume):
-                    stock["1_week_avg_volume"] = int(avg_volume)
+                if "Volume" in data.columns:
+                    last_week = data.tail(5)
+                    avg_volume = last_week["Volume"].mean()
+                    if pd.notna(avg_volume):
+                        stock["1_week_avg_volume"] = int(avg_volume)
 
                 # Helper to calc earn rate
                 def calc_rate_safe(df, days_lookback):
@@ -206,7 +195,6 @@ def _update_metadata_for_account(account_id: str):
                         return round(((end_price - start_price) / start_price) * 100, 4)
                     return None
 
-                # 2. 수익률 계산 (영업일 기준 근사치)
                 stock["1_month_earn_rate"] = calc_rate_safe(data, 21)
                 stock["3_month_earn_rate"] = calc_rate_safe(data, 63)
                 stock["6_month_earn_rate"] = calc_rate_safe(data, 126)
@@ -227,23 +215,23 @@ def _update_metadata_for_account(account_id: str):
             logger.error(f"'{account_id}' 설정 저장 실패: {e}")
 
 
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Update stock metadata.")
-    parser.add_argument("target", nargs="?", help="Account ID")
-    args = parser.parse_args()
-
-    target = (args.target or "").strip().lower()
+def update_stock_metadata(account_id: str | None = None):
+    """
+    모든 계정 또는 특정 계정의 종목 메타데이터를 업데이트합니다.
+    account_id가 None이면 모든 계정(kor/us/usa)을 업데이트합니다.
+    """
+    logger = get_app_logger()
 
     accounts_to_update = []
 
-    logger = get_app_logger()
-
-    if not target:
-        # Default: Update basic accounts if nothing specified?
-        # Or update all?
-        # Let's update valid accounts with country=kor or us
+    if account_id:
+        norm_id = account_id.strip().lower()
+        if norm_id in list_available_accounts():
+            accounts_to_update.append(norm_id)
+        else:
+            logger.error(f"계정 ID '{account_id}'를 찾을 수 없습니다.")
+            return
+    else:
         all_accounts = list_available_accounts()
         for account in all_accounts:
             try:
@@ -253,18 +241,10 @@ if __name__ == "__main__":
                     accounts_to_update.append(account)
             except Exception:
                 pass
-    else:
-        # Check if target is account
-        if target in list_available_accounts():
-            accounts_to_update = [target]
-        else:
-            logger.error(f"Target '{target}' is not a valid account ID.")
-            exit(1)
 
-    logger.info(f"Updating metadata for accounts: {accounts_to_update}")
+    logger.info(f"메타데이터 업데이트 대상 계정: {accounts_to_update}")
 
     for account in accounts_to_update:
-        logger.info(f"[{account.upper()}] 메타데이터 작업 시작")
-        _update_metadata_for_account(account)
+        update_account_metadata(account)
 
-    logger.info("모든 종목 메타데이터 업데이트 완료.")
+    logger.info("모든 메타데이터 업데이트 작업이 완료되었습니다.")
