@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -59,12 +59,12 @@ def _account_registry():
     return accounts, meta, default
 
 
-def _account_options() -> List[str]:
+def _account_options() -> list[str]:
     accounts, _, _ = _account_registry()
     return [account["account_id"] for account in accounts]
 
 
-def _account_meta() -> Dict[str, Dict[str, str]]:
+def _account_meta() -> dict[str, dict[str, str]]:
     return _account_registry()[1]
 
 
@@ -100,7 +100,7 @@ def _render_cache_summary_table(country_code: str) -> None:
         st.info("표시할 종목이 없습니다.")
         return
 
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for item in etf_items:
         ticker = str(item.get("ticker") or "").strip().upper()
         cache_start = cache_end = "-"
@@ -119,7 +119,6 @@ def _render_cache_summary_table(country_code: str) -> None:
             {
                 "티커": ticker,
                 "종목명": item.get("name") or "-",
-                "추천 사용": bool(item.get("recommend_enabled", True)),
                 "상장일": item.get("listing_date") or "-",
                 "1달 평균 거래량": item.get("1_month_avg_volume") or 0,
                 "캐시 시작": cache_start,

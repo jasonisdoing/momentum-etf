@@ -12,6 +12,7 @@ import pandas as pd
 from logic.backtest.account_runner import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
+from utils.data_loader import get_exchange_rate_series
 from utils.logger import get_app_logger
 from utils.notification import build_summary_line_from_summary_data
 from utils.report import format_kr_money, render_table_eaw
@@ -101,7 +102,11 @@ def print_backtest_summary(
     final_value_krw_value = float(summary.get("final_value_krw", final_value_local))
     fx_rate_to_krw = float(summary.get("fx_rate_to_krw", 1.0) or 1.0)
 
-    money_formatter = format_kr_money
+    # 통화에 따라 적절한 포맷터 설정
+    if currency == "USD":
+        money_formatter = _usd_money
+    else:
+        money_formatter = format_kr_money
 
     output_lines: list[str] = []
     section_counter = section_start_index
@@ -428,8 +433,9 @@ def _format_quantity(amount: float, precision: int) -> str:
     return f"{amount:,.{precision}f}".rstrip("0").rstrip(".")
 
 
-def _resolve_formatters(account_settings: dict[str, Any]):
-    account_id = str(account_settings.get("account") or "").strip().lower()
+def _resolve_formatters(account_settings: dict[str, Any], account_id: str = ""):
+    if not account_id:
+        account_id = str(account_settings.get("account") or "").strip().lower()
     try:
         precision = get_account_precision(account_id)
     except Exception:
@@ -438,7 +444,7 @@ def _resolve_formatters(account_settings: dict[str, Any]):
     if not isinstance(precision, dict):
         precision = {}
 
-    currency = "KRW"
+    currency = str(precision.get("currency", "KRW")).strip().upper()
     qty_precision = int(precision.get("qty_precision", 0))
     price_precision = int(precision.get("price_precision", 0))
 
@@ -449,12 +455,25 @@ def _resolve_formatters(account_settings: dict[str, Any]):
             return "-"
         return f"{float(value):,.{digits}f}"
 
-    def _krw_price(value: float) -> str:
-        if not _is_finite_number(value):
-            return "-"
-        return f"{int(round(value)):,}"
+    return currency, _usd_money if currency == "USD" else format_kr_money, _format_price, qty_precision, digits
 
-    return currency, format_kr_money, _krw_price, qty_precision, digits
+
+def _usd_money(value: float) -> str:
+    if not _is_finite_number(value):
+        return "-"
+
+    is_negative = value < 0
+    abs_val = abs(value)
+
+    # 2 decimal places for USD
+    if abs_val < 0.01 and abs_val != 0:
+        formatted_val = f"{abs_val:,.4f}"
+    else:
+        formatted_val = f"{abs_val:,.2f}"
+
+    if is_negative:
+        return f"-${formatted_val}"
+    return f"${formatted_val}"
 
 
 def _format_date_kor(ts: pd.Timestamp) -> str:
@@ -562,6 +581,11 @@ def _build_daily_table_rows(
         else:
             price_display = price_formatter(price) if _is_finite_number(price) else "-"
         shares_display = "1" if is_cash else _format_quantity(shares, qty_precision)
+
+        # CASH의 미세한 잔액(0.01 미만)은 0으로 처리하여 서식 통일 ($0.0000 -> $0.00)
+        if is_cash and abs(pv) < 0.01:
+            pv = 0.0
+
         pv_display = money_formatter(pv)
         cost_basis = avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 else 0.0
         eval_profit_value = 0.0 if is_cash else pv - cost_basis
@@ -673,7 +697,7 @@ def _generate_daily_report_lines(
         price_formatter,
         qty_precision,
         _price_precision,
-    ) = _resolve_formatters(account_settings)
+    ) = _resolve_formatters(account_settings, result.account_id)
 
     portfolio_df = result.portfolio_timeseries
     lines: list[str] = []
@@ -727,6 +751,18 @@ def _generate_daily_report_lines(
     holding_days_map: dict[str, int] = {}
     prev_rows_cache: dict[str, pd.Series | None] = {}
 
+    # 환율 데이터 프리패치 (필요 시)
+    fx_series = None
+    if _currency != "KRW":
+        try:
+            # 전체 기간에 대해 한 번에 로딩
+            start_dt = portfolio_df.index.min()
+            end_dt = portfolio_df.index.max()
+            # 여유있게 앞뒤로 조절
+            fx_series = get_exchange_rate_series(start_dt, end_dt)
+        except Exception as e:
+            logger.warning(f"리포팅 중 환율 정보 로드 실패: {e}")
+
     for target_date in portfolio_df.index:
         portfolio_row = portfolio_df.loc[target_date]
 
@@ -758,25 +794,85 @@ def _generate_daily_report_lines(
         cumulative_return_pct = _safe_float(portfolio_row.get("cumulative_return_pct"))
         held_count = _safe_int(portfolio_row.get("held_count"))
 
-        summary_data = {
+        # 환율 적용 로직:
+        # 1. 포트폴리오 데이터는 현지 통화 기준 (USD 등)
+        # 2. Daily Summary Header는 KRW 기준으로 표시 (User Request: "Header only in Korean Won is correct")
+        # 3. Table은 현지 통화 기준 (USD) 유지
+
+        header_money_formatter = money_formatter
+        header_values = {
             "principal": float(result.initial_capital),
             "total_equity": total_value,
             "total_holdings_value": total_holdings,
             "total_cash": total_cash,
             "daily_profit_loss": daily_profit_loss,
-            "daily_return_pct": daily_return_pct,
-            "eval_profit_loss": eval_profit_loss,
-            "eval_return_pct": eval_return_pct,
             "cum_profit_loss": total_value - float(result.initial_capital),
+        }
+
+        # 비 KRW 계좌인 경우 KRW로 변환
+        if _currency != "KRW":
+            try:
+                # 해당 일자의 환율 조회 (없으면 가장 최근 값)
+                target_result = fx_series.asof(target_date)
+                if pd.notna(target_result):
+                    rate = float(target_result)
+                    header_money_formatter = format_kr_money
+                    # 환율 적용 (KRW 환산)
+                    # 원금은 초기 환율 기준 고정일 수도 있지만,
+                    # 일별 리포트에서는 '현재 가치'를 보여주는게 맞으므로 매일 변동될 수도 있고,
+                    # 혹은 원금 자체는 초기 환율로 박아두고 평가금액만 변동시킬 수도 있음.
+                    # 여기서는 심플하게 '현재 환율'로 모든 가치를 환산하여 보여줌.
+                    # 단, 원금의 경우 '투입 당시 KRW'를 보여주는 게 더 직관적일 수 있으나
+                    # 이미 result.initial_capital_krw가 있으므로 그걸 쓰는 게 나을 수도.
+                    # 하지만 result.initial_capital_krw는 고정값.
+
+                    # Header: 원금 -> initial_capital * initial_fx (fixed) or current_fx?
+                    # User: "원금: 7만원" -> This implies fixed initial KRW amount.
+                    # So use result.initial_capital_krw for principal.
+
+                    header_values["principal"] = float(result.initial_capital_krw)  # 고정된 초기 KRW 원금
+
+                    header_values["total_equity"] = total_value * rate
+                    header_values["total_holdings_value"] = total_holdings * rate
+                    header_values["total_cash"] = total_cash * rate
+                    header_values["daily_profit_loss"] = daily_profit_loss * rate
+                    header_values["cum_profit_loss"] = (total_value * rate) - float(result.initial_capital_krw)
+            except Exception:
+                pass
+
+        summary_data = {
+            "principal": header_values["principal"],
+            "total_equity": header_values["total_equity"],
+            "total_holdings_value": header_values["total_holdings_value"],
+            "total_cash": header_values["total_cash"],
+            "daily_profit_loss": header_values["daily_profit_loss"],
+            "daily_return_pct": daily_return_pct,
+            "eval_profit_loss": eval_profit_loss,  # 이건 개별 종목 합산이라 애매하지만, 일단 테이블 값이랑 맞추려면 USD가 맞나? 아님 헤더니까 KRW?
+            # 헤더: "평가: -0.84%(-593원)" -> KRW여야 함.
+            # eval_profit_loss는 (total_holdings - total_cost).
+            # total_cost도 KRW로 변환 필요하지만 복잡함.
+            # 단순히 total_equity - total_cash - total_cost(converted)? No.
+            # 약식으로: eval_profit_loss(USD) * rate 사용.
+            "eval_return_pct": eval_return_pct,
+            "cum_profit_loss": header_values["cum_profit_loss"],
             "cum_return_pct": cumulative_return_pct,
             "held_count": held_count,
             "portfolio_topn": int(result.portfolio_topn),
         }
 
+        # eval_profit_loss KRW 변환 (비 KRW 계좌 시)
+        if _currency != "KRW" and summary_data["eval_profit_loss"]:
+            try:
+                target_result = fx_series.asof(target_date)
+                if pd.notna(target_result):
+                    summary_data["eval_profit_loss"] = eval_profit_loss * float(target_result)
+            except Exception:
+                pass
+
         prefix = f"{_format_date_kor(target_date)} |"
         summary_line = build_summary_line_from_summary_data(
             summary_data,
-            money_formatter,
+            header_money_formatter,
             use_html=False,
             prefix=prefix,
         )

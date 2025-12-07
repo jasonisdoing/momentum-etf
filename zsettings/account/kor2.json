@@ -4,6 +4,7 @@
     "name": "고정종목",
     "desc": "분산투자 6개 고정 종목들 입니다.",
     "country_code": "kor",
+    "currency": "krw",
     "slack_channel": "C09FAU2NHM2",
     "initial_capital_krw": "100000000",
     "show_hold_only": false,

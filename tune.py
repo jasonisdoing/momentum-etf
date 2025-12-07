@@ -12,18 +12,33 @@ from utils.logger import get_app_logger
 
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
-    "k1": {
+    "kor1": {
         "PORTFOLIO_TOPN": [8],
         "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
         "MA_TYPE": ["EMA"],
-        "REPLACE_SCORE_THRESHOLD": [3, 4, 5],
+        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3],
+        # "REPLACE_SCORE_THRESHOLD": [0],
         "STOP_LOSS_PCT": [8],
-        "OVERBOUGHT_SELL_THRESHOLD": [85, 86],
+        "OVERBOUGHT_SELL_THRESHOLD": [84, 85, 86, 87, 88, 89, 90],
         "TRAILING_STOP_PCT": [0],
-        "COOLDOWN_DAYS": [1, 2, 3],
+        # "COOLDOWN_DAYS": [0, 1, 2, 3],
+        "COOLDOWN_DAYS": [0],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    }
+    },
+    "us1": {
+        "PORTFOLIO_TOPN": [8],
+        "MA_RANGE": [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70],  # 범위가 넓어지면 과최적화 위험 증가
+        # "MA_TYPE": ["SMA", "EMA"],
+        "MA_TYPE": ["EMA"],
+        "REPLACE_SCORE_THRESHOLD": [2],
+        "STOP_LOSS_PCT": [7, 8, 9, 10],
+        "OVERBOUGHT_SELL_THRESHOLD": [83, 84, 85, 86],
+        "TRAILING_STOP_PCT": [0],
+        "COOLDOWN_DAYS": [0, 1, 2, 3],
+        "CORE_HOLDINGS": [],
+        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
+    },
 }
 
 

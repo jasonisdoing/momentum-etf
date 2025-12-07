@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import pickle
 import re
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
+import pandas as pd
 from bson.binary import Binary
 from pymongo.errors import PyMongoError
-import pandas as pd
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
@@ -18,12 +19,13 @@ logger = get_app_logger()
 
 _COLLECTION_NAME_MAP = {
     "kor": "cache_kor_stocks",
+    "us": "cache_us_stocks",
 }
 
 _TEMP_SUFFIX_SANITIZE = re.compile(r"[^a-z0-9_-]", re.IGNORECASE)
 
 
-def _get_cache_start_date() -> Optional[pd.Timestamp]:
+def _get_cache_start_date() -> pd.Timestamp | None:
     """config.py에서 CACHE_START_DATE를 로드하여 Timestamp로 반환합니다."""
     try:
         from utils.settings_loader import load_common_settings
@@ -78,7 +80,7 @@ def _get_collection(country: str):
     return collection
 
 
-def _deserialize_cached_doc(doc: Dict[str, Any]) -> Optional[pd.DataFrame]:
+def _deserialize_cached_doc(doc: dict[str, Any]) -> pd.DataFrame | None:
     """공통 캐시 문서 역직렬화 로직."""
     if not doc:
         return None
@@ -111,7 +113,7 @@ def _deserialize_cached_doc(doc: Dict[str, Any]) -> Optional[pd.DataFrame]:
     return df
 
 
-def load_cached_frame(country: str, ticker: str) -> Optional[pd.DataFrame]:
+def load_cached_frame(country: str, ticker: str) -> pd.DataFrame | None:
     """저장된 캐시 DataFrame을 로드하고, CACHE_START_DATE 이전 데이터를 필터링합니다."""
     collection = _get_collection(country)
     if collection is None:
@@ -125,7 +127,7 @@ def load_cached_frame(country: str, ticker: str) -> Optional[pd.DataFrame]:
     return _deserialize_cached_doc(doc)
 
 
-def load_cached_frames_bulk(country: str, tickers: Iterable[str]) -> Dict[str, pd.DataFrame]:
+def load_cached_frames_bulk(country: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
     """다수의 티커를 한 번의 질의로 가져와 역직렬화합니다."""
     normalized = []
     for t in tickers:
@@ -139,7 +141,7 @@ def load_cached_frames_bulk(country: str, tickers: Iterable[str]) -> Dict[str, p
     if collection is None:
         return {}
 
-    frames: Dict[str, pd.DataFrame] = {}
+    frames: dict[str, pd.DataFrame] = {}
     try:
         cursor = collection.find({"ticker": {"$in": list(set(normalized))}})
     except Exception:
@@ -218,7 +220,7 @@ def drop_cache_collection(country: str) -> None:
         return
 
 
-def clean_temp_cache_collections(country: str, *, max_age_seconds: Optional[int] = None) -> int:
+def clean_temp_cache_collections(country: str, *, max_age_seconds: int | None = None) -> int:
     """남아 있는 임시 캐시 컬렉션을 조건에 맞게 삭제합니다."""
     db = get_db_connection()
     if db is None:
@@ -281,19 +283,19 @@ def swap_cache_collection(country: str, temp_country_token: str) -> None:
         raise
 
 
-def get_cached_date_range(country: str, ticker: str) -> Optional[Tuple[pd.Timestamp, pd.Timestamp]]:
+def get_cached_date_range(country: str, ticker: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
     df = load_cached_frame(country, ticker)
     if df is None or df.empty:
         return None
     return df.index.min(), df.index.max()
 
 
-def list_cached_countries() -> List[str]:
+def list_cached_countries() -> list[str]:
     db = get_db_connection()
     if db is None:
         return []
 
-    available: List[str] = []
+    available: list[str] = []
     try:
         existing = set(db.list_collection_names())
     except Exception:
@@ -311,7 +313,7 @@ def list_cached_countries() -> List[str]:
     return available
 
 
-def list_cached_tickers(country: str) -> List[str]:
+def list_cached_tickers(country: str) -> list[str]:
     collection = _get_collection(country)
     if collection is None:
         return []

@@ -8,22 +8,21 @@ import os
 import sys
 import time
 import uuid
-from typing import Optional
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from utils.account_registry import get_account_settings, list_available_accounts
 from utils.cache_utils import (
+    clean_temp_cache_collections,
     drop_cache_collection,
     swap_cache_collection,
-    clean_temp_cache_collections,
 )
 from utils.data_loader import fetch_ohlcv
-from utils.stock_list_io import get_all_etfs
-from utils.account_registry import list_available_accounts, get_account_settings
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
 from utils.settings_loader import load_common_settings
+from utils.stock_list_io import get_all_etfs
 
 
 def _determine_start_date() -> str:
@@ -33,13 +32,22 @@ def _determine_start_date() -> str:
         return str(start)
 
 
-def _collect_benchmark_tickers() -> list[str]:
+def _collect_benchmark_tickers(target_country: str | None = None) -> list[str]:
     tickers = set()
+    target_country_norm = target_country.strip().lower() if target_country else None
+
     for account in list_available_accounts():
         try:
             settings = get_account_settings(account)
         except Exception:
             continue
+
+        # 국가 코드가 지정된 경우 필터링
+        if target_country_norm:
+            acct_country = str(settings.get("country_code") or "").strip().lower()
+            if acct_country != target_country_norm:
+                continue
+
         for bm in settings.get("benchmarks", []) or []:
             ticker = str(bm.get("ticker") or "").strip().upper()
             if ticker:
@@ -47,15 +55,13 @@ def _collect_benchmark_tickers() -> list[str]:
     return sorted(tickers)
 
 
-def refresh_all_caches(countries: list[str], start_date: Optional[str]):
+def refresh_all_caches(countries: list[str], start_date: str | None):
     """지정된 국가의 모든 종목에 대한 가격 데이터 캐시를 새로 고칩니다."""
     logger = get_app_logger()
-    logger.info(
-        "캐시 갱신 시작 (국가: %s, 시작일: %s)", ", ".join(countries), start_date
-    )
-    benchmark_tickers = _collect_benchmark_tickers()
+    logger.info("캐시 갱신 시작 (국가: %s, 시작일: %s)", ", ".join(countries), start_date)
 
     for country in countries:
+        benchmark_tickers = _collect_benchmark_tickers(country)
         logger.info("[%s] 국가의 캐시를 갱신합니다...", country.upper())
         removed = clean_temp_cache_collections(country, max_age_seconds=3600)
         if removed:
@@ -66,9 +72,7 @@ def refresh_all_caches(countries: list[str], start_date: Optional[str]):
             )
         all_etfs_from_file = get_all_etfs(country)
         all_map = {
-            str(item.get("ticker") or "").strip().upper(): item
-            for item in all_etfs_from_file
-            if item.get("ticker")
+            str(item.get("ticker") or "").strip().upper(): item for item in all_etfs_from_file if item.get("ticker")
         }
         for bench in benchmark_tickers:
             norm = str(bench or "").strip().upper()
@@ -79,7 +83,6 @@ def refresh_all_caches(countries: list[str], start_date: Optional[str]):
                 "name": norm,
                 "category": "BENCHMARK",
                 "type": "etf",
-                "recommend_enabled": True,
             }
         all_etfs_from_file = list(all_map.values())
 
@@ -92,9 +95,7 @@ def refresh_all_caches(countries: list[str], start_date: Optional[str]):
             for i, etf in enumerate(all_etfs_from_file, 1):
                 ticker = etf.get("ticker")
                 name = etf.get("name") or "-"
-                logger.info(
-                    " -> 처리 중: %d/%d - %s(%s)", i, total_tickers, name, ticker
-                )
+                logger.info(" -> 처리 중: %d/%d - %s(%s)", i, total_tickers, name, ticker)
 
                 try:
                     range_start = start_date or "1990-01-01"
@@ -140,25 +141,39 @@ def _build_parser() -> argparse.ArgumentParser:
 def main():
     """CLI 진입점"""
     logger = get_app_logger()
-
     load_env_if_present()
 
-    parser = _build_parser()
+    parser = argparse.ArgumentParser(description="OHLCV 캐시 갱신 스크립트")
+    parser.add_argument("target", nargs="?", help="Account ID or Country Code")
+    parser.add_argument("--start", help="데이터 조회 시작일 (YYYY-MM-DD)")
     args = parser.parse_args()
 
+    target = (args.target or "").strip().lower()
     start_date = args.start or _determine_start_date()
-    if args.countries:
-        countries = [
-            country.strip().lower() for country in args.countries if country.strip()
-        ]
+
+    countries_to_update = []
+
+    if not target:
+        # No argument -> Update all default (kor, us)
+        countries_to_update = ["kor", "us"]
     else:
-        countries = ["kor"]
+        if target in ["kor", "us"]:
+            countries_to_update = [target]
+        else:
+            # Assume account ID
+            try:
+                settings = get_account_settings(target)
+                country = settings.get("country_code", "kor").lower()
+                countries_to_update = [country]
+            except Exception:
+                logger.warning(f"Account '{target}' not found. Treating as country code.")
+                countries_to_update = [target]
 
-    if not countries:
-        parser.error("갱신할 국가를 최소 하나 이상 지정해야 합니다.")
+    if not countries_to_update:
+        parser.error("갱신할 국가를 결정할 수 없습니다.")
 
-    logger.info("입력 파라미터: countries=%s, start=%s", countries, start_date)
-    refresh_all_caches(countries, start_date)
+    logger.info("입력 파라미터: countries=%s, start=%s", countries_to_update, start_date)
+    refresh_all_caches(countries_to_update, start_date)
 
 
 if __name__ == "__main__":

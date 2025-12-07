@@ -9,12 +9,12 @@ from typing import Any
 
 import pandas as pd
 
-import config
 from config import BACKTEST_SLIPPAGE
 from logic.common import calculate_held_categories, is_category_exception, select_candidates_by_category
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
+from strategies.maps.evaluator import StrategyEvaluator
 from strategies.maps.labeler import compute_net_trade_note
-from utils.indicators import calculate_ma_score
+from strategies.maps.metrics import process_ticker_data
 from utils.logger import get_app_logger
 from utils.report import format_kr_money
 
@@ -126,8 +126,9 @@ def _execute_individual_sells(
     current_holdings_value: float,
     ma_period: int,
     min_buy_score: float,
+    evaluator: StrategyEvaluator,
 ) -> tuple[float, float]:
-    """개별 종목 매도 로직 (손절, RSI, 추세, 트레일링 스탑)"""
+    """개별 종목 매도 로직 (StrategyEvaluator 사용)"""
     for ticker, ticker_metrics in metrics_by_ticker.items():
         ticker_state, price = position_state[ticker], today_prices.get(ticker)
 
@@ -137,38 +138,47 @@ def _execute_individual_sells(
                 ticker_state["highest_price"] = price
 
             in_cooldown = i < ticker_state["sell_block_until"]
-            decision = None
-            hold_ret = (price / ticker_state["avg_cost"] - 1.0) * 100.0 if ticker_state["avg_cost"] > 0 else 0.0
-            trend_phrase = DECISION_NOTES["TREND_BREAK"]
 
-            # RSI 과매수 매도 조건 체크
-            rsi_score_current = rsi_score_today.get(ticker, 0.0)
+            # 매도 의사결정 (StrategyEvaluator)
+            ma_val_today = ticker_metrics["ma_values"][i]
+            ma_val = float(ma_val_today) if not pd.isna(ma_val_today) else 0.0
+            ticker_ma_period = ticker_metrics.get("ma_period", ma_period)
 
-            # 트레일링 스탑 조건 체크
-            highest_price = ticker_state.get("highest_price", price)
-            trailing_stop_price = highest_price * (1.0 - trailing_stop_pct / 100.0)
-            is_trailing_stop = (trailing_stop_pct > 0) and (price < trailing_stop_price)
+            current_score = score_today.get(ticker, 0.0)
+            if pd.isna(current_score):
+                current_score = -float("inf")
 
-            if stop_loss_threshold is not None and hold_ret <= float(stop_loss_threshold):
-                decision = "CUT_STOPLOSS"
-            elif is_trailing_stop:
-                decision = "SELL_TRAILING"
-            elif rsi_score_current >= rsi_sell_threshold:
-                decision = "SELL_RSI"
-            elif not pd.isna(score_today.get(ticker, float("nan"))) and score_today.get(ticker, 0.0) <= min_buy_score:
-                decision = "SELL_TREND"
-                ma_val_today = ticker_metrics["ma_values"][i]
-                ma_val = float(ma_val_today) if not pd.isna(ma_val_today) else None
-                ticker_ma_period = ticker_metrics.get("ma_period", ma_period)
-                trend_phrase = _format_trend_break_phrase(ma_val, price, ticker_ma_period)
+            # 쿨다운 정보 구성 (Evaluator 호환성)
+            # sell_cooldown_info는 현재 백테스트 로직에서 simple index check로 대체되므로 None 전달
+            # in_cooldown 변수가 이미 체크됨
+            pass
 
-            # 핵심 보유 종목은 매도 신호 무시
-            if decision and ticker in valid_core_holdings:
+            decision, phrase = evaluator.evaluate_sell_decision(
+                current_state="HOLD",
+                price=price,
+                avg_cost=ticker_state["avg_cost"],
+                highest_price=ticker_state.get("highest_price", 0.0),
+                ma_value=ma_val,
+                ma_period=ticker_ma_period,
+                score=current_score,
+                rsi_score=rsi_score_today.get(ticker, 0.0),
+                is_core_holding=(ticker in valid_core_holdings),
+                stop_loss_threshold=stop_loss_threshold,
+                rsi_sell_threshold=rsi_sell_threshold,
+                trailing_stop_pct=trailing_stop_pct,
+                min_buy_score=min_buy_score,
+                sell_cooldown_info=None,  # 백테스트 루프 내 제어
+                cooldown_days=cooldown_days,
+            )
+
+            # 백테스트 고유 쿨다운 처리 (Evaluator는 상태만 반환, 실행 여부는 여기서)
+            if decision == "HOLD_CORE":
                 decision = None
 
-            if not decision:
+            if not decision or decision == "HOLD":
                 continue
 
+            # 손절매가 아닌데 쿨다운 중이면 스킵
             if in_cooldown and decision != "CUT_STOPLOSS":
                 continue
 
@@ -224,10 +234,11 @@ def _execute_individual_sells(
                     }
                 )
                 if decision == "SELL_TREND":
-                    note_text = trend_phrase if trend_phrase else DECISION_NOTES["TREND_BREAK"]
-                    row["note"] = note_text
+                    row["note"] = phrase
                 elif decision == "SELL_TRAILING":
-                    row["note"] = f"고점({highest_price:,.0f}) 대비 {trailing_stop_pct}% 하락"
+                    row["note"] = (
+                        f"고점({ticker_state.get('highest_price', 0.0):,.0f}) 대비 {trailing_stop_pct}% 하락"  # phrase에 이미 포함되어 있지만 백테스트 형식 유지
+                    )
 
     return cash, current_holdings_value
 
@@ -476,151 +487,6 @@ def _execute_new_buys(
     return cash, current_holdings_value, purchased_today, held_categories
 
 
-def process_ticker_data(
-    ticker: str,
-    df: pd.DataFrame,
-    etf_tickers: set,
-    etf_ma_period: int,
-    stock_ma_period: int,
-    precomputed_entry: Mapping[str, Any] | None = None,
-    ma_type: str = "SMA",
-    *,
-    min_buy_score: float,
-) -> dict | None:
-    """
-    개별 종목의 데이터를 처리하고 지표를 계산합니다.
-
-    Args:
-        ticker: 종목 티커
-        df: 가격 데이터프레임
-        etf_tickers: ETF 티커 집합
-        etf_ma_period: ETF 이동평균 기간
-        stock_ma_period: 주식 이동평균 기간
-        ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA)
-
-    Returns:
-        Dict: 계산된 지표들 또는 None (처리 실패 시)
-    """
-    if df is None and precomputed_entry is None:
-        return None
-
-    working_df = df
-    if working_df is None and precomputed_entry:
-        # Dummy frame to keep downstream logic consistent
-        working_df = pd.DataFrame()
-
-    if working_df is not None and isinstance(working_df.columns, pd.MultiIndex):
-        working_df = working_df.copy()
-        working_df.columns = working_df.columns.get_level_values(0)
-        working_df = working_df.loc[:, ~working_df.columns.duplicated()]
-
-    # 티커 유형에 따라 이동평균 기간 결정
-    current_ma_period = etf_ma_period if ticker in etf_tickers else stock_ma_period
-
-    close_prices = None
-    open_prices = None
-    if isinstance(precomputed_entry, Mapping):
-        close_prices = precomputed_entry.get("close")
-        open_prices = precomputed_entry.get("open")
-
-    if close_prices is None:
-        if working_df is None:
-            return None
-
-        price_series = None
-        if isinstance(working_df.columns, pd.MultiIndex):
-            cols = working_df.columns.get_level_values(0)
-            working_df = working_df.copy()
-            working_df.columns = cols
-            working_df = working_df.loc[:, ~working_df.columns.duplicated()]
-
-        if "unadjusted_close" in working_df.columns:
-            price_series = working_df["unadjusted_close"]
-        else:
-            price_series = working_df["Close"]
-
-        if isinstance(price_series, pd.DataFrame):
-            price_series = price_series.iloc[:, 0]
-        close_prices = price_series.astype(float)
-
-    if open_prices is None:
-        if working_df is not None and "Open" in working_df.columns:
-            open_series = working_df["Open"]
-            if isinstance(open_series, pd.DataFrame):
-                open_series = open_series.iloc[:, 0]
-            open_prices = open_series.astype(float)
-        else:
-            open_prices = close_prices.copy()
-
-    # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
-    if config.ENABLE_DATA_SUFFICIENCY_CHECK:
-        ma_type_upper = (ma_type or "SMA").upper()
-        if ma_type_upper in {"EMA", "DEMA", "TEMA"}:
-            ideal_multiplier = 2.0
-        elif ma_type_upper == "HMA":
-            ideal_multiplier = 1.5
-        else:  # SMA, WMA 등
-            ideal_multiplier = 1.0
-
-        ideal_data_required = int(current_ma_period * ideal_multiplier)
-
-        # 데이터가 이상적인 양보다 적으면 완화된 기준 적용 (신규 상장 ETF 대응)
-        if len(close_prices) < ideal_data_required:
-            # 완화된 기준: multiplier의 절반 (최소 1배)
-            relaxed_multiplier = max(ideal_multiplier / 2.0, 1.0)
-            min_required_data = int(current_ma_period * relaxed_multiplier)
-        else:
-            # 충분한 데이터가 있으면 이상적인 기준 적용
-            min_required_data = ideal_data_required
-
-        if len(close_prices) < min_required_data:
-            return None
-
-    # MAPS 전략 지표 계산
-    from utils.moving_averages import calculate_moving_average
-
-    ma_type_key = (ma_type or "SMA").upper()
-    ma_key = f"{ma_type_key}_{int(current_ma_period)}"
-    moving_average = None
-    ma_score = None
-    if isinstance(precomputed_entry, Mapping):
-        ma_cache = precomputed_entry.get("ma") or {}
-        ma_score_cache = precomputed_entry.get("ma_score") or {}
-        moving_average = ma_cache.get(ma_key)
-        ma_score = ma_score_cache.get(ma_key)
-
-    if moving_average is None:
-        moving_average = calculate_moving_average(close_prices, current_ma_period, ma_type)
-    if ma_score is None:
-        ma_score = calculate_ma_score(close_prices, moving_average)
-
-    # 점수 기반 매수 시그널 지속일 계산
-    from logic.common import calculate_consecutive_days
-
-    consecutive_buy_days = calculate_consecutive_days(ma_score, min_buy_score)
-
-    # RSI 전략 지표 계산
-    from strategies.rsi.backtest import process_ticker_data_rsi
-
-    rsi_score = None
-    if isinstance(precomputed_entry, Mapping):
-        rsi_score = precomputed_entry.get("rsi_score")
-    if rsi_score is None or isinstance(rsi_score, float):
-        rsi_data = process_ticker_data_rsi(close_prices)
-        rsi_score = rsi_data.get("rsi_score") if rsi_data else pd.Series(dtype=float)
-
-    return {
-        "df": working_df if working_df is not None else df,
-        "close": close_prices,
-        "open": open_prices,  # 시초가 추가
-        "ma": moving_average,
-        "ma_score": ma_score,
-        "rsi_score": rsi_score,
-        "buy_signal_days": consecutive_buy_days,
-        "ma_period": current_ma_period,
-    }
-
-
 def run_portfolio_backtest(
     stocks: list[dict],
     initial_capital: float = 100_000_000.0,
@@ -700,6 +566,9 @@ def run_portfolio_backtest(
     etf_meta = {stock["ticker"]: stock for stock in stocks if stock.get("ticker")}
     metrics_by_ticker = {}
     tickers_to_process = [s["ticker"] for s in stocks]
+
+    # StrategyEvaluator 인스턴스 생성
+    evaluator = StrategyEvaluator()
 
     for ticker in tickers_to_process:
         df = None
@@ -970,6 +839,7 @@ def run_portfolio_backtest(
             current_holdings_value=current_holdings_value,
             ma_period=ma_period,
             min_buy_score=min_buy_score,
+            evaluator=evaluator,
         )
 
         # --- 3-1. 핵심 보유 종목 자동 매수 (최우선) ---

@@ -48,6 +48,7 @@ _WORKER_PREFETCHED_DATA: Mapping[str, DataFrame] | None = None
 _WORKER_PREFETCHED_METRICS: Mapping[str, dict[str, Any]] | None = None
 _WORKER_PREFETCHED_UNIVERSE: Sequence[Mapping[str, Any]] | None = None
 _WORKER_TRADING_CALENDAR: Sequence[pd.Timestamp] | None = None
+_WORKER_PREFETCHED_FX_SERIES: pd.Series | None = None
 
 
 def _init_worker_prefetch(
@@ -55,13 +56,20 @@ def _init_worker_prefetch(
     prefetched_metrics: Mapping[str, dict[str, Any]],
     prefetched_universe: Sequence[Mapping[str, Any]],
     trading_calendar: Sequence[pd.Timestamp],
+    fx_series: pd.Series | None = None,
 ) -> None:
     """ProcessPoolExecutor initializer - 각 worker 프로세스당 한 번만 실행"""
-    global _WORKER_PREFETCHED_DATA, _WORKER_PREFETCHED_METRICS, _WORKER_PREFETCHED_UNIVERSE, _WORKER_TRADING_CALENDAR
+    global \
+        _WORKER_PREFETCHED_DATA, \
+        _WORKER_PREFETCHED_METRICS, \
+        _WORKER_PREFETCHED_UNIVERSE, \
+        _WORKER_TRADING_CALENDAR, \
+        _WORKER_PREFETCHED_FX_SERIES
     _WORKER_PREFETCHED_DATA = prefetched_data
     _WORKER_PREFETCHED_METRICS = prefetched_metrics
     _WORKER_PREFETCHED_UNIVERSE = prefetched_universe
     _WORKER_TRADING_CALENDAR = trading_calendar
+    _WORKER_PREFETCHED_FX_SERIES = fx_series
 
 
 def _filter_trading_days(
@@ -770,6 +778,7 @@ def _evaluate_single_combo(
     metrics_source = _WORKER_PREFETCHED_METRICS
     universe_source = _WORKER_PREFETCHED_UNIVERSE
     calendar_source = _WORKER_TRADING_CALENDAR
+    fx_series_source = _WORKER_PREFETCHED_FX_SERIES
 
     try:
         override_rules = StrategyRules.from_values(
@@ -820,6 +829,7 @@ def _evaluate_single_combo(
             prefetched_etf_universe=universe_source,
             prefetched_metrics=metrics_source,
             trading_calendar=calendar_source,
+            prefetched_fx_series=fx_series_source,
         )
     except Exception as exc:
         logger = get_app_logger()
@@ -964,6 +974,23 @@ def _execute_tuning_for_months(
     encountered_missing: set[str] = set()
     best_cagr_so_far = float("-inf")
 
+    # US 계정인 경우 환율 데이터 prefetch (모든 워커가 공유)
+    fx_series: pd.Series | None = None
+    country_code = account_norm.strip().lower()
+    if country_code in {"us", "us1", "us2"}:
+        try:
+            from utils.data_loader import get_exchange_rate_series
+
+            fx_series = get_exchange_rate_series(date_range[0], date_range[1])
+            if fx_series is not None and not fx_series.empty:
+                logger.info(
+                    "[튜닝] %s 환율 데이터 prefetch 완료 (%d일)",
+                    account_norm.upper(),
+                    len(fx_series),
+                )
+        except Exception as exc:
+            logger.warning("[튜닝] %s 환율 데이터 로드 실패, fallback 사용: %s", account_norm.upper(), exc)
+
     # search_space에서 core_holdings 가져오기
     core_holdings_from_space = search_space.get("CORE_HOLDINGS", [])
 
@@ -1004,11 +1031,13 @@ def _execute_tuning_for_months(
             _WORKER_PREFETCHED_DATA, \
             _WORKER_PREFETCHED_METRICS, \
             _WORKER_PREFETCHED_UNIVERSE, \
-            _WORKER_TRADING_CALENDAR
+            _WORKER_TRADING_CALENDAR, \
+            _WORKER_PREFETCHED_FX_SERIES
         _WORKER_PREFETCHED_DATA = prefetched_data
         _WORKER_PREFETCHED_METRICS = prefetched_metrics
         _WORKER_PREFETCHED_UNIVERSE = prefetched_etf_universe
         _WORKER_TRADING_CALENDAR = filtered_calendar
+        _WORKER_PREFETCHED_FX_SERIES = fx_series
         iterator = map(_evaluate_single_combo, payloads)
     else:
         # 멀티 프로세스: worker 초기화 시 데이터 한 번만 전달
@@ -1017,6 +1046,7 @@ def _execute_tuning_for_months(
             prefetched_metrics,
             prefetched_etf_universe,
             filtered_calendar,
+            fx_series,
         )
         # chunksize를 적절히 설정: IPC 오버헤드와 로드 밸런싱 균형
         # 너무 크면 느린 조합으로 인한 대기 발생, 너무 작으면 IPC 오버헤드 증가
@@ -2016,7 +2046,21 @@ def run_account_tuning(
         end_date.strftime("%Y-%m-%d"),
     ]
 
-    warmup_days = int(max(ma_max, base_rules.ma_period) * 1.5)
+    # 국가 코드에 따라 웜업 기간 조정
+    # US 등 일부 전략은 MA_PERIOD가 '월' 단위일 수 있으므로 충분한 웜업 기간 필요
+    country_code = "kor"
+    try:
+        acct_settings = get_account_settings(account_id)
+        country_code = (acct_settings.get("country_code") or account_id).strip().lower()
+    except Exception:
+        pass
+
+    multiplier = 1.5
+    if country_code in ("us", "usa"):
+        # 월 단위 MA 가정 (약 32배)
+        multiplier = 32.0
+
+    warmup_days = int(max(ma_max, base_rules.ma_period) * multiplier)
 
     logger.info(
         "[튜닝] 데이터 프리패치: 티커 %d개, 기간 %s~%s, 웜업 %d일",

@@ -21,13 +21,12 @@ from logic.common.filtering import (
     sort_decisions_by_order_and_score,
 )
 from logic.common.portfolio import is_category_exception
-from logic.common.signals import get_buy_signal_streak
 from strategies.maps.constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 from strategies.maps.history import (
     calculate_consecutive_holding_info,
     calculate_trade_cooldown_info,
 )
-from strategies.rsi.recommend import calculate_rsi_for_ticker
+from strategies.maps.metrics import process_ticker_data
 from utils.data_loader import (
     MissingPriceDataError,
     count_trading_days,
@@ -37,9 +36,7 @@ from utils.data_loader import (
     prepare_price_data,
 )
 from utils.db_manager import get_db_connection, list_open_positions
-from utils.indicators import calculate_ma_score
 from utils.logger import get_app_logger
-from utils.moving_averages import calculate_moving_average
 from utils.settings_loader import (
     AccountSettingsError,
     get_account_settings,
@@ -114,7 +111,7 @@ class _TickerScore:
 
 
 def _load_full_etf_meta(country_code: str) -> dict[str, dict[str, Any]]:
-    """Load metadata for all ETFs including recommend_disabled ones."""
+    """Load metadata for all ETFs."""
 
     file_path = STOCKS_DIR / f"{country_code}.json"
     if not file_path.exists():
@@ -169,7 +166,6 @@ def _load_full_etf_meta(country_code: str) -> dict[str, dict[str, Any]]:
                 "ticker": ticker,
                 "name": name,
                 "category": item_category,
-                "recommend_enabled": item.get("recommend_enabled") is not False,
             }
 
     return meta_map
@@ -223,71 +219,6 @@ def _fetch_dataframe(
         import traceback
 
         traceback.print_exc()
-        return None
-
-
-def _calc_metrics(df: pd.DataFrame, ma_period: int) -> tuple | None:
-    try:
-        # 'Close' 또는 'Adj Close' 중 사용 가능한 컬럼 선택
-        if "unadjusted_close" in df.columns:
-            raw_close = df["unadjusted_close"].astype(float)
-        else:
-            raw_close = df["Close"].astype(float)
-
-        if "Adj Close" in df.columns and not df["Adj Close"].isnull().all():
-            price_series = df["Adj Close"].astype(float)
-        else:
-            price_series = raw_close
-
-        raw_close = raw_close.dropna()
-        price_series = price_series.dropna()
-
-        if raw_close.empty or price_series.empty:
-            return None
-
-        # 이동평균 계산 (최소 1개 데이터로도 계산 가능하도록 min_periods=1 설정)
-        ma = price_series.rolling(window=ma_period, min_periods=1).mean()
-
-        latest_close = float(price_series.iloc[-1])
-        prev_close = float(price_series.iloc[-2]) if len(price_series) >= 2 else latest_close
-        ma_value = float(ma.iloc[-1]) if not pd.isna(ma.iloc[-1]) else latest_close
-
-        # 0 이하 값이면 기본값 설정
-        if ma_value <= 0:
-            ma_value = latest_close if latest_close > 0 else 1.0
-
-        if latest_close <= 0:
-            return None
-
-        # 일간 수익률 계산 (이전 종가가 없거나 0 이하면 0%로 처리)
-        daily_pct = 0.0
-        raw_prev_close = float(raw_close.iloc[-2]) if len(raw_close) >= 2 else float(raw_close.iloc[-1])
-        raw_latest_close = float(raw_close.iloc[-1])
-        if raw_prev_close and raw_prev_close > 0:
-            daily_pct = ((raw_latest_close / raw_prev_close) - 1.0) * 100
-
-        # 점수 계산 (이동평균 대비 수익률, % 단위)
-        score = 0.0
-        if ma_value > 0:
-            score = ((latest_close / ma_value) - 1.0) * 100
-
-        # 점수가 매우 작으면 0.01%로 처리 (0점 방지)
-        if abs(score) < 0.01 and score != 0:
-            score = 0.01 if score > 0 else -0.01
-
-        # 연속 상승일 계산
-        streak = 0
-        for price, ma_entry in zip(reversed(price_series.iloc[-ma_period:]), reversed(ma.iloc[-ma_period:])):
-            if pd.isna(ma_entry) or pd.isna(price) or price < ma_entry:
-                break
-            streak += 1
-
-        # 보유일 계산 (최대 20일로 제한)
-        holding_days = min(streak, 20) if streak > 0 else 0
-
-        return latest_close, prev_close, daily_pct, score, holding_days
-    except Exception as e:
-        logger.exception("메트릭 계산 중 오류 발생: %s", e)
         return None
 
 
@@ -549,30 +480,40 @@ def _build_ticker_timeseries_entry(
     if not ticker_upper or df is None or df.empty:
         return None
 
-    df_sorted = df.sort_index()
-    price_series = _select_price_series(df_sorted, country_code)
-    if price_series is None or price_series.empty:
-        return None
-    price_series = price_series.dropna()
-    if price_series.empty:
-        return None
-
-    market_series = (
-        pd.to_numeric(df_sorted.get("Close"), errors="coerce") if "Close" in df_sorted.columns else price_series
+    # process_ticker_data 호출
+    metrics = process_ticker_data(
+        ticker=ticker_upper,
+        df=df,
+        etf_tickers={ticker_upper},  # 여기서는 ETF/Stock 구분이 모호하므로 일단 ETF로 가정하거나 단일 period 사용
+        etf_ma_period=ma_period,
+        stock_ma_period=ma_period,
+        ma_type=ma_type,
+        min_buy_score=min_buy_score,
     )
-    market_series = market_series.fillna(method="ffill").fillna(method="bfill")
 
-    base_date_norm = pd.to_datetime(base_date).normalize()
-    latest_data_date = pd.to_datetime(df_sorted.index[-1]).normalize()
-    if latest_data_date >= base_date_norm and len(market_series) > 1:
-        market_prev = float(market_series.iloc[-2])
-    else:
-        market_prev = float(market_series.iloc[-1]) if not market_series.empty else None
+    if metrics is None:
+        # 데이터 부족 등으로 계산 실패한 경우
+        # 하지만 기존 로직에서는 data_insufficient 플래그를 달고 부분 데이터를 반환하기도 함
+        # process_ticker_data는 None을 반환하므로, 여기서 예외 처리가 필요할 수 있음.
+        # 그러나 기존 로직도 데이터가 매우 부족하면 None을 반환하거나 data_insufficient=True로 처리.
+        # process_ticker_data는 엄격하게 None을 반환함.
+        # UI 표시를 위해 최소한의 가격 정보라도 필요하다면 별도 처리가 필요하지만,
+        # 백테스트와 일관성을 위해 None이면 추천 대상에서 제외하는 것이 맞음.
+        return None
 
-    market_latest = float(market_series.iloc[-1]) if not market_series.empty else None
+    close_series = metrics["close"]
+    ma_score_series = metrics["ma_score"]
+
+    latest_close = float(close_series.iloc[-1]) if not close_series.empty else 0.0
+    # prev_close는 -2번째 값 (없으면 latest)
+    prev_close = float(close_series.iloc[-2]) if len(close_series) >= 2 else latest_close
+
+    market_latest = latest_close
+    market_prev = prev_close
+
+    # 실시간 데이터 및 NAV 오버라이드
     nav_latest: float | None = None
     price_deviation: float | None = None
-    daily_pct = 0.0
 
     country_lower = (country_code or "").strip().lower()
     is_kor_market = country_lower in {"kr", "kor"}
@@ -591,134 +532,62 @@ def _build_ticker_timeseries_entry(
         if isinstance(deviation_raw, (int, float)):
             price_deviation = round(float(deviation_raw), 2)
 
-    # 일간 변동률 계산: 개장 시간 이후에만 표시 (개장 전에는 0)
+    # 일간 변동률 계산
+    daily_pct = 0.0
     if market_latest and market_prev and market_prev > 0:
-        # 현재 시간이 개장 시간 이후인지 확인
         now = datetime.now()
         market_schedule = config.MARKET_SCHEDULES.get(country_lower, {})
         market_open_time = market_schedule.get("open")
 
-        # 개장 시간 이후에만 일간 변동률 계산
         if market_open_time and now.time() >= market_open_time:
-            try:
-                daily_pct = ((market_latest / market_prev) - 1.0) * 100
-            except ZeroDivisionError:
-                daily_pct = 0.0
-        else:
-            # 개장 전에는 0으로 표시
-            daily_pct = 0.0
+            daily_pct = ((market_latest / market_prev) - 1.0) * 100
 
-    # 변수 초기화 (UnboundLocalError 방지)
-    data_insufficient = False
-    moving_average = pd.Series()
-    score_value = 0.0
-    consecutive_buy_days = 0
-    rsi_score = 0.0
-
-    # 데이터 충분성 검증 (config 설정에 따라 활성화/비활성화)
-    if config.ENABLE_DATA_SUFFICIENCY_CHECK:
-        # MA 타입에 따라 필요한 데이터 양 결정
-        ma_type_upper = ma_type.upper()
-        if ma_type_upper in {"EMA", "DEMA", "TEMA"}:
-            # 지수 이동평균은 더 많은 데이터 필요 (안정화를 위해)
-            ideal_multiplier = 2.0
-        elif ma_type_upper == "HMA":
-            # Hull MA는 중간 정도
-            ideal_multiplier = 1.5
-        else:  # SMA, WMA 등
-            ideal_multiplier = 1.0
-
-        ideal_data_required = int(ma_period * ideal_multiplier)
-
-        # 데이터가 이상적인 양보다 적으면 완화된 기준 적용 (신규 상장 ETF 대응)
-        if len(price_series) < ideal_data_required:
-            # 완화된 기준: multiplier의 절반 (최소 1배)
-            relaxed_multiplier = max(ideal_multiplier / 2.0, 1.0)
-            min_required_data = int(ma_period * relaxed_multiplier)
-            logger.info(
-                f"[{ticker_upper}] 데이터 부족으로 완화된 기준 적용 (보유: {len(price_series)}개, "
-                f"이상: {ideal_data_required}개, 최소: {min_required_data}개, MA타입: {ma_type_upper})"
-            )
-        else:
-            # 충분한 데이터가 있으면 이상적인 기준 적용
-            min_required_data = ideal_data_required
-
-        if len(price_series) < min_required_data:
-            logger.warning(
-                f"[{ticker_upper}] 데이터 부족 - 점수/RSI/지속 계산 불가 (보유: {len(price_series)}개, 필요: {min_required_data}개 이상, MA기간: {ma_period})"
-            )
-            # 데이터 부족이지만 가격 정보는 포함 (점수/RSI/지속만 0으로 설정)
-            data_insufficient = True
-            moving_average = pd.Series()
-            score_value = 0.0
-            consecutive_buy_days = 0
-            rsi_score = 0.0
-        else:
-            data_insufficient = False
-            moving_average = calculate_moving_average(price_series, ma_period, ma_type)
-            ma_score_series = calculate_ma_score(price_series, moving_average)
-            score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
-            consecutive_buy_days = get_buy_signal_streak(score_value, ma_score_series, min_buy_score)
-
-            rsi_score = calculate_rsi_for_ticker(price_series)
-            if rsi_score == 0.0 and len(price_series) < 15:
-                logger.warning(f"[RSI] {ticker_upper} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
-    else:
-        # ENABLE_DATA_SUFFICIENCY_CHECK = False인 경우 모든 종목에 대해 계산 시도
-        data_insufficient = False
-        moving_average = calculate_moving_average(price_series, ma_period, ma_type)
-        ma_score_series = calculate_ma_score(price_series, moving_average)
-        score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
-        consecutive_buy_days = get_buy_signal_streak(score_value, ma_score_series, min_buy_score)
-
-        rsi_score = calculate_rsi_for_ticker(price_series)
-        if rsi_score == 0.0 and len(price_series) < 15:
-            logger.warning(f"[RSI] {ticker_upper} 데이터 부족: {len(price_series)}개 (최소 15개 필요)")
-
-    recent_prices = market_series.tail(63)
+    # UI용 추가 지표 계산
+    recent_prices = close_series.tail(63)
     trend_prices = [round(float(val), 6) for val in recent_prices.tolist()] if not recent_prices.empty else []
 
     drawdown_from_high_pct = 0.0
-    if isinstance(price_series, pd.Series):
-        price_valid = price_series.dropna()
-        if not price_valid.empty:
-            try:
-                latest_price = float(market_latest) if market_latest is not None else float(price_valid.iloc[-1])
-                highest_price = float(price_valid.max())
-            except (TypeError, ValueError):
-                latest_price = None
-                highest_price = None
-            if latest_price is not None and highest_price and highest_price > 0:
-                drawdown_from_high_pct = round(((latest_price / highest_price) - 1.0) * 100, 2)
+    if not close_series.empty:
+        try:
+            cur_price = float(market_latest)
+            high_price = float(close_series.max())
+            if high_price > 0:
+                drawdown_from_high_pct = round(((cur_price / high_price) - 1.0) * 100, 2)
+        except Exception:
+            pass
 
-    # 시초가 데이터 추출 (당일 매수 종목의 평가손익 계산용)
-    open_price = None
-    if "Open" in df_sorted.columns:
-        open_series = pd.to_numeric(df_sorted["Open"], errors="coerce").dropna()
-        if not open_series.empty:
-            open_price = float(open_series.iloc[-1])
+    score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
+
+    # process_ticker_data의 rsi_score는 시리즈일 수도 있고 실수일 수도 있음 (캐시된 경우)
+    rsi_val = metrics.get("rsi_score")
+    if isinstance(rsi_val, pd.Series):
+        rsi_last = float(rsi_val.iloc[-1]) if not rsi_val.empty else 0.0
+    else:
+        rsi_last = float(rsi_val) if rsi_val is not None else 0.0
 
     ticker_data = {
         "price": market_latest,
         "nav_price": nav_latest,
-        "prev_close": market_prev if market_prev is not None else market_latest,
+        "prev_close": market_prev,
         "daily_pct": round(daily_pct, 2),
-        "open": open_price,
-        "close": price_series,
-        "s1": moving_average.iloc[-1] if not moving_average.empty else None,
+        "open": float(metrics["open"].iloc[-1])
+        if metrics.get("open") is not None and not metrics["open"].empty
+        else None,
+        "close": close_series,
+        "s1": float(metrics["ma"].iloc[-1]) if metrics["ma"] is not None and not metrics["ma"].empty else None,
         "s2": None,
         "score": score_value,
-        "rsi_score": rsi_score,
-        "filter": consecutive_buy_days,
-        "ret_1w": _compute_trailing_return(price_series, 5),
-        "ret_2w": _compute_trailing_return(price_series, 10),
-        "ret_1m": _compute_trailing_return(price_series, 21),
-        "ret_3m": _compute_trailing_return(price_series, 63),
+        "rsi_score": rsi_last,
+        "filter": int(metrics["buy_signal_days"].iloc[-1]) if not metrics["buy_signal_days"].empty else 0,
+        "ret_1w": _compute_trailing_return(close_series, 5),
+        "ret_2w": _compute_trailing_return(close_series, 10),
+        "ret_1m": _compute_trailing_return(close_series, 21),
+        "ret_3m": _compute_trailing_return(close_series, 63),
         "trend_prices": trend_prices,
         "price_deviation": price_deviation,
         "ma_period": ma_period,
         "drawdown_from_high": drawdown_from_high_pct,
-        "data_insufficient": data_insufficient if "data_insufficient" in locals() else False,
+        "data_insufficient": False,  # process_ticker_data가 None을 반환하므로 여기 도달하면 충분함
     }
     return ticker_data
 
@@ -811,12 +680,6 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
         entry.setdefault("name", norm)
         if "category" not in entry or not entry["category"]:
             raise ValueError(f"종목 {norm}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
-        entry["recommend_enabled"] = meta.get("recommend_enabled", True)
-        full_meta_map[norm] = entry
-
-    disabled_tickers = {
-        ticker for ticker, meta in full_meta_map.items() if not bool(meta.get("recommend_enabled", True))
-    }
     pairs: list[tuple[str, str]] = []
     pair_seen: set[str] = set()
     for stock in etf_universe:
@@ -1226,7 +1089,6 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
     decisions.extend(sold_entries)
 
     # 결과 포맷팅
-    disabled_note = DECISION_NOTES.get("NO_RECOMMEND", "추천 제외")
     held_category_names: set[str] = set()
     for held_ticker in holdings.keys():
         meta_info = etf_meta_map.get(held_ticker) or {}
@@ -1267,7 +1129,6 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
         if not category:
             raise ValueError(f"종목 {ticker}의 카테고리가 없습니다. 모든 종목은 카테고리가 있어야 합니다.")
         ticker_upper = str(ticker).upper()
-        recommend_enabled = ticker_upper not in disabled_tickers
 
         # 보유일 계산 (현재 날짜 기준)
         base_norm = base_date.normalize()
@@ -1423,11 +1284,6 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
 
         streak_val = int(filter_days)
 
-        if not recommend_enabled:
-            if state in {"BUY", "BUY_REPLACE"}:
-                state = "WAIT"
-            phrase = disabled_note
-
         rsi_score_val = decision.get("rsi_score", 0.0)
 
         result_entry = {
@@ -1453,7 +1309,6 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
             "holding_days": holding_days_val,
             "phrase": phrase,
             "state_order": DECISION_CONFIG.get(state, {}).get("order", 99),
-            "recommend_enabled": recommend_enabled,
         }
 
         results.append(result_entry)
@@ -1475,7 +1330,6 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
         item
         for item in results
         if item["state"] == "WAIT"
-        and item.get("recommend_enabled", True)
         and not pd.isna(item.get("score"))
         and item.get("score", float("nan")) > min_buy_score
     ]
@@ -1589,7 +1443,7 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
             category_counts_normalized.get(category_key, 0) - sell_in_same_category + buy_replace_in_same_category
         )
 
-        if category_key and effective_category_count >= category_limit:
+        if category_key and effective_category_count >= category_limit and not is_category_exception(category):
             # 카테고리 중복인 경우 BUY로 변경하지 않고 WAIT 상태 유지
             logger.info(
                 f"[PIPELINE BUY BLOCKED] {item.get('ticker')} 매수 차단 - '{category}' 카테고리 중복 (현재 {effective_category_count}개)"

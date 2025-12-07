@@ -17,6 +17,10 @@ DECISION_CONFIG = getattr(_constants_mod, "DECISION_CONFIG")
 
 # 추천 함수
 from logic.recommend.portfolio import generate_daily_recommendations_for_portfolio
+from strategies.maps.evaluator import StrategyEvaluator
+
+# 공유 로직
+from strategies.maps.metrics import process_ticker_data
 
 __all__ = [
     "StrategyRules",
@@ -24,4 +28,6 @@ __all__ = [
     "run_single_ticker_backtest",
     "DECISION_CONFIG",
     "generate_daily_recommendations_for_portfolio",
+    "process_ticker_data",
+    "StrategyEvaluator",
 ]

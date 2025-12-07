@@ -1,0 +1,46 @@
+{
+    "order": 20,
+    "icon": "🇺🇸",
+    "name": "미국 모멘텀",
+    "desc": "미국 ETF 포트폴리오 (USD)",
+    "country_code": "us",
+    "currency": "usd",
+    "slack_channel": "C0A0X2LTS3X",
+    "initial_capital_krw": "100000000",
+    "show_hold_only": false,
+    "strategy": {
+        "MONTHS_RANGE": 12,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "MA_PERIOD": 55,
+        "MA_TYPE": "SMA",
+        "PORTFOLIO_TOPN": 8,
+        "REPLACE_SCORE_THRESHOLD": 2,
+        "STOP_LOSS_PCT": 10,
+        "OVERBOUGHT_SELL_THRESHOLD": 85,
+        "TRAILING_STOP_PCT": 0,
+        "COOLDOWN_DAYS": 2,
+        "MIN_BUY_SCORE": 0,
+        "CORE_HOLDINGS": [],
+        "CAGR": 78.037677,
+        "MDD": -12.615485,
+        "BACKTESTED_DATE": "2025-12-07 09:53"
+    },
+    "benchmarks": [
+        {
+            "ticker": "SPY",
+            "name": "S&P 500"
+        },
+        {
+            "ticker": "QQQ",
+            "name": "Nasdaq 100"
+        },
+        {
+            "ticker": "QLD",
+            "name": "Nasdaq 100 x2"
+        },
+        {
+            "ticker": "SPMO",
+            "name": "Invesco S&P 500 Momentum ETF"
+        }
+    ]
+}

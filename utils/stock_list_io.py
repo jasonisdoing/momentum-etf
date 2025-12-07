@@ -1,6 +1,7 @@
 import json
 import os
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterable
+from typing import Any
 
 from utils.logger import get_app_logger
 
@@ -13,11 +14,11 @@ def _get_data_dir():
     return os.path.join(project_root, "zsettings")
 
 
-_COUNTRY_RAW_CACHE: Dict[str, List[Dict]] = {}
-_LISTING_CACHE: Dict[tuple[str, str], Optional[str]] = {}
+_COUNTRY_RAW_CACHE: dict[str, list[dict]] = {}
+_LISTING_CACHE: dict[tuple[str, str], str | None] = {}
 
 
-def _load_country_raw(country: str) -> List[Dict]:
+def _load_country_raw(country: str) -> list[dict]:
     country_norm = (country or "").strip().lower()
     if country_norm in _COUNTRY_RAW_CACHE:
         return _COUNTRY_RAW_CACHE[country_norm]
@@ -28,7 +29,7 @@ def _load_country_raw(country: str) -> List[Dict]:
         return []
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, list):
                 _COUNTRY_RAW_CACHE[country_norm] = data
@@ -43,17 +44,15 @@ def _load_country_raw(country: str) -> List[Dict]:
     return []
 
 
-def get_etfs(
-    country: str, include_extra_tickers: Optional[Iterable[str]] = None
-) -> List[Dict[str, str]]:
+def get_etfs(country: str, include_extra_tickers: Iterable[str] | None = None) -> list[dict[str, str]]:
     """
     'zsettings/stocks/{country}.json' 파일에서 종목 목록을 반환합니다.
     """
-    all_etfs: List[Dict[str, Any]] = []
+    all_etfs: list[dict[str, Any]] = []
     seen_tickers = set()
 
     data = _load_country_raw(country)
-    by_ticker: Dict[str, Dict[str, Any]] = {}
+    by_ticker: dict[str, dict[str, Any]] = {}
     for category_block in data:
         if not isinstance(category_block, dict) or "tickers" not in category_block:
             continue
@@ -78,7 +77,6 @@ def get_etfs(
             new_item["ticker"] = ticker_norm
             new_item["type"] = "etf"
             new_item["category"] = category_name
-            new_item["recommend_enabled"] = item.get("recommend_enabled") is not False
             if item.get("listing_date"):
                 new_item["listing_date"] = item["listing_date"]
             all_etfs.append(new_item)
@@ -87,17 +85,12 @@ def get_etfs(
     if not all_etfs:
         return all_etfs
 
-    # 추천 제외 플래그가 설정된 종목은 기본 유니버스에서 제거
-    filtered: List[Dict[str, Any]] = [
-        item for item in all_etfs if item.get("recommend_enabled", True)
-    ]
-    disabled_count = len(all_etfs) - len(filtered)
+    filtered = all_etfs
 
     logger.info(
-        "[%s] 전체 ETF 유니버스 로딩: %d개 종목 (추천 제외 %d개 필터링)",
+        "[%s] 전체 ETF 유니버스 로딩: %d개 종목",
         (country or "").upper(),
         len(filtered),
-        disabled_count,
     )
 
     if include_extra_tickers:
@@ -107,21 +100,21 @@ def get_etfs(
             if not norm or norm in existing:
                 continue
             src = by_ticker.get(norm)
-            if src and src.get("recommend_enabled", True):
+            if src:
                 filtered.append(src)
                 existing.add(norm)
 
     return filtered
 
 
-def get_all_etfs(country: str) -> List[Dict[str, Any]]:
+def get_all_etfs(country: str) -> list[dict[str, Any]]:
     """Return every ETF entry defined in zsettings/stocks/{country}.json without filtering."""
 
     raw_data = _load_country_raw(country)
     if not raw_data:
         return []
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     seen: set[str] = set()
     for category_block in raw_data:
         if not isinstance(category_block, dict):
@@ -148,12 +141,11 @@ def get_all_etfs(country: str) -> List[Dict[str, Any]]:
             entry["ticker"] = ticker
             entry.setdefault("type", "etf")
             entry.setdefault("category", category_name)
-            entry["recommend_enabled"] = item.get("recommend_enabled") is not False
             results.append(entry)
     return results
 
 
-def save_etfs(country: str, data: List[Dict]):
+def save_etfs(country: str, data: list[dict]):
     """
     주어진 데이터를 'zsettings/stocks/{country}.json' 파일에 저장합니다.
     """
@@ -164,9 +156,7 @@ def save_etfs(country: str, data: List[Dict]):
     try:
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
-        logger.info(
-            "%d개 카테고리의 종목 정보가 '%s'에 저장되었습니다.", len(data), file_path
-        )
+        logger.info("%d개 카테고리의 종목 정보가 '%s'에 저장되었습니다.", len(data), file_path)
         country_norm = (country or "").strip().lower()
         _COUNTRY_RAW_CACHE[country_norm] = data
     except Exception as e:
@@ -174,7 +164,7 @@ def save_etfs(country: str, data: List[Dict]):
         raise
 
 
-def get_etf_categories(country: str) -> List[str]:
+def get_etf_categories(country: str) -> list[str]:
     """
     지정된 국가의 모든 ETF 카테고리 목록을 반환합니다.
     """
@@ -185,14 +175,11 @@ def get_etf_categories(country: str) -> List[str]:
         return []
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, list):
                 for category_block in data:
-                    if (
-                        isinstance(category_block, dict)
-                        and "category" in category_block
-                    ):
+                    if isinstance(category_block, dict) and "category" in category_block:
                         categories.add(category_block["category"])
     except Exception as e:
         logger.warning("'%s' 파일에서 카테고리 읽기 실패: %s", file_path, e)
@@ -200,7 +187,7 @@ def get_etf_categories(country: str) -> List[str]:
     return sorted(list(categories))
 
 
-def get_listing_date(country: str, ticker: str) -> Optional[str]:
+def get_listing_date(country: str, ticker: str) -> str | None:
     country_norm = (country or "").strip().lower()
     ticker_norm = str(ticker or "").strip()
     cache_key = (country_norm, ticker_norm)
@@ -209,9 +196,7 @@ def get_listing_date(country: str, ticker: str) -> Optional[str]:
 
     data = _load_country_raw(country_norm)
     for category_block in data:
-        tickers_list = (
-            category_block.get("tickers") if isinstance(category_block, dict) else None
-        )
+        tickers_list = category_block.get("tickers") if isinstance(category_block, dict) else None
         if not isinstance(tickers_list, list):
             continue
         for item in tickers_list:
@@ -238,9 +223,7 @@ def set_listing_date(country: str, ticker: str, listing_date: str) -> None:
     updated = False
     changed = False
     for category_block in data:
-        tickers_list = (
-            category_block.get("tickers") if isinstance(category_block, dict) else None
-        )
+        tickers_list = category_block.get("tickers") if isinstance(category_block, dict) else None
         if not isinstance(tickers_list, list):
             continue
         for item in tickers_list:

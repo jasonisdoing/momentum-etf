@@ -25,8 +25,13 @@ select = [
 # 무시할 규칙
 ignore = [
     "E402",  # module level import not at top of file
-    "E501",
-    "N999",  # Invalid module name (due to hyphen in project directory)
+    "E501",  # line too long
+    "N999",  # Invalid module name
+    "E261",  # at least two spaces before inline comment
+    "E303",  # too many blank lines
+    "E305",  # expected 2 blank lines after class or function definition
+    "W291",  # trailing whitespace
+    "W293",  # blank line contains whitespace
 ]
 
 [tool.ruff.format]

@@ -12,7 +12,7 @@ import pandas as pd
 import config
 from logic.entry_point import StrategyRules, run_portfolio_backtest
 from utils.account_registry import get_common_file_settings
-from utils.data_loader import get_latest_trading_day, get_trading_days
+from utils.data_loader import get_exchange_rate_series, get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
 from utils.settings_loader import (
     AccountSettingsError,
@@ -104,6 +104,7 @@ def run_account_backtest(
     prefetched_etf_universe: Sequence[Mapping[str, Any]] | None = None,
     prefetched_metrics: Mapping[str, dict[str, Any]] | None = None,
     trading_calendar: Sequence[pd.Timestamp] | None = None,
+    prefetched_fx_series: pd.Series | None = None,
 ) -> AccountBacktestResult:
     """계정 ID를 기반으로 백테스트를 실행합니다."""
 
@@ -186,6 +187,8 @@ def run_account_backtest(
         override_settings,
         account_settings,
         precision_settings,
+        start_date=start_date,
+        prefetched_fx_series=prefetched_fx_series,
     )
     initial_capital_value = capital_info.local
 
@@ -403,6 +406,8 @@ def _resolve_initial_capital(
     override_settings: Mapping[str, Any],
     account_settings: Mapping[str, Any],
     precision_settings: Mapping[str, Any],
+    start_date: pd.Timestamp | None = None,
+    prefetched_fx_series: pd.Series | None = None,
 ) -> InitialCapitalInfo:
     def _coerce_positive_float(value: Any) -> float | None:
         try:
@@ -412,9 +417,10 @@ def _resolve_initial_capital(
         return candidate if math.isfinite(candidate) and candidate > 0 else None
 
     currency = str(precision_settings.get("currency") or account_settings.get("currency") or "KRW").upper()
-    if currency not in {"KRW", "KR"}:
-        raise ValueError(f"지원하지 않는 통화 코드입니다: {currency}")
-    currency = "KRW"
+    # if currency not in {"KRW", "KR"}:
+    #     raise ValueError(f"지원하지 않는 통화 코드입니다: {currency}")
+    if currency == "KR":
+        currency = "KRW"
 
     krw_override = _coerce_positive_float(override_settings.get("initial_capital_krw"))
     if krw_override is None:
@@ -436,7 +442,33 @@ def _resolve_initial_capital(
         if local_override is not None:
             break
 
+    fx_rate = 1.0
+    if currency != "KRW" and start_date is not None:
+        try:
+            # Prefetch된 환율 시리즈가 있으면 사용
+            if prefetched_fx_series is not None and not prefetched_fx_series.empty:
+                fx_rate = float(prefetched_fx_series.asof(start_date))
+                if pd.isna(fx_rate):
+                    fx_rate = float(prefetched_fx_series.iloc[-1])
+            else:
+                # Fallback: 실시간 조회
+                # 시작일 기준 환율 조회 (약간의 range를 두어 데이터 확보)
+                search_start = start_date - pd.Timedelta(days=5)
+                search_end = start_date + pd.Timedelta(days=1)
+                fx_series = get_exchange_rate_series(search_start, search_end)
+                if fx_series is not None and not fx_series.empty:
+                    # start_date와 가장 가까운(이전 포함) 날짜의 환율 사용
+                    # ffill 후 마지막 값 사용 or asof 사용
+                    fx_rate = float(fx_series.asof(start_date))
+                    if pd.isna(fx_rate):
+                        fx_rate = float(fx_series.iloc[-1])
+        except Exception:
+            fx_rate = 1.0  # fallback
+
     local_capital = float(krw_override)
+    if currency != "KRW" and fx_rate > 0:
+        local_capital = float(krw_override) / fx_rate
+
     if local_override is not None:
         local_capital = float(local_override)
 
@@ -644,22 +676,44 @@ def _build_summary(
     pv_series = portfolio_df["total_value"].astype(float)
     pv_series.index = pd.to_datetime(pv_series.index)
 
-    years = max((end_date - start_date).days / 365.25, 0.0)
-    final_value = float(final_row["total_value"])
-    initial_capital_local = float(initial_capital)
-    initial_capital_krw = float(initial_capital_krw)
-    fx_rate_to_krw = float(fx_rate_to_krw) if fx_rate_to_krw else 1.0
-    currency = (currency or country_code or "KRW").upper()
-    cagr = 0.0
-    if years > 0 and initial_capital_local > 0:
-        cagr = (final_value / initial_capital_local) ** (1 / years) - 1
+    initial_capital_local = initial_capital
+    final_value = float(pv_series.iloc[-1])
 
-    running_max = pv_series.cummax()
-    drawdown_series = (running_max - pv_series) / running_max.replace({0: pd.NA})
+    # 환율 데이터 로드 및 KRW 가치 계산
+    pv_series_krw = pv_series.copy()
+    initial_capital_val_for_cagr = initial_capital
+    if currency != "KRW":
+        try:
+            fx_series = get_exchange_rate_series(start_date, end_date)
+            if fx_series is not None and not fx_series.empty:
+                # 인덱스 정렬 및 보간
+                fx_series = fx_series.reindex(pv_series.index).fillna(method="ffill").fillna(method="bfill")
+                pv_series_krw = pv_series * fx_series
+
+                # CAGR 계산을 위한 초기 자본금은 KRW 기준 사용
+                initial_capital_val_for_cagr = initial_capital_krw
+
+                # 리포트에 환율 정보 추가 (옵션)
+                # logger.info(f"환율 적용 완료: {len(fx_series)}일치")
+        except Exception:
+            # 환율 조회 실패 시 경고 로그?
+            pass
+
+    years = max((end_date - start_date).days / 365.25, 0.0)
+
+    # 평가액(KRW 기준) 사용
+    final_value_krw = float(pv_series_krw.iloc[-1])
+
+    cagr = 0.0
+    if years > 0 and initial_capital_val_for_cagr > 0:
+        cagr = (final_value_krw / initial_capital_val_for_cagr) ** (1 / years) - 1
+
+    running_max = pv_series_krw.cummax()
+    drawdown_series = (running_max - pv_series_krw) / running_max.replace({0: pd.NA})
     drawdown_series = drawdown_series.fillna(0.0)
     max_drawdown = float(drawdown_series.max()) if not drawdown_series.empty else 0.0
 
-    daily_returns = pv_series.pct_change().dropna()
+    daily_returns = pv_series_krw.pct_change().dropna()
     sharpe_ratio = 0.0
     if not daily_returns.empty:
         mean_ret = daily_returns.mean()
