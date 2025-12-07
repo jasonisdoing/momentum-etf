@@ -1604,8 +1604,7 @@ def _compose_tuning_report(
 
                     try:
                         # tuning_metadata에서 country_code 추출
-                        lookup_country = tuning_metadata.get("country_code", "kor") if tuning_metadata else "kor"
-                        etf_list = get_etfs(lookup_country)
+                        etf_list = get_etfs(account_id)
                         ticker_to_name = {
                             str(etf.get("ticker")): etf.get("name", "") for etf in etf_list if etf.get("ticker")
                         }
@@ -1913,9 +1912,9 @@ def run_account_tuning(
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
-    etf_universe = get_etfs(country_code)
+    etf_universe = get_etfs(account_norm)
     if not etf_universe:
-        logger.error("[튜닝] '%s' 종목 데이터를 찾을 수 없습니다.", country_code)
+        logger.error("[튜닝] '%s' 종목 데이터를 찾을 수 없습니다.", account_norm)
         return None
 
     tickers = [str(item.get("ticker")) for item in etf_universe if item.get("ticker")]
@@ -2092,6 +2091,7 @@ def run_account_tuning(
         start_date=date_range_prefetch[0],
         end_date=date_range_prefetch[1],
         warmup_days=warmup_days,
+        account_id=account_id,
     )
     if missing_prefetch:
         raise MissingPriceDataError(

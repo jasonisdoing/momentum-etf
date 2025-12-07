@@ -194,6 +194,17 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
             styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, col])
 
     # 가격 컬럼 포맷팅
+    def _safe_format(fmt: str):
+        def _formatter(x):
+            if pd.isna(x) or x is None:
+                return "-"
+            try:
+                return fmt.format(x)
+            except Exception:
+                return str(x)
+
+        return _formatter
+
     format_dict = {}
     price_label = "현재가"
 
@@ -203,19 +214,19 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
 
     if price_label in df.columns:
         if is_kr:
-            format_dict[price_label] = "{:,.0f}원"
+            format_dict[price_label] = _safe_format("{:,.0f}원")
         elif is_us:
-            format_dict[price_label] = "${:,.2f}"
+            format_dict[price_label] = _safe_format("${:,.2f}")
         else:
-            format_dict[price_label] = "{:,.2f}"
+            format_dict[price_label] = _safe_format("{:,.2f}")
 
     if "Nav" in df.columns:
         if is_kr:
-            format_dict["Nav"] = "{:,.0f}원"
+            format_dict["Nav"] = _safe_format("{:,.0f}원")
         elif is_us:
-            format_dict["Nav"] = "${:,.2f}"
+            format_dict["Nav"] = _safe_format("${:,.2f}")
         else:
-            format_dict["Nav"] = "{:,.2f}"
+            format_dict["Nav"] = _safe_format("{:,.2f}")
 
     if format_dict:
         styled = styled.format(format_dict)

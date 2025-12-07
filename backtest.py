@@ -74,7 +74,7 @@ def main() -> None:
     # 웜업 기간을 전략의 MA_PERIOD로 설정
     warmup_days = strategy_rules.ma_period
 
-    universe_tickers = [etf["ticker"] for etf in get_etfs(country_code) if etf.get("ticker")]
+    universe_tickers = [etf["ticker"] for etf in get_etfs(account_id) if etf.get("ticker")]
     benchmark_tickers = get_benchmark_tickers(account_settings)
     tickers = sorted({*(str(t).strip().upper() for t in universe_tickers if t), *benchmark_tickers})
     common_settings = load_common_settings()
@@ -97,6 +97,7 @@ def main() -> None:
         start_date=date_range_prefetch[0],
         end_date=date_range_prefetch[1],
         warmup_days=0,
+        account_id=account_id,
     )
     if missing:
         raise MissingPriceDataError(

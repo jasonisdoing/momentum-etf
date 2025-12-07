@@ -15,10 +15,27 @@ class AccountSettingsError(RuntimeError):
 
 
 SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "zsettings"
-ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT / "account"
+ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT  # Backward compatibility alias
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
 logger = get_app_logger()
+
+
+def list_available_accounts() -> list[str]:
+    """
+    zsettings 디렉토리 하위의 유효한 계정(디렉토리 내 config.json 존재) 목록을 반환합니다.
+    """
+    accounts = []
+    if not SETTINGS_ROOT.exists():
+        return []
+
+    for item in SETTINGS_ROOT.iterdir():
+        if item.is_dir() and not item.name.startswith(".") and not item.name.startswith("_"):
+            config_path = item / "config.json"
+            if config_path.exists():
+                accounts.append(item.name)
+
+    return sorted(accounts)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -86,17 +103,22 @@ def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
 
 @cache
 def get_account_settings(account_id: str) -> dict[str, Any]:
-    """`zsettings/account/{account}.json` 파일을 로드합니다."""
+    """`zsettings/{account}/config.json` 파일을 로드합니다."""
 
     account = (account_id or "").strip().lower()
     if not account:
         raise AccountSettingsError("계정 식별자를 지정해야 합니다.")
 
-    path = ACCOUNT_SETTINGS_DIR / f"{account}.json"
+    # New: zsettings/<account>/config.json
+    path = SETTINGS_ROOT / account / "config.json"
     logger.debug("계정 설정 로드: %s", path)
+
     settings = _load_json(path)
     settings.setdefault("account", account)
-    settings.setdefault("country_code", settings.get("country_code") or account)
+
+    if not settings.get("country_code"):
+        raise AccountSettingsError(f"'{path}' 설정 파일에 필수 항목 'country_code'가 누락되었습니다.")
+
     return settings
 
 

@@ -207,9 +207,9 @@ def run_account_backtest(
         if not is_tuning_fast_path:
             _log(f"[백테스트] 사전 추려진 ETF 대표군 {len(etf_universe)}개를 재사용합니다.")
     else:
-        etf_universe = get_etfs(country_code)
+        etf_universe = get_etfs(account_id)
     if not etf_universe:
-        raise AccountSettingsError(f"'zsettings/stocks/{country_code}.json' 파일에서 종목을 찾을 수 없습니다.")
+        raise AccountSettingsError(f"계정 '{account_id}'에 대한 종목 설정(stocks.json)을 찾을 수 없습니다.")
 
     if excluded_upper:
         before_count = len(etf_universe)

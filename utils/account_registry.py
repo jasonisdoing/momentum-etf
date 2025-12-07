@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from pathlib import Path
 from typing import Any
 
 from utils.logger import get_app_logger
@@ -15,11 +14,11 @@ from utils.settings_loader import (
     get_account_strategy,
     get_account_strategy_sections,
     get_strategy_rules,
+    list_available_accounts,
     load_common_settings,
     resolve_strategy_params,
 )
 
-_SETTINGS_DIR = Path(__file__).resolve().parent.parent / "zsettings" / "account"
 _ICON_FALLBACKS: dict[str, str] = {
     "kor": "🇰🇷",
 }
@@ -37,20 +36,6 @@ def _resolve_order(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float("inf")
-
-
-def list_available_accounts() -> list[str]:
-    """`zsettings/account`에 존재하는 계정 ID 목록을 반환합니다."""
-
-    if not _SETTINGS_DIR.exists():
-        logger.warning("계정 설정 디렉터리를 찾을 수 없습니다: %s", _SETTINGS_DIR)
-        return []
-
-    return [
-        path.stem.lower()
-        for path in sorted(_SETTINGS_DIR.glob("*.json"))
-        if path.is_file() and path.suffix.lower() == ".json"
-    ]
 
 
 def load_account_configs() -> list[dict[str, Any]]:

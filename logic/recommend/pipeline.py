@@ -58,14 +58,14 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
 
     # 2. 계정 설정 로드
     account_config = get_account_settings(account_id)
-    country_code = account_config.get("country", "kor").lower()
+    country_code = account_config.get("country_code", "kor").lower()
 
     # 3. 전략 규칙 로드
 
     strategy_rules = get_strategy_rules(account_id)  # 계정별 오버라이드 포함 로드
 
     # 4. 유니버스 로드
-    universe = load_universe(country_code)
+    universe = load_universe(account_id)
     # universe는 list[dict] 형태 (ticker, name, category, etc.)
     etf_meta = {u["ticker"]: u for u in universe}
 
@@ -101,11 +101,13 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
     start_str = start_date_fetch.strftime("%Y-%m-%d")
     end_str = base_date.strftime("%Y-%m-%d")
 
+    logger.info(f"Preparing price data for {account_id} (Country: {country_code})")
     price_data_map, missings = prepare_price_data(
         tickers=list(tickers_to_fetch),
         country=country_code,
         start_date=start_str,
         end_date=end_str,
+        account_id=account_id,
         allow_remote_fetch=True,
     )
     logger.info(f"[{account_id.upper()}] 가격 데이터 로딩 완료")

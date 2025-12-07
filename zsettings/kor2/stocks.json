@@ -1,0 +1,87 @@
+[
+    {
+        "category": "기타",
+        "tickers": [
+            {
+                "ticker": "473640",
+                "name": "HANARO 글로벌 금채굴기업",
+                "listing_date": "2024-01-18",
+                "1_week_avg_volume": 44643,
+                "1_month_earn_rate": 16.9553,
+                "3_month_earn_rate": 34.8694,
+                "6_month_earn_rate": 70.6748,
+                "12_month_earn_rate": 128.8281
+            },
+            {
+                "ticker": "0013P0",
+                "name": "RISE 미국은행TOP10",
+                "listing_date": "2025-02-18",
+                "1_week_avg_volume": 12538,
+                "1_month_earn_rate": 6.599,
+                "3_month_earn_rate": 15.7718,
+                "6_month_earn_rate": 36.0051,
+                "12_month_earn_rate": null
+            },
+            {
+                "ticker": "0107F0",
+                "name": "KIWOOM 미국고배당&AI테크",
+                "listing_date": "2025-09-23",
+                "1_week_avg_volume": 173541,
+                "1_month_earn_rate": 5.8249,
+                "3_month_earn_rate": null,
+                "6_month_earn_rate": null,
+                "12_month_earn_rate": null
+            },
+            {
+                "ticker": "0097L0",
+                "name": "KIWOOM 한국고배당&미국AI테크",
+                "listing_date": "2025-09-02",
+                "1_week_avg_volume": 152964,
+                "1_month_earn_rate": 6.962,
+                "3_month_earn_rate": null,
+                "6_month_earn_rate": null,
+                "12_month_earn_rate": null
+            },
+            {
+                "ticker": "379810",
+                "name": "Kodex 미국나스닥100",
+                "listing_date": "2021-04-09",
+                "1_week_avg_volume": 2230575,
+                "1_month_earn_rate": 1.9707,
+                "3_month_earn_rate": 16.0984,
+                "6_month_earn_rate": 29.9019,
+                "12_month_earn_rate": 31.4863
+            },
+            {
+                "ticker": "379800",
+                "name": "Kodex 미국S&P500",
+                "listing_date": "2021-04-09",
+                "1_week_avg_volume": 3619168,
+                "1_month_earn_rate": 2.8207,
+                "3_month_earn_rate": 12.71,
+                "6_month_earn_rate": 25.7222,
+                "12_month_earn_rate": 23.5328
+            },
+            {
+                "ticker": "459750",
+                "name": "RISE 글로벌주식분산액티브",
+                "listing_date": "2023-06-27",
+                "1_week_avg_volume": 16007,
+                "1_month_earn_rate": 2.3558,
+                "3_month_earn_rate": 11.959,
+                "6_month_earn_rate": 23.1468,
+                "12_month_earn_rate": 27.2625
+            },
+            {
+                "ticker": "468380",
+                "name": "KODEX iShares미국하이일드액티브",
+                "listing_date": "2023-10-19",
+                "1_week_avg_volume": 122018,
+                "1_month_earn_rate": 2.6446,
+                "3_month_earn_rate": 7.4367,
+                "6_month_earn_rate": 12.306,
+                "12_month_earn_rate": 12.4327
+            }
+        ]
+    }
+]

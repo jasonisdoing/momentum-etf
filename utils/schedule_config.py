@@ -5,13 +5,10 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
+from config import MARKET_SCHEDULES
 from utils.account_registry import list_available_accounts
 from utils.market_schedule import generate_market_cron_expressions
 from utils.settings_loader import AccountSettingsError, get_account_settings
-
-_DEFAULT_TIMEZONES: dict[str, str] = {
-    "kor": "Asia/Seoul",
-}
 
 
 class ScheduleConfigError(RuntimeError):
@@ -21,10 +18,6 @@ class ScheduleConfigError(RuntimeError):
 def _normalize_country(value: Any, fallback: str) -> str:
     text = str(value or "").strip().lower()
     return text or fallback
-
-
-def _default_timezone(country_code: str) -> str:
-    return _DEFAULT_TIMEZONES.get(country_code, "UTC")
 
 
 def _build_schedule_entry(account_id: str) -> dict[str, Any] | None:
@@ -45,12 +38,17 @@ def _build_schedule_entry(account_id: str) -> dict[str, Any] | None:
     enabled_raw = schedule.get("enabled")
     enabled_flag = True if enabled_raw is None else bool(enabled_raw)
 
-    timezone_value = (
-        schedule.get("timezone") or schedule.get("recommendation_timezone") or _default_timezone(country_code)
-    )
-    notify_timezone_value = (
-        schedule.get("notify_timezone") or schedule.get("timezone") or _default_timezone(country_code)
-    )
+    timezone_value = schedule.get("timezone") or schedule.get("recommendation_timezone")
+    if not timezone_value:
+        # Fallback to MARKET_SCHEDULES if not in account settings
+        market_config = MARKET_SCHEDULES.get(country_code)
+        if market_config:
+            timezone_value = market_config.get("timezone")
+
+    if not timezone_value:
+        raise ScheduleConfigError(f"Account '{account_id}' (country: {country_code}) has no timezone configured.")
+
+    notify_timezone_value = schedule.get("notify_timezone") or timezone_value
 
     cron_value = schedule.get("recommendation_cron")
     cron_list: list[str] = []

@@ -47,7 +47,9 @@ import warnings
 from config import MARKET_SCHEDULES
 from utils.cache_utils import load_cached_frame, load_cached_frames_bulk, save_cached_frame
 from utils.logger import get_app_logger
-from utils.stock_list_io import get_etfs, get_listing_date, set_listing_date
+from utils.stock_list_io import get_etfs_by_country, get_listing_date, set_listing_date
+
+# ... (omitted code)
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 warnings.filterwarnings(
@@ -506,7 +508,7 @@ def fetch_ohlcv(
     date_range: list[str | None] | None = None,
     base_date: pd.Timestamp | None = None,
     *,
-    cache_country: str | None = None,
+    account_id: str | None = None,
     force_refresh: bool = False,
     update_listing_meta: bool = False,
 ) -> pd.DataFrame | None:
@@ -552,7 +554,7 @@ def fetch_ohlcv(
         country_code,
         start_dt.normalize(),
         end_dt.normalize(),
-        cache_country_override=cache_country,
+        account_id=account_id,
         force_refresh=force_refresh,
         update_listing_meta=update_listing_meta,
     )
@@ -570,12 +572,16 @@ def _fetch_ohlcv_with_cache(
     start_dt: pd.Timestamp,
     end_dt: pd.Timestamp,
     *,
-    cache_country_override: str | None = None,
+    account_id: str | None = None,
     force_refresh: bool = False,
     update_listing_meta: bool = False,
 ) -> pd.DataFrame | None:
     country_code = (country or "").strip().lower()
-    cache_country_code = (cache_country_override or country_code).strip().lower() or country_code
+
+    if not account_id:
+        raise ValueError(f"OHLCV 데이터 조회 시 account_id가 필요합니다. (Ticker: {ticker})")
+
+    cache_key = account_id.strip().lower()
 
     listing_date_str = get_listing_date(country_code, ticker)
     listing_ts = None
@@ -598,7 +604,7 @@ def _fetch_ohlcv_with_cache(
         if listing_ts is None or cache_seed_dt > listing_ts:
             request_start_dt = max(request_start_dt, cache_seed_dt)
 
-    cache_country_display = cache_country_code.upper()
+    cache_key_display = cache_key.upper()
 
     missing_ranges: list[tuple[pd.Timestamp, pd.Timestamp]] = []
     cache_start: pd.Timestamp | None = None
@@ -608,7 +614,7 @@ def _fetch_ohlcv_with_cache(
         cached_df = None
         missing_ranges.append((request_start_dt, end_dt))
     else:
-        cached_df = load_cached_frame(cache_country_code, ticker)
+        cached_df = load_cached_frame(cache_key, ticker)
         # cache_seed_dt는 이미 위에서 가져왔으므로 중복 제거
         if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
             if request_start_dt > cache_seed_dt:
@@ -657,7 +663,7 @@ def _fetch_ohlcv_with_cache(
             end_str = effective_end.strftime("%Y-%m-%d")
             logger.debug(
                 "[CACHE] %s/%s 오늘 개장 전이므로 조회 범위를 조정합니다: %s ~ %s",
-                cache_country_display,
+                cache_key_display,
                 ticker,
                 start_str,
                 end_str,
@@ -678,7 +684,7 @@ def _fetch_ohlcv_with_cache(
             if log_pending:
                 logger.debug(
                     "[CACHE] %s/%s 범위(%s~%s)에 거래일이 없어 캐시 갱신을 건너뜁니다.",
-                    cache_country_display,
+                    cache_key_display,
                     ticker,
                     start_str,
                     end_str,
@@ -688,7 +694,7 @@ def _fetch_ohlcv_with_cache(
         if log_pending:
             logger.info(
                 "[CACHE] %s/%s 누락 구간을 조회합니다: %s ~ %s",
-                cache_country_display,
+                cache_key_display,
                 ticker,
                 start_str,
                 end_str,
@@ -717,7 +723,7 @@ def _fetch_ohlcv_with_cache(
         combined_df = pd.concat(frames)
         combined_df.sort_index(inplace=True)
         combined_df = combined_df[~combined_df.index.duplicated(keep="last")]
-        save_cached_frame(cache_country_code, ticker, combined_df)
+        save_cached_frame(cache_key, ticker, combined_df)
 
         # new_total = combined_df.shape[0]
         # added_count = max(0, new_total - prev_count)
@@ -973,12 +979,14 @@ def fetch_ohlcv_for_tickers(
     date_range: list[str] | None = None,
     warmup_days: int = 0,
     *,
+    account_id: str | None = None,
     allow_remote_fetch: bool = False,
 ) -> tuple[dict[str, pd.DataFrame], list[str]]:
     """
     주어진 티커 목록에 대해 캐시된 OHLCV 데이터를 조회합니다.
     allow_remote_fetch=True로 설정하면 캐시에 없는 종목만 원천에서 조회합니다.
     오늘 날짜의 데이터가 없을 경우 실시간 데이터를 활용합니다.
+        account_id: str | None -> 캐시 컬렉션 키 오버라이드 (예: 계정 ID)
     """
     prefetched_data: dict[str, pd.DataFrame] = {}
 
@@ -1021,7 +1029,7 @@ def fetch_ohlcv_for_tickers(
 
                 schedule = MARKET_SCHEDULES.get(country.lower())
                 if schedule:
-                    tz_name = schedule.get("timezone", "Asia/Seoul")
+                    tz_name = schedule.get("timezone")
                     tz = pytz.timezone(tz_name)
                     now_local = datetime.now(tz)
                     market_open = schedule["open"]
@@ -1040,7 +1048,7 @@ def fetch_ohlcv_for_tickers(
             except Exception as e:
                 logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
 
-    cached_frames = load_cached_frames_bulk(country, tickers)
+    cached_frames = load_cached_frames_bulk(account_id or country, tickers)
     missing: list[str] = []
 
     for raw_ticker in tickers:
@@ -1123,7 +1131,7 @@ def fetch_ohlcv_for_tickers(
                 missing.append(tkr)
                 continue
             ticker_date_range = [ticker_start.strftime("%Y-%m-%d"), adjusted_date_range[1]]
-            df = fetch_ohlcv(ticker=tkr, country=country, date_range=ticker_date_range)
+            df = fetch_ohlcv(ticker=tkr, country=country, date_range=ticker_date_range, account_id=account_id)
             if df is None or df.empty:
                 # 실시간 데이터로 대체 시도
                 if is_today and tkr in realtime_data:
@@ -1157,6 +1165,7 @@ def prepare_price_data(
     start_date: str,
     end_date: str,
     warmup_days: int = 0,
+    account_id: str | None = None,
     allow_remote_fetch: bool = False,
 ) -> tuple[dict[str, pd.DataFrame], list[str]]:
     """Shared helper to populate cache-backed OHLCV data consistently across workflows."""
@@ -1171,6 +1180,7 @@ def prepare_price_data(
         country,
         date_range=date_range,
         warmup_days=warmup_days,
+        account_id=account_id,
         allow_remote_fetch=allow_remote_fetch,
     )
     return prefetched, missing
@@ -1384,23 +1394,12 @@ def _get_display_name(country: str, ticker: str) -> str:
 
     name = ""
     try:
-        etf_blocks = get_etfs(country_code) or []
+        etf_blocks = get_etfs_by_country(country_code) or []
         for block in etf_blocks:
             if isinstance(block, dict):
-                if "tickers" in block:
-                    for item in block.get("tickers", []):
-                        if isinstance(item, dict):
-                            tkr = (item.get("ticker") or "").upper()
-                            if tkr == key[1]:
-                                name = item.get("name") or block.get("name") or ""
-                                break
-                    if name:
-                        break
-                else:
-                    tkr = (block.get("ticker") or "").upper()
-                    if tkr == key[1]:
-                        name = block.get("name", "")
-                        break
+                if block.get("ticker", "").upper() == key[1]:
+                    name = block.get("name") or ""
+                    break
     except Exception:
         pass
 
@@ -1490,7 +1489,7 @@ def get_exchange_rate_series(
     """
     symbol = "KRW=X"
     # country="us"로 설정하여 yfinance를 사용하도록 하고,
-    # cache_country_override="fx"를 사용하여 data/fx 디렉토리에 캐싱
+    # account_id="fx"를 사용하여 data/fx (가상계정) 캐시에 저장
     target_country = "us"
     cache_dir_name = "fx"
 
@@ -1503,7 +1502,7 @@ def get_exchange_rate_series(
         target_country,
         s_dt,
         e_dt,
-        cache_country_override=cache_dir_name,
+        account_id=cache_dir_name,
         force_refresh=False,
     )
 

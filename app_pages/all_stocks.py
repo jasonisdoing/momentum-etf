@@ -17,7 +17,7 @@ from utils.data_loader import (
 )
 from utils.indicators import calculate_ma_score
 from utils.moving_averages import calculate_moving_average
-from utils.stock_list_io import get_etfs
+from utils.stock_list_io import get_etfs_by_country
 
 
 def _format_percent(value: float) -> str:
@@ -75,11 +75,11 @@ def _calculate_drawdown_from_high(close_series: pd.Series) -> float:
     return 0.0
 
 
-def _build_all_stocks_table(country: str = "kor") -> pd.DataFrame:
+def _build_all_stocks_table(country: str) -> pd.DataFrame:
     """모든 종목의 데이터를 수집하여 DataFrame으로 반환."""
 
     # 1. 종목 목록 로드
-    etfs = get_etfs(country)
+    etfs = get_etfs_by_country(country)
     if not etfs:
         return pd.DataFrame()
 
