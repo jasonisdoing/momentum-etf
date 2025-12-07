@@ -9,8 +9,9 @@ from typing import Any
 
 import pandas as pd
 
-from config import BACKTEST_SLIPPAGE
 from logic.common import calculate_held_categories, is_category_exception, select_candidates_by_category
+from logic.common.notes import format_min_score_phrase
+from logic.common.price import calculate_trade_price
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
 from strategies.maps.evaluator import StrategyEvaluator
 from strategies.maps.labeler import compute_net_trade_note
@@ -19,89 +20,6 @@ from utils.logger import get_app_logger
 from utils.report import format_kr_money
 
 logger = get_app_logger()
-
-
-def _format_trend_break_phrase(ma_value: float | None, price_value: float | None, ma_period: int | None) -> str:
-    if ma_value is None or pd.isna(ma_value) or price_value is None or pd.isna(price_value):
-        threshold = ma_value if (ma_value is not None and not pd.isna(ma_value)) else 0.0
-        return f"{DECISION_NOTES['TREND_BREAK']}({threshold:,.0f}원 이하)"
-
-    diff = ma_value - price_value
-    direction = "낮습니다" if diff >= 0 else "높습니다"
-    period_text = ""
-    if ma_period:
-        try:
-            period_text = f"{int(ma_period)}일 "
-        except (TypeError, ValueError):
-            period_text = ""
-    return (
-        f"{DECISION_NOTES['TREND_BREAK']}"
-        f"({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"
-    )
-
-
-def _format_min_score_phrase(score_value: float | None, min_buy_score: float) -> str:
-    template = DECISION_NOTES.get("MIN_SCORE", "최소 {min_buy_score:.1f}점수 미만")
-    try:
-        base = template.format(min_buy_score=min_buy_score)
-    except Exception:
-        base = f"최소 {min_buy_score:.1f}점수 미만"
-
-    if score_value is None or pd.isna(score_value):
-        return f"{base} (현재 점수 없음)"
-    return f"{base} (현재 {score_value:.1f})"
-
-
-def _calculate_trade_price(
-    current_index: int,
-    total_days: int,
-    open_values: any,
-    close_values: any,
-    country_code: str,
-    is_buy: bool,
-) -> float:
-    """
-    거래 가격 계산: 다음날 시초가 + 슬리피지
-
-    Args:
-        current_index: 현재 인덱스 (i)
-        total_days: 전체 거래일 수
-        open_values: Open 가격 배열
-        close_values: Close 가격 배열
-        country_code: 국가 코드
-        is_buy: 매수 여부 (True: 매수, False: 매도)
-
-    Returns:
-        거래 가격
-    """
-    # 다음날 시초가 사용
-    if current_index + 1 < total_days:
-        next_open = open_values[current_index + 1]
-        if pd.notna(next_open):
-            base_price = float(next_open)
-        else:
-            # 다음날 시초가가 없으면 당일 종가 사용
-            base_price = float(close_values[current_index]) if pd.notna(close_values[current_index]) else 0.0
-    else:
-        # 마지막 날은 당일 종가 사용
-        base_price = float(close_values[current_index]) if pd.notna(close_values[current_index]) else 0.0
-
-    if base_price <= 0:
-        return 0.0
-
-    # 슬리피지 적용
-    slippage_config = BACKTEST_SLIPPAGE.get(country_code, BACKTEST_SLIPPAGE.get("kor", {}))
-
-    if is_buy:
-        # 매수: 시초가보다 높은 가격
-        slippage_pct = slippage_config.get("buy_pct", 0.5)
-        trade_price = base_price * (1 + slippage_pct / 100)
-    else:
-        # 매도: 시초가보다 낮은 가격
-        slippage_pct = slippage_config.get("sell_pct", 0.5)
-        trade_price = base_price * (1 - slippage_pct / 100)
-
-    return trade_price
 
 
 def _execute_individual_sells(
@@ -184,7 +102,7 @@ def _execute_individual_sells(
 
             if decision:
                 # 다음날 시초가 + 슬리피지로 매도 가격 계산
-                sell_price = _calculate_trade_price(
+                sell_price = calculate_trade_price(
                     i,
                     total_days,
                     metrics_by_ticker[ticker]["open_values"],
@@ -308,32 +226,15 @@ def _apply_wait_note_if_empty(
     current_note = str(records[-1].get("note") or "").strip()
     if current_note:
         return
-
-    category = ticker_to_category.get(ticker)
-    normalized = str(category).strip().upper() if category else ""
-
-    if (
-        category
-        and not is_category_exception(category)
-        and (category in held_categories or (normalized and normalized in held_categories_normalized))
-    ):
-        records[-1]["note"] = DECISION_NOTES["CATEGORY_DUP"]
-    else:
-        # Calculate minimum required score for replacement
-        if position_state and score_today is not None:
-            held_scores = [
-                score_today.get(t, 0.0)
-                for t, state in position_state.items()
-                if state.get("shares", 0) > 0 and t != "CASH"
-            ]
-            if held_scores:
-                weakest_score = min(held_scores)
-                required_score = weakest_score + replace_threshold
-                records[-1]["note"] = DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score)
-            else:
-                records[-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
-        else:
-            records[-1]["note"] = DECISION_NOTES["PORTFOLIO_FULL"]
+    # Calculate minimum required score for replacement
+    if position_state and score_today is not None:
+        held_scores = [
+            score_today.get(t, 0.0) for t, state in position_state.items() if state.get("shares", 0) > 0 and t != "CASH"
+        ]
+        if held_scores:
+            weakest_score = min(held_scores)
+            required_score = weakest_score + replace_threshold
+            records[-1]["note"] = DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score)
 
 
 def _execute_new_buys(
@@ -437,7 +338,7 @@ def _execute_new_buys(
             continue
 
         # 다음날 시초가 + 슬리피지로 매수 가격 계산
-        buy_price = _calculate_trade_price(
+        buy_price = calculate_trade_price(
             i,
             total_days,
             metrics_by_ticker[ticker_to_buy]["open_values"],
@@ -760,7 +661,7 @@ def run_portfolio_backtest(
                 elif decision_out == "WAIT":
                     score_check = score_today.get(ticker, float("nan"))
                     if pd.isna(score_check) or score_check <= min_buy_score:
-                        note = _format_min_score_phrase(score_check, min_buy_score)
+                        note = format_min_score_phrase(score_check, min_buy_score)
 
             # 핵심 보유 종목 표시
             if decision_out == "HOLD_CORE" and not note:
@@ -1007,17 +908,6 @@ def run_portfolio_backtest(
                         )
                         continue  # 다음 buy_ranked_candidate로 넘어감
                 elif weakest_held_stock:
-                    # 다른 카테고리: 고정 종목 카테고리와 중복 체크 (이미 루프 밖에서 계산됨)
-                    # 교체 대상 종목이 고정 종목 카테고리와 중복되면 차단
-                    if wait_stock_category and wait_stock_category in core_categories:
-                        _update_ticker_note(
-                            daily_records_by_ticker,
-                            replacement_ticker,
-                            dt,
-                            DECISION_NOTES["CATEGORY_DUP"],
-                        )
-                        continue  # 다음 교체 후보로 넘어감
-
                     # 같은 카테고리 종목이 없는 경우: 가장 약한 종목과 임계값 포함 비교
                     if best_new_score > weakest_held_stock["score"] + replace_threshold:
                         ticker_to_sell = weakest_held_stock["ticker"]

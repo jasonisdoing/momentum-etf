@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
 from collections.abc import Mapping
+from datetime import datetime
 from functools import lru_cache
 
 import streamlit as st
@@ -12,13 +12,13 @@ from utils.account_registry import (
     load_account_configs,
     pick_default_account,
 )
-from utils.stock_list_io import get_all_etfs
 from utils.db_manager import (
+    delete_trade,
     fetch_recent_trades,
     insert_trade_event,
     list_open_positions,
-    delete_trade,
 )
+from utils.stock_list_io import get_all_etfs
 
 
 def _to_plain_dict(value):
@@ -96,9 +96,7 @@ def _load_authenticator() -> stauth.Authenticate:
 
     required_keys = {"name", "key", "expiry_days"}
     if not credentials or not cookie or not required_keys.issubset(cookie):
-        st.error(
-            "인증 설정 필드가 누락되었습니다. credentials/cookie 구성을 확인하세요."
-        )
+        st.error("인증 설정 필드가 누락되었습니다. credentials/cookie 구성을 확인하세요.")
         st.stop()
 
     return stauth.Authenticate(
@@ -110,9 +108,7 @@ def _load_authenticator() -> stauth.Authenticate:
     )
 
 
-def _show_notification(
-    message: str, *, kind: str = "info", icon: str | None = None
-) -> None:
+def _show_notification(message: str, *, kind: str = "info", icon: str | None = None) -> None:
     toast_fn = getattr(st, "toast", None)
     if callable(toast_fn):
         kwargs: dict[str, str] = {}
@@ -140,9 +136,7 @@ def _notify(
     persist: bool = False,
 ) -> None:
     if persist:
-        st.session_state.setdefault("trade_alerts", []).append(
-            {"message": message, "kind": kind, "icon": icon}
-        )
+        st.session_state.setdefault("trade_alerts", []).append({"message": message, "kind": kind, "icon": icon})
         return
 
     _show_notification(message, kind=kind, icon=icon)
@@ -172,9 +166,7 @@ def _ticker_name_map(country_code: str) -> dict[str, str]:
     return mapping
 
 
-def _resolve_ticker_name(
-    country_code: str, ticker: str, stored: str | None = None
-) -> str:
+def _resolve_ticker_name(country_code: str, ticker: str, stored: str | None = None) -> str:
     if stored:
         return stored
 
@@ -276,9 +268,7 @@ def _show_delete_dialog(
                     success_count += 1
                 except Exception as exc:
                     error_count += 1
-                    _notify(
-                        f"삭제 실패 (ID: {trade_id}): {exc}", kind="error", icon="❌"
-                    )
+                    _notify(f"삭제 실패 (ID: {trade_id}): {exc}", kind="error", icon="❌")
 
             # 결과 알림
             if success_count > 0:
@@ -367,9 +357,7 @@ def _render_trade_history(account_id: str, country_code: str) -> None:
 
     df = pd.DataFrame(trade_data)
 
-    cols = ["선택"] + [
-        col for col in df.columns if col not in ["선택", "id", "수량", "가격"]
-    ]
+    cols = ["선택"] + [col for col in df.columns if col not in ["선택", "id", "수량", "가격"]]
 
     editor_key = f"trade_editor_{account_id}"
 
@@ -377,9 +365,7 @@ def _render_trade_history(account_id: str, country_code: str) -> None:
         df[cols],
         column_config={
             "선택": st.column_config.CheckboxColumn("선택", default=False),
-            "구분": st.column_config.SelectboxColumn(
-                "구분", options=["BUY", "SELL"], required=True
-            ),
+            "구분": st.column_config.SelectboxColumn("구분", options=["BUY", "SELL"], required=True),
         },
         hide_index=True,
         width="stretch",
@@ -457,11 +443,7 @@ def _render_account_section(current_user: str, account_id: str) -> None:
 
 def _render_buy_form(username: str, account_id: str, country_code: str) -> None:
     holdings = list_open_positions(account_id or "") if account_id else []
-    holding_tickers = {
-        (pos.get("ticker") or "").strip().upper()
-        for pos in holdings
-        if pos.get("ticker")
-    }
+    holding_tickers = {(pos.get("ticker") or "").strip().upper() for pos in holdings if pos.get("ticker")}
 
     key_suffix = (account_id or country_code or "global").strip().lower() or "global"
 
@@ -514,9 +496,7 @@ def _render_buy_form(username: str, account_id: str, country_code: str) -> None:
             )
             name = None
 
-        executed_date = st.date_input(
-            "실행 날짜", value=datetime.today(), key=f"buy-date-{key_suffix}"
-        )
+        executed_date = st.date_input("실행 날짜", value=datetime.today(), key=f"buy-date-{key_suffix}")
         if isinstance(executed_date, datetime):
             executed_date = executed_date.date()
         memo = st.text_area(
@@ -606,9 +586,7 @@ def _render_sell_section(username: str, account_id: str, country_code: str) -> N
             continue
 
         ticker = pos.get("ticker", "").upper()
-        position_name = pos.get("name") or _resolve_ticker_name(
-            country_code or "", ticker
-        )
+        position_name = pos.get("name") or _resolve_ticker_name(country_code or "", ticker)
         executed_display = _format_datetime(pos.get("executed_at"))
         memo_text = pos.get("memo") or ""
 
@@ -638,14 +616,8 @@ def _render_sell_section(username: str, account_id: str, country_code: str) -> N
             key=f"sell-position-select-{key_suffix}",
         )
 
-        executed_date = st.date_input(
-            "매도 날짜", value=datetime.today(), key=f"sell-date-{key_suffix}"
-        )
-        executed_date = (
-            executed_date.date()
-            if isinstance(executed_date, datetime)
-            else executed_date
-        )
+        executed_date = st.date_input("매도 날짜", value=datetime.today(), key=f"sell-date-{key_suffix}")
+        executed_date = executed_date.date() if isinstance(executed_date, datetime) else executed_date
         memo = st.text_area(
             "메모",
             placeholder="매도 사유 등을 기록하세요.",
@@ -697,9 +669,7 @@ elif auth_status is None:
 else:
     current_user = username or name or "unknown"
 
-    default_account = st.session_state.get(
-        "trade_selected_account", _default_account_id()
-    )
+    default_account = st.session_state.get("trade_selected_account", _default_account_id())
     if "trade_selected_account_radio" not in st.session_state:
         st.session_state["trade_selected_account_radio"] = default_account
 
@@ -719,9 +689,7 @@ else:
             )
 
         with logout_col:
-            authenticator.logout(
-                button_name="로그아웃", location="main", key="trade_logout"
-            )
+            authenticator.logout(button_name="로그아웃", location="main", key="trade_logout")
 
     st.session_state["trade_selected_account"] = selected_account
 

@@ -105,8 +105,6 @@ DECISION_MESSAGES = {key: value for key, value in DECISION_MESSAGES.items() if v
 DECISION_MESSAGES["NEW_BUY"] = DECISION_MESSAGES.get("BUY", "✅ 신규 매수")
 
 DECISION_NOTES = {
-    "CATEGORY_DUP": "카테고리 중복",
-    "PORTFOLIO_FULL": "포트폴리오 가득 참",
     "INSUFFICIENT_CASH": "현금 부족",
     "NO_PRICE": "가격 정보 없음",
     "TREND_BREAK": "추세 이탈",

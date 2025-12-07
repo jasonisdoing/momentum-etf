@@ -1,16 +1,14 @@
 """포트폴리오 추천 및 백테스트에서 공통으로 사용하는 헬퍼 함수들."""
 
-from typing import Dict, Set, Any, List, Optional
+from typing import Any
 
-
-from utils.logger import get_app_logger
-from strategies.maps.constants import DECISION_NOTES
 from config import CATEGORY_EXCEPTIONS
+from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
 
-def is_category_exception(category: Optional[str]) -> bool:
+def is_category_exception(category: str | None) -> bool:
     """카테고리가 중복 제한에서 예외인지 확인합니다.
 
     Args:
@@ -30,8 +28,8 @@ def get_held_categories_excluding_sells(
     get_category_func,
     get_state_func,
     get_ticker_func=None,
-    holdings: Set[str] = None,
-) -> Set[str]:
+    holdings: set[str] = None,
+) -> set[str]:
     """매도 예정 종목을 제외한 보유 카테고리 집합을 반환합니다.
 
     추천과 백테스트 모두에서 사용되는 공통 로직입니다.
@@ -85,7 +83,7 @@ def should_exclude_from_category_count(state: str) -> bool:
     return state in sell_states
 
 
-def get_sell_states() -> Set[str]:
+def get_sell_states() -> set[str]:
     """매도 상태 집합을 반환합니다.
 
     Returns:
@@ -94,7 +92,7 @@ def get_sell_states() -> Set[str]:
     return {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
 
 
-def get_hold_states() -> Set[str]:
+def get_hold_states() -> set[str]:
     """보유 상태 집합을 반환합니다 (매도 예정 포함).
 
     물리적으로 보유 중인 종목의 상태를 반환합니다.
@@ -131,19 +129,14 @@ def count_current_holdings(items: list, *, get_state_func=None) -> int:
         return sum(1 for item in items if get_state_func(item) in hold_states)
     else:
         # dict 형태의 item인 경우
-        return sum(
-            1
-            for item in items
-            if isinstance(item, dict)
-            and str(item.get("state", "")).upper() in hold_states
-        )
+        return sum(1 for item in items if isinstance(item, dict) and str(item.get("state", "")).upper() in hold_states)
 
 
 def validate_core_holdings(
-    core_holdings_tickers: Set[str],
-    universe_tickers_set: Set[str],
+    core_holdings_tickers: set[str],
+    universe_tickers_set: set[str],
     account_id: str = "",
-) -> Set[str]:
+) -> set[str]:
     """핵심 보유 종목 유효성 검증
 
     Args:
@@ -157,9 +150,7 @@ def validate_core_holdings(
     invalid_core_tickers = core_holdings_tickers - universe_tickers_set
     if invalid_core_tickers:
         account_prefix = f"[{account_id.upper()}] " if account_id else ""
-        logger.warning(
-            f"{account_prefix}CORE_HOLDINGS에 Universe에 없는 종목이 포함됨: {invalid_core_tickers}"
-        )
+        logger.warning(f"{account_prefix}CORE_HOLDINGS에 Universe에 없는 종목이 포함됨: {invalid_core_tickers}")
 
     valid_core_holdings = core_holdings_tickers & universe_tickers_set
     if valid_core_holdings:
@@ -171,8 +162,8 @@ def validate_core_holdings(
 
 def check_buy_candidate_filters(
     category: str,
-    held_categories: Set[str],
-    sell_rsi_categories_today: Set[str],
+    held_categories: set[str],
+    sell_rsi_categories_today: set[str],
     rsi_score: float,
     rsi_sell_threshold: float,
 ) -> tuple[bool, str]:
@@ -188,16 +179,9 @@ def check_buy_candidate_filters(
     Returns:
         (통과 여부, 차단 사유)
     """
-    # 카테고리 중복 체크
-    if category and not is_category_exception(category) and category in held_categories:
-        return False, DECISION_NOTES["CATEGORY_DUP"]
 
     # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
-    if (
-        category
-        and not is_category_exception(category)
-        and category in sell_rsi_categories_today
-    ):
+    if category and not is_category_exception(category) and category in sell_rsi_categories_today:
         return False, f"RSI 과매수 매도 카테고리 ({category})"
 
     # RSI 과매수 종목 매수 차단
@@ -237,10 +221,10 @@ def calculate_buy_budget(
 
 
 def calculate_held_categories(
-    position_state: Dict,
-    ticker_to_category: Dict[str, str],
-    core_holdings: Set[str] = None,
-) -> Set[str]:
+    position_state: dict,
+    ticker_to_category: dict[str, str],
+    core_holdings: set[str] = None,
+) -> set[str]:
     """현재 보유 중인 카테고리 집합 계산 (고정 종목 포함)
 
     Args:
@@ -271,10 +255,10 @@ def calculate_held_categories(
 
 
 def track_sell_rsi_categories(
-    decisions: List[Dict],
-    etf_meta: Dict[str, Any],
+    decisions: list[dict],
+    etf_meta: dict[str, Any],
     rsi_sell_threshold: float,
-) -> Set[str]:
+) -> set[str]:
     """SELL_RSI로 매도하는 카테고리 추적
 
     Args:
@@ -294,10 +278,7 @@ def track_sell_rsi_categories(
             if category and not is_category_exception(category):
                 sell_rsi_categories.add(category)
         # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
-        elif (
-            d.get("state") in {"HOLD", "HOLD_CORE"}
-            and d.get("rsi_score", 0.0) >= rsi_sell_threshold
-        ):
+        elif d.get("state") in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
             category = etf_meta.get(d["tkr"], {}).get("category")
             if category and not is_category_exception(category):
                 sell_rsi_categories.add(category)
@@ -305,7 +286,7 @@ def track_sell_rsi_categories(
     return sell_rsi_categories
 
 
-def calculate_held_count(position_state: Dict) -> int:
+def calculate_held_count(position_state: dict) -> int:
     """현재 보유 중인 종목 수 계산 (백테스트용)
 
     Args:
@@ -318,10 +299,10 @@ def calculate_held_count(position_state: Dict) -> int:
 
 
 def calculate_held_categories_from_holdings(
-    holdings: Dict[str, Any],
-    etf_meta: Dict[str, Any],
-    core_holdings: Set[str] = None,
-) -> Set[str]:
+    holdings: dict[str, Any],
+    etf_meta: dict[str, Any],
+    core_holdings: set[str] = None,
+) -> set[str]:
     """보유 종목의 카테고리 집합 계산 (추천용, 고정 종목 포함)
 
     Args:
@@ -361,8 +342,140 @@ def validate_portfolio_topn(topn: int, account_id: str = "") -> None:
     """
     if topn <= 0:
         if account_id:
-            raise ValueError(
-                f"'{account_id}' 계정의 PORTFOLIO_TOPN은 0보다 커야 합니다."
-            )
+            raise ValueError(f"'{account_id}' 계정의 PORTFOLIO_TOPN은 0보다 커야 합니다.")
         else:
             raise ValueError("PORTFOLIO_TOPN은 0보다 커야 합니다.")
+
+
+def calculate_cooldown_blocks(
+    trade_cooldown_info: dict[str, dict[str, Any]],
+    cooldown_days: int,
+    base_date: Any,  # pd.Timestamp or similar
+    country_code: str,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """쿨다운 블록 정보를 계산합니다.
+
+    Args:
+        trade_cooldown_info: 종목별 매매 정보 (last_buy, last_sell)
+        cooldown_days: 쿨다운 일수
+        base_date: 기준일
+        country_code: 국가 코드
+
+    Returns:
+        (sell_cooldown_block, buy_cooldown_block)
+    """
+    import pandas as pd
+
+    from utils.data_loader import count_trading_days, get_trading_days
+
+    sell_cooldown_block: dict[str, dict[str, Any]] = {}
+    buy_cooldown_block: dict[str, dict[str, Any]] = {}
+
+    try:
+        base_date_norm = pd.to_datetime(base_date).normalize()
+    except Exception:
+        return {}, {}
+
+    # 성능 최적화: 캐싱된 거래일 정보 활용
+    trading_day_lookup: dict[pd.Timestamp, int] = {}
+    base_day_index: int | None = None
+
+    if cooldown_days and cooldown_days > 0:
+        relevant_dates: set[pd.Timestamp] = {base_date_norm}
+        for trade_info in (trade_cooldown_info or {}).values():
+            if not isinstance(trade_info, dict):
+                continue
+            for key in ("last_buy", "last_sell"):
+                raw_value = trade_info.get(key)
+                if raw_value is None:
+                    continue
+                try:
+                    ts = pd.to_datetime(raw_value).normalize()
+                    if ts <= base_date_norm:
+                        # 최적화: 너무 오래된 날짜는 제외 (어차피 쿨다운 대상 아님)
+                        # trading_days 로딩 범위 축소용
+                        if (base_date_norm - ts).days <= max(30, cooldown_days * 5):
+                            relevant_dates.add(ts)
+                except Exception:
+                    continue
+
+        if len(relevant_dates) > 1 and country_code:
+            try:
+                earliest = min(relevant_dates)
+                # 과거 충분한 기간 조회 (여유있게)
+                trading_days = get_trading_days(
+                    earliest.strftime("%Y-%m-%d"),
+                    base_date_norm.strftime("%Y-%m-%d"),
+                    country_code,
+                )
+                if trading_days:
+                    trading_day_lookup = {day.normalize(): idx for idx, day in enumerate(trading_days)}
+                    # base_date가 장이 아닌 날일 수 있으므로 가장 가까운 이전/동일 영업일 찾기
+                    # (여기서는 단순화를 위해 목록에 있으면 사용)
+                    base_day_index = trading_day_lookup.get(base_date_norm)
+            except Exception:
+                trading_day_lookup = {}
+                base_day_index = None
+
+    def _cached_trading_day_diff(target_ts: pd.Timestamp) -> int | None:
+        if not trading_day_lookup or base_day_index is None:
+            return None
+        idx = trading_day_lookup.get(target_ts)
+        if idx is None:
+            return None
+        diff = base_day_index - idx  # type: ignore
+        return diff if diff >= 0 else 0
+
+    if cooldown_days and cooldown_days > 0:
+        for tkr, trade_info in (trade_cooldown_info or {}).items():
+            if not isinstance(trade_info, dict):
+                continue
+
+            last_sell = trade_info.get("last_sell")
+            last_buy = trade_info.get("last_buy")
+
+            # 1. 매도 쿨다운: 매수 후 N일간 매도 금지 (손절 제외)
+            if last_buy is not None:
+                try:
+                    last_buy_ts = pd.to_datetime(last_buy).normalize()
+                    if last_buy_ts <= base_date_norm:
+                        # 최적화: 쿨다운 기간보다 훨씬 오래된 거래는 계산 스킵
+                        # (주말/휴장일 고려하여 넉넉히 3배수로 체크)
+                        if (base_date_norm - last_buy_ts).days > cooldown_days * 3 + 10:
+                            days_since_buy = 9999
+                        else:
+                            cached_days = _cached_trading_day_diff(last_buy_ts)
+                            if cached_days is None:
+                                days_since_buy = count_trading_days(country_code, last_buy_ts, base_date_norm)
+                            else:
+                                days_since_buy = max(cached_days, 0)
+
+                        # days_since_buy가 cooldown_days보다 작거나 같으면 쿨다운
+                        if days_since_buy <= cooldown_days:
+                            sell_cooldown_block[tkr] = {
+                                "last_buy": last_buy_ts,
+                                "days_since": days_since_buy,
+                            }
+                except Exception:
+                    pass
+
+            # 2. 매수 쿨다운: 매도 후 N일간 재매수 금지
+            if last_sell is not None:
+                try:
+                    last_sell_ts = pd.to_datetime(last_sell).normalize()
+                    if last_sell_ts <= base_date_norm:
+                        cached_days = _cached_trading_day_diff(last_sell_ts)
+                        if cached_days is None:
+                            days_since_sell = count_trading_days(country_code, last_sell_ts, base_date_norm)
+                        else:
+                            days_since_sell = max(cached_days, 0)
+
+                        if days_since_sell <= cooldown_days:
+                            buy_cooldown_block[tkr] = {
+                                "last_sell": last_sell_ts,
+                                "days_since": days_since_sell,
+                            }
+                except Exception:
+                    pass
+
+    return sell_cooldown_block, buy_cooldown_block

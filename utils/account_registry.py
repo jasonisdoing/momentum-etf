@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any
 
 from utils.logger import get_app_logger
-from utils.settings_loader import load_common_settings
-
 from utils.settings_loader import (
     AccountSettingsError,
     get_account_precision,
@@ -16,12 +15,12 @@ from utils.settings_loader import (
     get_account_strategy,
     get_account_strategy_sections,
     get_strategy_rules,
+    load_common_settings,
     resolve_strategy_params,
 )
 
-
 _SETTINGS_DIR = Path(__file__).resolve().parent.parent / "zsettings" / "account"
-_ICON_FALLBACKS: Dict[str, str] = {
+_ICON_FALLBACKS: dict[str, str] = {
     "kor": "🇰🇷",
 }
 
@@ -40,20 +39,24 @@ def _resolve_order(value: Any) -> float:
         return float("inf")
 
 
-def list_available_accounts() -> List[str]:
+def list_available_accounts() -> list[str]:
     """`zsettings/account`에 존재하는 계정 ID 목록을 반환합니다."""
 
     if not _SETTINGS_DIR.exists():
         logger.warning("계정 설정 디렉터리를 찾을 수 없습니다: %s", _SETTINGS_DIR)
         return []
 
-    return [path.stem.lower() for path in sorted(_SETTINGS_DIR.glob("*.json")) if path.is_file() and path.suffix.lower() == ".json"]
+    return [
+        path.stem.lower()
+        for path in sorted(_SETTINGS_DIR.glob("*.json"))
+        if path.is_file() and path.suffix.lower() == ".json"
+    ]
 
 
-def load_account_configs() -> List[Dict[str, Any]]:
+def load_account_configs() -> list[dict[str, Any]]:
     """`zsettings/account`에 정의된 계정 정보를 정렬된 리스트로 반환합니다."""
 
-    configs: List[Dict[str, Any]] = []
+    configs: list[dict[str, Any]] = []
 
     for account_id in list_available_accounts():
         try:
@@ -113,7 +116,7 @@ def load_account_configs() -> List[Dict[str, Any]]:
     return configs
 
 
-def pick_default_account(accounts: List[Dict[str, Any]]) -> Dict[str, Any]:
+def pick_default_account(accounts: list[dict[str, Any]]) -> dict[str, Any]:
     """기본으로 선택할 계정 설정을 결정합니다."""
 
     if not accounts:
@@ -134,14 +137,14 @@ def get_icon_fallback(country_code: str) -> str:
     return _ICON_FALLBACKS.get((country_code or "").strip().lower(), "")
 
 
-def get_benchmark_tickers(account_settings: Mapping[str, Any]) -> List[str]:
+def get_benchmark_tickers(account_settings: Mapping[str, Any]) -> list[str]:
     """계정 설정에서 벤치마크 티커 목록을 추출합니다."""
 
     entries = account_settings.get("benchmarks")
     if not isinstance(entries, list):
         return []
 
-    tickers: List[str] = []
+    tickers: list[str] = []
     seen: set[str] = set()
     for entry in entries:
         if not isinstance(entry, Mapping):
@@ -153,8 +156,8 @@ def get_benchmark_tickers(account_settings: Mapping[str, Any]) -> List[str]:
     return tickers
 
 
-def build_account_meta(accounts: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
-    meta: Dict[str, Dict[str, str]] = {}
+def build_account_meta(accounts: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    meta: dict[str, dict[str, str]] = {}
     for account in accounts:
         account_id = account["account_id"]
         meta[account_id] = {

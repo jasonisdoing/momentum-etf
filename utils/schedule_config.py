@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any, Dict
+from typing import Any
 
 from utils.account_registry import list_available_accounts
-from utils.settings_loader import AccountSettingsError, get_account_settings
 from utils.market_schedule import generate_market_cron_expressions
+from utils.settings_loader import AccountSettingsError, get_account_settings
 
-
-_DEFAULT_TIMEZONES: Dict[str, str] = {
+_DEFAULT_TIMEZONES: dict[str, str] = {
     "kor": "Asia/Seoul",
 }
 
@@ -28,7 +27,7 @@ def _default_timezone(country_code: str) -> str:
     return _DEFAULT_TIMEZONES.get(country_code, "UTC")
 
 
-def _build_schedule_entry(account_id: str) -> Dict[str, Any] | None:
+def _build_schedule_entry(account_id: str) -> dict[str, Any] | None:
     try:
         settings = get_account_settings(account_id)
     except AccountSettingsError as exc:  # pragma: no cover - 설정 오류 방어
@@ -46,8 +45,12 @@ def _build_schedule_entry(account_id: str) -> Dict[str, Any] | None:
     enabled_raw = schedule.get("enabled")
     enabled_flag = True if enabled_raw is None else bool(enabled_raw)
 
-    timezone_value = schedule.get("timezone") or schedule.get("recommendation_timezone") or _default_timezone(country_code)
-    notify_timezone_value = schedule.get("notify_timezone") or schedule.get("timezone") or _default_timezone(country_code)
+    timezone_value = (
+        schedule.get("timezone") or schedule.get("recommendation_timezone") or _default_timezone(country_code)
+    )
+    notify_timezone_value = (
+        schedule.get("notify_timezone") or schedule.get("timezone") or _default_timezone(country_code)
+    )
 
     cron_value = schedule.get("recommendation_cron")
     cron_list: list[str] = []
@@ -64,7 +67,7 @@ def _build_schedule_entry(account_id: str) -> Dict[str, Any] | None:
         except ValueError:
             cron_list = []
 
-    entry: Dict[str, Any] = {
+    entry: dict[str, Any] = {
         "account_id": account_id,
         "country_code": country_code,
         "enabled": enabled_flag,
@@ -83,8 +86,8 @@ def _build_schedule_entry(account_id: str) -> Dict[str, Any] | None:
 
 
 @lru_cache(maxsize=1)
-def _load_account_schedules() -> Dict[str, Dict[str, Any]]:
-    schedules: Dict[str, Dict[str, Any]] = {}
+def _load_account_schedules() -> dict[str, dict[str, Any]]:
+    schedules: dict[str, dict[str, Any]] = {}
 
     for account_id in list_available_accounts():
         try:
@@ -98,11 +101,13 @@ def _load_account_schedules() -> Dict[str, Dict[str, Any]]:
     return schedules
 
 
-def get_global_schedule_settings() -> Dict[str, Any]:
+def get_global_schedule_settings() -> dict[str, Any]:
     """Return global schedule metadata derived from account configs."""
 
     values = [
-        entry.get("run_immediately_on_start") for entry in _load_account_schedules().values() if entry.get("run_immediately_on_start") is not None
+        entry.get("run_immediately_on_start")
+        for entry in _load_account_schedules().values()
+        if entry.get("run_immediately_on_start") is not None
     ]
     if not values:
         return {}
@@ -110,7 +115,7 @@ def get_global_schedule_settings() -> Dict[str, Any]:
     return {"run_immediately_on_start": bool(values[0])}
 
 
-def get_country_schedule(country: str) -> Dict[str, Any]:
+def get_country_schedule(country: str) -> dict[str, Any]:
     country_norm = _normalize_country(country, "")
     if not country_norm:
         return {}
@@ -122,13 +127,13 @@ def get_country_schedule(country: str) -> Dict[str, Any]:
     return {}
 
 
-def get_cache_schedule() -> Dict[str, Any]:
+def get_cache_schedule() -> dict[str, Any]:
     """Return cache schedule configuration (disabled by default)."""
 
     return {"enabled": False}
 
 
-def get_all_country_schedules() -> Dict[str, Dict[str, Any]]:
+def get_all_country_schedules() -> dict[str, dict[str, Any]]:
     return {key: dict(value) for key, value in _load_account_schedules().items()}
 
 

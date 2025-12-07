@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from functools import lru_cache
-from typing import Dict
 
 import pandas as pd
 import streamlit as st
@@ -17,8 +16,8 @@ from utils.stock_list_io import get_all_etfs
 
 
 @lru_cache(maxsize=8)
-def _ticker_name_map(country: str) -> Dict[str, str]:
-    mapping: Dict[str, str] = {}
+def _ticker_name_map(country: str) -> dict[str, str]:
+    mapping: dict[str, str] = {}
     try:
         items = get_all_etfs(country)
     except Exception:
@@ -54,9 +53,7 @@ def _load_authenticator() -> stauth.Authenticate:
 
     required_keys = {"name", "key", "expiry_days"}
     if not credentials or not cookie or not required_keys.issubset(cookie):
-        st.error(
-            "인증 설정 필드가 누락되었습니다. credentials/cookie 구성을 확인하세요."
-        )
+        st.error("인증 설정 필드가 누락되었습니다. credentials/cookie 구성을 확인하세요.")
         st.stop()
 
     return stauth.Authenticate(
@@ -81,18 +78,14 @@ def render_cache_admin_page() -> None:
 
     header_col, logout_col = st.columns([5, 1])
     with logout_col:
-        authenticator.logout(
-            button_name="로그아웃", location="main", key="cache_logout"
-        )
+        authenticator.logout(button_name="로그아웃", location="main", key="cache_logout")
 
     countries = list_cached_countries()
     if not countries:
         st.warning("캐시 데이터가 저장된 국가가 없습니다.")
         return
 
-    selected_country = st.selectbox(
-        "국가 선택", countries, index=0, key="cache_country_selector"
-    )
+    selected_country = st.selectbox("국가 선택", countries, index=0, key="cache_country_selector")
 
     tickers = list_cached_tickers(selected_country)
     if not tickers:
@@ -104,11 +97,7 @@ def render_cache_admin_page() -> None:
     def _format_option(value: str) -> str:
         ticker_upper = value.upper()
         display_name = name_map.get(ticker_upper, ticker_upper)
-        return (
-            f"{display_name}({ticker_upper})"
-            if display_name and display_name != ticker_upper
-            else ticker_upper
-        )
+        return f"{display_name}({ticker_upper})" if display_name and display_name != ticker_upper else ticker_upper
 
     selected_tkr = st.selectbox(
         "종목 선택",
@@ -134,9 +123,7 @@ def render_cache_admin_page() -> None:
     display_label = _format_option(selected_tkr)
     st.markdown(f"### {display_label}")
 
-    st.caption(
-        f"행 개수: {len(df):,} | 열: {', '.join(df.columns.astype(str)) if not df.empty else '-'}"
-    )
+    st.caption(f"행 개수: {len(df):,} | 열: {', '.join(df.columns.astype(str)) if not df.empty else '-'}")
 
     if isinstance(df.index, pd.DatetimeIndex):
         df_sorted = df.sort_index(ascending=False)

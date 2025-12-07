@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from logic.backtest.account_runner import AccountBacktestResult
+from logic.backtest.account import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
 from utils.data_loader import get_exchange_rate_series

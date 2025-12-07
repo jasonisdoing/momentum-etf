@@ -101,7 +101,7 @@ class StrategyEvaluator:
         elif is_trailing_stop:
             new_state = "SELL_TRAILING"
             phrase = f"트레일링 스탑 (고점 {highest_price:,.0f}원 대비 {trailing_stop_pct}% 하락)"
-        elif rsi_score >= rsi_sell_threshold:
+        elif rsi_sell_threshold is not None and rsi_score >= rsi_sell_threshold:
             new_state = "SELL_RSI"
             phrase = f"RSI 과매수 (RSI점수: {rsi_score:.1f})"
         elif score <= min_buy_score:

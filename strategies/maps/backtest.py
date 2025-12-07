@@ -4,13 +4,11 @@
 개별 종목에 대한 백테스트를 수행합니다.
 """
 
-from typing import List, Optional
-
 import pandas as pd
 
+from logic.backtest.portfolio import process_ticker_data, run_portfolio_backtest
 from utils.data_loader import fetch_ohlcv
 from utils.logger import get_app_logger
-from logic.backtest.portfolio_runner import run_portfolio_backtest, process_ticker_data
 
 logger = get_app_logger()
 
@@ -18,10 +16,10 @@ logger = get_app_logger()
 def run_single_ticker_backtest(
     ticker: str,
     stock_type: str = "stock",
-    df: Optional[pd.DataFrame] = None,
+    df: pd.DataFrame | None = None,
     initial_capital: float = 1_000_000.0,
-    core_start_date: Optional[pd.Timestamp] = None,
-    date_range: Optional[List[str]] = None,
+    core_start_date: pd.Timestamp | None = None,
+    date_range: list[str] | None = None,
     country: str = "kor",
     ma_period: int = 20,
     stop_loss_pct: float = -10.0,

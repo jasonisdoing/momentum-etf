@@ -5,21 +5,38 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from utils.account_registry import (
     build_account_meta as build_country_meta,
+)
+from utils.account_registry import (
     get_icon_fallback,
-    list_available_accounts as list_available_countries,
     pick_default_account,
+)
+from utils.account_registry import (
+    list_available_accounts as list_available_countries,
 )
 from utils.settings_loader import (
     AccountSettingsError as CountrySettingsError,
+)
+from utils.settings_loader import (
     get_account_precision as get_country_precision,
+)
+from utils.settings_loader import (
     get_account_settings as get_country_settings,
+)
+from utils.settings_loader import (
     get_account_slack_channel as get_country_slack_channel,
+)
+from utils.settings_loader import (
     get_account_strategy as get_country_strategy,
+)
+from utils.settings_loader import (
     get_account_strategy_sections as get_country_strategy_sections,
+)
+from utils.settings_loader import (
     get_strategy_rules,
 )
 

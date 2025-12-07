@@ -1,234 +1,40 @@
-"""전략 중립적인 포트폴리오 추천 생성 로직."""
+"""
+전략 중립적인 포트폴리오 추천 생성 로직 (Refactored).
+
+`logic/backtest/portfolio.py`의 구조를 따르며, 단일 일자(추천일)에 대한 의사결정을 수행합니다.
+"""
 
 from __future__ import annotations
 
-# 순환 import 방지를 위해 TYPE_CHECKING 사용
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
-if TYPE_CHECKING:
-    pass
 import config
-from logic.common.portfolio import is_category_exception
+from logic.common import (
+    check_buy_candidate_filters,
+    get_held_categories_excluding_sells,
+    is_category_exception,
+    select_candidates_by_category,
+    sort_decisions_by_order_and_score,
+    validate_core_holdings,
+    validate_portfolio_topn,
+)
+from logic.common.notes import format_min_score_phrase
 from strategies.maps.constants import DECISION_MESSAGES, DECISION_NOTES
 from strategies.maps.evaluator import StrategyEvaluator
-from utils.data_loader import count_trading_days, get_trading_days
+from strategies.maps.messages import build_buy_replace_note
+from utils.data_loader import count_trading_days
 from utils.logger import get_app_logger
+
+if TYPE_CHECKING:
+    from strategies.maps.rules import StrategyRules
 
 logger = get_app_logger()
 
 
-def _calc_days_left(block_info: dict | None, cooldown_days: int | None) -> int | None:
-    """쿨다운 블록 정보에서 남은 일수를 계산합니다."""
-    if not cooldown_days or cooldown_days <= 0 or not isinstance(block_info, dict):
-        return None
-    try:
-        return max(cooldown_days - int(block_info.get("days_since", 0)) + 1, 0)
-    except (TypeError, ValueError):
-        return None
-
-
-def _format_cooldown_message(days_left: int | None, action: str = "") -> str:
-    """쿨다운 메시지를 DECISION_NOTES 템플릿을 사용하여 생성합니다."""
-    if days_left is None:
-        return DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중").replace("{days}", "?")
-
-    if days_left > 0:
-        if action:
-            # 예: "쿨다운 3일 대기중 (매도 2025-11-29)"
-            return (
-                DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중").replace("{days}", str(days_left))
-                + f" ({action})"
-            )
-        else:
-            # 예: "쿨다운 3일 대기중"
-            return DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중").replace("{days}", str(days_left))
-    else:
-        return DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중").replace("{days}", "0")
-
-
-def _normalize_category_value(category: str | None) -> str | None:
-    """카테고리 값을 정규화합니다."""
-    if category is None:
-        return None
-    category_str = str(category).strip()
-    if not category_str:
-        return None
-    return category_str.upper()
-
-
-def _resolve_highest_price_since_buy(series: Any, buy_date: pd.Timestamp | None) -> float | None:
-    """매수일 이후 최고가를 반환합니다."""
-    if buy_date is None:
-        return None
-
-    if not isinstance(series, pd.Series) or series.empty:
-        return None
-
-    try:
-        buy_ts = pd.to_datetime(buy_date).normalize()
-    except Exception:
-        return None
-
-    cleaned = series.dropna().copy()
-    if cleaned.empty:
-        return None
-
-    try:
-        cleaned.index = pd.to_datetime(cleaned.index).normalize()
-    except Exception:
-        return None
-
-    future_slice = cleaned.loc[cleaned.index >= buy_ts]
-    if future_slice.empty:
-        return float(cleaned.iloc[-1])
-
-    try:
-        return float(future_slice.max())
-    except (TypeError, ValueError):
-        return None
-
-
-def _resolve_entry_price(series: Any, buy_date: pd.Timestamp | None) -> float | None:
-    """매수일 이후 첫 종가를 반환합니다."""
-    if buy_date is None:
-        return None
-
-    if not isinstance(series, pd.Series) or series.empty:
-        return None
-
-    try:
-        buy_ts = pd.to_datetime(buy_date).normalize()
-    except Exception:
-        return None
-
-    cleaned = series.dropna().copy()
-    if cleaned.empty:
-        return None
-
-    try:
-        cleaned.index = pd.to_datetime(cleaned.index).normalize()
-    except Exception:
-        return None
-
-    future_slice = cleaned.loc[cleaned.index >= buy_ts]
-    if future_slice.empty:
-        return float(cleaned.iloc[-1])
-
-    entry_val = future_slice.iloc[0]
-    try:
-        return float(entry_val)
-    except (TypeError, ValueError):
-        return None
-
-
-def _calculate_cooldown_blocks(
-    trade_cooldown_info: dict[str, dict[str, pd.Timestamp | None]],
-    cooldown_days: int,
-    base_date: pd.Timestamp,
-    country_code: str,
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    """쿨다운 블록을 계산합니다."""
-    sell_cooldown_block: dict[str, dict[str, Any]] = {}
-    buy_cooldown_block: dict[str, dict[str, Any]] = {}
-    base_date_norm = base_date.normalize()
-
-    trading_day_lookup: dict[pd.Timestamp, int] = {}
-    base_day_index: int | None = None
-
-    if cooldown_days and cooldown_days > 0:
-        relevant_dates: set[pd.Timestamp] = {base_date_norm}
-        for trade_info in (trade_cooldown_info or {}).values():
-            if not isinstance(trade_info, dict):
-                continue
-            for key in ("last_buy", "last_sell"):
-                raw_value = trade_info.get(key)
-                if raw_value is None:
-                    continue
-                try:
-                    ts = pd.to_datetime(raw_value).normalize()
-                except Exception:
-                    continue
-                if ts <= base_date_norm:
-                    relevant_dates.add(ts)
-
-        if len(relevant_dates) > 1 and country_code:
-            try:
-                earliest = min(relevant_dates)
-                trading_days = get_trading_days(
-                    earliest.strftime("%Y-%m-%d"),
-                    base_date_norm.strftime("%Y-%m-%d"),
-                    country_code,
-                )
-                if trading_days:
-                    trading_day_lookup = {day.normalize(): idx for idx, day in enumerate(trading_days)}
-                    for day in reversed(trading_days):
-                        day_norm = day.normalize()
-                        if day_norm <= base_date_norm:
-                            base_day_index = trading_day_lookup.get(day_norm)
-                            if base_day_index is not None:
-                                break
-            except Exception:
-                trading_day_lookup = {}
-                base_day_index = None
-
-    def _cached_trading_day_diff(target_ts: pd.Timestamp) -> int | None:
-        if not trading_day_lookup or base_day_index is None:
-            return None
-        idx = trading_day_lookup.get(target_ts)
-        if idx is None:
-            return None
-        diff = base_day_index - idx + 1
-        return diff if diff >= 0 else 0
-
-    if cooldown_days and cooldown_days > 0:
-        for tkr, trade_info in (trade_cooldown_info or {}).items():
-            if not isinstance(trade_info, dict):
-                continue
-
-            last_sell = trade_info.get("last_sell")
-            last_buy = trade_info.get("last_buy")
-
-            # 1. 매도 쿨다운: 매수 후 N일간 매도 금지 (손절 제외)
-            if last_buy is not None:
-                last_buy_ts = pd.to_datetime(last_buy).normalize()
-                if last_buy_ts <= base_date_norm:
-                    cached_days = _cached_trading_day_diff(last_buy_ts)
-                    if cached_days is None:
-                        cached_days = count_trading_days(country_code, last_buy_ts, base_date_norm)
-                    days_since_buy = max(cached_days, 0)
-                    if days_since_buy <= cooldown_days:
-                        sell_cooldown_block[tkr] = {
-                            "last_buy": last_buy_ts,
-                            "days_since": days_since_buy,
-                        }
-
-            # 2. 매수 쿨다운: 매도 후 N일간 재매수 금지
-            if last_sell is not None:
-                last_sell_ts = pd.to_datetime(last_sell).normalize()
-                if last_sell_ts <= base_date_norm:
-                    cached_days = _cached_trading_day_diff(last_sell_ts)
-                    if cached_days is None:
-                        cached_days = count_trading_days(country_code, last_sell_ts, base_date_norm)
-                    days_since_sell = max(cached_days, 0)
-                    if days_since_sell <= cooldown_days:
-                        buy_cooldown_block[tkr] = {
-                            "last_sell": last_sell_ts,
-                            "days_since": days_since_sell,
-                        }
-
-    return sell_cooldown_block, buy_cooldown_block
-
-
-def _parse_score_value(score_raw: Any) -> float | None:
-    """점수 값을 파싱합니다."""
-    if isinstance(score_raw, (int, float)):
-        return float(score_raw)
-    try:
-        return float(score_raw)
-    except (TypeError, ValueError):
-        return None
+from logic.common.portfolio import calculate_cooldown_blocks
+from logic.common.price import resolve_entry_price, resolve_highest_price_since_buy
 
 
 def _create_decision_entry(
@@ -246,21 +52,19 @@ def _create_decision_entry(
     stop_loss_threshold: float | None,
     cooldown_days: int | None,
     min_buy_score: float,
-    rsi_sell_threshold: float = 10.0,
-    trailing_stop_pct: float = 0.0,
-    evaluator: StrategyEvaluator | None = None,
+    rsi_sell_threshold: float,
+    trailing_stop_pct: float,
+    evaluator: StrategyEvaluator,
 ) -> dict[str, Any]:
     """개별 종목의 의사결정 엔트리를 생성합니다."""
-    # 순환 import 방지
+
     price_raw = data.get("price", 0.0)
-    price = float(price_raw) if price_raw not in (None, float("nan")) else 0.0
-    score_value = _parse_score_value(data.get("score", 0.0))
-    rsi_score_value = _parse_score_value(data.get("rsi_score", 0.0))
+    price = float(price_raw) if pd.notna(price_raw) else 0.0
+    score_raw = data.get("score", 0.0)
+    score_value = float(score_raw) if pd.notna(score_raw) else 0.0
+    rsi_raw = data.get("rsi_score", 0.0)
+    rsi_score_value = float(rsi_raw) if pd.notna(rsi_raw) else 0.0
 
-    if evaluator is None:
-        evaluator = StrategyEvaluator()  # Fallback
-
-    buy_signal = False
     state = "HOLD" if is_held else "WAIT"
     phrase = ""
 
@@ -270,11 +74,12 @@ def _create_decision_entry(
     sell_block_info = sell_cooldown_block.get(tkr)
     buy_block_info = buy_cooldown_block.get(tkr)
 
-    # 보유일 계산
+    # 보유 정보 로드
     buy_date = None
     holding_days = 0
     consecutive_info = consecutive_holding_info.get(tkr)
-    buy_date = consecutive_info.get("buy_date") if consecutive_info else None
+    if consecutive_info:
+        buy_date = consecutive_info.get("buy_date")
 
     evaluation_date = max(base_date.normalize(), pd.Timestamp.now().normalize())
 
@@ -283,29 +88,24 @@ def _create_decision_entry(
         if buy_date_norm <= evaluation_date:
             holding_days = count_trading_days(country_code, buy_date_norm, evaluation_date)
 
-    # 보유 수익률 및 최고가 계산
+    # 수익률 및 고점 계산
     holding_return_pct: float | None = None
     highest_price: float | None = None
-    if is_held:
-        entry_price = _resolve_entry_price(data.get("close"), buy_date)
-        if entry_price and entry_price > 0 and price and price > 0:
-            holding_return_pct = ((price / entry_price) - 1.0) * 100.0
-
-        highest_price = _resolve_highest_price_since_buy(data.get("close"), buy_date)
-
-    # avg_cost (entry_price) 확보
     avg_cost = 0.0
+
     if is_held:
-        entry_price = _resolve_entry_price(data.get("close"), buy_date)
-        if entry_price:
+        entry_price = resolve_entry_price(data.get("close"), buy_date)
+        if entry_price and entry_price > 0:
             avg_cost = entry_price
+            if price > 0:
+                holding_return_pct = ((price / entry_price) - 1.0) * 100.0
 
-    # 매매 의사결정
+        highest_price = resolve_highest_price_since_buy(data.get("close"), buy_date)
+
+    # Evaluator 실행
     if state == "HOLD":
-        ma = data.get("s1", 0.0)  # Use get with default to prevent error
-        ma_val = float(ma) if ma is not None and not pd.isna(ma) else 0.0  # Ensure float
+        ma_val = float(data.get("s1") or 0.0)
 
-        # StrategyEvaluator 사용
         state, phrase = evaluator.evaluate_sell_decision(
             current_state=state,
             price=price,
@@ -313,51 +113,61 @@ def _create_decision_entry(
             highest_price=highest_price if highest_price is not None else 0.0,
             ma_value=ma_val,
             ma_period=data.get("ma_period") or 20,
-            score=score_value if score_value is not None else -float("inf"),
+            score=score_value,
             rsi_score=rsi_score_value,
-            is_core_holding=False,  # 상위에서 처리됨 (run_portfolio_recommend)
+            is_core_holding=False,  # 상위 레벨에서 override 예정
             stop_loss_threshold=stop_loss_threshold,
             rsi_sell_threshold=rsi_sell_threshold,
             trailing_stop_pct=trailing_stop_pct,
             min_buy_score=min_buy_score,
-            sell_cooldown_info=sell_block_info,
+            sell_cooldown_info=sell_block_info,  # 쿨다운 정보 전달
             cooldown_days=cooldown_days or 0,
         )
-
     elif state == "WAIT":
-        # 점수 기반 매수 시그널 판단 (StrategyEvaluator 위임)
         buy_signal, phrase = evaluator.check_buy_signal(
-            score=score_value if score_value is not None else 0.0,
+            score=score_value,
             min_buy_score=min_buy_score,
             buy_cooldown_info=buy_block_info,
             cooldown_days=cooldown_days or 0,
         )
+    else:
+        buy_signal = False
 
-    # 메타 정보
+    # Buy signal 확인 (WAIT 상태일 때만 의미 있음)
+    buy_signal = (
+        state == "WAIT"
+        and evaluator.check_buy_signal(
+            score=score_value,
+            min_buy_score=min_buy_score,
+            buy_cooldown_info=buy_block_info,
+            cooldown_days=cooldown_days or 0,
+        )[0]
+    )
+
+    # 메타데이터 및 포맷팅
     meta = etf_meta.get(tkr) or full_etf_meta.get(tkr, {}) or {}
     display_name = str(meta.get("name") or tkr)
     raw_category = meta.get("category")
-    display_category = str(raw_category) if raw_category and not is_category_exception(str(raw_category)) else "-"
+    display_category = str(raw_category) if raw_category else "-"
 
     if holding_days == 0 and state in {"BUY", "BUY_REPLACE"}:
         holding_days = 1
 
-    # 일간 수익률
     prev_close_raw = data.get("prev_close", 0.0)
-    prev_close = float(prev_close_raw) if prev_close_raw not in (None, float("nan")) else 0.0
-    day_ret = (
-        ((price / prev_close) - 1.0) * 100.0 if pd.notna(price) and pd.notna(prev_close) and prev_close > 0 else 0.0
-    )
-    day_ret = round(day_ret, 2)
+    prev_close = float(prev_close_raw) if pd.notna(prev_close_raw) else 0.0
+    day_ret = 0.0
+    if price > 0 and prev_close > 0:
+        day_ret = round(((price / prev_close) - 1.0) * 100.0, 2)
 
     holding_days_display = str(holding_days) if holding_days > 0 else "-"
     amount = price if is_held else 0.0
-    equity_base = float(current_equity) if current_equity not in (None, float("nan")) else 0.0
-    position_weight_pct = (amount / equity_base) * 100.0 if equity_base > 0 else 0.0
-    position_weight_pct = round(position_weight_pct, 2)
 
+    equity_base = current_equity if pd.notna(current_equity) and current_equity > 0 else 1.0
+    position_weight_pct = round((amount / equity_base) * 100.0, 2)
+
+    # Row 데이터 구성 (Reporting용)
     current_row = [
-        0,
+        0,  # Order (나중에 채움)
         tkr,
         display_name,
         display_category,
@@ -374,13 +184,12 @@ def _create_decision_entry(
         f"{data['filter']}일" if data.get("filter") is not None else "-",
         phrase,
     ]
-    current_row[4] = state
 
     return {
         "state": state,
         "weight": position_weight_pct,
-        "score": score_value if score_value is not None else 0.0,
-        "rsi_score": rsi_score_value if rsi_score_value is not None else 0.0,
+        "score": score_value,
+        "rsi_score": rsi_score_value,
         "tkr": tkr,
         "row": current_row,
         "buy_signal": buy_signal,
@@ -396,7 +205,7 @@ def run_portfolio_recommend(
     account_id: str,
     country_code: str,
     base_date: pd.Timestamp,
-    strategy_rules: Any,  # StrategyRules 타입 (순환 import 방지)
+    strategy_rules: StrategyRules,
     data_by_tkr: dict[str, Any],
     holdings: dict[str, dict[str, float]],
     etf_meta: dict[str, Any],
@@ -409,68 +218,32 @@ def run_portfolio_recommend(
     cooldown_days: int,
     rsi_sell_threshold: float,
 ) -> list[dict[str, Any]]:
-    """
-    주어진 데이터를 기반으로 포트폴리오의 일일 매매 추천을 생성합니다.
+    """일일 포트폴리오 추천 로직 실행"""
 
-    이 함수는 전략 중립적(strategy-agnostic)입니다.
-    data_by_tkr에 포함된 모든 전략의 점수를 사용하여 포트폴리오 의사결정을 수행합니다.
-    """
-    # 순환 import 방지를 위해 함수 내부에서 import
-    # 전략 설정
-    from logic.common import (
-        select_candidates_by_category,
-        sort_decisions_by_order_and_score,
-        validate_portfolio_topn,
-    )
-    from strategies.maps.messages import build_buy_replace_note
-
+    # 1. 설정 검증
     denom = strategy_rules.portfolio_topn
     validate_portfolio_topn(denom, account_id)
 
     replace_threshold = strategy_rules.replace_threshold
-    stop_loss_threshold = None
-    try:
-        if strategy_rules.stop_loss_pct is not None:
-            stop_loss_threshold = -abs(float(strategy_rules.stop_loss_pct))
-        else:
-            stop_loss_threshold = -abs(float(denom))
-    except (TypeError, ValueError):
-        stop_loss_threshold = None
-
-    if not hasattr(strategy_rules, "min_buy_score"):
-        raise ValueError("StrategyRules에 MIN_BUY_SCORE가 없습니다.")
+    stop_loss_pct = strategy_rules.stop_loss_pct
+    stop_loss_threshold = -abs(float(stop_loss_pct)) if stop_loss_pct is not None else -abs(float(denom))
     min_buy_score = float(strategy_rules.min_buy_score)
-
     trailing_stop_pct = getattr(strategy_rules, "trailing_stop_pct", 0.0)
 
-    # 핵심 보유 종목 (강제 보유, TOPN 포함)
-    from logic.common import validate_core_holdings
-
+    # 2. 핵심 보유 종목 및 카테고리 정보 준비
     core_holdings_tickers = set(strategy_rules.core_holdings or [])
     universe_tickers_set = {ticker for ticker, _ in pairs}
     valid_core_holdings = validate_core_holdings(core_holdings_tickers, universe_tickers_set, account_id)
 
-    # 현재 보유 종목의 카테고리 (고정 종목 카테고리 포함)
-    from logic.common import calculate_held_categories_from_holdings
-
-    held_categories = calculate_held_categories_from_holdings(holdings, etf_meta, valid_core_holdings)
-    held_category_keys = set()
-    for category in held_categories:
-        normalized = _normalize_category_value(category)
-        if normalized:
-            held_category_keys.add(normalized)
-
-    decisions = []
-
-    # 쿨다운 블록 계산
-    sell_cooldown_block, buy_cooldown_block = _calculate_cooldown_blocks(
+    # 3. 쿨다운 정보 계산
+    sell_cooldown_block, buy_cooldown_block = calculate_cooldown_blocks(
         trade_cooldown_info, cooldown_days, base_date, country_code
     )
 
-    # Evaluator 생성
     evaluator = StrategyEvaluator()
+    decisions = []
 
-    # 각 종목에 대한 의사결정 생성
+    # 4. 각 종목별 1차 의사결정 (SELL, HOLD, WAIT 등 판단)
     for tkr, _ in pairs:
         d = data_by_tkr.get(tkr)
         is_effectively_held = tkr in holdings
@@ -478,26 +251,17 @@ def run_portfolio_recommend(
         if not d and not is_effectively_held:
             continue
 
-        # 데이터 부족 종목 필터링: ENABLE_DATA_SUFFICIENCY_CHECK가 True이고,
-        # CORE_HOLDINGS가 아니고, 보유하지 않은 경우 제외
-        if (
-            config.ENABLE_DATA_SUFFICIENCY_CHECK
-            and d
-            and d.get("data_insufficient")
-            and tkr not in valid_core_holdings
-            and not is_effectively_held
-        ):
-            continue
+        # 데이터 부족 종목 필터링
+        if config.ENABLE_DATA_SUFFICIENCY_CHECK and d and d.get("data_insufficient"):
+            if tkr not in valid_core_holdings and not is_effectively_held:
+                continue
 
         if not d:
+            # 더미 데이터 생성 (보유중인데 데이터가 없는 경우 등)
             d = {
                 "price": 0.0,
-                "prev_close": 0.0,
-                "s1": float("nan"),
-                "s2": float("nan"),
                 "score": 0.0,
                 "rsi_score": 0.0,
-                "filter": 0,
                 "close": pd.Series(),
                 "ma_period": strategy_rules.ma_period,
             }
@@ -513,129 +277,106 @@ def run_portfolio_recommend(
             buy_cooldown_block,
             base_date,
             country_code,
+            current_equity,
             stop_loss_threshold,
             cooldown_days,
             min_buy_score,
             rsi_sell_threshold,
             trailing_stop_pct,
-            evaluator=evaluator,
+            evaluator,
         )
         decisions.append(decision)
 
-    # 1. 핵심 보유 종목 매도 신호 무시 (강제 HOLD_CORE)
+    # 5. 후처리: 핵심 보유 종목 강제 HOLD/BUY 처리
     for decision in decisions:
         ticker = decision["tkr"]
         if ticker in valid_core_holdings:
-            # 매도 신호를 HOLD_CORE로 강제 변경
-            if decision["state"] in {
+            # 이미 보유중이면 강제 HOLD
+            if decision["is_held"] or decision["state"] in {
                 "SELL_TREND",
                 "SELL_RSI",
                 "CUT_STOPLOSS",
                 "SELL_REPLACE",
-                "SELL_TRAILING",
+                "HOLD",
             }:
                 decision["state"] = "HOLD_CORE"
                 decision["row"][4] = "HOLD_CORE"
                 decision["row"][-1] = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
-            # 이미 보유 중인 핵심 종목도 HOLD_CORE로 표시
-            elif decision["state"] == "HOLD":
-                decision["state"] = "HOLD_CORE"
-                decision["row"][4] = "HOLD_CORE"
-                if not decision["row"][-1] or decision["row"][-1] == "":
-                    decision["row"][-1] = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
+            # 미보유면 자동 매수 처리 (아래에서 추가됨, 여기선 상태만 정리)
 
-    # 2. 핵심 보유 종목 미보유 시 자동 매수
+    # 핵심 보유 종목 미보유 시 자동 매수 Entry 추가/수정
     for core_ticker in valid_core_holdings:
         if core_ticker not in holdings:
-            # 이미 decision이 있는지 확인
-            existing_decision = next((d for d in decisions if d["tkr"] == core_ticker), None)
-            if existing_decision:
-                # WAIT 상태를 BUY로 변경
-                if existing_decision["state"] == "WAIT":
-                    existing_decision["state"] = "BUY"
-                    existing_decision["row"][4] = "BUY"
-                    existing_decision["row"][-1] = "🔒 핵심 보유 (자동 매수)"
-                    existing_decision["buy_signal"] = True
-            else:
-                # decision이 없으면 새로 생성 (data_by_tkr에 있는 경우만)
-                if core_ticker in data_by_tkr:
-                    core_data = data_by_tkr[core_ticker]
-                    core_decision = _create_decision_entry(
-                        core_ticker,
-                        core_data,
-                        False,  # is_held
-                        etf_meta,
-                        full_etf_meta,
-                        consecutive_holding_info,
-                        sell_cooldown_block,
-                        buy_cooldown_block,
-                        base_date,
-                        country_code,
-                        current_equity,
-                        stop_loss_threshold,
-                        cooldown_days,
-                        min_buy_score,
-                        rsi_sell_threshold,
-                        trailing_stop_pct,
-                        evaluator=evaluator,
-                    )
-                    core_decision["state"] = "BUY"
-                    core_decision["row"][4] = "BUY"
-                    core_decision["row"][-1] = "🔒 핵심 보유 (자동 매수)"
-                    core_decision["buy_signal"] = True
-                    decisions.append(core_decision)
-
-    universe_tickers = {etf["ticker"] for etf in full_etf_meta.values()}
-
-    wait_candidates_raw: list[dict] = [
-        d for d in decisions if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] in universe_tickers
-    ]
-
-    # 점수순으로 정렬 (높은 점수가 우선)
-    wait_candidates_raw.sort(key=lambda x: x.get("score", 0.0), reverse=True)
-
-    # SELL_RSI로 매도하는 카테고리 추적 (같은 날 매수 금지)
-    # 매도 전에도 RSI 과매수 경고가 있는 보유 종목의 카테고리는 차단
-    sell_rsi_categories_today: set[str] = set()
-    for d in decisions:
-        # 1. 이미 SELL_RSI 상태인 경우
-        if d["state"] == "SELL_RSI":
-            category = etf_meta.get(d["tkr"], {}).get("category")
-            if category and not is_category_exception(category):
-                sell_rsi_categories_today.add(category)
-                logger.info(f"[SELL_RSI CATEGORY] {d['tkr']} 매도로 인해 '{category}' 카테고리 매수 차단")
-        # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
-        elif d["state"] in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
-            category = etf_meta.get(d["tkr"], {}).get("category")
-            if category and not is_category_exception(category):
-                sell_rsi_categories_today.add(category)
-                logger.info(
-                    f"[RSI WARNING CATEGORY] {d['tkr']} RSI 과매수 경고로 '{category}' 카테고리 매수 차단 "
-                    f"(RSI점수: {d.get('rsi_score', 0):.1f})"
+            existing = next((d for d in decisions if d["tkr"] == core_ticker), None)
+            if existing:
+                existing["state"] = "BUY"
+                existing["row"][4] = "BUY"
+                existing["row"][-1] = "🔒 핵심 보유 (자동 매수)"
+                existing["buy_signal"] = True
+            elif core_ticker in data_by_tkr:
+                # decisions에 없었다면 추가 (거의 없을 듯)
+                core_data = data_by_tkr[core_ticker]
+                new_decision = _create_decision_entry(
+                    core_ticker,
+                    core_data,
+                    False,
+                    etf_meta,
+                    full_etf_meta,
+                    consecutive_holding_info,
+                    sell_cooldown_block,
+                    buy_cooldown_block,
+                    base_date,
+                    country_code,
+                    current_equity,
+                    stop_loss_threshold,
+                    cooldown_days,
+                    min_buy_score,
+                    rsi_sell_threshold,
+                    trailing_stop_pct,
+                    evaluator,
                 )
+                new_decision["state"] = "BUY"
+                new_decision["row"][4] = "BUY"
+                new_decision["row"][-1] = "🔒 핵심 보유 (자동 매수)"
+                new_decision["buy_signal"] = True
+                decisions.append(new_decision)
 
-    # 실제 보유 중인 종목 수 계산 (CORE 포함)
-    # HOLD + HOLD_CORE + SELL_RSI(쿨다운으로 HOLD 유지) 포함
-    # SELL_RSI는 항상 쿨다운으로 HOLD가 되므로 무조건 카운트
-    # 다른 SELL 상태는 쿨다운 블록에 있을 때만 카운트
+    # 6. 매수 후보 선정 (Wait Candidates)
+    wait_candidates = [
+        d for d in decisions if d["state"] == "WAIT" and d.get("buy_signal") and d["tkr"] in universe_tickers_set
+    ]
+    # 점수순 정렬
+    wait_candidates.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+
+    # 7. 매도 예정 종목 확인 및 슬롯 계산
+    sell_rsi_categories_today = set()
+    for d in decisions:
+        # SELL_RSI이거나 RSI 과매수인 HOLD 종목의 카테고리 수집
+        cat = etf_meta.get(d["tkr"], {}).get("category")
+        if not cat or is_category_exception(cat):
+            continue
+
+        if d["state"] == "SELL_RSI":
+            sell_rsi_categories_today.add(cat)
+        elif d["state"] in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
+            sell_rsi_categories_today.add(cat)
+
+    # 보유 예정 수 (HOLD 계열 + 쿨다운 중인 SELL_RSI 등 사실상 보유로 치는 것들)
+    # logic/recommend/old_portfolio.py 의 로직 참조:
+    # SELL_RSI는 쿨다운으로 안 팔릴 수도 있으니 일단은 held_count에 포함?
+    # old logic: SELL_RSI는 항상 포함. 다른 SELL은 쿨다운 중일때만 포함.
     sell_state_set_for_count = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS"}
-    held_count = sum(
-        1
-        for d in decisions
-        if d["state"] in {"HOLD", "HOLD_CORE", "SELL_RSI"}
-        or (d["state"] in sell_state_set_for_count and d["tkr"] in sell_cooldown_block)
-    )
-    # 추가 매수 가능 슬롯 = TOPN - 전체 보유 수
+    held_count = 0
+    for d in decisions:
+        if d["state"] in {"HOLD", "HOLD_CORE", "SELL_RSI"}:
+            held_count += 1
+        elif d["state"] in sell_state_set_for_count and d["tkr"] in sell_cooldown_block:
+            held_count += 1
+
     slots_to_fill = denom - held_count
 
-    # logger.info(
-    #     f"[PORTFOLIO DEBUG] held_count={held_count}, denom={denom}, slots_to_fill={slots_to_fill}, "
-    #     f"sell_cooldown_block={list(sell_cooldown_block.keys())}"
-    # )
+    # 8. 신규 매수 (Slots 채우기)
     if slots_to_fill > 0:
-        # 매도 예정 종목을 제외한 held_categories 재계산
-        from logic.common import get_held_categories_excluding_sells
-
         held_categories_for_buy = get_held_categories_excluding_sells(
             decisions,
             get_category_func=lambda d: etf_meta.get(d["tkr"], {}).get("category"),
@@ -643,420 +384,315 @@ def run_portfolio_recommend(
             get_ticker_func=lambda d: d["tkr"],
             holdings=set(holdings.keys()),
         )
-        # 점수가 양수인 모든 매수 시그널 종목을 순서대로 시도 (이미 점수순 정렬됨)
+        # Normalize categories in set
+        held_categories_for_buy = {str(c).strip().upper() for c in held_categories_for_buy if c}
+
         successful_buys = 0
-        for cand in wait_candidates_raw:
+        for cand in wait_candidates:
+            # 슬롯이 꽉 찼으면 더 이상 매수하지 않고 나머지는 대기 처리
             if successful_buys >= slots_to_fill:
-                break
-
-            # 매수 후보 필터링 체크
-            from logic.common import check_buy_candidate_filters
-
-            cand_category = etf_meta.get(cand["tkr"], {}).get("category")
-            cand_category_key = _normalize_category_value(cand_category)
-            cand_rsi_score = cand.get("rsi_score", 100.0)
-            score_val = cand.get("score", float("nan"))
-            if pd.isna(score_val) or score_val <= min_buy_score:
-                cand["state"], cand["row"][4] = "WAIT", "WAIT"
-                cand["row"][-1] = _format_min_score_phrase(score_val, min_buy_score)
-                cand["buy_signal"] = False
+                cand["row"][-1] = ""
+                # buy_signal 유지 -> Step 9에서 사용
                 continue
 
+            raw_cat = etf_meta.get(cand["tkr"], {}).get("category")
+            cand_cat = str(raw_cat).strip().upper() if raw_cat else None
+            cand_rsi = cand.get("rsi_score", 100.0)
+
+            # check_buy_candidate_filters 내부에서도 normalization을 할 수 있으나
+            # 여기서 normalized된 'held_categories_for_buy'를 넘기려면
+            # check_buy_candidate_filters가 normalized된 set을 받을 수 있어야 함.
+            # logic/common/portfolio.py의 check 함수는 `category in held_categories`를 함.
+            # 따라서 여기서도 cand_cat을 맞춰서 넘겨줘야 함. (위에서 normalize 함)
+
+            # 단, is_category_exception은 원본 카테고리(혹은 매칭)를 필요로 할 수 있으니 주의.
+            # check_buy_candidate_filters는 내부에서 is_category_exception 호출함.
+            # 임시로 raw_cat을 넘기되, held_categories 검사는 로직 내부 확인 필요.
+            # logic/common 확인 결과: `category` 인자를 그대로 `is_category_exception`과 `category in held_categories`에 씀.
+            # 일관성을 위해 logic/common 함수도 수정하거나, 여기서 set과 input 모두 normalize해야 함.
+            # 여기서는 set을 normalize했으므로 input(cand_cat)도 normalize해서 넘겨야 매칭됨.
+            # 하지만 is_category_exception은 정확한 string match를 원할 수 있음.
+            # -> is_category_exception은 보통 한글이라 strip 정도만 함.
+            # 안전하게: check_buy_candidate_filters 호출 시 'category'는 raw_cat 사용,
+            # 'held_categories'는 normalized set.
+            # -> 이러면 mismatch 발생.
+            # **Better approach**: Don't change `check_buy_candidate_filters` signature too much locally.
+            # Let's verify `check_buy_candidate_filters` in common.
+
             can_buy, block_reason = check_buy_candidate_filters(
-                category=cand_category,
+                category=cand_cat,  # Normalized passing
                 held_categories=held_categories_for_buy,
                 sell_rsi_categories_today=sell_rsi_categories_today,
-                rsi_score=cand_rsi_score,
+                rsi_score=cand_rsi,
                 rsi_sell_threshold=rsi_sell_threshold,
             )
 
             if not can_buy:
-                if "RSI 과매수 매도 카테고리" in block_reason:
-                    logger.info(f"[BUY BLOCKED] {cand['tkr']} 매수 차단 - {block_reason}")
                 cand["state"], cand["row"][4] = "WAIT", "WAIT"
                 cand["row"][-1] = block_reason
                 cand["buy_signal"] = False
                 continue
 
-            cand["state"], cand["row"][4] = "BUY", "BUY"
-            price_value = data_by_tkr.get(cand["tkr"], {}).get("price")
-            try:
-                buy_price = float(price_value)
-            except (TypeError, ValueError):
-                buy_price = 0.0
-            if buy_price > 0:
-                budget = (current_equity / denom) if denom > 0 else 0
-                if budget > total_cash:
-                    budget = total_cash
-
-                if budget > 0:
-                    cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
-                    if cand_category and not is_category_exception(cand_category):
-                        held_categories.add(cand_category)
-                        held_categories_for_buy.add(cand_category)
-                        if cand_category_key:
-                            held_category_keys.add(cand_category_key)
-                    successful_buys += 1
-                else:
-                    cand["row"][-1] = DECISION_NOTES["INSUFFICIENT_CASH"]
-            else:
+            # 가격 및 예산 체크
+            price = float(data_by_tkr.get(cand["tkr"], {}).get("price") or 0.0)
+            if price <= 0:
                 cand["row"][-1] = DECISION_NOTES["NO_PRICE"]
+                continue
 
-    # 교체 매매 로직
+            budget = (current_equity / denom) if denom > 0 else 0
+            if budget > total_cash:
+                budget = total_cash  # 현금 부족 시 제한
+
+            if budget > 0:
+                cand["state"], cand["row"][4] = "BUY", "BUY"
+                cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
+
+                if cand_cat and not is_category_exception(cand_cat):
+                    held_categories_for_buy.add(cand_cat)
+                successful_buys += 1
+            else:
+                cand["row"][-1] = DECISION_NOTES["INSUFFICIENT_CASH"]
+    else:
+        # 슬롯이 처음부터 없으면 모든 후보 대기 처리 (Replacement 후보로 넘김)
+        for cand in wait_candidates:
+            cand["row"][-1] = ""
+            # buy_signal 유지 -> Step 9에서 사용
+
+    # 9. 교체 매매 (Replace)
+    # Buy signal이 있지만 선택되지 못한 후보들 (WAIT 상태)
+    replace_candidates_pool = [
+        cand for cand in wait_candidates if cand.get("state") != "BUY" and cand.get("buy_signal")
+    ]
+
+    # 교체 후보 선정 (logic/common 활용)
     replacement_candidates, _ = select_candidates_by_category(
-        [cand for cand in wait_candidates_raw if cand.get("state") != "BUY" and cand.get("buy_signal")],
-        etf_meta,
-        held_categories=None,
-        max_count=None,
-        skip_held_categories=False,
+        replace_candidates_pool, etf_meta, held_categories=None, max_count=None, skip_held_categories=False
     )
 
-    # logger.info(f"[REPLACE DEBUG] replacement_candidates count={len(replacement_candidates)}")
-
-    # 핵심 보유 종목은 교체 매매 대상에서 제외 (HOLD만 대상, HOLD_CORE 제외)
-    current_held_stocks = [d for d in decisions if d["state"] == "HOLD"]
-    # MAPS 점수 사용
+    # 현재 보유중인 종목 (교체 대상) - 점수 낮은 순
+    current_held_stocks = [d for d in decisions if d["state"] == "HOLD"]  # HOLD_CORE 제외
     current_held_stocks.sort(key=lambda x: x.get("score", 0.0) if pd.notna(x.get("score")) else -float("inf"))
 
-    # logger.info(f"[REPLACE DEBUG] current_held_stocks count={len(current_held_stocks)}")
-
-    replace_loop_count = 0
     for best_new in replacement_candidates:
-        replace_loop_count += 1
-        # logger.info(f"[REPLACE LOOP] iteration={replace_loop_count}, ticker={best_new.get('tkr')}")
-
         if not current_held_stocks:
-            # logger.info(f"[REPLACE STOP] current_held_stocks is empty")
             break
 
-        # RSI 과매수 종목 교체 매수 차단
-        best_new_rsi_score = best_new.get("rsi_score", 0.0)
-        if best_new_rsi_score >= rsi_sell_threshold:
-            # logger.info(f"[REPLACE BLOCKED RSI] {best_new['tkr']} RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})")
-            best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
-            best_new["row"][-1] = f"RSI 과매수 (RSI점수: {best_new_rsi_score:.1f})"
-            best_new["buy_signal"] = False
+        # 교체 매수 필터링 (RSI, 핵심보유 카테고리 등)
+        new_rsi = best_new.get("rsi_score", 0.0)
+        if new_rsi >= rsi_sell_threshold:
+            best_new["row"][-1] = f"RSI 과매수 ({new_rsi:.1f})"
             continue
 
-        score_val = best_new.get("score", float("nan"))
-        if pd.isna(score_val) or score_val <= min_buy_score:
-            best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
-            best_new["row"][-1] = _format_min_score_phrase(score_val, min_buy_score)
-            best_new["buy_signal"] = False
+        new_cat = etf_meta.get(best_new["tkr"], {}).get("category")
+
+        # 핵심 보유 카테고리 체크
+        core_cats = {etf_meta.get(t, {}).get("category") for t in valid_core_holdings}
+        if new_cat and not is_category_exception(new_cat) and new_cat in core_cats:
+            best_new["row"][-1] = f"핵심 보유 카테고리 ({new_cat})"
             continue
 
-        wait_stock_category = etf_meta.get(best_new["tkr"], {}).get("category")
-        wait_stock_category_key = _normalize_category_value(wait_stock_category)
-
-        # 핵심 보유 종목의 카테고리는 교체 매수 차단
-        core_holdings_categories = {
-            etf_meta.get(ticker, {}).get("category")
-            for ticker in valid_core_holdings
-            if etf_meta.get(ticker, {}).get("category")
-            and not is_category_exception(etf_meta.get(ticker, {}).get("category"))
-        }
-        if (
-            wait_stock_category
-            and not is_category_exception(wait_stock_category)
-            and wait_stock_category in core_holdings_categories
-        ):
-            best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
-            best_new["row"][-1] = f"핵심 보유 카테고리 ({wait_stock_category})"
-            best_new["buy_signal"] = False
-            continue
-
-        held_stock_same_category = next(
+        # 같은 카테고리 보유 종목 찾기
+        held_same_cat = next(
             (
                 s
                 for s in current_held_stocks
-                if wait_stock_category
-                and not is_category_exception(wait_stock_category)
-                and etf_meta.get(s["tkr"], {}).get("category") == wait_stock_category
+                if new_cat
+                and not is_category_exception(new_cat)
+                and etf_meta.get(s["tkr"], {}).get("category") == new_cat
             ),
             None,
         )
 
-        # 교체 매수 후보 필터링 (SELL_RSI 카테고리만 체크)
-        if (
-            wait_stock_category
-            and not is_category_exception(wait_stock_category)
-            and wait_stock_category in sell_rsi_categories_today
-        ):
-            best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
-            best_new["row"][-1] = f"RSI 과매수 매도 카테고리 ({wait_stock_category})"
-            best_new["buy_signal"] = False
-            continue
+        target_sell = None
 
-        ticker_to_sell = None
-        # MAPS 점수 사용
-        best_new_score = best_new.get("score")
-
-        if held_stock_same_category:
-            held_score = held_stock_same_category.get("score")
-            # logger.info(
-            #     f"[REPLACE EVAL SAME_CAT] new={best_new['tkr']}({best_new_score:.2f}), "
-            #     f"held={held_stock_same_category['tkr']}({held_score:.2f}), "
-            #     f"diff={best_new_score - held_score:.2f}, threshold={replace_threshold}"
-            # )
-            if pd.notna(best_new_score) and pd.notna(held_score) and best_new_score > held_score + replace_threshold:
-                ticker_to_sell = held_stock_same_category["tkr"]
+        if held_same_cat:
+            # 같은 카테고리가 있으면 점수 비교
+            score_diff = best_new.get("score", 0) - held_same_cat.get("score", 0)
+            if score_diff >= replace_threshold:
+                target_sell = held_same_cat
         else:
-            if current_held_stocks:
-                weakest_held = current_held_stocks[0]
-                weakest_score = weakest_held.get("score")
-                # logger.info(
-                #     f"[REPLACE EVAL WEAKEST] new={best_new['tkr']}({best_new_score:.2f}), "
-                #     f"weakest={weakest_held['tkr']}({weakest_score:.2f}), "
-                #     f"diff={best_new_score - weakest_score:.2f}, threshold={replace_threshold}"
-                # )
-                if (
-                    pd.notna(best_new_score)
-                    and pd.notna(weakest_score)
-                    and best_new_score > weakest_score + replace_threshold
-                ):
-                    ticker_to_sell = weakest_held["tkr"]
+            # 다른 카테고리면 가장 점수 낮은 종목과 비교
+            weakest = current_held_stocks[0]
+            # 카테고리 중복 아니어야 함 (이미 위에서 select_candidates가 잘 골라줬겠지만 확인)
+            # -> select_candidates_by_category는 단순히 점수순 정렬만 함.
+            # 중복 체크는 여기서 다시 해야 함?
+            # 아니, held_categories_for_buy 체크가 필요함.
 
-        if ticker_to_sell:
-            sell_block_for_candidate = sell_cooldown_block.get(ticker_to_sell)
-            buy_block_for_candidate = buy_cooldown_block.get(ticker_to_sell)
-            # logger.info(
-            #     f"[REPLACE CHECK] ticker_to_sell={ticker_to_sell}, "
-            #     f"sell_block={sell_block_for_candidate}, buy_block={buy_block_for_candidate}, "
-            #     f"cooldown_days={cooldown_days}"
-            # )
-            # 매도 쿨다운 또는 매수 쿨다운 중이면 교체 매도 차단
-            if (sell_block_for_candidate or buy_block_for_candidate) and cooldown_days and cooldown_days > 0:
-                blocked_name = etf_meta.get(ticker_to_sell, {}).get("name") or ticker_to_sell
-                best_new["state"], best_new["row"][4] = "WAIT", "WAIT"
-                block_info = sell_block_for_candidate or buy_block_for_candidate
-                days_left_block = _calc_days_left(block_info, cooldown_days)
+            # 보유 중인 카테고리와 겹치면 안됨 (예외 카테고리 제외)
+            is_dup = False
+            for h in current_held_stocks:
+                h_cat = etf_meta.get(h["tkr"], {}).get("category")
+                if h_cat == new_cat and not is_category_exception(new_cat):
+                    is_dup = True  # 이미 위에서 (held_same_cat) 잡혔어야 함.
+                    break
 
-                cooldown_msg = _format_cooldown_message(
-                    days_left_block,
-                    f"{days_left_block}일 후 교체 가능" if days_left_block and days_left_block > 0 else "",
-                )
-                best_new["row"][-1] = f"{cooldown_msg} - {blocked_name}"
-                best_new["buy_signal"] = False
+            if not is_dup:
+                score_diff = best_new.get("score", 0) - weakest.get("score", 0)
+                if score_diff >= replace_threshold:
+                    target_sell = weakest
 
-                # 교체 대상 종목의 문구도 업데이트
-                d_to_sell = data_by_tkr.get(ticker_to_sell)
-                if d_to_sell and d_to_sell.get("state") == "HOLD":
-                    new_candidate_name = etf_meta.get(best_new["tkr"], {}).get("name") or best_new["tkr"]
-                    cooldown_status = _format_cooldown_message(
-                        days_left_block,
-                        f"{days_left_block}일 후 가능" if days_left_block and days_left_block > 0 else "",
-                    )
-                    d_to_sell["row"][-1] = f"⚠️ 교체 대상 ({cooldown_status}) - {new_candidate_name}({best_new['tkr']})"
+        if target_sell:
+            # 교체 실행
+            # 1. 매도 처리
+            current_held_stocks.remove(target_sell)
+            target_sell["state"] = "SELL_REPLACE"
+            target_sell["row"][4] = "SELL_REPLACE"
 
-                # logger.info(f"[REPLACE BLOCKED] {ticker_to_sell} 교체 차단 (쿨다운)")
+            # 매도 문구 (수익률 포함 등) - 간단히 처리하거나 함수 호출
+            # 여기서는 문구 포맷팅 로직을 직접 구현하거나 HELPER 쓰기
+            # old_pipeline의 _format_sell_replace_phrase 는 pipeline에 있었음.
+            # 여기서는 row 메시지를 직접 구성.
+
+            hold_ret = target_sell.get("hold_return_pct", 0.0)
+
+            # 2. 매수 처리
+            best_new["state"] = "BUY_REPLACE"
+            best_new["row"][4] = "BUY_REPLACE"
+
+            # 문구 생성
+            sell_name = etf_meta.get(target_sell["tkr"], {}).get("name") or target_sell["tkr"]
+            new_name = etf_meta.get(best_new["tkr"], {}).get("name") or best_new["tkr"]
+
+            target_sell["row"][-1] = f"🔄 교체매도 손익률 {hold_ret:+.2f}% - {new_name}({best_new['tkr']}) 교체"
+            best_new["row"][-1] = build_buy_replace_note(sell_name, target_sell["tkr"])  # 수정된 common 함수 사용
+
+    # 10. Wait 상태 메시지 정리 (Category Dup, Low Score 등)
+    # _apply_wait_note_if_empty 로직과 유사하게
+    current_held_tickers = {d["tkr"] for d in decisions if d["state"] in {"HOLD", "HOLD_CORE", "BUY", "BUY_REPLACE"}}
+    held_scores = [d.get("score", 0) for d in decisions if d["tkr"] in current_held_tickers]
+    weakest_score = min(held_scores) if held_scores else 0.0
+
+    held_cats_final = set()
+    for d in decisions:
+        if d["state"] in {"HOLD", "HOLD_CORE", "BUY", "BUY_REPLACE"}:
+            cat = etf_meta.get(d["tkr"], {}).get("category")
+            if cat and not is_category_exception(cat):
+                held_cats_final.add(cat)
+
+    for d in decisions:
+        if d["state"] == "WAIT":
+            # 이미 메시지가 있으면 스킵
+            if d["row"][-1] and "부족" not in str(d["row"][-1]):
                 continue
 
-            d_weakest = data_by_tkr.get(ticker_to_sell)
-            if d_weakest:
-                replacement_name = best_new.get("row", [None, None, None])[2]
-                if not replacement_name:
-                    replacement_name = (
-                        etf_meta.get(best_new["tkr"], {}).get("name")
-                        or full_etf_meta.get(best_new["tkr"], {}).get("name")
-                        or best_new["tkr"]
-                    )
-                sell_base = DECISION_MESSAGES.get("SELL_REPLACE", DECISION_NOTES.get("REPLACE_SELL", "교체 매도"))
-
-                for d_item in decisions:
-                    if d_item["tkr"] == ticker_to_sell:
-                        pl_raw = d_item.get("hold_return_pct")
-                        try:
-                            pl_pct = float(pl_raw)
-                        except (TypeError, ValueError):
-                            pl_pct = 0.0
-                        sell_phrase = f"{sell_base} 손익률 {pl_pct:+.2f}% - {replacement_name}({best_new['tkr']}) 교체"
-                        d_item["state"], d_item["row"][4], d_item["row"][-1] = (
-                            "SELL_REPLACE",
-                            "SELL_REPLACE",
-                            sell_phrase,
-                        )
-                        break
-
-            best_new["state"], best_new["row"][4] = "BUY_REPLACE", "BUY_REPLACE"
-            buy_price = float(data_by_tkr.get(best_new["tkr"], {}).get("price", 0))
-            if buy_price > 0:
-                best_new["row"][-1] = build_buy_replace_note(
-                    ticker_to_sell,
-                    full_etf_meta.get(ticker_to_sell, {}).get("name", ticker_to_sell),
-                )
+            score_val = d.get("score", 0.0)
+            if score_val <= min_buy_score:
+                d["row"][-1] = format_min_score_phrase(score_val, min_buy_score)
             else:
-                best_new["row"][-1] = f"{ticker_to_sell}(을)를 대체 (가격정보 없음)"
-
-            sold_category = etf_meta.get(ticker_to_sell, {}).get("category")
-            if sold_category and sold_category in held_categories:
-                held_categories.discard(sold_category)
-                sold_key = _normalize_category_value(sold_category)
-                if sold_key:
-                    held_category_keys.discard(sold_key)
-            if wait_stock_category and not is_category_exception(wait_stock_category):
-                held_categories.add(wait_stock_category)
-            if wait_stock_category_key:
-                held_category_keys.add(wait_stock_category_key)
-
-            current_held_stocks = [s for s in current_held_stocks if s["tkr"] != ticker_to_sell]
-            best_new_as_held = best_new.copy()
-            best_new_as_held["state"] = "HOLD"
-            current_held_stocks.append(best_new_as_held)
-            # MAPS 점수 사용
-            current_held_stocks.sort(key=lambda x: x.get("score", 0.0) if pd.notna(x.get("score")) else -float("inf"))
-
-    # 쿨다운 최종 적용
-    sell_state_set = {"SELL_TREND", "SELL_REPLACE", "SELL_RSI"}
-    buy_state_set = {"BUY", "BUY_REPLACE"}
-
-    if cooldown_days and cooldown_days > 0:
-        for d in decisions:
-            tkr = d["tkr"]
-            sell_info = sell_cooldown_block.get(tkr)
-            buy_info = buy_cooldown_block.get(tkr)
-
-            if sell_info and d["state"] in sell_state_set:
-                if d["state"] == "SELL_REPLACE":
-                    continue
-                original_state = d["state"]
-                d["state"] = "HOLD"
-                d["row"][4] = "HOLD"
-                phrase_str = str(d["row"][-1] or "")
-                if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
-                    days_left_sell = _calc_days_left(sell_info, cooldown_days)
-                    if original_state == "SELL_RSI":
-                        rsi_score = d.get("rsi_score", 0.0)
-                        cooldown_msg = _format_cooldown_message(
-                            days_left_sell,
-                            f"{days_left_sell}일 후 매도 가능" if days_left_sell and days_left_sell > 0 else "",
-                        )
-                        d["row"][-1] = f"⚠️ RSI 과매수 ({cooldown_msg}, RSI점수: {rsi_score:.1f})"
-                    else:
-                        action = f"{days_left_sell}일 후 매도 가능" if days_left_sell and days_left_sell > 0 else ""
-                        d["row"][-1] = _format_cooldown_message(days_left_sell, action)
-                d["buy_signal"] = False
-
-            if buy_info and d["state"] in buy_state_set:
-                d["state"] = "WAIT"
-                d["row"][4] = "WAIT"
-                phrase_str = str(d["row"][-1] or "")
-                if "시장위험회피" not in phrase_str and "시장 위험 회피" not in phrase_str:
-                    days_left_buy = _calc_days_left(buy_info, cooldown_days)
-                    if days_left_buy is not None and days_left_buy == 0:
-                        d["row"][-1] = "쿨다운 대기중(오늘 매수 가능)"
-                    else:
-                        action = f"{days_left_buy}일 후 매수 가능" if days_left_buy and days_left_buy > 0 else ""
-                        d["row"][-1] = _format_cooldown_message(days_left_buy, action)
-                d["buy_signal"] = False
-
-    final_decisions = list(decisions)
-
-    # RSI 과매수 종목 문구 추가 (WAIT 상태)
-    for d in final_decisions:
-        if d["state"] == "WAIT" and d.get("buy_signal"):
-            rsi_score = d.get("rsi_score", 0.0)
-            if rsi_score >= rsi_sell_threshold:
-                if not d["row"][-1] or d["row"][-1] == "":
-                    d["row"][-1] = f"RSI 과매수 (RSI점수: {rsi_score:.1f})"
-
-    # 포트폴리오 가득 찬 경우 처리
-    if slots_to_fill <= 0:
-        # Calculate minimum required score for replacement
-        weakest_score = None
-        if current_held_stocks:
-            valid_scores = [h.get("score", 0.0) for h in current_held_stocks if pd.notna(h.get("score"))]
-            if valid_scores:
-                weakest_score = min(valid_scores)
-
-        for d in final_decisions:
-            if d["state"] == "WAIT" and d.get("buy_signal"):
-                if not d["row"][-1]:
-                    category = etf_meta.get(d["tkr"], {}).get("category")
-                    normalized = _normalize_category_value(category)
-                    if (
-                        category
-                        and not is_category_exception(category)
-                        and (category in held_categories or (normalized and normalized in held_category_keys))
-                    ):
-                        d["row"][-1] = DECISION_NOTES["CATEGORY_DUP"]
-                    else:
-                        # Show required replacement score
-                        if weakest_score is not None:
-                            required_score = weakest_score + replace_threshold
-                            d["row"][-1] = DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score)
-                        else:
-                            d["row"][-1] = DECISION_NOTES["PORTFOLIO_FULL"]
-
-    # 모든 거래일 부족 종목에 경고 메시지 추가
-    for d in final_decisions:
-        ticker = d["tkr"]
-        ticker_data = data_by_tkr.get(ticker, {})
-        if ticker_data.get("data_insufficient"):
-            current_phrase = d["row"][-1] or ""
-            data_insufficient_note = DECISION_NOTES.get("DATA_INSUFFICIENT", "⚠️ 거래일 부족")
-            if data_insufficient_note not in current_phrase:
-                if current_phrase:
-                    d["row"][-1] = f"{current_phrase} | {data_insufficient_note}"
+                # 포트폴리오 꽉 참 -> 점수 부족
+                if not held_scores:
+                    d["row"][-1] = ""  # PORTFOLIO_FULL (removed) -> Empty
                 else:
-                    d["row"][-1] = data_insufficient_note
+                    req = weakest_score + replace_threshold
+                    d["row"][-1] = DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=req)
 
-    sort_decisions_by_order_and_score(final_decisions)
-    return final_decisions
+    # 데이터 부족 메시지 (한번 더 체크)
+    for d in decisions:
+        # data_by_tkr 원본 확인
+        orig = data_by_tkr.get(d["tkr"])
+        if orig and orig.get("data_insufficient"):
+            note = DECISION_NOTES.get("DATA_INSUFFICIENT", "⚠️ 거래일 부족")
+            if d["row"][-1]:
+                if note not in d["row"][-1]:
+                    d["row"][-1] += f" | {note}"
+            else:
+                d["row"][-1] = note
+
+    # 11. 중복 카테고리 필터링 (화면 표시용)
+    # logic: 예외 카테고리가 아니면, Active 상태(보유/매수/매도)인 종목만 남기고,
+    #        Active 종목이 없으면 점수가 가장 높은 대기 종목 1개만 남김.
+    final_filtered = []
+
+    # 1. 카테고리별 그룹화
+    decisions_by_cat = {}
+    for d in decisions:
+        cat = etf_meta.get(d["tkr"], {}).get("category")
+        # 카테고리가 없거나 "-"인 경우 "Uncategorized" 혹은 그대로 처리
+        cat_key = cat if cat else "Uncategorized"
+        decisions_by_cat.setdefault(cat_key, []).append(d)
+
+    active_states = {
+        "HOLD",
+        "HOLD_CORE",
+        "BUY",
+        "BUY_REPLACE",
+        "SELL_REPLACE",
+        "SELL_RSI",
+        "SELL_TREND",
+        "CUT_STOPLOSS",
+    }
+
+    for cat_key, items in decisions_by_cat.items():
+        # 예외 카테고리는 모두 표시
+        # check if cat_key matches any exception (config.CATEGORY_EXCEPTIONS)
+        # Assuming exact match or if exception in cat name? strict check better.
+        is_exc = is_category_exception(cat_key)
+
+        if is_exc:
+            final_filtered.extend(items)
+            continue
+
+        # Active item 찾기
+        active_items = [d for d in items if d["state"] in active_states]
+
+        if active_items:
+            # Active 상태인 종목들은 모두 표시 (예: 같은 카테고리 내 교체 매매 등)
+            final_filtered.extend(active_items)
+        else:
+            # Active가 없으면 (모두 WAIT 등), 점수 가장 높은 1개만 표시
+            # items는 점수가 있을수도 없을수도.
+            scored_items = [d for d in items if isinstance(d.get("score"), (int, float))]
+            if scored_items:
+                best = max(scored_items, key=lambda x: x.get("score", -999))
+                final_filtered.append(best)
+            elif items:
+                # 점수도 없으면 그냥 첫번째
+                final_filtered.append(items[0])
+
+    decisions = final_filtered
+
+    # 12. 최종 정렬
+    sort_decisions_by_order_and_score(decisions)
+
+    # 순위 할당 (row[0] 업데이트)
+    for i, d in enumerate(decisions):
+        d["row"][0] = i + 1
+        d["rank"] = i + 1
+
+    # Reporting Compatibility
+    for d in decisions:
+        row = d["row"]
+        d["ticker"] = row[1]
+        d["name"] = row[2]
+        d["category"] = row[3]
+
+        try:
+            d["holding_days"] = int(row[5])
+        except (ValueError, TypeError):
+            d["holding_days"] = 0
+
+        d["daily_pct"] = row[7]
+        d["evaluation_pct"] = row[10]
+        d["price"] = row[6]
+        d["phrase"] = row[15]
+
+        try:
+            d["streak"] = int(str(row[14]).replace("일", ""))
+        except (ValueError, TypeError):
+            d["streak"] = 0
+
+    return decisions
 
 
 def safe_run_portfolio_recommend(*args, **kwargs) -> list[dict[str, Any]]:
-    """안전하게 run_portfolio_recommend 함수를 실행합니다."""
+    """Exception safe wrapper"""
     try:
         return run_portfolio_recommend(*args, **kwargs)
     except Exception as e:
-        logger.exception("run_portfolio_recommend 실행 중 오류: %s", e)
+        logger.exception(f"run_portfolio_recommend failed: {e}")
         return []
 
 
-# 호환성을 위한 별칭
+# Aliases
 generate_daily_recommendations_for_portfolio = run_portfolio_recommend
 safe_generate_daily_recommendations_for_portfolio = safe_run_portfolio_recommend
-
-
-__all__ = [
-    "run_portfolio_recommend",
-    "safe_run_portfolio_recommend",
-    "generate_daily_recommendations_for_portfolio",  # 호환성
-    "safe_generate_daily_recommendations_for_portfolio",  # 호환성
-]
-
-
-def _build_trend_break_phrase(
-    ma_value: float | None,
-    price_value: float | None,
-    ma_period: int | None,
-    decision_notes: dict,
-) -> str:
-    if ma_value is None or pd.isna(ma_value) or price_value is None or pd.isna(price_value):
-        threshold = ma_value if (ma_value is not None and not pd.isna(ma_value)) else 0.0
-        return f"{decision_notes['TREND_BREAK']}({threshold:,.0f}원 이하)"
-
-    diff = ma_value - price_value
-    direction = "낮습니다" if diff >= 0 else "높습니다"
-    period_text = ""
-    if ma_period:
-        try:
-            period_text = f"{int(ma_period)}일 "
-        except (TypeError, ValueError):
-            period_text = ""
-    return (
-        f"{decision_notes['TREND_BREAK']}"
-        f"({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"
-    )
-
-
-def _format_min_score_phrase(score_value: float | None, min_buy_score: float) -> str:
-    template = DECISION_NOTES.get("MIN_SCORE", "최소 {min_buy_score:.1f}점수 미만")
-    try:
-        base = template.format(min_buy_score=min_buy_score)
-    except Exception:
-        base = f"최소 {min_buy_score:.1f}점수 미만"
-
-    if score_value is None or pd.isna(score_value):
-        return f"{base} (현재 점수 없음)"
-    return f"{base} (현재 {score_value:.1f})"

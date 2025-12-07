@@ -231,11 +231,10 @@ def filter_category_duplicates(
             filtered_results.append(item)
             continue
 
-        # HOLD, HOLD_CORE, BUY, SELL 상태는 무조건 포함
+        # HOLD, HOLD_CORE, SELL 상태는 무조건 포함 (BUY는 제외하여 카테고리 체크 수행)
         if state in {
             "HOLD",
             "HOLD_CORE",
-            "BUY",
             "BUY_REPLACE",
             "SELL_TREND",
             "SELL_REPLACE",
@@ -246,7 +245,7 @@ def filter_category_duplicates(
             filtered_results.append(item)
             # 매도 예정 종목은 category_best_map에 포함하지 않음 (WAIT 종목이 표시될 수 있도록)
             if not should_exclude_from_category_count(state):
-                # HOLD, BUY 상태만 category_best_map에 추가
+                # HOLD, BUY_REPLACE 상태만 category_best_map에 추가
                 category_key = category_key_getter(category)
                 if category_key and not is_category_exception(category_key):
                     # 기존 WAIT 종목만 제거 (HOLD/BUY 종목은 유지)
@@ -257,6 +256,22 @@ def filter_category_duplicates(
                         if existing_state == "WAIT" and existing_item in filtered_results:
                             filtered_results.remove(existing_item)
                     category_best_map[category_key] = item
+            continue
+
+        # BUY 상태: 카테고리 중복 체크 수행
+        if state == "BUY":
+            category_key = category_key_getter(category)
+            # 카테고리가 없거나 예외 카테고리면 포함
+            if not category_key or is_category_exception(category_key):
+                filtered_results.append(item)
+                continue
+            # 이미 held_categories에 있으면 스킵 (BUY_REPLACE와 중복 방지)
+            if category_key in held_categories:
+                continue
+            # 중복이 아니면 포함
+            filtered_results.append(item)
+            held_categories.add(category_key)
+            category_best_map[category_key] = item
             continue
 
         category_key = category_key_getter(category)

@@ -9,7 +9,7 @@ from strategies.maps import rules as _rules_mod
 StrategyRules = getattr(_rules_mod, "StrategyRules")
 
 # 백테스트 함수들
-from logic.backtest.portfolio_runner import run_portfolio_backtest
+from logic.backtest.portfolio import run_portfolio_backtest
 from strategies.maps.backtest import run_single_ticker_backtest
 
 # 상수

@@ -19,7 +19,7 @@ import pandas as pd
 from pandas import DataFrame, Timestamp
 
 from config import TUNING_ENSEMBLE_SIZE
-from logic.backtest.account_runner import run_account_backtest
+from logic.backtest.account import run_account_backtest
 from logic.entry_point import StrategyRules
 from utils.account_registry import get_benchmark_tickers, get_strategy_rules
 from utils.cache_utils import save_cached_frame
