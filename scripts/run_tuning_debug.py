@@ -18,7 +18,7 @@ from tune import TUNING_CONFIG  # noqa: E402
 from utils.account_registry import get_account_settings, get_strategy_rules  # noqa: E402
 from utils.logger import get_app_logger  # noqa: E402
 
-RESULTS_DIR = ROOT_DIR / "zresults"
+RESULTS_DIR = ROOT_DIR / "zaccounts"
 DEBUG_ROOT = RESULTS_DIR / "tuning_debug_sessions"
 
 

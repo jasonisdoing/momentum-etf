@@ -26,6 +26,8 @@ from utils.notification import (
 )
 from utils.recommendation_storage import save_recommendation_report
 
+RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
+
 
 def _available_account_choices() -> list[str]:
     choices = list_available_accounts()
@@ -115,7 +117,7 @@ def main() -> None:
 
     # 로그 파일 저장
     try:
-        log_path = dump_recommendation_log(report)
+        log_path = dump_recommendation_log(report, results_dir=RESULTS_DIR)
         logger.info("✅ 추천 로그를 '%s'에 저장했습니다.", log_path)
     except Exception:
         logger.error("추천 로그 저장에 실패했습니다 (account=%s)", account_id, exc_info=True)

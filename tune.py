@@ -89,7 +89,7 @@ TUNING_CONFIG: dict[str, dict] = {
 # }
 
 
-RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
+RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
 
 
 def main() -> None:

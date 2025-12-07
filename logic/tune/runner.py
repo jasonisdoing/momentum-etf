@@ -39,7 +39,7 @@ from utils.settings_loader import (
 )
 from utils.stock_list_io import get_etfs
 
-DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
+DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zaccounts"
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
 MAX_TABLE_ROWS = 20
 
@@ -2116,9 +2116,9 @@ def run_account_tuning(
 
     # 출력 경로 미리 결정 (중간 저장용) - 계정별 폴더
     if results_dir is not None:
-        base_dir = Path(results_dir) / account_norm
+        base_dir = Path(results_dir) / account_norm / "results"
     else:
-        base_dir = DEFAULT_RESULTS_DIR / account_norm
+        base_dir = DEFAULT_RESULTS_DIR / account_norm / "results"
 
     if output_path is None:
         date_str = datetime.now().strftime("%Y-%m-%d")

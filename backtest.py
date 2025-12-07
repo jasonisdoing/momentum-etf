@@ -21,7 +21,7 @@ from utils.logger import get_app_logger
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
 
-RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
+RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
 
 
 def _available_account_choices() -> list[str]:

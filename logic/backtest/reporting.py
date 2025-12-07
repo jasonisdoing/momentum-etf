@@ -18,7 +18,7 @@ from utils.notification import build_summary_line_from_summary_data
 from utils.report import format_kr_money, render_table_eaw
 from utils.settings_loader import get_account_precision, resolve_strategy_params
 
-DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
+DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zaccounts"
 logger = get_app_logger()
 
 
@@ -921,9 +921,9 @@ def dump_backtest_log(
 
     # 계정별 폴더 생성
     if results_dir is not None:
-        base_dir = Path(results_dir) / account_id
+        base_dir = Path(results_dir) / account_id / "results"
     else:
-        base_dir = DEFAULT_RESULTS_DIR / account_id
+        base_dir = DEFAULT_RESULTS_DIR / account_id / "results"
 
     base_dir.mkdir(parents=True, exist_ok=True)
 

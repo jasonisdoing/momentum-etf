@@ -101,10 +101,10 @@ def dump_recommendation_log(
 
     # 기본 디렉토리 설정 (계정별 폴더)
     if results_dir is None:
-        # 프로젝트 루트의 zresults/<account> 디렉토리
-        base_dir = Path(__file__).parent.parent.parent / "zresults" / account_id
+        # 프로젝트 루트의 zaccounts/<account>/results 디렉토리
+        base_dir = Path(__file__).parent.parent.parent / "zaccounts" / account_id / "results"
     else:
-        base_dir = Path(results_dir) / account_id
+        base_dir = Path(results_dir) / account_id / "results"
 
     base_dir.mkdir(parents=True, exist_ok=True)
 
