@@ -543,7 +543,7 @@ def run_portfolio_recommend(
             # old_pipeline의 _format_sell_replace_phrase 는 pipeline에 있었음.
             # 여기서는 row 메시지를 직접 구성.
 
-            hold_ret = target_sell.get("hold_return_pct", 0.0)
+            hold_ret = target_sell.get("hold_return_pct") or 0.0
 
             # 2. 매수 처리
             best_new["state"] = "BUY_REPLACE"
