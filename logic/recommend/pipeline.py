@@ -182,8 +182,6 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
         holdings=holdings,
         etf_meta=etf_meta,
         full_etf_meta=etf_meta,
-        current_equity=account_config.get("total_asset", 100_000_000),  # 로드된 자산 없으면 기본값
-        total_cash=account_config.get("cash", 0),
         pairs=pairs,
         consecutive_holding_info=consecutive_holding_info,
         trade_cooldown_info=trade_cooldown_info,
@@ -212,7 +210,6 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
         "보유",
         "평가금액",
         "수익률",
-        "비중",
         "MDD",
         "점수",
         "필터",

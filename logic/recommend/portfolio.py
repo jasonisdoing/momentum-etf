@@ -48,7 +48,6 @@ def _create_decision_entry(
     buy_cooldown_block: dict,
     base_date: pd.Timestamp,
     country_code: str,
-    current_equity: float,
     stop_loss_threshold: float | None,
     cooldown_days: int | None,
     min_buy_score: float,
@@ -162,8 +161,8 @@ def _create_decision_entry(
     holding_days_display = str(holding_days) if holding_days > 0 else "-"
     amount = price if is_held else 0.0
 
-    equity_base = current_equity if pd.notna(current_equity) and current_equity > 0 else 1.0
-    position_weight_pct = round((amount / equity_base) * 100.0, 2)
+    # equity_base = current_equity if pd.notna(current_equity) and current_equity > 0 else 1.0
+    # position_weight_pct = round((amount / equity_base) * 100.0, 2)
 
     # Row 데이터 구성 (Reporting용)
     current_row = [
@@ -178,7 +177,6 @@ def _create_decision_entry(
         1 if is_held else 0,
         amount,
         round(holding_return_pct, 2) if holding_return_pct is not None else 0.0,
-        position_weight_pct,
         (f"{data.get('drawdown_from_peak'):.1f}%" if data.get("drawdown_from_peak") is not None else "-"),
         data.get("score"),
         f"{data['filter']}일" if data.get("filter") is not None else "-",
@@ -187,7 +185,6 @@ def _create_decision_entry(
 
     return {
         "state": state,
-        "weight": position_weight_pct,
         "score": score_value,
         "rsi_score": rsi_score_value,
         "tkr": tkr,
@@ -210,8 +207,6 @@ def run_portfolio_recommend(
     holdings: dict[str, dict[str, float]],
     etf_meta: dict[str, Any],
     full_etf_meta: dict[str, Any],
-    current_equity: float,
-    total_cash: float,
     pairs: list[tuple[str, str]],
     consecutive_holding_info: dict[str, dict],
     trade_cooldown_info: dict[str, dict[str, pd.Timestamp | None]],
@@ -277,7 +272,6 @@ def run_portfolio_recommend(
             buy_cooldown_block,
             base_date,
             country_code,
-            current_equity,
             stop_loss_threshold,
             cooldown_days,
             min_buy_score,
@@ -303,6 +297,7 @@ def run_portfolio_recommend(
                 decision["row"][4] = "HOLD_CORE"
                 decision["row"][-1] = DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
             # 미보유면 자동 매수 처리 (아래에서 추가됨, 여기선 상태만 정리)
+            # here
 
     # 핵심 보유 종목 미보유 시 자동 매수 Entry 추가/수정
     for core_ticker in valid_core_holdings:
@@ -327,7 +322,6 @@ def run_portfolio_recommend(
                     buy_cooldown_block,
                     base_date,
                     country_code,
-                    current_equity,
                     stop_loss_threshold,
                     cooldown_days,
                     min_buy_score,
@@ -361,7 +355,7 @@ def run_portfolio_recommend(
         elif d["state"] in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
             sell_rsi_categories_today.add(cat)
 
-    # 보유 예정 수 (HOLD 계열 + 쿨다운 중인 SELL_RSI 등 사실상 보유로 치는 것들)
+    # 보유 예정 수
     # logic/recommend/old_portfolio.py 의 로직 참조:
     # SELL_RSI는 쿨다운으로 안 팔릴 수도 있으니 일단은 held_count에 포함?
     # old logic: SELL_RSI는 항상 포함. 다른 SELL은 쿨다운 중일때만 포함.
@@ -433,25 +427,20 @@ def run_portfolio_recommend(
                 cand["buy_signal"] = False
                 continue
 
-            # 가격 및 예산 체크
+            # 가격 체크 (예산 체크 삭제)
             price = float(data_by_tkr.get(cand["tkr"], {}).get("price") or 0.0)
             if price <= 0:
                 cand["row"][-1] = DECISION_NOTES["NO_PRICE"]
                 continue
 
-            budget = (current_equity / denom) if denom > 0 else 0
-            if budget > total_cash:
-                budget = total_cash  # 현금 부족 시 제한
+            # Budget check removed. Assume valid if slost are available.
+            cand["state"], cand["row"][4] = "BUY", "BUY"
+            cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
 
-            if budget > 0:
-                cand["state"], cand["row"][4] = "BUY", "BUY"
-                cand["row"][-1] = DECISION_MESSAGES["NEW_BUY"]
+            if cand_cat and not is_category_exception(cand_cat):
+                held_categories_for_buy.add(cand_cat)
+            successful_buys += 1
 
-                if cand_cat and not is_category_exception(cand_cat):
-                    held_categories_for_buy.add(cand_cat)
-                successful_buys += 1
-            else:
-                cand["row"][-1] = DECISION_NOTES["INSUFFICIENT_CASH"]
     else:
         # 슬롯이 처음부터 없으면 모든 후보 대기 처리 (Replacement 후보로 넘김)
         for cand in wait_candidates:
@@ -572,7 +561,7 @@ def run_portfolio_recommend(
     for d in decisions:
         if d["state"] == "WAIT":
             # 이미 메시지가 있으면 스킵
-            if d["row"][-1] and "부족" not in str(d["row"][-1]):
+            if d["row"][-1]:
                 continue
 
             score_val = d.get("score", 0.0)
@@ -659,7 +648,6 @@ def run_portfolio_recommend(
         d["row"][0] = i + 1
         d["rank"] = i + 1
 
-    # Reporting Compatibility
     for d in decisions:
         row = d["row"]
         d["ticker"] = row[1]
@@ -674,10 +662,10 @@ def run_portfolio_recommend(
         d["daily_pct"] = row[7]
         d["evaluation_pct"] = row[10]
         d["price"] = row[6]
-        d["phrase"] = row[15]
+        d["phrase"] = row[14]  # Was 15
 
         try:
-            d["streak"] = int(str(row[14]).replace("일", ""))
+            d["streak"] = int(str(row[13]).replace("일", ""))  # Was 14
         except (ValueError, TypeError):
             d["streak"] = 0
 
