@@ -14,15 +14,13 @@ from utils.logger import get_app_logger
 TUNING_CONFIG: dict[str, dict] = {
     "kor1": {
         "PORTFOLIO_TOPN": [8],
-        "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
+        "MA_RANGE": [25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
         "MA_TYPE": ["EMA"],
-        "REPLACE_SCORE_THRESHOLD": [2],
-        # "REPLACE_SCORE_THRESHOLD": [0],
+        "REPLACE_SCORE_THRESHOLD": [1, 2, 3, 4, 5],
         "STOP_LOSS_PCT": [8],
-        "OVERBOUGHT_SELL_THRESHOLD": [85, 86, 87, 88, 89, 90, 91, 92, 93],
+        "OVERBOUGHT_SELL_THRESHOLD": [90, 92, 94, 96, 98, 100],
         "TRAILING_STOP_PCT": [0],
-        # "COOLDOWN_DAYS": [0, 1, 2, 3],
-        "COOLDOWN_DAYS": [0],
+        "COOLDOWN_DAYS": [0, 1, 2, 3],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
