@@ -39,7 +39,7 @@
                 "1_week_avg_volume": 42831,
                 "1_month_earn_rate": 0.7261,
                 "3_month_earn_rate": 37.7708,
-                "6_month_earn_rate": 62.7649,
+                "6_month_earn_rate": 62.7648,
                 "12_month_earn_rate": null
             },
             {
@@ -409,7 +409,7 @@
                 "1_week_avg_volume": 778785,
                 "1_month_earn_rate": 4.6893,
                 "3_month_earn_rate": 14.8534,
-                "6_month_earn_rate": 40.1502,
+                "6_month_earn_rate": 40.1501,
                 "12_month_earn_rate": 54.2331
             }
         ]
@@ -423,9 +423,9 @@
                 "listing_date": "2006-06-27",
                 "1_week_avg_volume": 774352,
                 "1_month_earn_rate": 4.5925,
-                "3_month_earn_rate": 15.6642,
-                "6_month_earn_rate": 35.7997,
-                "12_month_earn_rate": 51.0298
+                "3_month_earn_rate": 15.6641,
+                "6_month_earn_rate": 35.7998,
+                "12_month_earn_rate": 51.0299
             },
             {
                 "ticker": "102970",
@@ -491,87 +491,6 @@
     },
     {
         "category": "기타",
-        "tickers": [
-            {
-                "ticker": "0023A0",
-                "name": "SOL 미국양자컴퓨팅TOP10",
-                "listing_date": "2025-03-11",
-                "1_week_avg_volume": 763909,
-                "1_month_earn_rate": -1.6165,
-                "3_month_earn_rate": 70.4599,
-                "6_month_earn_rate": 106.9435,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "473640",
-                "name": "HANARO 글로벌 금채굴기업",
-                "listing_date": "2024-01-18",
-                "1_week_avg_volume": 44643,
-                "1_month_earn_rate": 16.9553,
-                "3_month_earn_rate": 34.8694,
-                "6_month_earn_rate": 70.6748,
-                "12_month_earn_rate": 128.8281
-            },
-            {
-                "ticker": "390390",
-                "name": "Kodex 미국반도체",
-                "listing_date": "2021-06-30",
-                "1_week_avg_volume": 267586,
-                "1_month_earn_rate": 2.8753,
-                "3_month_earn_rate": 32.9684,
-                "6_month_earn_rate": 64.1082,
-                "12_month_earn_rate": 59.7296
-            },
-            {
-                "ticker": "0013P0",
-                "name": "RISE 미국은행TOP10",
-                "listing_date": "2025-02-18",
-                "1_week_avg_volume": 12538,
-                "1_month_earn_rate": 6.599,
-                "3_month_earn_rate": 15.7718,
-                "6_month_earn_rate": 36.0051,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "0051A0",
-                "name": "KoAct 브로드컴밸류체인액티브",
-                "listing_date": "2025-05-20",
-                "1_week_avg_volume": 27088,
-                "1_month_earn_rate": 6.758,
-                "3_month_earn_rate": 35.4773,
-                "6_month_earn_rate": 68.2915,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "0118S0",
-                "name": "SOL 미국넥스트테크TOP10액티브",
-                "listing_date": "2025-10-28",
-                "1_week_avg_volume": 587135,
-                "1_month_earn_rate": -6.4239,
-                "3_month_earn_rate": null,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "0078V0",
-                "name": "PLUS 미국로보택시",
-                "listing_date": "2025-07-22",
-                "1_week_avg_volume": 8007,
-                "1_month_earn_rate": 1.5014,
-                "3_month_earn_rate": 22.45,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "491010",
-                "name": "TIGER 글로벌AI전력인프라액티브",
-                "listing_date": "2024-09-10",
-                "1_week_avg_volume": 181103,
-                "1_month_earn_rate": -4.0807,
-                "3_month_earn_rate": 25.268,
-                "6_month_earn_rate": 57.6108,
-                "12_month_earn_rate": 52.1577
-            }
-        ]
+        "tickers": []
     }
 ]

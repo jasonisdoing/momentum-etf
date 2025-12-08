@@ -60,7 +60,7 @@
                 "1_month_earn_rate": 1.2043,
                 "3_month_earn_rate": 5.9906,
                 "6_month_earn_rate": 15.1735,
-                "12_month_earn_rate": 14.9897
+                "12_month_earn_rate": 14.9898
             },
             {
                 "ticker": "IVW",
@@ -130,7 +130,7 @@
                 "1_month_earn_rate": 1.0554,
                 "3_month_earn_rate": 2.8039,
                 "6_month_earn_rate": 9.0962,
-                "12_month_earn_rate": 18.6656
+                "12_month_earn_rate": 18.6655
             }
         ]
     },
@@ -290,7 +290,7 @@
                 "1_month_earn_rate": 1.2791,
                 "3_month_earn_rate": 17.821,
                 "6_month_earn_rate": 29.0048,
-                "12_month_earn_rate": 61.2497
+                "12_month_earn_rate": 61.2496
             }
         ]
     },
@@ -740,7 +740,7 @@
                 "1_month_earn_rate": -1.246,
                 "3_month_earn_rate": 9.07,
                 "6_month_earn_rate": 22.8706,
-                "12_month_earn_rate": 22.159
+                "12_month_earn_rate": 22.1591
             },
             {
                 "ticker": "IYW",
@@ -749,8 +749,8 @@
                 "1_week_avg_volume": 1137100,
                 "1_month_earn_rate": -0.617,
                 "3_month_earn_rate": 10.1964,
-                "6_month_earn_rate": 24.1965,
-                "12_month_earn_rate": 25.4059
+                "6_month_earn_rate": 24.1964,
+                "12_month_earn_rate": 25.4058
             },
             {
                 "ticker": "ARKK",
@@ -815,7 +815,7 @@
                 "1_month_earn_rate": 4.7525,
                 "3_month_earn_rate": 1.622,
                 "6_month_earn_rate": 2.4513,
-                "12_month_earn_rate": 5.0275
+                "12_month_earn_rate": 5.0274
             },
             {
                 "ticker": "IYH",
@@ -1004,7 +1004,7 @@
                 "1_week_avg_volume": 270420,
                 "1_month_earn_rate": -2.3094,
                 "3_month_earn_rate": 6.3203,
-                "6_month_earn_rate": 16.6724,
+                "6_month_earn_rate": 16.6725,
                 "12_month_earn_rate": 23.4238
             }
         ]
@@ -1120,7 +1120,7 @@
                 "1_month_earn_rate": 2.2328,
                 "3_month_earn_rate": 7.0616,
                 "6_month_earn_rate": 14.174,
-                "12_month_earn_rate": 41.7782
+                "12_month_earn_rate": 41.7781
             },
             {
                 "ticker": "EWT",

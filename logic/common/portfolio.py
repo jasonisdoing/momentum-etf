@@ -180,6 +180,10 @@ def check_buy_candidate_filters(
         (통과 여부, 차단 사유)
     """
 
+    # 이미 보유한 카테고리 매수 차단
+    if category and not is_category_exception(category) and category in held_categories:
+        return False, f"동일 카테고리 보유 ({category})"
+
     # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
     if category and not is_category_exception(category) and category in sell_rsi_categories_today:
         return False, f"RSI 과매수 매도 카테고리 ({category})"
