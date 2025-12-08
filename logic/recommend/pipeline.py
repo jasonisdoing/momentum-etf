@@ -260,11 +260,8 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
 
                     # Update current price with realtime if available and valid
                     if snap_price and snap_price > 0:
-                        # Optional: override current_price for display consistency?
-                        # For now, we only use it for Disparity calculation correctness relative to NAV
-                        # But user might prefer recommendation to use closing price for signals.
-                        # We will use Snapshot for NAV/Disparity, but keep 'price' as closing price for strategy.
-                        # However, for Disparity display, it makes sense to use the pair (RealPrice, RealNAV).
+                        # Override current_price with Real-time Snapshot for display consistency
+                        current_price = float(snap_price)
 
                         if nav_val and nav_val > 0:
                             price_deviation_val = ((snap_price / nav_val) - 1.0) * 100.0
