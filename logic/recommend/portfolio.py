@@ -143,6 +143,10 @@ def _create_decision_entry(
         )[0]
     )
 
+    # Cooldown Status Phrase Override (Backtest parity)
+    # 신호가 없더라도 쿨다운 중이면 상태 메시지 표시 -> 제거 (사용자 요청: action이 막힐 때만 표시)
+    pass
+
     # 메타데이터 및 포맷팅
     meta = etf_meta.get(tkr) or full_etf_meta.get(tkr, {}) or {}
     display_name = str(meta.get("name") or tkr)
@@ -542,34 +546,72 @@ def run_portfolio_recommend(
             ),
             None,
         )
-
         target_sell = None
 
         if held_same_cat:
-            # 같은 카테고리가 있으면 점수 비교
+            # Case 1: 같은 카테고리 종목이 있는 경우 (필수 교체 대상)
+            # 쿨다운 체크
+            sell_block_info = held_same_cat.get("sell_cooldown_info")
+            if sell_block_info:
+                # 쿨다운 때문에 교체 불가
+                days_since = int(sell_block_info.get("days_since", 0))
+                days_left = max(cooldown_days - days_since + 1, 0)
+                target_name = etf_meta.get(held_same_cat["tkr"], {}).get("name") or held_same_cat["tkr"]
+                best_new["row"][-1] = f"교체실패: {target_name} 쿨다운({days_left}일)"
+
+                phrase = held_same_cat["row"][-1]
+                if not phrase:
+                    held_same_cat["row"][-1] = f"쿨다운 대기중({days_left}일 후 매도 가능)"
+                continue
+
             score_diff = best_new.get("score", 0) - held_same_cat.get("score", 0)
             if score_diff >= replace_threshold:
                 target_sell = held_same_cat
         else:
-            # 다른 카테고리면 가장 점수 낮은 종목과 비교
-            weakest = current_held_stocks[0]
-            # 카테고리 중복 아니어야 함 (이미 위에서 select_candidates가 잘 골라줬겠지만 확인)
-            # -> select_candidates_by_category는 단순히 점수순 정렬만 함.
-            # 중복 체크는 여기서 다시 해야 함?
-            # 아니, held_categories_for_buy 체크가 필요함.
+            # Case 2: 같은 카테고리 종목이 없는 경우 (가장 점수 낮은 종목부터 탐색)
+            # current_held_stocks는 이미 점수 오름차순 정렬됨
+            for candidate in current_held_stocks:
+                # 카테고리 중복 체크 (held_same_cat이 없으므로 여기선 스킵해도 되지만 안전장치)
+                cand_tkr = candidate["tkr"]
+                cand_cat = etf_meta.get(cand_tkr, {}).get("category")
+                if cand_cat == new_cat and not is_category_exception(new_cat):
+                    continue  # 이미 위에서 잡혀야 하는데, 혹시 몰라서 패스
 
-            # 보유 중인 카테고리와 겹치면 안됨 (예외 카테고리 제외)
-            is_dup = False
-            for h in current_held_stocks:
-                h_cat = etf_meta.get(h["tkr"], {}).get("category")
-                if h_cat == new_cat and not is_category_exception(new_cat):
-                    is_dup = True  # 이미 위에서 (held_same_cat) 잡혔어야 함.
+                # 쿨다운 체크
+                sell_block_info = candidate.get("sell_cooldown_info")
+                if sell_block_info:
+                    continue  # 쿨다운 중이면 다음 약한 종목 탐색
+
+                # 점수 조건 체크
+                score_diff = best_new.get("score", 0) - candidate.get("score", 0)
+                if score_diff >= replace_threshold:
+                    target_sell = candidate
                     break
 
-            if not is_dup:
-                score_diff = best_new.get("score", 0) - weakest.get("score", 0)
-                if score_diff >= replace_threshold:
-                    target_sell = weakest
+            if not target_sell:
+                # 적절한 교체 대상을 찾지 못한 경우 (점수 미달 or 모두 쿨다운)
+                # 가장 약한 종목을 기준으로 실패 사유 표시 (단, 쿨다운인 경우 명시)
+                if current_held_stocks:  # Ensure current_held_stocks is not empty
+                    weakest = current_held_stocks[0]
+                    sell_block_info = weakest.get("sell_cooldown_info")
+
+                    if sell_block_info:
+                        # 쿨다운 때문에 교체 못했다는 건, 점수는 충족했지만 쿨다운이었다는 뜻이어야 함.
+                        # 점수조차 미달이면 "점수 부족"이 주 원인임.
+                        score_diff = best_new.get("score", 0) - weakest.get("score", 0)
+
+                        if score_diff >= replace_threshold:
+                            days_since = int(sell_block_info.get("days_since", 0))
+                            days_left = max(cooldown_days - days_since + 1, 0)
+                            target_name = etf_meta.get(weakest["tkr"], {}).get("name") or weakest["tkr"]
+                            best_new["row"][-1] = f"교체실패: {target_name} 쿨다운({days_left}일)"
+
+                        phrase = weakest["row"][-1]
+                        if not phrase:
+                            weakest["row"][-1] = f"쿨다운 대기중({days_left}일 후 매도 가능)"
+                    else:
+                        # 점수 부족 사유 (기존 로직 유지 - 함수 호출 필요 없음, 그냥 메시지 설정되면 됨)
+                        pass
 
         if target_sell:
             # 교체 실행

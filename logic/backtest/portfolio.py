@@ -882,19 +882,28 @@ def run_portfolio_backtest(
                     None,
                 )
 
-                weakest_held_stock = held_stocks_with_scores[0] if held_stocks_with_scores else None
-
                 # 교체 여부 및 대상 종목 결정
                 ticker_to_sell = None
                 replacement_note = ""
 
                 if held_stock_same_category:
-                    # 같은 카테고리 종목이 있는 경우: 점수만 비교
+                    # Case 1: 같은 카테고리 종목이 있는 경우 (필수 교체 대상)
+                    # 쿨다운 체크 추가
+                    target_state = position_state[held_stock_same_category["ticker"]]
+                    if i < target_state["sell_block_until"]:
+                        # 쿨다운 중이면 교체 불가 (동일 카테고리 중복 방지를 위해 다른 종목 매도 불가)
+                        _update_ticker_note(
+                            daily_records_by_ticker,
+                            replacement_ticker,
+                            dt,
+                            f"교체실패: {held_stock_same_category['ticker']} 쿨다운",
+                        )
+                        continue
+
                     if best_new_score > held_stock_same_category["score"] + replace_threshold:
                         ticker_to_sell = held_stock_same_category["ticker"]
                         replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체 (동일 카테고리)"
                     else:
-                        # 점수가 더 높지 않으면 교체하지 않고 다음 대기 종목으로 넘어감
                         required_score = held_stock_same_category["score"] + replace_threshold
                         _update_ticker_note(
                             daily_records_by_ticker,
@@ -902,25 +911,40 @@ def run_portfolio_backtest(
                             dt,
                             DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score),
                         )
-                        continue  # 다음 buy_ranked_candidate로 넘어감
-                elif weakest_held_stock:
-                    # 같은 카테고리 종목이 없는 경우: 가장 약한 종목과 임계값 포함 비교
-                    if best_new_score > weakest_held_stock["score"] + replace_threshold:
-                        ticker_to_sell = weakest_held_stock["ticker"]
-                        replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체 (새 카테고리)"
-                    else:
-                        # 임계값을 넘지 못하면 교체하지 않고 다음 대기 종목으로 넘어감
-                        required_score = weakest_held_stock["score"] + replace_threshold
+                        continue
+
+                elif held_stocks_with_scores:
+                    # Case 2: 같은 카테고리 종목이 없는 경우 (가장 점수 낮은 종목부터 탐색)
+                    # 점수 오름차순으로 정렬되어 있으므로 순서대로 확인
+                    for candidate_hold in held_stocks_with_scores:
+                        cand_ticker = candidate_hold["ticker"]
+                        cand_state = position_state[cand_ticker]
+
+                        # 쿨다운 체크
+                        if i < cand_state["sell_block_until"]:
+                            continue
+
+                        # 점수 조건 체크
+                        if best_new_score > candidate_hold["score"] + replace_threshold:
+                            ticker_to_sell = cand_ticker
+                            replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체 (새 카테고리)"
+                            break  # 유효한 가장 낮은 점수 종목을 찾았으므로 중단
+
+                    if not ticker_to_sell:
+                        # 모든 보유 종목을 확인했으나 교체 대상을 찾지 못한 경우
+                        # (모두 쿨다운이거나, 점수 조건을 만족하지 못함)
+                        weakest = held_stocks_with_scores[0]
+                        required_score = weakest["score"] + replace_threshold
                         _update_ticker_note(
                             daily_records_by_ticker,
                             replacement_ticker,
                             dt,
-                            DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score),
+                            DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score) + " 또는 쿨다운",
                         )
-                        continue  # 다음 buy_ranked_candidate로 넘어감
+                        continue
                 else:
                     # 보유 종목이 없으면 교체할 수 없음
-                    continue  # 다음 buy_ranked_candidate로 넘어감
+                    continue
 
                 # 교체할 종목이 결정되었으면 매도/매수 진행
                 if ticker_to_sell:
