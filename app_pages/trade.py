@@ -147,26 +147,27 @@ def _clear_trade_edit_state() -> None:
 
 
 @lru_cache(maxsize=16)
-def _ticker_name_map(country_code: str) -> dict[str, str]:
-    country_norm = (country_code or "").strip().lower()
-    if not country_norm:
+def _ticker_name_map(account_id: str) -> dict[str, str]:
+    account_id_norm = (account_id or "").strip().lower()
+    if not account_id_norm:
         return {}
 
     try:
-        items = get_all_etfs(country_norm)
+        items = get_all_etfs(account_id_norm)
     except Exception:
         return {}
 
     mapping: dict[str, str] = {}
     for item in items:
         ticker = str(item.get("ticker") or "").upper()
+        # Clean up name (remove special chars if needed?)
         name = str(item.get("name") or "").strip()
         if ticker and name and ticker not in mapping:
             mapping[ticker] = name
     return mapping
 
 
-def _resolve_ticker_name(country_code: str, ticker: str, stored: str | None = None) -> str:
+def _resolve_ticker_name(account_id: str, ticker: str, stored: str | None = None) -> str:
     if stored:
         return stored
 
@@ -174,7 +175,7 @@ def _resolve_ticker_name(country_code: str, ticker: str, stored: str | None = No
     if not ticker_norm:
         return ""
 
-    mapping = _ticker_name_map(country_code)
+    mapping = _ticker_name_map(account_id)
     return mapping.get(ticker_norm, "")
 
 
@@ -317,7 +318,6 @@ def _render_trade_history(account_id: str, country_code: str) -> None:
     trade_data = []
     for trade in trades:
         trade_id = trade.get("id", "")
-        trade_country_code = (trade.get("country_code") or "").upper()
         ticker = (trade.get("ticker") or "").upper()
         action = (trade.get("action") or "").upper()
         executed_at = trade.get("executed_at")
@@ -332,7 +332,7 @@ def _render_trade_history(account_id: str, country_code: str) -> None:
 
         trade_name = (
             _resolve_ticker_name(
-                trade_country_code or country_code,
+                account_id,
                 ticker,
                 trade.get("name"),
             )
@@ -450,7 +450,7 @@ def _render_buy_form(username: str, account_id: str, country_code: str) -> None:
     with st.form(f"buy-input-form-{key_suffix}", clear_on_submit=True):
         ticker = ""
         name: str | None = None
-        ticker_map = _ticker_name_map(country_code)
+        ticker_map = _ticker_name_map(account_id)
 
         if ticker_map:
             placeholder_option = {
@@ -586,7 +586,7 @@ def _render_sell_section(username: str, account_id: str, country_code: str) -> N
             continue
 
         ticker = pos.get("ticker", "").upper()
-        position_name = pos.get("name") or _resolve_ticker_name(country_code or "", ticker)
+        position_name = pos.get("name") or _resolve_ticker_name(account_id, ticker)
         executed_display = _format_datetime(pos.get("executed_at"))
         memo_text = pos.get("memo") or ""
 
