@@ -292,6 +292,8 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
 
                 row_data = {
                     "price": current_price,
+                    "open": float(metrics["open"].iloc[idx]) if "open" in metrics else current_price,
+                    "open_series": metrics["open"] if "open" in metrics else None,
                     "prev_close": float(metrics["close"].iloc[idx - 1]) if idx > 0 else 0.0,
                     "score": float(metrics["ma_score"].iloc[idx]),
                     "rsi_score": float(metrics["rsi_score"].iloc[idx]) if "rsi_score" in metrics else 0.0,

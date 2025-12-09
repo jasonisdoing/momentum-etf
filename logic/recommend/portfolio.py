@@ -92,14 +92,38 @@ def _create_decision_entry(
     highest_price: float | None = None
     avg_cost = 0.0
 
+    # [Start] Theoretical Cost Calculation
+    # 사용자 요구사항: "문서에 없는 평단가(Avg Cost) 사용 금지"
+    # -> 매수일의 Open Price + Slippage를 기준으로 모든 수익률/손절/매도 판단을 수행.
     if is_held:
-        entry_price = resolve_entry_price(data.get("close"), buy_date)
-        if entry_price and entry_price > 0:
-            avg_cost = entry_price
+        simulated_open = 0.0
+        # Pipeline에서 전달받은 open_series 사용 권장 (없으면 close fallback)
+        price_series = data.get("open_series", data.get("close"))
+
+        if buy_date and price_series is not None:
+            simulated_open = resolve_entry_price(price_series, buy_date)
+
+        if simulated_open and simulated_open > 0:
+            # Apply Backtest Slippage
+            from config import BACKTEST_SLIPPAGE
+
+            country_lower = country_code.lower()
+            slippage_conf = BACKTEST_SLIPPAGE.get(country_lower, BACKTEST_SLIPPAGE.get("kor", {}))
+            buy_slip = slippage_conf.get("buy_pct")
+
+            # Theoretical Cost
+            avg_cost = simulated_open * (1 + buy_slip / 100.0)
+
             if price > 0:
-                holding_return_pct = ((price / entry_price) - 1.0) * 100.0
+                holding_return_pct = ((price / avg_cost) - 1.0) * 100.0
+        else:
+            # 과거 데이터 부족 등으로 시뮬레이션 불가 시, 현재가 기준 (수익률 0%) 또는 0.0 처리
+            # 여기서는 보수적으로 0.0 처리하여 매도 로직이 오작동하지 않게 함 (단, 손절은 동작 안함)
+            avg_cost = 0.0
+            holding_return_pct = 0.0
 
         highest_price = resolve_highest_price_since_buy(data.get("close"), buy_date)
+    # [End] Theoretical Cost Calculation
 
     # Evaluator 실행
     if state == "HOLD":
@@ -214,6 +238,10 @@ def _create_decision_entry(
 
     # equity_base = current_equity if pd.notna(current_equity) and current_equity > 0 else 1.0
     # position_weight_pct = round((amount / equity_base) * 100.0, 2)
+
+    # [Start] Theoretical Return Calculation Logic (Redundant block removed)
+    # 상단에서 이미 처리됨
+    # [End] Theoretical Return Calculation Logic
 
     # Row 데이터 구성 (Reporting용)
     current_row = [

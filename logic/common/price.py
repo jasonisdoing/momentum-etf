@@ -47,11 +47,11 @@ def calculate_trade_price(
 
     if is_buy:
         # 매수: 시초가보다 높은 가격
-        slippage_pct = slippage_config.get("buy_pct", 0.5)
+        slippage_pct = slippage_config.get("buy_pct")
         trade_price = base_price * (1 + slippage_pct / 100)
     else:
         # 매도: 시초가보다 낮은 가격
-        slippage_pct = slippage_config.get("sell_pct", 0.5)
+        slippage_pct = slippage_config.get("sell_pct")
         trade_price = base_price * (1 - slippage_pct / 100)
 
     return trade_price
