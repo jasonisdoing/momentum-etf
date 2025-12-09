@@ -6,61 +6,61 @@
                 "ticker": "069500",
                 "name": "Kodex 200",
                 "listing_date": "2002-10-14",
-                "1_week_avg_volume": 10008888,
-                "1_month_earn_rate": 5.4965,
-                "3_month_earn_rate": 37.145,
-                "6_month_earn_rate": 59.9431,
-                "12_month_earn_rate": 81.0004
+                "1_week_avg_volume": 11948965,
+                "1_month_earn_rate": 1.8212,
+                "3_month_earn_rate": 35.9089,
+                "6_month_earn_rate": 56.3531,
+                "12_month_earn_rate": 77.953
             },
             {
                 "ticker": "315960",
                 "name": "RISE 대형고배당10TR",
                 "listing_date": "2019-01-22",
-                "1_week_avg_volume": 30727,
-                "1_month_earn_rate": 6.0221,
-                "3_month_earn_rate": 56.8381,
-                "6_month_earn_rate": 84.8201,
-                "12_month_earn_rate": 100.6421
+                "1_week_avg_volume": 52615,
+                "1_month_earn_rate": 1.1739,
+                "3_month_earn_rate": 54.9007,
+                "6_month_earn_rate": 78.0875,
+                "12_month_earn_rate": 96.2924
             },
             {
                 "ticker": "315930",
                 "name": "Kodex Top5Plus TR",
                 "listing_date": "2019-01-22",
-                "1_week_avg_volume": 46932,
-                "1_month_earn_rate": 5.7348,
-                "3_month_earn_rate": 54.8266,
-                "6_month_earn_rate": 81.5784,
-                "12_month_earn_rate": 93.7603
+                "1_week_avg_volume": 34319,
+                "1_month_earn_rate": 1.6037,
+                "3_month_earn_rate": 52.7093,
+                "6_month_earn_rate": 76.3323,
+                "12_month_earn_rate": 90.1582
             },
             {
                 "ticker": "278540",
                 "name": "KODEX MSCI Korea TR",
                 "listing_date": "2017-11-09",
-                "1_week_avg_volume": 8425,
-                "1_month_earn_rate": 5.1495,
-                "3_month_earn_rate": 40.2359,
-                "6_month_earn_rate": 65.4932,
-                "12_month_earn_rate": 80.2497
+                "1_week_avg_volume": 10701,
+                "1_month_earn_rate": 1.4888,
+                "3_month_earn_rate": 39.5075,
+                "6_month_earn_rate": 62.0467,
+                "12_month_earn_rate": 76.1717
             },
             {
                 "ticker": "461450",
                 "name": "KODEX 코스닥글로벌",
                 "listing_date": "2023-06-29",
-                "1_week_avg_volume": 10520,
-                "1_month_earn_rate": 4.3348,
-                "3_month_earn_rate": 19.977,
-                "6_month_earn_rate": 37.478,
-                "12_month_earn_rate": 54.1193
+                "1_week_avg_volume": 14240,
+                "1_month_earn_rate": 3.8054,
+                "3_month_earn_rate": 19.2322,
+                "6_month_earn_rate": 37.769,
+                "12_month_earn_rate": 46.8128
             },
             {
                 "ticker": "461580",
                 "name": "TIGER 코스닥글로벌",
                 "listing_date": "2023-06-29",
-                "1_week_avg_volume": 3754,
-                "1_month_earn_rate": 3.4944,
-                "3_month_earn_rate": 18.2904,
-                "6_month_earn_rate": 35.9502,
-                "12_month_earn_rate": 52.0373
+                "1_week_avg_volume": 4900,
+                "1_month_earn_rate": 2.5186,
+                "3_month_earn_rate": 18.0297,
+                "6_month_earn_rate": 36.6179,
+                "12_month_earn_rate": 46.0365
             }
         ]
     },
@@ -71,51 +71,51 @@
                 "ticker": "444200",
                 "name": "SOL 코리아메가테크액티브",
                 "listing_date": "2022-10-18",
-                "1_week_avg_volume": 115217,
-                "1_month_earn_rate": 6.2269,
-                "3_month_earn_rate": 34.803,
-                "6_month_earn_rate": 66.2901,
-                "12_month_earn_rate": 120.6425
+                "1_week_avg_volume": 175208,
+                "1_month_earn_rate": 2.6196,
+                "3_month_earn_rate": 34.765,
+                "6_month_earn_rate": 61.3456,
+                "12_month_earn_rate": 116.6498
             },
             {
                 "ticker": "495230",
                 "name": "KoAct 코리아밸류업액티브",
                 "listing_date": "2024-11-04",
-                "1_week_avg_volume": 31895,
-                "1_month_earn_rate": 4.804,
-                "3_month_earn_rate": 38.8827,
-                "6_month_earn_rate": 59.8132,
+                "1_week_avg_volume": 43290,
+                "1_month_earn_rate": 0.4875,
+                "3_month_earn_rate": 37.6308,
+                "6_month_earn_rate": 55.5408,
                 "12_month_earn_rate": null
             },
             {
                 "ticker": "495050",
                 "name": "RISE 코리아밸류업",
                 "listing_date": "2024-11-04",
-                "1_week_avg_volume": 220507,
-                "1_month_earn_rate": 3.8759,
-                "3_month_earn_rate": 35.8862,
-                "6_month_earn_rate": 55.489,
-                "12_month_earn_rate": 81.1898
+                "1_week_avg_volume": 437608,
+                "1_month_earn_rate": 0.1439,
+                "3_month_earn_rate": 35.8527,
+                "6_month_earn_rate": 52.2001,
+                "12_month_earn_rate": 79.46
             },
             {
                 "ticker": "385720",
                 "name": "TIMEFOLIO 코스피액티브",
                 "listing_date": "2021-05-25",
-                "1_week_avg_volume": 71573,
-                "1_month_earn_rate": 3.7682,
-                "3_month_earn_rate": 25.6024,
-                "6_month_earn_rate": 39.1325,
-                "12_month_earn_rate": 62.6184
+                "1_week_avg_volume": 112739,
+                "1_month_earn_rate": 0.2073,
+                "3_month_earn_rate": 24.3997,
+                "6_month_earn_rate": 36.7751,
+                "12_month_earn_rate": 60.8985
             },
             {
                 "ticker": "278540",
                 "name": "KODEX MSCI Korea TR",
                 "listing_date": "2017-11-09",
-                "1_week_avg_volume": 8425,
-                "1_month_earn_rate": 5.1495,
-                "3_month_earn_rate": 40.2359,
-                "6_month_earn_rate": 65.4932,
-                "12_month_earn_rate": 80.2497
+                "1_week_avg_volume": 10701,
+                "1_month_earn_rate": 1.4888,
+                "3_month_earn_rate": 39.5075,
+                "6_month_earn_rate": 62.0467,
+                "12_month_earn_rate": 76.1717
             }
         ]
     },
@@ -126,51 +126,51 @@
                 "ticker": "139260",
                 "name": "TIGER 200 IT",
                 "listing_date": "2011-04-06",
-                "1_week_avg_volume": 112932,
-                "1_month_earn_rate": 6.1101,
-                "3_month_earn_rate": 68.1626,
-                "6_month_earn_rate": 98.0966,
-                "12_month_earn_rate": 101.3135
+                "1_week_avg_volume": 196553,
+                "1_month_earn_rate": 2.6533,
+                "3_month_earn_rate": 65.8879,
+                "6_month_earn_rate": 92.5862,
+                "12_month_earn_rate": 96.57
             },
             {
                 "ticker": "363580",
                 "name": "KODEX 200IT TR",
                 "listing_date": "2020-09-25",
-                "1_week_avg_volume": 12308,
-                "1_month_earn_rate": 6.3992,
-                "3_month_earn_rate": 68.7354,
-                "6_month_earn_rate": 99.4924,
-                "12_month_earn_rate": 102.1983
+                "1_week_avg_volume": 13515,
+                "1_month_earn_rate": 2.5144,
+                "3_month_earn_rate": 65.9946,
+                "6_month_earn_rate": 92.5776,
+                "12_month_earn_rate": 97.0087
             },
             {
                 "ticker": "367760",
                 "name": "RISE 5G테크",
                 "listing_date": "2020-10-29",
-                "1_week_avg_volume": 228926,
-                "1_month_earn_rate": 11.8424,
-                "3_month_earn_rate": 70.1821,
-                "6_month_earn_rate": 113.4158,
-                "12_month_earn_rate": 146.3962
+                "1_week_avg_volume": 363026,
+                "1_month_earn_rate": 7.7182,
+                "3_month_earn_rate": 68.2313,
+                "6_month_earn_rate": 105.3162,
+                "12_month_earn_rate": 141.7104
             },
             {
                 "ticker": "365000",
                 "name": "TIGER 인터넷TOP10",
                 "listing_date": "2020-10-07",
-                "1_week_avg_volume": 251302,
-                "1_month_earn_rate": 2.0234,
-                "3_month_earn_rate": 7.7615,
-                "6_month_earn_rate": 27.0557,
-                "12_month_earn_rate": 32.4875
+                "1_week_avg_volume": 280976,
+                "1_month_earn_rate": 0.7376,
+                "3_month_earn_rate": 5.6354,
+                "6_month_earn_rate": 24.8042,
+                "12_month_earn_rate": 30.4121
             },
             {
                 "ticker": "157490",
                 "name": "TIGER 소프트웨어",
                 "listing_date": "2012-05-16",
-                "1_week_avg_volume": 204628,
-                "1_month_earn_rate": -0.5184,
-                "3_month_earn_rate": 4.9781,
-                "6_month_earn_rate": 19.1925,
-                "12_month_earn_rate": 24.0307
+                "1_week_avg_volume": 241917,
+                "1_month_earn_rate": -2.2074,
+                "3_month_earn_rate": 3.1961,
+                "6_month_earn_rate": 15.245,
+                "12_month_earn_rate": 21.8726
             }
         ]
     },
@@ -181,41 +181,41 @@
                 "ticker": "091180",
                 "name": "KODEX 자동차",
                 "listing_date": "2006-06-27",
-                "1_week_avg_volume": 2973836,
-                "1_month_earn_rate": 13.1868,
-                "3_month_earn_rate": 25.2357,
-                "6_month_earn_rate": 44.2412,
-                "12_month_earn_rate": 43.4161
+                "1_week_avg_volume": 3153480,
+                "1_month_earn_rate": 12.5813,
+                "3_month_earn_rate": 24.5658,
+                "6_month_earn_rate": 43.4696,
+                "12_month_earn_rate": 42.6489
             },
             {
                 "ticker": "385520",
                 "name": "KODEX 자율주행액티브",
                 "listing_date": "2021-05-25",
-                "1_week_avg_volume": 37855,
-                "1_month_earn_rate": 16.0846,
-                "3_month_earn_rate": 39.8104,
-                "6_month_earn_rate": 68.5714,
-                "12_month_earn_rate": 57.2971
+                "1_week_avg_volume": 69128,
+                "1_month_earn_rate": 12.2673,
+                "3_month_earn_rate": 39.3365,
+                "6_month_earn_rate": 63.22,
+                "12_month_earn_rate": 55.0457
             },
             {
                 "ticker": "466930",
                 "name": "SOL 자동차TOP3플러스",
                 "listing_date": "2023-10-05",
-                "1_week_avg_volume": 245041,
-                "1_month_earn_rate": 18.3066,
-                "3_month_earn_rate": 29.8995,
-                "6_month_earn_rate": 59.0769,
-                "12_month_earn_rate": 51.331
+                "1_week_avg_volume": 366573,
+                "1_month_earn_rate": 13.9717,
+                "3_month_earn_rate": 28.0988,
+                "6_month_earn_rate": 53.3333,
+                "12_month_earn_rate": 49.5161
             },
             {
                 "ticker": "464600",
                 "name": "SOL 자동차소부장Fn",
                 "listing_date": "2023-08-22",
-                "1_week_avg_volume": 37514,
-                "1_month_earn_rate": 21.6711,
-                "3_month_earn_rate": 39.5695,
-                "6_month_earn_rate": 63.3473,
-                "12_month_earn_rate": 59.1898
+                "1_week_avg_volume": 51425,
+                "1_month_earn_rate": 17.8556,
+                "3_month_earn_rate": 37.188,
+                "6_month_earn_rate": 58.2256,
+                "12_month_earn_rate": 53.7767
             }
         ]
     },
@@ -226,31 +226,31 @@
                 "ticker": "275280",
                 "name": "KODEX 모멘텀주",
                 "listing_date": "2017-07-11",
-                "1_week_avg_volume": 916,
-                "1_month_earn_rate": 0.7082,
-                "3_month_earn_rate": 23.8912,
-                "6_month_earn_rate": 43.4729,
-                "12_month_earn_rate": 83.7257
+                "1_week_avg_volume": 1123,
+                "1_month_earn_rate": 0.3648,
+                "3_month_earn_rate": 23.4688,
+                "6_month_earn_rate": 42.9838,
+                "12_month_earn_rate": 83.0993
             },
             {
                 "ticker": "147970",
                 "name": "TIGER 모멘텀",
                 "listing_date": "2011-10-26",
-                "1_week_avg_volume": 5190,
-                "1_month_earn_rate": 1.9093,
-                "3_month_earn_rate": 15.8979,
-                "6_month_earn_rate": 33.9181,
-                "12_month_earn_rate": 79.3839
+                "1_week_avg_volume": 8694,
+                "1_month_earn_rate": -0.8968,
+                "3_month_earn_rate": 15.9564,
+                "6_month_earn_rate": 34.1891,
+                "12_month_earn_rate": 77.8806
             },
             {
                 "ticker": "244620",
                 "name": "KODEX 모멘텀PLUS",
                 "listing_date": "2016-05-13",
-                "1_week_avg_volume": 188,
-                "1_month_earn_rate": 1.5301,
-                "3_month_earn_rate": 3.6086,
-                "6_month_earn_rate": 9.5378,
-                "12_month_earn_rate": 33.4406
+                "1_week_avg_volume": 648,
+                "1_month_earn_rate": -0.8278,
+                "3_month_earn_rate": 3.0272,
+                "6_month_earn_rate": 10.5574,
+                "12_month_earn_rate": 33.7258
             }
         ]
     },
@@ -261,31 +261,31 @@
                 "ticker": "395160",
                 "name": "Kodex AI반도체",
                 "listing_date": "2021-07-30",
-                "1_week_avg_volume": 1929969,
-                "1_month_earn_rate": 5.8896,
-                "3_month_earn_rate": 64.381,
-                "6_month_earn_rate": 94.0416,
-                "12_month_earn_rate": 119.6829
+                "1_week_avg_volume": 2098861,
+                "1_month_earn_rate": 0.6162,
+                "3_month_earn_rate": 61.3647,
+                "6_month_earn_rate": 88.6139,
+                "12_month_earn_rate": 114.4544
             },
             {
                 "ticker": "471990",
                 "name": "KODEX AI반도체핵심장비",
                 "listing_date": "2023-11-21",
-                "1_week_avg_volume": 657858,
-                "1_month_earn_rate": 12.3715,
-                "3_month_earn_rate": 61.6067,
-                "6_month_earn_rate": 89.8668,
-                "12_month_earn_rate": 108.3678
+                "1_week_avg_volume": 694368,
+                "1_month_earn_rate": 7.3419,
+                "3_month_earn_rate": 59.6004,
+                "6_month_earn_rate": 82.553,
+                "12_month_earn_rate": 101.2944
             },
             {
                 "ticker": "494220",
                 "name": "UNICORN SK하이닉스밸류체인액티브",
                 "listing_date": "2024-11-07",
-                "1_week_avg_volume": 179365,
-                "1_month_earn_rate": -0.7075,
-                "3_month_earn_rate": 75.0538,
-                "6_month_earn_rate": 102.7902,
-                "12_month_earn_rate": 137.0414
+                "1_week_avg_volume": 248005,
+                "1_month_earn_rate": -0.2228,
+                "3_month_earn_rate": 72.0017,
+                "6_month_earn_rate": 90.5437,
+                "12_month_earn_rate": 126.9144
             }
         ]
     },
@@ -296,11 +296,11 @@
                 "ticker": "462010",
                 "name": "TIGER 2차전지소재Fn",
                 "listing_date": "2023-07-13",
-                "1_week_avg_volume": 5985980,
-                "1_month_earn_rate": 9.9644,
-                "3_month_earn_rate": 57.0521,
-                "6_month_earn_rate": 83.6553,
-                "12_month_earn_rate": 22.0596
+                "1_week_avg_volume": 8291299,
+                "1_month_earn_rate": 13.1673,
+                "3_month_earn_rate": 61.6264,
+                "6_month_earn_rate": 89.0045,
+                "12_month_earn_rate": 25.6147
             }
         ]
     },
@@ -311,11 +311,11 @@
                 "ticker": "457990",
                 "name": "PLUS 태양광&ESS",
                 "listing_date": "2023-06-20",
-                "1_week_avg_volume": 37222,
-                "1_month_earn_rate": 4.5788,
-                "3_month_earn_rate": 40.6837,
-                "6_month_earn_rate": 50.2632,
-                "12_month_earn_rate": 163.7665
+                "1_week_avg_volume": 73286,
+                "1_month_earn_rate": -1.8309,
+                "3_month_earn_rate": 38.7127,
+                "6_month_earn_rate": 49.6843,
+                "12_month_earn_rate": 150.8802
             }
         ]
     },
@@ -326,8 +326,8 @@
                 "ticker": "0098F0",
                 "name": "KODEX K원자력SMR",
                 "listing_date": "2025-09-16",
-                "1_week_avg_volume": 859303,
-                "1_month_earn_rate": 8.4802,
+                "1_week_avg_volume": 1008025,
+                "1_month_earn_rate": 7.3368,
                 "3_month_earn_rate": null,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
@@ -336,9 +336,9 @@
                 "ticker": "0091P0",
                 "name": "TIGER 코리아원자력",
                 "listing_date": "2025-08-19",
-                "1_week_avg_volume": 1488738,
-                "1_month_earn_rate": 8.2837,
-                "3_month_earn_rate": 12.0637,
+                "1_week_avg_volume": 2048354,
+                "1_month_earn_rate": 4.9299,
+                "3_month_earn_rate": 10.1471,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
             },
@@ -346,9 +346,9 @@
                 "ticker": "0092B0",
                 "name": "SOL 한국원자력SMR",
                 "listing_date": "2025-08-19",
-                "1_week_avg_volume": 183308,
-                "1_month_earn_rate": 8.5466,
-                "3_month_earn_rate": 14.4603,
+                "1_week_avg_volume": 337605,
+                "1_month_earn_rate": 4.6457,
+                "3_month_earn_rate": 11.7234,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
             },
@@ -356,21 +356,21 @@
                 "ticker": "434730",
                 "name": "HANARO 원자력iSelect",
                 "listing_date": "2022-06-28",
-                "1_week_avg_volume": 292547,
-                "1_month_earn_rate": 5.484,
-                "3_month_earn_rate": 40.1214,
-                "6_month_earn_rate": 84.0522,
-                "12_month_earn_rate": 178.0765
+                "1_week_avg_volume": 420221,
+                "1_month_earn_rate": 0.4197,
+                "3_month_earn_rate": 39.1003,
+                "6_month_earn_rate": 76.9366,
+                "12_month_earn_rate": 168.1184
             },
             {
                 "ticker": "433500",
                 "name": "ACE 원자력TOP10",
                 "listing_date": "2022-06-28",
-                "1_week_avg_volume": 71763,
-                "1_month_earn_rate": 10.1223,
-                "3_month_earn_rate": 31.3316,
-                "6_month_earn_rate": 64.0637,
-                "12_month_earn_rate": 139.6153
+                "1_week_avg_volume": 84324,
+                "1_month_earn_rate": 4.8115,
+                "3_month_earn_rate": 29.5127,
+                "6_month_earn_rate": 56.5475,
+                "12_month_earn_rate": 132.4576
             }
         ]
     },
@@ -381,18 +381,18 @@
                 "ticker": "487240",
                 "name": "Kodex AI전력핵심설비",
                 "listing_date": "2024-07-09",
-                "1_week_avg_volume": 1742092,
-                "1_month_earn_rate": -0.7906,
-                "3_month_earn_rate": 51.6579,
-                "6_month_earn_rate": 97.0209,
-                "12_month_earn_rate": 191.4711
+                "1_week_avg_volume": 2365156,
+                "1_month_earn_rate": -6.4597,
+                "3_month_earn_rate": 51.874,
+                "6_month_earn_rate": 91.1217,
+                "12_month_earn_rate": 172.4392
             },
             {
                 "ticker": "0117V0",
                 "name": "TIGER 코리아AI전력기기TOP3플러스",
                 "listing_date": "2025-10-21",
-                "1_week_avg_volume": 1427526,
-                "1_month_earn_rate": 1.0736,
+                "1_week_avg_volume": 1776810,
+                "1_month_earn_rate": -4.6623,
                 "3_month_earn_rate": null,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
@@ -401,18 +401,18 @@
                 "ticker": "377990",
                 "name": "TIGER Fn신재생에너지",
                 "listing_date": "2021-03-05",
-                "1_week_avg_volume": 48847,
-                "1_month_earn_rate": -0.867,
-                "3_month_earn_rate": 32.6686,
-                "6_month_earn_rate": 64.5234,
-                "12_month_earn_rate": 139.3941
+                "1_week_avg_volume": 62833,
+                "1_month_earn_rate": -4.1481,
+                "3_month_earn_rate": 32.6672,
+                "6_month_earn_rate": 61.9069,
+                "12_month_earn_rate": 131.204
             },
             {
                 "ticker": "0101N0",
                 "name": "RISE AI전력인프라",
                 "listing_date": "2025-09-23",
-                "1_week_avg_volume": 333658,
-                "1_month_earn_rate": -1.8328,
+                "1_week_avg_volume": 352931,
+                "1_month_earn_rate": -4.5455,
                 "3_month_earn_rate": null,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
@@ -421,66 +421,76 @@
                 "ticker": "404120",
                 "name": "TIMEFOLIO K신재생에너지액티브",
                 "listing_date": "2021-10-29",
-                "1_week_avg_volume": 13886,
-                "1_month_earn_rate": 2.6846,
-                "3_month_earn_rate": 21.1777,
-                "6_month_earn_rate": 32.0946,
-                "12_month_earn_rate": 58.5849
+                "1_week_avg_volume": 24374,
+                "1_month_earn_rate": -1.7082,
+                "3_month_earn_rate": 19.7952,
+                "6_month_earn_rate": 30.4833,
+                "12_month_earn_rate": 57.6111
             }
         ]
     },
     {
-        "category": "💊 헬스케어",
+        "category": "💊 바이오",
         "tickers": [
             {
                 "ticker": "0000Z0",
                 "name": "RISE 바이오TOP10액티브",
                 "listing_date": "2024-12-24",
-                "1_week_avg_volume": 182095,
-                "1_month_earn_rate": 4.3225,
-                "3_month_earn_rate": 22.325,
-                "6_month_earn_rate": 43.2407,
+                "1_week_avg_volume": 219673,
+                "1_month_earn_rate": 3.9794,
+                "3_month_earn_rate": 21.9228,
+                "6_month_earn_rate": 42.7697,
                 "12_month_earn_rate": null
             },
             {
                 "ticker": "244580",
                 "name": "Kodex 바이오",
                 "listing_date": "2016-05-13",
-                "1_week_avg_volume": 1718017,
-                "1_month_earn_rate": 12.0845,
-                "3_month_earn_rate": 28.2776,
-                "6_month_earn_rate": 41.5201,
-                "12_month_earn_rate": 64.9816
+                "1_week_avg_volume": 1931386,
+                "1_month_earn_rate": 13.8702,
+                "3_month_earn_rate": 29.1878,
+                "6_month_earn_rate": 45.1797,
+                "12_month_earn_rate": 62.3924
             },
             {
                 "ticker": "266420",
                 "name": "Kodex 헬스케어",
                 "listing_date": "2017-03-28",
-                "1_week_avg_volume": 87604,
-                "1_month_earn_rate": 4.0816,
-                "3_month_earn_rate": 14.5455,
-                "6_month_earn_rate": 26.8582,
-                "12_month_earn_rate": 37.6647
+                "1_week_avg_volume": 109787,
+                "1_month_earn_rate": 5.1531,
+                "3_month_earn_rate": 15.1451,
+                "6_month_earn_rate": 28.6351,
+                "12_month_earn_rate": 33.8244
             },
             {
                 "ticker": "462900",
                 "name": "KoAct 바이오헬스케어액티브",
                 "listing_date": "2023-08-03",
-                "1_week_avg_volume": 2150525,
-                "1_month_earn_rate": 19.4444,
-                "3_month_earn_rate": 31.1277,
-                "6_month_earn_rate": 55.034,
-                "12_month_earn_rate": 78.4652
+                "1_week_avg_volume": 2500204,
+                "1_month_earn_rate": 19.1562,
+                "3_month_earn_rate": 30.8113,
+                "6_month_earn_rate": 54.6599,
+                "12_month_earn_rate": 78.0345
             },
             {
                 "ticker": "463050",
                 "name": "TIMEFOLIO K바이오액티브",
                 "listing_date": "2023-08-17",
-                "1_week_avg_volume": 1791303,
-                "1_month_earn_rate": 15.3823,
-                "3_month_earn_rate": 31.0476,
-                "6_month_earn_rate": 54.9084,
-                "12_month_earn_rate": 72.3935
+                "1_week_avg_volume": 2062170,
+                "1_month_earn_rate": 15.5947,
+                "3_month_earn_rate": 31.2888,
+                "6_month_earn_rate": 55.1935,
+                "12_month_earn_rate": 72.7108
+            },
+            {
+                "ticker": "460280",
+                "name": "KIWOOM Fn유전자혁신기술",
+                "listing_date": "2023-06-27",
+                "1_week_avg_volume": 2864,
+                "1_month_earn_rate": 13.4034,
+                "3_month_earn_rate": 25.0725,
+                "6_month_earn_rate": 31.2215,
+                "12_month_earn_rate": 43.5045
             }
         ]
     },
@@ -491,21 +501,21 @@
                 "ticker": "469070",
                 "name": "RISE AI&로봇",
                 "listing_date": "2023-10-24",
-                "1_week_avg_volume": 1879373,
-                "1_month_earn_rate": 12.8879,
-                "3_month_earn_rate": 35.2091,
-                "6_month_earn_rate": 34.5838,
-                "12_month_earn_rate": 71.4983
+                "1_week_avg_volume": 2255671,
+                "1_month_earn_rate": 11.609,
+                "3_month_earn_rate": 34.4473,
+                "6_month_earn_rate": 32.0707,
+                "12_month_earn_rate": 62.8184
             },
             {
                 "ticker": "445290",
                 "name": "Kodex 로봇액티브",
                 "listing_date": "2022-11-15",
-                "1_week_avg_volume": 1311649,
-                "1_month_earn_rate": 8.5403,
-                "3_month_earn_rate": 47.3529,
-                "6_month_earn_rate": 64.5854,
-                "12_month_earn_rate": 98.4059
+                "1_week_avg_volume": 1475517,
+                "1_month_earn_rate": 10.5229,
+                "3_month_earn_rate": 50.0444,
+                "6_month_earn_rate": 67.5917,
+                "12_month_earn_rate": 102.0299
             }
         ]
     },
@@ -516,41 +526,41 @@
                 "ticker": "211900",
                 "name": "KODEX 코리아배당성장",
                 "listing_date": "2014-12-17",
-                "1_week_avg_volume": 19366,
-                "1_month_earn_rate": 1.1336,
-                "3_month_earn_rate": 11.9767,
-                "6_month_earn_rate": 22.3656,
-                "12_month_earn_rate": 48.7762
+                "1_week_avg_volume": 26515,
+                "1_month_earn_rate": 0.7647,
+                "3_month_earn_rate": 11.5682,
+                "6_month_earn_rate": 21.9192,
+                "12_month_earn_rate": 48.2335
             },
             {
                 "ticker": "161510",
                 "name": "PLUS 고배당주",
                 "listing_date": "2012-08-29",
-                "1_week_avg_volume": 731245,
-                "1_month_earn_rate": 6.7914,
-                "3_month_earn_rate": 12.4961,
-                "6_month_earn_rate": 24.6404,
-                "12_month_earn_rate": 47.1177
+                "1_week_avg_volume": 977320,
+                "1_month_earn_rate": 2.2334,
+                "3_month_earn_rate": 12.2028,
+                "6_month_earn_rate": 23.672,
+                "12_month_earn_rate": 46.4693
             },
             {
                 "ticker": "498860",
                 "name": "RISE 코리아금융고배당",
                 "listing_date": "2024-12-10",
-                "1_week_avg_volume": 48701,
-                "1_month_earn_rate": -2.5093,
-                "3_month_earn_rate": 12.345,
-                "6_month_earn_rate": 27.8942,
+                "1_week_avg_volume": 70051,
+                "1_month_earn_rate": -2.737,
+                "3_month_earn_rate": 12.0826,
+                "6_month_earn_rate": 27.5955,
                 "12_month_earn_rate": null
             },
             {
                 "ticker": "466940",
                 "name": "TIGER 은행고배당플러스TOP10",
                 "listing_date": "2023-10-17",
-                "1_week_avg_volume": 656505,
-                "1_month_earn_rate": 4.6277,
-                "3_month_earn_rate": 12.8965,
-                "6_month_earn_rate": 30.7148,
-                "12_month_earn_rate": 51.3278
+                "1_week_avg_volume": 663153,
+                "1_month_earn_rate": 1.2401,
+                "3_month_earn_rate": 14.0197,
+                "6_month_earn_rate": 30.7049,
+                "12_month_earn_rate": 50.4923
             }
         ]
     },
@@ -561,11 +571,11 @@
                 "ticker": "091170",
                 "name": "Kodex 은행",
                 "listing_date": "2006-06-27",
-                "1_week_avg_volume": 572939,
-                "1_month_earn_rate": 0.8474,
-                "3_month_earn_rate": 14.375,
-                "6_month_earn_rate": 27.169,
-                "12_month_earn_rate": 46.5744
+                "1_week_avg_volume": 643896,
+                "1_month_earn_rate": 0.0589,
+                "3_month_earn_rate": 13.4808,
+                "6_month_earn_rate": 26.1747,
+                "12_month_earn_rate": 45.4284
             },
             {
                 "ticker": "102970",
@@ -581,11 +591,11 @@
                 "ticker": "140700",
                 "name": "Kodex 보험",
                 "listing_date": "2011-04-26",
-                "1_week_avg_volume": 52706,
-                "1_month_earn_rate": -4.9675,
-                "3_month_earn_rate": 2.3036,
-                "6_month_earn_rate": 17.3113,
-                "12_month_earn_rate": 32.3499
+                "1_week_avg_volume": 55832,
+                "1_month_earn_rate": -4.2415,
+                "3_month_earn_rate": 3.0852,
+                "6_month_earn_rate": 18.2075,
+                "12_month_earn_rate": 33.361
             }
         ]
     },
@@ -596,19 +606,19 @@
                 "ticker": "449450",
                 "name": "PLUS K방산",
                 "listing_date": "2023-01-05",
-                "1_week_avg_volume": 557298,
-                "1_month_earn_rate": -6.5853,
-                "3_month_earn_rate": -5.6868,
-                "6_month_earn_rate": 16.2255,
-                "12_month_earn_rate": 146.2813
+                "1_week_avg_volume": 757994,
+                "1_month_earn_rate": -5.1054,
+                "3_month_earn_rate": -4.1927,
+                "6_month_earn_rate": 18.0667,
+                "12_month_earn_rate": 150.1828
             },
             {
                 "ticker": "0080G0",
                 "name": "Kodex K방산TOP10",
                 "listing_date": "2025-07-15",
-                "1_week_avg_volume": 929305,
-                "1_month_earn_rate": -3.728,
-                "3_month_earn_rate": -6.1395,
+                "1_week_avg_volume": 1191174,
+                "1_month_earn_rate": -2.4181,
+                "3_month_earn_rate": -4.8625,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
             },
@@ -616,11 +626,11 @@
                 "ticker": "490480",
                 "name": "SOL K방산",
                 "listing_date": "2024-10-02",
-                "1_week_avg_volume": 97778,
-                "1_month_earn_rate": -4.2259,
-                "3_month_earn_rate": -2.6172,
-                "6_month_earn_rate": 18.9125,
-                "12_month_earn_rate": 122.1587
+                "1_week_avg_volume": 131092,
+                "1_month_earn_rate": -2.9197,
+                "3_month_earn_rate": -1.2891,
+                "6_month_earn_rate": 20.5342,
+                "12_month_earn_rate": 125.1885
             }
         ]
     },
@@ -631,18 +641,18 @@
                 "ticker": "466920",
                 "name": "SOL 조선TOP3플러스",
                 "listing_date": "2023-10-05",
-                "1_week_avg_volume": 981636,
-                "1_month_earn_rate": -6.3483,
-                "3_month_earn_rate": 1.0515,
-                "6_month_earn_rate": 34.1376,
-                "12_month_earn_rate": 129.1431
+                "1_week_avg_volume": 1530077,
+                "1_month_earn_rate": -2.1996,
+                "3_month_earn_rate": 5.528,
+                "6_month_earn_rate": 40.0798,
+                "12_month_earn_rate": 139.2939
             },
             {
                 "ticker": "0115D0",
                 "name": "KODEX K조선TOP10",
                 "listing_date": "2025-10-28",
-                "1_week_avg_volume": 530342,
-                "1_month_earn_rate": -3.6845,
+                "1_week_avg_volume": 754795,
+                "1_month_earn_rate": 0.1557,
                 "3_month_earn_rate": null,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
@@ -651,11 +661,11 @@
                 "ticker": "445150",
                 "name": "KODEX 친환경조선해운액티브",
                 "listing_date": "2022-11-15",
-                "1_week_avg_volume": 21202,
-                "1_month_earn_rate": -4.4085,
-                "3_month_earn_rate": -0.5773,
-                "6_month_earn_rate": 31.8172,
-                "12_month_earn_rate": 113.2481
+                "1_week_avg_volume": 33114,
+                "1_month_earn_rate": -0.2379,
+                "3_month_earn_rate": 3.7605,
+                "6_month_earn_rate": 37.5683,
+                "12_month_earn_rate": 122.5521
             }
         ]
     },
