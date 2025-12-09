@@ -147,6 +147,11 @@ def _create_decision_entry(
     # 신호가 없더라도 쿨다운 중이면 상태 메시지 표시 -> 제거 (사용자 요청: action이 막힐 때만 표시)
     pass
 
+    # [Start] New Entry Phrase Logic
+    if state in ("HOLD", "HOLD_CORE") and holding_days == 1 and not phrase:
+        phrase = "🆕 신규 편입"
+    # [End] New Entry Phrase Logic
+
     # 메타데이터 및 포맷팅
     meta = etf_meta.get(tkr) or full_etf_meta.get(tkr, {}) or {}
     display_name = str(meta.get("name") or tkr)
