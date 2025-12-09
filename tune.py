@@ -25,7 +25,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
     "kor2": {
-        "PORTFOLIO_TOPN": [6],
+        "PORTFOLIO_TOPN": [5],
         "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
         "MA_TYPE": ["EMA"],
         "REPLACE_SCORE_THRESHOLD": [2],
@@ -41,8 +41,8 @@ TUNING_CONFIG: dict[str, dict] = {
     "us1": {
         "PORTFOLIO_TOPN": [8],
         "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
-        # "MA_TYPE": ["SMA", "EMA"],
-        "MA_TYPE": ["SMA"],
+        "MA_TYPE": ["SMA", "EMA"],
+        # "MA_TYPE": ["SMA"],
         "REPLACE_SCORE_THRESHOLD": [3, 4, 5],
         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
         "OVERBOUGHT_SELL_THRESHOLD": [80, 82, 84, 86],
