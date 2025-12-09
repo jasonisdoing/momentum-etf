@@ -10,9 +10,38 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+from utils.data_loader import fetch_pykrx_name
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_settings, list_available_accounts
 from utils.stock_list_io import _load_account_stocks_raw, save_etfs
+
+
+def _fetch_naver_etf_names_map() -> dict[str, str]:
+    """
+    네이버 ETF API를 호출하여 전체 ETF 종목의 {코드: 이름} 맵을 반환합니다.
+    """
+    from config import NAVER_FINANCE_ETF_API_URL, NAVER_FINANCE_HEADERS
+
+    url = NAVER_FINANCE_ETF_API_URL
+    names_map = {}
+
+    try:
+        response = requests.get(url, headers=NAVER_FINANCE_HEADERS, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+
+        items = data.get("result", {}).get("etfItemList", [])
+        for item in items:
+            code = str(item.get("itemcode", "")).strip()
+            name = str(item.get("itemname", "")).strip()
+            if code and name:
+                names_map[code] = name
+
+        return names_map
+    except Exception as e:
+        logger = get_app_logger()
+        logger.warning(f"네이버 ETF 목록 조회 실패: {e}")
+        return {}
 
 
 def _fetch_naver_listing_date(ticker: str) -> str | None:
@@ -95,6 +124,13 @@ def update_account_metadata(account_id: str):
     total_count = len(ticker_entries)
     logger.info(f"[{account_norm.upper()}] 메타데이터 업데이트 시작 (총 {total_count}개 종목)")
 
+    # [KOR] 전체 ETF 목록(이름 포함)을 한 번에 조회하여 맵 구성
+    naver_etf_map = {}
+    if country_code == "kor":
+        logger.info("네이버 ETF API에서 전체 종목명 목록을 가져옵니다...")
+        naver_etf_map = _fetch_naver_etf_names_map()
+        logger.info(f"  -> {len(naver_etf_map)}개 ETF 정보 획득")
+
     for idx, stock in enumerate(ticker_entries, start=1):
         ticker = stock.get("ticker")
         if not ticker:
@@ -109,11 +145,36 @@ def update_account_metadata(account_id: str):
             listing_date_str = None
             data = None  # 각 종목마다 data 변수 초기화
 
-            # 한국 주식인 경우에만 네이버 API로 상장일 조회 시도
+            # 한국 주식인 경우
             if country_code == "kor":
-                listing_date_str = _fetch_naver_listing_date(ticker)
-                if listing_date_str:
-                    logger.debug(f"[{account_norm.upper()}/{ticker}] 네이버 API에서 상장일 획득: {listing_date_str}")
+                # 1. 상장일 조회 (네이버 API) - 없는 경우에만 조회 (사용자 요청)
+                if not stock.get("listing_date"):
+                    listing_date_str = _fetch_naver_listing_date(ticker)
+                    if listing_date_str:
+                        logger.debug(
+                            f"[{account_norm.upper()}/{ticker}] 네이버 API에서 상장일 획득: {listing_date_str}"
+                        )
+                else:
+                    listing_date_str = stock.get("listing_date")
+
+                # 2. 종목명 조회 및 업데이트
+                # - 우선 네이버 ETF 전체 목록 맵에서 찾아서 덮어쓰기 (효율적)
+                # - 없으면(ETF가 아니거나 누락된 경우) 기존 방식대로 Pykrx 시도
+                new_name = naver_etf_map.get(ticker)
+                if new_name:
+                    # 네이버 API에서 찾은 이름으로 항상 덮어쓰기 (사용자 요청)
+                    stock["name"] = new_name
+                    # logger.debug(f"[{account_norm.upper()}/{ticker}] 네이버 API 매핑 이름 적용: {new_name}")
+                elif not stock.get("name"):
+                    # 네이버 맵에도 없고, 기존 이름도 없으면 Pykrx 시도
+                    try:
+                        fetched_name = fetch_pykrx_name(ticker)
+                        if fetched_name:
+                            stock["name"] = fetched_name
+                            logger.info(f"[{account_norm.upper()}/{ticker}] pykrx에서 종목명 획득: {fetched_name}")
+                    except Exception as e:
+                        logger.warning(f"[{account_norm.upper()}/{ticker}] pykrx 종목명 조회 실패: {e}")
+
             elif country_code == "us":
                 # 미국 주식은 yfinance를 통해 메타데이터를 가져옵니다.
                 try:
