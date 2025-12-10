@@ -691,14 +691,14 @@ def _fetch_ohlcv_with_cache(
                 )
             continue
 
-        if log_pending:
-            logger.info(
-                "[CACHE] %s/%s 누락 구간을 조회합니다: %s ~ %s",
-                cache_key_display,
-                ticker,
-                start_str,
-                end_str,
-            )
+        # if log_pending:
+        #     logger.info(
+        #         "[CACHE] %s/%s 누락 구간을 조회합니다: %s ~ %s",
+        #         cache_key_display,
+        #         ticker,
+        #         start_str,
+        #         end_str,
+        #     )
 
         try:
             fetched = _fetch_ohlcv_core(ticker, country_code, miss_start, effective_end, cached_df)

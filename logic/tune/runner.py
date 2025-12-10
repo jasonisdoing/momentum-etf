@@ -1057,8 +1057,6 @@ def _execute_tuning_for_months(
         len(filtered_calendar) if filtered_calendar else 0,
     )
 
-    worker_desc = "순차 실행" if workers <= 1 else f"{workers}개의 CPU 병렬 처리 중..."
-
     if workers <= 1:
         # 단일 프로세스: 글로벌 변수 직접 설정
         global \
@@ -1099,13 +1097,12 @@ def _execute_tuning_for_months(
 
             if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
                 logger.info(
-                    "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%) | %s",
+                    "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%)",
                     account_norm.upper(),
                     months_range,
                     idx,
                     len(combos),
                     (idx / len(combos)) * 100,
-                    worker_desc,
                 )
 
                 if success_entries and output_path and progress_callback:
