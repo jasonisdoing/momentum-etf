@@ -1580,21 +1580,6 @@
         ]
     },
     {
-        "category": "₿ 코인",
-        "tickers": [
-            {
-                "ticker": "DAPP",
-                "name": "VanEck Digital Transformation ETF",
-                "listing_date": "2021-04-15",
-                "1_week_avg_volume": 603780,
-                "1_month_earn_rate": -8.9785,
-                "3_month_earn_rate": 2.9001,
-                "6_month_earn_rate": 32.9987,
-                "12_month_earn_rate": 1.9957
-            }
-        ]
-    },
-    {
         "category": "🔥 밈",
         "tickers": [
             {

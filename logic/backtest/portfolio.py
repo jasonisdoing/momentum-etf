@@ -369,7 +369,10 @@ def _execute_new_buys(
                 if normalized_category:
                     held_categories_normalized.add(normalized_category)
 
-            if daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt:
+            condition_met = (
+                daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt
+            )
+            if condition_met:
                 row = daily_records_by_ticker[ticker_to_buy][-1]
                 row.update(
                     {
@@ -378,6 +381,28 @@ def _execute_new_buys(
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
                         "avg_cost": ticker_state["avg_cost"],
+                    }
+                )
+            else:
+                # 기존 레코드가 없거나 날짜가 다른 경우 새로 생성
+                # 이 블록이 없으면 BUY 행이 로그에서 완전히 사라집니다!
+                daily_records_by_ticker.setdefault(ticker_to_buy, []).append(
+                    {
+                        "date": dt,
+                        "price": price,
+                        "shares": ticker_state["shares"],
+                        "pv": ticker_state["shares"] * price,
+                        "decision": "BUY",
+                        "avg_cost": ticker_state["avg_cost"],
+                        "trade_amount": trade_amount,
+                        "trade_profit": 0.0,
+                        "trade_pl_pct": 0.0,
+                        "note": "",
+                        "signal1": None,
+                        "signal2": None,
+                        "score": score_today.get(ticker_to_buy, 0.0),
+                        "rsi_score": rsi_score_today.get(ticker_to_buy, 0.0),
+                        "filter": None,
                     }
                 )
             purchased_today.add(ticker_to_buy)

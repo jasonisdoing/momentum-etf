@@ -39,8 +39,8 @@ TUNING_CONFIG: dict[str, dict] = {
     "us1": {
         "PORTFOLIO_TOPN": [8],
         "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
-        "MA_TYPE": ["SMA", "EMA"],
-        # "MA_TYPE": ["SMA"],
+        # "MA_TYPE": ["SMA", "EMA"],
+        "MA_TYPE": ["SMA"],
         "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
         "OVERBOUGHT_SELL_THRESHOLD": [80, 82, 84, 86],

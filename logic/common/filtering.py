@@ -265,10 +265,8 @@ def filter_category_duplicates(
             if not category_key or is_category_exception(category_key):
                 filtered_results.append(item)
                 continue
-            # 이미 held_categories에 있으면 스킵 (BUY_REPLACE와 중복 방지)
-            if category_key in held_categories:
-                continue
-            # 중복이 아니면 포함
+            # BUY는 항상 표시 (held_categories 체크 제거)
+            # 이유: 매수 당일에는 BUY가 표시되어야 하며, 다음날부터 HOLD로 전환됨
             filtered_results.append(item)
             held_categories.add(category_key)
             category_best_map[category_key] = item
