@@ -39,6 +39,8 @@ def process_ticker_data(
     """
     if df is None and precomputed_entry is None:
         return None
+    if df is not None and df.empty and not precomputed_entry:
+        return None
 
     working_df = df
     if working_df is None and precomputed_entry:

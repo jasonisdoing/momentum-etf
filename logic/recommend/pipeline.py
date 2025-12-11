@@ -176,7 +176,8 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
                         dev_fallback = snap_fb.get("deviation")
 
                 # Check DataFrame columns if Naver failed
-                if nav_fallback is None:
+                if nav_fallback is None and not df.empty:
+                    # last_row is defined only if not df.empty
                     if "NAV" in last_row:
                         nav_fallback = float(last_row["NAV"])
                     elif "순자산가치(NAV)" in last_row:
