@@ -135,7 +135,7 @@
                 "1_month_earn_rate": 4.6782,
                 "3_month_earn_rate": 4.9946,
                 "6_month_earn_rate": 18.7994,
-                "12_month_earn_rate": 2.7958
+                "12_month_earn_rate": 2.7959
             },
             {
                 "ticker": "MDYV",
@@ -185,7 +185,7 @@
                 "1_month_earn_rate": 4.4392,
                 "3_month_earn_rate": 0.6584,
                 "6_month_earn_rate": 9.7557,
-                "12_month_earn_rate": -3.33
+                "12_month_earn_rate": -3.3301
             },
             {
                 "ticker": "SDVD",
@@ -260,7 +260,7 @@
                 "1_month_earn_rate": 1.7368,
                 "3_month_earn_rate": 0.0692,
                 "6_month_earn_rate": 6.3778,
-                "12_month_earn_rate": 8.4959
+                "12_month_earn_rate": 8.496
             },
             {
                 "ticker": "XLV",
@@ -310,7 +310,7 @@
                 "1_month_earn_rate": -4.6844,
                 "3_month_earn_rate": 1.1347,
                 "6_month_earn_rate": 7.0728,
-                "12_month_earn_rate": 10.3907
+                "12_month_earn_rate": 10.3906
             }
         ]
     },
@@ -950,7 +950,7 @@
                 "1_month_earn_rate": 7.9452,
                 "3_month_earn_rate": 8.7554,
                 "6_month_earn_rate": 27.0349,
-                "12_month_earn_rate": 23.8168
+                "12_month_earn_rate": 23.8169
             },
             {
                 "ticker": "ARKF",
@@ -1060,7 +1060,7 @@
                 "1_month_earn_rate": -0.1551,
                 "3_month_earn_rate": 8.5269,
                 "6_month_earn_rate": 24.0963,
-                "12_month_earn_rate": 21.4565
+                "12_month_earn_rate": 21.4566
             },
             {
                 "ticker": "IYW",
@@ -1115,7 +1115,7 @@
                 "1_month_earn_rate": 5.8857,
                 "3_month_earn_rate": 17.545,
                 "6_month_earn_rate": 32.199,
-                "12_month_earn_rate": 19.7853
+                "12_month_earn_rate": 19.7852
             },
             {
                 "ticker": "XBI",

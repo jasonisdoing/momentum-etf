@@ -853,34 +853,6 @@ def _fetch_ohlcv_core(
             except Exception as e:
                 logger.warning(f"yfinance MultiIndex 컬럼 평탄화 실패 ({ticker}): {e}")
 
-        # [CRITICAL UPDATE] Manual Split Adjustment
-        # 2025-12-05 예정된 SPDR ETF 분할(2:1)이 yfinance에 반영되지 않은 경우 수동 보정
-        # XLK, XLE, XLY, XLB, XLU 등
-        known_splits = {
-            "XLK": ("2025-12-05", 2.0),
-            "XLE": ("2025-12-05", 2.0),
-            "XLY": ("2025-12-05", 2.0),
-            "XLB": ("2025-12-05", 2.0),
-            "XLU": ("2025-12-05", 2.0),
-        }
-
-        if ticker in known_splits:
-            split_date_str, split_ratio = known_splits[ticker]
-            split_dt = pd.Timestamp(split_date_str)
-
-            # 데이터가 분할일을 포함하고 있고(과거+미래), 분할일 이전 데이터가 존재하는 경우
-            if fetched.index.max() >= split_dt and fetched.index.min() < split_dt:
-                before_idx = fetched.index < split_dt
-                if before_idx.any():
-                    # 이미 보정되었는지 확인 (간단한 휴리스틱: 분할일 전날 종가가 예상 범위 내인지)
-                    # 여기서는 무조건 보정하도록 하되, 추후 yfinance가 업데이트되면 이 로직 제거 필요
-                    # logger.info(f"[Data Loader] Applying manual split adjustment for {ticker} (Ratio: {split_ratio})")
-
-                    cols_to_adjust = [c for c in ["Open", "High", "Low", "Close", "Adj Close"] if c in fetched.columns]
-                    fetched.loc[before_idx, cols_to_adjust] /= split_ratio
-                    if "Volume" in fetched.columns:
-                        fetched.loc[before_idx, "Volume"] *= split_ratio
-
         return fetched
 
     if country_code == "kor":
