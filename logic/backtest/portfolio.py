@@ -267,7 +267,6 @@ def _execute_new_buys(
         (cash, current_holdings_value, purchased_today, held_categories)
     """
     from logic.common import (
-        calculate_buy_budget,
         calculate_held_categories,
         calculate_held_count,
         check_buy_candidate_filters,
@@ -296,13 +295,15 @@ def _execute_new_buys(
         return cash, current_holdings_value, purchased_today, held_categories
 
     # 보유 중인 카테고리 (매수 시 중복 체크용, 고정 종목 카테고리 포함)
-    held_categories = calculate_held_categories(position_state, ticker_to_category, valid_core_holdings)
+    held_categories = calculate_held_categories(position_state, ticker_to_category)
     held_categories_normalized = {str(cat).strip().upper() for cat in held_categories if isinstance(cat, str)}
 
-    # 점수가 양수인 모든 매수 시그널 종목을 candidates에 넣기 (이미 정렬됨)
-    successful_buys = 0
+    # PHASE 1: Pre-count buyable tickers
+    buyable_candidates = []
+    temp_held_categories = held_categories.copy()  # 임시 카테고리 추적 (Phase 1용)
+
     for score, ticker_to_buy in buy_ranked_candidates:
-        if successful_buys >= slots_to_fill:
+        if len(buyable_candidates) >= slots_to_fill:
             break
         if cash <= 0:
             break
@@ -311,30 +312,19 @@ def _execute_new_buys(
         if pd.isna(price):
             continue
 
-        # 매수 후보 필터링 체크
+        # 매수 후보 필터링 체크 (임시 held_categories 사용)
         category = ticker_to_category.get(ticker_to_buy)
         rsi_score_buy_candidate = rsi_score_today.get(ticker_to_buy, 0.0)
 
         can_buy, block_reason = check_buy_candidate_filters(
             category=category,
-            held_categories=held_categories,
+            held_categories=temp_held_categories,  # Phase 1에서는 임시 카테고리 사용
             sell_rsi_categories_today=sell_rsi_categories_today,
             rsi_score=rsi_score_buy_candidate,
             rsi_sell_threshold=rsi_sell_threshold,
         )
 
         if not can_buy:
-            _update_ticker_note(daily_records_by_ticker, ticker_to_buy, dt, block_reason)
-            continue
-
-        # 매수 예산 계산 (총자산 / TOPN 기준)
-        budget = calculate_buy_budget(
-            cash=cash,
-            current_holdings_value=current_holdings_value,
-            top_n=top_n,
-        )
-
-        if budget <= 0:
             continue
 
         # 다음날 시초가 + 슬리피지로 매수 가격 계산
@@ -349,21 +339,50 @@ def _execute_new_buys(
         if buy_price <= 0:
             continue
 
+        buyable_candidates.append((score, ticker_to_buy, buy_price, block_reason))
+
+        # Phase 1에서도 카테고리 추가 (같은 카테고리 중복 방지)
+        if category:
+            temp_held_categories.add(category)
+
+    # PHASE 2: Execute buys with equal cash distribution
+    num_buys = len(buyable_candidates)
+    available_cash = cash
+    successful_buys = 0
+
+    for idx, (score, ticker_to_buy, buy_price, block_reason) in enumerate(buyable_candidates):
+        if available_cash <= 0:
+            break
+
+        # 균등 분배: 남은 현금을 남은 매수 수로 나눔
+        num_remaining = num_buys - idx
+        equal_share_budget = available_cash / num_remaining if num_remaining > 0 else 0.0
+
+        # 목표 비중: 총 평가금액 / TOPN (최대 한도)
+        target_budget = (cash + current_holdings_value) / top_n if top_n > 0 else 0.0
+
+        # 두 값 중 작은 값 사용 (균등 분배 vs 목표 비중)
+        budget = min(equal_share_budget, target_budget)
+
+        if budget <= 0:
+            continue
+
+        price = today_prices.get(ticker_to_buy)
         req_qty = budget / buy_price if buy_price > 0 else 0
         trade_amount = budget
 
         if trade_amount <= cash + 1e-9 and req_qty > 0:
             ticker_state = position_state[ticker_to_buy]
             cash -= trade_amount
+            available_cash -= trade_amount
             current_holdings_value += trade_amount
             ticker_state["shares"] += req_qty
             ticker_state["avg_cost"] = buy_price
+            ticker_state["buy_block_until"] = i + cooldown_days + 1
 
-            # 매도 쿨다운 설정: 매수 후 N일간 매도 금지 (손절 제외)
-            if cooldown_days > 0:
-                ticker_state["sell_block_until"] = i + cooldown_days + 1
-
-            if category and not is_category_exception(category):
+            # 카테고리 업데이트
+            category = ticker_to_category.get(ticker_to_buy)
+            if category:
                 held_categories.add(category)
                 normalized_category = str(category).strip().upper()
                 if normalized_category:
@@ -385,7 +404,6 @@ def _execute_new_buys(
                 )
             else:
                 # 기존 레코드가 없거나 날짜가 다른 경우 새로 생성
-                # 이 블록이 없으면 BUY 행이 로그에서 완전히 사라집니다!
                 daily_records_by_ticker.setdefault(ticker_to_buy, []).append(
                     {
                         "date": dt,
@@ -407,8 +425,13 @@ def _execute_new_buys(
                 )
             purchased_today.add(ticker_to_buy)
             # 순매수 집계
-            buy_trades_today_map.setdefault(ticker_to_buy, []).append({"shares": float(req_qty), "price": float(price)})
+            buy_trades_today_map.setdefault(ticker_to_buy, []).append(
+                {"shares": float(req_qty), "price": float(buy_price)}
+            )
             successful_buys += 1
+        else:
+            # 필터링으로 제외된 경우 note 업데이트
+            _update_ticker_note(daily_records_by_ticker, ticker_to_buy, dt, block_reason)
 
     return cash, current_holdings_value, purchased_today, held_categories
 
@@ -1204,6 +1227,102 @@ def run_portfolio_backtest(
                     if current_note:
                         new_note = f"{new_note} | {current_note}"
                     last_row["note"] = new_note
+
+        # --- PHASE 3: 추가 매수 (남은 현금으로 부족한 종목 채우기) ---
+        if cash > 0:
+            total_equity = cash + current_holdings_value
+            target_per_ticker = total_equity / top_n if top_n > 0 else 0.0
+
+            # 보유 종목 중 비중 < cap인 종목 찾기 (단, 오늘 신규 매수한 종목 제외)
+            underweight_tickers = []
+            for ticker, state in position_state.items():
+                if state["shares"] > 0:
+                    # 오늘 이미 BUY한 종목은 Phase 3에서 제외
+                    if ticker in purchased_today:
+                        continue  # 오늘 신규 매수한 종목은 추가 매수 안 함
+
+                    current_value = state["shares"] * today_prices.get(ticker, 0)
+                    current_weight = current_value / total_equity if total_equity > 0 else 0
+                    gap = target_per_ticker - current_value
+
+                    if gap > 0 and current_weight < (1.0 / top_n):  # Cap 미만
+                        underweight_tickers.append((ticker, gap, current_value))
+
+            # 부족분 큰 순서로 정렬
+            underweight_tickers.sort(key=lambda x: x[1], reverse=True)
+
+            # 순서대로 채우기
+            for ticker_to_topup, gap, current_value in underweight_tickers:
+                if cash <= 0:
+                    break
+
+                price = today_prices.get(ticker_to_topup)
+                if pd.isna(price) or price <= 0:
+                    continue
+
+                # 다음날 시초가 + 슬리피지로 매수 가격 계산
+                topup_price = calculate_trade_price(
+                    i,
+                    total_days,
+                    metrics_by_ticker[ticker_to_topup]["open_values"],
+                    metrics_by_ticker[ticker_to_topup]["close_values"],
+                    country_code,
+                    is_buy=True,
+                )
+                if topup_price <= 0:
+                    continue
+
+                # 매수 가능 금액: min(gap, cash)
+                topup_budget = min(gap, cash)
+                topup_qty = int(topup_budget // topup_price) if topup_price > 0 else 0
+
+                if topup_qty > 0:
+                    topup_amount = topup_qty * topup_price
+
+                    if topup_amount <= cash + 1e-9:
+                        # 추가 매수 실행
+                        ticker_state = position_state[ticker_to_topup]
+                        old_shares = ticker_state["shares"]
+                        old_avg_cost = ticker_state["avg_cost"]
+
+                        cash -= topup_amount
+                        current_holdings_value += topup_amount
+                        ticker_state["shares"] += topup_qty
+
+                        # 평균 단가 재계산
+                        total_cost = old_shares * old_avg_cost + topup_amount
+                        ticker_state["avg_cost"] = total_cost / ticker_state["shares"]
+
+                        # 레코드 업데이트 (기존 레코드에 추가 매수 표시)
+                        if (
+                            daily_records_by_ticker[ticker_to_topup]
+                            and daily_records_by_ticker[ticker_to_topup][-1]["date"] == dt
+                        ):
+                            row = daily_records_by_ticker[ticker_to_topup][-1]
+                            existing_decision = row.get("decision", "")
+                            existing_note = row.get("note", "")
+
+                            # Decision이 HOLD인 경우만 추가 매수 표시
+                            if existing_decision == "HOLD":
+                                # 상태값(HOLD) 및 보유일 유지
+                                topup_note = "🔼 추가매수"
+                                row["note"] = f"{topup_note} | {existing_note}" if existing_note else topup_note
+
+                            # 수량/금액 업데이트
+                            row["shares"] = ticker_state["shares"]
+                            row["pv"] = ticker_state["shares"] * price
+                            row["avg_cost"] = ticker_state["avg_cost"]
+
+                            # 거래금액 누적
+                            if "trade_amount" in row and row["trade_amount"]:
+                                row["trade_amount"] += topup_amount
+                            else:
+                                row["trade_amount"] = topup_amount
+
+                        # 순매수 집계
+                        buy_trades_today_map.setdefault(ticker_to_topup, []).append(
+                            {"shares": float(topup_qty), "price": float(topup_price)}
+                        )
 
         out_cash.append(
             {
