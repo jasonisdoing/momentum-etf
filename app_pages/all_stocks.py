@@ -17,7 +17,8 @@ from utils.data_loader import (
 )
 from utils.indicators import calculate_ma_score
 from utils.moving_averages import calculate_moving_average
-from utils.stock_list_io import get_etfs_by_country
+from utils.settings_loader import get_account_settings, list_available_accounts
+from utils.stock_list_io import get_etfs
 
 
 def _format_percent(value: float) -> str:
@@ -75,11 +76,18 @@ def _calculate_drawdown_from_high(close_series: pd.Series) -> float:
     return 0.0
 
 
-def _build_all_stocks_table(country: str) -> pd.DataFrame:
+def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
     """모든 종목의 데이터를 수집하여 DataFrame으로 반환."""
 
+    # 0. 계정 정보 로드 (Country Code 등)
+    try:
+        settings = get_account_settings(account_id)
+        country = settings.get("country_code", "kor")
+    except Exception:
+        country = "kor"
+
     # 1. 종목 목록 로드
-    etfs = get_etfs_by_country(country)
+    etfs = get_etfs(account_id)
     if not etfs:
         return pd.DataFrame()
 
@@ -98,7 +106,12 @@ def _build_all_stocks_table(country: str) -> pd.DataFrame:
 
         # 캐시된 과거 데이터 로드
         try:
-            price_data = fetch_ohlcv(ticker, country, months_back=12)
+            price_data = fetch_ohlcv(
+                ticker,
+                country,
+                months_back=12,
+                account_id=account_id,  # [FIX] account_id is required for fetch_ohlcv
+            )
         except Exception:
             price_data = None
 
@@ -246,10 +259,16 @@ def _style_dataframe(df: pd.DataFrame) -> pd.io.formats.style.Styler:
 
     # 가격 컬럼 포맷팅 (천 단위 콤마 + 원)
     format_dict = {}
+
+    def _safe_price_format(x: Any) -> str:
+        if isinstance(x, (int, float)):
+            return f"{x:,.0f}원"
+        return str(x)
+
     if "현재가" in df.columns:
-        format_dict["현재가"] = "{:,.0f}원"
+        format_dict["현재가"] = _safe_price_format
     if "Nav" in df.columns:
-        format_dict["Nav"] = "{:,.0f}원"
+        format_dict["Nav"] = _safe_price_format
 
     if format_dict:
         styled = styled.format(format_dict)
@@ -267,10 +286,56 @@ def render_all_stocks_page() -> None:
         initial_sidebar_state="expanded",
     )
 
-    st.caption("모든 ETF 종목의 실시간 데이터 및 지표")
+    st.caption("모든 ETF 종목의 가격 데이터 및 지표")
+
+    accounts = list_available_accounts()
+    if not accounts:
+        st.error("설정된 계정이 없습니다.")
+        return
+
+    # 계정 이름 매핑 (ID -> Name)
+    account_map = {}
+    for acc_id in accounts:
+        try:
+            settings = get_account_settings(acc_id)
+            name = settings.get("name", acc_id)
+            # 이름이 ID와 같으면 그냥 표시, 다르면 "이름 (ID)" 형식?
+            # 사용자 요청: "kor1 대신 모멘텀 ETF" -> Just Name if available.
+            # But duplicates? Assuming unique names or acceptable.
+            # 사용자 요청: "모멘텀 ETF(kor1)" => "모멘텀 ETF"
+            display_label = name
+            account_map[display_label] = acc_id
+        except Exception:
+            account_map[acc_id] = acc_id
+
+    # 계정 선택 (Pills 스타일) using Display Labels
+    display_options = list(account_map.keys())
+
+    # URL 쿼리 파라미터에서 초기값 읽기 (?account=kor1)
+    default_label = display_options[0] if display_options else None
+    query_account = st.query_params.get("account")
+
+    if query_account:
+        # 쿼리 파라미터의 ID에 해당하는 라벨 찾기
+        for label, acc_id in account_map.items():
+            if acc_id == query_account:
+                default_label = label
+                break
+
+    selected_label = st.pills("계정 선택", display_options, default=default_label, key="account_selector")
+
+    if not selected_label:
+        st.info("계정을 선택해주세요.")
+        return
+
+    selected_account = account_map[selected_label]
+
+    # 선택된 계정을 URL 파라미터에 반영 (동기화)
+    if selected_account != query_account:
+        st.query_params["account"] = selected_account
 
     with st.spinner("데이터 로딩 중..."):
-        df = _build_all_stocks_table("kor")
+        df = _build_all_stocks_table(selected_account)
 
     if df.empty:
         st.error("종목 데이터를 불러올 수 없습니다.")

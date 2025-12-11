@@ -200,6 +200,121 @@
         ]
     },
     {
+        "category": "🇺🇸 미국섹터",
+        "tickers": [
+            {
+                "ticker": "XLB",
+                "name": "Materials Select Sector SPDR Fund",
+                "listing_date": "1998-12-22",
+                "1_week_avg_volume": 9630160,
+                "1_month_earn_rate": 2.1355,
+                "3_month_earn_rate": -4.0062,
+                "6_month_earn_rate": 1.4911,
+                "12_month_earn_rate": -1.8095
+            },
+            {
+                "ticker": "XLC",
+                "name": "Communication Services Select Sector SPDR Fund",
+                "listing_date": "2018-06-19",
+                "1_week_avg_volume": 5511580,
+                "1_month_earn_rate": 3.3457,
+                "3_month_earn_rate": 0.9437,
+                "6_month_earn_rate": 12.7138,
+                "12_month_earn_rate": 17.3279
+            },
+            {
+                "ticker": "XLY",
+                "name": "Consumer Discretionary Select Sector SPDR Fund",
+                "listing_date": "1998-12-22",
+                "1_week_avg_volume": 7476080,
+                "1_month_earn_rate": 0.1925,
+                "3_month_earn_rate": 1.0288,
+                "6_month_earn_rate": 11.9375,
+                "12_month_earn_rate": 3.7245
+            },
+            {
+                "ticker": "XLP",
+                "name": "Consumer Staples Select Sector SPDR Fund",
+                "listing_date": "1998-12-22",
+                "1_week_avg_volume": 14040040,
+                "1_month_earn_rate": 2.342,
+                "3_month_earn_rate": -2.2748,
+                "6_month_earn_rate": -2.6792,
+                "12_month_earn_rate": -2.4983
+            },
+            {
+                "ticker": "XLE",
+                "name": "Energy Select Sector SPDR Fund",
+                "listing_date": "1998-12-22",
+                "1_week_avg_volume": 24204600,
+                "1_month_earn_rate": 2.2247,
+                "3_month_earn_rate": 4.5082,
+                "6_month_earn_rate": 8.8259,
+                "12_month_earn_rate": 4.8476
+            },
+            {
+                "ticker": "XLF",
+                "name": "Financial Select Sector SPDR Fund",
+                "listing_date": "1998-12-22",
+                "1_week_avg_volume": 37023100,
+                "1_month_earn_rate": 1.7368,
+                "3_month_earn_rate": 0.0692,
+                "6_month_earn_rate": 6.3778,
+                "12_month_earn_rate": 8.4959
+            },
+            {
+                "ticker": "XLV",
+                "name": "Health Care Select Sector SPDR Fund",
+                "listing_date": "1998-12-22",
+                "1_week_avg_volume": 12123200,
+                "1_month_earn_rate": 3.2998,
+                "3_month_earn_rate": 9.3872,
+                "6_month_earn_rate": 13.1237,
+                "12_month_earn_rate": 7.3312
+            },
+            {
+                "ticker": "XLI",
+                "name": "Industrial Select Sector SPDR Fund",
+                "listing_date": "1998-12-22",
+                "1_week_avg_volume": 9007320,
+                "1_month_earn_rate": 1.2062,
+                "3_month_earn_rate": 2.5555,
+                "6_month_earn_rate": 8.9723,
+                "12_month_earn_rate": 12.7333
+            },
+            {
+                "ticker": "XLRE",
+                "name": "Real Estate Select Sector SPDR Fund",
+                "listing_date": "2015-10-08",
+                "1_week_avg_volume": 6461580,
+                "1_month_earn_rate": -1.6004,
+                "3_month_earn_rate": -3.8793,
+                "6_month_earn_rate": -1.7628,
+                "12_month_earn_rate": -4.1118
+            },
+            {
+                "ticker": "XLK",
+                "name": "Technology Select Sector SPDR Fund",
+                "listing_date": "1998-12-22",
+                "1_week_avg_volume": 8165860,
+                "1_month_earn_rate": 0.6531,
+                "3_month_earn_rate": 9.8806,
+                "6_month_earn_rate": 24.1308,
+                "12_month_earn_rate": 24.2939
+            },
+            {
+                "ticker": "XLU",
+                "name": "Utilities Select Sector SPDR Fund",
+                "listing_date": "1998-12-22",
+                "1_week_avg_volume": 20180780,
+                "1_month_earn_rate": -4.6844,
+                "3_month_earn_rate": 1.1347,
+                "6_month_earn_rate": 7.0728,
+                "12_month_earn_rate": 10.3907
+            }
+        ]
+    },
+    {
         "category": "🚀 모멘텀",
         "tickers": [
             {
@@ -835,7 +950,7 @@
                 "1_month_earn_rate": 7.9452,
                 "3_month_earn_rate": 8.7554,
                 "6_month_earn_rate": 27.0349,
-                "12_month_earn_rate": 23.8169
+                "12_month_earn_rate": 23.8168
             },
             {
                 "ticker": "ARKF",
@@ -1000,7 +1115,7 @@
                 "1_month_earn_rate": 5.8857,
                 "3_month_earn_rate": 17.545,
                 "6_month_earn_rate": 32.199,
-                "12_month_earn_rate": 19.7852
+                "12_month_earn_rate": 19.7853
             },
             {
                 "ticker": "XBI",
@@ -1395,7 +1510,7 @@
                 "1_month_earn_rate": 5.561,
                 "3_month_earn_rate": 7.6122,
                 "6_month_earn_rate": 18.4422,
-                "12_month_earn_rate": 27.8027
+                "12_month_earn_rate": 27.8026
             },
             {
                 "ticker": "EWG",
