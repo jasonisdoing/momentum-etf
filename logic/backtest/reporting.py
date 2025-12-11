@@ -13,6 +13,7 @@ from logic.backtest.account import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
 from utils.data_loader import get_exchange_rate_series
+from utils.formatters import format_pct_change
 from utils.logger import get_app_logger
 from utils.notification import build_summary_line_from_summary_data
 from utils.report import format_kr_money, render_table_eaw
@@ -36,9 +37,9 @@ def format_period_return_with_listing_date(series_summary: dict[str, Any], core_
     if listing_date and core_start_dt:
         listing_dt = pd.to_datetime(listing_date)
         if listing_dt > core_start_dt:
-            return f"{period_return_pct:+.2f}%({listing_date})"
+            return f"{format_pct_change(period_return_pct).strip()}({listing_date})"
 
-    return f"{period_return_pct:+.2f}%"
+    return format_pct_change(period_return_pct)
 
 
 def print_backtest_summary(
@@ -207,8 +208,8 @@ def print_backtest_summary(
                     week_label,
                     holdings_display,
                     value_display,
-                    f"{weekly_ret:+.2f}%" if _is_finite_number(weekly_ret) else "-",
-                    f"{cum_ret:+.2f}%" if _is_finite_number(cum_ret) else "-",
+                    format_pct_change(weekly_ret) if _is_finite_number(weekly_ret) else "-",
+                    format_pct_change(cum_ret) if _is_finite_number(cum_ret) else "-",
                 ]
             )
         aligns = ["left", "center", "right", "right", "right"]
@@ -256,10 +257,10 @@ def print_backtest_summary(
             monthly_row_data = [str(year)]
             for month in range(1, 13):
                 val = row.get(month)
-                monthly_row_data.append(f"{val:+.2f}%" if pd.notna(val) else "-")
+                monthly_row_data.append(format_pct_change(val) if pd.notna(val) else "-")
 
             yearly_val = row.get("연간")
-            monthly_row_data.append(f"{yearly_val:+.2f}%" if pd.notna(yearly_val) else "-")
+            monthly_row_data.append(format_pct_change(yearly_val) if pd.notna(yearly_val) else "-")
             rows_data.append(monthly_row_data)
 
             if cum_pivot_df is not None and year in cum_pivot_df.index:
@@ -267,12 +268,12 @@ def print_backtest_summary(
                 cum_row_data = ["  (누적)"]
                 for month in range(1, 13):
                     cum_val = cum_row.get(month)
-                    cum_row_data.append(f"{cum_val:+.2f}%" if pd.notna(cum_val) else "-")
+                    cum_row_data.append(format_pct_change(cum_val) if pd.notna(cum_val) else "-")
 
                 last_valid_month_index = cum_row.last_valid_index()
                 if last_valid_month_index is not None:
                     cum_annual_val = cum_row[last_valid_month_index]
-                    cum_row_data.append(f"{cum_annual_val:+.2f}%")
+                    cum_row_data.append(format_pct_change(cum_annual_val))
                 else:
                     cum_row_data.append("-")
                 rows_data.append(cum_row_data)
@@ -366,13 +367,13 @@ def print_backtest_summary(
             name = str(bench.get("name") or bench.get("ticker") or "-").strip()
             ticker = str(bench.get("ticker") or "-").strip()
             cum_ret = bench.get("cumulative_return_pct")
-            cum_label = f"{float(cum_ret):+.2f}%" if cum_ret is not None else "N/A"
+            cum_label = format_pct_change(cum_ret) if cum_ret is not None else "N/A"
             add(f"| {idx}. {name}({ticker}): {cum_label}")
     else:
         benchmark_name = summary.get("benchmark_name") or "S&P 500"
         bench_ret = summary.get("benchmark_cum_ret_pct")
         if bench_ret is not None:
-            add(f"| 벤치마크 기간수익률(%): {benchmark_name}: {bench_ret:+.2f}%")
+            add(f"| 벤치마크 기간수익률(%): {benchmark_name}: {format_pct_change(bench_ret)}")
 
     if isinstance(benchmarks_info, list) and benchmarks_info:
         add("| 벤치마크 CAGR(%)")
@@ -380,13 +381,14 @@ def print_backtest_summary(
             name = str(bench.get("name") or bench.get("ticker") or "-").strip()
             ticker = str(bench.get("ticker") or "-").strip()
             cagr_ret = bench.get("cagr_pct")
-            cagr_label = f"{float(cagr_ret):+.2f}%" if cagr_ret is not None else "N/A"
+            cagr_ret = bench.get("cagr_pct")
+            cagr_label = format_pct_change(cagr_ret) if cagr_ret is not None else "N/A"
             add(f"| {idx}. {name}({ticker}): {cagr_label}")
     else:
         benchmark_name = summary.get("benchmark_name") or "S&P 500"
         bench_cagr = summary.get("benchmark_cagr_pct")
         if bench_cagr is not None:
-            add(f"| 벤치마크 CAGR(%): {benchmark_name}: {bench_cagr:+.2f}%")
+            add(f"| 벤치마크 CAGR(%): {benchmark_name}: {format_pct_change(bench_cagr)}")
 
     if isinstance(benchmarks_info, list) and benchmarks_info:
         add("| 벤치마크 SDR(Sharpe/MDD)")
@@ -397,9 +399,9 @@ def print_backtest_summary(
             sdr_label = f"{float(sdr):.3f}" if sdr is not None else "N/A"
             add(f"| {idx}. {name}({ticker}): {sdr_label}")
 
-    add(f"| 기간수익률(%): {summary['period_return']:+.2f}%")
-    add(f"| CAGR(%): {summary['cagr']:+.2f}%")
-    add(f"| MDD(%): {-summary['mdd']:.2f}%")
+    add(f"| 기간수익률(%): {format_pct_change(summary['period_return'])}")
+    add(f"| CAGR(%): {format_pct_change(summary['cagr'])}")
+    add(f"| MDD(%): {format_pct_change(-summary['mdd'])}")
     add(f"| Sharpe: {summary.get('sharpe', 0.0):.2f}")
     add(f"| SDR (Sharpe/MDD): {summary.get('sharpe_to_mdd', 0.0):.3f}")
 

@@ -44,3 +44,19 @@ def format_price_deviation(value: Any) -> str:
         prefix = "👍"
 
     return f"{prefix}{deviation:+.2f}%"
+
+
+def format_pct_change(value: Any) -> str:
+    """수익률(%) 등을 포맷팅한다. 0.00%는 부호 없이 정렬용 공백만 추가."""
+    if value is None:
+        return "-"
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return str(value) if value != "-" else "-"
+
+    if abs(val) < 0.005:
+        # " 0.00%" (aligns with "+1.23%")
+        return f" {abs(val):.2f}%"
+
+    return f"{val:+.2f}%"

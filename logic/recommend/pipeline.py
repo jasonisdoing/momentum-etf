@@ -130,10 +130,8 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
 
     # 전체 etf_tickers 집합 (ETF 식별용 - Unused)
     # all_etf_tickers = {u["ticker"] for u in universe if u.get("type") == "etf"}
-
     for tkr, df in price_data_map.items():
-        if df.empty:
-            continue
+        # if df.empty: continue  <-- Removed to allow fallback processing
 
         metrics = process_ticker_data(
             tkr,
@@ -143,31 +141,36 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
             min_buy_score=strategy_rules.min_buy_score,
         )
 
-        if metrics is None and tkr in holdings:
+        if (metrics is None or metrics.get("price", 0) <= 0) and tkr in holdings:
             # [CRITICAL fallback for held items with insufficient data]
             # 전략 지표 계산엔 실패했으나(데이터 부족 등), 보유 중인 종목이라면
             # 현재가와 NAV 정보라도 표시해야 함.
+            current_price_fallback = 0.0
+
             if not df.empty:
                 last_row = df.iloc[-1]
                 current_price_fallback = float(last_row["Close"])
 
-                # Try NAV fallback
-                nav_fallback = None
-                dev_fallback = None
+            # Try NAV fallback
+            nav_fallback = None
+            dev_fallback = None
 
-                # Check Naver Snapshot first
-                tkr_norm_fb = tkr.strip().upper()
-                if tkr_norm_fb in nav_snapshot:
-                    snap_fb = nav_snapshot[tkr_norm_fb]
-                    nav_fallback = snap_fb.get("nav")
-                    snap_price_fb = snap_fb.get("nowVal")
-                    if snap_price_fb and snap_price_fb > 0:
-                        # For consistency, maybe use closing price?
-                        # But for fallback, getting any valid price is better.
-                        pass
+            # Check Naver Snapshot first
+            tkr_norm_fb = tkr.strip().upper()
+            if tkr_norm_fb in nav_snapshot:
+                snap_fb = nav_snapshot[tkr_norm_fb]
+                nav_fallback = snap_fb.get("nav")
+                snap_price_fb = snap_fb.get("nowVal")
 
-                    if nav_fallback and nav_fallback > 0:
-                        dev_fallback = ((current_price_fallback / nav_fallback) - 1.0) * 100.0
+                # If price was 0 or df empty, use snapshot price
+                if snap_price_fb and snap_price_fb > 0:
+                    if current_price_fallback <= 0:
+                        current_price_fallback = snap_price_fb
+
+                dev_fallback = snap_fb.get("deviation")
+
+                if dev_fallback is None and nav_fallback and nav_fallback > 0:
+                    dev_fallback = ((current_price_fallback / nav_fallback) - 1.0) * 100.0
                     if dev_fallback is None:
                         dev_fallback = snap_fb.get("deviation")
 

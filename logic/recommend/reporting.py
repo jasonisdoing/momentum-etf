@@ -10,7 +10,7 @@ from typing import Any
 
 import pandas as pd
 
-from utils.formatters import format_price, format_price_deviation
+from utils.formatters import format_pct_change, format_price, format_price_deviation
 from utils.logger import get_app_logger
 from utils.notification import strip_html_tags
 from utils.report import render_table_eaw
@@ -199,8 +199,10 @@ def dump_recommendation_log(
             category,
             state,
             str(holding_days) if holding_days > 0 else "-",
-            f"{daily_pct:+.2f}%" if isinstance(daily_pct, (int, float)) else "-",
-            f"{evaluation_pct:+.2f}%" if isinstance(evaluation_pct, (int, float)) and evaluation_pct != 0 else "-",
+            format_pct_change(daily_pct),
+            format_pct_change(evaluation_pct)
+            if isinstance(evaluation_pct, (int, float)) and evaluation_pct != 0
+            else "-",
             format_price(price, country_code),
         ]
         if nav_mode:
