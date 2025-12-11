@@ -101,7 +101,7 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
     start_str = start_date_fetch.strftime("%Y-%m-%d")
     end_str = base_date.strftime("%Y-%m-%d")
 
-    logger.info(f"Preparing price data for {account_id} (Country: {country_code})")
+    logger.info(f"Preparing price data for {account_id}")
     price_data_map, missings = prepare_price_data(
         tickers=list(tickers_to_fetch),
         country=country_code,
@@ -133,6 +133,8 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
     for tkr, df in price_data_map.items():
         # if df.empty: continue  <-- Removed to allow fallback processing
 
+        # if df.empty: continue
+
         metrics = process_ticker_data(
             tkr,
             df,
@@ -140,8 +142,7 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
             ma_type=strategy_rules.ma_type,
             min_buy_score=strategy_rules.min_buy_score,
         )
-
-        if (metrics is None or metrics.get("price", 0) <= 0) and tkr in holdings:
+        if metrics is None and tkr in holdings:
             # [CRITICAL fallback for held items with insufficient data]
             # 전략 지표 계산엔 실패했으나(데이터 부족 등), 보유 중인 종목이라면
             # 현재가와 NAV 정보라도 표시해야 함.
