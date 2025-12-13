@@ -4,10 +4,9 @@ from typing import Any
 
 import streamlit as st
 
-from utils.ui import load_account_recommendations, render_recommendation_table
 from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
-
+from utils.ui import load_account_recommendations, render_recommendation_table
 
 _DATAFRAME_CSS = """
 <style>
@@ -61,7 +60,10 @@ def render_account_page(account_id: str) -> None:
     country_code = loaded_country_code or country_code
 
     if df is None:
-        st.error(updated_at or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요.")
+        st.error(
+            updated_at
+            or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
+        )
         return
 
     render_recommendation_table(df, country_code=country_code)
@@ -137,9 +139,7 @@ def render_account_page(account_id: str) -> None:
                     expected_val = float(expected_cagr)
                 except (TypeError, ValueError):
                     expected_val = None
-                expected_html = (
-                    f"<span style='color:#d32f2f;'>예상 CAGR (연간 복리 성장률): {expected_val:+.2f}%, 백테스트 일자: {backtested_date}</span>"
-                )
+                expected_html = f"<span style='color:#d32f2f;'>예상 CAGR (연간 복리 성장률): {expected_val:+.2f}%, 백테스트 일자: {backtested_date}</span>"
                 st.markdown(f"<small>{expected_html}</small>", unsafe_allow_html=True)
     else:
         # updated_at이 없는 경우에 대한 폴백

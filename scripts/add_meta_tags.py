@@ -2,6 +2,7 @@
 
 import os
 import shutil
+
 import streamlit
 from bs4 import BeautifulSoup
 
@@ -16,7 +17,7 @@ if not os.path.exists(backup_path):
     print(f"✅ 백업 생성: {backup_path}")
 
 # 원본 index.html 읽기
-with open(streamlit_path, "r", encoding="utf-8") as file:
+with open(streamlit_path, encoding="utf-8") as file:
     html_content = file.read()
 
 # HTML 파싱
@@ -31,7 +32,10 @@ meta_tags = [
     {"property": "og:url", "content": "https://etf.dojason.com/"},
     {"property": "og:title", "content": "Momentum ETF"},
     {"property": "og:description", "content": "추세추종 전략 기반 ETF 투자"},
-    {"property": "og:image", "content": "https://raw.githubusercontent.com/jasonisdoing/momentum-etf/upgrade/static/og-image.png"},
+    {
+        "property": "og:image",
+        "content": "https://raw.githubusercontent.com/jasonisdoing/momentum-etf/upgrade/static/og-image.png",
+    },
     {"property": "og:image:width", "content": "1024"},
     {"property": "og:image:height", "content": "1024"},
     {"property": "og:image:type", "content": "image/png"},
@@ -40,7 +44,10 @@ meta_tags = [
     {"name": "twitter:card", "content": "summary_large_image"},
     {"name": "twitter:title", "content": "Momentum ETF"},
     {"name": "twitter:description", "content": "추세추종 전략 기반 ETF 투자"},
-    {"name": "twitter:image", "content": "https://raw.githubusercontent.com/jasonisdoing/momentum-etf/upgrade/static/og-image.png"},
+    {
+        "name": "twitter:image",
+        "content": "https://raw.githubusercontent.com/jasonisdoing/momentum-etf/upgrade/static/og-image.png",
+    },
 ]
 
 # head에 새 메타태그 추가

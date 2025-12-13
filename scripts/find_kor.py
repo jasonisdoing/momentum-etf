@@ -24,7 +24,6 @@ python scripts/find.py
 
 import json
 from datetime import datetime, timedelta
-from typing import Optional
 
 import pandas as pd
 import requests
@@ -44,7 +43,7 @@ INCLUDE_KEYWORDS = []
 MIN_VOLUME = 0
 
 
-def fetch_naver_etf_data(min_change_pct: float) -> Optional[pd.DataFrame]:
+def fetch_naver_etf_data(min_change_pct: float) -> pd.DataFrame | None:
     """
     네이버 금융 API에서 ETF 데이터를 가져옵니다.
     실패 시 None을 반환합니다.
@@ -215,7 +214,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             # 네이버 API 성공 (빈 DataFrame도 성공)
             top_gainers = naver_df
             if not naver_df.empty:
-                print(f"✅ 네이버 API 사용 (빠른 조회 성공)")
+                print("✅ 네이버 API 사용 (빠른 조회 성공)")
 
         # 2. 일반 주식 데이터 가져오기
         if asset_type == "stock":
@@ -242,7 +241,9 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             top_gainers = top_gainers[top_gainers["종목명"].str.contains(include_pattern, na=False)]
             include_filtered_count = initial_count - len(top_gainers)
             if include_filtered_count > 0:
-                print(f"포함 키워드({', '.join(INCLUDE_KEYWORDS)})에 따라 {include_filtered_count}개 종목을 제외했습니다.")
+                print(
+                    f"포함 키워드({', '.join(INCLUDE_KEYWORDS)})에 따라 {include_filtered_count}개 종목을 제외했습니다."
+                )
 
         # EXCLUDE_KEYWORDS 필터링
         if EXCLUDE_KEYWORDS:
@@ -251,7 +252,9 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             top_gainers = top_gainers[~top_gainers["종목명"].str.contains(exclude_pattern, na=False)]
             exclude_filtered_count = before_exclude - len(top_gainers)
             if exclude_filtered_count > 0:
-                print(f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {exclude_filtered_count}개 종목을 제외했습니다.")
+                print(
+                    f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {exclude_filtered_count}개 종목을 제외했습니다."
+                )
 
         # 거래량 필터링
         if MIN_VOLUME > 0 and "거래량" in top_gainers.columns:
@@ -265,7 +268,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
 
         # 필터링 후 결과 확인
         if top_gainers.empty:
-            print(f"\n제외 키워드 필터링 후 남은 종목이 없습니다.")
+            print("\n제외 키워드 필터링 후 남은 종목이 없습니다.")
             return
 
         # 등락률 순으로 정렬
@@ -296,7 +299,9 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
             # 괴리율 포맷팅
             risefall_str = f"{risefall:+.2f}%" if risefall is not None else "N/A"
 
-            print(f"  - {name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}")
+            print(
+                f"  - {name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
+            )
 
     except Exception as e:
         logger.error("오류가 발생했습니다: %s", e)

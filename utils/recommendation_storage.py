@@ -1,10 +1,10 @@
 from __future__ import annotations
-from datetime import datetime
-from typing import Any, Dict, Optional
 
-from bson import ObjectId
+from datetime import datetime
+from typing import Any
 
 import pandas as pd
+from bson import ObjectId
 
 try:  # pragma: no cover - numpy is optional at runtime
     import numpy as np
@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover
     np = None  # type: ignore[assignment]
 
 from utils.db_manager import get_db_connection
-from utils.logger import get_app_logger, APP_LABEL
+from utils.logger import APP_LABEL, get_app_logger
 
 try:
     from zoneinfo import ZoneInfo
@@ -54,7 +54,7 @@ def _make_json_safe(obj: Any) -> Any:
     return str(obj)
 
 
-def _normalize_datetime(value: Any) -> Optional[datetime]:
+def _normalize_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -92,10 +92,10 @@ def save_recommendation_payload(
     payload: Any,
     *,
     account_id: str,
-    country_code: Optional[str] = None,
-    base_date: Optional[Any] = None,
-    summary: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    country_code: str | None = None,
+    base_date: Any | None = None,
+    summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Persist recommendation payload to MongoDB and return metadata."""
 
     account_norm = (account_id or "").strip().lower()
@@ -109,7 +109,7 @@ def save_recommendation_payload(
     base_datetime = _normalize_datetime(base_date)
     now = _now_kst()
 
-    update_doc: Dict[str, Any] = {
+    update_doc: dict[str, Any] = {
         "account_id": account_norm,
         "country_code": (country_code or "").strip().lower() or None,
         "recommendations": safe_payload,
@@ -119,7 +119,7 @@ def save_recommendation_payload(
         "updated_by": APP_LABEL,
     }
 
-    update_operations: Dict[str, Any] = {
+    update_operations: dict[str, Any] = {
         "$set": update_doc,
         "$setOnInsert": {"created_at": now},
     }
@@ -148,7 +148,7 @@ def save_recommendation_payload(
 
 def save_recommendation_report(
     report: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Persist a RecommendationReport-like object and return Mongo metadata."""
 
     account_id = getattr(report, "account_id", "")
@@ -170,7 +170,7 @@ def save_recommendation_report(
     )
 
 
-def fetch_latest_recommendations(account_id: str) -> Optional[Dict[str, Any]]:
+def fetch_latest_recommendations(account_id: str) -> dict[str, Any] | None:
     """Fetch the latest recommendation snapshot for an account."""
 
     collection = _get_collection()

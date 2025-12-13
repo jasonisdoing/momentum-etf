@@ -24,8 +24,8 @@
 ### 파일 매핑
 | 추천 (Recommend) | 백테스트 (Backtest) | 역할 |
 |-----------------|-------------------|------|
-| `logic/recommend/portfolio.py` | `logic/backtest/portfolio_runner.py` | 매매 의사결정 로직 |
-| `logic/recommend/pipeline.py` | `logic/backtest/account_runner.py` | 데이터 준비 및 실행 |
+| `logic/recommend/portfolio.py` | `logic/backtest/portfolio.py` | 매매 의사결정 로직 |
+| `logic/recommend/pipeline.py` | `logic/backtest/account.py` | 데이터 준비 및 실행 |
 
 ### 핵심 일관성 체크리스트
 
@@ -50,14 +50,27 @@
 *   `portfolio.py`: 카테고리 중복 체크, 핵심 보유 종목 검증
 *   `signals.py`: 매수 시그널 발생 여부, 연속 상승일 계산
 *   `filtering.py`: 후보군 필터링 및 정렬
+*   `price.py`: 가격 결정 및 수익률 계산 로직 공통화
 
 ## 4. 테스트 및 검증
 
 코드를 수정할 때는 다음 절차를 따르세요.
 
 1.  **추천 로직 수정**: `logic/recommend/` 수정
-2.  **백테스트 로직 수정**: `logic/backtest/`에 동일하게 반영
-3.  **검증**:
-    *   `python main.py` 실행하여 추천 결과 확인
-    *   `python logic/backtest/account_runner.py` 실행하여 백테스트 결과 확인
-    *   두 결과가 논리적으로 일치하는지 확인 (로그 비교)
+2.  **검증**:
+    *   **추천 실행**: `python recommend.py <account_id>` (예: `python recommend.py us1`)
+    *   **결과 확인**: `zaccounts/<account_id>/results/recommend_YYYY-MM-DD.log`
+3.  **백테스트 검증 (선택)**:
+    *   만약 `logic/common/` 등 공통 모듈을 수정했다면 백테스트도 검증 필요
+    *   `python backtest.py <account_id>`
+    *   결과 확인: `zaccounts/<account_id>/results/backtest_YYYY-MM-DD.log`
+
+## 5. 추천 시스템의 정의 (Definition of Recommendation)
+
+**"추천(Recommendation)"**은 계좌의 자산 규모(Total Equity)나 현금 잔고(Cash)와는 무관하게, 순수하게 **전략적 신호(Signal)**와 **포트폴리오 슬롯(Slot)** 여부만을 기반으로 생성됩니다.
+
+### 핵심 원칙
+1.  **전략적 신호 우선**: 자산이 부족하더라도 전략상 매수 신호(BUY Signal)가 발생하고 슬롯이 비어있으면 `BUY` 추천을 생성합니다.
+2.  **자산 독립성**: `current_equity`나 `total_cash` 등 자산 데이터를 로직에 반영하지 않습니다. 따라서 "현금 부족" 등의 사유로 추천이 거절(WAIT)되지 않습니다.
+3.  **슬롯 관리**: 유일한 물리적 제약은 `portfolio_topn` (최대 보유 종목 수)에 따른 슬롯 여유분입니다.
+4.  **역할 분리**: 실제 매수 가능 여부(예산 부족 등)는 추천 이후의 실행 단계(Execution Layer)나 사용자가 판단할 영역이며, 추천 로직의 책임이 아닙니다.

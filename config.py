@@ -39,11 +39,21 @@ MARKET_SCHEDULES = {
         "interval_minutes": 20,
         "timezone": "Asia/Seoul",
     },
+    "us": {
+        "open": time(9, 30),
+        "close": time(16, 0),
+        "interval_minutes": 60,
+        "timezone": "America/New_York",
+    },
 }
 
 # 백테스트 체결 슬리피지 가정치 (%)
 BACKTEST_SLIPPAGE = {
     "kor": {
+        "buy_pct": 0.25,
+        "sell_pct": 0.25,
+    },
+    "us": {
         "buy_pct": 0.25,
         "sell_pct": 0.25,
     },

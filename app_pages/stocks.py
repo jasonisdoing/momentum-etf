@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -59,12 +59,12 @@ def _account_registry():
     return accounts, meta, default
 
 
-def _account_options() -> List[str]:
+def _account_options() -> list[str]:
     accounts, _, _ = _account_registry()
     return [account["account_id"] for account in accounts]
 
 
-def _account_meta() -> Dict[str, Dict[str, str]]:
+def _account_meta() -> dict[str, dict[str, str]]:
     return _account_registry()[1]
 
 
@@ -89,9 +89,9 @@ def _resolve_country_code(account_id: str) -> str:
     return (meta.get("country_code") or account_id).strip().lower()
 
 
-def _render_cache_summary_table(country_code: str) -> None:
+def _render_cache_summary_table(account_id: str) -> None:
     try:
-        etf_items = get_etfs(country_code)
+        etf_items = get_etfs(account_id)
     except Exception as exc:
         st.error(f"ETF 목록을 불러오지 못했습니다: {exc}")
         return
@@ -100,12 +100,13 @@ def _render_cache_summary_table(country_code: str) -> None:
         st.info("표시할 종목이 없습니다.")
         return
 
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for item in etf_items:
         ticker = str(item.get("ticker") or "").strip().upper()
         cache_start = cache_end = "-"
         try:
-            cache_range = get_cached_date_range(country_code, ticker)
+            # Use account_id to look up the correct cache collection
+            cache_range = get_cached_date_range(account_id, ticker)
             if cache_range:
                 start, end = cache_range
                 if start is not None:
@@ -119,7 +120,6 @@ def _render_cache_summary_table(country_code: str) -> None:
             {
                 "티커": ticker,
                 "종목명": item.get("name") or "-",
-                "추천 사용": bool(item.get("recommend_enabled", True)),
                 "상장일": item.get("listing_date") or "-",
                 "1달 평균 거래량": item.get("1_month_avg_volume") or 0,
                 "캐시 시작": cache_start,
@@ -178,7 +178,7 @@ def render_stocks_admin_page() -> None:
     country_code = _resolve_country_code(selected_account)
     st.markdown(f"**선택된 계정:** {_format_account_label(selected_account)} (국가 코드: {country_code.upper()})")
 
-    _render_cache_summary_table(country_code)
+    _render_cache_summary_table(selected_account)
 
 
 render_stocks_admin_page()

@@ -4,7 +4,7 @@ def load_env_if_present() -> bool:
     Returns True if a .env file was found and loaded.
     """
     try:
-        from dotenv import load_dotenv, find_dotenv  # type: ignore
+        from dotenv import find_dotenv, load_dotenv  # type: ignore
     except Exception:
         return False
 

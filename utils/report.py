@@ -3,7 +3,6 @@
 """
 
 import re
-from typing import List
 from unicodedata import east_asian_width, normalize
 
 
@@ -34,31 +33,41 @@ def format_kr_money(value: float) -> str:
     return sign + " ".join(parts) + "원"
 
 
-def render_table_eaw(headers: List[str], rows: List[List[str]], aligns: List[str]) -> List[str]:
+def render_table_eaw(headers: list[str], rows: list[list[str]], aligns: list[str]) -> list[str]:
     """
     동아시아 문자 너비를 고려하여 리스트 데이터를 ASCII 테이블 문자열로 렌더링합니다.
     """
 
-    _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+    ansi_re = re.compile(r"\x1b\[[0-9;]*m")
 
     def _clean(s: str) -> str:
         if not isinstance(s, str):
             s = str(s)
-        s = _ANSI_RE.sub("", s)
+        s = ansi_re.sub("", s)
         s = normalize("NFKC", s)
         return s
 
     def _disp_width_eaw(s: str) -> int:
         """동아시아 문자를 포함한 문자열의 실제 터미널 출력 너비를 계산합니다."""
+        import unicodedata  # Function scope import to avoid changing module imports if not needed at top level
+
         s = _clean(s)
         w = 0
         for ch in s:
-            # 박스 드로잉 문자는 터미널에서 넓게 렌더링되는 경우가 많습니다.
+            # 박스 드로잉 문자
             if "\u2500" <= ch <= "\u257f":
                 w += 2
                 continue
+
+            # Zero-width characters (Marks, Formatting like VS16)
+            # Mn: Mark, Nonspacing
+            # Me: Mark, Enclosing
+            # Cf: Other, Format (includes VS16 \ufe0f)
+            if unicodedata.category(ch) in ("Mn", "Me", "Cf"):
+                continue
+
             eaw = east_asian_width(ch)
-            # 'Ambiguous'(A) 문자를 Wide로 처리하여 대부분의 터미널에서 정렬이 깨지지 않도록 합니다.
+            # 'Ambiguous'(A) 문자를 Wide로 처리
             if eaw in ("W", "F", "A"):
                 w += 2
             else:
@@ -88,7 +97,9 @@ def render_table_eaw(headers: List[str], rows: List[List[str]], aligns: List[str
         return "+" + "+".join("-" * (w + 2) for w in widths) + "+"
 
     out = [_hline()]
-    header_cells = [_pad(headers[j], widths[j], "center" if aligns[j] == "center" else "left") for j in range(len(headers))]
+    header_cells = [
+        _pad(headers[j], widths[j], "center" if aligns[j] == "center" else "left") for j in range(len(headers))
+    ]
     out.append("| " + " | ".join(header_cells) + " |")
     out.append(_hline())
     for r in rows:

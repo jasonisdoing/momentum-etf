@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import pickle
 import re
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
+import pandas as pd
 from bson.binary import Binary
 from pymongo.errors import PyMongoError
-import pandas as pd
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
@@ -18,12 +19,13 @@ logger = get_app_logger()
 
 _COLLECTION_NAME_MAP = {
     "kor": "cache_kor_stocks",
+    "us": "cache_us_stocks",
 }
 
 _TEMP_SUFFIX_SANITIZE = re.compile(r"[^a-z0-9_-]", re.IGNORECASE)
 
 
-def _get_cache_start_date() -> Optional[pd.Timestamp]:
+def _get_cache_start_date() -> pd.Timestamp | None:
     """config.py에서 CACHE_START_DATE를 로드하여 Timestamp로 반환합니다."""
     try:
         from utils.settings_loader import load_common_settings
@@ -50,25 +52,32 @@ def _get_cache_start_date() -> Optional[pd.Timestamp]:
     return None
 
 
-def _resolve_collection_name(country_token: str) -> str:
-    token = (country_token or "global").strip().lower() or "global"
+def _resolve_collection_name(account_id: str) -> str:
+    token = (account_id or "global").strip().lower() or "global"
+
+    # Static map check (legacy support or specific overrides)
     if token in _COLLECTION_NAME_MAP:
         return _COLLECTION_NAME_MAP[token]
+
+    # Temporary collection handling
     if "_tmp_" in token:
         base, _, suffix = token.partition("_tmp_")
-        base_collection = _COLLECTION_NAME_MAP.get(base, f"cache_{base}_stocks")
+        # Recursively resolve base collection name
+        base_collection = _resolve_collection_name(base)
         suffix_clean = _TEMP_SUFFIX_SANITIZE.sub("", suffix)
         if not suffix_clean:
-            raise ValueError(f"잘못된 임시 컬렉션 토큰: {country_token}")
+            raise ValueError(f"잘못된 임시 컬렉션 토큰: {account_id}")
         return f"{base_collection}_tmp_{suffix_clean}"
+
+    # Default to generic cache_{token}_stocks pattern for accounts
     return f"cache_{token}_stocks"
 
 
-def _get_collection(country: str):
+def _get_collection(account_id: str):
     db = get_db_connection()
     if db is None:
         return None
-    collection_name = _resolve_collection_name(country)
+    collection_name = _resolve_collection_name(account_id)
     collection = db[collection_name]
     # 보조 인덱스 생성 (존재 시 무시)
     try:
@@ -78,7 +87,7 @@ def _get_collection(country: str):
     return collection
 
 
-def _deserialize_cached_doc(doc: Dict[str, Any]) -> Optional[pd.DataFrame]:
+def _deserialize_cached_doc(doc: dict[str, Any]) -> pd.DataFrame | None:
     """공통 캐시 문서 역직렬화 로직."""
     if not doc:
         return None
@@ -111,9 +120,9 @@ def _deserialize_cached_doc(doc: Dict[str, Any]) -> Optional[pd.DataFrame]:
     return df
 
 
-def load_cached_frame(country: str, ticker: str) -> Optional[pd.DataFrame]:
+def load_cached_frame(account_id: str, ticker: str) -> pd.DataFrame | None:
     """저장된 캐시 DataFrame을 로드하고, CACHE_START_DATE 이전 데이터를 필터링합니다."""
-    collection = _get_collection(country)
+    collection = _get_collection(account_id)
     if collection is None:
         return None
 
@@ -125,7 +134,7 @@ def load_cached_frame(country: str, ticker: str) -> Optional[pd.DataFrame]:
     return _deserialize_cached_doc(doc)
 
 
-def load_cached_frames_bulk(country: str, tickers: Iterable[str]) -> Dict[str, pd.DataFrame]:
+def load_cached_frames_bulk(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
     """다수의 티커를 한 번의 질의로 가져와 역직렬화합니다."""
     normalized = []
     for t in tickers:
@@ -135,11 +144,11 @@ def load_cached_frames_bulk(country: str, tickers: Iterable[str]) -> Dict[str, p
     if not normalized:
         return {}
 
-    collection = _get_collection(country)
+    collection = _get_collection(account_id)
     if collection is None:
         return {}
 
-    frames: Dict[str, pd.DataFrame] = {}
+    frames: dict[str, pd.DataFrame] = {}
     try:
         cursor = collection.find({"ticker": {"$in": list(set(normalized))}})
     except Exception:
@@ -157,12 +166,12 @@ def load_cached_frames_bulk(country: str, tickers: Iterable[str]) -> Dict[str, p
     return frames
 
 
-def save_cached_frame(country: str, ticker: str, df: pd.DataFrame) -> None:
+def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
     """캐시 DataFrame을 저장합니다. CACHE_START_DATE 이전 데이터는 제외합니다."""
     if df is None or df.empty:
         return
 
-    collection = _get_collection(country)
+    collection = _get_collection(account_id)
     if collection is None:
         return
 
@@ -197,8 +206,8 @@ def save_cached_frame(country: str, ticker: str, df: pd.DataFrame) -> None:
         return
 
 
-def delete_cached_frame(country: str, ticker: str) -> None:
-    collection = _get_collection(country)
+def delete_cached_frame(account_id: str, ticker: str) -> None:
+    collection = _get_collection(account_id)
     if collection is None:
         return
     try:
@@ -207,23 +216,23 @@ def delete_cached_frame(country: str, ticker: str) -> None:
         return
 
 
-def drop_cache_collection(country: str) -> None:
+def drop_cache_collection(account_id: str) -> None:
     db = get_db_connection()
     if db is None:
         return
-    collection_name = _resolve_collection_name(country)
+    collection_name = _resolve_collection_name(account_id)
     try:
         db[collection_name].drop()
     except Exception:
         return
 
 
-def clean_temp_cache_collections(country: str, *, max_age_seconds: Optional[int] = None) -> int:
+def clean_temp_cache_collections(account_id: str, *, max_age_seconds: int | None = None) -> int:
     """남아 있는 임시 캐시 컬렉션을 조건에 맞게 삭제합니다."""
     db = get_db_connection()
     if db is None:
         return 0
-    base_name = _COLLECTION_NAME_MAP.get(country.strip().lower(), f"cache_{country}_stocks")
+    base_name = _COLLECTION_NAME_MAP.get(account_id.strip().lower(), f"cache_{account_id}_stocks")
     removed = 0
     try:
         threshold = None
@@ -249,7 +258,7 @@ def clean_temp_cache_collections(country: str, *, max_age_seconds: Optional[int]
     return removed
 
 
-def swap_cache_collection(country: str, temp_country_token: str) -> None:
+def swap_cache_collection(account_id: str, temp_token: str) -> None:
     """임시 컬렉션을 메인 캐시 컬렉션으로 원자적으로 교체합니다."""
     db = get_db_connection()
     if db is None:
@@ -257,8 +266,8 @@ def swap_cache_collection(country: str, temp_country_token: str) -> None:
 
     client = db.client
     db_name = db.name
-    main_collection_name = _resolve_collection_name(country)
-    temp_collection_name = _resolve_collection_name(temp_country_token)
+    main_collection_name = _resolve_collection_name(account_id)
+    temp_collection_name = _resolve_collection_name(temp_token)
 
     if temp_collection_name not in db.list_collection_names():
         raise ValueError(f"임시 컬렉션 '{temp_collection_name}'을 찾을 수 없습니다.")
@@ -272,7 +281,7 @@ def swap_cache_collection(country: str, temp_country_token: str) -> None:
             }
         )
         # rename 후 새 컬렉션 핸들을 초기화하여 (재)인덱스 보장
-        _get_collection(country)
+        _get_collection(account_id)
     except PyMongoError as exc:
         logger.error("캐시 컬렉션 교체 실패 (%s <- %s): %s", main_collection_name, temp_collection_name, exc)
         raise
@@ -281,38 +290,56 @@ def swap_cache_collection(country: str, temp_country_token: str) -> None:
         raise
 
 
-def get_cached_date_range(country: str, ticker: str) -> Optional[Tuple[pd.Timestamp, pd.Timestamp]]:
-    df = load_cached_frame(country, ticker)
+def get_cached_date_range(account_id: str, ticker: str) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    df = load_cached_frame(account_id, ticker)
     if df is None or df.empty:
         return None
     return df.index.min(), df.index.max()
 
 
-def list_cached_countries() -> List[str]:
+def list_available_cache_keys() -> list[str]:
+    """캐시된 계정(또는 국가) 키 목록을 반환합니다."""
     db = get_db_connection()
     if db is None:
         return []
 
-    available: List[str] = []
+    available: list[str] = []
     try:
         existing = set(db.list_collection_names())
     except Exception:
         existing = set()
 
-    for country, coll in _COLLECTION_NAME_MAP.items():
+    # 정적 맵 먼저 체크
+    for key, coll in _COLLECTION_NAME_MAP.items():
         if coll in existing:
-            try:
-                if db[coll].estimated_document_count() > 0:
-                    available.append(country)
-            except Exception:
-                continue
+            available.append(key)
+
+    # 동적 컬렉션 패턴 체크 (cache_{account}_stocks)
+    # cache_ 로 시작하고 _stocks 로 끝나는 컬렉션 탐색
+    # 단, _tmp_ 가 포함된 건 임시 컬렉션이므로 제외
+    for coll_name in existing:
+        if coll_name.startswith("cache_") and coll_name.endswith("_stocks"):
+            # cache_{account}_stocks
+            # account 부분을 추출
+            # prefix "cache_" (len 6), suffix "_stocks" (len 7)
+            if len(coll_name) > 13:
+                inner = coll_name[6:-7]  # extract "account"
+                if "_tmp_" in inner:
+                    continue
+                available.append(inner)
+
+    # 중복 제거 및 정렬
+    available = sorted(list(set(available)))
+
     if not available:
+        # DB 연결 실패 또는 없으면 정적 맵 키라도 반환
         available = sorted(_COLLECTION_NAME_MAP.keys())
+
     return available
 
 
-def list_cached_tickers(country: str) -> List[str]:
-    collection = _get_collection(country)
+def list_cached_tickers(account_id: str) -> list[str]:
+    collection = _get_collection(account_id)
     if collection is None:
         return []
     try:

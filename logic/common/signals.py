@@ -1,6 +1,5 @@
 """추천과 백테스트에서 공통으로 사용하는 매수/매도 시그널 로직."""
 
-from typing import Optional
 import numpy as np
 import pandas as pd
 
@@ -53,7 +52,7 @@ def calculate_consecutive_days(
     return pd.Series(streak_values, index=scores.index, dtype=int)
 
 
-def get_buy_signal_streak(score: float, score_series: Optional[pd.Series] = None, min_score: float = 0.0) -> int:
+def get_buy_signal_streak(score: float, score_series: pd.Series | None = None, min_score: float = 0.0) -> int:
     """현재 점수와 점수 시리즈를 기반으로 매수 시그널 지속일을 반환합니다.
 
     Args:

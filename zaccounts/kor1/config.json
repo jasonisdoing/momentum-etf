@@ -1,0 +1,38 @@
+{
+    "order": 10,
+    "icon": "🇰🇷",
+    "name": "한국 추세추종",
+    "desc": "한국 일반계좌에서 운영종인 포트폴리오 입니다.",
+    "country_code": "kor",
+    "currency": "krw",
+    "slack_channel": "C09FAU2NHM2",
+    "initial_capital_krw": "100000000",
+    "show_hold_only": false,
+    "strategy": {
+        "MONTHS_RANGE": 12,
+        "BACKTESTED_DATE": "2025-12-12 10:16",
+        "CAGR": 114.043552,
+        "MDD": -14.983235,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "PORTFOLIO_TOPN": 8,
+        "MA_PERIOD": 50,
+        "MA_TYPE": "EMA",
+        "REPLACE_SCORE_THRESHOLD": 4,
+        "STOP_LOSS_PCT": 10,
+        "OVERBOUGHT_SELL_THRESHOLD": 88,
+        "TRAILING_STOP_PCT": 0,
+        "COOLDOWN_DAYS": 3,
+        "MIN_BUY_SCORE": 0,
+        "CORE_HOLDINGS": []
+    },
+    "benchmarks": [
+        {
+            "ticker": "379800",
+            "name": "Kodex 미국S&P500"
+        },
+        {
+            "ticker": "379810",
+            "name": "Kodex 미국나스닥100"
+        }
+    ]
+}

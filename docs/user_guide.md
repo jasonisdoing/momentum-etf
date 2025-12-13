@@ -10,22 +10,25 @@
 
 ### 실행 명령어
 
-**1. 추천 실행 (매일 아침)**
-오늘의 매매 추천 목록을 생성하고 Slack으로 알림을 보냅니다.
+**1. 튜닝 (최적 파라미터 탐색)**
+최적의 파라미터를 찾기 위해 튜닝을 수행합니다. 완료 후 전략 설정이 **자동으로 업데이트**됩니다.
 ```bash
-python main.py
+python tune.py kor1  # kor1 계정 튜닝
+python tune.py us1   # us1 계정 튜닝
 ```
 
 **2. 백테스트 실행**
 과거 데이터를 바탕으로 전략의 성과를 시뮬레이션합니다.
 ```bash
-python logic/backtest/account_runner.py
+python backtest.py kor1
+python backtest.py us1
 ```
 
-**3. 파라미터 튜닝**
-최적의 파라미터를 찾기 위해 튜닝을 수행합니다.
+**3. 추천 실행 (매일 아침)**
+오늘의 매매 추천 목록을 생성하고 Slack으로 알림을 보냅니다.
 ```bash
-python logic/tune/runner.py
+python recommend.py kor1
+python recommend.py us1
 ```
 
 ## 2. 설정 가이드
@@ -35,18 +38,17 @@ python logic/tune/runner.py
 *   `SLACK_WEBHOOK_URL`: 알림을 받을 슬랙 웹훅 주소
 *   `TUNING_ENSEMBLE_SIZE`: 튜닝 시 앙상블에 사용할 상위 결과 개수 (기본 3, 홀수만 가능)
 
-### 계좌별 전략 설정 (`zsettings/account/k1.json`)
-각 계좌(포트폴리오)별로 구체적인 전략 파라미터를 설정합니다.
+### 계좌별 전략 설정 (`zsettings/account/kor1.json`, `us1.json`)
+각 계좌(포트폴리오)별로 구체적인 전략 파라미터를 설정합니다. `tune.py` 실행 시 자동으로 업데이트됩니다.
 
 ```json
 {
   "strategy": {
-    "tuning": {
-      "MA_PERIOD": 48,              // 이동평균 기간
-      "PORTFOLIO_TOPN": 5,          // 최대 보유 종목 수
-      "STOP_LOSS_PCT": -10,         // 손절 기준 (-10%)
-      "CORE_HOLDINGS": ["091160"]   // 핵심 보유 종목 티커
-    }
+    "MA_PERIOD": 48,              // 이동평균 기간
+    "PORTFOLIO_TOPN": 5,          // 최대 보유 종목 수
+    "STOP_LOSS_PCT": -10,         // 손절 기준 (-10%)
+    "CORE_HOLDINGS": ["091160"],  // 핵심 보유 종목 티커
+    "MONTHS_RANGE": 12            // 백테스트/튜닝 기간 (개월)
   }
 }
 ```
@@ -63,6 +65,13 @@ python logic/tune/runner.py
 *   **매매 신호**: 오늘 사고 팔아야 할 종목 (BUY, SELL)
 *   **보유 현황**: 현재 보유 중인 종목의 상태 (HOLD, WAIT)
 *   **계좌 요약**: 현재 총 자산, 현금 비중 등
+
+> **참고 (일간 수익률 표시 정책)**:
+> 추천 리포트의 `일간(%)` 항목은 **실시간 장 운영 중인 날(평일 개장 시간 이후)**에만 표시됩니다.
+> *   **휴장일(주말, 공휴일)**: 0.00%로 표시됩니다.
+> *   **개장 전**: 0.00%로 표시됩니다.
+> *   이는 마감된 전일 등락률 대신, **현재 시점의 등락률**만을 보여주기 위함입니다.
+
 
 ### 로그 파일
 실행 중 발생하는 상세 로그는 `logs/` 폴더에 저장됩니다. 오류 발생 시 이 파일을 확인하세요.

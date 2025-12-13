@@ -1,6 +1,6 @@
 """Backtest package: runners and reporting utilities."""
 
-from .account_runner import AccountBacktestResult, run_account_backtest
+from .account import AccountBacktestResult, run_account_backtest
 from .reporting import (
     dump_backtest_log,
     format_period_return_with_listing_date,

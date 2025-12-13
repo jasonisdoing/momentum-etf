@@ -2,29 +2,35 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
-from .messages import build_partial_sell_note
 from .constants import DECISION_MESSAGES
+from .messages import build_partial_sell_note
 
 
 def compute_net_trade_note(
     *,
     tkr: str,
-    data_by_tkr: Dict[str, Any],
-    buy_trades_today_map: Dict[str, List[Dict[str, Any]]],
-    sell_trades_today_map: Dict[str, List[Dict[str, Any]]],
+    data_by_tkr: dict[str, Any],
+    buy_trades_today_map: dict[str, list[dict[str, Any]]],
+    sell_trades_today_map: dict[str, list[dict[str, Any]]],
     current_decision: str | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute per-ticker net buy/sell note and state overrides for the day.
 
     Returns a dict possibly containing keys: state, row4, note.
     """
     trades_buys = buy_trades_today_map.get(tkr, [])
-    total_buy_amount = sum(float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0) for tr in trades_buys) if trades_buys else 0.0
+    total_buy_amount = (
+        sum(float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0) for tr in trades_buys)
+        if trades_buys
+        else 0.0
+    )
 
     sells = sell_trades_today_map.get(tkr, [])
-    total_sold_amount = sum(float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0) for tr in sells) if sells else 0.0
+    total_sold_amount = (
+        sum(float(tr.get("shares", 0.0) or 0.0) * float(tr.get("price", 0.0) or 0.0) for tr in sells) if sells else 0.0
+    )
     d = data_by_tkr.get(tkr) or {}
     current_shares_now = float(d.get("shares", 0.0) or 0.0)
 

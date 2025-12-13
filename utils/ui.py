@@ -5,12 +5,11 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from strategies.maps.constants import DECISION_CONFIG
 from utils.logger import get_app_logger
+from utils.recommendation_storage import fetch_latest_recommendations
 from utils.recommendations import recommendations_to_dataframe
 from utils.settings_loader import get_account_settings
-from strategies.maps.constants import DECISION_CONFIG
-from utils.recommendation_storage import fetch_latest_recommendations
-
 
 logger = get_app_logger()
 
@@ -35,7 +34,10 @@ def load_account_recommendations(
         return None, f"추천 스냅샷을 불러오지 못했습니다: {exc}", country_code
 
     if snapshot is None:
-        message = "추천 스냅샷을 찾을 수 없습니다. CLI에서 " f"`python recommend.py {account_norm}` 명령으로 데이터를 생성해 주세요."
+        message = (
+            "추천 스냅샷을 찾을 수 없습니다. CLI에서 "
+            f"`python recommend.py {account_norm}` 명령으로 데이터를 생성해 주세요."
+        )
         logger.warning("추천 스냅샷을 찾을 수 없습니다 (account=%s)", account_norm)
         return None, message, country_code
 
@@ -104,7 +106,11 @@ def _load_account_ui_settings(account_id: str) -> tuple[str, str]:
 def _resolve_row_colors(country_code: str) -> dict[str, str]:
     country_code = (country_code or "").strip().lower()
     # 기본값: DECISION_CONFIG의 background를 기반으로 구성
-    base_colors = {key.upper(): cfg.get("background") for key, cfg in DECISION_CONFIG.items() if isinstance(cfg, dict) and cfg.get("background")}
+    base_colors = {
+        key.upper(): cfg.get("background")
+        for key, cfg in DECISION_CONFIG.items()
+        if isinstance(cfg, dict) and cfg.get("background")
+    }
 
     return base_colors
 
@@ -187,13 +193,40 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         if col in df.columns:
             styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, col])
 
-    # 가격 컬럼 포맷팅 (천 단위 콤마 + 원)
+    # 가격 컬럼 포맷팅
+    def _safe_format(fmt: str):
+        def _formatter(x):
+            if pd.isna(x) or x is None:
+                return "-"
+            try:
+                return fmt.format(x)
+            except Exception:
+                return str(x)
+
+        return _formatter
+
     format_dict = {}
     price_label = "현재가"
+
+    country_lower = (country_code or "").strip().lower()
+    is_kr = country_lower in {"kr", "kor"}
+    is_us = country_lower in {"us", "usa", "usd"}
+
     if price_label in df.columns:
-        format_dict[price_label] = "{:,.0f}원"
+        if is_kr:
+            format_dict[price_label] = _safe_format("{:,.0f}원")
+        elif is_us:
+            format_dict[price_label] = _safe_format("${:,.2f}")
+        else:
+            format_dict[price_label] = _safe_format("{:,.2f}")
+
     if "Nav" in df.columns:
-        format_dict["Nav"] = "{:,.0f}원"
+        if is_kr:
+            format_dict["Nav"] = _safe_format("{:,.0f}원")
+        elif is_us:
+            format_dict["Nav"] = _safe_format("${:,.2f}")
+        else:
+            format_dict["Nav"] = _safe_format("{:,.2f}")
 
     if format_dict:
         styled = styled.format(format_dict)

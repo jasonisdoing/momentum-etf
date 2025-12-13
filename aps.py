@@ -14,23 +14,19 @@ import logging
 import os
 import sys
 import warnings
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable, Optional, Tuple
 
-TIMEZONE = "Asia/Seoul"
+from config import MARKET_SCHEDULES
 
 # pkg_resources 워닝 억제
 os.environ["PYTHONWARNINGS"] = "ignore"
-warnings.filterwarnings(
-    "ignore", message="pkg_resources is deprecated", category=UserWarning
-)
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 import time
 from datetime import datetime
 
-from utils.recommendation_storage import save_recommendation_report
-
 from utils.market_schedule import generate_market_cron_expressions
-
+from utils.recommendation_storage import save_recommendation_report
 
 try:
     from zoneinfo import ZoneInfo
@@ -72,9 +68,11 @@ def setup_logging() -> None:
     os.makedirs(log_dir, exist_ok=True)
 
     # YYYY-MM-DD.log 파일명 설정
-    now_kst = _now_kst()
+    # 로깅은 시스템 전역이므로 kor 타임존(혹은 시스템 기본)을 사용
+    tz_kor = MARKET_SCHEDULES.get("kor", {}).get("timezone", "Asia/Seoul")
+    now_local = _now_local(tz_kor)
 
-    log_filename = os.path.join(log_dir, f"{now_kst.strftime('%Y-%m-%d')}.log")
+    log_filename = os.path.join(log_dir, f"{now_local.strftime('%Y-%m-%d')}.log")
 
     # 로거 설정: 파일과 콘솔에 모두 출력
     logging.basicConfig(
@@ -89,9 +87,7 @@ def setup_logging() -> None:
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
-def run_recommendation_generation(
-    account_id: str, *, country_code: str
-) -> RecommendationReport:
+def run_recommendation_generation(account_id: str, *, country_code: str) -> RecommendationReport:
     """Run portfolio recommendation and optionally notify Slack."""
 
     start_ts = time.time()
@@ -151,24 +147,40 @@ def run_recommendation_generation(
 
 
 def run_cache_refresh() -> None:
-    """모든 국가의 가격 캐시를 갱신합니다."""
-    from utils.account_registry import get_common_file_settings
+    """모든 계정의 가격 캐시를 갱신합니다."""
+    from scripts.update_price_cache import refresh_cache_for_target
+    from utils.account_registry import (
+        get_account_settings,
+        get_common_file_settings,
+        list_available_accounts,
+    )
 
     common_settings = get_common_file_settings()
     start_date = str(common_settings.get("CACHE_START_DATE"))
-    countries = ["kor"]
-    logging.info(
-        "Running cache refresh (start=%s, countries=%s)",
-        start_date,
-        ",".join(countries),
-    )
-    try:
-        from scripts.update_price_cache import refresh_all_caches
 
-        refresh_all_caches(countries=countries, start_date=start_date)
-        logging.info("Cache refresh completed successfully")
-    except Exception:
-        logging.error("가격 캐시 갱신 작업이 실패했습니다.", exc_info=True)
+    accounts = list_available_accounts()
+    logging.info(
+        "Running cache refresh for all accounts (start=%s, accounts=%s)",
+        start_date,
+        ",".join(accounts) if accounts else "None",
+    )
+
+    success_count = 0
+    fail_count = 0
+
+    for account_id in accounts:
+        try:
+            settings = get_account_settings(account_id)
+            country_code = settings.get("country_code", "kor")
+
+            logging.info("Refreshing cache for account: %s (country: %s)", account_id, country_code)
+            refresh_cache_for_target(account_id, start_date)
+            success_count += 1
+        except Exception:
+            logging.error("Failed to refresh cache for account: %s", account_id, exc_info=True)
+            fail_count += 1
+
+    logging.info("Cache refresh completed. Success: %d, Failed: %d", success_count, fail_count)
 
 
 def run_stock_stats_update() -> None:
@@ -188,38 +200,31 @@ class RecommendationJobConfig:
     schedule_name: str
     account_id: str
     country_code: str
-    cron_exprs: Tuple[str, ...]
+    cron_exprs: tuple[str, ...]
     timezone: str
     run_immediately: bool
 
 
-def _now_kst() -> datetime:
+def _now_local(timezone_str: str) -> datetime:
     if ZoneInfo is not None:
         try:
-            return datetime.now(ZoneInfo(TIMEZONE))
+            return datetime.now(ZoneInfo(timezone_str))
         except Exception:
             pass
     return datetime.now()
 
 
-def _validate_timezone(tz_value: Optional[str]) -> str:
+def _validate_timezone(tz_value: str | None) -> str:
     tz = (tz_value or "").strip()
     if not tz:
-        return TIMEZONE
-    if tz != TIMEZONE:
-        logging.warning(
-            "Timezone '%s'은 지원하지 않아 '%s'로 대체합니다.", tz, TIMEZONE
-        )
-        return TIMEZONE
+        raise ValueError("Timezone configuration is missing.")
     return tz
 
 
-def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
+def _load_recommendation_jobs() -> tuple[RecommendationJobConfig, ...]:
     schedules = get_all_country_schedules()
     global_settings = get_global_schedule_settings()
-    run_immediately_default = bool(
-        global_settings.get("run_immediately_on_start", False)
-    )
+    run_immediately_default = bool(global_settings.get("run_immediately_on_start", False))
 
     jobs: list[RecommendationJobConfig] = []
     for schedule_name, cfg in schedules.items():
@@ -246,9 +251,7 @@ def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
                 continue
 
         timezone = _validate_timezone(cfg.get("timezone"))
-        run_immediately = bool(
-            cfg.get("run_immediately_on_start", run_immediately_default)
-        )
+        run_immediately = bool(cfg.get("run_immediately_on_start", run_immediately_default))
 
         jobs.append(
             RecommendationJobConfig(
@@ -264,9 +267,7 @@ def _load_recommendation_jobs() -> Tuple[RecommendationJobConfig, ...]:
     return tuple(jobs)
 
 
-def _register_recommendation_jobs(
-    scheduler: BlockingScheduler, jobs: Iterable[RecommendationJobConfig]
-) -> None:
+def _register_recommendation_jobs(scheduler: BlockingScheduler, jobs: Iterable[RecommendationJobConfig]) -> None:
     for job in jobs:
         for index, cron_expr in enumerate(job.cron_exprs, start=1):
             scheduler.add_job(
@@ -297,15 +298,17 @@ def _register_cache_job(
     *,
     hourly_cron_expr: str = "0 * * * *",
 ) -> None:
+    # 캐시 갱신은 자정 이후(예: 04:00) 실행. 기준 타임존은 한국(KST)으로 설정.
+    tz_kor = MARKET_SCHEDULES.get("kor", {}).get("timezone", "Asia/Seoul")
     scheduler.add_job(
         run_cache_refresh,
-        CronTrigger.from_crontab(hourly_cron_expr, timezone=TIMEZONE),
+        CronTrigger.from_crontab(hourly_cron_expr, timezone=tz_kor),
         id="cache_refresh_hourly",
     )
     logging.info(
         "Scheduled CACHE REFRESH (hourly): cron='%s' tz='%s'",
         hourly_cron_expr,
-        TIMEZONE,
+        tz_kor,
     )
 
 
@@ -316,15 +319,18 @@ def _register_nasdaq_switching_job(scheduler: BlockingScheduler) -> None:
     # 시간 목록 (HH:MM)
     run_times = ["06:00", "09:00", "18:00", "22:30"]
 
+    # 나스닥 스위칭 전략은 미국 시장 기준이므로 미국 타임존 사용
+    tz_us = MARKET_SCHEDULES.get("us", {}).get("timezone", "America/New_York")
+
     for t_str in run_times:
         hour, minute = map(int, t_str.split(":"))
         scheduler.add_job(
             run_nasdaq_switching_notification,
-            CronTrigger(hour=hour, minute=minute, timezone=TIMEZONE),
+            CronTrigger(hour=hour, minute=minute, timezone=tz_us),
             id=f"nasdaq_switching_{hour:02d}{minute:02d}",
         )
 
-    logging.info("Scheduled NASDAQ SWITCHING: times=%s tz='%s'", run_times, TIMEZONE)
+    logging.info("Scheduled NASDAQ SWITCHING: times=%s tz='%s'", run_times, tz_us)
 
 
 def _run_initial_recommendations(jobs: Iterable[RecommendationJobConfig]) -> None:
@@ -333,9 +339,7 @@ def _run_initial_recommendations(jobs: Iterable[RecommendationJobConfig]) -> Non
         logging.info("[Initial Run] Executing %d recommendation job(s)...", len(jobs))
         executable = list(jobs)
     else:
-        logging.info(
-            "[Initial Run] Executing %d recommendation job(s)...", len(executable)
-        )
+        logging.info("[Initial Run] Executing %d recommendation job(s)...", len(executable))
     for job in executable:
         try:
             run_recommendation_generation(job.account_id, country_code=job.country_code)
@@ -354,7 +358,10 @@ def _log_next_runs(scheduler: BlockingScheduler) -> None:
     if not jobs:
         logging.info("No jobs registered.")
         return
-    now = datetime.now(ZoneInfo(TIMEZONE)) if ZoneInfo else datetime.now()
+
+    # 로그 출력 기준은 한국 시간(시스템 메인)
+    tz_kor = MARKET_SCHEDULES.get("kor", {}).get("timezone", "Asia/Seoul")
+    now = datetime.now(ZoneInfo(tz_kor)) if ZoneInfo else datetime.now()
 
     logging.info("Next scheduled run times:")
     for job in jobs:
@@ -386,9 +393,7 @@ def main() -> None:
     if not jobs:
         logging.warning("등록 가능한 추천 잡이 없습니다. 설정을 확인하세요.")
 
-    logging.info(
-        "Running initial price cache refresh before scheduling recommendations..."
-    )
+    logging.info("Running initial price cache refresh before scheduling recommendations...")
     run_cache_refresh()
 
     _register_recommendation_jobs(scheduler, jobs)

@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any
 
 from bson import ObjectId
 from dotenv import load_dotenv
@@ -17,7 +17,7 @@ load_dotenv()
 
 # --- 전역 변수로 DB 연결 관리 ---
 _db_connection = None
-_mongo_client: Optional[MongoClient] = None
+_mongo_client: MongoClient | None = None
 logger = get_app_logger()
 
 
@@ -35,23 +35,15 @@ def get_db_connection():
         connection_string = os.environ.get("MONGO_DB_CONNECTION_STRING") or getattr(
             global_settings, "MONGO_DB_CONNECTION_STRING", None
         )
-        db_name = os.environ.get("MONGO_DB_NAME") or getattr(
-            global_settings, "MONGO_DB_NAME", "momentum_etf_db"
-        )
+        db_name = os.environ.get("MONGO_DB_NAME") or getattr(global_settings, "MONGO_DB_NAME", "momentum_etf_db")
         # 연결 풀 관련 환경 변수(선택 사항)를 반영한다.
         max_pool = int(os.environ.get("MONGO_DB_MAX_POOL_SIZE", "20"))
         min_pool = int(os.environ.get("MONGO_DB_MIN_POOL_SIZE", "0"))
-        max_idle = int(
-            os.environ.get("MONGO_DB_MAX_IDLE_TIME_MS", "0")
-        )  # 0 = driver default
-        wait_q_timeout = int(
-            os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "0")
-        )  # 0 = driver default
+        max_idle = int(os.environ.get("MONGO_DB_MAX_IDLE_TIME_MS", "0"))  # 0 = driver default
+        wait_q_timeout = int(os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "0"))  # 0 = driver default
 
         if not connection_string:
-            raise ValueError(
-                "MongoDB 연결 문자열이 설정되지 않았습니다. (MONGO_DB_CONNECTION_STRING)"
-            )
+            raise ValueError("MongoDB 연결 문자열이 설정되지 않았습니다. (MONGO_DB_CONNECTION_STRING)")
 
         if _mongo_client is None:
             client_kwargs = dict(
@@ -76,25 +68,23 @@ def get_db_connection():
 
         # 서버 연결 수 정보를 함께 출력한다.
         try:
-            status = client.admin.command(
-                "serverStatus"
-            )  # Atlas 환경에서는 clusterMonitor 권한 필요
+            status = client.admin.command("serverStatus")  # Atlas 환경에서는 clusterMonitor 권한 필요
             conn = status.get("connections", {}) if isinstance(status, dict) else {}
             current = conn.get("current")
             available = conn.get("available")
             total_created = conn.get("totalCreated")
             if current is not None:
-                logger.info(
+                logger.debug(
                     "MongoDB 연결 성공 (connections: current=%s, available=%s, totalCreated=%s)",
                     current,
                     available,
                     total_created,
                 )
             else:
-                logger.info("MongoDB에 성공적으로 연결되었습니다.")
+                logger.debug("MongoDB에 성공적으로 연결되었습니다.")
         except Exception:
             # 권한 부족 등으로 serverStatus 실패 시, 기본 메시지만 기록
-            logger.info("MongoDB에 성공적으로 연결되었습니다.")
+            logger.debug("MongoDB에 성공적으로 연결되었습니다.")
         return _db_connection
     except Exception as e:
         error_message = f"오류: MongoDB 연결에 실패했습니다: {e}"
@@ -197,7 +187,7 @@ def delete_account_trades(account_id: str) -> dict[str, int]:
 
 def fetch_recent_trades(
     account_id: str | None = None, *, limit: int = 100, include_deleted: bool = False
-) -> List[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """최근 트레이드 목록을 반환합니다."""
     db = get_db_connection()
     if db is None:
@@ -212,13 +202,9 @@ def fetch_recent_trades(
     if account_id:
         query["account"] = account_id.strip().lower()
 
-    cursor = (
-        db.trades.find(query)
-        .sort([("executed_at", DESCENDING), ("_id", DESCENDING)])
-        .limit(int(limit))
-    )
+    cursor = db.trades.find(query).sort([("executed_at", DESCENDING), ("_id", DESCENDING)]).limit(int(limit))
 
-    trades: List[dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
     for doc in cursor:
         trades.append(
             {
@@ -238,7 +224,7 @@ def fetch_recent_trades(
     return trades
 
 
-def list_open_positions(account_id: str) -> List[dict[str, Any]]:
+def list_open_positions(account_id: str) -> list[dict[str, Any]]:
     """특정 계정의 최신 매수 상태(미매도) 종목 목록을 반환합니다."""
 
     account_norm = (account_id or "").strip().lower()
@@ -281,7 +267,7 @@ def list_open_positions(account_id: str) -> List[dict[str, Any]]:
         if ticker:
             ticker_trades[ticker].append(trade)
 
-    holdings: List[dict[str, Any]] = []
+    holdings: list[dict[str, Any]] = []
     for ticker, trades in ticker_trades.items():
         if not trades:
             continue
@@ -310,11 +296,11 @@ def list_open_positions(account_id: str) -> List[dict[str, Any]]:
 def update_trade_event(
     trade_id: str,
     *,
-    account_id: Optional[str] = None,
-    ticker: Optional[str] = None,
-    action: Optional[str] = None,
-    executed_at: Optional[datetime] = None,
-    memo: Optional[str] = None,
+    account_id: str | None = None,
+    ticker: str | None = None,
+    action: str | None = None,
+    executed_at: datetime | None = None,
+    memo: str | None = None,
 ) -> bool:
     """트레이드 문서를 업데이트합니다."""
 

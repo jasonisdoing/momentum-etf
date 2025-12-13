@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import List
 
 import pandas as pd
 
@@ -19,14 +18,12 @@ def _load_csv(path: Path) -> pd.DataFrame:
     return df
 
 
-def _compare_dataframe(
-    df_prefetch: pd.DataFrame, df_live: pd.DataFrame, tolerance: float
-) -> List[str]:
+def _compare_dataframe(df_prefetch: pd.DataFrame, df_live: pd.DataFrame, tolerance: float) -> list[str]:
     # Align index and columns
     joined = df_prefetch.reindex(df_live.index.union(df_prefetch.index)).join(
         df_live, how="outer", lsuffix="_prefetch", rsuffix="_live"
     )
-    discrepancies: List[str] = []
+    discrepancies: list[str] = []
 
     for col in df_prefetch.columns:
         col_prefetch = f"{col}_prefetch"
@@ -71,9 +68,7 @@ def inspect_session(session_dir: Path, tolerance: float) -> None:
             print(f"-- {combo_dir.name} --")
             portfolio_prefetch = _load_csv(combo_dir / "portfolio_prefetch.csv")
             portfolio_live = _load_csv(combo_dir / "portfolio_live.csv")
-            discrepancies = _compare_dataframe(
-                portfolio_prefetch, portfolio_live, tolerance
-            )
+            discrepancies = _compare_dataframe(portfolio_prefetch, portfolio_live, tolerance)
             if discrepancies:
                 print("Portfolio discrepancies:")
                 for msg in discrepancies[:5]:
@@ -84,7 +79,7 @@ def inspect_session(session_dir: Path, tolerance: float) -> None:
             ticker_prefetch_dir = combo_dir / "ticker_prefetch"
             ticker_live_dir = combo_dir / "ticker_live"
             tickers = sorted({p.stem for p in ticker_live_dir.glob("*.csv")})
-            ticker_discrepancies: List[str] = []
+            ticker_discrepancies: list[str] = []
             for ticker in tickers:
                 pref_path = ticker_prefetch_dir / f"{ticker}.csv"
                 live_path = ticker_live_dir / f"{ticker}.csv"
@@ -104,15 +99,9 @@ def inspect_session(session_dir: Path, tolerance: float) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Inspect tuning debug session differences."
-    )
-    parser.add_argument(
-        "session_dir", help="Path to tuning_debug_sessions/<account>_<timestamp>"
-    )
-    parser.add_argument(
-        "--tol", type=float, default=1e-6, help="Absolute tolerance for comparisons"
-    )
+    parser = argparse.ArgumentParser(description="Inspect tuning debug session differences.")
+    parser.add_argument("session_dir", help="Path to tuning_debug_sessions/<account>_<timestamp>")
+    parser.add_argument("--tol", type=float, default=1e-6, help="Absolute tolerance for comparisons")
     args = parser.parse_args()
 
     inspect_session(Path(args.session_dir), tolerance=args.tol)

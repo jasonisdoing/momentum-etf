@@ -1,7 +1,8 @@
 """추천과 백테스트에서 공통으로 사용하는 필터링 로직."""
 
 from collections import defaultdict
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Callable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 import config
 from logic.common.portfolio import is_category_exception
@@ -12,8 +13,8 @@ logger = get_app_logger()
 
 def _resolve_category(
     ticker: str,
-    etf_meta: Dict[str, Dict[str, Any]],
-) -> Tuple[Optional[str], str]:
+    etf_meta: dict[str, dict[str, Any]],
+) -> tuple[str | None, str]:
     """주어진 티커의 카테고리를 반환합니다.
 
     반환값은 (표시용 카테고리, 내부 키) 튜플입니다. 카테고리가 없거나 CATEGORY_EXCEPTIONS 라면
@@ -37,13 +38,13 @@ def _resolve_category(
 
 
 def select_candidates_by_category(
-    candidates: Iterable[Dict[str, Any]],
-    etf_meta: Dict[str, Dict[str, Any]],
+    candidates: Iterable[dict[str, Any]],
+    etf_meta: dict[str, dict[str, Any]],
     *,
-    held_categories: Optional[Iterable[str]] = None,
-    max_count: Optional[int] = None,
+    held_categories: Iterable[str] | None = None,
+    max_count: int | None = None,
     skip_held_categories: bool = True,
-) -> Tuple[List[Dict[str, Any]], List[Tuple[Dict[str, Any], str]]]:
+) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], str]]]:
     """카테고리 중복을 허용하지 않는 매수 후보 목록을 선택합니다.
 
     Args:
@@ -67,7 +68,11 @@ def select_candidates_by_category(
         # 보유 중인 카테고리 집합 생성
         held_set = set()
         if skip_held_categories and held_categories:
-            held_set = {str(cat).strip().upper() for cat in held_categories if cat and not is_category_exception(str(cat).strip())}
+            held_set = {
+                str(cat).strip().upper()
+                for cat in held_categories
+                if cat and not is_category_exception(str(cat).strip())
+            }
 
         # 후보 처리
         best_per_category = {}
@@ -120,7 +125,11 @@ def select_candidates_by_category(
                     rejected.append((cand, "better_candidate"))
 
         # 최종 선택된 후보 목록 생성
-        selected_candidates = [item["cand"] for item in best_per_category.values() if item["category"] not in held_set or not skip_held_categories]
+        selected_candidates = [
+            item["cand"]
+            for item in best_per_category.values()
+            if item["category"] not in held_set or not skip_held_categories
+        ]
 
         # 점수 순으로 정렬
         selected_candidates.sort(key=lambda x: x.get("score", float("-inf")), reverse=True)
@@ -139,7 +148,7 @@ def select_candidates_by_category(
         return [], []
 
 
-def sort_decisions_by_order_and_score(decisions: List[Dict[str, Any]]) -> None:
+def sort_decisions_by_order_and_score(decisions: list[dict[str, Any]]) -> None:
     """DECISION_CONFIG의 order 순으로 정렬하고, 같은 order 내에서는 composite_score > score 역순으로 정렬합니다.
 
     백테스트와 추천에서 공통으로 사용되는 정렬 함수입니다.
@@ -159,10 +168,10 @@ def sort_decisions_by_order_and_score(decisions: List[Dict[str, Any]]) -> None:
 
 
 def filter_category_duplicates(
-    items: List[Dict[str, Any]],
+    items: list[dict[str, Any]],
     *,
-    category_key_getter: Callable[[str], Optional[str]],
-) -> List[Dict[str, Any]]:
+    category_key_getter: Callable[[str], str | None],
+) -> list[dict[str, Any]]:
     """카테고리별 최고 점수 1개만 남기고 필터링합니다.
 
     교체 매매(SELL_REPLACE/BUY_REPLACE)는 2개 모두 표시합니다.
@@ -174,16 +183,16 @@ def filter_category_duplicates(
     Returns:
         필터링된 항목 리스트
     """
-    from logic.common import should_exclude_from_category_count
+    from logic.common.portfolio import should_exclude_from_category_count
 
     filtered_results = []
     category_best_map = {}  # 카테고리별 최고 점수 종목 추적
     replacement_tickers = set()  # 교체 매매 관련 티커
     held_categories = set()  # 이미 보유/매수 중인 카테고리
-    wait_candidates_by_category: Dict[str, List[Tuple[float, int, Dict[str, Any]]]] = defaultdict(list)
+    wait_candidates_by_category: dict[str, list[tuple[float, int, dict[str, Any]]]] = defaultdict(list)
     max_per_category = getattr(config, "MAX_PER_CATEGORY", 1) or 1
 
-    def _resolve_item_score(entry: Dict[str, Any]) -> float:
+    def _resolve_item_score(entry: dict[str, Any]) -> float:
         composite = entry.get("composite_score")
         score = entry.get("score")
         try:
@@ -222,12 +231,21 @@ def filter_category_duplicates(
             filtered_results.append(item)
             continue
 
-        # HOLD, HOLD_CORE, BUY, SELL 상태는 무조건 포함
-        if state in {"HOLD", "HOLD_CORE", "BUY", "BUY_REPLACE", "SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI", "SOLD"}:
+        # HOLD, HOLD_CORE, SELL 상태는 무조건 포함 (BUY는 제외하여 카테고리 체크 수행)
+        if state in {
+            "HOLD",
+            "HOLD_CORE",
+            "BUY_REPLACE",
+            "SELL_TREND",
+            "SELL_REPLACE",
+            "CUT_STOPLOSS",
+            "SELL_RSI",
+            "SOLD",
+        }:
             filtered_results.append(item)
             # 매도 예정 종목은 category_best_map에 포함하지 않음 (WAIT 종목이 표시될 수 있도록)
             if not should_exclude_from_category_count(state):
-                # HOLD, BUY 상태만 category_best_map에 추가
+                # HOLD, BUY_REPLACE 상태만 category_best_map에 추가
                 category_key = category_key_getter(category)
                 if category_key and not is_category_exception(category_key):
                     # 기존 WAIT 종목만 제거 (HOLD/BUY 종목은 유지)
@@ -238,6 +256,20 @@ def filter_category_duplicates(
                         if existing_state == "WAIT" and existing_item in filtered_results:
                             filtered_results.remove(existing_item)
                     category_best_map[category_key] = item
+            continue
+
+        # BUY 상태: 카테고리 중복 체크 수행
+        if state == "BUY":
+            category_key = category_key_getter(category)
+            # 카테고리가 없거나 예외 카테고리면 포함
+            if not category_key or is_category_exception(category_key):
+                filtered_results.append(item)
+                continue
+            # BUY는 항상 표시 (held_categories 체크 제거)
+            # 이유: 매수 당일에는 BUY가 표시되어야 하며, 다음날부터 HOLD로 전환됨
+            filtered_results.append(item)
+            held_categories.add(category_key)
+            category_best_map[category_key] = item
             continue
 
         category_key = category_key_getter(category)
@@ -254,7 +286,7 @@ def filter_category_duplicates(
         score_val = _resolve_item_score(item)
         wait_candidates_by_category[category_key].append((score_val, order_idx, item))
 
-    selected_wait_items: List[Tuple[float, int, Dict[str, Any]]] = []
+    selected_wait_items: list[tuple[float, int, dict[str, Any]]] = []
     for category_key, entries in wait_candidates_by_category.items():
         entries.sort(key=lambda entry: (-entry[0], entry[1]))
         limit = max(1, int(max_per_category))

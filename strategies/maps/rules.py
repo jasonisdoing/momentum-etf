@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, List, Mapping, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -20,8 +21,9 @@ class StrategyRules:
     replace_threshold: float
     min_buy_score: float
     ma_type: str = "SMA"
-    core_holdings: List[str] = field(default_factory=list)
-    stop_loss_pct: Optional[float] = None
+    core_holdings: list[str] = field(default_factory=list)
+    stop_loss_pct: float | None = None
+    trailing_stop_pct: float = 0.0
 
     @classmethod
     def from_values(
@@ -34,7 +36,8 @@ class StrategyRules:
         core_holdings: Any = None,
         stop_loss_pct: Any = None,
         min_buy_score: Any = None,
-    ) -> "StrategyRules":
+        trailing_stop_pct: Any = None,
+    ) -> StrategyRules:
         try:
             ma_period_int = int(ma_period)
         except (TypeError, ValueError):
@@ -61,7 +64,7 @@ class StrategyRules:
             raise ValueError(f"MA_TYPE은 {valid_ma_types} 중 하나여야 합니다. (입력값: {ma_type_str})")
 
         # 핵심 보유 종목 검증
-        core_holdings_list: List[str] = []
+        core_holdings_list: list[str] = []
         if core_holdings is not None:
             if isinstance(core_holdings, (list, tuple)):
                 core_holdings_list = [str(ticker).strip().upper() for ticker in core_holdings if ticker]
@@ -69,7 +72,7 @@ class StrategyRules:
                 # 쉼표로 구분된 문자열 지원
                 core_holdings_list = [ticker.strip().upper() for ticker in core_holdings.split(",") if ticker.strip()]
 
-        stop_loss_value: Optional[float] = None
+        stop_loss_value: float | None = None
         if stop_loss_pct is not None:
             try:
                 stop_loss_value = float(stop_loss_pct)
@@ -77,6 +80,15 @@ class StrategyRules:
                 raise ValueError("STOP_LOSS_PCT는 숫자여야 합니다.") from exc
             if not (stop_loss_value > 0):
                 raise ValueError("STOP_LOSS_PCT는 0보다 커야 합니다.")
+
+        trailing_stop_value: float = 0.0
+        if trailing_stop_pct is not None:
+            try:
+                trailing_stop_value = float(trailing_stop_pct)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("TRAILING_STOP_PCT는 숫자여야 합니다.") from exc
+            if trailing_stop_value < 0:
+                raise ValueError("TRAILING_STOP_PCT는 0 이상이어야 합니다.")
 
         if min_buy_score is None:
             raise ValueError("MIN_BUY_SCORE 설정이 필요합니다.")
@@ -93,10 +105,11 @@ class StrategyRules:
             ma_type=ma_type_str,
             core_holdings=core_holdings_list,
             stop_loss_pct=stop_loss_value,
+            trailing_stop_pct=trailing_stop_value,
         )
 
     @classmethod
-    def from_mapping(cls, mapping: Mapping[str, Any]) -> "StrategyRules":
+    def from_mapping(cls, mapping: Mapping[str, Any]) -> StrategyRules:
         def _resolve(*keys: str) -> Any:
             sentinel = object()
             for key in keys:
@@ -113,6 +126,7 @@ class StrategyRules:
             core_holdings=_resolve("CORE_HOLDINGS", "core_holdings"),
             stop_loss_pct=_resolve("STOP_LOSS_PCT", "stop_loss_pct"),
             min_buy_score=_resolve("MIN_BUY_SCORE", "min_buy_score"),
+            trailing_stop_pct=_resolve("TRAILING_STOP_PCT", "trailing_stop_pct"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -124,6 +138,7 @@ class StrategyRules:
             "ma_type": self.ma_type,
             "core_holdings": list(self.core_holdings),
             "stop_loss_pct": self.stop_loss_pct,
+            "trailing_stop_pct": self.trailing_stop_pct,
         }
         return d
 

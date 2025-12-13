@@ -1,11 +1,11 @@
 """전략 설정 검증 유틸리티."""
 
-from typing import Dict, Any, Optional
+from typing import Any
 
 
 def validate_strategy_settings(
-    strategy_tuning: Dict[str, Any],
-    account_id: Optional[str] = None,
+    strategy_tuning: dict[str, Any],
+    account_id: str | None = None,
 ) -> None:
     """
     전략 설정의 모든 필수 항목을 검증합니다.
