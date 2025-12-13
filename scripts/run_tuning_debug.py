@@ -13,12 +13,12 @@ ROOT_DIR = Path(__file__).resolve().parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from logic.tune.runner import run_account_tuning, WORKERS  # noqa: E402
+from logic.tune.runner import run_account_tuning  # noqa: E402
+from tune import TUNING_CONFIG  # noqa: E402
 from utils.account_registry import get_account_settings, get_strategy_rules  # noqa: E402
 from utils.logger import get_app_logger  # noqa: E402
-from tune import TUNING_CONFIG  # noqa: E402
 
-RESULTS_DIR = ROOT_DIR / "zresults"
+RESULTS_DIR = ROOT_DIR / "zaccounts"
 DEBUG_ROOT = RESULTS_DIR / "tuning_debug_sessions"
 
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Standalone runner to execute `run_stock_stats_update` once."""
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:

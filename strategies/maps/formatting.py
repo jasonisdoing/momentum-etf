@@ -1,13 +1,15 @@
 """신호 모듈에서 분리한 표시·정밀도 보조 함수 모음."""
 
 from __future__ import annotations
-from typing import Dict, Any, Callable
+
+from collections.abc import Callable
+from typing import Any
 
 from utils.report import format_kr_money
 from utils.settings_loader import get_account_precision
 
 
-def _load_display_precision() -> Dict[str, int]:
+def _load_display_precision() -> dict[str, int]:
     """표시에 사용할 기본 정밀도 설정을 반환한다."""
     return {
         "daily_return_pct": 2,
@@ -16,7 +18,7 @@ def _load_display_precision() -> Dict[str, int]:
     }
 
 
-def load_account_precision(country_code: str) -> Dict[str, Any]:
+def load_account_precision(country_code: str) -> dict[str, Any]:
     """정밀도 설정을 반환한다."""
 
     precision_settings = get_account_precision(country_code)
@@ -26,7 +28,9 @@ def load_account_precision(country_code: str) -> Dict[str, Any]:
         "stock_currency": precision_settings.get("currency", "KRW"),
         "stock_qty_precision": int(precision_settings.get("qty_precision", 0)),
         "stock_price_precision": int(precision_settings.get("price_precision", 0)),
-        "stock_amt_precision": (int(precision_settings.get("amt_precision", 0)) if "amt_precision" in precision_settings else 0),
+        "stock_amt_precision": (
+            int(precision_settings.get("amt_precision", 0)) if "amt_precision" in precision_settings else 0
+        ),
     }
 
 

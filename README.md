@@ -57,23 +57,26 @@ pip install -r requirements.txt
 ```
 
 ### 2. 설정
-`config.py` 및 `zsettings/account/k1.json` 파일을 환경에 맞게 수정합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
+`config.py` 및 `zsettings/account/kor1.json` 파일을 환경에 맞게 수정합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
 
 ### 3. 실행
 
-**1. 튜닝 (최적 파라미터 탐색)**
+**1. 튜닝 (최적 파라미터 탐색 및 자동 적용)**
 ```bash
-python tune.py
+python tune.py kor1  # 한국 계정
+python tune.py us1   # 미국 계정
 ```
 
 **2. 백테스트 (성과 검증)**
 ```bash
-python backtest.py
+python backtest.py kor1
+python backtest.py us1
 ```
 
 **3. 추천 (매매 신호 생성)**
 ```bash
-python recommend.py
+python recommend.py kor1
+python recommend.py us1
 ```
 
 ## ⚠️ 면책 조항 (Disclaimer)

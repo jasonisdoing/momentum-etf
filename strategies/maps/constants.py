@@ -66,7 +66,7 @@ DECISION_CONFIG = {
     },
     "SOLD": {
         "display_name": "<✅ 매도 완료>",
-        "order": 50,
+        "order": 100,
         "is_recommendation": False,
         "show_slack": True,
         "background": "#a0a0a0",
@@ -105,15 +105,13 @@ DECISION_MESSAGES = {key: value for key, value in DECISION_MESSAGES.items() if v
 DECISION_MESSAGES["NEW_BUY"] = DECISION_MESSAGES.get("BUY", "✅ 신규 매수")
 
 DECISION_NOTES = {
-    "CATEGORY_DUP": "카테고리 중복",
-    "PORTFOLIO_FULL": "포트폴리오 가득 참",
     "INSUFFICIENT_CASH": "현금 부족",
     "NO_PRICE": "가격 정보 없음",
     "TREND_BREAK": "추세 이탈",
     "REPLACE_SELL": "교체 매도",
     "PRICE_DATA_FAIL": "가격 데이터 조회 실패",
-    "NO_RECOMMEND": "추천 제외",
     "MIN_SCORE": "최소 {min_buy_score:.1f}점수 미만",
+    "REPLACE_SCORE": "교체 {min_buy_score:.1f}점수 미만",
     "DATA_INSUFFICIENT": "⚠️ 거래일 부족",
     # 템플릿
     "COOLDOWN_GENERIC": "쿨다운 {days}일 대기중",

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional
 from collections import Counter
+from typing import Any
 
 import requests
 
@@ -17,19 +17,18 @@ except Exception:  # pragma: no cover - 선택적 의존성 처리
     SlackApiError = Exception  # type: ignore
 
 try:
-    from croniter import croniter
     import pytz
+    from croniter import croniter
 except ImportError:  # pragma: no cover - 선택적 의존성 처리
     croniter = None
     pytz = None
 
 from utils.account_registry import get_account_settings
+from utils.logger import APP_LABEL, get_app_logger
 from utils.report import format_kr_money
-from utils.logger import get_app_logger, APP_LABEL
 from utils.settings_loader import get_account_slack_channel, resolve_strategy_params
 
-
-_LAST_ERROR: Optional[str] = None
+_LAST_ERROR: str | None = None
 logger = get_app_logger()
 
 
@@ -40,9 +39,9 @@ logger = get_app_logger()
 
 def send_slack_message(
     text: str,
-    blocks: Optional[List[dict]] = None,
-    webhook_url: Optional[str] = None,
-    webhook_name: Optional[str] = None,
+    blocks: list[dict] | None = None,
+    webhook_url: str | None = None,
+    webhook_name: str | None = None,
 ) -> bool:
     """Send a Slack message using the provided webhook URL."""
 
@@ -67,9 +66,7 @@ def send_slack_message(
             return True
         _LAST_ERROR = response.text or "unknown"
         return False
-    except (
-        requests.exceptions.RequestException
-    ) as exc:  # pragma: no cover - 단순 위임 예외 처리
+    except requests.exceptions.RequestException as exc:  # pragma: no cover - 단순 위임 예외 처리
         _LAST_ERROR = str(exc)
         return False
     except Exception as exc:  # pragma: no cover - 방어적 처리
@@ -77,7 +74,7 @@ def send_slack_message(
         return False
 
 
-def get_last_error() -> Optional[str]:
+def get_last_error() -> str | None:
     return _LAST_ERROR
 
 
@@ -171,9 +168,7 @@ def compose_recommendation_slack_message(
 
     ordered_states = [
         (state, count)
-        for state, count in sorted(
-            state_counter.items(), key=lambda pair: (_state_order(pair[0]), pair[0])
-        )
+        for state, count in sorted(state_counter.items(), key=lambda pair: (_state_order(pair[0]), pair[0]))
     ]
 
     headline = f"{account_label} 추천 정보가 갱신되었습니다. ({base_date_str})"
@@ -191,15 +186,11 @@ def compose_recommendation_slack_message(
         held_count = count_current_holdings(recommendations)
     if portfolio_topn is None:
         strategy_params = (
-            resolve_strategy_params((account_settings or {}).get("strategy", {}))
-            if account_settings
-            else {}
+            resolve_strategy_params((account_settings or {}).get("strategy", {})) if account_settings else {}
         )
         topn_candidates = [
             getattr(report, "portfolio_topn", None),
-            (account_settings or {}).get("portfolio_topn")
-            if account_settings
-            else None,
+            (account_settings or {}).get("portfolio_topn") if account_settings else None,
             strategy_params.get("PORTFOLIO_TOPN"),
         ]
         for candidate in topn_candidates:
@@ -210,11 +201,7 @@ def compose_recommendation_slack_message(
                 portfolio_topn = None
 
     mobile_account = account_norm or (account_id or "").strip()
-    mobile_url = (
-        f"https://etf.dojason.com/{mobile_account}"
-        if mobile_account
-        else "https://etf.dojason.com"
-    )
+    mobile_url = f"https://etf.dojason.com/{mobile_account}" if mobile_account else "https://etf.dojason.com"
 
     lines = [
         app_prefix + headline,
@@ -260,21 +247,15 @@ def compose_recommendation_slack_message(
             params_str_parts.append(f"TopN: {topn}")
         if replace_threshold is not None:
             params_str_parts.append(f"교체점수: {replace_threshold}")
-        fields.append(
-            {"type": "mrkdwn", "text": f"*전략*: {', '.join(params_str_parts)}"}
-        )
+        fields.append({"type": "mrkdwn", "text": f"*전략*: {', '.join(params_str_parts)}"})
 
     if ordered_states:
         state_lines = [f"{state}: {count}개" for state, count in ordered_states]
-        fields.append(
-            {"type": "mrkdwn", "text": "*상태 요약*:\n" + "\n".join(state_lines)}
-        )
+        fields.append({"type": "mrkdwn", "text": "*상태 요약*:\n" + "\n".join(state_lines)})
 
     blocks.append({"type": "section", "fields": fields})
 
-    context_elements: list[dict[str, str]] = [
-        {"type": "mrkdwn", "text": f"<{mobile_url}|모바일 화면 열기>"}
-    ]
+    context_elements: list[dict[str, str]] = [{"type": "mrkdwn", "text": f"<{mobile_url}|모바일 화면 열기>"}]
     if ordered_states:
         context_elements.append({"type": "mrkdwn", "text": "<!channel> 알림"})
         fallback_text = "<!channel>\n" + fallback_text
@@ -303,9 +284,7 @@ def send_recommendation_slack_notification(
     token = os.environ.get("SLACK_BOT_TOKEN")
 
     if not channel:
-        logger.warning(
-            "Slack 채널이 설정되어 있지 않아 전송을 건너뜁니다 (account=%s)", account_id
-        )
+        logger.warning("Slack 채널이 설정되어 있지 않아 전송을 건너뜁니다 (account=%s)", account_id)
         return False
 
     if not token:
@@ -361,14 +340,14 @@ def _format_shares_for_country(quantity: Any) -> str:
 
 
 def build_summary_line_from_summary_data(
-    summary_data: Dict[str, Any],
+    summary_data: dict[str, Any],
     money_formatter: callable = format_kr_money,
     *,
     use_html: bool,
-    prefix: Optional[str] = None,
+    prefix: str | None = None,
     include_hold: bool = True,
 ) -> str:
-    parts: List[str] = []
+    parts: list[str] = []
 
     if include_hold:
         held_count = summary_data.get("held_count")
@@ -421,9 +400,7 @@ def build_summary_line_from_summary_data(
     return body
 
 
-def build_summary_line_from_header(
-    header_line: str, prefix: Optional[str] = None
-) -> str:
+def build_summary_line_from_header(header_line: str, prefix: str | None = None) -> str:
     header_line_clean = header_line.split("<br>")[0]
     segments = [seg.strip() for seg in header_line_clean.split("|")]
 

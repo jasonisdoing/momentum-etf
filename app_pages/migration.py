@@ -1,18 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 import streamlit as st
-
 import streamlit_authenticator as stauth
-
-from collections.abc import Mapping
 
 from utils.account_registry import list_available_accounts
 from utils.db_manager import migrate_account_id
 from utils.settings_loader import get_account_settings
 
-SETTINGS_DIR = Path(__file__).resolve().parents[1] / "data" / "settings" / "account"
+SETTINGS_DIR = Path(__file__).resolve().parents[1] / "zsettings" / "account"
 
 
 def _to_plain_dict(value):

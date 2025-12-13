@@ -3,8 +3,8 @@
 - SMA, EMA, WMA, DEMA, TEMA, HMA 지원
 """
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
 def calculate_sma(prices: pd.Series, period: int) -> pd.Series:
@@ -162,7 +162,7 @@ def calculate_moving_average(
     elif ma_type_upper == "HMA":
         return calculate_hma(prices, period)
     else:
-        raise ValueError(f"지원하지 않는 MA 타입입니다: {ma_type}. " f"지원 타입: SMA, EMA, WMA, DEMA, TEMA, HMA")
+        raise ValueError(f"지원하지 않는 MA 타입입니다: {ma_type}. 지원 타입: SMA, EMA, WMA, DEMA, TEMA, HMA")
 
 
 __all__ = [

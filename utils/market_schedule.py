@@ -1,6 +1,7 @@
 """Market schedule utilities."""
 
-from datetime import datetime, time, timedelta, date
+from datetime import date, datetime, time, timedelta
+
 from config import MARKET_SCHEDULES
 
 

@@ -6,28 +6,27 @@ import argparse
 import time
 from pathlib import Path
 
-from utils.account_registry import (
-    get_account_settings,
-    get_strategy_rules,
-    list_available_accounts,
-)
-from logic.recommend.output import (
+from logic.recommend import RecommendationReport, generate_recommendation_report
+from logic.recommend.reporting import (
     dump_json,
     dump_recommendation_log,
     print_result_summary,
     print_run_header,
 )
-from logic.recommend.pipeline import (
-    RecommendationReport,
-    generate_account_recommendation_report,
+from utils.account_registry import (
+    get_account_settings,
+    get_strategy_rules,
+    list_available_accounts,
 )
+from utils.data_loader import MissingPriceDataError
+from utils.logger import get_app_logger
 from utils.notification import (
     compose_recommendation_slack_message,
     send_recommendation_slack_notification,
 )
 from utils.recommendation_storage import save_recommendation_report
-from utils.logger import get_app_logger
-from utils.data_loader import MissingPriceDataError
+
+RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
 
 
 def _available_account_choices() -> list[str]:
@@ -74,7 +73,7 @@ def main() -> None:
     start_time = time.time()
 
     try:
-        report = generate_account_recommendation_report(account_id=account_id, date_str=args.date)
+        report = generate_recommendation_report(account_id=account_id, date_str=args.date)
     except MissingPriceDataError as exc:
         logger.error(str(exc))
         raise SystemExit(1)
@@ -118,7 +117,7 @@ def main() -> None:
 
     # 로그 파일 저장
     try:
-        log_path = dump_recommendation_log(report)
+        log_path = dump_recommendation_log(report, results_dir=RESULTS_DIR)
         logger.info("✅ 추천 로그를 '%s'에 저장했습니다.", log_path)
     except Exception:
         logger.error("추천 로그 저장에 실패했습니다 (account=%s)", account_id, exc_info=True)

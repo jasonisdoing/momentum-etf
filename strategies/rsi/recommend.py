@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import pandas as pd
-from .scoring import calculate_rsi_score
+
 from config import RSI_CALCULATION_CONFIG
 from utils.logger import get_app_logger
+
+from .scoring import calculate_rsi_score
 
 logger = get_app_logger()
 

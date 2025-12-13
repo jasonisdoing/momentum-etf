@@ -13,11 +13,12 @@ venv/
 # OS
 .DS_Store
 
-# 노트 파일
-znotes/
-
 # 백테스트 결과
 zresults
+zaccounts/*/results
+
+# 노트 파일
+znotes/
 
 # Streamlit secrets
 .streamlit/secrets.toml

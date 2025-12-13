@@ -7,9 +7,10 @@ import json
 import logging
 import os
 import warnings
-from datetime import datetime, time, timedelta
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, Iterable
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
+from datetime import datetime, time, timedelta
+from typing import Any
 
 import pandas as pd
 
@@ -40,14 +41,15 @@ try:
 except Exception:
     _stock = None
 
-from utils.cache_utils import load_cached_frame, load_cached_frames_bulk, save_cached_frame
-from utils.stock_list_io import get_etfs, get_listing_date, set_listing_date
-from utils.logger import get_app_logger
-from config import MARKET_SCHEDULES
-
 # from utils.notification import send_verbose_log_to_slack
-
 import warnings
+
+from config import MARKET_SCHEDULES
+from utils.cache_utils import load_cached_frame, load_cached_frames_bulk, save_cached_frame
+from utils.logger import get_app_logger
+from utils.stock_list_io import get_etfs_by_country, get_listing_date, set_listing_date
+
+# ... (omitted code)
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 warnings.filterwarnings(
@@ -90,7 +92,7 @@ if not any(isinstance(f, _PykrxLogFilter) for f in _root_logger.filters):
 logger = get_app_logger()
 
 
-def _safe_float(value: Any) -> Optional[float]:
+def _safe_float(value: Any) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -103,8 +105,11 @@ except ImportError:  # pragma: no cover
     ZoneInfo = None  # type: ignore
 
 
-class PykrxDataUnavailable(Exception):
+class PykrxDataUnavailableError(Exception):
     """pykrx 데이터가 제공되지 않을 때 사용되는 예외."""
+
+    # Custom Exception implementation for clearer Error suffix
+    pass
 
     def __init__(
         self,
@@ -117,11 +122,11 @@ class PykrxDataUnavailable(Exception):
         self.start_dt = start_dt
         self.end_dt = end_dt
         self.detail = detail
-        message = f"[{country.upper()}] pykrx data unavailable " f"({start_dt.date()}~{end_dt.date()}): {detail}"
+        message = f"[{country.upper()}] pykrx data unavailable ({start_dt.date()}~{end_dt.date()}): {detail}"
         super().__init__(message)
 
 
-class RateLimitException(Exception):
+class RateLimitError(Exception):
     """API rate limit에 도달했을 때 사용되는 예외."""
 
     def __init__(self, ticker: str, detail: str) -> None:
@@ -138,8 +143,8 @@ class MissingPriceDataError(RuntimeError):
         self,
         *,
         country: str,
-        start_date: Optional[Union[str, pd.Timestamp]],
-        end_date: Optional[Union[str, pd.Timestamp]],
+        start_date: str | pd.Timestamp | None,
+        end_date: str | pd.Timestamp | None,
         tickers: Iterable[str],
     ) -> None:
         self.country = (country or "").strip().lower()
@@ -150,11 +155,14 @@ class MissingPriceDataError(RuntimeError):
         period = ""
         if self.start_date or self.end_date:
             period = f" ({self.start_date or '?'}~{self.end_date or '?'})"
-        message = f"[{(self.country or 'unknown').upper()}] " f"가격 데이터 누락{period}: {len(normalized)}개 종목 미존재 ({', '.join(normalized)})"
+        message = (
+            f"[{(self.country or 'unknown').upper()}] "
+            f"가격 데이터 누락{period}: {len(normalized)}개 종목 미존재 ({', '.join(normalized)})"
+        )
         super().__init__(message)
 
 
-def _get_cache_start_dt() -> Optional[pd.Timestamp]:
+def _get_cache_start_dt() -> pd.Timestamp | None:
     """config.py에서 캐시 시작 날짜를 로드합니다."""
     try:
         from utils.settings_loader import load_common_settings
@@ -182,7 +190,7 @@ def _get_cache_start_dt() -> Optional[pd.Timestamp]:
 
 def _should_skip_pykrx_fetch(
     country: str,
-    cache_end: Optional[pd.Timestamp],
+    cache_end: pd.Timestamp | None,
     miss_start: pd.Timestamp,
 ) -> bool:
     """장 시작 전에는 캐시만 사용하도록 pykrx 호출을 지연합니다."""
@@ -213,8 +221,8 @@ def _now_with_zone(tz_name: str) -> datetime:
     return datetime.now()
 
 
-def _build_market_open_info() -> Dict[str, tuple[str, time]]:
-    info: Dict[str, tuple[str, time]] = {}
+def _build_market_open_info() -> dict[str, tuple[str, time]]:
+    info: dict[str, tuple[str, time]] = {}
     for code, schedule in (MARKET_SCHEDULES or {}).items():
         if not isinstance(schedule, dict):
             continue
@@ -280,17 +288,17 @@ def get_today_str() -> str:
 
 
 @functools.lru_cache(maxsize=10)
-def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Timestamp]:
+def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Timestamp]:
     """
     지정된 기간 내의 모든 거래일을 pd.Timestamp 리스트로 반환합니다.
     한국(KRX)는 pandas_market_calendars만 사용합니다.
     """
-    trading_days_ts: List[pd.Timestamp] = []
+    trading_days_ts: list[pd.Timestamp] = []
 
-    def _pmc(country_code: str) -> List[pd.Timestamp]:
+    def _pmc(country_code: str) -> list[pd.Timestamp]:
         import pandas_market_calendars as mcal  # type: ignore
 
-        cal_code = {"kor": "XKRX"}.get(country_code)
+        cal_code = {"kor": "XKRX", "us": "NYSE"}.get(country_code)
         if not cal_code:
             return []
         try:
@@ -335,8 +343,8 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
 
     country_code = (country or "").strip().lower()
 
-    if country_code == "kor":
-        trading_days_ts = _pmc("kor")
+    if country_code in ("kor", "us"):
+        trading_days_ts = _pmc(country_code)
     else:
         logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
         return []
@@ -351,7 +359,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> List[pd.Ti
 
 def is_trading_day(
     country: str,
-    date: Union[str, datetime, pd.Timestamp, None] = None,
+    date: str | datetime | pd.Timestamp | None = None,
 ) -> bool:
     """주어진 날짜가 해당 국가의 거래일인지 여부를 반환합니다."""
 
@@ -368,8 +376,8 @@ def is_trading_day(
 
 def count_trading_days(
     country: str,
-    start_date: Union[str, datetime, pd.Timestamp],
-    end_date: Union[str, datetime, pd.Timestamp],
+    start_date: str | datetime | pd.Timestamp,
+    end_date: str | datetime | pd.Timestamp,
 ) -> int:
     """Return number of trading days between two dates (inclusive)."""
 
@@ -474,10 +482,10 @@ def get_latest_trading_day(country: str) -> pd.Timestamp:
 
 def get_next_trading_day(
     country: str,
-    reference_date: Optional[pd.Timestamp] = None,
+    reference_date: pd.Timestamp | None = None,
     *,
     search_horizon_days: int = 30,
-) -> Optional[pd.Timestamp]:
+) -> pd.Timestamp | None:
     """reference_date 이후의 다음 거래일을 반환한다."""
 
     country_code = (country or "").strip().lower()
@@ -496,14 +504,14 @@ def fetch_ohlcv(
     ticker: str,
     country: str = "kor",
     months_back: int = None,
-    months_range: Optional[List[int]] = None,
-    date_range: Optional[List[Optional[str]]] = None,
-    base_date: Optional[pd.Timestamp] = None,
+    months_range: list[int] | None = None,
+    date_range: list[str | None] | None = None,
+    base_date: pd.Timestamp | None = None,
     *,
-    cache_country: Optional[str] = None,
+    account_id: str | None = None,
     force_refresh: bool = False,
     update_listing_meta: bool = False,
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame | None:
     """OHLCV 데이터를 조회합니다. 캐시를 우선 사용하고 부족분만 원천에서 보충합니다."""
 
     country_code = (country or "").strip().lower() or "kor"
@@ -546,7 +554,7 @@ def fetch_ohlcv(
         country_code,
         start_dt.normalize(),
         end_dt.normalize(),
-        cache_country_override=cache_country,
+        account_id=account_id,
         force_refresh=force_refresh,
         update_listing_meta=update_listing_meta,
     )
@@ -564,12 +572,16 @@ def _fetch_ohlcv_with_cache(
     start_dt: pd.Timestamp,
     end_dt: pd.Timestamp,
     *,
-    cache_country_override: Optional[str] = None,
+    account_id: str | None = None,
     force_refresh: bool = False,
     update_listing_meta: bool = False,
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame | None:
     country_code = (country or "").strip().lower()
-    cache_country_code = (cache_country_override or country_code).strip().lower() or country_code
+
+    if not account_id:
+        raise ValueError(f"OHLCV 데이터 조회 시 account_id가 필요합니다. (Ticker: {ticker})")
+
+    cache_key = account_id.strip().lower()
 
     listing_date_str = get_listing_date(country_code, ticker)
     listing_ts = None
@@ -592,17 +604,17 @@ def _fetch_ohlcv_with_cache(
         if listing_ts is None or cache_seed_dt > listing_ts:
             request_start_dt = max(request_start_dt, cache_seed_dt)
 
-    cache_country_display = cache_country_code.upper()
+    cache_key_display = cache_key.upper()
 
-    missing_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
-    cache_start: Optional[pd.Timestamp] = None
-    cache_end: Optional[pd.Timestamp] = None
+    missing_ranges: list[tuple[pd.Timestamp, pd.Timestamp]] = []
+    cache_start: pd.Timestamp | None = None
+    cache_end: pd.Timestamp | None = None
 
     if force_refresh:
         cached_df = None
         missing_ranges.append((request_start_dt, end_dt))
     else:
-        cached_df = load_cached_frame(cache_country_code, ticker)
+        cached_df = load_cached_frame(cache_key, ticker)
         # cache_seed_dt는 이미 위에서 가져왔으므로 중복 제거
         if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
             if request_start_dt > cache_seed_dt:
@@ -629,8 +641,8 @@ def _fetch_ohlcv_with_cache(
                     upper_bound = max(end_dt, listing_ts)
                 missing_ranges.append((cache_end + pd.Timedelta(days=1), upper_bound))
 
-    new_frames: List[pd.DataFrame] = []
-    unfilled_ranges: List[Tuple[pd.Timestamp, pd.Timestamp]] = []
+    new_frames: list[pd.DataFrame] = []
+    unfilled_ranges: list[tuple[pd.Timestamp, pd.Timestamp]] = []
     for miss_start, miss_end in missing_ranges:
         if miss_start > miss_end:
             continue
@@ -651,7 +663,7 @@ def _fetch_ohlcv_with_cache(
             end_str = effective_end.strftime("%Y-%m-%d")
             logger.debug(
                 "[CACHE] %s/%s 오늘 개장 전이므로 조회 범위를 조정합니다: %s ~ %s",
-                cache_country_display,
+                cache_key_display,
                 ticker,
                 start_str,
                 end_str,
@@ -665,35 +677,33 @@ def _fetch_ohlcv_with_cache(
         if cache_end is not None and _should_skip_pykrx_fetch(country_code, cache_end, miss_start):
             continue
 
-        trading_days_in_gap = get_trading_days(miss_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d"), country_code)
+        trading_days_in_gap = get_trading_days(
+            miss_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d"), country_code
+        )
         if not trading_days_in_gap:
             if log_pending:
                 logger.debug(
                     "[CACHE] %s/%s 범위(%s~%s)에 거래일이 없어 캐시 갱신을 건너뜁니다.",
-                    cache_country_display,
+                    cache_key_display,
                     ticker,
                     start_str,
                     end_str,
                 )
             continue
 
-        if log_pending:
-            logger.info(
-                "[CACHE] %s/%s 누락 구간을 조회합니다: %s ~ %s",
-                cache_country_display,
-                ticker,
-                start_str,
-                end_str,
-            )
+        # if log_pending:
+        #     logger.info(
+        #         "[CACHE] %s/%s 누락 구간을 조회합니다: %s ~ %s",
+        #         cache_key_display,
+        #         ticker,
+        #         start_str,
+        #         end_str,
+        #     )
 
         try:
             fetched = _fetch_ohlcv_core(ticker, country_code, miss_start, effective_end, cached_df)
-        except PykrxDataUnavailable:
-            if cached_df is not None:
-                if cache_start is not None and effective_end < cache_start:
-                    continue
-                if cache_end is not None and miss_start > cache_end:
-                    continue
+        except PykrxDataUnavailableError:
+            # 전체 구간 실패는 곧바로 상위로 전파
             raise
 
         if fetched is not None and not fetched.empty:
@@ -713,7 +723,7 @@ def _fetch_ohlcv_with_cache(
         combined_df = pd.concat(frames)
         combined_df.sort_index(inplace=True)
         combined_df = combined_df[~combined_df.index.duplicated(keep="last")]
-        save_cached_frame(cache_country_code, ticker, combined_df)
+        save_cached_frame(cache_key, ticker, combined_df)
 
         # new_total = combined_df.shape[0]
         # added_count = max(0, new_total - prev_count)
@@ -731,7 +741,9 @@ def _fetch_ohlcv_with_cache(
         return None
 
     if unfilled_ranges:
-        ranges_text = ", ".join(f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}" for start, end in unfilled_ranges)
+        ranges_text = ", ".join(
+            f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}" for start, end in unfilled_ranges
+        )
         raise RuntimeError(f"{ticker}의 가격 데이터 누락 구간을 가져오지 못했습니다: {ranges_text}")
 
     cache_min = combined_df.index.min()
@@ -782,17 +794,21 @@ def _fetch_ohlcv_core(
     country: str,
     start_dt: pd.Timestamp,
     end_dt: pd.Timestamp,
-    existing_df: Optional[pd.DataFrame] = None,
-) -> Optional[pd.DataFrame]:
+    existing_df: pd.DataFrame | None = None,
+) -> pd.DataFrame | None:
     """실제 원천 API에서 OHLCV를 조회합니다."""
 
     country_code = (country or "").strip().lower()
 
-    if ticker.startswith("^"):
+    # 인덱스(^) 또는 미국 주식의 경우 yfinance 사용
+    if ticker.startswith("^") or country_code == "us":
         if existing_df is not None and not existing_df.empty:
             fallback = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
             if not fallback.empty:
-                return fallback
+                # yfinance 호출 전 기존 데이터 확인 (옵션)
+                # 하지만 여기선 원천 조회 우선이므로 fallback은 호출 실패 시 사용
+                pass
+
         if yf is None:
             logger.error("yfinance 라이브러리가 설치되어 있지 않습니다. 'pip install yfinance'로 설치해주세요.")
             return None
@@ -803,13 +819,12 @@ def _fetch_ohlcv_core(
                 start=start_dt.strftime("%Y-%m-%d"),
                 end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
                 progress=False,
-                auto_adjust=False,
+                auto_adjust=True,
             )
         except Exception as exc:
             error_msg = str(exc)
-            if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
-                logger.error("%s 데이터 조회 Rate Limit 에러: %s", ticker, exc)
-                raise RateLimitException(ticker, error_msg)
+            if "Too Many Requests" in error_msg or "Rate Limit Exceeded" in error_msg:
+                raise RateLimitError(ticker, error_msg)
             logger.warning("%s의 데이터 조회 중 오류: %s", ticker, exc)
             if existing_df is not None and not existing_df.empty:
                 fallback_df = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
@@ -824,6 +839,20 @@ def _fetch_ohlcv_core(
                     return fallback_df
             return None
 
+        # yfinance 반환 시 index tz 제거
+        if fetched.index.tz is not None:
+            fetched.index = fetched.index.tz_localize(None)
+
+        # yfinance MultiIndex 컬럼 평탄화 (Price, Ticker) -> Price
+        if isinstance(fetched.columns, pd.MultiIndex):
+            try:
+                # 레벨 이름 확인 (디버깅용 안전장치)
+                # 보통 level 0: Price type (Close, Open, ...), level 1: Ticker
+                fetched.columns = fetched.columns.droplevel(1)
+                fetched.columns.name = None
+            except Exception as e:
+                logger.warning(f"yfinance MultiIndex 컬럼 평탄화 실패 ({ticker}): {e}")
+
         return fetched
 
     if country_code == "kor":
@@ -834,7 +863,9 @@ def _fetch_ohlcv_core(
     if country_code == "kor":
         # pykrx에 데이터를 요청하기 전에, 해당 기간에 거래일이 있는지 먼저 확인합니다.
         # 거래일이 없는 기간(예: 주말, 연휴)에 대해 불필요한 예외 발생을 방지합니다.
-        trading_days_in_range = get_trading_days(start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), country_code)
+        trading_days_in_range = get_trading_days(
+            start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d"), country_code
+        )
         if not trading_days_in_range:
             return None  # 거래일이 없으므로 데이터를 가져올 수 없는 것이 정상입니다.
 
@@ -896,7 +927,7 @@ def _fetch_ohlcv_core(
                     pykrx_error_msg = "데이터 없음"
 
         if pykrx_failed:
-            raise PykrxDataUnavailable(country_code, start_dt, end_dt, pykrx_error_msg)
+            raise PykrxDataUnavailableError(country_code, start_dt, end_dt, pykrx_error_msg)
 
         full_df = pd.concat(all_dfs)
         full_df = full_df[~full_df.index.duplicated(keep="first")]
@@ -915,19 +946,21 @@ def _fetch_ohlcv_core(
 
 
 def fetch_ohlcv_for_tickers(
-    tickers: List[str],
+    tickers: list[str],
     country: str,
-    date_range: Optional[List[str]] = None,
+    date_range: list[str] | None = None,
     warmup_days: int = 0,
     *,
+    account_id: str | None = None,
     allow_remote_fetch: bool = False,
-) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
+) -> tuple[dict[str, pd.DataFrame], list[str]]:
     """
     주어진 티커 목록에 대해 캐시된 OHLCV 데이터를 조회합니다.
     allow_remote_fetch=True로 설정하면 캐시에 없는 종목만 원천에서 조회합니다.
     오늘 날짜의 데이터가 없을 경우 실시간 데이터를 활용합니다.
+        account_id: str | None -> 캐시 컬렉션 키 오버라이드 (예: 계정 ID)
     """
-    prefetched_data: Dict[str, pd.DataFrame] = {}
+    prefetched_data: dict[str, pd.DataFrame] = {}
 
     if not date_range or len(date_range) != 2:
         return {}, []
@@ -960,13 +993,15 @@ def fetch_ohlcv_for_tickers(
         is_market_open_time = False
         if is_trading_day:
             try:
-                from config import MARKET_SCHEDULES
                 from datetime import datetime
+
                 import pytz
+
+                from config import MARKET_SCHEDULES
 
                 schedule = MARKET_SCHEDULES.get(country.lower())
                 if schedule:
-                    tz_name = schedule.get("timezone", "Asia/Seoul")
+                    tz_name = schedule.get("timezone")
                     tz = pytz.timezone(tz_name)
                     now_local = datetime.now(tz)
                     market_open = schedule["open"]
@@ -985,8 +1020,8 @@ def fetch_ohlcv_for_tickers(
             except Exception as e:
                 logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
 
-    cached_frames = load_cached_frames_bulk(country, tickers)
-    missing: List[str] = []
+    cached_frames = load_cached_frames_bulk(account_id or country, tickers)
+    missing: list[str] = []
 
     for raw_ticker in tickers:
         key = (raw_ticker or "").strip()
@@ -1022,7 +1057,8 @@ def fetch_ohlcv_for_tickers(
                 if rt_price > 0:
                     # 오늘 날짜의 임시 데이터 생성 (OHLCV 모두 실시간 가격으로 설정)
                     today_row = pd.DataFrame(
-                        {"Open": [rt_price], "High": [rt_price], "Low": [rt_price], "Close": [rt_price], "Volume": [0]}, index=[today]
+                        {"Open": [rt_price], "High": [rt_price], "Low": [rt_price], "Close": [rt_price], "Volume": [0]},
+                        index=[today],
                     )
 
                     # 캐시 데이터와 오늘 데이터 병합
@@ -1051,7 +1087,14 @@ def fetch_ohlcv_for_tickers(
                     if rt_price > 0:
                         # 오늘 날짜만 필요한 경우 실시간 데이터로 생성
                         today_row = pd.DataFrame(
-                            {"Open": [rt_price], "High": [rt_price], "Low": [rt_price], "Close": [rt_price], "Volume": [0]}, index=[today]
+                            {
+                                "Open": [rt_price],
+                                "High": [rt_price],
+                                "Low": [rt_price],
+                                "Close": [rt_price],
+                                "Volume": [0],
+                            },
+                            index=[today],
                         )
                         prefetched_data[key] = today_row
                         logger.info(f"[실시간] {tkr} 데이터를 실시간 가격({rt_price:,.0f})으로 생성")
@@ -1060,7 +1103,7 @@ def fetch_ohlcv_for_tickers(
                 missing.append(tkr)
                 continue
             ticker_date_range = [ticker_start.strftime("%Y-%m-%d"), adjusted_date_range[1]]
-            df = fetch_ohlcv(ticker=tkr, country=country, date_range=ticker_date_range)
+            df = fetch_ohlcv(ticker=tkr, country=country, date_range=ticker_date_range, account_id=account_id)
             if df is None or df.empty:
                 # 실시간 데이터로 대체 시도
                 if is_today and tkr in realtime_data:
@@ -1068,7 +1111,14 @@ def fetch_ohlcv_for_tickers(
                     rt_price = rt_info.get("nowVal", 0)
                     if rt_price > 0:
                         today_row = pd.DataFrame(
-                            {"Open": [rt_price], "High": [rt_price], "Low": [rt_price], "Close": [rt_price], "Volume": [0]}, index=[today]
+                            {
+                                "Open": [rt_price],
+                                "High": [rt_price],
+                                "Low": [rt_price],
+                                "Close": [rt_price],
+                                "Volume": [0],
+                            },
+                            index=[today],
                         )
                         prefetched_data[key] = today_row
                         logger.info(f"[실시간] {tkr} 데이터를 실시간 가격({rt_price:,.0f})으로 생성")
@@ -1087,8 +1137,9 @@ def prepare_price_data(
     start_date: str,
     end_date: str,
     warmup_days: int = 0,
+    account_id: str | None = None,
     allow_remote_fetch: bool = False,
-) -> Tuple[Dict[str, pd.DataFrame], List[str]]:
+) -> tuple[dict[str, pd.DataFrame], list[str]]:
     """Shared helper to populate cache-backed OHLCV data consistently across workflows."""
 
     tickers_list = [str(t).strip() for t in tickers if str(t or "").strip()]
@@ -1101,12 +1152,13 @@ def prepare_price_data(
         country,
         date_range=date_range,
         warmup_days=warmup_days,
+        account_id=account_id,
         allow_remote_fetch=allow_remote_fetch,
     )
     return prefetched, missing
 
 
-def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
+def fetch_naver_realtime_price(ticker: str) -> float | None:
     """
     네이버 금융 웹 스크레이핑을 통해 종목의 실시간 현재가를 조회합니다.
     주의: 이 방법은 웹페이지 구조 변경에 취약하며, 비공식적인 방법입니다.
@@ -1135,7 +1187,7 @@ def fetch_naver_realtime_price(ticker: str) -> Optional[float]:
     return None
 
 
-def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> Dict[str, Dict[str, float]]:
+def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """네이버 API에서 한국 ETF의 실시간 NAV 정보를 조회합니다."""
 
     normalized_codes = {str(t).strip().upper() for t in tickers if str(t or "").strip()}
@@ -1168,7 +1220,7 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> Dict[str, Dict[str,
     if not isinstance(items, list):
         return {}
 
-    snapshot: Dict[str, Dict[str, float]] = {}
+    snapshot: dict[str, dict[str, float]] = {}
 
     for item in items:
         if not isinstance(item, dict):
@@ -1201,8 +1253,8 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> Dict[str, Dict[str,
     return snapshot
 
 
-_NAVER_ETF_SNAPSHOT_CACHE: Dict[str, Dict[str, float]] = {}
-_NAVER_ETF_SNAPSHOT_FETCHED_AT: Optional[pd.Timestamp] = None
+_NAVER_ETF_SNAPSHOT_CACHE: dict[str, dict[str, float]] = {}
+_NAVER_ETF_SNAPSHOT_FETCHED_AT: pd.Timestamp | None = None
 
 
 def prime_naver_etf_realtime_snapshot(tickers: Sequence[str]) -> None:
@@ -1224,7 +1276,7 @@ def prime_naver_etf_realtime_snapshot(tickers: Sequence[str]) -> None:
         _NAVER_ETF_SNAPSHOT_FETCHED_AT = None
 
 
-def get_cached_naver_etf_snapshot_entry(ticker: str) -> Optional[Dict[str, float]]:
+def get_cached_naver_etf_snapshot_entry(ticker: str) -> dict[str, float] | None:
     """Return cached NAV snapshot entry for the given Korean ETF ticker."""
 
     key = str(ticker or "").strip().upper()
@@ -1233,7 +1285,7 @@ def get_cached_naver_etf_snapshot_entry(ticker: str) -> Optional[Dict[str, float
     return _NAVER_ETF_SNAPSHOT_CACHE.get(key)
 
 
-_pykrx_name_cache: Dict[str, str] = {}
+_pykrx_name_cache: dict[str, str] = {}
 
 
 def fetch_pykrx_name(ticker: str) -> str:
@@ -1281,7 +1333,7 @@ def fetch_pykrx_name(ticker: str) -> str:
     return name
 
 
-_etf_name_cache: Dict[Tuple[str, str], str] = {}
+_etf_name_cache: dict[tuple[str, str], str] = {}
 
 
 def resolve_security_name(country: str, ticker: str) -> str:
@@ -1314,23 +1366,12 @@ def _get_display_name(country: str, ticker: str) -> str:
 
     name = ""
     try:
-        etf_blocks = get_etfs(country_code) or []
+        etf_blocks = get_etfs_by_country(country_code) or []
         for block in etf_blocks:
             if isinstance(block, dict):
-                if "tickers" in block:
-                    for item in block.get("tickers", []):
-                        if isinstance(item, dict):
-                            tkr = (item.get("ticker") or "").upper()
-                            if tkr == key[1]:
-                                name = item.get("name") or block.get("name") or ""
-                                break
-                    if name:
-                        break
-                else:
-                    tkr = (block.get("ticker") or "").upper()
-                    if tkr == key[1]:
-                        name = block.get("name", "")
-                        break
+                if block.get("ticker", "").upper() == key[1]:
+                    name = block.get("name") or ""
+                    break
     except Exception:
         pass
 
@@ -1345,7 +1386,7 @@ def _get_display_name(country: str, ticker: str) -> str:
     return _etf_name_cache[key]
 
 
-def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
+def fetch_latest_unadjusted_price(ticker: str, country: str) -> float | None:
     """Fetches the latest unadjusted closing price for a ticker."""
     if not yf:
         return None
@@ -1381,7 +1422,7 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
             yfinance_ticker,
             start=start_date.strftime("%Y-%m-%d"),
             end=end_date.strftime("%Y-%m-%d"),
-            auto_adjust=False,
+            auto_adjust=True,
             progress=False,
             show_errors=False,  # 에러 로그를 직접 제어하기 위해 False로 설정
         )
@@ -1400,7 +1441,7 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
         error_msg = str(e)
         if "Too Many Requests" in error_msg or "Rate limited" in error_msg or "429" in error_msg:
             logger.error("yfinance Rate Limit 에러: %s (날짜: %s) - %s", yfinance_ticker, date_str_for_log, e)
-            raise RateLimitException(yfinance_ticker, error_msg)
+            raise RateLimitError(yfinance_ticker, error_msg)
         logger.error(
             "yfinance 다운로드 실패: %s (날짜: %s) - %s",
             yfinance_ticker,
@@ -1408,3 +1449,48 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> Optional[float]:
             e,
         )
         return None
+
+
+def get_exchange_rate_series(
+    start_date: str | pd.Timestamp,
+    end_date: str | pd.Timestamp,
+) -> pd.Series:
+    """
+    원/달러 환율(USD/KRW) 시계열 데이터를 반환합니다.
+    Yahoo Finance의 'KRW=X' 심볼을 사용합니다.
+    """
+    symbol = "KRW=X"
+    # country="us"로 설정하여 yfinance를 사용하도록 하고,
+    # account_id="fx"를 사용하여 data/fx (가상계정) 캐시에 저장
+    target_country = "us"
+    cache_dir_name = "fx"
+
+    s_dt = pd.to_datetime(start_date).normalize()
+    e_dt = pd.to_datetime(end_date).normalize()
+
+    # fetch_ohlcv_with_cache를 재사용하여 캐싱 처리
+    df = _fetch_ohlcv_with_cache(
+        symbol,
+        target_country,
+        s_dt,
+        e_dt,
+        account_id=cache_dir_name,
+        force_refresh=False,
+    )
+
+    if df is None or df.empty:
+        # 데이터가 아예 없으면 1.0 (비상용) 반환하기보다 None 리턴하거나 예외 처리
+        # 여기서는 로깅 후 빈 시리즈 반환
+        logger.warning("누락된 환율 데이터를 조회하지 못했습니다: %s~%s", s_dt.date(), e_dt.date())
+        return pd.Series(dtype=float)
+
+    # Close 가격을 환율로 사용
+    rates = df["Close"].astype(float)
+
+    # 요청 기간에 맞게 필터링
+    rates = rates[(rates.index >= s_dt) & (rates.index <= e_dt)]
+
+    # 결측치 보간 (ffill)
+    rates = rates.fillna(method="ffill")
+
+    return rates

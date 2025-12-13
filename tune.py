@@ -5,30 +5,87 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from utils.account_registry import get_account_settings, get_strategy_rules
 from logic.tune.runner import run_account_tuning
-from utils.logger import get_app_logger
+from utils.account_registry import get_account_settings, get_strategy_rules
 from utils.data_loader import MissingPriceDataError
-
+from utils.logger import get_app_logger
 
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
-    "k1": {
-        "MA_RANGE": [25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
+    "kor1": {
+        "PORTFOLIO_TOPN": [8],
+        "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
         "MA_TYPE": ["EMA"],
-        "PORTFOLIO_TOPN": [10],
-        "REPLACE_SCORE_THRESHOLD": [0, 1, 2],
+        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
-        "OVERBOUGHT_SELL_THRESHOLD": [70, 75, 80, 85, 90, 95, 100],
-        "COOLDOWN_DAYS": [0, 1, 2],
+        "OVERBOUGHT_SELL_THRESHOLD": [80, 82, 84, 86, 88, 90],
+        "TRAILING_STOP_PCT": [0],
+        "COOLDOWN_DAYS": [0, 1, 2, 3],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    }
+    },
+    "kor2": {
+        "PORTFOLIO_TOPN": [5],
+        "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
+        "MA_TYPE": ["EMA"],
+        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
+        "STOP_LOSS_PCT": [8],
+        "OVERBOUGHT_SELL_THRESHOLD": [85, 86, 87, 88, 89, 90, 91, 92, 93],
+        "TRAILING_STOP_PCT": [0],
+        "COOLDOWN_DAYS": [0, 1, 2, 3],
+        "CORE_HOLDINGS": [],
+        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
+    },
+    "us1": {
+        "PORTFOLIO_TOPN": [8],
+        "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
+        # "MA_TYPE": ["SMA", "EMA"],
+        "MA_TYPE": ["SMA"],
+        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
+        "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
+        "OVERBOUGHT_SELL_THRESHOLD": [80, 82, 84, 86],
+        "TRAILING_STOP_PCT": [0],
+        "COOLDOWN_DAYS": [0, 1, 2, 3],
+        "CORE_HOLDINGS": [],
+        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
+    },
 }
-# "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
 
 
-RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
+# TUNING_CONFIG: dict[str, dict] = {
+#     "k1": {
+#         "PORTFOLIO_TOPN": [10],
+#         "MA_RANGE": [25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
+#         "MA_TYPE": ["EMA"],
+#         "REPLACE_SCORE_THRESHOLD": [2, 3],
+#         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
+#         "OVERBOUGHT_SELL_THRESHOLD": [86],
+#         "TRAILING_STOP_PCT": [0],
+#         "COOLDOWN_DAYS": [2],
+#         "CORE_HOLDINGS": [],
+#         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
+#     }
+# }
+
+# 매달 전체 테스트
+# TUNING_CONFIG: dict[str, dict] = {
+#     "k1": {
+#         "PORTFOLIO_TOPN": [8],
+#         "MA_RANGE": [25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
+#         # "MA_TYPE": ["EMA"],
+#         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+#         "REPLACE_SCORE_THRESHOLD": [1, 2, 3, 4, 5],
+#         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
+#         "OVERBOUGHT_SELL_THRESHOLD": [83, 84, 85, 86, 87, 88, 89, 90],
+#         "TRAILING_STOP_PCT": [0],
+#         "COOLDOWN_DAYS": [0, 1, 2, 3],
+#         "CORE_HOLDINGS": [],
+#         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
+#     }
+# }
+
+
+RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
 
 
 def main() -> None:

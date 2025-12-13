@@ -5,19 +5,21 @@ from __future__ import annotations
 import math
 import numbers
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pandas as pd
 
-from logic.backtest.account_runner import AccountBacktestResult
+from logic.backtest.account import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
+from utils.data_loader import get_exchange_rate_series
+from utils.formatters import format_pct_change
+from utils.logger import get_app_logger
 from utils.notification import build_summary_line_from_summary_data
 from utils.report import format_kr_money, render_table_eaw
-from utils.logger import get_app_logger
 from utils.settings_loader import get_account_precision, resolve_strategy_params
 
-DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zresults"
+DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zaccounts"
 logger = get_app_logger()
 
 
@@ -26,7 +28,7 @@ logger = get_app_logger()
 # ---------------------------------------------------------------------------
 
 
-def format_period_return_with_listing_date(series_summary: Dict[str, Any], core_start_dt: pd.Timestamp) -> str:
+def format_period_return_with_listing_date(series_summary: dict[str, Any], core_start_dt: pd.Timestamp) -> str:
     """Format period return percentage, optionally appending listing date."""
 
     period_return_pct = series_summary.get("period_return_pct", 0.0)
@@ -35,24 +37,25 @@ def format_period_return_with_listing_date(series_summary: Dict[str, Any], core_
     if listing_date and core_start_dt:
         listing_dt = pd.to_datetime(listing_date)
         if listing_dt > core_start_dt:
-            return f"{period_return_pct:+.2f}%({listing_date})"
+            return f"{format_pct_change(period_return_pct).strip()}({listing_date})"
 
-    return f"{period_return_pct:+.2f}%"
+    return format_pct_change(period_return_pct)
 
 
 def print_backtest_summary(
     *,
-    summary: Dict[str, Any],
+    summary: dict[str, Any],
     account_id: str,
     country_code: str,
     test_months_range: int,
     initial_capital_krw: float,
     portfolio_topn: int,
-    ticker_summaries: List[Dict[str, Any]],
+    ticker_summaries: list[dict[str, Any]],
     core_start_dt: pd.Timestamp,
+    category_summaries: list[dict[str, Any]] = [],
     emit_to_logger: bool = True,
     section_start_index: int = 1,
-) -> List[str]:
+) -> list[str]:
     """Return a formatted summary for an account backtest run.
 
     Args:
@@ -72,7 +75,9 @@ def print_backtest_summary(
 
     account_settings = get_account_settings(account_id)
     currency = str(summary.get("currency") or account_settings.get("currency", "KRW")).upper()
-    precision = account_settings.get("precision", {}).get("amt_precision", 0) or account_settings.get("amt_precision", 0)
+    precision = account_settings.get("precision", {}).get("amt_precision", 0) or account_settings.get(
+        "amt_precision", 0
+    )
     try:
         precision = int(precision)
     except (TypeError, ValueError):
@@ -90,15 +95,21 @@ def print_backtest_summary(
     cooldown_days = int(strategy_tuning["COOLDOWN_DAYS"])
     replace_threshold = strategy_tuning["REPLACE_SCORE_THRESHOLD"]
 
-    initial_capital_local = float(summary.get("initial_capital_local", summary.get("initial_capital", initial_capital_krw)))
+    initial_capital_local = float(
+        summary.get("initial_capital_local", summary.get("initial_capital", initial_capital_krw))
+    )
     initial_capital_krw_value = float(summary.get("initial_capital_krw", initial_capital_krw))
     final_value_local = float(summary.get("final_value_local", summary.get("final_value", 0.0)))
     final_value_krw_value = float(summary.get("final_value_krw", final_value_local))
     fx_rate_to_krw = float(summary.get("fx_rate_to_krw", 1.0) or 1.0)
 
-    money_formatter = format_kr_money
+    # 통화에 따라 적절한 포맷터 설정
+    if currency == "USD":
+        money_formatter = _usd_money
+    else:
+        money_formatter = format_kr_money
 
-    output_lines: List[str] = []
+    output_lines: list[str] = []
     section_counter = section_start_index
 
     def add(line: str = "") -> None:
@@ -154,7 +165,9 @@ def print_backtest_summary(
         add(f"| {key}: {value}")
     add_section_heading("지표 설명")
     add("  - Sharpe: 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
-    add("  - SDR (Sharpe/MDD): Sharpe를 MDD(%)로 나눈 값. 수익 대비 최대 낙폭 효율성. 높을수록 우수 (기준: >0.2 양호, >0.3 우수).")
+    add(
+        "  - SDR (Sharpe/MDD): Sharpe를 MDD(%)로 나눈 값. 수익 대비 최대 낙폭 효율성. 높을수록 우수 (기준: >0.2 양호, >0.3 우수)."
+    )
 
     def _align_korean_money_for_weekly(text: str) -> str:
         if currency != "KRW" or not isinstance(text, str):
@@ -195,8 +208,8 @@ def print_backtest_summary(
                     week_label,
                     holdings_display,
                     value_display,
-                    f"{weekly_ret:+.2f}%" if _is_finite_number(weekly_ret) else "-",
-                    f"{cum_ret:+.2f}%" if _is_finite_number(cum_ret) else "-",
+                    format_pct_change(weekly_ret) if _is_finite_number(weekly_ret) else "-",
+                    format_pct_change(cum_ret) if _is_finite_number(cum_ret) else "-",
                 ]
             )
         aligns = ["left", "center", "right", "right", "right"]
@@ -239,15 +252,15 @@ def print_backtest_summary(
             )
 
         headers = ["연도"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
-        rows_data: List[List[str]] = []
+        rows_data: list[list[str]] = []
         for year, row in pivot_df.iterrows():
             monthly_row_data = [str(year)]
             for month in range(1, 13):
                 val = row.get(month)
-                monthly_row_data.append(f"{val:+.2f}%" if pd.notna(val) else "-")
+                monthly_row_data.append(format_pct_change(val) if pd.notna(val) else "-")
 
             yearly_val = row.get("연간")
-            monthly_row_data.append(f"{yearly_val:+.2f}%" if pd.notna(yearly_val) else "-")
+            monthly_row_data.append(format_pct_change(yearly_val) if pd.notna(yearly_val) else "-")
             rows_data.append(monthly_row_data)
 
             if cum_pivot_df is not None and year in cum_pivot_df.index:
@@ -255,12 +268,12 @@ def print_backtest_summary(
                 cum_row_data = ["  (누적)"]
                 for month in range(1, 13):
                     cum_val = cum_row.get(month)
-                    cum_row_data.append(f"{cum_val:+.2f}%" if pd.notna(cum_val) else "-")
+                    cum_row_data.append(format_pct_change(cum_val) if pd.notna(cum_val) else "-")
 
                 last_valid_month_index = cum_row.last_valid_index()
                 if last_valid_month_index is not None:
                     cum_annual_val = cum_row[last_valid_month_index]
-                    cum_row_data.append(f"{cum_annual_val:+.2f}%")
+                    cum_row_data.append(format_pct_change(cum_annual_val))
                 else:
                     cum_row_data.append("-")
                 rows_data.append(cum_row_data)
@@ -276,6 +289,7 @@ def print_backtest_summary(
         headers = [
             "티커",
             "종목명",
+            "카테고리",
             "총 기여도",
             "실현손익",
             "미실현손익",
@@ -290,6 +304,7 @@ def print_backtest_summary(
             [
                 s["ticker"],
                 s["name"],
+                s.get("category", "-"),
                 money_formatter(s["total_contribution"]),
                 money_formatter(s["realized_profit"]),
                 money_formatter(s["unrealized_profit"]),
@@ -300,12 +315,40 @@ def print_backtest_summary(
             for s in sorted_summaries
         ]
 
-        aligns = ["right", "left", "right", "right", "right", "right", "right", "right"]
+        aligns = ["right", "left", "left", "right", "right", "right", "right", "right", "right"]
         table_lines = render_table_eaw(headers, rows, aligns)
         for line in table_lines:
             add(line)
     else:
         add("| 종목별 성과 데이터가 없어 표시할 수 없습니다.")
+
+    add_section_heading("카테고리별 성과 요약")
+    if category_summaries:
+        headers = [
+            "카테고리",
+            "총 기여도",
+            "실현손익",
+            "미실현손익",
+            "거래횟수",
+            "승률",
+        ]
+        rows = [
+            [
+                s["category"],
+                money_formatter(s["total_contribution"]),
+                money_formatter(s["realized_profit"]),
+                money_formatter(s["unrealized_profit"]),
+                f"{s['total_trades']}회",
+                f"{s['win_rate']:.1f}%",
+            ]
+            for s in category_summaries
+        ]
+        aligns = ["left", "right", "right", "right", "right", "right"]
+        table_lines = render_table_eaw(headers, rows, aligns)
+        for line in table_lines:
+            add(line)
+    else:
+        add("| 카테고리별 성과 데이터가 없어 표시할 수 없습니다.")
 
     add_section_heading("백테스트 결과 요약")
     add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
@@ -324,13 +367,13 @@ def print_backtest_summary(
             name = str(bench.get("name") or bench.get("ticker") or "-").strip()
             ticker = str(bench.get("ticker") or "-").strip()
             cum_ret = bench.get("cumulative_return_pct")
-            cum_label = f"{float(cum_ret):+.2f}%" if cum_ret is not None else "N/A"
+            cum_label = format_pct_change(cum_ret) if cum_ret is not None else "N/A"
             add(f"| {idx}. {name}({ticker}): {cum_label}")
     else:
         benchmark_name = summary.get("benchmark_name") or "S&P 500"
         bench_ret = summary.get("benchmark_cum_ret_pct")
         if bench_ret is not None:
-            add(f"| 벤치마크 기간수익률(%): {benchmark_name}: {bench_ret:+.2f}%")
+            add(f"| 벤치마크 기간수익률(%): {benchmark_name}: {format_pct_change(bench_ret)}")
 
     if isinstance(benchmarks_info, list) and benchmarks_info:
         add("| 벤치마크 CAGR(%)")
@@ -338,13 +381,14 @@ def print_backtest_summary(
             name = str(bench.get("name") or bench.get("ticker") or "-").strip()
             ticker = str(bench.get("ticker") or "-").strip()
             cagr_ret = bench.get("cagr_pct")
-            cagr_label = f"{float(cagr_ret):+.2f}%" if cagr_ret is not None else "N/A"
+            cagr_ret = bench.get("cagr_pct")
+            cagr_label = format_pct_change(cagr_ret) if cagr_ret is not None else "N/A"
             add(f"| {idx}. {name}({ticker}): {cagr_label}")
     else:
         benchmark_name = summary.get("benchmark_name") or "S&P 500"
         bench_cagr = summary.get("benchmark_cagr_pct")
         if bench_cagr is not None:
-            add(f"| 벤치마크 CAGR(%): {benchmark_name}: {bench_cagr:+.2f}%")
+            add(f"| 벤치마크 CAGR(%): {benchmark_name}: {format_pct_change(bench_cagr)}")
 
     if isinstance(benchmarks_info, list) and benchmarks_info:
         add("| 벤치마크 SDR(Sharpe/MDD)")
@@ -355,9 +399,9 @@ def print_backtest_summary(
             sdr_label = f"{float(sdr):.3f}" if sdr is not None else "N/A"
             add(f"| {idx}. {name}({ticker}): {sdr_label}")
 
-    add(f"| 기간수익률(%): {summary['period_return']:+.2f}%")
-    add(f"| CAGR(%): {summary['cagr']:+.2f}%")
-    add(f"| MDD(%): {-summary['mdd']:.2f}%")
+    add(f"| 기간수익률(%): {format_pct_change(summary['period_return'])}")
+    add(f"| CAGR(%): {format_pct_change(summary['cagr'])}")
+    add(f"| MDD(%): {format_pct_change(-summary['mdd'])}")
     add(f"| Sharpe: {summary.get('sharpe', 0.0):.2f}")
     add(f"| SDR (Sharpe/MDD): {summary.get('sharpe_to_mdd', 0.0):.3f}")
 
@@ -391,8 +435,9 @@ def _format_quantity(amount: float, precision: int) -> str:
     return f"{amount:,.{precision}f}".rstrip("0").rstrip(".")
 
 
-def _resolve_formatters(account_settings: Dict[str, Any]):
-    account_id = str(account_settings.get("account") or "").strip().lower()
+def _resolve_formatters(account_settings: dict[str, Any], account_id: str = ""):
+    if not account_id:
+        account_id = str(account_settings.get("account") or "").strip().lower()
     try:
         precision = get_account_precision(account_id)
     except Exception:
@@ -401,7 +446,7 @@ def _resolve_formatters(account_settings: Dict[str, Any]):
     if not isinstance(precision, dict):
         precision = {}
 
-    currency = "KRW"
+    currency = str(precision.get("currency", "KRW")).strip().upper()
     qty_precision = int(precision.get("qty_precision", 0))
     price_precision = int(precision.get("price_precision", 0))
 
@@ -412,12 +457,25 @@ def _resolve_formatters(account_settings: Dict[str, Any]):
             return "-"
         return f"{float(value):,.{digits}f}"
 
-    def _krw_price(value: float) -> str:
-        if not _is_finite_number(value):
-            return "-"
-        return f"{int(round(value)):,}"
+    return currency, _usd_money if currency == "USD" else format_kr_money, _format_price, qty_precision, digits
 
-    return currency, format_kr_money, _krw_price, qty_precision, digits
+
+def _usd_money(value: float) -> str:
+    if not _is_finite_number(value):
+        return "-"
+
+    is_negative = value < 0
+    abs_val = abs(value)
+
+    # 2 decimal places for USD
+    if abs_val < 0.01 and abs_val != 0:
+        formatted_val = f"{abs_val:,.4f}"
+    else:
+        formatted_val = f"{abs_val:,.2f}"
+
+    if is_negative:
+        return f"-${formatted_val}"
+    return f"${formatted_val}"
 
 
 def _format_date_kor(ts: pd.Timestamp) -> str:
@@ -436,18 +494,22 @@ def _build_daily_table_rows(
     price_formatter,
     money_formatter,
     qty_precision: int,
-    buy_date_map: Dict[str, Optional[pd.Timestamp]],
-    holding_days_map: Dict[str, int],
-    prev_rows_cache: Dict[str, Optional[pd.Series]],
-) -> List[List[str]]:
-    entries: List[Tuple[Tuple[int, int, float, str], List[str]]] = []
+    buy_date_map: dict[str, pd.Timestamp | None],
+    holding_days_map: dict[str, int],
+    prev_rows_cache: dict[str, pd.Series | None],
+) -> list[list[str]]:
+    entries: list[tuple[tuple[int, int, float, str], list[str]]] = []
 
-    tickers_order: List[str] = []
+    tickers_order: list[str] = []
     if "CASH" in result.ticker_timeseries:
         tickers_order.append("CASH")
     tickers_order.extend(
         sorted(
-            [str(t) for t in result.ticker_timeseries.keys() if str(t).upper() != "CASH" and not str(t).startswith("__")],
+            [
+                str(t)
+                for t in result.ticker_timeseries.keys()
+                if str(t).upper() != "CASH" and not str(t).startswith("__")
+            ],
             key=lambda x: str(x).upper(),
         )
     )
@@ -521,6 +583,11 @@ def _build_daily_table_rows(
         else:
             price_display = price_formatter(price) if _is_finite_number(price) else "-"
         shares_display = "1" if is_cash else _format_quantity(shares, qty_precision)
+
+        # CASH의 미세한 잔액(0.01 미만)은 0으로 처리하여 서식 통일 ($0.0000 -> $0.00)
+        if is_cash and abs(pv) < 0.01:
+            pv = 0.0
+
         pv_display = money_formatter(pv)
         cost_basis = avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 else 0.0
         eval_profit_value = 0.0 if is_cash else pv - cost_basis
@@ -528,7 +595,9 @@ def _build_daily_table_rows(
         # 이유: 백테스트 시작일 이전의 실현 손익이 포함되는 문제를 방지
         cumulative_profit_value = eval_profit_value
         evaluated_profit_display = money_formatter(eval_profit_value)
-        evaluated_pct = (eval_profit_value / cost_basis * 100.0) if cost_basis > 0 and _is_finite_number(eval_profit_value) else 0.0
+        evaluated_pct = (
+            (eval_profit_value / cost_basis * 100.0) if cost_basis > 0 and _is_finite_number(eval_profit_value) else 0.0
+        )
         evaluated_pct_display = f"{evaluated_pct:+.1f}%" if cost_basis > 0 else "-"
         # 누적 수익률 = 평가 수익률 (현재 보유분 기준)
         cumulative_pct_display = evaluated_pct_display
@@ -605,10 +674,16 @@ def _build_daily_table_rows(
     filtered_items = filter_category_duplicates(items_for_filter, category_key_getter=normalize_category)
 
     # 다시 row 형태로 변환
-    sorted_rows: List[List[str]] = []
-    for idx, item in enumerate(filtered_items, 1):
+    sorted_rows: list[list[str]] = []
+    current_idx = 1
+    for item in filtered_items:
         row = item["row_data"]
-        row[0] = str(idx)
+        ticker = item["ticker"]
+        if str(ticker).upper() == "CASH":
+            row[0] = "0"
+        else:
+            row[0] = str(current_idx)
+            current_idx += 1
         sorted_rows.append(row)
 
     return sorted_rows
@@ -616,18 +691,18 @@ def _build_daily_table_rows(
 
 def _generate_daily_report_lines(
     result: AccountBacktestResult,
-    account_settings: Dict[str, Any],
-) -> List[str]:
+    account_settings: dict[str, Any],
+) -> list[str]:
     (
         _currency,
         money_formatter,
         price_formatter,
         qty_precision,
         _price_precision,
-    ) = _resolve_formatters(account_settings)
+    ) = _resolve_formatters(account_settings, result.account_id)
 
     portfolio_df = result.portfolio_timeseries
-    lines: List[str] = []
+    lines: list[str] = []
 
     price_header = "현재가"
 
@@ -674,9 +749,21 @@ def _generate_daily_report_lines(
         "left",  # 문구
     ]
 
-    buy_date_map: Dict[str, Optional[pd.Timestamp]] = {}
-    holding_days_map: Dict[str, int] = {}
-    prev_rows_cache: Dict[str, Optional[pd.Series]] = {}
+    buy_date_map: dict[str, pd.Timestamp | None] = {}
+    holding_days_map: dict[str, int] = {}
+    prev_rows_cache: dict[str, pd.Series | None] = {}
+
+    # 환율 데이터 프리패치 (필요 시)
+    fx_series = None
+    if _currency != "KRW":
+        try:
+            # 전체 기간에 대해 한 번에 로딩
+            start_dt = portfolio_df.index.min()
+            end_dt = portfolio_df.index.max()
+            # 여유있게 앞뒤로 조절
+            fx_series = get_exchange_rate_series(start_dt, end_dt)
+        except Exception as e:
+            logger.warning(f"리포팅 중 환율 정보 로드 실패: {e}")
 
     for target_date in portfolio_df.index:
         portfolio_row = portfolio_df.loc[target_date]
@@ -709,25 +796,85 @@ def _generate_daily_report_lines(
         cumulative_return_pct = _safe_float(portfolio_row.get("cumulative_return_pct"))
         held_count = _safe_int(portfolio_row.get("held_count"))
 
-        summary_data = {
+        # 환율 적용 로직:
+        # 1. 포트폴리오 데이터는 현지 통화 기준 (USD 등)
+        # 2. Daily Summary Header는 KRW 기준으로 표시 (User Request: "Header only in Korean Won is correct")
+        # 3. Table은 현지 통화 기준 (USD) 유지
+
+        header_money_formatter = money_formatter
+        header_values = {
             "principal": float(result.initial_capital),
             "total_equity": total_value,
             "total_holdings_value": total_holdings,
             "total_cash": total_cash,
             "daily_profit_loss": daily_profit_loss,
-            "daily_return_pct": daily_return_pct,
-            "eval_profit_loss": eval_profit_loss,
-            "eval_return_pct": eval_return_pct,
             "cum_profit_loss": total_value - float(result.initial_capital),
+        }
+
+        # 비 KRW 계좌인 경우 KRW로 변환
+        if _currency != "KRW":
+            try:
+                # 해당 일자의 환율 조회 (없으면 가장 최근 값)
+                target_result = fx_series.asof(target_date)
+                if pd.notna(target_result):
+                    rate = float(target_result)
+                    header_money_formatter = format_kr_money
+                    # 환율 적용 (KRW 환산)
+                    # 원금은 초기 환율 기준 고정일 수도 있지만,
+                    # 일별 리포트에서는 '현재 가치'를 보여주는게 맞으므로 매일 변동될 수도 있고,
+                    # 혹은 원금 자체는 초기 환율로 박아두고 평가금액만 변동시킬 수도 있음.
+                    # 여기서는 심플하게 '현재 환율'로 모든 가치를 환산하여 보여줌.
+                    # 단, 원금의 경우 '투입 당시 KRW'를 보여주는 게 더 직관적일 수 있으나
+                    # 이미 result.initial_capital_krw가 있으므로 그걸 쓰는 게 나을 수도.
+                    # 하지만 result.initial_capital_krw는 고정값.
+
+                    # Header: 원금 -> initial_capital * initial_fx (fixed) or current_fx?
+                    # User: "원금: 7만원" -> This implies fixed initial KRW amount.
+                    # So use result.initial_capital_krw for principal.
+
+                    header_values["principal"] = float(result.initial_capital_krw)  # 고정된 초기 KRW 원금
+
+                    header_values["total_equity"] = total_value * rate
+                    header_values["total_holdings_value"] = total_holdings * rate
+                    header_values["total_cash"] = total_cash * rate
+                    header_values["daily_profit_loss"] = daily_profit_loss * rate
+                    header_values["cum_profit_loss"] = (total_value * rate) - float(result.initial_capital_krw)
+            except Exception:
+                pass
+
+        summary_data = {
+            "principal": header_values["principal"],
+            "total_equity": header_values["total_equity"],
+            "total_holdings_value": header_values["total_holdings_value"],
+            "total_cash": header_values["total_cash"],
+            "daily_profit_loss": header_values["daily_profit_loss"],
+            "daily_return_pct": daily_return_pct,
+            "eval_profit_loss": eval_profit_loss,  # 이건 개별 종목 합산이라 애매하지만, 일단 테이블 값이랑 맞추려면 USD가 맞나? 아님 헤더니까 KRW?
+            # 헤더: "평가: -0.84%(-593원)" -> KRW여야 함.
+            # eval_profit_loss는 (total_holdings - total_cost).
+            # total_cost도 KRW로 변환 필요하지만 복잡함.
+            # 단순히 total_equity - total_cash - total_cost(converted)? No.
+            # 약식으로: eval_profit_loss(USD) * rate 사용.
+            "eval_return_pct": eval_return_pct,
+            "cum_profit_loss": header_values["cum_profit_loss"],
             "cum_return_pct": cumulative_return_pct,
             "held_count": held_count,
             "portfolio_topn": int(result.portfolio_topn),
         }
 
+        # eval_profit_loss KRW 변환 (비 KRW 계좌 시)
+        if _currency != "KRW" and summary_data["eval_profit_loss"]:
+            try:
+                target_result = fx_series.asof(target_date)
+                if pd.notna(target_result):
+                    summary_data["eval_profit_loss"] = eval_profit_loss * float(target_result)
+            except Exception:
+                pass
+
         prefix = f"{_format_date_kor(target_date)} |"
         summary_line = build_summary_line_from_summary_data(
             summary_data,
-            money_formatter,
+            header_money_formatter,
             use_html=False,
             prefix=prefix,
         )
@@ -765,9 +912,9 @@ def _generate_daily_report_lines(
 
 def dump_backtest_log(
     result: AccountBacktestResult,
-    account_settings: Dict[str, Any],
+    account_settings: dict[str, Any],
     *,
-    results_dir: Optional[Path | str] = None,
+    results_dir: Path | str | None = None,
 ) -> Path:
     """Write a detailed backtest log to disk and return the file path."""
 
@@ -776,20 +923,22 @@ def dump_backtest_log(
 
     # 계정별 폴더 생성
     if results_dir is not None:
-        base_dir = Path(results_dir) / account_id
+        base_dir = Path(results_dir) / account_id / "results"
     else:
-        base_dir = DEFAULT_RESULTS_DIR / account_id
+        base_dir = DEFAULT_RESULTS_DIR / account_id / "results"
 
     base_dir.mkdir(parents=True, exist_ok=True)
 
     # 파일명에 날짜 추가
     date_str = pd.Timestamp.now().strftime("%Y-%m-%d")
     path = base_dir / f"backtest_{date_str}.log"
-    lines: List[str] = []
+    lines: list[str] = []
 
     lines.append(f"백테스트 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")
     lines.append("1. ========= 기본정보 ==========")
-    lines.append(f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}")
+    lines.append(
+        f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}"
+    )
     base_line = f"초기 자본: {result.initial_capital:,.0f} {result.currency or 'KRW'}"
     if (result.currency or "KRW").upper() != "KRW":
         base_line += f" (≈ {result.initial_capital_krw:,.0f} KRW)"
@@ -817,6 +966,7 @@ def dump_backtest_log(
         initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),
+        category_summaries=getattr(result, "category_summaries", []),
         core_start_dt=result.start_date,
         emit_to_logger=False,
         section_start_index=3,

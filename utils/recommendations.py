@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Any, Iterable
+
+from collections.abc import Iterable
+from typing import Any
 
 import pandas as pd
 from pandas.io.formats.style import Styler
@@ -7,7 +9,6 @@ from pandas.io.formats.style import Styler
 from strategies.maps.constants import DECISION_CONFIG
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
-
 
 logger = get_app_logger()
 
@@ -111,9 +112,7 @@ def _trend_series(row: dict[str, Any]) -> list[float]:
     return []
 
 
-def recommendations_to_dataframe(
-    country: str, rows: Iterable[dict[str, Any]]
-) -> pd.DataFrame:
+def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -> pd.DataFrame:
     """추천 종목 데이터를 표 렌더링에 적합한 DataFrame으로 변환합니다."""
 
     country_lower = (country or "").strip().lower()
@@ -192,9 +191,7 @@ def _state_style(value: Any) -> str:
 
 
 _STATE_BACKGROUND_MAP = {
-    key.upper(): cfg.get("background")
-    for key, cfg in DECISION_CONFIG.items()
-    if isinstance(cfg, dict)
+    key.upper(): cfg.get("background") for key, cfg in DECISION_CONFIG.items() if isinstance(cfg, dict)
 }
 
 
@@ -250,9 +247,7 @@ def style_recommendations_dataframe(df: pd.DataFrame) -> Styler:
     return styled
 
 
-def get_recommendations_dataframe(
-    country: str, *, source_key: str | None = None
-) -> pd.DataFrame:
+def get_recommendations_dataframe(country: str, *, source_key: str | None = None) -> pd.DataFrame:
     """로딩과 포맷팅을 한 번에 수행하는 헬퍼.
 
     Args:
@@ -270,11 +265,7 @@ def get_recommendations_dataframe(
     except Exception as e:
         logger.error("추천 데이터를 불러오지 못했습니다 (%s): %s", country, e)
         # 오류 발생 시 빈 데이터프레임 반환
-        columns = [
-            col
-            for col in _BASE_DISPLAY_COLUMNS
-            if col != "괴리율" or country.lower() in {"kr", "kor"}
-        ]
+        columns = [col for col in _BASE_DISPLAY_COLUMNS if col != "괴리율" or country.lower() in {"kr", "kor"}]
         if "현재가" in columns:
             idx = columns.index("현재가")
             columns[idx] = "현재가"

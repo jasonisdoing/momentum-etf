@@ -8,26 +8,26 @@ from pathlib import Path
 
 import pandas as pd
 
+from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
+from logic.recommend.reporting import print_run_header
 from utils.account_registry import (
     get_account_settings,
-    get_strategy_rules,
     get_benchmark_tickers,
+    get_strategy_rules,
     list_available_accounts,
 )
-from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
-from logic.recommend.output import print_run_header
+from utils.data_loader import MissingPriceDataError, get_latest_trading_day, prepare_price_data
 from utils.logger import get_app_logger
-from utils.stock_list_io import get_etfs
-from utils.data_loader import prepare_price_data, get_latest_trading_day, MissingPriceDataError
 from utils.settings_loader import load_common_settings
+from utils.stock_list_io import get_etfs
 
-RESULTS_DIR = Path(__file__).resolve().parent / "zresults"
+RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
 
 
 def _available_account_choices() -> list[str]:
     choices = list_available_accounts()
     if not choices:
-        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. zsettings/account/*.json 파일을 확인하세요.")
+        raise SystemExit("계정 설정(JSON)이 존재하지 않습니다. zaccounts/account/*.json 파일을 확인하세요.")
     return choices
 
 
@@ -74,7 +74,7 @@ def main() -> None:
     # 웜업 기간을 전략의 MA_PERIOD로 설정
     warmup_days = strategy_rules.ma_period
 
-    universe_tickers = [etf["ticker"] for etf in get_etfs(country_code) if etf.get("ticker")]
+    universe_tickers = [etf["ticker"] for etf in get_etfs(account_id) if etf.get("ticker")]
     benchmark_tickers = get_benchmark_tickers(account_settings)
     tickers = sorted({*(str(t).strip().upper() for t in universe_tickers if t), *benchmark_tickers})
     common_settings = load_common_settings()
@@ -97,6 +97,7 @@ def main() -> None:
         start_date=date_range_prefetch[0],
         end_date=date_range_prefetch[1],
         warmup_days=0,
+        account_id=account_id,
     )
     if missing:
         raise MissingPriceDataError(
@@ -108,7 +109,7 @@ def main() -> None:
 
     print_run_header(account_id, date_str=None)
 
-    from logic.backtest.account_runner import run_account_backtest
+    from logic.backtest.account import run_account_backtest
 
     result = run_account_backtest(
         account_id,
@@ -131,6 +132,7 @@ def main() -> None:
         initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),
+        category_summaries=getattr(result, "category_summaries", []),
         core_start_dt=result.start_date,
     )
     logger.info("✅ 백테스트 로그를 '%s'에 저장했습니다.", log_path)

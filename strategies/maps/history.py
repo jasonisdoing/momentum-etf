@@ -6,16 +6,16 @@ Moved from the root signals module to avoid circular imports and duplication.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from pymongo import DESCENDING, ASCENDING
+from pymongo import ASCENDING, DESCENDING
 
 from utils.db_manager import get_db_connection, list_open_positions
-from utils.settings_loader import get_account_settings
 from utils.logger import get_app_logger
+from utils.settings_loader import get_account_settings
 
 
-def _extract_trade_time(trade: dict) -> Optional[datetime]:
+def _extract_trade_time(trade: dict) -> datetime | None:
     value = trade.get("date") or trade.get("executed_at")
     if isinstance(value, datetime):
         return value
@@ -32,7 +32,7 @@ def _extract_trade_shares(trade: dict) -> float:
         return 0.0
 
 
-def _generate_ticker_query_keys(ticker: str) -> List[str]:
+def _generate_ticker_query_keys(ticker: str) -> list[str]:
     keys: set[str] = set()
     raw = str(ticker or "").strip()
     if not raw:
@@ -71,7 +71,9 @@ def _canonical_ticker_key(ticker: str) -> str:
     return value.strip()
 
 
-def calculate_consecutive_holding_info(held_tickers: List[str], account_id: str, as_of_date: datetime) -> Dict[str, Dict]:
+def calculate_consecutive_holding_info(
+    held_tickers: list[str], account_id: str, as_of_date: datetime
+) -> dict[str, dict]:
     """
     Scan `trades` collection and compute consecutive holding start date per ticker
     for the given account. Uses a single query to avoid N+1 access.
@@ -99,7 +101,7 @@ def calculate_consecutive_holding_info(held_tickers: List[str], account_id: str,
 
     account_norm = (account_id or "").strip().lower()
 
-    query: Dict[str, Any] = {
+    query: dict[str, Any] = {
         "account": account_norm,
         "deleted_at": {"$exists": False},
     }
@@ -144,11 +146,11 @@ def calculate_consecutive_holding_info(held_tickers: List[str], account_id: str,
     for tkr in held_tickers:
         key = _canonical_ticker_key(tkr)
         entries = trades_by_ticker.get(key)
-        buy_dt: Optional[datetime] = None
+        buy_dt: datetime | None = None
 
         if entries:
             running_shares = 0.0
-            consecutive_start: Optional[datetime] = None
+            consecutive_start: datetime | None = None
 
             for when, trade in entries:
                 action = (trade.get("action") or "").upper()
@@ -180,12 +182,12 @@ def calculate_consecutive_holding_info(held_tickers: List[str], account_id: str,
 
 
 def calculate_trade_cooldown_info(
-    tickers: List[str],
+    tickers: list[str],
     account_id: str,
     as_of_date: datetime,
     *,
     country_code: str | None = None,
-) -> Dict[str, Dict[str, Optional[datetime]]]:
+) -> dict[str, dict[str, datetime | None]]:
     """Compute recent buy/sell dates per ticker for trade cooldown decisions.
 
     Args:
@@ -197,7 +199,7 @@ def calculate_trade_cooldown_info(
     Returns:
         Dictionary mapping tickers to their trade cooldown info
     """
-    info: Dict[str, Dict[str, Optional[datetime]]] = {tkr: {"last_buy": None, "last_sell": None} for tkr in tickers}
+    info: dict[str, dict[str, datetime | None]] = {tkr: {"last_buy": None, "last_sell": None} for tkr in tickers}
     if not tickers:
         return info
 
@@ -221,12 +223,12 @@ def calculate_trade_cooldown_info(
             logger.warning("계정 설정에서 국가 코드를 찾지 못했습니다: %s", exc)
             country_code_normalized = ""
 
-    query: Dict[str, Any] = {
+    query: dict[str, Any] = {
         "ticker": {"$in": tickers},
         "$or": [{"date": {"$lte": include_until}}, {"executed_at": {"$lte": include_until}}],
     }
 
-    legacy_filters: List[Dict[str, Any]] = []
+    legacy_filters: list[dict[str, Any]] = []
     if account_norm:
         legacy_filters.append({"account": account_norm})
         legacy_filters.append({"country": account_norm})

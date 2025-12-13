@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from utils.report import format_kr_money
+
 from .constants import DECISION_CONFIG, DECISION_MESSAGES, DECISION_NOTES
 
 
@@ -23,11 +24,11 @@ def _normalize_display_name(name: str) -> str:
     return name
 
 
-def build_buy_replace_note(ticker_to_sell: str, ticker_to_sell_name: str) -> str:
-    """Build note for BUY_REPLACE: "🔄 교체매수 -종목명(티커) 대체" (no angle brackets)"""
+def build_buy_replace_note(sell_name: str, sell_ticker: str) -> str:
+    """Build note for BUY_REPLACE: "🔄 교체매수 - 종목명(티커) 대체" """
     raw = DECISION_CONFIG["BUY_REPLACE"]["display_name"]
     disp = _normalize_display_name(raw)
-    return f"{disp} -{ticker_to_sell_name}({ticker_to_sell}) 대체"
+    return f"{disp} - {sell_name}({sell_ticker}) 대체"
 
 
 def build_sell_replace_note(
