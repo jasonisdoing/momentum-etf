@@ -631,11 +631,12 @@ def run_portfolio_recommend(
                     if sell_block_info:
                         # 쿨다운 때문에 교체 못했다는 건, 점수는 충족했지만 쿨다운이었다는 뜻이어야 함.
                         # 점수조차 미달이면 "점수 부족"이 주 원인임.
+                        days_since = int(sell_block_info.get("days_since", 0))
+                        days_left = max(cooldown_days - days_since + 1, 0)
+
                         score_diff = best_new.get("score", 0) - weakest.get("score", 0)
 
                         if score_diff >= replace_threshold:
-                            days_since = int(sell_block_info.get("days_since", 0))
-                            days_left = max(cooldown_days - days_since + 1, 0)
                             target_name = etf_meta.get(weakest["tkr"], {}).get("name") or weakest["tkr"]
                             best_new["row"][-1] = f"교체실패: {target_name} 쿨다운({days_left}일)"
 
