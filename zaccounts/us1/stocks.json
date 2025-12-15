@@ -6,91 +6,91 @@
                 "ticker": "QQQM",
                 "name": "Invesco NASDAQ 100 ETF",
                 "listing_date": "2020-10-13",
-                "1_week_avg_volume": 4403877,
-                "1_month_earn_rate": 0.6487,
-                "3_month_earn_rate": 6.7766,
-                "6_month_earn_rate": 17.5323,
-                "12_month_earn_rate": 20.4582
+                "1_week_avg_volume": 5230404,
+                "1_month_earn_rate": -1.228,
+                "3_month_earn_rate": 3.8093,
+                "6_month_earn_rate": 16.7367,
+                "12_month_earn_rate": 18.548
             },
             {
                 "ticker": "QLD",
                 "name": "ProShares Ultra QQQ",
                 "listing_date": "2006-06-21",
-                "1_week_avg_volume": 3762738,
-                "1_month_earn_rate": 0.6118,
-                "3_month_earn_rate": 11.631,
-                "6_month_earn_rate": 32.71,
-                "12_month_earn_rate": 29.2597
+                "1_week_avg_volume": 4654971,
+                "1_month_earn_rate": -3.1263,
+                "3_month_earn_rate": 5.5048,
+                "6_month_earn_rate": 30.9144,
+                "12_month_earn_rate": 25.1587
             },
             {
                 "ticker": "IWM",
                 "name": "iShares Russell 2000 ETF",
                 "listing_date": "2000-05-26",
-                "1_week_avg_volume": 37668152,
-                "1_month_earn_rate": 5.5519,
-                "3_month_earn_rate": 8.4716,
-                "6_month_earn_rate": 21.8376,
-                "12_month_earn_rate": 9.6199
+                "1_week_avg_volume": 41832676,
+                "1_month_earn_rate": 4.1906,
+                "3_month_earn_rate": 6.3589,
+                "6_month_earn_rate": 22.205,
+                "12_month_earn_rate": 8.41
             },
             {
                 "ticker": "DIA",
                 "name": "SPDR Dow Jones Industrial Average ETF Trust",
                 "listing_date": "1998-01-20",
-                "1_week_avg_volume": 5091640,
-                "1_month_earn_rate": 1.8928,
-                "3_month_earn_rate": 6.6893,
-                "6_month_earn_rate": 14.2721,
-                "12_month_earn_rate": 11.4047
+                "1_week_avg_volume": 5613459,
+                "1_month_earn_rate": 0.6734,
+                "3_month_earn_rate": 5.9761,
+                "6_month_earn_rate": 15.7587,
+                "12_month_earn_rate": 11.1879
             },
             {
                 "ticker": "VUG",
                 "name": "Vanguard Growth Index Fund ETF Shares",
                 "listing_date": "2004-01-30",
-                "1_week_avg_volume": 814098,
-                "1_month_earn_rate": -0.3799,
-                "3_month_earn_rate": 4.6733,
-                "6_month_earn_rate": 16.4983,
-                "12_month_earn_rate": 17.8389
+                "1_week_avg_volume": 885110,
+                "1_month_earn_rate": -1.6637,
+                "3_month_earn_rate": 2.009,
+                "6_month_earn_rate": 16.2572,
+                "12_month_earn_rate": 16.1112
             },
             {
                 "ticker": "IVV",
                 "name": "iShares Core S&P 500 ETF",
                 "listing_date": "2000-05-19",
-                "1_week_avg_volume": 11627454,
-                "1_month_earn_rate": 0.9371,
-                "3_month_earn_rate": 5.1394,
-                "6_month_earn_rate": 14.8944,
-                "12_month_earn_rate": 15.4335
+                "1_week_avg_volume": 12478934,
+                "1_month_earn_rate": -0.2141,
+                "3_month_earn_rate": 3.4726,
+                "6_month_earn_rate": 14.9369,
+                "12_month_earn_rate": 14.5285
             },
             {
                 "ticker": "IVW",
                 "name": "iShares S&P 500 Growth ETF",
                 "listing_date": "2000-05-26",
-                "1_week_avg_volume": 2038095,
-                "1_month_earn_rate": 0.4116,
-                "3_month_earn_rate": 4.6749,
-                "6_month_earn_rate": 17.1911,
-                "12_month_earn_rate": 20.9038
+                "1_week_avg_volume": 2154823,
+                "1_month_earn_rate": -0.987,
+                "3_month_earn_rate": 1.99,
+                "6_month_earn_rate": 16.716,
+                "12_month_earn_rate": 19.2079
             },
             {
                 "ticker": "SPYG",
                 "name": "SPDR Portfolio S&P 500 Growth ETF",
                 "listing_date": "2000-10-02",
-                "1_week_avg_volume": 2846933,
-                "1_month_earn_rate": 0.4194,
-                "3_month_earn_rate": 4.71,
-                "6_month_earn_rate": 17.2334,
-                "12_month_earn_rate": 21.0404
+                "1_week_avg_volume": 3111356,
+                "1_month_earn_rate": -0.9902,
+                "3_month_earn_rate": 1.9901,
+                "6_month_earn_rate": 16.7884,
+                "12_month_earn_rate": 19.3565
             },
             {
                 "ticker": "VOOG",
                 "name": "Vanguard S&P 500 Growth Index Fund ETF Shares",
                 "listing_date": "2010-09-09",
-                "1_week_avg_volume": 189974,
-                "1_month_earn_rate": 0.4004,
-                "3_month_earn_rate": 4.6968,
-                "6_month_earn_rate": 17.2669,
-                "12_month_earn_rate": 21.0224
+                "1_week_avg_volume": 219619,
+                "1_month_earn_rate": -1.0336,
+                "3_month_earn_rate": 1.9828,
+                "6_month_earn_rate": 16.7483,
+                "12_month_earn_rate": 19.293
             }
         ]
     },
@@ -101,101 +101,101 @@
                 "ticker": "DFSV",
                 "name": "Dimensional US Small Cap Value ETF",
                 "listing_date": "2022-02-24",
-                "1_week_avg_volume": 986042,
-                "1_month_earn_rate": 7.334,
-                "3_month_earn_rate": 6.1058,
-                "6_month_earn_rate": 18.2135,
-                "12_month_earn_rate": 5.4942
+                "1_week_avg_volume": 974648,
+                "1_month_earn_rate": 6.0968,
+                "3_month_earn_rate": 5.2108,
+                "6_month_earn_rate": 18.8309,
+                "12_month_earn_rate": 4.6335
             },
             {
                 "ticker": "AVUV",
                 "name": "Avantis US Small Cap Value ETF",
                 "listing_date": "2019-09-26",
-                "1_week_avg_volume": 764502,
-                "1_month_earn_rate": 7.3341,
-                "3_month_earn_rate": 6.5859,
-                "6_month_earn_rate": 18.485,
-                "12_month_earn_rate": 4.9702
+                "1_week_avg_volume": 766436,
+                "1_month_earn_rate": 5.9043,
+                "3_month_earn_rate": 5.0332,
+                "6_month_earn_rate": 18.9216,
+                "12_month_earn_rate": 3.8439
             },
             {
                 "ticker": "IJS",
                 "name": "iShares S&P Small-Cap 600 Value ETF",
                 "listing_date": "2000-07-28",
-                "1_week_avg_volume": 205110,
-                "1_month_earn_rate": 5.2149,
-                "3_month_earn_rate": 7.5114,
-                "6_month_earn_rate": 20.5466,
-                "12_month_earn_rate": 3.5956
+                "1_week_avg_volume": 224673,
+                "1_month_earn_rate": 4.0437,
+                "3_month_earn_rate": 6.3026,
+                "6_month_earn_rate": 21.7881,
+                "12_month_earn_rate": 2.9872
             },
             {
                 "ticker": "VIOV",
                 "name": "Vanguard S&P Small-Cap 600 Value Index Fund ETF Shares",
                 "listing_date": "2010-09-09",
-                "1_week_avg_volume": 52593,
-                "1_month_earn_rate": 5.2801,
-                "3_month_earn_rate": 7.4638,
-                "6_month_earn_rate": 20.4157,
-                "12_month_earn_rate": 3.6296
+                "1_week_avg_volume": 47000,
+                "1_month_earn_rate": 4.0455,
+                "3_month_earn_rate": 6.2001,
+                "6_month_earn_rate": 21.6898,
+                "12_month_earn_rate": 3.1017
             },
             {
                 "ticker": "MDYV",
                 "name": "State Street SPDR S&P 400 Mid Cap Value ETF",
                 "listing_date": "2005-11-15",
-                "1_week_avg_volume": 95143,
-                "1_month_earn_rate": 5.1566,
-                "3_month_earn_rate": 4.0972,
-                "6_month_earn_rate": 11.9282,
-                "12_month_earn_rate": 4.5545
+                "1_week_avg_volume": 103021,
+                "1_month_earn_rate": 3.7086,
+                "3_month_earn_rate": 3.2679,
+                "6_month_earn_rate": 12.4543,
+                "12_month_earn_rate": 4.2966
             },
             {
                 "ticker": "FFSM",
                 "name": "Fidelity Covington Trust - Fidelity Fundamental Small-Mid Cap ETF",
                 "listing_date": "2021-02-04",
-                "1_week_avg_volume": 260285,
-                "1_month_earn_rate": 6.4559,
-                "3_month_earn_rate": 9.7521,
-                "6_month_earn_rate": 20.1475,
-                "12_month_earn_rate": 12.461
+                "1_week_avg_volume": 264589,
+                "1_month_earn_rate": 4.3406,
+                "3_month_earn_rate": 7.8889,
+                "6_month_earn_rate": 20.4339,
+                "12_month_earn_rate": 11.4345
             },
             {
                 "ticker": "IJJ",
                 "name": "iShares S&P Mid-Cap 400 Value ETF",
                 "listing_date": "2000-07-28",
-                "1_week_avg_volume": 135098,
-                "1_month_earn_rate": 5.1665,
-                "3_month_earn_rate": 4.0171,
-                "6_month_earn_rate": 11.9727,
-                "12_month_earn_rate": 4.3645
+                "1_week_avg_volume": 137481,
+                "1_month_earn_rate": 3.6866,
+                "3_month_earn_rate": 3.2423,
+                "6_month_earn_rate": 12.5133,
+                "12_month_earn_rate": 4.0258
             },
             {
                 "ticker": "SDVY",
                 "name": "First Trust SMID Cap Rising Dividend Achievers ETF",
                 "listing_date": "2017-11-03",
-                "1_week_avg_volume": 976317,
-                "1_month_earn_rate": 3.8886,
-                "3_month_earn_rate": 3.8761,
-                "6_month_earn_rate": 14.2598,
-                "12_month_earn_rate": 3.6909
+                "1_week_avg_volume": 1023793,
+                "1_month_earn_rate": 2.5923,
+                "3_month_earn_rate": 3.0113,
+                "6_month_earn_rate": 14.9029,
+                "12_month_earn_rate": 3.6031
             },
             {
                 "ticker": "DES",
                 "name": "WisdomTree U.S. SmallCap Dividend Fund",
                 "listing_date": "2006-06-16",
-                "1_week_avg_volume": 138916,
-                "1_month_earn_rate": 4.7542,
-                "3_month_earn_rate": 2.6086,
-                "6_month_earn_rate": 10.8325,
-                "12_month_earn_rate": -2.5506
+                "1_week_avg_volume": 130028,
+                "1_month_earn_rate": 4.4275,
+                "3_month_earn_rate": 2.1653,
+                "6_month_earn_rate": 12.3678,
+                "12_month_earn_rate": -2.945
             },
             {
                 "ticker": "SDVD",
                 "name": "FT Vest SMID Rising Dividend Achievers Target Income ETF",
                 "listing_date": "2023-08-10",
-                "1_week_avg_volume": 123211,
-                "1_month_earn_rate": 3.8116,
-                "3_month_earn_rate": 3.7789,
-                "6_month_earn_rate": 13.5968,
-                "12_month_earn_rate": 4.0248
+                "1_week_avg_volume": 112464,
+                "1_month_earn_rate": 2.1178,
+                "3_month_earn_rate": 2.4663,
+                "6_month_earn_rate": 13.7211,
+                "12_month_earn_rate": 3.56
             }
         ]
     },
@@ -206,111 +206,111 @@
                 "ticker": "XLB",
                 "name": "Materials Select Sector SPDR Fund",
                 "listing_date": "1998-12-22",
-                "1_week_avg_volume": 9781175,
-                "1_month_earn_rate": 3.0961,
-                "3_month_earn_rate": -1.1036,
-                "6_month_earn_rate": 3.0767,
-                "12_month_earn_rate": 0.1654
+                "1_week_avg_volume": 11048231,
+                "1_month_earn_rate": 2.439,
+                "3_month_earn_rate": -0.2325,
+                "6_month_earn_rate": 4.3611,
+                "12_month_earn_rate": 1.268
             },
             {
                 "ticker": "XLC",
                 "name": "Communication Services Select Sector SPDR Fund",
                 "listing_date": "2018-06-19",
-                "1_week_avg_volume": 5808947,
-                "1_month_earn_rate": 2.2855,
-                "3_month_earn_rate": -0.113,
-                "6_month_earn_rate": 13.386,
-                "12_month_earn_rate": 19.6153
+                "1_week_avg_volume": 5858009,
+                "1_month_earn_rate": 2.651,
+                "3_month_earn_rate": -1.7172,
+                "6_month_earn_rate": 14.2916,
+                "12_month_earn_rate": 17.5052
             },
             {
                 "ticker": "XLY",
                 "name": "Consumer Discretionary Select Sector SPDR Fund",
                 "listing_date": "1998-12-22",
-                "1_week_avg_volume": 6233129,
-                "1_month_earn_rate": 0.3381,
-                "3_month_earn_rate": 0.9026,
-                "6_month_earn_rate": 12.9081,
-                "12_month_earn_rate": 4.4638
+                "1_week_avg_volume": 6894149,
+                "1_month_earn_rate": 1.4541,
+                "3_month_earn_rate": 0.4677,
+                "6_month_earn_rate": 14.4517,
+                "12_month_earn_rate": 4.7442
             },
             {
                 "ticker": "XLP",
                 "name": "Consumer Staples Select Sector SPDR Fund",
                 "listing_date": "1998-12-22",
-                "1_week_avg_volume": 13790168,
-                "1_month_earn_rate": 1.7693,
-                "3_month_earn_rate": -1.2192,
-                "6_month_earn_rate": -2.5317,
-                "12_month_earn_rate": -1.6201
+                "1_week_avg_volume": 14120466,
+                "1_month_earn_rate": 2.716,
+                "3_month_earn_rate": 0.7116,
+                "6_month_earn_rate": -0.5515,
+                "12_month_earn_rate": -1.3139
             },
             {
                 "ticker": "XLE",
                 "name": "Energy Select Sector SPDR Fund",
                 "listing_date": "1998-12-22",
-                "1_week_avg_volume": 24578745,
-                "1_month_earn_rate": 0.4261,
-                "3_month_earn_rate": 4.6325,
-                "6_month_earn_rate": 7.9323,
-                "12_month_earn_rate": 4.5203
+                "1_week_avg_volume": 26794372,
+                "1_month_earn_rate": 0.8532,
+                "3_month_earn_rate": 3.96,
+                "6_month_earn_rate": 5.0437,
+                "12_month_earn_rate": 4.2079
             },
             {
                 "ticker": "XLF",
                 "name": "Financial Select Sector SPDR Fund",
                 "listing_date": "1998-12-22",
-                "1_week_avg_volume": 40447789,
-                "1_month_earn_rate": 3.1197,
-                "3_month_earn_rate": 2.3246,
-                "6_month_earn_rate": 8.3123,
-                "12_month_earn_rate": 12.0023
+                "1_week_avg_volume": 47709385,
+                "1_month_earn_rate": 2.3849,
+                "3_month_earn_rate": 2.7029,
+                "6_month_earn_rate": 10.7283,
+                "12_month_earn_rate": 12.1882
             },
             {
                 "ticker": "XLV",
                 "name": "Health Care Select Sector SPDR Fund",
                 "listing_date": "1998-12-22",
-                "1_week_avg_volume": 12268975,
-                "1_month_earn_rate": 1.9246,
-                "3_month_earn_rate": 11.7098,
-                "6_month_earn_rate": 13.3096,
-                "12_month_earn_rate": 8.0326
+                "1_week_avg_volume": 13171514,
+                "1_month_earn_rate": 0.8114,
+                "3_month_earn_rate": 13.0246,
+                "6_month_earn_rate": 14.2315,
+                "12_month_earn_rate": 8.8215
             },
             {
                 "ticker": "XLI",
                 "name": "Industrial Select Sector SPDR Fund",
                 "listing_date": "1998-12-22",
-                "1_week_avg_volume": 9131329,
-                "1_month_earn_rate": 2.2627,
-                "3_month_earn_rate": 4.4872,
-                "6_month_earn_rate": 10.4294,
-                "12_month_earn_rate": 14.9372
+                "1_week_avg_volume": 9871837,
+                "1_month_earn_rate": 1.5221,
+                "3_month_earn_rate": 3.3541,
+                "6_month_earn_rate": 10.6671,
+                "12_month_earn_rate": 14.4952
             },
             {
                 "ticker": "XLRE",
                 "name": "Real Estate Select Sector SPDR Fund",
                 "listing_date": "2015-10-08",
-                "1_week_avg_volume": 7010358,
-                "1_month_earn_rate": -2.1583,
-                "3_month_earn_rate": -2.9247,
-                "6_month_earn_rate": -1.7682,
-                "12_month_earn_rate": -3.7898
+                "1_week_avg_volume": 7567679,
+                "1_month_earn_rate": -1.4987,
+                "3_month_earn_rate": -2.929,
+                "6_month_earn_rate": -1.0922,
+                "12_month_earn_rate": -2.3266
             },
             {
                 "ticker": "XLK",
                 "name": "Technology Select Sector SPDR Fund",
                 "listing_date": "1998-12-22",
-                "1_week_avg_volume": 8108830,
-                "1_month_earn_rate": 1.0,
-                "3_month_earn_rate": 9.3917,
-                "6_month_earn_rate": 22.3612,
-                "12_month_earn_rate": 24.4702
+                "1_week_avg_volume": 9742126,
+                "1_month_earn_rate": -2.2251,
+                "3_month_earn_rate": 5.2793,
+                "6_month_earn_rate": 20.511,
+                "12_month_earn_rate": 22.5706
             },
             {
                 "ticker": "XLU",
                 "name": "Utilities Select Sector SPDR Fund",
                 "listing_date": "1998-12-22",
-                "1_week_avg_volume": 20764395,
-                "1_month_earn_rate": -4.0464,
-                "3_month_earn_rate": 1.3561,
-                "6_month_earn_rate": 6.5589,
-                "12_month_earn_rate": 12.6046
+                "1_week_avg_volume": 21551003,
+                "1_month_earn_rate": -4.7375,
+                "3_month_earn_rate": 0.6261,
+                "6_month_earn_rate": 6.6511,
+                "12_month_earn_rate": 12.8727
             }
         ]
     },
@@ -321,21 +321,21 @@
                 "ticker": "SPMO",
                 "name": "Invesco S&P 500 Momentum ETF",
                 "listing_date": "2015-10-12",
-                "1_week_avg_volume": 1298782,
-                "1_month_earn_rate": 1.2387,
-                "3_month_earn_rate": 1.2384,
-                "6_month_earn_rate": 13.9837,
-                "12_month_earn_rate": 26.371
+                "1_week_avg_volume": 1508766,
+                "1_month_earn_rate": -1.0304,
+                "3_month_earn_rate": -1.5208,
+                "6_month_earn_rate": 12.5883,
+                "12_month_earn_rate": 24.5134
             },
             {
                 "ticker": "MTUM",
                 "name": "iShares MSCI USA Momentum Factor ETF",
                 "listing_date": "2013-04-18",
-                "1_week_avg_volume": 406109,
-                "1_month_earn_rate": 1.7039,
-                "3_month_earn_rate": 1.242,
-                "6_month_earn_rate": 10.7215,
-                "12_month_earn_rate": 21.4873
+                "1_week_avg_volume": 450246,
+                "1_month_earn_rate": -0.8466,
+                "3_month_earn_rate": -1.7936,
+                "6_month_earn_rate": 8.8186,
+                "12_month_earn_rate": 19.4835
             }
         ]
     },
@@ -346,20 +346,20 @@
                 "ticker": "AIQ",
                 "name": "Global X Artificial Intelligence & Technology ETF",
                 "listing_date": "2018-05-16",
-                "1_week_avg_volume": 1254417,
-                "1_month_earn_rate": 0.0775,
-                "3_month_earn_rate": 9.1677,
-                "6_month_earn_rate": 22.6317,
-                "12_month_earn_rate": 28.5783
+                "1_week_avg_volume": 1257515,
+                "1_month_earn_rate": -2.0551,
+                "3_month_earn_rate": 5.3378,
+                "6_month_earn_rate": 21.5793,
+                "12_month_earn_rate": 27.1453
             },
             {
                 "ticker": "IVES",
                 "name": "Dan IVES Wedbush AI Revolution ETF",
                 "listing_date": "2025-06-04",
-                "1_week_avg_volume": 745415,
-                "1_month_earn_rate": -1.4653,
-                "3_month_earn_rate": 7.364,
-                "6_month_earn_rate": 25.9075,
+                "1_week_avg_volume": 778499,
+                "1_month_earn_rate": -3.9747,
+                "3_month_earn_rate": 2.048,
+                "6_month_earn_rate": 23.8928,
                 "12_month_earn_rate": null
             }
         ]
@@ -371,41 +371,41 @@
                 "ticker": "SMH",
                 "name": "VanEck Semiconductor ETF",
                 "listing_date": "2000-06-05",
-                "1_week_avg_volume": 4816924,
-                "1_month_earn_rate": 5.6516,
-                "3_month_earn_rate": 21.875,
-                "6_month_earn_rate": 40.9424,
-                "12_month_earn_rate": 51.3934
+                "1_week_avg_volume": 5665165,
+                "1_month_earn_rate": -0.3966,
+                "3_month_earn_rate": 15.2847,
+                "6_month_earn_rate": 37.7952,
+                "12_month_earn_rate": 48.2781
             },
             {
                 "ticker": "SOXX",
                 "name": "iShares Semiconductor ETF",
                 "listing_date": "2001-07-13",
-                "1_week_avg_volume": 4313506,
-                "1_month_earn_rate": 6.5628,
-                "3_month_earn_rate": 23.2911,
-                "6_month_earn_rate": 39.2303,
-                "12_month_earn_rate": 44.7979
+                "1_week_avg_volume": 6361666,
+                "1_month_earn_rate": -0.0634,
+                "3_month_earn_rate": 16.4119,
+                "6_month_earn_rate": 36.1184,
+                "12_month_earn_rate": 41.2307
             },
             {
                 "ticker": "XSD",
                 "name": "SPDR S&P Semiconductor ETF",
                 "listing_date": "2006-02-06",
-                "1_week_avg_volume": 26003,
-                "1_month_earn_rate": 5.8426,
-                "3_month_earn_rate": 15.4517,
-                "6_month_earn_rate": 40.8638,
-                "12_month_earn_rate": 33.2389
+                "1_week_avg_volume": 26596,
+                "1_month_earn_rate": 0.5886,
+                "3_month_earn_rate": 8.287,
+                "6_month_earn_rate": 38.5244,
+                "12_month_earn_rate": 30.0723
             },
             {
                 "ticker": "PSI",
                 "name": "Invesco Semiconductors ETF",
                 "listing_date": "2005-06-23",
-                "1_week_avg_volume": 85306,
-                "1_month_earn_rate": 9.1299,
-                "3_month_earn_rate": 25.1431,
-                "6_month_earn_rate": 49.337,
-                "12_month_earn_rate": 42.3024
+                "1_week_avg_volume": 98138,
+                "1_month_earn_rate": 2.4406,
+                "3_month_earn_rate": 17.5268,
+                "6_month_earn_rate": 46.0074,
+                "12_month_earn_rate": 38.5203
             }
         ]
     },
@@ -416,121 +416,121 @@
                 "ticker": "GLDM",
                 "name": "SPDR Gold MiniShares",
                 "listing_date": "2018-06-26",
-                "1_week_avg_volume": 4912652,
-                "1_month_earn_rate": 3.5229,
-                "3_month_earn_rate": 17.281,
-                "6_month_earn_rate": 26.1252,
-                "12_month_earn_rate": 60.7102
+                "1_week_avg_volume": 4993665,
+                "1_month_earn_rate": 2.4684,
+                "3_month_earn_rate": 16.7513,
+                "6_month_earn_rate": 25.2023,
+                "12_month_earn_rate": 59.5426
             },
             {
                 "ticker": "GDX",
                 "name": "VanEck Gold Miners ETF",
                 "listing_date": "2006-05-22",
-                "1_week_avg_volume": 20775519,
-                "1_month_earn_rate": 12.4495,
-                "3_month_earn_rate": 23.6703,
-                "6_month_earn_rate": 61.1433,
-                "12_month_earn_rate": 130.2102
+                "1_week_avg_volume": 23545482,
+                "1_month_earn_rate": 8.0883,
+                "3_month_earn_rate": 21.538,
+                "6_month_earn_rate": 57.2898,
+                "12_month_earn_rate": 128.1876
             },
             {
                 "ticker": "SLV",
                 "name": "iShares Silver Trust",
                 "listing_date": "2006-04-28",
-                "1_week_avg_volume": 48977489,
-                "1_month_earn_rate": 24.0474,
-                "3_month_earn_rate": 50.2869,
-                "6_month_earn_rate": 74.2892,
-                "12_month_earn_rate": 98.8268
+                "1_week_avg_volume": 55940766,
+                "1_month_earn_rate": 16.101,
+                "3_month_earn_rate": 44.7368,
+                "6_month_earn_rate": 70.1547,
+                "12_month_earn_rate": 93.515
             },
             {
                 "ticker": "GLD",
                 "name": "SPDR Gold Shares",
                 "listing_date": "2004-11-18",
-                "1_week_avg_volume": 8490539,
-                "1_month_earn_rate": 3.5196,
-                "3_month_earn_rate": 17.2381,
-                "6_month_earn_rate": 25.9577,
-                "12_month_earn_rate": 60.2706
+                "1_week_avg_volume": 10056247,
+                "1_month_earn_rate": 2.4483,
+                "3_month_earn_rate": 16.6799,
+                "6_month_earn_rate": 25.0245,
+                "12_month_earn_rate": 59.0732
             },
             {
                 "ticker": "GDXJ",
                 "name": "VanEck Junior Gold Miners ETF",
                 "listing_date": "2009-11-11",
-                "1_week_avg_volume": 4577701,
-                "1_month_earn_rate": 17.1665,
-                "3_month_earn_rate": 27.5908,
-                "6_month_earn_rate": 62.6823,
-                "12_month_earn_rate": 139.1968
+                "1_week_avg_volume": 4948044,
+                "1_month_earn_rate": 12.6774,
+                "3_month_earn_rate": 24.9317,
+                "6_month_earn_rate": 60.4661,
+                "12_month_earn_rate": 137.8167
             },
             {
                 "ticker": "IAU",
                 "name": "iShares Gold Trust",
                 "listing_date": "2005-01-28",
-                "1_week_avg_volume": 7962938,
-                "1_month_earn_rate": 3.5218,
-                "3_month_earn_rate": 17.2685,
-                "6_month_earn_rate": 26.0604,
-                "12_month_earn_rate": 60.5342
+                "1_week_avg_volume": 9423663,
+                "1_month_earn_rate": 2.4671,
+                "3_month_earn_rate": 16.7339,
+                "6_month_earn_rate": 25.1004,
+                "12_month_earn_rate": 59.335
             },
             {
                 "ticker": "SGOL",
                 "name": "abrdn Physical Gold Shares ETF",
                 "listing_date": "2009-09-09",
-                "1_week_avg_volume": 5280472,
-                "1_month_earn_rate": 3.5315,
-                "3_month_earn_rate": 17.2662,
-                "6_month_earn_rate": 26.0829,
-                "12_month_earn_rate": 60.6228
+                "1_week_avg_volume": 5718518,
+                "1_month_earn_rate": 2.45,
+                "3_month_earn_rate": 16.7521,
+                "6_month_earn_rate": 25.1298,
+                "12_month_earn_rate": 59.5173
             },
             {
                 "ticker": "SLVR",
                 "name": "Sprott Silver Miners & Physical Silver ETF",
                 "listing_date": "2025-01-15",
-                "1_week_avg_volume": 448225,
-                "1_month_earn_rate": 30.2374,
-                "3_month_earn_rate": 46.2096,
-                "6_month_earn_rate": 86.1331,
+                "1_week_avg_volume": 541881,
+                "1_month_earn_rate": 20.7875,
+                "3_month_earn_rate": 38.872,
+                "6_month_earn_rate": 80.7439,
                 "12_month_earn_rate": null
             },
             {
                 "ticker": "SLVR",
                 "name": "Sprott Silver Miners & Physical Silver ETF",
                 "listing_date": "2025-01-15",
-                "1_week_avg_volume": 448225,
-                "1_month_earn_rate": 30.2374,
-                "3_month_earn_rate": 46.2096,
-                "6_month_earn_rate": 86.1331,
+                "1_week_avg_volume": 541881,
+                "1_month_earn_rate": 20.7875,
+                "3_month_earn_rate": 38.872,
+                "6_month_earn_rate": 80.7439,
                 "12_month_earn_rate": null
             },
             {
                 "ticker": "SIL",
                 "name": "Global X Silver Miners ETF",
                 "listing_date": "2010-04-20",
-                "1_week_avg_volume": 2054094,
-                "1_month_earn_rate": 22.874,
-                "3_month_earn_rate": 26.6059,
-                "6_month_earn_rate": 72.2519,
-                "12_month_earn_rate": 119.1876
+                "1_week_avg_volume": 2371836,
+                "1_month_earn_rate": 17.1092,
+                "3_month_earn_rate": 22.4102,
+                "6_month_earn_rate": 69.2609,
+                "12_month_earn_rate": 119.0955
             },
             {
                 "ticker": "SILJ",
                 "name": "Amplify Junior Silver Miners ETF",
                 "listing_date": "2012-11-29",
-                "1_week_avg_volume": 10362307,
-                "1_month_earn_rate": 22.6341,
-                "3_month_earn_rate": 37.3047,
-                "6_month_earn_rate": 88.3456,
-                "12_month_earn_rate": 145.1551
+                "1_week_avg_volume": 11954632,
+                "1_month_earn_rate": 15.7101,
+                "3_month_earn_rate": 30.406,
+                "6_month_earn_rate": 84.2562,
+                "12_month_earn_rate": 142.3737
             },
             {
                 "ticker": "SLVP",
                 "name": "iShares MSCI Global Silver and Metals Miners ETF",
                 "listing_date": "2012-02-02",
-                "1_week_avg_volume": 582101,
-                "1_month_earn_rate": 22.0572,
-                "3_month_earn_rate": 33.996,
-                "6_month_earn_rate": 87.4782,
-                "12_month_earn_rate": 152.0418
+                "1_week_avg_volume": 686203,
+                "1_month_earn_rate": 16.0084,
+                "3_month_earn_rate": 29.3957,
+                "6_month_earn_rate": 82.9154,
+                "12_month_earn_rate": 150.0813
             }
         ]
     },
@@ -541,41 +541,41 @@
                 "ticker": "COPP",
                 "name": "Sprott Copper Miners ETF",
                 "listing_date": "2024-03-06",
-                "1_week_avg_volume": 85610,
-                "1_month_earn_rate": 13.0266,
-                "3_month_earn_rate": 28.2834,
-                "6_month_earn_rate": 50.9489,
-                "12_month_earn_rate": 43.9791
+                "1_week_avg_volume": 81921,
+                "1_month_earn_rate": 9.3054,
+                "3_month_earn_rate": 23.8795,
+                "6_month_earn_rate": 49.7041,
+                "12_month_earn_rate": 44.3744
             },
             {
                 "ticker": "RSPM",
                 "name": "Invesco S&P 500 Equal Weight Materials ETF",
                 "listing_date": "2006-11-07",
-                "1_week_avg_volume": 38531,
-                "1_month_earn_rate": 5.1669,
-                "3_month_earn_rate": 2.1283,
-                "6_month_earn_rate": 5.3006,
-                "12_month_earn_rate": -2.824
+                "1_week_avg_volume": 40087,
+                "1_month_earn_rate": 4.0756,
+                "3_month_earn_rate": 2.4634,
+                "6_month_earn_rate": 5.8592,
+                "12_month_earn_rate": -1.9368
             },
             {
                 "ticker": "COPX",
                 "name": "Global X Copper Miners ETF",
                 "listing_date": "2010-04-20",
-                "1_week_avg_volume": 2005023,
-                "1_month_earn_rate": 11.5323,
-                "3_month_earn_rate": 29.4944,
-                "6_month_earn_rate": 60.1366,
-                "12_month_earn_rate": 61.8079
+                "1_week_avg_volume": 2076109,
+                "1_month_earn_rate": 7.6121,
+                "3_month_earn_rate": 25.6268,
+                "6_month_earn_rate": 59.7475,
+                "12_month_earn_rate": 60.9223
             },
             {
                 "ticker": "PICK",
                 "name": "iShares MSCI Global Metals & Mining Producers ETF",
                 "listing_date": "2012-02-02",
-                "1_week_avg_volume": 428655,
-                "1_month_earn_rate": 9.0929,
-                "3_month_earn_rate": 18.9566,
-                "6_month_earn_rate": 35.5241,
-                "12_month_earn_rate": 31.1055
+                "1_week_avg_volume": 385914,
+                "1_month_earn_rate": 5.9425,
+                "3_month_earn_rate": 15.6206,
+                "6_month_earn_rate": 35.3838,
+                "12_month_earn_rate": 30.0673
             }
         ]
     },
@@ -586,11 +586,11 @@
                 "ticker": "QTUM",
                 "name": "Defiance Quantum ETF",
                 "listing_date": "2018-09-05",
-                "1_week_avg_volume": 371284,
-                "1_month_earn_rate": 3.5987,
-                "3_month_earn_rate": 16.0711,
-                "6_month_earn_rate": 29.8093,
-                "12_month_earn_rate": 56.3003
+                "1_week_avg_volume": 392036,
+                "1_month_earn_rate": 0.5689,
+                "3_month_earn_rate": 11.2328,
+                "6_month_earn_rate": 27.8305,
+                "12_month_earn_rate": 48.3789
             }
         ]
     },
@@ -601,11 +601,11 @@
                 "ticker": "HYDR",
                 "name": "Global X Hydrogen ETF",
                 "listing_date": "2021-07-14",
-                "1_week_avg_volume": 16635,
-                "1_month_earn_rate": -16.651,
-                "3_month_earn_rate": 25.9904,
-                "6_month_earn_rate": 65.6471,
-                "12_month_earn_rate": 45.9305
+                "1_week_avg_volume": 15307,
+                "1_month_earn_rate": -18.8273,
+                "3_month_earn_rate": 21.8779,
+                "6_month_earn_rate": 64.8847,
+                "12_month_earn_rate": 46.6463
             }
         ]
     },
@@ -616,31 +616,31 @@
                 "ticker": "URA",
                 "name": "Global X Uranium ETF",
                 "listing_date": "2010-11-05",
-                "1_week_avg_volume": 3583031,
-                "1_month_earn_rate": 3.2884,
-                "3_month_earn_rate": 16.5279,
-                "6_month_earn_rate": 36.0733,
-                "12_month_earn_rate": 65.7133
+                "1_week_avg_volume": 4053079,
+                "1_month_earn_rate": -3.3375,
+                "3_month_earn_rate": 0.1522,
+                "6_month_earn_rate": 27.4564,
+                "12_month_earn_rate": 55.788
             },
             {
                 "ticker": "URNM",
                 "name": "Sprott Uranium Miners ETF",
                 "listing_date": "2019-12-04",
-                "1_week_avg_volume": 386104,
-                "1_month_earn_rate": 4.7577,
-                "3_month_earn_rate": 14.7941,
-                "6_month_earn_rate": 39.0909,
-                "12_month_earn_rate": 34.0034
+                "1_week_avg_volume": 397984,
+                "1_month_earn_rate": -0.4388,
+                "3_month_earn_rate": -0.839,
+                "6_month_earn_rate": 31.0767,
+                "12_month_earn_rate": 26.161
             },
             {
                 "ticker": "NLR",
                 "name": "VanEck Uranium and Nuclear ETF",
                 "listing_date": "2007-08-15",
-                "1_week_avg_volume": 435963,
-                "1_month_earn_rate": 1.2757,
-                "3_month_earn_rate": 12.8779,
-                "6_month_earn_rate": 31.212,
-                "12_month_earn_rate": 56.5848
+                "1_week_avg_volume": 442262,
+                "1_month_earn_rate": -5.0688,
+                "3_month_earn_rate": -0.7115,
+                "6_month_earn_rate": 23.5742,
+                "12_month_earn_rate": 48.2877
             }
         ]
     },
@@ -651,41 +651,41 @@
                 "ticker": "BATT",
                 "name": "Amplify Lithium & Battery Technology ETF",
                 "listing_date": "2018-06-06",
-                "1_week_avg_volume": 47388,
-                "1_month_earn_rate": 2.6316,
-                "3_month_earn_rate": 20.7223,
-                "6_month_earn_rate": 54.8985,
-                "12_month_earn_rate": 48.7737
+                "1_week_avg_volume": 39526,
+                "1_month_earn_rate": -0.1449,
+                "3_month_earn_rate": 15.3138,
+                "6_month_earn_rate": 54.3113,
+                "12_month_earn_rate": 49.8851
             },
             {
                 "ticker": "ILIT",
                 "name": "Ishares Lithium Miners And Producers ETF",
                 "listing_date": "2023-06-26",
-                "1_week_avg_volume": 31000,
-                "1_month_earn_rate": 13.9222,
-                "3_month_earn_rate": 54.9676,
-                "6_month_earn_rate": 102.0526,
-                "12_month_earn_rate": 57.5146
+                "1_week_avg_volume": 33123,
+                "1_month_earn_rate": 6.1044,
+                "3_month_earn_rate": 40.514,
+                "6_month_earn_rate": 95.412,
+                "12_month_earn_rate": 53.6218
             },
             {
                 "ticker": "LIT",
                 "name": "Global X Lithium & Battery Tech ETF",
                 "listing_date": "2010-07-23",
-                "1_week_avg_volume": 227049,
-                "1_month_earn_rate": 5.4225,
-                "3_month_earn_rate": 30.234,
-                "6_month_earn_rate": 73.8327,
-                "12_month_earn_rate": 43.0283
+                "1_week_avg_volume": 240912,
+                "1_month_earn_rate": 2.5036,
+                "3_month_earn_rate": 23.1585,
+                "6_month_earn_rate": 73.5624,
+                "12_month_earn_rate": 45.994
             },
             {
                 "ticker": "LITP",
                 "name": "Sprott Lithium Miners ETF",
                 "listing_date": "2023-02-02",
-                "1_week_avg_volume": 50795,
-                "1_month_earn_rate": 21.4528,
-                "3_month_earn_rate": 68.0965,
-                "6_month_earn_rate": 119.2308,
-                "12_month_earn_rate": 66.6629
+                "1_week_avg_volume": 61262,
+                "1_month_earn_rate": 14.1087,
+                "3_month_earn_rate": 51.4231,
+                "6_month_earn_rate": 111.1111,
+                "12_month_earn_rate": 60.0917
             }
         ]
     },
@@ -696,41 +696,41 @@
                 "ticker": "KSTR",
                 "name": "KraneShares SSE STAR Market 50 Index ETF",
                 "listing_date": "2021-02-01",
-                "1_week_avg_volume": 36201,
-                "1_month_earn_rate": -3.5504,
-                "3_month_earn_rate": -0.1246,
-                "6_month_earn_rate": 35.2364,
-                "12_month_earn_rate": 22.5835
+                "1_week_avg_volume": 31253,
+                "1_month_earn_rate": -0.9086,
+                "3_month_earn_rate": 1.589,
+                "6_month_earn_rate": 38.9805,
+                "12_month_earn_rate": 35.0328
             },
             {
                 "ticker": "KWEB",
                 "name": "KraneShares CSI China Internet ETF",
                 "listing_date": "2013-08-01",
-                "1_week_avg_volume": 14969773,
-                "1_month_earn_rate": -6.5168,
-                "3_month_earn_rate": -8.9097,
-                "6_month_earn_rate": 6.198,
-                "12_month_earn_rate": 11.899
+                "1_week_avg_volume": 16032809,
+                "1_month_earn_rate": -6.1801,
+                "3_month_earn_rate": -9.8925,
+                "6_month_earn_rate": 8.5,
+                "12_month_earn_rate": 17.1884
             },
             {
                 "ticker": "FXI",
                 "name": "iShares China Large-Cap ETF",
                 "listing_date": "2004-10-08",
-                "1_week_avg_volume": 28483862,
-                "1_month_earn_rate": -3.8518,
-                "3_month_earn_rate": -3.2107,
-                "6_month_earn_rate": 6.664,
-                "12_month_earn_rate": 21.1343
+                "1_week_avg_volume": 28116272,
+                "1_month_earn_rate": -4.4732,
+                "3_month_earn_rate": -4.1687,
+                "6_month_earn_rate": 8.3419,
+                "12_month_earn_rate": 26.5718
             },
             {
                 "ticker": "MCHI",
                 "name": "iShares MSCI China ETF",
                 "listing_date": "2011-03-31",
-                "1_week_avg_volume": 2550213,
-                "1_month_earn_rate": -4.4011,
-                "3_month_earn_rate": -3.534,
-                "6_month_earn_rate": 11.6682,
-                "12_month_earn_rate": 23.2354
+                "1_week_avg_volume": 2478049,
+                "1_month_earn_rate": -4.7383,
+                "3_month_earn_rate": -4.5165,
+                "6_month_earn_rate": 13.4344,
+                "12_month_earn_rate": 28.7171
             }
         ]
     },
@@ -741,11 +741,11 @@
                 "ticker": "VNM",
                 "name": "VanEck Vietnam ETF",
                 "listing_date": "2009-08-14",
-                "1_week_avg_volume": 744258,
-                "1_month_earn_rate": 7.9149,
-                "3_month_earn_rate": 1.6695,
-                "6_month_earn_rate": 36.7515,
-                "12_month_earn_rate": 52.5042
+                "1_week_avg_volume": 799868,
+                "1_month_earn_rate": -0.2282,
+                "3_month_earn_rate": -4.9457,
+                "6_month_earn_rate": 34.3318,
+                "12_month_earn_rate": 46.6052
             }
         ]
     },
@@ -756,41 +756,41 @@
                 "ticker": "ARKQ",
                 "name": "ARK Autonomous Technology & Robotics ETF",
                 "listing_date": "2014-09-30",
-                "1_week_avg_volume": 228735,
-                "1_month_earn_rate": 2.0151,
-                "3_month_earn_rate": 16.5757,
-                "6_month_earn_rate": 40.524,
-                "12_month_earn_rate": 51.6462
+                "1_week_avg_volume": 218459,
+                "1_month_earn_rate": -0.1743,
+                "3_month_earn_rate": 11.1154,
+                "6_month_earn_rate": 39.2488,
+                "12_month_earn_rate": 49.1472
             },
             {
                 "ticker": "BOTZ",
                 "name": "Global X Robotics & Artificial Intelligence ETF",
                 "listing_date": "2016-09-13",
-                "1_week_avg_volume": 592676,
-                "1_month_earn_rate": 1.7636,
-                "3_month_earn_rate": 8.49,
-                "6_month_earn_rate": 17.8625,
-                "12_month_earn_rate": 9.496
+                "1_week_avg_volume": 621321,
+                "1_month_earn_rate": 0.525,
+                "3_month_earn_rate": 5.7251,
+                "6_month_earn_rate": 17.9853,
+                "12_month_earn_rate": 9.2221
             },
             {
                 "ticker": "ROBT",
                 "name": "First Trust Nasdaq Artificial Intelligence and Robotics ETF",
                 "listing_date": "2018-03-05",
-                "1_week_avg_volume": 61772,
-                "1_month_earn_rate": 0.7942,
-                "3_month_earn_rate": 5.8306,
-                "6_month_earn_rate": 16.6808,
-                "12_month_earn_rate": 13.5089
+                "1_week_avg_volume": 60049,
+                "1_month_earn_rate": -1.3615,
+                "3_month_earn_rate": 2.5869,
+                "6_month_earn_rate": 16.4004,
+                "12_month_earn_rate": 12.6421
             },
             {
                 "ticker": "ROBO",
                 "name": "Robo Global Robotics and Automation Index ETF",
                 "listing_date": "2013-10-22",
-                "1_week_avg_volume": 150530,
-                "1_month_earn_rate": 4.4919,
-                "3_month_earn_rate": 10.8404,
-                "6_month_earn_rate": 24.7051,
-                "12_month_earn_rate": 23.3483
+                "1_week_avg_volume": 138825,
+                "1_month_earn_rate": 1.9537,
+                "3_month_earn_rate": 7.9032,
+                "6_month_earn_rate": 24.6903,
+                "12_month_earn_rate": 22.04
             }
         ]
     },
@@ -801,71 +801,71 @@
                 "ticker": "SHLD",
                 "name": "Global X Defense ETF",
                 "listing_date": "2023-09-14",
-                "1_week_avg_volume": 623786,
-                "1_month_earn_rate": -2.2139,
-                "3_month_earn_rate": -0.9307,
-                "6_month_earn_rate": 11.9182,
-                "12_month_earn_rate": 71.1109
+                "1_week_avg_volume": 657490,
+                "1_month_earn_rate": -1.7309,
+                "3_month_earn_rate": -2.4714,
+                "6_month_earn_rate": 9.3921,
+                "12_month_earn_rate": 71.1855
             },
             {
                 "ticker": "ITA",
                 "name": "iShares U.S. Aerospace & Defense ETF",
                 "listing_date": "2006-05-05",
-                "1_week_avg_volume": 493893,
-                "1_month_earn_rate": -1.0641,
-                "3_month_earn_rate": 4.8274,
-                "6_month_earn_rate": 16.5914,
-                "12_month_earn_rate": 40.7945
+                "1_week_avg_volume": 538188,
+                "1_month_earn_rate": -0.1097,
+                "3_month_earn_rate": 4.1478,
+                "6_month_earn_rate": 16.7417,
+                "12_month_earn_rate": 41.1114
             },
             {
                 "ticker": "JETS",
                 "name": "U.S. Global Jets ETF",
                 "listing_date": "2015-04-30",
-                "1_week_avg_volume": 3327304,
-                "1_month_earn_rate": 13.3628,
-                "3_month_earn_rate": 8.6957,
-                "6_month_earn_rate": 26.0036,
-                "12_month_earn_rate": 12.0587
+                "1_week_avg_volume": 3668037,
+                "1_month_earn_rate": 10.0817,
+                "3_month_earn_rate": 9.8679,
+                "6_month_earn_rate": 30.6839,
+                "12_month_earn_rate": 11.0326
             },
             {
                 "ticker": "XAR",
                 "name": "SPDR S&P Aerospace & Defense ETF",
                 "listing_date": "2011-09-29",
-                "1_week_avg_volume": 79162,
-                "1_month_earn_rate": 1.3426,
-                "3_month_earn_rate": 8.3628,
-                "6_month_earn_rate": 20.9373,
-                "12_month_earn_rate": 43.2257
+                "1_week_avg_volume": 87929,
+                "1_month_earn_rate": 0.7534,
+                "3_month_earn_rate": 6.1254,
+                "6_month_earn_rate": 19.9972,
+                "12_month_earn_rate": 41.5493
             },
             {
                 "ticker": "PPA",
                 "name": "Invesco Aerospace & Defense ETF",
                 "listing_date": "2005-10-26",
-                "1_week_avg_volume": 118122,
-                "1_month_earn_rate": -0.1163,
-                "3_month_earn_rate": 3.9377,
-                "6_month_earn_rate": 14.2809,
-                "12_month_earn_rate": 32.0753
+                "1_week_avg_volume": 127837,
+                "1_month_earn_rate": -0.0584,
+                "3_month_earn_rate": 2.9125,
+                "6_month_earn_rate": 13.2225,
+                "12_month_earn_rate": 31.1112
             },
             {
                 "ticker": "KDEF",
                 "name": "PLUS Korea Defense Industry Index ETF",
                 "listing_date": "2025-02-06",
-                "1_week_avg_volume": 39663,
-                "1_month_earn_rate": 1.899,
-                "3_month_earn_rate": -10.5686,
-                "6_month_earn_rate": 9.235,
+                "1_week_avg_volume": 24491,
+                "1_month_earn_rate": 5.074,
+                "3_month_earn_rate": -9.1223,
+                "6_month_earn_rate": 9.3643,
                 "12_month_earn_rate": null
             },
             {
                 "ticker": "EUAD",
                 "name": "Select STOXX Europe Aerospace & Defense ETF",
                 "listing_date": "2024-10-22",
-                "1_week_avg_volume": 291760,
-                "1_month_earn_rate": -5.5593,
-                "3_month_earn_rate": -7.2914,
-                "6_month_earn_rate": 3.1351,
-                "12_month_earn_rate": 65.8225
+                "1_week_avg_volume": 279375,
+                "1_month_earn_rate": -5.572,
+                "3_month_earn_rate": -9.4043,
+                "6_month_earn_rate": 3.6963,
+                "12_month_earn_rate": 68.8836
             }
         ]
     },
@@ -876,21 +876,21 @@
                 "ticker": "UFO",
                 "name": "Procure Space ETF",
                 "listing_date": "2019-04-11",
-                "1_week_avg_volume": 117005,
-                "1_month_earn_rate": 13.4083,
-                "3_month_earn_rate": 14.6413,
-                "6_month_earn_rate": 51.5512,
-                "12_month_earn_rate": 70.4066
+                "1_week_avg_volume": 113777,
+                "1_month_earn_rate": 11.747,
+                "3_month_earn_rate": 10.3293,
+                "6_month_earn_rate": 49.3178,
+                "12_month_earn_rate": 69.1333
             },
             {
                 "ticker": "ARKX",
                 "name": "ARK Space Exploration & Innovation ETF",
                 "listing_date": "2021-03-30",
-                "1_week_avg_volume": 272062,
-                "1_month_earn_rate": 1.1332,
-                "3_month_earn_rate": 12.0198,
-                "6_month_earn_rate": 33.3786,
-                "12_month_earn_rate": 49.5683
+                "1_week_avg_volume": 369511,
+                "1_month_earn_rate": -1.511,
+                "3_month_earn_rate": 7.456,
+                "6_month_earn_rate": 32.2878,
+                "12_month_earn_rate": 47.3036
             }
         ]
     },
@@ -901,31 +901,31 @@
                 "ticker": "BLOK",
                 "name": "Amplify Blockchain Technology ETF",
                 "listing_date": "2018-01-25",
-                "1_week_avg_volume": 238598,
-                "1_month_earn_rate": -1.9756,
-                "3_month_earn_rate": -0.4545,
-                "6_month_earn_rate": 22.5352,
-                "12_month_earn_rate": 33.3494
+                "1_week_avg_volume": 237142,
+                "1_month_earn_rate": -4.6079,
+                "3_month_earn_rate": -4.9494,
+                "6_month_earn_rate": 20.0983,
+                "12_month_earn_rate": 30.6896
             },
             {
                 "ticker": "BITQ",
                 "name": "Bitwise Crypto Industry Innovators ETF",
                 "listing_date": "2021-05-12",
-                "1_week_avg_volume": 137806,
-                "1_month_earn_rate": -4.9777,
-                "3_month_earn_rate": 4.3556,
-                "6_month_earn_rate": 30.735,
-                "12_month_earn_rate": 14.8382
+                "1_week_avg_volume": 136006,
+                "1_month_earn_rate": -7.4844,
+                "3_month_earn_rate": -3.5544,
+                "6_month_earn_rate": 27.1429,
+                "12_month_earn_rate": 12.1398
             },
             {
                 "ticker": "BKCH",
                 "name": "Global X Blockchain ETF",
                 "listing_date": "2021-07-14",
-                "1_week_avg_volume": 62366,
-                "1_month_earn_rate": -9.2449,
-                "3_month_earn_rate": 9.237,
-                "6_month_earn_rate": 69.0307,
-                "12_month_earn_rate": 24.8707
+                "1_week_avg_volume": 59907,
+                "1_month_earn_rate": -12.4883,
+                "3_month_earn_rate": -1.0537,
+                "6_month_earn_rate": 63.7405,
+                "12_month_earn_rate": 21.4997
             }
         ]
     },
@@ -936,31 +936,31 @@
                 "ticker": "IAI",
                 "name": "iShares U.S. Broker-Dealers & Securities Exchanges ETF",
                 "listing_date": "2006-05-05",
-                "1_week_avg_volume": 54938,
-                "1_month_earn_rate": 3.019,
-                "3_month_earn_rate": 2.9712,
-                "6_month_earn_rate": 17.1375,
-                "12_month_earn_rate": 22.1959
+                "1_week_avg_volume": 60312,
+                "1_month_earn_rate": 0.6693,
+                "3_month_earn_rate": 2.4557,
+                "6_month_earn_rate": 17.7199,
+                "12_month_earn_rate": 21.8195
             },
             {
                 "ticker": "KBWB",
                 "name": "Invesco KBW Bank ETF",
                 "listing_date": "2011-11-01",
-                "1_week_avg_volume": 2518215,
-                "1_month_earn_rate": 9.0271,
-                "3_month_earn_rate": 10.0138,
-                "6_month_earn_rate": 29.0315,
-                "12_month_earn_rate": 26.988
+                "1_week_avg_volume": 2493487,
+                "1_month_earn_rate": 7.1951,
+                "3_month_earn_rate": 9.4784,
+                "6_month_earn_rate": 31.0215,
+                "12_month_earn_rate": 26.8601
             },
             {
                 "ticker": "ARKF",
                 "name": "ARK Fintech Innovation ETF",
                 "listing_date": "2019-02-04",
-                "1_week_avg_volume": 139616,
-                "1_month_earn_rate": -4.7088,
-                "3_month_earn_rate": -7.8962,
-                "6_month_earn_rate": 14.0303,
-                "12_month_earn_rate": 25.0062
+                "1_week_avg_volume": 141970,
+                "1_month_earn_rate": -6.1445,
+                "3_month_earn_rate": -10.2141,
+                "6_month_earn_rate": 12.2986,
+                "12_month_earn_rate": 24.9748
             }
         ]
     },
@@ -971,41 +971,41 @@
                 "ticker": "HACK",
                 "name": "Amplify Cybersecurity ETF",
                 "listing_date": "2014-11-12",
-                "1_week_avg_volume": 44813,
-                "1_month_earn_rate": -2.1228,
-                "3_month_earn_rate": -0.1872,
-                "6_month_earn_rate": 1.9481,
-                "12_month_earn_rate": 12.7619
+                "1_week_avg_volume": 65887,
+                "1_month_earn_rate": -3.0458,
+                "3_month_earn_rate": -3.1359,
+                "6_month_earn_rate": 0.676,
+                "12_month_earn_rate": 12.0261
             },
             {
                 "ticker": "CIBR",
                 "name": "First Trust NASDAQ Cybersecurity ETF",
                 "listing_date": "2015-07-07",
-                "1_week_avg_volume": 562705,
-                "1_month_earn_rate": -1.4312,
-                "3_month_earn_rate": 1.0942,
-                "6_month_earn_rate": 3.7501,
-                "12_month_earn_rate": 17.6445
+                "1_week_avg_volume": 637609,
+                "1_month_earn_rate": -2.853,
+                "3_month_earn_rate": -2.4039,
+                "6_month_earn_rate": 2.1816,
+                "12_month_earn_rate": 15.9439
             },
             {
                 "ticker": "BUG",
                 "name": "Global X Cybersecurity ETF",
                 "listing_date": "2019-11-01",
-                "1_week_avg_volume": 316025,
-                "1_month_earn_rate": -4.4412,
-                "3_month_earn_rate": -4.5254,
-                "6_month_earn_rate": -9.9002,
-                "12_month_earn_rate": -4.9955
+                "1_week_avg_volume": 313488,
+                "1_month_earn_rate": -4.219,
+                "3_month_earn_rate": -6.6219,
+                "6_month_earn_rate": -10.3361,
+                "12_month_earn_rate": -5.4042
             },
             {
                 "ticker": "IHAK",
                 "name": "iShares Cybersecurity and Tech ETF",
                 "listing_date": "2019-06-14",
-                "1_week_avg_volume": 91587,
-                "1_month_earn_rate": -2.9593,
-                "3_month_earn_rate": -3.1082,
-                "6_month_earn_rate": -2.7855,
-                "12_month_earn_rate": -1.051
+                "1_week_avg_volume": 95219,
+                "1_month_earn_rate": -2.4864,
+                "3_month_earn_rate": -3.7577,
+                "6_month_earn_rate": -2.1976,
+                "12_month_earn_rate": -0.6343
             }
         ]
     },
@@ -1016,21 +1016,21 @@
                 "ticker": "SKYY",
                 "name": "First Trust Cloud Computing ETF",
                 "listing_date": "2011-07-06",
-                "1_week_avg_volume": 197221,
-                "1_month_earn_rate": -2.2258,
-                "3_month_earn_rate": 0.878,
-                "6_month_earn_rate": 14.293,
-                "12_month_earn_rate": 5.0238
+                "1_week_avg_volume": 222924,
+                "1_month_earn_rate": -3.3759,
+                "3_month_earn_rate": -2.7837,
+                "6_month_earn_rate": 13.8336,
+                "12_month_earn_rate": 5.6407
             },
             {
                 "ticker": "CLOU",
                 "name": "Global X Cloud Computing ETF Global X Cloud Computing ETF",
                 "listing_date": "2019-04-16",
-                "1_week_avg_volume": 92214,
-                "1_month_earn_rate": -4.0926,
-                "3_month_earn_rate": 0.346,
-                "6_month_earn_rate": 0.6071,
-                "12_month_earn_rate": -8.9839
+                "1_week_avg_volume": 106124,
+                "1_month_earn_rate": -3.7688,
+                "3_month_earn_rate": -1.9206,
+                "6_month_earn_rate": 1.9069,
+                "12_month_earn_rate": -8.5555
             }
         ]
     },
@@ -1041,11 +1041,11 @@
                 "ticker": "BUZZ",
                 "name": "VanEck Social Sentiment ETF",
                 "listing_date": "2021-03-04",
-                "1_week_avg_volume": 82313,
-                "1_month_earn_rate": -1.9198,
-                "3_month_earn_rate": 2.8724,
-                "6_month_earn_rate": 24.6636,
-                "12_month_earn_rate": 30.7978
+                "1_week_avg_volume": 85752,
+                "1_month_earn_rate": -4.3182,
+                "3_month_earn_rate": -1.7216,
+                "6_month_earn_rate": 22.2948,
+                "12_month_earn_rate": 29.6733
             }
         ]
     },
@@ -1056,41 +1056,41 @@
                 "ticker": "VGT",
                 "name": "Vanguard Information Technology Index Fund ETF Shares",
                 "listing_date": "2004-01-30",
-                "1_week_avg_volume": 399101,
-                "1_month_earn_rate": 0.3931,
-                "3_month_earn_rate": 8.0139,
-                "6_month_earn_rate": 22.7654,
-                "12_month_earn_rate": 21.9269
+                "1_week_avg_volume": 471473,
+                "1_month_earn_rate": -2.6144,
+                "3_month_earn_rate": 3.8768,
+                "6_month_earn_rate": 21.23,
+                "12_month_earn_rate": 20.1312
             },
             {
                 "ticker": "IYW",
                 "name": "iShares U.S. Technology ETF",
                 "listing_date": "2000-05-19",
-                "1_week_avg_volume": 953940,
-                "1_month_earn_rate": 0.1328,
-                "3_month_earn_rate": 7.9521,
-                "6_month_earn_rate": 22.9585,
-                "12_month_earn_rate": 24.2623
+                "1_week_avg_volume": 749684,
+                "1_month_earn_rate": -2.3367,
+                "3_month_earn_rate": 4.166,
+                "6_month_earn_rate": 21.6911,
+                "12_month_earn_rate": 22.4994
             },
             {
                 "ticker": "ARKK",
                 "name": "ARK Innovation ETF",
                 "listing_date": "2014-10-31",
-                "1_week_avg_volume": 7587290,
-                "1_month_earn_rate": 0.0122,
-                "3_month_earn_rate": 4.4419,
-                "6_month_earn_rate": 32.3122,
-                "12_month_earn_rate": 33.8444
+                "1_week_avg_volume": 8236022,
+                "1_month_earn_rate": -1.1922,
+                "3_month_earn_rate": 0.8404,
+                "6_month_earn_rate": 29.2652,
+                "12_month_earn_rate": 32.6787
             },
             {
                 "ticker": "ARKW",
                 "name": "ARK Next Generation Internet ETF",
                 "listing_date": "2014-09-30",
-                "1_week_avg_volume": 122660,
-                "1_month_earn_rate": -3.5388,
-                "3_month_earn_rate": -3.0487,
-                "6_month_earn_rate": 21.9356,
-                "12_month_earn_rate": 37.2238
+                "1_week_avg_volume": 139891,
+                "1_month_earn_rate": -5.0181,
+                "3_month_earn_rate": -6.4058,
+                "6_month_earn_rate": 19.2278,
+                "12_month_earn_rate": 36.2933
             }
         ]
     },
@@ -1101,81 +1101,81 @@
                 "ticker": "VHT",
                 "name": "Vanguard Health Care Index Fund ETF Shares",
                 "listing_date": "2004-01-30",
-                "1_week_avg_volume": 242262,
-                "1_month_earn_rate": 2.1367,
-                "3_month_earn_rate": 12.2924,
-                "6_month_earn_rate": 15.1276,
-                "12_month_earn_rate": 9.0678
+                "1_week_avg_volume": 246936,
+                "1_month_earn_rate": 1.1951,
+                "3_month_earn_rate": 13.5072,
+                "6_month_earn_rate": 15.9713,
+                "12_month_earn_rate": 9.7384
             },
             {
                 "ticker": "IBB",
                 "name": "iShares Biotechnology ETF",
                 "listing_date": "2001-02-12",
-                "1_week_avg_volume": 1394808,
-                "1_month_earn_rate": 3.7407,
-                "3_month_earn_rate": 20.8544,
-                "6_month_earn_rate": 32.0779,
-                "12_month_earn_rate": 20.3677
+                "1_week_avg_volume": 1519804,
+                "1_month_earn_rate": 2.7037,
+                "3_month_earn_rate": 20.4662,
+                "6_month_earn_rate": 32.4375,
+                "12_month_earn_rate": 20.7652
             },
             {
                 "ticker": "XBI",
                 "name": "SPDR S&P Biotech ETF",
                 "listing_date": "2006-02-06",
-                "1_week_avg_volume": 8596411,
-                "1_month_earn_rate": 7.9028,
-                "3_month_earn_rate": 30.7424,
-                "6_month_earn_rate": 45.881,
-                "12_month_earn_rate": 25.2813
+                "1_week_avg_volume": 8663040,
+                "1_month_earn_rate": 7.9047,
+                "3_month_earn_rate": 31.8257,
+                "6_month_earn_rate": 47.3388,
+                "12_month_earn_rate": 26.4487
             },
             {
                 "ticker": "IHI",
                 "name": "iShares U.S. Medical Devices ETF",
                 "listing_date": "2006-05-05",
-                "1_week_avg_volume": 1320181,
-                "1_month_earn_rate": -0.4955,
-                "3_month_earn_rate": 1.7023,
-                "6_month_earn_rate": 1.8941,
-                "12_month_earn_rate": 4.1072
+                "1_week_avg_volume": 1421205,
+                "1_month_earn_rate": -1.567,
+                "3_month_earn_rate": 3.1703,
+                "6_month_earn_rate": 2.4487,
+                "12_month_earn_rate": 3.5929
             },
             {
                 "ticker": "IYH",
                 "name": "iShares U.S. Healthcare ETF",
                 "listing_date": "2000-06-16",
-                "1_week_avg_volume": 964977,
-                "1_month_earn_rate": 2.0662,
-                "3_month_earn_rate": 11.4624,
-                "6_month_earn_rate": 13.7452,
-                "12_month_earn_rate": 7.0303
+                "1_week_avg_volume": 1009896,
+                "1_month_earn_rate": 0.9177,
+                "3_month_earn_rate": 12.6447,
+                "6_month_earn_rate": 14.7455,
+                "12_month_earn_rate": 7.7338
             },
             {
                 "ticker": "ARKG",
                 "name": "ARK Genomic Revolution ETF",
                 "listing_date": "2014-10-31",
-                "1_week_avg_volume": 3118354,
-                "1_month_earn_rate": 7.0809,
-                "3_month_earn_rate": 20.5078,
-                "6_month_earn_rate": 30.444,
-                "12_month_earn_rate": 16.8118
+                "1_week_avg_volume": 3324495,
+                "1_month_earn_rate": 6.7138,
+                "3_month_earn_rate": 16.4674,
+                "6_month_earn_rate": 28.6749,
+                "12_month_earn_rate": 13.8763
             },
             {
                 "ticker": "BBC",
                 "name": "Virtus LifeSci Biotech Clinical Trials ETF",
                 "listing_date": "2014-12-17",
-                "1_week_avg_volume": 38940,
-                "1_month_earn_rate": 25.168,
-                "3_month_earn_rate": 66.0448,
-                "6_month_earn_rate": 98.3655,
-                "12_month_earn_rate": 49.3635
+                "1_week_avg_volume": 38367,
+                "1_month_earn_rate": 23.8913,
+                "3_month_earn_rate": 66.4583,
+                "6_month_earn_rate": 101.2594,
+                "12_month_earn_rate": 48.4861
             },
             {
                 "ticker": "XPH",
                 "name": "State Street SPDR S&P Pharmaceuticals ETF",
                 "listing_date": "2006-06-22",
-                "1_week_avg_volume": 57007,
-                "1_month_earn_rate": 10.4799,
-                "3_month_earn_rate": 21.5592,
-                "6_month_earn_rate": 34.7098,
-                "12_month_earn_rate": 24.6673
+                "1_week_avg_volume": 50225,
+                "1_month_earn_rate": 10.4891,
+                "3_month_earn_rate": 22.5537,
+                "6_month_earn_rate": 36.3946,
+                "12_month_earn_rate": 25.5703
             }
         ]
     },
@@ -1186,11 +1186,11 @@
                 "ticker": "REMX",
                 "name": "VanEck Rare Earth and Strategic Metals ETF",
                 "listing_date": "2010-10-28",
-                "1_week_avg_volume": 702274,
-                "1_month_earn_rate": 9.795,
-                "3_month_earn_rate": 26.7151,
-                "6_month_earn_rate": 88.6541,
-                "12_month_earn_rate": 69.9567
+                "1_week_avg_volume": 786594,
+                "1_month_earn_rate": 5.9202,
+                "3_month_earn_rate": 18.8843,
+                "6_month_earn_rate": 82.7952,
+                "12_month_earn_rate": 68.1248
             }
         ]
     },
@@ -1201,61 +1201,61 @@
                 "ticker": "SCHD",
                 "name": "Schwab U.S. Dividend Equity ETF",
                 "listing_date": "2011-10-20",
-                "1_week_avg_volume": 17900032,
-                "1_month_earn_rate": 2.8811,
-                "3_month_earn_rate": 2.7328,
-                "6_month_earn_rate": 5.5077,
-                "12_month_earn_rate": 0.8465
+                "1_week_avg_volume": 19021544,
+                "1_month_earn_rate": 2.8433,
+                "3_month_earn_rate": 3.2589,
+                "6_month_earn_rate": 5.9783,
+                "12_month_earn_rate": 1.2333
             },
             {
                 "ticker": "DIVO",
                 "name": "Amplify CWP Enhanced Dividend Income ETF",
                 "listing_date": "2016-12-15",
-                "1_week_avg_volume": 723014,
-                "1_month_earn_rate": 1.2029,
-                "3_month_earn_rate": 6.3314,
-                "6_month_earn_rate": 12.475,
-                "12_month_earn_rate": 14.0687
+                "1_week_avg_volume": 829573,
+                "1_month_earn_rate": 0.7174,
+                "3_month_earn_rate": 5.7151,
+                "6_month_earn_rate": 13.4555,
+                "12_month_earn_rate": 13.7437
             },
             {
                 "ticker": "VYM",
                 "name": "Vanguard High Dividend Yield Index Fund ETF Shares",
                 "listing_date": "2006-11-16",
-                "1_week_avg_volume": 1573366,
-                "1_month_earn_rate": 4.0189,
-                "3_month_earn_rate": 5.1595,
-                "6_month_earn_rate": 13.5114,
-                "12_month_earn_rate": 15.0835
+                "1_week_avg_volume": 1785019,
+                "1_month_earn_rate": 2.1978,
+                "3_month_earn_rate": 4.0844,
+                "6_month_earn_rate": 13.2697,
+                "12_month_earn_rate": 14.2953
             },
             {
                 "ticker": "VIG",
                 "name": "Vanguard Dividend Appreciation Index Fund ETF Shares",
                 "listing_date": "2006-05-02",
-                "1_week_avg_volume": 1546398,
-                "1_month_earn_rate": 2.5682,
-                "3_month_earn_rate": 4.5149,
-                "6_month_earn_rate": 11.6866,
-                "12_month_earn_rate": 12.9986
+                "1_week_avg_volume": 1686237,
+                "1_month_earn_rate": 0.8996,
+                "3_month_earn_rate": 3.4113,
+                "6_month_earn_rate": 11.7091,
+                "12_month_earn_rate": 12.3724
             },
             {
                 "ticker": "DGRO",
                 "name": "iShares Core Dividend Growth ETF",
                 "listing_date": "2014-06-12",
-                "1_week_avg_volume": 1762644,
-                "1_month_earn_rate": 2.6025,
-                "3_month_earn_rate": 4.8268,
-                "6_month_earn_rate": 12.4116,
-                "12_month_earn_rate": 13.0503
+                "1_week_avg_volume": 1923579,
+                "1_month_earn_rate": 1.5616,
+                "3_month_earn_rate": 4.4601,
+                "6_month_earn_rate": 13.008,
+                "12_month_earn_rate": 12.9821
             },
             {
                 "ticker": "NOBL",
                 "name": "ProShares S&P 500 Dividend Aristocrats ETF",
                 "listing_date": "2013-10-10",
-                "1_week_avg_volume": 870176,
-                "1_month_earn_rate": 2.2082,
-                "3_month_earn_rate": 1.7711,
-                "6_month_earn_rate": 5.5287,
-                "12_month_earn_rate": 1.5921
+                "1_week_avg_volume": 861918,
+                "1_month_earn_rate": 2.0564,
+                "3_month_earn_rate": 2.6438,
+                "6_month_earn_rate": 7.0858,
+                "12_month_earn_rate": 2.1988
             }
         ]
     },
@@ -1266,31 +1266,31 @@
                 "ticker": "VLUE",
                 "name": "iShares MSCI USA Value Factor ETF",
                 "listing_date": "2013-04-18",
-                "1_week_avg_volume": 410626,
-                "1_month_earn_rate": 5.4081,
-                "3_month_earn_rate": 14.538,
-                "6_month_earn_rate": 26.6395,
-                "12_month_earn_rate": 27.2382
+                "1_week_avg_volume": 471140,
+                "1_month_earn_rate": 3.0979,
+                "3_month_earn_rate": 12.9853,
+                "6_month_earn_rate": 26.4674,
+                "12_month_earn_rate": 26.7771
             },
             {
                 "ticker": "MOAT",
                 "name": "VanEck Morningstar Wide Moat ETF",
                 "listing_date": "2012-04-25",
-                "1_week_avg_volume": 847827,
-                "1_month_earn_rate": 4.6944,
-                "3_month_earn_rate": 9.287,
-                "6_month_earn_rate": 14.844,
-                "12_month_earn_rate": 9.4299
+                "1_week_avg_volume": 952750,
+                "1_month_earn_rate": 3.5714,
+                "3_month_earn_rate": 8.2556,
+                "6_month_earn_rate": 15.9872,
+                "12_month_earn_rate": 8.9069
             },
             {
                 "ticker": "RPV",
                 "name": "Invesco S&P 500 Pure Value ETF",
                 "listing_date": "2006-03-07",
-                "1_week_avg_volume": 211368,
-                "1_month_earn_rate": 4.3788,
-                "3_month_earn_rate": 6.9863,
-                "6_month_earn_rate": 15.7022,
-                "12_month_earn_rate": 14.8577
+                "1_week_avg_volume": 193863,
+                "1_month_earn_rate": 4.3146,
+                "3_month_earn_rate": 7.5625,
+                "6_month_earn_rate": 16.0464,
+                "12_month_earn_rate": 15.1515
             }
         ]
     },
@@ -1301,51 +1301,51 @@
                 "ticker": "ICLN",
                 "name": "iShares Global Clean Energy ETF",
                 "listing_date": "2008-06-25",
-                "1_week_avg_volume": 1880193,
-                "1_month_earn_rate": -4.0541,
-                "3_month_earn_rate": 16.473,
-                "6_month_earn_rate": 29.9719,
-                "12_month_earn_rate": 40.9168
+                "1_week_avg_volume": 1725798,
+                "1_month_earn_rate": -6.0023,
+                "3_month_earn_rate": 12.0864,
+                "6_month_earn_rate": 26.1398,
+                "12_month_earn_rate": 39.0814
             },
             {
                 "ticker": "TAN",
                 "name": "Invesco Solar ETF",
                 "listing_date": "2008-04-15",
-                "1_week_avg_volume": 890844,
-                "1_month_earn_rate": -5.0337,
-                "3_month_earn_rate": 17.8554,
-                "6_month_earn_rate": 43.8504,
-                "12_month_earn_rate": 34.5024
+                "1_week_avg_volume": 1101042,
+                "1_month_earn_rate": -5.3985,
+                "3_month_earn_rate": 12.9634,
+                "6_month_earn_rate": 36.803,
+                "12_month_earn_rate": 34.3295
             },
             {
                 "ticker": "PBW",
                 "name": "Invesco WilderHill Clean Energy ETF",
                 "listing_date": "2005-03-03",
-                "1_week_avg_volume": 743519,
-                "1_month_earn_rate": 1.4378,
-                "3_month_earn_rate": 30.864,
-                "6_month_earn_rate": 69.8281,
-                "12_month_earn_rate": 55.9498
+                "1_week_avg_volume": 892488,
+                "1_month_earn_rate": -0.6585,
+                "3_month_earn_rate": 21.5318,
+                "6_month_earn_rate": 62.9126,
+                "12_month_earn_rate": 53.3214
             },
             {
                 "ticker": "QCLN",
                 "name": "First Trust NASDAQ Clean Edge Green Energy Index Fund",
                 "listing_date": "2007-02-14",
-                "1_week_avg_volume": 78682,
-                "1_month_earn_rate": 0.1719,
-                "3_month_earn_rate": 21.3093,
-                "6_month_earn_rate": 43.7637,
-                "12_month_earn_rate": 28.4361
+                "1_week_avg_volume": 76585,
+                "1_month_earn_rate": -1.6489,
+                "3_month_earn_rate": 16.0516,
+                "6_month_earn_rate": 40.2175,
+                "12_month_earn_rate": 27.2233
             },
             {
                 "ticker": "GRID",
                 "name": "First Trust NASDAQ Clean Edge Smart Grid Infrastructure Index Fund",
                 "listing_date": "2009-11-17",
-                "1_week_avg_volume": 259307,
-                "1_month_earn_rate": 0.0128,
-                "3_month_earn_rate": 5.0671,
-                "6_month_earn_rate": 16.3366,
-                "12_month_earn_rate": 25.3126
+                "1_week_avg_volume": 281212,
+                "1_month_earn_rate": -2.4,
+                "3_month_earn_rate": 2.2977,
+                "6_month_earn_rate": 15.1972,
+                "12_month_earn_rate": 24.0192
             }
         ]
     },
@@ -1356,31 +1356,31 @@
                 "ticker": "VT",
                 "name": "Vanguard Total World Stock Index Fund ETF Shares",
                 "listing_date": "2008-06-26",
-                "1_week_avg_volume": 3411658,
-                "1_month_earn_rate": 0.9989,
-                "3_month_earn_rate": 4.7265,
-                "6_month_earn_rate": 13.5935,
-                "12_month_earn_rate": 18.2952
+                "1_week_avg_volume": 3374985,
+                "1_month_earn_rate": -0.1908,
+                "3_month_earn_rate": 3.1606,
+                "6_month_earn_rate": 13.9577,
+                "12_month_earn_rate": 17.9323
             },
             {
                 "ticker": "VTI",
                 "name": "Vanguard Total Stock Market Index Fund ETF Shares",
                 "listing_date": "2001-06-15",
-                "1_week_avg_volume": 3883003,
-                "1_month_earn_rate": 1.2301,
-                "3_month_earn_rate": 5.0892,
-                "6_month_earn_rate": 15.0679,
-                "12_month_earn_rate": 14.5181
+                "1_week_avg_volume": 4042025,
+                "1_month_earn_rate": 0.0387,
+                "3_month_earn_rate": 3.3858,
+                "6_month_earn_rate": 15.1144,
+                "12_month_earn_rate": 13.638
             },
             {
                 "ticker": "VXUS",
                 "name": "Vanguard Total International Stock Index Fund ETF Shares",
                 "listing_date": "2011-01-28",
-                "1_week_avg_volume": 6041099,
-                "1_month_earn_rate": 0.7944,
-                "3_month_earn_rate": 4.6703,
-                "6_month_earn_rate": 11.9026,
-                "12_month_earn_rate": 25.3513
+                "1_week_avg_volume": 6242021,
+                "1_month_earn_rate": -0.277,
+                "3_month_earn_rate": 3.1509,
+                "6_month_earn_rate": 12.6432,
+                "12_month_earn_rate": 25.8599
             }
         ]
     },
@@ -1391,41 +1391,41 @@
                 "ticker": "VWO",
                 "name": "Vanguard Emerging Markets Stock Index Fund",
                 "listing_date": "2005-03-10",
-                "1_week_avg_volume": 10072276,
-                "1_month_earn_rate": -1.6085,
-                "3_month_earn_rate": 2.323,
-                "6_month_earn_rate": 11.7279,
-                "12_month_earn_rate": 18.4233
+                "1_week_avg_volume": 11276088,
+                "1_month_earn_rate": -2.4946,
+                "3_month_earn_rate": 0.7053,
+                "6_month_earn_rate": 12.395,
+                "12_month_earn_rate": 19.55
             },
             {
                 "ticker": "EEM",
                 "name": "iShares MSCI Emerging Markets ETF",
                 "listing_date": "2003-04-14",
-                "1_week_avg_volume": 24774785,
-                "1_month_earn_rate": -1.2417,
-                "3_month_earn_rate": 5.0134,
-                "6_month_earn_rate": 15.7544,
-                "12_month_earn_rate": 25.9154
+                "1_week_avg_volume": 26888758,
+                "1_month_earn_rate": -2.4109,
+                "3_month_earn_rate": 3.0395,
+                "6_month_earn_rate": 16.2502,
+                "12_month_earn_rate": 26.482
             },
             {
                 "ticker": "IEMG",
                 "name": "iShares Core MSCI Emerging Markets ETF",
                 "listing_date": "2012-10-24",
-                "1_week_avg_volume": 9416190,
-                "1_month_earn_rate": -1.2409,
-                "3_month_earn_rate": 4.4143,
-                "6_month_earn_rate": 14.7614,
-                "12_month_earn_rate": 25.0196
+                "1_week_avg_volume": 9771040,
+                "1_month_earn_rate": -2.3931,
+                "3_month_earn_rate": 2.5291,
+                "6_month_earn_rate": 15.3276,
+                "12_month_earn_rate": 25.5217
             },
             {
                 "ticker": "SCHE",
                 "name": "Schwab Emerging Markets Equity ETF",
                 "listing_date": "2010-01-14",
-                "1_week_avg_volume": 2405924,
-                "1_month_earn_rate": -4.395,
-                "3_month_earn_rate": -0.1835,
-                "6_month_earn_rate": 9.2582,
-                "12_month_earn_rate": 16.3105
+                "1_week_avg_volume": 2206928,
+                "1_month_earn_rate": -2.8269,
+                "3_month_earn_rate": 0.6541,
+                "6_month_earn_rate": 12.7523,
+                "12_month_earn_rate": 20.4354
             }
         ]
     },
@@ -1436,111 +1436,111 @@
                 "ticker": "EWZ",
                 "name": "iShares MSCI Brazil ETF",
                 "listing_date": "2000-07-14",
-                "1_week_avg_volume": 55133576,
-                "1_month_earn_rate": -0.9854,
-                "3_month_earn_rate": 10.4229,
-                "6_month_earn_rate": 19.9936,
-                "12_month_earn_rate": 38.4278
+                "1_week_avg_volume": 33778429,
+                "1_month_earn_rate": 0.301,
+                "3_month_earn_rate": 9.2101,
+                "6_month_earn_rate": 20.6154,
+                "12_month_earn_rate": 37.5867
             },
             {
                 "ticker": "EWJ",
                 "name": "iShares MSCI Japan ETF",
                 "listing_date": "1996-03-18",
-                "1_week_avg_volume": 4250554,
-                "1_month_earn_rate": 0.5612,
-                "3_month_earn_rate": 4.2843,
-                "6_month_earn_rate": 14.4074,
-                "12_month_earn_rate": 22.3786
+                "1_week_avg_volume": 4623325,
+                "1_month_earn_rate": -0.4031,
+                "3_month_earn_rate": 3.2575,
+                "6_month_earn_rate": 15.0543,
+                "12_month_earn_rate": 22.7208
             },
             {
                 "ticker": "EWW",
                 "name": "iShares MSCI Mexico ETF",
                 "listing_date": "1996-03-18",
-                "1_week_avg_volume": 1419414,
-                "1_month_earn_rate": 2.4805,
-                "3_month_earn_rate": 7.4713,
-                "6_month_earn_rate": 17.4974,
-                "12_month_earn_rate": 42.1648
+                "1_week_avg_volume": 1542805,
+                "1_month_earn_rate": 3.7119,
+                "3_month_earn_rate": 5.8709,
+                "6_month_earn_rate": 17.8618,
+                "12_month_earn_rate": 42.8943
             },
             {
                 "ticker": "EWT",
                 "name": "iShares MSCI Taiwan ETF",
                 "listing_date": "2000-06-23",
-                "1_week_avg_volume": 3162937,
-                "1_month_earn_rate": 0.8105,
-                "3_month_earn_rate": 4.918,
-                "6_month_earn_rate": 16.1791,
-                "12_month_earn_rate": 23.9615
+                "1_week_avg_volume": 4037342,
+                "1_month_earn_rate": -2.0028,
+                "3_month_earn_rate": 1.7137,
+                "6_month_earn_rate": 14.7717,
+                "12_month_earn_rate": 22.7294
             },
             {
                 "ticker": "EWY",
                 "name": "iShares MSCI South Korea ETF",
                 "listing_date": "2000-05-12",
-                "1_week_avg_volume": 6125321,
-                "1_month_earn_rate": -0.3463,
-                "3_month_earn_rate": 20.7221,
-                "6_month_earn_rate": 40.2866,
-                "12_month_earn_rate": 81.164
+                "1_week_avg_volume": 7087720,
+                "1_month_earn_rate": -3.3882,
+                "3_month_earn_rate": 17.0223,
+                "6_month_earn_rate": 39.5212,
+                "12_month_earn_rate": 75.9428
             },
             {
                 "ticker": "EWH",
                 "name": "iShares MSCI Hong Kong ETF",
                 "listing_date": "1996-03-18",
-                "1_week_avg_volume": 2060679,
-                "1_month_earn_rate": -3.9877,
-                "3_month_earn_rate": -0.0456,
-                "6_month_earn_rate": 12.3176,
-                "12_month_earn_rate": 25.1171
+                "1_week_avg_volume": 2297441,
+                "1_month_earn_rate": -5.4883,
+                "3_month_earn_rate": -0.5004,
+                "6_month_earn_rate": 13.1344,
+                "12_month_earn_rate": 28.2602
             },
             {
                 "ticker": "EWA",
                 "name": "iShares MSCI Australia ETF",
                 "listing_date": "1996-03-18",
-                "1_week_avg_volume": 4109711,
-                "1_month_earn_rate": 0.0376,
-                "3_month_earn_rate": -2.2026,
-                "6_month_earn_rate": 1.5315,
-                "12_month_earn_rate": 5.7033
+                "1_week_avg_volume": 4218773,
+                "1_month_earn_rate": -0.2257,
+                "3_month_earn_rate": -3.8085,
+                "6_month_earn_rate": 2.303,
+                "12_month_earn_rate": 7.0372
             },
             {
                 "ticker": "EWC",
                 "name": "iShares MSCI Canada ETF",
                 "listing_date": "1996-03-18",
-                "1_week_avg_volume": 2099500,
-                "1_month_earn_rate": 5.9561,
-                "3_month_earn_rate": 9.0323,
-                "6_month_earn_rate": 18.3546,
-                "12_month_earn_rate": 29.2015
+                "1_week_avg_volume": 2210858,
+                "1_month_earn_rate": 4.1353,
+                "3_month_earn_rate": 7.5005,
+                "6_month_earn_rate": 18.2472,
+                "12_month_earn_rate": 29.2622
             },
             {
                 "ticker": "EWG",
                 "name": "iShares MSCI Germany ETF",
                 "listing_date": "1996-03-18",
-                "1_week_avg_volume": 1817008,
-                "1_month_earn_rate": 2.8135,
-                "3_month_earn_rate": 2.6144,
-                "6_month_earn_rate": 2.0723,
-                "12_month_earn_rate": 29.804
+                "1_week_avg_volume": 1974055,
+                "1_month_earn_rate": 1.1996,
+                "3_month_earn_rate": 1.8349,
+                "6_month_earn_rate": 3.3039,
+                "12_month_earn_rate": 29.5512
             },
             {
                 "ticker": "EWU",
                 "name": "iShares MSCI United Kingdom ETF",
                 "listing_date": "1996-03-18",
-                "1_week_avg_volume": 2099937,
-                "1_month_earn_rate": 0.0,
-                "3_month_earn_rate": 4.0773,
-                "6_month_earn_rate": 9.2294,
-                "12_month_earn_rate": 26.0759
+                "1_week_avg_volume": 1856618,
+                "1_month_earn_rate": -0.5286,
+                "3_month_earn_rate": 2.8273,
+                "6_month_earn_rate": 9.2681,
+                "12_month_earn_rate": 26.1262
             },
             {
                 "ticker": "EWL",
                 "name": "iShares MSCI Switzerland ETF",
                 "listing_date": "1996-03-18",
-                "1_week_avg_volume": 696199,
-                "1_month_earn_rate": 1.4219,
-                "3_month_earn_rate": 5.1033,
-                "6_month_earn_rate": 5.9073,
-                "12_month_earn_rate": 23.9219
+                "1_week_avg_volume": 700207,
+                "1_month_earn_rate": 0.5339,
+                "3_month_earn_rate": 5.0576,
+                "6_month_earn_rate": 7.6997,
+                "12_month_earn_rate": 25.3885
             }
         ]
     },
@@ -1551,31 +1551,31 @@
                 "ticker": "VEA",
                 "name": "Vanguard FTSE Developed Markets Index Fund ETF Shares",
                 "listing_date": "2007-07-26",
-                "1_week_avg_volume": 15201494,
-                "1_month_earn_rate": 1.7334,
-                "3_month_earn_rate": 5.4844,
-                "6_month_earn_rate": 11.8583,
-                "12_month_earn_rate": 28.1448
+                "1_week_avg_volume": 16177852,
+                "1_month_earn_rate": 0.5633,
+                "3_month_earn_rate": 4.1115,
+                "6_month_earn_rate": 12.6554,
+                "12_month_earn_rate": 28.4308
             },
             {
                 "ticker": "EFA",
                 "name": "iShares MSCI EAFE ETF",
                 "listing_date": "2001-08-27",
-                "1_week_avg_volume": 16820391,
-                "1_month_earn_rate": 1.0626,
-                "3_month_earn_rate": 4.3231,
-                "6_month_earn_rate": 9.1825,
-                "12_month_earn_rate": 24.9966
+                "1_week_avg_volume": 17989611,
+                "1_month_earn_rate": -0.0621,
+                "3_month_earn_rate": 3.0873,
+                "6_month_earn_rate": 10.0204,
+                "12_month_earn_rate": 25.4683
             },
             {
                 "ticker": "IEFA",
                 "name": "iShares Core MSCI EAFE ETF",
                 "listing_date": "2012-10-24",
-                "1_week_avg_volume": 11362121,
-                "1_month_earn_rate": 1.1414,
-                "3_month_earn_rate": 3.9328,
-                "6_month_earn_rate": 9.4132,
-                "12_month_earn_rate": 25.4001
+                "1_week_avg_volume": 11545750,
+                "1_month_earn_rate": 0.0223,
+                "3_month_earn_rate": 2.7076,
+                "6_month_earn_rate": 10.2216,
+                "12_month_earn_rate": 25.7466
             }
         ]
     },
@@ -1586,8 +1586,8 @@
                 "ticker": "MEME",
                 "name": "Roundhill ETF Trust - Roundhill Meme Stock ETF",
                 "listing_date": "2025-10-08",
-                "1_week_avg_volume": 227887,
-                "1_month_earn_rate": -3.3647,
+                "1_week_avg_volume": 237491,
+                "1_month_earn_rate": -10.5624,
                 "3_month_earn_rate": null,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
