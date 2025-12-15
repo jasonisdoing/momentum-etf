@@ -31,21 +31,6 @@
                 "3_month_earn_rate": 31.2417,
                 "6_month_earn_rate": 52.8025,
                 "12_month_earn_rate": 81.0811
-            }
-        ]
-    },
-    {
-        "category": "📊 지수액티브",
-        "tickers": [
-            {
-                "ticker": "444200",
-                "name": "SOL 코리아메가테크액티브",
-                "listing_date": "2022-10-18",
-                "1_week_avg_volume": 196786,
-                "1_month_earn_rate": 3.6202,
-                "3_month_earn_rate": 29.7281,
-                "6_month_earn_rate": 52.0647,
-                "12_month_earn_rate": 128.2195
             },
             {
                 "ticker": "495050",
@@ -121,6 +106,16 @@
                 "3_month_earn_rate": -1.2658,
                 "6_month_earn_rate": 6.9714,
                 "12_month_earn_rate": 13.9619
+            },
+            {
+                "ticker": "444200",
+                "name": "SOL 코리아메가테크액티브",
+                "listing_date": "2022-10-18",
+                "1_week_avg_volume": 196786,
+                "1_month_earn_rate": 3.6202,
+                "3_month_earn_rate": 29.7281,
+                "6_month_earn_rate": 52.0647,
+                "12_month_earn_rate": 128.2195
             }
         ]
     },
