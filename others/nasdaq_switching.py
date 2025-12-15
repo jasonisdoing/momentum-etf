@@ -44,14 +44,7 @@ DEFAULT_SETTINGS = {
 TUNING_CONFIG = {
     "drawdown_buy_cutoff": np.round(np.arange(0.1, 3.1, 0.1), 1),
     "drawdown_sell_cutoff": np.round(np.arange(0.1, 3.1, 0.1), 1),
-    "defense_ticker": [
-        "SCHD",
-        "SGOV",
-        "SPLV",
-        "DIVO",
-        "JEPI",
-        "GLDM",
-    ],
+    "defense_ticker": ["SCHD", "SGOV", "SPLV", "GLDM", "GDX"],
 }
 
 
@@ -385,12 +378,12 @@ def render_table_eaw(headers: list[str], rows: list[list[str]], aligns: list[str
     동아시아 문자 너비를 고려하여 리스트 데이터를 ASCII 테이블 문자열로 렌더링합니다.
     """
 
-    ansi_re = re.compile(r"\x1b\[[0-9;]*m")
+    _ansi_re = re.compile(r"\x1b\[[0-9;]*m")
 
     def _clean(s: str) -> str:
         if not isinstance(s, str):
             s = str(s)
-        s = ansi_re.sub("", s)
+        s = _ansi_re.sub("", s)
         s = normalize("NFKC", s)
         return s
 
@@ -629,7 +622,9 @@ def main():
         print(f"\n[INFO] 기준일: {report['as_of']}")
         print(f"[INFO] 최종 타깃: {report['target']}")
         print(
-            f"[INFO] 적용 파라미터: {settings['defense_ticker']} / Buy {settings['drawdown_buy_cutoff']}% / Sell {settings['drawdown_sell_cutoff']}%"
+            f"[INFO] 적용 파라미터: {settings['defense_ticker']} / "
+            f"Buy {settings['drawdown_buy_cutoff']}% / "
+            f"Sell {settings['drawdown_sell_cutoff']}%"
         )
 
     except Exception as e:

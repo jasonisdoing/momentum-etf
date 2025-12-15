@@ -69,7 +69,7 @@
                 "1_week_avg_volume": 2154823,
                 "1_month_earn_rate": -0.987,
                 "3_month_earn_rate": 1.99,
-                "6_month_earn_rate": 16.716,
+                "6_month_earn_rate": 16.7159,
                 "12_month_earn_rate": 19.2079
             },
             {
@@ -185,7 +185,7 @@
                 "1_month_earn_rate": 4.4275,
                 "3_month_earn_rate": 2.1653,
                 "6_month_earn_rate": 12.3678,
-                "12_month_earn_rate": -2.945
+                "12_month_earn_rate": -2.9451
             },
             {
                 "ticker": "SDVD",
@@ -530,7 +530,7 @@
                 "1_month_earn_rate": 16.0084,
                 "3_month_earn_rate": 29.3957,
                 "6_month_earn_rate": 82.9154,
-                "12_month_earn_rate": 150.0813
+                "12_month_earn_rate": 150.0812
             }
         ]
     },
@@ -805,7 +805,7 @@
                 "1_month_earn_rate": -1.7309,
                 "3_month_earn_rate": -2.4714,
                 "6_month_earn_rate": 9.3921,
-                "12_month_earn_rate": 71.1855
+                "12_month_earn_rate": 71.1856
             },
             {
                 "ticker": "ITA",
@@ -1005,7 +1005,7 @@
                 "1_month_earn_rate": -2.4864,
                 "3_month_earn_rate": -3.7577,
                 "6_month_earn_rate": -2.1976,
-                "12_month_earn_rate": -0.6343
+                "12_month_earn_rate": -0.6342
             }
         ]
     },
@@ -1070,7 +1070,7 @@
                 "1_month_earn_rate": -2.3367,
                 "3_month_earn_rate": 4.166,
                 "6_month_earn_rate": 21.6911,
-                "12_month_earn_rate": 22.4994
+                "12_month_earn_rate": 22.4993
             },
             {
                 "ticker": "ARKK",
@@ -1344,7 +1344,7 @@
                 "1_week_avg_volume": 281212,
                 "1_month_earn_rate": -2.4,
                 "3_month_earn_rate": 2.2977,
-                "6_month_earn_rate": 15.1972,
+                "6_month_earn_rate": 15.1971,
                 "12_month_earn_rate": 24.0192
             }
         ]
