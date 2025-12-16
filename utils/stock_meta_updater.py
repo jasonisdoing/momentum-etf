@@ -269,11 +269,32 @@ def update_account_metadata(account_id: str):
         except Exception as e:
             logger.error(f"[{account_norm.upper()}/{ticker}] 메타데이터 업데이트 실패: {e}")
 
-    if updated_count > 0:
-        try:
-            save_etfs(account_norm, stock_data)
-        except Exception as e:
-            logger.error(f"'{account_id}' 설정 저장 실패: {e}")
+    # [User Request] 중복 제거 및 정렬 로직 추가
+    seen_tickers = set()
+    for cat_entry in stock_data:
+        if "tickers" not in cat_entry:
+            continue
+
+        unique_stocks = []
+        for stock in cat_entry["tickers"]:
+            tkr = stock.get("ticker")
+            if tkr and tkr not in seen_tickers:
+                seen_tickers.add(tkr)
+                unique_stocks.append(stock)
+            elif tkr:
+                logger.debug(f"[{account_norm.upper()}] 중복 티커 제거: {tkr} (category: {cat_entry.get('category')})")
+
+        # 상장일 순 정렬 (없는 경우 맨 뒤로)
+        unique_stocks.sort(key=lambda x: x.get("listing_date") or "9999-99-99")
+        cat_entry["tickers"] = unique_stocks
+
+    # 메타데이터 업데이트가 없더라도 정렬/중복제거 반영을 위해 저장 시도
+    try:
+        save_etfs(account_norm, stock_data)
+        if updated_count == 0:
+            logger.info(f"[{account_norm.upper()}] 메타데이터 변경 없음, 정렬/중복제거 결과 저장 완료")
+    except Exception as e:
+        logger.error(f"'{account_id}' 설정 저장 실패: {e}")
 
 
 def update_stock_metadata(account_id: str | None = None):
