@@ -17,8 +17,9 @@ TUNING_CONFIG: dict[str, dict] = {
         "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
         "MA_TYPE": ["EMA"],
         "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
-        "STOP_LOSS_PCT": [3, 4, 5, 6, 7, 8, 9, 10],
-        "OVERBOUGHT_SELL_THRESHOLD": [84, 86, 88, 90],
+        "STOP_LOSS_PCT": [8],
+        # "STOP_LOSS_PCT": [3, 4, 5, 6, 7, 8, 9, 10],
+        "OVERBOUGHT_SELL_THRESHOLD": [84, 86, 88, 90, 92, 94],
         "TRAILING_STOP_PCT": [0],
         "COOLDOWN_DAYS": [0, 1, 2, 3],
         "CORE_HOLDINGS": [],
