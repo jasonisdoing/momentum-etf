@@ -6,7 +6,7 @@
                 "ticker": "069500",
                 "name": "KODEX 200",
                 "listing_date": "2002-10-14",
-                "1_week_avg_volume": 9832599,
+                "1_week_avg_volume": 9832597,
                 "1_month_earn_rate": -2.2784,
                 "3_month_earn_rate": 24.3549,
                 "6_month_earn_rate": 46.0591,
@@ -61,7 +61,7 @@
                 "ticker": "495050",
                 "name": "RISE 코리아밸류업",
                 "listing_date": "2024-11-04",
-                "1_week_avg_volume": 472157,
+                "1_week_avg_volume": 472155,
                 "1_month_earn_rate": -3.3585,
                 "3_month_earn_rate": 23.5416,
                 "6_month_earn_rate": 42.5849,
@@ -71,7 +71,7 @@
                 "ticker": "495230",
                 "name": "KoAct 코리아밸류업액티브",
                 "listing_date": "2024-11-04",
-                "1_week_avg_volume": 141800,
+                "1_week_avg_volume": 141764,
                 "1_month_earn_rate": -3.3353,
                 "3_month_earn_rate": 23.8248,
                 "6_month_earn_rate": 44.3033,
@@ -81,17 +81,17 @@
                 "ticker": "495850",
                 "name": "KODEX 코리아밸류업",
                 "listing_date": "2024-11-04",
-                "1_week_avg_volume": 183588,
+                "1_week_avg_volume": 183565,
                 "1_month_earn_rate": -3.0946,
                 "3_month_earn_rate": 23.7339,
-                "6_month_earn_rate": 42.1782,
+                "6_month_earn_rate": 42.1781,
                 "12_month_earn_rate": 76.56
             },
             {
                 "ticker": "496080",
                 "name": "TIGER 코리아밸류업",
                 "listing_date": "2024-11-04",
-                "1_week_avg_volume": 152545,
+                "1_week_avg_volume": 152432,
                 "1_month_earn_rate": -3.1544,
                 "3_month_earn_rate": 22.8651,
                 "6_month_earn_rate": 42.2747,
@@ -101,7 +101,7 @@
                 "ticker": "495060",
                 "name": "TIMEFOLIO 코리아밸류업액티브",
                 "listing_date": "2024-11-04",
-                "1_week_avg_volume": 61726,
+                "1_week_avg_volume": 61716,
                 "1_month_earn_rate": -3.9962,
                 "3_month_earn_rate": 16.6667,
                 "6_month_earn_rate": 33.2889,
@@ -265,7 +265,7 @@
                 "1_month_earn_rate": -2.3499,
                 "3_month_earn_rate": 41.6667,
                 "6_month_earn_rate": 78.9293,
-                "12_month_earn_rate": 127.2588
+                "12_month_earn_rate": 127.2587
             },
             {
                 "ticker": "396500",
@@ -545,7 +545,7 @@
                 "1_month_earn_rate": 0.5113,
                 "3_month_earn_rate": 6.7601,
                 "6_month_earn_rate": 18.4682,
-                "12_month_earn_rate": 46.2872
+                "12_month_earn_rate": 46.2871
             },
             {
                 "ticker": "466940",
@@ -650,7 +650,7 @@
                 "1_month_earn_rate": -1.2999,
                 "3_month_earn_rate": 3.1792,
                 "6_month_earn_rate": 18.016,
-                "12_month_earn_rate": 42.6586
+                "12_month_earn_rate": 42.6587
             }
         ]
     },

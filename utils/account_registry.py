@@ -125,6 +125,12 @@ def get_icon_fallback(country_code: str) -> str:
 def get_benchmark_tickers(account_settings: Mapping[str, Any]) -> list[str]:
     """계정 설정에서 벤치마크 티커 목록을 추출합니다."""
 
+    single_bench = account_settings.get("benchmark")
+    if isinstance(single_bench, Mapping):
+        ticker = str(single_bench.get("ticker") or "").strip().upper()
+        if ticker:
+            return [ticker]
+
     entries = account_settings.get("benchmarks")
     if not isinstance(entries, list):
         return []

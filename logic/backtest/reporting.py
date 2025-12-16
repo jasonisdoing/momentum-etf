@@ -222,7 +222,6 @@ def print_backtest_summary(
     if "monthly_returns" in summary and not summary["monthly_returns"].empty:
         monthly_returns = summary["monthly_returns"]
         yearly_returns = summary["yearly_returns"]
-        monthly_cum_returns = summary.get("monthly_cum_returns")
 
         pivot_df = (
             monthly_returns.mul(100)
@@ -239,44 +238,62 @@ def print_backtest_summary(
             yearly_series.index = yearly_series.index.year
             pivot_df["연간"] = yearly_series
 
-        cum_pivot_df = None
-        if monthly_cum_returns is not None and not monthly_cum_returns.empty:
-            cum_pivot_df = (
-                monthly_cum_returns.mul(100)
-                .to_frame("cum_return")
-                .pivot_table(
-                    index=monthly_cum_returns.index.year,
-                    columns=monthly_cum_returns.index.month,
-                    values="cum_return",
-                )
-            )
-
-        headers = ["연도"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
+        headers = ["구분"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
         rows_data: list[list[str]] = []
-        for year, row in pivot_df.iterrows():
-            monthly_row_data = [str(year)]
-            for month in range(1, 13):
-                val = row.get(month)
-                monthly_row_data.append(format_pct_change(val) if pd.notna(val) else "-")
 
-            yearly_val = row.get("연간")
-            monthly_row_data.append(format_pct_change(yearly_val) if pd.notna(yearly_val) else "-")
-            rows_data.append(monthly_row_data)
+        # 모든 연도를 수집 (포트폴리오 + 각 벤치마크)
+        all_years = sorted(pivot_df.index.unique())
 
-            if cum_pivot_df is not None and year in cum_pivot_df.index:
-                cum_row = cum_pivot_df.loc[year]
-                cum_row_data = ["  (누적)"]
+        bench_monthly_returns_map = summary.get("benchmark_monthly_returns") or {}
+        bench_pivots = {}
+
+        # 벤치마크 데이터 Pivot 미리 생성
+        for bench_name, bench_m_ret in bench_monthly_returns_map.items():
+            if bench_m_ret is not None and not bench_m_ret.empty:
+                b_pivot = (
+                    bench_m_ret.mul(100)
+                    .to_frame("return")
+                    .pivot_table(
+                        index=bench_m_ret.index.year,
+                        columns=bench_m_ret.index.month,
+                        values="return",
+                    )
+                )
+
+                # 벤치마크 연간 수익률 (복리)
+                b_annual = bench_m_ret.groupby(bench_m_ret.index.year).apply(lambda x: (1 + x).prod() - 1).mul(100)
+                b_pivot["연간"] = b_annual
+
+                bench_pivots[bench_name] = b_pivot
+                all_years = sorted(list(set(all_years) | set(b_pivot.index)))
+
+        for year in all_years:
+            # 1. 포트폴리오 (해당 연도 데이터가 있을 경우)
+            if year in pivot_df.index:
+                row = pivot_df.loc[year]
+                # 첫 번째 컬럼에 연도 혹은 "포트폴리오" 명시
+                # 사용자가 "2025" 처럼 첫 컬럼에 연도가 오길 원함 -> 포트폴리오를 기본으로 연도 표시
+                row_data = [str(year)]
                 for month in range(1, 13):
-                    cum_val = cum_row.get(month)
-                    cum_row_data.append(format_pct_change(cum_val) if pd.notna(cum_val) else "-")
+                    val = row.get(month)
+                    row_data.append(format_pct_change(val) if pd.notna(val) else "-")
+                yearly_val = row.get("연간")
+                row_data.append(format_pct_change(yearly_val) if pd.notna(yearly_val) else "-")
+                rows_data.append(row_data)
 
-                last_valid_month_index = cum_row.last_valid_index()
-                if last_valid_month_index is not None:
-                    cum_annual_val = cum_row[last_valid_month_index]
-                    cum_row_data.append(format_pct_change(cum_annual_val))
-                else:
-                    cum_row_data.append("-")
-                rows_data.append(cum_row_data)
+            # 3. 벤치마크 (해당 연도 데이터가 있을 경우)
+            # 벤치마크가 여러 개일 수 있으므로 순회
+            for bench_name, b_pivot in bench_pivots.items():
+                if year in b_pivot.index:
+                    b_row = b_pivot.loc[year]
+                    # 벤치마크 이름 표시
+                    b_row_data = [f"{bench_name}"]
+                    for month in range(1, 13):
+                        val = b_row.get(month)
+                        b_row_data.append(format_pct_change(val) if pd.notna(val) else "-")
+                    b_yearly_val = b_row.get("연간")
+                    b_row_data.append(format_pct_change(b_yearly_val) if pd.notna(b_yearly_val) else "-")
+                    rows_data.append(b_row_data)
 
         aligns = ["left"] + ["right"] * (len(headers) - 1)
         for line in render_table_eaw(headers, rows_data, aligns):
