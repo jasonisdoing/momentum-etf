@@ -378,49 +378,63 @@ def print_backtest_summary(
         add(f"| 최종 자산 (KRW): {format_kr_money(final_value_krw_value)}")
 
     benchmarks_info = summary.get("benchmarks")
+
+    # 테이블 헤더 생성
+    headers = ["구분", "포트폴리오"]
+    has_benchmark = False
+
     if isinstance(benchmarks_info, list) and benchmarks_info:
-        add("| 벤치마크 기간수익률(%)")
-        for idx, bench in enumerate(benchmarks_info, start=1):
+        has_benchmark = True
+        for bench in benchmarks_info:
             name = str(bench.get("name") or bench.get("ticker") or "-").strip()
-            ticker = str(bench.get("ticker") or "-").strip()
-            cum_ret = bench.get("cumulative_return_pct")
-            cum_label = format_pct_change(cum_ret) if cum_ret is not None else "N/A"
-            add(f"| {idx}. {name}({ticker}): {cum_label}")
+            headers.append(f"{name}(벤치마크)")
     else:
-        benchmark_name = summary.get("benchmark_name") or "S&P 500"
-        bench_ret = summary.get("benchmark_cum_ret_pct")
-        if bench_ret is not None:
-            add(f"| 벤치마크 기간수익률(%): {benchmark_name}: {format_pct_change(bench_ret)}")
+        # 단일 벤치마크 (레거시 지원)
+        bm_ret = summary.get("benchmark_cum_ret_pct")
+        if bm_ret is not None:
+            has_benchmark = True
+            bm_name = summary.get("benchmark_name") or "Benchmark"
+            headers.append(f"{bm_name}(벤치마크)")
+
+    # 데이터 행 생성
+    row_ret = ["기간수익률", format_pct_change(summary["period_return"])]
+    row_cagr = ["CAGR", format_pct_change(summary["cagr"])]
+    row_mdd = ["MDD", format_pct_change(-summary["mdd"])]
+    row_sharpe = ["Sharpe", f"{summary.get('sharpe', 0.0):.2f}"]
+    row_sdr = ["SDR", f"{summary.get('sharpe_to_mdd', 0.0):.3f}"]
 
     if isinstance(benchmarks_info, list) and benchmarks_info:
-        add("| 벤치마크 CAGR(%)")
-        for idx, bench in enumerate(benchmarks_info, start=1):
-            name = str(bench.get("name") or bench.get("ticker") or "-").strip()
-            ticker = str(bench.get("ticker") or "-").strip()
-            cagr_ret = bench.get("cagr_pct")
-            cagr_ret = bench.get("cagr_pct")
-            cagr_label = format_pct_change(cagr_ret) if cagr_ret is not None else "N/A"
-            add(f"| {idx}. {name}({ticker}): {cagr_label}")
-    else:
-        benchmark_name = summary.get("benchmark_name") or "S&P 500"
-        bench_cagr = summary.get("benchmark_cagr_pct")
-        if bench_cagr is not None:
-            add(f"| 벤치마크 CAGR(%): {benchmark_name}: {format_pct_change(bench_cagr)}")
+        for bench in benchmarks_info:
+            # 수익률
+            row_ret.append(format_pct_change(bench.get("cumulative_return_pct")))
+            # CAGR
+            row_cagr.append(format_pct_change(bench.get("cagr_pct")))
+            # MDD (벤치마크 객체에 mdd가 없으면 - 표시)
+            bm_mdd = bench.get("mdd")
+            row_mdd.append(format_pct_change(-bm_mdd) if bm_mdd is not None else "-")
+            # Sharpe
+            bm_sharpe = bench.get("sharpe")
+            row_sharpe.append(f"{float(bm_sharpe):.2f}" if bm_sharpe is not None else "-")
+            # SDR
+            bm_sdr = bench.get("sharpe_to_mdd")
+            row_sdr.append(f"{float(bm_sdr):.3f}" if bm_sdr is not None else "-")
 
-    if isinstance(benchmarks_info, list) and benchmarks_info:
-        add("| 벤치마크 SDR(Sharpe/MDD)")
-        for idx, bench in enumerate(benchmarks_info, start=1):
-            name = str(bench.get("name") or bench.get("ticker") or "-").strip()
-            ticker = str(bench.get("ticker") or "-").strip()
-            sdr = bench.get("sharpe_to_mdd")
-            sdr_label = f"{float(sdr):.3f}" if sdr is not None else "N/A"
-            add(f"| {idx}. {name}({ticker}): {sdr_label}")
+    elif has_benchmark:
+        # 단일 벤치마크 폴백
+        row_ret.append(format_pct_change(summary.get("benchmark_cum_ret_pct")))
+        row_cagr.append(format_pct_change(summary.get("benchmark_cagr_pct")))
+        row_mdd.append("-")
+        row_sharpe.append("-")
+        row_sdr.append("-")
 
-    add(f"| 기간수익률(%): {format_pct_change(summary['period_return'])}")
-    add(f"| CAGR(%): {format_pct_change(summary['cagr'])}")
-    add(f"| MDD(%): {format_pct_change(-summary['mdd'])}")
-    add(f"| Sharpe: {summary.get('sharpe', 0.0):.2f}")
-    add(f"| SDR (Sharpe/MDD): {summary.get('sharpe_to_mdd', 0.0):.3f}")
+    # 테이블 렌더링
+    rows = [row_ret, row_cagr, row_mdd, row_sharpe, row_sdr]
+    # 정렬: 구분(Left), 나머지(Right)
+    aligns = ["left"] + ["right"] * (len(headers) - 1)
+
+    table_lines = render_table_eaw(headers, rows, aligns)
+    for line in table_lines:
+        add(line)
 
     if emit_to_logger:
         for line in output_lines:
@@ -782,6 +796,8 @@ def _generate_daily_report_lines(
         except Exception as e:
             logger.warning(f"리포팅 중 환율 정보 로드 실패: {e}")
 
+    current_streak = 0
+
     for target_date in portfolio_df.index:
         portfolio_row = portfolio_df.loc[target_date]
 
@@ -913,6 +929,35 @@ def _generate_daily_report_lines(
 
         lines.append("")
         lines.append(summary_line)
+
+        # [User Request] Add Consecutive Streak and Cash Weight line
+        # Streak Calculation
+        if daily_return_pct > 0.0001:  # float point tolerance
+            if current_streak >= 0:
+                current_streak += 1
+            else:
+                current_streak = 1
+        elif daily_return_pct < -0.0001:
+            if current_streak <= 0:
+                current_streak -= 1
+            else:
+                current_streak = -1
+        else:
+            current_streak = 0
+
+        streak_str = "변동 없음"
+        if current_streak > 0:
+            streak_str = f"{current_streak}일 연속 상승"
+        elif current_streak < 0:
+            streak_str = f"{abs(current_streak)}일 연속 하락"
+
+        # Cash Weight
+        total_val_safe = total_value if total_value > 0 else 0.0
+        cash_pct_val = (total_cash / total_val_safe * 100.0) if total_val_safe > 0 else 0.0
+        cash_pct_int = int(round(cash_pct_val))
+
+        extra_line = f"{streak_str} | 현금 비중 목표: {cash_pct_int}%"
+        lines.append(extra_line)
 
         lines.extend(table_lines)
 
