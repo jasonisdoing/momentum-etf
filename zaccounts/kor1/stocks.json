@@ -230,7 +230,7 @@
         ]
     },
     {
-        "category": "🔋 2차전지",
+        "category": "🔋 2차전지/태양광",
         "tickers": [
             {
                 "ticker": "462010",
@@ -241,12 +241,7 @@
                 "3_month_earn_rate": 60.3604,
                 "6_month_earn_rate": 80.0578,
                 "12_month_earn_rate": 31.6137
-            }
-        ]
-    },
-    {
-        "category": "☀️ 태양광",
-        "tickers": [
+            },
             {
                 "ticker": "457990",
                 "name": "PLUS 태양광&ESS",

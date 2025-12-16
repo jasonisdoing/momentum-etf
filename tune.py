@@ -26,11 +26,11 @@ TUNING_CONFIG: dict[str, dict] = {
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
     "kor2": {
-        "PORTFOLIO_TOPN": [5],
+        "PORTFOLIO_TOPN": [7],
         "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
         "MA_TYPE": ["EMA"],
         "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
-        "STOP_LOSS_PCT": [5],
+        "STOP_LOSS_PCT": [7],
         "OVERBOUGHT_SELL_THRESHOLD": [85, 86, 87, 88, 89, 90, 91, 92, 93],
         "TRAILING_STOP_PCT": [0],
         "COOLDOWN_DAYS": [0, 1, 2, 3],
