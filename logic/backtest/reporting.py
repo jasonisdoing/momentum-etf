@@ -951,12 +951,7 @@ def _generate_daily_report_lines(
         elif current_streak < 0:
             streak_str = f"{abs(current_streak)}일 연속 하락"
 
-        # Cash Weight
-        total_val_safe = total_value if total_value > 0 else 0.0
-        cash_pct_val = (total_cash / total_val_safe * 100.0) if total_val_safe > 0 else 0.0
-        cash_pct_int = int(round(cash_pct_val))
-
-        extra_line = f"{streak_str} | 현금 비중 목표: {cash_pct_int}%"
+        extra_line = f"{streak_str}"
         lines.append(extra_line)
 
         lines.extend(table_lines)
