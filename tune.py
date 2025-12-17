@@ -14,13 +14,20 @@ from utils.logger import get_app_logger
 TUNING_CONFIG: dict[str, dict] = {
     "kor1": {
         "PORTFOLIO_TOPN": [10],
-        "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
-        "MA_TYPE": ["EMA"],
-        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
-        "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
-        "OVERBOUGHT_SELL_THRESHOLD": [84, 86, 88, 90],
+        # 1. MA_RANGE: 160과 180 주변을 5단위로 정밀 타격
+        "MA_RANGE": [155, 160, 165, 170, 175, 180, 185],
+        # 2. MA_TYPE: SMA로 확정 (탐색 비용 절감)
+        "MA_TYPE": ["SMA"],
+        # 3. 교체 점수: 1점이 우세했으므로, 더 공격적인 0점과 보수적인 2점까지 비교
+        "REPLACE_SCORE_THRESHOLD": [0, 1, 2],
+        # 4. 손절: 6%가 좋았으므로 5~7% 구간 정밀 확인
+        "STOP_LOSS_PCT": [5, 6, 7],
+        # 5. RSI: 86으로 고정 (이미 검증됨)
+        "OVERBOUGHT_SELL_THRESHOLD": [86],
+        # 6. 트레일링 스탑: 0으로 고정
         "TRAILING_STOP_PCT": [0],
-        "COOLDOWN_DAYS": [0, 1, 2, 3, 4],
+        # 7. 쿨다운: 3일로 고정 (이미 검증됨)
+        "COOLDOWN_DAYS": [3],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
@@ -67,7 +74,6 @@ TUNING_CONFIG: dict[str, dict] = {
 #     }
 # }
 
-# 매달 전체 테스트
 # TUNING_CONFIG: dict[str, dict] = {
 #     "k1": {
 #         "PORTFOLIO_TOPN": [8],
