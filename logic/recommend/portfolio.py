@@ -101,7 +101,12 @@ def _create_decision_entry(
         price_series = data.get("open_series", data.get("close"))
 
         if buy_date and price_series is not None:
-            simulated_open = resolve_entry_price(price_series, buy_date)
+            # [New logic] If holding days is very short (e.g. 0 or 1), use real-time open price if available
+            # This fixes the issue where simulated_open relies on past-filled series which might not have today's open
+            if holding_days <= 1 and data.get("open") and data["open"] > 0:
+                simulated_open = float(data["open"])
+            else:
+                simulated_open = resolve_entry_price(price_series, buy_date)
 
         if simulated_open and simulated_open > 0:
             # Apply Backtest Slippage

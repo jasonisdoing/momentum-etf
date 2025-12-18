@@ -1233,6 +1233,12 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
         nav_raw = item.get("nav")
         price_raw = item.get("nowVal")
 
+        # 추가 정보 파싱 (Open, High, Low, Vol)
+        open_raw = item.get("openVal")
+        high_raw = item.get("highVal")
+        low_raw = item.get("lowVal")
+        vol_raw = item.get("quant")
+
         try:
             nav_value = float(str(nav_raw).replace(",", ""))
             price_value = float(str(price_raw).replace(",", ""))
@@ -1244,11 +1250,26 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
 
         deviation = ((price_value / nav_value) - 1.0) * 100.0
 
-        snapshot[code] = {
+        entry = {
             "nav": nav_value,
             "nowVal": price_value,
             "deviation": deviation,
         }
+
+        # Optional fields parsing
+        try:
+            if open_raw:
+                entry["open"] = float(str(open_raw).replace(",", ""))
+            if high_raw:
+                entry["high"] = float(str(high_raw).replace(",", ""))
+            if low_raw:
+                entry["low"] = float(str(low_raw).replace(",", ""))
+            if vol_raw:
+                entry["volume"] = float(str(vol_raw).replace(",", ""))
+        except (TypeError, ValueError):
+            pass
+
+        snapshot[code] = entry
 
     return snapshot
 

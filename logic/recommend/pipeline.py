@@ -274,8 +274,17 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
                     if price_deviation_val is None:
                         price_deviation_val = snap.get("deviation")
 
+                    # [New] Open Price from Snapshot
+                    snap_open = snap.get("open")
+                    if snap_open and snap_open > 0:
+                        current_open = float(snap_open)
+                    else:
+                        current_open = float(metrics["open"].iloc[idx]) if "open" in metrics else current_price
+
                 # 2. Fallback to pykrx cached data if Naver failed
                 if nav_val is None:
+                    current_open = float(metrics["open"].iloc[idx]) if "open" in metrics else current_price
+
                     raw_df = metrics.get("df")
                     if raw_df is not None and not raw_df.empty:
                         try:
@@ -297,7 +306,7 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
 
                 row_data = {
                     "price": current_price,
-                    "open": float(metrics["open"].iloc[idx]) if "open" in metrics else current_price,
+                    "open": current_open,
                     "open_series": metrics["open"] if "open" in metrics else None,
                     "prev_close": float(metrics["close"].iloc[idx - 1]) if idx > 0 else 0.0,
                     "score": float(metrics["ma_score"].iloc[idx]),
