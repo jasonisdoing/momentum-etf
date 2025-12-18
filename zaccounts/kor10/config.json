@@ -1,5 +1,5 @@
 {
-    "order": 20,
+    "order": 100,
     "icon": "🚢",
     "name": "한국 고정 7종목",
     "desc": "미국 지수와 배당주 위주의 7개 고정 종목을 보유하는 포트폴리오 입니다.",
@@ -14,7 +14,7 @@
         "CAGR": 13.753944,
         "MDD": -4.253246,
         "OPTIMIZATION_METRIC": "CAGR",
-        "PORTFOLIO_TOPN": 7,
+        "PORTFOLIO_TOPN": 6,
         "MA_PERIOD": 35,
         "MA_TYPE": "EMA",
         "REPLACE_SCORE_THRESHOLD": 0,

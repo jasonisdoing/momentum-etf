@@ -13,6 +13,24 @@ from utils.logger import get_app_logger
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
     "kor1": {
+        # 1. 포트폴리오 개수: 5개부터 10개까지 정밀 비교
+        "PORTFOLIO_TOPN": [5, 6, 7, 8, 9, 10],
+        # 2. 이동평균: 중기(60)~장기(200) 추세 전반 탐색
+        "MA_RANGE": [60, 90, 120, 150, 180, 200],
+        # 3. 이평선 타입: SMA(단순), EMA(지수) 비교
+        "MA_TYPE": ["SMA", "EMA"],
+        # 4. 교체 점수: 기본 범위
+        "REPLACE_SCORE_THRESHOLD": [1, 2, 3],
+        # 5. 손절: 변동성 고려하여 넓게 탐색
+        "STOP_LOSS_PCT": [5, 10, 15],
+        # 6. 과매수 매도: 75~85 탐색
+        "OVERBOUGHT_SELL_THRESHOLD": [75, 80, 85],
+        "TRAILING_STOP_PCT": [0, 5],
+        "COOLDOWN_DAYS": [1, 2, 3],
+        "CORE_HOLDINGS": [],
+        "OPTIMIZATION_METRIC": "CAGR",
+    },
+    "kor2": {
         "PORTFOLIO_TOPN": [10],
         # 1. MA_RANGE: 160과 180 주변을 5단위로 정밀 타격
         "MA_RANGE": [155, 160, 165, 170, 175, 180, 185],
@@ -31,7 +49,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
-    "kor2": {
+    "kor10": {
         "PORTFOLIO_TOPN": [7],
         "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
         "MA_TYPE": ["EMA"],
