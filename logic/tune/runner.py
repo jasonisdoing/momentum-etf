@@ -329,7 +329,6 @@ def _render_tuning_table(
         "TOPN",
         "교체점수",
         "손절",
-        "트레일링",
         "과매수",
         "쿨다운",
         "CAGR(%)",
@@ -374,12 +373,7 @@ def _render_tuning_table(
         else:
             stop_loss_display = "-"
 
-        trailing_stop_val = row.get("trailing_stop_pct")
-        trailing_stop_num = _safe_float(trailing_stop_val, float("nan"))
-        if math.isfinite(trailing_stop_num) and trailing_stop_num >= 0:
-            trailing_stop_display = f"{int(trailing_stop_num)}%"
-        else:
-            trailing_stop_display = "-"
+            stop_loss_display = "-"
 
         rsi_threshold_val = row.get("rsi_sell_threshold")
         cooldown_val = row.get("cooldown_days")
@@ -392,7 +386,6 @@ def _render_tuning_table(
             if isinstance(threshold_val, (int, float)) and math.isfinite(float(threshold_val))
             else "-",
             stop_loss_display,
-            trailing_stop_display,
             str(int(rsi_threshold_val))
             if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val))
             else "-",
@@ -475,13 +468,11 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
 
     integer_keys = {
         "REPLACE_SCORE_THRESHOLD",
-        "MIN_BUY_SCORE",
         "STOP_LOSS_PCT",
         "COOLDOWN_DAYS",
         "PORTFOLIO_TOPN",
         "OVERBOUGHT_SELL_THRESHOLD",
         "MA_PERIOD",
-        "TRAILING_STOP_PCT",
     }
 
     for key, value in result_params.items():
@@ -521,9 +512,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "REPLACE_SCORE_THRESHOLD",
         "STOP_LOSS_PCT",
         "OVERBOUGHT_SELL_THRESHOLD",
-        "TRAILING_STOP_PCT",
         "COOLDOWN_DAYS",
-        "MIN_BUY_SCORE",
         "CORE_HOLDINGS",
     ]
 
@@ -784,7 +773,6 @@ def _evaluate_single_combo(
         int,
         int,
         str,
-        float,
         tuple[str, ...],
         tuple[str, ...],
         float,
@@ -801,10 +789,8 @@ def _evaluate_single_combo(
         rsi_int,
         cooldown_int,
         ma_type_str,
-        min_score_float,
         excluded_tickers,
         core_holdings_tuple,
-        trailing_stop_float,
     ) = payload
 
     # Worker 글로벌 변수에서 데이터 가져오기 (프로세스당 한 번만 pickle됨)
@@ -822,8 +808,6 @@ def _evaluate_single_combo(
             ma_type=str(ma_type_str),
             core_holdings=list(core_holdings_tuple) if core_holdings_tuple else [],
             stop_loss_pct=float(stop_loss_float),
-            min_buy_score=float(min_score_float),
-            trailing_stop_pct=float(trailing_stop_float),
         )
     except ValueError as exc:
         return (
@@ -835,8 +819,6 @@ def _evaluate_single_combo(
                 "replace_threshold": threshold_float,
                 "rsi_sell_threshold": rsi_int,
                 "ma_type": ma_type_str,
-                "min_buy_score": min_score_float,
-                "trailing_stop_pct": trailing_stop_float,
                 "error": str(exc),
             },
             [],
@@ -874,8 +856,7 @@ def _evaluate_single_combo(
             topn_int,
             stop_loss_float,
             rsi_int,
-            min_score_float,
-            trailing_stop_float,
+            rsi_int,
             exc,
         )
         return (
@@ -886,8 +867,6 @@ def _evaluate_single_combo(
                 "stop_loss_pct": stop_loss_float,
                 "replace_threshold": threshold_float,
                 "rsi_sell_threshold": rsi_int,
-                "min_buy_score": min_score_float,
-                "trailing_stop_pct": trailing_stop_float,
                 "error": str(exc),
             },
             [],
@@ -905,8 +884,6 @@ def _evaluate_single_combo(
         "rsi_sell_threshold": rsi_int,
         "cooldown_days": cooldown_int,
         "ma_type": ma_type_str,
-        "min_buy_score": float(min_score_float),
-        "trailing_stop_pct": float(trailing_stop_float),
         "cagr": _round_float(_safe_float(summary.get("cagr"), 0.0)),
         "mdd": _round_float(_safe_float(summary.get("mdd"), 0.0)),
         "sharpe": _round_float(_safe_float(summary.get("sharpe"), 0.0)),
@@ -943,7 +920,6 @@ def _execute_tuning_for_months(
     rsi_candidates = list(search_space.get("OVERBOUGHT_SELL_THRESHOLD", []))
     cooldown_candidates = list(search_space.get("COOLDOWN_DAYS", []))
     ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
-    trailing_stop_candidates = list(search_space.get("TRAILING_STOP_PCT", [0.0]))
 
     if (
         not ma_candidates
@@ -961,10 +937,8 @@ def _execute_tuning_for_months(
         )
         return None
 
-    min_score_candidates = list(search_space.get("MIN_BUY_SCORE", [0.0]))
-
-    combos: list[tuple[int, int, float, float, int, int, str, float, float]] = [
-        (ma, topn, replace, stop_loss, rsi, cooldown, ma_type, min_score, trailing_stop)
+    combos: list[tuple[int, int, float, float, int, int, str]] = [
+        (ma, topn, replace, stop_loss, rsi, cooldown, ma_type)
         for ma in ma_candidates
         for topn in topn_candidates
         for replace in replace_candidates
@@ -972,8 +946,6 @@ def _execute_tuning_for_months(
         for rsi in rsi_candidates
         for cooldown in cooldown_candidates
         for ma_type in ma_type_candidates
-        for min_score in min_score_candidates
-        for trailing_stop in trailing_stop_candidates
     ]
 
     if not combos:
@@ -1041,12 +1013,10 @@ def _execute_tuning_for_months(
             int(rsi),
             int(cooldown),
             str(ma_type),
-            float(min_score),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             tuple(core_holdings_from_space) if core_holdings_from_space else tuple(),
-            float(trailing_stop),
         )
-        for ma, topn, replace, stop_loss, rsi, cooldown, ma_type, min_score, trailing_stop in combos
+        for ma, topn, replace, stop_loss, rsi, cooldown, ma_type in combos
     ]
 
     logger.info(
@@ -1182,7 +1152,6 @@ def _execute_tuning_for_months(
             "stop_loss_pct",
             "rsi_sell_threshold",
             "cooldown_days",
-            "min_buy_score",
         ]
 
         for key in param_keys:
@@ -1206,10 +1175,6 @@ def _execute_tuning_for_months(
         sharpe_val = _safe_float(item.get("sharpe"), float("nan"))
         sharpe_to_mdd_val = _safe_float(item.get("sharpe_to_mdd"), float("nan"))
 
-        min_score_raw = item.get("min_buy_score")
-        if min_score_raw is None:
-            raise ValueError("튜닝 결과에 MIN_BUY_SCORE 값이 없습니다.")
-
         raw_data_payload.append(
             {
                 "MONTHS_RANGE": months_range,
@@ -1232,10 +1197,6 @@ def _execute_tuning_for_months(
                     else None,
                     "OVERBOUGHT_SELL_THRESHOLD": int(item.get("rsi_sell_threshold", 10)),
                     "COOLDOWN_DAYS": int(item.get("cooldown_days", 2)),
-                    "MIN_BUY_SCORE": _round_up_float_places(min_score_raw, 2),
-                    "TRAILING_STOP_PCT": _round_up_float_places(item.get("trailing_stop_pct"), 1)
-                    if item.get("trailing_stop_pct") is not None
-                    else None,
                 },
             }
         )
@@ -1260,8 +1221,6 @@ def _build_run_entry(
         "STOP_LOSS_PCT": ("stop_loss_pct", False),
         "OVERBOUGHT_SELL_THRESHOLD": ("rsi_sell_threshold", True),
         "COOLDOWN_DAYS": ("cooldown_days", True),
-        "MIN_BUY_SCORE": ("min_buy_score", False),
-        "TRAILING_STOP_PCT": ("trailing_stop_pct", False),
     }
 
     entry: dict[str, Any] = {
@@ -1349,7 +1308,6 @@ def _build_run_entry(
                 rounded_up = _round_up_float_places(value, 1)
                 if math.isfinite(rounded_up):
                     tuning_snapshot[field] = rounded_up
-            else:
                 converted = _to_int(value)
                 if converted is not None:
                     tuning_snapshot[field] = converted
@@ -1446,7 +1404,6 @@ def _ensure_entry_schema(entry: Any) -> dict[str, Any]:
         "STOP_LOSS_PCT",
         "COOLDOWN_DAYS",
         "MA_TYPE",
-        "MIN_BUY_SCORE",
     ):
         normalized.pop(field, None)
 
@@ -1578,24 +1535,22 @@ def _compose_tuning_report(
             stop_loss_range = search_space.get("STOP_LOSS_PCT", [])
             rsi_range = search_space.get("OVERBOUGHT_SELL_THRESHOLD", [])
             cooldown_range = search_space.get("COOLDOWN_DAYS", [])
-            min_score_range = search_space.get("MIN_BUY_SCORE", [])
-            trailing_stop_range = search_space.get("TRAILING_STOP_PCT", [])
 
             # MA_TYPE이 있으면 포함해서 표시
             if ma_type_range and len(ma_type_range) > 1:
                 lines.append(
                     f"탐색 공간: MA {len(ma_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
                     f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
-                    f"× 트레일링 {len(trailing_stop_range)}개 × RSI {len(rsi_range)}개 "
-                    f"× COOLDOWN {len(cooldown_range)}개 × MIN_SCORE {len(min_score_range)}개 "
+                    f"× RSI {len(rsi_range)}개 "
+                    f"× COOLDOWN {len(cooldown_range)}개 "
                     f"= {tuning_metadata.get('combo_count', 0)}개 조합"
                 )
             else:
                 lines.append(
                     f"탐색 공간: MA {len(ma_range)}개 × TOPN {len(topn_range)}개 "
                     f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
-                    f"× 트레일링 {len(trailing_stop_range)}개 × RSI {len(rsi_range)}개 "
-                    f"× COOLDOWN {len(cooldown_range)}개 × MIN_SCORE {len(min_score_range)}개 "
+                    f"× RSI {len(rsi_range)}개 "
+                    f"× COOLDOWN {len(cooldown_range)}개 "
                     f"= {tuning_metadata.get('combo_count', 0)}개 조합"
                 )
             # 각 파라미터 범위 표시
@@ -1616,15 +1571,10 @@ def _compose_tuning_report(
             if rsi_range:
                 rsi_min, rsi_max = min(rsi_range), max(rsi_range)
                 lines.append(f"  OVERBOUGHT_SELL_THRESHOLD: {rsi_min}~{rsi_max}")
-            if trailing_stop_range:
-                ts_min, ts_max = int(min(trailing_stop_range)), int(max(trailing_stop_range))
-                lines.append(f"  TRAILING_STOP_PCT: {ts_min}~{ts_max}")
+
             if cooldown_range:
                 cd_min, cd_max = min(cooldown_range), max(cooldown_range)
                 lines.append(f"  COOLDOWN_DAYS: {cd_min}~{cd_max}")
-            if min_score_range:
-                min_min, min_max = min(min_score_range), max(min_score_range)
-                lines.append(f"  MIN_BUY_SCORE: {min_min}~{min_max}")
 
             # CORE_HOLDINGS 표시 (빈 리스트도 표시)
             core_holdings = search_space.get("CORE_HOLDINGS", [])
@@ -1745,15 +1695,7 @@ def _compose_tuning_report(
                 stop_loss_val = tuning.get("STOP_LOSS_PCT")
             rsi_val = tuning.get("OVERBOUGHT_SELL_THRESHOLD")
             cooldown_val = tuning.get("COOLDOWN_DAYS")
-            min_score_val = tuning.get("MIN_BUY_SCORE")
-            if min_score_val is None:
-                min_score_val = entry.get("min_buy_score")
-            if min_score_val is None:
-                raise ValueError("MIN_BUY_SCORE 값을 찾을 수 없습니다.")
-
-            trailing_stop_val = tuning.get("TRAILING_STOP_PCT")
-            if trailing_stop_val is None:
-                trailing_stop_val = entry.get("trailing_stop_pct")
+            cooldown_val = tuning.get("COOLDOWN_DAYS")
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -1768,10 +1710,8 @@ def _compose_tuning_report(
                     "portfolio_topn": topn_val,
                     "replace_threshold": threshold_val,
                     "stop_loss_pct": stop_loss_val,
-                    "trailing_stop_pct": trailing_stop_val,
                     "rsi_sell_threshold": rsi_val,
                     "cooldown_days": cooldown_val,
-                    "min_buy_score": min_score_val,
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
@@ -1897,17 +1837,6 @@ def run_account_tuning(
         dtype=int,
         fallback=2,
     )
-    min_buy_score_values = _normalize_tuning_values(
-        config.get("MIN_BUY_SCORE"),
-        dtype=float,
-        fallback=base_rules.min_buy_score,
-    )
-
-    trailing_stop_values = _normalize_tuning_values(
-        config.get("TRAILING_STOP_PCT"),
-        dtype=float,
-        fallback=base_rules.trailing_stop_pct or 0.0,
-    )
 
     # CORE_HOLDINGS 처리: tune.py에서 지정 가능, 없으면 base_rules에서 가져옴
     core_holdings_raw = config.get("CORE_HOLDINGS")
@@ -1938,7 +1867,6 @@ def run_account_tuning(
         or not rsi_sell_values
         or not cooldown_values
         or not ma_type_values
-        or not min_buy_score_values
     ):
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
@@ -1975,7 +1903,6 @@ def run_account_tuning(
         * len(rsi_sell_values)
         * len(cooldown_values)
         * len(ma_type_values)
-        * len(min_buy_score_values)
     )
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
@@ -1998,10 +1925,8 @@ def run_account_tuning(
         "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
         "COOLDOWN_DAYS": cooldown_values,
         "MA_TYPE": ma_type_values,
-        "MIN_BUY_SCORE": min_buy_score_values,
         "CORE_HOLDINGS": core_holdings,
         "OPTIMIZATION_METRIC": [optimization_metric],
-        "TRAILING_STOP_PCT": trailing_stop_values,
     }
 
     ma_count = len(ma_values)
@@ -2011,19 +1936,16 @@ def run_account_tuning(
     rsi_sell_count = len(rsi_sell_values)  # Defined for logger.info
     cooldown_count = len(cooldown_values)
     ma_type_count = len(ma_type_values)  # Defined for logger.info
-    min_score_count = len(min_buy_score_values)
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × 교체점수 %d개 × 손절 %d개 × 트레일링 %d개 "
-        "× RSI %d개 × COOLDOWN %d개 × MA_TYPE %d개 × MIN_SCORE %d개 = %d개 조합",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × 교체점수 %d개 × 손절 %d개 "
+        "× RSI %d개 × COOLDOWN %d개 × MA_TYPE %d개 = %d개 조합",
         ma_count,
         topn_count,
         replace_count,
         stop_loss_count,
-        len(trailing_stop_values),
         rsi_sell_count,
         cooldown_count,
         ma_type_count,
-        min_score_count,
         combo_count,
     )
 
@@ -2174,10 +2096,8 @@ def run_account_tuning(
             "STOP_LOSS_PCT": list(stop_loss_values),
             "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
             "COOLDOWN_DAYS": list(cooldown_values),
-            "MIN_BUY_SCORE": list(min_buy_score_values),
             "CORE_HOLDINGS": list(core_holdings) if core_holdings else [],
             "OPTIMIZATION_METRIC": optimization_metric,
-            "TRAILING_STOP_PCT": list(trailing_stop_values),
         },
         "data_period": {
             "start_date": date_range_prefetch[0],
@@ -2298,8 +2218,6 @@ def run_account_tuning(
                             "STOP_LOSS_PCT": _round_up_float_places(entry.get("stop_loss_pct", 0.0), 1),
                             "OVERBOUGHT_SELL_THRESHOLD": int(entry.get("rsi_sell_threshold", 10)),
                             "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
-                            "MIN_BUY_SCORE": _round_up_float_places(entry.get("min_buy_score", 0.0), 2),
-                            "TRAILING_STOP_PCT": _round_up_float_places(entry.get("trailing_stop_pct", 0.0), 1),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)

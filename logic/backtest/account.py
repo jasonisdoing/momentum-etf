@@ -165,8 +165,6 @@ def run_account_backtest(
             ma_type=strategy_override.ma_type,
             core_holdings=strategy_override.core_holdings,
             stop_loss_pct=strategy_override.stop_loss_pct,
-            min_buy_score=strategy_override.min_buy_score,
-            trailing_stop_pct=getattr(strategy_override, "trailing_stop_pct", 0.0),
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
@@ -175,8 +173,6 @@ def run_account_backtest(
         strategy_settings["CORE_HOLDINGS"] = strategy_rules.core_holdings
         if strategy_rules.stop_loss_pct is not None:
             strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
-        strategy_settings["MIN_BUY_SCORE"] = strategy_rules.min_buy_score
-        strategy_settings["TRAILING_STOP_PCT"] = strategy_rules.trailing_stop_pct
 
     months_range = _resolve_months_range(months_range, override_settings, account_settings)
     end_date = _resolve_end_date(country_code, override_settings)
@@ -522,7 +518,6 @@ def _build_backtest_kwargs(
 
     cooldown_days = int(strategy_settings["COOLDOWN_DAYS"])
     rsi_sell_threshold = int(strategy_settings["OVERBOUGHT_SELL_THRESHOLD"])
-    trailing_stop_pct = strategy_rules.trailing_stop_pct
 
     if not (0 <= rsi_sell_threshold <= 100):
         raise ValueError(f"OVERBOUGHT_SELL_THRESHOLD는 0~100 사이여야 합니다. (현재값: {rsi_sell_threshold})")
@@ -534,12 +529,10 @@ def _build_backtest_kwargs(
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
         "stop_loss_pct": stop_loss_threshold,
-        "trailing_stop_pct": trailing_stop_pct,
-        "cooldown_days": cooldown_days,
         "rsi_sell_threshold": rsi_sell_threshold,
+        "cooldown_days": cooldown_days,
         "core_holdings": strategy_rules.core_holdings,
         "quiet": quiet,
-        "min_buy_score": strategy_rules.min_buy_score,
     }
 
     clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}

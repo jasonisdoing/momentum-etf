@@ -20,9 +20,7 @@
         "REPLACE_SCORE_THRESHOLD": 0,
         "STOP_LOSS_PCT": 6,
         "OVERBOUGHT_SELL_THRESHOLD": 90,
-        "TRAILING_STOP_PCT": 0,
         "COOLDOWN_DAYS": 0,
-        "MIN_BUY_SCORE": 0,
         "CORE_HOLDINGS": [
             "0137W0",
             "0137V0",

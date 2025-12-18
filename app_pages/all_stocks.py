@@ -177,7 +177,6 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
         # 점수 계산 (MA 기반)
         ma_period = 90
         ma_type = "TEMA"
-        min_buy_score = 0.0
 
         score_value = 0.0
         consecutive_days = 0
@@ -188,7 +187,7 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
                 moving_average = calculate_moving_average(close_series, ma_period, ma_type)
                 ma_score_series = calculate_ma_score(close_series, moving_average)
                 score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
-                consecutive_days = get_buy_signal_streak(score_value, ma_score_series, min_buy_score)
+                consecutive_days = get_buy_signal_streak(score_value, ma_score_series)
                 rsi_score = calculate_rsi_for_ticker(close_series)
             except Exception:
                 pass

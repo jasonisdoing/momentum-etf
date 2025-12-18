@@ -10,7 +10,6 @@ from typing import Any
 import pandas as pd
 
 from logic.common import calculate_held_categories, is_category_exception, select_candidates_by_category
-from logic.common.notes import format_min_score_phrase
 from logic.common.price import calculate_trade_price
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
 from strategies.maps.evaluator import StrategyEvaluator
@@ -38,12 +37,10 @@ def _execute_individual_sells(
     country_code: str,
     stop_loss_threshold: float | None,
     rsi_sell_threshold: float,
-    trailing_stop_pct: float,
     cooldown_days: int,
     cash: float,
     current_holdings_value: float,
     ma_period: int,
-    min_buy_score: float,
     evaluator: StrategyEvaluator,
 ) -> tuple[float, float]:
     """개별 종목 매도 로직 (StrategyEvaluator 사용)"""
@@ -51,10 +48,6 @@ def _execute_individual_sells(
         ticker_state, price = position_state[ticker], today_prices.get(ticker)
 
         if ticker_state["shares"] > 0 and pd.notna(price) and metrics_by_ticker[ticker]["available_mask"][i]:
-            # 최고가 갱신 (트레일링 스탑용)
-            if price > ticker_state.get("highest_price", 0.0):
-                ticker_state["highest_price"] = price
-
             in_cooldown = i < ticker_state["sell_block_until"]
 
             # 매도 의사결정 (StrategyEvaluator)
@@ -75,7 +68,7 @@ def _execute_individual_sells(
                 current_state="HOLD",
                 price=price,
                 avg_cost=ticker_state["avg_cost"],
-                highest_price=ticker_state.get("highest_price", 0.0),
+                highest_price=0.0,
                 ma_value=ma_val,
                 ma_period=ticker_ma_period,
                 score=current_score,
@@ -83,8 +76,6 @@ def _execute_individual_sells(
                 is_core_holding=(ticker in valid_core_holdings),
                 stop_loss_threshold=stop_loss_threshold,
                 rsi_sell_threshold=rsi_sell_threshold,
-                trailing_stop_pct=trailing_stop_pct,
-                min_buy_score=min_buy_score,
                 sell_cooldown_info=None,  # 백테스트 루프 내 제어
                 cooldown_days=cooldown_days,
             )
@@ -132,7 +123,6 @@ def _execute_individual_sells(
                 cash += trade_amount
                 current_holdings_value = max(0.0, current_holdings_value - trade_amount)
                 ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
-                ticker_state["highest_price"] = 0.0  # 매도 후 최고가 초기화
 
                 # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
                 if cooldown_days > 0:
@@ -153,10 +143,6 @@ def _execute_individual_sells(
                 )
                 if decision == "SELL_TREND":
                     row["note"] = phrase
-                elif decision == "SELL_TRAILING":
-                    row["note"] = (
-                        f"고점({ticker_state.get('highest_price', 0.0):,.0f}) 대비 {trailing_stop_pct}% 하락"  # phrase에 이미 포함되어 있지만 백테스트 형식 유지
-                    )
 
     return cash, current_holdings_value
 
@@ -234,7 +220,7 @@ def _apply_wait_note_if_empty(
         if held_scores:
             weakest_score = min(held_scores)
             required_score = weakest_score + replace_threshold
-            records[-1]["note"] = DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score)
+            records[-1]["note"] = DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score)
 
 
 def _execute_new_buys(
@@ -450,15 +436,12 @@ def run_portfolio_backtest(
     ma_type: str = "SMA",
     replace_threshold: float = 0.0,
     stop_loss_pct: float = -10.0,
-    trailing_stop_pct: float = 0.0,
     cooldown_days: int = 5,
     rsi_sell_threshold: float = 10.0,
     core_holdings: list[str] | None = None,
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
-    *,
-    min_buy_score: float,
 ) -> dict[str, pd.DataFrame]:
     """
     이동평균 기반 모멘텀 전략으로 포트폴리오 백테스트를 실행합니다.
@@ -474,7 +457,7 @@ def run_portfolio_backtest(
         ma_period: 이동평균 기간
         replace_threshold: 종목 교체 임계값
         stop_loss_pct: 손절 비율 (%)
-        trailing_stop_pct: 트레일링 스탑 비율 (%)
+
         cooldown_days: 거래 쿨다운 기간
 
     Returns:
@@ -532,7 +515,6 @@ def run_portfolio_backtest(
             ma_period=ma_period,
             ma_type=ma_type,
             precomputed_entry=precomputed_entry,
-            min_buy_score=min_buy_score,
         )
         if ticker_metrics:
             metrics_by_ticker[ticker] = ticker_metrics
@@ -603,7 +585,6 @@ def run_portfolio_backtest(
         ticker: {
             "shares": 0,
             "avg_cost": 0.0,
-            "highest_price": 0.0,  # 트레일링 스탑용 최고가
             "buy_block_until": -1,
             "sell_block_until": -1,
         }
@@ -704,8 +685,10 @@ def run_portfolio_backtest(
                     note = f"쿨다운 대기중({remaining_buy}일 후 매수 가능)" if remaining_buy > 0 else "쿨다운 종료"
                 elif decision_out == "WAIT":
                     score_check = score_today.get(ticker, float("nan"))
-                    if pd.isna(score_check) or score_check <= min_buy_score:
-                        note = format_min_score_phrase(score_check, min_buy_score)
+                    if pd.isna(score_check):
+                        note = "점수 없음"
+                    elif score_check <= 0:
+                        note = f"추세 이탈 (점수 {score_check:.1f}점)"
 
             # 핵심 보유 종목 표시
             if decision_out == "HOLD_CORE" and not note:
@@ -778,12 +761,10 @@ def run_portfolio_backtest(
             country_code=country_code,
             stop_loss_threshold=stop_loss_threshold,
             rsi_sell_threshold=rsi_sell_threshold,
-            trailing_stop_pct=trailing_stop_pct,
             cooldown_days=cooldown_days,
             cash=cash,
             current_holdings_value=current_holdings_value,
             ma_period=ma_period,
-            min_buy_score=min_buy_score,
             evaluator=evaluator,
         )
 
@@ -957,7 +938,7 @@ def run_portfolio_backtest(
                             daily_records_by_ticker,
                             replacement_ticker,
                             dt,
-                            DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score),
+                            DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score),
                         )
                         continue
 
@@ -987,7 +968,7 @@ def run_portfolio_backtest(
                             daily_records_by_ticker,
                             replacement_ticker,
                             dt,
-                            DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=required_score) + " 또는 쿨다운",
+                            DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score) + " 또는 쿨다운",
                         )
                         continue
                 else:

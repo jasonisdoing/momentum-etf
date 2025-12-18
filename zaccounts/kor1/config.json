@@ -20,9 +20,7 @@
         "REPLACE_SCORE_THRESHOLD": 2,
         "STOP_LOSS_PCT": 10,
         "OVERBOUGHT_SELL_THRESHOLD": 86,
-        "TRAILING_STOP_PCT": 0,
         "COOLDOWN_DAYS": 3,
-        "MIN_BUY_SCORE": 0,
         "CORE_HOLDINGS": []
     },
     "benchmark": {

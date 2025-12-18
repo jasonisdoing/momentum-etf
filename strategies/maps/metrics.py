@@ -1,6 +1,4 @@
-"""
-MAPS 전략 지표 계산 모듈
-"""
+"""MAPS 전략 지표 계산 모듈"""
 
 from collections.abc import Mapping
 from typing import Any
@@ -20,8 +18,6 @@ def process_ticker_data(
     ma_period: int,
     precomputed_entry: Mapping[str, Any] | None = None,
     ma_type: str = "SMA",
-    *,
-    min_buy_score: float,
 ) -> dict | None:
     """
     개별 종목의 데이터를 처리하고 지표를 계산합니다.
@@ -32,7 +28,6 @@ def process_ticker_data(
         ma_period: 이동평균 기간
         precomputed_entry: 미리 계산된 캐시 데이터 (옵션)
         ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA)
-        min_buy_score: 매수 최소 점수
 
     Returns:
         Dict: 계산된 지표들 또는 None (처리 실패 시)
@@ -131,7 +126,7 @@ def process_ticker_data(
         ma_score = calculate_ma_score(close_prices, moving_average)
 
     # 점수 기반 매수 시그널 지속일 계산
-    consecutive_buy_days = calculate_consecutive_days(ma_score, min_buy_score)
+    consecutive_buy_days = calculate_consecutive_days(ma_score)
 
     # RSI 전략 지표 계산
     rsi_score = None

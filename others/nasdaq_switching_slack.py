@@ -78,9 +78,7 @@ def run_nasdaq_switching_notification() -> None:
             f"CAGR           : {tuning_result.get('cagr', 0):.2f}%\n"
             f"MDD            : {tuning_result.get('mdd', 0):.2f}%"
         )
-        message_blocks.append(
-            {"type": "section", "text": {"type": "mrkdwn", "text": tuning_text}}
-        )
+        message_blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": tuning_text}})
         message_blocks.append({"type": "divider"})
 
     # 3. 추천 목록 (상세 테이블)
@@ -99,22 +97,16 @@ def run_nasdaq_switching_notification() -> None:
 
     # 4. 요약 정보 (기준일 및 최종 타깃)
     summary_text = f"ℹ️ *기준일*: {as_of}\n🎯 *최종 타깃*: *{target}*"
-    message_blocks.append(
-        {"type": "section", "text": {"type": "mrkdwn", "text": summary_text}}
-    )
+    message_blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": summary_text}})
 
     # 5. 채널 알림 (맨 아래 혹은 맨 위, 여기서는 맨 아래에 추가하거나 텍스트에 포함)
     # 사용자가 "항상 channel 를 언급" 원함.
-    message_blocks.append(
-        {"type": "section", "text": {"type": "mrkdwn", "text": "<!channel>"}}
-    )
+    message_blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "<!channel>"}})
 
     # 슬랙 전송
     token = os.environ.get("SLACK_BOT_TOKEN")
     if not token:
-        logger.warning(
-            "[NASDAQ_SWITCH] SLACK_BOT_TOKEN이 설정되지 않아 전송을 건너뜁니다."
-        )
+        logger.warning("[NASDAQ_SWITCH] SLACK_BOT_TOKEN이 설정되지 않아 전송을 건너뜁니다.")
         return
 
     if not WebClient:
@@ -129,13 +121,9 @@ def run_nasdaq_switching_notification() -> None:
             text=f"<!channel> 나스닥 스위칭 전략 추천 ({as_of})",
             blocks=message_blocks,
         )
-        logger.info(
-            f"[NASDAQ_SWITCH] Slack 알림 전송 완료 (channel={TARGET_CHANNEL_ID})"
-        )
+        logger.info(f"[NASDAQ_SWITCH] Slack 알림 전송 완료 (channel={TARGET_CHANNEL_ID})")
     except SlackApiError as e:
-        logger.error(
-            f"[NASDAQ_SWITCH] Slack 전송 실패: {e.response['error']}", exc_info=True
-        )
+        logger.error(f"[NASDAQ_SWITCH] Slack 전송 실패: {e.response['error']}", exc_info=True)
     except Exception as e:
         logger.error(f"[NASDAQ_SWITCH] 알 수 없는 오류: {e}", exc_info=True)
 

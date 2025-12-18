@@ -24,7 +24,6 @@ TUNING_CONFIG: dict[str, dict] = {
         "STOP_LOSS_PCT": [8, 9, 10],
         # RSI 86 고정
         "OVERBOUGHT_SELL_THRESHOLD": [86],
-        "TRAILING_STOP_PCT": [0],
         "COOLDOWN_DAYS": [3],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",
@@ -41,8 +40,6 @@ TUNING_CONFIG: dict[str, dict] = {
         "STOP_LOSS_PCT": [5, 6, 7],
         # 5. RSI: 86으로 고정 (이미 검증됨)
         "OVERBOUGHT_SELL_THRESHOLD": [86],
-        # 6. 트레일링 스탑: 0으로 고정
-        "TRAILING_STOP_PCT": [0],
         # 7. 쿨다운: 3일로 고정 (이미 검증됨)
         "COOLDOWN_DAYS": [3],
         "CORE_HOLDINGS": [],
@@ -55,7 +52,6 @@ TUNING_CONFIG: dict[str, dict] = {
         "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
         "STOP_LOSS_PCT": [6],
         "OVERBOUGHT_SELL_THRESHOLD": [85, 86, 87, 88, 89, 90, 91, 92, 93],
-        "TRAILING_STOP_PCT": [0],
         "COOLDOWN_DAYS": [0, 1, 2, 3],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
@@ -68,7 +64,6 @@ TUNING_CONFIG: dict[str, dict] = {
         "REPLACE_SCORE_THRESHOLD": [1, 2, 3, 4, 5],
         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
         "OVERBOUGHT_SELL_THRESHOLD": [84, 86, 88, 90],
-        "TRAILING_STOP_PCT": [0],
         "COOLDOWN_DAYS": [2, 3, 4],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택ㅉ
@@ -84,7 +79,6 @@ TUNING_CONFIG: dict[str, dict] = {
 #         "REPLACE_SCORE_THRESHOLD": [2, 3],
 #         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
 #         "OVERBOUGHT_SELL_THRESHOLD": [86],
-#         "TRAILING_STOP_PCT": [0],
 #         "COOLDOWN_DAYS": [2],
 #         "CORE_HOLDINGS": [],
 #         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
@@ -100,7 +94,6 @@ TUNING_CONFIG: dict[str, dict] = {
 #         "REPLACE_SCORE_THRESHOLD": [1, 2, 3, 4, 5],
 #         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
 #         "OVERBOUGHT_SELL_THRESHOLD": [83, 84, 85, 86, 87, 88, 89, 90],
-#         "TRAILING_STOP_PCT": [0],
 #         "COOLDOWN_DAYS": [0, 1, 2, 3],
 #         "CORE_HOLDINGS": [],
 #         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택

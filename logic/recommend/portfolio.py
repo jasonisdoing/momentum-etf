@@ -20,7 +20,6 @@ from logic.common import (
     validate_core_holdings,
     validate_portfolio_topn,
 )
-from logic.common.notes import format_min_score_phrase
 from strategies.maps.constants import DECISION_MESSAGES, DECISION_NOTES
 from strategies.maps.evaluator import StrategyEvaluator
 from strategies.maps.messages import build_buy_replace_note
@@ -34,7 +33,7 @@ logger = get_app_logger()
 
 
 from logic.common.portfolio import calculate_cooldown_blocks
-from logic.common.price import resolve_entry_price, resolve_highest_price_since_buy
+from logic.common.price import resolve_entry_price
 
 
 def _create_decision_entry(
@@ -50,9 +49,7 @@ def _create_decision_entry(
     country_code: str,
     stop_loss_threshold: float | None,
     cooldown_days: int | None,
-    min_buy_score: float,
     rsi_sell_threshold: float,
-    trailing_stop_pct: float,
     evaluator: StrategyEvaluator,
 ) -> dict[str, Any]:
     """개별 종목의 의사결정 엔트리를 생성합니다."""
@@ -89,7 +86,6 @@ def _create_decision_entry(
 
     # 수익률 및 고점 계산
     holding_return_pct: float | None = None
-    highest_price: float | None = None
     avg_cost = 0.0
 
     # [Start] Theoretical Cost Calculation
@@ -127,8 +123,7 @@ def _create_decision_entry(
             avg_cost = 0.0
             holding_return_pct = 0.0
 
-        highest_price = resolve_highest_price_since_buy(data.get("close"), buy_date)
-    # [End] Theoretical Cost Calculation
+            holding_return_pct = 0.0
 
     # Evaluator 실행
     if state == "HOLD":
@@ -138,7 +133,7 @@ def _create_decision_entry(
             current_state=state,
             price=price,
             avg_cost=avg_cost,
-            highest_price=highest_price if highest_price is not None else 0.0,
+            highest_price=0.0,
             ma_value=ma_val,
             ma_period=data.get("ma_period") or 20,
             score=score_value,
@@ -146,15 +141,12 @@ def _create_decision_entry(
             is_core_holding=False,  # 상위 레벨에서 override 예정
             stop_loss_threshold=stop_loss_threshold,
             rsi_sell_threshold=rsi_sell_threshold,
-            trailing_stop_pct=trailing_stop_pct,
-            min_buy_score=min_buy_score,
             sell_cooldown_info=sell_block_info,  # 쿨다운 정보 전달
             cooldown_days=cooldown_days or 0,
         )
     elif state == "WAIT":
         buy_signal, phrase = evaluator.check_buy_signal(
             score=score_value,
-            min_buy_score=min_buy_score,
             buy_cooldown_info=buy_block_info,
             cooldown_days=cooldown_days or 0,
         )
@@ -166,7 +158,6 @@ def _create_decision_entry(
         state == "WAIT"
         and evaluator.check_buy_signal(
             score=score_value,
-            min_buy_score=min_buy_score,
             buy_cooldown_info=buy_block_info,
             cooldown_days=cooldown_days or 0,
         )[0]
@@ -315,8 +306,7 @@ def run_portfolio_recommend(
     replace_threshold = strategy_rules.replace_threshold
     stop_loss_pct = strategy_rules.stop_loss_pct
     stop_loss_threshold = -abs(float(stop_loss_pct)) if stop_loss_pct is not None else -abs(float(denom))
-    min_buy_score = float(strategy_rules.min_buy_score)
-    trailing_stop_pct = getattr(strategy_rules, "trailing_stop_pct", 0.0)
+    stop_loss_threshold = -abs(float(stop_loss_pct)) if stop_loss_pct is not None else -abs(float(denom))
 
     # 2. 핵심 보유 종목 및 카테고리 정보 준비
     core_holdings_tickers = set(strategy_rules.core_holdings or [])
@@ -367,9 +357,8 @@ def run_portfolio_recommend(
             country_code,
             stop_loss_threshold,
             cooldown_days,
-            min_buy_score,
+            cooldown_days,
             rsi_sell_threshold,
-            trailing_stop_pct,
             evaluator,
         )
         decisions.append(decision)
@@ -417,9 +406,8 @@ def run_portfolio_recommend(
                     country_code,
                     stop_loss_threshold,
                     cooldown_days,
-                    min_buy_score,
+                    cooldown_days,
                     rsi_sell_threshold,
-                    trailing_stop_pct,
                     evaluator,
                 )
                 new_decision["state"] = "BUY"
@@ -697,15 +685,15 @@ def run_portfolio_recommend(
                 continue
 
             score_val = d.get("score", 0.0)
-            if score_val <= min_buy_score:
-                d["row"][-1] = format_min_score_phrase(score_val, min_buy_score)
+            if score_val <= 0:
+                d["row"][-1] = f"추세 이탈(점수 {score_val:.1f}점)"
             else:
                 # 포트폴리오 꽉 참 -> 점수 부족
                 if not held_scores:
                     d["row"][-1] = ""  # PORTFOLIO_FULL (removed) -> Empty
                 else:
                     req = weakest_score + replace_threshold
-                    d["row"][-1] = DECISION_NOTES["REPLACE_SCORE"].format(min_buy_score=req)
+                    d["row"][-1] = DECISION_NOTES["REPLACE_SCORE"].format(replace_score=req)
 
     # 데이터 부족 메시지 (한번 더 체크)
     for d in decisions:

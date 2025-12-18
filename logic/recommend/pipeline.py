@@ -140,7 +140,6 @@ def generate_account_recommendation_report(account_id: str, date_str: str | None
             df,
             ma_period=strategy_rules.ma_period,
             ma_type=strategy_rules.ma_type,
-            min_buy_score=strategy_rules.min_buy_score,
         )
         if metrics is None and tkr in holdings:
             # [CRITICAL fallback for held items with insufficient data]
