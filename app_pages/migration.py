@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path
 
 import streamlit as st
 import streamlit_authenticator as stauth
 
 from utils.account_registry import list_available_accounts
 from utils.db_manager import migrate_account_id
-from utils.settings_loader import get_account_settings
+from utils.settings_loader import SETTINGS_ROOT, get_account_settings
 
-SETTINGS_DIR = Path(__file__).resolve().parents[1] / "zsettings" / "account"
+SETTINGS_DIR = SETTINGS_ROOT
 
 
 def _to_plain_dict(value):
@@ -51,17 +50,17 @@ def _normalize_account_id(value: str) -> str:
     return (value or "").strip().lower()
 
 
-def _rename_account_file(old_account_id: str, new_account_id: str) -> None:
-    old_path = SETTINGS_DIR / f"{old_account_id}.json"
-    new_path = SETTINGS_DIR / f"{new_account_id}.json"
+def _rename_account_directory(old_account_id: str, new_account_id: str) -> None:
+    old_dir = SETTINGS_DIR / old_account_id
+    new_dir = SETTINGS_DIR / new_account_id
 
-    if not old_path.exists():
-        raise FileNotFoundError(f"계정 설정 파일을 찾을 수 없습니다: {old_path}")
-    if new_path.exists():
+    if not old_dir.exists():
+        raise FileNotFoundError(f"계정 디렉토리를 찾을 수 없습니다: {old_dir}")
+    if new_dir.exists():
         raise FileExistsError(f"이미 존재하는 계정 ID입니다: {new_account_id}")
 
-    new_path.parent.mkdir(parents=True, exist_ok=True)
-    old_path.rename(new_path)
+    # 디렉토리 이름 변경 (전체 이동)
+    old_dir.rename(new_dir)
 
 
 def render_migration_page() -> None:
@@ -108,7 +107,7 @@ def render_migration_page() -> None:
         return
 
     try:
-        _rename_account_file(source_account_id, target_account_id)
+        _rename_account_directory(source_account_id, target_account_id)
     except FileExistsError as exc:
         st.error(str(exc))
         return
@@ -116,7 +115,7 @@ def render_migration_page() -> None:
         st.error(str(exc))
         return
     except Exception as exc:
-        st.error(f"계정 설정 파일 이름 변경에 실패했습니다: {exc}")
+        st.error(f"계정 디렉토리 이름 변경에 실패했습니다: {exc}")
         return
 
     # 기존 설정 캐시 무효화
