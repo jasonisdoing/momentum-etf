@@ -13,21 +13,19 @@ from utils.logger import get_app_logger
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
     "kor1": {
-        # 1. 포트폴리오 개수: 5개가 압도적이었으므로 5개 고정 (혹은 6개까지 확인)
-        "PORTFOLIO_TOPN": [5],
-        # 2. 이동평균: 최적값(66일) 주변 ±10일 범위를 5일 단위로 점검
-        "MA_RANGE": [55, 60, 65, 70, 75],
-        # 3. 이평선 타입: EMA가 확실한 우위였으므로 고정
+        # Top 8의 안정성이 확인되었으므로 8개 중심 (혹은 5개와 비교)
+        "PORTFOLIO_TOPN": [8],
+        # 60일 최적값 주변 점검
+        "MA_RANGE": [50, 55, 60, 65, 70],
         "MA_TYPE": ["EMA"],
-        # 4. 교체 점수: 1점이 우세했으나, 혹시 모르니 2점까지만 확인
-        "REPLACE_SCORE_THRESHOLD": [1, 2],
-        # 5. 손절: 최적값(6%) 주변 1% 단위 확인
-        "STOP_LOSS_PCT": [5, 6, 7],
-        # 6. RSI: 80 고정 (검증 완료)
-        "OVERBOUGHT_SELL_THRESHOLD": [80],
-        # 7. 나머지 고정
+        # 교체 점수 2~3점 확인
+        "REPLACE_SCORE_THRESHOLD": [2, 3],
+        # 손절 8~10% 확인
+        "STOP_LOSS_PCT": [8, 9, 10],
+        # RSI 86 고정
+        "OVERBOUGHT_SELL_THRESHOLD": [86],
         "TRAILING_STOP_PCT": [0],
-        "COOLDOWN_DAYS": [2],
+        "COOLDOWN_DAYS": [3],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",
     },
