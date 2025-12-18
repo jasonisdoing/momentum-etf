@@ -69,8 +69,10 @@ def load_account_configs() -> list[dict[str, Any]]:
             if latest_rec and "recommendations" in latest_rec:
                 recommendations = latest_rec["recommendations"]
                 if isinstance(recommendations, list):
-                    # HOLD + HOLD_CORE 상태인 종목 수 계산
-                    holdings_count = sum(1 for rec in recommendations if rec.get("state") in {"HOLD", "HOLD_CORE"})
+                    # HOLD + HOLD_CORE + BUY + BUY_REPLACE 상태인 종목 수 계산
+                    holdings_count = sum(
+                        1 for rec in recommendations if rec.get("state") in {"HOLD", "HOLD_CORE", "BUY", "BUY_REPLACE"}
+                    )
         except Exception as e:
             # MongoDB 연결 실패 등의 이유로 조회 실패 시 로그 출력
             logger.debug(f"[{account_id}] 보유 종목 수 조회 실패: {e}")
