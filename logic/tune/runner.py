@@ -983,7 +983,7 @@ def _execute_tuning_for_months(
     # US 계정인 경우 환율 데이터 prefetch (모든 워커가 공유)
     fx_series: pd.Series | None = None
     country_code = account_norm.strip().lower()
-    if country_code in {"us", "us1", "us2"}:
+    if country_code in {"us"}:
         try:
             from utils.data_loader import get_exchange_rate_series
 
