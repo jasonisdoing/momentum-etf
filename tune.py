@@ -12,7 +12,7 @@ from utils.logger import get_app_logger
 
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
-    "kor1": {
+    "kor_us": {
         # Top 8의 안정성이 확인되었으므로 8개 중심 (혹은 5개와 비교)
         "PORTFOLIO_TOPN": [8],
         # 60일 최적값 주변 점검
@@ -28,7 +28,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",
     },
-    "kor2": {
+    "kor_kr": {
         "PORTFOLIO_TOPN": [10],
         # 1. MA_RANGE: 160과 180 주변을 5단위로 정밀 타격
         "MA_RANGE": [155, 160, 165, 170, 175, 180, 185],
@@ -45,18 +45,7 @@ TUNING_CONFIG: dict[str, dict] = {
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
-    "kor10": {
-        "PORTFOLIO_TOPN": [6],
-        "MA_RANGE": [5],  # 신규종목 때문에 임시로 5일
-        "MA_TYPE": ["EMA"],
-        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
-        "STOP_LOSS_PCT": [6],
-        "OVERBOUGHT_SELL_THRESHOLD": [85, 86, 87, 88, 89, 90, 91, 92, 93],
-        "COOLDOWN_DAYS": [0, 1, 2, 3],
-        "CORE_HOLDINGS": ["0137W0", "0137V0", "0013P0", "0107F0", "0115C0", "441640"],
-        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    },
-    "us1": {
+    "us": {
         "PORTFOLIO_TOPN": [8],
         "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
         # "MA_TYPE": ["SMA", "EMA"],

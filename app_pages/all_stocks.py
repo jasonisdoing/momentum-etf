@@ -299,9 +299,9 @@ def render_all_stocks_page() -> None:
             settings = get_account_settings(acc_id)
             name = settings.get("name", acc_id)
             # 이름이 ID와 같으면 그냥 표시, 다르면 "이름 (ID)" 형식?
-            # 사용자 요청: "kor1 대신 모멘텀 ETF" -> Just Name if available.
+            # 사용자 요청: "kor_us 대신 모멘텀 ETF" -> Just Name if available.
             # But duplicates? Assuming unique names or acceptable.
-            # 사용자 요청: "모멘텀 ETF(kor1)" => "모멘텀 ETF"
+            # 사용자 요청: "모멘텀 ETF(kor_us)" => "모멘텀 ETF"
             display_label = name
             account_map[display_label] = acc_id
         except Exception:
@@ -310,7 +310,7 @@ def render_all_stocks_page() -> None:
     # 계정 선택 (Pills 스타일) using Display Labels
     display_options = list(account_map.keys())
 
-    # URL 쿼리 파라미터에서 초기값 읽기 (?account=kor1)
+    # URL 쿼리 파라미터에서 초기값 읽기 (?account=kor_us)
     default_label = display_options[0] if display_options else None
     query_account = st.query_params.get("account")
 

@@ -10,7 +10,7 @@
     "show_hold_only": false,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2025-12-18 21:31",
+        "BACKTESTED_DATE": "2025-12-19 08:40",
         "CAGR": 91.095746,
         "MDD": -13.392852,
         "OPTIMIZATION_METRIC": "CAGR",

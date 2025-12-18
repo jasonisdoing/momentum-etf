@@ -13,22 +13,22 @@
 **1. 튜닝 (최적 파라미터 탐색)**
 최적의 파라미터를 찾기 위해 튜닝을 수행합니다. 완료 후 전략 설정이 **자동으로 업데이트**됩니다.
 ```bash
-python tune.py kor1  # kor1 계정 튜닝
-python tune.py us1   # us1 계정 튜닝
+python tune.py kor_us  # kor_us 계정 튜닝
+python tune.py us      # us 계정 튜닝
 ```
 
 **2. 백테스트 실행**
 과거 데이터를 바탕으로 전략의 성과를 시뮬레이션합니다.
 ```bash
-python backtest.py kor1
-python backtest.py us1
+python backtest.py kor_us
+python backtest.py us
 ```
 
 **3. 추천 실행 (매일 아침)**
-오늘의 매매 추천 목록을 생성하고 Slack으로 알림을 보냅니다.
+백테스트 엔진을 기반으로 현재 시점의 매매 추천 목록을 생성하고 Slack으로 알림을 보냅니다.
 ```bash
-python recommend.py kor1
-python recommend.py us1
+python recommend.py kor_us
+python recommend.py us
 ```
 
 ## 2. 설정 가이드
@@ -38,7 +38,7 @@ python recommend.py us1
 *   `SLACK_WEBHOOK_URL`: 알림을 받을 슬랙 웹훅 주소
 *   `TUNING_ENSEMBLE_SIZE`: 튜닝 시 앙상블에 사용할 상위 결과 개수 (기본 3, 홀수만 가능)
 
-### 계좌별 전략 설정 (`zsettings/account/kor1.json`, `us1.json`)
+### 계좌별 전략 설정 (`zsettings/account/kor_us.json`, `us.json`)
 각 계좌(포트폴리오)별로 구체적인 전략 파라미터를 설정합니다. `tune.py` 실행 시 자동으로 업데이트됩니다.
 
 ```json
