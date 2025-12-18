@@ -212,6 +212,23 @@ def _pct_style(value: Any) -> str:
     return ""
 
 
+def _deviation_style(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return ""
+
+    if val == 0:
+        return ""
+
+    style = "color:#d32f2f" if val > 0 else "color:#1565c0"
+    if abs(val) >= 2.0:
+        style += ";font-weight:700"
+    return style
+
+
 def _score_style(value: Any) -> str:
     try:
         score = float(value)
@@ -241,6 +258,11 @@ def style_recommendations_dataframe(df: pd.DataFrame) -> Styler:
     styled = styled.set_properties(subset=["종목명"], **{"text-align": "left"})
     styled = styled.applymap(_state_style, subset=["상태"])
     styled = styled.applymap(_pct_style, subset=["일간(%)"])
+
+    # 괴리율 스타일 적용 (컬럼이 있는 경우에만)
+    if "괴리율" in df.columns:
+        styled = styled.applymap(_deviation_style, subset=["괴리율"])
+
     styled = styled.applymap(_score_style, subset=["점수"])
     styled = styled.applymap(_score_style, subset=["RSI"])
     styled = styled.apply(_row_background_styles, axis=1)

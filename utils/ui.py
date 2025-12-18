@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -188,10 +189,36 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
             return "color: blue"
         return "color: black"
 
+    def _deviation_style(val: Any) -> str:
+        """괴리율 스타일링: 양수 빨강, 음수 파랑, ±2% 이상 볼드체."""
+        if val is None:
+            return ""
+        try:
+            if isinstance(val, str):
+                cleaned = val.replace("%", "").replace(",", "").replace("원", "").replace("$", "").strip()
+                num = float(cleaned)
+            else:
+                num = float(val)
+        except (TypeError, ValueError):
+            return ""
+
+        if num == 0:
+            return ""
+
+        color = "red" if num > 0 else "blue"
+        if abs(num) >= 2.0:
+            return f"color: {color}; font-weight: bold"
+        return f"color: {color}"
+
+    # 전형적인 퍼센트 컬럼들
     pct_columns = ["일간(%)", "평가(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "고점대비"]
     for col in pct_columns:
         if col in df.columns:
-            styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, col])
+            styled = styled.map(_color_daily_pct, subset=[col])
+
+    # 괴리율 별도 적용 (볼드 포함)
+    if "괴리율" in df.columns:
+        styled = styled.map(_deviation_style, subset=["괴리율"])
 
     # 가격 컬럼 포맷팅
     def _safe_format(fmt: str):

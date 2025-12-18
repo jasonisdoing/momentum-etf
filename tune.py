@@ -47,13 +47,13 @@ TUNING_CONFIG: dict[str, dict] = {
     },
     "kor10": {
         "PORTFOLIO_TOPN": [6],
-        "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
+        "MA_RANGE": [5],  # 신규종목 때문에 임시로 5일
         "MA_TYPE": ["EMA"],
         "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
         "STOP_LOSS_PCT": [6],
         "OVERBOUGHT_SELL_THRESHOLD": [85, 86, 87, 88, 89, 90, 91, 92, 93],
         "COOLDOWN_DAYS": [0, 1, 2, 3],
-        "CORE_HOLDINGS": [],
+        "CORE_HOLDINGS": ["0137W0", "0137V0", "0013P0", "0107F0", "0115C0", "441640"],
         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
     },
     "us1": {

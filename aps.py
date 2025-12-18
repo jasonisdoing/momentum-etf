@@ -43,9 +43,11 @@ try:  # pragma: no cover - 선택적 의존성 처리
 except Exception:  # pragma: no cover
     np = None  # type: ignore[assignment]
 
-from logic.recommend.pipeline import (
+from recommend import (
     RecommendationReport,
-    generate_account_recommendation_report,
+)
+from recommend import (
+    generate_recommendation_report as generate_account_recommendation_report,
 )
 from utils.env import load_env_if_present
 from utils.notification import (
