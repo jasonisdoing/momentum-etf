@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from config import MARKET_SCHEDULES
-from logic.common import get_buy_signal_streak
+from logic.backtest.signals import get_buy_signal_streak
 from strategies.rsi.recommend import calculate_rsi_for_ticker
 from utils.data_loader import (
     fetch_naver_etf_inav_snapshot,

@@ -314,7 +314,7 @@ def _filter_category_duplicates(
     recommendations: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """카테고리별로 최고 점수 종목만 남기고 필터링합니다."""
-    from logic.common import filter_category_duplicates
+    from logic.backtest import filter_category_duplicates
 
     def normalize_category(category: str) -> str:
         if not category or category == "-":

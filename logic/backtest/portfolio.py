@@ -9,8 +9,9 @@ from typing import Any
 
 import pandas as pd
 
-from logic.common import calculate_held_categories, is_category_exception, select_candidates_by_category
-from logic.common.price import calculate_trade_price
+from logic.backtest.filtering import select_candidates_by_category
+from logic.backtest.portfolio_helpers import calculate_held_categories, is_category_exception
+from logic.backtest.price import calculate_trade_price
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
 from strategies.maps.evaluator import StrategyEvaluator
 from strategies.maps.labeler import compute_net_trade_note
@@ -252,7 +253,7 @@ def _execute_new_buys(
     Returns:
         (cash, current_holdings_value, purchased_today, held_categories)
     """
-    from logic.common import (
+    from logic.backtest.portfolio_helpers import (
         calculate_held_categories,
         calculate_held_count,
         check_buy_candidate_filters,
@@ -474,7 +475,7 @@ def run_portfolio_backtest(
 
     stop_loss_threshold = stop_loss_pct
 
-    from logic.common import validate_core_holdings, validate_portfolio_topn
+    from logic.backtest.portfolio_helpers import validate_core_holdings, validate_portfolio_topn
 
     validate_portfolio_topn(top_n)
 
@@ -851,7 +852,7 @@ def run_portfolio_backtest(
 
         # 3. 교체 매수 실행 (포트폴리오가 가득 찬 경우)
         if len(purchased_today) == 0 and buy_ranked_candidates:
-            from logic.common import calculate_buy_budget
+            from logic.backtest.portfolio_helpers import calculate_buy_budget
 
             # 종합 점수를 사용 (buy_ranked_candidates는 이미 종합 점수로 정렬됨)
             helper_candidates = [
