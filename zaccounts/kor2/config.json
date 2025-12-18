@@ -1,8 +1,8 @@
 {
     "order": 20,
     "icon": "🇰🇷",
-    "name": "한국 추세추종",
-    "desc": "한국 일반계좌에서 운영종인 포트폴리오 입니다.",
+    "name": "국내상장 ETF",
+    "desc": "운영종인 국내상장 ETF 포트폴리오 입니다.",
     "country_code": "kor",
     "currency": "krw",
     "slack_channel": "C09FAU2NHM2",
@@ -10,8 +10,8 @@
     "show_hold_only": false,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2025-12-18 12:22",
-        "CAGR": 117.753453,
+        "BACKTESTED_DATE": "2025-12-18 12:32",
+        "CAGR": 117.294237,
         "MDD": -14.908602,
         "OPTIMIZATION_METRIC": "CAGR",
         "PORTFOLIO_TOPN": 10,
