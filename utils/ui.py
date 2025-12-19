@@ -205,13 +205,16 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         if num == 0:
             return ""
 
-        color = "red" if num > 0 else "blue"
-        if abs(num) >= 2.0:
-            return f"color: {color}; font-weight: bold"
-        return f"color: {color}"
+        if num >= 2.0:
+            return "color: red; font-weight: bold"
+        if num <= -2.0:
+            return "color: blue; font-weight: bold"
+
+        return "color: black"
 
     # 전형적인 퍼센트 컬럼들
-    pct_columns = ["일간(%)", "평가(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "고점대비"]
+    # 전형적인 퍼센트 컬럼들
+    pct_columns = ["일간(%)", "평가(%)", "1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
     for col in pct_columns:
         if col in df.columns:
             styled = styled.map(_color_daily_pct, subset=[col])
@@ -284,9 +287,11 @@ def render_recommendation_table(
         "상태": st.column_config.TextColumn("상태", width=80),
         "보유일": st.column_config.NumberColumn("보유일", width=50),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
-        "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
+        # "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
+        "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
+        "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
         "고점대비": st.column_config.NumberColumn("고점대비", width="small", format="%.2f%%"),
         "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width="small"),
         "점수": st.column_config.NumberColumn("점수", width=50, format="%.1f"),

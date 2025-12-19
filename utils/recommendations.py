@@ -23,9 +23,10 @@ _BASE_DISPLAY_COLUMNS = [
     "보유일",
     "현재가",
     "1주(%)",
-    "2주(%)",
     "1달(%)",
     "3달(%)",
+    "6달(%)",
+    "12달(%)",
     "고점대비",
     "추세(3달)",
     "점수",
@@ -133,9 +134,11 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         evaluation_pct = row.get("evaluation_pct", 0.0)
         price_deviation = row.get("price_deviation") if show_deviation else None
         return_1w = row.get("return_1w", 0.0)
-        return_2w = row.get("return_2w", 0.0)
+        # return_2w = row.get("return_2w", 0.0)
         return_1m = row.get("return_1m", 0.0)
         return_3m = row.get("return_3m", 0.0)
+        return_6m = row.get("return_6m", 0.0)
+        return_12m = row.get("return_12m", 0.0)
         drawdown_from_high = row.get("drawdown_from_high", 0.0)
         score = row.get("score")
         streak = _format_days(row.get("streak"))
@@ -155,9 +158,11 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 **({"Nav": row.get("nav_price")} if nav_mode else {}),
                 **({"괴리율": price_deviation} if show_deviation else {}),
                 "1주(%)": return_1w,
-                "2주(%)": return_2w,
+                # "2주(%)": return_2w,
                 "1달(%)": return_1m,
                 "3달(%)": return_3m,
+                "6달(%)": return_6m,
+                "12달(%)": return_12m,
                 "고점대비": drawdown_from_high,
                 "추세(3달)": _trend_series(row),
                 "점수": score,
@@ -171,12 +176,16 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
     if "현재가" in columns:
         idx = columns.index("현재가")
         columns[idx] = price_label
-    if nav_mode and "Nav" not in columns:
-        insert_pos = columns.index(price_label) + 1
-        columns.insert(insert_pos, "Nav")
+
+    # [User Request] 현재가 - 괴리율 - Nav 순서로 변경
     if show_deviation and "괴리율" not in columns:
-        insert_pos = columns.index(price_label) + (2 if nav_mode else 1)
+        insert_pos = columns.index(price_label) + 1
         columns.insert(insert_pos, "괴리율")
+
+    if nav_mode and "Nav" not in columns:
+        # 괴리율이 있으면 그 다음(+2), 없으면 현재가 다음(+1)
+        insert_pos = columns.index(price_label) + (2 if show_deviation else 1)
+        columns.insert(insert_pos, "Nav")
     df = pd.DataFrame(display_rows, columns=columns)
     return df
 

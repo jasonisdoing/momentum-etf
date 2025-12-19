@@ -46,16 +46,24 @@ TUNING_CONFIG: dict[str, dict] = {
         "OPTIMIZATION_METRIC": "CAGR",
     },
     "us": {
-        "PORTFOLIO_TOPN": [8],
-        "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
-        # "MA_TYPE": ["SMA", "EMA"],
-        "MA_TYPE": ["SMA"],
-        "REPLACE_SCORE_THRESHOLD": [1, 2, 3, 4, 5],
-        "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
-        "OVERBOUGHT_SELL_THRESHOLD": [84, 86, 88, 90],
-        "COOLDOWN_DAYS": [2, 3, 4],
+        # 1. 포트폴리오 개수: 집중(5) vs 적절(8) vs 분산(10) 성향 파악
+        "PORTFOLIO_TOPN": [5, 8, 10],
+        # 2. 이동평균: 단기(30)부터 장기(200)까지 전 구간 스캔
+        # (이전 kor1은 60일, kor_kr은 170일이었습니다. us는 어디일지 모릅니다.)
+        "MA_RANGE": [20, 30, 60, 90, 120, 150, 180, 200],
+        # 3. 이평선 타입: 미국장은 EMA가 강세인 경우가 많으므로 필수 비교
+        "MA_TYPE": ["SMA", "EMA"],
+        # 4. 교체 점수: 1~3점 (너무 잦은 교체는 슬리피지 우려)
+        "REPLACE_SCORE_THRESHOLD": [1, 2, 3],
+        # 5. 손절: 테마주(코인, AI) 변동성을 고려해 15%까지 열어둠
+        "STOP_LOSS_PCT": [5, 10, 15],
+        # 6. 과매수: 75~85 탐색
+        "OVERBOUGHT_SELL_THRESHOLD": [75, 80, 85],
+        # 7. 쿨다운: 1~3일
+        "COOLDOWN_DAYS": [1, 2, 3],
+        "TRAILING_STOP_PCT": [0],  # 트레일링은 일단 0으로 시작 (필요시 2차에서 추가)
         "CORE_HOLDINGS": [],
-        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택ㅉ
+        "OPTIMIZATION_METRIC": "CAGR",
     },
 }
 

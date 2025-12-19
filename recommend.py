@@ -160,7 +160,7 @@ def extract_recommendations_from_backtest(
 
         # 수익률 및 드로우다운 계산
         df_up_to_end = df[df.index <= end_date]
-        return_1w = return_2w = return_1m = return_3m = 0.0
+        return_1w = return_1m = return_3m = 0.0
         drawdown_from_high = 0.0
         trend_prices = []
 
@@ -173,12 +173,22 @@ def extract_recommendations_from_backtest(
                     prev_p = _safe_float(historical_prices.iloc[-(days + 1)])
                     if prev_p and prev_p > 0:
                         return (current_p / prev_p - 1.0) * 100.0
+
+                # [Fallback] 데이터가 살짝 부족해도 전체 기간이 대략 맞으면(예: 12개월) 가장 오래된 데이터 사용
+                # 1년 영업일은 보통 252일 전후이므로, 240일 이상이면 1년치로 간주
+                if days == 252 and len(historical_prices) >= 240 and current_p:
+                    prev_p = _safe_float(historical_prices.iloc[0])
+                    if prev_p and prev_p > 0:
+                        return (current_p / prev_p - 1.0) * 100.0
+
                 return 0.0
 
             return_1w = _get_ret(5)
-            return_2w = _get_ret(10)
+            # return_2w = _get_ret(10)  # Removed as per request
             return_1m = _get_ret(20)
             return_3m = _get_ret(60)
+            return_6m = _get_ret(126)
+            return_12m = _get_ret(252)
 
             # 고점대비 하락폭
             max_p = _safe_float(historical_prices.max())
@@ -206,9 +216,11 @@ def extract_recommendations_from_backtest(
                 "price_deviation": price_deviation,
                 "holding_days": holding_days,
                 "return_1w": return_1w,
-                "return_2w": return_2w,
+                # "return_2w": return_2w,
                 "return_1m": return_1m,
                 "return_3m": return_3m,
+                "return_6m": return_6m,
+                "return_12m": return_12m,
                 "drawdown_from_high": drawdown_from_high,
                 "trend_prices": trend_prices,
                 "phrase": phrase,
@@ -537,19 +549,22 @@ def dump_recommendation_log(
     show_deviation = country_lower in {"kr", "kor"}
 
     headers = ["#", "티커", "종목명", "카테고리", "상태", "보유일", "일간(%)", "평가(%)", "현재가"]
-    if nav_mode:
-        headers.append("Nav")
+    # [User Request] 현재가 - 괴리율 - Nav
     if show_deviation:
         headers.append("괴리율")
-    headers.extend(["1주(%)", "2주(%)", "1달(%)", "3달(%)", "고점대비"])
+    if nav_mode:
+        headers.append("Nav")
+
+    # [User Request] 1주 - 1달 - 3달 - 6달 - 12달
+    headers.extend(["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"])
     headers.extend(["점수", "RSI", "지속", "문구"])
 
     aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "right"]
-    if nav_mode:
-        aligns.append("right")
     if show_deviation:
         aligns.append("right")
-    aligns.extend(["right", "right", "right", "right", "right"])  # Returns & Drawdown
+    if nav_mode:
+        aligns.append("right")
+    aligns.extend(["right", "right", "right", "right", "right", "right"])  # Returns(5) & Drawdown
     aligns.extend(["right", "right", "right", "left"])
 
     rows: list[list[str]] = []
@@ -571,9 +586,11 @@ def dump_recommendation_log(
         phrase = item.get("phrase", "")
 
         return_1w = item.get("return_1w", 0)
-        return_2w = item.get("return_2w", 0)
+        # return_2w = item.get("return_2w", 0)
         return_1m = item.get("return_1m", 0)
         return_3m = item.get("return_3m", 0)
+        return_6m = item.get("return_6m", 0)
+        return_12m = item.get("return_12m", 0)
         drawdown_from_high = item.get("drawdown_from_high", 0)
 
         row = [
@@ -587,17 +604,19 @@ def dump_recommendation_log(
             format_pct_change(evaluation_pct) if evaluation_pct != 0 else "-",
             format_price(price, country_code),
         ]
-        if nav_mode:
-            row.append(format_price(nav_price, country_code))
         if show_deviation:
             row.append(format_price_deviation(price_deviation))
+        if nav_mode:
+            row.append(format_price(nav_price, country_code))
 
         row.extend(
             [
                 format_pct_change(return_1w),
-                format_pct_change(return_2w),
+                # format_pct_change(return_2w),
                 format_pct_change(return_1m),
                 format_pct_change(return_3m),
+                format_pct_change(return_6m),
+                format_pct_change(return_12m),
                 format_pct_change(drawdown_from_high),
             ]
         )
