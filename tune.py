@@ -12,6 +12,23 @@ from utils.logger import get_app_logger
 
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 TUNING_CONFIG: dict[str, dict] = {
+    "kor_kr": {
+        # 1. 포트폴리오: 8개 확정
+        "PORTFOLIO_TOPN": [8],
+        # 2. 이동평균: 170일 주변 점검
+        "MA_RANGE": [160, 165, 170, 175, 180],
+        "MA_TYPE": ["SMA"],
+        # 3. 교체 점수: 0점 확정 (혹은 1점 비교)
+        "REPLACE_SCORE_THRESHOLD": [0, 1],
+        # 4. 손절: 12~16% 넓은 범위 유지보수
+        "STOP_LOSS_PCT": [12, 13, 14, 15, 16],
+        # 5. 나머지 고정
+        "OVERBOUGHT_SELL_THRESHOLD": [86],
+        "TRAILING_STOP_PCT": [0],
+        "COOLDOWN_DAYS": [3],
+        "CORE_HOLDINGS": [],
+        "OPTIMIZATION_METRIC": "CAGR",
+    },
     "kor_us": {
         # Top 8의 안정성이 확인되었으므로 8개 중심 (혹은 5개와 비교)
         "PORTFOLIO_TOPN": [8],
@@ -28,23 +45,6 @@ TUNING_CONFIG: dict[str, dict] = {
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",
     },
-    "kor_kr": {
-        "PORTFOLIO_TOPN": [10],
-        # 1. MA_RANGE: 160과 180 주변을 5단위로 정밀 타격
-        "MA_RANGE": [155, 160, 165, 170, 175, 180, 185],
-        # 2. MA_TYPE: SMA로 확정 (탐색 비용 절감)
-        "MA_TYPE": ["SMA"],
-        # 3. 교체 점수: 1점이 우세했으므로, 더 공격적인 0점과 보수적인 2점까지 비교
-        "REPLACE_SCORE_THRESHOLD": [0, 1, 2],
-        # 4. 손절: 6%가 좋았으므로 5~7% 구간 정밀 확인
-        "STOP_LOSS_PCT": [5, 6, 7],
-        # 5. RSI: 86으로 고정 (이미 검증됨)
-        "OVERBOUGHT_SELL_THRESHOLD": [86],
-        # 7. 쿨다운: 3일로 고정 (이미 검증됨)
-        "COOLDOWN_DAYS": [3],
-        "CORE_HOLDINGS": [],
-        "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-    },
     "us": {
         "PORTFOLIO_TOPN": [8],
         "MA_RANGE": [20, 25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
@@ -60,34 +60,32 @@ TUNING_CONFIG: dict[str, dict] = {
 }
 
 
-# TUNING_CONFIG: dict[str, dict] = {
-#     "k1": {
-#         "PORTFOLIO_TOPN": [10],
-#         "MA_RANGE": [25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
-#         "MA_TYPE": ["EMA"],
-#         "REPLACE_SCORE_THRESHOLD": [2, 3],
-#         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
-#         "OVERBOUGHT_SELL_THRESHOLD": [86],
-#         "COOLDOWN_DAYS": [2],
-#         "CORE_HOLDINGS": [],
-#         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-#     }
-# }
+# "kor_kr": {
+#     # 1. 포트폴리오: 8개로 고정 (사용자 요청 반영)
+#     "PORTFOLIO_TOPN": [8],
 
-# TUNING_CONFIG: dict[str, dict] = {
-#     "k1": {
-#         "PORTFOLIO_TOPN": [8],
-#         "MA_RANGE": [25, 30, 35, 40, 45, 50],  # 범위가 넓어지면 과최적화 위험 증가
-#         # "MA_TYPE": ["EMA"],
-#         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-#         "REPLACE_SCORE_THRESHOLD": [1, 2, 3, 4, 5],
-#         "STOP_LOSS_PCT": [5, 6, 7, 8, 9, 10],
-#         "OVERBOUGHT_SELL_THRESHOLD": [83, 84, 85, 86, 87, 88, 89, 90],
-#         "COOLDOWN_DAYS": [0, 1, 2, 3],
-#         "CORE_HOLDINGS": [],
-#         "OPTIMIZATION_METRIC": "CAGR",  # "CAGR", "Sharpe", "SDR" 중 선택
-#     }
-# }
+#     # 2. 이동평균: 중기(60)부터 초장기(200)까지 전체 탐색
+#     "MA_RANGE": [60, 90, 120, 150, 180, 200],
+
+#     # 3. 이평선 타입: SMA(단순), EMA(지수) 모두 비교
+#     "MA_TYPE": ["SMA", "EMA"],
+
+#     # 4. 교체 점수: 0~3점 전체 탐색 (적극 교체 vs 진득 보유)
+#     "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3],
+
+#     # 5. 손절: 5~15% 넓은 범위 확인
+#     "STOP_LOSS_PCT": [5, 10, 15],
+
+#     # 6. 과매수: 80~90 넓은 범위 확인
+#     "OVERBOUGHT_SELL_THRESHOLD": [80, 85, 90],
+
+#     # 7. 쿨다운: 1~3일 확인
+#     "COOLDOWN_DAYS": [1, 2, 3],
+
+#     "TRAILING_STOP_PCT": [0], # 트레일링 스탑은 보통 0이 우세하므로 고정 (원하시면 [0, 5] 추가)
+#     "CORE_HOLDINGS": [],
+#     "OPTIMIZATION_METRIC": "CAGR",
+# },
 
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
