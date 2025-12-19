@@ -46,22 +46,20 @@ TUNING_CONFIG: dict[str, dict] = {
         "OPTIMIZATION_METRIC": "CAGR",
     },
     "us": {
-        # 1. 포트폴리오 개수: 집중(5) vs 적절(8) vs 분산(10) 성향 파악
-        "PORTFOLIO_TOPN": [5, 8, 10],
-        # 2. 이동평균: 단기(30)부터 장기(200)까지 전 구간 스캔
-        # (이전 kor1은 60일, kor_kr은 170일이었습니다. us는 어디일지 모릅니다.)
-        "MA_RANGE": [20, 30, 60, 90, 120, 150, 180, 200],
-        # 3. 이평선 타입: 미국장은 EMA가 강세인 경우가 많으므로 필수 비교
-        "MA_TYPE": ["SMA", "EMA"],
-        # 4. 교체 점수: 1~3점 (너무 잦은 교체는 슬리피지 우려)
-        "REPLACE_SCORE_THRESHOLD": [1, 2, 3],
-        # 5. 손절: 테마주(코인, AI) 변동성을 고려해 15%까지 열어둠
-        "STOP_LOSS_PCT": [5, 10, 15],
-        # 6. 과매수: 75~85 탐색
-        "OVERBOUGHT_SELL_THRESHOLD": [75, 80, 85],
-        # 7. 쿨다운: 1~3일
-        "COOLDOWN_DAYS": [1, 2, 3],
-        "TRAILING_STOP_PCT": [0],  # 트레일링은 일단 0으로 시작 (필요시 2차에서 추가)
+        # 1. 포트폴리오: 8개 고정
+        "PORTFOLIO_TOPN": [8],
+        # 2. 이동평균: 70일 주변 점검
+        "MA_RANGE": [65, 70, 75],
+        "MA_TYPE": ["SMA"],
+        # 3. 교체 점수: 1~2점
+        "REPLACE_SCORE_THRESHOLD": [1, 2],
+        # 4. 손절: 10~13% 사이 점검
+        "STOP_LOSS_PCT": [10, 11, 12, 13],
+        # 5. RSI: 83~85 점검 (84가 좋았으므로)
+        "OVERBOUGHT_SELL_THRESHOLD": [83, 84, 85],
+        # 6. 나머지 고정
+        "TRAILING_STOP_PCT": [0],
+        "COOLDOWN_DAYS": [2, 3],
         "CORE_HOLDINGS": [],
         "OPTIMIZATION_METRIC": "CAGR",
     },
@@ -75,8 +73,8 @@ TUNING_CONFIG: dict[str, dict] = {
 #     # 2. 이동평균: 중기(60)부터 초장기(200)까지 전체 탐색
 #     "MA_RANGE": [60, 90, 120, 150, 180, 200],
 
-#     # 3. 이평선 타입: SMA(단순), EMA(지수) 모두 비교
-#     "MA_TYPE": ["SMA", "EMA"],
+#     # 3. 이평선 타입 모두 비교
+#     "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
 
 #     # 4. 교체 점수: 0~3점 전체 탐색 (적극 교체 vs 진득 보유)
 #     "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3],
