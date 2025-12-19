@@ -9,7 +9,7 @@
                 "1_week_avg_volume": 5936301,
                 "1_month_earn_rate": 4.2955,
                 "3_month_earn_rate": 3.961,
-                "6_month_earn_rate": 14.5521,
+                "6_month_earn_rate": 14.552,
                 "12_month_earn_rate": 11.4035
             },
             {
@@ -49,8 +49,8 @@
                 "1_week_avg_volume": 3009071,
                 "1_month_earn_rate": 1.9203,
                 "3_month_earn_rate": 0.4867,
-                "6_month_earn_rate": 16.2052,
-                "12_month_earn_rate": 15.7141
+                "6_month_earn_rate": 16.2053,
+                "12_month_earn_rate": 15.714
             },
             {
                 "ticker": "VUG",
@@ -115,7 +115,7 @@
                 "1_month_earn_rate": 6.7837,
                 "3_month_earn_rate": 1.525,
                 "6_month_earn_rate": 10.9019,
-                "12_month_earn_rate": 3.8799
+                "12_month_earn_rate": 3.8798
             },
             {
                 "ticker": "MDYV",
@@ -164,7 +164,7 @@
                 "1_week_avg_volume": 754556,
                 "1_month_earn_rate": 8.9175,
                 "3_month_earn_rate": 3.8957,
-                "6_month_earn_rate": 17.6464,
+                "6_month_earn_rate": 17.6465,
                 "12_month_earn_rate": 4.0344
             },
             {
@@ -280,7 +280,7 @@
                 "1_month_earn_rate": 1.4515,
                 "3_month_earn_rate": 1.6219,
                 "6_month_earn_rate": 18.0318,
-                "12_month_earn_rate": 17.9913
+                "12_month_earn_rate": 17.9912
             },
             {
                 "ticker": "XLU",
@@ -979,7 +979,7 @@
                 "1_week_avg_volume": 50808,
                 "1_month_earn_rate": 5.1412,
                 "3_month_earn_rate": 0.6473,
-                "6_month_earn_rate": 12.2455,
+                "6_month_earn_rate": 12.2454,
                 "12_month_earn_rate": 19.6333
             },
             {
@@ -1255,7 +1255,7 @@
                 "1_month_earn_rate": 3.0822,
                 "3_month_earn_rate": 2.385,
                 "6_month_earn_rate": 11.6114,
-                "12_month_earn_rate": 12.0523
+                "12_month_earn_rate": 12.0522
             },
             {
                 "ticker": "SCHD",
@@ -1309,7 +1309,7 @@
                 "1_week_avg_volume": 248649,
                 "1_month_earn_rate": 4.0241,
                 "3_month_earn_rate": 5.5274,
-                "6_month_earn_rate": 12.9993,
+                "6_month_earn_rate": 12.9994,
                 "12_month_earn_rate": 15.1147
             },
             {
@@ -1480,7 +1480,7 @@
                 "1_month_earn_rate": 0.5968,
                 "3_month_earn_rate": 1.8066,
                 "6_month_earn_rate": 13.569,
-                "12_month_earn_rate": 22.1457
+                "12_month_earn_rate": 22.1458
             },
             {
                 "ticker": "EWW",

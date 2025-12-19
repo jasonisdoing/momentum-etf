@@ -131,42 +131,6 @@ def main() -> None:
         )
     )
 
-    pages.append(
-        page_cls(
-            "app_pages/trade.py",
-            title="[Admin] trade",
-            icon="📝",
-            url_path="admin",
-        )
-    )
-
-    pages.append(
-        page_cls(
-            "app_pages/migration.py",
-            title="[Admin] 마이그레이션",
-            icon="🛠️",
-            url_path="migration",
-        )
-    )
-
-    pages.append(
-        page_cls(
-            "app_pages/delete.py",
-            title="[Admin] 계정 삭제",
-            icon="🗑️",
-            url_path="delete",
-        )
-    )
-
-    pages.append(
-        page_cls(
-            "app_pages/trade.py",
-            title="[Admin] trade",
-            icon="📝",
-            url_path="admin",
-        )
-    )
-
     # pages.append(
     #     page_cls(
     #         "app_pages/stocks.py",
