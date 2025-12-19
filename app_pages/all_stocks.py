@@ -174,9 +174,23 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
         # 추세 (3달 = 63일)
         trend_data = close_series.tail(63).tolist() if len(close_series) >= 63 else close_series.tolist()
 
-        # 점수 계산 (MA 기반)
-        ma_period = 90
-        ma_type = "TEMA"
+        # 점수 및 지표 계산 (계정별 전략 적용)
+        try:
+            from utils.settings_loader import get_strategy_rules
+
+            rules = get_strategy_rules(account_id)
+            ma_period = rules.ma_period
+            ma_type = rules.ma_type
+
+            # RSI 설정 로드 (Account Settings Raw)
+            strat_settings = settings.get("strategy", {})
+            rsi_period = strat_settings.get("RSI_PERIOD")  # None이면 기본값(14) 사용
+            rsi_smoothing = strat_settings.get("RSI_EMA_SMOOTHING")  # None이면 기본값(2.0) 사용
+        except Exception:
+            ma_period = 90
+            ma_type = "TEMA"
+            rsi_period = None
+            rsi_smoothing = None
 
         score_value = 0.0
         consecutive_days = 0
@@ -188,7 +202,13 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
                 ma_score_series = calculate_ma_score(close_series, moving_average)
                 score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
                 consecutive_days = get_buy_signal_streak(score_value, ma_score_series)
-                rsi_score = calculate_rsi_for_ticker(close_series)
+
+                # RSI 계산 (동적 파라미터 전달)
+                rsi_score = calculate_rsi_for_ticker(
+                    close_series,
+                    period=int(rsi_period) if rsi_period else None,
+                    ema_smoothing=float(rsi_smoothing) if rsi_smoothing else None,
+                )
             except Exception:
                 pass
 
