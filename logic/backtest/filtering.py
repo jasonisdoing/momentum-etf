@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 import config
-from logic.backtest.portfolio_helpers import is_category_exception
+from logic.backtest.portfolio import is_category_exception
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -183,7 +183,7 @@ def filter_category_duplicates(
     Returns:
         필터링된 항목 리스트
     """
-    from logic.backtest.portfolio_helpers import should_exclude_from_category_count
+    from logic.backtest.portfolio import should_exclude_from_category_count
 
     filtered_results = []
     category_best_map = {}  # 카테고리별 최고 점수 종목 추적

@@ -45,7 +45,7 @@ from .filtering import (
     sort_decisions_by_order_and_score,
 )
 from .notes import format_trend_break_phrase
-from .portfolio_helpers import (
+from .portfolio import (
     calculate_buy_budget,
     calculate_held_categories,
     calculate_held_categories_from_holdings,
