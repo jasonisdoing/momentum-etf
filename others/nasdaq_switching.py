@@ -24,7 +24,7 @@ DEFAULT_SETTINGS = {
     "months_range": 12,  # 기본 12개월 (튜닝 시에도 이 기간 사용)
     "signal_ticker": "QQQ",
     "trade_ticker": "TQQQ",
-    "slippage": 0.05,
+    "slippage": 0.25,
     "backtested_date": datetime.now().strftime("%Y-%m-%d"),
     "defense_ticker": "GLDM",
     "drawdown_buy_cutoff": 0.3,  # 초기값 (튜닝으로 덮어씌워짐)
