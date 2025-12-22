@@ -11,58 +11,40 @@ from utils.data_loader import MissingPriceDataError
 from utils.logger import get_app_logger
 
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
-TUNING_CONFIG: dict[str, dict] = {
+ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
-        # 1. 포트폴리오: 8개 확정
-        "PORTFOLIO_TOPN": [8],
-        # 2. 이동평균: 170일 주변 점검
-        "MA_RANGE": [160, 165, 170, 175, 180],
-        "MA_TYPE": ["SMA"],
-        # 3. 교체 점수: 0점 확정 (혹은 1점 비교)
-        "REPLACE_SCORE_THRESHOLD": [0, 1],
-        # 4. 손절: 12~16% 넓은 범위 유지보수
-        "STOP_LOSS_PCT": [12, 13, 14, 15, 16],
-        # 5. 나머지 고정
-        "OVERBOUGHT_SELL_THRESHOLD": [86],
-        "TRAILING_STOP_PCT": [0],
-        "COOLDOWN_DAYS": [3],
-        "CORE_HOLDINGS": [],
-        "OPTIMIZATION_METRIC": "CAGR",
+        # 이동평균: 100~110
+        "MA_RANGE": [90, 95, 100, 105, 110, 115, 120],
     },
     "kor_us": {
-        # Top 8의 안정성이 확인되었으므로 8개 중심 (혹은 5개와 비교)
-        "PORTFOLIO_TOPN": [8],
-        # 60일 최적값 주변 점검
+        # 이동평균: 60
         "MA_RANGE": [50, 55, 60, 65, 70],
-        "MA_TYPE": ["EMA"],
-        # 교체 점수 2~3점 확인
-        "REPLACE_SCORE_THRESHOLD": [2, 3],
-        # 손절 8~10% 확인
-        "STOP_LOSS_PCT": [8, 9, 10],
-        # RSI 86 고정
-        "OVERBOUGHT_SELL_THRESHOLD": [86],
-        "COOLDOWN_DAYS": [3],
-        "CORE_HOLDINGS": [],
-        "OPTIMIZATION_METRIC": "CAGR",
     },
     "us": {
-        # 1. 포트폴리오: 8개 고정
-        "PORTFOLIO_TOPN": [8],
-        # 2. 이동평균: 70일 주변 점검
-        "MA_RANGE": [65, 70, 75],
-        "MA_TYPE": ["SMA"],
-        # 3. 교체 점수: 1~2점
-        "REPLACE_SCORE_THRESHOLD": [1, 2],
-        # 4. 손절: 10~13% 사이 점검
-        "STOP_LOSS_PCT": [10, 11, 12, 13],
-        # 5. RSI: 83~85 점검 (84가 좋았으므로)
-        "OVERBOUGHT_SELL_THRESHOLD": [83, 84, 85],
-        # 6. 나머지 고정
-        "TRAILING_STOP_PCT": [0],
-        "COOLDOWN_DAYS": [2, 3],
-        "CORE_HOLDINGS": [],
-        "OPTIMIZATION_METRIC": "CAGR",
+        # 이동평균: 65 ~ 70
+        "MA_RANGE": [60, 65, 70, 75, 80],
     },
+}
+
+COMMON_TUNING_CONFIG = {
+    # 이동평균: 20~100
+    # "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
+    # 포트폴리오: 8개 확정
+    "PORTFOLIO_TOPN": [8],
+    # SMA, EMA
+    "MA_TYPE": ["SMA", "EMA"],
+    # 교체: 0~3점 확인
+    "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3],
+    # 손절: 8~10% 확인
+    "STOP_LOSS_PCT": [8, 9, 10],
+    # RSI: 82~90 점검
+    "OVERBOUGHT_SELL_THRESHOLD": [82, 84, 86, 88, 90],
+    # 쿨다운: 1~3
+    "COOLDOWN_DAYS": [1, 2, 3],
+    # 나머지 고정
+    "TRAILING_STOP_PCT": [0],
+    "CORE_HOLDINGS": [],
+    "OPTIMIZATION_METRIC": "CAGR",
 }
 
 
@@ -112,12 +94,17 @@ def main() -> None:
     except Exception as exc:  # pragma: no cover - 잘못된 입력 방어 전용 처리
         raise SystemExit(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
+    # 공통 설정과 계정별 설정을 조합
+    merged_config = COMMON_TUNING_CONFIG.copy()
+    account_config = ACCOUNT_TUNING_CONFIG.get(account_id, {})
+    merged_config.update(account_config)
+
     try:
         output = run_account_tuning(
             account_id,
             output_path=None,
             results_dir=RESULTS_DIR,
-            tuning_config=TUNING_CONFIG,
+            tuning_config={account_id: merged_config},
         )
     except MissingPriceDataError as exc:
         logger.error(str(exc))
