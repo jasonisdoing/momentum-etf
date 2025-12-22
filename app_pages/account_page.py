@@ -113,11 +113,9 @@ def render_account_page(account_id: str) -> None:
                     caption_parts.append(f"슬리피지: 매수+{buy_slip}%/매도-{sell_slip}%")
 
             try:
-                from logic.common import get_hold_states
+                from logic.backtest import get_hold_states
 
-                hold_states = get_hold_states()
-                # buy_states = {"BUY", "BUY_REPLACE"}
-                # sell_states = {"SELL_REPLACE", "SELL_TRIM", "SELL_TREND", "CUT_STOPLOSS"}
+                hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
                 current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
                 # exits = int(df[df["상태"].isin(sell_states)].shape[0])
                 # buys = int(df[df["상태"].isin(buy_states)].shape[0])

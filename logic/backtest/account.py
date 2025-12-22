@@ -165,8 +165,6 @@ def run_account_backtest(
             ma_type=strategy_override.ma_type,
             core_holdings=strategy_override.core_holdings,
             stop_loss_pct=strategy_override.stop_loss_pct,
-            min_buy_score=strategy_override.min_buy_score,
-            trailing_stop_pct=getattr(strategy_override, "trailing_stop_pct", 0.0),
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
@@ -175,8 +173,6 @@ def run_account_backtest(
         strategy_settings["CORE_HOLDINGS"] = strategy_rules.core_holdings
         if strategy_rules.stop_loss_pct is not None:
             strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
-        strategy_settings["MIN_BUY_SCORE"] = strategy_rules.min_buy_score
-        strategy_settings["TRAILING_STOP_PCT"] = strategy_rules.trailing_stop_pct
 
     months_range = _resolve_months_range(months_range, override_settings, account_settings)
     end_date = _resolve_end_date(country_code, override_settings)
@@ -522,7 +518,6 @@ def _build_backtest_kwargs(
 
     cooldown_days = int(strategy_settings["COOLDOWN_DAYS"])
     rsi_sell_threshold = int(strategy_settings["OVERBOUGHT_SELL_THRESHOLD"])
-    trailing_stop_pct = strategy_rules.trailing_stop_pct
 
     if not (0 <= rsi_sell_threshold <= 100):
         raise ValueError(f"OVERBOUGHT_SELL_THRESHOLD는 0~100 사이여야 합니다. (현재값: {rsi_sell_threshold})")
@@ -534,12 +529,10 @@ def _build_backtest_kwargs(
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
         "stop_loss_pct": stop_loss_threshold,
-        "trailing_stop_pct": trailing_stop_pct,
-        "cooldown_days": cooldown_days,
         "rsi_sell_threshold": rsi_sell_threshold,
+        "cooldown_days": cooldown_days,
         "core_holdings": strategy_rules.core_holdings,
         "quiet": quiet,
-        "min_buy_score": strategy_rules.min_buy_score,
     }
 
     clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
@@ -787,6 +780,9 @@ def _build_summary(
 
         bench_sharpe_to_mdd = (bench_sharpe / bench_mdd_pct) if bench_mdd_pct > 0 else 0.0
 
+        # 월별 수익률 계산 (리포팅용)
+        bench_monthly_returns = bench_series.resample("ME").last().pct_change().dropna()
+
         return {
             "ticker": ticker,
             "name": name,
@@ -796,23 +792,30 @@ def _build_summary(
             "sharpe": bench_sharpe,
             "mdd": bench_mdd_pct,
             "sharpe_to_mdd": bench_sharpe_to_mdd,
+            "monthly_returns": bench_monthly_returns,
         }
 
     benchmark_cum_ret_pct = 0.0
     benchmark_cagr_pct = 0.0
     benchmarks_summary: list[dict[str, Any]] = []
 
-    configured_benchmarks = account_settings.get("benchmarks")
-    if isinstance(configured_benchmarks, list) and configured_benchmarks:
-        for entry in configured_benchmarks:
-            if not isinstance(entry, Mapping):
-                continue
-            ticker_value = str(entry.get("ticker") or "").strip()
-            if not ticker_value:
-                continue
+    # 1. 단일 벤치마크 (우선순위)
+    bench_conf = account_settings.get("benchmark")
 
-            name_value = str(entry.get("name") or ticker_value).strip() or ticker_value
-            bench_country = str(entry.get("country") or entry.get("market") or country_code).strip() or country_code
+    # 2. 레거시 지원 (리스트 형태)
+    if not bench_conf:
+        legacy_list = account_settings.get("benchmarks")
+        if isinstance(legacy_list, list) and legacy_list:
+            bench_conf = legacy_list[0]
+
+    if isinstance(bench_conf, Mapping):
+        ticker_value = str(bench_conf.get("ticker") or "").strip()
+        if ticker_value:
+            name_value = str(bench_conf.get("name") or ticker_value).strip() or ticker_value
+            bench_country = (
+                str(bench_conf.get("country") or bench_conf.get("market") or country_code).strip() or country_code
+            )
+
             perf = _calc_benchmark_performance(
                 ticker=ticker_value,
                 name=name_value,
@@ -921,6 +924,11 @@ def _build_summary(
         "monthly_returns": monthly_returns,
         "monthly_cum_returns": monthly_cum_returns,
         "yearly_returns": yearly_returns,
+        "benchmark_monthly_returns": {
+            (b.get("name") or b.get("ticker")): b.get("monthly_returns")
+            for b in benchmarks_summary
+            if b.get("monthly_returns") is not None and not b["monthly_returns"].empty
+        },
         "fx_rate_to_krw": fx_rate_to_krw,
         "currency": currency,
     }

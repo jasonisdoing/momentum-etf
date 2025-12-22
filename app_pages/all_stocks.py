@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from config import MARKET_SCHEDULES
-from logic.common import get_buy_signal_streak
+from logic.backtest.signals import get_buy_signal_streak
 from strategies.rsi.recommend import calculate_rsi_for_ticker
 from utils.data_loader import (
     fetch_naver_etf_inav_snapshot,
@@ -174,10 +174,23 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
         # 추세 (3달 = 63일)
         trend_data = close_series.tail(63).tolist() if len(close_series) >= 63 else close_series.tolist()
 
-        # 점수 계산 (MA 기반)
-        ma_period = 90
-        ma_type = "TEMA"
-        min_buy_score = 0.0
+        # 점수 및 지표 계산 (계정별 전략 적용)
+        try:
+            from utils.settings_loader import get_strategy_rules
+
+            rules = get_strategy_rules(account_id)
+            ma_period = rules.ma_period
+            ma_type = rules.ma_type
+
+            # RSI 설정 로드 (Account Settings Raw)
+            strat_settings = settings.get("strategy", {})
+            rsi_period = strat_settings.get("RSI_PERIOD")  # None이면 기본값(14) 사용
+            rsi_smoothing = strat_settings.get("RSI_EMA_SMOOTHING")  # None이면 기본값(2.0) 사용
+        except Exception:
+            ma_period = 90
+            ma_type = "TEMA"
+            rsi_period = None
+            rsi_smoothing = None
 
         score_value = 0.0
         consecutive_days = 0
@@ -188,8 +201,14 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
                 moving_average = calculate_moving_average(close_series, ma_period, ma_type)
                 ma_score_series = calculate_ma_score(close_series, moving_average)
                 score_value = float(ma_score_series.iloc[-1]) if not ma_score_series.empty else 0.0
-                consecutive_days = get_buy_signal_streak(score_value, ma_score_series, min_buy_score)
-                rsi_score = calculate_rsi_for_ticker(close_series)
+                consecutive_days = get_buy_signal_streak(score_value, ma_score_series)
+
+                # RSI 계산 (동적 파라미터 전달)
+                rsi_score = calculate_rsi_for_ticker(
+                    close_series,
+                    period=int(rsi_period) if rsi_period else None,
+                    ema_smoothing=float(rsi_smoothing) if rsi_smoothing else None,
+                )
             except Exception:
                 pass
 
@@ -300,9 +319,9 @@ def render_all_stocks_page() -> None:
             settings = get_account_settings(acc_id)
             name = settings.get("name", acc_id)
             # 이름이 ID와 같으면 그냥 표시, 다르면 "이름 (ID)" 형식?
-            # 사용자 요청: "kor1 대신 모멘텀 ETF" -> Just Name if available.
+            # 사용자 요청: "kor_us 대신 모멘텀 ETF" -> Just Name if available.
             # But duplicates? Assuming unique names or acceptable.
-            # 사용자 요청: "모멘텀 ETF(kor1)" => "모멘텀 ETF"
+            # 사용자 요청: "모멘텀 ETF(kor_us)" => "모멘텀 ETF"
             display_label = name
             account_map[display_label] = acc_id
         except Exception:
@@ -311,7 +330,7 @@ def render_all_stocks_page() -> None:
     # 계정 선택 (Pills 스타일) using Display Labels
     display_options = list(account_map.keys())
 
-    # URL 쿼리 파라미터에서 초기값 읽기 (?account=kor1)
+    # URL 쿼리 파라미터에서 초기값 읽기 (?account=kor_us)
     default_label = display_options[0] if display_options else None
     query_account = st.query_params.get("account")
 

@@ -1,0 +1,30 @@
+{
+    "order": 30,
+    "icon": "🇺🇸",
+    "name": "미국상장 ETF",
+    "desc": "미국 ETF 포트폴리오 (USD)",
+    "country_code": "us",
+    "currency": "usd",
+    "slack_channel": "C0A0X2LTS3X",
+    "initial_capital_krw": "100000000",
+    "show_hold_only": false,
+    "strategy": {
+        "MONTHS_RANGE": 12,
+        "BACKTESTED_DATE": "2025-12-22 21:26",
+        "CAGR": 61.115205,
+        "MDD": -19.874363,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "PORTFOLIO_TOPN": 8,
+        "MA_PERIOD": 61,
+        "MA_TYPE": "SMA",
+        "REPLACE_SCORE_THRESHOLD": 3,
+        "STOP_LOSS_PCT": 10,
+        "OVERBOUGHT_SELL_THRESHOLD": 86,
+        "COOLDOWN_DAYS": 2,
+        "CORE_HOLDINGS": []
+    },
+    "benchmark": {
+        "ticker": "SPY",
+        "name": "S&P 500"
+    }
+}

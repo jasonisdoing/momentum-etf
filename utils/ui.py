@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -188,10 +189,39 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
             return "color: blue"
         return "color: black"
 
-    pct_columns = ["일간(%)", "평가(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "고점대비"]
+    def _deviation_style(val: Any) -> str:
+        """괴리율 스타일링: 양수 빨강, 음수 파랑, ±2% 이상 볼드체."""
+        if val is None:
+            return ""
+        try:
+            if isinstance(val, str):
+                cleaned = val.replace("%", "").replace(",", "").replace("원", "").replace("$", "").strip()
+                num = float(cleaned)
+            else:
+                num = float(val)
+        except (TypeError, ValueError):
+            return ""
+
+        if num == 0:
+            return ""
+
+        if num >= 2.0:
+            return "color: red; font-weight: bold"
+        if num <= -2.0:
+            return "color: blue; font-weight: bold"
+
+        return "color: black"
+
+    # 전형적인 퍼센트 컬럼들
+    # 전형적인 퍼센트 컬럼들
+    pct_columns = ["일간(%)", "평가(%)", "1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
     for col in pct_columns:
         if col in df.columns:
-            styled = styled.map(_color_daily_pct, subset=pd.IndexSlice[:, col])
+            styled = styled.map(_color_daily_pct, subset=[col])
+
+    # 괴리율 별도 적용 (볼드 포함)
+    if "괴리율" in df.columns:
+        styled = styled.map(_deviation_style, subset=["괴리율"])
 
     # 가격 컬럼 포맷팅
     def _safe_format(fmt: str):
@@ -251,15 +281,17 @@ def render_recommendation_table(
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width="medium"),
         "카테고리": st.column_config.TextColumn("카테고리", width=100),
-        "상태": st.column_config.TextColumn("상태", width=80),
-        "보유일": st.column_config.NumberColumn("보유일", width=50),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
         price_label: st.column_config.NumberColumn(price_label, width="small"),
+        "상태": st.column_config.TextColumn("상태", width=80),
+        "보유일": st.column_config.NumberColumn("보유일", width=50),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
-        "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
+        # "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
+        "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
+        "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
         "고점대비": st.column_config.NumberColumn("고점대비", width="small", format="%.2f%%"),
         "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width="small"),
         "점수": st.column_config.NumberColumn("점수", width=50, format="%.1f"),

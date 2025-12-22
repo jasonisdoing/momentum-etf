@@ -30,7 +30,16 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
 
 def _build_home_page(accounts: list[dict[str, Any]]):
     # 보유 중인 종목: HOLD, HOLD_CORE + 매도 신호가 있지만 아직 보유 중인 종목
-    allowed_states = {"HOLD", "HOLD_CORE", "SELL_TREND", "SELL_RSI", "CUT_STOPLOSS", "SELL_REPLACE"}
+    allowed_states = {
+        "HOLD",
+        "HOLD_CORE",
+        "BUY",
+        "BUY_REPLACE",
+        "SELL_TREND",
+        "SELL_RSI",
+        "CUT_STOPLOSS",
+        "SELL_REPLACE",
+    }
 
     def _render_home_page() -> None:
         for account in accounts:
@@ -122,15 +131,6 @@ def main() -> None:
         )
     )
 
-    pages.append(
-        page_cls(
-            "app_pages/trade.py",
-            title="[Admin] trade",
-            icon="📝",
-            url_path="admin",
-        )
-    )
-
     # pages.append(
     #     page_cls(
     #         "app_pages/stocks.py",
@@ -148,24 +148,6 @@ def main() -> None:
             url_path="cache",
         )
     )
-
-    # pages.append(
-    #     page_cls(
-    #         "app_pages/migration.py",
-    #         title="[Admin] 마이그레이션",
-    #         icon="🛠️",
-    #         url_path="migration",
-    #     )
-    # )
-
-    # pages.append(
-    #     page_cls(
-    #         "app_pages/delete.py",
-    #         title="[Admin] 계정 삭제",
-    #         icon="🗑️",
-    #         url_path="delete",
-    #     )
-    # )
 
     st.markdown(
         """

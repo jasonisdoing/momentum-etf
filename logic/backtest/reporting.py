@@ -222,7 +222,6 @@ def print_backtest_summary(
     if "monthly_returns" in summary and not summary["monthly_returns"].empty:
         monthly_returns = summary["monthly_returns"]
         yearly_returns = summary["yearly_returns"]
-        monthly_cum_returns = summary.get("monthly_cum_returns")
 
         pivot_df = (
             monthly_returns.mul(100)
@@ -239,44 +238,62 @@ def print_backtest_summary(
             yearly_series.index = yearly_series.index.year
             pivot_df["연간"] = yearly_series
 
-        cum_pivot_df = None
-        if monthly_cum_returns is not None and not monthly_cum_returns.empty:
-            cum_pivot_df = (
-                monthly_cum_returns.mul(100)
-                .to_frame("cum_return")
-                .pivot_table(
-                    index=monthly_cum_returns.index.year,
-                    columns=monthly_cum_returns.index.month,
-                    values="cum_return",
-                )
-            )
-
-        headers = ["연도"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
+        headers = ["구분"] + [f"{m}월" for m in range(1, 13)] + ["연간"]
         rows_data: list[list[str]] = []
-        for year, row in pivot_df.iterrows():
-            monthly_row_data = [str(year)]
-            for month in range(1, 13):
-                val = row.get(month)
-                monthly_row_data.append(format_pct_change(val) if pd.notna(val) else "-")
 
-            yearly_val = row.get("연간")
-            monthly_row_data.append(format_pct_change(yearly_val) if pd.notna(yearly_val) else "-")
-            rows_data.append(monthly_row_data)
+        # 모든 연도를 수집 (포트폴리오 + 각 벤치마크)
+        all_years = sorted(pivot_df.index.unique())
 
-            if cum_pivot_df is not None and year in cum_pivot_df.index:
-                cum_row = cum_pivot_df.loc[year]
-                cum_row_data = ["  (누적)"]
+        bench_monthly_returns_map = summary.get("benchmark_monthly_returns") or {}
+        bench_pivots = {}
+
+        # 벤치마크 데이터 Pivot 미리 생성
+        for bench_name, bench_m_ret in bench_monthly_returns_map.items():
+            if bench_m_ret is not None and not bench_m_ret.empty:
+                b_pivot = (
+                    bench_m_ret.mul(100)
+                    .to_frame("return")
+                    .pivot_table(
+                        index=bench_m_ret.index.year,
+                        columns=bench_m_ret.index.month,
+                        values="return",
+                    )
+                )
+
+                # 벤치마크 연간 수익률 (복리)
+                b_annual = bench_m_ret.groupby(bench_m_ret.index.year).apply(lambda x: (1 + x).prod() - 1).mul(100)
+                b_pivot["연간"] = b_annual
+
+                bench_pivots[bench_name] = b_pivot
+                all_years = sorted(list(set(all_years) | set(b_pivot.index)))
+
+        for year in all_years:
+            # 1. 포트폴리오 (해당 연도 데이터가 있을 경우)
+            if year in pivot_df.index:
+                row = pivot_df.loc[year]
+                # 첫 번째 컬럼에 연도 혹은 "포트폴리오" 명시
+                # 사용자가 "2025" 처럼 첫 컬럼에 연도가 오길 원함 -> 포트폴리오를 기본으로 연도 표시
+                row_data = [str(year)]
                 for month in range(1, 13):
-                    cum_val = cum_row.get(month)
-                    cum_row_data.append(format_pct_change(cum_val) if pd.notna(cum_val) else "-")
+                    val = row.get(month)
+                    row_data.append(format_pct_change(val) if pd.notna(val) else "-")
+                yearly_val = row.get("연간")
+                row_data.append(format_pct_change(yearly_val) if pd.notna(yearly_val) else "-")
+                rows_data.append(row_data)
 
-                last_valid_month_index = cum_row.last_valid_index()
-                if last_valid_month_index is not None:
-                    cum_annual_val = cum_row[last_valid_month_index]
-                    cum_row_data.append(format_pct_change(cum_annual_val))
-                else:
-                    cum_row_data.append("-")
-                rows_data.append(cum_row_data)
+            # 3. 벤치마크 (해당 연도 데이터가 있을 경우)
+            # 벤치마크가 여러 개일 수 있으므로 순회
+            for bench_name, b_pivot in bench_pivots.items():
+                if year in b_pivot.index:
+                    b_row = b_pivot.loc[year]
+                    # 벤치마크 이름 표시
+                    b_row_data = [f"{bench_name}"]
+                    for month in range(1, 13):
+                        val = b_row.get(month)
+                        b_row_data.append(format_pct_change(val) if pd.notna(val) else "-")
+                    b_yearly_val = b_row.get("연간")
+                    b_row_data.append(format_pct_change(b_yearly_val) if pd.notna(b_yearly_val) else "-")
+                    rows_data.append(b_row_data)
 
         aligns = ["left"] + ["right"] * (len(headers) - 1)
         for line in render_table_eaw(headers, rows_data, aligns):
@@ -361,49 +378,63 @@ def print_backtest_summary(
         add(f"| 최종 자산 (KRW): {format_kr_money(final_value_krw_value)}")
 
     benchmarks_info = summary.get("benchmarks")
+
+    # 테이블 헤더 생성
+    headers = ["구분", "포트폴리오"]
+    has_benchmark = False
+
     if isinstance(benchmarks_info, list) and benchmarks_info:
-        add("| 벤치마크 기간수익률(%)")
-        for idx, bench in enumerate(benchmarks_info, start=1):
+        has_benchmark = True
+        for bench in benchmarks_info:
             name = str(bench.get("name") or bench.get("ticker") or "-").strip()
-            ticker = str(bench.get("ticker") or "-").strip()
-            cum_ret = bench.get("cumulative_return_pct")
-            cum_label = format_pct_change(cum_ret) if cum_ret is not None else "N/A"
-            add(f"| {idx}. {name}({ticker}): {cum_label}")
+            headers.append(f"{name}(벤치마크)")
     else:
-        benchmark_name = summary.get("benchmark_name") or "S&P 500"
-        bench_ret = summary.get("benchmark_cum_ret_pct")
-        if bench_ret is not None:
-            add(f"| 벤치마크 기간수익률(%): {benchmark_name}: {format_pct_change(bench_ret)}")
+        # 단일 벤치마크 (레거시 지원)
+        bm_ret = summary.get("benchmark_cum_ret_pct")
+        if bm_ret is not None:
+            has_benchmark = True
+            bm_name = summary.get("benchmark_name") or "Benchmark"
+            headers.append(f"{bm_name}(벤치마크)")
+
+    # 데이터 행 생성
+    row_ret = ["기간수익률", format_pct_change(summary["period_return"])]
+    row_cagr = ["CAGR", format_pct_change(summary["cagr"])]
+    row_mdd = ["MDD", format_pct_change(-summary["mdd"])]
+    row_sharpe = ["Sharpe", f"{summary.get('sharpe', 0.0):.2f}"]
+    row_sdr = ["SDR", f"{summary.get('sharpe_to_mdd', 0.0):.3f}"]
 
     if isinstance(benchmarks_info, list) and benchmarks_info:
-        add("| 벤치마크 CAGR(%)")
-        for idx, bench in enumerate(benchmarks_info, start=1):
-            name = str(bench.get("name") or bench.get("ticker") or "-").strip()
-            ticker = str(bench.get("ticker") or "-").strip()
-            cagr_ret = bench.get("cagr_pct")
-            cagr_ret = bench.get("cagr_pct")
-            cagr_label = format_pct_change(cagr_ret) if cagr_ret is not None else "N/A"
-            add(f"| {idx}. {name}({ticker}): {cagr_label}")
-    else:
-        benchmark_name = summary.get("benchmark_name") or "S&P 500"
-        bench_cagr = summary.get("benchmark_cagr_pct")
-        if bench_cagr is not None:
-            add(f"| 벤치마크 CAGR(%): {benchmark_name}: {format_pct_change(bench_cagr)}")
+        for bench in benchmarks_info:
+            # 수익률
+            row_ret.append(format_pct_change(bench.get("cumulative_return_pct")))
+            # CAGR
+            row_cagr.append(format_pct_change(bench.get("cagr_pct")))
+            # MDD (벤치마크 객체에 mdd가 없으면 - 표시)
+            bm_mdd = bench.get("mdd")
+            row_mdd.append(format_pct_change(-bm_mdd) if bm_mdd is not None else "-")
+            # Sharpe
+            bm_sharpe = bench.get("sharpe")
+            row_sharpe.append(f"{float(bm_sharpe):.2f}" if bm_sharpe is not None else "-")
+            # SDR
+            bm_sdr = bench.get("sharpe_to_mdd")
+            row_sdr.append(f"{float(bm_sdr):.3f}" if bm_sdr is not None else "-")
 
-    if isinstance(benchmarks_info, list) and benchmarks_info:
-        add("| 벤치마크 SDR(Sharpe/MDD)")
-        for idx, bench in enumerate(benchmarks_info, start=1):
-            name = str(bench.get("name") or bench.get("ticker") or "-").strip()
-            ticker = str(bench.get("ticker") or "-").strip()
-            sdr = bench.get("sharpe_to_mdd")
-            sdr_label = f"{float(sdr):.3f}" if sdr is not None else "N/A"
-            add(f"| {idx}. {name}({ticker}): {sdr_label}")
+    elif has_benchmark:
+        # 단일 벤치마크 폴백
+        row_ret.append(format_pct_change(summary.get("benchmark_cum_ret_pct")))
+        row_cagr.append(format_pct_change(summary.get("benchmark_cagr_pct")))
+        row_mdd.append("-")
+        row_sharpe.append("-")
+        row_sdr.append("-")
 
-    add(f"| 기간수익률(%): {format_pct_change(summary['period_return'])}")
-    add(f"| CAGR(%): {format_pct_change(summary['cagr'])}")
-    add(f"| MDD(%): {format_pct_change(-summary['mdd'])}")
-    add(f"| Sharpe: {summary.get('sharpe', 0.0):.2f}")
-    add(f"| SDR (Sharpe/MDD): {summary.get('sharpe_to_mdd', 0.0):.3f}")
+    # 테이블 렌더링
+    rows = [row_ret, row_cagr, row_mdd, row_sharpe, row_sdr]
+    # 정렬: 구분(Left), 나머지(Right)
+    aligns = ["left"] + ["right"] * (len(headers) - 1)
+
+    table_lines = render_table_eaw(headers, rows, aligns)
+    for line in table_lines:
+        add(line)
 
     if emit_to_logger:
         for line in output_lines:
@@ -647,7 +678,7 @@ def _build_daily_table_rows(
     entries.sort(key=lambda item: item[0])
 
     # 카테고리별 최고 점수 필터링을 위해 딕셔너리 형태로 변환
-    from logic.common import filter_category_duplicates
+    from logic.backtest.filtering import filter_category_duplicates
 
     items_for_filter = []
     for sort_key, row_data in entries:
@@ -764,6 +795,8 @@ def _generate_daily_report_lines(
             fx_series = get_exchange_rate_series(start_dt, end_dt)
         except Exception as e:
             logger.warning(f"리포팅 중 환율 정보 로드 실패: {e}")
+
+    current_streak = 0
 
     for target_date in portfolio_df.index:
         portfolio_row = portfolio_df.loc[target_date]
@@ -896,6 +929,30 @@ def _generate_daily_report_lines(
 
         lines.append("")
         lines.append(summary_line)
+
+        # [User Request] Add Consecutive Streak and Cash Weight line
+        # Streak Calculation
+        if daily_return_pct > 0.0001:  # float point tolerance
+            if current_streak >= 0:
+                current_streak += 1
+            else:
+                current_streak = 1
+        elif daily_return_pct < -0.0001:
+            if current_streak <= 0:
+                current_streak -= 1
+            else:
+                current_streak = -1
+        else:
+            current_streak = 0
+
+        streak_str = "변동 없음"
+        if current_streak > 0:
+            streak_str = f"{current_streak}일 연속 상승"
+        elif current_streak < 0:
+            streak_str = f"{abs(current_streak)}일 연속 하락"
+
+        extra_line = f"{streak_str}"
+        lines.append(extra_line)
 
         lines.extend(table_lines)
 

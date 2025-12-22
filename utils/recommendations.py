@@ -18,14 +18,15 @@ _BASE_DISPLAY_COLUMNS = [
     "종목명",
     "카테고리",
     "상태",
-    "보유일",
     "일간(%)",
     "평가(%)",
+    "보유일",
     "현재가",
     "1주(%)",
-    "2주(%)",
     "1달(%)",
     "3달(%)",
+    "6달(%)",
+    "12달(%)",
     "고점대비",
     "추세(3달)",
     "점수",
@@ -133,9 +134,11 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         evaluation_pct = row.get("evaluation_pct", 0.0)
         price_deviation = row.get("price_deviation") if show_deviation else None
         return_1w = row.get("return_1w", 0.0)
-        return_2w = row.get("return_2w", 0.0)
+        # return_2w = row.get("return_2w", 0.0)
         return_1m = row.get("return_1m", 0.0)
         return_3m = row.get("return_3m", 0.0)
+        return_6m = row.get("return_6m", 0.0)
+        return_12m = row.get("return_12m", 0.0)
         drawdown_from_high = row.get("drawdown_from_high", 0.0)
         score = row.get("score")
         streak = _format_days(row.get("streak"))
@@ -155,9 +158,11 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 **({"Nav": row.get("nav_price")} if nav_mode else {}),
                 **({"괴리율": price_deviation} if show_deviation else {}),
                 "1주(%)": return_1w,
-                "2주(%)": return_2w,
+                # "2주(%)": return_2w,
                 "1달(%)": return_1m,
                 "3달(%)": return_3m,
+                "6달(%)": return_6m,
+                "12달(%)": return_12m,
                 "고점대비": drawdown_from_high,
                 "추세(3달)": _trend_series(row),
                 "점수": score,
@@ -171,12 +176,16 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
     if "현재가" in columns:
         idx = columns.index("현재가")
         columns[idx] = price_label
-    if nav_mode and "Nav" not in columns:
-        insert_pos = columns.index(price_label) + 1
-        columns.insert(insert_pos, "Nav")
+
+    # [User Request] 현재가 - 괴리율 - Nav 순서로 변경
     if show_deviation and "괴리율" not in columns:
-        insert_pos = columns.index(price_label) + (2 if nav_mode else 1)
+        insert_pos = columns.index(price_label) + 1
         columns.insert(insert_pos, "괴리율")
+
+    if nav_mode and "Nav" not in columns:
+        # 괴리율이 있으면 그 다음(+2), 없으면 현재가 다음(+1)
+        insert_pos = columns.index(price_label) + (2 if show_deviation else 1)
+        columns.insert(insert_pos, "Nav")
     df = pd.DataFrame(display_rows, columns=columns)
     return df
 
@@ -212,6 +221,23 @@ def _pct_style(value: Any) -> str:
     return ""
 
 
+def _deviation_style(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return ""
+
+    if val == 0:
+        return ""
+
+    style = "color:#d32f2f" if val > 0 else "color:#1565c0"
+    if abs(val) >= 2.0:
+        style += ";font-weight:700"
+    return style
+
+
 def _score_style(value: Any) -> str:
     try:
         score = float(value)
@@ -241,6 +267,11 @@ def style_recommendations_dataframe(df: pd.DataFrame) -> Styler:
     styled = styled.set_properties(subset=["종목명"], **{"text-align": "left"})
     styled = styled.applymap(_state_style, subset=["상태"])
     styled = styled.applymap(_pct_style, subset=["일간(%)"])
+
+    # 괴리율 스타일 적용 (컬럼이 있는 경우에만)
+    if "괴리율" in df.columns:
+        styled = styled.applymap(_deviation_style, subset=["괴리율"])
+
     styled = styled.applymap(_score_style, subset=["점수"])
     styled = styled.applymap(_score_style, subset=["RSI"])
     styled = styled.apply(_row_background_styles, axis=1)

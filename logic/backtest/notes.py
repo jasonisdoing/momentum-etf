@@ -27,16 +27,3 @@ def format_trend_break_phrase(
         f"{DECISION_NOTES['TREND_BREAK']}"
         f"({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"
     )
-
-
-def format_min_score_phrase(score_value: float | None, min_buy_score: float) -> str:
-    """최소 점수 미달 메시지 포맷팅."""
-    template = DECISION_NOTES.get("MIN_SCORE", "최소 {min_buy_score:.1f}점수 미만")
-    try:
-        base = template.format(min_buy_score=min_buy_score)
-    except Exception:
-        base = f"최소 {min_buy_score:.1f}점수 미만"
-
-    if score_value is None or pd.isna(score_value):
-        return f"{base} (현재 점수 없음)"
-    return f"{base} (현재 {score_value:.1f})"
