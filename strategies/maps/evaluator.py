@@ -1,6 +1,4 @@
-"""
-MAPS 전략 의사결정 평가 모듈
-"""
+"""MAPS 전략 의사결정 평가 모듈"""
 
 import pandas as pd
 
@@ -68,8 +66,6 @@ class StrategyEvaluator:
         is_core_holding: bool,
         stop_loss_threshold: float | None,
         rsi_sell_threshold: float,
-        trailing_stop_pct: float,
-        min_buy_score: float,
         sell_cooldown_info: dict | None,
         cooldown_days: int,
     ) -> tuple[str, str]:
@@ -91,26 +87,19 @@ class StrategyEvaluator:
 
         hold_ret = (price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
 
-        # 트레일링 스탑 조건
-        trailing_stop_price = highest_price * (1.0 - trailing_stop_pct / 100.0)
-        is_trailing_stop = (trailing_stop_pct > 0) and (price < trailing_stop_price)
-
         if stop_loss_threshold is not None and hold_ret <= float(stop_loss_threshold):
             new_state = "CUT_STOPLOSS"
             phrase = DECISION_MESSAGES.get("CUT_STOPLOSS", "손절매도")
-        elif is_trailing_stop:
-            new_state = "SELL_TRAILING"
-            phrase = f"트레일링 스탑 (고점 {highest_price:,.0f}원 대비 {trailing_stop_pct}% 하락)"
         elif rsi_sell_threshold is not None and rsi_score >= rsi_sell_threshold:
             new_state = "SELL_RSI"
             phrase = f"RSI 과매수 (RSI점수: {rsi_score:.1f})"
-        elif score <= min_buy_score:
+        elif score <= 0:
             new_state = "SELL_TREND"
             phrase = _format_trend_break_phrase(ma_value, price, ma_period)
 
         # 쿨다운 중이면 일반 매도(추세, RSI)는 HOLD로 유지
         # 손절은 쿨다운 무시
-        if sell_cooldown_info and new_state in ("SELL_RSI", "SELL_TREND", "SELL_TRAILING"):
+        if sell_cooldown_info and new_state in ("SELL_RSI", "SELL_TREND"):
             days_left = _calc_days_left(sell_cooldown_info, cooldown_days)
             if days_left and days_left > 0:
                 new_state = "HOLD"
@@ -122,7 +111,6 @@ class StrategyEvaluator:
     def check_buy_signal(
         self,
         score: float,
-        min_buy_score: float,
         buy_cooldown_info: dict | None,
         cooldown_days: int,
     ) -> tuple[bool, str]:
@@ -132,9 +120,9 @@ class StrategyEvaluator:
         Returns:
             (is_buy_signal, phrase)
         """
-        from logic.common import has_buy_signal
+        from logic.backtest.signals import has_buy_signal
 
-        if has_buy_signal(score, min_buy_score):
+        if has_buy_signal(score, 0):
             if buy_cooldown_info:
                 days_left = _calc_days_left(buy_cooldown_info, cooldown_days)
                 if days_left and days_left > 0:
@@ -146,12 +134,6 @@ class StrategyEvaluator:
             return True, DECISION_MESSAGES.get("NEW_BUY", "")
 
         # 점수 미달 메시지
-        template = DECISION_NOTES.get("MIN_SCORE", "최소 {min_buy_score:.1f}점수 미만")
-        try:
-            base = template.format(min_buy_score=min_buy_score)
-        except Exception:
-            base = f"최소 {min_buy_score:.1f}점수 미만"
-
         if pd.isna(score):
-            return False, f"{base} (현재 점수 없음)"
-        return False, f"{base} (현재 {score:.1f})"
+            return False, "추세 이탈 (점수 없음)"
+        return False, f"추세 이탈 (현재 {score:.1f})"

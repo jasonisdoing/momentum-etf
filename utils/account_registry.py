@@ -69,8 +69,10 @@ def load_account_configs() -> list[dict[str, Any]]:
             if latest_rec and "recommendations" in latest_rec:
                 recommendations = latest_rec["recommendations"]
                 if isinstance(recommendations, list):
-                    # HOLD + HOLD_CORE 상태인 종목 수 계산
-                    holdings_count = sum(1 for rec in recommendations if rec.get("state") in {"HOLD", "HOLD_CORE"})
+                    # HOLD + HOLD_CORE + BUY + BUY_REPLACE 상태인 종목 수 계산
+                    holdings_count = sum(
+                        1 for rec in recommendations if rec.get("state") in {"HOLD", "HOLD_CORE", "BUY", "BUY_REPLACE"}
+                    )
         except Exception as e:
             # MongoDB 연결 실패 등의 이유로 조회 실패 시 로그 출력
             logger.debug(f"[{account_id}] 보유 종목 수 조회 실패: {e}")
@@ -124,6 +126,12 @@ def get_icon_fallback(country_code: str) -> str:
 
 def get_benchmark_tickers(account_settings: Mapping[str, Any]) -> list[str]:
     """계정 설정에서 벤치마크 티커 목록을 추출합니다."""
+
+    single_bench = account_settings.get("benchmark")
+    if isinstance(single_bench, Mapping):
+        ticker = str(single_bench.get("ticker") or "").strip().upper()
+        if ticker:
+            return [ticker]
 
     entries = account_settings.get("benchmarks")
     if not isinstance(entries, list):

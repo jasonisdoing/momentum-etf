@@ -256,10 +256,44 @@ def update_account_metadata(account_id: str):
                         return round(((end_price - start_price) / start_price) * 100, 4)
                     return None
 
+                stock["1_week_earn_rate"] = calc_rate_safe(data, 5)
                 stock["1_month_earn_rate"] = calc_rate_safe(data, 21)
                 stock["3_month_earn_rate"] = calc_rate_safe(data, 63)
                 stock["6_month_earn_rate"] = calc_rate_safe(data, 126)
                 stock["12_month_earn_rate"] = calc_rate_safe(data, 252)
+
+                # [User Request] 필드 순서 재정렬 (가독성)
+                ordered_stock = {}
+                # 1. 기본 정보
+                for k in ["ticker", "name", "listing_date"]:
+                    if k in stock:
+                        ordered_stock[k] = stock[k]
+
+                # 2. 거래량
+                if "1_week_avg_volume" in stock:
+                    ordered_stock["1_week_avg_volume"] = stock["1_week_avg_volume"]
+
+                # 3. 수익률 (1주 -> 1달 -> 3달 -> 6달 -> 12달)
+                rate_keys = [
+                    "1_week_earn_rate",
+                    "1_month_earn_rate",
+                    "3_month_earn_rate",
+                    "6_month_earn_rate",
+                    "12_month_earn_rate",
+                ]
+                for k in rate_keys:
+                    if k in stock:
+                        ordered_stock[k] = stock[k]
+
+                # 4. 기타 나머지 필드 (혹시 있으면)
+                known_keys = set(["ticker", "name", "listing_date", "1_week_avg_volume"] + rate_keys)
+                for k, v in stock.items():
+                    if k not in known_keys:
+                        ordered_stock[k] = v
+
+                # 원본 dict 교체
+                stock.clear()
+                stock.update(ordered_stock)
 
             name = stock.get("name") or "-"
             logger.info(f"  -> 메타데이터 획득 중: {idx}/{total_count} - {name}({ticker})")
@@ -269,11 +303,32 @@ def update_account_metadata(account_id: str):
         except Exception as e:
             logger.error(f"[{account_norm.upper()}/{ticker}] 메타데이터 업데이트 실패: {e}")
 
-    if updated_count > 0:
-        try:
-            save_etfs(account_norm, stock_data)
-        except Exception as e:
-            logger.error(f"'{account_id}' 설정 저장 실패: {e}")
+    # [User Request] 중복 제거 및 정렬 로직 추가
+    seen_tickers = set()
+    for cat_entry in stock_data:
+        if "tickers" not in cat_entry:
+            continue
+
+        unique_stocks = []
+        for stock in cat_entry["tickers"]:
+            tkr = stock.get("ticker")
+            if tkr and tkr not in seen_tickers:
+                seen_tickers.add(tkr)
+                unique_stocks.append(stock)
+            elif tkr:
+                logger.debug(f"[{account_norm.upper()}] 중복 티커 제거: {tkr} (category: {cat_entry.get('category')})")
+
+        # 1주 수익률 내림차순 정렬 (데이터 없으면 -999)
+        unique_stocks.sort(key=lambda x: x.get("1_week_earn_rate") or -999.0, reverse=True)
+        cat_entry["tickers"] = unique_stocks
+
+    # 메타데이터 업데이트가 없더라도 정렬/중복제거 반영을 위해 저장 시도
+    try:
+        save_etfs(account_norm, stock_data)
+        if updated_count == 0:
+            logger.info(f"[{account_norm.upper()}] 메타데이터 변경 없음, 정렬/중복제거 결과 저장 완료")
+    except Exception as e:
+        logger.error(f"'{account_id}' 설정 저장 실패: {e}")
 
 
 def update_stock_metadata(account_id: str | None = None):

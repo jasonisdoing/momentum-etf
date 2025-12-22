@@ -27,12 +27,11 @@ def has_buy_signal(score: float, min_score: float = 0.0) -> bool:
     Returns:
         True if 매수 시그널 있음 (점수 > 0), False otherwise
     """
-    return score > min_score
+    return score > 0
 
 
 def calculate_consecutive_days(
     scores: pd.Series,
-    min_score: float = 0.0,
 ) -> pd.Series:
     """점수 시리즈를 기반으로 매수 시그널 지속일을 계산합니다.
 
@@ -46,13 +45,13 @@ def calculate_consecutive_days(
         return pd.Series([], dtype=int)
 
     # 점수가 양수인 경우 매수 시그널 활성화
-    buy_signal_active = (scores > min_score).to_numpy(dtype=bool, copy=False)
+    buy_signal_active = (scores > 0).to_numpy(dtype=bool, copy=False)
 
     streak_values = _consecutive_counter(buy_signal_active)
     return pd.Series(streak_values, index=scores.index, dtype=int)
 
 
-def get_buy_signal_streak(score: float, score_series: pd.Series | None = None, min_score: float = 0.0) -> int:
+def get_buy_signal_streak(score: float, score_series: pd.Series | None = None) -> int:
     """현재 점수와 점수 시리즈를 기반으로 매수 시그널 지속일을 반환합니다.
 
     Args:
@@ -62,11 +61,11 @@ def get_buy_signal_streak(score: float, score_series: pd.Series | None = None, m
     Returns:
         매수 시그널 지속일 (점수 <= 0이면 0)
     """
-    if score <= min_score:
+    if score <= 0:
         return 0
 
     if score_series is not None and not score_series.empty:
-        consecutive_days = calculate_consecutive_days(score_series, min_score)
+        consecutive_days = calculate_consecutive_days(score_series)
         return int(consecutive_days.iloc[-1])
 
     # score_series가 없으면 최소 1일로 반환 (점수가 양수이므로)

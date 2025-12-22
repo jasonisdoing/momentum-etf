@@ -15,7 +15,7 @@
 
 ## ✨ 주요 기능 (Key Features)
 
-*   **📊 자동 추천 (Auto Recommendation)**: 매일 아침 시장 데이터를 분석하여 최적의 매수/매도/교체 포트폴리오를 제안하고 Slack으로 알림을 보냅니다.
+*   **📊 통합 추천 시스템 (Unified Recommendation)**: 백테스트 엔진을 기반으로 현재 계좌 상태를 시뮬레이션하여 최적의 매수/매도/교체 신호를 생성하고 Slack으로 알림을 보냅니다.
 *   **🛡️ 리스크 관리 (Risk Management)**:
     *   **RSI 과매수 차단**: 과열된 종목의 매수를 막아 고점 추격 매수를 방지합니다.
     *   **카테고리 분산**: 동일 섹터 중복 투자를 제한하여 포트폴리오 쏠림을 막습니다.
@@ -57,26 +57,26 @@ pip install -r requirements.txt
 ```
 
 ### 2. 설정
-`config.py` 및 `zsettings/account/kor1.json` 파일을 환경에 맞게 수정합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
+`config.py` 및 `zsettings/account/kor_us.json` 파일을 환경에 맞게 수정합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
 
 ### 3. 실행
 
 **1. 튜닝 (최적 파라미터 탐색 및 자동 적용)**
 ```bash
-python tune.py kor1  # 한국 계정
-python tune.py us1   # 미국 계정
+python tune.py kor_us  # 한국 계정 (미국 ETF)
+python tune.py us      # 미국 계정
 ```
 
 **2. 백테스트 (성과 검증)**
 ```bash
-python backtest.py kor1
-python backtest.py us1
+python backtest.py kor_us
+python backtest.py us
 ```
 
 **3. 추천 (매매 신호 생성)**
 ```bash
-python recommend.py kor1
-python recommend.py us1
+python recommend.py kor_us
+python recommend.py us
 ```
 
 ## ⚠️ 면책 조항 (Disclaimer)

@@ -122,10 +122,14 @@ def _collect_benchmark_tickers(target_id: str) -> list[str]:
 
     try:
         settings = get_account_settings(target_id)
-        for bm in settings.get("benchmarks", []) or []:
-            ticker = str(bm.get("ticker") or "").strip().upper()
+
+        # 'benchmark' (dict, single) 처리
+        single_bm = settings.get("benchmark")
+        if single_bm and isinstance(single_bm, dict):
+            ticker = str(single_bm.get("ticker") or "").strip().upper()
             if ticker:
                 tickers.add(ticker)
+
         return sorted(tickers)
     except Exception:
         pass

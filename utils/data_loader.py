@@ -9,7 +9,7 @@ import os
 import warnings
 from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from typing import Any
 
 import pandas as pd
@@ -420,26 +420,26 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
             local_now = _now_with_zone(tz_name)
             candidate_date = local_now.date()
 
-            if local_now.time() < open_time:
-                candidate_date = candidate_date - timedelta(days=1)
+            # [User Request] 장 개시 전이라도 오늘이 거래일이면 오늘 날짜를 반환 (0% 수익률 표시용)
+            # if local_now.time() < open_time:
+            #     candidate_date = candidate_date - timedelta(days=1)
 
             end_dt = pd.Timestamp(candidate_date)
         except Exception:
             # 타임존 처리 실패 시 안전하게 폴백
             pass
     elif country_code == "kor":
-        # 과거 코드와의 호환을 위해 기본 동작 유지 (이 경로는 사실상 사용되지 않음)
+        # 한국 시장: 타임존 정보를 사용하도록 통합
         try:
-            if ZoneInfo is not None:
-                local_now = datetime.now(ZoneInfo("Asia/Seoul"))
-            else:  # pragma: no cover
-                local_now = datetime.now()
-            if local_now.hour < 9:
-                end_dt = end_dt - pd.DateOffset(days=1)
-            else:
-                end_dt = pd.Timestamp(local_now.date())
+            from datetime import datetime
+
+            import pytz
+
+            tz = pytz.timezone("Asia/Seoul")
+            local_now = datetime.now(tz)
+            end_dt = pd.Timestamp(local_now.date())
         except Exception:
-            pass
+            end_dt = end_dt.normalize()
     else:
         # 타임존 정보를 모르면 현재 날짜 기준으로 처리
         end_dt = end_dt.normalize()
@@ -1068,6 +1068,20 @@ def fetch_ohlcv_for_tickers(
                     cache_end = cached_df.index.max().normalize()
                     logger.info(f"[실시간] {tkr} 오늘 데이터를 실시간 가격({rt_price:,.0f})으로 보완")
 
+            # [User Request] 장 개시 전이거나 실시간 데이터가 없는 경우 마지막 종가로 패딩
+            if is_today and cache_end < required_end:
+                last_p = _safe_float(cached_df.iloc[-1]["Close"])
+                if last_p is not None and last_p > 0:
+                    padding_row = pd.DataFrame(
+                        {"Open": [last_p], "High": [last_p], "Low": [last_p], "Close": [last_p], "Volume": [0]},
+                        index=[today],
+                    )
+                    cached_df = pd.concat([cached_df, padding_row])
+                    cached_df = cached_df[~cached_df.index.duplicated(keep="last")]
+                    cached_df.sort_index(inplace=True)
+                    cache_end = cached_df.index.max().normalize()
+                    logger.debug(f"[패딩] {tkr} 오늘 데이터를 이전 종가({last_p:,.0f})로 보완 (0%% 변동)")
+
             # 캐시 범위가 요청 범위를 충분히 커버하는지 확인
             # ticker_start가 cache_start보다 이전이어도, cache_end가 required_end를 커버하면 OK
             if cache_end >= required_end:
@@ -1233,6 +1247,12 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
         nav_raw = item.get("nav")
         price_raw = item.get("nowVal")
 
+        # 추가 정보 파싱 (Open, High, Low, Vol)
+        open_raw = item.get("openVal")
+        high_raw = item.get("highVal")
+        low_raw = item.get("lowVal")
+        vol_raw = item.get("quant")
+
         try:
             nav_value = float(str(nav_raw).replace(",", ""))
             price_value = float(str(price_raw).replace(",", ""))
@@ -1244,11 +1264,26 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
 
         deviation = ((price_value / nav_value) - 1.0) * 100.0
 
-        snapshot[code] = {
+        entry = {
             "nav": nav_value,
             "nowVal": price_value,
             "deviation": deviation,
         }
+
+        # Optional fields parsing
+        try:
+            if open_raw:
+                entry["open"] = float(str(open_raw).replace(",", ""))
+            if high_raw:
+                entry["high"] = float(str(high_raw).replace(",", ""))
+            if low_raw:
+                entry["low"] = float(str(low_raw).replace(",", ""))
+            if vol_raw:
+                entry["volume"] = float(str(vol_raw).replace(",", ""))
+        except (TypeError, ValueError):
+            pass
+
+        snapshot[code] = entry
 
     return snapshot
 
