@@ -88,7 +88,7 @@
                 "1_month_earn_rate": 4.5575,
                 "3_month_earn_rate": 4.1619,
                 "6_month_earn_rate": 13.8851,
-                "12_month_earn_rate": 12.5135
+                "12_month_earn_rate": 12.5134
             },
             {
                 "ticker": "IWM",
@@ -340,7 +340,7 @@
                 "1_month_earn_rate": -1.8024,
                 "3_month_earn_rate": 0.673,
                 "6_month_earn_rate": 3.4676,
-                "12_month_earn_rate": 5.2948
+                "12_month_earn_rate": 5.2949
             }
         ]
     },
@@ -768,6 +768,17 @@
         "category": "☢️ 우라늄",
         "tickers": [
             {
+                "ticker": "URNJ",
+                "name": "Sprott Junior Uranium Miners ETF",
+                "listing_date": "2023-02-02",
+                "1_week_avg_volume": 350980,
+                "1_week_earn_rate": 4.4472,
+                "1_month_earn_rate": 8.2214,
+                "3_month_earn_rate": -4.7098,
+                "6_month_earn_rate": 35.9308,
+                "12_month_earn_rate": 40.8649
+            },
+            {
                 "ticker": "NLR",
                 "name": "VanEck Uranium and Nuclear ETF",
                 "listing_date": "2007-08-15",
@@ -912,7 +923,7 @@
                 "1_month_earn_rate": 5.3069,
                 "3_month_earn_rate": 4.709,
                 "6_month_earn_rate": 17.3203,
-                "12_month_earn_rate": 45.589
+                "12_month_earn_rate": 45.5891
             },
             {
                 "ticker": "EUAD",
@@ -1035,6 +1046,28 @@
                 "12_month_earn_rate": 1.5618
             },
             {
+                "ticker": "STCE",
+                "name": "Schwab Crypto Thematic ETF",
+                "listing_date": "2022-08-04",
+                "1_week_avg_volume": 96100,
+                "1_week_earn_rate": -3.8263,
+                "1_month_earn_rate": 1.8927,
+                "3_month_earn_rate": -16.0155,
+                "6_month_earn_rate": 52.8646,
+                "12_month_earn_rate": 21.4089
+            },
+            {
+                "ticker": "DAPP",
+                "name": "VanEck Digital Transformation ETF",
+                "listing_date": "2021-04-15",
+                "1_week_avg_volume": 1374340,
+                "1_week_earn_rate": -4.0816,
+                "1_month_earn_rate": 5.9312,
+                "3_month_earn_rate": -20.5869,
+                "6_month_earn_rate": 18.0436,
+                "12_month_earn_rate": -3.242
+            },
+            {
                 "ticker": "BKCH",
                 "name": "Global X Blockchain ETF",
                 "listing_date": "2021-07-14",
@@ -1070,7 +1103,7 @@
                 "1_month_earn_rate": 6.1928,
                 "3_month_earn_rate": 2.0632,
                 "6_month_earn_rate": 12.9945,
-                "12_month_earn_rate": 22.8999
+                "12_month_earn_rate": 22.9
             },
             {
                 "ticker": "ARKF",
@@ -1097,7 +1130,7 @@
                 "1_month_earn_rate": -0.08,
                 "3_month_earn_rate": -4.6537,
                 "6_month_earn_rate": -0.1495,
-                "12_month_earn_rate": 10.7475
+                "12_month_earn_rate": 10.7476
             },
             {
                 "ticker": "HACK",
