@@ -314,27 +314,6 @@ def _register_cache_job(
     )
 
 
-def _register_nasdaq_switching_job(scheduler: BlockingScheduler) -> None:
-    """나스닥 스위칭 전략 알림 스케줄 등록 (06:00, 09:00, 18:00, 22:30)"""
-    from others.nasdaq_switching_slack import run_nasdaq_switching_notification
-
-    # 시간 목록 (HH:MM)
-    run_times = ["06:00", "09:00", "18:00", "22:30"]
-
-    # 나스닥 스위칭 전략은 미국 시장 기준이므로 미국 타임존 사용
-    tz_us = MARKET_SCHEDULES.get("us", {}).get("timezone", "America/New_York")
-
-    for t_str in run_times:
-        hour, minute = map(int, t_str.split(":"))
-        scheduler.add_job(
-            run_nasdaq_switching_notification,
-            CronTrigger(hour=hour, minute=minute, timezone=tz_us),
-            id=f"nasdaq_switching_{hour:02d}{minute:02d}",
-        )
-
-    logging.info("Scheduled NASDAQ SWITCHING: times=%s tz='%s'", run_times, tz_us)
-
-
 def _run_initial_recommendations(jobs: Iterable[RecommendationJobConfig]) -> None:
     executable = [job for job in jobs if job.run_immediately]
     if not executable:
@@ -400,7 +379,6 @@ def main() -> None:
 
     _register_recommendation_jobs(scheduler, jobs)
     _register_cache_job(scheduler)
-    _register_nasdaq_switching_job(scheduler)
 
     _run_initial_recommendations(jobs)
     _log_next_runs(scheduler)
