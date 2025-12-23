@@ -13,14 +13,22 @@ from utils.logger import get_app_logger
 # 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
 ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
+        # 포트폴리오: 5개 확정
+        # "PORTFOLIO_TOPN": [5],
+        "PORTFOLIO_TOPN": [5, 6, 7, 8],
+        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
         # 이동평균: 100~110
-        "MA_RANGE": [90, 95, 100, 105, 110, 115, 120],
+        # "MA_RANGE": [90, 95, 100, 105, 110, 115, 120],
     },
     "kor_us": {
+        # 포트폴리오: 8개 확정
+        "PORTFOLIO_TOPN": [8],
         # 이동평균: 60
         "MA_RANGE": [50, 55, 60, 65, 70],
     },
     "us": {
+        # 포트폴리오: 8개 확정
+        "PORTFOLIO_TOPN": [8],
         # 이동평균: 65 ~ 70
         "MA_RANGE": [60, 65, 70, 75, 80],
     },
@@ -29,8 +37,6 @@ ACCOUNT_TUNING_CONFIG = {
 COMMON_TUNING_CONFIG = {
     # 이동평균: 20~100
     # "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
-    # 포트폴리오: 8개 확정
-    "PORTFOLIO_TOPN": [8],
     # SMA, EMA
     "MA_TYPE": ["SMA", "EMA"],
     # 교체: 0~3점 확인
