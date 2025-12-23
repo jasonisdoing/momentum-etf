@@ -14,11 +14,9 @@ from utils.logger import get_app_logger
 ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
         # 포트폴리오: 5개 확정
-        # "PORTFOLIO_TOPN": [5],
-        "PORTFOLIO_TOPN": [5, 6, 7, 8],
-        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
-        # 이동평균: 100~110
-        # "MA_RANGE": [90, 95, 100, 105, 110, 115, 120],
+        "PORTFOLIO_TOPN": [5],
+        # 이동평균: 110
+        "MA_RANGE": [100, 105, 110, 115, 120],
     },
     "kor_us": {
         # 포트폴리오: 8개 확정
@@ -27,9 +25,9 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_RANGE": [50, 55, 60, 65, 70],
     },
     "us": {
-        # 포트폴리오: 8개 확정
-        "PORTFOLIO_TOPN": [8],
-        # 이동평균: 65 ~ 70
+        # 포트폴리오: 5개 확정
+        "PORTFOLIO_TOPN": [5],
+        # 이동평균: 70
         "MA_RANGE": [60, 65, 70, 75, 80],
     },
 }

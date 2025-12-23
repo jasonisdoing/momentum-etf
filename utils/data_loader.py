@@ -1049,8 +1049,8 @@ def fetch_ohlcv_for_tickers(
             cache_start = cached_df.index.min().normalize()
             cache_end = cached_df.index.max().normalize()
 
-            # 캐시에 오늘 날짜가 없고 실시간 데이터가 있는 경우
-            if is_today and cache_end < required_end and tkr in realtime_data:
+            # [User Request] 오늘 날짜이고 실시간 데이터가 있는 경우 (캐시에 이미 있어도 덮어씌움)
+            if is_today and tkr in realtime_data:
                 # 캐시 데이터에 오늘 날짜의 실시간 데이터를 추가
                 rt_info = realtime_data[tkr]
                 rt_price = rt_info.get("nowVal", 0)
