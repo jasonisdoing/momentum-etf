@@ -863,32 +863,48 @@ def run_portfolio_backtest(
                         continue
 
                 elif held_stocks_with_scores:
+                    failed_due_to_cooldown = False
+
                     # Case 2: 같은 카테고리 종목이 없는 경우 (가장 점수 낮은 종목부터 탐색)
                     # 점수 오름차순으로 정렬되어 있으므로 순서대로 확인
                     for candidate_hold in held_stocks_with_scores:
                         cand_ticker = candidate_hold["ticker"]
                         cand_state = position_state[cand_ticker]
 
-                        # 쿨다운 체크
-                        if i < cand_state["sell_block_until"]:
-                            continue
-
-                        # 점수 조건 체크
+                        # 점수 조건 체크 (먼저 체크해야 교체 의사를 알 수 있음)
                         if best_new_score > candidate_hold["score"] + replace_threshold:
+                            # 쿨다운 체크
+                            if i < cand_state["sell_block_until"]:
+                                failed_due_to_cooldown = True
+                                continue
+
                             ticker_to_sell = cand_ticker
                             replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체 (새 카테고리)"
                             break  # 유효한 가장 낮은 점수 종목을 찾았으므로 중단
 
                     if not ticker_to_sell:
                         # 모든 보유 종목을 확인했으나 교체 대상을 찾지 못한 경우
-                        # (모두 쿨다운이거나, 점수 조건을 만족하지 못함)
                         weakest = held_stocks_with_scores[0]
                         required_score = weakest["score"] + replace_threshold
+
+                        if failed_due_to_cooldown:
+                            # 교체 조건은 만족했으나 쿨다운으로 못 파는 경우
+                            # 가장 약한 종목의 쿨다운 정보를 표기해줌
+                            weakest_state = position_state[weakest["ticker"]]
+                            remaining = int(weakest_state["sell_block_until"] - i)
+                            note_msg = str(DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중")).format(
+                                days=remaining
+                            )
+                            # 여기서는 쿨다운 때문임.
+                        else:
+                            # 점수 조건을 만족하는 종목이 없는 경우
+                            note_msg = DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score)
+
                         _update_ticker_note(
                             daily_records_by_ticker,
                             replacement_ticker,
                             dt,
-                            DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score) + " 또는 쿨다운",
+                            note_msg,
                         )
                         continue
                 else:

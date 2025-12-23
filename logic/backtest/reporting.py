@@ -12,7 +12,7 @@ import pandas as pd
 from logic.backtest.account import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
-from utils.data_loader import get_exchange_rate_series
+from utils.data_loader import fetch_naver_etf_inav_snapshot, get_exchange_rate_series
 from utils.formatters import format_pct_change
 from utils.logger import get_app_logger
 from utils.notification import build_summary_line_from_summary_data
@@ -528,6 +528,7 @@ def _build_daily_table_rows(
     buy_date_map: dict[str, pd.Timestamp | None],
     holding_days_map: dict[str, int],
     prev_rows_cache: dict[str, pd.Series | None],
+    price_overrides: dict[str, float] | None = None,
 ) -> list[list[str]]:
     entries: list[tuple[tuple[int, int, float, str], list[str]]] = []
 
@@ -559,12 +560,17 @@ def _build_daily_table_rows(
 
         price_val = row.get("price")
         shares_val = row.get("shares")
-        pv_val = row.get("pv")
+
         avg_cost_val = row.get("avg_cost")
 
         price = float(price_val) if pd.notna(price_val) else 0.0
+        # 실시간 가격 오버라이드 적용
+        if price_overrides and ticker_key in price_overrides:
+            price = float(price_overrides[ticker_key])
+
         shares = float(shares_val) if pd.notna(shares_val) else 0.0
-        pv = float(pv_val) if pd.notna(pv_val) else price * shares
+        # 가격이 변경되었을 수 있으므로 pv 재계산 (단, shares가 0이면 0)
+        pv = price * shares
         avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
 
         decision = str(row.get("decision", "")).upper()
@@ -829,7 +835,63 @@ def _generate_daily_report_lines(
         cumulative_return_pct = _safe_float(portfolio_row.get("cumulative_return_pct"))
         held_count = _safe_int(portfolio_row.get("held_count"))
 
+        # [Real-time Price Reflection]
+        # 마지막 날(오늘)이고 한국 계정이면 실시간 가격(Naver iNAV)을 가져와 반영
+        # recommend.py와 유사한 로직
+        price_overrides = {}
+        is_last_day = target_date == portfolio_df.index[-1]
+
+        # account_settings에서 country_code 가져오기 (없으면 result에서 fallback)
+        country_code_check = str(account_settings.get("country_code") or result.country_code).strip().lower()
+
+        if is_last_day and country_code_check in ("kor", "kr"):
+            # 현재 보유중이거나 관심있는 티커 목록 수집
+            tickers_to_fetch = []
+            for ticker_key, ts in result.ticker_timeseries.items():
+                if target_date in ts.index:
+                    tickers_to_fetch.append(str(ticker_key).upper())
+
+            if tickers_to_fetch:
+                try:
+                    snapshot = fetch_naver_etf_inav_snapshot(tickers_to_fetch)
+                    # 오버라이드 딕셔너리 생성
+                    # 또한 Total Value 등 헤더값도 재계산 필요
+                    # (Total Cash는 변하지 않음)
+                    recalc_holdings_value = 0.0
+
+                    for ticker_key in tickers_to_fetch:
+                        if ticker_key in snapshot:
+                            new_price = float(snapshot[ticker_key].get("nowVal", 0))
+                            if new_price > 0:
+                                price_overrides[ticker_key] = new_price
+
+                        # PV 재계산 합산
+                        # (오버라이드된 가격이 있으면 그거 쓰고, 없으면 기존 가격)
+                        # 주의: shares 정보를 가져와야 함
+                        tkr_ts = result.ticker_timeseries.get(ticker_key)
+                        if tkr_ts is not None and target_date in tkr_ts.index:
+                            tkr_row = tkr_ts.loc[target_date]
+                            tkr_shares = _safe_float(tkr_row.get("shares"))
+                            if tkr_shares > 0:
+                                tkr_price = price_overrides.get(ticker_key) or _safe_float(tkr_row.get("price"))
+                                recalc_holdings_value += tkr_shares * tkr_price
+
+                    if price_overrides:
+                        # 헤더 값 업데이트
+                        total_holdings = recalc_holdings_value
+                        total_value = total_cash + total_holdings
+
+                        # 평가 손익 등 파생 지표 재계산은 복잡하므로
+                        # daily_profit_loss와 eval_profit_loss 정도만 근사 업데이트
+                        # 하지만 정확한 '어제 대비' 수익을 계산하기엔 여기서 어제 Total Value 접근이 필요.
+                        # 여기서는 Total Value가 바뀌었으므로 그에 따른 단순 차이만 반영
+                        pass
+
+                except Exception as e:
+                    logger.warning(f"리포팅 중 실시간 가격 패치 실패: {e}")
+
         # 환율 적용 로직:
+
         # 1. 포트폴리오 데이터는 현지 통화 기준 (USD 등)
         # 2. Daily Summary Header는 KRW 기준으로 표시 (User Request: "Header only in Korean Won is correct")
         # 3. Table은 현지 통화 기준 (USD) 유지
@@ -923,6 +985,7 @@ def _generate_daily_report_lines(
             buy_date_map=buy_date_map,
             holding_days_map=holding_days_map,
             prev_rows_cache=prev_rows_cache,
+            price_overrides=price_overrides,
         )
 
         table_lines = render_table_eaw(headers, rows, aligns)
