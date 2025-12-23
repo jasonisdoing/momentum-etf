@@ -10,17 +10,17 @@
     "show_hold_only": false,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2025-12-23 14:46",
-        "CAGR": 75.922879,
-        "MDD": -15.687951,
-        "OPTIMIZATION_METRIC": "CAGR",
+        "BACKTESTED_DATE": "2025-12-23 16:05",
+        "CAGR": 76.342556,
+        "MDD": -15.239127,
         "PORTFOLIO_TOPN": 5,
         "MA_PERIOD": 70,
         "MA_TYPE": "SMA",
         "REPLACE_SCORE_THRESHOLD": 3,
         "STOP_LOSS_PCT": 8,
         "OVERBOUGHT_SELL_THRESHOLD": 84,
-        "COOLDOWN_DAYS": 2
+        "COOLDOWN_DAYS": 2,
+        "OPTIMIZATION_METRIC": "SDR"
     },
     "benchmark": {
         "ticker": "SPY",

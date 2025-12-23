@@ -505,7 +505,6 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "BACKTESTED_DATE",
         "CAGR",
         "MDD",
-        "OPTIMIZATION_METRIC",
         "PORTFOLIO_TOPN",
         "MA_PERIOD",
         "MA_TYPE",
@@ -513,6 +512,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "STOP_LOSS_PCT",
         "OVERBOUGHT_SELL_THRESHOLD",
         "COOLDOWN_DAYS",
+        "OPTIMIZATION_METRIC",
     ]
 
     ordered_strategy = {}
@@ -2299,6 +2299,11 @@ def run_account_tuning(
         )
 
     entry = _build_run_entry(months_results=results_per_month)
+
+    # 튜닝시 사용한 최적화 지표도 config에 저장
+    if optimization_metric:
+        entry["result"]["OPTIMIZATION_METRIC"] = optimization_metric
+
     _apply_tuning_to_strategy_file(account_norm, entry)
 
     if debug_dir is not None:
