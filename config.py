@@ -36,13 +36,15 @@ MARKET_SCHEDULES = {
     "kor": {
         "open": time(9, 0),
         "close": time(16, 0),
-        "interval_minutes": 180,
+        "open_offset_minutes": 30,
+        "close_offset_minutes": 30,
         "timezone": "Asia/Seoul",
     },
     "us": {
         "open": time(9, 30),
         "close": time(16, 0),
-        "interval_minutes": 180,
+        "open_offset_minutes": 30,
+        "close_offset_minutes": 30,
         "timezone": "America/New_York",
     },
 }
