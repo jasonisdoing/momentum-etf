@@ -10,18 +10,17 @@
     "show_hold_only": false,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2025-12-23 09:55",
-        "CAGR": 141.520613,
-        "MDD": -17.855089,
+        "BACKTESTED_DATE": "2025-12-23 15:00",
+        "CAGR": 120.300556,
+        "MDD": -13.774841,
         "OPTIMIZATION_METRIC": "CAGR",
         "PORTFOLIO_TOPN": 5,
-        "MA_PERIOD": 110,
+        "MA_PERIOD": 44,
         "MA_TYPE": "SMA",
-        "REPLACE_SCORE_THRESHOLD": 0,
+        "REPLACE_SCORE_THRESHOLD": 1,
         "STOP_LOSS_PCT": 8,
         "OVERBOUGHT_SELL_THRESHOLD": 86,
-        "COOLDOWN_DAYS": 1,
-        "CORE_HOLDINGS": []
+        "COOLDOWN_DAYS": 3
     },
     "benchmark": {
         "ticker": "379800",

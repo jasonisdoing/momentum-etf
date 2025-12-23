@@ -15,25 +15,25 @@ ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
         # 포트폴리오: 5개 확정
         "PORTFOLIO_TOPN": [5],
-        # 이동평균: 110
-        "MA_RANGE": [100, 105, 110, 115, 120],
+        # 이동평균: 40일 근처 - 스윙
+        "MA_RANGE": [20, 22, 25, 30, 35, 40, 45, 50],
     },
     "kor_us": {
         # 포트폴리오: 8개 확정
         "PORTFOLIO_TOPN": [8],
-        # 이동평균: 60
-        "MA_RANGE": [50, 55, 60, 65, 70],
+        # 이동평균: 20일 근처 - 스피드
+        "MA_RANGE": [20, 22, 25, 30, 35, 40, 45, 50],
     },
     "us": {
         # 포트폴리오: 5개 확정
         "PORTFOLIO_TOPN": [5],
-        # 이동평균: 70
-        "MA_RANGE": [60, 65, 70, 75, 80],
+        # 이동평균: 70일 근처 - 추세
+        "MA_RANGE": [20, 22, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80],
     },
 }
 
 COMMON_TUNING_CONFIG = {
-    # 이동평균: 20~100
+    # 이동평균: 20~200
     # "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
     # SMA, EMA
     "MA_TYPE": ["SMA", "EMA"],
@@ -45,10 +45,8 @@ COMMON_TUNING_CONFIG = {
     "OVERBOUGHT_SELL_THRESHOLD": [82, 84, 86, 88, 90],
     # 쿨다운: 1~3
     "COOLDOWN_DAYS": [1, 2, 3],
-    # 나머지 고정
-    "TRAILING_STOP_PCT": [0],
-    "CORE_HOLDINGS": [],
-    "OPTIMIZATION_METRIC": "CAGR",
+    # CAGR, SHARPE, SDR 중 선택
+    "OPTIMIZATION_METRIC": "SDR",  # CAGR, SHARPE, SDR 중 선택
 }
 
 
@@ -74,8 +72,6 @@ COMMON_TUNING_CONFIG = {
 #     # 7. 쿨다운: 1~3일 확인
 #     "COOLDOWN_DAYS": [1, 2, 3],
 
-#     "TRAILING_STOP_PCT": [0], # 트레일링 스탑은 보통 0이 우세하므로 고정 (원하시면 [0, 5] 추가)
-#     "CORE_HOLDINGS": [],
 #     "OPTIMIZATION_METRIC": "CAGR",
 # },
 
