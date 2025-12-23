@@ -29,10 +29,9 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
 
 
 def _build_home_page(accounts: list[dict[str, Any]]):
-    # 보유 중인 종목: HOLD, HOLD_CORE + 매도 신호가 있지만 아직 보유 중인 종목
+    # 보유 중인 종목: HOLD + 매도 신호가 있지만 아직 보유 중인 종목
     allowed_states = {
         "HOLD",
-        "HOLD_CORE",
         "BUY",
         "BUY_REPLACE",
         "SELL_TREND",

@@ -513,7 +513,6 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "STOP_LOSS_PCT",
         "OVERBOUGHT_SELL_THRESHOLD",
         "COOLDOWN_DAYS",
-        "CORE_HOLDINGS",
     ]
 
     ordered_strategy = {}
@@ -774,7 +773,6 @@ def _evaluate_single_combo(
         int,
         str,
         tuple[str, ...],
-        tuple[str, ...],
         float,
     ],
 ) -> tuple[str, Any, list[str]]:
@@ -790,7 +788,6 @@ def _evaluate_single_combo(
         cooldown_int,
         ma_type_str,
         excluded_tickers,
-        core_holdings_tuple,
     ) = payload
 
     # Worker 글로벌 변수에서 데이터 가져오기 (프로세스당 한 번만 pickle됨)
@@ -806,7 +803,6 @@ def _evaluate_single_combo(
             portfolio_topn=int(topn_int),
             replace_threshold=float(threshold_float),
             ma_type=str(ma_type_str),
-            core_holdings=list(core_holdings_tuple) if core_holdings_tuple else [],
             stop_loss_pct=float(stop_loss_float),
         )
     except ValueError as exc:
@@ -997,9 +993,6 @@ def _execute_tuning_for_months(
         except Exception as exc:
             logger.warning("[튜닝] %s 환율 데이터 로드 실패, fallback 사용: %s", account_norm.upper(), exc)
 
-    # search_space에서 core_holdings 가져오기
-    core_holdings_from_space = search_space.get("CORE_HOLDINGS", [])
-
     # 각 payload에는 파라미터만 포함 (데이터는 worker 초기화 시 한 번만 전달)
     payloads = [
         (
@@ -1014,7 +1007,6 @@ def _execute_tuning_for_months(
             int(cooldown),
             str(ma_type),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
-            tuple(core_holdings_from_space) if core_holdings_from_space else tuple(),
         )
         for ma, topn, replace, stop_loss, rsi, cooldown, ma_type in combos
     ]
@@ -1576,38 +1568,6 @@ def _compose_tuning_report(
                 cd_min, cd_max = min(cooldown_range), max(cooldown_range)
                 lines.append(f"  COOLDOWN_DAYS: {cd_min}~{cd_max}")
 
-            # CORE_HOLDINGS 표시 (빈 리스트도 표시)
-            core_holdings = search_space.get("CORE_HOLDINGS", [])
-            if core_holdings is not None:
-                if core_holdings:
-                    # 종목명 가져오기
-                    from utils.stock_list_io import get_etfs
-
-                    try:
-                        # tuning_metadata에서 country_code 추출
-                        etf_list = get_etfs(account_id)
-                        ticker_to_name = {
-                            str(etf.get("ticker")): etf.get("name", "") for etf in etf_list if etf.get("ticker")
-                        }
-
-                        core_holdings_display = []
-                        for ticker in core_holdings:
-                            name = ticker_to_name.get(str(ticker), "")
-                            if name:
-                                core_holdings_display.append(f"{name}({ticker})")
-                            else:
-                                core_holdings_display.append(str(ticker))
-
-                        lines.append(f"  CORE_HOLDINGS: {', '.join(core_holdings_display)}")
-                    except Exception as e:
-                        # 종목명을 가져오지 못하면 티커만 표시
-                        logger = get_app_logger()
-                        logger.debug(f"[튜닝] CORE_HOLDINGS 종목명 조회 실패: {e}")
-                        lines.append(f"  CORE_HOLDINGS: {', '.join(map(str, core_holdings))}")
-                else:
-                    # 빈 리스트인 경우
-                    lines.append("  CORE_HOLDINGS: (없음)")
-
         # 종목 수
         ticker_count = tuning_metadata.get("ticker_count", 0)
         if ticker_count > 0:
@@ -1838,15 +1798,6 @@ def run_account_tuning(
         fallback=2,
     )
 
-    # CORE_HOLDINGS 처리: tune.py에서 지정 가능, 없으면 base_rules에서 가져옴
-    core_holdings_raw = config.get("CORE_HOLDINGS")
-    if core_holdings_raw is None:
-        core_holdings = base_rules.core_holdings or []
-    elif isinstance(core_holdings_raw, (list, tuple)):
-        core_holdings = [str(v).strip() for v in core_holdings_raw if v]
-    else:
-        core_holdings = []
-
     # MA_TYPE 처리: 문자열 리스트로 받음
     ma_type_raw = config.get("MA_TYPE")
     if ma_type_raw is None:
@@ -1925,7 +1876,6 @@ def run_account_tuning(
         "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
         "COOLDOWN_DAYS": cooldown_values,
         "MA_TYPE": ma_type_values,
-        "CORE_HOLDINGS": core_holdings,
         "OPTIMIZATION_METRIC": [optimization_metric],
     }
 
@@ -2096,7 +2046,6 @@ def run_account_tuning(
             "STOP_LOSS_PCT": list(stop_loss_values),
             "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
             "COOLDOWN_DAYS": list(cooldown_values),
-            "CORE_HOLDINGS": list(core_holdings) if core_holdings else [],
             "OPTIMIZATION_METRIC": optimization_metric,
         },
         "data_period": {
