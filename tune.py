@@ -10,36 +10,40 @@ from utils.account_registry import get_account_settings, get_strategy_rules
 from utils.data_loader import MissingPriceDataError
 from utils.logger import get_app_logger
 
-# 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
+# =========================================================
+# 계좌별 성격 맞춤형 설정
+# =========================================================
 ACCOUNT_TUNING_CONFIG = {
+    # 🇰🇷 국내 ETF: 삼각편대 (수익 160% + MDD -14%)
     "kor_kr": {
-        # 포트폴리오: 5개 확정
-        "PORTFOLIO_TOPN": [5],
+        "PORTFOLIO_TOPN": [3],
+        "REPLACE_SCORE_THRESHOLD": [0],
     },
+    # 🇺🇸 국내상장 미국 ETF: 6개 분산 (수익 90% + MDD -15%)
     "kor_us": {
-        # 포트폴리오: 8개 확정
-        "PORTFOLIO_TOPN": [8],
+        "PORTFOLIO_TOPN": [6],
+        "REPLACE_SCORE_THRESHOLD": [0],
     },
+    # 🇺🇸 미국 직투: 테스트 중
     "us": {
-        # 포트폴리오: 5개 확정
         "PORTFOLIO_TOPN": [5],
+        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3],
     },
 }
 
+# =========================================================
+# 공통 설정 (나머지 변수 통제)
+# =========================================================
 COMMON_TUNING_CONFIG = {
-    # 이동평균: 50~100, 50일(약 2.5개월) ~ 100일(약 5개월)
+    # 1. 이동평균: 유일한 변수 (50~100일 사이에서 최적값 찾기)
     "MA_RANGE": [50, 60, 70, 80, 90, 100],
-    # SMA, EMA
     "MA_TYPE": ["SMA", "EMA"],
-    # 교체: 0~3점 확인
-    "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3],
-    # 손절: 10% 고정
+    # 2. 손절: 10% 고정 (리스크 관리)
     "STOP_LOSS_PCT": [10],
-    # RSI: 82~90 점검
+    # 3. 나머지 고정
     "OVERBOUGHT_SELL_THRESHOLD": [82, 84, 86, 88, 90],
-    # 쿨다운: 1~3
     "COOLDOWN_DAYS": [1, 2, 3],
-    # CAGR, SHARPE, SDR 중 선택
+    # 4. 목표: 수익률 극대화
     "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
 }
 
