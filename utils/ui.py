@@ -43,6 +43,41 @@ def load_account_recommendations(
         return None, message, country_code
 
     rows = snapshot.get("recommendations") or []
+
+    # [KOR] 실시간 데이터 오버레이 (NAVER API)
+    if country_code in ("kor", "kr"):
+        try:
+            from utils.data_loader import fetch_naver_etf_inav_snapshot
+
+            tickers = [r.get("ticker") for r in rows if r.get("ticker")]
+            realtime_data = fetch_naver_etf_inav_snapshot(tickers)
+
+            if realtime_data:
+                for row in rows:
+                    ticker = str(row.get("ticker") or "").strip().upper()
+                    if ticker in realtime_data:
+                        rt = realtime_data[ticker]
+                        # 1. 현재가
+                        if "nowVal" in rt:
+                            row["price"] = rt["nowVal"]
+                        # 2. 일간 등락률
+                        if "changeRate" in rt:
+                            row["daily_pct"] = rt["changeRate"]
+                        # 3. NAV
+                        if "nav" in rt:
+                            row["nav_price"] = rt["nav"]
+                        # 4. 괴리율
+                        if "deviation" in rt:
+                            row["price_deviation"] = rt["deviation"]
+                        # 5. 종목명 (선택)
+                        if "itemname" in rt:
+                            row["name"] = rt["itemname"]
+                        # 6. 3개월 수익률 (선택)
+                        if "threeMonthEarnRate" in rt:
+                            row["return_3m"] = rt["threeMonthEarnRate"]
+        except Exception as e:
+            logger.warning(f"실시간 데이터 오버레이 실패: {e}")
+
     try:
         df = recommendations_to_dataframe(country_code, rows)
     except Exception as exc:

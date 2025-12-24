@@ -1246,6 +1246,7 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
 
         nav_raw = item.get("nav")
         price_raw = item.get("nowVal")
+        change_rate_raw = item.get("changeRate")  # 일간 등락률 (%)
 
         # 추가 정보 파싱 (Open, High, Low, Vol)
         open_raw = item.get("openVal")
@@ -1253,22 +1254,43 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
         low_raw = item.get("lowVal")
         vol_raw = item.get("quant")
 
+        # 종목명, 수익률 등
+        name_raw = item.get("itemname")
+        return_3m_raw = item.get("threeMonthEarnRate")
+
         try:
             nav_value = float(str(nav_raw).replace(",", ""))
             price_value = float(str(price_raw).replace(",", ""))
         except (TypeError, ValueError):
             continue
 
-        if nav_value <= 0 or price_value <= 0:
-            continue
-
-        deviation = ((price_value / nav_value) - 1.0) * 100.0
+        # NAV가 0인 경우 괴리율 계산 불가 처리
+        if nav_value <= 0:
+            deviation = None
+        else:
+            deviation = ((price_value / nav_value) - 1.0) * 100.0
 
         entry = {
             "nav": nav_value,
             "nowVal": price_value,
             "deviation": deviation,
         }
+
+        # 등락률 파싱
+        try:
+            entry["changeRate"] = float(str(change_rate_raw).replace(",", ""))
+        except (TypeError, ValueError):
+            pass
+
+        # 종목명
+        if name_raw:
+            entry["itemname"] = str(name_raw).strip()
+
+        # 3개월 수익률
+        try:
+            entry["threeMonthEarnRate"] = float(str(return_3m_raw).replace(",", ""))
+        except (TypeError, ValueError):
+            pass
 
         # Optional fields parsing
         try:
