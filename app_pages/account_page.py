@@ -69,7 +69,14 @@ def render_account_page(account_id: str) -> None:
     render_recommendation_table(df, country_code=country_code)
 
     if updated_at:
-        st.caption(f"데이터 업데이트: {updated_at}")
+        # [KOR] 실시간 오버레이가 적용된 경우 푸터 분리
+        if country_code in ("kor", "kr"):
+            from datetime import datetime
+
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.caption(f"추천 데이터 업데이트: {updated_at}  \n가격 데이터 업데이트: {now_str}, Naver")
+        else:
+            st.caption(f"데이터 업데이트: {updated_at}")
 
         with st.expander("설정", expanded=True):
             strategy_cfg = account_settings.get("strategy", {}) or {}
