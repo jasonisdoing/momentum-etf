@@ -1,5 +1,5 @@
 {
-    "order": 30,
+    "order": 20,
     "icon": "🇺🇸",
     "name": "미국상장 ETF",
     "desc": "미국 ETF 포트폴리오 (USD)",
@@ -13,7 +13,7 @@
         "BACKTESTED_DATE": "2025-12-24 16:24",
         "CAGR": 75.881058,
         "MDD": -15.926142,
-        "PORTFOLIO_TOPN": 5,
+        "PORTFOLIO_TOPN": 10,
         "MA_PERIOD": 70,
         "MA_TYPE": "SMA",
         "REPLACE_SCORE_THRESHOLD": 3,

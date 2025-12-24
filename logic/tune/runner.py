@@ -41,7 +41,7 @@ from utils.stock_list_io import get_etfs
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zaccounts"
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
-MAX_TABLE_ROWS = 50
+MAX_TABLE_ROWS = 100
 
 # Worker 글로벌 변수 - 프로세스당 한 번만 초기화
 _WORKER_PREFETCHED_DATA: Mapping[str, DataFrame] | None = None
@@ -353,7 +353,7 @@ def _render_tuning_table(
         headers.append("기간수익률(%)")
     aligns.append("right")
 
-    headers.extend(["Sharpe", "SDR(Sharpe/MDD)", "Turnover(매매회전율)"])
+    headers.extend(["Sharpe", "SDR(Sharpe/MDD)", "Trades(거래 수)"])
     aligns.extend(["right", "right", "right"])
 
     if include_samples:

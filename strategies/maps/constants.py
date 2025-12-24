@@ -29,19 +29,19 @@ DECISION_CONFIG = {
         "show_slack": True,
         "background": "#ffb6c1",
     },
-    "SELL_REPLACE": {
-        "display_name": "<🔄 교체매도>",
-        "order": 23,
-        "is_recommendation": True,
-        "show_slack": True,
-        "background": "#ffc1cc",
-    },
     "BUY_REPLACE": {
         "display_name": "<🔄 교체매수>",
-        "order": 30,
+        "order": 25,
         "is_recommendation": True,
         "show_slack": True,
         "background": "#81c147",
+    },
+    "SELL_REPLACE": {
+        "display_name": "<🔄 교체매도>",
+        "order": 26,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#ffc1cc",
     },
     "BUY": {
         "display_name": "<🚀 신규매수>",

@@ -14,14 +14,9 @@ from utils.logger import get_app_logger
 # 계좌별 성격 맞춤형 설정
 # =========================================================
 ACCOUNT_TUNING_CONFIG = {
-    # 🇰🇷 국내 ETF: 삼각편대 (수익 160% + MDD -14%)
-    "kor_kr": {
-        "PORTFOLIO_TOPN": [3],
-        "REPLACE_SCORE_THRESHOLD": [0],
-    },
-    # 🇺🇸 국내상장 미국 ETF: 6개 분산 (수익 90% + MDD -15%)
-    "kor_us": {
-        "PORTFOLIO_TOPN": [6],
+    # 🇰🇷 국내 ETF: PORTFOLIO_TOPN 테스트 중
+    "kor": {
+        "PORTFOLIO_TOPN": [10],
         "REPLACE_SCORE_THRESHOLD": [0],
     },
     # 🇺🇸 미국 직투: 테스트 중
@@ -37,12 +32,13 @@ ACCOUNT_TUNING_CONFIG = {
 COMMON_TUNING_CONFIG = {
     # 1. 이동평균: 유일한 변수 (50~100일 사이에서 최적값 찾기)
     "MA_RANGE": [50, 60, 70, 80, 90, 100],
-    "MA_TYPE": ["SMA", "EMA"],
+    "MA_TYPE": ["EMA"],
     # 2. 손절: 10% 고정 (리스크 관리)
     "STOP_LOSS_PCT": [10],
-    # 3. 나머지 고정
-    "OVERBOUGHT_SELL_THRESHOLD": [82, 84, 86, 88, 90],
-    "COOLDOWN_DAYS": [1, 2, 3],
+    # 3. RSI: 85~95
+    "OVERBOUGHT_SELL_THRESHOLD": [85, 87, 89, 91, 93, 95],
+    # 4. 쿨다운: 1~2
+    "COOLDOWN_DAYS": [1, 2],
     # 4. 목표: 수익률 극대화
     "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
 }

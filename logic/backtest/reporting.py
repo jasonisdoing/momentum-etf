@@ -360,7 +360,7 @@ def print_backtest_summary(
     # 기본 정보 통합
     add(f"| 계정: {account_id.upper()} ({country_code.upper()})")
     add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
-    add(f"| 교체 매매(Turnover): {int(summary.get('turnover', 0))}회")
+    add(f"| 거래 수(Trades): {int(summary.get('turnover', 0))}회")
     add("")
     # 사용된 설정값 통합
     add("[ 전략 설정 ]")
@@ -401,7 +401,7 @@ def print_backtest_summary(
     row_mdd = ["MDD", format_pct_change(-summary["mdd"])]
     row_sharpe = ["Sharpe", f"{summary.get('sharpe', 0.0):.2f}"]
     row_sdr = ["SDR", f"{summary.get('sharpe_to_mdd', 0.0):.3f}"]
-    row_turnover = ["Turnover", f"{int(summary.get('turnover', 0))}"]
+    row_trades = ["Trades", f"{int(summary.get('turnover', 0))}"]
 
     if isinstance(benchmarks_info, list) and benchmarks_info:
         for bench in benchmarks_info:
@@ -418,8 +418,8 @@ def print_backtest_summary(
             # SDR
             bm_sdr = bench.get("sharpe_to_mdd")
             row_sdr.append(f"{float(bm_sdr):.3f}" if bm_sdr is not None else "-")
-            # Turnover (벤치마크는 해당 없음)
-            row_turnover.append("-")
+            # Trades (벤치마크는 해당 없음)
+            row_trades.append("-")
 
     elif has_benchmark:
         # 단일 벤치마크 폴백
@@ -428,10 +428,10 @@ def print_backtest_summary(
         row_mdd.append("-")
         row_sharpe.append("-")
         row_sdr.append("-")
-        row_turnover.append("-")
+        row_trades.append("-")
 
     # 테이블 렌더링
-    rows = [row_ret, row_cagr, row_mdd, row_sharpe, row_sdr, row_turnover]
+    rows = [row_ret, row_cagr, row_mdd, row_sharpe, row_sdr, row_trades]
     # 정렬: 구분(Left), 나머지(Right)
     aligns = ["left"] + ["right"] * (len(headers) - 1)
 
