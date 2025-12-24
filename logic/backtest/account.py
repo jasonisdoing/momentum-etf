@@ -320,6 +320,7 @@ def run_account_backtest(
         portfolio_topn=portfolio_topn,
         account_settings=account_settings,
         prefetched_data=prefetched_data,
+        ticker_timeseries=ticker_timeseries,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries, start_date)
@@ -656,6 +657,7 @@ def _build_summary(
     portfolio_topn: int,
     account_settings: Mapping[str, Any],
     prefetched_data: Mapping[str, pd.DataFrame] | None = None,
+    ticker_timeseries: dict[str, pd.DataFrame] | None = None,
 ) -> tuple[
     dict[str, Any],
     pd.Series,
@@ -891,11 +893,20 @@ def _build_summary(
                         "cumulative_return_pct": float(weekly_cum_pct.loc[dt]),
                     }
                 )
+
         monthly_returns = pv_series_with_start.resample("ME").last().pct_change().dropna()
         if initial_capital_local > 0:
             eom_pv = pv_series.resample("ME").last().dropna()
             monthly_cum_returns = (eom_pv / initial_capital_local - 1).ffill()
         yearly_returns = pv_series_with_start.resample("YE").last().pct_change().dropna()
+
+    # Turnover calculation (교체 매매 횟수) - if 블록 밖에서 항상 실행
+    total_turnover = 0
+    if ticker_timeseries:
+        for t_data in ticker_timeseries.values():
+            if isinstance(t_data, pd.DataFrame) and "decision" in t_data.columns:
+                repl_count = (t_data["decision"] == "SELL_REPLACE").sum()
+                total_turnover += int(repl_count)
 
     summary = {
         "start_date": start_date.strftime("%Y-%m-%d"),
@@ -909,6 +920,7 @@ def _build_summary(
         "period_return": float(final_row["cumulative_return_pct"]),
         "evaluation_return_pct": float(final_row["evaluation_return_pct"]),
         "held_count": int(final_row["held_count"]),
+        "turnover": total_turnover,
         "cagr": cagr * 100,
         "mdd": mdd_pct,
         "sharpe": sharpe_ratio,

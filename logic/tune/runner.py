@@ -353,8 +353,8 @@ def _render_tuning_table(
         headers.append("기간수익률(%)")
     aligns.append("right")
 
-    headers.extend(["Sharpe", "SDR(Sharpe/MDD)"])
-    aligns.extend(["right", "right"])
+    headers.extend(["Sharpe", "SDR(Sharpe/MDD)", "Turnover(매매회전율)"])
+    aligns.extend(["right", "right", "right"])
 
     if include_samples:
         headers.append("Samples")
@@ -397,6 +397,7 @@ def _render_tuning_table(
             _format_table_float(row.get("period_return")),
             _format_table_float(row.get("sharpe")),
             _format_table_float(row.get("sharpe_to_mdd"), digits=3),
+            str(int(row.get("turnover", 0))),
         ]
 
         if include_samples:
@@ -566,6 +567,7 @@ def _extract_summary(result) -> dict[str, Any]:
         "start_date": result.start_date.strftime("%Y-%m-%d"),
         "end_date": result.end_date.strftime("%Y-%m-%d"),
         "excluded": list(result.missing_tickers),
+        "turnover": int(summary.get("turnover") or 0),
     }
 
 
@@ -887,6 +889,7 @@ def _evaluate_single_combo(
         "period_return": _round_float(_safe_float(summary.get("period_return"), 0.0)),
         "final_value_local": final_value_local,
         "final_value": final_value_krw,
+        "turnover": int(summary.get("turnover") or 0),
     }
 
     missing = getattr(bt_result, "missing_tickers", []) or []
@@ -1179,6 +1182,7 @@ def _execute_tuning_for_months(
                 "sharpe_to_mdd": _round_float_places(sharpe_to_mdd_val, 3)
                 if math.isfinite(sharpe_to_mdd_val)
                 else None,
+                "turnover": int(item.get("turnover") or 0),
                 "tuning": {
                     "MA_PERIOD": int(item.get("ma_period", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
@@ -1312,6 +1316,7 @@ def _build_run_entry(
                 "period_return": period_return_display,
                 "sharpe": sharpe_display,
                 "sharpe_to_mdd": sharpe_to_mdd_display,
+                "turnover": int(best.get("turnover") or 0),
                 "tuning": tuning_snapshot,
             }
         )
@@ -1677,6 +1682,7 @@ def _compose_tuning_report(
                     "period_return": period_val,
                     "sharpe": sharpe_val,
                     "sharpe_to_mdd": sharpe_to_mdd_val,
+                    "turnover": entry.get("turnover", 0),
                 }
             )
 
@@ -2159,6 +2165,7 @@ def run_account_tuning(
                         "period_return": _round_float_places(entry.get("period_return", 0.0), 2),
                         "sharpe": _round_float_places(entry.get("sharpe", 0.0), 2),
                         "sharpe_to_mdd": _round_float_places(entry.get("sharpe_to_mdd", 0.0), 3),
+                        "turnover": int(entry.get("turnover") or 0),
                         "tuning": {
                             "MA_PERIOD": int(entry.get("ma_period", 0)),
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
