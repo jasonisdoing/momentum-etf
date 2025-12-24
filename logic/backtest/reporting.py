@@ -125,7 +125,7 @@ def print_backtest_summary(
         add(f"{section_counter}. ========= {title} ==========")
         section_counter += 1
 
-    add_section_heading("사용된 설정값")
+    # 설정값 계산 (나중에 사용)
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
         raise ValueError(f"'{account_id}' 계정 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
     ma_period = merged_strategy["MA_PERIOD"]
@@ -137,7 +137,6 @@ def print_backtest_summary(
     except (TypeError, ValueError):
         holding_stop_loss_pct = float(portfolio_topn)
 
-    # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
     if abs(holding_stop_loss_pct - round(holding_stop_loss_pct)) < 1e-6:
         stop_loss_label = f"{int(round(holding_stop_loss_pct))}%"
     else:
@@ -161,14 +160,6 @@ def print_backtest_summary(
     if currency != "KRW" and fx_rate_to_krw != 1.0:
         used_settings["적용 환율 (KRW)"] = f"1 {currency} ≈ {format_kr_money(fx_rate_to_krw)}"
 
-    for key, value in used_settings.items():
-        add(f"| {key}: {value}")
-    add_section_heading("지표 설명")
-    add("  - Sharpe: 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
-    add(
-        "  - SDR (Sharpe/MDD): Sharpe를 MDD(%)로 나눈 값. 수익 대비 최대 낙폭 효율성. 높을수록 우수 (기준: >0.2 양호, >0.3 우수)."
-    )
-
     def _align_korean_money_for_weekly(text: str) -> str:
         if currency != "KRW" or not isinstance(text, str):
             return text
@@ -183,7 +174,6 @@ def print_backtest_summary(
             eok_part = eok_part.strip()
             remainder = remainder.strip()
             man_part = remainder.replace("만원", "").strip()
-            # 5칸 폭으로 오른쪽 정렬 (콤마 포함)
             man_part_padded = man_part.rjust(5)
             return f"{sign}{eok_part}억 {man_part_padded}만원"
         return text
@@ -367,10 +357,25 @@ def print_backtest_summary(
     else:
         add("| 카테고리별 성과 데이터가 없어 표시할 수 없습니다.")
 
+    add_section_heading("지표 설명")
+    add("  - Sharpe: 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
+    add(
+        "  - SDR (Sharpe/MDD): Sharpe를 MDD(%)로 나눈 값. 수익 대비 최대 낙폭 효율성. 높을수록 우수 (기준: >0.2 양호, >0.3 우수)."
+    )
+
     add_section_heading("백테스트 결과 요약")
+    # 기본 정보 통합
+    add(f"| 계정: {account_id.upper()} ({country_code.upper()})")
     add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
     add(f"| 교체 매매(Turnover): {int(summary.get('turnover', 0))}회")
-
+    add("")
+    # 사용된 설정값 통합
+    add("[ 전략 설정 ]")
+    for key, value in used_settings.items():
+        add(f"| {key}: {value}")
+    add("")
+    # 자산 정보
+    add("[ 자산 현황 ]")
     add(f"| 초기 자본: {money_formatter(initial_capital_local)}")
     if currency != "KRW":
         add(f"| 초기 자본 (KRW): {format_kr_money(initial_capital_krw_value)}")
@@ -1060,17 +1065,7 @@ def dump_backtest_log(
     lines: list[str] = []
 
     lines.append(f"백테스트 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")
-    lines.append("1. ========= 기본정보 ==========")
-    lines.append(
-        f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}"
-    )
-    base_line = f"초기 자본: {result.initial_capital:,.0f} {result.currency or 'KRW'}"
-    if (result.currency or "KRW").upper() != "KRW":
-        base_line += f" (≈ {result.initial_capital_krw:,.0f} KRW)"
-    base_line += f" | 포트폴리오 TOPN: {result.portfolio_topn}"
-    lines.append(base_line)
-    lines.append("")
-    lines.append("2. ========= 일자별 성과 상세 ==========")
+    lines.append("1. ========= 일자별 성과 상세 ==========")
 
     daily_lines = _generate_daily_report_lines(result, account_settings)
     lines.extend(daily_lines)
@@ -1094,7 +1089,7 @@ def dump_backtest_log(
         category_summaries=getattr(result, "category_summaries", []),
         core_start_dt=result.start_date,
         emit_to_logger=False,
-        section_start_index=3,
+        section_start_index=2,
     )
     if summary_section:
         lines.extend(summary_section)
