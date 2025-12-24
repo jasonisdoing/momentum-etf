@@ -359,6 +359,7 @@ def _execute_new_buys(
             ticker_state["shares"] += req_qty
             ticker_state["avg_cost"] = buy_price
             ticker_state["buy_block_until"] = i + cooldown_days + 1
+            ticker_state["sell_block_until"] = i + cooldown_days + 1  # 매수 후 매도도 cooldown 적용
 
             # 카테고리 업데이트
             category = ticker_to_category.get(ticker_to_buy)

@@ -143,19 +143,12 @@ def print_backtest_summary(
         stop_loss_label = f"{holding_stop_loss_pct:.2f}%"
 
     used_settings = {
-        "계정": account_id.upper(),
-        "시장 코드": country_code.upper(),
-        "테스트 기간": f"최근 {test_months_range}개월",
-        "초기 자본": money_formatter(initial_capital_local),
         "포트폴리오 종목 수 (TopN)": portfolio_topn,
         "모멘텀 스코어 MA 기간": momentum_label,
         "교체 매매 점수 임계값": replace_threshold,
         "개별 종목 손절매": stop_loss_label,
-        "매도 후 재매수 금지 기간": f"{cooldown_days}일 (매수 후 매도는 즉시 가능)",
+        "매수/매도 쿨다운": f"{cooldown_days}일",
     }
-
-    if currency != "KRW":
-        used_settings["초기 자본 (KRW 환산)"] = format_kr_money(initial_capital_krw_value)
 
     if currency != "KRW" and fx_rate_to_krw != 1.0:
         used_settings["적용 환율 (KRW)"] = f"1 {currency} ≈ {format_kr_money(fx_rate_to_krw)}"
