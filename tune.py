@@ -15,38 +15,32 @@ ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
         # 포트폴리오: 5개 확정
         "PORTFOLIO_TOPN": [5],
-        # 이동평균: 40일 근처 - 스윙
-        "MA_RANGE": [20, 22, 25, 30, 35, 40, 45, 50],
     },
     "kor_us": {
         # 포트폴리오: 8개 확정
         "PORTFOLIO_TOPN": [8],
-        # 이동평균: 20일 근처 - 스피드
-        "MA_RANGE": [20, 22, 25, 30, 35, 40, 45, 50],
     },
     "us": {
         # 포트폴리오: 5개 확정
         "PORTFOLIO_TOPN": [5],
-        # 이동평균: 70일 근처 - 추세
-        "MA_RANGE": [20, 22, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80],
     },
 }
 
 COMMON_TUNING_CONFIG = {
-    # 이동평균: 20~200
-    # "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
+    # 이동평균: 50~100, 50일(약 2.5개월) ~ 100일(약 5개월)
+    "MA_RANGE": [50, 60, 70, 80, 90, 100],
     # SMA, EMA
     "MA_TYPE": ["SMA", "EMA"],
     # 교체: 0~3점 확인
     "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3],
-    # 손절: 8~10% 확인
-    "STOP_LOSS_PCT": [8, 9, 10],
+    # 손절: 10% 고정
+    "STOP_LOSS_PCT": [10],
     # RSI: 82~90 점검
     "OVERBOUGHT_SELL_THRESHOLD": [82, 84, 86, 88, 90],
     # 쿨다운: 1~3
     "COOLDOWN_DAYS": [1, 2, 3],
     # CAGR, SHARPE, SDR 중 선택
-    "OPTIMIZATION_METRIC": "SDR",  # CAGR, SHARPE, SDR 중 선택
+    "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
 }
 
 
