@@ -498,17 +498,6 @@
                 "12_month_earn_rate": 35.3512
             },
             {
-                "ticker": "0035T0",
-                "name": "PLUS 글로벌휴머노이드로봇액티브",
-                "listing_date": "2025-04-15",
-                "1_week_avg_volume": 92536,
-                "1_week_earn_rate": 1.0434,
-                "1_month_earn_rate": 19.3256,
-                "3_month_earn_rate": 33.0441,
-                "6_month_earn_rate": 63.1929,
-                "12_month_earn_rate": null
-            },
-            {
                 "ticker": "0078V0",
                 "name": "PLUS 미국로보택시",
                 "listing_date": "2025-07-22",
