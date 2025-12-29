@@ -734,55 +734,6 @@
         ]
     },
     {
-        "category": "🇰🇷 한국 - 📊 밸류업",
-        "tickers": [
-            {
-                "ticker": "496080",
-                "name": "TIGER 코리아밸류업",
-                "listing_date": "2024-11-04",
-                "1_week_avg_volume": 95647,
-                "1_week_earn_rate": 4.5053,
-                "1_month_earn_rate": 7.7189,
-                "3_month_earn_rate": 23.4887,
-                "6_month_earn_rate": 41.529,
-                "12_month_earn_rate": 85.5763
-            },
-            {
-                "ticker": "495230",
-                "name": "KoAct 코리아밸류업액티브",
-                "listing_date": "2024-11-04",
-                "1_week_avg_volume": 60351,
-                "1_week_earn_rate": 4.2648,
-                "1_month_earn_rate": 7.1867,
-                "3_month_earn_rate": 23.8005,
-                "6_month_earn_rate": 41.6449,
-                "12_month_earn_rate": 88.4985
-            },
-            {
-                "ticker": "495850",
-                "name": "KODEX 코리아밸류업",
-                "listing_date": "2024-11-04",
-                "1_week_avg_volume": 112946,
-                "1_week_earn_rate": 3.9866,
-                "1_month_earn_rate": 7.3178,
-                "3_month_earn_rate": 23.7117,
-                "6_month_earn_rate": 44.7145,
-                "12_month_earn_rate": 86.3303
-            },
-            {
-                "ticker": "495050",
-                "name": "RISE 코리아밸류업",
-                "listing_date": "2024-11-04",
-                "1_week_avg_volume": 304464,
-                "1_week_earn_rate": 3.8977,
-                "1_month_earn_rate": 7.2179,
-                "3_month_earn_rate": 22.7038,
-                "6_month_earn_rate": 41.4313,
-                "12_month_earn_rate": 85.252
-            }
-        ]
-    },
-    {
         "category": "🇰🇷 한국 - 🖥️ 테크",
         "tickers": [
             {
