@@ -6,7 +6,7 @@ import streamlit as st
 
 from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
-from utils.ui import load_account_recommendations, render_recommendation_table
+from utils.ui import format_relative_time, load_account_recommendations, render_recommendation_table
 
 _DATAFRAME_CSS = """
 <style>
@@ -70,13 +70,29 @@ def render_account_page(account_id: str) -> None:
 
     if updated_at:
         # [KOR] 실시간 오버레이가 적용된 경우 푸터 분리
+        # updated_at 형식: "YYYY-MM-DD HH:MM:SS, User" 또는 "YYYY-MM-DD HH:MM:SS"
+        # 사용자 요청 형식: "YYYY-MM-DD HH:MM:SS(Rel), User"
+
+        if "," in updated_at:
+            parts = updated_at.split(",", 1)
+            date_part = parts[0].strip()
+            user_part = parts[1].strip()
+            updated_at_rel = format_relative_time(date_part)
+            updated_at_display = f"{date_part}{updated_at_rel}, {user_part}"
+        else:
+            updated_at_rel = format_relative_time(updated_at)
+            updated_at_display = f"{updated_at}{updated_at_rel}"
+
         if country_code in ("kor", "kr"):
             from datetime import datetime
 
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            st.caption(f"추천 데이터 업데이트: {updated_at}  \n가격 데이터 업데이트: {now_str}, Naver")
+            now = datetime.now()
+            now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+            now_rel = format_relative_time(now)
+
+            st.caption(f"추천 데이터 업데이트: {updated_at_display}  \n가격 데이터 업데이트: {now_str}{now_rel}, Naver")
         else:
-            st.caption(f"데이터 업데이트: {updated_at}")
+            st.caption(f"데이터 업데이트: {updated_at_display}")
 
         with st.expander("설정", expanded=True):
             strategy_cfg = account_settings.get("strategy", {}) or {}

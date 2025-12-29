@@ -139,6 +139,64 @@ def _load_account_ui_settings(account_id: str) -> tuple[str, str]:
     return name, icon
 
 
+def format_relative_time(dt_input: datetime | pd.Timestamp | str | None) -> str:
+    """
+    Convert a datetime object (or string) to a relative time string (e.g. '(5분 전)').
+    Returns empty string if input is invalid or None.
+    """
+    if not dt_input:
+        return ""
+
+    try:
+        # 1. Parse/Normalize to datetime
+        if isinstance(dt_input, str):
+            # Handle "YYYY-MM-DD HH:MM:SS, User" format
+            if "," in dt_input:
+                dt_input = dt_input.split(",")[0].strip()
+
+            # Try parsing typical formats if it's a string
+            try:
+                dt = pd.to_datetime(dt_input).to_pydatetime()
+            except Exception:
+                return ""
+        elif isinstance(dt_input, pd.Timestamp):
+            dt = dt_input.to_pydatetime()
+        elif isinstance(dt_input, datetime):
+            dt = dt_input
+        else:
+            return ""
+
+        # 2. Handle Timezone
+        # If dt has no timezone, assume it's already in the target timezone (e.g. KST relative to now)
+        # or UTC. But here we usually deal with KST strings or aware datetimes.
+        # Let's compare with a naive 'now' if dt is naive, or aware 'now' if dt is aware.
+
+        now = datetime.now(dt.tzinfo)
+        diff = now - dt
+
+        seconds = diff.total_seconds()
+
+        # Future check (should not happen usually but valid)
+        if seconds < 0:
+            return ""
+
+        days = int(seconds // 86400)
+        hours = int((seconds % 86400) // 3600)
+        minutes = int((seconds % 3600) // 60)
+
+        if days > 0:
+            return f"({days}일 전)"
+        elif hours > 0:
+            return f"({hours}시간 전)"
+        elif minutes > 0:
+            return f"({minutes}분 전)"
+        else:
+            return "(방금 전)"
+
+    except Exception:
+        return ""
+
+
 def _resolve_row_colors(country_code: str) -> dict[str, str]:
     country_code = (country_code or "").strip().lower()
     # 기본값: DECISION_CONFIG의 background를 기반으로 구성
@@ -360,5 +418,6 @@ def render_recommendation_table(
 __all__ = [
     "load_account_recommendations",
     "render_recommendation_table",
+    "format_relative_time",
     "_resolve_row_colors",
 ]

@@ -141,10 +141,10 @@ def main() -> None:
 
     pages.append(
         page_cls(
-            "app_pages/cache_admin.py",
-            title="[Admin] 종목 캐시",
-            icon="🗃️",
-            url_path="cache",
+            "app_pages/admin_page.py",
+            title="[Admin] 관리자",
+            icon="⚙️",
+            url_path="admin",
         )
     )
 
