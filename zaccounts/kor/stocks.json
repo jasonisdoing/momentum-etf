@@ -759,17 +759,6 @@
                 "12_month_earn_rate": 120.6597
             },
             {
-                "ticker": "367760",
-                "name": "RISE 네트워크인프라",
-                "listing_date": "2020-10-29",
-                "1_week_avg_volume": 223337,
-                "1_week_earn_rate": 4.6258,
-                "1_month_earn_rate": 4.2864,
-                "3_month_earn_rate": 41.053,
-                "6_month_earn_rate": 84.6185,
-                "12_month_earn_rate": 141.033
-            },
-            {
                 "ticker": "444200",
                 "name": "SOL 코리아메가테크액티브",
                 "listing_date": "2022-10-18",
