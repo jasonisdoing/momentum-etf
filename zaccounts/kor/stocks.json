@@ -1119,17 +1119,6 @@
                 "12_month_earn_rate": 73.6376
             },
             {
-                "ticker": "462900",
-                "name": "KoAct 바이오헬스케어액티브",
-                "listing_date": "2023-08-03",
-                "1_week_avg_volume": 1664830,
-                "1_week_earn_rate": 1.644,
-                "1_month_earn_rate": 3.4121,
-                "3_month_earn_rate": 23.4887,
-                "6_month_earn_rate": 56.0754,
-                "12_month_earn_rate": 78.2776
-            },
-            {
                 "ticker": "0000Z0",
                 "name": "RISE 바이오TOP10액티브",
                 "listing_date": "2024-12-24",
