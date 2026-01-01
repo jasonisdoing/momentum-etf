@@ -637,28 +637,6 @@
         "category": "🇦🇺 호주 자원",
         "tickers": [
             {
-                "ticker": "QRE",
-                "name": "BetaShares Australian Resources Sector ETF",
-                "listing_date": "2010-12-10",
-                "1_week_avg_volume": 48752,
-                "1_week_earn_rate": 0.2275,
-                "1_month_earn_rate": 5.509,
-                "3_month_earn_rate": 10.401,
-                "6_month_earn_rate": 27.8665,
-                "12_month_earn_rate": 33.8078
-            },
-            {
-                "ticker": "OZR",
-                "name": "SPDR S&P/ASX 200 Resources ETF",
-                "listing_date": "2011-04-12",
-                "1_week_avg_volume": 14402,
-                "1_week_earn_rate": 0.182,
-                "1_month_earn_rate": 5.6553,
-                "3_month_earn_rate": 10.9496,
-                "6_month_earn_rate": 27.8474,
-                "12_month_earn_rate": 34.3297
-            },
-            {
                 "ticker": "MVR",
                 "name": "VanEck Australian Resources ETF",
                 "listing_date": "2013-10-14",
