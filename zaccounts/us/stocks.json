@@ -80,17 +80,6 @@
                 "12_month_earn_rate": 18.2109
             },
             {
-                "ticker": "MAGS",
-                "name": "Roundhill Magnificent Seven ETF",
-                "listing_date": "2023-04-11",
-                "1_week_avg_volume": 1316160,
-                "1_week_earn_rate": -1.7638,
-                "1_month_earn_rate": 0.3724,
-                "3_month_earn_rate": 2.635,
-                "6_month_earn_rate": 20.7438,
-                "12_month_earn_rate": 19.7501
-            },
-            {
                 "ticker": "IWM",
                 "name": "iShares Russell 2000 ETF",
                 "listing_date": "2000-05-26",
