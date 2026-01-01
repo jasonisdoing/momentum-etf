@@ -421,8 +421,8 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
             candidate_date = local_now.date()
 
             # [User Request] 장 개시 전이라도 오늘이 거래일이면 오늘 날짜를 반환 (0% 수익률 표시용)
-            # if local_now.time() < open_time:
-            #     candidate_date = candidate_date - timedelta(days=1)
+            if local_now.time() < open_time:
+                candidate_date = candidate_date - pd.Timedelta(days=1)
 
             end_dt = pd.Timestamp(candidate_date)
         except Exception:
