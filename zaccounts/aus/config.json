@@ -1,0 +1,29 @@
+{
+    "order": 20,
+    "icon": "🇦🇺",
+    "name": "호주 ETF",
+    "desc": "호주 ETF 포트폴리오 (AUD)",
+    "country_code": "au",
+    "currency": "aud",
+    "slack_channel": "C0A0X2LTS3X",
+    "initial_capital_krw": "100000000",
+    "show_hold_only": false,
+    "strategy": {
+        "MONTHS_RANGE": 12,
+        "BACKTESTED_DATE": "2026-01-01 20:48",
+        "CAGR": 32.002502,
+        "MDD": -15.947725,
+        "PORTFOLIO_TOPN": 6,
+        "MA_PERIOD": 180,
+        "MA_TYPE": "SMA",
+        "REPLACE_SCORE_THRESHOLD": 0,
+        "STOP_LOSS_PCT": 10,
+        "OVERBOUGHT_SELL_THRESHOLD": 85,
+        "COOLDOWN_DAYS": 1,
+        "OPTIMIZATION_METRIC": "CAGR"
+    },
+    "benchmark": {
+        "ticker": "IVV",
+        "name": "iShares S&P 500 ETF"
+    }
+}

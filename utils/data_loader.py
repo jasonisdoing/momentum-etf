@@ -298,7 +298,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Ti
     def _pmc(country_code: str) -> list[pd.Timestamp]:
         import pandas_market_calendars as mcal  # type: ignore
 
-        cal_code = {"kor": "XKRX", "us": "NYSE"}.get(country_code)
+        cal_code = {"kor": "XKRX", "us": "NYSE", "au": "XASX"}.get(country_code)
         if not cal_code:
             return []
         try:
@@ -343,7 +343,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Ti
 
     country_code = (country or "").strip().lower()
 
-    if country_code in ("kor", "us"):
+    if country_code in ("kor", "us", "au"):
         trading_days_ts = _pmc(country_code)
     else:
         logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
@@ -800,8 +800,8 @@ def _fetch_ohlcv_core(
 
     country_code = (country or "").strip().lower()
 
-    # 인덱스(^) 또는 미국 주식의 경우 yfinance 사용
-    if ticker.startswith("^") or country_code == "us":
+    # 인덱스(^) 또는 미국/호주 주식의 경우 yfinance 사용
+    if ticker.startswith("^") or country_code in ("us", "au"):
         if existing_df is not None and not existing_df.empty:
             fallback = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
             if not fallback.empty:
@@ -813,9 +813,14 @@ def _fetch_ohlcv_core(
             logger.error("yfinance 라이브러리가 설치되어 있지 않습니다. 'pip install yfinance'로 설치해주세요.")
             return None
 
+        # [AU] 호주 주식은 .AX 접미사가 필요함 (이미 있는 경우 제외)
+        download_ticker = ticker
+        if country_code == "au" and not download_ticker.endswith(".AX") and not download_ticker.startswith("^"):
+            download_ticker = f"{ticker}.AX"
+
         try:
             fetched = yf.download(
-                ticker,
+                download_ticker,
                 start=start_dt.strftime("%Y-%m-%d"),
                 end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
                 progress=False,

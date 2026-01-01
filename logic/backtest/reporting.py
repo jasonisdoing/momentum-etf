@@ -101,7 +101,6 @@ def print_backtest_summary(
     initial_capital_krw_value = float(summary.get("initial_capital_krw", initial_capital_krw))
     final_value_local = float(summary.get("final_value_local", summary.get("final_value", 0.0)))
     final_value_krw_value = float(summary.get("final_value_krw", final_value_local))
-    fx_rate_to_krw = float(summary.get("fx_rate_to_krw", 1.0) or 1.0)
 
     # 통화에 따라 적절한 포맷터 설정
     if currency == "USD":
@@ -149,9 +148,6 @@ def print_backtest_summary(
         "개별 종목 손절매": stop_loss_label,
         "매수/매도 쿨다운": f"{cooldown_days}일",
     }
-
-    if currency != "KRW" and fx_rate_to_krw != 1.0:
-        used_settings["적용 환율 (KRW)"] = f"1 {currency} ≈ {format_kr_money(fx_rate_to_krw)}"
 
     def _align_korean_money_for_weekly(text: str) -> str:
         if currency != "KRW" or not isinstance(text, str):

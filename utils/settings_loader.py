@@ -209,7 +209,13 @@ def get_account_precision(account_id: str) -> dict[str, Any]:
             "currency": "USD",
             "qty_precision": 0,
             "price_precision": 2,
-            "fx_rate_to_krw": 1.0,
+        }
+
+    if country_code in ("au", "aus"):
+        return {
+            "currency": "AUD",
+            "qty_precision": 0,
+            "price_precision": 2,
         }
 
     if country_code not in ("kor", "kr"):
@@ -219,7 +225,6 @@ def get_account_precision(account_id: str) -> dict[str, Any]:
         "currency": "KRW",
         "qty_precision": 0,
         "price_precision": 0,
-        "fx_rate_to_krw": 1.0,
     }
 
 

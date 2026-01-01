@@ -30,7 +30,6 @@ class InitialCapitalInfo:
 
     local: float
     krw: float
-    fx_rate_to_krw: float
     currency: str
 
 
@@ -44,7 +43,6 @@ class AccountBacktestResult:
     end_date: pd.Timestamp
     initial_capital: float
     initial_capital_krw: float
-    fx_rate_to_krw: float
     currency: str
     portfolio_topn: int
     holdings_limit: int
@@ -72,7 +70,6 @@ class AccountBacktestResult:
             "end_date": self.end_date.strftime("%Y-%m-%d"),
             "initial_capital": float(self.initial_capital),
             "initial_capital_krw": float(self.initial_capital_krw),
-            "fx_rate_to_krw": float(self.fx_rate_to_krw),
             "currency": self.currency,
             "portfolio_topn": self.portfolio_topn,
             "holdings_limit": self.holdings_limit,
@@ -315,7 +312,6 @@ def run_account_backtest(
         end_date=end_date,
         initial_capital=initial_capital_value,
         initial_capital_krw=capital_info.krw,
-        fx_rate_to_krw=capital_info.fx_rate_to_krw,
         currency=display_currency,
         portfolio_topn=portfolio_topn,
         account_settings=account_settings,
@@ -356,7 +352,6 @@ def run_account_backtest(
         end_date=end_date,
         initial_capital=initial_capital_value,
         initial_capital_krw=capital_info.krw,
-        fx_rate_to_krw=capital_info.fx_rate_to_krw,
         currency=display_currency,
         portfolio_topn=portfolio_topn,
         holdings_limit=holdings_limit,
@@ -470,7 +465,6 @@ def _resolve_initial_capital(
     return InitialCapitalInfo(
         local=float(local_capital),
         krw=float(krw_override),
-        fx_rate_to_krw=float(fx_rate),
         currency=currency,
     )
 
@@ -652,7 +646,6 @@ def _build_summary(
     end_date: pd.Timestamp,
     initial_capital: float,
     initial_capital_krw: float,
-    fx_rate_to_krw: float,
     currency: str,
     portfolio_topn: int,
     account_settings: Mapping[str, Any],
@@ -917,7 +910,7 @@ def _build_summary(
         "initial_capital_krw": initial_capital_krw,
         "final_value": final_value,
         "final_value_local": final_value,
-        "final_value_krw": final_value * fx_rate_to_krw,
+        "final_value_krw": final_value_krw,
         "period_return": float(final_row["cumulative_return_pct"]),
         "evaluation_return_pct": float(final_row["evaluation_return_pct"]),
         "held_count": int(final_row["held_count"]),
@@ -939,7 +932,6 @@ def _build_summary(
             for b in benchmarks_summary
             if b.get("monthly_returns") is not None and not b["monthly_returns"].empty
         },
-        "fx_rate_to_krw": fx_rate_to_krw,
         "currency": currency,
     }
 
