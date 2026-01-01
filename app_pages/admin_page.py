@@ -9,7 +9,6 @@ import pandas as pd
 import streamlit as st
 
 from utils.recommendation_storage import fetch_latest_recommendations
-from utils.settings_loader import list_available_accounts
 from utils.ui import format_relative_time
 
 
@@ -95,13 +94,24 @@ def render_admin_page() -> None:
         st.session_state["admin_last_account"] = None
 
     # 2. 계정 선택
-    accounts = list_available_accounts()
+    from utils.account_registry import load_account_configs
+
+    account_configs = load_account_configs()
+    accounts = [cfg["account_id"] for cfg in account_configs]
+
     if not accounts:
         st.error("사용 가능한 계정이 없습니다.")
         return
 
+    # 기본값: order가 가장 낮은(첫 번째) 계정
+    default_index = 0
+
     selected_account = st.selectbox(
-        "계정 선택", accounts, index=0, key="admin_account_selector", help="추천을 실행할 계정을 선택하세요."
+        "계정 선택",
+        accounts,
+        index=default_index,
+        key="admin_account_selector",
+        help="추천을 실행할 계정을 선택하세요.",
     )
 
     # 계정이 변경되었으면 콘솔 로그 초기화

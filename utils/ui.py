@@ -372,7 +372,7 @@ def render_recommendation_table(
     column_config_map: dict[str, st.column_config.BaseColumn] = {
         "#": st.column_config.TextColumn("#", width=30),
         "티커": st.column_config.TextColumn("티커", width=60),
-        "종목명": st.column_config.TextColumn("종목명", width="medium"),
+        "종목명": st.column_config.TextColumn("종목명", width=300),
         "카테고리": st.column_config.TextColumn("카테고리", width=165),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
