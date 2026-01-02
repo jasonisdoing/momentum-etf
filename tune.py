@@ -17,18 +17,16 @@ ACCOUNT_TUNING_CONFIG = {
     # 🇰🇷 국내 ETF: PORTFOLIO_TOPN 테스트 중
     "kor": {
         "PORTFOLIO_TOPN": [10],
-        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
-        "MA_RANGE": [25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120],
-        # "MA_RANGE": [50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100],
-        "MA_TYPE": ["SMA", "EMA", "HMA"],
-        # "MA_TYPE": ["EMA"],
+        "REPLACE_SCORE_THRESHOLD": [0],
+        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
+        # "MA_TYPE": ["SMA", "EMA", "HMA"],
+        "MA_TYPE": ["EMA"],
     },
     # 🇦🇺 호주 직투: 테스트 중
     "aus": {
         "PORTFOLIO_TOPN": [6],
-        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5],
-        "MA_RANGE": [25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120],
-        # "MA_RANGE": [50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100],
+        "REPLACE_SCORE_THRESHOLD": [0],
+        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
         # "MA_TYPE": ["SMA", "EMA", "HMA"],
         "MA_TYPE": ["SMA"],
     },
