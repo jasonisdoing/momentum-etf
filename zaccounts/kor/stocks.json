@@ -876,19 +876,8 @@
         ]
     },
     {
-        "category": "🇰🇷 한국 - 🚗 자동차",
+        "category": "🇰🇷 한국 - 🚗 자율주행",
         "tickers": [
-            {
-                "ticker": "466930",
-                "name": "SOL 자동차TOP3플러스",
-                "listing_date": "2023-10-05",
-                "1_week_avg_volume": 163721,
-                "1_week_earn_rate": 2.43,
-                "1_month_earn_rate": 13.9264,
-                "3_month_earn_rate": 27.307,
-                "6_month_earn_rate": 40.5093,
-                "12_month_earn_rate": 51.8699
-            },
             {
                 "ticker": "385520",
                 "name": "KODEX 자율주행액티브",
@@ -899,17 +888,6 @@
                 "3_month_earn_rate": 32.5015,
                 "6_month_earn_rate": 45.1367,
                 "12_month_earn_rate": 55.614
-            },
-            {
-                "ticker": "091180",
-                "name": "KODEX 자동차",
-                "listing_date": "2006-06-27",
-                "1_week_avg_volume": 537480,
-                "1_week_earn_rate": 1.6333,
-                "1_month_earn_rate": 10.8933,
-                "3_month_earn_rate": 29.3323,
-                "6_month_earn_rate": 34.6133,
-                "12_month_earn_rate": 43.8684
             }
         ]
     },
