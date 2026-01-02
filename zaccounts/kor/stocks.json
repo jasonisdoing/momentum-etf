@@ -205,17 +205,6 @@
                 "12_month_earn_rate": 165.2621
             },
             {
-                "ticker": "446690",
-                "name": "KODEX 아시아AI반도체exChina액티브",
-                "listing_date": "2023-02-01",
-                "1_week_avg_volume": 1573,
-                "1_week_earn_rate": 4.9737,
-                "1_month_earn_rate": 9.5996,
-                "3_month_earn_rate": 34.5975,
-                "6_month_earn_rate": 64.0671,
-                "12_month_earn_rate": 88.4155
-            },
-            {
                 "ticker": "446770",
                 "name": "ACE 글로벌반도체TOP4 Plus",
                 "listing_date": "2022-11-15",

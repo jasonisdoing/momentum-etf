@@ -5,7 +5,7 @@
     "desc": "호주 ETF 포트폴리오 (AUD)",
     "country_code": "au",
     "currency": "aud",
-    "slack_channel": "C0A0X2LTS3X",
+    "slack_channel": "C09FAU7SKA8",
     "initial_capital_krw": "100000000",
     "show_hold_only": false,
     "strategy": {
