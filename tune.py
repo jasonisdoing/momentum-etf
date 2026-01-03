@@ -18,7 +18,7 @@ ACCOUNT_TUNING_CONFIG = {
     "kor": {
         "PORTFOLIO_TOPN": [10],
         "REPLACE_SCORE_THRESHOLD": [0],
-        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
+        "MA_RANGE": [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
         # "MA_TYPE": ["SMA", "EMA", "HMA"],
         "MA_TYPE": ["EMA"],
     },
@@ -26,18 +26,18 @@ ACCOUNT_TUNING_CONFIG = {
     "aus": {
         "PORTFOLIO_TOPN": [6],
         "REPLACE_SCORE_THRESHOLD": [0],
-        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
+        "MA_RANGE": [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
         # "MA_TYPE": ["SMA", "EMA", "HMA"],
         "MA_TYPE": ["SMA"],
     },
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
         "PORTFOLIO_TOPN": [5],
-        "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3, 4, 5, 6, 7],
-        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
+        "REPLACE_SCORE_THRESHOLD": [0],
+        "MA_RANGE": [30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
         # "MA_RANGE": [50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100],
-        "MA_TYPE": ["SMA", "EMA", "HMA"],
-        # "MA_TYPE": ["HMA"],
+        # "MA_TYPE": ["SMA", "EMA", "HMA"],
+        "MA_TYPE": ["HMA"],
     },
 }
 
@@ -49,8 +49,8 @@ COMMON_TUNING_CONFIG = {
     "STOP_LOSS_PCT": [5, 7, 9, 11, 13, 15],
     # 2. RSI: 85~95
     "OVERBOUGHT_SELL_THRESHOLD": [85, 87, 89, 91, 93],
-    # 3. 쿨다운: 1
-    "COOLDOWN_DAYS": [1],
+    # 3. 쿨다운: 0
+    "COOLDOWN_DAYS": [0],
     # 4. 목표: 수익률 극대화
     "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
 }
