@@ -43,6 +43,9 @@ def _build_home_page(accounts: list[dict[str, Any]]):
     def _render_home_page() -> None:
         for account in accounts:
             account_id = account["account_id"]
+            if not account.get("settings", {}).get("show_hold", True):
+                continue
+
             account_name = account.get("name") or account_id.upper()
             df, updated_at, country_code = load_account_recommendations(account_id)
 
