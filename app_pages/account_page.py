@@ -95,14 +95,18 @@ def render_account_page(account_id: str) -> None:
             st.caption(f"데이터 업데이트: {updated_at_display}")
 
         with st.expander("설정", expanded=True):
+            # ...
             strategy_cfg = account_settings.get("strategy", {}) or {}
-            expected_cagr = None
+            cagr = None
+            mdd = None
             backtested_date = None
             strategy_tuning: dict[str, Any] = {}
             if isinstance(strategy_cfg, dict):
-                expected_cagr = strategy_cfg.get("EXPECTED_CAGR")
+                cagr = strategy_cfg.get("CAGR")
+                mdd = strategy_cfg.get("MDD")
                 backtested_date = strategy_cfg.get("BACKTESTED_DATE")
                 strategy_tuning = resolve_strategy_params(strategy_cfg)
+
             if strategy_tuning:
                 params_to_show = {
                     "MA": strategy_tuning.get("MA_PERIOD"),
@@ -140,28 +144,25 @@ def render_account_page(account_id: str) -> None:
 
                 hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
                 current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-                # exits = int(df[df["상태"].isin(sell_states)].shape[0])
-                # buys = int(df[df["상태"].isin(buy_states)].shape[0])
-                # future_holdings = current_holdings - exits + buys
                 target_topn = strategy_tuning.get("PORTFOLIO_TOPN") if isinstance(strategy_tuning, dict) else None
                 if target_topn:
                     caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
             except Exception:
                 pass
 
+            # 성과 지표 (CAGR, MDD) 및 백테스트 일자 추가
+            if cagr is not None:
+                caption_parts.append(f"**CAGR: {float(cagr):.2f}%**")
+            if mdd is not None:
+                caption_parts.append(f"**MDD: {float(mdd):.2f}%**")
+            if backtested_date:
+                caption_parts.append(f"**백테스트: {backtested_date}**")
+
             caption_text = ", ".join(caption_parts)
             if caption_text:
                 st.caption(caption_text)
             else:
                 st.caption("설정 정보를 찾을 수 없습니다.")
-
-            if expected_cagr is not None:
-                try:
-                    expected_val = float(expected_cagr)
-                except (TypeError, ValueError):
-                    expected_val = None
-                expected_html = f"<span style='color:#d32f2f;'>예상 CAGR (연간 복리 성장률): {expected_val:+.2f}%, 백테스트 일자: {backtested_date}</span>"
-                st.markdown(f"<small>{expected_html}</small>", unsafe_allow_html=True)
     else:
         # updated_at이 없는 경우에 대한 폴백
         st.caption("데이터를 찾을 수 없습니다.")
