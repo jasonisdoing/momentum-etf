@@ -63,7 +63,6 @@ class StrategyEvaluator:
         ma_period: int,
         score: float,
         rsi_score: float,
-        is_core_holding: bool,
         stop_loss_threshold: float | None,
         rsi_sell_threshold: float,
         sell_cooldown_info: dict | None,
@@ -78,12 +77,8 @@ class StrategyEvaluator:
         phrase = ""
         new_state = current_state
 
-        if current_state not in ("HOLD", "HOLD_CORE"):
+        if current_state not in ("HOLD",):
             return current_state, phrase
-
-        # 1. 핵심 보유 종목은 절대 매도하지 않음
-        if is_core_holding:
-            return "HOLD_CORE", DECISION_MESSAGES.get("HOLD_CORE", "🔒 핵심 보유")
 
         hold_ret = (price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
 

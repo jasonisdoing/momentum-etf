@@ -36,24 +36,37 @@ MARKET_SCHEDULES = {
     "kor": {
         "open": time(9, 0),
         "close": time(16, 0),
-        "interval_minutes": 180,
+        "open_offset_minutes": 30,
+        "close_offset_minutes": 30,
         "timezone": "Asia/Seoul",
     },
     "us": {
         "open": time(9, 30),
         "close": time(16, 0),
-        "interval_minutes": 180,
+        "open_offset_minutes": 30,
+        "close_offset_minutes": 30,
         "timezone": "America/New_York",
+    },
+    "au": {
+        "open": time(10, 0),
+        "close": time(16, 0),
+        "open_offset_minutes": 30,
+        "close_offset_minutes": 30,
+        "timezone": "Australia/Sydney",
     },
 }
 
 # 백테스트 체결 슬리피지 가정치 (%)
 BACKTEST_SLIPPAGE = {
     "kor": {
-        "buy_pct": 0.25,
-        "sell_pct": 0.25,
+        "buy_pct": 0.15,
+        "sell_pct": 0.15,
     },
     "us": {
+        "buy_pct": 0.15,
+        "sell_pct": 0.15,
+    },
+    "au": {
         "buy_pct": 0.25,
         "sell_pct": 0.25,
     },
@@ -65,4 +78,4 @@ BACKTEST_SLIPPAGE = {
 # Top1은 과거 데이터에 과최적화되므로 실전 성능이 불안정함.
 # Top5 평균·최빈값 방식은 백테스트 성능이 약간 낮아져도 실전에서는 훨씬 안정적임.
 # 실전용 전략에서는 TUNING_ENSEMBLE_SIZE = 5를 유지해야 장기 성과가 일정하게 나오므로 변경 금지.
-TUNING_ENSEMBLE_SIZE = 5
+TUNING_ENSEMBLE_SIZE = 1

@@ -298,7 +298,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Ti
     def _pmc(country_code: str) -> list[pd.Timestamp]:
         import pandas_market_calendars as mcal  # type: ignore
 
-        cal_code = {"kor": "XKRX", "us": "NYSE"}.get(country_code)
+        cal_code = {"kor": "XKRX", "us": "NYSE", "au": "XASX"}.get(country_code)
         if not cal_code:
             return []
         try:
@@ -343,7 +343,7 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Ti
 
     country_code = (country or "").strip().lower()
 
-    if country_code in ("kor", "us"):
+    if country_code in ("kor", "us", "au"):
         trading_days_ts = _pmc(country_code)
     else:
         logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
@@ -421,8 +421,8 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
             candidate_date = local_now.date()
 
             # [User Request] 장 개시 전이라도 오늘이 거래일이면 오늘 날짜를 반환 (0% 수익률 표시용)
-            # if local_now.time() < open_time:
-            #     candidate_date = candidate_date - timedelta(days=1)
+            if local_now.time() < open_time:
+                candidate_date = candidate_date - pd.Timedelta(days=1)
 
             end_dt = pd.Timestamp(candidate_date)
         except Exception:
@@ -800,8 +800,8 @@ def _fetch_ohlcv_core(
 
     country_code = (country or "").strip().lower()
 
-    # 인덱스(^) 또는 미국 주식의 경우 yfinance 사용
-    if ticker.startswith("^") or country_code == "us":
+    # 인덱스(^) 또는 미국/호주 주식의 경우 yfinance 사용
+    if ticker.startswith("^") or country_code in ("us", "au"):
         if existing_df is not None and not existing_df.empty:
             fallback = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
             if not fallback.empty:
@@ -813,9 +813,14 @@ def _fetch_ohlcv_core(
             logger.error("yfinance 라이브러리가 설치되어 있지 않습니다. 'pip install yfinance'로 설치해주세요.")
             return None
 
+        # [AU] 호주 주식은 .AX 접미사가 필요함 (이미 있는 경우 제외)
+        download_ticker = ticker
+        if country_code == "au" and not download_ticker.endswith(".AX") and not download_ticker.startswith("^"):
+            download_ticker = f"{ticker}.AX"
+
         try:
             fetched = yf.download(
-                ticker,
+                download_ticker,
                 start=start_dt.strftime("%Y-%m-%d"),
                 end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
                 progress=False,
@@ -1049,8 +1054,8 @@ def fetch_ohlcv_for_tickers(
             cache_start = cached_df.index.min().normalize()
             cache_end = cached_df.index.max().normalize()
 
-            # 캐시에 오늘 날짜가 없고 실시간 데이터가 있는 경우
-            if is_today and cache_end < required_end and tkr in realtime_data:
+            # [User Request] 오늘 날짜이고 실시간 데이터가 있는 경우 (캐시에 이미 있어도 덮어씌움)
+            if is_today and tkr in realtime_data:
                 # 캐시 데이터에 오늘 날짜의 실시간 데이터를 추가
                 rt_info = realtime_data[tkr]
                 rt_price = rt_info.get("nowVal", 0)
@@ -1246,6 +1251,7 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
 
         nav_raw = item.get("nav")
         price_raw = item.get("nowVal")
+        change_rate_raw = item.get("changeRate")  # 일간 등락률 (%)
 
         # 추가 정보 파싱 (Open, High, Low, Vol)
         open_raw = item.get("openVal")
@@ -1253,22 +1259,43 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
         low_raw = item.get("lowVal")
         vol_raw = item.get("quant")
 
+        # 종목명, 수익률 등
+        name_raw = item.get("itemname")
+        return_3m_raw = item.get("threeMonthEarnRate")
+
         try:
             nav_value = float(str(nav_raw).replace(",", ""))
             price_value = float(str(price_raw).replace(",", ""))
         except (TypeError, ValueError):
             continue
 
-        if nav_value <= 0 or price_value <= 0:
-            continue
-
-        deviation = ((price_value / nav_value) - 1.0) * 100.0
+        # NAV가 0인 경우 괴리율 계산 불가 처리
+        if nav_value <= 0:
+            deviation = None
+        else:
+            deviation = ((price_value / nav_value) - 1.0) * 100.0
 
         entry = {
             "nav": nav_value,
             "nowVal": price_value,
             "deviation": deviation,
         }
+
+        # 등락률 파싱
+        try:
+            entry["changeRate"] = float(str(change_rate_raw).replace(",", ""))
+        except (TypeError, ValueError):
+            pass
+
+        # 종목명
+        if name_raw:
+            entry["itemname"] = str(name_raw).strip()
+
+        # 3개월 수익률
+        try:
+            entry["threeMonthEarnRate"] = float(str(return_3m_raw).replace(",", ""))
+        except (TypeError, ValueError):
+            pass
 
         # Optional fields parsing
         try:

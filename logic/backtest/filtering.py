@@ -215,8 +215,8 @@ def filter_category_duplicates(
             if ticker:
                 replacement_tickers.add(ticker)
 
-        # HOLD, HOLD_CORE, BUY 상태의 카테고리 수집 (매도 예정 종목 제외)
-        if not should_exclude_from_category_count(state) and state in {"HOLD", "HOLD_CORE", "BUY", "BUY_REPLACE"}:
+        # HOLD, BUY 상태의 카테고리 수집 (매도 예정 종목 제외)
+        if not should_exclude_from_category_count(state) and state in {"HOLD", "BUY", "BUY_REPLACE"}:
             if category_key and not is_category_exception(category_key):
                 held_categories.add(category_key)
 
@@ -231,10 +231,9 @@ def filter_category_duplicates(
             filtered_results.append(item)
             continue
 
-        # HOLD, HOLD_CORE, SELL 상태는 무조건 포함 (BUY는 제외하여 카테고리 체크 수행)
+        # HOLD, SELL 상태는 무조건 포함 (BUY는 제외하여 카테고리 체크 수행)
         if state in {
             "HOLD",
-            "HOLD_CORE",
             "BUY_REPLACE",
             "SELL_TREND",
             "SELL_REPLACE",

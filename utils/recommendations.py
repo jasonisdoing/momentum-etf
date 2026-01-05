@@ -192,9 +192,11 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
 
 def _state_style(value: Any) -> str:
     text = str(value).upper()
-    if text == "BUY":
+    if text in ("BUY", "BUY_REPLACE"):
         return "color:#d32f2f;font-weight:600"
     if text == "WAIT":
+        return "color:#1565c0;font-weight:600"
+    if text in ("SELL", "SELL_REPLACE", "SELL_TREND", "SELL_RSI", "SELL_STOP", "CUT_STOPLOSS"):
         return "color:#1565c0;font-weight:600"
     return ""
 

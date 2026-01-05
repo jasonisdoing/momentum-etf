@@ -30,7 +30,6 @@ __all__ = [
     "is_category_exception",
     "should_exclude_from_category_count",
     "track_sell_rsi_categories",
-    "validate_core_holdings",
     "validate_portfolio_topn",
     "calculate_consecutive_days",
     "get_buy_signal_streak",
@@ -58,7 +57,6 @@ from .portfolio import (
     is_category_exception,
     should_exclude_from_category_count,
     track_sell_rsi_categories,
-    validate_core_holdings,
     validate_portfolio_topn,
 )
 from .signals import (

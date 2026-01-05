@@ -277,19 +277,20 @@ def _decision_to_state(decision: str, shares: float) -> str:
     """decision 값을 state로 변환합니다."""
     decision_upper = str(decision).upper()
 
-    if decision_upper in ("BUY", "BUY_REPLACE"):
-        return "BUY"
-    elif decision_upper in (
+    # [User Request] 교체매수/매도는 별도 상태로 표시
+    if decision_upper in (
+        "BUY",
         "SELL",
+        "BUY_REPLACE",
+        "SELL_REPLACE",
         "SELL_TREND",
         "SELL_RSI",
-        "SELL_REPLACE",
         "SELL_STOP",
         "CUT_STOPLOSS",
         "SELL_TRAILING",
         "SELL_MOMENTUM",
     ):
-        return "SELL"
+        return decision_upper
     elif shares and shares > 0:
         return "HOLD"
     else:

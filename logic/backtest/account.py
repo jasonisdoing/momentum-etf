@@ -30,7 +30,6 @@ class InitialCapitalInfo:
 
     local: float
     krw: float
-    fx_rate_to_krw: float
     currency: str
 
 
@@ -44,7 +43,6 @@ class AccountBacktestResult:
     end_date: pd.Timestamp
     initial_capital: float
     initial_capital_krw: float
-    fx_rate_to_krw: float
     currency: str
     portfolio_topn: int
     holdings_limit: int
@@ -72,7 +70,6 @@ class AccountBacktestResult:
             "end_date": self.end_date.strftime("%Y-%m-%d"),
             "initial_capital": float(self.initial_capital),
             "initial_capital_krw": float(self.initial_capital_krw),
-            "fx_rate_to_krw": float(self.fx_rate_to_krw),
             "currency": self.currency,
             "portfolio_topn": self.portfolio_topn,
             "holdings_limit": self.holdings_limit,
@@ -163,14 +160,12 @@ def run_account_backtest(
             portfolio_topn=strategy_override.portfolio_topn,
             replace_threshold=strategy_override.replace_threshold,
             ma_type=strategy_override.ma_type,
-            core_holdings=strategy_override.core_holdings,
             stop_loss_pct=strategy_override.stop_loss_pct,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
-        strategy_settings["CORE_HOLDINGS"] = strategy_rules.core_holdings
         if strategy_rules.stop_loss_pct is not None:
             strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
 
@@ -317,11 +312,11 @@ def run_account_backtest(
         end_date=end_date,
         initial_capital=initial_capital_value,
         initial_capital_krw=capital_info.krw,
-        fx_rate_to_krw=capital_info.fx_rate_to_krw,
         currency=display_currency,
         portfolio_topn=portfolio_topn,
         account_settings=account_settings,
         prefetched_data=prefetched_data,
+        ticker_timeseries=ticker_timeseries,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries, start_date)
@@ -357,7 +352,6 @@ def run_account_backtest(
         end_date=end_date,
         initial_capital=initial_capital_value,
         initial_capital_krw=capital_info.krw,
-        fx_rate_to_krw=capital_info.fx_rate_to_krw,
         currency=display_currency,
         portfolio_topn=portfolio_topn,
         holdings_limit=holdings_limit,
@@ -471,7 +465,6 @@ def _resolve_initial_capital(
     return InitialCapitalInfo(
         local=float(local_capital),
         krw=float(krw_override),
-        fx_rate_to_krw=float(fx_rate),
         currency=currency,
     )
 
@@ -531,7 +524,6 @@ def _build_backtest_kwargs(
         "stop_loss_pct": stop_loss_threshold,
         "rsi_sell_threshold": rsi_sell_threshold,
         "cooldown_days": cooldown_days,
-        "core_holdings": strategy_rules.core_holdings,
         "quiet": quiet,
     }
 
@@ -654,11 +646,11 @@ def _build_summary(
     end_date: pd.Timestamp,
     initial_capital: float,
     initial_capital_krw: float,
-    fx_rate_to_krw: float,
     currency: str,
     portfolio_topn: int,
     account_settings: Mapping[str, Any],
     prefetched_data: Mapping[str, pd.DataFrame] | None = None,
+    ticker_timeseries: dict[str, pd.DataFrame] | None = None,
 ) -> tuple[
     dict[str, Any],
     pd.Series,
@@ -894,11 +886,21 @@ def _build_summary(
                         "cumulative_return_pct": float(weekly_cum_pct.loc[dt]),
                     }
                 )
+
         monthly_returns = pv_series_with_start.resample("ME").last().pct_change().dropna()
         if initial_capital_local > 0:
             eom_pv = pv_series.resample("ME").last().dropna()
             monthly_cum_returns = (eom_pv / initial_capital_local - 1).ffill()
         yearly_returns = pv_series_with_start.resample("YE").last().pct_change().dropna()
+
+    # Turnover calculation (전체 거래 횟수) - if 블록 밖에서 항상 실행
+    total_turnover = 0
+    if ticker_timeseries:
+        trade_decisions = {"BUY", "BUY_REPLACE", "SELL_TREND", "SELL_RSI", "CUT_STOPLOSS", "SELL_REPLACE"}
+        for t_data in ticker_timeseries.values():
+            if isinstance(t_data, pd.DataFrame) and "decision" in t_data.columns:
+                trade_count = t_data["decision"].isin(trade_decisions).sum()
+                total_turnover += int(trade_count)
 
     summary = {
         "start_date": start_date.strftime("%Y-%m-%d"),
@@ -908,10 +910,11 @@ def _build_summary(
         "initial_capital_krw": initial_capital_krw,
         "final_value": final_value,
         "final_value_local": final_value,
-        "final_value_krw": final_value * fx_rate_to_krw,
+        "final_value_krw": final_value_krw,
         "period_return": float(final_row["cumulative_return_pct"]),
         "evaluation_return_pct": float(final_row["evaluation_return_pct"]),
         "held_count": int(final_row["held_count"]),
+        "turnover": total_turnover,
         "cagr": cagr * 100,
         "mdd": mdd_pct,
         "sharpe": sharpe_ratio,
@@ -929,7 +932,6 @@ def _build_summary(
             for b in benchmarks_summary
             if b.get("monthly_returns") is not None and not b["monthly_returns"].empty
         },
-        "fx_rate_to_krw": fx_rate_to_krw,
         "currency": currency,
     }
 

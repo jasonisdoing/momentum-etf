@@ -7,24 +7,23 @@
     "currency": "usd",
     "slack_channel": "C0A0X2LTS3X",
     "initial_capital_krw": "100000000",
-    "show_hold_only": false,
+    "show_hold": false,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2025-12-22 21:26",
-        "CAGR": 61.115205,
-        "MDD": -19.874363,
-        "OPTIMIZATION_METRIC": "CAGR",
-        "PORTFOLIO_TOPN": 8,
-        "MA_PERIOD": 61,
-        "MA_TYPE": "SMA",
-        "REPLACE_SCORE_THRESHOLD": 3,
-        "STOP_LOSS_PCT": 10,
-        "OVERBOUGHT_SELL_THRESHOLD": 86,
-        "COOLDOWN_DAYS": 2,
-        "CORE_HOLDINGS": []
+        "BACKTESTED_DATE": "2026-01-01 23:59",
+        "CAGR": 86.619315,
+        "MDD": -19.324986,
+        "PORTFOLIO_TOPN": 5,
+        "MA_PERIOD": 130,
+        "MA_TYPE": "HMA",
+        "REPLACE_SCORE_THRESHOLD": 0,
+        "STOP_LOSS_PCT": 9,
+        "OVERBOUGHT_SELL_THRESHOLD": 100,
+        "COOLDOWN_DAYS": 0,
+        "OPTIMIZATION_METRIC": "CAGR"
     },
     "benchmark": {
-        "ticker": "SPY",
+        "ticker": "VOO",
         "name": "S&P 500"
     }
 }
