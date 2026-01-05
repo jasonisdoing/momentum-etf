@@ -6,7 +6,7 @@ import streamlit as st
 
 from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
-from utils.ui import load_account_recommendations, render_recommendation_table
+from utils.ui import format_relative_time, load_account_recommendations, render_recommendation_table
 
 _DATAFRAME_CSS = """
 <style>
@@ -69,17 +69,44 @@ def render_account_page(account_id: str) -> None:
     render_recommendation_table(df, country_code=country_code)
 
     if updated_at:
-        st.caption(f"데이터 업데이트: {updated_at}")
+        # [KOR] 실시간 오버레이가 적용된 경우 푸터 분리
+        # updated_at 형식: "YYYY-MM-DD HH:MM:SS, User" 또는 "YYYY-MM-DD HH:MM:SS"
+        # 사용자 요청 형식: "YYYY-MM-DD HH:MM:SS(Rel), User"
+
+        if "," in updated_at:
+            parts = updated_at.split(",", 1)
+            date_part = parts[0].strip()
+            user_part = parts[1].strip()
+            updated_at_rel = format_relative_time(date_part)
+            updated_at_display = f"{date_part}{updated_at_rel}, {user_part}"
+        else:
+            updated_at_rel = format_relative_time(updated_at)
+            updated_at_display = f"{updated_at}{updated_at_rel}"
+
+        if country_code in ("kor", "kr"):
+            from datetime import datetime
+
+            now = datetime.now()
+            now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+            now_rel = format_relative_time(now)
+
+            st.caption(f"추천 데이터 업데이트: {updated_at_display}  \n가격 데이터 업데이트: {now_str}{now_rel}, Naver")
+        else:
+            st.caption(f"데이터 업데이트: {updated_at_display}")
 
         with st.expander("설정", expanded=True):
+            # ...
             strategy_cfg = account_settings.get("strategy", {}) or {}
-            expected_cagr = None
+            cagr = None
+            mdd = None
             backtested_date = None
             strategy_tuning: dict[str, Any] = {}
             if isinstance(strategy_cfg, dict):
-                expected_cagr = strategy_cfg.get("EXPECTED_CAGR")
+                cagr = strategy_cfg.get("CAGR")
+                mdd = strategy_cfg.get("MDD")
                 backtested_date = strategy_cfg.get("BACKTESTED_DATE")
                 strategy_tuning = resolve_strategy_params(strategy_cfg)
+
             if strategy_tuning:
                 params_to_show = {
                     "MA": strategy_tuning.get("MA_PERIOD"),
@@ -117,28 +144,25 @@ def render_account_page(account_id: str) -> None:
 
                 hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
                 current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-                # exits = int(df[df["상태"].isin(sell_states)].shape[0])
-                # buys = int(df[df["상태"].isin(buy_states)].shape[0])
-                # future_holdings = current_holdings - exits + buys
                 target_topn = strategy_tuning.get("PORTFOLIO_TOPN") if isinstance(strategy_tuning, dict) else None
                 if target_topn:
                     caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
             except Exception:
                 pass
 
+            # 성과 지표 (CAGR, MDD) 및 백테스트 일자 추가
+            if cagr is not None:
+                caption_parts.append(f"**CAGR: {float(cagr):.2f}%**")
+            if mdd is not None:
+                caption_parts.append(f"**MDD: {float(mdd):.2f}%**")
+            if backtested_date:
+                caption_parts.append(f"**백테스트: {backtested_date}**")
+
             caption_text = ", ".join(caption_parts)
             if caption_text:
                 st.caption(caption_text)
             else:
                 st.caption("설정 정보를 찾을 수 없습니다.")
-
-            if expected_cagr is not None:
-                try:
-                    expected_val = float(expected_cagr)
-                except (TypeError, ValueError):
-                    expected_val = None
-                expected_html = f"<span style='color:#d32f2f;'>예상 CAGR (연간 복리 성장률): {expected_val:+.2f}%, 백테스트 일자: {backtested_date}</span>"
-                st.markdown(f"<small>{expected_html}</small>", unsafe_allow_html=True)
     else:
         # updated_at이 없는 경우에 대한 폴백
         st.caption("데이터를 찾을 수 없습니다.")

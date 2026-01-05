@@ -8,7 +8,7 @@ from datetime import datetime
 
 # --- 설정 ---
 # 최소 등락률 (%)
-MIN_CHANGE_PCT = 2.0
+MIN_CHANGE_PCT = 3.0
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
 EXCLUDE_KEYWORDS = [
     "Income",
@@ -22,6 +22,15 @@ EXCLUDE_KEYWORDS = [
     "Ether",
     "Xrp",
     "Solana",
+    "Miners",
+    "Platinum",
+    "Silver",
+    "Gold",
+    "Cannabis",
+    "Copper",
+    "Uranium",
+    "XRP",
+    "Staking",
 ]
 # 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
 INCLUDE_KEYWORDS = []

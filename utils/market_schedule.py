@@ -38,27 +38,27 @@ def generate_market_cron_expressions(country_code: str) -> tuple[str, ...]:
     if not schedule:
         raise ValueError(f"Unknown country: {country_code}")
 
-    interval = int(schedule.get("interval_minutes", 10) or 10)
-    if interval <= 0:
-        raise ValueError("interval_minutes must be positive")
+    open_time = schedule["open"]
+    close_time = schedule["close"]
+    open_offset = int(schedule.get("open_offset_minutes", 0))
+    close_offset = int(schedule.get("close_offset_minutes", 0))
 
-    start_time = schedule["open"]
-    end_time = schedule["close"]
-
-    start_dt = datetime.combine(date(2000, 1, 1), start_time)
-    end_dt = datetime.combine(date(2000, 1, 1), end_time)
+    start_dt = datetime.combine(date(2000, 1, 1), open_time)
+    end_dt = datetime.combine(date(2000, 1, 1), close_time)
     if end_dt < start_dt:
         raise ValueError("Market close time must be after open time")
 
-    slots: dict[int, list[int]] = {}
-    current = start_dt
-    while current <= end_dt:
-        slots.setdefault(current.hour, []).append(current.minute)
-        current += timedelta(minutes=interval)
+    # [User Request] 장 개시 N분 후와 장 종료 M분 전 한번씩 실행
+    # 1. Open + Offset
+    time1 = start_dt + timedelta(minutes=open_offset)
+    # 2. Close - Offset
+    time2 = end_dt - timedelta(minutes=close_offset)
+
+    # 중복 제거 및 시간 순서 정렬
+    target_times = sorted({time1, time2})
 
     expressions: list[str] = []
-    for hour in sorted(slots.keys()):
-        minutes = ",".join(str(minute) for minute in sorted(slots[hour]))
-        expressions.append(f"{minutes} {hour} * * 1-5")
+    for t in target_times:
+        expressions.append(f"{t.minute} {t.hour} * * 1-5")
 
     return tuple(expressions)

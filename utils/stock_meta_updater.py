@@ -138,6 +138,8 @@ def update_account_metadata(account_id: str):
 
         if country_code == "kor":
             yfinance_ticker = f"{ticker}.KS"
+        elif country_code == "au" and not ticker.endswith(".AX"):
+            yfinance_ticker = f"{ticker}.AX"
         else:
             yfinance_ticker = ticker
 
@@ -175,10 +177,10 @@ def update_account_metadata(account_id: str):
                     except Exception as e:
                         logger.warning(f"[{account_norm.upper()}/{ticker}] pykrx 종목명 조회 실패: {e}")
 
-            elif country_code == "us":
-                # 미국 주식은 yfinance를 통해 메타데이터를 가져옵니다.
+            elif country_code in ("us", "au"):
+                # 미국/호주 주식은 yfinance를 통해 메타데이터를 가져옵니다.
                 try:
-                    t = yf.Ticker(ticker)
+                    t = yf.Ticker(yfinance_ticker)
 
                     # [UPDATE] 종목명이 없는 경우 자동 채우기
                     if not stock.get("name"):

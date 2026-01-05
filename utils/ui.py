@@ -43,6 +43,41 @@ def load_account_recommendations(
         return None, message, country_code
 
     rows = snapshot.get("recommendations") or []
+
+    # [KOR] 실시간 데이터 오버레이 (NAVER API)
+    if country_code in ("kor", "kr"):
+        try:
+            from utils.data_loader import fetch_naver_etf_inav_snapshot
+
+            tickers = [r.get("ticker") for r in rows if r.get("ticker")]
+            realtime_data = fetch_naver_etf_inav_snapshot(tickers)
+
+            if realtime_data:
+                for row in rows:
+                    ticker = str(row.get("ticker") or "").strip().upper()
+                    if ticker in realtime_data:
+                        rt = realtime_data[ticker]
+                        # 1. 현재가
+                        if "nowVal" in rt:
+                            row["price"] = rt["nowVal"]
+                        # 2. 일간 등락률
+                        if "changeRate" in rt:
+                            row["daily_pct"] = rt["changeRate"]
+                        # 3. NAV
+                        if "nav" in rt:
+                            row["nav_price"] = rt["nav"]
+                        # 4. 괴리율
+                        if "deviation" in rt:
+                            row["price_deviation"] = rt["deviation"]
+                        # 5. 종목명 (선택)
+                        if "itemname" in rt:
+                            row["name"] = rt["itemname"]
+                        # 6. 3개월 수익률 (선택)
+                        if "threeMonthEarnRate" in rt:
+                            row["return_3m"] = rt["threeMonthEarnRate"]
+        except Exception as e:
+            logger.warning(f"실시간 데이터 오버레이 실패: {e}")
+
     try:
         df = recommendations_to_dataframe(country_code, rows)
     except Exception as exc:
@@ -102,6 +137,64 @@ def _load_account_ui_settings(account_id: str) -> tuple[str, str]:
         name = "Momentum ETF"
         icon = ""
     return name, icon
+
+
+def format_relative_time(dt_input: datetime | pd.Timestamp | str | None) -> str:
+    """
+    Convert a datetime object (or string) to a relative time string (e.g. '(5분 전)').
+    Returns empty string if input is invalid or None.
+    """
+    if not dt_input:
+        return ""
+
+    try:
+        # 1. Parse/Normalize to datetime
+        if isinstance(dt_input, str):
+            # Handle "YYYY-MM-DD HH:MM:SS, User" format
+            if "," in dt_input:
+                dt_input = dt_input.split(",")[0].strip()
+
+            # Try parsing typical formats if it's a string
+            try:
+                dt = pd.to_datetime(dt_input).to_pydatetime()
+            except Exception:
+                return ""
+        elif isinstance(dt_input, pd.Timestamp):
+            dt = dt_input.to_pydatetime()
+        elif isinstance(dt_input, datetime):
+            dt = dt_input
+        else:
+            return ""
+
+        # 2. Handle Timezone
+        # If dt has no timezone, assume it's already in the target timezone (e.g. KST relative to now)
+        # or UTC. But here we usually deal with KST strings or aware datetimes.
+        # Let's compare with a naive 'now' if dt is naive, or aware 'now' if dt is aware.
+
+        now = datetime.now(dt.tzinfo)
+        diff = now - dt
+
+        seconds = diff.total_seconds()
+
+        # Future check (should not happen usually but valid)
+        if seconds < 0:
+            return ""
+
+        days = int(seconds // 86400)
+        hours = int((seconds % 86400) // 3600)
+        minutes = int((seconds % 3600) // 60)
+
+        if days > 0:
+            return f"({days}일 전)"
+        elif hours > 0:
+            return f"({hours}시간 전)"
+        elif minutes > 0:
+            return f"({minutes}분 전)"
+        else:
+            return "(방금 전)"
+
+    except Exception:
+        return ""
 
 
 def _resolve_row_colors(country_code: str) -> dict[str, str]:
@@ -279,8 +372,8 @@ def render_recommendation_table(
     column_config_map: dict[str, st.column_config.BaseColumn] = {
         "#": st.column_config.TextColumn("#", width=30),
         "티커": st.column_config.TextColumn("티커", width=60),
-        "종목명": st.column_config.TextColumn("종목명", width="medium"),
-        "카테고리": st.column_config.TextColumn("카테고리", width=100),
+        "종목명": st.column_config.TextColumn("종목명", width=300),
+        "카테고리": st.column_config.TextColumn("카테고리", width=165),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
         price_label: st.column_config.NumberColumn(price_label, width="small"),
@@ -325,5 +418,6 @@ def render_recommendation_table(
 __all__ = [
     "load_account_recommendations",
     "render_recommendation_table",
+    "format_relative_time",
     "_resolve_row_colors",
 ]

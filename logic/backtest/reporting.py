@@ -12,7 +12,7 @@ import pandas as pd
 from logic.backtest.account import AccountBacktestResult
 from logic.entry_point import DECISION_CONFIG
 from utils.account_registry import get_account_settings
-from utils.data_loader import get_exchange_rate_series
+from utils.data_loader import fetch_naver_etf_inav_snapshot, get_exchange_rate_series
 from utils.formatters import format_pct_change
 from utils.logger import get_app_logger
 from utils.notification import build_summary_line_from_summary_data
@@ -101,7 +101,6 @@ def print_backtest_summary(
     initial_capital_krw_value = float(summary.get("initial_capital_krw", initial_capital_krw))
     final_value_local = float(summary.get("final_value_local", summary.get("final_value", 0.0)))
     final_value_krw_value = float(summary.get("final_value_krw", final_value_local))
-    fx_rate_to_krw = float(summary.get("fx_rate_to_krw", 1.0) or 1.0)
 
     # 통화에 따라 적절한 포맷터 설정
     if currency == "USD":
@@ -125,7 +124,7 @@ def print_backtest_summary(
         add(f"{section_counter}. ========= {title} ==========")
         section_counter += 1
 
-    add_section_heading("사용된 설정값")
+    # 설정값 계산 (나중에 사용)
     if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
         raise ValueError(f"'{account_id}' 계정 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
     ma_period = merged_strategy["MA_PERIOD"]
@@ -137,37 +136,18 @@ def print_backtest_summary(
     except (TypeError, ValueError):
         holding_stop_loss_pct = float(portfolio_topn)
 
-    # 포트폴리오 N개 종목 중 한 종목만 N% 하락해 손절될 경우 전체 손실은 1%가 된다.
     if abs(holding_stop_loss_pct - round(holding_stop_loss_pct)) < 1e-6:
         stop_loss_label = f"{int(round(holding_stop_loss_pct))}%"
     else:
         stop_loss_label = f"{holding_stop_loss_pct:.2f}%"
 
     used_settings = {
-        "계정": account_id.upper(),
-        "시장 코드": country_code.upper(),
-        "테스트 기간": f"최근 {test_months_range}개월",
-        "초기 자본": money_formatter(initial_capital_local),
         "포트폴리오 종목 수 (TopN)": portfolio_topn,
         "모멘텀 스코어 MA 기간": momentum_label,
         "교체 매매 점수 임계값": replace_threshold,
         "개별 종목 손절매": stop_loss_label,
-        "매도 후 재매수 금지 기간": f"{cooldown_days}일 (매수 후 매도는 즉시 가능)",
+        "매수/매도 쿨다운": f"{cooldown_days}일",
     }
-
-    if currency != "KRW":
-        used_settings["초기 자본 (KRW 환산)"] = format_kr_money(initial_capital_krw_value)
-
-    if currency != "KRW" and fx_rate_to_krw != 1.0:
-        used_settings["적용 환율 (KRW)"] = f"1 {currency} ≈ {format_kr_money(fx_rate_to_krw)}"
-
-    for key, value in used_settings.items():
-        add(f"| {key}: {value}")
-    add_section_heading("지표 설명")
-    add("  - Sharpe: 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
-    add(
-        "  - SDR (Sharpe/MDD): Sharpe를 MDD(%)로 나눈 값. 수익 대비 최대 낙폭 효율성. 높을수록 우수 (기준: >0.2 양호, >0.3 우수)."
-    )
 
     def _align_korean_money_for_weekly(text: str) -> str:
         if currency != "KRW" or not isinstance(text, str):
@@ -183,7 +163,6 @@ def print_backtest_summary(
             eok_part = eok_part.strip()
             remainder = remainder.strip()
             man_part = remainder.replace("만원", "").strip()
-            # 5칸 폭으로 오른쪽 정렬 (콤마 포함)
             man_part_padded = man_part.rjust(5)
             return f"{sign}{eok_part}억 {man_part_padded}만원"
         return text
@@ -367,9 +346,25 @@ def print_backtest_summary(
     else:
         add("| 카테고리별 성과 데이터가 없어 표시할 수 없습니다.")
 
-    add_section_heading("백테스트 결과 요약")
-    add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
+    add_section_heading("지표 설명")
+    add("  - Sharpe: 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
+    add(
+        "  - SDR (Sharpe/MDD): Sharpe를 MDD(%)로 나눈 값. 수익 대비 최대 낙폭 효율성. 높을수록 우수 (기준: >0.2 양호, >0.3 우수)."
+    )
 
+    add_section_heading("백테스트 결과 요약")
+    # 기본 정보 통합
+    add(f"| 계정: {account_id.upper()} ({country_code.upper()})")
+    add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
+    add(f"| 거래 수(Trades): {int(summary.get('turnover', 0))}회")
+    add("")
+    # 사용된 설정값 통합
+    add("[ 전략 설정 ]")
+    for key, value in used_settings.items():
+        add(f"| {key}: {value}")
+    add("")
+    # 자산 정보
+    add("[ 자산 현황 ]")
     add(f"| 초기 자본: {money_formatter(initial_capital_local)}")
     if currency != "KRW":
         add(f"| 초기 자본 (KRW): {format_kr_money(initial_capital_krw_value)}")
@@ -402,6 +397,7 @@ def print_backtest_summary(
     row_mdd = ["MDD", format_pct_change(-summary["mdd"])]
     row_sharpe = ["Sharpe", f"{summary.get('sharpe', 0.0):.2f}"]
     row_sdr = ["SDR", f"{summary.get('sharpe_to_mdd', 0.0):.3f}"]
+    row_trades = ["Trades", f"{int(summary.get('turnover', 0))}"]
 
     if isinstance(benchmarks_info, list) and benchmarks_info:
         for bench in benchmarks_info:
@@ -418,6 +414,8 @@ def print_backtest_summary(
             # SDR
             bm_sdr = bench.get("sharpe_to_mdd")
             row_sdr.append(f"{float(bm_sdr):.3f}" if bm_sdr is not None else "-")
+            # Trades (벤치마크는 해당 없음)
+            row_trades.append("-")
 
     elif has_benchmark:
         # 단일 벤치마크 폴백
@@ -426,9 +424,10 @@ def print_backtest_summary(
         row_mdd.append("-")
         row_sharpe.append("-")
         row_sdr.append("-")
+        row_trades.append("-")
 
     # 테이블 렌더링
-    rows = [row_ret, row_cagr, row_mdd, row_sharpe, row_sdr]
+    rows = [row_ret, row_cagr, row_mdd, row_sharpe, row_sdr, row_trades]
     # 정렬: 구분(Left), 나머지(Right)
     aligns = ["left"] + ["right"] * (len(headers) - 1)
 
@@ -528,6 +527,7 @@ def _build_daily_table_rows(
     buy_date_map: dict[str, pd.Timestamp | None],
     holding_days_map: dict[str, int],
     prev_rows_cache: dict[str, pd.Series | None],
+    price_overrides: dict[str, float] | None = None,
 ) -> list[list[str]]:
     entries: list[tuple[tuple[int, int, float, str], list[str]]] = []
 
@@ -559,12 +559,17 @@ def _build_daily_table_rows(
 
         price_val = row.get("price")
         shares_val = row.get("shares")
-        pv_val = row.get("pv")
+
         avg_cost_val = row.get("avg_cost")
 
         price = float(price_val) if pd.notna(price_val) else 0.0
+        # 실시간 가격 오버라이드 적용
+        if price_overrides and ticker_key in price_overrides:
+            price = float(price_overrides[ticker_key])
+
         shares = float(shares_val) if pd.notna(shares_val) else 0.0
-        pv = float(pv_val) if pd.notna(pv_val) else price * shares
+        # 가격이 변경되었을 수 있으므로 pv 재계산 (단, shares가 0이면 0)
+        pv = price * shares
         avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
 
         decision = str(row.get("decision", "")).upper()
@@ -829,7 +834,63 @@ def _generate_daily_report_lines(
         cumulative_return_pct = _safe_float(portfolio_row.get("cumulative_return_pct"))
         held_count = _safe_int(portfolio_row.get("held_count"))
 
+        # [Real-time Price Reflection]
+        # 마지막 날(오늘)이고 한국 계정이면 실시간 가격(Naver iNAV)을 가져와 반영
+        # recommend.py와 유사한 로직
+        price_overrides = {}
+        is_last_day = target_date == portfolio_df.index[-1]
+
+        # account_settings에서 country_code 가져오기 (없으면 result에서 fallback)
+        country_code_check = str(account_settings.get("country_code") or result.country_code).strip().lower()
+
+        if is_last_day and country_code_check in ("kor", "kr"):
+            # 현재 보유중이거나 관심있는 티커 목록 수집
+            tickers_to_fetch = []
+            for ticker_key, ts in result.ticker_timeseries.items():
+                if target_date in ts.index:
+                    tickers_to_fetch.append(str(ticker_key).upper())
+
+            if tickers_to_fetch:
+                try:
+                    snapshot = fetch_naver_etf_inav_snapshot(tickers_to_fetch)
+                    # 오버라이드 딕셔너리 생성
+                    # 또한 Total Value 등 헤더값도 재계산 필요
+                    # (Total Cash는 변하지 않음)
+                    recalc_holdings_value = 0.0
+
+                    for ticker_key in tickers_to_fetch:
+                        if ticker_key in snapshot:
+                            new_price = float(snapshot[ticker_key].get("nowVal", 0))
+                            if new_price > 0:
+                                price_overrides[ticker_key] = new_price
+
+                        # PV 재계산 합산
+                        # (오버라이드된 가격이 있으면 그거 쓰고, 없으면 기존 가격)
+                        # 주의: shares 정보를 가져와야 함
+                        tkr_ts = result.ticker_timeseries.get(ticker_key)
+                        if tkr_ts is not None and target_date in tkr_ts.index:
+                            tkr_row = tkr_ts.loc[target_date]
+                            tkr_shares = _safe_float(tkr_row.get("shares"))
+                            if tkr_shares > 0:
+                                tkr_price = price_overrides.get(ticker_key) or _safe_float(tkr_row.get("price"))
+                                recalc_holdings_value += tkr_shares * tkr_price
+
+                    if price_overrides:
+                        # 헤더 값 업데이트
+                        total_holdings = recalc_holdings_value
+                        total_value = total_cash + total_holdings
+
+                        # 평가 손익 등 파생 지표 재계산은 복잡하므로
+                        # daily_profit_loss와 eval_profit_loss 정도만 근사 업데이트
+                        # 하지만 정확한 '어제 대비' 수익을 계산하기엔 여기서 어제 Total Value 접근이 필요.
+                        # 여기서는 Total Value가 바뀌었으므로 그에 따른 단순 차이만 반영
+                        pass
+
+                except Exception as e:
+                    logger.warning(f"리포팅 중 실시간 가격 패치 실패: {e}")
+
         # 환율 적용 로직:
+
         # 1. 포트폴리오 데이터는 현지 통화 기준 (USD 등)
         # 2. Daily Summary Header는 KRW 기준으로 표시 (User Request: "Header only in Korean Won is correct")
         # 3. Table은 현지 통화 기준 (USD) 유지
@@ -923,6 +984,7 @@ def _generate_daily_report_lines(
             buy_date_map=buy_date_map,
             holding_days_map=holding_days_map,
             prev_rows_cache=prev_rows_cache,
+            price_overrides=price_overrides,
         )
 
         table_lines = render_table_eaw(headers, rows, aligns)
@@ -992,17 +1054,7 @@ def dump_backtest_log(
     lines: list[str] = []
 
     lines.append(f"백테스트 로그 생성: {pd.Timestamp.now().isoformat(timespec='seconds')}")
-    lines.append("1. ========= 기본정보 ==========")
-    lines.append(
-        f"계정: {account_id.upper()} ({country_code.upper()}) | 기간: {result.start_date:%Y-%m-%d} ~ {result.end_date:%Y-%m-%d}"
-    )
-    base_line = f"초기 자본: {result.initial_capital:,.0f} {result.currency or 'KRW'}"
-    if (result.currency or "KRW").upper() != "KRW":
-        base_line += f" (≈ {result.initial_capital_krw:,.0f} KRW)"
-    base_line += f" | 포트폴리오 TOPN: {result.portfolio_topn}"
-    lines.append(base_line)
-    lines.append("")
-    lines.append("2. ========= 일자별 성과 상세 ==========")
+    lines.append("1. ========= 일자별 성과 상세 ==========")
 
     daily_lines = _generate_daily_report_lines(result, account_settings)
     lines.extend(daily_lines)
@@ -1026,7 +1078,7 @@ def dump_backtest_log(
         category_summaries=getattr(result, "category_summaries", []),
         core_start_dt=result.start_date,
         emit_to_logger=False,
-        section_start_index=3,
+        section_start_index=2,
     )
     if summary_section:
         lines.extend(summary_section)

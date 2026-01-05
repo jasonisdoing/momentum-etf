@@ -3,13 +3,6 @@
 from __future__ import annotations
 
 DECISION_CONFIG = {
-    "HOLD_CORE": {
-        "display_name": "<🔒 핵심보유>",
-        "order": 1,
-        "is_recommendation": False,
-        "show_slack": True,
-        "background": "#e8f5e9",
-    },
     "HOLD": {
         "display_name": "<💼 보유>",
         "order": 10,
@@ -36,19 +29,19 @@ DECISION_CONFIG = {
         "show_slack": True,
         "background": "#ffb6c1",
     },
-    "SELL_REPLACE": {
-        "display_name": "<🔄 교체매도>",
-        "order": 23,
-        "is_recommendation": True,
-        "show_slack": True,
-        "background": "#ffc1cc",
-    },
     "BUY_REPLACE": {
         "display_name": "<🔄 교체매수>",
-        "order": 30,
+        "order": 25,
         "is_recommendation": True,
         "show_slack": True,
         "background": "#81c147",
+    },
+    "SELL_REPLACE": {
+        "display_name": "<🔄 교체매도>",
+        "order": 26,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#ffc1cc",
     },
     "BUY": {
         "display_name": "<🚀 신규매수>",
@@ -87,7 +80,6 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
     "BUY_REPLACE": "🔄 교체매수",
     "SELL_REPLACE": "🔄 교체매도",
     "SELL_RSI": "🔥 RSI 과매수 매도",
-    "HOLD_CORE": "🔒 핵심 보유",
 }
 
 

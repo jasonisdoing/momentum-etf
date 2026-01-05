@@ -54,9 +54,9 @@ def get_held_categories_excluding_sells(
         if state in sell_states:
             continue
 
-        # HOLD 또는 HOLD_CORE 상태이거나, 보유 중인 종목만 포함
+        # HOLD 상태이거나, 보유 중인 종목만 포함
         is_held = False
-        if state in {"HOLD", "HOLD_CORE"}:
+        if state in {"HOLD"}:
             is_held = True
         elif holdings and get_ticker_func:
             ticker = get_ticker_func(item)
@@ -103,7 +103,6 @@ def get_hold_states() -> set[str]:
     """
     return {
         "HOLD",
-        "HOLD_CORE",
         "SELL_TREND",
         "SELL_REPLACE",
         "CUT_STOPLOSS",
@@ -130,34 +129,6 @@ def count_current_holdings(items: list, *, get_state_func=None) -> int:
     else:
         # dict 형태의 item인 경우
         return sum(1 for item in items if isinstance(item, dict) and str(item.get("state", "")).upper() in hold_states)
-
-
-def validate_core_holdings(
-    core_holdings_tickers: set[str],
-    universe_tickers_set: set[str],
-    account_id: str = "",
-) -> set[str]:
-    """핵심 보유 종목 유효성 검증
-
-    Args:
-        core_holdings_tickers: 핵심 보유 종목 티커 집합
-        universe_tickers_set: Universe 티커 집합
-        account_id: 계좌 ID (로깅용)
-
-    Returns:
-        유효한 핵심 보유 종목 티커 집합
-    """
-    invalid_core_tickers = core_holdings_tickers - universe_tickers_set
-    if invalid_core_tickers:
-        account_prefix = f"[{account_id.upper()}] " if account_id else ""
-        logger.warning(f"{account_prefix}CORE_HOLDINGS에 Universe에 없는 종목이 포함됨: {invalid_core_tickers}")
-
-    valid_core_holdings = core_holdings_tickers & universe_tickers_set
-    if valid_core_holdings:
-        account_prefix = f"[{account_id.upper()}] " if account_id else "[백테스트] "
-        # logger.info(f"{account_prefix}핵심 보유 종목 (TOPN 포함): {sorted(valid_core_holdings)}")
-
-    return valid_core_holdings
 
 
 def check_buy_candidate_filters(
@@ -227,30 +198,21 @@ def calculate_buy_budget(
 def calculate_held_categories(
     position_state: dict,
     ticker_to_category: dict[str, str],
-    core_holdings: set[str] = None,
 ) -> set[str]:
-    """현재 보유 중인 카테고리 집합 계산 (고정 종목 포함)
+    """현재 보유 중인 카테고리 집합 계산
 
     Args:
         position_state: 포지션 상태 (백테스트용)
         ticker_to_category: 티커 -> 카테고리 매핑
-        core_holdings: 고정 종목 티커 집합 (선택)
 
     Returns:
-        보유 중인 카테고리 집합 (고정 종목 카테고리 포함)
+        보유 중인 카테고리 집합
     """
     held_categories = set()
 
     # 실제 보유 종목의 카테고리
     for ticker, state in position_state.items():
         if state.get("shares", 0) > 0:
-            category = ticker_to_category.get(ticker)
-            if category and not is_category_exception(category):
-                held_categories.add(category)
-
-    # 고정 종목의 카테고리도 추가 (미보유 시에도 카테고리 차단)
-    if core_holdings:
-        for ticker in core_holdings:
             category = ticker_to_category.get(ticker)
             if category and not is_category_exception(category):
                 held_categories.add(category)
@@ -282,7 +244,7 @@ def track_sell_rsi_categories(
             if category and not is_category_exception(category):
                 sell_rsi_categories.add(category)
         # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
-        elif d.get("state") in {"HOLD", "HOLD_CORE"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
+        elif d.get("state") in {"HOLD"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
             category = etf_meta.get(d["tkr"], {}).get("category")
             if category and not is_category_exception(category):
                 sell_rsi_categories.add(category)
@@ -305,14 +267,12 @@ def calculate_held_count(position_state: dict) -> int:
 def calculate_held_categories_from_holdings(
     holdings: dict[str, Any],
     etf_meta: dict[str, Any],
-    core_holdings: set[str] = None,
 ) -> set[str]:
-    """보유 종목의 카테고리 집합 계산 (추천용, 고정 종목 포함)
+    """보유 종목의 카테고리 집합 계산 (추천용)
 
     Args:
         holdings: 보유 종목 딕셔너리
         etf_meta: ETF 메타 정보
-        core_holdings: 고정 종목 티커 집합 (선택)
 
     Returns:
         보유 중인 카테고리 집합 (고정 종목 카테고리 포함)
@@ -325,12 +285,6 @@ def calculate_held_categories_from_holdings(
         if category and not is_category_exception(category):
             held_categories.add(category)
 
-    # 고정 종목의 카테고리도 추가 (미보유 시에도 카테고리 차단)
-    if core_holdings:
-        for tkr in core_holdings:
-            category = etf_meta.get(tkr, {}).get("category")
-            if category and not is_category_exception(category):
-                held_categories.add(category)
     return held_categories
 
 

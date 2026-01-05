@@ -10,41 +10,48 @@ from utils.account_registry import get_account_settings, get_strategy_rules
 from utils.data_loader import MissingPriceDataError
 from utils.logger import get_app_logger
 
-# 튜닝·최적화 작업이 공유하는 계정별 파라미터 탐색 설정
+# =========================================================
+# 계좌별 성격 맞춤형 설정
+# =========================================================
 ACCOUNT_TUNING_CONFIG = {
-    "kor_kr": {
-        # 이동평균: 100~110
-        "MA_RANGE": [90, 95, 100, 105, 110, 115, 120],
+    # 🇰🇷 국내 ETF: PORTFOLIO_TOPN 테스트 중
+    "kor": {
+        "PORTFOLIO_TOPN": [10],
+        "REPLACE_SCORE_THRESHOLD": [0],
+        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
+        "MA_TYPE": ["SMA", "EMA", "HMA"],
+        # "MA_TYPE": ["EMA"],
     },
-    "kor_us": {
-        # 이동평균: 60
-        "MA_RANGE": [50, 55, 60, 65, 70],
+    # 🇦🇺 호주 직투: 테스트 중
+    "aus": {
+        "PORTFOLIO_TOPN": [6],
+        "REPLACE_SCORE_THRESHOLD": [0],
+        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
+        "MA_TYPE": ["SMA", "EMA", "HMA"],
+        # "MA_TYPE": ["SMA"],
     },
+    # 🇺🇸 미국 직투: 테스트 중
     "us": {
-        # 이동평균: 65 ~ 70
-        "MA_RANGE": [60, 65, 70, 75, 80],
+        "PORTFOLIO_TOPN": [5],
+        "REPLACE_SCORE_THRESHOLD": [0],
+        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
+        "MA_TYPE": ["SMA", "EMA", "HMA"],
+        # "MA_TYPE": ["HMA"],
     },
 }
 
+# =========================================================
+# 공통 설정 (나머지 변수 통제)
+# =========================================================
 COMMON_TUNING_CONFIG = {
-    # 이동평균: 20~100
-    # "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
-    # 포트폴리오: 8개 확정
-    "PORTFOLIO_TOPN": [8],
-    # SMA, EMA
-    "MA_TYPE": ["SMA", "EMA"],
-    # 교체: 0~3점 확인
-    "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3],
-    # 손절: 8~10% 확인
-    "STOP_LOSS_PCT": [8, 9, 10],
-    # RSI: 82~90 점검
-    "OVERBOUGHT_SELL_THRESHOLD": [82, 84, 86, 88, 90],
-    # 쿨다운: 1~3
-    "COOLDOWN_DAYS": [1, 2, 3],
-    # 나머지 고정
-    "TRAILING_STOP_PCT": [0],
-    "CORE_HOLDINGS": [],
-    "OPTIMIZATION_METRIC": "CAGR",
+    # 1. 손절: 5~15
+    "STOP_LOSS_PCT": [5, 7, 9, 11, 13, 15],
+    # 2. RSI: 100
+    "OVERBOUGHT_SELL_THRESHOLD": [100],
+    # 3. 쿨다운: 0
+    "COOLDOWN_DAYS": [0],
+    # 4. 목표: 수익률 극대화
+    "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
 }
 
 
@@ -70,8 +77,6 @@ COMMON_TUNING_CONFIG = {
 #     # 7. 쿨다운: 1~3일 확인
 #     "COOLDOWN_DAYS": [1, 2, 3],
 
-#     "TRAILING_STOP_PCT": [0], # 트레일링 스탑은 보통 0이 우세하므로 고정 (원하시면 [0, 5] 추가)
-#     "CORE_HOLDINGS": [],
 #     "OPTIMIZATION_METRIC": "CAGR",
 # },
 
