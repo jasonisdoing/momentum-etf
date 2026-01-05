@@ -888,61 +888,6 @@
                 "3_month_earn_rate": 51.1865,
                 "6_month_earn_rate": 83.2281,
                 "12_month_earn_rate": 133.8245
-            },
-            {
-                "ticker": "471760",
-                "name": "TIGER AI반도체핵심공정",
-                "listing_date": "2023-11-21",
-                "1_week_avg_volume": 718609,
-                "1_week_earn_rate": 16.9258,
-                "1_month_earn_rate": 12.9614,
-                "3_month_earn_rate": 31.9298,
-                "6_month_earn_rate": 40.3733,
-                "12_month_earn_rate": 60.261
-            },
-            {
-                "ticker": "395160",
-                "name": "KODEX AI반도체",
-                "listing_date": "2021-07-30",
-                "1_week_avg_volume": 2772269,
-                "1_week_earn_rate": 16.2688,
-                "1_month_earn_rate": 16.9582,
-                "3_month_earn_rate": 55.6827,
-                "6_month_earn_rate": 89.6635,
-                "12_month_earn_rate": 148.718
-            },
-            {
-                "ticker": "475300",
-                "name": "SOL 반도체전공정",
-                "listing_date": "2024-02-14",
-                "1_week_avg_volume": 341661,
-                "1_week_earn_rate": 15.9381,
-                "1_month_earn_rate": 9.5525,
-                "3_month_earn_rate": 16.9499,
-                "6_month_earn_rate": 48.976,
-                "12_month_earn_rate": 85.2464
-            },
-            {
-                "ticker": "0093A0",
-                "name": "RISE AI반도체TOP10",
-                "listing_date": "2025-08-26",
-                "1_week_avg_volume": 469025,
-                "1_week_earn_rate": 13.2848,
-                "1_month_earn_rate": 11.7623,
-                "3_month_earn_rate": 36.9423,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "455850",
-                "name": "SOL AI반도체소부장",
-                "listing_date": "2023-04-25",
-                "1_week_avg_volume": 1536535,
-                "1_week_earn_rate": 13.0967,
-                "1_month_earn_rate": 6.2374,
-                "3_month_earn_rate": 29.276,
-                "6_month_earn_rate": 51.9737,
-                "12_month_earn_rate": 86.5438
             }
         ]
     },
