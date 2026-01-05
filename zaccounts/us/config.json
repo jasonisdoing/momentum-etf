@@ -11,14 +11,14 @@
     "strategy": {
         "MONTHS_RANGE": 12,
         "BACKTESTED_DATE": "2026-01-01 23:59",
-        "CAGR": 66.90632,
-        "MDD": -20.840208,
+        "CAGR": 63.638365,
+        "MDD": -26.181587,
         "PORTFOLIO_TOPN": 5,
-        "MA_PERIOD": 170,
+        "MA_PERIOD": 130,
         "MA_TYPE": "HMA",
         "REPLACE_SCORE_THRESHOLD": 0,
         "STOP_LOSS_PCT": 5,
-        "OVERBOUGHT_SELL_THRESHOLD": 85,
+        "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
         "OPTIMIZATION_METRIC": "CAGR"
     },

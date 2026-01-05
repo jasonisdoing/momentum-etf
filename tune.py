@@ -47,8 +47,8 @@ ACCOUNT_TUNING_CONFIG = {
 COMMON_TUNING_CONFIG = {
     # 1. 손절: 5~15
     "STOP_LOSS_PCT": [5, 7, 9, 11, 13, 15],
-    # 2. RSI: 85~95
-    "OVERBOUGHT_SELL_THRESHOLD": [85, 87, 89, 91, 93],
+    # 2. RSI: 100
+    "OVERBOUGHT_SELL_THRESHOLD": [100],
     # 3. 쿨다운: 0
     "COOLDOWN_DAYS": [0],
     # 4. 목표: 수익률 극대화
