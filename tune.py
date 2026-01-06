@@ -24,7 +24,7 @@ ACCOUNT_TUNING_CONFIG = {
     },
     # 🇦🇺 호주 직투: 테스트 중
     "aus": {
-        "PORTFOLIO_TOPN": [6],
+        "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
         "MA_TYPE": ["SMA", "EMA", "HMA"],

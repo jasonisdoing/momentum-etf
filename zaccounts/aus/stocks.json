@@ -525,55 +525,6 @@
         ]
     },
     {
-        "category": "💊 바이오",
-        "tickers": [
-            {
-                "ticker": "DRUG",
-                "name": "Betashares Global Healthcare Currency Hedged ETF",
-                "listing_date": "2016-08-04",
-                "1_week_avg_volume": 9811,
-                "1_week_earn_rate": 1.0345,
-                "1_month_earn_rate": -0.5656,
-                "3_month_earn_rate": 11.8321,
-                "6_month_earn_rate": 14.752,
-                "12_month_earn_rate": 11.4068
-            },
-            {
-                "ticker": "IXJ",
-                "name": "iShares Global Healthcare ETF (AU)",
-                "listing_date": "2009-03-11",
-                "1_week_avg_volume": 4896,
-                "1_week_earn_rate": 0.2183,
-                "1_month_earn_rate": -2.6715,
-                "3_month_earn_rate": 11.9139,
-                "6_month_earn_rate": 11.34,
-                "12_month_earn_rate": 7.3823
-            },
-            {
-                "ticker": "HLTH",
-                "name": "VanEck Global Healthcare Leaders ETF",
-                "listing_date": "2020-09-08",
-                "1_week_avg_volume": 3154,
-                "1_week_earn_rate": -0.9278,
-                "1_month_earn_rate": -4.8062,
-                "3_month_earn_rate": 8.6726,
-                "6_month_earn_rate": 10.5311,
-                "12_month_earn_rate": 9.253
-            },
-            {
-                "ticker": "CURE",
-                "name": "Global X S&P Biotech ETF",
-                "listing_date": "2018-11-08",
-                "1_week_avg_volume": 2027,
-                "1_week_earn_rate": -1.6497,
-                "1_month_earn_rate": -3.2761,
-                "3_month_earn_rate": 20.1085,
-                "6_month_earn_rate": 40.5577,
-                "12_month_earn_rate": 25.2778
-            }
-        ]
-    },
-    {
         "category": "🥇 금",
         "tickers": [
             {
