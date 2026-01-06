@@ -14,17 +14,6 @@
                 "12_month_earn_rate": 119.5202
             },
             {
-                "ticker": "122090",
-                "name": "PLUS 코스피50",
-                "listing_date": "2010-01-07",
-                "1_week_avg_volume": 25783,
-                "1_week_earn_rate": 13.8866,
-                "1_month_earn_rate": 18.6482,
-                "3_month_earn_rate": 45.6688,
-                "6_month_earn_rate": 70.9424,
-                "12_month_earn_rate": 112.871
-            },
-            {
                 "ticker": "237350",
                 "name": "KODEX 코스피100",
                 "listing_date": "2016-01-27",
@@ -131,8 +120,41 @@
         ]
     },
     {
-        "category": "🚗 자율주행",
+        "category": "🚗 자동차",
         "tickers": [
+            {
+                "ticker": "466930",
+                "name": "SOL 자동차TOP3플러스",
+                "listing_date": "2023-10-05",
+                "1_week_avg_volume": 229357,
+                "1_week_earn_rate": 4.9662,
+                "1_month_earn_rate": 11.1628,
+                "3_month_earn_rate": 31.9881,
+                "6_month_earn_rate": 43.4441,
+                "12_month_earn_rate": 48.6911
+            },
+            {
+                "ticker": "387280",
+                "name": "TIGER 퓨처모빌리티액티브",
+                "listing_date": "2021-05-25",
+                "1_week_avg_volume": 14951,
+                "1_week_earn_rate": 3.5011,
+                "1_month_earn_rate": -2.4742,
+                "3_month_earn_rate": 16.0025,
+                "6_month_earn_rate": 33.9943,
+                "12_month_earn_rate": 30.5827
+            },
+            {
+                "ticker": "464600",
+                "name": "SOL 자동차소부장Fn",
+                "listing_date": "2023-08-22",
+                "1_week_avg_volume": 32329,
+                "1_week_earn_rate": 2.9919,
+                "1_month_earn_rate": 4.3124,
+                "3_month_earn_rate": 35.4692,
+                "6_month_earn_rate": 49.0838,
+                "12_month_earn_rate": 48.033
+            },
             {
                 "ticker": "385520",
                 "name": "KODEX 자율주행액티브",
@@ -143,6 +165,28 @@
                 "3_month_earn_rate": 35.8535,
                 "6_month_earn_rate": 45.1104,
                 "12_month_earn_rate": 54.2028
+            },
+            {
+                "ticker": "091180",
+                "name": "KODEX 자동차",
+                "listing_date": "2006-06-27",
+                "1_week_avg_volume": 979146,
+                "1_week_earn_rate": 2.2172,
+                "1_month_earn_rate": 4.9758,
+                "3_month_earn_rate": 30.4428,
+                "6_month_earn_rate": 32.4907,
+                "12_month_earn_rate": 38.4387
+            },
+            {
+                "ticker": "381560",
+                "name": "HANARO Fn전기&수소차",
+                "listing_date": "2021-04-02",
+                "1_week_avg_volume": 8485,
+                "1_week_earn_rate": 0.9023,
+                "1_month_earn_rate": -0.0497,
+                "3_month_earn_rate": 26.1278,
+                "6_month_earn_rate": 32.6743,
+                "12_month_earn_rate": 43.2283
             }
         ]
     },
