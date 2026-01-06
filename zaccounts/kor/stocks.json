@@ -909,44 +909,6 @@
         ]
     },
     {
-        "category": "🇰🇷 한국 - ⚛️ 원자력",
-        "tickers": [
-            {
-                "ticker": "434730",
-                "name": "HANARO 원자력iSelect",
-                "listing_date": "2022-06-28",
-                "1_week_avg_volume": 307366,
-                "1_week_earn_rate": 8.343,
-                "1_month_earn_rate": 7.6867,
-                "3_month_earn_rate": 41.8489,
-                "6_month_earn_rate": 37.5167,
-                "12_month_earn_rate": 194.7135
-            },
-            {
-                "ticker": "0091P0",
-                "name": "TIGER 코리아원자력",
-                "listing_date": "2025-08-19",
-                "1_week_avg_volume": 932754,
-                "1_week_earn_rate": 4.9859,
-                "1_month_earn_rate": 9.1443,
-                "3_month_earn_rate": 19.2945,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "0092B0",
-                "name": "SOL 한국원자력SMR",
-                "listing_date": "2025-08-19",
-                "1_week_avg_volume": 205727,
-                "1_week_earn_rate": 4.9452,
-                "1_month_earn_rate": 5.6842,
-                "3_month_earn_rate": 18.2908,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            }
-        ]
-    },
-    {
         "category": "🇰🇷 한국 - ⚡ AI전력",
         "tickers": [
             {
@@ -992,6 +954,39 @@
                 "3_month_earn_rate": 33.1633,
                 "6_month_earn_rate": 50.0,
                 "12_month_earn_rate": 22.9909
+            },
+            {
+                "ticker": "434730",
+                "name": "HANARO 원자력iSelect",
+                "listing_date": "2022-06-28",
+                "1_week_avg_volume": 307366,
+                "1_week_earn_rate": 8.343,
+                "1_month_earn_rate": 7.6867,
+                "3_month_earn_rate": 41.8489,
+                "6_month_earn_rate": 37.5167,
+                "12_month_earn_rate": 194.7135
+            },
+            {
+                "ticker": "0091P0",
+                "name": "TIGER 코리아원자력",
+                "listing_date": "2025-08-19",
+                "1_week_avg_volume": 932754,
+                "1_week_earn_rate": 4.9859,
+                "1_month_earn_rate": 9.1443,
+                "3_month_earn_rate": 19.2945,
+                "6_month_earn_rate": null,
+                "12_month_earn_rate": null
+            },
+            {
+                "ticker": "0092B0",
+                "name": "SOL 한국원자력SMR",
+                "listing_date": "2025-08-19",
+                "1_week_avg_volume": 205727,
+                "1_week_earn_rate": 4.9452,
+                "1_month_earn_rate": 5.6842,
+                "3_month_earn_rate": 18.2908,
+                "6_month_earn_rate": null,
+                "12_month_earn_rate": null
             }
         ]
     },
