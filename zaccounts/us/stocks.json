@@ -224,7 +224,7 @@
                 "1_month_earn_rate": 2.382,
                 "3_month_earn_rate": 13.2266,
                 "6_month_earn_rate": 34.7409,
-                "12_month_earn_rate": 50.4164
+                "12_month_earn_rate": 50.4165
             },
             {
                 "ticker": "SMH",
@@ -245,7 +245,7 @@
                 "1_week_earn_rate": 3.0996,
                 "1_month_earn_rate": 0.3448,
                 "3_month_earn_rate": 2.6141,
-                "6_month_earn_rate": 31.2746,
+                "6_month_earn_rate": 31.2745,
                 "12_month_earn_rate": 36.5831
             }
         ]
@@ -882,7 +882,7 @@
                 "1_month_earn_rate": 3.3187,
                 "3_month_earn_rate": 3.5155,
                 "6_month_earn_rate": 14.3186,
-                "12_month_earn_rate": 33.246
+                "12_month_earn_rate": 33.2459
             }
         ]
     },
@@ -953,7 +953,7 @@
                 "1_month_earn_rate": 4.9297,
                 "3_month_earn_rate": 5.5059,
                 "6_month_earn_rate": 15.3391,
-                "12_month_earn_rate": 35.6996
+                "12_month_earn_rate": 35.6997
             },
             {
                 "ticker": "VT",
@@ -1024,7 +1024,7 @@
                 "1_month_earn_rate": 4.2858,
                 "3_month_earn_rate": 2.8964,
                 "6_month_earn_rate": 14.6456,
-                "12_month_earn_rate": 29.1808
+                "12_month_earn_rate": 29.1807
             }
         ]
     },
