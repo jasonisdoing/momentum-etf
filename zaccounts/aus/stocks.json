@@ -52,17 +52,6 @@
         "category": "💻 테크",
         "tickers": [
             {
-                "ticker": "ATEC",
-                "name": "BetaShares S&P/ASX Australian Technology ETF",
-                "listing_date": "2020-03-04",
-                "1_week_avg_volume": 31677,
-                "1_week_earn_rate": -0.6133,
-                "1_month_earn_rate": -7.7224,
-                "3_month_earn_rate": -19.8702,
-                "6_month_earn_rate": -15.7843,
-                "12_month_earn_rate": -10.615
-            },
-            {
                 "ticker": "HACK",
                 "name": "BetaShares Global Cybersecurity ETF",
                 "listing_date": "2016-08-30",
@@ -161,17 +150,6 @@
                 "12_month_earn_rate": 14.9693
             },
             {
-                "ticker": "YMAX",
-                "name": "Betashares Australian Top 20 Equities Yield Maximiser Complex ETF",
-                "listing_date": "2012-11-22",
-                "1_week_avg_volume": 153996,
-                "1_week_earn_rate": 0.5348,
-                "1_month_earn_rate": 2.1739,
-                "3_month_earn_rate": -2.0644,
-                "6_month_earn_rate": 0.496,
-                "12_month_earn_rate": 2.5503
-            },
-            {
                 "ticker": "VHY",
                 "name": "Vanguard Australian Shares High Yield ETF",
                 "listing_date": "2011-05-23",
@@ -227,17 +205,6 @@
                 "12_month_earn_rate": 10.2111
             },
             {
-                "ticker": "MVW",
-                "name": "VanEck Australian Equal Weight ETF",
-                "listing_date": "2014-03-04",
-                "1_week_avg_volume": 49716,
-                "1_week_earn_rate": 0.1552,
-                "1_month_earn_rate": -1.1239,
-                "3_month_earn_rate": -2.5919,
-                "6_month_earn_rate": 0.0,
-                "12_month_earn_rate": 7.8229
-            },
-            {
                 "ticker": "IHD",
                 "name": "iShares S&P/ASX Dividend Opportunities ESG Screened ETF",
                 "listing_date": "2010-12-07",
@@ -258,17 +225,6 @@
                 "3_month_earn_rate": 2.6801,
                 "6_month_earn_rate": 9.8566,
                 "12_month_earn_rate": 16.9389
-            },
-            {
-                "ticker": "QUS",
-                "name": "BetaShares S&P 500 Equal Weight ETF",
-                "listing_date": "2014-12-17",
-                "1_week_avg_volume": 21415,
-                "1_week_earn_rate": -0.3704,
-                "1_month_earn_rate": -0.683,
-                "3_month_earn_rate": 1.3183,
-                "6_month_earn_rate": 3.5213,
-                "12_month_earn_rate": 3.5547
             },
             {
                 "ticker": "EX20",
@@ -307,17 +263,6 @@
                 "3_month_earn_rate": 0.0056,
                 "6_month_earn_rate": 6.039,
                 "12_month_earn_rate": 15.7761
-            },
-            {
-                "ticker": "BANK",
-                "name": "Global X Australian Bank Credit ETF",
-                "listing_date": "2024-07-22",
-                "1_week_avg_volume": 13420,
-                "1_week_earn_rate": 0.0771,
-                "1_month_earn_rate": 0.278,
-                "3_month_earn_rate": 0.5973,
-                "6_month_earn_rate": 2.1274,
-                "12_month_earn_rate": 4.389
             }
         ]
     },
@@ -345,17 +290,6 @@
                 "3_month_earn_rate": 5.9066,
                 "6_month_earn_rate": 8.3626,
                 "12_month_earn_rate": 21.5992
-            },
-            {
-                "ticker": "VBLD",
-                "name": "Vanguard Global Infrastructure Index ETF",
-                "listing_date": "2018-10-22",
-                "1_week_avg_volume": 11147,
-                "1_week_earn_rate": 0.9861,
-                "1_month_earn_rate": -3.2468,
-                "3_month_earn_rate": -0.5652,
-                "6_month_earn_rate": 2.159,
-                "12_month_earn_rate": 5.3418
             },
             {
                 "ticker": "VGAD",
@@ -446,17 +380,6 @@
                 "12_month_earn_rate": 11.7264
             },
             {
-                "ticker": "QUAL",
-                "name": "Vaneck Msci International Quality Etf",
-                "listing_date": "2014-10-29",
-                "1_week_avg_volume": 58503,
-                "1_week_earn_rate": -0.3219,
-                "1_month_earn_rate": -0.7532,
-                "3_month_earn_rate": 4.0316,
-                "6_month_earn_rate": 8.1369,
-                "12_month_earn_rate": 8.1164
-            },
-            {
                 "ticker": "BGBL",
                 "name": "Betashares Global Shares ETF Units AUD",
                 "listing_date": "2023-05-11",
@@ -490,17 +413,6 @@
                 "12_month_earn_rate": 12.1807
             },
             {
-                "ticker": "QLTY",
-                "name": "BetaShares Global Quality Leaders ETF",
-                "listing_date": "2018-11-05",
-                "1_week_avg_volume": 28345,
-                "1_week_earn_rate": -0.8098,
-                "1_month_earn_rate": -0.4216,
-                "3_month_earn_rate": 1.504,
-                "6_month_earn_rate": 3.4407,
-                "12_month_earn_rate": 7.4516
-            },
-            {
                 "ticker": "FEMX",
                 "name": "Fidelity Global Emerging Markets ETF",
                 "listing_date": "2018-10-29",
@@ -510,34 +422,12 @@
                 "3_month_earn_rate": 0.7042,
                 "6_month_earn_rate": 10.3395,
                 "12_month_earn_rate": 17.0906
-            },
-            {
-                "ticker": "HYGG",
-                "name": "Hyperion Global Growth Companies Fund-Active ETF",
-                "listing_date": "2021-03-22",
-                "1_week_avg_volume": 205470,
-                "1_week_earn_rate": -2.5316,
-                "1_month_earn_rate": -1.0,
-                "3_month_earn_rate": -5.7143,
-                "6_month_earn_rate": 0.1445,
-                "12_month_earn_rate": 1.6129
             }
         ]
     },
     {
         "category": "🥇 금",
         "tickers": [
-            {
-                "ticker": "QAU",
-                "name": "Betashares Gold Bullion Currency Hedged ETF",
-                "listing_date": "2011-05-05",
-                "1_week_avg_volume": 102124,
-                "1_week_earn_rate": -1.1661,
-                "1_month_earn_rate": 5.303,
-                "3_month_earn_rate": 11.9163,
-                "6_month_earn_rate": 28.4183,
-                "12_month_earn_rate": 64.4439
-            },
             {
                 "ticker": "MNRS",
                 "name": "Betashares Global Gold Miners Currency Hedged ETF",
@@ -548,28 +438,6 @@
                 "3_month_earn_rate": 14.4843,
                 "6_month_earn_rate": 67.3797,
                 "12_month_earn_rate": 151.6077
-            },
-            {
-                "ticker": "GOLD",
-                "name": "Global X Physical Gold Structured",
-                "listing_date": "2008-01-02",
-                "1_week_avg_volume": 269066,
-                "1_week_earn_rate": -2.021,
-                "1_month_earn_rate": 1.5497,
-                "3_month_earn_rate": 10.7747,
-                "6_month_earn_rate": 26.9804,
-                "12_month_earn_rate": 54.322
-            },
-            {
-                "ticker": "PMGOLD",
-                "name": "Perth Mint Gold Structured Product",
-                "listing_date": "2009-03-31",
-                "1_week_avg_volume": 160929,
-                "1_week_earn_rate": -2.1364,
-                "1_month_earn_rate": 1.3176,
-                "3_month_earn_rate": 10.6941,
-                "6_month_earn_rate": 27.0706,
-                "12_month_earn_rate": 54.5955
             },
             {
                 "ticker": "GDX",
@@ -603,17 +471,6 @@
     {
         "category": "🥇 원자재/에너지",
         "tickers": [
-            {
-                "ticker": "FUEL",
-                "name": "Betashares Global Energy Companies Currency Hedged ETF",
-                "listing_date": "2016-06-16",
-                "1_week_avg_volume": 51903,
-                "1_week_earn_rate": 1.8072,
-                "1_month_earn_rate": 0.0,
-                "3_month_earn_rate": 2.8919,
-                "6_month_earn_rate": 6.962,
-                "12_month_earn_rate": 11.1842
-            },
             {
                 "ticker": "ACDC",
                 "name": "Global X Battery Tech & Lithium ETF",

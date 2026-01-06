@@ -1,5 +1,5 @@
 {
-    "order": 20,
+    "order": 50,
     "icon": "🇦🇺",
     "name": "호주 ETF",
     "desc": "호주 ETF 포트폴리오 (AUD)",
@@ -10,11 +10,11 @@
     "show_hold": true,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2026-01-01 23:59",
-        "CAGR": 28.534199,
-        "MDD": -15.942729,
+        "BACKTESTED_DATE": "2026-01-06 22:58",
+        "CAGR": 30.099535,
+        "MDD": -9.897419,
         "PORTFOLIO_TOPN": 5,
-        "MA_PERIOD": 140,
+        "MA_PERIOD": 60,
         "MA_TYPE": "SMA",
         "REPLACE_SCORE_THRESHOLD": 0,
         "STOP_LOSS_PCT": 9,

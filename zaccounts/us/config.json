@@ -1,5 +1,5 @@
 {
-    "order": 30,
+    "order": 100,
     "icon": "🇺🇸",
     "name": "미국상장 ETF",
     "desc": "미국 ETF 포트폴리오 (USD)",
@@ -10,9 +10,9 @@
     "show_hold": false,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2026-01-01 23:59",
-        "CAGR": 86.619315,
-        "MDD": -19.324986,
+        "BACKTESTED_DATE": "2026-01-06 22:59",
+        "CAGR": 84.969737,
+        "MDD": -19.256638,
         "PORTFOLIO_TOPN": 5,
         "MA_PERIOD": 130,
         "MA_TYPE": "HMA",
