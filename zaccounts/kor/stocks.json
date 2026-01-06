@@ -479,7 +479,7 @@
         ]
     },
     {
-        "category": "🇺🇸 미국 - 👻 로봇",
+        "category": "🇺🇸 미국 - ⚙️ 로봇",
         "tickers": [
             {
                 "ticker": "471040",
@@ -512,17 +512,6 @@
                 "1_month_earn_rate": 1.9314,
                 "3_month_earn_rate": 15.4834,
                 "6_month_earn_rate": 34.0758,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "0035T0",
-                "name": "PLUS 글로벌휴머노이드로봇액티브",
-                "listing_date": "2025-04-15",
-                "1_week_avg_volume": 114104,
-                "1_week_earn_rate": -1.0133,
-                "1_month_earn_rate": 7.3596,
-                "3_month_earn_rate": 26.2201,
-                "6_month_earn_rate": 55.8713,
                 "12_month_earn_rate": null
             },
             {
@@ -1018,7 +1007,7 @@
         ]
     },
     {
-        "category": "🇰🇷 한국 - 👻 로봇",
+        "category": "🇰🇷 한국 - ⚙️ 로봇",
         "tickers": [
             {
                 "ticker": "445290",
