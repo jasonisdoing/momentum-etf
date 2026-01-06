@@ -539,44 +539,6 @@
         ]
     },
     {
-        "category": "🇺🇸 미국 - 🥇 금",
-        "tickers": [
-            {
-                "ticker": "0022T0",
-                "name": "SOL 국제금커버드콜액티브",
-                "listing_date": "2025-03-11",
-                "1_week_avg_volume": 165109,
-                "1_week_earn_rate": -2.0346,
-                "1_month_earn_rate": 3.5341,
-                "3_month_earn_rate": 19.4584,
-                "6_month_earn_rate": 41.3738,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "0064K0",
-                "name": "KODEX 금액티브",
-                "listing_date": "2025-06-17",
-                "1_week_avg_volume": 535843,
-                "1_week_earn_rate": -2.0468,
-                "1_month_earn_rate": 3.4749,
-                "3_month_earn_rate": 19.6429,
-                "6_month_earn_rate": 42.4774,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "473640",
-                "name": "HANARO 글로벌금채굴기업",
-                "listing_date": "2024-01-18",
-                "1_week_avg_volume": 83968,
-                "1_week_earn_rate": -4.0159,
-                "1_month_earn_rate": 4.4836,
-                "3_month_earn_rate": 23.0204,
-                "6_month_earn_rate": 85.6858,
-                "12_month_earn_rate": 147.5899
-            }
-        ]
-    },
-    {
         "category": "🇺🇸 미국 - 💰 금융",
         "tickers": [
             {

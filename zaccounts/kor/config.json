@@ -11,8 +11,8 @@
     "strategy": {
         "MONTHS_RANGE": 12,
         "BACKTESTED_DATE": "2026-01-01 23:59",
-        "CAGR": 102.176048,
-        "MDD": -14.641596,
+        "CAGR": 96.665836,
+        "MDD": -15.089588,
         "PORTFOLIO_TOPN": 10,
         "MA_PERIOD": 100,
         "MA_TYPE": "EMA",
