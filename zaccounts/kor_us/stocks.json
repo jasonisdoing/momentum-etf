@@ -1,12 +1,12 @@
 [
     {
-        "category": "👑 지수",
+        "category": "👑지수",
         "tickers": [
             {
                 "ticker": "0015B0",
                 "name": "KoAct 미국나스닥성장기업액티브",
                 "listing_date": "2025-02-25",
-                "1_week_avg_volume": 305186,
+                "1_week_avg_volume": 305182,
                 "1_week_earn_rate": 6.7143,
                 "1_month_earn_rate": 5.3968,
                 "3_month_earn_rate": 14.8789,
@@ -17,7 +17,7 @@
                 "ticker": "426030",
                 "name": "TIMEFOLIO 미국나스닥100액티브",
                 "listing_date": "2022-05-11",
-                "1_week_avg_volume": 407045,
+                "1_week_avg_volume": 406983,
                 "1_week_earn_rate": 4.9047,
                 "1_month_earn_rate": 1.6797,
                 "3_month_earn_rate": 2.0248,
@@ -28,7 +28,7 @@
                 "ticker": "379800",
                 "name": "KODEX 미국S&P500",
                 "listing_date": "2021-04-09",
-                "1_week_avg_volume": 6323030,
+                "1_week_avg_volume": 6322140,
                 "1_week_earn_rate": 1.352,
                 "1_month_earn_rate": -0.4788,
                 "3_month_earn_rate": 7.7462,
@@ -39,7 +39,7 @@
                 "ticker": "379810",
                 "name": "KODEX 미국나스닥100",
                 "listing_date": "2021-04-09",
-                "1_week_avg_volume": 3387406,
+                "1_week_avg_volume": 3386816,
                 "1_week_earn_rate": 1.0039,
                 "1_month_earn_rate": -1.7733,
                 "3_month_earn_rate": 7.282,
@@ -49,13 +49,35 @@
         ]
     },
     {
-        "category": "👽 AI",
+        "category": "💾AI반도체",
         "tickers": [
+            {
+                "ticker": "446690",
+                "name": "KODEX 아시아AI반도체exChina액티브",
+                "listing_date": "2023-02-01",
+                "1_week_avg_volume": 3021,
+                "1_week_earn_rate": 10.4964,
+                "1_month_earn_rate": 15.6177,
+                "3_month_earn_rate": 45.7238,
+                "6_month_earn_rate": 78.4496,
+                "12_month_earn_rate": 101.1471
+            },
+            {
+                "ticker": "446770",
+                "name": "ACE 글로벌반도체TOP4 Plus",
+                "listing_date": "2022-11-15",
+                "1_week_avg_volume": 601690,
+                "1_week_earn_rate": 10.2608,
+                "1_month_earn_rate": 13.1014,
+                "3_month_earn_rate": 40.5738,
+                "6_month_earn_rate": 72.8545,
+                "12_month_earn_rate": 104.7381
+            },
             {
                 "ticker": "483320",
                 "name": "ACE 엔비디아밸류체인액티브",
                 "listing_date": "2024-06-11",
-                "1_week_avg_volume": 1045439,
+                "1_week_avg_volume": 1045132,
                 "1_week_earn_rate": 8.9018,
                 "1_month_earn_rate": 4.7833,
                 "3_month_earn_rate": 29.1947,
@@ -66,7 +88,7 @@
                 "ticker": "456600",
                 "name": "TIMEFOLIO 글로벌AI인공지능액티브",
                 "listing_date": "2023-05-16",
-                "1_week_avg_volume": 337374,
+                "1_week_avg_volume": 335708,
                 "1_week_earn_rate": 7.9682,
                 "1_month_earn_rate": 5.1622,
                 "3_month_earn_rate": 5.8924,
@@ -77,12 +99,23 @@
                 "ticker": "0118Z0",
                 "name": "ACE 미국AI테크핵심산업액티브",
                 "listing_date": "2025-10-28",
-                "1_week_avg_volume": 465356,
+                "1_week_avg_volume": 465347,
                 "1_week_earn_rate": 7.1892,
                 "1_month_earn_rate": 0.3658,
                 "3_month_earn_rate": null,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
+            },
+            {
+                "ticker": "390390",
+                "name": "KODEX 미국반도체",
+                "listing_date": "2021-06-30",
+                "1_week_avg_volume": 401195,
+                "1_week_earn_rate": 6.9829,
+                "1_month_earn_rate": 4.8697,
+                "3_month_earn_rate": 23.697,
+                "6_month_earn_rate": 49.0316,
+                "12_month_earn_rate": 60.965
             },
             {
                 "ticker": "0051A0",
@@ -99,7 +132,7 @@
                 "ticker": "497570",
                 "name": "TIGER 미국필라델피아AI반도체나스닥",
                 "listing_date": "2024-11-26",
-                "1_week_avg_volume": 889945,
+                "1_week_avg_volume": 889855,
                 "1_week_earn_rate": 5.7356,
                 "1_month_earn_rate": 1.8097,
                 "3_month_earn_rate": 19.1608,
@@ -110,7 +143,7 @@
                 "ticker": "483340",
                 "name": "ACE 구글밸류체인액티브",
                 "listing_date": "2024-06-11",
-                "1_week_avg_volume": 505033,
+                "1_week_avg_volume": 504989,
                 "1_week_earn_rate": 5.7282,
                 "1_month_earn_rate": 7.6287,
                 "3_month_earn_rate": 22.6196,
@@ -121,7 +154,7 @@
                 "ticker": "0093D0",
                 "name": "KoAct 팔란티어밸류체인액티브",
                 "listing_date": "2025-08-26",
-                "1_week_avg_volume": 67910,
+                "1_week_avg_volume": 67909,
                 "1_week_earn_rate": 5.1628,
                 "1_month_earn_rate": 7.1631,
                 "3_month_earn_rate": 16.9095,
@@ -132,12 +165,23 @@
                 "ticker": "495940",
                 "name": "RISE 미국AI테크액티브",
                 "listing_date": "2024-11-26",
-                "1_week_avg_volume": 14790,
+                "1_week_avg_volume": 14788,
                 "1_week_earn_rate": 4.9546,
                 "1_month_earn_rate": 4.7851,
                 "3_month_earn_rate": 7.916,
                 "6_month_earn_rate": 30.0747,
                 "12_month_earn_rate": 24.2626
+            },
+            {
+                "ticker": "479620",
+                "name": "SOL 미국AI반도체칩메이커",
+                "listing_date": "2024-04-16",
+                "1_week_avg_volume": 35560,
+                "1_week_earn_rate": 4.7874,
+                "1_month_earn_rate": 2.1207,
+                "3_month_earn_rate": 21.2239,
+                "6_month_earn_rate": 38.8027,
+                "12_month_earn_rate": 41.7361
             },
             {
                 "ticker": "466950",
@@ -165,7 +209,7 @@
                 "ticker": "485540",
                 "name": "KODEX 미국AI테크TOP10",
                 "listing_date": "2024-06-25",
-                "1_week_avg_volume": 548064,
+                "1_week_avg_volume": 548058,
                 "1_week_earn_rate": 0.1015,
                 "1_month_earn_rate": -1.4647,
                 "3_month_earn_rate": 7.2068,
@@ -176,7 +220,7 @@
                 "ticker": "0041D0",
                 "name": "KODEX 미국AI소프트웨어TOP10",
                 "listing_date": "2025-04-22",
-                "1_week_avg_volume": 84531,
+                "1_week_avg_volume": 84460,
                 "1_week_earn_rate": -1.9805,
                 "1_month_earn_rate": -2.801,
                 "3_month_earn_rate": -4.3365,
@@ -186,13 +230,13 @@
         ]
     },
     {
-        "category": "🖥️ 테크",
+        "category": "🖥️테크",
         "tickers": [
             {
                 "ticker": "0118S0",
                 "name": "SOL 미국넥스트테크TOP10액티브",
                 "listing_date": "2025-10-28",
-                "1_week_avg_volume": 360957,
+                "1_week_avg_volume": 360869,
                 "1_week_earn_rate": 15.7558,
                 "1_month_earn_rate": 15.5258,
                 "3_month_earn_rate": null,
@@ -203,7 +247,7 @@
                 "ticker": "381170",
                 "name": "TIGER 미국테크TOP10 INDXX",
                 "listing_date": "2021-04-09",
-                "1_week_avg_volume": 1887260,
+                "1_week_avg_volume": 1887083,
                 "1_week_earn_rate": -0.5401,
                 "1_month_earn_rate": -3.6661,
                 "3_month_earn_rate": 6.0982,
@@ -213,89 +257,13 @@
         ]
     },
     {
-        "category": "💾 반도체",
-        "tickers": [
-            {
-                "ticker": "442580",
-                "name": "PLUS 글로벌HBM반도체",
-                "listing_date": "2022-09-22",
-                "1_week_avg_volume": 365509,
-                "1_week_earn_rate": 17.0934,
-                "1_month_earn_rate": 30.8518,
-                "3_month_earn_rate": 84.1536,
-                "6_month_earn_rate": 142.4644,
-                "12_month_earn_rate": 215.0089
-            },
-            {
-                "ticker": "446770",
-                "name": "ACE 글로벌반도체TOP4 Plus",
-                "listing_date": "2022-11-15",
-                "1_week_avg_volume": 601741,
-                "1_week_earn_rate": 10.2608,
-                "1_month_earn_rate": 13.1014,
-                "3_month_earn_rate": 40.5738,
-                "6_month_earn_rate": 72.8545,
-                "12_month_earn_rate": 104.7381
-            },
-            {
-                "ticker": "390390",
-                "name": "KODEX 미국반도체",
-                "listing_date": "2021-06-30",
-                "1_week_avg_volume": 401256,
-                "1_week_earn_rate": 6.9829,
-                "1_month_earn_rate": 4.8697,
-                "3_month_earn_rate": 23.697,
-                "6_month_earn_rate": 49.0316,
-                "12_month_earn_rate": 60.965
-            },
-            {
-                "ticker": "479620",
-                "name": "SOL 미국AI반도체칩메이커",
-                "listing_date": "2024-04-16",
-                "1_week_avg_volume": 35560,
-                "1_week_earn_rate": 4.7874,
-                "1_month_earn_rate": 2.1207,
-                "3_month_earn_rate": 21.2239,
-                "6_month_earn_rate": 38.8027,
-                "12_month_earn_rate": 41.7361
-            }
-        ]
-    },
-    {
-        "category": "🗿 원자재",
-        "tickers": [
-            {
-                "ticker": "415920",
-                "name": "PLUS 글로벌희토류&전략자원생산기업",
-                "listing_date": "2022-01-18",
-                "1_week_avg_volume": 348404,
-                "1_week_earn_rate": 14.2761,
-                "1_month_earn_rate": 19.7601,
-                "3_month_earn_rate": 30.9414,
-                "6_month_earn_rate": 115.9033,
-                "12_month_earn_rate": 105.712
-            },
-            {
-                "ticker": "394670",
-                "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
-                "listing_date": "2021-07-20",
-                "1_week_avg_volume": 244331,
-                "1_week_earn_rate": 4.1527,
-                "1_month_earn_rate": 8.8764,
-                "3_month_earn_rate": 24.0943,
-                "6_month_earn_rate": 90.7476,
-                "12_month_earn_rate": 63.1113
-            }
-        ]
-    },
-    {
-        "category": "⚡️ AI전력",
+        "category": "⚡️AI전력",
         "tickers": [
             {
                 "ticker": "0132H0",
                 "name": "KODEX 미국원자력SMR",
                 "listing_date": "2025-11-25",
-                "1_week_avg_volume": 686387,
+                "1_week_avg_volume": 686361,
                 "1_week_earn_rate": 16.0804,
                 "1_month_earn_rate": 6.9444,
                 "3_month_earn_rate": null,
@@ -306,7 +274,7 @@
                 "ticker": "0007G0",
                 "name": "PLUS 글로벌원자력밸류체인",
                 "listing_date": "2025-01-14",
-                "1_week_avg_volume": 64595,
+                "1_week_avg_volume": 64591,
                 "1_week_earn_rate": 12.5,
                 "1_month_earn_rate": 7.8864,
                 "3_month_earn_rate": 4.9534,
@@ -317,7 +285,7 @@
                 "ticker": "0123G0",
                 "name": "TIGER 미국AI전력SMR",
                 "listing_date": "2025-11-04",
-                "1_week_avg_volume": 1205815,
+                "1_week_avg_volume": 1205758,
                 "1_week_earn_rate": 10.7337,
                 "1_month_earn_rate": 1.4219,
                 "3_month_earn_rate": null,
@@ -328,7 +296,7 @@
                 "ticker": "0051G0",
                 "name": "SOL 미국원자력SMR",
                 "listing_date": "2025-05-20",
-                "1_week_avg_volume": 514100,
+                "1_week_avg_volume": 514062,
                 "1_week_earn_rate": 9.6541,
                 "1_month_earn_rate": 3.3676,
                 "3_month_earn_rate": 2.2181,
@@ -339,7 +307,7 @@
                 "ticker": "0142D0",
                 "name": "TIGER 미국AI데이터센터TOP4Plus",
                 "listing_date": "2025-12-09",
-                "1_week_avg_volume": 538694,
+                "1_week_avg_volume": 538693,
                 "1_week_earn_rate": 6.6589,
                 "1_month_earn_rate": null,
                 "3_month_earn_rate": null,
@@ -350,7 +318,7 @@
                 "ticker": "491010",
                 "name": "TIGER 글로벌AI전력인프라액티브",
                 "listing_date": "2024-09-10",
-                "1_week_avg_volume": 216074,
+                "1_week_avg_volume": 216073,
                 "1_week_earn_rate": 6.5772,
                 "1_month_earn_rate": 1.5903,
                 "3_month_earn_rate": 6.4046,
@@ -372,7 +340,7 @@
                 "ticker": "486450",
                 "name": "SOL 미국AI전력인프라",
                 "listing_date": "2024-07-16",
-                "1_week_avg_volume": 188695,
+                "1_week_avg_volume": 188630,
                 "1_week_earn_rate": 5.1733,
                 "1_month_earn_rate": -0.7681,
                 "3_month_earn_rate": 5.0079,
@@ -383,7 +351,7 @@
                 "ticker": "487230",
                 "name": "KODEX 미국AI전력핵심인프라",
                 "listing_date": "2024-07-09",
-                "1_week_avg_volume": 2504263,
+                "1_week_avg_volume": 2497669,
                 "1_week_earn_rate": 5.1259,
                 "1_month_earn_rate": -1.1834,
                 "3_month_earn_rate": -1.8594,
@@ -394,7 +362,7 @@
                 "ticker": "419650",
                 "name": "PLUS 글로벌수소&차세대연료전지",
                 "listing_date": "2022-02-15",
-                "1_week_avg_volume": 76327,
+                "1_week_avg_volume": 76325,
                 "1_week_earn_rate": 2.9817,
                 "1_month_earn_rate": -9.4758,
                 "3_month_earn_rate": 1.0124,
@@ -404,13 +372,13 @@
         ]
     },
     {
-        "category": "🧮 양자",
+        "category": "🧮양자",
         "tickers": [
             {
                 "ticker": "0020H0",
                 "name": "KoAct 글로벌양자컴퓨팅액티브",
                 "listing_date": "2025-03-11",
-                "1_week_avg_volume": 67684,
+                "1_week_avg_volume": 67681,
                 "1_week_earn_rate": 10.565,
                 "1_month_earn_rate": 7.0483,
                 "3_month_earn_rate": 17.9422,
@@ -421,7 +389,7 @@
                 "ticker": "0023A0",
                 "name": "SOL 미국양자컴퓨팅TOP10",
                 "listing_date": "2025-03-11",
-                "1_week_avg_volume": 823858,
+                "1_week_avg_volume": 823678,
                 "1_week_earn_rate": 6.6925,
                 "1_month_earn_rate": 1.0814,
                 "3_month_earn_rate": 14.7382,
@@ -431,13 +399,13 @@
         ]
     },
     {
-        "category": "💊 바이오",
+        "category": "💊바이오",
         "tickers": [
             {
                 "ticker": "0083S0",
                 "name": "1Q 미국메디컬AI",
                 "listing_date": "2025-07-22",
-                "1_week_avg_volume": 132825,
+                "1_week_avg_volume": 132823,
                 "1_week_earn_rate": 4.5356,
                 "1_month_earn_rate": -2.5765,
                 "3_month_earn_rate": 10.9624,
@@ -481,7 +449,7 @@
                 "ticker": "203780",
                 "name": "TIGER 미국나스닥바이오",
                 "listing_date": "2014-08-27",
-                "1_week_avg_volume": 59672,
+                "1_week_avg_volume": 59671,
                 "1_week_earn_rate": 0.181,
                 "1_month_earn_rate": -2.2731,
                 "3_month_earn_rate": 23.2012,
@@ -492,7 +460,7 @@
                 "ticker": "185680",
                 "name": "KODEX 미국S&P바이오(합성)",
                 "listing_date": "2013-10-31",
-                "1_week_avg_volume": 8372,
+                "1_week_avg_volume": 8366,
                 "1_week_earn_rate": -1.5532,
                 "1_month_earn_rate": -0.9635,
                 "3_month_earn_rate": 27.361,
@@ -502,13 +470,13 @@
         ]
     },
     {
-        "category": "⚙️ 로봇",
+        "category": "⚙️로봇",
         "tickers": [
             {
                 "ticker": "471040",
                 "name": "KoAct 글로벌AI&로봇액티브",
                 "listing_date": "2023-11-21",
-                "1_week_avg_volume": 192903,
+                "1_week_avg_volume": 192899,
                 "1_week_earn_rate": 7.2886,
                 "1_month_earn_rate": 5.5449,
                 "3_month_earn_rate": 18.9015,
@@ -519,7 +487,7 @@
                 "ticker": "0036R0",
                 "name": "RISE 미국휴머노이드로봇",
                 "listing_date": "2025-04-15",
-                "1_week_avg_volume": 168253,
+                "1_week_avg_volume": 168251,
                 "1_week_earn_rate": 4.7363,
                 "1_month_earn_rate": 0.8608,
                 "3_month_earn_rate": 18.3236,
@@ -530,7 +498,7 @@
                 "ticker": "464310",
                 "name": "TIGER 글로벌AI&로보틱스 INDXX",
                 "listing_date": "2023-08-17",
-                "1_week_avg_volume": 99563,
+                "1_week_avg_volume": 99558,
                 "1_week_earn_rate": 4.4556,
                 "1_month_earn_rate": 3.787,
                 "3_month_earn_rate": 11.8162,
@@ -541,7 +509,7 @@
                 "ticker": "0038A0",
                 "name": "KODEX 미국휴머노이드로봇",
                 "listing_date": "2025-04-15",
-                "1_week_avg_volume": 725365,
+                "1_week_avg_volume": 725317,
                 "1_week_earn_rate": 1.7874,
                 "1_month_earn_rate": 0.4332,
                 "3_month_earn_rate": 11.3478,
@@ -551,159 +519,7 @@
         ]
     },
     {
-        "category": "💰 금융",
-        "tickers": [
-            {
-                "ticker": "0013P0",
-                "name": "RISE 미국은행TOP10",
-                "listing_date": "2025-02-18",
-                "1_week_avg_volume": 38685,
-                "1_week_earn_rate": 3.4903,
-                "1_month_earn_rate": 6.1288,
-                "3_month_earn_rate": 15.3475,
-                "6_month_earn_rate": 34.4618,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "0028X0",
-                "name": "KODEX 미국금융테크액티브",
-                "listing_date": "2025-05-27",
-                "1_week_avg_volume": 23041,
-                "1_week_earn_rate": 1.5476,
-                "1_month_earn_rate": -0.1561,
-                "3_month_earn_rate": 3.6138,
-                "6_month_earn_rate": 17.8113,
-                "12_month_earn_rate": null
-            }
-        ]
-    },
-    {
-        "category": "🚀 우주",
-        "tickers": [
-            {
-                "ticker": "0144M0",
-                "name": "KODEX 미국드론UAM TOP10",
-                "listing_date": "2025-12-23",
-                "1_week_avg_volume": 349065,
-                "1_week_earn_rate": 14.6329,
-                "1_month_earn_rate": null,
-                "3_month_earn_rate": null,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "0131V0",
-                "name": "1Q 미국우주항공테크",
-                "listing_date": "2025-11-25",
-                "1_week_avg_volume": 1340452,
-                "1_week_earn_rate": 13.7931,
-                "1_month_earn_rate": 32.4213,
-                "3_month_earn_rate": null,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "440910",
-                "name": "WON 미국우주항공방산",
-                "listing_date": "2022-08-26",
-                "1_week_avg_volume": 53918,
-                "1_week_earn_rate": 8.8266,
-                "1_month_earn_rate": 14.3693,
-                "3_month_earn_rate": 18.5068,
-                "6_month_earn_rate": 37.4567,
-                "12_month_earn_rate": 64.1287
-            },
-            {
-                "ticker": "478150",
-                "name": "TIMEFOLIO 글로벌우주테크&방산액티브",
-                "listing_date": "2024-04-23",
-                "1_week_avg_volume": 265712,
-                "1_week_earn_rate": 7.912,
-                "1_month_earn_rate": 13.3264,
-                "3_month_earn_rate": 9.8985,
-                "6_month_earn_rate": 27.1393,
-                "12_month_earn_rate": 57.4417
-            }
-        ]
-    },
-    {
-        "category": "🛡️ 방산",
-        "tickers": [
-            {
-                "ticker": "0102X0",
-                "name": "ACE 유럽방산TOP10",
-                "listing_date": "2025-09-23",
-                "1_week_avg_volume": 41365,
-                "1_week_earn_rate": 10.3014,
-                "1_month_earn_rate": 13.9041,
-                "3_month_earn_rate": -3.4979,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "496770",
-                "name": "PLUS 글로벌방산",
-                "listing_date": "2024-11-12",
-                "1_week_avg_volume": 277419,
-                "1_week_earn_rate": 9.0108,
-                "1_month_earn_rate": 13.2939,
-                "3_month_earn_rate": 6.9139,
-                "6_month_earn_rate": 22.2895,
-                "12_month_earn_rate": 102.3753
-            },
-            {
-                "ticker": "494840",
-                "name": "TIGER 미국방산TOP10",
-                "listing_date": "2024-10-29",
-                "1_week_avg_volume": 86275,
-                "1_week_earn_rate": 7.9639,
-                "1_month_earn_rate": 12.4183,
-                "3_month_earn_rate": 14.9469,
-                "6_month_earn_rate": 34.2928,
-                "12_month_earn_rate": 46.8902
-            }
-        ]
-    },
-    {
-        "category": "🔥 밈/모멘텀",
-        "tickers": [
-            {
-                "ticker": "473590",
-                "name": "ACE 미국주식베스트셀러",
-                "listing_date": "2023-12-27",
-                "1_week_avg_volume": 40706,
-                "1_week_earn_rate": 1.3977,
-                "1_month_earn_rate": -0.0538,
-                "3_month_earn_rate": 3.6238,
-                "6_month_earn_rate": 13.3253,
-                "12_month_earn_rate": 12.6469
-            },
-            {
-                "ticker": "473460",
-                "name": "KODEX 미국서학개미",
-                "listing_date": "2023-12-27",
-                "1_week_avg_volume": 384710,
-                "1_week_earn_rate": 0.5261,
-                "1_month_earn_rate": -0.7892,
-                "3_month_earn_rate": 0.7853,
-                "6_month_earn_rate": 30.9487,
-                "12_month_earn_rate": 26.0953
-            },
-            {
-                "ticker": "0137V0",
-                "name": "KIWOOM 미국S&P500모멘텀",
-                "listing_date": "2025-12-09",
-                "1_week_avg_volume": 286089,
-                "1_week_earn_rate": 0.3057,
-                "1_month_earn_rate": null,
-                "3_month_earn_rate": null,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            }
-        ]
-    },
-    {
-        "category": "🚗 자율주행",
+        "category": "🚗자율주행",
         "tickers": [
             {
                 "ticker": "0078V0",
@@ -720,7 +536,7 @@
                 "ticker": "394660",
                 "name": "TIGER 글로벌자율주행&전기차SOLACTIVE",
                 "listing_date": "2021-07-20",
-                "1_week_avg_volume": 27224,
+                "1_week_avg_volume": 27223,
                 "1_week_earn_rate": 5.2083,
                 "1_month_earn_rate": 4.1305,
                 "3_month_earn_rate": 16.0165,
@@ -731,7 +547,7 @@
                 "ticker": "414270",
                 "name": "ACE 글로벌자율주행액티브",
                 "listing_date": "2022-02-15",
-                "1_week_avg_volume": 302797,
+                "1_week_avg_volume": 302628,
                 "1_week_earn_rate": 3.7224,
                 "1_month_earn_rate": -0.3389,
                 "3_month_earn_rate": -1.5079,
@@ -741,13 +557,95 @@
         ]
     },
     {
-        "category": "🇨🇳 중국",
+        "category": "🚀우주항공/🛡️방산",
+        "tickers": [
+            {
+                "ticker": "0144M0",
+                "name": "KODEX 미국드론UAM TOP10",
+                "listing_date": "2025-12-23",
+                "1_week_avg_volume": 349033,
+                "1_week_earn_rate": 14.6329,
+                "1_month_earn_rate": null,
+                "3_month_earn_rate": null,
+                "6_month_earn_rate": null,
+                "12_month_earn_rate": null
+            },
+            {
+                "ticker": "0131V0",
+                "name": "1Q 미국우주항공테크",
+                "listing_date": "2025-11-25",
+                "1_week_avg_volume": 1340095,
+                "1_week_earn_rate": 13.7931,
+                "1_month_earn_rate": 32.4213,
+                "3_month_earn_rate": null,
+                "6_month_earn_rate": null,
+                "12_month_earn_rate": null
+            },
+            {
+                "ticker": "0102X0",
+                "name": "ACE 유럽방산TOP10",
+                "listing_date": "2025-09-23",
+                "1_week_avg_volume": 41345,
+                "1_week_earn_rate": 10.3014,
+                "1_month_earn_rate": 13.9041,
+                "3_month_earn_rate": -3.4979,
+                "6_month_earn_rate": null,
+                "12_month_earn_rate": null
+            },
+            {
+                "ticker": "496770",
+                "name": "PLUS 글로벌방산",
+                "listing_date": "2024-11-12",
+                "1_week_avg_volume": 276867,
+                "1_week_earn_rate": 9.0108,
+                "1_month_earn_rate": 13.2939,
+                "3_month_earn_rate": 6.9139,
+                "6_month_earn_rate": 22.2895,
+                "12_month_earn_rate": 102.3753
+            },
+            {
+                "ticker": "440910",
+                "name": "WON 미국우주항공방산",
+                "listing_date": "2022-08-26",
+                "1_week_avg_volume": 53909,
+                "1_week_earn_rate": 8.8266,
+                "1_month_earn_rate": 14.3693,
+                "3_month_earn_rate": 18.5068,
+                "6_month_earn_rate": 37.4567,
+                "12_month_earn_rate": 64.1287
+            },
+            {
+                "ticker": "494840",
+                "name": "TIGER 미국방산TOP10",
+                "listing_date": "2024-10-29",
+                "1_week_avg_volume": 85642,
+                "1_week_earn_rate": 7.9639,
+                "1_month_earn_rate": 12.4183,
+                "3_month_earn_rate": 14.9469,
+                "6_month_earn_rate": 34.2928,
+                "12_month_earn_rate": 46.8901
+            },
+            {
+                "ticker": "478150",
+                "name": "TIMEFOLIO 글로벌우주테크&방산액티브",
+                "listing_date": "2024-04-23",
+                "1_week_avg_volume": 265702,
+                "1_week_earn_rate": 7.912,
+                "1_month_earn_rate": 13.3264,
+                "3_month_earn_rate": 9.8985,
+                "6_month_earn_rate": 27.1393,
+                "12_month_earn_rate": 57.4417
+            }
+        ]
+    },
+    {
+        "category": "🇨🇳중국",
         "tickers": [
             {
                 "ticker": "396520",
                 "name": "TIGER 차이나반도체FACTSET",
                 "listing_date": "2021-08-10",
-                "1_week_avg_volume": 531896,
+                "1_week_avg_volume": 531873,
                 "1_week_earn_rate": 11.3169,
                 "1_month_earn_rate": 13.4099,
                 "3_month_earn_rate": 5.7277,
@@ -758,7 +656,7 @@
                 "ticker": "414780",
                 "name": "TIGER 차이나과창판STAR50(합성)",
                 "listing_date": "2022-01-13",
-                "1_week_avg_volume": 441309,
+                "1_week_avg_volume": 441305,
                 "1_week_earn_rate": 8.363,
                 "1_month_earn_rate": 8.3621,
                 "3_month_earn_rate": 1.807,
@@ -769,7 +667,7 @@
                 "ticker": "0043Y0",
                 "name": "TIMEFOLIO 차이나AI테크액티브",
                 "listing_date": "2025-05-13",
-                "1_week_avg_volume": 287928,
+                "1_week_avg_volume": 287927,
                 "1_week_earn_rate": 8.0072,
                 "1_month_earn_rate": 12.3033,
                 "3_month_earn_rate": 3.0376,
@@ -780,7 +678,7 @@
                 "ticker": "0053L0",
                 "name": "TIGER 차이나휴머노이드로봇",
                 "listing_date": "2025-05-27",
-                "1_week_avg_volume": 1615094,
+                "1_week_avg_volume": 1615074,
                 "1_week_earn_rate": 7.1263,
                 "1_month_earn_rate": 7.3341,
                 "3_month_earn_rate": -4.2593,
@@ -802,7 +700,7 @@
                 "ticker": "371460",
                 "name": "TIGER 차이나전기차SOLACTIVE",
                 "listing_date": "2020-12-08",
-                "1_week_avg_volume": 1045421,
+                "1_week_avg_volume": 1045319,
                 "1_week_earn_rate": 4.8544,
                 "1_month_earn_rate": 4.4614,
                 "3_month_earn_rate": -3.1435,
@@ -813,7 +711,7 @@
                 "ticker": "371160",
                 "name": "TIGER 차이나항셍테크",
                 "listing_date": "2020-12-16",
-                "1_week_avg_volume": 1752761,
+                "1_week_avg_volume": 1752379,
                 "1_week_earn_rate": 4.5169,
                 "1_month_earn_rate": 0.4396,
                 "3_month_earn_rate": -8.1836,
@@ -835,7 +733,7 @@
                 "ticker": "0047A0",
                 "name": "TIGER 차이나테크TOP10",
                 "listing_date": "2025-05-13",
-                "1_week_avg_volume": 382849,
+                "1_week_avg_volume": 382842,
                 "1_week_earn_rate": 2.3839,
                 "1_month_earn_rate": -4.1879,
                 "3_month_earn_rate": -10.5289,
@@ -845,7 +743,46 @@
         ]
     },
     {
+        "category": "🗿원자재",
+        "tickers": [
+            {
+                "ticker": "415920",
+                "name": "PLUS 글로벌희토류&전략자원생산기업",
+                "listing_date": "2022-01-18",
+                "1_week_avg_volume": 348336,
+                "1_week_earn_rate": 14.2761,
+                "1_month_earn_rate": 19.7601,
+                "3_month_earn_rate": 30.9414,
+                "6_month_earn_rate": 115.9033,
+                "12_month_earn_rate": 105.712
+            },
+            {
+                "ticker": "394670",
+                "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
+                "listing_date": "2021-07-20",
+                "1_week_avg_volume": 244311,
+                "1_week_earn_rate": 4.1527,
+                "1_month_earn_rate": 8.8764,
+                "3_month_earn_rate": 24.0943,
+                "6_month_earn_rate": 90.7476,
+                "12_month_earn_rate": 63.1113
+            }
+        ]
+    },
+    {
         "category": "기타",
-        "tickers": []
+        "tickers": [
+            {
+                "ticker": "442580",
+                "name": "PLUS 글로벌HBM반도체",
+                "listing_date": "2022-09-22",
+                "1_week_avg_volume": 365428,
+                "1_week_earn_rate": 17.0934,
+                "1_month_earn_rate": 30.8518,
+                "3_month_earn_rate": 84.1536,
+                "6_month_earn_rate": 142.4644,
+                "12_month_earn_rate": 215.0089
+            }
+        ]
     }
 ]
