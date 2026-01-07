@@ -106,8 +106,16 @@ def extract_recommendations_from_backtest(
             last_row = df.iloc[-1]
 
         # 전날 데이터 (일간 수익률 계산용)
+        # 방법 1: end_date 이전 데이터 중 마지막 행
         df_before_end = df[df.index < end_date]
-        prev_row = df_before_end.iloc[-1] if not df_before_end.empty else None
+        # 방법 2: 충분히 가까운 날짜 (df에 end_date가 없을 수 있음)
+        if df_before_end.empty and len(df) >= 2:
+            # end_date가 df의 마지막 날짜와 같다면, 두 번째 마지막 행 사용
+            prev_row = df.iloc[-2]
+        elif not df_before_end.empty:
+            prev_row = df_before_end.iloc[-1]
+        else:
+            prev_row = None
 
         # 메타 정보
         meta = merged_meta.get(ticker_key, merged_meta.get(ticker, {}))
@@ -131,9 +139,25 @@ def extract_recommendations_from_backtest(
             price_deviation = ((price - nav_price) / nav_price) * 100
 
         # 일간 수익률 계산
+        # 주의: 백테스트 엔진에서 데이터 없는 날은 price = avg_cost로 설정됨
+        # 실제 가격 변동을 계산하려면 price != avg_cost인 날을 찾아야 함
         daily_pct = 0.0
         if prev_row is not None:
             prev_price = _safe_float(prev_row.get("price"))
+            prev_avg_cost = _safe_float(prev_row.get("avg_cost"))
+
+            # prev_price가 avg_cost와 같으면 (데이터 없음 표시), 더 이전 날짜를 찾음
+            if prev_price and prev_avg_cost and abs(prev_price - prev_avg_cost) < 0.001:
+                # df에서 price != avg_cost인 마지막 행 찾기
+                df_before_prev = df[df.index < end_date]
+                for idx in reversed(df_before_prev.index):
+                    row = df_before_prev.loc[idx]
+                    row_price = _safe_float(row.get("price"))
+                    row_avg_cost = _safe_float(row.get("avg_cost"))
+                    if row_price and row_avg_cost and abs(row_price - row_avg_cost) >= 0.001:
+                        prev_price = row_price
+                        break
+
             if prev_price and prev_price > 0 and price:
                 daily_pct = ((price / prev_price) - 1.0) * 100.0
 
