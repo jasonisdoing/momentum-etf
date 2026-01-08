@@ -52,17 +52,6 @@
         "category": "💾AI반도체",
         "tickers": [
             {
-                "ticker": "446690",
-                "name": "KODEX 아시아AI반도체exChina액티브",
-                "listing_date": "2023-02-01",
-                "1_week_avg_volume": 3021,
-                "1_week_earn_rate": 10.4964,
-                "1_month_earn_rate": 15.6177,
-                "3_month_earn_rate": 45.7238,
-                "6_month_earn_rate": 78.4496,
-                "12_month_earn_rate": 101.1471
-            },
-            {
                 "ticker": "446770",
                 "name": "ACE 글로벌반도체TOP4 Plus",
                 "listing_date": "2022-11-15",
@@ -411,17 +400,6 @@
                 "3_month_earn_rate": 10.9624,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
-            },
-            {
-                "ticker": "485810",
-                "name": "TIMEFOLIO 글로벌바이오액티브",
-                "listing_date": "2024-07-02",
-                "1_week_avg_volume": 36766,
-                "1_week_earn_rate": 3.8949,
-                "1_month_earn_rate": 3.2723,
-                "3_month_earn_rate": 34.0073,
-                "6_month_earn_rate": 39.4488,
-                "12_month_earn_rate": 27.8992
             },
             {
                 "ticker": "483030",
