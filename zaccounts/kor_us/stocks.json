@@ -535,7 +535,7 @@
         ]
     },
     {
-        "category": "🚀우주항공/🛡️방산",
+        "category": "🚀우주항공",
         "tickers": [
             {
                 "ticker": "0144M0",
@@ -560,6 +560,33 @@
                 "12_month_earn_rate": null
             },
             {
+                "ticker": "440910",
+                "name": "WON 미국우주항공방산",
+                "listing_date": "2022-08-26",
+                "1_week_avg_volume": 53909,
+                "1_week_earn_rate": 8.8266,
+                "1_month_earn_rate": 14.3693,
+                "3_month_earn_rate": 18.5068,
+                "6_month_earn_rate": 37.4567,
+                "12_month_earn_rate": 64.1287
+            },
+            {
+                "ticker": "478150",
+                "name": "TIMEFOLIO 글로벌우주테크&방산액티브",
+                "listing_date": "2024-04-23",
+                "1_week_avg_volume": 265702,
+                "1_week_earn_rate": 7.912,
+                "1_month_earn_rate": 13.3264,
+                "3_month_earn_rate": 9.8985,
+                "6_month_earn_rate": 27.1393,
+                "12_month_earn_rate": 57.4417
+            }
+        ]
+    },
+    {
+        "category": "🛡️방산",
+        "tickers": [
+            {
                 "ticker": "0102X0",
                 "name": "ACE 유럽방산TOP10",
                 "listing_date": "2025-09-23",
@@ -582,17 +609,6 @@
                 "12_month_earn_rate": 102.3753
             },
             {
-                "ticker": "440910",
-                "name": "WON 미국우주항공방산",
-                "listing_date": "2022-08-26",
-                "1_week_avg_volume": 53909,
-                "1_week_earn_rate": 8.8266,
-                "1_month_earn_rate": 14.3693,
-                "3_month_earn_rate": 18.5068,
-                "6_month_earn_rate": 37.4567,
-                "12_month_earn_rate": 64.1287
-            },
-            {
                 "ticker": "494840",
                 "name": "TIGER 미국방산TOP10",
                 "listing_date": "2024-10-29",
@@ -602,17 +618,6 @@
                 "3_month_earn_rate": 14.9469,
                 "6_month_earn_rate": 34.2928,
                 "12_month_earn_rate": 46.8901
-            },
-            {
-                "ticker": "478150",
-                "name": "TIMEFOLIO 글로벌우주테크&방산액티브",
-                "listing_date": "2024-04-23",
-                "1_week_avg_volume": 265702,
-                "1_week_earn_rate": 7.912,
-                "1_month_earn_rate": 13.3264,
-                "3_month_earn_rate": 9.8985,
-                "6_month_earn_rate": 27.1393,
-                "12_month_earn_rate": 57.4417
             }
         ]
     },

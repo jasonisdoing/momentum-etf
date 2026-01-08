@@ -491,7 +491,7 @@
         ]
     },
     {
-        "category": "🚀우주항공/🛡️방산",
+        "category": "🚀우주항공",
         "tickers": [
             {
                 "ticker": "421320",
@@ -514,7 +514,12 @@
                 "3_month_earn_rate": 1.3046,
                 "6_month_earn_rate": 16.0786,
                 "12_month_earn_rate": 208.3928
-            },
+            }
+        ]
+    },
+    {
+        "category": "🛡️방산",
+        "tickers": [
             {
                 "ticker": "449450",
                 "name": "PLUS K방산",
