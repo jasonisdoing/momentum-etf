@@ -31,6 +31,7 @@ EXCLUDE_KEYWORDS = [
     "Uranium",
     "XRP",
     "Staking",
+    "Gas",
 ]
 # 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
 INCLUDE_KEYWORDS = []
