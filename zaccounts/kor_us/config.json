@@ -10,9 +10,9 @@
     "show_hold": true,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2026-01-08 00:00",
-        "CAGR": 82.391868,
-        "MDD": -15.33939,
+        "BACKTESTED_DATE": "2026-01-09 21:32",
+        "CAGR": 87.301563,
+        "MDD": -14.443298,
         "PORTFOLIO_TOPN": 5,
         "MA_PERIOD": 60,
         "MA_TYPE": "EMA",
