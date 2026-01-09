@@ -118,17 +118,6 @@
         "category": "🖥️테크",
         "tickers": [
             {
-                "ticker": "139260",
-                "name": "TIGER 200 IT",
-                "listing_date": "2011-04-06",
-                "1_week_avg_volume": 478758,
-                "1_week_earn_rate": 12.9731,
-                "1_month_earn_rate": 20.2579,
-                "3_month_earn_rate": 64.8107,
-                "6_month_earn_rate": 95.5424,
-                "12_month_earn_rate": 147.8473
-            },
-            {
                 "ticker": "444200",
                 "name": "SOL 코리아메가테크액티브",
                 "listing_date": "2022-10-18",
