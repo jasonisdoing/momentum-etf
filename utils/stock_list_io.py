@@ -86,6 +86,10 @@ def get_etfs(account_id: str, include_extra_tickers: Iterable[str] | None = None
         if not isinstance(tickers_list, list):
             continue
 
+        # 카테고리명에 종목 수 추가
+        category_count = len(tickers_list)
+        category_display = f"{category_name}({category_count})"
+
         for item in tickers_list:
             if not isinstance(item, dict) or not item.get("ticker"):
                 continue
@@ -100,7 +104,7 @@ def get_etfs(account_id: str, include_extra_tickers: Iterable[str] | None = None
             new_item = dict(item)
             new_item["ticker"] = ticker_norm
             new_item["type"] = "etf"
-            new_item["category"] = category_name
+            new_item["category"] = category_display
             if item.get("listing_date"):
                 new_item["listing_date"] = item["listing_date"]
             all_etfs.append(new_item)

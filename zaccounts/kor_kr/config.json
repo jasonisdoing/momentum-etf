@@ -1,0 +1,29 @@
+{
+    "order": 10,
+    "icon": "🇰🇷",
+    "name": "국내상장 한국 ETF",
+    "desc": "운영종인 국내상장 한국 ETF 포트폴리오 입니다.",
+    "country_code": "kor",
+    "currency": "krw",
+    "slack_channel": "C09FAU2NHM2",
+    "initial_capital_krw": "50000000",
+    "show_hold": true,
+    "strategy": {
+        "MONTHS_RANGE": 12,
+        "BACKTESTED_DATE": "2026-01-09 11:04",
+        "CAGR": 136.348077,
+        "MDD": -13.773185,
+        "PORTFOLIO_TOPN": 6,
+        "MA_PERIOD": 50,
+        "MA_TYPE": "EMA",
+        "REPLACE_SCORE_THRESHOLD": 0,
+        "STOP_LOSS_PCT": 7,
+        "OVERBOUGHT_SELL_THRESHOLD": 100,
+        "COOLDOWN_DAYS": 0,
+        "OPTIMIZATION_METRIC": "CAGR"
+    },
+    "benchmark": {
+        "ticker": "379800",
+        "name": "Kodex 미국S&P500"
+    }
+}
