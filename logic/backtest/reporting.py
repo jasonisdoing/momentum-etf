@@ -687,9 +687,15 @@ def _build_daily_table_rows(
 
     items_for_filter = []
     for sort_key, row_data in entries:
-        # row_data: [순위, 티커, 종목명, 카테고리, 상태, ...]
+        # row_data: [순위, 티커, 종목명, 카테고리, 상태, ...문구(18)]
         # sort_key: (is_cash, decision_order, -score, ticker)
         score_val = -sort_key[2] if len(sort_key) > 2 else 0.0  # 음수로 저장되어 있으므로 다시 양수로
+
+        # "데이터 없음" 종목은 점수를 -inf로 처리하여 카테고리 필터링에서 제외
+        phrase = row_data[18] if len(row_data) > 18 else ""
+        if "데이터 없음" in str(phrase):
+            score_val = float("-inf")
+
         item_dict = {
             "ticker": row_data[1],  # 티커
             "category": row_data[3],  # 카테고리

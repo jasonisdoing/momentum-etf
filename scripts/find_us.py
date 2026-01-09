@@ -31,6 +31,7 @@ EXCLUDE_KEYWORDS = [
     "Uranium",
     "XRP",
     "Staking",
+    "Gas",
 ]
 # 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
 INCLUDE_KEYWORDS = []
@@ -227,6 +228,49 @@ def main():
 
     print()
     print("=" * 70)
+
+    # 기존 stocks.json 로드 및 비교
+    import json
+    import os
+
+    existing_tickers = set()
+    stocks_json_path = os.path.join("zaccounts", "us", "stocks.json")
+
+    try:
+        if os.path.exists(stocks_json_path):
+            with open(stocks_json_path, encoding="utf-8") as f:
+                data = json.load(f)
+                for category in data:
+                    for item in category.get("tickers", []):
+                        existing_tickers.add(item.get("ticker"))
+    except Exception as e:
+        print(f"\n⚠️ stocks.json 로드 중 오류 발생: {e}")
+
+    new_tickers = [etf for etf in etfs if etf["ticker"] not in existing_tickers]
+
+    if new_tickers:
+        print()
+        print("+" * 70)
+        print(f"🆕 stocks.json에 없는 신규 발견 종목 ({len(new_tickers)}개)")
+        print("+" * 70)
+        print()
+        for etf in new_tickers:
+            ticker = etf["ticker"]
+            name = etf["name"]
+            change_pct = etf["change_pct"]
+            price = etf["price"]
+            volume = etf["volume"]
+
+            # 이름이 너무 길면 자르기
+            if len(name) > 45:
+                name = name[:42] + "..."
+
+            volume_str = f"{volume:,}" if volume > 0 else "N/A"
+            print(f"  - {name} ({ticker}): 금일수익률: +{change_pct:.2f}%, 현재가: ${price:.2f}, 거래량: {volume_str}")
+        print()
+        print("+" * 70)
+    else:
+        print("\n✅ 발견된 모든 종목이 이미 stocks.json에 존재합니다.")
 
 
 if __name__ == "__main__":
