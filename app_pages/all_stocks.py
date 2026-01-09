@@ -306,21 +306,53 @@ def _style_dataframe(df: pd.DataFrame, country_code: str = "kor") -> pd.io.forma
     if "괴리율" in df.columns:
         styled = styled.map(_deviation_style, subset=["괴리율"])
 
-    # 가격 컬럼 포맷팅 (천 단위 콤마 + 원)
+    # 가격 컬럼 포맷팅 (국가별 통화 단위)
     format_dict = {}
 
-    is_korean = str(country_code).lower() in {"kr", "kor"}
+    country_lower = str(country_code).lower()
+    is_korean = country_lower in {"kr", "kor"}
+    is_us = country_lower in {"us", "usa", "usd"}
+    is_aus = country_lower in {"aus", "au", "aud"}
 
-    def _safe_price_format(x: Any) -> str:
+    def _safe_price_format_kr(x: Any) -> str:
         if isinstance(x, (int, float)):
             return f"{x:,.0f}원"
         return str(x)
 
-    if "현재가" in df.columns:
-        format_dict["현재가"] = _safe_price_format
+    def _safe_price_format_us(x: Any) -> str:
+        if isinstance(x, (int, float)):
+            return f"${x:,.2f}"
+        return str(x)
 
-    if is_korean and "Nav" in df.columns:
-        format_dict["Nav"] = _safe_price_format
+    def _safe_price_format_aus(x: Any) -> str:
+        if isinstance(x, (int, float)):
+            return f"A${x:,.2f}"
+        return str(x)
+
+    def _safe_price_format_default(x: Any) -> str:
+        if isinstance(x, (int, float)):
+            return f"{x:,.2f}"
+        return str(x)
+
+    if "현재가" in df.columns:
+        if is_korean:
+            format_dict["현재가"] = _safe_price_format_kr
+        elif is_us:
+            format_dict["현재가"] = _safe_price_format_us
+        elif is_aus:
+            format_dict["현재가"] = _safe_price_format_aus
+        else:
+            format_dict["현재가"] = _safe_price_format_default
+
+    if "Nav" in df.columns:
+        if is_korean:
+            format_dict["Nav"] = _safe_price_format_kr
+        elif is_us:
+            format_dict["Nav"] = _safe_price_format_us
+        elif is_aus:
+            format_dict["Nav"] = _safe_price_format_aus
+        else:
+            format_dict["Nav"] = _safe_price_format_default
 
     if format_dict:
         styled = styled.format(format_dict)
