@@ -334,12 +334,15 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     country_lower = (country_code or "").strip().lower()
     is_kr = country_lower in {"kr", "kor"}
     is_us = country_lower in {"us", "usa", "usd"}
+    is_aus = country_lower in {"aus", "au", "aud"}
 
     if price_label in df.columns:
         if is_kr:
             format_dict[price_label] = _safe_format("{:,.0f}원")
         elif is_us:
             format_dict[price_label] = _safe_format("${:,.2f}")
+        elif is_aus:
+            format_dict[price_label] = _safe_format("A${:,.2f}")
         else:
             format_dict[price_label] = _safe_format("{:,.2f}")
 
@@ -348,6 +351,8 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
             format_dict["Nav"] = _safe_format("{:,.0f}원")
         elif is_us:
             format_dict["Nav"] = _safe_format("${:,.2f}")
+        elif is_aus:
+            format_dict["Nav"] = _safe_format("A${:,.2f}")
         else:
             format_dict["Nav"] = _safe_format("{:,.2f}")
 
@@ -373,7 +378,7 @@ def render_recommendation_table(
         "#": st.column_config.TextColumn("#", width=30),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),
-        "카테고리": st.column_config.TextColumn("카테고리", width=165),
+        "카테고리": st.column_config.TextColumn("카테고리", width=130),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
         price_label: st.column_config.NumberColumn(price_label, width="small"),
