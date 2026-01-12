@@ -10,9 +10,9 @@
     "show_hold": true,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2026-01-09 21:32",
-        "CAGR": 87.301563,
-        "MDD": -14.443298,
+        "BACKTESTED_DATE": "2026-01-12 14:02",
+        "CAGR": 93.980598,
+        "MDD": -14.431357,
         "PORTFOLIO_TOPN": 5,
         "MA_PERIOD": 60,
         "MA_TYPE": "EMA",
@@ -20,7 +20,8 @@
         "STOP_LOSS_PCT": 5,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
-        "OPTIMIZATION_METRIC": "CAGR"
+        "OPTIMIZATION_METRIC": "CAGR",
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
         "ticker": "379800",

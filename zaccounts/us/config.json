@@ -10,9 +10,9 @@
     "show_hold": false,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2026-01-08 10:38",
-        "CAGR": 79.939642,
-        "MDD": -14.90199,
+        "BACKTESTED_DATE": "2026-01-12 14:07",
+        "CAGR": 97.516746,
+        "MDD": -14.144235,
         "PORTFOLIO_TOPN": 5,
         "MA_PERIOD": 40,
         "MA_TYPE": "SMA",
@@ -20,7 +20,8 @@
         "STOP_LOSS_PCT": 5,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
-        "OPTIMIZATION_METRIC": "CAGR"
+        "OPTIMIZATION_METRIC": "CAGR",
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
         "ticker": "VOO",

@@ -161,6 +161,7 @@ def run_account_backtest(
             replace_threshold=strategy_override.replace_threshold,
             ma_type=strategy_override.ma_type,
             stop_loss_pct=strategy_override.stop_loss_pct,
+            enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
@@ -525,6 +526,7 @@ def _build_backtest_kwargs(
         "rsi_sell_threshold": rsi_sell_threshold,
         "cooldown_days": cooldown_days,
         "quiet": quiet,
+        "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }
 
     clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}

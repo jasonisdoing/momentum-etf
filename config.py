@@ -25,11 +25,6 @@ RSI_CALCULATION_CONFIG = {
     "ema_smoothing": 2.0,
 }
 
-# 데이터 충분성 검증 활성화 여부
-# True: 신규 상장 ETF 등 데이터가 부족한 경우 완화된 기준 적용
-# False: 데이터 충분성 검증 비활성화 (모든 종목에 대해 계산 시도)
-ENABLE_DATA_SUFFICIENCY_CHECK = False
-
 
 # 통합 시장 거래 시간표
 MARKET_SCHEDULES = {
