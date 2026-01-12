@@ -591,17 +591,6 @@
                 "3_month_earn_rate": 14.5597,
                 "6_month_earn_rate": 37.9406,
                 "12_month_earn_rate": 69.9699
-            },
-            {
-                "ticker": "0131V0",
-                "name": "1Q 미국우주항공테크",
-                "listing_date": "2025-11-25",
-                "1_week_avg_volume": 1509762,
-                "1_week_earn_rate": 9.3461,
-                "1_month_earn_rate": 25.7969,
-                "3_month_earn_rate": null,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
             }
         ]
     },
@@ -775,7 +764,7 @@
         ]
     },
     {
-        "category": "기타",
+        "category": "예외",
         "tickers": [
             {
                 "ticker": "442580",
@@ -787,6 +776,17 @@
                 "3_month_earn_rate": 60.0097,
                 "6_month_earn_rate": 141.6322,
                 "12_month_earn_rate": 215.5216
+            },
+            {
+                "ticker": "0131V0",
+                "name": "1Q 미국우주항공테크",
+                "listing_date": "2025-11-25",
+                "1_week_avg_volume": 1509762,
+                "1_week_earn_rate": 9.3461,
+                "1_month_earn_rate": 25.7969,
+                "3_month_earn_rate": null,
+                "6_month_earn_rate": null,
+                "12_month_earn_rate": null
             }
         ]
     }
