@@ -235,7 +235,7 @@
                 "1_month_earn_rate": 1.4895,
                 "3_month_earn_rate": 2.6719,
                 "6_month_earn_rate": 31.6101,
-                "12_month_earn_rate": 33.9953
+                "12_month_earn_rate": 33.9954
             },
             {
                 "ticker": "SOXQ",
@@ -392,6 +392,17 @@
                 "1_month_earn_rate": 29.2368,
                 "3_month_earn_rate": 17.1142,
                 "6_month_earn_rate": 43.5387,
+                "12_month_earn_rate": null
+            },
+            {
+                "ticker": "JEDI",
+                "name": "Defiance Drone and Modern Warfare ETF",
+                "listing_date": "2025-09-26",
+                "1_week_avg_volume": 157280,
+                "1_week_earn_rate": 15.5991,
+                "1_month_earn_rate": 22.1445,
+                "3_month_earn_rate": 5.0368,
+                "6_month_earn_rate": null,
                 "12_month_earn_rate": null
             },
             {
@@ -931,7 +942,7 @@
                 "1_month_earn_rate": 9.5499,
                 "3_month_earn_rate": 9.868,
                 "6_month_earn_rate": 30.5258,
-                "12_month_earn_rate": 56.8847
+                "12_month_earn_rate": 56.8848
             },
             {
                 "ticker": "VTI",
