@@ -363,17 +363,6 @@
         "category": "🚗자동차/자율주행",
         "tickers": [
             {
-                "ticker": "138540",
-                "name": "TIGER 현대차그룹+펀더멘털",
-                "listing_date": "2011-03-10",
-                "1_week_avg_volume": 334159,
-                "1_week_earn_rate": 12.8873,
-                "1_month_earn_rate": 9.6453,
-                "3_month_earn_rate": 33.7547,
-                "6_month_earn_rate": 42.7723,
-                "12_month_earn_rate": 84.0832
-            },
-            {
                 "ticker": "466930",
                 "name": "SOL 자동차TOP3플러스",
                 "listing_date": "2023-10-05",
