@@ -227,17 +227,6 @@
                 "12_month_earn_rate": null
             },
             {
-                "ticker": "367770",
-                "name": "RISE 수소경제테마",
-                "listing_date": "2020-10-29",
-                "1_week_avg_volume": 169757,
-                "1_week_earn_rate": 9.1795,
-                "1_month_earn_rate": 9.2979,
-                "3_month_earn_rate": 29.148,
-                "6_month_earn_rate": 40.6348,
-                "12_month_earn_rate": 143.3104
-            },
-            {
                 "ticker": "0092B0",
                 "name": "SOL 한국원자력SMR",
                 "listing_date": "2025-08-19",
