@@ -37,7 +37,7 @@ ACCOUNT_TUNING_CONFIG = {
     },
     # 🇦🇺 호주 직투: 테스트 중
     "aus": {
-        "PORTFOLIO_TOPN": [6],
+        "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": [0],
         # 1개월 ~ 3개월
         # "MA_RANGE": [20, 30, 40, 50, 60],
