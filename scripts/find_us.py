@@ -208,7 +208,7 @@ def main():
     print(f"📅 조회 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
     print()
-    print("--- 상승중인 미국 ETF 목록 ---")
+    print("--- 상승중인 ETF 목록 ---")
     print()
 
     for etf in etfs:

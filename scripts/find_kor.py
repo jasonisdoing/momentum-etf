@@ -31,10 +31,10 @@ from pykrx import stock
 
 # --- 설정 ---
 # 최소 등락률 (%)
-MIN_CHANGE_PCT = 2.0
+MIN_CHANGE_PCT = 3.0
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
 # EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN", "코리아", "한국", "200", "삼성", "코스닥", "코스피"]
-EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN"]
+EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "ETN"]
 # 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
 # INCLUDE_KEYWORDS = ["글로벌", "미국"]
 INCLUDE_KEYWORDS = []
