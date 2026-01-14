@@ -250,9 +250,7 @@ def main():
 
     if new_tickers:
         print()
-        print("+" * 70)
-        print(f"🆕 stocks.json에 없는 신규 발견 종목 ({len(new_tickers)}개)")
-        print("+" * 70)
+        print("--- 신규 발견 종목 ---")
         print()
         for etf in new_tickers:
             ticker = etf["ticker"]

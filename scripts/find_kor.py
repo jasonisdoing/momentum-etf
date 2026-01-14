@@ -41,7 +41,7 @@ INCLUDE_KEYWORDS = []
 # 최소 거래량 (0이면 필터링 안 함)
 # MIN_VOLUME = 100000
 # MIN_VOLUME = 500000
-MIN_VOLUME = 0
+MIN_VOLUME = 100000
 
 
 def fetch_naver_etf_data(min_change_pct: float) -> pd.DataFrame | None:
@@ -306,6 +306,60 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
 
     except Exception as e:
         logger.error("오류가 발생했습니다: %s", e)
+        return
+
+    # 기존 stocks.json 로드 및 비교
+    import json
+    import os
+
+    existing_tickers = set()
+
+    # 확인할 계정 목록
+    target_accounts = ["kor_kr", "kor_us"]
+
+    for account in target_accounts:
+        stocks_json_path = os.path.join("zaccounts", account, "stocks.json")
+        try:
+            if os.path.exists(stocks_json_path):
+                with open(stocks_json_path, encoding="utf-8") as f:
+                    data = json.load(f)
+                    for category in data:
+                        for item in category.get("tickers", []):
+                            existing_tickers.add(item.get("ticker"))
+        except Exception as e:
+            logger.warning(f"{account} stocks.json 로드 중 오류 발생: {e}")
+
+    # top_gainers DataFrame에서 티커 목록 추출
+    found_tickers = []
+    if not top_gainers.empty:
+        found_tickers = top_gainers.to_dict("records")
+
+    new_tickers = [item for item in found_tickers if item["티커"] not in existing_tickers]
+
+    if new_tickers:
+        print()
+        print("--- 신규 발견 종목 ---")
+        print()
+        for item in new_tickers:
+            ticker = item["티커"]
+            name = item["종목명"]
+            change_rate = item["등락률"]
+
+            # 추가 정보
+            volume = item.get("거래량", 0)
+            volume_str = f"{volume:,}" if volume else "N/A"
+            risefall = item.get("괴리율")
+            risefall_str = f"{risefall:+.2f}%" if risefall is not None else "N/A"
+            three_month = item.get("3개월수익률")
+            three_month_str = (
+                f"{three_month:+.2f}%" if three_month is not None and pd.notna(three_month) else "아직없음"
+            )
+
+            print(
+                f"  - {name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
+            )
+    else:
+        print("\n✅ 발견된 모든 종목이 이미 등록되어 있습니다.")
 
 
 if __name__ == "__main__":
