@@ -16,7 +16,7 @@ from utils.logger import get_app_logger
 ACCOUNT_TUNING_CONFIG = {
     # 🇰🇷 국내 ETF: PORTFOLIO_TOPN 테스트 중
     "kor_kr": {
-        "PORTFOLIO_TOPN": [6],
+        "PORTFOLIO_TOPN": [6, 7, 8],
         "REPLACE_SCORE_THRESHOLD": [0],
         # 1개월 ~ 3개월
         "MA_RANGE": [20, 30, 40, 50, 60],
@@ -26,7 +26,7 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_TYPE": ["EMA"],
     },
     "kor_us": {
-        "PORTFOLIO_TOPN": [5],
+        "PORTFOLIO_TOPN": [5, 6, 7, 8],
         "REPLACE_SCORE_THRESHOLD": [0],
         # 1개월 ~ 3개월
         "MA_RANGE": [20, 30, 40, 50, 60],
