@@ -784,17 +784,6 @@
         "category": "🇯🇵 일본",
         "tickers": [
             {
-                "ticker": "464920",
-                "name": "PLUS 일본반도체소부장",
-                "listing_date": "2023-08-31",
-                "1_week_avg_volume": 26919,
-                "1_week_earn_rate": 7.7882,
-                "1_month_earn_rate": 15.7513,
-                "3_month_earn_rate": 27.362,
-                "6_month_earn_rate": 55.7974,
-                "12_month_earn_rate": 59.7069
-            },
-            {
                 "ticker": "465660",
                 "name": "TIGER 일본반도체FACTSET",
                 "listing_date": "2023-09-19",
@@ -804,61 +793,6 @@
                 "3_month_earn_rate": 29.0097,
                 "6_month_earn_rate": 49.9629,
                 "12_month_earn_rate": 66.8949
-            },
-            {
-                "ticker": "469160",
-                "name": "ACE 일본반도체",
-                "listing_date": "2023-10-17",
-                "1_week_avg_volume": 20563,
-                "1_week_earn_rate": 6.135,
-                "1_month_earn_rate": 15.7344,
-                "3_month_earn_rate": 31.1552,
-                "6_month_earn_rate": 62.1255,
-                "12_month_earn_rate": 70.6584
-            },
-            {
-                "ticker": "488480",
-                "name": "RISE 일본섹터TOP4Plus",
-                "listing_date": "2024-08-20",
-                "1_week_avg_volume": 22749,
-                "1_week_earn_rate": 5.1282,
-                "1_month_earn_rate": 8.1375,
-                "3_month_earn_rate": 13.8117,
-                "6_month_earn_rate": 28.4001,
-                "12_month_earn_rate": 24.1484
-            },
-            {
-                "ticker": "241180",
-                "name": "TIGER 일본니케이225",
-                "listing_date": "2016-03-31",
-                "1_week_avg_volume": 86356,
-                "1_week_earn_rate": 5.0336,
-                "1_month_earn_rate": 7.2711,
-                "3_month_earn_rate": 15.7457,
-                "6_month_earn_rate": 37.0382,
-                "12_month_earn_rate": 37.1906
-            },
-            {
-                "ticker": "238720",
-                "name": "ACE 일본Nikkei225(H)",
-                "listing_date": "2016-03-03",
-                "1_week_avg_volume": 13292,
-                "1_week_earn_rate": 4.6365,
-                "1_month_earn_rate": 8.3926,
-                "3_month_earn_rate": 15.7253,
-                "6_month_earn_rate": 37.7295,
-                "12_month_earn_rate": 36.7937
-            },
-            {
-                "ticker": "488290",
-                "name": "마이다스 일본테크액티브",
-                "listing_date": "2024-08-06",
-                "1_week_avg_volume": 24241,
-                "1_week_earn_rate": 2.9876,
-                "1_month_earn_rate": 4.2187,
-                "3_month_earn_rate": 15.9472,
-                "6_month_earn_rate": 43.3678,
-                "12_month_earn_rate": 53.4345
             }
         ]
     },
