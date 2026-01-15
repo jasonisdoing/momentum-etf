@@ -781,33 +781,6 @@
         ]
     },
     {
-        "category": "💰금융",
-        "tickers": [
-            {
-                "ticker": "0028X0",
-                "name": "KODEX 미국금융테크액티브",
-                "listing_date": "2025-05-27",
-                "1_week_avg_volume": 24136,
-                "1_week_earn_rate": -1.0224,
-                "1_month_earn_rate": -2.6306,
-                "3_month_earn_rate": 2.3685,
-                "6_month_earn_rate": 12.9717,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "0013P0",
-                "name": "RISE 미국은행TOP10",
-                "listing_date": "2025-02-18",
-                "1_week_avg_volume": 41007,
-                "1_week_earn_rate": -2.8343,
-                "1_month_earn_rate": -1.522,
-                "3_month_earn_rate": 12.2731,
-                "6_month_earn_rate": 25.9781,
-                "12_month_earn_rate": null
-            }
-        ]
-    },
-    {
         "category": "🔋 리튬",
         "tickers": [
             {
