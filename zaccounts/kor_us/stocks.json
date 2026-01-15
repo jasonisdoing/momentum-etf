@@ -781,22 +781,6 @@
         ]
     },
     {
-        "category": "🇯🇵 일본",
-        "tickers": [
-            {
-                "ticker": "465660",
-                "name": "TIGER 일본반도체FACTSET",
-                "listing_date": "2023-09-19",
-                "1_week_avg_volume": 16549,
-                "1_week_earn_rate": 7.1487,
-                "1_month_earn_rate": 14.386,
-                "3_month_earn_rate": 29.0097,
-                "6_month_earn_rate": 49.9629,
-                "12_month_earn_rate": 66.8949
-            }
-        ]
-    },
-    {
         "category": "💰금융",
         "tickers": [
             {
