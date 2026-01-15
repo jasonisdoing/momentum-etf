@@ -19,6 +19,15 @@ NAVER_FINANCE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
+# 호주 MarketIndex QuoteAPI 설정
+AU_QUOTEAPI_URL = "https://quoteapi.com/api/v5/symbols"
+AU_QUOTEAPI_APP_ID = "af5f4d73c1a54a33"  # marketindex.com.au 제공
+AU_QUOTEAPI_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Referer": "https://www.marketindex.com.au/",
+    "Origin": "https://www.marketindex.com.au",
+}
+
 # RSI 계산 파라미터 (원본 RSI 사용: 70 이상 과매수, 30 이하 과매도)
 RSI_CALCULATION_CONFIG = {
     "period": 15,
