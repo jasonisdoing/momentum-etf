@@ -47,17 +47,6 @@
                 "12_month_earn_rate": 123.1362
             },
             {
-                "ticker": "315960",
-                "name": "RISE 대형고배당10TR",
-                "listing_date": "2019-01-22",
-                "1_week_avg_volume": 153449,
-                "1_week_earn_rate": 2.9212,
-                "1_month_earn_rate": 22.3748,
-                "3_month_earn_rate": 50.2728,
-                "6_month_earn_rate": 88.942,
-                "12_month_earn_rate": 157.2884
-            },
-            {
                 "ticker": "292150",
                 "name": "TIGER 코리아TOP10",
                 "listing_date": "2018-03-30",
