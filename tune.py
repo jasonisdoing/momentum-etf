@@ -19,9 +19,9 @@ ACCOUNT_TUNING_CONFIG = {
         "PORTFOLIO_TOPN": [6, 7, 8],
         "REPLACE_SCORE_THRESHOLD": [0],
         # 1개월 ~ 3개월
-        # "MA_RANGE": [20, 30, 40, 50, 60],
+        "MA_RANGE": [20, 30, 40, 50, 60],
         # 2개월 ~ 6개월
-        "MA_RANGE": [40, 50, 60, 70, 80, 90, 100, 110, 120],
+        # "MA_RANGE": [40, 50, 60, 70, 80, 90, 100, 110, 120],
         # "MA_TYPE": ["SMA", "EMA", "HMA"],
         "MA_TYPE": ["EMA"],
     },
@@ -29,9 +29,9 @@ ACCOUNT_TUNING_CONFIG = {
         "PORTFOLIO_TOPN": [6, 7, 8],
         "REPLACE_SCORE_THRESHOLD": [0],
         # 1개월 ~ 3개월
-        # "MA_RANGE": [20, 30, 40, 50, 60],
+        "MA_RANGE": [20, 30, 40, 50, 60],
         # 2개월 ~ 6개월
-        "MA_RANGE": [40, 50, 60, 70, 80, 90, 100, 110, 120],
+        # "MA_RANGE": [40, 50, 60, 70, 80, 90, 100, 110, 120],
         # "MA_TYPE": ["SMA", "EMA", "HMA"],
         "MA_TYPE": ["EMA"],
     },
@@ -40,11 +40,11 @@ ACCOUNT_TUNING_CONFIG = {
         "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": [0],
         # 1개월 ~ 3개월
-        # "MA_RANGE": [20, 30, 40, 50, 60],
+        "MA_RANGE": [20, 30, 40, 50, 60],
         # 2개월 ~ 6개월
         # "MA_RANGE": [40, 50, 60, 70, 80, 90, 100, 110, 120],
         # 1개월 ~ 10개월
-        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
+        # "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
         "MA_TYPE": ["SMA", "EMA", "HMA"],
         # "MA_TYPE": ["SMA"],
     },
@@ -53,9 +53,9 @@ ACCOUNT_TUNING_CONFIG = {
         "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": [0],
         # 1개월 ~ 3개월
-        # "MA_RANGE": [20, 30, 40, 50, 60],
+        "MA_RANGE": [20, 30, 40, 50, 60],
         # 2개월 ~ 6개월
-        "MA_RANGE": [40, 50, 60, 70, 80, 90, 100, 110, 120],
+        # "MA_RANGE": [40, 50, 60, 70, 80, 90, 100, 110, 120],
         "MA_TYPE": ["SMA", "EMA", "HMA"],
         # "MA_TYPE": ["HMA"],
     },
