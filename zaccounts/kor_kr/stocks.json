@@ -369,17 +369,6 @@
                 "12_month_earn_rate": null
             },
             {
-                "ticker": "469070",
-                "name": "RISE AI&로봇",
-                "listing_date": "2023-10-24",
-                "1_week_avg_volume": 2161613,
-                "1_week_earn_rate": 16.5221,
-                "1_month_earn_rate": 13.3994,
-                "3_month_earn_rate": 34.4212,
-                "6_month_earn_rate": 48.0825,
-                "12_month_earn_rate": 90.7878
-            },
-            {
                 "ticker": "445290",
                 "name": "KODEX 로봇액티브",
                 "listing_date": "2022-11-15",
@@ -645,88 +634,6 @@
                 "3_month_earn_rate": 16.2803,
                 "6_month_earn_rate": 40.4891,
                 "12_month_earn_rate": 115.5715
-            }
-        ]
-    },
-    {
-        "category": "📈그룹",
-        "tickers": [
-            {
-                "ticker": "0000J0",
-                "name": "PLUS 한화그룹주",
-                "listing_date": "2024-12-24",
-                "1_week_avg_volume": 869611,
-                "1_week_earn_rate": 26.0409,
-                "1_month_earn_rate": 36.7413,
-                "3_month_earn_rate": 35.5116,
-                "6_month_earn_rate": 44.2152,
-                "12_month_earn_rate": 223.6803
-            },
-            {
-                "ticker": "469170",
-                "name": "ACE 포스코그룹포커스",
-                "listing_date": "2023-10-17",
-                "1_week_avg_volume": 1813120,
-                "1_week_earn_rate": 20.3041,
-                "1_month_earn_rate": 7.7724,
-                "3_month_earn_rate": 26.8425,
-                "6_month_earn_rate": 33.5474,
-                "12_month_earn_rate": 61.0781
-            },
-            {
-                "ticker": "138540",
-                "name": "TIGER 현대차그룹+펀더멘털",
-                "listing_date": "2011-03-10",
-                "1_week_avg_volume": 1054671,
-                "1_week_earn_rate": 19.0267,
-                "1_month_earn_rate": 24.0292,
-                "3_month_earn_rate": 51.5152,
-                "6_month_earn_rate": 59.6872,
-                "12_month_earn_rate": 111.6953
-            },
-            {
-                "ticker": "105780",
-                "name": "RISE 5대그룹주",
-                "listing_date": "2008-10-22",
-                "1_week_avg_volume": 30127,
-                "1_week_earn_rate": 7.531,
-                "1_month_earn_rate": 16.2887,
-                "3_month_earn_rate": 40.5607,
-                "6_month_earn_rate": 69.2388,
-                "12_month_earn_rate": 103.5298
-            },
-            {
-                "ticker": "102780",
-                "name": "KODEX 삼성그룹",
-                "listing_date": "2008-05-21",
-                "1_week_avg_volume": 487251,
-                "1_week_earn_rate": 5.2281,
-                "1_month_earn_rate": 13.465,
-                "3_month_earn_rate": 31.8315,
-                "6_month_earn_rate": 61.5542,
-                "12_month_earn_rate": 99.8022
-            },
-            {
-                "ticker": "213610",
-                "name": "KODEX 삼성그룹밸류",
-                "listing_date": "2015-01-08",
-                "1_week_avg_volume": 36678,
-                "1_week_earn_rate": 4.5698,
-                "1_month_earn_rate": 12.3083,
-                "3_month_earn_rate": 27.7923,
-                "6_month_earn_rate": 57.2195,
-                "12_month_earn_rate": 93.0014
-            },
-            {
-                "ticker": "138520",
-                "name": "TIGER 삼성그룹펀더멘털",
-                "listing_date": "2011-03-07",
-                "1_week_avg_volume": 51319,
-                "1_week_earn_rate": 4.5421,
-                "1_month_earn_rate": 12.364,
-                "3_month_earn_rate": 30.3312,
-                "6_month_earn_rate": 61.327,
-                "12_month_earn_rate": 105.4303
             }
         ]
     },
