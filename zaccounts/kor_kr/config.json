@@ -10,21 +10,21 @@
     "show_hold": true,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2026-01-16 12:04",
-        "CAGR": 142.01204,
-        "MDD": -16.098629,
-        "PORTFOLIO_TOPN": 6,
-        "MA_PERIOD": 60,
+        "BACKTESTED_DATE": "2026-01-16 21:38",
+        "CAGR": 160.939776,
+        "MDD": -17.060668,
+        "PORTFOLIO_TOPN": 4,
+        "MA_PERIOD": 110,
         "MA_TYPE": "EMA",
         "REPLACE_SCORE_THRESHOLD": 0,
-        "STOP_LOSS_PCT": 7,
+        "STOP_LOSS_PCT": 11,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
         "OPTIMIZATION_METRIC": "CAGR",
         "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
-        "ticker": "379800",
-        "name": "Kodex 미국S&P500"
+        "ticker": "385720",
+        "name": "TIME 코스피액티브"
     }
 }

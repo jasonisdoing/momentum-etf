@@ -10,11 +10,11 @@
     "show_hold": true,
     "strategy": {
         "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2026-01-16 09:14",
-        "CAGR": 92.818552,
-        "MDD": -14.447252,
-        "PORTFOLIO_TOPN": 6,
-        "MA_PERIOD": 60,
+        "BACKTESTED_DATE": "2026-01-16 21:40",
+        "CAGR": 99.520504,
+        "MDD": -16.894626,
+        "PORTFOLIO_TOPN": 4,
+        "MA_PERIOD": 50,
         "MA_TYPE": "EMA",
         "REPLACE_SCORE_THRESHOLD": 0,
         "STOP_LOSS_PCT": 5,
@@ -24,7 +24,7 @@
         "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
-        "ticker": "379800",
-        "name": "Kodex 미국S&P500"
+        "ticker": "426030",
+        "name": "TIME 미국나스닥100액티브"
     }
 }
