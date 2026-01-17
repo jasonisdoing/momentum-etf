@@ -199,7 +199,7 @@ def main() -> None:
     pages.append(
         page_cls(
             "app_pages/admin_page.py",
-            title="[Admin] 관리자",
+            title="관리자",
             icon="⚙️",
             url_path="admin",
         )

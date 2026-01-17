@@ -557,7 +557,7 @@
         ]
     },
     {
-        "category": "🚀우주/항공",
+        "category": "🚀우주/항공/방산",
         "tickers": [
             {
                 "ticker": "478150",
@@ -602,12 +602,7 @@
                 "3_month_earn_rate": null,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
-            }
-        ]
-    },
-    {
-        "category": "🛡️방산",
-        "tickers": [
+            },
             {
                 "ticker": "494840",
                 "name": "TIGER 미국방산TOP10",
@@ -797,7 +792,7 @@
         ]
     },
     {
-        "category": "🥇 금채굴",
+        "category": "🥇금",
         "tickers": [
             {
                 "ticker": "473640",
