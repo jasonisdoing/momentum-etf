@@ -6,7 +6,7 @@
     "country_code": "kor",
     "currency": "krw",
     "slack_channel": "C09FAU2NHM2",
-    "initial_capital_krw": "50000000",
+    "initial_capital_krw": "100000000",
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-09-08",
