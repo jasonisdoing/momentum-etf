@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import streamlit as st
+import streamlit_authenticator as stauth
 
 from app_pages.account_page import render_account_page
 from utils.account_registry import (
@@ -11,6 +12,40 @@ from utils.account_registry import (
     load_account_configs,
 )
 from utils.ui import load_account_recommendations, render_recommendation_table
+
+
+def _to_plain_dict(value):
+    if isinstance(value, Mapping):
+        return {k: _to_plain_dict(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_plain_dict(v) for v in value]
+    return value
+
+
+def _load_authenticator() -> stauth.Authenticate:
+    raw_config = st.secrets.get("auth")
+    if not raw_config:
+        st.error("인증 설정(st.secrets['auth'])이 구성되지 않았습니다.")
+        st.stop()
+
+    config = _to_plain_dict(raw_config)
+
+    credentials = config.get("credentials")
+    cookie = config.get("cookie") or {}
+    preauthorized = config.get("preauthorized", {})
+
+    required_keys = {"name", "key", "expiry_days"}
+    if not credentials or not cookie or not required_keys.issubset(cookie):
+        st.error("인증 설정 필드가 누락되었습니다. credentials/cookie 구성을 확인하세요.")
+        st.stop()
+
+    return stauth.Authenticate(
+        credentials,
+        cookie.get("name"),
+        cookie.get("key"),
+        cookie.get("expiry_days"),
+        preauthorized,
+    )
 
 
 def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]):
@@ -112,6 +147,25 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    # --- 인증 로직 시작 ---
+    authenticator = _load_authenticator()
+    # "main_login" 키를 사용하여 로그인 상태 관리
+    _, auth_status, _ = authenticator.login(location="main")
+
+    if auth_status is False:
+        st.error("이메일/사용자명 또는 비밀번호가 올바르지 않습니다.")
+        st.stop()
+    elif auth_status is None:
+        st.warning("계속하려면 로그인하세요.")
+        st.stop()
+
+    # 로그인 성공 시 사이드바에 로그아웃 버튼 표시
+    with st.sidebar:
+        st.write(f"환영합니다, {st.session_state.get('name', 'User')}님!")
+        authenticator.logout(button_name="로그아웃", location="sidebar")
+        st.divider()
+    # --- 인증 로직 끝 ---
 
     pages = [
         page_cls(
