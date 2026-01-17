@@ -448,8 +448,6 @@ def generate_recommendation_report(
         prefetch_start = cache_seed_dt
     date_range = [prefetch_start.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
 
-    logger.info("DEBUG: 데이터 로딩 요청 기간: %s ~ %s", date_range[0], date_range[1])
-
     # 가격 데이터 로드
     prefetched_map, missing = prepare_price_data(
         tickers=tickers,
@@ -852,16 +850,15 @@ def _enrich_with_period_returns(
         if df is None or df.empty:
             continue
 
-        if ticker == "421320" or ticker == "005930":  # 디버그용 대표 종목
-            logger.info("DEBUG: [%s] 데이터 행 수: %d, 시작: %s, 종료: %s", ticker, len(df), df.index[0], df.index[-1])
-
         # 현재가 결정
         current_price = rec.get("price")
         if not current_price:
             if base_date in df.index:
-                current_price = _safe_float(df.loc[base_date].get("close"))
+                row = df.loc[base_date]
+                current_price = _safe_float(row.get("close") or row.get("Close"))
             elif not df.empty:
-                current_price = _safe_float(df.iloc[-1].get("close"))
+                row = df.iloc[-1]
+                current_price = _safe_float(row.get("close") or row.get("Close"))
 
         if not current_price:
             continue
@@ -870,33 +867,15 @@ def _enrich_with_period_returns(
         for key, days in periods.items():
             target_date = base_date - pd.Timedelta(days=days)
 
-            # target_date 이전에 있는 가장 최근 데이터 찾기
             try:
-                # metho='pad'는 해당 날짜가 없으면 이전 날짜를 찾음 (데이터가 있는 날)
-                # target_date가 df.index 범위 밖(너무 과거)이면 KeyError 또는 IndexError 가능성
                 if target_date < df.index[0]:
                     continue
 
                 idx = df.index.get_indexer([target_date], method="pad")[0]
-
-                if ticker == "421320" and key == "return_12m":
-                    logger.info(
-                        "DEBUG: [%s] 12개월 수익률 계산 - Base: %s, Target: %s, FoundIdx: %s, DF_Start: %s",
-                        ticker,
-                        base_date,
-                        target_date,
-                        idx,
-                        df.index[0],
-                    )
-                    if idx >= 0:
-                        logger.info(
-                            "DEBUG: -> Current: %s, Prev: %s", current_price, _safe_float(df.iloc[idx].get("close"))
-                        )
-                        logger.info("DEBUG: Columns: %s", df.columns.tolist())
-                        logger.info("DEBUG: Row Data: %s", df.iloc[idx].to_dict())
-
                 if idx >= 0:
-                    prev_price = _safe_float(df.iloc[idx].get("close"))
+                    row = df.iloc[idx]
+                    prev_price = _safe_float(row.get("close") or row.get("Close"))
+
                     if prev_price and prev_price > 0:
                         ret = ((current_price - prev_price) / prev_price) * 100.0
                         rec[key] = ret

@@ -37,7 +37,7 @@ def _build_home_page(accounts: list[dict[str, Any]]):
         "SELL_TREND",
         "SELL_RSI",
         "CUT_STOPLOSS",
-        "SELL_REPLACE",
+        # "SELL_REPLACE",
     }
 
     def _render_home_page() -> None:
