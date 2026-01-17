@@ -797,19 +797,8 @@
         ]
     },
     {
-        "category": "🥇 금/은/금속",
+        "category": "🥇 금채굴",
         "tickers": [
-            {
-                "ticker": "144600",
-                "name": "KODEX 은선물(H)",
-                "listing_date": "2011-07-18",
-                "1_week_avg_volume": 12490437,
-                "1_week_earn_rate": 18.3391,
-                "1_month_earn_rate": 42.9467,
-                "3_month_earn_rate": 72.398,
-                "6_month_earn_rate": 132.3287,
-                "12_month_earn_rate": 191.8383
-            },
             {
                 "ticker": "473640",
                 "name": "HANARO 글로벌금채굴기업",
@@ -820,28 +809,6 @@
                 "3_month_earn_rate": 25.0,
                 "6_month_earn_rate": 101.4662,
                 "12_month_earn_rate": 187.7064
-            },
-            {
-                "ticker": "411060",
-                "name": "ACE KRX금현물",
-                "listing_date": "2021-12-15",
-                "1_week_avg_volume": 2945801,
-                "1_week_earn_rate": 4.2821,
-                "1_month_earn_rate": 6.0332,
-                "3_month_earn_rate": -0.0781,
-                "6_month_earn_rate": 47.5999,
-                "12_month_earn_rate": 67.5916
-            },
-            {
-                "ticker": "0064K0",
-                "name": "KODEX 금액티브",
-                "listing_date": "2025-06-17",
-                "1_week_avg_volume": 426921,
-                "1_week_earn_rate": 4.2491,
-                "1_month_earn_rate": 6.0753,
-                "3_month_earn_rate": 12.5346,
-                "6_month_earn_rate": 46.3239,
-                "12_month_earn_rate": null
             }
         ]
     },

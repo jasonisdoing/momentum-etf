@@ -398,12 +398,12 @@ def generate_recommendation_report(
     account_settings = get_account_settings(account_id)
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
     strategy_cfg = account_settings.get("strategy", {}) or {}
-    months_range = strategy_cfg.get("MONTHS_RANGE", 12)
+    backtest_start_date_str = strategy_cfg.get("BACKTEST_START_DATE", "2025-01-01")
 
     try:
-        months_range = int(months_range)
-    except (TypeError, ValueError):
-        months_range = 12
+        start_date = pd.to_datetime(backtest_start_date_str)
+    except Exception:
+        start_date = pd.Timestamp.now().normalize() - pd.DateOffset(months=12)
 
     # 종료일 결정
     if date_str:
@@ -412,8 +412,6 @@ def generate_recommendation_report(
         end_date = get_latest_trading_day(country_code)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()
-
-    start_date = end_date - pd.DateOffset(months=months_range)
 
     # 전략 규칙 로드
     strategy_rules = get_strategy_rules(account_id)
@@ -436,10 +434,21 @@ def generate_recommendation_report(
         except Exception:
             pass
 
+    # 1년 수익률 계산 등을 위한 최소 데이터 확보 (400일)
+    min_days_needed = 400
+    min_start_date_for_stats = end_date - pd.DateOffset(days=min_days_needed)
+
     prefetch_start = start_date - pd.DateOffset(days=warmup_days)
+
+    # 통계용 최소 시작일과 비교하여 더 이른 날짜 선택
+    if min_start_date_for_stats < prefetch_start:
+        prefetch_start = min_start_date_for_stats
+
     if cache_seed_dt is not None and cache_seed_dt < prefetch_start:
         prefetch_start = cache_seed_dt
     date_range = [prefetch_start.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
+
+    logger.info("DEBUG: 데이터 로딩 요청 기간: %s ~ %s", date_range[0], date_range[1])
 
     # 가격 데이터 로드
     prefetched_map, missing = prepare_price_data(
@@ -464,7 +473,6 @@ def generate_recommendation_report(
 
     result = run_account_backtest(
         account_id,
-        months_range=months_range,
         prefetched_data=prefetched_map,
         prefetched_etf_universe=etf_universe,
         quiet=True,  # 백테스트 로그 출력 억제
@@ -472,6 +480,13 @@ def generate_recommendation_report(
 
     # 마지막 날 추천 데이터 추출
     recommendations = extract_recommendations_from_backtest(result, ticker_meta=universe_meta)
+
+    # 전체 기간 데이터(prefetched_map)를 이용하여 기간별 수익률(6m, 12m 등) 재계산/보강
+    recommendations = _enrich_with_period_returns(
+        recommendations,
+        prefetched_map,
+        base_date=result.end_date,
+    )
 
     # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
     if country_code in ("kor", "kr"):
@@ -810,6 +825,85 @@ def main() -> None:
         account_id.upper(),
         " ".join(parts),
     )
+
+
+def _enrich_with_period_returns(
+    recommendations: list[dict[str, Any]],
+    prefetched_map: dict[str, pd.DataFrame],
+    base_date: pd.Timestamp,
+) -> list[dict[str, Any]]:
+    """추천 목록에 기간별 수익률을 prefetch된 전체 데이터를 이용하여 다시 계산합니다."""
+
+    # 1주, 1달, 3달, 6달, 12달
+    periods = {
+        "return_1w": 7,
+        "return_1m": 30,
+        "return_3m": 90,
+        "return_6m": 180,
+        "return_12m": 365,
+    }
+
+    for rec in recommendations:
+        ticker = rec.get("ticker")
+        if not ticker:
+            continue
+
+        df = prefetched_map.get(ticker)
+        if df is None or df.empty:
+            continue
+
+        if ticker == "421320" or ticker == "005930":  # 디버그용 대표 종목
+            logger.info("DEBUG: [%s] 데이터 행 수: %d, 시작: %s, 종료: %s", ticker, len(df), df.index[0], df.index[-1])
+
+        # 현재가 결정
+        current_price = rec.get("price")
+        if not current_price:
+            if base_date in df.index:
+                current_price = _safe_float(df.loc[base_date].get("close"))
+            elif not df.empty:
+                current_price = _safe_float(df.iloc[-1].get("close"))
+
+        if not current_price:
+            continue
+
+        # 과거 가격 조회 및 수익률 갱신
+        for key, days in periods.items():
+            target_date = base_date - pd.Timedelta(days=days)
+
+            # target_date 이전에 있는 가장 최근 데이터 찾기
+            try:
+                # metho='pad'는 해당 날짜가 없으면 이전 날짜를 찾음 (데이터가 있는 날)
+                # target_date가 df.index 범위 밖(너무 과거)이면 KeyError 또는 IndexError 가능성
+                if target_date < df.index[0]:
+                    continue
+
+                idx = df.index.get_indexer([target_date], method="pad")[0]
+
+                if ticker == "421320" and key == "return_12m":
+                    logger.info(
+                        "DEBUG: [%s] 12개월 수익률 계산 - Base: %s, Target: %s, FoundIdx: %s, DF_Start: %s",
+                        ticker,
+                        base_date,
+                        target_date,
+                        idx,
+                        df.index[0],
+                    )
+                    if idx >= 0:
+                        logger.info(
+                            "DEBUG: -> Current: %s, Prev: %s", current_price, _safe_float(df.iloc[idx].get("close"))
+                        )
+                        logger.info("DEBUG: Columns: %s", df.columns.tolist())
+                        logger.info("DEBUG: Row Data: %s", df.iloc[idx].to_dict())
+
+                if idx >= 0:
+                    prev_price = _safe_float(df.iloc[idx].get("close"))
+                    if prev_price and prev_price > 0:
+                        ret = ((current_price - prev_price) / prev_price) * 100.0
+                        rec[key] = ret
+            except Exception:
+                pass
+
+    return recommendations
 
 
 if __name__ == "__main__":

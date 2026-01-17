@@ -94,7 +94,7 @@
                 "ticker": "069500",
                 "name": "KODEX 200",
                 "listing_date": "2002-10-14",
-                "1_week_avg_volume": 12945825,
+                "1_week_avg_volume": 12945824,
                 "1_week_earn_rate": 5.3215,
                 "1_month_earn_rate": 22.7214,
                 "3_month_earn_rate": 34.8826,
@@ -143,7 +143,7 @@
                 "ticker": "471780",
                 "name": "TIGER 코리아테크액티브",
                 "listing_date": "2023-11-28",
-                "1_week_avg_volume": 67835,
+                "1_week_avg_volume": 67816,
                 "1_week_earn_rate": 2.7481,
                 "1_month_earn_rate": 12.6023,
                 "3_month_earn_rate": 31.7933,
@@ -497,7 +497,7 @@
                 "1_month_earn_rate": 1.8291,
                 "3_month_earn_rate": 9.2602,
                 "6_month_earn_rate": 3.9748,
-                "12_month_earn_rate": 63.7961
+                "12_month_earn_rate": 63.7962
             }
         ]
     },

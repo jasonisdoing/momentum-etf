@@ -504,7 +504,6 @@ def fetch_ohlcv(
     ticker: str,
     country: str = "kor",
     months_back: int = None,
-    months_range: list[int] | None = None,
     date_range: list[str | None] | None = None,
     base_date: pd.Timestamp | None = None,
     *,
@@ -529,14 +528,9 @@ def fetch_ohlcv(
             return None
     else:
         now = base_date if base_date is not None else pd.Timestamp.now()
-        if months_range is not None and len(months_range) == 2:  # months_range가 있으면 사용
-            start_off, end_off = months_range
-            start_dt = now - pd.DateOffset(months=int(start_off))
-            end_dt = now - pd.DateOffset(months=int(end_off))
-        else:
-            months_back = months_back or 3  # months_back의 기본값은 3개월
-            start_dt = now - pd.DateOffset(months=int(months_back))
-            end_dt = now
+        months_back = months_back or 3  # months_back의 기본값은 3개월
+        start_dt = now - pd.DateOffset(months=int(months_back))
+        end_dt = now
 
     # 조회 종료일(end_dt)이 실제 데이터가 있는 마지막 거래일을 초과하지 않도록 보정합니다.
     # 이는 주말이나 휴일에 다음 거래일을 기준으로 데이터를 조회할 때, 아직 존재하지 않는

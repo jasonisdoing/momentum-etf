@@ -57,46 +57,38 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
-    """튜닝용 MONTHS_RANGE 설정을 반환합니다.
+    """튜닝용 BACKTEST_START_DATE 설정을 반환합니다.
 
-    계정별 strategy.MONTHS_RANGE를 사용합니다.
+    계정별 strategy.BACKTEST_START_DATE를 사용합니다.
     """
     normalized: list[dict[str, Any]] = []
 
-    def _append(months_raw: Any, *, weight: float = 1.0, source: Any = None) -> None:
-        try:
-            months_range = int(months_raw)
-        except (TypeError, ValueError):
-            return
-        if months_range <= 0:
-            return
-        normalized.append(
-            {
-                "months_range": months_range,
-                "weight": float(weight),
-                "source": source,
-            }
-        )
-
-    # 계정별 strategy.MONTHS_RANGE 사용
+    # 계정별 strategy.BACKTEST_START_DATE 사용
     if account_id:
         try:
             account_settings = get_account_settings(account_id)
             strategy = account_settings.get("strategy", {})
-            account_months = strategy.get("MONTHS_RANGE")
-            if account_months is not None:
-                _append(account_months, weight=1.0, source=f"account_{account_id}")
+            backtest_start_date = strategy.get("BACKTEST_START_DATE")
+            if backtest_start_date is not None:
+                normalized.append(
+                    {
+                        "backtest_start_date": str(backtest_start_date),
+                        "weight": 1.0,
+                        "source": f"account_{account_id}",
+                    }
+                )
         except Exception:
             pass
 
     if not normalized:
         return []
 
-    seen: dict[int, dict[str, Any]] = {}
+    # 중복 제거 (날짜 기준)
+    seen: dict[str, dict[str, Any]] = {}
     for entry in normalized:
-        months_range = entry["months_range"]
-        if months_range not in seen:
-            seen[months_range] = entry
+        start_date = entry["backtest_start_date"]
+        if start_date not in seen:
+            seen[start_date] = entry
 
     return list(seen.values())
 
