@@ -1,7 +1,7 @@
 {
     "order": 100,
     "icon": "🇺🇸",
-    "name": "미국상장 ETF",
+    "name": "미국직투 ETF",
     "desc": "미국 ETF 포트폴리오 (USD)",
     "country_code": "us",
     "currency": "usd",
