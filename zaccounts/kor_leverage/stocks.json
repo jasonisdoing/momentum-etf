@@ -1,7 +1,18 @@
 [
     {
-        "category": "📈지수",
+        "category": "📊지수",
         "tickers": [
+            {
+                "ticker": "122630",
+                "name": "KODEX 레버리지",
+                "listing_date": "2010-02-22",
+                "1_week_avg_volume": 21912343,
+                "1_week_earn_rate": 12.6823,
+                "1_month_earn_rate": 60.8082,
+                "3_month_earn_rate": 80.6893,
+                "6_month_earn_rate": 163.2921,
+                "12_month_earn_rate": 359.388
+            },
             {
                 "ticker": "117680",
                 "name": "KODEX 철강",
@@ -129,6 +140,17 @@
         "category": "🖥️테크",
         "tickers": [
             {
+                "ticker": "243880",
+                "name": "TIGER 200IT레버리지",
+                "listing_date": "2016-05-13",
+                "1_week_avg_volume": 17492,
+                "1_week_earn_rate": 13.2134,
+                "1_month_earn_rate": 70.3362,
+                "3_month_earn_rate": 99.4537,
+                "6_month_earn_rate": 274.9763,
+                "12_month_earn_rate": 437.0623
+            },
+            {
                 "ticker": "444200",
                 "name": "SOL 코리아메가테크액티브",
                 "listing_date": "2022-10-18",
@@ -177,6 +199,17 @@
     {
         "category": "💾반도체",
         "tickers": [
+            {
+                "ticker": "488080",
+                "name": "TIGER 반도체TOP10레버리지",
+                "listing_date": "2024-07-23",
+                "1_week_avg_volume": 2629030,
+                "1_week_earn_rate": 9.2453,
+                "1_month_earn_rate": 86.7311,
+                "3_month_earn_rate": 85.9796,
+                "6_month_earn_rate": 268.3204,
+                "12_month_earn_rate": 419.7159
+            },
             {
                 "ticker": "471990",
                 "name": "KODEX AI반도체핵심장비",
@@ -575,6 +608,17 @@
     {
         "category": "🛡️방산",
         "tickers": [
+            {
+                "ticker": "0100K0",
+                "name": "KODEX K방산TOP10레버리지",
+                "listing_date": "2025-09-16",
+                "1_week_avg_volume": 1874470,
+                "1_week_earn_rate": 9.2776,
+                "1_month_earn_rate": 94.452,
+                "3_month_earn_rate": 62.4647,
+                "6_month_earn_rate": null,
+                "12_month_earn_rate": null
+            },
             {
                 "ticker": "490480",
                 "name": "SOL K방산",
