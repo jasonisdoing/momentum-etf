@@ -162,17 +162,6 @@
                 "12_month_earn_rate": null
             },
             {
-                "ticker": "0008T0",
-                "name": "SOL 화장품TOP3플러스",
-                "listing_date": "2025-01-21",
-                "1_week_avg_volume": 646207,
-                "1_week_earn_rate": 5.153,
-                "1_month_earn_rate": 1.3835,
-                "3_month_earn_rate": -3.976,
-                "6_month_earn_rate": -20.5198,
-                "12_month_earn_rate": null
-            },
-            {
                 "ticker": "465330",
                 "name": "RISE 2차전지TOP10",
                 "listing_date": "2023-09-12",
@@ -182,17 +171,6 @@
                 "3_month_earn_rate": 7.4146,
                 "6_month_earn_rate": 39.1909,
                 "12_month_earn_rate": 24.3587
-            },
-            {
-                "ticker": "0120J0",
-                "name": "BNK 카카오그룹포커스",
-                "listing_date": "2025-12-02",
-                "1_week_avg_volume": 41740,
-                "1_week_earn_rate": 0.7437,
-                "1_month_earn_rate": 3.4097,
-                "3_month_earn_rate": null,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
             }
         ]
     },
