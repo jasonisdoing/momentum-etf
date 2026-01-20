@@ -21,7 +21,7 @@
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
         "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": true
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
         "ticker": "385720",
