@@ -3,17 +3,6 @@
         "category": "📈지수",
         "tickers": [
             {
-                "ticker": "315930",
-                "name": "KODEX Top5PlusTR",
-                "listing_date": "2019-01-22",
-                "1_week_avg_volume": 102382,
-                "1_week_earn_rate": 4.6187,
-                "1_month_earn_rate": 28.5678,
-                "3_month_earn_rate": 40.5039,
-                "6_month_earn_rate": 85.317,
-                "12_month_earn_rate": 137.6332
-            },
-            {
                 "ticker": "237350",
                 "name": "KODEX 코스피100",
                 "listing_date": "2016-01-27",
