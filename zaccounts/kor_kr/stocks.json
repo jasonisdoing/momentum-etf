@@ -74,28 +74,6 @@
         "category": "🙆‍♂️섹터/테마",
         "tickers": [
             {
-                "ticker": "117700",
-                "name": "KODEX 건설",
-                "listing_date": "2009-10-30",
-                "1_week_avg_volume": 1198126,
-                "1_week_earn_rate": 13.8581,
-                "1_month_earn_rate": 25.2439,
-                "3_month_earn_rate": 31.4981,
-                "6_month_earn_rate": 19.2799,
-                "12_month_earn_rate": 84.0812
-            },
-            {
-                "ticker": "139220",
-                "name": "TIGER 200 건설",
-                "listing_date": "2011-04-06",
-                "1_week_avg_volume": 486935,
-                "1_week_earn_rate": 11.0577,
-                "1_month_earn_rate": 22.4814,
-                "3_month_earn_rate": 33.0645,
-                "6_month_earn_rate": 27.3429,
-                "12_month_earn_rate": 121.8355
-            },
-            {
                 "ticker": "385710",
                 "name": "TIMEFOLIO K이노베이션액티브",
                 "listing_date": "2021-05-25",
