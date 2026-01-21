@@ -118,17 +118,6 @@
                 "12_month_earn_rate": 35.3794
             },
             {
-                "ticker": "465330",
-                "name": "RISE 2차전지TOP10",
-                "listing_date": "2023-09-12",
-                "1_week_avg_volume": 553371,
-                "1_week_earn_rate": 4.8722,
-                "1_month_earn_rate": 6.3081,
-                "3_month_earn_rate": 5.3295,
-                "6_month_earn_rate": 40.9857,
-                "12_month_earn_rate": 22.4322
-            },
-            {
                 "ticker": "307520",
                 "name": "TIGER 지주회사",
                 "listing_date": "2018-11-08",
@@ -428,6 +417,17 @@
                 "3_month_earn_rate": 37.561,
                 "6_month_earn_rate": null,
                 "12_month_earn_rate": null
+            },
+            {
+                "ticker": "465330",
+                "name": "RISE 2차전지TOP10",
+                "listing_date": "2023-09-12",
+                "1_week_avg_volume": 553371,
+                "1_week_earn_rate": 4.8722,
+                "1_month_earn_rate": 6.3081,
+                "3_month_earn_rate": 5.3295,
+                "6_month_earn_rate": 40.9857,
+                "12_month_earn_rate": 22.4322
             }
         ]
     },
