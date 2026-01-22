@@ -781,7 +781,7 @@
         ]
     },
     {
-        "category": "🔋 리튬",
+        "category": "🔋리튬",
         "tickers": [
             {
                 "ticker": "394670",
@@ -793,22 +793,6 @@
                 "3_month_earn_rate": 26.2228,
                 "6_month_earn_rate": 90.1212,
                 "12_month_earn_rate": 74.1933
-            }
-        ]
-    },
-    {
-        "category": "🥇금",
-        "tickers": [
-            {
-                "ticker": "473640",
-                "name": "HANARO 글로벌금채굴기업",
-                "listing_date": "2024-01-18",
-                "1_week_avg_volume": 171922,
-                "1_week_earn_rate": 7.6533,
-                "1_month_earn_rate": 23.8095,
-                "3_month_earn_rate": 40.2227,
-                "6_month_earn_rate": 118.3099,
-                "12_month_earn_rate": 208.6155
             }
         ]
     },
