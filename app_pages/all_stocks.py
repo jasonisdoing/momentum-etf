@@ -441,7 +441,7 @@ def render_all_stocks_page() -> None:
         "#": st.column_config.TextColumn("#", width=30),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),
-        "카테고리": st.column_config.TextColumn("카테고리", width=130),
+        "카테고리": st.column_config.TextColumn("카테고리", width=140),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "현재가": st.column_config.NumberColumn("현재가", width="small"),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
