@@ -298,17 +298,6 @@
                 "12_month_earn_rate": null
             },
             {
-                "ticker": "0132H0",
-                "name": "KODEX 미국원자력SMR",
-                "listing_date": "2025-11-25",
-                "1_week_avg_volume": 681559,
-                "1_week_earn_rate": 3.0159,
-                "1_month_earn_rate": 22.9167,
-                "3_month_earn_rate": null,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
                 "ticker": "419650",
                 "name": "PLUS 글로벌수소&차세대연료전지",
                 "listing_date": "2022-02-15",
@@ -340,17 +329,6 @@
                 "3_month_earn_rate": 4.0527,
                 "6_month_earn_rate": 21.1639,
                 "12_month_earn_rate": 52.7228
-            },
-            {
-                "ticker": "0051G0",
-                "name": "SOL 미국원자력SMR",
-                "listing_date": "2025-05-20",
-                "1_week_avg_volume": 734527,
-                "1_week_earn_rate": -1.4945,
-                "1_month_earn_rate": 10.2634,
-                "3_month_earn_rate": 4.9129,
-                "6_month_earn_rate": 33.278,
-                "12_month_earn_rate": null
             },
             {
                 "ticker": "487230",
