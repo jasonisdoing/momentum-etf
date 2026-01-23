@@ -10,8 +10,8 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-09-08",
-        "BACKTESTED_DATE": "2026-01-23 10:24",
-        "CAGR": 225.241546,
+        "BACKTESTED_DATE": "2026-01-23 12:54",
+        "CAGR": 225.829202,
         "MDD": -11.522746,
         "PORTFOLIO_TOPN": 5,
         "MA_PERIOD": 90,
@@ -21,7 +21,7 @@
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
         "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": true
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
         "ticker": "426030",
