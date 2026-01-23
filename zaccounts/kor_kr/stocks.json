@@ -466,17 +466,6 @@
         "category": "💰금융",
         "tickers": [
             {
-                "ticker": "0111J0",
-                "name": "HANARO 증권고배당TOP3플러스",
-                "listing_date": "2025-10-28",
-                "1_week_avg_volume": 298784,
-                "1_week_earn_rate": 5.6277,
-                "1_month_earn_rate": 22.0,
-                "3_month_earn_rate": null,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
                 "ticker": "102970",
                 "name": "KODEX 증권",
                 "listing_date": "2008-05-29",
