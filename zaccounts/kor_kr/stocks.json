@@ -379,28 +379,6 @@
         "category": "⚙️로봇",
         "tickers": [
             {
-                "ticker": "0148J0",
-                "name": "TIGER 코리아휴머노이드로봇산업",
-                "listing_date": "2026-01-06",
-                "1_week_avg_volume": 17097393,
-                "1_week_earn_rate": 20.0931,
-                "1_month_earn_rate": null,
-                "3_month_earn_rate": null,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "469070",
-                "name": "RISE AI&로봇",
-                "listing_date": "2023-10-24",
-                "1_week_avg_volume": 6713293,
-                "1_week_earn_rate": 17.2314,
-                "1_month_earn_rate": 35.0056,
-                "3_month_earn_rate": 61.6103,
-                "6_month_earn_rate": 77.306,
-                "12_month_earn_rate": 101.5007
-            },
-            {
                 "ticker": "445290",
                 "name": "KODEX 로봇액티브",
                 "listing_date": "2022-11-15",
