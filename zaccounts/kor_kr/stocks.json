@@ -52,17 +52,6 @@
         "category": "🙆‍♂️섹터/테마",
         "tickers": [
             {
-                "ticker": "117700",
-                "name": "KODEX 건설",
-                "listing_date": "2009-10-30",
-                "1_week_avg_volume": 978417,
-                "1_week_earn_rate": 7.724,
-                "1_month_earn_rate": 26.1761,
-                "3_month_earn_rate": 28.6593,
-                "6_month_earn_rate": 22.9142,
-                "12_month_earn_rate": 87.8174
-            },
-            {
                 "ticker": "117680",
                 "name": "KODEX 철강",
                 "listing_date": "2009-10-30",
