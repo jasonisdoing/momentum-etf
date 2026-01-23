@@ -743,7 +743,7 @@
         ]
     },
     {
-        "category": "🗿희토류",
+        "category": "🗿원자재",
         "tickers": [
             {
                 "ticker": "415920",
@@ -755,12 +755,7 @@
                 "3_month_earn_rate": 39.8693,
                 "6_month_earn_rate": 94.1532,
                 "12_month_earn_rate": 125.5527
-            }
-        ]
-    },
-    {
-        "category": "🔋리튬",
-        "tickers": [
+            },
             {
                 "ticker": "394670",
                 "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
