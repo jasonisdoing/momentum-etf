@@ -838,7 +838,7 @@ def run_portfolio_backtest(
                 ticker_to_sell = None
                 replacement_note = ""
 
-                if held_stock_same_category:
+                if held_stock_same_category and not is_category_exception(wait_stock_category):
                     # Case 1: 같은 카테고리 종목이 있는 경우 (필수 교체 대상)
                     # 쿨다운 체크 추가
                     target_state = position_state[held_stock_same_category["ticker"]]
