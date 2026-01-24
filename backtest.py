@@ -67,17 +67,16 @@ def main() -> None:
 
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
     strategy_cfg = account_settings.get("strategy", {}) or {}
-    months_range = strategy_cfg.get("MONTHS_RANGE")
-    if months_range is None:
-        parser.error("계정 설정에 'strategy.MONTHS_RANGE' 값을 지정해야 합니다.")
+    backtest_start_date_str = strategy_cfg.get("BACKTEST_START_DATE")
+    if backtest_start_date_str is None:
+        parser.error("계정 설정에 'strategy.BACKTEST_START_DATE' 값을 지정해야 합니다.")
     try:
-        months_range = int(months_range)
-    except (TypeError, ValueError):
-        parser.error("MONTHS_RANGE 설정이 올바른 숫자여야 합니다.")
+        start_date = pd.to_datetime(backtest_start_date_str)
+    except Exception:
+        parser.error("BACKTEST_START_DATE 설정이 올바른 날짜 형식이어야 합니다.")
     end_date = get_latest_trading_day(country_code)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()
-    start_date = end_date - pd.DateOffset(months=months_range)
 
     # 웜업 기간을 전략의 MA_PERIOD로 설정
     warmup_days = strategy_rules.ma_period
@@ -121,7 +120,6 @@ def main() -> None:
 
     result = run_account_backtest(
         account_id,
-        months_range=months_range,
         prefetched_data=prefetched_map,
     )
 
@@ -136,7 +134,7 @@ def main() -> None:
         summary=result.summary,
         account_id=account_id,
         country_code=result.country_code,
-        test_months_range=months_range,
+        backtest_start_date=str(backtest_start_date_str),
         initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),

@@ -47,7 +47,7 @@ def print_backtest_summary(
     summary: dict[str, Any],
     account_id: str,
     country_code: str,
-    test_months_range: int,
+    backtest_start_date: str,
     initial_capital_krw: float,
     portfolio_topn: int,
     ticker_summaries: list[dict[str, Any]],
@@ -62,11 +62,11 @@ def print_backtest_summary(
         summary: 백테스트 요약 지표
         account_id: 계정 ID
         country_code: 국가 코드
-        test_months_range: 테스트 기간(개월)
+        backtest_start_date: 백테스트 시작일 (YYYY-MM-DD)
         initial_capital_krw: 초기 자본
         portfolio_topn: 포트폴리오 보유 종목 수
         ticker_summaries: 종목별 성과 요약 리스트
-        core_start_dt: 백테스트 시작일
+        core_start_dt: 백테스트 시작일 (Timestamp)
         emit_to_logger: True면 logger.info 로 출력도 수행
 
     Returns:
@@ -355,7 +355,25 @@ def print_backtest_summary(
     add_section_heading("백테스트 결과 요약")
     # 기본 정보 통합
     add(f"| 계정: {account_id.upper()} ({country_code.upper()})")
-    add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({test_months_range} 개월)")
+    # 기간 계산 (N년 N개월 N일)
+    try:
+        start_dt = pd.to_datetime(summary["start_date"])
+        end_dt = pd.to_datetime(summary["end_date"])
+        delta = end_dt - start_dt
+        total_days = delta.days
+        years = total_days // 365
+        remaining_days = total_days % 365
+        months = remaining_days // 30
+        days = remaining_days % 30
+        if years > 0:
+            period_str = f"{years}년 {months}개월 {days}일"
+        elif months > 0:
+            period_str = f"{months}개월 {days}일"
+        else:
+            period_str = f"{days}일"
+    except Exception:
+        period_str = ""
+    add(f"| 기간: {summary['start_date']} ~ {summary['end_date']} ({period_str})")
     add(f"| 거래 수(Trades): {int(summary.get('turnover', 0))}회")
     add("")
     # 사용된 설정값 통합
@@ -1065,19 +1083,20 @@ def dump_backtest_log(
     daily_lines = _generate_daily_report_lines(result, account_settings)
     lines.extend(daily_lines)
 
-    months_range_value = getattr(result, "months_range", None)
-    if months_range_value is None:
-        if isinstance(account_settings, dict):
-            months_range_value = account_settings.get("strategy", {}).get("MONTHS_RANGE")
-    if months_range_value is None:
-        raise ValueError("MONTHS_RANGE 설정이 필요합니다. 계정 설정의 strategy.MONTHS_RANGE 값을 확인하세요.")
-    months_range_value = int(months_range_value)
+    # 백테스트 기간 계산 (시작일로부터)
+    backtest_start_date = None
+    if isinstance(account_settings, dict):
+        backtest_start_date = account_settings.get("strategy", {}).get("BACKTEST_START_DATE")
+    if backtest_start_date is None:
+        raise ValueError(
+            "BACKTEST_START_DATE 설정이 필요합니다. 계정 설정의 strategy.BACKTEST_START_DATE 값을 확인하세요."
+        )
 
     summary_section = print_backtest_summary(
         summary=result.summary,
         account_id=account_id,
         country_code=country_code,
-        test_months_range=months_range_value,
+        backtest_start_date=str(backtest_start_date),
         initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),

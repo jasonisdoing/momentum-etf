@@ -504,7 +504,6 @@ def fetch_ohlcv(
     ticker: str,
     country: str = "kor",
     months_back: int = None,
-    months_range: list[int] | None = None,
     date_range: list[str | None] | None = None,
     base_date: pd.Timestamp | None = None,
     *,
@@ -529,14 +528,9 @@ def fetch_ohlcv(
             return None
     else:
         now = base_date if base_date is not None else pd.Timestamp.now()
-        if months_range is not None and len(months_range) == 2:  # months_range가 있으면 사용
-            start_off, end_off = months_range
-            start_dt = now - pd.DateOffset(months=int(start_off))
-            end_dt = now - pd.DateOffset(months=int(end_off))
-        else:
-            months_back = months_back or 3  # months_back의 기본값은 3개월
-            start_dt = now - pd.DateOffset(months=int(months_back))
-            end_dt = now
+        months_back = months_back or 3  # months_back의 기본값은 3개월
+        start_dt = now - pd.DateOffset(months=int(months_back))
+        end_dt = now
 
     # 조회 종료일(end_dt)이 실제 데이터가 있는 마지막 거래일을 초과하지 않도록 보정합니다.
     # 이는 주말이나 휴일에 다음 거래일을 기준으로 데이터를 조회할 때, 아직 존재하지 않는
@@ -985,7 +979,10 @@ def fetch_ohlcv_for_tickers(
 
     # 실시간 데이터 가져오기 (거래일 + 장 시작 이후에만)
     realtime_data = {}
-    if is_today and country.lower() == "kor":
+    country_lower = country.lower()
+    supports_realtime = country_lower in ("kor", "au")
+
+    if is_today and supports_realtime:
         # 거래일 여부 확인
         try:
             today_str = today.strftime("%Y-%m-%d")
@@ -1004,7 +1001,7 @@ def fetch_ohlcv_for_tickers(
 
                 from config import MARKET_SCHEDULES
 
-                schedule = MARKET_SCHEDULES.get(country.lower())
+                schedule = MARKET_SCHEDULES.get(country_lower)
                 if schedule:
                     tz_name = schedule.get("timezone")
                     tz = pytz.timezone(tz_name)
@@ -1021,7 +1018,10 @@ def fetch_ohlcv_for_tickers(
         # 거래일이고 장 시작 ~ 장 마감 사이에만 실시간 데이터 조회
         if is_trading_day and is_market_open_time:
             try:
-                realtime_data = fetch_naver_etf_inav_snapshot(tickers)
+                if country_lower == "kor":
+                    realtime_data = fetch_naver_etf_inav_snapshot(tickers)
+                elif country_lower == "au":
+                    realtime_data = fetch_au_quoteapi_snapshot(tickers)
             except Exception as e:
                 logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
 
@@ -1313,6 +1313,136 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
         snapshot[code] = entry
 
     return snapshot
+
+
+def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """호주 MarketIndex QuoteAPI에서 ETF의 실시간 가격 정보를 조회합니다.
+
+    Args:
+        tickers: 조회할 호주 ETF 티커 리스트 (예: ["ACDC", "MNRS"])
+
+    Returns:
+        티커별 가격 정보 딕셔너리
+        {
+            "ACDC": {"nowVal": 155.81, "changeRate": -0.44, "open": ..., "high": ..., "low": ..., "volume": ...},
+            ...
+        }
+    """
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 호주 QuoteAPI 조회를 건너뜁니다.")
+        return {}
+
+    from config import AU_QUOTEAPI_APP_ID, AU_QUOTEAPI_HEADERS, AU_QUOTEAPI_URL
+
+    normalized_tickers = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
+    if not normalized_tickers:
+        return {}
+
+    snapshot: dict[str, dict[str, float]] = {}
+
+    for ticker in normalized_tickers:
+        try:
+            # 호주 ETF 티커 형식: ticker.asx (소문자)
+            url = f"{AU_QUOTEAPI_URL}/{ticker.lower()}.asx"
+            params = {"appID": AU_QUOTEAPI_APP_ID}
+
+            response = requests.get(url, params=params, headers=AU_QUOTEAPI_HEADERS, timeout=5)
+            response.raise_for_status()
+
+            data = response.json()
+            quote = data.get("quote", {})
+
+            if not quote:
+                logger.debug(f"[AU] {ticker}: QuoteAPI 응답에 quote 데이터가 없습니다.")
+                continue
+
+            price = quote.get("price")
+            if price is None or price <= 0:
+                continue
+
+            entry: dict[str, float] = {
+                "nowVal": float(price),
+            }
+
+            # 일간 변동률 (%)
+            pct_change = quote.get("pctChange")
+            if pct_change is not None:
+                try:
+                    entry["changeRate"] = float(pct_change)
+                except (TypeError, ValueError):
+                    pass
+
+            # OHLCV 데이터
+            if quote.get("open"):
+                try:
+                    entry["open"] = float(quote["open"])
+                except (TypeError, ValueError):
+                    pass
+
+            if quote.get("high"):
+                try:
+                    entry["high"] = float(quote["high"])
+                except (TypeError, ValueError):
+                    pass
+
+            if quote.get("low"):
+                try:
+                    entry["low"] = float(quote["low"])
+                except (TypeError, ValueError):
+                    pass
+
+            if quote.get("volume"):
+                try:
+                    entry["volume"] = float(quote["volume"])
+                except (TypeError, ValueError):
+                    pass
+
+            snapshot[ticker] = entry
+            logger.debug(f"[AU] {ticker}: 실시간 가격 {price:.2f} (변동 {pct_change:+.2f}%)")
+
+        except requests.exceptions.Timeout:
+            logger.warning(f"[AU] {ticker}: QuoteAPI 타임아웃")
+        except requests.exceptions.HTTPError as e:
+            logger.warning(f"[AU] {ticker}: QuoteAPI HTTP 에러 - {e}")
+        except Exception as e:
+            logger.warning(f"[AU] {ticker}: QuoteAPI 조회 실패 - {e}")
+
+    if snapshot:
+        logger.info(f"[AU] QuoteAPI에서 {len(snapshot)}개 종목의 실시간 가격을 조회했습니다.")
+
+    return snapshot
+
+
+_AU_QUOTEAPI_SNAPSHOT_CACHE: dict[str, dict[str, float]] = {}
+_AU_QUOTEAPI_SNAPSHOT_FETCHED_AT: pd.Timestamp | None = None
+
+
+def prime_au_etf_realtime_snapshot(tickers: Sequence[str]) -> None:
+    """Fetch and cache real-time price snapshot for given Australian ETF tickers."""
+
+    global _AU_QUOTEAPI_SNAPSHOT_CACHE, _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT
+
+    try:
+        snapshot = fetch_au_quoteapi_snapshot(tickers)
+    except Exception as exc:
+        logger.warning("호주 ETF 실시간 스냅샷 조회 실패: %s", exc)
+        return
+
+    if snapshot:
+        _AU_QUOTEAPI_SNAPSHOT_CACHE = snapshot
+        _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT = pd.Timestamp.now()
+    else:
+        _AU_QUOTEAPI_SNAPSHOT_CACHE = {}
+        _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT = None
+
+
+def get_cached_au_etf_snapshot_entry(ticker: str) -> dict[str, float] | None:
+    """Return cached price snapshot entry for the given Australian ETF ticker."""
+
+    key = str(ticker or "").strip().upper()
+    if not key:
+        return None
+    return _AU_QUOTEAPI_SNAPSHOT_CACHE.get(key)
 
 
 _NAVER_ETF_SNAPSHOT_CACHE: dict[str, dict[str, float]] = {}

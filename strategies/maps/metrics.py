@@ -5,7 +5,6 @@ from typing import Any
 
 import pandas as pd
 
-import config
 from logic.backtest.signals import calculate_consecutive_days
 from strategies.rsi.backtest import process_ticker_data_rsi
 from utils.indicators import calculate_ma_score
@@ -18,6 +17,7 @@ def process_ticker_data(
     ma_period: int,
     precomputed_entry: Mapping[str, Any] | None = None,
     ma_type: str = "SMA",
+    enable_data_sufficiency_check: bool = False,
 ) -> dict | None:
     """
     개별 종목의 데이터를 처리하고 지표를 계산합니다.
@@ -28,6 +28,7 @@ def process_ticker_data(
         ma_period: 이동평균 기간
         precomputed_entry: 미리 계산된 캐시 데이터 (옵션)
         ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA)
+        enable_data_sufficiency_check: 데이터 충분성 검사 활성화 여부
 
     Returns:
         Dict: 계산된 지표들 또는 None (처리 실패 시)
@@ -86,7 +87,7 @@ def process_ticker_data(
             open_prices = close_prices.copy()
 
     # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
-    if config.ENABLE_DATA_SUFFICIENCY_CHECK:
+    if enable_data_sufficiency_check:
         ma_type_upper = (ma_type or "SMA").upper()
         if ma_type_upper in {"EMA", "DEMA", "TEMA"}:
             ideal_multiplier = 2.0

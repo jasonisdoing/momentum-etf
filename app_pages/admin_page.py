@@ -84,8 +84,7 @@ def _get_latest_log_content(account_id: str) -> tuple[str | None, str | None]:
 
 
 def render_admin_page() -> None:
-    st.set_page_config(page_title="[Admin] 관리자", page_icon="⚙️", layout="wide")
-    st.title("⚙️ 관리자 페이지")
+    st.set_page_config(page_title="관리자", page_icon="⚙️", layout="wide")
 
     # 1. 세션 스테이트 초기화
     if "admin_console_log" not in st.session_state:

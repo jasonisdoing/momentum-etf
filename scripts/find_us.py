@@ -22,21 +22,20 @@ EXCLUDE_KEYWORDS = [
     "Ether",
     "Xrp",
     "Solana",
-    "Miners",
     "Platinum",
-    "Silver",
-    "Gold",
     "Cannabis",
     "Copper",
     "Uranium",
     "XRP",
     "Staking",
     "Gas",
+    "Oil",
+    "Energy",
 ]
 # 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
 INCLUDE_KEYWORDS = []
 # 최소 거래량 (0이면 필터링 안 함)
-MIN_VOLUME = 100000
+MIN_VOLUME = 500000
 
 
 def parse_barchart_data(text):
@@ -208,7 +207,7 @@ def main():
     print(f"📅 조회 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
     print()
-    print("--- 상승중인 미국 ETF 목록 ---")
+    print("--- 상승중인 ETF 목록 ---")
     print()
 
     for etf in etfs:
@@ -250,9 +249,7 @@ def main():
 
     if new_tickers:
         print()
-        print("+" * 70)
-        print(f"🆕 stocks.json에 없는 신규 발견 종목 ({len(new_tickers)}개)")
-        print("+" * 70)
+        print("--- 신규 발견 종목 ---")
         print()
         for etf in new_tickers:
             ticker = etf["ticker"]

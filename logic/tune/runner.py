@@ -203,22 +203,7 @@ def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> list[Any]:
     return list(dict.fromkeys(normalized))
 
 
-def _resolve_month_configs(months_range: int | None, account_id: str = None) -> list[dict[str, Any]]:
-    if months_range is not None:
-        try:
-            months = int(months_range)
-        except (TypeError, ValueError):
-            return []
-        if months <= 0:
-            return []
-        return [
-            {
-                "months_range": months,
-                "weight": 1.0,
-                "source": "manual",
-            }
-        ]
-
+def _resolve_month_configs(account_id: str = None) -> list[dict[str, Any]]:
     configs = get_tune_month_configs(account_id=account_id)
     if configs:
         return configs
@@ -226,20 +211,16 @@ def _resolve_month_configs(months_range: int | None, account_id: str = None) -> 
     if account_id:
         try:
             account_settings = get_account_settings(account_id)
-            fallback = account_settings.get("strategy", {}).get("MONTHS_RANGE")
+            fallback = account_settings.get("strategy", {}).get("BACKTEST_START_DATE")
             if fallback is not None:
-                try:
-                    fallback_val = int(fallback)
-                    if fallback_val > 0:
-                        return [
-                            {
-                                "months_range": fallback_val,
-                                "weight": 1.0,
-                                "source": f"account_{account_id}",
-                            }
-                        ]
-                except (TypeError, ValueError):
-                    pass
+                # BACKTEST_START_DATE가 있으면 단일 설정으로 반환
+                return [
+                    {
+                        "backtest_start_date": str(fallback),
+                        "weight": 1.0,
+                        "source": f"account_{account_id}",
+                    }
+                ]
         except Exception:
             pass
 
@@ -319,7 +300,7 @@ def _render_tuning_table(
     rows: list[dict[str, Any]],
     *,
     include_samples: bool = False,
-    months_range: int | None = None,
+    period_str: str | None = None,
 ) -> list[str]:
     from utils.report import render_table_eaw
 
@@ -347,8 +328,8 @@ def _render_tuning_table(
         "right",
     ]
 
-    if months_range:
-        headers.append(f"{months_range}개월(%)")
+    if period_str:
+        headers.append(f"{period_str}(%)")
     else:
         headers.append("기간수익률(%)")
     aligns.append("right")
@@ -502,7 +483,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     # [Key Reordering]
     # 사용자가 요청한 순서대로 키를 정렬하여 저장
     desired_order = [
-        "MONTHS_RANGE",
+        "BACKTEST_START_DATE",
         "BACKTESTED_DATE",
         "CAGR",
         "MDD",
@@ -647,7 +628,7 @@ def _export_debug_month(
     debug_dir: Path,
     *,
     account_id: str,
-    months_range: int,
+    backtest_start_date: str,
     raw_rows: list[dict[str, Any]],
     prefetched_data: Mapping[str, DataFrame],
     capture_top_n: int,
@@ -671,7 +652,7 @@ def _export_debug_month(
     )
 
     summary_rows: list[dict[str, Any]] = []
-    month_dir = debug_dir / f"months_{months_range:02d}"
+    month_dir = debug_dir / f"start_{backtest_start_date}"
 
     for idx, row in enumerate(sorted_rows[:capture_top_n], 1):
         tuning = row.get("tuning") or {}
@@ -699,7 +680,6 @@ def _export_debug_month(
 
         result_prefetch = run_account_backtest(
             account_id,
-            months_range=months_range,
             quiet=True,
             prefetched_data=prefetched_data,
             strategy_override=strategy_rules,
@@ -710,7 +690,6 @@ def _export_debug_month(
 
         result_live = run_account_backtest(
             account_id,
-            months_range=months_range,
             quiet=True,
             strategy_override=strategy_rules,
             prefetched_etf_universe=prefetched_etf_universe,
@@ -732,7 +711,7 @@ def _export_debug_month(
 
         summary_rows.append(
             {
-                "months_range": months_range,
+                "backtest_start_date": backtest_start_date,
                 "ma_period": ma,
                 "topn": topn,
                 "stop_loss_pct": stop_loss_value,
@@ -765,7 +744,7 @@ def _export_debug_month(
 def _evaluate_single_combo(
     payload: tuple[
         str,
-        int,
+        str,
         tuple[str, str],
         int,
         int,
@@ -780,7 +759,6 @@ def _evaluate_single_combo(
 ) -> tuple[str, Any, list[str]]:
     (
         account_norm,
-        months_range,
         date_range,
         ma_int,
         topn_int,
@@ -830,7 +808,6 @@ def _evaluate_single_combo(
     try:
         bt_result = run_account_backtest(
             account_norm,
-            months_range=months_range,
             quiet=True,
             override_settings={
                 "start_date": date_range[0],
@@ -848,8 +825,8 @@ def _evaluate_single_combo(
     except Exception as exc:
         logger = get_app_logger()
         logger.warning(
-            "[튜닝] 조합 실행 실패 months=%d MA=%s TOPN=%s STOP=%.2f RSI=%d score=%.2f TS=%.2f error=%s",
-            months_range,
+            "[튜닝] 조합 실행 실패 (%s) MA=%s TOPN=%s STOP=%.2f RSI=%d score=%.2f TS=%.2f error=%s",
+            str(date_range),
             ma_int,
             topn_int,
             stop_loss_float,
@@ -896,10 +873,10 @@ def _evaluate_single_combo(
     return ("success", entry, list(missing))
 
 
-def _execute_tuning_for_months(
+def _execute_tuning(
     account_norm: str,
     *,
-    months_range: int,
+    backtest_start_date: str,
     search_space: Mapping[str, list[Any]],
     end_date: Timestamp,
     excluded_tickers: Collection[str] | None,
@@ -930,9 +907,9 @@ def _execute_tuning_for_months(
         or not ma_type_candidates
     ):
         logger.warning(
-            "[튜닝] %s (%d개월) 유효한 탐색 공간이 없습니다.",
+            "[튜닝] %s (%s 시작) 유효한 탐색 공간이 없습니다.",
             account_norm.upper(),
-            months_range,
+            backtest_start_date,
         )
         return None
 
@@ -949,26 +926,32 @@ def _execute_tuning_for_months(
 
     if not combos:
         logger.warning(
-            "[튜닝] %s (%d개월) 평가할 조합이 없습니다.",
+            "[튜닝] %s (%s 시작) 평가할 조합이 없습니다.",
             account_norm.upper(),
-            months_range,
+            backtest_start_date,
         )
         return None
 
-    start_date = end_date - pd.DateOffset(months=months_range)
+    # backtest_start_date를 직접 start_date로 사용
+    try:
+        start_date = pd.to_datetime(backtest_start_date)
+    except (ValueError, TypeError):
+        logger.error(f"[튜닝] 유효하지 않은 backtest_start_date: {backtest_start_date}")
+        return None
+
     date_range = (start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
 
     logger.info(
-        "[튜닝] %s (%d개월) 전수조사 시작 (조합 %d개)",
+        "[튜닝] %s (%s 시작) 전수조사 시작 (조합 %d개)",
         account_norm.upper(),
-        months_range,
+        backtest_start_date,
         len(combos),
     )
 
     filtered_calendar = _filter_trading_days(trading_calendar, date_range[0], date_range[1])
     if filtered_calendar is None:
         raise RuntimeError(
-            f"[튜닝] {account_norm.upper()} ({months_range}개월) 구간의 거래일 정보를 준비하지 못했습니다."
+            f"[튜닝] {account_norm.upper()} ({backtest_start_date} 시작) 구간의 거래일 정보를 준비하지 못했습니다."
         )
 
     workers = WORKERS or (cpu_count() or 1)
@@ -1000,7 +983,6 @@ def _execute_tuning_for_months(
     payloads = [
         (
             account_norm,
-            months_range,
             date_range,
             int(ma),
             int(topn),
@@ -1015,9 +997,9 @@ def _execute_tuning_for_months(
     ]
 
     logger.info(
-        "[튜닝] %s (%d개월) 백테스트 워커 초기화 중... (조합 %d개, 거래일 %d일)",
+        "[튜닝] %s (%s 시작) 백테스트 워커 초기화 중... (조합 %d개, 거래일 %d일)",
         account_norm.upper(),
-        months_range,
+        backtest_start_date,
         len(combos),
         len(filtered_calendar) if filtered_calendar else 0,
     )
@@ -1062,9 +1044,9 @@ def _execute_tuning_for_months(
 
             if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
                 logger.info(
-                    "[튜닝] %s (%d개월) 진행률: %d/%d (%.1f%%)",
+                    "[튜닝] %s (%s 시작) 진행률: %d/%d (%.1f%%)",
                     account_norm.upper(),
-                    months_range,
+                    backtest_start_date,
                     idx,
                     len(combos),
                     (idx / len(combos)) * 100,
@@ -1087,9 +1069,9 @@ def _execute_tuning_for_months(
 
     if not success_entries:
         logger.warning(
-            "[튜닝] %s (%d개월) 성공한 조합이 없습니다.",
+            "[튜닝] %s (%s 시작) 성공한 조합이 없습니다.",
             account_norm.upper(),
-            months_range,
+            backtest_start_date,
         )
         return None
 
@@ -1172,7 +1154,7 @@ def _execute_tuning_for_months(
 
         raw_data_payload.append(
             {
-                "MONTHS_RANGE": months_range,
+                "BACKTEST_START_DATE": backtest_start_date,
                 "CAGR": _round_float_places(cagr_val, 2) if math.isfinite(cagr_val) else None,
                 "MDD": _round_float_places(-mdd_val, 2) if math.isfinite(mdd_val) else None,
                 "period_return": _round_float_places(period_return_val, 2)
@@ -1198,7 +1180,7 @@ def _execute_tuning_for_months(
         )
 
     return {
-        "months_range": months_range,
+        "backtest_start_date": backtest_start_date,
         "best": best_entry,
         "failures": failures,
         "success_count": len(success_entries),
@@ -1234,8 +1216,8 @@ def _build_run_entry(
 
     for item in months_results:
         best = item.get("best") or {}
-        months = item.get("months_range")
-        if not best or months is None:
+        backtest_start_date = item.get("backtest_start_date", "")
+        if not best or not backtest_start_date:
             continue
 
         try:
@@ -1310,7 +1292,7 @@ def _build_run_entry(
 
         raw_data_payload.append(
             {
-                "MONTHS_RANGE": months,
+                "BACKTEST_START_DATE": backtest_start_date,
                 "CAGR": cagr_display,
                 "MDD": mdd_display,
                 "period_return": period_return_display,
@@ -1420,7 +1402,7 @@ def _ensure_entry_schema(entry: Any) -> dict[str, Any]:
             continue
 
         cleaned: dict[str, Any] = {
-            "MONTHS_RANGE": item.get("MONTHS_RANGE"),
+            "BACKTEST_START_DATE": item.get("BACKTEST_START_DATE"),
             "tuning": item.get("tuning", {}),
         }
 
@@ -1536,7 +1518,7 @@ def _compose_tuning_report(
             # MA_TYPE이 있으면 포함해서 표시
             if ma_type_range and len(ma_type_range) > 1:
                 lines.append(
-                    f"탐색 공간: MA {len(ma_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
+                    f"| 탐색 공간: MA {len(ma_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
                     f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
                     f"× RSI {len(rsi_range)}개 "
                     f"× COOLDOWN {len(cooldown_range)}개 "
@@ -1544,7 +1526,7 @@ def _compose_tuning_report(
                 )
             else:
                 lines.append(
-                    f"탐색 공간: MA {len(ma_range)}개 × TOPN {len(topn_range)}개 "
+                    f"| 탐색 공간: MA {len(ma_range)}개 × TOPN {len(topn_range)}개 "
                     f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
                     f"× RSI {len(rsi_range)}개 "
                     f"× COOLDOWN {len(cooldown_range)}개 "
@@ -1553,30 +1535,30 @@ def _compose_tuning_report(
             # 각 파라미터 범위 표시
             if ma_range:
                 ma_min, ma_max = min(ma_range), max(ma_range)
-                lines.append(f"  MA_RANGE: {ma_min}~{ma_max}")
+                lines.append(f"|   MA_RANGE: {ma_min}~{ma_max}")
             if ma_type_range:
-                lines.append(f"  MA_TYPE: {', '.join(ma_type_range)}")
+                lines.append(f"|   MA_TYPE: {', '.join(ma_type_range)}")
             if topn_range:
                 topn_min, topn_max = min(topn_range), max(topn_range)
-                lines.append(f"  PORTFOLIO_TOPN: {topn_min}~{topn_max}")
+                lines.append(f"|   PORTFOLIO_TOPN: {topn_min}~{topn_max}")
             if threshold_range:
                 th_min, th_max = min(threshold_range), max(threshold_range)
-                lines.append(f"  REPLACE_SCORE_THRESHOLD: {th_min}~{th_max}")
+                lines.append(f"|   REPLACE_SCORE_THRESHOLD: {th_min}~{th_max}")
             if stop_loss_range:
                 sl_min, sl_max = min(stop_loss_range), max(stop_loss_range)
-                lines.append(f"  STOP_LOSS_PCT: {sl_min}~{sl_max}")
+                lines.append(f"|   STOP_LOSS_PCT: {sl_min}~{sl_max}")
             if rsi_range:
                 rsi_min, rsi_max = min(rsi_range), max(rsi_range)
-                lines.append(f"  OVERBOUGHT_SELL_THRESHOLD: {rsi_min}~{rsi_max}")
+                lines.append(f"|   OVERBOUGHT_SELL_THRESHOLD: {rsi_min}~{rsi_max}")
 
             if cooldown_range:
                 cd_min, cd_max = min(cooldown_range), max(cooldown_range)
-                lines.append(f"  COOLDOWN_DAYS: {cd_min}~{cd_max}")
+                lines.append(f"|   COOLDOWN_DAYS: {cd_min}~{cd_max}")
 
         # 종목 수
         ticker_count = tuning_metadata.get("ticker_count", 0)
         if ticker_count > 0:
-            lines.append(f"대상 종목: {ticker_count}개")
+            lines.append(f"| 대상 종목: {ticker_count}개")
 
         # 제외된 종목
         excluded_tickers = tuning_metadata.get("excluded_tickers", [])
@@ -1588,29 +1570,58 @@ def _compose_tuning_report(
         test_period_ranges = tuning_metadata.get("test_period_ranges", [])
         test_periods = tuning_metadata.get("test_periods", [])
 
+        # 기간 표시 (시작일 ~ 종료일 (N년 N개월 N일))
         period_lines: list[str] = []
         for entry in test_period_ranges:
             start_date = entry.get("start_date")
             end_date = entry.get("end_date")
-            months = entry.get("months")
-            if start_date and end_date and months:
+            if start_date and end_date:
                 try:
-                    months_int = int(months)
-                except (TypeError, ValueError):
-                    months_int = months
-                period_lines.append(f"{start_date} ~ {end_date} ({months_int}개월)")
+                    start_dt = pd.to_datetime(start_date)
+                    end_dt = pd.to_datetime(end_date)
+                    delta = end_dt - start_dt
+                    total_days = delta.days
+                    years = total_days // 365
+                    remaining_days = total_days % 365
+                    months = remaining_days // 30
+                    days = remaining_days % 30
+                    if years > 0:
+                        period_str = f"{years}년 {months}개월 {days}일"
+                    elif months > 0:
+                        period_str = f"{months}개월 {days}일"
+                    else:
+                        period_str = f"{days}일"
+                    period_lines.append(f"{start_date} ~ {end_date} ({period_str})")
+                except Exception:
+                    period_lines.append(f"{start_date} ~ {end_date}")
 
         if period_lines:
-            lines.append(f"테스트 기간: {', '.join(period_lines)}")
-        elif test_periods:
-            period_str = ", ".join([f"{p}개월" for p in test_periods])
-            lines.append(f"테스트 기간: {period_str}")
-
-        if data_period:
-            data_start = data_period.get("start_date")
+            lines.append(f"| 기간: {', '.join(period_lines)}")
+        elif test_periods and data_period:
+            # test_periods가 backtest_start_date 리스트일 경우
             data_end = data_period.get("end_date")
-            if data_start and data_end:
-                lines.append(f"사용 데이터 범위: {data_start} ~ {data_end}")
+            if data_end:
+                for start_date in test_periods:
+                    try:
+                        start_dt = pd.to_datetime(start_date)
+                        end_dt = pd.to_datetime(data_end)
+                        delta = end_dt - start_dt
+                        total_days = delta.days
+                        years = total_days // 365
+                        remaining_days = total_days % 365
+                        months = remaining_days // 30
+                        days = remaining_days % 30
+                        if years > 0:
+                            period_str = f"{years}년 {months}개월 {days}일"
+                        elif months > 0:
+                            period_str = f"{months}개월 {days}일"
+                        else:
+                            period_str = f"{days}일"
+                        period_lines.append(f"{start_date} ~ {data_end} ({period_str})")
+                    except Exception:
+                        period_lines.append(f"{start_date}")
+                if period_lines:
+                    lines.append(f"| 기간: {', '.join(period_lines)}")
 
     lines.append("")
 
@@ -1641,10 +1652,58 @@ def _compose_tuning_report(
     metric_names = {"CAGR": "CAGR", "SHARPE": "Sharpe", "SDR": "SDR(Sharpe/MDD)"}
     metric_display = metric_names.get(optimization_metric, "SDR(Sharpe/MDD)")
 
-    for item in sorted(month_results, key=lambda x: int(x.get("months_range", 0))):
-        months_range = item.get("months_range")
-        if months_range is None:
+    # 기간 문자열 계산 (tuning_metadata에서)
+    period_display = ""
+    if tuning_metadata:
+        test_period_ranges = tuning_metadata.get("test_period_ranges", [])
+        if test_period_ranges:
+            for entry in test_period_ranges:
+                start_date = entry.get("start_date")
+                end_date = entry.get("end_date")
+                if start_date and end_date:
+                    try:
+                        start_dt = pd.to_datetime(start_date)
+                        end_dt = pd.to_datetime(end_date)
+                        delta = end_dt - start_dt
+                        total_days = delta.days
+                        years = total_days // 365
+                        remaining_days = total_days % 365
+                        months = remaining_days // 30
+                        days = remaining_days % 30
+                        if years > 0:
+                            period_display = f"{years}년 {months}개월 {days}일"
+                        elif months > 0:
+                            period_display = f"{months}개월 {days}일"
+                        else:
+                            period_display = f"{days}일"
+                    except Exception:
+                        pass
+                    break  # 첫 번째 범위만 사용
+
+    for item in sorted(month_results, key=lambda x: x.get("backtest_start_date", "")):
+        backtest_start_date = item.get("backtest_start_date", "")
+        if not backtest_start_date:
             continue
+
+        # period_display가 아직 없으면 fallback
+        if not period_display and backtest_start_date:
+            try:
+                start_dt = pd.to_datetime(backtest_start_date)
+                end_dt = pd.Timestamp.now().normalize()
+                delta = end_dt - start_dt
+                total_days = delta.days
+                years = total_days // 365
+                remaining_days = total_days % 365
+                months = remaining_days // 30
+                days = remaining_days % 30
+                if years > 0:
+                    period_display = f"{years}년 {months}개월 {days}일"
+                elif months > 0:
+                    period_display = f"{months}개월 {days}일"
+                else:
+                    period_display = f"{days}일"
+            except Exception:
+                period_display = str(backtest_start_date)
 
         raw_rows = item.get("raw_data") or []
         normalized_rows: list[dict[str, Any]] = []
@@ -1659,7 +1718,6 @@ def _compose_tuning_report(
             if stop_loss_val is None:
                 stop_loss_val = tuning.get("STOP_LOSS_PCT")
             rsi_val = tuning.get("OVERBOUGHT_SELL_THRESHOLD")
-            cooldown_val = tuning.get("COOLDOWN_DAYS")
             cooldown_val = tuning.get("COOLDOWN_DAYS")
 
             cagr_val = entry.get("CAGR")
@@ -1687,8 +1745,8 @@ def _compose_tuning_report(
             )
 
         normalized_rows.sort(key=_get_sort_key, reverse=True)
-        lines.append(f"=== 최근 {months_range}개월 결과 - 정렬 기준: {metric_display} ===")
-        lines.extend(_render_tuning_table(normalized_rows, months_range=months_range))
+        lines.append(f"=== 최근 {period_display} 결과 - 정렬 기준: {metric_display} ===")
+        lines.extend(_render_tuning_table(normalized_rows, period_str=period_display))
         lines.append("")
 
     return lines
@@ -1741,7 +1799,6 @@ def run_account_tuning(
     output_path: Path | str | None = None,
     results_dir: Path | str | None = None,
     tuning_config: dict[str, dict[str, Any]] | None = None,
-    months_range: int | None = None,
     debug_export_dir: Path | str | None = None,
     debug_capture_top_n: int = 1,
 ) -> Path | None:
@@ -1910,17 +1967,16 @@ def run_account_tuning(
     except ValueError:
         ma_max = base_rules.ma_period
 
-    month_items = _resolve_month_configs(months_range, account_id=account_id)
+    month_items = _resolve_month_configs(account_id=account_id)
     if not month_items:
         logger.error("[튜닝] 테스트할 기간 설정이 없습니다.")
         return None
 
-    valid_month_ranges = [
-        int(item.get("months_range", 0))
-        for item in month_items
-        if isinstance(item.get("months_range"), (int, float)) and int(item.get("months_range", 0)) > 0
+    # backtest_start_date 기반으로 검증
+    valid_start_dates = [
+        str(item.get("backtest_start_date", "")) for item in month_items if item.get("backtest_start_date")
     ]
-    if not valid_month_ranges:
+    if not valid_start_dates:
         logger.error("[튜닝] 유효한 기간 정보가 없습니다.")
         return None
 
@@ -1930,27 +1986,30 @@ def run_account_tuning(
     else:
         end_date = end_date.normalize()
 
-    unique_month_ranges = sorted(set(valid_month_ranges))
+    # 시작일 기반으로 테스트 기간 생성
     test_period_ranges: list[dict[str, Any]] = []
-    for months in unique_month_ranges:
+    for start_date_str in valid_start_dates:
         try:
-            months_int = int(months)
-        except (TypeError, ValueError):
+            start_dt = pd.to_datetime(start_date_str).normalize()
+        except Exception:
             continue
-        start_dt = (end_date - pd.DateOffset(months=months_int)).normalize()
         test_period_ranges.append(
             {
-                "months": months_int,
+                "backtest_start_date": start_date_str,
                 "start_date": start_dt.strftime("%Y-%m-%d"),
                 "end_date": end_date.strftime("%Y-%m-%d"),
             }
         )
 
-    longest_months = max(valid_month_ranges)
+    if not test_period_ranges:
+        logger.error("[튜닝] 유효한 테스트 기간이 없습니다.")
+        return None
 
-    start_date_prefetch = end_date - pd.DateOffset(months=longest_months)
+    # 가장 이른 시작일 찾기
+    earliest_start = min(pd.to_datetime(item["start_date"]) for item in test_period_ranges)
+
     date_range_prefetch = [
-        start_date_prefetch.strftime("%Y-%m-%d"),
+        earliest_start.strftime("%Y-%m-%d"),
         end_date.strftime("%Y-%m-%d"),
     ]
 
@@ -1987,10 +2046,10 @@ def run_account_tuning(
         except Exception:
             cache_seed_dt = None
 
-    if cache_seed_dt is not None and cache_seed_dt < start_date_prefetch:
-        start_date_prefetch = cache_seed_dt
+    if cache_seed_dt is not None and cache_seed_dt < earliest_start:
+        earliest_start = cache_seed_dt
         date_range_prefetch = [
-            start_date_prefetch.strftime("%Y-%m-%d"),
+            earliest_start.strftime("%Y-%m-%d"),
             end_date.strftime("%Y-%m-%d"),
         ]
 
@@ -2060,38 +2119,37 @@ def run_account_tuning(
         },
         "ticker_count": len(tickers),
         "excluded_tickers": sorted(excluded_ticker_set),
-        "test_periods": valid_month_ranges,
+        "test_periods": valid_start_dates,
         "test_period_ranges": test_period_ranges,
     }
 
     normalized_month_items: list[dict[str, Any]] = []
 
     for item in month_items:
-        months_raw = item.get("months_range")
-        try:
-            months_value = int(months_raw)
-        except (TypeError, ValueError):
+        backtest_start_date = item.get("backtest_start_date")
+        if not backtest_start_date:
             logger.warning(
-                "[튜닝] %s (%s) 월 범위를 정수로 변환할 수 없습니다. 항목을 건너뜁니다.",
+                "[튜닝] %s 백테스트 시작일이 없습니다. 항목을 건너뜁니다.",
                 account_norm.upper(),
-                months_raw,
             )
             continue
 
-        if months_value <= 0:
+        try:
+            start_dt = pd.to_datetime(backtest_start_date)
+        except Exception:
             logger.warning(
-                "[튜닝] %s (%s) 유효하지 않은 월 범위입니다. 항목을 건너뜁니다.",
+                "[튜닝] %s (%s) 날짜를 파싱할 수 없습니다. 항목을 건너뜁니다.",
                 account_norm.upper(),
-                months_raw,
+                backtest_start_date,
             )
             continue
 
         sanitized_item = dict(item)
-        sanitized_item["months_range"] = months_value
+        sanitized_item["backtest_start_date"] = str(backtest_start_date)
         if debug_dir is not None:
             debug_month_configs.append(
                 {
-                    "months_range": months_value,
+                    "backtest_start_date": str(backtest_start_date),
                     "weight": float(item.get("weight", 0.0) or 0.0),
                     "source": item.get("source"),
                 }
@@ -2146,20 +2204,20 @@ def run_account_tuning(
             return _safe_float(entry.get("sharpe_to_mdd"), float("-inf"))
 
     for idx, item in enumerate(normalized_month_items, 1):
-        months_value = item.get("months_range", 0)
+        backtest_start_date = str(item.get("backtest_start_date", ""))
 
         # 중간 저장 콜백 함수 정의
         def save_progress_callback(success_entries, progress_pct, completed, total):
             """1%마다 호출되는 중간 저장 콜백"""
             # 현재까지의 결과로 임시 결과 생성
             temp_result = {
-                "months_range": months_value,
+                "backtest_start_date": backtest_start_date,
                 "best": success_entries[0] if success_entries else {},
                 "weight": item.get("weight", 0.0),
                 "source": item.get("source"),
                 "raw_data": [
                     {
-                        "MONTHS_RANGE": months_value,
+                        "BACKTEST_START_DATE": backtest_start_date,
                         "CAGR": _round_float_places(entry.get("cagr", 0.0), 2),
                         "MDD": _round_float_places(-entry.get("mdd", 0.0), 2),
                         "period_return": _round_float_places(entry.get("period_return", 0.0), 2),
@@ -2188,15 +2246,14 @@ def run_account_tuning(
                 progress_info={
                     "completed": completed,
                     "total": total,
-                    "months_range": months_value,
                     "progress_pct": progress_pct,
                 },
                 tuning_metadata=tuning_metadata,
             )
 
-        single_result = _execute_tuning_for_months(
+        single_result = _execute_tuning(
             account_norm,
-            months_range=months_value,
+            backtest_start_date=backtest_start_date,
             search_space=search_space,
             end_date=end_date,
             excluded_tickers=excluded_ticker_set,
@@ -2244,19 +2301,19 @@ def run_account_tuning(
 
         if debug_dir is not None and capture_top_n > 0:
             raw_rows = single_result.get("raw_data") or []
-            month_start = (end_date - pd.DateOffset(months=months_value)).strftime("%Y-%m-%d")
+            month_start = backtest_start_date
             month_end = end_date.strftime("%Y-%m-%d")
             calendar_for_month = _filter_trading_days(prefetched_trading_days, month_start, month_end)
             if calendar_for_month is None:
                 raise RuntimeError(
-                    f"[튜닝] {account_norm.upper()} ({months_value}개월) 구간의 거래일 정보를 준비하지 못했습니다."
+                    f"[튜닝] {account_norm.upper()} ({backtest_start_date} 시작) 구간의 거래일 정보를 준비하지 못했습니다."
                 )
 
             debug_diff_rows.extend(
                 _export_debug_month(
                     debug_dir,
                     account_id=account_norm,
-                    months_range=months_value,
+                    backtest_start_date=backtest_start_date,
                     raw_rows=raw_rows,
                     prefetched_data=prefetched_map,
                     capture_top_n=capture_top_n,
@@ -2290,10 +2347,10 @@ def run_account_tuning(
     for item in results_per_month:
         best = item.get("best", {})
         logger.info(
-            "[튜닝] %s (%d개월) 최적 조합 (%s 기준): MA=%d / TOPN=%d / TH=%.3f / RSI=%d / "
+            "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): MA=%d / TOPN=%d / TH=%.3f / RSI=%d / "
             "COOLDOWN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
             account_norm.upper(),
-            item.get("months_range"),
+            item.get("backtest_start_date"),
             optimization_metric,
             best.get("ma_period", 0),
             best.get("portfolio_topn", 0),
@@ -2335,7 +2392,7 @@ def run_account_tuning(
 
         if debug_diff_rows:
             summary_fields = [
-                "months_range",
+                "backtest_start_date",
                 "ma_period",
                 "topn",
                 "threshold",

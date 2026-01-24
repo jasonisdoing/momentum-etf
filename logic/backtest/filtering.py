@@ -33,8 +33,9 @@ def _resolve_category(
         return raw_category, raw_category
 
     # 카테고리가 없거나 예외 카테고리라면, 티커 기반의 내부 키를 만들어 카테고리 중복을 방지합니다.
+    # 원본 카테고리명은 유지하여 is_category_exception 체크가 작동하도록 합니다.
     internal_key = f"__i_{ticker.upper()}"
-    return None, internal_key
+    return raw_category, internal_key
 
 
 def select_candidates_by_category(

@@ -122,6 +122,12 @@ def extract_recommendations_from_backtest(
         name = meta.get("name", ticker_key)
         category = meta.get("category", "-")
 
+        # [UPDATE] stock_note가 있으면 이름에 병합 (예: 종목명(노트내용))
+        # UI 오버레이 복구용 원본 노트도 stock_note 필드로 저장
+        stock_note = meta.get("note")
+        if stock_note:
+            name = f"{name}({stock_note})"
+
         # 기본 값 추출
         price = _safe_float(last_row.get("price"))
         shares = _safe_float(last_row.get("shares"), 0)
@@ -227,6 +233,7 @@ def extract_recommendations_from_backtest(
                 "ticker": ticker_key,
                 "name": name,
                 "category": category,
+                "stock_note": stock_note,  # UI 오버레이 복구용
                 "state": state,
                 "decision": decision,
                 "price": price,
@@ -398,12 +405,12 @@ def generate_recommendation_report(
     account_settings = get_account_settings(account_id)
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
     strategy_cfg = account_settings.get("strategy", {}) or {}
-    months_range = strategy_cfg.get("MONTHS_RANGE", 12)
+    backtest_start_date_str = strategy_cfg.get("BACKTEST_START_DATE", "2025-01-01")
 
     try:
-        months_range = int(months_range)
-    except (TypeError, ValueError):
-        months_range = 12
+        start_date = pd.to_datetime(backtest_start_date_str)
+    except Exception:
+        start_date = pd.Timestamp.now().normalize() - pd.DateOffset(months=12)
 
     # 종료일 결정
     if date_str:
@@ -412,8 +419,6 @@ def generate_recommendation_report(
         end_date = get_latest_trading_day(country_code)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()
-
-    start_date = end_date - pd.DateOffset(months=months_range)
 
     # 전략 규칙 로드
     strategy_rules = get_strategy_rules(account_id)
@@ -436,7 +441,16 @@ def generate_recommendation_report(
         except Exception:
             pass
 
+    # 1년 수익률 계산 등을 위한 최소 데이터 확보 (400일)
+    min_days_needed = 400
+    min_start_date_for_stats = end_date - pd.DateOffset(days=min_days_needed)
+
     prefetch_start = start_date - pd.DateOffset(days=warmup_days)
+
+    # 통계용 최소 시작일과 비교하여 더 이른 날짜 선택
+    if min_start_date_for_stats < prefetch_start:
+        prefetch_start = min_start_date_for_stats
+
     if cache_seed_dt is not None and cache_seed_dt < prefetch_start:
         prefetch_start = cache_seed_dt
     date_range = [prefetch_start.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
@@ -464,7 +478,6 @@ def generate_recommendation_report(
 
     result = run_account_backtest(
         account_id,
-        months_range=months_range,
         prefetched_data=prefetched_map,
         prefetched_etf_universe=etf_universe,
         quiet=True,  # 백테스트 로그 출력 억제
@@ -472,6 +485,13 @@ def generate_recommendation_report(
 
     # 마지막 날 추천 데이터 추출
     recommendations = extract_recommendations_from_backtest(result, ticker_meta=universe_meta)
+
+    # 전체 기간 데이터(prefetched_map)를 이용하여 기간별 수익률(6m, 12m 등) 재계산/보강
+    recommendations = _enrich_with_period_returns(
+        recommendations,
+        prefetched_map,
+        base_date=result.end_date,
+    )
 
     # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
     if country_code in ("kor", "kr"):
@@ -810,6 +830,66 @@ def main() -> None:
         account_id.upper(),
         " ".join(parts),
     )
+
+
+def _enrich_with_period_returns(
+    recommendations: list[dict[str, Any]],
+    prefetched_map: dict[str, pd.DataFrame],
+    base_date: pd.Timestamp,
+) -> list[dict[str, Any]]:
+    """추천 목록에 기간별 수익률을 prefetch된 전체 데이터를 이용하여 다시 계산합니다."""
+
+    # 1주, 1달, 3달, 6달, 12달
+    periods = {
+        "return_1w": 7,
+        "return_1m": 30,
+        "return_3m": 90,
+        "return_6m": 180,
+        "return_12m": 365,
+    }
+
+    for rec in recommendations:
+        ticker = rec.get("ticker")
+        if not ticker:
+            continue
+
+        df = prefetched_map.get(ticker)
+        if df is None or df.empty:
+            continue
+
+        # 현재가 결정
+        current_price = rec.get("price")
+        if not current_price:
+            if base_date in df.index:
+                row = df.loc[base_date]
+                current_price = _safe_float(row.get("close") or row.get("Close"))
+            elif not df.empty:
+                row = df.iloc[-1]
+                current_price = _safe_float(row.get("close") or row.get("Close"))
+
+        if not current_price:
+            continue
+
+        # 과거 가격 조회 및 수익률 갱신
+        for key, days in periods.items():
+            target_date = base_date - pd.Timedelta(days=days)
+
+            try:
+                if target_date < df.index[0]:
+                    continue
+
+                idx = df.index.get_indexer([target_date], method="pad")[0]
+                if idx >= 0:
+                    row = df.iloc[idx]
+                    prev_price = _safe_float(row.get("close") or row.get("Close"))
+
+                    if prev_price and prev_price > 0:
+                        ret = ((current_price - prev_price) / prev_price) * 100.0
+                        rec[key] = ret
+            except Exception:
+                pass
+
+    return recommendations
 
 
 if __name__ == "__main__":
