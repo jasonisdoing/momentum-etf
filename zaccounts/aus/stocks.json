@@ -498,8 +498,8 @@
             {
                 "ticker": "S32",
                 "name": "South32 Limited",
-                "listing_date": "2015-05-18",
                 "note": "알루미늄/은/망간/구리 25%",
+                "listing_date": "2015-05-18",
                 "1_week_avg_volume": 19115539,
                 "1_week_earn_rate": 5.5288,
                 "1_month_earn_rate": 26.513,

@@ -267,7 +267,7 @@ def update_account_metadata(account_id: str):
                 # [User Request] 필드 순서 재정렬 (가독성)
                 ordered_stock = {}
                 # 1. 기본 정보
-                for k in ["ticker", "name", "listing_date"]:
+                for k in ["ticker", "name", "note", "listing_date"]:
                     if k in stock:
                         ordered_stock[k] = stock[k]
 
@@ -288,7 +288,7 @@ def update_account_metadata(account_id: str):
                         ordered_stock[k] = stock[k]
 
                 # 4. 기타 나머지 필드 (혹시 있으면)
-                known_keys = set(["ticker", "name", "listing_date", "1_week_avg_volume"] + rate_keys)
+                known_keys = set(["ticker", "name", "note", "listing_date", "1_week_avg_volume"] + rate_keys)
                 for k, v in stock.items():
                     if k not in known_keys:
                         ordered_stock[k] = v
