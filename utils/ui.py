@@ -71,7 +71,11 @@ def load_account_recommendations(
                             row["price_deviation"] = rt["deviation"]
                         # 5. 종목명 (선택)
                         if "itemname" in rt:
-                            row["name"] = rt["itemname"]
+                            new_name = rt["itemname"]
+                            stock_note = row.get("stock_note")
+                            if stock_note:
+                                new_name = f"{new_name}({stock_note})"
+                            row["name"] = new_name
                         # 6. 3개월 수익률 (선택)
                         if "threeMonthEarnRate" in rt:
                             row["return_3m"] = rt["threeMonthEarnRate"]
@@ -334,12 +338,15 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     country_lower = (country_code or "").strip().lower()
     is_kr = country_lower in {"kr", "kor"}
     is_us = country_lower in {"us", "usa", "usd"}
+    is_aus = country_lower in {"aus", "au", "aud"}
 
     if price_label in df.columns:
         if is_kr:
             format_dict[price_label] = _safe_format("{:,.0f}원")
         elif is_us:
             format_dict[price_label] = _safe_format("${:,.2f}")
+        elif is_aus:
+            format_dict[price_label] = _safe_format("A${:,.2f}")
         else:
             format_dict[price_label] = _safe_format("{:,.2f}")
 
@@ -348,6 +355,8 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
             format_dict["Nav"] = _safe_format("{:,.0f}원")
         elif is_us:
             format_dict["Nav"] = _safe_format("${:,.2f}")
+        elif is_aus:
+            format_dict["Nav"] = _safe_format("A${:,.2f}")
         else:
             format_dict["Nav"] = _safe_format("{:,.2f}")
 
@@ -372,12 +381,12 @@ def render_recommendation_table(
     column_config_map: dict[str, st.column_config.BaseColumn] = {
         "#": st.column_config.TextColumn("#", width=30),
         "티커": st.column_config.TextColumn("티커", width=60),
-        "종목명": st.column_config.TextColumn("종목명", width=250),
-        "카테고리": st.column_config.TextColumn("카테고리", width=165),
+        "종목명": st.column_config.TextColumn("종목명", width=300),
+        "카테고리": st.column_config.TextColumn("카테고리", width=140),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
         price_label: st.column_config.NumberColumn(price_label, width="small"),
-        "상태": st.column_config.TextColumn("상태", width=80),
+        "상태": st.column_config.TextColumn("상태", width=90),
         "보유일": st.column_config.NumberColumn("보유일", width=50),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
         # "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),

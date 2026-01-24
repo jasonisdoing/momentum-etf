@@ -436,6 +436,7 @@ def run_portfolio_backtest(
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
+    enable_data_sufficiency_check: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """
     이동평균 기반 모멘텀 전략으로 포트폴리오 백테스트를 실행합니다.
@@ -503,6 +504,7 @@ def run_portfolio_backtest(
             ma_period=ma_period,
             ma_type=ma_type,
             precomputed_entry=precomputed_entry,
+            enable_data_sufficiency_check=enable_data_sufficiency_check,
         )
         if ticker_metrics:
             metrics_by_ticker[ticker] = ticker_metrics
@@ -836,7 +838,7 @@ def run_portfolio_backtest(
                 ticker_to_sell = None
                 replacement_note = ""
 
-                if held_stock_same_category:
+                if held_stock_same_category and not is_category_exception(wait_stock_category):
                     # Case 1: 같은 카테고리 종목이 있는 경우 (필수 교체 대상)
                     # 쿨다운 체크 추가
                     target_state = position_state[held_stock_same_category["ticker"]]

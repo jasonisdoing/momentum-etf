@@ -104,12 +104,12 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
         name = etf.get("name", ticker)
         category = etf.get("category", "-")
 
-        # 캐시된 과거 데이터 로드
+        # 캐시된 과거 데이터 로드 (12달 수익률 계산을 위해 18개월 필요)
         try:
             price_data = fetch_ohlcv(
                 ticker,
                 country,
-                months_back=12,
+                months_back=18,
                 account_id=account_id,  # [FIX] account_id is required for fetch_ohlcv
             )
         except Exception:
@@ -128,9 +128,10 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
                     "Nav": "-",
                     "괴리율": "-",
                     "1주(%)": 0.0,
-                    "2주(%)": 0.0,
                     "1달(%)": 0.0,
                     "3달(%)": 0.0,
+                    "6달(%)": 0.0,
+                    "12달(%)": 0.0,
                     "고점대비": 0.0,
                     "추세(3달)": [],
                     "점수": 0.0,
@@ -164,9 +165,10 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
 
         # 수익률 계산 (계정 페이지와 동일한 기간 사용)
         return_1w = _calculate_return_pct(close_series, 5)  # 5일
-        return_2w = _calculate_return_pct(close_series, 10)  # 10일
         return_1m = _calculate_return_pct(close_series, 21)  # 21일 (1개월)
         return_3m = _calculate_return_pct(close_series, 63)  # 63일 (3개월)
+        return_6m = _calculate_return_pct(close_series, 126)  # 126일 (6개월)
+        return_12m = _calculate_return_pct(close_series, 252)  # 252일 (12개월)
 
         # 고점 대비 (전체 기간 기준)
         drawdown = _calculate_drawdown_from_high(close_series)
@@ -223,9 +225,10 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
                 "Nav": int(nav_price) if pd.notna(nav_price) else None,
                 "괴리율": deviation,
                 "1주(%)": return_1w,
-                "2주(%)": return_2w,
                 "1달(%)": return_1m,
                 "3달(%)": return_3m,
+                "6달(%)": return_6m,
+                "12달(%)": return_12m,
                 "고점대비": drawdown,
                 "추세(3달)": trend_data,
                 "점수": score_value,
@@ -245,7 +248,7 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
     return df
 
 
-def _style_dataframe(df: pd.DataFrame) -> pd.io.formats.style.Styler:
+def _style_dataframe(df: pd.DataFrame, country_code: str = "kor") -> pd.io.formats.style.Styler:
     """DataFrame에 스타일 적용 (색상 및 포맷)."""
 
     def _color_pct(val: float | str) -> str:
@@ -262,32 +265,94 @@ def _style_dataframe(df: pd.DataFrame) -> pd.io.formats.style.Styler:
             return "color: blue"
         return "color: black"
 
+    def _deviation_style(val: Any) -> str:
+        """괴리율 스타일링: 양수 빨강, 음수 파랑, ±2% 이상 볼드체."""
+        if val is None:
+            return ""
+        try:
+            if isinstance(val, str):
+                cleaned = val.replace("%", "").replace(",", "").strip()
+                num = float(cleaned)
+            else:
+                num = float(val)
+        except (TypeError, ValueError):
+            return ""
+
+        if num == 0:
+            return ""
+
+        if num >= 2.0:
+            return "color: red; font-weight: bold"
+        if num <= -2.0:
+            return "color: blue; font-weight: bold"
+
+        return "color: black"
+
     styled = df.style
     pct_columns = [
         "일간(%)",
         "1주(%)",
-        "2주(%)",
         "1달(%)",
         "3달(%)",
+        "6달(%)",
+        "12달(%)",
         "고점대비",
-        "괴리율",
     ]
     for col in pct_columns:
         if col in df.columns:
             styled = styled.map(_color_pct, subset=pd.IndexSlice[:, col])
 
-    # 가격 컬럼 포맷팅 (천 단위 콤마 + 원)
+    # 괴리율 별도 스타일링 (±2% 이상 볼드)
+    if "괴리율" in df.columns:
+        styled = styled.map(_deviation_style, subset=["괴리율"])
+
+    # 가격 컬럼 포맷팅 (국가별 통화 단위)
     format_dict = {}
 
-    def _safe_price_format(x: Any) -> str:
+    country_lower = str(country_code).lower()
+    is_korean = country_lower in {"kr", "kor"}
+    is_us = country_lower in {"us", "usa", "usd"}
+    is_aus = country_lower in {"aus", "au", "aud"}
+
+    def _safe_price_format_kr(x: Any) -> str:
         if isinstance(x, (int, float)):
             return f"{x:,.0f}원"
         return str(x)
 
+    def _safe_price_format_us(x: Any) -> str:
+        if isinstance(x, (int, float)):
+            return f"${x:,.2f}"
+        return str(x)
+
+    def _safe_price_format_aus(x: Any) -> str:
+        if isinstance(x, (int, float)):
+            return f"A${x:,.2f}"
+        return str(x)
+
+    def _safe_price_format_default(x: Any) -> str:
+        if isinstance(x, (int, float)):
+            return f"{x:,.2f}"
+        return str(x)
+
     if "현재가" in df.columns:
-        format_dict["현재가"] = _safe_price_format
+        if is_korean:
+            format_dict["현재가"] = _safe_price_format_kr
+        elif is_us:
+            format_dict["현재가"] = _safe_price_format_us
+        elif is_aus:
+            format_dict["현재가"] = _safe_price_format_aus
+        else:
+            format_dict["현재가"] = _safe_price_format_default
+
     if "Nav" in df.columns:
-        format_dict["Nav"] = _safe_price_format
+        if is_korean:
+            format_dict["Nav"] = _safe_price_format_kr
+        elif is_us:
+            format_dict["Nav"] = _safe_price_format_us
+        elif is_aus:
+            format_dict["Nav"] = _safe_price_format_aus
+        else:
+            format_dict["Nav"] = _safe_price_format_default
 
     if format_dict:
         styled = styled.format(format_dict)
@@ -362,29 +427,88 @@ def render_all_stocks_page() -> None:
 
     st.caption(f"총 {len(df)}개 종목 | 업데이트: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # 컬럼 설정
+    # 국가 코드 확인 (Nav, 괴리율 표시 여부)
+    try:
+        settings = get_account_settings(selected_account)
+        country_code = settings.get("country_code", "kor").lower()
+    except Exception:
+        country_code = "kor"
+
+    is_korean = country_code in {"kr", "kor"}
+
+    # 컬럼 설정 (kor_us 페이지와 동일하게)
     column_config = {
-        "#": st.column_config.TextColumn("#", width=40),
+        "#": st.column_config.TextColumn("#", width=30),
         "티커": st.column_config.TextColumn("티커", width=60),
-        "종목명": st.column_config.TextColumn("종목명", width=250),
-        "카테고리": st.column_config.TextColumn("카테고리", width=165),
-        "일간(%)": st.column_config.NumberColumn("일간(%)", width=70, format="%.2f%%"),
-        "현재가": st.column_config.NumberColumn("현재가", width=80),
-        "Nav": st.column_config.NumberColumn("Nav", width=80),
-        "괴리율": st.column_config.NumberColumn("괴리율", width=70, format="%.2f%%"),
-        "1주(%)": st.column_config.NumberColumn("1주(%)", width=70, format="%.2f%%"),
-        "2주(%)": st.column_config.NumberColumn("2주(%)", width=70, format="%.2f%%"),
-        "1달(%)": st.column_config.NumberColumn("1달(%)", width=70, format="%.2f%%"),
-        "3달(%)": st.column_config.NumberColumn("3달(%)", width=70, format="%.2f%%"),
-        "고점대비": st.column_config.NumberColumn("고점대비", width=80, format="%.2f%%"),
-        "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width=100),
-        "점수": st.column_config.NumberColumn("점수", width=60, format="%.1f"),
-        "RSI": st.column_config.NumberColumn("RSI", width=60, format="%.1f"),
+        "종목명": st.column_config.TextColumn("종목명", width=300),
+        "카테고리": st.column_config.TextColumn("카테고리", width=140),
+        "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
+        "현재가": st.column_config.NumberColumn("현재가", width="small"),
+        "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+        "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
+        "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
+        "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
+        "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
+        "고점대비": st.column_config.NumberColumn("고점대비", width="small", format="%.2f%%"),
+        "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width="small"),
+        "점수": st.column_config.NumberColumn("점수", width=50, format="%.1f"),
+        "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
     }
 
+    # 국가가 kor인 경우 Nav, 괴리율 컬럼 추가
+    if is_korean:
+        column_config["Nav"] = st.column_config.NumberColumn("Nav", width="small")
+        column_config["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")
+
+    # 표시할 컬럼 순서 정의 (현재가, 괴리율, Nav 순서 - kor_us 페이지와 동일)
+    if is_korean:
+        column_order = [
+            "#",
+            "티커",
+            "종목명",
+            "카테고리",
+            "일간(%)",
+            "현재가",
+            "괴리율",
+            "Nav",
+            "1주(%)",
+            "1달(%)",
+            "3달(%)",
+            "6달(%)",
+            "12달(%)",
+            "고점대비",
+            "추세(3달)",
+            "점수",
+            "RSI",
+            "지속",
+        ]
+    else:
+        column_order = [
+            "#",
+            "티커",
+            "종목명",
+            "카테고리",
+            "일간(%)",
+            "현재가",
+            "1주(%)",
+            "1달(%)",
+            "3달(%)",
+            "6달(%)",
+            "12달(%)",
+            "고점대비",
+            "추세(3달)",
+            "점수",
+            "RSI",
+            "지속",
+        ]
+
+    # DataFrame 컬럼 순서 재정렬
+    existing_columns = [col for col in column_order if col in df.columns]
+    df_reordered = df[existing_columns]
+
     # 스타일 적용
-    styled_df = _style_dataframe(df)
+    styled_df = _style_dataframe(df_reordered, country_code=country_code)
 
     # 테이블 표시
     st.dataframe(

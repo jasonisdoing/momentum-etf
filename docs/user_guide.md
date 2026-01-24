@@ -47,7 +47,7 @@ python recommend.py us
     "MA_PERIOD": 48,              // 이동평균 기간
     "PORTFOLIO_TOPN": 5,          // 최대 보유 종목 수
     "STOP_LOSS_PCT": -10,         // 손절 기준 (-10%)
-    "MONTHS_RANGE": 12            // 백테스트/튜닝 기간 (개월)
+    "BACKTEST_START_DATE": "2025-09-08"  // 백테스트/튜닝 시작일
   }
 }
 ```

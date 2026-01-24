@@ -12,14 +12,19 @@ def is_category_exception(category: str | None) -> bool:
     """카테고리가 중복 제한에서 예외인지 확인합니다.
 
     Args:
-        category: 확인할 카테고리 이름
+        category: 확인할 카테고리 이름 (예: "예외", "예외(2)", "💾AI반도체(15)")
 
     Returns:
         True if 예외 카테고리, False otherwise
     """
+    import re
+
     if not category:
         return False
-    return str(category).strip() in CATEGORY_EXCEPTIONS
+
+    # 카테고리명에서 종목 수 접미사 제거 (예: "예외(2)" -> "예외")
+    category_clean = re.sub(r"\(\d+\)$", "", str(category).strip())
+    return category_clean in CATEGORY_EXCEPTIONS
 
 
 def get_held_categories_excluding_sells(

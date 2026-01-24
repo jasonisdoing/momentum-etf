@@ -1,29 +1,30 @@
 {
     "order": 20,
     "icon": "🇺🇸",
-    "name": "국내상장 해외 ETF",
+    "name": "해외 ETF",
     "desc": "운영종인 국내상장 해외 ETF 포트폴리오 입니다.",
     "country_code": "kor",
     "currency": "krw",
     "slack_channel": "C09FAU2NHM2",
-    "initial_capital_krw": "50000000",
+    "initial_capital_krw": "100000000",
     "show_hold": true,
     "strategy": {
-        "MONTHS_RANGE": 12,
-        "BACKTESTED_DATE": "2026-01-08 00:00",
-        "CAGR": 82.391868,
-        "MDD": -15.33939,
+        "BACKTEST_START_DATE": "2025-09-08",
+        "BACKTESTED_DATE": "2026-01-23 23:15",
+        "CAGR": 237.340746,
+        "MDD": -9.775942,
         "PORTFOLIO_TOPN": 5,
-        "MA_PERIOD": 60,
+        "MA_PERIOD": 70,
         "MA_TYPE": "EMA",
         "REPLACE_SCORE_THRESHOLD": 0,
         "STOP_LOSS_PCT": 5,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
-        "OPTIMIZATION_METRIC": "CAGR"
+        "OPTIMIZATION_METRIC": "CAGR",
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
-        "ticker": "379800",
-        "name": "Kodex 미국S&P500"
+        "ticker": "426030",
+        "name": "TIME 미국나스닥100액티브"
     }
 }

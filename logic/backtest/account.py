@@ -57,7 +57,7 @@ class AccountBacktestResult:
     ticker_summaries: list[dict[str, Any]]
     category_summaries: list[dict[str, Any]]
     settings_snapshot: dict[str, Any]
-    months_range: int
+    backtest_start_date: str
     missing_tickers: list[str]
 
     def to_dict(self) -> dict[str, Any]:
@@ -83,7 +83,7 @@ class AccountBacktestResult:
             "ticker_summaries": self.ticker_summaries,
             "category_summaries": self.category_summaries,
             "settings_snapshot": self.settings_snapshot,
-            "months_range": self.months_range,
+            "backtest_start_date": self.backtest_start_date,
             "missing_tickers": self.missing_tickers,
         }
 
@@ -91,7 +91,6 @@ class AccountBacktestResult:
 def run_account_backtest(
     account_id: str,
     *,
-    months_range: int | None = None,
     initial_capital: float | None = None,
     quiet: bool = False,
     prefetched_data: Mapping[str, pd.DataFrame] | None = None,
@@ -161,6 +160,7 @@ def run_account_backtest(
             replace_threshold=strategy_override.replace_threshold,
             ma_type=strategy_override.ma_type,
             stop_loss_pct=strategy_override.stop_loss_pct,
+            enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
@@ -169,9 +169,9 @@ def run_account_backtest(
         if strategy_rules.stop_loss_pct is not None:
             strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
 
-    months_range = _resolve_months_range(months_range, override_settings, account_settings)
+    backtest_start_date_str = _resolve_backtest_start_date(None, override_settings, account_settings)
     end_date = _resolve_end_date(country_code, override_settings)
-    start_date = _resolve_start_date(end_date, months_range, override_settings)
+    start_date = pd.to_datetime(backtest_start_date_str)
 
     capital_info = _resolve_initial_capital(
         initial_capital,
@@ -366,29 +366,33 @@ def run_account_backtest(
         ticker_summaries=ticker_summaries,
         category_summaries=category_summaries,
         settings_snapshot=settings_snapshot,
-        months_range=months_range,
+        backtest_start_date=backtest_start_date_str,
         missing_tickers=missing_sorted,
     )
 
 
-def _resolve_months_range(
-    months_range: int | None,
+def _resolve_backtest_start_date(
+    start_date: str | None,
     override_settings: Mapping[str, Any],
     account_settings: Mapping[str, Any],
-) -> int:
-    if months_range is not None:
-        return int(months_range)
-    if "months_range" in override_settings:
-        return int(override_settings["months_range"])
-    if "test_months_range" in override_settings:
-        return int(override_settings["test_months_range"])
-    account_months = account_settings.get("strategy", {}).get("MONTHS_RANGE") if account_settings else None
-    if account_months is not None:
-        try:
-            return int(account_months)
-        except (TypeError, ValueError):
-            pass
-    raise ValueError("MONTHS_RANGE 설정이 필요합니다. 계정 설정의 strategy.MONTHS_RANGE 값을 확인하세요.")
+) -> str:
+    """백테스트 시작일을 결정합니다.
+
+    우선순위:
+    1. 직접 전달된 start_date
+    2. override_settings의 backtest_start_date
+    3. account_settings의 strategy.BACKTEST_START_DATE
+    """
+    if start_date is not None:
+        return str(start_date)
+    if "backtest_start_date" in override_settings:
+        return str(override_settings["backtest_start_date"])
+    if "start_date" in override_settings:
+        return str(override_settings["start_date"])
+    account_start = account_settings.get("strategy", {}).get("BACKTEST_START_DATE") if account_settings else None
+    if account_start is not None:
+        return str(account_start)
+    raise ValueError("BACKTEST_START_DATE 설정이 필요합니다. 계정 설정의 strategy.BACKTEST_START_DATE 값을 확인하세요.")
 
 
 def _resolve_initial_capital(
@@ -475,16 +479,6 @@ def _resolve_end_date(country_code: str, override_settings: Mapping[str, Any]) -
     return get_latest_trading_day(country_code)
 
 
-def _resolve_start_date(
-    end_date: pd.Timestamp,
-    months_range: int,
-    override_settings: Mapping[str, Any],
-) -> pd.Timestamp:
-    if "start_date" in override_settings:
-        return pd.to_datetime(override_settings["start_date"])
-    return end_date - pd.DateOffset(months=months_range)
-
-
 def _build_backtest_kwargs(
     *,
     strategy_rules,
@@ -525,6 +519,7 @@ def _build_backtest_kwargs(
         "rsi_sell_threshold": rsi_sell_threshold,
         "cooldown_days": cooldown_days,
         "quiet": quiet,
+        "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }
 
     clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
