@@ -409,7 +409,7 @@
             {
                 "ticker": "MNRS",
                 "name": "Betashares Global Gold Miners Currency Hedged ETF",
-                "note": "금80%, 은10%, 구리5~10%",
+                "note": "금80%, 은10%, 구리10%",
                 "listing_date": "2016-07-27",
                 "1_week_avg_volume": 288515,
                 "1_week_earn_rate": 6.7989,
@@ -426,7 +426,7 @@
             {
                 "ticker": "GDX",
                 "name": "VanEck Gold Miners ETF",
-                "note": "금80%, 은10%, 구리5~10%",
+                "note": "금80%, 은10%, 구리10%",
                 "listing_date": "2015-06-24",
                 "1_week_avg_volume": 79630,
                 "1_week_earn_rate": 7.1016,
@@ -494,6 +494,18 @@
                 "3_month_earn_rate": 39.9247,
                 "6_month_earn_rate": 107.3411,
                 "12_month_earn_rate": 174.2361
+            },
+            {
+                "ticker": "PLS",
+                "name": "PLS Group Limited",
+                "note": "리튬100%",
+                "listing_date": "2007-09-19",
+                "1_week_avg_volume": 27149140,
+                "1_week_earn_rate": 8.547,
+                "1_month_earn_rate": 26.6833,
+                "3_month_earn_rate": 71.6216,
+                "6_month_earn_rate": 198.8235,
+                "12_month_earn_rate": 119.9134
             },
             {
                 "ticker": "S32",
