@@ -440,7 +440,7 @@ def render_all_stocks_page() -> None:
     column_config = {
         "#": st.column_config.TextColumn("#", width=30),
         "티커": st.column_config.TextColumn("티커", width=60),
-        "종목명": st.column_config.TextColumn("종목명", width=250),
+        "종목명": st.column_config.TextColumn("종목명", width=300),
         "카테고리": st.column_config.TextColumn("카테고리", width=140),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "현재가": st.column_config.NumberColumn("현재가", width="small"),

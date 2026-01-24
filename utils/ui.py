@@ -71,7 +71,11 @@ def load_account_recommendations(
                             row["price_deviation"] = rt["deviation"]
                         # 5. 종목명 (선택)
                         if "itemname" in rt:
-                            row["name"] = rt["itemname"]
+                            new_name = rt["itemname"]
+                            stock_note = row.get("stock_note")
+                            if stock_note:
+                                new_name = f"{new_name}({stock_note})"
+                            row["name"] = new_name
                         # 6. 3개월 수익률 (선택)
                         if "threeMonthEarnRate" in rt:
                             row["return_3m"] = rt["threeMonthEarnRate"]
@@ -377,7 +381,7 @@ def render_recommendation_table(
     column_config_map: dict[str, st.column_config.BaseColumn] = {
         "#": st.column_config.TextColumn("#", width=30),
         "티커": st.column_config.TextColumn("티커", width=60),
-        "종목명": st.column_config.TextColumn("종목명", width=250),
+        "종목명": st.column_config.TextColumn("종목명", width=300),
         "카테고리": st.column_config.TextColumn("카테고리", width=140),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),

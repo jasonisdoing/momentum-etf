@@ -122,6 +122,12 @@ def extract_recommendations_from_backtest(
         name = meta.get("name", ticker_key)
         category = meta.get("category", "-")
 
+        # [UPDATE] stock_note가 있으면 이름에 병합 (예: 종목명(노트내용))
+        # UI 오버레이 복구용 원본 노트도 stock_note 필드로 저장
+        stock_note = meta.get("note")
+        if stock_note:
+            name = f"{name}({stock_note})"
+
         # 기본 값 추출
         price = _safe_float(last_row.get("price"))
         shares = _safe_float(last_row.get("shares"), 0)
@@ -227,6 +233,7 @@ def extract_recommendations_from_backtest(
                 "ticker": ticker_key,
                 "name": name,
                 "category": category,
+                "stock_note": stock_note,  # UI 오버레이 복구용
                 "state": state,
                 "decision": decision,
                 "price": price,

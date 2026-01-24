@@ -409,6 +409,7 @@
             {
                 "ticker": "MNRS",
                 "name": "Betashares Global Gold Miners Currency Hedged ETF",
+                "note": "금80%, 은10%, 구리5~10%",
                 "listing_date": "2016-07-27",
                 "1_week_avg_volume": 288515,
                 "1_week_earn_rate": 6.7989,
@@ -425,6 +426,7 @@
             {
                 "ticker": "GDX",
                 "name": "VanEck Gold Miners ETF",
+                "note": "금80%, 은10%, 구리5~10%",
                 "listing_date": "2015-06-24",
                 "1_week_avg_volume": 79630,
                 "1_week_earn_rate": 7.1016,
@@ -484,6 +486,7 @@
             {
                 "ticker": "EVN",
                 "name": "Evolution Mining Limited",
+                "note": "금70%, 구리30%",
                 "listing_date": "2002-08-20",
                 "1_week_avg_volume": 5863583,
                 "1_week_earn_rate": 13.2622,
@@ -496,6 +499,7 @@
                 "ticker": "S32",
                 "name": "South32 Limited",
                 "listing_date": "2015-05-18",
+                "note": "알루미늄/은/망간/구리 25%",
                 "1_week_avg_volume": 19115539,
                 "1_week_earn_rate": 5.5288,
                 "1_month_earn_rate": 26.513,
@@ -506,7 +510,7 @@
             {
                 "ticker": "NEM",
                 "name": "Newmont Corporation",
-                "note": "Newmont Corporation",
+                "note": "금100%, 은10%",
                 "listing_date": "2023-10-27",
                 "1_week_avg_volume": 424290,
                 "1_week_earn_rate": 5.4594,
