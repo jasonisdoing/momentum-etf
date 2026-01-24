@@ -248,6 +248,17 @@
         "category": "🌍 글로벌",
         "tickers": [
             {
+                "ticker": "IKO",
+                "name": "iShares MSCI South Korea ETF (AU)",
+                "listing_date": "2008-01-02",
+                "1_week_avg_volume": 6086,
+                "1_week_earn_rate": 0.3281,
+                "1_month_earn_rate": 21.5312,
+                "3_month_earn_rate": 23.5032,
+                "6_month_earn_rate": 53.5683,
+                "12_month_earn_rate": 92.1646
+            },
+            {
                 "ticker": "EMKT",
                 "name": "VanEck MSCI Multifactor Emerging Markets Equity ETF",
                 "listing_date": "2018-04-10",
@@ -471,15 +482,38 @@
         "category": "예외",
         "tickers": [
             {
-                "ticker": "IKO",
-                "name": "iShares MSCI South Korea ETF (AU)",
-                "listing_date": "2008-01-02",
-                "1_week_avg_volume": 6086,
-                "1_week_earn_rate": 0.3281,
-                "1_month_earn_rate": 21.5312,
-                "3_month_earn_rate": 23.5032,
-                "6_month_earn_rate": 53.5683,
-                "12_month_earn_rate": 92.1646
+                "ticker": "EVN",
+                "name": "Evolution Mining Limited",
+                "listing_date": "2002-08-20",
+                "1_week_avg_volume": 5863583,
+                "1_week_earn_rate": 13.2622,
+                "1_month_earn_rate": 14.1321,
+                "3_month_earn_rate": 39.9247,
+                "6_month_earn_rate": 107.3411,
+                "12_month_earn_rate": 174.2361
+            },
+            {
+                "ticker": "S32",
+                "name": "South32 Limited",
+                "listing_date": "2015-05-18",
+                "1_week_avg_volume": 19115539,
+                "1_week_earn_rate": 5.5288,
+                "1_month_earn_rate": 26.513,
+                "3_month_earn_rate": 38.0503,
+                "6_month_earn_rate": 47.0799,
+                "12_month_earn_rate": 27.8565
+            },
+            {
+                "ticker": "NEM",
+                "name": "Newmont Corporation",
+                "note": "Newmont Corporation",
+                "listing_date": "2023-10-27",
+                "1_week_avg_volume": 424290,
+                "1_week_earn_rate": 5.4594,
+                "1_month_earn_rate": 14.2482,
+                "3_month_earn_rate": 34.4374,
+                "6_month_earn_rate": 79.8394,
+                "12_month_earn_rate": 170.7367
             }
         ]
     }
