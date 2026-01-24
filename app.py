@@ -148,25 +148,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # --- 인증 로직 시작 ---
-    authenticator = _load_authenticator()
-    # "main_login" 키를 사용하여 로그인 상태 관리
-    _, auth_status, _ = authenticator.login(location="main")
-
-    if auth_status is False:
-        st.error("이메일/사용자명 또는 비밀번호가 올바르지 않습니다.")
-        st.stop()
-    elif auth_status is None:
-        st.warning("계속하려면 로그인하세요.")
-        st.stop()
-
-    # 로그인 성공 시 사이드바에 로그아웃 버튼 표시
-    with st.sidebar:
-        st.write(f"환영합니다, {st.session_state.get('name', 'User')}님!")
-        authenticator.logout(button_name="로그아웃", location="sidebar")
-        st.divider()
-    # --- 인증 로직 끝 ---
-
+    # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
     pages = [
         page_cls(
             _build_home_page(accounts),
@@ -187,15 +169,6 @@ def main() -> None:
         )
     )
 
-    # pages.append(
-    #     page_cls(
-    #         "app_pages/stocks.py",
-    #         title="[Admin] 종목 정보",
-    #         icon="📊",
-    #         url_path="stocks",
-    #     )
-    # )
-
     pages.append(
         page_cls(
             "app_pages/admin_page.py",
@@ -204,6 +177,28 @@ def main() -> None:
             url_path="admin",
         )
     )
+
+    # 네비게이션 객체 생성 (이 시점에 URL 경로가 인식됨)
+    pg = navigation(pages, position="top")
+
+    # --- 인증 로직 시작 ---
+    authenticator = _load_authenticator()
+    # "main_login" 키를 사용하여 로그인 상태 관리
+    _, auth_status, _ = authenticator.login(location="main")
+
+    if auth_status is False:
+        st.error("이메일/사용자명 또는 비밀번호가 올바르지 않습니다.")
+        st.stop()
+    elif auth_status is None:
+        st.warning("계속하려면 로그인하세요.")
+        st.stop()
+
+    # 로그인 성공 시 사이드바에 로그아웃 버튼 표시
+    with st.sidebar:
+        st.write(f"환영합니다, {st.session_state.get('name', 'User')}님!")
+        authenticator.logout(button_name="로그아웃", location="sidebar")
+        st.divider()
+    # --- 인증 로직 끝 ---
 
     st.markdown(
         """
@@ -247,7 +242,8 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    navigation(pages, position="top").run()
+    # --- 3. 라우팅 실행 ---
+    pg.run()
 
 
 if __name__ == "__main__":
