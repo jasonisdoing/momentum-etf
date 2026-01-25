@@ -438,22 +438,6 @@
         ]
     },
     {
-        "category": "🇦🇺 호주 자원",
-        "tickers": [
-            {
-                "ticker": "MVR",
-                "name": "VanEck Australian Resources ETF",
-                "listing_date": "2013-10-14",
-                "1_week_avg_volume": 35097,
-                "1_week_earn_rate": 3.3181,
-                "1_month_earn_rate": 9.3047,
-                "3_month_earn_rate": 18.8871,
-                "6_month_earn_rate": 38.908,
-                "12_month_earn_rate": 46.6857
-            }
-        ]
-    },
-    {
         "category": "🥇원자재/에너지",
         "tickers": [
             {
@@ -529,7 +513,7 @@
                 "1_month_earn_rate": 14.2482,
                 "3_month_earn_rate": 34.4374,
                 "6_month_earn_rate": 79.8394,
-                "12_month_earn_rate": 170.7367
+                "12_month_earn_rate": 170.7368
             }
         ]
     }
