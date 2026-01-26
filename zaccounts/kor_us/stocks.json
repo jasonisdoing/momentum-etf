@@ -732,7 +732,34 @@
         ]
     },
     {
-        "category": "🗿희토류/리튬/금채굴",
+        "category": "🗿희토류/리튬",
+        "tickers": [
+            {
+                "ticker": "415920",
+                "name": "PLUS 글로벌희토류&전략자원생산기업",
+                "listing_date": "2022-01-18",
+                "1_week_avg_volume": 607269,
+                "1_week_earn_rate": 5.4526,
+                "1_month_earn_rate": 29.6247,
+                "3_month_earn_rate": 40.4503,
+                "6_month_earn_rate": 94.9597,
+                "12_month_earn_rate": 126.4896
+            },
+            {
+                "ticker": "394670",
+                "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
+                "listing_date": "2021-07-20",
+                "1_week_avg_volume": 215707,
+                "1_week_earn_rate": 4.0493,
+                "1_month_earn_rate": 13.1627,
+                "3_month_earn_rate": 31.4574,
+                "6_month_earn_rate": 84.286,
+                "12_month_earn_rate": 82.0179
+            }
+        ]
+    },
+    {
+        "category": "🥇금",
         "tickers": [
             {
                 "ticker": "415920",

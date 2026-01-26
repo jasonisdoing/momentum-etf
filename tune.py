@@ -29,7 +29,7 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_TYPE": ["SMA", "EMA", "HMA"],
     },
     "kor_us": {
-        "PORTFOLIO_TOPN": [4],
+        "PORTFOLIO_TOPN": [4, 5],
         "REPLACE_SCORE_THRESHOLD": [0],
         # 1개월 ~ 3개월: 급락 혹은 급등시
         # "MA_RANGE": [20, 30, 40, 50, 60],
