@@ -6,45 +6,45 @@
                 "ticker": "HNDQ",
                 "name": "Betashares Nasdaq 100 Currency Hedged ETF",
                 "listing_date": "2020-07-20",
-                "1_week_avg_volume": 35557,
-                "1_week_earn_rate": -0.4155,
-                "1_month_earn_rate": 0.3389,
-                "3_month_earn_rate": 2.4842,
-                "6_month_earn_rate": 8.8216,
-                "12_month_earn_rate": 16.2549
+                "1_week_avg_volume": 25560,
+                "1_week_earn_rate": 2.1131,
+                "1_month_earn_rate": 1.0958,
+                "3_month_earn_rate": 1.5181,
+                "6_month_earn_rate": 9.8268,
+                "12_month_earn_rate": 20.9853
             },
             {
                 "ticker": "IHVV",
                 "name": "iShares S&P 500 AUD Hedged ETF",
                 "listing_date": "2014-12-15",
-                "1_week_avg_volume": 77385,
-                "1_week_earn_rate": -0.582,
-                "1_month_earn_rate": 1.1362,
-                "3_month_earn_rate": 2.7977,
-                "6_month_earn_rate": 8.8717,
-                "12_month_earn_rate": 14.42
+                "1_week_avg_volume": 58157,
+                "1_week_earn_rate": 1.1154,
+                "1_month_earn_rate": 1.2444,
+                "3_month_earn_rate": 3.8795,
+                "6_month_earn_rate": 8.5529,
+                "12_month_earn_rate": 14.3163
             },
             {
                 "ticker": "NDQ",
                 "name": "BetaShares NASDAQ 100 ETF",
                 "listing_date": "2015-05-26",
-                "1_week_avg_volume": 225259,
-                "1_week_earn_rate": -2.4481,
-                "1_month_earn_rate": -2.8102,
-                "3_month_earn_rate": -2.8617,
-                "6_month_earn_rate": 4.5239,
-                "12_month_earn_rate": 7.9074
+                "1_week_avg_volume": 169305,
+                "1_week_earn_rate": -1.0621,
+                "1_month_earn_rate": -2.3454,
+                "3_month_earn_rate": -4.3619,
+                "6_month_earn_rate": 3.9728,
+                "12_month_earn_rate": 10.2485
             },
             {
                 "ticker": "IVV",
                 "name": "iShares S&P 500 ETF",
                 "listing_date": "2008-01-02",
-                "1_week_avg_volume": 308355,
-                "1_week_earn_rate": -2.6183,
-                "1_month_earn_rate": -2.0482,
-                "3_month_earn_rate": -2.2892,
-                "6_month_earn_rate": 4.8744,
-                "12_month_earn_rate": 5.4598
+                "1_week_avg_volume": 252294,
+                "1_week_earn_rate": -2.076,
+                "1_month_earn_rate": -2.302,
+                "3_month_earn_rate": -2.4155,
+                "6_month_earn_rate": 3.3519,
+                "12_month_earn_rate": 5.0738
             }
         ]
     },
@@ -55,23 +55,23 @@
                 "ticker": "FANG",
                 "name": "Global X FANG+ ETF",
                 "listing_date": "2020-02-27",
-                "1_week_avg_volume": 225249,
-                "1_week_earn_rate": -3.9273,
-                "1_month_earn_rate": -7.1388,
-                "3_month_earn_rate": -10.7055,
-                "6_month_earn_rate": -3.7863,
-                "12_month_earn_rate": 1.7171
+                "1_week_avg_volume": 200651,
+                "1_week_earn_rate": -1.4017,
+                "1_month_earn_rate": -5.4888,
+                "3_month_earn_rate": -11.1904,
+                "6_month_earn_rate": -3.5589,
+                "12_month_earn_rate": 5.5054
             },
             {
                 "ticker": "HACK",
                 "name": "BetaShares Global Cybersecurity ETF",
                 "listing_date": "2016-08-30",
-                "1_week_avg_volume": 154605,
-                "1_week_earn_rate": -4.6952,
-                "1_month_earn_rate": -6.3361,
-                "3_month_earn_rate": -13.0435,
-                "6_month_earn_rate": -10.6439,
-                "12_month_earn_rate": -2.9285
+                "1_week_avg_volume": 158255,
+                "1_week_earn_rate": -1.7756,
+                "1_month_earn_rate": -5.3388,
+                "3_month_earn_rate": -12.241,
+                "6_month_earn_rate": -8.7129,
+                "12_month_earn_rate": -0.1785
             }
         ]
     },
@@ -82,23 +82,23 @@
                 "ticker": "RBTZ",
                 "name": "BetaShares Global Robotics and Artificial Intelligence ETF",
                 "listing_date": "2018-09-12",
-                "1_week_avg_volume": 47798,
-                "1_week_earn_rate": -2.8448,
-                "1_month_earn_rate": 1.7487,
-                "3_month_earn_rate": -1.4429,
-                "6_month_earn_rate": 5.3655,
-                "12_month_earn_rate": 1.9141
+                "1_week_avg_volume": 44174,
+                "1_week_earn_rate": -2.6185,
+                "1_month_earn_rate": 2.4262,
+                "3_month_earn_rate": -4.3539,
+                "6_month_earn_rate": 5.5405,
+                "12_month_earn_rate": 4.8635
             },
             {
                 "ticker": "ROBO",
                 "name": "Global X ROBO Global Robotics & Automation ETF",
                 "listing_date": "2017-09-13",
-                "1_week_avg_volume": 6936,
-                "1_week_earn_rate": -3.0633,
-                "1_month_earn_rate": 3.5326,
-                "3_month_earn_rate": 4.2237,
-                "6_month_earn_rate": 10.9493,
-                "12_month_earn_rate": 13.3822
+                "1_week_avg_volume": 5448,
+                "1_week_earn_rate": -2.8486,
+                "1_month_earn_rate": 2.3954,
+                "3_month_earn_rate": 1.1776,
+                "6_month_earn_rate": 10.7893,
+                "12_month_earn_rate": 13.5869
             }
         ]
     },
@@ -106,114 +106,114 @@
         "category": "🇦🇺 호주",
         "tickers": [
             {
-                "ticker": "EX20",
-                "name": "BetaShares Australian Ex-20 Portfolio Diversifier ETF",
-                "listing_date": "2016-10-05",
-                "1_week_avg_volume": 34731,
-                "1_week_earn_rate": 0.7813,
-                "1_month_earn_rate": 3.5234,
-                "3_month_earn_rate": 1.6141,
-                "6_month_earn_rate": 7.5655,
-                "12_month_earn_rate": 14.9792
-            },
-            {
                 "ticker": "QOZ",
                 "name": "BetaShares FTSE RAFI Australia 200 ETF",
                 "listing_date": "2013-07-10",
-                "1_week_avg_volume": 112563,
-                "1_week_earn_rate": -0.3212,
-                "1_month_earn_rate": 3.0441,
-                "3_month_earn_rate": 3.5512,
-                "6_month_earn_rate": 11.7375,
-                "12_month_earn_rate": 17.7106
+                "1_week_avg_volume": 95280,
+                "1_week_earn_rate": 1.3434,
+                "1_month_earn_rate": 3.3601,
+                "3_month_earn_rate": 4.486,
+                "6_month_earn_rate": 13.1777,
+                "12_month_earn_rate": 18.8667
             },
             {
-                "ticker": "VAS",
-                "name": "Vanguard Australian Shares Index ETF",
-                "listing_date": "2009-05-01",
-                "1_week_avg_volume": 280692,
-                "1_week_earn_rate": -0.4706,
-                "1_month_earn_rate": 2.0868,
-                "3_month_earn_rate": -1.0401,
-                "6_month_earn_rate": 4.2875,
-                "12_month_earn_rate": 9.733
-            },
-            {
-                "ticker": "IOZ",
-                "name": "iShares Core S&P/ASX 200 ETF",
-                "listing_date": "2010-12-07",
-                "1_week_avg_volume": 263856,
-                "1_week_earn_rate": -0.5322,
-                "1_month_earn_rate": 2.0216,
-                "3_month_earn_rate": -1.2248,
-                "6_month_earn_rate": 3.8551,
-                "12_month_earn_rate": 9.1214
-            },
-            {
-                "ticker": "A200",
-                "name": "BetaShares Australia 200 ETF",
-                "listing_date": "2018-05-07",
-                "1_week_avg_volume": 102162,
-                "1_week_earn_rate": -0.5403,
-                "1_month_earn_rate": 1.9031,
-                "3_month_earn_rate": -1.3671,
-                "6_month_earn_rate": 3.9159,
-                "12_month_earn_rate": 9.3078
-            },
-            {
-                "ticker": "STW",
-                "name": "SPDR S&P/ASX 200 ETF",
-                "listing_date": "2008-01-02",
-                "1_week_avg_volume": 95916,
-                "1_week_earn_rate": -0.5893,
-                "1_month_earn_rate": 2.0048,
-                "3_month_earn_rate": -1.3656,
-                "6_month_earn_rate": 3.8238,
-                "12_month_earn_rate": 9.2406
+                "ticker": "EX20",
+                "name": "BetaShares Australian Ex-20 Portfolio Diversifier ETF",
+                "listing_date": "2016-10-05",
+                "1_week_avg_volume": 20466,
+                "1_week_earn_rate": 1.1513,
+                "1_month_earn_rate": 3.214,
+                "3_month_earn_rate": 1.3228,
+                "6_month_earn_rate": 7.9605,
+                "12_month_earn_rate": 14.8821
             },
             {
                 "ticker": "HVST",
                 "name": "Betashares Australian Dividend Harvester Active ETF",
                 "listing_date": "2014-10-29",
-                "1_week_avg_volume": 44406,
-                "1_week_earn_rate": -0.7342,
-                "1_month_earn_rate": 0.9731,
-                "3_month_earn_rate": -2.6151,
-                "6_month_earn_rate": 0.8352,
-                "12_month_earn_rate": 5.0238
+                "1_week_avg_volume": 40598,
+                "1_week_earn_rate": 1.1087,
+                "1_month_earn_rate": 1.1156,
+                "3_month_earn_rate": -1.6024,
+                "6_month_earn_rate": 1.5865,
+                "12_month_earn_rate": 5.801
+            },
+            {
+                "ticker": "STW",
+                "name": "SPDR S&P/ASX 200 ETF",
+                "listing_date": "2008-01-02",
+                "1_week_avg_volume": 118753,
+                "1_week_earn_rate": 0.9572,
+                "1_month_earn_rate": 1.9284,
+                "3_month_earn_rate": -0.3202,
+                "6_month_earn_rate": 4.5869,
+                "12_month_earn_rate": 9.9858
+            },
+            {
+                "ticker": "VAS",
+                "name": "Vanguard Australian Shares Index ETF",
+                "listing_date": "2009-05-01",
+                "1_week_avg_volume": 229001,
+                "1_week_earn_rate": 0.8998,
+                "1_month_earn_rate": 1.9163,
+                "3_month_earn_rate": -0.2914,
+                "6_month_earn_rate": 4.8635,
+                "12_month_earn_rate": 10.3764
+            },
+            {
+                "ticker": "IOZ",
+                "name": "iShares Core S&P/ASX 200 ETF",
+                "listing_date": "2010-12-07",
+                "1_week_avg_volume": 258954,
+                "1_week_earn_rate": 0.8996,
+                "1_month_earn_rate": 1.9191,
+                "3_month_earn_rate": -0.3332,
+                "6_month_earn_rate": 4.5162,
+                "12_month_earn_rate": 9.8653
+            },
+            {
+                "ticker": "A200",
+                "name": "BetaShares Australia 200 ETF",
+                "listing_date": "2018-05-07",
+                "1_week_avg_volume": 92790,
+                "1_week_earn_rate": 0.8742,
+                "1_month_earn_rate": 1.8497,
+                "3_month_earn_rate": -0.3553,
+                "6_month_earn_rate": 4.6248,
+                "12_month_earn_rate": 10.0062
             },
             {
                 "ticker": "VHY",
                 "name": "Vanguard Australian Shares High Yield ETF",
                 "listing_date": "2011-05-23",
-                "1_week_avg_volume": 171963,
-                "1_week_earn_rate": -0.9892,
-                "1_month_earn_rate": 0.6517,
-                "3_month_earn_rate": -0.5309,
-                "6_month_earn_rate": 6.1806,
-                "12_month_earn_rate": 12.6076
+                "1_week_avg_volume": 153730,
+                "1_week_earn_rate": 0.7005,
+                "1_month_earn_rate": 0.9089,
+                "3_month_earn_rate": 0.5526,
+                "6_month_earn_rate": 7.3123,
+                "12_month_earn_rate": 13.7481
             },
             {
                 "ticker": "SYI",
                 "name": "SPDR MSCI Australia Select High Dividend Yield ETF",
                 "listing_date": "2010-09-28",
-                "1_week_avg_volume": 24556,
-                "1_week_earn_rate": -1.116,
-                "1_month_earn_rate": 0.279,
-                "3_month_earn_rate": -2.1078,
-                "6_month_earn_rate": 4.1668,
-                "12_month_earn_rate": 11.7931
+                "1_week_avg_volume": 26160,
+                "1_week_earn_rate": 0.6798,
+                "1_month_earn_rate": 0.4932,
+                "3_month_earn_rate": -1.2274,
+                "6_month_earn_rate": 5.1551,
+                "12_month_earn_rate": 13.1314
             },
             {
                 "ticker": "IHD",
                 "name": "iShares S&P/ASX Dividend Opportunities ESG Screened ETF",
                 "listing_date": "2010-12-07",
-                "1_week_avg_volume": 7953,
-                "1_week_earn_rate": -1.9139,
-                "1_month_earn_rate": 0.0303,
-                "3_month_earn_rate": 0.9458,
-                "6_month_earn_rate": 10.6345,
-                "12_month_earn_rate": 18.1835
+                "1_week_avg_volume": 7400,
+                "1_week_earn_rate": 0.1803,
+                "1_month_earn_rate": 0.7634,
+                "3_month_earn_rate": 2.4827,
+                "6_month_earn_rate": 12.3821,
+                "12_month_earn_rate": 19.554
             }
         ]
     },
@@ -221,26 +221,26 @@
         "category": "💰 금융",
         "tickers": [
             {
-                "ticker": "BNKS",
-                "name": "Betashares Global Banks Currency Hedged ETF",
-                "listing_date": "2016-07-28",
-                "1_week_avg_volume": 30088,
-                "1_week_earn_rate": -0.5591,
-                "1_month_earn_rate": 2.505,
-                "3_month_earn_rate": 16.1597,
-                "6_month_earn_rate": 21.0884,
-                "12_month_earn_rate": 39.9873
-            },
-            {
                 "ticker": "MVB",
                 "name": "VanEck Australian Banks ETF",
                 "listing_date": "2013-10-14",
-                "1_week_avg_volume": 8194,
-                "1_week_earn_rate": -1.8753,
-                "1_month_earn_rate": -0.2621,
-                "3_month_earn_rate": -3.8771,
-                "6_month_earn_rate": 8.3657,
-                "12_month_earn_rate": 10.0029
+                "1_week_avg_volume": 7789,
+                "1_week_earn_rate": 0.1654,
+                "1_month_earn_rate": -0.6328,
+                "3_month_earn_rate": -2.5495,
+                "6_month_earn_rate": 8.9197,
+                "12_month_earn_rate": 11.0042
+            },
+            {
+                "ticker": "BNKS",
+                "name": "Betashares Global Banks Currency Hedged ETF",
+                "listing_date": "2016-07-28",
+                "1_week_avg_volume": 28199,
+                "1_week_earn_rate": -0.3218,
+                "1_month_earn_rate": 1.5963,
+                "3_month_earn_rate": 14.3148,
+                "6_month_earn_rate": 21.7968,
+                "12_month_earn_rate": 38.0812
             }
         ]
     },
@@ -248,158 +248,158 @@
         "category": "🌍 글로벌",
         "tickers": [
             {
+                "ticker": "FOOD",
+                "name": "Betashares Global Agriculture Companies Currency Hedged ETF",
+                "listing_date": "2016-08-02",
+                "1_week_avg_volume": 39141,
+                "1_week_earn_rate": 2.0833,
+                "1_month_earn_rate": 8.2257,
+                "3_month_earn_rate": 9.0656,
+                "6_month_earn_rate": 13.335,
+                "12_month_earn_rate": 20.0321
+            },
+            {
                 "ticker": "IKO",
                 "name": "iShares MSCI South Korea ETF (AU)",
                 "listing_date": "2008-01-02",
-                "1_week_avg_volume": 6086,
-                "1_week_earn_rate": 0.3281,
-                "1_month_earn_rate": 21.5312,
-                "3_month_earn_rate": 23.5032,
-                "6_month_earn_rate": 53.5683,
-                "12_month_earn_rate": 92.1646
-            },
-            {
-                "ticker": "EMKT",
-                "name": "VanEck MSCI Multifactor Emerging Markets Equity ETF",
-                "listing_date": "2018-04-10",
-                "1_week_avg_volume": 100078,
-                "1_week_earn_rate": -0.1817,
-                "1_month_earn_rate": 8.0656,
-                "3_month_earn_rate": 6.0489,
-                "6_month_earn_rate": 14.9634,
-                "12_month_earn_rate": 29.1194
+                "1_week_avg_volume": 5326,
+                "1_week_earn_rate": 0.6787,
+                "1_month_earn_rate": 23.9451,
+                "3_month_earn_rate": 27.4504,
+                "6_month_earn_rate": 55.8757,
+                "12_month_earn_rate": 96.9839
             },
             {
                 "ticker": "VGAD",
                 "name": "Vanguard MSCI Index International Shares (Hedged) ETF",
                 "listing_date": "2014-11-18",
-                "1_week_avg_volume": 118462,
-                "1_week_earn_rate": -0.8497,
-                "1_month_earn_rate": 1.7306,
-                "3_month_earn_rate": 3.7616,
-                "6_month_earn_rate": 10.2724,
-                "12_month_earn_rate": 16.5296
+                "1_week_avg_volume": 117397,
+                "1_week_earn_rate": 0.529,
+                "1_month_earn_rate": 1.6522,
+                "3_month_earn_rate": 4.5788,
+                "6_month_earn_rate": 9.6663,
+                "12_month_earn_rate": 16.2646
             },
             {
                 "ticker": "VDHG",
                 "name": "Vanguard Diversified High Growth Index ETF",
                 "listing_date": "2017-11-20",
-                "1_week_avg_volume": 78336,
-                "1_week_earn_rate": -1.2039,
-                "1_month_earn_rate": 1.1502,
-                "3_month_earn_rate": 0.2045,
-                "6_month_earn_rate": 6.2387,
-                "12_month_earn_rate": 11.323
-            },
-            {
-                "ticker": "IEM",
-                "name": "iShares MSCI Emerging Markets ETF (AU)",
-                "listing_date": "2008-01-02",
-                "1_week_avg_volume": 21586,
-                "1_week_earn_rate": -1.2556,
-                "1_month_earn_rate": 5.2606,
-                "3_month_earn_rate": 3.4979,
-                "6_month_earn_rate": 14.4991,
-                "12_month_earn_rate": 29.4275
-            },
-            {
-                "ticker": "VGE",
-                "name": "Vanguard FTSE Emerging Markets Shares ETF",
-                "listing_date": "2013-11-18",
-                "1_week_avg_volume": 22970,
-                "1_week_earn_rate": -1.6059,
-                "1_month_earn_rate": 2.9517,
-                "3_month_earn_rate": -0.3694,
-                "6_month_earn_rate": 9.1614,
-                "12_month_earn_rate": 19.777
-            },
-            {
-                "ticker": "HJPN",
-                "name": "Betashares Japan Currency Hedged ETF",
-                "listing_date": "2016-05-10",
-                "1_week_avg_volume": 26321,
-                "1_week_earn_rate": -1.6158,
-                "1_month_earn_rate": 7.8456,
-                "3_month_earn_rate": 14.6168,
-                "6_month_earn_rate": 28.2706,
-                "12_month_earn_rate": 35.5228
+                "1_week_avg_volume": 66265,
+                "1_week_earn_rate": -0.3728,
+                "1_month_earn_rate": 0.8774,
+                "3_month_earn_rate": 0.6208,
+                "6_month_earn_rate": 5.9303,
+                "12_month_earn_rate": 11.4519
             },
             {
                 "ticker": "DHHF",
                 "name": "BetaShares Diversified All Growth ETF",
                 "listing_date": "2019-12-03",
-                "1_week_avg_volume": 69261,
-                "1_week_earn_rate": -1.798,
-                "1_month_earn_rate": 0.2391,
-                "3_month_earn_rate": -0.8004,
-                "6_month_earn_rate": 4.8771,
-                "12_month_earn_rate": 9.7173
+                "1_week_avg_volume": 65450,
+                "1_week_earn_rate": -0.794,
+                "1_month_earn_rate": 0.5658,
+                "3_month_earn_rate": -0.9539,
+                "6_month_earn_rate": 5.3307,
+                "12_month_earn_rate": 10.4658
             },
             {
-                "ticker": "VEU",
-                "name": "Vanguard All-World ex-US Shares Index ETF",
-                "listing_date": "2009-05-08",
-                "1_week_avg_volume": 65563,
-                "1_week_earn_rate": -1.8995,
-                "1_month_earn_rate": 2.1317,
-                "3_month_earn_rate": 2.4827,
-                "6_month_earn_rate": 10.3885,
-                "12_month_earn_rate": 23.5976
+                "ticker": "IEM",
+                "name": "iShares MSCI Emerging Markets ETF (AU)",
+                "listing_date": "2008-01-02",
+                "1_week_avg_volume": 18751,
+                "1_week_earn_rate": -1.256,
+                "1_month_earn_rate": 5.594,
+                "3_month_earn_rate": 2.7586,
+                "6_month_earn_rate": 15.262,
+                "12_month_earn_rate": 31.1571
             },
             {
                 "ticker": "IWLD",
                 "name": "iShares Core MSCI World Ex Australia ESG ETF",
                 "listing_date": "2016-04-22",
-                "1_week_avg_volume": 43897,
-                "1_week_earn_rate": -2.0677,
-                "1_month_earn_rate": -1.0308,
-                "3_month_earn_rate": -0.742,
-                "6_month_earn_rate": 6.3324,
-                "12_month_earn_rate": 8.7753
+                "1_week_avg_volume": 35324,
+                "1_week_earn_rate": -1.5472,
+                "1_month_earn_rate": -1.3107,
+                "3_month_earn_rate": -0.645,
+                "6_month_earn_rate": 4.909,
+                "12_month_earn_rate": 8.5322
+            },
+            {
+                "ticker": "VEU",
+                "name": "Vanguard All-World ex-US Shares Index ETF",
+                "listing_date": "2009-05-08",
+                "1_week_avg_volume": 58989,
+                "1_week_earn_rate": -1.5546,
+                "1_month_earn_rate": 2.2868,
+                "3_month_earn_rate": 2.7757,
+                "6_month_earn_rate": 9.7163,
+                "12_month_earn_rate": 23.504
             },
             {
                 "ticker": "BGBL",
                 "name": "Betashares Global Shares ETF Units AUD",
                 "listing_date": "2023-05-11",
-                "1_week_avg_volume": 233866,
-                "1_week_earn_rate": -2.5252,
-                "1_month_earn_rate": -1.2911,
-                "3_month_earn_rate": -0.9275,
-                "6_month_earn_rate": 4.9086,
-                "12_month_earn_rate": 9.7317
+                "1_week_avg_volume": 222725,
+                "1_week_earn_rate": -1.9118,
+                "1_month_earn_rate": -1.4176,
+                "3_month_earn_rate": -1.7188,
+                "6_month_earn_rate": 4.6909,
+                "12_month_earn_rate": 9.7737
             },
             {
                 "ticker": "VGS",
                 "name": "Vanguard MSCI Index International Shares ETF",
                 "listing_date": "2014-11-18",
-                "1_week_avg_volume": 263801,
-                "1_week_earn_rate": -2.6122,
-                "1_month_earn_rate": -1.4768,
-                "3_month_earn_rate": -1.3874,
-                "6_month_earn_rate": 5.4992,
-                "12_month_earn_rate": 9.1394
+                "1_week_avg_volume": 246812,
+                "1_week_earn_rate": -2.0333,
+                "1_month_earn_rate": -1.6098,
+                "3_month_earn_rate": -1.3283,
+                "6_month_earn_rate": 4.3279,
+                "12_month_earn_rate": 8.8539
+            },
+            {
+                "ticker": "VGE",
+                "name": "Vanguard FTSE Emerging Markets Shares ETF",
+                "listing_date": "2013-11-18",
+                "1_week_avg_volume": 21643,
+                "1_week_earn_rate": -2.1118,
+                "1_month_earn_rate": 2.558,
+                "3_month_earn_rate": -0.3136,
+                "6_month_earn_rate": 8.0389,
+                "12_month_earn_rate": 19.3068
+            },
+            {
+                "ticker": "HJPN",
+                "name": "Betashares Japan Currency Hedged ETF",
+                "listing_date": "2016-05-10",
+                "1_week_avg_volume": 19582,
+                "1_week_earn_rate": -3.0424,
+                "1_month_earn_rate": 5.4072,
+                "3_month_earn_rate": 10.8772,
+                "6_month_earn_rate": 26.677,
+                "12_month_earn_rate": 33.1267
             },
             {
                 "ticker": "FEMX",
                 "name": "Fidelity Global Emerging Markets ETF",
                 "listing_date": "2018-10-29",
-                "1_week_avg_volume": 342166,
-                "1_week_earn_rate": -2.9178,
-                "1_month_earn_rate": 1.385,
-                "3_month_earn_rate": 0.4115,
-                "6_month_earn_rate": 10.9091,
-                "12_month_earn_rate": 21.439
+                "1_week_avg_volume": 359532,
+                "1_week_earn_rate": -3.8513,
+                "1_month_earn_rate": 0.6254,
+                "3_month_earn_rate": -1.4577,
+                "6_month_earn_rate": 10.1979,
+                "12_month_earn_rate": 21.9015
             },
             {
-                "ticker": "FOOD",
-                "name": "Betashares Global Agriculture Companies Currency Hedged ETF",
-                "listing_date": "2016-08-02",
-                "1_week_avg_volume": 44363,
+                "ticker": "EMKT",
+                "name": "VanEck MSCI Multifactor Emerging Markets Equity ETF",
+                "listing_date": "2018-04-10",
+                "1_week_avg_volume": 100044,
                 "1_week_earn_rate": 0.0,
-                "1_month_earn_rate": 7.3974,
-                "3_month_earn_rate": 9.4915,
-                "6_month_earn_rate": 11.3526,
-                "12_month_earn_rate": 19.2942
+                "1_month_earn_rate": 8.3415,
+                "3_month_earn_rate": 7.0113,
+                "6_month_earn_rate": 15.2,
+                "12_month_earn_rate": 30.6389
             }
         ]
     },
@@ -411,12 +411,12 @@
                 "name": "Betashares Global Gold Miners Currency Hedged ETF",
                 "note": "금80%, 은10%, 구리10%",
                 "listing_date": "2016-07-27",
-                "1_week_avg_volume": 288515,
-                "1_week_earn_rate": 6.7989,
-                "1_month_earn_rate": 18.9375,
-                "3_month_earn_rate": 46.9826,
-                "6_month_earn_rate": 96.3334,
-                "12_month_earn_rate": 180.2266
+                "1_week_avg_volume": 283697,
+                "1_week_earn_rate": 7.9978,
+                "1_month_earn_rate": 18.8463,
+                "3_month_earn_rate": 48.8434,
+                "6_month_earn_rate": 104.5262,
+                "12_month_earn_rate": 191.8277
             }
         ]
     },
@@ -428,12 +428,12 @@
                 "name": "VanEck Gold Miners ETF",
                 "note": "금80%, 은10%, 구리10%",
                 "listing_date": "2015-06-24",
-                "1_week_avg_volume": 79630,
-                "1_week_earn_rate": 7.1016,
-                "1_month_earn_rate": 15.5678,
-                "3_month_earn_rate": 40.5972,
-                "6_month_earn_rate": 95.3077,
-                "12_month_earn_rate": 164.4577
+                "1_week_avg_volume": 74928,
+                "1_week_earn_rate": 5.9269,
+                "1_month_earn_rate": 15.1515,
+                "3_month_earn_rate": 42.5255,
+                "6_month_earn_rate": 95.4685,
+                "12_month_earn_rate": 165.6594
             }
         ]
     },
@@ -444,23 +444,23 @@
                 "ticker": "CLNE",
                 "name": "VanEck Global Clean Energy ETF",
                 "listing_date": "2021-03-08",
-                "1_week_avg_volume": 17087,
-                "1_week_earn_rate": 1.3095,
-                "1_month_earn_rate": 7.044,
-                "3_month_earn_rate": 5.8458,
-                "6_month_earn_rate": 29.9237,
-                "12_month_earn_rate": 65.5695
+                "1_week_avg_volume": 12877,
+                "1_week_earn_rate": 1.0702,
+                "1_month_earn_rate": 6.9182,
+                "3_month_earn_rate": 7.1879,
+                "6_month_earn_rate": 28.2051,
+                "12_month_earn_rate": 61.9491
             },
             {
                 "ticker": "ACDC",
                 "name": "Global X Battery Tech & Lithium ETF",
                 "listing_date": "2018-08-30",
-                "1_week_avg_volume": 11397,
-                "1_week_earn_rate": -2.1168,
-                "1_month_earn_rate": 8.5093,
-                "3_month_earn_rate": 20.2229,
-                "6_month_earn_rate": 50.1629,
-                "12_month_earn_rate": 69.6235
+                "1_week_avg_volume": 11182,
+                "1_week_earn_rate": 0.2686,
+                "1_month_earn_rate": 8.1702,
+                "3_month_earn_rate": 16.0822,
+                "6_month_earn_rate": 53.8964,
+                "12_month_earn_rate": 73.8406
             }
         ]
     },
@@ -472,48 +472,60 @@
                 "name": "Evolution Mining Limited",
                 "note": "금70%, 구리30%",
                 "listing_date": "2002-08-20",
-                "1_week_avg_volume": 5863583,
-                "1_week_earn_rate": 13.2622,
-                "1_month_earn_rate": 14.1321,
-                "3_month_earn_rate": 39.9247,
-                "6_month_earn_rate": 107.3411,
-                "12_month_earn_rate": 174.2361
+                "1_week_avg_volume": 5714633,
+                "1_week_earn_rate": 8.9431,
+                "1_month_earn_rate": 13.0368,
+                "3_month_earn_rate": 40.381,
+                "6_month_earn_rate": 106.8045,
+                "12_month_earn_rate": 172.5116
             },
             {
                 "ticker": "PLS",
                 "name": "PLS Group Limited",
                 "note": "리튬100%",
                 "listing_date": "2007-09-19",
-                "1_week_avg_volume": 27149140,
-                "1_week_earn_rate": 8.547,
-                "1_month_earn_rate": 26.6833,
-                "3_month_earn_rate": 71.6216,
-                "6_month_earn_rate": 198.8235,
-                "12_month_earn_rate": 119.9134
+                "1_week_avg_volume": 32351318,
+                "1_week_earn_rate": 7.4786,
+                "1_month_earn_rate": 22.0874,
+                "3_month_earn_rate": 55.7276,
+                "6_month_earn_rate": 200.2985,
+                "12_month_earn_rate": 120.614
             },
             {
                 "ticker": "S32",
                 "name": "South32 Limited",
                 "note": "알루미늄/은/망간/구리 25%",
                 "listing_date": "2015-05-18",
-                "1_week_avg_volume": 19115539,
-                "1_week_earn_rate": 5.5288,
-                "1_month_earn_rate": 26.513,
-                "3_month_earn_rate": 38.0503,
-                "6_month_earn_rate": 47.0799,
-                "12_month_earn_rate": 27.8565
+                "1_week_avg_volume": 16890418,
+                "1_week_earn_rate": 6.5166,
+                "1_month_earn_rate": 28.7966,
+                "3_month_earn_rate": 38.7346,
+                "6_month_earn_rate": 52.1037,
+                "12_month_earn_rate": 37.5185
             },
             {
                 "ticker": "NEM",
                 "name": "Newmont Corporation",
                 "note": "금100%, 은10%",
                 "listing_date": "2023-10-27",
-                "1_week_avg_volume": 424290,
-                "1_week_earn_rate": 5.4594,
-                "1_month_earn_rate": 14.2482,
-                "3_month_earn_rate": 34.4374,
-                "6_month_earn_rate": 79.8394,
-                "12_month_earn_rate": 170.7368
+                "1_week_avg_volume": 387948,
+                "1_week_earn_rate": 5.395,
+                "1_month_earn_rate": 14.4357,
+                "3_month_earn_rate": 42.5535,
+                "6_month_earn_rate": 84.7518,
+                "12_month_earn_rate": 176.341
+            },
+            {
+                "ticker": "LYC",
+                "name": "Lynas Rare Earths Limited",
+                "note": "희토류 100%",
+                "listing_date": "1999-06-10",
+                "1_week_avg_volume": 6576925,
+                "1_week_earn_rate": 0.0614,
+                "1_month_earn_rate": 29.6975,
+                "3_month_earn_rate": -13.4431,
+                "6_month_earn_rate": 50.6938,
+                "12_month_earn_rate": 154.1342
             }
         ]
     }
