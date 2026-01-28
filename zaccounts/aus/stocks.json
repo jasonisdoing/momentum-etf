@@ -404,7 +404,7 @@
         ]
     },
     {
-        "category": "🥇금헷지",
+        "category": "🥇금",
         "tickers": [
             {
                 "ticker": "MNRS",
@@ -417,12 +417,7 @@
                 "3_month_earn_rate": 48.8434,
                 "6_month_earn_rate": 104.5262,
                 "12_month_earn_rate": 191.8277
-            }
-        ]
-    },
-    {
-        "category": "🥇금",
-        "tickers": [
+            },
             {
                 "ticker": "GDX",
                 "name": "VanEck Gold Miners ETF",
