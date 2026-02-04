@@ -759,22 +759,6 @@
         ]
     },
     {
-        "category": "🥇금",
-        "tickers": [
-            {
-                "ticker": "473640",
-                "name": "HANARO 글로벌금채굴기업",
-                "listing_date": "2024-01-18",
-                "1_week_avg_volume": 215680,
-                "1_week_earn_rate": -8.8366,
-                "1_month_earn_rate": 11.2851,
-                "3_month_earn_rate": 42.3389,
-                "6_month_earn_rate": 97.8005,
-                "12_month_earn_rate": 172.6347
-            }
-        ]
-    },
-    {
         "category": "예외",
         "tickers": [
             {
