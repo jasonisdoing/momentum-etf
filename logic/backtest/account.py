@@ -886,7 +886,20 @@ def _build_summary(
         if initial_capital_local > 0:
             eom_pv = pv_series.resample("ME").last().dropna()
             monthly_cum_returns = (eom_pv / initial_capital_local - 1).ffill()
-        yearly_returns = pv_series_with_start.resample("YE").last().pct_change().dropna()
+        yearly_returns = pv_series_with_start.resample("YE").last().pct_change()
+        # 첫 해 수익률 보정: pct_change는 전년도 데이터가 없어 NaN이 되므로, 초기 자본금 기준으로 계산
+        if not yearly_returns.empty and initial_capital_local > 0:
+            yearly_prices = pv_series_with_start.resample("YE").last()
+            # 첫 번째 연도의 기말 평가액
+            first_val = float(yearly_prices.iloc[0])
+            # 수익률 = (기말 / 기초) - 1
+            first_ret = (first_val / initial_capital_local) - 1.0
+
+            # 첫 번째 값이 NaN이면 채워넣기
+            if pd.isna(yearly_returns.iloc[0]):
+                yearly_returns.iloc[0] = first_ret
+
+        yearly_returns = yearly_returns.dropna()
 
     # Turnover calculation (전체 거래 횟수) - if 블록 밖에서 항상 실행
     total_turnover = 0

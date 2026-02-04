@@ -9,10 +9,10 @@
     "initial_capital_krw": "100000000",
     "show_hold": true,
     "strategy": {
-        "BACKTEST_START_DATE": "2025-09-08",
-        "BACKTESTED_DATE": "2026-02-04 15:19",
-        "CAGR": 461.857544,
-        "MDD": -10.144285,
+        "BACKTEST_START_DATE": "2025-09-01",
+        "BACKTESTED_DATE": "2026-02-04 21:47",
+        "CAGR": 451.78394,
+        "MDD": -9.980725,
         "PORTFOLIO_TOPN": 5,
         "MA_PERIOD": 60,
         "MA_TYPE": "HMA",
@@ -24,7 +24,7 @@
         "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
-        "ticker": "385720",
-        "name": "TIME 코스피액티브"
+        "ticker": "069500",
+        "name": "KODEX 200"
     }
 }

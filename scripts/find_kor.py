@@ -335,6 +335,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
         found_tickers = top_gainers.to_dict("records")
 
     new_tickers = [item for item in found_tickers if item["티커"] not in existing_tickers]
+    new_tickers.sort(key=lambda x: x["등락률"], reverse=True)
 
     if new_tickers:
         print()
