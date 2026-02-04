@@ -186,7 +186,6 @@ def filter_category_duplicates(
     """
     from logic.backtest.portfolio import should_exclude_from_category_count
 
-    filtered_results = []
     category_best_map = {}  # 카테고리별 최고 점수 종목 추적
     replacement_tickers = set()  # 교체 매매 관련 티커
     held_categories = set()  # 이미 보유/매수 중인 카테고리
@@ -222,6 +221,9 @@ def filter_category_duplicates(
                 held_categories.add(category_key)
 
     # 2단계: 필터링
+    # 순서 보장을 위해 (original_index, item) 튜플로 저장
+    filtered_entries: list[tuple[int, dict[str, Any]]] = []
+
     for order_idx, item in enumerate(items):
         ticker = item.get("ticker") or item.get("tkr")
         category = item.get("category", "")
@@ -229,7 +231,7 @@ def filter_category_duplicates(
 
         # 교체 매매 관련 종목은 무조건 포함
         if ticker in replacement_tickers:
-            filtered_results.append(item)
+            filtered_entries.append((order_idx, item))
             continue
 
         # HOLD, SELL 상태는 무조건 포함 (BUY는 제외하여 카테고리 체크 수행)
@@ -242,7 +244,7 @@ def filter_category_duplicates(
             "SELL_RSI",
             "SOLD",
         }:
-            filtered_results.append(item)
+            filtered_entries.append((order_idx, item))
             # 매도 예정 종목은 category_best_map에 포함하지 않음 (WAIT 종목이 표시될 수 있도록)
             if not should_exclude_from_category_count(state):
                 # HOLD, BUY_REPLACE 상태만 category_best_map에 추가
@@ -250,12 +252,13 @@ def filter_category_duplicates(
                 if category_key and not is_category_exception(category_key):
                     # 기존 WAIT 종목만 제거 (HOLD/BUY 종목은 유지)
                     if category_key in category_best_map:
-                        existing_item = category_best_map[category_key]
+                        existing_entry = category_best_map[category_key]  # (idx, item)
+                        existing_item = existing_entry[1]
                         existing_state = existing_item.get("state", "")
                         # WAIT 종목만 제거
-                        if existing_state == "WAIT" and existing_item in filtered_results:
-                            filtered_results.remove(existing_item)
-                    category_best_map[category_key] = item
+                        if existing_state == "WAIT" and existing_entry in filtered_entries:
+                            filtered_entries.remove(existing_entry)
+                    category_best_map[category_key] = (order_idx, item)
             continue
 
         # BUY 상태: 카테고리 중복 체크 수행
@@ -263,20 +266,19 @@ def filter_category_duplicates(
             category_key = category_key_getter(category)
             # 카테고리가 없거나 예외 카테고리면 포함
             if not category_key or is_category_exception(category_key):
-                filtered_results.append(item)
+                filtered_entries.append((order_idx, item))
                 continue
             # BUY는 항상 표시 (held_categories 체크 제거)
-            # 이유: 매수 당일에는 BUY가 표시되어야 하며, 다음날부터 HOLD로 전환됨
-            filtered_results.append(item)
+            filtered_entries.append((order_idx, item))
             held_categories.add(category_key)
-            category_best_map[category_key] = item
+            category_best_map[category_key] = (order_idx, item)
             continue
 
         category_key = category_key_getter(category)
 
         # 카테고리가 없거나 예외 카테고리는 그대로 표시
         if not category_key or is_category_exception(category_key):
-            filtered_results.append(item)
+            filtered_entries.append((order_idx, item))
             continue
 
         # 이미 보유 중인 카테고리는 숨김 (카테고리 중복 노출 대신)
@@ -292,10 +294,13 @@ def filter_category_duplicates(
         limit = max(1, int(max_per_category))
         selected_wait_items.extend(entries[:limit])
 
-    selected_wait_items.sort(key=lambda entry: entry[1])
-    filtered_results.extend([entry[2] for entry in selected_wait_items])
+    # 선택된 대기 항목 추가 (점수, 인덱스, 아이템) -> (인덱스, 아이템)
+    filtered_entries.extend([(entry[1], entry[2]) for entry in selected_wait_items])
 
-    return filtered_results
+    # 원래 순서(인덱스)대로 정렬
+    filtered_entries.sort(key=lambda x: x[0])
+
+    return [entry[1] for entry in filtered_entries]
 
 
 __all__ = [
