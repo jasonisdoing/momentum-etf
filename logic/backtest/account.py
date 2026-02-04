@@ -768,7 +768,18 @@ def _build_summary(
         bench_sharpe_to_mdd = (bench_sharpe / bench_mdd_pct) if bench_mdd_pct > 0 else 0.0
 
         # 월별 수익률 계산 (리포팅용)
-        bench_monthly_returns = bench_series.resample("ME").last().pct_change().dropna()
+        bench_monthly_prices = bench_series.resample("ME").last()
+        bench_monthly_returns = bench_monthly_prices.pct_change()
+
+        # 첫 달 수익률 보정: pct_change는 전월 데이터가 없어 NaN이 되므로, 시작 가격 기준으로 계산
+        if not bench_monthly_returns.empty and start_price > 0:
+            first_val = float(bench_monthly_prices.iloc[0])
+            first_ret = (first_val / start_price) - 1.0
+
+            if pd.isna(bench_monthly_returns.iloc[0]):
+                bench_monthly_returns.iloc[0] = first_ret
+
+        bench_monthly_returns = bench_monthly_returns.dropna()
 
         return {
             "ticker": ticker,
