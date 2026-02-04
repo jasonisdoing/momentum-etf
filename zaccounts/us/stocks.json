@@ -126,7 +126,7 @@
                 "1_month_earn_rate": -0.1253,
                 "3_month_earn_rate": -1.5516,
                 "6_month_earn_rate": 4.122,
-                "12_month_earn_rate": 20.4186
+                "12_month_earn_rate": 20.4187
             },
             {
                 "ticker": "MTUM",
@@ -458,7 +458,7 @@
                 "1_month_earn_rate": 11.2061,
                 "3_month_earn_rate": 12.0877,
                 "6_month_earn_rate": 28.7379,
-                "12_month_earn_rate": 59.4332
+                "12_month_earn_rate": 59.4333
             },
             {
                 "ticker": "EUAD",
@@ -926,7 +926,7 @@
                 "1_month_earn_rate": 7.3239,
                 "3_month_earn_rate": 4.0443,
                 "6_month_earn_rate": 52.6748,
-                "12_month_earn_rate": 79.2008
+                "12_month_earn_rate": 79.2009
             },
             {
                 "ticker": "QCLN",
@@ -1008,7 +1008,7 @@
                 "1_month_earn_rate": 2.4701,
                 "3_month_earn_rate": 4.3995,
                 "6_month_earn_rate": 13.1145,
-                "12_month_earn_rate": 22.6356
+                "12_month_earn_rate": 22.6355
             },
             {
                 "ticker": "VTI",
@@ -1145,7 +1145,7 @@
                 "1_month_earn_rate": 3.3133,
                 "3_month_earn_rate": 5.2676,
                 "6_month_earn_rate": 16.3315,
-                "12_month_earn_rate": 31.5169
+                "12_month_earn_rate": 31.5168
             }
         ]
     },

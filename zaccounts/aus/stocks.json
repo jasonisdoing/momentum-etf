@@ -136,7 +136,7 @@
                 "1_month_earn_rate": 1.9761,
                 "3_month_earn_rate": 0.1691,
                 "6_month_earn_rate": 5.0912,
-                "12_month_earn_rate": 15.0912
+                "12_month_earn_rate": 15.0913
             },
             {
                 "ticker": "HVST",
@@ -147,7 +147,7 @@
                 "1_month_earn_rate": 1.9426,
                 "3_month_earn_rate": 0.3671,
                 "6_month_earn_rate": 1.1265,
-                "12_month_earn_rate": 6.7172
+                "12_month_earn_rate": 6.7173
             },
             {
                 "ticker": "QOZ",
@@ -202,7 +202,7 @@
                 "1_month_earn_rate": 2.0408,
                 "3_month_earn_rate": 0.8416,
                 "6_month_earn_rate": 3.536,
-                "12_month_earn_rate": 10.3372
+                "12_month_earn_rate": 10.3373
             },
             {
                 "ticker": "EX20",
@@ -444,6 +444,17 @@
                 "3_month_earn_rate": 5.3659,
                 "6_month_earn_rate": 32.9231,
                 "12_month_earn_rate": 65.2389
+            },
+            {
+                "ticker": "MVR",
+                "name": "VanEck Australian Resources ETF",
+                "listing_date": "2013-10-14",
+                "1_week_avg_volume": 89513,
+                "1_week_earn_rate": -1.8227,
+                "1_month_earn_rate": 7.7763,
+                "3_month_earn_rate": 17.3483,
+                "6_month_earn_rate": 38.1541,
+                "12_month_earn_rate": 49.0551
             },
             {
                 "ticker": "ACDC",
