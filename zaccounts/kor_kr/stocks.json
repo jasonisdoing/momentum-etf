@@ -167,17 +167,6 @@
                 "12_month_earn_rate": 173.9
             },
             {
-                "ticker": "261060",
-                "name": "TIGER 코스닥150IT",
-                "listing_date": "2016-12-15",
-                "1_week_avg_volume": 506226,
-                "1_week_earn_rate": 3.5325,
-                "1_month_earn_rate": 28.8361,
-                "3_month_earn_rate": 29.4804,
-                "6_month_earn_rate": 71.1976,
-                "12_month_earn_rate": 79.8827
-            },
-            {
                 "ticker": "444200",
                 "name": "SOL 코리아메가테크액티브",
                 "listing_date": "2022-10-18",
@@ -275,28 +264,6 @@
     {
         "category": "⚡️AI전력",
         "tickers": [
-            {
-                "ticker": "377990",
-                "name": "TIGER Fn신재생에너지",
-                "listing_date": "2021-03-05",
-                "1_week_avg_volume": 170281,
-                "1_week_earn_rate": 9.3444,
-                "1_month_earn_rate": 22.3317,
-                "3_month_earn_rate": 8.8121,
-                "6_month_earn_rate": 56.1299,
-                "12_month_earn_rate": 158.9495
-            },
-            {
-                "ticker": "0101N0",
-                "name": "RISE AI전력인프라",
-                "listing_date": "2025-09-23",
-                "1_week_avg_volume": 737817,
-                "1_week_earn_rate": 7.8876,
-                "1_month_earn_rate": 20.4005,
-                "3_month_earn_rate": 11.0932,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
             {
                 "ticker": "385510",
                 "name": "KODEX 신재생에너지액티브",
