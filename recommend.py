@@ -262,9 +262,21 @@ def extract_recommendations_from_backtest(
     # 점수로 정렬 (None은 마지막으로)
     recommendations.sort(key=lambda x: (x.get("score") is None, -(x.get("score") or 0)))
 
-    # 순위 부여
-    for i, rec in enumerate(recommendations, start=1):
-        rec["rank"] = i
+    # 순위 부여 (보유/신규 -> 보유N, 그외 -> 대기N)
+    held_count = 0
+    wait_count = 0
+
+    for rec in recommendations:
+        shares = rec.get("shares", 0) or 0
+        decision = str(rec.get("decision", "")).upper()
+
+        # [User Request] 웹 화면 기준: 보유중이거나(shares > 0) 신규 매수(BUY)인 경우 '보유' 그룹
+        if shares > 0 or decision == "BUY":
+            held_count += 1
+            rec["rank"] = f"보유{held_count}"
+        else:
+            wait_count += 1
+            rec["rank"] = f"대기{wait_count}"
 
     return recommendations
 
@@ -497,8 +509,8 @@ def generate_recommendation_report(
     if country_code in ("kor", "kr"):
         recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
 
-    # 카테고리별 중복 필터링 (MAX_PER_CATEGORY=1 적용)
-    recommendations = _filter_category_duplicates(recommendations)
+    # 카테고리별 중복 필터링 (MAX_PER_CATEGORY=1 적용) - [User Request] 모든 종목 표시를 위해 비활성화
+    # recommendations = _filter_category_duplicates(recommendations)
 
     return RecommendationReport(
         account_id=account_id,

@@ -438,7 +438,7 @@ def render_all_stocks_page() -> None:
 
     # 컬럼 설정 (kor_us 페이지와 동일하게)
     column_config = {
-        "#": st.column_config.TextColumn("#", width=30),
+        "#": st.column_config.TextColumn("#", width=50),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=300),
         "카테고리": st.column_config.TextColumn("카테고리", width=140),
