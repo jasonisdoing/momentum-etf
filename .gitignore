@@ -16,6 +16,7 @@ venv/
 # 백테스트 결과
 zresults
 zaccounts/*/results
+scripts/results/*.*
 
 # 노트 파일
 znotes/
