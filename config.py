@@ -63,16 +63,16 @@ MARKET_SCHEDULES = {
 # 백테스트 체결 슬리피지 가정치 (%)
 BACKTEST_SLIPPAGE = {
     "kor": {
-        "buy_pct": 0.15,
-        "sell_pct": 0.15,
+        "buy_pct": 0.5,
+        "sell_pct": 0.5,
     },
     "us": {
-        "buy_pct": 0.15,
-        "sell_pct": 0.15,
-    },
-    "au": {
         "buy_pct": 0.25,
         "sell_pct": 0.25,
+    },
+    "au": {
+        "buy_pct": 1.0,
+        "sell_pct": 1.0,
     },
 }
 
@@ -83,3 +83,8 @@ BACKTEST_SLIPPAGE = {
 # Top5 평균·최빈값 방식은 백테스트 성능이 약간 낮아져도 실전에서는 훨씬 안정적임.
 # 실전용 전략에서는 TUNING_ENSEMBLE_SIZE = 5를 유지해야 장기 성과가 일정하게 나오므로 변경 금지.
 TUNING_ENSEMBLE_SIZE = 1
+
+# [전략 실행 시 실시간 가격 반영 여부]
+# True: 장중 실행 시 현재가(실시간)를 '오늘 종가'로 가정하고 전략 실행 (순위 변동 발생 가능)
+# False: 장중 실행 시 '어제 종가'까지만 전략에 반영 (순위 고정), 수익률만 실시간 업데이트 (권장)
+USE_REALTIME_RECOMMENDATION = True
