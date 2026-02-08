@@ -7,7 +7,7 @@
     "currency": "aud",
     "slack_channel": "C09FAU7SKA8",
     "initial_capital_krw": "100000000",
-    "show_hold": false,
+    "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-02-01",
         "BACKTESTED_DATE": "2026-02-07 21:13",
