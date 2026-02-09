@@ -515,9 +515,13 @@ def generate_recommendation_report(
     # 백테스트 실행 (ETF 유니버스 전달하여 중복 로딩 방지)
     from logic.backtest.account import run_account_backtest
 
+    # [Data Slicing] 전략 기준일 이후의 데이터(오늘 시가 등)가 백테스트에 영향을 주지 않도록 잘라냄
+    # (엔진이 '다음날 시가'를 참조하여 체결가를 계산하는 로직 때문)
+    backtest_data = {ticker: df[df.index <= strategy_end_date] for ticker, df in prefetched_map.items()}
+
     result = run_account_backtest(
         account_id,
-        prefetched_data=prefetched_map,
+        prefetched_data=backtest_data,
         prefetched_etf_universe=etf_universe,
         quiet=True,  # 백테스트 로그 출력 억제
         override_settings={"end_date": strategy_end_date.strftime("%Y-%m-%d")},
