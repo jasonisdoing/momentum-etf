@@ -205,17 +205,6 @@
                 "12_month_earn_rate": 5.7306
             },
             {
-                "ticker": "MVR",
-                "name": "VanEck Australian Resources ETF",
-                "listing_date": "2013-10-14",
-                "1_week_avg_volume": 71009,
-                "1_week_earn_rate": -4.3663,
-                "1_month_earn_rate": -0.1112,
-                "3_month_earn_rate": 14.8887,
-                "6_month_earn_rate": 29.2702,
-                "12_month_earn_rate": 39.1546
-            },
-            {
                 "ticker": "EX20",
                 "name": "BetaShares Australian Ex-20 Portfolio Diversifier ETF",
                 "listing_date": "2016-10-05",
@@ -450,11 +439,22 @@
                 "3_month_earn_rate": 27.3017,
                 "6_month_earn_rate": 53.4064,
                 "12_month_earn_rate": 106.3809
+            },
+            {
+                "ticker": "NEM",
+                "name": "Newmont Corporation",
+                "listing_date": "2023-10-27",
+                "1_week_avg_volume": 648946,
+                "1_week_earn_rate": -10.6648,
+                "1_month_earn_rate": -2.3344,
+                "3_month_earn_rate": 26.8029,
+                "6_month_earn_rate": 45.7068,
+                "12_month_earn_rate": 119.7058
             }
         ]
     },
     {
-        "category": "🥇원자재/에너지",
+        "category": "🌿에너지",
         "tickers": [
             {
                 "ticker": "CLNE",
@@ -466,7 +466,12 @@
                 "3_month_earn_rate": 3.4969,
                 "6_month_earn_rate": 30.9783,
                 "12_month_earn_rate": 57.1591
-            },
+            }
+        ]
+    },
+    {
+        "category": "🔋리튬",
+        "tickers": [
             {
                 "ticker": "ACDC",
                 "name": "Global X Battery Tech & Lithium ETF",
@@ -477,22 +482,6 @@
                 "3_month_earn_rate": 7.8863,
                 "6_month_earn_rate": 38.1655,
                 "12_month_earn_rate": 56.3197
-            }
-        ]
-    },
-    {
-        "category": "⛏️광산주",
-        "tickers": [
-            {
-                "ticker": "EVN",
-                "name": "Evolution Mining Limited",
-                "listing_date": "2002-08-20",
-                "1_week_avg_volume": 8192294,
-                "1_week_earn_rate": -2.5153,
-                "1_month_earn_rate": 10.3926,
-                "3_month_earn_rate": 38.819,
-                "6_month_earn_rate": 89.8984,
-                "12_month_earn_rate": 148.9673
             },
             {
                 "ticker": "PLS",
@@ -504,6 +493,33 @@
                 "3_month_earn_rate": 38.255,
                 "6_month_earn_rate": 113.4715,
                 "12_month_earn_rate": 84.7534
+            }
+        ]
+    },
+    {
+        "category": "⛏️광산주",
+        "tickers": [
+            {
+                "ticker": "MVR",
+                "name": "VanEck Australian Resources ETF",
+                "listing_date": "2013-10-14",
+                "1_week_avg_volume": 71009,
+                "1_week_earn_rate": -4.3663,
+                "1_month_earn_rate": -0.1112,
+                "3_month_earn_rate": 14.8887,
+                "6_month_earn_rate": 29.2702,
+                "12_month_earn_rate": 39.1546
+            },
+            {
+                "ticker": "EVN",
+                "name": "Evolution Mining Limited",
+                "listing_date": "2002-08-20",
+                "1_week_avg_volume": 8192294,
+                "1_week_earn_rate": -2.5153,
+                "1_month_earn_rate": 10.3926,
+                "3_month_earn_rate": 38.819,
+                "6_month_earn_rate": 89.8984,
+                "12_month_earn_rate": 148.9673
             },
             {
                 "ticker": "LYC",
@@ -526,17 +542,6 @@
                 "3_month_earn_rate": 46.0265,
                 "6_month_earn_rate": 48.2392,
                 "12_month_earn_rate": 29.9068
-            },
-            {
-                "ticker": "NEM",
-                "name": "Newmont Corporation",
-                "listing_date": "2023-10-27",
-                "1_week_avg_volume": 648946,
-                "1_week_earn_rate": -10.6648,
-                "1_month_earn_rate": -2.3344,
-                "3_month_earn_rate": 26.8029,
-                "6_month_earn_rate": 45.7068,
-                "12_month_earn_rate": 119.7058
             }
         ]
     },
