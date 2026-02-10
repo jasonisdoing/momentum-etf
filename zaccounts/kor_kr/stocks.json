@@ -510,17 +510,6 @@
         "category": "💰금융",
         "tickers": [
             {
-                "ticker": "157500",
-                "name": "TIGER 증권",
-                "listing_date": "2012-05-16",
-                "1_week_avg_volume": 3388514,
-                "1_week_earn_rate": 15.8724,
-                "1_month_earn_rate": 45.807,
-                "3_month_earn_rate": 58.7629,
-                "6_month_earn_rate": 87.0445,
-                "12_month_earn_rate": 188.0262
-            },
-            {
                 "ticker": "091170",
                 "name": "KODEX 은행",
                 "listing_date": "2006-06-27",
@@ -530,17 +519,6 @@
                 "3_month_earn_rate": 26.2373,
                 "6_month_earn_rate": 38.006,
                 "12_month_earn_rate": 88.6923
-            },
-            {
-                "ticker": "0111J0",
-                "name": "HANARO 증권고배당TOP3플러스",
-                "listing_date": "2025-10-28",
-                "1_week_avg_volume": 692000,
-                "1_week_earn_rate": 14.9851,
-                "1_month_earn_rate": 45.1175,
-                "3_month_earn_rate": 52.5963,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
             },
             {
                 "ticker": "0154F0",
