@@ -442,6 +442,7 @@
             {
                 "ticker": "EVN",
                 "name": "Evolution Mining Limited",
+                "note": "금70%, 구리30%",
                 "listing_date": "2002-08-20",
                 "1_week_avg_volume": 5884020,
                 "1_week_earn_rate": 2.6625,
@@ -465,6 +466,7 @@
             {
                 "ticker": "NEM",
                 "name": "Newmont Corporation",
+                "note": "금90%, 은10%",
                 "listing_date": "2023-10-27",
                 "1_week_avg_volume": 488875,
                 "1_week_earn_rate": 1.3475,
@@ -508,6 +510,7 @@
             {
                 "ticker": "PLS",
                 "name": "PLS Group Limited",
+                "note": "리튬 100%",
                 "listing_date": "2007-09-19",
                 "1_week_avg_volume": 24310279,
                 "1_week_earn_rate": -3.4014,
@@ -524,6 +527,7 @@
             {
                 "ticker": "S32",
                 "name": "South32 Limited",
+                "note": "알루미늄/은/망간/구리 25%",
                 "listing_date": "2015-05-18",
                 "1_week_avg_volume": 16392351,
                 "1_week_earn_rate": 2.6608,
@@ -546,6 +550,7 @@
             {
                 "ticker": "LYC",
                 "name": "Lynas Rare Earths Limited",
+                "note": "희토류 100%",
                 "listing_date": "1999-06-10",
                 "1_week_avg_volume": 5161970,
                 "1_week_earn_rate": -1.5738,
