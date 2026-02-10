@@ -488,28 +488,6 @@
                 "12_month_earn_rate": 100.7309
             },
             {
-                "ticker": "0089D0",
-                "name": "KODEX 금융고배당TOP10",
-                "listing_date": "2025-08-12",
-                "1_week_avg_volume": 560575,
-                "1_week_earn_rate": 11.1248,
-                "1_month_earn_rate": 26.9988,
-                "3_month_earn_rate": 21.0279,
-                "6_month_earn_rate": null,
-                "12_month_earn_rate": null
-            },
-            {
-                "ticker": "139270",
-                "name": "TIGER 200 금융",
-                "listing_date": "2011-04-06",
-                "1_week_avg_volume": 127313,
-                "1_week_earn_rate": 10.2116,
-                "1_month_earn_rate": 28.1481,
-                "3_month_earn_rate": 27.3057,
-                "6_month_earn_rate": 43.967,
-                "12_month_earn_rate": 95.2558
-            },
-            {
                 "ticker": "140700",
                 "name": "KODEX 보험",
                 "listing_date": "2011-04-26",
