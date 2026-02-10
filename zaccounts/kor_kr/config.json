@@ -22,7 +22,7 @@
         "COOLDOWN_DAYS": 0,
         "MAX_PER_CATEGORY": 2,
         "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": true
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
         "ticker": "069500",
