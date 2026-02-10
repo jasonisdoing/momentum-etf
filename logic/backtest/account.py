@@ -9,7 +9,6 @@ from typing import Any
 
 import pandas as pd
 
-import config
 from logic.entry_point import StrategyRules, run_portfolio_backtest
 from utils.account_registry import get_common_file_settings
 from utils.data_loader import get_exchange_rate_series, get_latest_trading_day, get_trading_days
@@ -161,11 +160,13 @@ def run_account_backtest(
             ma_type=strategy_override.ma_type,
             stop_loss_pct=strategy_override.stop_loss_pct,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
+            max_per_category=strategy_override.max_per_category,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
+        strategy_settings["MAX_PER_CATEGORY"] = strategy_rules.max_per_category
         if strategy_rules.stop_loss_pct is not None:
             strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
 
@@ -221,7 +222,7 @@ def run_account_backtest(
 
     # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
     portfolio_topn = strategy_rules.portfolio_topn
-    holdings_limit = strategy_settings.get("MAX_PER_CATEGORY", config.MAX_PER_CATEGORY)
+    holdings_limit = strategy_settings.get("MAX_PER_CATEGORY", 1)
     if not is_tuning_fast_path:
         _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}, 카테고리당 최대 보유 수: {holdings_limit}")
 
@@ -286,6 +287,7 @@ def run_account_backtest(
             missing_ticker_sink=runtime_missing_tickers,
             **backtest_kwargs,
             trading_calendar=calendar_arg,
+            max_per_category=holdings_limit,
         )
         or {}
     )

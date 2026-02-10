@@ -138,29 +138,41 @@ def count_current_holdings(items: list, *, get_state_func=None) -> int:
 
 def check_buy_candidate_filters(
     category: str,
-    held_categories: set[str],
+    held_categories: set[str] | None,  # Lower priority than held_category_counts
     sell_rsi_categories_today: set[str],
     rsi_score: float,
     rsi_sell_threshold: float,
+    held_category_counts: dict[str, int] | None = None,
+    max_per_category: int = 1,
 ) -> tuple[bool, str]:
     """매수 후보 필터링 체크
 
     Args:
         category: 종목 카테고리
-        held_categories: 현재 보유 카테고리 집합
+        held_categories: (deprecated) 현재 보유 카테고리 집합. counts가 없으면 사용됨.
         sell_rsi_categories_today: 오늘 RSI 매도한 카테고리 집합
         rsi_score: RSI 점수
         rsi_sell_threshold: RSI 매도 임계값
+        held_category_counts: 카테고리별 보유 수량 (dict)
+        max_per_category: 카테고리당 최대 보유 수
 
     Returns:
         (통과 여부, 차단 사유)
     """
 
     # 이미 보유한 카테고리 매수 차단
-    if category and not is_category_exception(category) and category in held_categories:
-        return False, f"동일 카테고리 보유 ({category})"
+    if category and not is_category_exception(category):
+        # 1. 우선순위: 카테고리 카운트 확인
+        if held_category_counts is not None:
+            current_count = held_category_counts.get(category, 0)
+            if current_count >= max_per_category:
+                return False, f"카테고리 보유 한도 초과 ({current_count}/{max_per_category}, {category})"
 
-    # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지
+        # 2. 차선책: 단순 집합 확인 (기존 로직 호환성)
+        elif held_categories and category in held_categories:
+            return False, f"동일 카테고리 보유 ({category})"
+
+    # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지 (카테고리당 N종목이라도, 과열 매도 후 즉시 재진입은 위험)
     if category and not is_category_exception(category) and category in sell_rsi_categories_today:
         return False, f"RSI 과매수 매도 카테고리 ({category})"
 

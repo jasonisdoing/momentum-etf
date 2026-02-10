@@ -3,8 +3,7 @@
 from datetime import time
 
 CACHE_START_DATE = "2024-01-02"
-# 포트폴리오 카테고리별 최대 보유 수
-MAX_PER_CATEGORY = 1
+
 
 # 카테고리 중복 제한에서 예외되는 카테고리 목록
 # 이 카테고리들은 여러 종목을 동시에 보유할 수 있음

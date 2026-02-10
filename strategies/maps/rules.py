@@ -22,6 +22,7 @@ class StrategyRules:
     ma_type: str = "SMA"
     stop_loss_pct: float | None = None
     enable_data_sufficiency_check: bool = False
+    max_per_category: int = 1
 
     @classmethod
     def from_values(
@@ -33,6 +34,7 @@ class StrategyRules:
         ma_type: Any = None,
         stop_loss_pct: Any = None,
         enable_data_sufficiency_check: Any = False,
+        max_per_category: Any = 1,
     ) -> StrategyRules:
         try:
             ma_period_int = int(ma_period)
@@ -71,6 +73,14 @@ class StrategyRules:
         # ENABLE_DATA_SUFFICIENCY_CHECK 검증
         data_sufficiency_check = bool(enable_data_sufficiency_check)
 
+        # MAX_PER_CATEGORY 검증
+        try:
+            max_per_category_int = int(max_per_category)
+        except (TypeError, ValueError):
+            max_per_category_int = 1
+        if max_per_category_int < 1:
+            max_per_category_int = 1
+
         return cls(
             ma_period=ma_period_int,
             portfolio_topn=portfolio_topn_int,
@@ -78,6 +88,7 @@ class StrategyRules:
             ma_type=ma_type_str,
             stop_loss_pct=stop_loss_value,
             enable_data_sufficiency_check=data_sufficiency_check,
+            max_per_category=max_per_category_int,
         )
 
     @classmethod
@@ -100,6 +111,7 @@ class StrategyRules:
             # True: 신규 상장 ETF 등 데이터가 부족한 경우 완화된 기준 적용
             # False: 데이터 충분성 검증 비활성화 (모든 종목에 대해 계산 시도)
             enable_data_sufficiency_check=_resolve("ENABLE_DATA_SUFFICIENCY_CHECK", "enable_data_sufficiency_check"),
+            max_per_category=_resolve("MAX_PER_CATEGORY", "max_per_category"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -110,6 +122,7 @@ class StrategyRules:
             "ma_type": self.ma_type,
             "stop_loss_pct": self.stop_loss_pct,
             "enable_data_sufficiency_check": self.enable_data_sufficiency_check,
+            "max_per_category": self.max_per_category,
         }
         return d
 

@@ -10,18 +10,19 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-02-01",
-        "BACKTESTED_DATE": "2026-02-07 20:43",
-        "CAGR": 179.87793,
-        "MDD": -14.371988,
+        "BACKTESTED_DATE": "2026-02-10 18:49",
+        "CAGR": 199.459976,
+        "MDD": -13.279086,
         "PORTFOLIO_TOPN": 5,
-        "MA_PERIOD": 30,
-        "MA_TYPE": "WMA",
+        "MA_PERIOD": 80,
+        "MA_TYPE": "HMA",
         "REPLACE_SCORE_THRESHOLD": 0,
         "STOP_LOSS_PCT": 10,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
+        "MAX_PER_CATEGORY": 2,
         "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": false
+        "ENABLE_DATA_SUFFICIENCY_CHECK": true
     },
     "benchmark": {
         "ticker": "069500",

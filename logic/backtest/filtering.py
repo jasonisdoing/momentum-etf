@@ -75,8 +75,9 @@ def select_candidates_by_category(
                 if cat and not is_category_exception(str(cat).strip())
             }
 
-        # 후보 처리
-        best_per_category = {}
+        # 후보 처리 (카테고리별 n개 유지)
+        candidates_per_category: dict[str, list[dict[str, Any]]] = {}
+
         for cand in candidates:
             if not isinstance(cand, dict):
                 continue
@@ -98,49 +99,51 @@ def select_candidates_by_category(
 
             # 카테고리 확인
             category, internal_key = _resolve_category(ticker, etf_meta)
-            existing = best_per_category.get(internal_key)
 
-            if existing is None:
-                # 새로운 카테고리인 경우
-                if category not in held_set:
-                    best_per_category[internal_key] = {
-                        "cand": cand,
-                        "score": final_score_val,
-                        "category": category,
-                    }
-                elif skip_held_categories:
-                    rejected.append((cand, "category_held"))
-            else:
-                # 기존 카테고리와 비교 (종합 점수 우선)
-                if final_score_val > existing["score"]:
-                    if existing["category"] not in held_set:
-                        rejected.append((existing["cand"], "better_candidate"))
-                        best_per_category[internal_key] = {
-                            "cand": cand,
-                            "score": final_score_val,
-                            "category": category,
-                        }
-                    else:
-                        rejected.append((cand, "category_held"))
+            # 후보 데이터 구성
+            candidate_data = {
+                "cand": cand,
+                "score": final_score_val,
+                "category": category,
+            }
+
+            # 카테고리별 리스트에 추가
+            if internal_key not in candidates_per_category:
+                candidates_per_category[internal_key] = []
+            candidates_per_category[internal_key].append(candidate_data)
+
+        # 각 카테고리별로 점수 순 정렬 후 max_count만큼 선택
+        effective_max = max_count if max_count is not None and max_count > 0 else 9999
+
+        for internal_key, items in candidates_per_category.items():
+            # 점수 내림차순 정렬
+            items.sort(key=lambda x: x["score"], reverse=True)
+
+            # 상위 N개 선택
+            picked = items[:effective_max]
+            dropped = items[effective_max:]
+
+            # 선택된 항목 처리
+            for item in picked:
+                if item["category"] not in held_set or not skip_held_categories:
+                    selected_candidates.append(item["cand"])
                 else:
-                    rejected.append((cand, "better_candidate"))
+                    rejected.append((item["cand"], "category_held"))
 
-        # 최종 선택된 후보 목록 생성
-        selected_candidates = [
-            item["cand"]
-            for item in best_per_category.values()
-            if item["category"] not in held_set or not skip_held_categories
-        ]
+            # 탈락한 항목 처리 (better_candidate)
+            for item in dropped:
+                rejected.append((item["cand"], "better_candidate"))
 
-        # 점수 순으로 정렬
-        selected_candidates.sort(key=lambda x: x.get("score", float("-inf")), reverse=True)
-
-        # 최대 개수 제한
-        if max_count is not None and max_count > 0:
-            selected_candidates = selected_candidates[:max_count]
-
-        # 제외된 후보 중에서 선택되지 않은 후보들만 남김
-        rejected = [(cand, reason) for cand, reason in rejected if cand not in selected_candidates]
+        # 최종 선택된 후보 목록 점수 순 정렬
+        selected_candidates.sort(
+            key=lambda x: (
+                float(x.get("composite_score", float("-inf")))
+                if x.get("composite_score") is not None
+                else float("-inf"),
+                float(x.get("score", float("-inf"))) if x.get("score") is not None else float("-inf"),
+            ),
+            reverse=True,
+        )
 
         return selected_candidates, rejected
 

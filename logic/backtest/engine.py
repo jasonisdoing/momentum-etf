@@ -197,6 +197,7 @@ def _apply_wait_note_if_empty(
     position_state: dict = None,
     score_today: dict[str, float] = None,
     replace_threshold: float = 0.0,
+    max_per_category: int = 1,
 ) -> None:
     """WAIT 상태 종목에 대해 카테고리 중복 여부에 따라 노트를 설정합니다."""
 
@@ -207,15 +208,38 @@ def _apply_wait_note_if_empty(
     current_note = str(records[-1].get("note") or "").strip()
     if current_note:
         return
+
     # Calculate minimum required score for replacement
     if position_state and score_today is not None:
-        held_scores = [
-            score_today.get(t, 0.0) for t, state in position_state.items() if state.get("shares", 0) > 0 and t != "CASH"
-        ]
-        if held_scores:
-            weakest_score = min(held_scores)
+        # 1. 카테고리 확인
+        cat = ticker_to_category.get(ticker)
+
+        # 2. 카테고리별 보유 종목 확인
+        held_in_cat = []
+        held_others = []
+        for t, state in position_state.items():
+            if state.get("shares", 0) > 0 and t != "CASH":
+                t_cat = ticker_to_category.get(t)
+                score_h = score_today.get(t, 0.0)
+                if t_cat == cat and not is_category_exception(cat):
+                    held_in_cat.append(score_h)
+                else:
+                    held_others.append(score_h)
+
+        # 3. 비교 대상 스코어 결정
+        # 카테고리가 꽉 찼으면 -> 카테고리 내 최저점과 비교
+        if len(held_in_cat) >= max_per_category:
+            weakest_score = min(held_in_cat)
             required_score = weakest_score + replace_threshold
             records[-1]["note"] = DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score)
+        else:
+            # 카테고리 여유 있음 -> 전체 포트폴리오 중 최저점과 비교 (공간 부족 시)
+            # (공간이 부족해서 여기 들어온 것이므로, 전체 최저점과 비교해야 함)
+            all_held_scores = held_in_cat + held_others
+            if all_held_scores:
+                weakest_score = min(all_held_scores)
+                required_score = weakest_score + replace_threshold
+                records[-1]["note"] = DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score)
 
 
 def _execute_new_buys(
@@ -240,6 +264,7 @@ def _execute_new_buys(
     dt: pd.Timestamp,
     country_code: str,
     initial_capital: float = 0.0,
+    max_per_category: int = 1,
 ) -> tuple[float, float, set[str], set[str]]:
     """신규 매수 실행
 
@@ -250,6 +275,7 @@ def _execute_new_buys(
         calculate_held_categories,
         calculate_held_count,
         check_buy_candidate_filters,
+        is_category_exception,
     )
 
     held_count = calculate_held_count(position_state)
@@ -271,6 +297,7 @@ def _execute_new_buys(
                     position_state,
                     score_today,
                     replace_threshold,
+                    max_per_category,
                 )
         return cash, current_holdings_value, purchased_today, held_categories
 
@@ -278,9 +305,18 @@ def _execute_new_buys(
     held_categories = calculate_held_categories(position_state, ticker_to_category)
     held_categories_normalized = {str(cat).strip().upper() for cat in held_categories if isinstance(cat, str)}
 
+    # 카테고리별 보유 수량 계산 (MAX_PER_CATEGORY 체크용)
+    held_category_counts: dict[str, int] = {}
+    for tkr, state in position_state.items():
+        if state.get("shares", 0) > 0:
+            cat = ticker_to_category.get(tkr)
+            if cat and not is_category_exception(cat):
+                held_category_counts[cat] = held_category_counts.get(cat, 0) + 1
+
     # PHASE 1: Pre-count buyable tickers
     buyable_candidates = []
     temp_held_categories = held_categories.copy()  # 임시 카테고리 추적 (Phase 1용)
+    temp_held_category_counts = held_category_counts.copy()  # 임시 카테고리 카운트 추적
 
     for score, ticker_to_buy in buy_ranked_candidates:
         if len(buyable_candidates) >= slots_to_fill:
@@ -298,10 +334,12 @@ def _execute_new_buys(
 
         can_buy, block_reason = check_buy_candidate_filters(
             category=category,
-            held_categories=temp_held_categories,  # Phase 1에서는 임시 카테고리 사용
+            held_categories=temp_held_categories,  # Phase 1에서는 임시 카테고리 사용 (deprecated but kept for compatibility)
             sell_rsi_categories_today=sell_rsi_categories_today,
             rsi_score=rsi_score_buy_candidate,
             rsi_sell_threshold=rsi_sell_threshold,
+            held_category_counts=temp_held_category_counts,
+            max_per_category=max_per_category,
         )
 
         if not can_buy:
@@ -321,9 +359,10 @@ def _execute_new_buys(
 
         buyable_candidates.append((score, ticker_to_buy, buy_price, block_reason))
 
-        # Phase 1에서도 카테고리 추가 (같은 카테고리 중복 방지)
-        if category:
+        # Phase 1에서도 카테고리 추가
+        if category and not is_category_exception(category):
             temp_held_categories.add(category)
+            temp_held_category_counts[category] = temp_held_category_counts.get(category, 0) + 1
 
     # PHASE 2: Execute buys with equal cash distribution
     num_buys = len(buyable_candidates)
@@ -437,6 +476,7 @@ def run_portfolio_backtest(
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
     enable_data_sufficiency_check: bool = False,
+    max_per_category: int = 1,
 ) -> dict[str, pd.DataFrame]:
     """
     이동평균 기반 모멘텀 전략으로 포트폴리오 백테스트를 실행합니다.
@@ -770,7 +810,7 @@ def run_portfolio_backtest(
             buy_trades_today_map=buy_trades_today_map,
             cash=cash,
             current_holdings_value=current_holdings_value,
-            top_n=top_n,
+            top_n=int(top_n),
             rsi_sell_threshold=rsi_sell_threshold,
             cooldown_days=cooldown_days,
             replace_threshold=replace_threshold,
@@ -780,6 +820,7 @@ def run_portfolio_backtest(
             dt=dt,
             country_code=country_code,
             initial_capital=initial_capital,
+            max_per_category=max_per_category,
         )
 
         # 3. 교체 매수 실행 (포트폴리오가 가득 찬 경우)
@@ -797,7 +838,7 @@ def run_portfolio_backtest(
                 helper_candidates,
                 etf_meta,
                 held_categories=None,
-                max_count=None,
+                max_count=max_per_category,
                 skip_held_categories=False,
             )
 
@@ -828,18 +869,26 @@ def run_portfolio_backtest(
                     best_new_score = float("-inf")
 
                 # 교체 대상이 될 수 있는 보유 종목을 찾습니다.
-                # 1. 같은 카테고리의 종목이 있는지 확인
-                held_stock_same_category = next(
-                    (s for s in held_stocks_with_scores if s["category"] == wait_stock_category),
-                    None,
-                )
+                # 1. 같은 카테고리의 종목 수 확인
+                held_same_cat_list = [s for s in held_stocks_with_scores if s["category"] == wait_stock_category]
+                held_count_same_cat = len(held_same_cat_list)
+
+                # 교체 대상 (같은 카테고리 내에서 가장 점수가 낮은 종목)
+                held_stock_same_category = None
+                if held_same_cat_list:
+                    # 점수 오름차순 정렬 가정 (또는 명시적 정렬)
+                    held_same_cat_list.sort(key=lambda x: x["score"])
+                    held_stock_same_category = held_same_cat_list[0]
+
+                # 카테고리가 꽉 찼는지 여부
+                is_category_full = held_count_same_cat >= max_per_category
 
                 # 교체 여부 및 대상 종목 결정
                 ticker_to_sell = None
                 replacement_note = ""
 
-                if held_stock_same_category and not is_category_exception(wait_stock_category):
-                    # Case 1: 같은 카테고리 종목이 있는 경우 (필수 교체 대상)
+                if is_category_full and held_stock_same_category and not is_category_exception(wait_stock_category):
+                    # Case 1: 같은 카테고리가 꽉 찬 경우 (필수 교체 대상: 해당 카테고리 내 최저점 종목)
                     # 쿨다운 체크 추가
                     target_state = position_state[held_stock_same_category["ticker"]]
                     if i < target_state["sell_block_until"]:
