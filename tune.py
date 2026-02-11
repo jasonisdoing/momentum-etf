@@ -30,7 +30,7 @@ ACCOUNT_TUNING_CONFIG = {
         "MAX_PER_CATEGORY": [1, 2, 3],  # -> 최대 60% 비중까지만 허용
     },
     "aus": {
-        "PORTFOLIO_TOPN": [6, 7],
+        "PORTFOLIO_TOPN": [7],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_RANGE": [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],

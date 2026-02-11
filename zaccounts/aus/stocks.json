@@ -218,33 +218,6 @@
         ]
     },
     {
-        "category": "💰 금융",
-        "tickers": [
-            {
-                "ticker": "MVB",
-                "name": "VanEck Australian Banks ETF",
-                "listing_date": "2013-10-14",
-                "1_week_avg_volume": 20308,
-                "1_week_earn_rate": 4.7192,
-                "1_month_earn_rate": 8.0266,
-                "3_month_earn_rate": 5.454,
-                "6_month_earn_rate": 15.7499,
-                "12_month_earn_rate": 15.2624
-            },
-            {
-                "ticker": "BNKS",
-                "name": "Betashares Global Banks Currency Hedged ETF",
-                "listing_date": "2016-07-28",
-                "1_week_avg_volume": 35962,
-                "1_week_earn_rate": -0.3882,
-                "1_month_earn_rate": 2.7222,
-                "3_month_earn_rate": 13.2119,
-                "6_month_earn_rate": 23.005,
-                "12_month_earn_rate": 40.3484
-            }
-        ]
-    },
-    {
         "category": "🌍 글로벌",
         "tickers": [
             {
@@ -290,17 +263,6 @@
                 "3_month_earn_rate": 7.9145,
                 "6_month_earn_rate": 24.9935,
                 "12_month_earn_rate": 44.6225
-            },
-            {
-                "ticker": "FOOD",
-                "name": "Betashares Global Agriculture Companies Currency Hedged ETF",
-                "listing_date": "2016-08-02",
-                "1_week_avg_volume": 41196,
-                "1_week_earn_rate": 4.0195,
-                "1_month_earn_rate": 14.7849,
-                "3_month_earn_rate": 21.713,
-                "6_month_earn_rate": 21.8849,
-                "12_month_earn_rate": 35.4702
             },
             {
                 "ticker": "EMKT",
@@ -433,6 +395,44 @@
                 "3_month_earn_rate": -4.3573,
                 "6_month_earn_rate": 1.3071,
                 "12_month_earn_rate": 6.4533
+            }
+        ]
+    },
+    {
+        "category": "🙆‍♂️섹터/테마",
+        "tickers": [
+            {
+                "ticker": "FOOD",
+                "name": "Betashares Global Agriculture Companies Currency Hedged ETF",
+                "listing_date": "2016-08-02",
+                "1_week_avg_volume": 41196,
+                "1_week_earn_rate": 4.0195,
+                "1_month_earn_rate": 14.7849,
+                "3_month_earn_rate": 21.713,
+                "6_month_earn_rate": 21.8849,
+                "12_month_earn_rate": 35.4702
+            },
+            {
+                "ticker": "MVB",
+                "name": "VanEck Australian Banks ETF",
+                "listing_date": "2013-10-14",
+                "1_week_avg_volume": 20308,
+                "1_week_earn_rate": 4.7192,
+                "1_month_earn_rate": 8.0266,
+                "3_month_earn_rate": 5.454,
+                "6_month_earn_rate": 15.7499,
+                "12_month_earn_rate": 15.2624
+            },
+            {
+                "ticker": "BNKS",
+                "name": "Betashares Global Banks Currency Hedged ETF",
+                "listing_date": "2016-07-28",
+                "1_week_avg_volume": 35962,
+                "1_week_earn_rate": -0.3882,
+                "1_month_earn_rate": 2.7222,
+                "3_month_earn_rate": 13.2119,
+                "6_month_earn_rate": 23.005,
+                "12_month_earn_rate": 40.3484
             }
         ]
     },
