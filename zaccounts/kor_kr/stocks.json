@@ -52,17 +52,6 @@
         "category": "🙆‍♂️섹터/테마",
         "tickers": [
             {
-                "ticker": "388280",
-                "name": "RISE K엔터&여행레저",
-                "listing_date": "2021-06-10",
-                "1_week_avg_volume": 111445,
-                "1_week_earn_rate": 8.0772,
-                "1_month_earn_rate": 17.5738,
-                "3_month_earn_rate": 24.5139,
-                "6_month_earn_rate": 21.8071,
-                "12_month_earn_rate": 47.9175
-            },
-            {
                 "ticker": "0120J0",
                 "name": "BNK 카카오그룹포커스",
                 "listing_date": "2025-12-02",
@@ -497,17 +486,6 @@
                 "3_month_earn_rate": 15.2083,
                 "6_month_earn_rate": 32.5858,
                 "12_month_earn_rate": 72.7773
-            },
-            {
-                "ticker": "498860",
-                "name": "RISE 코리아금융고배당",
-                "listing_date": "2024-12-10",
-                "1_week_avg_volume": 148233,
-                "1_week_earn_rate": 9.6657,
-                "1_month_earn_rate": 32.3334,
-                "3_month_earn_rate": 29.0675,
-                "6_month_earn_rate": 50.3411,
-                "12_month_earn_rate": 106.8858
             },
             {
                 "ticker": "0154F0",
