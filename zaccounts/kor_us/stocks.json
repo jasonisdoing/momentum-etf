@@ -52,6 +52,17 @@
         "category": "💾반도체",
         "tickers": [
             {
+                "ticker": "442580",
+                "name": "PLUS 글로벌HBM반도체",
+                "listing_date": "2022-09-22",
+                "1_week_avg_volume": 521650,
+                "1_week_earn_rate": -5.1353,
+                "1_month_earn_rate": 14.3146,
+                "3_month_earn_rate": 48.3364,
+                "6_month_earn_rate": 183.1,
+                "12_month_earn_rate": 232.2487
+            },
+            {
                 "ticker": "483320",
                 "name": "ACE 엔비디아밸류체인액티브",
                 "listing_date": "2024-06-11",
@@ -373,6 +384,17 @@
                 "3_month_earn_rate": -2.8331,
                 "6_month_earn_rate": 12.3748,
                 "12_month_earn_rate": 36.8377
+            },
+            {
+                "ticker": "0155M0",
+                "name": "ACE 미국SMR원자력TOP10",
+                "listing_date": "2026-02-03",
+                "1_week_avg_volume": 544667,
+                "1_week_earn_rate": 1.4933,
+                "1_month_earn_rate": null,
+                "3_month_earn_rate": null,
+                "6_month_earn_rate": null,
+                "12_month_earn_rate": null
             },
             {
                 "ticker": "0007G0",
@@ -765,18 +787,6 @@
     },
     {
         "category": "기본",
-        "tickers": [
-            {
-                "ticker": "442580",
-                "name": "PLUS 글로벌HBM반도체",
-                "listing_date": "2022-09-22",
-                "1_week_avg_volume": 521650,
-                "1_week_earn_rate": -5.1353,
-                "1_month_earn_rate": 14.3146,
-                "3_month_earn_rate": 48.3364,
-                "6_month_earn_rate": 183.1,
-                "12_month_earn_rate": 232.2487
-            }
-        ]
+        "tickers": []
     }
 ]
