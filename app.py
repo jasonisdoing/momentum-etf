@@ -237,6 +237,39 @@ def main() -> None:
         section[data-testid="stSidebar"][aria-expanded="false"] > div {
             width: 0 !important;
         }
+
+        /* === 로딩 오버레이 === */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .stApp[data-test-script-state="running"]::after {
+            content: "";
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: rgba(255, 255, 255, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+
+        .stApp[data-test-script-state="running"]::before {
+            content: "";
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            z-index: 10000;
+            width: 40px;
+            height: 40px;
+            margin: -20px 0 0 -20px;
+            border: 4px solid #e0e0e0;
+            border-top-color: #D94D2B;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            pointer-events: none;
+        }
         </style>
         """,
         unsafe_allow_html=True,

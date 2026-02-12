@@ -15,6 +15,7 @@ from utils.settings_loader import get_account_settings
 logger = get_app_logger()
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def load_account_recommendations(
     account_id: str,
 ) -> tuple[pd.DataFrame | None, str | None, str]:

@@ -76,6 +76,7 @@ def _calculate_drawdown_from_high(close_series: pd.Series) -> float:
     return 0.0
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
     """모든 종목의 데이터를 수집하여 DataFrame으로 반환."""
 

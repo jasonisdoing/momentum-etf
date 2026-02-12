@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+import streamlit as st
+
 from utils.logger import get_app_logger
 from utils.settings_loader import (
     AccountSettingsError,
@@ -38,6 +40,7 @@ def _resolve_order(value: Any) -> float:
         return float("inf")
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def load_account_configs() -> list[dict[str, Any]]:
     """`zsettings/account`에 정의된 계정 정보를 정렬된 리스트로 반환합니다."""
 
