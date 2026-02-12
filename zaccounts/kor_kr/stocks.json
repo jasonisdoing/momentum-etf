@@ -134,17 +134,6 @@
         "category": "🖥️테크",
         "tickers": [
             {
-                "ticker": "322400",
-                "name": "HANARO e커머스",
-                "listing_date": "2019-04-23",
-                "1_week_avg_volume": 65421,
-                "1_week_earn_rate": 3.2003,
-                "1_month_earn_rate": 12.0605,
-                "3_month_earn_rate": 13.1242,
-                "6_month_earn_rate": 16.7376,
-                "12_month_earn_rate": 46.7538
-            },
-            {
                 "ticker": "427120",
                 "name": "RISE AI플랫폼",
                 "listing_date": "2022-05-17",
@@ -475,17 +464,6 @@
                 "3_month_earn_rate": 26.2287,
                 "6_month_earn_rate": 38.4789,
                 "12_month_earn_rate": 90.5405
-            },
-            {
-                "ticker": "484880",
-                "name": "SOL 금융지주플러스고배당",
-                "listing_date": "2024-06-25",
-                "1_week_avg_volume": 1330335,
-                "1_week_earn_rate": 11.4011,
-                "1_month_earn_rate": 28.5739,
-                "3_month_earn_rate": 26.6927,
-                "6_month_earn_rate": 43.9315,
-                "12_month_earn_rate": 99.8672
             },
             {
                 "ticker": "140700",
