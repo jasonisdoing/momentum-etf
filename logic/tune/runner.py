@@ -2274,6 +2274,7 @@ def run_account_tuning(
                             "STOP_LOSS_PCT": _round_up_float_places(entry.get("stop_loss_pct", 0.0), 1),
                             "OVERBOUGHT_SELL_THRESHOLD": int(entry.get("rsi_sell_threshold", 10)),
                             "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
+                            "MAX_PER_CATEGORY": int(entry.get("max_per_category", 1)),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)
