@@ -9,9 +9,8 @@ def main():
     try:
         with open("zaccounts/kor_kr/stocks.json", encoding="utf-8") as f:
             data = json.load(f)
-            for category in data:
-                for item in category.get("tickers", []):
-                    current_tickers.add(item.get("ticker"))
+            for item in data:
+                current_tickers.add(item.get("ticker"))
     except Exception as e:
         print(f"Error reading stocks.json: {e}")
         return

@@ -103,7 +103,6 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
     for idx, etf in enumerate(etfs, 1):
         ticker = etf["ticker"]
         name = etf.get("name", ticker)
-        category = etf.get("category", "-")
 
         # 캐시된 과거 데이터 로드 (12달 수익률 계산을 위해 18개월 필요)
         try:
@@ -123,7 +122,6 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
                     "#": idx,
                     "티커": ticker,
                     "종목명": name,
-                    "카테고리": category,
                     "일간(%)": 0.0,
                     "현재가": "-",
                     "Nav": "-",
@@ -220,7 +218,6 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
                 "#": idx,
                 "티커": ticker,
                 "종목명": name,
-                "카테고리": category,
                 "일간(%)": daily_pct,
                 "현재가": int(current_price) if pd.notna(current_price) else None,
                 "Nav": int(nav_price) if pd.notna(nav_price) else None,
@@ -441,8 +438,7 @@ def render_all_stocks_page() -> None:
     column_config = {
         "#": st.column_config.TextColumn("#", width=50),
         "티커": st.column_config.TextColumn("티커", width=60),
-        "종목명": st.column_config.TextColumn("종목명", width=300),
-        "카테고리": st.column_config.TextColumn("카테고리", width=140),
+        "종목명": st.column_config.TextColumn("종목명", width=250),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "현재가": st.column_config.NumberColumn("현재가", width="small"),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
@@ -468,7 +464,6 @@ def render_all_stocks_page() -> None:
             "#",
             "티커",
             "종목명",
-            "카테고리",
             "일간(%)",
             "현재가",
             "괴리율",
@@ -489,7 +484,6 @@ def render_all_stocks_page() -> None:
             "#",
             "티커",
             "종목명",
-            "카테고리",
             "일간(%)",
             "현재가",
             "1주(%)",

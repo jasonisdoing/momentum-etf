@@ -117,9 +117,8 @@ def update_account_metadata(account_id: str):
     updated_count = 0
     ticker_entries: list[dict[str, Any]] = []
 
-    for category in stock_data:
-        for stock in category.get("tickers", []):
-            ticker_entries.append(stock)
+    for stock in stock_data:
+        ticker_entries.append(stock)
 
     total_count = len(ticker_entries)
     logger.info(f"[{account_norm.upper()}] 메타데이터 업데이트 시작 (총 {total_count}개 종목)")
@@ -307,22 +306,18 @@ def update_account_metadata(account_id: str):
 
     # [User Request] 중복 제거 및 정렬 로직 추가
     seen_tickers = set()
-    for cat_entry in stock_data:
-        if "tickers" not in cat_entry:
-            continue
+    unique_stocks = []
+    for stock in stock_data:
+        tkr = stock.get("ticker")
+        if tkr and tkr not in seen_tickers:
+            seen_tickers.add(tkr)
+            unique_stocks.append(stock)
+        elif tkr:
+            logger.debug(f"[{account_norm.upper()}] 중복 티커 제거: {tkr}")
 
-        unique_stocks = []
-        for stock in cat_entry["tickers"]:
-            tkr = stock.get("ticker")
-            if tkr and tkr not in seen_tickers:
-                seen_tickers.add(tkr)
-                unique_stocks.append(stock)
-            elif tkr:
-                logger.debug(f"[{account_norm.upper()}] 중복 티커 제거: {tkr} (category: {cat_entry.get('category')})")
-
-        # 1주 수익률 내림차순 정렬 (데이터 없으면 -999)
-        unique_stocks.sort(key=lambda x: x.get("1_week_earn_rate") or -999.0, reverse=True)
-        cat_entry["tickers"] = unique_stocks
+    # 1주 수익률 내림차순 정렬 (데이터 없으면 -999)
+    unique_stocks.sort(key=lambda x: x.get("1_week_earn_rate") or -999.0, reverse=True)
+    stock_data = unique_stocks
 
     # 메타데이터 업데이트가 없더라도 정렬/중복제거 반영을 위해 저장 시도
     try:

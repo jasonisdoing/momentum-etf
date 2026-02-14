@@ -20,21 +20,18 @@ ACCOUNT_TUNING_CONFIG = {
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_RANGE": [60, 120, 180, 240],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "MAX_PER_CATEGORY": [1, 2, 3, 4, 5],
     },
     "kor_us": {
         "PORTFOLIO_TOPN": [3, 4],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_RANGE": [60, 120, 180, 240],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "MAX_PER_CATEGORY": [1, 2, 3, 4],
     },
     "aus": {
         "PORTFOLIO_TOPN": [7],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_RANGE": [60, 120, 180, 240],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "MAX_PER_CATEGORY": [1, 2, 3, 4, 5, 6, 7],
     },
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
@@ -42,7 +39,6 @@ ACCOUNT_TUNING_CONFIG = {
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_RANGE": [60, 120, 180, 240],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "MAX_PER_CATEGORY": [1, 2, 3, 4, 5],
     },
 }
 

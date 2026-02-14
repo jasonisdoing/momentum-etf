@@ -312,14 +312,12 @@ def _render_tuning_table(
         "손절",
         "과매수",
         "쿨다운",
-        "최대카테고리",
         "CAGR(%)",
         "MDD(%)",
     ]
     aligns = [
         "right",
         "center",
-        "right",
         "right",
         "right",
         "right",
@@ -359,7 +357,6 @@ def _render_tuning_table(
 
         rsi_threshold_val = row.get("rsi_sell_threshold")
         cooldown_val = row.get("cooldown_days")
-        max_cat_val = row.get("max_per_category", 1)
 
         row_data = [
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
@@ -375,9 +372,6 @@ def _render_tuning_table(
             str(int(cooldown_val))
             if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val))
             else "-",
-            str(int(max_cat_val))
-            if isinstance(max_cat_val, (int, float)) and math.isfinite(float(max_cat_val))
-            else "1",
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),
             _format_table_float(row.get("period_return")),
@@ -460,7 +454,6 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "PORTFOLIO_TOPN",
         "OVERBOUGHT_SELL_THRESHOLD",
         "MA_PERIOD",
-        "MAX_PER_CATEGORY",
     }
 
     for key, value in result_params.items():
@@ -500,7 +493,6 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "STOP_LOSS_PCT",
         "OVERBOUGHT_SELL_THRESHOLD",
         "COOLDOWN_DAYS",
-        "MAX_PER_CATEGORY",
         "OPTIMIZATION_METRIC",
     ]
 
@@ -760,7 +752,6 @@ def _evaluate_single_combo(
         int,
         str,
         tuple[str, ...],
-        int,
     ],
 ) -> tuple[str, Any, list[str]]:
     (
@@ -774,7 +765,6 @@ def _evaluate_single_combo(
         cooldown_int,
         ma_type_str,
         excluded_tickers,
-        max_cat_int,
     ) = payload
 
     # Worker 글로벌 변수에서 데이터 가져오기 (프로세스당 한 번만 pickle됨)
@@ -791,7 +781,6 @@ def _evaluate_single_combo(
             replace_threshold=float(threshold_float),
             ma_type=str(ma_type_str),
             stop_loss_pct=float(stop_loss_float),
-            max_per_category=int(max_cat_int),
         )
     except ValueError as exc:
         return (
@@ -803,7 +792,6 @@ def _evaluate_single_combo(
                 "replace_threshold": threshold_float,
                 "rsi_sell_threshold": rsi_int,
                 "ma_type": ma_type_str,
-                "max_per_category": max_cat_int,
                 "error": str(exc),
             },
             [],
@@ -851,7 +839,6 @@ def _evaluate_single_combo(
                 "stop_loss_pct": stop_loss_float,
                 "replace_threshold": threshold_float,
                 "rsi_sell_threshold": rsi_int,
-                "max_per_category": max_cat_int,
                 "error": str(exc),
             },
             [],
@@ -869,7 +856,6 @@ def _evaluate_single_combo(
         "rsi_sell_threshold": rsi_int,
         "cooldown_days": cooldown_int,
         "ma_type": ma_type_str,
-        "max_per_category": max_cat_int,
         "cagr": _round_float(_safe_float(summary.get("cagr"), 0.0)),
         "mdd": _round_float(_safe_float(summary.get("mdd"), 0.0)),
         "sharpe": _round_float(_safe_float(summary.get("sharpe"), 0.0)),
@@ -907,7 +893,6 @@ def _execute_tuning(
     rsi_candidates = list(search_space.get("OVERBOUGHT_SELL_THRESHOLD", []))
     cooldown_candidates = list(search_space.get("COOLDOWN_DAYS", []))
     ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
-    max_per_category_candidates = list(search_space.get("MAX_PER_CATEGORY", [1]))
 
     if (
         not ma_candidates
@@ -917,7 +902,6 @@ def _execute_tuning(
         or not rsi_candidates
         or not cooldown_candidates
         or not ma_type_candidates
-        or not max_per_category_candidates
     ):
         logger.warning(
             "[튜닝] %s (%s 시작) 유효한 탐색 공간이 없습니다.",
@@ -926,8 +910,8 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, float, float, int, int, str, int]] = [
-        (ma, topn, replace, stop_loss, rsi, cooldown, ma_type, max_cat)
+    combos: list[tuple[int, int, float, float, int, int, str]] = [
+        (ma, topn, replace, stop_loss, rsi, cooldown, ma_type)
         for ma in ma_candidates
         for topn in topn_candidates
         for replace in replace_candidates
@@ -935,7 +919,6 @@ def _execute_tuning(
         for rsi in rsi_candidates
         for cooldown in cooldown_candidates
         for ma_type in ma_type_candidates
-        for max_cat in max_per_category_candidates
     ]
 
     if not combos:
@@ -1006,9 +989,8 @@ def _execute_tuning(
             int(cooldown),
             str(ma_type),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
-            int(max_cat),
         )
-        for ma, topn, replace, stop_loss, rsi, cooldown, ma_type, max_cat in combos
+        for ma, topn, replace, stop_loss, rsi, cooldown, ma_type in combos
     ]
 
     logger.info(
@@ -1144,7 +1126,6 @@ def _execute_tuning(
             "stop_loss_pct",
             "rsi_sell_threshold",
             "cooldown_days",
-            "max_per_category",
         ]
 
         for key in param_keys:
@@ -1191,7 +1172,6 @@ def _execute_tuning(
                     else None,
                     "OVERBOUGHT_SELL_THRESHOLD": int(item.get("rsi_sell_threshold", 10)),
                     "COOLDOWN_DAYS": int(item.get("cooldown_days", 2)),
-                    "MAX_PER_CATEGORY": int(item.get("max_per_category", 1)),
                 },
             }
         )
@@ -1216,7 +1196,6 @@ def _build_run_entry(
         "STOP_LOSS_PCT": ("stop_loss_pct", False),
         "OVERBOUGHT_SELL_THRESHOLD": ("rsi_sell_threshold", True),
         "COOLDOWN_DAYS": ("cooldown_days", True),
-        "MAX_PER_CATEGORY": ("max_per_category", True),
     }
 
     entry: dict[str, Any] = {
@@ -1290,7 +1269,6 @@ def _build_run_entry(
             ("STOP_LOSS_PCT", "stop_loss_pct"),
             ("OVERBOUGHT_SELL_THRESHOLD", "rsi_sell_threshold"),
             ("COOLDOWN_DAYS", "cooldown_days"),
-            ("MAX_PER_CATEGORY", "max_per_category"),
         ]
 
         for field, key in field_key_pairs:
@@ -1402,7 +1380,6 @@ def _ensure_entry_schema(entry: Any) -> dict[str, Any]:
         "STOP_LOSS_PCT",
         "COOLDOWN_DAYS",
         "MA_TYPE",
-        "MAX_PER_CATEGORY",
     ):
         normalized.pop(field, None)
 
@@ -1534,7 +1511,6 @@ def _compose_tuning_report(
             stop_loss_range = search_space.get("STOP_LOSS_PCT", [])
             rsi_range = search_space.get("OVERBOUGHT_SELL_THRESHOLD", [])
             cooldown_range = search_space.get("COOLDOWN_DAYS", [])
-            max_cat_range = search_space.get("MAX_PER_CATEGORY", [])
 
             # MA_TYPE이 있으면 포함해서 표시
             if ma_type_range and len(ma_type_range) > 1:
@@ -1543,7 +1519,6 @@ def _compose_tuning_report(
                     f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
                     f"× RSI {len(rsi_range)}개 "
                     f"× COOLDOWN {len(cooldown_range)}개 "
-                    f"× MAX_CAT {len(max_cat_range)}개 "
                     f"= {tuning_metadata.get('combo_count', 0)}개 조합"
                 )
             else:
@@ -1552,7 +1527,6 @@ def _compose_tuning_report(
                     f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
                     f"× RSI {len(rsi_range)}개 "
                     f"× COOLDOWN {len(cooldown_range)}개 "
-                    f"× MAX_CAT {len(max_cat_range)}개 "
                     f"= {tuning_metadata.get('combo_count', 0)}개 조합"
                 )
             # 각 파라미터 범위 표시
@@ -1577,10 +1551,6 @@ def _compose_tuning_report(
             if cooldown_range:
                 cd_min, cd_max = min(cooldown_range), max(cooldown_range)
                 lines.append(f"|   COOLDOWN_DAYS: {cd_min}~{cd_max}")
-
-            if max_cat_range:
-                mc_min, mc_max = min(max_cat_range), max(max_cat_range)
-                lines.append(f"|   MAX_PER_CATEGORY: {mc_min}~{mc_max}")
 
         # 종목 수
         ticker_count = tuning_metadata.get("ticker_count", 0)
@@ -1746,7 +1716,6 @@ def _compose_tuning_report(
                 stop_loss_val = tuning.get("STOP_LOSS_PCT")
             rsi_val = tuning.get("OVERBOUGHT_SELL_THRESHOLD")
             cooldown_val = tuning.get("COOLDOWN_DAYS")
-            max_cat_val = tuning.get("MAX_PER_CATEGORY")
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -1763,7 +1732,6 @@ def _compose_tuning_report(
                     "stop_loss_pct": stop_loss_val,
                     "rsi_sell_threshold": rsi_val,
                     "cooldown_days": cooldown_val,
-                    "max_per_category": max_cat_val,
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
@@ -1899,12 +1867,6 @@ def run_account_tuning(
     else:
         ma_type_values = [str(ma_type_raw).upper()]
 
-    max_cat_values = _normalize_tuning_values(
-        config.get("MAX_PER_CATEGORY"),
-        dtype=int,
-        fallback=base_rules.max_per_category,
-    )
-
     if not ma_type_values:
         ma_type_values = [base_rules.ma_type]
 
@@ -1916,7 +1878,6 @@ def run_account_tuning(
         or not rsi_sell_values
         or not cooldown_values
         or not ma_type_values
-        or not max_cat_values
     ):
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
@@ -1953,7 +1914,6 @@ def run_account_tuning(
         * len(rsi_sell_values)
         * len(cooldown_values)
         * len(ma_type_values)
-        * len(max_cat_values)
     )
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
@@ -1976,7 +1936,6 @@ def run_account_tuning(
         "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
         "COOLDOWN_DAYS": cooldown_values,
         "MA_TYPE": ma_type_values,
-        "MAX_PER_CATEGORY": max_cat_values,
         "OPTIMIZATION_METRIC": [optimization_metric],
     }
 
@@ -1987,11 +1946,10 @@ def run_account_tuning(
     rsi_sell_count = len(rsi_sell_values)  # Defined for logger.info
     cooldown_count = len(cooldown_values)
     ma_type_count = len(ma_type_values)  # Defined for logger.info
-    max_cat_count = len(max_cat_values)
 
     logger.info(
         "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × 교체점수 %d개 × 손절 %d개 "
-        "× RSI %d개 × COOLDOWN %d개 × MA_TYPE %d개 × MAX_CAT %d개 = %d개 조합",
+        "× RSI %d개 × COOLDOWN %d개 × MA_TYPE %d개 = %d개 조합",
         ma_count,
         topn_count,
         replace_count,
@@ -1999,7 +1957,6 @@ def run_account_tuning(
         rsi_sell_count,
         cooldown_count,
         ma_type_count,
-        max_cat_count,
         combo_count,
     )
 
@@ -2152,7 +2109,6 @@ def run_account_tuning(
             "STOP_LOSS_PCT": list(stop_loss_values),
             "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
             "COOLDOWN_DAYS": list(cooldown_values),
-            "MAX_PER_CATEGORY": list(max_cat_values),
             "OPTIMIZATION_METRIC": optimization_metric,
         },
         "data_period": {
@@ -2274,7 +2230,6 @@ def run_account_tuning(
                             "STOP_LOSS_PCT": _round_up_float_places(entry.get("stop_loss_pct", 0.0), 1),
                             "OVERBOUGHT_SELL_THRESHOLD": int(entry.get("rsi_sell_threshold", 10)),
                             "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
-                            "MAX_PER_CATEGORY": int(entry.get("max_per_category", 1)),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)

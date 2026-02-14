@@ -138,7 +138,6 @@ def main() -> None:
         initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),
-        category_summaries=getattr(result, "category_summaries", []),
         core_start_dt=result.start_date,
     )
     logger.info("✅ 백테스트 로그를 '%s'에 저장했습니다.", log_path)

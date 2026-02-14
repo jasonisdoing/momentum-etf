@@ -2,90 +2,9 @@
 
 from typing import Any
 
-from config import CATEGORY_EXCEPTIONS
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
-
-
-def is_category_exception(category: str | None) -> bool:
-    """카테고리가 중복 제한에서 예외인지 확인합니다.
-
-    Args:
-        category: 확인할 카테고리 이름 (예: "예외", "예외(2)", "💾AI반도체(15)")
-
-    Returns:
-        True if 예외 카테고리, False otherwise
-    """
-    import re
-
-    if not category:
-        return False
-
-    # 카테고리명에서 종목 수 접미사 제거 (예: "예외(2)" -> "예외")
-    category_clean = re.sub(r"\(\d+\)$", "", str(category).strip())
-    return category_clean in CATEGORY_EXCEPTIONS
-
-
-def get_held_categories_excluding_sells(
-    items: list,
-    *,
-    get_category_func,
-    get_state_func,
-    get_ticker_func=None,
-    holdings: set[str] = None,
-) -> set[str]:
-    """매도 예정 종목을 제외한 보유 카테고리 집합을 반환합니다.
-
-    추천과 백테스트 모두에서 사용되는 공통 로직입니다.
-
-    Args:
-        items: 종목 리스트 (dict 또는 state 객체)
-        get_category_func: 카테고리를 추출하는 함수 (item -> str)
-        get_state_func: 상태를 추출하는 함수 (item -> str)
-        get_ticker_func: 티커를 추출하는 함수 (item -> str), 옵션
-        holdings: 보유 종목 티커 집합, 옵션
-
-    Returns:
-        매도 예정이 아닌 보유 종목의 카테고리 집합
-    """
-    sell_states = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
-    held_categories = set()
-
-    for item in items:
-        state = get_state_func(item)
-
-        # 매도 예정 종목은 제외
-        if state in sell_states:
-            continue
-
-        # HOLD 상태이거나, 보유 중인 종목만 포함
-        is_held = False
-        if state in {"HOLD"}:
-            is_held = True
-        elif holdings and get_ticker_func:
-            ticker = get_ticker_func(item)
-            is_held = ticker in holdings
-
-        if is_held or state in {"BUY", "BUY_REPLACE"}:
-            category = get_category_func(item)
-            if category and not is_category_exception(category):
-                held_categories.add(category)
-
-    return held_categories
-
-
-def should_exclude_from_category_count(state: str) -> bool:
-    """카테고리 카운트에서 제외해야 하는 상태인지 확인합니다.
-
-    Args:
-        state: 종목 상태
-
-    Returns:
-        True if 매도 예정 종목 (카운트에서 제외), False otherwise
-    """
-    sell_states = {"SELL_TREND", "SELL_REPLACE", "CUT_STOPLOSS", "SELL_RSI"}
-    return state in sell_states
 
 
 def get_sell_states() -> set[str]:
@@ -137,45 +56,18 @@ def count_current_holdings(items: list, *, get_state_func=None) -> int:
 
 
 def check_buy_candidate_filters(
-    category: str,
-    held_categories: set[str] | None,  # Lower priority than held_category_counts
-    sell_rsi_categories_today: set[str],
     rsi_score: float,
     rsi_sell_threshold: float,
-    held_category_counts: dict[str, int] | None = None,
-    max_per_category: int = 1,
 ) -> tuple[bool, str]:
     """매수 후보 필터링 체크
 
     Args:
-        category: 종목 카테고리
-        held_categories: (deprecated) 현재 보유 카테고리 집합. counts가 없으면 사용됨.
-        sell_rsi_categories_today: 오늘 RSI 매도한 카테고리 집합
         rsi_score: RSI 점수
         rsi_sell_threshold: RSI 매도 임계값
-        held_category_counts: 카테고리별 보유 수량 (dict)
-        max_per_category: 카테고리당 최대 보유 수
 
     Returns:
         (통과 여부, 차단 사유)
     """
-
-    # 이미 보유한 카테고리 매수 차단
-    if category and not is_category_exception(category):
-        # 1. 우선순위: 카테고리 카운트 확인
-        if held_category_counts is not None:
-            current_count = held_category_counts.get(category, 0)
-            if current_count >= max_per_category:
-                return False, f"카테고리 보유 한도 초과 ({current_count}/{max_per_category}, {category})"
-
-        # 2. 차선책: 단순 집합 확인 (기존 로직 호환성)
-        elif held_categories and category in held_categories:
-            return False, f"동일 카테고리 보유 ({category})"
-
-    # SELL_RSI로 매도한 카테고리는 같은 날 매수 금지 (카테고리당 N종목이라도, 과열 매도 후 즉시 재진입은 위험)
-    if category and not is_category_exception(category) and category in sell_rsi_categories_today:
-        return False, f"RSI 과매수 매도 카테고리 ({category})"
-
     # RSI 과매수 종목 매수 차단
     if rsi_score >= rsi_sell_threshold:
         return False, f"RSI 과매수 (RSI점수: {rsi_score:.1f})"
@@ -212,63 +104,6 @@ def calculate_buy_budget(
     return min(target_value, cash)
 
 
-def calculate_held_categories(
-    position_state: dict,
-    ticker_to_category: dict[str, str],
-) -> set[str]:
-    """현재 보유 중인 카테고리 집합 계산
-
-    Args:
-        position_state: 포지션 상태 (백테스트용)
-        ticker_to_category: 티커 -> 카테고리 매핑
-
-    Returns:
-        보유 중인 카테고리 집합
-    """
-    held_categories = set()
-
-    # 실제 보유 종목의 카테고리
-    for ticker, state in position_state.items():
-        if state.get("shares", 0) > 0:
-            category = ticker_to_category.get(ticker)
-            if category and not is_category_exception(category):
-                held_categories.add(category)
-
-    return held_categories
-
-
-def track_sell_rsi_categories(
-    decisions: list[dict],
-    etf_meta: dict[str, Any],
-    rsi_sell_threshold: float,
-) -> set[str]:
-    """SELL_RSI로 매도하는 카테고리 추적
-
-    Args:
-        decisions: 의사결정 리스트
-        etf_meta: ETF 메타 정보
-        rsi_sell_threshold: RSI 매도 임계값
-
-    Returns:
-        SELL_RSI로 매도하는 카테고리 집합
-    """
-    sell_rsi_categories = set()
-
-    for d in decisions:
-        # 1. 이미 SELL_RSI 상태인 경우
-        if d.get("state") == "SELL_RSI":
-            category = etf_meta.get(d["tkr"], {}).get("category")
-            if category and not is_category_exception(category):
-                sell_rsi_categories.add(category)
-        # 2. 보유 중이지만 RSI 과매수 경고가 있는 경우 (매도 전 예방)
-        elif d.get("state") in {"HOLD"} and d.get("rsi_score", 0.0) >= rsi_sell_threshold:
-            category = etf_meta.get(d["tkr"], {}).get("category")
-            if category and not is_category_exception(category):
-                sell_rsi_categories.add(category)
-
-    return sell_rsi_categories
-
-
 def calculate_held_count(position_state: dict) -> int:
     """현재 보유 중인 종목 수 계산 (백테스트용)
 
@@ -279,30 +114,6 @@ def calculate_held_count(position_state: dict) -> int:
         보유 중인 종목 수
     """
     return sum(1 for pos in position_state.values() if pos.get("shares", 0) > 0)
-
-
-def calculate_held_categories_from_holdings(
-    holdings: dict[str, Any],
-    etf_meta: dict[str, Any],
-) -> set[str]:
-    """보유 종목의 카테고리 집합 계산 (추천용)
-
-    Args:
-        holdings: 보유 종목 딕셔너리
-        etf_meta: ETF 메타 정보
-
-    Returns:
-        보유 중인 카테고리 집합 (고정 종목 카테고리 포함)
-    """
-    held_categories = set()
-
-    # 실제 보유 종목의 카테고리
-    for tkr in holdings.keys():
-        category = etf_meta.get(tkr, {}).get("category")
-        if category and not is_category_exception(category):
-            held_categories.add(category)
-
-    return held_categories
 
 
 def validate_portfolio_topn(topn: int, account_id: str = "") -> None:

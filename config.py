@@ -5,10 +5,6 @@ from datetime import time
 CACHE_START_DATE = "2024-01-02"
 
 
-# 카테고리 중복 제한에서 예외되는 카테고리 목록
-# 이 카테고리들은 여러 종목을 동시에 보유할 수 있음
-CATEGORY_EXCEPTIONS = ["기본"]
-
 # 네이버 금융 API 설정
 NAVER_FINANCE_ETF_API_URL = "https://finance.naver.com/api/sise/etfItemList.nhn"
 NAVER_FINANCE_CHART_API_URL = "https://fchart.stock.naver.com/sise.nhn"

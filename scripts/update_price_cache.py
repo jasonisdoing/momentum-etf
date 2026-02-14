@@ -75,7 +75,6 @@ def refresh_cache_for_target(account_id: str, start_date: str | None):
         all_map[norm] = {
             "ticker": norm,
             "name": norm,
-            "category": "BENCHMARK",
             "type": "etf",
         }
 

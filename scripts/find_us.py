@@ -239,9 +239,8 @@ def main():
         if os.path.exists(stocks_json_path):
             with open(stocks_json_path, encoding="utf-8") as f:
                 data = json.load(f)
-                for category in data:
-                    for item in category.get("tickers", []):
-                        existing_tickers.add(item.get("ticker"))
+                for item in data:
+                    existing_tickers.add(item.get("ticker"))
     except Exception as e:
         print(f"\n⚠️ stocks.json 로드 중 오류 발생: {e}")
 

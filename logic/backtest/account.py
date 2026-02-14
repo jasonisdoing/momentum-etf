@@ -54,7 +54,6 @@ class AccountBacktestResult:
     monthly_cum_returns: pd.Series
     yearly_returns: pd.Series
     ticker_summaries: list[dict[str, Any]]
-    category_summaries: list[dict[str, Any]]
     settings_snapshot: dict[str, Any]
     backtest_start_date: str
     missing_tickers: list[str]
@@ -80,7 +79,6 @@ class AccountBacktestResult:
             "monthly_cum_returns": self.monthly_cum_returns.to_dict(),
             "yearly_returns": self.yearly_returns.to_dict(),
             "ticker_summaries": self.ticker_summaries,
-            "category_summaries": self.category_summaries,
             "settings_snapshot": self.settings_snapshot,
             "backtest_start_date": self.backtest_start_date,
             "missing_tickers": self.missing_tickers,
@@ -160,13 +158,11 @@ def run_account_backtest(
             ma_type=strategy_override.ma_type,
             stop_loss_pct=strategy_override.stop_loss_pct,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
-            max_per_category=strategy_override.max_per_category,
         )
         strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
-        strategy_settings["MAX_PER_CATEGORY"] = strategy_rules.max_per_category
         if strategy_rules.stop_loss_pct is not None:
             strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
 
@@ -218,13 +214,12 @@ def run_account_backtest(
         _log(f"[백테스트] {len(etf_universe)}개의 ETF를 찾았습니다.")
 
     ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
-    ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금", "category": "-"}
+    ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금"}
 
     # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
     portfolio_topn = strategy_rules.portfolio_topn
-    holdings_limit = strategy_settings.get("MAX_PER_CATEGORY", 1)
     if not is_tuning_fast_path:
-        _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}, 카테고리당 최대 보유 수: {holdings_limit}")
+        _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}")
 
     if not is_tuning_fast_path:
         _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
@@ -287,7 +282,6 @@ def run_account_backtest(
             missing_ticker_sink=runtime_missing_tickers,
             **backtest_kwargs,
             trading_calendar=calendar_arg,
-            max_per_category=holdings_limit,
         )
         or {}
     )
@@ -328,8 +322,6 @@ def run_account_backtest(
         ticker_meta,
     )
 
-    category_summaries = _build_category_summaries(ticker_summaries)
-
     _log("[백테스트] 설정 스냅샷을 생성하는 중...")
     settings_snapshot = _build_settings_snapshot(
         account_id=account_id,
@@ -356,7 +348,7 @@ def run_account_backtest(
         initial_capital_krw=capital_info.krw,
         currency=display_currency,
         portfolio_topn=portfolio_topn,
-        holdings_limit=holdings_limit,
+        holdings_limit=portfolio_topn,
         summary=summary,
         portfolio_timeseries=portfolio_df,
         ticker_timeseries=ticker_timeseries,
@@ -366,7 +358,6 @@ def run_account_backtest(
         monthly_cum_returns=monthly_cum_returns,
         yearly_returns=yearly_returns,
         ticker_summaries=ticker_summaries,
-        category_summaries=category_summaries,
         settings_snapshot=settings_snapshot,
         backtest_start_date=backtest_start_date_str,
         missing_tickers=missing_sorted,
@@ -1074,7 +1065,6 @@ def _build_ticker_summaries(
                 "total_contribution": total_contribution,
                 "period_return_pct": period_return_pct,
                 "listing_date": listing_date,
-                "category": meta.get("category", "-"),
             }
         )
 
@@ -1100,39 +1090,3 @@ def _build_settings_snapshot(
         "strategy_settings": dict(strategy_settings),
     }
     return snapshot
-
-
-def _build_category_summaries(
-    ticker_summaries: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    category_stats: dict[str, dict[str, Any]] = {}
-
-    for summary in ticker_summaries:
-        category = summary.get("category", "-")
-        if category not in category_stats:
-            category_stats[category] = {
-                "category": category,
-                "total_contribution": 0.0,
-                "realized_profit": 0.0,
-                "unrealized_profit": 0.0,
-                "total_trades": 0,
-                "winning_trades": 0,
-            }
-
-        stats = category_stats[category]
-        stats["total_contribution"] += summary.get("total_contribution", 0.0)
-        stats["realized_profit"] += summary.get("realized_profit", 0.0)
-        stats["unrealized_profit"] += summary.get("unrealized_profit", 0.0)
-        stats["total_trades"] += summary.get("total_trades", 0)
-        stats["winning_trades"] += summary.get("winning_trades", 0)
-
-    results = []
-    for stats in category_stats.values():
-        total_trades = stats["total_trades"]
-        winning_trades = stats["winning_trades"]
-        win_rate = (winning_trades / total_trades) * 100.0 if total_trades > 0 else 0.0
-        stats["win_rate"] = win_rate
-        results.append(stats)
-
-    results.sort(key=lambda x: x["total_contribution"], reverse=True)
-    return results

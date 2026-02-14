@@ -10,7 +10,7 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-06-04",
-        "BACKTESTED_DATE": "2026-02-14 08:23",
+        "BACKTESTED_DATE": "2026-02-14 09:55",
         "CAGR": 247.868443,
         "MDD": -9.788022,
         "PORTFOLIO_TOPN": 5,
@@ -20,7 +20,6 @@
         "STOP_LOSS_PCT": 10,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
-        "MAX_PER_CATEGORY": 4,
         "OPTIMIZATION_METRIC": "CAGR",
         "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },

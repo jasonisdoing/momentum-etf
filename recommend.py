@@ -120,7 +120,6 @@ def extract_recommendations_from_backtest(
         # 메타 정보
         meta = merged_meta.get(ticker_key, merged_meta.get(ticker, {}))
         name = meta.get("name", ticker_key)
-        category = meta.get("category", "-")
 
         # [UPDATE] stock_note가 있으면 이름에 병합 (예: 종목명(노트내용))
         # UI 오버레이 복구용 원본 노트도 stock_note 필드로 저장
@@ -232,7 +231,6 @@ def extract_recommendations_from_backtest(
             {
                 "ticker": ticker_key,
                 "name": name,
-                "category": category,
                 "stock_note": stock_note,  # UI 오버레이 복구용
                 "state": state,
                 "decision": decision,
@@ -364,42 +362,6 @@ def _enrich_with_nav_data(
                 rec["price"] = nav_info.get("nowVal")
 
     return recommendations
-
-
-def _filter_category_duplicates(
-    recommendations: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """카테고리별로 최고 점수 종목만 남기고 필터링합니다."""
-    from logic.backtest import filter_category_duplicates
-
-    def normalize_category(category: str) -> str:
-        if not category or category == "-":
-            return ""
-        return str(category).strip().upper()
-
-    # filter_category_duplicates에 맞는 형식으로 변환
-    items = []
-    for rec in recommendations:
-        items.append(
-            {
-                "ticker": rec.get("ticker"),
-                "category": rec.get("category", "-"),
-                "state": rec.get("state"),
-                "score": rec.get("score") or 0,
-                "_original": rec,
-            }
-        )
-
-    filtered = filter_category_duplicates(items, category_key_getter=normalize_category)
-
-    # 필터링된 결과에서 원본 추출
-    result = [item["_original"] for item in filtered]
-
-    # 순위 재부여
-    for i, rec in enumerate(result, start=1):
-        rec["rank"] = i
-
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -542,9 +504,6 @@ def generate_recommendation_report(
     if country_code in ("kor", "kr"):
         recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
 
-    # 카테고리별 중복 필터링 (MAX_PER_CATEGORY=1 적용) - [User Request] 모든 종목 표시를 위해 비활성화
-    # recommendations = _filter_category_duplicates(recommendations)
-
     return RecommendationReport(
         account_id=account_id,
         country_code=country_code,
@@ -638,7 +597,7 @@ def dump_recommendation_log(
     nav_mode = country_lower in {"kr", "kor"}
     show_deviation = country_lower in {"kr", "kor"}
 
-    headers = ["#", "티커", "종목명", "카테고리", "상태", "보유일", "일간(%)", "평가(%)", "현재가"]
+    headers = ["#", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가"]
     # [User Request] 현재가 - 괴리율 - Nav
     if show_deviation:
         headers.append("괴리율")
@@ -662,7 +621,7 @@ def dump_recommendation_log(
         rank = item.get("rank", 0)
         ticker = item.get("ticker", "-")
         name = item.get("name", "-")
-        category = item.get("category", "-")
+
         state = item.get("state", "-")
         holding_days = item.get("holding_days", 0)
         daily_pct = item.get("daily_pct", 0)
@@ -687,7 +646,6 @@ def dump_recommendation_log(
             str(rank),
             ticker,
             name,
-            category,
             state,
             str(holding_days) if holding_days > 0 else "-",
             format_pct_change(daily_pct),
