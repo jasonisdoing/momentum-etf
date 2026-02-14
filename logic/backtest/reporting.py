@@ -758,8 +758,6 @@ def _generate_daily_report_lines(
         except Exception as e:
             logger.warning(f"리포팅 중 환율 정보 로드 실패: {e}")
 
-    current_streak = 0
-
     for target_date in portfolio_df.index:
         portfolio_row = portfolio_df.loc[target_date]
 
@@ -948,30 +946,6 @@ def _generate_daily_report_lines(
 
         lines.append("")
         lines.append(summary_line)
-
-        # [User Request] Add Consecutive Streak and Cash Weight line
-        # Streak Calculation
-        if daily_return_pct > 0.0001:  # float point tolerance
-            if current_streak >= 0:
-                current_streak += 1
-            else:
-                current_streak = 1
-        elif daily_return_pct < -0.0001:
-            if current_streak <= 0:
-                current_streak -= 1
-            else:
-                current_streak = -1
-        else:
-            current_streak = 0
-
-        streak_str = "변동 없음"
-        if current_streak > 0:
-            streak_str = f"{current_streak}일 연속 상승"
-        elif current_streak < 0:
-            streak_str = f"{abs(current_streak)}일 연속 하락"
-
-        extra_line = f"{streak_str}"
-        lines.append(extra_line)
 
         lines.extend(table_lines)
 
