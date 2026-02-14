@@ -4,6 +4,9 @@ from datetime import time
 
 CACHE_START_DATE = "2024-01-02"
 
+# 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
+TRADING_DAYS_PER_MONTH = 20
+
 
 # 네이버 금융 API 설정
 NAVER_FINANCE_ETF_API_URL = "https://finance.naver.com/api/sise/etfItemList.nhn"

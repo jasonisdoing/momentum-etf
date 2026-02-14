@@ -78,8 +78,8 @@ def main() -> None:
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()
 
-    # 웜업 기간을 전략의 MA_PERIOD로 설정
-    warmup_days = strategy_rules.ma_period
+    # 웜업 기간을 전략의 MA_MONTH 기반으로 설정
+    warmup_days = strategy_rules.ma_days
 
     universe_tickers = [etf["ticker"] for etf in get_etfs(account_id) if etf.get("ticker")]
     benchmark_tickers = get_benchmark_tickers(account_settings)

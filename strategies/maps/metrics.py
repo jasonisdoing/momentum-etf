@@ -14,7 +14,7 @@ from utils.moving_averages import calculate_moving_average
 def process_ticker_data(
     ticker: str,
     df: pd.DataFrame,
-    ma_period: int,
+    ma_days: int,
     precomputed_entry: Mapping[str, Any] | None = None,
     ma_type: str = "SMA",
     enable_data_sufficiency_check: bool = False,
@@ -25,7 +25,7 @@ def process_ticker_data(
     Args:
         ticker: 종목 티커
         df: 가격 데이터프레임
-        ma_period: 이동평균 기간
+        ma_days: 이동평균 기간
         precomputed_entry: 미리 계산된 캐시 데이터 (옵션)
         ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA)
         enable_data_sufficiency_check: 데이터 충분성 검사 활성화 여부
@@ -49,7 +49,7 @@ def process_ticker_data(
         working_df = working_df.loc[:, ~working_df.columns.duplicated()]
 
     # 티커 유형에 따른 이동평균 기간 결정 (단일 기간 사용)
-    current_ma_period = ma_period
+    current_ma_days = ma_days
 
     close_prices = None
     open_prices = None
@@ -96,13 +96,13 @@ def process_ticker_data(
         else:  # SMA, WMA 등
             ideal_multiplier = 1.0
 
-        ideal_data_required = int(current_ma_period * ideal_multiplier)
+        ideal_data_required = int(current_ma_days * ideal_multiplier)
 
         # 데이터가 이상적인 양보다 적으면 완화된 기준 적용
         if len(close_prices) < ideal_data_required:
             # 완화된 기준: multiplier의 절반 (최소 1배)
             relaxed_multiplier = max(ideal_multiplier / 2.0, 1.0)
-            min_required_data = int(current_ma_period * relaxed_multiplier)
+            min_required_data = int(current_ma_days * relaxed_multiplier)
         else:
             # 충분한 데이터가 있으면 이상적인 기준 적용
             min_required_data = ideal_data_required
@@ -112,7 +112,7 @@ def process_ticker_data(
 
     # MAPS 전략 지표 계산
     ma_type_key = (ma_type or "SMA").upper()
-    ma_key = f"{ma_type_key}_{int(current_ma_period)}"
+    ma_key = f"{ma_type_key}_{int(current_ma_days)}"
     moving_average = None
     ma_score = None
     if isinstance(precomputed_entry, Mapping):
@@ -122,7 +122,7 @@ def process_ticker_data(
         ma_score = ma_score_cache.get(ma_key)
 
     if moving_average is None:
-        moving_average = calculate_moving_average(close_prices, current_ma_period, ma_type)
+        moving_average = calculate_moving_average(close_prices, current_ma_days, ma_type)
     if ma_score is None:
         ma_score = calculate_ma_score(close_prices, moving_average)
 
@@ -145,5 +145,5 @@ def process_ticker_data(
         "ma_score": ma_score,
         "rsi_score": rsi_score,
         "buy_signal_days": consecutive_buy_days,
-        "ma_period": current_ma_period,
+        "ma_days": current_ma_days,
     }

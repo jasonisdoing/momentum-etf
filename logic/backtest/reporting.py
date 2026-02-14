@@ -124,10 +124,11 @@ def print_backtest_summary(
         section_counter += 1
 
     # 설정값 계산 (나중에 사용)
-    if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
-        raise ValueError(f"'{account_id}' 계정 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
-    ma_period = merged_strategy["MA_PERIOD"]
-    momentum_label = f"{ma_period}일"
+    ma_month = merged_strategy.get("MA_MONTH")
+    if ma_month is not None:
+        momentum_label = f"{ma_month}개월"
+    else:
+        raise ValueError(f"'{account_id}' 계정 설정에 'strategy.MA_MONTH' 값이 필요합니다.")
 
     stop_loss_source = strategy_tuning.get("STOP_LOSS_PCT")
     try:

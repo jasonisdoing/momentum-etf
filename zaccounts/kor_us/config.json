@@ -10,11 +10,11 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-09-01",
-        "BACKTESTED_DATE": "2026-02-14 10:32",
+        "BACKTESTED_DATE": "2026-02-14 16:13",
         "CAGR": 212.733568,
         "MDD": -11.667787,
         "PORTFOLIO_TOPN": 4,
-        "MA_PERIOD": 240,
+        "MA_MONTH": 12,
         "MA_TYPE": "SMA",
         "REPLACE_SCORE_THRESHOLD": 0,
         "STOP_LOSS_PCT": 10,

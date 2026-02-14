@@ -423,7 +423,7 @@ def generate_recommendation_report(
 
     # 전략 규칙 로드
     strategy_rules = get_strategy_rules(account_id)
-    warmup_days = strategy_rules.ma_period
+    warmup_days = strategy_rules.ma_days
 
     # 종목 로드 (한 번만)
     etf_universe = get_etfs(account_id)

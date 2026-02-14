@@ -566,15 +566,20 @@ def render_account_page(account_id: str) -> None:
                 backtested_date = strategy_cfg.get("BACKTESTED_DATE")
                 strategy_tuning = resolve_strategy_params(strategy_cfg)
 
-            if strategy_tuning:
-                params_to_show = {
-                    "MA": strategy_tuning.get("MA_PERIOD"),
-                    "MA타입": strategy_tuning.get("MA_TYPE"),
-                    "TopN": strategy_tuning.get("PORTFOLIO_TOPN"),
-                    "교체점수": strategy_tuning.get("REPLACE_SCORE_THRESHOLD"),
-                    "과매수 지표": strategy_tuning.get("OVERBOUGHT_SELL_THRESHOLD"),
-                    "쿨다운 일자": strategy_tuning.get("COOLDOWN_DAYS"),
-                }
+                params_to_show = {}
+                if strategy_tuning.get("MA_MONTH"):
+                    params_to_show["MA개월"] = strategy_tuning.get("MA_MONTH")
+
+                params_to_show.update(
+                    {
+                        "MA타입": strategy_tuning.get("MA_TYPE"),
+                        "TopN": strategy_tuning.get("PORTFOLIO_TOPN"),
+                        "교체점수": strategy_tuning.get("REPLACE_SCORE_THRESHOLD"),
+                        "과매수 지표": strategy_tuning.get("OVERBOUGHT_SELL_THRESHOLD"),
+                        "쿨다운 일자": strategy_tuning.get("COOLDOWN_DAYS"),
+                    }
+                )
+
                 param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
             else:
                 param_strs = []

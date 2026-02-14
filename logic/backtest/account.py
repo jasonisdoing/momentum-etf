@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 
+from config import TRADING_DAYS_PER_MONTH
 from logic.entry_point import StrategyRules, run_portfolio_backtest
 from utils.account_registry import get_common_file_settings
 from utils.data_loader import get_exchange_rate_series, get_latest_trading_day, get_trading_days
@@ -152,14 +153,14 @@ def run_account_backtest(
 
     if strategy_override is not None:
         strategy_rules = StrategyRules.from_values(
-            ma_period=strategy_override.ma_period,
+            ma_days=strategy_override.ma_days,
             portfolio_topn=strategy_override.portfolio_topn,
             replace_threshold=strategy_override.replace_threshold,
             ma_type=strategy_override.ma_type,
             stop_loss_pct=strategy_override.stop_loss_pct,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
-        strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
+        strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
@@ -505,7 +506,7 @@ def _build_backtest_kwargs(
     kwargs: dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "prefetched_metrics": prefetched_metrics,
-        "ma_period": strategy_rules.ma_period,
+        "ma_days": strategy_rules.ma_days,
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
         "stop_loss_pct": stop_loss_threshold,

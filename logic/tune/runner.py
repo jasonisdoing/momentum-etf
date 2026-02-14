@@ -18,7 +18,7 @@ from typing import Any
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
-from config import TUNING_ENSEMBLE_SIZE
+from config import TRADING_DAYS_PER_MONTH, TUNING_ENSEMBLE_SIZE
 from logic.backtest.account import run_account_backtest
 from logic.entry_point import StrategyRules
 from utils.account_registry import get_benchmark_tickers, get_strategy_rules
@@ -125,13 +125,13 @@ def _extract_price_series_for_prefetch(
 def _build_prefetched_metric_cache(
     prefetched_data: Mapping[str, pd.DataFrame],
     *,
-    ma_periods: Sequence[int],
+    ma_dayss: Sequence[int],
     ma_types: Sequence[str],
 ) -> dict[str, dict[str, Any]]:
     if not prefetched_data:
         return {}
 
-    period_pool = sorted({int(p) for p in ma_periods if isinstance(p, (int, float)) and int(p) > 0})
+    period_pool = sorted({int(p) for p in ma_dayss if isinstance(p, (int, float)) and int(p) > 0})
     type_pool = sorted({(t or "SMA").upper() for t in ma_types if isinstance(t, str) and t})
     if not period_pool or not type_pool:
         return {}
@@ -305,7 +305,7 @@ def _render_tuning_table(
     from utils.report import render_table_eaw
 
     headers = [
-        "MA",
+        "MA개월",
         "MA타입",
         "TOPN",
         "교체점수",
@@ -342,7 +342,7 @@ def _render_tuning_table(
 
     table_rows = []
     for row in rows[:MAX_TABLE_ROWS]:
-        ma_val = row.get("ma_period")
+        ma_val = row.get("ma_month") or row.get("ma_days")
         ma_type_val = row.get("ma_type", "SMA")
         topn_val = row.get("portfolio_topn")
         threshold_val = row.get("replace_threshold")
@@ -453,7 +453,9 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "COOLDOWN_DAYS",
         "PORTFOLIO_TOPN",
         "OVERBOUGHT_SELL_THRESHOLD",
-        "MA_PERIOD",
+        "PORTFOLIO_TOPN",
+        "OVERBOUGHT_SELL_THRESHOLD",
+        "MA_MONTH",
     }
 
     for key, value in result_params.items():
@@ -487,7 +489,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "CAGR",
         "MDD",
         "PORTFOLIO_TOPN",
-        "MA_PERIOD",
+        "MA_MONTH",
         "MA_TYPE",
         "REPLACE_SCORE_THRESHOLD",
         "STOP_LOSS_PCT",
@@ -656,7 +658,9 @@ def _export_debug_month(
     for idx, row in enumerate(sorted_rows[:capture_top_n], 1):
         tuning = row.get("tuning") or {}
         try:
-            ma = int(tuning.get("MA_PERIOD"))
+            ma_month = tuning.get("MA_MONTH")
+            if ma_month is None:
+                continue
             topn = int(tuning.get("PORTFOLIO_TOPN"))
             threshold = float(tuning.get("REPLACE_SCORE_THRESHOLD"))
             stop_loss = tuning.get("STOP_LOSS_PCT")
@@ -671,7 +675,7 @@ def _export_debug_month(
         }
 
         strategy_rules = StrategyRules.from_values(
-            ma_period=ma,
+            ma_month=int(ma_month),
             portfolio_topn=topn,
             replace_threshold=threshold,
             stop_loss_pct=stop_loss_value,
@@ -697,7 +701,7 @@ def _export_debug_month(
         )
 
         stop_loss_dir_part = f"SL{stop_loss_value:.2f}" if stop_loss_value is not None else "SLauto"
-        combo_dir = month_dir / f"combo_{idx:02d}_MA{ma}_TOPN{topn}_{stop_loss_dir_part}_TH{threshold:.3f}"
+        combo_dir = month_dir / f"combo_{idx:02d}_MA{ma_month}_TOPN{topn}_{stop_loss_dir_part}_TH{threshold:.3f}"
         combo_metrics = _export_combo_debug(
             combo_dir,
             recorded_metrics=recorded_metrics,
@@ -711,7 +715,7 @@ def _export_debug_month(
         summary_rows.append(
             {
                 "backtest_start_date": backtest_start_date,
-                "ma_period": ma,
+                "ma_days": ma_month,
                 "topn": topn,
                 "stop_loss_pct": stop_loss_value,
                 "threshold": threshold,
@@ -752,6 +756,7 @@ def _evaluate_single_combo(
         int,
         str,
         tuple[str, ...],
+        bool,
     ],
 ) -> tuple[str, Any, list[str]]:
     (
@@ -765,6 +770,7 @@ def _evaluate_single_combo(
         cooldown_int,
         ma_type_str,
         excluded_tickers,
+        is_ma_month,
     ) = payload
 
     # Worker 글로벌 변수에서 데이터 가져오기 (프로세스당 한 번만 pickle됨)
@@ -775,18 +781,27 @@ def _evaluate_single_combo(
     fx_series_source = _WORKER_PREFETCHED_FX_SERIES
 
     try:
-        override_rules = StrategyRules.from_values(
-            ma_period=int(ma_int),
-            portfolio_topn=int(topn_int),
-            replace_threshold=float(threshold_float),
-            ma_type=str(ma_type_str),
-            stop_loss_pct=float(stop_loss_float),
-        )
+        if is_ma_month:
+            override_rules = StrategyRules.from_values(
+                ma_month=int(ma_int),
+                portfolio_topn=int(topn_int),
+                replace_threshold=float(threshold_float),
+                ma_type=str(ma_type_str),
+                stop_loss_pct=float(stop_loss_float),
+            )
+        else:
+            override_rules = StrategyRules.from_values(
+                ma_days=int(ma_int),
+                portfolio_topn=int(topn_int),
+                replace_threshold=float(threshold_float),
+                ma_type=str(ma_type_str),
+                stop_loss_pct=float(stop_loss_float),
+            )
     except ValueError as exc:
         return (
             "failure",
             {
-                "ma_period": ma_int,
+                "ma_month" if is_ma_month else "ma_days": ma_int,
                 "portfolio_topn": topn_int,
                 "stop_loss_pct": stop_loss_float,
                 "replace_threshold": threshold_float,
@@ -834,7 +849,7 @@ def _evaluate_single_combo(
         return (
             "failure",
             {
-                "ma_period": ma_int,
+                "ma_month" if is_ma_month else "ma_days": ma_int,
                 "portfolio_topn": topn_int,
                 "stop_loss_pct": stop_loss_float,
                 "replace_threshold": threshold_float,
@@ -849,7 +864,7 @@ def _evaluate_single_combo(
     final_value_krw = _safe_float(summary.get("final_value_krw"), final_value_local)
 
     entry = {
-        "ma_period": ma_int,
+        "ma_month" if is_ma_month else "ma_days": ma_int,
         "portfolio_topn": topn_int,
         "replace_threshold": float(threshold_float),
         "stop_loss_pct": float(stop_loss_float),
@@ -886,7 +901,9 @@ def _execute_tuning(
 ) -> dict[str, Any] | None:
     logger = get_app_logger()
 
-    ma_candidates = list(search_space.get("MA_PERIOD", []))
+    ma_candidates = list(search_space.get("MA_MONTH", []))
+    is_ma_month = True
+
     topn_candidates = list(search_space.get("PORTFOLIO_TOPN", []))
     replace_candidates = list(search_space.get("REPLACE_SCORE_THRESHOLD", []))
     stop_loss_candidates = list(search_space.get("STOP_LOSS_PCT", []))
@@ -989,6 +1006,7 @@ def _execute_tuning(
             int(cooldown),
             str(ma_type),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
+            is_ma_month,
         )
         for ma, topn, replace, stop_loss, rsi, cooldown, ma_type in combos
     ]
@@ -1091,7 +1109,7 @@ def _execute_tuning(
 
     # --- Top N Ensemble Logic ---
     # 상위 N개의 결과를 사용하여 파라미터를 결정합니다.
-    # 1. MA_PERIOD: 상위 N개의 평균 (반올림)
+    # 1. MA_MONTH: 상위 N개의 평균 (반올림)
     # 2. 나머지: 상위 N개의 최빈값 (Mode)
 
     # 앙상블 크기 검증 (홀수만 허용)
@@ -1113,10 +1131,10 @@ def _execute_tuning(
             c = Counter(values)
             return c.most_common(1)[0][0]
 
-        # 1. MA_PERIOD (Average)
-        ma_periods = [e.get("ma_period") for e in top_n_entries if e.get("ma_period") is not None]
-        if ma_periods:
-            best_entry["ma_period"] = int(round(statistics.mean(ma_periods)))
+        # 1. MA_MONTH (Average)
+        ma_dayss = [e.get("ma_month") for e in top_n_entries if e.get("ma_month") is not None]
+        if ma_dayss:
+            best_entry["ma_month"] = int(round(statistics.mean(ma_dayss)))
 
         # 2. Others (Mode)
         param_keys = [
@@ -1137,7 +1155,8 @@ def _execute_tuning(
         logger.info(
             "[튜닝] Top %d 앙상블 적용: MA=%s (Avg), Others=Mode",
             ensemble_size,
-            best_entry.get("ma_period"),
+            ensemble_size,
+            best_entry.get("ma_month") if is_ma_month else best_entry.get("ma_days"),
         )
     # -----------------------------
 
@@ -1163,7 +1182,7 @@ def _execute_tuning(
                 else None,
                 "turnover": int(item.get("turnover") or 0),
                 "tuning": {
-                    "MA_PERIOD": int(item.get("ma_period", 0)),
+                    "MA_MONTH": int(item.get("ma_month", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
                     "PORTFOLIO_TOPN": int(item.get("portfolio_topn", 0)),
                     "REPLACE_SCORE_THRESHOLD": _round_up_float_places(item.get("replace_threshold", 0.0), 1),
@@ -1190,7 +1209,7 @@ def _build_run_entry(
     months_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
     param_fields = {
-        "MA_PERIOD": ("ma_period", True),
+        "MA_MONTH": ("ma_month", True),
         "PORTFOLIO_TOPN": ("portfolio_topn", True),
         "REPLACE_SCORE_THRESHOLD": ("replace_threshold", False),
         "STOP_LOSS_PCT": ("stop_loss_pct", False),
@@ -1263,7 +1282,7 @@ def _build_run_entry(
 
         tuning_snapshot: dict[str, Any] = {}
         field_key_pairs = [
-            ("MA_PERIOD", "ma_period"),
+            ("MA_MONTH", "ma_month"),
             ("PORTFOLIO_TOPN", "portfolio_topn"),
             ("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
             ("STOP_LOSS_PCT", "stop_loss_pct"),
@@ -1374,7 +1393,7 @@ def _ensure_entry_schema(entry: Any) -> dict[str, Any]:
     normalized.pop("result", None)
 
     for field in (
-        "MA_PERIOD",
+        "MA_MONTH",
         "PORTFOLIO_TOPN",
         "REPLACE_SCORE_THRESHOLD",
         "STOP_LOSS_PCT",
@@ -1504,7 +1523,7 @@ def _compose_tuning_report(
         # 탐색 공간
         search_space = tuning_metadata.get("search_space", {})
         if search_space:
-            ma_range = search_space.get("MA_RANGE", [])
+            ma_month_range = search_space.get("MA_MONTH", [])
             ma_type_range = search_space.get("MA_TYPE", [])
             topn_range = search_space.get("PORTFOLIO_TOPN", [])
             threshold_range = search_space.get("REPLACE_SCORE_THRESHOLD", [])
@@ -1515,7 +1534,7 @@ def _compose_tuning_report(
             # MA_TYPE이 있으면 포함해서 표시
             if ma_type_range and len(ma_type_range) > 1:
                 lines.append(
-                    f"| 탐색 공간: MA {len(ma_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
+                    f"| 탐색 공간: MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
                     f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
                     f"× RSI {len(rsi_range)}개 "
                     f"× COOLDOWN {len(cooldown_range)}개 "
@@ -1523,15 +1542,15 @@ def _compose_tuning_report(
                 )
             else:
                 lines.append(
-                    f"| 탐색 공간: MA {len(ma_range)}개 × TOPN {len(topn_range)}개 "
+                    f"| 탐색 공간: MA {len(ma_month_range)}개 × TOPN {len(topn_range)}개 "
                     f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
                     f"× RSI {len(rsi_range)}개 "
                     f"× COOLDOWN {len(cooldown_range)}개 "
                     f"= {tuning_metadata.get('combo_count', 0)}개 조합"
                 )
             # 각 파라미터 범위 표시
-            if ma_range:
-                ma_min, ma_max = min(ma_range), max(ma_range)
+            if ma_month_range:
+                ma_min, ma_max = min(ma_month_range), max(ma_month_range)
                 lines.append(f"|   MA_RANGE: {ma_min}~{ma_max}")
             if ma_type_range:
                 lines.append(f"|   MA_TYPE: {', '.join(ma_type_range)}")
@@ -1707,7 +1726,7 @@ def _compose_tuning_report(
 
         for entry in raw_rows:
             tuning = entry.get("tuning") or {}
-            ma_val = tuning.get("MA_PERIOD")
+            ma_val = tuning.get("MA_MONTH")
             ma_type_val = tuning.get("MA_TYPE", "SMA")
             topn_val = tuning.get("PORTFOLIO_TOPN")
             threshold_val = tuning.get("REPLACE_SCORE_THRESHOLD")
@@ -1725,7 +1744,7 @@ def _compose_tuning_report(
 
             normalized_rows.append(
                 {
-                    "ma_period": ma_val,
+                    "ma_days": ma_val,
                     "ma_type": ma_type_val,
                     "portfolio_topn": topn_val,
                     "replace_threshold": threshold_val,
@@ -1834,7 +1853,23 @@ def run_account_tuning(
     debug_month_configs: list[dict[str, Any]] = []
 
     base_rules = get_strategy_rules(account_norm)
-    ma_values = _normalize_tuning_values(config.get("MA_RANGE"), dtype=int, fallback=base_rules.ma_period)
+
+    # [Modify] MA_MONTH 우선 처리
+    ma_month_values = _normalize_tuning_values(config.get("MA_MONTH"), dtype=int, fallback=None)
+    ma_values = []
+
+    if ma_month_values:
+        # Month 사용 시 Day 변환 없이 그대로 사용
+        pass
+    else:
+        # 기존 로직
+        fallback_ma = base_rules.ma_days
+        # rules에서 ma_days가 None(월단위 사용시)일 수 있음
+        if fallback_ma is None:
+            fallback_ma = 20  # default fallback
+
+        ma_values = _normalize_tuning_values(config.get("MA_MONTH"), dtype=int, fallback=fallback_ma)
+
     topn_values = _normalize_tuning_values(config.get("PORTFOLIO_TOPN"), dtype=int, fallback=base_rules.portfolio_topn)
     replace_values = _normalize_tuning_values(
         config.get("REPLACE_SCORE_THRESHOLD"),
@@ -1871,7 +1906,7 @@ def run_account_tuning(
         ma_type_values = [base_rules.ma_type]
 
     if (
-        not ma_values
+        (not ma_values and not ma_month_values)
         or not topn_values
         or not replace_values
         or not stop_loss_values
@@ -1907,7 +1942,7 @@ def run_account_tuning(
         )
 
     combo_count = (
-        len(ma_values)
+        (len(ma_month_values) if ma_month_values else len(ma_values))
         * len(topn_values)
         * len(replace_values)
         * len(stop_loss_values)
@@ -1929,7 +1964,7 @@ def run_account_tuning(
         return None
 
     search_space = {
-        "MA_PERIOD": ma_values,
+        "MA_MONTH": ma_month_values or ma_values,
         "PORTFOLIO_TOPN": topn_values,
         "REPLACE_SCORE_THRESHOLD": replace_values,
         "STOP_LOSS_PCT": stop_loss_values,
@@ -1939,7 +1974,7 @@ def run_account_tuning(
         "OPTIMIZATION_METRIC": [optimization_metric],
     }
 
-    ma_count = len(ma_values)
+    ma_count = len(ma_month_values) if ma_month_values else len(ma_values)
     topn_count = len(topn_values)
     replace_count = len(replace_values)
     stop_loss_count = len(stop_loss_values)  # Defined for logger.info
@@ -1961,9 +1996,14 @@ def run_account_tuning(
     )
 
     try:
-        ma_max = max([base_rules.ma_period, *ma_values])
+        base_ma = base_rules.ma_days or 20
+        if ma_month_values:
+            # Month -> Approx Day for warmup
+            ma_max = max(ma_month_values) * 20
+        else:
+            ma_max = max([base_ma, *ma_values] if ma_values else [base_ma])
     except ValueError:
-        ma_max = base_rules.ma_period
+        ma_max = base_rules.ma_days or 20
 
     month_items = _resolve_month_configs(account_id=account_id)
     if not month_items:
@@ -2012,7 +2052,7 @@ def run_account_tuning(
     ]
 
     # 국가 코드에 따라 웜업 기간 조정
-    # US 등 일부 전략은 MA_PERIOD가 '월' 단위일 수 있으므로 충분한 웜업 기간 필요
+    # US 등 일부 전략은 MA_MONTH가 큰 값일 수 있으므로 충분한 웜업 기간 필요
     country_code = "kor"
     try:
         acct_settings = get_account_settings(account_id)
@@ -2025,7 +2065,7 @@ def run_account_tuning(
         # 월 단위 MA 가정 (약 32배)
         multiplier = 32.0
 
-    warmup_days = int(max(ma_max, base_rules.ma_period) * multiplier)
+    warmup_days = int(max(ma_max, base_rules.ma_days) * multiplier)
 
     logger.info(
         "[튜닝] 데이터 프리패치: 티커 %d개, 기간 %s~%s, 웜업 %d일",
@@ -2102,7 +2142,7 @@ def run_account_tuning(
         "combo_count": combo_count,
         "country_code": country_code,
         "search_space": {
-            "MA_RANGE": list(ma_values),
+            "MA_MONTH": list(ma_month_values) if ma_month_values else list(ma_values),
             "MA_TYPE": list(ma_type_values),
             "PORTFOLIO_TOPN": list(topn_values),
             "REPLACE_SCORE_THRESHOLD": list(replace_values),
@@ -2166,18 +2206,23 @@ def run_account_tuning(
             "거래일 정보를 로드하지 못했습니다."
         )
 
-    # 실제 탐색 공간에서 사용되는 MA_PERIOD와 MA_TYPE 조합만 캐시
-    ma_period_pool = sorted(set(ma_values))  # 탐색 공간의 MA_PERIOD만 사용
+    # 실제 탐색 공간에서 사용되는 MA_MONTH와 MA_TYPE 조합만 캐시
+    # Month 단위일 경우 x20 한 값으로 캐시 필요
+    if ma_month_values:
+        ma_days_pool = sorted(set(m * TRADING_DAYS_PER_MONTH for m in ma_month_values))
+    else:
+        ma_days_pool = sorted(set(ma_values))
+
     ma_type_pool = sorted(set(ma_type_values))  # 탐색 공간의 MA_TYPE만 사용
     logger.info(
-        "[튜닝] MA 지표 캐시 생성: %d개 MA_PERIOD × %d개 MA_TYPE = %d개 조합",
-        len(ma_period_pool),
+        "[튜닝] MA 지표 캐시 생성: %d개 MA_MONTH × %d개 MA_TYPE = %d개 조합",
+        len(ma_days_pool),
         len(ma_type_pool),
-        len(ma_period_pool) * len(ma_type_pool),
+        len(ma_days_pool) * len(ma_type_pool),
     )
     prefetched_metrics_map = _build_prefetched_metric_cache(
         prefetched_map,
-        ma_periods=ma_period_pool,
+        ma_dayss=ma_days_pool,
         ma_types=ma_type_pool,
     )
 
@@ -2223,7 +2268,7 @@ def run_account_tuning(
                         "sharpe_to_mdd": _round_float_places(entry.get("sharpe_to_mdd", 0.0), 3),
                         "turnover": int(entry.get("turnover") or 0),
                         "tuning": {
-                            "MA_PERIOD": int(entry.get("ma_period", 0)),
+                            "MA_MONTH": int(entry.get("ma_month")) if entry.get("ma_month") is not None else None,
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
                             "PORTFOLIO_TOPN": int(entry.get("portfolio_topn", 0)),
                             "REPLACE_SCORE_THRESHOLD": _round_up_float_places(entry.get("replace_threshold", 0.0), 1),
@@ -2350,7 +2395,7 @@ def run_account_tuning(
             account_norm.upper(),
             item.get("backtest_start_date"),
             optimization_metric,
-            best.get("ma_period", 0),
+            best.get("ma_days", 0),
             best.get("portfolio_topn", 0),
             best.get("replace_threshold", 0.0),
             best.get("rsi_sell_threshold", 10),
@@ -2375,7 +2420,7 @@ def run_account_tuning(
             "run_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "combo_count": combo_count,
             "search_space": {
-                "MA_RANGE": ma_values,
+                "MA_MONTH": ma_values,
                 "PORTFOLIO_TOPN": topn_values,
                 "REPLACE_SCORE_THRESHOLD": replace_values,
                 "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
@@ -2391,7 +2436,7 @@ def run_account_tuning(
         if debug_diff_rows:
             summary_fields = [
                 "backtest_start_date",
-                "ma_period",
+                "ma_days",
                 "topn",
                 "threshold",
                 "recorded_cagr",

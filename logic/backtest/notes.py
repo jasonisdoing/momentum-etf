@@ -8,7 +8,7 @@ from strategies.maps.constants import DECISION_NOTES
 def format_trend_break_phrase(
     ma_value: float | None,
     price_value: float | None,
-    ma_period: int | None,
+    ma_days: int | None,
 ) -> str:
     """추세 이탈 메시지 포맷팅."""
     if ma_value is None or pd.isna(ma_value) or price_value is None or pd.isna(price_value):
@@ -18,9 +18,9 @@ def format_trend_break_phrase(
     diff = ma_value - price_value
     direction = "낮습니다" if diff >= 0 else "높습니다"
     period_text = ""
-    if ma_period:
+    if ma_days:
         try:
-            period_text = f"{int(ma_period)}일 "
+            period_text = f"{int(ma_days)}일 "
         except (TypeError, ValueError):
             period_text = ""
     return (

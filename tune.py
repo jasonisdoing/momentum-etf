@@ -18,26 +18,26 @@ ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
         "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": [0],
-        "MA_RANGE": [60, 120, 180, 240],
+        "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     "kor_us": {
         "PORTFOLIO_TOPN": [3, 4, 5],
         "REPLACE_SCORE_THRESHOLD": [0],
-        "MA_RANGE": [60, 120, 180, 240],
+        "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     "aus": {
         "PORTFOLIO_TOPN": [5, 6, 7],
         "REPLACE_SCORE_THRESHOLD": [0],
-        "MA_RANGE": [60, 120, 180, 240],
+        "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
         "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": [0],
-        "MA_RANGE": [60, 120, 180, 240],
+        "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
 }
@@ -55,32 +55,6 @@ COMMON_TUNING_CONFIG = {
     # 4. 목표: 수익률 극대화
     "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
 }
-
-
-# "kor_kr": {
-#     # 1. 포트폴리오: 8개로 고정 (사용자 요청 반영)
-#     "PORTFOLIO_TOPN": [8],
-
-#     # 2. 이동평균: 중기(60)부터 초장기(200)까지 전체 탐색
-#     "MA_RANGE": [60, 90, 120, 150, 180, 200],
-
-#     # 3. 이평선 타입 모두 비교
-#     "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-
-#     # 4. 교체 점수: 0~3점 전체 탐색 (적극 교체 vs 진득 보유)
-#     "REPLACE_SCORE_THRESHOLD": [0, 1, 2, 3],
-
-#     # 5. 손절: 5~15% 넓은 범위 확인
-#     "STOP_LOSS_PCT": [5, 10, 15],
-
-#     # 6. 과매수: 80~90 넓은 범위 확인
-#     "OVERBOUGHT_SELL_THRESHOLD": [80, 85, 90],
-
-#     # 7. 쿨다운: 1~3일 확인
-#     "COOLDOWN_DAYS": [1, 2, 3],
-
-#     "OPTIMIZATION_METRIC": "CAGR",
-# },
 
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"

@@ -38,7 +38,7 @@ def _execute_individual_sells(
     cooldown_days: int,
     cash: float,
     current_holdings_value: float,
-    ma_period: int,
+    ma_days: int,
     evaluator: StrategyEvaluator,
 ) -> tuple[float, float]:
     """개별 종목 매도 로직 (StrategyEvaluator 사용)"""
@@ -51,7 +51,7 @@ def _execute_individual_sells(
             # 매도 의사결정 (StrategyEvaluator)
             ma_val_today = ticker_metrics["ma_values"][i]
             ma_val = float(ma_val_today) if not pd.isna(ma_val_today) else 0.0
-            ticker_ma_period = ticker_metrics.get("ma_period", ma_period)
+            ticker_ma_days = ticker_metrics.get("ma_days", ma_days)
 
             current_score = score_today.get(ticker, 0.0)
             if pd.isna(current_score):
@@ -68,7 +68,7 @@ def _execute_individual_sells(
                 avg_cost=ticker_state["avg_cost"],
                 highest_price=0.0,
                 ma_value=ma_val,
-                ma_period=ticker_ma_period,
+                ma_days=ticker_ma_days,
                 score=current_score,
                 rsi_score=rsi_score_today.get(ticker, 0.0),
                 stop_loss_threshold=stop_loss_threshold,
@@ -400,7 +400,7 @@ def run_portfolio_backtest(
     prefetched_data: dict[str, pd.DataFrame] | None = None,
     prefetched_metrics: Mapping[str, dict[str, Any]] | None = None,
     trading_calendar: Sequence[pd.Timestamp] | None = None,
-    ma_period: int = 20,
+    ma_days: int = 20,
     ma_type: str = "SMA",
     replace_threshold: float = 0.0,
     stop_loss_pct: float = -10.0,
@@ -422,7 +422,7 @@ def run_portfolio_backtest(
         date_range: 백테스트 기간 [시작일, 종료일]
         country: 시장 국가 코드 (예: kor)
         prefetched_data: 미리 로드된 가격 데이터
-        ma_period: 이동평균 기간
+        ma_days: 이동평균 기간
         replace_threshold: 종목 교체 임계값
         stop_loss_pct: 손절 비율 (%)
 
@@ -471,7 +471,7 @@ def run_portfolio_backtest(
         ticker_metrics = process_ticker_data(
             ticker,
             df,
-            ma_period=ma_period,
+            ma_days=ma_days,
             ma_type=ma_type,
             precomputed_entry=precomputed_entry,
             enable_data_sufficiency_check=enable_data_sufficiency_check,
@@ -709,7 +709,7 @@ def run_portfolio_backtest(
             cooldown_days=cooldown_days,
             cash=cash,
             current_holdings_value=current_holdings_value,
-            ma_period=ma_period,
+            ma_days=ma_days,
             evaluator=evaluator,
         )
 
