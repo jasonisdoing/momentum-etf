@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 
+from config import MIN_TRADING_DAYS
 from logic.backtest.signals import calculate_consecutive_days
 from strategies.rsi.backtest import process_ticker_data_rsi
 from utils.indicators import calculate_ma_score
@@ -109,6 +110,10 @@ def process_ticker_data(
 
         if len(close_prices) < min_required_data:
             return None
+
+    # 절대 최소 거래일 기준 (ENABLE_DATA_SUFFICIENCY_CHECK와 무관, 항상 적용)
+    if len(close_prices) < MIN_TRADING_DAYS:
+        return None
 
     # MAPS 전략 지표 계산
     ma_type_key = (ma_type or "SMA").upper()

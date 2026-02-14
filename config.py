@@ -1,11 +1,6 @@
 """프로젝트 전역에서 사용하는 설정 값 정의."""
 
-from datetime import time
-
 CACHE_START_DATE = "2024-01-02"
-
-# 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
-TRADING_DAYS_PER_MONTH = 20
 
 
 # 네이버 금융 API 설정
@@ -34,6 +29,8 @@ RSI_CALCULATION_CONFIG = {
 
 
 # 통합 시장 거래 시간표
+from datetime import time
+
 MARKET_SCHEDULES = {
     "kor": {
         "open": time(9, 0),
@@ -73,6 +70,16 @@ BACKTEST_SLIPPAGE = {
         "sell_pct": 1.0,
     },
 }
+
+# 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
+TRADING_DAYS_PER_MONTH = 20
+
+# 지표 계산에 필요한 절대 최소 거래일 수 (MA 타입 무관, 항상 적용)
+# ENABLE_DATA_SUFFICIENCY_CHECK = True  → MA 타입별 엄격 기준 적용 (60~120일)
+# ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
+# 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
+MIN_TRADING_DAYS = 5
+
 
 # 튜닝 앙상블 크기 (Top N)
 # 상위 N개의 결과를 사용하여 파라미터를 결정합니다. (MA: 평균, 나머지: 최빈값)
