@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+import pandas as pd
 import streamlit as st
 
 from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
+from utils.stock_list_io import get_etfs
 from utils.ui import format_relative_time, load_account_recommendations, render_recommendation_table
 
 _DATAFRAME_CSS = """
@@ -26,17 +28,107 @@ def _normalize_code(value: Any, fallback: str) -> str:
     return text or fallback
 
 
+# ---------------------------------------------------------------------------
+# 종목관리 탭: stocks.json 메타정보 테이블
+# ---------------------------------------------------------------------------
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
+    """stocks.json 메타정보를 DataFrame으로 반환."""
+    etfs = get_etfs(account_id)
+    if not etfs:
+        return pd.DataFrame()
+
+    rows: list[dict[str, Any]] = []
+    for idx, etf in enumerate(etfs, 1):
+        rows.append(
+            {
+                "#": idx,
+                "티커": etf.get("ticker", ""),
+                "종목명": etf.get("name", ""),
+                "상장일": etf.get("listing_date", "-"),
+                "주간거래량": etf.get("1_week_avg_volume"),
+                "1주(%)": etf.get("1_week_earn_rate"),
+                "1달(%)": etf.get("1_month_earn_rate"),
+                "3달(%)": etf.get("3_month_earn_rate"),
+                "6달(%)": etf.get("6_month_earn_rate"),
+                "12달(%)": etf.get("12_month_earn_rate"),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _render_stocks_meta_table(account_id: str) -> None:
+    """종목관리 테이블 렌더링."""
+
+    df = _build_stocks_meta_table(account_id)
+    if df.empty:
+        st.info("종목 데이터가 없습니다.")
+        return
+
+    st.caption(f"총 {len(df)}개 종목")
+
+    def _color_pct(val: float | str) -> str:
+        if val is None or pd.isna(val):
+            return ""
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            return ""
+        if num > 0:
+            return "color: red"
+        if num < 0:
+            return "color: blue"
+        return "color: black"
+
+    pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+    styled = df.style
+    for col in pct_columns:
+        if col in df.columns:
+            styled = styled.map(_color_pct, subset=pd.IndexSlice[:, col])
+
+    column_config = {
+        "#": st.column_config.TextColumn("#", width=50),
+        "티커": st.column_config.TextColumn("티커", width=80),
+        "종목명": st.column_config.TextColumn("종목명", width=300),
+        "상장일": st.column_config.TextColumn("상장일", width=110),
+        "주간거래량": st.column_config.NumberColumn("주간거래량", width=120, format="%d"),
+        "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+        "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
+        "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
+        "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
+        "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
+    }
+
+    column_order = ["#", "티커", "종목명", "상장일", "주간거래량", "1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+    existing_columns = [col for col in column_order if col in df.columns]
+
+    st.dataframe(
+        styled,
+        hide_index=True,
+        width="stretch",
+        height=600,
+        column_config=column_config,
+        column_order=existing_columns,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 메인 렌더 함수
+# ---------------------------------------------------------------------------
+
+
 def render_account_page(account_id: str) -> None:
-    """주어진 계정 설정을 기반으로 추천 페이지를 렌더링합니다."""
+    """주어진 계정 설정을 기반으로 계정 페이지를 렌더링합니다 (탭 포함)."""
 
     try:
         account_settings = get_account_settings(account_id)
-    except AccountSettingsError as exc:  # pragma: no cover - Streamlit 오류 피드백 전용
+    except AccountSettingsError as exc:
         st.error(f"설정을 불러오지 못했습니다: {exc}")
         st.stop()
 
     country_code = _normalize_code(account_settings.get("country_code"), account_id)
-
     page_icon = account_settings.get("icon") or get_icon_fallback(country_code)
 
     # 메뉴명과 동일한 이름 사용 (PORTFOLIO_TOPN 포함)
@@ -48,31 +140,29 @@ def render_account_page(account_id: str) -> None:
             break
 
     page_title = account_name or "Momentum ETF"
-
     st.set_page_config(page_title=page_title, page_icon=page_icon or "📈", layout="wide")
 
-    # 계좌 설명 표시
-    account_desc = account_settings.get("desc")
-    if account_desc:
-        st.caption(account_desc)
-
+    # 추천 데이터 로드 (탭 밖에서 한 번만)
     df, updated_at, loaded_country_code = load_account_recommendations(account_id)
     country_code = loaded_country_code or country_code
 
-    if df is None:
-        st.error(
-            updated_at
-            or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
-        )
-        return
+    # --- 탭: 테이블만 다르게 ---
+    tab_holdings, tab_management = st.tabs(["보유종목", "종목관리"])
 
-    render_recommendation_table(df, country_code=country_code)
+    with tab_holdings:
+        if df is None:
+            st.error(
+                updated_at
+                or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
+            )
+        else:
+            render_recommendation_table(df, country_code=country_code)
 
+    with tab_management:
+        _render_stocks_meta_table(account_id)
+
+    # --- 공통: 업데이트 시간, 설정, 푸터 ---
     if updated_at:
-        # [KOR] 실시간 오버레이가 적용된 경우 푸터 분리
-        # updated_at 형식: "YYYY-MM-DD HH:MM:SS, User" 또는 "YYYY-MM-DD HH:MM:SS"
-        # 사용자 요청 형식: "YYYY-MM-DD HH:MM:SS(Rel), User"
-
         if "," in updated_at:
             parts = updated_at.split(",", 1)
             date_part = parts[0].strip()
@@ -95,7 +185,6 @@ def render_account_page(account_id: str) -> None:
             st.caption(f"데이터 업데이트: {updated_at_display}")
 
         with st.expander("설정", expanded=True):
-            # ...
             strategy_cfg = account_settings.get("strategy", {}) or {}
             cagr = None
             mdd = None
@@ -143,10 +232,11 @@ def render_account_page(account_id: str) -> None:
                 from logic.backtest import get_hold_states
 
                 hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
-                current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-                target_topn = strategy_tuning.get("PORTFOLIO_TOPN") if isinstance(strategy_tuning, dict) else None
-                if target_topn:
-                    caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
+                if df is not None:
+                    current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
+                    target_topn = strategy_tuning.get("PORTFOLIO_TOPN") if isinstance(strategy_tuning, dict) else None
+                    if target_topn:
+                        caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
             except Exception:
                 pass
 
@@ -164,18 +254,7 @@ def render_account_page(account_id: str) -> None:
             else:
                 st.caption("설정 정보를 찾을 수 없습니다.")
     else:
-        # updated_at이 없는 경우에 대한 폴백
         st.caption("데이터를 찾을 수 없습니다.")
-
-    # st.markdown(_DATAFRAME_CSS, unsafe_allow_html=True)
-    st.markdown("---")
-    st.markdown(
-        """
-        - 본 웹사이트에서 제공되는 종목 정보 및 추천은 단순 정보 제공을 목적으로 하며, 특정 종목의 매매를 권유하는 것이 아닙니다.
-        - 본 정보를 이용한 투자 판단 및 매매 결과에 대하여 웹사이트 운영자는 어떠한 책임도 지지 않습니다.
-        - 투자에는 원금 손실 가능성이 있으며, 투자자는 스스로 리스크를 검토해야 합니다.
-        """
-    )
 
 
 __all__ = ["render_account_page"]
