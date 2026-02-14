@@ -1,15 +1,17 @@
 """계좌 내 종목 간 가격 상관관계 분석 스크립트.
 
 사용법:
-    python scripts/analyze_correlation.py kor_kr
-    python scripts/analyze_correlation.py us --threshold 0.90 --days 120
+    python scripts/check_similar_tickers.py kor_kr
+    python scripts/check_similar_tickers.py us --threshold 0.90 --days 120
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from collections import defaultdict
 from pathlib import Path
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -21,21 +23,37 @@ from utils.data_loader import get_latest_trading_day, prepare_price_data
 from utils.stock_list_io import get_etfs
 
 
-def load_close_prices(
+class StockStats(NamedTuple):
+    ticker: str
+    name: str
+    return_pct: float
+    avg_volume: float
+
+
+def load_market_data(
     account_id: str,
-    lookback_days: int = 120,
-) -> pd.DataFrame:
-    """계좌의 전체 종목 종가 데이터를 DataFrame으로 로드합니다."""
+) -> tuple[pd.DataFrame, dict[str, StockStats], int, int, list[str], list[str]]:
+    """계좌의 전체 종목 종가 데이터와 통계를 로드합니다."""
     account_settings = get_account_settings(account_id)
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
 
+    # 전략 설정에서 MA_MONTH 가져오기 (없으면 기본값 6개월)
+    strategy_cfg = account_settings.get("strategy", {})
+    ma_month = strategy_cfg.get("MA_MONTH", 6)
+
+    # 1개월 = 20거래일 기준
+    lookback_days = int(ma_month * 20)
+
     etfs = get_etfs(account_id)
-    tickers = sorted({etf["ticker"] for etf in etfs if etf.get("ticker")})
-    ticker_names = {etf["ticker"]: etf.get("name", etf["ticker"]) for etf in etfs if etf.get("ticker")}
+    tickers = sorted({str(etf["ticker"]).strip().upper() for etf in etfs if etf.get("ticker")})
+    ticker_names = {
+        str(etf["ticker"]).strip().upper(): etf.get("name", str(etf["ticker"])) for etf in etfs if etf.get("ticker")
+    }
 
     end_date = get_latest_trading_day(country_code)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()
+    # 웜업 데이터 포함하여 넉넉히 로드
     start_date = end_date - pd.DateOffset(days=int(lookback_days * 1.5))
 
     prefetched_map, missing = prepare_price_data(
@@ -43,25 +61,57 @@ def load_close_prices(
         country=country_code,
         start_date=start_date.strftime("%Y-%m-%d"),
         end_date=end_date.strftime("%Y-%m-%d"),
-        warmup_days=0,
+        warmup_days=30,  # 웜업 충분히 확보
         account_id=account_id,
     )
 
-    # 종가 추출
     close_dict: dict[str, pd.Series] = {}
+    stats_dict: dict[str, StockStats] = {}
+    missing_tickers: list[str] = []  # 데이터 아예 없음 (캐시 문제)
+    short_tickers: list[str] = []  # 데이터 짧음 (신규 상장 등)
+
     for ticker in tickers:
         df = prefetched_map.get(ticker)
         if df is None or df.empty:
+            missing_tickers.append(f"{ticker} (데이터 없음)")
             continue
+
         if isinstance(df.columns, pd.MultiIndex):
             df = df.copy()
             df.columns = df.columns.get_level_values(0)
-        col = "unadjusted_close" if "unadjusted_close" in df.columns else "Close"
-        if col in df.columns:
-            series = df[col].astype(float).tail(lookback_days)
-            if len(series) >= 20:  # 최소 20일 데이터
-                label = f"{ticker} ({ticker_names.get(ticker, '')})"
-                close_dict[label] = series
+
+        close_col = "unadjusted_close" if "unadjusted_close" in df.columns else "Close"
+        if close_col not in df.columns:
+            missing_tickers.append(f"{ticker} (종가 컬럼 없음)")
+            continue
+
+        df_cut = df.tail(lookback_days)
+        if len(df_cut) < 20:
+            short_tickers.append(f"{ticker} (데이터 부족: {len(df_cut)}일 < 20일)")
+            continue
+
+        series = df_cut[close_col].astype(float)
+        label = ticker
+        close_dict[label] = series
+
+        start_price = series.iloc[0]
+        end_price = series.iloc[-1]
+
+        if start_price > 0:
+            return_pct = (end_price - start_price) / start_price * 100
+        else:
+            return_pct = 0.0
+
+        avg_vol = 0.0
+        if "Volume" in df_cut.columns:
+            avg_vol = df_cut["Volume"].mean()
+
+        stats_dict[ticker] = StockStats(
+            ticker=ticker,
+            name=ticker_names.get(ticker, ticker),
+            return_pct=return_pct,
+            avg_volume=avg_vol,
+        )
 
     if not close_dict:
         print(f"[오류] {account_id}: 유효한 가격 데이터가 없습니다.")
@@ -69,75 +119,146 @@ def load_close_prices(
 
     prices_df = pd.DataFrame(close_dict)
     prices_df = prices_df.dropna(how="all")
-    return prices_df
+    return prices_df, stats_dict, lookback_days, ma_month, missing_tickers, short_tickers
 
 
-def find_correlated_pairs(
+def build_similarity_groups(
     prices_df: pd.DataFrame,
+    stats: dict[str, StockStats],
     threshold: float = 0.95,
-) -> list[tuple[str, str, float]]:
-    """상관계수가 threshold 이상인 종목 쌍을 찾습니다."""
-    # 일별 수익률 기반 상관관계 (가격 수준 차이 제거)
+) -> list[tuple[str, list[tuple[str, float]]]]:
+    """
+    종목들을 유사 그룹으로 묶고, 각 그룹의 대장주(수익률 1위)를 선정합니다.
+    Returns:
+        List of (LeaderTicker, List of (MemberTicker, CorrelationWithLeader))
+    """
     returns_df = prices_df.pct_change().dropna()
     corr_matrix = returns_df.corr()
-
-    pairs: list[tuple[str, str, float]] = []
     columns = corr_matrix.columns.tolist()
 
+    # 1. 그래프 생성 (Node: Ticker, Edge: Correlation >= Threshold)
+    adj = defaultdict(set)
     for i in range(len(columns)):
         for j in range(i + 1, len(columns)):
-            corr_val = corr_matrix.iloc[i, j]
-            if abs(corr_val) >= threshold:
-                pairs.append((columns[i], columns[j], round(corr_val, 4)))
+            t_i, t_j = columns[i], columns[j]
+            if abs(corr_matrix.loc[t_i, t_j]) >= threshold:
+                adj[t_i].add(t_j)
+                adj[t_j].add(t_i)
 
-    pairs.sort(key=lambda x: abs(x[2]), reverse=True)
-    return pairs
+    # 2. 연결 요소(Connected Components) 찾기 - BFS/DFS
+    visited = set()
+    groups = []
+
+    for t in columns:
+        if t in visited:
+            continue
+
+        # 새로운 그룹 발견 (혹은 독립 노드)
+        if t not in adj:  # 연결된 간선이 없는 독립 노드는 제외 (그룹 아님)
+            continue
+
+        # BFS로 그룹 탐색
+        component = {t}
+        queue = [t]
+        visited.add(t)
+
+        while queue:
+            curr = queue.pop(0)
+            for neighbor in adj[curr]:
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    component.add(neighbor)
+                    queue.append(neighbor)
+
+        if len(component) > 1:
+            groups.append(list(component))
+
+    # 3. 각 그룹별 대장주 선정 및 정렬
+    sorted_groups = []
+
+    for group in groups:
+        # 수익률 순으로 정렬 (내림차순) --> 첫 번째가 대장주
+        group_stats = [stats[t] for t in group if t in stats]
+        if not group_stats:
+            continue
+
+        group_stats.sort(key=lambda s: s.return_pct, reverse=True)
+        leader = group_stats[0]
+
+        # 멤버 리스트 생성: (티커, 대장주와의 상관계수)
+        members = []
+        for member in group_stats[1:]:  # 대장주 제외
+            corr = corr_matrix.loc[leader.ticker, member.ticker]
+            # 대장주와의 상관계수가 임계값 이상인 경우만 포함
+            if abs(corr) >= threshold:
+                members.append((member.ticker, corr))
+
+        if members:
+            sorted_groups.append((leader.ticker, members))
+
+    # 그룹 간 정렬 (대장주 수익률 높은 순)
+    sorted_groups.sort(key=lambda x: stats[x[0]].return_pct, reverse=True)
+
+    return sorted_groups
 
 
 def print_report(
     account_id: str,
-    pairs: list[tuple[str, str, float]],
+    groups: list[tuple[str, list[tuple[str, float]]]],
+    stats: dict[str, StockStats],
     threshold: float,
     total_tickers: int,
     lookback_days: int,
+    ma_month: int,
 ) -> None:
-    """상관관계 분석 결과를 출력합니다."""
+    """상관관계 및 수익률 비교 리포트를 출력합니다."""
     print()
     print(f"{'=' * 70}")
-    print(f"  📊 상관관계 분석: {account_id.upper()}")
-    print(f"  분석 기간: 최근 {lookback_days} 거래일 | 종목 수: {total_tickers}개")
+    print(f"  📊 상관관계 유사 그룹 분석: {account_id.upper()}")
+    print(f"  분석 기간: 최근 {ma_month}개월 ({lookback_days} 거래일) | 대상 종목: {total_tickers}개")
     print(f"  기준: 상관계수 ≥ {threshold}")
     print(f"{'=' * 70}")
 
-    if not pairs:
-        print(f"\n  ✅ 상관계수 {threshold} 이상인 종목 쌍이 없습니다.\n")
+    if not groups:
+        print(f"\n  ✅ 상관계수 {threshold} 이상인 유사 그룹이 없습니다.\n")
         return
 
-    print(f"\n  ⚠️  높은 상관관계 종목 쌍: {len(pairs)}건\n")
-    print(f"  {'상관계수':>8}  {'종목 A':<30}  {'종목 B':<30}")
-    print(f"  {'─' * 8}  {'─' * 30}  {'─' * 30}")
+    print(f"\n  총 {len(groups)}개의 유사 그룹이 발견되었습니다.\n")
 
-    for ticker_a, ticker_b, corr_val in pairs:
-        emoji = "🔴" if abs(corr_val) >= 0.98 else "🟡"
-        print(f"  {emoji} {corr_val:>6.4f}  {ticker_a:<30}  {ticker_b:<30}")
+    for idx, (leader_ticker, members) in enumerate(groups, 1):
+        leader = stats[leader_ticker]
+        print(f"  📦 그룹 {idx} (총 {len(members) + 1}종목)")
+        print(f"  {'─' * 60}")
+        print(f"  🥇 [대장] {leader.ticker} ({leader.name})")
+        print(f"      수익률: {leader.return_pct:+.1f}% | 거래량: {leader.avg_volume:,.0f} | (기준)")
+        print(f"  {'─' * 60}")
 
-    # 중복 제거 후보 표시
-    print(f"\n  {'─' * 70}")
-    redundant = set()
-    for _, ticker_b, _ in pairs:
-        redundant.add(ticker_b)
+        for member_ticker, corr in members:
+            member = stats[member_ticker]
 
-    if redundant:
-        print("\n  💡 제거 후보 (각 쌍에서 후순위 종목):")
-        for t in sorted(redundant):
-            print(f"     - {t}")
+            if abs(corr) >= 0.95:
+                emoji = "🔴"
+                action_msg = "👉 (제거 추천)"
+            else:
+                emoji = "🟡"
+                action_msg = "👉 (제거 고려)"
 
+            print(f"  └─ {emoji} {corr:.4f} {member.ticker} ({member.name})")
+            print(f"          수익률: {member.return_pct:+.1f}% | 거래량: {member.avg_volume:,.0f}")
+            print(f"          {action_msg}")
+        print()
+
+    print(f"{'=' * 70}")
+    print("  💡 '유사 그룹'은 서로 상관관계가 높은 종목들의 묶음입니다.")
+    print("  각 그룹 내에서 [대장] 종목의 성과가 가장 좋습니다.")
+    print("  🔴 0.95 이상: 매우 유사함 -> 교체 강력 추천")
+    print("  🟡 0.90 ~ 0.95: 유사함 -> 교체 고려")
     print()
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="계좌 내 종목 간 가격 상관관계 분석",
+        description="계좌 내 종목 간 가격 상관관계 그룹 분석",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -148,14 +269,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.95,
-        help="상관계수 기준값 (이 이상이면 높은 상관관계로 판단)",
-    )
-    parser.add_argument(
-        "--days",
-        type=int,
-        default=120,
-        help="분석할 최근 거래일 수",
+        default=0.90,
+        help="상관계수 기준값",
     )
     return parser
 
@@ -166,20 +281,35 @@ def main() -> None:
 
     account_id = args.account.lower()
     threshold = args.threshold
-    lookback_days = args.days
 
     print(f"\n[{account_id.upper()}] 가격 데이터 로딩 중...")
-    prices_df = load_close_prices(account_id, lookback_days=lookback_days)
+    prices_df, stats, lookback_days, ma_month, missing, short = load_market_data(account_id)
 
-    print(f"[{account_id.upper()}] 상관관계 계산 중... ({len(prices_df.columns)}개 종목)")
-    pairs = find_correlated_pairs(prices_df, threshold=threshold)
+    if missing:
+        print(f"\n[오류] 데이터가 없는 {len(missing)}개 종목이 발견되었습니다:")
+        for s in missing:
+            print(f"  - {s}")
+        print("\n모든 종목의 데이터가 필요합니다. 캐시를 갱신해주세요.")
+        print(f"실행: python scripts/update_price_cache.py {account_id}")
+        sys.exit(1)
+
+    if short:
+        print(f"\n[주의] 데이터 기간이 짧은 {len(short)}개 종목은 분석에서 제외됩니다:")
+        for s in short:
+            print(f"  - {s}")
+        print()
+
+    print(f"[{account_id.upper()}] 유사 그룹 분석 중... ({len(prices_df.columns)}개 종목)")
+    groups = build_similarity_groups(prices_df, stats, threshold=threshold)
 
     print_report(
         account_id=account_id,
-        pairs=pairs,
+        groups=groups,
+        stats=stats,
         threshold=threshold,
         total_tickers=len(prices_df.columns),
         lookback_days=lookback_days,
+        ma_month=ma_month,
     )
 
 

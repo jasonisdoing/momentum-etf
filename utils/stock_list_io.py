@@ -138,11 +138,11 @@ def get_etfs(account_id: str, include_extra_tickers: Iterable[str] | None = None
         new_item["type"] = "etf"
         all_etfs.append(new_item)
 
-    logger.info(
-        "[%s] 전체 ETF 유니버스 로딩: %d개 종목",
-        account_norm.upper(),
-        len(all_etfs),
-    )
+    # logger.info(
+    #     "[%s] 전체 ETF 유니버스 로딩: %d개 종목",
+    #     account_norm.upper(),
+    #     len(all_etfs),
+    # )
 
     return all_etfs
 
@@ -298,6 +298,8 @@ def add_stock(account_id: str, ticker: str, name: str = "", **extra_fields: Any)
             update_doc = {
                 "is_deleted": False,
                 "deleted_at": None,
+                "deleted_reason": None,
+                "added_date": now.strftime("%Y-%m-%d"),
                 "updated_at": now,
             }
             if name:
@@ -335,7 +337,7 @@ def add_stock(account_id: str, ticker: str, name: str = "", **extra_fields: Any)
         return False
 
 
-def remove_stock(account_id: str, ticker: str) -> bool:
+def remove_stock(account_id: str, ticker: str, reason: str = "") -> bool:
     """단일 종목을 Soft Delete 처리한다."""
     account_norm = (account_id or "").strip().lower()
     ticker_norm = str(ticker or "").strip()
@@ -347,25 +349,56 @@ def remove_stock(account_id: str, ticker: str) -> bool:
         return False
 
     now = datetime.now(timezone.utc)
+    update_fields: dict[str, Any] = {
+        "is_deleted": True,
+        "deleted_at": now,
+        "updated_at": now,
+    }
+    if reason:
+        update_fields["deleted_reason"] = reason.strip()
+
     try:
         result = coll.update_one(
             {"account_id": account_norm, "ticker": ticker_norm},
-            {
-                "$set": {
-                    "is_deleted": True,
-                    "deleted_at": now,
-                    "updated_at": now,
-                }
-            },
+            {"$set": update_fields},
         )
         if result.modified_count > 0:
             _invalidate_cache(account_norm)
-            logger.info("종목 삭제(Soft): %s (account=%s)", ticker_norm, account_norm)
+            logger.info("종목 삭제(Soft): %s (account=%s, reason=%s)", ticker_norm, account_norm, reason)
             return True
         return False
     except Exception as exc:
         logger.warning("종목 삭제 실패 %s (account=%s): %s", ticker_norm, account_norm, exc)
         return False
+
+
+def get_deleted_etfs(account_id: str) -> list[dict[str, Any]]:
+    """해당 계좌의 Soft Delete된 종목 목록을 반환한다."""
+    account_norm = (account_id or "").strip().lower()
+    if not account_norm:
+        return []
+
+    coll = _get_collection()
+    if coll is None:
+        return []
+
+    try:
+        docs = list(
+            coll.find(
+                {"account_id": account_norm, "is_deleted": True},
+                {"_id": 0},
+            )
+        )
+        results: list[dict[str, Any]] = []
+        for doc in docs:
+            doc.pop("account_id", None)
+            doc.pop("created_at", None)
+            doc.pop("updated_at", None)
+            results.append(doc)
+        return results
+    except Exception as exc:
+        logger.warning("삭제 종목 조회 실패 (account=%s): %s", account_norm, exc)
+        return []
 
 
 # ---------------------------------------------------------------------------

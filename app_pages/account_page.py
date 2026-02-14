@@ -13,7 +13,7 @@ from scripts.update_price_cache import refresh_cache_for_target
 from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.data_loader import fetch_ohlcv
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
-from utils.stock_list_io import add_stock, check_stock_status, get_etfs, remove_stock
+from utils.stock_list_io import add_stock, check_stock_status, get_deleted_etfs, get_etfs, remove_stock
 from utils.stock_meta_updater import fetch_stock_info, update_account_metadata
 from utils.ui import format_relative_time, load_account_recommendations, render_recommendation_table
 
@@ -207,13 +207,77 @@ def _render_stocks_meta_table(account_id: str) -> None:
     # 삭제 확인 버튼 (체크된 항목이 있을 때만 표시, readonly 아닐 때만)
     if to_delete and not readonly:
         st.warning(f"선택한 {len(to_delete)}개 종목을 삭제하시겠습니까?")
+        delete_reason = st.text_input(
+            "🏷️ 삭제 사유 (필수)",
+            placeholder="예: 상관관계 높은 중복 종목, 거래량 부족 등",
+            key=f"delete_reason_{account_id}",
+        )
         if st.button("🗑️ 선택 항목 삭제 실행", type="primary", key=f"btn_del_exec_{account_id}"):
-            deleted_count = 0
-            for t in to_delete:
-                if remove_stock(account_id, t):
-                    deleted_count += 1
-            st.success(f"{deleted_count}개 종목 삭제 완료!")
-            st.rerun()
+            if not delete_reason or not delete_reason.strip():
+                st.error("삭제 사유를 입력해야 삭제할 수 있습니다.")
+            else:
+                deleted_count = 0
+                for t in to_delete:
+                    if remove_stock(account_id, t, reason=delete_reason.strip()):
+                        deleted_count += 1
+                st.success(f"{deleted_count}개 종목 삭제 완료!")
+                st.rerun()
+
+    # 삭제 모드일 때 삭제된 종목 표시
+    if not readonly:
+        deleted_etfs = get_deleted_etfs(account_id)
+        if deleted_etfs:
+            st.markdown("---")
+            st.subheader(f"🗑️ 삭제된 종목 ({len(deleted_etfs)}개)")
+            deleted_rows = []
+            for etf in deleted_etfs:
+                deleted_at = etf.get("deleted_at")
+                if deleted_at:
+                    try:
+                        deleted_at_str = deleted_at.strftime("%Y-%m-%d")
+                    except Exception:
+                        deleted_at_str = str(deleted_at)[:10]
+                else:
+                    deleted_at_str = "-"
+                deleted_rows.append(
+                    {
+                        "복구": False,
+                        "티커": etf.get("ticker", ""),
+                        "종목명": etf.get("name", ""),
+                        "삭제일": deleted_at_str,
+                        "삭제 사유": etf.get("deleted_reason", "-"),
+                    }
+                )
+            df_deleted = pd.DataFrame(deleted_rows)
+            df_deleted.sort_values(by="삭제일", ascending=False, inplace=True)
+
+            edited_deleted = st.data_editor(
+                df_deleted.style.map(lambda _: "background-color: #ffe0e6"),
+                hide_index=True,
+                width="stretch",
+                column_config={
+                    "복구": st.column_config.CheckboxColumn("복구", width="small"),
+                    "티커": st.column_config.TextColumn("티커", width=80),
+                    "종목명": st.column_config.TextColumn("종목명", width=250),
+                    "삭제일": st.column_config.TextColumn("삭제일", width=110),
+                    "삭제 사유": st.column_config.TextColumn("삭제 사유", width=300),
+                },
+                disabled=["티커", "종목명", "삭제일", "삭제 사유"],
+                key=f"deleted_editor_{account_id}",
+            )
+
+            to_restore = edited_deleted[edited_deleted["복구"]]["티커"].tolist()
+            if to_restore:
+                st.info(f"선택한 {len(to_restore)}개 종목을 복구합니다.")
+                if st.button("♻️ 선택 종목 복구", type="primary", key=f"btn_restore_{account_id}"):
+                    restored = 0
+                    for t in to_restore:
+                        if add_stock(account_id, t):
+                            restored += 1
+                    st.success(f"{restored}개 종목 복구 완료!")
+                    st.rerun()
+        else:
+            st.info("삭제된 종목이 없습니다.")
 
     # 종목 추가 다이얼로그
     @st.dialog("종목 추가")
