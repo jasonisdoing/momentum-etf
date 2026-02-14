@@ -18,38 +18,31 @@ ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
         "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": [0],
-        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
+        "MA_RANGE": [60, 120, 180, 240],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "MAX_PER_CATEGORY": [2],  # -> 최대 40% 비중까지만 허용
+        "MAX_PER_CATEGORY": [1, 2, 3, 4, 5],
     },
     "kor_us": {
         "PORTFOLIO_TOPN": [3, 4],
         "REPLACE_SCORE_THRESHOLD": [0],
-        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
+        "MA_RANGE": [60, 120, 180, 240],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "MAX_PER_CATEGORY": [2, 3],  # -> 최대 60% 비중까지만 허용
+        "MAX_PER_CATEGORY": [1, 2, 3, 4],
     },
     "aus": {
         "PORTFOLIO_TOPN": [7],
         "REPLACE_SCORE_THRESHOLD": [0],
-        "MA_RANGE": [20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
+        "MA_RANGE": [60, 120, 180, 240],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "MAX_PER_CATEGORY": [2],  # -> 최대 40% 비중까지만 허용
+        "MAX_PER_CATEGORY": [1, 2, 3, 4, 5, 6, 7],
     },
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
         "PORTFOLIO_TOPN": [5],
         "REPLACE_SCORE_THRESHOLD": [0],
-        # 1개월 ~ 3개월: 급락 혹은 급등시
-        # "MA_RANGE": [20, 30, 40, 50, 60],
-        # "MA_TYPE": ["SMA", "EMA", "HMA"],
-        # 3개월 ~ 5개월: 짧게
-        # "MA_RANGE": [40, 50, 60, 70, 80, 90, 100],
-        # "MA_TYPE": ["SMA", "EMA", "HMA"],
-        # 2개월 ~ 9개월: 길게
-        "MA_RANGE": [40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
-        "MA_TYPE": ["SMA", "EMA", "HMA"],
-        "MAX_PER_CATEGORY": [1, 2],  # -> 최대 40% 비중까지만 허용
+        "MA_RANGE": [60, 120, 180, 240],
+        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+        "MAX_PER_CATEGORY": [1, 2, 3, 4, 5],
     },
 }
 

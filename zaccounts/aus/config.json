@@ -10,19 +10,19 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-09-01",
-        "BACKTESTED_DATE": "2026-02-12 08:52",
-        "CAGR": 148.533001,
-        "MDD": -13.859403,
+        "BACKTESTED_DATE": "2026-02-14 08:23",
+        "CAGR": 139.614298,
+        "MDD": -11.687018,
         "PORTFOLIO_TOPN": 7,
-        "MA_PERIOD": 70,
-        "MA_TYPE": "SMA",
+        "MA_PERIOD": 240,
+        "MA_TYPE": "HMA",
         "REPLACE_SCORE_THRESHOLD": 0,
         "STOP_LOSS_PCT": 10,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
-        "MAX_PER_CATEGORY": 3,
+        "MAX_PER_CATEGORY": 2,
         "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": true
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
         "ticker": "IVV",
