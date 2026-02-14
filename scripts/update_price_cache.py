@@ -32,7 +32,14 @@ def _determine_start_date() -> str:
         return str(start)
 
 
-def refresh_cache_for_target(account_id: str, start_date: str | None):
+from collections.abc import Callable
+
+
+def refresh_cache_for_target(
+    account_id: str,
+    start_date: str | None,
+    progress_callback: Callable[[int, int, str], None] | None = None,
+):
     """지정된 계정(account_id)에 대한 가격 데이터 캐시를 새로 고칩니다."""
     logger = get_app_logger()
 
@@ -90,7 +97,10 @@ def refresh_cache_for_target(account_id: str, start_date: str | None):
         for i, etf in enumerate(target_items, 1):
             ticker = etf.get("ticker")
             name = etf.get("name") or "-"
-            logger.info(" -> 처리 중: %d/%d - %s(%s)", i, total_tickers, name, ticker)
+            logger.info(" -> 가격 캐시 갱신 중: %d/%d - %s(%s)", i, total_tickers, name, ticker)
+
+            if progress_callback:
+                progress_callback(i, total_tickers, f"{name}({ticker})")
 
             try:
                 range_start = start_date or "1990-01-01"

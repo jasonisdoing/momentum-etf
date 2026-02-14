@@ -228,21 +228,16 @@ def main():
     print()
     print("=" * 70)
 
-    # 기존 stocks.json 로드 및 비교
-    import json
-    import os
+    # 기존 종목 로드 (MongoDB)
+    from utils.stock_list_io import get_etfs
 
     existing_tickers = set()
-    stocks_json_path = os.path.join("zaccounts", "us", "stocks.json")
-
     try:
-        if os.path.exists(stocks_json_path):
-            with open(stocks_json_path, encoding="utf-8") as f:
-                data = json.load(f)
-                for item in data:
-                    existing_tickers.add(item.get("ticker"))
+        data = get_etfs("us")
+        for item in data:
+            existing_tickers.add(item.get("ticker"))
     except Exception as e:
-        print(f"\n⚠️ stocks.json 로드 중 오류 발생: {e}")
+        print(f"\n⚠️ 종목 로드 중 오류 발생: {e}")
 
     new_tickers = [etf for etf in etfs if etf["ticker"] not in existing_tickers]
 

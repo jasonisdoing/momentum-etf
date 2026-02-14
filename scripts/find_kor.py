@@ -309,31 +309,28 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
         return
 
     # 기존 stocks.json 로드 및 비교
-    import json
-    import os
-
-    existing_tickers = set()
 
     # 확인할 계정 목록
     target_accounts = ["kor_kr", "kor_us"]
 
+    # 기존 종목 로드 (MongoDB)
+    from utils.stock_list_io import get_etfs
+
+    # 모든 계정의 기존 종목을 한 번에 로드
+    all_existing_tickers = set()
     for account in target_accounts:
-        stocks_json_path = os.path.join("zaccounts", account, "stocks.json")
         try:
-            if os.path.exists(stocks_json_path):
-                with open(stocks_json_path, encoding="utf-8") as f:
-                    data = json.load(f)
-                    for item in data:
-                        existing_tickers.add(item.get("ticker"))
+            existing_etfs = get_etfs(account)
+            all_existing_tickers.update({item["ticker"] for item in existing_etfs})
         except Exception as e:
-            logger.warning(f"{account} stocks.json 로드 중 오류 발생: {e}")
+            logger.warning(f"{account} 종목 로드 중 오류 발생: {e}")
 
     # top_gainers DataFrame에서 티커 목록 추출
     found_tickers = []
     if not top_gainers.empty:
         found_tickers = top_gainers.to_dict("records")
 
-    new_tickers = [item for item in found_tickers if item["티커"] not in existing_tickers]
+    new_tickers = [item for item in found_tickers if item["티커"] not in all_existing_tickers]
     new_tickers.sort(key=lambda x: x["등락률"], reverse=True)
 
     if new_tickers:

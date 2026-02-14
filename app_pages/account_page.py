@@ -1,14 +1,32 @@
 from __future__ import annotations
 
+import glob
+import os
+import subprocess
+import time
 from typing import Any
 
 import pandas as pd
 import streamlit as st
 
+from scripts.update_price_cache import refresh_cache_for_target
 from utils.account_registry import get_icon_fallback, load_account_configs
+from utils.data_loader import fetch_ohlcv
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
-from utils.stock_list_io import get_etfs
+from utils.stock_list_io import add_stock, check_stock_status, get_etfs, remove_stock
+from utils.stock_meta_updater import fetch_stock_info, update_account_metadata
 from utils.ui import format_relative_time, load_account_recommendations, render_recommendation_table
+
+try:
+    from streamlit import fragment
+except ImportError:
+    try:
+        from streamlit import experimental_fragment as fragment
+    except ImportError:
+
+        def fragment(func):
+            return func
+
 
 _DATAFRAME_CSS = """
 <style>
@@ -33,7 +51,6 @@ def _normalize_code(value: Any, fallback: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@st.cache_data(ttl=30, show_spinner=False)
 def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
     """stocks.json 메타정보를 DataFrame으로 반환."""
     etfs = get_etfs(account_id)
@@ -47,6 +64,7 @@ def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
                 "#": idx,
                 "티커": etf.get("ticker", ""),
                 "종목명": etf.get("name", ""),
+                "추가일자": etf.get("added_date", "-"),
                 "상장일": etf.get("listing_date", "-"),
                 "주간거래량": etf.get("1_week_avg_volume"),
                 "1주(%)": etf.get("1_week_earn_rate"),
@@ -56,18 +74,41 @@ def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
                 "12달(%)": etf.get("12_month_earn_rate"),
             }
         )
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    if not df.empty and "1주(%)" in df.columns:
+        df = df.sort_values(by="1주(%)", ascending=False)
+    return df
 
 
+@fragment
 def _render_stocks_meta_table(account_id: str) -> None:
-    """종목관리 테이블 렌더링."""
+    """종목관리 테이블 렌더링. 업데이트 중일 경우 readonly 모드로 전환하여 스피너 방지."""
+
+    # 세션 스테이트 키
+    key_meta = f"updating_meta_{account_id}"
+    key_price = f"updating_price_{account_id}"
+
+    is_updating_meta = st.session_state.get(key_meta, False)
+    is_updating_price = st.session_state.get(key_price, False)
+    is_updating = is_updating_meta or is_updating_price
 
     df = _build_stocks_meta_table(account_id)
     if df.empty:
         st.info("종목 데이터가 없습니다.")
         return
 
-    st.caption(f"총 {len(df)}개 종목")
+    st.caption(f"총 {len(df)}개 종목 (Source: MongoDB)")
+
+    # 상단 컨트롤: 편집 모드 토글
+    col_toggle, _ = st.columns([1, 4])
+    with col_toggle:
+        edit_mode = st.toggle("관리 모드 (삭제)", value=False, key=f"toggle_edit_{account_id}", disabled=is_updating)
+
+    # 업데이트 중이거나 편집 모드가 아닐 때는 Readonly (컬러 표시)
+    readonly = not edit_mode or is_updating
+
+    # --- 관리 도구 (업데이트 버튼 & 종목 추가/삭제) ---
+    # (Old expander removed to avoid duplicate keys and use new UI below)
 
     def _color_pct(val: float | str) -> str:
         if val is None or pd.isna(val):
@@ -88,10 +129,18 @@ def _render_stocks_meta_table(account_id: str) -> None:
         if col in df.columns:
             styled = styled.map(_color_pct, subset=pd.IndexSlice[:, col])
 
+    # 편집 가능하도록 '삭제' 컬럼 추가
+    df_edit = df.copy()
+    if not readonly:
+        df_edit.insert(0, "삭제", False)
+
+    # DataFrame 표시
     column_config = {
+        "삭제": st.column_config.CheckboxColumn("삭제", width="small") if not readonly else None,
         "#": st.column_config.TextColumn("#", width=50),
         "티커": st.column_config.TextColumn("티커", width=80),
         "종목명": st.column_config.TextColumn("종목명", width=300),
+        "추가일자": st.column_config.TextColumn("추가일자", width=100),
         "상장일": st.column_config.TextColumn("상장일", width=110),
         "주간거래량": st.column_config.NumberColumn("주간거래량", width=120, format="%d"),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
@@ -101,17 +150,332 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
     }
 
-    column_order = ["#", "티커", "종목명", "상장일", "주간거래량", "1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
-    existing_columns = [col for col in column_order if col in df.columns]
+    # readonly 모드일 때는 삭제 컬럼 제외
+    if readonly:
+        if "삭제" in column_config:
+            del column_config["삭제"]
 
-    st.dataframe(
-        styled,
-        hide_index=True,
-        width="stretch",
-        height=600,
-        column_config=column_config,
-        column_order=existing_columns,
-    )
+    column_order = [
+        "삭제",
+        "#",
+        "티커",
+        "종목명",
+        "상장일",
+        "주간거래량",
+        "1주(%)",
+        "1달(%)",
+        "3달(%)",
+        "6달(%)",
+        "12달(%)",
+        "추가일자",
+    ]
+    if readonly:
+        column_order = [c for c in column_order if c != "삭제"]
+
+    existing_columns = [col for col in column_order if col in df_edit.columns]
+
+    if readonly:
+        # 갱신 중일 때는 static dataframe 사용 (스피너 방지)
+        st.dataframe(
+            styled,  # 스타일 적용된 객체 사용
+            hide_index=True,
+            width="stretch",  # use_container_width deprecated
+            height=600,
+            column_config=column_config,
+            column_order=existing_columns,
+        )
+        to_delete = []  # 삭제 불가
+    else:
+        edited_df = st.data_editor(
+            df_edit,
+            hide_index=True,
+            width="stretch",  # use_container_width deprecated
+            height=600,
+            column_config=column_config,
+            column_order=existing_columns,
+            disabled=[col for col in existing_columns if col != "삭제"],
+            key=f"editor_{account_id}",
+        )
+        # 삭제 로직
+        to_delete = edited_df[edited_df["삭제"]]["티커"].tolist()
+
+    # -----------------------------------------------------------------------
+    # 관리 액션 버튼 영역
+    # -----------------------------------------------------------------------
+    st.divider()
+
+    # 삭제 확인 버튼 (체크된 항목이 있을 때만 표시, readonly 아닐 때만)
+    if to_delete and not readonly:
+        st.warning(f"선택한 {len(to_delete)}개 종목을 삭제하시겠습니까?")
+        if st.button("🗑️ 선택 항목 삭제 실행", type="primary", key=f"btn_del_exec_{account_id}"):
+            deleted_count = 0
+            for t in to_delete:
+                if remove_stock(account_id, t):
+                    deleted_count += 1
+            st.success(f"{deleted_count}개 종목 삭제 완료!")
+            st.rerun()
+
+    # 종목 추가 다이얼로그
+    @st.dialog("종목 추가")
+    def open_add_dialog():
+        # 국가 코드 조회 (검색용)
+        try:
+            settings = get_account_settings(account_id)
+            country_code = settings.get("country_code", "kor")
+        except Exception:
+            country_code = "kor"
+
+        st.write(f"계좌: **{account_id.upper()}** ({country_code.upper()})")
+
+        # 검색 상태 관리를 위한 세션 스테이트 키
+        ss_key_result = f"add_stock_result_{account_id}"
+
+        c_in, c_btn = st.columns([3, 1], vertical_alignment="bottom")
+        with c_in:
+            d_ticker = st.text_input(
+                "티커 입력", placeholder="예: 005930 or SPY", max_chars=12, key=f"in_ticker_{account_id}"
+            ).strip()
+        with c_btn:
+            do_search = st.button("🔍 조회", key=f"btn_search_{account_id}", use_container_width=True)
+
+        if do_search:
+            if not d_ticker:
+                st.error("티커를 입력하세요.")
+                st.session_state[ss_key_result] = None
+            else:
+                with st.spinner("정보 조회 중..."):
+                    info = fetch_stock_info(d_ticker, country_code)
+                if info and info.get("name"):
+                    st.session_state[ss_key_result] = info
+                    # 재진입 시 정보 유지를 위해
+                else:
+                    st.error("종목을 찾을 수 없습니다.")
+                    st.session_state[ss_key_result] = None
+
+        # 조회 결과 표시 및 추가 버튼
+        search_result = st.session_state.get(ss_key_result)
+        if search_result:
+            ticker_res = search_result["ticker"]
+            st.success(f"✅ 종목명: **{search_result['name']}**")
+            if search_result.get("listing_date"):
+                st.caption(f"상장일: {search_result['listing_date']}")
+
+            # 상태 확인
+            status = check_stock_status(account_id, ticker_res)
+
+            if status == "ACTIVE":
+                st.warning(f"⚠️ 이미 '{account_id.upper()}' 계좌에 등록된 종목입니다.")
+                # 이미 등록된 경우 추가 버튼 비활성화 (요청 사항: 워닝)
+                st.button("➕ 추가하기", disabled=True, key=f"btn_confirm_add_{account_id}")
+
+            else:
+                if status == "DELETED":
+                    st.info("🗑️ 이전에 삭제된 종목입니다. 추가 시 복구됩니다.")
+
+                # 추가 버튼 (녹색 primary)
+                if st.button(
+                    "➕ 추가하기", type="primary", use_container_width=True, key=f"btn_confirm_add_{account_id}"
+                ):
+                    success = add_stock(
+                        account_id, ticker_res, search_result["name"], listing_date=search_result.get("listing_date")
+                    )
+                    if success:
+                        msg = "복구되었습니다" if status == "DELETED" else "추가되었습니다"
+
+                        # [Auto-Update] 추가된 종목에 대해 메타데이터 및 가격 데이터 즉시 갱신
+                        with st.spinner(f"'{search_result['name']}' 데이터(메타/가격)를 갱신 중입니다..."):
+                            try:
+                                # 1. 메타데이터 업데이트 (상장일 등)
+                                # search_result에 이미 name/listing_date가 있지만, 확실히 하기 위해 단일 업데이트 호출
+                                # stock_list_io.add_stock에서 이미 파일에 썼으므로, 다시 로드해서 업데이트하거나
+                                # 그냥 단일 딕셔너리 만들어서 업데이트 함수에 넘길 수도 있음.
+                                # 여기서는 간단히 listing_date가 없으면 search_result 값을 쓰기도 함.
+
+                                # 파일에 저장된 상태를 업데이트하기 위해,
+                                # 전체 로드 -> 해당 종목 찾기 -> 업데이트 -> 저장 프로세스가 필요하나,
+                                # update_single_stock_metadata 함수는 dict를 인자로 받아 갱신함.
+                                # 따라서 파일 I/O를 직접 하거나, 전체 update를 돌리는게 나음.
+                                # 하지만 전체 update는 느리므로 단일 종목만 처리하고 싶음.
+                                # -> update_single_stock_metadata는 'dict'를 수정함. 저장은 안함.
+                                # -> 따라서 add_stock 내부에서 이미 저장했으니, 여기서는 가격 데이터(fetch_ohlcv)만 메인으로 돌리는게 효율적.
+                                #    상장일은 add_stock 할 때 이미 들어감.
+
+                                # 가격 데이터 갱신 (force_refresh=True)
+                                fetch_ohlcv(ticker_res, country=country_code, date_range=None, force_refresh=True)
+                                st.success(f"{msg}: {search_result['name']} (데이터 갱신 완료)")
+                            except Exception as e:
+                                st.warning(f"{msg}: {search_result['name']} (데이터 갱신 실패: {e})")
+
+                        # 상태 초기화
+                        st.session_state[ss_key_result] = None
+                        st.rerun()
+                    else:
+                        st.error("추가 실패 (시스템 오류)")
+
+    # 하단 버튼 그룹 (항상 표시하되, 업데이트 중이면 비활성화)
+    c_btn1, c_btn2, c_btn3 = st.columns([1, 1, 1])
+
+    with c_btn1:
+        if st.button("➕ 종목 추가", key=f"btn_add_modal_{account_id}", disabled=readonly):
+            open_add_dialog()
+
+    with c_btn2:
+        if st.button("메타데이터 업데이트", key=f"btn_meta_{account_id}", disabled=readonly):
+            st.session_state[key_meta] = True
+            st.rerun()
+
+    with c_btn3:
+        if st.button("가격 캐시 갱신", key=f"btn_price_{account_id}", disabled=readonly):
+            st.session_state[key_price] = True
+            st.rerun()
+
+    # -----------------------------------------------------------------------
+    # 업데이트 실행 로직 (readonly 모드일 때 실행됨)
+    # -----------------------------------------------------------------------
+    if is_updating_meta:
+        st.divider()
+        # [User Request] 스피너 아이콘 제거를 위해 st.status 대신 st.empty 사용
+        status_area = st.empty()
+        p_bar = st.progress(0)
+
+        status_area.info("메타데이터 업데이트 준비 중...")
+
+        def on_progress(curr, total, ticker):
+            pct = min(curr / total, 1.0)
+            p_bar.progress(pct)
+            status_area.info(f"메타데이터 획득 중: {curr}/{total} - {ticker}")
+
+        try:
+            update_account_metadata(account_id, progress_callback=on_progress)
+            status_area.success("메타데이터 업데이트 완료!")
+            time.sleep(1.0)
+        except Exception as e:
+            status_area.error(f"실패: {e}")
+            time.sleep(3.0)
+
+        # 상태 해제 및 리런
+        del st.session_state[key_meta]
+        st.rerun()
+
+    if is_updating_price:
+        st.divider()
+        status_area = st.empty()
+        p_bar = st.progress(0)
+
+        status_area.info("가격 캐시 갱신 준비 중...")
+
+        def on_progress(curr, total, ticker):
+            pct = min(curr / total, 1.0)
+            p_bar.progress(pct)
+            status_area.info(f"가격 캐시 갱신 중: {curr}/{total} - {ticker}")
+
+        try:
+            refresh_cache_for_target(account_id, None, progress_callback=on_progress)
+            status_area.success("가격 캐시 갱신 완료!")
+            time.sleep(1.0)
+        except Exception as e:
+            status_area.error(f"실패: {e}")
+            time.sleep(3.0)
+
+        del st.session_state[key_price]
+        st.rerun()
+
+
+def _get_latest_log_content(account_id: str) -> tuple[str | None, str | None]:
+    """
+    Get the content of the latest recommend_*.log file for the given account.
+    Returns (filename, content).
+    """
+    log_dir = os.path.join("zaccounts", account_id, "results")
+    search_pattern = os.path.join(log_dir, "recommend_*.log")
+    files = glob.glob(search_pattern)
+
+    if not files:
+        return None, None
+
+    latest_file = max(files, key=os.path.getmtime)
+    try:
+        with open(latest_file, encoding="utf-8") as f:
+            content = f.read()
+        return os.path.basename(latest_file), content
+    except Exception:
+        return os.path.basename(latest_file), "파일을 읽는 중 오류가 발생했습니다."
+
+
+@fragment
+def _render_run_recommendation(account_id: str) -> None:
+    """추천 실행 화면 렌더링"""
+
+    st.caption("이 기능은 백그라운드에서 추천 스크립트(`recommend.py`)를 즉시 실행합니다.")
+
+    # 세션 스테이트 초기화
+    if "admin_console_log" not in st.session_state:
+        st.session_state["admin_console_log"] = ""
+
+    # 1. 실행 버튼
+    if st.button("🚀 추천 시스템 즉시 실행", type="primary", key=f"btn_run_rec_{account_id}"):
+        status_area = st.empty()
+        status_area.info(f"🚀 `{account_id}` 계정 추천 실행 중...")
+
+        try:
+            # logs reset before run
+            st.session_state["admin_console_log"] = ""
+
+            result = subprocess.run(
+                ["python", "recommend.py", account_id],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            )
+
+            # 실행 결과 저장
+            st.session_state["admin_console_log"] = result.stdout
+
+            if result.returncode == 0:
+                status_area.success(f"✅ `{account_id}` 추천 실행 완료!")
+                time.sleep(1)
+                st.rerun()
+            else:
+                # 에러 로그 파싱 (마지막 줄 또는 [ERROR] 포함 라인)
+                error_msg = f"❌ 실행 실패 (Exit Code: {result.returncode})"
+                if result.stdout:
+                    lines = result.stdout.strip().splitlines()
+                    # 뒤에서부터 탐색하여 [ERROR]가 있는 가장 마지막 줄 찾기
+                    for line in reversed(lines):
+                        if "[ERROR]" in line:
+                            error_msg = f"❌ {line.strip()}"
+                            break
+                    else:
+                        # [ERROR]를 못 찾았으면 그냥 마지막 줄 표시
+                        if lines:
+                            error_msg = f"❌ {lines[-1].strip()}"
+
+                status_area.error(error_msg)
+
+        except Exception as e:
+            status_area.error(f"실행 중 예외 발생: {str(e)}")
+            st.session_state["admin_console_log"] += f"\n[System Error] {str(e)}"
+
+    st.divider()
+
+    # 2. 콘솔 로그
+    with st.expander("콘솔 로그", expanded=False):
+        log_content = st.session_state.get("admin_console_log", "")
+        if log_content:
+            st.code(log_content)
+        else:
+            st.info("실행 이력이 없습니다.")
+
+    # 3. 파일 결과 (항상 최신 파일 로드)
+    file_name, file_content = _get_latest_log_content(account_id)
+
+    expander_title = f"📁 최신 결과 파일 ({file_name})" if file_name else "📁 최신 결과 파일 (없음)"
+    with st.expander(expander_title, expanded=True):
+        if file_content:
+            st.code(file_content, language="text")
+        else:
+            st.warning("표시할 결과 파일이 존재하지 않습니다.")
 
 
 # ---------------------------------------------------------------------------
@@ -147,11 +511,17 @@ def render_account_page(account_id: str) -> None:
     country_code = loaded_country_code or country_code
 
     view_mode = st.pills(
-        "뷰", ["보유종목", "종목관리"], default="보유종목", key=f"view_{account_id}", label_visibility="collapsed"
+        "뷰",
+        ["보유종목", "종목관리", "추천실행"],
+        default="보유종목",
+        key=f"view_{account_id}",
+        label_visibility="collapsed",
     )
 
     if view_mode == "종목관리":
         _render_stocks_meta_table(account_id)
+    elif view_mode == "추천실행":
+        _render_run_recommendation(account_id)
     else:
         if df is None:
             st.error(
@@ -161,8 +531,8 @@ def render_account_page(account_id: str) -> None:
         else:
             render_recommendation_table(df, country_code=country_code)
 
-    # --- 공통: 업데이트 시간, 설정, 푸터 ---
-    if updated_at:
+    # --- 공통: 업데이트 시간, 설정, 푸터 (보유종목 탭에서만 표시) ---
+    if view_mode == "보유종목" and updated_at:
         if "," in updated_at:
             parts = updated_at.split(",", 1)
             date_part = parts[0].strip()
@@ -253,7 +623,7 @@ def render_account_page(account_id: str) -> None:
                 st.caption(caption_text)
             else:
                 st.caption("설정 정보를 찾을 수 없습니다.")
-    else:
+    elif view_mode == "보유종목":
         st.caption("데이터를 찾을 수 없습니다.")
 
 
