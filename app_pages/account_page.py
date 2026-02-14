@@ -146,10 +146,13 @@ def render_account_page(account_id: str) -> None:
     df, updated_at, loaded_country_code = load_account_recommendations(account_id)
     country_code = loaded_country_code or country_code
 
-    # --- 탭: 테이블만 다르게 ---
-    tab_holdings, tab_management = st.tabs(["보유종목", "종목관리"])
+    view_mode = st.pills(
+        "뷰", ["보유종목", "종목관리"], default="보유종목", key=f"view_{account_id}", label_visibility="collapsed"
+    )
 
-    with tab_holdings:
+    if view_mode == "종목관리":
+        _render_stocks_meta_table(account_id)
+    else:
         if df is None:
             st.error(
                 updated_at
@@ -157,9 +160,6 @@ def render_account_page(account_id: str) -> None:
             )
         else:
             render_recommendation_table(df, country_code=country_code)
-
-    with tab_management:
-        _render_stocks_meta_table(account_id)
 
     # --- 공통: 업데이트 시간, 설정, 푸터 ---
     if updated_at:

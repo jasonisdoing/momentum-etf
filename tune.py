@@ -22,13 +22,13 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     "kor_us": {
-        "PORTFOLIO_TOPN": [3, 4],
+        "PORTFOLIO_TOPN": [3, 4, 5],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_RANGE": [60, 120, 180, 240],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     "aus": {
-        "PORTFOLIO_TOPN": [7],
+        "PORTFOLIO_TOPN": [5, 6, 7],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_RANGE": [60, 120, 180, 240],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
