@@ -34,7 +34,7 @@ from datetime import time
 MARKET_SCHEDULES = {
     "kor": {
         "open": time(9, 0),
-        "close": time(16, 0),
+        "close": time(15, 30),
         "open_offset_minutes": 30,
         "close_offset_minutes": 30,
         "timezone": "Asia/Seoul",

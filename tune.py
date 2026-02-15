@@ -35,7 +35,7 @@ ACCOUNT_TUNING_CONFIG = {
     },
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
-        "PORTFOLIO_TOPN": [5],
+        "PORTFOLIO_TOPN": [4],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
