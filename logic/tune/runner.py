@@ -18,7 +18,7 @@ from typing import Any
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
-from config import TRADING_DAYS_PER_MONTH, TUNING_ENSEMBLE_SIZE
+from config import TRADING_DAYS_PER_MONTH
 from logic.backtest.account import run_account_backtest
 from logic.entry_point import StrategyRules
 from utils.account_registry import get_benchmark_tickers, get_strategy_rules
@@ -1107,57 +1107,15 @@ def _execute_tuning(
 
     success_entries.sort(key=_sort_key, reverse=True)
 
-    # --- Top N Ensemble Logic ---
-    # 상위 N개의 결과를 사용하여 파라미터를 결정합니다.
-    # 1. MA_MONTH: 상위 N개의 평균 (반올림)
-    # 2. 나머지: 상위 N개의 최빈값 (Mode)
+    # --- Top 1 Selection Logic ---
+    # 앙상블 로직 제거: 항상 최적의 단일 결과를 사용합니다.
+    # MA_MONTH 평균화나 Mode 방식은 파라미터 간 불일치(Logical Inconsistency)를 유발할 수 있음.
 
-    # 앙상블 크기 검증 (홀수만 허용)
-    if TUNING_ENSEMBLE_SIZE % 2 == 0:
-        raise ValueError(f"TUNING_ENSEMBLE_SIZE는 반드시 홀수여야 합니다. (현재값: {TUNING_ENSEMBLE_SIZE})")
+    best_entry = success_entries[0].copy()
 
-    ensemble_size = min(len(success_entries), TUNING_ENSEMBLE_SIZE)
-    top_n_entries = success_entries[:ensemble_size]
-    best_entry = success_entries[0].copy()  # Top 1의 메트릭(CAGR 등)은 유지하되 파라미터만 덮어씀
-
-    if top_n_entries:
-        import statistics
-        from collections import Counter
-
-        def _get_mode(values):
-            if not values:
-                return None
-            # 빈도수가 같으면 먼저 나온 것(순위가 높은 것)을 선호
-            c = Counter(values)
-            return c.most_common(1)[0][0]
-
-        # 1. MA_MONTH (Average)
-        ma_dayss = [e.get("ma_month") for e in top_n_entries if e.get("ma_month") is not None]
-        if ma_dayss:
-            best_entry["ma_month"] = int(round(statistics.mean(ma_dayss)))
-
-        # 2. Others (Mode)
-        param_keys = [
-            "ma_type",
-            "portfolio_topn",
-            "replace_threshold",
-            "stop_loss_pct",
-            "rsi_sell_threshold",
-            "cooldown_days",
-        ]
-
-        for key in param_keys:
-            values = [e.get(key) for e in top_n_entries if e.get(key) is not None]
-            mode_val = _get_mode(values)
-            if mode_val is not None:
-                best_entry[key] = mode_val
-
-        logger.info(
-            "[튜닝] Top %d 앙상블 적용: MA=%s (Avg), Others=Mode",
-            ensemble_size,
-            ensemble_size,
-            best_entry.get("ma_month") if is_ma_month else best_entry.get("ma_days"),
-        )
+    logger.info(
+        "[튜닝] 최적 파라미터 선정: Top 1 (Best CAGR/SDR) 사용",
+    )
     # -----------------------------
 
     raw_data_payload: list[dict[str, Any]] = []

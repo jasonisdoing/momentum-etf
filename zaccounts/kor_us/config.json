@@ -10,7 +10,7 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-09-01",
-        "BACKTESTED_DATE": "2026-02-16 10:46",
+        "BACKTESTED_DATE": "2026-02-16 20:24",
         "CAGR": 170.775878,
         "MDD": -17.904643,
         "PORTFOLIO_TOPN": 4,
