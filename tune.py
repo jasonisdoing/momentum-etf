@@ -22,7 +22,7 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     "kor_us": {
-        "PORTFOLIO_TOPN": [4, 5, 6, 7],
+        "PORTFOLIO_TOPN": [4, 5],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
