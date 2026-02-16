@@ -23,6 +23,7 @@ python scripts/find.py
 """
 
 import json
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -317,22 +318,25 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
     # 기존 종목 및 삭제된 종목 로드
     from utils.stock_list_io import get_deleted_etfs, get_etfs
 
-    all_existing_tickers = set()
-    deleted_tickers_map = {}  # ticker -> {deleted_at, deleted_reason, ...}
+    existing_tickers_map = defaultdict(list)  # ticker -> list of account_ids
+    deleted_tickers_map = defaultdict(list)  # ticker -> list of {account_id, deleted_at, deleted_reason}
 
     for account in target_accounts:
         try:
             # 활성 종목
             existing_etfs = get_etfs(account)
-            all_existing_tickers.update({item["ticker"] for item in existing_etfs})
+            for item in existing_etfs:
+                existing_tickers_map[item["ticker"]].append(account)
 
             # 삭제된 종목
             deleted_list = get_deleted_etfs(account)
             for item in deleted_list:
                 t = item.get("ticker")
                 if t:
-                    # 중복되면 최신 정보로 덮어쓰거나 하나만 유지 (여기선 단순 덮어쓰기)
-                    deleted_tickers_map[t] = item
+                    info = item.copy()
+                    info["account_id"] = account
+                    deleted_tickers_map[t].append(info)
+
         except Exception as e:
             logger.warning(f"{account} 종목 로드 중 오류 발생: {e}")
 
@@ -349,13 +353,13 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
     for item in found_tickers:
         ticker = item["티커"]
 
-        if ticker in all_existing_tickers:
+        if ticker in existing_tickers_map:
+            # 계좌 정보 추가
+            item["accounts"] = existing_tickers_map[ticker]
             my_universe_list.append(item)
         elif ticker in deleted_tickers_map:
-            # 삭제 정보 추가
-            info = deleted_tickers_map[ticker]
-            item["deleted_at"] = info.get("deleted_at")
-            item["deleted_reason"] = info.get("deleted_reason")
+            # 삭제 정보 추가 (여러 계좌일 수 있음, 여기선 첫 번째 정보 사용하거나 모두 표시)
+            item["deleted_infos"] = deleted_tickers_map[ticker]
             deleted_list.append(item)
         else:
             new_discovery_list.append(item)
@@ -372,20 +376,31 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
         three_month = item.get("3개월수익률")
         three_month_str = f"{three_month:+.2f}%" if three_month is not None and pd.notna(three_month) else "아직없음"
 
-        base_msg = f"  - {name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
+        # 계좌 표시
+        accounts_str = ""
+        if "accounts" in item:
+            accounts_str = f"[{', '.join(item['accounts'])}] "
+
+        base_msg = f"  - {accounts_str}{name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
 
         if is_deleted:
-            d_date = item.get("deleted_at")
-            d_reason = item.get("deleted_reason") or "사유없음"
-            date_str = ""
-            if d_date:
-                # datetime 객체일 수도 있고 문자열일 수도 있음
-                if hasattr(d_date, "strftime"):
-                    date_str = d_date.strftime("%Y-%m-%d")
-                else:
-                    date_str = str(d_date)[:10]
+            deleted_infos = item.get("deleted_infos", [])
+            del_msg_parts = []
+            for info in deleted_infos:
+                acc = info.get("account_id", "?")
+                d_date = info.get("deleted_at")
+                d_reason = info.get("deleted_reason") or "사유없음"
 
-            print(f"{base_msg} | 🗑️ 삭제: {date_str} ({d_reason})")
+                date_str = ""
+                if d_date:
+                    if hasattr(d_date, "strftime"):
+                        date_str = d_date.strftime("%Y-%m-%d")
+                    else:
+                        date_str = str(d_date)[:10]
+                del_msg_parts.append(f"[{acc}] {date_str} ({d_reason})")
+
+            del_msg = " | ".join(del_msg_parts)
+            print(f"{base_msg} | 🗑️ 삭제: {del_msg}")
         else:
             print(base_msg)
 
