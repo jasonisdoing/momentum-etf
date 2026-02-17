@@ -10,12 +10,12 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-02-01",
-        "BACKTESTED_DATE": "2026-02-17 09:19",
-        "CAGR": 92.154204,
-        "MDD": -12.690172,
-        "PORTFOLIO_TOPN": 7,
-        "MA_MONTH": 9,
-        "MA_TYPE": "DEMA",
+        "BACKTESTED_DATE": "2026-02-17 10:45",
+        "CAGR": 81.592647,
+        "MDD": -14.991307,
+        "PORTFOLIO_TOPN": 6,
+        "MA_MONTH": 3,
+        "MA_TYPE": "SMA",
         "REPLACE_SCORE_THRESHOLD": 0,
         "STOP_LOSS_PCT": 10,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
@@ -24,7 +24,7 @@
         "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
-        "ticker": "IVV",
-        "name": "iShares S&P 500 ETF"
+        "ticker": "A200",
+        "name": "BetaShares Australia 200 ETF"
     }
 }

@@ -237,6 +237,7 @@ def extract_recommendations_from_backtest(
                 "price": price,
                 "nav_price": nav_price,
                 "shares": shares,
+                "avg_cost": avg_cost,
                 "score": score,
                 "rsi_score": rsi_score,
                 "streak": streak,
@@ -394,32 +395,8 @@ def generate_recommendation_report(
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()
 
-    # [전략 기준일 설정] 장중 변동 방지 로직
-    from datetime import time as dt_time
-
-    from config import MARKET_SCHEDULES, USE_REALTIME_RECOMMENDATION
-
+    # 전략 기준일 설정
     strategy_end_date = end_date
-
-    # 날짜가 강제 지정되지 않았고, 실시간 반영 옵션이 꺼져있는 경우
-    if not date_str and not USE_REALTIME_RECOMMENDATION:
-        schedule = MARKET_SCHEDULES.get(country_code, {})
-        timezone_str = schedule.get("timezone", "Asia/Seoul")
-        market_close_time = schedule.get("close", dt_time(15, 30))
-
-        try:
-            now = pd.Timestamp.now(tz=timezone_str)
-        except Exception:
-            # Fallback
-            now = pd.Timestamp.now().tz_localize(timezone_str)
-
-        # 오늘 날짜이고, 아직 장 마감 전이라면
-        if end_date.date() == now.date() and now.time() < market_close_time:
-            # 전략 기준일을 하루 전으로 설정 (전일 종가 기준 고정)
-            strategy_end_date = end_date - pd.Timedelta(days=1)
-            logger.info(
-                f"[장중 고정] 전략 기준일을 전일({strategy_end_date.strftime('%Y-%m-%d')})로 고정합니다. (수익률은 실시간 반영)"
-            )
 
     # 전략 규칙 로드
     strategy_rules = get_strategy_rules(account_id)

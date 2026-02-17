@@ -79,9 +79,3 @@ TRADING_DAYS_PER_MONTH = 20
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5
-
-
-# [전략 실행 시 실시간 가격 반영 여부]
-# True: 장중 실행 시 현재가(실시간)를 '오늘 종가'로 가정하고 전략 실행 (순위 변동 발생 가능)
-# False: 장중 실행 시 '어제 종가'까지만 전략에 반영 (순위 고정), 수익률만 실시간 업데이트 (권장)
-USE_REALTIME_RECOMMENDATION = False
