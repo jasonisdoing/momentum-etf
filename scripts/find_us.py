@@ -4,6 +4,12 @@ find_us.py
 Barchart ETF 데이터를 수동으로 입력받아 파싱합니다.
 """
 
+import os
+import sys
+
+# 프로젝트 루트를 Python 경로에 추가
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from datetime import datetime
 
 # --- 설정 ---
@@ -31,11 +37,16 @@ EXCLUDE_KEYWORDS = [
     "Gas",
     "Oil",
     "Energy",
+    "Canary",
+    "coin",
+    "Doge",
+    "Covered",
+    "Call",
 ]
 # 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
 INCLUDE_KEYWORDS = []
 # 최소 거래량 (0이면 필터링 안 함)
-MIN_VOLUME = 0
+MIN_VOLUME = 10000
 
 
 def parse_barchart_data(text):
@@ -207,61 +218,126 @@ def main():
     print(f"📅 조회 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
     print()
-    print("--- 상승중인 ETF 목록 ---")
-    print()
+    # 기존 종목 로드 (MongoDB)
+    from collections import defaultdict
 
-    for etf in etfs:
-        ticker = etf["ticker"]
-        name = etf["name"]
-        change_pct = etf["change_pct"]
-        price = etf["price"]
-        volume = etf["volume"]
+    from utils.stock_list_io import get_deleted_etfs, get_etfs
+
+    target_accounts = ["us"]  # 미국 계좌만 확인
+
+    existing_tickers_map = defaultdict(list)  # ticker -> list of account_ids
+    deleted_tickers_map = defaultdict(list)  # ticker -> list of {account_id, deleted_at, deleted_reason}
+
+    for account in target_accounts:
+        try:
+            # 활성 종목
+            existing_etfs = get_etfs(account)
+            for item in existing_etfs:
+                existing_tickers_map[item["ticker"]].append(account)
+
+            # 삭제된 종목
+            deleted_list = get_deleted_etfs(account)
+            for item in deleted_list:
+                t = item.get("ticker")
+                if t:
+                    info = item.copy()
+                    info["account_id"] = account
+                    deleted_tickers_map[t].append(info)
+
+        except Exception as e:
+            print(f"⚠️ {account} 종목 로드 중 오류 발생: {e}")
+
+    # 분류
+    my_universe_list = []
+    deleted_list = []
+    new_discovery_list = []
+
+    for item in etfs:
+        ticker = item["ticker"]
+
+        # 딕셔너리 키 통일 (find_kor와 맞춤)
+        item["티커"] = item["ticker"]
+        item["종목명"] = item["name"]
+        item["등락률"] = item["change_pct"]
+        item["거래량"] = item["volume"]
+        item["현재가"] = item["price"]
+        item["괴리율"] = None  # US는 괴리율 정보 없음
+        item["3개월수익률"] = None  # US는 3개월 수익률 정보 없음
+
+        if ticker in existing_tickers_map:
+            # 계좌 정보 추가
+            item["accounts"] = existing_tickers_map[ticker]
+            my_universe_list.append(item)
+        elif ticker in deleted_tickers_map:
+            # 삭제 정보 추가
+            item["deleted_infos"] = deleted_tickers_map[ticker]
+            deleted_list.append(item)
+        else:
+            new_discovery_list.append(item)
+
+    # 출력 헬퍼
+    def print_item(item, is_deleted=False):
+        ticker = item["티커"]
+        name = item["종목명"]
+        change_rate = item["등락률"]
+        price = item["현재가"]
+        volume = item.get("거래량", 0)
+        volume_str = f"{volume:,}" if volume else "N/A"
 
         # 이름이 너무 길면 자르기
         if len(name) > 45:
             name = name[:42] + "..."
 
-        volume_str = f"{volume:,}" if volume > 0 else "N/A"
+        # 계좌 표시
+        accounts_str = ""
+        if "accounts" in item:
+            accounts_str = f"[{', '.join(item['accounts'])}] "
 
-        print(f"  - {name} ({ticker}): 금일수익률: +{change_pct:.2f}%, 현재가: ${price:.2f}, 거래량: {volume_str}")
+        base_msg = f"  - {accounts_str}{name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 현재가: ${price:.2f}, 거래량: {volume_str}"
 
-    print()
-    print("=" * 70)
+        if is_deleted:
+            deleted_infos = item.get("deleted_infos", [])
+            del_msg_parts = []
+            for info in deleted_infos:
+                acc = info.get("account_id", "?")
+                d_date = info.get("deleted_at")
+                d_reason = info.get("deleted_reason") or "사유없음"
 
-    # 기존 종목 로드 (MongoDB)
-    from utils.stock_list_io import get_etfs
+                date_str = ""
+                if d_date:
+                    if hasattr(d_date, "strftime"):
+                        date_str = d_date.strftime("%Y-%m-%d")
+                    else:
+                        date_str = str(d_date)[:10]
+                del_msg_parts.append(f"[{acc}] {date_str} ({d_reason})")
 
-    existing_tickers = set()
-    try:
-        data = get_etfs("us")
-        for item in data:
-            existing_tickers.add(item.get("ticker"))
-    except Exception as e:
-        print(f"\n⚠️ 종목 로드 중 오류 발생: {e}")
+            del_msg = " | ".join(del_msg_parts)
+            print(f"{base_msg} | 🗑️ 삭제: {del_msg}")
+        else:
+            print(base_msg)
 
-    new_tickers = [etf for etf in etfs if etf["ticker"] not in existing_tickers]
+    # 1. 내 유니버스
+    if my_universe_list:
+        print()
+        print("--- 내 유니버스 ETF 목록 ---")
+        for item in my_universe_list:
+            print_item(item)
 
-    if new_tickers:
+    # 2. 삭제된 목록
+    if deleted_list:
+        print()
+        print("--- 삭제된 ETF 목록 ---")
+        for item in deleted_list:
+            print_item(item, is_deleted=True)
+
+    # 3. 신규 발견
+    if new_discovery_list:
         print()
         print("--- 신규 발견 종목 ---")
-        print()
-        for etf in new_tickers:
-            ticker = etf["ticker"]
-            name = etf["name"]
-            change_pct = etf["change_pct"]
-            price = etf["price"]
-            volume = etf["volume"]
-
-            # 이름이 너무 길면 자르기
-            if len(name) > 45:
-                name = name[:42] + "..."
-
-            volume_str = f"{volume:,}" if volume > 0 else "N/A"
-            print(f"  - {name} ({ticker}): 금일수익률: +{change_pct:.2f}%, 현재가: ${price:.2f}, 거래량: {volume_str}")
-        print()
-        print("+" * 70)
+        for item in new_discovery_list:
+            print_item(item)
     else:
-        print("\n✅ 발견된 모든 종목이 이미 stocks.json에 존재합니다.")
+        print("\n✅ 신규로 발견된 종목이 없습니다 (모두 등록됨 혹은 삭제됨).")
 
 
 if __name__ == "__main__":
