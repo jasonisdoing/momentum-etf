@@ -49,8 +49,6 @@ python recommend.py us
     "MA_MONTH": 12,                    // 이동평균 기간 (개월) - 필수
     "MA_TYPE": "EMA",                  // 이동평균 종류 (SMA, EMA, WMA 등) - 필수
     "BUCKET_TOPN": 1,                  // 버켓 내 최대 보유 종목 수 - 필수
-    "REPLACE_SCORE_THRESHOLD": 0.0,    // 교체 매매 점수 기준 - 필수
-    "STOP_LOSS_PCT": 10,               // 손절 기준 (10%) - 필수
     "REBALANCE_MODE": "QUARTERLY",     // 리밸런싱 주기 (DAILY, MONTHLY, QUARTERLY) - 필수
     "OVERBOUGHT_SELL_THRESHOLD": 100,  // RSI 매도 기준 - 필수
     "BACKTEST_START_DATE": "2025-02-01" // 백테스트/튜닝 시작일

@@ -17,30 +17,30 @@ ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
         "BUCKET_TOPN": [2],
         "MA_MONTH": [3, 6, 9, 12],
-        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
+        "MA_TYPE": ["HMA"],  # "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"], HMA 고정
+        "REBALANCE_MODE": ["MONTHLY"],  # QUARTERLY 임시 제거
         "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
     },
     "kor_us": {
         "BUCKET_TOPN": [1],
         "MA_MONTH": [3, 6, 9, 12],
-        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
+        "MA_TYPE": ["HMA"],  # "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"], HMA 고정
+        "REBALANCE_MODE": ["MONTHLY"],  # QUARTERLY 임시 제거
         "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
     },
     "aus": {
         "BUCKET_TOPN": [2],
         "MA_MONTH": [3, 6, 9, 12],
-        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
+        "MA_TYPE": ["HMA"],  # "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"], HMA 고정
+        "REBALANCE_MODE": ["MONTHLY"],  # QUARTERLY 임시 제거
         "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
     },
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
         "BUCKET_TOPN": [2],
         "MA_MONTH": [3, 6, 9, 12],
-        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
-        "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
+        "MA_TYPE": ["HMA"],  # "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"], HMA 고정
+        "REBALANCE_MODE": ["MONTHLY"],  # QUARTERLY 임시 제거
         "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
     },
 }

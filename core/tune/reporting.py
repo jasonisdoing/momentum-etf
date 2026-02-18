@@ -118,7 +118,6 @@ def _render_tuning_table(
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
             str(ma_type_val) if ma_type_val else "SMA",
             str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-            str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
             str(rebalance_mode_val),
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),

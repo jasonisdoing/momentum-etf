@@ -118,9 +118,8 @@ def _rank_buy_candidates(
     buy_ranked_candidates = []
     for candidate_ticker in tickers_available_today:
         ticker_state_cand = position_state[candidate_ticker]
-        buy_signal_days_today = buy_signal_today.get(candidate_ticker, 0)
 
-        if ticker_state_cand["shares"] == 0 and buy_signal_days_today > 0:
+        if ticker_state_cand["shares"] == 0:
             # MAPS 점수 사용
             score_cand = score_today.get(candidate_ticker, float("nan"))
             final_score = score_cand if not pd.isna(score_cand) else -float("inf")
@@ -312,6 +311,7 @@ def _execute_new_buys(
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
                         "avg_cost": ticker_state["avg_cost"],
+                        "note": "",
                     }
                 )
             else:
