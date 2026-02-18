@@ -16,7 +16,6 @@ from utils.settings_loader import (
     get_strategy_rules,
     list_available_accounts,
     load_common_settings,
-    resolve_strategy_params,
 )
 
 _ICON_FALLBACKS: dict[str, str] = {
@@ -67,39 +66,12 @@ def _load_account_configs_impl() -> list[dict[str, Any]]:
         country_code = _normalize_code(settings.get("country_code"), account_id)
         base_name = settings.get("name") or account_id.upper()
 
-        # 현재 보유 종목 수와 BUCKET_TOPN을 이름에 추가
-        bucket_topn = None
-        strategy = settings.get("strategy", {})
-        if isinstance(strategy, dict):
-            params = resolve_strategy_params(strategy)
-            bucket_topn = params.get("BUCKET_TOPN")
-
-        # 현재 보유 종목 수 조회 (추천 결과에서 HOLD 상태 종목 수 계산)
-        holdings_count = 0
-        try:
-            from utils.recommendation_storage import fetch_latest_recommendations
-
-            latest_rec = fetch_latest_recommendations(account_id)
-            if latest_rec and "recommendations" in latest_rec:
-                recommendations = latest_rec["recommendations"]
-                if isinstance(recommendations, list):
-                    # HOLD + BUY + BUY_REPLACE 상태인 종목 수 계산
-                    holdings_count = sum(
-                        1 for rec in recommendations if rec.get("state") in {"HOLD", "BUY", "BUY_REPLACE"}
-                    )
-        except Exception as e:
-            # MongoDB 연결 실패 등의 이유로 조회 실패 시 로그 출력
-            logger.debug(f"[{account_id}] 보유 종목 수 조회 실패: {e}")
-            holdings_count = 0
-
-        if bucket_topn is not None:
-            name = f"{base_name}({holdings_count}/{bucket_topn})"
-        else:
-            name = base_name
-
         icon = settings.get("icon") or _ICON_FALLBACKS.get(country_code, "")
         is_default = bool(settings.get("default", False))
         order = _resolve_order(settings.get("order"))
+
+        # [User Request] '순서. 이름' 형식으로 변경 (비율 제거)
+        name = f"{int(order)}. {base_name}"
 
         configs.append(
             {

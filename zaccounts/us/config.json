@@ -1,5 +1,5 @@
 {
-    "order": 100,
+    "order": 4,
     "icon": "🇺🇸",
     "name": "미국직투 ETF",
     "desc": "미국 ETF 포트폴리오 (USD)",
@@ -7,7 +7,7 @@
     "currency": "usd",
     "slack_channel": "C0A0X2LTS3X",
     "initial_capital_krw": "100000000",
-    "show_hold": false,
+    "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-02-01",
         "BACKTESTED_DATE": "2026-02-19 01:25",

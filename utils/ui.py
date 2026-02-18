@@ -364,6 +364,14 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     if format_dict:
         styled = styled.format(format_dict)
 
+    # 계좌별 색상 구분 (옵션)
+    if "계좌" in df.columns:
+
+        def _style_account_col(val: Any) -> str:
+            return "font-weight: bold; color: #555;"
+
+        styled = styled.map(_style_account_col, subset=["계좌"])
+
     return styled
 
 
@@ -383,7 +391,7 @@ def render_recommendation_table(
 
     # 공통 컬럼 설정
     column_config_map: dict[str, st.column_config.BaseColumn] = {
-        "#": st.column_config.TextColumn("#", width=65),
+        "계좌": st.column_config.TextColumn("계좌", width=100),
         "버킷": st.column_config.TextColumn("버킷", width=85),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),

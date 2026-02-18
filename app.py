@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+import pandas as pd
 import streamlit as st
 import streamlit_authenticator as stauth
 
@@ -76,6 +77,7 @@ def _build_home_page(accounts: list[dict[str, Any]]):
     }
 
     def _render_home_page() -> None:
+        all_holdings = []
         for account in accounts:
             account_id = account["account_id"]
             if not account.get("settings", {}).get("show_hold", True):
@@ -84,18 +86,29 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             account_name = account.get("name") or account_id.upper()
             df, updated_at, country_code = load_account_recommendations(account_id)
 
-            st.text(f"{account_name} ({account_id.upper()})")
-
             if df is None or df.empty:
-                st.info("표시할 추천 데이터가 없습니다.")
                 continue
 
-            filtered = df[df["상태"].str.upper().isin(allowed_states)]
-            if filtered.empty:
-                st.info("현재 보유 중인 종목이 없습니다.")
-                continue
+            filtered = df[df["상태"].str.upper().isin(allowed_states)].copy()
+            if not filtered.empty:
+                filtered.insert(0, "계좌", account_name)
+                all_holdings.append(filtered)
 
-            render_recommendation_table(filtered, country_code=country_code)
+        if not all_holdings:
+            st.info("현재 모든 계좌를 통틀어 보유 중인 종목이 없습니다.")
+            return
+
+        combined_df = pd.concat(all_holdings, ignore_index=True)
+
+        # 정렬: 계좌순(이름에 order가 포함됨) -> 버킷순
+        if "bucket" in combined_df.columns:
+            combined_df = combined_df.sort_values(["계좌", "bucket"], ascending=[True, True])
+        else:
+            combined_df = combined_df.sort_values(["계좌"], ascending=[True])
+
+        # render_recommendation_table 호출 (컬럼 순서 제어를 위해 visible_columns 명시)
+        visible_cols = ["계좌", "버킷", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가", "문구"]
+        render_recommendation_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols)
 
     return _render_home_page
 
