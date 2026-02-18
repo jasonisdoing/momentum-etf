@@ -40,8 +40,7 @@ def print_backtest_summary(
     strategy_tuning = resolve_strategy_params(strategy_cfg)
     merged_strategy = dict(strategy_tuning)
 
-    cooldown_days = int(strategy_tuning["COOLDOWN_DAYS"])
-    replace_threshold = strategy_tuning["REPLACE_SCORE_THRESHOLD"]
+    replace_threshold = strategy_tuning.get("REPLACE_SCORE_THRESHOLD", 0.0)
 
     initial_capital_local = float(
         summary.get("initial_capital_local", summary.get("initial_capital", initial_capital_krw))
@@ -71,17 +70,6 @@ def print_backtest_summary(
     ma_month = merged_strategy.get("MA_MONTH")
     momentum_label = f"{ma_month}개월" if ma_month is not None else "N/A"
 
-    stop_loss_source = strategy_tuning.get("STOP_LOSS_PCT")
-    try:
-        holding_stop_loss_pct = float(stop_loss_source if stop_loss_source is not None else bucket_topn)
-    except (TypeError, ValueError):
-        holding_stop_loss_pct = float(bucket_topn)
-
-    if abs(holding_stop_loss_pct - round(holding_stop_loss_pct)) < 1e-6:
-        stop_loss_label = f"{int(round(holding_stop_loss_pct))}%"
-    else:
-        stop_loss_label = f"{holding_stop_loss_pct:.2f}%"
-
     # [수정] 전체 종목 수 한도 표시를 명확히 함
     holdings_limit = summary.get("holdings_limit") or (bucket_topn * 5)  # 5버킷 기준 기본값
     try:
@@ -94,8 +82,6 @@ def print_backtest_summary(
         "전체 종목 수 한도 (Total Limit)": holdings_limit,
         "모멘텀 스코어 MA 기간": momentum_label,
         "교체 매매 점수 임계값": replace_threshold,
-        "개별 종목 손절매": stop_loss_label,
-        "매수/매도 쿨다운": f"{cooldown_days}일",
     }
 
     add_section_heading("주별 성과 요약")

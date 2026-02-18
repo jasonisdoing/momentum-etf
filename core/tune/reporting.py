@@ -94,9 +94,7 @@ def _render_tuning_table(
         "MA타입",
         "TOPN",
         "교체점수",
-        "손절",
-        "과매수",
-        "쿨다운",
+        "리밸런스",
         "CAGR(%)",
         "MDD(%)",
     ]
@@ -105,9 +103,7 @@ def _render_tuning_table(
         "center",
         "right",
         "right",
-        "right",
-        "right",
-        "right",
+        "center",
         "right",
         "right",
     ]
@@ -131,15 +127,7 @@ def _render_tuning_table(
         ma_type_val = row.get("ma_type", "SMA")
         topn_val = row.get("bucket_topn")
         threshold_val = row.get("replace_threshold")
-        stop_loss_val = row.get("stop_loss_pct")
-        stop_loss_num = _safe_float(stop_loss_val, float("nan"))
-        if math.isfinite(stop_loss_num):
-            stop_loss_display = f"{int(stop_loss_num)}%"
-        else:
-            stop_loss_display = "-"
-
-        rsi_threshold_val = row.get("rsi_sell_threshold")
-        cooldown_val = row.get("cooldown_days")
+        rebalance_mode_val = row.get("rebalance_mode") or "-"
 
         row_data = [
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
@@ -148,13 +136,7 @@ def _render_tuning_table(
             str(int(threshold_val))
             if isinstance(threshold_val, (int, float)) and math.isfinite(float(threshold_val))
             else "-",
-            stop_loss_display,
-            str(int(rsi_threshold_val))
-            if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val))
-            else "-",
-            str(int(cooldown_val))
-            if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val))
-            else "-",
+            str(rebalance_mode_val),
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),
             _format_table_float(row.get("period_return")),

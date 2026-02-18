@@ -69,7 +69,6 @@ def _build_daily_table_rows(
 
         decision = str(row.get("decision", "")).upper()
         score = row.get("score")
-        filter_val = row.get("filter")
         note = str(row.get("note", "") or "")
 
         is_cash = ticker_key == "CASH"
@@ -137,9 +136,6 @@ def _build_daily_table_rows(
         # decision_order = decision_conf.get("order", 99)
         score_val = float(score) if _is_finite_number(score) else float("-inf")
 
-        rsi_score = row.get("rsi_score")
-        rsi_score_display = f"{float(rsi_score):.1f}" if _is_finite_number(rsi_score) else "-"
-
         bucket_id = meta.get("bucket")
         bucket_display = "-"
         if bucket_id and bucket_id in BUCKET_NAMES:
@@ -168,8 +164,6 @@ def _build_daily_table_rows(
             cumulative_pct_display,
             weight_display,
             score_display,
-            rsi_score_display,
-            f"{int(filter_val)}일" if _is_finite_number(filter_val) else "-",
             message,
         ]
 
@@ -225,8 +219,6 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "누적(%)",
         "비중",
         "점수",
-        "RSI",
-        "지속",
         "문구",
     ]
     aligns = [
@@ -235,8 +227,6 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "left",
         "left",
         "center",
-        "right",
-        "right",
         "right",
         "right",
         "right",

@@ -45,7 +45,7 @@ def init_worker_prefetch(
 
 
 def evaluate_single_combo(
-    payload: tuple[str, tuple[str, str], int, int, float, float, int, int, str, tuple[str, ...], bool],
+    payload: tuple[str, tuple[str, str], int, int, float, str, tuple[str, ...], bool],
 ) -> tuple[str, dict[str, Any], list[str]]:
     """단일 파라미터 조합 평가 (Worker Process에서 실행)"""
     (
@@ -53,10 +53,7 @@ def evaluate_single_combo(
         date_range,
         ma_int,
         topn_int,
-        stop_loss_float,
         threshold_float,
-        rsi_int,
-        cooldown_int,
         ma_type_str,
         rebalance_mode_str,
         excluded_tickers,
@@ -87,7 +84,6 @@ def evaluate_single_combo(
                 bucket_topn=int(topn_int),
                 replace_threshold=float(threshold_float),
                 ma_type=str(ma_type_str),
-                stop_loss_pct=float(stop_loss_float),
                 rebalance_mode=rebalance_mode_str,
             )
         else:
@@ -96,20 +92,13 @@ def evaluate_single_combo(
                 bucket_topn=int(topn_int),
                 replace_threshold=float(threshold_float),
                 ma_type=str(ma_type_str),
-                stop_loss_pct=float(stop_loss_float),
                 rebalance_mode=rebalance_mode_str,
             )
-
-        strategy_overrides = {
-            "OVERBOUGHT_SELL_THRESHOLD": rsi_int,
-            "COOLDOWN_DAYS": cooldown_int,
-        }
 
         override_settings = {
             "START_DATE": date_range[0],
             "END_DATE": date_range[1],
             "EXCLUDED_TICKERS": list(excluded_tickers),
-            "strategy_overrides": strategy_overrides,
         }
 
         # 백테스트 실행
@@ -131,9 +120,7 @@ def evaluate_single_combo(
             {
                 "ma_month" if is_ma_month else "ma_days": ma_int,
                 "bucket_topn": topn_int,
-                "stop_loss_pct": stop_loss_float,
                 "replace_threshold": threshold_float,
-                "rsi_sell_threshold": rsi_int,
                 "error": str(exc),
             },
             [],
@@ -147,9 +134,7 @@ def evaluate_single_combo(
         "ma_month" if is_ma_month else "ma_days": ma_int,
         "bucket_topn": topn_int,
         "replace_threshold": float(threshold_float),
-        "stop_loss_pct": float(stop_loss_float),
-        "rsi_sell_threshold": rsi_int,
-        "cooldown_days": cooldown_int,
+        "rebalance_mode": rebalance_mode_str,
         "ma_type": ma_type_str,
         "cagr": _round_float(_safe_float(summary.get("cagr"), 0.0)),
         "mdd": _round_float(_safe_float(summary.get("mdd"), 0.0)),

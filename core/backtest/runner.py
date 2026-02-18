@@ -158,7 +158,6 @@ def run_account_backtest(
             bucket_topn=strategy_override.bucket_topn,
             replace_threshold=strategy_override.replace_threshold,
             ma_type=strategy_override.ma_type,
-            stop_loss_pct=strategy_override.stop_loss_pct,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
             rebalance_mode=strategy_override.rebalance_mode,
         )
@@ -166,8 +165,6 @@ def run_account_backtest(
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["BUCKET_TOPN"] = strategy_rules.bucket_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
-        if strategy_rules.stop_loss_pct is not None:
-            strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
 
     backtest_start_date_str = _resolve_backtest_start_date(None, override_settings, account_settings)
     end_date = _resolve_end_date(country_code, override_settings)
@@ -492,37 +489,12 @@ def _build_backtest_kwargs(
     prefetched_metrics: Mapping[str, dict[str, Any]] | None,
     quiet: bool,
 ) -> dict[str, Any]:
-    try:
-        configured_stop_loss = (
-            float(strategy_rules.stop_loss_pct)
-            if strategy_rules.stop_loss_pct is not None
-            else float(strategy_rules.bucket_topn)
-        )
-    except (TypeError, ValueError):
-        configured_stop_loss = float(strategy_rules.bucket_topn)
-    stop_loss_threshold = -abs(configured_stop_loss)
-
-    # 필수 설정 검증
-    if "COOLDOWN_DAYS" not in strategy_settings:
-        raise ValueError("strategy_settings에 COOLDOWN_DAYS 설정이 필요합니다.")
-    if "OVERBOUGHT_SELL_THRESHOLD" not in strategy_settings:
-        raise ValueError("strategy_settings에 OVERBOUGHT_SELL_THRESHOLD 설정이 필요합니다.")
-
-    cooldown_days = int(strategy_settings["COOLDOWN_DAYS"])
-    rsi_sell_threshold = int(strategy_settings["OVERBOUGHT_SELL_THRESHOLD"])
-
-    if not (0 <= rsi_sell_threshold <= 100):
-        raise ValueError(f"OVERBOUGHT_SELL_THRESHOLD는 0~100 사이여야 합니다. (현재값: {rsi_sell_threshold})")
-
     kwargs: dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "prefetched_metrics": prefetched_metrics,
         "ma_days": strategy_rules.ma_days,
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
-        "stop_loss_pct": stop_loss_threshold,
-        "rsi_sell_threshold": rsi_sell_threshold,
-        "cooldown_days": cooldown_days,
         "rebalance_mode": strategy_rules.rebalance_mode,
         "quiet": quiet,
         "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,

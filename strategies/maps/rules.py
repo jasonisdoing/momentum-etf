@@ -17,7 +17,6 @@ class StrategyRules:
     bucket_topn: int
     replace_threshold: float
     ma_type: str
-    stop_loss_pct: float | None
     enable_data_sufficiency_check: bool
 
     # 리밸런싱 모드 (QUARTERLY, MONTHLY, DAILY)
@@ -32,7 +31,6 @@ class StrategyRules:
         bucket_topn: Any = None,
         replace_threshold: Any,
         ma_type: Any = None,
-        stop_loss_pct: Any = None,
         enable_data_sufficiency_check: Any = False,
         rebalance_mode: Any = None,
     ) -> StrategyRules:
@@ -84,15 +82,6 @@ class StrategyRules:
         if ma_type_str not in valid_ma_types:
             raise ValueError(f"MA_TYPE은 {valid_ma_types} 중 하나여야 합니다. (입력값: {ma_type_str})")
 
-        stop_loss_value: float | None = None
-        if stop_loss_pct is not None:
-            try:
-                stop_loss_value = float(stop_loss_pct)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("STOP_LOSS_PCT는 숫자여야 합니다.") from exc
-            if not (stop_loss_value > 0):
-                raise ValueError("STOP_LOSS_PCT는 0보다 커야 합니다.")
-
         # ENABLE_DATA_SUFFICIENCY_CHECK 검증
         data_sufficiency_check = bool(enable_data_sufficiency_check)
 
@@ -110,7 +99,6 @@ class StrategyRules:
             bucket_topn=final_bucket_topn,
             replace_threshold=replace_threshold_float,
             ma_type=ma_type_str,
-            stop_loss_pct=stop_loss_value,
             enable_data_sufficiency_check=data_sufficiency_check,
             rebalance_mode=final_rebalance_mode,
         )
@@ -131,7 +119,6 @@ class StrategyRules:
             bucket_topn=_resolve("BUCKET_TOPN", "bucket_topn"),
             replace_threshold=_resolve("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
-            stop_loss_pct=_resolve("STOP_LOSS_PCT", "stop_loss_pct"),
             enable_data_sufficiency_check=_resolve("ENABLE_DATA_SUFFICIENCY_CHECK", "enable_data_sufficiency_check"),
             rebalance_mode=_resolve("REBALANCE_MODE", "rebalance_mode"),
         )
@@ -142,7 +129,6 @@ class StrategyRules:
             "bucket_topn": self.bucket_topn,
             "replace_threshold": self.replace_threshold,
             "ma_type": self.ma_type,
-            "stop_loss_pct": self.stop_loss_pct,
             "enable_data_sufficiency_check": self.enable_data_sufficiency_check,
             "rebalance_mode": self.rebalance_mode,
         }

@@ -16,9 +16,6 @@ class BacktestConfig:
     ma_days: int
     ma_type: str
     replace_threshold: float
-    stop_loss_pct: float
-    cooldown_days: int
-    rsi_sell_threshold: float
     bucket_map: dict[str, int]
     bucket_topn: int
     rebalance_mode: str

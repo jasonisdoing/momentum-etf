@@ -11,24 +11,11 @@ DECISION_CONFIG = {
         # [User Request] 보유 종목 하이라이트 (연한 초록)
         "background": "#d0f0c0",
     },
-    "CUT_STOPLOSS": {
-        "display_name": "<🚨 손절매도>",
-        "order": 11,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
     "SELL_TREND": {
         "display_name": "<📉 추세이탈 매도>",
         "order": 21,
         "is_recommendation": True,
         "show_slack": True,
-    },
-    "SELL_RSI": {
-        "display_name": "<🔥 RSI 과매수 매도>",
-        "order": 22,
-        "is_recommendation": True,
-        "show_slack": True,
-        "background": "#ffb6c1",
     },
     "BUY_REPLACE": {
         "display_name": "<🔄 교체매수>",
@@ -80,7 +67,6 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
     "SOLD": "🔚 매도 완료",
     "BUY_REPLACE": "🔄 교체매수",
     "SELL_REPLACE": "🔄 교체매도",
-    "SELL_RSI": "🔥 RSI 과매수 매도",
 }
 
 
@@ -105,8 +91,6 @@ DECISION_NOTES = {
     "PRICE_DATA_FAIL": "가격 데이터 조회 실패",
     "REPLACE_SCORE": "교체 {replace_score:.1f}점수 미만",
     "DATA_INSUFFICIENT": "⚠️ 거래일 부족",
-    # 템플릿
-    "COOLDOWN_GENERIC": "쿨다운 {days}일 대기중",
 }
 
 __all__ = [

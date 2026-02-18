@@ -19,18 +19,24 @@ ACCOUNT_TUNING_CONFIG = {
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+        "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
+        "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
     },
     "kor_us": {
         "BUCKET_TOPN": [1],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+        "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
+        "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
     },
     "aus": {
         "BUCKET_TOPN": [2],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+        "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
+        "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
     },
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
@@ -38,21 +44,9 @@ ACCOUNT_TUNING_CONFIG = {
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
+        "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
+        "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
     },
-}
-
-# =========================================================
-# 공통 설정 (나머지 변수 통제)
-# =========================================================
-COMMON_TUNING_CONFIG = {
-    # 1. 손절: 5~15
-    "STOP_LOSS_PCT": [10],
-    # 2. RSI: 100
-    "OVERBOUGHT_SELL_THRESHOLD": [100],
-    # 3. 쿨다운: 0
-    "COOLDOWN_DAYS": [0],
-    # 4. 목표: 수익률 극대화
-    "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
 }
 
 
@@ -74,17 +68,14 @@ def main() -> None:
     except Exception as exc:  # pragma: no cover - 잘못된 입력 방어 전용 처리
         raise SystemExit(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 
-    # 공통 설정과 계정별 설정을 조합
-    merged_config = COMMON_TUNING_CONFIG.copy()
     account_config = ACCOUNT_TUNING_CONFIG.get(account_id, {})
-    merged_config.update(account_config)
 
     try:
         output = run_account_tuning(
             account_id,
             output_path=None,
             results_dir=RESULTS_DIR,
-            tuning_config={account_id: merged_config},
+            tuning_config={account_id: account_config},
         )
     except MissingPriceDataError as exc:
         logger.error(str(exc))

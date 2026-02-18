@@ -487,19 +487,19 @@ def _execute_tuning(
 
     topn_candidates = list(search_space.get("BUCKET_TOPN", []))
     replace_candidates = list(search_space.get("REPLACE_SCORE_THRESHOLD", []))
-    stop_loss_candidates = list(search_space.get("STOP_LOSS_PCT", []))
-    rsi_candidates = list(search_space.get("OVERBOUGHT_SELL_THRESHOLD", []))
-    cooldown_candidates = list(search_space.get("COOLDOWN_DAYS", []))
     ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
+    rebalance_mode_candidates = list(search_space.get("REBALANCE_MODE", []))
+
+    if not rebalance_mode_candidates:
+        current_rules = get_strategy_rules(account_norm)
+        rebalance_mode_candidates = [current_rules.rebalance_mode]
 
     if (
         not ma_candidates
         or not topn_candidates
         or not replace_candidates
-        or not stop_loss_candidates
-        or not rsi_candidates
-        or not cooldown_candidates
         or not ma_type_candidates
+        or not rebalance_mode_candidates
     ):
         logger.warning(
             "[튜닝] %s (%s 시작) 유효한 탐색 공간이 없습니다.",
@@ -508,15 +508,13 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, float, float, int, int, str]] = [
-        (ma, topn, replace, stop_loss, rsi, cooldown, ma_type)
+    combos: list[tuple[int, int, float, str, str]] = [
+        (ma, topn, replace, ma_type, mode)
         for ma in ma_candidates
         for topn in topn_candidates
         for replace in replace_candidates
-        for stop_loss in stop_loss_candidates
-        for rsi in rsi_candidates
-        for cooldown in cooldown_candidates
         for ma_type in ma_type_candidates
+        for mode in rebalance_mode_candidates
     ]
 
     if not combos:
@@ -575,7 +573,6 @@ def _execute_tuning(
             logger.warning("[튜닝] %s 환율 데이터 로드 실패, fallback 사용: %s", account_norm.upper(), exc)
 
     current_rules = get_strategy_rules(account_norm)
-    rebalance_mode = current_rules.rebalance_mode
 
     # 각 payload에는 파라미터만 포함 (데이터는 worker 초기화 시 한 번만 전달)
     payloads = [
@@ -584,16 +581,13 @@ def _execute_tuning(
             date_range,
             int(ma),
             int(topn),
-            float(stop_loss),
             float(replace),
-            int(rsi),
-            int(cooldown),
             str(ma_type),
-            str(rebalance_mode),
+            str(mode),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )
-        for ma, topn, replace, stop_loss, rsi, cooldown, ma_type in combos
+        for ma, topn, replace, ma_type, mode in combos
     ]
 
     logger.info(
@@ -725,11 +719,7 @@ def _execute_tuning(
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
                     "BUCKET_TOPN": int(item.get("bucket_topn", 0)),
                     "REPLACE_SCORE_THRESHOLD": _round_up_float_places(item.get("replace_threshold", 0.0), 1),
-                    "STOP_LOSS_PCT": _round_up_float_places(item.get("stop_loss_pct"), 1)
-                    if item.get("stop_loss_pct") is not None
-                    else None,
-                    "OVERBOUGHT_SELL_THRESHOLD": int(item.get("rsi_sell_threshold", 10)),
-                    "COOLDOWN_DAYS": int(item.get("cooldown_days", 2)),
+                    "REBALANCE_MODE": str(item.get("rebalance_mode", "MONTHLY")),
                 },
             }
         )
@@ -751,9 +741,7 @@ def _build_run_entry(
         "MA_MONTH": ("ma_month", True),
         "BUCKET_TOPN": ("bucket_topn", True),
         "REPLACE_SCORE_THRESHOLD": ("replace_threshold", False),
-        "STOP_LOSS_PCT": ("stop_loss_pct", False),
-        "OVERBOUGHT_SELL_THRESHOLD": ("rsi_sell_threshold", True),
-        "COOLDOWN_DAYS": ("cooldown_days", True),
+        "REBALANCE_MODE": ("rebalance_mode", True),
     }
 
     entry: dict[str, Any] = {
@@ -1066,25 +1054,17 @@ def _compose_tuning_report(
             ma_type_range = search_space.get("MA_TYPE", [])
             topn_range = search_space.get("BUCKET_TOPN", [])
             threshold_range = search_space.get("REPLACE_SCORE_THRESHOLD", [])
-            stop_loss_range = search_space.get("STOP_LOSS_PCT", [])
-            rsi_range = search_space.get("OVERBOUGHT_SELL_THRESHOLD", [])
-            cooldown_range = search_space.get("COOLDOWN_DAYS", [])
-
             # MA_TYPE이 있으면 포함해서 표시
             if ma_type_range and len(ma_type_range) > 1:
                 lines.append(
                     f"| 탐색 공간: MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
-                    f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
-                    f"× RSI {len(rsi_range)}개 "
-                    f"× COOLDOWN {len(cooldown_range)}개 "
+                    f"× 교체점수 {len(threshold_range)}개 × 리밸런스 {len(search_space.get('REBALANCE_MODE', []))}개 "
                     f"= {tuning_metadata.get('combo_count', 0)}개 조합"
                 )
             else:
                 lines.append(
                     f"| 탐색 공간: MA {len(ma_month_range)}개 × TOPN {len(topn_range)}개 "
-                    f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
-                    f"× RSI {len(rsi_range)}개 "
-                    f"× COOLDOWN {len(cooldown_range)}개 "
+                    f"× 교체점수 {len(threshold_range)}개 × 리밸런스 {len(search_space.get('REBALANCE_MODE', []))}개 "
                     f"= {tuning_metadata.get('combo_count', 0)}개 조합"
                 )
             # 각 파라미터 범위 표시
@@ -1099,16 +1079,10 @@ def _compose_tuning_report(
             if threshold_range:
                 th_min, th_max = min(threshold_range), max(threshold_range)
                 lines.append(f"|   REPLACE_SCORE_THRESHOLD: {th_min}~{th_max}")
-            if stop_loss_range:
-                sl_min, sl_max = min(stop_loss_range), max(stop_loss_range)
-                lines.append(f"|   STOP_LOSS_PCT: {sl_min}~{sl_max}")
-            if rsi_range:
-                rsi_min, rsi_max = min(rsi_range), max(rsi_range)
-                lines.append(f"|   OVERBOUGHT_SELL_THRESHOLD: {rsi_min}~{rsi_max}")
 
-            if cooldown_range:
-                cd_min, cd_max = min(cooldown_range), max(cooldown_range)
-                lines.append(f"|   COOLDOWN_DAYS: {cd_min}~{cd_max}")
+            rebalance_range = search_space.get("REBALANCE_MODE", [])
+            if rebalance_range:
+                lines.append(f"|   REBALANCE_MODE: {', '.join(rebalance_range)}")
 
         # 종목 수
         ticker_count = tuning_metadata.get("ticker_count", 0)
@@ -1269,11 +1243,7 @@ def _compose_tuning_report(
             ma_type_val = tuning.get("MA_TYPE", "SMA")
             topn_val = tuning.get("BUCKET_TOPN")
             threshold_val = tuning.get("REPLACE_SCORE_THRESHOLD")
-            stop_loss_val = entry.get("stop_loss_pct")
-            if stop_loss_val is None:
-                stop_loss_val = tuning.get("STOP_LOSS_PCT")
-            rsi_val = tuning.get("OVERBOUGHT_SELL_THRESHOLD")
-            cooldown_val = tuning.get("COOLDOWN_DAYS")
+            rebalance_val = tuning.get("REBALANCE_MODE", "MONTHLY")
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -1287,9 +1257,7 @@ def _compose_tuning_report(
                     "ma_type": ma_type_val,
                     "bucket_topn": topn_val,
                     "replace_threshold": threshold_val,
-                    "stop_loss_pct": stop_loss_val,
-                    "rsi_sell_threshold": rsi_val,
-                    "cooldown_days": cooldown_val,
+                    "rebalance_mode": rebalance_val,
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
@@ -1415,22 +1383,11 @@ def run_account_tuning(
         dtype=float,
         fallback=base_rules.replace_threshold,
     )
-    stop_loss_fallback = base_rules.stop_loss_pct if base_rules.stop_loss_pct is not None else base_rules.bucket_topn
-    stop_loss_values = _normalize_tuning_values(
-        config.get("STOP_LOSS_PCT"),
-        dtype=float,
-        fallback=stop_loss_fallback,
-    )
-    rsi_sell_values = _normalize_tuning_values(
-        config.get("OVERBOUGHT_SELL_THRESHOLD"),
-        dtype=int,
-        fallback=10,
-    )
-    cooldown_values = _normalize_tuning_values(
-        config.get("COOLDOWN_DAYS"),
-        dtype=int,
-        fallback=2,
-    )
+
+    # MA_TYPE 처리: 문자열 리스트로 받음
+    ma_type_raw = config.get("MA_TYPE")
+    if ma_type_raw is None:
+        ma_type_values = [base_rules.ma_type]
 
     # MA_TYPE 처리: 문자열 리스트로 받음
     ma_type_raw = config.get("MA_TYPE")
@@ -1444,15 +1401,13 @@ def run_account_tuning(
     if not ma_type_values:
         ma_type_values = [base_rules.ma_type]
 
-    if (
-        (not ma_values and not ma_month_values)
-        or not topn_values
-        or not replace_values
-        or not stop_loss_values
-        or not rsi_sell_values
-        or not cooldown_values
-        or not ma_type_values
-    ):
+    rebalance_mode_values = _normalize_tuning_values(
+        config.get("REBALANCE_MODE"),
+        dtype=str,
+        fallback=base_rules.rebalance_mode,
+    )
+
+    if (not ma_values and not ma_month_values) or not topn_values or not replace_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
@@ -1484,10 +1439,8 @@ def run_account_tuning(
         (len(ma_month_values) if ma_month_values else len(ma_values))
         * len(topn_values)
         * len(replace_values)
-        * len(stop_loss_values)
-        * len(rsi_sell_values)
-        * len(cooldown_values)
         * len(ma_type_values)
+        * len(rebalance_mode_values)
     )
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
@@ -1506,31 +1459,24 @@ def run_account_tuning(
         "MA_MONTH": ma_month_values or ma_values,
         "BUCKET_TOPN": topn_values,
         "REPLACE_SCORE_THRESHOLD": replace_values,
-        "STOP_LOSS_PCT": stop_loss_values,
-        "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
-        "COOLDOWN_DAYS": cooldown_values,
         "MA_TYPE": ma_type_values,
+        "REBALANCE_MODE": rebalance_mode_values,
         "OPTIMIZATION_METRIC": [optimization_metric],
     }
 
     ma_count = len(ma_month_values) if ma_month_values else len(ma_values)
     topn_count = len(topn_values)
     replace_count = len(replace_values)
-    stop_loss_count = len(stop_loss_values)  # Defined for logger.info
-    rsi_sell_count = len(rsi_sell_values)  # Defined for logger.info
-    cooldown_count = len(cooldown_values)
-    ma_type_count = len(ma_type_values)  # Defined for logger.info
+    ma_type_count = len(ma_type_values)
+    rebalance_count = len(rebalance_mode_values)
 
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × 교체점수 %d개 × 손절 %d개 "
-        "× RSI %d개 × COOLDOWN %d개 × MA_TYPE %d개 = %d개 조합",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × 교체점수 %d개 × MA_TYPE %d개 × 리밸런스 %d개 = %d개 조합",
         ma_count,
         topn_count,
         replace_count,
-        stop_loss_count,
-        rsi_sell_count,
-        cooldown_count,
         ma_type_count,
+        rebalance_count,
         combo_count,
     )
 
@@ -1685,9 +1631,7 @@ def run_account_tuning(
             "MA_TYPE": list(ma_type_values),
             "BUCKET_TOPN": list(topn_values),
             "REPLACE_SCORE_THRESHOLD": list(replace_values),
-            "STOP_LOSS_PCT": list(stop_loss_values),
-            "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
-            "COOLDOWN_DAYS": list(cooldown_values),
+            "REBALANCE_MODE": list(rebalance_mode_values),
             "OPTIMIZATION_METRIC": optimization_metric,
         },
         "data_period": {
@@ -1811,9 +1755,7 @@ def run_account_tuning(
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
                             "BUCKET_TOPN": int(entry.get("bucket_topn", 0)),
                             "REPLACE_SCORE_THRESHOLD": _round_up_float_places(entry.get("replace_threshold", 0.0), 1),
-                            "STOP_LOSS_PCT": _round_up_float_places(entry.get("stop_loss_pct", 0.0), 1),
-                            "OVERBOUGHT_SELL_THRESHOLD": int(entry.get("rsi_sell_threshold", 10)),
-                            "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
+                            "REBALANCE_MODE": str(entry.get("rebalance_mode", "MONTHLY")),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)
@@ -1962,7 +1904,6 @@ def run_account_tuning(
                 "MA_MONTH": ma_values,
                 "BUCKET_TOPN": topn_values,
                 "REPLACE_SCORE_THRESHOLD": replace_values,
-                "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
             },
             "month_configs": debug_month_configs,
             "excluded_tickers_initial": sorted(excluded_ticker_set),
