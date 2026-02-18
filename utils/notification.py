@@ -136,18 +136,18 @@ def compose_recommendation_slack_message(
     summary_data = getattr(report, "summary_data", None)
 
     held_count: int | None = None
-    portfolio_topn: int | None = None
+    bucket_topn: int | None = None
     if isinstance(summary_data, dict):
         held_raw = summary_data.get("held_count")
-        topn_raw = summary_data.get("portfolio_topn")
+        topn_raw = summary_data.get("bucket_topn")
         try:
             held_count = int(held_raw) if held_raw is not None else None
         except (TypeError, ValueError):
             held_count = None
         try:
-            portfolio_topn = int(topn_raw) if topn_raw is not None else None
+            bucket_topn = int(topn_raw) if topn_raw is not None else None
         except (TypeError, ValueError):
-            portfolio_topn = None
+            bucket_topn = None
 
     state_counter: Counter[str] = Counter()
     if isinstance(decision_config, dict):
@@ -184,21 +184,21 @@ def compose_recommendation_slack_message(
         from core.backtest.portfolio import count_current_holdings
 
         held_count = count_current_holdings(recommendations)
-    if portfolio_topn is None:
+    if bucket_topn is None:
         strategy_params = (
             resolve_strategy_params((account_settings or {}).get("strategy", {})) if account_settings else {}
         )
         topn_candidates = [
-            getattr(report, "portfolio_topn", None),
-            (account_settings or {}).get("portfolio_topn") if account_settings else None,
-            strategy_params.get("PORTFOLIO_TOPN"),
+            getattr(report, "bucket_topn", None),
+            (account_settings or {}).get("bucket_topn") if account_settings else None,
+            strategy_params.get("BUCKET_TOPN"),
         ]
         for candidate in topn_candidates:
             try:
-                portfolio_topn = int(candidate)
+                bucket_topn = int(candidate)
                 break
             except (TypeError, ValueError, AttributeError):
-                portfolio_topn = None
+                bucket_topn = None
 
     mobile_account = account_norm or (account_id or "").strip()
     mobile_url = f"https://etf.dojason.com/{mobile_account}" if mobile_account else "https://etf.dojason.com"
@@ -206,7 +206,7 @@ def compose_recommendation_slack_message(
     lines = [
         app_prefix + headline,
         f"생성시간: {duration:.1f}초",
-        f"보유종목: {_format_hold_ratio(held_count, portfolio_topn)}",
+        f"보유종목: {_format_hold_ratio(held_count, bucket_topn)}",
         f"모바일: {mobile_url}",
     ]
     if ordered_states:
@@ -229,7 +229,7 @@ def compose_recommendation_slack_message(
         {"type": "mrkdwn", "text": f"*소요시간*: {duration:.1f}초"},
         {
             "type": "mrkdwn",
-            "text": f"*보유*: {_format_hold_ratio(held_count, portfolio_topn)}",
+            "text": f"*보유*: {_format_hold_ratio(held_count, bucket_topn)}",
         },
     ]
 
@@ -237,7 +237,7 @@ def compose_recommendation_slack_message(
     strategy_params = getattr(report, "strategy_params", {})
     if isinstance(strategy_params, dict):
         ma_month = strategy_params.get("MA_MONTH")
-        topn = strategy_params.get("PORTFOLIO_TOPN")
+        topn = strategy_params.get("BUCKET_TOPN")
         replace_threshold = strategy_params.get("REPLACE_SCORE_THRESHOLD")
 
         params_str_parts = []
@@ -351,10 +351,10 @@ def build_summary_line_from_summary_data(
 
     if include_hold:
         held_count = summary_data.get("held_count")
-        portfolio_topn = summary_data.get("portfolio_topn")
-        if held_count is not None and portfolio_topn is not None:
+        bucket_topn = summary_data.get("bucket_topn")
+        if held_count is not None and bucket_topn is not None:
             try:
-                parts.append(f"보유종목: {int(held_count)}/{int(portfolio_topn)}")
+                parts.append(f"보유종목: {int(held_count)}/{int(bucket_topn)}")
             except (TypeError, ValueError):
                 pass
 

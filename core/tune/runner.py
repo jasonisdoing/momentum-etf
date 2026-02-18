@@ -20,7 +20,6 @@ from pandas import DataFrame, Timestamp
 
 from config import TRADING_DAYS_PER_MONTH
 from core.backtest.runner import run_account_backtest
-from core.entry_point import StrategyRules
 from core.tune.reporting import (
     _export_combo_debug,
     _export_prefetched_data,
@@ -34,6 +33,7 @@ from core.tune.worker import (
     evaluate_single_combo,
     init_worker_prefetch,
 )
+from strategies.maps.rules import StrategyRules
 from utils.account_registry import get_benchmark_tickers, get_strategy_rules
 from utils.cache_utils import save_cached_frame
 from utils.data_loader import (
@@ -250,7 +250,6 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         strategy_data.update(legacy_tuning)
 
     # Legacy cleanup
-    strategy_data.pop("PORTFOLIO_TOPN", None)
 
     integer_keys = {
         "REPLACE_SCORE_THRESHOLD",

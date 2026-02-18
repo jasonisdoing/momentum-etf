@@ -47,8 +47,7 @@ python recommend.py us
 {
   "strategy": {
     "MA_MONTH": 12,          // 이동평균 기간 (개월)
-    "PORTFOLIO_TOPN": 1,     // 버킷 내 최대 보유 종목 수 (TOP N)
-    "BUCKET_TOPN": 2,        // 포트폴리오 전체 버킷 수 (상위 N개 버킷만 투자)
+    "BUCKET_TOPN": 1,     // 버켓 내 최대 보유 종목 수 (TOP N)
     "STOP_LOSS_PCT": 10,     // 손절 기준 (10%)
     "BACKTEST_START_DATE": "2025-02-01"  // 백테스트/튜닝 시작일
   }

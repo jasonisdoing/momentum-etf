@@ -654,7 +654,7 @@ def render_account_page(account_id: str) -> None:
     country_code = _normalize_code(account_settings.get("country_code"), account_id)
     page_icon = account_settings.get("icon") or get_icon_fallback(country_code)
 
-    # 메뉴명과 동일한 이름 사용 (PORTFOLIO_TOPN 포함)
+    # 메뉴명과 동일한 이름 사용 (BUCKET_TOPN 포함)
     account_configs = load_account_configs()
     account_name = None
     for config in account_configs:
@@ -742,7 +742,7 @@ def render_account_page(account_id: str) -> None:
                 params_to_show.update(
                     {
                         "MA타입": strategy_tuning.get("MA_TYPE"),
-                        "TopN": strategy_tuning.get("PORTFOLIO_TOPN"),
+                        "TopN": strategy_tuning.get("BUCKET_TOPN"),
                         "교체점수": strategy_tuning.get("REPLACE_SCORE_THRESHOLD"),
                         "과매수 지표": strategy_tuning.get("OVERBOUGHT_SELL_THRESHOLD"),
                         "쿨다운 일자": strategy_tuning.get("COOLDOWN_DAYS"),
@@ -778,7 +778,7 @@ def render_account_page(account_id: str) -> None:
                 hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
                 if df is not None:
                     current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-                    target_topn = strategy_tuning.get("PORTFOLIO_TOPN") if isinstance(strategy_tuning, dict) else None
+                    target_topn = strategy_tuning.get("BUCKET_TOPN") if isinstance(strategy_tuning, dict) else None
                     if target_topn:
                         caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
             except Exception:

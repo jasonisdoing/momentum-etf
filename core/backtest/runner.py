@@ -10,7 +10,8 @@ from typing import Any
 import pandas as pd
 
 from config import TRADING_DAYS_PER_MONTH
-from core.entry_point import StrategyRules, run_portfolio_backtest
+from core.backtest.engine import run_portfolio_backtest
+from strategies.maps.rules import StrategyRules
 from utils.account_registry import get_common_file_settings
 from utils.data_loader import get_exchange_rate_series, get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger

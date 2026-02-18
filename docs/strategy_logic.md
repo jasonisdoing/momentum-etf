@@ -13,7 +13,7 @@
 5.  **대체헷지 (Alternative/Hedge)**: 금, 원자재, 채권 등 주식과의 상관관계가 낮은 자산.
 
 ### 버킷 내 종목 선정 (Selection)
-각 버킷별로 등록된 ETF 후보군 중에서 **MAPS 점수**가 가장 높은 상위 종목(`PORTFOLIO_TOPN`)을 선별하여 투자합니다.
+각 버킷별로 등록된 ETF 후보군 중에서 **MAPS 점수**가 가장 높은 상위 종목(`BUCKET_TOPN`)을 선별하여 투자합니다.
 
 ## 2. 추세 분석 알고리즘 (MAPS)
 
@@ -94,6 +94,6 @@
 
 ### 주요 튜닝 파라미터
 *   `MA_MONTH`: 이동평균 기간 (예: 3개월, 6개월, 12개월)
-*   `PORTFOLIO_TOPN`: 최대 보유 종목 수
+*   `BUCKET_TOPN`: 버켓 내 최대 보유 종목 수
 *   `REPLACE_SCORE_THRESHOLD`: 교체 매매를 위한 점수 차이 기준
 *   `OVERBOUGHT_SELL_THRESHOLD`: RSI 과매수 기준값

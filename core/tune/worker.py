@@ -9,11 +9,11 @@ import pandas as pd
 from pandas import DataFrame
 
 from core.backtest.runner import run_account_backtest
-from core.entry_point import StrategyRules
 from core.tune.reporting import (
     _round_float,
     _safe_float,
 )
+from strategies.maps.rules import StrategyRules
 
 # Worker 글로벌 변수 - 프로세스당 한 번만 초기화
 _WORKER_PREFETCHED_DATA: Mapping[str, DataFrame] | None = None

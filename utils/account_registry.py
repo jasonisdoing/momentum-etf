@@ -67,12 +67,12 @@ def _load_account_configs_impl() -> list[dict[str, Any]]:
         country_code = _normalize_code(settings.get("country_code"), account_id)
         base_name = settings.get("name") or account_id.upper()
 
-        # 현재 보유 종목 수와 PORTFOLIO_TOPN을 이름에 추가
-        portfolio_topn = None
+        # 현재 보유 종목 수와 BUCKET_TOPN을 이름에 추가
+        bucket_topn = None
         strategy = settings.get("strategy", {})
         if isinstance(strategy, dict):
             params = resolve_strategy_params(strategy)
-            portfolio_topn = params.get("PORTFOLIO_TOPN")
+            bucket_topn = params.get("BUCKET_TOPN")
 
         # 현재 보유 종목 수 조회 (추천 결과에서 HOLD 상태 종목 수 계산)
         holdings_count = 0
@@ -92,8 +92,8 @@ def _load_account_configs_impl() -> list[dict[str, Any]]:
             logger.debug(f"[{account_id}] 보유 종목 수 조회 실패: {e}")
             holdings_count = 0
 
-        if portfolio_topn is not None:
-            name = f"{base_name}({holdings_count}/{portfolio_topn})"
+        if bucket_topn is not None:
+            name = f"{base_name}({holdings_count}/{bucket_topn})"
         else:
             name = base_name
 

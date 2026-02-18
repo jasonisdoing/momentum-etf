@@ -17,7 +17,7 @@ class StrategyRules:
     DEFAULT_MA_TYPE = "SMA"
 
     ma_days: int
-    bucket_topn: int  # Renamed from portfolio_topn
+    bucket_topn: int
     replace_threshold: float
     ma_type: str = "SMA"
     stop_loss_pct: float | None = None
@@ -29,11 +29,6 @@ class StrategyRules:
     # [신규] 음수 점수 허용 여부 (상대 모멘텀)
     allow_negative_score: bool = True
 
-    @property
-    def portfolio_topn(self) -> int:
-        """Legacy support for portfolio_topn."""
-        return self.bucket_topn
-
     @classmethod
     def from_values(
         cls,
@@ -41,7 +36,6 @@ class StrategyRules:
         ma_days: Any = None,
         ma_month: Any = None,
         bucket_topn: Any = None,
-        portfolio_topn: Any = None,  # Legacy support
         replace_threshold: Any,
         ma_type: Any = None,
         stop_loss_pct: Any = None,
@@ -71,9 +65,9 @@ class StrategyRules:
                 raise ValueError("MA_MONTH은 필수입니다.")
             raise ValueError("MA_MONTH은 0보다 큰 정수여야 합니다.")
 
-        # TOPN 처리 (BUCKET_TOPN 우선, 없으면 PORTFOLIO_TOPN)
+        # TOPN 처리 (BUCKET_TOPN)
         final_bucket_topn = 1
-        topn_source = bucket_topn if bucket_topn is not None else portfolio_topn
+        topn_source = bucket_topn
 
         try:
             topn_val = int(topn_source)
@@ -82,7 +76,7 @@ class StrategyRules:
             else:
                 raise ValueError
         except (TypeError, ValueError):
-            raise ValueError("BUCKET_TOPN(또는 PORTFOLIO_TOPN)은 0보다 큰 정수여야 합니다.")
+            raise ValueError("BUCKET_TOPN은 0보다 큰 정수여야 합니다.")
 
         try:
             replace_threshold_float = float(replace_threshold)
@@ -138,7 +132,6 @@ class StrategyRules:
             ma_month=_resolve("MA_MONTH", "ma_month"),
             ma_days=_resolve("ma_days"),
             bucket_topn=_resolve("BUCKET_TOPN", "bucket_topn"),
-            portfolio_topn=_resolve("PORTFOLIO_TOPN", "portfolio_topn"),
             replace_threshold=_resolve("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
             stop_loss_pct=_resolve("STOP_LOSS_PCT", "stop_loss_pct"),
