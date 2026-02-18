@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 from config import MIN_TRADING_DAYS
-from logic.backtest.signals import calculate_consecutive_days
+from core.backtest.signals import calculate_consecutive_days
 from strategies.rsi.backtest import process_ticker_data_rsi
 from utils.indicators import calculate_ma_score
 from utils.moving_averages import calculate_moving_average

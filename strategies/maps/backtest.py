@@ -6,7 +6,7 @@
 
 import pandas as pd
 
-from logic.backtest.engine import run_portfolio_backtest
+from core.backtest.engine import run_portfolio_backtest
 from strategies.maps.metrics import process_ticker_data
 from utils.data_loader import fetch_ohlcv
 from utils.logger import get_app_logger

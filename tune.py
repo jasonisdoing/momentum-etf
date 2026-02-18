@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from logic.tune.runner import run_account_tuning
+from old_logic.tune.runner import run_account_tuning
 from utils.account_registry import get_account_settings, get_strategy_rules
 from utils.data_loader import MissingPriceDataError
 from utils.logger import get_app_logger
@@ -14,28 +14,27 @@ from utils.logger import get_app_logger
 # 계좌별 성격 맞춤형 설정
 # =========================================================
 ACCOUNT_TUNING_CONFIG = {
-    # 🇰🇷 국내 ETF: PORTFOLIO_TOPN 테스트 중
     "kor_kr": {
-        "PORTFOLIO_TOPN": [5, 6, 7],
+        "BUCKET_TOPN": [2],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     "kor_us": {
-        "PORTFOLIO_TOPN": [4, 5],
+        "BUCKET_TOPN": [1],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     "aus": {
-        "PORTFOLIO_TOPN": [6],
+        "BUCKET_TOPN": [2],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
-        "PORTFOLIO_TOPN": [4],
+        "BUCKET_TOPN": [2],
         "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],

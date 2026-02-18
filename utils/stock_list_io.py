@@ -224,6 +224,7 @@ def save_etfs(account_id: str, data: list[dict]) -> None:
         ticker = str(item.get("ticker") or "").strip()
         if not ticker:
             continue
+        ticker = ticker.upper()
         new_tickers.add(ticker)
 
         doc = dict(item)
@@ -274,7 +275,7 @@ def add_stock(account_id: str, ticker: str, name: str = "", **extra_fields: Any)
     이미 존재하면(삭제된 경우 포함) 활성 상태로 복구한다.
     """
     account_norm = (account_id or "").strip().lower()
-    ticker_norm = str(ticker or "").strip()
+    ticker_norm = str(ticker or "").strip().upper()
     if not account_norm or not ticker_norm:
         return False
 
@@ -324,6 +325,7 @@ def add_stock(account_id: str, ticker: str, name: str = "", **extra_fields: Any)
         "added_date": now.strftime("%Y-%m-%d"),
         "is_deleted": False,
         "deleted_at": None,
+        "bucket": 1,
     }
     doc.update(extra_fields)
 
@@ -334,6 +336,30 @@ def add_stock(account_id: str, ticker: str, name: str = "", **extra_fields: Any)
         return True
     except Exception as exc:
         logger.warning("종목 추가 실패 %s (account=%s): %s", ticker_norm, account_norm, exc)
+        return False
+
+
+def update_stock(account_id: str, ticker: str, **update_fields: Any) -> bool:
+    """종목 정보를 업데이트한다."""
+    account_norm = (account_id or "").strip().lower()
+    ticker_norm = str(ticker or "").strip()
+    if not account_norm or not ticker_norm:
+        return False
+
+    coll = _get_collection()
+    if coll is None:
+        return False
+
+    update_fields["updated_at"] = datetime.now(timezone.utc)
+
+    try:
+        result = coll.update_one({"account_id": account_norm, "ticker": ticker_norm}, {"$set": update_fields})
+        if result.modified_count > 0:
+            _invalidate_cache(account_norm)
+            return True
+        return False
+    except Exception as exc:
+        logger.warning("종목 업데이트 실패 %s (account=%s): %s", ticker_norm, account_norm, exc)
         return False
 
 

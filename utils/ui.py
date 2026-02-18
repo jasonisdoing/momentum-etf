@@ -122,7 +122,7 @@ TABLE_ROW_HEIGHT = 36
 TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT
 
 DEFAULT_COMPACT_COLUMNS_BASE = [
-    "#",
+    "버킷",
     "티커",
     "종목명",
     "상태",
@@ -369,18 +369,22 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
 
 def render_recommendation_table(
     df: pd.DataFrame,
-    *,
-    country_code: str,
+    country_code: str | None = None,
     visible_columns: list[str] | None = None,
+    grouped_by_bucket: bool = True,
 ) -> None:
-    styled_df = _style_rows_by_state(df, country_code=country_code)
+    # 스타일링 준비 (전체 DF 기준)
+    # 하지만 여기서는 버킷별로 쪼개서 보여줘야 하므로, 쪼갠 뒤 각각 스타일링 적용 필요
+    # 기존 _style_rows_by_state는 DF 전체를 스타일링함.
 
     price_label = "현재가"
     country_lower = (country_code or "").strip().lower()
     show_deviation = country_lower in {"kr", "kor"}
 
+    # 공통 컬럼 설정
     column_config_map: dict[str, st.column_config.BaseColumn] = {
-        "#": st.column_config.TextColumn("#", width=50),
+        "#": st.column_config.TextColumn("#", width=65),
+        "버킷": st.column_config.TextColumn("버킷", width=85),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
@@ -404,23 +408,119 @@ def render_recommendation_table(
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")
 
+    # [Segmentation] 1~5 버킷 순회
+    # 버킷 매핑 (app_pages.account_page와 동일하게 유지하거나, 여기서 정의)
+    bucket_names = {
+        1: "1. 모멘텀",
+        2: "2. 혁신기술",
+        3: "3. 시장지수",
+        4: "4. 배당방어",
+        5: "5. 대체헷지",
+    }
+
+    # DataFrame에 'bucket' 컬럼이 없으면 전체를 하나로 표시 (하위 호환)
+    if "bucket" not in df.columns:
+        if grouped_by_bucket:
+            st.warning("버킷 정보가 없습니다. 전체 목록을 표시합니다.")
+        _render_single_table(df, country_code, column_config_map, visible_columns)
+        return
+
+    # [Aggregation] 전체를 하나로 표시 (로그와 포맷 일원화)
+    if not grouped_by_bucket:
+        # recommend.py에서 이미 rank_order로 정렬되어 있으므로 그대로 사용하되,
+        # 혹시 모르니 보장함 (단, rank_order가 없는 구시작 데이터 고려)
+        df_sorted = df.copy()
+
+        # [User Request] # 컬럼과 버킷 컬럼을 모두 사용 (추천 로그와 동일하게)
+        # utils/recommendations.py에서 이미 #과 버킷 컬럼이 생성됨
+
+        # 컬럼 구성 설정
+        if visible_columns is None:
+            visible_columns = list(df_sorted.columns)
+            # '# '와 '버킷'을 맨 앞으로
+            for col in reversed(["#", "버킷"]):
+                if col in visible_columns:
+                    visible_columns.insert(0, visible_columns.pop(visible_columns.index(col)))
+
+        # 'bucket' (숫자) 제외
+        final_columns = [c for c in visible_columns if c != "bucket"]
+
+        _render_single_table(df_sorted, country_code, column_config_map, final_columns)
+        return
+
+    # 버킷별 렌더링
+    has_data = False
+    for bucket_idx in range(1, 6):
+        # 해당 버킷 데이터 필터링
+        sub_df = df[df["bucket"] == bucket_idx].copy()
+        if sub_df.empty:
+            continue
+
+        has_data = True
+        bucket_name = bucket_names.get(bucket_idx, f"Bucket {bucket_idx}")
+
+        st.subheader(f"{bucket_name} ({len(sub_df)})")
+        # 버킷 컬럼은 표시할 필요 없으므로 제외 (옵션)
+        _render_single_table(sub_df, country_code, column_config_map, visible_columns)
+        st.write("")  # 간격
+
+    if not has_data:
+        st.info("표시할 추천 종목이 없습니다.")
+
+
+def _render_single_table(
+    df: pd.DataFrame,
+    country_code: str,
+    column_config_map: dict,
+    visible_columns: list[str] | None = None,
+) -> None:
+    """단일 테이블 렌더링 헬퍼"""
+    styled_df = _style_rows_by_state(df, country_code=country_code)
+
     if visible_columns:
         columns = [col for col in visible_columns if col in df.columns]
-        styled_df = styled_df.reindex(columns=columns)
+        # visible_columns에 없는 컬럼은 제외
+        # 단, 스타일링을 위해 필요한 데이터가 날아가지 않도록 주의 (style object는 df 참조함)
+        # st.dataframe은 pandas Styler 객체를 받으면, columns 인자로 표시 컬럼 제어 가능?
+        # -> st.dataframe(styled_df, column_order=...) 사용
+        pass
     else:
         columns = list(df.columns)
+        # bucket 등 내부용 컬럼 제외
+        if "bucket" in columns:
+            columns.remove("bucket")
 
-    selected_column_config = {key: column_config_map[key] for key in columns if key in column_config_map}
+    # column_order를 위해 filtered columns 준비
+    column_order = [col for col in columns if col in column_config_map]
+    # config map에 없는 컬럼도 표시하고 싶다면 추가해야 함.
+    # 여기서는 config map에 있는 것만 우선 표시
 
-    row_count = len(df.index) if len(df.index) < TABLE_VISIBLE_ROWS else TABLE_VISIBLE_ROWS - 1
-    table_height = max(TABLE_ROW_HEIGHT * (row_count + 1), TABLE_ROW_HEIGHT * 6)
+    # 나머지 컬럼도 추가 (config 정의 안된 것들)
+    for col in columns:
+        if col not in column_order:
+            column_order.append(col)
+
+    selected_column_config = {key: column_config_map[key] for key in column_order if key in column_config_map}
+
+    # 높이 자동 조절
+    # 행 개수에 따라 조절하되, 최대 높이 제한
+    row_count = len(df.index)
+    # 헤더(1) + 행(N) : 높이 계산
+    # st.dataframe의 height는 픽셀 단위.
+    # 대략 row당 35~40px
+    calc_height = (row_count + 1) * 35 + 10
+    if calc_height > 600:
+        calc_height = 600
+    if calc_height < 150:
+        calc_height = 150
 
     st.dataframe(
         styled_df,
         hide_index=True,
         width="stretch",
-        height=table_height,
+        height=calc_height,
         column_config=selected_column_config,
+        column_order=column_order,
     )
 
 

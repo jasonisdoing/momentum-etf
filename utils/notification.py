@@ -181,7 +181,7 @@ def compose_recommendation_slack_message(
 
     if held_count is None:
         # 현재 물리적으로 보유 중인 종목 수 (매도 예정 포함)
-        from logic.backtest import count_current_holdings
+        from core.backtest.portfolio import count_current_holdings
 
         held_count = count_current_holdings(recommendations)
     if portfolio_topn is None:

@@ -115,7 +115,7 @@ class StrategyEvaluator:
         Returns:
             (is_buy_signal, phrase)
         """
-        from logic.backtest.signals import has_buy_signal
+        from core.backtest.signals import has_buy_signal
 
         if has_buy_signal(score, 0):
             if buy_cooldown_info:

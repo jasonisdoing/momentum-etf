@@ -13,7 +13,7 @@ from scripts.update_price_cache import refresh_cache_for_target
 from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.data_loader import fetch_ohlcv
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
-from utils.stock_list_io import add_stock, check_stock_status, get_deleted_etfs, get_etfs, remove_stock
+from utils.stock_list_io import add_stock, check_stock_status, get_deleted_etfs, get_etfs, remove_stock, update_stock
 from utils.stock_meta_updater import fetch_stock_info, update_account_metadata
 from utils.ui import format_relative_time, load_account_recommendations, render_recommendation_table
 
@@ -40,10 +40,25 @@ _DATAFRAME_CSS = """
 </style>
 """
 
+BUCKET_MAPPING = {
+    1: "1. 모멘텀",
+    2: "2. 혁신기술",
+    3: "3. 시장지수",
+    4: "4. 배당방어",
+    5: "5. 대체헷지",
+}
+BUCKET_OPTIONS = list(BUCKET_MAPPING.values())
+BUCKET_REVERSE_MAPPING = {v: k for k, v in BUCKET_MAPPING.items()}
+
 
 def _normalize_code(value: Any, fallback: str) -> str:
     text = str(value or "").strip().lower()
     return text or fallback
+
+
+# ---------------------------------------------------------------------------
+# 종목관리 탭: stocks.json 메타정보 테이블
+# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -59,9 +74,13 @@ def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
 
     rows: list[dict[str, Any]] = []
     for idx, etf in enumerate(etfs, 1):
+        bucket_val = etf.get("bucket", 1)
+        bucket_str = BUCKET_MAPPING.get(bucket_val, "1. 모멘텀")
+
         rows.append(
             {
                 "#": idx,
+                "버킷": bucket_str,
                 "티커": etf.get("ticker", ""),
                 "종목명": etf.get("name", ""),
                 "추가일자": etf.get("added_date", "-"),
@@ -76,7 +95,7 @@ def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
         )
     df = pd.DataFrame(rows)
     if not df.empty and "1주(%)" in df.columns:
-        df = df.sort_values(by="1주(%)", ascending=False)
+        df = df.sort_values(by=["버킷", "1주(%)"], ascending=[True, False])
     return df
 
 
@@ -92,112 +111,128 @@ def _render_stocks_meta_table(account_id: str) -> None:
     is_updating_price = st.session_state.get(key_price, False)
     is_updating = is_updating_meta or is_updating_price
 
+    # 상단 컨트롤: 이제 관리 모드는 상시 활성화 (사용자 요청)
+    # 상단 컨트롤: 이제 관리 모드는 상시 활성화 (사용자 요청)
+    readonly = is_updating
+
     df = _build_stocks_meta_table(account_id)
+
     if df.empty:
-        st.info("종목 데이터가 없습니다.")
-        return
-
-    st.caption(f"총 {len(df)}개 종목 (Source: MongoDB)")
-
-    # 상단 컨트롤: 편집 모드 토글
-    col_toggle, _ = st.columns([1, 4])
-    with col_toggle:
-        edit_mode = st.toggle("관리 모드 (삭제)", value=False, key=f"toggle_edit_{account_id}", disabled=is_updating)
-
-    # 업데이트 중이거나 편집 모드가 아닐 때는 Readonly (컬러 표시)
-    readonly = not edit_mode or is_updating
-
-    # --- 관리 도구 (업데이트 버튼 & 종목 추가/삭제) ---
-    # (Old expander removed to avoid duplicate keys and use new UI below)
-
-    def _color_pct(val: float | str) -> str:
-        if val is None or pd.isna(val):
-            return ""
-        try:
-            num = float(val)
-        except (TypeError, ValueError):
-            return ""
-        if num > 0:
-            return "color: red"
-        if num < 0:
-            return "color: blue"
-        return "color: black"
-
-    pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
-    styled = df.style
-    for col in pct_columns:
-        if col in df.columns:
-            styled = styled.map(_color_pct, subset=pd.IndexSlice[:, col])
-
-    # 편집 가능하도록 '삭제' 컬럼 추가
-    df_edit = df.copy()
-    if not readonly:
-        df_edit.insert(0, "삭제", False)
-
-    # DataFrame 표시
-    column_config = {
-        "삭제": st.column_config.CheckboxColumn("삭제", width="small") if not readonly else None,
-        "#": st.column_config.TextColumn("#", width=50),
-        "티커": st.column_config.TextColumn("티커", width=80),
-        "종목명": st.column_config.TextColumn("종목명", width=300),
-        "추가일자": st.column_config.TextColumn("추가일자", width=100),
-        "상장일": st.column_config.TextColumn("상장일", width=110),
-        "주간거래량": st.column_config.NumberColumn("주간거래량", width=120, format="%d"),
-        "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
-        "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
-        "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
-        "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
-        "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
-    }
-
-    # readonly 모드일 때는 삭제 컬럼 제외
-    if readonly:
-        if "삭제" in column_config:
-            del column_config["삭제"]
-
-    column_order = [
-        "삭제",
-        "#",
-        "티커",
-        "종목명",
-        "상장일",
-        "주간거래량",
-        "1주(%)",
-        "1달(%)",
-        "3달(%)",
-        "6달(%)",
-        "12달(%)",
-        "추가일자",
-    ]
-    if readonly:
-        column_order = [c for c in column_order if c != "삭제"]
-
-    existing_columns = [col for col in column_order if col in df_edit.columns]
-
-    if readonly:
-        # 갱신 중일 때는 static dataframe 사용 (스피너 방지)
-        st.dataframe(
-            styled,  # 스타일 적용된 객체 사용
-            hide_index=True,
-            width="stretch",  # use_container_width deprecated
-            height=600,
-            column_config=column_config,
-            column_order=existing_columns,
-        )
-        to_delete = []  # 삭제 불가
+        st.info("종목 데이터가 없습니다. 종목을 추가하거나 삭제된 종목을 복원하세요.")
+        to_delete = []
     else:
-        edited_df = st.data_editor(
-            df_edit,
-            hide_index=True,
-            width="stretch",  # use_container_width deprecated
-            height=600,
-            column_config=column_config,
-            column_order=existing_columns,
-            disabled=[col for col in existing_columns if col != "삭제"],
-            key=f"editor_{account_id}",
-        )
-        # 삭제 로직
-        to_delete = edited_df[edited_df["삭제"]]["티커"].tolist()
+        st.caption(f"총 {len(df)}개 종목 (Source: MongoDB)")
+
+        def _color_pct(val: float | str) -> str:
+            if val is None or pd.isna(val):
+                return ""
+            try:
+                num = float(val)
+            except (TypeError, ValueError):
+                return ""
+            if num > 0:
+                return "color: red"
+            if num < 0:
+                return "color: blue"
+            return "color: black"
+
+        pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+        styled = df.style
+        for col in pct_columns:
+            if col in df.columns:
+                styled = styled.map(_color_pct, subset=pd.IndexSlice[:, col])
+
+        # 편집 가능하도록 '삭제' 컬럼 추가
+        df_edit = df.copy()
+        if not readonly:
+            df_edit.insert(0, "삭제", False)
+
+        # DataFrame 표시
+        column_config = {
+            "삭제": st.column_config.CheckboxColumn("삭제", width="small") if not readonly else None,
+            "#": st.column_config.TextColumn("#", width=50),
+            "버킷": st.column_config.SelectboxColumn(
+                "버킷",
+                width=150,
+                options=BUCKET_OPTIONS,
+                required=True,
+            ),
+            "티커": st.column_config.TextColumn("티커", width=80),
+            "종목명": st.column_config.TextColumn("종목명", width=300),
+            "추가일자": st.column_config.TextColumn("추가일자", width=100),
+            "상장일": st.column_config.TextColumn("상장일", width=110),
+            "주간거래량": st.column_config.NumberColumn("주간거래량", width=120, format="%d"),
+            "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+            "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
+            "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
+            "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
+            "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
+        }
+
+        # readonly 모드일 때는 삭제 컬럼 제외
+        if readonly:
+            if "삭제" in column_config:
+                del column_config["삭제"]
+
+        column_order = [
+            "삭제",
+            "#",
+            "버킷",
+            "티커",
+            "종목명",
+            "상장일",
+            "주간거래량",
+            "1주(%)",
+            "1달(%)",
+            "3달(%)",
+            "6달(%)",
+            "12달(%)",
+            "추가일자",
+        ]
+        if readonly:
+            column_order = [c for c in column_order if c != "삭제"]
+
+        existing_columns = [col for col in column_order if col in df_edit.columns]
+
+        if readonly:
+            # 갱신 중일 때는 static dataframe 사용 (스피너 방지)
+            st.dataframe(
+                styled,  # 스타일 적용된 객체 사용
+                hide_index=True,
+                width="stretch",  # use_container_width deprecated
+                height=600,
+                column_config=column_config,
+                column_order=existing_columns,
+            )
+            to_delete = []  # 삭제 불가
+        else:
+            edited_df = st.data_editor(
+                df_edit,
+                hide_index=True,
+                width="stretch",  # use_container_width deprecated
+                height=600,
+                column_config=column_config,
+                column_order=existing_columns,
+                disabled=[col for col in existing_columns if col not in ("삭제", "버킷")],
+                key=f"editor_{account_id}",
+            )
+            # 삭제 로직
+            to_delete = edited_df[edited_df["삭제"]]["티커"].tolist() if "삭제" in edited_df.columns else []
+
+            # 버킷 변경 감지 로직
+            original_indexed = df.set_index("티커")
+            edited_indexed = edited_df.set_index("티커")
+
+            for ticker in edited_indexed.index:
+                if ticker in original_indexed.index:
+                    old_val = original_indexed.at[ticker, "버킷"]
+                    new_val = edited_indexed.at[ticker, "버킷"]
+                    if old_val != new_val:
+                        bucket_int = BUCKET_REVERSE_MAPPING.get(new_val, 1)
+                        if update_stock(account_id, ticker, bucket=bucket_int):
+                            st.toast(f"✅ {ticker} -> {new_val} 변경 완료")
+                        else:
+                            st.error(f"❌ {ticker} 업데이트 실패")
 
     # -----------------------------------------------------------------------
     # 관리 액션 버튼 영역
@@ -226,6 +261,16 @@ def _render_stocks_meta_table(account_id: str) -> None:
     # 종목 추가 다이얼로그
     @st.dialog("종목 추가")
     def open_add_dialog():
+        # 검색 상태 관리를 위한 세션 스테이트 키
+        ss_key_result = f"add_stock_result_{account_id}"
+
+        # [Fix] Widget state modification error 방지: 렌더링 전 플래그 확인하여 초기화
+        if st.session_state.get(f"should_clear_add_{account_id}"):
+            # Note: 렌더링 루프 중 직접 수정 시 에러가 나서, 위젯 생성 전 세션 제거 혹은 값 변경 처리
+            st.session_state[f"in_ticker_{account_id}"] = ""
+            st.session_state[ss_key_result] = None
+            st.session_state[f"should_clear_add_{account_id}"] = False
+
         # 국가 코드 조회 (검색용)
         try:
             settings = get_account_settings(account_id)
@@ -234,9 +279,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
             country_code = "kor"
 
         st.write(f"계좌: **{account_id.upper()}** ({country_code.upper()})")
-
-        # 검색 상태 관리를 위한 세션 스테이트 키
-        ss_key_result = f"add_stock_result_{account_id}"
 
         # 국가별 플레이스홀더 설정
         if country_code == "kor":
@@ -290,12 +332,22 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 if status == "DELETED":
                     st.info("🗑️ 이전에 삭제된 종목입니다. 추가 시 복구됩니다.")
 
+                # 버킷 선택 필드 추가
+                selected_bucket_name = st.selectbox(
+                    "버킷 선택", options=BUCKET_OPTIONS, index=0, key=f"sb_bucket_add_{account_id}"
+                )
+                bucket_int = BUCKET_REVERSE_MAPPING.get(selected_bucket_name, 1)
+
                 # 추가 버튼 (녹색 primary)
                 if st.button(
                     "➕ 추가하기", type="primary", use_container_width=True, key=f"btn_confirm_add_{account_id}"
                 ):
                     success = add_stock(
-                        account_id, ticker_res, search_result["name"], listing_date=search_result.get("listing_date")
+                        account_id,
+                        ticker_res,
+                        search_result["name"],
+                        listing_date=search_result.get("listing_date"),
+                        bucket=bucket_int,
                     )
                     if success:
                         msg = "복구되었습니다" if status == "DELETED" else "추가되었습니다"
@@ -320,22 +372,34 @@ def _render_stocks_meta_table(account_id: str) -> None:
 
                                 # 가격 데이터 갱신 (force_refresh=True)
                                 fetch_ohlcv(ticker_res, country=country_code, date_range=None, force_refresh=True)
-                                st.success(f"{msg}: {search_result['name']} (데이터 갱신 완료)")
+                                st.toast(f"✅ {msg}: {search_result['name']} (데이터 갱신 완료)")
                             except Exception as e:
-                                st.warning(f"{msg}: {search_result['name']} (데이터 갱신 실패: {e})")
+                                st.toast(f"⚠️ {msg}: {search_result['name']} (갱신 실패: {e})")
 
-                        # 상태 초기화
-                        st.session_state[ss_key_result] = None
-                        st.rerun()
+                        # [Fix] 상태 초기화: 즉시 수정하면 에러가 나므로 플래그 설정 후 리런
+                        st.session_state[f"should_clear_add_{account_id}"] = True
+                        st.rerun()  # 모달 유지를 위해 상단에서 다시 호출됨
                     else:
                         st.error("추가 실패 (시스템 오류)")
 
+        # 모달 하단: 종료 버튼
+        st.write("")
+        st.divider()
+        if st.button("닫기", key=f"btn_close_modal_internal_{account_id}", use_container_width=True):
+            st.session_state[f"show_add_modal_{account_id}"] = False
+            st.rerun()
+
     # 하단 버튼 그룹 (항상 표시하되, 업데이트 중이면 비활성화)
+    # [Continuous Add] 모달 유지 로직: 플래그가 True면 강제로 모달 오픈
+    if st.session_state.get(f"show_add_modal_{account_id}"):
+        open_add_dialog()
+
     c_btn1, c_btn2, c_btn3 = st.columns([1, 1, 1])
 
     with c_btn1:
         if st.button("➕ 종목 추가", key=f"btn_add_modal_{account_id}", disabled=readonly):
-            open_add_dialog()
+            st.session_state[f"show_add_modal_{account_id}"] = True
+            st.rerun()  # 즉시 모달 오픈
 
     with c_btn2:
         if st.button("메타데이터 업데이트", key=f"btn_meta_{account_id}", disabled=readonly):
@@ -363,9 +427,14 @@ def _render_stocks_meta_table(account_id: str) -> None:
                         deleted_at_str = str(deleted_at)[:10]
                 else:
                     deleted_at_str = "-"
+
+                bucket_val = etf.get("bucket", 1)
+                bucket_str = BUCKET_MAPPING.get(bucket_val, "1. 모멘텀")
+
                 deleted_rows.append(
                     {
                         "복구": False,
+                        "버킷": bucket_str,
                         "티커": etf.get("ticker", ""),
                         "종목명": etf.get("name", ""),
                         "삭제일": deleted_at_str,
@@ -373,7 +442,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                     }
                 )
             df_deleted = pd.DataFrame(deleted_rows)
-            df_deleted.sort_values(by="삭제일", ascending=False, inplace=True)
+            df_deleted.sort_values(by=["버킷", "삭제일"], ascending=[True, False], inplace=True)
 
             edited_deleted = st.data_editor(
                 df_deleted.style.map(lambda _: "background-color: #ffe0e6"),
@@ -381,6 +450,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 width="stretch",
                 column_config={
                     "복구": st.column_config.CheckboxColumn("복구", width="small"),
+                    "버킷": st.column_config.SelectboxColumn("버킷", width=150, options=BUCKET_OPTIONS),
                     "티커": st.column_config.TextColumn("티커", width=80),
                     "종목명": st.column_config.TextColumn("종목명", width=250),
                     "삭제일": st.column_config.TextColumn("삭제일", width=110),
@@ -390,13 +460,17 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 key=f"deleted_editor_{account_id}",
             )
 
-            to_restore = edited_deleted[edited_deleted["복구"]]["티커"].tolist()
-            if to_restore:
-                st.info(f"선택한 {len(to_restore)}개 종목을 복구합니다.")
+            to_restore_df = edited_deleted[edited_deleted["복구"]]
+            if not to_restore_df.empty:
+                st.info(f"선택한 {len(to_restore_df)}개 종목을 복구합니다.")
                 if st.button("♻️ 선택 종목 복구", type="primary", key=f"btn_restore_{account_id}"):
                     restored = 0
-                    for t in to_restore:
-                        if add_stock(account_id, t):
+                    for _, row in to_restore_df.iterrows():
+                        ticker = row["티커"]
+                        bucket_name = row["버킷"]
+                        bucket_int = BUCKET_REVERSE_MAPPING.get(bucket_name, 1)
+
+                        if add_stock(account_id, ticker, bucket=bucket_int):
                             restored += 1
                     st.success(f"{restored}개 종목 복구 완료!")
                     st.rerun()
@@ -552,6 +626,17 @@ def _render_run_recommendation(account_id: str) -> None:
             st.warning("표시할 결과 파일이 존재하지 않습니다.")
 
 
+def _get_active_holdings(df: pd.DataFrame) -> pd.DataFrame:
+    """보유 중인 종목만 필터링합니다."""
+    try:
+        from logic.backtest import get_hold_states
+
+        hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
+        return df[df["상태"].isin(hold_states)].copy()
+    except Exception:
+        return df
+
+
 # ---------------------------------------------------------------------------
 # 메인 렌더 함수
 # ---------------------------------------------------------------------------
@@ -586,27 +671,37 @@ def render_account_page(account_id: str) -> None:
 
     view_mode = st.pills(
         "뷰",
-        ["보유종목", "종목관리", "추천실행"],
-        default="보유종목",
+        ["1. 추천 결과", "2. 종목 관리", "3. 추천 실행"],
+        default="1. 추천 결과",
         key=f"view_{account_id}",
         label_visibility="collapsed",
     )
 
-    if view_mode == "종목관리":
+    if view_mode == "2. 종목 관리":
         _render_stocks_meta_table(account_id)
-    elif view_mode == "추천실행":
+    elif view_mode == "3. 추천 실행":
         _render_run_recommendation(account_id)
-    else:
+    else:  # "1. 추천 결과" (Default)
         if df is None:
             st.error(
                 updated_at
                 or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
             )
         else:
-            render_recommendation_table(df, country_code=country_code)
+            # 보유 종목만 필터링
+            df_held = _get_active_holdings(df)
+            if df_held.empty:
+                st.info("현재 보유 중인 종목이 없습니다.")
+            else:
+                render_recommendation_table(
+                    df_held,
+                    country_code=country_code,
+                    grouped_by_bucket=False,
+                    # customize_columns={"#": ("버킷", 120)} # This will be implemented in utils/ui.py
+                )
 
-    # --- 공통: 업데이트 시간, 설정, 푸터 (보유종목 탭에서만 표시) ---
-    if view_mode == "보유종목" and updated_at:
+    # --- 공통: 업데이트 시간, 설정, 푸터 (보유종목/종목추세 탭에서만 표시) ---
+    if view_mode in ("1. 보유 종목", "2. 종목 추세") and updated_at:
         if "," in updated_at:
             parts = updated_at.split(",", 1)
             date_part = parts[0].strip()
@@ -678,7 +773,7 @@ def render_account_page(account_id: str) -> None:
                     caption_parts.append(f"슬리피지: 매수+{buy_slip}%/매도-{sell_slip}%")
 
             try:
-                from logic.backtest import get_hold_states
+                from core.backtest.portfolio import get_hold_states
 
                 hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
                 if df is not None:
@@ -702,7 +797,7 @@ def render_account_page(account_id: str) -> None:
                 st.caption(caption_text)
             else:
                 st.caption("설정 정보를 찾을 수 없습니다.")
-    elif view_mode == "보유종목":
+    elif view_mode in ("1. 보유 종목", "2. 종목 추세"):
         st.caption("데이터를 찾을 수 없습니다.")
 
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from logic.backtest.reporting import dump_backtest_log, print_backtest_summary
+from core.entry_point import dump_backtest_log, print_backtest_summary, run_account_backtest
 from utils.account_registry import (
     get_account_settings,
     get_benchmark_tickers,
@@ -115,8 +115,6 @@ def main() -> None:
         )
 
     print_run_header(account_id, date_str=None)
-
-    from logic.backtest.account import run_account_backtest
 
     result = run_account_backtest(
         account_id,
