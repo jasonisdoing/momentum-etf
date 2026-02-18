@@ -14,7 +14,7 @@ def build_full_summary(
     initial_capital: float,
     initial_capital_krw: float,
     currency: str,
-    portfolio_topn: int,
+    bucket_topn: int,
     account_settings: dict[str, Any],
     prefetched_data: dict[str, pd.DataFrame] | None,
     ticker_timeseries: dict[str, pd.DataFrame],
@@ -22,7 +22,7 @@ def build_full_summary(
 ) -> dict[str, Any]:
     """Orchestrates the creation of the full backtest summary."""
     perf = calculate_performance_summary(portfolio_df, initial_capital, start_date, end_date, currency)
-    weekly = calculate_weekly_summary(portfolio_df, initial_capital, portfolio_topn)
+    weekly = calculate_weekly_summary(portfolio_df, initial_capital, bucket_topn)
     bucket_summary = build_bucket_summaries(ticker_timeseries, ticker_meta)
     m_rets, m_cum_rets, y_rets = calculate_monthly_returns(portfolio_df)
 

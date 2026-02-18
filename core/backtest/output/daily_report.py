@@ -313,7 +313,7 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
             "cum_profit_loss": header_values["c_pl"],
             "cum_return_pct": cum_ret,
             "held_count": held_count,
-            "portfolio_topn": int(result.portfolio_topn),
+            "bucket_topn": int(result.bucket_topn),
         }
 
         prefix = f"{_format_date_kor(target_date)} |"

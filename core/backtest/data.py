@@ -24,6 +24,10 @@ def load_and_process_data(
     for ticker in tickers:
         df = prefetched_data.get(ticker)
         if df is None:
+            # Debugging: check keys only once
+            if not metrics_by_ticker:
+                logger.debug(f"Prefetched keys sample: {list(prefetched_data.keys())[:5]}")
+                logger.debug(f"Looking for ticker: {ticker} (Type: {type(ticker)})")
             logger.warning(f"Data missing for {ticker}")
             continue
 

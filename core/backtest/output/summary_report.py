@@ -25,7 +25,7 @@ def print_backtest_summary(
     country_code: str,
     backtest_start_date: str,
     initial_capital_krw: float,
-    portfolio_topn: int,
+    bucket_topn: int,
     ticker_summaries: list[dict[str, Any]],
     core_start_dt: pd.Timestamp,
     emit_to_logger: bool = True,
@@ -73,9 +73,9 @@ def print_backtest_summary(
 
     stop_loss_source = strategy_tuning.get("STOP_LOSS_PCT")
     try:
-        holding_stop_loss_pct = float(stop_loss_source if stop_loss_source is not None else portfolio_topn)
+        holding_stop_loss_pct = float(stop_loss_source if stop_loss_source is not None else bucket_topn)
     except (TypeError, ValueError):
-        holding_stop_loss_pct = float(portfolio_topn)
+        holding_stop_loss_pct = float(bucket_topn)
 
     if abs(holding_stop_loss_pct - round(holding_stop_loss_pct)) < 1e-6:
         stop_loss_label = f"{int(round(holding_stop_loss_pct))}%"
@@ -83,7 +83,7 @@ def print_backtest_summary(
         stop_loss_label = f"{holding_stop_loss_pct:.2f}%"
 
     used_settings = {
-        "포트폴리오 종목 수 (TopN)": portfolio_topn,
+        "포트폴리오 종목 수 (TopN)": bucket_topn,
         "모멘텀 스코어 MA 기간": momentum_label,
         "교체 매매 점수 임계값": replace_threshold,
         "개별 종목 손절매": stop_loss_label,

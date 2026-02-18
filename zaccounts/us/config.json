@@ -13,7 +13,7 @@
         "BACKTESTED_DATE": "2026-02-18 23:36",
         "CAGR": 53.761668,
         "MDD": -12.347969,
-        "PORTFOLIO_TOPN": 2,
+        "BUCKET_TOPN": 2,
         "MA_MONTH": 3,
         "MA_TYPE": "SMA",
         "REPLACE_SCORE_THRESHOLD": 0,
@@ -21,7 +21,6 @@
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
         "OPTIMIZATION_METRIC": "CAGR",
-        "BUCKET_TOPN": 2,
         "ENABLE_DATA_SUFFICIENCY_CHECK": true
     },
     "benchmark": {

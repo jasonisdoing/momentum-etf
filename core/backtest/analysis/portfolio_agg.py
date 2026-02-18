@@ -2,7 +2,7 @@ import pandas as pd
 
 
 def build_portfolio_dataframe(
-    ticker_timeseries: dict[str, pd.DataFrame], initial_capital: float, portfolio_topn: int
+    ticker_timeseries: dict[str, pd.DataFrame], initial_capital: float, bucket_topn: int
 ) -> pd.DataFrame:
     """Aggregates individual ticker results into a portfolio-level DataFrame."""
     if not ticker_timeseries:
@@ -52,7 +52,7 @@ def build_portfolio_dataframe(
                 "daily_profit_loss": daily_pl,
                 "daily_return_pct": daily_ret,
                 "cumulative_return_pct": ((total_v / initial_capital) - 1.0) * 100.0 if initial_capital > 0 else 0.0,
-                "portfolio_topn": portfolio_topn,
+                "bucket_topn": bucket_topn,
             }
         )
     return pd.DataFrame(rows).set_index("date") if rows else pd.DataFrame()

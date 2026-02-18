@@ -72,7 +72,7 @@ class AccountBacktestResult:
     initial_capital: float
     initial_capital_krw: float
     currency: str
-    portfolio_topn: int
+    bucket_topn: int
     holdings_limit: int
     summary: dict[str, Any]
     portfolio_timeseries: pd.DataFrame
@@ -98,7 +98,7 @@ class AccountBacktestResult:
             "initial_capital": float(self.initial_capital),
             "initial_capital_krw": float(self.initial_capital_krw),
             "currency": self.currency,
-            "portfolio_topn": self.portfolio_topn,
+            "bucket_topn": self.bucket_topn,
             "holdings_limit": self.holdings_limit,
             "summary": self.summary,
             "portfolio_timeseries": df.to_dict(orient="records"),

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from old_logic.tune.runner import run_account_tuning
+from core.tune.runner import run_account_tuning
 from utils.account_registry import get_account_settings, get_strategy_rules
 from utils.data_loader import MissingPriceDataError
 from utils.logger import get_app_logger

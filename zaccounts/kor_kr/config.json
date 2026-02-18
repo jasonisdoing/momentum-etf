@@ -13,7 +13,7 @@
         "BACKTESTED_DATE": "2026-02-18 23:52",
         "CAGR": 148.018373,
         "MDD": -11.356117,
-        "PORTFOLIO_TOPN": 2,
+        "BUCKET_TOPN": 2,
         "MA_MONTH": 12,
         "MA_TYPE": "SMA",
         "REPLACE_SCORE_THRESHOLD": 0,

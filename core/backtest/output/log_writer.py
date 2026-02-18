@@ -41,7 +41,7 @@ def dump_backtest_log(
         country_code=result.country_code,
         backtest_start_date=result.backtest_start_date,
         initial_capital_krw=result.initial_capital_krw,
-        portfolio_topn=result.portfolio_topn,
+        bucket_topn=result.bucket_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),
         core_start_dt=result.start_date,
         emit_to_logger=False,
