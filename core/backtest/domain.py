@@ -15,7 +15,6 @@ class BacktestConfig:
     top_n: int
     ma_days: int
     ma_type: str
-    replace_threshold: float
     bucket_map: dict[str, int]
     bucket_topn: int
     rebalance_mode: str

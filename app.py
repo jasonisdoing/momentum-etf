@@ -70,9 +70,9 @@ def _build_home_page(accounts: list[dict[str, Any]]):
         "HOLD",
         "BUY",
         "BUY_REPLACE",
-        "SELL_TREND",
-        "SELL_RSI",
-        "CUT_STOPLOSS",
+        # "SELL_TREND",
+        # "SELL_RSI",
+        # "CUT_STOPLOSS",
         # "SELL_REPLACE",
     }
 

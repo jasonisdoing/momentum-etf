@@ -252,7 +252,6 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     # Legacy cleanup
 
     integer_keys = {
-        "REPLACE_SCORE_THRESHOLD",
         "STOP_LOSS_PCT",
         "COOLDOWN_DAYS",
         "BUCKET_TOPN",
@@ -293,7 +292,6 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "BUCKET_TOPN",
         "MA_MONTH",
         "MA_TYPE",
-        "REPLACE_SCORE_THRESHOLD",
         "STOP_LOSS_PCT",
         "OVERBOUGHT_SELL_THRESHOLD",
         "COOLDOWN_DAYS",
@@ -377,7 +375,6 @@ def _export_debug_month(
             if ma_month is None:
                 continue
             topn = int(tuning.get("BUCKET_TOPN"))
-            threshold = float(tuning.get("REPLACE_SCORE_THRESHOLD"))
             stop_loss = tuning.get("STOP_LOSS_PCT")
             stop_loss_value = float(stop_loss) if stop_loss is not None else None
         except (TypeError, ValueError):
@@ -398,7 +395,6 @@ def _export_debug_month(
         strategy_rules = StrategyRules.from_values(
             ma_month=int(ma_month),
             bucket_topn=topn,
-            replace_threshold=threshold,
             ma_type=tuning.get("MA_TYPE", "SMA"),
             stop_loss_pct=stop_loss_value,
             rebalance_mode=rebalance_mode_val,
@@ -423,7 +419,7 @@ def _export_debug_month(
         )
 
         stop_loss_dir_part = f"SL{stop_loss_value:.2f}" if stop_loss_value is not None else "SLauto"
-        combo_dir = month_dir / f"combo_{idx:02d}_MA{ma_month}_TOPN{topn}_{stop_loss_dir_part}_TH{threshold:.3f}"
+        combo_dir = month_dir / f"combo_{idx:02d}_MA{ma_month}_TOPN{topn}_{stop_loss_dir_part}"
         combo_metrics = _export_combo_debug(
             combo_dir,
             recorded_metrics=recorded_metrics,
@@ -440,7 +436,6 @@ def _export_debug_month(
                 "ma_days": ma_month,
                 "topn": topn,
                 "stop_loss_pct": stop_loss_value,
-                "threshold": threshold,
                 "recorded_cagr": recorded_metrics["cagr"],
                 "prefetch_cagr": metrics_prefetch["cagr"],
                 "live_cagr": metrics_live["cagr"],
@@ -486,7 +481,6 @@ def _execute_tuning(
     is_ma_month = True
 
     topn_candidates = list(search_space.get("BUCKET_TOPN", []))
-    replace_candidates = list(search_space.get("REPLACE_SCORE_THRESHOLD", []))
     ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
     rebalance_mode_candidates = list(search_space.get("REBALANCE_MODE", []))
 
@@ -494,13 +488,7 @@ def _execute_tuning(
         current_rules = get_strategy_rules(account_norm)
         rebalance_mode_candidates = [current_rules.rebalance_mode]
 
-    if (
-        not ma_candidates
-        or not topn_candidates
-        or not replace_candidates
-        or not ma_type_candidates
-        or not rebalance_mode_candidates
-    ):
+    if not ma_candidates or not topn_candidates or not ma_type_candidates or not rebalance_mode_candidates:
         logger.warning(
             "[튜닝] %s (%s 시작) 유효한 탐색 공간이 없습니다.",
             account_norm.upper(),
@@ -508,11 +496,10 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, float, str, str]] = [
-        (ma, topn, replace, ma_type, mode)
+    combos: list[tuple[int, int, str, str]] = [
+        (ma, topn, ma_type, mode)
         for ma in ma_candidates
         for topn in topn_candidates
-        for replace in replace_candidates
         for ma_type in ma_type_candidates
         for mode in rebalance_mode_candidates
     ]
@@ -581,13 +568,12 @@ def _execute_tuning(
             date_range,
             int(ma),
             int(topn),
-            float(replace),
             str(ma_type),
             str(mode),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )
-        for ma, topn, replace, ma_type, mode in combos
+        for ma, topn, ma_type, mode in combos
     ]
 
     logger.info(
@@ -718,7 +704,6 @@ def _execute_tuning(
                     "MA_MONTH": int(item.get("ma_month", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
                     "BUCKET_TOPN": int(item.get("bucket_topn", 0)),
-                    "REPLACE_SCORE_THRESHOLD": _round_up_float_places(item.get("replace_threshold", 0.0), 1),
                     "REBALANCE_MODE": str(item.get("rebalance_mode", "MONTHLY")),
                 },
             }
@@ -740,7 +725,6 @@ def _build_run_entry(
     param_fields = {
         "MA_MONTH": ("ma_month", True),
         "BUCKET_TOPN": ("bucket_topn", True),
-        "REPLACE_SCORE_THRESHOLD": ("replace_threshold", False),
         "REBALANCE_MODE": ("rebalance_mode", True),
     }
 
@@ -1053,20 +1037,12 @@ def _compose_tuning_report(
             ma_month_range = search_space.get("MA_MONTH", [])
             ma_type_range = search_space.get("MA_TYPE", [])
             topn_range = search_space.get("BUCKET_TOPN", [])
-            threshold_range = search_space.get("REPLACE_SCORE_THRESHOLD", [])
             # MA_TYPE이 있으면 포함해서 표시
-            if ma_type_range and len(ma_type_range) > 1:
-                lines.append(
-                    f"| 탐색 공간: MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
-                    f"× 교체점수 {len(threshold_range)}개 × 리밸런스 {len(search_space.get('REBALANCE_MODE', []))}개 "
-                    f"= {tuning_metadata.get('combo_count', 0)}개 조합"
-                )
-            else:
-                lines.append(
-                    f"| 탐색 공간: MA {len(ma_month_range)}개 × TOPN {len(topn_range)}개 "
-                    f"× 교체점수 {len(threshold_range)}개 × 리밸런스 {len(search_space.get('REBALANCE_MODE', []))}개 "
-                    f"= {tuning_metadata.get('combo_count', 0)}개 조합"
-                )
+            lines.append(
+                f"| 탐색 공간: MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
+                f"× 리밸런스 {len(search_space.get('REBALANCE_MODE', []))}개 "
+                f"= {tuning_metadata.get('combo_count', 0)}개 조합"
+            )
             # 각 파라미터 범위 표시
             if ma_month_range:
                 ma_min, ma_max = min(ma_month_range), max(ma_month_range)
@@ -1076,10 +1052,6 @@ def _compose_tuning_report(
             if topn_range:
                 topn_min, topn_max = min(topn_range), max(topn_range)
                 lines.append(f"|   BUCKET_TOPN: {topn_min}~{topn_max}")
-            if threshold_range:
-                th_min, th_max = min(threshold_range), max(threshold_range)
-                lines.append(f"|   REPLACE_SCORE_THRESHOLD: {th_min}~{th_max}")
-
             rebalance_range = search_space.get("REBALANCE_MODE", [])
             if rebalance_range:
                 lines.append(f"|   REBALANCE_MODE: {', '.join(rebalance_range)}")
@@ -1242,7 +1214,6 @@ def _compose_tuning_report(
             ma_val = tuning.get("MA_MONTH")
             ma_type_val = tuning.get("MA_TYPE", "SMA")
             topn_val = tuning.get("BUCKET_TOPN")
-            threshold_val = tuning.get("REPLACE_SCORE_THRESHOLD")
             rebalance_val = tuning.get("REBALANCE_MODE", "MONTHLY")
 
             cagr_val = entry.get("CAGR")
@@ -1256,7 +1227,6 @@ def _compose_tuning_report(
                     "ma_days": ma_val,
                     "ma_type": ma_type_val,
                     "bucket_topn": topn_val,
-                    "replace_threshold": threshold_val,
                     "rebalance_mode": rebalance_val,
                     "cagr": cagr_val,
                     "mdd": mdd_val,
@@ -1378,11 +1348,6 @@ def run_account_tuning(
         ma_values = _normalize_tuning_values(config.get("MA_MONTH"), dtype=int, fallback=fallback_ma)
 
     topn_values = _normalize_tuning_values(config.get("BUCKET_TOPN"), dtype=int, fallback=base_rules.bucket_topn)
-    replace_values = _normalize_tuning_values(
-        config.get("REPLACE_SCORE_THRESHOLD"),
-        dtype=float,
-        fallback=base_rules.replace_threshold,
-    )
 
     # MA_TYPE 처리: 문자열 리스트로 받음
     ma_type_raw = config.get("MA_TYPE")
@@ -1407,7 +1372,7 @@ def run_account_tuning(
         fallback=base_rules.rebalance_mode,
     )
 
-    if (not ma_values and not ma_month_values) or not topn_values or not replace_values or not ma_type_values:
+    if (not ma_values and not ma_month_values) or not topn_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
@@ -1438,7 +1403,6 @@ def run_account_tuning(
     combo_count = (
         (len(ma_month_values) if ma_month_values else len(ma_values))
         * len(topn_values)
-        * len(replace_values)
         * len(ma_type_values)
         * len(rebalance_mode_values)
     )
@@ -1458,7 +1422,6 @@ def run_account_tuning(
     search_space = {
         "MA_MONTH": ma_month_values or ma_values,
         "BUCKET_TOPN": topn_values,
-        "REPLACE_SCORE_THRESHOLD": replace_values,
         "MA_TYPE": ma_type_values,
         "REBALANCE_MODE": rebalance_mode_values,
         "OPTIMIZATION_METRIC": [optimization_metric],
@@ -1466,15 +1429,13 @@ def run_account_tuning(
 
     ma_count = len(ma_month_values) if ma_month_values else len(ma_values)
     topn_count = len(topn_values)
-    replace_count = len(replace_values)
     ma_type_count = len(ma_type_values)
     rebalance_count = len(rebalance_mode_values)
 
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × 교체점수 %d개 × MA_TYPE %d개 × 리밸런스 %d개 = %d개 조합",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 리밸런스 %d개 = %d개 조합",
         ma_count,
         topn_count,
-        replace_count,
         ma_type_count,
         rebalance_count,
         combo_count,
@@ -1630,7 +1591,6 @@ def run_account_tuning(
             "MA_MONTH": list(ma_month_values) if ma_month_values else list(ma_values),
             "MA_TYPE": list(ma_type_values),
             "BUCKET_TOPN": list(topn_values),
-            "REPLACE_SCORE_THRESHOLD": list(replace_values),
             "REBALANCE_MODE": list(rebalance_mode_values),
             "OPTIMIZATION_METRIC": optimization_metric,
         },
@@ -1754,7 +1714,6 @@ def run_account_tuning(
                             "MA_MONTH": int(entry.get("ma_month")) if entry.get("ma_month") is not None else None,
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
                             "BUCKET_TOPN": int(entry.get("bucket_topn", 0)),
-                            "REPLACE_SCORE_THRESHOLD": _round_up_float_places(entry.get("replace_threshold", 0.0), 1),
                             "REBALANCE_MODE": str(entry.get("rebalance_mode", "MONTHLY")),
                         },
                     }
@@ -1903,7 +1862,6 @@ def run_account_tuning(
             "search_space": {
                 "MA_MONTH": ma_values,
                 "BUCKET_TOPN": topn_values,
-                "REPLACE_SCORE_THRESHOLD": replace_values,
             },
             "month_configs": debug_month_configs,
             "excluded_tickers_initial": sorted(excluded_ticker_set),

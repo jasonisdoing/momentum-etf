@@ -71,18 +71,6 @@ def _format_table_float(value: Any, *, digits: int = 2) -> str:
     return fmt.format(num)
 
 
-def _format_threshold(value: Any) -> str:
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return "-"
-    if not math.isfinite(num):
-        return "-"
-    if abs(num - round(num)) < 1e-9:
-        return f"{int(round(num))}"
-    return f"{num:.1f}"
-
-
 def _render_tuning_table(
     rows: list[dict[str, Any]],
     *,
@@ -93,7 +81,6 @@ def _render_tuning_table(
         "MA개월",
         "MA타입",
         "TOPN",
-        "교체점수",
         "리밸런스",
         "CAGR(%)",
         "MDD(%)",
@@ -101,7 +88,6 @@ def _render_tuning_table(
     aligns = [
         "right",
         "center",
-        "right",
         "right",
         "center",
         "right",
@@ -126,16 +112,13 @@ def _render_tuning_table(
         ma_val = row.get("ma_month") or row.get("ma_days")
         ma_type_val = row.get("ma_type", "SMA")
         topn_val = row.get("bucket_topn")
-        threshold_val = row.get("replace_threshold")
         rebalance_mode_val = row.get("rebalance_mode") or "-"
 
         row_data = [
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
             str(ma_type_val) if ma_type_val else "SMA",
             str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-            str(int(threshold_val))
-            if isinstance(threshold_val, (int, float)) and math.isfinite(float(threshold_val))
-            else "-",
+            str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
             str(rebalance_mode_val),
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),

@@ -11,7 +11,7 @@ import pandas as pd
 
 from core.backtest.filtering import select_candidates
 from core.backtest.price import calculate_trade_price
-from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
+from strategies.maps.constants import DECISION_CONFIG
 from strategies.maps.evaluator import StrategyEvaluator
 from strategies.maps.labeler import compute_net_trade_note
 from strategies.maps.metrics import process_ticker_data
@@ -154,7 +154,6 @@ def _apply_wait_note_if_empty(
     dt: pd.Timestamp,
     position_state: dict = None,
     score_today: dict[str, float] = None,
-    replace_threshold: float = 0.0,
 ) -> None:
     """WAIT 상태 종목에 대해 교체 필요 점수를 노트로 설정합니다."""
 
@@ -174,11 +173,6 @@ def _apply_wait_note_if_empty(
                 score_h = score_today.get(t, 0.0)
                 all_held_scores.append(score_h)
 
-        if all_held_scores:
-            weakest_score = min(all_held_scores)
-            required_score = weakest_score + replace_threshold
-            records[-1]["note"] = DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score)
-
 
 def _execute_new_buys(
     buy_ranked_candidates: list[tuple[float, str]],
@@ -190,7 +184,6 @@ def _execute_new_buys(
     cash: float,
     current_holdings_value: float,
     top_n: int,
-    replace_threshold: float,
     score_today: dict[str, float],
     i: int,
     total_days: int,
@@ -222,7 +215,6 @@ def _execute_new_buys(
                     dt,
                     position_state,
                     score_today,
-                    replace_threshold,
                 )
         return cash, current_holdings_value, purchased_today
 
@@ -369,7 +361,6 @@ def run_portfolio_backtest(
     trading_calendar: Sequence[pd.Timestamp] | None = None,
     ma_days: int = 20,
     ma_type: str = "SMA",
-    replace_threshold: float = 0.0,
     rebalance_mode: str = "QUARTERLY",
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
@@ -509,24 +500,31 @@ def run_portfolio_backtest(
     total_days = len(union_index)
     _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
 
-    last_dt: pd.Timestamp | None = None
-
     for i, dt in enumerate(union_index):
         # 리밸런싱 날짜 판별 (DAILY, MONTHLY, QUARTERLY)
+        # 각 기간의 '마지막 거래일'에 리밸런싱을 수행하도록 변경
         is_rebalance_day = False
-        if i == 0:  # 첫 날은 무조건 리밸런싱 (포트폴리오 구성)
+        if i == 0:  # 첫 날은 초기 자산 배분을 위해 항상 True
             is_rebalance_day = True
         elif rebalance_mode == "DAILY":
             is_rebalance_day = True
         elif rebalance_mode == "MONTHLY":
-            if last_dt is not None and dt.month != last_dt.month:
+            # 오늘이 월말일인지 확인: 다음 거래일이 다른 달이거나 오늘이 마지막 거래일인 경우
+            if i == total_days - 1:
                 is_rebalance_day = True
-        elif rebalance_mode == "QUARTERLY":
-            if last_dt is not None and dt.month != last_dt.month:
-                if dt.month in {1, 4, 7, 10}:
+            else:
+                next_dt = union_index[i + 1]
+                if next_dt.month != dt.month:
                     is_rebalance_day = True
-
-        last_dt = dt
+        elif rebalance_mode == "QUARTERLY":
+            # 오늘이 분기말일인지 확인: 3, 6, 9, 12월의 마지막 거래일
+            if i == total_days - 1:
+                if dt.month in {3, 6, 9, 12}:
+                    is_rebalance_day = True
+            else:
+                next_dt = union_index[i + 1]
+                if next_dt.month != dt.month and dt.month in {3, 6, 9, 12}:
+                    is_rebalance_day = True
 
         # 진행률 표시 (10% 단위로)
         if i % max(1, total_days // 10) == 0 or i == total_days - 1:
@@ -670,7 +668,7 @@ def run_portfolio_backtest(
                 i=i,
             )
 
-            # 2. 매수 실행 (신규 매수)
+            # 2. 매수 실행 (신규 매수) - 리밸런싱 날에만 수행
             cash, current_holdings_value, purchased_today = _execute_new_buys(
                 buy_ranked_candidates=buy_ranked_candidates,
                 position_state=position_state,
@@ -681,7 +679,6 @@ def run_portfolio_backtest(
                 cash=cash,
                 current_holdings_value=current_holdings_value,
                 top_n=int(top_n),
-                replace_threshold=replace_threshold,
                 score_today=score_today,
                 i=i,
                 total_days=total_days,
@@ -691,6 +688,8 @@ def run_portfolio_backtest(
                 bucket_map=bucket_map,
                 bucket_topn=bucket_topn,
             )
+
+            # 3. 교체(Replacement) - 리밸런싱 날에만 수행
 
             # 3. 교체 매수 실행 (포트폴리오가 가득 찬 경우)
             if len(purchased_today) == 0 and buy_ranked_candidates:
@@ -753,8 +752,8 @@ def run_portfolio_backtest(
 
                         for candidate_hold in bucket_held:
                             cand_ticker = candidate_hold["ticker"]
-                            # 점수 조건 체크
-                            if best_new_score > candidate_hold["score"] + replace_threshold:
+                            # 점수 조건 체크 (단순 점수 비교로 변경)
+                            if best_new_score > candidate_hold["score"]:
                                 ticker_to_sell = cand_ticker
                                 replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체"
                                 break
@@ -941,7 +940,6 @@ def run_portfolio_backtest(
                                 dt,
                                 position_state,
                                 score_today,
-                                replace_threshold,
                             )
 
         # --- 당일 최종 라벨 오버라이드 (공용 라벨러) ---

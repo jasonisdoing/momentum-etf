@@ -23,8 +23,6 @@ def validate_strategy_settings(
     errors = []
 
     # strategy 필수 항목 검증
-    if "REPLACE_SCORE_THRESHOLD" not in strategy_tuning:
-        errors.append("strategy.REPLACE_SCORE_THRESHOLD")
 
     # 에러가 있으면 한 번에 보고
     if errors:

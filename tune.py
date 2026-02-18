@@ -16,7 +16,6 @@ from utils.logger import get_app_logger
 ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
         "BUCKET_TOPN": [2],
-        "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
         "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
@@ -24,7 +23,6 @@ ACCOUNT_TUNING_CONFIG = {
     },
     "kor_us": {
         "BUCKET_TOPN": [1],
-        "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
         "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
@@ -32,7 +30,6 @@ ACCOUNT_TUNING_CONFIG = {
     },
     "aus": {
         "BUCKET_TOPN": [2],
-        "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
         "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],
@@ -41,7 +38,6 @@ ACCOUNT_TUNING_CONFIG = {
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
         "BUCKET_TOPN": [2],
-        "REPLACE_SCORE_THRESHOLD": [0],
         "MA_MONTH": [3, 6, 9, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
         "REBALANCE_MODE": ["MONTHLY", "QUARTERLY"],

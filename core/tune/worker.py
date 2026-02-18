@@ -45,7 +45,7 @@ def init_worker_prefetch(
 
 
 def evaluate_single_combo(
-    payload: tuple[str, tuple[str, str], int, int, float, str, tuple[str, ...], bool],
+    payload: tuple[str, tuple[str, str], int, int, str, tuple[str, ...], bool],
 ) -> tuple[str, dict[str, Any], list[str]]:
     """단일 파라미터 조합 평가 (Worker Process에서 실행)"""
     (
@@ -53,7 +53,6 @@ def evaluate_single_combo(
         date_range,
         ma_int,
         topn_int,
-        threshold_float,
         ma_type_str,
         rebalance_mode_str,
         excluded_tickers,
@@ -82,7 +81,6 @@ def evaluate_single_combo(
             strategy_rules = StrategyRules.from_values(
                 ma_month=int(ma_int),
                 bucket_topn=int(topn_int),
-                replace_threshold=float(threshold_float),
                 ma_type=str(ma_type_str),
                 rebalance_mode=rebalance_mode_str,
             )
@@ -90,7 +88,6 @@ def evaluate_single_combo(
             strategy_rules = StrategyRules.from_values(
                 ma_days=int(ma_int),
                 bucket_topn=int(topn_int),
-                replace_threshold=float(threshold_float),
                 ma_type=str(ma_type_str),
                 rebalance_mode=rebalance_mode_str,
             )
@@ -120,7 +117,6 @@ def evaluate_single_combo(
             {
                 "ma_month" if is_ma_month else "ma_days": ma_int,
                 "bucket_topn": topn_int,
-                "replace_threshold": threshold_float,
                 "error": str(exc),
             },
             [],
@@ -133,7 +129,6 @@ def evaluate_single_combo(
     entry = {
         "ma_month" if is_ma_month else "ma_days": ma_int,
         "bucket_topn": topn_int,
-        "replace_threshold": float(threshold_float),
         "rebalance_mode": rebalance_mode_str,
         "ma_type": ma_type_str,
         "cagr": _round_float(_safe_float(summary.get("cagr"), 0.0)),

@@ -40,8 +40,6 @@ def print_backtest_summary(
     strategy_tuning = resolve_strategy_params(strategy_cfg)
     merged_strategy = dict(strategy_tuning)
 
-    replace_threshold = strategy_tuning.get("REPLACE_SCORE_THRESHOLD", 0.0)
-
     initial_capital_local = float(
         summary.get("initial_capital_local", summary.get("initial_capital", initial_capital_krw))
     )
@@ -81,7 +79,6 @@ def print_backtest_summary(
         "버킷당 종목 수 (Bucket TopN)": bucket_topn,
         "전체 종목 수 한도 (Total Limit)": holdings_limit,
         "모멘텀 스코어 MA 기간": momentum_label,
-        "교체 매매 점수 임계값": replace_threshold,
     }
 
     add_section_heading("주별 성과 요약")

@@ -16,7 +16,6 @@
         "BUCKET_TOPN": 2,
         "MA_MONTH": 6,
         "MA_TYPE": "EMA",
-        "REPLACE_SCORE_THRESHOLD": 0,
         "OPTIMIZATION_METRIC": "CAGR",
         "ENABLE_DATA_SUFFICIENCY_CHECK": false,
         "REBALANCE_MODE": "QUARTERLY"

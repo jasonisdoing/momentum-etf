@@ -15,7 +15,6 @@ class StrategyRules:
 
     ma_days: int
     bucket_topn: int
-    replace_threshold: float
     ma_type: str
     enable_data_sufficiency_check: bool
 
@@ -29,7 +28,6 @@ class StrategyRules:
         ma_days: Any = None,
         ma_month: Any = None,
         bucket_topn: Any = None,
-        replace_threshold: Any,
         ma_type: Any = None,
         enable_data_sufficiency_check: Any = False,
         rebalance_mode: Any = None,
@@ -69,11 +67,6 @@ class StrategyRules:
         except (TypeError, ValueError):
             raise ValueError("BUCKET_TOPN은 0보다 큰 정수여야 합니다.")
 
-        try:
-            replace_threshold_float = float(replace_threshold)
-        except (TypeError, ValueError):
-            raise ValueError("REPLACE_SCORE_THRESHOLD는 숫자여야 합니다.") from None
-
         # MA 타입 검증
         if ma_type is None:
             raise ValueError("MA_TYPE은 필수입니다.")
@@ -97,7 +90,6 @@ class StrategyRules:
         return cls(
             ma_days=final_ma_days,
             bucket_topn=final_bucket_topn,
-            replace_threshold=replace_threshold_float,
             ma_type=ma_type_str,
             enable_data_sufficiency_check=data_sufficiency_check,
             rebalance_mode=final_rebalance_mode,
@@ -117,7 +109,6 @@ class StrategyRules:
             ma_month=_resolve("MA_MONTH", "ma_month"),
             ma_days=_resolve("ma_days"),
             bucket_topn=_resolve("BUCKET_TOPN", "bucket_topn"),
-            replace_threshold=_resolve("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
             enable_data_sufficiency_check=_resolve("ENABLE_DATA_SUFFICIENCY_CHECK", "enable_data_sufficiency_check"),
             rebalance_mode=_resolve("REBALANCE_MODE", "rebalance_mode"),
@@ -127,7 +118,6 @@ class StrategyRules:
         d = {
             "ma_days": self.ma_days,
             "bucket_topn": self.bucket_topn,
-            "replace_threshold": self.replace_threshold,
             "ma_type": self.ma_type,
             "enable_data_sufficiency_check": self.enable_data_sufficiency_check,
             "rebalance_mode": self.rebalance_mode,

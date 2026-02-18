@@ -50,8 +50,10 @@ class StrategyEvaluator:
         new_state = current_state
 
         if score <= 0:
-            new_state = "SELL_TREND"
-            phrase = _format_trend_break_phrase(ma_value, price, ma_days)
+            # 전략 변경: 추세 이탈 시에도 매도하지 않음 (리밸런싱 날에만 교체)
+            # new_state = "SELL_TREND"
+            # phrase = _format_trend_break_phrase(ma_value, price, ma_days)
+            pass
 
         return new_state, phrase
 
