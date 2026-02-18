@@ -6,17 +6,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from config import TRADING_DAYS_PER_MONTH
+
 
 @dataclass(frozen=True)
 class StrategyRules:
     """Momentum 전략에서 공통으로 사용하는 핵심 파라미터."""
 
-    # 기본 MA 기간 (이동평균 기간)
-    DEFAULT_MA_PERIOD = 20
     # 기본 MA 타입 (이동평균 종류)
     DEFAULT_MA_TYPE = "SMA"
 
-    ma_period: int
+    ma_days: int
     portfolio_topn: int
     replace_threshold: float
     ma_type: str = "SMA"
@@ -27,19 +27,35 @@ class StrategyRules:
     def from_values(
         cls,
         *,
-        ma_period: Any,
+        ma_days: Any = None,
+        ma_month: Any = None,
         portfolio_topn: Any,
         replace_threshold: Any,
         ma_type: Any = None,
         stop_loss_pct: Any = None,
         enable_data_sufficiency_check: Any = False,
     ) -> StrategyRules:
-        try:
-            ma_period_int = int(ma_period)
-        except (TypeError, ValueError):
-            raise ValueError("MA_PERIOD는 0보다 큰 정수여야 합니다.") from None
-        if ma_period_int <= 0:
-            raise ValueError("MA_PERIOD는 0보다 큰 정수여야 합니다.")
+        # MA 기간 결정 (개월 우선)
+        final_ma_days = None
+
+        if ma_month is not None:
+            try:
+                month_val = int(ma_month)
+                if month_val > 0:
+                    final_ma_days = month_val * TRADING_DAYS_PER_MONTH
+            except (TypeError, ValueError):
+                pass
+
+        if final_ma_days is None and ma_days is not None:
+            try:
+                final_ma_days = int(ma_days)
+            except (TypeError, ValueError):
+                pass
+
+        if final_ma_days is None or final_ma_days <= 0:
+            if ma_days is None and ma_month is None:
+                raise ValueError("MA_MONTH은 필수입니다.")
+            raise ValueError("MA_MONTH은 0보다 큰 정수여야 합니다.")
 
         try:
             portfolio_topn_int = int(portfolio_topn)
@@ -72,7 +88,7 @@ class StrategyRules:
         data_sufficiency_check = bool(enable_data_sufficiency_check)
 
         return cls(
-            ma_period=ma_period_int,
+            ma_days=final_ma_days,
             portfolio_topn=portfolio_topn_int,
             replace_threshold=replace_threshold_float,
             ma_type=ma_type_str,
@@ -91,7 +107,8 @@ class StrategyRules:
             return None
 
         return cls.from_values(
-            ma_period=_resolve("MA_PERIOD", "ma_period"),
+            ma_month=_resolve("MA_MONTH", "ma_month"),
+            ma_days=_resolve("ma_days"),
             portfolio_topn=_resolve("PORTFOLIO_TOPN", "portfolio_topn"),
             replace_threshold=_resolve("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
@@ -104,7 +121,7 @@ class StrategyRules:
 
     def to_dict(self) -> dict[str, Any]:
         d = {
-            "ma_period": self.ma_period,
+            "ma_days": self.ma_days,
             "portfolio_topn": self.portfolio_topn,
             "replace_threshold": self.replace_threshold,
             "ma_type": self.ma_type,

@@ -9,22 +9,22 @@
     "initial_capital_krw": "100000000",
     "show_hold": true,
     "strategy": {
-        "BACKTEST_START_DATE": "2025-09-08",
-        "BACKTESTED_DATE": "2026-01-24 10:39",
-        "CAGR": 205.125395,
-        "MDD": -9.356703,
-        "PORTFOLIO_TOPN": 8,
-        "MA_PERIOD": 140,
+        "BACKTEST_START_DATE": "2025-02-01",
+        "BACKTESTED_DATE": "2026-02-17 10:45",
+        "CAGR": 81.592647,
+        "MDD": -14.991307,
+        "PORTFOLIO_TOPN": 6,
+        "MA_MONTH": 3,
         "MA_TYPE": "SMA",
         "REPLACE_SCORE_THRESHOLD": 0,
-        "STOP_LOSS_PCT": 5,
+        "STOP_LOSS_PCT": 10,
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
         "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": true
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
-        "ticker": "IVV",
-        "name": "iShares S&P 500 ETF"
+        "ticker": "A200",
+        "name": "BetaShares Australia 200 ETF"
     }
 }

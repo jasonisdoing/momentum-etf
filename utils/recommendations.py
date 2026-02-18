@@ -16,7 +16,6 @@ _BASE_DISPLAY_COLUMNS = [
     "#",
     "티커",
     "종목명",
-    "카테고리",
     "상태",
     "일간(%)",
     "평가(%)",
@@ -126,7 +125,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         rank = row.get("rank")
         ticker = row.get("ticker", "-")
         name = row.get("name", "-")
-        category = row.get("category", "-")
+
         state = row.get("state", "-").upper()
         holding_days = _format_days(row.get("holding_days"))
         price_display = row.get("price")
@@ -149,7 +148,6 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "#": rank if rank is not None else "-",
                 "티커": ticker,
                 "종목명": name,
-                "카테고리": category,
                 "상태": state,
                 "보유일": holding_days,
                 "일간(%)": daily_pct,

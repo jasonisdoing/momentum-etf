@@ -5,7 +5,7 @@ import pandas as pd
 from strategies.maps.constants import DECISION_MESSAGES, DECISION_NOTES
 
 
-def _format_trend_break_phrase(ma_value: float | None, price_value: float | None, ma_period: int | None) -> str:
+def _format_trend_break_phrase(ma_value: float | None, price_value: float | None, ma_days: int | None) -> str:
     if ma_value is None or pd.isna(ma_value) or price_value is None or pd.isna(price_value):
         threshold = ma_value if (ma_value is not None and not pd.isna(ma_value)) else 0.0
         return f"{DECISION_NOTES['TREND_BREAK']}({threshold:,.0f}원 이하)"
@@ -13,9 +13,9 @@ def _format_trend_break_phrase(ma_value: float | None, price_value: float | None
     diff = ma_value - price_value
     direction = "낮습니다" if diff >= 0 else "높습니다"
     period_text = ""
-    if ma_period:
+    if ma_days:
         try:
-            period_text = f"{int(ma_period)}일 "
+            period_text = f"{int(ma_days)}일 "
         except (TypeError, ValueError):
             period_text = ""
     return (
@@ -60,7 +60,7 @@ class StrategyEvaluator:
         avg_cost: float,
         highest_price: float,
         ma_value: float,
-        ma_period: int,
+        ma_days: int,
         score: float,
         rsi_score: float,
         stop_loss_threshold: float | None,
@@ -90,7 +90,7 @@ class StrategyEvaluator:
             phrase = f"RSI 과매수 (RSI점수: {rsi_score:.1f})"
         elif score <= 0:
             new_state = "SELL_TREND"
-            phrase = _format_trend_break_phrase(ma_value, price, ma_period)
+            phrase = _format_trend_break_phrase(ma_value, price, ma_days)
 
         # 쿨다운 중이면 일반 매도(추세, RSI)는 HOLD로 유지
         # 손절은 쿨다운 무시

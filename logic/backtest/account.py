@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-import config
+from config import TRADING_DAYS_PER_MONTH
 from logic.entry_point import StrategyRules, run_portfolio_backtest
 from utils.account_registry import get_common_file_settings
 from utils.data_loader import get_exchange_rate_series, get_latest_trading_day, get_trading_days
@@ -55,7 +55,6 @@ class AccountBacktestResult:
     monthly_cum_returns: pd.Series
     yearly_returns: pd.Series
     ticker_summaries: list[dict[str, Any]]
-    category_summaries: list[dict[str, Any]]
     settings_snapshot: dict[str, Any]
     backtest_start_date: str
     missing_tickers: list[str]
@@ -81,7 +80,6 @@ class AccountBacktestResult:
             "monthly_cum_returns": self.monthly_cum_returns.to_dict(),
             "yearly_returns": self.yearly_returns.to_dict(),
             "ticker_summaries": self.ticker_summaries,
-            "category_summaries": self.category_summaries,
             "settings_snapshot": self.settings_snapshot,
             "backtest_start_date": self.backtest_start_date,
             "missing_tickers": self.missing_tickers,
@@ -155,14 +153,14 @@ def run_account_backtest(
 
     if strategy_override is not None:
         strategy_rules = StrategyRules.from_values(
-            ma_period=strategy_override.ma_period,
+            ma_days=strategy_override.ma_days,
             portfolio_topn=strategy_override.portfolio_topn,
             replace_threshold=strategy_override.replace_threshold,
             ma_type=strategy_override.ma_type,
             stop_loss_pct=strategy_override.stop_loss_pct,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
-        strategy_settings["MA_PERIOD"] = strategy_rules.ma_period
+        strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
         strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
@@ -217,13 +215,12 @@ def run_account_backtest(
         _log(f"[백테스트] {len(etf_universe)}개의 ETF를 찾았습니다.")
 
     ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
-    ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금", "category": "-"}
+    ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금"}
 
     # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
     portfolio_topn = strategy_rules.portfolio_topn
-    holdings_limit = strategy_settings.get("MAX_PER_CATEGORY", config.MAX_PER_CATEGORY)
     if not is_tuning_fast_path:
-        _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}, 카테고리당 최대 보유 수: {holdings_limit}")
+        _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}")
 
     if not is_tuning_fast_path:
         _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
@@ -326,8 +323,6 @@ def run_account_backtest(
         ticker_meta,
     )
 
-    category_summaries = _build_category_summaries(ticker_summaries)
-
     _log("[백테스트] 설정 스냅샷을 생성하는 중...")
     settings_snapshot = _build_settings_snapshot(
         account_id=account_id,
@@ -354,7 +349,7 @@ def run_account_backtest(
         initial_capital_krw=capital_info.krw,
         currency=display_currency,
         portfolio_topn=portfolio_topn,
-        holdings_limit=holdings_limit,
+        holdings_limit=portfolio_topn,
         summary=summary,
         portfolio_timeseries=portfolio_df,
         ticker_timeseries=ticker_timeseries,
@@ -364,7 +359,6 @@ def run_account_backtest(
         monthly_cum_returns=monthly_cum_returns,
         yearly_returns=yearly_returns,
         ticker_summaries=ticker_summaries,
-        category_summaries=category_summaries,
         settings_snapshot=settings_snapshot,
         backtest_start_date=backtest_start_date_str,
         missing_tickers=missing_sorted,
@@ -512,7 +506,7 @@ def _build_backtest_kwargs(
     kwargs: dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "prefetched_metrics": prefetched_metrics,
-        "ma_period": strategy_rules.ma_period,
+        "ma_days": strategy_rules.ma_days,
         "ma_type": strategy_rules.ma_type,
         "replace_threshold": strategy_rules.replace_threshold,
         "stop_loss_pct": stop_loss_threshold,
@@ -768,7 +762,18 @@ def _build_summary(
         bench_sharpe_to_mdd = (bench_sharpe / bench_mdd_pct) if bench_mdd_pct > 0 else 0.0
 
         # 월별 수익률 계산 (리포팅용)
-        bench_monthly_returns = bench_series.resample("ME").last().pct_change().dropna()
+        bench_monthly_prices = bench_series.resample("ME").last()
+        bench_monthly_returns = bench_monthly_prices.pct_change()
+
+        # 첫 달 수익률 보정: pct_change는 전월 데이터가 없어 NaN이 되므로, 시작 가격 기준으로 계산
+        if not bench_monthly_returns.empty and start_price > 0:
+            first_val = float(bench_monthly_prices.iloc[0])
+            first_ret = (first_val / start_price) - 1.0
+
+            if pd.isna(bench_monthly_returns.iloc[0]):
+                bench_monthly_returns.iloc[0] = first_ret
+
+        bench_monthly_returns = bench_monthly_returns.dropna()
 
         return {
             "ticker": ticker,
@@ -886,7 +891,20 @@ def _build_summary(
         if initial_capital_local > 0:
             eom_pv = pv_series.resample("ME").last().dropna()
             monthly_cum_returns = (eom_pv / initial_capital_local - 1).ffill()
-        yearly_returns = pv_series_with_start.resample("YE").last().pct_change().dropna()
+        yearly_returns = pv_series_with_start.resample("YE").last().pct_change()
+        # 첫 해 수익률 보정: pct_change는 전년도 데이터가 없어 NaN이 되므로, 초기 자본금 기준으로 계산
+        if not yearly_returns.empty and initial_capital_local > 0:
+            yearly_prices = pv_series_with_start.resample("YE").last()
+            # 첫 번째 연도의 기말 평가액
+            first_val = float(yearly_prices.iloc[0])
+            # 수익률 = (기말 / 기초) - 1
+            first_ret = (first_val / initial_capital_local) - 1.0
+
+            # 첫 번째 값이 NaN이면 채워넣기
+            if pd.isna(yearly_returns.iloc[0]):
+                yearly_returns.iloc[0] = first_ret
+
+        yearly_returns = yearly_returns.dropna()
 
     # Turnover calculation (전체 거래 횟수) - if 블록 밖에서 항상 실행
     total_turnover = 0
@@ -1048,7 +1066,6 @@ def _build_ticker_summaries(
                 "total_contribution": total_contribution,
                 "period_return_pct": period_return_pct,
                 "listing_date": listing_date,
-                "category": meta.get("category", "-"),
             }
         )
 
@@ -1074,39 +1091,3 @@ def _build_settings_snapshot(
         "strategy_settings": dict(strategy_settings),
     }
     return snapshot
-
-
-def _build_category_summaries(
-    ticker_summaries: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    category_stats: dict[str, dict[str, Any]] = {}
-
-    for summary in ticker_summaries:
-        category = summary.get("category", "-")
-        if category not in category_stats:
-            category_stats[category] = {
-                "category": category,
-                "total_contribution": 0.0,
-                "realized_profit": 0.0,
-                "unrealized_profit": 0.0,
-                "total_trades": 0,
-                "winning_trades": 0,
-            }
-
-        stats = category_stats[category]
-        stats["total_contribution"] += summary.get("total_contribution", 0.0)
-        stats["realized_profit"] += summary.get("realized_profit", 0.0)
-        stats["unrealized_profit"] += summary.get("unrealized_profit", 0.0)
-        stats["total_trades"] += summary.get("total_trades", 0)
-        stats["winning_trades"] += summary.get("winning_trades", 0)
-
-    results = []
-    for stats in category_stats.values():
-        total_trades = stats["total_trades"]
-        winning_trades = stats["winning_trades"]
-        win_rate = (winning_trades / total_trades) * 100.0 if total_trades > 0 else 0.0
-        stats["win_rate"] = win_rate
-        results.append(stats)
-
-    results.sort(key=lambda x: x["total_contribution"], reverse=True)
-    return results

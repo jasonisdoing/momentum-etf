@@ -1,220 +1,165 @@
+"""종목 메타데이터를 MongoDB stock_meta 컬렉션에서 읽고 쓰는 유틸리티."""
+
+from __future__ import annotations
+
 import json
 import os
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from typing import Any
 
+from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
+# ---------------------------------------------------------------------------
+# 컬렉션 / 인덱스
+# ---------------------------------------------------------------------------
+_COLLECTION_NAME = "stock_meta"
+_INDEX_ENSURED = False
 
-def _get_data_dir():
-    """Helper to get the absolute path to the 'zaccounts' directory."""
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(project_root, "zaccounts")
+
+def _get_collection():
+    """stock_meta 컬렉션 핸들을 반환하고, 최초 호출 시 인덱스를 보장한다."""
+    global _INDEX_ENSURED
+    db = get_db_connection()
+    if db is None:
+        return None
+    coll = db[_COLLECTION_NAME]
+    if not _INDEX_ENSURED:
+        try:
+            coll.create_index(
+                [("account_id", 1), ("ticker", 1)],
+                unique=True,
+                name="account_ticker_unique",
+                background=True,
+            )
+            _INDEX_ENSURED = True
+        except Exception:
+            pass
+    return coll
 
 
-from utils.settings_loader import get_account_settings, list_available_accounts
-
+# ---------------------------------------------------------------------------
+# 인메모리 캐시 (기존 호환)
+# ---------------------------------------------------------------------------
 _ACCOUNT_STOCKS_CACHE: dict[str, list[dict]] = {}
 _LISTING_CACHE: dict[tuple[str, str], str | None] = {}
 
 
+def _invalidate_cache(account_id: str | None = None) -> None:
+    """캐시를 무효화한다. account_id가 None이면 전체 캐시를 초기화한다."""
+    if account_id is None:
+        _ACCOUNT_STOCKS_CACHE.clear()
+        _LISTING_CACHE.clear()
+    else:
+        norm = (account_id or "").strip().lower()
+        _ACCOUNT_STOCKS_CACHE.pop(norm, None)
+        # listing 캐시에서 해당 계좌 관련 항목 제거는 비용이 크므로 전체 초기화
+        _LISTING_CACHE.clear()
+
+
+# ---------------------------------------------------------------------------
+# 내부 로드 (캐시 적용)
+# ---------------------------------------------------------------------------
+
+
 def _load_account_stocks_raw(account_id: str) -> list[dict]:
+    """DB에서 해당 계좌의 활성(is_deleted!=True) 종목 메타데이터를 로드한다 (캐시 적용)."""
     account_norm = (account_id or "").strip().lower()
     if account_norm in _ACCOUNT_STOCKS_CACHE:
         return _ACCOUNT_STOCKS_CACHE[account_norm]
 
-    # Rule 7: Strict Path. No fallbacks.
-    file_path = os.path.join(_get_data_dir(), account_norm, "stocks.json")
-    if not os.path.exists(file_path):
-        # Fallback check (Strictly forbidden by Rule 7, but I must ensure migration happened)
-        # Assuming migration happened, this file SHOULD exist if the account is valid.
+    coll = _get_collection()
+    if coll is None:
+        logger.error("MongoDB 연결 실패 — stock_meta 컬렉션을 읽을 수 없습니다.")
         _ACCOUNT_STOCKS_CACHE[account_norm] = []
-        # We might want to raise an error if expected?
-        # But for now returning empty list allows callers to handle it?
-        # Rule 7 says "raise clear error".
-        # But load_raw might be used by "try load".
-        # Let's log warning and return empty, but get_etfs will validate.
-        logger.error(f"계정 종목 파일이 존재하지 않습니다: {file_path}")
         return []
 
     try:
-        with open(file_path, encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                _ACCOUNT_STOCKS_CACHE[account_norm] = data
-                return data
-            logger.warning("'%s' 파일의 루트는 리스트여야 합니다.", file_path)
-    except json.JSONDecodeError as exc:
-        logger.error("'%s' JSON 파싱 실패: %s", file_path, exc)
+        # Soft Delete: is_deleted가 True가 아닌 것만 조회
+        query = {
+            "account_id": account_norm,
+            "is_deleted": {"$ne": True},
+        }
+        docs = list(coll.find(query, {"_id": 0}))
+        # account_id 필드는 내부 관리용이므로 반환 데이터에서 제거
+        for doc in docs:
+            doc.pop("account_id", None)
+            doc.pop("created_at", None)
+            doc.pop("updated_at", None)
+            doc.pop("is_deleted", None)
+            doc.pop("deleted_at", None)
+        _ACCOUNT_STOCKS_CACHE[account_norm] = docs
+        return docs
     except Exception as exc:
-        logger.warning("'%s' 파일 읽기 실패: %s", file_path, exc)
+        logger.error("stock_meta 컬렉션 조회 실패 (account=%s): %s", account_norm, exc)
+        _ACCOUNT_STOCKS_CACHE[account_norm] = []
+        return []
 
-    _ACCOUNT_STOCKS_CACHE[account_norm] = []
-    return []
+
+# ---------------------------------------------------------------------------
+# 공개 API — 읽기
+# ---------------------------------------------------------------------------
+
+# 하위 호환용 import
+from utils.settings_loader import get_account_settings, list_available_accounts  # noqa: E402
 
 
 def get_etfs(account_id: str, include_extra_tickers: Iterable[str] | None = None) -> list[dict[str, str]]:
     """
-    'zaccounts/<account>/stocks.json' 파일에서 종목 목록을 반환합니다.
+    MongoDB stock_meta 컬렉션에서 활성 종목 목록을 반환합니다.
+    플랫 리스트 형태: [{ticker, name, listing_date, ...}, ...]
     """
     account_norm = (account_id or "").strip().lower()
     if not account_norm:
         raise ValueError("account_id must be provided")
 
     all_etfs: list[dict[str, Any]] = []
-    seen_tickers = set()
+    seen_tickers: set[str] = set()
 
     data = _load_account_stocks_raw(account_norm)
     if not data:
-        # If data is empty, it might be a missing file or empty file.
-        # Check if file exists to distinguish?
-        file_path = os.path.join(_get_data_dir(), account_norm, "stocks.json")
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Stock settings not found for account: {account_id} at {file_path}")
         return []
 
-    by_ticker: dict[str, dict[str, Any]] = {}
-
-    for category_block in data:
-        if not isinstance(category_block, dict) or "tickers" not in category_block:
+    for item in data:
+        if not isinstance(item, dict) or not item.get("ticker"):
             continue
 
-        category_name = category_block.get("category", "Uncategorized")
-        tickers_list = category_block.get("tickers", [])
-        if not isinstance(tickers_list, list):
+        ticker = str(item["ticker"]).strip()
+        if not ticker or ticker in seen_tickers:
             continue
 
-        # 카테고리명에 종목 수 추가
-        category_count = len(tickers_list)
-        category_display = f"{category_name}({category_count})"
+        seen_tickers.add(ticker)
 
-        for item in tickers_list:
-            if not isinstance(item, dict) or not item.get("ticker"):
-                continue
+        new_item = dict(item)
+        new_item["ticker"] = ticker
+        new_item["type"] = "etf"
+        all_etfs.append(new_item)
 
-            ticker = item["ticker"]
-            ticker_norm = str(ticker).strip()
-            if not ticker_norm or ticker_norm in seen_tickers:
-                continue
+    # logger.info(
+    #     "[%s] 전체 ETF 유니버스 로딩: %d개 종목",
+    #     account_norm.upper(),
+    #     len(all_etfs),
+    # )
 
-            seen_tickers.add(ticker_norm)
-
-            new_item = dict(item)
-            new_item["ticker"] = ticker_norm
-            new_item["type"] = "etf"
-            new_item["category"] = category_display
-            if item.get("listing_date"):
-                new_item["listing_date"] = item["listing_date"]
-            all_etfs.append(new_item)
-            by_ticker[ticker_norm.upper()] = new_item
-
-    filtered = all_etfs
-    logger.info(
-        "[%s] 전체 ETF 유니버스 로딩: %d개 종목",
-        account_norm.upper(),
-        len(filtered),
-    )
-
-    if include_extra_tickers:
-        existing = {item["ticker"].upper() for item in filtered}
-        for ticker in include_extra_tickers:
-            norm = str(ticker or "").strip().upper()
-            if not norm or norm in existing:
-                continue
-            # Extra tickers might not be in the account source?
-            # If provided in include_extra_tickers, assume we want them.
-            # But where do we get metadata?
-            # The original code looked up in `by_ticker`.
-            # If extra ticker is NOT in the file, it won't be in by_ticker.
-            # So this logic only works if include_extra_tickers are IN the file but filtered out?
-            # But here we loaded EVERYTHING from the file.
-            # So include_extra_tickers logic seems redundant if we already load everything?
-            # Wait, the original code filtered?
-            # Original code: `filtered = all_etfs`.
-            # So it returns ALL.
-            # Include extra tickers logic seems to be "Ensure these are included even if..."?
-            # Actually line 102: `src = by_ticker.get(norm)`.
-            # If it's in `by_ticker`, it's already in `all_etfs`.
-            # So `include_extra_tickers` does NOTHING in the original code unless there was prior filtering?
-            # Yes, `filtered = all_etfs`.
-            # So I will keep it as is (no-op effectively).
-            pass
-
-    return filtered
+    return all_etfs
 
 
 def get_etfs_by_country(country: str) -> list[dict[str, Any]]:
     """
-    (Legacy Helper) Aggregate stocks from all accounts matching the country code.
-    Used for name resolution where account context is missing.
+    (Legacy Helper) 해당 country_code를 가진 모든 계좌의 종목을 합산하여 반환합니다.
+    이름 해석 등 계좌 컨텍스트가 없는 경우에 사용합니다.
     """
     country_norm = (country or "").strip().lower()
     accounts = list_available_accounts()
 
-    aggregated = []
-    seen = set()
-
+    unique_tickers: dict[str, dict] = {}
     for account in accounts:
         try:
             settings = get_account_settings(account)
             if settings.get("country_code", "").lower() == country_norm:
-                stocks = _load_account_stocks_raw(account)
-                for block in stocks:
-                    for item in block.get("tickers", []):
-                        tkr = item.get("ticker")
-                        if tkr and tkr not in seen:
-                            aggregated.append(item)  # Need flattened structure?
-                            seen.add(tkr)
-        except Exception:
-            continue
-
-    # Need to return structure compatible with _get_display_name?
-    # _get_display_name expects list of blocks (with tickers list) OR flat list?
-    # Original get_etfs returns list of ETF dictionaries (flat).
-    # But _get_display_name iterates:
-    # for block in etf_blocks:
-    #    if "tickers" in block: ...
-    # So _get_display_name expects RAW structure (blocks).
-    #
-    # My _load_country_raw returned RAW structure (List[Dict] with category/tickers).
-    # So `get_etfs_by_country` should return RAW structure?
-    # But `get_etfs` (the original one) called `_load_country_raw` inside but returned FLAT list?
-    # Wait, check `_get_display_name` in Step 876.
-    # Line 1387: `etf_blocks = get_etfs(country_code)`.
-    # AND Line 1388: `for block in etf_blocks: if "tickers" in block...`
-    #
-    # WAIT! `get_etfs` (Original) returned FLAT list calling it `all_etfs`.
-    # Step 819: `get_etfs` implementation:
-    # 51: `all_etfs: list[dict] = []`
-    # 82: `all_etfs.append(new_item)` which is a DICT of ticker info.
-    # It does NOT have "tickers" key. It has "ticker", "category", etc.
-    #
-    # So `_get_display_name` logic at Step 876 Line 1390 `if "tickers" in block:`
-    # seems to expect the RAW structure.
-    # BUT it calls `get_etfs(country_code)`.
-    # THIS MEANS `_get_display_name` IS BUGGY/WRONG in the current codebase if `get_etfs` returns flat list.
-    # OR `get_etfs` returns blocks?
-    # Step 819 again: `get_etfs` returns `filtered` (list of dicts).
-    # Each dict is `new_item` with `ticker` key.
-    #
-    # Let's check `_get_display_name` again.
-    # Line 1390: `if "tickers" in block:`
-    # If `get_etfs` returns flat items, they don't have "tickers".
-    # So `else` block (Line 1399) runs.
-    # Line 1400: `tkr = block.get("ticker")`.
-    # This matches!
-    # So `_get_display_name` handles both?
-    #
-    # So `get_etfs_by_country` can return flat list of unique tickers.
-
-    unique_tickers = {}
-    for account in accounts:
-        try:
-            settings = get_account_settings(account)
-            if settings.get("country_code", "").lower() == country_norm:
-                # Use get_etfs(account) to get flat list
                 etfs = get_etfs(account)
                 for etf in etfs:
                     tkr = etf.get("ticker")
@@ -227,7 +172,7 @@ def get_etfs_by_country(country: str) -> list[dict[str, Any]]:
 
 
 def get_all_etfs(account_id: str) -> list[dict[str, Any]]:
-    """Return every ETF entry defined in zaccounts/<account>/stocks.json."""
+    """해당 계좌의 전체 ETF 항목을 반환합니다."""
 
     raw_data = _load_account_stocks_raw(account_id)
     if not raw_data:
@@ -235,76 +180,259 @@ def get_all_etfs(account_id: str) -> list[dict[str, Any]]:
 
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for category_block in raw_data:
-        if not isinstance(category_block, dict):
+    for item in raw_data:
+        if not isinstance(item, dict):
             continue
-        raw_category = category_block.get("category", "")
-        if isinstance(raw_category, (list, set, tuple)):
-            raw_category = next(iter(raw_category), "") if raw_category else ""
-        category_name = str(raw_category or "").strip()
-
-        tickers_list = category_block.get("tickers", [])
-        if not isinstance(tickers_list, list):
+        ticker = str(item.get("ticker") or "").strip()
+        if not ticker or ticker in seen:
             continue
-        for item in tickers_list:
-            if not isinstance(item, dict):
-                continue
-            ticker = str(item.get("ticker") or "").strip()
-            if not ticker or ticker in seen:
-                continue
-            seen.add(ticker)
-            entry = dict(item)
-            entry["ticker"] = ticker
-            entry.setdefault("type", "etf")
-            entry.setdefault("category", category_name)
-            results.append(entry)
+        seen.add(ticker)
+        entry = dict(item)
+        entry["ticker"] = ticker
+        entry.setdefault("type", "etf")
+        results.append(entry)
     return results
 
 
-def save_etfs(account_id: str, data: list[dict]):
+# ---------------------------------------------------------------------------
+# 공개 API — 쓰기
+# ---------------------------------------------------------------------------
+
+
+def save_etfs(account_id: str, data: list[dict]) -> None:
     """
-    주어진 데이터를 'zaccounts/<account>/stocks.json' 파일에 저장합니다.
+    종목 메타데이터를 MongoDB stock_meta 컬렉션에 저장합니다 (upsert).
+    Soft Delete 방식: 기존에 있지만 새 데이터에 없는 종목은 is_deleted=True 처리합니다.
     """
     account_norm = (account_id or "").strip().lower()
     if not account_norm:
         raise ValueError("account_id required")
 
-    # Rule 7: Strict Path.
-    stocks_file = os.path.join(_get_data_dir(), account_norm, "stocks.json")
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — stock_meta 컬렉션에 쓸 수 없습니다.")
 
-    # Ensure dir exists (it should if migrated)
-    os.makedirs(os.path.dirname(stocks_file), exist_ok=True)
+    now = datetime.now(timezone.utc)
+    new_tickers: set[str] = set()
+
+    from pymongo import UpdateOne
+
+    operations = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        ticker = str(item.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        new_tickers.add(ticker)
+
+        doc = dict(item)
+        doc.pop("type", None)
+        doc["account_id"] = account_norm
+        doc["ticker"] = ticker
+        doc["updated_at"] = now
+        doc["is_deleted"] = False  # 활성 상태로 설정
+        doc["deleted_at"] = None
+
+        operations.append(
+            UpdateOne(
+                {"account_id": account_norm, "ticker": ticker},
+                {"$set": doc, "$setOnInsert": {"created_at": now}},
+                upsert=True,
+            )
+        )
+
+    if operations:
+        try:
+            coll.bulk_write(operations, ordered=False)
+        except Exception as exc:
+            logger.error("stock_meta bulk_write 실패 (account=%s): %s", account_norm, exc)
+            raise
+
+    # DB에는 있지만 새 데이터에는 없는 종목 → Soft Delete
+    try:
+        coll.update_many(
+            {"account_id": account_norm, "ticker": {"$nin": list(new_tickers)}},
+            {
+                "$set": {
+                    "is_deleted": True,
+                    "deleted_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
+    except Exception as exc:
+        logger.warning("stock_meta 잔여 종목 soft delete 실패 (account=%s): %s", account_norm, exc)
+
+    logger.info("%d개 종목 정보가 stock_meta 컬렉션에 저장되었습니다. (account=%s)", len(new_tickers), account_norm)
+    _invalidate_cache(account_norm)
+
+
+def add_stock(account_id: str, ticker: str, name: str = "", **extra_fields: Any) -> bool:
+    """
+    단일 종목을 stock_meta 컬렉션에 추가한다.
+    이미 존재하면(삭제된 경우 포함) 활성 상태로 복구한다.
+    """
+    account_norm = (account_id or "").strip().lower()
+    ticker_norm = str(ticker or "").strip()
+    if not account_norm or not ticker_norm:
+        return False
+
+    coll = _get_collection()
+    if coll is None:
+        return False
+
+    now = datetime.now(timezone.utc)
+
+    # 1. 먼저 존재 여부 확인 (삭제된 것 포함)
+    existing = coll.find_one({"account_id": account_norm, "ticker": ticker_norm})
+
+    if existing:
+        if not existing.get("is_deleted"):
+            # 이미 활성 상태로 존재하면 False 반환 (또는 업데이트? 현재는 기각)
+            logger.info("이미 존재하는 종목입니다: %s (account=%s)", ticker_norm, account_norm)
+            return False
+
+        # 삭제된 상태라면 복구
+        try:
+            update_doc = {
+                "is_deleted": False,
+                "deleted_at": None,
+                "deleted_reason": None,
+                "added_date": now.strftime("%Y-%m-%d"),
+                "updated_at": now,
+            }
+            if name:
+                update_doc["name"] = name
+            update_doc.update(extra_fields)
+
+            coll.update_one({"_id": existing["_id"]}, {"$set": update_doc})
+            _invalidate_cache(account_norm)
+            logger.info("삭제된 종목 복구: %s (account=%s)", ticker_norm, account_norm)
+            return True
+        except Exception as exc:
+            logger.warning("종목 복구 실패 %s: %s", ticker_norm, exc)
+            return False
+
+    # 2. 없으면 신규 삽입
+    doc: dict[str, Any] = {
+        "account_id": account_norm,
+        "ticker": ticker_norm,
+        "name": name or "",
+        "created_at": now,
+        "updated_at": now,
+        "added_date": now.strftime("%Y-%m-%d"),
+        "is_deleted": False,
+        "deleted_at": None,
+    }
+    doc.update(extra_fields)
 
     try:
-        with open(stocks_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-        logger.info("%d개 카테고리의 종목 정보가 '%s'에 저장되었습니다.", len(data), stocks_file)
-        _ACCOUNT_STOCKS_CACHE[account_norm] = data
-    except Exception as e:
-        logger.error("'%s' 파일 저장 실패: %s", stocks_file, e)
-        raise
+        coll.insert_one(doc)
+        _invalidate_cache(account_norm)
+        logger.info("종목 추가: %s (account=%s)", ticker_norm, account_norm)
+        return True
+    except Exception as exc:
+        logger.warning("종목 추가 실패 %s (account=%s): %s", ticker_norm, account_norm, exc)
+        return False
 
 
-def get_etf_categories(account_id: str) -> list[str]:
-    """
-    지정된 계정의 모든 ETF 카테고리 목록을 반환합니다.
-    """
-    categories = set()
-    data = _load_account_stocks_raw(account_id)
-    if not data:
+def remove_stock(account_id: str, ticker: str, reason: str = "") -> bool:
+    """단일 종목을 Soft Delete 처리한다."""
+    account_norm = (account_id or "").strip().lower()
+    ticker_norm = str(ticker or "").strip()
+    if not account_norm or not ticker_norm:
+        return False
+
+    coll = _get_collection()
+    if coll is None:
+        return False
+
+    now = datetime.now(timezone.utc)
+    update_fields: dict[str, Any] = {
+        "is_deleted": True,
+        "deleted_at": now,
+        "updated_at": now,
+    }
+    if reason:
+        update_fields["deleted_reason"] = reason.strip()
+
+    try:
+        result = coll.update_one(
+            {"account_id": account_norm, "ticker": ticker_norm},
+            {"$set": update_fields},
+        )
+        if result.modified_count > 0:
+            _invalidate_cache(account_norm)
+            logger.info("종목 삭제(Soft): %s (account=%s, reason=%s)", ticker_norm, account_norm, reason)
+            return True
+        return False
+    except Exception as exc:
+        logger.warning("종목 삭제 실패 %s (account=%s): %s", ticker_norm, account_norm, exc)
+        return False
+
+
+def get_deleted_etfs(account_id: str) -> list[dict[str, Any]]:
+    """해당 계좌의 Soft Delete된 종목 목록을 반환한다."""
+    account_norm = (account_id or "").strip().lower()
+    if not account_norm:
         return []
 
-    for category_block in data:
-        if isinstance(category_block, dict) and "category" in category_block:
-            categories.add(category_block["category"])
+    coll = _get_collection()
+    if coll is None:
+        return []
 
-    return sorted(list(categories))
+    try:
+        docs = list(
+            coll.find(
+                {"account_id": account_norm, "is_deleted": True},
+                {"_id": 0},
+            )
+        )
+        results: list[dict[str, Any]] = []
+        for doc in docs:
+            doc.pop("account_id", None)
+            doc.pop("created_at", None)
+            doc.pop("updated_at", None)
+            results.append(doc)
+        return results
+    except Exception as exc:
+        logger.warning("삭제 종목 조회 실패 (account=%s): %s", account_norm, exc)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# 공개 API — listing_date 관련
+# ---------------------------------------------------------------------------
+
+
+def check_stock_status(account_id: str, ticker: str) -> str | None:
+    """
+    종목의 상태를 확인한다.
+    Returns:
+        "ACTIVE": 이미 활성 상태로 존재함
+        "DELETED": 삭제된 상태로 존재함 (복구 가능)
+        None: 존재하지 않음 (신규)
+    """
+    account_norm = (account_id or "").strip().lower()
+    ticker_norm = str(ticker or "").strip()
+    if not account_norm or not ticker_norm:
+        return None
+
+    coll = _get_collection()
+    if coll is None:
+        return None
+
+    existing = coll.find_one({"account_id": account_norm, "ticker": ticker_norm})
+    if existing:
+        if existing.get("is_deleted"):
+            return "DELETED"
+        return "ACTIVE"
+    return None
 
 
 def get_listing_date(country: str, ticker: str) -> str | None:
-    """
-    Looks up listing date by country code (aggregating all accounts).
-    """
+    """country_code 기준으로 listing_date를 조회한다."""
     country_norm = (country or "").strip().lower()
     ticker_norm = str(ticker or "").strip()
     cache_key = (country_norm, ticker_norm)
@@ -317,19 +445,15 @@ def get_listing_date(country: str, ticker: str) -> str | None:
             settings = get_account_settings(account)
             if settings.get("country_code", "").lower() == country_norm:
                 data = _load_account_stocks_raw(account)
-                for category_block in data:
-                    tickers_list = category_block.get("tickers") if isinstance(category_block, dict) else None
-                    if not isinstance(tickers_list, list):
+                for item in data:
+                    if not isinstance(item, dict):
                         continue
-                    for item in tickers_list:
-                        if not isinstance(item, dict):
-                            continue
-                        item_ticker = str(item.get("ticker") or "").strip()
-                        if item_ticker == ticker_norm:
-                            listing_date = item.get("listing_date")
-                            if listing_date:
-                                _LISTING_CACHE[cache_key] = listing_date
-                                return listing_date
+                    item_ticker = str(item.get("ticker") or "").strip()
+                    if item_ticker == ticker_norm:
+                        listing_date = item.get("listing_date")
+                        if listing_date:
+                            _LISTING_CACHE[cache_key] = listing_date
+                            return listing_date
         except Exception:
             continue
 
@@ -338,12 +462,14 @@ def get_listing_date(country: str, ticker: str) -> str | None:
 
 
 def set_listing_date(country: str, ticker: str, listing_date: str) -> None:
-    """
-    Sets listing date for a ticker across ALL accounts sharing the country code.
-    """
+    """해당 country_code를 공유하는 모든 계좌에서 티커의 listing_date를 설정한다."""
     country_norm = (country or "").strip().lower()
     ticker_norm = str(ticker or "").strip()
     if not ticker_norm:
+        return
+
+    coll = _get_collection()
+    if coll is None:
         return
 
     accounts = list_available_accounts()
@@ -352,41 +478,46 @@ def set_listing_date(country: str, ticker: str, listing_date: str) -> None:
     for account in accounts:
         try:
             settings = get_account_settings(account)
-            if settings.get("country_code", "").lower() == country_norm:
-                data = _load_account_stocks_raw(account)
-                updated_local = False
-                changed_local = False
+            if settings.get("country_code", "").lower() != country_norm:
+                continue
 
-                for category_block in data:
-                    tickers_list = category_block.get("tickers") if isinstance(category_block, dict) else None
-                    if not isinstance(tickers_list, list):
-                        continue
-                    for item in tickers_list:
-                        if not isinstance(item, dict):
-                            continue
-                        item_ticker = str(item.get("ticker") or "").strip()
-                        if item_ticker != ticker_norm:
-                            continue
-
-                        current = item.get("listing_date")
-                        if current == listing_date:
-                            updated_local = True
-                            break
-                        item["listing_date"] = listing_date
-                        updated_local = True
-                        changed_local = True
-                        break
-
-                    if updated_local:
-                        break
-
-                if updated_local and changed_local:
-                    save_etfs(account, data)
-                    updated_any = True
-                elif updated_local:
-                    updated_any = True
+            account_norm = account.strip().lower()
+            result = coll.update_one(
+                {"account_id": account_norm, "ticker": ticker_norm},
+                {"$set": {"listing_date": listing_date, "updated_at": datetime.now(timezone.utc)}},
+            )
+            if result.modified_count > 0 or result.matched_count > 0:
+                updated_any = True
+                _invalidate_cache(account_norm)
         except Exception:
             continue
 
     if updated_any:
         _LISTING_CACHE[(country_norm, ticker_norm)] = listing_date
+
+
+# ---------------------------------------------------------------------------
+# 파일 기반 레거시 헬퍼 (마이그레이션용)
+# ---------------------------------------------------------------------------
+
+
+def _get_data_dir() -> str:
+    """zaccounts 디렉토리 절대경로를 반환한다."""
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(project_root, "zaccounts")
+
+
+def load_stocks_from_file(account_id: str) -> list[dict]:
+    """stocks.json 파일에서 종목 데이터를 로드한다 (마이그레이션 전용)."""
+    account_norm = (account_id or "").strip().lower()
+    file_path = os.path.join(_get_data_dir(), account_norm, "stocks.json")
+    if not os.path.exists(file_path):
+        return []
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+    except Exception as exc:
+        logger.error("stocks.json 로드 실패 (%s): %s", file_path, exc)
+    return []

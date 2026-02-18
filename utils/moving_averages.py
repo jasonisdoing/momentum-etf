@@ -18,7 +18,7 @@ def calculate_sma(prices: pd.Series, period: int) -> pd.Series:
     Returns:
         SMA 시리즈
     """
-    return prices.rolling(window=period).mean()
+    return prices.rolling(window=period, min_periods=1).mean()
 
 
 def calculate_ema(prices: pd.Series, period: int) -> pd.Series:
@@ -53,11 +53,11 @@ def calculate_wma(prices: pd.Series, period: int) -> pd.Series:
     weights = np.arange(1, period + 1)
 
     def weighted_mean(x):
-        if len(x) < period:
-            return np.nan
-        return np.dot(x, weights) / weights.sum()
+        n = len(x)
+        w = weights[-n:]  # 데이터 길이에 맞춰 가중치 뒤쪽(최근)부터 사용
+        return np.dot(x, w) / w.sum()
 
-    return prices.rolling(window=period).apply(weighted_mean, raw=True)
+    return prices.rolling(window=period, min_periods=1).apply(weighted_mean, raw=True)
 
 
 def calculate_dema(prices: pd.Series, period: int) -> pd.Series:

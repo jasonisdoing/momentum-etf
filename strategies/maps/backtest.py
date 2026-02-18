@@ -22,7 +22,7 @@ def run_single_ticker_backtest(
     core_start_date: pd.Timestamp | None = None,
     date_range: list[str] | None = None,
     country: str = "kor",
-    ma_period: int = 20,
+    ma_days: int = 20,
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
 ) -> pd.DataFrame:
@@ -37,7 +37,7 @@ def run_single_ticker_backtest(
         core_start_date: 백테스트 시작일
         date_range: 백테스트 기간
         country: 시장 국가 코드
-        ma_period: 이동평균 기간
+        ma_days: 이동평균 기간
         stop_loss_pct: 손절 비율
         cooldown_days: 거래 쿨다운 기간
 
@@ -49,7 +49,7 @@ def run_single_ticker_backtest(
     stop_loss_threshold = stop_loss_pct
 
     # 티커 유형에 따른 이동평균 기간 설정
-    current_ma_period = ma_period
+    current_ma_days = ma_days
     if df is None:
         # df가 제공되지 않으면, date_range를 사용하여 직접 데이터를 조회합니다.
         # date_range가 없으면 기본값(3개월)으로 조회됩니다.
@@ -63,7 +63,7 @@ def run_single_ticker_backtest(
     ticker_metrics = process_ticker_data(
         ticker,
         df,
-        ma_period=current_ma_period,
+        ma_days=current_ma_days,
     )
 
     if not ticker_metrics:

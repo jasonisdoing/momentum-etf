@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import glob
-import os
-import subprocess
 from datetime import datetime
 
 import pandas as pd
@@ -62,35 +59,8 @@ def _get_db_time_info(account_id: str) -> str | None:
         return None
 
 
-def _get_latest_log_content(account_id: str) -> tuple[str | None, str | None]:
-    """
-    Get the content of the latest recommend_*.log file for the given account.
-    Returns (filename, content).
-    """
-    log_dir = os.path.join("zaccounts", account_id, "results")
-    search_pattern = os.path.join(log_dir, "recommend_*.log")
-    files = glob.glob(search_pattern)
-
-    if not files:
-        return None, None
-
-    latest_file = max(files, key=os.path.getmtime)
-    try:
-        with open(latest_file, encoding="utf-8") as f:
-            content = f.read()
-        return os.path.basename(latest_file), content
-    except Exception:
-        return os.path.basename(latest_file), "파일을 읽는 중 오류가 발생했습니다."
-
-
 def render_admin_page() -> None:
     st.set_page_config(page_title="관리자", page_icon="⚙️", layout="wide")
-
-    # 1. 세션 스테이트 초기화
-    if "admin_console_log" not in st.session_state:
-        st.session_state["admin_console_log"] = ""
-    if "admin_last_account" not in st.session_state:
-        st.session_state["admin_last_account"] = None
 
     # 2. 계정 선택
     from utils.account_registry import load_account_configs
@@ -102,90 +72,16 @@ def render_admin_page() -> None:
         st.error("사용 가능한 계정이 없습니다.")
         return
 
-    # 기본값: order가 가장 낮은(첫 번째) 계정
-    default_index = 0
+    st.title("⚙️ 관리자 페이지")
 
-    selected_account = st.selectbox(
-        "계정 선택",
-        accounts,
-        index=default_index,
-        key="admin_account_selector",
-        help="추천을 실행할 계정을 선택하세요.",
-    )
-
-    # 계정이 변경되었으면 콘솔 로그 초기화
-    if selected_account != st.session_state["admin_last_account"]:
-        st.session_state["admin_last_account"] = selected_account
-        st.session_state["admin_console_log"] = ""
+    st.info("추천 실행 기능은 각 계좌 페이지의 '추천실행' 탭으로 이동되었습니다.")
 
     st.markdown("---")
-    st.subheader("💡 추천 실행")
+    st.subheader("📊 계정 상태 요약")
 
-    # DB 업데이트 시간 조회
-    time_info = _get_db_time_info(selected_account)
-
-    if time_info:
-        # 볼드체로 표시
-        st.markdown(f"**최근 실행: {time_info}**")
-    else:
-        st.info("아직 추천 데이터가 없습니다.")
-
-    # 3. 추천 실행 버튼
-    if st.button("추천 실행", type="primary", key="btn_run_recommend"):
-        if not selected_account:
-            st.warning("계정을 선택해주세요.")
-            return
-
-        status_area = st.empty()
-        status_area.info(f"🚀 `{selected_account}` 계정 추천 실행 중...")
-
-        try:
-            # logs reset before run
-            st.session_state["admin_console_log"] = ""
-
-            result = subprocess.run(
-                ["python", "recommend.py", selected_account],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                check=False,
-            )
-
-            # 실행 결과 저장
-            st.session_state["admin_console_log"] = result.stdout
-
-            if result.returncode == 0:
-                status_area.success(f"✅ `{selected_account}` 추천 실행 완료!")
-                # Rerun to update the "Last Run" time and file content
-                st.rerun()
-            else:
-                status_area.error(f"❌ 실행 실패 (Exit Code: {result.returncode})")
-
-        except Exception as e:
-            status_area.error(f"실행 중 예외 발생: {str(e)}")
-            st.session_state["admin_console_log"] += f"\n[System Error] {str(e)}"
-
-    # 4. 결과 표시 (항상 표시)
-    st.markdown("---")
-
-    # 4-1. 콘솔 로그
-    with st.expander("콘솔 로그", expanded=False):
-        log_content = st.session_state.get("admin_console_log", "")
-        if log_content:
-            st.code(log_content)
-        else:
-            st.info("실행 이력이 없습니다.")
-
-    # 4-2. 파일 결과 (항상 최신 파일 로드)
-    # 파일 정보 조회
-    file_name, file_content = _get_latest_log_content(selected_account)
-
-    expander_title = f"파일 결과 ({file_name})" if file_name else "파일 결과 (파일 없음)"
-    with st.expander(expander_title, expanded=True):
-        if file_content:
-            st.code(file_content, language="text")
-        else:
-            st.warning("표시할 결과 파일이 존재하지 않습니다.")
+    for account in accounts:
+        time_info = _get_db_time_info(account)
+        st.write(f"- **{account}**: {time_info if time_info else '데이터 없음'}")
 
 
 __all__ = ["render_admin_page"]

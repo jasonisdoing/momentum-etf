@@ -36,7 +36,7 @@ python recommend.py us
 ### 기본 설정 (`config.py`)
 시스템 전반에 걸친 기본 설정을 변경할 수 있습니다.
 *   `SLACK_WEBHOOK_URL`: 알림을 받을 슬랙 웹훅 주소
-*   `TUNING_ENSEMBLE_SIZE`: 튜닝 시 앙상블에 사용할 상위 결과 개수 (기본 3, 홀수만 가능)
+
 
 ### 계좌별 전략 설정 (`zsettings/account/kor_us.json`, `us.json`)
 각 계좌(포트폴리오)별로 구체적인 전략 파라미터를 설정합니다. `tune.py` 실행 시 자동으로 업데이트됩니다.
@@ -44,7 +44,7 @@ python recommend.py us
 ```json
 {
   "strategy": {
-    "MA_PERIOD": 48,              // 이동평균 기간
+    "MA_MONTH": 3,          // 이동평균 기간 (개월)
     "PORTFOLIO_TOPN": 5,          // 최대 보유 종목 수
     "STOP_LOSS_PCT": -10,         // 손절 기준 (-10%)
     "BACKTEST_START_DATE": "2025-09-08"  // 백테스트/튜닝 시작일
