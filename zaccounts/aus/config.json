@@ -21,7 +21,8 @@
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
         "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": false
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false,
+        "REBALANCE_MODE": "QUARTERLY"
     },
     "benchmark": {
         "ticker": "A200",

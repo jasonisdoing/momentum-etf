@@ -389,13 +389,20 @@ def _export_debug_month(
             "period_return": float(row.get("period_return")) if row.get("period_return") is not None else None,
         }
 
+        # [Fix] ma_type and rebalance_mode are now mandatory
+        rebalance_mode_val = tuning.get("REBALANCE_MODE")
+        if rebalance_mode_val is None:
+            # If missing in row, get from account settings
+            rebalance_mode_val = get_strategy_rules(account_id).rebalance_mode
+
         strategy_rules = StrategyRules.from_values(
             ma_month=int(ma_month),
             bucket_topn=topn,
             replace_threshold=threshold,
+            ma_type=tuning.get("MA_TYPE", "SMA"),
             stop_loss_pct=stop_loss_value,
+            rebalance_mode=rebalance_mode_val,
         )
-
         result_prefetch = run_account_backtest(
             account_id,
             quiet=True,
@@ -567,6 +574,9 @@ def _execute_tuning(
         except Exception as exc:
             logger.warning("[튜닝] %s 환율 데이터 로드 실패, fallback 사용: %s", account_norm.upper(), exc)
 
+    current_rules = get_strategy_rules(account_norm)
+    rebalance_mode = current_rules.rebalance_mode
+
     # 각 payload에는 파라미터만 포함 (데이터는 worker 초기화 시 한 번만 전달)
     payloads = [
         (
@@ -579,6 +589,7 @@ def _execute_tuning(
             int(rsi),
             int(cooldown),
             str(ma_type),
+            str(rebalance_mode),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )

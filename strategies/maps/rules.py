@@ -13,21 +13,15 @@ from config import TRADING_DAYS_PER_MONTH
 class StrategyRules:
     """Momentum 전략에서 공통으로 사용하는 핵심 파라미터."""
 
-    # 기본 MA 타입 (이동평균 종류)
-    DEFAULT_MA_TYPE = "SMA"
-
     ma_days: int
     bucket_topn: int
     replace_threshold: float
-    ma_type: str = "SMA"
-    stop_loss_pct: float | None = None
-    enable_data_sufficiency_check: bool = False
+    ma_type: str
+    stop_loss_pct: float | None
+    enable_data_sufficiency_check: bool
 
-    # [신규] 리밸런싱 모드 (QUARTERLY, MONTHLY, DAILY)
-    rebalance_mode: str = "QUARTERLY"
-
-    # [신규] 음수 점수 허용 여부 (상대 모멘텀)
-    allow_negative_score: bool = True
+    # 리밸런싱 모드 (QUARTERLY, MONTHLY, DAILY)
+    rebalance_mode: str
 
     @classmethod
     def from_values(
@@ -41,7 +35,6 @@ class StrategyRules:
         stop_loss_pct: Any = None,
         enable_data_sufficiency_check: Any = False,
         rebalance_mode: Any = None,
-        allow_negative_score: Any = None,
     ) -> StrategyRules:
         # MA 기간 결정 (개월 우선)
         final_ma_days = None
@@ -84,7 +77,9 @@ class StrategyRules:
             raise ValueError("REPLACE_SCORE_THRESHOLD는 숫자여야 합니다.") from None
 
         # MA 타입 검증
-        ma_type_str = str(ma_type or cls.DEFAULT_MA_TYPE).upper()
+        if ma_type is None:
+            raise ValueError("MA_TYPE은 필수입니다.")
+        ma_type_str = str(ma_type).upper()
         valid_ma_types = {"SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"}
         if ma_type_str not in valid_ma_types:
             raise ValueError(f"MA_TYPE은 {valid_ma_types} 중 하나여야 합니다. (입력값: {ma_type_str})")
@@ -102,10 +97,13 @@ class StrategyRules:
         data_sufficiency_check = bool(enable_data_sufficiency_check)
 
         # Rebalance Mode
-        final_rebalance_mode = str(rebalance_mode).upper() if rebalance_mode else "QUARTERLY"
-
-        # Allow Negative Score
-        final_allow_negative = bool(allow_negative_score) if allow_negative_score is not None else True
+        if rebalance_mode is None:
+            raise ValueError("REBALANCE_MODE는 필수입니다.")
+        final_rebalance_mode = str(rebalance_mode).upper()
+        if final_rebalance_mode not in {"DAILY", "MONTHLY", "QUARTERLY"}:
+            raise ValueError(
+                f"REBALANCE_MODE는 DAILY, MONTHLY, QUARTERLY 중 하나여야 합니다. (입력값: {final_rebalance_mode})"
+            )
 
         return cls(
             ma_days=final_ma_days,
@@ -115,7 +113,6 @@ class StrategyRules:
             stop_loss_pct=stop_loss_value,
             enable_data_sufficiency_check=data_sufficiency_check,
             rebalance_mode=final_rebalance_mode,
-            allow_negative_score=final_allow_negative,
         )
 
     @classmethod
@@ -137,7 +134,6 @@ class StrategyRules:
             stop_loss_pct=_resolve("STOP_LOSS_PCT", "stop_loss_pct"),
             enable_data_sufficiency_check=_resolve("ENABLE_DATA_SUFFICIENCY_CHECK", "enable_data_sufficiency_check"),
             rebalance_mode=_resolve("REBALANCE_MODE", "rebalance_mode"),
-            allow_negative_score=_resolve("ALLOW_NEGATIVE_SCORE", "allow_negative_score"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -149,7 +145,6 @@ class StrategyRules:
             "stop_loss_pct": self.stop_loss_pct,
             "enable_data_sufficiency_check": self.enable_data_sufficiency_check,
             "rebalance_mode": self.rebalance_mode,
-            "allow_negative_score": self.allow_negative_score,
         }
         return d
 

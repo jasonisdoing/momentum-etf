@@ -58,6 +58,7 @@ def evaluate_single_combo(
         rsi_int,
         cooldown_int,
         ma_type_str,
+        rebalance_mode_str,
         excluded_tickers,
         is_ma_month,
     ) = payload
@@ -87,6 +88,7 @@ def evaluate_single_combo(
                 replace_threshold=float(threshold_float),
                 ma_type=str(ma_type_str),
                 stop_loss_pct=float(stop_loss_float),
+                rebalance_mode=rebalance_mode_str,
             )
         else:
             strategy_rules = StrategyRules.from_values(
@@ -95,6 +97,7 @@ def evaluate_single_combo(
                 replace_threshold=float(threshold_float),
                 ma_type=str(ma_type_str),
                 stop_loss_pct=float(stop_loss_float),
+                rebalance_mode=rebalance_mode_str,
             )
 
         strategy_overrides = {

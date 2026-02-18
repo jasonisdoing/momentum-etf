@@ -136,18 +136,18 @@ def compose_recommendation_slack_message(
     summary_data = getattr(report, "summary_data", None)
 
     held_count: int | None = None
-    bucket_topn: int | None = None
+    holdings_limit: int | None = None
     if isinstance(summary_data, dict):
         held_raw = summary_data.get("held_count")
-        topn_raw = summary_data.get("bucket_topn")
+        limit_raw = summary_data.get("holdings_limit") or summary_data.get("bucket_topn")
         try:
             held_count = int(held_raw) if held_raw is not None else None
         except (TypeError, ValueError):
             held_count = None
         try:
-            bucket_topn = int(topn_raw) if topn_raw is not None else None
+            holdings_limit = int(limit_raw) if limit_raw is not None else None
         except (TypeError, ValueError):
-            bucket_topn = None
+            holdings_limit = None
 
     state_counter: Counter[str] = Counter()
     if isinstance(decision_config, dict):
@@ -184,21 +184,32 @@ def compose_recommendation_slack_message(
         from core.backtest.portfolio import count_current_holdings
 
         held_count = count_current_holdings(recommendations)
-    if bucket_topn is None:
+    if holdings_limit is None:
         strategy_params = (
             resolve_strategy_params((account_settings or {}).get("strategy", {})) if account_settings else {}
         )
+        # 5버킷 시스템에서는 BUCKET_TOPN * 5가 전체 한도임
+        bucket_topn_val = strategy_params.get("BUCKET_TOPN")
+        total_limit_fallback = None
+        if bucket_topn_val is not None:
+            try:
+                total_limit_fallback = int(bucket_topn_val) * 5
+            except (TypeError, ValueError):
+                pass
+
         topn_candidates = [
-            getattr(report, "bucket_topn", None),
-            (account_settings or {}).get("bucket_topn") if account_settings else None,
+            getattr(report, "holdings_limit", None),
+            getattr(report, "bucket_topn", None),  # Legacy / individual bucket
+            (account_settings or {}).get("holdings_limit"),
+            total_limit_fallback,
             strategy_params.get("BUCKET_TOPN"),
         ]
         for candidate in topn_candidates:
             try:
-                bucket_topn = int(candidate)
+                holdings_limit = int(candidate)
                 break
             except (TypeError, ValueError, AttributeError):
-                bucket_topn = None
+                holdings_limit = None
 
     mobile_account = account_norm or (account_id or "").strip()
     mobile_url = f"https://etf.dojason.com/{mobile_account}" if mobile_account else "https://etf.dojason.com"
@@ -206,7 +217,7 @@ def compose_recommendation_slack_message(
     lines = [
         app_prefix + headline,
         f"생성시간: {duration:.1f}초",
-        f"보유종목: {_format_hold_ratio(held_count, bucket_topn)}",
+        f"보유종목: {_format_hold_ratio(held_count, holdings_limit)}",
         f"모바일: {mobile_url}",
     ]
     if ordered_states:
@@ -229,7 +240,7 @@ def compose_recommendation_slack_message(
         {"type": "mrkdwn", "text": f"*소요시간*: {duration:.1f}초"},
         {
             "type": "mrkdwn",
-            "text": f"*보유*: {_format_hold_ratio(held_count, bucket_topn)}",
+            "text": f"*보유*: {_format_hold_ratio(held_count, holdings_limit)}",
         },
     ]
 
@@ -351,10 +362,11 @@ def build_summary_line_from_summary_data(
 
     if include_hold:
         held_count = summary_data.get("held_count")
-        bucket_topn = summary_data.get("bucket_topn")
-        if held_count is not None and bucket_topn is not None:
+        # holdings_limit을 우선 사용하고 없으면 bucket_topn(레거시) 사용
+        limit = summary_data.get("holdings_limit") or summary_data.get("bucket_topn")
+        if held_count is not None and limit is not None:
             try:
-                parts.append(f"보유종목: {int(held_count)}/{int(bucket_topn)}")
+                parts.append(f"보유종목: {int(held_count)}/{int(limit)}")
             except (TypeError, ValueError):
                 pass
 

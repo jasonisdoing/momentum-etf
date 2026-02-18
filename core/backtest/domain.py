@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -11,20 +11,18 @@ class BacktestConfig:
     start_date: pd.Timestamp
     end_date: pd.Timestamp
     initial_capital: float
-    country_code: str = "kor"
-    top_n: int = 10
-    ma_days: int = 20
-    ma_type: str = "SMA"
-    replace_threshold: float = 0.0
-    stop_loss_pct: float = -10.0
-    cooldown_days: int = 5
-    rsi_sell_threshold: float = 10.0
-    # Rebalance & Bucket
-    bucket_map: dict[str, int] = field(default_factory=dict)
-    bucket_topn: int = 1
-    rebalance_mode: str = "QUARTERLY"
-    allow_negative_score: bool = True
-    quiet: bool = False
+    country_code: str
+    top_n: int
+    ma_days: int
+    ma_type: str
+    replace_threshold: float
+    stop_loss_pct: float
+    cooldown_days: int
+    rsi_sell_threshold: float
+    bucket_map: dict[str, int]
+    bucket_topn: int
+    rebalance_mode: str
+    quiet: bool
 
 
 @dataclass

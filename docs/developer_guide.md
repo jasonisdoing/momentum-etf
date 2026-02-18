@@ -6,11 +6,13 @@
 
 ### 모듈 구조
 *   `recommend.py`: 백테스트 엔진을 호출하여 가장 최신일(오늘)의 시뮬레이션 결과를 추출하고 추천 리포트를 생성하는 엔트리 포인트
-*   `logic/backtest/`:
-    *   `engine.py`: 핵심 시뮬레이션 엔진 (매매 실행, 시간 순차 처리)
+*   `core/backtest/`:
+    *   `engine.py`: 핵심 시뮬레이션 엔진 (매매 실행, 시간 순차 처리, 리밸런싱 주기 관리)
+    *   `runner.py`: 계좌별 백테스트 실행 (설정 로드 및 엄격한 유효성 검사)
+    *   `domain.py`: 핵심 데이터 구조 및 설정 (BacktestConfig, AccountBacktestResult)
     *   `portfolio.py`: 포트폴리오 상태 관리 및 도메인 로직 (종목 카운트, 필터링 등)
     *   그 외 `filtering.py`, `signals.py` 등 공통 유틸리티
-*   `logic/tune/`: 파라미터 최적화 로직
+*   `core/tune/`: 파라미터 최적화 로직 (Ensemble 기반)
 *   `utils/`: 데이터 I/O, 로깅, UI 렌더링 등 유틸리티
 
 ### 데이터 파이프라인
@@ -41,6 +43,9 @@
 4.  **데이터 기준**:
     *   모든 의사결정은 **판단 시점의 전일 종가 데이터**를 기준으로 함
     *   추천 리포트 생성 시, "오늘"의 신호는 "어제까지의 마감 데이터"를 보고 결정된 것임
+5.  **엄격한 설정 원칙 (Rule 7)**:
+    *   코드에 암묵적인 기본값(fallback)을 사용하지 않습니다.
+    *   필수 전략 파라미터가 누락된 경우 명확한 `ValueError`를 발생시켜 의도치 않은 전략 실행을 방지합니다.
 
 ## 3. 공통 모듈 (`logic/common/`)
 
@@ -55,9 +60,9 @@
 
 코드를 수정할 때는 다음 절차를 따르세요.
 
-1.  **로직 수정**: `logic/backtest/` 수정
+1.  **로직 수정**: `core/backtest/` 수정
 2.  **검증**:
-    *   **백테스트 실행**: `python backtest.py <account_id>`를 통해 전체 기간 수익률 추이 확인
+    *   **백테스트 실행**: `python backtest.py <account_id>`를 통해 전체 기간 수익률 추이 및 거래 횟수 확인
     *   **추천 실행**: `python recommend.py <account_id>`를 실행하여 마지막 날 결과가 의도대로 나오는지 확인
 3.  **확인**:
     *   `zaccounts/<account_id>/results/` 폴더 내의 로그 파일들을 대조하여 정합성 확인

@@ -82,8 +82,16 @@ def print_backtest_summary(
     else:
         stop_loss_label = f"{holding_stop_loss_pct:.2f}%"
 
+    # [수정] 전체 종목 수 한도 표시를 명확히 함
+    holdings_limit = summary.get("holdings_limit") or (bucket_topn * 5)  # 5버킷 기준 기본값
+    try:
+        holdings_limit = int(holdings_limit)
+    except (TypeError, ValueError):
+        holdings_limit = bucket_topn
+
     used_settings = {
-        "포트폴리오 종목 수 (TopN)": bucket_topn,
+        "버킷당 종목 수 (Bucket TopN)": bucket_topn,
+        "전체 종목 수 한도 (Total Limit)": holdings_limit,
         "모멘텀 스코어 MA 기간": momentum_label,
         "교체 매매 점수 임계값": replace_threshold,
         "개별 종목 손절매": stop_loss_label,

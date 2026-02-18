@@ -19,7 +19,7 @@ def extract_evaluated_records(ticker_timeseries: dict[str, pd.DataFrame]) -> dic
 
 
 def calculate_weekly_summary(
-    portfolio_df: pd.DataFrame, initial_capital: float, bucket_topn: int
+    portfolio_df: pd.DataFrame, initial_capital: float, holdings_limit: int
 ) -> list[dict[str, Any]]:
     """Calculates weekly performance summary."""
     if portfolio_df.empty:
@@ -61,7 +61,7 @@ def calculate_weekly_summary(
                 "week_end": week_end_label,
                 "value": float(value),
                 "held_count": held_count,
-                "max_topn": bucket_topn,
+                "max_topn": holdings_limit,
                 "weekly_return_pct": float(weekly_return_pct.loc[dt] if dt in weekly_return_pct.index else 0.0),
                 "cumulative_return_pct": float(weekly_cum_pct.loc[dt] if dt in weekly_cum_pct.index else 0.0),
             }

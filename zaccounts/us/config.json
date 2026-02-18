@@ -10,9 +10,9 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-02-01",
-        "BACKTESTED_DATE": "2026-02-19 01:25",
-        "CAGR": 47.054325,
-        "MDD": -7.275695,
+        "BACKTESTED_DATE": "2026-02-19 02:13",
+        "CAGR": 41.360236,
+        "MDD": -9.867282,
         "BUCKET_TOPN": 2,
         "MA_MONTH": 6,
         "MA_TYPE": "EMA",
@@ -21,7 +21,8 @@
         "OVERBOUGHT_SELL_THRESHOLD": 100,
         "COOLDOWN_DAYS": 0,
         "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": true
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false,
+        "REBALANCE_MODE": "QUARTERLY"
     },
     "benchmark": {
         "ticker": "VOO",

@@ -429,6 +429,7 @@ def run_portfolio_backtest(
     stop_loss_pct: float = -10.0,
     cooldown_days: int = 5,
     rsi_sell_threshold: float = 10.0,
+    rebalance_mode: str = "QUARTERLY",
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
@@ -575,9 +576,27 @@ def run_portfolio_backtest(
 
     # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     total_days = len(union_index)
-    _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다...")
+    _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
+
+    last_dt: pd.Timestamp | None = None
 
     for i, dt in enumerate(union_index):
+        # 리밸런싱 날짜 판별 (DAILY, MONTHLY, QUARTERLY)
+        is_rebalance_day = False
+        if i == 0:  # 첫 날은 무조건 리밸런싱 (포트폴리오 구성)
+            is_rebalance_day = True
+        elif rebalance_mode == "DAILY":
+            is_rebalance_day = True
+        elif rebalance_mode == "MONTHLY":
+            if last_dt is not None and dt.month != last_dt.month:
+                is_rebalance_day = True
+        elif rebalance_mode == "QUARTERLY":
+            if last_dt is not None and dt.month != last_dt.month:
+                if dt.month in {1, 4, 7, 10}:
+                    is_rebalance_day = True
+
+        last_dt = dt
+
         # 진행률 표시 (10% 단위로)
         if i % max(1, total_days // 10) == 0 or i == total_days - 1:
             progress_pct = int((i + 1) / total_days * 100)
@@ -736,257 +755,280 @@ def run_portfolio_backtest(
             evaluator=evaluator,
         )
 
-        # --- 3. 매수 로직 ---
-        # 1. 매수 후보 선정 (종합 점수 기준)
-        buy_ranked_candidates = _rank_buy_candidates(
-            tickers_available_today=tickers_available_today,
-            position_state=position_state,
-            buy_signal_today=buy_signal_today,
-            score_today=score_today,
-            i=i,
-        )
-
-        # 2. 매수 실행 (신규 매수)
-        cash, current_holdings_value, purchased_today = _execute_new_buys(
-            buy_ranked_candidates=buy_ranked_candidates,
-            position_state=position_state,
-            sell_rsi_tickers_today=sell_rsi_tickers_today,
-            rsi_score_today=rsi_score_today,
-            today_prices=today_prices,
-            metrics_by_ticker=metrics_by_ticker,
-            daily_records_by_ticker=daily_records_by_ticker,
-            buy_trades_today_map=buy_trades_today_map,
-            cash=cash,
-            current_holdings_value=current_holdings_value,
-            top_n=int(top_n),
-            rsi_sell_threshold=rsi_sell_threshold,
-            cooldown_days=cooldown_days,
-            replace_threshold=replace_threshold,
-            score_today=score_today,
-            i=i,
-            total_days=total_days,
-            dt=dt,
-            country_code=country_code,
-            initial_capital=initial_capital,
-            bucket_map=bucket_map,
-            bucket_topn=bucket_topn,
-        )
-
-        # 3. 교체 매수 실행 (포트폴리오가 가득 찬 경우)
-        if len(purchased_today) == 0 and buy_ranked_candidates:
-            from core.backtest.portfolio import calculate_buy_budget
-
-            # 종합 점수를 사용 (buy_ranked_candidates는 이미 종합 점수로 정렬됨)
-            helper_candidates = [
-                {"tkr": ticker, "score": score}
-                for score, ticker in buy_ranked_candidates
-                if ticker not in purchased_today
-            ]
-
-            replacement_candidates, _ = select_candidates(
-                helper_candidates,
-                max_count=None,
+        # --- 3. 매수 및 교체 로직 (리밸런싱 날에만 실행) ---
+        if is_rebalance_day:
+            # 1. 매수 후보 선정 (종합 점수 기준)
+            buy_ranked_candidates = _rank_buy_candidates(
+                tickers_available_today=tickers_available_today,
+                position_state=position_state,
+                buy_signal_today=buy_signal_today,
+                score_today=score_today,
+                i=i,
             )
 
-            # 보유 종목 정보 수집 (버켓 정보 포함)
-            held_stocks_with_scores = []
-            for held_ticker, held_position in position_state.items():
-                if held_position["shares"] > 0:
-                    # MAPS 점수 사용
-                    score_h = score_today.get(held_ticker, float("nan"))
-                    bucket_h = bucket_map.get(held_ticker, 1) if bucket_map else 1
+            # 2. 매수 실행 (신규 매수)
+            cash, current_holdings_value, purchased_today = _execute_new_buys(
+                buy_ranked_candidates=buy_ranked_candidates,
+                position_state=position_state,
+                sell_rsi_tickers_today=sell_rsi_tickers_today,
+                rsi_score_today=rsi_score_today,
+                today_prices=today_prices,
+                metrics_by_ticker=metrics_by_ticker,
+                daily_records_by_ticker=daily_records_by_ticker,
+                buy_trades_today_map=buy_trades_today_map,
+                cash=cash,
+                current_holdings_value=current_holdings_value,
+                top_n=int(top_n),
+                rsi_sell_threshold=rsi_sell_threshold,
+                cooldown_days=cooldown_days,
+                replace_threshold=replace_threshold,
+                score_today=score_today,
+                i=i,
+                total_days=total_days,
+                dt=dt,
+                country_code=country_code,
+                initial_capital=initial_capital,
+                bucket_map=bucket_map,
+                bucket_topn=bucket_topn,
+            )
 
-                    if not pd.isna(score_h):
-                        held_stocks_with_scores.append(
-                            {
-                                "ticker": held_ticker,
-                                "score": score_h,
-                                "bucket": bucket_h,
-                            }
-                        )
+            # 3. 교체 매수 실행 (포트폴리오가 가득 찬 경우)
+            if len(purchased_today) == 0 and buy_ranked_candidates:
+                from core.backtest.portfolio import calculate_buy_budget
 
-            # 점수 낮은 순으로 정렬
-            held_stocks_with_scores.sort(key=lambda x: x["score"])
+                # 종합 점수를 사용 (buy_ranked_candidates는 이미 종합 점수로 정렬됨)
+                helper_candidates = [
+                    {"tkr": ticker, "score": score}
+                    for score, ticker in buy_ranked_candidates
+                    if ticker not in purchased_today
+                ]
 
-            for candidate in replacement_candidates:
-                replacement_ticker = candidate["tkr"]
-                best_new_score_raw = candidate.get("score")
-                try:
-                    best_new_score = float(best_new_score_raw)
-                except (TypeError, ValueError):
-                    best_new_score = float("-inf")
+                replacement_candidates, _ = select_candidates(
+                    helper_candidates,
+                    max_count=None,
+                )
 
-                # 교체 대상 버켓 결정
-                replacement_bucket = bucket_map.get(replacement_ticker, 1) if bucket_map else 1
+                # 보유 종목 정보 수집 (버켓 정보 포함)
+                held_stocks_with_scores = []
+                for held_ticker, held_position in position_state.items():
+                    if held_position["shares"] > 0:
+                        # MAPS 점수 사용
+                        score_h = score_today.get(held_ticker, float("nan"))
+                        bucket_h = bucket_map.get(held_ticker, 1) if bucket_map else 1
 
-                # 교체 대상이 될 수 있는 보유 종목을 찾습니다.
-                # 버켓 전략인 경우 동일 버켓 내에서만 교체!
-                ticker_to_sell = None
-                replacement_note = ""
-                failed_due_to_cooldown = False
-
-                if held_stocks_with_scores:
-                    # 동일 버켓 내의 보유 종목들만 필터링
-                    if bucket_map:
-                        bucket_held = [s for s in held_stocks_with_scores if s["bucket"] == replacement_bucket]
-                    else:
-                        bucket_held = held_stocks_with_scores
-
-                    for candidate_hold in bucket_held:
-                        cand_ticker = candidate_hold["ticker"]
-                        cand_state = position_state[cand_ticker]
-
-                        # 점수 조건 체크
-                        if best_new_score > candidate_hold["score"] + replace_threshold:
-                            # 쿨다운 체크
-                            if i < cand_state["sell_block_until"]:
-                                failed_due_to_cooldown = True
-                                continue
-
-                            ticker_to_sell = cand_ticker
-                            replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체"
-                            break
-
-                    if not ticker_to_sell:
-                        # 동일 버켓에 보유 종목이 없으면 (예: 신규 진입 시도 중)
-                        # 또는 조건 미달인 경우 사유 기록
-                        if bucket_held:
-                            weakest = bucket_held[0]
-                            required_score = weakest["score"] + replace_threshold
-
-                            if failed_due_to_cooldown:
-                                weakest_state = position_state[weakest["ticker"]]
-                                remaining = int(weakest_state["sell_block_until"] - i)
-                                note_msg = str(DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중")).format(
-                                    days=remaining
-                                )
-                            else:
-                                note_msg = DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score)
-
-                            _update_ticker_note(
-                                daily_records_by_ticker,
-                                replacement_ticker,
-                                dt,
-                                note_msg,
-                            )
-                        continue
-                else:
-                    continue
-
-                # 교체할 종목이 결정되었으면 매도/매수 진행
-                if ticker_to_sell:
-                    # SELL_RSI로 매도한 종목은 같은 날 교체 매수 금지
-                    if replacement_ticker in sell_rsi_tickers_today:
-                        if (
-                            daily_records_by_ticker[replacement_ticker]
-                            and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt
-                        ):
-                            daily_records_by_ticker[replacement_ticker][-1]["note"] = "RSI 과매수 매도 종목"
-                        continue  # 다음 교체 후보로 넘어감
-
-                    # RSI 과매수 종목 교체 매수 차단
-                    rsi_score_replace_candidate = rsi_score_today.get(replacement_ticker, 0.0)
-
-                    if rsi_score_replace_candidate >= rsi_sell_threshold:
-                        # RSI 과매수 종목은 교체 매수하지 않음
-                        if (
-                            daily_records_by_ticker[replacement_ticker]
-                            and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt
-                        ):
-                            daily_records_by_ticker[replacement_ticker][-1]["note"] = (
-                                f"RSI 과매수 (RSI점수: {rsi_score_replace_candidate:.1f})"
-                            )
-                        continue  # 다음 교체 후보로 넘어감
-
-                    sell_price = today_prices.get(ticker_to_sell)
-                    buy_price = today_prices.get(replacement_ticker)
-
-                    if pd.notna(sell_price) and sell_price > 0 and pd.notna(buy_price) and buy_price > 0:
-                        # (a) 교체 대상 종목 매도
-                        weakest_state = position_state[ticker_to_sell]
-                        sell_qty = weakest_state["shares"]
-                        sell_amount = sell_qty * sell_price
-                        hold_ret = (
-                            (sell_price / weakest_state["avg_cost"] - 1.0) * 100.0
-                            if weakest_state["avg_cost"] > 0
-                            else 0.0
-                        )
-                        trade_profit = (
-                            (sell_price - weakest_state["avg_cost"]) * sell_qty
-                            if weakest_state["avg_cost"] > 0
-                            else 0.0
-                        )
-
-                        cash += sell_amount
-                        current_holdings_value = max(0.0, current_holdings_value - sell_amount)
-                        weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
-                        # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
-                        if cooldown_days > 0:
-                            weakest_state["buy_block_until"] = i + cooldown_days + 1
-
-                        if (
-                            daily_records_by_ticker[ticker_to_sell]
-                            and daily_records_by_ticker[ticker_to_sell][-1]["date"] == dt
-                        ):
-                            row = daily_records_by_ticker[ticker_to_sell][-1]
-                            row.update(
+                        if not pd.isna(score_h):
+                            held_stocks_with_scores.append(
                                 {
-                                    "decision": "SELL_REPLACE",
-                                    "trade_amount": sell_amount,
-                                    "trade_profit": trade_profit,
-                                    "trade_pl_pct": hold_ret,
-                                    "shares": 0,
-                                    "pv": 0,
-                                    "avg_cost": 0,
-                                    "note": replacement_note,
+                                    "ticker": held_ticker,
+                                    "score": score_h,
+                                    "bucket": bucket_h,
                                 }
                             )
 
-                        # (b) 새 종목 매수 (기준 자산 기반 예산)
-                        budget = calculate_buy_budget(
-                            cash=cash,
-                            current_holdings_value=current_holdings_value,
-                            top_n=top_n,
-                        )
-                        if budget <= 0:
-                            continue
-                        # 수량/금액 산정
-                        req_qty = int(budget // buy_price) if buy_price > 0 else 0
-                        if req_qty <= 0:
-                            continue
-                        buy_amount = req_qty * buy_price
+                # 점수 낮은 순으로 정렬
+                held_stocks_with_scores.sort(key=lambda x: x["score"])
 
-                        # 체결 반영
-                        if req_qty > 0 and buy_amount <= cash + 1e-9:
-                            new_ticker_state = position_state[replacement_ticker]
-                            cash -= buy_amount
-                            current_holdings_value += buy_amount
-                            new_ticker_state["shares"], new_ticker_state["avg_cost"] = (
-                                req_qty,
-                                buy_price,
-                            )
-                            # 매도 쿨다운 제거: 매수 후 바로 매도 가능 (조건 충족 시)
+                for candidate in replacement_candidates:
+                    replacement_ticker = candidate["tkr"]
+                    best_new_score_raw = candidate.get("score")
+                    try:
+                        best_new_score = float(best_new_score_raw)
+                    except (TypeError, ValueError):
+                        best_new_score = float("-inf")
 
-                            # 결과 행 업데이트: 없으면 새로 추가
+                    # 교체 대상 버켓 결정
+                    replacement_bucket = bucket_map.get(replacement_ticker, 1) if bucket_map else 1
+
+                    # 교체 대상이 될 수 있는 보유 종목을 찾습니다.
+                    # 버켓 전략인 경우 동일 버켓 내에서만 교체!
+                    ticker_to_sell = None
+                    replacement_note = ""
+                    failed_due_to_cooldown = False
+
+                    if held_stocks_with_scores:
+                        # 동일 버켓 내의 보유 종목들만 필터링
+                        if bucket_map:
+                            bucket_held = [s for s in held_stocks_with_scores if s["bucket"] == replacement_bucket]
+                        else:
+                            bucket_held = held_stocks_with_scores
+
+                        for candidate_hold in bucket_held:
+                            cand_ticker = candidate_hold["ticker"]
+                            cand_state = position_state[cand_ticker]
+
+                            # 점수 조건 체크
+                            if best_new_score > candidate_hold["score"] + replace_threshold:
+                                # 쿨다운 체크
+                                if i < cand_state["sell_block_until"]:
+                                    failed_due_to_cooldown = True
+                                    continue
+
+                                ticker_to_sell = cand_ticker
+                                replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체"
+                                break
+
+                        if not ticker_to_sell:
+                            # 동일 버켓에 보유 종목이 없으면 (예: 신규 진입 시도 중)
+                            # 또는 조건 미달인 경우 사유 기록
+                            if bucket_held:
+                                weakest = bucket_held[0]
+                                required_score = weakest["score"] + replace_threshold
+
+                                if failed_due_to_cooldown:
+                                    weakest_state = position_state[weakest["ticker"]]
+                                    remaining = int(weakest_state["sell_block_until"] - i)
+                                    note_msg = str(
+                                        DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중")
+                                    ).format(days=remaining)
+                                else:
+                                    note_msg = DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score)
+
+                                _update_ticker_note(
+                                    daily_records_by_ticker,
+                                    replacement_ticker,
+                                    dt,
+                                    note_msg,
+                                )
+                            continue
+                    else:
+                        continue
+
+                    # 교체할 종목이 결정되었으면 매도/매수 진행
+                    if ticker_to_sell:
+                        # SELL_RSI로 매도한 종목은 같은 날 교체 매수 금지
+                        if replacement_ticker in sell_rsi_tickers_today:
                             if (
-                                daily_records_by_ticker.get(replacement_ticker)
-                                and daily_records_by_ticker[replacement_ticker]
+                                daily_records_by_ticker[replacement_ticker]
                                 and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt
                             ):
-                                row = daily_records_by_ticker[replacement_ticker][-1]
+                                daily_records_by_ticker[replacement_ticker][-1]["note"] = "RSI 과매수 매도 종목"
+                            continue  # 다음 교체 후보로 넘어감
+
+                        # RSI 과매수 종목 교체 매수 차단
+                        rsi_score_replace_candidate = rsi_score_today.get(replacement_ticker, 0.0)
+
+                        if rsi_score_replace_candidate >= rsi_sell_threshold:
+                            # RSI 과매수 종목은 교체 매수하지 않음
+                            if (
+                                daily_records_by_ticker[replacement_ticker]
+                                and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt
+                            ):
+                                daily_records_by_ticker[replacement_ticker][-1]["note"] = (
+                                    f"RSI 과매수 (RSI점수: {rsi_score_replace_candidate:.1f})"
+                                )
+                            continue  # 다음 교체 후보로 넘어감
+
+                        sell_price = today_prices.get(ticker_to_sell)
+                        buy_price = today_prices.get(replacement_ticker)
+
+                        if pd.notna(sell_price) and sell_price > 0 and pd.notna(buy_price) and buy_price > 0:
+                            # (a) 교체 대상 종목 매도
+                            weakest_state = position_state[ticker_to_sell]
+                            sell_qty = weakest_state["shares"]
+                            sell_amount = sell_qty * sell_price
+                            hold_ret = (
+                                (sell_price / weakest_state["avg_cost"] - 1.0) * 100.0
+                                if weakest_state["avg_cost"] > 0
+                                else 0.0
+                            )
+                            trade_profit = (
+                                (sell_price - weakest_state["avg_cost"]) * sell_qty
+                                if weakest_state["avg_cost"] > 0
+                                else 0.0
+                            )
+
+                            cash += sell_amount
+                            current_holdings_value = max(0.0, current_holdings_value - sell_amount)
+                            weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
+                            # 매도 후 재매수 금지 기간만 설정 (매수 쿨다운)
+                            if cooldown_days > 0:
+                                weakest_state["buy_block_until"] = i + cooldown_days + 1
+
+                            if (
+                                daily_records_by_ticker[ticker_to_sell]
+                                and daily_records_by_ticker[ticker_to_sell][-1]["date"] == dt
+                            ):
+                                row = daily_records_by_ticker[ticker_to_sell][-1]
                                 row.update(
                                     {
-                                        "decision": "BUY_REPLACE",
-                                        "trade_amount": buy_amount,
-                                        "shares": req_qty,
-                                        "pv": req_qty * buy_price,
-                                        "avg_cost": buy_price,
-                                        # 추천/리포트와 동일 포맷: 디스플레이명 + 금액 + 대체 정보
-                                        "note": f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} "
-                                        f"{format_kr_money(buy_amount)} "
-                                        f"({ticker_to_sell} 대체)",
+                                        "decision": "SELL_REPLACE",
+                                        "trade_amount": sell_amount,
+                                        "trade_profit": trade_profit,
+                                        "trade_pl_pct": hold_ret,
+                                        "shares": 0,
+                                        "pv": 0,
+                                        "avg_cost": 0,
+                                        "note": replacement_note,
                                     }
                                 )
+
+                            # (b) 새 종목 매수 (기준 자산 기반 예산)
+                            budget = calculate_buy_budget(
+                                cash=cash,
+                                current_holdings_value=current_holdings_value,
+                                top_n=top_n,
+                            )
+                            if budget <= 0:
+                                continue
+                            # 수량/금액 산정
+                            req_qty = int(budget // buy_price) if buy_price > 0 else 0
+                            if req_qty <= 0:
+                                continue
+                            buy_amount = req_qty * buy_price
+
+                            # 체결 반영
+                            if req_qty > 0 and buy_amount <= cash + 1e-9:
+                                new_ticker_state = position_state[replacement_ticker]
+                                cash -= buy_amount
+                                current_holdings_value += buy_amount
+                                new_ticker_state["shares"], new_ticker_state["avg_cost"] = (
+                                    req_qty,
+                                    buy_price,
+                                )
+                                # 매도 쿨다운 제거: 매수 후 바로 매도 가능 (조건 충족 시)
+
+                                # 결과 행 업데이트: 없으면 새로 추가
+                                if (
+                                    daily_records_by_ticker.get(replacement_ticker)
+                                    and daily_records_by_ticker[replacement_ticker]
+                                    and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt
+                                ):
+                                    row = daily_records_by_ticker[replacement_ticker][-1]
+                                    row.update(
+                                        {
+                                            "decision": "BUY_REPLACE",
+                                            "trade_amount": buy_amount,
+                                            "shares": req_qty,
+                                            "pv": req_qty * buy_price,
+                                            "avg_cost": buy_price,
+                                            # 추천/리포트와 동일 포맷: 디스플레이명 + 금액 + 대체 정보
+                                            "note": f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} "
+                                            f"{format_kr_money(buy_amount)} "
+                                            f"({ticker_to_sell} 대체)",
+                                        }
+                                    )
+                                else:
+                                    daily_records_by_ticker.setdefault(replacement_ticker, []).append(
+                                        {
+                                            "date": dt,
+                                            "price": buy_price,
+                                            "shares": req_qty,
+                                            "pv": req_qty * buy_price,
+                                            "decision": "BUY_REPLACE",
+                                            "avg_cost": buy_price,
+                                            "trade_amount": buy_amount,
+                                            "trade_profit": 0.0,
+                                            "trade_pl_pct": 0.0,
+                                            "note": f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} "
+                                            f"{format_kr_money(buy_amount)} "
+                                            f"({ticker_to_sell} 대체)",
+                                            "signal1": metrics_by_ticker[replacement_ticker]["ma_values"][i],
+                                            "signal2": None,
+                                            "score": score_today.get(replacement_ticker, 0.0),
+                                            "rsi_score": rsi_score_today.get(replacement_ticker, 0.0),
+                                            "filter": buy_signal_today.get(replacement_ticker, 0),
+                                        }
+                                    )
                             else:
                                 daily_records_by_ticker.setdefault(replacement_ticker, []).append(
                                     {

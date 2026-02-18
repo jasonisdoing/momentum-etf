@@ -160,6 +160,7 @@ def run_account_backtest(
             ma_type=strategy_override.ma_type,
             stop_loss_pct=strategy_override.stop_loss_pct,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
+            rebalance_mode=strategy_override.rebalance_mode,
         )
         strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
@@ -320,6 +321,7 @@ def run_account_backtest(
         initial_capital_krw=capital_info.krw,
         currency=display_currency,
         bucket_topn=bucket_topn,
+        holdings_limit=total_top_n,  # Pass total limit
         account_settings=account_settings,
         prefetched_data=prefetched_data,
         ticker_timeseries=ticker_timeseries,
@@ -358,7 +360,7 @@ def run_account_backtest(
         initial_capital_krw=capital_info.krw,
         currency=display_currency,
         bucket_topn=bucket_topn,
-        holdings_limit=bucket_topn,
+        holdings_limit=total_top_n,
         summary=summary,
         portfolio_timeseries=portfolio_df,
         ticker_timeseries=ticker_timeseries,
@@ -521,6 +523,7 @@ def _build_backtest_kwargs(
         "stop_loss_pct": stop_loss_threshold,
         "rsi_sell_threshold": rsi_sell_threshold,
         "cooldown_days": cooldown_days,
+        "rebalance_mode": strategy_rules.rebalance_mode,
         "quiet": quiet,
         "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }
@@ -646,6 +649,7 @@ def _build_summary(
     initial_capital_krw: float,
     currency: str,
     bucket_topn: int,
+    holdings_limit: int,
     account_settings: Mapping[str, Any],
     prefetched_data: Mapping[str, pd.DataFrame] | None = None,
     ticker_timeseries: dict[str, pd.DataFrame] | None = None,
@@ -858,7 +862,7 @@ def _build_summary(
             for dt, value in weekly_values.items():
                 # 해당 날짜의 보유종목 수 가져오기
                 held_count = 0
-                max_topn = bucket_topn
+                max_topn = holdings_limit
                 actual_date = dt
 
                 # 해당 날짜가 portfolio_df에 없으면 가장 가까운 이전 날짜 찾기
