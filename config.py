@@ -1,14 +1,7 @@
 """프로젝트 전역에서 사용하는 설정 값 정의."""
 
-from datetime import time
-
 CACHE_START_DATE = "2024-01-02"
-# 포트폴리오 카테고리별 최대 보유 수
-MAX_PER_CATEGORY = 1
 
-# 카테고리 중복 제한에서 예외되는 카테고리 목록
-# 이 카테고리들은 여러 종목을 동시에 보유할 수 있음
-CATEGORY_EXCEPTIONS = ["예외"]
 
 # 네이버 금융 API 설정
 NAVER_FINANCE_ETF_API_URL = "https://finance.naver.com/api/sise/etfItemList.nhn"
@@ -36,10 +29,12 @@ RSI_CALCULATION_CONFIG = {
 
 
 # 통합 시장 거래 시간표
+from datetime import time
+
 MARKET_SCHEDULES = {
     "kor": {
         "open": time(9, 0),
-        "close": time(16, 0),
+        "close": time(15, 30),
         "open_offset_minutes": 30,
         "close_offset_minutes": 30,
         "timezone": "Asia/Seoul",
@@ -63,23 +58,24 @@ MARKET_SCHEDULES = {
 # 백테스트 체결 슬리피지 가정치 (%)
 BACKTEST_SLIPPAGE = {
     "kor": {
-        "buy_pct": 0.15,
-        "sell_pct": 0.15,
+        "buy_pct": 0.5,
+        "sell_pct": 0.5,
     },
     "us": {
-        "buy_pct": 0.15,
-        "sell_pct": 0.15,
-    },
-    "au": {
         "buy_pct": 0.25,
         "sell_pct": 0.25,
     },
+    "au": {
+        "buy_pct": 1.0,
+        "sell_pct": 1.0,
+    },
 }
 
-# 튜닝 앙상블 크기 (Top N)
-# 상위 N개의 결과를 사용하여 파라미터를 결정합니다. (MA: 평균, 나머지: 최빈값)
-# 반드시 홀수로 설정해야 합니다. (짝수 입력 시 런타임 에러 발생)
-# Top1은 과거 데이터에 과최적화되므로 실전 성능이 불안정함.
-# Top5 평균·최빈값 방식은 백테스트 성능이 약간 낮아져도 실전에서는 훨씬 안정적임.
-# 실전용 전략에서는 TUNING_ENSEMBLE_SIZE = 5를 유지해야 장기 성과가 일정하게 나오므로 변경 금지.
-TUNING_ENSEMBLE_SIZE = 1
+# 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
+TRADING_DAYS_PER_MONTH = 20
+
+# 지표 계산에 필요한 절대 최소 거래일 수 (MA 타입 무관, 항상 적용)
+# ENABLE_DATA_SUFFICIENCY_CHECK = True  → MA 타입별 엄격 기준 적용 (60~120일)
+# ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
+# 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
+MIN_TRADING_DAYS = 5

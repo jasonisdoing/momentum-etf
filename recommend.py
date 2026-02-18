@@ -120,7 +120,6 @@ def extract_recommendations_from_backtest(
         # 메타 정보
         meta = merged_meta.get(ticker_key, merged_meta.get(ticker, {}))
         name = meta.get("name", ticker_key)
-        category = meta.get("category", "-")
 
         # [UPDATE] stock_note가 있으면 이름에 병합 (예: 종목명(노트내용))
         # UI 오버레이 복구용 원본 노트도 stock_note 필드로 저장
@@ -232,13 +231,13 @@ def extract_recommendations_from_backtest(
             {
                 "ticker": ticker_key,
                 "name": name,
-                "category": category,
                 "stock_note": stock_note,  # UI 오버레이 복구용
                 "state": state,
                 "decision": decision,
                 "price": price,
                 "nav_price": nav_price,
                 "shares": shares,
+                "avg_cost": avg_cost,
                 "score": score,
                 "rsi_score": rsi_score,
                 "streak": streak,
@@ -262,9 +261,21 @@ def extract_recommendations_from_backtest(
     # 점수로 정렬 (None은 마지막으로)
     recommendations.sort(key=lambda x: (x.get("score") is None, -(x.get("score") or 0)))
 
-    # 순위 부여
-    for i, rec in enumerate(recommendations, start=1):
-        rec["rank"] = i
+    # 순위 부여 (보유/신규 -> 보유N, 그외 -> 대기N)
+    held_count = 0
+    wait_count = 0
+
+    for rec in recommendations:
+        shares = rec.get("shares", 0) or 0
+        decision = str(rec.get("decision", "")).upper()
+
+        # [User Request] 웹 화면 기준: 보유중이거나(shares > 0) 신규 매수(BUY)인 경우 '보유' 그룹
+        if shares > 0 or decision == "BUY":
+            held_count += 1
+            rec["rank"] = f"보유{held_count}"
+        else:
+            wait_count += 1
+            rec["rank"] = f"대기{wait_count}"
 
     return recommendations
 
@@ -354,42 +365,6 @@ def _enrich_with_nav_data(
     return recommendations
 
 
-def _filter_category_duplicates(
-    recommendations: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """카테고리별로 최고 점수 종목만 남기고 필터링합니다."""
-    from logic.backtest import filter_category_duplicates
-
-    def normalize_category(category: str) -> str:
-        if not category or category == "-":
-            return ""
-        return str(category).strip().upper()
-
-    # filter_category_duplicates에 맞는 형식으로 변환
-    items = []
-    for rec in recommendations:
-        items.append(
-            {
-                "ticker": rec.get("ticker"),
-                "category": rec.get("category", "-"),
-                "state": rec.get("state"),
-                "score": rec.get("score") or 0,
-                "_original": rec,
-            }
-        )
-
-    filtered = filter_category_duplicates(items, category_key_getter=normalize_category)
-
-    # 필터링된 결과에서 원본 추출
-    result = [item["_original"] for item in filtered]
-
-    # 순위 재부여
-    for i, rec in enumerate(result, start=1):
-        rec["rank"] = i
-
-    return result
-
-
 # ---------------------------------------------------------------------------
 # 추천 리포트 생성 (백테스트 실행 포함)
 # ---------------------------------------------------------------------------
@@ -420,9 +395,12 @@ def generate_recommendation_report(
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()
 
+    # 전략 기준일 설정
+    strategy_end_date = end_date
+
     # 전략 규칙 로드
     strategy_rules = get_strategy_rules(account_id)
-    warmup_days = strategy_rules.ma_period
+    warmup_days = strategy_rules.ma_days
 
     # 종목 로드 (한 번만)
     etf_universe = get_etfs(account_id)
@@ -476,29 +454,32 @@ def generate_recommendation_report(
     # 백테스트 실행 (ETF 유니버스 전달하여 중복 로딩 방지)
     from logic.backtest.account import run_account_backtest
 
+    # [Data Slicing] 전략 기준일 이후의 데이터(오늘 시가 등)가 백테스트에 영향을 주지 않도록 잘라냄
+    # (엔진이 '다음날 시가'를 참조하여 체결가를 계산하는 로직 때문)
+    backtest_data = {ticker: df[df.index <= strategy_end_date] for ticker, df in prefetched_map.items()}
+
     result = run_account_backtest(
         account_id,
-        prefetched_data=prefetched_map,
+        prefetched_data=backtest_data,
         prefetched_etf_universe=etf_universe,
         quiet=True,  # 백테스트 로그 출력 억제
+        override_settings={"end_date": strategy_end_date.strftime("%Y-%m-%d")},
     )
 
     # 마지막 날 추천 데이터 추출
     recommendations = extract_recommendations_from_backtest(result, ticker_meta=universe_meta)
 
     # 전체 기간 데이터(prefetched_map)를 이용하여 기간별 수익률(6m, 12m 등) 재계산/보강
+    # [수익률 표시] 전략은 과거 기준이라도, 수익률은 현재(end_date) 기준으로 표시
     recommendations = _enrich_with_period_returns(
         recommendations,
         prefetched_map,
-        base_date=result.end_date,
+        base_date=end_date,
     )
 
     # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
     if country_code in ("kor", "kr"):
         recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
-
-    # 카테고리별 중복 필터링 (MAX_PER_CATEGORY=1 적용)
-    recommendations = _filter_category_duplicates(recommendations)
 
     return RecommendationReport(
         account_id=account_id,
@@ -593,7 +574,7 @@ def dump_recommendation_log(
     nav_mode = country_lower in {"kr", "kor"}
     show_deviation = country_lower in {"kr", "kor"}
 
-    headers = ["#", "티커", "종목명", "카테고리", "상태", "보유일", "일간(%)", "평가(%)", "현재가"]
+    headers = ["#", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가"]
     # [User Request] 현재가 - 괴리율 - Nav
     if show_deviation:
         headers.append("괴리율")
@@ -617,7 +598,7 @@ def dump_recommendation_log(
         rank = item.get("rank", 0)
         ticker = item.get("ticker", "-")
         name = item.get("name", "-")
-        category = item.get("category", "-")
+
         state = item.get("state", "-")
         holding_days = item.get("holding_days", 0)
         daily_pct = item.get("daily_pct", 0)
@@ -642,7 +623,6 @@ def dump_recommendation_log(
             str(rank),
             ticker,
             name,
-            category,
             state,
             str(holding_days) if holding_days > 0 else "-",
             format_pct_change(daily_pct),

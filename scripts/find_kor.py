@@ -23,6 +23,7 @@ python scripts/find.py
 """
 
 import json
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -41,7 +42,7 @@ INCLUDE_KEYWORDS = []
 # 최소 거래량 (0이면 필터링 안 함)
 # MIN_VOLUME = 100000
 # MIN_VOLUME = 500000
-MIN_VOLUME = 100000
+MIN_VOLUME = 0
 
 
 def fetch_naver_etf_data(min_change_pct: float) -> pd.DataFrame | None:
@@ -309,57 +310,122 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
         return
 
     # 기존 stocks.json 로드 및 비교
-    import json
-    import os
-
-    existing_tickers = set()
 
     # 확인할 계정 목록
     target_accounts = ["kor_kr", "kor_us"]
 
+    # 기존 종목 로드 (MongoDB)
+    # 기존 종목 및 삭제된 종목 로드
+    from utils.stock_list_io import get_deleted_etfs, get_etfs
+
+    existing_tickers_map = defaultdict(list)  # ticker -> list of account_ids
+    deleted_tickers_map = defaultdict(list)  # ticker -> list of {account_id, deleted_at, deleted_reason}
+
     for account in target_accounts:
-        stocks_json_path = os.path.join("zaccounts", account, "stocks.json")
         try:
-            if os.path.exists(stocks_json_path):
-                with open(stocks_json_path, encoding="utf-8") as f:
-                    data = json.load(f)
-                    for category in data:
-                        for item in category.get("tickers", []):
-                            existing_tickers.add(item.get("ticker"))
+            # 활성 종목
+            existing_etfs = get_etfs(account)
+            for item in existing_etfs:
+                existing_tickers_map[item["ticker"]].append(account)
+
+            # 삭제된 종목
+            deleted_list = get_deleted_etfs(account)
+            for item in deleted_list:
+                t = item.get("ticker")
+                if t:
+                    info = item.copy()
+                    info["account_id"] = account
+                    deleted_tickers_map[t].append(info)
+
         except Exception as e:
-            logger.warning(f"{account} stocks.json 로드 중 오류 발생: {e}")
+            logger.warning(f"{account} 종목 로드 중 오류 발생: {e}")
 
     # top_gainers DataFrame에서 티커 목록 추출
     found_tickers = []
     if not top_gainers.empty:
         found_tickers = top_gainers.to_dict("records")
 
-    new_tickers = [item for item in found_tickers if item["티커"] not in existing_tickers]
+    # 분류
+    my_universe_list = []
+    deleted_list = []
+    new_discovery_list = []
 
-    if new_tickers:
+    for item in found_tickers:
+        ticker = item["티커"]
+
+        if ticker in existing_tickers_map:
+            # 계좌 정보 추가
+            item["accounts"] = existing_tickers_map[ticker]
+            my_universe_list.append(item)
+        elif ticker in deleted_tickers_map:
+            # 삭제 정보 추가 (여러 계좌일 수 있음, 여기선 첫 번째 정보 사용하거나 모두 표시)
+            item["deleted_infos"] = deleted_tickers_map[ticker]
+            deleted_list.append(item)
+        else:
+            new_discovery_list.append(item)
+
+    # 출력 헬퍼
+    def print_item(item, is_deleted=False):
+        ticker = item["티커"]
+        name = item["종목명"]
+        change_rate = item["등락률"]
+        volume = item.get("거래량", 0)
+        volume_str = f"{volume:,}" if volume else "N/A"
+        risefall = item.get("괴리율")
+        risefall_str = f"{risefall:+.2f}%" if risefall is not None else "N/A"
+        three_month = item.get("3개월수익률")
+        three_month_str = f"{three_month:+.2f}%" if three_month is not None and pd.notna(three_month) else "아직없음"
+
+        # 계좌 표시
+        accounts_str = ""
+        if "accounts" in item:
+            accounts_str = f"[{', '.join(item['accounts'])}] "
+
+        base_msg = f"  - {accounts_str}{name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
+
+        if is_deleted:
+            deleted_infos = item.get("deleted_infos", [])
+            del_msg_parts = []
+            for info in deleted_infos:
+                acc = info.get("account_id", "?")
+                d_date = info.get("deleted_at")
+                d_reason = info.get("deleted_reason") or "사유없음"
+
+                date_str = ""
+                if d_date:
+                    if hasattr(d_date, "strftime"):
+                        date_str = d_date.strftime("%Y-%m-%d")
+                    else:
+                        date_str = str(d_date)[:10]
+                del_msg_parts.append(f"[{acc}] {date_str} ({d_reason})")
+
+            del_msg = " | ".join(del_msg_parts)
+            print(f"{base_msg} | 🗑️ 삭제: {del_msg}")
+        else:
+            print(base_msg)
+
+    # 1. 내 유니버스
+    if my_universe_list:
+        print()
+        print("--- 내 유니버스 ETF 목록 ---")
+        for item in my_universe_list:
+            print_item(item)
+
+    # 2. 삭제된 목록
+    if deleted_list:
+        print()
+        print("--- 삭제된 ETF 목록 ---")
+        for item in deleted_list:
+            print_item(item, is_deleted=True)
+
+    # 3. 신규 발견
+    if new_discovery_list:
         print()
         print("--- 신규 발견 종목 ---")
-        print()
-        for item in new_tickers:
-            ticker = item["티커"]
-            name = item["종목명"]
-            change_rate = item["등락률"]
-
-            # 추가 정보
-            volume = item.get("거래량", 0)
-            volume_str = f"{volume:,}" if volume else "N/A"
-            risefall = item.get("괴리율")
-            risefall_str = f"{risefall:+.2f}%" if risefall is not None else "N/A"
-            three_month = item.get("3개월수익률")
-            three_month_str = (
-                f"{three_month:+.2f}%" if three_month is not None and pd.notna(three_month) else "아직없음"
-            )
-
-            print(
-                f"  - {name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
-            )
+        for item in new_discovery_list:
+            print_item(item)
     else:
-        print("\n✅ 발견된 모든 종목이 이미 등록되어 있습니다.")
+        print("\n✅ 신규로 발견된 종목이 없습니다 (모두 등록됨 혹은 삭제됨).")
 
 
 if __name__ == "__main__":

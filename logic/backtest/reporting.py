@@ -52,7 +52,6 @@ def print_backtest_summary(
     portfolio_topn: int,
     ticker_summaries: list[dict[str, Any]],
     core_start_dt: pd.Timestamp,
-    category_summaries: list[dict[str, Any]] = [],
     emit_to_logger: bool = True,
     section_start_index: int = 1,
 ) -> list[str]:
@@ -125,10 +124,11 @@ def print_backtest_summary(
         section_counter += 1
 
     # 설정값 계산 (나중에 사용)
-    if "MA_PERIOD" not in merged_strategy or merged_strategy.get("MA_PERIOD") is None:
-        raise ValueError(f"'{account_id}' 계정 설정에 'strategy.MA_PERIOD' 값이 필요합니다.")
-    ma_period = merged_strategy["MA_PERIOD"]
-    momentum_label = f"{ma_period}일"
+    ma_month = merged_strategy.get("MA_MONTH")
+    if ma_month is not None:
+        momentum_label = f"{ma_month}개월"
+    else:
+        raise ValueError(f"'{account_id}' 계정 설정에 'strategy.MA_MONTH' 값이 필요합니다.")
 
     stop_loss_source = strategy_tuning.get("STOP_LOSS_PCT")
     try:
@@ -285,7 +285,6 @@ def print_backtest_summary(
         headers = [
             "티커",
             "종목명",
-            "카테고리",
             "총 기여도",
             "실현손익",
             "미실현손익",
@@ -300,7 +299,6 @@ def print_backtest_summary(
             [
                 s["ticker"],
                 s["name"],
-                s.get("category", "-"),
                 money_formatter(s["total_contribution"]),
                 money_formatter(s["realized_profit"]),
                 money_formatter(s["unrealized_profit"]),
@@ -311,40 +309,12 @@ def print_backtest_summary(
             for s in sorted_summaries
         ]
 
-        aligns = ["right", "left", "left", "right", "right", "right", "right", "right", "right"]
+        aligns = ["right", "left", "right", "right", "right", "right", "right", "right"]
         table_lines = render_table_eaw(headers, rows, aligns)
         for line in table_lines:
             add(line)
     else:
         add("| 종목별 성과 데이터가 없어 표시할 수 없습니다.")
-
-    add_section_heading("카테고리별 성과 요약")
-    if category_summaries:
-        headers = [
-            "카테고리",
-            "총 기여도",
-            "실현손익",
-            "미실현손익",
-            "거래횟수",
-            "승률",
-        ]
-        rows = [
-            [
-                s["category"],
-                money_formatter(s["total_contribution"]),
-                money_formatter(s["realized_profit"]),
-                money_formatter(s["unrealized_profit"]),
-                f"{s['total_trades']}회",
-                f"{s['win_rate']:.1f}%",
-            ]
-            for s in category_summaries
-        ]
-        aligns = ["left", "right", "right", "right", "right", "right"]
-        table_lines = render_table_eaw(headers, rows, aligns)
-        for line in table_lines:
-            add(line)
-    else:
-        add("| 카테고리별 성과 데이터가 없어 표시할 수 없습니다.")
 
     add_section_heading("지표 설명")
     add("  - Sharpe: 위험(변동성) 대비 수익률. 높을수록 좋음 (기준: >1 양호, >2 우수).")
@@ -679,7 +649,6 @@ def _build_daily_table_rows(
             "0",
             ticker_key,
             str(meta.get("name") or ticker_key),
-            str(meta.get("category") or "-"),
             decision or "-",
             holding_days_display,
             price_display,
@@ -700,51 +669,17 @@ def _build_daily_table_rows(
 
     entries.sort(key=lambda item: item[0])
 
-    # 카테고리별 최고 점수 필터링을 위해 딕셔너리 형태로 변환
-    from logic.backtest.filtering import filter_category_duplicates
-
-    items_for_filter = []
-    for sort_key, row_data in entries:
-        # row_data: [순위, 티커, 종목명, 카테고리, 상태, ...문구(18)]
-        # sort_key: (is_cash, decision_order, -score, ticker)
-        score_val = -sort_key[2] if len(sort_key) > 2 else 0.0  # 음수로 저장되어 있으므로 다시 양수로
-
-        # "데이터 없음" 종목은 점수를 -inf로 처리하여 카테고리 필터링에서 제외
-        phrase = row_data[18] if len(row_data) > 18 else ""
-        if "데이터 없음" in str(phrase):
-            score_val = float("-inf")
-
-        item_dict = {
-            "ticker": row_data[1],  # 티커
-            "category": row_data[3],  # 카테고리
-            "state": row_data[4],  # 상태
-            "score": score_val,
-            "row_data": row_data,
-            "sort_key": sort_key,
-        }
-        items_for_filter.append(item_dict)
-
-    # 카테고리 정규화 함수
-    def normalize_category(category: str) -> str:
-        if not category or category == "-":
-            return ""
-        return str(category).strip().upper()
-
-    # 필터링 적용
-    filtered_items = filter_category_duplicates(items_for_filter, category_key_getter=normalize_category)
-
-    # 다시 row 형태로 변환
+    # 순위 부여
     sorted_rows: list[list[str]] = []
     current_idx = 1
-    for item in filtered_items:
-        row = item["row_data"]
-        ticker = item["ticker"]
+    for sort_key, row_data in entries:
+        ticker = row_data[1]
         if str(ticker).upper() == "CASH":
-            row[0] = "0"
+            row_data[0] = "0"
         else:
-            row[0] = str(current_idx)
+            row_data[0] = str(current_idx)
             current_idx += 1
-        sorted_rows.append(row)
+        sorted_rows.append(row_data)
 
     return sorted_rows
 
@@ -770,7 +705,6 @@ def _generate_daily_report_lines(
         "#",
         "티커",
         "종목명",
-        "카테고리",
         "상태",
         "보유일",
         price_header,
@@ -791,7 +725,6 @@ def _generate_daily_report_lines(
         "right",  # #
         "left",  # 티커
         "left",  # 종목명
-        "left",  # 카테고리
         "center",  # 상태
         "right",  # 보유일
         "right",  # 현재가 계열
@@ -824,8 +757,6 @@ def _generate_daily_report_lines(
             fx_series = get_exchange_rate_series(start_dt, end_dt)
         except Exception as e:
             logger.warning(f"리포팅 중 환율 정보 로드 실패: {e}")
-
-    current_streak = 0
 
     for target_date in portfolio_df.index:
         portfolio_row = portfolio_df.loc[target_date]
@@ -1016,30 +947,6 @@ def _generate_daily_report_lines(
         lines.append("")
         lines.append(summary_line)
 
-        # [User Request] Add Consecutive Streak and Cash Weight line
-        # Streak Calculation
-        if daily_return_pct > 0.0001:  # float point tolerance
-            if current_streak >= 0:
-                current_streak += 1
-            else:
-                current_streak = 1
-        elif daily_return_pct < -0.0001:
-            if current_streak <= 0:
-                current_streak -= 1
-            else:
-                current_streak = -1
-        else:
-            current_streak = 0
-
-        streak_str = "변동 없음"
-        if current_streak > 0:
-            streak_str = f"{current_streak}일 연속 상승"
-        elif current_streak < 0:
-            streak_str = f"{abs(current_streak)}일 연속 하락"
-
-        extra_line = f"{streak_str}"
-        lines.append(extra_line)
-
         lines.extend(table_lines)
 
         for ticker_key, ts in result.ticker_timeseries.items():
@@ -1100,7 +1007,6 @@ def dump_backtest_log(
         initial_capital_krw=result.initial_capital_krw,
         portfolio_topn=result.portfolio_topn,
         ticker_summaries=getattr(result, "ticker_summaries", []),
-        category_summaries=getattr(result, "category_summaries", []),
         core_start_dt=result.start_date,
         emit_to_logger=False,
         section_start_index=2,

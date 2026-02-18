@@ -8,7 +8,8 @@ DECISION_CONFIG = {
         "order": 10,
         "is_recommendation": False,
         "show_slack": True,
-        "background": None,
+        # [User Request] 보유 종목 하이라이트 (연한 초록)
+        "background": "#d0f0c0",
     },
     "CUT_STOPLOSS": {
         "display_name": "<🚨 손절매도>",

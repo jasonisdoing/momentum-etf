@@ -9,8 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from logic.backtest.filtering import select_candidates_by_category
-from logic.backtest.portfolio import calculate_held_categories, is_category_exception
+from logic.backtest.filtering import select_candidates
 from logic.backtest.price import calculate_trade_price
 from strategies.maps.constants import DECISION_CONFIG, DECISION_NOTES
 from strategies.maps.evaluator import StrategyEvaluator
@@ -28,8 +27,7 @@ def _execute_individual_sells(
     today_prices: dict[str, float],
     score_today: dict[str, float],
     rsi_score_today: dict[str, float],
-    ticker_to_category: dict[str, str],
-    sell_rsi_categories_today: set[str],
+    sell_rsi_tickers_today: set[str],
     sell_trades_today_map: dict,
     daily_records_by_ticker: dict,
     i: int,
@@ -40,7 +38,7 @@ def _execute_individual_sells(
     cooldown_days: int,
     cash: float,
     current_holdings_value: float,
-    ma_period: int,
+    ma_days: int,
     evaluator: StrategyEvaluator,
 ) -> tuple[float, float]:
     """개별 종목 매도 로직 (StrategyEvaluator 사용)"""
@@ -53,7 +51,7 @@ def _execute_individual_sells(
             # 매도 의사결정 (StrategyEvaluator)
             ma_val_today = ticker_metrics["ma_values"][i]
             ma_val = float(ma_val_today) if not pd.isna(ma_val_today) else 0.0
-            ticker_ma_period = ticker_metrics.get("ma_period", ma_period)
+            ticker_ma_days = ticker_metrics.get("ma_days", ma_days)
 
             current_score = score_today.get(ticker, 0.0)
             if pd.isna(current_score):
@@ -70,7 +68,7 @@ def _execute_individual_sells(
                 avg_cost=ticker_state["avg_cost"],
                 highest_price=0.0,
                 ma_value=ma_val,
-                ma_period=ticker_ma_period,
+                ma_days=ticker_ma_days,
                 score=current_score,
                 rsi_score=rsi_score_today.get(ticker, 0.0),
                 stop_loss_threshold=stop_loss_threshold,
@@ -109,11 +107,9 @@ def _execute_individual_sells(
                 # 순매도 집계
                 sell_trades_today_map.setdefault(ticker, []).append({"shares": float(qty), "price": float(sell_price)})
 
-                # SELL_RSI인 경우 해당 카테고리 추적
+                # SELL_RSI인 경우 해당 티커 추적 (같은 날 재매수 방지)
                 if decision == "SELL_RSI":
-                    sold_category = ticker_to_category.get(ticker)
-                    if sold_category and not is_category_exception(sold_category):
-                        sell_rsi_categories_today.add(sold_category)
+                    sell_rsi_tickers_today.add(ticker)
 
                 cash += trade_amount
                 current_holdings_value = max(0.0, current_holdings_value - trade_amount)
@@ -191,14 +187,11 @@ def _apply_wait_note_if_empty(
     daily_records_by_ticker: dict,
     ticker: str,
     dt: pd.Timestamp,
-    ticker_to_category: dict[str, str],
-    held_categories: set[str],
-    held_categories_normalized: set[str],
     position_state: dict = None,
     score_today: dict[str, float] = None,
     replace_threshold: float = 0.0,
 ) -> None:
-    """WAIT 상태 종목에 대해 카테고리 중복 여부에 따라 노트를 설정합니다."""
+    """WAIT 상태 종목에 대해 교체 필요 점수를 노트로 설정합니다."""
 
     records = daily_records_by_ticker.get(ticker)
     if not (records and records[-1]["date"] == dt):
@@ -207,13 +200,17 @@ def _apply_wait_note_if_empty(
     current_note = str(records[-1].get("note") or "").strip()
     if current_note:
         return
+
     # Calculate minimum required score for replacement
     if position_state and score_today is not None:
-        held_scores = [
-            score_today.get(t, 0.0) for t, state in position_state.items() if state.get("shares", 0) > 0 and t != "CASH"
-        ]
-        if held_scores:
-            weakest_score = min(held_scores)
+        all_held_scores = []
+        for t, state in position_state.items():
+            if state.get("shares", 0) > 0 and t != "CASH":
+                score_h = score_today.get(t, 0.0)
+                all_held_scores.append(score_h)
+
+        if all_held_scores:
+            weakest_score = min(all_held_scores)
             required_score = weakest_score + replace_threshold
             records[-1]["note"] = DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score)
 
@@ -221,8 +218,7 @@ def _apply_wait_note_if_empty(
 def _execute_new_buys(
     buy_ranked_candidates: list[tuple[float, str]],
     position_state: dict,
-    ticker_to_category: dict[str, str],
-    sell_rsi_categories_today: set[str],
+    sell_rsi_tickers_today: set[str],
     rsi_score_today: dict[str, float],
     today_prices: dict[str, float],
     metrics_by_ticker: dict,
@@ -240,14 +236,13 @@ def _execute_new_buys(
     dt: pd.Timestamp,
     country_code: str,
     initial_capital: float = 0.0,
-) -> tuple[float, float, set[str], set[str]]:
+) -> tuple[float, float, set[str]]:
     """신규 매수 실행
 
     Returns:
-        (cash, current_holdings_value, purchased_today, held_categories)
+        (cash, current_holdings_value, purchased_today)
     """
     from logic.backtest.portfolio import (
-        calculate_held_categories,
         calculate_held_count,
         check_buy_candidate_filters,
     )
@@ -257,30 +252,20 @@ def _execute_new_buys(
     purchased_today: set[str] = set()
 
     if slots_to_fill <= 0 or not buy_ranked_candidates:
-        held_categories = calculate_held_categories(position_state, ticker_to_category)
         if slots_to_fill <= 0 and buy_ranked_candidates:
-            held_categories_normalized = {str(cat).strip().upper() for cat in held_categories if isinstance(cat, str)}
             for _, candidate_ticker in buy_ranked_candidates:
                 _apply_wait_note_if_empty(
                     daily_records_by_ticker,
                     candidate_ticker,
                     dt,
-                    ticker_to_category,
-                    held_categories,
-                    held_categories_normalized,
                     position_state,
                     score_today,
                     replace_threshold,
                 )
-        return cash, current_holdings_value, purchased_today, held_categories
-
-    # 보유 중인 카테고리 (매수 시 중복 체크용, 고정 종목 카테고리 포함)
-    held_categories = calculate_held_categories(position_state, ticker_to_category)
-    held_categories_normalized = {str(cat).strip().upper() for cat in held_categories if isinstance(cat, str)}
+        return cash, current_holdings_value, purchased_today
 
     # PHASE 1: Pre-count buyable tickers
     buyable_candidates = []
-    temp_held_categories = held_categories.copy()  # 임시 카테고리 추적 (Phase 1용)
 
     for score, ticker_to_buy in buy_ranked_candidates:
         if len(buyable_candidates) >= slots_to_fill:
@@ -292,19 +277,19 @@ def _execute_new_buys(
         if pd.isna(price):
             continue
 
-        # 매수 후보 필터링 체크 (임시 held_categories 사용)
-        category = ticker_to_category.get(ticker_to_buy)
+        # 매수 후보 필터링 체크
         rsi_score_buy_candidate = rsi_score_today.get(ticker_to_buy, 0.0)
 
         can_buy, block_reason = check_buy_candidate_filters(
-            category=category,
-            held_categories=temp_held_categories,  # Phase 1에서는 임시 카테고리 사용
-            sell_rsi_categories_today=sell_rsi_categories_today,
             rsi_score=rsi_score_buy_candidate,
             rsi_sell_threshold=rsi_sell_threshold,
         )
 
         if not can_buy:
+            continue
+
+        # SELL_RSI로 매도한 종목은 같은 날 매수 금지
+        if ticker_to_buy in sell_rsi_tickers_today:
             continue
 
         # 다음날 시초가 + 슬리피지로 매수 가격 계산
@@ -320,10 +305,6 @@ def _execute_new_buys(
             continue
 
         buyable_candidates.append((score, ticker_to_buy, buy_price, block_reason))
-
-        # Phase 1에서도 카테고리 추가 (같은 카테고리 중복 방지)
-        if category:
-            temp_held_categories.add(category)
 
     # PHASE 2: Execute buys with equal cash distribution
     num_buys = len(buyable_candidates)
@@ -360,14 +341,6 @@ def _execute_new_buys(
             ticker_state["avg_cost"] = buy_price
             ticker_state["buy_block_until"] = i + cooldown_days + 1
             ticker_state["sell_block_until"] = i + cooldown_days + 1  # 매수 후 매도도 cooldown 적용
-
-            # 카테고리 업데이트
-            category = ticker_to_category.get(ticker_to_buy)
-            if category:
-                held_categories.add(category)
-                normalized_category = str(category).strip().upper()
-                if normalized_category:
-                    held_categories_normalized.add(normalized_category)
 
             condition_met = (
                 daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt
@@ -414,7 +387,7 @@ def _execute_new_buys(
             # 필터링으로 제외된 경우 note 업데이트
             _update_ticker_note(daily_records_by_ticker, ticker_to_buy, dt, block_reason)
 
-    return cash, current_holdings_value, purchased_today, held_categories
+    return cash, current_holdings_value, purchased_today
 
 
 def run_portfolio_backtest(
@@ -427,7 +400,7 @@ def run_portfolio_backtest(
     prefetched_data: dict[str, pd.DataFrame] | None = None,
     prefetched_metrics: Mapping[str, dict[str, Any]] | None = None,
     trading_calendar: Sequence[pd.Timestamp] | None = None,
-    ma_period: int = 20,
+    ma_days: int = 20,
     ma_type: str = "SMA",
     replace_threshold: float = 0.0,
     stop_loss_pct: float = -10.0,
@@ -449,7 +422,7 @@ def run_portfolio_backtest(
         date_range: 백테스트 기간 [시작일, 종료일]
         country: 시장 국가 코드 (예: kor)
         prefetched_data: 미리 로드된 가격 데이터
-        ma_period: 이동평균 기간
+        ma_days: 이동평균 기간
         replace_threshold: 종목 교체 임계값
         stop_loss_pct: 손절 비율 (%)
 
@@ -480,9 +453,6 @@ def run_portfolio_backtest(
     # (실제 데이터 요청은 상위 프리패치 단계에서 수행)
 
     # 개별 종목 데이터 로딩 및 지표 계산
-    # 티커별 카테고리 매핑 생성 (성능 최적화를 위해 딕셔너리로 변환)
-    ticker_to_category = {stock["ticker"]: stock.get("category") for stock in stocks}
-    etf_meta = {stock["ticker"]: stock for stock in stocks if stock.get("ticker")}
     metrics_by_ticker = {}
     tickers_to_process = [s["ticker"] for s in stocks]
 
@@ -501,7 +471,7 @@ def run_portfolio_backtest(
         ticker_metrics = process_ticker_data(
             ticker,
             df,
-            ma_period=ma_period,
+            ma_days=ma_days,
             ma_type=ma_type,
             precomputed_entry=precomputed_entry,
             enable_data_sufficiency_check=enable_data_sufficiency_check,
@@ -600,8 +570,8 @@ def run_portfolio_backtest(
         buy_trades_today_map: dict[str, list[dict[str, float]]] = {}
         sell_trades_today_map: dict[str, list[dict[str, float]]] = {}
 
-        # SELL_RSI로 매도한 카테고리 추적 (같은 날 매수 금지)
-        sell_rsi_categories_today: set[str] = set()
+        # SELL_RSI로 매도한 티커 추적 (같은 날 재매수 금지)
+        sell_rsi_tickers_today: set[str] = set()
 
         tickers_available_today: list[str] = []
         today_prices: dict[str, float] = {}
@@ -627,16 +597,13 @@ def run_portfolio_backtest(
             if available:
                 tickers_available_today.append(ticker)
 
-        # RSI 과매수 경고 카테고리도 추적 (쿨다운으로 아직 매도 안 했지만 RSI 높은 경우)
+        # RSI 과매수 경고 티커도 추적 (쿨다운으로 아직 매도 안 했지만 RSI 높은 경우)
         for ticker, ticker_state in position_state.items():
             if ticker_state["shares"] > 0:
                 rsi_val = rsi_score_today.get(ticker, 0.0)
                 if rsi_val >= rsi_sell_threshold:
-                    # 쿨다운으로 매도하지 못한 경우에도 카테고리 차단
                     if i < ticker_state["sell_block_until"]:
-                        category = ticker_to_category.get(ticker)
-                        if category and not is_category_exception(category):
-                            sell_rsi_categories_today.add(category)
+                        sell_rsi_tickers_today.add(ticker)
 
         # 현재 총 보유 자산 가치를 계산합니다.
         current_holdings_value = 0
@@ -731,8 +698,7 @@ def run_portfolio_backtest(
             today_prices=today_prices,
             score_today=score_today,
             rsi_score_today=rsi_score_today,
-            ticker_to_category=ticker_to_category,
-            sell_rsi_categories_today=sell_rsi_categories_today,
+            sell_rsi_tickers_today=sell_rsi_tickers_today,
             sell_trades_today_map=sell_trades_today_map,
             daily_records_by_ticker=daily_records_by_ticker,
             i=i,
@@ -743,7 +709,7 @@ def run_portfolio_backtest(
             cooldown_days=cooldown_days,
             cash=cash,
             current_holdings_value=current_holdings_value,
-            ma_period=ma_period,
+            ma_days=ma_days,
             evaluator=evaluator,
         )
 
@@ -758,11 +724,10 @@ def run_portfolio_backtest(
         )
 
         # 2. 매수 실행 (신규 매수)
-        cash, current_holdings_value, purchased_today, held_categories = _execute_new_buys(
+        cash, current_holdings_value, purchased_today = _execute_new_buys(
             buy_ranked_candidates=buy_ranked_candidates,
             position_state=position_state,
-            ticker_to_category=ticker_to_category,
-            sell_rsi_categories_today=sell_rsi_categories_today,
+            sell_rsi_tickers_today=sell_rsi_tickers_today,
             rsi_score_today=rsi_score_today,
             today_prices=today_prices,
             metrics_by_ticker=metrics_by_ticker,
@@ -770,7 +735,7 @@ def run_portfolio_backtest(
             buy_trades_today_map=buy_trades_today_map,
             cash=cash,
             current_holdings_value=current_holdings_value,
-            top_n=top_n,
+            top_n=int(top_n),
             rsi_sell_threshold=rsi_sell_threshold,
             cooldown_days=cooldown_days,
             replace_threshold=replace_threshold,
@@ -793,12 +758,9 @@ def run_portfolio_backtest(
                 if ticker not in purchased_today
             ]
 
-            replacement_candidates, _ = select_candidates_by_category(
+            replacement_candidates, _ = select_candidates(
                 helper_candidates,
-                etf_meta,
-                held_categories=None,
                 max_count=None,
-                skip_held_categories=False,
             )
 
             held_stocks_with_scores = []
@@ -812,7 +774,6 @@ def run_portfolio_backtest(
                             {
                                 "ticker": held_ticker,
                                 "score": score_h,
-                                "category": ticker_to_category.get(held_ticker),
                             }
                         )
 
@@ -820,61 +781,23 @@ def run_portfolio_backtest(
 
             for candidate in replacement_candidates:
                 replacement_ticker = candidate["tkr"]
-                wait_stock_category = ticker_to_category.get(replacement_ticker)
                 best_new_score_raw = candidate.get("score")
                 try:
                     best_new_score = float(best_new_score_raw)
                 except (TypeError, ValueError):
                     best_new_score = float("-inf")
 
-                # 교체 대상이 될 수 있는 보유 종목을 찾습니다.
-                # 1. 같은 카테고리의 종목이 있는지 확인
-                held_stock_same_category = next(
-                    (s for s in held_stocks_with_scores if s["category"] == wait_stock_category),
-                    None,
-                )
-
-                # 교체 여부 및 대상 종목 결정
+                # 교체 대상이 될 수 있는 보유 종목을 찾습니다 (가장 점수 낮은 종목부터 탐색)
                 ticker_to_sell = None
                 replacement_note = ""
+                failed_due_to_cooldown = False
 
-                if held_stock_same_category and not is_category_exception(wait_stock_category):
-                    # Case 1: 같은 카테고리 종목이 있는 경우 (필수 교체 대상)
-                    # 쿨다운 체크 추가
-                    target_state = position_state[held_stock_same_category["ticker"]]
-                    if i < target_state["sell_block_until"]:
-                        # 쿨다운 중이면 교체 불가 (동일 카테고리 중복 방지를 위해 다른 종목 매도 불가)
-                        _update_ticker_note(
-                            daily_records_by_ticker,
-                            replacement_ticker,
-                            dt,
-                            f"교체실패: {held_stock_same_category['ticker']} 쿨다운",
-                        )
-                        continue
-
-                    if best_new_score > held_stock_same_category["score"] + replace_threshold:
-                        ticker_to_sell = held_stock_same_category["ticker"]
-                        replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체 (동일 카테고리)"
-                    else:
-                        required_score = held_stock_same_category["score"] + replace_threshold
-                        _update_ticker_note(
-                            daily_records_by_ticker,
-                            replacement_ticker,
-                            dt,
-                            DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score),
-                        )
-                        continue
-
-                elif held_stocks_with_scores:
-                    failed_due_to_cooldown = False
-
-                    # Case 2: 같은 카테고리 종목이 없는 경우 (가장 점수 낮은 종목부터 탐색)
-                    # 점수 오름차순으로 정렬되어 있으므로 순서대로 확인
+                if held_stocks_with_scores:
                     for candidate_hold in held_stocks_with_scores:
                         cand_ticker = candidate_hold["ticker"]
                         cand_state = position_state[cand_ticker]
 
-                        # 점수 조건 체크 (먼저 체크해야 교체 의사를 알 수 있음)
+                        # 점수 조건 체크
                         if best_new_score > candidate_hold["score"] + replace_threshold:
                             # 쿨다운 체크
                             if i < cand_state["sell_block_until"]:
@@ -882,25 +805,20 @@ def run_portfolio_backtest(
                                 continue
 
                             ticker_to_sell = cand_ticker
-                            replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체 (새 카테고리)"
-                            break  # 유효한 가장 낮은 점수 종목을 찾았으므로 중단
+                            replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체"
+                            break
 
                     if not ticker_to_sell:
-                        # 모든 보유 종목을 확인했으나 교체 대상을 찾지 못한 경우
                         weakest = held_stocks_with_scores[0]
                         required_score = weakest["score"] + replace_threshold
 
                         if failed_due_to_cooldown:
-                            # 교체 조건은 만족했으나 쿨다운으로 못 파는 경우
-                            # 가장 약한 종목의 쿨다운 정보를 표기해줌
                             weakest_state = position_state[weakest["ticker"]]
                             remaining = int(weakest_state["sell_block_until"] - i)
                             note_msg = str(DECISION_NOTES.get("COOLDOWN_GENERIC", "쿨다운 {days}일 대기중")).format(
                                 days=remaining
                             )
-                            # 여기서는 쿨다운 때문임.
                         else:
-                            # 점수 조건을 만족하는 종목이 없는 경우
                             note_msg = DECISION_NOTES["REPLACE_SCORE"].format(replace_score=required_score)
 
                         _update_ticker_note(
@@ -911,25 +829,17 @@ def run_portfolio_backtest(
                         )
                         continue
                 else:
-                    # 보유 종목이 없으면 교체할 수 없음
                     continue
 
                 # 교체할 종목이 결정되었으면 매도/매수 진행
                 if ticker_to_sell:
-                    # SELL_RSI로 매도한 카테고리는 같은 날 교체 매수 금지
-                    replacement_category = ticker_to_category.get(replacement_ticker)
-                    if (
-                        replacement_category
-                        and not is_category_exception(replacement_category)
-                        and replacement_category in sell_rsi_categories_today
-                    ):
+                    # SELL_RSI로 매도한 종목은 같은 날 교체 매수 금지
+                    if replacement_ticker in sell_rsi_tickers_today:
                         if (
                             daily_records_by_ticker[replacement_ticker]
                             and daily_records_by_ticker[replacement_ticker][-1]["date"] == dt
                         ):
-                            daily_records_by_ticker[replacement_ticker][-1]["note"] = (
-                                f"RSI 과매수 매도 카테고리 ({replacement_category})"
-                            )
+                            daily_records_by_ticker[replacement_ticker][-1]["note"] = "RSI 과매수 매도 종목"
                         continue  # 다음 교체 후보로 넘어감
 
                     # RSI 과매수 종목 교체 매수 차단
@@ -1064,7 +974,6 @@ def run_portfolio_backtest(
                                 {
                                     "ticker": replacement_ticker,
                                     "score": best_new_score,
-                                    "category": wait_stock_category,
                                 }
                             )
                             held_stocks_with_scores.sort(key=lambda x: x["score"])  # 다시 정렬
@@ -1089,26 +998,19 @@ def run_portfolio_backtest(
                 if records and records[-1]["date"] == dt and records[-1]["decision"] in ("BUY", "BUY_REPLACE")
             }
 
-            held_categories_snapshot = calculate_held_categories(position_state, ticker_to_category)
-            held_categories_normalized = {
-                str(cat).strip().upper() for cat in held_categories_snapshot if isinstance(cat, str)
-            }
             for _, candidate_ticker in buy_ranked_candidates:
                 if candidate_ticker not in bought_tickers_today:
                     if (
                         daily_records_by_ticker[candidate_ticker]
                         and daily_records_by_ticker[candidate_ticker][-1]["date"] == dt
                     ):
-                        # RSI 차단이나 카테고리 중복 등 이미 note가 설정된 경우 덮어쓰지 않음
+                        # RSI 차단 등 이미 note가 설정된 경우 덮어쓰지 않음
                         current_note = daily_records_by_ticker[candidate_ticker][-1].get("note", "")
                         if not current_note or current_note == "":
                             _apply_wait_note_if_empty(
                                 daily_records_by_ticker,
                                 candidate_ticker,
                                 dt,
-                                ticker_to_category,
-                                held_categories_snapshot,
-                                held_categories_normalized,
                                 position_state,
                                 score_today,
                                 replace_threshold,

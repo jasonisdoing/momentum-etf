@@ -236,13 +236,13 @@ def compose_recommendation_slack_message(
     # 튜닝 파라미터 표시
     strategy_params = getattr(report, "strategy_params", {})
     if isinstance(strategy_params, dict):
-        ma_period = strategy_params.get("MA_PERIOD")
+        ma_month = strategy_params.get("MA_MONTH")
         topn = strategy_params.get("PORTFOLIO_TOPN")
         replace_threshold = strategy_params.get("REPLACE_SCORE_THRESHOLD")
 
         params_str_parts = []
-        if ma_period is not None:
-            params_str_parts.append(f"MA: {ma_period}")
+        if ma_month is not None:
+            params_str_parts.append(f"MA: {ma_month}개월")
         if topn is not None:
             params_str_parts.append(f"TopN: {topn}")
         if replace_threshold is not None:
