@@ -91,7 +91,7 @@ MIN_TRADING_DAYS = 5
 
 # 리밸런싱 주기 설정 (전역 공통)
 # DAILY, WEEKLY, MONTHLY, QUARTERLY 중 선택
-REBALANCE_MODE = "WEEKLY"
+REBALANCE_MODE = "MONTHLY"
 
 # 튜닝 최적화 지표 (전역 공통)
 # CAGR, SHARPE, SDR 중 선택

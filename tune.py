@@ -20,7 +20,7 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     "kor_us": {
-        "BUCKET_TOPN": [1],
+        "BUCKET_TOPN": [2],
         "MA_MONTH": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
