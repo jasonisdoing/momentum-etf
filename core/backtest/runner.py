@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 
 from config import TRADING_DAYS_PER_MONTH
+from core.backtest.analysis.summaries import build_bucket_summaries
 from core.backtest.engine import run_portfolio_backtest
 from strategies.maps.rules import StrategyRules
 from utils.account_registry import get_common_file_settings
@@ -320,6 +321,7 @@ def run_account_backtest(
         account_settings=account_settings,
         prefetched_data=prefetched_data,
         ticker_timeseries=ticker_timeseries,
+        ticker_meta=ticker_meta,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries, start_date)
@@ -621,6 +623,7 @@ def _build_summary(
     account_settings: Mapping[str, Any],
     prefetched_data: Mapping[str, pd.DataFrame] | None = None,
     ticker_timeseries: dict[str, pd.DataFrame] | None = None,
+    ticker_meta: Mapping[str, dict[str, Any]] | None = None,
 ) -> tuple[
     dict[str, Any],
     pd.Series,
@@ -896,6 +899,14 @@ def _build_summary(
                 trade_count = t_data["decision"].isin(trade_decisions).sum()
                 total_turnover += int(trade_count)
 
+    # Bucket summary
+    bucket_summary = []
+    if ticker_timeseries and ticker_meta:
+        # ticker_timeseries를 dict[str, pd.DataFrame]으로 변환 (Mapping인 경우 고려)
+        ts_dict = {k: v for k, v in ticker_timeseries.items() if isinstance(v, pd.DataFrame)}
+        meta_dict = {k: v for k, v in ticker_meta.items()}
+        bucket_summary = build_bucket_summaries(ts_dict, meta_dict)
+
     summary = {
         "start_date": start_date.strftime("%Y-%m-%d"),
         "end_date": end_date.strftime("%Y-%m-%d"),
@@ -918,6 +929,7 @@ def _build_summary(
         "benchmarks": benchmarks_summary,
         "benchmark_name": benchmarks_summary[0]["name"] if benchmarks_summary else "S&P 500",
         "weekly_summary": weekly_summary_rows,
+        "bucket_summary": bucket_summary,
         "monthly_returns": monthly_returns,
         "monthly_cum_returns": monthly_cum_returns,
         "yearly_returns": yearly_returns,

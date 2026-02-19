@@ -42,6 +42,9 @@ EXCLUDE_KEYWORDS = [
     "Doge",
     "Covered",
     "Call",
+    "Shipping",
+    "gold",  # 이미 충분함
+    "silver",  # 이미 충분함
 ]
 # 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
 INCLUDE_KEYWORDS = []
