@@ -67,7 +67,6 @@ def align_market_data(config: BacktestConfig, metrics_by_ticker: dict[str, dict]
     open_prices = {}
     ma_values = {}
     scores = {}
-    rsi_scores = {}
     buy_signals = {}
     available_mask = {}
     raw_frames = {}
@@ -78,7 +77,6 @@ def align_market_data(config: BacktestConfig, metrics_by_ticker: dict[str, dict]
         o = m["open"].reindex(union_index)
         ma = m["ma"].reindex(union_index)
         sc = m["ma_score"].reindex(union_index)
-        rsi = m.get("rsi_score", pd.Series(dtype=float)).reindex(union_index)
         sig = m["buy_signal_days"].reindex(union_index).fillna(0).astype(int)
 
         # Store numpy arrays
@@ -86,7 +84,6 @@ def align_market_data(config: BacktestConfig, metrics_by_ticker: dict[str, dict]
         open_prices[ticker] = o.to_numpy()
         ma_values[ticker] = ma.to_numpy()
         scores[ticker] = sc.to_numpy()
-        rsi_scores[ticker] = rsi.to_numpy()
         buy_signals[ticker] = sig.to_numpy()
         available_mask[ticker] = c.notna().to_numpy()
 
@@ -99,7 +96,6 @@ def align_market_data(config: BacktestConfig, metrics_by_ticker: dict[str, dict]
         open_prices=open_prices,
         ma_values=ma_values,
         scores=scores,
-        rsi_scores=rsi_scores,
         buy_signals=buy_signals,
         available_mask=available_mask,
         raw_frames=raw_frames,

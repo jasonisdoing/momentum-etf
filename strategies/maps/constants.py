@@ -11,12 +11,6 @@ DECISION_CONFIG = {
         # [User Request] 보유 종목 하이라이트 (연한 초록)
         "background": "#d0f0c0",
     },
-    "SELL_TREND": {
-        "display_name": "<📉 추세이탈 매도>",
-        "order": 21,
-        "is_recommendation": True,
-        "show_slack": True,
-    },
     "BUY_REPLACE": {
         "display_name": "<🔄 교체매수>",
         "order": 25,
@@ -86,7 +80,6 @@ DECISION_MESSAGES["NEW_BUY"] = DECISION_MESSAGES.get("BUY", "✅ 신규 매수")
 DECISION_NOTES = {
     "INSUFFICIENT_CASH": "현금 부족",
     "NO_PRICE": "가격 정보 없음",
-    "TREND_BREAK": "추세 이탈",
     "REPLACE_SELL": "교체 매도",
     "PRICE_DATA_FAIL": "가격 데이터 조회 실패",
     "DATA_INSUFFICIENT": "⚠️ 거래일 부족",

@@ -742,10 +742,7 @@ def render_account_page(account_id: str) -> None:
                 params_to_show.update(
                     {
                         "MA타입": strategy_tuning.get("MA_TYPE"),
-                        "TopN": strategy_tuning.get("BUCKET_TOPN"),
-                        "교체점수": strategy_tuning.get("REPLACE_SCORE_THRESHOLD"),
-                        "과매수 지표": strategy_tuning.get("OVERBOUGHT_SELL_THRESHOLD"),
-                        "쿨다운 일자": strategy_tuning.get("COOLDOWN_DAYS"),
+                        "리밸런스 주기": strategy_tuning.get("REBALANCE_MODE"),
                     }
                 )
 

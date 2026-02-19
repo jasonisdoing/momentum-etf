@@ -27,13 +27,12 @@ class MarketData:
 
     union_index: pd.DatetimeIndex
     # Ticker -> Field -> Array
-    # Fields: close, open, high, low, ma, score, rsi, buy_signal
+    # Fields: close, open, high, low, ma, score, buy_signal
     # access: dates[i], prices[ticker][i]
     close_prices: dict[str, np.ndarray]
     open_prices: dict[str, np.ndarray]
     ma_values: dict[str, np.ndarray]
     scores: dict[str, np.ndarray]
-    rsi_scores: dict[str, np.ndarray]
     buy_signals: dict[str, np.ndarray]
     available_mask: dict[str, np.ndarray]
 

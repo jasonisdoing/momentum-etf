@@ -142,7 +142,6 @@ def extract_recommendations_from_backtest(
         shares = _safe_float(last_row.get("shares"), 0)
         avg_cost = _safe_float(last_row.get("avg_cost"))
         score = _safe_float(last_row.get("score"))
-        rsi_score = _safe_float(last_row.get("rsi_score"))
         filter_val = _safe_float(last_row.get("filter"))
         decision = str(last_row.get("decision", "")).upper() or "WAIT"
         note = str(last_row.get("note", "") or "")
@@ -249,7 +248,6 @@ def extract_recommendations_from_backtest(
                 "shares": shares,
                 "avg_cost": avg_cost,
                 "score": score,
-                "rsi_score": rsi_score,
                 "streak": streak,
                 "daily_pct": daily_pct,
                 "evaluation_pct": evaluation_pct,
@@ -362,12 +360,6 @@ def _decision_to_state(decision: str, shares: float) -> str:
         "SELL",
         "BUY_REPLACE",
         "SELL_REPLACE",
-        "SELL_TREND",
-        "SELL_RSI",
-        "SELL_STOP",
-        "CUT_STOPLOSS",
-        "SELL_TRAILING",
-        "SELL_MOMENTUM",
     ):
         return decision_upper
     elif shares and shares > 0:

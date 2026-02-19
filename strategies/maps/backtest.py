@@ -23,8 +23,6 @@ def run_single_ticker_backtest(
     date_range: list[str] | None = None,
     country: str = "kor",
     ma_days: int = 20,
-    stop_loss_pct: float = -10.0,
-    cooldown_days: int = 5,
 ) -> pd.DataFrame:
     """
     단일 종목에 대해 이동평균선 교차 전략 백테스트를 실행합니다.
@@ -38,15 +36,11 @@ def run_single_ticker_backtest(
         date_range: 백테스트 기간
         country: 시장 국가 코드
         ma_days: 이동평균 기간
-        stop_loss_pct: 손절 비율
-        cooldown_days: 거래 쿨다운 기간
 
     Returns:
         pd.DataFrame: 백테스트 결과
     """
     country_code = (country or "").strip().lower() or "kor"
-
-    stop_loss_threshold = stop_loss_pct
 
     # 티커 유형에 따른 이동평균 기간 설정
     current_ma_days = ma_days
@@ -82,8 +76,6 @@ def run_single_ticker_backtest(
     available_cash = float(initial_capital)
     held_shares: float = 0.0
     average_cost = 0.0
-    buy_cooldown_until = -1
-    sell_cooldown_until = -1
 
     rows = []
     close_prices = ticker_metrics["close"]
@@ -118,25 +110,11 @@ def run_single_ticker_backtest(
             )
             continue
 
-        if held_shares > 0 and i >= sell_cooldown_until:
-            hold_return_pct = (current_price / average_cost - 1.0) * 100.0 if average_cost > 0 else 0.0
+        if held_shares > 0:
+            # 전략 변경: 개별 종목 백테스트에서도 중간 매도를 비활성화하고 리밸런싱 대기 시뮬레이션
+            pass
 
-            if stop_loss_threshold is not None and hold_return_pct <= float(stop_loss_threshold):
-                decision = "CUT_STOPLOSS"
-            elif current_price < ma_today:
-                decision = "SELL_TREND"
-
-            if decision in ("CUT_STOPLOSS", "SELL_TREND"):
-                trade_amount = held_shares * current_price
-                if average_cost > 0:
-                    trade_profit = (current_price - average_cost) * held_shares
-                    trade_pl_pct = hold_return_pct
-                available_cash += trade_amount
-                held_shares, average_cost = 0, 0.0
-                if cooldown_days > 0:
-                    buy_cooldown_until = i + cooldown_days
-
-        if decision is None and held_shares == 0 and i >= buy_cooldown_until:
+        if decision is None and held_shares == 0:
             consecutive_buy_days_today = consecutive_buy_days.iloc[i]
             if consecutive_buy_days_today > 0:
                 buy_quantity = int(available_cash // current_price)
@@ -145,8 +123,6 @@ def run_single_ticker_backtest(
                     available_cash -= trade_amount
                     average_cost, held_shares = current_price, float(buy_quantity)
                     decision = "BUY"
-                    if cooldown_days > 0:
-                        sell_cooldown_until = i + cooldown_days
 
         if decision is None:
             decision = "HOLD" if held_shares > 0 else "WAIT"

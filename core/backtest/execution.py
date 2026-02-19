@@ -108,7 +108,6 @@ def apply_trade(
         price_val = data.close_prices[ticker][i]
 
         score_val = data.scores[ticker][i] if pd.notna(data.scores[ticker][i]) else None
-        rsi_val = data.rsi_scores[ticker][i] if pd.notna(data.rsi_scores[ticker][i]) else None
         ma_val = data.ma_values[ticker][i] if pd.notna(data.ma_values[ticker][i]) else None
         filter_val = int(data.buy_signals[ticker][i])
 
@@ -124,7 +123,6 @@ def apply_trade(
             "trade_pl_pct": 0.0,
             "note": "",
             "score": score_val,
-            "rsi_score": rsi_val,
             "signal1": ma_val,
             "filter": filter_val,
         }

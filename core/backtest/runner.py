@@ -892,7 +892,7 @@ def _build_summary(
     # Turnover calculation (전체 거래 횟수) - if 블록 밖에서 항상 실행
     total_turnover = 0
     if ticker_timeseries:
-        trade_decisions = {"BUY", "BUY_REPLACE", "SELL_TREND", "SELL_RSI", "CUT_STOPLOSS", "SELL_REPLACE"}
+        trade_decisions = {"BUY", "BUY_REPLACE", "SELL_REPLACE"}
         for t_data in ticker_timeseries.values():
             if isinstance(t_data, pd.DataFrame) and "decision" in t_data.columns:
                 trade_count = t_data["decision"].isin(trade_decisions).sum()
@@ -981,12 +981,7 @@ def _build_ticker_summaries(
     ticker_meta: Mapping[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     sell_decisions = {
-        "SELL_MOMENTUM",
-        "SELL_TREND",
-        "CUT_STOPLOSS",
         "SELL_REPLACE",
-        "SELL_TRAILING",
-        "SELL_RSI",
     }
 
     summaries: list[dict[str, Any]] = []

@@ -2,26 +2,7 @@
 
 import pandas as pd
 
-from strategies.maps.constants import DECISION_MESSAGES, DECISION_NOTES
-
-
-def _format_trend_break_phrase(ma_value: float | None, price_value: float | None, ma_days: int | None) -> str:
-    if ma_value is None or pd.isna(ma_value) or price_value is None or pd.isna(price_value):
-        threshold = ma_value if (ma_value is not None and not pd.isna(ma_value)) else 0.0
-        return f"{DECISION_NOTES['TREND_BREAK']}({threshold:,.0f}원 이하)"
-
-    diff = ma_value - price_value
-    direction = "낮습니다" if diff >= 0 else "높습니다"
-    period_text = ""
-    if ma_days:
-        try:
-            period_text = f"{int(ma_days)}일 "
-        except (TypeError, ValueError):
-            period_text = ""
-    return (
-        f"{DECISION_NOTES['TREND_BREAK']}"
-        f"({period_text}평균 가격 {ma_value:,.0f}원 보다 {abs(diff):,.0f}원 {direction}.)"
-    )
+from strategies.maps.constants import DECISION_MESSAGES
 
 
 class StrategyEvaluator:
@@ -42,20 +23,12 @@ class StrategyEvaluator:
     ) -> tuple[str, str]:
         """
         매도 여부를 판단합니다.
+        (전략 변경: 추세 이탈 시에도 매도하지 않음, 리밸런싱 날에만 교체)
 
         Returns:
             (new_state, phrase)
         """
-        phrase = ""
-        new_state = current_state
-
-        if score <= 0:
-            # 전략 변경: 추세 이탈 시에도 매도하지 않음 (리밸런싱 날에만 교체)
-            # new_state = "SELL_TREND"
-            # phrase = _format_trend_break_phrase(ma_value, price, ma_days)
-            pass
-
-        return new_state, phrase
+        return current_state, ""
 
     def check_buy_signal(
         self,

@@ -75,14 +75,7 @@ def build_ticker_summaries(
     """Calculates performance summary per ticker."""
     summaries = []
     sell_decisions = {
-        "SELL_MOMENTUM",
-        "SELL_TREND",
-        "CUT_STOPLOSS",
         "SELL_REPLACE",
-        "SELL_TRAILING",
-        "SELL_RSI",
-        "SELL_REBALANCE",
-        "SELL_MACRO",
     }
 
     for ticker, df in ticker_timeseries.items():
@@ -147,14 +140,7 @@ def build_bucket_summaries(
     """Calculates performance summary per bucket."""
     bucket_data = {}
     sell_decisions = {
-        "SELL_MOMENTUM",
-        "SELL_TREND",
-        "CUT_STOPLOSS",
         "SELL_REPLACE",
-        "SELL_TRAILING",
-        "SELL_RSI",
-        "SELL_REBALANCE",
-        "SELL_MACRO",
     }
 
     for ticker, df in ticker_timeseries.items():

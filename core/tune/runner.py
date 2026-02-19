@@ -123,7 +123,6 @@ def _build_prefetched_metric_cache(
     if not period_pool or not type_pool:
         return {}
 
-    from strategies.rsi.backtest import process_ticker_data_rsi
     from utils.indicators import calculate_ma_score
     from utils.moving_averages import calculate_moving_average
 
@@ -141,10 +140,6 @@ def _build_prefetched_metric_cache(
             "ma": {},
             "ma_score": {},
         }
-
-        rsi_payload = process_ticker_data_rsi(close_series)
-        if rsi_payload:
-            entry["rsi_score"] = rsi_payload.get("rsi_score")
 
         for ma_type in type_pool:
             for period in period_pool:
@@ -252,10 +247,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     # Legacy cleanup
 
     integer_keys = {
-        "STOP_LOSS_PCT",
-        "COOLDOWN_DAYS",
         "BUCKET_TOPN",
-        "OVERBOUGHT_SELL_THRESHOLD",
         "MA_MONTH",
     }
 
@@ -292,9 +284,6 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "BUCKET_TOPN",
         "MA_MONTH",
         "MA_TYPE",
-        "STOP_LOSS_PCT",
-        "OVERBOUGHT_SELL_THRESHOLD",
-        "COOLDOWN_DAYS",
         "OPTIMIZATION_METRIC",
     ]
 
@@ -375,8 +364,6 @@ def _export_debug_month(
             if ma_month is None:
                 continue
             topn = int(tuning.get("BUCKET_TOPN"))
-            stop_loss = tuning.get("STOP_LOSS_PCT")
-            stop_loss_value = float(stop_loss) if stop_loss is not None else None
         except (TypeError, ValueError):
             continue
 
@@ -396,7 +383,6 @@ def _export_debug_month(
             ma_month=int(ma_month),
             bucket_topn=topn,
             ma_type=tuning.get("MA_TYPE", "SMA"),
-            stop_loss_pct=stop_loss_value,
             rebalance_mode=rebalance_mode_val,
         )
         result_prefetch = run_account_backtest(
@@ -418,8 +404,7 @@ def _export_debug_month(
             trading_calendar=trading_calendar,
         )
 
-        stop_loss_dir_part = f"SL{stop_loss_value:.2f}" if stop_loss_value is not None else "SLauto"
-        combo_dir = month_dir / f"combo_{idx:02d}_MA{ma_month}_TOPN{topn}_{stop_loss_dir_part}"
+        combo_dir = month_dir / f"combo_{idx:02d}_MA{ma_month}_TOPN{topn}"
         combo_metrics = _export_combo_debug(
             combo_dir,
             recorded_metrics=recorded_metrics,
@@ -435,7 +420,6 @@ def _export_debug_month(
                 "backtest_start_date": backtest_start_date,
                 "ma_days": ma_month,
                 "topn": topn,
-                "stop_loss_pct": stop_loss_value,
                 "recorded_cagr": recorded_metrics["cagr"],
                 "prefetch_cagr": metrics_prefetch["cagr"],
                 "live_cagr": metrics_live["cagr"],
@@ -795,27 +779,16 @@ def _build_run_entry(
         field_key_pairs = [
             ("MA_MONTH", "ma_month"),
             ("BUCKET_TOPN", "bucket_topn"),
-            ("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
-            ("STOP_LOSS_PCT", "stop_loss_pct"),
-            ("OVERBOUGHT_SELL_THRESHOLD", "rsi_sell_threshold"),
-            ("COOLDOWN_DAYS", "cooldown_days"),
         ]
 
         for field, key in field_key_pairs:
             value = best.get(key)
             if value is None:
                 continue
-            if field == "REPLACE_SCORE_THRESHOLD":
-                rounded_up = _round_up_float_places(value, 1)
-                if math.isfinite(rounded_up):
-                    tuning_snapshot[field] = rounded_up
-            elif field == "STOP_LOSS_PCT":
-                rounded_up = _round_up_float_places(value, 1)
-                if math.isfinite(rounded_up):
-                    tuning_snapshot[field] = rounded_up
-                converted = _to_int(value)
-                if converted is not None:
-                    tuning_snapshot[field] = converted
+
+            converted = _to_int(value)
+            if converted is not None:
+                tuning_snapshot[field] = converted
 
         raw_data_payload.append(
             {
@@ -906,9 +879,6 @@ def _ensure_entry_schema(entry: Any) -> dict[str, Any]:
     for field in (
         "MA_MONTH",
         "BUCKET_TOPN",
-        "REPLACE_SCORE_THRESHOLD",
-        "STOP_LOSS_PCT",
-        "COOLDOWN_DAYS",
         "MA_TYPE",
     ):
         normalized.pop(field, None)
@@ -1827,20 +1797,17 @@ def run_account_tuning(
     else:
         optimization_metric = str(optimization_metric_raw).upper()
 
-    for item in results_per_month:
-        best = item.get("best", {})
+    if results_per_month:
+        item = results_per_month[-1]
+        best = item.get("best") or {}
         logger.info(
-            "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): MA=%d / TOPN=%d / TH=%.3f / RSI=%d / "
-            "COOLDOWN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
+            "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): MA=%d / TOPN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
             account_norm.upper(),
             item.get("backtest_start_date"),
             optimization_metric,
-            best.get("ma_days", 0),
+            best.get("ma_month", 0),
             best.get("bucket_topn", 0),
-            best.get("replace_threshold", 0.0),
-            best.get("rsi_sell_threshold", 10),
-            best.get("cooldown_days", 2),
-            best.get("cagr_pct", 0.0),
+            best.get("cagr", 0.0),
             best.get("sharpe", 0.0),
             best.get("sharpe_to_mdd", 0.0),
         )

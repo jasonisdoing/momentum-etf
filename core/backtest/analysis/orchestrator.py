@@ -28,17 +28,9 @@ def build_full_summary(
 
     total_trades = 0
     trade_decisions = {
-        "SELL_MOMENTUM",
-        "SELL_TREND",
-        "CUT_STOPLOSS",
         "SELL_REPLACE",
-        "SELL_TRAILING",
-        "SELL_RSI",
-        "SELL_REBALANCE",
-        "SELL_MACRO",
         "BUY",
         "BUY_REPLACE",
-        "BUY_REBALANCE",
     }
     for df in ticker_timeseries.values():
         if isinstance(df, pd.DataFrame) and "decision" in df.columns:

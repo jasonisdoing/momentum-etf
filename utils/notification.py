@@ -249,15 +249,14 @@ def compose_recommendation_slack_message(
     if isinstance(strategy_params, dict):
         ma_month = strategy_params.get("MA_MONTH")
         topn = strategy_params.get("BUCKET_TOPN")
-        replace_threshold = strategy_params.get("REPLACE_SCORE_THRESHOLD")
 
         params_str_parts = []
         if ma_month is not None:
             params_str_parts.append(f"MA: {ma_month}개월")
         if topn is not None:
             params_str_parts.append(f"TopN: {topn}")
-        if replace_threshold is not None:
-            params_str_parts.append(f"교체점수: {replace_threshold}")
+        # if replace_threshold is not None:
+        #     params_str_parts.append(f"교체점수: {replace_threshold}")
         fields.append({"type": "mrkdwn", "text": f"*전략*: {', '.join(params_str_parts)}"})
 
     if ordered_states:

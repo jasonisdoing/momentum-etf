@@ -97,8 +97,6 @@ def _execute_individual_sells(
                         "avg_cost": 0,
                     }
                 )
-                if decision == "SELL_TREND":
-                    row["note"] = phrase
 
     return cash, current_holdings_value
 
@@ -470,7 +468,6 @@ def run_portfolio_backtest(
         open_series = ticker_metrics["open"].reindex(union_index)
         ma_series = ticker_metrics["ma"].reindex(union_index)
         ma_score_series = ticker_metrics["ma_score"].reindex(union_index)
-        buy_signal_series = ticker_metrics["buy_signal_days"].reindex(union_index).fillna(0).astype(int)
 
         ticker_metrics["close_series"] = close_series
         ticker_metrics["close_values"] = close_series.to_numpy()
@@ -479,6 +476,8 @@ def run_portfolio_backtest(
         ticker_metrics["available_mask"] = close_series.notna().to_numpy()
         ticker_metrics["ma_values"] = ma_series.to_numpy()
         ticker_metrics["ma_score_values"] = ma_score_series.to_numpy()
+
+        buy_signal_series = ticker_metrics["buy_signal_days"].reindex(union_index).fillna(0).astype(int)
         ticker_metrics["buy_signal_series"] = buy_signal_series
         ticker_metrics["buy_signal_values"] = buy_signal_series.to_numpy()
 
@@ -544,7 +543,6 @@ def run_portfolio_backtest(
         tickers_available_today: list[str] = []
         today_prices: dict[str, float] = {}
         score_today: dict[str, float] = {}
-        rsi_score_today: dict[str, float] = {}
         buy_signal_today: dict[str, int] = {}
 
         for ticker, ticker_metrics in metrics_by_ticker.items():
@@ -553,13 +551,10 @@ def run_portfolio_backtest(
             price_float = float(price_val) if not pd.isna(price_val) else float("nan")
             today_prices[ticker] = price_float
 
-            ma_val = ticker_metrics["ma_values"][i]
             score_val = ticker_metrics["ma_score_values"][i]
-            rsi_score_val = ticker_metrics.get("rsi_score_values", [float("nan")] * len(union_index))[i]
             buy_signal_val = ticker_metrics["buy_signal_values"][i]
 
             score_today[ticker] = float(score_val) if not pd.isna(score_val) else 0.0
-            rsi_score_today[ticker] = float(rsi_score_val) if not pd.isna(rsi_score_val) else 0.0
             buy_signal_today[ticker] = int(buy_signal_val) if not pd.isna(buy_signal_val) else 0
 
             if available:
@@ -595,7 +590,7 @@ def run_portfolio_backtest(
                 if pd.isna(score_check):
                     note = "점수 없음"
                 elif score_check <= 0:
-                    note = f"추세 이탈 (점수 {score_check:.1f}점)"
+                    note = "점수 미달"
 
             ma_val = ticker_metrics["ma_values"][i]
             ma_value = float(ma_val) if not pd.isna(ma_val) else float("nan")
@@ -828,7 +823,7 @@ def run_portfolio_backtest(
                                     req_qty,
                                     buy_price,
                                 )
-                                # 매도 쿨다운 제거: 매수 후 바로 매도 가능 (조건 충족 시)
+                                # 매도 완료: 매수 후 바로 매도 가능 (리밸런싱 조건 충족 시)
 
                                 # 결과 행 업데이트: 없으면 새로 추가
                                 if (

@@ -21,12 +21,6 @@ AU_QUOTEAPI_HEADERS = {
     "Origin": "https://www.marketindex.com.au",
 }
 
-# RSI 계산 파라미터 (원본 RSI 사용: 70 이상 과매수, 30 이하 과매도)
-RSI_CALCULATION_CONFIG = {
-    "period": 15,
-    "ema_smoothing": 2.0,
-}
-
 
 # 통합 시장 거래 시간표
 from datetime import time
