@@ -510,15 +510,13 @@ def _render_single_table(
 
     selected_column_config = {key: column_config_map[key] for key in column_order if key in column_config_map}
 
-    # 높이 자동 조절
-    # 행 개수에 따라 조절하되, 최대 높이 제한
+    # 높이 자동 조절: 모든 행이 한 번에 보이도록 계산 (헤더 포함)
     row_count = len(df.index)
-    # 헤더(1) + 행(N) : 높이 계산
-    # st.dataframe의 height는 픽셀 단위.
-    # 대략 row당 35~40px
-    calc_height = (row_count + 1) * 35 + 10
-    if calc_height > 600:
-        calc_height = 600
+    # Streamlit dataframe의 기본 행 높이는 약 35px입니다.
+    # 넉넉하게 계산하여 내부 스크롤바가 생기지 않도록 합니다.
+    calc_height = (row_count + 1) * 35 + 3  # 헤더 1줄 + 데이터 N줄 + 약간의 여백
+
+    # 너무 작으면 보기 흉하므로 최소 높이 설정
     if calc_height < 150:
         calc_height = 150
 

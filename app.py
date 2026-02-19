@@ -103,7 +103,26 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             combined_df = combined_df.sort_values(["계좌"], ascending=[True])
 
         # render_recommendation_table 호출 (컬럼 순서 제어를 위해 visible_columns 명시)
-        visible_cols = ["계좌", "버킷", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가", "문구"]
+        visible_cols = [
+            "계좌",
+            "버킷",
+            "티커",
+            "종목명",
+            "일간(%)",
+            "평가(%)",
+            "보유일",
+            "현재가",
+            "1주(%)",
+            "1달(%)",
+            "3달(%)",
+            "6달(%)",
+            "12달(%)",
+            "고점대비",
+            "추세(3달)",
+            "점수",
+            "지속",
+            "문구",
+        ]
         render_recommendation_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols)
 
     return _render_home_page

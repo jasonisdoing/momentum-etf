@@ -196,21 +196,23 @@ def _render_stocks_meta_table(account_id: str) -> None:
 
         if readonly:
             # 갱신 중일 때는 static dataframe 사용 (스피너 방지)
+            calc_height = (len(df.index) + 1) * 35 + 10
             st.dataframe(
                 styled,  # 스타일 적용된 객체 사용
                 hide_index=True,
                 width="stretch",  # use_container_width deprecated
-                height=600,
+                height=calc_height,
                 column_config=column_config,
                 column_order=existing_columns,
             )
             to_delete = []  # 삭제 불가
         else:
+            calc_height = (len(df_edit.index) + 1) * 35 + 10
             edited_df = st.data_editor(
                 df_edit,
                 hide_index=True,
                 width="stretch",  # use_container_width deprecated
-                height=600,
+                height=calc_height,
                 column_config=column_config,
                 column_order=existing_columns,
                 disabled=[col for col in existing_columns if col not in ("삭제", "버킷")],
