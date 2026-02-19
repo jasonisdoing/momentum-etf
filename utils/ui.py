@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from config import BUCKET_CONFIG, BUCKET_MAPPING
 from strategies.maps.constants import DECISION_CONFIG
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
@@ -263,7 +264,17 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
             return [f"background-color: {color}"] * len(row)
         return [""] * len(row)
 
+    def _style_bucket(val: Any) -> str:
+        val_str = str(val or "")
+        for b_id, cfg in BUCKET_CONFIG.items():
+            if cfg["name"] in val_str:
+                return f"background-color: {cfg['bg_color']}; color: {cfg['text_color']}; font-weight: bold; border-radius: 4px;"
+        return ""
+
     styled = df.style.apply(_color_row, axis=1)
+
+    if "버킷" in df.columns:
+        styled = styled.map(_style_bucket, subset=["버킷"])
 
     def _color_daily_pct(val: float | str) -> str:
         if val is None:
@@ -380,6 +391,7 @@ def render_recommendation_table(
     country_code: str | None = None,
     visible_columns: list[str] | None = None,
     grouped_by_bucket: bool = True,
+    height: int | None = 400,
 ) -> None:
     # 스타일링 준비 (전체 DF 기준)
     # 하지만 여기서는 버킷별로 쪼개서 보여줘야 하므로, 쪼갠 뒤 각각 스타일링 적용 필요
@@ -418,19 +430,13 @@ def render_recommendation_table(
 
     # [Segmentation] 1~5 버킷 순회
     # 버킷 매핑 (app_pages.account_page와 동일하게 유지하거나, 여기서 정의)
-    bucket_names = {
-        1: "1. 모멘텀",
-        2: "2. 혁신기술",
-        3: "3. 시장지수",
-        4: "4. 배당방어",
-        5: "5. 대체헷지",
-    }
+    bucket_names = BUCKET_MAPPING
 
     # DataFrame에 'bucket' 컬럼이 없으면 전체를 하나로 표시 (하위 호환)
     if "bucket" not in df.columns:
         if grouped_by_bucket:
             st.warning("버킷 정보가 없습니다. 전체 목록을 표시합니다.")
-        _render_single_table(df, country_code, column_config_map, visible_columns)
+        _render_single_table(df, country_code, column_config_map, visible_columns, height=height)
         return
 
     # [Aggregation] 전체를 하나로 표시 (로그와 포맷 일원화)
@@ -453,7 +459,7 @@ def render_recommendation_table(
         # 'bucket' (숫자) 제외
         final_columns = [c for c in visible_columns if c != "bucket"]
 
-        _render_single_table(df_sorted, country_code, column_config_map, final_columns)
+        _render_single_table(df_sorted, country_code, column_config_map, final_columns, height=height)
         return
 
     # 버킷별 렌더링
@@ -469,7 +475,7 @@ def render_recommendation_table(
 
         st.subheader(f"{bucket_name} ({len(sub_df)})")
         # 버킷 컬럼은 표시할 필요 없으므로 제외 (옵션)
-        _render_single_table(sub_df, country_code, column_config_map, visible_columns)
+        _render_single_table(sub_df, country_code, column_config_map, visible_columns, height=height)
         st.write("")  # 간격
 
     if not has_data:
@@ -481,6 +487,7 @@ def _render_single_table(
     country_code: str,
     column_config_map: dict,
     visible_columns: list[str] | None = None,
+    height: int | None = 400,
 ) -> None:
     """단일 테이블 렌더링 헬퍼"""
     styled_df = _style_rows_by_state(df, country_code=country_code)
@@ -510,11 +517,14 @@ def _render_single_table(
 
     selected_column_config = {key: column_config_map[key] for key in column_order if key in column_config_map}
 
-    # 높이 자동 조절: 모든 행이 한 번에 보이도록 계산 (헤더 포함)
+    # 높이 조절
     row_count = len(df.index)
-    # Streamlit dataframe의 기본 행 높이는 약 35px입니다.
-    # 넉넉하게 계산하여 내부 스크롤바가 생기지 않도록 합니다.
-    calc_height = (row_count + 1) * 35 + 3  # 헤더 1줄 + 데이터 N줄 + 약간의 여백
+    if height is None:
+        # height가 None인 경우 전체 데이터를 보여주기 위해 높이 계산 (스크롤바 제거용)
+        calc_height = (row_count + 1) * 35 + 10
+    else:
+        # height가 지정된 경우 해당 높이로 제한 (기본 400px)
+        calc_height = min((row_count + 1) * 35 + 10, height)
 
     # 너무 작으면 보기 흉하므로 최소 높이 설정
     if calc_height < 150:

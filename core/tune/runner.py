@@ -18,7 +18,7 @@ from typing import Any
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
-from config import TRADING_DAYS_PER_MONTH
+from config import OPTIMIZATION_METRIC, REBALANCE_MODE, TRADING_DAYS_PER_MONTH
 from core.backtest.runner import run_account_backtest
 from core.tune.reporting import (
     _export_combo_debug,
@@ -284,8 +284,6 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "BUCKET_TOPN",
         "MA_MONTH",
         "MA_TYPE",
-        "REBALANCE_MODE",
-        "OPTIMIZATION_METRIC",
     ]
 
     ordered_strategy = {}
@@ -374,17 +372,10 @@ def _export_debug_month(
             "period_return": float(row.get("period_return")) if row.get("period_return") is not None else None,
         }
 
-        # [Fix] ma_type and rebalance_mode are now mandatory
-        rebalance_mode_val = tuning.get("REBALANCE_MODE")
-        if rebalance_mode_val is None:
-            # If missing in row, get from account settings
-            rebalance_mode_val = get_strategy_rules(account_id).rebalance_mode
-
         strategy_rules = StrategyRules.from_values(
             ma_month=int(ma_month),
             bucket_topn=topn,
             ma_type=tuning.get("MA_TYPE", "SMA"),
-            rebalance_mode=rebalance_mode_val,
         )
         result_prefetch = run_account_backtest(
             account_id,
@@ -481,12 +472,8 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, str, str]] = [
-        (ma, topn, ma_type, mode)
-        for ma in ma_candidates
-        for topn in topn_candidates
-        for ma_type in ma_type_candidates
-        for mode in rebalance_mode_candidates
+    combos: list[tuple[int, int, str]] = [
+        (ma, topn, ma_type) for ma in ma_candidates for topn in topn_candidates for ma_type in ma_type_candidates
     ]
 
     if not combos:
@@ -554,11 +541,10 @@ def _execute_tuning(
             int(ma),
             int(topn),
             str(ma_type),
-            str(mode),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )
-        for ma, topn, ma_type, mode in combos
+        for ma, topn, ma_type in combos
     ]
 
     logger.info(
@@ -718,7 +704,6 @@ def _build_run_entry(
 
     raw_data_payload: list[dict[str, Any]] = []
     ma_type_weights: dict[str, float] = {}
-    rebalance_weights: dict[str, float] = {}
     weighted_cagr_sum = 0.0
     weighted_cagr_weight = 0.0
     weighted_mdd_sum = 0.0
@@ -809,12 +794,6 @@ def _build_run_entry(
             type_key = str(ma_type_val)
             ma_type_weights[type_key] = ma_type_weights.get(type_key, 0.0) + weight_for_cat
 
-        rebalance_val = best.get("rebalance_mode")
-        if rebalance_val:
-            weight_for_cat = weight if weight > 0 else 1.0
-            reb_key = str(rebalance_val)
-            rebalance_weights[reb_key] = rebalance_weights.get(reb_key, 0.0) + weight_for_cat
-
     if weighted_cagr_weight > 0:
         entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
     elif cagr_values:
@@ -863,9 +842,6 @@ def _build_run_entry(
 
     if ma_type_weights:
         result_values["MA_TYPE"] = max(ma_type_weights.items(), key=lambda item: (item[1], item[0]))[0]
-
-    if rebalance_weights:
-        result_values["REBALANCE_MODE"] = max(rebalance_weights.items(), key=lambda item: (item[1], item[0]))[0]
 
     return entry
 
@@ -1346,11 +1322,7 @@ def run_account_tuning(
     if not ma_type_values:
         ma_type_values = [base_rules.ma_type]
 
-    rebalance_mode_values = _normalize_tuning_values(
-        config.get("REBALANCE_MODE"),
-        dtype=str,
-        fallback=base_rules.rebalance_mode,
-    )
+    rebalance_mode_values = [REBALANCE_MODE]
 
     if (not ma_values and not ma_month_values) or not topn_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
@@ -1390,14 +1362,8 @@ def run_account_tuning(
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
         return None
 
-    # OPTIMIZATION_METRIC 필수 확인
-    optimization_metric = config.get("OPTIMIZATION_METRIC")
-    if not optimization_metric:
-        logger.error(
-            "[튜닝] '%s' 계정에 OPTIMIZATION_METRIC 설정이 없습니다. config.py에 추가해주세요.",
-            account_norm.upper(),
-        )
-        return None
+    # OPTIMIZATION_METRIC은 config.py의 전역 설정을 사용합니다.
+    optimization_metric = OPTIMIZATION_METRIC
 
     search_space = {
         "MA_MONTH": ma_month_values or ma_values,
@@ -1413,12 +1379,13 @@ def run_account_tuning(
     rebalance_count = len(rebalance_mode_values)
 
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 리밸런스 %d개 = %d개 조합",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 리밸런스 %d개 = %d개 조합 (최적화 지표: %s)",
         ma_count,
         topn_count,
         ma_type_count,
         rebalance_count,
         combo_count,
+        optimization_metric,
     )
 
     try:

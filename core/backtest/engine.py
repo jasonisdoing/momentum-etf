@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 
+from config import REBALANCE_MODE
 from core.backtest.filtering import select_candidates
 from core.backtest.price import calculate_trade_price
 from strategies.maps.constants import DECISION_CONFIG
@@ -359,7 +360,6 @@ def run_portfolio_backtest(
     trading_calendar: Sequence[pd.Timestamp] | None = None,
     ma_days: int = 20,
     ma_type: str = "SMA",
-    rebalance_mode: str = "QUARTERLY",
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
@@ -497,7 +497,7 @@ def run_portfolio_backtest(
 
     # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     total_days = len(union_index)
-    _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
+    _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {REBALANCE_MODE}")
 
     for i, dt in enumerate(union_index):
         # 리밸런싱 날짜 판별 (DAILY, MONTHLY, QUARTERLY)
@@ -505,9 +505,23 @@ def run_portfolio_backtest(
         is_rebalance_day = False
         if i == 0:  # 첫 날은 초기 자산 배분을 위해 항상 True
             is_rebalance_day = True
-        elif rebalance_mode == "DAILY":
+        elif REBALANCE_MODE == "DAILY":
             is_rebalance_day = True
-        elif rebalance_mode == "MONTHLY":
+        elif REBALANCE_MODE == "WEEKLY":
+            # 오늘이 주말일인지 확인: 다음 거래일이 다른 주(week)인 경우
+            if i < total_days - 1:
+                next_dt = union_index[i + 1]
+                if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
+                    is_rebalance_day = True
+            elif trading_calendar is not None:
+                try:
+                    cal_idx = trading_calendar.get_loc(dt)
+                    if cal_idx + 1 < len(trading_calendar):
+                        if trading_calendar[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
+                            is_rebalance_day = True
+                except (KeyError, IndexError, AttributeError):
+                    pass
+        elif REBALANCE_MODE == "MONTHLY":
             # 오늘이 월말일인지 확인: 다음 거래일이 다른 달인 경우
             if i < total_days - 1:
                 next_dt = union_index[i + 1]
@@ -523,7 +537,7 @@ def run_portfolio_backtest(
                 except (KeyError, IndexError, AttributeError):
                     pass
 
-        elif rebalance_mode == "QUARTERLY":
+        elif REBALANCE_MODE == "QUARTERLY":
             # 오늘이 분기말일인지 확인: 3, 6, 9, 12월의 마지막 거래일
             target_months = {3, 6, 9, 12}
             if dt.month in target_months:

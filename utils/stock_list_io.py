@@ -363,6 +363,53 @@ def update_stock(account_id: str, ticker: str, **update_fields: Any) -> bool:
         return False
 
 
+def bulk_update_stocks(account_id: str, updates: list[dict[str, Any]]) -> int:
+    """
+    여러 종목의 정보를 한 번에 업데이트한다.
+    updates format: [{"ticker": "005930", "bucket": 1}, ...]
+    returns: 성공적으로 업데이트된 종목 수
+    """
+    if not updates:
+        return 0
+
+    account_norm = (account_id or "").strip().lower()
+    coll = _get_collection()
+    if coll is None:
+        return 0
+
+    from pymongo import UpdateOne
+
+    now = datetime.now(timezone.utc)
+    operations = []
+    for item in updates:
+        ticker = item.get("ticker")
+        if not ticker:
+            continue
+
+        fields = dict(item)
+        fields.pop("ticker", None)
+        fields["updated_at"] = now
+
+        operations.append(
+            UpdateOne(
+                {"account_id": account_norm, "ticker": ticker},
+                {"$set": fields},
+            )
+        )
+
+    if not operations:
+        return 0
+
+    try:
+        result = coll.bulk_write(operations, ordered=False)
+        if result.modified_count > 0 or result.upserted_count > 0:
+            _invalidate_cache(account_norm)
+        return result.modified_count + result.upserted_count
+    except Exception as exc:
+        logger.error("bulk_update_stocks 실패 (account=%s): %s", account_norm, exc)
+        return 0
+
+
 def remove_stock(account_id: str, ticker: str, reason: str = "") -> bool:
     """단일 종목을 Soft Delete 처리한다."""
     account_norm = (account_id or "").strip().lower()

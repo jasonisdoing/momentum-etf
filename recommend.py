@@ -14,6 +14,10 @@ from typing import Any
 
 import pandas as pd
 
+from config import BUCKET_MAPPING as BUCKET_NAMES
+
+DEFAULT_BUCKET = 1
+
 from utils.account_registry import (
     get_account_settings,
     get_benchmark_tickers,
@@ -34,16 +38,6 @@ from utils.stock_list_io import get_etfs
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
 logger = get_app_logger()
-
-BUCKET_NAMES = {
-    1: "1. 모멘텀",
-    2: "2. 혁신기술",
-    3: "3. 시장지수",
-    4: "4. 배당방어",
-    5: "5. 대체헷지",
-}
-
-DEFAULT_BUCKET = 1
 
 
 # ---------------------------------------------------------------------------

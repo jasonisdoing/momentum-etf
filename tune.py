@@ -16,32 +16,24 @@ from utils.logger import get_app_logger
 ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [3, 6, 9, 12],
-        "MA_TYPE": ["HMA"],  # "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"], HMA 고정
-        "REBALANCE_MODE": ["MONTHLY"],  # QUARTERLY 임시 제거
-        "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
+        "MA_MONTH": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     "kor_us": {
         "BUCKET_TOPN": [1],
-        "MA_MONTH": [3, 6, 9, 12],
-        "MA_TYPE": ["HMA"],  # "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"], HMA 고정
-        "REBALANCE_MODE": ["MONTHLY"],  # QUARTERLY 임시 제거
-        "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
+        "MA_MONTH": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     "aus": {
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [3, 6, 9, 12],
-        "MA_TYPE": ["HMA"],  # "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"], HMA 고정
-        "REBALANCE_MODE": ["MONTHLY"],  # QUARTERLY 임시 제거
-        "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
+        "MA_MONTH": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [3, 6, 9, 12],
-        "MA_TYPE": ["HMA"],  # "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"], HMA 고정
-        "REBALANCE_MODE": ["MONTHLY"],  # QUARTERLY 임시 제거
-        "OPTIMIZATION_METRIC": "CAGR",  # CAGR, SHARPE, SDR 중 선택
+        "MA_MONTH": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_TYPE": ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"],
     },
 }
 

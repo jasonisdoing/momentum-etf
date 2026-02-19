@@ -54,7 +54,6 @@ def evaluate_single_combo(
         ma_int,
         topn_int,
         ma_type_str,
-        rebalance_mode_str,
         excluded_tickers,
         is_ma_month,
     ) = payload
@@ -82,14 +81,12 @@ def evaluate_single_combo(
                 ma_month=int(ma_int),
                 bucket_topn=int(topn_int),
                 ma_type=str(ma_type_str),
-                rebalance_mode=rebalance_mode_str,
             )
         else:
             strategy_rules = StrategyRules.from_values(
                 ma_days=int(ma_int),
                 bucket_topn=int(topn_int),
                 ma_type=str(ma_type_str),
-                rebalance_mode=rebalance_mode_str,
             )
 
         override_settings = {
@@ -129,7 +126,6 @@ def evaluate_single_combo(
     entry = {
         "ma_month" if is_ma_month else "ma_days": ma_int,
         "bucket_topn": topn_int,
-        "rebalance_mode": rebalance_mode_str,
         "ma_type": ma_type_str,
         "cagr": _round_float(_safe_float(summary.get("cagr"), 0.0)),
         "mdd": _round_float(_safe_float(summary.get("mdd"), 0.0)),

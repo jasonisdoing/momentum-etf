@@ -3,6 +3,21 @@
 CACHE_START_DATE = "2024-01-02"
 
 
+# -----------------------------------------------------------------------
+# 버킷(Bucket) 설정 및 스타일링
+# -----------------------------------------------------------------------
+BUCKET_CONFIG = {
+    1: {"name": "1. 모멘텀", "bg_color": "#ffebee", "text_color": "#c62828"},
+    2: {"name": "2. 혁신기술", "bg_color": "#fff3e0", "text_color": "#ef6c00"},
+    3: {"name": "3. 시장지수", "bg_color": "#f3e5f5", "text_color": "#7b1fa2"},
+    4: {"name": "4. 배당방어", "bg_color": "#e3f2fd", "text_color": "#1565c0"},
+    5: {"name": "5. 대체헷지", "bg_color": "#e8f5e9", "text_color": "#2e7d32"},
+}
+
+BUCKET_MAPPING = {k: v["name"] for k, v in BUCKET_CONFIG.items()}
+BUCKET_REVERSE_MAPPING = {v: k for k, v in BUCKET_MAPPING.items()}
+BUCKET_OPTIONS = list(BUCKET_MAPPING.values())
+
 # 네이버 금융 API 설정
 NAVER_FINANCE_ETF_API_URL = "https://finance.naver.com/api/sise/etfItemList.nhn"
 NAVER_FINANCE_CHART_API_URL = "https://fchart.stock.naver.com/sise.nhn"
@@ -73,3 +88,11 @@ TRADING_DAYS_PER_MONTH = 20
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5
+
+# 리밸런싱 주기 설정 (전역 공통)
+# DAILY, WEEKLY, MONTHLY, QUARTERLY 중 선택
+REBALANCE_MODE = "WEEKLY"
+
+# 튜닝 최적화 지표 (전역 공통)
+# CAGR, SHARPE, SDR 중 선택
+OPTIMIZATION_METRIC = "CAGR"

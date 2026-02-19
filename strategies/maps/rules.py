@@ -18,9 +18,6 @@ class StrategyRules:
     ma_type: str
     enable_data_sufficiency_check: bool
 
-    # 리밸런싱 모드 (QUARTERLY, MONTHLY, DAILY)
-    rebalance_mode: str
-
     @classmethod
     def from_values(
         cls,
@@ -30,7 +27,6 @@ class StrategyRules:
         bucket_topn: Any = None,
         ma_type: Any = None,
         enable_data_sufficiency_check: Any = False,
-        rebalance_mode: Any = None,
     ) -> StrategyRules:
         # MA 기간 결정 (개월 우선)
         final_ma_days = None
@@ -78,21 +74,11 @@ class StrategyRules:
         # ENABLE_DATA_SUFFICIENCY_CHECK 검증
         data_sufficiency_check = bool(enable_data_sufficiency_check)
 
-        # Rebalance Mode
-        if rebalance_mode is None:
-            raise ValueError("REBALANCE_MODE는 필수입니다.")
-        final_rebalance_mode = str(rebalance_mode).upper()
-        if final_rebalance_mode not in {"DAILY", "MONTHLY", "QUARTERLY"}:
-            raise ValueError(
-                f"REBALANCE_MODE는 DAILY, MONTHLY, QUARTERLY 중 하나여야 합니다. (입력값: {final_rebalance_mode})"
-            )
-
         return cls(
             ma_days=final_ma_days,
             bucket_topn=final_bucket_topn,
             ma_type=ma_type_str,
             enable_data_sufficiency_check=data_sufficiency_check,
-            rebalance_mode=final_rebalance_mode,
         )
 
     @classmethod
@@ -111,7 +97,6 @@ class StrategyRules:
             bucket_topn=_resolve("BUCKET_TOPN", "bucket_topn"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
             enable_data_sufficiency_check=_resolve("ENABLE_DATA_SUFFICIENCY_CHECK", "enable_data_sufficiency_check"),
-            rebalance_mode=_resolve("REBALANCE_MODE", "rebalance_mode"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -120,7 +105,6 @@ class StrategyRules:
             "bucket_topn": self.bucket_topn,
             "ma_type": self.ma_type,
             "enable_data_sufficiency_check": self.enable_data_sufficiency_check,
-            "rebalance_mode": self.rebalance_mode,
         }
         return d
 
