@@ -284,6 +284,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "BUCKET_TOPN",
         "MA_MONTH",
         "MA_TYPE",
+        "REBALANCE_MODE",
         "OPTIMIZATION_METRIC",
     ]
 
@@ -709,7 +710,6 @@ def _build_run_entry(
     param_fields = {
         "MA_MONTH": ("ma_month", True),
         "BUCKET_TOPN": ("bucket_topn", True),
-        "REBALANCE_MODE": ("rebalance_mode", True),
     }
 
     entry: dict[str, Any] = {
@@ -718,6 +718,7 @@ def _build_run_entry(
 
     raw_data_payload: list[dict[str, Any]] = []
     ma_type_weights: dict[str, float] = {}
+    rebalance_weights: dict[str, float] = {}
     weighted_cagr_sum = 0.0
     weighted_cagr_weight = 0.0
     weighted_mdd_sum = 0.0
@@ -804,9 +805,15 @@ def _build_run_entry(
         )
         ma_type_val = best.get("ma_type")
         if ma_type_val:
-            weight_for_type = weight if weight > 0 else 1.0
-            key = str(ma_type_val)
-            ma_type_weights[key] = ma_type_weights.get(key, 0.0) + weight_for_type
+            weight_for_cat = weight if weight > 0 else 1.0
+            type_key = str(ma_type_val)
+            ma_type_weights[type_key] = ma_type_weights.get(type_key, 0.0) + weight_for_cat
+
+        rebalance_val = best.get("rebalance_mode")
+        if rebalance_val:
+            weight_for_cat = weight if weight > 0 else 1.0
+            reb_key = str(rebalance_val)
+            rebalance_weights[reb_key] = rebalance_weights.get(reb_key, 0.0) + weight_for_cat
 
     if weighted_cagr_weight > 0:
         entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
@@ -856,6 +863,9 @@ def _build_run_entry(
 
     if ma_type_weights:
         result_values["MA_TYPE"] = max(ma_type_weights.items(), key=lambda item: (item[1], item[0]))[0]
+
+    if rebalance_weights:
+        result_values["REBALANCE_MODE"] = max(rebalance_weights.items(), key=lambda item: (item[1], item[0]))[0]
 
     return entry
 

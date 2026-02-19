@@ -10,15 +10,15 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-02-01",
-        "BACKTESTED_DATE": "2026-02-19 08:50",
-        "CAGR": 49.929049,
-        "MDD": -10.419186,
+        "BACKTESTED_DATE": "2026-02-19 11:10",
+        "CAGR": 47.021989,
+        "MDD": -12.945398,
         "BUCKET_TOPN": 2,
         "MA_MONTH": 12,
         "MA_TYPE": "HMA",
+        "REBALANCE_MODE": "MONTHLY",
         "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": false,
-        "REBALANCE_MODE": "QUARTERLY"
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false
     },
     "benchmark": {
         "ticker": "A200",

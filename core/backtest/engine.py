@@ -508,22 +508,37 @@ def run_portfolio_backtest(
         elif rebalance_mode == "DAILY":
             is_rebalance_day = True
         elif rebalance_mode == "MONTHLY":
-            # 오늘이 월말일인지 확인: 다음 거래일이 다른 달이거나 오늘이 마지막 거래일인 경우
-            if i == total_days - 1:
-                is_rebalance_day = True
-            else:
+            # 오늘이 월말일인지 확인: 다음 거래일이 다른 달인 경우
+            if i < total_days - 1:
                 next_dt = union_index[i + 1]
                 if next_dt.month != dt.month:
                     is_rebalance_day = True
+            elif trading_calendar is not None:
+                # 데이터의 마지막 날인 경우, 실제 거래일 달력 기준 다음 날이 다른 달인지 확인
+                try:
+                    cal_idx = trading_calendar.get_loc(dt)
+                    if cal_idx + 1 < len(trading_calendar):
+                        if trading_calendar[cal_idx + 1].month != dt.month:
+                            is_rebalance_day = True
+                except (KeyError, IndexError, AttributeError):
+                    pass
+
         elif rebalance_mode == "QUARTERLY":
             # 오늘이 분기말일인지 확인: 3, 6, 9, 12월의 마지막 거래일
-            if i == total_days - 1:
-                if dt.month in {3, 6, 9, 12}:
-                    is_rebalance_day = True
-            else:
-                next_dt = union_index[i + 1]
-                if next_dt.month != dt.month and dt.month in {3, 6, 9, 12}:
-                    is_rebalance_day = True
+            target_months = {3, 6, 9, 12}
+            if dt.month in target_months:
+                if i < total_days - 1:
+                    next_dt = union_index[i + 1]
+                    if next_dt.month != dt.month:
+                        is_rebalance_day = True
+                elif trading_calendar is not None:
+                    try:
+                        cal_idx = trading_calendar.get_loc(dt)
+                        if cal_idx + 1 < len(trading_calendar):
+                            if trading_calendar[cal_idx + 1].month != dt.month:
+                                is_rebalance_day = True
+                    except (KeyError, IndexError, AttributeError):
+                        pass
 
         # 진행률 표시 (10% 단위로)
         if i % max(1, total_days // 10) == 0 or i == total_days - 1:
@@ -686,8 +701,8 @@ def run_portfolio_backtest(
 
             # 3. 교체(Replacement) - 리밸런싱 날에만 수행
 
-            # 3. 교체 매수 실행 (포트폴리오가 가득 찬 경우)
-            if len(purchased_today) == 0 and buy_ranked_candidates:
+            # 3. 교체 매수 실행
+            if buy_ranked_candidates:
                 from core.backtest.portfolio import calculate_buy_budget
 
                 # 종합 점수를 사용 (buy_ranked_candidates는 이미 종합 점수로 정렬됨)
