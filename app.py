@@ -172,7 +172,7 @@ def main() -> None:
     pages = [
         page_cls(
             _build_home_page(accounts),
-            title="보유종목",
+            title="보유종목1",
             icon="🏠",
             default=True,
         )
