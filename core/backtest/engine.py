@@ -499,8 +499,9 @@ def run_portfolio_backtest(
     total_days = len(union_index)
     _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {REBALANCE_MODE}")
 
+    # 이전 리밸런싱 인덱스 추적 변수는 제거함
     for i, dt in enumerate(union_index):
-        # 리밸런싱 날짜 판별 (DAILY, MONTHLY, QUARTERLY)
+        # 리밸런싱 날짜 판별 (DAILY, WEEKLY, FORTNIGHTLY, MONTHLY, QUARTERLY)
         # 각 기간의 '마지막 거래일'에 리밸런싱을 수행하도록 변경
         is_rebalance_day = False
         if i == 0:  # 첫 날은 초기 자산 배분을 위해 항상 True
@@ -521,22 +522,43 @@ def run_portfolio_backtest(
                             is_rebalance_day = True
                 except (KeyError, IndexError, AttributeError):
                     pass
-        elif REBALANCE_MODE == "FORTNIGHTLY":
-            # 2주마다 리밸런싱: 주말일이면서 짝수 주차인 경우
-            if i < total_days - 1:
-                next_dt = union_index[i + 1]
-                if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
-                    if dt.isocalendar()[1] % 2 == 0:
-                        is_rebalance_day = True
-            elif trading_calendar is not None:
-                try:
-                    cal_idx = trading_calendar.get_loc(dt)
-                    if cal_idx + 1 < len(trading_calendar):
-                        if trading_calendar[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
-                            if dt.isocalendar()[1] % 2 == 0:
-                                is_rebalance_day = True
-                except (KeyError, IndexError, AttributeError):
-                    pass
+        elif REBALANCE_MODE == "TWICE_A_MONTH":
+            import calendar
+
+            # 현재 dt가 속한 주의 금요일이 몇 월 며칠인지 계산
+            dt_friday = dt + pd.Timedelta(days=4 - dt.weekday())
+            # 판별 기준이 되는 달력 정보 (해당 금요일이 포함된 달)
+            days_in_month = calendar.monthrange(dt_friday.year, dt_friday.month)[1]
+
+            # 그 달에 존재하는 모든 금요일 날짜 목록
+            fridays = [d for d in range(1, days_in_month + 1) if dt_friday.replace(day=d).weekday() == 4]
+
+            # 금요일이 5번 있는 달은 3주, 5주차 / 없는 경우 2주, 4주차 선택
+            if len(fridays) >= 5:
+                target_fridays = [fridays[2], fridays[4]]
+            else:
+                target_fridays = [fridays[1], fridays[3]]
+
+            # 우리가 구한 dt_friday가 해당 달의 목표 금요일 중 하나인지 확인
+            if dt_friday.day in target_fridays:
+                # 이번 주는 리밸런싱해야 하는 타겟 주차임.
+                # 남은 것은 오늘(dt)이 이번 주의 마지막 거래일(휴장이면 그 전날)인지 확인
+                is_end_of_week = False
+                if i < total_days - 1:
+                    next_dt = union_index[i + 1]
+                    if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
+                        is_end_of_week = True
+                elif trading_calendar is not None:
+                    try:
+                        cal_idx = trading_calendar.get_loc(dt)
+                        if cal_idx + 1 < len(trading_calendar):
+                            if trading_calendar[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
+                                is_end_of_week = True
+                    except (KeyError, IndexError, AttributeError):
+                        pass
+
+                if is_end_of_week:
+                    is_rebalance_day = True
         elif REBALANCE_MODE == "MONTHLY":
             # 오늘이 월말일인지 확인: 다음 거래일이 다른 달인 경우
             if i < total_days - 1:
@@ -569,6 +591,9 @@ def run_portfolio_backtest(
                                 is_rebalance_day = True
                     except (KeyError, IndexError, AttributeError):
                         pass
+
+        # 리밸런싱 날짜인 경우 last_rebalance_idx 업데이트
+        # (FORTNIGHTLY 로직 변경으로 인해 더 이상 사용하지 않음)
 
         # 진행률 표시 (10% 단위로)
         if i % max(1, total_days // 10) == 0 or i == total_days - 1:
