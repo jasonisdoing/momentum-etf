@@ -268,43 +268,21 @@ def compose_recommendation_slack_message(
 
             daily_pct = item.get("daily_pct")
 
-            num_emojis = {
-                "0": ":zero:",
-                "1": ":one:",
-                "2": ":two:",
-                "3": ":three:",
-                "4": ":four:",
-                "5": ":five:",
-                "6": ":six:",
-                "7": ":seven:",
-                "8": ":eight:",
-                "9": ":nine:",
-            }
-
             if daily_pct is None:
                 daily_pct_str = "-"
             else:
                 try:
                     pct_val = float(daily_pct)
+
                     if pct_val > 0:
                         trend = ":chart_with_upwards_trend:"
-                        sign = ":heavy_plus_sign:"
                     elif pct_val < 0:
                         trend = ":chart_with_downwards_trend:"
-                        sign = ":heavy_minus_sign:"
                     else:
-                        trend = ":chart_with_upwards_trend:"
-                        sign = ""
+                        trend = ""
 
-                    abs_str = f"{abs(pct_val):.2f}"
-                    formatted_nums = []
-                    for char in abs_str:
-                        if char in num_emojis:
-                            formatted_nums.append(num_emojis[char])
-                        else:
-                            formatted_nums.append(char)
+                    daily_pct_str = f"{trend} *{pct_val:+.2f}%*"
 
-                    daily_pct_str = f"{trend}{sign}" + "".join(formatted_nums)
                     if pct_val >= 3.0:
                         daily_pct_str += " :tada:"
                     elif pct_val <= -3.0:
@@ -336,22 +314,12 @@ def compose_recommendation_slack_message(
         if valid_items_count > 0:
             avg_pct = total_pct / valid_items_count
             try:
-                if avg_pct > 0:
-                    sign = ":heavy_plus_sign:"
-                elif avg_pct < 0:
-                    sign = ":heavy_minus_sign:"
-                else:
-                    sign = ""
+                avg_pct_str = f"{trend} *{avg_pct:+.2f}%*"
 
-                abs_str = f"{abs(avg_pct):.2f}"
-                formatted_nums = []
-                for char in abs_str:
-                    if char in num_emojis:
-                        formatted_nums.append(num_emojis[char])
-                    else:
-                        formatted_nums.append(char)
-
-                avg_pct_str = f"{sign}" + "".join(formatted_nums)
+                if avg_pct >= 3.0:
+                    avg_pct_str += " :tada:"
+                elif avg_pct <= -3.0:
+                    avg_pct_str += " :sob:"
             except (TypeError, ValueError):
                 pass
 
