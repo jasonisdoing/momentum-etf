@@ -248,7 +248,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
 
     if readonly:
         # 갱신 중일 때는 static dataframe 사용 (스피너 방지)
-        calc_height = min((len(df.index) + 1) * 35 + 10, 400)
+        calc_height = min((len(df.index) + 1) * 35 + 10, 750)
         st.dataframe(
             styled,
             hide_index=True,
@@ -260,7 +260,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
     else:
         # 데이터 에디터 출력 (체크박스 클릭 감지를 위해)
         editor_key = f"selection_{account_id}_editor"
-        calc_height = min((len(df.index) + 1) * 35 + 10, 400)
+        calc_height = min((len(df.index) + 1) * 35 + 10, 750)
 
         # 모든 컬럼을 비활성화하고 '수정/삭제'만 활성화
         disabled_cols = [col for col in df_edit.columns if col != "수정/삭제"]

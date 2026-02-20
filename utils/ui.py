@@ -391,7 +391,7 @@ def render_recommendation_table(
     country_code: str | None = None,
     visible_columns: list[str] | None = None,
     grouped_by_bucket: bool = True,
-    height: int | None = 400,
+    height: int | None = 750,
 ) -> None:
     # 스타일링 준비 (전체 DF 기준)
     # 하지만 여기서는 버킷별로 쪼개서 보여줘야 하므로, 쪼갠 뒤 각각 스타일링 적용 필요
@@ -487,7 +487,7 @@ def _render_single_table(
     country_code: str,
     column_config_map: dict,
     visible_columns: list[str] | None = None,
-    height: int | None = 400,
+    height: int | None = 750,
 ) -> None:
     """단일 테이블 렌더링 헬퍼"""
     styled_df = _style_rows_by_state(df, country_code=country_code)
@@ -523,7 +523,7 @@ def _render_single_table(
         # height가 None인 경우 전체 데이터를 보여주기 위해 높이 계산 (스크롤바 제거용)
         calc_height = (row_count + 1) * 35 + 10
     else:
-        # height가 지정된 경우 해당 높이로 제한 (기본 400px)
+        # height가 지정된 경우 해당 높이로 제한 (기본 750px)
         calc_height = min((row_count + 1) * 35 + 10, height)
 
     # 너무 작으면 보기 흉하므로 최소 높이 설정

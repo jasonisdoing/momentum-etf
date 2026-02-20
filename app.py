@@ -123,7 +123,7 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             "지속",
             "문구",
         ]
-        render_recommendation_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols, height=None)
+        render_recommendation_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols, height=900)
 
     return _render_home_page
 

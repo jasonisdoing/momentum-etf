@@ -521,6 +521,22 @@ def run_portfolio_backtest(
                             is_rebalance_day = True
                 except (KeyError, IndexError, AttributeError):
                     pass
+        elif REBALANCE_MODE == "FORTNIGHTLY":
+            # 2주마다 리밸런싱: 주말일이면서 짝수 주차인 경우
+            if i < total_days - 1:
+                next_dt = union_index[i + 1]
+                if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
+                    if dt.isocalendar()[1] % 2 == 0:
+                        is_rebalance_day = True
+            elif trading_calendar is not None:
+                try:
+                    cal_idx = trading_calendar.get_loc(dt)
+                    if cal_idx + 1 < len(trading_calendar):
+                        if trading_calendar[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
+                            if dt.isocalendar()[1] % 2 == 0:
+                                is_rebalance_day = True
+                except (KeyError, IndexError, AttributeError):
+                    pass
         elif REBALANCE_MODE == "MONTHLY":
             # 오늘이 월말일인지 확인: 다음 거래일이 다른 달인 경우
             if i < total_days - 1:
