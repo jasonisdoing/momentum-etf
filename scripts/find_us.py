@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 MIN_CHANGE_PCT = 3.0
 # 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
 EXCLUDE_KEYWORDS = [
+    "Korea",
     "Income",
     "Yieldmax",
     "Weeklypay",

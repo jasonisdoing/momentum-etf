@@ -217,7 +217,6 @@ def compose_recommendation_slack_message(
     lines = [
         app_prefix + headline,
         f"생성시간: {duration:.1f}초",
-        f"보유종목: {_format_hold_ratio(held_count, holdings_limit)}",
         f"모바일: {mobile_url}",
     ]
     if ordered_states:
@@ -238,26 +237,7 @@ def compose_recommendation_slack_message(
     fields: list[dict[str, str]] = [
         {"type": "mrkdwn", "text": f"*기준일*: {base_date_str}"},
         {"type": "mrkdwn", "text": f"*소요시간*: {duration:.1f}초"},
-        {
-            "type": "mrkdwn",
-            "text": f"*보유*: {_format_hold_ratio(held_count, holdings_limit)}",
-        },
     ]
-
-    # 튜닝 파라미터 표시
-    strategy_params = getattr(report, "strategy_params", {})
-    if isinstance(strategy_params, dict):
-        ma_month = strategy_params.get("MA_MONTH")
-        topn = strategy_params.get("BUCKET_TOPN")
-
-        params_str_parts = []
-        if ma_month is not None:
-            params_str_parts.append(f"MA: {ma_month}개월")
-        if topn is not None:
-            params_str_parts.append(f"TopN: {topn}")
-        # if replace_threshold is not None:
-        #     params_str_parts.append(f"교체점수: {replace_threshold}")
-        fields.append({"type": "mrkdwn", "text": f"*전략*: {', '.join(params_str_parts)}"})
 
     if ordered_states:
         state_lines = [f"{state}: {count}개" for state, count in ordered_states]
@@ -265,12 +245,100 @@ def compose_recommendation_slack_message(
 
     blocks.append({"type": "section", "fields": fields})
 
-    context_elements: list[dict[str, str]] = [{"type": "mrkdwn", "text": f"<{mobile_url}|모바일 화면 열기>"}]
+    hold_items = [item for item in recommendations if str(item.get("state") or "").upper() == "HOLD"]
+    if hold_items:
+        bucket_names = {
+            1: "1. 모멘텀",
+            2: "2. 혁신기술",
+            3: "3. 시장지수",
+            4: "4. 배당방어",
+            5: "5. 대체헷지",
+        }
+        hold_lines = []
+        bucket_groups = {}
+        for item in hold_items:
+            bucket_id = item.get("bucket", 1)
+            try:
+                bucket_id_int = int(bucket_id)
+            except (TypeError, ValueError):
+                bucket_id_int = 1
+            bucket_name = bucket_names.get(bucket_id_int, f"{bucket_id}. 기타")
+            ticker = item.get("ticker", "-")
+            name = item.get("name", "-")
+
+            daily_pct = item.get("daily_pct")
+
+            if daily_pct is None:
+                daily_pct_str = "-"
+            else:
+                try:
+                    pct_val = float(daily_pct)
+
+                    if pct_val > 0:
+                        trend = ":chart_with_upwards_trend:"
+                    elif pct_val < 0:
+                        trend = ":chart_with_downwards_trend:"
+                    else:
+                        trend = ""
+
+                    daily_pct_str = f"{trend} *{pct_val:+.2f}%*"
+
+                    if pct_val >= 3.0:
+                        daily_pct_str += " :tada:"
+                    elif pct_val <= -3.0:
+                        daily_pct_str += " :sob:"
+                except (TypeError, ValueError):
+                    daily_pct_str = str(daily_pct)
+
+            if bucket_name not in bucket_groups:
+                bucket_groups[bucket_name] = []
+            bucket_groups[bucket_name].append(f"*{ticker}* - {name} {daily_pct_str}")
+
+        for bucket_name, lines in sorted(bucket_groups.items()):
+            hold_lines.append(f"*{bucket_name}*")
+            hold_lines.extend(lines)
+
+        # Calculate sum and avg
+        total_pct = 0.0
+        valid_items_count = 0
+        for item in hold_items:
+            daily_pct = item.get("daily_pct")
+            if daily_pct is not None:
+                try:
+                    total_pct += float(daily_pct)
+                    valid_items_count += 1
+                except (TypeError, ValueError):
+                    pass
+
+        avg_pct_str = ""
+        if valid_items_count > 0:
+            avg_pct = total_pct / valid_items_count
+            try:
+                avg_pct_str = f"{trend} *{avg_pct:+.2f}%*"
+
+                if avg_pct >= 3.0:
+                    avg_pct_str += " :tada:"
+                elif avg_pct <= -3.0:
+                    avg_pct_str += " :sob:"
+            except (TypeError, ValueError):
+                pass
+
+            hold_lines.append("")
+            hold_lines.append(
+                f"모든 {valid_items_count} 종목이 같은 비중으로 있다고 가정하면 합계 수익률은 {avg_pct_str} 입니다."
+            )
+
+        blocks.append(
+            {"type": "section", "text": {"type": "mrkdwn", "text": "*보유 종목 (HOLD)*\n" + "\n".join(hold_lines)}}
+        )
+
+    context_elements: list[dict[str, str]] = []
     if ordered_states:
         context_elements.append({"type": "mrkdwn", "text": "<!channel> 알림"})
         fallback_text = "<!channel>\n" + fallback_text
 
-    blocks.append({"type": "context", "elements": context_elements})
+    if context_elements:
+        blocks.append({"type": "context", "elements": context_elements})
 
     payload: dict[str, Any] = {"text": fallback_text, "blocks": blocks}
 

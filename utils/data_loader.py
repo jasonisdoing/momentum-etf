@@ -38,7 +38,7 @@ except ImportError:
 # pykrx가 설치되지 않았을 경우를 대비한 예외 처리
 try:
     from pykrx import stock as _stock
-except Exception:
+except ImportError:
     _stock = None
 
 # from utils.notification import send_verbose_log_to_slack
@@ -973,17 +973,18 @@ def fetch_ohlcv_for_tickers(
     except Exception:
         required_end = pd.Timestamp.now().normalize()
 
-    # 오늘 날짜인지 확인
-    today = pd.Timestamp.now().normalize()
-    is_today = required_end == today
+    # 오늘 날짜인지 확인: 요청 범위의 끝이 해당 국가 최신 거래일 이상이면 활성화
+    country_lower = country.lower()
+    target_today = get_latest_trading_day(country_lower)
+    is_today = required_end >= target_today
+    today = target_today  # 실시간 데이터 인덱스로 사용될 날짜
 
     # 실시간 데이터 가져오기 (거래일 + 장 시작 이후에만)
     realtime_data = {}
-    country_lower = country.lower()
-    supports_realtime = country_lower in ("kor", "au")
+    supports_realtime = country_lower in ("kor", "au", "us")
 
     if is_today and supports_realtime:
-        # 거래일 여부 확인
+        # 거래일 여부 확인 (target_today 기준)
         try:
             today_str = today.strftime("%Y-%m-%d")
             trading_days = get_trading_days(today_str, today_str, country)
@@ -991,7 +992,7 @@ def fetch_ohlcv_for_tickers(
         except Exception:
             is_trading_day = False
 
-        # 시장 개장 시간 확인 (장 시작 ~ 장 마감 사이)
+        # 시장 개장 시간 확인 (해당 국가 타임존 기준 장 시작 이후)
         is_market_open_time = False
         if is_trading_day:
             try:
@@ -1007,21 +1008,23 @@ def fetch_ohlcv_for_tickers(
                     tz = pytz.timezone(tz_name)
                     now_local = datetime.now(tz)
                     market_open = schedule["open"]
-                    market_close = schedule["close"]
 
-                    # 장 시작 ~ 장 마감 사이인지 확인
-                    current_time = now_local.time()
-                    is_market_open_time = market_open <= current_time <= market_close
+                    # 장 시작 시간을 지났거나, 현지 날짜가 인덱스 날짜보다 크면 허용
+                    is_market_open_time = (now_local.time() >= market_open) or (now_local.date() > today.date())
+                else:
+                    is_market_open_time = True
             except Exception:
-                is_market_open_time = False
+                is_market_open_time = True
 
-        # 거래일이고 장 시작 ~ 장 마감 사이에만 실시간 데이터 조회
+        # 거래일이고 장 시작 이후라면 실시간 데이터 조회 (장 마감 후에도 지연 데이터 보완용)
         if is_trading_day and is_market_open_time:
             try:
                 if country_lower == "kor":
                     realtime_data = fetch_naver_etf_inav_snapshot(tickers)
                 elif country_lower == "au":
                     realtime_data = fetch_au_quoteapi_snapshot(tickers)
+                elif country_lower == "us":
+                    realtime_data = fetch_us_yfinance_snapshot(tickers)
             except Exception as e:
                 logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
 
@@ -1405,6 +1408,71 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
 
 _AU_QUOTEAPI_SNAPSHOT_CACHE: dict[str, dict[str, float]] = {}
 _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT: pd.Timestamp | None = None
+
+
+def fetch_us_yfinance_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """yfinance를 사용하여 미국 ETF의 실시간(또는 최근 장중) 가격 정보를 조회합니다."""
+
+    if not yf:
+        logger.debug("yfinance 라이브러리가 없어 미국 파이낸스 조회를 건너뜁니다.")
+        return {}
+
+    normalized_tickers = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
+    if not normalized_tickers:
+        return {}
+
+    snapshot: dict[str, dict[str, float]] = {}
+
+    try:
+        # 최근 5일치 데이터를 받아와서 전일 종가와 현재가를 모두 가져옵니다.
+        df = yf.download(normalized_tickers, period="5d", progress=False, auto_adjust=True)
+
+        if df.empty:
+            return {}
+
+        import pandas as pd
+
+        is_multi = isinstance(df.columns, pd.MultiIndex)
+
+        for tk in normalized_tickers:
+            try:
+                tk_df = df.xs(tk, level=1, axis=1) if is_multi else df
+                # NaN 제거 후 유효한 종가 데이터만 추출
+                if "Close" not in tk_df:
+                    continue
+                valid_closes = tk_df["Close"].dropna()
+                if len(valid_closes) < 2:
+                    continue
+
+                latest_row = tk_df.loc[valid_closes.index[-1]]
+
+                now_val = float(valid_closes.iloc[-1])
+                prev_close = float(valid_closes.iloc[-2])
+
+                change_rate = ((now_val / prev_close) - 1.0) * 100.0 if prev_close else 0.0
+
+                entry = {
+                    "nowVal": now_val,
+                    "changeRate": change_rate,
+                }
+
+                if "Open" in latest_row and not pd.isna(latest_row["Open"]):
+                    entry["open"] = float(latest_row["Open"])
+                if "High" in latest_row and not pd.isna(latest_row["High"]):
+                    entry["high"] = float(latest_row["High"])
+                if "Low" in latest_row and not pd.isna(latest_row["Low"]):
+                    entry["low"] = float(latest_row["Low"])
+                if "Volume" in latest_row and not pd.isna(latest_row["Volume"]):
+                    entry["volume"] = float(latest_row["Volume"])
+
+                snapshot[tk] = entry
+            except Exception as tk_err:
+                logger.debug(f"[US] {tk} 실시간 데이터 처리 중 오류: {tk_err}")
+
+    except Exception as exc:
+        logger.warning(f"미국 ETF 실시간 조회 실패: {exc}")
+
+    return snapshot
 
 
 def prime_au_etf_realtime_snapshot(tickers: Sequence[str]) -> None:

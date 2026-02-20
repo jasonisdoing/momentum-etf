@@ -1,7 +1,7 @@
 {
     "order": 4,
     "icon": "🇺🇸",
-    "name": "미국직투 ETF",
+    "name": "미국직투",
     "desc": "미국 ETF 포트폴리오 (USD)",
     "country_code": "us",
     "currency": "usd",
@@ -10,12 +10,12 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-01-01",
-        "BACKTESTED_DATE": "2026-02-20 09:54",
-        "CAGR": 64.820295,
-        "MDD": -11.325144,
+        "BACKTESTED_DATE": "2026-02-20 22:51",
+        "CAGR": 70.925737,
+        "MDD": -12.488047,
         "BUCKET_TOPN": 2,
-        "MA_MONTH": 3,
-        "MA_TYPE": "WMA",
+        "MA_MONTH": 6,
+        "MA_TYPE": "HMA",
         "ENABLE_DATA_SUFFICIENCY_CHECK": false,
         "OPTIMIZATION_METRIC": "CAGR"
     },

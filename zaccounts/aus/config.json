@@ -1,7 +1,7 @@
 {
     "order": 3,
     "icon": "🇦🇺",
-    "name": "호주 ETF",
+    "name": "호주연금",
     "desc": "호주 ETF 포트폴리오 (AUD)",
     "country_code": "au",
     "currency": "aud",

@@ -13,7 +13,6 @@ import yfinance as yf
 from utils.data_loader import fetch_pykrx_name
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_settings, list_available_accounts
-from utils.stock_list_io import _load_account_stocks_raw, save_etfs
 
 
 def fetch_naver_etf_names_map() -> dict[str, str]:
@@ -98,7 +97,8 @@ def _try_parse_float(value: Any) -> float | None:
 
 
 from collections.abc import Callable
-from typing import Any
+
+from utils.stock_list_io import bulk_update_stocks, get_all_etfs_including_deleted
 
 
 def update_account_metadata(account_id: str, progress_callback: Callable[[int, int, str], None] | None = None):
@@ -113,7 +113,8 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
         logger.error(f"계정 설정을 로드할 수 없습니다: {e}")
         return
 
-    stock_data = _load_account_stocks_raw(account_norm)
+    # 삭제된 종목 포함하여 모든 종목 로드
+    stock_data = get_all_etfs_including_deleted(account_norm)
     if not stock_data:
         logger.warning(f"'{account_norm}' 계정의 종목 데이터가 비어있습니다.")
         return
@@ -137,6 +138,9 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
         naver_etf_map = fetch_naver_etf_names_map()
         logger.info(f"  -> {len(naver_etf_map)}개 ETF 정보 획득")
 
+    # 업데이트 사항을 모아두기 위한 리스트
+    updates_for_db = []
+
     for idx, stock in enumerate(ticker_entries, start=1):
         ticker = stock.get("ticker")
         if not ticker:
@@ -148,6 +152,26 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
             name = stock.get("name") or "-"
             logger.info(f"  -> 메타데이터 획득 중: {idx}/{total_count} - {name}({ticker})")
 
+            # 저장할 필드들을 딕셔너리로 구성
+            update_doc = {"ticker": ticker}
+
+            # 메타데이터 업데이트 시 갱신되는 주요 필드 지정
+            fields_to_update = [
+                "name",
+                "listing_date",
+                "1_week_avg_volume",
+                "1_week_earn_rate",
+                "1_month_earn_rate",
+                "3_month_earn_rate",
+                "6_month_earn_rate",
+                "12_month_earn_rate",
+            ]
+            for f in fields_to_update:
+                if f in stock:
+                    update_doc[f] = stock[f]
+
+            updates_for_db.append(update_doc)
+
             if progress_callback:
                 progress_callback(idx, total_count, f"{name}({ticker})")
             updated_count += 1
@@ -156,26 +180,11 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
         except Exception as e:
             logger.error(f"[{account_norm.upper()}/{ticker}] 메타데이터 업데이트 실패: {e}")
 
-    # [User Request] 중복 제거 및 정렬 로직 추가
-    seen_tickers = set()
-    unique_stocks = []
-    for stock in stock_data:
-        tkr = stock.get("ticker")
-        if tkr and tkr not in seen_tickers:
-            seen_tickers.add(tkr)
-            unique_stocks.append(stock)
-        elif tkr:
-            logger.debug(f"[{account_norm.upper()}] 중복 티커 제거: {tkr}")
-
-    # 1주 수익률 내림차순 정렬 (데이터 없으면 -999)
-    unique_stocks.sort(key=lambda x: x.get("1_week_earn_rate") or -999.0, reverse=True)
-    stock_data = unique_stocks
-
-    # 메타데이터 업데이트가 없더라도 정렬/중복제거 반영을 위해 저장 시도
+    # 메타데이터가 갱신된 필드만 추출하여 bulk_update 수행 (save_etfs를 쓰면 is_deleted가 리셋되는 버그 방지)
     try:
-        save_etfs(account_norm, stock_data)
-        if updated_count == 0:
-            logger.info(f"[{account_norm.upper()}] 메타데이터 변경 없음, 정렬/중복제거 결과 저장 완료")
+        if updates_for_db:
+            modified = bulk_update_stocks(account_norm, updates_for_db)
+            logger.info(f"[{account_norm.upper()}] {modified}개 메타데이터 변경사항 저장 완료")
     except Exception as e:
         logger.error(f"'{account_id}' 설정 저장 실패: {e}")
 

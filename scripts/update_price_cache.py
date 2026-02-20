@@ -22,7 +22,7 @@ from utils.data_loader import fetch_ohlcv
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
 from utils.settings_loader import load_common_settings
-from utils.stock_list_io import get_all_etfs
+from utils.stock_list_io import get_all_etfs_including_deleted
 
 
 def _determine_start_date() -> str:
@@ -63,7 +63,7 @@ def refresh_cache_for_target(
 
     # 종목 리스트 로드 (계정 전용)
     try:
-        all_etfs_from_file = get_all_etfs(account_id)
+        all_etfs_from_file = get_all_etfs_including_deleted(account_id)
     except Exception:
         all_etfs_from_file = []
 
