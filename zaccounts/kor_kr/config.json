@@ -1,5 +1,5 @@
 {
-    "order": 10,
+    "order": 1,
     "icon": "🇰🇷",
     "name": "국내 ETF",
     "desc": "운영종인 국내상장 한국 ETF 포트폴리오 입니다.",
@@ -9,19 +9,15 @@
     "initial_capital_krw": "50000000",
     "show_hold": true,
     "strategy": {
-        "BACKTEST_START_DATE": "2025-02-01",
-        "BACKTESTED_DATE": "2026-02-17 09:30",
-        "CAGR": 171.263576,
-        "MDD": -13.709748,
-        "PORTFOLIO_TOPN": 5,
-        "MA_MONTH": 3,
-        "MA_TYPE": "HMA",
-        "REPLACE_SCORE_THRESHOLD": 0,
-        "STOP_LOSS_PCT": 10,
-        "OVERBOUGHT_SELL_THRESHOLD": 100,
-        "COOLDOWN_DAYS": 0,
-        "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": false
+        "BACKTEST_START_DATE": "2025-01-01",
+        "BACKTESTED_DATE": "2026-02-20 10:30",
+        "CAGR": 141.975338,
+        "MDD": -13.029498,
+        "BUCKET_TOPN": 2,
+        "MA_MONTH": 5,
+        "MA_TYPE": "EMA",
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false,
+        "OPTIMIZATION_METRIC": "CAGR"
     },
     "benchmark": {
         "ticker": "069500",

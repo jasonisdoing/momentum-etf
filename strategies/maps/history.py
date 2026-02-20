@@ -29,30 +29,6 @@ def calculate_consecutive_holding_info(
     return {tkr: {"buy_date": None} for tkr in held_tickers}
 
 
-def calculate_trade_cooldown_info(
-    tickers: list[str],
-    account_id: str,
-    as_of_date: datetime,
-    *,
-    country_code: str | None = None,
-) -> dict[str, dict[str, datetime | None]]:
-    """
-    STUB: 'trades' 컬렉션 사용 중단으로 인해 항상 빈 정보를 반환합니다.
-
-    Args:
-        tickers: List of tickers to check
-        account_id: 계정 ID (예: 'kor')
-        country_code: 계정이 참조하는 시장 코드
-        as_of_date: Date to calculate cooldown as of
-
-    Returns:
-        Dictionary mapping tickers to their trade cooldown info (empty defaults)
-    """
-    # 기본값: 최근 매수/매도 없음
-    return {tkr: {"last_buy": None, "last_sell": None} for tkr in tickers}
-
-
 __all__ = [
     "calculate_consecutive_holding_info",
-    "calculate_trade_cooldown_info",
 ]

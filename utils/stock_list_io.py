@@ -224,6 +224,7 @@ def save_etfs(account_id: str, data: list[dict]) -> None:
         ticker = str(item.get("ticker") or "").strip()
         if not ticker:
             continue
+        ticker = ticker.upper()
         new_tickers.add(ticker)
 
         doc = dict(item)
@@ -274,7 +275,7 @@ def add_stock(account_id: str, ticker: str, name: str = "", **extra_fields: Any)
     이미 존재하면(삭제된 경우 포함) 활성 상태로 복구한다.
     """
     account_norm = (account_id or "").strip().lower()
-    ticker_norm = str(ticker or "").strip()
+    ticker_norm = str(ticker or "").strip().upper()
     if not account_norm or not ticker_norm:
         return False
 
@@ -324,6 +325,7 @@ def add_stock(account_id: str, ticker: str, name: str = "", **extra_fields: Any)
         "added_date": now.strftime("%Y-%m-%d"),
         "is_deleted": False,
         "deleted_at": None,
+        "bucket": 1,
     }
     doc.update(extra_fields)
 
@@ -335,6 +337,77 @@ def add_stock(account_id: str, ticker: str, name: str = "", **extra_fields: Any)
     except Exception as exc:
         logger.warning("종목 추가 실패 %s (account=%s): %s", ticker_norm, account_norm, exc)
         return False
+
+
+def update_stock(account_id: str, ticker: str, **update_fields: Any) -> bool:
+    """종목 정보를 업데이트한다."""
+    account_norm = (account_id or "").strip().lower()
+    ticker_norm = str(ticker or "").strip()
+    if not account_norm or not ticker_norm:
+        return False
+
+    coll = _get_collection()
+    if coll is None:
+        return False
+
+    update_fields["updated_at"] = datetime.now(timezone.utc)
+
+    try:
+        result = coll.update_one({"account_id": account_norm, "ticker": ticker_norm}, {"$set": update_fields})
+        if result.modified_count > 0:
+            _invalidate_cache(account_norm)
+            return True
+        return False
+    except Exception as exc:
+        logger.warning("종목 업데이트 실패 %s (account=%s): %s", ticker_norm, account_norm, exc)
+        return False
+
+
+def bulk_update_stocks(account_id: str, updates: list[dict[str, Any]]) -> int:
+    """
+    여러 종목의 정보를 한 번에 업데이트한다.
+    updates format: [{"ticker": "005930", "bucket": 1}, ...]
+    returns: 성공적으로 업데이트된 종목 수
+    """
+    if not updates:
+        return 0
+
+    account_norm = (account_id or "").strip().lower()
+    coll = _get_collection()
+    if coll is None:
+        return 0
+
+    from pymongo import UpdateOne
+
+    now = datetime.now(timezone.utc)
+    operations = []
+    for item in updates:
+        ticker = item.get("ticker")
+        if not ticker:
+            continue
+
+        fields = dict(item)
+        fields.pop("ticker", None)
+        fields["updated_at"] = now
+
+        operations.append(
+            UpdateOne(
+                {"account_id": account_norm, "ticker": ticker},
+                {"$set": fields},
+            )
+        )
+
+    if not operations:
+        return 0
+
+    try:
+        result = coll.bulk_write(operations, ordered=False)
+        if result.modified_count > 0 or result.upserted_count > 0:
+            _invalidate_cache(account_norm)
+        return result.modified_count + result.upserted_count
+    except Exception as exc:
+        logger.error("bulk_update_stocks 실패 (account=%s): %s", account_norm, exc)
+        return 0
 
 
 def remove_stock(account_id: str, ticker: str, reason: str = "") -> bool:

@@ -1,0 +1,28 @@
+name: Recommend - KOR
+
+on:
+  schedule:
+    - cron: '0 1 * * 1-5'    # KST 10:00 (오픈 1시간 후)
+    - cron: '30 5 * * 1-5'   # KST 14:30 (종료 1시간 전)
+  workflow_dispatch:
+
+jobs:
+  run-kor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run KOR Action
+        env:
+          MONGO_DB_CONNECTION_STRING: ${{ secrets.MONGO_DB_CONNECTION_STRING }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: python scripts/action_runner.py --country kor

@@ -1,5 +1,5 @@
 {
-    "order": 20,
+    "order": 2,
     "icon": "🇺🇸",
     "name": "해외 ETF",
     "desc": "운영종인 국내상장 해외 ETF 포트폴리오 입니다.",
@@ -9,19 +9,15 @@
     "initial_capital_krw": "40000000",
     "show_hold": true,
     "strategy": {
-        "BACKTEST_START_DATE": "2025-02-01",
-        "BACKTESTED_DATE": "2026-02-17 11:44",
-        "CAGR": 81.419303,
-        "MDD": -19.041721,
-        "PORTFOLIO_TOPN": 4,
-        "MA_MONTH": 12,
-        "MA_TYPE": "DEMA",
-        "REPLACE_SCORE_THRESHOLD": 0,
-        "STOP_LOSS_PCT": 10,
-        "OVERBOUGHT_SELL_THRESHOLD": 100,
-        "COOLDOWN_DAYS": 0,
-        "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": false
+        "BACKTEST_START_DATE": "2025-01-01",
+        "BACKTESTED_DATE": "2026-02-20 11:32",
+        "CAGR": 92.633618,
+        "MDD": -16.973406,
+        "BUCKET_TOPN": 1,
+        "MA_MONTH": 5,
+        "MA_TYPE": "HMA",
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false,
+        "OPTIMIZATION_METRIC": "CAGR"
     },
     "benchmark": {
         "ticker": "426030",

@@ -32,7 +32,7 @@ def get_db_connection():
         connection_string = os.environ.get("MONGO_DB_CONNECTION_STRING") or getattr(
             global_settings, "MONGO_DB_CONNECTION_STRING", None
         )
-        db_name = os.environ.get("MONGO_DB_NAME") or getattr(global_settings, "MONGO_DB_NAME", "momentum_etf_db")
+        db_name = "momentum_etf_db"
         # 연결 풀 관련 환경 변수(선택 사항)를 반영한다.
         max_pool = int(os.environ.get("MONGO_DB_MAX_POOL_SIZE", "20"))
         min_pool = int(os.environ.get("MONGO_DB_MIN_POOL_SIZE", "0"))

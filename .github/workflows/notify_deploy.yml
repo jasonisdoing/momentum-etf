@@ -1,0 +1,29 @@
+name: Notify Deployment
+
+on:
+  push:
+    branches:
+      - upgrade   # upgrade 브랜치에 코드가 푸시될 때 발동
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract APP_VERSION
+        id: app_version
+        run: |
+          VERSION=$(python -c "from pathlib import Path; import re; content = Path('utils/logger.py').read_text(encoding='utf-8'); match = re.search(r'APP_VERSION\s*=\s*[\'\"]([^\'\"]+)[\'\"]', content); print(match.group(1) if match else '')")
+          if [ -z "$VERSION" ]; then
+            echo "version=Unknown" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notify Slack (GitHub Actions Updated)
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"✅ GitHub Actions에 코드가 성공적으로 업데이트되었습니다. (branch: upgrade)\nAPP_VERSION: ${{ steps.app_version.outputs.version }}\"}" \
+            ${{ secrets.LOGS_SLACK_WEBHOOK }}

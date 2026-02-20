@@ -14,6 +14,10 @@ from typing import Any
 
 import pandas as pd
 
+from config import BUCKET_MAPPING as BUCKET_NAMES
+
+DEFAULT_BUCKET = 1
+
 from utils.account_registry import (
     get_account_settings,
     get_benchmark_tickers,
@@ -132,7 +136,6 @@ def extract_recommendations_from_backtest(
         shares = _safe_float(last_row.get("shares"), 0)
         avg_cost = _safe_float(last_row.get("avg_cost"))
         score = _safe_float(last_row.get("score"))
-        rsi_score = _safe_float(last_row.get("rsi_score"))
         filter_val = _safe_float(last_row.get("filter"))
         decision = str(last_row.get("decision", "")).upper() or "WAIT"
         note = str(last_row.get("note", "") or "")
@@ -239,7 +242,6 @@ def extract_recommendations_from_backtest(
                 "shares": shares,
                 "avg_cost": avg_cost,
                 "score": score,
-                "rsi_score": rsi_score,
                 "streak": streak,
                 "daily_pct": daily_pct,
                 "evaluation_pct": evaluation_pct,
@@ -255,27 +257,54 @@ def extract_recommendations_from_backtest(
                 "trend_prices": trend_prices,
                 "phrase": phrase,
                 "base_date": end_date,
+                "bucket": meta.get("bucket", DEFAULT_BUCKET),
+                "bucket_name": BUCKET_NAMES.get(meta.get("bucket", DEFAULT_BUCKET), "Unknown"),
             }
         )
 
-    # 점수로 정렬 (None은 마지막으로)
-    recommendations.sort(key=lambda x: (x.get("score") is None, -(x.get("score") or 0)))
+    return recommendations
 
-    # 순위 부여 (보유/신규 -> 보유N, 그외 -> 대기N)
-    held_count = 0
-    wait_count = 0
 
+def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """백테스트 리포트와 동일한 정렬 및 보유/대기 순위를 부여합니다."""
+
+    # 1. 정렬 그룹 할당 (daily_report.py와 동일)
+    # 0: CASH (현금은 여기서는 제외됨)
+    # 1: HOLD, BUY, BUY_REBALANCE
+    # 2: WAIT / others
     for rec in recommendations:
-        shares = rec.get("shares", 0) or 0
         decision = str(rec.get("decision", "")).upper()
+        shares = rec.get("shares", 0) or 0
 
-        # [User Request] 웹 화면 기준: 보유중이거나(shares > 0) 신규 매수(BUY)인 경우 '보유' 그룹
-        if shares > 0 or decision == "BUY":
-            held_count += 1
-            rec["rank"] = f"보유{held_count}"
+        if decision in ("HOLD", "BUY", "BUY_REBALANCE"):
+            rec["_sort_group"] = 1
+        elif shares > 0:  # 잔고는 있는데 WAIT인 경우 (교체 대상 등)
+            rec["_sort_group"] = 1  # [User Request] 백테스트와 동일하게 상단 그룹에 배치
         else:
-            wait_count += 1
-            rec["rank"] = f"대기{wait_count}"
+            rec["_sort_group"] = 2
+
+    # 2. 정렬: Group -> Bucket -> Score (desc) -> Ticker
+    def _sort_key(x):
+        return (
+            x.get("_sort_group", 2),
+            x.get("bucket", 99) if x.get("_sort_group") == 1 else 0,  # 백테스트 로직: 그룹 1인 경우만 버킷 정렬
+            -(x.get("score") if x.get("score") is not None else float("-inf")),
+            x.get("ticker", ""),
+        )
+
+    recommendations.sort(key=_sort_key)
+
+    # 3. 순위 부여
+    held_idx = 1
+    wait_idx = 1
+    for i, rec in enumerate(recommendations, 1):
+        rec["rank_order"] = i  # 전체 정렬 순서 보존
+        if rec.get("_sort_group") == 1:
+            rec["rank"] = f"보유 {held_idx}"
+            held_idx += 1
+        else:
+            rec["rank"] = f"대기 {wait_idx}"
+            wait_idx += 1
 
     return recommendations
 
@@ -325,12 +354,6 @@ def _decision_to_state(decision: str, shares: float) -> str:
         "SELL",
         "BUY_REPLACE",
         "SELL_REPLACE",
-        "SELL_TREND",
-        "SELL_RSI",
-        "SELL_STOP",
-        "CUT_STOPLOSS",
-        "SELL_TRAILING",
-        "SELL_MOMENTUM",
     ):
         return decision_upper
     elif shares and shares > 0:
@@ -368,6 +391,68 @@ def _enrich_with_nav_data(
 # ---------------------------------------------------------------------------
 # 추천 리포트 생성 (백테스트 실행 포함)
 # ---------------------------------------------------------------------------
+
+
+def _apply_bucket_selection(
+    recommendations: list[dict[str, Any]],
+    ticker_meta: dict[str, dict[str, Any]],
+    target_count: int = 1,
+) -> list[dict[str, Any]]:
+    """5-Bucket 전략 적용: 각 버킷별로 점수 상위 N개 선정 (Relative Momentum)."""
+
+    # 1. 버킷별 그룹화
+    buckets: dict[int, list[dict[str, Any]]] = {i: [] for i in range(1, 6)}
+
+    for rec in recommendations:
+        ticker = rec.get("ticker", "")
+        meta = ticker_meta.get(ticker, {})
+        # 메타에 없으면 기본값(1)
+        bucket_idx = meta.get("bucket", DEFAULT_BUCKET)
+
+        # 안전장치: 1~5 범위를 벗어나면 1로
+        if bucket_idx not in buckets:
+            bucket_idx = DEFAULT_BUCKET
+
+        rec["bucket"] = bucket_idx
+        rec["bucket_name"] = BUCKET_NAMES.get(bucket_idx, "Unknown")
+        buckets[bucket_idx].append(rec)
+
+    # 2. 각 버킷별 선정 로직
+    final_list = []
+
+    for b_idx in sorted(buckets.keys()):
+        group = buckets[b_idx]
+
+        # 점수 내림차순 정렬 (Relative Momentum)
+        # 점수가 None이면 최하위(-inf)로 취급
+        group.sort(key=lambda x: (x.get("score") if x.get("score") is not None else float("-inf")), reverse=True)
+
+        # Top N 선정
+        # 가용 종목이 target보다 적으면 전수 선정
+        selected_count = 0
+
+        for i, rec in enumerate(group):
+            is_selected = i < target_count
+
+            # 상태/랭크 업데이트
+            if is_selected:
+                selected_count += 1
+                # [Logic Change] 엔진의 decision/state를 오버라이드
+                # 이미 보유중이면 HOLD, 아니면 BUY
+                current_shares = rec.get("shares", 0)
+                if current_shares > 0:
+                    rec["decision"] = "HOLD"
+                    rec["state"] = "HOLD"
+                else:
+                    rec["decision"] = "BUY"
+                    rec["state"] = "BUY"
+            else:
+                rec["decision"] = "WAIT"
+                rec["state"] = "WAIT"
+
+            final_list.append(rec)
+
+    return final_list
 
 
 def generate_recommendation_report(
@@ -452,7 +537,7 @@ def generate_recommendation_report(
         )
 
     # 백테스트 실행 (ETF 유니버스 전달하여 중복 로딩 방지)
-    from logic.backtest.account import run_account_backtest
+    from core.entry_point import run_account_backtest
 
     # [Data Slicing] 전략 기준일 이후의 데이터(오늘 시가 등)가 백테스트에 영향을 주지 않도록 잘라냄
     # (엔진이 '다음날 시가'를 참조하여 체결가를 계산하는 로직 때문)
@@ -480,6 +565,9 @@ def generate_recommendation_report(
     # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
     if country_code in ("kor", "kr"):
         recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
+
+    # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
+    recommendations = _assign_final_ranks(recommendations)
 
     return RecommendationReport(
         account_id=account_id,
@@ -569,12 +657,12 @@ def dump_recommendation_log(
     # 테이블
     lines.append("=== 추천 목록 ===")
     lines.append("")
-
     country_lower = (country_code or "").strip().lower()
     nav_mode = country_lower in {"kr", "kor"}
     show_deviation = country_lower in {"kr", "kor"}
 
-    headers = ["#", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가"]
+    # headers: #, 버킷, 티커, 종목명, 상태, 보유일, 일간(%), 평가(%), 현재가
+    headers = ["#", "버킷", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가"]
     # [User Request] 현재가 - 괴리율 - Nav
     if show_deviation:
         headers.append("괴리율")
@@ -585,7 +673,8 @@ def dump_recommendation_log(
     headers.extend(["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"])
     headers.extend(["점수", "RSI", "지속", "문구"])
 
-    aligns = ["right", "left", "left", "left", "center", "right", "right", "right", "right"]
+    # aligns ( headers 수와 일치해야 함 )
+    aligns = ["left", "left", "left", "left", "left", "center", "right", "right", "right"]
     if show_deviation:
         aligns.append("right")
     if nav_mode:
@@ -595,9 +684,11 @@ def dump_recommendation_log(
 
     rows: list[list[str]] = []
     for item in recommendations:
-        rank = item.get("rank", 0)
+        rank = item.get("rank", "-")
         ticker = item.get("ticker", "-")
         name = item.get("name", "-")
+        bucket_val = item.get("bucket", DEFAULT_BUCKET)
+        bucket_name = BUCKET_NAMES.get(bucket_val, str(bucket_val))
 
         state = item.get("state", "-")
         holding_days = item.get("holding_days", 0)
@@ -621,6 +712,7 @@ def dump_recommendation_log(
 
         row = [
             str(rank),
+            str(bucket_name),
             ticker,
             name,
             state,

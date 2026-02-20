@@ -18,9 +18,22 @@ from typing import Any
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
-from config import TRADING_DAYS_PER_MONTH
-from logic.backtest.account import run_account_backtest
-from logic.entry_point import StrategyRules
+from config import OPTIMIZATION_METRIC, REBALANCE_MODE, TRADING_DAYS_PER_MONTH
+from core.backtest.runner import run_account_backtest
+from core.tune.reporting import (
+    _export_combo_debug,
+    _export_prefetched_data,
+    _render_tuning_table,
+    _round_float,
+    _round_float_places,
+    _round_up_float_places,
+    _safe_float,
+)
+from core.tune.worker import (
+    evaluate_single_combo,
+    init_worker_prefetch,
+)
+from strategies.maps.rules import StrategyRules
 from utils.account_registry import get_benchmark_tickers, get_strategy_rules
 from utils.cache_utils import save_cached_frame
 from utils.data_loader import (
@@ -41,35 +54,9 @@ from utils.stock_list_io import get_etfs
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parents[2] / "zaccounts"
 WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
-MAX_TABLE_ROWS = 100
+WORKERS = None  # 병렬 실행 프로세스 수 (None이면 CPU 개수 기반 자동 결정)
 
 # Worker 글로벌 변수 - 프로세스당 한 번만 초기화
-_WORKER_PREFETCHED_DATA: Mapping[str, DataFrame] | None = None
-_WORKER_PREFETCHED_METRICS: Mapping[str, dict[str, Any]] | None = None
-_WORKER_PREFETCHED_UNIVERSE: Sequence[Mapping[str, Any]] | None = None
-_WORKER_TRADING_CALENDAR: Sequence[pd.Timestamp] | None = None
-_WORKER_PREFETCHED_FX_SERIES: pd.Series | None = None
-
-
-def _init_worker_prefetch(
-    prefetched_data: Mapping[str, DataFrame],
-    prefetched_metrics: Mapping[str, dict[str, Any]],
-    prefetched_universe: Sequence[Mapping[str, Any]],
-    trading_calendar: Sequence[pd.Timestamp],
-    fx_series: pd.Series | None = None,
-) -> None:
-    """ProcessPoolExecutor initializer - 각 worker 프로세스당 한 번만 실행"""
-    global \
-        _WORKER_PREFETCHED_DATA, \
-        _WORKER_PREFETCHED_METRICS, \
-        _WORKER_PREFETCHED_UNIVERSE, \
-        _WORKER_TRADING_CALENDAR, \
-        _WORKER_PREFETCHED_FX_SERIES
-    _WORKER_PREFETCHED_DATA = prefetched_data
-    _WORKER_PREFETCHED_METRICS = prefetched_metrics
-    _WORKER_PREFETCHED_UNIVERSE = prefetched_universe
-    _WORKER_TRADING_CALENDAR = trading_calendar
-    _WORKER_PREFETCHED_FX_SERIES = fx_series
 
 
 def _filter_trading_days(
@@ -136,7 +123,6 @@ def _build_prefetched_metric_cache(
     if not period_pool or not type_pool:
         return {}
 
-    from strategies.rsi.backtest import process_ticker_data_rsi
     from utils.indicators import calculate_ma_score
     from utils.moving_averages import calculate_moving_average
 
@@ -154,10 +140,6 @@ def _build_prefetched_metric_cache(
             "ma": {},
             "ma_score": {},
         }
-
-        rsi_payload = process_ticker_data_rsi(close_series)
-        if rsi_payload:
-            entry["rsi_score"] = rsi_payload.get("rsi_score")
 
         for ma_type in type_pool:
             for period in period_pool:
@@ -227,191 +209,6 @@ def _resolve_month_configs(account_id: str = None) -> list[dict[str, Any]]:
     return []
 
 
-def _safe_float(value: Any, default: float = float("nan")) -> float:
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return default
-    if not math.isfinite(num):
-        return default
-    return num
-
-
-def _round_float(value: Any, *, digits: int = 6) -> float:
-    """Round float-like values with a consistent precision for serialization."""
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return float("nan")
-    if not math.isfinite(num):
-        return float("nan")
-    return float(round(num, digits))
-
-
-def _round_float_places(value: Any, digits: int) -> float:
-    """Round float with explicit digits, preserving float semantics."""
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return float("nan")
-    if not math.isfinite(num):
-        return float("nan")
-    return float(round(num, digits))
-
-
-def _round_up_float_places(value: Any, digits: int) -> float:
-    """Round float up (ceiling) to the specified number of decimal places."""
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return float("nan")
-    if not math.isfinite(num):
-        return float("nan")
-    if digits <= 0:
-        return float(math.ceil(num))
-    factor = 10**digits
-    return float(math.ceil(num * factor) / factor)
-
-
-def _format_table_float(value: Any, *, digits: int = 2) -> str:
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return "-"
-    if not math.isfinite(num):
-        return "-"
-    fmt = f"{{:.{digits}f}}"
-    return fmt.format(num)
-
-
-def _format_threshold(value: Any) -> str:
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return "-"
-    if not math.isfinite(num):
-        return "-"
-    if abs(num - round(num)) < 1e-9:
-        return f"{int(round(num))}"
-    return f"{num:.1f}"
-
-
-def _render_tuning_table(
-    rows: list[dict[str, Any]],
-    *,
-    include_samples: bool = False,
-    period_str: str | None = None,
-) -> list[str]:
-    from utils.report import render_table_eaw
-
-    headers = [
-        "MA개월",
-        "MA타입",
-        "TOPN",
-        "교체점수",
-        "손절",
-        "과매수",
-        "쿨다운",
-        "CAGR(%)",
-        "MDD(%)",
-    ]
-    aligns = [
-        "right",
-        "center",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-    ]
-
-    if period_str:
-        headers.append(f"{period_str}(%)")
-    else:
-        headers.append("기간수익률(%)")
-    aligns.append("right")
-
-    headers.extend(["Sharpe", "SDR(Sharpe/MDD)", "Trades(거래 수)"])
-    aligns.extend(["right", "right", "right"])
-
-    if include_samples:
-        headers.append("Samples")
-        aligns.append("right")
-
-    table_rows = []
-    for row in rows[:MAX_TABLE_ROWS]:
-        ma_val = row.get("ma_month") or row.get("ma_days")
-        ma_type_val = row.get("ma_type", "SMA")
-        topn_val = row.get("portfolio_topn")
-        threshold_val = row.get("replace_threshold")
-        stop_loss_val = row.get("stop_loss_pct")
-        stop_loss_num = _safe_float(stop_loss_val, float("nan"))
-        if math.isfinite(stop_loss_num):
-            stop_loss_display = f"{int(stop_loss_num)}%"
-        else:
-            stop_loss_display = "-"
-
-            stop_loss_display = "-"
-
-        rsi_threshold_val = row.get("rsi_sell_threshold")
-        cooldown_val = row.get("cooldown_days")
-
-        row_data = [
-            str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
-            str(ma_type_val) if ma_type_val else "SMA",
-            str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-            str(int(threshold_val))
-            if isinstance(threshold_val, (int, float)) and math.isfinite(float(threshold_val))
-            else "-",
-            stop_loss_display,
-            str(int(rsi_threshold_val))
-            if isinstance(rsi_threshold_val, (int, float)) and math.isfinite(float(rsi_threshold_val))
-            else "-",
-            str(int(cooldown_val))
-            if isinstance(cooldown_val, (int, float)) and math.isfinite(float(cooldown_val))
-            else "-",
-            _format_table_float(row.get("cagr")),
-            _format_table_float(row.get("mdd")),
-            _format_table_float(row.get("period_return")),
-            _format_table_float(row.get("sharpe")),
-            _format_table_float(row.get("sharpe_to_mdd"), digits=3),
-            str(int(row.get("turnover", 0))),
-        ]
-
-        if include_samples:
-            samples_val = row.get("samples")
-            if isinstance(samples_val, (int, float)) and math.isfinite(float(samples_val)):
-                row_data.append(str(int(samples_val)))
-            else:
-                row_data.append("-")
-
-        table_rows.append(row_data)
-
-    lines = render_table_eaw(headers, table_rows, aligns)
-
-    if len(rows) > MAX_TABLE_ROWS:
-        lines.append(f"... (총 {len(rows)}개 중 상위 {MAX_TABLE_ROWS}개 표시)")
-
-    return lines
-
-
-def _save_dataframe_csv(df: DataFrame, path: Path) -> None:
-    df_copy = df.copy()
-    df_copy.index = df_copy.index.astype(str)
-    df_copy.to_csv(path)
-
-
-def _export_prefetched_data(debug_dir: Path, prefetched_data: Mapping[str, DataFrame]) -> None:
-    prefetch_dir = debug_dir / "prefetched_data"
-    prefetch_dir.mkdir(parents=True, exist_ok=True)
-    for ticker, frame in prefetched_data.items():
-        if not isinstance(frame, pd.DataFrame) or frame.empty:
-            continue
-        _save_dataframe_csv(frame, prefetch_dir / f"{ticker}.csv")
-
-
 def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> None:
     """Persist the final tuning result back into the account strategy file."""
 
@@ -447,14 +244,10 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     if isinstance(legacy_tuning, dict):
         strategy_data.update(legacy_tuning)
 
+    # Legacy cleanup
+
     integer_keys = {
-        "REPLACE_SCORE_THRESHOLD",
-        "STOP_LOSS_PCT",
-        "COOLDOWN_DAYS",
-        "PORTFOLIO_TOPN",
-        "OVERBOUGHT_SELL_THRESHOLD",
-        "PORTFOLIO_TOPN",
-        "OVERBOUGHT_SELL_THRESHOLD",
+        "BUCKET_TOPN",
         "MA_MONTH",
     }
 
@@ -488,14 +281,9 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "BACKTESTED_DATE",
         "CAGR",
         "MDD",
-        "PORTFOLIO_TOPN",
+        "BUCKET_TOPN",
         "MA_MONTH",
         "MA_TYPE",
-        "REPLACE_SCORE_THRESHOLD",
-        "STOP_LOSS_PCT",
-        "OVERBOUGHT_SELL_THRESHOLD",
-        "COOLDOWN_DAYS",
-        "OPTIMIZATION_METRIC",
     ]
 
     ordered_strategy = {}
@@ -538,93 +326,6 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
                 pass
 
 
-def _extract_summary(result) -> dict[str, Any]:
-    summary = result.summary or {}
-    return {
-        "cagr": float(summary.get("cagr") or 0.0),
-        "mdd": float(summary.get("mdd") or 0.0),
-        "sharpe": float(summary.get("sharpe") or 0.0),
-        "sharpe_to_mdd": float(summary.get("sharpe_to_mdd") or 0.0),
-        "period_return": float(summary.get("period_return") or 0.0),
-        "start_date": result.start_date.strftime("%Y-%m-%d"),
-        "end_date": result.end_date.strftime("%Y-%m-%d"),
-        "excluded": list(result.missing_tickers),
-        "turnover": int(summary.get("turnover") or 0),
-    }
-
-
-def _export_combo_debug(
-    combo_dir: Path,
-    *,
-    recorded_metrics: dict[str, Any],
-    result_prefetch,
-    result_live,
-) -> dict[str, Any]:
-    combo_dir.mkdir(parents=True, exist_ok=True)
-
-    combo_dir.joinpath("recorded_metrics.json").write_text(
-        json.dumps(recorded_metrics, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-    metrics_prefetch = _extract_summary(result_prefetch)
-    metrics_live = _extract_summary(result_live)
-
-    combo_dir.joinpath("metrics_prefetch.json").write_text(
-        json.dumps(metrics_prefetch, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    combo_dir.joinpath("metrics_live.json").write_text(
-        json.dumps(metrics_live, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-    diff_payload = {
-        "delta_cagr": metrics_live["cagr"] - recorded_metrics.get("cagr", 0.0)
-        if recorded_metrics.get("cagr") is not None
-        else None,
-        "delta_mdd": metrics_live["mdd"] - recorded_metrics.get("mdd", 0.0)
-        if recorded_metrics.get("mdd") is not None
-        else None,
-        "delta_period_return": (
-            metrics_live["period_return"] - recorded_metrics.get("period_return", 0.0)
-            if recorded_metrics.get("period_return") is not None
-            else None
-        ),
-    }
-    combo_dir.joinpath("metrics_diff.json").write_text(
-        json.dumps(diff_payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-    _save_dataframe_csv(result_prefetch.portfolio_timeseries, combo_dir / "portfolio_prefetch.csv")
-    _save_dataframe_csv(result_live.portfolio_timeseries, combo_dir / "portfolio_live.csv")
-
-    prefetch_ticker_dir = combo_dir / "ticker_prefetch"
-    live_ticker_dir = combo_dir / "ticker_live"
-    prefetch_ticker_dir.mkdir(exist_ok=True)
-    live_ticker_dir.mkdir(exist_ok=True)
-
-    for ticker, frame in result_prefetch.ticker_timeseries.items():
-        if isinstance(frame, pd.DataFrame) and not frame.empty:
-            _save_dataframe_csv(frame, prefetch_ticker_dir / f"{ticker}.csv")
-
-    for ticker, frame in result_live.ticker_timeseries.items():
-        if isinstance(frame, pd.DataFrame) and not frame.empty:
-            _save_dataframe_csv(frame, live_ticker_dir / f"{ticker}.csv")
-
-    combo_dir.joinpath("ticker_meta_prefetch.json").write_text(
-        json.dumps(result_prefetch.ticker_meta, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    combo_dir.joinpath("ticker_meta_live.json").write_text(
-        json.dumps(result_live.ticker_meta, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-    return {
-        "metrics_prefetch": metrics_prefetch,
-        "metrics_live": metrics_live,
-        "diff": diff_payload,
-    }
-
-
 def _export_debug_month(
     debug_dir: Path,
     *,
@@ -661,10 +362,7 @@ def _export_debug_month(
             ma_month = tuning.get("MA_MONTH")
             if ma_month is None:
                 continue
-            topn = int(tuning.get("PORTFOLIO_TOPN"))
-            threshold = float(tuning.get("REPLACE_SCORE_THRESHOLD"))
-            stop_loss = tuning.get("STOP_LOSS_PCT")
-            stop_loss_value = float(stop_loss) if stop_loss is not None else None
+            topn = int(tuning.get("BUCKET_TOPN"))
         except (TypeError, ValueError):
             continue
 
@@ -676,11 +374,9 @@ def _export_debug_month(
 
         strategy_rules = StrategyRules.from_values(
             ma_month=int(ma_month),
-            portfolio_topn=topn,
-            replace_threshold=threshold,
-            stop_loss_pct=stop_loss_value,
+            bucket_topn=topn,
+            ma_type=tuning.get("MA_TYPE", "SMA"),
         )
-
         result_prefetch = run_account_backtest(
             account_id,
             quiet=True,
@@ -700,8 +396,7 @@ def _export_debug_month(
             trading_calendar=trading_calendar,
         )
 
-        stop_loss_dir_part = f"SL{stop_loss_value:.2f}" if stop_loss_value is not None else "SLauto"
-        combo_dir = month_dir / f"combo_{idx:02d}_MA{ma_month}_TOPN{topn}_{stop_loss_dir_part}_TH{threshold:.3f}"
+        combo_dir = month_dir / f"combo_{idx:02d}_MA{ma_month}_TOPN{topn}"
         combo_metrics = _export_combo_debug(
             combo_dir,
             recorded_metrics=recorded_metrics,
@@ -717,8 +412,6 @@ def _export_debug_month(
                 "backtest_start_date": backtest_start_date,
                 "ma_days": ma_month,
                 "topn": topn,
-                "stop_loss_pct": stop_loss_value,
-                "threshold": threshold,
                 "recorded_cagr": recorded_metrics["cagr"],
                 "prefetch_cagr": metrics_prefetch["cagr"],
                 "live_cagr": metrics_live["cagr"],
@@ -744,147 +437,6 @@ def _export_debug_month(
     return summary_rows
 
 
-def _evaluate_single_combo(
-    payload: tuple[
-        str,
-        tuple[str, str],
-        int,
-        int,
-        float,
-        float,
-        int,
-        int,
-        str,
-        tuple[str, ...],
-        bool,
-    ],
-) -> tuple[str, Any, list[str]]:
-    (
-        account_norm,
-        date_range,
-        ma_int,
-        topn_int,
-        stop_loss_float,
-        threshold_float,
-        rsi_int,
-        cooldown_int,
-        ma_type_str,
-        excluded_tickers,
-        is_ma_month,
-    ) = payload
-
-    # Worker 글로벌 변수에서 데이터 가져오기 (프로세스당 한 번만 pickle됨)
-    data_source = _WORKER_PREFETCHED_DATA
-    metrics_source = _WORKER_PREFETCHED_METRICS
-    universe_source = _WORKER_PREFETCHED_UNIVERSE
-    calendar_source = _WORKER_TRADING_CALENDAR
-    fx_series_source = _WORKER_PREFETCHED_FX_SERIES
-
-    try:
-        if is_ma_month:
-            override_rules = StrategyRules.from_values(
-                ma_month=int(ma_int),
-                portfolio_topn=int(topn_int),
-                replace_threshold=float(threshold_float),
-                ma_type=str(ma_type_str),
-                stop_loss_pct=float(stop_loss_float),
-            )
-        else:
-            override_rules = StrategyRules.from_values(
-                ma_days=int(ma_int),
-                portfolio_topn=int(topn_int),
-                replace_threshold=float(threshold_float),
-                ma_type=str(ma_type_str),
-                stop_loss_pct=float(stop_loss_float),
-            )
-    except ValueError as exc:
-        return (
-            "failure",
-            {
-                "ma_month" if is_ma_month else "ma_days": ma_int,
-                "portfolio_topn": topn_int,
-                "stop_loss_pct": stop_loss_float,
-                "replace_threshold": threshold_float,
-                "rsi_sell_threshold": rsi_int,
-                "ma_type": ma_type_str,
-                "error": str(exc),
-            },
-            [],
-        )
-
-    strategy_overrides: dict[str, Any] = {
-        "OVERBOUGHT_SELL_THRESHOLD": rsi_int,
-        "COOLDOWN_DAYS": cooldown_int,
-    }
-
-    try:
-        bt_result = run_account_backtest(
-            account_norm,
-            quiet=True,
-            override_settings={
-                "start_date": date_range[0],
-                "end_date": date_range[1],
-                "strategy_overrides": strategy_overrides,
-            },
-            prefetched_data=data_source,
-            strategy_override=override_rules,
-            excluded_tickers=set(excluded_tickers) if excluded_tickers else None,
-            prefetched_etf_universe=universe_source,
-            prefetched_metrics=metrics_source,
-            trading_calendar=calendar_source,
-            prefetched_fx_series=fx_series_source,
-        )
-    except Exception as exc:
-        logger = get_app_logger()
-        logger.warning(
-            "[튜닝] 조합 실행 실패 (%s) MA=%s TOPN=%s STOP=%.2f RSI=%d score=%.2f TS=%.2f error=%s",
-            str(date_range),
-            ma_int,
-            topn_int,
-            stop_loss_float,
-            rsi_int,
-            rsi_int,
-            exc,
-        )
-        return (
-            "failure",
-            {
-                "ma_month" if is_ma_month else "ma_days": ma_int,
-                "portfolio_topn": topn_int,
-                "stop_loss_pct": stop_loss_float,
-                "replace_threshold": threshold_float,
-                "rsi_sell_threshold": rsi_int,
-                "error": str(exc),
-            },
-            [],
-        )
-
-    summary = bt_result.summary or {}
-    final_value_local = _safe_float(summary.get("final_value"), 0.0)
-    final_value_krw = _safe_float(summary.get("final_value_krw"), final_value_local)
-
-    entry = {
-        "ma_month" if is_ma_month else "ma_days": ma_int,
-        "portfolio_topn": topn_int,
-        "replace_threshold": float(threshold_float),
-        "stop_loss_pct": float(stop_loss_float),
-        "rsi_sell_threshold": rsi_int,
-        "cooldown_days": cooldown_int,
-        "ma_type": ma_type_str,
-        "cagr": _round_float(_safe_float(summary.get("cagr"), 0.0)),
-        "mdd": _round_float(_safe_float(summary.get("mdd"), 0.0)),
-        "sharpe": _round_float(_safe_float(summary.get("sharpe"), 0.0)),
-        "sharpe_to_mdd": _round_float(_safe_float(summary.get("sharpe_to_mdd"), 0.0)),
-        "period_return": _round_float(_safe_float(summary.get("period_return"), 0.0)),
-        "final_value_local": final_value_local,
-        "final_value": final_value_krw,
-        "turnover": int(summary.get("turnover") or 0),
-    }
-
-    missing = getattr(bt_result, "missing_tickers", []) or []
-    return ("success", entry, list(missing))
-
-
 def _execute_tuning(
     account_norm: str,
     *,
@@ -904,22 +456,15 @@ def _execute_tuning(
     ma_candidates = list(search_space.get("MA_MONTH", []))
     is_ma_month = True
 
-    topn_candidates = list(search_space.get("PORTFOLIO_TOPN", []))
-    replace_candidates = list(search_space.get("REPLACE_SCORE_THRESHOLD", []))
-    stop_loss_candidates = list(search_space.get("STOP_LOSS_PCT", []))
-    rsi_candidates = list(search_space.get("OVERBOUGHT_SELL_THRESHOLD", []))
-    cooldown_candidates = list(search_space.get("COOLDOWN_DAYS", []))
+    topn_candidates = list(search_space.get("BUCKET_TOPN", []))
     ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
+    rebalance_mode_candidates = list(search_space.get("REBALANCE_MODE", []))
 
-    if (
-        not ma_candidates
-        or not topn_candidates
-        or not replace_candidates
-        or not stop_loss_candidates
-        or not rsi_candidates
-        or not cooldown_candidates
-        or not ma_type_candidates
-    ):
+    if not rebalance_mode_candidates:
+        current_rules = get_strategy_rules(account_norm)
+        rebalance_mode_candidates = [current_rules.rebalance_mode]
+
+    if not ma_candidates or not topn_candidates or not ma_type_candidates or not rebalance_mode_candidates:
         logger.warning(
             "[튜닝] %s (%s 시작) 유효한 탐색 공간이 없습니다.",
             account_norm.upper(),
@@ -927,15 +472,8 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, float, float, int, int, str]] = [
-        (ma, topn, replace, stop_loss, rsi, cooldown, ma_type)
-        for ma in ma_candidates
-        for topn in topn_candidates
-        for replace in replace_candidates
-        for stop_loss in stop_loss_candidates
-        for rsi in rsi_candidates
-        for cooldown in cooldown_candidates
-        for ma_type in ma_type_candidates
+    combos: list[tuple[int, int, str]] = [
+        (ma, topn, ma_type) for ma in ma_candidates for topn in topn_candidates for ma_type in ma_type_candidates
     ]
 
     if not combos:
@@ -993,6 +531,8 @@ def _execute_tuning(
         except Exception as exc:
             logger.warning("[튜닝] %s 환율 데이터 로드 실패, fallback 사용: %s", account_norm.upper(), exc)
 
+    current_rules = get_strategy_rules(account_norm)
+
     # 각 payload에는 파라미터만 포함 (데이터는 worker 초기화 시 한 번만 전달)
     payloads = [
         (
@@ -1000,15 +540,11 @@ def _execute_tuning(
             date_range,
             int(ma),
             int(topn),
-            float(stop_loss),
-            float(replace),
-            int(rsi),
-            int(cooldown),
             str(ma_type),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )
-        for ma, topn, replace, stop_loss, rsi, cooldown, ma_type in combos
+        for ma, topn, ma_type in combos
     ]
 
     logger.info(
@@ -1021,18 +557,14 @@ def _execute_tuning(
 
     if workers <= 1:
         # 단일 프로세스: 글로벌 변수 직접 설정
-        global \
-            _WORKER_PREFETCHED_DATA, \
-            _WORKER_PREFETCHED_METRICS, \
-            _WORKER_PREFETCHED_UNIVERSE, \
-            _WORKER_TRADING_CALENDAR, \
-            _WORKER_PREFETCHED_FX_SERIES
-        _WORKER_PREFETCHED_DATA = prefetched_data
-        _WORKER_PREFETCHED_METRICS = prefetched_metrics
-        _WORKER_PREFETCHED_UNIVERSE = prefetched_etf_universe
-        _WORKER_TRADING_CALENDAR = filtered_calendar
-        _WORKER_PREFETCHED_FX_SERIES = fx_series
-        iterator = map(_evaluate_single_combo, payloads)
+        init_worker_prefetch(
+            prefetched_data,
+            prefetched_metrics,
+            prefetched_etf_universe,
+            filtered_calendar,
+            fx_series,
+        )
+        iterator = map(evaluate_single_combo, payloads)
     else:
         # 멀티 프로세스: worker 초기화 시 데이터 한 번만 전달
         init_args = (
@@ -1045,8 +577,8 @@ def _execute_tuning(
         # chunksize를 적절히 설정: IPC 오버헤드와 로드 밸런싱 균형
         # 너무 크면 느린 조합으로 인한 대기 발생, 너무 작으면 IPC 오버헤드 증가
         chunksize = max(10, len(payloads) // (workers * 10)) if len(payloads) > workers else 10
-        executor = ProcessPoolExecutor(max_workers=workers, initializer=_init_worker_prefetch, initargs=init_args)
-        iterator = executor.map(_evaluate_single_combo, payloads, chunksize=chunksize)
+        executor = ProcessPoolExecutor(max_workers=workers, initializer=init_worker_prefetch, initargs=init_args)
+        iterator = executor.map(evaluate_single_combo, payloads, chunksize=chunksize)
 
     try:
         for idx, result in enumerate(iterator, 1):
@@ -1142,13 +674,8 @@ def _execute_tuning(
                 "tuning": {
                     "MA_MONTH": int(item.get("ma_month", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
-                    "PORTFOLIO_TOPN": int(item.get("portfolio_topn", 0)),
-                    "REPLACE_SCORE_THRESHOLD": _round_up_float_places(item.get("replace_threshold", 0.0), 1),
-                    "STOP_LOSS_PCT": _round_up_float_places(item.get("stop_loss_pct"), 1)
-                    if item.get("stop_loss_pct") is not None
-                    else None,
-                    "OVERBOUGHT_SELL_THRESHOLD": int(item.get("rsi_sell_threshold", 10)),
-                    "COOLDOWN_DAYS": int(item.get("cooldown_days", 2)),
+                    "BUCKET_TOPN": int(item.get("bucket_topn", 0)),
+                    "REBALANCE_MODE": str(item.get("rebalance_mode", "MONTHLY")),
                 },
             }
         )
@@ -1168,11 +695,7 @@ def _build_run_entry(
 ) -> dict[str, Any]:
     param_fields = {
         "MA_MONTH": ("ma_month", True),
-        "PORTFOLIO_TOPN": ("portfolio_topn", True),
-        "REPLACE_SCORE_THRESHOLD": ("replace_threshold", False),
-        "STOP_LOSS_PCT": ("stop_loss_pct", False),
-        "OVERBOUGHT_SELL_THRESHOLD": ("rsi_sell_threshold", True),
-        "COOLDOWN_DAYS": ("cooldown_days", True),
+        "BUCKET_TOPN": ("bucket_topn", True),
     }
 
     entry: dict[str, Any] = {
@@ -1241,28 +764,17 @@ def _build_run_entry(
         tuning_snapshot: dict[str, Any] = {}
         field_key_pairs = [
             ("MA_MONTH", "ma_month"),
-            ("PORTFOLIO_TOPN", "portfolio_topn"),
-            ("REPLACE_SCORE_THRESHOLD", "replace_threshold"),
-            ("STOP_LOSS_PCT", "stop_loss_pct"),
-            ("OVERBOUGHT_SELL_THRESHOLD", "rsi_sell_threshold"),
-            ("COOLDOWN_DAYS", "cooldown_days"),
+            ("BUCKET_TOPN", "bucket_topn"),
         ]
 
         for field, key in field_key_pairs:
             value = best.get(key)
             if value is None:
                 continue
-            if field == "REPLACE_SCORE_THRESHOLD":
-                rounded_up = _round_up_float_places(value, 1)
-                if math.isfinite(rounded_up):
-                    tuning_snapshot[field] = rounded_up
-            elif field == "STOP_LOSS_PCT":
-                rounded_up = _round_up_float_places(value, 1)
-                if math.isfinite(rounded_up):
-                    tuning_snapshot[field] = rounded_up
-                converted = _to_int(value)
-                if converted is not None:
-                    tuning_snapshot[field] = converted
+
+            converted = _to_int(value)
+            if converted is not None:
+                tuning_snapshot[field] = converted
 
         raw_data_payload.append(
             {
@@ -1278,9 +790,9 @@ def _build_run_entry(
         )
         ma_type_val = best.get("ma_type")
         if ma_type_val:
-            weight_for_type = weight if weight > 0 else 1.0
-            key = str(ma_type_val)
-            ma_type_weights[key] = ma_type_weights.get(key, 0.0) + weight_for_type
+            weight_for_cat = weight if weight > 0 else 1.0
+            type_key = str(ma_type_val)
+            ma_type_weights[type_key] = ma_type_weights.get(type_key, 0.0) + weight_for_cat
 
     if weighted_cagr_weight > 0:
         entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
@@ -1352,10 +864,7 @@ def _ensure_entry_schema(entry: Any) -> dict[str, Any]:
 
     for field in (
         "MA_MONTH",
-        "PORTFOLIO_TOPN",
-        "REPLACE_SCORE_THRESHOLD",
-        "STOP_LOSS_PCT",
-        "COOLDOWN_DAYS",
+        "BUCKET_TOPN",
         "MA_TYPE",
     ):
         normalized.pop(field, None)
@@ -1483,29 +992,13 @@ def _compose_tuning_report(
         if search_space:
             ma_month_range = search_space.get("MA_MONTH", [])
             ma_type_range = search_space.get("MA_TYPE", [])
-            topn_range = search_space.get("PORTFOLIO_TOPN", [])
-            threshold_range = search_space.get("REPLACE_SCORE_THRESHOLD", [])
-            stop_loss_range = search_space.get("STOP_LOSS_PCT", [])
-            rsi_range = search_space.get("OVERBOUGHT_SELL_THRESHOLD", [])
-            cooldown_range = search_space.get("COOLDOWN_DAYS", [])
-
+            topn_range = search_space.get("BUCKET_TOPN", [])
             # MA_TYPE이 있으면 포함해서 표시
-            if ma_type_range and len(ma_type_range) > 1:
-                lines.append(
-                    f"| 탐색 공간: MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
-                    f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
-                    f"× RSI {len(rsi_range)}개 "
-                    f"× COOLDOWN {len(cooldown_range)}개 "
-                    f"= {tuning_metadata.get('combo_count', 0)}개 조합"
-                )
-            else:
-                lines.append(
-                    f"| 탐색 공간: MA {len(ma_month_range)}개 × TOPN {len(topn_range)}개 "
-                    f"× 교체점수 {len(threshold_range)}개 × 손절 {len(stop_loss_range)}개 "
-                    f"× RSI {len(rsi_range)}개 "
-                    f"× COOLDOWN {len(cooldown_range)}개 "
-                    f"= {tuning_metadata.get('combo_count', 0)}개 조합"
-                )
+            lines.append(
+                f"| 탐색 공간: MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
+                f"× 리밸런스 {len(search_space.get('REBALANCE_MODE', []))}개 "
+                f"= {tuning_metadata.get('combo_count', 0)}개 조합"
+            )
             # 각 파라미터 범위 표시
             if ma_month_range:
                 ma_min, ma_max = min(ma_month_range), max(ma_month_range)
@@ -1514,20 +1007,10 @@ def _compose_tuning_report(
                 lines.append(f"|   MA_TYPE: {', '.join(ma_type_range)}")
             if topn_range:
                 topn_min, topn_max = min(topn_range), max(topn_range)
-                lines.append(f"|   PORTFOLIO_TOPN: {topn_min}~{topn_max}")
-            if threshold_range:
-                th_min, th_max = min(threshold_range), max(threshold_range)
-                lines.append(f"|   REPLACE_SCORE_THRESHOLD: {th_min}~{th_max}")
-            if stop_loss_range:
-                sl_min, sl_max = min(stop_loss_range), max(stop_loss_range)
-                lines.append(f"|   STOP_LOSS_PCT: {sl_min}~{sl_max}")
-            if rsi_range:
-                rsi_min, rsi_max = min(rsi_range), max(rsi_range)
-                lines.append(f"|   OVERBOUGHT_SELL_THRESHOLD: {rsi_min}~{rsi_max}")
-
-            if cooldown_range:
-                cd_min, cd_max = min(cooldown_range), max(cooldown_range)
-                lines.append(f"|   COOLDOWN_DAYS: {cd_min}~{cd_max}")
+                lines.append(f"|   BUCKET_TOPN: {topn_min}~{topn_max}")
+            rebalance_range = search_space.get("REBALANCE_MODE", [])
+            if rebalance_range:
+                lines.append(f"|   REBALANCE_MODE: {', '.join(rebalance_range)}")
 
         # 종목 수
         ticker_count = tuning_metadata.get("ticker_count", 0)
@@ -1686,13 +1169,8 @@ def _compose_tuning_report(
             tuning = entry.get("tuning") or {}
             ma_val = tuning.get("MA_MONTH")
             ma_type_val = tuning.get("MA_TYPE", "SMA")
-            topn_val = tuning.get("PORTFOLIO_TOPN")
-            threshold_val = tuning.get("REPLACE_SCORE_THRESHOLD")
-            stop_loss_val = entry.get("stop_loss_pct")
-            if stop_loss_val is None:
-                stop_loss_val = tuning.get("STOP_LOSS_PCT")
-            rsi_val = tuning.get("OVERBOUGHT_SELL_THRESHOLD")
-            cooldown_val = tuning.get("COOLDOWN_DAYS")
+            topn_val = tuning.get("BUCKET_TOPN")
+            rebalance_val = tuning.get("REBALANCE_MODE", "MONTHLY")
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -1704,11 +1182,8 @@ def _compose_tuning_report(
                 {
                     "ma_days": ma_val,
                     "ma_type": ma_type_val,
-                    "portfolio_topn": topn_val,
-                    "replace_threshold": threshold_val,
-                    "stop_loss_pct": stop_loss_val,
-                    "rsi_sell_threshold": rsi_val,
-                    "cooldown_days": cooldown_val,
+                    "bucket_topn": topn_val,
+                    "rebalance_mode": rebalance_val,
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
@@ -1828,28 +1303,12 @@ def run_account_tuning(
 
         ma_values = _normalize_tuning_values(config.get("MA_MONTH"), dtype=int, fallback=fallback_ma)
 
-    topn_values = _normalize_tuning_values(config.get("PORTFOLIO_TOPN"), dtype=int, fallback=base_rules.portfolio_topn)
-    replace_values = _normalize_tuning_values(
-        config.get("REPLACE_SCORE_THRESHOLD"),
-        dtype=float,
-        fallback=base_rules.replace_threshold,
-    )
-    stop_loss_fallback = base_rules.stop_loss_pct if base_rules.stop_loss_pct is not None else base_rules.portfolio_topn
-    stop_loss_values = _normalize_tuning_values(
-        config.get("STOP_LOSS_PCT"),
-        dtype=float,
-        fallback=stop_loss_fallback,
-    )
-    rsi_sell_values = _normalize_tuning_values(
-        config.get("OVERBOUGHT_SELL_THRESHOLD"),
-        dtype=int,
-        fallback=10,
-    )
-    cooldown_values = _normalize_tuning_values(
-        config.get("COOLDOWN_DAYS"),
-        dtype=int,
-        fallback=2,
-    )
+    topn_values = _normalize_tuning_values(config.get("BUCKET_TOPN"), dtype=int, fallback=base_rules.bucket_topn)
+
+    # MA_TYPE 처리: 문자열 리스트로 받음
+    ma_type_raw = config.get("MA_TYPE")
+    if ma_type_raw is None:
+        ma_type_values = [base_rules.ma_type]
 
     # MA_TYPE 처리: 문자열 리스트로 받음
     ma_type_raw = config.get("MA_TYPE")
@@ -1863,15 +1322,9 @@ def run_account_tuning(
     if not ma_type_values:
         ma_type_values = [base_rules.ma_type]
 
-    if (
-        (not ma_values and not ma_month_values)
-        or not topn_values
-        or not replace_values
-        or not stop_loss_values
-        or not rsi_sell_values
-        or not cooldown_values
-        or not ma_type_values
-    ):
+    rebalance_mode_values = [REBALANCE_MODE]
+
+    if (not ma_values and not ma_month_values) or not topn_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
@@ -1902,55 +1355,37 @@ def run_account_tuning(
     combo_count = (
         (len(ma_month_values) if ma_month_values else len(ma_values))
         * len(topn_values)
-        * len(replace_values)
-        * len(stop_loss_values)
-        * len(rsi_sell_values)
-        * len(cooldown_values)
         * len(ma_type_values)
+        * len(rebalance_mode_values)
     )
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
         return None
 
-    # OPTIMIZATION_METRIC 필수 확인
-    optimization_metric = config.get("OPTIMIZATION_METRIC")
-    if not optimization_metric:
-        logger.error(
-            "[튜닝] '%s' 계정에 OPTIMIZATION_METRIC 설정이 없습니다. config.py에 추가해주세요.",
-            account_norm.upper(),
-        )
-        return None
+    # OPTIMIZATION_METRIC은 config.py의 전역 설정을 사용합니다.
+    optimization_metric = OPTIMIZATION_METRIC
 
     search_space = {
         "MA_MONTH": ma_month_values or ma_values,
-        "PORTFOLIO_TOPN": topn_values,
-        "REPLACE_SCORE_THRESHOLD": replace_values,
-        "STOP_LOSS_PCT": stop_loss_values,
-        "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
-        "COOLDOWN_DAYS": cooldown_values,
+        "BUCKET_TOPN": topn_values,
         "MA_TYPE": ma_type_values,
+        "REBALANCE_MODE": rebalance_mode_values,
         "OPTIMIZATION_METRIC": [optimization_metric],
     }
 
     ma_count = len(ma_month_values) if ma_month_values else len(ma_values)
     topn_count = len(topn_values)
-    replace_count = len(replace_values)
-    stop_loss_count = len(stop_loss_values)  # Defined for logger.info
-    rsi_sell_count = len(rsi_sell_values)  # Defined for logger.info
-    cooldown_count = len(cooldown_values)
-    ma_type_count = len(ma_type_values)  # Defined for logger.info
+    ma_type_count = len(ma_type_values)
+    rebalance_count = len(rebalance_mode_values)
 
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × 교체점수 %d개 × 손절 %d개 "
-        "× RSI %d개 × COOLDOWN %d개 × MA_TYPE %d개 = %d개 조합",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 리밸런스 %d개 = %d개 조합 (최적화 지표: %s)",
         ma_count,
         topn_count,
-        replace_count,
-        stop_loss_count,
-        rsi_sell_count,
-        cooldown_count,
         ma_type_count,
+        rebalance_count,
         combo_count,
+        optimization_metric,
     )
 
     try:
@@ -2102,11 +1537,8 @@ def run_account_tuning(
         "search_space": {
             "MA_MONTH": list(ma_month_values) if ma_month_values else list(ma_values),
             "MA_TYPE": list(ma_type_values),
-            "PORTFOLIO_TOPN": list(topn_values),
-            "REPLACE_SCORE_THRESHOLD": list(replace_values),
-            "STOP_LOSS_PCT": list(stop_loss_values),
-            "OVERBOUGHT_SELL_THRESHOLD": list(rsi_sell_values),
-            "COOLDOWN_DAYS": list(cooldown_values),
+            "BUCKET_TOPN": list(topn_values),
+            "REBALANCE_MODE": list(rebalance_mode_values),
             "OPTIMIZATION_METRIC": optimization_metric,
         },
         "data_period": {
@@ -2228,11 +1660,8 @@ def run_account_tuning(
                         "tuning": {
                             "MA_MONTH": int(entry.get("ma_month")) if entry.get("ma_month") is not None else None,
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
-                            "PORTFOLIO_TOPN": int(entry.get("portfolio_topn", 0)),
-                            "REPLACE_SCORE_THRESHOLD": _round_up_float_places(entry.get("replace_threshold", 0.0), 1),
-                            "STOP_LOSS_PCT": _round_up_float_places(entry.get("stop_loss_pct", 0.0), 1),
-                            "OVERBOUGHT_SELL_THRESHOLD": int(entry.get("rsi_sell_threshold", 10)),
-                            "COOLDOWN_DAYS": int(entry.get("cooldown_days", 2)),
+                            "BUCKET_TOPN": int(entry.get("bucket_topn", 0)),
+                            "REBALANCE_MODE": str(entry.get("rebalance_mode", "MONTHLY")),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)
@@ -2345,20 +1774,17 @@ def run_account_tuning(
     else:
         optimization_metric = str(optimization_metric_raw).upper()
 
-    for item in results_per_month:
-        best = item.get("best", {})
+    if results_per_month:
+        item = results_per_month[-1]
+        best = item.get("best") or {}
         logger.info(
-            "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): MA=%d / TOPN=%d / TH=%.3f / RSI=%d / "
-            "COOLDOWN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
+            "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): MA=%d / TOPN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
             account_norm.upper(),
             item.get("backtest_start_date"),
             optimization_metric,
-            best.get("ma_days", 0),
-            best.get("portfolio_topn", 0),
-            best.get("replace_threshold", 0.0),
-            best.get("rsi_sell_threshold", 10),
-            best.get("cooldown_days", 2),
-            best.get("cagr_pct", 0.0),
+            best.get("ma_month", 0),
+            best.get("bucket_topn", 0),
+            best.get("cagr", 0.0),
             best.get("sharpe", 0.0),
             best.get("sharpe_to_mdd", 0.0),
         )
@@ -2379,9 +1805,7 @@ def run_account_tuning(
             "combo_count": combo_count,
             "search_space": {
                 "MA_MONTH": ma_values,
-                "PORTFOLIO_TOPN": topn_values,
-                "REPLACE_SCORE_THRESHOLD": replace_values,
-                "OVERBOUGHT_SELL_THRESHOLD": rsi_sell_values,
+                "BUCKET_TOPN": topn_values,
             },
             "month_configs": debug_month_configs,
             "excluded_tickers_initial": sorted(excluded_ticker_set),

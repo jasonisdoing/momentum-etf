@@ -38,19 +38,31 @@ python recommend.py us
 *   `SLACK_WEBHOOK_URL`: 알림을 받을 슬랙 웹훅 주소
 
 
-### 계좌별 전략 설정 (`zsettings/account/kor_us.json`, `us.json`)
+### 계좌별 전략 설정 (`zaccounts` 폴더 내 `config.json`)
 각 계좌(포트폴리오)별로 구체적인 전략 파라미터를 설정합니다. `tune.py` 실행 시 자동으로 업데이트됩니다.
+
+**5버킷 포트폴리오 설정 예시:**
 
 ```json
 {
   "strategy": {
-    "MA_MONTH": 3,          // 이동평균 기간 (개월)
-    "PORTFOLIO_TOPN": 5,          // 최대 보유 종목 수
-    "STOP_LOSS_PCT": -10,         // 손절 기준 (-10%)
-    "BACKTEST_START_DATE": "2025-09-08"  // 백테스트/튜닝 시작일
+    "MA_MONTH": 12,                    // 이동평균 기간 (개월) - 필수
+    "MA_TYPE": "EMA",                  // 이동평균 종류 (SMA, EMA, WMA 등) - 필수
+    "BUCKET_TOPN": 1,                  // 버켓 내 최대 보유 종목 수 - 필수
+    "REBALANCE_MODE": "QUARTERLY",     // 리밸런싱 주기 (DAILY, WEEKLY, TWICE_A_MONTH, MONTHLY, QUARTERLY) - 필수
+    "BACKTEST_START_DATE": "2025-02-01" // 백테스트/튜닝 시작일
   }
 }
 ```
+
+> **주의**: 시스템은 엄격한 설정 표준을 따릅니다. 필수 파라미터(`MA_TYPE`, `REBALANCE_MODE` 등)가 하나라도 누락되면 백테스트 및 리포트 생성이 중단됩니다.
+
+> **5버킷(Bucket) 시스템**:
+> 1. **모멘텀**: 공격적인 추세 추종
+> 2. **혁신기술**: 성장성이 높은 기술주
+> 3. **시장지수**: 안정적인 시장 대표 지수
+> 4. **배당방어**: 하락장을 방어하는 배당주
+> 5. **대체헷지**: 원자재, 채권 등 주식 외 자산
 
 ## 3. 결과 해석
 

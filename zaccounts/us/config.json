@@ -1,5 +1,5 @@
 {
-    "order": 100,
+    "order": 4,
     "icon": "🇺🇸",
     "name": "미국직투 ETF",
     "desc": "미국 ETF 포트폴리오 (USD)",
@@ -7,21 +7,17 @@
     "currency": "usd",
     "slack_channel": "C0A0X2LTS3X",
     "initial_capital_krw": "100000000",
-    "show_hold": false,
+    "show_hold": true,
     "strategy": {
-        "BACKTEST_START_DATE": "2025-02-01",
-        "BACKTESTED_DATE": "2026-02-17 09:18",
-        "CAGR": 105.645489,
-        "MDD": -19.314079,
-        "PORTFOLIO_TOPN": 4,
-        "MA_MONTH": 6,
-        "MA_TYPE": "HMA",
-        "REPLACE_SCORE_THRESHOLD": 0,
-        "STOP_LOSS_PCT": 10,
-        "OVERBOUGHT_SELL_THRESHOLD": 100,
-        "COOLDOWN_DAYS": 0,
-        "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": true
+        "BACKTEST_START_DATE": "2025-01-01",
+        "BACKTESTED_DATE": "2026-02-20 09:54",
+        "CAGR": 64.820295,
+        "MDD": -11.325144,
+        "BUCKET_TOPN": 2,
+        "MA_MONTH": 3,
+        "MA_TYPE": "WMA",
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false,
+        "OPTIMIZATION_METRIC": "CAGR"
     },
     "benchmark": {
         "ticker": "VOO",

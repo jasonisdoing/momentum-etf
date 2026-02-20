@@ -155,12 +155,13 @@ def render_all_stocks_page() -> None:
     # 스타일 적용
     styled_df = _style_dataframe(df_reordered)
 
-    # 테이블 표시
+    # 테이블 표시 (높이 자동 조절)
+    calc_height = (len(df_reordered.index) + 1) * 35 + 10
     st.dataframe(
         styled_df,
         hide_index=True,
         width="stretch",
-        height=600,
+        height=calc_height,
         column_config=column_config,
     )
 

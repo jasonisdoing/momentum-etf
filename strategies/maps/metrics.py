@@ -6,8 +6,7 @@ from typing import Any
 import pandas as pd
 
 from config import MIN_TRADING_DAYS
-from logic.backtest.signals import calculate_consecutive_days
-from strategies.rsi.backtest import process_ticker_data_rsi
+from core.backtest.signals import calculate_consecutive_days
 from utils.indicators import calculate_ma_score
 from utils.moving_averages import calculate_moving_average
 
@@ -96,7 +95,6 @@ def process_ticker_data(
             ideal_multiplier = 1.5
         else:  # SMA, WMA 등
             ideal_multiplier = 1.0
-
         ideal_data_required = int(current_ma_days * ideal_multiplier)
 
         # 데이터가 이상적인 양보다 적으면 완화된 기준 적용
@@ -131,16 +129,8 @@ def process_ticker_data(
     if ma_score is None:
         ma_score = calculate_ma_score(close_prices, moving_average)
 
-    # 점수 기반 매수 시그널 지속일 계산
+    # consecutive_buy_days = calculate_consecutive_days(ma_score)
     consecutive_buy_days = calculate_consecutive_days(ma_score)
-
-    # RSI 전략 지표 계산
-    rsi_score = None
-    if isinstance(precomputed_entry, Mapping):
-        rsi_score = precomputed_entry.get("rsi_score")
-    if rsi_score is None or isinstance(rsi_score, float):
-        rsi_data = process_ticker_data_rsi(close_prices)
-        rsi_score = rsi_data.get("rsi_score") if rsi_data else pd.Series(dtype=float)
 
     return {
         "df": working_df if working_df is not None else df,
@@ -148,7 +138,6 @@ def process_ticker_data(
         "open": open_prices,
         "ma": moving_average,
         "ma_score": ma_score,
-        "rsi_score": rsi_score,
         "buy_signal_days": consecutive_buy_days,
         "ma_days": current_ma_days,
     }
