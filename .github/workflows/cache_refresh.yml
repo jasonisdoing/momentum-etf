@@ -1,0 +1,33 @@
+name: Cache Refresh
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 매시 정각마다
+  workflow_dispatch:      # 수동 실행 가능하도록 트리거 추가
+
+jobs:
+  refresh-cache:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Replace cache directories for Pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Cache Refresh
+        env:
+          MONGO_DB_CONNECTION_STRING: ${{ secrets.MONGO_DB_CONNECTION_STRING }}
+        run: python scripts/update_price_cache.py
