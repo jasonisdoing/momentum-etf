@@ -36,9 +36,13 @@ except ImportError:
     yf = None
 
 # pykrx가 설치되지 않았을 경우를 대비한 예외 처리
+_pykrx_import_error = None
 try:
     from pykrx import stock as _stock
 except ImportError:
+    import traceback
+
+    _pykrx_import_error = traceback.format_exc()
     _stock = None
 
 # from utils.notification import send_verbose_log_to_slack
@@ -856,7 +860,9 @@ def _fetch_ohlcv_core(
 
     if country_code == "kor":
         if _stock is None:
-            logger.error("pykrx 라이브러리가 설치되어 있지 않습니다. 'pip install pykrx'로 설치해주세요.")
+            logger.error(
+                f"pykrx 라이브러리가 설치되어 있지 않습니다. 'pip install pykrx'로 설치해주세요.\n상세 에러:\n{_pykrx_import_error}"
+            )
             return None
 
     if country_code == "kor":
