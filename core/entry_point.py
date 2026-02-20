@@ -9,7 +9,10 @@ from strategies.maps import rules as _rules_mod
 StrategyRules = getattr(_rules_mod, "StrategyRules")
 
 # 백테스트 함수들
-from logic.backtest.engine import run_portfolio_backtest
+from core.backtest.engine import run_portfolio_backtest
+from core.backtest.output.log_writer import dump_backtest_log
+from core.backtest.output.summary_report import print_backtest_summary
+from core.backtest.runner import run_account_backtest
 from strategies.maps.backtest import run_single_ticker_backtest
 
 # 상수
@@ -29,4 +32,7 @@ __all__ = [
     "DECISION_CONFIG",
     "process_ticker_data",
     "StrategyEvaluator",
+    "run_account_backtest",
+    "dump_backtest_log",
+    "print_backtest_summary",
 ]

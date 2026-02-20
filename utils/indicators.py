@@ -64,26 +64,3 @@ def calculate_ma_score(
     from strategies.maps.scoring import calculate_maps_score
 
     return calculate_maps_score(close_prices, moving_average)
-
-
-def calculate_rsi_score(
-    close_prices: pd.Series,
-    period: int = 14,
-    ema_smoothing: float = 2.0,
-    normalize: bool = False,
-    normalize_config: dict | None = None,
-) -> pd.Series:
-    """
-    RSI 점수를 계산합니다 (EMA 기반).
-
-    Args:
-        close_prices: 종가 시리즈
-        period: RSI 계산 기간 (기본값: 14)
-        ema_smoothing: EMA 평활화 계수 (기본값: 2.0)
-
-    Returns:
-        pd.Series: RSI 값 (0~100) 또는 정규화된 점수 (0~100)
-    """
-    from strategies.rsi.scoring import calculate_rsi_score as _calculate_rsi_score
-
-    return _calculate_rsi_score(close_prices, period, ema_smoothing, normalize, normalize_config)

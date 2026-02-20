@@ -1,5 +1,5 @@
 {
-    "order": 50,
+    "order": 3,
     "icon": "🇦🇺",
     "name": "호주 ETF",
     "desc": "호주 ETF 포트폴리오 (AUD)",
@@ -9,19 +9,15 @@
     "initial_capital_krw": "100000000",
     "show_hold": true,
     "strategy": {
-        "BACKTEST_START_DATE": "2025-02-01",
-        "BACKTESTED_DATE": "2026-02-17 10:45",
-        "CAGR": 81.592647,
-        "MDD": -14.991307,
-        "PORTFOLIO_TOPN": 6,
-        "MA_MONTH": 3,
-        "MA_TYPE": "SMA",
-        "REPLACE_SCORE_THRESHOLD": 0,
-        "STOP_LOSS_PCT": 10,
-        "OVERBOUGHT_SELL_THRESHOLD": 100,
-        "COOLDOWN_DAYS": 0,
-        "OPTIMIZATION_METRIC": "CAGR",
-        "ENABLE_DATA_SUFFICIENCY_CHECK": false
+        "BACKTEST_START_DATE": "2025-01-01",
+        "BACKTESTED_DATE": "2026-02-20 10:31",
+        "CAGR": 44.251475,
+        "MDD": -14.480925,
+        "BUCKET_TOPN": 2,
+        "MA_MONTH": 12,
+        "MA_TYPE": "TEMA",
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false,
+        "OPTIMIZATION_METRIC": "CAGR"
     },
     "benchmark": {
         "ticker": "A200",

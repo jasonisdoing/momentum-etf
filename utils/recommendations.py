@@ -14,6 +14,7 @@ logger = get_app_logger()
 
 _BASE_DISPLAY_COLUMNS = [
     "#",
+    "버킷",
     "티커",
     "종목명",
     "상태",
@@ -29,7 +30,6 @@ _BASE_DISPLAY_COLUMNS = [
     "고점대비",
     "추세(3달)",
     "점수",
-    "RSI",
     "지속",
     "문구",
 ]
@@ -55,7 +55,7 @@ def load_recommendations(account_key: str) -> list[dict[str, Any]]:
         if isinstance(entry, dict):
             normalized.append(entry.copy())
 
-    normalized.sort(key=lambda row: row.get("rank", 0))
+    normalized.sort(key=lambda row: row.get("rank_order") or row.get("rank") or 0)
     return normalized
 
 
@@ -142,10 +142,20 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         score = row.get("score")
         streak = _format_days(row.get("streak"))
         phrase = _resolve_phrase(row)
-        rsi_score = row.get("rsi_score", 0.0)
+        bucket_names = {
+            1: "1. 모멘텀",
+            2: "2. 혁신기술",
+            3: "3. 시장지수",
+            4: "4. 배당방어",
+            5: "5. 대체헷지",
+        }
+        bucket_id = row.get("bucket", 1)
+        bucket_name = bucket_names.get(bucket_id, f"{bucket_id}. 기타")
+
         display_rows.append(
             {
                 "#": rank if rank is not None else "-",
+                "버킷": bucket_name,
                 "티커": ticker,
                 "종목명": name,
                 "상태": state,
@@ -164,9 +174,9 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "고점대비": drawdown_from_high,
                 "추세(3달)": _trend_series(row),
                 "점수": score,
-                "RSI": rsi_score,
                 "지속": streak,
                 "문구": phrase or row.get("phrase", ""),
+                "bucket": row.get("bucket", 1),
             }
         )
 
@@ -184,6 +194,11 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         # 괴리율이 있으면 그 다음(+2), 없으면 현재가 다음(+1)
         insert_pos = columns.index(price_label) + (2 if show_deviation else 1)
         columns.insert(insert_pos, "Nav")
+
+    # [Fix] 버킷 정보가 누락되지 않도록 컬럼 추가
+    if "bucket" not in columns:
+        columns.append("bucket")
+
     df = pd.DataFrame(display_rows, columns=columns)
     return df
 
@@ -194,7 +209,7 @@ def _state_style(value: Any) -> str:
         return "color:#d32f2f;font-weight:600"
     if text == "WAIT":
         return "color:#1565c0;font-weight:600"
-    if text in ("SELL", "SELL_REPLACE", "SELL_TREND", "SELL_RSI", "SELL_STOP", "CUT_STOPLOSS"):
+    if text in ("SELL", "SELL_REPLACE"):
         return "color:#1565c0;font-weight:600"
     return ""
 
@@ -273,7 +288,6 @@ def style_recommendations_dataframe(df: pd.DataFrame) -> Styler:
         styled = styled.applymap(_deviation_style, subset=["괴리율"])
 
     styled = styled.applymap(_score_style, subset=["점수"])
-    styled = styled.applymap(_score_style, subset=["RSI"])
     styled = styled.apply(_row_background_styles, axis=1)
     return styled
 

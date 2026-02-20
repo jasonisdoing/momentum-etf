@@ -10,7 +10,9 @@ from typing import Any
 import pandas as pd
 
 from config import TRADING_DAYS_PER_MONTH
-from logic.entry_point import StrategyRules, run_portfolio_backtest
+from core.backtest.analysis.summaries import build_bucket_summaries
+from core.backtest.engine import run_portfolio_backtest
+from strategies.maps.rules import StrategyRules
 from utils.account_registry import get_common_file_settings
 from utils.data_loader import get_exchange_rate_series, get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
@@ -44,7 +46,7 @@ class AccountBacktestResult:
     initial_capital: float
     initial_capital_krw: float
     currency: str
-    portfolio_topn: int
+    bucket_topn: int
     holdings_limit: int
     summary: dict[str, Any]
     portfolio_timeseries: pd.DataFrame
@@ -70,7 +72,7 @@ class AccountBacktestResult:
             "initial_capital": float(self.initial_capital),
             "initial_capital_krw": float(self.initial_capital_krw),
             "currency": self.currency,
-            "portfolio_topn": self.portfolio_topn,
+            "bucket_topn": self.bucket_topn,
             "holdings_limit": self.holdings_limit,
             "summary": self.summary,
             "portfolio_timeseries": df.to_dict(orient="records"),
@@ -154,18 +156,14 @@ def run_account_backtest(
     if strategy_override is not None:
         strategy_rules = StrategyRules.from_values(
             ma_days=strategy_override.ma_days,
-            portfolio_topn=strategy_override.portfolio_topn,
-            replace_threshold=strategy_override.replace_threshold,
+            bucket_topn=strategy_override.bucket_topn,
             ma_type=strategy_override.ma_type,
-            stop_loss_pct=strategy_override.stop_loss_pct,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
         strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
-        strategy_settings["PORTFOLIO_TOPN"] = strategy_rules.portfolio_topn
-        strategy_settings["REPLACE_SCORE_THRESHOLD"] = strategy_rules.replace_threshold
-        if strategy_rules.stop_loss_pct is not None:
-            strategy_settings["STOP_LOSS_PCT"] = strategy_rules.stop_loss_pct
+        strategy_settings["BUCKET_TOPN"] = strategy_rules.bucket_topn
+        strategy_settings["MA_TYPE"] = strategy_rules.ma_type
 
     backtest_start_date_str = _resolve_backtest_start_date(None, override_settings, account_settings)
     end_date = _resolve_end_date(country_code, override_settings)
@@ -218,9 +216,9 @@ def run_account_backtest(
     ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금"}
 
     # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
-    portfolio_topn = strategy_rules.portfolio_topn
+    bucket_topn = strategy_rules.bucket_topn
     if not is_tuning_fast_path:
-        _log(f"[백테스트] 포트폴리오 TOPN: {portfolio_topn}")
+        _log(f"[백테스트] 포트폴리오 TOPN: {bucket_topn}")
 
     if not is_tuning_fast_path:
         _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
@@ -272,12 +270,20 @@ def run_account_backtest(
                 f"{account_id.upper()} 기간 {date_range[0]}~{date_range[1]}의 거래일 정보를 로드하지 못했습니다."
             )
 
+    # 버켓 맵 구성 및 전체 top_n 계산
+    bucket_map = {str(item.get("ticker", "")).upper(): item.get("bucket", 1) for item in etf_universe}
+    unique_buckets = {item.get("bucket", 1) for item in etf_universe}
+    num_buckets = len(unique_buckets) if unique_buckets else 1
+    total_top_n = bucket_topn * num_buckets
+
     ticker_timeseries = (
         run_portfolio_backtest(
             stocks=etf_universe,
             initial_capital=initial_capital_value,
             core_start_date=start_date,
-            top_n=portfolio_topn,
+            top_n=total_top_n,
+            bucket_topn=bucket_topn,  # 버켓당 제한 전달
+            bucket_map=bucket_map,  # 버켓 맵 전달
             date_range=date_range,
             country=country_code,
             missing_ticker_sink=runtime_missing_tickers,
@@ -294,7 +300,7 @@ def run_account_backtest(
     portfolio_df = _build_portfolio_timeseries(
         ticker_timeseries,
         initial_capital_value,
-        portfolio_topn,
+        bucket_topn,
     )
 
     (
@@ -310,10 +316,12 @@ def run_account_backtest(
         initial_capital=initial_capital_value,
         initial_capital_krw=capital_info.krw,
         currency=display_currency,
-        portfolio_topn=portfolio_topn,
+        bucket_topn=bucket_topn,
+        holdings_limit=total_top_n,  # Pass total limit
         account_settings=account_settings,
         prefetched_data=prefetched_data,
         ticker_timeseries=ticker_timeseries,
+        ticker_meta=ticker_meta,
     )
 
     evaluated_records = _compute_evaluated_records(ticker_timeseries, start_date)
@@ -348,8 +356,8 @@ def run_account_backtest(
         initial_capital=initial_capital_value,
         initial_capital_krw=capital_info.krw,
         currency=display_currency,
-        portfolio_topn=portfolio_topn,
-        holdings_limit=portfolio_topn,
+        bucket_topn=bucket_topn,
+        holdings_limit=total_top_n,
         summary=summary,
         portfolio_timeseries=portfolio_df,
         ticker_timeseries=ticker_timeseries,
@@ -481,37 +489,11 @@ def _build_backtest_kwargs(
     prefetched_metrics: Mapping[str, dict[str, Any]] | None,
     quiet: bool,
 ) -> dict[str, Any]:
-    try:
-        configured_stop_loss = (
-            float(strategy_rules.stop_loss_pct)
-            if strategy_rules.stop_loss_pct is not None
-            else float(strategy_rules.portfolio_topn)
-        )
-    except (TypeError, ValueError):
-        configured_stop_loss = float(strategy_rules.portfolio_topn)
-    stop_loss_threshold = -abs(configured_stop_loss)
-
-    # 필수 설정 검증
-    if "COOLDOWN_DAYS" not in strategy_settings:
-        raise ValueError("strategy_settings에 COOLDOWN_DAYS 설정이 필요합니다.")
-    if "OVERBOUGHT_SELL_THRESHOLD" not in strategy_settings:
-        raise ValueError("strategy_settings에 OVERBOUGHT_SELL_THRESHOLD 설정이 필요합니다.")
-
-    cooldown_days = int(strategy_settings["COOLDOWN_DAYS"])
-    rsi_sell_threshold = int(strategy_settings["OVERBOUGHT_SELL_THRESHOLD"])
-
-    if not (0 <= rsi_sell_threshold <= 100):
-        raise ValueError(f"OVERBOUGHT_SELL_THRESHOLD는 0~100 사이여야 합니다. (현재값: {rsi_sell_threshold})")
-
     kwargs: dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "prefetched_metrics": prefetched_metrics,
         "ma_days": strategy_rules.ma_days,
         "ma_type": strategy_rules.ma_type,
-        "replace_threshold": strategy_rules.replace_threshold,
-        "stop_loss_pct": stop_loss_threshold,
-        "rsi_sell_threshold": rsi_sell_threshold,
-        "cooldown_days": cooldown_days,
         "quiet": quiet,
         "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }
@@ -523,7 +505,7 @@ def _build_backtest_kwargs(
 def _build_portfolio_timeseries(
     ticker_timeseries: Mapping[str, pd.DataFrame],
     initial_capital: float,
-    portfolio_topn: int,
+    bucket_topn: int,
 ) -> pd.DataFrame:
     # DataFrame만 필터링 (메타데이터 문자열 제외)
     dataframes = [ts for ts in ticker_timeseries.values() if isinstance(ts, pd.DataFrame) and not ts.empty]
@@ -618,7 +600,7 @@ def _build_portfolio_timeseries(
                 "cumulative_return_pct": cumulative_return_pct,
                 "evaluation_profit_loss": eval_profit_loss,
                 "evaluation_return_pct": eval_return_pct,
-                "portfolio_topn": portfolio_topn,
+                "bucket_topn": bucket_topn,
             }
         )
 
@@ -636,10 +618,12 @@ def _build_summary(
     initial_capital: float,
     initial_capital_krw: float,
     currency: str,
-    portfolio_topn: int,
+    bucket_topn: int,
+    holdings_limit: int,
     account_settings: Mapping[str, Any],
     prefetched_data: Mapping[str, pd.DataFrame] | None = None,
     ticker_timeseries: dict[str, pd.DataFrame] | None = None,
+    ticker_meta: Mapping[str, dict[str, Any]] | None = None,
 ) -> tuple[
     dict[str, Any],
     pd.Series,
@@ -849,7 +833,7 @@ def _build_summary(
             for dt, value in weekly_values.items():
                 # 해당 날짜의 보유종목 수 가져오기
                 held_count = 0
-                max_topn = portfolio_topn
+                max_topn = holdings_limit
                 actual_date = dt
 
                 # 해당 날짜가 portfolio_df에 없으면 가장 가까운 이전 날짜 찾기
@@ -909,11 +893,19 @@ def _build_summary(
     # Turnover calculation (전체 거래 횟수) - if 블록 밖에서 항상 실행
     total_turnover = 0
     if ticker_timeseries:
-        trade_decisions = {"BUY", "BUY_REPLACE", "SELL_TREND", "SELL_RSI", "CUT_STOPLOSS", "SELL_REPLACE"}
+        trade_decisions = {"BUY", "BUY_REPLACE", "SELL_REPLACE"}
         for t_data in ticker_timeseries.values():
             if isinstance(t_data, pd.DataFrame) and "decision" in t_data.columns:
                 trade_count = t_data["decision"].isin(trade_decisions).sum()
                 total_turnover += int(trade_count)
+
+    # Bucket summary
+    bucket_summary = []
+    if ticker_timeseries and ticker_meta:
+        # ticker_timeseries를 dict[str, pd.DataFrame]으로 변환 (Mapping인 경우 고려)
+        ts_dict = {k: v for k, v in ticker_timeseries.items() if isinstance(v, pd.DataFrame)}
+        meta_dict = {k: v for k, v in ticker_meta.items()}
+        bucket_summary = build_bucket_summaries(ts_dict, meta_dict)
 
     summary = {
         "start_date": start_date.strftime("%Y-%m-%d"),
@@ -937,6 +929,7 @@ def _build_summary(
         "benchmarks": benchmarks_summary,
         "benchmark_name": benchmarks_summary[0]["name"] if benchmarks_summary else "S&P 500",
         "weekly_summary": weekly_summary_rows,
+        "bucket_summary": bucket_summary,
         "monthly_returns": monthly_returns,
         "monthly_cum_returns": monthly_cum_returns,
         "yearly_returns": yearly_returns,
@@ -998,12 +991,7 @@ def _build_ticker_summaries(
     ticker_meta: Mapping[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     sell_decisions = {
-        "SELL_MOMENTUM",
-        "SELL_TREND",
-        "CUT_STOPLOSS",
         "SELL_REPLACE",
-        "SELL_TRAILING",
-        "SELL_RSI",
     }
 
     summaries: list[dict[str, Any]] = []
