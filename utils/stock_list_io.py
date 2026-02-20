@@ -471,6 +471,29 @@ def remove_stock(account_id: str, ticker: str, reason: str = "") -> bool:
         return False
 
 
+def hard_remove_stock(account_id: str, ticker: str) -> bool:
+    """단일 종목을 MongoDB에서 완전히 삭제(Hard Delete)한다."""
+    account_norm = (account_id or "").strip().lower()
+    ticker_norm = str(ticker or "").strip()
+    if not account_norm or not ticker_norm:
+        return False
+
+    coll = _get_collection()
+    if coll is None:
+        return False
+
+    try:
+        result = coll.delete_one({"account_id": account_norm, "ticker": ticker_norm})
+        if result.deleted_count > 0:
+            _invalidate_cache(account_norm)
+            logger.info("종목 완전 삭제(Hard): %s (account=%s)", ticker_norm, account_norm)
+            return True
+        return False
+    except Exception as exc:
+        logger.warning("종목 완전 삭제 실패 %s (account=%s): %s", ticker_norm, account_norm, exc)
+        return False
+
+
 def get_deleted_etfs(account_id: str) -> list[dict[str, Any]]:
     """해당 계좌의 Soft Delete된 종목 목록을 반환한다."""
     account_norm = (account_id or "").strip().lower()

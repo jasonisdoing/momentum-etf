@@ -24,6 +24,7 @@ from utils.stock_list_io import (
     check_stock_status,
     get_deleted_etfs,
     get_etfs,
+    hard_remove_stock,
     remove_stock,
     update_stock,
 )
@@ -165,39 +166,9 @@ def _render_stocks_meta_table(account_id: str) -> None:
         st.write(f"**{name}** ({ticker})")
         st.caption(f"현재 버킷: {current_bucket_name}")
 
+        st.subheader("버킷 변경")
         new_bucket_name = st.selectbox(
             "버킷 변경", options=BUCKET_OPTIONS, index=BUCKET_OPTIONS.index(current_bucket_name)
-        )
-
-        st.markdown(
-            """
-            <style>
-            /* primary 버튼(변경사항 저장) -> 녹색 */
-            div[data-testid="stDialog"] .stButton > button[kind="primary"] {
-                background-color: #4CAF50 !important;
-                color: white !important;
-                border-color: #4CAF50 !important;
-            }
-            div[data-testid="stDialog"] .stButton > button[kind="primary"]:hover {
-                background-color: #45a049 !important;
-                border-color: #45a049 !important;
-                color: white !important;
-            }
-
-            /* secondary 버튼(삭제 실행 등) -> 빨간색 */
-            div[data-testid="stDialog"] .stButton > button[kind="secondary"] {
-                background-color: #f44336 !important;
-                color: white !important;
-                border-color: #f44336 !important;
-            }
-            div[data-testid="stDialog"] .stButton > button[kind="secondary"]:hover {
-                background-color: #da190b !important;
-                border-color: #da190b !important;
-                color: white !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
         )
 
         if st.button("💾 변경사항 저장", type="primary", use_container_width=True):
@@ -243,7 +214,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
 
     # DataFrame 표시
     column_config = {
-        "수정/삭제": st.column_config.CheckboxColumn("수정/삭제", width=90, help="클릭하여 수정 또는 삭제"),
+        "수정/삭제": st.column_config.CheckboxColumn("수정/삭제", width=50, help="클릭하여 수정 또는 삭제"),
         "버킷": st.column_config.SelectboxColumn(
             "버킷",
             width=50,
@@ -468,136 +439,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
     if st.session_state.get(f"show_add_modal_{account_id}"):
         open_add_dialog()
 
-    # 삭제된 종목 표시 (접이식 Expander로 변경)
-    if not readonly:
-        deleted_etfs = get_deleted_etfs(account_id)
-        if deleted_etfs:
-            st.markdown("---")
-            with st.expander(f"🗑️ 삭제된 종목 ({len(deleted_etfs)}개)", expanded=False):
-                deleted_rows = []
-                for etf in deleted_etfs:
-                    deleted_at = etf.get("deleted_at")
-                    if deleted_at:
-                        try:
-                            deleted_at_str = deleted_at.strftime("%Y-%m-%d")
-                        except Exception:
-                            deleted_at_str = str(deleted_at)[:10]
-                    else:
-                        deleted_at_str = "-"
-
-                    bucket_val = etf.get("bucket", 1)
-                    bucket_str = BUCKET_MAPPING.get(bucket_val, "1. 모멘텀")
-
-                    deleted_rows.append(
-                        {
-                            "복구": False,
-                            "버킷": bucket_str,
-                            "티커": etf.get("ticker", ""),
-                            "종목명": etf.get("name", ""),
-                            "상장일": etf.get("listing_date", "-"),
-                            "주간거래량": etf.get("1_week_avg_volume"),
-                            "1주(%)": etf.get("1_week_earn_rate"),
-                            "1달(%)": etf.get("1_month_earn_rate"),
-                            "3달(%)": etf.get("3_month_earn_rate"),
-                            "6달(%)": etf.get("6_month_earn_rate"),
-                            "12달(%)": etf.get("12_month_earn_rate"),
-                            "삭제일": deleted_at_str,
-                            "삭제 사유": etf.get("deleted_reason", "-"),
-                        }
-                    )
-                df_deleted = pd.DataFrame(deleted_rows)
-                df_deleted.sort_values(by=["버킷", "삭제일"], ascending=[True, False], inplace=True)
-
-                # 퍼센트 색상 스타일 함수 추가 (종목관리 테이블과 동일)
-                def _color_pct_deleted(val: float | str) -> str:
-                    if val is None or pd.isna(val):
-                        return "background-color: #ffe0e6"
-                    try:
-                        num = float(val)
-                    except (TypeError, ValueError):
-                        return "background-color: #ffe0e6"
-                    if num > 0:
-                        return "background-color: #ffe0e6; color: red"
-                    if num < 0:
-                        return "background-color: #ffe0e6; color: blue"
-                    return "background-color: #ffe0e6; color: black"
-
-                # 주간거래량 데이터 타입 보장 (숫자형)
-                df_deleted["주간거래량"] = pd.to_numeric(df_deleted["주간거래량"], errors="coerce")
-
-                styled_deleted = df_deleted.style.map(lambda _: "background-color: #ffe0e6")
-                pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
-                for col in pct_columns:
-                    if col in df_deleted.columns:
-                        styled_deleted = styled_deleted.map(_color_pct_deleted, subset=[col])
-
-                edited_deleted = st.data_editor(
-                    styled_deleted,
-                    hide_index=True,
-                    width="stretch",
-                    column_config={
-                        "복구": st.column_config.CheckboxColumn("복구", width="small"),
-                        "버킷": st.column_config.SelectboxColumn("버킷", width=50, options=BUCKET_OPTIONS),
-                        "티커": st.column_config.TextColumn("티커", width=50),
-                        "종목명": st.column_config.TextColumn("종목명", width=250),
-                        "상장일": st.column_config.TextColumn("상장일", width=70),
-                        "주간거래량": st.column_config.NumberColumn("주간거래량", width=50, format="localized"),
-                        "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
-                        "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
-                        "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
-                        "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
-                        "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
-                        "삭제일": st.column_config.TextColumn("삭제일", width=90),
-                        "삭제 사유": st.column_config.TextColumn("삭제 사유", width=300),
-                    },
-                    column_order=[
-                        "복구",
-                        "버킷",
-                        "티커",
-                        "종목명",
-                        "상장일",
-                        "주간거래량",
-                        "1주(%)",
-                        "1달(%)",
-                        "3달(%)",
-                        "6달(%)",
-                        "12달(%)",
-                        "삭제일",
-                        "삭제 사유",
-                    ],
-                    disabled=[
-                        "티커",
-                        "종목명",
-                        "상장일",
-                        "주간거래량",
-                        "1주(%)",
-                        "1달(%)",
-                        "3달(%)",
-                        "6달(%)",
-                        "12달(%)",
-                        "삭제일",
-                        "삭제 사유",
-                    ],
-                    key=f"deleted_editor_{account_id}",
-                )
-
-                to_restore_df = edited_deleted[edited_deleted["복구"]]
-                if not to_restore_df.empty:
-                    st.info(f"선택한 {len(to_restore_df)}개 종목을 복구합니다.")
-                    if st.button("♻️ 선택 종목 복구", type="primary", key=f"btn_restore_{account_id}"):
-                        restored = 0
-                        for _, row in to_restore_df.iterrows():
-                            ticker = row["티커"]
-                            bucket_name = row["버킷"]
-                            bucket_int = BUCKET_REVERSE_MAPPING.get(bucket_name, 1)
-
-                            if add_stock(account_id, ticker, bucket=bucket_int):
-                                restored += 1
-                        st.success(f"{restored}개 종목 복구 완료!")
-                        st.rerun()
-        else:
-            st.info("삭제된 종목이 없습니다.")
-
     # -----------------------------------------------------------------------
     # 업데이트 실행 로직 (readonly 모드일 때 실행됨)
     # -----------------------------------------------------------------------
@@ -762,8 +603,229 @@ def _get_active_holdings(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# 삭제된 종목 관리 탭
+# ---------------------------------------------------------------------------
+def _render_deleted_stocks_tab(account_id: str) -> None:
+    """삭제된 종목 목록을 표시하고 복구/완전삭제 기능을 제공합니다."""
+    deleted_etfs = get_deleted_etfs(account_id)
+    if not deleted_etfs:
+        st.info("삭제된 종목이 없습니다.")
+        return
+
+    st.subheader(f"🗑️ 삭제된 종목 ({len(deleted_etfs)}개)")
+
+    deleted_rows = []
+    for etf in deleted_etfs:
+        deleted_at = etf.get("deleted_at")
+        if deleted_at:
+            try:
+                deleted_at_str = deleted_at.strftime("%Y-%m-%d")
+            except Exception:
+                deleted_at_str = str(deleted_at)[:10]
+        else:
+            deleted_at_str = "-"
+
+        bucket_val = etf.get("bucket", 1)
+        bucket_str = BUCKET_MAPPING.get(bucket_val, "1. 모멘텀")
+
+        deleted_rows.append(
+            {
+                "복구": False,
+                "버킷": bucket_str,
+                "티커": etf.get("ticker", ""),
+                "종목명": etf.get("name", ""),
+                "상장일": etf.get("listing_date", "-"),
+                "주간거래량": etf.get("1_week_avg_volume"),
+                "1주(%)": etf.get("1_week_earn_rate"),
+                "1달(%)": etf.get("1_month_earn_rate"),
+                "3달(%)": etf.get("3_month_earn_rate"),
+                "6달(%)": etf.get("6_month_earn_rate"),
+                "12달(%)": etf.get("12_month_earn_rate"),
+                "삭제일": deleted_at_str,
+                "삭제 사유": etf.get("deleted_reason", "-"),
+            }
+        )
+
+    df_deleted = pd.DataFrame(deleted_rows)
+    df_deleted.sort_values(by=["버킷", "삭제일"], ascending=[True, False], inplace=True)
+    df_deleted["주간거래량"] = pd.to_numeric(df_deleted["주간거래량"], errors="coerce")
+
+    def _color_pct_deleted(val: Any) -> str:
+        if val is None or pd.isna(val):
+            return "background-color: #ffe0e6"
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            return "background-color: #ffe0e6"
+        if num > 0:
+            return "background-color: #ffe0e6; color: red"
+        if num < 0:
+            return "background-color: #ffe0e6; color: blue"
+        return "background-color: #ffe0e6; color: black"
+
+    styled_deleted = df_deleted.style.map(lambda _: "background-color: #ffe0e6")
+    pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+    for col in pct_columns:
+        if col in df_deleted.columns:
+            styled_deleted = styled_deleted.map(_color_pct_deleted, subset=[col])
+
+    # [User Request] 버튼을 테이블 위로 이동
+    # 미리 에디터 키를 사용하여 체크된 항목을 확인해야 함 (fragment 내에서)
+    editor_key = f"deleted_editor_{account_id}"
+
+    # 세션 스테이트에서 에디터 상태 확인
+    editor_state = st.session_state.get(editor_key, {})
+    edited_rows = editor_state.get("edited_rows", {})
+
+    # 현재 체크된 인덱스들 파악
+    checked_indices = []
+    if edited_rows:
+        for idx_str, changes in edited_rows.items():
+            if changes.get("복구") is True:
+                checked_indices.append(int(idx_str))
+            # 체크 해제된 경우 (기존에 체크되어 있었다면)
+            # st.data_editor의 edited_rows는 '변경된' 것만 관리함.
+            # 하지만 복구 체크박스는 초기값이 False이므로 체크 시에만 들어옴.
+
+    to_restore_df = df_deleted.iloc[checked_indices] if checked_indices else pd.DataFrame()
+
+    if not to_restore_df.empty:
+        st.info(f"선택한 {len(to_restore_df)}개 종목에 대한 작업을 선택하세요.")
+
+        # 탭 3 전용 버튼 스타일링 (복구: 녹색, 완전 삭제: 빨간색)
+        # 탭 3 전용 버튼 스타일링 (복구: 녹색, 완전 삭제: 빨간색)
+        st.markdown(
+            """
+            <style>
+            .stButton > button[kind="primary"] {
+                background-color: #4CAF50 !important;
+                color: white !important;
+                border-color: #4CAF50 !important;
+            }
+            .stButton > button[kind="secondary"] {
+                background-color: #f44336 !important;
+                color: white !important;
+                border-color: #f44336 !important;
+            }
+            </style>
+        """,
+            unsafe_allow_html=True,
+        )
+
+        c_res1, c_res2 = st.columns(2)
+        with c_res1:
+            if st.button(
+                "♻️ 선택 종목 복구", type="primary", key=f"btn_tab_restore_{account_id}", use_container_width=True
+            ):
+                restored = 0
+                for _, row in to_restore_df.iterrows():
+                    ticker = row["티커"]
+                    bucket_name = row["버킷"]
+                    bucket_int = BUCKET_REVERSE_MAPPING.get(bucket_name, 1)
+                    if add_stock(account_id, ticker, bucket=bucket_int):
+                        restored += 1
+                if restored > 0:
+                    st.success(f"{restored}개 종목 복구 완료!")
+                    st.rerun()
+        with c_res2:
+            if st.button(
+                "💀 선택 종목 완전 삭제",
+                type="secondary",
+                key=f"btn_tab_hard_del_{account_id}",
+                use_container_width=True,
+            ):
+                deleted_count = 0
+                for _, row in to_restore_df.iterrows():
+                    ticker = row["티커"]
+                    if hard_remove_stock(account_id, ticker):
+                        deleted_count += 1
+                if deleted_count > 0:
+                    st.success(f"{deleted_count}개 종목 영구 삭제 완료!")
+                    st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.caption("복구하거나 완전 삭제할 종목을 아래 테이블에서 선택하세요.")
+
+    st.data_editor(
+        styled_deleted,
+        hide_index=True,
+        width="stretch",
+        column_config={
+            "복구": st.column_config.CheckboxColumn("복구", width=20),
+            "버킷": st.column_config.SelectboxColumn("버킷", width=50, options=BUCKET_OPTIONS),
+            "티커": st.column_config.TextColumn("티커", width=50),
+            "종목명": st.column_config.TextColumn("종목명", width=250),
+            "상장일": st.column_config.TextColumn("상장일", width=70),
+            "주간거래량": st.column_config.NumberColumn("주간거래량", width=50, format="localized"),
+            "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+            "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
+            "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
+            "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
+            "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
+            "삭제일": st.column_config.TextColumn("삭제일", width=90),
+            "삭제 사유": st.column_config.TextColumn("삭제 사유", width=300),
+        },
+        column_order=[
+            "복구",
+            "버킷",
+            "티커",
+            "종목명",
+            "상장일",
+            "주간거래량",
+            "1주(%)",
+            "1달(%)",
+            "3달(%)",
+            "6달(%)",
+            "12달(%)",
+            "삭제일",
+            "삭제 사유",
+        ],
+        disabled=[
+            "티커",
+            "종목명",
+            "상장일",
+            "주간거래량",
+            "1주(%)",
+            "1달(%)",
+            "3달(%)",
+            "6달(%)",
+            "12달(%)",
+            "삭제일",
+            "삭제 사유",
+        ],
+        key=editor_key,
+    )
+
+
 def render_account_page(account_id: str) -> None:
     """주어진 계정 설정을 기반으로 계정 페이지를 렌더링합니다 (탭 포함)."""
+
+    # 버튼 스타일링 (특정 영역의 버튼만 색상 적용)
+    # 탭 이동 시에도 항상 적용되도록 메인 함수 최상단에 배치
+    st.markdown(
+        """
+        <style>
+        /* 1. 다이얼로그(수정 모달) 내의 버튼 스타일 */
+        div[data-testid="stDialog"] .stButton > button[kind="primary"] {
+            background-color: #4CAF50 !important;
+            color: white !important;
+            border-color: #4CAF50 !important;
+        }
+        div[data-testid="stDialog"] .stButton > button[kind="secondary"] {
+            background-color: #f44336 !important;
+            color: white !important;
+            border-color: #f44336 !important;
+        }
+
+        /* 호버 효과 */
+        .stButton > button:hover {
+            opacity: 0.9;
+        }
+        </style>
+    """,
+        unsafe_allow_html=True,
+    )
 
     try:
         account_settings = get_account_settings(account_id)
@@ -791,7 +853,7 @@ def render_account_page(account_id: str) -> None:
 
     view_mode = st.pills(
         "뷰",
-        ["1. 추천 결과", "2. 종목 관리", "3. 추천 실행"],
+        ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목", "4. 추천 실행"],
         default="1. 추천 결과",
         key=f"view_{account_id}",
         label_visibility="collapsed",
@@ -799,7 +861,9 @@ def render_account_page(account_id: str) -> None:
 
     if view_mode == "2. 종목 관리":
         _render_stocks_meta_table(account_id)
-    elif view_mode == "3. 추천 실행":
+    elif view_mode == "3. 삭제된 종목":
+        _render_deleted_stocks_tab(account_id)
+    elif view_mode == "4. 추천 실행":
         _render_run_recommendation(account_id)
     else:  # "1. 추천 결과" (Default)
         if df is None:
