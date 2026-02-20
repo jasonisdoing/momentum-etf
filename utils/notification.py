@@ -314,6 +314,13 @@ def compose_recommendation_slack_message(
         if valid_items_count > 0:
             avg_pct = total_pct / valid_items_count
             try:
+                if avg_pct > 0:
+                    trend = ":chart_with_upwards_trend:"
+                elif avg_pct < 0:
+                    trend = ":large_blue_circle:"
+                else:
+                    trend = ":chart_with_upwards_trend:"
+
                 avg_pct_str = f"{trend} *{avg_pct:+.2f}%*"
 
                 if avg_pct >= 3.0:
