@@ -2,7 +2,7 @@ pandas
 numpy
 streamlit
 streamlit-authenticator
-pykrx
+pykrx>=1.2.0
 pymongo
 APScheduler
 python-dotenv
