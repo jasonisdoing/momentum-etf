@@ -171,8 +171,34 @@ def get_etfs_by_country(country: str) -> list[dict[str, Any]]:
     return list(unique_tickers.values())
 
 
+def get_all_etfs_including_deleted(account_id: str) -> list[dict[str, Any]]:
+    """해당 계좌의 전체 ETF 항목(삭제된 종목 포함)을 DB에서 직접 조회하여 반환합니다."""
+    account_norm = (account_id or "").strip().lower()
+    if not account_norm:
+        return []
+
+    coll = _get_collection()
+    if coll is None:
+        return []
+
+    try:
+        # 조건 없이 (account_id 일치하는) 모든 도큐먼트 조회
+        docs = list(coll.find({"account_id": account_norm}, {"_id": 0}))
+        results: list[dict[str, Any]] = []
+        for doc in docs:
+            doc.pop("account_id", None)
+            doc.pop("created_at", None)
+            doc.pop("updated_at", None)
+            doc.setdefault("type", "etf")
+            results.append(doc)
+        return results
+    except Exception as exc:
+        logger.error("전체 종목 조회(삭제포함) 실패 (account=%s): %s", account_norm, exc)
+        return []
+
+
 def get_all_etfs(account_id: str) -> list[dict[str, Any]]:
-    """해당 계좌의 전체 ETF 항목을 반환합니다."""
+    """해당 계좌의 전체 ETF 항목(활성 상태만)을 반환합니다."""
 
     raw_data = _load_account_stocks_raw(account_id)
     if not raw_data:

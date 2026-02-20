@@ -137,6 +137,9 @@ def _render_stocks_meta_table(account_id: str) -> None:
         # 사용자가 요청한 '명칭 있는 체크박스' 구현을 위해 불리언 컬럼 추가
         df_edit.insert(0, "수정/삭제", False)
 
+        # 주간거래량 데이터 타입 보장 (숫자형)
+        df_edit["주간거래량"] = pd.to_numeric(df_edit["주간거래량"], errors="coerce")
+
         def _style_bucket(val: Any) -> str:
             val_str = str(val or "")
             for b_id, cfg in BUCKET_CONFIG.items():
@@ -166,26 +169,56 @@ def _render_stocks_meta_table(account_id: str) -> None:
             "버킷 변경", options=BUCKET_OPTIONS, index=BUCKET_OPTIONS.index(current_bucket_name)
         )
 
+        st.markdown(
+            """
+            <style>
+            /* primary 버튼(변경사항 저장) -> 녹색 */
+            div[data-testid="stDialog"] .stButton > button[kind="primary"] {
+                background-color: #4CAF50 !important;
+                color: white !important;
+                border-color: #4CAF50 !important;
+            }
+            div[data-testid="stDialog"] .stButton > button[kind="primary"]:hover {
+                background-color: #45a049 !important;
+                border-color: #45a049 !important;
+                color: white !important;
+            }
+
+            /* secondary 버튼(삭제 실행 등) -> 빨간색 */
+            div[data-testid="stDialog"] .stButton > button[kind="secondary"] {
+                background-color: #f44336 !important;
+                color: white !important;
+                border-color: #f44336 !important;
+            }
+            div[data-testid="stDialog"] .stButton > button[kind="secondary"]:hover {
+                background-color: #da190b !important;
+                border-color: #da190b !important;
+                color: white !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if st.button("💾 변경사항 저장", type="primary", use_container_width=True):
+            new_bucket_int = BUCKET_REVERSE_MAPPING.get(new_bucket_name, 1)
+            if update_stock(account_id, ticker, bucket=new_bucket_int):
+                st.toast(f"✅ {ticker} 버킷 변경 완료")
+                st.rerun()
+
         st.divider()
         st.subheader("🗑️ 종목 삭제")
         delete_reason = st.text_input(
             "삭제 사유 (필수)", placeholder="삭제 이유를 입력하세요", key=f"edit_del_reason_{ticker}"
         )
 
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("💾 변경사항 저장", type="primary", use_container_width=True):
-                new_bucket_int = BUCKET_REVERSE_MAPPING.get(new_bucket_name, 1)
-                if update_stock(account_id, ticker, bucket=new_bucket_int):
-                    st.toast(f"✅ {ticker} 버킷 변경 완료")
-                    st.rerun()
-        with c2:
-            if st.button("🗑️ 삭제 실행", type="secondary", use_container_width=True):
-                if not delete_reason or not delete_reason.strip():
-                    st.error("삭제 사유를 입력해야 합니다.")
-                elif remove_stock(account_id, ticker, reason=delete_reason.strip()):
-                    st.toast(f"✅ {ticker} 삭제 완료")
-                    st.rerun()
+        # type="secondary" 속성을 부여하여 CSS 선택자가 적용되도록 함
+        if st.button("🗑️ 삭제 실행", type="secondary", use_container_width=True):
+            if not delete_reason or not delete_reason.strip():
+                st.error("삭제 사유를 입력해야 합니다.")
+            elif remove_stock(account_id, ticker, reason=delete_reason.strip()):
+                st.toast(f"✅ {ticker} 삭제 완료")
+                st.rerun()
 
     # --- 상단 관리 버튼 영역 ---
     # [종목 추가 / 메타데이터 업데이트 / 가격 캐시 갱신] 버튼 배치 (저장 버튼 제거)
@@ -213,15 +246,15 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "수정/삭제": st.column_config.CheckboxColumn("수정/삭제", width=90, help="클릭하여 수정 또는 삭제"),
         "버킷": st.column_config.SelectboxColumn(
             "버킷",
-            width=150,
+            width=50,
             options=BUCKET_OPTIONS,
             required=True,
         ),
-        "티커": st.column_config.TextColumn("티커", width=80),
+        "티커": st.column_config.TextColumn("티커", width=50),
         "종목명": st.column_config.TextColumn("종목명", width=300),
-        "추가일자": st.column_config.TextColumn("추가일자", width=100),
-        "상장일": st.column_config.TextColumn("상장일", width=110),
-        "주간거래량": st.column_config.NumberColumn("주간거래량", width=120, format="%d"),
+        "추가일자": st.column_config.TextColumn("추가일자", width=90),
+        "상장일": st.column_config.TextColumn("상장일", width=70),
+        "주간거래량": st.column_config.NumberColumn("주간거래량", width=50, format="localized"),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
@@ -461,6 +494,13 @@ def _render_stocks_meta_table(account_id: str) -> None:
                             "버킷": bucket_str,
                             "티커": etf.get("ticker", ""),
                             "종목명": etf.get("name", ""),
+                            "상장일": etf.get("listing_date", "-"),
+                            "주간거래량": etf.get("1_week_avg_volume"),
+                            "1주(%)": etf.get("1_week_earn_rate"),
+                            "1달(%)": etf.get("1_month_earn_rate"),
+                            "3달(%)": etf.get("3_month_earn_rate"),
+                            "6달(%)": etf.get("6_month_earn_rate"),
+                            "12달(%)": etf.get("12_month_earn_rate"),
                             "삭제일": deleted_at_str,
                             "삭제 사유": etf.get("deleted_reason", "-"),
                         }
@@ -468,19 +508,76 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 df_deleted = pd.DataFrame(deleted_rows)
                 df_deleted.sort_values(by=["버킷", "삭제일"], ascending=[True, False], inplace=True)
 
+                # 퍼센트 색상 스타일 함수 추가 (종목관리 테이블과 동일)
+                def _color_pct_deleted(val: float | str) -> str:
+                    if val is None or pd.isna(val):
+                        return "background-color: #ffe0e6"
+                    try:
+                        num = float(val)
+                    except (TypeError, ValueError):
+                        return "background-color: #ffe0e6"
+                    if num > 0:
+                        return "background-color: #ffe0e6; color: red"
+                    if num < 0:
+                        return "background-color: #ffe0e6; color: blue"
+                    return "background-color: #ffe0e6; color: black"
+
+                # 주간거래량 데이터 타입 보장 (숫자형)
+                df_deleted["주간거래량"] = pd.to_numeric(df_deleted["주간거래량"], errors="coerce")
+
+                styled_deleted = df_deleted.style.map(lambda _: "background-color: #ffe0e6")
+                pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+                for col in pct_columns:
+                    if col in df_deleted.columns:
+                        styled_deleted = styled_deleted.map(_color_pct_deleted, subset=[col])
+
                 edited_deleted = st.data_editor(
-                    df_deleted.style.map(lambda _: "background-color: #ffe0e6"),
+                    styled_deleted,
                     hide_index=True,
                     width="stretch",
                     column_config={
                         "복구": st.column_config.CheckboxColumn("복구", width="small"),
-                        "버킷": st.column_config.SelectboxColumn("버킷", width=150, options=BUCKET_OPTIONS),
-                        "티커": st.column_config.TextColumn("티커", width=80),
+                        "버킷": st.column_config.SelectboxColumn("버킷", width=50, options=BUCKET_OPTIONS),
+                        "티커": st.column_config.TextColumn("티커", width=50),
                         "종목명": st.column_config.TextColumn("종목명", width=250),
-                        "삭제일": st.column_config.TextColumn("삭제일", width=110),
+                        "상장일": st.column_config.TextColumn("상장일", width=70),
+                        "주간거래량": st.column_config.NumberColumn("주간거래량", width=50, format="localized"),
+                        "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+                        "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
+                        "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
+                        "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
+                        "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
+                        "삭제일": st.column_config.TextColumn("삭제일", width=90),
                         "삭제 사유": st.column_config.TextColumn("삭제 사유", width=300),
                     },
-                    disabled=["티커", "종목명", "삭제일", "삭제 사유"],
+                    column_order=[
+                        "복구",
+                        "버킷",
+                        "티커",
+                        "종목명",
+                        "상장일",
+                        "주간거래량",
+                        "1주(%)",
+                        "1달(%)",
+                        "3달(%)",
+                        "6달(%)",
+                        "12달(%)",
+                        "삭제일",
+                        "삭제 사유",
+                    ],
+                    disabled=[
+                        "티커",
+                        "종목명",
+                        "상장일",
+                        "주간거래량",
+                        "1주(%)",
+                        "1달(%)",
+                        "3달(%)",
+                        "6달(%)",
+                        "12달(%)",
+                        "삭제일",
+                        "삭제 사유",
+                    ],
                     key=f"deleted_editor_{account_id}",
                 )
 
