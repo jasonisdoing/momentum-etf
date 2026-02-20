@@ -1122,10 +1122,20 @@ def fetch_ohlcv_for_tickers(
                                 "Close": [rt_price],
                                 "Volume": [0],
                             },
-                            index=[today],
+                            index=[pd.to_datetime(today)],
                         )
-                        prefetched_data[key] = today_row
-                        logger.info(f"[실시간] {tkr} 데이터를 실시간 가격({rt_price:,.0f})으로 생성")
+                        if cached_df is not None and not cached_df.empty:
+                            effective_start = max(ticker_start, cached_df.index.min().normalize())
+                            sliced = cached_df.loc[cached_df.index >= effective_start].copy()
+                            merged = pd.concat([sliced, today_row])
+                            merged = merged[~merged.index.duplicated(keep="last")].sort_index()
+                            prefetched_data[key] = merged
+                            logger.info(
+                                f"[실시간보완] {tkr} 기존 데이터에 실시간 가격({rt_price:,.0f}) 추가 (캐시 범위: {len(sliced)}일)"
+                            )
+                        else:
+                            prefetched_data[key] = today_row
+                            logger.info(f"[실시간] {tkr} 데이터를 실시간 가격({rt_price:,.0f})으로 생성")
                         continue
 
                 missing.append(tkr)
@@ -1439,10 +1449,21 @@ def fetch_us_yfinance_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
         import pandas as pd
 
         is_multi = isinstance(df.columns, pd.MultiIndex)
+        idx_ticker_level = (
+            1
+            if is_multi and "Ticker" in getattr(df.columns, "names", []) and df.columns.names.index("Ticker") == 1
+            else 0
+        )
 
         for tk in normalized_tickers:
             try:
-                tk_df = df.xs(tk, level=1, axis=1) if is_multi else df
+                if is_multi:
+                    try:
+                        tk_df = df.xs(tk, level=idx_ticker_level, axis=1)
+                    except KeyError:
+                        continue
+                else:
+                    tk_df = df
                 # NaN 제거 후 유효한 종가 데이터만 추출
                 if "Close" not in tk_df:
                     continue
