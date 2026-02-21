@@ -242,15 +242,17 @@ def _build_home_page(accounts: list[dict[str, Any]]):
 
         bucket_totals["6. 현금"] = global_cash
 
-        weight_data = {}
         if total_assets > 0:
+            weight_row = {}
+            amount_row = {}
             for k, v in bucket_totals.items():
-                weight_data[k] = f"{(v / total_assets) * 100:.2f}%"
+                weight_row[k] = f"{(v / total_assets) * 100:.2f}%"
+                amount_row[k] = format_korean_currency(v)
+            weight_df = pd.DataFrame([weight_row, amount_row])
         else:
-            for k in bucket_totals.keys():
-                weight_data[k] = "0.00%"
-
-        weight_df = pd.DataFrame([weight_data])
+            weight_df = pd.DataFrame(
+                [{k: "0.00%" for k in bucket_totals.keys()}, {k: "0원" for k in bucket_totals.keys()}]
+            )
 
         def get_weight_styles(df):
             return pd.DataFrame(
@@ -413,18 +415,13 @@ def _build_home_page(accounts: list[dict[str, Any]]):
                 )
 
                 st.subheader("총 자산 요약")
-                c1, c2, c3, c4, c5 = st.columns(5)
+                c1, c2, c3, c4 = st.columns(4)
                 c1.metric(label="총 자산 (주식+현금)", value=format_korean_currency(total_assets))
                 c2.metric(label="총 투자 원금", value=format_korean_currency(global_principal))
                 c3.metric(
                     label="총 평가손익", value=format_korean_currency(net_profit), delta=f"{net_profit_pct:,.2f}%"
                 )
                 c4.metric(label="총 현금 보유량", value=format_korean_currency(global_cash))
-                c5.metric(
-                    label="주식 평가손익",
-                    value=format_korean_currency(total_stock_profit),
-                    delta=f"{total_stock_profit_pct:,.2f}%",
-                )
 
                 if styled_summary_df is not None:
                     st.subheader("계좌별 요약")

@@ -138,9 +138,12 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
 
     import streamlit as st
 
-    # Initialize a warnings dict in session_state if it doesn't exist
-    if "cache_warnings" not in st.session_state:
-        st.session_state.cache_warnings = {}  # {account_id: {ticker1, ticker2, ...}}
+    # Initialize a warnings dict in session_state if it doesn't exist (if running in Streamlit)
+    try:
+        if "cache_warnings" not in st.session_state:
+            st.session_state.cache_warnings = {}  # {account_id: {ticker1, ticker2, ...}}
+    except Exception:
+        pass
 
     def _get_current_price(row):
         ticker = str(row["ticker"]).strip().upper()
@@ -149,9 +152,12 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
             msg = f"가격 캐시에 '{ticker}'가 없습니다. 캐시 업데이트를 실행하세요."
             logger.warning(msg)
             # Add to session_state so the UI can display it
-            if account_id not in st.session_state.cache_warnings:
-                st.session_state.cache_warnings[account_id] = set()
-            st.session_state.cache_warnings[account_id].add(ticker)
+            try:
+                if account_id not in st.session_state.cache_warnings:
+                    st.session_state.cache_warnings[account_id] = set()
+                st.session_state.cache_warnings[account_id].add(ticker)
+            except Exception:
+                pass
             return 0.0
         return float(df_cached["Close"].iloc[-1])
 
