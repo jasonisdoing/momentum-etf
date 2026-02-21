@@ -1075,17 +1075,33 @@ def fetch_ohlcv_for_tickers(
                         index=[today],
                     )
 
+                    # 가격 포맷팅 (로그용)
+                    if country_lower == "us":
+                        price_str = f"${rt_price:,.2f}"
+                    elif country_lower == "au":
+                        price_str = f"A${rt_price:,.2f}"
+                    else:
+                        price_str = f"{rt_price:,.0f}"
+
                     # 캐시 데이터와 오늘 데이터 병합
                     cached_df = pd.concat([cached_df, today_row])
                     cached_df = cached_df[~cached_df.index.duplicated(keep="last")]
                     cached_df.sort_index(inplace=True)
                     cache_end = cached_df.index.max().normalize()
-                    logger.info(f"[실시간] {tkr} 오늘 데이터를 실시간 가격({rt_price:,.0f})으로 보완")
+                    logger.info(f"[실시간] {tkr} 오늘 데이터를 실시간 가격({price_str})으로 보완")
 
             # [User Request] 장 개시 전이거나 실시간 데이터가 없는 경우 마지막 종가로 패딩
             if is_today and cache_end < required_end:
                 last_p = _safe_float(cached_df.iloc[-1]["Close"])
                 if last_p is not None and last_p > 0:
+                    # 가격 포맷팅 (로그용)
+                    if country_lower == "us":
+                        last_p_str = f"${last_p:,.2f}"
+                    elif country_lower == "au":
+                        last_p_str = f"A${last_p:,.2f}"
+                    else:
+                        last_p_str = f"{last_p:,.0f}"
+
                     padding_row = pd.DataFrame(
                         {"Open": [last_p], "High": [last_p], "Low": [last_p], "Close": [last_p], "Volume": [0]},
                         index=[today],
@@ -1094,7 +1110,7 @@ def fetch_ohlcv_for_tickers(
                     cached_df = cached_df[~cached_df.index.duplicated(keep="last")]
                     cached_df.sort_index(inplace=True)
                     cache_end = cached_df.index.max().normalize()
-                    logger.debug(f"[패딩] {tkr} 오늘 데이터를 이전 종가({last_p:,.0f})로 보완 (0%% 변동)")
+                    logger.debug(f"[패딩] {tkr} 오늘 데이터를 이전 종가({last_p_str})로 보완 (0%% 변동)")
 
             # 캐시 범위가 요청 범위를 충분히 커버하는지 확인
             # ticker_start가 cache_start보다 이전이어도, cache_end가 required_end를 커버하면 OK

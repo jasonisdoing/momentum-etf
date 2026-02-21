@@ -5,7 +5,7 @@
     "desc": "연금저축에서 운영종인 국내상장 해외 ETF 포트폴리오",
     "country_code": "kor",
     "currency": "krw",
-    "slack_channel": "C09FAU2NHM2",
+    "slack_channel": "C0AGP0WT0N5",
     "initial_capital_krw": "40000000",
     "show_hold": true,
     "strategy": {

@@ -294,9 +294,11 @@ def _render_stocks_meta_table(account_id: str) -> None:
                     bucket_name = df_edit.iloc[idx]["버킷"]
                     name = df_edit.iloc[idx]["종목명"]
 
-                    # [중요] 모달이 열리기 전 세션 스테이트에서 체크박스 상태를 리셋하여
                     # 무한 리런이나 모달 닫기 후 잔상 방지
-                    # 하지만 직접 수정이 안되므로 모달 내부에서 리런을 유도함
+                    # To prevent the modal from popping up again when other buttons are clicked
+                    if editor_key in st.session_state:
+                        del st.session_state[editor_key]
+
                     open_edit_dialog(ticker, bucket_name, name)
                     break
 
