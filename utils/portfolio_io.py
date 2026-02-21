@@ -136,11 +136,20 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
     tickers = df_holdings["ticker"].tolist()
     cached_frames = load_cached_frames_bulk(account_id, tickers)
 
+    import streamlit as st
+
+    # Initialize a warnings list in session_state if it doesn't exist
+    if "cache_warnings" not in st.session_state:
+        st.session_state.cache_warnings = set()
+
     def _get_current_price(row):
         ticker = str(row["ticker"]).strip().upper()
         df_cached = cached_frames.get(ticker)
         if df_cached is None or df_cached.empty:
-            logger.warning(f"가격 캐시에 '{ticker}'가 없습니다. 캐시 업데이트를 실행하세요.")
+            msg = f"가격 캐시에 '{ticker}'가 없습니다. 캐시 업데이트를 실행하세요."
+            logger.warning(msg)
+            # Add to session_state so the UI can display it
+            st.session_state.cache_warnings.add(ticker)
             return 0.0
         return float(df_cached["Close"].iloc[-1])
 

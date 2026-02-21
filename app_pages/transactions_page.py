@@ -20,8 +20,6 @@ def _normalize_ticker(ticker: str) -> str:
 
 
 def render_transaction_management_page():
-    st.title("주식 거래 및 잔고 관리")
-
     from utils.account_registry import load_account_configs
     from utils.portfolio_io import load_portfolio_master, save_portfolio_master
 

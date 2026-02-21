@@ -130,6 +130,17 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             "평가손익(KRW)",
             "추세(3달)",
         ]
+        # 캐시 누락 경고가 있으면 UI 상단에 표시
+        if "cache_warnings" in st.session_state and st.session_state.cache_warnings:
+            missing_tickers = ", ".join(sorted(st.session_state.cache_warnings))
+            st.warning(
+                f"⚠️ 다음 종목들의 가격 캐시 데이터를 불러오지 못했습니다: **{missing_tickers}**\n\n"
+                "현재가가 0원으로 표시될 수 있습니다. 해결을 위해 백그라운드 스크립트(`python scripts/update_price_cache.py`)가 "
+                "실행 중이거나 재실행이 필요합니다."
+            )
+            # 한 번 보여준 후 다음 렌더링을 위해 초기화 (새로고침 시 다시 수집됨)
+            st.session_state.cache_warnings = set()
+
         render_recommendation_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols, height=900)
 
     return _render_home_page
