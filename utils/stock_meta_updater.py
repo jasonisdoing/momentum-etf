@@ -310,8 +310,11 @@ def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
 
         elif country_norm in ("us", "au", "usa"):
             yf_ticker = ticker
-            if country_norm == "au" and not ticker.endswith(".AX"):
-                yf_ticker = f"{ticker}.AX"
+            # Strip exchange prefix (e.g., "ASX:VGS" → "VGS")
+            if ":" in yf_ticker:
+                yf_ticker = yf_ticker.split(":")[-1]
+            if country_norm == "au" and not yf_ticker.endswith(".AX"):
+                yf_ticker = f"{yf_ticker}.AX"
 
             t = yf.Ticker(yf_ticker)
             try:

@@ -1,0 +1,26 @@
+{
+    "order": 3,
+    "icon": "🇺🇸",
+    "name": "연금저축",
+    "desc": "연금저축에서 운영종인 국내상장 해외 ETF 포트폴리오",
+    "country_code": "kor",
+    "currency": "KRW",
+    "slack_channel": "C0AGP0WT0N5",
+    "initial_capital_krw": "40000000",
+    "show_hold": true,
+    "strategy": {
+        "BACKTEST_START_DATE": "2025-01-01",
+        "BACKTESTED_DATE": "2026-02-21 12:19",
+        "CAGR": 90.254503,
+        "MDD": -17.078971,
+        "BUCKET_TOPN": 1,
+        "MA_MONTH": 5,
+        "MA_TYPE": "HMA",
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false,
+        "OPTIMIZATION_METRIC": "CAGR"
+    },
+    "benchmark": {
+        "ticker": "426030",
+        "name": "TIME 미국나스닥100액티브"
+    }
+}
