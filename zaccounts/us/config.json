@@ -4,7 +4,7 @@
     "name": "미국직투",
     "desc": "미국 ETF 포트폴리오 (USD)",
     "country_code": "us",
-    "currency": "usd",
+    "currency": "USD",
     "slack_channel": "C0A0X2LTS3X",
     "initial_capital_krw": "100000000",
     "show_hold": true,
