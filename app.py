@@ -104,6 +104,7 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             total_valuation = combined_df["평가금액(KRW)"].sum()  # 주식 평가금액
             total_purchase = combined_df["매입금액(KRW)"].sum()  # 주식 매입금액
             total_stock_profit = total_valuation - total_purchase  # 주식 평가손익
+            total_stock_profit_pct = (total_stock_profit / total_purchase) * 100 if total_purchase > 0 else 0.0
 
             total_assets = total_valuation + global_cash  # 총 자산 (주식 + 현금)
             net_profit = total_assets - global_principal  # 전체 평가손익 (자산 - 원금)
@@ -187,7 +188,11 @@ def _build_home_page(accounts: list[dict[str, Any]]):
                 c2.metric(label="총 투자 원금", value=f"{global_principal:,.0f}원")
                 c3.metric(label="총 평가손익", value=f"{net_profit:,.0f}원", delta=f"{net_profit_pct:,.2f}%")
                 c4.metric(label="총 현금 보유량", value=f"{global_cash:,.0f}원")
-                c5.metric(label="주식 평가손익", value=f"{total_stock_profit:,.0f}원")
+                c5.metric(
+                    label="주식 평가손익",
+                    value=f"{total_stock_profit:,.0f}원",
+                    delta=f"{total_stock_profit_pct:,.2f}%",
+                )
 
                 st.divider()
 

@@ -4,7 +4,6 @@ streamlit
 streamlit-authenticator
 pykrx>=1.2.0
 pymongo
-APScheduler
 python-dotenv
 requests
 beautifulsoup4
