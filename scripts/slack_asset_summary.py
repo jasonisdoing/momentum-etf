@@ -18,7 +18,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.account_registry import load_account_configs
 from utils.env import load_env_if_present
 from utils.notification import send_slack_message_v2
-from utils.portfolio_io import load_portfolio_master, load_real_holdings_with_recommendations
+from utils.portfolio_io import (
+    get_latest_daily_snapshot,
+    load_portfolio_master,
+    load_real_holdings_with_recommendations,
+    save_daily_snapshot,
+)
 
 # Suppress Streamlit warnings in non-Streamlit environments
 os.environ["STREAMLIT_GLOBAL_LOG_LEVEL"] = "error"
@@ -74,7 +79,7 @@ def get_trend_emoji(val):
         return "🔺"
     elif val < 0:
         return "🔹"
-    return "▫️"
+    return ""
 
 
 def main():
@@ -133,6 +138,7 @@ def main():
         if acc_principal > 0 or acc_cash > 0 or acc_valuation > 0:
             account_summaries.append(
                 {
+                    "account_id": account_id,
                     "name": account_name,
                     "principal": acc_principal,
                     "total_assets": acc_total_assets,
@@ -154,6 +160,16 @@ def main():
     total_net_profit = total_assets - global_principal
     total_net_profit_pct = (total_net_profit / global_principal * 100) if global_principal > 0 else 0.0
 
+    # Fetch previous snapshots
+    prev_global = get_latest_daily_snapshot("TOTAL", before_today=True)
+    global_change = 0.0
+    global_change_pct = 0.0
+    if prev_global:
+        prev_total = prev_global.get("total_assets", 0.0)
+        if prev_total > 0:
+            global_change = total_assets - prev_total
+            global_change_pct = (global_change / prev_total) * 100
+
     # 1. Compose Main Message (Total Summary)
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     main_text = (
@@ -162,6 +178,7 @@ def main():
         f"💰 *총 자산*: *{format_korean_currency(total_assets)}*\n"
         f"🏛️ *투자 원금*: {format_korean_currency(global_principal)}\n"
         f"💵 *현금 잔고*: {format_korean_currency(global_cash)}\n"
+        f"📉 *전일 대비*: {format_korean_currency(global_change)} ({global_change_pct:+.2f}%) {get_trend_emoji(global_change)}\n"
         f"📈 *총 평가손익*: *{format_korean_currency(total_net_profit)} ({total_net_profit_pct:+.2f}%)*\n"
     )
 
@@ -173,11 +190,23 @@ def main():
     # 2. Compose Account Details (Thread)
     acc_details = ["*📂 계좌별 상세 현황*"]
     for acc in account_summaries:
+        # Fetch previous account snapshot
+        prev_acc = get_latest_daily_snapshot(acc["account_id"], before_today=True)
+        acc_change = 0.0
+        acc_change_pct = 0.0
+        if prev_acc:
+            prev_acc_total = prev_acc.get("total_assets", 0.0)
+            if prev_acc_total > 0:
+                acc_change = acc["total_assets"] - prev_acc_total
+                acc_change_pct = (acc_change / prev_acc_total) * 100
+
         emoji = get_trend_emoji(acc["net_profit"])
+        change_emoji = get_trend_emoji(acc_change)
         line = (
             f"• *{acc['name']}*\n"
             f"  - 자산: {format_korean_currency(acc['total_assets'])} (원금: {format_korean_currency(acc['principal'])})\n"
             f"  - 수익: {emoji} {acc['net_profit_pct']:+.2f}% ({format_korean_currency(acc['net_profit'])})\n"
+            f"  - 변동: {change_emoji} {acc_change_pct:+.2f}% ({format_korean_currency(acc_change)})\n"
             f"  - 현금: {format_korean_currency(acc['cash'])}"
         )
         acc_details.append(line)
@@ -199,6 +228,11 @@ def main():
         comp_details.append(f"• 6. 현금: {cash_pct:.1f}% ({format_korean_currency(global_cash)})")
 
         send_slack_message_v2("\n".join(comp_details), thread_ts=main_ts)
+
+    # 4. Save Snapshots for next time
+    save_daily_snapshot("TOTAL", total_assets, global_principal, global_cash, total_assets - global_cash)
+    for acc in account_summaries:
+        save_daily_snapshot(acc["account_id"], acc["total_assets"], acc["principal"], acc["cash"], acc["valuation"])
 
     logger.info("Slack asset summary sent successfully.")
 

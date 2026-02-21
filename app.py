@@ -92,12 +92,27 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
 
 def _build_home_page(accounts: list[dict[str, Any]]):
     def _render_home_page() -> None:
-        from utils.portfolio_io import load_portfolio_master, load_real_holdings_with_recommendations
+        from utils.portfolio_io import (
+            get_latest_daily_snapshot,
+            load_portfolio_master,
+            load_real_holdings_with_recommendations,
+        )
 
         all_holdings = []
         account_summaries = []
         global_principal = 0.0
         global_cash = 0.0
+        global_change = 0.0
+        global_change_pct = 0.0
+        total_assets = 0.0
+        total_principal = 0.0
+        total_net_profit = 0.0
+        total_net_profit_pct = 0.0
+        total_cash = 0.0
+        total_purchase = 0.0
+        total_valuation = 0.0
+        total_stock_profit = 0.0
+        total_stock_profit_pct = 0.0
 
         for account in accounts:
             account_id = account["account_id"]
@@ -167,6 +182,16 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             total_stock_profit_pct = (total_stock_profit / total_purchase) * 100 if total_purchase > 0 else 0.0
             total_cash = sum(acc["현금"] for acc in account_summaries)
 
+            # Fetch previous snapshot for change calculation
+            prev_global = get_latest_daily_snapshot("TOTAL", before_today=True)
+            global_change = 0.0
+            global_change_pct = 0.0
+            if prev_global:
+                prev_total = prev_global.get("total_assets", 0.0)
+                if prev_total > 0:
+                    global_change = total_assets - prev_total
+                    global_change_pct = (global_change / prev_total) * 100
+
             account_summaries.append(
                 {
                     "계좌": "합계",
@@ -185,24 +210,6 @@ def _build_home_page(accounts: list[dict[str, Any]]):
         combined_df = pd.concat(all_holdings, ignore_index=True) if all_holdings else pd.DataFrame()
 
         weight_df = None
-
-        # 요약 메트릭 계산
-        total_valuation = (
-            combined_df["평가금액(KRW)"].sum()
-            if not combined_df.empty and "평가금액(KRW)" in combined_df.columns
-            else 0.0
-        )
-        total_purchase = (
-            combined_df["매입금액(KRW)"].sum()
-            if not combined_df.empty and "매입금액(KRW)" in combined_df.columns
-            else 0.0
-        )
-        total_stock_profit = total_valuation - total_purchase  # 주식 평가손익
-        total_stock_profit_pct = (total_stock_profit / total_purchase) * 100 if total_purchase > 0 else 0.0
-
-        total_assets = total_valuation + global_cash  # 총 자산 (주식 + 현금)
-        net_profit = total_assets - global_principal  # 전체 평가손익 (자산 - 원금)
-        net_profit_pct = (net_profit / global_principal) * 100 if global_principal > 0 else 0.0
 
         # 통계용 3컬럼 테이블 데이터 생성
         stat_df = pd.DataFrame(
@@ -415,13 +422,20 @@ def _build_home_page(accounts: list[dict[str, Any]]):
                 )
 
                 st.subheader("총 자산 요약")
-                c1, c2, c3, c4 = st.columns(4)
+                c1, c2, c3, c4, c5 = st.columns(5)
                 c1.metric(label="총 자산 (주식+현금)", value=format_korean_currency(total_assets))
-                c2.metric(label="총 투자 원금", value=format_korean_currency(global_principal))
+                c2.metric(label="총 투자 원금", value=format_korean_currency(total_principal))
                 c3.metric(
-                    label="총 평가손익", value=format_korean_currency(net_profit), delta=f"{net_profit_pct:,.2f}%"
+                    label="전일 대비",
+                    value=format_korean_currency(global_change),
+                    delta=f"{global_change_pct:+.2f}%",
                 )
-                c4.metric(label="총 현금 보유량", value=format_korean_currency(global_cash))
+                c4.metric(
+                    label="총 평가손익",
+                    value=format_korean_currency(total_net_profit),
+                    delta=f"{total_net_profit_pct:,.2f}%",
+                )
+                c5.metric(label="총 현금 보유량", value=format_korean_currency(total_cash))
 
                 if styled_summary_df is not None:
                     st.subheader("계좌별 요약")
