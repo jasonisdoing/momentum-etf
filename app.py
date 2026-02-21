@@ -23,6 +23,32 @@ def _to_plain_dict(value):
     return value
 
 
+def format_korean_currency(value):
+    """주어진 원화 값을 '억/만원' 단위로 변환합니다."""
+    if value == 0:
+        return "0원"
+
+    abs_value = abs(value)
+    eok = int(abs_value // 100_000_000)
+    remain = abs_value % 100_000_000
+    man = int(round(remain / 10_000))
+
+    if man == 10000:
+        eok += 1
+        man = 0
+
+    parts = []
+    if eok > 0:
+        parts.append(f"{eok}억")
+    if man > 0:
+        parts.append(f"{man}만원")
+
+    result = " ".join(parts) if parts else "0원"
+    if value < 0:
+        result = "-" + result
+    return result
+
+
 def _load_authenticator() -> stauth.Authenticate:
     raw_config = st.secrets.get("auth")
     if not raw_config:
@@ -69,6 +95,7 @@ def _build_home_page(accounts: list[dict[str, Any]]):
         from utils.portfolio_io import load_portfolio_master, load_real_holdings_with_recommendations
 
         all_holdings = []
+        account_summaries = []
         global_principal = 0.0
         global_cash = 0.0
 
@@ -90,73 +117,245 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             if df is not None and not df.empty:
                 df.insert(0, "계좌", account_name)
                 all_holdings.append(df)
+                acc_valuation = df["평가금액(KRW)"].sum()
+                acc_purchase = df["매입금액(KRW)"].sum()
+            else:
+                acc_valuation = 0.0
+                acc_purchase = 0.0
 
-        if not all_holdings:
-            st.info("현재 모든 계좌를 통틀어 보유 중인 종목이 없습니다.")
+            # 계좌별 요약용 데이터 계산
+            acc_stock_profit = acc_valuation - acc_purchase
+            acc_stock_profit_pct = (acc_stock_profit / acc_purchase) * 100 if acc_purchase > 0 else 0.0
+
+            acc_principal = m_data.get("total_principal", 0.0) if m_data else 0.0
+            acc_cash = m_data.get("cash_balance", 0.0) if m_data else 0.0
+            acc_total_assets = acc_valuation + acc_cash
+            acc_net_profit = acc_total_assets - acc_principal
+            acc_net_profit_pct = (acc_net_profit / acc_principal) * 100 if acc_principal > 0 else 0.0
+
+            # 하나라도 데이터가 있는 경우에만 요약에 추가 (또는 모든 계좌 표시)
+            if acc_principal > 0 or acc_cash > 0 or acc_valuation > 0:
+                account_summaries.append(
+                    {
+                        "계좌": account_name,
+                        "총 원금": acc_principal,
+                        "총 수익금": acc_net_profit,
+                        "계좌 수익률": acc_net_profit_pct,
+                        "총 자산": acc_total_assets,
+                        "매입 금액": acc_purchase,
+                        "평가 금액": acc_valuation,
+                        "평가 손익": acc_stock_profit,
+                        "평가 수익률": acc_stock_profit_pct,
+                        "현금": acc_cash,
+                    }
+                )
+
+        if not all_holdings and not account_summaries:
+            st.info("현재 모든 계좌를 통틀어 보유 중인 종목이나 자산 정보가 없습니다.")
             return
 
-        combined_df = pd.concat(all_holdings, ignore_index=True)
+        # 합계(Total) 데이터 계산 및 추가
+        if account_summaries:
+            total_principal = sum(acc["총 원금"] for acc in account_summaries)
+            total_net_profit = sum(acc["총 수익금"] for acc in account_summaries)
+            total_net_profit_pct = (total_net_profit / total_principal) * 100 if total_principal > 0 else 0.0
+
+            total_assets = sum(acc["총 자산"] for acc in account_summaries)
+            total_purchase = sum(acc["매입 금액"] for acc in account_summaries)
+            total_valuation = sum(acc["평가 금액"] for acc in account_summaries)
+            total_stock_profit = sum(acc["평가 손익"] for acc in account_summaries)
+            total_stock_profit_pct = (total_stock_profit / total_purchase) * 100 if total_purchase > 0 else 0.0
+            total_cash = sum(acc["현금"] for acc in account_summaries)
+
+            account_summaries.append(
+                {
+                    "계좌": "합계",
+                    "총 원금": total_principal,
+                    "총 수익금": total_net_profit,
+                    "계좌 수익률": total_net_profit_pct,
+                    "총 자산": total_assets,
+                    "매입 금액": total_purchase,
+                    "평가 금액": total_valuation,
+                    "평가 손익": total_stock_profit,
+                    "평가 수익률": total_stock_profit_pct,
+                    "현금": total_cash,
+                }
+            )
+
+        combined_df = pd.concat(all_holdings, ignore_index=True) if all_holdings else pd.DataFrame()
 
         weight_df = None
 
         # 요약 메트릭 계산
-        if "평가금액(KRW)" in combined_df.columns and "매입금액(KRW)" in combined_df.columns:
-            total_valuation = combined_df["평가금액(KRW)"].sum()  # 주식 평가금액
-            total_purchase = combined_df["매입금액(KRW)"].sum()  # 주식 매입금액
-            total_stock_profit = total_valuation - total_purchase  # 주식 평가손익
-            total_stock_profit_pct = (total_stock_profit / total_purchase) * 100 if total_purchase > 0 else 0.0
+        total_valuation = (
+            combined_df["평가금액(KRW)"].sum()
+            if not combined_df.empty and "평가금액(KRW)" in combined_df.columns
+            else 0.0
+        )
+        total_purchase = (
+            combined_df["매입금액(KRW)"].sum()
+            if not combined_df.empty and "매입금액(KRW)" in combined_df.columns
+            else 0.0
+        )
+        total_stock_profit = total_valuation - total_purchase  # 주식 평가손익
+        total_stock_profit_pct = (total_stock_profit / total_purchase) * 100 if total_purchase > 0 else 0.0
 
-            total_assets = total_valuation + global_cash  # 총 자산 (주식 + 현금)
-            net_profit = total_assets - global_principal  # 전체 평가손익 (자산 - 원금)
-            net_profit_pct = (net_profit / global_principal) * 100 if global_principal > 0 else 0.0
+        total_assets = total_valuation + global_cash  # 총 자산 (주식 + 현금)
+        net_profit = total_assets - global_principal  # 전체 평가손익 (자산 - 원금)
+        net_profit_pct = (net_profit / global_principal) * 100 if global_principal > 0 else 0.0
 
-            # 1. 자산 요약 관련 변수 유지 (metric용)
+        # 통계용 3컬럼 테이블 데이터 생성
+        stat_df = pd.DataFrame(
+            [
+                {
+                    "총 자산": f"{total_assets:,.0f}원",
+                    "매입 금액": f"{total_purchase:,.0f}원",
+                    "평가 금액": f"{total_valuation:,.0f}원",
+                }
+            ]
+        )
 
-            # 통계용 3컬럼 테이블 데이터 생성
-            stat_df = pd.DataFrame(
-                [
-                    {
-                        "총 자산": f"{total_assets:,.0f}원",
-                        "매입 금액": f"{total_purchase:,.0f}원",
-                        "평가 금액": f"{total_valuation:,.0f}원",
-                    }
-                ]
+        def get_stat_styles(df):
+            style_df = pd.DataFrame("", index=df.index, columns=df.columns)
+            style_df.iloc[0, 0] = (
+                "background-color: #93c47d; color: black; font-weight: bold; text-align: center; padding: 8px; border: 1px solid #dee2e6;"
+            )
+            style_df.iloc[0, 1] = (
+                "background-color: #76a5af; color: black; font-weight: bold; text-align: center; padding: 8px; border: 1px solid #dee2e6;"
+            )
+            style_df.iloc[0, 2] = (
+                "background-color: #6fa8dc; color: black; font-weight: bold; text-align: center; padding: 8px; border: 1px solid #dee2e6;"
+            )
+            return style_df
+
+        styled_stat_df = stat_df.style.apply(get_stat_styles, axis=None).hide(axis="index")
+
+        # 2. 포트폴리오 비중 테이블 데이터 생성
+        bucket_cols = ["1. 모멘텀", "2. 혁신기술", "3. 시장지수", "4. 배당방어", "5. 대체헷지"]
+        bucket_totals = {}
+        for col in bucket_cols:
+            if not combined_df.empty and "버킷" in combined_df.columns:
+                val = combined_df.loc[combined_df["버킷"] == col, "평가금액(KRW)"].sum()
+            else:
+                val = 0.0
+            bucket_totals[col] = val
+
+        bucket_totals["6. 현금"] = global_cash
+
+        weight_data = {}
+        if total_assets > 0:
+            for k, v in bucket_totals.items():
+                weight_data[k] = f"{(v / total_assets) * 100:.2f}%"
+        else:
+            for k in bucket_totals.keys():
+                weight_data[k] = "0.00%"
+
+        weight_df = pd.DataFrame([weight_data])
+
+        def get_weight_styles(df):
+            return pd.DataFrame(
+                "text-align: center; padding: 8px; border: 1px solid #dee2e6;", index=df.index, columns=df.columns
             )
 
-            def style_stat_df(df):
-                return pd.DataFrame(
-                    [
-                        ["background-color: #93c47d; color: black; font-size: 16px;"] * 1
-                        + ["background-color: #76a5af; color: black; font-size: 16px;"] * 1
-                        + ["background-color: #6fa8dc; color: black; font-size: 16px;"] * 1
-                    ],
-                    index=df.index,
-                    columns=df.columns,
+        styled_weight_df = weight_df.style.apply(get_weight_styles, axis=None).hide(axis="index")
+
+        # 3. 계좌별 요약 테이블 생성
+        if account_summaries:
+            # 리스트를 DataFrame으로 변환 후 전치(Transpose)
+            summary_df = pd.DataFrame(account_summaries).set_index("계좌").T.reset_index()
+            summary_df.columns.name = None
+            summary_df = summary_df.rename(columns={"index": "계좌"})
+
+            def style_account_summary(styler):
+                # 기본 스타일
+                styler.format(
+                    {
+                        col: (
+                            lambda v: f"{v:,.0f}원"
+                            if isinstance(v, (int, float)) and "수익률" not in str(styler.data.iloc[i, 0])
+                            else f"{v:+.2f}%"
+                        )
+                        for i, col in enumerate(styler.columns)
+                        if col != "계좌"
+                    },
+                    na_rep="",
                 )
 
-            styled_stat_df = stat_df.style.apply(style_stat_df, axis=None)
+                # 행별 포맷팅 및 색상 적용
+                def apply_row_styles(row):
+                    styles = [""] * len(row)
+                    metric_name = row["계좌"]
 
-            # 2. 포트폴리오 비중 테이블 데이터 생성
-            bucket_cols = ["1. 모멘텀", "2. 혁신기술", "3. 시장지수", "4. 배당방어", "5. 대체헷지"]
-            bucket_totals = {}
-            for col in bucket_cols:
-                if "버킷" in combined_df.columns:
-                    val = combined_df.loc[combined_df["버킷"] == col, "평가금액(KRW)"].sum()
-                else:
-                    val = 0.0
-                bucket_totals[col] = val
+                    # 배경색 설정
+                    if metric_name == "총 원금":
+                        styles = ["background-color: #93c47d; color: black; font-weight: bold;"] * len(row)
+                    elif metric_name == "총 자산":
+                        styles = ["background-color: #fce5cd; color: black; font-weight: bold;"] * len(row)
 
-            bucket_totals["6. 현금"] = global_cash
+                    # 글자색 설정 (수익금, 수익률 관련)
+                    if "수익" in metric_name or "손익" in metric_name:
+                        for i in range(1, len(row)):
+                            val = row.iloc[i]
+                            if isinstance(val, (int, float)):
+                                if val > 0:
+                                    styles[i] += " color: #e06666; font-weight: bold;"  # 빨간색
+                                elif val < 0:
+                                    styles[i] += " color: #3d85c6; font-weight: bold;"  # 파란색
 
-            weight_data = {}
-            if total_assets > 0:
-                for k, v in bucket_totals.items():
-                    weight_data[k] = f"{(v / total_assets) * 100:.2f}%"
-            else:
-                for k in bucket_totals.keys():
-                    weight_data[k] = "0.00%"
+                    # "계좌" 열은 별도 스타일 (헤더 느낌)
+                    styles[0] = "background-color: #efefef; color: black; font-weight: bold;"
+                    return styles
 
-            weight_df = pd.DataFrame([weight_data])
+                return styler.apply(apply_row_styles, axis=1)
+
+            # 행별로 다른 포맷 적용을 위해 수동 포맷팅 함수 정의
+            def format_value(val, row_name):
+                if not isinstance(val, (int, float)):
+                    return val
+                if "수익률" in row_name:
+                    return f"{val:+.2f}%"
+                return f"{val:,.0f}원"
+
+            # 전치된 데이터이므로 각 셀에 대해 포맷팅 적용
+            formatted_summary_df = summary_df.copy()
+            for i, row in summary_df.iterrows():
+                row_name = row["계좌"]
+                for col in summary_df.columns[1:]:
+                    formatted_summary_df.at[i, col] = format_value(row.at[col], row_name)
+
+            # 위 방식은 col 루프가 필요하므로 다시 작성
+            def get_styles(df_raw, df_formatted):
+                style_df = pd.DataFrame("", index=df_formatted.index, columns=df_formatted.columns)
+                for i, row in df_raw.iterrows():
+                    metric_name = row["계좌"]
+                    for col in df_raw.columns:
+                        s = "padding: 8px; border: 1px solid #dee2e6;"
+                        if col == "계좌":
+                            s += " background-color: #cfcfcf; color: black; font-weight: bold; text-align: left;"
+                        else:
+                            s += " text-align: right;"
+                            if metric_name == "총 원금":
+                                s += " background-color: #b6d7a8; color: black; font-weight: bold;"
+                            elif metric_name == "총 자산":
+                                s += " background-color: #d9ead3; color: black; font-weight: bold;"
+
+                            if "수익" in metric_name or "손익" in metric_name:
+                                val = row[col]
+                                if isinstance(val, (int, float)):
+                                    if val > 0:
+                                        s += " color: #e06666; font-weight: bold;"
+                                    elif val < 0:
+                                        s += " color: #3d85c6; font-weight: bold;"
+                            elif metric_name == "계좌 수익률" or metric_name == "현금":
+                                s += " font-weight: bold;"
+                        style_df.at[i, col] = s
+                return style_df
+
+            styled_summary_df = formatted_summary_df.style.apply(
+                lambda _: get_styles(summary_df, formatted_summary_df), axis=None
+            ).hide(axis="index")
+        else:
+            styled_summary_df = None
 
         if "cache_warnings" in st.session_state and st.session_state.cache_warnings:
             # {account_id: {ticker_set}}
@@ -182,25 +381,66 @@ def _build_home_page(accounts: list[dict[str, Any]]):
 
         with tab_summary:
             if total_assets > 0 or total_purchase > 0:
+                # 섹션 간 간격 최소화를 위한 전역 CSS
+                st.markdown(
+                    """
+                    <style>
+                        [data-testid="stMetric"] { padding-bottom: 0px; }
+                        [data-testid="stSubheader"] { margin-bottom: -15px; margin-top: 10px; }
+                        div.stMarkdown { margin-bottom: -10px; }
+                        .summary-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            font-size: 14px;
+                            margin-top: 5px;
+                            margin-bottom: 5px;
+                        }
+                        .summary-table th {
+                            background-color: #cfcfcf !important;
+                            color: black !important;
+                            font-weight: bold !important;
+                            padding: 8px;
+                            border: 1px solid #dee2e6;
+                            text-align: center;
+                        }
+                        .summary-table td {
+                            padding: 8px;
+                            border: 1px solid #dee2e6;
+                        }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
                 st.subheader("총 자산 요약")
                 c1, c2, c3, c4, c5 = st.columns(5)
-                c1.metric(label="총 자산 (주식+현금)", value=f"{total_assets:,.0f}원")
-                c2.metric(label="총 투자 원금", value=f"{global_principal:,.0f}원")
-                c3.metric(label="총 평가손익", value=f"{net_profit:,.0f}원", delta=f"{net_profit_pct:,.2f}%")
-                c4.metric(label="총 현금 보유량", value=f"{global_cash:,.0f}원")
+                c1.metric(label="총 자산 (주식+현금)", value=format_korean_currency(total_assets))
+                c2.metric(label="총 투자 원금", value=format_korean_currency(global_principal))
+                c3.metric(
+                    label="총 평가손익", value=format_korean_currency(net_profit), delta=f"{net_profit_pct:,.2f}%"
+                )
+                c4.metric(label="총 현금 보유량", value=format_korean_currency(global_cash))
                 c5.metric(
                     label="주식 평가손익",
-                    value=f"{total_stock_profit:,.0f}원",
+                    value=format_korean_currency(total_stock_profit),
                     delta=f"{total_stock_profit_pct:,.2f}%",
                 )
 
-                st.divider()
+                if styled_summary_df is not None:
+                    st.subheader("계좌별 요약")
+                    table_html = styled_summary_df.to_html()
+                    full_html = f'<div style="overflow-x: auto;">{table_html.replace("<table ", "<table class='summary-table' ")}</div>'
+                    st.html(full_html)
 
                 st.subheader("포트폴리오 구성 비중")
-                st.dataframe(weight_df, hide_index=True, width="stretch")
+                table_weight_html = styled_weight_df.to_html()
+                full_weight_html = f'<div style="width: 70%; overflow-x: auto;">{table_weight_html.replace("<table ", "<table class='summary-table' ")}</div>'
+                st.html(full_weight_html)
 
                 st.subheader("통계용")
-                st.dataframe(styled_stat_df, hide_index=True, width="stretch")
+                table_stat_html = styled_stat_df.to_html()
+                full_stat_html = f'<div style="width: 50%; overflow-x: auto;">{table_stat_html.replace("<table ", "<table class='summary-table' ")}</div>'
+                st.html(full_stat_html)
             else:
                 st.info("평가금액 및 매입금액 데이터가 없어 요약을 표시할 수 없습니다.")
 
