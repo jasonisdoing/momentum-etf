@@ -21,7 +21,12 @@ def _normalize_ticker(ticker: str) -> str:
 
 def render_transaction_management_page():
     from utils.account_registry import load_account_configs
-    from utils.portfolio_io import load_portfolio_master, save_portfolio_master
+    from utils.portfolio_io import (
+        delete_daily_snapshot,
+        list_daily_snapshots,
+        load_portfolio_master,
+        save_portfolio_master,
+    )
 
     configs = load_account_configs()
     account_map = {c["name"]: c["account_id"] for c in configs}
@@ -118,7 +123,9 @@ def render_transaction_management_page():
                 else:
                     st.error("저장 실패")
 
-    tab_manage, tab_bulk, tab_cash = st.tabs(["📊 잔고 관리 (CRUD)", "📥 잔고 벌크 입력", "💵 원금 및 현금 관리"])
+    tab_manage, tab_bulk, tab_cash, tab_snapshot = st.tabs(
+        ["📊 잔고 관리 (CRUD)", "📥 잔고 벌크 입력", "💵 원금 및 현금 관리", "📸 스냅샷 관리"]
+    )
 
     # --- Tab 1: 잔고 관리 (Unified CRUD) ---
     with tab_manage:
@@ -465,6 +472,65 @@ def render_transaction_management_page():
                     st.success(f"✅ 총 {success_count}개 계좌의 원금 및 현금 정보가 성공적으로 저장되었습니다!")
                 else:
                     st.warning(f"⚠️ {success_count}/{len(input_values)}개 계좌만 저장되었습니다. 로그를 확인해 주세요.")
+
+    # --- Tab 4: 스냅샷 관리 ---
+    with tab_snapshot:
+        st.subheader("📸 일간 자산 스냅샷 관리")
+        st.info("슬랙 요약 리포트 실행 시 저장된 자산 스냅샷 목록입니다. 전일 대비 수익률 계산의 기준점이 됩니다.")
+
+        # Account filter
+        snapshot_acc_map = {"내역 전체": None}
+        for name, acc_id in account_map.items():
+            snapshot_acc_map[name] = acc_id
+        snapshot_acc_map["전체 합계 (TOTAL)"] = "TOTAL"
+
+        sel_acc_name = st.selectbox("계좌 필터", options=list(snapshot_acc_map.keys()), key="snapshot_filter")
+        target_acc_id = snapshot_acc_map[sel_acc_name]
+
+        snapshots = list_daily_snapshots(target_acc_id)
+
+        if not snapshots:
+            st.write("저장된 스냅샷이 없습니다.")
+        else:
+            # Prepare data for display
+            snap_data = []
+            for s in snapshots:
+                snap_data.append(
+                    {
+                        "ID": str(s["_id"]),
+                        "날짜": s["snapshot_date"],
+                        "계좌": s["account_id"],
+                        "총 자산": s["total_assets"],
+                        "원금": s.get("total_principal", 0),
+                        "현금": s.get("cash_balance", 0),
+                        "평가액": s.get("valuation_krw", 0),
+                    }
+                )
+
+            snap_df = pd.DataFrame(snap_data)
+
+            # Display with formatting
+            st.dataframe(
+                snap_df,
+                column_config={
+                    "총 자산": st.column_config.NumberColumn(format="%d 원"),
+                    "원금": st.column_config.NumberColumn(format="%d 원"),
+                    "현금": st.column_config.NumberColumn(format="%d 원"),
+                    "평가액": st.column_config.NumberColumn(format="%d 원"),
+                },
+                width="stretch",
+                hide_index=True,
+            )
+
+            # Delete section
+            with st.expander("🗑️ 스냅샷 삭제"):
+                delete_id = st.selectbox("삭제할 스냅샷 ID 선택", options=[s["ID"] for s in snap_data])
+                if st.button("❌ 선택한 스냅샷 삭제", type="secondary"):
+                    if delete_daily_snapshot(delete_id):
+                        st.success("스냅샷이 삭제되었습니다.")
+                        st.rerun()
+                    else:
+                        st.error("삭제 실패")
 
 
 def build_transaction_page(page_cls):

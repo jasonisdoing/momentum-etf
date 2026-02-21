@@ -220,23 +220,19 @@ def get_account_precision(account_id: str) -> dict[str, Any]:
     }
 
 
-def get_account_slack_channel(account_id: str) -> str | None:
-    """슬랙 채널 ID(없으면 None)를 반환합니다."""
+def get_slack_channel() -> str | None:
+    """공통 슬랙 채널 ID를 반환합니다. config.SLACK_CHANNEL을 사용합니다."""
 
-    settings = get_account_settings(account_id)
-    channel_value: str | None = None
+    try:
+        import config
 
-    if isinstance(settings.get("slack"), dict):
-        channel_field = settings["slack"].get("channel")
-        if isinstance(channel_field, str) and channel_field.strip():
-            channel_value = channel_field.strip()
+        channel = getattr(config, "SLACK_CHANNEL", None)
+        if isinstance(channel, str) and channel.strip():
+            return channel.strip()
+    except Exception:
+        pass
 
-    if not channel_value:
-        legacy_channel = settings.get("slack_channel")
-        if isinstance(legacy_channel, str) and legacy_channel.strip():
-            channel_value = legacy_channel.strip()
-
-    return channel_value
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -293,4 +289,4 @@ def get_country_precision(country: str) -> dict[str, Any]:  # pragma: no cover
 
 
 def get_country_slack_channel(country: str) -> str | None:  # pragma: no cover
-    return get_account_slack_channel(country)
+    return get_slack_channel()

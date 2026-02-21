@@ -866,7 +866,6 @@ def main() -> None:
 
     target_country = (getattr(report, "country_code", "") or account_country or "").strip().lower()
     notified = send_recommendation_slack_notification(
-        account_id,
         slack_payload,
     )
 

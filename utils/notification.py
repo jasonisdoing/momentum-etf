@@ -26,7 +26,7 @@ except ImportError:  # pragma: no cover - 선택적 의존성 처리
 from utils.account_registry import get_account_settings
 from utils.logger import APP_LABEL, get_app_logger
 from utils.report import format_kr_money
-from utils.settings_loader import get_account_slack_channel, resolve_strategy_params
+from utils.settings_loader import get_slack_channel, resolve_strategy_params
 
 _LAST_ERROR: str | None = None
 logger = get_app_logger()
@@ -76,15 +76,6 @@ def send_slack_message(
 
 def get_last_error() -> str | None:
     return _LAST_ERROR
-
-
-# def send_verbose_log_to_slack(message: str):
-#     webhook_url = os.environ.get("VERBOSE_LOGS_SLACK_WEBHOOK")
-#     if webhook_url:
-#         log_message = f"📜 *[{APP_LABEL}]*{message}"
-#         send_slack_message(
-#             log_message, webhook_url=webhook_url, webhook_name="VERBOSE_LOGS_SLACK_WEBHOOK"
-#         )
 
 
 # ---------------------------------------------------------------------------
@@ -353,10 +344,13 @@ def compose_recommendation_slack_message(
 
 
 def send_recommendation_slack_notification(
-    account_id: str,
     payload: dict[str, Any] | str,
-) -> bool:
-    """전달받은 페이로드를 슬랙으로 전송합니다."""
+    thread_ts: str | None = None,
+) -> str | None:
+    """
+    전달받은 페이로드를 슬랙으로 전송합니다.
+    성공 시 메시지의 ts(timestamp)를 반환하고, 실패 시 None을 반환합니다.
+    """
 
     if isinstance(payload, str):
         text = payload
@@ -365,57 +359,55 @@ def send_recommendation_slack_notification(
         text = str(payload.get("text", ""))
         blocks = payload.get("blocks")
 
-    channel = get_account_slack_channel(account_id)
+    channel = get_slack_channel()
     token = os.environ.get("SLACK_BOT_TOKEN")
 
     if not channel:
-        logger.warning("Slack 채널이 설정되어 있지 않아 전송을 건너뜁니다 (account=%s)", account_id)
-        return False
+        logger.warning("Slack 채널이 설정되어 있지 않아 전송을 건너뜁니다.")
+        return None
 
     if not token:
-        logger.warning(
-            "SLACK_BOT_TOKEN 이 설정되지 않아 전송을 건너뜁니다 (account=%s)",
-            account_id,
-        )
-        return False
+        logger.warning("SLACK_BOT_TOKEN 이 설정되지 않아 전송을 건너뜁니다.")
+        return None
 
     if WebClient is None:
-        logger.warning(
-            "slack_sdk 가 설치되어 있지 않아 슬랙 전송을 건너뜁니다 (account=%s)",
-            account_id,
-        )
-        return False
+        logger.warning("slack_sdk 가 설치되어 있지 않아 슬랙 전송을 건너뜁니다.")
+        return None
 
     client = WebClient(token=token)
 
     try:
-        client.chat_postMessage(
+        response = client.chat_postMessage(
             channel=channel,
             text=text or "Slack notification",
             blocks=blocks,
+            thread_ts=thread_ts,
         )
-        logger.info(
-            "Slack message sent via bot token for account=%s (channel=%s)",
-            account_id,
-            channel,
-        )
+        ts = response.get("ts")
+        logger.info("Slack message sent via bot token (channel=%s, ts=%s)", channel, ts)
+        return ts
     except SlackApiError as exc:  # pragma: no cover - 외부 API 호출 오류
         logger.error(
-            "Slack API 호출 중 오류가 발생했습니다 (account=%s): %s",
-            account_id,
+            "Slack API 호출 중 오류가 발생했습니다: %s",
             getattr(exc, "response", {}).get("error") or str(exc),
             exc_info=True,
         )
-        return False
+        return None
     except Exception:  # pragma: no cover - 방어적 처리
-        logger.error(
-            "Slack 메시지 전송 중 알 수 없는 오류가 발생했습니다 (account=%s)",
-            account_id,
-            exc_info=True,
-        )
-        return False
+        logger.error("Slack 메시지 전송 중 알 수 없는 오류가 발생했습니다", exc_info=True)
+        return None
 
-    return True
+
+def send_slack_message_v2(
+    text: str,
+    blocks: list[dict[str, Any]] | None = None,
+    thread_ts: str | None = None,
+) -> str | None:
+    """
+    범용 슬랙 메시지 전송 함수 (WebClient 기반).
+    메시지의 ts(timestamp)를 반환합니다.
+    """
+    return send_recommendation_slack_notification({"text": text, "blocks": blocks}, thread_ts=thread_ts)
 
 
 def _format_shares_for_country(quantity: Any) -> str:
@@ -539,5 +531,6 @@ __all__ = [
     "get_last_error",
     "send_slack_message",
     "send_recommendation_slack_notification",
+    "send_slack_message_v2",
     "strip_html_tags",
 ]

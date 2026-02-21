@@ -6,20 +6,18 @@
 
 ### 모듈 구조
 *   `recommend.py`: 백테스트 엔진을 호출하여 가장 최신일(오늘)의 시뮬레이션 결과를 추출하고 추천 리포트를 생성하는 엔트리 포인트
-*   `core/backtest/`:
-    *   `engine.py`: 핵심 시뮬레이션 엔진 (매매 실행, 시간 순차 처리, 리밸런싱 주기 관리)
-    *   `runner.py`: 계좌별 백테스트 실행 (설정 로드 및 엄격한 유효성 검사)
-    *   `domain.py`: 핵심 데이터 구조 및 설정 (BacktestConfig, AccountBacktestResult)
-    *   `portfolio.py`: 포트폴리오 상태 관리 및 도메인 로직 (종목 카운트, 필터링 등)
-    *   그 외 `filtering.py`, `signals.py` 등 공통 유틸리티
-*   `core/tune/`: 파라미터 최적화 로직 (Ensemble 기반)
-*   `utils/`: 데이터 I/O, 로깅, UI 렌더링 등 유틸리티
+*   `core/backtest/`: 핵심 시뮬레이션 엔진 및 계좌별 백테스트 실행 로직
+*   `scripts/`: 데이터 수집, 캐시 갱신 등 유틸리티 스크립트
+*   `utils/`:
+    *   `cache_utils.py`: **Parquet 기반 캐시 I/O** 및 직렬화 관리
+    *   `ui.py`: Streamlit 커스텀 컴포넌트 및 스타일링
+*   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 
-### 데이터 파이프라인
-1.  **데이터 수집**: `pykrx`, `yfinance`, 네이버 금융 등을 통해 일별 OHLCV 및 INAV 데이터 수집
-2.  **전처리**: 수정주가 반영, 결측치 처리
-3.  **시뮬레이션 (Backtest Engine)**: 과거 데이터부터 현재까지 전략 로직에 따라 매매를 시뮬레이션
-4.  **추천 생성**: 시뮬레이션의 마지막 날(오늘) 상태를 스냅샷으로 추출하여 추천 신호 생성
+### 데이터 파이프라인 및 캐싱
+1.  **데이터 수집**: `pykrx`, `yfinance` 등을 통해 원천 데이터 수집.
+2.  **Parquet 캐싱**: 수집된 데이터는 `utils/cache_utils.py`를 통해 **Apache Parquet** 포맷으로 MongoDB에 저장됩니다. (기존 Pickle 방식의 버전 충돌 문제를 해결)
+3.  **시뮬레이션**: 백테스트 엔진이 캐시된 데이터를 로드하여 전략 시뮬레이션 수행.
+4.  **추천 생성**: 시뮬레이션의 마지막 날 상태를 스냅샷으로 추출.
 
 ## 2. 추천/백테스트 정합성 원칙
 

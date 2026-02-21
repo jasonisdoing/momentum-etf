@@ -2,8 +2,8 @@ name: Recommend - AU
 
 on:
   schedule:
-    - cron: '30 0 * * 1-5'   # KST 09:30
-    - cron: '30 4 * * 1-5'   # KST 13:30
+    - cron: '30 0 * * *'   # KST 09:30
+    - cron: '30 4 * * *'   # KST 13:30
   workflow_dispatch:
 
 jobs:
