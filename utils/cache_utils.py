@@ -98,7 +98,9 @@ def _deserialize_cached_doc(doc: dict[str, Any]) -> pd.DataFrame | None:
 
     try:
         df = pickle.loads(payload)
-    except Exception:
+    except Exception as e:
+        ticker_name = doc.get("ticker", "UNKNOWN")
+        logger.warning("캐시 역직렬화 실패 (%s): %s (Numpy 버전 충돌 의심)", ticker_name, e)
         return None
 
     if df is None or df.empty:
