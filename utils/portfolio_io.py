@@ -2,92 +2,12 @@ import datetime
 from typing import Any
 
 import pandas as pd
+from bson import ObjectId
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
-
-
-def save_portfolio_snapshot(account_id: str, snapshot_date: str, df: pd.DataFrame) -> bool:
-    """Save the parsed dataframe as a snapshot to portfolio_balances collection."""
-    db = get_db_connection()
-    if db is None:
-        logger.error("DB connection failed in save_portfolio_snapshot.")
-        return False
-
-    try:
-        # Load past history to carry-over first_buy_date
-        history = list(db.portfolio_balances.find({"account_id": account_id}).sort("snapshot_date", 1))
-
-        first_buy_lookup = {}
-        for snap in history:
-            for item in snap.get("holdings", []):
-                ticker = item.get("ticker")
-                if ticker and ticker not in first_buy_lookup:
-                    first_buy_lookup[ticker] = item.get("first_buy_date") or snap.get("snapshot_date")
-
-        holdings = []
-        for _, row in df.iterrows():
-            ticker = str(row["티커"])
-            # Fallback to 2026-02-20 if no history exists for this ticker
-            first_buy_date = first_buy_lookup.get(ticker, "2026-02-20")
-
-            # Helper to parse string back to float safely
-            def to_float(val: Any) -> float:
-                if pd.isna(val):
-                    return 0.0
-                if isinstance(val, (int, float)):
-                    return float(val)
-                s = str(val).replace(",", "").replace("원", "").replace("%", "").strip()
-                try:
-                    return float(s)
-                except ValueError:
-                    return 0.0
-
-            item = {
-                "ticker": ticker,
-                "name": str(row["종목명"]),
-                "quantity": to_float(row["수량"]),
-                "average_buy_price": to_float(row["평균 매입가"]),
-                "currency": str(row["환종"]),
-                "current_price": to_float(row.get("현재가", 0)),
-                "valuation_krw": to_float(row.get("평가금액(KRW)", 0)),
-                "purchase_krw": to_float(row.get("매입금액(KRW)", 0)),
-                "first_buy_date": first_buy_date,
-                "bucket": int(row["bucket"]) if "bucket" in row else 1,
-            }
-            holdings.append(item)
-
-        doc = {
-            "account_id": account_id,
-            "snapshot_date": snapshot_date,
-            "total_principal": 0.0,  # Placeholder for net principal tracking
-            "cash_balance": 0.0,  # Placeholder for cash inputs
-            "holdings": holdings,
-            "updated_at": datetime.datetime.now(),
-        }
-
-        db.portfolio_balances.update_one(
-            {"account_id": account_id, "snapshot_date": snapshot_date}, {"$set": doc}, upsert=True
-        )
-        return True
-    except Exception as e:
-        logger.error(f"Error saving portfolio snapshot: {e}")
-        return False
-
-
-def get_latest_portfolio_snapshot(account_id: str) -> dict[str, Any] | None:
-    """Retrieve the latest portfolio snapshot for the account."""
-    db = get_db_connection()
-    if db is None:
-        return None
-
-    cursor = db.portfolio_balances.find({"account_id": account_id}).sort("snapshot_date", -1).limit(1)
-    results = list(cursor)
-    if results:
-        return results[0]
-    return None
 
 
 def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | None:
@@ -138,9 +58,12 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
 
     import streamlit as st
 
-    # Initialize a warnings dict in session_state if it doesn't exist
-    if "cache_warnings" not in st.session_state:
-        st.session_state.cache_warnings = {}  # {account_id: {ticker1, ticker2, ...}}
+    # Initialize a warnings dict in session_state if it doesn't exist (if running in Streamlit)
+    try:
+        if "cache_warnings" not in st.session_state:
+            st.session_state.cache_warnings = {}  # {account_id: {ticker1, ticker2, ...}}
+    except Exception:
+        pass
 
     def _get_current_price(row):
         ticker = str(row["ticker"]).strip().upper()
@@ -149,9 +72,12 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
             msg = f"가격 캐시에 '{ticker}'가 없습니다. 캐시 업데이트를 실행하세요."
             logger.warning(msg)
             # Add to session_state so the UI can display it
-            if account_id not in st.session_state.cache_warnings:
-                st.session_state.cache_warnings[account_id] = set()
-            st.session_state.cache_warnings[account_id].add(ticker)
+            try:
+                if account_id not in st.session_state.cache_warnings:
+                    st.session_state.cache_warnings[account_id] = set()
+                st.session_state.cache_warnings[account_id].add(ticker)
+            except Exception:
+                pass
             return 0.0
         return float(df_cached["Close"].iloc[-1])
 
@@ -260,33 +186,6 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         return df_holdings
 
 
-def list_portfolio_snapshots(account_id: str | None = None) -> list[dict[str, Any]]:
-    """List all portfolio snapshots, optionally filtered by account_id."""
-    db = get_db_connection()
-    if db is None:
-        return []
-
-    query = {}
-    if account_id:
-        query["account_id"] = account_id
-
-    return list(db.portfolio_balances.find(query).sort([("snapshot_date", -1), ("account_id", 1)]))
-
-
-def delete_portfolio_snapshot(account_id: str, snapshot_date: str) -> bool:
-    """Delete a specific portfolio snapshot from the database."""
-    db = get_db_connection()
-    if db is None:
-        return False
-
-    try:
-        result = db.portfolio_balances.delete_one({"account_id": account_id, "snapshot_date": snapshot_date})
-        return result.deleted_count > 0
-    except Exception as e:
-        logger.error(f"Error deleting portfolio snapshot: {e}")
-        return False
-
-
 def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
     """Load the current live balance (master) for an account."""
     db = get_db_connection()
@@ -329,61 +228,87 @@ def save_portfolio_master(
         return False
 
 
-def close_portfolio_period(target_date: str, collection_name: str = "portfolio_weekly") -> bool:
-    """Take a snapshot of current master for ALL accounts and save as one document."""
-    from utils.account_registry import load_account_configs
-
-    configs = load_account_configs()
-    accounts_data = []
-
-    for c in configs:
-        acc_id = c["account_id"]
-        master = load_portfolio_master(acc_id)
-        if master and master.get("holdings"):
-            accounts_data.append(
-                {
-                    "account_id": acc_id,
-                    "total_principal": master.get("total_principal", 0.0),
-                    "cash_balance": master.get("cash_balance", 0.0),
-                    "holdings": master["holdings"],
-                }
-            )
-
-    if not accounts_data:
-        logger.warning(f"No master balances found to close for {target_date}.")
-        return False
-
+def save_daily_snapshot(
+    account_id: str,
+    total_assets: float,
+    total_principal: float,
+    cash_balance: float,
+    valuation_krw: float,
+) -> bool:
+    """Save a daily snapshot of account totals to MongoDB."""
     db = get_db_connection()
     if db is None:
         return False
 
+    snapshot_date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    doc = {
+        "account_id": account_id,
+        "snapshot_date": snapshot_date,
+        "total_assets": float(total_assets),
+        "total_principal": float(total_principal),
+        "cash_balance": float(cash_balance),
+        "valuation_krw": float(valuation_krw),
+        "updated_at": datetime.datetime.now(),
+    }
+
     try:
-        doc = {"snapshot_date": target_date, "accounts": accounts_data, "updated_at": datetime.datetime.now()}
-        db[collection_name].update_one({"snapshot_date": target_date}, {"$set": doc}, upsert=True)
+        # Use upsert to only have one record per day per account
+        db.daily_snapshots.update_one(
+            {"account_id": account_id, "snapshot_date": snapshot_date}, {"$set": doc}, upsert=True
+        )
         return True
     except Exception as e:
-        logger.error(f"Error closing period {target_date} in {collection_name}: {e}")
+        logger.error(f"Error saving daily snapshot: {e}")
         return False
 
 
-def list_period_snapshots(collection_name: str = "portfolio_weekly") -> list[dict[str, Any]]:
-    """List snapshots from the specified period collection."""
+def get_latest_daily_snapshot(account_id: str, before_today: bool = True) -> dict[str, Any] | None:
+    """Retrieve the latest daily snapshot for an account."""
+    db = get_db_connection()
+    if db is None:
+        return None
+
+    query = {"account_id": account_id}
+    if before_today:
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        query["snapshot_date"] = {"$lt": today_str}
+
+    try:
+        cursor = db.daily_snapshots.find(query).sort("snapshot_date", -1).limit(1)
+        results = list(cursor)
+        return results[0] if results else None
+    except Exception as e:
+        logger.error(f"Error fetching latest daily snapshot: {e}")
+        return None
+
+
+def list_daily_snapshots(account_id: str | None = None) -> list[dict[str, Any]]:
+    """List all daily snapshots, optionally filtered by account_id."""
     db = get_db_connection()
     if db is None:
         return []
 
-    return list(db[collection_name].find({}).sort("snapshot_date", -1))
+    query = {}
+    if account_id:
+        query["account_id"] = account_id
+
+    try:
+        return list(db.daily_snapshots.find(query).sort("snapshot_date", -1))
+    except Exception as e:
+        logger.error(f"Error listing daily snapshots: {e}")
+        return []
 
 
-def delete_period_snapshot(collection_name: str, snapshot_date: str) -> bool:
-    """Delete a specific snapshot from the specified period collection."""
+def delete_daily_snapshot(snapshot_id: str) -> bool:
+    """Delete a daily snapshot by its ID."""
     db = get_db_connection()
     if db is None:
         return False
 
     try:
-        db[collection_name].delete_one({"snapshot_date": snapshot_date})
-        return True
+        result = db.daily_snapshots.delete_one({"_id": ObjectId(snapshot_id)})
+        return result.deleted_count > 0
     except Exception as e:
-        logger.error(f"Error deleting snapshot from {collection_name}: {e}")
+        logger.error(f"Error deleting daily snapshot: {e}")
         return False

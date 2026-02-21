@@ -28,13 +28,13 @@ from utils.settings_loader import (
     get_account_settings as get_country_settings,
 )
 from utils.settings_loader import (
-    get_account_slack_channel as get_country_slack_channel,
-)
-from utils.settings_loader import (
     get_account_strategy as get_country_strategy,
 )
 from utils.settings_loader import (
     get_account_strategy_sections as get_country_strategy_sections,
+)
+from utils.settings_loader import (
+    get_slack_channel as get_country_slack_channel,
 )
 from utils.settings_loader import (
     get_strategy_rules,

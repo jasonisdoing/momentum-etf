@@ -17,6 +17,7 @@ import pytz
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from aps import run_recommendation_generation
+
 from utils.account_registry import get_account_settings, list_available_accounts
 from utils.data_loader import get_trading_days
 from utils.env import load_env_if_present
@@ -75,7 +76,7 @@ def main():
         for acc in target_accounts:
             try:
                 msg = f"🏖️ 오늘은 {country.upper()} 시장 휴장일입니다.\n포트폴리오 점검은 내려놓고 푹 쉬세요!"
-                send_recommendation_slack_notification(acc, msg)
+                send_recommendation_slack_notification(msg)
                 logging.info(f"[{acc}] 휴장일 알림 전송 완료")
             except Exception as e:
                 logging.error(f"[{acc}] 휴장일 알림 전송 실패: {e}")
