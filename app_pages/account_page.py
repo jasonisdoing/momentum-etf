@@ -172,7 +172,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
             "버킷 변경", options=BUCKET_OPTIONS, index=BUCKET_OPTIONS.index(current_bucket_name)
         )
 
-        if st.button("💾 변경사항 저장", type="primary", use_container_width=True):
+        if st.button("💾 변경사항 저장", type="primary", width="stretch"):
             new_bucket_int = BUCKET_REVERSE_MAPPING.get(new_bucket_name, 1)
             if update_stock(account_id, ticker, bucket=new_bucket_int):
                 st.toast(f"✅ {ticker} 버킷 변경 완료")
@@ -185,7 +185,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         )
 
         # type="secondary" 속성을 부여하여 CSS 선택자가 적용되도록 함
-        if st.button("🗑️ 삭제 실행", type="secondary", use_container_width=True):
+        if st.button("🗑️ 삭제 실행", type="secondary", width="stretch"):
             if not delete_reason or not delete_reason.strip():
                 st.error("삭제 사유를 입력해야 합니다.")
             elif remove_stock(account_id, ticker, reason=delete_reason.strip()):
@@ -197,17 +197,17 @@ def _render_stocks_meta_table(account_id: str) -> None:
     c_mgr1, c_mgr2, c_mgr3 = st.columns([1, 1, 1])
 
     with c_mgr1:
-        if st.button("➕ 종목 추가", key=f"btn_add_modal_{account_id}", disabled=readonly, use_container_width=True):
+        if st.button("➕ 종목 추가", key=f"btn_add_modal_{account_id}", disabled=readonly, width="stretch"):
             st.session_state[f"show_add_modal_{account_id}"] = True
             st.rerun()
 
     with c_mgr2:
-        if st.button("메타데이터 업데이트", key=f"btn_meta_{account_id}", disabled=readonly, use_container_width=True):
+        if st.button("메타데이터 업데이트", key=f"btn_meta_{account_id}", disabled=readonly, width="stretch"):
             st.session_state[key_meta] = True
             st.rerun()
 
     with c_mgr3:
-        if st.button("가격 캐시 갱신", key=f"btn_price_{account_id}", disabled=readonly, use_container_width=True):
+        if st.button("가격 캐시 갱신", key=f"btn_price_{account_id}", disabled=readonly, width="stretch"):
             st.session_state[key_price] = True
             st.rerun()
 
@@ -345,7 +345,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 "티커 입력", placeholder=placeholder_text, max_chars=12, key=f"in_ticker_{account_id}"
             ).strip()
         with c_btn:
-            do_search = st.button("🔍 조회", key=f"btn_search_{account_id}", use_container_width=True)
+            do_search = st.button("🔍 조회", key=f"btn_search_{account_id}", width="stretch")
 
         if do_search:
             if not d_ticker:
@@ -388,9 +388,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 bucket_int = BUCKET_REVERSE_MAPPING.get(selected_bucket_name, 1)
 
                 # 추가 버튼 (녹색 primary)
-                if st.button(
-                    "➕ 추가하기", type="primary", use_container_width=True, key=f"btn_confirm_add_{account_id}"
-                ):
+                if st.button("➕ 추가하기", type="primary", width="stretch", key=f"btn_confirm_add_{account_id}"):
                     success = add_stock(
                         account_id,
                         ticker_res,
@@ -434,7 +432,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         # 모달 하단: 종료 버튼
         st.write("")
         st.divider()
-        if st.button("닫기", key=f"btn_close_modal_internal_{account_id}", use_container_width=True):
+        if st.button("닫기", key=f"btn_close_modal_internal_{account_id}", width="stretch"):
             st.session_state[f"show_add_modal_{account_id}"] = False
             st.rerun()
 
@@ -718,9 +716,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
 
         c_res1, c_res2 = st.columns(2)
         with c_res1:
-            if st.button(
-                "♻️ 선택 종목 복구", type="primary", key=f"btn_tab_restore_{account_id}", use_container_width=True
-            ):
+            if st.button("♻️ 선택 종목 복구", type="primary", key=f"btn_tab_restore_{account_id}", width="stretch"):
                 restored = 0
                 for _, row in to_restore_df.iterrows():
                     ticker = row["티커"]
@@ -736,7 +732,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
                 "💀 선택 종목 완전 삭제",
                 type="secondary",
                 key=f"btn_tab_hard_del_{account_id}",
-                use_container_width=True,
+                width="stretch",
             ):
                 deleted_count = 0
                 for _, row in to_restore_df.iterrows():

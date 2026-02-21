@@ -138,9 +138,9 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
 
     import streamlit as st
 
-    # Initialize a warnings list in session_state if it doesn't exist
+    # Initialize a warnings dict in session_state if it doesn't exist
     if "cache_warnings" not in st.session_state:
-        st.session_state.cache_warnings = set()
+        st.session_state.cache_warnings = {}  # {account_id: {ticker1, ticker2, ...}}
 
     def _get_current_price(row):
         ticker = str(row["ticker"]).strip().upper()
@@ -149,7 +149,9 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
             msg = f"가격 캐시에 '{ticker}'가 없습니다. 캐시 업데이트를 실행하세요."
             logger.warning(msg)
             # Add to session_state so the UI can display it
-            st.session_state.cache_warnings.add(ticker)
+            if account_id not in st.session_state.cache_warnings:
+                st.session_state.cache_warnings[account_id] = set()
+            st.session_state.cache_warnings[account_id].add(ticker)
             return 0.0
         return float(df_cached["Close"].iloc[-1])
 
@@ -293,14 +295,33 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
     return db.portfolio_master.find_one({"account_id": account_id})
 
 
-def save_portfolio_master(account_id: str, holdings: list[dict[str, Any]]) -> bool:
+def save_portfolio_master(
+    account_id: str,
+    holdings: list[dict[str, Any]],
+    total_principal: float | None = None,
+    cash_balance: float | None = None,
+) -> bool:
     """Save the live balance to portfolio_master."""
     db = get_db_connection()
     if db is None:
         return False
 
     try:
-        doc = {"account_id": account_id, "holdings": holdings, "updated_at": datetime.datetime.now()}
+        # Prevent overwriting cash/principal with 0 if not provided
+        existing = load_portfolio_master(account_id)
+
+        if total_principal is None:
+            total_principal = existing.get("total_principal", 0.0) if existing else 0.0
+        if cash_balance is None:
+            cash_balance = existing.get("cash_balance", 0.0) if existing else 0.0
+
+        doc = {
+            "account_id": account_id,
+            "total_principal": float(total_principal),
+            "cash_balance": float(cash_balance),
+            "holdings": holdings,
+            "updated_at": datetime.datetime.now(),
+        }
         db.portfolio_master.update_one({"account_id": account_id}, {"$set": doc}, upsert=True)
         return True
     except Exception as e:
