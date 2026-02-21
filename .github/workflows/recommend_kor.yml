@@ -2,8 +2,8 @@ name: Recommend - KOR
 
 on:
   schedule:
-    - cron: '0 1 * * 1-5'    # KST 10:00 (오픈 1시간 후)
-    - cron: '30 5 * * 1-5'   # KST 14:30 (종료 1시간 전)
+    - cron: '0 1 * * *'    # KST 10:00 (오픈 1시간 후)
+    - cron: '30 5 * * *'   # KST 14:30 (종료 1시간 전)
   workflow_dispatch:
 
 jobs:
