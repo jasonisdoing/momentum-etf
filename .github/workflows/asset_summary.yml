@@ -2,8 +2,8 @@ name: Daily Asset Summary
 
 on:
   schedule:
-    # 매일 한국 시간 오전 8시 30분 (UTC 23:30)
-    - cron: '30 23 * * *'
+    # 매일 한국 시간 06:00, 11:00, 18:00, 23:00 (UTC 21:00, 02:00, 09:00, 14:00)
+    - cron: '0 2,9,14,21 * * *'
   workflow_dispatch: # 수동 실행 지원
 
 jobs:
@@ -25,7 +25,6 @@ jobs:
 
       - name: Send Slack Asset Summary
         env:
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
-          MONGODB_DB_NAME: ${{ secrets.MONGODB_DB_NAME }}
+          MONGO_DB_CONNECTION_STRING: ${{ secrets.MONGO_DB_CONNECTION_STRING }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: python scripts/slack_asset_summary.py
