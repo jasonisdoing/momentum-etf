@@ -4,7 +4,7 @@
     "name": "국내 일반계좌",
     "desc": "일반계좌에서 운영종인 국내상장 한국 ETF 포트폴리오",
     "country_code": "kor",
-    "currency": "krw",
+    "currency": "KRW",
     "slack_channel": "C09FAU2NHM2",
     "initial_capital_krw": "50000000",
     "show_hold": true,

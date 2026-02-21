@@ -322,8 +322,18 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         return "color: black"
 
     # 전형적인 퍼센트 컬럼들
-    # 전형적인 퍼센트 컬럼들
-    pct_columns = ["일간(%)", "평가(%)", "1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
+    pct_columns = [
+        "일간(%)",
+        "평가수익률(%)",
+        "평가(%)",
+        "수익률(%)",
+        "1주(%)",
+        "1달(%)",
+        "3달(%)",
+        "6달(%)",
+        "12달(%)",
+        "고점대비",
+    ]
     for col in pct_columns:
         if col in df.columns:
             styled = styled.map(_color_daily_pct, subset=[col])
@@ -404,16 +414,24 @@ def render_recommendation_table(
     # 공통 컬럼 설정
     column_config_map: dict[str, st.column_config.BaseColumn] = {
         "계좌": st.column_config.TextColumn("계좌", width=100),
+        "환종": st.column_config.TextColumn("환종", width=60),
+        "타입": st.column_config.TextColumn("타입", width=120),
         "버킷": st.column_config.TextColumn("버킷", width=85),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),
+        "수량": st.column_config.NumberColumn("수량", width="small", format="%.4f"),
+        "평균 매입가": st.column_config.NumberColumn("평균 매입가", width="small", format="%.2f"),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
+        "평가수익률(%)": st.column_config.NumberColumn("평가수익률(%)", width="small", format="%.2f%%"),
+        "매입금액(KRW)": st.column_config.NumberColumn("매입금액(KRW)", width="small", format="localized"),
+        "평가금액(KRW)": st.column_config.NumberColumn("평가금액(KRW)", width="small", format="localized"),
+        "평가손익(KRW)": st.column_config.NumberColumn("평가손익(KRW)", width="small", format="localized"),
+        "수익률(%)": st.column_config.NumberColumn("수익률(%)", width="small", format="%.2f%%"),
         price_label: st.column_config.NumberColumn(price_label, width="small"),
         "상태": st.column_config.TextColumn("상태", width=100),
         "보유일": st.column_config.NumberColumn("보유일", width=50),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
-        # "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
         "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),

@@ -115,6 +115,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
     readonly = is_updating
 
     df = _build_stocks_meta_table(account_id)
+    df_edit = df.copy()
 
     if df.empty:
         st.info("종목 데이터가 없습니다. 종목을 추가하거나 삭제된 종목을 복원하세요.")
@@ -134,23 +135,23 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 return "color: blue"
             return "color: black"
 
-        df_edit = df.copy()
         # 사용자가 요청한 '명칭 있는 체크박스' 구현을 위해 불리언 컬럼 추가
         df_edit.insert(0, "수정/삭제", False)
 
         # 주간거래량 데이터 타입 보장 (숫자형)
         df_edit["주간거래량"] = pd.to_numeric(df_edit["주간거래량"], errors="coerce")
 
-        def _style_bucket(val: Any) -> str:
-            val_str = str(val or "")
-            for b_id, cfg in BUCKET_CONFIG.items():
-                if cfg["name"] in val_str:
-                    return f"background-color: {cfg['bg_color']}; color: {cfg['text_color']}; font-weight: bold; border-radius: 4px;"
-            return ""
+    def _style_bucket(val: Any) -> str:
+        val_str = str(val or "")
+        for b_id, cfg in BUCKET_CONFIG.items():
+            if cfg["name"] in val_str:
+                return f"background-color: {cfg['bg_color']}; color: {cfg['text_color']}; font-weight: bold; border-radius: 4px;"
+        return ""
 
-        pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
-        styled = df_edit.style
+    pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+    styled = df_edit.style
 
+    if not df_edit.empty:
         if "버킷" in df_edit.columns:
             styled = styled.map(_style_bucket, subset=["버킷"])
 

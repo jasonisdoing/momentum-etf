@@ -12,7 +12,7 @@ from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
 )
-from utils.ui import load_account_recommendations, render_recommendation_table
+from utils.ui import render_recommendation_table
 
 
 def _to_plain_dict(value):
@@ -65,13 +65,6 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
 
 
 def _build_home_page(accounts: list[dict[str, Any]]):
-    # 보유 중인 종목: HOLD + 매도 신호가 있지만 아직 보유 중인 종목
-    allowed_states = {
-        "HOLD",
-        "BUY",
-        "BUY_REPLACE",
-    }
-
     def _render_home_page() -> None:
         all_holdings = []
         for account in accounts:
@@ -80,15 +73,14 @@ def _build_home_page(accounts: list[dict[str, Any]]):
                 continue
 
             account_name = account.get("name") or account_id.upper()
-            df, updated_at, country_code = load_account_recommendations(account_id)
 
-            if df is None or df.empty:
-                continue
+            from utils.portfolio_io import load_real_holdings_with_recommendations
 
-            filtered = df[df["상태"].str.upper().isin(allowed_states)].copy()
-            if not filtered.empty:
-                filtered.insert(0, "계좌", account_name)
-                all_holdings.append(filtered)
+            df = load_real_holdings_with_recommendations(account_id)
+
+            if df is not None and not df.empty:
+                df.insert(0, "계좌", account_name)
+                all_holdings.append(df)
 
         if not all_holdings:
             st.info("현재 모든 계좌를 통틀어 보유 중인 종목이 없습니다.")
@@ -96,33 +88,59 @@ def _build_home_page(accounts: list[dict[str, Any]]):
 
         combined_df = pd.concat(all_holdings, ignore_index=True)
 
+        # 요약 메트릭 계산
+        if "평가금액" in combined_df.columns and "매입금액" in combined_df.columns:
+            total_valuation = combined_df["평가금액"].sum()
+            total_purchase = combined_df["매입금액"].sum()
+            total_profit = total_valuation - total_purchase
+            total_profit_pct = (total_profit / total_purchase) * 100 if total_purchase > 0 else 0.0
+
+            st.subheader("총 자산 요약")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric(label="총 평가금액", value=f"{total_valuation:,.0f}원")
+            c2.metric(label="총 매입금액", value=f"{total_purchase:,.0f}원")
+            c3.metric(label="총 평가손익", value=f"{total_profit:,.0f}원", delta=f"{total_profit_pct:,.2f}%")
+            st.divider()
+
         # 정렬: 계좌순(이름에 order가 포함됨) -> 버킷순
         if "bucket" in combined_df.columns:
             combined_df = combined_df.sort_values(["계좌", "bucket"], ascending=[True, True])
         else:
             combined_df = combined_df.sort_values(["계좌"], ascending=[True])
 
+        # Rename target column to 평가수익률(%)
+        if "수익률(%)" in combined_df.columns:
+            combined_df = combined_df.rename(columns={"수익률(%)": "평가수익률(%)"})
+
         # render_recommendation_table 호출 (컬럼 순서 제어를 위해 visible_columns 명시)
         visible_cols = [
             "계좌",
+            "환종",
             "버킷",
             "티커",
             "종목명",
             "일간(%)",
-            "평가(%)",
             "보유일",
+            "평가수익률(%)",
+            "수량",
+            "평균 매입가",
             "현재가",
-            "1주(%)",
-            "1달(%)",
-            "3달(%)",
-            "6달(%)",
-            "12달(%)",
-            "고점대비",
+            "매입금액(KRW)",
+            "평가금액(KRW)",
+            "평가손익(KRW)",
             "추세(3달)",
-            "점수",
-            "지속",
-            "문구",
         ]
+        # 캐시 누락 경고가 있으면 UI 상단에 표시
+        if "cache_warnings" in st.session_state and st.session_state.cache_warnings:
+            missing_tickers = ", ".join(sorted(st.session_state.cache_warnings))
+            st.warning(
+                f"⚠️ 다음 종목들의 가격 캐시 데이터를 불러오지 못했습니다: **{missing_tickers}**\n\n"
+                "현재가가 0원으로 표시될 수 있습니다. 해결을 위해 백그라운드 스크립트(`python scripts/update_price_cache.py`)가 "
+                "실행 중이거나 재실행이 필요합니다."
+            )
+            # 한 번 보여준 후 다음 렌더링을 위해 초기화 (새로고침 시 다시 수집됨)
+            st.session_state.cache_warnings = set()
+
         render_recommendation_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols, height=900)
 
     return _render_home_page
@@ -169,6 +187,8 @@ def main() -> None:
     )
 
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
+    from app_pages.transactions_page import build_transaction_page
+
     pages = [
         page_cls(
             _build_home_page(accounts),
@@ -177,6 +197,7 @@ def main() -> None:
             default=True,
         )
     ]
+    pages.append(build_transaction_page(page_cls))
     for account in accounts:
         pages.append(_build_account_page(page_cls, account))
 
