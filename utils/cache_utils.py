@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import pickle
+import io
 import re
 from collections.abc import Iterable
 from datetime import datetime
@@ -87,7 +87,7 @@ def _get_collection(account_id: str):
     return collection
 
 
-def _deserialize_cached_doc(doc: dict[str, Any]) -> pd.DataFrame | None:
+def _deserialize_cached_doc(doc: dict[str, Any], collection=None) -> pd.DataFrame | None:
     """공통 캐시 문서 역직렬화 로직."""
     if not doc:
         return None
@@ -96,11 +96,23 @@ def _deserialize_cached_doc(doc: dict[str, Any]) -> pd.DataFrame | None:
     if payload is None:
         return None
 
+    ticker_name = doc.get("ticker", "UNKNOWN")
+    df = None
     try:
-        df = pickle.loads(payload)
+        buf = io.BytesIO(payload)
+        df = pd.read_parquet(buf, engine="pyarrow")
     except Exception as e:
-        ticker_name = doc.get("ticker", "UNKNOWN")
-        logger.warning("캐시 역직렬화 실패 (%s): %s (Numpy 버전 충돌 의심)", ticker_name, e)
+        logger.warning(
+            "캐시 역직렬화 실패 (%s). 구버전 캐시이거나 데이터가 손상되었습니다. 재생성합니다. (Error: %s)",
+            ticker_name,
+            e,
+        )
+        if collection is not None and ticker_name != "UNKNOWN":
+            try:
+                collection.delete_one({"ticker": ticker_name})
+                logger.info("손상된 캐시 문서 삭제됨: %s (ticker: %s)", collection.name, ticker_name)
+            except Exception as e_delete:
+                logger.error("손상된 캐시 문서 삭제 실패 (ticker: %s): %s", ticker_name, e_delete)
         return None
 
     if df is None or df.empty:
@@ -133,7 +145,7 @@ def load_cached_frame(account_id: str, ticker: str) -> pd.DataFrame | None:
     except Exception:
         return None
 
-    return _deserialize_cached_doc(doc)
+    return _deserialize_cached_doc(doc, collection)
 
 
 def load_cached_frames_bulk(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
@@ -160,7 +172,7 @@ def load_cached_frames_bulk(account_id: str, tickers: Iterable[str]) -> dict[str
         ticker = (doc.get("ticker") or "").strip().upper()
         if not ticker:
             continue
-        df = _deserialize_cached_doc(doc)
+        df = _deserialize_cached_doc(doc, collection)  # Pass collection for potential cleanup
         if df is None:
             continue
         frames[ticker] = df
@@ -190,7 +202,10 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
         return
 
     try:
-        payload = Binary(pickle.dumps(df_to_save, protocol=pickle.HIGHEST_PROTOCOL))
+        buf = io.BytesIO()
+        df_to_save.to_parquet(buf, engine="pyarrow", compression="snappy")
+        payload = Binary(buf.getvalue())
+
         collection.update_one(
             {"ticker": (ticker or "").strip().upper()},
             {

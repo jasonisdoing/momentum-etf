@@ -118,7 +118,7 @@ def render_transaction_management_page():
                 else:
                     st.error("저장 실패")
 
-    tab_manage, tab_bulk = st.tabs(["📊 잔고 관리 (CRUD)", "📥 잔고 벌크 입력"])
+    tab_manage, tab_bulk, tab_cash = st.tabs(["📊 잔고 관리 (CRUD)", "📥 잔고 벌크 입력", "💵 원금 및 현금 관리"])
 
     # --- Tab 1: 잔고 관리 (Unified CRUD) ---
     with tab_manage:
@@ -212,9 +212,9 @@ def render_transaction_management_page():
 
             btn_save_col, btn_del_col = st.columns(2)
             with btn_save_col:
-                save_clicked = st.button("💾 저장", use_container_width=True, key="btn_edit_save")
+                save_clicked = st.button("💾 저장", width="stretch", key="btn_edit_save")
             with btn_del_col:
-                delete_clicked = st.button("🗑️ 삭제", use_container_width=True, key="btn_edit_delete")
+                delete_clicked = st.button("🗑️ 삭제", width="stretch", key="btn_edit_delete")
 
             if save_clicked:
                 existing_m = load_portfolio_master(acc_id)
@@ -414,11 +414,63 @@ def render_transaction_management_page():
                 st.success(f"✅ 총 {success_count}개 계좌의 [현재 잔고]가 업데이트되었습니다.")
                 del st.session_state.bulk_parsed_df
 
+    # --- Tab 3: 원금 및 현금 관리 ---
+    with tab_cash:
+        st.subheader("계좌별 원금 및 현금 관리")
+        st.info("이곳에서 입력한 투자 원금과 현금 잔고는 홈 화면의 '총 자산 요약' 및 '진짜 수익률' 계산에 반영됩니다.")
+
+        with st.form("cash_manager_bulk_form"):
+            st.write("각 계좌별 투자 원금과 보유 현금을 설정하세요.")
+
+            # Dictionary to track input values per account
+            input_values = {}
+
+            for acc_name, acc_id in account_map.items():
+                st.markdown(f"#### 🏦 {acc_name}")
+                m_data = load_portfolio_master(acc_id)
+                current_principal = m_data.get("total_principal", 0.0) if m_data else 0.0
+                current_cash = m_data.get("cash_balance", 0.0) if m_data else 0.0
+                current_holdings = m_data.get("holdings", []) if m_data else []
+
+                c1, c2 = st.columns(2)
+                with c1:
+                    new_principal = st.number_input(
+                        f"투자 원금 ({acc_name})",
+                        value=int(current_principal),
+                        min_value=0,
+                        step=100000,
+                        format="%d",
+                        key=f"prin_{acc_id}",
+                    )
+                with c2:
+                    new_cash = st.number_input(
+                        f"보유 현금 ({acc_name})",
+                        value=int(current_cash),
+                        min_value=0,
+                        step=100000,
+                        format="%d",
+                        key=f"cash_{acc_id}",
+                    )
+
+                input_values[acc_id] = {"holdings": current_holdings, "principal": new_principal, "cash": new_cash}
+                st.divider()
+
+            submitted = st.form_submit_button("전체 계좌 일괄 저장하기", type="primary", width="stretch")
+            if submitted:
+                success_count = 0
+                for acc_id, data in input_values.items():
+                    if save_portfolio_master(acc_id, data["holdings"], data["principal"], data["cash"]):
+                        success_count += 1
+                if success_count == len(input_values):
+                    st.success(f"✅ 총 {success_count}개 계좌의 원금 및 현금 정보가 성공적으로 저장되었습니다!")
+                else:
+                    st.warning(f"⚠️ {success_count}/{len(input_values)}개 계좌만 저장되었습니다. 로그를 확인해 주세요.")
+
 
 def build_transaction_page(page_cls):
     return page_cls(
         render_transaction_management_page,
-        title="주식 거래 관리",
+        title="계좌 관리",
         icon="📝",
         url_path="transactions",
     )
