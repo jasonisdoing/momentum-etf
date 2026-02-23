@@ -112,6 +112,10 @@ def _render_manage_tab(account_map, account_id_to_country):
         key="manage_table",
         on_select="rerun",
         selection_mode="single-row",
+        column_config={
+            "수량": st.column_config.NumberColumn("수량", format="%d"),
+            "평균 매입가": st.column_config.NumberColumn("평균 매입가", format="%.2f"),
+        },
     )
 
     # Handle row selection → open edit modal
@@ -178,7 +182,13 @@ def _render_bulk_tab(account_map, account_id_to_country):
 
     if "bulk_parsed_df" in st.session_state:
         st.divider()
-        st.dataframe(st.session_state.bulk_parsed_df)
+        st.dataframe(
+            st.session_state.bulk_parsed_df,
+            column_config={
+                "수량": st.column_config.NumberColumn("수량", format="%d"),
+                "평균 매입가": st.column_config.NumberColumn("평균 매입가", format="%.2f"),
+            },
+        )
         if st.button("🚀 위 결과를 [현재 잔고] 마스터에 일괄 반영하기", type="primary"):
             parsed_df = st.session_state.bulk_parsed_df
             unique_accounts = parsed_df["계좌"].unique()
@@ -360,7 +370,7 @@ def add_new_stock_modal(account_map, account_id_to_country):
         with c3:
             new_bucket = st.number_input("버킷번호", min_value=1, max_value=5, value=1, key="add_bucket")
         with c4:
-            new_qty = st.number_input("수량", min_value=0.0, key="add_qty")
+            new_qty = st.number_input("수량", min_value=0, step=1, key="add_qty")
         new_avg_price = st.number_input("평균 매입가", min_value=0.0, key="add_price")
         if st.button("✅ 목록에 추가", type="primary", key="btn_add_confirm"):
             final_ticker = _normalize_ticker(lookup_result["ticker"])
@@ -403,7 +413,7 @@ def edit_stock_modal(row_data):
 
     acc_id = str(row_data.get("account_id", ""))
     st.markdown(f"**{row_data.get('account_name')}** / **{ticker}** / {row_data.get('name')}")
-    new_qty = st.number_input("수량", value=row_data.get("quantity", 0.0), key="edit_qty")
+    new_qty = st.number_input("수량", value=int(row_data.get("quantity", 0)), step=1, key="edit_qty")
     new_price = st.number_input("평균 매입가", value=row_data.get("average_buy_price", 0.0), key="edit_price")
 
     st.markdown(

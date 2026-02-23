@@ -376,6 +376,9 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         else:
             format_dict[price_label] = _safe_format("{:,.2f}")
 
+    if "수량" in df.columns:
+        format_dict["수량"] = _safe_format("{:,.0f}")
+
     if "Nav" in df.columns:
         if is_kr:
             format_dict["Nav"] = _safe_format("{:,.0f}원")
@@ -424,7 +427,7 @@ def render_recommendation_table(
         "버킷": st.column_config.TextColumn("버킷", width=85),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),
-        "수량": st.column_config.NumberColumn("수량", width="small", format="%.4f"),
+        "수량": st.column_config.NumberColumn("수량", width="small", format="%d"),
         "평균 매입가": st.column_config.NumberColumn("평균 매입가", width="small", format="%.2f"),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
