@@ -20,7 +20,6 @@ from recommend import run_recommendation_generation_v2 as run_recommendation_gen
 from utils.account_registry import get_account_settings, list_available_accounts
 from utils.data_loader import get_trading_days
 from utils.env import load_env_if_present
-from utils.notification import send_recommendation_slack_notification
 
 
 def setup_logger():
@@ -72,20 +71,13 @@ def main():
 
     if not is_trading_day:
         logging.info(f"[{country.upper()}] 오늘은 휴장일입니다. ({today_str})")
-        for acc in target_accounts:
-            try:
-                msg = f"🏖️ 오늘은 {country.upper()} 시장 휴장일입니다.\n포트폴리오 점검은 내려놓고 푹 쉬세요!"
-                send_recommendation_slack_notification(msg)
-                logging.info(f"[{acc}] 휴장일 알림 전송 완료")
-            except Exception as e:
-                logging.error(f"[{acc}] 휴장일 알림 전송 실패: {e}")
         return
 
     # 4. 영업일이면 추천 로직 실행
     logging.info(f"[{country.upper()}] 영업일입니다. 추천 로직을 시작합니다.")
     for acc in target_accounts:
         try:
-            run_recommendation_generation(acc, send_slack=True)
+            run_recommendation_generation(acc)
         except Exception as e:
             logging.error(f"[{acc}] 추천 로직 실행 중 오류: {e}", exc_info=True)
 
