@@ -60,7 +60,7 @@ def _get_db_time_info(account_id: str) -> str | None:
 
 
 def render_admin_page() -> None:
-    st.set_page_config(page_title="관리자", page_icon="⚙️", layout="wide")
+    # page config은 app.py의 main()에서 이미 설정됨
 
     # 2. 계정 선택
     from utils.account_registry import load_account_configs

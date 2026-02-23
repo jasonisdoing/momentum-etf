@@ -114,12 +114,13 @@ def _build_home_page(accounts: list[dict[str, Any]]):
         total_stock_profit = 0.0
         total_stock_profit_pct = 0.0
 
-        for account in accounts:
+        # 데이터 로딩 (첫 로딩 시 환율/가격 조회로 시간이 걸릴 수 있음)
+        visible_accounts = [a for a in accounts if a.get("settings", {}).get("show_hold", True)]
+        loading_placeholder = st.empty()
+        for idx, account in enumerate(visible_accounts):
             account_id = account["account_id"]
-            if not account.get("settings", {}).get("show_hold", True):
-                continue
-
             account_name = account.get("name") or account_id.upper()
+            loading_placeholder.info(f"⏳ 로딩 중... {account_name} ({idx + 1}/{len(visible_accounts)})")
 
             # 원금 및 현금 로드
             m_data = load_portfolio_master(account_id)
@@ -164,6 +165,7 @@ def _build_home_page(accounts: list[dict[str, Any]]):
                         "현금": acc_cash,
                     }
                 )
+        loading_placeholder.empty()
 
         if not all_holdings and not account_summaries:
             st.info("현재 모든 계좌를 통틀어 보유 중인 종목이나 자산 정보가 없습니다.")
@@ -525,9 +527,7 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
 
-    # Open Graph 메타 태그 추가 (링크 미리보기용)
-    # 참고: Streamlit의 제약으로 st.markdown()으로 추가한 메타 태그는 <body>에 들어가므로
-    # 실제로는 Nginx sub_filter를 통해 <head>에 주입해야 합니다.
+    # Open Graph 메타 태그
     st.markdown(
         """
         <meta property="og:title" content="Momentum ETF" />
@@ -559,12 +559,11 @@ def main() -> None:
     for account in accounts:
         pages.append(_build_account_page(page_cls, account))
 
-    # 네비게이션 객체 생성 (이 시점에 URL 경로가 인식됨)
+    # 네비게이션 객체 생성 (상단 탭 방식 — 일관된 패딩 동작)
     pg = navigation(pages, position="top")
 
     # --- 인증 로직 시작 ---
     authenticator = _load_authenticator()
-    # "main_login" 키를 사용하여 로그인 상태 관리
     _, auth_status, _ = authenticator.login(location="main")
 
     if auth_status is False:
@@ -581,58 +580,10 @@ def main() -> None:
         st.divider()
     # --- 인증 로직 끝 ---
 
-    st.markdown(
-        """
-        <style>
-        .block-container {
-            padding-top: 0rem !important;
-            padding-bottom: 0.5rem !important;
-            padding-left: 1.0rem !important;
-            padding-right: 1.0rem !important;
-        }
+    # 전역 CSS 주입
+    from utils.ui import inject_global_css
 
-        /* st.navigation(position="top") 사용 시 발생하는 상단 여백 제거 (안전한 높이 유지) */
-        header[data-testid="stHeader"] {
-            height: 3.0rem !important;
-            min-height: 3.0rem !important;
-        }
-
-        /* 컨텐츠 간격 최적화 */
-        div[data-testid="stVerticalBlock"] {
-            gap: 0.5rem !important;
-        }
-
-        .block-container h1,
-        .block-container h2,
-        .block-container h3 {
-            margin-top: 0.5rem;
-        }
-
-        .stTabs [data-baseweb="tab-list"] {
-            margin-top: 0 !important;
-        }
-
-        section[data-testid="stSidebar"][aria-expanded="true"] {
-            width: 12rem !important;
-            min-width: 12rem !important;
-        }
-
-        section[data-testid="stSidebar"][aria-expanded="false"] {
-            width: 0 !important;
-            min-width: 0 !important;
-        }
-
-        section[data-testid="stSidebar"][aria-expanded="true"] > div {
-            width: 12rem !important;
-        }
-
-        section[data-testid="stSidebar"][aria-expanded="false"] > div {
-            width: 0 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    inject_global_css()
 
     # --- 3. 라우팅 실행 ---
     pg.run()

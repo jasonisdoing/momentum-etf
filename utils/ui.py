@@ -16,6 +16,49 @@ from utils.settings_loader import get_account_settings
 logger = get_app_logger()
 
 
+def inject_global_css() -> None:
+    """전역 CSS를 주입합니다. main()에서만 호출하세요."""
+    st.markdown(
+        """
+        <style>
+        /* padding-top은 상단 탭 네비게이션에서 일관되게 동작하는 값 */
+        .block-container {
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+            padding-left: 1.0rem !important;
+            padding-right: 1.0rem !important;
+        }
+        div[data-testid="stVerticalBlock"] {
+            gap: 0.5rem !important;
+        }
+        .block-container h1,
+        .block-container h2,
+        .block-container h3 {
+            margin-top: 0.5rem;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            margin-top: 0 !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="true"] {
+            width: 12rem !important;
+            min-width: 12rem !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+            width: 0 !important;
+            min-width: 0 !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="true"] > div {
+            width: 12rem !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="false"] > div {
+            width: 0 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 @st.cache_data(ttl=30, show_spinner=False)
 def load_account_recommendations(
     account_id: str,
