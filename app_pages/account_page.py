@@ -850,7 +850,7 @@ def render_account_page(account_id: str) -> None:
     df, updated_at, loaded_country_code = load_account_recommendations(account_id)
     country_code = loaded_country_code or country_code
 
-    view_mode = st.pills(
+    view_mode = st.segmented_control(
         "뷰",
         ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목", "4. 추천 실행"],
         default="1. 추천 결과",
