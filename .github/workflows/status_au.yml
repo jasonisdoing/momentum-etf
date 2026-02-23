@@ -2,8 +2,8 @@ name: Status Notification - AU
 
 on:
   schedule:
-    - cron: '30 0 * * 1-5'  # 09:30 KST (Open + 1h approx)
-    - cron: '30 4 * * 1-5'  # 13:30 KST (Close - 1h approx)
+    - cron: '30 0 * * 1-5'  # 09:30 KST (개장 후 1.5시간)
+    - cron: '30 6 * * 1-5'  # 15:30 KST (폐장 후 1.5시간)
   workflow_dispatch:
 
 jobs:
