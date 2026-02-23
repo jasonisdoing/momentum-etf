@@ -2,7 +2,7 @@ name: Recommend - KOR Prod
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '47 * * * *'
   workflow_dispatch:
 
 jobs:
