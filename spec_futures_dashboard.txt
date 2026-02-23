@@ -1,0 +1,62 @@
+[Project Specification: Market Sentiment & Futures Dashboard]
+
+1. Overview
+This project is a real-time financial dashboard designed to provide a comprehensive view of global market sentiment and futures data. The primary goal is to replicate the visual style and data accuracy of premium platforms like CNN's Fear & Greed Index and ESignal.
+
+2. Recommended Tech Stack for Standalone App
+- Frontend: Next.js (React), Tailwind CSS
+- Visualization: Plotly.js (or Recharts/D3.js)
+- Backend: Netlify Functions (Node.js/Python) to bypass CORS and hide data sources.
+- Deployment: Netlify
+
+3. Detailed Feature Specifications
+
+Tab 1 & 2: KOSPI 200 Futures (Day/Night)
+- Day Futures:
+  * Source: Investing.com (or ESignal KOSPI 200 page)
+  * Data: Real-time price and change rate.
+- Night Futures:
+  * Source: Eurex (via Investing.com or ESignal Eurex page)
+  * Logic: Change rate must be calculated manually.
+    Formula: ((Current Price - Opening Price) / Opening Price) * 100
+  * Importance: Structure is often different from day futures; Opening price extraction is key.
+
+Tab 3, 4, 5: US Indices (S&P 500, Nasdaq 100, VIX)
+- Real-time Price: Display current price and percentage change.
+- Historical Chart: 1-day or 1-year timeline (based on project needs).
+- Colors: Positive (Red/Green based on local preference), Negative (Blue).
+
+Tab 6: CNN Fear & Greed Index
+- Data API: https://production.dataviz.cnn.io/index/fearandgreed/graphdata
+- Layout (Vertical Layout):
+  A. Header: Display the Score (e.g., 42.6) and Rating (e.g., FEAR) in bold below the title.
+  B. Linear Sentiment Bar (Full Width):
+     - Domain: 0 to 100.
+     - Segments:
+       * 0-25: Extreme Fear (Dark Red, 10% opacity)
+       * 25-45: Fear (Orange/Red, 20% opacity)
+       * 45-55: Neutral (Gray, 5% opacity)
+       * 55-75: Greed (Green, 20% opacity)
+       * 75-100: Extreme Greed (Deep Green, 30% opacity)
+     - Current Score Marker: A thick black bar (#333333) at the score position.
+  C. Labels: Position labels (EXTREME FEAR, FEAR, NEUTRAL, GREED, EXTREME GREED) directly above each segment.
+  D. Historical Timeline: Plot "score" vs "timestamp" as an area chart below the bar. Blue line (#006598) with subtle fill.
+
+Tab 7: Market Momentum
+- Data Source: S&P 500 Index (^GSPC via Yahoo Finance API).
+- Indicator: 125-day Simple Moving Average (SMA).
+- Graph Logic:
+  - Line 1: S&P 500 Closing Price (Blue: #006598, width: 2).
+  - Line 2: 125-day SMA (Orange: #f06c00, width: 2).
+  - Time Range: Last 1 Trading Year (approx. 252 days).
+- Hover: Unified X-axis hover to compare price vs MA at any point.
+
+4. Essential Security & Privacy
+- Source Masking: Never call data APIs directly from the browser. All calls should go through a Netlify Function proxy.
+- API Keys: Store all sensitive tokens in Environment Variables.
+- Private Repository: Ensure the source code is kept in a private GitHub repository.
+
+5. Design Principles
+- Modern & Premium: Use clean typography (Inter/Roboto), subtle gradients, and rounded corners.
+- Responsive: Ensure the dashboard is usable on both desktop and mobile viewports.
+- Real-time Update: Refresh data periodically or use WebSockets if available.
