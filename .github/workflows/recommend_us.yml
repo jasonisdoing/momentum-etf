@@ -1,9 +1,8 @@
-name: Recommend - US
+name: Recommend - US Prod
 
 on:
   schedule:
-    - cron: '0 15 * * *'   # KST 24:00 (US 넉넉하게 안전한 오픈 시간)
-    - cron: '30 19 * * *'  # KST 04:30 (US 종료 30분~1시간 반 전)
+    - cron: '*/20 * * * *'
   workflow_dispatch:
 
 jobs:
