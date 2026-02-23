@@ -8,7 +8,7 @@
     "initial_capital_krw": "100000000",
     "show_hold": true,
     "strategy": {
-        "BACKTEST_START_DATE": "2025-01-01",
+        "BACKTEST_START_DATE": "2025-02-01",
         "BACKTESTED_DATE": "2026-02-20 22:51",
         "CAGR": 70.925737,
         "MDD": -12.488047,

@@ -21,6 +21,7 @@ BUCKET_OPTIONS = list(BUCKET_MAPPING.values())
 
 # 네이버 금융 API 설정
 NAVER_FINANCE_ETF_API_URL = "https://finance.naver.com/api/sise/etfItemList.nhn"
+NAVER_FINANCE_STOCK_POLLING_URL = "https://polling.finance.naver.com/api/realtime"
 NAVER_FINANCE_CHART_API_URL = "https://fchart.stock.naver.com/sise.nhn"
 NAVER_FINANCE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
