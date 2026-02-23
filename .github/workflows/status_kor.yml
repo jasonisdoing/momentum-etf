@@ -2,8 +2,8 @@ name: Status Notification - KOR
 
 on:
   schedule:
-    - cron: '0 1 * * 1-5'   # 10:00 KST (Open + 1h)
-    - cron: '30 5 * * 1-5'  # 14:30 KST (Close - 1h)
+    - cron: '0 1 * * 1-5'   # 10:00 KST (개장 후 1시간)
+    - cron: '30 7 * * 1-5'  # 16:30 KST (폐장 후 1시간)
   workflow_dispatch:
 
 jobs:

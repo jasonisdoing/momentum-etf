@@ -28,10 +28,6 @@ from utils.account_registry import (
 from utils.data_loader import MissingPriceDataError, get_latest_trading_day, prepare_price_data
 from utils.formatters import format_pct_change, format_price, format_price_deviation
 from utils.logger import get_app_logger
-from utils.notification import (
-    compose_recommendation_slack_message,
-    send_recommendation_slack_notification,
-)
 from utils.recommendation_storage import save_recommendation_payload
 from utils.report import render_table_eaw
 from utils.settings_loader import load_common_settings
@@ -807,11 +803,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         help="결과 JSON 저장 경로",
     )
-    parser.add_argument(
-        "--slack",
-        action="store_true",
-        help="슬랙 알림 전송 여부",
-    )
     return parser
 
 
@@ -819,17 +810,15 @@ def run_recommendation_generation_v2(
     account_id: str,
     date_str: str | None = None,
     output_path: str | None = None,
-    send_slack: bool = False,
 ) -> bool:
-    """추천 생성 및 저장, (선택적) 슬랙 알림을 수행하는 통합 함수."""
+    """추천 생성 및 저장 통합 함수."""
     try:
-        account_settings = get_account_settings(account_id)
+        get_account_settings(account_id)
         get_strategy_rules(account_id)
     except Exception as exc:
         logger.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
         return False
 
-    account_country = str((account_settings or {}).get("country_code", "") or "")
     print_run_header(account_id, date_str=date_str)
     start_time = time.time()
 
@@ -886,32 +875,8 @@ def run_recommendation_generation_v2(
     except Exception:
         logger.error("추천 로그 저장에 실패했습니다 (account=%s)", account_id, exc_info=True)
 
-    # Slack 알림
-    if send_slack:
-        slack_payload = compose_recommendation_slack_message(
-            account_id,
-            report,
-            duration=duration,
-        )
-
-        target_country = (getattr(report, "country_code", "") or account_country or "").strip().lower()
-        notified = send_recommendation_slack_notification(
-            slack_payload,
-        )
-
-        base_date_str = (
-            report.base_date.strftime("%Y-%m-%d") if hasattr(report.base_date, "strftime") else str(report.base_date)
-        )
-        if notified:
-            logger.info(
-                "[%s/%s] Slack 알림 전송이 완료되었습니다 (소요 %.1fs)",
-                (target_country or account_country or "").upper() or "UNKNOWN",
-                base_date_str,
-                duration,
-            )
-    else:
-        logger.info("ℹ️ Slack 알림 전송이 건너뛰어졌습니다. (--slack 옵션 미사용)")
-
+    duration = time.time() - start_time
+    logger.info("[%s] 추천 생성 완료 (소요 %.1fs)", account_id.upper(), duration)
     return True
 
 
@@ -923,7 +888,6 @@ def main() -> None:
         account_id=args.account.lower(),
         date_str=args.date,
         output_path=args.output,
-        send_slack=args.slack,
     )
     if not success:
         sys.exit(1)
