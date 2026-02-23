@@ -559,8 +559,8 @@ def main() -> None:
     for account in accounts:
         pages.append(_build_account_page(page_cls, account))
 
-    # 네비게이션 객체 생성 (상단 탭 방식 — 일관된 패딩 동작)
-    pg = navigation(pages, position="top")
+    # 네비게이션 객체 생성 (사이드바 방식)
+    pg = navigation(pages, position="sidebar")
 
     # --- 인증 로직 시작 ---
     authenticator = _load_authenticator()
