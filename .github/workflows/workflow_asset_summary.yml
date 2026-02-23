@@ -1,29 +1,27 @@
-name: Recommend - AU Prod
+name: Daily Asset Summary Prod
 
 on:
   schedule:
-    - cron: '*/25 * * * *'
+    - cron: '45 * * * *'
   workflow_dispatch:
 
 jobs:
-  run-au:
+  summary:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
-          pip install setuptools
           pip install -r requirements.txt
 
-      - name: Run AU Action
+      - name: Send Slack Asset Summary
         env:
           MONGO_DB_CONNECTION_STRING: ${{ secrets.MONGO_DB_CONNECTION_STRING }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-        run: python scripts/action_runner.py --country au
+        run: python scripts/slack_asset_summary.py

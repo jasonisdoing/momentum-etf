@@ -2,7 +2,7 @@ name: Cache Refresh
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # 30분마다
+    - cron: '0 * * * *'  # 매시 정각
   workflow_dispatch:      # 수동 실행 가능하도록 트리거 추가
 
 jobs:

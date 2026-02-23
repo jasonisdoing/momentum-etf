@@ -2,8 +2,8 @@ name: Metadata Update
 
 on:
   schedule:
-    - cron: '0 * * * *'  # 매시 정각
-  workflow_dispatch:      # 수동 실행 가능 옵션
+    - cron: '0 0 * * *'  # 매일 자정
+  workflow_dispatch:      # 수동 실행 가능하도록 트리거 추가
 
 jobs:
   update-metadata:
