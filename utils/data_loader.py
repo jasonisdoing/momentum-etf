@@ -14,6 +14,17 @@ from typing import Any
 
 import pandas as pd
 
+from config import (
+    AU_QUOTEAPI_APP_ID,
+    AU_QUOTEAPI_HEADERS,
+    AU_QUOTEAPI_URL,
+    MARKET_SCHEDULES,
+    MIN_TRADING_DAYS,
+    NAVER_FINANCE_ETF_API_URL,
+    NAVER_FINANCE_HEADERS,
+    NAVER_FINANCE_STOCK_POLLING_URL,
+)
+
 # pkg_resources 워닝 억제 (가장 강력한 방법)
 os.environ["PYTHONWARNINGS"] = "ignore"
 warnings.simplefilter("ignore")
@@ -46,9 +57,7 @@ except ImportError:
     _stock = None
 
 # from utils.notification import send_verbose_log_to_slack
-import warnings
 
-from config import MARKET_SCHEDULES
 from utils.cache_utils import load_cached_frame, load_cached_frames_bulk, save_cached_frame
 from utils.logger import get_app_logger
 from utils.stock_list_io import get_etfs_by_country, get_listing_date, set_listing_date
@@ -1153,13 +1162,24 @@ def fetch_ohlcv_for_tickers(
                             sliced = cached_df.loc[cached_df.index >= effective_start].copy()
                             merged = pd.concat([sliced, today_row])
                             merged = merged[~merged.index.duplicated(keep="last")].sort_index()
+
+                            if len(merged) < MIN_TRADING_DAYS:
+                                logger.warning(
+                                    f"[데이터부족] {tkr} 데이터가 충분하지 않습니다 (현재 {len(merged)}일, 최소 {MIN_TRADING_DAYS}일 필요). 누락 처리합니다."
+                                )
+                                missing.append(tkr)
+                                continue
+
                             prefetched_data[key] = merged
                             logger.info(
                                 f"[실시간보완] {tkr} 기존 데이터에 실시간 가격({rt_price:,.0f}) 추가 (캐시 범위: {len(sliced)}일)"
                             )
                         else:
-                            prefetched_data[key] = today_row
-                            logger.info(f"[실시간] {tkr} 데이터를 실시간 가격({rt_price:,.0f})으로 생성")
+                            # 캐시가 전혀 없는 경우 오늘의 실시간 데이터만으로는 MIN_TRADING_DAYS를 충족할 수 없음
+                            logger.warning(
+                                f"[캐시없음] {tkr} 캐시 데이터가 없고 실시간 데이터만 존재합니다. 최소 {MIN_TRADING_DAYS}일의 데이터가 필요합니다."
+                            )
+                            missing.append(tkr)
                         continue
 
                 missing.append(tkr)
@@ -1187,6 +1207,14 @@ def fetch_ohlcv_for_tickers(
                         continue
                 missing.append(tkr)
                 continue
+
+            if len(df) < MIN_TRADING_DAYS:
+                logger.warning(
+                    f"[데이터부족] {tkr} 데이터가 충분하지 않습니다 (현재 {len(df)}일, 최소 {MIN_TRADING_DAYS}일 필요). 누락 처리합니다."
+                )
+                missing.append(tkr)
+                continue
+
             prefetched_data[key] = df
 
     return prefetched_data, missing
@@ -1259,8 +1287,6 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
     if not requests:
         logger.debug("requests 라이브러리가 없어 네이버 iNAV 조회를 건너뜁니다.")
         return {}
-
-    from config import NAVER_FINANCE_ETF_API_URL, NAVER_FINANCE_HEADERS
 
     url = NAVER_FINANCE_ETF_API_URL
     headers = NAVER_FINANCE_HEADERS
@@ -1369,8 +1395,6 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         logger.debug("requests 라이브러리가 없어 네이버 주식 조회를 건너뜁니다.")
         return {}
 
-    from config import NAVER_FINANCE_HEADERS, NAVER_FINANCE_STOCK_POLLING_URL
-
     # 한 번에 최대 50개까지만 지원할 수 있으므로 청크로 나눔 (보통 백테스트 종목이 많지 않음)
     def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float]]:
         query_str = ",".join([f"SERVICE_ITEM:{code}" for code in chunk])
@@ -1450,8 +1474,6 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
     if not requests:
         logger.debug("requests 라이브러리가 없어 호주 QuoteAPI 조회를 건너뜁니다.")
         return {}
-
-    from config import AU_QUOTEAPI_APP_ID, AU_QUOTEAPI_HEADERS, AU_QUOTEAPI_URL
 
     normalized_tickers = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
     if not normalized_tickers:
