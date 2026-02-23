@@ -36,7 +36,9 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         if col not in df_holdings.columns:
             df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date") else 0
 
-    df_holdings["quantity"] = pd.to_numeric(df_holdings["quantity"], errors="coerce").fillna(0.0)
+    df_holdings["quantity"] = (
+        pd.to_numeric(df_holdings["quantity"], errors="coerce").fillna(0.0).apply(np.floor).astype(int)
+    )
     df_holdings["average_buy_price"] = pd.to_numeric(df_holdings["average_buy_price"], errors="coerce").fillna(0.0)
 
     # Calculate days held
@@ -139,7 +141,7 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         df_holdings["매입금액(KRW)"] > 0, (df_holdings["평가손익(KRW)"] / df_holdings["매입금액(KRW)"]) * 100, 0.0
     ).astype(float)
 
-    float_cols = ["수량", "평균 매입가", "현재가", "수익률(%)"]
+    float_cols = ["평균 매입가", "현재가", "수익률(%)"]
     for col in float_cols:
         if col in df_holdings.columns:
             df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").fillna(0.0).astype(float)
@@ -234,12 +236,25 @@ def save_portfolio_master(
                     acc["total_principal"] = float(total_principal)
                 if cash_balance is not None:
                     acc["cash_balance"] = float(cash_balance)
+
+                # Enforce integer quantity
+                import math
+
+                for h in holdings:
+                    h["quantity"] = int(math.floor(float(h.get("quantity", 0.0))))
+
                 acc["holdings"] = holdings
                 acc["updated_at"] = datetime.datetime.now()
                 found = True
                 break
 
         if not found:
+            # Enforce integer quantity
+            import math
+
+            for h in holdings:
+                h["quantity"] = int(math.floor(float(h.get("quantity", 0.0))))
+
             accounts.append(
                 {
                     "account_id": account_id,
