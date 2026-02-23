@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from collections import Counter
 from datetime import datetime
@@ -366,24 +367,46 @@ def _enrich_with_nav_data(
     recommendations: list[dict[str, Any]],
     tickers: list[str],
 ) -> list[dict[str, Any]]:
-    """한국 ETF의 경우 네이버 API에서 Nav와 괴리율을 가져와 채웁니다."""
-    from utils.data_loader import fetch_naver_etf_inav_snapshot
+    """한국 ETF의 경우 네이버 API에서 Nav와 괴리율을 가져와 채웁니다. 개별 종목은 실시간 가격만 채웁니다."""
+    from utils.data_loader import fetch_naver_etf_inav_snapshot, fetch_naver_stock_realtime_snapshot
 
     try:
+        # 1. ETF 정보 조회
         snapshot = fetch_naver_etf_inav_snapshot(tickers)
+
+        # 2. 누락된 종목(개별 주식 등)에 대해 실시간 가격 별도 조회
+        missed = [t for t in tickers if t.upper() not in snapshot]
+        if missed:
+            stock_snapshot = fetch_naver_stock_realtime_snapshot(missed)
+            # ETF 스냅샷 형식으로 변환하여 병합 (nav와 deviation은 없음)
+            for t, data in stock_snapshot.items():
+                snapshot[t] = {
+                    "nowVal": data.get("nowVal"),
+                    "nav": None,
+                    "deviation": None,
+                    "changeRate": data.get("changeRate"),
+                }
     except Exception as e:
-        logger.warning("네이버 ETF Nav 스냅샷 조회 실패: %s", e)
+        logger.warning("네이버 실시간 데이터(ETF/Stock) 스냅샷 조회 실패: %s", e)
         return recommendations
 
     for rec in recommendations:
         ticker = str(rec.get("ticker", "")).upper()
         if ticker in snapshot:
             nav_info = snapshot[ticker]
-            rec["nav_price"] = nav_info.get("nav")
-            rec["price_deviation"] = nav_info.get("deviation")
-            # 실시간 가격으로 덮어쓰기 (옵션)
+            # ETF인 경우에만 nav와 deviation 업데이트
+            if nav_info.get("nav") is not None:
+                rec["nav_price"] = nav_info.get("nav")
+                rec["price_deviation"] = nav_info.get("deviation")
+
+            # 실시간 가격으로 덮어쓰기
             if nav_info.get("nowVal"):
                 rec["price"] = nav_info.get("nowVal")
+
+            # [User Request] 개별 종목의 경우 실시간 changeRate가 있으면 daily_pct 업데이트 (선택 사항)
+            # 여기서는 백테스트 결과의 daily_pct가 0인 경우 실시간 데이터로 보완
+            if rec.get("daily_pct", 0) == 0 and nav_info.get("changeRate") is not None:
+                rec["daily_pct"] = nav_info.get("changeRate")
 
     return recommendations
 
@@ -784,40 +807,46 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         help="결과 JSON 저장 경로",
     )
+    parser.add_argument(
+        "--slack",
+        action="store_true",
+        help="슬랙 알림 전송 여부",
+    )
     return parser
 
 
-def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
-
-    account_id = args.account.lower()
-
+def run_recommendation_generation_v2(
+    account_id: str,
+    date_str: str | None = None,
+    output_path: str | None = None,
+    send_slack: bool = False,
+) -> bool:
+    """추천 생성 및 저장, (선택적) 슬랙 알림을 수행하는 통합 함수."""
     try:
         account_settings = get_account_settings(account_id)
         get_strategy_rules(account_id)
     except Exception as exc:
-        parser.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
+        logger.error(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
+        return False
 
     account_country = str((account_settings or {}).get("country_code", "") or "")
-
-    print_run_header(account_id, date_str=args.date)
+    print_run_header(account_id, date_str=date_str)
     start_time = time.time()
 
     try:
-        report = generate_recommendation_report(account_id=account_id, date_str=args.date)
+        report = generate_recommendation_report(account_id=account_id, date_str=date_str)
     except MissingPriceDataError as exc:
         logger.error(str(exc))
-        raise SystemExit(1)
+        return False
 
     if not report.recommendations:
         logger.warning("%s에 대한 추천 결과가 비어 있습니다.", account_id.upper())
-        return
+        return False
 
     duration = time.time() - start_time
     items = list(report.recommendations)
 
-    print_result_summary(items, account_id, args.date)
+    print_result_summary(items, account_id, date_str)
 
     # MongoDB 저장
     try:
@@ -841,10 +870,10 @@ def main() -> None:
         )
 
     # 커스텀 JSON 저장
-    if args.output:
+    if output_path:
         import json
 
-        custom_path = Path(args.output)
+        custom_path = Path(output_path)
         custom_path.parent.mkdir(parents=True, exist_ok=True)
         with custom_path.open("w", encoding="utf-8") as fp:
             json.dump(items, fp, ensure_ascii=False, indent=2, default=str)
@@ -858,49 +887,46 @@ def main() -> None:
         logger.error("추천 로그 저장에 실패했습니다 (account=%s)", account_id, exc_info=True)
 
     # Slack 알림
-    slack_payload = compose_recommendation_slack_message(
-        account_id,
-        report,
-        duration=duration,
-    )
-
-    target_country = (getattr(report, "country_code", "") or account_country or "").strip().lower()
-    notified = send_recommendation_slack_notification(
-        slack_payload,
-    )
-
-    base_date_str = (
-        report.base_date.strftime("%Y-%m-%d") if hasattr(report.base_date, "strftime") else str(report.base_date)
-    )
-    if notified:
-        logger.info(
-            "[%s/%s] Slack 알림 전송이 완료되었습니다 (소요 %.1fs)",
-            (target_country or account_country or "").upper() or "UNKNOWN",
-            base_date_str,
-            duration,
+    if send_slack:
+        slack_payload = compose_recommendation_slack_message(
+            account_id,
+            report,
+            duration=duration,
         )
+
+        target_country = (getattr(report, "country_code", "") or account_country or "").strip().lower()
+        notified = send_recommendation_slack_notification(
+            slack_payload,
+        )
+
+        base_date_str = (
+            report.base_date.strftime("%Y-%m-%d") if hasattr(report.base_date, "strftime") else str(report.base_date)
+        )
+        if notified:
+            logger.info(
+                "[%s/%s] Slack 알림 전송이 완료되었습니다 (소요 %.1fs)",
+                (target_country or account_country or "").upper() or "UNKNOWN",
+                base_date_str,
+                duration,
+            )
     else:
-        logger.info(
-            "[%s/%s] Slack 알림이 전송되지 않았습니다.",
-            (target_country or account_country or "").upper() or "UNKNOWN",
-            base_date_str,
-        )
+        logger.info("ℹ️ Slack 알림 전송이 건너뛰어졌습니다. (--slack 옵션 미사용)")
 
-    elapsed_total = int(time.time() - start_time)
-    hours, remainder = divmod(elapsed_total, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    parts = []
-    if hours:
-        parts.append(f"{hours}시간")
-    if minutes:
-        parts.append(f"{minutes}분")
-    if seconds or not parts:
-        parts.append(f"{seconds}초")
-    logger.info(
-        "[%s] 총 소요 시간: %s",
-        account_id.upper(),
-        " ".join(parts),
+    return True
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    success = run_recommendation_generation_v2(
+        account_id=args.account.lower(),
+        date_str=args.date,
+        output_path=args.output,
+        send_slack=args.slack,
     )
+    if not success:
+        sys.exit(1)
 
 
 def _enrich_with_period_returns(

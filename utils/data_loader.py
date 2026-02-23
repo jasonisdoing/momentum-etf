@@ -1026,7 +1026,15 @@ def fetch_ohlcv_for_tickers(
         if is_trading_day and is_market_open_time:
             try:
                 if country_lower == "kor":
-                    realtime_data = fetch_naver_etf_inav_snapshot(tickers)
+                    # 1. ETF 조회
+                    etf_data = fetch_naver_etf_inav_snapshot(tickers)
+                    realtime_data.update(etf_data)
+
+                    # 2. 누락된 종목은 개별 종목으로 조회 시도
+                    missed_tickers = [t for t in tickers if t.upper() not in realtime_data]
+                    if missed_tickers:
+                        stock_data = fetch_naver_stock_realtime_snapshot(missed_tickers)
+                        realtime_data.update(stock_data)
                 elif country_lower == "au":
                     realtime_data = fetch_au_quoteapi_snapshot(tickers)
                 elif country_lower == "us":
@@ -1346,6 +1354,82 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
             pass
 
         snapshot[code] = entry
+
+    return snapshot
+
+
+def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """네이버 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
+
+    normalized_codes = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
+    if not normalized_codes:
+        return {}
+
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 네이버 주식 조회를 건너뜁니다.")
+        return {}
+
+    from config import NAVER_FINANCE_HEADERS, NAVER_FINANCE_STOCK_POLLING_URL
+
+    # 한 번에 최대 50개까지만 지원할 수 있으므로 청크로 나눔 (보통 백테스트 종목이 많지 않음)
+    def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float]]:
+        query_str = ",".join([f"SERVICE_ITEM:{code}" for code in chunk])
+        url = f"{NAVER_FINANCE_STOCK_POLLING_URL}?query={query_str}"
+
+        try:
+            response = requests.get(url, headers=NAVER_FINANCE_HEADERS, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            logger.warning("네이버 주식 실시간 조회 실패: %s", exc)
+            return {}
+
+        result = {}
+        items = data.get("result", {}).get("areas", [])
+        if not items:
+            return {}
+
+        # 폴링 API 응답 구조: result.areas[0].datas 에 리스트로 들어있음
+        datas = items[0].get("datas", [])
+        for item in datas:
+            code = str(item.get("cd") or "").strip().upper()
+            if not code:
+                continue
+
+            # nv: 현재가, cv: 전일대비, cr: 등락률
+            price_raw = item.get("nv")
+            change_rate_raw = item.get("cr")
+
+            if price_raw is None:
+                continue
+
+            try:
+                price_value = float(price_raw)
+                entry = {"nowVal": price_value}
+                if change_rate_raw is not None:
+                    entry["changeRate"] = float(change_rate_raw)
+
+                # 추가 필드 (Open, High, Low, Vol)
+                if item.get("ov"):
+                    entry["open"] = float(item["ov"])
+                if item.get("hv"):
+                    entry["high"] = float(item["hv"])
+                if item.get("lv"):
+                    entry["low"] = float(item["lv"])
+                if item.get("aq"):
+                    entry["volume"] = float(item["aq"])
+
+                result[code] = entry
+            except (TypeError, ValueError):
+                continue
+
+        return result
+
+    snapshot: dict[str, dict[str, float]] = {}
+    chunk_size = 50
+    for i in range(0, len(normalized_codes), chunk_size):
+        chunk = normalized_codes[i : i + chunk_size]
+        snapshot.update(_fetch_chunk(chunk))
 
     return snapshot
 

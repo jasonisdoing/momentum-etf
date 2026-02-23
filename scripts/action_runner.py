@@ -16,8 +16,7 @@ import pytz
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from aps import run_recommendation_generation
-
+from recommend import run_recommendation_generation_v2 as run_recommendation_generation
 from utils.account_registry import get_account_settings, list_available_accounts
 from utils.data_loader import get_trading_days
 from utils.env import load_env_if_present
@@ -86,7 +85,7 @@ def main():
     logging.info(f"[{country.upper()}] 영업일입니다. 추천 로직을 시작합니다.")
     for acc in target_accounts:
         try:
-            run_recommendation_generation(acc, country_code=country)
+            run_recommendation_generation(acc, send_slack=True)
         except Exception as e:
             logging.error(f"[{acc}] 추천 로직 실행 중 오류: {e}", exc_info=True)
 
