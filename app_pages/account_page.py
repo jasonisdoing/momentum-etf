@@ -16,7 +16,6 @@ from config import (
     BUCKET_REVERSE_MAPPING,
 )
 from scripts.update_price_cache import refresh_cache_for_target
-from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.data_loader import fetch_ohlcv
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
 from utils.stock_list_io import (
@@ -833,18 +832,6 @@ def render_account_page(account_id: str) -> None:
         st.stop()
 
     country_code = _normalize_code(account_settings.get("country_code"), account_id)
-    page_icon = account_settings.get("icon") or get_icon_fallback(country_code)
-
-    # 메뉴명과 동일한 이름 사용 (BUCKET_TOPN 포함)
-    account_configs = load_account_configs()
-    account_name = None
-    for config in account_configs:
-        if config["account_id"] == account_id:
-            account_name = config["name"]
-            break
-
-    page_title = account_name or "Momentum ETF"
-    st.set_page_config(page_title=page_title, page_icon=page_icon or "📈", layout="wide")
 
     # 추천 데이터 로드 (탭 밖에서 한 번만)
     df, updated_at, loaded_country_code = load_account_recommendations(account_id)
