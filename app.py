@@ -386,9 +386,22 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             # 한 번 보여준 후 다음 렌더링을 위해 초기화
             st.session_state.cache_warnings = {}
 
-        tab_summary, tab_details = st.tabs(["📊 요약", "📋 상세"])
+        if "home_active_subtab" not in st.session_state:
+            st.session_state.home_active_subtab = "📊 요약"
 
-        with tab_summary:
+        active_subtab = st.segmented_control(
+            "홈 메뉴",
+            options=["📊 요약", "📋 상세"],
+            default=st.session_state.home_active_subtab,
+            key="home_subtab_selector",
+            label_visibility="collapsed",
+        )
+        if active_subtab:
+            st.session_state.home_active_subtab = active_subtab
+        else:
+            active_subtab = st.session_state.home_active_subtab
+
+        if active_subtab == "📊 요약":
             if total_assets > 0 or total_purchase > 0:
                 # 섹션 간 간격 최소화를 위한 전역 CSS
                 st.markdown(
@@ -455,7 +468,7 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             else:
                 st.info("평가금액 및 매입금액 데이터가 없어 요약을 표시할 수 없습니다.")
 
-        with tab_details:
+        elif active_subtab == "📋 상세":
             # 정렬: 계좌순(이름에 order가 포함됨) -> 버킷순
             if "bucket" in combined_df.columns:
                 combined_df = combined_df.sort_values(["계좌", "bucket"], ascending=[True, True])
@@ -572,10 +585,21 @@ def main() -> None:
         """
         <style>
         .block-container {
-            padding-top: 0.5rem !important;
+            padding-top: 0rem !important;
             padding-bottom: 0.5rem !important;
             padding-left: 1.0rem !important;
             padding-right: 1.0rem !important;
+        }
+
+        /* st.navigation(position="top") 사용 시 발생하는 상단 여백 제거 (안전한 높이 유지) */
+        header[data-testid="stHeader"] {
+            height: 3.0rem !important;
+            min-height: 3.0rem !important;
+        }
+
+        /* 컨텐츠 간격 최적화 */
+        div[data-testid="stVerticalBlock"] {
+            gap: 0.5rem !important;
         }
 
         .block-container h1,
