@@ -441,7 +441,7 @@ def render_recommendation_table(
         "점수": st.column_config.NumberColumn("점수", width=50, format="%.1f"),
         "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
-        "문구": st.column_config.TextColumn("문구", width="large"),
+        "문구": st.column_config.TextColumn("문구", width="small"),
     }
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")
