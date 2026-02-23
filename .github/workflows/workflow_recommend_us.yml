@@ -2,7 +2,7 @@ name: Recommend - US Prod
 
 on:
   schedule:
-    - cron: '*/20 * * * *'
+    - cron: '49 * * * *'
   workflow_dispatch:
 
 jobs:
