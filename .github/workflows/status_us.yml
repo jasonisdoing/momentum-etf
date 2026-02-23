@@ -1,0 +1,24 @@
+name: Status Notification - US
+
+on:
+  schedule:
+    - cron: '0 15 * * 0-4'  # 00:00 KST
+    - cron: '0 23 * * 0-4'  # 08:00 KST
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run Portfolio Notifier
+        env:
+          MONGO_DB_CONNECTION_STRING: ${{ secrets.MONGO_DB_CONNECTION_STRING }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: python scripts/portfolio_notifier.py --country us
