@@ -367,24 +367,46 @@ def _enrich_with_nav_data(
     recommendations: list[dict[str, Any]],
     tickers: list[str],
 ) -> list[dict[str, Any]]:
-    """한국 ETF의 경우 네이버 API에서 Nav와 괴리율을 가져와 채웁니다."""
-    from utils.data_loader import fetch_naver_etf_inav_snapshot
+    """한국 ETF의 경우 네이버 API에서 Nav와 괴리율을 가져와 채웁니다. 개별 종목은 실시간 가격만 채웁니다."""
+    from utils.data_loader import fetch_naver_etf_inav_snapshot, fetch_naver_stock_realtime_snapshot
 
     try:
+        # 1. ETF 정보 조회
         snapshot = fetch_naver_etf_inav_snapshot(tickers)
+
+        # 2. 누락된 종목(개별 주식 등)에 대해 실시간 가격 별도 조회
+        missed = [t for t in tickers if t.upper() not in snapshot]
+        if missed:
+            stock_snapshot = fetch_naver_stock_realtime_snapshot(missed)
+            # ETF 스냅샷 형식으로 변환하여 병합 (nav와 deviation은 없음)
+            for t, data in stock_snapshot.items():
+                snapshot[t] = {
+                    "nowVal": data.get("nowVal"),
+                    "nav": None,
+                    "deviation": None,
+                    "changeRate": data.get("changeRate"),
+                }
     except Exception as e:
-        logger.warning("네이버 ETF Nav 스냅샷 조회 실패: %s", e)
+        logger.warning("네이버 실시간 데이터(ETF/Stock) 스냅샷 조회 실패: %s", e)
         return recommendations
 
     for rec in recommendations:
         ticker = str(rec.get("ticker", "")).upper()
         if ticker in snapshot:
             nav_info = snapshot[ticker]
-            rec["nav_price"] = nav_info.get("nav")
-            rec["price_deviation"] = nav_info.get("deviation")
-            # 실시간 가격으로 덮어쓰기 (옵션)
+            # ETF인 경우에만 nav와 deviation 업데이트
+            if nav_info.get("nav") is not None:
+                rec["nav_price"] = nav_info.get("nav")
+                rec["price_deviation"] = nav_info.get("deviation")
+
+            # 실시간 가격으로 덮어쓰기
             if nav_info.get("nowVal"):
                 rec["price"] = nav_info.get("nowVal")
+
+            # [User Request] 개별 종목의 경우 실시간 changeRate가 있으면 daily_pct 업데이트 (선택 사항)
+            # 여기서는 백테스트 결과의 daily_pct가 0인 경우 실시간 데이터로 보완
+            if rec.get("daily_pct", 0) == 0 and nav_info.get("changeRate") is not None:
+                rec["daily_pct"] = nav_info.get("changeRate")
 
     return recommendations
 

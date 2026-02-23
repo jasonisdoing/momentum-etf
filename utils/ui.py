@@ -413,6 +413,7 @@ def render_recommendation_table(
 
     # 공통 컬럼 설정
     column_config_map: dict[str, st.column_config.BaseColumn] = {
+        "#": st.column_config.TextColumn("#", width=60),
         "계좌": st.column_config.TextColumn("계좌", width=100),
         "환종": st.column_config.TextColumn("환종", width=60),
         "타입": st.column_config.TextColumn("타입", width=120),
@@ -524,13 +525,12 @@ def _render_single_table(
             columns.remove("bucket")
 
     # column_order를 위해 filtered columns 준비
-    column_order = [col for col in columns if col in column_config_map]
-    # config map에 없는 컬럼도 표시하고 싶다면 추가해야 함.
-    # 여기서는 config map에 있는 것만 우선 표시
+    column_order = []
+    if "#" in columns:
+        column_order.append("#")
 
-    # 나머지 컬럼도 추가 (config 정의 안된 것들)
     for col in columns:
-        if col not in column_order:
+        if col in column_config_map and col not in column_order:
             column_order.append(col)
 
     selected_column_config = {key: column_config_map[key] for key in column_order if key in column_config_map}
