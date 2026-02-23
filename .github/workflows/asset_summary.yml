@@ -1,4 +1,5 @@
 name: Daily Asset Summary
+# Refreshing schedule trigger
 
 on:
   schedule:
