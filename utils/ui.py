@@ -23,13 +23,13 @@ def inject_global_css() -> None:
         <style>
         /* padding-top은 상단 탭 네비게이션에서 일관되게 동작하는 값 */
         .block-container {
-            padding-top: 0.5rem !important;
+            padding-top: 0.1rem !important;
             padding-bottom: 0.5rem !important;
             padding-left: 1.0rem !important;
             padding-right: 1.0rem !important;
         }
         div[data-testid="stVerticalBlock"] {
-            gap: 0.5rem !important;
+            gap: 0.1rem !important;
         }
         .block-container h1,
         .block-container h2,
@@ -256,45 +256,6 @@ def _resolve_row_colors(country_code: str) -> dict[str, str]:
     }
 
     return base_colors
-
-
-def _inject_responsive_styles() -> None:
-    """Mobile-friendly padding and typography tweaks."""
-    st.markdown(
-        """
-        <style>
-            @media (max-width: 900px) {
-                .block-container {
-                    padding-top: 0.75rem;
-                    padding-bottom: 2rem;
-                    padding-left: 0.75rem;
-                    padding-right: 0.75rem;
-                }
-                div[data-testid="stHorizontalBlock"] {
-                    gap: 0.75rem !important;
-                }
-                .stDataFrame table {
-                    font-size: 0.85rem;
-                }
-            }
-            @media (max-width: 600px) {
-                .block-container {
-                    padding-top: 0.5rem;
-                    padding-bottom: 1.5rem;
-                    padding-left: 0.5rem;
-                    padding-right: 0.5rem;
-                }
-                .stDataFrame table {
-                    font-size: 0.78rem;
-                }
-                .stDataFrame tbody tr td {
-                    white-space: normal;
-                }
-            }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.formats.style.Styler:
