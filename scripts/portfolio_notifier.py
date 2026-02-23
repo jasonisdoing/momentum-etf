@@ -131,6 +131,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Real Portfolio Status Notifier")
     parser.add_argument("account", nargs="?", help="Account ID (optional, runs all if omitted)")
+    parser.add_argument("--country", help="Country code to filter by (e.g. kor, us, au)")
     args = parser.parse_args()
 
     if args.account:
@@ -151,10 +152,18 @@ def main():
             send_slack_message_v2(payload["text"], blocks=payload["blocks"])
             logger.info(f"Sent Slack message for {args.account}")
     else:
-        # Run all accounts
+        # Run filtered or all accounts
         accounts = load_account_configs()
+        target_country = args.country.lower() if args.country else None
+
         for acc in accounts:
             account_id = acc["account_id"]
+            country_code = acc.get("country_code", "").lower()
+
+            # Filter by country if specified
+            if target_country and country_code != target_country:
+                continue
+
             if not acc.get("settings", {}).get("show_hold", True):
                 continue
 
