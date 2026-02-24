@@ -825,7 +825,9 @@ def run_recommendation_generation_v2(
     try:
         report = generate_recommendation_report(account_id=account_id, date_str=date_str)
     except MissingPriceDataError as exc:
-        logger.error(str(exc))
+        logger.error("❌ 가격 데이터 부족으로 인해 추천을 생성할 수 없습니다.")
+        logger.error(f"대상 티커: {', '.join(exc.tickers)}")
+        logger.error("💡 '캐시 업데이트(update_price_cache.py)'를 먼저 실행하여 데이터를 확보해 주세요.")
         return False
 
     if not report.recommendations:

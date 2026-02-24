@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import glob
-import os
-import subprocess
 import time
 from typing import Any
 
@@ -16,7 +13,6 @@ from config import (
     BUCKET_REVERSE_MAPPING,
 )
 from scripts.update_price_cache import refresh_cache_for_target
-from utils.account_registry import get_icon_fallback, load_account_configs
 from utils.data_loader import fetch_ohlcv
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
 from utils.stock_list_io import (
@@ -492,102 +488,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
         st.rerun()
 
 
-def _get_latest_log_content(account_id: str) -> tuple[str | None, str | None]:
-    """
-    Get the content of the latest recommend_*.log file for the given account.
-    Returns (filename, content).
-    """
-    log_dir = os.path.join("zaccounts", account_id, "results")
-    search_pattern = os.path.join(log_dir, "recommend_*.log")
-    files = glob.glob(search_pattern)
-
-    if not files:
-        return None, None
-
-    latest_file = max(files, key=os.path.getmtime)
-    try:
-        with open(latest_file, encoding="utf-8") as f:
-            content = f.read()
-        return os.path.basename(latest_file), content
-    except Exception:
-        return os.path.basename(latest_file), "파일을 읽는 중 오류가 발생했습니다."
-
-
-@fragment
-def _render_run_recommendation(account_id: str) -> None:
-    """추천 실행 화면 렌더링"""
-
-    st.caption("이 기능은 백그라운드에서 추천 스크립트(`recommend.py`)를 즉시 실행합니다.")
-
-    # 세션 스테이트 초기화
-    if "admin_console_log" not in st.session_state:
-        st.session_state["admin_console_log"] = ""
-
-    # 1. 실행 버튼
-    if st.button("🚀 추천 시스템 즉시 실행", type="primary", key=f"btn_run_rec_{account_id}"):
-        status_area = st.empty()
-        status_area.info(f"🚀 `{account_id}` 계정 추천 실행 중...")
-
-        try:
-            # logs reset before run
-            st.session_state["admin_console_log"] = ""
-
-            result = subprocess.run(
-                ["python", "recommend.py", account_id],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                check=False,
-            )
-
-            # 실행 결과 저장
-            st.session_state["admin_console_log"] = result.stdout
-
-            if result.returncode == 0:
-                status_area.success(f"✅ `{account_id}` 추천 실행 완료!")
-                time.sleep(1)
-                st.rerun()
-            else:
-                # 에러 로그 파싱 (마지막 줄 또는 [ERROR] 포함 라인)
-                lines = result.stdout.strip().splitlines()
-                error_msg = f"❌ 실행 실패 (Exit Code: {result.returncode})"
-                # 뒤에서부터 탐색하여 [ERROR]가 있는 가장 마지막 줄 찾기
-                for line in reversed(lines):
-                    if "[ERROR]" in line:
-                        error_msg = f"❌ {line.strip()}"
-                        break
-                else:
-                    # [ERROR]를 못 찾았으면 그냥 마지막 줄 표시
-                    if lines:
-                        error_msg = f"❌ {lines[-1].strip()}"
-
-                status_area.error(error_msg)
-
-        except Exception as e:
-            status_area.error(f"실행 중 예외 발생: {str(e)}")
-            st.session_state["admin_console_log"] += f"\n[System Error] {str(e)}"
-
-    st.divider()
-
-    # 2. 콘솔 로그
-    with st.expander("콘솔 로그", expanded=False):
-        log_content = st.session_state.get("admin_console_log", "")
-        if log_content:
-            st.code(log_content)
-        else:
-            st.info("실행 이력이 없습니다.")
-
-    # 3. 파일 결과 (항상 최신 파일 로드)
-    file_name, file_content = _get_latest_log_content(account_id)
-
-    expander_title = f"📁 최신 결과 파일 ({file_name})" if file_name else "📁 최신 결과 파일 (없음)"
-    with st.expander(expander_title, expanded=True):
-        if file_content:
-            st.code(file_content, language="text")
-        else:
-            st.warning("표시할 결과 파일이 존재하지 않습니다.")
-
-
 def _get_active_holdings(df: pd.DataFrame) -> pd.DataFrame:
     """보유 중인 종목만 필터링합니다."""
     try:
@@ -833,26 +733,14 @@ def render_account_page(account_id: str) -> None:
         st.stop()
 
     country_code = _normalize_code(account_settings.get("country_code"), account_id)
-    page_icon = account_settings.get("icon") or get_icon_fallback(country_code)
-
-    # 메뉴명과 동일한 이름 사용 (BUCKET_TOPN 포함)
-    account_configs = load_account_configs()
-    account_name = None
-    for config in account_configs:
-        if config["account_id"] == account_id:
-            account_name = config["name"]
-            break
-
-    page_title = account_name or "Momentum ETF"
-    st.set_page_config(page_title=page_title, page_icon=page_icon or "📈", layout="wide")
 
     # 추천 데이터 로드 (탭 밖에서 한 번만)
     df, updated_at, loaded_country_code = load_account_recommendations(account_id)
     country_code = loaded_country_code or country_code
 
-    view_mode = st.pills(
+    view_mode = st.segmented_control(
         "뷰",
-        ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목", "4. 추천 실행"],
+        ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"],
         default="1. 추천 결과",
         key=f"view_{account_id}",
         label_visibility="collapsed",
@@ -862,8 +750,6 @@ def render_account_page(account_id: str) -> None:
         _render_stocks_meta_table(account_id)
     elif view_mode == "3. 삭제된 종목":
         _render_deleted_stocks_tab(account_id)
-    elif view_mode == "4. 추천 실행":
-        _render_run_recommendation(account_id)
     else:  # "1. 추천 결과" (Default)
         if df is None:
             st.error(

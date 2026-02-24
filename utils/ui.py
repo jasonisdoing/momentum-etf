@@ -16,6 +16,49 @@ from utils.settings_loader import get_account_settings
 logger = get_app_logger()
 
 
+def inject_global_css() -> None:
+    """전역 CSS를 주입합니다. main()에서만 호출하세요."""
+    st.markdown(
+        """
+        <style>
+        /* padding-top은 상단 탭 네비게이션에서 일관되게 동작하는 값 */
+        .block-container {
+            padding-top: 0.1rem !important;
+            padding-bottom: 0.5rem !important;
+            padding-left: 1.0rem !important;
+            padding-right: 1.0rem !important;
+        }
+        div[data-testid="stVerticalBlock"] {
+            gap: 0.1rem !important;
+        }
+        .block-container h1,
+        .block-container h2,
+        .block-container h3 {
+            margin-top: 0.5rem;
+        }
+        .stTabs [data-baseweb="tab-list"] {
+            margin-top: 0 !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="true"] {
+            width: 12rem !important;
+            min-width: 12rem !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+            width: 0 !important;
+            min-width: 0 !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="true"] > div {
+            width: 12rem !important;
+        }
+        section[data-testid="stSidebar"][aria-expanded="false"] > div {
+            width: 0 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 @st.cache_data(ttl=30, show_spinner=False)
 def load_account_recommendations(
     account_id: str,
@@ -215,45 +258,6 @@ def _resolve_row_colors(country_code: str) -> dict[str, str]:
     return base_colors
 
 
-def _inject_responsive_styles() -> None:
-    """Mobile-friendly padding and typography tweaks."""
-    st.markdown(
-        """
-        <style>
-            @media (max-width: 900px) {
-                .block-container {
-                    padding-top: 0.75rem;
-                    padding-bottom: 2rem;
-                    padding-left: 0.75rem;
-                    padding-right: 0.75rem;
-                }
-                div[data-testid="stHorizontalBlock"] {
-                    gap: 0.75rem !important;
-                }
-                .stDataFrame table {
-                    font-size: 0.85rem;
-                }
-            }
-            @media (max-width: 600px) {
-                .block-container {
-                    padding-top: 0.5rem;
-                    padding-bottom: 1.5rem;
-                    padding-left: 0.5rem;
-                    padding-right: 0.5rem;
-                }
-                .stDataFrame table {
-                    font-size: 0.78rem;
-                }
-                .stDataFrame tbody tr td {
-                    white-space: normal;
-                }
-            }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.formats.style.Styler:
     row_colors = _resolve_row_colors(country_code)
 
@@ -372,6 +376,9 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         else:
             format_dict[price_label] = _safe_format("{:,.2f}")
 
+    if "수량" in df.columns:
+        format_dict["수량"] = _safe_format("{:,.0f}")
+
     if "Nav" in df.columns:
         if is_kr:
             format_dict["Nav"] = _safe_format("{:,.0f}원")
@@ -420,7 +427,7 @@ def render_recommendation_table(
         "버킷": st.column_config.TextColumn("버킷", width=85),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),
-        "수량": st.column_config.NumberColumn("수량", width="small", format="%.4f"),
+        "수량": st.column_config.NumberColumn("수량", width="small", format="%d"),
         "평균 매입가": st.column_config.NumberColumn("평균 매입가", width="small", format="%.2f"),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),

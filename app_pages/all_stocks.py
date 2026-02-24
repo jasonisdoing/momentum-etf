@@ -79,12 +79,7 @@ def _style_dataframe(df: pd.DataFrame) -> pd.io.formats.style.Styler:
 def render_all_stocks_page() -> None:
     """모든 종목 페이지 렌더링."""
 
-    st.set_page_config(
-        page_title="전체 종목",
-        page_icon="📊",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
+    # page config은 app.py의 main()에서 이미 설정됨
 
     st.caption("종목 유니버스 메타정보 (stocks.json)")
 
