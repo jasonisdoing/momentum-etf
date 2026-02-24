@@ -27,7 +27,7 @@ def render_transaction_management_page():
     account_id_to_country = {c["account_id"]: c["country_code"] for c in configs}
 
     # --- Navigation ---
-    tabs = ["📊 잔고 CRUD", "📥 벌크 입력", "💵 원금/현금", "📸 스냅샷"]
+    tabs = ["📊 잔고 CRUD", "📥 벌크 입력", "💵 원금/현금", "📸 스냅샷", "🤖 수동 액션"]
 
     # Initialize session state for the selector key if not exists
     if "transaction_tab_selector" not in st.session_state:
@@ -52,6 +52,8 @@ def render_transaction_management_page():
         _render_cash_tab(account_map)
     elif active_tab == "📸 스냅샷":
         _render_snapshot_tab(account_map)
+    elif active_tab == "🤖 수동 액션":
+        _render_action_tab(configs)
 
 
 def _render_manage_tab(account_map, account_id_to_country):
@@ -431,11 +433,84 @@ def edit_stock_modal(row_data):
                 break
         if save_portfolio_master(acc_id, h):
             st.rerun()
-    if b2.button("🗑️ 삭제", width="stretch", key="btn_edit_delete"):
-        m = load_portfolio_master(acc_id)
-        h = [item for item in m["holdings"] if item["ticker"] != ticker]
         if save_portfolio_master(acc_id, h):
             st.rerun()
+
+
+def _render_action_tab(configs):
+    import subprocess
+
+    st.subheader("🤖 수동 액션 실행")
+    st.info("GitHub Action에서 수행하던 추천(Recommend) 및 상태 알림(Status) 작업을 여기서 직접 실행할 수 있습니다.")
+
+    # 계좌 선택
+    account_options = {f"{c['name']} ({c['account_id'].upper()})": c["account_id"] for c in configs}
+    selected_label = st.selectbox("계좌 선택", options=list(account_options.keys()))
+    account_id = account_options[selected_label]
+
+    st.write(f"선택된 계좌: **{account_id}**")
+
+    # 세션 스테이트 초기화 (로그 저장용)
+    log_key = f"action_log_{account_id}"
+    if log_key not in st.session_state:
+        st.session_state[log_key] = ""
+
+    c1, c2 = st.columns(2)
+
+    # 1. 추천 실행
+    with c1:
+        if st.button("🚀 추천 시스템 즉시 실행", type="primary", use_container_width=True):
+            status_placeholder = st.empty()
+            status_placeholder.info(f"⏳ `{account_id}` 추천 실행 중...")
+            try:
+                result = subprocess.run(
+                    ["python", "recommend.py", account_id],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    check=False,
+                )
+                st.session_state[log_key] = result.stdout
+                if result.returncode == 0:
+                    status_placeholder.success("✅ 추천 실행 완료!")
+                else:
+                    status_placeholder.error(f"❌ 실행 실패 (Code: {result.returncode})")
+            except Exception as e:
+                status_placeholder.error(f"⚠️ 오류 발생: {e}")
+                st.session_state[log_key] += f"\n[System Error] {e}"
+
+    # 2. 상태 알림 (Slack)
+    with c2:
+        if st.button("🔔 포트폴리오 상태 알림 전송", type="secondary", use_container_width=True):
+            status_placeholder = st.empty()
+            status_placeholder.info(f"⏳ `{account_id}` 상태 알림 전송 중...")
+            try:
+                # scripts/portfolio_notifier.py 는 인자로 account_id를 받음
+                result = subprocess.run(
+                    ["python", "scripts/portfolio_notifier.py", account_id],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    check=False,
+                )
+                st.session_state[log_key] = result.stdout
+                if result.returncode == 0:
+                    status_placeholder.success("✅ 상태 알림 전송 완료!")
+                else:
+                    status_placeholder.error(f"❌ 전송 실패 (Code: {result.returncode})")
+            except Exception as e:
+                status_placeholder.error(f"⚠️ 오류 발생: {e}")
+                st.session_state[log_key] += f"\n[System Error] {e}"
+
+    st.divider()
+
+    # 콘솔 로그 출력
+    st.markdown("#### 📝 실행 로그")
+    current_log = st.session_state.get(log_key, "")
+    if current_log:
+        st.code(current_log, language="text")
+    else:
+        st.caption("실행 내역이 없습니다. 버튼을 눌러 작업을 시작하세요.")
 
 
 def build_transaction_page(page_cls):
