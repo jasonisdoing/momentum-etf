@@ -23,7 +23,7 @@ def inject_global_css() -> None:
         <style>
         /* padding-top은 상단 탭 네비게이션에서 일관되게 동작하는 값 */
         .block-container {
-            padding-top: 0.1rem !important;
+            padding-top: 2.5rem !important;
             padding-bottom: 0.5rem !important;
             padding-left: 1.0rem !important;
             padding-right: 1.0rem !important;

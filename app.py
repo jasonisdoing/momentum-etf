@@ -75,22 +75,27 @@ def _load_authenticator() -> stauth.Authenticate:
     )
 
 
-def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]):
+def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any], view_mode: str | None = None):
     account_id = account["account_id"]
     icon = account.get("icon") or get_icon_fallback(account.get("country_code", ""))
 
+    title = view_mode if view_mode else account["name"]
+    # URL path에서 슬래시(/) 제거하여 Streamlit nested path 에러 방지
+    clean_view = view_mode.split(".")[-1].strip().replace("/", "_") if view_mode else "main"
+    url_path = f"{account_id}_{clean_view}"
+
     def _render(account_key: str = account_id) -> None:
-        render_account_page(account_key)
+        render_account_page(account_key, view_mode=view_mode)
 
     return page_cls(
         _render,
-        title=account["name"],
+        title=title,
         icon=icon,
-        url_path=account_id,
+        url_path=url_path,
     )
 
 
-def _build_home_page(accounts: list[dict[str, Any]]):
+def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None = None):
     def _render_home_page() -> None:
         from utils.portfolio_io import (
             get_latest_daily_snapshot,
@@ -388,22 +393,24 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             # 한 번 보여준 후 다음 렌더링을 위해 초기화
             st.session_state.cache_warnings = {}
 
-        if "home_active_subtab" not in st.session_state:
-            st.session_state.home_active_subtab = "📊 요약"
+        current_subtab = initial_subtab
+        if current_subtab is None:
+            if "home_active_subtab" not in st.session_state:
+                st.session_state.home_active_subtab = "📊 요약"
 
-        active_subtab = st.segmented_control(
-            "홈 메뉴",
-            options=["📊 요약", "📋 상세"],
-            default=st.session_state.home_active_subtab,
-            key="home_subtab_selector",
-            label_visibility="collapsed",
-        )
-        if active_subtab:
-            st.session_state.home_active_subtab = active_subtab
-        else:
-            active_subtab = st.session_state.home_active_subtab
+            current_subtab = st.segmented_control(
+                "홈 메뉴",
+                options=["📊 요약", "📋 상세"],
+                default=st.session_state.home_active_subtab,
+                key="home_subtab_selector",
+                label_visibility="collapsed",
+            )
+            if current_subtab:
+                st.session_state.home_active_subtab = current_subtab
+            else:
+                current_subtab = st.session_state.home_active_subtab
 
-        if active_subtab == "📊 요약":
+        if current_subtab == "📊 요약":
             if total_assets > 0 or total_purchase > 0:
                 # 섹션 간 간격 최소화를 위한 전역 CSS
                 st.markdown(
@@ -470,7 +477,7 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             else:
                 st.info("평가금액 및 매입금액 데이터가 없어 요약을 표시할 수 없습니다.")
 
-        elif active_subtab == "📋 상세":
+        elif current_subtab == "📋 상세":
             # 정렬: 계좌순(이름에 order가 포함됨) -> 버킷순
             if "bucket" in combined_df.columns:
                 combined_df = combined_df.sort_values(["계좌", "bucket"], ascending=[True, True])
@@ -547,17 +554,34 @@ def main() -> None:
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
     from app_pages.transactions_page import build_transaction_page
 
-    pages = [
+    pages = {}
+
+    # 보유종목 그룹
+    pages["보유종목"] = [
         page_cls(
-            _build_home_page(accounts),
-            title="보유종목",
+            _build_home_page(accounts, initial_subtab="📊 요약"),
+            title="📊 요약",
             icon="🏠",
+            url_path="home_summary",
             default=True,
-        )
+        ),
+        page_cls(
+            _build_home_page(accounts, initial_subtab="📋 상세"),
+            title="📋 상세",
+            icon="📋",
+            url_path="home_details",
+        ),
     ]
-    pages.append(build_transaction_page(page_cls))
+
+    # 계좌 관리 그룹
+    transaction_tabs = ["📊 잔고 CRUD", "📥 벌크 입력", "💵 원금/현금", "📸 스냅샷"]
+    pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
+
+    # 각 계좌 그룹
+    view_modes = ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]
     for account in accounts:
-        pages.append(_build_account_page(page_cls, account))
+        group_name = account["name"]
+        pages[group_name] = [_build_account_page(page_cls, account, view_mode) for view_mode in view_modes]
 
     # 네비게이션 객체 생성 (사이드바 방식)
     pg = navigation(pages, position="sidebar")

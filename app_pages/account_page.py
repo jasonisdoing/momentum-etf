@@ -487,6 +487,34 @@ def _render_stocks_meta_table(account_id: str) -> None:
         del st.session_state[key_price]
         st.rerun()
 
+    # -----------------------------------------------------------------------
+    # 수동 액션 실행 (추천 / 상태 알림)
+    # -----------------------------------------------------------------------
+    st.subheader("🤖 수동 액션 실행")
+    st.info("GitHub Action에서 수행하던 작업을 여기서 직접 실행할 수 있습니다.")
+
+    import subprocess
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if st.button("🚀 추천 시스템 즉시 실행", type="primary", use_container_width=True, key=f"btn_rec_{account_id}"):
+            try:
+                subprocess.Popen(["python", "recommend.py", account_id])
+                st.success(f"✅ `{account_id}` 추천 시스템 실행을 시작했습니다. (배경에서 처리가 완료됩니다)")
+            except Exception as e:
+                st.error(f"⚠️ 실행 시작 오류: {e}")
+
+    with c2:
+        if st.button(
+            "🔔 포트폴리오 상태 알림 전송", type="secondary", use_container_width=True, key=f"btn_noti_{account_id}"
+        ):
+            try:
+                subprocess.Popen(["python", "scripts/portfolio_notifier.py", account_id])
+                st.success(f"✅ `{account_id}` 상태 알림 전송을 시작했습니다. (배경에서 처리가 완료됩니다)")
+            except Exception as e:
+                st.error(f"⚠️ 전송 시작 오류: {e}")
+
 
 def _get_active_holdings(df: pd.DataFrame) -> pd.DataFrame:
     """보유 중인 종목만 필터링합니다."""
@@ -697,7 +725,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     )
 
 
-def render_account_page(account_id: str) -> None:
+def render_account_page(account_id: str, view_mode: str | None = None) -> None:
     """주어진 계정 설정을 기반으로 계정 페이지를 렌더링합니다 (탭 포함)."""
 
     # 버튼 스타일링 (특정 영역의 버튼만 색상 적용)
@@ -738,13 +766,14 @@ def render_account_page(account_id: str) -> None:
     df, updated_at, loaded_country_code = load_account_recommendations(account_id)
     country_code = loaded_country_code or country_code
 
-    view_mode = st.segmented_control(
-        "뷰",
-        ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"],
-        default="1. 추천 결과",
-        key=f"view_{account_id}",
-        label_visibility="collapsed",
-    )
+    if view_mode is None:
+        view_mode = st.segmented_control(
+            "뷰",
+            ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"],
+            default="1. 추천 결과",
+            key=f"view_{account_id}",
+            label_visibility="collapsed",
+        )
 
     if view_mode == "2. 종목 관리":
         _render_stocks_meta_table(account_id)
