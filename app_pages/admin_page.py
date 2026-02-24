@@ -74,8 +74,6 @@ def render_admin_page() -> None:
 
     st.title("⚙️ 관리자 페이지")
 
-    st.info("추천 실행 기능은 각 계좌 페이지의 '추천실행' 탭으로 이동되었습니다.")
-
     st.markdown("---")
     st.subheader("📊 계정 상태 요약")
 
