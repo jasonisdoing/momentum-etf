@@ -229,10 +229,12 @@ def main():
 
         send_slack_message_v2("\n".join(comp_details), thread_ts=main_ts)
 
-    # 4. Save Snapshots for next time
-    save_daily_snapshot("TOTAL", total_assets, global_principal, global_cash, total_assets - global_cash)
+    # 4. Save Snapshots for next time (Consolidated)
+    # Save individual accounts first, then TOTAL (which updates the same document for today)
     for acc in account_summaries:
         save_daily_snapshot(acc["account_id"], acc["total_assets"], acc["principal"], acc["cash"], acc["valuation"])
+
+    save_daily_snapshot("TOTAL", total_assets, global_principal, global_cash, total_assets - global_cash)
 
     logger.info("Slack asset summary sent successfully.")
 

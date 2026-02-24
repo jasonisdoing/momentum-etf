@@ -60,7 +60,7 @@ def _get_db_time_info(account_id: str) -> str | None:
 
 
 def render_admin_page() -> None:
-    st.set_page_config(page_title="관리자", page_icon="⚙️", layout="wide")
+    # page config은 app.py의 main()에서 이미 설정됨
 
     # 2. 계정 선택
     from utils.account_registry import load_account_configs
@@ -73,8 +73,6 @@ def render_admin_page() -> None:
         return
 
     st.title("⚙️ 관리자 페이지")
-
-    st.info("추천 실행 기능은 각 계좌 페이지의 '추천실행' 탭으로 이동되었습니다.")
 
     st.markdown("---")
     st.subheader("📊 계정 상태 요약")

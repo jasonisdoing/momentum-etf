@@ -36,7 +36,9 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         if col not in df_holdings.columns:
             df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date") else 0
 
-    df_holdings["quantity"] = pd.to_numeric(df_holdings["quantity"], errors="coerce").fillna(0.0)
+    df_holdings["quantity"] = (
+        pd.to_numeric(df_holdings["quantity"], errors="coerce").fillna(0.0).apply(np.floor).astype(int)
+    )
     df_holdings["average_buy_price"] = pd.to_numeric(df_holdings["average_buy_price"], errors="coerce").fillna(0.0)
 
     # Calculate days held
@@ -139,7 +141,7 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         df_holdings["매입금액(KRW)"] > 0, (df_holdings["평가손익(KRW)"] / df_holdings["매입금액(KRW)"]) * 100, 0.0
     ).astype(float)
 
-    float_cols = ["수량", "평균 매입가", "현재가", "수익률(%)"]
+    float_cols = ["평균 매입가", "현재가", "수익률(%)"]
     for col in float_cols:
         if col in df_holdings.columns:
             df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").fillna(0.0).astype(float)
@@ -187,11 +189,26 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
 
 
 def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
-    """Load the current live balance (master) for an account."""
+    """Load the current live balance (master) for a specific account from the consolidated document."""
     db = get_db_connection()
     if db is None:
         return None
-    return db.portfolio_master.find_one({"account_id": account_id})
+
+    doc = db.portfolio_master.find_one({"master_id": "GLOBAL"})
+    if not doc or "accounts" not in doc:
+        return None
+
+    for acc in doc["accounts"]:
+        if acc["account_id"] == account_id:
+            # Flatten for backward compatibility in functions that expect account-level dict
+            return {
+                "account_id": acc["account_id"],
+                "total_principal": acc.get("total_principal", 0.0),
+                "cash_balance": acc.get("cash_balance", 0.0),
+                "holdings": acc.get("holdings", []),
+                "updated_at": acc.get("updated_at"),
+            }
+    return None
 
 
 def save_portfolio_master(
@@ -200,28 +217,55 @@ def save_portfolio_master(
     total_principal: float | None = None,
     cash_balance: float | None = None,
 ) -> bool:
-    """Save the live balance to portfolio_master."""
+    """Save/Update one account's balance within the consolidated portfolio_master document."""
     db = get_db_connection()
     if db is None:
         return False
 
     try:
-        # Prevent overwriting cash/principal with 0 if not provided
-        existing = load_portfolio_master(account_id)
+        doc = db.portfolio_master.find_one({"master_id": "GLOBAL"})
+        if not doc:
+            doc = {"master_id": "GLOBAL", "accounts": []}
 
-        if total_principal is None:
-            total_principal = existing.get("total_principal", 0.0) if existing else 0.0
-        if cash_balance is None:
-            cash_balance = existing.get("cash_balance", 0.0) if existing else 0.0
+        accounts = doc.get("accounts", [])
+        found = False
 
-        doc = {
-            "account_id": account_id,
-            "total_principal": float(total_principal),
-            "cash_balance": float(cash_balance),
-            "holdings": holdings,
-            "updated_at": datetime.datetime.now(),
-        }
-        db.portfolio_master.update_one({"account_id": account_id}, {"$set": doc}, upsert=True)
+        for acc in accounts:
+            if acc["account_id"] == account_id:
+                if total_principal is not None:
+                    acc["total_principal"] = float(total_principal)
+                if cash_balance is not None:
+                    acc["cash_balance"] = float(cash_balance)
+
+                # Enforce integer quantity
+                import math
+
+                for h in holdings:
+                    h["quantity"] = int(math.floor(float(h.get("quantity", 0.0))))
+
+                acc["holdings"] = holdings
+                acc["updated_at"] = datetime.datetime.now()
+                found = True
+                break
+
+        if not found:
+            # Enforce integer quantity
+            import math
+
+            for h in holdings:
+                h["quantity"] = int(math.floor(float(h.get("quantity", 0.0))))
+
+            accounts.append(
+                {
+                    "account_id": account_id,
+                    "total_principal": float(total_principal or 0.0),
+                    "cash_balance": float(cash_balance or 0.0),
+                    "holdings": holdings,
+                    "updated_at": datetime.datetime.now(),
+                }
+            )
+
+        db.portfolio_master.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
         return True
     except Exception as e:
         logger.error(f"Error saving portfolio master: {e}")
@@ -235,28 +279,62 @@ def save_daily_snapshot(
     cash_balance: float,
     valuation_krw: float,
 ) -> bool:
-    """Save a daily snapshot of account totals to MongoDB."""
+    """
+    Save a daily snapshot.
+    In the consolidated schema, 'TOTAL' values are stored in the root,
+    and individual accounts in an 'accounts' array.
+    """
     db = get_db_connection()
     if db is None:
         return False
 
     snapshot_date = datetime.datetime.now().strftime("%Y-%m-%d")
 
-    doc = {
-        "account_id": account_id,
-        "snapshot_date": snapshot_date,
-        "total_assets": float(total_assets),
-        "total_principal": float(total_principal),
-        "cash_balance": float(cash_balance),
-        "valuation_krw": float(valuation_krw),
-        "updated_at": datetime.datetime.now(),
-    }
-
     try:
-        # Use upsert to only have one record per day per account
-        db.daily_snapshots.update_one(
-            {"account_id": account_id, "snapshot_date": snapshot_date}, {"$set": doc}, upsert=True
-        )
+        # Find existing snapshot for today
+        doc = db.daily_snapshots.find_one({"snapshot_date": snapshot_date})
+        if not doc:
+            doc = {
+                "snapshot_date": snapshot_date,
+                "total_assets": 0.0,
+                "total_principal": 0.0,
+                "cash_balance": 0.0,
+                "valuation_krw": 0.0,
+                "accounts": [],
+                "updated_at": datetime.datetime.now(),
+            }
+
+        if account_id == "TOTAL":
+            doc["total_assets"] = float(total_assets)
+            doc["total_principal"] = float(total_principal)
+            doc["cash_balance"] = float(cash_balance)
+            doc["valuation_krw"] = float(valuation_krw)
+        else:
+            accounts = doc.get("accounts", [])
+            found = False
+            for acc in accounts:
+                if acc["account_id"] == account_id:
+                    acc["total_assets"] = float(total_assets)
+                    acc["total_principal"] = float(total_principal)
+                    acc["cash_balance"] = float(cash_balance)
+                    acc["valuation_krw"] = float(valuation_krw)
+                    found = True
+                    break
+            if not found:
+                accounts.append(
+                    {
+                        "account_id": account_id,
+                        "total_assets": float(total_assets),
+                        "total_principal": float(total_principal),
+                        "cash_balance": float(cash_balance),
+                        "valuation_krw": float(valuation_krw),
+                    }
+                )
+            doc["accounts"] = accounts
+
+        doc["updated_at"] = datetime.datetime.now()
+
+        db.daily_snapshots.update_one({"snapshot_date": snapshot_date}, {"$set": doc}, upsert=True)
         return True
     except Exception as e:
         logger.error(f"Error saving daily snapshot: {e}")
@@ -264,12 +342,12 @@ def save_daily_snapshot(
 
 
 def get_latest_daily_snapshot(account_id: str, before_today: bool = True) -> dict[str, Any] | None:
-    """Retrieve the latest daily snapshot for an account."""
+    """Retrieve the latest daily snapshot for an account from the consolidated documents."""
     db = get_db_connection()
     if db is None:
         return None
 
-    query = {"account_id": account_id}
+    query = {}
     if before_today:
         today_str = datetime.datetime.now().strftime("%Y-%m-%d")
         query["snapshot_date"] = {"$lt": today_str}
@@ -277,31 +355,57 @@ def get_latest_daily_snapshot(account_id: str, before_today: bool = True) -> dic
     try:
         cursor = db.daily_snapshots.find(query).sort("snapshot_date", -1).limit(1)
         results = list(cursor)
-        return results[0] if results else None
+        if not results:
+            return None
+
+        doc = results[0]
+        if account_id == "TOTAL":
+            return doc
+
+        for acc in doc.get("accounts", []):
+            if acc["account_id"] == account_id:
+                # Add date for context
+                acc["snapshot_date"] = doc["snapshot_date"]
+                return acc
+        return None
     except Exception as e:
         logger.error(f"Error fetching latest daily snapshot: {e}")
         return None
 
 
 def list_daily_snapshots(account_id: str | None = None) -> list[dict[str, Any]]:
-    """List all daily snapshots, optionally filtered by account_id."""
+    """
+    List daily snapshots.
+    If account_id is provided, returns account-specific data flattened.
+    """
     db = get_db_connection()
     if db is None:
         return []
 
-    query = {}
-    if account_id:
-        query["account_id"] = account_id
-
     try:
-        return list(db.daily_snapshots.find(query).sort("snapshot_date", -1))
+        all_docs = list(db.daily_snapshots.find().sort("snapshot_date", -1))
+
+        if not account_id:
+            return all_docs
+
+        flattened = []
+        for doc in all_docs:
+            if account_id == "TOTAL":
+                flattened.append(doc)
+            else:
+                for acc in doc.get("accounts", []):
+                    if acc["account_id"] == account_id:
+                        acc["_id"] = doc["_id"]  # Keep same ID for deletion if needed
+                        acc["snapshot_date"] = doc["snapshot_date"]
+                        flattened.append(acc)
+        return flattened
     except Exception as e:
         logger.error(f"Error listing daily snapshots: {e}")
         return []
 
 
 def delete_daily_snapshot(snapshot_id: str) -> bool:
-    """Delete a daily snapshot by its ID."""
+    """Delete a daily snapshot (all accounts for that day) by its ID."""
     db = get_db_connection()
     if db is None:
         return False
