@@ -465,15 +465,54 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                     full_html = f'<div style="overflow-x: auto;">{table_html.replace("<table ", "<table class='summary-table' ")}</div>'
                     st.html(full_html)
 
-                st.subheader("포트폴리오 구성 비중")
-                table_weight_html = styled_weight_df.to_html()
-                full_weight_html = f'<div style="width: 70%; overflow-x: auto;">{table_weight_html.replace("<table ", "<table class='summary-table' ")}</div>'
-                st.html(full_weight_html)
+                # 왼쪽 50%만 사용하기 위한 컬럼 생성
+                left_col, _ = st.columns([1, 1])
 
-                st.subheader("통계용")
-                table_stat_html = styled_stat_df.to_html()
-                full_stat_html = f'<div style="width: 50%; overflow-x: auto;">{table_stat_html.replace("<table ", "<table class='summary-table' ")}</div>'
-                st.html(full_stat_html)
+                with left_col:
+                    st.subheader("포트폴리오 구성 비중")
+                    table_weight_html = styled_weight_df.to_html()
+                    full_weight_html = f'<div style="overflow-x: auto;">{table_weight_html.replace("<table ", "<table class='summary-table' ")}</div>'
+                    st.html(full_weight_html)
+
+                    st.subheader("통계용")
+                    table_stat_html = styled_stat_df.to_html()
+                    full_stat_html = f'<div style="overflow-x: auto;">{table_stat_html.replace("<table ", "<table class='summary-table' ")}</div>'
+                    st.html(full_stat_html)
+
+                    # 버튼 스타일링 (기존 코드 유지)
+                    st.markdown(
+                        """
+                        <style>
+                        /* 글로벌 슬랙 버튼 (Primary) 스타일 강제 적용 */
+                        .stButton > button[kind="primary"] {
+                            background-color: #2e7d32 !important;
+                            color: white !important;
+                            font-weight: bold !important;
+                            border: none !important;
+                        }
+                        .stButton > button[kind="primary"]:hover {
+                            background-color: #1b5e20 !important;
+                            color: white !important;
+                        }
+                        </style>
+                    """,
+                        unsafe_allow_html=True,
+                    )
+
+                    st.divider()
+                    if st.button(
+                        "🔔 전체 자산 요약 알림 전송 (Slack)",
+                        type="primary",
+                        use_container_width=True,
+                        key="btn_global_slack_summary",
+                    ):
+                        try:
+                            import subprocess
+
+                            subprocess.Popen(["python", "scripts/slack_asset_summary.py"])
+                            st.success("✅ 전체 자산 요약 알림 전송을 시작했습니다. (배경에서 처리가 완료됩니다)")
+                        except Exception as e:
+                            st.error(f"⚠️ 전송 시작 오류: {e}")
             else:
                 st.info("평가금액 및 매입금액 데이터가 없어 요약을 표시할 수 없습니다.")
 
