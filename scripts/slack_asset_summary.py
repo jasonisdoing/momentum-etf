@@ -82,6 +82,14 @@ def get_trend_emoji(val):
     return ""
 
 
+def get_chart_emoji(val):
+    if val > 0:
+        return "📈"
+    elif val < 0:
+        return "📉"
+    return "📊"
+
+
 def main():
     load_env_if_present()
 
@@ -178,8 +186,8 @@ def main():
         f"💰 *총 자산*: *{format_korean_currency(total_assets)}*\n"
         f"🏛️ *투자 원금*: {format_korean_currency(global_principal)}\n"
         f"💵 *현금 잔고*: {format_korean_currency(global_cash)}\n"
-        f"📉 *전일 대비*: {format_korean_currency(global_change)} ({global_change_pct:+.2f}%) {get_trend_emoji(global_change)}\n"
-        f"📈 *총 평가손익*: *{format_korean_currency(total_net_profit)} ({total_net_profit_pct:+.2f}%)*\n"
+        f"{get_chart_emoji(global_change)} *전일 대비*: {format_korean_currency(global_change)} ({global_change_pct:+.2f}%) {get_trend_emoji(global_change)}\n"
+        f"{get_chart_emoji(total_net_profit)} *총 평가손익*: *{format_korean_currency(total_net_profit)} ({total_net_profit_pct:+.2f}%)*\n"
     )
 
     main_ts = send_slack_message_v2(main_text)
