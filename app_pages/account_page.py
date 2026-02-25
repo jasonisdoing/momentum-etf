@@ -487,11 +487,10 @@ def _render_stocks_meta_table(account_id: str) -> None:
         del st.session_state[key_price]
         st.rerun()
 
-    # -----------------------------------------------------------------------
-    # 수동 액션 실행 (추천 / 상태 알림)
-    # -----------------------------------------------------------------------
+
+def _render_manual_actions(account_id: str) -> None:
+    """수동 액션 실행 (추천 / 상태 알림) 영역을 렌더링합니다."""
     st.subheader("🤖 수동 액션 실행")
-    st.info("GitHub Action에서 수행하던 작업을 여기서 직접 실행할 수 있습니다.")
 
     import subprocess
 
@@ -897,6 +896,11 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
                 st.caption("설정 정보를 찾을 수 없습니다.")
     elif view_mode in ("1. 보유 종목", "2. 종목 추세"):
         st.caption("데이터를 찾을 수 없습니다.")
+
+    # 수동 액션 실행 (추천 결과 탭에서만 가장 하단에 표시)
+    if view_mode == "1. 추천 결과":
+        st.divider()
+        _render_manual_actions(account_id)
 
 
 __all__ = ["render_account_page"]
