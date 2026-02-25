@@ -13,6 +13,7 @@ from core.backtest.output.formatters import (
 )
 from strategies.maps.constants import DECISION_MESSAGES
 from utils.data_loader import get_exchange_rate_series
+from utils.formatters import format_trading_days
 from utils.notification import build_summary_line_from_summary_data
 from utils.report import format_kr_money, render_table_eaw
 
@@ -105,7 +106,7 @@ def _build_daily_table_rows(
             buy_date_map[ticker_key] = None
             holding_days_map[ticker_key] = 0
 
-        holding_days_display = str(holding_days_map.get(ticker_key, 0))
+        holding_days_display = format_trading_days(holding_days_map.get(ticker_key, 0))
         price_display = "1" if is_cash else (price_formatter(price) if _is_finite_number(price) else "-")
         shares_display = "1" if is_cash else _format_quantity(shares, qty_precision)
 

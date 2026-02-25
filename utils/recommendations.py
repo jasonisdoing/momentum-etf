@@ -7,6 +7,7 @@ import pandas as pd
 from pandas.io.formats.style import Styler
 
 from strategies.maps.constants import DECISION_CONFIG
+from utils.formatters import format_trading_days
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 
@@ -159,7 +160,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "티커": ticker,
                 "종목명": name,
                 "상태": state,
-                "보유일": holding_days,
+                "보유일": format_trading_days(holding_days),
                 "일간(%)": daily_pct,
                 "평가(%)": evaluation_pct,
                 price_label: price_display,

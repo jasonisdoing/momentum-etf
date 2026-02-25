@@ -26,7 +26,7 @@ from utils.account_registry import (
     list_available_accounts,
 )
 from utils.data_loader import MissingPriceDataError, get_latest_trading_day, prepare_price_data
-from utils.formatters import format_pct_change, format_price, format_price_deviation
+from utils.formatters import format_pct_change, format_price, format_price_deviation, format_trading_days
 from utils.logger import get_app_logger
 from utils.recommendation_storage import save_recommendation_payload
 from utils.report import render_table_eaw
@@ -735,7 +735,7 @@ def dump_recommendation_log(
             ticker,
             name,
             state,
-            str(holding_days) if holding_days > 0 else "-",
+            format_trading_days(holding_days),
             format_pct_change(daily_pct),
             format_pct_change(evaluation_pct) if evaluation_pct != 0 else "-",
             format_price(price, country_code),
