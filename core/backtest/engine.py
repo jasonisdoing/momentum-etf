@@ -346,6 +346,88 @@ def _execute_new_buys(
     return cash, current_holdings_value, purchased_today
 
 
+def check_is_rebalance_day(
+    dt: pd.Timestamp,
+    next_dt: pd.Timestamp | None,
+    rebalance_mode: str,
+    trading_calendar: pd.DatetimeIndex | None = None,
+) -> bool:
+    """주어진 dt가 리밸런싱 날짜(기존 해당 모드의 지정된 거래일)인지 판별하는 헬퍼 함수입니다."""
+    if rebalance_mode == "DAILY":
+        return True
+
+    if rebalance_mode == "WEEKLY":
+        if next_dt is not None:
+            if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
+                return True
+        elif trading_calendar is not None:
+            try:
+                cal_idx = trading_calendar.get_loc(dt)
+                if cal_idx + 1 < len(trading_calendar):
+                    if trading_calendar[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
+                        return True
+            except (KeyError, IndexError, AttributeError):
+                pass
+        return False
+
+    elif rebalance_mode == "TWICE_A_MONTH":
+        import calendar
+
+        dt_friday = dt + pd.Timedelta(days=4 - dt.weekday())
+        days_in_month = calendar.monthrange(dt_friday.year, dt_friday.month)[1]
+        fridays = [d for d in range(1, days_in_month + 1) if dt_friday.replace(day=d).weekday() == 4]
+        if len(fridays) >= 5:
+            target_fridays = [fridays[2], fridays[4]]
+        else:
+            target_fridays = [fridays[1], fridays[3]]
+
+        if dt_friday.day in target_fridays:
+            if next_dt is not None:
+                if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
+                    return True
+            elif trading_calendar is not None:
+                try:
+                    cal_idx = trading_calendar.get_loc(dt)
+                    if cal_idx + 1 < len(trading_calendar):
+                        if trading_calendar[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
+                            return True
+                except (KeyError, IndexError, AttributeError):
+                    pass
+        return False
+
+    elif rebalance_mode == "MONTHLY":
+        if next_dt is not None:
+            if next_dt.month != dt.month:
+                return True
+        elif trading_calendar is not None:
+            try:
+                cal_idx = trading_calendar.get_loc(dt)
+                if cal_idx + 1 < len(trading_calendar):
+                    if trading_calendar[cal_idx + 1].month != dt.month:
+                        return True
+            except (KeyError, IndexError, AttributeError):
+                pass
+        return False
+
+    elif rebalance_mode == "QUARTERLY":
+        target_months = {3, 6, 9, 12}
+        if dt.month in target_months:
+            if next_dt is not None:
+                if next_dt.month != dt.month:
+                    return True
+            elif trading_calendar is not None:
+                try:
+                    cal_idx = trading_calendar.get_loc(dt)
+                    if cal_idx + 1 < len(trading_calendar):
+                        if trading_calendar[cal_idx + 1].month != dt.month:
+                            return True
+                except (KeyError, IndexError, AttributeError):
+                    pass
+        return False
+
+    return False
+
+
 def run_portfolio_backtest(
     stocks: list[dict],
     initial_capital: float = 100_000_000.0,

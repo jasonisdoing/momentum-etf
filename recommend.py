@@ -267,16 +267,13 @@ def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str,
 
     # 1. 정렬 그룹 할당 (daily_report.py와 동일)
     # 0: CASH (현금은 여기서는 제외됨)
-    # 1: HOLD, BUY, BUY_REBALANCE
-    # 2: WAIT / others
+    # 1: 내일 보유할 최종 타겟 10종목 (HOLD, BUY_TOMORROW, BUY, BUY_REBALANCE)
+    # 2: 제외/대기 대상 (WAIT, SELL_TOMORROW, SELL)
     for rec in recommendations:
-        decision = str(rec.get("decision", "")).upper()
-        shares = rec.get("shares", 0) or 0
+        state = str(rec.get("state", "")).upper()
 
-        if decision in ("HOLD", "BUY", "BUY_REBALANCE"):
+        if state in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_TOMORROW"):
             rec["_sort_group"] = 1
-        elif shares > 0:  # 잔고는 있는데 WAIT인 경우 (교체 대상 등)
-            rec["_sort_group"] = 1  # [User Request] 백테스트와 동일하게 상단 그룹에 배치
         else:
             rec["_sort_group"] = 2
 
@@ -284,7 +281,7 @@ def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str,
     def _sort_key(x):
         return (
             x.get("_sort_group", 2),
-            x.get("bucket", 99) if x.get("_sort_group") == 1 else 0,  # 백테스트 로직: 그룹 1인 경우만 버킷 정렬
+            x.get("bucket", 99) if x.get("_sort_group") == 1 else x.get("bucket", 99),  # Group 1, 2 모두 버킷으로 정렬
             -(x.get("score") if x.get("score") is not None else float("-inf")),
             x.get("ticker", ""),
         )
@@ -643,7 +640,34 @@ def generate_recommendation_report(
         recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
 
     # [Tomorrow Replacement Logic] 내일 리밸런싱을 가정하고 교체(Swap) 대상 표기
-    recommendations = _inject_expected_replacements(recommendations, universe_meta)
+    from core.backtest.engine import check_is_rebalance_day
+    from utils.data_loader import get_trading_days
+
+    rebalance_mode = strategy_cfg.get("REBALANCE_MODE", "MONTHLY")
+
+    check_start = result.end_date.strftime("%Y-%m-%d")
+    check_end = (result.end_date + pd.DateOffset(days=30)).strftime("%Y-%m-%d")
+    future_cal = get_trading_days(check_start, check_end, country_code)
+
+    is_tomorrow_rebalance = False
+    if future_cal is not None and len(future_cal) > 0:
+        future_cal_idx = pd.DatetimeIndex(future_cal)
+        future_mask = future_cal_idx > result.end_date
+        future_dates = future_cal_idx[future_mask]
+
+        if len(future_dates) >= 1:
+            next_trading_day = future_dates[0]
+            next_next_trading_day = future_dates[1] if len(future_dates) > 1 else None
+
+            is_tomorrow_rebalance = check_is_rebalance_day(
+                dt=next_trading_day,
+                next_dt=next_next_trading_day,
+                rebalance_mode=rebalance_mode,
+                trading_calendar=future_cal_idx,
+            )
+
+    if is_tomorrow_rebalance:
+        recommendations = _inject_expected_replacements(recommendations, universe_meta)
 
     # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
     recommendations = _assign_final_ranks(recommendations)
