@@ -281,7 +281,7 @@ def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str,
     def _sort_key(x):
         return (
             x.get("_sort_group", 2),
-            x.get("bucket", 99) if x.get("_sort_group") == 1 else x.get("bucket", 99),  # Group 1, 2 모두 버킷으로 정렬
+            x.get("bucket", 99) if x.get("_sort_group") == 1 else 99,  # Group 1은 버킷 정렬, Group 2는 점수순 정렬
             -(x.get("score") if x.get("score") is not None else float("-inf")),
             x.get("ticker", ""),
         )
