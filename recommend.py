@@ -272,7 +272,7 @@ def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str,
     for rec in recommendations:
         state = str(rec.get("state", "")).upper()
 
-        if state in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_TOMORROW"):
+        if state in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_TOMORROW", "BUY_TODAY"):
             rec["_sort_group"] = 1
         else:
             rec["_sort_group"] = 2
@@ -474,8 +474,9 @@ def _apply_bucket_selection(
 def _inject_expected_replacements(
     recommendations: list[dict[str, Any]],
     ticker_meta: dict[str, dict[str, Any]],
+    is_today: bool = False,
 ) -> list[dict[str, Any]]:
-    """만약 내일 당장 리밸런싱을 한다고 가정할 때 교체해야 할 종목에 SELL_TOMORROW, BUY_TOMORROW 상태 부여."""
+    """만약 내일 당장 (또는 오늘) 리밸런싱을 한다고 가정할 때 교체해야 할 종목에 상태 부여."""
 
     # 1. 버킷별 그룹화
     buckets: dict[int, list[dict[str, Any]]] = {i: [] for i in range(1, 6)}
@@ -514,11 +515,18 @@ def _inject_expected_replacements(
 
             # 대기 종목 점수가 보유 종목 점수보다 높으면 교체 지시
             if w_score > h_score:
-                h_cand["state"] = "SELL_TOMORROW"
-                h_cand["phrase"] = f"교체 매도 ({w_cand.get('name')} 편입 예정)"
+                if is_today:
+                    h_cand["state"] = "SELL_TODAY"
+                    h_cand["phrase"] = f"당일 교체 매도 ({w_cand.get('name')} 편입 예정)"
 
-                w_cand["state"] = "BUY_TOMORROW"
-                w_cand["phrase"] = f"교체 진입 ({h_cand.get('name')} 매도 예정)"
+                    w_cand["state"] = "BUY_TODAY"
+                    w_cand["phrase"] = f"당일 교체 진입 ({h_cand.get('name')} 매도 예정)"
+                else:
+                    h_cand["state"] = "SELL_TOMORROW"
+                    h_cand["phrase"] = f"교체 매도 ({w_cand.get('name')} 편입 예정)"
+
+                    w_cand["state"] = "BUY_TOMORROW"
+                    w_cand["phrase"] = f"교체 진입 ({h_cand.get('name')} 매도 예정)"
 
                 held_idx += 1
                 wait_idx += 1
@@ -650,6 +658,7 @@ def generate_recommendation_report(
     future_cal = get_trading_days(check_start, check_end, country_code)
 
     is_tomorrow_rebalance = False
+    is_today_rebalance = False
     if future_cal is not None and len(future_cal) > 0:
         future_cal_idx = pd.DatetimeIndex(future_cal)
         future_mask = future_cal_idx > result.end_date
@@ -666,8 +675,17 @@ def generate_recommendation_report(
                 trading_calendar=future_cal_idx,
             )
 
-    if is_tomorrow_rebalance:
-        recommendations = _inject_expected_replacements(recommendations, universe_meta)
+            is_today_rebalance = check_is_rebalance_day(
+                dt=result.end_date,
+                next_dt=next_trading_day,
+                rebalance_mode=rebalance_mode,
+                trading_calendar=future_cal_idx,
+            )
+
+    if is_today_rebalance:
+        recommendations = _inject_expected_replacements(recommendations, universe_meta, is_today=True)
+    elif is_tomorrow_rebalance:
+        recommendations = _inject_expected_replacements(recommendations, universe_meta, is_today=False)
 
     # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
     recommendations = _assign_final_ranks(recommendations)
