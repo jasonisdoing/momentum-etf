@@ -24,6 +24,7 @@ _BASE_DISPLAY_COLUMNS = [
     "보유일",
     "현재가",
     "1주(%)",
+    "2주(%)",
     "1달(%)",
     "3달(%)",
     "6달(%)",
@@ -134,7 +135,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         evaluation_pct = row.get("evaluation_pct", 0.0)
         price_deviation = row.get("price_deviation") if show_deviation else None
         return_1w = row.get("return_1w", 0.0)
-        # return_2w = row.get("return_2w", 0.0)
+        return_2w = row.get("return_2w", 0.0)
         return_1m = row.get("return_1m", 0.0)
         return_3m = row.get("return_3m", 0.0)
         return_6m = row.get("return_6m", 0.0)
@@ -167,7 +168,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 **({"Nav": row.get("nav_price")} if nav_mode else {}),
                 **({"괴리율": price_deviation} if show_deviation else {}),
                 "1주(%)": return_1w,
-                # "2주(%)": return_2w,
+                "2주(%)": return_2w,
                 "1달(%)": return_1m,
                 "3달(%)": return_3m,
                 "6달(%)": return_6m,

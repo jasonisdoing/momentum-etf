@@ -332,6 +332,7 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         "평가(%)",
         "수익률(%)",
         "1주(%)",
+        "2주(%)",
         "1달(%)",
         "3달(%)",
         "6달(%)",
@@ -440,6 +441,7 @@ def render_recommendation_table(
         "상태": st.column_config.TextColumn("상태", width=80),
         "보유일": st.column_config.TextColumn("보유일", width=60),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+        "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
         "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
@@ -449,7 +451,7 @@ def render_recommendation_table(
         "점수": st.column_config.NumberColumn("점수", width=50, format="%.1f"),
         "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
-        "문구": st.column_config.TextColumn("문구", width="small"),
+        "문구": st.column_config.TextColumn("문구", width="medium"),
     }
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")

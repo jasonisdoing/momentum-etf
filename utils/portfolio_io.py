@@ -177,6 +177,7 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
             "티커",
             "일간(%)",
             "1주(%)",
+            "2주(%)",
             "1달(%)",
             "3달(%)",
             "6달(%)",
