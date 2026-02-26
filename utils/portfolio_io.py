@@ -43,13 +43,24 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
 
     # Calculate days held
     try:
-        now = pd.Timestamp.now()
-        df_holdings["first_buy_date"] = pd.to_datetime(df_holdings["first_buy_date"], errors="coerce")
+        from utils.formatters import format_trading_days
+
+        now = pd.Timestamp.now().normalize()
+        df_holdings["first_buy_date"] = (
+            pd.to_datetime(df_holdings["first_buy_date"], errors="coerce").dt.tz_localize(None).dt.normalize()
+        )
         df_holdings["first_buy_date"] = df_holdings["first_buy_date"].fillna(now)
-        df_holdings["보유일"] = (now - df_holdings["first_buy_date"]).dt.days
+
+        # Calculate business days
+        bus_days = np.busday_count(
+            df_holdings["first_buy_date"].values.astype("datetime64[D]"), now.to_datetime64().astype("datetime64[D]")
+        )
+
+        # Format the business days using format_trading_days
+        df_holdings["보유일"] = [format_trading_days(max(d, 0)) for d in bus_days]
     except Exception as e:
         logger.warning(f"Error calculating dates: {e}")
-        df_holdings["보유일"] = 0
+        df_holdings["보유일"] = "-"
 
     # Fetch prices from price cache and exchange rates
     from utils.cache_utils import load_cached_frames_bulk
@@ -180,6 +191,26 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
 
         # Left join on Ticker
         df_merged = pd.merge(df_holdings, rec_df[cols_to_pull], on="티커", how="left")
+
+        if "일간(%)" in df_merged.columns:
+
+            def _get_daily_pct_fallback(row):
+                ticker = str(row["티커"]).strip().upper()
+                df_cached = cached_frames.get(ticker)
+                if df_cached is None or len(df_cached) < 2:
+                    return 0.0
+                try:
+                    prev_close = float(df_cached["Close"].iloc[-2])
+                    curr_close = float(df_cached["Close"].iloc[-1])
+                    if prev_close > 0:
+                        return ((curr_close - prev_close) / prev_close) * 100
+                except Exception:
+                    pass
+                return 0.0
+
+            missing_mask = df_merged["일간(%)"].isna()
+            if missing_mask.any():
+                df_merged.loc[missing_mask, "일간(%)"] = df_merged[missing_mask].apply(_get_daily_pct_fallback, axis=1)
 
         return df_merged
     else:
