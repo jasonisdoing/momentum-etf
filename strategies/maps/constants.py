@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-DECISION_CONFIG = {
+BACKTEST_STATUS_LIST = {
     "HOLD": {
         "display_name": "<💼 보유>",
         "order": 10,
@@ -48,6 +48,23 @@ DECISION_CONFIG = {
     },
 }
 
+RECOMMEND_STATUS_LIST = {
+    "SELL_TOMORROW": {
+        "display_name": "<📉 내일 매도>",
+        "order": 15,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#ffb6b9",
+    },
+    "BUY_TOMORROW": {
+        "display_name": "<📈 내일 매수>",
+        "order": 20,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#bae1ff",
+    },
+}
+
 
 def _normalize_display_label(raw: str | None) -> str:
     value = str(raw or "").strip()
@@ -66,7 +83,7 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
 
 DECISION_MESSAGES = {
     key: _normalize_display_label(cfg.get("display_name"))
-    for key, cfg in DECISION_CONFIG.items()
+    for key, cfg in {**BACKTEST_STATUS_LIST, **RECOMMEND_STATUS_LIST}.items()
     if isinstance(cfg, dict) and cfg.get("display_name")
 }
 
@@ -86,7 +103,8 @@ DECISION_NOTES = {
 }
 
 __all__ = [
-    "DECISION_CONFIG",
+    "BACKTEST_STATUS_LIST",
+    "RECOMMEND_STATUS_LIST",
     "DECISION_MESSAGES",
     "DECISION_NOTES",
 ]

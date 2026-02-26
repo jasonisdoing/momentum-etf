@@ -133,7 +133,7 @@ def _build_daily_table_rows(
         if not message:
             message = DECISION_MESSAGES.get(decision, "")
 
-        # decision_conf = DECISION_CONFIG.get(decision, {})
+        # decision_conf = BACKTEST_STATUS_LIST.get(decision, {})
         # decision_order = decision_conf.get("order", 99)
         score_val = float(score) if _is_finite_number(score) else float("-inf")
 

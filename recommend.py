@@ -474,6 +474,63 @@ def _apply_bucket_selection(
     return final_list
 
 
+def _inject_expected_replacements(
+    recommendations: list[dict[str, Any]],
+    ticker_meta: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """만약 내일 당장 리밸런싱을 한다고 가정할 때 교체해야 할 종목에 SELL_TOMORROW, BUY_TOMORROW 상태 부여."""
+
+    # 1. 버킷별 그룹화
+    buckets: dict[int, list[dict[str, Any]]] = {i: [] for i in range(1, 6)}
+    for rec in recommendations:
+        ticker = rec.get("ticker", "")
+        meta = ticker_meta.get(ticker, {})
+        bucket_idx = meta.get("bucket", 1)
+        # 안전장치
+        if bucket_idx not in buckets:
+            bucket_idx = 1
+        buckets[bucket_idx].append(rec)
+
+    for b_idx, group in buckets.items():
+        # 상태별 분류
+        held_stocks = [r for r in group if r.get("shares", 0) > 0]
+        wait_stocks = [r for r in group if r.get("shares", 0) <= 0]
+
+        if not held_stocks or not wait_stocks:
+            continue
+
+        # 보유 종목은 점수 오름차순 (가장 점수 낮은 것을 팔아야 함)
+        held_stocks.sort(key=lambda x: (x.get("score") if x.get("score") is not None else float("-inf")))
+
+        # 대기 종목은 점수 내림차순 (가장 점수 높은 것을 사야 함)
+        wait_stocks.sort(key=lambda x: (x.get("score") if x.get("score") is not None else float("-inf")), reverse=True)
+
+        held_idx = 0
+        wait_idx = 0
+
+        while held_idx < len(held_stocks) and wait_idx < len(wait_stocks):
+            h_cand = held_stocks[held_idx]
+            w_cand = wait_stocks[wait_idx]
+
+            h_score = h_cand.get("score") if h_cand.get("score") is not None else float("-inf")
+            w_score = w_cand.get("score") if w_cand.get("score") is not None else float("-inf")
+
+            # 대기 종목 점수가 보유 종목 점수보다 높으면 교체 지시
+            if w_score > h_score:
+                h_cand["state"] = "SELL_TOMORROW"
+                h_cand["phrase"] = f"교체 매도 ({w_cand.get('name')} 편입 예정)"
+
+                w_cand["state"] = "BUY_TOMORROW"
+                w_cand["phrase"] = f"교체 진입 ({h_cand.get('name')} 매도 예정)"
+
+                held_idx += 1
+                wait_idx += 1
+            else:
+                break
+
+    return recommendations
+
+
 def generate_recommendation_report(
     account_id: str,
     *,
@@ -584,6 +641,9 @@ def generate_recommendation_report(
     # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
     if country_code in ("kor", "kr"):
         recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
+
+    # [Tomorrow Replacement Logic] 내일 리밸런싱을 가정하고 교체(Swap) 대상 표기
+    recommendations = _inject_expected_replacements(recommendations, universe_meta)
 
     # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
     recommendations = _assign_final_ranks(recommendations)

@@ -12,7 +12,7 @@ import pandas as pd
 from config import REBALANCE_MODE
 from core.backtest.filtering import select_candidates
 from core.backtest.price import calculate_trade_price
-from strategies.maps.constants import DECISION_CONFIG
+from strategies.maps.constants import BACKTEST_STATUS_LIST
 from strategies.maps.evaluator import StrategyEvaluator
 from strategies.maps.labeler import compute_net_trade_note
 from strategies.maps.metrics import process_ticker_data
@@ -910,7 +910,7 @@ def run_portfolio_backtest(
                                             "pv": req_qty * buy_price,
                                             "avg_cost": buy_price,
                                             # 추천/리포트와 동일 포맷: 디스플레이명 + 금액 + 대체 정보
-                                            "note": f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} "
+                                            "note": f"{BACKTEST_STATUS_LIST['BUY_REPLACE']['display_name']} "
                                             f"{format_kr_money(buy_amount)} "
                                             f"({ticker_to_sell} 대체)",
                                         }
@@ -927,7 +927,7 @@ def run_portfolio_backtest(
                                             "trade_amount": buy_amount,
                                             "trade_profit": 0.0,
                                             "trade_pl_pct": 0.0,
-                                            "note": f"{DECISION_CONFIG['BUY_REPLACE']['display_name']} "
+                                            "note": f"{BACKTEST_STATUS_LIST['BUY_REPLACE']['display_name']} "
                                             f"{format_kr_money(buy_amount)} "
                                             f"({ticker_to_sell} 대체)",
                                             "signal1": metrics_by_ticker[replacement_ticker]["ma_values"][i],
