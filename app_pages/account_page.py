@@ -82,6 +82,7 @@ def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
                 "상장일": etf.get("listing_date", "-"),
                 "주간거래량": etf.get("1_week_avg_volume"),
                 "1주(%)": etf.get("1_week_earn_rate"),
+                "2주(%)": etf.get("2_week_earn_rate"),
                 "1달(%)": etf.get("1_month_earn_rate"),
                 "3달(%)": etf.get("3_month_earn_rate"),
                 "6달(%)": etf.get("6_month_earn_rate"),
@@ -144,7 +145,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 return f"background-color: {cfg['bg_color']}; color: {cfg['text_color']}; font-weight: bold; border-radius: 4px;"
         return ""
 
-    pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+    pct_columns = ["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
     styled = df_edit.style
 
     if not df_edit.empty:
@@ -224,6 +225,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "상장일": st.column_config.TextColumn("상장일", width=70),
         "주간거래량": st.column_config.NumberColumn("주간거래량", width=50, format="localized"),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+        "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
         "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
@@ -238,6 +240,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "상장일",
         "주간거래량",
         "1주(%)",
+        "2주(%)",
         "1달(%)",
         "3달(%)",
         "6달(%)",
@@ -566,6 +569,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
                 "상장일": etf.get("listing_date", "-"),
                 "주간거래량": etf.get("1_week_avg_volume"),
                 "1주(%)": etf.get("1_week_earn_rate"),
+                "2주(%)": etf.get("2_week_earn_rate"),
                 "1달(%)": etf.get("1_month_earn_rate"),
                 "3달(%)": etf.get("3_month_earn_rate"),
                 "6달(%)": etf.get("6_month_earn_rate"),
@@ -593,7 +597,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
         return "background-color: #ffe0e6; color: black"
 
     styled_deleted = df_deleted.style.map(lambda _: "background-color: #ffe0e6")
-    pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+    pct_columns = ["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
     for col in pct_columns:
         if col in df_deleted.columns:
             styled_deleted = styled_deleted.map(_color_pct_deleted, subset=[col])
@@ -685,6 +689,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
             "상장일": st.column_config.TextColumn("상장일", width=70),
             "주간거래량": st.column_config.NumberColumn("주간거래량", width=50, format="localized"),
             "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+            "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
             "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
             "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
             "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
@@ -700,6 +705,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
             "상장일",
             "주간거래량",
             "1주(%)",
+            "2주(%)",
             "1달(%)",
             "3달(%)",
             "6달(%)",
@@ -713,6 +719,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
             "상장일",
             "주간거래량",
             "1주(%)",
+            "2주(%)",
             "1달(%)",
             "3달(%)",
             "6달(%)",

@@ -41,6 +41,7 @@ def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
                 "상장일": etf.get("listing_date", "-"),
                 "주간거래량": etf.get("1_week_avg_volume"),
                 "1주(%)": etf.get("1_week_earn_rate"),
+                "2주(%)": etf.get("2_week_earn_rate"),
                 "1달(%)": etf.get("1_month_earn_rate"),
                 "3달(%)": etf.get("3_month_earn_rate"),
                 "6달(%)": etf.get("6_month_earn_rate"),
@@ -68,7 +69,7 @@ def _style_dataframe(df: pd.DataFrame) -> pd.io.formats.style.Styler:
         return "color: black"
 
     styled = df.style
-    pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+    pct_columns = ["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
     for col in pct_columns:
         if col in df.columns:
             styled = styled.map(_color_pct, subset=pd.IndexSlice[:, col])
@@ -137,13 +138,26 @@ def render_all_stocks_page() -> None:
         "상장일": st.column_config.TextColumn("상장일", width=110),
         "주간거래량": st.column_config.NumberColumn("주간거래량", width=120, format="%d"),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+        "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
         "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
         "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
     }
 
-    column_order = ["#", "티커", "종목명", "상장일", "주간거래량", "1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+    column_order = [
+        "#",
+        "티커",
+        "종목명",
+        "상장일",
+        "주간거래량",
+        "1주(%)",
+        "2주(%)",
+        "1달(%)",
+        "3달(%)",
+        "6달(%)",
+        "12달(%)",
+    ]
     existing_columns = [col for col in column_order if col in df.columns]
     df_reordered = df[existing_columns]
 

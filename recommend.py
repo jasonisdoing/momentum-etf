@@ -189,7 +189,7 @@ def extract_recommendations_from_backtest(
 
         # 수익률 및 드로우다운 계산
         df_up_to_end = df[df.index <= end_date]
-        return_1w = return_1m = return_3m = 0.0
+        return_1w = return_2w = return_1m = return_3m = 0.0
         drawdown_from_high = 0.0
         trend_prices = []
 
@@ -213,7 +213,7 @@ def extract_recommendations_from_backtest(
                 return 0.0
 
             return_1w = _get_ret(5)
-            # return_2w = _get_ret(10)  # Removed as per request
+            return_2w = _get_ret(10)
             return_1m = _get_ret(20)
             return_3m = _get_ret(60)
             return_6m = _get_ret(126)
@@ -245,7 +245,7 @@ def extract_recommendations_from_backtest(
                 "price_deviation": price_deviation,
                 "holding_days": holding_days,
                 "return_1w": return_1w,
-                # "return_2w": return_2w,
+                "return_2w": return_2w,
                 "return_1m": return_1m,
                 "return_3m": return_3m,
                 "return_6m": return_6m,
@@ -772,8 +772,8 @@ def dump_recommendation_log(
     if nav_mode:
         headers.append("Nav")
 
-    # [User Request] 1주 - 1달 - 3달 - 6달 - 12달
-    headers.extend(["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"])
+    # [User Request] 1주 - 2주 - 1달 - 3달 - 6달 - 12달
+    headers.extend(["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"])
     headers.extend(["점수", "RSI", "지속", "문구"])
 
     # aligns ( headers 수와 일치해야 함 )
@@ -782,7 +782,7 @@ def dump_recommendation_log(
         aligns.append("right")
     if nav_mode:
         aligns.append("right")
-    aligns.extend(["right", "right", "right", "right", "right", "right"])  # Returns(5) & Drawdown
+    aligns.extend(["right", "right", "right", "right", "right", "right", "right"])  # Returns(6) & Drawdown
     aligns.extend(["right", "right", "right", "left"])
 
     rows: list[list[str]] = []
@@ -806,7 +806,7 @@ def dump_recommendation_log(
         phrase = item.get("phrase", "")
 
         return_1w = item.get("return_1w", 0)
-        # return_2w = item.get("return_2w", 0)
+        return_2w = item.get("return_2w", 0)
         return_1m = item.get("return_1m", 0)
         return_3m = item.get("return_3m", 0)
         return_6m = item.get("return_6m", 0)
@@ -832,7 +832,7 @@ def dump_recommendation_log(
         row.extend(
             [
                 format_pct_change(return_1w),
-                # format_pct_change(return_2w),
+                format_pct_change(return_2w),
                 format_pct_change(return_1m),
                 format_pct_change(return_3m),
                 format_pct_change(return_6m),
