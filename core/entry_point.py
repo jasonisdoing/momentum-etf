@@ -16,7 +16,7 @@ from core.backtest.runner import run_account_backtest
 from strategies.maps.backtest import run_single_ticker_backtest
 
 # 상수
-DECISION_CONFIG = getattr(_constants_mod, "DECISION_CONFIG")
+BACKTEST_STATUS_LIST = getattr(_constants_mod, "BACKTEST_STATUS_LIST")
 
 # 추천 함수 (recommend.py에서 별도 제공 - 백테스트 기반)
 # from recommend import generate_recommendation_report
@@ -29,7 +29,7 @@ __all__ = [
     "StrategyRules",
     "run_portfolio_backtest",
     "run_single_ticker_backtest",
-    "DECISION_CONFIG",
+    "BACKTEST_STATUS_LIST",
     "process_ticker_data",
     "StrategyEvaluator",
     "run_account_backtest",

@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 from pandas.io.formats.style import Styler
 
-from strategies.maps.constants import DECISION_CONFIG
+from strategies.maps.constants import BACKTEST_STATUS_LIST, RECOMMEND_STATUS_LIST
 from utils.formatters import format_trading_days
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
@@ -216,7 +216,9 @@ def _state_style(value: Any) -> str:
 
 
 _STATE_BACKGROUND_MAP = {
-    key.upper(): cfg.get("background") for key, cfg in DECISION_CONFIG.items() if isinstance(cfg, dict)
+    key.upper(): cfg.get("background")
+    for key, cfg in {**BACKTEST_STATUS_LIST, **RECOMMEND_STATUS_LIST}.items()
+    if isinstance(cfg, dict)
 }
 
 
