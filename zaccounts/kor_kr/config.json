@@ -9,11 +9,11 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_START_DATE": "2025-03-01",
-        "BACKTESTED_DATE": "2026-02-27 09:02",
-        "CAGR": 195.704525,
-        "MDD": -13.67018,
+        "BACKTESTED_DATE": "2026-02-27 09:56",
+        "CAGR": 191.438002,
+        "MDD": -15.002672,
         "BUCKET_TOPN": 2,
-        "MA_MONTH": 2,
+        "MA_MONTH": 3,
         "MA_TYPE": "HMA",
         "ENABLE_DATA_SUFFICIENCY_CHECK": false,
         "OPTIMIZATION_METRIC": "CAGR"
