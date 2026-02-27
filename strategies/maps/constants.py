@@ -49,33 +49,19 @@ BACKTEST_STATUS_LIST = {
 }
 
 RECOMMEND_STATUS_LIST = {
-    "SELL_TODAY": {
-        "display_name": "<📉 오늘 매도>",
-        "order": 14,
+    "SELL_CANDIDATE": {
+        "display_name": "<📉 매도 후보>",
+        "order": 16,
         "is_recommendation": True,
         "show_slack": True,
-        "background": "#ffb6b9",
+        "background": "#ffe0e0",
     },
-    "SELL_TOMORROW": {
-        "display_name": "<📉 내일 매도>",
-        "order": 15,
+    "BUY_CANDIDATE": {
+        "display_name": "<📈 매수 후보>",
+        "order": 21,
         "is_recommendation": True,
         "show_slack": True,
-        "background": "#ffb6b9",
-    },
-    "BUY_TODAY": {
-        "display_name": "<📈 오늘 매수>",
-        "order": 19,
-        "is_recommendation": True,
-        "show_slack": True,
-        "background": "#bae1ff",
-    },
-    "BUY_TOMORROW": {
-        "display_name": "<📈 내일 매수>",
-        "order": 20,
-        "is_recommendation": True,
-        "show_slack": True,
-        "background": "#bae1ff",
+        "background": "#e0f0ff",
     },
 }
 
