@@ -201,11 +201,13 @@ def _render_stocks_meta_table(account_id: str) -> None:
     with c_mgr2:
         if st.button("메타데이터 업데이트", key=f"btn_meta_{account_id}", disabled=readonly, width="stretch"):
             st.session_state[key_meta] = True
+            st.session_state[f"show_add_modal_{account_id}"] = False
             st.rerun()
 
     with c_mgr3:
         if st.button("가격 캐시 갱신", key=f"btn_price_{account_id}", disabled=readonly, width="stretch"):
             st.session_state[key_price] = True
+            st.session_state[f"show_add_modal_{account_id}"] = False
             st.rerun()
 
     st.write("")  # 간격
@@ -300,6 +302,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                         del st.session_state[editor_key]
 
                     open_edit_dialog(ticker, bucket_name, name)
+                    st.session_state[f"show_add_modal_{account_id}"] = False
                     break
 
     # -----------------------------------------------------------------------
