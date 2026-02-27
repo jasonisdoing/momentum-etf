@@ -16,6 +16,7 @@ from typing import Any
 import pandas as pd
 
 from config import BUCKET_MAPPING as BUCKET_NAMES
+from config import REBALANCE_CANDIDATE_THRESHOLD
 
 DEFAULT_BUCKET = 1
 
@@ -272,7 +273,7 @@ def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str,
     for rec in recommendations:
         state = str(rec.get("state", "")).upper()
 
-        if state in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_TOMORROW", "BUY_TODAY"):
+        if state in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_CANDIDATE", "SELL_CANDIDATE"):
             rec["_sort_group"] = 1
         else:
             rec["_sort_group"] = 2
@@ -503,33 +504,48 @@ def _inject_expected_replacements(
         # 대기 종목은 점수 내림차순 (가장 점수 높은 것을 사야 함)
         wait_stocks.sort(key=lambda x: (x.get("score") if x.get("score") is not None else float("-inf")), reverse=True)
 
-        held_idx = 0
-        wait_idx = 0
+        threshold_pct = float(REBALANCE_CANDIDATE_THRESHOLD) / 100.0
 
-        while held_idx < len(held_stocks) and wait_idx < len(wait_stocks):
-            h_cand = held_stocks[held_idx]
-            w_cand = wait_stocks[wait_idx]
+        max_wait_score = wait_stocks[0].get("score", float("-inf"))
 
-            h_score = h_cand.get("score") if h_cand.get("score") is not None else float("-inf")
-            w_score = w_cand.get("score") if w_cand.get("score") is not None else float("-inf")
+        # 허용 하락폭(drop) = 대기 1등 점수의 절대값을 기준으로 threshold_pct 비율만큼
+        drop_allowed = abs(max_wait_score) * threshold_pct
 
-            # 대기 종목 점수가 보유 종목 점수보다 높으면 교체 지시
-            if w_score > h_score:
-                if is_today:
-                    h_cand["state"] = "SELL_TODAY"
-                    h_cand["phrase"] = f"당일 교체 매도 ({w_cand.get('name')} 편입 예정)"
+        # 1. SELL_CANDIDATE 선정
+        sell_candidates = []
+        for h in held_stocks:
+            h_score = h.get("score", float("-inf"))
+            if max_wait_score > h_score:
+                h["state"] = "SELL_CANDIDATE"
 
-                    w_cand["state"] = "BUY_TODAY"
-                    w_cand["phrase"] = f"당일 교체 진입 ({h_cand.get('name')} 매도 예정)"
+                # 역전 규모에 따라 문구 설정
+                if max_wait_score - h_score >= drop_allowed:
+                    h["phrase"] = f"교체 매도 추천 (최상위 대기: {wait_stocks[0].get('name')})"
                 else:
-                    h_cand["state"] = "SELL_TOMORROW"
-                    h_cand["phrase"] = f"교체 매도 ({w_cand.get('name')} 편입 예정)"
+                    h["phrase"] = f"교체 매도 후보 (최상위 대기: {wait_stocks[0].get('name')})"
 
-                    w_cand["state"] = "BUY_TOMORROW"
-                    w_cand["phrase"] = f"교체 진입 ({h_cand.get('name')} 매도 예정)"
+                sell_candidates.append(h_score)
 
-                held_idx += 1
-                wait_idx += 1
+        if not sell_candidates:
+            continue
+
+        max_sell_score = max(sell_candidates)
+
+        # 2. BUY_CANDIDATE 선정
+        # 매수 후보가 너무 많이 표출되지 않도록, 대기 1등 종목(max_wait_score)과의 격차가 THRESHOLD 이내인 '최상위 대기 종목'들만 편입
+        cut_off_score = max_wait_score - drop_allowed
+
+        for w in wait_stocks:
+            w_score = w.get("score", float("-inf"))
+            if w_score >= cut_off_score:
+                w["state"] = "BUY_CANDIDATE"
+
+                if w_score >= max_sell_score:
+                    # 매도 후보의 최고 점수조차 앞서는 경우
+                    w["phrase"] = "교체 진입 추천"
+                else:
+                    # 점수 차이가 THRESHOLD 이내인 진입 후보
+                    w["phrase"] = "교체 진입 후보"
             else:
                 break
 
