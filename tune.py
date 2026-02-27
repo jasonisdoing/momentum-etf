@@ -16,29 +16,35 @@ from utils.logger import get_app_logger
 ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        # "MA_MONTH": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_MONTH": [3],  # 단기 추세
         "MA_TYPE": ["HMA"],
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
     "kor_isa": {  # 절세계좌 금액이 적어서 1 * 5 종목
         "BUCKET_TOPN": [1],
-        "MA_MONTH": [12],
+        "MA_MONTH": [6],  # 종목이 많지 않고 고정 종목이라 의미 없음
         "MA_TYPE": ["HMA"],
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
     "kor_pension": {  # 절세계좌 금액이 적어서 1 * 5 종목
         "BUCKET_TOPN": [1],
-        "MA_MONTH": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_MONTH": [6],  # 중기 추세
         "MA_TYPE": ["HMA"],
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
     "aus": {
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [12],
+        "MA_MONTH": [12],  # 장기 추세
         "MA_TYPE": ["HMA"],
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
     # 🇺🇸 미국 직투: 테스트 중
     "us": {
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [12],
+        "MA_MONTH": [12],  # 장기 추세
         "MA_TYPE": ["HMA"],
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
 }
 

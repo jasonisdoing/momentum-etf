@@ -158,6 +158,7 @@ def run_account_backtest(
             ma_days=strategy_override.ma_days,
             bucket_topn=strategy_override.bucket_topn,
             ma_type=strategy_override.ma_type,
+            rebalance_mode=strategy_override.rebalance_mode,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
         strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
@@ -509,6 +510,7 @@ def _build_backtest_kwargs(
         "prefetched_metrics": prefetched_metrics,
         "ma_days": strategy_rules.ma_days,
         "ma_type": strategy_rules.ma_type,
+        "rebalance_mode": strategy_rules.rebalance_mode,
         "quiet": quiet,
         "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }

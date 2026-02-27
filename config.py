@@ -85,15 +85,13 @@ BACKTEST_SLIPPAGE = {
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
 TRADING_DAYS_PER_MONTH = 20
 
+
 # 지표 계산에 필요한 절대 최소 거래일 수 (MA 타입 무관, 항상 적용)
 # ENABLE_DATA_SUFFICIENCY_CHECK = True  → MA 타입별 엄격 기준 적용 (60~120일)
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5
 
-# 리밸런싱 주기 설정 (전역 공통)
-# DAILY, WEEKLY, TWICE_A_MONTH, MONTHLY, QUARTERLY 중 선택
-REBALANCE_MODE = "TWICE_A_MONTH"
 
 # 튜닝 최적화 지표 (전역 공통)
 # CAGR, SHARPE, SDR 중 선택
