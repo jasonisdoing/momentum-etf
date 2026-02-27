@@ -98,9 +98,3 @@ REBALANCE_MODE = "TWICE_A_MONTH"
 # 튜닝 최적화 지표 (전역 공통)
 # CAGR, SHARPE, SDR 중 선택
 OPTIMIZATION_METRIC = "CAGR"
-
-# 리밸런싱 교체 후보군(Candidate) 선정 임계값(%)
-# 대기 1등 종목 점수를 기준으로, 지정한 퍼센트(%) 이내의 점수 하락폭을 가진 종목들을 매수 후보로 노출합니다.
-# 점수 스케일(MA TYPE 등)수준에 구애받지 않도록 상대적 비율(%)로 계산됩니다.
-# 예: 25.0인 경우, 대기 1등 점수에서 26% 하락한 점수까지 커트라인으로 인정하여 묶어서 추천합니다.
-REBALANCE_CANDIDATE_THRESHOLD = 25.0

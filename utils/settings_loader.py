@@ -57,19 +57,25 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
-    """튜닝용 BACKTEST_START_DATE 설정을 반환합니다.
+    """튜닝용 시작일 설정을 반환합니다.
 
-    계정별 strategy.BACKTEST_START_DATE를 사용합니다.
+    계정별 strategy.BACKTEST_LAST_MONTHS를 사용합니다.
     """
     normalized: list[dict[str, Any]] = []
 
-    # 계정별 strategy.BACKTEST_START_DATE 사용
+    # 계정별 strategy.BACKTEST_LAST_MONTHS 사용
     if account_id:
         try:
             account_settings = get_account_settings(account_id)
             strategy = account_settings.get("strategy", {})
-            backtest_start_date = strategy.get("BACKTEST_START_DATE")
-            if backtest_start_date is not None:
+            backtest_last_months = strategy.get("BACKTEST_LAST_MONTHS")
+            if backtest_last_months is not None:
+                import pandas as pd
+
+                months_back = int(backtest_last_months)
+                start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
+                backtest_start_date = start_dt.strftime("%Y-%m-%d")
+
                 normalized.append(
                     {
                         "backtest_start_date": str(backtest_start_date),
