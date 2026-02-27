@@ -16,7 +16,6 @@ from typing import Any
 import pandas as pd
 
 from config import BUCKET_MAPPING as BUCKET_NAMES
-from config import REBALANCE_CANDIDATE_THRESHOLD
 
 DEFAULT_BUCKET = 1
 
@@ -268,12 +267,12 @@ def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str,
 
     # 1. 정렬 그룹 할당 (daily_report.py와 동일)
     # 0: CASH (현금은 여기서는 제외됨)
-    # 1: 내일 보유할 최종 타겟 10종목 (HOLD, BUY_TOMORROW, BUY, BUY_REBALANCE)
-    # 2: 제외/대기 대상 (WAIT, SELL_TOMORROW, SELL)
+    # 1: 내일 보유할 최종 타겟 10종목 (HOLD, BUY, BUY_REBALANCE, BUY_REPLACE)
+    # 2: 제외/대기 대상 (WAIT, SELL, SELL_REPLACE)
     for rec in recommendations:
         state = str(rec.get("state", "")).upper()
 
-        if state in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_CANDIDATE", "SELL_CANDIDATE"):
+        if state in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_REPLACE"):
             rec["_sort_group"] = 1
         else:
             rec["_sort_group"] = 2
@@ -467,92 +466,9 @@ def _apply_bucket_selection(
                 rec["decision"] = "WAIT"
                 rec["state"] = "WAIT"
 
-            final_list.append(rec)
+        final_list.append(rec)
 
     return final_list
-
-
-def _inject_expected_replacements(
-    recommendations: list[dict[str, Any]],
-    ticker_meta: dict[str, dict[str, Any]],
-    is_today: bool = False,
-) -> list[dict[str, Any]]:
-    """만약 내일 당장 (또는 오늘) 리밸런싱을 한다고 가정할 때 교체해야 할 종목에 상태 부여."""
-
-    # 1. 버킷별 그룹화
-    buckets: dict[int, list[dict[str, Any]]] = {i: [] for i in range(1, 6)}
-    for rec in recommendations:
-        ticker = rec.get("ticker", "")
-        meta = ticker_meta.get(ticker, {})
-        bucket_idx = meta.get("bucket", 1)
-        # 안전장치
-        if bucket_idx not in buckets:
-            bucket_idx = 1
-        buckets[bucket_idx].append(rec)
-
-    for b_idx, group in buckets.items():
-        # 상태별 분류
-        held_stocks = [r for r in group if r.get("shares", 0) > 0]
-        wait_stocks = [r for r in group if r.get("shares", 0) <= 0]
-
-        if not held_stocks or not wait_stocks:
-            continue
-
-        # 보유 종목은 점수 오름차순 (가장 점수 낮은 것을 팔아야 함)
-        held_stocks.sort(key=lambda x: (x.get("score") if x.get("score") is not None else float("-inf")))
-
-        # 대기 종목은 점수 내림차순 (가장 점수 높은 것을 사야 함)
-        wait_stocks.sort(key=lambda x: (x.get("score") if x.get("score") is not None else float("-inf")), reverse=True)
-
-        threshold_pct = float(REBALANCE_CANDIDATE_THRESHOLD) / 100.0
-
-        max_wait_score = wait_stocks[0].get("score", float("-inf"))
-
-        # 허용 하락폭(drop) = 대기 1등 점수의 절대값을 기준으로 threshold_pct 비율만큼
-        drop_allowed = abs(max_wait_score) * threshold_pct
-
-        # 1. 1차 대략적인 SELL_CANDIDATE 풀 추출 (대기 1등보다 낮은 모든 보유 종목)
-        potential_sells = []
-        for h in held_stocks:
-            h_score = h.get("score", float("-inf"))
-            if max_wait_score > h_score:
-                potential_sells.append(h)
-
-        if not potential_sells:
-            continue
-
-        max_sell_score = max([h.get("score", float("-inf")) for h in potential_sells])
-
-        # 2. BUY_CANDIDATE 선정 및 개수 파악
-        cut_off_score = max_wait_score - drop_allowed
-        buy_count = 0
-
-        for w in wait_stocks:
-            w_score = w.get("score", float("-inf"))
-            if w_score >= cut_off_score:
-                w["state"] = "BUY_CANDIDATE"
-
-                if w_score >= max_sell_score:
-                    w["phrase"] = "교체 진입 추천"
-                else:
-                    w["phrase"] = "교체 진입 후보"
-                buy_count += 1
-            else:
-                break
-
-        # 3. 매수 후보(buy_count) 개수만큼만 매도 후보 확정하기
-        # 보유 종목은 이미 오름차순(점수 낮은 순)으로 정렬되어 있으므로, 앞에서부터 buy_count 개만 SELL_CANDIDATE 마킹
-        actual_sells = potential_sells[:buy_count]
-
-        for h in actual_sells:
-            h["state"] = "SELL_CANDIDATE"
-            h_score = h.get("score", float("-inf"))
-            if max_wait_score - h_score >= drop_allowed:
-                h["phrase"] = f"교체 매도 추천 (최상위 대기: {wait_stocks[0].get('name')})"
-            else:
-                h["phrase"] = f"교체 매도 후보 (최상위 대기: {wait_stocks[0].get('name')})"
-
-    return recommendations
 
 
 def generate_recommendation_report(
@@ -565,12 +481,13 @@ def generate_recommendation_report(
     account_settings = get_account_settings(account_id)
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
     strategy_cfg = account_settings.get("strategy", {}) or {}
-    backtest_start_date_str = strategy_cfg.get("BACKTEST_START_DATE", "2025-01-01")
+    backtest_last_months = strategy_cfg.get("BACKTEST_LAST_MONTHS", 12)
 
     try:
-        start_date = pd.to_datetime(backtest_start_date_str)
+        months_back = int(backtest_last_months)
+        start_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
     except Exception:
-        start_date = pd.Timestamp.now().normalize() - pd.DateOffset(months=12)
+        start_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=12)
 
     # 종료일 결정
     if date_str:
@@ -665,46 +582,6 @@ def generate_recommendation_report(
     # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
     if country_code in ("kor", "kr"):
         recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
-
-    # [Tomorrow Replacement Logic] 내일 리밸런싱을 가정하고 교체(Swap) 대상 표기
-    from core.backtest.engine import check_is_rebalance_day
-    from utils.data_loader import get_trading_days
-
-    rebalance_mode = strategy_cfg.get("REBALANCE_MODE", "MONTHLY")
-
-    check_start = result.end_date.strftime("%Y-%m-%d")
-    check_end = (result.end_date + pd.DateOffset(days=30)).strftime("%Y-%m-%d")
-    future_cal = get_trading_days(check_start, check_end, country_code)
-
-    is_tomorrow_rebalance = False
-    is_today_rebalance = False
-    if future_cal is not None and len(future_cal) > 0:
-        future_cal_idx = pd.DatetimeIndex(future_cal)
-        future_mask = future_cal_idx > result.end_date
-        future_dates = future_cal_idx[future_mask]
-
-        if len(future_dates) >= 1:
-            next_trading_day = future_dates[0]
-            next_next_trading_day = future_dates[1] if len(future_dates) > 1 else None
-
-            is_tomorrow_rebalance = check_is_rebalance_day(
-                dt=next_trading_day,
-                next_dt=next_next_trading_day,
-                rebalance_mode=rebalance_mode,
-                trading_calendar=future_cal_idx,
-            )
-
-            is_today_rebalance = check_is_rebalance_day(
-                dt=result.end_date,
-                next_dt=next_trading_day,
-                rebalance_mode=rebalance_mode,
-                trading_calendar=future_cal_idx,
-            )
-
-    if is_today_rebalance:
-        recommendations = _inject_expected_replacements(recommendations, universe_meta, is_today=True)
-    elif is_tomorrow_rebalance:
-        recommendations = _inject_expected_replacements(recommendations, universe_meta, is_today=False)
 
     # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
     recommendations = _assign_final_ranks(recommendations)

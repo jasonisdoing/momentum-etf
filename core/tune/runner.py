@@ -193,12 +193,15 @@ def _resolve_month_configs(account_id: str = None) -> list[dict[str, Any]]:
     if account_id:
         try:
             account_settings = get_account_settings(account_id)
-            fallback = account_settings.get("strategy", {}).get("BACKTEST_START_DATE")
+            fallback = account_settings.get("strategy", {}).get("BACKTEST_LAST_MONTHS")
             if fallback is not None:
-                # BACKTEST_START_DATE가 있으면 단일 설정으로 반환
+                import pandas as pd
+
+                months_back = int(fallback)
+                start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
                 return [
                     {
-                        "backtest_start_date": str(fallback),
+                        "backtest_start_date": start_dt.strftime("%Y-%m-%d"),
                         "weight": 1.0,
                         "source": f"account_{account_id}",
                     }
@@ -277,7 +280,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     # [Key Reordering]
     # 사용자가 요청한 순서대로 키를 정렬하여 저장
     desired_order = [
-        "BACKTEST_START_DATE",
+        "BACKTEST_LAST_MONTHS",
         "BACKTESTED_DATE",
         "CAGR",
         "MDD",

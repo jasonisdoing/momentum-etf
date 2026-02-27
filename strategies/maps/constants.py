@@ -48,23 +48,6 @@ BACKTEST_STATUS_LIST = {
     },
 }
 
-RECOMMEND_STATUS_LIST = {
-    "SELL_CANDIDATE": {
-        "display_name": "<📉 매도 후보>",
-        "order": 16,
-        "is_recommendation": True,
-        "show_slack": True,
-        "background": "#ffe0e0",
-    },
-    "BUY_CANDIDATE": {
-        "display_name": "<📈 매수 후보>",
-        "order": 21,
-        "is_recommendation": True,
-        "show_slack": True,
-        "background": "#e0f0ff",
-    },
-}
-
 
 def _normalize_display_label(raw: str | None) -> str:
     value = str(raw or "").strip()
@@ -83,7 +66,7 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
 
 DECISION_MESSAGES = {
     key: _normalize_display_label(cfg.get("display_name"))
-    for key, cfg in {**BACKTEST_STATUS_LIST, **RECOMMEND_STATUS_LIST}.items()
+    for key, cfg in BACKTEST_STATUS_LIST.items()
     if isinstance(cfg, dict) and cfg.get("display_name")
 }
 
@@ -104,7 +87,6 @@ DECISION_NOTES = {
 
 __all__ = [
     "BACKTEST_STATUS_LIST",
-    "RECOMMEND_STATUS_LIST",
     "DECISION_MESSAGES",
     "DECISION_NOTES",
 ]

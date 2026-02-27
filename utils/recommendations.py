@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 from pandas.io.formats.style import Styler
 
-from strategies.maps.constants import BACKTEST_STATUS_LIST, RECOMMEND_STATUS_LIST
+from strategies.maps.constants import BACKTEST_STATUS_LIST
 from utils.formatters import format_trading_days
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
@@ -207,19 +207,17 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
 
 def _state_style(value: Any) -> str:
     text = str(value).upper()
-    if text in ("BUY", "BUY_REPLACE", "BUY_TODAY", "BUY_TOMORROW"):
+    if text in ("BUY", "BUY_REPLACE"):
         return "color:#d32f2f;font-weight:600"
     if text == "WAIT":
         return "color:#1565c0;font-weight:600"
-    if text in ("SELL", "SELL_REPLACE", "SELL_TODAY", "SELL_TOMORROW"):
+    if text in ("SELL", "SELL_REPLACE"):
         return "color:#1565c0;font-weight:600"
     return ""
 
 
 _STATE_BACKGROUND_MAP = {
-    key.upper(): cfg.get("background")
-    for key, cfg in {**BACKTEST_STATUS_LIST, **RECOMMEND_STATUS_LIST}.items()
-    if isinstance(cfg, dict)
+    key.upper(): cfg.get("background") for key, cfg in BACKTEST_STATUS_LIST.items() if isinstance(cfg, dict)
 }
 
 
