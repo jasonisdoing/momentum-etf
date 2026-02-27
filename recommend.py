@@ -511,29 +511,21 @@ def _inject_expected_replacements(
         # 허용 하락폭(drop) = 대기 1등 점수의 절대값을 기준으로 threshold_pct 비율만큼
         drop_allowed = abs(max_wait_score) * threshold_pct
 
-        # 1. SELL_CANDIDATE 선정
-        sell_candidates = []
+        # 1. 1차 대략적인 SELL_CANDIDATE 풀 추출 (대기 1등보다 낮은 모든 보유 종목)
+        potential_sells = []
         for h in held_stocks:
             h_score = h.get("score", float("-inf"))
             if max_wait_score > h_score:
-                h["state"] = "SELL_CANDIDATE"
+                potential_sells.append(h)
 
-                # 역전 규모에 따라 문구 설정
-                if max_wait_score - h_score >= drop_allowed:
-                    h["phrase"] = f"교체 매도 추천 (최상위 대기: {wait_stocks[0].get('name')})"
-                else:
-                    h["phrase"] = f"교체 매도 후보 (최상위 대기: {wait_stocks[0].get('name')})"
-
-                sell_candidates.append(h_score)
-
-        if not sell_candidates:
+        if not potential_sells:
             continue
 
-        max_sell_score = max(sell_candidates)
+        max_sell_score = max([h.get("score", float("-inf")) for h in potential_sells])
 
-        # 2. BUY_CANDIDATE 선정
-        # 매수 후보가 너무 많이 표출되지 않도록, 대기 1등 종목(max_wait_score)과의 격차가 THRESHOLD 이내인 '최상위 대기 종목'들만 편입
+        # 2. BUY_CANDIDATE 선정 및 개수 파악
         cut_off_score = max_wait_score - drop_allowed
+        buy_count = 0
 
         for w in wait_stocks:
             w_score = w.get("score", float("-inf"))
@@ -541,13 +533,24 @@ def _inject_expected_replacements(
                 w["state"] = "BUY_CANDIDATE"
 
                 if w_score >= max_sell_score:
-                    # 매도 후보의 최고 점수조차 앞서는 경우
                     w["phrase"] = "교체 진입 추천"
                 else:
-                    # 점수 차이가 THRESHOLD 이내인 진입 후보
                     w["phrase"] = "교체 진입 후보"
+                buy_count += 1
             else:
                 break
+
+        # 3. 매수 후보(buy_count) 개수만큼만 매도 후보 확정하기
+        # 보유 종목은 이미 오름차순(점수 낮은 순)으로 정렬되어 있으므로, 앞에서부터 buy_count 개만 SELL_CANDIDATE 마킹
+        actual_sells = potential_sells[:buy_count]
+
+        for h in actual_sells:
+            h["state"] = "SELL_CANDIDATE"
+            h_score = h.get("score", float("-inf"))
+            if max_wait_score - h_score >= drop_allowed:
+                h["phrase"] = f"교체 매도 추천 (최상위 대기: {wait_stocks[0].get('name')})"
+            else:
+                h["phrase"] = f"교체 매도 후보 (최상위 대기: {wait_stocks[0].get('name')})"
 
     return recommendations
 
