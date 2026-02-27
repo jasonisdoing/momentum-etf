@@ -18,7 +18,7 @@ from typing import Any
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
-from config import OPTIMIZATION_METRIC, REBALANCE_MODE, TRADING_DAYS_PER_MONTH
+from config import OPTIMIZATION_METRIC, TRADING_DAYS_PER_MONTH
 from core.backtest.runner import run_account_backtest
 from core.tune.reporting import (
     _export_combo_debug,
@@ -287,6 +287,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "BUCKET_TOPN",
         "MA_MONTH",
         "MA_TYPE",
+        "REBALANCE_MODE",
     ]
 
     ordered_strategy = {}
@@ -475,8 +476,12 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, str]] = [
-        (ma, topn, ma_type) for ma in ma_candidates for topn in topn_candidates for ma_type in ma_type_candidates
+    combos: list[tuple[int, int, str, str]] = [
+        (ma, topn, ma_type, rebal)
+        for ma in ma_candidates
+        for topn in topn_candidates
+        for ma_type in ma_type_candidates
+        for rebal in rebalance_mode_candidates
     ]
 
     if not combos:
@@ -536,7 +541,6 @@ def _execute_tuning(
 
     current_rules = get_strategy_rules(account_norm)
 
-    # 각 payload에는 파라미터만 포함 (데이터는 worker 초기화 시 한 번만 전달)
     payloads = [
         (
             account_norm,
@@ -544,10 +548,11 @@ def _execute_tuning(
             int(ma),
             int(topn),
             str(ma_type),
+            str(rebal_mode),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )
-        for ma, topn, ma_type in combos
+        for ma, topn, ma_type, rebal_mode in combos
     ]
 
     logger.info(
@@ -591,6 +596,7 @@ def _execute_tuning(
                 encountered_missing.update(missing)
             else:
                 failures.append(data)
+                logger.error(f"[튜닝] 오류 발생: {data.get('error', 'Unknown Error')}")
 
             if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
                 logger.info(
@@ -706,11 +712,12 @@ def _build_run_entry(
     }
 
     raw_data_payload: list[dict[str, Any]] = []
-    ma_type_weights: dict[str, float] = {}
     weighted_cagr_sum = 0.0
     weighted_cagr_weight = 0.0
     weighted_mdd_sum = 0.0
     weighted_mdd_weight = 0.0
+    ma_type_weights: dict[str, float] = {}
+    rebal_mode_weights: dict[str, float] = {}
     cagr_values: list[float] = []
     mdd_values: list[float] = []
 
@@ -797,6 +804,12 @@ def _build_run_entry(
             type_key = str(ma_type_val)
             ma_type_weights[type_key] = ma_type_weights.get(type_key, 0.0) + weight_for_cat
 
+        rebal_mode_val = best.get("rebalance_mode")
+        if rebal_mode_val:
+            weight_for_cat = weight if weight > 0 else 1.0
+            rebal_key = str(rebal_mode_val)
+            rebal_mode_weights[rebal_key] = rebal_mode_weights.get(rebal_key, 0.0) + weight_for_cat
+
     if weighted_cagr_weight > 0:
         entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
     elif cagr_values:
@@ -845,6 +858,9 @@ def _build_run_entry(
 
     if ma_type_weights:
         result_values["MA_TYPE"] = max(ma_type_weights.items(), key=lambda item: (item[1], item[0]))[0]
+
+    if rebal_mode_weights:
+        result_values["REBALANCE_MODE"] = max(rebal_mode_weights.items(), key=lambda item: (item[1], item[0]))[0]
 
     return entry
 
@@ -1312,11 +1328,6 @@ def run_account_tuning(
     ma_type_raw = config.get("MA_TYPE")
     if ma_type_raw is None:
         ma_type_values = [base_rules.ma_type]
-
-    # MA_TYPE 처리: 문자열 리스트로 받음
-    ma_type_raw = config.get("MA_TYPE")
-    if ma_type_raw is None:
-        ma_type_values = [base_rules.ma_type]
     elif isinstance(ma_type_raw, (list, tuple)):
         ma_type_values = [str(v).upper() for v in ma_type_raw if v]
     else:
@@ -1325,7 +1336,17 @@ def run_account_tuning(
     if not ma_type_values:
         ma_type_values = [base_rules.ma_type]
 
-    rebalance_mode_values = [REBALANCE_MODE]
+    # REBALANCE_MODE 처리: 문자열 리스트로 받음
+    rebalance_raw = config.get("REBALANCE_MODE")
+    if rebalance_raw is None:
+        rebalance_mode_values = [base_rules.rebalance_mode]
+    elif isinstance(rebalance_raw, (list, tuple)):
+        rebalance_mode_values = [str(v).upper() for v in rebalance_raw if v]
+    else:
+        rebalance_mode_values = [str(rebalance_raw).upper()]
+
+    if not rebalance_mode_values:
+        rebalance_mode_values = [base_rules.rebalance_mode]
 
     if (not ma_values and not ma_month_values) or not topn_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")

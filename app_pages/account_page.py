@@ -524,7 +524,7 @@ def _render_manual_actions(account_id: str) -> None:
 def _get_active_holdings(df: pd.DataFrame) -> pd.DataFrame:
     """보유 중인 종목만 필터링합니다."""
     try:
-        from logic.backtest import get_hold_states
+        from core.backtest.portfolio import get_hold_states
 
         hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
         return df[df["상태"].isin(hold_states)].copy()
@@ -846,12 +846,12 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
                 if strategy_tuning.get("MA_MONTH"):
                     params_to_show["MA개월"] = strategy_tuning.get("MA_MONTH")
 
-                from config import OPTIMIZATION_METRIC, REBALANCE_MODE
+                from config import OPTIMIZATION_METRIC
 
                 params_to_show.update(
                     {
                         "MA타입": strategy_tuning.get("MA_TYPE"),
-                        "리밸런스 주기": REBALANCE_MODE,
+                        "리밸런스 주기": strategy_tuning.get("REBALANCE_MODE", "TWICE_A_MONTH"),
                         "최적화 지표": OPTIMIZATION_METRIC,
                     }
                 )

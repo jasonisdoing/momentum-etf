@@ -9,7 +9,6 @@ from typing import Any
 
 import pandas as pd
 
-from config import REBALANCE_MODE
 from core.backtest.filtering import select_candidates
 from core.backtest.price import calculate_trade_price
 from strategies.maps.constants import BACKTEST_STATUS_LIST
@@ -449,6 +448,7 @@ def run_portfolio_backtest(
     trading_calendar: Sequence[pd.Timestamp] | None = None,
     ma_days: int = 20,
     ma_type: str = "SMA",
+    rebalance_mode: str = "TWICE_A_MONTH",
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
@@ -466,6 +466,7 @@ def run_portfolio_backtest(
         country: 시장 국가 코드 (예: kor)
         prefetched_data: 미리 로드된 가격 데이터
         ma_days: 이동평균 기간
+        rebalance_mode: 리밸런싱 모드 (WEEKLY, FORTNIGHTLY, MONTHLY, QUARTERLY, TWICE_A_MONTH)
 
     Returns:
         Dict[str, pd.DataFrame]: 종목별 백테스트 결과
@@ -589,7 +590,7 @@ def run_portfolio_backtest(
 
     # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     total_days = len(union_index)
-    _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {REBALANCE_MODE}")
+    _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
 
     # 이전 리밸런싱 인덱스 추적 변수는 제거함
     for i, dt in enumerate(union_index):
@@ -598,9 +599,7 @@ def run_portfolio_backtest(
         is_rebalance_day = False
         if i == 0:  # 첫 날은 초기 자산 배분을 위해 항상 True
             is_rebalance_day = True
-        elif REBALANCE_MODE == "DAILY":
-            is_rebalance_day = True
-        elif REBALANCE_MODE == "WEEKLY":
+        elif rebalance_mode == "WEEKLY":
             # 오늘이 주말일인지 확인: 다음 거래일이 다른 주(week)인 경우
             if i < total_days - 1:
                 next_dt = union_index[i + 1]
@@ -614,7 +613,7 @@ def run_portfolio_backtest(
                             is_rebalance_day = True
                 except (KeyError, IndexError, AttributeError):
                     pass
-        elif REBALANCE_MODE == "TWICE_A_MONTH":
+        elif rebalance_mode == "TWICE_A_MONTH":
             import calendar
 
             # 현재 dt가 속한 주의 금요일이 몇 월 며칠인지 계산
@@ -640,7 +639,7 @@ def run_portfolio_backtest(
                     next_dt = union_index[i + 1]
                     if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
                         is_end_of_week = True
-                elif trading_calendar is not None:
+                elif trading_calendar_idx is not None:
                     try:
                         cal_idx = trading_calendar_idx.get_loc(dt)
                         if cal_idx + 1 < len(trading_calendar_idx):
@@ -651,22 +650,22 @@ def run_portfolio_backtest(
 
                 if is_end_of_week:
                     is_rebalance_day = True
-        elif REBALANCE_MODE == "MONTHLY":
+        elif rebalance_mode == "MONTHLY":
             # 오늘이 월말일인지 확인: 다음 거래일이 다른 달인 경우
             if i < total_days - 1:
                 next_dt = union_index[i + 1]
                 if next_dt.month != dt.month:
                     is_rebalance_day = True
-                elif trading_calendar_idx is not None:
-                    try:
-                        cal_idx = trading_calendar_idx.get_loc(dt)
-                        if cal_idx + 1 < len(trading_calendar_idx):
-                            if trading_calendar_idx[cal_idx + 1].month != dt.month:
-                                is_rebalance_day = True
-                    except (KeyError, IndexError, AttributeError):
-                        pass
+            elif trading_calendar_idx is not None:
+                try:
+                    cal_idx = trading_calendar_idx.get_loc(dt)
+                    if cal_idx + 1 < len(trading_calendar_idx):
+                        if trading_calendar_idx[cal_idx + 1].month != dt.month:
+                            is_rebalance_day = True
+                except (KeyError, IndexError, AttributeError):
+                    pass
 
-        elif REBALANCE_MODE == "QUARTERLY":
+        elif rebalance_mode == "QUARTERLY":
             # 오늘이 분기말일인지 확인: 3, 6, 9, 12월의 마지막 거래일
             target_months = {3, 6, 9, 12}
             if dt.month in target_months:
