@@ -4,7 +4,7 @@ from __future__ import annotations
 
 BACKTEST_STATUS_LIST = {
     "HOLD": {
-        "display_name": "<💼 보유>",
+        "display_name": "",
         "order": 10,
         "is_recommendation": False,
         "show_slack": True,
@@ -33,7 +33,7 @@ BACKTEST_STATUS_LIST = {
         "background": "#81c147",
     },
     "WAIT": {
-        "display_name": "<⏳ 대기>",
+        "display_name": "",
         "order": 50,
         "is_recommendation": False,
         "show_slack": False,

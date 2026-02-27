@@ -264,10 +264,17 @@ def run_account_backtest(
         if not calendar_arg:
             calendar_arg = None
     else:
-        calendar_arg = get_trading_days(date_range[0], date_range[1], country_code)
+        try:
+            # 리밸런싱 로직은 주/월 단위 전환이 일어나는지 확인하기 위해 다음 거래일을 참조해야 하므로,
+            # 달력 범위에 30일을 추가하여 넉넉하게 거래일을 제공합니다.
+            future_end_date = (pd.to_datetime(date_range[1]) + pd.DateOffset(days=30)).strftime("%Y-%m-%d")
+        except Exception:
+            future_end_date = date_range[1]
+
+        calendar_arg = get_trading_days(date_range[0], future_end_date, country_code)
         if not calendar_arg:
             raise RuntimeError(
-                f"{account_id.upper()} 기간 {date_range[0]}~{date_range[1]}의 거래일 정보를 로드하지 못했습니다."
+                f"{account_id.upper()} 기간 {date_range[0]}~{future_end_date}의 거래일 정보를 로드하지 못했습니다."
             )
 
     # 버켓 맵 구성 및 전체 top_n 계산
