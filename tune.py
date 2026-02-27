@@ -21,7 +21,7 @@ ACCOUNT_TUNING_CONFIG = {
     },
     "kor_isa": {  # 절세계좌 금액이 적어서 1 * 5 종목
         "BUCKET_TOPN": [1],
-        "MA_MONTH": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_MONTH": [12],
         "MA_TYPE": ["HMA"],
     },
     "kor_pension": {  # 절세계좌 금액이 적어서 1 * 5 종목
@@ -31,7 +31,7 @@ ACCOUNT_TUNING_CONFIG = {
     },
     "aus": {
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_MONTH": [12],
         "MA_TYPE": ["HMA"],
     },
     # 🇺🇸 미국 직투: 테스트 중
