@@ -9,12 +9,13 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_LAST_MONTHS": 12,
-        "BACKTESTED_DATE": "2026-02-27 08:48",
-        "CAGR": 57.12109,
-        "MDD": -9.545684,
+        "BACKTESTED_DATE": "2026-02-27 22:52",
+        "CAGR": 74.673421,
+        "MDD": -9.744865,
         "BUCKET_TOPN": 2,
-        "MA_MONTH": 12,
+        "MA_MONTH": 9,
         "MA_TYPE": "HMA",
+        "REBALANCE_MODE": "MONTHLY",
         "ENABLE_DATA_SUFFICIENCY_CHECK": false,
         "OPTIMIZATION_METRIC": "CAGR"
     },

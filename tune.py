@@ -14,37 +14,43 @@ from utils.logger import get_app_logger
 # 계좌별 성격 맞춤형 설정
 # =========================================================
 ACCOUNT_TUNING_CONFIG = {
-    "kor_kr": {
+    "aus": {
+        # 9개월 + QUARTERLY가 최적이지만 다음 쿼터까지 MONTHLY 로 유지
         "BUCKET_TOPN": [2],
-        # "MA_MONTH": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        # "MA_MONTH": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_MONTH": [9],
+        "MA_TYPE": ["HMA"],
+        # "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"], # 다음 쿼터에 오픈
+        "REBALANCE_MODE": ["MONTHLY"],
+    },
+    "kor_isa": {
+        # 아무 개월 + QUARTERLY가 최적이지만 다음 쿼터까지 MONTHLY 로 유지
+        "BUCKET_TOPN": [1],  # 절세계좌 금액이 적어서 1 * 5 종목
+        "MA_MONTH": [3],  # 종목이 많지 않고 고정 종목이라 의미 없음
+        "MA_TYPE": ["HMA"],
+        # "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"], # 다음 쿼터에 오픈
+        "REBALANCE_MODE": ["MONTHLY"],
+    },
+    "kor_kr": {
+        # 3개월 + WEEKLY가 최적
+        "BUCKET_TOPN": [2],
         "MA_MONTH": [3],  # 단기 추세
         "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["WEEKLY"],
     },
-    "kor_isa": {  # 절세계좌 금액이 적어서 1 * 5 종목
-        "BUCKET_TOPN": [1],
-        "MA_MONTH": [6],  # 종목이 많지 않고 고정 종목이라 의미 없음
+    "kor_pension": {
+        # 5개월 + TWICE_A_MONTH가 최적
+        "BUCKET_TOPN": [1],  # 절세계좌 금액이 적어서 1 * 5 종목
+        "MA_MONTH": [5],  # 중기 추세
         "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["TWICE_A_MONTH"],
     },
-    "kor_pension": {  # 절세계좌 금액이 적어서 1 * 5 종목
-        "BUCKET_TOPN": [1],
-        "MA_MONTH": [6],  # 중기 추세
-        "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-    },
-    "aus": {
-        "BUCKET_TOPN": [2],
-        "MA_MONTH": [12],  # 장기 추세
-        "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-    },
-    # 🇺🇸 미국 직투: 테스트 중
     "us": {
+        # 4개월 + MONTHLY 가 최적
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [12],  # 장기 추세
+        # "MA_MONTH": [4],  # 중단기 추세
         "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["MONTHLY"],
     },
 }
 
