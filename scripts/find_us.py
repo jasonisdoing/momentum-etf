@@ -56,11 +56,14 @@ EXCLUDE_KEYWORDS = [
     "3x",
     "YieldBOOST",
     "VIX",
+    "Ultra",
+    "Short",
+    "Bear",
 ]
 # 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
 INCLUDE_KEYWORDS = []
 # 최소 거래량 (0이면 필터링 안 함)
-MIN_VOLUME = 10000
+MIN_VOLUME = 100000
 
 
 def fetch_finviz_etf_data(min_change_pct):

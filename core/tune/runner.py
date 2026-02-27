@@ -1306,21 +1306,22 @@ def run_account_tuning(
 
     base_rules = get_strategy_rules(account_norm)
 
-    # [Modify] MA_MONTH 우선 처리
-    ma_month_values = _normalize_tuning_values(config.get("MA_MONTH"), dtype=int, fallback=None)
+    # [Modify] MA_MONTH 필수 처리: 튜닝 설정에 명시적으로 존재해야 함
+    ma_month_raw = config.get("MA_MONTH")
+    if ma_month_raw is None or (isinstance(ma_month_raw, (list, tuple)) and not ma_month_raw):
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'MA_MONTH' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+        )
+
+    ma_month_values = _normalize_tuning_values(ma_month_raw, dtype=int, fallback=None)
     ma_values = []
 
     if ma_month_values:
         # Month 사용 시 Day 변환 없이 그대로 사용
         pass
     else:
-        # 기존 로직
-        fallback_ma = base_rules.ma_days
-        # rules에서 ma_days가 None(월단위 사용시)일 수 있음
-        if fallback_ma is None:
-            fallback_ma = 20  # default fallback
-
-        ma_values = _normalize_tuning_values(config.get("MA_MONTH"), dtype=int, fallback=fallback_ma)
+        # 위에서 에러를 던지므로 여기는 도달하지 않아야 함
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_MONTH'가 유효하지 않습니다.")
 
     topn_values = _normalize_tuning_values(config.get("BUCKET_TOPN"), dtype=int, fallback=base_rules.bucket_topn)
 
@@ -1479,10 +1480,16 @@ def run_account_tuning(
 
     multiplier = 1.5
     if country_code in ("us", "usa"):
-        # 월 단위 MA 가정 (약 32배)
-        multiplier = 32.0
+        # [Modify] ma_max가 이미 개월수 * 20으로 계산되어 있으므로 32배 중복 적용은 비정상적임
+        # US는 초기 데이터 안정을 위해 충분한 웜업이 필요하지만 2.0배면 충분 (약 20년 MA 시 30년 데이터)
+        multiplier = 2.0
 
-    warmup_days = int(max(ma_max, base_rules.ma_days) * multiplier)
+    # 웜업 일수 계산 및 오버플로 방지 (최대 약 10년으로 제한)
+    warmup_days = int(max(ma_max, base_rules.ma_days or 0) * multiplier)
+    max_safe_warmup = 2500  # 약 10년
+    if warmup_days > max_safe_warmup:
+        logger.warning("[튜닝] 웜업 기간이 너무 깁니다 (%d일). %d일로 제한합니다.", warmup_days, max_safe_warmup)
+        warmup_days = max_safe_warmup
 
     logger.info(
         "[튜닝] 데이터 프리패치: 티커 %d개, 기간 %s~%s, 웜업 %d일",
