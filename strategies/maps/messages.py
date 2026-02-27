@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from utils.report import format_kr_money
+from utils.report import format_money
 
 from .constants import BACKTEST_STATUS_LIST, DECISION_MESSAGES, DECISION_NOTES
 
 
 def money_str(country: str, amount: float) -> str:
-    """Return formatted money string by country stock currency (KRW only)."""
+    """Return formatted money string by country stock currency."""
     try:
         val = float(amount or 0.0)
     except Exception:
         val = 0.0
-    return format_kr_money(val)
+    return format_money(val, country)
 
 
 def _normalize_display_name(name: str) -> str:

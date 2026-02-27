@@ -116,12 +116,10 @@ def _build_daily_table_rows(
 
         cost_basis = avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 else 0.0
         eval_profit_value = 0.0 if is_cash else (pv - cost_basis)
-        cumulative_profit_value = eval_profit_value
 
         evaluated_profit_display = money_formatter(eval_profit_value)
         evaluated_pct = (eval_profit_value / cost_basis * 100.0) if cost_basis > 0 else 0.0
         evaluated_pct_display = f"{evaluated_pct:+.1f}%" if cost_basis > 0 else "-"
-        cumulative_pct_display = evaluated_pct_display
 
         score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
         weight_display = f"{weight:.1f}%"
@@ -161,8 +159,6 @@ def _build_daily_table_rows(
             pv_display,
             evaluated_profit_display,
             evaluated_pct_display,
-            money_formatter(cumulative_profit_value),
-            cumulative_pct_display,
             weight_display,
             score_display,
             message,
@@ -171,7 +167,7 @@ def _build_daily_table_rows(
         sort_group = 2  # Default: WAIT / others
         if is_cash:
             sort_group = 0
-        elif decision in ("HOLD", "BUY", "BUY_REBALANCE"):
+        elif decision in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_REPLACE", "BUY_TODAY"):
             sort_group = 1
 
         bucket_sort_val = int(bucket_id) if (bucket_id and str(bucket_id).isdigit()) else 99
@@ -216,30 +212,26 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "금액",
         "평가손익",
         "평가(%)",
-        "누적손익",
-        "누적(%)",
         "비중",
         "점수",
         "문구",
     ]
     aligns = [
-        "right",
-        "left",
-        "left",
-        "left",
-        "center",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "left",
+        "right",  # #
+        "left",  # 버킷
+        "left",  # 티커
+        "left",  # 종목명
+        "center",  # 상태
+        "right",  # 보유일
+        "right",  # 현재가
+        "right",  # 일간(%)
+        "right",  # 수량
+        "right",  # 금액
+        "right",  # 평가손익
+        "right",  # 평가(%)
+        "right",  # 비중
+        "right",  # 점수
+        "left",  # 문구
     ]
 
     buy_date_map = {}
