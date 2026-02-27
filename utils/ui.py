@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from config import BUCKET_CONFIG, BUCKET_MAPPING
-from strategies.maps.constants import BACKTEST_STATUS_LIST, RECOMMEND_STATUS_LIST
+from strategies.maps.constants import BACKTEST_STATUS_LIST
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 from utils.recommendations import recommendations_to_dataframe
@@ -251,7 +251,7 @@ def _resolve_row_colors(country_code: str) -> dict[str, str]:
     # 기본값: DECISION_CONFIG의 background를 기반으로 구성
     base_colors = {
         key.upper(): cfg.get("background")
-        for key, cfg in {**BACKTEST_STATUS_LIST, **RECOMMEND_STATUS_LIST}.items()
+        for key, cfg in BACKTEST_STATUS_LIST.items()
         if isinstance(cfg, dict) and cfg.get("background")
     }
 
