@@ -526,7 +526,7 @@ def _get_active_holdings(df: pd.DataFrame) -> pd.DataFrame:
     try:
         from core.backtest.portfolio import get_hold_states
 
-        hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
+        hold_states = get_hold_states() | {"BUY", "BUY_REPLACE", "WAIT"}
         return df[df["상태"].isin(hold_states)].copy()
     except Exception:
         return df
