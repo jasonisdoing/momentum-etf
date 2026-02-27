@@ -903,6 +903,7 @@ def _enrich_with_period_returns(
     # 1주, 1달, 3달, 6달, 12달
     periods = {
         "return_1w": 7,
+        "return_2w": 14,
         "return_1m": 30,
         "return_3m": 90,
         "return_6m": 180,
