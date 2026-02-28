@@ -81,6 +81,7 @@ def _render_tuning_table(
         "MA개월",
         "MA타입",
         "TOPN",
+        "리밸런스",
         "CAGR(%)",
         "MDD(%)",
     ]
@@ -88,6 +89,7 @@ def _render_tuning_table(
         "right",
         "center",
         "right",
+        "center",
         "right",
         "right",
     ]
@@ -111,10 +113,17 @@ def _render_tuning_table(
         ma_type_val = row.get("ma_type", "SMA")
         topn_val = row.get("bucket_topn")
 
+        rebal_mode_val = row.get("rebalance_mode")
+        if not rebal_mode_val and "tuning" in row:
+            rebal_mode_val = row["tuning"].get("REBALANCE_MODE")
+        if not rebal_mode_val:
+            rebal_mode_val = "-"
+
         row_data = [
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
             str(ma_type_val) if ma_type_val else "SMA",
             str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
+            str(rebal_mode_val),
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),
             _format_table_float(row.get("period_return")),

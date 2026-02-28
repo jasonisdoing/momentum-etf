@@ -312,7 +312,9 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
     # 기존 stocks.json 로드 및 비교
 
     # 확인할 계정 목록
-    target_accounts = ["kor_kr", "kor_us"]
+    from utils.settings_loader import list_available_accounts
+
+    target_accounts = list_available_accounts()
 
     # 기존 종목 로드 (MongoDB)
     # 기존 종목 및 삭제된 종목 로드

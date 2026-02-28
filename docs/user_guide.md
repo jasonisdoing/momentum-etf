@@ -50,7 +50,7 @@ python recommend.py us
     "MA_TYPE": "EMA",                  // 이동평균 종류 (SMA, EMA, WMA 등) - 필수
     "BUCKET_TOPN": 1,                  // 버켓 내 최대 보유 종목 수 - 필수
     "REBALANCE_MODE": "QUARTERLY",     // 리밸런싱 주기 (DAILY, WEEKLY, TWICE_A_MONTH, MONTHLY, QUARTERLY) - 필수
-    "BACKTEST_START_DATE": "2025-02-01" // 백테스트/튜닝 시작일
+    "BACKTEST_LAST_MONTHS": 12         // 백테스트/튜닝 대상 과거 개월 수
   }
 }
 ```

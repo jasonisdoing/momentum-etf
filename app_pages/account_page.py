@@ -82,6 +82,7 @@ def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
                 "상장일": etf.get("listing_date", "-"),
                 "주간거래량": etf.get("1_week_avg_volume"),
                 "1주(%)": etf.get("1_week_earn_rate"),
+                "2주(%)": etf.get("2_week_earn_rate"),
                 "1달(%)": etf.get("1_month_earn_rate"),
                 "3달(%)": etf.get("3_month_earn_rate"),
                 "6달(%)": etf.get("6_month_earn_rate"),
@@ -144,7 +145,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 return f"background-color: {cfg['bg_color']}; color: {cfg['text_color']}; font-weight: bold; border-radius: 4px;"
         return ""
 
-    pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+    pct_columns = ["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
     styled = df_edit.style
 
     if not df_edit.empty:
@@ -200,11 +201,13 @@ def _render_stocks_meta_table(account_id: str) -> None:
     with c_mgr2:
         if st.button("메타데이터 업데이트", key=f"btn_meta_{account_id}", disabled=readonly, width="stretch"):
             st.session_state[key_meta] = True
+            st.session_state[f"show_add_modal_{account_id}"] = False
             st.rerun()
 
     with c_mgr3:
         if st.button("가격 캐시 갱신", key=f"btn_price_{account_id}", disabled=readonly, width="stretch"):
             st.session_state[key_price] = True
+            st.session_state[f"show_add_modal_{account_id}"] = False
             st.rerun()
 
     st.write("")  # 간격
@@ -224,6 +227,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "상장일": st.column_config.TextColumn("상장일", width=70),
         "주간거래량": st.column_config.NumberColumn("주간거래량", width=50, format="localized"),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+        "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
         "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
@@ -238,6 +242,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "상장일",
         "주간거래량",
         "1주(%)",
+        "2주(%)",
         "1달(%)",
         "3달(%)",
         "6달(%)",
@@ -297,6 +302,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                         del st.session_state[editor_key]
 
                     open_edit_dialog(ticker, bucket_name, name)
+                    st.session_state[f"show_add_modal_{account_id}"] = False
                     break
 
     # -----------------------------------------------------------------------
@@ -488,12 +494,39 @@ def _render_stocks_meta_table(account_id: str) -> None:
         st.rerun()
 
 
+def _render_manual_actions(account_id: str) -> None:
+    """수동 액션 실행 (추천 / 상태 알림) 영역을 렌더링합니다."""
+    st.subheader("🤖 수동 액션 실행")
+
+    import subprocess
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if st.button("🚀 추천 시스템 즉시 실행", type="primary", use_container_width=True, key=f"btn_rec_{account_id}"):
+            try:
+                subprocess.Popen(["python", "recommend.py", account_id])
+                st.success(f"✅ `{account_id}` 추천 시스템 실행을 시작했습니다. (배경에서 처리가 완료됩니다)")
+            except Exception as e:
+                st.error(f"⚠️ 실행 시작 오류: {e}")
+
+    with c2:
+        if st.button(
+            "🔔 포트폴리오 상태 알림 전송", type="secondary", use_container_width=True, key=f"btn_noti_{account_id}"
+        ):
+            try:
+                subprocess.Popen(["python", "scripts/portfolio_notifier.py", account_id])
+                st.success(f"✅ `{account_id}` 상태 알림 전송을 시작했습니다. (배경에서 처리가 완료됩니다)")
+            except Exception as e:
+                st.error(f"⚠️ 전송 시작 오류: {e}")
+
+
 def _get_active_holdings(df: pd.DataFrame) -> pd.DataFrame:
     """보유 중인 종목만 필터링합니다."""
     try:
-        from logic.backtest import get_hold_states
+        from core.backtest.portfolio import get_hold_states
 
-        hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
+        hold_states = get_hold_states() | {"BUY", "BUY_REPLACE", "WAIT"}
         return df[df["상태"].isin(hold_states)].copy()
     except Exception:
         return df
@@ -539,6 +572,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
                 "상장일": etf.get("listing_date", "-"),
                 "주간거래량": etf.get("1_week_avg_volume"),
                 "1주(%)": etf.get("1_week_earn_rate"),
+                "2주(%)": etf.get("2_week_earn_rate"),
                 "1달(%)": etf.get("1_month_earn_rate"),
                 "3달(%)": etf.get("3_month_earn_rate"),
                 "6달(%)": etf.get("6_month_earn_rate"),
@@ -566,7 +600,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
         return "background-color: #ffe0e6; color: black"
 
     styled_deleted = df_deleted.style.map(lambda _: "background-color: #ffe0e6")
-    pct_columns = ["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
+    pct_columns = ["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
     for col in pct_columns:
         if col in df_deleted.columns:
             styled_deleted = styled_deleted.map(_color_pct_deleted, subset=[col])
@@ -658,6 +692,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
             "상장일": st.column_config.TextColumn("상장일", width=70),
             "주간거래량": st.column_config.NumberColumn("주간거래량", width=50, format="localized"),
             "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+            "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
             "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
             "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
             "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
@@ -673,6 +708,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
             "상장일",
             "주간거래량",
             "1주(%)",
+            "2주(%)",
             "1달(%)",
             "3달(%)",
             "6달(%)",
@@ -686,6 +722,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
             "상장일",
             "주간거래량",
             "1주(%)",
+            "2주(%)",
             "1달(%)",
             "3달(%)",
             "6달(%)",
@@ -697,7 +734,7 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     )
 
 
-def render_account_page(account_id: str) -> None:
+def render_account_page(account_id: str, view_mode: str | None = None) -> None:
     """주어진 계정 설정을 기반으로 계정 페이지를 렌더링합니다 (탭 포함)."""
 
     # 버튼 스타일링 (특정 영역의 버튼만 색상 적용)
@@ -738,13 +775,14 @@ def render_account_page(account_id: str) -> None:
     df, updated_at, loaded_country_code = load_account_recommendations(account_id)
     country_code = loaded_country_code or country_code
 
-    view_mode = st.segmented_control(
-        "뷰",
-        ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"],
-        default="1. 추천 결과",
-        key=f"view_{account_id}",
-        label_visibility="collapsed",
-    )
+    if view_mode is None:
+        view_mode = st.segmented_control(
+            "뷰",
+            ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"],
+            default="1. 추천 결과",
+            key=f"view_{account_id}",
+            label_visibility="collapsed",
+        )
 
     if view_mode == "2. 종목 관리":
         _render_stocks_meta_table(account_id)
@@ -808,12 +846,12 @@ def render_account_page(account_id: str) -> None:
                 if strategy_tuning.get("MA_MONTH"):
                     params_to_show["MA개월"] = strategy_tuning.get("MA_MONTH")
 
-                from config import OPTIMIZATION_METRIC, REBALANCE_MODE
+                from config import OPTIMIZATION_METRIC
 
                 params_to_show.update(
                     {
                         "MA타입": strategy_tuning.get("MA_TYPE"),
-                        "리밸런스 주기": REBALANCE_MODE,
+                        "리밸런스 주기": strategy_tuning.get("REBALANCE_MODE", "TWICE_A_MONTH"),
                         "최적화 지표": OPTIMIZATION_METRIC,
                     }
                 )
@@ -868,6 +906,11 @@ def render_account_page(account_id: str) -> None:
                 st.caption("설정 정보를 찾을 수 없습니다.")
     elif view_mode in ("1. 보유 종목", "2. 종목 추세"):
         st.caption("데이터를 찾을 수 없습니다.")
+
+    # 수동 액션 실행 (추천 결과 탭에서만 가장 하단에 표시)
+    if view_mode == "1. 추천 결과":
+        st.divider()
+        _render_manual_actions(account_id)
 
 
 __all__ = ["render_account_page"]

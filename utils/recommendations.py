@@ -6,7 +6,8 @@ from typing import Any
 import pandas as pd
 from pandas.io.formats.style import Styler
 
-from strategies.maps.constants import DECISION_CONFIG
+from strategies.maps.constants import BACKTEST_STATUS_LIST
+from utils.formatters import format_trading_days
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 
@@ -23,6 +24,7 @@ _BASE_DISPLAY_COLUMNS = [
     "보유일",
     "현재가",
     "1주(%)",
+    "2주(%)",
     "1달(%)",
     "3달(%)",
     "6달(%)",
@@ -133,7 +135,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         evaluation_pct = row.get("evaluation_pct", 0.0)
         price_deviation = row.get("price_deviation") if show_deviation else None
         return_1w = row.get("return_1w", 0.0)
-        # return_2w = row.get("return_2w", 0.0)
+        return_2w = row.get("return_2w", 0.0)
         return_1m = row.get("return_1m", 0.0)
         return_3m = row.get("return_3m", 0.0)
         return_6m = row.get("return_6m", 0.0)
@@ -159,14 +161,14 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "티커": ticker,
                 "종목명": name,
                 "상태": state,
-                "보유일": holding_days,
+                "보유일": format_trading_days(holding_days),
                 "일간(%)": daily_pct,
                 "평가(%)": evaluation_pct,
                 price_label: price_display,
                 **({"Nav": row.get("nav_price")} if nav_mode else {}),
                 **({"괴리율": price_deviation} if show_deviation else {}),
                 "1주(%)": return_1w,
-                # "2주(%)": return_2w,
+                "2주(%)": return_2w,
                 "1달(%)": return_1m,
                 "3달(%)": return_3m,
                 "6달(%)": return_6m,
@@ -215,7 +217,7 @@ def _state_style(value: Any) -> str:
 
 
 _STATE_BACKGROUND_MAP = {
-    key.upper(): cfg.get("background") for key, cfg in DECISION_CONFIG.items() if isinstance(cfg, dict)
+    key.upper(): cfg.get("background") for key, cfg in BACKTEST_STATUS_LIST.items() if isinstance(cfg, dict)
 }
 
 

@@ -8,13 +8,14 @@
     "initial_capital_krw": "40000000",
     "show_hold": true,
     "strategy": {
-        "BACKTEST_START_DATE": "2025-02-01",
-        "BACKTESTED_DATE": "2026-02-21 12:19",
-        "CAGR": 90.254503,
-        "MDD": -17.078971,
+        "BACKTEST_LAST_MONTHS": 12,
+        "BACKTESTED_DATE": "2026-02-27 23:01",
+        "CAGR": 86.398434,
+        "MDD": -15.579205,
         "BUCKET_TOPN": 1,
         "MA_MONTH": 5,
         "MA_TYPE": "HMA",
+        "REBALANCE_MODE": "TWICE_A_MONTH",
         "ENABLE_DATA_SUFFICIENCY_CHECK": false,
         "OPTIMIZATION_METRIC": "CAGR"
     },

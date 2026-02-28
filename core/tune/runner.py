@@ -18,7 +18,7 @@ from typing import Any
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
-from config import OPTIMIZATION_METRIC, REBALANCE_MODE, TRADING_DAYS_PER_MONTH
+from config import OPTIMIZATION_METRIC, TRADING_DAYS_PER_MONTH
 from core.backtest.runner import run_account_backtest
 from core.tune.reporting import (
     _export_combo_debug,
@@ -193,12 +193,15 @@ def _resolve_month_configs(account_id: str = None) -> list[dict[str, Any]]:
     if account_id:
         try:
             account_settings = get_account_settings(account_id)
-            fallback = account_settings.get("strategy", {}).get("BACKTEST_START_DATE")
+            fallback = account_settings.get("strategy", {}).get("BACKTEST_LAST_MONTHS")
             if fallback is not None:
-                # BACKTEST_START_DATE가 있으면 단일 설정으로 반환
+                import pandas as pd
+
+                months_back = int(fallback)
+                start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
                 return [
                     {
-                        "backtest_start_date": str(fallback),
+                        "backtest_start_date": start_dt.strftime("%Y-%m-%d"),
                         "weight": 1.0,
                         "source": f"account_{account_id}",
                     }
@@ -277,13 +280,14 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     # [Key Reordering]
     # 사용자가 요청한 순서대로 키를 정렬하여 저장
     desired_order = [
-        "BACKTEST_START_DATE",
+        "BACKTEST_LAST_MONTHS",
         "BACKTESTED_DATE",
         "CAGR",
         "MDD",
         "BUCKET_TOPN",
         "MA_MONTH",
         "MA_TYPE",
+        "REBALANCE_MODE",
     ]
 
     ordered_strategy = {}
@@ -472,8 +476,12 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, str]] = [
-        (ma, topn, ma_type) for ma in ma_candidates for topn in topn_candidates for ma_type in ma_type_candidates
+    combos: list[tuple[int, int, str, str]] = [
+        (ma, topn, ma_type, rebal)
+        for ma in ma_candidates
+        for topn in topn_candidates
+        for ma_type in ma_type_candidates
+        for rebal in rebalance_mode_candidates
     ]
 
     if not combos:
@@ -533,7 +541,6 @@ def _execute_tuning(
 
     current_rules = get_strategy_rules(account_norm)
 
-    # 각 payload에는 파라미터만 포함 (데이터는 worker 초기화 시 한 번만 전달)
     payloads = [
         (
             account_norm,
@@ -541,10 +548,11 @@ def _execute_tuning(
             int(ma),
             int(topn),
             str(ma_type),
+            str(rebal_mode),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )
-        for ma, topn, ma_type in combos
+        for ma, topn, ma_type, rebal_mode in combos
     ]
 
     logger.info(
@@ -588,6 +596,7 @@ def _execute_tuning(
                 encountered_missing.update(missing)
             else:
                 failures.append(data)
+                logger.error(f"[튜닝] 오류 발생: {data.get('error', 'Unknown Error')}")
 
             if idx % max(1, len(combos) // 100) == 0 or idx == len(combos):
                 logger.info(
@@ -703,11 +712,12 @@ def _build_run_entry(
     }
 
     raw_data_payload: list[dict[str, Any]] = []
-    ma_type_weights: dict[str, float] = {}
     weighted_cagr_sum = 0.0
     weighted_cagr_weight = 0.0
     weighted_mdd_sum = 0.0
     weighted_mdd_weight = 0.0
+    ma_type_weights: dict[str, float] = {}
+    rebal_mode_weights: dict[str, float] = {}
     cagr_values: list[float] = []
     mdd_values: list[float] = []
 
@@ -794,6 +804,12 @@ def _build_run_entry(
             type_key = str(ma_type_val)
             ma_type_weights[type_key] = ma_type_weights.get(type_key, 0.0) + weight_for_cat
 
+        rebal_mode_val = best.get("rebalance_mode")
+        if rebal_mode_val:
+            weight_for_cat = weight if weight > 0 else 1.0
+            rebal_key = str(rebal_mode_val)
+            rebal_mode_weights[rebal_key] = rebal_mode_weights.get(rebal_key, 0.0) + weight_for_cat
+
     if weighted_cagr_weight > 0:
         entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
     elif cagr_values:
@@ -842,6 +858,9 @@ def _build_run_entry(
 
     if ma_type_weights:
         result_values["MA_TYPE"] = max(ma_type_weights.items(), key=lambda item: (item[1], item[0]))[0]
+
+    if rebal_mode_weights:
+        result_values["REBALANCE_MODE"] = max(rebal_mode_weights.items(), key=lambda item: (item[1], item[0]))[0]
 
     return entry
 
@@ -1287,28 +1306,24 @@ def run_account_tuning(
 
     base_rules = get_strategy_rules(account_norm)
 
-    # [Modify] MA_MONTH 우선 처리
-    ma_month_values = _normalize_tuning_values(config.get("MA_MONTH"), dtype=int, fallback=None)
+    # [Modify] MA_MONTH 필수 처리: 튜닝 설정에 명시적으로 존재해야 함
+    ma_month_raw = config.get("MA_MONTH")
+    if ma_month_raw is None or (isinstance(ma_month_raw, (list, tuple)) and not ma_month_raw):
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'MA_MONTH' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+        )
+
+    ma_month_values = _normalize_tuning_values(ma_month_raw, dtype=int, fallback=None)
     ma_values = []
 
     if ma_month_values:
         # Month 사용 시 Day 변환 없이 그대로 사용
         pass
     else:
-        # 기존 로직
-        fallback_ma = base_rules.ma_days
-        # rules에서 ma_days가 None(월단위 사용시)일 수 있음
-        if fallback_ma is None:
-            fallback_ma = 20  # default fallback
-
-        ma_values = _normalize_tuning_values(config.get("MA_MONTH"), dtype=int, fallback=fallback_ma)
+        # 위에서 에러를 던지므로 여기는 도달하지 않아야 함
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_MONTH'가 유효하지 않습니다.")
 
     topn_values = _normalize_tuning_values(config.get("BUCKET_TOPN"), dtype=int, fallback=base_rules.bucket_topn)
-
-    # MA_TYPE 처리: 문자열 리스트로 받음
-    ma_type_raw = config.get("MA_TYPE")
-    if ma_type_raw is None:
-        ma_type_values = [base_rules.ma_type]
 
     # MA_TYPE 처리: 문자열 리스트로 받음
     ma_type_raw = config.get("MA_TYPE")
@@ -1322,7 +1337,17 @@ def run_account_tuning(
     if not ma_type_values:
         ma_type_values = [base_rules.ma_type]
 
-    rebalance_mode_values = [REBALANCE_MODE]
+    # REBALANCE_MODE 처리: 문자열 리스트로 받음
+    rebalance_raw = config.get("REBALANCE_MODE")
+    if rebalance_raw is None:
+        rebalance_mode_values = [base_rules.rebalance_mode]
+    elif isinstance(rebalance_raw, (list, tuple)):
+        rebalance_mode_values = [str(v).upper() for v in rebalance_raw if v]
+    else:
+        rebalance_mode_values = [str(rebalance_raw).upper()]
+
+    if not rebalance_mode_values:
+        rebalance_mode_values = [base_rules.rebalance_mode]
 
     if (not ma_values and not ma_month_values) or not topn_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
@@ -1455,10 +1480,16 @@ def run_account_tuning(
 
     multiplier = 1.5
     if country_code in ("us", "usa"):
-        # 월 단위 MA 가정 (약 32배)
-        multiplier = 32.0
+        # [Modify] ma_max가 이미 개월수 * 20으로 계산되어 있으므로 32배 중복 적용은 비정상적임
+        # US는 초기 데이터 안정을 위해 충분한 웜업이 필요하지만 2.0배면 충분 (약 20년 MA 시 30년 데이터)
+        multiplier = 2.0
 
-    warmup_days = int(max(ma_max, base_rules.ma_days) * multiplier)
+    # 웜업 일수 계산 및 오버플로 방지 (최대 약 10년으로 제한)
+    warmup_days = int(max(ma_max, base_rules.ma_days or 0) * multiplier)
+    max_safe_warmup = 2500  # 약 10년
+    if warmup_days > max_safe_warmup:
+        logger.warning("[튜닝] 웜업 기간이 너무 깁니다 (%d일). %d일로 제한합니다.", warmup_days, max_safe_warmup)
+        warmup_days = max_safe_warmup
 
     logger.info(
         "[튜닝] 데이터 프리패치: 티커 %d개, 기간 %s~%s, 웜업 %d일",

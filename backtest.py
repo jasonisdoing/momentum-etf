@@ -67,13 +67,15 @@ def main() -> None:
 
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
     strategy_cfg = account_settings.get("strategy", {}) or {}
-    backtest_start_date_str = strategy_cfg.get("BACKTEST_START_DATE")
-    if backtest_start_date_str is None:
-        parser.error("계정 설정에 'strategy.BACKTEST_START_DATE' 값을 지정해야 합니다.")
+    backtest_last_months = strategy_cfg.get("BACKTEST_LAST_MONTHS")
+    if backtest_last_months is None:
+        parser.error("계정 설정에 'strategy.BACKTEST_LAST_MONTHS' 값을 지정해야 합니다.")
     try:
-        start_date = pd.to_datetime(backtest_start_date_str)
+        months_back = int(backtest_last_months)
+        start_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
+        backtest_start_date_str = start_date.strftime("%Y-%m-%d")
     except Exception:
-        parser.error("BACKTEST_START_DATE 설정이 올바른 날짜 형식이어야 합니다.")
+        parser.error("BACKTEST_LAST_MONTHS 설정이 올바른 숫자 형식이어야 합니다.")
     end_date = get_latest_trading_day(country_code)
     if not isinstance(end_date, pd.Timestamp):
         end_date = pd.Timestamp.now().normalize()

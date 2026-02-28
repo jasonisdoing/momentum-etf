@@ -158,6 +158,7 @@ def run_account_backtest(
             ma_days=strategy_override.ma_days,
             bucket_topn=strategy_override.bucket_topn,
             ma_type=strategy_override.ma_type,
+            rebalance_mode=strategy_override.rebalance_mode,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
         strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
@@ -264,10 +265,17 @@ def run_account_backtest(
         if not calendar_arg:
             calendar_arg = None
     else:
-        calendar_arg = get_trading_days(date_range[0], date_range[1], country_code)
+        try:
+            # 리밸런싱 로직은 주/월 단위 전환이 일어나는지 확인하기 위해 다음 거래일을 참조해야 하므로,
+            # 달력 범위에 30일을 추가하여 넉넉하게 거래일을 제공합니다.
+            future_end_date = (pd.to_datetime(date_range[1]) + pd.DateOffset(days=30)).strftime("%Y-%m-%d")
+        except Exception:
+            future_end_date = date_range[1]
+
+        calendar_arg = get_trading_days(date_range[0], future_end_date, country_code)
         if not calendar_arg:
             raise RuntimeError(
-                f"{account_id.upper()} 기간 {date_range[0]}~{date_range[1]}의 거래일 정보를 로드하지 못했습니다."
+                f"{account_id.upper()} 기간 {date_range[0]}~{future_end_date}의 거래일 정보를 로드하지 못했습니다."
             )
 
     # 버켓 맵 구성 및 전체 top_n 계산
@@ -383,7 +391,7 @@ def _resolve_backtest_start_date(
     우선순위:
     1. 직접 전달된 start_date
     2. override_settings의 backtest_start_date
-    3. account_settings의 strategy.BACKTEST_START_DATE
+    3. account_settings의 strategy.BACKTEST_LAST_MONTHS
     """
     if start_date is not None:
         return str(start_date)
@@ -391,10 +399,18 @@ def _resolve_backtest_start_date(
         return str(override_settings["backtest_start_date"])
     if "start_date" in override_settings:
         return str(override_settings["start_date"])
-    account_start = account_settings.get("strategy", {}).get("BACKTEST_START_DATE") if account_settings else None
-    if account_start is not None:
-        return str(account_start)
-    raise ValueError("BACKTEST_START_DATE 설정이 필요합니다. 계정 설정의 strategy.BACKTEST_START_DATE 값을 확인하세요.")
+
+    account_months = account_settings.get("strategy", {}).get("BACKTEST_LAST_MONTHS") if account_settings else None
+    if account_months is not None:
+        try:
+            months_back = int(account_months)
+            calc_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
+            return calc_date.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    raise ValueError(
+        "BACKTEST_LAST_MONTHS 설정이 필요합니다. 계정 설정의 strategy.BACKTEST_LAST_MONTHS 값을 확인하세요."
+    )
 
 
 def _resolve_initial_capital(
@@ -494,6 +510,7 @@ def _build_backtest_kwargs(
         "prefetched_metrics": prefetched_metrics,
         "ma_days": strategy_rules.ma_days,
         "ma_type": strategy_rules.ma_type,
+        "rebalance_mode": strategy_rules.rebalance_mode,
         "quiet": quiet,
         "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }

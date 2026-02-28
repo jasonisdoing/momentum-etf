@@ -13,6 +13,7 @@ from core.backtest.output.formatters import (
 )
 from strategies.maps.constants import DECISION_MESSAGES
 from utils.data_loader import get_exchange_rate_series
+from utils.formatters import format_trading_days
 from utils.notification import build_summary_line_from_summary_data
 from utils.report import format_kr_money, render_table_eaw
 
@@ -105,7 +106,7 @@ def _build_daily_table_rows(
             buy_date_map[ticker_key] = None
             holding_days_map[ticker_key] = 0
 
-        holding_days_display = str(holding_days_map.get(ticker_key, 0))
+        holding_days_display = format_trading_days(holding_days_map.get(ticker_key, 0))
         price_display = "1" if is_cash else (price_formatter(price) if _is_finite_number(price) else "-")
         shares_display = "1" if is_cash else _format_quantity(shares, qty_precision)
 
@@ -115,12 +116,10 @@ def _build_daily_table_rows(
 
         cost_basis = avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 else 0.0
         eval_profit_value = 0.0 if is_cash else (pv - cost_basis)
-        cumulative_profit_value = eval_profit_value
 
         evaluated_profit_display = money_formatter(eval_profit_value)
         evaluated_pct = (eval_profit_value / cost_basis * 100.0) if cost_basis > 0 else 0.0
         evaluated_pct_display = f"{evaluated_pct:+.1f}%" if cost_basis > 0 else "-"
-        cumulative_pct_display = evaluated_pct_display
 
         score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
         weight_display = f"{weight:.1f}%"
@@ -132,7 +131,7 @@ def _build_daily_table_rows(
         if not message:
             message = DECISION_MESSAGES.get(decision, "")
 
-        # decision_conf = DECISION_CONFIG.get(decision, {})
+        # decision_conf = BACKTEST_STATUS_LIST.get(decision, {})
         # decision_order = decision_conf.get("order", 99)
         score_val = float(score) if _is_finite_number(score) else float("-inf")
 
@@ -160,8 +159,6 @@ def _build_daily_table_rows(
             pv_display,
             evaluated_profit_display,
             evaluated_pct_display,
-            money_formatter(cumulative_profit_value),
-            cumulative_pct_display,
             weight_display,
             score_display,
             message,
@@ -170,7 +167,7 @@ def _build_daily_table_rows(
         sort_group = 2  # Default: WAIT / others
         if is_cash:
             sort_group = 0
-        elif decision in ("HOLD", "BUY", "BUY_REBALANCE"):
+        elif decision in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_REPLACE", "BUY_TODAY"):
             sort_group = 1
 
         bucket_sort_val = int(bucket_id) if (bucket_id and str(bucket_id).isdigit()) else 99
@@ -215,30 +212,26 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "금액",
         "평가손익",
         "평가(%)",
-        "누적손익",
-        "누적(%)",
         "비중",
         "점수",
         "문구",
     ]
     aligns = [
-        "right",
-        "left",
-        "left",
-        "left",
-        "center",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "right",
-        "left",
+        "right",  # #
+        "left",  # 버킷
+        "left",  # 티커
+        "left",  # 종목명
+        "center",  # 상태
+        "right",  # 보유일
+        "right",  # 현재가
+        "right",  # 일간(%)
+        "right",  # 수량
+        "right",  # 금액
+        "right",  # 평가손익
+        "right",  # 평가(%)
+        "right",  # 비중
+        "right",  # 점수
+        "left",  # 문구
     ]
 
     buy_date_map = {}
