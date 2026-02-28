@@ -3,7 +3,7 @@ import numbers
 
 import pandas as pd
 
-from utils.report import format_kr_money
+from utils.report import format_money
 from utils.settings_loader import get_account_precision
 
 BUCKET_NAMES = {
@@ -73,4 +73,7 @@ def _resolve_formatters(account_settings: dict[str, any], account_id: str = ""):
             return "-"
         return f"{float(value):,.{digits}f}"
 
-    return currency, _usd_money if currency == "USD" else format_kr_money, _format_price, qty_precision, digits
+    def format_money_for_account(val: float) -> str:
+        return format_money(val, account_id)
+
+    return currency, format_money_for_account, _format_price, qty_precision, digits

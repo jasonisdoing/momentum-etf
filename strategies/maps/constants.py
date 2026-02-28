@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-DECISION_CONFIG = {
+BACKTEST_STATUS_LIST = {
     "HOLD": {
-        "display_name": "<💼 보유>",
+        "display_name": "",
         "order": 10,
         "is_recommendation": False,
         "show_slack": True,
@@ -33,7 +33,7 @@ DECISION_CONFIG = {
         "background": "#81c147",
     },
     "WAIT": {
-        "display_name": "<⏳ 대기>",
+        "display_name": "",
         "order": 50,
         "is_recommendation": False,
         "show_slack": False,
@@ -66,7 +66,7 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
 
 DECISION_MESSAGES = {
     key: _normalize_display_label(cfg.get("display_name"))
-    for key, cfg in DECISION_CONFIG.items()
+    for key, cfg in BACKTEST_STATUS_LIST.items()
     if isinstance(cfg, dict) and cfg.get("display_name")
 }
 
@@ -86,7 +86,7 @@ DECISION_NOTES = {
 }
 
 __all__ = [
-    "DECISION_CONFIG",
+    "BACKTEST_STATUS_LIST",
     "DECISION_MESSAGES",
     "DECISION_NOTES",
 ]

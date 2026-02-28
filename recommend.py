@@ -26,7 +26,7 @@ from utils.account_registry import (
     list_available_accounts,
 )
 from utils.data_loader import MissingPriceDataError, get_latest_trading_day, prepare_price_data
-from utils.formatters import format_pct_change, format_price, format_price_deviation
+from utils.formatters import format_pct_change, format_price, format_price_deviation, format_trading_days
 from utils.logger import get_app_logger
 from utils.recommendation_storage import save_recommendation_payload
 from utils.report import render_table_eaw
@@ -189,7 +189,7 @@ def extract_recommendations_from_backtest(
 
         # 수익률 및 드로우다운 계산
         df_up_to_end = df[df.index <= end_date]
-        return_1w = return_1m = return_3m = 0.0
+        return_1w = return_2w = return_1m = return_3m = 0.0
         drawdown_from_high = 0.0
         trend_prices = []
 
@@ -213,7 +213,7 @@ def extract_recommendations_from_backtest(
                 return 0.0
 
             return_1w = _get_ret(5)
-            # return_2w = _get_ret(10)  # Removed as per request
+            return_2w = _get_ret(10)
             return_1m = _get_ret(20)
             return_3m = _get_ret(60)
             return_6m = _get_ret(126)
@@ -245,7 +245,7 @@ def extract_recommendations_from_backtest(
                 "price_deviation": price_deviation,
                 "holding_days": holding_days,
                 "return_1w": return_1w,
-                # "return_2w": return_2w,
+                "return_2w": return_2w,
                 "return_1m": return_1m,
                 "return_3m": return_3m,
                 "return_6m": return_6m,
@@ -267,16 +267,13 @@ def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str,
 
     # 1. 정렬 그룹 할당 (daily_report.py와 동일)
     # 0: CASH (현금은 여기서는 제외됨)
-    # 1: HOLD, BUY, BUY_REBALANCE
-    # 2: WAIT / others
+    # 1: 내일 보유할 최종 타겟 10종목 (HOLD, BUY, BUY_REBALANCE, BUY_REPLACE)
+    # 2: 제외/대기 대상 (WAIT, SELL, SELL_REPLACE)
     for rec in recommendations:
-        decision = str(rec.get("decision", "")).upper()
-        shares = rec.get("shares", 0) or 0
+        state = str(rec.get("state", "")).upper()
 
-        if decision in ("HOLD", "BUY", "BUY_REBALANCE"):
+        if state in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_REPLACE"):
             rec["_sort_group"] = 1
-        elif shares > 0:  # 잔고는 있는데 WAIT인 경우 (교체 대상 등)
-            rec["_sort_group"] = 1  # [User Request] 백테스트와 동일하게 상단 그룹에 배치
         else:
             rec["_sort_group"] = 2
 
@@ -284,7 +281,7 @@ def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str,
     def _sort_key(x):
         return (
             x.get("_sort_group", 2),
-            x.get("bucket", 99) if x.get("_sort_group") == 1 else 0,  # 백테스트 로직: 그룹 1인 경우만 버킷 정렬
+            x.get("bucket", 99) if x.get("_sort_group") == 1 else 99,  # Group 1은 버킷 정렬, Group 2는 점수순 정렬
             -(x.get("score") if x.get("score") is not None else float("-inf")),
             x.get("ticker", ""),
         )
@@ -469,7 +466,7 @@ def _apply_bucket_selection(
                 rec["decision"] = "WAIT"
                 rec["state"] = "WAIT"
 
-            final_list.append(rec)
+        final_list.append(rec)
 
     return final_list
 
@@ -484,12 +481,13 @@ def generate_recommendation_report(
     account_settings = get_account_settings(account_id)
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
     strategy_cfg = account_settings.get("strategy", {}) or {}
-    backtest_start_date_str = strategy_cfg.get("BACKTEST_START_DATE", "2025-01-01")
+    backtest_last_months = strategy_cfg.get("BACKTEST_LAST_MONTHS", 12)
 
     try:
-        start_date = pd.to_datetime(backtest_start_date_str)
+        months_back = int(backtest_last_months)
+        start_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
     except Exception:
-        start_date = pd.Timestamp.now().normalize() - pd.DateOffset(months=12)
+        start_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=12)
 
     # 종료일 결정
     if date_str:
@@ -688,8 +686,8 @@ def dump_recommendation_log(
     if nav_mode:
         headers.append("Nav")
 
-    # [User Request] 1주 - 1달 - 3달 - 6달 - 12달
-    headers.extend(["1주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"])
+    # [User Request] 1주 - 2주 - 1달 - 3달 - 6달 - 12달
+    headers.extend(["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"])
     headers.extend(["점수", "RSI", "지속", "문구"])
 
     # aligns ( headers 수와 일치해야 함 )
@@ -698,7 +696,7 @@ def dump_recommendation_log(
         aligns.append("right")
     if nav_mode:
         aligns.append("right")
-    aligns.extend(["right", "right", "right", "right", "right", "right"])  # Returns(5) & Drawdown
+    aligns.extend(["right", "right", "right", "right", "right", "right", "right"])  # Returns(6) & Drawdown
     aligns.extend(["right", "right", "right", "left"])
 
     rows: list[list[str]] = []
@@ -722,7 +720,7 @@ def dump_recommendation_log(
         phrase = item.get("phrase", "")
 
         return_1w = item.get("return_1w", 0)
-        # return_2w = item.get("return_2w", 0)
+        return_2w = item.get("return_2w", 0)
         return_1m = item.get("return_1m", 0)
         return_3m = item.get("return_3m", 0)
         return_6m = item.get("return_6m", 0)
@@ -735,7 +733,7 @@ def dump_recommendation_log(
             ticker,
             name,
             state,
-            str(holding_days) if holding_days > 0 else "-",
+            format_trading_days(holding_days),
             format_pct_change(daily_pct),
             format_pct_change(evaluation_pct) if evaluation_pct != 0 else "-",
             format_price(price, country_code),
@@ -748,7 +746,7 @@ def dump_recommendation_log(
         row.extend(
             [
                 format_pct_change(return_1w),
-                # format_pct_change(return_2w),
+                format_pct_change(return_2w),
                 format_pct_change(return_1m),
                 format_pct_change(return_3m),
                 format_pct_change(return_6m),
@@ -905,6 +903,7 @@ def _enrich_with_period_returns(
     # 1주, 1달, 3달, 6달, 12달
     periods = {
         "return_1w": 7,
+        "return_2w": 14,
         "return_1m": 30,
         "return_3m": 90,
         "return_6m": 180,

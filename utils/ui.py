@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from config import BUCKET_CONFIG, BUCKET_MAPPING
-from strategies.maps.constants import DECISION_CONFIG
+from strategies.maps.constants import BACKTEST_STATUS_LIST
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 from utils.recommendations import recommendations_to_dataframe
@@ -23,7 +23,7 @@ def inject_global_css() -> None:
         <style>
         /* padding-top은 상단 탭 네비게이션에서 일관되게 동작하는 값 */
         .block-container {
-            padding-top: 0.1rem !important;
+            padding-top: 2.5rem !important;
             padding-bottom: 0.5rem !important;
             padding-left: 1.0rem !important;
             padding-right: 1.0rem !important;
@@ -251,7 +251,7 @@ def _resolve_row_colors(country_code: str) -> dict[str, str]:
     # 기본값: DECISION_CONFIG의 background를 기반으로 구성
     base_colors = {
         key.upper(): cfg.get("background")
-        for key, cfg in DECISION_CONFIG.items()
+        for key, cfg in BACKTEST_STATUS_LIST.items()
         if isinstance(cfg, dict) and cfg.get("background")
     }
 
@@ -332,6 +332,7 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         "평가(%)",
         "수익률(%)",
         "1주(%)",
+        "2주(%)",
         "1달(%)",
         "3달(%)",
         "6달(%)",
@@ -437,9 +438,10 @@ def render_recommendation_table(
         "평가손익(KRW)": st.column_config.NumberColumn("평가손익(KRW)", width="small", format="localized"),
         "수익률(%)": st.column_config.NumberColumn("수익률(%)", width="small", format="%.2f%%"),
         price_label: st.column_config.NumberColumn(price_label, width="small"),
-        "상태": st.column_config.TextColumn("상태", width=100),
-        "보유일": st.column_config.NumberColumn("보유일", width=50),
+        "상태": st.column_config.TextColumn("상태", width=80),
+        "보유일": st.column_config.TextColumn("보유일", width=60),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
+        "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
         "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
@@ -449,7 +451,7 @@ def render_recommendation_table(
         "점수": st.column_config.NumberColumn("점수", width=50, format="%.1f"),
         "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
-        "문구": st.column_config.TextColumn("문구", width="small"),
+        "문구": st.column_config.TextColumn("문구", width="medium"),
     }
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")

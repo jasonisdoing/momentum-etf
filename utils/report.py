@@ -33,6 +33,27 @@ def format_kr_money(value: float) -> str:
     return sign + " ".join(parts) + "원"
 
 
+def format_money(value: float, country: str) -> str:
+    """금액을 국가에 맞는 형식(KRW 억만단위, USD 달러명시, AUD 호주달러명시)으로 포맷합니다."""
+    if value is None or not isinstance(value, (int, float)):
+        return "-"
+
+    country = str(country or "").strip().lower()
+
+    if country in ("kor", "kr"):
+        return format_kr_money(value)
+
+    sign = "-" if value < 0 else ""
+    val_abs = abs(value)
+
+    if country in ("us", "usa"):
+        return f"{sign}${val_abs:,.2f}"
+    elif country in ("aus", "au"):
+        return f"{sign}A${val_abs:,.2f}"
+    else:
+        return f"{sign}{val_abs:,.2f}"
+
+
 def render_table_eaw(headers: list[str], rows: list[list[str]], aligns: list[str]) -> list[str]:
     """
     동아시아 문자 너비를 고려하여 리스트 데이터를 ASCII 테이블 문자열로 렌더링합니다.

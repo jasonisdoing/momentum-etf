@@ -161,6 +161,7 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
                 "listing_date",
                 "1_week_avg_volume",
                 "1_week_earn_rate",
+                "2_week_earn_rate",
                 "1_month_earn_rate",
                 "3_month_earn_rate",
                 "6_month_earn_rate",
@@ -471,6 +472,7 @@ def update_single_stock_metadata(
             return None
 
         stock["1_week_earn_rate"] = calc_rate_safe(data, 5)
+        stock["2_week_earn_rate"] = calc_rate_safe(data, 10)
         stock["1_month_earn_rate"] = calc_rate_safe(data, 21)
         stock["3_month_earn_rate"] = calc_rate_safe(data, 63)
         stock["6_month_earn_rate"] = calc_rate_safe(data, 126)
@@ -486,6 +488,7 @@ def update_single_stock_metadata(
 
         rate_keys = [
             "1_week_earn_rate",
+            "2_week_earn_rate",
             "1_month_earn_rate",
             "3_month_earn_rate",
             "6_month_earn_rate",

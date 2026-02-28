@@ -75,22 +75,27 @@ def _load_authenticator() -> stauth.Authenticate:
     )
 
 
-def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]):
+def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any], view_mode: str | None = None):
     account_id = account["account_id"]
     icon = account.get("icon") or get_icon_fallback(account.get("country_code", ""))
 
+    title = view_mode if view_mode else account["name"]
+    # URL path에서 슬래시(/) 제거하여 Streamlit nested path 에러 방지
+    clean_view = view_mode.split(".")[-1].strip().replace("/", "_") if view_mode else "main"
+    url_path = f"{account_id}_{clean_view}"
+
     def _render(account_key: str = account_id) -> None:
-        render_account_page(account_key)
+        render_account_page(account_key, view_mode=view_mode)
 
     return page_cls(
         _render,
-        title=account["name"],
+        title=title,
         icon=icon,
-        url_path=account_id,
+        url_path=url_path,
     )
 
 
-def _build_home_page(accounts: list[dict[str, Any]]):
+def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None = None):
     def _render_home_page() -> None:
         from utils.portfolio_io import (
             get_latest_daily_snapshot,
@@ -388,22 +393,24 @@ def _build_home_page(accounts: list[dict[str, Any]]):
             # 한 번 보여준 후 다음 렌더링을 위해 초기화
             st.session_state.cache_warnings = {}
 
-        if "home_active_subtab" not in st.session_state:
-            st.session_state.home_active_subtab = "📊 요약"
+        current_subtab = initial_subtab
+        if current_subtab is None:
+            if "home_active_subtab" not in st.session_state:
+                st.session_state.home_active_subtab = "📊 요약"
 
-        active_subtab = st.segmented_control(
-            "홈 메뉴",
-            options=["📊 요약", "📋 상세"],
-            default=st.session_state.home_active_subtab,
-            key="home_subtab_selector",
-            label_visibility="collapsed",
-        )
-        if active_subtab:
-            st.session_state.home_active_subtab = active_subtab
-        else:
-            active_subtab = st.session_state.home_active_subtab
+            current_subtab = st.segmented_control(
+                "홈 메뉴",
+                options=["📊 요약", "📋 상세"],
+                default=st.session_state.home_active_subtab,
+                key="home_subtab_selector",
+                label_visibility="collapsed",
+            )
+            if current_subtab:
+                st.session_state.home_active_subtab = current_subtab
+            else:
+                current_subtab = st.session_state.home_active_subtab
 
-        if active_subtab == "📊 요약":
+        if current_subtab == "📊 요약":
             if total_assets > 0 or total_purchase > 0:
                 # 섹션 간 간격 최소화를 위한 전역 CSS
                 st.markdown(
@@ -458,19 +465,58 @@ def _build_home_page(accounts: list[dict[str, Any]]):
                     full_html = f'<div style="overflow-x: auto;">{table_html.replace("<table ", "<table class='summary-table' ")}</div>'
                     st.html(full_html)
 
-                st.subheader("포트폴리오 구성 비중")
-                table_weight_html = styled_weight_df.to_html()
-                full_weight_html = f'<div style="width: 70%; overflow-x: auto;">{table_weight_html.replace("<table ", "<table class='summary-table' ")}</div>'
-                st.html(full_weight_html)
+                # 왼쪽 50%만 사용하기 위한 컬럼 생성
+                left_col, _ = st.columns([1, 1])
 
-                st.subheader("통계용")
-                table_stat_html = styled_stat_df.to_html()
-                full_stat_html = f'<div style="width: 50%; overflow-x: auto;">{table_stat_html.replace("<table ", "<table class='summary-table' ")}</div>'
-                st.html(full_stat_html)
+                with left_col:
+                    st.subheader("포트폴리오 구성 비중")
+                    table_weight_html = styled_weight_df.to_html()
+                    full_weight_html = f'<div style="overflow-x: auto;">{table_weight_html.replace("<table ", "<table class='summary-table' ")}</div>'
+                    st.html(full_weight_html)
+
+                    st.subheader("통계용")
+                    table_stat_html = styled_stat_df.to_html()
+                    full_stat_html = f'<div style="overflow-x: auto;">{table_stat_html.replace("<table ", "<table class='summary-table' ")}</div>'
+                    st.html(full_stat_html)
+
+                    # 버튼 스타일링 (기존 코드 유지)
+                    st.markdown(
+                        """
+                        <style>
+                        /* 글로벌 슬랙 버튼 (Primary) 스타일 강제 적용 */
+                        .stButton > button[kind="primary"] {
+                            background-color: #2e7d32 !important;
+                            color: white !important;
+                            font-weight: bold !important;
+                            border: none !important;
+                        }
+                        .stButton > button[kind="primary"]:hover {
+                            background-color: #1b5e20 !important;
+                            color: white !important;
+                        }
+                        </style>
+                    """,
+                        unsafe_allow_html=True,
+                    )
+
+                    st.divider()
+                    if st.button(
+                        "🔔 전체 자산 요약 알림 전송 (Slack)",
+                        type="primary",
+                        use_container_width=True,
+                        key="btn_global_slack_summary",
+                    ):
+                        try:
+                            import subprocess
+
+                            subprocess.Popen(["python", "scripts/slack_asset_summary.py"])
+                            st.success("✅ 전체 자산 요약 알림 전송을 시작했습니다. (배경에서 처리가 완료됩니다)")
+                        except Exception as e:
+                            st.error(f"⚠️ 전송 시작 오류: {e}")
             else:
                 st.info("평가금액 및 매입금액 데이터가 없어 요약을 표시할 수 없습니다.")
 
-        elif active_subtab == "📋 상세":
+        elif current_subtab == "📋 상세":
             # 정렬: 계좌순(이름에 order가 포함됨) -> 버킷순
             if "bucket" in combined_df.columns:
                 combined_df = combined_df.sort_values(["계좌", "bucket"], ascending=[True, True])
@@ -547,17 +593,34 @@ def main() -> None:
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
     from app_pages.transactions_page import build_transaction_page
 
-    pages = [
+    pages = {}
+
+    # 보유종목 그룹
+    pages["보유종목"] = [
         page_cls(
-            _build_home_page(accounts),
-            title="보유종목",
+            _build_home_page(accounts, initial_subtab="📊 요약"),
+            title="📊 요약",
             icon="🏠",
+            url_path="home_summary",
             default=True,
-        )
+        ),
+        page_cls(
+            _build_home_page(accounts, initial_subtab="📋 상세"),
+            title="📋 상세",
+            icon="📋",
+            url_path="home_details",
+        ),
     ]
-    pages.append(build_transaction_page(page_cls))
+
+    # 계좌 관리 그룹
+    transaction_tabs = ["📊 잔고 CRUD", "📥 벌크 입력", "💵 원금/현금", "📸 스냅샷"]
+    pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
+
+    # 각 계좌 그룹
+    view_modes = ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]
     for account in accounts:
-        pages.append(_build_account_page(page_cls, account))
+        group_name = account["name"]
+        pages[group_name] = [_build_account_page(page_cls, account, view_mode) for view_mode in view_modes]
 
     # 네비게이션 객체 생성 (사이드바 방식)
     pg = navigation(pages, position="sidebar")

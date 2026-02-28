@@ -62,18 +62,18 @@ def select_candidates(
 
 
 def sort_decisions_by_order_and_score(decisions: list[dict[str, Any]]) -> None:
-    """DECISION_CONFIG의 order 순으로 정렬하고, 같은 order 내에서는 composite_score > score 역순으로 정렬합니다.
+    """BACKTEST_STATUS_LIST의 order 순으로 정렬하고, 같은 order 내에서는 composite_score > score 역순으로 정렬합니다.
 
     백테스트와 추천에서 공통으로 사용되는 정렬 함수입니다.
     """
-    from strategies.maps.constants import DECISION_CONFIG
+    from strategies.maps.constants import BACKTEST_STATUS_LIST
 
     def sort_key(item_dict):
         state = item_dict["state"]
         composite_score = item_dict.get("composite_score", 0.0)
         score = item_dict.get("score", 0.0)
         ticker = item_dict.get("ticker") or item_dict.get("tkr", "")
-        order = DECISION_CONFIG.get(state, {}).get("order", 99)
+        order = BACKTEST_STATUS_LIST.get(state, {}).get("order", 99)
         # composite_score 우선, 그 다음 MAPS score, 마지막으로 ticker
         return (order, -composite_score, -score, ticker)
 
