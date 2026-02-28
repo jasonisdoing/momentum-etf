@@ -46,11 +46,11 @@ ACCOUNT_TUNING_CONFIG = {
         "REBALANCE_MODE": ["TWICE_A_MONTH"],
     },
     "us": {
-        # 4개월 + MONTHLY 가 최적
+        # 4개월 + TWICE_A_MONTH 가 최적
         "BUCKET_TOPN": [2],
-        # "MA_MONTH": [4],  # 중단기 추세
+        "MA_MONTH": [4],  # 중단기 추세
         "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["MONTHLY"],
+        "REBALANCE_MODE": ["TWICE_A_MONTH"],
     },
 }
 
