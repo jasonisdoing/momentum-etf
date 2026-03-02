@@ -250,25 +250,74 @@ def _render_cash_tab(account_map):
         for acc_name, acc_id in account_map.items():
             st.markdown(f"#### 🏦 {acc_name}")
             m_data = load_portfolio_master(acc_id)
-            current_principal = m_data.get("total_principal", 0.0) if m_data else 0.0
-            current_cash = m_data.get("cash_balance", 0.0) if m_data else 0.0
+            current_principal = m_data.get("base_principal", m_data.get("total_principal", 0.0)) if m_data else 0.0
+            current_cash = m_data.get("base_cash", m_data.get("cash_balance", 0.0)) if m_data else 0.0
             current_holdings = m_data.get("holdings", []) if m_data else []
+
+            # Additional logic for 'aus' account
+            if acc_id == "aus":
+                current_intl_val = m_data.get("intl_shares_value", 0.0) if m_data else 0.0
+                current_intl_chg = m_data.get("intl_shares_change", 0.0) if m_data else 0.0
+
+                c_intl1, c_intl2 = st.columns(2)
+                with c_intl1:
+                    new_intl_val = st.number_input(
+                        "International Shares Current Value",
+                        value=float(current_intl_val),
+                        min_value=0.0,
+                        step=100.0,
+                        key=f"intl_val_{acc_id}",
+                    )
+                with c_intl2:
+                    new_intl_chg = st.number_input(
+                        "International Shares Change",
+                        value=float(current_intl_chg),
+                        step=100.0,
+                        key=f"intl_chg_{acc_id}",
+                    )
+                st.caption(
+                    f"ℹ️ International Shares 원금: ${new_intl_val - new_intl_chg:,.2f} (자동계산되어 총 원금에 합산됩니다)"
+                )
+                st.write("")  # spacer
+
             c1, c2 = st.columns(2)
             with c1:
                 new_principal = st.number_input(
-                    f"투자 원금 ({acc_name})", value=int(current_principal), min_value=0, key=f"prin_{acc_id}"
+                    f"기타 투자 원금 ({acc_name})" if acc_id == "aus" else f"투자 원금 ({acc_name})",
+                    value=int(current_principal),
+                    min_value=0,
+                    key=f"prin_{acc_id}",
                 )
             with c2:
                 new_cash = st.number_input(
-                    f"보유 현금 ({acc_name})", value=int(current_cash), min_value=0, key=f"cash_{acc_id}"
+                    f"기타 보유 현금 ({acc_name})" if acc_id == "aus" else f"보유 현금 ({acc_name})",
+                    value=int(current_cash),
+                    min_value=0,
+                    key=f"cash_{acc_id}",
                 )
-            input_values[acc_id] = {"holdings": current_holdings, "principal": new_principal, "cash": new_cash}
+
+            input_values[acc_id] = {
+                "holdings": current_holdings,
+                "principal": new_principal,
+                "cash": new_cash,
+            }
+            if acc_id == "aus":
+                input_values[acc_id]["intl_shares_value"] = new_intl_val
+                input_values[acc_id]["intl_shares_change"] = new_intl_chg
+
             st.divider()
 
         if st.form_submit_button("전체 계좌 일괄 저장하기", type="primary"):
             success_count = 0
             for acc_id, data in input_values.items():
-                if save_portfolio_master(acc_id, data["holdings"], data["principal"], data["cash"]):
+                if save_portfolio_master(
+                    acc_id,
+                    data["holdings"],
+                    data["principal"],
+                    data["cash"],
+                    intl_shares_value=data.get("intl_shares_value"),
+                    intl_shares_change=data.get("intl_shares_change"),
+                ):
                     success_count += 1
             if success_count == len(input_values):
                 st.success("✅ 저장 완료!")

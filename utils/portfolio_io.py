@@ -134,6 +134,33 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
     )
     df_holdings["평가금액(KRW)"] = (df_holdings["quantity"] * df_holdings["현재가"] * multiplier).astype(float)
 
+    # -----------------------------------------------------
+    # Pseudo-holding logic for International Shares
+    # -----------------------------------------------------
+    intl_val = snapshot.get("intl_shares_value", 0.0)
+    intl_change = snapshot.get("intl_shares_change", 0.0)
+    if account_id == "aus" and (intl_val > 0 or intl_change != 0):
+        intl_princi = intl_val - intl_change
+
+        intl_princi_krw = intl_princi * aud_krw
+        intl_val_krw = intl_val * aud_krw
+
+        # We append a row to df_holdings
+        pseudo_row = {
+            "ticker": "IS",
+            "name": "International Shares",
+            "quantity": 1,
+            "average_buy_price": intl_princi,
+            "currency": "AUD",
+            "bucket": 3,  # "3. 시장지수"
+            "first_buy_date": pd.Timestamp.now().normalize(),
+            "보유일": "-",
+            "현재가": intl_val,
+            "매입금액(KRW)": intl_princi_krw,
+            "평가금액(KRW)": intl_val_krw,
+        }
+        df_holdings = pd.concat([df_holdings, pd.DataFrame([pseudo_row])], ignore_index=True)
+
     # Rename columns to match UI
     df_holdings = df_holdings.rename(
         columns={
@@ -233,10 +260,20 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
     for acc in doc["accounts"]:
         if acc["account_id"] == account_id:
             # Flatten for backward compatibility in functions that expect account-level dict
+            base_principal = acc.get("total_principal", 0.0)
+            base_cash = acc.get("cash_balance", 0.0)
+
+            intl_val = acc.get("intl_shares_value", 0.0)
+            intl_change = acc.get("intl_shares_change", 0.0)
+
             return {
                 "account_id": acc["account_id"],
-                "total_principal": acc.get("total_principal", 0.0),
-                "cash_balance": acc.get("cash_balance", 0.0),
+                "total_principal": base_principal,
+                "cash_balance": base_cash,
+                "base_principal": base_principal,
+                "base_cash": base_cash,
+                "intl_shares_value": intl_val,
+                "intl_shares_change": intl_change,
                 "holdings": acc.get("holdings", []),
                 "updated_at": acc.get("updated_at"),
             }
@@ -248,6 +285,8 @@ def save_portfolio_master(
     holdings: list[dict[str, Any]],
     total_principal: float | None = None,
     cash_balance: float | None = None,
+    intl_shares_value: float | None = None,
+    intl_shares_change: float | None = None,
 ) -> bool:
     """Save/Update one account's balance within the consolidated portfolio_master document."""
     db = get_db_connection()
@@ -268,6 +307,10 @@ def save_portfolio_master(
                     acc["total_principal"] = float(total_principal)
                 if cash_balance is not None:
                     acc["cash_balance"] = float(cash_balance)
+                if intl_shares_value is not None:
+                    acc["intl_shares_value"] = float(intl_shares_value)
+                if intl_shares_change is not None:
+                    acc["intl_shares_change"] = float(intl_shares_change)
 
                 # Enforce integer quantity
                 import math
@@ -287,15 +330,18 @@ def save_portfolio_master(
             for h in holdings:
                 h["quantity"] = int(math.floor(float(h.get("quantity", 0.0))))
 
-            accounts.append(
-                {
-                    "account_id": account_id,
-                    "total_principal": float(total_principal or 0.0),
-                    "cash_balance": float(cash_balance or 0.0),
-                    "holdings": holdings,
-                    "updated_at": datetime.datetime.now(),
-                }
-            )
+            new_acc = {
+                "account_id": account_id,
+                "total_principal": float(total_principal or 0.0),
+                "cash_balance": float(cash_balance or 0.0),
+                "holdings": holdings,
+                "updated_at": datetime.datetime.now(),
+            }
+            if intl_shares_value is not None:
+                new_acc["intl_shares_value"] = float(intl_shares_value)
+            if intl_shares_change is not None:
+                new_acc["intl_shares_change"] = float(intl_shares_change)
+            accounts.append(new_acc)
 
         db.portfolio_master.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
         return True
