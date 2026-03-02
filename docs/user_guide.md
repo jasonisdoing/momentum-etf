@@ -35,8 +35,8 @@ python recommend.py us
 
 ### 기본 설정 (`config.py`)
 시스템 전반에 걸친 기본 설정을 변경할 수 있습니다.
-*   `SLACK_WEBHOOK_URL`: 알림을 받을 슬랙 웹훅 주소
-
+*   `SLACK_BOT_TOKEN`: 알림을 봇을 통해 발송하기 위한 슬랙 봇 토큰
+*   `SLACK_CHANNEL_ID`: 알림을 받을 슬랙 채널 ID
 
 ### 계좌별 전략 설정 (`zaccounts` 폴더 내 `config.json`)
 각 계좌(포트폴리오)별로 구체적인 전략 파라미터를 설정합니다. `tune.py` 실행 시 자동으로 업데이트됩니다.
