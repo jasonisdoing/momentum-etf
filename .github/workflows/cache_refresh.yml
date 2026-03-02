@@ -38,7 +38,7 @@ jobs:
         if: failure()
         uses: rtCamp/action-slack-notify@v2
         env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK: ${{ secrets.LOGS_SLACK_WEBHOOK }}
           SLACK_COLOR: danger
           SLACK_TITLE: "❌ GitHub Action Failed: ${{ github.workflow }}"
           SLACK_MESSAGE: "Job failed in ${{ github.repository }}! View run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
