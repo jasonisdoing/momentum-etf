@@ -149,19 +149,6 @@ def extract_recommendations_from_backtest(
         daily_pct = 0.0
         if prev_row is not None:
             prev_price = _safe_float(prev_row.get("price"))
-            prev_avg_cost = _safe_float(prev_row.get("avg_cost"))
-
-            # prev_price가 avg_cost와 같으면 (데이터 없음 표시), 더 이전 날짜를 찾음
-            if prev_price and prev_avg_cost and abs(prev_price - prev_avg_cost) < 0.001:
-                # df에서 price != avg_cost인 마지막 행 찾기
-                df_before_prev = df[df.index < end_date]
-                for idx in reversed(df_before_prev.index):
-                    row = df_before_prev.loc[idx]
-                    row_price = _safe_float(row.get("price"))
-                    row_avg_cost = _safe_float(row.get("avg_cost"))
-                    if row_price and row_avg_cost and abs(row_price - row_avg_cost) >= 0.001:
-                        prev_price = row_price
-                        break
 
             if prev_price and prev_price > 0 and price:
                 daily_pct = ((price / prev_price) - 1.0) * 100.0
@@ -397,8 +384,11 @@ def _enrich_with_nav_data(
                 rec["price"] = nav_info.get("nowVal")
 
             # [User Request] 개별 종목의 경우 실시간 changeRate가 있으면 daily_pct 업데이트 (선택 사항)
-            # 여기서는 백테스트 결과의 daily_pct가 0인 경우 실시간 데이터로 보완
+            # 호주 등 외부 API의 changeRate 신뢰도가 낮은 경우를 대비해 한국 계좌에서만 동작하도록 제한
             if rec.get("daily_pct", 0) == 0 and nav_info.get("changeRate") is not None:
+                # _enrich_with_nav_data는 상위 호출부(generate_recommendation_report)에서
+                # 이미 한국 국가 코드일 때만 호출되지만, 로직의 명확성을 위해 한 번 더 배제 로직을 확인하거나
+                # 이 함수 자체가 네이버 전용임을 명시함.
                 rec["daily_pct"] = nav_info.get("changeRate")
 
     return recommendations

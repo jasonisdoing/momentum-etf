@@ -1098,6 +1098,21 @@ def fetch_ohlcv_for_tickers(
                     elif country_lower == "au":
                         price_str = f"A${rt_price:,.2f}"
                     else:
+                        price_str = f"{rt_price:,.0f}원"
+
+                    # [안전장치] 실시간 가격이 기존 캐시의 마지막 종가와 너무 큰 차이가 나면 경고 (예: 15% 이상)
+                    if not cached_df.empty:
+                        last_close = _safe_float(cached_df.iloc[-1].get("Close") or cached_df.iloc[-1].get("close"))
+                        if last_close > 0:
+                            diff_pct = abs(rt_price - last_close) / last_close * 100.0
+                            if diff_pct > 15.0:
+                                logger.warning(
+                                    f"⚠️ [{tkr}] 실시간 가격({price_str})이 직전 종가({last_close:,.2f}) 대비 비정상적 변동({diff_pct:.2f}%)을 보입니다. 데이터 오염 가능성이 있으니 확인이 필요합니다."
+                                )
+                                # 극단적인 오차(예: 25% 이상)인 경우 실시간 데이터 무시 처리 고려 가능
+                                if diff_pct > 25.0:
+                                    logger.error(f"❌ [{tkr}] 변동폭이 너무 커서 실시간 데이터를 무시합니다.")
+                                    continue
                         price_str = f"{rt_price:,.0f}"
 
                     # 캐시 데이터와 오늘 데이터 병합
@@ -1506,13 +1521,8 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
                 "nowVal": float(price),
             }
 
-            # 일간 변동률 (%)
-            pct_change = quote.get("pctChange")
-            if pct_change is not None:
-                try:
-                    entry["changeRate"] = float(pct_change)
-                except (TypeError, ValueError):
-                    pass
+            # 일간 변동률 (%) - 호주의 경우 QuoteAPI의 pctChange 신뢰도가 낮아 직접 계산을 권장함
+            # entry["changeRate"] = ... (생략)
 
             # OHLCV 데이터
             for field in ["open", "high", "low", "volume"]:
