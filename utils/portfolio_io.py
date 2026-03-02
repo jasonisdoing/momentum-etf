@@ -98,21 +98,20 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
 
     @st.cache_data(ttl=3600, show_spinner=False)
     def _get_cached_exchange_rates() -> dict[str, float]:
-        import yfinance as yf
-
         rates = {"USD": 0.0, "AUD": 0.0}
         today_dt = datetime.datetime.today()
 
         # USD/KRW
         usd_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt)
-        rates["USD"] = float(usd_krw_series.iloc[-1]) if not usd_krw_series.empty else 0.0
+        if usd_krw_series.empty:
+            raise RuntimeError("USD/KRW 환율 데이터를 가져오지 못했습니다.")
+        rates["USD"] = float(usd_krw_series.iloc[-1])
 
         # AUD/KRW
-        try:
-            aud_krw_df = yf.download("AUDKRW=X", period="5d", progress=False, auto_adjust=True)
-            rates["AUD"] = float(aud_krw_df["Close"].dropna().iloc[-1]) if not aud_krw_df.empty else 0.0
-        except Exception:
-            pass
+        aud_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt, symbol="AUDKRW=X")
+        if aud_krw_series.empty:
+            raise RuntimeError("AUD/KRW 환율 데이터를 가져오지 못했습니다.")
+        rates["AUD"] = float(aud_krw_series.iloc[-1])
 
         return rates
 

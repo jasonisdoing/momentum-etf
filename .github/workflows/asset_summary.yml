@@ -28,3 +28,12 @@ jobs:
           MONGO_DB_CONNECTION_STRING: ${{ secrets.MONGO_DB_CONNECTION_STRING }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: python scripts/slack_asset_summary.py
+
+      - name: Notify Slack on Failure
+        if: failure()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_COLOR: danger
+          SLACK_TITLE: "❌ GitHub Action Failed: ${{ github.workflow }}"
+          SLACK_MESSAGE: "Job failed in ${{ github.repository }}! View run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
