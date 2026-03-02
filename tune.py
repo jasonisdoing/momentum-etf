@@ -32,9 +32,10 @@ ACCOUNT_TUNING_CONFIG = {
         "REBALANCE_MODE": ["MONTHLY"],
     },
     "kor_kr": {
-        # 3개월 + WEEKLY가 최적
+        # 2개월 + WEEKLY가 최적
+        # [2026년 3월 3일] CAGR: 191.32%, MDD: -12.37%
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [3],  # 단기 추세
+        "MA_MONTH": [2],  # 단기 추세
         "MA_TYPE": ["HMA"],
         "REBALANCE_MODE": ["WEEKLY"],
     },
