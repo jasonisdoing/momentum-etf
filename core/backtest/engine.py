@@ -579,6 +579,8 @@ def run_portfolio_backtest(
         }
         for ticker in metrics_by_ticker.keys()
     }
+    # 각 종목별 직전 유효 가격을 추적 (데이터 공백 시 패딩용)
+    last_prices = {ticker: 0.0 for ticker in metrics_by_ticker.keys()}
     cash = float(initial_capital)
     daily_records_by_ticker = {ticker: [] for ticker in metrics_by_ticker.keys()}
     out_cash = []
@@ -753,6 +755,7 @@ def run_portfolio_backtest(
             filter_value = buy_signal_today.get(ticker, 0)
 
             if available_today:
+                last_prices[ticker] = price  # 유효한 가격 업데이트
                 pv_value = snapshot["shares"] * price
                 record = {
                     "date": dt,
@@ -772,10 +775,15 @@ def run_portfolio_backtest(
                 }
             else:
                 avg_cost = snapshot["avg_cost"]
-                pv_value = snapshot["shares"] * (avg_cost if pd.notna(avg_cost) else 0.0)
+                # 데이터가 없는 날(휴장일 등)에는 직전 유효 가격 사용 (없으면 avg_cost 후순위)
+                display_price = last_prices.get(ticker, 0.0)
+                if display_price <= 0:
+                    display_price = avg_cost if pd.notna(avg_cost) else 0.0
+
+                pv_value = snapshot["shares"] * display_price
                 record = {
                     "date": dt,
-                    "price": avg_cost,
+                    "price": display_price,
                     "shares": snapshot["shares"],
                     "pv": pv_value,
                     "decision": "HOLD" if snapshot["shares"] > 0 else "WAIT",
