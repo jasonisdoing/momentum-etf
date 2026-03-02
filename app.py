@@ -140,6 +140,9 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 all_holdings.append(df)
                 acc_valuation = df["평가금액(KRW)"].sum()
                 acc_purchase = df["매입금액(KRW)"].sum()
+
+                # Capture the rates from the DataFrame's first row (which we know are correct because they were just calculated)
+                # Alternatively, we can just load it once outside the loop.
             else:
                 acc_valuation = 0.0
                 acc_purchase = 0.0
@@ -458,6 +461,98 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                     delta=f"{total_net_profit_pct:,.2f}%",
                 )
                 c5.metric(label="총 현금 보유량", value=format_korean_currency(total_cash))
+
+                # Display Exchange Rates
+                import datetime
+
+                import yfinance as yf
+
+                @st.cache_data(ttl=3600, show_spinner=False)
+                def _get_app_exchange_rates() -> dict[str, Any]:
+                    rates = {
+                        "USD": {"rate": 0.0, "change_pct": 0.0},
+                        "AUD": {"rate": 0.0, "change_pct": 0.0},
+                        "updated_at": datetime.datetime.now(),
+                    }
+
+                    # USD
+                    try:
+                        usd_krw_df = yf.download("KRW=X", period="5d", progress=False, auto_adjust=True)
+                        if len(usd_krw_df) >= 2:
+                            prev_usd = float(usd_krw_df["Close"].dropna().iloc[-2])
+                            curr_usd = float(usd_krw_df["Close"].dropna().iloc[-1])
+                            rates["USD"]["rate"] = curr_usd
+                            if prev_usd > 0:
+                                rates["USD"]["change_pct"] = ((curr_usd - prev_usd) / prev_usd) * 100
+                        elif len(usd_krw_df) == 1:
+                            rates["USD"]["rate"] = float(usd_krw_df["Close"].dropna().iloc[-1])
+                    except Exception:
+                        pass
+
+                    # AUD
+                    try:
+                        aud_krw_df = yf.download("AUDKRW=X", period="5d", progress=False, auto_adjust=True)
+                        if len(aud_krw_df) >= 2:
+                            prev_aud = float(aud_krw_df["Close"].dropna().iloc[-2])
+                            curr_aud = float(aud_krw_df["Close"].dropna().iloc[-1])
+                            rates["AUD"]["rate"] = curr_aud
+                            if prev_aud > 0:
+                                rates["AUD"]["change_pct"] = ((curr_aud - prev_aud) / prev_aud) * 100
+                        elif len(aud_krw_df) == 1:
+                            rates["AUD"]["rate"] = float(aud_krw_df["Close"].dropna().iloc[-1])
+                    except Exception:
+                        pass
+                    return rates
+
+                rates = _get_app_exchange_rates()
+
+                st.subheader("적용 환율")
+
+                # Update time calculation
+                update_time = rates["updated_at"]
+                now_time = datetime.datetime.now()
+                diff = now_time - update_time
+                diff_sec = diff.total_seconds()
+
+                if diff_sec < 60:
+                    time_ago_str = "방금 전"
+                elif diff_sec < 3600:
+                    time_ago_str = f"{int(diff_sec // 60)}분 전"
+                elif diff_sec < 86400:
+                    time_ago_str = f"{int(diff_sec // 3600)}시간 전"
+                else:
+                    time_ago_str = f"{int(diff_sec // 86400)}일 전"
+
+                caption_str = f"ℹ️ 업데이트: {update_time.strftime('%Y-%m-%d %H:%M:%S')} ({time_ago_str})"
+
+                def _format_rate_html(label: str, data: dict, caption: str) -> str:
+                    rate = data["rate"]
+                    pct = data["change_pct"]
+
+                    if pct > 0:
+                        color = "#e06666"  # Red
+                        sign = "+"
+                    elif pct < 0:
+                        color = "#3d85c6"  # Blue
+                        sign = ""
+                    else:
+                        color = "inherit"
+                        sign = ""
+
+                    return (
+                        f"<div style='margin-bottom: 10px;'>"
+                        f"<div style='font-size: 1.1em;'>{label}: <span style='color: {color}; font-weight: bold;'>{rate:,.2f}원({sign}{pct:.2f}%)</span></div>"
+                        f"<div style='font-size: 0.85em; color: gray; margin-top: 4px;'>{caption}</div>"
+                        f"</div>"
+                    )
+
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.markdown(_format_rate_html("USD/KRW", rates["USD"], caption_str), unsafe_allow_html=True)
+                with col_b:
+                    st.markdown(_format_rate_html("AUD/KRW", rates["AUD"], caption_str), unsafe_allow_html=True)
+
+                st.write("")  # small spacer
 
                 if styled_summary_df is not None:
                     st.subheader("계좌별 요약")
