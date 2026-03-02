@@ -379,7 +379,7 @@ def update_single_stock_metadata(
         new_name = naver_etf_map.get(ticker)
         if new_name:
             stock["name"] = new_name
-        elif not stock.get("name"):
+        elif not stock.get("name") or stock.get("name") == ticker:
             try:
                 fetched_name = fetch_pykrx_name(ticker)
                 if fetched_name:
@@ -393,7 +393,7 @@ def update_single_stock_metadata(
         try:
             t = yf.Ticker(yfinance_ticker)
 
-            if not stock.get("name"):
+            if not stock.get("name") or stock.get("name") == ticker:
                 try:
                     info = t.info
                     fetched_name = info.get("longName") or info.get("shortName")
