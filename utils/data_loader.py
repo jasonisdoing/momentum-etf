@@ -1895,12 +1895,12 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> float | None:
 def get_exchange_rate_series(
     start_date: str | pd.Timestamp,
     end_date: str | pd.Timestamp,
+    symbol: str = "KRW=X",
 ) -> pd.Series:
     """
-    원/달러 환율(USD/KRW) 시계열 데이터를 반환합니다.
-    Yahoo Finance의 'KRW=X' 심볼을 사용합니다.
+    환율 (USD/KRW, AUD/KRW 등) 시계열 데이터를 반환합니다.
+    기본값으로 Yahoo Finance의 'KRW=X' 심볼을 사용합니다.
     """
-    symbol = "KRW=X"
     # country="us"로 설정하여 yfinance를 사용하도록 하고,
     # account_id="fx"를 사용하여 data/fx (가상계정) 캐시에 저장
     target_country = "us"

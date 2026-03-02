@@ -124,8 +124,10 @@ def main():
             # But load_real_holdings_with_recommendations might work if handled carefully
             df = load_real_holdings_with_recommendations(account_id)
         except Exception as e:
-            logger.error(f"Error loading holdings for {account_id}: {e}")
-            df = None
+            error_msg = f"❌ 자산 요약 생성 중 치명적 에러 발생 ({account_id} 계좌):\n```{e}```\n\n잘못된 자산 리포트가 발송되는 것을 방지하기 위해 오늘 알림을 중단합니다."
+            logger.error(error_msg)
+            send_slack_message_v2(error_msg)
+            sys.exit(1)
 
         acc_valuation = 0.0
         acc_purchase = 0.0
