@@ -15,10 +15,10 @@ from utils.logger import get_app_logger
 # =========================================================
 ACCOUNT_TUNING_CONFIG = {
     "aus": {
-        # 9개월 + QUARTERLY가 최적이지만 다음 쿼터까지 MONTHLY 로 유지
+        # 6개월 + MONTHLY가 최적
         "BUCKET_TOPN": [2],
-        # "MA_MONTH": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-        "MA_MONTH": [9],
+        # "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_MONTH": [6],  # 중기 추세
         "MA_TYPE": ["HMA"],
         # "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"], # 다음 쿼터에 오픈
         "REBALANCE_MODE": ["MONTHLY"],
