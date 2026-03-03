@@ -477,29 +477,23 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
 
                     # USD
                     try:
-                        usd_krw_df = yf.download("KRW=X", period="5d", progress=False, auto_adjust=True)
-                        if len(usd_krw_df) >= 2:
-                            prev_usd = float(usd_krw_df["Close"].dropna().iloc[-2])
-                            curr_usd = float(usd_krw_df["Close"].dropna().iloc[-1])
-                            rates["USD"]["rate"] = curr_usd
-                            if prev_usd > 0:
-                                rates["USD"]["change_pct"] = ((curr_usd - prev_usd) / prev_usd) * 100
-                        elif len(usd_krw_df) == 1:
-                            rates["USD"]["rate"] = float(usd_krw_df["Close"].dropna().iloc[-1])
+                        usd_ticker = yf.Ticker("KRW=X")
+                        curr_usd = float(usd_ticker.fast_info.last_price)
+                        prev_usd = float(usd_ticker.fast_info.previous_close)
+                        rates["USD"]["rate"] = curr_usd
+                        if prev_usd > 0:
+                            rates["USD"]["change_pct"] = ((curr_usd - prev_usd) / prev_usd) * 100
                     except Exception:
                         pass
 
                     # AUD
                     try:
-                        aud_krw_df = yf.download("AUDKRW=X", period="5d", progress=False, auto_adjust=True)
-                        if len(aud_krw_df) >= 2:
-                            prev_aud = float(aud_krw_df["Close"].dropna().iloc[-2])
-                            curr_aud = float(aud_krw_df["Close"].dropna().iloc[-1])
-                            rates["AUD"]["rate"] = curr_aud
-                            if prev_aud > 0:
-                                rates["AUD"]["change_pct"] = ((curr_aud - prev_aud) / prev_aud) * 100
-                        elif len(aud_krw_df) == 1:
-                            rates["AUD"]["rate"] = float(aud_krw_df["Close"].dropna().iloc[-1])
+                        aud_ticker = yf.Ticker("AUDKRW=X")
+                        curr_aud = float(aud_ticker.fast_info.last_price)
+                        prev_aud = float(aud_ticker.fast_info.previous_close)
+                        rates["AUD"]["rate"] = curr_aud
+                        if prev_aud > 0:
+                            rates["AUD"]["change_pct"] = ((curr_aud - prev_aud) / prev_aud) * 100
                     except Exception:
                         pass
                     return rates
