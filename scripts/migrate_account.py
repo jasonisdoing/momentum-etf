@@ -38,4 +38,4 @@ def migrate_account(old_id: str, new_id: str):
 
 
 if __name__ == "__main__":
-    migrate_account("kor_us", "kor_pension")
+    migrate_account("kor_isa", "kor_us")
