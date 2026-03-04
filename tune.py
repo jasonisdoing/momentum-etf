@@ -23,14 +23,6 @@ ACCOUNT_TUNING_CONFIG = {
         # "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"], # 다음 쿼터에 오픈
         "REBALANCE_MODE": ["MONTHLY"],
     },
-    "kor_isa": {
-        # 아무 개월 + QUARTERLY가 최적이지만 다음 쿼터까지 MONTHLY 로 유지
-        "BUCKET_TOPN": [1],  # 절세계좌 금액이 적어서 1 * 5 종목
-        "MA_MONTH": [3],  # 종목이 많지 않고 고정 종목이라 의미 없음
-        "MA_TYPE": ["HMA"],
-        # "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"], # 다음 쿼터에 오픈
-        "REBALANCE_MODE": ["MONTHLY"],
-    },
     "kor_kr": {
         # 2개월 + WEEKLY가 최적
         # [2026년 3월 3일] CAGR: 191.32%, MDD: -12.37%
@@ -45,6 +37,13 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_MONTH": [5],  # 중기 추세
         "MA_TYPE": ["HMA"],
         "REBALANCE_MODE": ["TWICE_A_MONTH"],
+    },
+    "kor_us": {
+        # 아무 개월 + QUARTERLY가 최적이지만 다음 쿼터까지 MONTHLY 로 유지
+        "BUCKET_TOPN": [2],
+        "MA_MONTH": [3],  # 종목이 많지 않고 고정 종목이라 의미 없음
+        "MA_TYPE": ["HMA"],
+        "REBALANCE_MODE": ["MONTHLY"],
     },
     "us": {
         # 5개월 + MONTHLY 가 최적 81.78%, -15.41%
