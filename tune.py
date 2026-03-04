@@ -32,11 +32,11 @@ ACCOUNT_TUNING_CONFIG = {
         "REBALANCE_MODE": ["WEEKLY"],
     },
     "kor_pension": {
-        # 5개월 + TWICE_A_MONTH가 최적
-        "BUCKET_TOPN": [1],  # 절세계좌 금액이 적어서 1 * 5 종목
-        "MA_MONTH": [5],  # 중기 추세
+        # 4개월 + MONTHLY 최적: 72.30 | -14.68
+        "BUCKET_TOPN": [2],  # 연금 1개, ISA 1개
+        "MA_MONTH": [4],
         "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["TWICE_A_MONTH"],
+        "REBALANCE_MODE": ["MONTHLY"],
     },
     "kor_us": {
         # 아무 개월 + QUARTERLY가 최적이지만 다음 쿼터까지 MONTHLY 로 유지
