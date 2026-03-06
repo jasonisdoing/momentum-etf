@@ -21,6 +21,20 @@ if TYPE_CHECKING:
     from core.backtest.domain import AccountBacktestResult
 
 
+_DISPLAY_DECISION_MAP: dict[tuple[str, str], str] = {
+    ("BUY_TOMORROW", "HOLD"): "BUY",
+    ("BUY_REPLACE_TOMORROW", "HOLD"): "BUY_REPLACE",
+    ("BUY_REBALANCE_TOMORROW", "HOLD"): "BUY_REBALANCE",
+    ("SELL_TOMORROW", "WAIT"): "SOLD",
+    ("SELL_REPLACE_TOMORROW", "WAIT"): "SELL_REPLACE",
+    ("SELL_REBALANCE_TOMORROW", "HOLD"): "SELL_REBALANCE",
+}
+
+
+def _resolve_display_decision(prev_decision: str, current_decision: str) -> str:
+    return _DISPLAY_DECISION_MAP.get((prev_decision, current_decision), current_decision)
+
+
 def _build_daily_table_rows(
     *,
     result: AccountBacktestResult,
@@ -70,6 +84,8 @@ def _build_daily_table_rows(
         avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
 
         decision = str(row.get("decision", "")).upper()
+        prev_decision = prev_decisions_map.get(ticker_key, "")
+        display_decision = _resolve_display_decision(prev_decision, decision)
         score = row.get("score")
         note = str(row.get("note", "") or "")
         is_pending_tomorrow = decision.endswith("_TOMORROW")
@@ -99,7 +115,7 @@ def _build_daily_table_rows(
                 if is_pending_tomorrow:
                     buy_date_map[ticker_key] = None
                     holding_days_map[ticker_key] = 0
-                elif buy_date_map[ticker_key] is None or decision.startswith("BUY"):
+                elif buy_date_map[ticker_key] is None or display_decision.startswith("BUY"):
                     buy_date_map[ticker_key] = target_date
                     holding_days_map[ticker_key] = 1
                 elif prev_decisions_map.get(ticker_key, "").startswith("BUY") and decision == "HOLD":
@@ -139,7 +155,7 @@ def _build_daily_table_rows(
 
         message = note
         if not message:
-            message = DECISION_MESSAGES.get(decision, "")
+            message = DECISION_MESSAGES.get(display_decision, "")
 
         # decision_conf = BACKTEST_STATUS_LIST.get(decision, {})
         # decision_order = decision_conf.get("order", 99)
@@ -161,7 +177,7 @@ def _build_daily_table_rows(
             bucket_display,
             ticker_key,
             name_display,
-            decision or "-",
+            display_decision or "-",
             holding_days_display,
             price_display,
             "-"
@@ -180,7 +196,7 @@ def _build_daily_table_rows(
         sort_group = 2  # Default: WAIT / others
         if is_cash:
             sort_group = 0
-        elif decision in (
+        elif display_decision in (
             "HOLD",
             "BUY",
             "BUY_REBALANCE",

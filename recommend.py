@@ -37,6 +37,15 @@ from utils.stock_list_io import get_etfs
 RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
 logger = get_app_logger()
 
+_DISPLAY_DECISION_MAP: dict[tuple[str, str], str] = {
+    ("BUY_TOMORROW", "HOLD"): "BUY",
+    ("BUY_REPLACE_TOMORROW", "HOLD"): "BUY_REPLACE",
+    ("BUY_REBALANCE_TOMORROW", "HOLD"): "BUY_REBALANCE",
+    ("SELL_TOMORROW", "WAIT"): "SOLD",
+    ("SELL_REPLACE_TOMORROW", "WAIT"): "SELL_REPLACE",
+    ("SELL_REBALANCE_TOMORROW", "HOLD"): "SELL_REBALANCE",
+}
+
 
 # ---------------------------------------------------------------------------
 # RecommendationReport 호환 클래스 (기존 인터페이스 유지)
@@ -61,6 +70,10 @@ class RecommendationReport:
         self.recommendations = recommendations
         self.report_date = datetime.now()
         self.summary_data = summary_data
+
+
+def _resolve_display_decision(prev_decision: str, current_decision: str) -> str:
+    return _DISPLAY_DECISION_MAP.get((prev_decision, current_decision), current_decision)
 
 
 # ---------------------------------------------------------------------------
@@ -131,13 +144,16 @@ def extract_recommendations_from_backtest(
         if stock_note:
             name = f"{name}({stock_note})"
 
+        prev_decision = str(prev_row.get("decision", "")).upper() if prev_row is not None else ""
+
         # 기본 값 추출
         price = _safe_float(last_row.get("price"))
         shares = _safe_float(last_row.get("shares"), 0)
         avg_cost = _safe_float(last_row.get("avg_cost"))
         score = _safe_float(last_row.get("score"))
         filter_val = _safe_float(last_row.get("filter"))
-        decision = str(last_row.get("decision", "")).upper() or "WAIT"
+        raw_decision = str(last_row.get("decision", "")).upper() or "WAIT"
+        decision = _resolve_display_decision(prev_decision, raw_decision)
         note = str(last_row.get("note", "") or "")
 
         # nav_price와 price_deviation 계산 (메타에서 가져오거나 계산)
@@ -468,6 +484,8 @@ def _decision_to_state(decision: str, shares: float) -> str:
     if decision_upper in (
         "BUY",
         "SELL",
+        "BUY_REBALANCE",
+        "SELL_REBALANCE",
         "BUY_REPLACE",
         "SELL_REPLACE",
         "BUY_TOMORROW",
