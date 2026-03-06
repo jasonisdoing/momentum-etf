@@ -29,14 +29,11 @@ def build_full_summary(
     m_rets, m_cum_rets, y_rets = calculate_monthly_returns(portfolio_df)
 
     total_trades = 0
-    trade_decisions = {
-        "SELL_REPLACE",
-        "BUY",
-        "BUY_REPLACE",
-    }
-    for df in ticker_timeseries.values():
-        if isinstance(df, pd.DataFrame) and "decision" in df.columns:
-            total_trades += df["decision"].isin(trade_decisions).sum()
+    for ticker, df in ticker_timeseries.items():
+        if ticker == "CASH" or not isinstance(df, pd.DataFrame) or "trade_amount" not in df.columns:
+            continue
+        trade_amounts = pd.to_numeric(df["trade_amount"], errors="coerce").fillna(0.0)
+        total_trades += int(trade_amounts.abs().gt(0).sum())
 
     benchmarks_summary = []
     bench_conf = account_settings.get("benchmark") or (account_settings.get("benchmarks") or [None])[0]
