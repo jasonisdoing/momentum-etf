@@ -168,10 +168,10 @@ def _build_daily_table_rows(
             if is_cash or is_pending_tomorrow or not _is_finite_number(avg_cost) or avg_cost <= 0
             else price_formatter(avg_cost),
             f"{daily_ret:+.1f}%",
+            evaluated_pct_display,
             shares_display,
             pv_display,
             evaluated_profit_display,
-            evaluated_pct_display,
             weight_display,
             score_display,
             message,
@@ -235,10 +235,10 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "현재가",
         "평균단가",
         "일간(%)",
+        "평가(%)",
         "수량",
         "금액",
         "평가손익",
-        "평가(%)",
         "비중",
         "점수",
         "문구",
@@ -253,10 +253,10 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "right",  # 현재가
         "right",  # 평균단가
         "right",  # 일간(%)
+        "right",  # 평가(%)
         "right",  # 수량
         "right",  # 금액
         "right",  # 평가손익
-        "right",  # 평가(%)
         "right",  # 비중
         "right",  # 점수
         "left",  # 문구
