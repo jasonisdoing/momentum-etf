@@ -285,15 +285,16 @@ def _assign_final_ranks(
 
     # 3. 정렬 로직 적용
     def _sort_key(x):
-        # 1. Group (1=Held/Buy, 2=Wait/Sell)
-        # 2. For Group 1, we don't split. For Group 2, we split by _is_bucket_top (0 if TopN, 1 if rest)
-        subgroup = 0 if x.get("_sort_group") == 1 else (0 if x.get("_is_bucket_top") else 1)
-        # 3. For Group 1 and Group 2-TopN, sort by bucket. For Group 2-rest, ignore bucket (set to 99).
-        sort_bucket = x.get("bucket", 99) if subgroup == 0 else 99
+        # 1. 버킷별 TopN 구간을 먼저 노출
+        # 2. TopN 구간 안에서는 버킷 번호 순 고정
+        # 3. 같은 버킷 안에서는 보유/매수 중인 항목을 먼저, 이후 점수순 정렬
+        top_priority = 0 if x.get("_is_bucket_top") else 1
+        sort_bucket = x.get("bucket", 99)
+        state_priority = 0 if x.get("_sort_group") == 1 else 1
         return (
-            x.get("_sort_group", 2),
-            subgroup,
+            top_priority,
             sort_bucket,
+            state_priority,
             -(x.get("score") if x.get("score") is not None else float("-inf")),
             x.get("ticker", ""),
         )
