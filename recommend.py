@@ -254,14 +254,11 @@ def _assign_final_ranks(
     # 1: 내일 보유할 최종 타겟 10종목 (HOLD, BUY, BUY_REPLACE)
     # 2: 제외/대기 대상 (WAIT, SELL, SELL_REPLACE)
     for rec in recommendations:
-        state = str(rec.get("state", "")).upper()
-        is_pending_tomorrow = bool(rec.get("is_pending_tomorrow", False))
+        shares = _safe_float(rec.get("shares"), 0.0) or 0.0
+        is_current_holding = shares > 0
+        rec["_is_current_holding"] = is_current_holding
 
-        if is_pending_tomorrow or state in (
-            "HOLD",
-            "BUY",
-            "BUY_REPLACE",
-        ):
+        if is_current_holding:
             rec["_sort_group"] = 1
         else:
             rec["_sort_group"] = 2
@@ -284,15 +281,21 @@ def _assign_final_ranks(
 
     # 3. 정렬 로직 적용
     def _sort_key(x):
+        # [절대 변경 금지] 정렬 정책:
+        # 1) 상단 TOPN * 버킷수(버킷 TopN 선정 구간)만 버킷 순서 유지
+        # 2) 상단 구간 외에는 버킷 무시, 점수순 정렬
         # 1. 버킷별 TopN 구간을 먼저 노출
         # 2. TopN 구간 안에서는 버킷 번호 순 고정
         # 3. 같은 버킷 안에서는 보유/매수 중인 항목을 먼저, 이후 점수순 정렬
         top_priority = 0 if x.get("_is_bucket_top") else 1
         sort_bucket = x.get("bucket", 99)
+        bucket_rank = sort_bucket if top_priority == 0 else 99
+        holding_priority = 0 if x.get("_is_current_holding") else 1
         state_priority = 0 if x.get("_sort_group") == 1 else 1
         return (
             top_priority,
-            sort_bucket,
+            bucket_rank,
+            holding_priority,
             state_priority,
             -(x.get("score") if x.get("score") is not None else float("-inf")),
             x.get("ticker", ""),
