@@ -58,9 +58,11 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
     icon = account.get("icon") or get_icon_fallback(account.get("country_code", ""))
 
     title = view_mode if view_mode else account["name"]
-    # URL path에서 슬래시(/) 제거하여 Streamlit nested path 에러 방지
-    clean_view = view_mode.split(".")[-1].strip().replace("/", "_") if view_mode else "main"
-    url_path = f"{account_id}_{clean_view}"
+    url_mapping = {"추천 결과": "result", "종목 관리": "setup", "삭제된 종목": "deleted"}
+
+    clean_view = view_mode.split(".")[-1].strip() if view_mode else "main"
+    english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
+    url_path = f"{account_id}/{english_view}"
 
     def _render(account_key: str = account_id) -> None:
         render_account_page(account_key, view_mode=view_mode)
