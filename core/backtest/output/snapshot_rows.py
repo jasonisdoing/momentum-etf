@@ -89,8 +89,10 @@ def build_snapshot_rows(
         pv = price * shares
 
         if is_cash:
+            cash_pv = float(row.get("pv")) if pd.notna(row.get("pv")) else float(total_cash)
             price = 1.0
-            shares = pv if pv else 1.0
+            shares = cash_pv if _is_finite_number(cash_pv) and cash_pv > 0 else 1.0
+            pv = cash_pv if _is_finite_number(cash_pv) else 0.0
 
         prev_row = state.prev_rows_cache.get(ticker_key)
         prev_price = (
