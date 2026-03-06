@@ -162,12 +162,11 @@ def build_snapshot_rows(
             state.holding_days_map[ticker_key] = 0
 
         display_avg_cost = None
-        is_pending_buy = is_pending_tomorrow and pending_action.startswith("BUY")
-        if not is_cash and not is_pending_buy and _is_finite_number(avg_cost) and avg_cost > 0:
+        if not is_cash and _is_finite_number(avg_cost) and avg_cost > 0:
             display_avg_cost = avg_cost
 
         cost_basis = display_avg_cost * shares if display_avg_cost is not None and shares > 0 else 0.0
-        evaluation_profit = 0.0 if is_cash or is_pending_buy else (pv - cost_basis)
+        evaluation_profit = 0.0 if is_cash else (pv - cost_basis)
         evaluation_pct = ((evaluation_profit / cost_basis) * 100.0) if cost_basis > 0 else None
 
         bucket_id = meta.get("bucket")
@@ -187,15 +186,12 @@ def build_snapshot_rows(
 
         message = note or DECISION_MESSAGES.get(display_decision, "")
 
+        is_current_holding = (not is_cash) and shares > 0
+
         sort_group = 2
         if is_cash:
             sort_group = 0
-        elif is_pending_tomorrow or display_decision in {
-            "HOLD",
-            "BUY",
-            "BUY_REPLACE",
-            "BUY_TODAY",
-        }:
+        elif is_current_holding:
             sort_group = 1
 
         snapshot_row = {
@@ -217,6 +213,7 @@ def build_snapshot_rows(
             "score": float(score) if _is_finite_number(score) else None,
             "message": message,
             "is_cash": is_cash,
+            "is_current_holding": is_current_holding,
             "is_pending_tomorrow": is_pending_tomorrow,
             "pending_action": pending_action or None,
             "sort_group": sort_group,
@@ -238,6 +235,7 @@ def build_snapshot_rows(
         ranked_entries = sorted(
             entries,
             key=lambda row: (
+                0 if row.get("is_current_holding") else 1,
                 row.get("sort_group", 2),
                 -(float(row.get("score")) if _is_finite_number(row.get("score")) else float("-inf")),
                 str(row.get("ticker", "")),
@@ -256,14 +254,19 @@ def build_snapshot_rows(
             row["_is_bucket_top"] = False
 
     def _final_sort_key(row: dict[str, Any]) -> tuple[int, int, int, float, str]:
+        # [절대 변경 금지] 정렬 정책:
+        # 1) 상단 TOPN * 버킷수(버킷 TopN 선정 구간)만 버킷 순서 유지
+        # 2) 상단 구간 외에는 버킷 무시, 점수순 정렬
         if row.get("is_cash"):
             return (-1, 0, 0, 0.0, "CASH")
 
         bucket_sort_val = int(row["bucket"]) if (row.get("bucket") and str(row.get("bucket")).isdigit()) else 99
         top_priority = 0 if row.get("_is_bucket_top") else 1
+        bucket_rank = bucket_sort_val if top_priority == 0 else 99
+        holding_priority = 0 if row.get("is_current_holding") else 1
         state_priority = 0 if row.get("sort_group", 2) == 1 else 1
         score_val = float(row.get("score")) if _is_finite_number(row.get("score")) else float("-inf")
-        return (top_priority, bucket_sort_val, state_priority, -score_val, str(row.get("ticker", "")))
+        return (top_priority, bucket_rank, holding_priority, state_priority, -score_val, str(row.get("ticker", "")))
 
     entries.sort(key=_final_sort_key)
 

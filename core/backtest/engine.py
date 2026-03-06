@@ -11,7 +11,6 @@ import pandas as pd
 
 from core.backtest.filtering import select_candidates
 from core.backtest.price import calculate_trade_price
-from strategies.maps.constants import BACKTEST_STATUS_LIST
 from strategies.maps.evaluator import StrategyEvaluator
 from strategies.maps.labeler import compute_net_trade_note
 from strategies.maps.metrics import process_ticker_data
@@ -1018,9 +1017,8 @@ def run_portfolio_backtest(
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
                                             "avg_cost": buy_price,
-                                            # 추천/리포트와 동일 포맷: 디스플레이명 + 금액 + 대체 정보
-                                            "note": f"{BACKTEST_STATUS_LIST['BUY_REPLACE']['display_name']} "
-                                            f"{format_money(buy_amount, country_code)} "
+                                            # WAIT 상태(신호일)이므로 체결형 문구 대신 신호형 문구를 사용합니다.
+                                            "note": f"교체매수 신호 {format_money(buy_amount, country_code)} "
                                             f"({ticker_to_sell} 대체)",
                                             "pending_action": "BUY_REPLACE",
                                             "execute_on": next_dt,
@@ -1040,8 +1038,7 @@ def run_portfolio_backtest(
                                             "trade_shares": req_qty,
                                             "trade_profit": 0.0,
                                             "trade_pl_pct": 0.0,
-                                            "note": f"{BACKTEST_STATUS_LIST['BUY_REPLACE']['display_name']} "
-                                            f"{format_money(buy_amount, country_code)} "
+                                            "note": f"교체매수 신호 {format_money(buy_amount, country_code)} "
                                             f"({ticker_to_sell} 대체)",
                                             "pending_action": "BUY_REPLACE",
                                             "execute_on": next_dt,

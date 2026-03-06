@@ -129,11 +129,10 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         name = row.get("name", "-")
 
         state = row.get("state", "-").upper()
-        is_pending_tomorrow = bool(row.get("is_pending_tomorrow", False))
         holding_days = _format_days(row.get("holding_days"))
         price_display = row.get("price")
         daily_pct = row.get("daily_pct")
-        evaluation_pct = None if is_pending_tomorrow else row.get("evaluation_pct", 0.0)
+        evaluation_pct = row.get("evaluation_pct", 0.0)
         price_deviation = row.get("price_deviation") if show_deviation else None
         return_1w = row.get("return_1w", 0.0)
         return_2w = row.get("return_2w", 0.0)
@@ -162,7 +161,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "티커": ticker,
                 "종목명": name,
                 "상태": state,
-                "보유일": format_trading_days(0 if is_pending_tomorrow else holding_days),
+                "보유일": format_trading_days(holding_days),
                 "일간(%)": daily_pct,
                 "평가(%)": evaluation_pct,
                 price_label: price_display,
