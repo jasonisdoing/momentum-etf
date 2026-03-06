@@ -92,7 +92,7 @@ def _execute_individual_sells(
                 row = daily_records_by_ticker[ticker][-1]
                 row.update(
                     {
-                        "decision": f"{decision}_TOMORROW",
+                        "decision": f"{decision}_NEXTDAY",
                         "trade_amount": trade_amount,
                         "trade_profit": trade_profit,
                         "trade_pl_pct": hold_ret,
@@ -310,7 +310,7 @@ def _execute_new_buys(
                 row = daily_records_by_ticker[ticker_to_buy][-1]
                 row.update(
                     {
-                        "decision": "BUY_TOMORROW",
+                        "decision": "BUY_NEXTDAY",
                         "trade_amount": trade_amount,
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
@@ -326,7 +326,7 @@ def _execute_new_buys(
                         "price": price,
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
-                        "decision": "BUY_TOMORROW",
+                        "decision": "BUY_NEXTDAY",
                         "avg_cost": ticker_state["avg_cost"],
                         "trade_amount": trade_amount,
                         "trade_profit": 0.0,
@@ -357,7 +357,11 @@ def check_is_rebalance_day(
     rebalance_mode: str,
     trading_calendar: pd.DatetimeIndex | None = None,
 ) -> bool:
-    """주어진 dt가 리밸런싱 날짜(기존 해당 모드의 지정된 거래일)인지 판별하는 헬퍼 함수입니다."""
+    """주어진 dt가 거래 신호일인지 판별합니다.
+
+    DAILY는 당일 종가 기준으로 다음 거래일 체결을 유지합니다.
+    주간/월간 계열은 실제 체결일의 직전 거래일을 신호일로 사용합니다.
+    """
     if trading_calendar is not None:
         trading_calendar = (
             pd.DatetimeIndex(trading_calendar)
@@ -365,79 +369,102 @@ def check_is_rebalance_day(
             else trading_calendar
         )
 
+    def _is_execution_day(target_dt: pd.Timestamp, target_next_dt: pd.Timestamp | None) -> bool:
+        if rebalance_mode == "DAILY":
+            return True
+
+        if rebalance_mode == "WEEKLY":
+            if target_next_dt is not None:
+                if target_next_dt.isocalendar()[:2] != target_dt.isocalendar()[:2]:
+                    return True
+            elif trading_calendar is not None:
+                try:
+                    cal_idx = trading_calendar.get_loc(target_dt)
+                    if cal_idx + 1 < len(trading_calendar):
+                        if trading_calendar[cal_idx + 1].isocalendar()[:2] != target_dt.isocalendar()[:2]:
+                            return True
+                except (KeyError, IndexError, AttributeError):
+                    pass
+            return False
+
+        elif rebalance_mode == "TWICE_A_MONTH":
+            import calendar
+
+            dt_friday = target_dt + pd.Timedelta(days=4 - target_dt.weekday())
+            days_in_month = calendar.monthrange(dt_friday.year, dt_friday.month)[1]
+            fridays = [d for d in range(1, days_in_month + 1) if dt_friday.replace(day=d).weekday() == 4]
+            if len(fridays) >= 5:
+                target_fridays = [fridays[2], fridays[4]]
+            else:
+                target_fridays = [fridays[1], fridays[3]]
+
+            if dt_friday.day in target_fridays:
+                if target_next_dt is not None:
+                    if target_next_dt.isocalendar()[:2] != target_dt.isocalendar()[:2]:
+                        return True
+                elif trading_calendar is not None:
+                    try:
+                        cal_idx = trading_calendar.get_loc(target_dt)
+                        if cal_idx + 1 < len(trading_calendar):
+                            if trading_calendar[cal_idx + 1].isocalendar()[:2] != target_dt.isocalendar()[:2]:
+                                return True
+                    except (KeyError, IndexError, AttributeError):
+                        pass
+            return False
+
+        elif rebalance_mode == "MONTHLY":
+            if target_next_dt is not None:
+                if target_next_dt.month != target_dt.month:
+                    return True
+            elif trading_calendar is not None:
+                try:
+                    cal_idx = trading_calendar.get_loc(target_dt)
+                    if cal_idx + 1 < len(trading_calendar):
+                        if trading_calendar[cal_idx + 1].month != target_dt.month:
+                            return True
+                except (KeyError, IndexError, AttributeError):
+                    pass
+            return False
+
+        elif rebalance_mode == "QUARTERLY":
+            target_months = {3, 6, 9, 12}
+            if target_dt.month in target_months:
+                if target_next_dt is not None:
+                    if target_next_dt.month != target_dt.month:
+                        return True
+                elif trading_calendar is not None:
+                    try:
+                        cal_idx = trading_calendar.get_loc(target_dt)
+                        if cal_idx + 1 < len(trading_calendar):
+                            if trading_calendar[cal_idx + 1].month != target_dt.month:
+                                return True
+                    except (KeyError, IndexError, AttributeError):
+                        pass
+            return False
+
+        return False
+
     if rebalance_mode == "DAILY":
         return True
 
-    if rebalance_mode == "WEEKLY":
-        if next_dt is not None:
-            if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
-                return True
-        elif trading_calendar is not None:
-            try:
-                cal_idx = trading_calendar.get_loc(dt)
-                if cal_idx + 1 < len(trading_calendar):
-                    if trading_calendar[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
-                        return True
-            except (KeyError, IndexError, AttributeError):
-                pass
+    if trading_calendar is None:
         return False
 
-    elif rebalance_mode == "TWICE_A_MONTH":
-        import calendar
-
-        dt_friday = dt + pd.Timedelta(days=4 - dt.weekday())
-        days_in_month = calendar.monthrange(dt_friday.year, dt_friday.month)[1]
-        fridays = [d for d in range(1, days_in_month + 1) if dt_friday.replace(day=d).weekday() == 4]
-        if len(fridays) >= 5:
-            target_fridays = [fridays[2], fridays[4]]
-        else:
-            target_fridays = [fridays[1], fridays[3]]
-
-        if dt_friday.day in target_fridays:
-            if next_dt is not None:
-                if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
-                    return True
-            elif trading_calendar is not None:
-                try:
-                    cal_idx = trading_calendar.get_loc(dt)
-                    if cal_idx + 1 < len(trading_calendar):
-                        if trading_calendar[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
-                            return True
-                except (KeyError, IndexError, AttributeError):
-                    pass
+    try:
+        cal_idx = trading_calendar.get_loc(dt)
+        if isinstance(cal_idx, slice):
+            cal_idx = int(cal_idx.stop) - 1
+        next_signal_idx = int(cal_idx) + 1
+        if next_signal_idx >= len(trading_calendar):
+            return False
+        execution_dt = trading_calendar[next_signal_idx]
+        execution_next_dt = (
+            trading_calendar[next_signal_idx + 1] if next_signal_idx + 1 < len(trading_calendar) else None
+        )
+    except (KeyError, IndexError, AttributeError, TypeError, ValueError):
         return False
 
-    elif rebalance_mode == "MONTHLY":
-        if next_dt is not None:
-            if next_dt.month != dt.month:
-                return True
-        elif trading_calendar is not None:
-            try:
-                cal_idx = trading_calendar.get_loc(dt)
-                if cal_idx + 1 < len(trading_calendar):
-                    if trading_calendar[cal_idx + 1].month != dt.month:
-                        return True
-            except (KeyError, IndexError, AttributeError):
-                pass
-        return False
-
-    elif rebalance_mode == "QUARTERLY":
-        target_months = {3, 6, 9, 12}
-        if dt.month in target_months:
-            if next_dt is not None:
-                if next_dt.month != dt.month:
-                    return True
-            elif trading_calendar is not None:
-                try:
-                    cal_idx = trading_calendar.get_loc(dt)
-                    if cal_idx + 1 < len(trading_calendar):
-                        if trading_calendar[cal_idx + 1].month != dt.month:
-                            return True
-                except (KeyError, IndexError, AttributeError):
-                    pass
-        return False
-
-    return False
+    return _is_execution_day(execution_dt, execution_next_dt)
 
 
 def run_portfolio_backtest(
@@ -888,7 +915,7 @@ def run_portfolio_backtest(
                                 row = daily_records_by_ticker[ticker_to_sell][-1]
                                 row.update(
                                     {
-                                        "decision": "SELL_REPLACE_TOMORROW",
+                                        "decision": "SELL_REPLACE_NEXTDAY",
                                         "trade_amount": sell_amount,
                                         "trade_profit": trade_profit,
                                         "trade_pl_pct": hold_ret,
@@ -933,7 +960,7 @@ def run_portfolio_backtest(
                                     row = daily_records_by_ticker[replacement_ticker][-1]
                                     row.update(
                                         {
-                                            "decision": "BUY_REPLACE_TOMORROW",
+                                            "decision": "BUY_REPLACE_NEXTDAY",
                                             "trade_amount": buy_amount,
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
@@ -951,7 +978,7 @@ def run_portfolio_backtest(
                                             "price": buy_price,
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
-                                            "decision": "BUY_REPLACE_TOMORROW",
+                                            "decision": "BUY_REPLACE_NEXTDAY",
                                             "avg_cost": buy_price,
                                             "trade_amount": buy_amount,
                                             "trade_profit": 0.0,
@@ -972,7 +999,7 @@ def run_portfolio_backtest(
                                         "price": buy_price,
                                         "shares": req_qty,
                                         "pv": req_qty * buy_price,
-                                        "decision": "BUY_REPLACE_TOMORROW",
+                                        "decision": "BUY_REPLACE_NEXTDAY",
                                         "avg_cost": buy_price,
                                         "trade_amount": buy_amount,
                                         "trade_profit": 0.0,
@@ -1041,7 +1068,7 @@ def run_portfolio_backtest(
                                 ):
                                     daily_records_by_ticker[held_ticker][-1].update(
                                         {
-                                            "decision": "SELL_TOMORROW",
+                                            "decision": "SELL_NEXTDAY",
                                             "trade_amount": sell_amount,
                                             "trade_profit": trade_profit,
                                             "trade_pl_pct": hold_ret,
@@ -1063,8 +1090,8 @@ def run_portfolio_backtest(
                 in (
                     "BUY",
                     "BUY_REPLACE",
-                    "BUY_TOMORROW",
-                    "BUY_REPLACE_TOMORROW",
+                    "BUY_NEXTDAY",
+                    "BUY_REPLACE_NEXTDAY",
                 )
             }
 
@@ -1141,7 +1168,7 @@ def run_portfolio_backtest(
                                     row = daily_records_by_ticker[ticker][-1]
                                     existing_note = row.get("note", "")
                                     if row.get("decision") == "HOLD":
-                                        row["decision"] = "SELL_REBALANCE_TOMORROW"
+                                        row["decision"] = "SELL_REBALANCE_NEXTDAY"
                                     row["note"] = f"{trim_note} | {existing_note}" if existing_note else trim_note
                                     row["shares"] = state["shares"]
                                     row["pv"] = state["shares"] * price
@@ -1269,7 +1296,7 @@ def run_portfolio_backtest(
 
                             # Decision이 HOLD인 경우만 추가 매수 표시
                             if existing_decision == "HOLD":
-                                row["decision"] = "BUY_REBALANCE_TOMORROW"
+                                row["decision"] = "BUY_REBALANCE_NEXTDAY"
                                 # 상태값(HOLD) 및 보유일 유지
                                 diff_pct = (topup_amount / (total_equity)) * 100
                                 # 리밸런싱 날과 일반 날 구분 없이 비중확대 메시지 사용

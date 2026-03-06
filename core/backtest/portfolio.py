@@ -13,9 +13,9 @@ def get_sell_states() -> set[str]:
     """
     return {
         "SELL_REPLACE",
-        "SELL_TOMORROW",
-        "SELL_REPLACE_TOMORROW",
-        "SELL_REBALANCE_TOMORROW",
+        "SELL_NEXTDAY",
+        "SELL_REPLACE_NEXTDAY",
+        "SELL_REBALANCE_NEXTDAY",
     }
 
 
@@ -31,9 +31,9 @@ def get_hold_states() -> set[str]:
     return {
         "HOLD",
         "SELL_REPLACE",
-        "SELL_TOMORROW",
-        "SELL_REPLACE_TOMORROW",
-        "SELL_REBALANCE_TOMORROW",
+        "SELL_NEXTDAY",
+        "SELL_REPLACE_NEXTDAY",
+        "SELL_REBALANCE_NEXTDAY",
     }
 
 
