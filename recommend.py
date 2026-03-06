@@ -801,8 +801,8 @@ def dump_recommendation_log(
     nav_mode = country_lower in {"kr", "kor"}
     show_deviation = country_lower in {"kr", "kor"}
 
-    # headers: #, 버킷, 티커, 종목명, 상태, 보유일, 일간(%), 평가(%), 현재가, 평균단가
-    headers = ["#", "버킷", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가", "평균단가"]
+    # headers: #, 버킷, 티커, 종목명, 상태, 보유일, 일간(%), 평가(%), 현재가
+    headers = ["#", "버킷", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가"]
     # [User Request] 현재가 - 괴리율 - Nav
     if show_deviation:
         headers.append("괴리율")
@@ -814,7 +814,7 @@ def dump_recommendation_log(
     headers.extend(["점수", "RSI", "지속", "문구"])
 
     # aligns ( headers 수와 일치해야 함 )
-    aligns = ["left", "left", "left", "left", "left", "center", "right", "right", "right", "right"]
+    aligns = ["left", "left", "left", "left", "left", "center", "right", "right", "right"]
     if show_deviation:
         aligns.append("right")
     if nav_mode:
@@ -836,7 +836,6 @@ def dump_recommendation_log(
         daily_pct = item.get("daily_pct", 0)
         evaluation_pct = item.get("evaluation_pct", 0)
         price = item.get("price")
-        avg_cost = item.get("avg_cost")
         nav_price = item.get("nav_price")
         price_deviation = item.get("price_deviation")
         score = item.get("score", 0)
@@ -862,7 +861,6 @@ def dump_recommendation_log(
             format_pct_change(daily_pct),
             "-" if is_pending_tomorrow else (format_pct_change(evaluation_pct) if evaluation_pct != 0 else "-"),
             format_price(price, country_code),
-            "-" if is_pending_tomorrow else (format_price(avg_cost, country_code) if avg_cost else "-"),
         ]
         if show_deviation:
             row.append(format_price_deviation(price_deviation))
