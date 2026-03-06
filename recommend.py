@@ -16,6 +16,7 @@ from typing import Any
 import pandas as pd
 
 from config import BUCKET_MAPPING as BUCKET_NAMES
+from core.backtest.output.snapshot_rows import advance_snapshot_state, build_snapshot_rows, create_snapshot_build_state
 from core.backtest.price import calculate_trade_price
 
 DEFAULT_BUCKET = 1
@@ -36,15 +37,6 @@ from utils.stock_list_io import get_etfs
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
 logger = get_app_logger()
-
-_DISPLAY_DECISION_MAP: dict[tuple[str, str], str] = {
-    ("BUY_TOMORROW", "HOLD"): "BUY",
-    ("BUY_REPLACE_TOMORROW", "HOLD"): "BUY_REPLACE",
-    ("BUY_REBALANCE_TOMORROW", "HOLD"): "BUY_REBALANCE",
-    ("SELL_TOMORROW", "WAIT"): "SOLD",
-    ("SELL_REPLACE_TOMORROW", "WAIT"): "SELL_REPLACE",
-    ("SELL_REBALANCE_TOMORROW", "HOLD"): "SELL_REBALANCE",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -72,10 +64,6 @@ class RecommendationReport:
         self.summary_data = summary_data
 
 
-def _resolve_display_decision(prev_decision: str, current_decision: str) -> str:
-    return _DISPLAY_DECISION_MAP.get((prev_decision, current_decision), current_decision)
-
-
 # ---------------------------------------------------------------------------
 # 백테스트 결과에서 추천 데이터 추출
 # ---------------------------------------------------------------------------
@@ -92,9 +80,10 @@ def extract_recommendations_from_backtest(
 
     ticker_timeseries = getattr(result, "ticker_timeseries", {})
     result_ticker_meta = getattr(result, "ticker_meta", {})
+    portfolio_timeseries = getattr(result, "portfolio_timeseries", None)
     end_date = getattr(result, "end_date", None)
 
-    if not ticker_timeseries or end_date is None:
+    if not ticker_timeseries or end_date is None or portfolio_timeseries is None or portfolio_timeseries.empty:
         return []
 
     # 티커 메타정보 병합 (result에서 온 것 + 전달받은 것)
@@ -106,6 +95,22 @@ def extract_recommendations_from_backtest(
             else:
                 merged_meta[k] = {**merged_meta[k], **v}
 
+    snapshot_state = create_snapshot_build_state()
+    snapshot_rows: list[dict[str, Any]] = []
+    for current_date in portfolio_timeseries.index:
+        if current_date > end_date:
+            break
+        portfolio_row = portfolio_timeseries.loc[current_date]
+        snapshot_rows = build_snapshot_rows(
+            result=result,
+            target_date=current_date,
+            total_value=float(portfolio_row.get("total_value", 0.0)),
+            total_cash=float(portfolio_row.get("total_cash", 0.0)),
+            state=snapshot_state,
+        )
+        advance_snapshot_state(result=result, target_date=current_date, state=snapshot_state)
+
+    snapshot_by_ticker = {str(row.get("ticker", "")).upper(): row for row in snapshot_rows}
     recommendations: list[dict[str, Any]] = []
 
     for ticker, df in ticker_timeseries.items():
@@ -116,23 +121,10 @@ def extract_recommendations_from_backtest(
         if not isinstance(df, pd.DataFrame) or df.empty:
             continue
 
-        # 마지막 날 데이터 추출
-        if end_date in df.index:
-            last_row = df.loc[end_date]
-        else:
-            last_row = df.iloc[-1]
-
-        # 전날 데이터 (일간 수익률 계산용)
-        # 방법 1: end_date 이전 데이터 중 마지막 행
-        df_before_end = df[df.index < end_date]
-        # 방법 2: 충분히 가까운 날짜 (df에 end_date가 없을 수 있음)
-        if df_before_end.empty and len(df) >= 2:
-            # end_date가 df의 마지막 날짜와 같다면, 두 번째 마지막 행 사용
-            prev_row = df.iloc[-2]
-        elif not df_before_end.empty:
-            prev_row = df_before_end.iloc[-1]
-        else:
-            prev_row = None
+        snapshot_row = snapshot_by_ticker.get(ticker_key)
+        if snapshot_row is None:
+            continue
+        last_row = df.loc[end_date] if end_date in df.index else df.iloc[-1]
 
         # 메타 정보
         meta = merged_meta.get(ticker_key, merged_meta.get(ticker, {}))
@@ -144,57 +136,23 @@ def extract_recommendations_from_backtest(
         if stock_note:
             name = f"{name}({stock_note})"
 
-        prev_decision = str(prev_row.get("decision", "")).upper() if prev_row is not None else ""
-
         # 기본 값 추출
-        price = _safe_float(last_row.get("price"))
-        shares = _safe_float(last_row.get("shares"), 0)
-        avg_cost = _safe_float(last_row.get("avg_cost"))
-        score = _safe_float(last_row.get("score"))
+        price = _safe_float(snapshot_row.get("price"))
+        shares = _safe_float(snapshot_row.get("shares"), 0)
+        avg_cost = _safe_float(snapshot_row.get("avg_cost"))
+        score = _safe_float(snapshot_row.get("score"))
+        decision = str(snapshot_row.get("display_decision", "")).upper() or "WAIT"
+        note = str(snapshot_row.get("message", "") or "")
+        holding_days = int(snapshot_row.get("holding_days", 0) or 0)
+        daily_pct = _safe_float(snapshot_row.get("daily_pct"), 0.0) or 0.0
+        evaluation_pct = _safe_float(snapshot_row.get("evaluation_pct"))
         filter_val = _safe_float(last_row.get("filter"))
-        raw_decision = str(last_row.get("decision", "")).upper() or "WAIT"
-        decision = _resolve_display_decision(prev_decision, raw_decision)
-        note = str(last_row.get("note", "") or "")
 
         # nav_price와 price_deviation 계산 (메타에서 가져오거나 계산)
         nav_price = meta.get("nav_price") or meta.get("nav") or None
         price_deviation = None
         if nav_price and price and price > 0:
             price_deviation = ((price - nav_price) / nav_price) * 100
-
-        # 일간 수익률 계산
-        # 주의: 백테스트 엔진에서 데이터 없는 날은 price = avg_cost로 설정됨
-        # 실제 가격 변동을 계산하려면 price != avg_cost인 날을 찾아야 함
-        daily_pct = 0.0
-        if prev_row is not None:
-            prev_price = _safe_float(prev_row.get("price"))
-
-            if prev_price and prev_price > 0 and price:
-                daily_pct = ((price / prev_price) - 1.0) * 100.0
-
-        # 평가 수익률 계산
-        evaluation_pct = 0.0
-        if shares > 0 and avg_cost and avg_cost > 0 and price:
-            cost_basis = avg_cost * shares
-            pv = price * shares
-            evaluation_pct = ((pv - cost_basis) / cost_basis) * 100.0
-
-        # 보유일 계산 (연속 보유 기간)
-        holding_days = 0
-        if shares > 0:
-            holding_days = _calculate_holding_days(df, end_date)
-            holding_days, avg_cost = _adjust_current_holding_metrics(
-                df,
-                (price_frames or {}).get(ticker_key) if price_frames else None,
-                target_date=end_date,
-                raw_holding_days=holding_days,
-                avg_cost=avg_cost,
-                country_code=(country_code or "kor").strip().lower() or "kor",
-            )
-            if avg_cost and avg_cost > 0 and price:
-                cost_basis = avg_cost * shares
-                pv = price * shares
-                evaluation_pct = ((pv - cost_basis) / cost_basis) * 100.0
 
         # streak (filter 값 사용)
         streak = int(filter_val) if filter_val and filter_val > 0 else 0
@@ -205,7 +163,7 @@ def extract_recommendations_from_backtest(
         phrase = note
 
         # 상태 결정
-        state = _decision_to_state(decision, shares)
+        state = decision
 
         # 수익률 및 드로우다운 계산
         df_up_to_end = df[df.index <= end_date]
@@ -274,8 +232,10 @@ def extract_recommendations_from_backtest(
                 "trend_prices": trend_prices,
                 "phrase": phrase,
                 "base_date": end_date,
-                "bucket": meta.get("bucket", DEFAULT_BUCKET),
-                "bucket_name": BUCKET_NAMES.get(meta.get("bucket", DEFAULT_BUCKET), "Unknown"),
+                "bucket": snapshot_row.get("bucket", meta.get("bucket", DEFAULT_BUCKET)),
+                "bucket_name": BUCKET_NAMES.get(
+                    snapshot_row.get("bucket", meta.get("bucket", DEFAULT_BUCKET)), "Unknown"
+                ),
             }
         )
 
