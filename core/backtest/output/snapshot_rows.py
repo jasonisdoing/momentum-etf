@@ -58,8 +58,9 @@ def build_snapshot_rows(
     total_cash: float,
     state: SnapshotBuildState,
     price_overrides: dict[str, float] | None = None,
+    bucket_topn: int | None = None,
 ) -> list[dict[str, Any]]:
-    entries: list[tuple[tuple[int, int, float, str], dict[str, Any]]] = []
+    entries: list[dict[str, Any]] = []
 
     for ticker in _iter_tickers_order(result.ticker_timeseries):
         ts = result.ticker_timeseries.get(ticker)
@@ -89,7 +90,9 @@ def build_snapshot_rows(
         pv = price * shares
 
         if is_cash:
-            cash_pv = float(row.get("pv")) if pd.notna(row.get("pv")) else float(total_cash)
+            cash_pv = float(total_cash) if _is_finite_number(total_cash) else 0.0
+            if not _is_finite_number(cash_pv) or cash_pv <= 0:
+                cash_pv = float(row.get("pv")) if pd.notna(row.get("pv")) else 0.0
             price = 1.0
             shares = cash_pv if _is_finite_number(cash_pv) and cash_pv > 0 else 1.0
             pv = cash_pv if _is_finite_number(cash_pv) else 0.0
@@ -135,7 +138,6 @@ def build_snapshot_rows(
         evaluation_profit = 0.0 if is_cash or is_pending_tomorrow else (pv - cost_basis)
         evaluation_pct = ((evaluation_profit / cost_basis) * 100.0) if cost_basis > 0 else None
 
-        score_val = float(score) if _is_finite_number(score) else float("-inf")
         bucket_id = meta.get("bucket")
         bucket_display = "-"
         if bucket_id and bucket_id in BUCKET_NAMES:
@@ -193,16 +195,53 @@ def build_snapshot_rows(
             "is_pending_tomorrow": is_pending_tomorrow,
             "sort_group": sort_group,
         }
-        bucket_sort_val = int(bucket_id) if (bucket_id and str(bucket_id).isdigit()) else 99
-        sort_key = (sort_group, bucket_sort_val if sort_group == 1 else 0, -score_val, ticker_key)
-        entries.append((sort_key, snapshot_row))
+        entries.append(snapshot_row)
         state.prev_decisions_map[ticker_key] = raw_decision
 
-    entries.sort(key=lambda item: item[0])
+    effective_bucket_topn = bucket_topn
+    if effective_bucket_topn is None:
+        try:
+            effective_bucket_topn = int(getattr(result, "bucket_topn", 0) or 0)
+        except (TypeError, ValueError):
+            effective_bucket_topn = 0
+
+    if effective_bucket_topn and effective_bucket_topn > 0:
+        bucket_counts: dict[int | str, int] = {}
+        ranked_entries = sorted(
+            entries,
+            key=lambda row: (
+                row.get("sort_group", 2),
+                -(float(row.get("score")) if _is_finite_number(row.get("score")) else float("-inf")),
+                str(row.get("ticker", "")),
+            ),
+        )
+
+        for row in ranked_entries:
+            if row.get("is_cash"):
+                row["_is_bucket_top"] = False
+                continue
+            b_idx = row.get("bucket") if row.get("bucket") is not None else 99
+            bucket_counts[b_idx] = bucket_counts.get(b_idx, 0) + 1
+            row["_is_bucket_top"] = bucket_counts[b_idx] <= effective_bucket_topn
+    else:
+        for row in entries:
+            row["_is_bucket_top"] = False
+
+    def _final_sort_key(row: dict[str, Any]) -> tuple[int, int, int, float, str]:
+        if row.get("is_cash"):
+            return (-1, 0, 0, 0.0, "CASH")
+
+        bucket_sort_val = int(row["bucket"]) if (row.get("bucket") and str(row.get("bucket")).isdigit()) else 99
+        top_priority = 0 if row.get("_is_bucket_top") else 1
+        state_priority = 0 if row.get("sort_group", 2) == 1 else 1
+        score_val = float(row.get("score")) if _is_finite_number(row.get("score")) else float("-inf")
+        return (top_priority, bucket_sort_val, state_priority, -score_val, str(row.get("ticker", "")))
+
+    entries.sort(key=_final_sort_key)
 
     sorted_rows: list[dict[str, Any]] = []
     current_idx = 1
-    for _, snapshot_row in entries:
+    for snapshot_row in entries:
         if snapshot_row["ticker"] == "CASH":
             snapshot_row["row_index"] = "0"
             snapshot_row["bucket_display"] = "-"

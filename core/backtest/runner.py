@@ -933,14 +933,14 @@ def _build_summary(
 
         yearly_returns = yearly_returns.dropna()
 
-    # Turnover calculation (전체 거래 횟수) - if 블록 밖에서 항상 실행
+    # Turnover calculation: 상태 라벨이 아니라 실제 거래 금액이 기록된 행 수를 센다.
     total_turnover = 0
     if ticker_timeseries:
-        trade_decisions = {"BUY", "BUY_REPLACE", "SELL_REPLACE"}
-        for t_data in ticker_timeseries.values():
-            if isinstance(t_data, pd.DataFrame) and "decision" in t_data.columns:
-                trade_count = t_data["decision"].isin(trade_decisions).sum()
-                total_turnover += int(trade_count)
+        for ticker, t_data in ticker_timeseries.items():
+            if ticker == "CASH" or not isinstance(t_data, pd.DataFrame) or "trade_amount" not in t_data.columns:
+                continue
+            trade_amounts = pd.to_numeric(t_data["trade_amount"], errors="coerce").fillna(0.0)
+            total_turnover += int(trade_amounts.abs().gt(0).sum())
 
     # Bucket summary
     bucket_summary = []
