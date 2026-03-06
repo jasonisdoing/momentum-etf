@@ -110,6 +110,7 @@ def _execute_individual_sells(
                     {
                         "decision": f"{decision}_NEXTDAY",
                         "trade_amount": trade_amount,
+                        "trade_shares": qty,
                         "trade_profit": trade_profit,
                         "trade_pl_pct": hold_ret,
                         "shares": remaining_shares,
@@ -329,6 +330,7 @@ def _execute_new_buys(
                     {
                         "decision": "BUY_NEXTDAY",
                         "trade_amount": trade_amount,
+                        "trade_shares": req_qty,
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
                         "avg_cost": ticker_state["avg_cost"],
@@ -346,6 +348,7 @@ def _execute_new_buys(
                         "decision": "BUY_NEXTDAY",
                         "avg_cost": ticker_state["avg_cost"],
                         "trade_amount": trade_amount,
+                        "trade_shares": req_qty,
                         "trade_profit": 0.0,
                         "trade_pl_pct": 0.0,
                         "note": "",
@@ -500,7 +503,6 @@ def run_portfolio_backtest(
     ma_type: str = "SMA",
     rebalance_mode: str = "TWICE_A_MONTH",
     replacement_mode: str = "WEEKLY",
-    sell_on_negative_score: bool = True,
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
@@ -744,6 +746,7 @@ def run_portfolio_backtest(
                     "decision": decision_out,
                     "avg_cost": snapshot["avg_cost"],
                     "trade_amount": 0.0,
+                    "trade_shares": 0.0,
                     "trade_profit": 0.0,
                     "trade_pl_pct": 0.0,
                     "note": note,
@@ -768,6 +771,7 @@ def run_portfolio_backtest(
                     "decision": "HOLD" if snapshot["shares"] > 0 else "WAIT",
                     "avg_cost": avg_cost,
                     "trade_amount": 0.0,
+                    "trade_shares": 0.0,
                     "trade_profit": 0.0,
                     "trade_pl_pct": 0.0,
                     "note": "데이터 없음",
@@ -942,6 +946,7 @@ def run_portfolio_backtest(
                                     {
                                         "decision": "SELL_REPLACE_NEXTDAY",
                                         "trade_amount": sell_amount,
+                                        "trade_shares": sell_qty,
                                         "trade_profit": trade_profit,
                                         "trade_pl_pct": hold_ret,
                                         "shares": 0,
@@ -987,6 +992,7 @@ def run_portfolio_backtest(
                                         {
                                             "decision": "BUY_REPLACE_NEXTDAY",
                                             "trade_amount": buy_amount,
+                                            "trade_shares": req_qty,
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
                                             "avg_cost": buy_price,
@@ -1006,6 +1012,7 @@ def run_portfolio_backtest(
                                             "decision": "BUY_REPLACE_NEXTDAY",
                                             "avg_cost": buy_price,
                                             "trade_amount": buy_amount,
+                                            "trade_shares": req_qty,
                                             "trade_profit": 0.0,
                                             "trade_pl_pct": 0.0,
                                             "note": f"{BACKTEST_STATUS_LIST['BUY_REPLACE']['display_name']} "
@@ -1027,6 +1034,7 @@ def run_portfolio_backtest(
                                         "decision": "BUY_REPLACE_NEXTDAY",
                                         "avg_cost": buy_price,
                                         "trade_amount": buy_amount,
+                                        "trade_shares": req_qty,
                                         "trade_profit": 0.0,
                                         "trade_pl_pct": 0.0,
                                         "note": replacement_note,
@@ -1063,50 +1071,49 @@ def run_portfolio_backtest(
                         # 가격 정보가 유효하지 않으면 교체하지 않고 다음 대기 종목으로 넘어감
                         continue  # 다음 buy_ranked_candidate로 넘어감
 
-            # 4. 강제 손절 (옵션)
-            # SELL_ON_NEGATIVE_SCORE=True일 때만 교체일에 음수 점수 종목을 매도합니다.
-            if sell_on_negative_score:
-                for held_ticker, held_position in position_state.items():
-                    if held_position["shares"] > 0:
-                        held_score = score_today.get(held_ticker, float("nan"))
-                        if not pd.isna(held_score) and held_score < 0:
-                            sell_price = today_prices.get(held_ticker)
-                            if pd.notna(sell_price) and sell_price > 0:
-                                qty = _floor_quantity(float(held_position["shares"]), qty_precision)
-                                if qty <= 0:
-                                    continue
-                                sell_amount = qty * sell_price
-                                avg_cost = held_position["avg_cost"]
-                                hold_ret = (sell_price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
-                                trade_profit = (sell_price - avg_cost) * qty if avg_cost > 0 else 0.0
+            # 4. 점수 음수 종목 매도
+            for held_ticker, held_position in position_state.items():
+                if held_position["shares"] > 0:
+                    held_score = score_today.get(held_ticker, float("nan"))
+                    if not pd.isna(held_score) and held_score < 0:
+                        sell_price = today_prices.get(held_ticker)
+                        if pd.notna(sell_price) and sell_price > 0:
+                            qty = _floor_quantity(float(held_position["shares"]), qty_precision)
+                            if qty <= 0:
+                                continue
+                            sell_amount = qty * sell_price
+                            avg_cost = held_position["avg_cost"]
+                            hold_ret = (sell_price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
+                            trade_profit = (sell_price - avg_cost) * qty if avg_cost > 0 else 0.0
 
-                                sell_trades_today_map.setdefault(held_ticker, []).append(
-                                    {"shares": float(qty), "price": float(sell_price)}
+                            sell_trades_today_map.setdefault(held_ticker, []).append(
+                                {"shares": float(qty), "price": float(sell_price)}
+                            )
+
+                            cash += sell_amount
+                            current_holdings_value = max(0.0, current_holdings_value - sell_amount)
+                            remaining_shares = _floor_quantity(float(held_position["shares"]) - qty, qty_precision)
+                            held_position["shares"] = remaining_shares
+                            if remaining_shares <= 0:
+                                held_position["avg_cost"] = 0.0
+
+                            if (
+                                daily_records_by_ticker.get(held_ticker)
+                                and daily_records_by_ticker[held_ticker][-1]["date"] == dt
+                            ):
+                                daily_records_by_ticker[held_ticker][-1].update(
+                                    {
+                                        "decision": "SELL",
+                                        "trade_amount": sell_amount,
+                                        "trade_shares": qty,
+                                        "trade_profit": trade_profit,
+                                        "trade_pl_pct": hold_ret,
+                                        "shares": remaining_shares,
+                                        "pv": remaining_shares * sell_price,
+                                        "avg_cost": held_position["avg_cost"],
+                                        "note": "점수 음수 매도",
+                                    }
                                 )
-
-                                cash += sell_amount
-                                current_holdings_value = max(0.0, current_holdings_value - sell_amount)
-                                remaining_shares = _floor_quantity(float(held_position["shares"]) - qty, qty_precision)
-                                held_position["shares"] = remaining_shares
-                                if remaining_shares <= 0:
-                                    held_position["avg_cost"] = 0.0
-
-                                if (
-                                    daily_records_by_ticker.get(held_ticker)
-                                    and daily_records_by_ticker[held_ticker][-1]["date"] == dt
-                                ):
-                                    daily_records_by_ticker[held_ticker][-1].update(
-                                        {
-                                            "decision": "SELL_NEXTDAY",
-                                            "trade_amount": sell_amount,
-                                            "trade_profit": trade_profit,
-                                            "trade_pl_pct": hold_ret,
-                                            "shares": remaining_shares,
-                                            "pv": remaining_shares * sell_price,
-                                            "avg_cost": held_position["avg_cost"],
-                                            "note": "점수 음수 (교체일 매도)",
-                                        }
-                                    )
 
             # 5. 매수하지 못한 후보에 사유 기록
             # 오늘 매수 또는 교체매수된 종목 목록을 만듭니다.
@@ -1196,8 +1203,7 @@ def run_portfolio_backtest(
                                 ):
                                     row = daily_records_by_ticker[ticker][-1]
                                     existing_note = row.get("note", "")
-                                    if row.get("decision") == "HOLD":
-                                        row["decision"] = "SELL_REBALANCE_NEXTDAY"
+                                    # 리밸런스 비중 축소는 부분 조정이므로 상태는 변경하지 않습니다.
                                     row["note"] = f"{trim_note} | {existing_note}" if existing_note else trim_note
                                     row["shares"] = state["shares"]
                                     row["pv"] = state["shares"] * price
@@ -1206,6 +1212,10 @@ def run_portfolio_backtest(
                                         row["trade_amount"] += sell_amount
                                     else:
                                         row["trade_amount"] = sell_amount
+                                    if "trade_shares" in row and row["trade_shares"]:
+                                        row["trade_shares"] += sell_qty
+                                    else:
+                                        row["trade_shares"] = sell_qty
 
                                 # 순매도 집계
                                 sell_trades_today_map.setdefault(ticker, []).append(
@@ -1223,8 +1233,8 @@ def run_portfolio_backtest(
             last_row = rows[-1]
             current_note = str(last_row.get("note") or "")
 
-            # 리스크 오프 비중 조절 문구가 있으면 덮어쓰지 않음
-            if "시장위험회피" in current_note:
+            # 리스크 오프/비중조절 문구가 있으면 덮어쓰지 않음
+            if "시장위험회피" in current_note or "[비중조절]" in current_note:
                 continue
 
             overrides = compute_net_trade_note(
@@ -1323,12 +1333,9 @@ def run_portfolio_backtest(
                             existing_decision = row.get("decision", "")
                             existing_note = row.get("note", "")
 
-                            # Decision이 HOLD인 경우만 추가 매수 표시
+                            # 상태는 HOLD를 유지하고 문구로만 비중 조절 매수를 표시
                             if existing_decision == "HOLD":
-                                row["decision"] = "BUY_REBALANCE_NEXTDAY"
-                                # 상태값(HOLD) 및 보유일 유지
                                 diff_pct = (topup_amount / (total_equity)) * 100
-                                # 리밸런싱 날과 일반 날 구분 없이 비중확대 메시지 사용
                                 topup_note = f"[비중조절] {diff_pct:.1f}% 매수"
                                 row["note"] = f"{topup_note} | {existing_note}" if existing_note else topup_note
 
@@ -1342,6 +1349,10 @@ def run_portfolio_backtest(
                                 row["trade_amount"] += topup_amount
                             else:
                                 row["trade_amount"] = topup_amount
+                            if "trade_shares" in row and row["trade_shares"]:
+                                row["trade_shares"] += topup_qty
+                            else:
+                                row["trade_shares"] = topup_qty
 
                         # 순매수 집계
                         buy_trades_today_map.setdefault(ticker_to_topup, []).append(

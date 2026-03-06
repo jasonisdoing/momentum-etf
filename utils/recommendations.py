@@ -213,7 +213,6 @@ def _state_style(value: Any) -> str:
         "BUY_REPLACE",
         "BUY_NEXTDAY",
         "BUY_REPLACE_NEXTDAY",
-        "BUY_REBALANCE_NEXTDAY",
     ):
         return "color:#d32f2f;font-weight:600"
     if text == "WAIT":

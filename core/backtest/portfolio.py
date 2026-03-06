@@ -12,6 +12,7 @@ def get_sell_states() -> set[str]:
         매도 상태 문자열 집합
     """
     return {
+        "SELL",
         "SELL_REPLACE",
         "SELL_NEXTDAY",
         "SELL_REPLACE_NEXTDAY",

@@ -250,7 +250,7 @@ def _assign_final_ranks(
 
     # 1. 정렬 그룹 할당 (daily_report.py와 동일)
     # 0: CASH (현금은 여기서는 제외됨)
-    # 1: 내일 보유할 최종 타겟 10종목 (HOLD, BUY, BUY_REBALANCE, BUY_REPLACE)
+    # 1: 내일 보유할 최종 타겟 10종목 (HOLD, BUY, BUY_REPLACE)
     # 2: 제외/대기 대상 (WAIT, SELL, SELL_REPLACE)
     for rec in recommendations:
         state = str(rec.get("state", "")).upper()
@@ -258,13 +258,11 @@ def _assign_final_ranks(
         if state in (
             "HOLD",
             "BUY",
-            "BUY_REBALANCE",
             "BUY_REPLACE",
             "BUY_NEXTDAY",
             "SELL_NEXTDAY",
             "BUY_REPLACE_NEXTDAY",
             "SELL_REPLACE_NEXTDAY",
-            "BUY_REBALANCE_NEXTDAY",
             "SELL_REBALANCE_NEXTDAY",
         ):
             rec["_sort_group"] = 1
@@ -376,7 +374,7 @@ def _adjust_current_holding_metrics(
     entry_signal_dt = holding_dates[0]
     entry_row = df_up_to_date.loc[entry_signal_dt]
     entry_decision = str(entry_row.get("decision", "") or "").upper()
-    if entry_decision not in {"BUY", "BUY_REPLACE", "BUY_REBALANCE"}:
+    if entry_decision not in {"BUY", "BUY_REPLACE"}:
         return raw_holding_days, avg_cost
 
     adjusted_days = max(raw_holding_days - 1, 0)
@@ -444,16 +442,12 @@ def _decision_to_state(decision: str, shares: float) -> str:
     if decision_upper in (
         "BUY",
         "SELL",
-        "BUY_REBALANCE",
-        "SELL_REBALANCE",
         "BUY_REPLACE",
         "SELL_REPLACE",
         "BUY_NEXTDAY",
         "SELL_NEXTDAY",
         "BUY_REPLACE_NEXTDAY",
         "SELL_REPLACE_NEXTDAY",
-        "BUY_REBALANCE_NEXTDAY",
-        "SELL_REBALANCE_NEXTDAY",
     ):
         return decision_upper
     elif shares and shares > 0:

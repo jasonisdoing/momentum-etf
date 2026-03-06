@@ -33,6 +33,8 @@ def _build_daily_table_rows(
     holding_days_map: dict[str, int],
     prev_rows_cache: dict[str, pd.Series | None],
     prev_decisions_map: dict[str, str],
+    prev_effective_shares_map: dict[str, float],
+    prev_effective_avg_cost_map: dict[str, float],
     price_overrides: dict[str, float] | None = None,
 ) -> list[list[str]]:
     snapshot_state = create_snapshot_build_state()
@@ -40,6 +42,8 @@ def _build_daily_table_rows(
     snapshot_state.holding_days_map = holding_days_map
     snapshot_state.prev_rows_cache = prev_rows_cache
     snapshot_state.prev_decisions_map = prev_decisions_map
+    snapshot_state.prev_effective_shares_map = prev_effective_shares_map
+    snapshot_state.prev_effective_avg_cost_map = prev_effective_avg_cost_map
 
     snapshot_rows = build_snapshot_rows(
         result=result,
@@ -202,6 +206,8 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
             holding_days_map=snapshot_state.holding_days_map,
             prev_rows_cache=snapshot_state.prev_rows_cache,
             prev_decisions_map=snapshot_state.prev_decisions_map,
+            prev_effective_shares_map=snapshot_state.prev_effective_shares_map,
+            prev_effective_avg_cost_map=snapshot_state.prev_effective_avg_cost_map,
         )
 
         lines.extend(render_table_eaw(headers, table_rows, aligns))

@@ -514,7 +514,6 @@ def _build_backtest_kwargs(
         "ma_type": strategy_rules.ma_type,
         "rebalance_mode": strategy_rules.rebalance_mode,
         "replacement_mode": strategy_rules.replacement_mode,
-        "sell_on_negative_score": strategy_rules.sell_on_negative_score,
         "quiet": quiet,
         "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }
@@ -544,6 +543,8 @@ def _build_portfolio_timeseries(
         raise RuntimeError("종목들 간에 공통된 거래일이 없습니다.")
 
     rows = []
+    prev_effective_shares: dict[str, float] = {}
+    prev_effective_avg_cost: dict[str, float] = {}
     prev_total_value: float | None = None
     for dt in common_index:
         total_value = 0.0
@@ -594,10 +595,39 @@ def _build_portfolio_timeseries(
             price_val = row.get("price")
             shares_val = row.get("shares")
             avg_cost_val = row.get("avg_cost")
+            trade_shares_val = row.get("trade_shares", 0.0)
 
             price = float(price_val) if pd.notna(price_val) else 0.0
-            shares = 0.0 if is_pending_nextday else (float(shares_val) if pd.notna(shares_val) else 0.0)
-            avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
+            raw_shares = float(shares_val) if pd.notna(shares_val) else 0.0
+            raw_avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
+            traded_shares = float(trade_shares_val) if pd.notna(trade_shares_val) else 0.0
+
+            # 엔진은 *_NEXTDAY 의 거래 결과를 당일 row에 먼저 반영한다.
+            # 집계에서는 "다음날 체결" 의미를 복원해야 하므로:
+            # - BUY*_NEXTDAY: 아직 미체결이므로 보유수량 0
+            # - SELL*_NEXTDAY: 아직 미체결이므로 매도 직전 수량(=잔여+당일매도수량)으로 복원
+            if is_pending_nextday:
+                if decision.startswith("BUY"):
+                    reconstructed_shares = max(0.0, raw_shares - max(0.0, traded_shares))
+                    shares = reconstructed_shares
+                    if shares > 0:
+                        avg_cost = prev_effective_avg_cost.get(ticker, raw_avg_cost)
+                    else:
+                        avg_cost = 0.0
+                elif decision.startswith("SELL"):
+                    reconstructed_shares = raw_shares + max(0.0, traded_shares)
+                    shares = (
+                        reconstructed_shares
+                        if reconstructed_shares > 0
+                        else prev_effective_shares.get(ticker, raw_shares)
+                    )
+                    avg_cost = prev_effective_avg_cost.get(ticker, raw_avg_cost)
+                else:
+                    shares = raw_shares
+                    avg_cost = raw_avg_cost
+            else:
+                shares = raw_shares
+                avg_cost = raw_avg_cost
 
             effective_pv = price * shares
             total_value += effective_pv
@@ -605,6 +635,9 @@ def _build_portfolio_timeseries(
             if shares > 0:
                 held_count += 1
                 total_cost += avg_cost * shares
+
+            prev_effective_shares[ticker] = shares
+            prev_effective_avg_cost[ticker] = avg_cost
 
         if not math.isfinite(cash_value):
             cash_value = 0.0

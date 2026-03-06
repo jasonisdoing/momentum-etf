@@ -49,7 +49,15 @@ def compute_net_trade_note(
         # net buy: 부분/신규 구분 없이 동일 메시지 사용
         return {"note": DECISION_MESSAGES["NEW_BUY"]}
     if net_amount < 0:
-        # net sell, keep HOLD state
+        # net sell:
+        # - *_NEXTDAY 는 체결 예정 상태이므로 "매도 완료"로 덮어쓰지 않는다.
+        # - 그 외는 기존대로 부분매도 문구를 사용한다.
+        current_decision_norm = str(current_decision or "").upper()
+        if current_decision_norm == "SELL":
+            return {"note": DECISION_MESSAGES.get("SELL", DECISION_MESSAGES["SOLD"])}
+        if current_decision_norm.endswith("_NEXTDAY"):
+            pending_note = DECISION_MESSAGES.get(current_decision_norm)
+            return {"note": pending_note} if pending_note else {}
         note = build_partial_sell_note()
         return {"state": "HOLD", "row4": "HOLD", "note": note}
 
