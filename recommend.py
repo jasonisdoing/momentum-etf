@@ -16,6 +16,7 @@ from typing import Any
 import pandas as pd
 
 from config import BUCKET_MAPPING as BUCKET_NAMES
+from core.backtest.price import calculate_trade_price
 
 DEFAULT_BUCKET = 1
 
@@ -71,6 +72,8 @@ def extract_recommendations_from_backtest(
     result: Any,
     *,
     ticker_meta: dict[str, dict[str, Any]] | None = None,
+    price_frames: dict[str, pd.DataFrame] | None = None,
+    country_code: str | None = None,
 ) -> list[dict[str, Any]]:
     """백테스트 결과에서 마지막 날(오늘) 추천 데이터를 추출합니다."""
 
@@ -164,6 +167,18 @@ def extract_recommendations_from_backtest(
         holding_days = 0
         if shares > 0:
             holding_days = _calculate_holding_days(df, end_date)
+            holding_days, avg_cost = _adjust_current_holding_metrics(
+                df,
+                (price_frames or {}).get(ticker_key) if price_frames else None,
+                target_date=end_date,
+                raw_holding_days=holding_days,
+                avg_cost=avg_cost,
+                country_code=(country_code or "kor").strip().lower() or "kor",
+            )
+            if avg_cost and avg_cost > 0 and price:
+                cost_basis = avg_cost * shares
+                pv = price * shares
+                evaluation_pct = ((pv - cost_basis) / cost_basis) * 100.0
 
         # streak (filter 값 사용)
         streak = int(filter_val) if filter_val and filter_val > 0 else 0
@@ -326,6 +341,87 @@ def _safe_float(value: Any, default: float | None = None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _resolve_price_column(frame: pd.DataFrame, candidates: tuple[str, ...]) -> pd.Series | None:
+    for candidate in candidates:
+        if candidate in frame.columns:
+            series = frame[candidate]
+            if isinstance(series, pd.DataFrame):
+                series = series.iloc[:, 0]
+            return pd.to_numeric(series, errors="coerce")
+    return None
+
+
+def _adjust_current_holding_metrics(
+    df: pd.DataFrame,
+    price_frame: pd.DataFrame | None,
+    *,
+    target_date: pd.Timestamp,
+    raw_holding_days: int,
+    avg_cost: float | None,
+    country_code: str,
+) -> tuple[int, float | None]:
+    """다음날 시가 체결 규칙에 맞춰 현재 보유의 보유일/진입가를 보정합니다."""
+
+    if raw_holding_days <= 0 or df.empty:
+        return raw_holding_days, avg_cost
+
+    df_up_to_date = df[df.index <= target_date]
+    if df_up_to_date.empty:
+        return raw_holding_days, avg_cost
+
+    holding_dates: list[pd.Timestamp] = []
+    for idx in reversed(df_up_to_date.index):
+        row = df_up_to_date.loc[idx]
+        shares = _safe_float(row.get("shares"), 0)
+        if shares and shares > 0:
+            holding_dates.append(pd.Timestamp(idx))
+        else:
+            break
+
+    if not holding_dates:
+        return raw_holding_days, avg_cost
+
+    holding_dates.reverse()
+    entry_signal_dt = holding_dates[0]
+    entry_row = df_up_to_date.loc[entry_signal_dt]
+    entry_decision = str(entry_row.get("decision", "") or "").upper()
+    if entry_decision not in {"BUY", "BUY_REPLACE", "BUY_REBALANCE"}:
+        return raw_holding_days, avg_cost
+
+    adjusted_days = max(raw_holding_days - 1, 0)
+    if price_frame is None or price_frame.empty:
+        return adjusted_days, avg_cost
+
+    price_history = price_frame.sort_index().copy()
+    try:
+        price_history.index = pd.to_datetime(price_history.index).normalize()
+    except Exception:
+        return adjusted_days, avg_cost
+
+    if entry_signal_dt not in price_history.index:
+        return adjusted_days, avg_cost
+
+    open_series = _resolve_price_column(price_history, ("Open", "open"))
+    close_series = _resolve_price_column(price_history, ("Close", "close", "unadjusted_close"))
+    if open_series is None or close_series is None:
+        return adjusted_days, avg_cost
+
+    loc = price_history.index.get_loc(entry_signal_dt)
+    trade_idx = int(loc.stop) - 1 if isinstance(loc, slice) else int(loc)
+    if trade_idx + 1 > len(price_history.index) - 1:
+        return adjusted_days, avg_cost
+
+    adjusted_avg_cost = calculate_trade_price(
+        trade_idx,
+        len(price_history.index),
+        open_series.to_numpy(),
+        close_series.to_numpy(),
+        country_code,
+        is_buy=True,
+    )
+    return adjusted_days, adjusted_avg_cost
 
 
 def _calculate_holding_days(df: pd.DataFrame, target_date: pd.Timestamp) -> int:
@@ -592,7 +688,12 @@ def generate_recommendation_report(
     )
 
     # 마지막 날 추천 데이터 추출
-    recommendations = extract_recommendations_from_backtest(result, ticker_meta=universe_meta)
+    recommendations = extract_recommendations_from_backtest(
+        result,
+        ticker_meta=universe_meta,
+        price_frames=dict(prefetched_map),
+        country_code=country_code,
+    )
 
     # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
     if country_code in ("kor", "kr"):
