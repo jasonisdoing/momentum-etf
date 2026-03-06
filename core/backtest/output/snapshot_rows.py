@@ -142,18 +142,18 @@ def build_snapshot_rows(
             state.buy_date_map[ticker_key] = None
             state.holding_days_map[ticker_key] = 0
 
+        # 보유일은 상태/문구가 아니라 실제 보유수량(전일 대비) 기준으로 계산한다.
+        # 이렇게 해야 평가(평균매입가 기반)와 보유일 기준이 일치한다.
         if not is_cash:
-            if shares > 0:
-                if is_pending_tomorrow and pending_action.startswith("BUY"):
-                    state.buy_date_map[ticker_key] = None
-                    state.holding_days_map[ticker_key] = 0
-                elif state.buy_date_map[ticker_key] is None or display_decision.startswith("BUY"):
-                    state.buy_date_map[ticker_key] = target_date
-                    state.holding_days_map[ticker_key] = 1
-                elif prev_pending_action.startswith("BUY") and raw_decision == "HOLD":
-                    state.holding_days_map[ticker_key] = max(state.holding_days_map[ticker_key], 1)
-                else:
-                    state.holding_days_map[ticker_key] += 1
+            prev_effective_shares = float(state.prev_effective_shares_map.get(ticker_key, 0.0) or 0.0)
+            has_prev_holding = prev_effective_shares > 0.0
+            has_current_holding = shares > 0.0
+
+            if has_current_holding and not has_prev_holding:
+                state.buy_date_map[ticker_key] = target_date
+                state.holding_days_map[ticker_key] = 1
+            elif has_current_holding and has_prev_holding:
+                state.holding_days_map[ticker_key] = max(1, int(state.holding_days_map.get(ticker_key, 0)) + 1)
             else:
                 state.buy_date_map[ticker_key] = None
                 state.holding_days_map[ticker_key] = 0
