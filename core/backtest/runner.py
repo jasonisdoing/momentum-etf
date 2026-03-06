@@ -1064,10 +1064,6 @@ def _build_ticker_summaries(
     ticker_timeseries: Mapping[str, pd.DataFrame],
     ticker_meta: Mapping[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    sell_decisions = {
-        "SELL_REPLACE",
-    }
-
     summaries: list[dict[str, Any]] = []
     for ticker, df in ticker_timeseries.items():
         ticker_key = str(ticker).upper()
@@ -1076,8 +1072,21 @@ def _build_ticker_summaries(
             continue
 
         df_sorted = df.sort_index()
-        if "decision" in df_sorted.columns:
-            trades_mask = df_sorted["decision"].isin(sell_decisions)
+        if "decision" in df_sorted.columns or "pending_action" in df_sorted.columns:
+            decision_col = (
+                df_sorted["decision"].astype(str).str.upper()
+                if "decision" in df_sorted.columns
+                else pd.Series("", index=df_sorted.index, dtype=object)
+            )
+            pending_col = (
+                df_sorted["pending_action"].astype(str).str.upper()
+                if "pending_action" in df_sorted.columns
+                else pd.Series("", index=df_sorted.index, dtype=object)
+            )
+            trade_shares_col = pd.to_numeric(df_sorted.get("trade_shares", 0.0), errors="coerce").fillna(0.0)
+            trades_mask = (
+                (decision_col == "SELL") | (decision_col == "SELL_REPLACE") | pending_col.str.startswith("SELL")
+            ) & (trade_shares_col > 0)
         else:
             trades_mask = pd.Series(False, index=df_sorted.index)
 
