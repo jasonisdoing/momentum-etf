@@ -407,6 +407,13 @@ def _enrich_with_nav_data(
             # 실시간 가격으로 덮어쓰기
             if nav_info.get("nowVal"):
                 rec["price"] = nav_info.get("nowVal")
+                shares = _safe_float(rec.get("shares"), 0) or 0.0
+                avg_cost = _safe_float(rec.get("avg_cost"), 0) or 0.0
+                live_price = _safe_float(rec.get("price"), 0) or 0.0
+                if shares > 0 and avg_cost > 0 and live_price > 0:
+                    cost_basis = avg_cost * shares
+                    pv = live_price * shares
+                    rec["evaluation_pct"] = ((pv - cost_basis) / cost_basis) * 100.0
 
             # [User Request] 개별 종목의 경우 실시간 changeRate가 있으면 daily_pct 업데이트 (선택 사항)
             # 호주 등 외부 API의 changeRate 신뢰도가 낮은 경우를 대비해 한국 계좌에서만 동작하도록 제한
@@ -481,7 +488,7 @@ def _apply_bucket_selection(
                 rec["decision"] = "WAIT"
                 rec["state"] = "WAIT"
 
-        final_list.append(rec)
+        final_list.extend(group)
 
     return final_list
 
@@ -586,6 +593,10 @@ def generate_recommendation_report(
     # 마지막 날 추천 데이터 추출
     recommendations = extract_recommendations_from_backtest(result, ticker_meta=universe_meta)
 
+    # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
+    if country_code in ("kor", "kr"):
+        recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
+
     # 전체 기간 데이터(prefetched_map)를 이용하여 기간별 수익률(6m, 12m 등) 재계산/보강
     # [수익률 표시] 전략은 과거 기준이라도, 수익률은 현재(end_date) 기준으로 표시
     recommendations = _enrich_with_period_returns(
@@ -593,10 +604,6 @@ def generate_recommendation_report(
         prefetched_map,
         base_date=end_date,
     )
-
-    # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
-    if country_code in ("kor", "kr"):
-        recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
 
     # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
     bucket_topn = strategy_cfg.get("BUCKET_TOPN", 2)
@@ -948,6 +955,10 @@ def _enrich_with_period_returns(
         if not current_price:
             continue
 
+        close_col = "close" if "close" in df.columns else "Close"
+        if close_col not in df.columns:
+            continue
+
         # 과거 가격 조회 및 수익률 갱신
         for key, days in periods.items():
             target_date = base_date - pd.Timedelta(days=days)
@@ -966,6 +977,18 @@ def _enrich_with_period_returns(
                         rec[key] = ret
             except Exception:
                 pass
+
+        try:
+            history = df.loc[df.index <= base_date, close_col].dropna()
+            if not history.empty and current_price > 0:
+                max_price = float(history.max())
+                if max_price > 0:
+                    rec["drawdown_from_high"] = ((current_price / max_price) - 1.0) * 100.0
+                trend_prices = history.iloc[-59:].tolist()
+                trend_prices.append(float(current_price))
+                rec["trend_prices"] = trend_prices[-60:]
+        except Exception:
+            pass
 
     return recommendations
 
