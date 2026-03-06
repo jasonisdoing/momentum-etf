@@ -463,10 +463,15 @@ def _execute_tuning(
     topn_candidates = list(search_space.get("BUCKET_TOPN", []))
     ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
     rebalance_mode_candidates = list(search_space.get("REBALANCE_MODE", []))
+    replacement_mode_candidates = list(search_space.get("REPLACEMENT_MODE", []))
 
     if not rebalance_mode_candidates:
         current_rules = get_strategy_rules(account_norm)
         rebalance_mode_candidates = [current_rules.rebalance_mode]
+
+    if not replacement_mode_candidates:
+        current_rules = get_strategy_rules(account_norm)
+        replacement_mode_candidates = [current_rules.replacement_mode]
 
     if not ma_candidates or not topn_candidates or not ma_type_candidates or not rebalance_mode_candidates:
         logger.warning(
@@ -476,12 +481,13 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, str, str]] = [
-        (ma, topn, ma_type, rebal)
+    combos: list[tuple[int, int, str, str, str]] = [
+        (ma, topn, ma_type, rebal, replace)
         for ma in ma_candidates
         for topn in topn_candidates
         for ma_type in ma_type_candidates
         for rebal in rebalance_mode_candidates
+        for replace in replacement_mode_candidates
     ]
 
     if not combos:
@@ -549,10 +555,11 @@ def _execute_tuning(
             int(topn),
             str(ma_type),
             str(rebal_mode),
+            str(replace_mode),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )
-        for ma, topn, ma_type, rebal_mode in combos
+        for ma, topn, ma_type, rebal_mode, replace_mode in combos
     ]
 
     logger.info(
@@ -685,6 +692,7 @@ def _execute_tuning(
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
                     "BUCKET_TOPN": int(item.get("bucket_topn", 0)),
                     "REBALANCE_MODE": str(item.get("rebalance_mode", "MONTHLY")),
+                    "REPLACEMENT_MODE": str(item.get("replacement_mode", "WEEKLY")),
                 },
             }
         )
@@ -718,6 +726,7 @@ def _build_run_entry(
     weighted_mdd_weight = 0.0
     ma_type_weights: dict[str, float] = {}
     rebal_mode_weights: dict[str, float] = {}
+    replace_mode_weights: dict[str, float] = {}
     cagr_values: list[float] = []
     mdd_values: list[float] = []
 
@@ -810,6 +819,12 @@ def _build_run_entry(
             rebal_key = str(rebal_mode_val)
             rebal_mode_weights[rebal_key] = rebal_mode_weights.get(rebal_key, 0.0) + weight_for_cat
 
+        replace_mode_val = best.get("replacement_mode")
+        if replace_mode_val:
+            weight_for_cat = weight if weight > 0 else 1.0
+            replace_key = str(replace_mode_val)
+            replace_mode_weights[replace_key] = replace_mode_weights.get(replace_key, 0.0) + weight_for_cat
+
     if weighted_cagr_weight > 0:
         entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
     elif cagr_values:
@@ -861,6 +876,9 @@ def _build_run_entry(
 
     if rebal_mode_weights:
         result_values["REBALANCE_MODE"] = max(rebal_mode_weights.items(), key=lambda item: (item[1], item[0]))[0]
+
+    if replace_mode_weights:
+        result_values["REPLACEMENT_MODE"] = max(replace_mode_weights.items(), key=lambda item: (item[1], item[0]))[0]
 
     return entry
 
@@ -1015,6 +1033,7 @@ def _compose_tuning_report(
             # MA_TYPE이 있으면 포함해서 표시
             lines.append(
                 f"| 탐색 공간: MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
+                f"× 교체 {len(search_space.get('REPLACEMENT_MODE', []))}개 "
                 f"× 리밸런스 {len(search_space.get('REBALANCE_MODE', []))}개 "
                 f"= {tuning_metadata.get('combo_count', 0)}개 조합"
             )
@@ -1027,6 +1046,9 @@ def _compose_tuning_report(
             if topn_range:
                 topn_min, topn_max = min(topn_range), max(topn_range)
                 lines.append(f"|   BUCKET_TOPN: {topn_min}~{topn_max}")
+            replace_range = search_space.get("REPLACEMENT_MODE", [])
+            if replace_range:
+                lines.append(f"|   REPLACEMENT_MODE: {', '.join(replace_range)}")
             rebalance_range = search_space.get("REBALANCE_MODE", [])
             if rebalance_range:
                 lines.append(f"|   REBALANCE_MODE: {', '.join(rebalance_range)}")
@@ -1190,6 +1212,7 @@ def _compose_tuning_report(
             ma_type_val = tuning.get("MA_TYPE", "SMA")
             topn_val = tuning.get("BUCKET_TOPN")
             rebalance_val = tuning.get("REBALANCE_MODE", "MONTHLY")
+            replace_val = tuning.get("REPLACEMENT_MODE", "WEEKLY")
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -1203,6 +1226,7 @@ def _compose_tuning_report(
                     "ma_type": ma_type_val,
                     "bucket_topn": topn_val,
                     "rebalance_mode": rebalance_val,
+                    "replacement_mode": replace_val,
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
@@ -1349,6 +1373,18 @@ def run_account_tuning(
     if not rebalance_mode_values:
         rebalance_mode_values = [base_rules.rebalance_mode]
 
+    # REPLACEMENT_MODE 처리: 문자열 리스트로 받음
+    replacement_raw = config.get("REPLACEMENT_MODE")
+    if replacement_raw is None:
+        replacement_mode_values = [base_rules.replacement_mode]
+    elif isinstance(replacement_raw, (list, tuple)):
+        replacement_mode_values = [str(v).upper() for v in replacement_raw if v]
+    else:
+        replacement_mode_values = [str(replacement_raw).upper()]
+
+    if not replacement_mode_values:
+        replacement_mode_values = [base_rules.replacement_mode]
+
     if (not ma_values and not ma_month_values) or not topn_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
@@ -1382,6 +1418,7 @@ def run_account_tuning(
         * len(topn_values)
         * len(ma_type_values)
         * len(rebalance_mode_values)
+        * len(replacement_mode_values)
     )
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
@@ -1395,6 +1432,7 @@ def run_account_tuning(
         "BUCKET_TOPN": topn_values,
         "MA_TYPE": ma_type_values,
         "REBALANCE_MODE": rebalance_mode_values,
+        "REPLACEMENT_MODE": replacement_mode_values,
         "OPTIMIZATION_METRIC": [optimization_metric],
     }
 
@@ -1402,12 +1440,14 @@ def run_account_tuning(
     topn_count = len(topn_values)
     ma_type_count = len(ma_type_values)
     rebalance_count = len(rebalance_mode_values)
+    replace_count = len(replacement_mode_values)
 
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 리밸런스 %d개 = %d개 조합 (최적화 지표: %s)",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 교체 %d개 × 리밸런스 %d개 = %d개 조합 (최적화 지표: %s)",
         ma_count,
         topn_count,
         ma_type_count,
+        replace_count,
         rebalance_count,
         combo_count,
         optimization_metric,
@@ -1570,6 +1610,7 @@ def run_account_tuning(
             "MA_TYPE": list(ma_type_values),
             "BUCKET_TOPN": list(topn_values),
             "REBALANCE_MODE": list(rebalance_mode_values),
+            "REPLACEMENT_MODE": list(replacement_mode_values),
             "OPTIMIZATION_METRIC": optimization_metric,
         },
         "data_period": {
@@ -1693,6 +1734,7 @@ def run_account_tuning(
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
                             "BUCKET_TOPN": int(entry.get("bucket_topn", 0)),
                             "REBALANCE_MODE": str(entry.get("rebalance_mode", "MONTHLY")),
+                            "REPLACEMENT_MODE": str(entry.get("replacement_mode", "WEEKLY")),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)

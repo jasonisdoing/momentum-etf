@@ -17,6 +17,7 @@ class StrategyRules:
     bucket_topn: int
     ma_type: str
     rebalance_mode: str
+    replacement_mode: str
     enable_data_sufficiency_check: bool
 
     @classmethod
@@ -28,6 +29,7 @@ class StrategyRules:
         bucket_topn: Any = None,
         ma_type: Any = None,
         rebalance_mode: Any = None,
+        replacement_mode: Any = None,
         enable_data_sufficiency_check: Any = False,
     ) -> StrategyRules:
         # MA 기간 결정 (개월 우선)
@@ -78,12 +80,14 @@ class StrategyRules:
 
         # REBALANCE_MODE 처리
         final_rebalance_mode = str(rebalance_mode).upper() if rebalance_mode else "TWICE_A_MONTH"
+        final_replacement_mode = str(replacement_mode).upper() if replacement_mode else "WEEKLY"
 
         return cls(
             ma_days=final_ma_days,
             bucket_topn=final_bucket_topn,
             ma_type=ma_type_str,
             rebalance_mode=final_rebalance_mode,
+            replacement_mode=final_replacement_mode,
             enable_data_sufficiency_check=data_sufficiency_check,
         )
 
@@ -103,6 +107,7 @@ class StrategyRules:
             bucket_topn=_resolve("BUCKET_TOPN", "bucket_topn"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
             rebalance_mode=_resolve("REBALANCE_MODE", "rebalance_mode"),
+            replacement_mode=_resolve("REPLACEMENT_MODE", "replacement_mode"),
             enable_data_sufficiency_check=_resolve("ENABLE_DATA_SUFFICIENCY_CHECK", "enable_data_sufficiency_check"),
         )
 
@@ -112,6 +117,7 @@ class StrategyRules:
             "bucket_topn": self.bucket_topn,
             "ma_type": self.ma_type,
             "rebalance_mode": self.rebalance_mode,
+            "replacement_mode": self.replacement_mode,
             "enable_data_sufficiency_check": self.enable_data_sufficiency_check,
         }
         return d

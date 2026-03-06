@@ -14,28 +14,27 @@ from utils.logger import get_app_logger
 # 계좌별 성격 맞춤형 설정
 # =========================================================
 ACCOUNT_TUNING_CONFIG = {
-    "aus": {
-        # 6개월 + MONTHLY가 최적
-        "BUCKET_TOPN": [2],
-        # "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-        "MA_MONTH": [6],  # 중기 추세
-        "MA_TYPE": ["HMA"],
-        # "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"], # 다음 쿼터에 오픈
-        "REBALANCE_MODE": ["MONTHLY"],
-    },
+    # "BUCKET_TOPN": [2],
+    # "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    # "MA_TYPE": ["HMA"],
+    # "REPLACEMENT_MODE": ["DAILY", "WEEKLY"],
+    # "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     "kor_kr": {
-        # 2개월 + WEEKLY가 최적
         # [2026년 3월 3일] CAGR: 191.32%, MDD: -12.37%
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [2],  # 단기 추세
+        "MA_MONTH": [3],
         "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["WEEKLY"],
+        # "REPLACEMENT_MODE": ["WEEKLY"],
+        # "REBALANCE_MODE": ["MONTHLY"],
+        "REPLACEMENT_MODE": ["DAILY"],
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
     "kor_pension": {
         # 4개월 + MONTHLY 최적: 72.30 | -14.68
         "BUCKET_TOPN": [2],  # 연금 1개, ISA 1개
-        "MA_MONTH": [4],
+        "MA_MONTH": [6],
         "MA_TYPE": ["HMA"],
+        "REPLACEMENT_MODE": ["MONTHLY"],
         "REBALANCE_MODE": ["MONTHLY"],
     },
     "kor_us": {
@@ -43,6 +42,7 @@ ACCOUNT_TUNING_CONFIG = {
         "BUCKET_TOPN": [2],
         "MA_MONTH": [3],  # 종목이 많지 않고 고정 종목이라 의미 없음
         "MA_TYPE": ["HMA"],
+        "REPLACEMENT_MODE": ["MONTHLY"],
         "REBALANCE_MODE": ["MONTHLY"],
     },
     "us": {
@@ -50,6 +50,17 @@ ACCOUNT_TUNING_CONFIG = {
         "BUCKET_TOPN": [2],
         "MA_MONTH": [5],  # 중단기 추세
         "MA_TYPE": ["HMA"],
+        "REPLACEMENT_MODE": ["MONTHLY"],
+        "REBALANCE_MODE": ["MONTHLY"],
+    },
+    "aus": {
+        # 6개월 + MONTHLY가 최적
+        "BUCKET_TOPN": [2],
+        # "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_MONTH": [6],  # 중기 추세
+        "MA_TYPE": ["HMA"],
+        "REPLACEMENT_MODE": ["WEEKLY"],
+        # "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"], # 다음 쿼터에 오픈
         "REBALANCE_MODE": ["MONTHLY"],
     },
 }
