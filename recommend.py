@@ -260,12 +260,12 @@ def _assign_final_ranks(
             "BUY",
             "BUY_REBALANCE",
             "BUY_REPLACE",
-            "BUY_TOMORROW",
-            "SELL_TOMORROW",
-            "BUY_REPLACE_TOMORROW",
-            "SELL_REPLACE_TOMORROW",
-            "BUY_REBALANCE_TOMORROW",
-            "SELL_REBALANCE_TOMORROW",
+            "BUY_NEXTDAY",
+            "SELL_NEXTDAY",
+            "BUY_REPLACE_NEXTDAY",
+            "SELL_REPLACE_NEXTDAY",
+            "BUY_REBALANCE_NEXTDAY",
+            "SELL_REBALANCE_NEXTDAY",
         ):
             rec["_sort_group"] = 1
         else:
@@ -448,12 +448,12 @@ def _decision_to_state(decision: str, shares: float) -> str:
         "SELL_REBALANCE",
         "BUY_REPLACE",
         "SELL_REPLACE",
-        "BUY_TOMORROW",
-        "SELL_TOMORROW",
-        "BUY_REPLACE_TOMORROW",
-        "SELL_REPLACE_TOMORROW",
-        "BUY_REBALANCE_TOMORROW",
-        "SELL_REBALANCE_TOMORROW",
+        "BUY_NEXTDAY",
+        "SELL_NEXTDAY",
+        "BUY_REPLACE_NEXTDAY",
+        "SELL_REPLACE_NEXTDAY",
+        "BUY_REBALANCE_NEXTDAY",
+        "SELL_REBALANCE_NEXTDAY",
     ):
         return decision_upper
     elif shares and shares > 0:
@@ -831,7 +831,7 @@ def dump_recommendation_log(
         bucket_name = BUCKET_NAMES.get(bucket_val, str(bucket_val))
 
         state = item.get("state", "-")
-        is_pending_tomorrow = str(state).upper().endswith("_TOMORROW")
+        is_pending_tomorrow = str(state).upper().endswith("_NEXTDAY")
         holding_days = item.get("holding_days", 0)
         daily_pct = item.get("daily_pct", 0)
         evaluation_pct = item.get("evaluation_pct", 0)

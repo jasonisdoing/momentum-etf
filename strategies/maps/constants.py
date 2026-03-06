@@ -18,7 +18,7 @@ BACKTEST_STATUS_LIST = {
         "show_slack": True,
         "background": "#81c147",
     },
-    "BUY_REPLACE_TOMORROW": {
+    "BUY_REPLACE_NEXTDAY": {
         "display_name": "<⏭ 교체매수예정>",
         "order": 24,
         "is_recommendation": True,
@@ -32,7 +32,7 @@ BACKTEST_STATUS_LIST = {
         "show_slack": True,
         "background": "#ffc1cc",
     },
-    "SELL_REPLACE_TOMORROW": {
+    "SELL_REPLACE_NEXTDAY": {
         "display_name": "<⏭ 교체매도예정>",
         "order": 23,
         "is_recommendation": True,
@@ -46,28 +46,28 @@ BACKTEST_STATUS_LIST = {
         "show_slack": True,
         "background": "#81c147",
     },
-    "BUY_TOMORROW": {
+    "BUY_NEXTDAY": {
         "display_name": "<⏭ 신규매수예정>",
         "order": 30,
         "is_recommendation": True,
         "show_slack": True,
         "background": "#b8de8f",
     },
-    "BUY_REBALANCE_TOMORROW": {
+    "BUY_REBALANCE_NEXTDAY": {
         "display_name": "<⏭ 비중확대예정>",
         "order": 32,
         "is_recommendation": True,
         "show_slack": True,
         "background": "#d6ebb8",
     },
-    "SELL_TOMORROW": {
+    "SELL_NEXTDAY": {
         "display_name": "<⏭ 매도예정>",
         "order": 22,
         "is_recommendation": True,
         "show_slack": True,
         "background": "#ffd9df",
     },
-    "SELL_REBALANCE_TOMORROW": {
+    "SELL_REBALANCE_NEXTDAY": {
         "display_name": "<⏭ 비중축소예정>",
         "order": 21,
         "is_recommendation": True,
@@ -103,12 +103,12 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
     "SOLD": "🔚 매도 완료",
     "BUY_REPLACE": "🔄 교체매수",
     "SELL_REPLACE": "🔄 교체매도",
-    "BUY_TOMORROW": "⏭ 신규 매수 예정",
-    "SELL_TOMORROW": "⏭ 매도 예정",
-    "BUY_REPLACE_TOMORROW": "⏭ 교체매수 예정",
-    "SELL_REPLACE_TOMORROW": "⏭ 교체매도 예정",
-    "BUY_REBALANCE_TOMORROW": "⏭ 비중확대 예정",
-    "SELL_REBALANCE_TOMORROW": "⏭ 비중축소 예정",
+    "BUY_NEXTDAY": "⏭ 신규 매수 예정",
+    "SELL_NEXTDAY": "⏭ 매도 예정",
+    "BUY_REPLACE_NEXTDAY": "⏭ 교체매수 예정",
+    "SELL_REPLACE_NEXTDAY": "⏭ 교체매도 예정",
+    "BUY_REBALANCE_NEXTDAY": "⏭ 비중확대 예정",
+    "SELL_REBALANCE_NEXTDAY": "⏭ 비중축소 예정",
 }
 
 

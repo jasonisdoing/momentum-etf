@@ -129,7 +129,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         name = row.get("name", "-")
 
         state = row.get("state", "-").upper()
-        is_pending_tomorrow = state.endswith("_TOMORROW")
+        is_pending_tomorrow = state.endswith("_NEXTDAY")
         holding_days = _format_days(row.get("holding_days"))
         price_display = row.get("price")
         daily_pct = row.get("daily_pct")
@@ -211,9 +211,9 @@ def _state_style(value: Any) -> str:
     if text in (
         "BUY",
         "BUY_REPLACE",
-        "BUY_TOMORROW",
-        "BUY_REPLACE_TOMORROW",
-        "BUY_REBALANCE_TOMORROW",
+        "BUY_NEXTDAY",
+        "BUY_REPLACE_NEXTDAY",
+        "BUY_REBALANCE_NEXTDAY",
     ):
         return "color:#d32f2f;font-weight:600"
     if text == "WAIT":
@@ -221,9 +221,9 @@ def _state_style(value: Any) -> str:
     if text in (
         "SELL",
         "SELL_REPLACE",
-        "SELL_TOMORROW",
-        "SELL_REPLACE_TOMORROW",
-        "SELL_REBALANCE_TOMORROW",
+        "SELL_NEXTDAY",
+        "SELL_REPLACE_NEXTDAY",
+        "SELL_REBALANCE_NEXTDAY",
     ):
         return "color:#1565c0;font-weight:600"
     return ""

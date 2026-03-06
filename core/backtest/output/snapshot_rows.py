@@ -12,12 +12,12 @@ if TYPE_CHECKING:
 
 
 DISPLAY_DECISION_MAP: dict[tuple[str, str], str] = {
-    ("BUY_TOMORROW", "HOLD"): "BUY",
-    ("BUY_REPLACE_TOMORROW", "HOLD"): "BUY_REPLACE",
-    ("BUY_REBALANCE_TOMORROW", "HOLD"): "BUY_REBALANCE",
-    ("SELL_TOMORROW", "WAIT"): "SOLD",
-    ("SELL_REPLACE_TOMORROW", "WAIT"): "SELL_REPLACE",
-    ("SELL_REBALANCE_TOMORROW", "HOLD"): "SELL_REBALANCE",
+    ("BUY_NEXTDAY", "HOLD"): "BUY",
+    ("BUY_REPLACE_NEXTDAY", "HOLD"): "BUY_REPLACE",
+    ("BUY_REBALANCE_NEXTDAY", "HOLD"): "BUY_REBALANCE",
+    ("SELL_NEXTDAY", "WAIT"): "SOLD",
+    ("SELL_REPLACE_NEXTDAY", "WAIT"): "SELL_REPLACE",
+    ("SELL_REBALANCE_NEXTDAY", "HOLD"): "SELL_REBALANCE",
 }
 
 
@@ -83,7 +83,7 @@ def build_snapshot_rows(
         display_decision = resolve_display_decision(prev_decision, raw_decision)
         score = row.get("score")
         note = str(row.get("note", "") or "")
-        is_pending_tomorrow = raw_decision.endswith("_TOMORROW")
+        is_pending_tomorrow = raw_decision.endswith("_NEXTDAY")
         is_cash = ticker_key == "CASH"
 
         if is_cash:
@@ -158,12 +158,12 @@ def build_snapshot_rows(
             "BUY_REBALANCE",
             "BUY_REPLACE",
             "BUY_TODAY",
-            "BUY_TOMORROW",
-            "SELL_TOMORROW",
-            "BUY_REPLACE_TOMORROW",
-            "SELL_REPLACE_TOMORROW",
-            "BUY_REBALANCE_TOMORROW",
-            "SELL_REBALANCE_TOMORROW",
+            "BUY_NEXTDAY",
+            "SELL_NEXTDAY",
+            "BUY_REPLACE_NEXTDAY",
+            "SELL_REPLACE_NEXTDAY",
+            "BUY_REBALANCE_NEXTDAY",
+            "SELL_REBALANCE_NEXTDAY",
         }:
             sort_group = 1
 
