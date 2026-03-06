@@ -249,7 +249,10 @@ def extract_recommendations_from_backtest(
     return recommendations
 
 
-def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _assign_final_ranks(
+    recommendations: list[dict[str, Any]],
+    bucket_topn: int = 2,
+) -> list[dict[str, Any]]:
     """백테스트 리포트와 동일한 정렬 및 보유/대기 순위를 부여합니다."""
 
     # 1. 정렬 그룹 할당 (daily_report.py와 동일)
@@ -264,11 +267,33 @@ def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str,
         else:
             rec["_sort_group"] = 2
 
-    # 2. 정렬: Group -> Bucket -> Score (desc) -> Ticker
+    # 2. 버킷별 Top N 판별
+    # 최상단에 보여질 종목(Group 1)이 먼저 버킷 T/O(Top N)를 차지하게 함.
+    # Group 1을 먼저 점수순으로 정렬해서 T/O 할당, 그 다음 Group 2를 점수순으로 정렬해서 남은 T/O 할당
+    recommendations.sort(
+        key=lambda x: (x.get("_sort_group", 2), -(x.get("score") if x.get("score") is not None else float("-inf")))
+    )
+
+    bucket_counts = {}
+    for rec in recommendations:
+        b_idx = rec.get("bucket", 99)
+        bucket_counts[b_idx] = bucket_counts.get(b_idx, 0) + 1
+        if bucket_counts[b_idx] <= bucket_topn:
+            rec["_is_bucket_top"] = True
+        else:
+            rec["_is_bucket_top"] = False
+
+    # 3. 정렬 로직 적용
     def _sort_key(x):
+        # 1. Group (1=Held/Buy, 2=Wait/Sell)
+        # 2. For Group 1, we don't split. For Group 2, we split by _is_bucket_top (0 if TopN, 1 if rest)
+        subgroup = 0 if x.get("_sort_group") == 1 else (0 if x.get("_is_bucket_top") else 1)
+        # 3. For Group 1 and Group 2-TopN, sort by bucket. For Group 2-rest, ignore bucket (set to 99).
+        sort_bucket = x.get("bucket", 99) if subgroup == 0 else 99
         return (
             x.get("_sort_group", 2),
-            x.get("bucket", 99) if x.get("_sort_group") == 1 else 99,  # Group 1은 버킷 정렬, Group 2는 점수순 정렬
+            subgroup,
+            sort_bucket,
             -(x.get("score") if x.get("score") is not None else float("-inf")),
             x.get("ticker", ""),
         )
@@ -574,7 +599,8 @@ def generate_recommendation_report(
         recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
 
     # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
-    recommendations = _assign_final_ranks(recommendations)
+    bucket_topn = strategy_cfg.get("BUCKET_TOPN", 2)
+    recommendations = _assign_final_ranks(recommendations, bucket_topn=bucket_topn)
 
     return RecommendationReport(
         account_id=account_id,

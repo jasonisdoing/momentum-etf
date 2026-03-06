@@ -35,8 +35,12 @@ def _execute_individual_sells(
     current_holdings_value: float,
     ma_days: int,
     evaluator: StrategyEvaluator,
+    is_replacement_day: bool,
 ) -> tuple[float, float]:
     """개별 종목 매도 로직 (StrategyEvaluator 사용)"""
+    if not is_replacement_day:
+        return cash, current_holdings_value
+
     for ticker, ticker_metrics in metrics_by_ticker.items():
         ticker_state, price = position_state[ticker], today_prices.get(ticker)
 
@@ -121,6 +125,8 @@ def _rank_buy_candidates(
             # MAPS 점수 사용
             score_cand = score_today.get(candidate_ticker, float("nan"))
             final_score = score_cand if not pd.isna(score_cand) else -float("inf")
+            if final_score < 0.0:
+                continue
             buy_ranked_candidates.append((final_score, candidate_ticker))
 
     buy_ranked_candidates.sort(reverse=True)
@@ -449,6 +455,7 @@ def run_portfolio_backtest(
     ma_days: int = 20,
     ma_type: str = "SMA",
     rebalance_mode: str = "TWICE_A_MONTH",
+    replacement_mode: str = "WEEKLY",
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
@@ -592,100 +599,26 @@ def run_portfolio_backtest(
 
     # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     total_days = len(union_index)
-    _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
+    _log(
+        f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 교체 모드: {replacement_mode}, 리밸런싱 모드: {rebalance_mode}"
+    )
 
     # 이전 리밸런싱 인덱스 추적 변수는 제거함
     for i, dt in enumerate(union_index):
-        # 리밸런싱 날짜 판별 (DAILY, WEEKLY, FORTNIGHTLY, MONTHLY, QUARTERLY)
-        # 각 기간의 '마지막 거래일'에 리밸런싱을 수행하도록 변경
-        is_rebalance_day = False
-        if i == 0:  # 첫 날은 초기 자산 배분을 위해 항상 True
+        next_dt = union_index[i + 1] if i < total_days - 1 else None
+
+        # 교체 날짜 판별 (DAILY, WEEKLY, FORTNIGHTLY, MONTHLY, QUARTERLY)
+        is_replacement_day = check_is_rebalance_day(
+            dt=dt, next_dt=next_dt, rebalance_mode=replacement_mode, trading_calendar=trading_calendar_idx
+        )
+
+        # 리밸런싱 날짜 판별
+        is_rebalance_day = check_is_rebalance_day(
+            dt=dt, next_dt=next_dt, rebalance_mode=rebalance_mode, trading_calendar=trading_calendar_idx
+        )
+        if i == 0:
+            is_replacement_day = True
             is_rebalance_day = True
-        elif rebalance_mode == "WEEKLY":
-            # 오늘이 주말일인지 확인: 다음 거래일이 다른 주(week)인 경우
-            if i < total_days - 1:
-                next_dt = union_index[i + 1]
-                if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
-                    is_rebalance_day = True
-            elif trading_calendar_idx is not None:
-                try:
-                    cal_idx = trading_calendar_idx.get_loc(dt)
-                    if cal_idx + 1 < len(trading_calendar_idx):
-                        if trading_calendar_idx[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
-                            is_rebalance_day = True
-                except (KeyError, IndexError, AttributeError):
-                    pass
-        elif rebalance_mode == "TWICE_A_MONTH":
-            import calendar
-
-            # 현재 dt가 속한 주의 금요일이 몇 월 며칠인지 계산
-            dt_friday = dt + pd.Timedelta(days=4 - dt.weekday())
-            # 판별 기준이 되는 달력 정보 (해당 금요일이 포함된 달)
-            days_in_month = calendar.monthrange(dt_friday.year, dt_friday.month)[1]
-
-            # 그 달에 존재하는 모든 금요일 날짜 목록
-            fridays = [d for d in range(1, days_in_month + 1) if dt_friday.replace(day=d).weekday() == 4]
-
-            # 금요일이 5번 있는 달은 3주, 5주차 / 없는 경우 2주, 4주차 선택
-            if len(fridays) >= 5:
-                target_fridays = [fridays[2], fridays[4]]
-            else:
-                target_fridays = [fridays[1], fridays[3]]
-
-            # 우리가 구한 dt_friday가 해당 달의 목표 금요일 중 하나인지 확인
-            if dt_friday.day in target_fridays:
-                # 이번 주는 리밸런싱해야 하는 타겟 주차임.
-                # 남은 것은 오늘(dt)이 이번 주의 마지막 거래일(휴장이면 그 전날)인지 확인
-                is_end_of_week = False
-                if i < total_days - 1:
-                    next_dt = union_index[i + 1]
-                    if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
-                        is_end_of_week = True
-                elif trading_calendar_idx is not None:
-                    try:
-                        cal_idx = trading_calendar_idx.get_loc(dt)
-                        if cal_idx + 1 < len(trading_calendar_idx):
-                            if trading_calendar_idx[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
-                                is_end_of_week = True
-                    except (KeyError, IndexError, AttributeError):
-                        pass
-
-                if is_end_of_week:
-                    is_rebalance_day = True
-        elif rebalance_mode == "MONTHLY":
-            # 오늘이 월말일인지 확인: 다음 거래일이 다른 달인 경우
-            if i < total_days - 1:
-                next_dt = union_index[i + 1]
-                if next_dt.month != dt.month:
-                    is_rebalance_day = True
-            elif trading_calendar_idx is not None:
-                try:
-                    cal_idx = trading_calendar_idx.get_loc(dt)
-                    if cal_idx + 1 < len(trading_calendar_idx):
-                        if trading_calendar_idx[cal_idx + 1].month != dt.month:
-                            is_rebalance_day = True
-                except (KeyError, IndexError, AttributeError):
-                    pass
-
-        elif rebalance_mode == "QUARTERLY":
-            # 오늘이 분기말일인지 확인: 3, 6, 9, 12월의 마지막 거래일
-            target_months = {3, 6, 9, 12}
-            if dt.month in target_months:
-                if i < total_days - 1:
-                    next_dt = union_index[i + 1]
-                    if next_dt.month != dt.month:
-                        is_rebalance_day = True
-                elif trading_calendar_idx is not None:
-                    try:
-                        cal_idx = trading_calendar_idx.get_loc(dt)
-                        if cal_idx + 1 < len(trading_calendar_idx):
-                            if trading_calendar_idx[cal_idx + 1].month != dt.month:
-                                is_rebalance_day = True
-                    except (KeyError, IndexError, AttributeError):
-                        pass
-
-        # 리밸런싱 날짜인 경우 last_rebalance_idx 업데이트
-        # (FORTNIGHTLY 로직 변경으로 인해 더 이상 사용하지 않음)
 
         # 진행률 표시 (10% 단위로)
         if i % max(1, total_days // 10) == 0 or i == total_days - 1:
@@ -801,6 +734,7 @@ def run_portfolio_backtest(
             daily_records_by_ticker[ticker].append(record)
 
         # --- 2. 매도 로직 ---
+        purchased_today: set[str] = set()
         cash, current_holdings_value = _execute_individual_sells(
             position_state=position_state,
             metrics_by_ticker=metrics_by_ticker,
@@ -815,8 +749,9 @@ def run_portfolio_backtest(
             current_holdings_value=current_holdings_value,
             ma_days=ma_days,
             evaluator=evaluator,
+            is_replacement_day=is_replacement_day,
         )
-        if is_rebalance_day:
+        if is_replacement_day:
             # 1. 매수 후보 선정 (종합 점수 기준)
             buy_ranked_candidates = _rank_buy_candidates(
                 tickers_available_today=tickers_available_today,
@@ -826,7 +761,7 @@ def run_portfolio_backtest(
                 i=i,
             )
 
-            # 2. 매수 실행 (신규 매수) - 리밸런싱 날에만 수행
+            # 2. 매수 실행 (신규 매수) - 교체 날에만 수행
             cash, current_holdings_value, purchased_today = _execute_new_buys(
                 buy_ranked_candidates=buy_ranked_candidates,
                 position_state=position_state,
@@ -847,7 +782,7 @@ def run_portfolio_backtest(
                 bucket_topn=bucket_topn,
             )
 
-            # 3. 교체(Replacement) - 리밸런싱 날에만 수행
+            # 3. 교체(Replacement) - 교체 날에만 수행
 
             # 3. 교체 매수 실행
             if buy_ranked_candidates:
@@ -1075,7 +1010,48 @@ def run_portfolio_backtest(
                         # 가격 정보가 유효하지 않으면 교체하지 않고 다음 대기 종목으로 넘어감
                         continue  # 다음 buy_ranked_candidate로 넘어감
 
-            # 3. 매수하지 못한 후보에 사유 기록
+            # 4. 강제 손절 (음수 점수 종목의 뒤늦은 처분)
+            # 교체가 발생하지 않았거나, 발생했더라도 여전히 남은 종목 중 점수가 음수인 것이 있다면,
+            # 이를 강제로 매도하여 현금화합니다.
+            for held_ticker, held_position in position_state.items():
+                if held_position["shares"] > 0:
+                    held_score = score_today.get(held_ticker, float("nan"))
+                    if not pd.isna(held_score) and held_score < 0:
+                        sell_price = today_prices.get(held_ticker)
+                        if pd.notna(sell_price) and sell_price > 0:
+                            qty = held_position["shares"]
+                            sell_amount = qty * sell_price
+                            avg_cost = held_position["avg_cost"]
+                            hold_ret = (sell_price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
+                            trade_profit = (sell_price - avg_cost) * qty if avg_cost > 0 else 0.0
+
+                            sell_trades_today_map.setdefault(held_ticker, []).append(
+                                {"shares": float(qty), "price": float(sell_price)}
+                            )
+
+                            cash += sell_amount
+                            current_holdings_value = max(0.0, current_holdings_value - sell_amount)
+                            held_position["shares"] = 0
+                            held_position["avg_cost"] = 0.0
+
+                            if (
+                                daily_records_by_ticker.get(held_ticker)
+                                and daily_records_by_ticker[held_ticker][-1]["date"] == dt
+                            ):
+                                daily_records_by_ticker[held_ticker][-1].update(
+                                    {
+                                        "decision": "SELL",
+                                        "trade_amount": sell_amount,
+                                        "trade_profit": trade_profit,
+                                        "trade_pl_pct": hold_ret,
+                                        "shares": 0,
+                                        "pv": 0,
+                                        "avg_cost": 0,
+                                        "note": "점수 음수 (교체일 매도)",
+                                    }
+                                )
+
+            # 5. 매수하지 못한 후보에 사유 기록
             # 오늘 매수 또는 교체매수된 종목 목록을 만듭니다.
             bought_tickers_today = {
                 ticker_symbol
@@ -1100,7 +1076,8 @@ def run_portfolio_backtest(
                                 score_today,
                             )
 
-            # 4. 무게 재조정(Weight Realignment) - 리밸런싱 날에만 수행
+        # 4. 무게 재조정(Weight Realignment) - 리밸런싱 날에만 수행
+        if is_rebalance_day:
             # 이미 매수/매도/교체된 종목을 포함해 총 보유 자산을 다시 계산
             total_rebalance_equity = cash
             for held_ticker, held_state in position_state.items():
@@ -1168,9 +1145,9 @@ def run_portfolio_backtest(
                                     {"shares": float(sell_qty), "price": float(sell_price)}
                                 )
 
-                # 4-2. Top-up (비중 확대)는 당일 전체에 적용되는 `PHASE 3` 추가매수 로직에서
-                # 남은 현금을 모두 사용해 부족한 종목들을 채우므로 여기서 별도 진행하지 않아도 되나,
-                # 명시적인 [비중조절] 퍼센트 노트를 위해 Phase 3 노트 부분만 조금 수정 (아래 참고)
+            # 4-2. Top-up (비중 확대)는 당일 전체에 적용되는 `PHASE 3` 추가매수 로직에서
+            # 남은 현금을 모두 사용해 부족한 종목들을 채우므로 여기서 별도 진행하지 않아도 되나,
+            # 명시적인 [비중조절] 퍼센트 노트를 위해 Phase 3 노트 부분만 조금 수정 (아래 참고)
 
         # --- 당일 최종 라벨 오버라이드 (공용 라벨러) ---
         for tkr, rows in daily_records_by_ticker.items():
@@ -1205,7 +1182,8 @@ def run_portfolio_backtest(
                     last_row["note"] = new_note
 
         # --- PHASE 3: 추가 매수 (남은 현금으로 부족한 종목 채우기) ---
-        if cash > 0:
+        # 비중 조절용 추가 매수는 is_rebalance_day 일 때만 동작하게 합니다.
+        if is_rebalance_day and cash > 0:
             total_equity = cash + current_holdings_value
             target_per_ticker = total_equity / top_n if top_n > 0 else 0.0
 
