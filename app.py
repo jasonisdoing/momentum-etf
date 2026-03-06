@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -25,6 +26,12 @@ def _to_plain_dict(value):
 
 
 format_korean_currency = format_kr_money
+
+
+def _slugify_path(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9_-]+", "-", raw)
+    return slug.strip("-") or "page"
 
 
 def _load_authenticator() -> stauth.Authenticate:
@@ -62,7 +69,9 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
 
     clean_view = view_mode.split(".")[-1].strip() if view_mode else "main"
     english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
-    url_path = f"{account_id}/{english_view}"
+    account_slug = _slugify_path(account_id)
+    view_slug = _slugify_path(english_view)
+    url_path = f"{account_slug}-{view_slug}"
 
     def _render(account_key: str = account_id) -> None:
         render_account_page(account_key, view_mode=view_mode)
