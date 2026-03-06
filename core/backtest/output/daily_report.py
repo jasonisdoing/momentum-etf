@@ -72,6 +72,7 @@ def _build_daily_table_rows(
         decision = str(row.get("decision", "")).upper()
         score = row.get("score")
         note = str(row.get("note", "") or "")
+        is_pending_tomorrow = decision.endswith("_TOMORROW")
 
         is_cash = ticker_key == "CASH"
         if is_cash:
@@ -95,7 +96,10 @@ def _build_daily_table_rows(
 
         if not is_cash:
             if shares > 0:
-                if buy_date_map[ticker_key] is None or decision.startswith("BUY"):
+                if is_pending_tomorrow:
+                    buy_date_map[ticker_key] = None
+                    holding_days_map[ticker_key] = 0
+                elif buy_date_map[ticker_key] is None or decision.startswith("BUY"):
                     buy_date_map[ticker_key] = target_date
                     holding_days_map[ticker_key] = 1
                 elif prev_decisions_map.get(ticker_key, "").startswith("BUY") and decision == "HOLD":
@@ -118,8 +122,10 @@ def _build_daily_table_rows(
             pv = 0.0
         pv_display = money_formatter(pv)
 
-        cost_basis = avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 else 0.0
-        eval_profit_value = 0.0 if is_cash else (pv - cost_basis)
+        cost_basis = (
+            avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 and not is_pending_tomorrow else 0.0
+        )
+        eval_profit_value = 0.0 if is_cash or is_pending_tomorrow else (pv - cost_basis)
 
         evaluated_profit_display = money_formatter(eval_profit_value)
         evaluated_pct = (eval_profit_value / cost_basis * 100.0) if cost_basis > 0 else 0.0
@@ -158,6 +164,9 @@ def _build_daily_table_rows(
             decision or "-",
             holding_days_display,
             price_display,
+            "-"
+            if is_cash or is_pending_tomorrow or not _is_finite_number(avg_cost) or avg_cost <= 0
+            else price_formatter(avg_cost),
             f"{daily_ret:+.1f}%",
             shares_display,
             pv_display,
@@ -171,7 +180,19 @@ def _build_daily_table_rows(
         sort_group = 2  # Default: WAIT / others
         if is_cash:
             sort_group = 0
-        elif decision in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_REPLACE", "BUY_TODAY"):
+        elif decision in (
+            "HOLD",
+            "BUY",
+            "BUY_REBALANCE",
+            "BUY_REPLACE",
+            "BUY_TODAY",
+            "BUY_TOMORROW",
+            "SELL_TOMORROW",
+            "BUY_REPLACE_TOMORROW",
+            "SELL_REPLACE_TOMORROW",
+            "BUY_REBALANCE_TOMORROW",
+            "SELL_REBALANCE_TOMORROW",
+        ):
             sort_group = 1
 
         bucket_sort_val = int(bucket_id) if (bucket_id and str(bucket_id).isdigit()) else 99
@@ -212,6 +233,7 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "상태",
         "보유일",
         "현재가",
+        "평균단가",
         "일간(%)",
         "수량",
         "금액",
@@ -229,6 +251,7 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "center",  # 상태
         "right",  # 보유일
         "right",  # 현재가
+        "right",  # 평균단가
         "right",  # 일간(%)
         "right",  # 수량
         "right",  # 금액

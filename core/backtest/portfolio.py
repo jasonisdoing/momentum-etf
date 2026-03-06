@@ -11,7 +11,12 @@ def get_sell_states() -> set[str]:
     Returns:
         매도 상태 문자열 집합
     """
-    return {"SELL_REPLACE"}
+    return {
+        "SELL_REPLACE",
+        "SELL_TOMORROW",
+        "SELL_REPLACE_TOMORROW",
+        "SELL_REBALANCE_TOMORROW",
+    }
 
 
 def get_hold_states() -> set[str]:
@@ -26,6 +31,9 @@ def get_hold_states() -> set[str]:
     return {
         "HOLD",
         "SELL_REPLACE",
+        "SELL_TOMORROW",
+        "SELL_REPLACE_TOMORROW",
+        "SELL_REBALANCE_TOMORROW",
     }
 
 
