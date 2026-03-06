@@ -9,9 +9,9 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_LAST_MONTHS": 12,
-        "BACKTESTED_DATE": "2026-03-06 13:11",
-        "CAGR": 47.468181,
-        "MDD": -6.553504,
+        "BACKTESTED_DATE": "2026-03-06 14:04",
+        "CAGR": 48.865522,
+        "MDD": -6.453528,
         "BUCKET_TOPN": 2,
         "MA_MONTH": 6,
         "MA_TYPE": "HMA",
