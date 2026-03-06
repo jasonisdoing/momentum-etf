@@ -287,7 +287,11 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "BUCKET_TOPN",
         "MA_MONTH",
         "MA_TYPE",
+        "SELL_ON_NEGATIVE_SCORE",
         "REBALANCE_MODE",
+        "REPLACEMENT_MODE",
+        "ENABLE_DATA_SUFFICIENCY_CHECK",
+        "OPTIMIZATION_METRIC",
     ]
 
     ordered_strategy = {}
@@ -380,6 +384,9 @@ def _export_debug_month(
             ma_month=int(ma_month),
             bucket_topn=topn,
             ma_type=tuning.get("MA_TYPE", "SMA"),
+            rebalance_mode=tuning.get("REBALANCE_MODE", "MONTHLY"),
+            replacement_mode=tuning.get("REPLACEMENT_MODE", "WEEKLY"),
+            sell_on_negative_score=bool(tuning.get("SELL_ON_NEGATIVE_SCORE", True)),
         )
         result_prefetch = run_account_backtest(
             account_id,
@@ -464,6 +471,7 @@ def _execute_tuning(
     ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
     rebalance_mode_candidates = list(search_space.get("REBALANCE_MODE", []))
     replacement_mode_candidates = list(search_space.get("REPLACEMENT_MODE", []))
+    sell_on_negative_score_candidates = list(search_space.get("SELL_ON_NEGATIVE_SCORE", []))
 
     if not rebalance_mode_candidates:
         current_rules = get_strategy_rules(account_norm)
@@ -473,6 +481,10 @@ def _execute_tuning(
         current_rules = get_strategy_rules(account_norm)
         replacement_mode_candidates = [current_rules.replacement_mode]
 
+    if not sell_on_negative_score_candidates:
+        current_rules = get_strategy_rules(account_norm)
+        sell_on_negative_score_candidates = [current_rules.sell_on_negative_score]
+
     if not ma_candidates or not topn_candidates or not ma_type_candidates or not rebalance_mode_candidates:
         logger.warning(
             "[튜닝] %s (%s 시작) 유효한 탐색 공간이 없습니다.",
@@ -481,13 +493,14 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, str, str, str]] = [
-        (ma, topn, ma_type, rebal, replace)
+    combos: list[tuple[int, int, str, str, str, bool]] = [
+        (ma, topn, ma_type, rebal, replace, sell_negative)
         for ma in ma_candidates
         for topn in topn_candidates
         for ma_type in ma_type_candidates
         for rebal in rebalance_mode_candidates
         for replace in replacement_mode_candidates
+        for sell_negative in sell_on_negative_score_candidates
     ]
 
     if not combos:
@@ -556,10 +569,11 @@ def _execute_tuning(
             str(ma_type),
             str(rebal_mode),
             str(replace_mode),
+            bool(sell_on_negative_score),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )
-        for ma, topn, ma_type, rebal_mode, replace_mode in combos
+        for ma, topn, ma_type, rebal_mode, replace_mode, sell_on_negative_score in combos
     ]
 
     logger.info(
@@ -693,6 +707,7 @@ def _execute_tuning(
                     "BUCKET_TOPN": int(item.get("bucket_topn", 0)),
                     "REBALANCE_MODE": str(item.get("rebalance_mode", "MONTHLY")),
                     "REPLACEMENT_MODE": str(item.get("replacement_mode", "WEEKLY")),
+                    "SELL_ON_NEGATIVE_SCORE": bool(item.get("sell_on_negative_score", True)),
                 },
             }
         )
@@ -727,6 +742,7 @@ def _build_run_entry(
     ma_type_weights: dict[str, float] = {}
     rebal_mode_weights: dict[str, float] = {}
     replace_mode_weights: dict[str, float] = {}
+    sell_negative_weights: dict[bool, float] = {}
     cagr_values: list[float] = []
     mdd_values: list[float] = []
 
@@ -795,6 +811,22 @@ def _build_run_entry(
             if converted is not None:
                 tuning_snapshot[field] = converted
 
+        ma_type_snapshot = best.get("ma_type")
+        if ma_type_snapshot:
+            tuning_snapshot["MA_TYPE"] = str(ma_type_snapshot)
+
+        rebalance_snapshot = best.get("rebalance_mode")
+        if rebalance_snapshot:
+            tuning_snapshot["REBALANCE_MODE"] = str(rebalance_snapshot)
+
+        replacement_snapshot = best.get("replacement_mode")
+        if replacement_snapshot:
+            tuning_snapshot["REPLACEMENT_MODE"] = str(replacement_snapshot)
+
+        sell_negative_snapshot = best.get("sell_on_negative_score")
+        if isinstance(sell_negative_snapshot, bool):
+            tuning_snapshot["SELL_ON_NEGATIVE_SCORE"] = sell_negative_snapshot
+
         raw_data_payload.append(
             {
                 "BACKTEST_START_DATE": backtest_start_date,
@@ -824,6 +856,13 @@ def _build_run_entry(
             weight_for_cat = weight if weight > 0 else 1.0
             replace_key = str(replace_mode_val)
             replace_mode_weights[replace_key] = replace_mode_weights.get(replace_key, 0.0) + weight_for_cat
+
+        sell_negative_val = best.get("sell_on_negative_score")
+        if isinstance(sell_negative_val, bool):
+            weight_for_cat = weight if weight > 0 else 1.0
+            sell_negative_weights[sell_negative_val] = (
+                sell_negative_weights.get(sell_negative_val, 0.0) + weight_for_cat
+            )
 
     if weighted_cagr_weight > 0:
         entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
@@ -879,6 +918,12 @@ def _build_run_entry(
 
     if replace_mode_weights:
         result_values["REPLACEMENT_MODE"] = max(replace_mode_weights.items(), key=lambda item: (item[1], item[0]))[0]
+
+    if sell_negative_weights:
+        result_values["SELL_ON_NEGATIVE_SCORE"] = max(
+            sell_negative_weights.items(),
+            key=lambda item: (item[1], int(item[0])),
+        )[0]
 
     return entry
 
@@ -1033,6 +1078,7 @@ def _compose_tuning_report(
             # MA_TYPE이 있으면 포함해서 표시
             lines.append(
                 f"| 탐색 공간: MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
+                f"× 음수매도 {len(search_space.get('SELL_ON_NEGATIVE_SCORE', []))}개 "
                 f"× 교체 {len(search_space.get('REPLACEMENT_MODE', []))}개 "
                 f"× 리밸런스 {len(search_space.get('REBALANCE_MODE', []))}개 "
                 f"= {tuning_metadata.get('combo_count', 0)}개 조합"
@@ -1049,6 +1095,11 @@ def _compose_tuning_report(
             replace_range = search_space.get("REPLACEMENT_MODE", [])
             if replace_range:
                 lines.append(f"|   REPLACEMENT_MODE: {', '.join(replace_range)}")
+            negative_score_range = search_space.get("SELL_ON_NEGATIVE_SCORE", [])
+            if negative_score_range:
+                lines.append(
+                    f"|   SELL_ON_NEGATIVE_SCORE: {', '.join('TRUE' if bool(v) else 'FALSE' for v in negative_score_range)}"
+                )
             rebalance_range = search_space.get("REBALANCE_MODE", [])
             if rebalance_range:
                 lines.append(f"|   REBALANCE_MODE: {', '.join(rebalance_range)}")
@@ -1213,6 +1264,7 @@ def _compose_tuning_report(
             topn_val = tuning.get("BUCKET_TOPN")
             rebalance_val = tuning.get("REBALANCE_MODE", "MONTHLY")
             replace_val = tuning.get("REPLACEMENT_MODE", "WEEKLY")
+            sell_negative_val = tuning.get("SELL_ON_NEGATIVE_SCORE", True)
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -1227,6 +1279,7 @@ def _compose_tuning_report(
                     "bucket_topn": topn_val,
                     "rebalance_mode": rebalance_val,
                     "replacement_mode": replace_val,
+                    "sell_on_negative_score": bool(sell_negative_val),
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
@@ -1385,6 +1438,24 @@ def run_account_tuning(
     if not replacement_mode_values:
         replacement_mode_values = [base_rules.replacement_mode]
 
+    def _coerce_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    sell_negative_raw = config.get("SELL_ON_NEGATIVE_SCORE")
+    if sell_negative_raw is None:
+        sell_negative_score_values = [base_rules.sell_on_negative_score]
+    elif isinstance(sell_negative_raw, (list, tuple)):
+        sell_negative_score_values = [_coerce_bool(v) for v in sell_negative_raw]
+    else:
+        sell_negative_score_values = [_coerce_bool(sell_negative_raw)]
+
+    if not sell_negative_score_values:
+        sell_negative_score_values = [base_rules.sell_on_negative_score]
+
     if (not ma_values and not ma_month_values) or not topn_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
@@ -1419,6 +1490,7 @@ def run_account_tuning(
         * len(ma_type_values)
         * len(rebalance_mode_values)
         * len(replacement_mode_values)
+        * len(sell_negative_score_values)
     )
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
@@ -1433,6 +1505,7 @@ def run_account_tuning(
         "MA_TYPE": ma_type_values,
         "REBALANCE_MODE": rebalance_mode_values,
         "REPLACEMENT_MODE": replacement_mode_values,
+        "SELL_ON_NEGATIVE_SCORE": sell_negative_score_values,
         "OPTIMIZATION_METRIC": [optimization_metric],
     }
 
@@ -1441,12 +1514,14 @@ def run_account_tuning(
     ma_type_count = len(ma_type_values)
     rebalance_count = len(rebalance_mode_values)
     replace_count = len(replacement_mode_values)
+    sell_negative_count = len(sell_negative_score_values)
 
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 교체 %d개 × 리밸런스 %d개 = %d개 조합 (최적화 지표: %s)",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 음수매도 %d개 × 교체 %d개 × 리밸런스 %d개 = %d개 조합 (최적화 지표: %s)",
         ma_count,
         topn_count,
         ma_type_count,
+        sell_negative_count,
         replace_count,
         rebalance_count,
         combo_count,
@@ -1611,6 +1686,7 @@ def run_account_tuning(
             "BUCKET_TOPN": list(topn_values),
             "REBALANCE_MODE": list(rebalance_mode_values),
             "REPLACEMENT_MODE": list(replacement_mode_values),
+            "SELL_ON_NEGATIVE_SCORE": list(sell_negative_score_values),
             "OPTIMIZATION_METRIC": optimization_metric,
         },
         "data_period": {
@@ -1735,6 +1811,7 @@ def run_account_tuning(
                             "BUCKET_TOPN": int(entry.get("bucket_topn", 0)),
                             "REBALANCE_MODE": str(entry.get("rebalance_mode", "MONTHLY")),
                             "REPLACEMENT_MODE": str(entry.get("replacement_mode", "WEEKLY")),
+                            "SELL_ON_NEGATIVE_SCORE": bool(entry.get("sell_on_negative_score", True)),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)

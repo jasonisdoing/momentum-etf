@@ -456,6 +456,7 @@ def run_portfolio_backtest(
     ma_type: str = "SMA",
     rebalance_mode: str = "TWICE_A_MONTH",
     replacement_mode: str = "WEEKLY",
+    sell_on_negative_score: bool = True,
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
@@ -1010,46 +1011,46 @@ def run_portfolio_backtest(
                         # 가격 정보가 유효하지 않으면 교체하지 않고 다음 대기 종목으로 넘어감
                         continue  # 다음 buy_ranked_candidate로 넘어감
 
-            # 4. 강제 손절 (음수 점수 종목의 뒤늦은 처분)
-            # 교체가 발생하지 않았거나, 발생했더라도 여전히 남은 종목 중 점수가 음수인 것이 있다면,
-            # 이를 강제로 매도하여 현금화합니다.
-            for held_ticker, held_position in position_state.items():
-                if held_position["shares"] > 0:
-                    held_score = score_today.get(held_ticker, float("nan"))
-                    if not pd.isna(held_score) and held_score < 0:
-                        sell_price = today_prices.get(held_ticker)
-                        if pd.notna(sell_price) and sell_price > 0:
-                            qty = held_position["shares"]
-                            sell_amount = qty * sell_price
-                            avg_cost = held_position["avg_cost"]
-                            hold_ret = (sell_price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
-                            trade_profit = (sell_price - avg_cost) * qty if avg_cost > 0 else 0.0
+            # 4. 강제 손절 (옵션)
+            # SELL_ON_NEGATIVE_SCORE=True일 때만 교체일에 음수 점수 종목을 매도합니다.
+            if sell_on_negative_score:
+                for held_ticker, held_position in position_state.items():
+                    if held_position["shares"] > 0:
+                        held_score = score_today.get(held_ticker, float("nan"))
+                        if not pd.isna(held_score) and held_score < 0:
+                            sell_price = today_prices.get(held_ticker)
+                            if pd.notna(sell_price) and sell_price > 0:
+                                qty = held_position["shares"]
+                                sell_amount = qty * sell_price
+                                avg_cost = held_position["avg_cost"]
+                                hold_ret = (sell_price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
+                                trade_profit = (sell_price - avg_cost) * qty if avg_cost > 0 else 0.0
 
-                            sell_trades_today_map.setdefault(held_ticker, []).append(
-                                {"shares": float(qty), "price": float(sell_price)}
-                            )
-
-                            cash += sell_amount
-                            current_holdings_value = max(0.0, current_holdings_value - sell_amount)
-                            held_position["shares"] = 0
-                            held_position["avg_cost"] = 0.0
-
-                            if (
-                                daily_records_by_ticker.get(held_ticker)
-                                and daily_records_by_ticker[held_ticker][-1]["date"] == dt
-                            ):
-                                daily_records_by_ticker[held_ticker][-1].update(
-                                    {
-                                        "decision": "SELL",
-                                        "trade_amount": sell_amount,
-                                        "trade_profit": trade_profit,
-                                        "trade_pl_pct": hold_ret,
-                                        "shares": 0,
-                                        "pv": 0,
-                                        "avg_cost": 0,
-                                        "note": "점수 음수 (교체일 매도)",
-                                    }
+                                sell_trades_today_map.setdefault(held_ticker, []).append(
+                                    {"shares": float(qty), "price": float(sell_price)}
                                 )
+
+                                cash += sell_amount
+                                current_holdings_value = max(0.0, current_holdings_value - sell_amount)
+                                held_position["shares"] = 0
+                                held_position["avg_cost"] = 0.0
+
+                                if (
+                                    daily_records_by_ticker.get(held_ticker)
+                                    and daily_records_by_ticker[held_ticker][-1]["date"] == dt
+                                ):
+                                    daily_records_by_ticker[held_ticker][-1].update(
+                                        {
+                                            "decision": "SELL",
+                                            "trade_amount": sell_amount,
+                                            "trade_profit": trade_profit,
+                                            "trade_pl_pct": hold_ret,
+                                            "shares": 0,
+                                            "pv": 0,
+                                            "avg_cost": 0,
+                                            "note": "점수 음수 (교체일 매도)",
+                                        }
+                                    )
 
             # 5. 매수하지 못한 후보에 사유 기록
             # 오늘 매수 또는 교체매수된 종목 목록을 만듭니다.
