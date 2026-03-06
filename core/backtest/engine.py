@@ -17,8 +17,18 @@ from strategies.maps.labeler import compute_net_trade_note
 from strategies.maps.metrics import process_ticker_data
 from utils.logger import get_app_logger
 from utils.report import format_money
+from utils.settings_loader import get_account_precision
 
 logger = get_app_logger()
+
+
+def _floor_quantity(quantity: float, qty_precision: int) -> float:
+    if quantity <= 0:
+        return 0.0
+    if qty_precision <= 0:
+        return float(int(quantity))
+    factor = 10**qty_precision
+    return float(int(quantity * factor)) / factor
 
 
 def _execute_individual_sells(
@@ -36,6 +46,7 @@ def _execute_individual_sells(
     ma_days: int,
     evaluator: StrategyEvaluator,
     is_replacement_day: bool,
+    qty_precision: int,
 ) -> tuple[float, float]:
     """개별 종목 매도 로직 (StrategyEvaluator 사용)"""
     if not is_replacement_day:
@@ -74,7 +85,9 @@ def _execute_individual_sells(
                 if sell_price <= 0:
                     continue
 
-                qty = ticker_state["shares"]
+                qty = _floor_quantity(float(ticker_state["shares"]), qty_precision)
+                if qty <= 0:
+                    continue
                 trade_amount = qty * sell_price
                 trade_profit = (sell_price - ticker_state["avg_cost"]) * qty if ticker_state["avg_cost"] > 0 else 0.0
                 hold_ret = (
@@ -86,7 +99,10 @@ def _execute_individual_sells(
 
                 cash += trade_amount
                 current_holdings_value = max(0.0, current_holdings_value - trade_amount)
-                ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
+                remaining_shares = _floor_quantity(float(ticker_state["shares"]) - qty, qty_precision)
+                ticker_state["shares"] = remaining_shares
+                if remaining_shares <= 0:
+                    ticker_state["avg_cost"] = 0.0
 
                 # 행 업데이트
                 row = daily_records_by_ticker[ticker][-1]
@@ -96,9 +112,9 @@ def _execute_individual_sells(
                         "trade_amount": trade_amount,
                         "trade_profit": trade_profit,
                         "trade_pl_pct": hold_ret,
-                        "shares": 0,
-                        "pv": 0,
-                        "avg_cost": 0,
+                        "shares": remaining_shares,
+                        "pv": remaining_shares * price,
+                        "avg_cost": ticker_state["avg_cost"],
                     }
                 )
 
@@ -195,6 +211,7 @@ def _execute_new_buys(
     initial_capital: float = 0.0,
     bucket_map: dict[str, int] | None = None,
     bucket_topn: int | None = None,
+    qty_precision: int = 0,
 ) -> tuple[float, float, set[str]]:
     """신규 매수 실행
 
@@ -292,8 +309,8 @@ def _execute_new_buys(
             continue
 
         price = today_prices.get(ticker_to_buy)
-        req_qty = budget / buy_price if buy_price > 0 else 0
-        trade_amount = budget
+        req_qty = _floor_quantity(budget / buy_price, qty_precision) if buy_price > 0 else 0.0
+        trade_amount = req_qty * buy_price
 
         if trade_amount <= cash + 1e-9 and req_qty > 0:
             ticker_state = position_state[ticker_to_buy]
@@ -508,6 +525,7 @@ def run_portfolio_backtest(
     """
 
     country_code = (country or "").strip().lower() or "kor"
+    qty_precision = int(get_account_precision(country_code).get("qty_precision", 0))
 
     def _log(message: str) -> None:
         if quiet:
@@ -778,6 +796,7 @@ def run_portfolio_backtest(
             ma_days=ma_days,
             evaluator=evaluator,
             is_replacement_day=is_replacement_day,
+            qty_precision=qty_precision,
         )
         if is_replacement_day:
             # 1. 매수 후보 선정 (종합 점수 기준)
@@ -808,6 +827,7 @@ def run_portfolio_backtest(
                 initial_capital=initial_capital,
                 bucket_map=bucket_map,
                 bucket_topn=bucket_topn,
+                qty_precision=qty_precision,
             )
 
             # 3. 교체(Replacement) - 교체 날에만 수행
@@ -891,7 +911,9 @@ def run_portfolio_backtest(
                         if pd.notna(sell_price) and sell_price > 0 and pd.notna(buy_price) and buy_price > 0:
                             # (a) 교체 대상 종목 매도
                             weakest_state = position_state[ticker_to_sell]
-                            sell_qty = weakest_state["shares"]
+                            sell_qty = _floor_quantity(float(weakest_state["shares"]), qty_precision)
+                            if sell_qty <= 0:
+                                continue
                             sell_amount = sell_qty * sell_price
                             hold_ret = (
                                 (sell_price / weakest_state["avg_cost"] - 1.0) * 100.0
@@ -906,7 +928,10 @@ def run_portfolio_backtest(
 
                             cash += sell_amount
                             current_holdings_value = max(0.0, current_holdings_value - sell_amount)
-                            weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
+                            remaining_shares = _floor_quantity(float(weakest_state["shares"]) - sell_qty, qty_precision)
+                            weakest_state["shares"] = remaining_shares
+                            if remaining_shares <= 0:
+                                weakest_state["avg_cost"] = 0.0
 
                             if (
                                 daily_records_by_ticker[ticker_to_sell]
@@ -935,7 +960,7 @@ def run_portfolio_backtest(
                             if budget <= 0:
                                 continue
                             # 수량/금액 산정
-                            req_qty = int(budget // buy_price) if buy_price > 0 else 0
+                            req_qty = _floor_quantity(budget / buy_price, qty_precision) if buy_price > 0 else 0.0
                             if req_qty <= 0:
                                 continue
                             buy_amount = req_qty * buy_price
@@ -1047,7 +1072,9 @@ def run_portfolio_backtest(
                         if not pd.isna(held_score) and held_score < 0:
                             sell_price = today_prices.get(held_ticker)
                             if pd.notna(sell_price) and sell_price > 0:
-                                qty = held_position["shares"]
+                                qty = _floor_quantity(float(held_position["shares"]), qty_precision)
+                                if qty <= 0:
+                                    continue
                                 sell_amount = qty * sell_price
                                 avg_cost = held_position["avg_cost"]
                                 hold_ret = (sell_price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
@@ -1059,8 +1086,10 @@ def run_portfolio_backtest(
 
                                 cash += sell_amount
                                 current_holdings_value = max(0.0, current_holdings_value - sell_amount)
-                                held_position["shares"] = 0
-                                held_position["avg_cost"] = 0.0
+                                remaining_shares = _floor_quantity(float(held_position["shares"]) - qty, qty_precision)
+                                held_position["shares"] = remaining_shares
+                                if remaining_shares <= 0:
+                                    held_position["avg_cost"] = 0.0
 
                                 if (
                                     daily_records_by_ticker.get(held_ticker)
@@ -1072,9 +1101,9 @@ def run_portfolio_backtest(
                                             "trade_amount": sell_amount,
                                             "trade_profit": trade_profit,
                                             "trade_pl_pct": hold_ret,
-                                            "shares": 0,
-                                            "pv": 0,
-                                            "avg_cost": 0,
+                                            "shares": remaining_shares,
+                                            "pv": remaining_shares * sell_price,
+                                            "avg_cost": held_position["avg_cost"],
                                             "note": "점수 음수 (교체일 매도)",
                                         }
                                     )
@@ -1149,7 +1178,7 @@ def run_portfolio_backtest(
                             if sell_price <= 0:
                                 continue
 
-                            sell_qty = int(excess_val // sell_price)
+                            sell_qty = _floor_quantity(excess_val / sell_price, qty_precision)
                             # 최소 1주 이상 매도 가능할 때
                             if sell_qty > 0:
                                 sell_amount = sell_qty * sell_price
@@ -1266,7 +1295,7 @@ def run_portfolio_backtest(
 
                 # 매수 가능 금액: min(gap, cash)
                 topup_budget = min(gap, cash)
-                topup_qty = int(topup_budget // topup_price) if topup_price > 0 else 0
+                topup_qty = _floor_quantity(topup_budget / topup_price, qty_precision) if topup_price > 0 else 0.0
 
                 if topup_qty > 0:
                     topup_amount = topup_qty * topup_price
