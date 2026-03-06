@@ -1,28 +1,28 @@
 {
-  "icon": "🇺🇸",
-  "name": "해외 일반계좌",
-  "desc": "일반계좌에서 운영중인 국내상장 해외 ETF 포트폴리오",
-  "country_code": "kor",
-  "currency": "KRW",
-  "initial_capital_krw": "40000000",
-  "show_hold": true,
-  "strategy": {
-    "BACKTEST_LAST_MONTHS": 12,
-    "BACKTESTED_DATE": "2026-03-06 14:44",
-    "CAGR": 85.122015,
-    "MDD": -7.516904,
-    "BUCKET_TOPN": 2,
-    "MA_MONTH": 4,
-    "MA_TYPE": "HMA",
-    "SELL_ON_NEGATIVE_SCORE": false,
-    "REBALANCE_MODE": "QUARTERLY",
-    "REPLACEMENT_MODE": "TWICE_A_MONTH",
-    "ENABLE_DATA_SUFFICIENCY_CHECK": false,
-    "OPTIMIZATION_METRIC": "CAGR"
-  },
-  "benchmark": {
-    "ticker": "379800",
-    "name": "KODEX 미국S&P500"
-  },
-  "account": "kor_us"
+    "icon": "🇺🇸",
+    "name": "해외 일반계좌",
+    "desc": "일반계좌에서 운영중인 국내상장 해외 ETF 포트폴리오",
+    "country_code": "kor",
+    "currency": "KRW",
+    "initial_capital_krw": "40000000",
+    "show_hold": true,
+    "strategy": {
+        "BACKTEST_LAST_MONTHS": 12,
+        "BACKTESTED_DATE": "2026-03-06 20:04",
+        "CAGR": 60.350375,
+        "MDD": -7.364488,
+        "BUCKET_TOPN": 2,
+        "MA_MONTH": 12,
+        "MA_TYPE": "HMA",
+        "SELL_ON_NEGATIVE_SCORE": true,
+        "REBALANCE_MODE": "QUARTERLY",
+        "REPLACEMENT_MODE": "MONTHLY",
+        "ENABLE_DATA_SUFFICIENCY_CHECK": false,
+        "OPTIMIZATION_METRIC": "CAGR"
+    },
+    "benchmark": {
+        "ticker": "379800",
+        "name": "KODEX 미국S&P500"
+    },
+    "account": "kor_us"
 }
