@@ -562,8 +562,8 @@ def _build_portfolio_timeseries(
                 continue
 
             row = ts.loc[dt]
-            decision = str(row.get("decision", "") or "").upper()
-            is_pending_nextday = decision.endswith("_NEXTDAY")
+            pending_action = str(row.get("pending_action", "") or "").upper()
+            is_pending_nextday = bool(pending_action)
             trade_amount = float(row.get("trade_amount", 0.0) or 0.0)
 
             if ticker == "CASH":
@@ -576,8 +576,7 @@ def _build_portfolio_timeseries(
                         if tk2 != "CASH"
                         and isinstance(ts2, pd.DataFrame)
                         and dt in ts2.index
-                        and str(ts2.loc[dt].get("decision", "") or "").upper().endswith("_NEXTDAY")
-                        and str(ts2.loc[dt].get("decision", "") or "").upper().startswith("BUY")
+                        and str(ts2.loc[dt].get("pending_action", "") or "").upper().startswith("BUY")
                     )
                     effective_cash -= sum(
                         float(ts2.loc[dt].get("trade_amount", 0.0) or 0.0)
@@ -585,8 +584,7 @@ def _build_portfolio_timeseries(
                         if tk2 != "CASH"
                         and isinstance(ts2, pd.DataFrame)
                         and dt in ts2.index
-                        and str(ts2.loc[dt].get("decision", "") or "").upper().endswith("_NEXTDAY")
-                        and str(ts2.loc[dt].get("decision", "") or "").upper().startswith("SELL")
+                        and str(ts2.loc[dt].get("pending_action", "") or "").upper().startswith("SELL")
                     )
                     cash_value += effective_cash
                     total_value += effective_cash
@@ -602,19 +600,19 @@ def _build_portfolio_timeseries(
             raw_avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
             traded_shares = float(trade_shares_val) if pd.notna(trade_shares_val) else 0.0
 
-            # 엔진은 *_NEXTDAY 의 거래 결과를 당일 row에 먼저 반영한다.
+            # 엔진은 pending_action 거래 결과를 당일 row에 먼저 반영한다.
             # 집계에서는 "다음날 체결" 의미를 복원해야 하므로:
-            # - BUY*_NEXTDAY: 아직 미체결이므로 보유수량 0
-            # - SELL*_NEXTDAY: 아직 미체결이므로 매도 직전 수량(=잔여+당일매도수량)으로 복원
+            # - pending BUY*: 아직 미체결이므로 보유수량 0
+            # - pending SELL*: 아직 미체결이므로 매도 직전 수량(=잔여+당일매도수량)으로 복원
             if is_pending_nextday:
-                if decision.startswith("BUY"):
+                if pending_action.startswith("BUY"):
                     reconstructed_shares = max(0.0, raw_shares - max(0.0, traded_shares))
                     shares = reconstructed_shares
                     if shares > 0:
                         avg_cost = prev_effective_avg_cost.get(ticker, raw_avg_cost)
                     else:
                         avg_cost = 0.0
-                elif decision.startswith("SELL"):
+                elif pending_action.startswith("SELL"):
                     reconstructed_shares = raw_shares + max(0.0, traded_shares)
                     shares = (
                         reconstructed_shares

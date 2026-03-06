@@ -47,6 +47,7 @@ def _execute_individual_sells(
     evaluator: StrategyEvaluator,
     is_replacement_day: bool,
     qty_precision: int,
+    next_dt: pd.Timestamp | None,
 ) -> tuple[float, float]:
     """개별 종목 매도 로직 (StrategyEvaluator 사용)"""
     if not is_replacement_day:
@@ -108,7 +109,7 @@ def _execute_individual_sells(
                 row = daily_records_by_ticker[ticker][-1]
                 row.update(
                     {
-                        "decision": f"{decision}_NEXTDAY",
+                        "decision": "HOLD",
                         "trade_amount": trade_amount,
                         "trade_shares": qty,
                         "trade_profit": trade_profit,
@@ -116,6 +117,9 @@ def _execute_individual_sells(
                         "shares": remaining_shares,
                         "pv": remaining_shares * price,
                         "avg_cost": ticker_state["avg_cost"],
+                        "pending_action": str(decision).upper(),
+                        "execute_on": next_dt,
+                        "pending_reason": phrase or None,
                     }
                 )
 
@@ -213,6 +217,7 @@ def _execute_new_buys(
     bucket_map: dict[str, int] | None = None,
     bucket_topn: int | None = None,
     qty_precision: int = 0,
+    next_dt: pd.Timestamp | None = None,
 ) -> tuple[float, float, set[str]]:
     """신규 매수 실행
 
@@ -328,13 +333,16 @@ def _execute_new_buys(
                 row = daily_records_by_ticker[ticker_to_buy][-1]
                 row.update(
                     {
-                        "decision": "BUY_NEXTDAY",
+                        "decision": "WAIT",
                         "trade_amount": trade_amount,
                         "trade_shares": req_qty,
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
                         "avg_cost": ticker_state["avg_cost"],
                         "note": "",
+                        "pending_action": "BUY",
+                        "execute_on": next_dt,
+                        "pending_reason": "신규 매수",
                     }
                 )
             else:
@@ -345,13 +353,16 @@ def _execute_new_buys(
                         "price": price,
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
-                        "decision": "BUY_NEXTDAY",
+                        "decision": "WAIT",
                         "avg_cost": ticker_state["avg_cost"],
                         "trade_amount": trade_amount,
                         "trade_shares": req_qty,
                         "trade_profit": 0.0,
                         "trade_pl_pct": 0.0,
                         "note": "",
+                        "pending_action": "BUY",
+                        "execute_on": next_dt,
+                        "pending_reason": "신규 매수",
                         "signal1": None,
                         "signal2": None,
                         "score": score_today.get(ticker_to_buy, 0.0),
@@ -750,6 +761,9 @@ def run_portfolio_backtest(
                     "trade_profit": 0.0,
                     "trade_pl_pct": 0.0,
                     "note": note,
+                    "pending_action": None,
+                    "execute_on": None,
+                    "pending_reason": None,
                     "signal1": ma_value if not pd.isna(ma_value) else None,
                     "signal2": None,
                     "score": score_value if not pd.isna(score_value) else None,
@@ -775,6 +789,9 @@ def run_portfolio_backtest(
                     "trade_profit": 0.0,
                     "trade_pl_pct": 0.0,
                     "note": "데이터 없음",
+                    "pending_action": None,
+                    "execute_on": None,
+                    "pending_reason": None,
                     "signal1": ma_value if not pd.isna(ma_value) else None,
                     "signal2": None,
                     "score": score_value if not pd.isna(score_value) else None,
@@ -801,6 +818,7 @@ def run_portfolio_backtest(
             evaluator=evaluator,
             is_replacement_day=is_replacement_day,
             qty_precision=qty_precision,
+            next_dt=next_dt,
         )
         if is_replacement_day:
             # 1. 매수 후보 선정 (종합 점수 기준)
@@ -832,6 +850,7 @@ def run_portfolio_backtest(
                 bucket_map=bucket_map,
                 bucket_topn=bucket_topn,
                 qty_precision=qty_precision,
+                next_dt=next_dt,
             )
 
             # 3. 교체(Replacement) - 교체 날에만 수행
@@ -944,7 +963,7 @@ def run_portfolio_backtest(
                                 row = daily_records_by_ticker[ticker_to_sell][-1]
                                 row.update(
                                     {
-                                        "decision": "SELL_REPLACE_NEXTDAY",
+                                        "decision": "HOLD",
                                         "trade_amount": sell_amount,
                                         "trade_shares": sell_qty,
                                         "trade_profit": trade_profit,
@@ -953,6 +972,9 @@ def run_portfolio_backtest(
                                         "pv": 0,
                                         "avg_cost": 0,
                                         "note": replacement_note,
+                                        "pending_action": "SELL_REPLACE",
+                                        "execute_on": next_dt,
+                                        "pending_reason": replacement_note,
                                     }
                                 )
 
@@ -990,7 +1012,7 @@ def run_portfolio_backtest(
                                     row = daily_records_by_ticker[replacement_ticker][-1]
                                     row.update(
                                         {
-                                            "decision": "BUY_REPLACE_NEXTDAY",
+                                            "decision": "WAIT",
                                             "trade_amount": buy_amount,
                                             "trade_shares": req_qty,
                                             "shares": req_qty,
@@ -1000,6 +1022,9 @@ def run_portfolio_backtest(
                                             "note": f"{BACKTEST_STATUS_LIST['BUY_REPLACE']['display_name']} "
                                             f"{format_money(buy_amount, country_code)} "
                                             f"({ticker_to_sell} 대체)",
+                                            "pending_action": "BUY_REPLACE",
+                                            "execute_on": next_dt,
+                                            "pending_reason": f"{ticker_to_sell} 대체",
                                         }
                                     )
                                 else:
@@ -1009,7 +1034,7 @@ def run_portfolio_backtest(
                                             "price": buy_price,
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
-                                            "decision": "BUY_REPLACE_NEXTDAY",
+                                            "decision": "WAIT",
                                             "avg_cost": buy_price,
                                             "trade_amount": buy_amount,
                                             "trade_shares": req_qty,
@@ -1018,6 +1043,9 @@ def run_portfolio_backtest(
                                             "note": f"{BACKTEST_STATUS_LIST['BUY_REPLACE']['display_name']} "
                                             f"{format_money(buy_amount, country_code)} "
                                             f"({ticker_to_sell} 대체)",
+                                            "pending_action": "BUY_REPLACE",
+                                            "execute_on": next_dt,
+                                            "pending_reason": f"{ticker_to_sell} 대체",
                                             "signal1": metrics_by_ticker[replacement_ticker]["ma_values"][i],
                                             "signal2": None,
                                             "score": score_today.get(replacement_ticker, 0.0),
@@ -1031,13 +1059,16 @@ def run_portfolio_backtest(
                                         "price": buy_price,
                                         "shares": req_qty,
                                         "pv": req_qty * buy_price,
-                                        "decision": "BUY_REPLACE_NEXTDAY",
+                                        "decision": "WAIT",
                                         "avg_cost": buy_price,
                                         "trade_amount": buy_amount,
                                         "trade_shares": req_qty,
                                         "trade_profit": 0.0,
                                         "trade_pl_pct": 0.0,
                                         "note": replacement_note,
+                                        "pending_action": "BUY_REPLACE",
+                                        "execute_on": next_dt,
+                                        "pending_reason": f"{ticker_to_sell} 대체",
                                         "signal1": None,
                                         "signal2": None,
                                         "score": None,
@@ -1103,7 +1134,7 @@ def run_portfolio_backtest(
                             ):
                                 daily_records_by_ticker[held_ticker][-1].update(
                                     {
-                                        "decision": "SELL",
+                                        "decision": "HOLD",
                                         "trade_amount": sell_amount,
                                         "trade_shares": qty,
                                         "trade_profit": trade_profit,
@@ -1112,6 +1143,9 @@ def run_portfolio_backtest(
                                         "pv": remaining_shares * sell_price,
                                         "avg_cost": held_position["avg_cost"],
                                         "note": "점수 음수 매도",
+                                        "pending_action": "SELL",
+                                        "execute_on": next_dt,
+                                        "pending_reason": "점수 음수",
                                     }
                                 )
 
@@ -1122,13 +1156,7 @@ def run_portfolio_backtest(
                 for ticker_symbol, records in daily_records_by_ticker.items()
                 if records
                 and records[-1]["date"] == dt
-                and records[-1]["decision"]
-                in (
-                    "BUY",
-                    "BUY_REPLACE",
-                    "BUY_NEXTDAY",
-                    "BUY_REPLACE_NEXTDAY",
-                )
+                and str(records[-1].get("pending_action", "")).upper() in ("BUY", "BUY_REPLACE")
             }
 
             for _, candidate_ticker in buy_ranked_candidates:
@@ -1207,6 +1235,9 @@ def run_portfolio_backtest(
                                     row["note"] = f"{trim_note} | {existing_note}" if existing_note else trim_note
                                     row["shares"] = state["shares"]
                                     row["pv"] = state["shares"] * price
+                                    row["pending_action"] = "SELL_REBALANCE"
+                                    row["execute_on"] = next_dt
+                                    row["pending_reason"] = "비중 조정"
                                     # 만약 이미 거래 기록이 있다면 금액 합산, 없다면 추가
                                     if "trade_amount" in row and row["trade_amount"]:
                                         row["trade_amount"] += sell_amount
@@ -1232,6 +1263,7 @@ def run_portfolio_backtest(
                 continue
             last_row = rows[-1]
             current_note = str(last_row.get("note") or "")
+            pending_action = str(last_row.get("pending_action") or "").upper() or None
 
             # 리스크 오프/비중조절 문구가 있으면 덮어쓰지 않음
             if "시장위험회피" in current_note or "[비중조절]" in current_note:
@@ -1248,10 +1280,11 @@ def run_portfolio_backtest(
                 buy_trades_today_map=buy_trades_today_map,
                 sell_trades_today_map=sell_trades_today_map,
                 current_decision=str(last_row.get("decision")),
+                current_pending_action=pending_action,
             )
             if overrides:
-                if overrides.get("state") == "SOLD":
-                    last_row["decision"] = "SOLD"
+                if overrides.get("state") == "SELL":
+                    last_row["decision"] = "SELL"
                 if overrides.get("note") is not None:
                     new_note = overrides["note"]
                     if current_note:
@@ -1338,6 +1371,9 @@ def run_portfolio_backtest(
                                 diff_pct = (topup_amount / (total_equity)) * 100
                                 topup_note = f"[비중조절] {diff_pct:.1f}% 매수"
                                 row["note"] = f"{topup_note} | {existing_note}" if existing_note else topup_note
+                                row["pending_action"] = "BUY"
+                                row["execute_on"] = next_dt
+                                row["pending_reason"] = "비중 조정"
 
                             # 수량/금액 업데이트
                             row["shares"] = ticker_state["shares"]
@@ -1368,6 +1404,9 @@ def run_portfolio_backtest(
                 "pv": cash,
                 "decision": "HOLD",
                 "note": "",  # CASH는 문구 없음
+                "pending_action": None,
+                "execute_on": None,
+                "pending_reason": None,
             }
         )
 
