@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
@@ -19,19 +20,17 @@ ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT  # Backward compatibility alias
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
 logger = get_app_logger()
+ACCOUNT_DIR_PATTERN = re.compile(r"^(?P<order>\d+)_(?P<account>[a-z0-9_]+)$")
 
 
-def _derive_account_id_from_dir(dir_name: str, config_data: dict[str, Any]) -> str:
-    configured = str(config_data.get("account") or "").strip().lower()
-    if configured:
-        return configured
+def parse_account_dir_name(dir_name: str) -> tuple[int, str]:
+    """`<order>_<account>` 형식의 디렉토리명에서 순번과 계정 코드를 추출합니다."""
 
-    normalized = dir_name.strip().lower()
-    if "_" in normalized:
-        prefix, suffix = normalized.split("_", 1)
-        if prefix.isdigit() and suffix:
-            return suffix
-    return normalized
+    normalized = (dir_name or "").strip().lower()
+    match = ACCOUNT_DIR_PATTERN.fullmatch(normalized)
+    if not match:
+        raise AccountSettingsError(f"계정 디렉토리명은 '<order>_<account>' 형식이어야 합니다: {dir_name}")
+    return int(match.group("order")), match.group("account")
 
 
 def _iter_account_dirs() -> list[tuple[str, Path]]:
@@ -47,16 +46,16 @@ def _iter_account_dirs() -> list[tuple[str, Path]]:
         if not config_path.exists():
             continue
 
-        try:
-            config_data = _load_json(config_path)
-        except AccountSettingsError:
-            continue
+        config_data = _load_json(config_path)
+        _, account_id = parse_account_dir_name(item.name)
+        configured = str(config_data.get("account") or "").strip().lower()
+        if configured and configured != account_id:
+            raise AccountSettingsError(
+                f"계정 디렉토리명과 config.json account 값이 다릅니다: {item.name} / {configured}"
+            )
+        account_dirs[account_id] = item
 
-        account_id = _derive_account_id_from_dir(item.name, config_data)
-        if account_id:
-            account_dirs[account_id] = item
-
-    return sorted(account_dirs.items(), key=lambda pair: pair[0])
+    return sorted(account_dirs.items(), key=lambda pair: parse_account_dir_name(pair[1].name))
 
 
 def list_available_accounts() -> list[str]:
@@ -140,6 +139,12 @@ def get_account_dir(account_id: str) -> Path:
     if path is None:
         raise AccountSettingsError(f"계정 '{account}'에 해당하는 설정 디렉토리를 찾을 수 없습니다.")
     return path
+
+
+def get_account_order(account_id: str) -> int:
+    """논리 계정 ID에 대응하는 디렉토리명의 순번을 반환합니다."""
+
+    return parse_account_dir_name(get_account_dir(account_id).name)[0]
 
 
 @cache
