@@ -31,7 +31,7 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_TYPE": ["HMA"],
         "SELL_ON_NEGATIVE_SCORE": [True, False],
         "REPLACEMENT_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         "OPTIMIZATION_METRIC": "SDR",
     },
     "kor_pension": {
@@ -43,30 +43,34 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "MA_TYPE": ["HMA"],
         "SELL_ON_NEGATIVE_SCORE": [True, False],
-        "REPLACEMENT_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REPLACEMENT_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         "OPTIMIZATION_METRIC": "CAGR",
     },
     "kor_us": {
         # +--------+--------+------+----------+---------------+---------------+---------+--------+------------------+--------+-----------------+-----------------+
         # | MA개월 | MA타입 | TOPN | 음수매도 |     교체      |   리밸런스    | CAGR(%) | MDD(%) | 1년 0개월 0일(%) | Sharpe | SDR(Sharpe/MDD) | Trades(거래 수) |
         # +--------+--------+------+----------+---------------+---------------+---------+--------+------------------+--------+-----------------+-----------------+
-        # |      6 |  HMA   |    2 |   OFF    | TWICE_A_MONTH |   QUARTERLY   |   84.67 |  -7.51 |            84.60 |   3.38 |           0.450 |              10 |
+        # |      4 |  HMA   |    2 |   OFF    | TWICE_A_MONTH |   QUARTERLY   |   85.12 |  -7.52 |            85.04 |   3.33 |           0.443 |              10 |
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [6],
+        "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "MA_TYPE": ["HMA"],
         "SELL_ON_NEGATIVE_SCORE": [True, False],
-        "REPLACEMENT_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REPLACEMENT_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         "OPTIMIZATION_METRIC": "CAGR",
     },
     "us": {
+        # +--------+--------+------+----------+---------------+---------------+---------+--------+---------------+--------+-----------------+-----------------+
+        # | MA개월 | MA타입 | TOPN | 음수매도 |     교체      |   리밸런스    | CAGR(%) | MDD(%) | 12개월 4일(%) | Sharpe | SDR(Sharpe/MDD) | Trades(거래 수) |
+        # +--------+--------+------+----------+---------------+---------------+---------+--------+---------------+--------+-----------------+-----------------+
+        # |      4 |  HMA   |    2 |   OFF    | TWICE_A_MONTH |    MONTHLY    |   75.74 | -12.51 |         71.30 |   2.40 |           0.192 |             260 |
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [6],
+        "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "MA_TYPE": ["HMA"],
         "SELL_ON_NEGATIVE_SCORE": [True, False],
-        "REPLACEMENT_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REPLACEMENT_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         "OPTIMIZATION_METRIC": "CAGR",
     },
     "aus": {

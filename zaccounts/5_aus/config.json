@@ -1,0 +1,29 @@
+{
+  "order": 5,
+  "icon": "🇦🇺",
+  "name": "호주연금",
+  "desc": "호주 ETF 포트폴리오 (AUD)",
+  "country_code": "au",
+  "currency": "aud",
+  "initial_capital_krw": "100000000",
+  "show_hold": true,
+  "strategy": {
+    "BACKTEST_LAST_MONTHS": 12,
+    "BACKTESTED_DATE": "2026-03-06 14:59",
+    "CAGR": 79.936759,
+    "MDD": -6.873057,
+    "BUCKET_TOPN": 2,
+    "MA_MONTH": 6,
+    "MA_TYPE": "HMA",
+    "SELL_ON_NEGATIVE_SCORE": false,
+    "REBALANCE_MODE": "QUARTERLY",
+    "REPLACEMENT_MODE": "MONTHLY",
+    "ENABLE_DATA_SUFFICIENCY_CHECK": false,
+    "OPTIMIZATION_METRIC": "CAGR"
+  },
+  "benchmark": {
+    "ticker": "A200",
+    "name": "BetaShares Australia 200 ETF"
+  },
+  "account": "aus"
+}

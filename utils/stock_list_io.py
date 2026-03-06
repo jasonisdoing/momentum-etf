@@ -10,6 +10,7 @@ from typing import Any
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
+from utils.settings_loader import get_account_dir
 
 logger = get_app_logger()
 
@@ -632,7 +633,7 @@ def _get_data_dir() -> str:
 def load_stocks_from_file(account_id: str) -> list[dict]:
     """stocks.json 파일에서 종목 데이터를 로드한다 (마이그레이션 전용)."""
     account_norm = (account_id or "").strip().lower()
-    file_path = os.path.join(_get_data_dir(), account_norm, "stocks.json")
+    file_path = str(get_account_dir(account_norm) / "stocks.json")
     if not os.path.exists(file_path):
         return []
     try:

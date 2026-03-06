@@ -30,7 +30,7 @@ from utils.formatters import format_pct_change, format_price, format_price_devia
 from utils.logger import get_app_logger
 from utils.recommendation_storage import save_recommendation_payload
 from utils.report import render_table_eaw
-from utils.settings_loader import load_common_settings
+from utils.settings_loader import get_account_dir, load_common_settings
 from utils.stock_list_io import get_etfs
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
@@ -669,10 +669,11 @@ def dump_recommendation_log(
     country_code = report.country_code
 
     # 기본 디렉토리 설정
+    account_dirname = get_account_dir(account_id).name
     if results_dir is None:
-        base_dir = Path(__file__).parent / "zaccounts" / account_id / "results"
+        base_dir = Path(__file__).parent / "zaccounts" / account_dirname / "results"
     else:
-        base_dir = Path(results_dir) / account_id / "results"
+        base_dir = Path(results_dir) / account_dirname / "results"
 
     base_dir.mkdir(parents=True, exist_ok=True)
 

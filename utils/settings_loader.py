@@ -21,21 +21,49 @@ SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
 logger = get_app_logger()
 
 
-def list_available_accounts() -> list[str]:
-    """
-    zaccounts 디렉토리 하위의 유효한 계정(디렉토리 내 config.json 존재) 목록을 반환합니다.
-    """
-    accounts = []
+def _derive_account_id_from_dir(dir_name: str, config_data: dict[str, Any]) -> str:
+    configured = str(config_data.get("account") or "").strip().lower()
+    if configured:
+        return configured
+
+    normalized = dir_name.strip().lower()
+    if "_" in normalized:
+        prefix, suffix = normalized.split("_", 1)
+        if prefix.isdigit() and suffix:
+            return suffix
+    return normalized
+
+
+def _iter_account_dirs() -> list[tuple[str, Path]]:
+    account_dirs: dict[str, Path] = {}
     if not SETTINGS_ROOT.exists():
         return []
 
     for item in SETTINGS_ROOT.iterdir():
-        if item.is_dir() and not item.name.startswith(".") and not item.name.startswith("_"):
-            config_path = item / "config.json"
-            if config_path.exists():
-                accounts.append(item.name)
+        if not item.is_dir() or item.name.startswith(".") or item.name.startswith("_"):
+            continue
 
-    return sorted(accounts)
+        config_path = item / "config.json"
+        if not config_path.exists():
+            continue
+
+        try:
+            config_data = _load_json(config_path)
+        except AccountSettingsError:
+            continue
+
+        account_id = _derive_account_id_from_dir(item.name, config_data)
+        if account_id:
+            account_dirs[account_id] = item
+
+    return sorted(account_dirs.items(), key=lambda pair: pair[0])
+
+
+def list_available_accounts() -> list[str]:
+    """
+    zaccounts 디렉토리 하위의 유효한 계정(디렉토리 내 config.json 존재) 목록을 반환합니다.
+    """
+    return [account_id for account_id, _ in _iter_account_dirs()]
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -100,6 +128,21 @@ def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
 
 
 @cache
+def get_account_dir(account_id: str) -> Path:
+    """논리 계정 ID에 대응하는 실제 zaccounts 디렉토리를 반환합니다."""
+
+    account = (account_id or "").strip().lower()
+    if not account:
+        raise AccountSettingsError("계정 식별자를 지정해야 합니다.")
+
+    account_dirs = dict(_iter_account_dirs())
+    path = account_dirs.get(account)
+    if path is None:
+        raise AccountSettingsError(f"계정 '{account}'에 해당하는 설정 디렉토리를 찾을 수 없습니다.")
+    return path
+
+
+@cache
 def get_account_settings(account_id: str) -> dict[str, Any]:
     """`zaccounts/{account}/config.json` 파일을 로드합니다."""
 
@@ -107,12 +150,11 @@ def get_account_settings(account_id: str) -> dict[str, Any]:
     if not account:
         raise AccountSettingsError("계정 식별자를 지정해야 합니다.")
 
-    # New: zaccounts/<account>/config.json
-    path = SETTINGS_ROOT / account / "config.json"
+    path = get_account_dir(account) / "config.json"
     logger.debug("계정 설정 로드: %s", path)
 
     settings = _load_json(path)
-    settings.setdefault("account", account)
+    settings["account"] = account
 
     if not settings.get("country_code"):
         raise AccountSettingsError(f"'{path}' 설정 파일에 필수 항목 'country_code'가 누락되었습니다.")
