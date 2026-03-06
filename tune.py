@@ -22,21 +22,29 @@ ACCOUNT_TUNING_CONFIG = {
     # "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     # "OPTIMIZATION_METRIC": "CAGR",
     "kor_kr": {
+        # +--------+--------+------+----------+-------+----------+---------+--------+------------------+--------+-----------------+-----------------+
+        # | MA개월 | MA타입 | TOPN | 음수매도 | 교체  | 리밸런스 | CAGR(%) | MDD(%) | 1년 0개월 0일(%) | Sharpe | SDR(Sharpe/MDD) | Trades(거래 수) |
+        # +--------+--------+------+----------+-------+----------+---------+--------+------------------+--------+-----------------+-----------------+
+        # |      3 |  HMA   |    2 |    ON    | DAILY | MONTHLY  |  108.48 | -15.70 |           108.38 |   3.40 |           0.216 |             650 |
         "BUCKET_TOPN": [2],
         "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "MA_TYPE": ["HMA"],
         "SELL_ON_NEGATIVE_SCORE": [True, False],
-        "REPLACEMENT_MODE": ["DAILY"],
-        "REBALANCE_MODE": ["MONTHLY"],
+        "REPLACEMENT_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         "OPTIMIZATION_METRIC": "SDR",
     },
     "kor_pension": {
+        # +--------+--------+------+----------+---------------+---------------+---------+--------+------------------+--------+-----------------+-----------------+
+        # | MA개월 | MA타입 | TOPN | 음수매도 |     교체      |   리밸런스    | CAGR(%) | MDD(%) | 1년 0개월 0일(%) | Sharpe | SDR(Sharpe/MDD) | Trades(거래 수) |
+        # +--------+--------+------+----------+---------------+---------------+---------+--------+------------------+--------+-----------------+-----------------+
+        # |      4 |  HMA   |    2 |   OFF    | TWICE_A_MONTH |    MONTHLY    |   79.80 | -12.94 |            79.73 |   2.79 |           0.215 |             196 |
         "BUCKET_TOPN": [2],  # 연금 1개, ISA 1개
-        "MA_MONTH": [6],
+        "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "MA_TYPE": ["HMA"],
         "SELL_ON_NEGATIVE_SCORE": [True, False],
-        "REPLACEMENT_MODE": ["WEEKLY"],
-        "REBALANCE_MODE": ["MONTHLY"],
+        "REPLACEMENT_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         "OPTIMIZATION_METRIC": "CAGR",
     },
     "kor_us": {
@@ -44,8 +52,8 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_MONTH": [6],
         "MA_TYPE": ["HMA"],
         "SELL_ON_NEGATIVE_SCORE": [True, False],
-        "REPLACEMENT_MODE": ["WEEKLY"],
-        "REBALANCE_MODE": ["MONTHLY"],
+        "REPLACEMENT_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         "OPTIMIZATION_METRIC": "CAGR",
     },
     "us": {
@@ -53,8 +61,8 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_MONTH": [6],
         "MA_TYPE": ["HMA"],
         "SELL_ON_NEGATIVE_SCORE": [True, False],
-        "REPLACEMENT_MODE": ["WEEKLY"],
-        "REBALANCE_MODE": ["MONTHLY"],
+        "REPLACEMENT_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         "OPTIMIZATION_METRIC": "CAGR",
     },
     "aus": {
@@ -62,8 +70,8 @@ ACCOUNT_TUNING_CONFIG = {
         "MA_MONTH": [6],
         "MA_TYPE": ["HMA"],
         "SELL_ON_NEGATIVE_SCORE": [True, False],
-        "REPLACEMENT_MODE": ["WEEKLY"],
-        "REBALANCE_MODE": ["MONTHLY"],
+        "REPLACEMENT_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         "OPTIMIZATION_METRIC": "CAGR",
     },
 }
