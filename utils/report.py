@@ -19,18 +19,24 @@ def format_kr_money(value: float) -> str:
 
     eok = val_abs // 100000000
     man = (val_abs % 100000000) // 10000
+    won = val_abs % 10000
 
     parts = []
     if eok > 0:
-        parts.append(f"{eok:,}억")
+        parts.append(f"{eok}억")
     if man > 0:
-        parts.append(f"{man:,}만")
+        parts.append(f"{man}만")
+    if won > 0:
+        parts.append(f"{won}원")
 
     if not parts:
         # 억, 만 단위가 없는 작은 금액
-        return f"{sign}{val_abs:,}원"
+        return f"{sign}{val_abs}원"
 
-    return sign + " ".join(parts) + "원"
+    formatted = " ".join(parts)
+    if not formatted.endswith("원"):
+        formatted += "원"
+    return sign + formatted
 
 
 def format_money(value: float, country: str) -> str:
