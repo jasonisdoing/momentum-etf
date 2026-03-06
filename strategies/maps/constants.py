@@ -18,6 +18,13 @@ BACKTEST_STATUS_LIST = {
         "show_slack": True,
         "background": "#81c147",
     },
+    "BUY_REPLACE_TOMORROW": {
+        "display_name": "<⏭ 교체매수예정>",
+        "order": 24,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#b8de8f",
+    },
     "SELL_REPLACE": {
         "display_name": "<🔄 교체매도>",
         "order": 26,
@@ -25,12 +32,47 @@ BACKTEST_STATUS_LIST = {
         "show_slack": True,
         "background": "#ffc1cc",
     },
+    "SELL_REPLACE_TOMORROW": {
+        "display_name": "<⏭ 교체매도예정>",
+        "order": 23,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#ffd9df",
+    },
     "BUY": {
         "display_name": "<🚀 신규매수>",
         "order": 31,
         "is_recommendation": True,
         "show_slack": True,
         "background": "#81c147",
+    },
+    "BUY_TOMORROW": {
+        "display_name": "<⏭ 신규매수예정>",
+        "order": 30,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#b8de8f",
+    },
+    "BUY_REBALANCE_TOMORROW": {
+        "display_name": "<⏭ 비중확대예정>",
+        "order": 32,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#d6ebb8",
+    },
+    "SELL_TOMORROW": {
+        "display_name": "<⏭ 매도예정>",
+        "order": 22,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#ffd9df",
+    },
+    "SELL_REBALANCE_TOMORROW": {
+        "display_name": "<⏭ 비중축소예정>",
+        "order": 21,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#ffe5ea",
     },
     "WAIT": {
         "display_name": "",
@@ -61,6 +103,12 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
     "SOLD": "🔚 매도 완료",
     "BUY_REPLACE": "🔄 교체매수",
     "SELL_REPLACE": "🔄 교체매도",
+    "BUY_TOMORROW": "⏭ 신규 매수 예정",
+    "SELL_TOMORROW": "⏭ 매도 예정",
+    "BUY_REPLACE_TOMORROW": "⏭ 교체매수 예정",
+    "SELL_REPLACE_TOMORROW": "⏭ 교체매도 예정",
+    "BUY_REBALANCE_TOMORROW": "⏭ 비중확대 예정",
+    "SELL_REBALANCE_TOMORROW": "⏭ 비중축소 예정",
 }
 
 

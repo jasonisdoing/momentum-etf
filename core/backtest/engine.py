@@ -92,7 +92,7 @@ def _execute_individual_sells(
                 row = daily_records_by_ticker[ticker][-1]
                 row.update(
                     {
-                        "decision": decision,
+                        "decision": f"{decision}_TOMORROW",
                         "trade_amount": trade_amount,
                         "trade_profit": trade_profit,
                         "trade_pl_pct": hold_ret,
@@ -310,7 +310,7 @@ def _execute_new_buys(
                 row = daily_records_by_ticker[ticker_to_buy][-1]
                 row.update(
                     {
-                        "decision": "BUY",
+                        "decision": "BUY_TOMORROW",
                         "trade_amount": trade_amount,
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
@@ -326,7 +326,7 @@ def _execute_new_buys(
                         "price": price,
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
-                        "decision": "BUY",
+                        "decision": "BUY_TOMORROW",
                         "avg_cost": ticker_state["avg_cost"],
                         "trade_amount": trade_amount,
                         "trade_profit": 0.0,
@@ -888,7 +888,7 @@ def run_portfolio_backtest(
                                 row = daily_records_by_ticker[ticker_to_sell][-1]
                                 row.update(
                                     {
-                                        "decision": "SELL_REPLACE",
+                                        "decision": "SELL_REPLACE_TOMORROW",
                                         "trade_amount": sell_amount,
                                         "trade_profit": trade_profit,
                                         "trade_pl_pct": hold_ret,
@@ -933,7 +933,7 @@ def run_portfolio_backtest(
                                     row = daily_records_by_ticker[replacement_ticker][-1]
                                     row.update(
                                         {
-                                            "decision": "BUY_REPLACE",
+                                            "decision": "BUY_REPLACE_TOMORROW",
                                             "trade_amount": buy_amount,
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
@@ -951,7 +951,7 @@ def run_portfolio_backtest(
                                             "price": buy_price,
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
-                                            "decision": "BUY_REPLACE",
+                                            "decision": "BUY_REPLACE_TOMORROW",
                                             "avg_cost": buy_price,
                                             "trade_amount": buy_amount,
                                             "trade_profit": 0.0,
@@ -972,7 +972,7 @@ def run_portfolio_backtest(
                                         "price": buy_price,
                                         "shares": req_qty,
                                         "pv": req_qty * buy_price,
-                                        "decision": "BUY_REPLACE",
+                                        "decision": "BUY_REPLACE_TOMORROW",
                                         "avg_cost": buy_price,
                                         "trade_amount": buy_amount,
                                         "trade_profit": 0.0,
@@ -1041,7 +1041,7 @@ def run_portfolio_backtest(
                                 ):
                                     daily_records_by_ticker[held_ticker][-1].update(
                                         {
-                                            "decision": "SELL",
+                                            "decision": "SELL_TOMORROW",
                                             "trade_amount": sell_amount,
                                             "trade_profit": trade_profit,
                                             "trade_pl_pct": hold_ret,
@@ -1057,7 +1057,15 @@ def run_portfolio_backtest(
             bought_tickers_today = {
                 ticker_symbol
                 for ticker_symbol, records in daily_records_by_ticker.items()
-                if records and records[-1]["date"] == dt and records[-1]["decision"] in ("BUY", "BUY_REPLACE")
+                if records
+                and records[-1]["date"] == dt
+                and records[-1]["decision"]
+                in (
+                    "BUY",
+                    "BUY_REPLACE",
+                    "BUY_TOMORROW",
+                    "BUY_REPLACE_TOMORROW",
+                )
             }
 
             for _, candidate_ticker in buy_ranked_candidates:
@@ -1132,6 +1140,8 @@ def run_portfolio_backtest(
                                 ):
                                     row = daily_records_by_ticker[ticker][-1]
                                     existing_note = row.get("note", "")
+                                    if row.get("decision") == "HOLD":
+                                        row["decision"] = "SELL_REBALANCE_TOMORROW"
                                     row["note"] = f"{trim_note} | {existing_note}" if existing_note else trim_note
                                     row["shares"] = state["shares"]
                                     row["pv"] = state["shares"] * price
@@ -1259,6 +1269,7 @@ def run_portfolio_backtest(
 
                             # Decision이 HOLD인 경우만 추가 매수 표시
                             if existing_decision == "HOLD":
+                                row["decision"] = "BUY_REBALANCE_TOMORROW"
                                 # 상태값(HOLD) 및 보유일 유지
                                 diff_pct = (topup_amount / (total_equity)) * 100
                                 # 리밸런싱 날과 일반 날 구분 없이 비중확대 메시지 사용

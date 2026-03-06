@@ -182,6 +182,8 @@ def extract_recommendations_from_backtest(
 
         # streak (filter 값 사용)
         streak = int(filter_val) if filter_val and filter_val > 0 else 0
+        if holding_days > 0 and streak > holding_days:
+            streak = holding_days
 
         # phrase (note 사용)
         phrase = note
@@ -277,7 +279,18 @@ def _assign_final_ranks(
     for rec in recommendations:
         state = str(rec.get("state", "")).upper()
 
-        if state in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_REPLACE"):
+        if state in (
+            "HOLD",
+            "BUY",
+            "BUY_REBALANCE",
+            "BUY_REPLACE",
+            "BUY_TOMORROW",
+            "SELL_TOMORROW",
+            "BUY_REPLACE_TOMORROW",
+            "SELL_REPLACE_TOMORROW",
+            "BUY_REBALANCE_TOMORROW",
+            "SELL_REBALANCE_TOMORROW",
+        ):
             rec["_sort_group"] = 1
         else:
             rec["_sort_group"] = 2
@@ -457,6 +470,12 @@ def _decision_to_state(decision: str, shares: float) -> str:
         "SELL",
         "BUY_REPLACE",
         "SELL_REPLACE",
+        "BUY_TOMORROW",
+        "SELL_TOMORROW",
+        "BUY_REPLACE_TOMORROW",
+        "SELL_REPLACE_TOMORROW",
+        "BUY_REBALANCE_TOMORROW",
+        "SELL_REBALANCE_TOMORROW",
     ):
         return decision_upper
     elif shares and shares > 0:
@@ -804,8 +823,8 @@ def dump_recommendation_log(
     nav_mode = country_lower in {"kr", "kor"}
     show_deviation = country_lower in {"kr", "kor"}
 
-    # headers: #, 버킷, 티커, 종목명, 상태, 보유일, 일간(%), 평가(%), 현재가
-    headers = ["#", "버킷", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가"]
+    # headers: #, 버킷, 티커, 종목명, 상태, 보유일, 일간(%), 평가(%), 현재가, 평균단가
+    headers = ["#", "버킷", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가", "평균단가"]
     # [User Request] 현재가 - 괴리율 - Nav
     if show_deviation:
         headers.append("괴리율")
@@ -817,7 +836,7 @@ def dump_recommendation_log(
     headers.extend(["점수", "RSI", "지속", "문구"])
 
     # aligns ( headers 수와 일치해야 함 )
-    aligns = ["left", "left", "left", "left", "left", "center", "right", "right", "right"]
+    aligns = ["left", "left", "left", "left", "left", "center", "right", "right", "right", "right"]
     if show_deviation:
         aligns.append("right")
     if nav_mode:
@@ -834,10 +853,12 @@ def dump_recommendation_log(
         bucket_name = BUCKET_NAMES.get(bucket_val, str(bucket_val))
 
         state = item.get("state", "-")
+        is_pending_tomorrow = str(state).upper().endswith("_TOMORROW")
         holding_days = item.get("holding_days", 0)
         daily_pct = item.get("daily_pct", 0)
         evaluation_pct = item.get("evaluation_pct", 0)
         price = item.get("price")
+        avg_cost = item.get("avg_cost")
         nav_price = item.get("nav_price")
         price_deviation = item.get("price_deviation")
         score = item.get("score", 0)
@@ -859,10 +880,11 @@ def dump_recommendation_log(
             ticker,
             name,
             state,
-            format_trading_days(holding_days),
+            format_trading_days(0 if is_pending_tomorrow else holding_days),
             format_pct_change(daily_pct),
-            format_pct_change(evaluation_pct) if evaluation_pct != 0 else "-",
+            "-" if is_pending_tomorrow else (format_pct_change(evaluation_pct) if evaluation_pct != 0 else "-"),
             format_price(price, country_code),
+            "-" if is_pending_tomorrow else (format_price(avg_cost, country_code) if avg_cost else "-"),
         ]
         if show_deviation:
             row.append(format_price_deviation(price_deviation))
