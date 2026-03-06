@@ -33,6 +33,7 @@ def _build_daily_table_rows(
     buy_date_map: dict[str, pd.Timestamp | None],
     holding_days_map: dict[str, int],
     prev_rows_cache: dict[str, pd.Series | None],
+    prev_decisions_map: dict[str, str],
     price_overrides: dict[str, float] | None = None,
 ) -> list[list[str]]:
     entries = []
@@ -97,6 +98,9 @@ def _build_daily_table_rows(
                 if buy_date_map[ticker_key] is None or decision.startswith("BUY"):
                     buy_date_map[ticker_key] = target_date
                     holding_days_map[ticker_key] = 1
+                elif prev_decisions_map.get(ticker_key, "").startswith("BUY") and decision == "HOLD":
+                    # 다음날 시가 체결 전략에서는 BUY 다음 첫 HOLD를 여전히 1D로 봅니다.
+                    holding_days_map[ticker_key] = max(holding_days_map[ticker_key], 1)
                 else:
                     holding_days_map[ticker_key] += 1
             else:
@@ -175,6 +179,7 @@ def _build_daily_table_rows(
         # Final Sort Key: Group -> Bucket (for Group 1) -> Score (desc) -> Ticker
         sort_key_tuple = (sort_group, bucket_sort_val if sort_group == 1 else 0, -score_val, ticker_key)
         entries.append((sort_key_tuple, row_data))
+        prev_decisions_map[ticker_key] = decision
 
     entries.sort(key=lambda x: x[0])
 
@@ -237,6 +242,7 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
     buy_date_map = {}
     holding_days_map = {}
     prev_rows_cache = {}
+    prev_decisions_map = {}
 
     fx_series = None
     if currency != "KRW":
@@ -315,6 +321,7 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
             buy_date_map=buy_date_map,
             holding_days_map=holding_days_map,
             prev_rows_cache=prev_rows_cache,
+            prev_decisions_map=prev_decisions_map,
         )
 
         lines.extend(render_table_eaw(headers, table_rows, aligns))
