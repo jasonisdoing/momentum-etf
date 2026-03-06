@@ -12,6 +12,7 @@ from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
 )
+from utils.report import format_kr_money
 from utils.ui import render_recommendation_table
 
 
@@ -23,30 +24,7 @@ def _to_plain_dict(value):
     return value
 
 
-def format_korean_currency(value):
-    """주어진 원화 값을 '억/만원' 단위로 변환합니다."""
-    if value == 0:
-        return "0원"
-
-    abs_value = abs(value)
-    eok = int(abs_value // 100_000_000)
-    remain = abs_value % 100_000_000
-    man = int(round(remain / 10_000))
-
-    if man == 10000:
-        eok += 1
-        man = 0
-
-    parts = []
-    if eok > 0:
-        parts.append(f"{eok}억")
-    if man > 0:
-        parts.append(f"{man}만원")
-
-    result = " ".join(parts) if parts else "0원"
-    if value < 0:
-        result = "-" + result
-    return result
+format_korean_currency = format_kr_money
 
 
 def _load_authenticator() -> stauth.Authenticate:
