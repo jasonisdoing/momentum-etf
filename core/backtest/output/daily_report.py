@@ -56,7 +56,6 @@ def _build_daily_table_rows(
         price = float(snapshot_row["price"])
         shares = float(snapshot_row["shares"])
         pv = float(snapshot_row["pv"])
-        avg_cost = snapshot_row["avg_cost"]
         evaluation_profit = snapshot_row["evaluation_profit"]
         score = snapshot_row["score"]
         row_data = [
@@ -67,7 +66,6 @@ def _build_daily_table_rows(
             snapshot_row["display_decision"],
             format_trading_days(int(snapshot_row["holding_days"])),
             "1" if is_cash else (price_formatter(price) if _is_finite_number(price) else "-"),
-            "-" if avg_cost is None else price_formatter(float(avg_cost)),
             f"{float(snapshot_row['daily_pct']):+.1f}%",
             "-" if snapshot_row["evaluation_pct"] is None else f"{float(snapshot_row['evaluation_pct']):+.1f}%",
             "1" if is_cash else _format_quantity(shares, qty_precision),
@@ -97,7 +95,6 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "상태",
         "보유일",
         "현재가",
-        "평균단가",
         "일간(%)",
         "평가(%)",
         "수량",
@@ -115,7 +112,6 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "center",  # 상태
         "right",  # 보유일
         "right",  # 현재가
-        "right",  # 평균단가
         "right",  # 일간(%)
         "right",  # 평가(%)
         "right",  # 수량
