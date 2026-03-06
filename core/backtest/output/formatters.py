@@ -74,6 +74,6 @@ def _resolve_formatters(account_settings: dict[str, any], account_id: str = ""):
         return f"{float(value):,.{digits}f}"
 
     def format_money_for_account(val: float) -> str:
-        return format_money(val, account_id)
+        return format_money(val, currency)
 
     return currency, format_money_for_account, _format_price, qty_precision, digits
