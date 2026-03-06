@@ -40,21 +40,21 @@ def format_kr_money(value: float) -> str:
 
 
 def format_money(value: float, country: str) -> str:
-    """금액을 국가에 맞는 형식(KRW 억만단위, USD 달러명시, AUD 호주달러명시)으로 포맷합니다."""
+    """금액을 통화/국가 코드에 맞는 형식으로 포맷합니다."""
     if value is None or not isinstance(value, (int, float)):
         return "-"
 
-    country = str(country or "").strip().lower()
+    code = str(country or "").strip().lower()
 
-    if country in ("kor", "kr"):
+    if code in ("kor", "kr", "krw"):
         return format_kr_money(value)
 
     sign = "-" if value < 0 else ""
     val_abs = abs(value)
 
-    if country in ("us", "usa"):
+    if code in ("us", "usa", "usd"):
         return f"{sign}${val_abs:,.2f}"
-    elif country in ("aus", "au"):
+    elif code in ("aus", "au", "aud"):
         return f"{sign}A${val_abs:,.2f}"
     else:
         return f"{sign}{val_abs:,.2f}"
