@@ -338,7 +338,26 @@ def get_country_strategy(country: str) -> dict[str, Any]:  # pragma: no cover
 
 
 def get_country_precision(country: str) -> dict[str, Any]:  # pragma: no cover
-    return get_account_precision(country)
+    country_code = (country or "").strip().lower()
+    if country_code in ("us", "usa"):
+        return {
+            "currency": "USD",
+            "qty_precision": 0,
+            "price_precision": 2,
+        }
+    if country_code in ("au", "aus"):
+        return {
+            "currency": "AUD",
+            "qty_precision": 0,
+            "price_precision": 2,
+        }
+    if country_code in ("kor", "kr"):
+        return {
+            "currency": "KRW",
+            "qty_precision": 0,
+            "price_precision": 0,
+        }
+    raise AccountSettingsError(f"지원하지 않는 국가 코드입니다: {country}")
 
 
 def get_country_slack_channel(country: str) -> str | None:  # pragma: no cover

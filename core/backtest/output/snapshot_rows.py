@@ -74,9 +74,8 @@ def build_snapshot_rows(
         if price_overrides and ticker_key in price_overrides:
             price = float(price_overrides[ticker_key])
 
-        shares = float(row.get("shares")) if pd.notna(row.get("shares")) else 0.0
+        raw_shares = float(row.get("shares")) if pd.notna(row.get("shares")) else 0.0
         avg_cost = float(row.get("avg_cost")) if pd.notna(row.get("avg_cost")) else 0.0
-        pv = price * shares
 
         raw_decision = str(row.get("decision", "")).upper()
         prev_decision = state.prev_decisions_map.get(ticker_key, "")
@@ -85,6 +84,9 @@ def build_snapshot_rows(
         note = str(row.get("note", "") or "")
         is_pending_tomorrow = raw_decision.endswith("_NEXTDAY")
         is_cash = ticker_key == "CASH"
+
+        shares = 0.0 if (is_pending_tomorrow and not is_cash) else raw_shares
+        pv = price * shares
 
         if is_cash:
             price = 1.0
