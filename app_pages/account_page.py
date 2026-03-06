@@ -795,13 +795,11 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
                 or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
             )
         else:
-            # 보유 종목만 필터링
-            df_held = _get_active_holdings(df)
-            if df_held.empty:
-                st.info("현재 보유 중인 종목이 없습니다.")
+            if df.empty:
+                st.info("표시할 추천 종목이 없습니다.")
             else:
                 render_recommendation_table(
-                    df_held,
+                    df,
                     country_code=country_code,
                     grouped_by_bucket=False,
                     # customize_columns={"#": ("버킷", 120)} # This will be implemented in utils/ui.py
