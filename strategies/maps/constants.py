@@ -32,6 +32,13 @@ BACKTEST_STATUS_LIST = {
         "show_slack": True,
         "background": "#ffc1cc",
     },
+    "SELL": {
+        "display_name": "<🔻 매도>",
+        "order": 27,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#ffc1cc",
+    },
     "SELL_REPLACE_NEXTDAY": {
         "display_name": "<⏭ 교체매도예정>",
         "order": 23,
@@ -52,13 +59,6 @@ BACKTEST_STATUS_LIST = {
         "is_recommendation": True,
         "show_slack": True,
         "background": "#b8de8f",
-    },
-    "BUY_REBALANCE_NEXTDAY": {
-        "display_name": "<⏭ 비중확대예정>",
-        "order": 32,
-        "is_recommendation": True,
-        "show_slack": True,
-        "background": "#d6ebb8",
     },
     "SELL_NEXTDAY": {
         "display_name": "<⏭ 매도예정>",
@@ -101,13 +101,13 @@ def _normalize_display_label(raw: str | None) -> str:
 _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
     "BUY": "✅ 신규 매수",
     "SOLD": "🔚 매도 완료",
+    "SELL": "🔻 매도",
     "BUY_REPLACE": "🔄 교체매수",
     "SELL_REPLACE": "🔄 교체매도",
     "BUY_NEXTDAY": "⏭ 신규 매수 예정",
     "SELL_NEXTDAY": "⏭ 매도 예정",
     "BUY_REPLACE_NEXTDAY": "⏭ 교체매수 예정",
     "SELL_REPLACE_NEXTDAY": "⏭ 교체매도 예정",
-    "BUY_REBALANCE_NEXTDAY": "⏭ 비중확대 예정",
     "SELL_REBALANCE_NEXTDAY": "⏭ 비중축소 예정",
 }
 

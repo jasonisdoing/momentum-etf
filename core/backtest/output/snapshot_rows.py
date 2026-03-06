@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 DISPLAY_DECISION_MAP: dict[tuple[str, str], str] = {
     ("BUY_NEXTDAY", "HOLD"): "BUY",
     ("BUY_REPLACE_NEXTDAY", "HOLD"): "BUY_REPLACE",
-    ("BUY_REBALANCE_NEXTDAY", "HOLD"): "BUY_REBALANCE",
     ("SELL_NEXTDAY", "WAIT"): "SOLD",
     ("SELL_REPLACE_NEXTDAY", "WAIT"): "SELL_REPLACE",
     ("SELL_REBALANCE_NEXTDAY", "HOLD"): "SELL_REBALANCE",
@@ -27,6 +26,8 @@ class SnapshotBuildState:
         self.holding_days_map: dict[str, int] = {}
         self.prev_rows_cache: dict[str, pd.Series | None] = {}
         self.prev_decisions_map: dict[str, str] = {}
+        self.prev_effective_shares_map: dict[str, float] = {}
+        self.prev_effective_avg_cost_map: dict[str, float] = {}
 
 
 def create_snapshot_build_state() -> SnapshotBuildState:
@@ -77,6 +78,7 @@ def build_snapshot_rows(
 
         raw_shares = float(row.get("shares")) if pd.notna(row.get("shares")) else 0.0
         avg_cost = float(row.get("avg_cost")) if pd.notna(row.get("avg_cost")) else 0.0
+        traded_shares = float(row.get("trade_shares")) if pd.notna(row.get("trade_shares")) else 0.0
 
         raw_decision = str(row.get("decision", "")).upper()
         prev_decision = state.prev_decisions_map.get(ticker_key, "")
@@ -86,7 +88,26 @@ def build_snapshot_rows(
         is_pending_tomorrow = raw_decision.endswith("_NEXTDAY")
         is_cash = ticker_key == "CASH"
 
-        shares = 0.0 if (is_pending_tomorrow and not is_cash) else raw_shares
+        if is_pending_tomorrow and not is_cash:
+            if raw_decision.startswith("BUY"):
+                reconstructed_shares = max(0.0, raw_shares - max(0.0, traded_shares))
+                shares = reconstructed_shares
+                if shares > 0:
+                    avg_cost = state.prev_effective_avg_cost_map.get(ticker_key, avg_cost)
+                else:
+                    avg_cost = 0.0
+            elif raw_decision.startswith("SELL"):
+                reconstructed_shares = raw_shares + max(0.0, traded_shares)
+                shares = (
+                    reconstructed_shares
+                    if reconstructed_shares > 0
+                    else state.prev_effective_shares_map.get(ticker_key, raw_shares)
+                )
+                avg_cost = state.prev_effective_avg_cost_map.get(ticker_key, avg_cost)
+            else:
+                shares = raw_shares
+        else:
+            shares = raw_shares
         pv = price * shares
 
         if is_cash:
@@ -113,7 +134,7 @@ def build_snapshot_rows(
 
         if not is_cash:
             if shares > 0:
-                if is_pending_tomorrow:
+                if is_pending_tomorrow and raw_decision.startswith("BUY"):
                     state.buy_date_map[ticker_key] = None
                     state.holding_days_map[ticker_key] = 0
                 elif state.buy_date_map[ticker_key] is None or display_decision.startswith("BUY"):
@@ -131,11 +152,12 @@ def build_snapshot_rows(
             state.holding_days_map[ticker_key] = 0
 
         display_avg_cost = None
-        if not is_cash and not is_pending_tomorrow and _is_finite_number(avg_cost) and avg_cost > 0:
+        is_pending_buy = is_pending_tomorrow and raw_decision.startswith("BUY")
+        if not is_cash and not is_pending_buy and _is_finite_number(avg_cost) and avg_cost > 0:
             display_avg_cost = avg_cost
 
         cost_basis = display_avg_cost * shares if display_avg_cost is not None and shares > 0 else 0.0
-        evaluation_profit = 0.0 if is_cash or is_pending_tomorrow else (pv - cost_basis)
+        evaluation_profit = 0.0 if is_cash or is_pending_buy else (pv - cost_basis)
         evaluation_pct = ((evaluation_profit / cost_basis) * 100.0) if cost_basis > 0 else None
 
         bucket_id = meta.get("bucket")
@@ -161,14 +183,12 @@ def build_snapshot_rows(
         elif display_decision in {
             "HOLD",
             "BUY",
-            "BUY_REBALANCE",
             "BUY_REPLACE",
             "BUY_TODAY",
             "BUY_NEXTDAY",
             "SELL_NEXTDAY",
             "BUY_REPLACE_NEXTDAY",
             "SELL_REPLACE_NEXTDAY",
-            "BUY_REBALANCE_NEXTDAY",
             "SELL_REBALANCE_NEXTDAY",
         }:
             sort_group = 1
@@ -197,6 +217,8 @@ def build_snapshot_rows(
         }
         entries.append(snapshot_row)
         state.prev_decisions_map[ticker_key] = raw_decision
+        state.prev_effective_shares_map[ticker_key] = shares
+        state.prev_effective_avg_cost_map[ticker_key] = avg_cost
 
     effective_bucket_topn = bucket_topn
     if effective_bucket_topn is None:
