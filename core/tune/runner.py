@@ -18,7 +18,7 @@ from typing import Any
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
-from config import OPTIMIZATION_METRIC, TRADING_DAYS_PER_MONTH
+from config import TRADING_DAYS_PER_MONTH
 from core.backtest.runner import run_account_backtest
 from core.tune.reporting import (
     _export_combo_debug,
@@ -1496,8 +1496,18 @@ def run_account_tuning(
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
         return None
 
-    # OPTIMIZATION_METRIC은 config.py의 전역 설정을 사용합니다.
-    optimization_metric = OPTIMIZATION_METRIC
+    optimization_metric_raw = config.get("OPTIMIZATION_METRIC")
+    if optimization_metric_raw is None:
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'OPTIMIZATION_METRIC' 설정이 누락되었습니다. tune.py의 ACCOUNT_TUNING_CONFIG를 확인하세요."
+        )
+    optimization_metric = str(optimization_metric_raw).strip().upper()
+    valid_optimization_metrics = {"CAGR", "SHARPE", "SDR"}
+    if optimization_metric not in valid_optimization_metrics:
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 OPTIMIZATION_METRIC은 {sorted(valid_optimization_metrics)} 중 하나여야 합니다. "
+            f"(입력값: {optimization_metric_raw})"
+        )
 
     search_space = {
         "MA_MONTH": ma_month_values or ma_values,

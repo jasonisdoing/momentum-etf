@@ -20,6 +20,7 @@ ACCOUNT_TUNING_CONFIG = {
     # "SELL_ON_NEGATIVE_SCORE": [True, False],
     # "REPLACEMENT_MODE": ["DAILY", "WEEKLY"],
     # "REBALANCE_MODE": ["DAILY", "WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+    # "OPTIMIZATION_METRIC": "CAGR",
     "kor_kr": {
         "BUCKET_TOPN": [2],
         "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
@@ -27,6 +28,7 @@ ACCOUNT_TUNING_CONFIG = {
         "SELL_ON_NEGATIVE_SCORE": [True, False],
         "REPLACEMENT_MODE": ["DAILY"],
         "REBALANCE_MODE": ["MONTHLY"],
+        "OPTIMIZATION_METRIC": "SDR",
     },
     "kor_pension": {
         "BUCKET_TOPN": [2],  # 연금 1개, ISA 1개
@@ -35,6 +37,7 @@ ACCOUNT_TUNING_CONFIG = {
         "SELL_ON_NEGATIVE_SCORE": [True, False],
         "REPLACEMENT_MODE": ["WEEKLY"],
         "REBALANCE_MODE": ["MONTHLY"],
+        "OPTIMIZATION_METRIC": "CAGR",
     },
     "kor_us": {
         "BUCKET_TOPN": [2],
@@ -43,6 +46,7 @@ ACCOUNT_TUNING_CONFIG = {
         "SELL_ON_NEGATIVE_SCORE": [True, False],
         "REPLACEMENT_MODE": ["WEEKLY"],
         "REBALANCE_MODE": ["MONTHLY"],
+        "OPTIMIZATION_METRIC": "CAGR",
     },
     "us": {
         "BUCKET_TOPN": [2],
@@ -51,6 +55,7 @@ ACCOUNT_TUNING_CONFIG = {
         "SELL_ON_NEGATIVE_SCORE": [True, False],
         "REPLACEMENT_MODE": ["WEEKLY"],
         "REBALANCE_MODE": ["MONTHLY"],
+        "OPTIMIZATION_METRIC": "CAGR",
     },
     "aus": {
         "BUCKET_TOPN": [2],
@@ -59,6 +64,7 @@ ACCOUNT_TUNING_CONFIG = {
         "SELL_ON_NEGATIVE_SCORE": [True, False],
         "REPLACEMENT_MODE": ["WEEKLY"],
         "REBALANCE_MODE": ["MONTHLY"],
+        "OPTIMIZATION_METRIC": "CAGR",
     },
 }
 
