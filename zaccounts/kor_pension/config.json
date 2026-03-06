@@ -15,6 +15,7 @@
         "BUCKET_TOPN": 2,
         "MA_MONTH": 6,
         "MA_TYPE": "HMA",
+        "SELL_ON_NEGATIVE_SCORE": true,
         "REBALANCE_MODE": "MONTHLY",
         "REPLACEMENT_MODE": "WEEKLY",
         "ENABLE_DATA_SUFFICIENCY_CHECK": false,

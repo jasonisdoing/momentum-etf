@@ -160,6 +160,7 @@ def run_account_backtest(
             ma_type=strategy_override.ma_type,
             rebalance_mode=strategy_override.rebalance_mode,
             replacement_mode=strategy_override.replacement_mode,
+            sell_on_negative_score=strategy_override.sell_on_negative_score,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
         strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
@@ -513,6 +514,7 @@ def _build_backtest_kwargs(
         "ma_type": strategy_rules.ma_type,
         "rebalance_mode": strategy_rules.rebalance_mode,
         "replacement_mode": strategy_rules.replacement_mode,
+        "sell_on_negative_score": strategy_rules.sell_on_negative_score,
         "quiet": quiet,
         "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }

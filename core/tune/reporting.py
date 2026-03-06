@@ -81,6 +81,7 @@ def _render_tuning_table(
         "MA개월",
         "MA타입",
         "TOPN",
+        "음수매도",
         "교체",
         "리밸런스",
         "CAGR(%)",
@@ -90,6 +91,7 @@ def _render_tuning_table(
         "right",
         "center",
         "right",
+        "center",
         "center",
         "center",
         "right",
@@ -127,10 +129,23 @@ def _render_tuning_table(
         if not replace_mode_val:
             replace_mode_val = "-"
 
+        sell_negative_val = row.get("sell_on_negative_score")
+        if sell_negative_val is None and "tuning" in row:
+            sell_negative_val = row["tuning"].get("SELL_ON_NEGATIVE_SCORE")
+        if isinstance(sell_negative_val, bool):
+            sell_negative_display = "ON" if sell_negative_val else "OFF"
+        elif sell_negative_val is None:
+            sell_negative_display = "-"
+        else:
+            sell_negative_display = (
+                "ON" if str(sell_negative_val).strip().lower() in ("1", "true", "yes", "on") else "OFF"
+            )
+
         row_data = [
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
             str(ma_type_val) if ma_type_val else "SMA",
             str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
+            sell_negative_display,
             str(replace_mode_val),
             str(rebal_mode_val),
             _format_table_float(row.get("cagr")),

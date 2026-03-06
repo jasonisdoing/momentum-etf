@@ -9,16 +9,17 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_LAST_MONTHS": 12,
-        "BACKTESTED_DATE": "2026-03-06 14:04",
-        "CAGR": 108.481901,
-        "MDD": -15.90544,
+        "BACKTESTED_DATE": "2026-03-06 14:22",
+        "CAGR": 160.77746,
+        "MDD": -20.953035,
         "BUCKET_TOPN": 2,
-        "MA_MONTH": 3,
+        "MA_MONTH": 2,
         "MA_TYPE": "HMA",
+        "SELL_ON_NEGATIVE_SCORE": false,
         "REBALANCE_MODE": "MONTHLY",
         "REPLACEMENT_MODE": "DAILY",
         "ENABLE_DATA_SUFFICIENCY_CHECK": false,
-        "OPTIMIZATION_METRIC": "CAGR"
+        "OPTIMIZATION_METRIC": "SDR"
     },
     "benchmark": {
         "ticker": "069500",
