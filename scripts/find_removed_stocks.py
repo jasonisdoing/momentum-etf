@@ -2,12 +2,17 @@ import json
 import re
 import subprocess
 
+from utils.settings_loader import get_account_dir
+
 
 def main():
+    account_dir = get_account_dir("kor_kr")
+    stocks_path = account_dir / "stocks.json"
+
     # 1. Load current tickers
     current_tickers = set()
     try:
-        with open("zaccounts/kor_kr/stocks.json", encoding="utf-8") as f:
+        with stocks_path.open(encoding="utf-8") as f:
             data = json.load(f)
             for item in data:
                 current_tickers.add(item.get("ticker"))
@@ -18,7 +23,7 @@ def main():
     # 2. Get git log content
     # We use -U1000 to get full context or enough context, or just look for lines
     # actually we just want to find ANY mention of "ticker": "CODE" in the history
-    cmd = ["git", "log", "-p", "--", "zaccounts/kor_kr/stocks.json"]
+    cmd = ["git", "log", "-p", "--", str(stocks_path)]
     result = subprocess.run(cmd, capture_output=True, text=True)
     log_content = result.stdout
 

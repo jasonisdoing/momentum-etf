@@ -1,0 +1,29 @@
+{
+  "order": 4,
+  "icon": "🇺🇸",
+  "name": "미국직투",
+  "desc": "미국 ETF 포트폴리오 (USD)",
+  "country_code": "us",
+  "currency": "USD",
+  "initial_capital_krw": "100000000",
+  "show_hold": true,
+  "strategy": {
+    "BACKTEST_LAST_MONTHS": 12,
+    "BACKTESTED_DATE": "2026-03-06 14:47",
+    "CAGR": 75.737743,
+    "MDD": -12.50629,
+    "BUCKET_TOPN": 2,
+    "MA_MONTH": 4,
+    "MA_TYPE": "HMA",
+    "SELL_ON_NEGATIVE_SCORE": false,
+    "REBALANCE_MODE": "MONTHLY",
+    "REPLACEMENT_MODE": "TWICE_A_MONTH",
+    "ENABLE_DATA_SUFFICIENCY_CHECK": false,
+    "OPTIMIZATION_METRIC": "CAGR"
+  },
+  "benchmark": {
+    "ticker": "VOO",
+    "name": "S&P 500"
+  },
+  "account": "us"
+}

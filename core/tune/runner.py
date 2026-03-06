@@ -44,8 +44,8 @@ from utils.data_loader import (
 )
 from utils.logger import get_app_logger
 from utils.settings_loader import (
-    ACCOUNT_SETTINGS_DIR,
     AccountSettingsError,
+    get_account_dir,
     get_account_settings,
     get_tune_month_configs,
     load_common_settings,
@@ -221,7 +221,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         logger.warning("[튜닝] %s 계정 결과에 반영할 파라미터가 없습니다.", account_id.upper())
         return
 
-    settings_path = ACCOUNT_SETTINGS_DIR / account_id / "config.json"
+    settings_path = get_account_dir(account_id) / "config.json"
     try:
         raw = settings_path.read_text(encoding="utf-8")
         settings_data = json.loads(raw)
@@ -1671,9 +1671,9 @@ def run_account_tuning(
 
     # 출력 경로 미리 결정 (중간 저장용) - 계정별 폴더
     if results_dir is not None:
-        base_dir = Path(results_dir) / account_norm / "results"
+        base_dir = Path(results_dir) / get_account_dir(account_norm).name / "results"
     else:
-        base_dir = DEFAULT_RESULTS_DIR / account_norm / "results"
+        base_dir = DEFAULT_RESULTS_DIR / get_account_dir(account_norm).name / "results"
 
     if output_path is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
