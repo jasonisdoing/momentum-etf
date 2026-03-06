@@ -8,6 +8,7 @@ from typing import Any
 from utils.logger import get_app_logger
 from utils.settings_loader import (
     AccountSettingsError,
+    get_account_order,
     get_account_precision,
     get_account_settings,
     get_account_strategy,
@@ -28,13 +29,6 @@ logger = get_app_logger()
 def _normalize_code(value: Any, fallback: str) -> str:
     text = str(value or "").strip().lower()
     return text or fallback
-
-
-def _resolve_order(value: Any) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float("inf")
 
 
 def _st_cache_data(func):
@@ -68,7 +62,7 @@ def _load_account_configs_impl() -> list[dict[str, Any]]:
 
         icon = settings.get("icon") or _ICON_FALLBACKS.get(country_code, "")
         is_default = bool(settings.get("default", False))
-        order = _resolve_order(settings.get("order"))
+        order = float(get_account_order(account_id))
 
         # [User Request] '순서. 이름' 형식으로 변경 (비율 제거)
         name = f"{int(order)}. {base_name}"
