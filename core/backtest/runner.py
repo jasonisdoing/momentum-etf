@@ -561,14 +561,34 @@ def _build_portfolio_timeseries(
                 continue
 
             row = ts.loc[dt]
-            pv_val = row.get("pv")
-            if pd.notna(pv_val):
-                total_value += float(pv_val)
+            decision = str(row.get("decision", "") or "").upper()
+            is_pending_nextday = decision.endswith("_NEXTDAY")
+            trade_amount = float(row.get("trade_amount", 0.0) or 0.0)
 
             if ticker == "CASH":
                 cash_val = row.get("pv")
                 if pd.notna(cash_val):
-                    cash_value += float(cash_val)
+                    effective_cash = float(cash_val)
+                    effective_cash += sum(
+                        float(ts2.loc[dt].get("trade_amount", 0.0) or 0.0)
+                        for tk2, ts2 in ticker_timeseries.items()
+                        if tk2 != "CASH"
+                        and isinstance(ts2, pd.DataFrame)
+                        and dt in ts2.index
+                        and str(ts2.loc[dt].get("decision", "") or "").upper().endswith("_NEXTDAY")
+                        and str(ts2.loc[dt].get("decision", "") or "").upper().startswith("BUY")
+                    )
+                    effective_cash -= sum(
+                        float(ts2.loc[dt].get("trade_amount", 0.0) or 0.0)
+                        for tk2, ts2 in ticker_timeseries.items()
+                        if tk2 != "CASH"
+                        and isinstance(ts2, pd.DataFrame)
+                        and dt in ts2.index
+                        and str(ts2.loc[dt].get("decision", "") or "").upper().endswith("_NEXTDAY")
+                        and str(ts2.loc[dt].get("decision", "") or "").upper().startswith("SELL")
+                    )
+                    cash_value += effective_cash
+                    total_value += effective_cash
                 continue
 
             price_val = row.get("price")
@@ -576,10 +596,12 @@ def _build_portfolio_timeseries(
             avg_cost_val = row.get("avg_cost")
 
             price = float(price_val) if pd.notna(price_val) else 0.0
-            shares = float(shares_val) if pd.notna(shares_val) else 0.0
+            shares = 0.0 if is_pending_nextday else (float(shares_val) if pd.notna(shares_val) else 0.0)
             avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
 
-            total_holdings += price * shares
+            effective_pv = price * shares
+            total_value += effective_pv
+            total_holdings += effective_pv
             if shares > 0:
                 held_count += 1
                 total_cost += avg_cost * shares

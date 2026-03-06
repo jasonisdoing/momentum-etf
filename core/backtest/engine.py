@@ -17,7 +17,7 @@ from strategies.maps.labeler import compute_net_trade_note
 from strategies.maps.metrics import process_ticker_data
 from utils.logger import get_app_logger
 from utils.report import format_money
-from utils.settings_loader import get_account_precision
+from utils.settings_loader import get_country_precision
 
 logger = get_app_logger()
 
@@ -525,7 +525,7 @@ def run_portfolio_backtest(
     """
 
     country_code = (country or "").strip().lower() or "kor"
-    qty_precision = int(get_account_precision(country_code).get("qty_precision", 0))
+    qty_precision = int(get_country_precision(country_code).get("qty_precision", 0))
 
     def _log(message: str) -> None:
         if quiet:
