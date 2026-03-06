@@ -11,21 +11,12 @@ if TYPE_CHECKING:
     from core.backtest.domain import AccountBacktestResult
 
 
-DISPLAY_DECISION_MAP: dict[tuple[str, str], str] = {
-    ("BUY_NEXTDAY", "HOLD"): "BUY",
-    ("BUY_REPLACE_NEXTDAY", "HOLD"): "BUY_REPLACE",
-    ("SELL_NEXTDAY", "WAIT"): "SOLD",
-    ("SELL_REPLACE_NEXTDAY", "WAIT"): "SELL_REPLACE",
-    ("SELL_REBALANCE_NEXTDAY", "HOLD"): "SELL_REBALANCE",
-}
-
-
 class SnapshotBuildState:
     def __init__(self) -> None:
         self.buy_date_map: dict[str, pd.Timestamp | None] = {}
         self.holding_days_map: dict[str, int] = {}
         self.prev_rows_cache: dict[str, pd.Series | None] = {}
-        self.prev_decisions_map: dict[str, str] = {}
+        self.prev_pending_actions_map: dict[str, str] = {}
         self.prev_effective_shares_map: dict[str, float] = {}
         self.prev_effective_avg_cost_map: dict[str, float] = {}
 
@@ -34,8 +25,26 @@ def create_snapshot_build_state() -> SnapshotBuildState:
     return SnapshotBuildState()
 
 
-def resolve_display_decision(prev_decision: str, current_decision: str) -> str:
-    return DISPLAY_DECISION_MAP.get((prev_decision, current_decision), current_decision)
+def _display_from_pending_action(pending_action: str) -> str | None:
+    pending_norm = str(pending_action or "").upper()
+    if pending_norm == "SELL_REBALANCE":
+        return "HOLD"
+    return None
+
+
+def resolve_display_decision(prev_pending_action: str, current_decision: str, current_pending_action: str) -> str:
+    prev_pending_norm = str(prev_pending_action or "").upper()
+    curr_norm = str(current_decision or "").upper()
+    signal_decision = _display_from_pending_action(current_pending_action)
+    if prev_pending_norm == "BUY_REPLACE" and curr_norm == "HOLD":
+        return "BUY_REPLACE"
+    if prev_pending_norm == "BUY" and curr_norm == "HOLD":
+        return "BUY"
+    if prev_pending_norm == "SELL_REPLACE" and curr_norm == "WAIT":
+        return "SELL_REPLACE"
+    if prev_pending_norm == "SELL" and curr_norm == "WAIT":
+        return "SELL"
+    return signal_decision or curr_norm
 
 
 def _iter_tickers_order(ticker_timeseries: dict[str, pd.DataFrame]) -> list[str]:
@@ -81,22 +90,23 @@ def build_snapshot_rows(
         traded_shares = float(row.get("trade_shares")) if pd.notna(row.get("trade_shares")) else 0.0
 
         raw_decision = str(row.get("decision", "")).upper()
-        prev_decision = state.prev_decisions_map.get(ticker_key, "")
-        display_decision = resolve_display_decision(prev_decision, raw_decision)
+        pending_action = str(row.get("pending_action", "") or "").upper()
+        prev_pending_action = state.prev_pending_actions_map.get(ticker_key, "")
+        display_decision = resolve_display_decision(prev_pending_action, raw_decision, pending_action)
         score = row.get("score")
         note = str(row.get("note", "") or "")
-        is_pending_tomorrow = raw_decision.endswith("_NEXTDAY")
+        is_pending_tomorrow = bool(pending_action)
         is_cash = ticker_key == "CASH"
 
         if is_pending_tomorrow and not is_cash:
-            if raw_decision.startswith("BUY"):
+            if pending_action.startswith("BUY"):
                 reconstructed_shares = max(0.0, raw_shares - max(0.0, traded_shares))
                 shares = reconstructed_shares
                 if shares > 0:
                     avg_cost = state.prev_effective_avg_cost_map.get(ticker_key, avg_cost)
                 else:
                     avg_cost = 0.0
-            elif raw_decision.startswith("SELL"):
+            elif pending_action.startswith("SELL"):
                 reconstructed_shares = raw_shares + max(0.0, traded_shares)
                 shares = (
                     reconstructed_shares
@@ -134,13 +144,13 @@ def build_snapshot_rows(
 
         if not is_cash:
             if shares > 0:
-                if is_pending_tomorrow and raw_decision.startswith("BUY"):
+                if is_pending_tomorrow and pending_action.startswith("BUY"):
                     state.buy_date_map[ticker_key] = None
                     state.holding_days_map[ticker_key] = 0
                 elif state.buy_date_map[ticker_key] is None or display_decision.startswith("BUY"):
                     state.buy_date_map[ticker_key] = target_date
                     state.holding_days_map[ticker_key] = 1
-                elif prev_decision.startswith("BUY") and raw_decision == "HOLD":
+                elif prev_pending_action.startswith("BUY") and raw_decision == "HOLD":
                     state.holding_days_map[ticker_key] = max(state.holding_days_map[ticker_key], 1)
                 else:
                     state.holding_days_map[ticker_key] += 1
@@ -152,7 +162,7 @@ def build_snapshot_rows(
             state.holding_days_map[ticker_key] = 0
 
         display_avg_cost = None
-        is_pending_buy = is_pending_tomorrow and raw_decision.startswith("BUY")
+        is_pending_buy = is_pending_tomorrow and pending_action.startswith("BUY")
         if not is_cash and not is_pending_buy and _is_finite_number(avg_cost) and avg_cost > 0:
             display_avg_cost = avg_cost
 
@@ -180,16 +190,11 @@ def build_snapshot_rows(
         sort_group = 2
         if is_cash:
             sort_group = 0
-        elif display_decision in {
+        elif is_pending_tomorrow or display_decision in {
             "HOLD",
             "BUY",
             "BUY_REPLACE",
             "BUY_TODAY",
-            "BUY_NEXTDAY",
-            "SELL_NEXTDAY",
-            "BUY_REPLACE_NEXTDAY",
-            "SELL_REPLACE_NEXTDAY",
-            "SELL_REBALANCE_NEXTDAY",
         }:
             sort_group = 1
 
@@ -198,7 +203,7 @@ def build_snapshot_rows(
             "bucket": bucket_id,
             "bucket_display": bucket_display,
             "name": name,
-            "display_decision": display_decision or "-",
+            "display_decision": "N/A" if is_cash else (display_decision or "-"),
             "raw_decision": raw_decision or "-",
             "holding_days": state.holding_days_map.get(ticker_key, 0),
             "price": price,
@@ -213,10 +218,11 @@ def build_snapshot_rows(
             "message": message,
             "is_cash": is_cash,
             "is_pending_tomorrow": is_pending_tomorrow,
+            "pending_action": pending_action or None,
             "sort_group": sort_group,
         }
         entries.append(snapshot_row)
-        state.prev_decisions_map[ticker_key] = raw_decision
+        state.prev_pending_actions_map[ticker_key] = pending_action
         state.prev_effective_shares_map[ticker_key] = shares
         state.prev_effective_avg_cost_map[ticker_key] = avg_cost
 

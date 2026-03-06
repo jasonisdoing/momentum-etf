@@ -32,7 +32,7 @@ def _build_daily_table_rows(
     buy_date_map: dict[str, pd.Timestamp | None],
     holding_days_map: dict[str, int],
     prev_rows_cache: dict[str, pd.Series | None],
-    prev_decisions_map: dict[str, str],
+    prev_pending_actions_map: dict[str, str],
     prev_effective_shares_map: dict[str, float],
     prev_effective_avg_cost_map: dict[str, float],
     price_overrides: dict[str, float] | None = None,
@@ -41,7 +41,7 @@ def _build_daily_table_rows(
     snapshot_state.buy_date_map = buy_date_map
     snapshot_state.holding_days_map = holding_days_map
     snapshot_state.prev_rows_cache = prev_rows_cache
-    snapshot_state.prev_decisions_map = prev_decisions_map
+    snapshot_state.prev_pending_actions_map = prev_pending_actions_map
     snapshot_state.prev_effective_shares_map = prev_effective_shares_map
     snapshot_state.prev_effective_avg_cost_map = prev_effective_avg_cost_map
 
@@ -205,7 +205,7 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
             buy_date_map=snapshot_state.buy_date_map,
             holding_days_map=snapshot_state.holding_days_map,
             prev_rows_cache=snapshot_state.prev_rows_cache,
-            prev_decisions_map=snapshot_state.prev_decisions_map,
+            prev_pending_actions_map=snapshot_state.prev_pending_actions_map,
             prev_effective_shares_map=snapshot_state.prev_effective_shares_map,
             prev_effective_avg_cost_map=snapshot_state.prev_effective_avg_cost_map,
         )

@@ -231,6 +231,7 @@ def extract_recommendations_from_backtest(
                 "drawdown_from_high": drawdown_from_high,
                 "trend_prices": trend_prices,
                 "phrase": phrase,
+                "is_pending_tomorrow": bool(snapshot_row.get("is_pending_tomorrow", False)),
                 "base_date": end_date,
                 "bucket": snapshot_row.get("bucket", meta.get("bucket", DEFAULT_BUCKET)),
                 "bucket_name": BUCKET_NAMES.get(
@@ -254,16 +255,12 @@ def _assign_final_ranks(
     # 2: 제외/대기 대상 (WAIT, SELL, SELL_REPLACE)
     for rec in recommendations:
         state = str(rec.get("state", "")).upper()
+        is_pending_tomorrow = bool(rec.get("is_pending_tomorrow", False))
 
-        if state in (
+        if is_pending_tomorrow or state in (
             "HOLD",
             "BUY",
             "BUY_REPLACE",
-            "BUY_NEXTDAY",
-            "SELL_NEXTDAY",
-            "BUY_REPLACE_NEXTDAY",
-            "SELL_REPLACE_NEXTDAY",
-            "SELL_REBALANCE_NEXTDAY",
         ):
             rec["_sort_group"] = 1
         else:
@@ -444,10 +441,6 @@ def _decision_to_state(decision: str, shares: float) -> str:
         "SELL",
         "BUY_REPLACE",
         "SELL_REPLACE",
-        "BUY_NEXTDAY",
-        "SELL_NEXTDAY",
-        "BUY_REPLACE_NEXTDAY",
-        "SELL_REPLACE_NEXTDAY",
     ):
         return decision_upper
     elif shares and shares > 0:
@@ -825,7 +818,7 @@ def dump_recommendation_log(
         bucket_name = BUCKET_NAMES.get(bucket_val, str(bucket_val))
 
         state = item.get("state", "-")
-        is_pending_tomorrow = str(state).upper().endswith("_NEXTDAY")
+        is_pending_tomorrow = bool(item.get("is_pending_tomorrow", False))
         holding_days = item.get("holding_days", 0)
         daily_pct = item.get("daily_pct", 0)
         evaluation_pct = item.get("evaluation_pct", 0)
