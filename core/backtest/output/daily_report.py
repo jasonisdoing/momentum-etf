@@ -36,7 +36,7 @@ def _build_daily_table_rows(
     prev_effective_shares_map: dict[str, float],
     prev_effective_avg_cost_map: dict[str, float],
     price_overrides: dict[str, float] | None = None,
-) -> list[list[str]]:
+) -> tuple[list[list[str]], float, float]:
     snapshot_state = create_snapshot_build_state()
     snapshot_state.buy_date_map = buy_date_map
     snapshot_state.holding_days_map = holding_days_map
@@ -55,6 +55,8 @@ def _build_daily_table_rows(
     )
 
     table_rows: list[list[str]] = []
+    eval_profit_sum = 0.0
+    eval_cost_sum = 0.0
     for snapshot_row in snapshot_rows:
         is_cash = bool(snapshot_row["is_cash"])
         price = float(snapshot_row["price"])
@@ -81,7 +83,14 @@ def _build_daily_table_rows(
         ]
         table_rows.append(row_data)
 
-    return table_rows
+        if (not is_cash) and shares > 0 and evaluation_profit is not None:
+            eval_profit_val = float(evaluation_profit)
+            cost_basis = pv - eval_profit_val
+            if cost_basis > 0:
+                eval_profit_sum += eval_profit_val
+                eval_cost_sum += cost_basis
+
+    return table_rows, eval_profit_sum, eval_cost_sum
 
 
 def _generate_daily_report_lines(result: AccountBacktestResult, account_settings: dict[str, Any]) -> list[str]:
@@ -194,7 +203,7 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         lines.append("")
         lines.append(line_str)
 
-        table_rows = _build_daily_table_rows(
+        table_rows, eval_profit_sum, eval_cost_sum = _build_daily_table_rows(
             result=result,
             target_date=target_date,
             total_value=total_value,
@@ -209,6 +218,13 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
             prev_effective_shares_map=snapshot_state.prev_effective_shares_map,
             prev_effective_avg_cost_map=snapshot_state.prev_effective_avg_cost_map,
         )
+
+        eval_return_pct = (eval_profit_sum / eval_cost_sum * 100.0) if eval_cost_sum > 0 else 0.0
+        summary_data["eval_profit_loss"] = eval_profit_sum
+        summary_data["eval_return_pct"] = eval_return_pct
+
+        line_str = build_summary_line_from_summary_data(summary_data, header_formatter, use_html=False, prefix=prefix)
+        lines[-1] = line_str
 
         lines.extend(render_table_eaw(headers, table_rows, aligns))
         advance_snapshot_state(result=result, target_date=target_date, state=snapshot_state)
