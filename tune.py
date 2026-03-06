@@ -24,43 +24,35 @@ ACCOUNT_TUNING_CONFIG = {
         "BUCKET_TOPN": [2],
         "MA_MONTH": [3],
         "MA_TYPE": ["HMA"],
-        # "REPLACEMENT_MODE": ["WEEKLY"],
-        # "REBALANCE_MODE": ["MONTHLY"],
         "REPLACEMENT_MODE": ["DAILY"],
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["MONTHLY"],
     },
     "kor_pension": {
-        # 4개월 + MONTHLY 최적: 72.30 | -14.68
         "BUCKET_TOPN": [2],  # 연금 1개, ISA 1개
         "MA_MONTH": [6],
         "MA_TYPE": ["HMA"],
-        "REPLACEMENT_MODE": ["MONTHLY"],
+        "REPLACEMENT_MODE": ["WEEKLY"],
         "REBALANCE_MODE": ["MONTHLY"],
     },
     "kor_us": {
-        # 아무 개월 + QUARTERLY가 최적이지만 다음 쿼터까지 MONTHLY 로 유지
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [3],  # 종목이 많지 않고 고정 종목이라 의미 없음
+        "MA_MONTH": [6],
         "MA_TYPE": ["HMA"],
-        "REPLACEMENT_MODE": ["MONTHLY"],
+        "REPLACEMENT_MODE": ["WEEKLY"],
         "REBALANCE_MODE": ["MONTHLY"],
     },
     "us": {
-        # 5개월 + MONTHLY 가 최적 81.78%, -15.41%
         "BUCKET_TOPN": [2],
-        "MA_MONTH": [5],  # 중단기 추세
+        "MA_MONTH": [6],
         "MA_TYPE": ["HMA"],
-        "REPLACEMENT_MODE": ["MONTHLY"],
+        "REPLACEMENT_MODE": ["WEEKLY"],
         "REBALANCE_MODE": ["MONTHLY"],
     },
     "aus": {
-        # 6개월 + MONTHLY가 최적
         "BUCKET_TOPN": [2],
-        # "MA_MONTH": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-        "MA_MONTH": [6],  # 중기 추세
+        "MA_MONTH": [6],
         "MA_TYPE": ["HMA"],
         "REPLACEMENT_MODE": ["WEEKLY"],
-        # "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"], # 다음 쿼터에 오픈
         "REBALANCE_MODE": ["MONTHLY"],
     },
 }
