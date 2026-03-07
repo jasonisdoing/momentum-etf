@@ -155,17 +155,18 @@ def run_account_backtest(
 
     if strategy_override is not None:
         strategy_rules = StrategyRules.from_values(
+            strategy=strategy_override.strategy,
             ma_days=strategy_override.ma_days,
-            bucket_topn=strategy_override.bucket_topn,
+            topn=strategy_override.topn,
             ma_type=strategy_override.ma_type,
             rebalance_mode=strategy_override.rebalance_mode,
-            replacement_mode=strategy_override.replacement_mode,
-            sell_on_negative_score=strategy_override.sell_on_negative_score,
+            cooldown=strategy_override.cooldown_days,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
         strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
+        strategy_settings["STRATEGY"] = strategy_rules.strategy
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
-        strategy_settings["BUCKET_TOPN"] = strategy_rules.bucket_topn
+        strategy_settings["TOPN"] = strategy_rules.topn
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
 
     backtest_start_date_str = _resolve_backtest_start_date(None, override_settings, account_settings)
@@ -219,9 +220,10 @@ def run_account_backtest(
     ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금"}
 
     # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
-    bucket_topn = strategy_rules.bucket_topn
+    topn = strategy_rules.topn
+    bucket_topn = topn  # backward-compatible field naming for reports/result schema
     if not is_tuning_fast_path:
-        _log(f"[백테스트] 포트폴리오 TOPN: {bucket_topn}")
+        _log(f"[백테스트] 포트폴리오 TOPN: {topn}")
 
     if not is_tuning_fast_path:
         _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
@@ -280,20 +282,12 @@ def run_account_backtest(
                 f"{account_id.upper()} 기간 {date_range[0]}~{future_end_date}의 거래일 정보를 로드하지 못했습니다."
             )
 
-    # 버켓 맵 구성 및 전체 top_n 계산
-    bucket_map = {str(item.get("ticker", "")).upper(): item.get("bucket", 1) for item in etf_universe}
-    unique_buckets = {item.get("bucket", 1) for item in etf_universe}
-    num_buckets = len(unique_buckets) if unique_buckets else 1
-    total_top_n = bucket_topn * num_buckets
-
     ticker_timeseries = (
         run_portfolio_backtest(
             stocks=etf_universe,
             initial_capital=initial_capital_value,
             core_start_date=start_date,
-            top_n=total_top_n,
-            bucket_topn=bucket_topn,  # 버켓당 제한 전달
-            bucket_map=bucket_map,  # 버켓 맵 전달
+            top_n=topn,
             date_range=date_range,
             country=country_code,
             missing_ticker_sink=runtime_missing_tickers,
@@ -310,7 +304,7 @@ def run_account_backtest(
     portfolio_df = _build_portfolio_timeseries(
         ticker_timeseries,
         initial_capital_value,
-        bucket_topn,
+        topn,
     )
 
     (
@@ -327,7 +321,7 @@ def run_account_backtest(
         initial_capital_krw=capital_info.krw,
         currency=display_currency,
         bucket_topn=bucket_topn,
-        holdings_limit=total_top_n,  # Pass total limit
+        holdings_limit=topn,
         account_settings=account_settings,
         prefetched_data=prefetched_data,
         ticker_timeseries=ticker_timeseries,
@@ -367,7 +361,7 @@ def run_account_backtest(
         initial_capital_krw=capital_info.krw,
         currency=display_currency,
         bucket_topn=bucket_topn,
-        holdings_limit=total_top_n,
+        holdings_limit=topn,
         summary=summary,
         portfolio_timeseries=portfolio_df,
         ticker_timeseries=ticker_timeseries,
@@ -510,10 +504,11 @@ def _build_backtest_kwargs(
     kwargs: dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "prefetched_metrics": prefetched_metrics,
+        "strategy": strategy_rules.strategy,
         "ma_days": strategy_rules.ma_days,
         "ma_type": strategy_rules.ma_type,
         "rebalance_mode": strategy_rules.rebalance_mode,
-        "replacement_mode": strategy_rules.replacement_mode,
+        "cooldown": strategy_rules.cooldown_days,
         "quiet": quiet,
         "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }

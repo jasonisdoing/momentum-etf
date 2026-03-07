@@ -23,6 +23,29 @@ def validate_strategy_settings(
     errors = []
 
     # strategy 필수 항목 검증
+    required_keys = [
+        "STRATEGY",
+        "TOPN",
+        "MA_MONTH",
+        "MA_TYPE",
+        "REBALANCE_MODE",
+        "COOLDOWN",
+    ]
+    for key in required_keys:
+        val = strategy_tuning.get(key)
+        if val is None:
+            errors.append(key)
+            continue
+        if isinstance(val, str) and not val.strip():
+            errors.append(key)
+
+    cooldown_val = strategy_tuning.get("COOLDOWN")
+    if cooldown_val is not None:
+        try:
+            if int(cooldown_val) < 1:
+                errors.append("COOLDOWN(>=1)")
+        except (TypeError, ValueError):
+            errors.append("COOLDOWN(정수)")
 
     # 에러가 있으면 한 번에 보고
     if errors:

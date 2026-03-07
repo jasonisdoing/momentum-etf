@@ -883,7 +883,7 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
                 hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
                 if df is not None:
                     current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-                    target_topn = strategy_tuning.get("BUCKET_TOPN") if isinstance(strategy_tuning, dict) else None
+                    target_topn = strategy_tuning.get("TOPN") if isinstance(strategy_tuning, dict) else None
                     if target_topn:
                         caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
             except Exception:

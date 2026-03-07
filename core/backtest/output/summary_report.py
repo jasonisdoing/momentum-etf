@@ -68,15 +68,15 @@ def print_backtest_summary(
     ma_month = merged_strategy.get("MA_MONTH")
     momentum_label = f"{ma_month}개월" if ma_month is not None else "N/A"
 
-    # [수정] 전체 종목 수 한도 표시를 명확히 함
-    holdings_limit = summary.get("holdings_limit") or (bucket_topn * 5)  # 5버킷 기준 기본값
+    # 전체 종목 수 한도 표시
+    holdings_limit = summary.get("holdings_limit") or bucket_topn
     try:
         holdings_limit = int(holdings_limit)
     except (TypeError, ValueError):
         holdings_limit = bucket_topn
 
     used_settings = {
-        "버킷당 종목 수 (Bucket TopN)": bucket_topn,
+        "포트폴리오 종목 수 (TOPN)": bucket_topn,
         "전체 종목 수 한도 (Total Limit)": holdings_limit,
         "모멘텀 스코어 MA 기간": momentum_label,
     }

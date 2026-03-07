@@ -263,40 +263,11 @@ def _assign_final_ranks(
         else:
             rec["_sort_group"] = 2
 
-    # 2. 버킷별 Top N 판별
-    # 최상단에 보여질 종목(Group 1)이 먼저 버킷 T/O(Top N)를 차지하게 함.
-    # Group 1을 먼저 점수순으로 정렬해서 T/O 할당, 그 다음 Group 2를 점수순으로 정렬해서 남은 T/O 할당
-    recommendations.sort(
-        key=lambda x: (x.get("_sort_group", 2), -(x.get("score") if x.get("score") is not None else float("-inf")))
-    )
-
-    bucket_counts = {}
-    for rec in recommendations:
-        b_idx = rec.get("bucket", 99)
-        bucket_counts[b_idx] = bucket_counts.get(b_idx, 0) + 1
-        if bucket_counts[b_idx] <= bucket_topn:
-            rec["_is_bucket_top"] = True
-        else:
-            rec["_is_bucket_top"] = False
-
-    # 3. 정렬 로직 적용
+    # 2. 정렬 로직 적용 (버킷 미사용, 전체 점수순)
     def _sort_key(x):
-        # [절대 변경 금지] 정렬 정책:
-        # 1) 상단 TOPN * 버킷수(버킷 TopN 선정 구간)만 버킷 순서 유지
-        # 2) 상단 구간 외에는 버킷 무시, 점수순 정렬
-        # 1. 버킷별 TopN 구간을 먼저 노출
-        # 2. TopN 구간 안에서는 버킷 번호 순 고정
-        # 3. 같은 버킷 안에서는 보유/매수 중인 항목을 먼저, 이후 점수순 정렬
-        top_priority = 0 if x.get("_is_bucket_top") else 1
-        sort_bucket = x.get("bucket", 99)
-        bucket_rank = sort_bucket if top_priority == 0 else 99
         holding_priority = 0 if x.get("_is_current_holding") else 1
-        state_priority = 0 if x.get("_sort_group") == 1 else 1
         return (
-            top_priority,
-            bucket_rank,
             holding_priority,
-            state_priority,
             -(x.get("score") if x.get("score") is not None else float("-inf")),
             x.get("ticker", ""),
         )
@@ -695,8 +666,16 @@ def generate_recommendation_report(
     )
 
     # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
-    bucket_topn = strategy_cfg.get("BUCKET_TOPN", 2)
-    recommendations = _assign_final_ranks(recommendations, bucket_topn=bucket_topn)
+    topn_raw = strategy_cfg.get("TOPN")
+    if topn_raw is None:
+        raise ValueError("strategy.TOPN 설정이 누락되었습니다.")
+    try:
+        topn = int(topn_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("strategy.TOPN은 정수여야 합니다.") from exc
+    if topn <= 0:
+        raise ValueError("strategy.TOPN은 0보다 커야 합니다.")
+    recommendations = _assign_final_ranks(recommendations, bucket_topn=topn)
 
     return RecommendationReport(
         account_id=account_id,

@@ -8,21 +8,21 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_LAST_MONTHS": 12,
-        "BACKTESTED_DATE": "2026-03-06 20:03",
-        "CAGR": 70.289373,
-        "MDD": -8.991423,
-        "BUCKET_TOPN": 2,
-        "MA_MONTH": 5,
+        "BACKTESTED_DATE": "2026-03-07 11:41",
+        "CAGR": 51.618942,
+        "MDD": -13.424077,
+        "STRATEGY": "MAPS",
+        "TOPN": 5,
+        "MA_MONTH": 12,
         "MA_TYPE": "HMA",
-        "SELL_ON_NEGATIVE_SCORE": true,
-        "REBALANCE_MODE": "QUARTERLY",
-        "REPLACEMENT_MODE": "MONTHLY",
+        "REBALANCE_MODE": "WEEKLY",
+        "COOLDOWN": 2,
         "ENABLE_DATA_SUFFICIENCY_CHECK": false,
         "OPTIMIZATION_METRIC": "CAGR"
     },
     "benchmark": {
-        "ticker": "426030",
-        "name": "TIME 미국나스닥100액티브"
+        "ticker": "379810",
+        "name": "KODEX 미국나스닥100"
     },
     "account": "kor_pension"
 }

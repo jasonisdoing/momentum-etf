@@ -64,10 +64,10 @@ _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
 }
 
 PENDING_ACTION_MESSAGES: dict[str, str] = {
-    "BUY": "신규 매수 신호",
-    "BUY_REPLACE": "교체매수 신호",
-    "SELL": "매도 신호",
-    "SELL_REPLACE": "교체매도 신호",
+    "BUY": "[예정] 신규 매수 신호",
+    "BUY_REPLACE": "[예정] 교체매수 신호",
+    "SELL": "[예정] 매도 신호",
+    "SELL_REPLACE": "[예정] 교체매도 신호",
     "SELL_REBALANCE": "",
 }
 
