@@ -26,9 +26,10 @@
 ### 핵심 구조
 | 파일/경로 | 역할 |
 |-----------------|------|
-| `recommend.py` | `backtest.py`의 핵심 로직을 호출하여 최신 권장 사항 추출 및 리포트(Slack, JSON, DB) 생성 |
-| `backtest.py` | 단일 계정 또는 전체 기간에 대한 전략 시뮬레이션 실행 |
-| `logic/backtest/account.py` | 개별 계좌의 상태(현금, 보유종목, 수익률)를 관리하는 핵심 엔진 |
+| `recommend.py` | 백테스트 엔진을 호출하여 최신 권장 사항 추출 및 리포트 생성 |
+| `backtest.py` | 계정 단위 전략 시뮬레이션 실행 엔트리 |
+| `core/backtest/runner.py` | 계좌 설정 로드/검증 후 백테스트 실행 오케스트레이션 |
+| `core/backtest/engine.py` | MAPS/HR 전략 공통 실행 엔진 |
 
 ### 핵심 일관성 체크리스트
 
@@ -40,20 +41,40 @@
     *   코드에 암묵적인 기본값(fallback)을 사용하지 않습니다.
     *   필수 전략 파라미터가 누락된 경우 명확한 `ValueError`를 발생시켜 의도치 않은 전략 실행을 방지합니다.
 
-## 3. 공통 모듈 (`logic/common/`)
+## 3. 전략 설정 규칙
 
-로직의 중복을 피하고 일관성을 유지하기 위해 백테스트 엔진은 다음 공통 모듈을 사용합니다.
+신규 전략 설정 포맷:
 
-*   `portfolio.py`: 보유 수 계산, 매수 필터링
-*   `signals.py`: 매수 시그널 발생 여부, 연속 상승일 계산
-*   `filtering.py`: 후보군 필터링 및 정렬
-*   `price.py`: 가격 결정 및 수익률 계산 로직
+```json
+{
+  "strategy": {
+    "COMMON": {
+      "STRATEGY": "MAPS|HR",
+      "BACKTEST_LAST_MONTHS": 12,
+      "REBALANCE_MODE": "...",
+      "OPTIMIZATION_METRIC": "CAGR|SHARPE|SDR"
+    },
+    "MAPS": {
+      "TOPN": 5,
+      "MA_MONTH": 12,
+      "MA_TYPE": "HMA",
+      "COOLDOWN": 2
+    }
+  }
+}
+```
+
+검증 원칙:
+
+* `MAPS`: `COMMON` + `MAPS` 필수
+* `HR`: `COMMON` 필수 (`HR` 블록은 선택)
+* 필수값 누락 시 fallback 없이 명시적 에러
 
 ## 4. 테스트 및 검증
 
 코드를 수정할 때는 다음 절차를 따르세요.
 
-1.  **로직 수정**: `core/backtest/` 수정
+1.  **로직 수정**: `core/backtest/`, `core/tune/`, `utils/settings_loader.py`를 우선 확인
 2.  **검증**:
     *   **백테스트 실행**: `python backtest.py <account_id>`를 통해 전체 기간 수익률 추이 및 거래 횟수 확인
     *   **추천 실행**: `python recommend.py <account_id>`를 실행하여 마지막 날 결과가 의도대로 나오는지 확인

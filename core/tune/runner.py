@@ -187,29 +187,14 @@ def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> list[Any]:
 
 def _resolve_month_configs(account_id: str = None) -> list[dict[str, Any]]:
     configs = get_tune_month_configs(account_id=account_id)
-    if configs:
-        return configs
-
-    if account_id:
-        try:
-            account_settings = get_account_settings(account_id)
-            fallback = account_settings.get("strategy", {}).get("BACKTEST_LAST_MONTHS")
-            if fallback is not None:
-                import pandas as pd
-
-                months_back = int(fallback)
-                start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
-                return [
-                    {
-                        "backtest_start_date": start_dt.strftime("%Y-%m-%d"),
-                        "weight": 1.0,
-                        "source": f"account_{account_id}",
-                    }
-                ]
-        except Exception:
-            pass
-
-    return []
+    if not configs:
+        if account_id:
+            raise ValueError(
+                f"[튜닝] '{account_id}' 계정의 테스트 기간 설정이 비어 있습니다. "
+                "strategy.BACKTEST_LAST_MONTHS를 확인하세요."
+            )
+        raise ValueError("[튜닝] 테스트 기간 설정이 비어 있습니다.")
+    return configs
 
 
 def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> None:
@@ -243,77 +228,127 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     else:
         strategy_data = {}
 
-    legacy_tuning = strategy_data.pop("tuning", None)
-    if isinstance(legacy_tuning, dict):
-        strategy_data.update(legacy_tuning)
-
-    # Legacy cleanup
-
-    integer_keys = {
-        "TOPN",
-        "MA_MONTH",
-    }
-
-    for key, value in result_params.items():
-        if value is None:
-            continue
-        strategy_data[key] = value
-
-    # Migrate legacy key if present
-    if "TOPN" not in strategy_data and "BUCKET_TOPN" in strategy_data:
-        strategy_data["TOPN"] = strategy_data.get("BUCKET_TOPN")
-    strategy_data.pop("BUCKET_TOPN", None)
-
-    # 정수형이어야 하는 필드들 강제 형변환 (튜닝 여부와 무관하게)
-    for key in integer_keys:
-        if key in strategy_data and strategy_data[key] is not None:
-            try:
-                strategy_data[key] = int(float(strategy_data[key]))
-            except (ValueError, TypeError):
-                pass
-
     weighted_cagr = entry.get("weighted_expected_CAGR")
-    if weighted_cagr is not None:
-        strategy_data["CAGR"] = _round_float(weighted_cagr)
-
     weighted_mdd = entry.get("weighted_expected_MDD")
-    if weighted_mdd is not None:
-        strategy_data["MDD"] = _round_float(weighted_mdd)
+    backtested_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    strategy_data["BACKTESTED_DATE"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # 신규 포맷: strategy.COMMON + strategy.<ACTIVE_STRATEGY>
+    common_raw = strategy_data.get("COMMON")
+    if isinstance(common_raw, dict):
+        common_data = dict(common_raw)
+        original_strategy = str(common_data.get("STRATEGY") or "").strip().upper()
+        result_strategy = str(result_params.get("STRATEGY") or "").strip().upper()
+        active_strategy = result_strategy or original_strategy
+        if not active_strategy:
+            logger.error("[튜닝] %s 계정의 strategy.COMMON.STRATEGY가 비어 있어 갱신을 건너뜁니다.", account_id.upper())
+            return
 
-    # [Key Reordering]
-    # 사용자가 요청한 순서대로 키를 정렬하여 저장
-    desired_order = [
-        "BACKTEST_LAST_MONTHS",
-        "BACKTESTED_DATE",
-        "CAGR",
-        "MDD",
-        "STRATEGY",
-        "TOPN",
-        "MA_MONTH",
-        "MA_TYPE",
-        "REBALANCE_MODE",
-        "COOLDOWN",
-        "ENABLE_DATA_SUFFICIENCY_CHECK",
-        "OPTIMIZATION_METRIC",
-    ]
+        active_block = strategy_data.get(active_strategy)
+        if not isinstance(active_block, dict):
+            active_block = {}
+        active_data = dict(active_block)
 
-    ordered_strategy = {}
+        common_data["STRATEGY"] = active_strategy
+        common_data["BACKTESTED_DATE"] = backtested_at
+        if weighted_cagr is not None:
+            common_data["CAGR"] = _round_float(weighted_cagr)
+        if weighted_mdd is not None:
+            common_data["MDD"] = _round_float(weighted_mdd)
+        if result_params.get("OPTIMIZATION_METRIC") is not None:
+            common_data["OPTIMIZATION_METRIC"] = result_params.get("OPTIMIZATION_METRIC")
 
-    # 1. Desired keys first
-    for key in desired_order:
-        if key in strategy_data:
-            ordered_strategy[key] = strategy_data[key]
+        for key, value in result_params.items():
+            if value is None:
+                continue
+            if key == "STRATEGY":
+                resolved = str(value).upper()
+                common_data["STRATEGY"] = resolved
+                if resolved != active_strategy:
+                    active_strategy = resolved
+                    next_block = strategy_data.get(active_strategy)
+                    active_data = dict(next_block) if isinstance(next_block, dict) else {}
+                continue
+            if key == "REBALANCE_MODE":
+                common_data["REBALANCE_MODE"] = value
+                continue
+            if key in {"CAGR", "MDD", "BACKTESTED_DATE", "BACKTEST_LAST_MONTHS", "OPTIMIZATION_METRIC"}:
+                continue
+            active_data[key] = value
 
-    # 2. Remaining keys
-    for key, val in strategy_data.items():
-        if key not in ordered_strategy:
-            ordered_strategy[key] = val
+        for int_key in ("TOPN", "MA_MONTH", "COOLDOWN"):
+            if int_key in active_data and active_data[int_key] is not None:
+                try:
+                    active_data[int_key] = int(float(active_data[int_key]))
+                except (TypeError, ValueError):
+                    pass
 
-    strategy_data = ordered_strategy
+        # REBALANCE_MODE는 COMMON 전용으로 유지한다.
+        active_data.pop("REBALANCE_MODE", None)
 
-    settings_data["strategy"] = strategy_data
+        strategy_out: dict[str, Any] = {"COMMON": common_data}
+        # HR은 전략 전용 파라미터가 없을 수 있으므로 빈 블록은 저장하지 않는다.
+        if active_strategy != "HR" or active_data:
+            strategy_out[active_strategy] = active_data
+        settings_data["strategy"] = strategy_out
+    else:
+        # 구 포맷(flat) 호환
+        legacy_tuning = strategy_data.pop("tuning", None)
+        if isinstance(legacy_tuning, dict):
+            strategy_data.update(legacy_tuning)
+
+        integer_keys = {
+            "TOPN",
+            "MA_MONTH",
+        }
+
+        for key, value in result_params.items():
+            if value is None:
+                continue
+            strategy_data[key] = value
+
+        if "TOPN" not in strategy_data and "BUCKET_TOPN" in strategy_data:
+            strategy_data["TOPN"] = strategy_data.get("BUCKET_TOPN")
+        strategy_data.pop("BUCKET_TOPN", None)
+
+        for key in integer_keys:
+            if key in strategy_data and strategy_data[key] is not None:
+                try:
+                    strategy_data[key] = int(float(strategy_data[key]))
+                except (ValueError, TypeError):
+                    pass
+
+        if weighted_cagr is not None:
+            strategy_data["CAGR"] = _round_float(weighted_cagr)
+
+        if weighted_mdd is not None:
+            strategy_data["MDD"] = _round_float(weighted_mdd)
+
+        strategy_data["BACKTESTED_DATE"] = backtested_at
+
+        desired_order = [
+            "BACKTEST_LAST_MONTHS",
+            "BACKTESTED_DATE",
+            "CAGR",
+            "MDD",
+            "STRATEGY",
+            "TOPN",
+            "MA_MONTH",
+            "MA_TYPE",
+            "REBALANCE_MODE",
+            "COOLDOWN",
+            "ENABLE_DATA_SUFFICIENCY_CHECK",
+            "OPTIMIZATION_METRIC",
+        ]
+
+        ordered_strategy = {}
+        for key in desired_order:
+            if key in strategy_data:
+                ordered_strategy[key] = strategy_data[key]
+        for key, val in strategy_data.items():
+            if key not in ordered_strategy:
+                ordered_strategy[key] = val
+
+        settings_data["strategy"] = ordered_strategy
 
     tmp_path: Path | None = None
     try:
@@ -1372,64 +1407,51 @@ def run_account_tuning(
     debug_diff_rows: list[dict[str, Any]] = []
     debug_month_configs: list[dict[str, Any]] = []
 
-    # [Modify] MA_MONTH 필수 처리: 튜닝 설정에 명시적으로 존재해야 함
-    ma_month_raw = config.get("MA_MONTH")
-    if ma_month_raw is None or (isinstance(ma_month_raw, (list, tuple)) and not ma_month_raw):
-        raise ValueError(
-            f"[튜닝] '{account_id}' 계정의 'MA_MONTH' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
-        )
-
-    ma_month_values = _normalize_tuning_values(ma_month_raw, dtype=int, fallback=None)
-    ma_values = []
-
-    if ma_month_values:
-        # Month 사용 시 Day 변환 없이 그대로 사용
-        pass
+    # 튜닝 설정 포맷:
+    # 1) 신규: {"COMMON": {...}, "MAPS": {...}} 또는 {"COMMON": {...}, "HR": {...}}
+    # 2) 구형: 최상위 키에 STRATEGY/TOPN/MA_MONTH...
+    common_cfg: dict[str, Any] = {}
+    strategy_cfg_block: dict[str, Any] = {}
+    if isinstance(config.get("COMMON"), dict):
+        common_cfg = dict(config.get("COMMON") or {})
+        strategy_raw = common_cfg.get("STRATEGY")
+        strategy_value = str(strategy_raw or "").strip().upper()
+        if not strategy_value:
+            raise ValueError(
+                f"[튜닝] '{account_id}' 계정의 'COMMON.STRATEGY'가 누락되었습니다. tune.py의 설정을 확인하세요."
+            )
+        strategy_cfg_raw = config.get(strategy_value)
+        if not isinstance(strategy_cfg_raw, dict) and strategy_value != "HR":
+            raise ValueError(
+                f"[튜닝] '{account_id}' 계정의 '{strategy_value}' 튜닝 블록이 누락되었거나 dict가 아닙니다."
+            )
+        strategy_cfg_block = dict(strategy_cfg_raw) if isinstance(strategy_cfg_raw, dict) else {}
+        strategy_values = [strategy_value]
     else:
-        # 위에서 에러를 던지므로 여기는 도달하지 않아야 함
-        raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_MONTH'가 유효하지 않습니다.")
+        strategy_raw = config.get("STRATEGY")
+        if strategy_raw is None or (isinstance(strategy_raw, (list, tuple)) and not strategy_raw):
+            raise ValueError(
+                f"[튜닝] '{account_id}' 계정의 'STRATEGY' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+            )
+        if isinstance(strategy_raw, (list, tuple)):
+            strategy_values = [str(v).upper() for v in strategy_raw if v]
+        else:
+            strategy_values = [str(strategy_raw).upper()]
+        strategy_values = list(dict.fromkeys(str(v).upper() for v in strategy_values if v))
+        if not strategy_values:
+            raise ValueError(f"[튜닝] '{account_id}' 계정의 'STRATEGY'가 유효하지 않습니다.")
+        if len(strategy_values) != 1:
+            raise ValueError(f"[튜닝] '{account_id}' 계정의 STRATEGY는 단일 값만 허용됩니다.")
+        strategy_cfg_block = dict(config)
 
-    topn_raw = config.get("TOPN")
-    if topn_raw is None or (isinstance(topn_raw, (list, tuple)) and not topn_raw):
-        raise ValueError(
-            f"[튜닝] '{account_id}' 계정의 'TOPN' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
-        )
-    topn_values = _normalize_tuning_values(topn_raw, dtype=int, fallback=None)
-    if not topn_values:
-        raise ValueError(f"[튜닝] '{account_id}' 계정의 'TOPN'이 유효하지 않습니다.")
+    active_strategy = strategy_values[0]
 
-    strategy_raw = config.get("STRATEGY")
-    if strategy_raw is None or (isinstance(strategy_raw, (list, tuple)) and not strategy_raw):
-        raise ValueError(
-            f"[튜닝] '{account_id}' 계정의 'STRATEGY' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
-        )
-    if isinstance(strategy_raw, (list, tuple)):
-        strategy_values = [str(v).upper() for v in strategy_raw if v]
-    else:
-        strategy_values = [str(strategy_raw).upper()]
+    def _pick(key: str) -> Any:
+        if key in strategy_cfg_block:
+            return strategy_cfg_block.get(key)
+        return common_cfg.get(key)
 
-    if not strategy_values:
-        raise ValueError(f"[튜닝] '{account_id}' 계정의 'STRATEGY'가 유효하지 않습니다.")
-    strategy_values = list(dict.fromkeys(str(v).upper() for v in strategy_values if v))
-    if not strategy_values:
-        raise ValueError(f"[튜닝] '{account_id}' 계정의 'STRATEGY'가 유효하지 않습니다.")
-
-    # MA_TYPE 처리: 문자열 리스트로 받음
-    ma_type_raw = config.get("MA_TYPE")
-    if ma_type_raw is None or (isinstance(ma_type_raw, (list, tuple)) and not ma_type_raw):
-        raise ValueError(
-            f"[튜닝] '{account_id}' 계정의 'MA_TYPE' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
-        )
-    if isinstance(ma_type_raw, (list, tuple)):
-        ma_type_values = [str(v).upper() for v in ma_type_raw if v]
-    else:
-        ma_type_values = [str(ma_type_raw).upper()]
-
-    if not ma_type_values:
-        raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_TYPE'이 유효하지 않습니다.")
-
-    # REBALANCE_MODE 처리: 문자열 리스트로 받음
-    rebalance_raw = config.get("REBALANCE_MODE")
+    rebalance_raw = _pick("REBALANCE_MODE")
     if rebalance_raw is None or (isinstance(rebalance_raw, (list, tuple)) and not rebalance_raw):
         raise ValueError(
             f"[튜닝] '{account_id}' 계정의 'REBALANCE_MODE' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
@@ -1438,33 +1460,71 @@ def run_account_tuning(
         rebalance_mode_values = [str(v).upper() for v in rebalance_raw if v]
     else:
         rebalance_mode_values = [str(rebalance_raw).upper()]
-
     if not rebalance_mode_values:
         raise ValueError(f"[튜닝] '{account_id}' 계정의 'REBALANCE_MODE'가 유효하지 않습니다.")
 
-    # COOLDOWN 처리: 정수 리스트로 받음
-    cooldown_raw = config.get("COOLDOWN")
-    if cooldown_raw is None or (isinstance(cooldown_raw, (list, tuple)) and not cooldown_raw):
-        raise ValueError(
-            f"[튜닝] '{account_id}' 계정의 'COOLDOWN' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
-        )
-    if isinstance(cooldown_raw, (list, tuple)):
-        cooldown_values_raw = [v for v in cooldown_raw if v is not None]
+    ma_values: list[int] = []
+    if active_strategy == "MAPS":
+        ma_month_raw = _pick("MA_MONTH")
+        if ma_month_raw is None or (isinstance(ma_month_raw, (list, tuple)) and not ma_month_raw):
+            raise ValueError(
+                f"[튜닝] '{account_id}' 계정의 'MA_MONTH' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+            )
+        ma_month_values = _normalize_tuning_values(ma_month_raw, dtype=int, fallback=None)
+        if not ma_month_values:
+            raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_MONTH'가 유효하지 않습니다.")
+
+        topn_raw = _pick("TOPN")
+        if topn_raw is None or (isinstance(topn_raw, (list, tuple)) and not topn_raw):
+            raise ValueError(
+                f"[튜닝] '{account_id}' 계정의 'TOPN' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+            )
+        topn_values = _normalize_tuning_values(topn_raw, dtype=int, fallback=None)
+        if not topn_values:
+            raise ValueError(f"[튜닝] '{account_id}' 계정의 'TOPN'이 유효하지 않습니다.")
+
+        ma_type_raw = _pick("MA_TYPE")
+        if ma_type_raw is None or (isinstance(ma_type_raw, (list, tuple)) and not ma_type_raw):
+            raise ValueError(
+                f"[튜닝] '{account_id}' 계정의 'MA_TYPE' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+            )
+        if isinstance(ma_type_raw, (list, tuple)):
+            ma_type_values = [str(v).upper() for v in ma_type_raw if v]
+        else:
+            ma_type_values = [str(ma_type_raw).upper()]
+        if not ma_type_values:
+            raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_TYPE'이 유효하지 않습니다.")
+
+        cooldown_raw = _pick("COOLDOWN")
+        if cooldown_raw is None or (isinstance(cooldown_raw, (list, tuple)) and not cooldown_raw):
+            raise ValueError(
+                f"[튜닝] '{account_id}' 계정의 'COOLDOWN' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+            )
+        if isinstance(cooldown_raw, (list, tuple)):
+            cooldown_values_raw = [v for v in cooldown_raw if v is not None]
+        else:
+            cooldown_values_raw = [cooldown_raw]
+        cooldown_values: list[int] = []
+        for value in cooldown_values_raw:
+            try:
+                cooldown_values.append(int(value))
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"[튜닝] '{account_id}' 계정의 'COOLDOWN'에 정수가 아닌 값이 포함되어 있습니다: {value}"
+                )
+        cooldown_values = sorted(set(v for v in cooldown_values if v >= 1))
+        if not cooldown_values:
+            raise ValueError(f"[튜닝] '{account_id}' 계정의 'COOLDOWN'이 유효하지 않습니다. (1 이상의 정수)")
+    elif active_strategy == "HR":
+        # HR는 REBALANCE_MODE만 탐색한다.
+        ma_month_values = [1]
+        topn_values = [1]
+        ma_type_values = ["SMA"]
+        cooldown_values = [1]
     else:
-        cooldown_values_raw = [cooldown_raw]
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 '{active_strategy}' 전략 튜닝은 아직 지원하지 않습니다.")
 
-    cooldown_values: list[int] = []
-    for value in cooldown_values_raw:
-        try:
-            cooldown_values.append(int(value))
-        except (TypeError, ValueError):
-            raise ValueError(f"[튜닝] '{account_id}' 계정의 'COOLDOWN'에 정수가 아닌 값이 포함되어 있습니다: {value}")
-
-    cooldown_values = sorted(set(v for v in cooldown_values if v >= 1))
-    if not cooldown_values:
-        raise ValueError(f"[튜닝] '{account_id}' 계정의 'COOLDOWN'이 유효하지 않습니다. (1 이상의 정수)")
-
-    if (not ma_values and not ma_month_values) or not strategy_values or not topn_values or not ma_type_values:
+    if not strategy_values or not topn_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
@@ -1472,6 +1532,32 @@ def run_account_tuning(
     if not etf_universe:
         logger.error("[튜닝] '%s' 종목 데이터를 찾을 수 없습니다.", account_norm)
         return None
+
+    if active_strategy == "HR":
+        weight_sum = 0.0
+        weighted_count = 0
+        for item in etf_universe:
+            ticker = str(item.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            if item.get("weight") is None:
+                continue
+            try:
+                weight_val = float(item.get("weight"))
+            except (TypeError, ValueError):
+                raise ValueError(f"[튜닝] '{account_id}' 계정 종목 비중이 숫자가 아닙니다: {ticker}")
+            if weight_val < 0:
+                raise ValueError(f"[튜닝] '{account_id}' 계정 종목 비중은 0 이상이어야 합니다: {ticker}")
+            if weight_val > 0:
+                weighted_count += 1
+            weight_sum += weight_val
+
+        if weighted_count == 0:
+            raise ValueError(f"[튜닝] '{account_id}' 계정에 비중(weight) 0 초과 종목이 없습니다.")
+        if abs(weight_sum - 100.0) > 1e-2 and abs(weight_sum - 1.0) > 1e-3:
+            raise ValueError(
+                f"[튜닝] '{account_id}' 계정 HR 비중 합계는 100이어야 합니다. 현재 합계: {int(round(weight_sum))}"
+            )
 
     tickers = [str(item.get("ticker")) for item in etf_universe if item.get("ticker")]
     if not tickers:
@@ -1504,7 +1590,7 @@ def run_account_tuning(
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
         return None
 
-    optimization_metric_raw = config.get("OPTIMIZATION_METRIC")
+    optimization_metric_raw = _pick("OPTIMIZATION_METRIC")
     if optimization_metric_raw is None:
         raise ValueError(
             f"[튜닝] '{account_id}' 계정의 'OPTIMIZATION_METRIC' 설정이 누락되었습니다. tune.py의 ACCOUNT_TUNING_CONFIG를 확인하세요."
@@ -1945,20 +2031,42 @@ def run_account_tuning(
     if results_per_month:
         item = results_per_month[-1]
         best = item.get("best") or {}
-        logger.info(
-            "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): STRATEGY=%s / MA=%d / TOPN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
-            account_norm.upper(),
-            item.get("backtest_start_date"),
-            optimization_metric,
-            best.get("strategy", "MAPS"),
-            best.get("ma_month", 0),
-            best.get("bucket_topn", 0),
-            best.get("cagr", 0.0),
-            best.get("sharpe", 0.0),
-            best.get("sharpe_to_mdd", 0.0),
-        )
+        if active_strategy == "HR":
+            logger.info(
+                "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): STRATEGY=HR / REBALANCE_MODE=%s / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
+                account_norm.upper(),
+                item.get("backtest_start_date"),
+                optimization_metric,
+                best.get("rebalance_mode", "MONTHLY"),
+                best.get("cagr", 0.0),
+                best.get("sharpe", 0.0),
+                best.get("sharpe_to_mdd", 0.0),
+            )
+        else:
+            logger.info(
+                "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): STRATEGY=%s / MA=%d / TOPN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
+                account_norm.upper(),
+                item.get("backtest_start_date"),
+                optimization_metric,
+                best.get("strategy", "MAPS"),
+                best.get("ma_month", 0),
+                best.get("bucket_topn", 0),
+                best.get("cagr", 0.0),
+                best.get("sharpe", 0.0),
+                best.get("sharpe_to_mdd", 0.0),
+            )
 
     entry = _build_run_entry(months_results=results_per_month)
+    if active_strategy == "HR":
+        rebalance_mode = None
+        try:
+            rebalance_mode = str((entry.get("result") or {}).get("REBALANCE_MODE") or "").upper() or None
+        except Exception:
+            rebalance_mode = None
+        entry["result"] = {
+            "STRATEGY": "HR",
+            "REBALANCE_MODE": rebalance_mode,
+        }
 
     # 튜닝시 사용한 최적화 지표도 config에 저장
     if optimization_metric:

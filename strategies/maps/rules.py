@@ -34,6 +34,7 @@ class StrategyRules:
     rebalance_mode: str
     cooldown_days: int
     enable_data_sufficiency_check: bool
+    target_weights: dict[str, float] | None = None
 
     @classmethod
     def from_values(
@@ -48,8 +49,58 @@ class StrategyRules:
         rebalance_mode: Any = None,
         cooldown: Any = None,
         cooldown_days: Any = None,
+        target_weights: Any = None,
         enable_data_sufficiency_check: Any = False,
     ) -> StrategyRules:
+        strategy_str = str(strategy or "MAPS").strip().upper()
+        if not strategy_str:
+            strategy_str = "MAPS"
+
+        # HR: MA/점수 기반 파라미터 대신 목표 비중(선택)을 사용
+        if strategy_str == "HR":
+            normalized_weights: dict[str, float] | None = None
+            if target_weights is not None:
+                if not isinstance(target_weights, Mapping):
+                    raise ValueError("TARGET_WEIGHTS는 dict 형태여야 합니다.")
+                if not target_weights:
+                    raise ValueError("TARGET_WEIGHTS가 비어 있습니다.")
+                normalized_weights = {}
+                weight_sum = 0.0
+                for ticker, weight in target_weights.items():
+                    ticker_key = str(ticker or "").strip().upper()
+                    if not ticker_key:
+                        raise ValueError("TARGET_WEIGHTS의 티커 키가 비어 있습니다.")
+                    try:
+                        weight_val = float(weight)
+                    except (TypeError, ValueError):
+                        raise ValueError(f"TARGET_WEIGHTS[{ticker_key}] 값은 숫자여야 합니다.")
+                    if weight_val <= 0:
+                        raise ValueError(f"TARGET_WEIGHTS[{ticker_key}] 값은 0보다 커야 합니다.")
+                    normalized_weights[ticker_key] = weight_val
+                    weight_sum += weight_val
+                if abs(weight_sum - 1.0) > 1e-3:
+                    raise ValueError("TARGET_WEIGHTS의 합계는 1.0이어야 합니다.")
+
+            final_rebalance_mode = str(rebalance_mode).upper() if rebalance_mode else "TWICE_A_MONTH"
+            data_sufficiency_check = _coerce_bool(enable_data_sufficiency_check, default=False)
+            try:
+                hr_topn = int(topn if topn is not None else bucket_topn)
+                if hr_topn < 1:
+                    raise ValueError
+            except (TypeError, ValueError):
+                hr_topn = len(normalized_weights) if normalized_weights else 1
+
+            return cls(
+                strategy=strategy_str,
+                ma_days=1,
+                bucket_topn=hr_topn,
+                ma_type="SMA",
+                rebalance_mode=final_rebalance_mode,
+                cooldown_days=1,
+                enable_data_sufficiency_check=data_sufficiency_check,
+                target_weights=normalized_weights,
+            )
+
         # MA 기간 결정 (개월 우선)
         final_ma_days = None
 
@@ -110,10 +161,6 @@ class StrategyRules:
         if final_cooldown_days < 1:
             raise ValueError("COOLDOWN은 1 이상의 정수여야 합니다.")
 
-        strategy_str = str(strategy or "MAPS").strip().upper()
-        if not strategy_str:
-            strategy_str = "MAPS"
-
         return cls(
             strategy=strategy_str,
             ma_days=final_ma_days,
@@ -122,6 +169,7 @@ class StrategyRules:
             rebalance_mode=final_rebalance_mode,
             cooldown_days=final_cooldown_days,
             enable_data_sufficiency_check=data_sufficiency_check,
+            target_weights=None,
         )
 
     @classmethod
@@ -142,6 +190,7 @@ class StrategyRules:
             ma_type=_resolve("MA_TYPE", "ma_type"),
             rebalance_mode=_resolve("REBALANCE_MODE", "rebalance_mode"),
             cooldown=_resolve("COOLDOWN", "cooldown", "cooldown_days"),
+            target_weights=_resolve("TARGET_WEIGHTS", "target_weights"),
             enable_data_sufficiency_check=_resolve("ENABLE_DATA_SUFFICIENCY_CHECK", "enable_data_sufficiency_check"),
         )
 
@@ -157,6 +206,9 @@ class StrategyRules:
             "cooldown": self.cooldown_days,
             "enable_data_sufficiency_check": self.enable_data_sufficiency_check,
         }
+        if self.target_weights:
+            d["target_weights"] = dict(self.target_weights)
+            d["TARGET_WEIGHTS"] = dict(self.target_weights)
         return d
 
     @property
