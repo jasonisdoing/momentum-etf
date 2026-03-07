@@ -73,6 +73,10 @@ def _set_cooldown_note_if_empty(
     current_note = str(records[-1].get("note") or "").strip()
     if current_note:
         return
+    pending_action = str(records[-1].get("pending_action") or "").upper()
+    # BUY 예정 행에는 "매도 가능" 쿨다운 문구를 노출하지 않음
+    if "매도 가능" in note and pending_action.startswith("BUY"):
+        return
     records[-1]["note"] = note
 
 
