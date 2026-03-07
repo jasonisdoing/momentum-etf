@@ -20,37 +20,62 @@ def validate_strategy_settings(
         ValueError: 필수 설정이 누락되었거나 유효하지 않은 경우
     """
     prefix = f"{account_id} 계좌의 " if account_id else ""
-    errors = []
+    strategy_name = str(strategy_tuning.get("STRATEGY") or "").strip().upper()
+    if not strategy_name:
+        raise ValueError(f"{prefix}필수 설정이 누락되었습니다: STRATEGY")
 
-    # strategy 필수 항목 검증
-    required_keys = [
-        "STRATEGY",
-        "TOPN",
-        "MA_MONTH",
-        "MA_TYPE",
-        "REBALANCE_MODE",
-        "COOLDOWN",
-    ]
-    for key in required_keys:
-        val = strategy_tuning.get(key)
-        if val is None:
-            errors.append(key)
-            continue
-        if isinstance(val, str) and not val.strip():
-            errors.append(key)
+    def _require(keys: list[str]) -> list[str]:
+        errs: list[str] = []
+        for key in keys:
+            val = strategy_tuning.get(key)
+            if val is None:
+                errs.append(key)
+                continue
+            if isinstance(val, str) and not val.strip():
+                errs.append(key)
+        return errs
 
-    cooldown_val = strategy_tuning.get("COOLDOWN")
-    if cooldown_val is not None:
-        try:
-            if int(cooldown_val) < 1:
-                errors.append("COOLDOWN(>=1)")
-        except (TypeError, ValueError):
-            errors.append("COOLDOWN(정수)")
+    errors: list[str] = []
+    if strategy_name == "MAPS":
+        errors.extend(_require(["TOPN", "MA_MONTH", "MA_TYPE", "REBALANCE_MODE", "COOLDOWN"]))
+        cooldown_val = strategy_tuning.get("COOLDOWN")
+        if cooldown_val is not None:
+            try:
+                if int(cooldown_val) < 1:
+                    errors.append("COOLDOWN(>=1)")
+            except (TypeError, ValueError):
+                errors.append("COOLDOWN(정수)")
+    elif strategy_name == "HR":
+        errors.extend(_require(["REBALANCE_MODE"]))
+        # HR 비중은 기본적으로 Mongo 종목 리스트(weight)에서 읽는다.
+        # 설정의 TARGET_WEIGHTS는 하위 호환용 선택값으로만 허용한다.
+        weights = strategy_tuning.get("TARGET_WEIGHTS")
+        if isinstance(weights, dict):
+            if not weights:
+                errors.append("TARGET_WEIGHTS(비어있음)")
+            total = 0.0
+            for ticker, weight in weights.items():
+                if not str(ticker).strip():
+                    errors.append("TARGET_WEIGHTS(티커)")
+                    continue
+                try:
+                    w = float(weight)
+                except (TypeError, ValueError):
+                    errors.append(f"TARGET_WEIGHTS({ticker}: 숫자)")
+                    continue
+                if w <= 0:
+                    errors.append(f"TARGET_WEIGHTS({ticker}: 양수)")
+                    continue
+                total += w
+            if abs(total - 1.0) > 1e-3:
+                errors.append("TARGET_WEIGHTS(합계=1.0)")
+        elif weights is not None:
+            errors.append("TARGET_WEIGHTS(dict)")
+    else:
+        errors.append(f"STRATEGY({strategy_name})")
 
-    # 에러가 있으면 한 번에 보고
     if errors:
-        missing_fields = ", ".join(errors)
-        raise ValueError(f"{prefix}필수 설정이 누락되었습니다: {missing_fields}")
+        raise ValueError(f"{prefix}필수 설정이 누락되었습니다: {', '.join(errors)}")
 
 
 __all__ = ["validate_strategy_settings"]

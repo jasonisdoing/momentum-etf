@@ -17,7 +17,7 @@ from utils.account_registry import (
 )
 from utils.data_loader import MissingPriceDataError, get_latest_trading_day, prepare_price_data
 from utils.logger import get_app_logger
-from utils.settings_loader import load_common_settings
+from utils.settings_loader import load_common_settings, resolve_strategy_params
 from utils.stock_list_io import get_etfs
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
@@ -67,7 +67,8 @@ def main() -> None:
 
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
     strategy_cfg = account_settings.get("strategy", {}) or {}
-    backtest_last_months = strategy_cfg.get("BACKTEST_LAST_MONTHS")
+    strategy_params = resolve_strategy_params(strategy_cfg)
+    backtest_last_months = strategy_params.get("BACKTEST_LAST_MONTHS")
     if backtest_last_months is None:
         parser.error("계정 설정에 'strategy.BACKTEST_LAST_MONTHS' 값을 지정해야 합니다.")
     try:

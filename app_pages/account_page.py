@@ -56,12 +56,35 @@ def _normalize_code(value: Any, fallback: str) -> str:
     return text or fallback
 
 
+def _get_account_strategy_name(account_id: str) -> str:
+    try:
+        settings = get_account_settings(account_id)
+        strategy = resolve_strategy_params(settings.get("strategy", {}) or {})
+        return str(strategy.get("STRATEGY") or "MAPS").strip().upper()
+    except Exception:
+        return "MAPS"
+
+
+def _to_weight_pct(weight: Any) -> float | None:
+    if weight is None:
+        return None
+    try:
+        value = float(weight)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    if value <= 1.0:
+        return value * 100.0
+    return value
+
+
 # ---------------------------------------------------------------------------
 # 스타일 및 설정
 # ---------------------------------------------------------------------------
 
 
-def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
+def _build_stocks_meta_table(account_id: str, *, is_hr: bool = False) -> pd.DataFrame:
     """stocks.json 메타정보를 DataFrame으로 반환."""
     etfs = get_etfs(account_id)
     if not etfs:
@@ -72,23 +95,24 @@ def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
         bucket_val = etf.get("bucket", 1)
         bucket_str = BUCKET_MAPPING.get(bucket_val, "1. 모멘텀")
 
-        rows.append(
-            {
-                "#": idx,
-                "버킷": bucket_str,
-                "티커": etf.get("ticker", ""),
-                "종목명": etf.get("name", ""),
-                "추가일자": etf.get("added_date", "-"),
-                "상장일": etf.get("listing_date", "-"),
-                "주간거래량": etf.get("1_week_avg_volume"),
-                "1주(%)": etf.get("1_week_earn_rate"),
-                "2주(%)": etf.get("2_week_earn_rate"),
-                "1달(%)": etf.get("1_month_earn_rate"),
-                "3달(%)": etf.get("3_month_earn_rate"),
-                "6달(%)": etf.get("6_month_earn_rate"),
-                "12달(%)": etf.get("12_month_earn_rate"),
-            }
-        )
+        row = {
+            "#": idx,
+            "버킷": bucket_str,
+            "티커": etf.get("ticker", ""),
+            "종목명": etf.get("name", ""),
+            "추가일자": etf.get("added_date", "-"),
+            "상장일": etf.get("listing_date", "-"),
+            "주간거래량": etf.get("1_week_avg_volume"),
+            "1주(%)": etf.get("1_week_earn_rate"),
+            "2주(%)": etf.get("2_week_earn_rate"),
+            "1달(%)": etf.get("1_month_earn_rate"),
+            "3달(%)": etf.get("3_month_earn_rate"),
+            "6달(%)": etf.get("6_month_earn_rate"),
+            "12달(%)": etf.get("12_month_earn_rate"),
+        }
+        if is_hr:
+            row["비중(%)"] = _to_weight_pct(etf.get("weight"))
+        rows.append(row)
     df = pd.DataFrame(rows)
     if not df.empty and "1주(%)" in df.columns:
         df = df.sort_values(by=["버킷", "1주(%)"], ascending=[True, False])
@@ -98,6 +122,8 @@ def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
 @fragment
 def _render_stocks_meta_table(account_id: str) -> None:
     """종목관리 테이블 렌더링. 업데이트 중일 경우 readonly 모드로 전환하여 스피너 방지."""
+    strategy_name = _get_account_strategy_name(account_id)
+    is_hr = strategy_name == "HR"
 
     # 세션 스테이트 키
     key_meta = f"updating_meta_{account_id}"
@@ -111,13 +137,23 @@ def _render_stocks_meta_table(account_id: str) -> None:
     # 상단 컨트롤: 이제 관리 모드는 상시 활성화 (사용자 요청)
     readonly = is_updating
 
-    df = _build_stocks_meta_table(account_id)
+    df = _build_stocks_meta_table(account_id, is_hr=is_hr)
     df_edit = df.copy()
 
     if df.empty:
         st.info("종목 데이터가 없습니다. 종목을 추가하거나 삭제된 종목을 복원하세요.")
     else:
         st.caption(f"총 {len(df)}개 종목 (Source: MongoDB)")
+        if is_hr:
+            weight_series = pd.to_numeric(df.get("비중(%)"), errors="coerce")
+            if weight_series.isna().any():
+                st.warning("HR 비중이 비어 있거나 숫자가 아닌 종목이 있습니다.")
+            else:
+                total_weight = float(weight_series.sum())
+                if abs(total_weight - 100.0) > 1e-2:
+                    st.warning(f"HR 비중 합계가 100%가 아닙니다. 현재: {total_weight:.2f}%")
+                else:
+                    st.caption("HR 비중 합계: 100.00%")
 
         def _color_pct(val: float | str) -> str:
             if val is None or pd.isna(val):
@@ -163,15 +199,34 @@ def _render_stocks_meta_table(account_id: str) -> None:
     def open_edit_dialog(ticker: str, current_bucket_name: str, name: str):
         st.write(f"**{name}** ({ticker})")
         st.caption(f"현재 버킷: {current_bucket_name}")
+        current_row = df_edit[df_edit["티커"] == ticker]
+        current_weight_pct = None
+        if is_hr and not current_row.empty:
+            current_weight_pct = current_row.iloc[0].get("비중(%)")
+            current_weight_pct = float(current_weight_pct) if pd.notna(current_weight_pct) else 0.0
 
         st.subheader("버킷 변경")
         new_bucket_name = st.selectbox(
             "버킷 변경", options=BUCKET_OPTIONS, index=BUCKET_OPTIONS.index(current_bucket_name)
         )
+        new_weight_pct = None
+        if is_hr:
+            st.subheader("비중 변경")
+            new_weight_pct = st.number_input(
+                "비중(%)",
+                min_value=0,
+                max_value=100,
+                step=1,
+                value=int(round(float(current_weight_pct or 0.0))),
+                format="%d",
+            )
 
         if st.button("💾 변경사항 저장", type="primary", width="stretch"):
             new_bucket_int = BUCKET_REVERSE_MAPPING.get(new_bucket_name, 1)
-            if update_stock(account_id, ticker, bucket=new_bucket_int):
+            update_fields: dict[str, Any] = {"bucket": new_bucket_int}
+            if is_hr:
+                update_fields["weight"] = int(new_weight_pct or 0)
+            if update_stock(account_id, ticker, **update_fields):
                 st.toast(f"✅ {ticker} 버킷 변경 완료")
                 st.rerun()
 
@@ -223,6 +278,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         ),
         "티커": st.column_config.TextColumn("티커", width=50),
         "종목명": st.column_config.TextColumn("종목명", width=300),
+        "비중(%)": st.column_config.NumberColumn("비중(%)", width="small", format="%.0f"),
         "추가일자": st.column_config.TextColumn("추가일자", width=90),
         "상장일": st.column_config.TextColumn("상장일", width=70),
         "주간거래량": st.column_config.NumberColumn("주간거래량", width=50, format="localized"),
@@ -239,6 +295,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "버킷",
         "티커",
         "종목명",
+        "비중(%)",
         "상장일",
         "주간거래량",
         "1주(%)",
@@ -388,15 +445,31 @@ def _render_stocks_meta_table(account_id: str) -> None:
                     "버킷 선택", options=BUCKET_OPTIONS, index=0, key=f"sb_bucket_add_{account_id}"
                 )
                 bucket_int = BUCKET_REVERSE_MAPPING.get(selected_bucket_name, 1)
+                weight_for_add = None
+                if is_hr:
+                    weight_for_add = st.number_input(
+                        "비중(%)",
+                        min_value=0,
+                        max_value=100,
+                        step=1,
+                        value=0,
+                        format="%d",
+                        key=f"nb_weight_add_{account_id}",
+                    )
 
                 # 추가 버튼 (녹색 primary)
                 if st.button("➕ 추가하기", type="primary", width="stretch", key=f"btn_confirm_add_{account_id}"):
+                    extra_fields: dict[str, Any] = {
+                        "listing_date": search_result.get("listing_date"),
+                        "bucket": bucket_int,
+                    }
+                    if is_hr:
+                        extra_fields["weight"] = int(weight_for_add or 0)
                     success = add_stock(
                         account_id,
                         ticker_res,
                         search_result["name"],
-                        listing_date=search_result.get("listing_date"),
-                        bucket=bucket_int,
+                        **extra_fields,
                     )
                     if success:
                         msg = "복구되었습니다" if status == "DELETED" else "추가되었습니다"

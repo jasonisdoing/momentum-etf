@@ -32,7 +32,7 @@ from utils.formatters import format_pct_change, format_price, format_price_devia
 from utils.logger import get_app_logger
 from utils.recommendation_storage import save_recommendation_payload
 from utils.report import render_table_eaw
-from utils.settings_loader import get_account_dir, load_common_settings
+from utils.settings_loader import get_account_dir, load_common_settings, resolve_strategy_params
 from utils.stock_list_io import get_etfs
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
@@ -557,7 +557,7 @@ def generate_recommendation_report(
 
     account_settings = get_account_settings(account_id)
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
-    strategy_cfg = account_settings.get("strategy", {}) or {}
+    strategy_cfg = resolve_strategy_params(account_settings.get("strategy", {}) or {})
     backtest_last_months = strategy_cfg.get("BACKTEST_LAST_MONTHS", 12)
 
     try:
@@ -666,15 +666,37 @@ def generate_recommendation_report(
     )
 
     # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
-    topn_raw = strategy_cfg.get("TOPN")
-    if topn_raw is None:
-        raise ValueError("strategy.TOPN 설정이 누락되었습니다.")
-    try:
-        topn = int(topn_raw)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("strategy.TOPN은 정수여야 합니다.") from exc
-    if topn <= 0:
-        raise ValueError("strategy.TOPN은 0보다 커야 합니다.")
+    strategy_name = str(strategy_cfg.get("STRATEGY") or "MAPS").upper()
+    if strategy_name == "HR":
+        weighted: list[dict[str, Any]] = []
+        for etf in etf_universe:
+            if not isinstance(etf, dict):
+                continue
+            ticker = str(etf.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            weight_raw = etf.get("weight")
+            if weight_raw is None:
+                continue
+            try:
+                weight_val = float(weight_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"HR 비중이 숫자가 아닙니다: {ticker}") from exc
+            if weight_val > 0:
+                weighted.append(etf)
+        if not weighted:
+            raise ValueError("HR 전략은 종목 리스트의 weight 설정이 필요합니다.")
+        topn = len(weighted)
+    else:
+        topn_raw = strategy_cfg.get("TOPN")
+        if topn_raw is None:
+            raise ValueError("strategy.TOPN 설정이 누락되었습니다.")
+        try:
+            topn = int(topn_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("strategy.TOPN은 정수여야 합니다.") from exc
+        if topn <= 0:
+            raise ValueError("strategy.TOPN은 0보다 커야 합니다.")
     recommendations = _assign_final_ranks(recommendations, bucket_topn=topn)
 
     return RecommendationReport(

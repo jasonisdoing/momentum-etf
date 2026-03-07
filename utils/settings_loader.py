@@ -92,26 +92,36 @@ def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
 
     # 계정별 strategy.BACKTEST_LAST_MONTHS 사용
     if account_id:
+        account_settings = get_account_settings(account_id)
+        strategy_cfg = account_settings.get("strategy", {})
+        strategy = resolve_strategy_params(strategy_cfg)
+        backtest_last_months = strategy.get("BACKTEST_LAST_MONTHS")
+        if backtest_last_months is None:
+            raise AccountSettingsError(f"{account_id} 계좌의 필수 설정이 누락되었습니다: strategy.BACKTEST_LAST_MONTHS")
+
+        import pandas as pd
+
         try:
-            account_settings = get_account_settings(account_id)
-            strategy = account_settings.get("strategy", {})
-            backtest_last_months = strategy.get("BACKTEST_LAST_MONTHS")
-            if backtest_last_months is not None:
-                import pandas as pd
+            months_back = int(backtest_last_months)
+        except (TypeError, ValueError) as exc:
+            raise AccountSettingsError(
+                f"{account_id} 계좌의 strategy.BACKTEST_LAST_MONTHS는 정수여야 합니다: {backtest_last_months}"
+            ) from exc
+        if months_back < 1:
+            raise AccountSettingsError(
+                f"{account_id} 계좌의 strategy.BACKTEST_LAST_MONTHS는 1 이상이어야 합니다: {months_back}"
+            )
 
-                months_back = int(backtest_last_months)
-                start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
-                backtest_start_date = start_dt.strftime("%Y-%m-%d")
+        start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
+        backtest_start_date = start_dt.strftime("%Y-%m-%d")
 
-                normalized.append(
-                    {
-                        "backtest_start_date": str(backtest_start_date),
-                        "weight": 1.0,
-                        "source": f"account_{account_id}",
-                    }
-                )
-        except Exception:
-            pass
+        normalized.append(
+            {
+                "backtest_start_date": str(backtest_start_date),
+                "weight": 1.0,
+                "source": f"account_{account_id}",
+            }
+        )
 
     if not normalized:
         return []
@@ -199,6 +209,32 @@ def resolve_strategy_params(strategy_cfg: Any) -> dict[str, Any]:
     if not isinstance(strategy_cfg, dict):
         return {}
 
+    # 신규 포맷:
+    # - MAPS: COMMON + MAPS 필수
+    # - HR: COMMON 필수 (HR 블록은 선택)
+    common_raw = strategy_cfg.get("COMMON")
+    if isinstance(common_raw, dict):
+        common = dict(common_raw)
+        strategy_name = str(common.get("STRATEGY") or "").strip().upper()
+        if not strategy_name:
+            raise AccountSettingsError("strategy.COMMON.STRATEGY가 누락되었습니다.")
+        if strategy_name not in {"MAPS", "HR"}:
+            raise AccountSettingsError(f"지원하지 않는 STRATEGY입니다: {strategy_name}")
+
+        merged = dict(common)
+        active_raw = strategy_cfg.get(strategy_name)
+        if strategy_name == "MAPS":
+            if not isinstance(active_raw, dict):
+                raise AccountSettingsError("strategy.MAPS 블록이 누락되었거나 객체(dict)가 아닙니다.")
+            merged.update(dict(active_raw))
+        else:
+            # HR는 전략 전용 블록을 필수로 강제하지 않는다.
+            if active_raw is not None and not isinstance(active_raw, dict):
+                raise AccountSettingsError("strategy.HR 블록이 존재한다면 객체(dict)여야 합니다.")
+            if isinstance(active_raw, dict):
+                merged.update(dict(active_raw))
+        return merged
+
     tuning = strategy_cfg.get("tuning")
     if isinstance(tuning, dict) and tuning:
         return dict(tuning)
@@ -223,8 +259,8 @@ def get_account_strategy_sections(
     if "tuning" in strategy or "static" in strategy:
         tuning, static = _split_strategy_sections(strategy)
     else:
-        # 이전 포맷과의 호환성: 모든 값을 튜닝 영역으로 간주
-        tuning, static = dict(strategy), {}
+        # 신규/기존 포맷 공통 처리
+        tuning, static = resolve_strategy_params(strategy), {}
 
     # 전략 설정 검증 (한 번만 수행)
     validate_strategy_settings(tuning, account_id)

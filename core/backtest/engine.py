@@ -592,6 +592,325 @@ def check_is_rebalance_day(
     return _is_execution_day(execution_dt, execution_next_dt)
 
 
+def _run_hr_backtest(
+    *,
+    stocks: list[dict],
+    initial_capital: float,
+    core_start_date: pd.Timestamp | None,
+    country: str,
+    prefetched_data: dict[str, pd.DataFrame] | None,
+    trading_calendar: Sequence[pd.Timestamp] | None,
+    rebalance_mode: str,
+    target_weights: Mapping[str, float] | None,
+    quiet: bool,
+    progress_callback: Callable[[int, int], None] | None,
+    missing_ticker_sink: set[str] | None,
+    qty_precision: int,
+) -> dict[str, pd.DataFrame]:
+    country_code = (country or "").strip().lower() or "kor"
+
+    def _log(message: str) -> None:
+        if quiet:
+            logger.debug(message)
+        else:
+            logger.info(message)
+
+    if not isinstance(target_weights, Mapping) or not target_weights:
+        raise RuntimeError("HR 전략은 종목 weight 기반 목표 비중이 필요합니다.")
+
+    normalized_weights: dict[str, float] = {}
+    weight_sum = 0.0
+    for ticker, weight in target_weights.items():
+        key = str(ticker or "").strip().upper()
+        if not key:
+            continue
+        w = float(weight)
+        if w <= 0:
+            continue
+        normalized_weights[key] = w
+        weight_sum += w
+    if not normalized_weights:
+        raise RuntimeError("HR 전략 목표 비중이 비어 있습니다.")
+    if abs(weight_sum - 1.0) > 1e-3:
+        raise RuntimeError("HR 전략 목표 비중 합계는 1.0이어야 합니다.")
+
+    ticker_set = set(normalized_weights.keys())
+    metrics_by_ticker: dict[str, dict[str, Any]] = {}
+    if prefetched_data is None:
+        prefetched_data = {}
+
+    for stock in stocks:
+        ticker = str(stock.get("ticker") or "").strip().upper()
+        if not ticker or ticker not in ticker_set:
+            continue
+        df = prefetched_data.get(ticker)
+        if df is None or df.empty:
+            continue
+        working_df = df.copy()
+        if isinstance(working_df.columns, pd.MultiIndex):
+            working_df.columns = working_df.columns.get_level_values(0)
+            working_df = working_df.loc[:, ~working_df.columns.duplicated()]
+
+        if "unadjusted_close" in working_df.columns:
+            close_series = working_df["unadjusted_close"]
+        else:
+            close_series = working_df["Close"]
+        if isinstance(close_series, pd.DataFrame):
+            close_series = close_series.iloc[:, 0]
+        close_series = close_series.astype(float)
+
+        if "Open" in working_df.columns:
+            open_series = working_df["Open"]
+            if isinstance(open_series, pd.DataFrame):
+                open_series = open_series.iloc[:, 0]
+            open_series = open_series.astype(float)
+        else:
+            open_series = close_series.copy()
+
+        metrics_by_ticker[ticker] = {
+            "close": close_series,
+            "open": open_series,
+        }
+
+    missing = sorted(ticker_set - set(metrics_by_ticker.keys()))
+    if missing:
+        if missing_ticker_sink is not None:
+            missing_ticker_sink.update(missing)
+        else:
+            logger.warning("HR 가격 데이터 부족으로 제외된 종목: %s", ", ".join(missing))
+
+    if not metrics_by_ticker:
+        return {}
+
+    union_index = pd.DatetimeIndex([])
+    for item in metrics_by_ticker.values():
+        union_index = union_index.union(item["close"].index)
+    if core_start_date is not None:
+        union_index = union_index[union_index >= core_start_date]
+    union_index = union_index.sort_values()
+    if union_index.empty:
+        return {}
+
+    for ticker, item in metrics_by_ticker.items():
+        close_series = item["close"].reindex(union_index)
+        open_series = item["open"].reindex(union_index)
+        item["close_values"] = close_series.to_numpy()
+        item["open_values"] = open_series.to_numpy()
+        item["available_mask"] = close_series.notna().to_numpy()
+
+    if trading_calendar is None:
+        raise RuntimeError("trading_calendar must be provided to run_portfolio_backtest.")
+    trading_calendar_idx = (
+        pd.DatetimeIndex(trading_calendar) if not isinstance(trading_calendar, pd.DatetimeIndex) else trading_calendar
+    )
+
+    position_state = {ticker: {"shares": 0.0, "avg_cost": 0.0} for ticker in metrics_by_ticker.keys()}
+    last_prices = {ticker: 0.0 for ticker in metrics_by_ticker.keys()}
+    daily_records_by_ticker = {ticker: [] for ticker in metrics_by_ticker.keys()}
+    out_cash: list[dict[str, Any]] = []
+    cash = float(initial_capital)
+    total_days = len(union_index)
+
+    # 시작일 즉시 목표 비중으로 초기 보유 구성
+    for ticker, weight in normalized_weights.items():
+        if ticker not in metrics_by_ticker:
+            continue
+        buy_price = _calculate_bootstrap_buy_price(
+            open_values=metrics_by_ticker[ticker]["open_values"],
+            close_values=metrics_by_ticker[ticker]["close_values"],
+            country_code=country_code,
+        )
+        if buy_price <= 0:
+            continue
+        budget = float(initial_capital) * float(weight)
+        qty = _floor_quantity(budget / buy_price, qty_precision) if buy_price > 0 else 0.0
+        amount = qty * buy_price
+        if qty <= 0 or amount > cash + 1e-9:
+            continue
+        position_state[ticker]["shares"] = qty
+        position_state[ticker]["avg_cost"] = buy_price
+        cash -= amount
+
+    _log(f"[HR] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
+
+    for i, dt in enumerate(union_index):
+        next_dt = union_index[i + 1] if i < total_days - 1 else None
+        is_rebalance_day = check_is_rebalance_day(
+            dt=dt, next_dt=next_dt, rebalance_mode=rebalance_mode, trading_calendar=trading_calendar_idx
+        )
+
+        if progress_callback is not None:
+            progress_callback(i + 1, total_days)
+
+        today_prices: dict[str, float] = {}
+        for ticker, item in metrics_by_ticker.items():
+            price_val = item["close_values"][i]
+            price_float = float(price_val) if not pd.isna(price_val) else float("nan")
+            if pd.notna(price_float):
+                last_prices[ticker] = price_float
+            today_prices[ticker] = price_float
+
+        total_holdings_value = 0.0
+        for ticker, state in position_state.items():
+            price = today_prices.get(ticker, float("nan"))
+            if pd.isna(price) or price <= 0:
+                price = last_prices.get(ticker, 0.0)
+            total_holdings_value += float(state["shares"]) * float(price)
+        total_equity = cash + total_holdings_value
+
+        for ticker, state in position_state.items():
+            price = today_prices.get(ticker, float("nan"))
+            if pd.isna(price) or price <= 0:
+                price = last_prices.get(ticker, 0.0)
+                note = "데이터 없음"
+            else:
+                note = ""
+            shares = float(state["shares"])
+            daily_records_by_ticker[ticker].append(
+                {
+                    "date": dt,
+                    "price": float(price),
+                    "shares": shares,
+                    "pv": shares * float(price),
+                    "decision": "HOLD" if shares > 0 else "WAIT",
+                    "avg_cost": float(state["avg_cost"]),
+                    "trade_amount": 0.0,
+                    "trade_shares": 0.0,
+                    "trade_profit": 0.0,
+                    "trade_pl_pct": 0.0,
+                    "note": note,
+                    "pending_action": None,
+                    "execute_on": None,
+                    "pending_reason": None,
+                    "signal1": None,
+                    "signal2": None,
+                    "score": 0.0,
+                    "filter": 0,
+                }
+            )
+
+        if is_rebalance_day and total_equity > 0:
+            # 1) 비중 초과분 매도
+            for ticker, weight in normalized_weights.items():
+                if ticker not in position_state:
+                    continue
+                state = position_state[ticker]
+                price = today_prices.get(ticker, float("nan"))
+                if pd.isna(price) or price <= 0:
+                    price = last_prices.get(ticker, 0.0)
+                if price <= 0:
+                    continue
+                current_value = float(state["shares"]) * float(price)
+                target_value = float(total_equity) * float(weight)
+                delta = target_value - current_value
+                if delta >= 0:
+                    continue
+                trade_price = calculate_trade_price(
+                    i,
+                    total_days,
+                    metrics_by_ticker[ticker]["open_values"],
+                    metrics_by_ticker[ticker]["close_values"],
+                    country_code,
+                    is_buy=False,
+                )
+                if trade_price <= 0:
+                    continue
+                qty = _floor_quantity(min(float(state["shares"]), abs(delta) / trade_price), qty_precision)
+                if qty <= 0:
+                    continue
+                amount = qty * trade_price
+                state["shares"] = _floor_quantity(float(state["shares"]) - qty, qty_precision)
+                if state["shares"] <= 0:
+                    state["shares"] = 0.0
+                    state["avg_cost"] = 0.0
+                cash += amount
+                row = daily_records_by_ticker[ticker][-1]
+                diff_pct = (amount / total_equity) * 100.0
+                row["note"] = f"[예정] 비중조절 - {diff_pct:.1f}% 매도"
+                row["pending_action"] = "SELL_REBALANCE"
+                row["execute_on"] = next_dt
+                row["pending_reason"] = "비중 조정"
+                row["trade_amount"] += amount
+                row["trade_shares"] += qty
+                row["shares"] = float(state["shares"])
+                row["pv"] = float(state["shares"]) * float(price)
+
+            # 2) 비중 부족분 매수
+            for ticker, weight in normalized_weights.items():
+                if ticker not in position_state or cash <= 0:
+                    continue
+                state = position_state[ticker]
+                price = today_prices.get(ticker, float("nan"))
+                if pd.isna(price) or price <= 0:
+                    price = last_prices.get(ticker, 0.0)
+                if price <= 0:
+                    continue
+                current_value = float(state["shares"]) * float(price)
+                target_value = float(total_equity) * float(weight)
+                delta = target_value - current_value
+                if delta <= 0:
+                    continue
+                trade_price = calculate_trade_price(
+                    i,
+                    total_days,
+                    metrics_by_ticker[ticker]["open_values"],
+                    metrics_by_ticker[ticker]["close_values"],
+                    country_code,
+                    is_buy=True,
+                )
+                if trade_price <= 0:
+                    continue
+                budget = min(delta, cash)
+                qty = _floor_quantity(budget / trade_price, qty_precision)
+                if qty <= 0:
+                    continue
+                amount = qty * trade_price
+                if amount > cash + 1e-9:
+                    continue
+                prev_shares = float(state["shares"])
+                prev_cost = float(state["avg_cost"])
+                state["shares"] = prev_shares + qty
+                cash -= amount
+                total_cost = prev_shares * prev_cost + amount
+                state["avg_cost"] = (total_cost / state["shares"]) if state["shares"] > 0 else 0.0
+                row = daily_records_by_ticker[ticker][-1]
+                diff_pct = (amount / total_equity) * 100.0
+                existing_note = str(row.get("note") or "").strip()
+                topup_note = f"[예정] 비중조절 - {diff_pct:.1f}% 매수"
+                row["note"] = f"{topup_note} | {existing_note}" if existing_note else topup_note
+                row["pending_action"] = "BUY"
+                row["execute_on"] = next_dt
+                row["pending_reason"] = "비중 조정"
+                row["trade_amount"] += amount
+                row["trade_shares"] += qty
+                row["shares"] = float(state["shares"])
+                row["avg_cost"] = float(state["avg_cost"])
+                row["pv"] = float(state["shares"]) * float(price)
+
+        out_cash.append(
+            {
+                "date": dt,
+                "price": 1.0,
+                "cash": float(cash),
+                "shares": 0,
+                "pv": float(cash),
+                "decision": "HOLD",
+                "note": "",
+                "pending_action": None,
+                "execute_on": None,
+                "pending_reason": None,
+            }
+        )
+
+    result: dict[str, pd.DataFrame] = {}
+    for ticker_symbol, records in daily_records_by_ticker.items():
+        if records:
+            result[ticker_symbol] = pd.DataFrame(records).set_index("date")
+    if out_cash:
+        result["CASH"] = pd.DataFrame(out_cash).set_index("date")
+    return result
+
+
 def run_portfolio_backtest(
     stocks: list[dict],
     initial_capital: float = 100_000_000.0,
@@ -609,6 +928,7 @@ def run_portfolio_backtest(
     strategy: str = "MAPS",
     rebalance_mode: str = "TWICE_A_MONTH",
     cooldown: int = 1,
+    target_weights: Mapping[str, float] | None = None,
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
@@ -647,6 +967,23 @@ def run_portfolio_backtest(
     from core.backtest.portfolio import validate_bucket_topn
 
     validate_bucket_topn(top_n)
+
+    strategy_key = str(strategy or "MAPS").upper()
+    if strategy_key == "HR":
+        return _run_hr_backtest(
+            stocks=stocks,
+            initial_capital=initial_capital,
+            core_start_date=core_start_date,
+            country=country,
+            prefetched_data=prefetched_data,
+            trading_calendar=trading_calendar,
+            rebalance_mode=rebalance_mode,
+            target_weights=target_weights,
+            quiet=quiet,
+            progress_callback=progress_callback,
+            missing_ticker_sink=missing_ticker_sink,
+            qty_precision=qty_precision,
+        )
 
     ticker_name_map: dict[str, str] = {}
     for stock in stocks:

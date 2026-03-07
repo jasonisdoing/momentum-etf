@@ -38,37 +38,54 @@ python recommend.py us
 *   `SLACK_BOT_TOKEN`: 알림을 봇을 통해 발송하기 위한 슬랙 봇 토큰
 *   `SLACK_CHANNEL_ID`: 알림을 받을 슬랙 채널 ID
 
-### 계좌별 전략 설정 (`zaccounts` 폴더 내 `config.json`)
-각 계좌(포트폴리오)별로 구체적인 전략 파라미터를 설정합니다. `tune.py` 실행 시 자동으로 업데이트됩니다.
+### 계좌별 전략 설정 (`zaccounts/<account>/config.json`)
+각 계좌별 전략 설정은 `strategy.COMMON` + 전략 전용 블록(`MAPS`, `HR`) 구조를 사용합니다.
 
-**5버킷 포트폴리오 설정 예시:**
+**MAPS 예시:**
 
 ```json
 {
   "strategy": {
-    "MA_MONTH": 12,                    // 이동평균 기간 (개월) - 필수
-    "MA_TYPE": "EMA",                  // 이동평균 종류 (SMA, EMA, WMA 등) - 필수
-    "BUCKET_TOPN": 1,                  // 버켓 내 최대 보유 종목 수 - 필수
-    "REBALANCE_MODE": "QUARTERLY",     // 리밸런싱 주기 (DAILY, WEEKLY, TWICE_A_MONTH, MONTHLY, QUARTERLY) - 필수
-    "BACKTEST_LAST_MONTHS": 12         // 백테스트/튜닝 대상 과거 개월 수
+    "COMMON": {
+      "STRATEGY": "MAPS",
+      "BACKTEST_LAST_MONTHS": 12,
+      "REBALANCE_MODE": "WEEKLY",
+      "OPTIMIZATION_METRIC": "CAGR"
+    },
+    "MAPS": {
+      "TOPN": 5,
+      "MA_MONTH": 12,
+      "MA_TYPE": "HMA",
+      "COOLDOWN": 2
+    }
   }
 }
 ```
 
-> **주의**: 시스템은 엄격한 설정 표준을 따릅니다. 필수 파라미터(`MA_TYPE`, `REBALANCE_MODE` 등)가 하나라도 누락되면 백테스트 및 리포트 생성이 중단됩니다.
+**HR 예시:**
 
-> **5버킷(Bucket) 시스템**:
-> 1. **모멘텀**: 공격적인 추세 추종
-> 2. **혁신기술**: 성장성이 높은 기술주
-> 3. **시장지수**: 안정적인 시장 대표 지수
-> 4. **배당방어**: 하락장을 방어하는 배당주
-> 5. **대체헷지**: 원자재, 채권 등 주식 외 자산
+```json
+{
+  "strategy": {
+    "COMMON": {
+      "STRATEGY": "HR",
+      "BACKTEST_LAST_MONTHS": 12,
+      "REBALANCE_MODE": "QUARTERLY",
+      "OPTIMIZATION_METRIC": "CAGR"
+    }
+  }
+}
+```
+
+> **주의**: 필수 설정이 누락되면 fallback 없이 즉시 에러가 발생합니다.
+> * MAPS: `COMMON` + `MAPS` 필수
+> * HR: `COMMON` 필수
 
 ## 3. 대시보드 및 계좌 관리
 
 ### 대시보드 구성
 대시보드는 **[요약(Summary)]** 탭과 **[상세(Details)]** 탭으로 나뉩니다.
-*   **요약 탭**: 포트폴리오의 전체 수익률, 원금 대비 순이익, 현금 비중 등 핵심 지표를 확인합니다. 버킷별 투자 비중 테이블이 제공됩니다.
+*   **요약 탭**: 포트폴리오 전체 수익률, 원금 대비 순이익, 현금 비중 등 핵심 지표를 확인합니다.
 *   **상세 탭**: 개별 종목의 현재가, 평가손익, 매매 신호(BUY/SELL/HOLD 등)를 상세히 분석합니다.
 
 ### 계좌 관리 (원금 및 현금)
