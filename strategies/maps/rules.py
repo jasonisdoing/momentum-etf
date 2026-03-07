@@ -27,25 +27,27 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
 class StrategyRules:
     """Momentum 전략에서 공통으로 사용하는 핵심 파라미터."""
 
+    strategy: str
     ma_days: int
     bucket_topn: int
     ma_type: str
     rebalance_mode: str
-    replacement_mode: str
-    sell_on_negative_score: bool
+    cooldown_days: int
     enable_data_sufficiency_check: bool
 
     @classmethod
     def from_values(
         cls,
         *,
+        strategy: Any = "MAPS",
         ma_days: Any = None,
         ma_month: Any = None,
+        topn: Any = None,
         bucket_topn: Any = None,
         ma_type: Any = None,
         rebalance_mode: Any = None,
-        replacement_mode: Any = None,
-        sell_on_negative_score: Any = True,
+        cooldown: Any = None,
+        cooldown_days: Any = None,
         enable_data_sufficiency_check: Any = False,
     ) -> StrategyRules:
         # MA 기간 결정 (개월 우선)
@@ -70,9 +72,9 @@ class StrategyRules:
                 raise ValueError("MA_MONTH은 필수입니다.")
             raise ValueError("MA_MONTH은 0보다 큰 정수여야 합니다.")
 
-        # TOPN 처리 (BUCKET_TOPN)
+        # TOPN 처리
         final_bucket_topn = 1
-        topn_source = bucket_topn
+        topn_source = topn if topn is not None else bucket_topn
 
         try:
             topn_val = int(topn_source)
@@ -81,7 +83,7 @@ class StrategyRules:
             else:
                 raise ValueError
         except (TypeError, ValueError):
-            raise ValueError("BUCKET_TOPN은 0보다 큰 정수여야 합니다.")
+            raise ValueError("TOPN은 0보다 큰 정수여야 합니다.")
 
         # MA 타입 검증
         if ma_type is None:
@@ -93,19 +95,32 @@ class StrategyRules:
 
         # ENABLE_DATA_SUFFICIENCY_CHECK 검증
         data_sufficiency_check = _coerce_bool(enable_data_sufficiency_check, default=False)
-        negative_score_exit = _coerce_bool(sell_on_negative_score, default=True)
 
         # REBALANCE_MODE 처리
         final_rebalance_mode = str(rebalance_mode).upper() if rebalance_mode else "TWICE_A_MONTH"
-        final_replacement_mode = str(replacement_mode).upper() if replacement_mode else "WEEKLY"
+
+        # COOLDOWN 처리
+        cooldown_source = cooldown if cooldown is not None else cooldown_days
+        if cooldown_source is None:
+            raise ValueError("COOLDOWN은 필수입니다.")
+        try:
+            final_cooldown_days = int(cooldown_source)
+        except (TypeError, ValueError):
+            raise ValueError("COOLDOWN은 1 이상의 정수여야 합니다.")
+        if final_cooldown_days < 1:
+            raise ValueError("COOLDOWN은 1 이상의 정수여야 합니다.")
+
+        strategy_str = str(strategy or "MAPS").strip().upper()
+        if not strategy_str:
+            strategy_str = "MAPS"
 
         return cls(
+            strategy=strategy_str,
             ma_days=final_ma_days,
             bucket_topn=final_bucket_topn,
             ma_type=ma_type_str,
             rebalance_mode=final_rebalance_mode,
-            replacement_mode=final_replacement_mode,
-            sell_on_negative_score=negative_score_exit,
+            cooldown_days=final_cooldown_days,
             enable_data_sufficiency_check=data_sufficiency_check,
         )
 
@@ -120,27 +135,33 @@ class StrategyRules:
             return None
 
         return cls.from_values(
+            strategy=_resolve("STRATEGY", "strategy"),
             ma_month=_resolve("MA_MONTH", "ma_month"),
             ma_days=_resolve("ma_days"),
-            bucket_topn=_resolve("BUCKET_TOPN", "bucket_topn"),
+            topn=_resolve("TOPN", "topn"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
             rebalance_mode=_resolve("REBALANCE_MODE", "rebalance_mode"),
-            replacement_mode=_resolve("REPLACEMENT_MODE", "replacement_mode"),
-            sell_on_negative_score=_resolve("SELL_ON_NEGATIVE_SCORE", "sell_on_negative_score"),
+            cooldown=_resolve("COOLDOWN", "cooldown", "cooldown_days"),
             enable_data_sufficiency_check=_resolve("ENABLE_DATA_SUFFICIENCY_CHECK", "enable_data_sufficiency_check"),
         )
 
     def to_dict(self) -> dict[str, Any]:
         d = {
+            "strategy": self.strategy,
             "ma_days": self.ma_days,
+            "topn": self.bucket_topn,
             "bucket_topn": self.bucket_topn,
             "ma_type": self.ma_type,
             "rebalance_mode": self.rebalance_mode,
-            "replacement_mode": self.replacement_mode,
-            "sell_on_negative_score": self.sell_on_negative_score,
+            "cooldown_days": self.cooldown_days,
+            "cooldown": self.cooldown_days,
             "enable_data_sufficiency_check": self.enable_data_sufficiency_check,
         }
         return d
+
+    @property
+    def topn(self) -> int:
+        return int(self.bucket_topn)
 
 
 __all__ = [

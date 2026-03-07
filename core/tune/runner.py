@@ -34,7 +34,7 @@ from core.tune.worker import (
     init_worker_prefetch,
 )
 from strategies.maps.rules import StrategyRules
-from utils.account_registry import get_benchmark_tickers, get_strategy_rules
+from utils.account_registry import get_benchmark_tickers
 from utils.cache_utils import save_cached_frame
 from utils.data_loader import (
     MissingPriceDataError,
@@ -250,7 +250,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     # Legacy cleanup
 
     integer_keys = {
-        "BUCKET_TOPN",
+        "TOPN",
         "MA_MONTH",
     }
 
@@ -258,6 +258,11 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         if value is None:
             continue
         strategy_data[key] = value
+
+    # Migrate legacy key if present
+    if "TOPN" not in strategy_data and "BUCKET_TOPN" in strategy_data:
+        strategy_data["TOPN"] = strategy_data.get("BUCKET_TOPN")
+    strategy_data.pop("BUCKET_TOPN", None)
 
     # 정수형이어야 하는 필드들 강제 형변환 (튜닝 여부와 무관하게)
     for key in integer_keys:
@@ -284,12 +289,12 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "BACKTESTED_DATE",
         "CAGR",
         "MDD",
-        "BUCKET_TOPN",
+        "STRATEGY",
+        "TOPN",
         "MA_MONTH",
         "MA_TYPE",
-        "SELL_ON_NEGATIVE_SCORE",
         "REBALANCE_MODE",
-        "REPLACEMENT_MODE",
+        "COOLDOWN",
         "ENABLE_DATA_SUFFICIENCY_CHECK",
         "OPTIMIZATION_METRIC",
     ]
@@ -370,7 +375,7 @@ def _export_debug_month(
             ma_month = tuning.get("MA_MONTH")
             if ma_month is None:
                 continue
-            topn = int(tuning.get("BUCKET_TOPN"))
+            topn = int(tuning.get("TOPN", tuning.get("BUCKET_TOPN")))
         except (TypeError, ValueError):
             continue
 
@@ -381,12 +386,12 @@ def _export_debug_month(
         }
 
         strategy_rules = StrategyRules.from_values(
+            strategy=tuning.get("STRATEGY", "MAPS"),
             ma_month=int(ma_month),
             bucket_topn=topn,
             ma_type=tuning.get("MA_TYPE", "SMA"),
             rebalance_mode=tuning.get("REBALANCE_MODE", "MONTHLY"),
-            replacement_mode=tuning.get("REPLACEMENT_MODE", "WEEKLY"),
-            sell_on_negative_score=bool(tuning.get("SELL_ON_NEGATIVE_SCORE", True)),
+            cooldown=int(tuning.get("COOLDOWN")),
         )
         result_prefetch = run_account_backtest(
             account_id,
@@ -467,25 +472,20 @@ def _execute_tuning(
     ma_candidates = list(search_space.get("MA_MONTH", []))
     is_ma_month = True
 
-    topn_candidates = list(search_space.get("BUCKET_TOPN", []))
+    strategy_candidates = list(search_space.get("STRATEGY", []))
+    topn_candidates = list(search_space.get("TOPN", []))
     ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
     rebalance_mode_candidates = list(search_space.get("REBALANCE_MODE", []))
-    replacement_mode_candidates = list(search_space.get("REPLACEMENT_MODE", []))
-    sell_on_negative_score_candidates = list(search_space.get("SELL_ON_NEGATIVE_SCORE", []))
+    cooldown_candidates = list(search_space.get("COOLDOWN", []))
 
-    if not rebalance_mode_candidates:
-        current_rules = get_strategy_rules(account_norm)
-        rebalance_mode_candidates = [current_rules.rebalance_mode]
-
-    if not replacement_mode_candidates:
-        current_rules = get_strategy_rules(account_norm)
-        replacement_mode_candidates = [current_rules.replacement_mode]
-
-    if not sell_on_negative_score_candidates:
-        current_rules = get_strategy_rules(account_norm)
-        sell_on_negative_score_candidates = [current_rules.sell_on_negative_score]
-
-    if not ma_candidates or not topn_candidates or not ma_type_candidates or not rebalance_mode_candidates:
+    if (
+        not ma_candidates
+        or not strategy_candidates
+        or not topn_candidates
+        or not ma_type_candidates
+        or not rebalance_mode_candidates
+        or not cooldown_candidates
+    ):
         logger.warning(
             "[튜닝] %s (%s 시작) 유효한 탐색 공간이 없습니다.",
             account_norm.upper(),
@@ -493,14 +493,14 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, str, str, str, bool]] = [
-        (ma, topn, ma_type, rebal, replace, sell_negative)
+    combos: list[tuple[str, int, int, str, str, int]] = [
+        (strategy, ma, topn, ma_type, rebal, cooldown)
+        for strategy in strategy_candidates
         for ma in ma_candidates
         for topn in topn_candidates
         for ma_type in ma_type_candidates
         for rebal in rebalance_mode_candidates
-        for replace in replacement_mode_candidates
-        for sell_negative in sell_on_negative_score_candidates
+        for cooldown in cooldown_candidates
     ]
 
     if not combos:
@@ -558,22 +558,20 @@ def _execute_tuning(
         except Exception as exc:
             logger.warning("[튜닝] %s 환율 데이터 로드 실패, fallback 사용: %s", account_norm.upper(), exc)
 
-    current_rules = get_strategy_rules(account_norm)
-
     payloads = [
         (
             account_norm,
             date_range,
+            str(strategy_name),
             int(ma),
             int(topn),
             str(ma_type),
             str(rebal_mode),
-            str(replace_mode),
-            bool(sell_on_negative_score),
+            int(cooldown),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )
-        for ma, topn, ma_type, rebal_mode, replace_mode, sell_on_negative_score in combos
+        for strategy_name, ma, topn, ma_type, rebal_mode, cooldown in combos
     ]
 
     logger.info(
@@ -702,12 +700,12 @@ def _execute_tuning(
                 else None,
                 "turnover": int(item.get("turnover") or 0),
                 "tuning": {
+                    "STRATEGY": str(item.get("strategy", "MAPS")),
                     "MA_MONTH": int(item.get("ma_month", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
-                    "BUCKET_TOPN": int(item.get("bucket_topn", 0)),
+                    "TOPN": int(item.get("bucket_topn", 0)),
                     "REBALANCE_MODE": str(item.get("rebalance_mode", "MONTHLY")),
-                    "REPLACEMENT_MODE": str(item.get("replacement_mode", "WEEKLY")),
-                    "SELL_ON_NEGATIVE_SCORE": bool(item.get("sell_on_negative_score", True)),
+                    "COOLDOWN": int(item.get("cooldown", 1)),
                 },
             }
         )
@@ -727,7 +725,8 @@ def _build_run_entry(
 ) -> dict[str, Any]:
     param_fields = {
         "MA_MONTH": ("ma_month", True),
-        "BUCKET_TOPN": ("bucket_topn", True),
+        "TOPN": ("bucket_topn", True),
+        "COOLDOWN": ("cooldown", True),
     }
 
     entry: dict[str, Any] = {
@@ -739,10 +738,10 @@ def _build_run_entry(
     weighted_cagr_weight = 0.0
     weighted_mdd_sum = 0.0
     weighted_mdd_weight = 0.0
+    strategy_weights: dict[str, float] = {}
     ma_type_weights: dict[str, float] = {}
     rebal_mode_weights: dict[str, float] = {}
-    replace_mode_weights: dict[str, float] = {}
-    sell_negative_weights: dict[bool, float] = {}
+    cooldown_weights: dict[int, float] = {}
     cagr_values: list[float] = []
     mdd_values: list[float] = []
 
@@ -797,9 +796,13 @@ def _build_run_entry(
             return num
 
         tuning_snapshot: dict[str, Any] = {}
+        strategy_snapshot = best.get("strategy")
+        if strategy_snapshot:
+            tuning_snapshot["STRATEGY"] = str(strategy_snapshot).upper()
         field_key_pairs = [
             ("MA_MONTH", "ma_month"),
-            ("BUCKET_TOPN", "bucket_topn"),
+            ("TOPN", "bucket_topn"),
+            ("COOLDOWN", "cooldown"),
         ]
 
         for field, key in field_key_pairs:
@@ -819,13 +822,9 @@ def _build_run_entry(
         if rebalance_snapshot:
             tuning_snapshot["REBALANCE_MODE"] = str(rebalance_snapshot)
 
-        replacement_snapshot = best.get("replacement_mode")
-        if replacement_snapshot:
-            tuning_snapshot["REPLACEMENT_MODE"] = str(replacement_snapshot)
-
-        sell_negative_snapshot = best.get("sell_on_negative_score")
-        if isinstance(sell_negative_snapshot, bool):
-            tuning_snapshot["SELL_ON_NEGATIVE_SCORE"] = sell_negative_snapshot
+        cooldown_snapshot = _to_int(best.get("cooldown"))
+        if cooldown_snapshot is not None:
+            tuning_snapshot["COOLDOWN"] = cooldown_snapshot
 
         raw_data_payload.append(
             {
@@ -839,6 +838,12 @@ def _build_run_entry(
                 "tuning": tuning_snapshot,
             }
         )
+        strategy_val = best.get("strategy")
+        if strategy_val:
+            weight_for_cat = weight if weight > 0 else 1.0
+            strategy_key = str(strategy_val).upper()
+            strategy_weights[strategy_key] = strategy_weights.get(strategy_key, 0.0) + weight_for_cat
+
         ma_type_val = best.get("ma_type")
         if ma_type_val:
             weight_for_cat = weight if weight > 0 else 1.0
@@ -851,18 +856,10 @@ def _build_run_entry(
             rebal_key = str(rebal_mode_val)
             rebal_mode_weights[rebal_key] = rebal_mode_weights.get(rebal_key, 0.0) + weight_for_cat
 
-        replace_mode_val = best.get("replacement_mode")
-        if replace_mode_val:
+        cooldown_val = _to_int(best.get("cooldown"))
+        if cooldown_val is not None:
             weight_for_cat = weight if weight > 0 else 1.0
-            replace_key = str(replace_mode_val)
-            replace_mode_weights[replace_key] = replace_mode_weights.get(replace_key, 0.0) + weight_for_cat
-
-        sell_negative_val = best.get("sell_on_negative_score")
-        if isinstance(sell_negative_val, bool):
-            weight_for_cat = weight if weight > 0 else 1.0
-            sell_negative_weights[sell_negative_val] = (
-                sell_negative_weights.get(sell_negative_val, 0.0) + weight_for_cat
-            )
+            cooldown_weights[cooldown_val] = cooldown_weights.get(cooldown_val, 0.0) + weight_for_cat
 
     if weighted_cagr_weight > 0:
         entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
@@ -878,6 +875,9 @@ def _build_run_entry(
         entry["raw_data"] = raw_data_payload
 
     result_values: dict[str, Any] = entry["result"]
+
+    if strategy_weights:
+        result_values["STRATEGY"] = max(strategy_weights.items(), key=lambda item: (item[1], item[0]))[0]
 
     for field, (key, is_int) in param_fields.items():
         values: list[float] = []
@@ -916,14 +916,8 @@ def _build_run_entry(
     if rebal_mode_weights:
         result_values["REBALANCE_MODE"] = max(rebal_mode_weights.items(), key=lambda item: (item[1], item[0]))[0]
 
-    if replace_mode_weights:
-        result_values["REPLACEMENT_MODE"] = max(replace_mode_weights.items(), key=lambda item: (item[1], item[0]))[0]
-
-    if sell_negative_weights:
-        result_values["SELL_ON_NEGATIVE_SCORE"] = max(
-            sell_negative_weights.items(),
-            key=lambda item: (item[1], int(item[0])),
-        )[0]
+    if cooldown_weights:
+        result_values["COOLDOWN"] = max(cooldown_weights.items(), key=lambda item: (item[1], item[0]))[0]
 
     return entry
 
@@ -945,8 +939,9 @@ def _ensure_entry_schema(entry: Any) -> dict[str, Any]:
     normalized.pop("result", None)
 
     for field in (
+        "STRATEGY",
         "MA_MONTH",
-        "BUCKET_TOPN",
+        "TOPN",
         "MA_TYPE",
     ):
         normalized.pop(field, None)
@@ -1073,17 +1068,19 @@ def _compose_tuning_report(
         search_space = tuning_metadata.get("search_space", {})
         if search_space:
             ma_month_range = search_space.get("MA_MONTH", [])
+            strategy_range = search_space.get("STRATEGY", [])
             ma_type_range = search_space.get("MA_TYPE", [])
-            topn_range = search_space.get("BUCKET_TOPN", [])
+            topn_range = search_space.get("TOPN", [])
             # MA_TYPE이 있으면 포함해서 표시
             lines.append(
-                f"| 탐색 공간: MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
-                f"× 음수매도 {len(search_space.get('SELL_ON_NEGATIVE_SCORE', []))}개 "
-                f"× 교체 {len(search_space.get('REPLACEMENT_MODE', []))}개 "
+                f"| 탐색 공간: 전략 {len(strategy_range)}개 × MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
+                f"× 쿨다운 {len(search_space.get('COOLDOWN', []))}개 "
                 f"× 리밸런스 {len(search_space.get('REBALANCE_MODE', []))}개 "
                 f"= {tuning_metadata.get('combo_count', 0)}개 조합"
             )
             # 각 파라미터 범위 표시
+            if strategy_range:
+                lines.append(f"|   STRATEGY: {', '.join(strategy_range)}")
             if ma_month_range:
                 ma_min, ma_max = min(ma_month_range), max(ma_month_range)
                 lines.append(f"|   MA_RANGE: {ma_min}~{ma_max}")
@@ -1091,15 +1088,10 @@ def _compose_tuning_report(
                 lines.append(f"|   MA_TYPE: {', '.join(ma_type_range)}")
             if topn_range:
                 topn_min, topn_max = min(topn_range), max(topn_range)
-                lines.append(f"|   BUCKET_TOPN: {topn_min}~{topn_max}")
-            replace_range = search_space.get("REPLACEMENT_MODE", [])
-            if replace_range:
-                lines.append(f"|   REPLACEMENT_MODE: {', '.join(replace_range)}")
-            negative_score_range = search_space.get("SELL_ON_NEGATIVE_SCORE", [])
-            if negative_score_range:
-                lines.append(
-                    f"|   SELL_ON_NEGATIVE_SCORE: {', '.join('TRUE' if bool(v) else 'FALSE' for v in negative_score_range)}"
-                )
+                lines.append(f"|   TOPN: {topn_min}~{topn_max}")
+            cooldown_range = search_space.get("COOLDOWN", [])
+            if cooldown_range:
+                lines.append(f"|   COOLDOWN: {', '.join(str(int(v)) for v in cooldown_range)}")
             rebalance_range = search_space.get("REBALANCE_MODE", [])
             if rebalance_range:
                 lines.append(f"|   REBALANCE_MODE: {', '.join(rebalance_range)}")
@@ -1261,10 +1253,9 @@ def _compose_tuning_report(
             tuning = entry.get("tuning") or {}
             ma_val = tuning.get("MA_MONTH")
             ma_type_val = tuning.get("MA_TYPE", "SMA")
-            topn_val = tuning.get("BUCKET_TOPN")
+            topn_val = tuning.get("TOPN", tuning.get("BUCKET_TOPN"))
             rebalance_val = tuning.get("REBALANCE_MODE", "MONTHLY")
-            replace_val = tuning.get("REPLACEMENT_MODE", "WEEKLY")
-            sell_negative_val = tuning.get("SELL_ON_NEGATIVE_SCORE", True)
+            cooldown_val = tuning.get("COOLDOWN")
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -1274,12 +1265,12 @@ def _compose_tuning_report(
 
             normalized_rows.append(
                 {
+                    "strategy": str(tuning.get("STRATEGY", "MAPS")).upper(),
                     "ma_days": ma_val,
                     "ma_type": ma_type_val,
                     "bucket_topn": topn_val,
                     "rebalance_mode": rebalance_val,
-                    "replacement_mode": replace_val,
-                    "sell_on_negative_score": bool(sell_negative_val),
+                    "cooldown": int(cooldown_val) if cooldown_val is not None else None,
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
@@ -1381,8 +1372,6 @@ def run_account_tuning(
     debug_diff_rows: list[dict[str, Any]] = []
     debug_month_configs: list[dict[str, Any]] = []
 
-    base_rules = get_strategy_rules(account_norm)
-
     # [Modify] MA_MONTH 필수 처리: 튜닝 설정에 명시적으로 존재해야 함
     ma_month_raw = config.get("MA_MONTH")
     if ma_month_raw is None or (isinstance(ma_month_raw, (list, tuple)) and not ma_month_raw):
@@ -1400,63 +1389,82 @@ def run_account_tuning(
         # 위에서 에러를 던지므로 여기는 도달하지 않아야 함
         raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_MONTH'가 유효하지 않습니다.")
 
-    topn_values = _normalize_tuning_values(config.get("BUCKET_TOPN"), dtype=int, fallback=base_rules.bucket_topn)
+    topn_raw = config.get("TOPN")
+    if topn_raw is None or (isinstance(topn_raw, (list, tuple)) and not topn_raw):
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'TOPN' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+        )
+    topn_values = _normalize_tuning_values(topn_raw, dtype=int, fallback=None)
+    if not topn_values:
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'TOPN'이 유효하지 않습니다.")
+
+    strategy_raw = config.get("STRATEGY")
+    if strategy_raw is None or (isinstance(strategy_raw, (list, tuple)) and not strategy_raw):
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'STRATEGY' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+        )
+    if isinstance(strategy_raw, (list, tuple)):
+        strategy_values = [str(v).upper() for v in strategy_raw if v]
+    else:
+        strategy_values = [str(strategy_raw).upper()]
+
+    if not strategy_values:
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'STRATEGY'가 유효하지 않습니다.")
+    strategy_values = list(dict.fromkeys(str(v).upper() for v in strategy_values if v))
+    if not strategy_values:
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'STRATEGY'가 유효하지 않습니다.")
 
     # MA_TYPE 처리: 문자열 리스트로 받음
     ma_type_raw = config.get("MA_TYPE")
-    if ma_type_raw is None:
-        ma_type_values = [base_rules.ma_type]
-    elif isinstance(ma_type_raw, (list, tuple)):
+    if ma_type_raw is None or (isinstance(ma_type_raw, (list, tuple)) and not ma_type_raw):
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'MA_TYPE' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+        )
+    if isinstance(ma_type_raw, (list, tuple)):
         ma_type_values = [str(v).upper() for v in ma_type_raw if v]
     else:
         ma_type_values = [str(ma_type_raw).upper()]
 
     if not ma_type_values:
-        ma_type_values = [base_rules.ma_type]
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_TYPE'이 유효하지 않습니다.")
 
     # REBALANCE_MODE 처리: 문자열 리스트로 받음
     rebalance_raw = config.get("REBALANCE_MODE")
-    if rebalance_raw is None:
-        rebalance_mode_values = [base_rules.rebalance_mode]
-    elif isinstance(rebalance_raw, (list, tuple)):
+    if rebalance_raw is None or (isinstance(rebalance_raw, (list, tuple)) and not rebalance_raw):
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'REBALANCE_MODE' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+        )
+    if isinstance(rebalance_raw, (list, tuple)):
         rebalance_mode_values = [str(v).upper() for v in rebalance_raw if v]
     else:
         rebalance_mode_values = [str(rebalance_raw).upper()]
 
     if not rebalance_mode_values:
-        rebalance_mode_values = [base_rules.rebalance_mode]
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'REBALANCE_MODE'가 유효하지 않습니다.")
 
-    # REPLACEMENT_MODE 처리: 문자열 리스트로 받음
-    replacement_raw = config.get("REPLACEMENT_MODE")
-    if replacement_raw is None:
-        replacement_mode_values = [base_rules.replacement_mode]
-    elif isinstance(replacement_raw, (list, tuple)):
-        replacement_mode_values = [str(v).upper() for v in replacement_raw if v]
+    # COOLDOWN 처리: 정수 리스트로 받음
+    cooldown_raw = config.get("COOLDOWN")
+    if cooldown_raw is None or (isinstance(cooldown_raw, (list, tuple)) and not cooldown_raw):
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'COOLDOWN' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+        )
+    if isinstance(cooldown_raw, (list, tuple)):
+        cooldown_values_raw = [v for v in cooldown_raw if v is not None]
     else:
-        replacement_mode_values = [str(replacement_raw).upper()]
+        cooldown_values_raw = [cooldown_raw]
 
-    if not replacement_mode_values:
-        replacement_mode_values = [base_rules.replacement_mode]
+    cooldown_values: list[int] = []
+    for value in cooldown_values_raw:
+        try:
+            cooldown_values.append(int(value))
+        except (TypeError, ValueError):
+            raise ValueError(f"[튜닝] '{account_id}' 계정의 'COOLDOWN'에 정수가 아닌 값이 포함되어 있습니다: {value}")
 
-    def _coerce_bool(value: Any) -> bool:
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on"}
-        return bool(value)
+    cooldown_values = sorted(set(v for v in cooldown_values if v >= 1))
+    if not cooldown_values:
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'COOLDOWN'이 유효하지 않습니다. (1 이상의 정수)")
 
-    sell_negative_raw = config.get("SELL_ON_NEGATIVE_SCORE")
-    if sell_negative_raw is None:
-        sell_negative_score_values = [base_rules.sell_on_negative_score]
-    elif isinstance(sell_negative_raw, (list, tuple)):
-        sell_negative_score_values = [_coerce_bool(v) for v in sell_negative_raw]
-    else:
-        sell_negative_score_values = [_coerce_bool(sell_negative_raw)]
-
-    if not sell_negative_score_values:
-        sell_negative_score_values = [base_rules.sell_on_negative_score]
-
-    if (not ma_values and not ma_month_values) or not topn_values or not ma_type_values:
+    if (not ma_values and not ma_month_values) or not strategy_values or not topn_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
@@ -1485,12 +1493,12 @@ def run_account_tuning(
         )
 
     combo_count = (
-        (len(ma_month_values) if ma_month_values else len(ma_values))
+        len(strategy_values)
+        * (len(ma_month_values) if ma_month_values else len(ma_values))
         * len(topn_values)
         * len(ma_type_values)
         * len(rebalance_mode_values)
-        * len(replacement_mode_values)
-        * len(sell_negative_score_values)
+        * len(cooldown_values)
     )
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
@@ -1510,43 +1518,43 @@ def run_account_tuning(
         )
 
     search_space = {
+        "STRATEGY": strategy_values,
         "MA_MONTH": ma_month_values or ma_values,
-        "BUCKET_TOPN": topn_values,
+        "TOPN": topn_values,
         "MA_TYPE": ma_type_values,
         "REBALANCE_MODE": rebalance_mode_values,
-        "REPLACEMENT_MODE": replacement_mode_values,
-        "SELL_ON_NEGATIVE_SCORE": sell_negative_score_values,
+        "COOLDOWN": cooldown_values,
         "OPTIMIZATION_METRIC": [optimization_metric],
     }
 
+    strategy_count = len(strategy_values)
     ma_count = len(ma_month_values) if ma_month_values else len(ma_values)
     topn_count = len(topn_values)
     ma_type_count = len(ma_type_values)
     rebalance_count = len(rebalance_mode_values)
-    replace_count = len(replacement_mode_values)
-    sell_negative_count = len(sell_negative_score_values)
+    cooldown_count = len(cooldown_values)
 
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 음수매도 %d개 × 교체 %d개 × 리밸런스 %d개 = %d개 조합 (최적화 지표: %s)",
+        "[튜닝] 탐색 공간: 전략 %d개 × MA %d개 × TOPN %d개 × MA_TYPE %d개 × 쿨다운 %d개 × 리밸런스 %d개 = %d개 조합 (최적화 지표: %s)",
+        strategy_count,
         ma_count,
         topn_count,
         ma_type_count,
-        sell_negative_count,
-        replace_count,
+        cooldown_count,
         rebalance_count,
         combo_count,
         optimization_metric,
     )
 
     try:
-        base_ma = base_rules.ma_days or 20
+        base_ma = max(ma_month_values) * 20
         if ma_month_values:
             # Month -> Approx Day for warmup
             ma_max = max(ma_month_values) * 20
         else:
             ma_max = max([base_ma, *ma_values] if ma_values else [base_ma])
     except ValueError:
-        ma_max = base_rules.ma_days or 20
+        ma_max = 20
 
     month_items = _resolve_month_configs(account_id=account_id)
     if not month_items:
@@ -1610,7 +1618,7 @@ def run_account_tuning(
         multiplier = 2.0
 
     # 웜업 일수 계산 및 오버플로 방지 (최대 약 10년으로 제한)
-    warmup_days = int(max(ma_max, base_rules.ma_days or 0) * multiplier)
+    warmup_days = int(max(ma_max, 20) * multiplier)
     max_safe_warmup = 2500  # 약 10년
     if warmup_days > max_safe_warmup:
         logger.warning("[튜닝] 웜업 기간이 너무 깁니다 (%d일). %d일로 제한합니다.", warmup_days, max_safe_warmup)
@@ -1691,12 +1699,12 @@ def run_account_tuning(
         "combo_count": combo_count,
         "country_code": country_code,
         "search_space": {
+            "STRATEGY": list(strategy_values),
             "MA_MONTH": list(ma_month_values) if ma_month_values else list(ma_values),
             "MA_TYPE": list(ma_type_values),
-            "BUCKET_TOPN": list(topn_values),
+            "TOPN": list(topn_values),
             "REBALANCE_MODE": list(rebalance_mode_values),
-            "REPLACEMENT_MODE": list(replacement_mode_values),
-            "SELL_ON_NEGATIVE_SCORE": list(sell_negative_score_values),
+            "COOLDOWN": list(cooldown_values),
             "OPTIMIZATION_METRIC": optimization_metric,
         },
         "data_period": {
@@ -1816,12 +1824,12 @@ def run_account_tuning(
                         "sharpe_to_mdd": _round_float_places(entry.get("sharpe_to_mdd", 0.0), 3),
                         "turnover": int(entry.get("turnover") or 0),
                         "tuning": {
+                            "STRATEGY": str(entry.get("strategy", "MAPS")),
                             "MA_MONTH": int(entry.get("ma_month")) if entry.get("ma_month") is not None else None,
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
-                            "BUCKET_TOPN": int(entry.get("bucket_topn", 0)),
+                            "TOPN": int(entry.get("bucket_topn", 0)),
                             "REBALANCE_MODE": str(entry.get("rebalance_mode", "MONTHLY")),
-                            "REPLACEMENT_MODE": str(entry.get("replacement_mode", "WEEKLY")),
-                            "SELL_ON_NEGATIVE_SCORE": bool(entry.get("sell_on_negative_score", True)),
+                            "COOLDOWN": int(entry.get("cooldown", 1)),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)
@@ -1938,10 +1946,11 @@ def run_account_tuning(
         item = results_per_month[-1]
         best = item.get("best") or {}
         logger.info(
-            "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): MA=%d / TOPN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
+            "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): STRATEGY=%s / MA=%d / TOPN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
             account_norm.upper(),
             item.get("backtest_start_date"),
             optimization_metric,
+            best.get("strategy", "MAPS"),
             best.get("ma_month", 0),
             best.get("bucket_topn", 0),
             best.get("cagr", 0.0),
@@ -1964,8 +1973,9 @@ def run_account_tuning(
             "run_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "combo_count": combo_count,
             "search_space": {
+                "STRATEGY": strategy_values,
                 "MA_MONTH": ma_values,
-                "BUCKET_TOPN": topn_values,
+                "TOPN": topn_values,
             },
             "month_configs": debug_month_configs,
             "excluded_tickers_initial": sorted(excluded_ticker_set),

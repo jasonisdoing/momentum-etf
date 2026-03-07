@@ -78,20 +78,20 @@ def _render_tuning_table(
     period_str: str | None = None,
 ) -> list[str]:
     headers = [
+        "전략",
         "MA개월",
         "MA타입",
         "TOPN",
-        "음수매도",
-        "교체",
+        "쿨다운",
         "리밸런스",
         "CAGR(%)",
         "MDD(%)",
     ]
     aligns = [
-        "right",
         "center",
         "right",
         "center",
+        "right",
         "center",
         "center",
         "right",
@@ -114,6 +114,7 @@ def _render_tuning_table(
     table_rows = []
     for row in rows[:MAX_TABLE_ROWS]:
         ma_val = row.get("ma_month") or row.get("ma_days")
+        strategy_val = row.get("strategy", "MAPS")
         ma_type_val = row.get("ma_type", "SMA")
         topn_val = row.get("bucket_topn")
 
@@ -123,30 +124,23 @@ def _render_tuning_table(
         if not rebal_mode_val:
             rebal_mode_val = "-"
 
-        replace_mode_val = row.get("replacement_mode")
-        if not replace_mode_val and "tuning" in row:
-            replace_mode_val = row["tuning"].get("REPLACEMENT_MODE")
-        if not replace_mode_val:
-            replace_mode_val = "-"
-
-        sell_negative_val = row.get("sell_on_negative_score")
-        if sell_negative_val is None and "tuning" in row:
-            sell_negative_val = row["tuning"].get("SELL_ON_NEGATIVE_SCORE")
-        if isinstance(sell_negative_val, bool):
-            sell_negative_display = "ON" if sell_negative_val else "OFF"
-        elif sell_negative_val is None:
-            sell_negative_display = "-"
+        cooldown_val = row.get("cooldown")
+        if cooldown_val is None and "tuning" in row:
+            cooldown_val = row["tuning"].get("COOLDOWN")
+        if cooldown_val is None:
+            cooldown_display = "-"
         else:
-            sell_negative_display = (
-                "ON" if str(sell_negative_val).strip().lower() in ("1", "true", "yes", "on") else "OFF"
-            )
+            try:
+                cooldown_display = str(int(cooldown_val))
+            except (TypeError, ValueError):
+                cooldown_display = "-"
 
         row_data = [
+            str(strategy_val) if strategy_val else "MAPS",
             str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
             str(ma_type_val) if ma_type_val else "SMA",
             str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-            sell_negative_display,
-            str(replace_mode_val),
+            cooldown_display,
             str(rebal_mode_val),
             _format_table_float(row.get("cagr")),
             _format_table_float(row.get("mdd")),

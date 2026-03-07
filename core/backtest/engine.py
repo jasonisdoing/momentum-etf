@@ -30,6 +30,51 @@ def _floor_quantity(quantity: float, qty_precision: int) -> float:
     return float(int(quantity * factor)) / factor
 
 
+def _can_sell_with_cooldown(ticker_state: Mapping[str, Any], day_index: int, cooldown_days: int) -> bool:
+    last_buy_index = ticker_state.get("last_buy_index")
+    if last_buy_index is None:
+        return True
+    return (day_index - int(last_buy_index)) >= int(cooldown_days)
+
+
+def _can_buy_with_cooldown(ticker_state: Mapping[str, Any], day_index: int, cooldown_days: int) -> bool:
+    last_sell_index = ticker_state.get("last_sell_index")
+    if last_sell_index is None:
+        return True
+    return (day_index - int(last_sell_index)) >= int(cooldown_days)
+
+
+def _remaining_sell_cooldown_days(ticker_state: Mapping[str, Any], day_index: int, cooldown_days: int) -> int:
+    last_buy_index = ticker_state.get("last_buy_index")
+    if last_buy_index is None:
+        return 0
+    elapsed = day_index - int(last_buy_index)
+    return max(int(cooldown_days) - int(elapsed), 0)
+
+
+def _remaining_buy_cooldown_days(ticker_state: Mapping[str, Any], day_index: int, cooldown_days: int) -> int:
+    last_sell_index = ticker_state.get("last_sell_index")
+    if last_sell_index is None:
+        return 0
+    elapsed = day_index - int(last_sell_index)
+    return max(int(cooldown_days) - int(elapsed), 0)
+
+
+def _set_cooldown_note_if_empty(
+    daily_records_by_ticker: dict[str, list[dict[str, Any]]],
+    ticker: str,
+    dt: pd.Timestamp,
+    note: str,
+) -> None:
+    records = daily_records_by_ticker.get(ticker)
+    if not records or records[-1]["date"] != dt:
+        return
+    current_note = str(records[-1].get("note") or "").strip()
+    if current_note:
+        return
+    records[-1]["note"] = note
+
+
 def _execute_individual_sells(
     position_state: dict,
     metrics_by_ticker: dict,
@@ -45,7 +90,9 @@ def _execute_individual_sells(
     ma_days: int,
     evaluator: StrategyEvaluator,
     is_replacement_day: bool,
+    cooldown_days: int,
     qty_precision: int,
+    dt: pd.Timestamp,
     next_dt: pd.Timestamp | None,
 ) -> tuple[float, float]:
     """개별 종목 매도 로직 (StrategyEvaluator 사용)"""
@@ -56,6 +103,16 @@ def _execute_individual_sells(
         ticker_state, price = position_state[ticker], today_prices.get(ticker)
 
         if ticker_state["shares"] > 0 and pd.notna(price) and metrics_by_ticker[ticker]["available_mask"][i]:
+            if not _can_sell_with_cooldown(ticker_state, i, cooldown_days):
+                remaining = _remaining_sell_cooldown_days(ticker_state, i, cooldown_days)
+                if remaining > 0:
+                    _set_cooldown_note_if_empty(
+                        daily_records_by_ticker,
+                        ticker,
+                        dt,
+                        f"[예정] 쿨다운 - {remaining}일 후 매도 가능",
+                    )
+                continue
             ma_val = ticker_metrics["ma_values"][i]
             current_score = score_today.get(ticker, 0.0)
 
@@ -101,6 +158,7 @@ def _execute_individual_sells(
                 current_holdings_value = max(0.0, current_holdings_value - trade_amount)
                 remaining_shares = _floor_quantity(float(ticker_state["shares"]) - qty, qty_precision)
                 ticker_state["shares"] = remaining_shares
+                ticker_state["last_sell_index"] = i
                 if remaining_shares <= 0:
                     ticker_state["avg_cost"] = 0.0
 
@@ -217,6 +275,7 @@ def _execute_new_buys(
     bucket_topn: int | None = None,
     qty_precision: int = 0,
     next_dt: pd.Timestamp | None = None,
+    cooldown_days: int = 1,
 ) -> tuple[float, float, set[str]]:
     """신규 매수 실행
 
@@ -268,6 +327,17 @@ def _execute_new_buys(
                 continue
 
         block_reason = ""
+        ticker_state = position_state[ticker_to_buy]
+        if not _can_buy_with_cooldown(ticker_state, i, cooldown_days):
+            remaining = _remaining_buy_cooldown_days(ticker_state, i, cooldown_days)
+            if remaining > 0:
+                _set_cooldown_note_if_empty(
+                    daily_records_by_ticker,
+                    ticker_to_buy,
+                    dt,
+                    f"[예정] 쿨다운 - {remaining}일 후 매수 가능",
+                )
+            continue
 
         price = today_prices.get(ticker_to_buy)
         if pd.isna(price):
@@ -324,6 +394,7 @@ def _execute_new_buys(
             current_holdings_value += trade_amount
             ticker_state["shares"] += req_qty
             ticker_state["avg_cost"] = buy_price
+            ticker_state["last_buy_index"] = i
 
             condition_met = (
                 daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt
@@ -511,8 +582,9 @@ def run_portfolio_backtest(
     trading_calendar: Sequence[pd.Timestamp] | None = None,
     ma_days: int = 20,
     ma_type: str = "SMA",
+    strategy: str = "MAPS",
     rebalance_mode: str = "TWICE_A_MONTH",
-    replacement_mode: str = "WEEKLY",
+    cooldown: int = 1,
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
@@ -538,6 +610,9 @@ def run_portfolio_backtest(
 
     country_code = (country or "").strip().lower() or "kor"
     qty_precision = int(get_country_precision(country_code).get("qty_precision", 0))
+    cooldown_days = int(cooldown)
+    if cooldown_days < 1:
+        raise ValueError("COOLDOWN은 1 이상의 정수여야 합니다.")
 
     def _log(message: str) -> None:
         if quiet:
@@ -548,6 +623,22 @@ def run_portfolio_backtest(
     from core.backtest.portfolio import validate_bucket_topn
 
     validate_bucket_topn(top_n)
+
+    ticker_name_map: dict[str, str] = {}
+    for stock in stocks:
+        if not isinstance(stock, Mapping):
+            continue
+        ticker_raw = str(stock.get("ticker") or "").strip().upper()
+        name_raw = str(stock.get("name") or "").strip()
+        if ticker_raw and name_raw:
+            ticker_name_map[ticker_raw] = name_raw
+
+    def _ticker_label(ticker: str) -> str:
+        tk = str(ticker or "").strip().upper()
+        if not tk:
+            return ""
+        nm = ticker_name_map.get(tk)
+        return f"{nm}({tk})" if nm else tk
 
     # ETF와 주식을 구분하여 처리 (삭제됨)
     # etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
@@ -578,6 +669,7 @@ def run_portfolio_backtest(
             ma_type=ma_type,
             precomputed_entry=precomputed_entry,
             enable_data_sufficiency_check=enable_data_sufficiency_check,
+            strategy=strategy,
         )
         if ticker_metrics:
             metrics_by_ticker[ticker] = ticker_metrics
@@ -641,6 +733,8 @@ def run_portfolio_backtest(
         ticker: {
             "shares": 0,
             "avg_cost": 0.0,
+            "last_buy_index": None,
+            "last_sell_index": None,
         }
         for ticker in metrics_by_ticker.keys()
     }
@@ -658,17 +752,15 @@ def run_portfolio_backtest(
     # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     total_days = len(union_index)
     _log(
-        f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 교체 모드: {replacement_mode}, 리밸런싱 모드: {rebalance_mode}"
+        f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 교체 모드: DAILY(고정), 리밸런싱 모드: {rebalance_mode}, COOLDOWN: {cooldown_days}"
     )
 
     # 이전 리밸런싱 인덱스 추적 변수는 제거함
     for i, dt in enumerate(union_index):
         next_dt = union_index[i + 1] if i < total_days - 1 else None
 
-        # 교체 날짜 판별 (DAILY, WEEKLY, FORTNIGHTLY, MONTHLY, QUARTERLY)
-        is_replacement_day = check_is_rebalance_day(
-            dt=dt, next_dt=next_dt, rebalance_mode=replacement_mode, trading_calendar=trading_calendar_idx
-        )
+        # 교체는 항상 모든 거래일에 수행
+        is_replacement_day = True
 
         # 리밸런싱 날짜 판별
         is_rebalance_day = check_is_rebalance_day(
@@ -816,7 +908,9 @@ def run_portfolio_backtest(
             ma_days=ma_days,
             evaluator=evaluator,
             is_replacement_day=is_replacement_day,
+            cooldown_days=cooldown_days,
             qty_precision=qty_precision,
+            dt=dt,
             next_dt=next_dt,
         )
         if is_replacement_day:
@@ -850,6 +944,7 @@ def run_portfolio_backtest(
                 bucket_topn=bucket_topn,
                 qty_precision=qty_precision,
                 next_dt=next_dt,
+                cooldown_days=cooldown_days,
             )
 
             # 3. 교체(Replacement) - 교체 날에만 수행
@@ -915,10 +1010,21 @@ def run_portfolio_backtest(
 
                         for candidate_hold in bucket_held:
                             cand_ticker = candidate_hold["ticker"]
+                            cand_state = position_state.get(cand_ticker, {})
+                            if not _can_sell_with_cooldown(cand_state, i, cooldown_days):
+                                remaining = _remaining_sell_cooldown_days(cand_state, i, cooldown_days)
+                                if remaining > 0:
+                                    _set_cooldown_note_if_empty(
+                                        daily_records_by_ticker,
+                                        cand_ticker,
+                                        dt,
+                                        f"[예정] 쿨다운 - {remaining}일 후 매도 가능",
+                                    )
+                                continue
                             # 점수 조건 체크 (단순 점수 비교로 변경)
                             if best_new_score > candidate_hold["score"]:
                                 ticker_to_sell = cand_ticker
-                                replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체"
+                                replacement_note = f"[예정] 교체 - {_ticker_label(replacement_ticker)}"
                                 break
 
                         if not ticker_to_sell:
@@ -952,6 +1058,7 @@ def run_portfolio_backtest(
                             current_holdings_value = max(0.0, current_holdings_value - sell_amount)
                             remaining_shares = _floor_quantity(float(weakest_state["shares"]) - sell_qty, qty_precision)
                             weakest_state["shares"] = remaining_shares
+                            weakest_state["last_sell_index"] = i
                             if remaining_shares <= 0:
                                 weakest_state["avg_cost"] = 0.0
 
@@ -994,12 +1101,23 @@ def run_portfolio_backtest(
                             # 체결 반영
                             if req_qty > 0 and buy_amount <= cash + 1e-9:
                                 new_ticker_state = position_state[replacement_ticker]
+                                if not _can_buy_with_cooldown(new_ticker_state, i, cooldown_days):
+                                    remaining = _remaining_buy_cooldown_days(new_ticker_state, i, cooldown_days)
+                                    if remaining > 0:
+                                        _set_cooldown_note_if_empty(
+                                            daily_records_by_ticker,
+                                            replacement_ticker,
+                                            dt,
+                                            f"[예정] 쿨다운 - {remaining}일 후 매수 가능",
+                                        )
+                                    continue
                                 cash -= buy_amount
                                 current_holdings_value += buy_amount
                                 new_ticker_state["shares"], new_ticker_state["avg_cost"] = (
                                     req_qty,
                                     buy_price,
                                 )
+                                new_ticker_state["last_buy_index"] = i
                                 # 매도 완료: 매수 후 바로 매도 가능 (리밸런싱 조건 충족 시)
 
                                 # 결과 행 업데이트: 없으면 새로 추가
@@ -1018,11 +1136,11 @@ def run_portfolio_backtest(
                                             "pv": req_qty * buy_price,
                                             "avg_cost": buy_price,
                                             # WAIT 상태(신호일)이므로 체결형 문구 대신 신호형 문구를 사용합니다.
-                                            "note": f"교체매수 신호 {format_money(buy_amount, country_code)} "
-                                            f"({ticker_to_sell} 대체)",
+                                            "note": f"[예정] 교체매수 신호 {format_money(buy_amount, country_code)} "
+                                            f"({_ticker_label(ticker_to_sell)} 대체)",
                                             "pending_action": "BUY_REPLACE",
                                             "execute_on": next_dt,
-                                            "pending_reason": f"{ticker_to_sell} 대체",
+                                            "pending_reason": f"{_ticker_label(ticker_to_sell)} 대체",
                                         }
                                     )
                                 else:
@@ -1038,11 +1156,11 @@ def run_portfolio_backtest(
                                             "trade_shares": req_qty,
                                             "trade_profit": 0.0,
                                             "trade_pl_pct": 0.0,
-                                            "note": f"교체매수 신호 {format_money(buy_amount, country_code)} "
-                                            f"({ticker_to_sell} 대체)",
+                                            "note": f"[예정] 교체매수 신호 {format_money(buy_amount, country_code)} "
+                                            f"({_ticker_label(ticker_to_sell)} 대체)",
                                             "pending_action": "BUY_REPLACE",
                                             "execute_on": next_dt,
-                                            "pending_reason": f"{ticker_to_sell} 대체",
+                                            "pending_reason": f"{_ticker_label(ticker_to_sell)} 대체",
                                             "signal1": metrics_by_ticker[replacement_ticker]["ma_values"][i],
                                             "signal2": None,
                                             "score": score_today.get(replacement_ticker, 0.0),
@@ -1065,7 +1183,7 @@ def run_portfolio_backtest(
                                         "note": replacement_note,
                                         "pending_action": "BUY_REPLACE",
                                         "execute_on": next_dt,
-                                        "pending_reason": f"{ticker_to_sell} 대체",
+                                        "pending_reason": f"{_ticker_label(ticker_to_sell)} 대체",
                                         "signal1": None,
                                         "signal2": None,
                                         "score": None,
@@ -1102,6 +1220,16 @@ def run_portfolio_backtest(
             # 4. 점수 음수 종목 매도
             for held_ticker, held_position in position_state.items():
                 if held_position["shares"] > 0:
+                    if not _can_sell_with_cooldown(held_position, i, cooldown_days):
+                        remaining = _remaining_sell_cooldown_days(held_position, i, cooldown_days)
+                        if remaining > 0:
+                            _set_cooldown_note_if_empty(
+                                daily_records_by_ticker,
+                                held_ticker,
+                                dt,
+                                f"[예정] 쿨다운 - {remaining}일 후 매도 가능",
+                            )
+                        continue
                     held_score = score_today.get(held_ticker, float("nan"))
                     if not pd.isna(held_score) and held_score < 0:
                         sell_price = today_prices.get(held_ticker)
@@ -1122,6 +1250,7 @@ def run_portfolio_backtest(
                             current_holdings_value = max(0.0, current_holdings_value - sell_amount)
                             remaining_shares = _floor_quantity(float(held_position["shares"]) - qty, qty_precision)
                             held_position["shares"] = remaining_shares
+                            held_position["last_sell_index"] = i
                             if remaining_shares <= 0:
                                 held_position["avg_cost"] = 0.0
 
@@ -1196,6 +1325,16 @@ def run_portfolio_backtest(
                         current_val = state["shares"] * price
                         # 목표 비중보다 5% 이상 초과일 때만 매도 (Trading Cost 방어) - 여기서는 사용자의 요청에 따라 엄격하게 조절
                         if current_val > target_per_ticker * 1.05:
+                            if not _can_sell_with_cooldown(state, i, cooldown_days):
+                                remaining = _remaining_sell_cooldown_days(state, i, cooldown_days)
+                                if remaining > 0:
+                                    _set_cooldown_note_if_empty(
+                                        daily_records_by_ticker,
+                                        ticker,
+                                        dt,
+                                        f"[예정] 쿨다운 - {remaining}일 후 매도 가능",
+                                    )
+                                continue
                             excess_val = current_val - target_per_ticker
 
                             # 다음날 시초가 + 슬리피지로 매도 가격 계산 (실제 거래 가격)
@@ -1218,9 +1357,10 @@ def run_portfolio_backtest(
                                 # 상태 업데이트
                                 cash += sell_amount
                                 state["shares"] -= sell_qty
+                                state["last_sell_index"] = i
 
                                 diff_pct = (sell_amount / total_rebalance_equity) * 100
-                                trim_note = f"[비중조절] {diff_pct:.1f}% 매도"
+                                trim_note = f"[예정] 비중조절 - {diff_pct:.1f}% 매도"
 
                                 if (
                                     daily_records_by_ticker[ticker]
@@ -1263,7 +1403,7 @@ def run_portfolio_backtest(
             pending_action = str(last_row.get("pending_action") or "").upper() or None
 
             # 리스크 오프/비중조절 문구가 있으면 덮어쓰지 않음
-            if "시장위험회피" in current_note or "[비중조절]" in current_note:
+            if "시장위험회피" in current_note or "비중조절 -" in current_note:
                 continue
 
             overrides = compute_net_trade_note(
@@ -1341,6 +1481,16 @@ def run_portfolio_backtest(
                     topup_amount = topup_qty * topup_price
 
                     if topup_amount <= cash + 1e-9:
+                        if not _can_buy_with_cooldown(position_state[ticker_to_topup], i, cooldown_days):
+                            remaining = _remaining_buy_cooldown_days(position_state[ticker_to_topup], i, cooldown_days)
+                            if remaining > 0:
+                                _set_cooldown_note_if_empty(
+                                    daily_records_by_ticker,
+                                    ticker_to_topup,
+                                    dt,
+                                    f"[예정] 쿨다운 - {remaining}일 후 매수 가능",
+                                )
+                            continue
                         # 추가 매수 실행
                         ticker_state = position_state[ticker_to_topup]
                         old_shares = ticker_state["shares"]
@@ -1349,6 +1499,7 @@ def run_portfolio_backtest(
                         cash -= topup_amount
                         current_holdings_value += topup_amount
                         ticker_state["shares"] += topup_qty
+                        ticker_state["last_buy_index"] = i
 
                         # 평균 단가 재계산
                         total_cost = old_shares * old_avg_cost + topup_amount
@@ -1366,7 +1517,7 @@ def run_portfolio_backtest(
                             # 상태는 HOLD를 유지하고 문구로만 비중 조절 매수를 표시
                             if existing_decision == "HOLD":
                                 diff_pct = (topup_amount / (total_equity)) * 100
-                                topup_note = f"[비중조절] {diff_pct:.1f}% 매수"
+                                topup_note = f"[예정] 비중조절 - {diff_pct:.1f}% 매수"
                                 row["note"] = f"{topup_note} | {existing_note}" if existing_note else topup_note
                                 row["pending_action"] = "BUY"
                                 row["execute_on"] = next_dt

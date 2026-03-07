@@ -253,20 +253,14 @@ def build_snapshot_rows(
         for row in entries:
             row["_is_bucket_top"] = False
 
-    def _final_sort_key(row: dict[str, Any]) -> tuple[int, int, int, float, str]:
-        # [절대 변경 금지] 정렬 정책:
-        # 1) 상단 TOPN * 버킷수(버킷 TopN 선정 구간)만 버킷 순서 유지
-        # 2) 상단 구간 외에는 버킷 무시, 점수순 정렬
+    def _final_sort_key(row: dict[str, Any]) -> tuple[int, int, float, str]:
+        # 백테스트 일별 표는 CASH 고정, 그 다음 보유 우선, 점수 내림차순 정렬
         if row.get("is_cash"):
-            return (-1, 0, 0, 0.0, "CASH")
+            return (-1, 0, 0.0, "CASH")
 
-        bucket_sort_val = int(row["bucket"]) if (row.get("bucket") and str(row.get("bucket")).isdigit()) else 99
-        top_priority = 0 if row.get("_is_bucket_top") else 1
-        bucket_rank = bucket_sort_val if top_priority == 0 else 99
         holding_priority = 0 if row.get("is_current_holding") else 1
-        state_priority = 0 if row.get("sort_group", 2) == 1 else 1
         score_val = float(row.get("score")) if _is_finite_number(row.get("score")) else float("-inf")
-        return (top_priority, bucket_rank, holding_priority, state_priority, -score_val, str(row.get("ticker", "")))
+        return (0, holding_priority, -score_val, str(row.get("ticker", "")))
 
     entries.sort(key=_final_sort_key)
 
