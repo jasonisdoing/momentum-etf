@@ -886,10 +886,46 @@ def _build_summary(
         benchmark_cagr_pct = float(benchmarks_summary[0]["cagr_pct"])
 
     weekly_summary_rows: list[dict[str, Any]] = []
+    benchmark_weekly_return_map: dict[pd.Timestamp, float] = {}
+    benchmark_weekly_cum_map: dict[pd.Timestamp, float] = {}
+    benchmark_weekly_name = ""
     monthly_returns = pd.Series(dtype=float)
     monthly_cum_returns = pd.Series(dtype=float)
     yearly_returns = pd.Series(dtype=float)
     if not pv_series.empty:
+        if benchmarks_summary:
+            primary_benchmark = benchmarks_summary[0]
+            benchmark_weekly_name = str(primary_benchmark.get("name") or primary_benchmark.get("ticker") or "Benchmark")
+            benchmark_ticker = str(primary_benchmark.get("ticker") or "").strip()
+            benchmark_frame = _load_benchmark_frame(benchmark_ticker)
+            if benchmark_frame is not None and not benchmark_frame.empty and "Close" in benchmark_frame.columns:
+                benchmark_frame = benchmark_frame.sort_index()
+                benchmark_frame.index = pd.to_datetime(benchmark_frame.index)
+                benchmark_mask = (benchmark_frame.index >= start_date) & (benchmark_frame.index <= end_date)
+                benchmark_frame = benchmark_frame.loc[benchmark_mask]
+                benchmark_frame = benchmark_frame.loc[benchmark_frame.index.intersection(pv_series.index)]
+                if not benchmark_frame.empty:
+                    benchmark_prices = benchmark_frame["Close"].astype(float)
+                    benchmark_start_price = float(benchmark_prices.iloc[0])
+                    if benchmark_start_price > 0:
+                        benchmark_start_row = pd.Series(
+                            [benchmark_start_price],
+                            index=[start_date - pd.Timedelta(days=1)],
+                        )
+                        benchmark_with_start = pd.concat([benchmark_start_row, benchmark_prices])
+                        benchmark_weekly = benchmark_with_start.resample("W-FRI").last().dropna()
+                        if not benchmark_weekly.empty:
+                            benchmark_weekly_ret = benchmark_weekly.pct_change().mul(100).fillna(0.0)
+                            benchmark_weekly_cum = (benchmark_weekly / benchmark_start_price - 1).mul(100)
+                            first_bench_idx = benchmark_weekly_ret.index[0]
+                            benchmark_weekly_ret.loc[first_bench_idx] = float(benchmark_weekly_cum.loc[first_bench_idx])
+                            benchmark_weekly_return_map = {
+                                pd.to_datetime(dt): float(val) for dt, val in benchmark_weekly_ret.items()
+                            }
+                            benchmark_weekly_cum_map = {
+                                pd.to_datetime(dt): float(val) for dt, val in benchmark_weekly_cum.items()
+                            }
+
         start_row = pd.Series([initial_capital_local], index=[start_date - pd.Timedelta(days=1)])
         pv_series_with_start = pd.concat([start_row, pv_series])
         weekly_values = pv_series_with_start.resample("W-FRI").last().dropna()
@@ -899,6 +935,8 @@ def _build_summary(
                 weekly_cum_pct = (weekly_values / initial_capital_local - 1).mul(100)
             else:
                 weekly_cum_pct = pd.Series([0.0] * len(weekly_values), index=weekly_values.index)
+            first_week_idx = weekly_return_pct.index[0]
+            weekly_return_pct.loc[first_week_idx] = float(weekly_cum_pct.loc[first_week_idx])
             for dt, value in weekly_values.items():
                 # 해당 날짜의 보유종목 수 가져오기
                 held_count = 0
@@ -937,6 +975,9 @@ def _build_summary(
                         "max_topn": max_topn,
                         "weekly_return_pct": float(weekly_return_pct.loc[dt]),
                         "cumulative_return_pct": float(weekly_cum_pct.loc[dt]),
+                        "benchmark_name": benchmark_weekly_name or None,
+                        "benchmark_weekly_return_pct": benchmark_weekly_return_map.get(pd.to_datetime(dt)),
+                        "benchmark_cumulative_return_pct": benchmark_weekly_cum_map.get(pd.to_datetime(dt)),
                     }
                 )
 
