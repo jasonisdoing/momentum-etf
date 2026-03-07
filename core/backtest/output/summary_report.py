@@ -84,7 +84,15 @@ def print_backtest_summary(
     add_section_heading("주별 성과 요약")
     weekly_summary_rows = summary.get("weekly_summary") or []
     if isinstance(weekly_summary_rows, list) and weekly_summary_rows:
-        headers = ["주차(종료일)", "보유종목", "평가금액", "주간 수익률", "누적 수익률"]
+        headers = [
+            "주차(종료일)",
+            "보유종목",
+            "평가금액",
+            "주간 수익률",
+            "누적 수익률",
+            "벤치마크 주간 수익률",
+            "벤치마크 누적 수익률",
+        ]
         table_rows = []
         for item in weekly_summary_rows:
             week_label = item.get("week_end") or "-"
@@ -93,6 +101,8 @@ def print_backtest_summary(
             max_topn = item.get("max_topn", 0)
             weekly_ret = item.get("weekly_return_pct")
             cum_ret = item.get("cumulative_return_pct")
+            bench_weekly_ret = item.get("benchmark_weekly_return_pct")
+            bench_cum_ret = item.get("benchmark_cumulative_return_pct")
             value_display = money_formatter(value) if _is_finite_number(value) else "-"
             holdings_display = f"{held_count}/{max_topn}" if max_topn > 0 else "-"
             table_rows.append(
@@ -102,9 +112,11 @@ def print_backtest_summary(
                     value_display,
                     format_pct_change(weekly_ret) if _is_finite_number(weekly_ret) else "-",
                     format_pct_change(cum_ret) if _is_finite_number(cum_ret) else "-",
+                    format_pct_change(bench_weekly_ret) if _is_finite_number(bench_weekly_ret) else "-",
+                    format_pct_change(bench_cum_ret) if _is_finite_number(bench_cum_ret) else "-",
                 ]
             )
-        aligns = ["left", "center", "right", "right", "right"]
+        aligns = ["left", "center", "right", "right", "right", "right", "right"]
         output_lines.extend(render_table_eaw(headers, table_rows, aligns))
     else:
         add("| 주별 성과 데이터를 찾을 수 없습니다.")

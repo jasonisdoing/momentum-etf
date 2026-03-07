@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 
+from config import BACKTEST_SLIPPAGE
 from core.backtest.filtering import select_candidates
 from core.backtest.price import calculate_trade_price
 from strategies.maps.evaluator import StrategyEvaluator
@@ -73,6 +74,25 @@ def _set_cooldown_note_if_empty(
     if current_note:
         return
     records[-1]["note"] = note
+
+
+def _calculate_bootstrap_buy_price(
+    *,
+    open_values: Any,
+    close_values: Any,
+    country_code: str,
+) -> float:
+    open0 = open_values[0] if len(open_values) > 0 else float("nan")
+    close0 = close_values[0] if len(close_values) > 0 else float("nan")
+    if pd.notna(open0):
+        base_price = float(open0)
+    elif pd.notna(close0):
+        base_price = float(close0)
+    else:
+        return 0.0
+    slippage_config = BACKTEST_SLIPPAGE.get(country_code, BACKTEST_SLIPPAGE.get("kor", {}))
+    slippage_pct = float(slippage_config.get("buy_pct", 0.0) or 0.0)
+    return base_price * (1 + slippage_pct / 100.0)
 
 
 def _execute_individual_sells(
@@ -755,6 +775,59 @@ def run_portfolio_backtest(
         f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 교체 모드: DAILY(고정), 리밸런싱 모드: {rebalance_mode}, COOLDOWN: {cooldown_days}"
     )
 
+    bootstrap_initialized = False
+    if total_days > 0:
+        initial_candidates: list[tuple[float, str]] = []
+        held_per_bucket: dict[int, int] = {}
+
+        for ticker, ticker_metrics in metrics_by_ticker.items():
+            available0 = bool(ticker_metrics["available_mask"][0])
+            if not available0:
+                continue
+            score0 = ticker_metrics["ma_score_values"][0]
+            score_float = float(score0) if not pd.isna(score0) else float("-inf")
+            if score_float >= 0:
+                initial_candidates.append((score_float, ticker))
+
+        initial_candidates.sort(reverse=True)
+
+        selected: list[str] = []
+        for _, ticker in initial_candidates:
+            if len(selected) >= int(top_n):
+                break
+            if bucket_map and bucket_topn:
+                b_id = bucket_map.get(ticker, 1)
+                if held_per_bucket.get(b_id, 0) >= int(bucket_topn):
+                    continue
+                held_per_bucket[b_id] = held_per_bucket.get(b_id, 0) + 1
+            selected.append(ticker)
+
+        if selected:
+            remaining_cash = float(cash)
+            for idx, ticker in enumerate(selected):
+                remaining_slots = len(selected) - idx
+                if remaining_slots <= 0 or remaining_cash <= 0:
+                    break
+                ticker_metrics = metrics_by_ticker[ticker]
+                buy_price = _calculate_bootstrap_buy_price(
+                    open_values=ticker_metrics["open_values"],
+                    close_values=ticker_metrics["close_values"],
+                    country_code=country_code,
+                )
+                if buy_price <= 0:
+                    continue
+                budget = remaining_cash / remaining_slots
+                qty = _floor_quantity(budget / buy_price, qty_precision) if buy_price > 0 else 0.0
+                trade_amount = qty * buy_price
+                if qty <= 0 or trade_amount > remaining_cash + 1e-9:
+                    continue
+                position_state[ticker]["shares"] = qty
+                position_state[ticker]["avg_cost"] = buy_price
+                position_state[ticker]["last_buy_index"] = 0
+                remaining_cash -= trade_amount
+                bootstrap_initialized = True
+            cash = max(remaining_cash, 0.0)
+
     # 이전 리밸런싱 인덱스 추적 변수는 제거함
     for i, dt in enumerate(union_index):
         next_dt = union_index[i + 1] if i < total_days - 1 else None
@@ -766,7 +839,7 @@ def run_portfolio_backtest(
         is_rebalance_day = check_is_rebalance_day(
             dt=dt, next_dt=next_dt, rebalance_mode=rebalance_mode, trading_calendar=trading_calendar_idx
         )
-        if i == 0:
+        if i == 0 and not bootstrap_initialized:
             is_replacement_day = True
             is_rebalance_day = True
 
