@@ -21,8 +21,8 @@
         "OPTIMIZATION_METRIC": "CAGR"
     },
     "benchmark": {
-        "ticker": "379800",
-        "name": "KODEX 미국S&P500"
+        "ticker": "379810",
+        "name": "KODEX 미국나스닥100"
     },
     "account": "kor_us"
 }

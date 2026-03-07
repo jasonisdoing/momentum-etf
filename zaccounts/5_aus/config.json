@@ -8,14 +8,14 @@
     "show_hold": true,
     "strategy": {
         "BACKTEST_LAST_MONTHS": 12,
-        "BACKTESTED_DATE": "2026-03-07 11:41",
-        "CAGR": 71.538716,
-        "MDD": -16.379829,
+        "BACKTESTED_DATE": "2026-03-07 12:29",
+        "CAGR": 37.511901,
+        "MDD": -18.303003,
         "STRATEGY": "MAPS",
         "TOPN": 6,
         "MA_MONTH": 12,
         "MA_TYPE": "HMA",
-        "REBALANCE_MODE": "MONTHLY",
+        "REBALANCE_MODE": "TWICE_A_MONTH",
         "COOLDOWN": 5,
         "ENABLE_DATA_SUFFICIENCY_CHECK": false,
         "OPTIMIZATION_METRIC": "CAGR"
