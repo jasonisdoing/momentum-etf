@@ -231,8 +231,10 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     weighted_mdd = entry.get("weighted_expected_MDD")
     backtested_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # 표준 저장 포맷: strategy: {TUNE_*, OPTIMIZATION_METRIC, COMMON}
-    common_data = dict(strategy_data.get("COMMON") or {}) if isinstance(strategy_data.get("COMMON"), dict) else {}
+    # 표준 저장 포맷: strategy: {TUNE_*, OPTIMIZATION_METRIC, REBALANCE_MODE}
+    rebalance_mode = strategy_data.get("REBALANCE_MODE")
+    if rebalance_mode is None and isinstance(strategy_data.get("COMMON"), dict):
+        rebalance_mode = (strategy_data.get("COMMON") or {}).get("REBALANCE_MODE")
 
     for key, value in result_params.items():
         if value is None:
@@ -241,7 +243,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
             strategy_data["TUNE_MONTHS"] = value
             continue
         if key == "REBALANCE_MODE":
-            common_data["REBALANCE_MODE"] = value
+            rebalance_mode = value
             continue
         if key in {"OPTIMIZATION_METRIC"}:
             strategy_data[key] = value
@@ -258,14 +260,14 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     tune_cagr = _round_float(weighted_cagr) if weighted_cagr is not None else strategy_data.get("TUNE_CAGR")
     tune_mdd = _round_float(weighted_mdd) if weighted_mdd is not None else strategy_data.get("TUNE_MDD")
 
-    # 키 순서 고정: TUNE_DATE, TUNE_CAGR, TUNE_MDD, TUNE_MONTHS, OPTIMIZATION_METRIC, COMMON
+    # 키 순서 고정: TUNE_DATE, TUNE_CAGR, TUNE_MDD, TUNE_MONTHS, OPTIMIZATION_METRIC, REBALANCE_MODE
     strategy_out: dict[str, Any] = {
         "TUNE_DATE": backtested_at,
         "TUNE_CAGR": tune_cagr,
         "TUNE_MDD": tune_mdd,
         "TUNE_MONTHS": tune_months,
         "OPTIMIZATION_METRIC": strategy_data.get("OPTIMIZATION_METRIC") or result_params.get("OPTIMIZATION_METRIC"),
-        "COMMON": common_data,
+        "REBALANCE_MODE": rebalance_mode,
     }
 
     settings_data["strategy"] = strategy_out
