@@ -1,6 +1,6 @@
 # 전략 로직 상세 (Strategy Logic)
 
-이 문서는 현재 시스템에서 사용하는 전략(`MAPS`, `HR`)의 의사결정 로직을 설명합니다.
+이 문서는 현재 시스템의 의사결정 로직(종목풀 랭킹 + 계좌 리밸런싱)을 설명합니다.
 
 ## 1. 공통 실행 원칙
 
@@ -9,28 +9,24 @@
 * 리밸런싱/교체/신규매수는 `REBALANCE_MODE` 규칙을 따릅니다.
 * 필수 설정이 누락되면 fallback 없이 명시적 에러로 중단됩니다.
 
-## 2. MAPS 전략
+## 2. 종목풀 랭킹 로직
 
-`MAPS`는 이동평균 기반 점수로 종목 상대 순위를 계산합니다.
+종목풀(`zpools/*`)은 이동평균 기반 점수로 종목 상대 순위를 계산합니다.
 
 ### 핵심 파라미터
 
-* `TOPN`: 보유 종목 수
 * `MA_MONTH`: 이동평균 기간(개월)
 * `MA_TYPE`: 이동평균 종류
-* `COOLDOWN`: 매수/매도 후 반대 거래 제한 거래일 수
-* `REBALANCE_MODE`: 리밸런싱 주기
 
 ### 동작 요약
 
-1. 각 종목의 MAPS 점수를 계산
-2. 보유 우선 + 점수 순으로 정렬
-3. `TOPN` 기준으로 보유/대기 상태 결정
-4. 쿨다운/리밸런싱 규칙을 적용해 실행 가능 주문만 확정
+1. 각 종목의 점수를 계산
+2. 점수 순으로 정렬
+3. `rank_YYYY-MM-DD.log`와 MongoDB `pool_rankings`에 저장
 
-## 3. HR 전략
+## 3. 계좌 리밸런싱 로직
 
-`HR`은 계좌 종목 리스트(`stock_meta`)의 `weight`를 목표 비중으로 사용하는 고정 비중 전략입니다.
+계좌(`zaccounts/*`)는 종목 리스트(`stock_meta`)의 `weight`를 목표 비중으로 사용하는 고정 비중 리밸런싱 방식입니다.
 
 ### 핵심 파라미터
 
@@ -50,9 +46,7 @@
 
 ## 4. 튜닝 로직
 
-* `MAPS` 튜닝: `TOPN`, `MA_MONTH`, `MA_TYPE`, `COOLDOWN`, `REBALANCE_MODE`
-* `HR` 튜닝: `REBALANCE_MODE`만 탐색
+* 계좌 튜닝: `REBALANCE_MODE` 중심으로 탐색
+* 종목풀 랭킹 파라미터(`months`, `ma_type`)는 `zpools/*/config.json`에서 관리
 * 최적 결과는 계좌 `config.json`의 `strategy`에 반영됩니다.
   * 공통 파라미터: `strategy.COMMON`
-  * MAPS 전용 파라미터: `strategy.MAPS`
-  * HR은 전용 파라미터가 없으면 `strategy.HR` 블록을 생략할 수 있습니다.

@@ -1,4 +1,4 @@
-"""Trade history utilities for maps logic.
+"""Trade history utilities for strategy logic.
 
 NOTE: This module previously interacted with MongoDB 'trades' collection.
 As of the refactoring to remove legacy trade logic, these functions are stubs

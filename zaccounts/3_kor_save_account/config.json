@@ -1,7 +1,7 @@
 {
     "icon": "🇺🇸",
     "name": "해외 일반계좌",
-    "desc": "일반계좌에서 운영중인 국내상장 해외 ETF 포트폴리오",
+    "desc": "기본 운용 계좌 (국내 해외 ETF 계좌)",
     "country_code": "kor",
     "currency": "KRW",
     "initial_capital_krw": "40000000",
@@ -11,7 +11,6 @@
         "TUNE_CAGR": 100.782389,
         "TUNE_MDD": -7.28761,
         "TUNE_MONTHS": 4,
-        "STRATEGY": "HR",
         "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
             "REBALANCE_MODE": "QUARTERLY"
@@ -21,5 +20,5 @@
         "ticker": "379810",
         "name": "KODEX 미국나스닥100"
     },
-    "account": "kor_us"
+    "account": "kor_save_account"
 }

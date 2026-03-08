@@ -40,7 +40,7 @@ class StrategyRules:
     def from_values(
         cls,
         *,
-        strategy: Any = "MAPS",
+        strategy: Any = "WEIGHT",
         ma_days: Any = None,
         ma_month: Any = None,
         topn: Any = None,
@@ -52,12 +52,12 @@ class StrategyRules:
         target_weights: Any = None,
         enable_data_sufficiency_check: Any = False,
     ) -> StrategyRules:
-        strategy_str = str(strategy or "MAPS").strip().upper()
+        strategy_str = str(strategy or "WEIGHT").strip().upper()
         if not strategy_str:
-            strategy_str = "MAPS"
+            strategy_str = "WEIGHT"
 
-        # HR: MA/점수 기반 파라미터 대신 목표 비중(선택)을 사용
-        if strategy_str == "HR":
+        # WEIGHT: MA/점수 기반 파라미터 대신 목표 비중(선택)을 사용
+        if strategy_str == "WEIGHT":
             normalized_weights: dict[str, float] | None = None
             if target_weights is not None:
                 if not isinstance(target_weights, Mapping):

@@ -129,7 +129,7 @@ def _render_tuning_table(
     table_rows = []
     for row in rows[:MAX_TABLE_ROWS]:
         ma_val = row.get("ma_month") or row.get("ma_days")
-        strategy_val = row.get("strategy", "MAPS")
+        strategy_val = row.get("strategy", "RANK")
         ma_type_val = row.get("ma_type", "SMA")
         topn_val = row.get("bucket_topn")
 
@@ -152,7 +152,7 @@ def _render_tuning_table(
 
         if hr_mode:
             row_data = [
-                str(strategy_val) if strategy_val else "HR",
+                str(strategy_val) if strategy_val else "WEIGHT",
                 str(rebal_mode_val),
                 _format_table_float(row.get("cagr")),
                 _format_table_float(row.get("mdd")),
@@ -163,7 +163,7 @@ def _render_tuning_table(
             ]
         else:
             row_data = [
-                str(strategy_val) if strategy_val else "MAPS",
+                str(strategy_val) if strategy_val else "RANK",
                 str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
                 str(ma_type_val) if ma_type_val else "SMA",
                 str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",

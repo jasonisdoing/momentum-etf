@@ -12,9 +12,9 @@ import pandas as pd
 from config import BACKTEST_SLIPPAGE
 from core.backtest.filtering import select_candidates
 from core.backtest.price import calculate_trade_price
-from strategies.maps.evaluator import StrategyEvaluator
-from strategies.maps.labeler import compute_net_trade_note
-from strategies.maps.metrics import process_ticker_data
+from core.strategy.evaluator import StrategyEvaluator
+from core.strategy.labeler import compute_net_trade_note
+from core.strategy.metrics import process_ticker_data
 from utils.logger import get_app_logger
 from utils.report import format_money
 from utils.settings_loader import get_country_precision
@@ -224,7 +224,7 @@ def _rank_buy_candidates(
         ticker_state_cand = position_state[candidate_ticker]
 
         if ticker_state_cand["shares"] == 0:
-            # MAPS 점수 사용
+            # RANK 점수 사용
             score_cand = score_today.get(candidate_ticker, float("nan"))
             final_score = score_cand if not pd.isna(score_cand) else -float("inf")
             if final_score < 0.0:
@@ -592,7 +592,7 @@ def check_is_rebalance_day(
     return _is_execution_day(execution_dt, execution_next_dt)
 
 
-def _run_hr_backtest(
+def _run_weight_backtest(
     *,
     stocks: list[dict],
     initial_capital: float,
@@ -616,7 +616,7 @@ def _run_hr_backtest(
             logger.info(message)
 
     if not isinstance(target_weights, Mapping) or not target_weights:
-        raise RuntimeError("HR 전략은 종목 weight 기반 목표 비중이 필요합니다.")
+        raise RuntimeError("종목 weight 기반 목표 비중이 필요합니다.")
 
     normalized_weights: dict[str, float] = {}
     weight_sum = 0.0
@@ -630,9 +630,9 @@ def _run_hr_backtest(
         normalized_weights[key] = w
         weight_sum += w
     if not normalized_weights:
-        raise RuntimeError("HR 전략 목표 비중이 비어 있습니다.")
+        raise RuntimeError("목표 비중이 비어 있습니다.")
     if abs(weight_sum - 1.0) > 1e-3:
-        raise RuntimeError("HR 전략 목표 비중 합계는 1.0이어야 합니다.")
+        raise RuntimeError("목표 비중 합계는 1.0이어야 합니다.")
 
     ticker_set = set(normalized_weights.keys())
     metrics_by_ticker: dict[str, dict[str, Any]] = {}
@@ -677,7 +677,7 @@ def _run_hr_backtest(
         if missing_ticker_sink is not None:
             missing_ticker_sink.update(missing)
         else:
-            logger.warning("HR 가격 데이터 부족으로 제외된 종목: %s", ", ".join(missing))
+            logger.warning("가격 데이터 부족으로 제외된 종목: %s", ", ".join(missing))
 
     if not metrics_by_ticker:
         return {}
@@ -731,7 +731,7 @@ def _run_hr_backtest(
         position_state[ticker]["avg_cost"] = buy_price
         cash -= amount
 
-    _log(f"[HR] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
+    _log(f"총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
 
     for i, dt in enumerate(union_index):
         next_dt = union_index[i + 1] if i < total_days - 1 else None
@@ -925,7 +925,7 @@ def run_portfolio_backtest(
     trading_calendar: Sequence[pd.Timestamp] | None = None,
     ma_days: int = 20,
     ma_type: str = "SMA",
-    strategy: str = "MAPS",
+    strategy: str = "RANK",
     rebalance_mode: str = "TWICE_A_MONTH",
     cooldown: int = 1,
     target_weights: Mapping[str, float] | None = None,
@@ -968,9 +968,9 @@ def run_portfolio_backtest(
 
     validate_bucket_topn(top_n)
 
-    strategy_key = str(strategy or "MAPS").upper()
-    if strategy_key == "HR":
-        return _run_hr_backtest(
+    strategy_key = str(strategy or "RANK").upper()
+    if strategy_key == "WEIGHT":
+        return _run_weight_backtest(
             stocks=stocks,
             initial_capital=initial_capital,
             core_start_date=core_start_date,
@@ -1383,7 +1383,7 @@ def run_portfolio_backtest(
                 held_stocks_with_scores = []
                 for held_ticker, held_position in position_state.items():
                     if held_position["shares"] > 0:
-                        # MAPS 점수 사용
+                        # RANK 점수 사용
                         score_h = score_today.get(held_ticker, float("nan"))
                         bucket_h = bucket_map.get(held_ticker, 1) if bucket_map else 1
 

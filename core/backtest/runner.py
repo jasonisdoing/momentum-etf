@@ -12,7 +12,7 @@ import pandas as pd
 from config import TRADING_DAYS_PER_MONTH
 from core.backtest.analysis.summaries import build_bucket_summaries
 from core.backtest.engine import run_portfolio_backtest
-from strategies.maps.rules import StrategyRules
+from core.strategy.rules import StrategyRules
 from utils.account_registry import get_common_file_settings
 from utils.data_loader import get_exchange_rate_series, get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
@@ -88,8 +88,8 @@ class AccountBacktestResult:
         }
 
 
-def _extract_hr_target_weights(etf_universe: Sequence[Mapping[str, Any]]) -> dict[str, float]:
-    """Mongo 종목 리스트의 weight 필드에서 HR 목표 비중을 추출/정규화한다."""
+def _extract_target_weights(etf_universe: Sequence[Mapping[str, Any]]) -> dict[str, float]:
+    """종목 리스트의 weight 필드에서 목표 비중을 추출/정규화한다."""
     raw: dict[str, float] = {}
     total = 0.0
     for item in etf_universe:
@@ -101,21 +101,21 @@ def _extract_hr_target_weights(etf_universe: Sequence[Mapping[str, Any]]) -> dic
         try:
             weight_val = float(item.get("weight"))
         except (TypeError, ValueError):
-            raise ValueError(f"HR 비중이 숫자가 아닙니다: {ticker}")
+            raise ValueError(f"비중이 숫자가 아닙니다: {ticker}")
         if weight_val <= 0:
-            raise ValueError(f"HR 비중은 0보다 커야 합니다: {ticker}")
+            raise ValueError(f"비중은 0보다 커야 합니다: {ticker}")
         raw[ticker] = weight_val
         total += weight_val
 
     if not raw:
-        raise ValueError("HR 전략은 종목 리스트의 weight 설정이 필요합니다.")
+        raise ValueError("종목 리스트의 weight 설정이 필요합니다.")
 
     # 저장 단위는 1.0(레거시) 또는 100(현재 UI) 합계를 모두 허용하고, 내부는 1.0 기준으로 정규화한다.
     if abs(total - 1.0) <= 1e-3:
         return raw
     if abs(total - 100.0) <= 1e-2:
         return {ticker: value / 100.0 for ticker, value in raw.items()}
-    raise ValueError(f"HR 비중 합계는 100이어야 합니다. 현재 합계: {int(round(total))}")
+    raise ValueError(f"비중 합계는 100이어야 합니다. 현재 합계: {int(round(total))}")
 
 
 def run_account_backtest(
@@ -251,11 +251,8 @@ def run_account_backtest(
     ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금"}
 
     # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
-    hr_target_weights: dict[str, float] | None = None
-    topn = strategy_rules.topn
-    if strategy_rules.strategy == "HR":
-        hr_target_weights = _extract_hr_target_weights(etf_universe)
-        topn = len(hr_target_weights)
+    target_weights: dict[str, float] | None = _extract_target_weights(etf_universe)
+    topn = len(target_weights)
     bucket_topn = topn  # backward-compatible field naming for reports/result schema
     if not is_tuning_fast_path:
         _log(f"[백테스트] 포트폴리오 TOPN: {topn}")
@@ -265,7 +262,7 @@ def run_account_backtest(
     backtest_kwargs = _build_backtest_kwargs(
         strategy_rules=strategy_rules,
         strategy_settings=strategy_settings,
-        hr_target_weights=hr_target_weights,
+        hr_target_weights=target_weights,
         prefetched_data=prefetched_data,
         prefetched_metrics=prefetched_metrics,
         quiet=quiet,

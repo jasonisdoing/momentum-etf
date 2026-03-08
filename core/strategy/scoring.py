@@ -1,4 +1,4 @@
-"""MAPS 전략 점수 계산 및 정규화 함수."""
+"""RANK 전략 점수 계산 및 정규화 함수."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ def calculate_maps_score(
     moving_average: pd.Series,
 ) -> pd.Series:
     """
-    MAPS(Moving Average Position Score) 점수를 계산합니다.
+    RANK(Moving Average Position Score) 점수를 계산합니다.
 
     Args:
         close_prices: 종가 시리즈

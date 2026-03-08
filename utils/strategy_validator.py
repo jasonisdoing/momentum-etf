@@ -20,9 +20,7 @@ def validate_strategy_settings(
         ValueError: 필수 설정이 누락되었거나 유효하지 않은 경우
     """
     prefix = f"{account_id} 계좌의 " if account_id else ""
-    strategy_name = str(strategy_tuning.get("STRATEGY") or "").strip().upper()
-    if not strategy_name:
-        raise ValueError(f"{prefix}필수 설정이 누락되었습니다: STRATEGY")
+    strategy_name = str(strategy_tuning.get("STRATEGY") or "").strip().upper() or "WEIGHT"
 
     def _require(keys: list[str]) -> list[str]:
         errs: list[str] = []
@@ -36,7 +34,7 @@ def validate_strategy_settings(
         return errs
 
     errors: list[str] = []
-    if strategy_name == "MAPS":
+    if strategy_name == "RANK":
         errors.extend(_require(["TOPN", "MA_MONTH", "MA_TYPE", "REBALANCE_MODE", "COOLDOWN"]))
         cooldown_val = strategy_tuning.get("COOLDOWN")
         if cooldown_val is not None:
@@ -45,9 +43,9 @@ def validate_strategy_settings(
                     errors.append("COOLDOWN(>=1)")
             except (TypeError, ValueError):
                 errors.append("COOLDOWN(정수)")
-    elif strategy_name == "HR":
+    elif strategy_name == "WEIGHT":
         errors.extend(_require(["REBALANCE_MODE"]))
-        # HR 비중은 기본적으로 Mongo 종목 리스트(weight)에서 읽는다.
+        # 비중은 기본적으로 종목 리스트(weight)에서 읽는다.
         # 설정의 TARGET_WEIGHTS는 하위 호환용 선택값으로만 허용한다.
         weights = strategy_tuning.get("TARGET_WEIGHTS")
         if isinstance(weights, dict):

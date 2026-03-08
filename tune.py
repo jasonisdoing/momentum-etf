@@ -15,68 +15,39 @@ from utils.logger import get_app_logger
 # =========================================================
 
 ACCOUNT_TUNING_CONFIG = {
-    "kor_kr": {
+    "kor_account": {
         "TUNE_MONTHS": 12,
-        "STRATEGY": "MAPS",
         "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
             "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         },
-        "MAPS": {
-            "TOPN": [5],
-            "MA_MONTH": [12],
-            "MA_TYPE": ["HMA"],
-            "COOLDOWN": [1, 2, 3, 4, 5],
-        },
     },
-    "kor_pension": {
+    "pension_account": {
         "TUNE_MONTHS": 12,
-        "STRATEGY": "MAPS",
         "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
             "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         },
-        "MAPS": {
-            "TOPN": [5],
-            "MA_MONTH": [12],
-            "MA_TYPE": ["HMA"],
-            "COOLDOWN": [1, 2, 3, 4, 5],
-        },
     },
-    "kor_us": {
+    "kor_save_account": {
         "TUNE_MONTHS": 4,
-        "STRATEGY": "HR",
         "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
             "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
         },
     },
-    "us": {
+    "us_account": {
         "TUNE_MONTHS": 12,
-        "STRATEGY": "MAPS",
         "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
             "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        },
-        "MAPS": {
-            "TOPN": [5],
-            "MA_MONTH": [12],
-            "MA_TYPE": ["HMA"],
-            "COOLDOWN": [1, 2, 3, 4, 5],
         },
     },
-    "aus": {
+    "aus_account": {
         "TUNE_MONTHS": 12,
-        "STRATEGY": "MAPS",
         "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
             "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        },
-        "MAPS": {
-            "TOPN": [5],
-            "MA_MONTH": [12],
-            "MA_TYPE": ["HMA"],
-            "COOLDOWN": [1, 2, 3, 4, 5],
         },
     },
 }
