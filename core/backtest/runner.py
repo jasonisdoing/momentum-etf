@@ -185,7 +185,6 @@ def run_account_backtest(
 
     if strategy_override is not None:
         strategy_rules = StrategyRules.from_values(
-            strategy=strategy_override.strategy,
             ma_days=strategy_override.ma_days,
             topn=strategy_override.topn,
             ma_type=strategy_override.ma_type,
@@ -195,7 +194,6 @@ def run_account_backtest(
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
         strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
-        strategy_settings["STRATEGY"] = strategy_rules.strategy
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
         strategy_settings["TOPN"] = strategy_rules.topn
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
@@ -537,7 +535,6 @@ def _build_backtest_kwargs(
     kwargs: dict[str, Any] = {
         "prefetched_data": prefetched_data,
         "prefetched_metrics": prefetched_metrics,
-        "strategy": strategy_rules.strategy,
         "ma_days": strategy_rules.ma_days,
         "ma_type": strategy_rules.ma_type,
         "rebalance_mode": strategy_rules.rebalance_mode,

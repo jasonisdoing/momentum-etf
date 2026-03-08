@@ -77,7 +77,6 @@ def main() -> int:
             ma_days=ma_days,
             ma_type=args.ma_type,
             enable_data_sufficiency_check=False,
-            strategy="RANK",
         )
         if not metrics:
             continue

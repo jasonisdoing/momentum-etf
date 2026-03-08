@@ -925,7 +925,7 @@ def run_portfolio_backtest(
     trading_calendar: Sequence[pd.Timestamp] | None = None,
     ma_days: int = 20,
     ma_type: str = "SMA",
-    strategy: str = "RANK",
+    strategy: str = "PORTFOLIO",
     rebalance_mode: str = "TWICE_A_MONTH",
     cooldown: int = 1,
     target_weights: Mapping[str, float] | None = None,
@@ -968,22 +968,20 @@ def run_portfolio_backtest(
 
     validate_bucket_topn(top_n)
 
-    strategy_key = str(strategy or "RANK").upper()
-    if strategy_key == "WEIGHT":
-        return _run_weight_backtest(
-            stocks=stocks,
-            initial_capital=initial_capital,
-            core_start_date=core_start_date,
-            country=country,
-            prefetched_data=prefetched_data,
-            trading_calendar=trading_calendar,
-            rebalance_mode=rebalance_mode,
-            target_weights=target_weights,
-            quiet=quiet,
-            progress_callback=progress_callback,
-            missing_ticker_sink=missing_ticker_sink,
-            qty_precision=qty_precision,
-        )
+    return _run_weight_backtest(
+        stocks=stocks,
+        initial_capital=initial_capital,
+        core_start_date=core_start_date,
+        country=country,
+        prefetched_data=prefetched_data,
+        trading_calendar=trading_calendar,
+        rebalance_mode=rebalance_mode,
+        target_weights=target_weights,
+        quiet=quiet,
+        progress_callback=progress_callback,
+        missing_ticker_sink=missing_ticker_sink,
+        qty_precision=qty_precision,
+    )
 
     ticker_name_map: dict[str, str] = {}
     for stock in stocks:
@@ -1030,7 +1028,6 @@ def run_portfolio_backtest(
             ma_type=ma_type,
             precomputed_entry=precomputed_entry,
             enable_data_sufficiency_check=enable_data_sufficiency_check,
-            strategy=strategy,
         )
         if ticker_metrics:
             metrics_by_ticker[ticker] = ticker_metrics

@@ -33,7 +33,7 @@
 | `rank.py` | 종목풀 랭킹 생성 및 저장 |
 | `backtest.py` | 계정 단위 전략 시뮬레이션 실행 엔트리 |
 | `core/backtest/runner.py` | 계좌 설정 로드/검증 후 백테스트 실행 오케스트레이션 |
-| `core/backtest/engine.py` | 계좌 리밸런싱(WEIGHT) 실행 엔진 |
+| `core/backtest/engine.py` | 계좌 리밸런싱 실행 엔진 |
 
 ### 핵심 일관성 체크리스트
 

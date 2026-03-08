@@ -45,13 +45,12 @@ def init_worker_prefetch(
 
 
 def evaluate_single_combo(
-    payload: tuple[str, tuple[str, str], str, int, int, str, str, int, tuple[str, ...], bool],
+    payload: tuple[str, tuple[str, str], int, int, str, str, int, tuple[str, ...], bool],
 ) -> tuple[str, dict[str, Any], list[str]]:
     """단일 파라미터 조합 평가 (Worker Process에서 실행)"""
     (
         account_norm,
         date_range,
-        strategy_name,
         ma_int,
         topn_int,
         ma_type_str,
@@ -81,7 +80,6 @@ def evaluate_single_combo(
         # StrategyRules 구성
         if is_ma_month:
             strategy_rules = StrategyRules.from_values(
-                strategy=str(strategy_name),
                 ma_month=int(ma_int),
                 bucket_topn=int(topn_int),
                 ma_type=str(ma_type_str),
@@ -90,7 +88,6 @@ def evaluate_single_combo(
             )
         else:
             strategy_rules = StrategyRules.from_values(
-                strategy=str(strategy_name),
                 ma_days=int(ma_int),
                 bucket_topn=int(topn_int),
                 ma_type=str(ma_type_str),
@@ -134,7 +131,6 @@ def evaluate_single_combo(
 
     entry = {
         "ma_month" if is_ma_month else "ma_days": ma_int,
-        "strategy": str(strategy_name).upper(),
         "bucket_topn": topn_int,
         "ma_type": ma_type_str,
         "rebalance_mode": rebalance_mode_str,

@@ -48,7 +48,7 @@ python recommend.py us_account
 *   `SLACK_CHANNEL_ID`: 알림을 받을 슬랙 채널 ID
 
 ### 계좌 설정 (`zaccounts/<order>_<account_id>/config.json`)
-계좌는 기본적으로 `WEIGHT`(고정 비중 리밸런싱) 방식으로 동작하며, 종목별 `weight` 값이 필수입니다.
+계좌는 기본적으로 고정 비중 리밸런싱 방식으로 동작하며, 종목별 `weight` 값이 필수입니다.
 
 ```json
 {
