@@ -908,9 +908,9 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
             backtested_date = None
             strategy_tuning: dict[str, Any] = {}
             if isinstance(strategy_cfg, dict):
-                cagr = strategy_cfg.get("CAGR")
-                mdd = strategy_cfg.get("MDD")
-                backtested_date = strategy_cfg.get("BACKTESTED_DATE")
+                cagr = strategy_cfg.get("TUNE_CAGR")
+                mdd = strategy_cfg.get("TUNE_MDD")
+                backtested_date = strategy_cfg.get("TUNE_DATE")
                 strategy_tuning = resolve_strategy_params(strategy_cfg)
 
                 params_to_show = {}

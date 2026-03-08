@@ -76,27 +76,42 @@ def _render_tuning_table(
     *,
     include_samples: bool = False,
     period_str: str | None = None,
+    hr_mode: bool = False,
 ) -> list[str]:
-    headers = [
-        "전략",
-        "MA개월",
-        "MA타입",
-        "TOPN",
-        "쿨다운",
-        "리밸런스",
-        "CAGR(%)",
-        "MDD(%)",
-    ]
-    aligns = [
-        "center",
-        "right",
-        "center",
-        "right",
-        "center",
-        "center",
-        "right",
-        "right",
-    ]
+    if hr_mode:
+        headers = [
+            "전략",
+            "리밸런스",
+            "CAGR(%)",
+            "MDD(%)",
+        ]
+        aligns = [
+            "center",
+            "center",
+            "right",
+            "right",
+        ]
+    else:
+        headers = [
+            "전략",
+            "MA개월",
+            "MA타입",
+            "TOPN",
+            "쿨다운",
+            "리밸런스",
+            "CAGR(%)",
+            "MDD(%)",
+        ]
+        aligns = [
+            "center",
+            "right",
+            "center",
+            "right",
+            "center",
+            "center",
+            "right",
+            "right",
+        ]
 
     if period_str:
         headers.append(f"{period_str}(%)")
@@ -135,20 +150,32 @@ def _render_tuning_table(
             except (TypeError, ValueError):
                 cooldown_display = "-"
 
-        row_data = [
-            str(strategy_val) if strategy_val else "MAPS",
-            str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
-            str(ma_type_val) if ma_type_val else "SMA",
-            str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-            cooldown_display,
-            str(rebal_mode_val),
-            _format_table_float(row.get("cagr")),
-            _format_table_float(row.get("mdd")),
-            _format_table_float(row.get("period_return")),
-            _format_table_float(row.get("sharpe")),
-            _format_table_float(row.get("sharpe_to_mdd"), digits=3),
-            str(int(row.get("turnover", 0))),
-        ]
+        if hr_mode:
+            row_data = [
+                str(strategy_val) if strategy_val else "HR",
+                str(rebal_mode_val),
+                _format_table_float(row.get("cagr")),
+                _format_table_float(row.get("mdd")),
+                _format_table_float(row.get("period_return")),
+                _format_table_float(row.get("sharpe")),
+                _format_table_float(row.get("sharpe_to_mdd"), digits=3),
+                str(int(row.get("turnover", 0))),
+            ]
+        else:
+            row_data = [
+                str(strategy_val) if strategy_val else "MAPS",
+                str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
+                str(ma_type_val) if ma_type_val else "SMA",
+                str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
+                cooldown_display,
+                str(rebal_mode_val),
+                _format_table_float(row.get("cagr")),
+                _format_table_float(row.get("mdd")),
+                _format_table_float(row.get("period_return")),
+                _format_table_float(row.get("sharpe")),
+                _format_table_float(row.get("sharpe_to_mdd"), digits=3),
+                str(int(row.get("turnover", 0))),
+            ]
 
         if include_samples:
             samples_val = row.get("samples")

@@ -7,18 +7,21 @@
     "initial_capital_krw": "40000000",
     "show_hold": true,
     "strategy": {
-        "BACKTEST_LAST_MONTHS": 12,
-        "BACKTESTED_DATE": "2026-03-07 11:41",
-        "CAGR": 51.618942,
-        "MDD": -13.424077,
+        "TUNE_DATE": "2026-03-08 14:29",
+        "TUNE_CAGR": 51.126656,
+        "TUNE_MDD": -13.361945,
+        "TUNE_MONTHS": 12,
         "STRATEGY": "MAPS",
-        "TOPN": 5,
-        "MA_MONTH": 12,
-        "MA_TYPE": "HMA",
-        "REBALANCE_MODE": "WEEKLY",
-        "COOLDOWN": 2,
-        "ENABLE_DATA_SUFFICIENCY_CHECK": false,
-        "OPTIMIZATION_METRIC": "CAGR"
+        "OPTIMIZATION_METRIC": "CAGR",
+        "COMMON": {
+            "REBALANCE_MODE": "WEEKLY"
+        },
+        "MAPS": {
+            "TOPN": 5,
+            "MA_MONTH": 12,
+            "MA_TYPE": "HMA",
+            "COOLDOWN": 2
+        }
     },
     "benchmark": {
         "ticker": "379810",
