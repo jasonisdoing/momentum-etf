@@ -18,37 +18,27 @@ ACCOUNT_TUNING_CONFIG = {
     "kor_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "COMMON": {
-            "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        },
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
     "pension_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "COMMON": {
-            "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        },
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
     "kor_save_account": {
         "TUNE_MONTHS": 4,
         "OPTIMIZATION_METRIC": "CAGR",
-        "COMMON": {
-            "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        },
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
     "us_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "COMMON": {
-            "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        },
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
     "aus_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "COMMON": {
-            "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-        },
+        "REBALANCE_MODE": ["MONTHLY"],
     },
 }
 

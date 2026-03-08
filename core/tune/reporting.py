@@ -152,7 +152,7 @@ def _render_tuning_table(
 
         if hr_mode:
             row_data = [
-                str(strategy_val) if strategy_val else "WEIGHT",
+                str(strategy_val) if strategy_val else "PORTFOLIO",
                 str(rebal_mode_val),
                 _format_table_float(row.get("cagr")),
                 _format_table_float(row.get("mdd")),

@@ -30,7 +30,7 @@ POOL_SOURCE_CANDIDATES: dict[str, list[str]] = {
     "aus": ["aus", "aus_account"],  # 호주 ETF
 }
 
-# 새 WEIGHT 계좌 매핑 (재실행 시 현재 계좌를 우선 소스로 사용)
+# 새 계좌 매핑 (재실행 시 현재 계좌를 우선 소스로 사용)
 NEW_ACCOUNT_SOURCE_CANDIDATES: dict[str, list[str]] = {
     "kor_account": ["kor_account", "kor_kr"],
     "pension_account": ["pension_account", "kor_pension"],
@@ -224,7 +224,7 @@ def main() -> int:
     copied_master = _copy_portfolio_master_accounts(portfolio_master, account_source_map, args.execute)
 
     _print_stats("Pool Copy (RANK 종목군)", pool_rows)
-    _print_stats("Account Copy (신규 WEIGHT 계좌)", account_rows)
+    _print_stats("Account Copy (신규 계좌)", account_rows)
 
     print("\n[추천/포트폴리오]")
     print(f"  - stock_recommendations 복제 대상 발견: {rec_hits}건")

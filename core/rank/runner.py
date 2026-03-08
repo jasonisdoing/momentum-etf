@@ -136,7 +136,6 @@ def run_pool_ranking(pool_id: str, config: RankConfig) -> RankRunResult:
             ma_days=ma_days,
             ma_type=config.ma_type,
             enable_data_sufficiency_check=False,
-            strategy="RANK",
         )
         if not metrics:
             continue

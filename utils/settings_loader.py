@@ -207,53 +207,22 @@ def resolve_strategy_params(strategy_cfg: Any) -> dict[str, Any]:
     if not isinstance(strategy_cfg, dict):
         return {}
 
-    # 신규 v2 포맷: strategy 하위에 STRATEGY/TUNE_* 를 두고 COMMON + 활성 전략 블록을 병합
-    top_strategy_name = str(strategy_cfg.get("STRATEGY") or "").strip().upper()
-    if top_strategy_name:
-        if top_strategy_name not in {"RANK", "WEIGHT"}:
-            raise AccountSettingsError(f"지원하지 않는 STRATEGY입니다: {top_strategy_name}")
-        common_raw = strategy_cfg.get("COMMON")
-        if not isinstance(common_raw, dict):
-            raise AccountSettingsError("strategy.COMMON 블록이 누락되었거나 객체(dict)가 아닙니다.")
-
-        merged = {key: value for key, value in strategy_cfg.items() if key not in {"COMMON", "RANK", "WEIGHT"}}
-        merged.update(dict(common_raw))
-
-        active_raw = strategy_cfg.get(top_strategy_name)
-        if top_strategy_name == "RANK":
-            if not isinstance(active_raw, dict):
-                raise AccountSettingsError("strategy.RANK 블록이 누락되었거나 객체(dict)가 아닙니다.")
-            merged.update(dict(active_raw))
-        else:
-            if active_raw is not None and not isinstance(active_raw, dict):
-                raise AccountSettingsError("strategy.WEIGHT 블록이 존재한다면 객체(dict)여야 합니다.")
-            if isinstance(active_raw, dict):
-                merged.update(dict(active_raw))
-        return merged
-
-    # 신규 포맷:
-    # - COMMON 필수
-    # - COMMON.STRATEGY 미지정 시 기본 WEIGHT
-    # - RANK를 명시한 경우에만 RANK 블록을 필수로 요구
+    # 기본 포맷: COMMON + 상위 키를 병합한다.
     common_raw = strategy_cfg.get("COMMON")
     if isinstance(common_raw, dict):
         common = dict(common_raw)
-        strategy_name = str(common.get("STRATEGY") or "").strip().upper() or "WEIGHT"
-        if strategy_name not in {"RANK", "WEIGHT"}:
-            raise AccountSettingsError(f"지원하지 않는 STRATEGY입니다: {strategy_name}")
-
-        merged = dict(common)
-        active_raw = strategy_cfg.get(strategy_name)
-        if strategy_name == "RANK":
-            if not isinstance(active_raw, dict):
-                raise AccountSettingsError("strategy.RANK 블록이 누락되었거나 객체(dict)가 아닙니다.")
-            merged.update(dict(active_raw))
-        else:
-            # WEIGHT는 전략 전용 블록을 필수로 강제하지 않는다.
-            if active_raw is not None and not isinstance(active_raw, dict):
-                raise AccountSettingsError("strategy.WEIGHT 블록이 존재한다면 객체(dict)여야 합니다.")
-            if isinstance(active_raw, dict):
-                merged.update(dict(active_raw))
+        merged = {key: value for key, value in strategy_cfg.items() if key != "COMMON"}
+        merged.update(common)
+        merged.pop("STRATEGY", None)
+        # 레거시 전략 전용 블록은 키 이름과 무관하게 제거
+        for key in list(merged.keys()):
+            if key == "STRATEGY":
+                continue
+            if not isinstance(key, str):
+                continue
+            value = strategy_cfg.get(key)
+            if key.isupper() and isinstance(value, dict):
+                merged.pop(key, None)
         return merged
 
     tuning = strategy_cfg.get("tuning")

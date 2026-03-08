@@ -6,8 +6,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from config import TRADING_DAYS_PER_MONTH
-
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -40,7 +38,7 @@ class StrategyRules:
     def from_values(
         cls,
         *,
-        strategy: Any = "WEIGHT",
+        strategy: Any = "PORTFOLIO",
         ma_days: Any = None,
         ma_month: Any = None,
         topn: Any = None,
@@ -52,124 +50,48 @@ class StrategyRules:
         target_weights: Any = None,
         enable_data_sufficiency_check: Any = False,
     ) -> StrategyRules:
-        strategy_str = str(strategy or "WEIGHT").strip().upper()
-        if not strategy_str:
-            strategy_str = "WEIGHT"
+        strategy_str = "PORTFOLIO"
+        normalized_weights: dict[str, float] | None = None
+        if target_weights is not None:
+            if not isinstance(target_weights, Mapping):
+                raise ValueError("TARGET_WEIGHTS는 dict 형태여야 합니다.")
+            if not target_weights:
+                raise ValueError("TARGET_WEIGHTS가 비어 있습니다.")
+            normalized_weights = {}
+            weight_sum = 0.0
+            for ticker, weight in target_weights.items():
+                ticker_key = str(ticker or "").strip().upper()
+                if not ticker_key:
+                    raise ValueError("TARGET_WEIGHTS의 티커 키가 비어 있습니다.")
+                try:
+                    weight_val = float(weight)
+                except (TypeError, ValueError):
+                    raise ValueError(f"TARGET_WEIGHTS[{ticker_key}] 값은 숫자여야 합니다.")
+                if weight_val <= 0:
+                    raise ValueError(f"TARGET_WEIGHTS[{ticker_key}] 값은 0보다 커야 합니다.")
+                normalized_weights[ticker_key] = weight_val
+                weight_sum += weight_val
+            if abs(weight_sum - 1.0) > 1e-3:
+                raise ValueError("TARGET_WEIGHTS의 합계는 1.0이어야 합니다.")
 
-        # WEIGHT: MA/점수 기반 파라미터 대신 목표 비중(선택)을 사용
-        if strategy_str == "WEIGHT":
-            normalized_weights: dict[str, float] | None = None
-            if target_weights is not None:
-                if not isinstance(target_weights, Mapping):
-                    raise ValueError("TARGET_WEIGHTS는 dict 형태여야 합니다.")
-                if not target_weights:
-                    raise ValueError("TARGET_WEIGHTS가 비어 있습니다.")
-                normalized_weights = {}
-                weight_sum = 0.0
-                for ticker, weight in target_weights.items():
-                    ticker_key = str(ticker or "").strip().upper()
-                    if not ticker_key:
-                        raise ValueError("TARGET_WEIGHTS의 티커 키가 비어 있습니다.")
-                    try:
-                        weight_val = float(weight)
-                    except (TypeError, ValueError):
-                        raise ValueError(f"TARGET_WEIGHTS[{ticker_key}] 값은 숫자여야 합니다.")
-                    if weight_val <= 0:
-                        raise ValueError(f"TARGET_WEIGHTS[{ticker_key}] 값은 0보다 커야 합니다.")
-                    normalized_weights[ticker_key] = weight_val
-                    weight_sum += weight_val
-                if abs(weight_sum - 1.0) > 1e-3:
-                    raise ValueError("TARGET_WEIGHTS의 합계는 1.0이어야 합니다.")
-
-            final_rebalance_mode = str(rebalance_mode).upper() if rebalance_mode else "TWICE_A_MONTH"
-            data_sufficiency_check = _coerce_bool(enable_data_sufficiency_check, default=False)
-            try:
-                hr_topn = int(topn if topn is not None else bucket_topn)
-                if hr_topn < 1:
-                    raise ValueError
-            except (TypeError, ValueError):
-                hr_topn = len(normalized_weights) if normalized_weights else 1
-
-            return cls(
-                strategy=strategy_str,
-                ma_days=1,
-                bucket_topn=hr_topn,
-                ma_type="SMA",
-                rebalance_mode=final_rebalance_mode,
-                cooldown_days=1,
-                enable_data_sufficiency_check=data_sufficiency_check,
-                target_weights=normalized_weights,
-            )
-
-        # MA 기간 결정 (개월 우선)
-        final_ma_days = None
-
-        if ma_month is not None:
-            try:
-                month_val = int(ma_month)
-                if month_val > 0:
-                    final_ma_days = month_val * TRADING_DAYS_PER_MONTH
-            except (TypeError, ValueError):
-                pass
-
-        if final_ma_days is None and ma_days is not None:
-            try:
-                final_ma_days = int(ma_days)
-            except (TypeError, ValueError):
-                pass
-
-        if final_ma_days is None or final_ma_days <= 0:
-            if ma_days is None and ma_month is None:
-                raise ValueError("MA_MONTH은 필수입니다.")
-            raise ValueError("MA_MONTH은 0보다 큰 정수여야 합니다.")
-
-        # TOPN 처리
-        final_bucket_topn = 1
-        topn_source = topn if topn is not None else bucket_topn
-
+        final_rebalance_mode = str(rebalance_mode).upper() if rebalance_mode else "TWICE_A_MONTH"
+        data_sufficiency_check = _coerce_bool(enable_data_sufficiency_check, default=False)
         try:
-            topn_val = int(topn_source)
-            if topn_val > 0:
-                final_bucket_topn = topn_val
-            else:
+            resolved_topn = int(topn if topn is not None else bucket_topn)
+            if resolved_topn < 1:
                 raise ValueError
         except (TypeError, ValueError):
-            raise ValueError("TOPN은 0보다 큰 정수여야 합니다.")
-
-        # MA 타입 검증
-        if ma_type is None:
-            raise ValueError("MA_TYPE은 필수입니다.")
-        ma_type_str = str(ma_type).upper()
-        valid_ma_types = {"SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA"}
-        if ma_type_str not in valid_ma_types:
-            raise ValueError(f"MA_TYPE은 {valid_ma_types} 중 하나여야 합니다. (입력값: {ma_type_str})")
-
-        # ENABLE_DATA_SUFFICIENCY_CHECK 검증
-        data_sufficiency_check = _coerce_bool(enable_data_sufficiency_check, default=False)
-
-        # REBALANCE_MODE 처리
-        final_rebalance_mode = str(rebalance_mode).upper() if rebalance_mode else "TWICE_A_MONTH"
-
-        # COOLDOWN 처리
-        cooldown_source = cooldown if cooldown is not None else cooldown_days
-        if cooldown_source is None:
-            raise ValueError("COOLDOWN은 필수입니다.")
-        try:
-            final_cooldown_days = int(cooldown_source)
-        except (TypeError, ValueError):
-            raise ValueError("COOLDOWN은 1 이상의 정수여야 합니다.")
-        if final_cooldown_days < 1:
-            raise ValueError("COOLDOWN은 1 이상의 정수여야 합니다.")
+            resolved_topn = len(normalized_weights) if normalized_weights else 1
 
         return cls(
             strategy=strategy_str,
-            ma_days=final_ma_days,
-            bucket_topn=final_bucket_topn,
-            ma_type=ma_type_str,
+            ma_days=1,
+            bucket_topn=resolved_topn,
+            ma_type="SMA",
             rebalance_mode=final_rebalance_mode,
-            cooldown_days=final_cooldown_days,
+            cooldown_days=1,
             enable_data_sufficiency_check=data_sufficiency_check,
-            target_weights=None,
+            target_weights=normalized_weights,
         )
 
     @classmethod

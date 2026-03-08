@@ -1,4 +1,4 @@
-"""RANK 전략 지표 계산 모듈"""
+"""이동평균 기반 점수 지표 계산 모듈."""
 
 from collections.abc import Mapping
 from typing import Any
@@ -11,8 +11,7 @@ from utils.indicators import calculate_ma_score
 from utils.moving_averages import calculate_moving_average
 
 
-def _calculate_strategy_score(
-    strategy: str,
+def _calculate_score(
     close_prices: pd.Series,
     moving_average: pd.Series,
 ) -> pd.Series:
@@ -26,7 +25,6 @@ def process_ticker_data(
     precomputed_entry: Mapping[str, Any] | None = None,
     ma_type: str = "SMA",
     enable_data_sufficiency_check: bool = False,
-    strategy: str = "RANK",
 ) -> dict | None:
     """
     개별 종목의 데이터를 처리하고 지표를 계산합니다.
@@ -38,8 +36,6 @@ def process_ticker_data(
         precomputed_entry: 미리 계산된 캐시 데이터 (옵션)
         ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA)
         enable_data_sufficiency_check: 데이터 충분성 검사 활성화 여부
-        strategy: 전략 식별자 (예: RANK)
-
     Returns:
         Dict: 계산된 지표들 또는 None (처리 실패 시)
     """
@@ -123,8 +119,7 @@ def process_ticker_data(
     if len(close_prices) < MIN_TRADING_DAYS:
         return None
 
-    # RANK 전략 지표 계산
-    strategy_key = str(strategy or "RANK").upper()
+    # 이동평균 기반 점수 계산
     ma_type_key = (ma_type or "SMA").upper()
     ma_key = f"{ma_type_key}_{int(current_ma_days)}"
     moving_average = None
@@ -133,13 +128,12 @@ def process_ticker_data(
         ma_cache = precomputed_entry.get("ma") or {}
         ma_score_cache = precomputed_entry.get("ma_score") or {}
         moving_average = ma_cache.get(ma_key)
-        if strategy_key == "RANK":
-            ma_score = ma_score_cache.get(ma_key)
+        ma_score = ma_score_cache.get(ma_key)
 
     if moving_average is None:
         moving_average = calculate_moving_average(close_prices, current_ma_days, ma_type)
     if ma_score is None:
-        ma_score = _calculate_strategy_score(strategy_key, close_prices, moving_average)
+        ma_score = _calculate_score(close_prices, moving_average)
 
     # consecutive_buy_days = calculate_consecutive_days(ma_score)
     consecutive_buy_days = calculate_consecutive_days(ma_score)
@@ -152,5 +146,4 @@ def process_ticker_data(
         "ma_score": ma_score,
         "buy_signal_days": consecutive_buy_days,
         "ma_days": current_ma_days,
-        "strategy": strategy_key,
     }
