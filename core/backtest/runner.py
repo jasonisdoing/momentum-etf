@@ -423,7 +423,7 @@ def _resolve_backtest_start_date(
     우선순위:
     1. 직접 전달된 start_date
     2. override_settings의 backtest_start_date
-    3. account_settings의 strategy.BACKTEST_LAST_MONTHS
+    3. account_settings의 strategy.TUNE_MONTHS
     """
     if start_date is not None:
         return str(start_date)
@@ -433,7 +433,7 @@ def _resolve_backtest_start_date(
         return str(override_settings["start_date"])
 
     strategy_params = resolve_strategy_params(account_settings.get("strategy", {}) if account_settings else {})
-    account_months = strategy_params.get("BACKTEST_LAST_MONTHS")
+    account_months = strategy_params.get("TUNE_MONTHS")
     if account_months is not None:
         try:
             months_back = int(account_months)
@@ -441,9 +441,7 @@ def _resolve_backtest_start_date(
             return calc_date.strftime("%Y-%m-%d")
         except Exception:
             pass
-    raise ValueError(
-        "BACKTEST_LAST_MONTHS 설정이 필요합니다. 계정 설정의 strategy.BACKTEST_LAST_MONTHS 값을 확인하세요."
-    )
+    raise ValueError("TUNE_MONTHS 설정이 필요합니다. 계정 설정의 strategy.TUNE_MONTHS 값을 확인하세요.")
 
 
 def _resolve_initial_capital(

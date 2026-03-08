@@ -86,31 +86,29 @@ def _load_json(path: Path) -> dict[str, Any]:
 def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
     """튜닝용 시작일 설정을 반환합니다.
 
-    계정별 strategy.BACKTEST_LAST_MONTHS를 사용합니다.
+    계정별 strategy.TUNE_MONTHS를 사용합니다.
     """
     normalized: list[dict[str, Any]] = []
 
-    # 계정별 strategy.BACKTEST_LAST_MONTHS 사용
+    # 계정별 strategy.TUNE_MONTHS 사용
     if account_id:
         account_settings = get_account_settings(account_id)
         strategy_cfg = account_settings.get("strategy", {})
         strategy = resolve_strategy_params(strategy_cfg)
-        backtest_last_months = strategy.get("BACKTEST_LAST_MONTHS")
-        if backtest_last_months is None:
-            raise AccountSettingsError(f"{account_id} 계좌의 필수 설정이 누락되었습니다: strategy.BACKTEST_LAST_MONTHS")
+        tune_months = strategy.get("TUNE_MONTHS")
+        if tune_months is None:
+            raise AccountSettingsError(f"{account_id} 계좌의 필수 설정이 누락되었습니다: strategy.TUNE_MONTHS")
 
         import pandas as pd
 
         try:
-            months_back = int(backtest_last_months)
+            months_back = int(tune_months)
         except (TypeError, ValueError) as exc:
             raise AccountSettingsError(
-                f"{account_id} 계좌의 strategy.BACKTEST_LAST_MONTHS는 정수여야 합니다: {backtest_last_months}"
+                f"{account_id} 계좌의 strategy.TUNE_MONTHS는 정수여야 합니다: {tune_months}"
             ) from exc
         if months_back < 1:
-            raise AccountSettingsError(
-                f"{account_id} 계좌의 strategy.BACKTEST_LAST_MONTHS는 1 이상이어야 합니다: {months_back}"
-            )
+            raise AccountSettingsError(f"{account_id} 계좌의 strategy.TUNE_MONTHS는 1 이상이어야 합니다: {months_back}")
 
         start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
         backtest_start_date = start_dt.strftime("%Y-%m-%d")
@@ -208,6 +206,30 @@ def resolve_strategy_params(strategy_cfg: Any) -> dict[str, Any]:
 
     if not isinstance(strategy_cfg, dict):
         return {}
+
+    # 신규 v2 포맷: strategy 하위에 STRATEGY/TUNE_* 를 두고 COMMON + 활성 전략 블록을 병합
+    top_strategy_name = str(strategy_cfg.get("STRATEGY") or "").strip().upper()
+    if top_strategy_name:
+        if top_strategy_name not in {"MAPS", "HR"}:
+            raise AccountSettingsError(f"지원하지 않는 STRATEGY입니다: {top_strategy_name}")
+        common_raw = strategy_cfg.get("COMMON")
+        if not isinstance(common_raw, dict):
+            raise AccountSettingsError("strategy.COMMON 블록이 누락되었거나 객체(dict)가 아닙니다.")
+
+        merged = {key: value for key, value in strategy_cfg.items() if key not in {"COMMON", "MAPS", "HR"}}
+        merged.update(dict(common_raw))
+
+        active_raw = strategy_cfg.get(top_strategy_name)
+        if top_strategy_name == "MAPS":
+            if not isinstance(active_raw, dict):
+                raise AccountSettingsError("strategy.MAPS 블록이 누락되었거나 객체(dict)가 아닙니다.")
+            merged.update(dict(active_raw))
+        else:
+            if active_raw is not None and not isinstance(active_raw, dict):
+                raise AccountSettingsError("strategy.HR 블록이 존재한다면 객체(dict)여야 합니다.")
+            if isinstance(active_raw, dict):
+                merged.update(dict(active_raw))
+        return merged
 
     # 신규 포맷:
     # - MAPS: COMMON + MAPS 필수

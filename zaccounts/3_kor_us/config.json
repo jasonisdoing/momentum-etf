@@ -7,14 +7,14 @@
     "initial_capital_krw": "40000000",
     "show_hold": true,
     "strategy": {
+        "TUNE_DATE": "2026-03-07 18:48",
+        "TUNE_CAGR": 100.782389,
+        "TUNE_MDD": -7.28761,
+        "TUNE_MONTHS": 4,
+        "STRATEGY": "HR",
+        "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
-            "STRATEGY": "HR",
-            "BACKTEST_LAST_MONTHS": 4,
-            "REBALANCE_MODE": "QUARTERLY",
-            "OPTIMIZATION_METRIC": "CAGR",
-            "BACKTESTED_DATE": "2026-03-07 17:33",
-            "CAGR": 77.361749,
-            "MDD": -15.776287
+            "REBALANCE_MODE": "QUARTERLY"
         }
     },
     "benchmark": {

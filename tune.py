@@ -16,10 +16,11 @@ from utils.logger import get_app_logger
 
 ACCOUNT_TUNING_CONFIG = {
     "kor_kr": {
+        "TUNE_MONTHS": 12,
+        "STRATEGY": "MAPS",
+        "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
-            "STRATEGY": "MAPS",
             "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-            "OPTIMIZATION_METRIC": "CAGR",
         },
         "MAPS": {
             "TOPN": [5],
@@ -29,15 +30,11 @@ ACCOUNT_TUNING_CONFIG = {
         },
     },
     "kor_pension": {
-        # +------+--------+--------+------+--------+---------------+---------+--------+---------------+--------+-----------------+-----------------+
-        # | 전략 | MA개월 | MA타입 | TOPN | 쿨다운 |   리밸런스    | CAGR(%) | MDD(%) | 12개월 4일(%) | Sharpe | SDR(Sharpe/MDD) | Trades(거래 수) |
-        # +------+--------+--------+------+--------+---------------+---------+--------+---------------+--------+-----------------+-----------------+
-        # | MAPS |     12 |  HMA   |    5 |   2    |    WEEKLY     |   51.62 | -13.42 |         51.40 |   1.67 |           0.124 |             375 |
-        # +------+--------+--------+------+--------+---------------+---------+--------+---------------+--------+-----------------+-----------------+
+        "TUNE_MONTHS": 12,
+        "STRATEGY": "MAPS",
+        "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
-            "STRATEGY": "MAPS",
             "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-            "OPTIMIZATION_METRIC": "CAGR",
         },
         "MAPS": {
             "TOPN": [5],
@@ -47,17 +44,19 @@ ACCOUNT_TUNING_CONFIG = {
         },
     },
     "kor_us": {
+        "TUNE_MONTHS": 4,
+        "STRATEGY": "HR",
+        "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
-            "STRATEGY": "HR",
             "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-            "OPTIMIZATION_METRIC": "CAGR",
         },
     },
     "us": {
+        "TUNE_MONTHS": 12,
+        "STRATEGY": "MAPS",
+        "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
-            "STRATEGY": "MAPS",
             "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-            "OPTIMIZATION_METRIC": "CAGR",
         },
         "MAPS": {
             "TOPN": [5],
@@ -67,10 +66,11 @@ ACCOUNT_TUNING_CONFIG = {
         },
     },
     "aus": {
+        "TUNE_MONTHS": 12,
+        "STRATEGY": "MAPS",
+        "OPTIMIZATION_METRIC": "CAGR",
         "COMMON": {
-            "STRATEGY": "MAPS",
             "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-            "OPTIMIZATION_METRIC": "CAGR",
         },
         "MAPS": {
             "TOPN": [5],

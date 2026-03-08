@@ -558,7 +558,9 @@ def generate_recommendation_report(
     account_settings = get_account_settings(account_id)
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
     strategy_cfg = resolve_strategy_params(account_settings.get("strategy", {}) or {})
-    backtest_last_months = strategy_cfg.get("BACKTEST_LAST_MONTHS", 12)
+    backtest_last_months = strategy_cfg.get("TUNE_MONTHS")
+    if backtest_last_months is None:
+        raise ValueError("strategy.TUNE_MONTHS 설정이 누락되었습니다.")
 
     try:
         months_back = int(backtest_last_months)

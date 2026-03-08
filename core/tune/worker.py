@@ -99,9 +99,8 @@ def evaluate_single_combo(
             )
 
         override_settings = {
-            "START_DATE": date_range[0],
-            "END_DATE": date_range[1],
-            "EXCLUDED_TICKERS": list(excluded_tickers),
+            "start_date": date_range[0],
+            "end_date": date_range[1],
         }
 
         # 백테스트 실행
@@ -111,6 +110,7 @@ def evaluate_single_combo(
             override_settings=override_settings,
             strategy_override=strategy_rules,
             quiet=True,
+            excluded_tickers=excluded_tickers,
             prefetched_etf_universe=prefetched_universe,
             prefetched_metrics=prefetched_metrics,
             trading_calendar=trading_calendar,
