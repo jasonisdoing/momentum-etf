@@ -7,14 +7,12 @@
     "initial_capital_krw": "100000000",
     "show_hold": true,
     "strategy": {
-        "TUNE_DATE": "2026-03-08 15:30",
-        "TUNE_CAGR": 0.0,
-        "TUNE_MDD": 0.0,
+        "TUNE_DATE": "2026-03-08 21:38",
+        "TUNE_CAGR": 34.978773,
+        "TUNE_MDD": -11.530194,
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "COMMON": {
-            "REBALANCE_MODE": "QUARTERLY"
-        }
+        "REBALANCE_MODE": "MONTHLY"
     },
     "benchmark": {
         "ticker": "A200",
