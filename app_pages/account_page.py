@@ -14,6 +14,7 @@ from config import (
 )
 from scripts.update_price_cache import refresh_cache_for_target
 from utils.data_loader import fetch_ohlcv
+from utils.pool_registry import get_pool_country_code, list_available_pools
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
 from utils.stock_list_io import (
     add_stock,
@@ -56,13 +57,21 @@ def _normalize_code(value: Any, fallback: str) -> str:
     return text or fallback
 
 
-def _get_account_strategy_name(account_id: str) -> str:
+def _resolve_target_country_code(target_id: str) -> str:
+    target_norm = (target_id or "").strip().lower()
     try:
-        settings = get_account_settings(account_id)
-        strategy = resolve_strategy_params(settings.get("strategy", {}) or {})
-        return str(strategy.get("STRATEGY") or "MAPS").strip().upper()
+        settings = get_account_settings(target_norm)
+        code = str(settings.get("country_code") or "").strip().lower()
+        if code:
+            return code
     except Exception:
-        return "MAPS"
+        pass
+    try:
+        if target_norm in list_available_pools():
+            return get_pool_country_code(target_norm, default="kor")
+    except Exception:
+        pass
+    return "kor"
 
 
 def _to_weight_pct(weight: Any) -> float | None:
@@ -84,7 +93,7 @@ def _to_weight_pct(weight: Any) -> float | None:
 # ---------------------------------------------------------------------------
 
 
-def _build_stocks_meta_table(account_id: str, *, is_hr: bool = False) -> pd.DataFrame:
+def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.DataFrame:
     """stocks.json 메타정보를 DataFrame으로 반환."""
     etfs = get_etfs(account_id)
     if not etfs:
@@ -110,7 +119,7 @@ def _build_stocks_meta_table(account_id: str, *, is_hr: bool = False) -> pd.Data
             "6달(%)": etf.get("6_month_earn_rate"),
             "12달(%)": etf.get("12_month_earn_rate"),
         }
-        if is_hr:
+        if use_weight:
             row["비중(%)"] = _to_weight_pct(etf.get("weight"))
         rows.append(row)
     df = pd.DataFrame(rows)
@@ -122,8 +131,7 @@ def _build_stocks_meta_table(account_id: str, *, is_hr: bool = False) -> pd.Data
 @fragment
 def _render_stocks_meta_table(account_id: str) -> None:
     """종목관리 테이블 렌더링. 업데이트 중일 경우 readonly 모드로 전환하여 스피너 방지."""
-    strategy_name = _get_account_strategy_name(account_id)
-    is_hr = strategy_name == "HR"
+    use_weight = True
 
     # 세션 스테이트 키
     key_meta = f"updating_meta_{account_id}"
@@ -137,23 +145,23 @@ def _render_stocks_meta_table(account_id: str) -> None:
     # 상단 컨트롤: 이제 관리 모드는 상시 활성화 (사용자 요청)
     readonly = is_updating
 
-    df = _build_stocks_meta_table(account_id, is_hr=is_hr)
+    df = _build_stocks_meta_table(account_id, use_weight=use_weight)
     df_edit = df.copy()
 
     if df.empty:
         st.info("종목 데이터가 없습니다. 종목을 추가하거나 삭제된 종목을 복원하세요.")
     else:
         st.caption(f"총 {len(df)}개 종목 (Source: MongoDB)")
-        if is_hr:
+        if use_weight:
             weight_series = pd.to_numeric(df.get("비중(%)"), errors="coerce")
             if weight_series.isna().any():
-                st.warning("HR 비중이 비어 있거나 숫자가 아닌 종목이 있습니다.")
+                st.warning("비중이 비어 있거나 숫자가 아닌 종목이 있습니다.")
             else:
                 total_weight = float(weight_series.sum())
                 if abs(total_weight - 100.0) > 1e-2:
-                    st.warning(f"HR 비중 합계가 100%가 아닙니다. 현재: {total_weight:.2f}%")
+                    st.warning(f"비중 합계가 100%가 아닙니다. 현재: {total_weight:.2f}%")
                 else:
-                    st.caption("HR 비중 합계: 100.00%")
+                    st.caption("비중 합계: 100.00%")
 
         def _color_pct(val: float | str) -> str:
             if val is None or pd.isna(val):
@@ -201,7 +209,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         st.caption(f"현재 버킷: {current_bucket_name}")
         current_row = df_edit[df_edit["티커"] == ticker]
         current_weight_pct = None
-        if is_hr and not current_row.empty:
+        if use_weight and not current_row.empty:
             current_weight_pct = current_row.iloc[0].get("비중(%)")
             current_weight_pct = float(current_weight_pct) if pd.notna(current_weight_pct) else 0.0
 
@@ -210,7 +218,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
             "버킷 변경", options=BUCKET_OPTIONS, index=BUCKET_OPTIONS.index(current_bucket_name)
         )
         new_weight_pct = None
-        if is_hr:
+        if use_weight:
             st.subheader("비중 변경")
             new_weight_pct = st.number_input(
                 "비중(%)",
@@ -224,7 +232,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         if st.button("💾 변경사항 저장", type="primary", width="stretch"):
             new_bucket_int = BUCKET_REVERSE_MAPPING.get(new_bucket_name, 1)
             update_fields: dict[str, Any] = {"bucket": new_bucket_int}
-            if is_hr:
+            if use_weight:
                 update_fields["weight"] = int(new_weight_pct or 0)
             if update_stock(account_id, ticker, **update_fields):
                 st.toast(f"✅ {ticker} 버킷 변경 완료")
@@ -380,13 +388,8 @@ def _render_stocks_meta_table(account_id: str) -> None:
             st.session_state[f"should_clear_add_{account_id}"] = False
 
         # 국가 코드 조회 (검색용)
-        try:
-            settings = get_account_settings(account_id)
-            country_code = settings.get("country_code", "kor")
-        except Exception:
-            country_code = "kor"
-
-        st.write(f"계좌: **{account_id.upper()}** ({country_code.upper()})")
+        country_code = _resolve_target_country_code(account_id)
+        st.write(f"대상: **{account_id.upper()}** ({country_code.upper()})")
 
         # 국가별 플레이스홀더 설정
         if country_code == "kor":
@@ -446,7 +449,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 )
                 bucket_int = BUCKET_REVERSE_MAPPING.get(selected_bucket_name, 1)
                 weight_for_add = None
-                if is_hr:
+                if use_weight:
                     weight_for_add = st.number_input(
                         "비중(%)",
                         min_value=0,
@@ -463,7 +466,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                         "listing_date": search_result.get("listing_date"),
                         "bucket": bucket_int,
                     }
-                    if is_hr:
+                    if use_weight:
                         extra_fields["weight"] = int(weight_for_add or 0)
                     success = add_stock(
                         account_id,
@@ -984,4 +987,18 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
         _render_manual_actions(account_id)
 
 
-__all__ = ["render_account_page"]
+def render_account_setup_page(account_id: str) -> None:
+    """계좌/풀 공용 종목 관리 뷰를 렌더링한다."""
+    _render_stocks_meta_table(account_id)
+
+
+def render_account_deleted_page(account_id: str) -> None:
+    """계좌/풀 공용 삭제된 종목 뷰를 렌더링한다."""
+    _render_deleted_stocks_tab(account_id)
+
+
+__all__ = [
+    "render_account_page",
+    "render_account_setup_page",
+    "render_account_deleted_page",
+]

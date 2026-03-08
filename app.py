@@ -9,10 +9,13 @@ import streamlit as st
 import streamlit_authenticator as stauth
 
 from app_pages.account_page import render_account_page
+from app_pages.pool_page import render_pool_page
 from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
 )
+from utils.identifier_guard import ensure_account_pool_id_separation
+from utils.pool_registry import load_pool_configs
 from utils.report import format_kr_money
 from utils.ui import render_recommendation_table
 
@@ -80,6 +83,96 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
         _render,
         title=title,
         icon=icon,
+        url_path=url_path,
+    )
+
+
+def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[dict[str, Any]], view_mode: str):
+    url_mapping = {"추천 결과": "result", "종목 관리": "setup", "삭제된 종목": "deleted"}
+    clean_view = view_mode.split(".")[-1].strip()
+    english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
+    view_slug = _slugify_path(english_view)
+    url_path = f"account-{view_slug}"
+
+    account_options: list[tuple[str, str]] = []
+    for acc in accounts:
+        account_id = acc["account_id"]
+        account_name = acc.get("name") or account_id.upper()
+        icon = acc.get("icon") or get_icon_fallback(acc.get("country_code", ""))
+        label = f"{icon} {account_name}".strip()
+        account_options.append((account_id, label))
+
+    def _render() -> None:
+        if not account_options:
+            st.error("선택 가능한 계좌가 없습니다.")
+            return
+
+        option_ids = [account_id for account_id, _ in account_options]
+        option_label_map = {account_id: label for account_id, label in account_options}
+
+        current_id = st.session_state.get("selected_account_id")
+        if current_id not in option_label_map:
+            current_id = option_ids[0]
+            st.session_state["selected_account_id"] = current_id
+
+        selected_id = st.selectbox(
+            "계좌 선택",
+            options=option_ids,
+            index=option_ids.index(current_id),
+            format_func=lambda account_id: option_label_map.get(account_id, account_id),
+            key=f"account_selector_{view_slug}",
+        )
+        st.session_state["selected_account_id"] = selected_id
+        render_account_page(selected_id, view_mode=view_mode)
+
+    return page_cls(
+        _render,
+        title=view_mode,
+        icon="💼",
+        url_path=url_path,
+    )
+
+
+def _build_unified_pool_page(page_cls: Callable[..., object], pools: list[dict[str, str]], view_mode: str):
+    url_mapping = {"랭킹": "rank", "종목 관리": "setup", "삭제된 종목": "deleted"}
+    clean_view = view_mode.split(".")[-1].strip()
+    english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
+    view_slug = _slugify_path(english_view)
+    url_path = f"pool-{view_slug}"
+
+    pool_options: list[tuple[str, str]] = []
+    for pool in pools:
+        pool_id = pool["pool_id"]
+        pool_name = pool.get("name") or pool_id.upper()
+        pool_options.append((pool_id, pool_name))
+
+    def _render() -> None:
+        if not pool_options:
+            st.error("선택 가능한 종목풀이 없습니다.")
+            return
+
+        option_ids = [pool_id for pool_id, _ in pool_options]
+        option_label_map = {pool_id: label for pool_id, label in pool_options}
+
+        current_id = st.session_state.get("selected_pool_id")
+        if current_id not in option_label_map:
+            current_id = option_ids[0]
+            st.session_state["selected_pool_id"] = current_id
+
+        selected_id = st.selectbox(
+            "종목풀 선택",
+            options=option_ids,
+            index=option_ids.index(current_id),
+            format_func=lambda pool_id: option_label_map.get(pool_id, pool_id),
+            key=f"pool_selector_{view_slug}",
+        )
+        st.session_state["selected_pool_id"] = selected_id
+        render_pool_page(selected_id, view_mode=view_mode)
+
+    return page_cls(
+        _render,
+        title=view_mode,
+        icon="🧩",
         url_path=url_path,
     )
 
@@ -631,6 +724,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
 
 
 def main() -> None:
+    ensure_account_pool_id_separation()
     navigation = getattr(st, "navigation", None)
     page_cls = getattr(st, "Page", None)
     if navigation is None or page_cls is None:
@@ -643,6 +737,7 @@ def main() -> None:
         st.stop()
 
     default_icon = "📈"
+    pools = load_pool_configs()
 
     st.set_page_config(
         page_title="Momentum ETF",
@@ -694,11 +789,13 @@ def main() -> None:
     transaction_tabs = ["📊 잔고 CRUD", "📥 벌크 입력", "💵 원금/현금", "📸 스냅샷"]
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
 
-    # 각 계좌 그룹
+    # 통합 계좌 그룹 (계좌 선택형 단일 URL)
     view_modes = ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]
-    for account in accounts:
-        group_name = account["name"]
-        pages[group_name] = [_build_account_page(page_cls, account, view_mode) for view_mode in view_modes]
+    pages["계좌"] = [_build_unified_account_page(page_cls, accounts, view_mode) for view_mode in view_modes]
+
+    # 통합 종목풀 그룹 (풀 선택형 단일 URL)
+    pool_view_modes = ["1. 랭킹", "2. 종목 관리", "3. 삭제된 종목"]
+    pages["종목풀"] = [_build_unified_pool_page(page_cls, pools, view_mode) for view_mode in pool_view_modes]
 
     # 네비게이션 객체 생성 (사이드바 방식)
     pg = navigation(pages, position="sidebar")

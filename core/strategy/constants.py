@@ -1,4 +1,4 @@
-"""MAPS(Moving Average Position Score) 전략에서 사용하는 상수 모음."""
+"""RANK(Moving Average Position Score) 전략에서 사용하는 상수 모음."""
 
 from __future__ import annotations
 

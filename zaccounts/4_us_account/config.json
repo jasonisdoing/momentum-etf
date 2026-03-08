@@ -1,0 +1,24 @@
+{
+    "icon": "🇺🇸",
+    "name": "미국직투",
+    "desc": "기본 운용 계좌 (미국 ETF, USD)",
+    "country_code": "us",
+    "currency": "USD",
+    "initial_capital_krw": "100000000",
+    "show_hold": true,
+    "strategy": {
+        "TUNE_DATE": "2026-03-08 15:30",
+        "TUNE_CAGR": 0.0,
+        "TUNE_MDD": 0.0,
+        "TUNE_MONTHS": 12,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "COMMON": {
+            "REBALANCE_MODE": "QUARTERLY"
+        }
+    },
+    "benchmark": {
+        "ticker": "VOO",
+        "name": "S&P 500"
+    },
+    "account": "us_account"
+}

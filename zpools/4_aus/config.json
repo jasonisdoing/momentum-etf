@@ -1,0 +1,9 @@
+{
+  "name": "호주 ETF",
+  "desc": "호주 ETF 종목풀",
+  "rank": {
+    "country": "au",
+    "months": 3,
+    "ma_type": "HMA"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "국내상장 국내 ETF",
+  "desc": "국내상장 국내 ETF 종목풀",
+  "rank": {
+    "country": "kor",
+    "months": 3,
+    "ma_type": "HMA"
+  }
+}

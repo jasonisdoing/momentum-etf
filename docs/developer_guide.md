@@ -6,7 +6,10 @@
 
 ### 모듈 구조
 *   `recommend.py`: 백테스트 엔진을 호출하여 가장 최신일(오늘)의 시뮬레이션 결과를 추출하고 추천 리포트를 생성하는 엔트리 포인트
+*   `rank.py`: 종목풀(`zpools`) 기반 랭킹 생성 엔트리 포인트
 *   `core/backtest/`: 핵심 시뮬레이션 엔진 및 계좌별 백테스트 실행 로직
+*   `core/rank/`: 종목풀 랭킹 계산/저장 로직
+*   `core/strategy/`: 지표/점수/의사결정 공용 전략 유틸
 *   `scripts/`: 데이터 수집, 캐시 갱신 등 유틸리티 스크립트
 *   `utils/`:
     *   `cache_utils.py`: **Parquet 기반 캐시 I/O** 및 직렬화 관리
@@ -27,9 +30,10 @@
 | 파일/경로 | 역할 |
 |-----------------|------|
 | `recommend.py` | 백테스트 엔진을 호출하여 최신 권장 사항 추출 및 리포트 생성 |
+| `rank.py` | 종목풀 랭킹 생성 및 저장 |
 | `backtest.py` | 계정 단위 전략 시뮬레이션 실행 엔트리 |
 | `core/backtest/runner.py` | 계좌 설정 로드/검증 후 백테스트 실행 오케스트레이션 |
-| `core/backtest/engine.py` | MAPS/HR 전략 공통 실행 엔진 |
+| `core/backtest/engine.py` | 계좌 리밸런싱(WEIGHT) 실행 엔진 |
 
 ### 핵심 일관성 체크리스트
 
@@ -43,31 +47,38 @@
 
 ## 3. 전략 설정 규칙
 
-신규 전략 설정 포맷:
+계좌 설정 포맷(`zaccounts/<order>_<account>/config.json`):
 
 ```json
 {
   "strategy": {
     "COMMON": {
-      "STRATEGY": "MAPS|HR",
       "BACKTEST_LAST_MONTHS": 12,
       "REBALANCE_MODE": "...",
       "OPTIMIZATION_METRIC": "CAGR|SHARPE|SDR"
-    },
-    "MAPS": {
-      "TOPN": 5,
-      "MA_MONTH": 12,
-      "MA_TYPE": "HMA",
-      "COOLDOWN": 2
     }
   }
 }
 ```
 
-검증 원칙:
+종목풀 설정 포맷(`zpools/<order>_<pool>/config.json`):
 
-* `MAPS`: `COMMON` + `MAPS` 필수
-* `HR`: `COMMON` 필수 (`HR` 블록은 선택)
+```json
+{
+  "name": "국내상장 국내 ETF",
+  "desc": "국내상장 국내 ETF 종목풀",
+  "rank": {
+    "country": "kor|us|au",
+    "months": 12,
+    "ma_type": "HMA"
+  }
+}
+```
+
+검증 원칙(현재 운영):
+
+* 계좌: `COMMON.REBALANCE_MODE` 및 종목 `weight` 필수
+* 종목풀: `rank.country/months/ma_type` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
 
 ## 4. 테스트 및 검증

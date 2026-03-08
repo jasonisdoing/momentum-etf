@@ -20,6 +20,7 @@ from pandas import DataFrame, Timestamp
 
 from config import TRADING_DAYS_PER_MONTH
 from core.backtest.runner import run_account_backtest
+from core.strategy.rules import StrategyRules
 from core.tune.reporting import (
     _export_combo_debug,
     _export_prefetched_data,
@@ -33,7 +34,6 @@ from core.tune.worker import (
     evaluate_single_combo,
     init_worker_prefetch,
 )
-from strategies.maps.rules import StrategyRules
 from utils.account_registry import get_benchmark_tickers
 from utils.cache_utils import save_cached_frame
 from utils.data_loader import (
@@ -232,7 +232,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     backtested_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     # 표준 저장 포맷:
-    # strategy: {TUNE_*, STRATEGY, OPTIMIZATION_METRIC, TUNE_MONTHS, COMMON, MAPS?/HR?}
+    # strategy: {TUNE_*, STRATEGY, OPTIMIZATION_METRIC, TUNE_MONTHS, COMMON, RANK?/WEIGHT?}
     common_data = dict(strategy_data.get("COMMON") or {}) if isinstance(strategy_data.get("COMMON"), dict) else {}
     active_strategy = str(result_params.get("STRATEGY") or strategy_data.get("STRATEGY") or "").strip().upper()
     if not active_strategy:
@@ -280,7 +280,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     tune_mdd = _round_float(weighted_mdd) if weighted_mdd is not None else strategy_data.get("TUNE_MDD")
 
     # 키 순서 고정:
-    # TUNE_DATE, TUNE_CAGR, TUNE_MDD, TUNE_MONTHS, STRATEGY, OPTIMIZATION_METRIC, COMMON, MAPS?/HR?
+    # TUNE_DATE, TUNE_CAGR, TUNE_MDD, TUNE_MONTHS, STRATEGY, OPTIMIZATION_METRIC, COMMON, RANK?/WEIGHT?
     strategy_out: dict[str, Any] = {
         "TUNE_DATE": backtested_at,
         "TUNE_CAGR": tune_cagr,
@@ -291,12 +291,12 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "COMMON": common_data,
     }
 
-    # 전략 전용 블록 저장 (MAPS는 COMMON 바로 아래)
-    if active_strategy == "MAPS":
-        strategy_out["MAPS"] = active_data
-    elif active_strategy == "HR":
+    # 전략 전용 블록 저장 (RANK는 COMMON 바로 아래)
+    if active_strategy == "RANK":
+        strategy_out["RANK"] = active_data
+    elif active_strategy == "WEIGHT":
         if active_data:
-            strategy_out["HR"] = active_data
+            strategy_out["WEIGHT"] = active_data
     elif active_data:
         strategy_out[active_strategy] = active_data
 
@@ -373,7 +373,7 @@ def _export_debug_month(
         }
 
         strategy_rules = StrategyRules.from_values(
-            strategy=tuning.get("STRATEGY", "MAPS"),
+            strategy=tuning.get("STRATEGY", "RANK"),
             ma_month=int(ma_month),
             bucket_topn=topn,
             ma_type=tuning.get("MA_TYPE", "SMA"),
@@ -687,7 +687,7 @@ def _execute_tuning(
                 else None,
                 "turnover": int(item.get("turnover") or 0),
                 "tuning": {
-                    "STRATEGY": str(item.get("strategy", "MAPS")),
+                    "STRATEGY": str(item.get("strategy", "RANK")),
                     "MA_MONTH": int(item.get("ma_month", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
                     "TOPN": int(item.get("bucket_topn", 0)),
@@ -1057,7 +1057,7 @@ def _compose_tuning_report(
         if search_space:
             strategy_range_probe = search_space.get("STRATEGY", [])
             normalized_probe = [str(s).upper() for s in strategy_range_probe if s]
-            is_hr_tuning = len(normalized_probe) == 1 and normalized_probe[0] == "HR"
+            is_hr_tuning = len(normalized_probe) == 1 and normalized_probe[0] == "WEIGHT"
         if search_space:
             ma_month_range = search_space.get("MA_MONTH", [])
             strategy_range = search_space.get("STRATEGY", [])
@@ -1249,7 +1249,7 @@ def _compose_tuning_report(
         if tuning_metadata:
             strategy_probe = tuning_metadata.get("search_space", {}).get("STRATEGY", [])
             normalized_probe = [str(s).upper() for s in strategy_probe if s]
-            is_hr_tuning_rows = len(normalized_probe) == 1 and normalized_probe[0] == "HR"
+            is_hr_tuning_rows = len(normalized_probe) == 1 and normalized_probe[0] == "WEIGHT"
 
         for entry in raw_rows:
             tuning = entry.get("tuning") or {}
@@ -1267,7 +1267,7 @@ def _compose_tuning_report(
 
             normalized_rows.append(
                 {
-                    "strategy": str(tuning.get("STRATEGY", "MAPS")).upper(),
+                    "strategy": str(tuning.get("STRATEGY", "RANK")).upper(),
                     "ma_days": ma_val,
                     "ma_type": ma_type_val,
                     "bucket_topn": topn_val,
@@ -1375,7 +1375,7 @@ def run_account_tuning(
     debug_month_configs: list[dict[str, Any]] = []
 
     # 튜닝 설정 포맷:
-    # 1) 신규: {"COMMON": {...}, "MAPS": {...}} 또는 {"COMMON": {...}, "HR": {...}}
+    # 1) 신규: {"COMMON": {...}, "RANK": {...}} 또는 {"COMMON": {...}, "WEIGHT": {...}}
     # 2) 구형: 최상위 키에 STRATEGY/TOPN/MA_MONTH...
     common_cfg: dict[str, Any] = {}
     strategy_cfg_block: dict[str, Any] = {}
@@ -1390,7 +1390,7 @@ def run_account_tuning(
                 f"[튜닝] '{account_id}' 계정의 'COMMON.STRATEGY'가 누락되었습니다. tune.py의 설정을 확인하세요."
             )
         strategy_cfg_raw = config.get(strategy_value)
-        if not isinstance(strategy_cfg_raw, dict) and strategy_value != "HR":
+        if not isinstance(strategy_cfg_raw, dict) and strategy_value != "WEIGHT":
             raise ValueError(
                 f"[튜닝] '{account_id}' 계정의 '{strategy_value}' 튜닝 블록이 누락되었거나 dict가 아닙니다."
             )
@@ -1435,7 +1435,7 @@ def run_account_tuning(
         raise ValueError(f"[튜닝] '{account_id}' 계정의 'REBALANCE_MODE'가 유효하지 않습니다.")
 
     ma_values: list[int] = []
-    if active_strategy == "MAPS":
+    if active_strategy == "RANK":
         ma_month_raw = _pick("MA_MONTH")
         if ma_month_raw is None or (isinstance(ma_month_raw, (list, tuple)) and not ma_month_raw):
             raise ValueError(
@@ -1486,8 +1486,8 @@ def run_account_tuning(
         cooldown_values = sorted(set(v for v in cooldown_values if v >= 1))
         if not cooldown_values:
             raise ValueError(f"[튜닝] '{account_id}' 계정의 'COOLDOWN'이 유효하지 않습니다. (1 이상의 정수)")
-    elif active_strategy == "HR":
-        # HR는 REBALANCE_MODE만 탐색한다.
+    elif active_strategy == "WEIGHT":
+        # WEIGHT는 REBALANCE_MODE만 탐색한다.
         ma_month_values = [1]
         topn_values = [1]
         ma_type_values = ["SMA"]
@@ -1504,7 +1504,7 @@ def run_account_tuning(
         logger.error("[튜닝] '%s' 종목 데이터를 찾을 수 없습니다.", account_norm)
         return None
 
-    if active_strategy == "HR":
+    if active_strategy == "WEIGHT":
         weight_sum = 0.0
         weighted_count = 0
         for item in etf_universe:
@@ -1527,7 +1527,7 @@ def run_account_tuning(
             raise ValueError(f"[튜닝] '{account_id}' 계정에 비중(weight) 0 초과 종목이 없습니다.")
         if abs(weight_sum - 100.0) > 1e-2 and abs(weight_sum - 1.0) > 1e-3:
             raise ValueError(
-                f"[튜닝] '{account_id}' 계정 HR 비중 합계는 100이어야 합니다. 현재 합계: {int(round(weight_sum))}"
+                f"[튜닝] '{account_id}' 계정 WEIGHT 비중 합계는 100이어야 합니다. 현재 합계: {int(round(weight_sum))}"
             )
 
     tickers = [str(item.get("ticker")) for item in etf_universe if item.get("ticker")]
@@ -1901,7 +1901,7 @@ def run_account_tuning(
                         "sharpe_to_mdd": _round_float_places(entry.get("sharpe_to_mdd", 0.0), 3),
                         "turnover": int(entry.get("turnover") or 0),
                         "tuning": {
-                            "STRATEGY": str(entry.get("strategy", "MAPS")),
+                            "STRATEGY": str(entry.get("strategy", "RANK")),
                             "MA_MONTH": int(entry.get("ma_month")) if entry.get("ma_month") is not None else None,
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
                             "TOPN": int(entry.get("bucket_topn", 0)),
@@ -2022,9 +2022,9 @@ def run_account_tuning(
     if results_per_month:
         item = results_per_month[-1]
         best = item.get("best") or {}
-        if active_strategy == "HR":
+        if active_strategy == "WEIGHT":
             logger.info(
-                "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): STRATEGY=HR / REBALANCE_MODE=%s / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
+                "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): STRATEGY=WEIGHT / REBALANCE_MODE=%s / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
                 account_norm.upper(),
                 item.get("backtest_start_date"),
                 optimization_metric,
@@ -2039,7 +2039,7 @@ def run_account_tuning(
                 account_norm.upper(),
                 item.get("backtest_start_date"),
                 optimization_metric,
-                best.get("strategy", "MAPS"),
+                best.get("strategy", "RANK"),
                 best.get("ma_month", 0),
                 best.get("bucket_topn", 0),
                 best.get("cagr", 0.0),
@@ -2048,14 +2048,14 @@ def run_account_tuning(
             )
 
     entry = _build_run_entry(months_results=results_per_month)
-    if active_strategy == "HR":
+    if active_strategy == "WEIGHT":
         rebalance_mode = None
         try:
             rebalance_mode = str((entry.get("result") or {}).get("REBALANCE_MODE") or "").upper() or None
         except Exception:
             rebalance_mode = None
         entry["result"] = {
-            "STRATEGY": "HR",
+            "STRATEGY": "WEIGHT",
             "REBALANCE_MODE": rebalance_mode,
         }
 

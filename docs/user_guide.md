@@ -10,25 +10,34 @@
 
 ### 실행 명령어
 
-**1. 튜닝 (최적 파라미터 탐색)**
-최적의 파라미터를 찾기 위해 튜닝을 수행합니다. 완료 후 전략 설정이 **자동으로 업데이트**됩니다.
+**1. 종목풀 랭킹 생성**
+종목풀에서 모멘텀 랭킹을 생성합니다.
 ```bash
-python tune.py kor_us  # kor_us 계정 튜닝
-python tune.py us      # us 계정 튜닝
+python rank.py kor_kr
+python rank.py kor_us
+python rank.py us
+python rank.py aus
 ```
 
-**2. 백테스트 실행**
+**2. 튜닝 (계좌 리밸런싱 파라미터 탐색)**
+최적의 리밸런싱 파라미터를 찾기 위해 튜닝을 수행합니다. 완료 후 계좌 설정이 **자동으로 업데이트**됩니다.
+```bash
+python tune.py kor_save_account  # kor_save_account 계정 튜닝
+python tune.py us_account        # us_account 계정 튜닝
+```
+
+**3. 백테스트 실행**
 과거 데이터를 바탕으로 전략의 성과를 시뮬레이션합니다.
 ```bash
-python backtest.py kor_us
-python backtest.py us
+python backtest.py kor_save_account
+python backtest.py us_account
 ```
 
-**3. 추천 실행 (매일 아침)**
+**4. 추천 실행 (매일 아침)**
 백테스트 엔진을 기반으로 현재 시점의 매매 추천 목록을 생성하고 Slack으로 알림을 보냅니다.
 ```bash
-python recommend.py kor_us
-python recommend.py us
+python recommend.py kor_save_account
+python recommend.py us_account
 ```
 
 ## 2. 설정 가이드
@@ -38,48 +47,37 @@ python recommend.py us
 *   `SLACK_BOT_TOKEN`: 알림을 봇을 통해 발송하기 위한 슬랙 봇 토큰
 *   `SLACK_CHANNEL_ID`: 알림을 받을 슬랙 채널 ID
 
-### 계좌별 전략 설정 (`zaccounts/<account>/config.json`)
-각 계좌별 전략 설정은 `strategy.COMMON` + 전략 전용 블록(`MAPS`, `HR`) 구조를 사용합니다.
-
-**MAPS 예시:**
+### 계좌 설정 (`zaccounts/<order>_<account_id>/config.json`)
+계좌는 기본적으로 `WEIGHT`(고정 비중 리밸런싱) 방식으로 동작하며, 종목별 `weight` 값이 필수입니다.
 
 ```json
 {
   "strategy": {
+    "TUNE_MONTHS": 12,
+    "OPTIMIZATION_METRIC": "CAGR",
     "COMMON": {
-      "STRATEGY": "MAPS",
-      "BACKTEST_LAST_MONTHS": 12,
-      "REBALANCE_MODE": "WEEKLY",
-      "OPTIMIZATION_METRIC": "CAGR"
-    },
-    "MAPS": {
-      "TOPN": 5,
-      "MA_MONTH": 12,
-      "MA_TYPE": "HMA",
-      "COOLDOWN": 2
+      "REBALANCE_MODE": "QUARTERLY"
     }
   }
 }
 ```
 
-**HR 예시:**
+### 종목풀 설정 (`zpools/<order>_<pool_id>/config.json`)
+종목풀은 랭킹 계산 파라미터를 관리합니다.
 
 ```json
 {
-  "strategy": {
-    "COMMON": {
-      "STRATEGY": "HR",
-      "BACKTEST_LAST_MONTHS": 12,
-      "REBALANCE_MODE": "QUARTERLY",
-      "OPTIMIZATION_METRIC": "CAGR"
-    }
+  "name": "국내상장 국내 ETF",
+  "desc": "국내상장 국내 ETF 종목풀",
+  "rank": {
+    "country": "kor",
+    "months": 12,
+    "ma_type": "HMA"
   }
 }
 ```
 
-> **주의**: 필수 설정이 누락되면 fallback 없이 즉시 에러가 발생합니다.
-> * MAPS: `COMMON` + `MAPS` 필수
-> * HR: `COMMON` 필수
+> 참고: 계좌 추천/백테스트는 종목풀 랭킹을 자동 병합하지 않습니다. 랭킹 결과를 보고 계좌 종목/비중을 관리 화면에서 반영하는 운영 모델입니다.
 
 ## 3. 대시보드 및 계좌 관리
 

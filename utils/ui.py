@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from config import BUCKET_CONFIG, BUCKET_MAPPING
-from strategies.maps.constants import BACKTEST_STATUS_LIST
+from core.strategy.constants import BACKTEST_STATUS_LIST
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 from utils.recommendations import recommendations_to_dataframe

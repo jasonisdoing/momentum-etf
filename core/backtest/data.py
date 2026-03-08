@@ -3,7 +3,7 @@ from typing import Any
 
 import pandas as pd
 
-from strategies.maps.metrics import process_ticker_data
+from core.strategy.metrics import process_ticker_data
 from utils.logger import get_app_logger
 
 from .domain import BacktestConfig, MarketData

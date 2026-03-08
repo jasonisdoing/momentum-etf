@@ -17,6 +17,7 @@ venv/
 zresults
 zaccounts/*/results
 scripts/results/*.*
+zpools/*/results
 
 # 노트 파일
 znotes/
