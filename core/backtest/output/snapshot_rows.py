@@ -236,7 +236,7 @@ def build_snapshot_rows(
             entries,
             key=lambda row: (
                 0 if row.get("is_current_holding") else 1,
-                row.get("sort_group", 2),
+                (int(row.get("bucket")) if row.get("bucket") is not None else 99),
                 -(float(row.get("score")) if _is_finite_number(row.get("score")) else float("-inf")),
                 str(row.get("ticker", "")),
             ),
@@ -254,13 +254,18 @@ def build_snapshot_rows(
             row["_is_bucket_top"] = False
 
     def _final_sort_key(row: dict[str, Any]) -> tuple[int, int, float, str]:
-        # 백테스트 일별 표는 CASH 고정, 그 다음 보유 우선, 점수 내림차순 정렬
+        # 백테스트 일별 표는 CASH 고정, 그 다음 보유 여부 -> 버킷 -> 점수 내림차순 정렬
         if row.get("is_cash"):
             return (-1, 0, 0.0, "CASH")
 
         holding_priority = 0 if row.get("is_current_holding") else 1
+        bucket_val = row.get("bucket")
+        try:
+            bucket_priority = int(bucket_val) if bucket_val is not None else 99
+        except (TypeError, ValueError):
+            bucket_priority = 99
         score_val = float(row.get("score")) if _is_finite_number(row.get("score")) else float("-inf")
-        return (0, holding_priority, -score_val, str(row.get("ticker", "")))
+        return (0, holding_priority, bucket_priority, -score_val, str(row.get("ticker", "")))
 
     entries.sort(key=_final_sort_key)
 
