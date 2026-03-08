@@ -263,11 +263,17 @@ def _assign_final_ranks(
         else:
             rec["_sort_group"] = 2
 
-    # 2. 정렬 로직 적용 (버킷 미사용, 전체 점수순)
+    # 2. 정렬 로직 적용 (보유 여부 -> 버킷 -> 점수)
     def _sort_key(x):
         holding_priority = 0 if x.get("_is_current_holding") else 1
+        bucket_val = x.get("bucket")
+        try:
+            bucket_priority = int(bucket_val) if bucket_val is not None else 99
+        except (TypeError, ValueError):
+            bucket_priority = 99
         return (
             holding_priority,
+            bucket_priority,
             -(x.get("score") if x.get("score") is not None else float("-inf")),
             x.get("ticker", ""),
         )
