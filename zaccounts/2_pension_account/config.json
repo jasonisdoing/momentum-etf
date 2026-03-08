@@ -12,9 +12,7 @@
         "TUNE_MDD": 0.0,
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "COMMON": {
-            "REBALANCE_MODE": "QUARTERLY"
-        }
+        "REBALANCE_MODE": "QUARTERLY"
     },
     "benchmark": {
         "ticker": "379810",
