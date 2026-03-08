@@ -110,10 +110,12 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
         option_ids = [account_id for account_id, _ in account_options]
         option_label_map = {account_id: label for account_id, label in account_options}
 
-        current_id = st.session_state.get("selected_account_id")
+        query_account = st.query_params.get("account")
+        current_id = query_account if query_account in option_label_map else st.session_state.get("selected_account_id")
         if current_id not in option_label_map:
             current_id = option_ids[0]
             st.session_state["selected_account_id"] = current_id
+            st.query_params["account"] = current_id
 
         selected_id = st.selectbox(
             "계좌 선택",
@@ -123,6 +125,7 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
             key=f"account_selector_{view_slug}",
         )
         st.session_state["selected_account_id"] = selected_id
+        st.query_params["account"] = selected_id
         render_account_page(selected_id, view_mode=view_mode)
 
     return page_cls(
@@ -154,10 +157,12 @@ def _build_unified_pool_page(page_cls: Callable[..., object], pools: list[dict[s
         option_ids = [pool_id for pool_id, _ in pool_options]
         option_label_map = {pool_id: label for pool_id, label in pool_options}
 
-        current_id = st.session_state.get("selected_pool_id")
+        query_pool = st.query_params.get("pool")
+        current_id = query_pool if query_pool in option_label_map else st.session_state.get("selected_pool_id")
         if current_id not in option_label_map:
             current_id = option_ids[0]
             st.session_state["selected_pool_id"] = current_id
+            st.query_params["pool"] = current_id
 
         selected_id = st.selectbox(
             "종목풀 선택",
@@ -167,6 +172,7 @@ def _build_unified_pool_page(page_cls: Callable[..., object], pools: list[dict[s
             key=f"pool_selector_{view_slug}",
         )
         st.session_state["selected_pool_id"] = selected_id
+        st.query_params["pool"] = selected_id
         render_pool_page(selected_id, view_mode=view_mode)
 
     return page_cls(
