@@ -63,6 +63,38 @@ def _calc_return(close_series: pd.Series, days: int) -> float:
     return (current / previous - 1.0) * 100.0
 
 
+def _calc_period_return_like_recommend(close_series: pd.Series, days: int) -> float:
+    """recommend.py와 동일한 기간 수익률 계산 규칙.
+
+    - 기본: 지정 거래일(days) 이전 값과 비교
+    - 12개월(252일): 데이터가 240일 이상이면 가장 오래된 값으로 fallback 계산
+    """
+    if close_series is None:
+        return 0.0
+    try:
+        series = pd.to_numeric(close_series, errors="coerce").dropna()
+    except Exception:
+        return 0.0
+    if series.empty:
+        return 0.0
+
+    current = float(series.iloc[-1])
+    if current <= 0:
+        return 0.0
+
+    if len(series) > days:
+        previous = float(series.iloc[-(days + 1)])
+        if previous > 0:
+            return (current / previous - 1.0) * 100.0
+
+    if days == 252 and len(series) >= 240:
+        previous = float(series.iloc[0])
+        if previous > 0:
+            return (current / previous - 1.0) * 100.0
+
+    return 0.0
+
+
 def _calc_rsi(close_series: pd.Series, period: int = 14) -> float:
     """Wilder 방식 RSI를 계산해 마지막 값을 반환한다."""
     if close_series is None or len(close_series) < period + 1:
@@ -151,12 +183,12 @@ def run_pool_ranking(pool_id: str, config: RankConfig) -> RankRunResult:
             close = float(close_series.iloc[-1])
             ma_val = float(ma_series.iloc[-1])
             daily_pct = _calc_return(close_series, 1)
-            return_1w = _calc_return(close_series, 5)
-            return_2w = _calc_return(close_series, 10)
-            return_1m = _calc_return(close_series, 20)
-            return_3m = _calc_return(close_series, 60)
-            return_6m = _calc_return(close_series, 126)
-            return_12m = _calc_return(close_series, 252)
+            return_1w = _calc_period_return_like_recommend(close_series, 5)
+            return_2w = _calc_period_return_like_recommend(close_series, 10)
+            return_1m = _calc_period_return_like_recommend(close_series, 20)
+            return_3m = _calc_period_return_like_recommend(close_series, 60)
+            return_6m = _calc_period_return_like_recommend(close_series, 126)
+            return_12m = _calc_period_return_like_recommend(close_series, 252)
             drawdown_from_high = (
                 ((close / float(close_series.max())) - 1.0) * 100.0 if float(close_series.max()) > 0 else 0.0
             )
