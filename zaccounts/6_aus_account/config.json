@@ -1,7 +1,6 @@
 {
     "icon": "🇦🇺",
     "name": "호주연금",
-    "desc": "기본 운용 계좌 (호주 ETF, AUD)",
     "country_code": "au",
     "currency": "aud",
     "initial_capital_krw": "100000000",
@@ -17,6 +16,5 @@
     "benchmark": {
         "ticker": "A200",
         "name": "BetaShares Australia 200 ETF"
-    },
-    "account": "aus_account"
+    }
 }

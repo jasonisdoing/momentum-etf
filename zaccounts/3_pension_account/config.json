@@ -1,9 +1,9 @@
 {
     "icon": "🇰🇷",
-    "name": "국내 일반계좌",
+    "name": "연금저축 계좌",
     "country_code": "kor",
     "currency": "KRW",
-    "initial_capital_krw": "50000000",
+    "initial_capital_krw": "40000000",
     "show_hold": true,
     "strategy": {
         "TUNE_DATE": "2026-03-08 15:30",
@@ -14,7 +14,7 @@
         "REBALANCE_MODE": "QUARTERLY"
     },
     "benchmark": {
-        "ticker": "069500",
-        "name": "KODEX 200"
+        "ticker": "379810",
+        "name": "KODEX 미국나스닥100"
     }
 }
