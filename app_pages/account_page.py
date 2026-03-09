@@ -673,44 +673,39 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     df_deleted.sort_values(by=["버킷", "삭제일"], ascending=[True, False], inplace=True)
     df_deleted["주간거래량"] = pd.to_numeric(df_deleted["주간거래량"], errors="coerce")
 
-    def _color_pct_deleted(val: Any) -> str:
-        if val is None or pd.isna(val):
-            return "background-color: #ffe0e6"
-        try:
-            num = float(val)
-        except (TypeError, ValueError):
-            return "background-color: #ffe0e6"
-        if num > 0:
-            return "background-color: #ffe0e6; color: red"
-        if num < 0:
-            return "background-color: #ffe0e6; color: blue"
-        return "background-color: #ffe0e6; color: black"
-
-    styled_deleted = df_deleted.style.map(lambda _: "background-color: #ffe0e6")
-    pct_columns = ["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
-    for col in pct_columns:
-        if col in df_deleted.columns:
-            styled_deleted = styled_deleted.map(_color_pct_deleted, subset=[col])
-
     # [User Request] 버튼을 테이블 위로 이동
-    # 미리 에디터 키를 사용하여 체크된 항목을 확인해야 함 (fragment 내에서)
-    editor_key = f"deleted_editor_{account_id}"
+    editor_base_key = f"deleted_editor_{account_id}"
+    editor_nonce_key = f"{editor_base_key}_nonce"
+    selected_tickers_key = f"{editor_base_key}_selected_tickers"
+    editor_nonce = int(st.session_state.get(editor_nonce_key, 0) or 0)
+    editor_key = f"{editor_base_key}_{editor_nonce}"
 
-    # 세션 스테이트에서 에디터 상태 확인
-    editor_state = st.session_state.get(editor_key, {})
-    edited_rows = editor_state.get("edited_rows", {})
+    selected_tickers = {
+        str(ticker).strip().upper()
+        for ticker in st.session_state.get(selected_tickers_key, [])
+        if str(ticker or "").strip()
+    }
 
-    # 현재 체크된 인덱스들 파악
-    checked_indices = []
-    if edited_rows:
-        for idx_str, changes in edited_rows.items():
-            if changes.get("복구") is True:
-                checked_indices.append(int(idx_str))
-            # 체크 해제된 경우 (기존에 체크되어 있었다면)
-            # st.data_editor의 edited_rows는 '변경된' 것만 관리함.
-            # 하지만 복구 체크박스는 초기값이 False이므로 체크 시에만 들어옴.
+    # 전체 선택/해제 컨트롤
+    c_all_1, c_all_2, _ = st.columns([1, 1, 3])
+    with c_all_1:
+        if st.button("✅ 전체 선택", key=f"btn_deleted_select_all_{account_id}", width="stretch"):
+            st.session_state[selected_tickers_key] = [
+                str(t).strip().upper() for t in df_deleted["티커"].tolist() if str(t or "").strip()
+            ]
+            st.session_state[editor_nonce_key] = editor_nonce + 1
+            st.rerun()
+    with c_all_2:
+        if st.button("↩️ 전체 해제", key=f"btn_deleted_clear_all_{account_id}", width="stretch"):
+            st.session_state[selected_tickers_key] = []
+            st.session_state[editor_nonce_key] = editor_nonce + 1
+            st.rerun()
 
-    to_restore_df = df_deleted.iloc[checked_indices] if checked_indices else pd.DataFrame()
+    to_restore_df = (
+        df_deleted[df_deleted["티커"].astype(str).str.upper().isin(selected_tickers)].copy()
+        if selected_tickers
+        else pd.DataFrame()
+    )
 
     if not to_restore_df.empty:
         st.info(f"선택한 {len(to_restore_df)}개 종목에 대한 작업을 선택하세요.")
@@ -767,8 +762,11 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     else:
         st.caption("복구하거나 완전 삭제할 종목을 아래 테이블에서 선택하세요.")
 
-    st.data_editor(
-        styled_deleted,
+    df_deleted_editor = df_deleted.copy()
+    df_deleted_editor["복구"] = df_deleted_editor["티커"].astype(str).str.upper().isin(selected_tickers)
+
+    edited_deleted = st.data_editor(
+        df_deleted_editor,
         hide_index=True,
         width="stretch",
         column_config={
@@ -819,6 +817,20 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
         ],
         key=editor_key,
     )
+
+    if (
+        isinstance(edited_deleted, pd.DataFrame)
+        and "복구" in edited_deleted.columns
+        and "티커" in edited_deleted.columns
+    ):
+        selected_now = (
+            edited_deleted.loc[edited_deleted["복구"] == True, "티커"]  # noqa: E712
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .tolist()
+        )
+        st.session_state[selected_tickers_key] = selected_now
 
 
 def render_account_page(account_id: str, view_mode: str | None = None) -> None:
