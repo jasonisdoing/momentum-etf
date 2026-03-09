@@ -712,6 +712,8 @@ def _run_weight_backtest(
     total_days = len(union_index)
 
     # 시작일 즉시 목표 비중으로 초기 보유 구성
+    # 시작일에 가격/체결가를 만들 수 없는 종목은 최초 거래 가능일에 지연 편입한다.
+    deferred_initial_entries: set[str] = set()
     for ticker, weight in normalized_weights.items():
         if ticker not in metrics_by_ticker:
             continue
@@ -726,10 +728,14 @@ def _run_weight_backtest(
         qty = _floor_quantity(budget / buy_price, qty_precision) if buy_price > 0 else 0.0
         amount = qty * buy_price
         if qty <= 0 or amount > cash + 1e-9:
+            deferred_initial_entries.add(ticker)
             continue
         position_state[ticker]["shares"] = qty
         position_state[ticker]["avg_cost"] = buy_price
         cash -= amount
+    for ticker in normalized_weights.keys():
+        if ticker in metrics_by_ticker and position_state.get(ticker, {}).get("shares", 0.0) <= 0:
+            deferred_initial_entries.add(ticker)
 
     _log(f"총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
 
@@ -749,6 +755,41 @@ def _run_weight_backtest(
             if pd.notna(price_float):
                 last_prices[ticker] = price_float
             today_prices[ticker] = price_float
+
+        # 시작일 체결 실패 종목은 가격이 처음 유효해지는 거래일에 즉시 편입한다.
+        if deferred_initial_entries:
+            for ticker in list(deferred_initial_entries):
+                if ticker not in metrics_by_ticker:
+                    deferred_initial_entries.discard(ticker)
+                    continue
+                if float(position_state.get(ticker, {}).get("shares", 0.0) or 0.0) > 0:
+                    deferred_initial_entries.discard(ticker)
+                    continue
+                price = today_prices.get(ticker, float("nan"))
+                if pd.isna(price) or price <= 0:
+                    continue
+                trade_price = calculate_trade_price(
+                    i,
+                    total_days,
+                    metrics_by_ticker[ticker]["open_values"],
+                    metrics_by_ticker[ticker]["close_values"],
+                    country_code,
+                    is_buy=True,
+                )
+                if trade_price <= 0:
+                    continue
+                target_budget = float(initial_capital) * float(normalized_weights.get(ticker, 0.0))
+                if target_budget <= 0:
+                    deferred_initial_entries.discard(ticker)
+                    continue
+                qty = _floor_quantity(target_budget / trade_price, qty_precision)
+                amount = qty * trade_price
+                if qty <= 0 or amount > cash + 1e-9:
+                    continue
+                position_state[ticker]["shares"] = float(qty)
+                position_state[ticker]["avg_cost"] = float(trade_price)
+                cash -= amount
+                deferred_initial_entries.discard(ticker)
 
         total_holdings_value = 0.0
         for ticker, state in position_state.items():

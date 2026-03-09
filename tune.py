@@ -20,6 +20,11 @@ ACCOUNT_TUNING_CONFIG = {
         "OPTIMIZATION_METRIC": "CAGR",
         "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
+    "isa_account": {
+        "TUNE_MONTHS": 12,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+    },
     "pension_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
