@@ -16,8 +16,10 @@ from typing import Any
 import pandas as pd
 
 from config import BUCKET_MAPPING as BUCKET_NAMES
+from config import TRADING_DAYS_PER_MONTH
 from core.backtest.output.snapshot_rows import advance_snapshot_state, build_snapshot_rows, create_snapshot_build_state
 from core.backtest.price import calculate_trade_price
+from core.strategy.metrics import process_ticker_data
 
 DEFAULT_BUCKET = 1
 
@@ -75,6 +77,8 @@ def extract_recommendations_from_backtest(
     ticker_meta: dict[str, dict[str, Any]] | None = None,
     price_frames: dict[str, pd.DataFrame] | None = None,
     country_code: str | None = None,
+    ma_days: int = 252,
+    ma_type: str = "HMA",
 ) -> list[dict[str, Any]]:
     """백테스트 결과에서 마지막 날(오늘) 추천 데이터를 추출합니다."""
 
@@ -141,6 +145,7 @@ def extract_recommendations_from_backtest(
         shares = _safe_float(snapshot_row.get("shares"), 0)
         avg_cost = _safe_float(snapshot_row.get("avg_cost"))
         score = _safe_float(snapshot_row.get("score"))
+        rsi_score = _safe_float(snapshot_row.get("rsi_score"))
         decision = str(snapshot_row.get("display_decision", "")).upper() or "WAIT"
         note = str(snapshot_row.get("message", "") or "")
         holding_days = int(snapshot_row.get("holding_days", 0) or 0)
@@ -205,6 +210,41 @@ def extract_recommendations_from_backtest(
             # 추세 데이터 (최근 60일)
             trend_prices = historical_prices.iloc[-60:].tolist()
 
+        # [Display Metrics] 추천/랭킹 일관성을 위해 MA 점수, RSI, 지속일을 가격 원본에서 보강
+        source_frame = None
+        if price_frames:
+            source_frame = price_frames.get(ticker_key) or price_frames.get(ticker)
+        if isinstance(source_frame, pd.DataFrame) and not source_frame.empty:
+            source_upto_end = source_frame[source_frame.index <= end_date]
+            if not source_upto_end.empty:
+                try:
+                    metrics = process_ticker_data(
+                        ticker=ticker_key,
+                        df=source_upto_end,
+                        ma_days=max(1, int(ma_days)),
+                        ma_type=str(ma_type or "HMA").upper(),
+                        enable_data_sufficiency_check=False,
+                    )
+                except Exception:
+                    metrics = None
+                if metrics:
+                    score_series = metrics.get("ma_score")
+                    if isinstance(score_series, pd.Series) and not score_series.empty:
+                        computed_score = _safe_float(score_series.iloc[-1])
+                        if computed_score is not None:
+                            score = computed_score
+                    close_series = metrics.get("close")
+                    if isinstance(close_series, pd.Series) and not close_series.empty:
+                        computed_rsi = _calc_rsi(close_series, period=14)
+                        if computed_rsi is not None:
+                            rsi_score = computed_rsi
+                    streak_series = metrics.get("buy_signal_days")
+                    if isinstance(streak_series, pd.Series) and not streak_series.empty:
+                        computed_streak = int(_safe_float(streak_series.iloc[-1], 0) or 0)
+                        if holding_days > 0 and computed_streak > holding_days:
+                            computed_streak = holding_days
+                        streak = max(0, computed_streak)
+
         recommendations.append(
             {
                 "ticker": ticker_key,
@@ -217,6 +257,7 @@ def extract_recommendations_from_backtest(
                 "shares": shares,
                 "avg_cost": avg_cost,
                 "score": score,
+                "rsi_score": rsi_score,
                 "streak": streak,
                 "daily_pct": daily_pct,
                 "evaluation_pct": evaluation_pct,
@@ -305,6 +346,23 @@ def _safe_float(value: Any, default: float | None = None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _calc_rsi(close_series: pd.Series, period: int = 14) -> float:
+    if close_series is None or len(close_series) < period + 1:
+        return 0.0
+    try:
+        delta = close_series.diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+        avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+        rs = avg_gain / avg_loss.replace(0, pd.NA)
+        rsi = 100 - (100 / (1 + rs))
+        val = _safe_float(rsi.iloc[-1], 0.0) or 0.0
+        return max(0.0, min(100.0, float(val)))
+    except Exception:
+        return 0.0
 
 
 def _resolve_price_column(frame: pd.DataFrame, candidates: tuple[str, ...]) -> pd.Series | None:
@@ -567,6 +625,11 @@ def generate_recommendation_report(
     backtest_last_months = strategy_cfg.get("TUNE_MONTHS")
     if backtest_last_months is None:
         raise ValueError("strategy.TUNE_MONTHS 설정이 누락되었습니다.")
+    try:
+        ma_month = int(strategy_cfg.get("MA_MONTH", 12))
+    except Exception:
+        ma_month = 12
+    ma_type = str(strategy_cfg.get("MA_TYPE", "HMA") or "HMA").upper()
 
     try:
         months_back = int(backtest_last_months)
@@ -659,6 +722,8 @@ def generate_recommendation_report(
         ticker_meta=universe_meta,
         price_frames=dict(prefetched_map),
         country_code=country_code,
+        ma_days=max(1, int(ma_month) * TRADING_DAYS_PER_MONTH),
+        ma_type=ma_type,
     )
 
     # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
