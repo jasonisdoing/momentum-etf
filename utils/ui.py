@@ -12,6 +12,7 @@ from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 from utils.recommendations import recommendations_to_dataframe
 from utils.settings_loader import get_account_settings
+from utils.stock_list_io import get_etfs
 
 logger = get_app_logger()
 
@@ -88,6 +89,23 @@ def load_account_recommendations(
         return None, message, country_code
 
     rows = snapshot.get("recommendations") or []
+
+    # 추천 스냅샷 기준이 아닌 종목 관리의 비중(weight)을 표시용으로 주입
+    try:
+        account_stocks = get_etfs(account_norm)
+    except Exception:
+        account_stocks = []
+    weight_map = {
+        str(item.get("ticker") or "").strip().upper(): item.get("weight")
+        for item in account_stocks
+        if isinstance(item, dict) and str(item.get("ticker") or "").strip()
+    }
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        if ticker in weight_map:
+            row["weight"] = weight_map.get(ticker)
 
     # [KOR] 실시간 데이터 오버레이 (NAVER API)
     if country_code in ("kor", "kr"):
@@ -426,6 +444,13 @@ def render_recommendation_table(
         "환종": st.column_config.TextColumn("환종", width=60),
         "타입": st.column_config.TextColumn("타입", width=120),
         "버킷": st.column_config.TextColumn("버킷", width=85),
+        "비중(%)": st.column_config.ProgressColumn(
+            "비중(%)",
+            width="small",
+            format="%.0f",
+            min_value=0.0,
+            max_value=100.0,
+        ),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),
         "수량": st.column_config.NumberColumn("수량", width="small", format="%d"),

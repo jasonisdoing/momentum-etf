@@ -18,6 +18,7 @@ _BASE_DISPLAY_COLUMNS = [
     "버킷",
     "티커",
     "종목명",
+    "비중(%)",
     "상태",
     "일간(%)",
     "평가(%)",
@@ -155,11 +156,13 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         }
         bucket_id = row.get("bucket", 1)
         bucket_name = bucket_names.get(bucket_id, f"{bucket_id}. 기타")
+        weight_val = row.get("weight")
 
         display_rows.append(
             {
                 "#": rank if rank is not None else "-",
                 "버킷": bucket_name,
+                "비중(%)": weight_val,
                 "티커": ticker,
                 "종목명": name,
                 "상태": state,
