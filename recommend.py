@@ -213,7 +213,9 @@ def extract_recommendations_from_backtest(
         # [Display Metrics] 추천/랭킹 일관성을 위해 MA 점수, RSI, 지속일을 가격 원본에서 보강
         source_frame = None
         if price_frames:
-            source_frame = price_frames.get(ticker_key) or price_frames.get(ticker)
+            source_frame = price_frames.get(ticker_key)
+            if source_frame is None:
+                source_frame = price_frames.get(ticker)
         if isinstance(source_frame, pd.DataFrame) and not source_frame.empty:
             source_upto_end = source_frame[source_frame.index <= end_date]
             if not source_upto_end.empty:
