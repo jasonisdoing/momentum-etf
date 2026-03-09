@@ -1,7 +1,6 @@
 {
     "icon": "🇰🇷",
-    "name": "절세계좌",
-    "desc": "기본 운용 계좌 (국내 절세계좌)",
+    "name": "ISA 계좌",
     "country_code": "kor",
     "currency": "KRW",
     "initial_capital_krw": "40000000",
@@ -17,6 +16,5 @@
     "benchmark": {
         "ticker": "379810",
         "name": "KODEX 미국나스닥100"
-    },
-    "account": "pension_account"
+    }
 }
