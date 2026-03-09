@@ -131,7 +131,9 @@ def run_pool_ranking(pool_id: str, config: RankConfig) -> RankRunResult:
         end_date = pd.Timestamp.now().normalize()
 
     ma_days = int(config.months) * TRADING_DAYS_PER_MONTH
-    start_date = (end_date - pd.DateOffset(days=max(ma_days * 3, 360))).strftime("%Y-%m-%d")
+    # 12개월 수익률(252일, 240일 fallback) 계산을 위해 MA 설정과 별도로 충분한 히스토리를 확보한다.
+    lookback_days_for_returns = 540
+    start_date = (end_date - pd.DateOffset(days=max(ma_days * 3, lookback_days_for_returns))).strftime("%Y-%m-%d")
 
     prices_map, missing = prepare_price_data(
         tickers=tickers,
