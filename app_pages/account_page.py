@@ -74,6 +74,16 @@ def _resolve_target_country_code(target_id: str) -> str:
     return "kor"
 
 
+def _is_pool_target(target_id: str) -> bool:
+    target_norm = (target_id or "").strip().lower()
+    if not target_norm:
+        return False
+    try:
+        return target_norm in list_available_pools()
+    except Exception:
+        return False
+
+
 def _to_weight_pct(weight: Any) -> float | None:
     if weight is None:
         return None
@@ -131,7 +141,8 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
 @fragment
 def _render_stocks_meta_table(account_id: str) -> None:
     """종목관리 테이블 렌더링. 업데이트 중일 경우 readonly 모드로 전환하여 스피너 방지."""
-    use_weight = True
+    # 계좌는 비중 표시/입력을 사용하고, 종목풀은 비중 UI를 숨긴다.
+    use_weight = not _is_pool_target(account_id)
 
     # 세션 스테이트 키
     key_meta = f"updating_meta_{account_id}"
