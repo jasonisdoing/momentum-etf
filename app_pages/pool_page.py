@@ -12,6 +12,11 @@ from utils.recommendations import recommendations_to_dataframe
 from utils.ui import format_relative_time, render_recommendation_table
 
 try:
+    from utils.data_loader import fetch_naver_etf_inav_snapshot
+except Exception:  # pragma: no cover
+    fetch_naver_etf_inav_snapshot = None  # type: ignore
+
+try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
     ZoneInfo = None  # type: ignore
@@ -86,7 +91,36 @@ def _render_ranking_view(pool_id: str) -> None:
         st.info("표시할 랭킹 데이터가 없습니다.")
         return
 
-    df = recommendations_to_dataframe(country or "kor", rows)
+    country_norm = (country or "").strip().lower()
+    rows_for_view = [dict(row) for row in rows]
+    price_source = "Local Cache"
+
+    # 추천 화면과 동일하게 한국 종목은 렌더링 시점에 Naver 실시간값으로 오버레이한다.
+    if country_norm in ("kor", "kr") and fetch_naver_etf_inav_snapshot is not None:
+        try:
+            tickers = [r.get("ticker") for r in rows_for_view if r.get("ticker")]
+            realtime_data = fetch_naver_etf_inav_snapshot(tickers)
+            if realtime_data:
+                for row in rows_for_view:
+                    ticker = str(row.get("ticker") or "").strip().upper()
+                    rt = realtime_data.get(ticker)
+                    if not rt:
+                        continue
+                    if rt.get("nowVal") is not None:
+                        row["price"] = float(rt["nowVal"])
+                    if rt.get("changeRate") is not None:
+                        row["daily_pct"] = float(rt["changeRate"])
+                    if rt.get("nav") is not None:
+                        row["nav_price"] = float(rt["nav"])
+                    if rt.get("deviation") is not None:
+                        row["price_deviation"] = float(rt["deviation"])
+                    if rt.get("itemname"):
+                        row["name"] = str(rt["itemname"])
+                price_source = "Naver"
+        except Exception:
+            pass
+
+    df = recommendations_to_dataframe(country or "kor", rows_for_view)
 
     update_caption = None
     if updated_at:
@@ -95,12 +129,13 @@ def _render_ranking_view(pool_id: str) -> None:
         if updated_by:
             updated_display = f"{updated_display}, {updated_by}"
 
-        country_norm = (country or "").strip().lower()
         if country_norm in ("kor", "kr"):
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             now_rel = format_relative_time(now_str)
             now_display = f"{now_str}{now_rel}" if now_rel else now_str
-            update_caption = f"랭킹 데이터 업데이트: {updated_display}  \n가격 데이터 업데이트: {now_display}, Naver"
+            update_caption = (
+                f"랭킹 데이터 업데이트: {updated_display}  \n가격 데이터 업데이트: {now_display}, {price_source}"
+            )
         else:
             update_caption = f"랭킹 데이터 업데이트: {updated_display}"
 
