@@ -474,7 +474,7 @@ def render_recommendation_table(
         ),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),
-        "수량": st.column_config.NumberColumn("수량", width="small", format="%d"),
+        "수량": st.column_config.NumberColumn("수량", width="small", format="localized"),
         "평균 매입가": st.column_config.NumberColumn("평균 매입가", width="small", format="%.2f"),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),

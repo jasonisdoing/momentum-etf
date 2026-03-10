@@ -733,7 +733,9 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             for old_col, new_col in krw_column_renames.items():
                 if old_col in combined_df.columns:
                     combined_df[old_col] = (
-                        pd.to_numeric(combined_df[old_col], errors="coerce").fillna(0.0).apply(format_korean_currency)
+                        pd.to_numeric(combined_df[old_col], errors="coerce")
+                        .fillna(0.0)
+                        .apply(lambda value: format_price(value, "KRW"))
                     )
             combined_df = combined_df.rename(columns=krw_column_renames)
 
