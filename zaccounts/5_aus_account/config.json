@@ -7,9 +7,9 @@
     "initial_capital_krw": "100000000",
     "show_hold": true,
     "strategy": {
-        "TUNE_DATE": "2026-03-09 18:40",
-        "TUNE_CAGR": 29.369123,
-        "TUNE_MDD": -13.362294,
+        "TUNE_DATE": "2026-03-11 08:47",
+        "TUNE_CAGR": 35.606154,
+        "TUNE_MDD": -11.723952,
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
         "REBALANCE_MODE": "MONTHLY"
