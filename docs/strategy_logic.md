@@ -13,6 +13,11 @@
 
 종목풀(`zpools/*`)은 이동평균 기반 점수로 종목 상대 순위를 계산합니다.
 
+현재 운영 종목풀:
+* `kor`: 국내상장 국내 ETF
+* `us`: 국내상장 해외 ETF
+* `aus`: 호주 ETF
+
 ### 핵심 파라미터
 
 * `MA_MONTH`: 이동평균 기간(개월)
@@ -49,4 +54,4 @@
 * 계좌 튜닝: `REBALANCE_MODE` 중심으로 탐색
 * 종목풀 랭킹 파라미터(`months`, `ma_type`)는 `zpools/*/config.json`에서 관리
 * 최적 결과는 계좌 `config.json`의 `strategy`에 반영됩니다.
-  * 공통 파라미터: `strategy.COMMON`
+  * 예: `strategy.REBALANCE_MODE`, `strategy.TUNE_MONTHS`

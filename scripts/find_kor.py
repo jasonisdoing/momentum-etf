@@ -37,7 +37,7 @@ MIN_CHANGE_PCT = 3.0
 # EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN", "코리아", "한국", "200", "삼성", "코스닥", "코스피"]
 EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "ETN"]
 # 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
-# INCLUDE_KEYWORDS = ["글로벌", "미국"]
+# INCLUDE_KEYWORDS = ["글로벌"]
 INCLUDE_KEYWORDS = []
 # 최소 거래량 (0이면 필터링 안 함)
 # MIN_VOLUME = 100000

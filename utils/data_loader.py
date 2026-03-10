@@ -811,7 +811,7 @@ def _fetch_ohlcv_core(
 
     country_code = (country or "").strip().lower()
 
-    # 인덱스(^) 또는 미국/호주 주식의 경우 yfinance 사용
+    # 인덱스(^) 또는 해외 주식의 경우 yfinance 사용
     if ticker.startswith("^") or country_code in ("us", "au"):
         if existing_df is not None and not existing_df.empty:
             fallback = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
@@ -1563,10 +1563,10 @@ _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT: pd.Timestamp | None = None
 
 
 def fetch_us_yfinance_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """yfinance를 사용하여 미국 ETF의 실시간(또는 최근 장중) 가격 정보를 조회합니다."""
+    """yfinance를 사용하여 해외 ETF의 실시간(또는 최근 장중) 가격 정보를 조회합니다."""
 
     if not yf:
-        logger.debug("yfinance 라이브러리가 없어 미국 파이낸스 조회를 건너뜁니다.")
+        logger.debug("yfinance 라이브러리가 없어 해외 파이낸스 조회를 건너뜁니다.")
         return {}
 
     normalized_tickers = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
@@ -1633,7 +1633,7 @@ def fetch_us_yfinance_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
                 logger.debug(f"[US] {tk} 실시간 데이터 처리 중 오류: {tk_err}")
 
     except Exception as exc:
-        logger.warning(f"미국 ETF 실시간 조회 실패: {exc}")
+        logger.warning(f"해외 ETF 실시간 조회 실패: {exc}")
 
     return snapshot
 

@@ -13,8 +13,7 @@
 **1. 종목풀 랭킹 생성**
 종목풀에서 모멘텀 랭킹을 생성합니다.
 ```bash
-python rank.py kor_kr
-python rank.py kor_us
+python rank.py kor
 python rank.py us
 python rank.py aus
 ```
@@ -22,23 +21,27 @@ python rank.py aus
 **2. 튜닝 (계좌 리밸런싱 파라미터 탐색)**
 최적의 리밸런싱 파라미터를 찾기 위해 튜닝을 수행합니다. 완료 후 계좌 설정이 **자동으로 업데이트**됩니다.
 ```bash
-python tune.py kor_save_account  # kor_save_account 계정 튜닝
-python tune.py us_account        # us_account 계정 튜닝
+python tune.py kor_account
+python tune.py us_account
 ```
 
 **3. 백테스트 실행**
 과거 데이터를 바탕으로 전략의 성과를 시뮬레이션합니다.
 ```bash
-python backtest.py kor_save_account
+python backtest.py kor_account
 python backtest.py us_account
 ```
 
 **4. 추천 실행 (매일 아침)**
 백테스트 엔진을 기반으로 현재 시점의 매매 추천 목록을 생성하고 Slack으로 알림을 보냅니다.
 ```bash
-python recommend.py kor_save_account
+python recommend.py kor_account
 python recommend.py us_account
 ```
+
+현재 운영 식별자:
+* 종목풀: `kor`, `us`, `aus`
+* 계좌: `kor_account`, `isa_account`, `pension_account`, `us_account`, `aus_account`
 
 ## 2. 설정 가이드
 
@@ -55,9 +58,7 @@ python recommend.py us_account
   "strategy": {
     "TUNE_MONTHS": 12,
     "OPTIMIZATION_METRIC": "CAGR",
-    "COMMON": {
-      "REBALANCE_MODE": "QUARTERLY"
-    }
+    "REBALANCE_MODE": "QUARTERLY"
   }
 }
 ```

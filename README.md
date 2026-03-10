@@ -66,29 +66,32 @@ pip install -r requirements.txt
 
 **1. 종목풀 랭킹 생성**
 ```bash
-python rank.py kor_kr
-python rank.py kor_us
+python rank.py kor
 python rank.py us
 python rank.py aus
 ```
 
 **2. 튜닝 (계좌 리밸런싱 파라미터 탐색 및 자동 적용)**
 ```bash
-python tune.py kor_save_account  # 국내 해외 ETF 계좌
-python tune.py us_account        # 미국 계좌
+python tune.py kor_account
+python tune.py us_account
 ```
 
 **3. 백테스트 (성과 검증)**
 ```bash
-python backtest.py kor_save_account
+python backtest.py kor_account
 python backtest.py us_account
 ```
 
 **4. 추천 (매매 신호 생성)**
 ```bash
-python recommend.py kor_save_account
+python recommend.py kor_account
 python recommend.py us_account
 ```
+
+현재 기본 식별자는 다음과 같습니다.
+* 종목풀: `kor`, `us`, `aus`
+* 계좌: `kor_account`, `isa_account`, `pension_account`, `us_account`, `aus_account`
 
 ## ⚠️ 면책 조항 (Disclaimer)
 
