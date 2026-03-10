@@ -248,6 +248,8 @@ def _render_cash_tab(account_map):
     with st.form("cash_manager_bulk_form"):
         input_values = {}
         for acc_name, acc_id in account_map.items():
+            # 계좌코드가 바뀌면 여기 조건도 함께 수정해야 International Shares 입력 UI가 유지됩니다.
+            is_aus_account = acc_id == "aus_account"
             st.markdown(f"#### 🏦 {acc_name}")
             m_data = load_portfolio_master(acc_id)
             current_principal = m_data.get("base_principal", m_data.get("total_principal", 0.0)) if m_data else 0.0
@@ -255,7 +257,7 @@ def _render_cash_tab(account_map):
             current_holdings = m_data.get("holdings", []) if m_data else []
 
             # Additional logic for 'aus' account
-            if acc_id == "aus":
+            if is_aus_account:
                 current_intl_val = m_data.get("intl_shares_value", 0.0) if m_data else 0.0
                 current_intl_chg = m_data.get("intl_shares_change", 0.0) if m_data else 0.0
 
@@ -283,14 +285,14 @@ def _render_cash_tab(account_map):
             c1, c2 = st.columns(2)
             with c1:
                 new_principal = st.number_input(
-                    f"기타 투자 원금 ({acc_name})" if acc_id == "aus" else f"투자 원금 ({acc_name})",
+                    f"기타 투자 원금 ({acc_name})" if is_aus_account else f"투자 원금 ({acc_name})",
                     value=int(current_principal),
                     min_value=0,
                     key=f"prin_{acc_id}",
                 )
             with c2:
                 new_cash = st.number_input(
-                    f"기타 보유 현금 ({acc_name})" if acc_id == "aus" else f"보유 현금 ({acc_name})",
+                    f"기타 보유 현금 ({acc_name})" if is_aus_account else f"보유 현금 ({acc_name})",
                     value=int(current_cash),
                     min_value=0,
                     key=f"cash_{acc_id}",
@@ -301,7 +303,7 @@ def _render_cash_tab(account_map):
                 "principal": new_principal,
                 "cash": new_cash,
             }
-            if acc_id == "aus":
+            if is_aus_account:
                 input_values[acc_id]["intl_shares_value"] = new_intl_val
                 input_values[acc_id]["intl_shares_change"] = new_intl_chg
 
