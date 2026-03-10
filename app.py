@@ -756,6 +756,13 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 "매입금액",
                 "평가금액",
                 "평가손익",
+                "1주(%)",
+                "2주(%)",
+                "1달(%)",
+                "3달(%)",
+                "6달(%)",
+                "12달(%)",
+                "고점대비",
                 "추세(3달)",
             ]
             # Warnings moved to the top of the tabs
