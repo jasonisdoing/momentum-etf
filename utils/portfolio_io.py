@@ -6,6 +6,7 @@ from bson import ObjectId
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
+from utils.settings_loader import get_account_settings
 
 logger = get_app_logger()
 
@@ -307,6 +308,18 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
             # Flatten for backward compatibility in functions that expect account-level dict
             base_principal = acc.get("total_principal", 0.0)
             base_cash = acc.get("cash_balance", 0.0)
+            cash_balance_native = acc.get("cash_balance_native")
+            cash_currency = str(acc.get("cash_currency") or "").strip().upper()
+
+            try:
+                settings = get_account_settings(account_id)
+                account_currency = str(settings.get("currency") or "").strip().upper()
+            except Exception:
+                account_currency = ""
+            cash_currency = cash_currency or account_currency
+
+            if cash_balance_native is None and cash_currency == "KRW":
+                cash_balance_native = base_cash
 
             intl_val = acc.get("intl_shares_value", 0.0)
             intl_change = acc.get("intl_shares_change", 0.0)
@@ -315,6 +328,8 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
                 "account_id": acc["account_id"],
                 "total_principal": base_principal,
                 "cash_balance": base_cash,
+                "cash_balance_native": cash_balance_native,
+                "cash_currency": cash_currency,
                 "base_principal": base_principal,
                 "base_cash": base_cash,
                 "intl_shares_value": intl_val,
@@ -330,6 +345,8 @@ def save_portfolio_master(
     holdings: list[dict[str, Any]],
     total_principal: float | None = None,
     cash_balance: float | None = None,
+    cash_balance_native: float | None = None,
+    cash_currency: str | None = None,
     intl_shares_value: float | None = None,
     intl_shares_change: float | None = None,
 ) -> bool:
@@ -352,6 +369,10 @@ def save_portfolio_master(
                     acc["total_principal"] = float(total_principal)
                 if cash_balance is not None:
                     acc["cash_balance"] = float(cash_balance)
+                if cash_balance_native is not None:
+                    acc["cash_balance_native"] = float(cash_balance_native)
+                if cash_currency is not None:
+                    acc["cash_currency"] = str(cash_currency).strip().upper()
                 if intl_shares_value is not None:
                     acc["intl_shares_value"] = float(intl_shares_value)
                 if intl_shares_change is not None:
@@ -382,6 +403,10 @@ def save_portfolio_master(
                 "holdings": holdings,
                 "updated_at": datetime.datetime.now(),
             }
+            if cash_balance_native is not None:
+                new_acc["cash_balance_native"] = float(cash_balance_native)
+            if cash_currency is not None:
+                new_acc["cash_currency"] = str(cash_currency).strip().upper()
             if intl_shares_value is not None:
                 new_acc["intl_shares_value"] = float(intl_shares_value)
             if intl_shares_change is not None:
