@@ -295,7 +295,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
             options=BUCKET_OPTIONS,
             required=True,
         ),
-        "티커": st.column_config.TextColumn("티커", width=50),
+        "티커": st.column_config.TextColumn("티커", width=55),
         "종목명": st.column_config.TextColumn("종목명", width=300),
         "비중(%)": st.column_config.NumberColumn("비중(%)", width="small", format="%.0f"),
         "추가일자": st.column_config.TextColumn("추가일자", width=90),
