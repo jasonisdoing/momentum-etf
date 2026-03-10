@@ -444,6 +444,7 @@ def render_recommendation_table(
         "환종": st.column_config.TextColumn("환종", width=60),
         "타입": st.column_config.TextColumn("타입", width=120),
         "버킷": st.column_config.TextColumn("버킷", width=85),
+        "비중": st.column_config.NumberColumn("비중", width="small", format="%.1f%%"),
         "비중(%)": st.column_config.ProgressColumn(
             "비중(%)",
             width="small",
