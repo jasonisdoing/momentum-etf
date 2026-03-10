@@ -2,6 +2,7 @@
     "icon": "🇦🇺",
     "name": "호주연금",
     "country_code": "au",
+    "pool": "aus",
     "currency": "aud",
     "initial_capital_krw": "100000000",
     "show_hold": true,

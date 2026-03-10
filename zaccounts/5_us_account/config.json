@@ -2,6 +2,7 @@
     "icon": "🇺🇸",
     "name": "미국직투",
     "country_code": "us",
+    "pool": "us",
     "currency": "USD",
     "initial_capital_krw": "100000000",
     "show_hold": true,

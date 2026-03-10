@@ -2,6 +2,7 @@
     "icon": "🇺🇸",
     "name": "해외 저축계좌",
     "country_code": "kor",
+    "pool": "kor_us",
     "currency": "KRW",
     "initial_capital_krw": "40000000",
     "show_hold": true,
