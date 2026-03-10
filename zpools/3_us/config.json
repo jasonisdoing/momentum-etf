@@ -3,7 +3,7 @@
   "desc": "미국 ETF 종목풀",
   "rank": {
     "country": "us",
-    "months": 6,
+    "months": 12,
     "ma_type": "HMA"
   }
 }
