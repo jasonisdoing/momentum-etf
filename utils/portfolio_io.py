@@ -63,11 +63,11 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         df_holdings["보유일"] = "-"
 
     # Fetch prices from price cache and exchange rates
-    from utils.cache_utils import load_cached_frames_bulk
+    from utils.cache_utils import load_cached_frames_bulk_with_fallback
     from utils.data_loader import get_exchange_rate_series
 
     tickers = df_holdings["ticker"].tolist()
-    cached_frames = load_cached_frames_bulk(account_id, tickers)
+    cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
 
     import streamlit as st
 

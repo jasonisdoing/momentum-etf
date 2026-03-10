@@ -58,7 +58,11 @@ except ImportError:
 
 # from utils.notification import send_verbose_log_to_slack
 
-from utils.cache_utils import load_cached_frame, load_cached_frames_bulk, save_cached_frame
+from utils.cache_utils import (
+    load_cached_frame_with_fallback,
+    load_cached_frames_bulk_with_fallback,
+    save_cached_frame,
+)
 from utils.logger import get_app_logger
 from utils.stock_list_io import get_etfs_by_country, get_listing_date, set_listing_date
 
@@ -621,7 +625,7 @@ def _fetch_ohlcv_with_cache(
         cached_df = None
         missing_ranges.append((request_start_dt, end_dt))
     else:
-        cached_df = load_cached_frame(cache_key, ticker)
+        cached_df = load_cached_frame_with_fallback(cache_key, ticker)
         # cache_seed_dt는 이미 위에서 가져왔으므로 중복 제거
         if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
             if request_start_dt > cache_seed_dt:
@@ -1051,7 +1055,7 @@ def fetch_ohlcv_for_tickers(
             except Exception as e:
                 logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
 
-    cached_frames = load_cached_frames_bulk(account_id or country, tickers)
+    cached_frames = load_cached_frames_bulk_with_fallback(account_id or country, tickers)
     missing: list[str] = []
 
     for raw_ticker in tickers:

@@ -22,6 +22,7 @@ from utils.env import load_env_if_present
 from utils.identifier_guard import ensure_account_pool_id_separation
 from utils.logger import get_app_logger
 from utils.pool_registry import get_pool_country_code, list_available_pools
+from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import get_account_settings, list_available_accounts, load_common_settings
 from utils.stock_list_io import get_all_etfs_including_deleted
 
@@ -68,17 +69,22 @@ def refresh_cache_for_target(
             removed,
         )
 
-    # 종목 리스트 로드 (계정 전용)
+    # 종목 리스트 로드
     try:
         all_etfs_from_file = get_all_etfs_including_deleted(target_norm)
     except Exception:
         all_etfs_from_file = []
 
-    if not all_etfs_from_file:
-        logger.warning("[%s] 갱신할 종목이 없습니다 (종목 파일 비어있음/없음).", target_norm.upper())
-        return
-
     all_map = {str(item.get("ticker") or "").strip().upper(): item for item in all_etfs_from_file if item.get("ticker")}
+
+    # 계좌 실행 시 portfolio_master 보유 종목도 함께 반영한다.
+    if target_norm in list_available_accounts():
+        holdings = _collect_portfolio_master_holdings(target_norm)
+        for item in holdings:
+            ticker = str(item.get("ticker") or "").strip().upper()
+            if not ticker or ticker in all_map:
+                continue
+            all_map[ticker] = item
 
     # 벤치마크 추가
     benchmark_tickers = _collect_benchmark_tickers(target_norm)
@@ -91,6 +97,10 @@ def refresh_cache_for_target(
             "name": norm,
             "type": "etf",
         }
+
+    if not all_map:
+        logger.warning("[%s] 갱신할 종목이 없습니다 (stock_meta/portfolio_master 모두 비어있음).", target_norm.upper())
+        return
 
     target_items = list(all_map.values())
 
@@ -153,6 +163,33 @@ def _collect_benchmark_tickers(target_id: str) -> list[str]:
         pass
 
     return sorted(tickers)
+
+
+def _collect_portfolio_master_holdings(target_id: str) -> list[dict[str, str]]:
+    """portfolio_master의 현재 보유 종목을 캐시 갱신 대상에 추가한다."""
+    snapshot = load_portfolio_master(target_id)
+    if not snapshot:
+        return []
+
+    holdings = snapshot.get("holdings")
+    if not isinstance(holdings, list):
+        return []
+
+    results: list[dict[str, str]] = []
+    for item in holdings:
+        if not isinstance(item, dict):
+            continue
+        ticker = str(item.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        results.append(
+            {
+                "ticker": ticker,
+                "name": str(item.get("name") or ticker).strip() or ticker,
+                "type": "etf",
+            }
+        )
+    return results
 
 
 def _build_parser() -> argparse.ArgumentParser:
