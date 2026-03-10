@@ -3,7 +3,7 @@
   "desc": "국내상장 해외 ETF 종목풀",
   "rank": {
     "country": "kor",
-    "months": 3,
+    "months": 6,
     "ma_type": "HMA"
   }
 }
