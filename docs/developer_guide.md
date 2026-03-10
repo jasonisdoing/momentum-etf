@@ -52,11 +52,9 @@
 ```json
 {
   "strategy": {
-    "COMMON": {
-      "BACKTEST_LAST_MONTHS": 12,
-      "REBALANCE_MODE": "...",
-      "OPTIMIZATION_METRIC": "CAGR|SHARPE|SDR"
-    }
+    "TUNE_MONTHS": 12,
+    "REBALANCE_MODE": "...",
+    "OPTIMIZATION_METRIC": "CAGR|SHARPE|SDR"
   }
 }
 ```
@@ -77,7 +75,7 @@
 
 검증 원칙(현재 운영):
 
-* 계좌: `COMMON.REBALANCE_MODE` 및 종목 `weight` 필수
+* 계좌: `strategy.REBALANCE_MODE` 및 종목 `weight` 필수
 * 종목풀: `rank.country/months/ma_type` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
 

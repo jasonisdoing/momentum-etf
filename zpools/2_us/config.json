@@ -1,0 +1,9 @@
+{
+  "name": "해외 ETF",
+  "desc": "해외 ETF 종목풀",
+  "rank": {
+    "country": "kor",
+    "months": 12,
+    "ma_type": "HMA"
+  }
+}
