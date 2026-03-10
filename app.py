@@ -695,6 +695,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
 
         elif current_subtab == "📋 상세":
             # 정렬: 계좌순(이름에 order가 포함됨) -> 버킷순
+            combined_df = combined_df.copy()
             if "bucket" in combined_df.columns:
                 combined_df = combined_df.sort_values(["계좌", "bucket"], ascending=[True, True])
             else:
@@ -704,6 +705,13 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             if "수익률(%)" in combined_df.columns:
                 combined_df = combined_df.rename(columns={"수익률(%)": "평가수익률(%)"})
 
+            if total_assets > 0 and "평가금액(KRW)" in combined_df.columns:
+                combined_df["비중"] = (
+                    pd.to_numeric(combined_df["평가금액(KRW)"], errors="coerce").fillna(0.0) / total_assets
+                ) * 100.0
+            else:
+                combined_df["비중"] = 0.0
+
             # render_recommendation_table 호출 (컬럼 순서 제어를 위해 visible_columns 명시)
             visible_cols = [
                 "계좌",
@@ -711,6 +719,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 "버킷",
                 "티커",
                 "종목명",
+                "비중",
                 "일간(%)",
                 "보유일",
                 "평가수익률(%)",
@@ -725,6 +734,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             # Warnings moved to the top of the tabs
 
             render_recommendation_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols, height=900)
+            st.caption("비중은 총자산에서 차지하는 비중입니다.")
 
     return _render_home_page
 
