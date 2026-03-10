@@ -2,13 +2,14 @@
 리포트 및 로그 출력을 위한 포맷팅 유틸리티 함수 모음.
 """
 
+import numbers
 import re
 from unicodedata import east_asian_width, normalize
 
 
 def format_kr_money(value: float) -> str:
     """금액을 '억', '만' 단위를 포함한 한글 문자열로 포맷합니다."""
-    if value is None or not isinstance(value, (int, float)):
+    if value is None or not isinstance(value, numbers.Real):
         return "-"
     val_int = int(round(value))
     if val_int == 0:
@@ -41,7 +42,7 @@ def format_kr_money(value: float) -> str:
 
 def format_money(value: float, country: str) -> str:
     """금액을 통화/국가 코드에 맞는 형식으로 포맷합니다."""
-    if value is None or not isinstance(value, (int, float)):
+    if value is None or not isinstance(value, numbers.Real):
         return "-"
 
     code = str(country or "").strip().lower()
