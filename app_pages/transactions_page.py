@@ -489,9 +489,14 @@ def edit_stock_modal(row_data):
 
 def build_transaction_page(page_cls, active_tab: str | None = None):
     title = active_tab if active_tab else "계좌 관리"
-    # URL path에서 슬래시(/) 제거하여 Streamlit nested path 에러 방지
-    clean_tab = active_tab.split()[-1].replace("/", "_") if active_tab else "main"
-    url_path = f"transactions_{clean_tab}"
+    slug_map = {
+        None: "transactions",
+        "📊 잔고 CRUD": "transactions_holdings",
+        "📥 벌크 입력": "transactions_import",
+        "💵 원금/현금": "transactions_cash",
+        "📸 스냅샷": "transactions_snapshot",
+    }
+    url_path = slug_map.get(active_tab, "transactions")
     return page_cls(
         lambda: render_transaction_management_page(active_tab),
         title=title,
