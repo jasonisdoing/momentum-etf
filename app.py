@@ -14,6 +14,7 @@ from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
 )
+from utils.formatters import format_price
 from utils.identifier_guard import ensure_account_pool_id_separation
 from utils.pool_registry import load_pool_configs
 from utils.report import format_kr_money
@@ -712,6 +713,30 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             else:
                 combined_df["비중"] = 0.0
 
+            if "환종" in combined_df.columns:
+                if "평균 매입가" in combined_df.columns:
+                    combined_df["평균 매입가"] = combined_df.apply(
+                        lambda row: format_price(row.get("평균 매입가"), row.get("환종")),
+                        axis=1,
+                    )
+                if "현재가" in combined_df.columns:
+                    combined_df["현재가"] = combined_df.apply(
+                        lambda row: format_price(row.get("현재가"), row.get("환종")),
+                        axis=1,
+                    )
+
+            krw_column_renames = {
+                "매입금액(KRW)": "매입금액",
+                "평가금액(KRW)": "평가금액",
+                "평가손익(KRW)": "평가손익",
+            }
+            for old_col, new_col in krw_column_renames.items():
+                if old_col in combined_df.columns:
+                    combined_df[old_col] = (
+                        pd.to_numeric(combined_df[old_col], errors="coerce").fillna(0.0).apply(format_korean_currency)
+                    )
+            combined_df = combined_df.rename(columns=krw_column_renames)
+
             # render_recommendation_table 호출 (컬럼 순서 제어를 위해 visible_columns 명시)
             visible_cols = [
                 "계좌",
@@ -726,9 +751,9 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 "수량",
                 "평균 매입가",
                 "현재가",
-                "매입금액(KRW)",
-                "평가금액(KRW)",
-                "평가손익(KRW)",
+                "매입금액",
+                "평가금액",
+                "평가손익",
                 "추세(3달)",
             ]
             # Warnings moved to the top of the tabs

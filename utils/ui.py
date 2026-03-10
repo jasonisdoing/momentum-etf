@@ -419,6 +419,20 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
 
         styled = styled.map(_style_account_col, subset=["계좌"])
 
+    right_align_columns = [
+        "평균 매입가",
+        "현재가",
+        "매입금액",
+        "평가금액",
+        "평가손익",
+        "매입금액(KRW)",
+        "평가금액(KRW)",
+        "평가손익(KRW)",
+    ]
+    existing_right_align_columns = [col for col in right_align_columns if col in df.columns]
+    if existing_right_align_columns:
+        styled = styled.map(lambda _: "text-align: right;", subset=existing_right_align_columns)
+
     return styled
 
 
@@ -444,7 +458,13 @@ def render_recommendation_table(
         "환종": st.column_config.TextColumn("환종", width=60),
         "타입": st.column_config.TextColumn("타입", width=120),
         "버킷": st.column_config.TextColumn("버킷", width=85),
-        "비중": st.column_config.NumberColumn("비중", width="small", format="%.1f%%"),
+        "비중": st.column_config.ProgressColumn(
+            "비중",
+            width="small",
+            format="%.1f%%",
+            min_value=0.0,
+            max_value=100.0,
+        ),
         "비중(%)": st.column_config.ProgressColumn(
             "비중(%)",
             width="small",
@@ -460,8 +480,11 @@ def render_recommendation_table(
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
         "평가수익률(%)": st.column_config.NumberColumn("평가수익률(%)", width="small", format="%.2f%%"),
         "매입금액(KRW)": st.column_config.NumberColumn("매입금액(KRW)", width="small", format="localized"),
+        "매입금액": st.column_config.TextColumn("매입금액", width="small"),
         "평가금액(KRW)": st.column_config.NumberColumn("평가금액(KRW)", width="small", format="localized"),
+        "평가금액": st.column_config.TextColumn("평가금액", width="small"),
         "평가손익(KRW)": st.column_config.NumberColumn("평가손익(KRW)", width="small", format="localized"),
+        "평가손익": st.column_config.TextColumn("평가손익", width="small"),
         "수익률(%)": st.column_config.NumberColumn("수익률(%)", width="small", format="%.2f%%"),
         price_label: st.column_config.NumberColumn(price_label, width="small"),
         "상태": st.column_config.TextColumn("상태", width=80),
@@ -481,6 +504,11 @@ def render_recommendation_table(
     }
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")
+
+    if "평균 매입가" in df.columns and not pd.api.types.is_numeric_dtype(df["평균 매입가"]):
+        column_config_map["평균 매입가"] = st.column_config.TextColumn("평균 매입가", width="small")
+    if price_label in df.columns and not pd.api.types.is_numeric_dtype(df[price_label]):
+        column_config_map[price_label] = st.column_config.TextColumn(price_label, width="small")
 
     # [Segmentation] 1~5 버킷 순회
     # 버킷 매핑 (app_pages.account_page와 동일하게 유지하거나, 여기서 정의)
