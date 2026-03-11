@@ -90,7 +90,7 @@ def _get_collection(account_id: str):
 def get_cache_lookup_keys(account_id: str) -> list[str]:
     """캐시 조회 시도 순서를 반환한다.
 
-    계좌에 pool이 연결되어 있으면 `[account_id, pool_id]` 순서로 조회한다.
+    계좌에 pool이 연결되어 있으면 `[account_id, *pool_ids]` 순서로 조회한다.
     """
     token = (account_id or "").strip().lower()
     if not token:
@@ -99,12 +99,11 @@ def get_cache_lookup_keys(account_id: str) -> list[str]:
     lookup_keys = [token]
 
     try:
-        from utils.settings_loader import get_account_settings
+        from utils.settings_loader import get_account_pool_ids
 
-        settings = get_account_settings(token)
-        pool_id = str(settings.get("pool") or "").strip().lower()
-        if pool_id and pool_id not in lookup_keys:
-            lookup_keys.append(pool_id)
+        for pool_id in get_account_pool_ids(token):
+            if pool_id not in lookup_keys:
+                lookup_keys.append(pool_id)
     except Exception:
         pass
 

@@ -74,24 +74,24 @@ python rank.py aus
 **2. 튜닝 (계좌 리밸런싱 파라미터 탐색 및 자동 적용)**
 ```bash
 python tune.py kor_account
-python tune.py us_account
+python tune.py core_account
 ```
 
 **3. 백테스트 (성과 검증)**
 ```bash
 python backtest.py kor_account
-python backtest.py us_account
+python backtest.py core_account
 ```
 
 **4. 추천 (매매 신호 생성)**
 ```bash
 python recommend.py kor_account
-python recommend.py us_account
+python recommend.py core_account
 ```
 
 현재 기본 식별자는 다음과 같습니다.
 * 종목풀: `kor`, `us`, `aus`
-* 계좌: `kor_account`, `isa_account`, `pension_account`, `us_account`, `aus_account`
+* 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
 
 ## ⚠️ 면책 조항 (Disclaimer)
 

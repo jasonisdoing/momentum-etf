@@ -35,7 +35,7 @@ ACCOUNT_TUNING_CONFIG = {
         "OPTIMIZATION_METRIC": "CAGR",
         "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
     },
-    "us_account": {
+    "core_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
         "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
