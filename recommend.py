@@ -82,6 +82,22 @@ def extract_recommendations_from_backtest(
 ) -> list[dict[str, Any]]:
     """백테스트 결과에서 마지막 날(오늘) 추천 데이터를 추출합니다."""
 
+    def _compute_latest_daily_pct(frame: pd.DataFrame, target_date: pd.Timestamp) -> float | None:
+        """가격 프레임의 마지막 두 종가를 기준으로 일간 수익률을 재계산한다."""
+        if frame.empty:
+            return None
+        frame_upto_end = frame[frame.index <= target_date]
+        if len(frame_upto_end) < 2:
+            return None
+        close_series = pd.to_numeric(frame_upto_end.get("Close"), errors="coerce").dropna()
+        if len(close_series) < 2:
+            return None
+        current_close = _safe_float(close_series.iloc[-1])
+        prev_close = _safe_float(close_series.iloc[-2])
+        if current_close is None or prev_close is None or prev_close <= 0:
+            return None
+        return (current_close / prev_close - 1.0) * 100.0
+
     ticker_timeseries = getattr(result, "ticker_timeseries", {})
     result_ticker_meta = getattr(result, "ticker_meta", {})
     portfolio_timeseries = getattr(result, "portfolio_timeseries", None)
@@ -219,6 +235,9 @@ def extract_recommendations_from_backtest(
         if isinstance(source_frame, pd.DataFrame) and not source_frame.empty:
             source_upto_end = source_frame[source_frame.index <= end_date]
             if not source_upto_end.empty:
+                computed_daily_pct = _compute_latest_daily_pct(source_frame, end_date)
+                if computed_daily_pct is not None:
+                    daily_pct = computed_daily_pct
                 try:
                     metrics = process_ticker_data(
                         ticker=ticker_key,
