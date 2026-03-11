@@ -118,6 +118,36 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _format_realtime_price_for_log(price: float, country_code: str) -> str:
+    """국가별 실시간 가격 로그 포맷을 반환합니다."""
+    country = str(country_code or "").strip().lower()
+    if country == "us":
+        return f"${price:,.2f}"
+    if country == "au":
+        return f"A${price:,.2f}"
+    return f"{price:,.0f}"
+
+
+def _format_realtime_change_for_log(current_price: float, previous_close: float | None) -> str:
+    """직전 종가 대비 실시간 등락률 로그 포맷을 반환합니다."""
+    if previous_close is None or previous_close <= 0:
+        return ""
+
+    change_pct = ((current_price / previous_close) - 1.0) * 100.0
+    rounded_pct = round(change_pct, 1)
+    if abs(rounded_pct) < 0.05:
+        rounded_pct = 0.0
+
+    if rounded_pct > 0:
+        direction = "상승"
+    elif rounded_pct < 0:
+        direction = "하락"
+    else:
+        direction = "보합"
+
+    return f" | {rounded_pct:.1f}% {direction}"
+
+
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
@@ -1167,18 +1197,15 @@ def fetch_ohlcv_for_tickers(
                         index=[today],
                     )
 
-                    # 가격 포맷팅 (로그용)
-                    if country_lower == "us":
-                        price_str = f"${rt_price:,.2f}"
-                    elif country_lower == "au":
-                        price_str = f"A${rt_price:,.2f}"
-                    else:
-                        price_str = f"{rt_price:,.0f}원"
+                    # 국가별 가격 포맷을 사용해 로그를 남긴다.
+                    price_str = _format_realtime_price_for_log(rt_price, country_lower)
+                    change_suffix = ""
 
                     # [안전장치] 실시간 가격이 기존 캐시의 마지막 종가와 너무 큰 차이가 나면 경고 (예: 15% 이상)
                     if not cached_df.empty:
                         last_close = _safe_float(cached_df.iloc[-1].get("Close") or cached_df.iloc[-1].get("close"))
                         if last_close > 0:
+                            change_suffix = _format_realtime_change_for_log(rt_price, last_close)
                             diff_pct = abs(rt_price - last_close) / last_close * 100.0
                             if diff_pct > 15.0:
                                 logger.warning(
@@ -1188,26 +1215,18 @@ def fetch_ohlcv_for_tickers(
                                 if diff_pct > 25.0:
                                     logger.error(f"❌ [{tkr}] 변동폭이 너무 커서 실시간 데이터를 무시합니다.")
                                     continue
-                        price_str = f"{rt_price:,.0f}"
-
                     # 캐시 데이터와 오늘 데이터 병합
                     cached_df = pd.concat([cached_df, today_row])
                     cached_df = cached_df[~cached_df.index.duplicated(keep="last")]
                     cached_df.sort_index(inplace=True)
                     cache_end = cached_df.index.max().normalize()
-                    logger.info(f"[실시간] {tkr} 오늘 데이터를 실시간 가격({price_str})으로 보완")
+                    logger.info(f"[실시간] {tkr} 오늘 데이터를 실시간 가격({price_str})으로 보완{change_suffix}")
 
             # [User Request] 장 개시 전이거나 실시간 데이터가 없는 경우 마지막 종가로 패딩
             if is_today and cache_end < required_end:
                 last_p = _safe_float(cached_df.iloc[-1]["Close"])
                 if last_p is not None and last_p > 0:
-                    # 가격 포맷팅 (로그용)
-                    if country_lower == "us":
-                        last_p_str = f"${last_p:,.2f}"
-                    elif country_lower == "au":
-                        last_p_str = f"A${last_p:,.2f}"
-                    else:
-                        last_p_str = f"{last_p:,.0f}"
+                    last_p_str = _format_realtime_price_for_log(last_p, country_lower)
 
                     padding_row = pd.DataFrame(
                         {"Open": [last_p], "High": [last_p], "Low": [last_p], "Close": [last_p], "Volume": [0]},
@@ -1248,6 +1267,8 @@ def fetch_ohlcv_for_tickers(
                             index=[pd.to_datetime(today)],
                         )
                         if cached_df is not None and not cached_df.empty:
+                            last_close = _safe_float(cached_df.iloc[-1].get("Close") or cached_df.iloc[-1].get("close"))
+                            change_suffix = _format_realtime_change_for_log(rt_price, last_close)
                             effective_start = max(ticker_start, cached_df.index.min().normalize())
                             sliced = cached_df.loc[cached_df.index >= effective_start].copy()
                             merged = pd.concat([sliced, today_row])
@@ -1262,7 +1283,7 @@ def fetch_ohlcv_for_tickers(
 
                             prefetched_data[key] = merged
                             logger.info(
-                                f"[실시간보완] {tkr} 기존 데이터에 실시간 가격({rt_price:,.0f}) 추가 (캐시 범위: {len(sliced)}일)"
+                                f"[실시간보완] {tkr} 기존 데이터에 실시간 가격({_format_realtime_price_for_log(rt_price, country)}) 추가{change_suffix} (캐시 범위: {len(sliced)}일)"
                             )
                         else:
                             # 캐시가 전혀 없는 경우 오늘의 실시간 데이터만으로는 MIN_TRADING_DAYS를 충족할 수 없음
@@ -1293,7 +1314,9 @@ def fetch_ohlcv_for_tickers(
                             index=[today],
                         )
                         prefetched_data[key] = today_row
-                        logger.info(f"[실시간] {tkr} 데이터를 실시간 가격({rt_price:,.0f})으로 생성")
+                        logger.info(
+                            f"[실시간] {tkr} 데이터를 실시간 가격({_format_realtime_price_for_log(rt_price, country)})으로 생성"
+                        )
                         continue
                 missing.append(tkr)
                 continue
