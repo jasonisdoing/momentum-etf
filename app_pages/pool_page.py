@@ -194,20 +194,6 @@ def _render_ranking_view(pool_id: str) -> None:
         st.caption(update_caption)
 
 
-def _render_pool_manual_actions(pool_id: str) -> None:
-    """수동 액션 실행 (랭킹) 영역을 렌더링합니다."""
-    st.subheader("🤖 수동 액션 실행")
-
-    import subprocess
-
-    if st.button("🚀 랭크 시스템 즉시 실행", type="primary", use_container_width=True, key=f"btn_rank_{pool_id}"):
-        try:
-            subprocess.Popen(["python", "rank.py", pool_id])
-            st.success(f"✅ `{pool_id}` 랭크 시스템 실행을 시작했습니다. (배경에서 처리가 완료됩니다)")
-        except Exception as e:
-            st.error(f"⚠️ 실행 시작 오류: {e}")
-
-
 def render_pool_page(pool_id: str, view_mode: str | None = None) -> None:
     mode = view_mode or "1. 랭킹"
 
@@ -220,8 +206,6 @@ def render_pool_page(pool_id: str, view_mode: str | None = None) -> None:
         return
 
     _render_ranking_view(pool_id)
-    st.divider()
-    _render_pool_manual_actions(pool_id)
 
 
 __all__ = ["render_pool_page"]
