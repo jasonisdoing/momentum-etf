@@ -13,6 +13,7 @@ from config import TRADING_DAYS_PER_MONTH
 from core.strategy.metrics import process_ticker_data
 from utils.data_loader import (
     MissingPriceDataError,
+    fetch_au_quoteapi_snapshot,
     fetch_naver_etf_inav_snapshot,
     get_latest_trading_day,
     prepare_price_data,
@@ -256,6 +257,23 @@ def run_pool_ranking(pool_id: str, config: RankConfig) -> RankRunResult:
                 row["price"] = float(nav_data.get("nowVal"))
             if nav_data.get("itemname"):
                 row["name"] = str(nav_data.get("itemname"))
+    elif (config.country or "").strip().lower() == "au":
+        tickers_for_quote = [row.get("ticker") for row in sliced_rows if row.get("ticker")]
+        quote_snapshot = fetch_au_quoteapi_snapshot(tickers_for_quote)
+        for row in sliced_rows:
+            ticker = str(row.get("ticker") or "").strip().upper()
+            quote_data = quote_snapshot.get(ticker)
+            if not quote_data:
+                continue
+            if quote_data.get("nowVal") is not None:
+                row["price"] = float(quote_data.get("nowVal"))
+            if quote_data.get("changeRate") is not None:
+                row["daily_pct"] = float(quote_data.get("changeRate"))
+            elif quote_data.get("prevClose") is not None and quote_data.get("nowVal") is not None:
+                prev_close = float(quote_data.get("prevClose"))
+                now_val = float(quote_data.get("nowVal"))
+                if prev_close > 0:
+                    row["daily_pct"] = ((now_val / prev_close) - 1.0) * 100.0
 
     return RankRunResult(
         pool_id=pool_norm,

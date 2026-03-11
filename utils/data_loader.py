@@ -8,8 +8,9 @@ import logging
 import os
 import warnings
 from collections.abc import Iterable, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, time
+from io import StringIO
 from typing import Any
 
 import pandas as pd
@@ -59,6 +60,7 @@ except ImportError:
 # from utils.notification import send_verbose_log_to_slack
 
 from utils.cache_utils import (
+    load_cached_frame,
     load_cached_frame_with_fallback,
     load_cached_frames_bulk_with_fallback,
     save_cached_frame,
@@ -297,6 +299,16 @@ def _silence_yfinance_logs():
     finally:
         for lg, lvl in zip(targets, prev_levels):
             lg.setLevel(lvl)
+
+
+@contextmanager
+def _silence_yfinance_output():
+    """yfinance가 직접 출력하는 실패 메시지를 숨긴다."""
+    stdout_buffer = StringIO()
+    stderr_buffer = StringIO()
+    with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+        with _silence_yfinance_logs():
+            yield
 
 
 def get_today_str() -> str:
@@ -826,13 +838,14 @@ def _fetch_ohlcv_core(
             download_ticker = f"{ticker}.AX"
 
         try:
-            fetched = yf.download(
-                download_ticker,
-                start=start_dt.strftime("%Y-%m-%d"),
-                end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
-                progress=False,
-                auto_adjust=True,
-            )
+            with _silence_yfinance_output():
+                fetched = yf.download(
+                    download_ticker,
+                    start=start_dt.strftime("%Y-%m-%d"),
+                    end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
+                    progress=False,
+                    auto_adjust=True,
+                )
         except Exception as exc:
             error_msg = str(exc)
             if "Too Many Requests" in error_msg or "Rate Limit Exceeded" in error_msg:
@@ -957,6 +970,68 @@ def _fetch_ohlcv_core(
 
     logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
     return None
+
+
+def repair_recent_trading_day_gaps(
+    ticker: str,
+    country: str,
+    *,
+    account_id: str,
+    lookback_days: int = 15,
+) -> list[pd.Timestamp]:
+    """최근 거래일 구간의 내부 누락 일봉을 다시 조회해 캐시에 병합한다."""
+
+    cache_key = str(account_id or "").strip().lower()
+    ticker_key = str(ticker or "").strip().upper()
+    country_code = str(country or "").strip().lower()
+    if not cache_key:
+        raise ValueError(f"누락 거래일 보강 시 account_id가 필요합니다. (Ticker: {ticker_key})")
+    if not ticker_key:
+        raise ValueError("누락 거래일 보강 시 ticker가 필요합니다.")
+
+    cached_df = load_cached_frame(cache_key, ticker_key)
+    if cached_df is None or cached_df.empty:
+        return []
+
+    latest_trading_day = get_latest_trading_day(country_code).normalize()
+    recent_start = (latest_trading_day - pd.DateOffset(days=max(1, int(lookback_days)))).normalize()
+    expected_days = get_trading_days(
+        recent_start.strftime("%Y-%m-%d"),
+        latest_trading_day.strftime("%Y-%m-%d"),
+        country_code,
+    )
+    if not expected_days:
+        return []
+
+    existing_days = {pd.Timestamp(idx).normalize() for idx in cached_df.index}
+    missing_days = [
+        pd.Timestamp(day).normalize() for day in expected_days if pd.Timestamp(day).normalize() not in existing_days
+    ]
+    if not missing_days:
+        return []
+
+    repaired_df = cached_df.copy()
+    for missing_day in missing_days:
+        fetched = _fetch_ohlcv_core(ticker_key, country_code, missing_day, missing_day, repaired_df)
+        if fetched is None or fetched.empty:
+            continue
+        repaired_df = pd.concat([repaired_df, fetched])
+        repaired_df.sort_index(inplace=True)
+        repaired_df = repaired_df[~repaired_df.index.duplicated(keep="last")]
+
+    save_cached_frame(cache_key, ticker_key, repaired_df)
+
+    refreshed_days = {pd.Timestamp(idx).normalize() for idx in repaired_df.index}
+    unresolved = [day for day in missing_days if day not in refreshed_days]
+    if not unresolved:
+        logger.info(
+            "[CACHE] %s/%s 최근 거래일 누락 보강 완료: %s",
+            cache_key.upper(),
+            ticker_key,
+            ", ".join(day.strftime("%Y-%m-%d") for day in missing_days),
+        )
+
+    return unresolved
 
 
 def fetch_ohlcv_for_tickers(
@@ -1521,8 +1596,25 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
                 "nowVal": float(price),
             }
 
-            # 일간 변동률 (%) - 호주의 경우 QuoteAPI의 pctChange 신뢰도가 낮아 직접 계산을 권장함
-            # entry["changeRate"] = ... (생략)
+            prev_close = quote.get("prevClose")
+            if prev_close is not None:
+                try:
+                    entry["prevClose"] = float(prev_close)
+                except (TypeError, ValueError):
+                    pass
+
+            pct_change = quote.get("pctChange")
+            if pct_change is not None:
+                try:
+                    entry["pctChange"] = float(pct_change)
+                    entry["changeRate"] = float(pct_change)
+                except (TypeError, ValueError):
+                    pass
+            elif entry.get("prevClose"):
+                try:
+                    entry["changeRate"] = ((entry["nowVal"] / entry["prevClose"]) - 1.0) * 100.0
+                except Exception:
+                    pass
 
             # OHLCV 데이터
             for field in ["open", "high", "low", "volume"]:
@@ -1549,7 +1641,13 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
                 snapshot[ticker_res] = entry_res
 
     if snapshot:
+        global _AU_QUOTEAPI_SNAPSHOT_CACHE, _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT
+        _AU_QUOTEAPI_SNAPSHOT_CACHE = snapshot
+        _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT = pd.Timestamp.now()
         logger.info(f"[AU] QuoteAPI에서 {len(snapshot)}개 종목의 실시간 가격을 조회했습니다.")
+    else:
+        _AU_QUOTEAPI_SNAPSHOT_CACHE = {}
+        _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT = None
 
     return snapshot
 
@@ -1573,7 +1671,8 @@ def fetch_us_yfinance_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
 
     try:
         # 최근 5일치 데이터를 받아와서 전일 종가와 현재가를 모두 가져옵니다.
-        df = yf.download(normalized_tickers, period="5d", progress=False, auto_adjust=True)
+        with _silence_yfinance_output():
+            df = yf.download(normalized_tickers, period="5d", progress=False, auto_adjust=True)
 
         if df.empty:
             return {}

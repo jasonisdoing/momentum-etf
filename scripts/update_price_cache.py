@@ -17,7 +17,7 @@ from utils.cache_utils import (
     drop_cache_collection,
     swap_cache_collection,
 )
-from utils.data_loader import fetch_ohlcv
+from utils.data_loader import fetch_ohlcv, repair_recent_trading_day_gaps
 from utils.env import load_env_if_present
 from utils.identifier_guard import ensure_account_pool_id_separation
 from utils.logger import get_app_logger
@@ -114,7 +114,6 @@ def refresh_cache_for_target(
         for i, etf in enumerate(target_items, 1):
             ticker = etf.get("ticker")
             name = etf.get("name") or "-"
-            logger.info(" -> 가격 캐시 갱신 중: %d/%d - %s(%s)", i, total_tickers, name, ticker)
 
             if progress_callback:
                 progress_callback(i, total_tickers, f"{name}({ticker})")
@@ -129,6 +128,24 @@ def refresh_cache_for_target(
                     force_refresh=True,
                     account_id=temp_token,  # 임시 캐시에 저장
                 )
+                unresolved_days = repair_recent_trading_day_gaps(
+                    ticker,
+                    country_code,
+                    account_id=temp_token,
+                    lookback_days=15,
+                )
+                if unresolved_days:
+                    unresolved_text = ", ".join(day.strftime("%Y-%m-%d") for day in unresolved_days)
+                    logger.warning(
+                        " -> 가격 캐시 갱신 중: %d/%d - %s(%s) - 최근 거래일 누락 유지: %s",
+                        i,
+                        total_tickers,
+                        name,
+                        ticker,
+                        unresolved_text,
+                    )
+                else:
+                    logger.info(" -> 가격 캐시 갱신 중: %d/%d - %s(%s)", i, total_tickers, name, ticker)
             except Exception as e:
                 logger.error("%s 데이터 처리 중 오류 발생: %s", ticker, e)
 
