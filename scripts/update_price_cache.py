@@ -8,6 +8,9 @@ import os
 import sys
 import time
 import uuid
+from collections.abc import Callable
+
+import pandas as pd
 
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,7 +20,7 @@ from utils.cache_utils import (
     drop_cache_collection,
     swap_cache_collection,
 )
-from utils.data_loader import fetch_ohlcv, repair_recent_trading_day_gaps
+from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_recent_trading_day_gaps
 from utils.env import load_env_if_present
 from utils.identifier_guard import ensure_account_pool_id_separation
 from utils.logger import get_app_logger
@@ -32,9 +35,6 @@ def _determine_start_date() -> str:
     start = settings.get("CACHE_START_DATE")
     if start:
         return str(start)
-
-
-from collections.abc import Callable
 
 
 def refresh_cache_for_target(
@@ -59,6 +59,13 @@ def refresh_cache_for_target(
         country_code = "kor"
 
     logger.info("[%s] 캐시 갱신 시작 (국가설정: %s, 시작일: %s)", target_norm.upper(), country_code, start_date)
+
+    def _is_today_unavailable_warning(exc: PykrxDataUnavailableError) -> bool:
+        """한국장 당일 데이터가 아직 집계되지 않은 정상 상황만 경고로 낮춘다."""
+        if str(exc.country or "").strip().lower() != "kor":
+            return False
+        today = pd.Timestamp.now().normalize()
+        return exc.start_dt.normalize() == today and exc.end_dt.normalize() == today
 
     # 임시 컬렉션 정리
     removed = clean_temp_cache_collections(target_norm, max_age_seconds=3600)
@@ -146,6 +153,11 @@ def refresh_cache_for_target(
                     )
                 else:
                     logger.info(" -> 가격 캐시 갱신 중: %d/%d - %s(%s)", i, total_tickers, name, ticker)
+            except PykrxDataUnavailableError as e:
+                if _is_today_unavailable_warning(e):
+                    logger.warning("%s 당일 데이터 미집계: %s", ticker, e)
+                else:
+                    logger.error("%s 데이터 처리 중 오류 발생: %s", ticker, e)
             except Exception as e:
                 logger.error("%s 데이터 처리 중 오류 발생: %s", ticker, e)
 
