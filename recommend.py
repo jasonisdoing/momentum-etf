@@ -29,7 +29,13 @@ from utils.account_registry import (
     get_strategy_rules,
     list_available_accounts,
 )
-from utils.data_loader import MissingPriceDataError, get_latest_trading_day, get_trading_days, prepare_price_data
+from utils.data_loader import (
+    MissingPriceDataError,
+    get_cached_au_etf_snapshot_entry,
+    get_latest_trading_day,
+    get_trading_days,
+    prepare_price_data,
+)
 from utils.formatters import format_pct_change, format_price, format_price_deviation, format_trading_days
 from utils.logger import get_app_logger
 from utils.recommendation_storage import save_recommendation_payload
@@ -196,6 +202,20 @@ def extract_recommendations_from_backtest(
         if nav_price and price and price > 0:
             price_deviation = ((price - nav_price) / nav_price) * 100
 
+        if str(country_code or "").strip().lower() == "au":
+            au_snapshot = get_cached_au_etf_snapshot_entry(ticker_key)
+            if au_snapshot:
+                realtime_price = _safe_float(au_snapshot.get("nowVal"))
+                if realtime_price is not None and realtime_price > 0:
+                    price = realtime_price
+                realtime_daily_pct = _safe_float(au_snapshot.get("changeRate"))
+                if realtime_daily_pct is None:
+                    prev_close = _safe_float(au_snapshot.get("prevClose"))
+                    if realtime_price is not None and prev_close is not None and prev_close > 0:
+                        realtime_daily_pct = ((realtime_price / prev_close) - 1.0) * 100.0
+                if realtime_daily_pct is not None:
+                    daily_pct = realtime_daily_pct
+
         # streak (filter 값 사용)
         streak = int(filter_val) if filter_val and filter_val > 0 else 0
         if holding_days > 0 and streak > holding_days:
@@ -257,7 +277,7 @@ def extract_recommendations_from_backtest(
             source_upto_end = source_frame[source_frame.index <= end_date]
             if not source_upto_end.empty:
                 computed_daily_pct = _compute_latest_daily_pct(source_frame, end_date)
-                if computed_daily_pct is not None:
+                if computed_daily_pct is not None and str(country_code or "").strip().lower() != "au":
                     daily_pct = computed_daily_pct
                 try:
                     metrics = process_ticker_data(

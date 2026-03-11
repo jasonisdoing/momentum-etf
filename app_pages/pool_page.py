@@ -12,9 +12,10 @@ from utils.recommendations import recommendations_to_dataframe
 from utils.ui import format_relative_time, render_recommendation_table
 
 try:
-    from utils.data_loader import fetch_naver_etf_inav_snapshot
+    from utils.data_loader import fetch_au_quoteapi_snapshot, fetch_naver_etf_inav_snapshot
 except Exception:  # pragma: no cover
     fetch_naver_etf_inav_snapshot = None  # type: ignore
+    fetch_au_quoteapi_snapshot = None  # type: ignore
 
 try:
     from zoneinfo import ZoneInfo
@@ -119,6 +120,28 @@ def _render_ranking_view(pool_id: str) -> None:
                 price_source = "Naver"
         except Exception:
             pass
+    elif country_norm == "au" and fetch_au_quoteapi_snapshot is not None:
+        try:
+            tickers = [r.get("ticker") for r in rows_for_view if r.get("ticker")]
+            realtime_data = fetch_au_quoteapi_snapshot(tickers)
+            if realtime_data:
+                for row in rows_for_view:
+                    ticker = str(row.get("ticker") or "").strip().upper()
+                    rt = realtime_data.get(ticker)
+                    if not rt:
+                        continue
+                    if rt.get("nowVal") is not None:
+                        row["price"] = float(rt["nowVal"])
+                    if rt.get("changeRate") is not None:
+                        row["daily_pct"] = float(rt["changeRate"])
+                    elif rt.get("prevClose") is not None and rt.get("nowVal") is not None:
+                        prev_close = float(rt["prevClose"])
+                        now_val = float(rt["nowVal"])
+                        if prev_close > 0:
+                            row["daily_pct"] = ((now_val / prev_close) - 1.0) * 100.0
+                price_source = "QuoteAPI"
+        except Exception:
+            pass
 
     df = recommendations_to_dataframe(country or "kor", rows_for_view)
 
@@ -129,7 +152,7 @@ def _render_ranking_view(pool_id: str) -> None:
         if updated_by:
             updated_display = f"{updated_display}, {updated_by}"
 
-        if country_norm in ("kor", "kr"):
+        if country_norm in ("kor", "kr", "au"):
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             now_rel = format_relative_time(now_str)
             now_display = f"{now_str}{now_rel}" if now_rel else now_str
