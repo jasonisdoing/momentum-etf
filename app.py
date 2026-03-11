@@ -184,6 +184,17 @@ def _build_unified_pool_page(page_cls: Callable[..., object], pools: list[dict[s
     )
 
 
+def _build_system_page(page_cls: Callable[..., object]):
+    from app_pages.system_page import render_system_page
+
+    return page_cls(
+        render_system_page,
+        title="시스템 정보",
+        icon="🛠️",
+        url_path="system",
+    )
+
+
 def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None = None):
     def _render_home_page() -> None:
         from utils.portfolio_io import (
@@ -846,6 +857,7 @@ def main() -> None:
     # 통합 종목풀 그룹 (풀 선택형 단일 URL)
     pool_view_modes = ["1. 랭킹", "2. 종목 관리", "3. 삭제된 종목"]
     pages["종목풀"] = [_build_unified_pool_page(page_cls, pools, view_mode) for view_mode in pool_view_modes]
+    pages["시스템 정보"] = [_build_system_page(page_cls)]
 
     # 네비게이션 객체 생성 (사이드바 방식)
     pg = navigation(pages, position="sidebar")
