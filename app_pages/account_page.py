@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import time
+import subprocess
 from typing import Any
 
 import pandas as pd
@@ -12,7 +12,6 @@ from config import (
     BUCKET_OPTIONS,
     BUCKET_REVERSE_MAPPING,
 )
-from scripts.update_price_cache import refresh_cache_for_target
 from utils.data_loader import fetch_ohlcv
 from utils.pool_registry import get_pool_country_code, list_available_pools
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
@@ -25,7 +24,7 @@ from utils.stock_list_io import (
     remove_stock,
     update_stock,
 )
-from utils.stock_meta_updater import fetch_stock_info, update_account_metadata
+from utils.stock_meta_updater import fetch_stock_info
 from utils.ui import format_relative_time, load_account_recommendations, render_recommendation_table
 
 try:
@@ -145,16 +144,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
     use_weight = not _is_pool_target(account_id)
 
     # 세션 스테이트 키
-    key_meta = f"updating_meta_{account_id}"
-    key_price = f"updating_price_{account_id}"
-
-    is_updating_meta = st.session_state.get(key_meta, False)
-    is_updating_price = st.session_state.get(key_price, False)
-    is_updating = is_updating_meta or is_updating_price
-
-    # 상단 컨트롤: 이제 관리 모드는 상시 활성화 (사용자 요청)
-    # 상단 컨트롤: 이제 관리 모드는 상시 활성화 (사용자 요청)
-    readonly = is_updating
+    readonly = False
 
     df = _build_stocks_meta_table(account_id, use_weight=use_weight)
     df_edit = df.copy()
@@ -274,15 +264,21 @@ def _render_stocks_meta_table(account_id: str) -> None:
 
     with c_mgr2:
         if st.button("메타데이터 업데이트", key=f"btn_meta_{account_id}", disabled=readonly, width="stretch"):
-            st.session_state[key_meta] = True
             st.session_state[f"show_add_modal_{account_id}"] = False
-            st.rerun()
+            try:
+                subprocess.Popen(["python", "scripts/stock_meta_updater.py", account_id])
+                st.success(f"✅ `{account_id}` 메타데이터 업데이트를 시작했습니다. (배경에서 처리가 완료됩니다)")
+            except Exception as e:
+                st.error(f"⚠️ 실행 시작 오류: {e}")
 
     with c_mgr3:
         if st.button("가격 캐시 갱신", key=f"btn_price_{account_id}", disabled=readonly, width="stretch"):
-            st.session_state[key_price] = True
             st.session_state[f"show_add_modal_{account_id}"] = False
-            st.rerun()
+            try:
+                subprocess.Popen(["python", "scripts/update_price_cache.py", account_id])
+                st.success(f"✅ `{account_id}` 가격 캐시 갱신을 시작했습니다. (배경에서 처리가 완료됩니다)")
+            except Exception as e:
+                st.error(f"⚠️ 실행 시작 오류: {e}")
 
     st.write("")  # 간격
 
@@ -528,57 +524,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
     # [Continuous Add] 모달 유지 로직: 플래그가 True면 강제로 모달 오픈
     if st.session_state.get(f"show_add_modal_{account_id}"):
         open_add_dialog()
-
-    # -----------------------------------------------------------------------
-    # 업데이트 실행 로직 (readonly 모드일 때 실행됨)
-    # -----------------------------------------------------------------------
-    if is_updating_meta:
-        st.divider()
-        # [User Request] 스피너 아이콘 제거를 위해 st.status 대신 st.empty 사용
-        status_area = st.empty()
-        p_bar = st.progress(0)
-
-        status_area.info("메타데이터 업데이트 준비 중...")
-
-        def on_progress(curr, total, ticker):
-            pct = min(curr / total, 1.0)
-            p_bar.progress(pct)
-            status_area.info(f"메타데이터 획득 중: {curr}/{total} - {ticker}")
-
-        try:
-            update_account_metadata(account_id, progress_callback=on_progress)
-            status_area.success("메타데이터 업데이트 완료!")
-            time.sleep(1.0)
-        except Exception as e:
-            status_area.error(f"실패: {e}")
-            time.sleep(3.0)
-
-        # 상태 해제 및 리런
-        del st.session_state[key_meta]
-        st.rerun()
-
-    if is_updating_price:
-        st.divider()
-        status_area = st.empty()
-        p_bar = st.progress(0)
-
-        status_area.info("가격 캐시 갱신 준비 중...")
-
-        def on_progress(curr, total, ticker):
-            pct = min(curr / total, 1.0)
-            p_bar.progress(pct)
-            status_area.info(f"가격 캐시 갱신 중: {curr}/{total} - {ticker}")
-
-        try:
-            refresh_cache_for_target(account_id, None, progress_callback=on_progress)
-            status_area.success("가격 캐시 갱신 완료!")
-            time.sleep(1.0)
-        except Exception as e:
-            status_area.error(f"실패: {e}")
-            time.sleep(3.0)
-
-        del st.session_state[key_price]
-        st.rerun()
 
 
 def _render_manual_actions(account_id: str) -> None:
