@@ -24,7 +24,7 @@ DEFAULT_TARGET_ACCOUNTS = [
     "isa_account",
     "pension_account",
     "kor_save_account",
-    "us_account",
+    "core_account",
     "aus_account",
 ]
 

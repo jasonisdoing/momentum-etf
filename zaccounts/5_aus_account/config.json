@@ -2,7 +2,7 @@
     "icon": "🇦🇺",
     "name": "호주 계좌",
     "country_code": "au",
-    "pool": "aus",
+    "pool": ["aus"],
     "currency": "aud",
     "initial_capital_krw": "100000000",
     "show_hold": true,

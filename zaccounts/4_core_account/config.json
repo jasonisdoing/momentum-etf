@@ -1,8 +1,8 @@
 {
-    "icon": "🇺🇸",
-    "name": "해외 계좌",
+    "icon": "💼",
+    "name": "장기보유 계좌",
     "country_code": "kor",
-    "pool": "us",
+    "pool": ["kor", "us"],
     "currency": "KRW",
     "initial_capital_krw": "40000000",
     "show_hold": true,

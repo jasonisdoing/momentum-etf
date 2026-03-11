@@ -2,7 +2,7 @@
     "icon": "🇰🇷",
     "name": "국내 계좌",
     "country_code": "kor",
-    "pool": "kor",
+    "pool": ["kor"],
     "currency": "KRW",
     "initial_capital_krw": "50000000",
     "show_hold": true,

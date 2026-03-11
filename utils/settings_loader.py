@@ -83,6 +83,39 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def _normalize_pool_ids(raw_value: Any, *, context: str) -> list[str]:
+    """계좌 설정의 pool 값을 정규화하고 검증합니다."""
+
+    if not isinstance(raw_value, list):
+        raise AccountSettingsError(f"{context}의 'pool'은 문자열이 아니라 리스트여야 합니다.")
+    if not raw_value:
+        raise AccountSettingsError(f"{context}의 'pool'은 최소 1개 이상의 종목풀 ID를 가져야 합니다.")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in raw_value:
+        pool_id = str(value or "").strip().lower()
+        if not pool_id:
+            raise AccountSettingsError(f"{context}의 'pool' 목록에는 빈 값이 올 수 없습니다.")
+        if pool_id in seen:
+            continue
+        seen.add(pool_id)
+        normalized.append(pool_id)
+
+    if not normalized:
+        raise AccountSettingsError(f"{context}의 'pool'에서 유효한 종목풀 ID를 찾지 못했습니다.")
+
+    from utils.pool_registry import list_available_pools
+
+    available_pools = set(list_available_pools())
+    invalid_pools = [pool_id for pool_id in normalized if pool_id not in available_pools]
+    if invalid_pools:
+        invalid_text = ", ".join(invalid_pools)
+        raise AccountSettingsError(f"{context}의 'pool'에 존재하지 않는 종목풀이 포함되어 있습니다: {invalid_text}")
+
+    return normalized
+
+
 def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
     """튜닝용 시작일 설정을 반환합니다.
 
@@ -171,8 +204,16 @@ def get_account_settings(account_id: str) -> dict[str, Any]:
 
     if not settings.get("country_code"):
         raise AccountSettingsError(f"'{path}' 설정 파일에 필수 항목 'country_code'가 누락되었습니다.")
+    settings["pool"] = _normalize_pool_ids(settings.get("pool"), context=str(path))
 
     return settings
+
+
+def get_account_pool_ids(account_id: str) -> list[str]:
+    """계좌에 연결된 종목풀 ID 목록을 반환합니다."""
+
+    settings = get_account_settings(account_id)
+    return list(settings["pool"])
 
 
 def _split_strategy_sections(
