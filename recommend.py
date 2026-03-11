@@ -29,7 +29,7 @@ from utils.account_registry import (
     get_strategy_rules,
     list_available_accounts,
 )
-from utils.data_loader import MissingPriceDataError, get_latest_trading_day, prepare_price_data
+from utils.data_loader import MissingPriceDataError, get_latest_trading_day, get_trading_days, prepare_price_data
 from utils.formatters import format_pct_change, format_price, format_price_deviation, format_trading_days
 from utils.logger import get_app_logger
 from utils.recommendation_storage import save_recommendation_payload
@@ -82,18 +82,39 @@ def extract_recommendations_from_backtest(
 ) -> list[dict[str, Any]]:
     """백테스트 결과에서 마지막 날(오늘) 추천 데이터를 추출합니다."""
 
+    def _get_previous_trading_day(target_date: pd.Timestamp) -> pd.Timestamp | None:
+        """대상일 직전 거래일을 반환한다."""
+        country = str(country_code or "").strip().lower()
+        if not country:
+            return None
+        start_date = (target_date.normalize() - pd.DateOffset(days=10)).strftime("%Y-%m-%d")
+        end_date = target_date.normalize().strftime("%Y-%m-%d")
+        trading_days = get_trading_days(start_date, end_date, country)
+        normalized_days = [pd.Timestamp(day).normalize() for day in trading_days]
+        previous_days = [day for day in normalized_days if day < target_date.normalize()]
+        if not previous_days:
+            return None
+        return max(previous_days)
+
     def _compute_latest_daily_pct(frame: pd.DataFrame, target_date: pd.Timestamp) -> float | None:
-        """가격 프레임의 마지막 두 종가를 기준으로 일간 수익률을 재계산한다."""
+        """직전 거래일 종가 대비 오늘 종가 기준으로 일간 수익률을 계산한다."""
         if frame.empty:
             return None
         frame_upto_end = frame[frame.index <= target_date]
-        if len(frame_upto_end) < 2:
+        if frame_upto_end.empty:
             return None
         close_series = pd.to_numeric(frame_upto_end.get("Close"), errors="coerce").dropna()
-        if len(close_series) < 2:
-            return None
         current_close = _safe_float(close_series.iloc[-1])
-        prev_close = _safe_float(close_series.iloc[-2])
+        previous_trading_day = _get_previous_trading_day(target_date)
+        if previous_trading_day is None:
+            return None
+        previous_rows = frame_upto_end[frame_upto_end.index.normalize() == previous_trading_day]
+        if previous_rows.empty:
+            return None
+        prev_close_series = pd.to_numeric(previous_rows.get("Close"), errors="coerce").dropna()
+        if prev_close_series.empty:
+            return None
+        prev_close = _safe_float(prev_close_series.iloc[-1])
         if current_close is None or prev_close is None or prev_close <= 0:
             return None
         return (current_close / prev_close - 1.0) * 100.0
