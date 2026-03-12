@@ -449,7 +449,7 @@ def render_recommendation_table(
 
     price_label = "현재가"
     country_lower = (country_code or "").strip().lower()
-    show_deviation = country_lower in {"kr", "kor"}
+    show_deviation = country_lower in {"kr", "kor"} or "괴리율" in df.columns
 
     # 공통 컬럼 설정
     column_config_map: dict[str, st.column_config.BaseColumn] = {

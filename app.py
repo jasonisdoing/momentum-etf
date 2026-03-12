@@ -764,6 +764,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 "수량",
                 "평균 매입가",
                 "현재가",
+                "괴리율",
                 "매입금액",
                 "평가금액",
                 "평가손익",
