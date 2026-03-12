@@ -11,6 +11,46 @@ from utils.settings_loader import get_account_settings
 logger = get_app_logger()
 
 
+def _apply_kor_realtime_overlay_to_holdings(df_holdings: pd.DataFrame) -> pd.DataFrame:
+    """한국 종목 보유 테이블에 실시간 현재가/NAV/괴리율을 덮어쓴다."""
+    tickers = [
+        str(ticker or "").strip().upper() for ticker in df_holdings.get("ticker", []) if str(ticker or "").strip()
+    ]
+    if not tickers:
+        return df_holdings
+
+    try:
+        from utils.data_loader import fetch_naver_etf_inav_snapshot
+
+        realtime_data = fetch_naver_etf_inav_snapshot(tickers)
+    except Exception as exc:
+        logger.warning("보유 종목 실시간 오버레이 실패: %s", exc)
+        return df_holdings
+
+    if not realtime_data:
+        return df_holdings
+
+    overlaid = df_holdings.copy()
+    overlaid["Nav"] = overlaid.get("Nav")
+    overlaid["괴리율"] = overlaid.get("괴리율")
+
+    for idx, row in overlaid.iterrows():
+        ticker = str(row.get("ticker") or "").strip().upper()
+        rt = realtime_data.get(ticker)
+        if not rt:
+            continue
+        if rt.get("nowVal") is not None:
+            overlaid.at[idx, "현재가"] = float(rt["nowVal"])
+        if rt.get("changeRate") is not None:
+            overlaid.at[idx, "일간(%)"] = float(rt["changeRate"])
+        if rt.get("nav") is not None:
+            overlaid.at[idx, "Nav"] = float(rt["nav"])
+        if rt.get("deviation") is not None:
+            overlaid.at[idx, "괴리율"] = float(rt["deviation"])
+
+    return overlaid
+
+
 def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | None:
     """
     Load the actual portfolio holdings from portfolio_master (live)
@@ -216,6 +256,14 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         }
 
     df_holdings["현재가"] = df_holdings.apply(_get_current_price, axis=1)
+    try:
+        account_settings = get_account_settings(account_id)
+        account_country = str(account_settings.get("country_code") or "").strip().lower()
+    except Exception:
+        account_country = ""
+    if account_country in {"kor", "kr"}:
+        df_holdings = _apply_kor_realtime_overlay_to_holdings(df_holdings)
+
     multiplier = df_holdings["currency"].apply(_get_multiplier)
     df_holdings["매입금액(KRW)"] = (df_holdings["quantity"] * df_holdings["average_buy_price"] * multiplier).astype(
         float
