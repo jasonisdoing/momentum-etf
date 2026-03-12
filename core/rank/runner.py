@@ -21,7 +21,7 @@ from utils.data_loader import (
 from utils.formatters import format_pct_change, format_price, format_price_deviation
 from utils.pool_registry import POOL_ROOT, get_pool_dir
 from utils.report import render_table_eaw
-from utils.stock_list_io import get_etfs
+from utils.stock_list_io import ensure_stock_meta_readable, get_etfs
 
 RESULTS_ROOT = POOL_ROOT
 
@@ -121,6 +121,7 @@ def run_pool_ranking(pool_id: str, config: RankConfig) -> RankRunResult:
     if not pool_norm:
         raise ValueError("pool_id is required")
 
+    ensure_stock_meta_readable()
     universe = get_etfs(pool_norm)
     if not universe:
         raise ValueError(f"pool_id='{pool_norm}' 종목이 비어있습니다.")

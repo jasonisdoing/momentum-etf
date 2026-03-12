@@ -42,6 +42,13 @@ def _get_collection():
     return coll
 
 
+def ensure_stock_meta_readable() -> None:
+    """stock_meta 컬렉션을 읽을 수 없으면 즉시 예외를 발생시킨다."""
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — stock_meta 컬렉션을 읽을 수 없습니다.")
+
+
 # ---------------------------------------------------------------------------
 # 인메모리 캐시 (기존 호환)
 # ---------------------------------------------------------------------------
