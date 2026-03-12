@@ -4,6 +4,6 @@
   "rank": {
     "country": "kor",
     "months": 6,
-    "ma_type": "SMA"
+    "ma_type": "HMA"
   }
 }
