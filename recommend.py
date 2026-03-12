@@ -16,6 +16,10 @@ from typing import Any
 import pandas as pd
 
 from config import BUCKET_MAPPING as BUCKET_NAMES
+from config import TRADING_DAYS_PER_MONTH
+from core.backtest.output.snapshot_rows import advance_snapshot_state, build_snapshot_rows, create_snapshot_build_state
+from core.backtest.price import calculate_trade_price
+from core.strategy.metrics import process_ticker_data
 
 DEFAULT_BUCKET = 1
 
@@ -25,12 +29,18 @@ from utils.account_registry import (
     get_strategy_rules,
     list_available_accounts,
 )
-from utils.data_loader import MissingPriceDataError, get_latest_trading_day, prepare_price_data
+from utils.data_loader import (
+    MissingPriceDataError,
+    get_cached_au_etf_snapshot_entry,
+    get_latest_trading_day,
+    get_trading_days,
+    prepare_price_data,
+)
 from utils.formatters import format_pct_change, format_price, format_price_deviation, format_trading_days
 from utils.logger import get_app_logger
 from utils.recommendation_storage import save_recommendation_payload
 from utils.report import render_table_eaw
-from utils.settings_loader import load_common_settings
+from utils.settings_loader import get_account_dir, load_common_settings, resolve_strategy_params
 from utils.stock_list_io import get_etfs
 
 RESULTS_DIR = Path(__file__).resolve().parent / "zaccounts"
@@ -71,14 +81,56 @@ def extract_recommendations_from_backtest(
     result: Any,
     *,
     ticker_meta: dict[str, dict[str, Any]] | None = None,
+    price_frames: dict[str, pd.DataFrame] | None = None,
+    country_code: str | None = None,
+    ma_days: int = 252,
+    ma_type: str = "HMA",
 ) -> list[dict[str, Any]]:
     """백테스트 결과에서 마지막 날(오늘) 추천 데이터를 추출합니다."""
 
+    def _get_previous_trading_day(target_date: pd.Timestamp) -> pd.Timestamp | None:
+        """대상일 직전 거래일을 반환한다."""
+        country = str(country_code or "").strip().lower()
+        if not country:
+            return None
+        start_date = (target_date.normalize() - pd.DateOffset(days=10)).strftime("%Y-%m-%d")
+        end_date = target_date.normalize().strftime("%Y-%m-%d")
+        trading_days = get_trading_days(start_date, end_date, country)
+        normalized_days = [pd.Timestamp(day).normalize() for day in trading_days]
+        previous_days = [day for day in normalized_days if day < target_date.normalize()]
+        if not previous_days:
+            return None
+        return max(previous_days)
+
+    def _compute_latest_daily_pct(frame: pd.DataFrame, target_date: pd.Timestamp) -> float | None:
+        """직전 거래일 종가 대비 오늘 종가 기준으로 일간 수익률을 계산한다."""
+        if frame.empty:
+            return None
+        frame_upto_end = frame[frame.index <= target_date]
+        if frame_upto_end.empty:
+            return None
+        close_series = pd.to_numeric(frame_upto_end.get("Close"), errors="coerce").dropna()
+        current_close = _safe_float(close_series.iloc[-1])
+        previous_trading_day = _get_previous_trading_day(target_date)
+        if previous_trading_day is None:
+            return None
+        previous_rows = frame_upto_end[frame_upto_end.index.normalize() == previous_trading_day]
+        if previous_rows.empty:
+            return None
+        prev_close_series = pd.to_numeric(previous_rows.get("Close"), errors="coerce").dropna()
+        if prev_close_series.empty:
+            return None
+        prev_close = _safe_float(prev_close_series.iloc[-1])
+        if current_close is None or prev_close is None or prev_close <= 0:
+            return None
+        return (current_close / prev_close - 1.0) * 100.0
+
     ticker_timeseries = getattr(result, "ticker_timeseries", {})
     result_ticker_meta = getattr(result, "ticker_meta", {})
+    portfolio_timeseries = getattr(result, "portfolio_timeseries", None)
     end_date = getattr(result, "end_date", None)
 
-    if not ticker_timeseries or end_date is None:
+    if not ticker_timeseries or end_date is None or portfolio_timeseries is None or portfolio_timeseries.empty:
         return []
 
     # 티커 메타정보 병합 (result에서 온 것 + 전달받은 것)
@@ -90,6 +142,22 @@ def extract_recommendations_from_backtest(
             else:
                 merged_meta[k] = {**merged_meta[k], **v}
 
+    snapshot_state = create_snapshot_build_state()
+    snapshot_rows: list[dict[str, Any]] = []
+    for current_date in portfolio_timeseries.index:
+        if current_date > end_date:
+            break
+        portfolio_row = portfolio_timeseries.loc[current_date]
+        snapshot_rows = build_snapshot_rows(
+            result=result,
+            target_date=current_date,
+            total_value=float(portfolio_row.get("total_value", 0.0)),
+            total_cash=float(portfolio_row.get("total_cash", 0.0)),
+            state=snapshot_state,
+        )
+        advance_snapshot_state(result=result, target_date=current_date, state=snapshot_state)
+
+    snapshot_by_ticker = {str(row.get("ticker", "")).upper(): row for row in snapshot_rows}
     recommendations: list[dict[str, Any]] = []
 
     for ticker, df in ticker_timeseries.items():
@@ -100,23 +168,10 @@ def extract_recommendations_from_backtest(
         if not isinstance(df, pd.DataFrame) or df.empty:
             continue
 
-        # 마지막 날 데이터 추출
-        if end_date in df.index:
-            last_row = df.loc[end_date]
-        else:
-            last_row = df.iloc[-1]
-
-        # 전날 데이터 (일간 수익률 계산용)
-        # 방법 1: end_date 이전 데이터 중 마지막 행
-        df_before_end = df[df.index < end_date]
-        # 방법 2: 충분히 가까운 날짜 (df에 end_date가 없을 수 있음)
-        if df_before_end.empty and len(df) >= 2:
-            # end_date가 df의 마지막 날짜와 같다면, 두 번째 마지막 행 사용
-            prev_row = df.iloc[-2]
-        elif not df_before_end.empty:
-            prev_row = df_before_end.iloc[-1]
-        else:
-            prev_row = None
+        snapshot_row = snapshot_by_ticker.get(ticker_key)
+        if snapshot_row is None:
+            continue
+        last_row = df.loc[end_date] if end_date in df.index else df.iloc[-1]
 
         # 메타 정보
         meta = merged_meta.get(ticker_key, merged_meta.get(ticker, {}))
@@ -129,13 +184,17 @@ def extract_recommendations_from_backtest(
             name = f"{name}({stock_note})"
 
         # 기본 값 추출
-        price = _safe_float(last_row.get("price"))
-        shares = _safe_float(last_row.get("shares"), 0)
-        avg_cost = _safe_float(last_row.get("avg_cost"))
-        score = _safe_float(last_row.get("score"))
+        price = _safe_float(snapshot_row.get("price"))
+        shares = _safe_float(snapshot_row.get("shares"), 0)
+        avg_cost = _safe_float(snapshot_row.get("avg_cost"))
+        score = _safe_float(snapshot_row.get("score"))
+        rsi_score = _safe_float(snapshot_row.get("rsi_score"))
+        decision = str(snapshot_row.get("display_decision", "")).upper() or "WAIT"
+        note = str(snapshot_row.get("message", "") or "")
+        holding_days = int(snapshot_row.get("holding_days", 0) or 0)
+        daily_pct = _safe_float(snapshot_row.get("daily_pct"), 0.0) or 0.0
+        evaluation_pct = _safe_float(snapshot_row.get("evaluation_pct"))
         filter_val = _safe_float(last_row.get("filter"))
-        decision = str(last_row.get("decision", "")).upper() or "WAIT"
-        note = str(last_row.get("note", "") or "")
 
         # nav_price와 price_deviation 계산 (메타에서 가져오거나 계산)
         nav_price = meta.get("nav_price") or meta.get("nav") or None
@@ -143,49 +202,30 @@ def extract_recommendations_from_backtest(
         if nav_price and price and price > 0:
             price_deviation = ((price - nav_price) / nav_price) * 100
 
-        # 일간 수익률 계산
-        # 주의: 백테스트 엔진에서 데이터 없는 날은 price = avg_cost로 설정됨
-        # 실제 가격 변동을 계산하려면 price != avg_cost인 날을 찾아야 함
-        daily_pct = 0.0
-        if prev_row is not None:
-            prev_price = _safe_float(prev_row.get("price"))
-            prev_avg_cost = _safe_float(prev_row.get("avg_cost"))
-
-            # prev_price가 avg_cost와 같으면 (데이터 없음 표시), 더 이전 날짜를 찾음
-            if prev_price and prev_avg_cost and abs(prev_price - prev_avg_cost) < 0.001:
-                # df에서 price != avg_cost인 마지막 행 찾기
-                df_before_prev = df[df.index < end_date]
-                for idx in reversed(df_before_prev.index):
-                    row = df_before_prev.loc[idx]
-                    row_price = _safe_float(row.get("price"))
-                    row_avg_cost = _safe_float(row.get("avg_cost"))
-                    if row_price and row_avg_cost and abs(row_price - row_avg_cost) >= 0.001:
-                        prev_price = row_price
-                        break
-
-            if prev_price and prev_price > 0 and price:
-                daily_pct = ((price / prev_price) - 1.0) * 100.0
-
-        # 평가 수익률 계산
-        evaluation_pct = 0.0
-        if shares > 0 and avg_cost and avg_cost > 0 and price:
-            cost_basis = avg_cost * shares
-            pv = price * shares
-            evaluation_pct = ((pv - cost_basis) / cost_basis) * 100.0
-
-        # 보유일 계산 (연속 보유 기간)
-        holding_days = 0
-        if shares > 0:
-            holding_days = _calculate_holding_days(df, end_date)
+        if str(country_code or "").strip().lower() == "au":
+            au_snapshot = get_cached_au_etf_snapshot_entry(ticker_key)
+            if au_snapshot:
+                realtime_price = _safe_float(au_snapshot.get("nowVal"))
+                if realtime_price is not None and realtime_price > 0:
+                    price = realtime_price
+                realtime_daily_pct = _safe_float(au_snapshot.get("changeRate"))
+                if realtime_daily_pct is None:
+                    prev_close = _safe_float(au_snapshot.get("prevClose"))
+                    if realtime_price is not None and prev_close is not None and prev_close > 0:
+                        realtime_daily_pct = ((realtime_price / prev_close) - 1.0) * 100.0
+                if realtime_daily_pct is not None:
+                    daily_pct = realtime_daily_pct
 
         # streak (filter 값 사용)
         streak = int(filter_val) if filter_val and filter_val > 0 else 0
+        if holding_days > 0 and streak > holding_days:
+            streak = holding_days
 
         # phrase (note 사용)
         phrase = note
 
         # 상태 결정
-        state = _decision_to_state(decision, shares)
+        state = decision
 
         # 수익률 및 드로우다운 계산
         df_up_to_end = df[df.index <= end_date]
@@ -227,6 +267,46 @@ def extract_recommendations_from_backtest(
             # 추세 데이터 (최근 60일)
             trend_prices = historical_prices.iloc[-60:].tolist()
 
+        # [Display Metrics] 추천/랭킹 일관성을 위해 MA 점수, RSI, 지속일을 가격 원본에서 보강
+        source_frame = None
+        if price_frames:
+            source_frame = price_frames.get(ticker_key)
+            if source_frame is None:
+                source_frame = price_frames.get(ticker)
+        if isinstance(source_frame, pd.DataFrame) and not source_frame.empty:
+            source_upto_end = source_frame[source_frame.index <= end_date]
+            if not source_upto_end.empty:
+                computed_daily_pct = _compute_latest_daily_pct(source_frame, end_date)
+                if computed_daily_pct is not None and str(country_code or "").strip().lower() != "au":
+                    daily_pct = computed_daily_pct
+                try:
+                    metrics = process_ticker_data(
+                        ticker=ticker_key,
+                        df=source_upto_end,
+                        ma_days=max(1, int(ma_days)),
+                        ma_type=str(ma_type or "HMA").upper(),
+                        enable_data_sufficiency_check=False,
+                    )
+                except Exception:
+                    metrics = None
+                if metrics:
+                    score_series = metrics.get("ma_score")
+                    if isinstance(score_series, pd.Series) and not score_series.empty:
+                        computed_score = _safe_float(score_series.iloc[-1])
+                        if computed_score is not None:
+                            score = computed_score
+                    close_series = metrics.get("close")
+                    if isinstance(close_series, pd.Series) and not close_series.empty:
+                        computed_rsi = _calc_rsi(close_series, period=14)
+                        if computed_rsi is not None:
+                            rsi_score = computed_rsi
+                    streak_series = metrics.get("buy_signal_days")
+                    if isinstance(streak_series, pd.Series) and not streak_series.empty:
+                        computed_streak = int(_safe_float(streak_series.iloc[-1], 0) or 0)
+                        if holding_days > 0 and computed_streak > holding_days:
+                            computed_streak = holding_days
+                        streak = max(0, computed_streak)
+
         recommendations.append(
             {
                 "ticker": ticker_key,
@@ -239,6 +319,7 @@ def extract_recommendations_from_backtest(
                 "shares": shares,
                 "avg_cost": avg_cost,
                 "score": score,
+                "rsi_score": rsi_score,
                 "streak": streak,
                 "daily_pct": daily_pct,
                 "evaluation_pct": evaluation_pct,
@@ -253,35 +334,49 @@ def extract_recommendations_from_backtest(
                 "drawdown_from_high": drawdown_from_high,
                 "trend_prices": trend_prices,
                 "phrase": phrase,
+                "is_pending_tomorrow": bool(snapshot_row.get("is_pending_tomorrow", False)),
                 "base_date": end_date,
-                "bucket": meta.get("bucket", DEFAULT_BUCKET),
-                "bucket_name": BUCKET_NAMES.get(meta.get("bucket", DEFAULT_BUCKET), "Unknown"),
+                "bucket": snapshot_row.get("bucket", meta.get("bucket", DEFAULT_BUCKET)),
+                "bucket_name": BUCKET_NAMES.get(
+                    snapshot_row.get("bucket", meta.get("bucket", DEFAULT_BUCKET)), "Unknown"
+                ),
             }
         )
 
     return recommendations
 
 
-def _assign_final_ranks(recommendations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _assign_final_ranks(
+    recommendations: list[dict[str, Any]],
+    bucket_topn: int = 2,
+) -> list[dict[str, Any]]:
     """백테스트 리포트와 동일한 정렬 및 보유/대기 순위를 부여합니다."""
 
     # 1. 정렬 그룹 할당 (daily_report.py와 동일)
     # 0: CASH (현금은 여기서는 제외됨)
-    # 1: 내일 보유할 최종 타겟 10종목 (HOLD, BUY, BUY_REBALANCE, BUY_REPLACE)
+    # 1: 내일 보유할 최종 타겟 10종목 (HOLD, BUY, BUY_REPLACE)
     # 2: 제외/대기 대상 (WAIT, SELL, SELL_REPLACE)
     for rec in recommendations:
-        state = str(rec.get("state", "")).upper()
+        shares = _safe_float(rec.get("shares"), 0.0) or 0.0
+        is_current_holding = shares > 0
+        rec["_is_current_holding"] = is_current_holding
 
-        if state in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_REPLACE"):
+        if is_current_holding:
             rec["_sort_group"] = 1
         else:
             rec["_sort_group"] = 2
 
-    # 2. 정렬: Group -> Bucket -> Score (desc) -> Ticker
+    # 2. 정렬 로직 적용 (보유 여부 -> 버킷 -> 점수)
     def _sort_key(x):
+        holding_priority = 0 if x.get("_is_current_holding") else 1
+        bucket_val = x.get("bucket")
+        try:
+            bucket_priority = int(bucket_val) if bucket_val is not None else 99
+        except (TypeError, ValueError):
+            bucket_priority = 99
         return (
-            x.get("_sort_group", 2),
-            x.get("bucket", 99) if x.get("_sort_group") == 1 else 99,  # Group 1은 버킷 정렬, Group 2는 점수순 정렬
+            holding_priority,
+            bucket_priority,
             -(x.get("score") if x.get("score") is not None else float("-inf")),
             x.get("ticker", ""),
         )
@@ -313,6 +408,104 @@ def _safe_float(value: Any, default: float | None = None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _calc_rsi(close_series: pd.Series, period: int = 14) -> float:
+    if close_series is None or len(close_series) < period + 1:
+        return 0.0
+    try:
+        delta = close_series.diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+        avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+        rs = avg_gain / avg_loss.replace(0, pd.NA)
+        rsi = 100 - (100 / (1 + rs))
+        val = _safe_float(rsi.iloc[-1], 0.0) or 0.0
+        return max(0.0, min(100.0, float(val)))
+    except Exception:
+        return 0.0
+
+
+def _resolve_price_column(frame: pd.DataFrame, candidates: tuple[str, ...]) -> pd.Series | None:
+    for candidate in candidates:
+        if candidate in frame.columns:
+            series = frame[candidate]
+            if isinstance(series, pd.DataFrame):
+                series = series.iloc[:, 0]
+            return pd.to_numeric(series, errors="coerce")
+    return None
+
+
+def _adjust_current_holding_metrics(
+    df: pd.DataFrame,
+    price_frame: pd.DataFrame | None,
+    *,
+    target_date: pd.Timestamp,
+    raw_holding_days: int,
+    avg_cost: float | None,
+    country_code: str,
+) -> tuple[int, float | None]:
+    """다음날 시가 체결 규칙에 맞춰 현재 보유의 보유일/진입가를 보정합니다."""
+
+    if raw_holding_days <= 0 or df.empty:
+        return raw_holding_days, avg_cost
+
+    df_up_to_date = df[df.index <= target_date]
+    if df_up_to_date.empty:
+        return raw_holding_days, avg_cost
+
+    holding_dates: list[pd.Timestamp] = []
+    for idx in reversed(df_up_to_date.index):
+        row = df_up_to_date.loc[idx]
+        shares = _safe_float(row.get("shares"), 0)
+        if shares and shares > 0:
+            holding_dates.append(pd.Timestamp(idx))
+        else:
+            break
+
+    if not holding_dates:
+        return raw_holding_days, avg_cost
+
+    holding_dates.reverse()
+    entry_signal_dt = holding_dates[0]
+    entry_row = df_up_to_date.loc[entry_signal_dt]
+    entry_decision = str(entry_row.get("decision", "") or "").upper()
+    if entry_decision not in {"BUY", "BUY_REPLACE"}:
+        return raw_holding_days, avg_cost
+
+    adjusted_days = max(raw_holding_days - 1, 0)
+    if price_frame is None or price_frame.empty:
+        return adjusted_days, avg_cost
+
+    price_history = price_frame.sort_index().copy()
+    try:
+        price_history.index = pd.to_datetime(price_history.index).normalize()
+    except Exception:
+        return adjusted_days, avg_cost
+
+    if entry_signal_dt not in price_history.index:
+        return adjusted_days, avg_cost
+
+    open_series = _resolve_price_column(price_history, ("Open", "open"))
+    close_series = _resolve_price_column(price_history, ("Close", "close", "unadjusted_close"))
+    if open_series is None or close_series is None:
+        return adjusted_days, avg_cost
+
+    loc = price_history.index.get_loc(entry_signal_dt)
+    trade_idx = int(loc.stop) - 1 if isinstance(loc, slice) else int(loc)
+    if trade_idx + 1 > len(price_history.index) - 1:
+        return adjusted_days, avg_cost
+
+    adjusted_avg_cost = calculate_trade_price(
+        trade_idx,
+        len(price_history.index),
+        open_series.to_numpy(),
+        close_series.to_numpy(),
+        country_code,
+        is_buy=True,
+    )
+    return adjusted_days, adjusted_avg_cost
 
 
 def _calculate_holding_days(df: pd.DataFrame, target_date: pd.Timestamp) -> int:
@@ -395,10 +588,20 @@ def _enrich_with_nav_data(
             # 실시간 가격으로 덮어쓰기
             if nav_info.get("nowVal"):
                 rec["price"] = nav_info.get("nowVal")
+                shares = _safe_float(rec.get("shares"), 0) or 0.0
+                avg_cost = _safe_float(rec.get("avg_cost"), 0) or 0.0
+                live_price = _safe_float(rec.get("price"), 0) or 0.0
+                if shares > 0 and avg_cost > 0 and live_price > 0:
+                    cost_basis = avg_cost * shares
+                    pv = live_price * shares
+                    rec["evaluation_pct"] = ((pv - cost_basis) / cost_basis) * 100.0
 
             # [User Request] 개별 종목의 경우 실시간 changeRate가 있으면 daily_pct 업데이트 (선택 사항)
-            # 여기서는 백테스트 결과의 daily_pct가 0인 경우 실시간 데이터로 보완
+            # 호주 등 외부 API의 changeRate 신뢰도가 낮은 경우를 대비해 한국 계좌에서만 동작하도록 제한
             if rec.get("daily_pct", 0) == 0 and nav_info.get("changeRate") is not None:
+                # _enrich_with_nav_data는 상위 호출부(generate_recommendation_report)에서
+                # 이미 한국 국가 코드일 때만 호출되지만, 로직의 명확성을 위해 한 번 더 배제 로직을 확인하거나
+                # 이 함수 자체가 네이버 전용임을 명시함.
                 rec["daily_pct"] = nav_info.get("changeRate")
 
     return recommendations
@@ -466,7 +669,7 @@ def _apply_bucket_selection(
                 rec["decision"] = "WAIT"
                 rec["state"] = "WAIT"
 
-        final_list.append(rec)
+        final_list.extend(group)
 
     return final_list
 
@@ -480,8 +683,15 @@ def generate_recommendation_report(
 
     account_settings = get_account_settings(account_id)
     country_code = (account_settings.get("country_code") or account_id).strip().lower()
-    strategy_cfg = account_settings.get("strategy", {}) or {}
-    backtest_last_months = strategy_cfg.get("BACKTEST_LAST_MONTHS", 12)
+    strategy_cfg = resolve_strategy_params(account_settings.get("strategy", {}) or {})
+    backtest_last_months = strategy_cfg.get("TUNE_MONTHS")
+    if backtest_last_months is None:
+        raise ValueError("strategy.TUNE_MONTHS 설정이 누락되었습니다.")
+    try:
+        ma_month = int(strategy_cfg.get("MA_MONTH", 12))
+    except Exception:
+        ma_month = 12
+    ma_type = str(strategy_cfg.get("MA_TYPE", "HMA") or "HMA").upper()
 
     try:
         months_back = int(backtest_last_months)
@@ -569,7 +779,18 @@ def generate_recommendation_report(
     )
 
     # 마지막 날 추천 데이터 추출
-    recommendations = extract_recommendations_from_backtest(result, ticker_meta=universe_meta)
+    recommendations = extract_recommendations_from_backtest(
+        result,
+        ticker_meta=universe_meta,
+        price_frames=dict(prefetched_map),
+        country_code=country_code,
+        ma_days=max(1, int(ma_month) * TRADING_DAYS_PER_MONTH),
+        ma_type=ma_type,
+    )
+
+    # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
+    if country_code in ("kor", "kr"):
+        recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
 
     # 전체 기간 데이터(prefetched_map)를 이용하여 기간별 수익률(6m, 12m 등) 재계산/보강
     # [수익률 표시] 전략은 과거 기준이라도, 수익률은 현재(end_date) 기준으로 표시
@@ -579,12 +800,27 @@ def generate_recommendation_report(
         base_date=end_date,
     )
 
-    # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
-    if country_code in ("kor", "kr"):
-        recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
-
     # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
-    recommendations = _assign_final_ranks(recommendations)
+    weighted: list[dict[str, Any]] = []
+    for etf in etf_universe:
+        if not isinstance(etf, dict):
+            continue
+        ticker = str(etf.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        weight_raw = etf.get("weight")
+        if weight_raw is None:
+            continue
+        try:
+            weight_val = float(weight_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"비중이 숫자가 아닙니다: {ticker}") from exc
+        if weight_val > 0:
+            weighted.append(etf)
+    if not weighted:
+        raise ValueError("종목 리스트의 weight 설정이 필요합니다.")
+    topn = len(weighted)
+    recommendations = _assign_final_ranks(recommendations, bucket_topn=topn)
 
     return RecommendationReport(
         account_id=account_id,
@@ -645,10 +881,11 @@ def dump_recommendation_log(
     country_code = report.country_code
 
     # 기본 디렉토리 설정
+    account_dirname = get_account_dir(account_id).name
     if results_dir is None:
-        base_dir = Path(__file__).parent / "zaccounts" / account_id / "results"
+        base_dir = Path(__file__).parent / "zaccounts" / account_dirname / "results"
     else:
-        base_dir = Path(results_dir) / account_id / "results"
+        base_dir = Path(results_dir) / account_dirname / "results"
 
     base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -708,6 +945,7 @@ def dump_recommendation_log(
         bucket_name = BUCKET_NAMES.get(bucket_val, str(bucket_val))
 
         state = item.get("state", "-")
+        is_pending_tomorrow = bool(item.get("is_pending_tomorrow", False))
         holding_days = item.get("holding_days", 0)
         daily_pct = item.get("daily_pct", 0)
         evaluation_pct = item.get("evaluation_pct", 0)
@@ -733,9 +971,9 @@ def dump_recommendation_log(
             ticker,
             name,
             state,
-            format_trading_days(holding_days),
+            format_trading_days(0 if is_pending_tomorrow else holding_days),
             format_pct_change(daily_pct),
-            format_pct_change(evaluation_pct) if evaluation_pct != 0 else "-",
+            "-" if is_pending_tomorrow else (format_pct_change(evaluation_pct) if evaluation_pct != 0 else "-"),
             format_price(price, country_code),
         ]
         if show_deviation:
@@ -932,6 +1170,10 @@ def _enrich_with_period_returns(
         if not current_price:
             continue
 
+        close_col = "close" if "close" in df.columns else "Close"
+        if close_col not in df.columns:
+            continue
+
         # 과거 가격 조회 및 수익률 갱신
         for key, days in periods.items():
             target_date = base_date - pd.Timedelta(days=days)
@@ -950,6 +1192,18 @@ def _enrich_with_period_returns(
                         rec[key] = ret
             except Exception:
                 pass
+
+        try:
+            history = df.loc[df.index <= base_date, close_col].dropna()
+            if not history.empty and current_price > 0:
+                max_price = float(history.max())
+                if max_price > 0:
+                    rec["drawdown_from_high"] = ((current_price / max_price) - 1.0) * 100.0
+                trend_prices = history.iloc[-59:].tolist()
+                trend_prices.append(float(current_price))
+                rec["trend_prices"] = trend_prices[-60:]
+        except Exception:
+            pass
 
     return recommendations
 

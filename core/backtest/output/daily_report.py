@@ -5,13 +5,12 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 from core.backtest.output.formatters import (
-    BUCKET_NAMES,
     _format_date_kor,
     _format_quantity,
     _is_finite_number,
     _resolve_formatters,
 )
-from strategies.maps.constants import DECISION_MESSAGES
+from core.backtest.output.snapshot_rows import advance_snapshot_state, build_snapshot_rows, create_snapshot_build_state
 from utils.data_loader import get_exchange_rate_series
 from utils.formatters import format_trading_days
 from utils.notification import build_summary_line_from_summary_data
@@ -33,163 +32,65 @@ def _build_daily_table_rows(
     buy_date_map: dict[str, pd.Timestamp | None],
     holding_days_map: dict[str, int],
     prev_rows_cache: dict[str, pd.Series | None],
+    prev_pending_actions_map: dict[str, str],
+    prev_effective_shares_map: dict[str, float],
+    prev_effective_avg_cost_map: dict[str, float],
     price_overrides: dict[str, float] | None = None,
-) -> list[list[str]]:
-    entries = []
-    tickers_order = []
-    if "CASH" in result.ticker_timeseries:
-        tickers_order.append("CASH")
+) -> tuple[list[list[str]], float, float]:
+    snapshot_state = create_snapshot_build_state()
+    snapshot_state.buy_date_map = buy_date_map
+    snapshot_state.holding_days_map = holding_days_map
+    snapshot_state.prev_rows_cache = prev_rows_cache
+    snapshot_state.prev_pending_actions_map = prev_pending_actions_map
+    snapshot_state.prev_effective_shares_map = prev_effective_shares_map
+    snapshot_state.prev_effective_avg_cost_map = prev_effective_avg_cost_map
 
-    other_tickers = sorted(
-        [str(t) for t in result.ticker_timeseries.keys() if str(t).upper() != "CASH"], key=lambda x: str(x).upper()
+    snapshot_rows = build_snapshot_rows(
+        result=result,
+        target_date=target_date,
+        total_value=total_value,
+        total_cash=total_cash,
+        state=snapshot_state,
+        price_overrides=price_overrides,
     )
-    tickers_order.extend(other_tickers)
 
-    for idx, ticker in enumerate(tickers_order, 1):
-        ts = result.ticker_timeseries.get(ticker)
-        if ts is None or not isinstance(ts, pd.DataFrame):
-            continue
-        if target_date not in ts.index:
-            continue
-
-        row = ts.loc[target_date]
-        ticker_key = str(ticker).upper()
-        meta = result.ticker_meta.get(ticker_key, {})
-
-        price_val = row.get("price")
-        shares_val = row.get("shares")
-        avg_cost_val = row.get("avg_cost")
-
-        price = float(price_val) if pd.notna(price_val) else 0.0
-        if price_overrides and ticker_key in price_overrides:
-            price = float(price_overrides[ticker_key])
-
-        shares = float(shares_val) if pd.notna(shares_val) else 0.0
-        pv = price * shares
-        avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
-
-        decision = str(row.get("decision", "")).upper()
-        score = row.get("score")
-        note = str(row.get("note", "") or "")
-
-        is_cash = ticker_key == "CASH"
-        if is_cash:
-            price = 1.0
-            shares = pv if pv else 1.0
-
-        prev_row = prev_rows_cache.get(ticker_key)
-        prev_price = (
-            float(prev_row.get("price")) if (prev_row is not None and pd.notna(prev_row.get("price"))) else None
-        )
-
-        daily_ret = ((price / prev_price) - 1.0) * 100.0 if prev_price else 0.0
-
-        pv_safe = pv if _is_finite_number(pv) else 0.0
-        total_value_safe = total_value if _is_finite_number(total_value) and total_value > 0 else 0.0
-        weight = (pv_safe / total_value_safe * 100.0) if total_value_safe > 0 else 0.0
-
-        if ticker_key not in buy_date_map:
-            buy_date_map[ticker_key] = None
-            holding_days_map[ticker_key] = 0
-
-        if not is_cash:
-            if shares > 0:
-                if buy_date_map[ticker_key] is None or decision.startswith("BUY"):
-                    buy_date_map[ticker_key] = target_date
-                    holding_days_map[ticker_key] = 1
-                else:
-                    holding_days_map[ticker_key] += 1
-            else:
-                buy_date_map[ticker_key] = None
-                holding_days_map[ticker_key] = 0
-        else:
-            buy_date_map[ticker_key] = None
-            holding_days_map[ticker_key] = 0
-
-        holding_days_display = format_trading_days(holding_days_map.get(ticker_key, 0))
-        price_display = "1" if is_cash else (price_formatter(price) if _is_finite_number(price) else "-")
-        shares_display = "1" if is_cash else _format_quantity(shares, qty_precision)
-
-        if is_cash and abs(pv) < 0.01:
-            pv = 0.0
-        pv_display = money_formatter(pv)
-
-        cost_basis = avg_cost * shares if _is_finite_number(avg_cost) and shares > 0 else 0.0
-        eval_profit_value = 0.0 if is_cash else (pv - cost_basis)
-
-        evaluated_profit_display = money_formatter(eval_profit_value)
-        evaluated_pct = (eval_profit_value / cost_basis * 100.0) if cost_basis > 0 else 0.0
-        evaluated_pct_display = f"{evaluated_pct:+.1f}%" if cost_basis > 0 else "-"
-
-        score_display = f"{float(score):.1f}" if _is_finite_number(score) else "-"
-        weight_display = f"{weight:.1f}%"
-        if is_cash and total_value_safe > 0:
-            cash_ratio = (total_cash / total_value_safe) if _is_finite_number(total_cash) else 0.0
-            weight_display = f"{cash_ratio * 100.0:.1f}%"
-
-        message = note
-        if not message:
-            message = DECISION_MESSAGES.get(decision, "")
-
-        # decision_conf = BACKTEST_STATUS_LIST.get(decision, {})
-        # decision_order = decision_conf.get("order", 99)
-        score_val = float(score) if _is_finite_number(score) else float("-inf")
-
-        bucket_id = meta.get("bucket")
-        bucket_display = "-"
-        if bucket_id and bucket_id in BUCKET_NAMES:
-            bucket_display = f"{bucket_id}. {BUCKET_NAMES[bucket_id]}"
-        elif bucket_id:
-            bucket_display = str(bucket_id)
-
-        name_display = str(meta.get("name") or ticker_key)
-        if is_cash:
-            name_display = "현금"
-
+    table_rows: list[list[str]] = []
+    eval_profit_sum = 0.0
+    eval_cost_sum = 0.0
+    for snapshot_row in snapshot_rows:
+        is_cash = bool(snapshot_row["is_cash"])
+        price = float(snapshot_row["price"])
+        shares = float(snapshot_row["shares"])
+        pv = float(snapshot_row["pv"])
+        evaluation_profit = snapshot_row["evaluation_profit"]
+        score = snapshot_row["score"]
         row_data = [
-            "-",  # Index placeholder
-            bucket_display,
-            ticker_key,
-            name_display,
-            decision or "-",
-            holding_days_display,
-            price_display,
-            f"{daily_ret:+.1f}%",
-            shares_display,
-            pv_display,
-            evaluated_profit_display,
-            evaluated_pct_display,
-            weight_display,
-            score_display,
-            message,
+            snapshot_row["row_index"],
+            snapshot_row["bucket_display"],
+            snapshot_row["ticker"],
+            snapshot_row["name"],
+            snapshot_row["display_decision"],
+            format_trading_days(int(snapshot_row["holding_days"])),
+            "1" if is_cash else (price_formatter(price) if _is_finite_number(price) else "-"),
+            f"{float(snapshot_row['daily_pct']):+.1f}%",
+            "-" if snapshot_row["evaluation_pct"] is None else f"{float(snapshot_row['evaluation_pct']):+.1f}%",
+            "1" if is_cash else _format_quantity(shares, qty_precision),
+            money_formatter(0.0 if is_cash and abs(pv) < 0.01 else pv),
+            "-" if evaluation_profit is None else money_formatter(float(evaluation_profit)),
+            f"{float(snapshot_row['weight']):.1f}%",
+            f"{float(score):.1f}" if _is_finite_number(score) else "-",
+            str(snapshot_row["message"] or ""),
         ]
+        table_rows.append(row_data)
 
-        sort_group = 2  # Default: WAIT / others
-        if is_cash:
-            sort_group = 0
-        elif decision in ("HOLD", "BUY", "BUY_REBALANCE", "BUY_REPLACE", "BUY_TODAY"):
-            sort_group = 1
+        if (not is_cash) and shares > 0 and evaluation_profit is not None:
+            eval_profit_val = float(evaluation_profit)
+            cost_basis = pv - eval_profit_val
+            if cost_basis > 0:
+                eval_profit_sum += eval_profit_val
+                eval_cost_sum += cost_basis
 
-        bucket_sort_val = int(bucket_id) if (bucket_id and str(bucket_id).isdigit()) else 99
-
-        # Final Sort Key: Group -> Bucket (for Group 1) -> Score (desc) -> Ticker
-        sort_key_tuple = (sort_group, bucket_sort_val if sort_group == 1 else 0, -score_val, ticker_key)
-        entries.append((sort_key_tuple, row_data))
-
-    entries.sort(key=lambda x: x[0])
-
-    sorted_rows = []
-    current_idx = 1
-    for _, row_data in entries:
-        if row_data[2] == "CASH":
-            row_data[0] = "0"
-            row_data[1] = "-"
-        else:
-            row_data[0] = str(current_idx)
-            current_idx += 1
-        sorted_rows.append(row_data)
-
-    return sorted_rows
+    return table_rows, eval_profit_sum, eval_cost_sum
 
 
 def _generate_daily_report_lines(result: AccountBacktestResult, account_settings: dict[str, Any]) -> list[str]:
@@ -208,10 +109,10 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "보유일",
         "현재가",
         "일간(%)",
+        "평가(%)",
         "수량",
         "금액",
         "평가손익",
-        "평가(%)",
         "비중",
         "점수",
         "문구",
@@ -225,18 +126,16 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "right",  # 보유일
         "right",  # 현재가
         "right",  # 일간(%)
+        "right",  # 평가(%)
         "right",  # 수량
         "right",  # 금액
         "right",  # 평가손익
-        "right",  # 평가(%)
         "right",  # 비중
         "right",  # 점수
         "left",  # 문구
     ]
 
-    buy_date_map = {}
-    holding_days_map = {}
-    prev_rows_cache = {}
+    snapshot_state = create_snapshot_build_state()
 
     fx_series = None
     if currency != "KRW":
@@ -304,7 +203,7 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         lines.append("")
         lines.append(line_str)
 
-        table_rows = _build_daily_table_rows(
+        table_rows, eval_profit_sum, eval_cost_sum = _build_daily_table_rows(
             result=result,
             target_date=target_date,
             total_value=total_value,
@@ -312,16 +211,22 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
             price_formatter=price_formatter,
             money_formatter=money_formatter,
             qty_precision=qty_precision,
-            buy_date_map=buy_date_map,
-            holding_days_map=holding_days_map,
-            prev_rows_cache=prev_rows_cache,
+            buy_date_map=snapshot_state.buy_date_map,
+            holding_days_map=snapshot_state.holding_days_map,
+            prev_rows_cache=snapshot_state.prev_rows_cache,
+            prev_pending_actions_map=snapshot_state.prev_pending_actions_map,
+            prev_effective_shares_map=snapshot_state.prev_effective_shares_map,
+            prev_effective_avg_cost_map=snapshot_state.prev_effective_avg_cost_map,
         )
 
-        lines.extend(render_table_eaw(headers, table_rows, aligns))
+        eval_return_pct = (eval_profit_sum / eval_cost_sum * 100.0) if eval_cost_sum > 0 else 0.0
+        summary_data["eval_profit_loss"] = eval_profit_sum
+        summary_data["eval_return_pct"] = eval_return_pct
 
-        for ticker in result.ticker_timeseries:
-            ts = result.ticker_timeseries[ticker]
-            if isinstance(ts, pd.DataFrame) and target_date in ts.index:
-                prev_rows_cache[str(ticker).upper()] = ts.loc[target_date].copy()
+        line_str = build_summary_line_from_summary_data(summary_data, header_formatter, use_html=False, prefix=prefix)
+        lines[-1] = line_str
+
+        lines.extend(render_table_eaw(headers, table_rows, aligns))
+        advance_snapshot_state(result=result, target_date=target_date, state=snapshot_state)
 
     return lines

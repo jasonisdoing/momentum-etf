@@ -66,7 +66,7 @@ def sort_decisions_by_order_and_score(decisions: list[dict[str, Any]]) -> None:
 
     백테스트와 추천에서 공통으로 사용되는 정렬 함수입니다.
     """
-    from strategies.maps.constants import BACKTEST_STATUS_LIST
+    from core.strategy.constants import BACKTEST_STATUS_LIST
 
     def sort_key(item_dict):
         state = item_dict["state"]
@@ -74,7 +74,7 @@ def sort_decisions_by_order_and_score(decisions: list[dict[str, Any]]) -> None:
         score = item_dict.get("score", 0.0)
         ticker = item_dict.get("ticker") or item_dict.get("tkr", "")
         order = BACKTEST_STATUS_LIST.get(state, {}).get("order", 99)
-        # composite_score 우선, 그 다음 MAPS score, 마지막으로 ticker
+        # composite_score 우선, 그 다음 RANK score, 마지막으로 ticker
         return (order, -composite_score, -score, ticker)
 
     decisions.sort(key=sort_key)

@@ -7,6 +7,7 @@ import pandas as pd
 
 from core.backtest.output.daily_report import _generate_daily_report_lines
 from core.backtest.output.summary_report import print_backtest_summary
+from utils.settings_loader import get_account_dir
 
 if TYPE_CHECKING:
     from core.backtest.domain import AccountBacktestResult
@@ -18,10 +19,11 @@ def dump_backtest_log(
     result: AccountBacktestResult, account_settings: dict[str, Any], *, results_dir: Path | str | None = None
 ) -> Path:
     account_id = result.account_id
+    account_dirname = get_account_dir(account_id).name
     if results_dir:
-        base_dir = Path(results_dir) / account_id / "results"
+        base_dir = Path(results_dir) / account_dirname / "results"
     else:
-        base_dir = DEFAULT_RESULTS_DIR / account_id / "results"
+        base_dir = DEFAULT_RESULTS_DIR / account_dirname / "results"
     base_dir.mkdir(parents=True, exist_ok=True)
 
     path = base_dir / f"backtest_{pd.Timestamp.now().strftime('%Y-%m-%d')}.log"

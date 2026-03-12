@@ -12,7 +12,7 @@ import pandas as pd
 from config import TRADING_DAYS_PER_MONTH
 from core.backtest.analysis.summaries import build_bucket_summaries
 from core.backtest.engine import run_portfolio_backtest
-from strategies.maps.rules import StrategyRules
+from core.strategy.rules import StrategyRules
 from utils.account_registry import get_common_file_settings
 from utils.data_loader import get_exchange_rate_series, get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
@@ -88,6 +88,36 @@ class AccountBacktestResult:
         }
 
 
+def _extract_target_weights(etf_universe: Sequence[Mapping[str, Any]]) -> dict[str, float]:
+    """종목 리스트의 weight 필드에서 목표 비중을 추출/정규화한다."""
+    raw: dict[str, float] = {}
+    total = 0.0
+    for item in etf_universe:
+        ticker = str(item.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        if "weight" not in item:
+            continue
+        try:
+            weight_val = float(item.get("weight"))
+        except (TypeError, ValueError):
+            raise ValueError(f"비중이 숫자가 아닙니다: {ticker}")
+        if weight_val <= 0:
+            raise ValueError(f"비중은 0보다 커야 합니다: {ticker}")
+        raw[ticker] = weight_val
+        total += weight_val
+
+    if not raw:
+        raise ValueError("종목 리스트의 weight 설정이 필요합니다.")
+
+    # 저장 단위는 1.0(레거시) 또는 100(현재 UI) 합계를 모두 허용하고, 내부는 1.0 기준으로 정규화한다.
+    if abs(total - 1.0) <= 1e-3:
+        return raw
+    if abs(total - 100.0) <= 1e-2:
+        return {ticker: value / 100.0 for ticker, value in raw.items()}
+    raise ValueError(f"비중 합계는 100이어야 합니다. 현재 합계: {int(round(total))}")
+
+
 def run_account_backtest(
     account_id: str,
     *,
@@ -156,14 +186,16 @@ def run_account_backtest(
     if strategy_override is not None:
         strategy_rules = StrategyRules.from_values(
             ma_days=strategy_override.ma_days,
-            bucket_topn=strategy_override.bucket_topn,
+            topn=strategy_override.topn,
             ma_type=strategy_override.ma_type,
             rebalance_mode=strategy_override.rebalance_mode,
+            cooldown=strategy_override.cooldown_days,
+            target_weights=strategy_override.target_weights,
             enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
         )
         strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
-        strategy_settings["BUCKET_TOPN"] = strategy_rules.bucket_topn
+        strategy_settings["TOPN"] = strategy_rules.topn
         strategy_settings["MA_TYPE"] = strategy_rules.ma_type
 
     backtest_start_date_str = _resolve_backtest_start_date(None, override_settings, account_settings)
@@ -217,15 +249,18 @@ def run_account_backtest(
     ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금"}
 
     # 검증은 get_account_strategy에서 이미 완료됨 - 바로 사용
-    bucket_topn = strategy_rules.bucket_topn
+    target_weights: dict[str, float] | None = _extract_target_weights(etf_universe)
+    topn = len(target_weights)
+    bucket_topn = topn  # backward-compatible field naming for reports/result schema
     if not is_tuning_fast_path:
-        _log(f"[백테스트] 포트폴리오 TOPN: {bucket_topn}")
+        _log(f"[백테스트] 포트폴리오 TOPN: {topn}")
 
     if not is_tuning_fast_path:
         _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
     backtest_kwargs = _build_backtest_kwargs(
         strategy_rules=strategy_rules,
         strategy_settings=strategy_settings,
+        hr_target_weights=target_weights,
         prefetched_data=prefetched_data,
         prefetched_metrics=prefetched_metrics,
         quiet=quiet,
@@ -278,20 +313,12 @@ def run_account_backtest(
                 f"{account_id.upper()} 기간 {date_range[0]}~{future_end_date}의 거래일 정보를 로드하지 못했습니다."
             )
 
-    # 버켓 맵 구성 및 전체 top_n 계산
-    bucket_map = {str(item.get("ticker", "")).upper(): item.get("bucket", 1) for item in etf_universe}
-    unique_buckets = {item.get("bucket", 1) for item in etf_universe}
-    num_buckets = len(unique_buckets) if unique_buckets else 1
-    total_top_n = bucket_topn * num_buckets
-
     ticker_timeseries = (
         run_portfolio_backtest(
             stocks=etf_universe,
             initial_capital=initial_capital_value,
             core_start_date=start_date,
-            top_n=total_top_n,
-            bucket_topn=bucket_topn,  # 버켓당 제한 전달
-            bucket_map=bucket_map,  # 버켓 맵 전달
+            top_n=topn,
             date_range=date_range,
             country=country_code,
             missing_ticker_sink=runtime_missing_tickers,
@@ -308,7 +335,7 @@ def run_account_backtest(
     portfolio_df = _build_portfolio_timeseries(
         ticker_timeseries,
         initial_capital_value,
-        bucket_topn,
+        topn,
     )
 
     (
@@ -325,7 +352,7 @@ def run_account_backtest(
         initial_capital_krw=capital_info.krw,
         currency=display_currency,
         bucket_topn=bucket_topn,
-        holdings_limit=total_top_n,  # Pass total limit
+        holdings_limit=topn,
         account_settings=account_settings,
         prefetched_data=prefetched_data,
         ticker_timeseries=ticker_timeseries,
@@ -365,7 +392,7 @@ def run_account_backtest(
         initial_capital_krw=capital_info.krw,
         currency=display_currency,
         bucket_topn=bucket_topn,
-        holdings_limit=total_top_n,
+        holdings_limit=topn,
         summary=summary,
         portfolio_timeseries=portfolio_df,
         ticker_timeseries=ticker_timeseries,
@@ -391,7 +418,7 @@ def _resolve_backtest_start_date(
     우선순위:
     1. 직접 전달된 start_date
     2. override_settings의 backtest_start_date
-    3. account_settings의 strategy.BACKTEST_LAST_MONTHS
+    3. account_settings의 strategy.TUNE_MONTHS
     """
     if start_date is not None:
         return str(start_date)
@@ -400,7 +427,8 @@ def _resolve_backtest_start_date(
     if "start_date" in override_settings:
         return str(override_settings["start_date"])
 
-    account_months = account_settings.get("strategy", {}).get("BACKTEST_LAST_MONTHS") if account_settings else None
+    strategy_params = resolve_strategy_params(account_settings.get("strategy", {}) if account_settings else {})
+    account_months = strategy_params.get("TUNE_MONTHS")
     if account_months is not None:
         try:
             months_back = int(account_months)
@@ -408,9 +436,7 @@ def _resolve_backtest_start_date(
             return calc_date.strftime("%Y-%m-%d")
         except Exception:
             pass
-    raise ValueError(
-        "BACKTEST_LAST_MONTHS 설정이 필요합니다. 계정 설정의 strategy.BACKTEST_LAST_MONTHS 값을 확인하세요."
-    )
+    raise ValueError("TUNE_MONTHS 설정이 필요합니다. 계정 설정의 strategy.TUNE_MONTHS 값을 확인하세요.")
 
 
 def _resolve_initial_capital(
@@ -501,6 +527,7 @@ def _build_backtest_kwargs(
     *,
     strategy_rules,
     strategy_settings: Mapping[str, Any],
+    hr_target_weights: Mapping[str, float] | None,
     prefetched_data: Mapping[str, pd.DataFrame] | None,
     prefetched_metrics: Mapping[str, dict[str, Any]] | None,
     quiet: bool,
@@ -511,6 +538,8 @@ def _build_backtest_kwargs(
         "ma_days": strategy_rules.ma_days,
         "ma_type": strategy_rules.ma_type,
         "rebalance_mode": strategy_rules.rebalance_mode,
+        "cooldown": strategy_rules.cooldown_days,
+        "target_weights": hr_target_weights or strategy_rules.target_weights or strategy_settings.get("TARGET_WEIGHTS"),
         "quiet": quiet,
         "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }
@@ -540,6 +569,8 @@ def _build_portfolio_timeseries(
         raise RuntimeError("종목들 간에 공통된 거래일이 없습니다.")
 
     rows = []
+    prev_effective_shares: dict[str, float] = {}
+    prev_effective_avg_cost: dict[str, float] = {}
     prev_total_value: float | None = None
     for dt in common_index:
         total_value = 0.0
@@ -557,28 +588,80 @@ def _build_portfolio_timeseries(
                 continue
 
             row = ts.loc[dt]
-            pv_val = row.get("pv")
-            if pd.notna(pv_val):
-                total_value += float(pv_val)
+            pending_action = str(row.get("pending_action", "") or "").upper()
+            is_pending_nextday = bool(pending_action)
+            trade_amount = float(row.get("trade_amount", 0.0) or 0.0)
 
             if ticker == "CASH":
                 cash_val = row.get("pv")
                 if pd.notna(cash_val):
-                    cash_value += float(cash_val)
+                    effective_cash = float(cash_val)
+                    effective_cash += sum(
+                        float(ts2.loc[dt].get("trade_amount", 0.0) or 0.0)
+                        for tk2, ts2 in ticker_timeseries.items()
+                        if tk2 != "CASH"
+                        and isinstance(ts2, pd.DataFrame)
+                        and dt in ts2.index
+                        and str(ts2.loc[dt].get("pending_action", "") or "").upper().startswith("BUY")
+                    )
+                    effective_cash -= sum(
+                        float(ts2.loc[dt].get("trade_amount", 0.0) or 0.0)
+                        for tk2, ts2 in ticker_timeseries.items()
+                        if tk2 != "CASH"
+                        and isinstance(ts2, pd.DataFrame)
+                        and dt in ts2.index
+                        and str(ts2.loc[dt].get("pending_action", "") or "").upper().startswith("SELL")
+                    )
+                    cash_value += effective_cash
+                    total_value += effective_cash
                 continue
 
             price_val = row.get("price")
             shares_val = row.get("shares")
             avg_cost_val = row.get("avg_cost")
+            trade_shares_val = row.get("trade_shares", 0.0)
 
             price = float(price_val) if pd.notna(price_val) else 0.0
-            shares = float(shares_val) if pd.notna(shares_val) else 0.0
-            avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
+            raw_shares = float(shares_val) if pd.notna(shares_val) else 0.0
+            raw_avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
+            traded_shares = float(trade_shares_val) if pd.notna(trade_shares_val) else 0.0
 
-            total_holdings += price * shares
+            # 엔진은 pending_action 거래 결과를 당일 row에 먼저 반영한다.
+            # 집계에서는 "다음날 체결" 의미를 복원해야 하므로:
+            # - pending BUY*: 아직 미체결이므로 보유수량 0
+            # - pending SELL*: 아직 미체결이므로 매도 직전 수량(=잔여+당일매도수량)으로 복원
+            if is_pending_nextday:
+                if pending_action.startswith("BUY"):
+                    reconstructed_shares = max(0.0, raw_shares - max(0.0, traded_shares))
+                    shares = reconstructed_shares
+                    if shares > 0:
+                        avg_cost = prev_effective_avg_cost.get(ticker, raw_avg_cost)
+                    else:
+                        avg_cost = 0.0
+                elif pending_action.startswith("SELL"):
+                    reconstructed_shares = raw_shares + max(0.0, traded_shares)
+                    shares = (
+                        reconstructed_shares
+                        if reconstructed_shares > 0
+                        else prev_effective_shares.get(ticker, raw_shares)
+                    )
+                    avg_cost = prev_effective_avg_cost.get(ticker, raw_avg_cost)
+                else:
+                    shares = raw_shares
+                    avg_cost = raw_avg_cost
+            else:
+                shares = raw_shares
+                avg_cost = raw_avg_cost
+
+            effective_pv = price * shares
+            total_value += effective_pv
+            total_holdings += effective_pv
             if shares > 0:
                 held_count += 1
                 total_cost += avg_cost * shares
+
+            prev_effective_shares[ticker] = shares
+            prev_effective_avg_cost[ticker] = avg_cost
 
         if not math.isfinite(cash_value):
             cash_value = 0.0
@@ -834,10 +917,46 @@ def _build_summary(
         benchmark_cagr_pct = float(benchmarks_summary[0]["cagr_pct"])
 
     weekly_summary_rows: list[dict[str, Any]] = []
+    benchmark_weekly_return_map: dict[pd.Timestamp, float] = {}
+    benchmark_weekly_cum_map: dict[pd.Timestamp, float] = {}
+    benchmark_weekly_name = ""
     monthly_returns = pd.Series(dtype=float)
     monthly_cum_returns = pd.Series(dtype=float)
     yearly_returns = pd.Series(dtype=float)
     if not pv_series.empty:
+        if benchmarks_summary:
+            primary_benchmark = benchmarks_summary[0]
+            benchmark_weekly_name = str(primary_benchmark.get("name") or primary_benchmark.get("ticker") or "Benchmark")
+            benchmark_ticker = str(primary_benchmark.get("ticker") or "").strip()
+            benchmark_frame = _load_benchmark_frame(benchmark_ticker)
+            if benchmark_frame is not None and not benchmark_frame.empty and "Close" in benchmark_frame.columns:
+                benchmark_frame = benchmark_frame.sort_index()
+                benchmark_frame.index = pd.to_datetime(benchmark_frame.index)
+                benchmark_mask = (benchmark_frame.index >= start_date) & (benchmark_frame.index <= end_date)
+                benchmark_frame = benchmark_frame.loc[benchmark_mask]
+                benchmark_frame = benchmark_frame.loc[benchmark_frame.index.intersection(pv_series.index)]
+                if not benchmark_frame.empty:
+                    benchmark_prices = benchmark_frame["Close"].astype(float)
+                    benchmark_start_price = float(benchmark_prices.iloc[0])
+                    if benchmark_start_price > 0:
+                        benchmark_start_row = pd.Series(
+                            [benchmark_start_price],
+                            index=[start_date - pd.Timedelta(days=1)],
+                        )
+                        benchmark_with_start = pd.concat([benchmark_start_row, benchmark_prices])
+                        benchmark_weekly = benchmark_with_start.resample("W-FRI").last().dropna()
+                        if not benchmark_weekly.empty:
+                            benchmark_weekly_ret = benchmark_weekly.pct_change().mul(100).fillna(0.0)
+                            benchmark_weekly_cum = (benchmark_weekly / benchmark_start_price - 1).mul(100)
+                            first_bench_idx = benchmark_weekly_ret.index[0]
+                            benchmark_weekly_ret.loc[first_bench_idx] = float(benchmark_weekly_cum.loc[first_bench_idx])
+                            benchmark_weekly_return_map = {
+                                pd.to_datetime(dt): float(val) for dt, val in benchmark_weekly_ret.items()
+                            }
+                            benchmark_weekly_cum_map = {
+                                pd.to_datetime(dt): float(val) for dt, val in benchmark_weekly_cum.items()
+                            }
+
         start_row = pd.Series([initial_capital_local], index=[start_date - pd.Timedelta(days=1)])
         pv_series_with_start = pd.concat([start_row, pv_series])
         weekly_values = pv_series_with_start.resample("W-FRI").last().dropna()
@@ -847,6 +966,8 @@ def _build_summary(
                 weekly_cum_pct = (weekly_values / initial_capital_local - 1).mul(100)
             else:
                 weekly_cum_pct = pd.Series([0.0] * len(weekly_values), index=weekly_values.index)
+            first_week_idx = weekly_return_pct.index[0]
+            weekly_return_pct.loc[first_week_idx] = float(weekly_cum_pct.loc[first_week_idx])
             for dt, value in weekly_values.items():
                 # 해당 날짜의 보유종목 수 가져오기
                 held_count = 0
@@ -885,6 +1006,9 @@ def _build_summary(
                         "max_topn": max_topn,
                         "weekly_return_pct": float(weekly_return_pct.loc[dt]),
                         "cumulative_return_pct": float(weekly_cum_pct.loc[dt]),
+                        "benchmark_name": benchmark_weekly_name or None,
+                        "benchmark_weekly_return_pct": benchmark_weekly_return_map.get(pd.to_datetime(dt)),
+                        "benchmark_cumulative_return_pct": benchmark_weekly_cum_map.get(pd.to_datetime(dt)),
                     }
                 )
 
@@ -907,14 +1031,14 @@ def _build_summary(
 
         yearly_returns = yearly_returns.dropna()
 
-    # Turnover calculation (전체 거래 횟수) - if 블록 밖에서 항상 실행
+    # Turnover calculation: 상태 라벨이 아니라 실제 거래 금액이 기록된 행 수를 센다.
     total_turnover = 0
     if ticker_timeseries:
-        trade_decisions = {"BUY", "BUY_REPLACE", "SELL_REPLACE"}
-        for t_data in ticker_timeseries.values():
-            if isinstance(t_data, pd.DataFrame) and "decision" in t_data.columns:
-                trade_count = t_data["decision"].isin(trade_decisions).sum()
-                total_turnover += int(trade_count)
+        for ticker, t_data in ticker_timeseries.items():
+            if ticker == "CASH" or not isinstance(t_data, pd.DataFrame) or "trade_amount" not in t_data.columns:
+                continue
+            trade_amounts = pd.to_numeric(t_data["trade_amount"], errors="coerce").fillna(0.0)
+            total_turnover += int(trade_amounts.abs().gt(0).sum())
 
     # Bucket summary
     bucket_summary = []
@@ -1007,10 +1131,6 @@ def _build_ticker_summaries(
     ticker_timeseries: Mapping[str, pd.DataFrame],
     ticker_meta: Mapping[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    sell_decisions = {
-        "SELL_REPLACE",
-    }
-
     summaries: list[dict[str, Any]] = []
     for ticker, df in ticker_timeseries.items():
         ticker_key = str(ticker).upper()
@@ -1019,8 +1139,21 @@ def _build_ticker_summaries(
             continue
 
         df_sorted = df.sort_index()
-        if "decision" in df_sorted.columns:
-            trades_mask = df_sorted["decision"].isin(sell_decisions)
+        if "decision" in df_sorted.columns or "pending_action" in df_sorted.columns:
+            decision_col = (
+                df_sorted["decision"].astype(str).str.upper()
+                if "decision" in df_sorted.columns
+                else pd.Series("", index=df_sorted.index, dtype=object)
+            )
+            pending_col = (
+                df_sorted["pending_action"].astype(str).str.upper()
+                if "pending_action" in df_sorted.columns
+                else pd.Series("", index=df_sorted.index, dtype=object)
+            )
+            trade_shares_col = pd.to_numeric(df_sorted.get("trade_shares", 0.0), errors="coerce").fillna(0.0)
+            trades_mask = (
+                (decision_col == "SELL") | (decision_col == "SELL_REPLACE") | pending_col.str.startswith("SELL")
+            ) & (trade_shares_col > 0)
         else:
             trades_mask = pd.Series(False, index=df_sorted.index)
 

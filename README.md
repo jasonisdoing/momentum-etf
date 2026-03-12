@@ -10,15 +10,17 @@
 
 ## 🚀 소개 (Introduction)
 
-**Momentum ETF**는 **5버킷(Bucket) 분산 투자**를 기반으로 한 **ETF 추세추종(Momentum) 자동화 및 개인 종합 자산관리 시스템**입니다.
-단순한 모멘텀 전략을 넘어, **[1. 모멘텀, 2. 혁신기술, 3. 시장지수, 4. 배당방어, 5. 대체헷지]**의 5가지 버킷으로 자산을 전략적으로 배분하여, 상승장에서는 수익을 극대화하고 하락장에서는 방어력을 높이는 스마트한 자산 운용을 실현합니다.
+**Momentum ETF**는 계좌/종목풀 설정을 기반으로 동작하는 **ETF 포트폴리오 자동화/분석 시스템**입니다.
+현재 운영 모델은 다음과 같습니다.
+* 계좌(`zaccounts/*`): 고정 비중 리밸런싱 방식으로만 운용
+* 종목풀(`zpools/*`): `rank.py`로 모멘텀 랭킹 산출
+* 계좌 편입 종목: 종목풀 랭킹 결과를 참고해 수동/반자동으로 반영
 
 감정이나 직관에 의존하는 투자를 지양하고, **이동평균(MA)**과 **RSI** 등 기술적 지표를 활용하여 **"상대적으로 가장 우수한 종목을 선정하고 리밸런싱 때까지 유지하는"** 데이터 기반의 의사결정을 지원합니다.
 
 ## ✨ 주요 기능 (Key Features)
 
-*   **📊 통합 추천 시스템 (Unified Recommendation)**: 백테스트 엔진을 기반으로 현재 계좌 상태를 시뮬레이션하여 최적의 매수/매도/교체 신호를 생성하고 Slack으로 알림을 보냅니다.
-    *   **5버켓 분산 투자**: 상관관계가 낮은 5개 자산군(모멘텀, 혁신기술, 시장지수, 배당방어, 대체헷지)으로 나누어 하락장에서도 안정성을 확보합니다.
+*   **📊 통합 추천 시스템 (Unified Recommendation)**: 백테스트 엔진을 기반으로 현재 계좌 상태를 시뮬레이션하여 매수/매도/교체 신호를 생성합니다.
 *   **🧪 검증된 전략 (Backtesting & Tuning)**: 과거 데이터를 기반으로 전략의 유효성을 검증하고, 시장 상황에 맞는 최적의 파라미터를 자동으로 탐색합니다.
 *   **🛡️ 데이터 안정성 (Robust Caching)**: **Apache Parquet** 포맷을 캐시 엔진으로 도입하여 라이브러리 버전 mismatch로부터 자유롭고 안정적인 데이터 로딩을 보장합니다.
 *   **☁️ 클라우드 자동화 (CI/CD Automation)**: **GitHub Actions**를 통해 정해진 시간에 자동으로 추천 및 캐시 갱신 작업을 수행합니다.
@@ -36,7 +38,7 @@
 
 *   **[프로젝트 개요 (Project Overview)](docs/project_overview.md)**: 프로젝트의 철학, 상세 기능, 시스템 구조
 *   **[사용자 가이드 (User Guide)](docs/user_guide.md)**: 설치, 설정, 실행 방법, 결과 해석
-*   **[전략 로직 (Strategy Logic)](docs/strategy_logic.md)**: MAPS 점수 산정, 매매 조건, 리스크 관리 알고리즘 상세
+*   **[전략 로직 (Strategy Logic)](docs/strategy_logic.md)**: 종목풀 랭킹 산정, 계좌 리밸런싱, 리스크 관리 알고리즘 상세
 *   **[개발자 가이드 (Developer Guide)](docs/developer_guide.md)**: 시스템 아키텍처, 데이터 파이프라인, 정합성 원칙
 
 ## ⚡️ 빠른 시작 (Quick Start)
@@ -58,27 +60,38 @@ pip install -r requirements.txt
 ```
 
 ### 2. 설정
-`config.py` 및 `zsettings/account/kor_us.json` 파일을 환경에 맞게 수정합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
+`config.py` 및 `zaccounts/<account>/config.json` 파일을 환경에 맞게 수정합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
 
 ### 3. 실행
 
-**1. 튜닝 (최적 파라미터 탐색 및 자동 적용)**
+**1. 종목풀 랭킹 생성**
 ```bash
-python tune.py kor_us  # 한국 계정 (미국 ETF)
-python tune.py us      # 미국 계정
+python rank.py kor
+python rank.py us
+python rank.py aus
 ```
 
-**2. 백테스트 (성과 검증)**
+**2. 튜닝 (계좌 리밸런싱 파라미터 탐색 및 자동 적용)**
 ```bash
-python backtest.py kor_us
-python backtest.py us
+python tune.py kor_account
+python tune.py core_account
 ```
 
-**3. 추천 (매매 신호 생성)**
+**3. 백테스트 (성과 검증)**
 ```bash
-python recommend.py kor_us
-python recommend.py us
+python backtest.py kor_account
+python backtest.py core_account
 ```
+
+**4. 추천 (매매 신호 생성)**
+```bash
+python recommend.py kor_account
+python recommend.py core_account
+```
+
+현재 기본 식별자는 다음과 같습니다.
+* 종목풀: `kor`, `us`, `aus`
+* 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
 
 ## ⚠️ 면책 조항 (Disclaimer)
 

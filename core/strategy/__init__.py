@@ -1,4 +1,4 @@
-"""MAPS(Moving Average Position Score) 전략 서브패키지."""
+"""RANK(Moving Average Position Score) 전략 서브패키지."""
 
 from __future__ import annotations
 

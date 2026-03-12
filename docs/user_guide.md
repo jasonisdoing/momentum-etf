@@ -10,26 +10,38 @@
 
 ### 실행 명령어
 
-**1. 튜닝 (최적 파라미터 탐색)**
-최적의 파라미터를 찾기 위해 튜닝을 수행합니다. 완료 후 전략 설정이 **자동으로 업데이트**됩니다.
+**1. 종목풀 랭킹 생성**
+종목풀에서 모멘텀 랭킹을 생성합니다.
 ```bash
-python tune.py kor_us  # kor_us 계정 튜닝
-python tune.py us      # us 계정 튜닝
+python rank.py kor
+python rank.py us
+python rank.py aus
 ```
 
-**2. 백테스트 실행**
+**2. 튜닝 (계좌 리밸런싱 파라미터 탐색)**
+최적의 리밸런싱 파라미터를 찾기 위해 튜닝을 수행합니다. 완료 후 계좌 설정이 **자동으로 업데이트**됩니다.
+```bash
+python tune.py kor_account
+python tune.py core_account
+```
+
+**3. 백테스트 실행**
 과거 데이터를 바탕으로 전략의 성과를 시뮬레이션합니다.
 ```bash
-python backtest.py kor_us
-python backtest.py us
+python backtest.py kor_account
+python backtest.py core_account
 ```
 
-**3. 추천 실행 (매일 아침)**
+**4. 추천 실행 (매일 아침)**
 백테스트 엔진을 기반으로 현재 시점의 매매 추천 목록을 생성하고 Slack으로 알림을 보냅니다.
 ```bash
-python recommend.py kor_us
-python recommend.py us
+python recommend.py kor_account
+python recommend.py core_account
 ```
+
+현재 운영 식별자:
+* 종목풀: `kor`, `us`, `aus`
+* 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
 
 ## 2. 설정 가이드
 
@@ -38,37 +50,41 @@ python recommend.py us
 *   `SLACK_BOT_TOKEN`: 알림을 봇을 통해 발송하기 위한 슬랙 봇 토큰
 *   `SLACK_CHANNEL_ID`: 알림을 받을 슬랙 채널 ID
 
-### 계좌별 전략 설정 (`zaccounts` 폴더 내 `config.json`)
-각 계좌(포트폴리오)별로 구체적인 전략 파라미터를 설정합니다. `tune.py` 실행 시 자동으로 업데이트됩니다.
-
-**5버킷 포트폴리오 설정 예시:**
+### 계좌 설정 (`zaccounts/<order>_<account_id>/config.json`)
+계좌는 기본적으로 고정 비중 리밸런싱 방식으로 동작하며, 종목별 `weight` 값이 필수입니다.
 
 ```json
 {
   "strategy": {
-    "MA_MONTH": 12,                    // 이동평균 기간 (개월) - 필수
-    "MA_TYPE": "EMA",                  // 이동평균 종류 (SMA, EMA, WMA 등) - 필수
-    "BUCKET_TOPN": 1,                  // 버켓 내 최대 보유 종목 수 - 필수
-    "REBALANCE_MODE": "QUARTERLY",     // 리밸런싱 주기 (DAILY, WEEKLY, TWICE_A_MONTH, MONTHLY, QUARTERLY) - 필수
-    "BACKTEST_LAST_MONTHS": 12         // 백테스트/튜닝 대상 과거 개월 수
+    "TUNE_MONTHS": 12,
+    "OPTIMIZATION_METRIC": "CAGR",
+    "REBALANCE_MODE": "QUARTERLY"
   }
 }
 ```
 
-> **주의**: 시스템은 엄격한 설정 표준을 따릅니다. 필수 파라미터(`MA_TYPE`, `REBALANCE_MODE` 등)가 하나라도 누락되면 백테스트 및 리포트 생성이 중단됩니다.
+### 종목풀 설정 (`zpools/<order>_<pool_id>/config.json`)
+종목풀은 랭킹 계산 파라미터를 관리합니다.
 
-> **5버킷(Bucket) 시스템**:
-> 1. **모멘텀**: 공격적인 추세 추종
-> 2. **혁신기술**: 성장성이 높은 기술주
-> 3. **시장지수**: 안정적인 시장 대표 지수
-> 4. **배당방어**: 하락장을 방어하는 배당주
-> 5. **대체헷지**: 원자재, 채권 등 주식 외 자산
+```json
+{
+  "name": "국내상장 국내 ETF",
+  "desc": "국내상장 국내 ETF 종목풀",
+  "rank": {
+    "country": "kor",
+    "months": 12,
+    "ma_type": "HMA"
+  }
+}
+```
+
+> 참고: 계좌 추천/백테스트는 종목풀 랭킹을 자동 병합하지 않습니다. 랭킹 결과를 보고 계좌 종목/비중을 관리 화면에서 반영하는 운영 모델입니다.
 
 ## 3. 대시보드 및 계좌 관리
 
 ### 대시보드 구성
 대시보드는 **[요약(Summary)]** 탭과 **[상세(Details)]** 탭으로 나뉩니다.
-*   **요약 탭**: 포트폴리오의 전체 수익률, 원금 대비 순이익, 현금 비중 등 핵심 지표를 확인합니다. 버킷별 투자 비중 테이블이 제공됩니다.
+*   **요약 탭**: 포트폴리오 전체 수익률, 원금 대비 순이익, 현금 비중 등 핵심 지표를 확인합니다.
 *   **상세 탭**: 개별 종목의 현재가, 평가손익, 매매 신호(BUY/SELL/HOLD 등)를 상세히 분석합니다.
 
 ### 계좌 관리 (원금 및 현금)

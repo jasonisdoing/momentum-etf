@@ -24,6 +24,7 @@ from utils.portfolio_io import (
     load_real_holdings_with_recommendations,
     save_daily_snapshot,
 )
+from utils.report import format_kr_money
 
 # Suppress Streamlit warnings in non-Streamlit environments
 os.environ["STREAMLIT_GLOBAL_LOG_LEVEL"] = "error"
@@ -48,30 +49,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-def format_korean_currency(value):
-    """원화 값을 '억/만원' 단위로 변환합니다."""
-    if value == 0:
-        return "0원"
-
-    abs_value = abs(value)
-    eok = int(abs_value // 100_000_000)
-    remain = abs_value % 100_000_000
-    man = int(round(remain / 10_000))
-
-    if man == 10000:
-        eok += 1
-        man = 0
-
-    parts = []
-    if eok > 0:
-        parts.append(f"{eok}억")
-    if man > 0:
-        parts.append(f"{man}만원")
-
-    result = " ".join(parts) if parts else "0원"
-    if value < 0:
-        result = "-" + result
-    return result
+format_korean_currency = format_kr_money
 
 
 def get_trend_emoji(val):

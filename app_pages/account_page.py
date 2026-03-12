@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import time
+import subprocess
 from typing import Any
 
 import pandas as pd
@@ -12,8 +12,8 @@ from config import (
     BUCKET_OPTIONS,
     BUCKET_REVERSE_MAPPING,
 )
-from scripts.update_price_cache import refresh_cache_for_target
 from utils.data_loader import fetch_ohlcv
+from utils.pool_registry import get_pool_country_code, list_available_pools
 from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
 from utils.stock_list_io import (
     add_stock,
@@ -24,7 +24,7 @@ from utils.stock_list_io import (
     remove_stock,
     update_stock,
 )
-from utils.stock_meta_updater import fetch_stock_info, update_account_metadata
+from utils.stock_meta_updater import fetch_stock_info
 from utils.ui import format_relative_time, load_account_recommendations, render_recommendation_table
 
 try:
@@ -56,12 +56,53 @@ def _normalize_code(value: Any, fallback: str) -> str:
     return text or fallback
 
 
+def _resolve_target_country_code(target_id: str) -> str:
+    target_norm = (target_id or "").strip().lower()
+    try:
+        settings = get_account_settings(target_norm)
+        code = str(settings.get("country_code") or "").strip().lower()
+        if code:
+            return code
+    except Exception:
+        pass
+    try:
+        if target_norm in list_available_pools():
+            return get_pool_country_code(target_norm, default="kor")
+    except Exception:
+        pass
+    return "kor"
+
+
+def _is_pool_target(target_id: str) -> bool:
+    target_norm = (target_id or "").strip().lower()
+    if not target_norm:
+        return False
+    try:
+        return target_norm in list_available_pools()
+    except Exception:
+        return False
+
+
+def _to_weight_pct(weight: Any) -> float | None:
+    if weight is None:
+        return None
+    try:
+        value = float(weight)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    if value <= 1.0:
+        return value * 100.0
+    return value
+
+
 # ---------------------------------------------------------------------------
 # 스타일 및 설정
 # ---------------------------------------------------------------------------
 
 
-def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
+def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.DataFrame:
     """stocks.json 메타정보를 DataFrame으로 반환."""
     etfs = get_etfs(account_id)
     if not etfs:
@@ -72,23 +113,24 @@ def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
         bucket_val = etf.get("bucket", 1)
         bucket_str = BUCKET_MAPPING.get(bucket_val, "1. 모멘텀")
 
-        rows.append(
-            {
-                "#": idx,
-                "버킷": bucket_str,
-                "티커": etf.get("ticker", ""),
-                "종목명": etf.get("name", ""),
-                "추가일자": etf.get("added_date", "-"),
-                "상장일": etf.get("listing_date", "-"),
-                "주간거래량": etf.get("1_week_avg_volume"),
-                "1주(%)": etf.get("1_week_earn_rate"),
-                "2주(%)": etf.get("2_week_earn_rate"),
-                "1달(%)": etf.get("1_month_earn_rate"),
-                "3달(%)": etf.get("3_month_earn_rate"),
-                "6달(%)": etf.get("6_month_earn_rate"),
-                "12달(%)": etf.get("12_month_earn_rate"),
-            }
-        )
+        row = {
+            "#": idx,
+            "버킷": bucket_str,
+            "티커": etf.get("ticker", ""),
+            "종목명": etf.get("name", ""),
+            "추가일자": etf.get("added_date", "-"),
+            "상장일": etf.get("listing_date", "-"),
+            "주간거래량": etf.get("1_week_avg_volume"),
+            "1주(%)": etf.get("1_week_earn_rate"),
+            "2주(%)": etf.get("2_week_earn_rate"),
+            "1달(%)": etf.get("1_month_earn_rate"),
+            "3달(%)": etf.get("3_month_earn_rate"),
+            "6달(%)": etf.get("6_month_earn_rate"),
+            "12달(%)": etf.get("12_month_earn_rate"),
+        }
+        if use_weight:
+            row["비중(%)"] = _to_weight_pct(etf.get("weight"))
+        rows.append(row)
     df = pd.DataFrame(rows)
     if not df.empty and "1주(%)" in df.columns:
         df = df.sort_values(by=["버킷", "1주(%)"], ascending=[True, False])
@@ -98,26 +140,29 @@ def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
 @fragment
 def _render_stocks_meta_table(account_id: str) -> None:
     """종목관리 테이블 렌더링. 업데이트 중일 경우 readonly 모드로 전환하여 스피너 방지."""
+    # 계좌는 비중 표시/입력을 사용하고, 종목풀은 비중 UI를 숨긴다.
+    use_weight = not _is_pool_target(account_id)
 
     # 세션 스테이트 키
-    key_meta = f"updating_meta_{account_id}"
-    key_price = f"updating_price_{account_id}"
+    readonly = False
 
-    is_updating_meta = st.session_state.get(key_meta, False)
-    is_updating_price = st.session_state.get(key_price, False)
-    is_updating = is_updating_meta or is_updating_price
-
-    # 상단 컨트롤: 이제 관리 모드는 상시 활성화 (사용자 요청)
-    # 상단 컨트롤: 이제 관리 모드는 상시 활성화 (사용자 요청)
-    readonly = is_updating
-
-    df = _build_stocks_meta_table(account_id)
+    df = _build_stocks_meta_table(account_id, use_weight=use_weight)
     df_edit = df.copy()
 
     if df.empty:
         st.info("종목 데이터가 없습니다. 종목을 추가하거나 삭제된 종목을 복원하세요.")
     else:
         st.caption(f"총 {len(df)}개 종목 (Source: MongoDB)")
+        if use_weight:
+            weight_series = pd.to_numeric(df.get("비중(%)"), errors="coerce")
+            if weight_series.isna().any():
+                st.warning("비중이 비어 있거나 숫자가 아닌 종목이 있습니다.")
+            else:
+                total_weight = float(weight_series.sum())
+                if abs(total_weight - 100.0) > 1e-2:
+                    st.warning(f"비중 합계가 100%가 아닙니다. 현재: {total_weight:.2f}%")
+                else:
+                    st.caption("비중 합계: 100.00%")
 
         def _color_pct(val: float | str) -> str:
             if val is None or pd.isna(val):
@@ -163,15 +208,34 @@ def _render_stocks_meta_table(account_id: str) -> None:
     def open_edit_dialog(ticker: str, current_bucket_name: str, name: str):
         st.write(f"**{name}** ({ticker})")
         st.caption(f"현재 버킷: {current_bucket_name}")
+        current_row = df_edit[df_edit["티커"] == ticker]
+        current_weight_pct = None
+        if use_weight and not current_row.empty:
+            current_weight_pct = current_row.iloc[0].get("비중(%)")
+            current_weight_pct = float(current_weight_pct) if pd.notna(current_weight_pct) else 0.0
 
         st.subheader("버킷 변경")
         new_bucket_name = st.selectbox(
             "버킷 변경", options=BUCKET_OPTIONS, index=BUCKET_OPTIONS.index(current_bucket_name)
         )
+        new_weight_pct = None
+        if use_weight:
+            st.subheader("비중 변경")
+            new_weight_pct = st.number_input(
+                "비중(%)",
+                min_value=0,
+                max_value=100,
+                step=1,
+                value=int(round(float(current_weight_pct or 0.0))),
+                format="%d",
+            )
 
         if st.button("💾 변경사항 저장", type="primary", width="stretch"):
             new_bucket_int = BUCKET_REVERSE_MAPPING.get(new_bucket_name, 1)
-            if update_stock(account_id, ticker, bucket=new_bucket_int):
+            update_fields: dict[str, Any] = {"bucket": new_bucket_int}
+            if use_weight:
+                update_fields["weight"] = int(new_weight_pct or 0)
+            if update_stock(account_id, ticker, **update_fields):
                 st.toast(f"✅ {ticker} 버킷 변경 완료")
                 st.rerun()
 
@@ -200,15 +264,21 @@ def _render_stocks_meta_table(account_id: str) -> None:
 
     with c_mgr2:
         if st.button("메타데이터 업데이트", key=f"btn_meta_{account_id}", disabled=readonly, width="stretch"):
-            st.session_state[key_meta] = True
             st.session_state[f"show_add_modal_{account_id}"] = False
-            st.rerun()
+            try:
+                subprocess.Popen(["python", "scripts/stock_meta_updater.py", account_id])
+                st.success(f"✅ `{account_id}` 메타데이터 업데이트를 시작했습니다. (배경에서 처리가 완료됩니다)")
+            except Exception as e:
+                st.error(f"⚠️ 실행 시작 오류: {e}")
 
     with c_mgr3:
         if st.button("가격 캐시 갱신", key=f"btn_price_{account_id}", disabled=readonly, width="stretch"):
-            st.session_state[key_price] = True
             st.session_state[f"show_add_modal_{account_id}"] = False
-            st.rerun()
+            try:
+                subprocess.Popen(["python", "scripts/update_price_cache.py", account_id])
+                st.success(f"✅ `{account_id}` 가격 캐시 갱신을 시작했습니다. (배경에서 처리가 완료됩니다)")
+            except Exception as e:
+                st.error(f"⚠️ 실행 시작 오류: {e}")
 
     st.write("")  # 간격
 
@@ -217,15 +287,16 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "수정/삭제": st.column_config.CheckboxColumn("수정/삭제", width=50, help="클릭하여 수정 또는 삭제"),
         "버킷": st.column_config.SelectboxColumn(
             "버킷",
-            width=50,
+            width=85,
             options=BUCKET_OPTIONS,
             required=True,
         ),
-        "티커": st.column_config.TextColumn("티커", width=50),
+        "티커": st.column_config.TextColumn("티커", width=55),
         "종목명": st.column_config.TextColumn("종목명", width=300),
+        "비중(%)": st.column_config.NumberColumn("비중(%)", width="small", format="%.0f"),
         "추가일자": st.column_config.TextColumn("추가일자", width=90),
-        "상장일": st.column_config.TextColumn("상장일", width=70),
-        "주간거래량": st.column_config.NumberColumn("주간거래량", width=50, format="localized"),
+        "상장일": st.column_config.TextColumn("상장일", width=80),
+        "주간거래량": st.column_config.NumberColumn("주간거래량", width=80, format="localized"),
         "1주(%)": st.column_config.NumberColumn("1주(%)", width="small", format="%.2f%%"),
         "2주(%)": st.column_config.NumberColumn("2주(%)", width="small", format="%.2f%%"),
         "1달(%)": st.column_config.NumberColumn("1달(%)", width="small", format="%.2f%%"),
@@ -239,6 +310,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "버킷",
         "티커",
         "종목명",
+        "비중(%)",
         "상장일",
         "주간거래량",
         "1주(%)",
@@ -323,13 +395,8 @@ def _render_stocks_meta_table(account_id: str) -> None:
             st.session_state[f"should_clear_add_{account_id}"] = False
 
         # 국가 코드 조회 (검색용)
-        try:
-            settings = get_account_settings(account_id)
-            country_code = settings.get("country_code", "kor")
-        except Exception:
-            country_code = "kor"
-
-        st.write(f"계좌: **{account_id.upper()}** ({country_code.upper()})")
+        country_code = _resolve_target_country_code(account_id)
+        st.write(f"대상: **{account_id.upper()}** ({country_code.upper()})")
 
         # 국가별 플레이스홀더 설정
         if country_code == "kor":
@@ -388,15 +455,31 @@ def _render_stocks_meta_table(account_id: str) -> None:
                     "버킷 선택", options=BUCKET_OPTIONS, index=0, key=f"sb_bucket_add_{account_id}"
                 )
                 bucket_int = BUCKET_REVERSE_MAPPING.get(selected_bucket_name, 1)
+                weight_for_add = None
+                if use_weight:
+                    weight_for_add = st.number_input(
+                        "비중(%)",
+                        min_value=0,
+                        max_value=100,
+                        step=1,
+                        value=0,
+                        format="%d",
+                        key=f"nb_weight_add_{account_id}",
+                    )
 
                 # 추가 버튼 (녹색 primary)
                 if st.button("➕ 추가하기", type="primary", width="stretch", key=f"btn_confirm_add_{account_id}"):
+                    extra_fields: dict[str, Any] = {
+                        "listing_date": search_result.get("listing_date"),
+                        "bucket": bucket_int,
+                    }
+                    if use_weight:
+                        extra_fields["weight"] = int(weight_for_add or 0)
                     success = add_stock(
                         account_id,
                         ticker_res,
                         search_result["name"],
-                        listing_date=search_result.get("listing_date"),
-                        bucket=bucket_int,
+                        **extra_fields,
                     )
                     if success:
                         msg = "복구되었습니다" if status == "DELETED" else "추가되었습니다"
@@ -441,57 +524,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
     # [Continuous Add] 모달 유지 로직: 플래그가 True면 강제로 모달 오픈
     if st.session_state.get(f"show_add_modal_{account_id}"):
         open_add_dialog()
-
-    # -----------------------------------------------------------------------
-    # 업데이트 실행 로직 (readonly 모드일 때 실행됨)
-    # -----------------------------------------------------------------------
-    if is_updating_meta:
-        st.divider()
-        # [User Request] 스피너 아이콘 제거를 위해 st.status 대신 st.empty 사용
-        status_area = st.empty()
-        p_bar = st.progress(0)
-
-        status_area.info("메타데이터 업데이트 준비 중...")
-
-        def on_progress(curr, total, ticker):
-            pct = min(curr / total, 1.0)
-            p_bar.progress(pct)
-            status_area.info(f"메타데이터 획득 중: {curr}/{total} - {ticker}")
-
-        try:
-            update_account_metadata(account_id, progress_callback=on_progress)
-            status_area.success("메타데이터 업데이트 완료!")
-            time.sleep(1.0)
-        except Exception as e:
-            status_area.error(f"실패: {e}")
-            time.sleep(3.0)
-
-        # 상태 해제 및 리런
-        del st.session_state[key_meta]
-        st.rerun()
-
-    if is_updating_price:
-        st.divider()
-        status_area = st.empty()
-        p_bar = st.progress(0)
-
-        status_area.info("가격 캐시 갱신 준비 중...")
-
-        def on_progress(curr, total, ticker):
-            pct = min(curr / total, 1.0)
-            p_bar.progress(pct)
-            status_area.info(f"가격 캐시 갱신 중: {curr}/{total} - {ticker}")
-
-        try:
-            refresh_cache_for_target(account_id, None, progress_callback=on_progress)
-            status_area.success("가격 캐시 갱신 완료!")
-            time.sleep(1.0)
-        except Exception as e:
-            status_area.error(f"실패: {e}")
-            time.sleep(3.0)
-
-        del st.session_state[key_price]
-        st.rerun()
 
 
 def _render_manual_actions(account_id: str) -> None:
@@ -586,44 +618,39 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     df_deleted.sort_values(by=["버킷", "삭제일"], ascending=[True, False], inplace=True)
     df_deleted["주간거래량"] = pd.to_numeric(df_deleted["주간거래량"], errors="coerce")
 
-    def _color_pct_deleted(val: Any) -> str:
-        if val is None or pd.isna(val):
-            return "background-color: #ffe0e6"
-        try:
-            num = float(val)
-        except (TypeError, ValueError):
-            return "background-color: #ffe0e6"
-        if num > 0:
-            return "background-color: #ffe0e6; color: red"
-        if num < 0:
-            return "background-color: #ffe0e6; color: blue"
-        return "background-color: #ffe0e6; color: black"
-
-    styled_deleted = df_deleted.style.map(lambda _: "background-color: #ffe0e6")
-    pct_columns = ["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
-    for col in pct_columns:
-        if col in df_deleted.columns:
-            styled_deleted = styled_deleted.map(_color_pct_deleted, subset=[col])
-
     # [User Request] 버튼을 테이블 위로 이동
-    # 미리 에디터 키를 사용하여 체크된 항목을 확인해야 함 (fragment 내에서)
-    editor_key = f"deleted_editor_{account_id}"
+    editor_base_key = f"deleted_editor_{account_id}"
+    editor_nonce_key = f"{editor_base_key}_nonce"
+    selected_tickers_key = f"{editor_base_key}_selected_tickers"
+    editor_nonce = int(st.session_state.get(editor_nonce_key, 0) or 0)
+    editor_key = f"{editor_base_key}_{editor_nonce}"
 
-    # 세션 스테이트에서 에디터 상태 확인
-    editor_state = st.session_state.get(editor_key, {})
-    edited_rows = editor_state.get("edited_rows", {})
+    selected_tickers = {
+        str(ticker).strip().upper()
+        for ticker in st.session_state.get(selected_tickers_key, [])
+        if str(ticker or "").strip()
+    }
 
-    # 현재 체크된 인덱스들 파악
-    checked_indices = []
-    if edited_rows:
-        for idx_str, changes in edited_rows.items():
-            if changes.get("복구") is True:
-                checked_indices.append(int(idx_str))
-            # 체크 해제된 경우 (기존에 체크되어 있었다면)
-            # st.data_editor의 edited_rows는 '변경된' 것만 관리함.
-            # 하지만 복구 체크박스는 초기값이 False이므로 체크 시에만 들어옴.
+    # 전체 선택/해제 컨트롤
+    c_all_1, c_all_2, _ = st.columns([1, 1, 3])
+    with c_all_1:
+        if st.button("✅ 전체 선택", key=f"btn_deleted_select_all_{account_id}", width="stretch"):
+            st.session_state[selected_tickers_key] = [
+                str(t).strip().upper() for t in df_deleted["티커"].tolist() if str(t or "").strip()
+            ]
+            st.session_state[editor_nonce_key] = editor_nonce + 1
+            st.rerun()
+    with c_all_2:
+        if st.button("↩️ 전체 해제", key=f"btn_deleted_clear_all_{account_id}", width="stretch"):
+            st.session_state[selected_tickers_key] = []
+            st.session_state[editor_nonce_key] = editor_nonce + 1
+            st.rerun()
 
-    to_restore_df = df_deleted.iloc[checked_indices] if checked_indices else pd.DataFrame()
+    to_restore_df = (
+        df_deleted[df_deleted["티커"].astype(str).str.upper().isin(selected_tickers)].copy()
+        if selected_tickers
+        else pd.DataFrame()
+    )
 
     if not to_restore_df.empty:
         st.info(f"선택한 {len(to_restore_df)}개 종목에 대한 작업을 선택하세요.")
@@ -680,8 +707,11 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     else:
         st.caption("복구하거나 완전 삭제할 종목을 아래 테이블에서 선택하세요.")
 
-    st.data_editor(
-        styled_deleted,
+    df_deleted_editor = df_deleted.copy()
+    df_deleted_editor["복구"] = df_deleted_editor["티커"].astype(str).str.upper().isin(selected_tickers)
+
+    edited_deleted = st.data_editor(
+        df_deleted_editor,
         hide_index=True,
         width="stretch",
         column_config={
@@ -732,6 +762,20 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
         ],
         key=editor_key,
     )
+
+    if (
+        isinstance(edited_deleted, pd.DataFrame)
+        and "복구" in edited_deleted.columns
+        and "티커" in edited_deleted.columns
+    ):
+        selected_now = (
+            edited_deleted.loc[edited_deleted["복구"] == True, "티커"]  # noqa: E712
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .tolist()
+        )
+        st.session_state[selected_tickers_key] = selected_now
 
 
 def render_account_page(account_id: str, view_mode: str | None = None) -> None:
@@ -795,13 +839,11 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
                 or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
             )
         else:
-            # 보유 종목만 필터링
-            df_held = _get_active_holdings(df)
-            if df_held.empty:
-                st.info("현재 보유 중인 종목이 없습니다.")
+            if df.empty:
+                st.info("표시할 추천 종목이 없습니다.")
             else:
                 render_recommendation_table(
-                    df_held,
+                    df,
                     country_code=country_code,
                     grouped_by_bucket=False,
                     # customize_columns={"#": ("버킷", 120)} # This will be implemented in utils/ui.py
@@ -837,9 +879,9 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
             backtested_date = None
             strategy_tuning: dict[str, Any] = {}
             if isinstance(strategy_cfg, dict):
-                cagr = strategy_cfg.get("CAGR")
-                mdd = strategy_cfg.get("MDD")
-                backtested_date = strategy_cfg.get("BACKTESTED_DATE")
+                cagr = strategy_cfg.get("TUNE_CAGR")
+                mdd = strategy_cfg.get("TUNE_MDD")
+                backtested_date = strategy_cfg.get("TUNE_DATE")
                 strategy_tuning = resolve_strategy_params(strategy_cfg)
 
                 params_to_show = {}
@@ -885,7 +927,7 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
                 hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
                 if df is not None:
                     current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-                    target_topn = strategy_tuning.get("BUCKET_TOPN") if isinstance(strategy_tuning, dict) else None
+                    target_topn = strategy_tuning.get("TOPN") if isinstance(strategy_tuning, dict) else None
                     if target_topn:
                         caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
             except Exception:
@@ -913,4 +955,18 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
         _render_manual_actions(account_id)
 
 
-__all__ = ["render_account_page"]
+def render_account_setup_page(account_id: str) -> None:
+    """계좌/풀 공용 종목 관리 뷰를 렌더링한다."""
+    _render_stocks_meta_table(account_id)
+
+
+def render_account_deleted_page(account_id: str) -> None:
+    """계좌/풀 공용 삭제된 종목 뷰를 렌더링한다."""
+    _render_deleted_stocks_tab(account_id)
+
+
+__all__ = [
+    "render_account_page",
+    "render_account_setup_page",
+    "render_account_deleted_page",
+]

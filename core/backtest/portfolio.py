@@ -11,7 +11,10 @@ def get_sell_states() -> set[str]:
     Returns:
         매도 상태 문자열 집합
     """
-    return {"SELL_REPLACE"}
+    return {
+        "SELL",
+        "SELL_REPLACE",
+    }
 
 
 def get_hold_states() -> set[str]:
@@ -25,7 +28,6 @@ def get_hold_states() -> set[str]:
     """
     return {
         "HOLD",
-        "SELL_REPLACE",
     }
 
 
@@ -103,6 +105,6 @@ def validate_bucket_topn(topn: int, account_id: str = "") -> None:
     """
     if topn <= 0:
         if account_id:
-            raise ValueError(f"'{account_id}' 계정의 BUCKET_TOPN은 0보다 커야 합니다.")
+            raise ValueError(f"'{account_id}' 계정의 TOPN은 0보다 커야 합니다.")
         else:
-            raise ValueError("BUCKET_TOPN은 0보다 커야 합니다.")
+            raise ValueError("TOPN은 0보다 커야 합니다.")

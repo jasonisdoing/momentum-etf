@@ -242,20 +242,53 @@ def _render_bulk_tab(account_map, account_id_to_country):
 
 
 def _render_cash_tab(account_map):
+    from utils.data_loader import get_exchange_rate_series
     from utils.portfolio_io import load_portfolio_master, save_portfolio_master
+    from utils.settings_loader import get_account_settings
 
     st.subheader("계좌별 원금 및 현금 관리")
+
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _get_cash_exchange_rates() -> dict[str, float]:
+        today_dt = pd.Timestamp.today().normalize()
+        rates = {"USD": 0.0, "AUD": 0.0}
+
+        usd_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt)
+        if not usd_krw_series.empty:
+            rates["USD"] = float(usd_krw_series.iloc[-1])
+
+        aud_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt, symbol="AUDKRW=X")
+        if not aud_krw_series.empty:
+            rates["AUD"] = float(aud_krw_series.iloc[-1])
+
+        return rates
+
+    exchange_rates = _get_cash_exchange_rates()
+
     with st.form("cash_manager_bulk_form"):
         input_values = {}
+        invalid_cash_accounts: list[str] = []
         for acc_name, acc_id in account_map.items():
+            # 계좌코드가 바뀌면 여기 조건도 함께 수정해야 International Shares 입력 UI가 유지됩니다.
+            is_aus_account = acc_id == "aus_account"
+            settings = get_account_settings(acc_id)
+            account_currency = str(settings.get("currency") or "KRW").strip().upper()
+            use_native_cash_input = account_currency in {"USD", "AUD"}
             st.markdown(f"#### 🏦 {acc_name}")
             m_data = load_portfolio_master(acc_id)
             current_principal = m_data.get("base_principal", m_data.get("total_principal", 0.0)) if m_data else 0.0
-            current_cash = m_data.get("base_cash", m_data.get("cash_balance", 0.0)) if m_data else 0.0
+            current_cash_krw = m_data.get("base_cash", m_data.get("cash_balance", 0.0)) if m_data else 0.0
             current_holdings = m_data.get("holdings", []) if m_data else []
+            rate = exchange_rates.get(account_currency, 0.0) if use_native_cash_input else 1.0
+            if use_native_cash_input and m_data and m_data.get("cash_balance_native") is not None:
+                current_cash_native = float(m_data.get("cash_balance_native", 0.0))
+            elif use_native_cash_input and rate > 0:
+                current_cash_native = float(current_cash_krw) / rate
+            else:
+                current_cash_native = float(current_cash_krw)
 
             # Additional logic for 'aus' account
-            if acc_id == "aus":
+            if is_aus_account:
                 current_intl_val = m_data.get("intl_shares_value", 0.0) if m_data else 0.0
                 current_intl_chg = m_data.get("intl_shares_change", 0.0) if m_data else 0.0
 
@@ -283,31 +316,55 @@ def _render_cash_tab(account_map):
             c1, c2 = st.columns(2)
             with c1:
                 new_principal = st.number_input(
-                    f"기타 투자 원금 ({acc_name})" if acc_id == "aus" else f"투자 원금 ({acc_name})",
+                    f"기타 투자 원금 ({acc_name})" if is_aus_account else f"투자 원금 ({acc_name})",
                     value=int(current_principal),
                     min_value=0,
                     key=f"prin_{acc_id}",
                 )
             with c2:
-                new_cash = st.number_input(
-                    f"기타 보유 현금 ({acc_name})" if acc_id == "aus" else f"보유 현금 ({acc_name})",
-                    value=int(current_cash),
-                    min_value=0,
-                    key=f"cash_{acc_id}",
-                )
+                if use_native_cash_input:
+                    new_cash_native = st.number_input(
+                        f"보유 현금 ({account_currency})",
+                        value=float(current_cash_native),
+                        min_value=0.0,
+                        step=100.0,
+                        key=f"cash_native_{acc_id}",
+                    )
+                    if rate <= 0:
+                        invalid_cash_accounts.append(acc_name)
+                        st.error(f"{acc_name} 환율을 불러오지 못했습니다. 저장 전에 환율 데이터를 확인하세요.")
+                        new_cash = float(current_cash_krw)
+                    else:
+                        new_cash = float(new_cash_native * rate)
+                else:
+                    new_cash = st.number_input(
+                        f"기타 보유 현금 ({acc_name})" if is_aus_account else f"보유 현금 ({acc_name})",
+                        value=int(current_cash_krw),
+                        min_value=0,
+                        key=f"cash_{acc_id}",
+                    )
+                    new_cash_native = float(new_cash)
+
+            if use_native_cash_input:
+                st.caption(f"ℹ️ 보유 현금은 {account_currency}로 입력되며, 저장 시 KRW로 환산됩니다.")
 
             input_values[acc_id] = {
                 "holdings": current_holdings,
                 "principal": new_principal,
-                "cash": new_cash,
+                "cash": float(new_cash),
+                "cash_native": float(new_cash_native),
+                "cash_currency": account_currency if use_native_cash_input else "KRW",
             }
-            if acc_id == "aus":
+            if is_aus_account:
                 input_values[acc_id]["intl_shares_value"] = new_intl_val
                 input_values[acc_id]["intl_shares_change"] = new_intl_chg
 
             st.divider()
 
         if st.form_submit_button("전체 계좌 일괄 저장하기", type="primary"):
+            if invalid_cash_accounts:
+                st.error(f"환율 확인이 필요한 계좌가 있어 저장을 중단했습니다: {', '.join(invalid_cash_accounts)}")
+                return
             success_count = 0
             for acc_id, data in input_values.items():
                 if save_portfolio_master(
@@ -315,6 +372,8 @@ def _render_cash_tab(account_map):
                     data["holdings"],
                     data["principal"],
                     data["cash"],
+                    cash_balance_native=data.get("cash_native"),
+                    cash_currency=data.get("cash_currency"),
                     intl_shares_value=data.get("intl_shares_value"),
                     intl_shares_change=data.get("intl_shares_change"),
                 ):
@@ -489,9 +548,14 @@ def edit_stock_modal(row_data):
 
 def build_transaction_page(page_cls, active_tab: str | None = None):
     title = active_tab if active_tab else "계좌 관리"
-    # URL path에서 슬래시(/) 제거하여 Streamlit nested path 에러 방지
-    clean_tab = active_tab.split()[-1].replace("/", "_") if active_tab else "main"
-    url_path = f"transactions_{clean_tab}"
+    slug_map = {
+        None: "transactions",
+        "📊 잔고 CRUD": "transactions_holdings",
+        "📥 벌크 입력": "transactions_import",
+        "💵 원금/현금": "transactions_cash",
+        "📸 스냅샷": "transactions_snapshot",
+    }
+    url_path = slug_map.get(active_tab, "transactions")
     return page_cls(
         lambda: render_transaction_management_page(active_tab),
         title=title,

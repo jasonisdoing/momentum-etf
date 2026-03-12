@@ -6,7 +6,10 @@
 
 ### 모듈 구조
 *   `recommend.py`: 백테스트 엔진을 호출하여 가장 최신일(오늘)의 시뮬레이션 결과를 추출하고 추천 리포트를 생성하는 엔트리 포인트
+*   `rank.py`: 종목풀(`zpools`) 기반 랭킹 생성 엔트리 포인트
 *   `core/backtest/`: 핵심 시뮬레이션 엔진 및 계좌별 백테스트 실행 로직
+*   `core/rank/`: 종목풀 랭킹 계산/저장 로직
+*   `core/strategy/`: 지표/점수/의사결정 공용 전략 유틸
 *   `scripts/`: 데이터 수집, 캐시 갱신 등 유틸리티 스크립트
 *   `utils/`:
     *   `cache_utils.py`: **Parquet 기반 캐시 I/O** 및 직렬화 관리
@@ -26,9 +29,11 @@
 ### 핵심 구조
 | 파일/경로 | 역할 |
 |-----------------|------|
-| `recommend.py` | `backtest.py`의 핵심 로직을 호출하여 최신 권장 사항 추출 및 리포트(Slack, JSON, DB) 생성 |
-| `backtest.py` | 단일 계정 또는 전체 기간에 대한 전략 시뮬레이션 실행 |
-| `logic/backtest/account.py` | 개별 계좌의 상태(현금, 보유종목, 수익률)를 관리하는 핵심 엔진 |
+| `recommend.py` | 백테스트 엔진을 호출하여 최신 권장 사항 추출 및 리포트 생성 |
+| `rank.py` | 종목풀 랭킹 생성 및 저장 |
+| `backtest.py` | 계정 단위 전략 시뮬레이션 실행 엔트리 |
+| `core/backtest/runner.py` | 계좌 설정 로드/검증 후 백테스트 실행 오케스트레이션 |
+| `core/backtest/engine.py` | 계좌 리밸런싱 실행 엔진 |
 
 ### 핵심 일관성 체크리스트
 
@@ -40,20 +45,45 @@
     *   코드에 암묵적인 기본값(fallback)을 사용하지 않습니다.
     *   필수 전략 파라미터가 누락된 경우 명확한 `ValueError`를 발생시켜 의도치 않은 전략 실행을 방지합니다.
 
-## 3. 공통 모듈 (`logic/common/`)
+## 3. 전략 설정 규칙
 
-로직의 중복을 피하고 일관성을 유지하기 위해 백테스트 엔진은 다음 공통 모듈을 사용합니다.
+계좌 설정 포맷(`zaccounts/<order>_<account>/config.json`):
 
-*   `portfolio.py`: 보유 수 계산, 매수 필터링
-*   `signals.py`: 매수 시그널 발생 여부, 연속 상승일 계산
-*   `filtering.py`: 후보군 필터링 및 정렬
-*   `price.py`: 가격 결정 및 수익률 계산 로직
+```json
+{
+  "strategy": {
+    "TUNE_MONTHS": 12,
+    "REBALANCE_MODE": "...",
+    "OPTIMIZATION_METRIC": "CAGR|SHARPE|SDR"
+  }
+}
+```
+
+종목풀 설정 포맷(`zpools/<order>_<pool>/config.json`):
+
+```json
+{
+  "name": "국내상장 국내 ETF",
+  "desc": "국내상장 국내 ETF 종목풀",
+  "rank": {
+    "country": "kor|us|au",
+    "months": 12,
+    "ma_type": "HMA"
+  }
+}
+```
+
+검증 원칙(현재 운영):
+
+* 계좌: `strategy.REBALANCE_MODE` 및 종목 `weight` 필수
+* 종목풀: `rank.country/months/ma_type` 필수
+* 필수값 누락 시 fallback 없이 명시적 에러
 
 ## 4. 테스트 및 검증
 
 코드를 수정할 때는 다음 절차를 따르세요.
 
-1.  **로직 수정**: `core/backtest/` 수정
+1.  **로직 수정**: `core/backtest/`, `core/tune/`, `utils/settings_loader.py`를 우선 확인
 2.  **검증**:
     *   **백테스트 실행**: `python backtest.py <account_id>`를 통해 전체 기간 수익률 추이 및 거래 횟수 확인
     *   **추천 실행**: `python recommend.py <account_id>`를 실행하여 마지막 날 결과가 의도대로 나오는지 확인

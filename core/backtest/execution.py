@@ -209,9 +209,7 @@ def execute_rebalance_buy(
     if buy_qty <= 0:
         return 0.0
 
-    decision = "BUY_REBALANCE"
-    if current_shares == 0:
-        decision = "BUY"  # Maps to "✅ 신규 매수"
+    decision = "BUY"
 
     apply_trade(state, ticker, cost, buy_price, buy_qty, decision, dt, data=data, i=i)
     return cost

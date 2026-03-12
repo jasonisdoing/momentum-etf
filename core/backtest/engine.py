@@ -9,16 +9,94 @@ from typing import Any
 
 import pandas as pd
 
+from config import BACKTEST_SLIPPAGE
 from core.backtest.filtering import select_candidates
 from core.backtest.price import calculate_trade_price
-from strategies.maps.constants import BACKTEST_STATUS_LIST
-from strategies.maps.evaluator import StrategyEvaluator
-from strategies.maps.labeler import compute_net_trade_note
-from strategies.maps.metrics import process_ticker_data
+from core.strategy.evaluator import StrategyEvaluator
+from core.strategy.labeler import compute_net_trade_note
+from core.strategy.metrics import process_ticker_data
 from utils.logger import get_app_logger
 from utils.report import format_money
+from utils.settings_loader import get_country_precision
 
 logger = get_app_logger()
+
+
+def _floor_quantity(quantity: float, qty_precision: int) -> float:
+    if quantity <= 0:
+        return 0.0
+    if qty_precision <= 0:
+        return float(int(quantity))
+    factor = 10**qty_precision
+    return float(int(quantity * factor)) / factor
+
+
+def _can_sell_with_cooldown(ticker_state: Mapping[str, Any], day_index: int, cooldown_days: int) -> bool:
+    last_buy_index = ticker_state.get("last_buy_index")
+    if last_buy_index is None:
+        return True
+    return (day_index - int(last_buy_index)) >= int(cooldown_days)
+
+
+def _can_buy_with_cooldown(ticker_state: Mapping[str, Any], day_index: int, cooldown_days: int) -> bool:
+    last_sell_index = ticker_state.get("last_sell_index")
+    if last_sell_index is None:
+        return True
+    return (day_index - int(last_sell_index)) >= int(cooldown_days)
+
+
+def _remaining_sell_cooldown_days(ticker_state: Mapping[str, Any], day_index: int, cooldown_days: int) -> int:
+    last_buy_index = ticker_state.get("last_buy_index")
+    if last_buy_index is None:
+        return 0
+    elapsed = day_index - int(last_buy_index)
+    return max(int(cooldown_days) - int(elapsed), 0)
+
+
+def _remaining_buy_cooldown_days(ticker_state: Mapping[str, Any], day_index: int, cooldown_days: int) -> int:
+    last_sell_index = ticker_state.get("last_sell_index")
+    if last_sell_index is None:
+        return 0
+    elapsed = day_index - int(last_sell_index)
+    return max(int(cooldown_days) - int(elapsed), 0)
+
+
+def _set_cooldown_note_if_empty(
+    daily_records_by_ticker: dict[str, list[dict[str, Any]]],
+    ticker: str,
+    dt: pd.Timestamp,
+    note: str,
+) -> None:
+    records = daily_records_by_ticker.get(ticker)
+    if not records or records[-1]["date"] != dt:
+        return
+    current_note = str(records[-1].get("note") or "").strip()
+    if current_note:
+        return
+    pending_action = str(records[-1].get("pending_action") or "").upper()
+    # BUY 예정 행에는 "매도 가능" 쿨다운 문구를 노출하지 않음
+    if "매도 가능" in note and pending_action.startswith("BUY"):
+        return
+    records[-1]["note"] = note
+
+
+def _calculate_bootstrap_buy_price(
+    *,
+    open_values: Any,
+    close_values: Any,
+    country_code: str,
+) -> float:
+    open0 = open_values[0] if len(open_values) > 0 else float("nan")
+    close0 = close_values[0] if len(close_values) > 0 else float("nan")
+    if pd.notna(open0):
+        base_price = float(open0)
+    elif pd.notna(close0):
+        base_price = float(close0)
+    else:
+        return 0.0
+    slippage_config = BACKTEST_SLIPPAGE.get(country_code, BACKTEST_SLIPPAGE.get("kor", {}))
+    slippage_pct = float(slippage_config.get("buy_pct", 0.0) or 0.0)
+    return base_price * (1 + slippage_pct / 100.0)
 
 
 def _execute_individual_sells(
@@ -35,12 +113,30 @@ def _execute_individual_sells(
     current_holdings_value: float,
     ma_days: int,
     evaluator: StrategyEvaluator,
+    is_replacement_day: bool,
+    cooldown_days: int,
+    qty_precision: int,
+    dt: pd.Timestamp,
+    next_dt: pd.Timestamp | None,
 ) -> tuple[float, float]:
     """개별 종목 매도 로직 (StrategyEvaluator 사용)"""
+    if not is_replacement_day:
+        return cash, current_holdings_value
+
     for ticker, ticker_metrics in metrics_by_ticker.items():
         ticker_state, price = position_state[ticker], today_prices.get(ticker)
 
         if ticker_state["shares"] > 0 and pd.notna(price) and metrics_by_ticker[ticker]["available_mask"][i]:
+            if not _can_sell_with_cooldown(ticker_state, i, cooldown_days):
+                remaining = _remaining_sell_cooldown_days(ticker_state, i, cooldown_days)
+                if remaining > 0:
+                    _set_cooldown_note_if_empty(
+                        daily_records_by_ticker,
+                        ticker,
+                        dt,
+                        f"[예정] 쿨다운 - {remaining}일 후 매도 가능",
+                    )
+                continue
             ma_val = ticker_metrics["ma_values"][i]
             current_score = score_today.get(ticker, 0.0)
 
@@ -70,7 +166,9 @@ def _execute_individual_sells(
                 if sell_price <= 0:
                     continue
 
-                qty = ticker_state["shares"]
+                qty = _floor_quantity(float(ticker_state["shares"]), qty_precision)
+                if qty <= 0:
+                    continue
                 trade_amount = qty * sell_price
                 trade_profit = (sell_price - ticker_state["avg_cost"]) * qty if ticker_state["avg_cost"] > 0 else 0.0
                 hold_ret = (
@@ -82,19 +180,27 @@ def _execute_individual_sells(
 
                 cash += trade_amount
                 current_holdings_value = max(0.0, current_holdings_value - trade_amount)
-                ticker_state["shares"], ticker_state["avg_cost"] = 0, 0.0
+                remaining_shares = _floor_quantity(float(ticker_state["shares"]) - qty, qty_precision)
+                ticker_state["shares"] = remaining_shares
+                ticker_state["last_sell_index"] = i
+                if remaining_shares <= 0:
+                    ticker_state["avg_cost"] = 0.0
 
                 # 행 업데이트
                 row = daily_records_by_ticker[ticker][-1]
                 row.update(
                     {
-                        "decision": decision,
+                        "decision": "HOLD",
                         "trade_amount": trade_amount,
+                        "trade_shares": qty,
                         "trade_profit": trade_profit,
                         "trade_pl_pct": hold_ret,
-                        "shares": 0,
-                        "pv": 0,
-                        "avg_cost": 0,
+                        "shares": remaining_shares,
+                        "pv": remaining_shares * price,
+                        "avg_cost": ticker_state["avg_cost"],
+                        "pending_action": str(decision).upper(),
+                        "execute_on": next_dt,
+                        "pending_reason": phrase or None,
                     }
                 )
 
@@ -118,9 +224,11 @@ def _rank_buy_candidates(
         ticker_state_cand = position_state[candidate_ticker]
 
         if ticker_state_cand["shares"] == 0:
-            # MAPS 점수 사용
+            # RANK 점수 사용
             score_cand = score_today.get(candidate_ticker, float("nan"))
             final_score = score_cand if not pd.isna(score_cand) else -float("inf")
+            if final_score < 0.0:
+                continue
             buy_ranked_candidates.append((final_score, candidate_ticker))
 
     buy_ranked_candidates.sort(reverse=True)
@@ -189,6 +297,9 @@ def _execute_new_buys(
     initial_capital: float = 0.0,
     bucket_map: dict[str, int] | None = None,
     bucket_topn: int | None = None,
+    qty_precision: int = 0,
+    next_dt: pd.Timestamp | None = None,
+    cooldown_days: int = 1,
 ) -> tuple[float, float, set[str]]:
     """신규 매수 실행
 
@@ -240,6 +351,17 @@ def _execute_new_buys(
                 continue
 
         block_reason = ""
+        ticker_state = position_state[ticker_to_buy]
+        if not _can_buy_with_cooldown(ticker_state, i, cooldown_days):
+            remaining = _remaining_buy_cooldown_days(ticker_state, i, cooldown_days)
+            if remaining > 0:
+                _set_cooldown_note_if_empty(
+                    daily_records_by_ticker,
+                    ticker_to_buy,
+                    dt,
+                    f"[예정] 쿨다운 - {remaining}일 후 매수 가능",
+                )
+            continue
 
         price = today_prices.get(ticker_to_buy)
         if pd.isna(price):
@@ -286,8 +408,8 @@ def _execute_new_buys(
             continue
 
         price = today_prices.get(ticker_to_buy)
-        req_qty = budget / buy_price if buy_price > 0 else 0
-        trade_amount = budget
+        req_qty = _floor_quantity(budget / buy_price, qty_precision) if buy_price > 0 else 0.0
+        trade_amount = req_qty * buy_price
 
         if trade_amount <= cash + 1e-9 and req_qty > 0:
             ticker_state = position_state[ticker_to_buy]
@@ -296,6 +418,7 @@ def _execute_new_buys(
             current_holdings_value += trade_amount
             ticker_state["shares"] += req_qty
             ticker_state["avg_cost"] = buy_price
+            ticker_state["last_buy_index"] = i
 
             condition_met = (
                 daily_records_by_ticker[ticker_to_buy] and daily_records_by_ticker[ticker_to_buy][-1]["date"] == dt
@@ -304,12 +427,16 @@ def _execute_new_buys(
                 row = daily_records_by_ticker[ticker_to_buy][-1]
                 row.update(
                     {
-                        "decision": "BUY",
+                        "decision": "WAIT",
                         "trade_amount": trade_amount,
+                        "trade_shares": req_qty,
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
                         "avg_cost": ticker_state["avg_cost"],
                         "note": "",
+                        "pending_action": "BUY",
+                        "execute_on": next_dt,
+                        "pending_reason": "신규 매수",
                     }
                 )
             else:
@@ -320,12 +447,16 @@ def _execute_new_buys(
                         "price": price,
                         "shares": ticker_state["shares"],
                         "pv": ticker_state["shares"] * price,
-                        "decision": "BUY",
+                        "decision": "WAIT",
                         "avg_cost": ticker_state["avg_cost"],
                         "trade_amount": trade_amount,
+                        "trade_shares": req_qty,
                         "trade_profit": 0.0,
                         "trade_pl_pct": 0.0,
                         "note": "",
+                        "pending_action": "BUY",
+                        "execute_on": next_dt,
+                        "pending_reason": "신규 매수",
                         "signal1": None,
                         "signal2": None,
                         "score": score_today.get(ticker_to_buy, 0.0),
@@ -351,7 +482,11 @@ def check_is_rebalance_day(
     rebalance_mode: str,
     trading_calendar: pd.DatetimeIndex | None = None,
 ) -> bool:
-    """주어진 dt가 리밸런싱 날짜(기존 해당 모드의 지정된 거래일)인지 판별하는 헬퍼 함수입니다."""
+    """주어진 dt가 거래 신호일인지 판별합니다.
+
+    DAILY는 당일 종가 기준으로 다음 거래일 체결을 유지합니다.
+    주간/월간 계열은 실제 체결일의 직전 거래일을 신호일로 사용합니다.
+    """
     if trading_calendar is not None:
         trading_calendar = (
             pd.DatetimeIndex(trading_calendar)
@@ -359,79 +494,462 @@ def check_is_rebalance_day(
             else trading_calendar
         )
 
+    def _is_execution_day(target_dt: pd.Timestamp, target_next_dt: pd.Timestamp | None) -> bool:
+        if rebalance_mode == "DAILY":
+            return True
+
+        if rebalance_mode == "WEEKLY":
+            if target_next_dt is not None:
+                if target_next_dt.isocalendar()[:2] != target_dt.isocalendar()[:2]:
+                    return True
+            elif trading_calendar is not None:
+                try:
+                    cal_idx = trading_calendar.get_loc(target_dt)
+                    if cal_idx + 1 < len(trading_calendar):
+                        if trading_calendar[cal_idx + 1].isocalendar()[:2] != target_dt.isocalendar()[:2]:
+                            return True
+                except (KeyError, IndexError, AttributeError):
+                    pass
+            return False
+
+        elif rebalance_mode == "TWICE_A_MONTH":
+            import calendar
+
+            dt_friday = target_dt + pd.Timedelta(days=4 - target_dt.weekday())
+            days_in_month = calendar.monthrange(dt_friday.year, dt_friday.month)[1]
+            fridays = [d for d in range(1, days_in_month + 1) if dt_friday.replace(day=d).weekday() == 4]
+            if len(fridays) >= 5:
+                target_fridays = [fridays[2], fridays[4]]
+            else:
+                target_fridays = [fridays[1], fridays[3]]
+
+            if dt_friday.day in target_fridays:
+                if target_next_dt is not None:
+                    if target_next_dt.isocalendar()[:2] != target_dt.isocalendar()[:2]:
+                        return True
+                elif trading_calendar is not None:
+                    try:
+                        cal_idx = trading_calendar.get_loc(target_dt)
+                        if cal_idx + 1 < len(trading_calendar):
+                            if trading_calendar[cal_idx + 1].isocalendar()[:2] != target_dt.isocalendar()[:2]:
+                                return True
+                    except (KeyError, IndexError, AttributeError):
+                        pass
+            return False
+
+        elif rebalance_mode == "MONTHLY":
+            if target_next_dt is not None:
+                if target_next_dt.month != target_dt.month:
+                    return True
+            elif trading_calendar is not None:
+                try:
+                    cal_idx = trading_calendar.get_loc(target_dt)
+                    if cal_idx + 1 < len(trading_calendar):
+                        if trading_calendar[cal_idx + 1].month != target_dt.month:
+                            return True
+                except (KeyError, IndexError, AttributeError):
+                    pass
+            return False
+
+        elif rebalance_mode == "QUARTERLY":
+            target_months = {3, 6, 9, 12}
+            if target_dt.month in target_months:
+                if target_next_dt is not None:
+                    if target_next_dt.month != target_dt.month:
+                        return True
+                elif trading_calendar is not None:
+                    try:
+                        cal_idx = trading_calendar.get_loc(target_dt)
+                        if cal_idx + 1 < len(trading_calendar):
+                            if trading_calendar[cal_idx + 1].month != target_dt.month:
+                                return True
+                    except (KeyError, IndexError, AttributeError):
+                        pass
+            return False
+
+        return False
+
     if rebalance_mode == "DAILY":
         return True
 
-    if rebalance_mode == "WEEKLY":
-        if next_dt is not None:
-            if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
-                return True
-        elif trading_calendar is not None:
-            try:
-                cal_idx = trading_calendar.get_loc(dt)
-                if cal_idx + 1 < len(trading_calendar):
-                    if trading_calendar[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
-                        return True
-            except (KeyError, IndexError, AttributeError):
-                pass
+    if trading_calendar is None:
         return False
 
-    elif rebalance_mode == "TWICE_A_MONTH":
-        import calendar
+    try:
+        cal_idx = trading_calendar.get_loc(dt)
+        if isinstance(cal_idx, slice):
+            cal_idx = int(cal_idx.stop) - 1
+        next_signal_idx = int(cal_idx) + 1
+        if next_signal_idx >= len(trading_calendar):
+            return False
+        execution_dt = trading_calendar[next_signal_idx]
+        execution_next_dt = (
+            trading_calendar[next_signal_idx + 1] if next_signal_idx + 1 < len(trading_calendar) else None
+        )
+    except (KeyError, IndexError, AttributeError, TypeError, ValueError):
+        return False
 
-        dt_friday = dt + pd.Timedelta(days=4 - dt.weekday())
-        days_in_month = calendar.monthrange(dt_friday.year, dt_friday.month)[1]
-        fridays = [d for d in range(1, days_in_month + 1) if dt_friday.replace(day=d).weekday() == 4]
-        if len(fridays) >= 5:
-            target_fridays = [fridays[2], fridays[4]]
+    return _is_execution_day(execution_dt, execution_next_dt)
+
+
+def _run_weight_backtest(
+    *,
+    stocks: list[dict],
+    initial_capital: float,
+    core_start_date: pd.Timestamp | None,
+    country: str,
+    prefetched_data: dict[str, pd.DataFrame] | None,
+    trading_calendar: Sequence[pd.Timestamp] | None,
+    rebalance_mode: str,
+    target_weights: Mapping[str, float] | None,
+    quiet: bool,
+    progress_callback: Callable[[int, int], None] | None,
+    missing_ticker_sink: set[str] | None,
+    qty_precision: int,
+) -> dict[str, pd.DataFrame]:
+    country_code = (country or "").strip().lower() or "kor"
+
+    def _log(message: str) -> None:
+        if quiet:
+            logger.debug(message)
         else:
-            target_fridays = [fridays[1], fridays[3]]
+            logger.info(message)
 
-        if dt_friday.day in target_fridays:
-            if next_dt is not None:
-                if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
-                    return True
-            elif trading_calendar is not None:
-                try:
-                    cal_idx = trading_calendar.get_loc(dt)
-                    if cal_idx + 1 < len(trading_calendar):
-                        if trading_calendar[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
-                            return True
-                except (KeyError, IndexError, AttributeError):
-                    pass
-        return False
+    if not isinstance(target_weights, Mapping) or not target_weights:
+        raise RuntimeError("종목 weight 기반 목표 비중이 필요합니다.")
 
-    elif rebalance_mode == "MONTHLY":
-        if next_dt is not None:
-            if next_dt.month != dt.month:
-                return True
-        elif trading_calendar is not None:
-            try:
-                cal_idx = trading_calendar.get_loc(dt)
-                if cal_idx + 1 < len(trading_calendar):
-                    if trading_calendar[cal_idx + 1].month != dt.month:
-                        return True
-            except (KeyError, IndexError, AttributeError):
-                pass
-        return False
+    normalized_weights: dict[str, float] = {}
+    weight_sum = 0.0
+    for ticker, weight in target_weights.items():
+        key = str(ticker or "").strip().upper()
+        if not key:
+            continue
+        w = float(weight)
+        if w <= 0:
+            continue
+        normalized_weights[key] = w
+        weight_sum += w
+    if not normalized_weights:
+        raise RuntimeError("목표 비중이 비어 있습니다.")
+    if abs(weight_sum - 1.0) > 1e-3:
+        raise RuntimeError("목표 비중 합계는 1.0이어야 합니다.")
 
-    elif rebalance_mode == "QUARTERLY":
-        target_months = {3, 6, 9, 12}
-        if dt.month in target_months:
-            if next_dt is not None:
-                if next_dt.month != dt.month:
-                    return True
-            elif trading_calendar is not None:
-                try:
-                    cal_idx = trading_calendar.get_loc(dt)
-                    if cal_idx + 1 < len(trading_calendar):
-                        if trading_calendar[cal_idx + 1].month != dt.month:
-                            return True
-                except (KeyError, IndexError, AttributeError):
-                    pass
-        return False
+    ticker_set = set(normalized_weights.keys())
+    metrics_by_ticker: dict[str, dict[str, Any]] = {}
+    if prefetched_data is None:
+        prefetched_data = {}
 
-    return False
+    for stock in stocks:
+        ticker = str(stock.get("ticker") or "").strip().upper()
+        if not ticker or ticker not in ticker_set:
+            continue
+        df = prefetched_data.get(ticker)
+        if df is None or df.empty:
+            continue
+        working_df = df.copy()
+        if isinstance(working_df.columns, pd.MultiIndex):
+            working_df.columns = working_df.columns.get_level_values(0)
+            working_df = working_df.loc[:, ~working_df.columns.duplicated()]
+
+        if "unadjusted_close" in working_df.columns:
+            close_series = working_df["unadjusted_close"]
+        else:
+            close_series = working_df["Close"]
+        if isinstance(close_series, pd.DataFrame):
+            close_series = close_series.iloc[:, 0]
+        close_series = close_series.astype(float)
+
+        if "Open" in working_df.columns:
+            open_series = working_df["Open"]
+            if isinstance(open_series, pd.DataFrame):
+                open_series = open_series.iloc[:, 0]
+            open_series = open_series.astype(float)
+        else:
+            open_series = close_series.copy()
+
+        metrics_by_ticker[ticker] = {
+            "close": close_series,
+            "open": open_series,
+        }
+
+    missing = sorted(ticker_set - set(metrics_by_ticker.keys()))
+    if missing:
+        if missing_ticker_sink is not None:
+            missing_ticker_sink.update(missing)
+        else:
+            logger.warning("가격 데이터 부족으로 제외된 종목: %s", ", ".join(missing))
+
+    if not metrics_by_ticker:
+        return {}
+
+    union_index = pd.DatetimeIndex([])
+    for item in metrics_by_ticker.values():
+        union_index = union_index.union(item["close"].index)
+    if core_start_date is not None:
+        union_index = union_index[union_index >= core_start_date]
+    union_index = union_index.sort_values()
+    if union_index.empty:
+        return {}
+
+    for ticker, item in metrics_by_ticker.items():
+        close_series = item["close"].reindex(union_index)
+        open_series = item["open"].reindex(union_index)
+        item["close_values"] = close_series.to_numpy()
+        item["open_values"] = open_series.to_numpy()
+        item["available_mask"] = close_series.notna().to_numpy()
+
+    if trading_calendar is None:
+        raise RuntimeError("trading_calendar must be provided to run_portfolio_backtest.")
+    trading_calendar_idx = (
+        pd.DatetimeIndex(trading_calendar) if not isinstance(trading_calendar, pd.DatetimeIndex) else trading_calendar
+    )
+
+    position_state = {ticker: {"shares": 0.0, "avg_cost": 0.0} for ticker in metrics_by_ticker.keys()}
+    last_prices = {ticker: 0.0 for ticker in metrics_by_ticker.keys()}
+    daily_records_by_ticker = {ticker: [] for ticker in metrics_by_ticker.keys()}
+    out_cash: list[dict[str, Any]] = []
+    cash = float(initial_capital)
+    total_days = len(union_index)
+
+    # 시작일 즉시 목표 비중으로 초기 보유 구성
+    # 시작일에 가격/체결가를 만들 수 없는 종목은 최초 거래 가능일에 지연 편입한다.
+    deferred_initial_entries: set[str] = set()
+    for ticker, weight in normalized_weights.items():
+        if ticker not in metrics_by_ticker:
+            continue
+        buy_price = _calculate_bootstrap_buy_price(
+            open_values=metrics_by_ticker[ticker]["open_values"],
+            close_values=metrics_by_ticker[ticker]["close_values"],
+            country_code=country_code,
+        )
+        if buy_price <= 0:
+            continue
+        budget = float(initial_capital) * float(weight)
+        qty = _floor_quantity(budget / buy_price, qty_precision) if buy_price > 0 else 0.0
+        amount = qty * buy_price
+        if qty <= 0 or amount > cash + 1e-9:
+            deferred_initial_entries.add(ticker)
+            continue
+        position_state[ticker]["shares"] = qty
+        position_state[ticker]["avg_cost"] = buy_price
+        cash -= amount
+    for ticker in normalized_weights.keys():
+        if ticker in metrics_by_ticker and position_state.get(ticker, {}).get("shares", 0.0) <= 0:
+            deferred_initial_entries.add(ticker)
+
+    _log(f"총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
+
+    for i, dt in enumerate(union_index):
+        next_dt = union_index[i + 1] if i < total_days - 1 else None
+        is_rebalance_day = check_is_rebalance_day(
+            dt=dt, next_dt=next_dt, rebalance_mode=rebalance_mode, trading_calendar=trading_calendar_idx
+        )
+
+        if progress_callback is not None:
+            progress_callback(i + 1, total_days)
+
+        today_prices: dict[str, float] = {}
+        for ticker, item in metrics_by_ticker.items():
+            price_val = item["close_values"][i]
+            price_float = float(price_val) if not pd.isna(price_val) else float("nan")
+            if pd.notna(price_float):
+                last_prices[ticker] = price_float
+            today_prices[ticker] = price_float
+
+        # 시작일 체결 실패 종목은 가격이 처음 유효해지는 거래일에 즉시 편입한다.
+        if deferred_initial_entries:
+            for ticker in list(deferred_initial_entries):
+                if ticker not in metrics_by_ticker:
+                    deferred_initial_entries.discard(ticker)
+                    continue
+                if float(position_state.get(ticker, {}).get("shares", 0.0) or 0.0) > 0:
+                    deferred_initial_entries.discard(ticker)
+                    continue
+                price = today_prices.get(ticker, float("nan"))
+                if pd.isna(price) or price <= 0:
+                    continue
+                trade_price = calculate_trade_price(
+                    i,
+                    total_days,
+                    metrics_by_ticker[ticker]["open_values"],
+                    metrics_by_ticker[ticker]["close_values"],
+                    country_code,
+                    is_buy=True,
+                )
+                if trade_price <= 0:
+                    continue
+                target_budget = float(initial_capital) * float(normalized_weights.get(ticker, 0.0))
+                if target_budget <= 0:
+                    deferred_initial_entries.discard(ticker)
+                    continue
+                qty = _floor_quantity(target_budget / trade_price, qty_precision)
+                amount = qty * trade_price
+                if qty <= 0 or amount > cash + 1e-9:
+                    continue
+                position_state[ticker]["shares"] = float(qty)
+                position_state[ticker]["avg_cost"] = float(trade_price)
+                cash -= amount
+                deferred_initial_entries.discard(ticker)
+
+        total_holdings_value = 0.0
+        for ticker, state in position_state.items():
+            price = today_prices.get(ticker, float("nan"))
+            if pd.isna(price) or price <= 0:
+                price = last_prices.get(ticker, 0.0)
+            total_holdings_value += float(state["shares"]) * float(price)
+        total_equity = cash + total_holdings_value
+
+        for ticker, state in position_state.items():
+            price = today_prices.get(ticker, float("nan"))
+            if pd.isna(price) or price <= 0:
+                price = last_prices.get(ticker, 0.0)
+                note = "데이터 없음"
+            else:
+                note = ""
+            shares = float(state["shares"])
+            daily_records_by_ticker[ticker].append(
+                {
+                    "date": dt,
+                    "price": float(price),
+                    "shares": shares,
+                    "pv": shares * float(price),
+                    "decision": "HOLD" if shares > 0 else "WAIT",
+                    "avg_cost": float(state["avg_cost"]),
+                    "trade_amount": 0.0,
+                    "trade_shares": 0.0,
+                    "trade_profit": 0.0,
+                    "trade_pl_pct": 0.0,
+                    "note": note,
+                    "pending_action": None,
+                    "execute_on": None,
+                    "pending_reason": None,
+                    "signal1": None,
+                    "signal2": None,
+                    "score": 0.0,
+                    "filter": 0,
+                }
+            )
+
+        if is_rebalance_day and total_equity > 0:
+            # 1) 비중 초과분 매도
+            for ticker, weight in normalized_weights.items():
+                if ticker not in position_state:
+                    continue
+                state = position_state[ticker]
+                price = today_prices.get(ticker, float("nan"))
+                if pd.isna(price) or price <= 0:
+                    price = last_prices.get(ticker, 0.0)
+                if price <= 0:
+                    continue
+                current_value = float(state["shares"]) * float(price)
+                target_value = float(total_equity) * float(weight)
+                delta = target_value - current_value
+                if delta >= 0:
+                    continue
+                trade_price = calculate_trade_price(
+                    i,
+                    total_days,
+                    metrics_by_ticker[ticker]["open_values"],
+                    metrics_by_ticker[ticker]["close_values"],
+                    country_code,
+                    is_buy=False,
+                )
+                if trade_price <= 0:
+                    continue
+                qty = _floor_quantity(min(float(state["shares"]), abs(delta) / trade_price), qty_precision)
+                if qty <= 0:
+                    continue
+                amount = qty * trade_price
+                state["shares"] = _floor_quantity(float(state["shares"]) - qty, qty_precision)
+                if state["shares"] <= 0:
+                    state["shares"] = 0.0
+                    state["avg_cost"] = 0.0
+                cash += amount
+                row = daily_records_by_ticker[ticker][-1]
+                diff_pct = (amount / total_equity) * 100.0
+                row["note"] = f"[예정] 비중조절 - {diff_pct:.1f}% 매도"
+                row["pending_action"] = "SELL_REBALANCE"
+                row["execute_on"] = next_dt
+                row["pending_reason"] = "비중 조정"
+                row["trade_amount"] += amount
+                row["trade_shares"] += qty
+                row["shares"] = float(state["shares"])
+                row["pv"] = float(state["shares"]) * float(price)
+
+            # 2) 비중 부족분 매수
+            for ticker, weight in normalized_weights.items():
+                if ticker not in position_state or cash <= 0:
+                    continue
+                state = position_state[ticker]
+                price = today_prices.get(ticker, float("nan"))
+                if pd.isna(price) or price <= 0:
+                    price = last_prices.get(ticker, 0.0)
+                if price <= 0:
+                    continue
+                current_value = float(state["shares"]) * float(price)
+                target_value = float(total_equity) * float(weight)
+                delta = target_value - current_value
+                if delta <= 0:
+                    continue
+                trade_price = calculate_trade_price(
+                    i,
+                    total_days,
+                    metrics_by_ticker[ticker]["open_values"],
+                    metrics_by_ticker[ticker]["close_values"],
+                    country_code,
+                    is_buy=True,
+                )
+                if trade_price <= 0:
+                    continue
+                budget = min(delta, cash)
+                qty = _floor_quantity(budget / trade_price, qty_precision)
+                if qty <= 0:
+                    continue
+                amount = qty * trade_price
+                if amount > cash + 1e-9:
+                    continue
+                prev_shares = float(state["shares"])
+                prev_cost = float(state["avg_cost"])
+                state["shares"] = prev_shares + qty
+                cash -= amount
+                total_cost = prev_shares * prev_cost + amount
+                state["avg_cost"] = (total_cost / state["shares"]) if state["shares"] > 0 else 0.0
+                row = daily_records_by_ticker[ticker][-1]
+                diff_pct = (amount / total_equity) * 100.0
+                existing_note = str(row.get("note") or "").strip()
+                topup_note = f"[예정] 비중조절 - {diff_pct:.1f}% 매수"
+                row["note"] = f"{topup_note} | {existing_note}" if existing_note else topup_note
+                row["pending_action"] = "BUY"
+                row["execute_on"] = next_dt
+                row["pending_reason"] = "비중 조정"
+                row["trade_amount"] += amount
+                row["trade_shares"] += qty
+                row["shares"] = float(state["shares"])
+                row["avg_cost"] = float(state["avg_cost"])
+                row["pv"] = float(state["shares"]) * float(price)
+
+        out_cash.append(
+            {
+                "date": dt,
+                "price": 1.0,
+                "cash": float(cash),
+                "shares": 0,
+                "pv": float(cash),
+                "decision": "HOLD",
+                "note": "",
+                "pending_action": None,
+                "execute_on": None,
+                "pending_reason": None,
+            }
+        )
+
+    result: dict[str, pd.DataFrame] = {}
+    for ticker_symbol, records in daily_records_by_ticker.items():
+        if records:
+            result[ticker_symbol] = pd.DataFrame(records).set_index("date")
+    if out_cash:
+        result["CASH"] = pd.DataFrame(out_cash).set_index("date")
+    return result
 
 
 def run_portfolio_backtest(
@@ -448,7 +966,10 @@ def run_portfolio_backtest(
     trading_calendar: Sequence[pd.Timestamp] | None = None,
     ma_days: int = 20,
     ma_type: str = "SMA",
+    strategy: str = "PORTFOLIO",
     rebalance_mode: str = "TWICE_A_MONTH",
+    cooldown: int = 1,
+    target_weights: Mapping[str, float] | None = None,
     quiet: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
     missing_ticker_sink: set[str] | None = None,
@@ -473,6 +994,10 @@ def run_portfolio_backtest(
     """
 
     country_code = (country or "").strip().lower() or "kor"
+    qty_precision = int(get_country_precision(country_code).get("qty_precision", 0))
+    cooldown_days = int(cooldown)
+    if cooldown_days < 1:
+        raise ValueError("COOLDOWN은 1 이상의 정수여야 합니다.")
 
     def _log(message: str) -> None:
         if quiet:
@@ -483,6 +1008,37 @@ def run_portfolio_backtest(
     from core.backtest.portfolio import validate_bucket_topn
 
     validate_bucket_topn(top_n)
+
+    return _run_weight_backtest(
+        stocks=stocks,
+        initial_capital=initial_capital,
+        core_start_date=core_start_date,
+        country=country,
+        prefetched_data=prefetched_data,
+        trading_calendar=trading_calendar,
+        rebalance_mode=rebalance_mode,
+        target_weights=target_weights,
+        quiet=quiet,
+        progress_callback=progress_callback,
+        missing_ticker_sink=missing_ticker_sink,
+        qty_precision=qty_precision,
+    )
+
+    ticker_name_map: dict[str, str] = {}
+    for stock in stocks:
+        if not isinstance(stock, Mapping):
+            continue
+        ticker_raw = str(stock.get("ticker") or "").strip().upper()
+        name_raw = str(stock.get("name") or "").strip()
+        if ticker_raw and name_raw:
+            ticker_name_map[ticker_raw] = name_raw
+
+    def _ticker_label(ticker: str) -> str:
+        tk = str(ticker or "").strip().upper()
+        if not tk:
+            return ""
+        nm = ticker_name_map.get(tk)
+        return f"{nm}({tk})" if nm else tk
 
     # ETF와 주식을 구분하여 처리 (삭제됨)
     # etf_tickers = {stock["ticker"] for stock in stocks if stock.get("type") == "etf"}
@@ -576,9 +1132,13 @@ def run_portfolio_backtest(
         ticker: {
             "shares": 0,
             "avg_cost": 0.0,
+            "last_buy_index": None,
+            "last_sell_index": None,
         }
         for ticker in metrics_by_ticker.keys()
     }
+    # 각 종목별 직전 유효 가격을 추적 (데이터 공백 시 패딩용)
+    last_prices = {ticker: 0.0 for ticker in metrics_by_ticker.keys()}
     cash = float(initial_capital)
     daily_records_by_ticker = {ticker: [] for ticker in metrics_by_ticker.keys()}
     out_cash = []
@@ -590,100 +1150,77 @@ def run_portfolio_backtest(
 
     # 일별 루프를 돌며 시뮬레이션을 실행합니다.
     total_days = len(union_index)
-    _log(f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 리밸런싱 모드: {rebalance_mode}")
+    _log(
+        f"[백테스트] 총 {total_days}일의 데이터를 처리합니다... 교체 모드: DAILY(고정), 리밸런싱 모드: {rebalance_mode}, COOLDOWN: {cooldown_days}"
+    )
+
+    bootstrap_initialized = False
+    if total_days > 0:
+        initial_candidates: list[tuple[float, str]] = []
+        held_per_bucket: dict[int, int] = {}
+
+        for ticker, ticker_metrics in metrics_by_ticker.items():
+            available0 = bool(ticker_metrics["available_mask"][0])
+            if not available0:
+                continue
+            score0 = ticker_metrics["ma_score_values"][0]
+            score_float = float(score0) if not pd.isna(score0) else float("-inf")
+            if score_float >= 0:
+                initial_candidates.append((score_float, ticker))
+
+        initial_candidates.sort(reverse=True)
+
+        selected: list[str] = []
+        for _, ticker in initial_candidates:
+            if len(selected) >= int(top_n):
+                break
+            if bucket_map and bucket_topn:
+                b_id = bucket_map.get(ticker, 1)
+                if held_per_bucket.get(b_id, 0) >= int(bucket_topn):
+                    continue
+                held_per_bucket[b_id] = held_per_bucket.get(b_id, 0) + 1
+            selected.append(ticker)
+
+        if selected:
+            remaining_cash = float(cash)
+            for idx, ticker in enumerate(selected):
+                remaining_slots = len(selected) - idx
+                if remaining_slots <= 0 or remaining_cash <= 0:
+                    break
+                ticker_metrics = metrics_by_ticker[ticker]
+                buy_price = _calculate_bootstrap_buy_price(
+                    open_values=ticker_metrics["open_values"],
+                    close_values=ticker_metrics["close_values"],
+                    country_code=country_code,
+                )
+                if buy_price <= 0:
+                    continue
+                budget = remaining_cash / remaining_slots
+                qty = _floor_quantity(budget / buy_price, qty_precision) if buy_price > 0 else 0.0
+                trade_amount = qty * buy_price
+                if qty <= 0 or trade_amount > remaining_cash + 1e-9:
+                    continue
+                position_state[ticker]["shares"] = qty
+                position_state[ticker]["avg_cost"] = buy_price
+                position_state[ticker]["last_buy_index"] = 0
+                remaining_cash -= trade_amount
+                bootstrap_initialized = True
+            cash = max(remaining_cash, 0.0)
 
     # 이전 리밸런싱 인덱스 추적 변수는 제거함
     for i, dt in enumerate(union_index):
-        # 리밸런싱 날짜 판별 (DAILY, WEEKLY, FORTNIGHTLY, MONTHLY, QUARTERLY)
-        # 각 기간의 '마지막 거래일'에 리밸런싱을 수행하도록 변경
-        is_rebalance_day = False
-        if i == 0:  # 첫 날은 초기 자산 배분을 위해 항상 True
+        next_dt = union_index[i + 1] if i < total_days - 1 else None
+
+        # 교체는 항상 모든 거래일에 수행
+        is_replacement_day = True
+
+        # 리밸런싱 날짜 판별
+        is_rebalance_day = check_is_rebalance_day(
+            dt=dt, next_dt=next_dt, rebalance_mode=rebalance_mode, trading_calendar=trading_calendar_idx
+        )
+        if i == 0 and not bootstrap_initialized:
+            is_replacement_day = True
             is_rebalance_day = True
-        elif rebalance_mode == "WEEKLY":
-            # 오늘이 주말일인지 확인: 다음 거래일이 다른 주(week)인 경우
-            if i < total_days - 1:
-                next_dt = union_index[i + 1]
-                if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
-                    is_rebalance_day = True
-            elif trading_calendar_idx is not None:
-                try:
-                    cal_idx = trading_calendar_idx.get_loc(dt)
-                    if cal_idx + 1 < len(trading_calendar_idx):
-                        if trading_calendar_idx[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
-                            is_rebalance_day = True
-                except (KeyError, IndexError, AttributeError):
-                    pass
-        elif rebalance_mode == "TWICE_A_MONTH":
-            import calendar
-
-            # 현재 dt가 속한 주의 금요일이 몇 월 며칠인지 계산
-            dt_friday = dt + pd.Timedelta(days=4 - dt.weekday())
-            # 판별 기준이 되는 달력 정보 (해당 금요일이 포함된 달)
-            days_in_month = calendar.monthrange(dt_friday.year, dt_friday.month)[1]
-
-            # 그 달에 존재하는 모든 금요일 날짜 목록
-            fridays = [d for d in range(1, days_in_month + 1) if dt_friday.replace(day=d).weekday() == 4]
-
-            # 금요일이 5번 있는 달은 3주, 5주차 / 없는 경우 2주, 4주차 선택
-            if len(fridays) >= 5:
-                target_fridays = [fridays[2], fridays[4]]
-            else:
-                target_fridays = [fridays[1], fridays[3]]
-
-            # 우리가 구한 dt_friday가 해당 달의 목표 금요일 중 하나인지 확인
-            if dt_friday.day in target_fridays:
-                # 이번 주는 리밸런싱해야 하는 타겟 주차임.
-                # 남은 것은 오늘(dt)이 이번 주의 마지막 거래일(휴장이면 그 전날)인지 확인
-                is_end_of_week = False
-                if i < total_days - 1:
-                    next_dt = union_index[i + 1]
-                    if next_dt.isocalendar()[:2] != dt.isocalendar()[:2]:
-                        is_end_of_week = True
-                elif trading_calendar_idx is not None:
-                    try:
-                        cal_idx = trading_calendar_idx.get_loc(dt)
-                        if cal_idx + 1 < len(trading_calendar_idx):
-                            if trading_calendar_idx[cal_idx + 1].isocalendar()[:2] != dt.isocalendar()[:2]:
-                                is_end_of_week = True
-                    except (KeyError, IndexError, AttributeError):
-                        pass
-
-                if is_end_of_week:
-                    is_rebalance_day = True
-        elif rebalance_mode == "MONTHLY":
-            # 오늘이 월말일인지 확인: 다음 거래일이 다른 달인 경우
-            if i < total_days - 1:
-                next_dt = union_index[i + 1]
-                if next_dt.month != dt.month:
-                    is_rebalance_day = True
-            elif trading_calendar_idx is not None:
-                try:
-                    cal_idx = trading_calendar_idx.get_loc(dt)
-                    if cal_idx + 1 < len(trading_calendar_idx):
-                        if trading_calendar_idx[cal_idx + 1].month != dt.month:
-                            is_rebalance_day = True
-                except (KeyError, IndexError, AttributeError):
-                    pass
-
-        elif rebalance_mode == "QUARTERLY":
-            # 오늘이 분기말일인지 확인: 3, 6, 9, 12월의 마지막 거래일
-            target_months = {3, 6, 9, 12}
-            if dt.month in target_months:
-                if i < total_days - 1:
-                    next_dt = union_index[i + 1]
-                    if next_dt.month != dt.month:
-                        is_rebalance_day = True
-                elif trading_calendar_idx is not None:
-                    try:
-                        cal_idx = trading_calendar_idx.get_loc(dt)
-                        if cal_idx + 1 < len(trading_calendar_idx):
-                            if trading_calendar_idx[cal_idx + 1].month != dt.month:
-                                is_rebalance_day = True
-                    except (KeyError, IndexError, AttributeError):
-                        pass
-
-        # 리밸런싱 날짜인 경우 last_rebalance_idx 업데이트
-        # (FORTNIGHTLY 로직 변경으로 인해 더 이상 사용하지 않음)
 
         # 진행률 표시 (10% 단위로)
         if i % max(1, total_days // 10) == 0 or i == total_days - 1:
@@ -753,6 +1290,7 @@ def run_portfolio_backtest(
             filter_value = buy_signal_today.get(ticker, 0)
 
             if available_today:
+                last_prices[ticker] = price  # 유효한 가격 업데이트
                 pv_value = snapshot["shares"] * price
                 record = {
                     "date": dt,
@@ -762,9 +1300,13 @@ def run_portfolio_backtest(
                     "decision": decision_out,
                     "avg_cost": snapshot["avg_cost"],
                     "trade_amount": 0.0,
+                    "trade_shares": 0.0,
                     "trade_profit": 0.0,
                     "trade_pl_pct": 0.0,
                     "note": note,
+                    "pending_action": None,
+                    "execute_on": None,
+                    "pending_reason": None,
                     "signal1": ma_value if not pd.isna(ma_value) else None,
                     "signal2": None,
                     "score": score_value if not pd.isna(score_value) else None,
@@ -772,18 +1314,27 @@ def run_portfolio_backtest(
                 }
             else:
                 avg_cost = snapshot["avg_cost"]
-                pv_value = snapshot["shares"] * (avg_cost if pd.notna(avg_cost) else 0.0)
+                # 데이터가 없는 날(휴장일 등)에는 직전 유효 가격 사용 (없으면 avg_cost 후순위)
+                display_price = last_prices.get(ticker, 0.0)
+                if display_price <= 0:
+                    display_price = avg_cost if pd.notna(avg_cost) else 0.0
+
+                pv_value = snapshot["shares"] * display_price
                 record = {
                     "date": dt,
-                    "price": avg_cost,
+                    "price": display_price,
                     "shares": snapshot["shares"],
                     "pv": pv_value,
                     "decision": "HOLD" if snapshot["shares"] > 0 else "WAIT",
                     "avg_cost": avg_cost,
                     "trade_amount": 0.0,
+                    "trade_shares": 0.0,
                     "trade_profit": 0.0,
                     "trade_pl_pct": 0.0,
                     "note": "데이터 없음",
+                    "pending_action": None,
+                    "execute_on": None,
+                    "pending_reason": None,
                     "signal1": ma_value if not pd.isna(ma_value) else None,
                     "signal2": None,
                     "score": score_value if not pd.isna(score_value) else None,
@@ -793,6 +1344,7 @@ def run_portfolio_backtest(
             daily_records_by_ticker[ticker].append(record)
 
         # --- 2. 매도 로직 ---
+        purchased_today: set[str] = set()
         cash, current_holdings_value = _execute_individual_sells(
             position_state=position_state,
             metrics_by_ticker=metrics_by_ticker,
@@ -807,8 +1359,13 @@ def run_portfolio_backtest(
             current_holdings_value=current_holdings_value,
             ma_days=ma_days,
             evaluator=evaluator,
+            is_replacement_day=is_replacement_day,
+            cooldown_days=cooldown_days,
+            qty_precision=qty_precision,
+            dt=dt,
+            next_dt=next_dt,
         )
-        if is_rebalance_day:
+        if is_replacement_day:
             # 1. 매수 후보 선정 (종합 점수 기준)
             buy_ranked_candidates = _rank_buy_candidates(
                 tickers_available_today=tickers_available_today,
@@ -818,7 +1375,7 @@ def run_portfolio_backtest(
                 i=i,
             )
 
-            # 2. 매수 실행 (신규 매수) - 리밸런싱 날에만 수행
+            # 2. 매수 실행 (신규 매수) - 교체 날에만 수행
             cash, current_holdings_value, purchased_today = _execute_new_buys(
                 buy_ranked_candidates=buy_ranked_candidates,
                 position_state=position_state,
@@ -837,9 +1394,12 @@ def run_portfolio_backtest(
                 initial_capital=initial_capital,
                 bucket_map=bucket_map,
                 bucket_topn=bucket_topn,
+                qty_precision=qty_precision,
+                next_dt=next_dt,
+                cooldown_days=cooldown_days,
             )
 
-            # 3. 교체(Replacement) - 리밸런싱 날에만 수행
+            # 3. 교체(Replacement) - 교체 날에만 수행
 
             # 3. 교체 매수 실행
             if buy_ranked_candidates:
@@ -861,7 +1421,7 @@ def run_portfolio_backtest(
                 held_stocks_with_scores = []
                 for held_ticker, held_position in position_state.items():
                     if held_position["shares"] > 0:
-                        # MAPS 점수 사용
+                        # RANK 점수 사용
                         score_h = score_today.get(held_ticker, float("nan"))
                         bucket_h = bucket_map.get(held_ticker, 1) if bucket_map else 1
 
@@ -902,10 +1462,21 @@ def run_portfolio_backtest(
 
                         for candidate_hold in bucket_held:
                             cand_ticker = candidate_hold["ticker"]
+                            cand_state = position_state.get(cand_ticker, {})
+                            if not _can_sell_with_cooldown(cand_state, i, cooldown_days):
+                                remaining = _remaining_sell_cooldown_days(cand_state, i, cooldown_days)
+                                if remaining > 0:
+                                    _set_cooldown_note_if_empty(
+                                        daily_records_by_ticker,
+                                        cand_ticker,
+                                        dt,
+                                        f"[예정] 쿨다운 - {remaining}일 후 매도 가능",
+                                    )
+                                continue
                             # 점수 조건 체크 (단순 점수 비교로 변경)
                             if best_new_score > candidate_hold["score"]:
                                 ticker_to_sell = cand_ticker
-                                replacement_note = f"{ticker_to_sell}(을)를 {replacement_ticker}(으)로 교체"
+                                replacement_note = f"[예정] 교체 - {_ticker_label(replacement_ticker)}"
                                 break
 
                         if not ticker_to_sell:
@@ -920,7 +1491,9 @@ def run_portfolio_backtest(
                         if pd.notna(sell_price) and sell_price > 0 and pd.notna(buy_price) and buy_price > 0:
                             # (a) 교체 대상 종목 매도
                             weakest_state = position_state[ticker_to_sell]
-                            sell_qty = weakest_state["shares"]
+                            sell_qty = _floor_quantity(float(weakest_state["shares"]), qty_precision)
+                            if sell_qty <= 0:
+                                continue
                             sell_amount = sell_qty * sell_price
                             hold_ret = (
                                 (sell_price / weakest_state["avg_cost"] - 1.0) * 100.0
@@ -935,7 +1508,11 @@ def run_portfolio_backtest(
 
                             cash += sell_amount
                             current_holdings_value = max(0.0, current_holdings_value - sell_amount)
-                            weakest_state["shares"], weakest_state["avg_cost"] = 0, 0.0
+                            remaining_shares = _floor_quantity(float(weakest_state["shares"]) - sell_qty, qty_precision)
+                            weakest_state["shares"] = remaining_shares
+                            weakest_state["last_sell_index"] = i
+                            if remaining_shares <= 0:
+                                weakest_state["avg_cost"] = 0.0
 
                             if (
                                 daily_records_by_ticker[ticker_to_sell]
@@ -944,14 +1521,18 @@ def run_portfolio_backtest(
                                 row = daily_records_by_ticker[ticker_to_sell][-1]
                                 row.update(
                                     {
-                                        "decision": "SELL_REPLACE",
+                                        "decision": "HOLD",
                                         "trade_amount": sell_amount,
+                                        "trade_shares": sell_qty,
                                         "trade_profit": trade_profit,
                                         "trade_pl_pct": hold_ret,
                                         "shares": 0,
                                         "pv": 0,
                                         "avg_cost": 0,
                                         "note": replacement_note,
+                                        "pending_action": "SELL_REPLACE",
+                                        "execute_on": next_dt,
+                                        "pending_reason": replacement_note,
                                     }
                                 )
 
@@ -964,7 +1545,7 @@ def run_portfolio_backtest(
                             if budget <= 0:
                                 continue
                             # 수량/금액 산정
-                            req_qty = int(budget // buy_price) if buy_price > 0 else 0
+                            req_qty = _floor_quantity(budget / buy_price, qty_precision) if buy_price > 0 else 0.0
                             if req_qty <= 0:
                                 continue
                             buy_amount = req_qty * buy_price
@@ -972,12 +1553,23 @@ def run_portfolio_backtest(
                             # 체결 반영
                             if req_qty > 0 and buy_amount <= cash + 1e-9:
                                 new_ticker_state = position_state[replacement_ticker]
+                                if not _can_buy_with_cooldown(new_ticker_state, i, cooldown_days):
+                                    remaining = _remaining_buy_cooldown_days(new_ticker_state, i, cooldown_days)
+                                    if remaining > 0:
+                                        _set_cooldown_note_if_empty(
+                                            daily_records_by_ticker,
+                                            replacement_ticker,
+                                            dt,
+                                            f"[예정] 쿨다운 - {remaining}일 후 매수 가능",
+                                        )
+                                    continue
                                 cash -= buy_amount
                                 current_holdings_value += buy_amount
                                 new_ticker_state["shares"], new_ticker_state["avg_cost"] = (
                                     req_qty,
                                     buy_price,
                                 )
+                                new_ticker_state["last_buy_index"] = i
                                 # 매도 완료: 매수 후 바로 매도 가능 (리밸런싱 조건 충족 시)
 
                                 # 결과 행 업데이트: 없으면 새로 추가
@@ -989,15 +1581,18 @@ def run_portfolio_backtest(
                                     row = daily_records_by_ticker[replacement_ticker][-1]
                                     row.update(
                                         {
-                                            "decision": "BUY_REPLACE",
+                                            "decision": "WAIT",
                                             "trade_amount": buy_amount,
+                                            "trade_shares": req_qty,
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
                                             "avg_cost": buy_price,
-                                            # 추천/리포트와 동일 포맷: 디스플레이명 + 금액 + 대체 정보
-                                            "note": f"{BACKTEST_STATUS_LIST['BUY_REPLACE']['display_name']} "
-                                            f"{format_money(buy_amount, country_code)} "
-                                            f"({ticker_to_sell} 대체)",
+                                            # WAIT 상태(신호일)이므로 체결형 문구 대신 신호형 문구를 사용합니다.
+                                            "note": f"[예정] 교체매수 신호 {format_money(buy_amount, country_code)} "
+                                            f"({_ticker_label(ticker_to_sell)} 대체)",
+                                            "pending_action": "BUY_REPLACE",
+                                            "execute_on": next_dt,
+                                            "pending_reason": f"{_ticker_label(ticker_to_sell)} 대체",
                                         }
                                     )
                                 else:
@@ -1007,14 +1602,17 @@ def run_portfolio_backtest(
                                             "price": buy_price,
                                             "shares": req_qty,
                                             "pv": req_qty * buy_price,
-                                            "decision": "BUY_REPLACE",
+                                            "decision": "WAIT",
                                             "avg_cost": buy_price,
                                             "trade_amount": buy_amount,
+                                            "trade_shares": req_qty,
                                             "trade_profit": 0.0,
                                             "trade_pl_pct": 0.0,
-                                            "note": f"{BACKTEST_STATUS_LIST['BUY_REPLACE']['display_name']} "
-                                            f"{format_money(buy_amount, country_code)} "
-                                            f"({ticker_to_sell} 대체)",
+                                            "note": f"[예정] 교체매수 신호 {format_money(buy_amount, country_code)} "
+                                            f"({_ticker_label(ticker_to_sell)} 대체)",
+                                            "pending_action": "BUY_REPLACE",
+                                            "execute_on": next_dt,
+                                            "pending_reason": f"{_ticker_label(ticker_to_sell)} 대체",
                                             "signal1": metrics_by_ticker[replacement_ticker]["ma_values"][i],
                                             "signal2": None,
                                             "score": score_today.get(replacement_ticker, 0.0),
@@ -1028,12 +1626,16 @@ def run_portfolio_backtest(
                                         "price": buy_price,
                                         "shares": req_qty,
                                         "pv": req_qty * buy_price,
-                                        "decision": "BUY_REPLACE",
+                                        "decision": "WAIT",
                                         "avg_cost": buy_price,
                                         "trade_amount": buy_amount,
+                                        "trade_shares": req_qty,
                                         "trade_profit": 0.0,
                                         "trade_pl_pct": 0.0,
                                         "note": replacement_note,
+                                        "pending_action": "BUY_REPLACE",
+                                        "execute_on": next_dt,
+                                        "pending_reason": f"{_ticker_label(ticker_to_sell)} 대체",
                                         "signal1": None,
                                         "signal2": None,
                                         "score": None,
@@ -1067,12 +1669,72 @@ def run_portfolio_backtest(
                         # 가격 정보가 유효하지 않으면 교체하지 않고 다음 대기 종목으로 넘어감
                         continue  # 다음 buy_ranked_candidate로 넘어감
 
-            # 3. 매수하지 못한 후보에 사유 기록
+            # 4. 점수 음수 종목 매도
+            for held_ticker, held_position in position_state.items():
+                if held_position["shares"] > 0:
+                    if not _can_sell_with_cooldown(held_position, i, cooldown_days):
+                        remaining = _remaining_sell_cooldown_days(held_position, i, cooldown_days)
+                        if remaining > 0:
+                            _set_cooldown_note_if_empty(
+                                daily_records_by_ticker,
+                                held_ticker,
+                                dt,
+                                f"[예정] 쿨다운 - {remaining}일 후 매도 가능",
+                            )
+                        continue
+                    held_score = score_today.get(held_ticker, float("nan"))
+                    if not pd.isna(held_score) and held_score < 0:
+                        sell_price = today_prices.get(held_ticker)
+                        if pd.notna(sell_price) and sell_price > 0:
+                            qty = _floor_quantity(float(held_position["shares"]), qty_precision)
+                            if qty <= 0:
+                                continue
+                            sell_amount = qty * sell_price
+                            avg_cost = held_position["avg_cost"]
+                            hold_ret = (sell_price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
+                            trade_profit = (sell_price - avg_cost) * qty if avg_cost > 0 else 0.0
+
+                            sell_trades_today_map.setdefault(held_ticker, []).append(
+                                {"shares": float(qty), "price": float(sell_price)}
+                            )
+
+                            cash += sell_amount
+                            current_holdings_value = max(0.0, current_holdings_value - sell_amount)
+                            remaining_shares = _floor_quantity(float(held_position["shares"]) - qty, qty_precision)
+                            held_position["shares"] = remaining_shares
+                            held_position["last_sell_index"] = i
+                            if remaining_shares <= 0:
+                                held_position["avg_cost"] = 0.0
+
+                            if (
+                                daily_records_by_ticker.get(held_ticker)
+                                and daily_records_by_ticker[held_ticker][-1]["date"] == dt
+                            ):
+                                daily_records_by_ticker[held_ticker][-1].update(
+                                    {
+                                        "decision": "HOLD",
+                                        "trade_amount": sell_amount,
+                                        "trade_shares": qty,
+                                        "trade_profit": trade_profit,
+                                        "trade_pl_pct": hold_ret,
+                                        "shares": remaining_shares,
+                                        "pv": remaining_shares * sell_price,
+                                        "avg_cost": held_position["avg_cost"],
+                                        "note": "점수 음수 매도",
+                                        "pending_action": "SELL",
+                                        "execute_on": next_dt,
+                                        "pending_reason": "점수 음수",
+                                    }
+                                )
+
+            # 5. 매수하지 못한 후보에 사유 기록
             # 오늘 매수 또는 교체매수된 종목 목록을 만듭니다.
             bought_tickers_today = {
                 ticker_symbol
                 for ticker_symbol, records in daily_records_by_ticker.items()
-                if records and records[-1]["date"] == dt and records[-1]["decision"] in ("BUY", "BUY_REPLACE")
+                if records
+                and records[-1]["date"] == dt
+                and str(records[-1].get("pending_action", "")).upper() in ("BUY", "BUY_REPLACE")
             }
 
             for _, candidate_ticker in buy_ranked_candidates:
@@ -1092,7 +1754,8 @@ def run_portfolio_backtest(
                                 score_today,
                             )
 
-            # 4. 무게 재조정(Weight Realignment) - 리밸런싱 날에만 수행
+        # 4. 무게 재조정(Weight Realignment) - 리밸런싱 날에만 수행
+        if is_rebalance_day:
             # 이미 매수/매도/교체된 종목을 포함해 총 보유 자산을 다시 계산
             total_rebalance_equity = cash
             for held_ticker, held_state in position_state.items():
@@ -1114,6 +1777,16 @@ def run_portfolio_backtest(
                         current_val = state["shares"] * price
                         # 목표 비중보다 5% 이상 초과일 때만 매도 (Trading Cost 방어) - 여기서는 사용자의 요청에 따라 엄격하게 조절
                         if current_val > target_per_ticker * 1.05:
+                            if not _can_sell_with_cooldown(state, i, cooldown_days):
+                                remaining = _remaining_sell_cooldown_days(state, i, cooldown_days)
+                                if remaining > 0:
+                                    _set_cooldown_note_if_empty(
+                                        daily_records_by_ticker,
+                                        ticker,
+                                        dt,
+                                        f"[예정] 쿨다운 - {remaining}일 후 매도 가능",
+                                    )
+                                continue
                             excess_val = current_val - target_per_ticker
 
                             # 다음날 시초가 + 슬리피지로 매도 가격 계산 (실제 거래 가격)
@@ -1128,7 +1801,7 @@ def run_portfolio_backtest(
                             if sell_price <= 0:
                                 continue
 
-                            sell_qty = int(excess_val // sell_price)
+                            sell_qty = _floor_quantity(excess_val / sell_price, qty_precision)
                             # 최소 1주 이상 매도 가능할 때
                             if sell_qty > 0:
                                 sell_amount = sell_qty * sell_price
@@ -1136,9 +1809,10 @@ def run_portfolio_backtest(
                                 # 상태 업데이트
                                 cash += sell_amount
                                 state["shares"] -= sell_qty
+                                state["last_sell_index"] = i
 
                                 diff_pct = (sell_amount / total_rebalance_equity) * 100
-                                trim_note = f"[비중조절] {diff_pct:.1f}% 매도"
+                                trim_note = f"[예정] 비중조절 - {diff_pct:.1f}% 매도"
 
                                 if (
                                     daily_records_by_ticker[ticker]
@@ -1146,23 +1820,31 @@ def run_portfolio_backtest(
                                 ):
                                     row = daily_records_by_ticker[ticker][-1]
                                     existing_note = row.get("note", "")
+                                    # 리밸런스 비중 축소는 부분 조정이므로 상태는 변경하지 않습니다.
                                     row["note"] = f"{trim_note} | {existing_note}" if existing_note else trim_note
                                     row["shares"] = state["shares"]
                                     row["pv"] = state["shares"] * price
+                                    row["pending_action"] = "SELL_REBALANCE"
+                                    row["execute_on"] = next_dt
+                                    row["pending_reason"] = "비중 조정"
                                     # 만약 이미 거래 기록이 있다면 금액 합산, 없다면 추가
                                     if "trade_amount" in row and row["trade_amount"]:
                                         row["trade_amount"] += sell_amount
                                     else:
                                         row["trade_amount"] = sell_amount
+                                    if "trade_shares" in row and row["trade_shares"]:
+                                        row["trade_shares"] += sell_qty
+                                    else:
+                                        row["trade_shares"] = sell_qty
 
                                 # 순매도 집계
                                 sell_trades_today_map.setdefault(ticker, []).append(
                                     {"shares": float(sell_qty), "price": float(sell_price)}
                                 )
 
-                # 4-2. Top-up (비중 확대)는 당일 전체에 적용되는 `PHASE 3` 추가매수 로직에서
-                # 남은 현금을 모두 사용해 부족한 종목들을 채우므로 여기서 별도 진행하지 않아도 되나,
-                # 명시적인 [비중조절] 퍼센트 노트를 위해 Phase 3 노트 부분만 조금 수정 (아래 참고)
+            # 4-2. Top-up (비중 확대)는 당일 전체에 적용되는 `PHASE 3` 추가매수 로직에서
+            # 남은 현금을 모두 사용해 부족한 종목들을 채우므로 여기서 별도 진행하지 않아도 되나,
+            # 명시적인 [비중조절] 퍼센트 노트를 위해 Phase 3 노트 부분만 조금 수정 (아래 참고)
 
         # --- 당일 최종 라벨 오버라이드 (공용 라벨러) ---
         for tkr, rows in daily_records_by_ticker.items():
@@ -1170,9 +1852,10 @@ def run_portfolio_backtest(
                 continue
             last_row = rows[-1]
             current_note = str(last_row.get("note") or "")
+            pending_action = str(last_row.get("pending_action") or "").upper() or None
 
-            # 리스크 오프 비중 조절 문구가 있으면 덮어쓰지 않음
-            if "시장위험회피" in current_note:
+            # 리스크 오프/비중조절 문구가 있으면 덮어쓰지 않음
+            if "시장위험회피" in current_note or "비중조절 -" in current_note:
                 continue
 
             overrides = compute_net_trade_note(
@@ -1186,10 +1869,11 @@ def run_portfolio_backtest(
                 buy_trades_today_map=buy_trades_today_map,
                 sell_trades_today_map=sell_trades_today_map,
                 current_decision=str(last_row.get("decision")),
+                current_pending_action=pending_action,
             )
             if overrides:
-                if overrides.get("state") == "SOLD":
-                    last_row["decision"] = "SOLD"
+                if overrides.get("state") == "SELL":
+                    last_row["decision"] = "SELL"
                 if overrides.get("note") is not None:
                     new_note = overrides["note"]
                     if current_note:
@@ -1197,7 +1881,8 @@ def run_portfolio_backtest(
                     last_row["note"] = new_note
 
         # --- PHASE 3: 추가 매수 (남은 현금으로 부족한 종목 채우기) ---
-        if cash > 0:
+        # 비중 조절용 추가 매수는 is_rebalance_day 일 때만 동작하게 합니다.
+        if is_rebalance_day and cash > 0:
             total_equity = cash + current_holdings_value
             target_per_ticker = total_equity / top_n if top_n > 0 else 0.0
 
@@ -1242,12 +1927,22 @@ def run_portfolio_backtest(
 
                 # 매수 가능 금액: min(gap, cash)
                 topup_budget = min(gap, cash)
-                topup_qty = int(topup_budget // topup_price) if topup_price > 0 else 0
+                topup_qty = _floor_quantity(topup_budget / topup_price, qty_precision) if topup_price > 0 else 0.0
 
                 if topup_qty > 0:
                     topup_amount = topup_qty * topup_price
 
                     if topup_amount <= cash + 1e-9:
+                        if not _can_buy_with_cooldown(position_state[ticker_to_topup], i, cooldown_days):
+                            remaining = _remaining_buy_cooldown_days(position_state[ticker_to_topup], i, cooldown_days)
+                            if remaining > 0:
+                                _set_cooldown_note_if_empty(
+                                    daily_records_by_ticker,
+                                    ticker_to_topup,
+                                    dt,
+                                    f"[예정] 쿨다운 - {remaining}일 후 매수 가능",
+                                )
+                            continue
                         # 추가 매수 실행
                         ticker_state = position_state[ticker_to_topup]
                         old_shares = ticker_state["shares"]
@@ -1256,6 +1951,7 @@ def run_portfolio_backtest(
                         cash -= topup_amount
                         current_holdings_value += topup_amount
                         ticker_state["shares"] += topup_qty
+                        ticker_state["last_buy_index"] = i
 
                         # 평균 단가 재계산
                         total_cost = old_shares * old_avg_cost + topup_amount
@@ -1270,13 +1966,14 @@ def run_portfolio_backtest(
                             existing_decision = row.get("decision", "")
                             existing_note = row.get("note", "")
 
-                            # Decision이 HOLD인 경우만 추가 매수 표시
+                            # 상태는 HOLD를 유지하고 문구로만 비중 조절 매수를 표시
                             if existing_decision == "HOLD":
-                                # 상태값(HOLD) 및 보유일 유지
                                 diff_pct = (topup_amount / (total_equity)) * 100
-                                # 리밸런싱 날과 일반 날 구분 없이 비중확대 메시지 사용
-                                topup_note = f"[비중조절] {diff_pct:.1f}% 매수"
+                                topup_note = f"[예정] 비중조절 - {diff_pct:.1f}% 매수"
                                 row["note"] = f"{topup_note} | {existing_note}" if existing_note else topup_note
+                                row["pending_action"] = "BUY"
+                                row["execute_on"] = next_dt
+                                row["pending_reason"] = "비중 조정"
 
                             # 수량/금액 업데이트
                             row["shares"] = ticker_state["shares"]
@@ -1288,6 +1985,10 @@ def run_portfolio_backtest(
                                 row["trade_amount"] += topup_amount
                             else:
                                 row["trade_amount"] = topup_amount
+                            if "trade_shares" in row and row["trade_shares"]:
+                                row["trade_shares"] += topup_qty
+                            else:
+                                row["trade_shares"] = topup_qty
 
                         # 순매수 집계
                         buy_trades_today_map.setdefault(ticker_to_topup, []).append(
@@ -1303,6 +2004,9 @@ def run_portfolio_backtest(
                 "pv": cash,
                 "decision": "HOLD",
                 "note": "",  # CASH는 문구 없음
+                "pending_action": None,
+                "execute_on": None,
+                "pending_reason": None,
             }
         )
 

@@ -6,51 +6,44 @@ import sys
 from pathlib import Path
 
 from core.tune.runner import run_account_tuning
-from utils.account_registry import get_account_settings, get_strategy_rules
+from utils.account_registry import get_account_settings
 from utils.data_loader import MissingPriceDataError
 from utils.logger import get_app_logger
 
 # =========================================================
 # 계좌별 성격 맞춤형 설정
 # =========================================================
+
 ACCOUNT_TUNING_CONFIG = {
-    "aus": {
-        # 9개월 + QUARTERLY가 최적이지만 다음 쿼터까지 MONTHLY 로 유지
-        "BUCKET_TOPN": [2],
-        # "MA_MONTH": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-        "MA_MONTH": [9],
-        "MA_TYPE": ["HMA"],
-        # "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"], # 다음 쿼터에 오픈
+    "kor_account": {
+        "TUNE_MONTHS": 12,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+    },
+    "isa_account": {
+        "TUNE_MONTHS": 12,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+    },
+    "pension_account": {
+        "TUNE_MONTHS": 12,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+    },
+    "kor_save_account": {
+        "TUNE_MONTHS": 4,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+    },
+    "core_account": {
+        "TUNE_MONTHS": 12,
+        "OPTIMIZATION_METRIC": "CAGR",
+        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+    },
+    "aus_account": {
+        "TUNE_MONTHS": 12,
+        "OPTIMIZATION_METRIC": "CAGR",
         "REBALANCE_MODE": ["MONTHLY"],
-    },
-    "kor_isa": {
-        # 아무 개월 + QUARTERLY가 최적이지만 다음 쿼터까지 MONTHLY 로 유지
-        "BUCKET_TOPN": [1],  # 절세계좌 금액이 적어서 1 * 5 종목
-        "MA_MONTH": [3],  # 종목이 많지 않고 고정 종목이라 의미 없음
-        "MA_TYPE": ["HMA"],
-        # "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"], # 다음 쿼터에 오픈
-        "REBALANCE_MODE": ["MONTHLY"],
-    },
-    "kor_kr": {
-        # 3개월 + WEEKLY가 최적
-        "BUCKET_TOPN": [2],
-        "MA_MONTH": [3],  # 단기 추세
-        "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["WEEKLY"],
-    },
-    "kor_pension": {
-        # 5개월 + TWICE_A_MONTH가 최적
-        "BUCKET_TOPN": [1],  # 절세계좌 금액이 적어서 1 * 5 종목
-        "MA_MONTH": [5],  # 중기 추세
-        "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["TWICE_A_MONTH"],
-    },
-    "us": {
-        # 4개월 + TWICE_A_MONTH 가 최적
-        "BUCKET_TOPN": [2],
-        "MA_MONTH": [4],  # 중단기 추세
-        "MA_TYPE": ["HMA"],
-        "REBALANCE_MODE": ["TWICE_A_MONTH"],
     },
 }
 
@@ -69,7 +62,6 @@ def main() -> None:
 
     try:
         get_account_settings(account_id)
-        get_strategy_rules(account_id)
     except Exception as exc:  # pragma: no cover - 잘못된 입력 방어 전용 처리
         raise SystemExit(f"계정 설정을 로드하는 중 오류가 발생했습니다: {exc}")
 

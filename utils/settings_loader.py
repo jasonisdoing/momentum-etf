@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
@@ -19,23 +20,49 @@ ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT  # Backward compatibility alias
 COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
 SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
 logger = get_app_logger()
+ACCOUNT_DIR_PATTERN = re.compile(r"^(?P<order>\d+)_(?P<account>[a-z0-9_]+)$")
+
+
+def parse_account_dir_name(dir_name: str) -> tuple[int, str]:
+    """`<order>_<account>` 형식의 디렉토리명에서 순번과 계정 코드를 추출합니다."""
+
+    normalized = (dir_name or "").strip().lower()
+    match = ACCOUNT_DIR_PATTERN.fullmatch(normalized)
+    if not match:
+        raise AccountSettingsError(f"계정 디렉토리명은 '<order>_<account>' 형식이어야 합니다: {dir_name}")
+    return int(match.group("order")), match.group("account")
+
+
+def _iter_account_dirs() -> list[tuple[str, Path]]:
+    account_dirs: dict[str, Path] = {}
+    if not SETTINGS_ROOT.exists():
+        return []
+
+    for item in SETTINGS_ROOT.iterdir():
+        if not item.is_dir() or item.name.startswith(".") or item.name.startswith("_"):
+            continue
+
+        config_path = item / "config.json"
+        if not config_path.exists():
+            continue
+
+        config_data = _load_json(config_path)
+        _, account_id = parse_account_dir_name(item.name)
+        configured = str(config_data.get("account") or "").strip().lower()
+        if configured and configured != account_id:
+            raise AccountSettingsError(
+                f"계정 디렉토리명과 config.json account 값이 다릅니다: {item.name} / {configured}"
+            )
+        account_dirs[account_id] = item
+
+    return sorted(account_dirs.items(), key=lambda pair: parse_account_dir_name(pair[1].name))
 
 
 def list_available_accounts() -> list[str]:
     """
     zaccounts 디렉토리 하위의 유효한 계정(디렉토리 내 config.json 존재) 목록을 반환합니다.
     """
-    accounts = []
-    if not SETTINGS_ROOT.exists():
-        return []
-
-    for item in SETTINGS_ROOT.iterdir():
-        if item.is_dir() and not item.name.startswith(".") and not item.name.startswith("_"):
-            config_path = item / "config.json"
-            if config_path.exists():
-                accounts.append(item.name)
-
-    return sorted(accounts)
+    return [account_id for account_id, _ in _iter_account_dirs()]
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -56,35 +83,76 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def _normalize_pool_ids(raw_value: Any, *, context: str) -> list[str]:
+    """계좌 설정의 pool 값을 정규화하고 검증합니다."""
+
+    if not isinstance(raw_value, list):
+        raise AccountSettingsError(f"{context}의 'pool'은 문자열이 아니라 리스트여야 합니다.")
+    if not raw_value:
+        raise AccountSettingsError(f"{context}의 'pool'은 최소 1개 이상의 종목풀 ID를 가져야 합니다.")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in raw_value:
+        pool_id = str(value or "").strip().lower()
+        if not pool_id:
+            raise AccountSettingsError(f"{context}의 'pool' 목록에는 빈 값이 올 수 없습니다.")
+        if pool_id in seen:
+            continue
+        seen.add(pool_id)
+        normalized.append(pool_id)
+
+    if not normalized:
+        raise AccountSettingsError(f"{context}의 'pool'에서 유효한 종목풀 ID를 찾지 못했습니다.")
+
+    from utils.pool_registry import list_available_pools
+
+    available_pools = set(list_available_pools())
+    invalid_pools = [pool_id for pool_id in normalized if pool_id not in available_pools]
+    if invalid_pools:
+        invalid_text = ", ".join(invalid_pools)
+        raise AccountSettingsError(f"{context}의 'pool'에 존재하지 않는 종목풀이 포함되어 있습니다: {invalid_text}")
+
+    return normalized
+
+
 def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
     """튜닝용 시작일 설정을 반환합니다.
 
-    계정별 strategy.BACKTEST_LAST_MONTHS를 사용합니다.
+    계정별 strategy.TUNE_MONTHS를 사용합니다.
     """
     normalized: list[dict[str, Any]] = []
 
-    # 계정별 strategy.BACKTEST_LAST_MONTHS 사용
+    # 계정별 strategy.TUNE_MONTHS 사용
     if account_id:
+        account_settings = get_account_settings(account_id)
+        strategy_cfg = account_settings.get("strategy", {})
+        strategy = resolve_strategy_params(strategy_cfg)
+        tune_months = strategy.get("TUNE_MONTHS")
+        if tune_months is None:
+            raise AccountSettingsError(f"{account_id} 계좌의 필수 설정이 누락되었습니다: strategy.TUNE_MONTHS")
+
+        import pandas as pd
+
         try:
-            account_settings = get_account_settings(account_id)
-            strategy = account_settings.get("strategy", {})
-            backtest_last_months = strategy.get("BACKTEST_LAST_MONTHS")
-            if backtest_last_months is not None:
-                import pandas as pd
+            months_back = int(tune_months)
+        except (TypeError, ValueError) as exc:
+            raise AccountSettingsError(
+                f"{account_id} 계좌의 strategy.TUNE_MONTHS는 정수여야 합니다: {tune_months}"
+            ) from exc
+        if months_back < 1:
+            raise AccountSettingsError(f"{account_id} 계좌의 strategy.TUNE_MONTHS는 1 이상이어야 합니다: {months_back}")
 
-                months_back = int(backtest_last_months)
-                start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
-                backtest_start_date = start_dt.strftime("%Y-%m-%d")
+        start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
+        backtest_start_date = start_dt.strftime("%Y-%m-%d")
 
-                normalized.append(
-                    {
-                        "backtest_start_date": str(backtest_start_date),
-                        "weight": 1.0,
-                        "source": f"account_{account_id}",
-                    }
-                )
-        except Exception:
-            pass
+        normalized.append(
+            {
+                "backtest_start_date": str(backtest_start_date),
+                "weight": 1.0,
+                "source": f"account_{account_id}",
+            }
+        )
 
     if not normalized:
         return []
@@ -100,6 +168,27 @@ def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
 
 
 @cache
+def get_account_dir(account_id: str) -> Path:
+    """논리 계정 ID에 대응하는 실제 zaccounts 디렉토리를 반환합니다."""
+
+    account = (account_id or "").strip().lower()
+    if not account:
+        raise AccountSettingsError("계정 식별자를 지정해야 합니다.")
+
+    account_dirs = dict(_iter_account_dirs())
+    path = account_dirs.get(account)
+    if path is None:
+        raise AccountSettingsError(f"계정 '{account}'에 해당하는 설정 디렉토리를 찾을 수 없습니다.")
+    return path
+
+
+def get_account_order(account_id: str) -> int:
+    """논리 계정 ID에 대응하는 디렉토리명의 순번을 반환합니다."""
+
+    return parse_account_dir_name(get_account_dir(account_id).name)[0]
+
+
+@cache
 def get_account_settings(account_id: str) -> dict[str, Any]:
     """`zaccounts/{account}/config.json` 파일을 로드합니다."""
 
@@ -107,17 +196,24 @@ def get_account_settings(account_id: str) -> dict[str, Any]:
     if not account:
         raise AccountSettingsError("계정 식별자를 지정해야 합니다.")
 
-    # New: zaccounts/<account>/config.json
-    path = SETTINGS_ROOT / account / "config.json"
+    path = get_account_dir(account) / "config.json"
     logger.debug("계정 설정 로드: %s", path)
 
     settings = _load_json(path)
-    settings.setdefault("account", account)
+    settings["account"] = account
 
     if not settings.get("country_code"):
         raise AccountSettingsError(f"'{path}' 설정 파일에 필수 항목 'country_code'가 누락되었습니다.")
+    settings["pool"] = _normalize_pool_ids(settings.get("pool"), context=str(path))
 
     return settings
+
+
+def get_account_pool_ids(account_id: str) -> list[str]:
+    """계좌에 연결된 종목풀 ID 목록을 반환합니다."""
+
+    settings = get_account_settings(account_id)
+    return list(settings["pool"])
 
 
 def _split_strategy_sections(
@@ -152,6 +248,24 @@ def resolve_strategy_params(strategy_cfg: Any) -> dict[str, Any]:
     if not isinstance(strategy_cfg, dict):
         return {}
 
+    # 기본 포맷: COMMON + 상위 키를 병합한다.
+    common_raw = strategy_cfg.get("COMMON")
+    if isinstance(common_raw, dict):
+        common = dict(common_raw)
+        merged = {key: value for key, value in strategy_cfg.items() if key != "COMMON"}
+        merged.update(common)
+        merged.pop("STRATEGY", None)
+        # 레거시 전략 전용 블록은 키 이름과 무관하게 제거
+        for key in list(merged.keys()):
+            if key == "STRATEGY":
+                continue
+            if not isinstance(key, str):
+                continue
+            value = strategy_cfg.get(key)
+            if key.isupper() and isinstance(value, dict):
+                merged.pop(key, None)
+        return merged
+
     tuning = strategy_cfg.get("tuning")
     if isinstance(tuning, dict) and tuning:
         return dict(tuning)
@@ -176,8 +290,8 @@ def get_account_strategy_sections(
     if "tuning" in strategy or "static" in strategy:
         tuning, static = _split_strategy_sections(strategy)
     else:
-        # 이전 포맷과의 호환성: 모든 값을 튜닝 영역으로 간주
-        tuning, static = dict(strategy), {}
+        # 신규/기존 포맷 공통 처리
+        tuning, static = resolve_strategy_params(strategy), {}
 
     # 전략 설정 검증 (한 번만 수행)
     validate_strategy_settings(tuning, account_id)
@@ -261,7 +375,7 @@ def load_common_settings() -> dict[str, Any]:
 def get_strategy_rules(account_id: str):
     """계정별 전략 설정을 `StrategyRules` 객체로 반환합니다."""
 
-    from strategies.maps.rules import StrategyRules
+    from core.strategy.rules import StrategyRules
 
     tuning, _ = get_account_strategy_sections(account_id)
     return StrategyRules.from_mapping(tuning)
@@ -291,7 +405,26 @@ def get_country_strategy(country: str) -> dict[str, Any]:  # pragma: no cover
 
 
 def get_country_precision(country: str) -> dict[str, Any]:  # pragma: no cover
-    return get_account_precision(country)
+    country_code = (country or "").strip().lower()
+    if country_code in ("us", "usa"):
+        return {
+            "currency": "USD",
+            "qty_precision": 0,
+            "price_precision": 2,
+        }
+    if country_code in ("au", "aus"):
+        return {
+            "currency": "AUD",
+            "qty_precision": 0,
+            "price_precision": 2,
+        }
+    if country_code in ("kor", "kr"):
+        return {
+            "currency": "KRW",
+            "qty_precision": 0,
+            "price_precision": 0,
+        }
+    raise AccountSettingsError(f"지원하지 않는 국가 코드입니다: {country}")
 
 
 def get_country_slack_channel(country: str) -> str | None:  # pragma: no cover

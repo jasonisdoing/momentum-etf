@@ -2,13 +2,14 @@
 리포트 및 로그 출력을 위한 포맷팅 유틸리티 함수 모음.
 """
 
+import numbers
 import re
 from unicodedata import east_asian_width, normalize
 
 
 def format_kr_money(value: float) -> str:
     """금액을 '억', '만' 단위를 포함한 한글 문자열로 포맷합니다."""
-    if value is None or not isinstance(value, (int, float)):
+    if value is None or not isinstance(value, numbers.Real):
         return "-"
     val_int = int(round(value))
     if val_int == 0:
@@ -19,36 +20,42 @@ def format_kr_money(value: float) -> str:
 
     eok = val_abs // 100000000
     man = (val_abs % 100000000) // 10000
+    won = val_abs % 10000
 
     parts = []
     if eok > 0:
-        parts.append(f"{eok:,}억")
+        parts.append(f"{eok}억")
     if man > 0:
-        parts.append(f"{man:,}만")
+        parts.append(f"{man}만")
+    if won > 0:
+        parts.append(f"{won}원")
 
     if not parts:
         # 억, 만 단위가 없는 작은 금액
-        return f"{sign}{val_abs:,}원"
+        return f"{sign}{val_abs}원"
 
-    return sign + " ".join(parts) + "원"
+    formatted = " ".join(parts)
+    if not formatted.endswith("원"):
+        formatted += "원"
+    return sign + formatted
 
 
 def format_money(value: float, country: str) -> str:
-    """금액을 국가에 맞는 형식(KRW 억만단위, USD 달러명시, AUD 호주달러명시)으로 포맷합니다."""
-    if value is None or not isinstance(value, (int, float)):
+    """금액을 통화/국가 코드에 맞는 형식으로 포맷합니다."""
+    if value is None or not isinstance(value, numbers.Real):
         return "-"
 
-    country = str(country or "").strip().lower()
+    code = str(country or "").strip().lower()
 
-    if country in ("kor", "kr"):
+    if code in ("kor", "kr", "krw"):
         return format_kr_money(value)
 
     sign = "-" if value < 0 else ""
     val_abs = abs(value)
 
-    if country in ("us", "usa"):
+    if code in ("us", "usa", "usd"):
         return f"{sign}${val_abs:,.2f}"
-    elif country in ("aus", "au"):
+    elif code in ("aus", "au", "aud"):
         return f"{sign}A${val_abs:,.2f}"
     else:
         return f"{sign}{val_abs:,.2f}"
