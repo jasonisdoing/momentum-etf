@@ -4,6 +4,7 @@
   "rank": {
     "country": "kor",
     "months": 6,
-    "ma_type": "HMA"
+    "ma_type": "HMA",
+    "_ma_type": "나중에 3개월로 변경"
   }
 }

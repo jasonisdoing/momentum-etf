@@ -3,7 +3,8 @@
   "desc": "호주 ETF 종목풀",
   "rank": {
     "country": "au",
-    "months": 6,
-    "ma_type": "SMA"
+    "months": 12,
+    "ma_type": "DEMA",
+    "_ma_type": "나중에 HMA로 변경"
   }
 }
