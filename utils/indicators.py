@@ -54,13 +54,13 @@ def calculate_ma_score(
     moving_average: pd.Series,
 ) -> pd.Series:
     """
-    MAPS(Moving Average Position Score) 점수를 계산합니다.
+    RANK(Moving Average Position Score) 점수를 계산합니다.
 
     Args:
         close_prices: 종가 시리즈
         moving_average: 이동평균 시리즈
 
     """
-    from strategies.maps.scoring import calculate_maps_score
+    from core.strategy.scoring import calculate_maps_score
 
     return calculate_maps_score(close_prices, moving_average)

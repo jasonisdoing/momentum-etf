@@ -15,6 +15,7 @@ def build_full_summary(
     initial_capital_krw: float,
     currency: str,
     bucket_topn: int,
+    holdings_limit: int | None,
     account_settings: dict[str, Any],
     prefetched_data: dict[str, pd.DataFrame] | None,
     ticker_timeseries: dict[str, pd.DataFrame],
@@ -22,19 +23,17 @@ def build_full_summary(
 ) -> dict[str, Any]:
     """Orchestrates the creation of the full backtest summary."""
     perf = calculate_performance_summary(portfolio_df, initial_capital, start_date, end_date, currency)
-    weekly = calculate_weekly_summary(portfolio_df, initial_capital, bucket_topn)
+    resolved_holdings_limit = int(holdings_limit) if holdings_limit is not None else int(bucket_topn)
+    weekly = calculate_weekly_summary(portfolio_df, initial_capital, resolved_holdings_limit)
     bucket_summary = build_bucket_summaries(ticker_timeseries, ticker_meta)
     m_rets, m_cum_rets, y_rets = calculate_monthly_returns(portfolio_df)
 
     total_trades = 0
-    trade_decisions = {
-        "SELL_REPLACE",
-        "BUY",
-        "BUY_REPLACE",
-    }
-    for df in ticker_timeseries.values():
-        if isinstance(df, pd.DataFrame) and "decision" in df.columns:
-            total_trades += df["decision"].isin(trade_decisions).sum()
+    for ticker, df in ticker_timeseries.items():
+        if ticker == "CASH" or not isinstance(df, pd.DataFrame) or "trade_amount" not in df.columns:
+            continue
+        trade_amounts = pd.to_numeric(df["trade_amount"], errors="coerce").fillna(0.0)
+        total_trades += int(trade_amounts.abs().gt(0).sum())
 
     benchmarks_summary = []
     bench_conf = account_settings.get("benchmark") or (account_settings.get("benchmarks") or [None])[0]
@@ -77,8 +76,9 @@ def build_full_summary(
         "final_value_local": perf.get("final_value", 0.0),
         "final_value_krw": perf.get("final_value_krw", 0.0),
         "period_return": float(final_row.get("cumulative_return_pct", 0.0)),
-        "evaluation_return_pct": 0.0,
+        "evaluation_return_pct": float(final_row.get("evaluation_return_pct", 0.0)),
         "held_count": int(final_row.get("held_count", 0)),
+        "holdings_limit": resolved_holdings_limit,
         "turnover": int(total_trades),
         "cagr": perf.get("cagr", 0.0),
         "mdd": perf.get("mdd", 0.0),

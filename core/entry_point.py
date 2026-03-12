@@ -1,9 +1,9 @@
-"""MAPS 전략 컴포넌트를 노출하는 엔트리 포인트."""
+"""RANK 전략 컴포넌트를 노출하는 엔트리 포인트."""
 
 from __future__ import annotations
 
-from strategies.maps import constants as _constants_mod
-from strategies.maps import rules as _rules_mod
+from core.strategy import constants as _constants_mod
+from core.strategy import rules as _rules_mod
 
 # 전략 규칙 클래스
 StrategyRules = getattr(_rules_mod, "StrategyRules")
@@ -13,17 +13,17 @@ from core.backtest.engine import run_portfolio_backtest
 from core.backtest.output.log_writer import dump_backtest_log
 from core.backtest.output.summary_report import print_backtest_summary
 from core.backtest.runner import run_account_backtest
-from strategies.maps.backtest import run_single_ticker_backtest
+from core.strategy.backtest import run_single_ticker_backtest
 
 # 상수
 BACKTEST_STATUS_LIST = getattr(_constants_mod, "BACKTEST_STATUS_LIST")
 
 # 추천 함수 (recommend.py에서 별도 제공 - 백테스트 기반)
 # from recommend import generate_recommendation_report
-from strategies.maps.evaluator import StrategyEvaluator
+from core.strategy.evaluator import StrategyEvaluator
 
 # 공유 로직
-from strategies.maps.metrics import process_ticker_data
+from core.strategy.metrics import process_ticker_data
 
 __all__ = [
     "StrategyRules",

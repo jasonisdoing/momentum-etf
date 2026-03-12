@@ -4,6 +4,28 @@ from typing import Any
 import pandas as pd
 
 
+def _build_sell_trade_mask(df: pd.DataFrame) -> pd.Series:
+    """Return mask for realized sell trades compatible with pending_action model."""
+    if df.empty:
+        return pd.Series(False, index=df.index)
+
+    decision_col = (
+        df["decision"].astype(str).str.upper()
+        if "decision" in df.columns
+        else pd.Series("", index=df.index, dtype=object)
+    )
+    pending_col = (
+        df["pending_action"].astype(str).str.upper()
+        if "pending_action" in df.columns
+        else pd.Series("", index=df.index, dtype=object)
+    )
+    trade_shares_col = pd.to_numeric(df.get("trade_shares", 0.0), errors="coerce").fillna(0.0)
+
+    return ((decision_col == "SELL") | (decision_col == "SELL_REPLACE") | pending_col.str.startswith("SELL")) & (
+        trade_shares_col > 0
+    )
+
+
 def extract_evaluated_records(ticker_timeseries: dict[str, pd.DataFrame]) -> dict[str, dict[str, Any]]:
     """Extracts the latest status for each ticker."""
     records = {}
@@ -74,9 +96,6 @@ def build_ticker_summaries(
 ) -> list[dict[str, Any]]:
     """Calculates performance summary per ticker."""
     summaries = []
-    sell_decisions = {
-        "SELL_REPLACE",
-    }
 
     for ticker, df in ticker_timeseries.items():
         ticker_key = str(ticker).upper()
@@ -87,9 +106,9 @@ def build_ticker_summaries(
         total_trades = 0
         winning_trades = 0
 
-        if "decision" in df.columns:
-            sell_mask = df["decision"].isin(sell_decisions) | df["decision"].str.startswith("SELL")
-            trades = df[sell_mask]
+        if "decision" in df.columns or "pending_action" in df.columns:
+            sell_mask = _build_sell_trade_mask(df)
+            trades = df[sell_mask] if sell_mask.any() else pd.DataFrame()
             realized_profit = trades["trade_profit"].sum() if "trade_profit" in trades.columns else 0.0
             total_trades = len(trades)
             if "trade_profit" in trades.columns:
@@ -139,9 +158,6 @@ def build_bucket_summaries(
 ) -> list[dict[str, Any]]:
     """Calculates performance summary per bucket."""
     bucket_data = {}
-    sell_decisions = {
-        "SELL_REPLACE",
-    }
 
     for ticker, df in ticker_timeseries.items():
         ticker_key = str(ticker).upper()
@@ -154,9 +170,9 @@ def build_bucket_summaries(
             continue
 
         realized_profit = 0.0
-        if "decision" in df.columns:
-            sell_mask = df["decision"].isin(sell_decisions) | df["decision"].str.startswith("SELL")
-            trades = df[sell_mask]
+        if "decision" in df.columns or "pending_action" in df.columns:
+            sell_mask = _build_sell_trade_mask(df)
+            trades = df[sell_mask] if sell_mask.any() else pd.DataFrame()
             realized_profit = trades["trade_profit"].sum() if "trade_profit" in trades.columns else 0.0
 
         last_row = df.iloc[-1]

@@ -37,12 +37,12 @@ MIN_CHANGE_PCT = 3.0
 # EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN", "코리아", "한국", "200", "삼성", "코스닥", "코스피"]
 EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "ETN"]
 # 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
-# INCLUDE_KEYWORDS = ["글로벌", "미국"]
+# INCLUDE_KEYWORDS = ["글로벌"]
 INCLUDE_KEYWORDS = []
 # 최소 거래량 (0이면 필터링 안 함)
 # MIN_VOLUME = 100000
 # MIN_VOLUME = 500000
-MIN_VOLUME = 0
+MIN_VOLUME = 500000
 
 
 def fetch_naver_etf_data(min_change_pct: float) -> pd.DataFrame | None:
@@ -311,36 +311,36 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
 
     # 기존 stocks.json 로드 및 비교
 
-    # 확인할 계정 목록
-    from utils.settings_loader import list_available_accounts
+    # 확인할 종목풀 목록
+    from utils.pool_registry import list_available_pools
 
-    target_accounts = list_available_accounts()
+    target_pools = list_available_pools()
 
     # 기존 종목 로드 (MongoDB)
     # 기존 종목 및 삭제된 종목 로드
     from utils.stock_list_io import get_deleted_etfs, get_etfs
 
-    existing_tickers_map = defaultdict(list)  # ticker -> list of account_ids
-    deleted_tickers_map = defaultdict(list)  # ticker -> list of {account_id, deleted_at, deleted_reason}
+    existing_tickers_map = defaultdict(list)  # ticker -> list of pool_ids
+    deleted_tickers_map = defaultdict(list)  # ticker -> list of {pool_id, deleted_at, deleted_reason}
 
-    for account in target_accounts:
+    for pool_id in target_pools:
         try:
             # 활성 종목
-            existing_etfs = get_etfs(account)
+            existing_etfs = get_etfs(pool_id)
             for item in existing_etfs:
-                existing_tickers_map[item["ticker"]].append(account)
+                existing_tickers_map[item["ticker"]].append(pool_id)
 
             # 삭제된 종목
-            deleted_list = get_deleted_etfs(account)
+            deleted_list = get_deleted_etfs(pool_id)
             for item in deleted_list:
                 t = item.get("ticker")
                 if t:
                     info = item.copy()
-                    info["account_id"] = account
+                    info["pool_id"] = pool_id
                     deleted_tickers_map[t].append(info)
 
         except Exception as e:
-            logger.warning(f"{account} 종목 로드 중 오류 발생: {e}")
+            logger.warning(f"{pool_id} 종목 로드 중 오류 발생: {e}")
 
     # top_gainers DataFrame에서 티커 목록 추출
     found_tickers = []
@@ -356,8 +356,8 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
         ticker = item["티커"]
 
         if ticker in existing_tickers_map:
-            # 계좌 정보 추가
-            item["accounts"] = existing_tickers_map[ticker]
+            # 종목풀 정보 추가
+            item["pools"] = existing_tickers_map[ticker]
             my_universe_list.append(item)
         elif ticker in deleted_tickers_map:
             # 삭제 정보 추가 (여러 계좌일 수 있음, 여기선 첫 번째 정보 사용하거나 모두 표시)
@@ -378,18 +378,18 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
         three_month = item.get("3개월수익률")
         three_month_str = f"{three_month:+.2f}%" if three_month is not None and pd.notna(three_month) else "아직없음"
 
-        # 계좌 표시
-        accounts_str = ""
-        if "accounts" in item:
-            accounts_str = f"[{', '.join(item['accounts'])}] "
+        # 종목풀 표시
+        pools_str = ""
+        if "pools" in item:
+            pools_str = f"[{', '.join(item['pools'])}] "
 
-        base_msg = f"  - {accounts_str}{name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
+        base_msg = f"  - {pools_str}{name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
 
         if is_deleted:
             deleted_infos = item.get("deleted_infos", [])
             del_msg_parts = []
             for info in deleted_infos:
-                acc = info.get("account_id", "?")
+                pool_id = info.get("pool_id", "?")
                 d_date = info.get("deleted_at")
                 d_reason = info.get("deleted_reason") or "사유없음"
 
@@ -399,7 +399,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
                         date_str = d_date.strftime("%Y-%m-%d")
                     else:
                         date_str = str(d_date)[:10]
-                del_msg_parts.append(f"[{acc}] {date_str} ({d_reason})")
+                del_msg_parts.append(f"[{pool_id}] {date_str} ({d_reason})")
 
             del_msg = " | ".join(del_msg_parts)
             print(f"{base_msg} | 🗑️ 삭제: {del_msg}")
@@ -409,7 +409,7 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
     # 1. 내 유니버스
     if my_universe_list:
         print()
-        print("--- 내 유니버스 ETF 목록 ---")
+        print("--- 종목풀 등록 ETF 목록 ---")
         for item in my_universe_list:
             print_item(item)
 
@@ -422,6 +422,11 @@ def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
 
     # 3. 신규 발견
     if new_discovery_list:
+        new_discovery_list = sorted(
+            new_discovery_list,
+            key=lambda item: float(item.get("등락률", 0.0) or 0.0),
+            reverse=True,
+        )
         print()
         print("--- 신규 발견 종목 ---")
         for item in new_discovery_list:

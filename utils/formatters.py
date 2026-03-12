@@ -18,11 +18,14 @@ def format_price(value: Any, country_code: str) -> str:
 
     country_norm = (country_code or "").strip().lower()
 
-    if country_norm in {"kr", "kor"}:
+    if country_norm in {"kr", "kor", "krw"}:
         return f"{amount:,.0f}원"
 
     if country_norm in {"us", "usa", "usd"}:
         return f"${amount:,.2f}"
+
+    if country_norm in {"au", "aus", "aud"}:
+        return f"A${amount:,.2f}"
 
     return f"{amount:,.2f}"
 

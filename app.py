@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -8,10 +9,15 @@ import streamlit as st
 import streamlit_authenticator as stauth
 
 from app_pages.account_page import render_account_page
+from app_pages.pool_page import render_pool_page
 from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
 )
+from utils.formatters import format_price
+from utils.identifier_guard import ensure_account_pool_id_separation
+from utils.pool_registry import load_pool_configs
+from utils.report import format_kr_money
 from utils.ui import render_recommendation_table
 
 
@@ -23,30 +29,13 @@ def _to_plain_dict(value):
     return value
 
 
-def format_korean_currency(value):
-    """주어진 원화 값을 '억/만원' 단위로 변환합니다."""
-    if value == 0:
-        return "0원"
+format_korean_currency = format_kr_money
 
-    abs_value = abs(value)
-    eok = int(abs_value // 100_000_000)
-    remain = abs_value % 100_000_000
-    man = int(round(remain / 10_000))
 
-    if man == 10000:
-        eok += 1
-        man = 0
-
-    parts = []
-    if eok > 0:
-        parts.append(f"{eok}억")
-    if man > 0:
-        parts.append(f"{man}만원")
-
-    result = " ".join(parts) if parts else "0원"
-    if value < 0:
-        result = "-" + result
-    return result
+def _slugify_path(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    slug = re.sub(r"[^a-z0-9_-]+", "-", raw)
+    return slug.strip("-") or "page"
 
 
 def _load_authenticator() -> stauth.Authenticate:
@@ -80,9 +69,13 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
     icon = account.get("icon") or get_icon_fallback(account.get("country_code", ""))
 
     title = view_mode if view_mode else account["name"]
-    # URL path에서 슬래시(/) 제거하여 Streamlit nested path 에러 방지
-    clean_view = view_mode.split(".")[-1].strip().replace("/", "_") if view_mode else "main"
-    url_path = f"{account_id}_{clean_view}"
+    url_mapping = {"추천 결과": "result", "종목 관리": "setup", "삭제된 종목": "deleted"}
+
+    clean_view = view_mode.split(".")[-1].strip() if view_mode else "main"
+    english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
+    account_slug = _slugify_path(account_id)
+    view_slug = _slugify_path(english_view)
+    url_path = f"{account_slug}-{view_slug}"
 
     def _render(account_key: str = account_id) -> None:
         render_account_page(account_key, view_mode=view_mode)
@@ -92,6 +85,113 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
         title=title,
         icon=icon,
         url_path=url_path,
+    )
+
+
+def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[dict[str, Any]], view_mode: str):
+    url_mapping = {"추천 결과": "result", "종목 관리": "setup", "삭제된 종목": "deleted"}
+    clean_view = view_mode.split(".")[-1].strip()
+    english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
+    view_slug = _slugify_path(english_view)
+    url_path = f"account-{view_slug}"
+
+    account_options: list[tuple[str, str]] = []
+    for acc in accounts:
+        account_id = acc["account_id"]
+        account_name = acc.get("name") or account_id.upper()
+        icon = acc.get("icon") or get_icon_fallback(acc.get("country_code", ""))
+        label = f"{icon} {account_name}".strip()
+        account_options.append((account_id, label))
+
+    def _render() -> None:
+        if not account_options:
+            st.error("선택 가능한 계좌가 없습니다.")
+            return
+
+        option_ids = [account_id for account_id, _ in account_options]
+        option_label_map = {account_id: label for account_id, label in account_options}
+
+        query_account = st.query_params.get("account")
+        current_id = query_account if query_account in option_label_map else st.session_state.get("selected_account_id")
+        if current_id not in option_label_map:
+            current_id = option_ids[0]
+            st.session_state["selected_account_id"] = current_id
+            st.query_params["account"] = current_id
+
+        selected_id = st.selectbox(
+            "계좌 선택",
+            options=option_ids,
+            index=option_ids.index(current_id),
+            format_func=lambda account_id: option_label_map.get(account_id, account_id),
+            key=f"account_selector_{view_slug}",
+        )
+        st.session_state["selected_account_id"] = selected_id
+        st.query_params["account"] = selected_id
+        render_account_page(selected_id, view_mode=view_mode)
+
+    return page_cls(
+        _render,
+        title=view_mode,
+        icon="💼",
+        url_path=url_path,
+    )
+
+
+def _build_unified_pool_page(page_cls: Callable[..., object], pools: list[dict[str, str]], view_mode: str):
+    url_mapping = {"랭킹": "rank", "종목 관리": "setup", "삭제된 종목": "deleted"}
+    clean_view = view_mode.split(".")[-1].strip()
+    english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
+    view_slug = _slugify_path(english_view)
+    url_path = f"pool-{view_slug}"
+
+    pool_options: list[tuple[str, str]] = []
+    for pool in pools:
+        pool_id = pool["pool_id"]
+        pool_name = pool.get("name") or pool_id.upper()
+        pool_options.append((pool_id, pool_name))
+
+    def _render() -> None:
+        if not pool_options:
+            st.error("선택 가능한 종목풀이 없습니다.")
+            return
+
+        option_ids = [pool_id for pool_id, _ in pool_options]
+        option_label_map = {pool_id: label for pool_id, label in pool_options}
+
+        query_pool = st.query_params.get("pool")
+        current_id = query_pool if query_pool in option_label_map else st.session_state.get("selected_pool_id")
+        if current_id not in option_label_map:
+            current_id = option_ids[0]
+            st.session_state["selected_pool_id"] = current_id
+            st.query_params["pool"] = current_id
+
+        selected_id = st.selectbox(
+            "종목풀 선택",
+            options=option_ids,
+            index=option_ids.index(current_id),
+            format_func=lambda pool_id: option_label_map.get(pool_id, pool_id),
+            key=f"pool_selector_{view_slug}",
+        )
+        st.session_state["selected_pool_id"] = selected_id
+        st.query_params["pool"] = selected_id
+        render_pool_page(selected_id, view_mode=view_mode)
+
+    return page_cls(
+        _render,
+        title=view_mode,
+        icon="🧩",
+        url_path=url_path,
+    )
+
+
+def _build_system_page(page_cls: Callable[..., object]):
+    from app_pages.system_page import render_system_page
+
+    return page_cls(
+        render_system_page,
+        title="시스템 정보",
+        icon="🛠️",
+        url_path="system",
     )
 
 
@@ -477,29 +577,23 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
 
                     # USD
                     try:
-                        usd_krw_df = yf.download("KRW=X", period="5d", progress=False, auto_adjust=True)
-                        if len(usd_krw_df) >= 2:
-                            prev_usd = float(usd_krw_df["Close"].dropna().iloc[-2])
-                            curr_usd = float(usd_krw_df["Close"].dropna().iloc[-1])
-                            rates["USD"]["rate"] = curr_usd
-                            if prev_usd > 0:
-                                rates["USD"]["change_pct"] = ((curr_usd - prev_usd) / prev_usd) * 100
-                        elif len(usd_krw_df) == 1:
-                            rates["USD"]["rate"] = float(usd_krw_df["Close"].dropna().iloc[-1])
+                        usd_ticker = yf.Ticker("KRW=X")
+                        curr_usd = float(usd_ticker.fast_info.last_price)
+                        prev_usd = float(usd_ticker.fast_info.previous_close)
+                        rates["USD"]["rate"] = curr_usd
+                        if prev_usd > 0:
+                            rates["USD"]["change_pct"] = ((curr_usd - prev_usd) / prev_usd) * 100
                     except Exception:
                         pass
 
                     # AUD
                     try:
-                        aud_krw_df = yf.download("AUDKRW=X", period="5d", progress=False, auto_adjust=True)
-                        if len(aud_krw_df) >= 2:
-                            prev_aud = float(aud_krw_df["Close"].dropna().iloc[-2])
-                            curr_aud = float(aud_krw_df["Close"].dropna().iloc[-1])
-                            rates["AUD"]["rate"] = curr_aud
-                            if prev_aud > 0:
-                                rates["AUD"]["change_pct"] = ((curr_aud - prev_aud) / prev_aud) * 100
-                        elif len(aud_krw_df) == 1:
-                            rates["AUD"]["rate"] = float(aud_krw_df["Close"].dropna().iloc[-1])
+                        aud_ticker = yf.Ticker("AUDKRW=X")
+                        curr_aud = float(aud_ticker.fast_info.last_price)
+                        prev_aud = float(aud_ticker.fast_info.previous_close)
+                        rates["AUD"]["rate"] = curr_aud
+                        if prev_aud > 0:
+                            rates["AUD"]["change_pct"] = ((curr_aud - prev_aud) / prev_aud) * 100
                     except Exception:
                         pass
                     return rates
@@ -613,6 +707,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
 
         elif current_subtab == "📋 상세":
             # 정렬: 계좌순(이름에 order가 포함됨) -> 버킷순
+            combined_df = combined_df.copy()
             if "bucket" in combined_df.columns:
                 combined_df = combined_df.sort_values(["계좌", "bucket"], ascending=[True, True])
             else:
@@ -622,6 +717,39 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             if "수익률(%)" in combined_df.columns:
                 combined_df = combined_df.rename(columns={"수익률(%)": "평가수익률(%)"})
 
+            if total_assets > 0 and "평가금액(KRW)" in combined_df.columns:
+                combined_df["비중"] = (
+                    pd.to_numeric(combined_df["평가금액(KRW)"], errors="coerce").fillna(0.0) / total_assets
+                ) * 100.0
+            else:
+                combined_df["비중"] = 0.0
+
+            if "환종" in combined_df.columns:
+                if "평균 매입가" in combined_df.columns:
+                    combined_df["평균 매입가"] = combined_df.apply(
+                        lambda row: format_price(row.get("평균 매입가"), row.get("환종")),
+                        axis=1,
+                    )
+                if "현재가" in combined_df.columns:
+                    combined_df["현재가"] = combined_df.apply(
+                        lambda row: format_price(row.get("현재가"), row.get("환종")),
+                        axis=1,
+                    )
+
+            krw_column_renames = {
+                "매입금액(KRW)": "매입금액",
+                "평가금액(KRW)": "평가금액",
+                "평가손익(KRW)": "평가손익",
+            }
+            for old_col, new_col in krw_column_renames.items():
+                if old_col in combined_df.columns:
+                    combined_df[old_col] = (
+                        pd.to_numeric(combined_df[old_col], errors="coerce")
+                        .fillna(0.0)
+                        .apply(lambda value: format_price(value, "KRW"))
+                    )
+            combined_df = combined_df.rename(columns=krw_column_renames)
+
             # render_recommendation_table 호출 (컬럼 순서 제어를 위해 visible_columns 명시)
             visible_cols = [
                 "계좌",
@@ -629,25 +757,35 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 "버킷",
                 "티커",
                 "종목명",
+                "비중",
                 "일간(%)",
                 "보유일",
                 "평가수익률(%)",
                 "수량",
                 "평균 매입가",
                 "현재가",
-                "매입금액(KRW)",
-                "평가금액(KRW)",
-                "평가손익(KRW)",
+                "매입금액",
+                "평가금액",
+                "평가손익",
+                "1주(%)",
+                "2주(%)",
+                "1달(%)",
+                "3달(%)",
+                "6달(%)",
+                "12달(%)",
+                "고점대비",
                 "추세(3달)",
             ]
             # Warnings moved to the top of the tabs
 
             render_recommendation_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols, height=900)
+            st.caption("비중은 총자산에서 차지하는 비중입니다.")
 
     return _render_home_page
 
 
 def main() -> None:
+    ensure_account_pool_id_separation()
     navigation = getattr(st, "navigation", None)
     page_cls = getattr(st, "Page", None)
     if navigation is None or page_cls is None:
@@ -660,6 +798,7 @@ def main() -> None:
         st.stop()
 
     default_icon = "📈"
+    pools = load_pool_configs()
 
     st.set_page_config(
         page_title="Momentum ETF",
@@ -711,11 +850,14 @@ def main() -> None:
     transaction_tabs = ["📊 잔고 CRUD", "📥 벌크 입력", "💵 원금/현금", "📸 스냅샷"]
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
 
-    # 각 계좌 그룹
+    # 통합 계좌 그룹 (계좌 선택형 단일 URL)
     view_modes = ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]
-    for account in accounts:
-        group_name = account["name"]
-        pages[group_name] = [_build_account_page(page_cls, account, view_mode) for view_mode in view_modes]
+    pages["계좌"] = [_build_unified_account_page(page_cls, accounts, view_mode) for view_mode in view_modes]
+
+    # 통합 종목풀 그룹 (풀 선택형 단일 URL)
+    pool_view_modes = ["1. 랭킹", "2. 종목 관리", "3. 삭제된 종목"]
+    pages["종목풀"] = [_build_unified_pool_page(page_cls, pools, view_mode) for view_mode in pool_view_modes]
+    pages["시스템 정보"] = [_build_system_page(page_cls)]
 
     # 네비게이션 객체 생성 (사이드바 방식)
     pg = navigation(pages, position="sidebar")

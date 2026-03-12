@@ -1,12 +1,12 @@
-"""MAPS 전략 의사결정 평가 모듈"""
+"""RANK 전략 의사결정 평가 모듈"""
 
 import pandas as pd
 
-from strategies.maps.constants import DECISION_MESSAGES
+from core.strategy.constants import DECISION_MESSAGES
 
 
 class StrategyEvaluator:
-    """MAPS 전략의 매수/매도 의사결정을 담당하는 클래스"""
+    """RANK 전략의 매수/매도 의사결정을 담당하는 클래스"""
 
     def __init__(self):
         pass

@@ -1,4 +1,4 @@
-"""MAPS(Moving Average Position Score) 전략에서 사용하는 상수 모음."""
+"""RANK(Moving Average Position Score) 전략에서 사용하는 상수 모음."""
 
 from __future__ import annotations
 
@@ -25,6 +25,13 @@ BACKTEST_STATUS_LIST = {
         "show_slack": True,
         "background": "#ffc1cc",
     },
+    "SELL": {
+        "display_name": "<🔻 매도>",
+        "order": 27,
+        "is_recommendation": True,
+        "show_slack": True,
+        "background": "#ffc1cc",
+    },
     "BUY": {
         "display_name": "<🚀 신규매수>",
         "order": 31,
@@ -39,13 +46,6 @@ BACKTEST_STATUS_LIST = {
         "show_slack": False,
         "background": "#f0f0f0",
     },
-    "SOLD": {
-        "display_name": "<✅ 매도 완료>",
-        "order": 100,
-        "is_recommendation": False,
-        "show_slack": True,
-        "background": "#a0a0a0",
-    },
 }
 
 
@@ -58,9 +58,17 @@ def _normalize_display_label(raw: str | None) -> str:
 
 _DECISION_MESSAGE_OVERRIDES: dict[str, str] = {
     "BUY": "✅ 신규 매수",
-    "SOLD": "🔚 매도 완료",
+    "SELL": "🔻 매도",
     "BUY_REPLACE": "🔄 교체매수",
     "SELL_REPLACE": "🔄 교체매도",
+}
+
+PENDING_ACTION_MESSAGES: dict[str, str] = {
+    "BUY": "[예정] 신규 매수 신호",
+    "BUY_REPLACE": "[예정] 교체매수 신호",
+    "SELL": "[예정] 매도 신호",
+    "SELL_REPLACE": "[예정] 교체매도 신호",
+    "SELL_REBALANCE": "",
 }
 
 
@@ -89,4 +97,5 @@ __all__ = [
     "BACKTEST_STATUS_LIST",
     "DECISION_MESSAGES",
     "DECISION_NOTES",
+    "PENDING_ACTION_MESSAGES",
 ]

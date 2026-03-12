@@ -7,11 +7,12 @@ import pandas as pd
 import streamlit as st
 
 from config import BUCKET_CONFIG, BUCKET_MAPPING
-from strategies.maps.constants import BACKTEST_STATUS_LIST
+from core.strategy.constants import BACKTEST_STATUS_LIST
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 from utils.recommendations import recommendations_to_dataframe
 from utils.settings_loader import get_account_settings
+from utils.stock_list_io import get_etfs
 
 logger = get_app_logger()
 
@@ -88,6 +89,23 @@ def load_account_recommendations(
         return None, message, country_code
 
     rows = snapshot.get("recommendations") or []
+
+    # 추천 스냅샷 기준이 아닌 종목 관리의 비중(weight)을 표시용으로 주입
+    try:
+        account_stocks = get_etfs(account_norm)
+    except Exception:
+        account_stocks = []
+    weight_map = {
+        str(item.get("ticker") or "").strip().upper(): item.get("weight")
+        for item in account_stocks
+        if isinstance(item, dict) and str(item.get("ticker") or "").strip()
+    }
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        if ticker in weight_map:
+            row["weight"] = weight_map.get(ticker)
 
     # [KOR] 실시간 데이터 오버레이 (NAVER API)
     if country_code in ("kor", "kr"):
@@ -401,6 +419,20 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
 
         styled = styled.map(_style_account_col, subset=["계좌"])
 
+    right_align_columns = [
+        "평균 매입가",
+        "현재가",
+        "매입금액",
+        "평가금액",
+        "평가손익",
+        "매입금액(KRW)",
+        "평가금액(KRW)",
+        "평가손익(KRW)",
+    ]
+    existing_right_align_columns = [col for col in right_align_columns if col in df.columns]
+    if existing_right_align_columns:
+        styled = styled.map(lambda _: "text-align: right;", subset=existing_right_align_columns)
+
     return styled
 
 
@@ -426,16 +458,33 @@ def render_recommendation_table(
         "환종": st.column_config.TextColumn("환종", width=60),
         "타입": st.column_config.TextColumn("타입", width=120),
         "버킷": st.column_config.TextColumn("버킷", width=85),
+        "비중": st.column_config.ProgressColumn(
+            "비중",
+            width="small",
+            format="%.1f%%",
+            min_value=0.0,
+            max_value=100.0,
+        ),
+        "비중(%)": st.column_config.ProgressColumn(
+            "비중(%)",
+            width="small",
+            format="%.0f",
+            min_value=0.0,
+            max_value=100.0,
+        ),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),
-        "수량": st.column_config.NumberColumn("수량", width="small", format="%d"),
+        "수량": st.column_config.NumberColumn("수량", width="small", format="localized"),
         "평균 매입가": st.column_config.NumberColumn("평균 매입가", width="small", format="%.2f"),
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
         "평가수익률(%)": st.column_config.NumberColumn("평가수익률(%)", width="small", format="%.2f%%"),
         "매입금액(KRW)": st.column_config.NumberColumn("매입금액(KRW)", width="small", format="localized"),
+        "매입금액": st.column_config.TextColumn("매입금액", width="small"),
         "평가금액(KRW)": st.column_config.NumberColumn("평가금액(KRW)", width="small", format="localized"),
+        "평가금액": st.column_config.TextColumn("평가금액", width="small"),
         "평가손익(KRW)": st.column_config.NumberColumn("평가손익(KRW)", width="small", format="localized"),
+        "평가손익": st.column_config.TextColumn("평가손익", width="small"),
         "수익률(%)": st.column_config.NumberColumn("수익률(%)", width="small", format="%.2f%%"),
         price_label: st.column_config.NumberColumn(price_label, width="small"),
         "상태": st.column_config.TextColumn("상태", width=80),
@@ -451,10 +500,15 @@ def render_recommendation_table(
         "점수": st.column_config.NumberColumn("점수", width=50, format="%.1f"),
         "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
-        "문구": st.column_config.TextColumn("문구", width="medium"),
+        "문구": st.column_config.TextColumn("문구", width="large"),
     }
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")
+
+    if "평균 매입가" in df.columns and not pd.api.types.is_numeric_dtype(df["평균 매입가"]):
+        column_config_map["평균 매입가"] = st.column_config.TextColumn("평균 매입가", width="small")
+    if price_label in df.columns and not pd.api.types.is_numeric_dtype(df[price_label]):
+        column_config_map[price_label] = st.column_config.TextColumn(price_label, width="small")
 
     # [Segmentation] 1~5 버킷 순회
     # 버킷 매핑 (app_pages.account_page와 동일하게 유지하거나, 여기서 정의)

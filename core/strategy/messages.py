@@ -50,7 +50,7 @@ def build_sell_replace_note(
 
 def build_partial_sell_note() -> str:
     """Build note for partial sell with amount."""
-    tmpl = DECISION_MESSAGES["SOLD"]
+    tmpl = DECISION_MESSAGES["SELL"]
     return tmpl
 
 

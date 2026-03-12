@@ -18,8 +18,9 @@ from typing import Any
 import pandas as pd
 from pandas import DataFrame, Timestamp
 
-from config import OPTIMIZATION_METRIC, TRADING_DAYS_PER_MONTH
+from config import TRADING_DAYS_PER_MONTH
 from core.backtest.runner import run_account_backtest
+from core.strategy.rules import StrategyRules
 from core.tune.reporting import (
     _export_combo_debug,
     _export_prefetched_data,
@@ -33,8 +34,7 @@ from core.tune.worker import (
     evaluate_single_combo,
     init_worker_prefetch,
 )
-from strategies.maps.rules import StrategyRules
-from utils.account_registry import get_benchmark_tickers, get_strategy_rules
+from utils.account_registry import get_benchmark_tickers
 from utils.cache_utils import save_cached_frame
 from utils.data_loader import (
     MissingPriceDataError,
@@ -44,8 +44,8 @@ from utils.data_loader import (
 )
 from utils.logger import get_app_logger
 from utils.settings_loader import (
-    ACCOUNT_SETTINGS_DIR,
     AccountSettingsError,
+    get_account_dir,
     get_account_settings,
     get_tune_month_configs,
     load_common_settings,
@@ -187,29 +187,13 @@ def _normalize_tuning_values(values: Any, *, dtype, fallback: Any) -> list[Any]:
 
 def _resolve_month_configs(account_id: str = None) -> list[dict[str, Any]]:
     configs = get_tune_month_configs(account_id=account_id)
-    if configs:
-        return configs
-
-    if account_id:
-        try:
-            account_settings = get_account_settings(account_id)
-            fallback = account_settings.get("strategy", {}).get("BACKTEST_LAST_MONTHS")
-            if fallback is not None:
-                import pandas as pd
-
-                months_back = int(fallback)
-                start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
-                return [
-                    {
-                        "backtest_start_date": start_dt.strftime("%Y-%m-%d"),
-                        "weight": 1.0,
-                        "source": f"account_{account_id}",
-                    }
-                ]
-        except Exception:
-            pass
-
-    return []
+    if not configs:
+        if account_id:
+            raise ValueError(
+                f"[튜닝] '{account_id}' 계정의 테스트 기간 설정이 비어 있습니다. strategy.TUNE_MONTHS를 확인하세요."
+            )
+        raise ValueError("[튜닝] 테스트 기간 설정이 비어 있습니다.")
+    return configs
 
 
 def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> None:
@@ -221,7 +205,7 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         logger.warning("[튜닝] %s 계정 결과에 반영할 파라미터가 없습니다.", account_id.upper())
         return
 
-    settings_path = ACCOUNT_SETTINGS_DIR / account_id / "config.json"
+    settings_path = get_account_dir(account_id) / "config.json"
     try:
         raw = settings_path.read_text(encoding="utf-8")
         settings_data = json.loads(raw)
@@ -243,68 +227,50 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     else:
         strategy_data = {}
 
-    legacy_tuning = strategy_data.pop("tuning", None)
-    if isinstance(legacy_tuning, dict):
-        strategy_data.update(legacy_tuning)
+    weighted_cagr = entry.get("weighted_expected_CAGR")
+    weighted_mdd = entry.get("weighted_expected_MDD")
+    backtested_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # Legacy cleanup
-
-    integer_keys = {
-        "BUCKET_TOPN",
-        "MA_MONTH",
-    }
+    # 표준 저장 포맷: strategy: {TUNE_*, OPTIMIZATION_METRIC, REBALANCE_MODE}
+    rebalance_mode = strategy_data.get("REBALANCE_MODE")
+    if rebalance_mode is None and isinstance(strategy_data.get("COMMON"), dict):
+        rebalance_mode = (strategy_data.get("COMMON") or {}).get("REBALANCE_MODE")
 
     for key, value in result_params.items():
         if value is None:
             continue
-        strategy_data[key] = value
+        if key == "TUNE_MONTHS":
+            strategy_data["TUNE_MONTHS"] = value
+            continue
+        if key == "REBALANCE_MODE":
+            rebalance_mode = value
+            continue
+        if key in {"OPTIMIZATION_METRIC"}:
+            strategy_data[key] = value
+            continue
+        if key in {"CAGR", "MDD", "BACKTESTED_DATE", "BACKTEST_LAST_MONTHS"}:
+            continue
 
-    # 정수형이어야 하는 필드들 강제 형변환 (튜닝 여부와 무관하게)
-    for key in integer_keys:
-        if key in strategy_data and strategy_data[key] is not None:
-            try:
-                strategy_data[key] = int(float(strategy_data[key]))
-            except (ValueError, TypeError):
-                pass
+    tune_months = None
+    if "TUNE_MONTHS" in strategy_data:
+        tune_months = strategy_data.get("TUNE_MONTHS")
+    elif "BACKTEST_LAST_MONTHS" in strategy_data:
+        tune_months = strategy_data.get("BACKTEST_LAST_MONTHS")
 
-    weighted_cagr = entry.get("weighted_expected_CAGR")
-    if weighted_cagr is not None:
-        strategy_data["CAGR"] = _round_float(weighted_cagr)
+    tune_cagr = _round_float(weighted_cagr) if weighted_cagr is not None else strategy_data.get("TUNE_CAGR")
+    tune_mdd = _round_float(weighted_mdd) if weighted_mdd is not None else strategy_data.get("TUNE_MDD")
 
-    weighted_mdd = entry.get("weighted_expected_MDD")
-    if weighted_mdd is not None:
-        strategy_data["MDD"] = _round_float(weighted_mdd)
+    # 키 순서 고정: TUNE_DATE, TUNE_CAGR, TUNE_MDD, TUNE_MONTHS, OPTIMIZATION_METRIC, REBALANCE_MODE
+    strategy_out: dict[str, Any] = {
+        "TUNE_DATE": backtested_at,
+        "TUNE_CAGR": tune_cagr,
+        "TUNE_MDD": tune_mdd,
+        "TUNE_MONTHS": tune_months,
+        "OPTIMIZATION_METRIC": strategy_data.get("OPTIMIZATION_METRIC") or result_params.get("OPTIMIZATION_METRIC"),
+        "REBALANCE_MODE": rebalance_mode,
+    }
 
-    strategy_data["BACKTESTED_DATE"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-    # [Key Reordering]
-    # 사용자가 요청한 순서대로 키를 정렬하여 저장
-    desired_order = [
-        "BACKTEST_LAST_MONTHS",
-        "BACKTESTED_DATE",
-        "CAGR",
-        "MDD",
-        "BUCKET_TOPN",
-        "MA_MONTH",
-        "MA_TYPE",
-        "REBALANCE_MODE",
-    ]
-
-    ordered_strategy = {}
-
-    # 1. Desired keys first
-    for key in desired_order:
-        if key in strategy_data:
-            ordered_strategy[key] = strategy_data[key]
-
-    # 2. Remaining keys
-    for key, val in strategy_data.items():
-        if key not in ordered_strategy:
-            ordered_strategy[key] = val
-
-    strategy_data = ordered_strategy
-
-    settings_data["strategy"] = strategy_data
+    settings_data["strategy"] = strategy_out
 
     tmp_path: Path | None = None
     try:
@@ -366,7 +332,7 @@ def _export_debug_month(
             ma_month = tuning.get("MA_MONTH")
             if ma_month is None:
                 continue
-            topn = int(tuning.get("BUCKET_TOPN"))
+            topn = int(tuning.get("TOPN", tuning.get("BUCKET_TOPN")))
         except (TypeError, ValueError):
             continue
 
@@ -380,6 +346,8 @@ def _export_debug_month(
             ma_month=int(ma_month),
             bucket_topn=topn,
             ma_type=tuning.get("MA_TYPE", "SMA"),
+            rebalance_mode=tuning.get("REBALANCE_MODE", "MONTHLY"),
+            cooldown=int(tuning.get("COOLDOWN")),
         )
         result_prefetch = run_account_backtest(
             account_id,
@@ -460,15 +428,18 @@ def _execute_tuning(
     ma_candidates = list(search_space.get("MA_MONTH", []))
     is_ma_month = True
 
-    topn_candidates = list(search_space.get("BUCKET_TOPN", []))
+    topn_candidates = list(search_space.get("TOPN", []))
     ma_type_candidates = list(search_space.get("MA_TYPE", ["SMA"]))
     rebalance_mode_candidates = list(search_space.get("REBALANCE_MODE", []))
+    cooldown_candidates = list(search_space.get("COOLDOWN", []))
 
-    if not rebalance_mode_candidates:
-        current_rules = get_strategy_rules(account_norm)
-        rebalance_mode_candidates = [current_rules.rebalance_mode]
-
-    if not ma_candidates or not topn_candidates or not ma_type_candidates or not rebalance_mode_candidates:
+    if (
+        not ma_candidates
+        or not topn_candidates
+        or not ma_type_candidates
+        or not rebalance_mode_candidates
+        or not cooldown_candidates
+    ):
         logger.warning(
             "[튜닝] %s (%s 시작) 유효한 탐색 공간이 없습니다.",
             account_norm.upper(),
@@ -476,12 +447,13 @@ def _execute_tuning(
         )
         return None
 
-    combos: list[tuple[int, int, str, str]] = [
-        (ma, topn, ma_type, rebal)
+    combos: list[tuple[int, int, str, str, int]] = [
+        (ma, topn, ma_type, rebal, cooldown)
         for ma in ma_candidates
         for topn in topn_candidates
         for ma_type in ma_type_candidates
         for rebal in rebalance_mode_candidates
+        for cooldown in cooldown_candidates
     ]
 
     if not combos:
@@ -539,8 +511,6 @@ def _execute_tuning(
         except Exception as exc:
             logger.warning("[튜닝] %s 환율 데이터 로드 실패, fallback 사용: %s", account_norm.upper(), exc)
 
-    current_rules = get_strategy_rules(account_norm)
-
     payloads = [
         (
             account_norm,
@@ -549,10 +519,11 @@ def _execute_tuning(
             int(topn),
             str(ma_type),
             str(rebal_mode),
+            int(cooldown),
             tuple(excluded_tickers) if excluded_tickers else tuple(),
             is_ma_month,
         )
-        for ma, topn, ma_type, rebal_mode in combos
+        for ma, topn, ma_type, rebal_mode, cooldown in combos
     ]
 
     logger.info(
@@ -683,8 +654,9 @@ def _execute_tuning(
                 "tuning": {
                     "MA_MONTH": int(item.get("ma_month", 0)),
                     "MA_TYPE": str(item.get("ma_type", "SMA")),
-                    "BUCKET_TOPN": int(item.get("bucket_topn", 0)),
+                    "TOPN": int(item.get("bucket_topn", 0)),
                     "REBALANCE_MODE": str(item.get("rebalance_mode", "MONTHLY")),
+                    "COOLDOWN": int(item.get("cooldown", 1)),
                 },
             }
         )
@@ -704,7 +676,8 @@ def _build_run_entry(
 ) -> dict[str, Any]:
     param_fields = {
         "MA_MONTH": ("ma_month", True),
-        "BUCKET_TOPN": ("bucket_topn", True),
+        "TOPN": ("bucket_topn", True),
+        "COOLDOWN": ("cooldown", True),
     }
 
     entry: dict[str, Any] = {
@@ -718,6 +691,7 @@ def _build_run_entry(
     weighted_mdd_weight = 0.0
     ma_type_weights: dict[str, float] = {}
     rebal_mode_weights: dict[str, float] = {}
+    cooldown_weights: dict[int, float] = {}
     cagr_values: list[float] = []
     mdd_values: list[float] = []
 
@@ -774,7 +748,8 @@ def _build_run_entry(
         tuning_snapshot: dict[str, Any] = {}
         field_key_pairs = [
             ("MA_MONTH", "ma_month"),
-            ("BUCKET_TOPN", "bucket_topn"),
+            ("TOPN", "bucket_topn"),
+            ("COOLDOWN", "cooldown"),
         ]
 
         for field, key in field_key_pairs:
@@ -785,6 +760,18 @@ def _build_run_entry(
             converted = _to_int(value)
             if converted is not None:
                 tuning_snapshot[field] = converted
+
+        ma_type_snapshot = best.get("ma_type")
+        if ma_type_snapshot:
+            tuning_snapshot["MA_TYPE"] = str(ma_type_snapshot)
+
+        rebalance_snapshot = best.get("rebalance_mode")
+        if rebalance_snapshot:
+            tuning_snapshot["REBALANCE_MODE"] = str(rebalance_snapshot)
+
+        cooldown_snapshot = _to_int(best.get("cooldown"))
+        if cooldown_snapshot is not None:
+            tuning_snapshot["COOLDOWN"] = cooldown_snapshot
 
         raw_data_payload.append(
             {
@@ -809,6 +796,11 @@ def _build_run_entry(
             weight_for_cat = weight if weight > 0 else 1.0
             rebal_key = str(rebal_mode_val)
             rebal_mode_weights[rebal_key] = rebal_mode_weights.get(rebal_key, 0.0) + weight_for_cat
+
+        cooldown_val = _to_int(best.get("cooldown"))
+        if cooldown_val is not None:
+            weight_for_cat = weight if weight > 0 else 1.0
+            cooldown_weights[cooldown_val] = cooldown_weights.get(cooldown_val, 0.0) + weight_for_cat
 
     if weighted_cagr_weight > 0:
         entry["weighted_expected_CAGR"] = _round_float(weighted_cagr_sum / weighted_cagr_weight)
@@ -862,6 +854,9 @@ def _build_run_entry(
     if rebal_mode_weights:
         result_values["REBALANCE_MODE"] = max(rebal_mode_weights.items(), key=lambda item: (item[1], item[0]))[0]
 
+    if cooldown_weights:
+        result_values["COOLDOWN"] = max(cooldown_weights.items(), key=lambda item: (item[1], item[0]))[0]
+
     return entry
 
 
@@ -882,8 +877,9 @@ def _ensure_entry_schema(entry: Any) -> dict[str, Any]:
     normalized.pop("result", None)
 
     for field in (
+        "STRATEGY",
         "MA_MONTH",
-        "BUCKET_TOPN",
+        "TOPN",
         "MA_TYPE",
     ):
         normalized.pop(field, None)
@@ -1008,25 +1004,29 @@ def _compose_tuning_report(
 
         # 탐색 공간
         search_space = tuning_metadata.get("search_space", {})
+        is_hr_tuning = True
         if search_space:
             ma_month_range = search_space.get("MA_MONTH", [])
             ma_type_range = search_space.get("MA_TYPE", [])
-            topn_range = search_space.get("BUCKET_TOPN", [])
-            # MA_TYPE이 있으면 포함해서 표시
+            topn_range = search_space.get("TOPN", [])
             lines.append(
                 f"| 탐색 공간: MA {len(ma_month_range)}개 × MA타입 {len(ma_type_range)}개 × TOPN {len(topn_range)}개 "
+                f"× 쿨다운 {len(search_space.get('COOLDOWN', []))}개 "
                 f"× 리밸런스 {len(search_space.get('REBALANCE_MODE', []))}개 "
                 f"= {tuning_metadata.get('combo_count', 0)}개 조합"
             )
             # 각 파라미터 범위 표시
-            if ma_month_range:
+            if ma_month_range and not is_hr_tuning:
                 ma_min, ma_max = min(ma_month_range), max(ma_month_range)
                 lines.append(f"|   MA_RANGE: {ma_min}~{ma_max}")
-            if ma_type_range:
+            if ma_type_range and not is_hr_tuning:
                 lines.append(f"|   MA_TYPE: {', '.join(ma_type_range)}")
-            if topn_range:
+            if topn_range and not is_hr_tuning:
                 topn_min, topn_max = min(topn_range), max(topn_range)
-                lines.append(f"|   BUCKET_TOPN: {topn_min}~{topn_max}")
+                lines.append(f"|   TOPN: {topn_min}~{topn_max}")
+            cooldown_range = search_space.get("COOLDOWN", [])
+            if cooldown_range and not is_hr_tuning:
+                lines.append(f"|   COOLDOWN: {', '.join(str(int(v)) for v in cooldown_range)}")
             rebalance_range = search_space.get("REBALANCE_MODE", [])
             if rebalance_range:
                 lines.append(f"|   REBALANCE_MODE: {', '.join(rebalance_range)}")
@@ -1183,13 +1183,15 @@ def _compose_tuning_report(
 
         raw_rows = item.get("raw_data") or []
         normalized_rows: list[dict[str, Any]] = []
+        is_hr_tuning_rows = True
 
         for entry in raw_rows:
             tuning = entry.get("tuning") or {}
             ma_val = tuning.get("MA_MONTH")
             ma_type_val = tuning.get("MA_TYPE", "SMA")
-            topn_val = tuning.get("BUCKET_TOPN")
+            topn_val = tuning.get("TOPN", tuning.get("BUCKET_TOPN"))
             rebalance_val = tuning.get("REBALANCE_MODE", "MONTHLY")
+            cooldown_val = tuning.get("COOLDOWN")
 
             cagr_val = entry.get("CAGR")
             mdd_val = entry.get("MDD")
@@ -1199,10 +1201,12 @@ def _compose_tuning_report(
 
             normalized_rows.append(
                 {
+                    "strategy": "PORTFOLIO",
                     "ma_days": ma_val,
                     "ma_type": ma_type_val,
                     "bucket_topn": topn_val,
                     "rebalance_mode": rebalance_val,
+                    "cooldown": int(cooldown_val) if cooldown_val is not None else None,
                     "cagr": cagr_val,
                     "mdd": mdd_val,
                     "period_return": period_val,
@@ -1214,7 +1218,7 @@ def _compose_tuning_report(
 
         normalized_rows.sort(key=_get_sort_key, reverse=True)
         lines.append(f"=== 최근 {period_display} 결과 - 정렬 기준: {metric_display} ===")
-        lines.extend(_render_tuning_table(normalized_rows, period_str=period_display))
+        lines.extend(_render_tuning_table(normalized_rows, period_str=period_display, hr_mode=is_hr_tuning_rows))
         lines.append("")
 
     return lines
@@ -1304,52 +1308,33 @@ def run_account_tuning(
     debug_diff_rows: list[dict[str, Any]] = []
     debug_month_configs: list[dict[str, Any]] = []
 
-    base_rules = get_strategy_rules(account_norm)
+    # 계좌 튜닝은 고정 비중 리밸런싱 파라미터만 탐색한다.
+    common_cfg: dict[str, Any] = dict(config.get("COMMON") or {}) if isinstance(config.get("COMMON"), dict) else {}
 
-    # [Modify] MA_MONTH 필수 처리: 튜닝 설정에 명시적으로 존재해야 함
-    ma_month_raw = config.get("MA_MONTH")
-    if ma_month_raw is None or (isinstance(ma_month_raw, (list, tuple)) and not ma_month_raw):
+    def _pick(key: str) -> Any:
+        if key in common_cfg:
+            return common_cfg.get(key)
+        return config.get(key)
+
+    rebalance_raw = _pick("REBALANCE_MODE")
+    if rebalance_raw is None or (isinstance(rebalance_raw, (list, tuple)) and not rebalance_raw):
         raise ValueError(
-            f"[튜닝] '{account_id}' 계정의 'MA_MONTH' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
+            f"[튜닝] '{account_id}' 계정의 'REBALANCE_MODE' 설정이 누락되었거나 비어있습니다. tune.py의 설정을 확인하세요."
         )
-
-    ma_month_values = _normalize_tuning_values(ma_month_raw, dtype=int, fallback=None)
-    ma_values = []
-
-    if ma_month_values:
-        # Month 사용 시 Day 변환 없이 그대로 사용
-        pass
-    else:
-        # 위에서 에러를 던지므로 여기는 도달하지 않아야 함
-        raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_MONTH'가 유효하지 않습니다.")
-
-    topn_values = _normalize_tuning_values(config.get("BUCKET_TOPN"), dtype=int, fallback=base_rules.bucket_topn)
-
-    # MA_TYPE 처리: 문자열 리스트로 받음
-    ma_type_raw = config.get("MA_TYPE")
-    if ma_type_raw is None:
-        ma_type_values = [base_rules.ma_type]
-    elif isinstance(ma_type_raw, (list, tuple)):
-        ma_type_values = [str(v).upper() for v in ma_type_raw if v]
-    else:
-        ma_type_values = [str(ma_type_raw).upper()]
-
-    if not ma_type_values:
-        ma_type_values = [base_rules.ma_type]
-
-    # REBALANCE_MODE 처리: 문자열 리스트로 받음
-    rebalance_raw = config.get("REBALANCE_MODE")
-    if rebalance_raw is None:
-        rebalance_mode_values = [base_rules.rebalance_mode]
-    elif isinstance(rebalance_raw, (list, tuple)):
+    if isinstance(rebalance_raw, (list, tuple)):
         rebalance_mode_values = [str(v).upper() for v in rebalance_raw if v]
     else:
         rebalance_mode_values = [str(rebalance_raw).upper()]
-
     if not rebalance_mode_values:
-        rebalance_mode_values = [base_rules.rebalance_mode]
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'REBALANCE_MODE'가 유효하지 않습니다.")
 
-    if (not ma_values and not ma_month_values) or not topn_values or not ma_type_values:
+    ma_values: list[int] = []
+    ma_month_values = [1]
+    topn_values = [1]
+    ma_type_values = ["SMA"]
+    cooldown_values = [1]
+
+    if not topn_values or not ma_type_values:
         logger.warning("[튜닝] 유효한 파라미터 조합이 없습니다.")
         return None
 
@@ -1357,6 +1342,31 @@ def run_account_tuning(
     if not etf_universe:
         logger.error("[튜닝] '%s' 종목 데이터를 찾을 수 없습니다.", account_norm)
         return None
+
+    weight_sum = 0.0
+    weighted_count = 0
+    for item in etf_universe:
+        ticker = str(item.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        if item.get("weight") is None:
+            continue
+        try:
+            weight_val = float(item.get("weight"))
+        except (TypeError, ValueError):
+            raise ValueError(f"[튜닝] '{account_id}' 계정 종목 비중이 숫자가 아닙니다: {ticker}")
+        if weight_val < 0:
+            raise ValueError(f"[튜닝] '{account_id}' 계정 종목 비중은 0 이상이어야 합니다: {ticker}")
+        if weight_val > 0:
+            weighted_count += 1
+        weight_sum += weight_val
+
+    if weighted_count == 0:
+        raise ValueError(f"[튜닝] '{account_id}' 계정에 비중(weight) 0 초과 종목이 없습니다.")
+    if abs(weight_sum - 100.0) > 1e-2 and abs(weight_sum - 1.0) > 1e-3:
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정 비중 합계는 100이어야 합니다. 현재 합계: {int(round(weight_sum))}"
+        )
 
     tickers = [str(item.get("ticker")) for item in etf_universe if item.get("ticker")]
     if not tickers:
@@ -1382,19 +1392,31 @@ def run_account_tuning(
         * len(topn_values)
         * len(ma_type_values)
         * len(rebalance_mode_values)
+        * len(cooldown_values)
     )
     if combo_count <= 0:
         logger.warning("[튜닝] 조합 생성에 실패했습니다.")
         return None
 
-    # OPTIMIZATION_METRIC은 config.py의 전역 설정을 사용합니다.
-    optimization_metric = OPTIMIZATION_METRIC
+    optimization_metric_raw = _pick("OPTIMIZATION_METRIC")
+    if optimization_metric_raw is None:
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'OPTIMIZATION_METRIC' 설정이 누락되었습니다. tune.py의 ACCOUNT_TUNING_CONFIG를 확인하세요."
+        )
+    optimization_metric = str(optimization_metric_raw).strip().upper()
+    valid_optimization_metrics = {"CAGR", "SHARPE", "SDR"}
+    if optimization_metric not in valid_optimization_metrics:
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 OPTIMIZATION_METRIC은 {sorted(valid_optimization_metrics)} 중 하나여야 합니다. "
+            f"(입력값: {optimization_metric_raw})"
+        )
 
     search_space = {
         "MA_MONTH": ma_month_values or ma_values,
-        "BUCKET_TOPN": topn_values,
+        "TOPN": topn_values,
         "MA_TYPE": ma_type_values,
         "REBALANCE_MODE": rebalance_mode_values,
+        "COOLDOWN": cooldown_values,
         "OPTIMIZATION_METRIC": [optimization_metric],
     }
 
@@ -1402,28 +1424,50 @@ def run_account_tuning(
     topn_count = len(topn_values)
     ma_type_count = len(ma_type_values)
     rebalance_count = len(rebalance_mode_values)
+    cooldown_count = len(cooldown_values)
 
     logger.info(
-        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 리밸런스 %d개 = %d개 조합 (최적화 지표: %s)",
+        "[튜닝] 탐색 공간: MA %d개 × TOPN %d개 × MA_TYPE %d개 × 쿨다운 %d개 × 리밸런스 %d개 = %d개 조합 (최적화 지표: %s)",
         ma_count,
         topn_count,
         ma_type_count,
+        cooldown_count,
         rebalance_count,
         combo_count,
         optimization_metric,
     )
 
     try:
-        base_ma = base_rules.ma_days or 20
+        base_ma = max(ma_month_values) * 20
         if ma_month_values:
             # Month -> Approx Day for warmup
             ma_max = max(ma_month_values) * 20
         else:
             ma_max = max([base_ma, *ma_values] if ma_values else [base_ma])
     except ValueError:
-        ma_max = base_rules.ma_days or 20
+        ma_max = 20
 
-    month_items = _resolve_month_configs(account_id=account_id)
+    tune_months_from_config = config.get("TUNE_MONTHS")
+    if tune_months_from_config is None:
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'TUNE_MONTHS' 설정이 누락되었습니다. tune.py의 ACCOUNT_TUNING_CONFIG를 확인하세요."
+        )
+    try:
+        tune_months_value = int(tune_months_from_config)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"[튜닝] '{account_id}' 계정의 'TUNE_MONTHS'는 정수여야 합니다: {tune_months_from_config}"
+        ) from exc
+    if tune_months_value < 1:
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'TUNE_MONTHS'는 1 이상이어야 합니다: {tune_months_value}")
+    start_dt = pd.Timestamp.today().normalize() - pd.DateOffset(months=tune_months_value)
+    month_items = [
+        {
+            "backtest_start_date": start_dt.strftime("%Y-%m-%d"),
+            "weight": 1.0,
+            "source": f"tune_config_{account_id}",
+        }
+    ]
     if not month_items:
         logger.error("[튜닝] 테스트할 기간 설정이 없습니다.")
         return None
@@ -1485,7 +1529,7 @@ def run_account_tuning(
         multiplier = 2.0
 
     # 웜업 일수 계산 및 오버플로 방지 (최대 약 10년으로 제한)
-    warmup_days = int(max(ma_max, base_rules.ma_days or 0) * multiplier)
+    warmup_days = int(max(ma_max, 20) * multiplier)
     max_safe_warmup = 2500  # 약 10년
     if warmup_days > max_safe_warmup:
         logger.warning("[튜닝] 웜업 기간이 너무 깁니다 (%d일). %d일로 제한합니다.", warmup_days, max_safe_warmup)
@@ -1546,9 +1590,9 @@ def run_account_tuning(
 
     # 출력 경로 미리 결정 (중간 저장용) - 계정별 폴더
     if results_dir is not None:
-        base_dir = Path(results_dir) / account_norm / "results"
+        base_dir = Path(results_dir) / get_account_dir(account_norm).name / "results"
     else:
-        base_dir = DEFAULT_RESULTS_DIR / account_norm / "results"
+        base_dir = DEFAULT_RESULTS_DIR / get_account_dir(account_norm).name / "results"
 
     if output_path is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
@@ -1568,8 +1612,9 @@ def run_account_tuning(
         "search_space": {
             "MA_MONTH": list(ma_month_values) if ma_month_values else list(ma_values),
             "MA_TYPE": list(ma_type_values),
-            "BUCKET_TOPN": list(topn_values),
+            "TOPN": list(topn_values),
             "REBALANCE_MODE": list(rebalance_mode_values),
+            "COOLDOWN": list(cooldown_values),
             "OPTIMIZATION_METRIC": optimization_metric,
         },
         "data_period": {
@@ -1691,8 +1736,9 @@ def run_account_tuning(
                         "tuning": {
                             "MA_MONTH": int(entry.get("ma_month")) if entry.get("ma_month") is not None else None,
                             "MA_TYPE": str(entry.get("ma_type", "SMA")),
-                            "BUCKET_TOPN": int(entry.get("bucket_topn", 0)),
+                            "TOPN": int(entry.get("bucket_topn", 0)),
                             "REBALANCE_MODE": str(entry.get("rebalance_mode", "MONTHLY")),
+                            "COOLDOWN": int(entry.get("cooldown", 1)),
                         },
                     }
                     for entry in sorted(success_entries, key=_sort_key_local, reverse=True)
@@ -1809,22 +1855,31 @@ def run_account_tuning(
         item = results_per_month[-1]
         best = item.get("best") or {}
         logger.info(
-            "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): MA=%d / TOPN=%d / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
+            "[튜닝] %s (%s 시작) 최적 조합 (%s 기준): REBALANCE_MODE=%s / CAGR=%.2f%% / Sharpe=%.2f / SDR=%.3f",
             account_norm.upper(),
             item.get("backtest_start_date"),
             optimization_metric,
-            best.get("ma_month", 0),
-            best.get("bucket_topn", 0),
+            best.get("rebalance_mode", "MONTHLY"),
             best.get("cagr", 0.0),
             best.get("sharpe", 0.0),
             best.get("sharpe_to_mdd", 0.0),
         )
 
     entry = _build_run_entry(months_results=results_per_month)
+    rebalance_mode = None
+    try:
+        rebalance_mode = str((entry.get("result") or {}).get("REBALANCE_MODE") or "").upper() or None
+    except Exception:
+        rebalance_mode = None
+    entry["result"] = {
+        "REBALANCE_MODE": rebalance_mode,
+    }
 
     # 튜닝시 사용한 최적화 지표도 config에 저장
     if optimization_metric:
         entry["result"]["OPTIMIZATION_METRIC"] = optimization_metric
+    if tune_months_value is not None:
+        entry["result"]["TUNE_MONTHS"] = int(tune_months_value)
 
     _apply_tuning_to_strategy_file(account_norm, entry)
 
@@ -1836,7 +1891,7 @@ def run_account_tuning(
             "combo_count": combo_count,
             "search_space": {
                 "MA_MONTH": ma_values,
-                "BUCKET_TOPN": topn_values,
+                "TOPN": topn_values,
             },
             "month_configs": debug_month_configs,
             "excluded_tickers_initial": sorted(excluded_ticker_set),

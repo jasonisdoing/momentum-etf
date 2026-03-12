@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 from pandas.io.formats.style import Styler
 
-from strategies.maps.constants import BACKTEST_STATUS_LIST
+from core.strategy.constants import BACKTEST_STATUS_LIST
 from utils.formatters import format_trading_days
 from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
@@ -18,6 +18,7 @@ _BASE_DISPLAY_COLUMNS = [
     "버킷",
     "티커",
     "종목명",
+    "비중(%)",
     "상태",
     "일간(%)",
     "평가(%)",
@@ -32,6 +33,7 @@ _BASE_DISPLAY_COLUMNS = [
     "고점대비",
     "추세(3달)",
     "점수",
+    "RSI",
     "지속",
     "문구",
 ]
@@ -142,6 +144,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         return_12m = row.get("return_12m", 0.0)
         drawdown_from_high = row.get("drawdown_from_high", 0.0)
         score = row.get("score")
+        rsi_score = row.get("rsi_score")
         streak = _format_days(row.get("streak"))
         phrase = _resolve_phrase(row)
         bucket_names = {
@@ -153,11 +156,13 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         }
         bucket_id = row.get("bucket", 1)
         bucket_name = bucket_names.get(bucket_id, f"{bucket_id}. 기타")
+        weight_val = row.get("weight")
 
         display_rows.append(
             {
                 "#": rank if rank is not None else "-",
                 "버킷": bucket_name,
+                "비중(%)": weight_val,
                 "티커": ticker,
                 "종목명": name,
                 "상태": state,
@@ -176,6 +181,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "고점대비": drawdown_from_high,
                 "추세(3달)": _trend_series(row),
                 "점수": score,
+                "RSI": rsi_score,
                 "지속": streak,
                 "문구": phrase or row.get("phrase", ""),
                 "bucket": row.get("bucket", 1),
@@ -207,11 +213,17 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
 
 def _state_style(value: Any) -> str:
     text = str(value).upper()
-    if text in ("BUY", "BUY_REPLACE"):
+    if text in (
+        "BUY",
+        "BUY_REPLACE",
+    ):
         return "color:#d32f2f;font-weight:600"
     if text == "WAIT":
         return "color:#1565c0;font-weight:600"
-    if text in ("SELL", "SELL_REPLACE"):
+    if text in (
+        "SELL",
+        "SELL_REPLACE",
+    ):
         return "color:#1565c0;font-weight:600"
     return ""
 

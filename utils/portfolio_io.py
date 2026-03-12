@@ -6,6 +6,7 @@ from bson import ObjectId
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
+from utils.settings_loader import get_account_settings
 
 logger = get_app_logger()
 
@@ -13,17 +14,12 @@ logger = get_app_logger()
 def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | None:
     """
     Load the actual portfolio holdings from portfolio_master (live)
-    and merge with recommendation data.
+    and calculate display metrics directly from cached price data.
     """
-    from utils.ui import load_account_recommendations
-
     # 1. Fetch live holdings from master only
     snapshot = load_portfolio_master(account_id)
     if not snapshot or not snapshot.get("holdings"):
         return None
-
-    # 2. Fetch recommendations for scores, trends, etc.
-    rec_df, _, _ = load_account_recommendations(account_id)
 
     # 3. Build holdings dataframe from raw master data
     holdings_list = snapshot["holdings"]
@@ -63,11 +59,11 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         df_holdings["보유일"] = "-"
 
     # Fetch prices from price cache and exchange rates
-    from utils.cache_utils import load_cached_frames_bulk
+    from utils.cache_utils import load_cached_frames_bulk_with_fallback
     from utils.data_loader import get_exchange_rate_series
 
     tickers = df_holdings["ticker"].tolist()
-    cached_frames = load_cached_frames_bulk(account_id, tickers)
+    cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
 
     import streamlit as st
 
@@ -126,6 +122,99 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
             return aud_krw
         return 1.0
 
+    def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
+        try:
+            series = pd.to_numeric(close_series, errors="coerce").dropna()
+        except Exception:
+            return None
+
+        if series.empty:
+            return None
+
+        current = float(series.iloc[-1])
+        if current <= 0:
+            return None
+
+        if len(series) > days:
+            previous = float(series.iloc[-(days + 1)])
+            if previous > 0:
+                return (current / previous - 1.0) * 100.0
+
+        if days == 252 and len(series) >= 240:
+            previous = float(series.iloc[0])
+            if previous > 0:
+                return (current / previous - 1.0) * 100.0
+
+        return None
+
+    def _build_cached_metrics(ticker: str) -> dict[str, Any]:
+        ticker_norm = str(ticker or "").strip().upper()
+        cached_df = cached_frames.get(ticker_norm)
+        if cached_df is None or cached_df.empty:
+            return {
+                "일간(%)": None,
+                "1주(%)": None,
+                "2주(%)": None,
+                "1달(%)": None,
+                "3달(%)": None,
+                "6달(%)": None,
+                "12달(%)": None,
+                "고점대비": None,
+                "추세(3달)": [],
+            }
+
+        close_col = "Close" if "Close" in cached_df.columns else "close"
+        if close_col not in cached_df.columns:
+            return {
+                "일간(%)": None,
+                "1주(%)": None,
+                "2주(%)": None,
+                "1달(%)": None,
+                "3달(%)": None,
+                "6달(%)": None,
+                "12달(%)": None,
+                "고점대비": None,
+                "추세(3달)": [],
+            }
+
+        close_series = pd.to_numeric(cached_df[close_col], errors="coerce").dropna()
+        if close_series.empty:
+            return {
+                "일간(%)": None,
+                "1주(%)": None,
+                "2주(%)": None,
+                "1달(%)": None,
+                "3달(%)": None,
+                "6달(%)": None,
+                "12달(%)": None,
+                "고점대비": None,
+                "추세(3달)": [],
+            }
+
+        current_price = float(close_series.iloc[-1])
+        daily_pct = None
+        if len(close_series) > 1:
+            prev_close = float(close_series.iloc[-2])
+            if prev_close > 0:
+                daily_pct = ((current_price / prev_close) - 1.0) * 100.0
+
+        max_price = float(close_series.max()) if not close_series.empty else 0.0
+        drawdown = None
+        if max_price > 0:
+            drawdown = (current_price / max_price - 1.0) * 100.0
+
+        return {
+            "일간(%)": daily_pct,
+            "1주(%)": _calc_period_return(close_series, 5),
+            "2주(%)": _calc_period_return(close_series, 10),
+            "1달(%)": _calc_period_return(close_series, 20),
+            "3달(%)": _calc_period_return(close_series, 60),
+            "6달(%)": _calc_period_return(close_series, 126),
+            "12달(%)": _calc_period_return(close_series, 252),
+            "고점대비": drawdown,
+            "추세(3달)": close_series.iloc[-60:].astype(float).tolist(),
+        }
+
     df_holdings["현재가"] = df_holdings.apply(_get_current_price, axis=1)
     multiplier = df_holdings["currency"].apply(_get_multiplier)
     df_holdings["매입금액(KRW)"] = (df_holdings["quantity"] * df_holdings["average_buy_price"] * multiplier).astype(
@@ -138,7 +227,8 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
     # -----------------------------------------------------
     intl_val = snapshot.get("intl_shares_value", 0.0)
     intl_change = snapshot.get("intl_shares_change", 0.0)
-    if account_id == "aus" and (intl_val > 0 or intl_change != 0):
+    # 계좌코드가 바뀌면 여기 조건도 함께 수정해야 International Shares 평가금이 합산됩니다.
+    if account_id == "aus_account" and (intl_val > 0 or intl_change != 0):
         intl_princi = intl_val - intl_change
 
         intl_princi_krw = intl_princi * aud_krw
@@ -194,56 +284,13 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
 
     df_holdings["버킷"] = df_holdings["bucket_id"].apply(lambda x: BUCKET_MAPPING.get(x, f"{x}. Bucket"))
 
-    # 4. Merge with recommendations
-    if rec_df is not None and not rec_df.empty:
-        # We only want to pull in indicator columns from rec_df that aren't already in df_holdings
-        df_holdings["상태"] = "HOLD"
+    metrics_rows = [_build_cached_metrics(ticker) for ticker in df_holdings["티커"].tolist()]
+    metrics_df = pd.DataFrame(metrics_rows)
+    for col in metrics_df.columns:
+        df_holdings[col] = metrics_df[col]
 
-        cols_to_pull = [
-            "티커",
-            "일간(%)",
-            "1주(%)",
-            "2주(%)",
-            "1달(%)",
-            "3달(%)",
-            "6달(%)",
-            "12달(%)",
-            "고점대비",
-            "추세(3달)",
-            "점수",
-            "지속",
-            "문구",
-        ]
-        cols_to_pull = [c for c in cols_to_pull if c in rec_df.columns]
-
-        # Left join on Ticker
-        df_merged = pd.merge(df_holdings, rec_df[cols_to_pull], on="티커", how="left")
-
-        if "일간(%)" in df_merged.columns:
-
-            def _get_daily_pct_fallback(row):
-                ticker = str(row["티커"]).strip().upper()
-                df_cached = cached_frames.get(ticker)
-                if df_cached is None or len(df_cached) < 2:
-                    return 0.0
-                try:
-                    prev_close = float(df_cached["Close"].iloc[-2])
-                    curr_close = float(df_cached["Close"].iloc[-1])
-                    if prev_close > 0:
-                        return ((curr_close - prev_close) / prev_close) * 100
-                except Exception:
-                    pass
-                return 0.0
-
-            missing_mask = df_merged["일간(%)"].isna()
-            if missing_mask.any():
-                df_merged.loc[missing_mask, "일간(%)"] = df_merged[missing_mask].apply(_get_daily_pct_fallback, axis=1)
-
-        return df_merged
-    else:
-        # Fallback if no recommendation data
-        df_holdings["상태"] = "HOLD"
-        return df_holdings
+    df_holdings["상태"] = "HOLD"
+    return df_holdings
 
 
 def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
@@ -261,6 +308,18 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
             # Flatten for backward compatibility in functions that expect account-level dict
             base_principal = acc.get("total_principal", 0.0)
             base_cash = acc.get("cash_balance", 0.0)
+            cash_balance_native = acc.get("cash_balance_native")
+            cash_currency = str(acc.get("cash_currency") or "").strip().upper()
+
+            try:
+                settings = get_account_settings(account_id)
+                account_currency = str(settings.get("currency") or "").strip().upper()
+            except Exception:
+                account_currency = ""
+            cash_currency = cash_currency or account_currency
+
+            if cash_balance_native is None and cash_currency == "KRW":
+                cash_balance_native = base_cash
 
             intl_val = acc.get("intl_shares_value", 0.0)
             intl_change = acc.get("intl_shares_change", 0.0)
@@ -269,6 +328,8 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
                 "account_id": acc["account_id"],
                 "total_principal": base_principal,
                 "cash_balance": base_cash,
+                "cash_balance_native": cash_balance_native,
+                "cash_currency": cash_currency,
                 "base_principal": base_principal,
                 "base_cash": base_cash,
                 "intl_shares_value": intl_val,
@@ -284,6 +345,8 @@ def save_portfolio_master(
     holdings: list[dict[str, Any]],
     total_principal: float | None = None,
     cash_balance: float | None = None,
+    cash_balance_native: float | None = None,
+    cash_currency: str | None = None,
     intl_shares_value: float | None = None,
     intl_shares_change: float | None = None,
 ) -> bool:
@@ -306,6 +369,10 @@ def save_portfolio_master(
                     acc["total_principal"] = float(total_principal)
                 if cash_balance is not None:
                     acc["cash_balance"] = float(cash_balance)
+                if cash_balance_native is not None:
+                    acc["cash_balance_native"] = float(cash_balance_native)
+                if cash_currency is not None:
+                    acc["cash_currency"] = str(cash_currency).strip().upper()
                 if intl_shares_value is not None:
                     acc["intl_shares_value"] = float(intl_shares_value)
                 if intl_shares_change is not None:
@@ -336,6 +403,10 @@ def save_portfolio_master(
                 "holdings": holdings,
                 "updated_at": datetime.datetime.now(),
             }
+            if cash_balance_native is not None:
+                new_acc["cash_balance_native"] = float(cash_balance_native)
+            if cash_currency is not None:
+                new_acc["cash_currency"] = str(cash_currency).strip().upper()
             if intl_shares_value is not None:
                 new_acc["intl_shares_value"] = float(intl_shares_value)
             if intl_shares_change is not None:

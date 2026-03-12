@@ -179,21 +179,13 @@ def compose_recommendation_slack_message(
         strategy_params = (
             resolve_strategy_params((account_settings or {}).get("strategy", {})) if account_settings else {}
         )
-        # 5버킷 시스템에서는 BUCKET_TOPN * 5가 전체 한도임
-        bucket_topn_val = strategy_params.get("BUCKET_TOPN")
-        total_limit_fallback = None
-        if bucket_topn_val is not None:
-            try:
-                total_limit_fallback = int(bucket_topn_val) * 5
-            except (TypeError, ValueError):
-                pass
+        topn_val = strategy_params.get("TOPN")
 
         topn_candidates = [
             getattr(report, "holdings_limit", None),
             getattr(report, "bucket_topn", None),  # Legacy / individual bucket
             (account_settings or {}).get("holdings_limit"),
-            total_limit_fallback,
-            strategy_params.get("BUCKET_TOPN"),
+            topn_val,
         ]
         for candidate in topn_candidates:
             try:

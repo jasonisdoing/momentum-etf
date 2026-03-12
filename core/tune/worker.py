@@ -9,11 +9,11 @@ import pandas as pd
 from pandas import DataFrame
 
 from core.backtest.runner import run_account_backtest
+from core.strategy.rules import StrategyRules
 from core.tune.reporting import (
     _round_float,
     _safe_float,
 )
-from strategies.maps.rules import StrategyRules
 
 # Worker 글로벌 변수 - 프로세스당 한 번만 초기화
 _WORKER_PREFETCHED_DATA: Mapping[str, DataFrame] | None = None
@@ -45,7 +45,7 @@ def init_worker_prefetch(
 
 
 def evaluate_single_combo(
-    payload: tuple[str, tuple[str, str], int, int, str, str, tuple[str, ...], bool],
+    payload: tuple[str, tuple[str, str], int, int, str, str, int, tuple[str, ...], bool],
 ) -> tuple[str, dict[str, Any], list[str]]:
     """단일 파라미터 조합 평가 (Worker Process에서 실행)"""
     (
@@ -55,6 +55,7 @@ def evaluate_single_combo(
         topn_int,
         ma_type_str,
         rebalance_mode_str,
+        cooldown_int,
         excluded_tickers,
         is_ma_month,
     ) = payload
@@ -83,6 +84,7 @@ def evaluate_single_combo(
                 bucket_topn=int(topn_int),
                 ma_type=str(ma_type_str),
                 rebalance_mode=str(rebalance_mode_str),
+                cooldown=int(cooldown_int),
             )
         else:
             strategy_rules = StrategyRules.from_values(
@@ -90,12 +92,12 @@ def evaluate_single_combo(
                 bucket_topn=int(topn_int),
                 ma_type=str(ma_type_str),
                 rebalance_mode=str(rebalance_mode_str),
+                cooldown=int(cooldown_int),
             )
 
         override_settings = {
-            "START_DATE": date_range[0],
-            "END_DATE": date_range[1],
-            "EXCLUDED_TICKERS": list(excluded_tickers),
+            "start_date": date_range[0],
+            "end_date": date_range[1],
         }
 
         # 백테스트 실행
@@ -105,6 +107,7 @@ def evaluate_single_combo(
             override_settings=override_settings,
             strategy_override=strategy_rules,
             quiet=True,
+            excluded_tickers=excluded_tickers,
             prefetched_etf_universe=prefetched_universe,
             prefetched_metrics=prefetched_metrics,
             trading_calendar=trading_calendar,
@@ -131,6 +134,7 @@ def evaluate_single_combo(
         "bucket_topn": topn_int,
         "ma_type": ma_type_str,
         "rebalance_mode": rebalance_mode_str,
+        "cooldown": int(cooldown_int),
         "cagr": _round_float(_safe_float(summary.get("cagr"), 0.0)),
         "mdd": _round_float(_safe_float(summary.get("mdd"), 0.0)),
         "sharpe": _round_float(_safe_float(summary.get("sharpe"), 0.0)),

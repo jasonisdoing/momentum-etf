@@ -8,8 +8,9 @@ import logging
 import os
 import warnings
 from collections.abc import Iterable, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, time
+from io import StringIO
 from typing import Any
 
 import pandas as pd
@@ -58,7 +59,12 @@ except ImportError:
 
 # from utils.notification import send_verbose_log_to_slack
 
-from utils.cache_utils import load_cached_frame, load_cached_frames_bulk, save_cached_frame
+from utils.cache_utils import (
+    load_cached_frame,
+    load_cached_frame_with_fallback,
+    load_cached_frames_bulk_with_fallback,
+    save_cached_frame,
+)
 from utils.logger import get_app_logger
 from utils.stock_list_io import get_etfs_by_country, get_listing_date, set_listing_date
 
@@ -110,6 +116,36 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _format_realtime_price_for_log(price: float, country_code: str) -> str:
+    """국가별 실시간 가격 로그 포맷을 반환합니다."""
+    country = str(country_code or "").strip().lower()
+    if country == "us":
+        return f"${price:,.2f}"
+    if country == "au":
+        return f"A${price:,.2f}"
+    return f"{price:,.0f}"
+
+
+def _format_realtime_change_for_log(current_price: float, previous_close: float | None) -> str:
+    """직전 종가 대비 실시간 등락률 로그 포맷을 반환합니다."""
+    if previous_close is None or previous_close <= 0:
+        return ""
+
+    change_pct = ((current_price / previous_close) - 1.0) * 100.0
+    rounded_pct = round(change_pct, 1)
+    if abs(rounded_pct) < 0.05:
+        rounded_pct = 0.0
+
+    if rounded_pct > 0:
+        direction = "상승"
+    elif rounded_pct < 0:
+        direction = "하락"
+    else:
+        direction = "보합"
+
+    return f" | {rounded_pct:.1f}% {direction}"
 
 
 try:
@@ -295,6 +331,16 @@ def _silence_yfinance_logs():
             lg.setLevel(lvl)
 
 
+@contextmanager
+def _silence_yfinance_output():
+    """yfinance가 직접 출력하는 실패 메시지를 숨긴다."""
+    stdout_buffer = StringIO()
+    stderr_buffer = StringIO()
+    with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+        with _silence_yfinance_logs():
+            yield
+
+
 def get_today_str() -> str:
     """오늘 날짜를 'YYYYMMDD' 형식의 문자열로 반환합니다."""
     return datetime.now().strftime("%Y%m%d")
@@ -432,10 +478,6 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
         try:
             local_now = _now_with_zone(tz_name)
             candidate_date = local_now.date()
-
-            # [User Request] 장 개시 전이라도 오늘이 거래일이면 오늘 날짜를 반환 (0% 수익률 표시용)
-            if local_now.time() < open_time:
-                candidate_date = candidate_date - pd.Timedelta(days=1)
 
             end_dt = pd.Timestamp(candidate_date)
         except Exception:
@@ -621,7 +663,7 @@ def _fetch_ohlcv_with_cache(
         cached_df = None
         missing_ranges.append((request_start_dt, end_dt))
     else:
-        cached_df = load_cached_frame(cache_key, ticker)
+        cached_df = load_cached_frame_with_fallback(cache_key, ticker)
         # cache_seed_dt는 이미 위에서 가져왔으므로 중복 제거
         if (cached_df is None or cached_df.empty) and cache_seed_dt is not None:
             if request_start_dt > cache_seed_dt:
@@ -807,7 +849,7 @@ def _fetch_ohlcv_core(
 
     country_code = (country or "").strip().lower()
 
-    # 인덱스(^) 또는 미국/호주 주식의 경우 yfinance 사용
+    # 인덱스(^) 또는 해외 주식의 경우 yfinance 사용
     if ticker.startswith("^") or country_code in ("us", "au"):
         if existing_df is not None and not existing_df.empty:
             fallback = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
@@ -826,13 +868,14 @@ def _fetch_ohlcv_core(
             download_ticker = f"{ticker}.AX"
 
         try:
-            fetched = yf.download(
-                download_ticker,
-                start=start_dt.strftime("%Y-%m-%d"),
-                end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
-                progress=False,
-                auto_adjust=True,
-            )
+            with _silence_yfinance_output():
+                fetched = yf.download(
+                    download_ticker,
+                    start=start_dt.strftime("%Y-%m-%d"),
+                    end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
+                    progress=False,
+                    auto_adjust=True,
+                )
         except Exception as exc:
             error_msg = str(exc)
             if "Too Many Requests" in error_msg or "Rate Limit Exceeded" in error_msg:
@@ -959,6 +1002,68 @@ def _fetch_ohlcv_core(
     return None
 
 
+def repair_recent_trading_day_gaps(
+    ticker: str,
+    country: str,
+    *,
+    account_id: str,
+    lookback_days: int = 15,
+) -> list[pd.Timestamp]:
+    """최근 거래일 구간의 내부 누락 일봉을 다시 조회해 캐시에 병합한다."""
+
+    cache_key = str(account_id or "").strip().lower()
+    ticker_key = str(ticker or "").strip().upper()
+    country_code = str(country or "").strip().lower()
+    if not cache_key:
+        raise ValueError(f"누락 거래일 보강 시 account_id가 필요합니다. (Ticker: {ticker_key})")
+    if not ticker_key:
+        raise ValueError("누락 거래일 보강 시 ticker가 필요합니다.")
+
+    cached_df = load_cached_frame(cache_key, ticker_key)
+    if cached_df is None or cached_df.empty:
+        return []
+
+    latest_trading_day = get_latest_trading_day(country_code).normalize()
+    recent_start = (latest_trading_day - pd.DateOffset(days=max(1, int(lookback_days)))).normalize()
+    expected_days = get_trading_days(
+        recent_start.strftime("%Y-%m-%d"),
+        latest_trading_day.strftime("%Y-%m-%d"),
+        country_code,
+    )
+    if not expected_days:
+        return []
+
+    existing_days = {pd.Timestamp(idx).normalize() for idx in cached_df.index}
+    missing_days = [
+        pd.Timestamp(day).normalize() for day in expected_days if pd.Timestamp(day).normalize() not in existing_days
+    ]
+    if not missing_days:
+        return []
+
+    repaired_df = cached_df.copy()
+    for missing_day in missing_days:
+        fetched = _fetch_ohlcv_core(ticker_key, country_code, missing_day, missing_day, repaired_df)
+        if fetched is None or fetched.empty:
+            continue
+        repaired_df = pd.concat([repaired_df, fetched])
+        repaired_df.sort_index(inplace=True)
+        repaired_df = repaired_df[~repaired_df.index.duplicated(keep="last")]
+
+    save_cached_frame(cache_key, ticker_key, repaired_df)
+
+    refreshed_days = {pd.Timestamp(idx).normalize() for idx in repaired_df.index}
+    unresolved = [day for day in missing_days if day not in refreshed_days]
+    if not unresolved:
+        logger.info(
+            "[CACHE] %s/%s 최근 거래일 누락 보강 완료: %s",
+            cache_key.upper(),
+            ticker_key,
+            ", ".join(day.strftime("%Y-%m-%d") for day in missing_days),
+        )
+
+    return unresolved
+
+
 def fetch_ohlcv_for_tickers(
     tickers: list[str],
     country: str,
@@ -1051,7 +1156,7 @@ def fetch_ohlcv_for_tickers(
             except Exception as e:
                 logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
 
-    cached_frames = load_cached_frames_bulk(account_id or country, tickers)
+    cached_frames = load_cached_frames_bulk_with_fallback(account_id or country, tickers)
     missing: list[str] = []
 
     for raw_ticker in tickers:
@@ -1092,32 +1197,36 @@ def fetch_ohlcv_for_tickers(
                         index=[today],
                     )
 
-                    # 가격 포맷팅 (로그용)
-                    if country_lower == "us":
-                        price_str = f"${rt_price:,.2f}"
-                    elif country_lower == "au":
-                        price_str = f"A${rt_price:,.2f}"
-                    else:
-                        price_str = f"{rt_price:,.0f}"
+                    # 국가별 가격 포맷을 사용해 로그를 남긴다.
+                    price_str = _format_realtime_price_for_log(rt_price, country_lower)
+                    change_suffix = ""
 
+                    # [안전장치] 실시간 가격이 기존 캐시의 마지막 종가와 너무 큰 차이가 나면 경고 (예: 15% 이상)
+                    if not cached_df.empty:
+                        last_close = _safe_float(cached_df.iloc[-1].get("Close") or cached_df.iloc[-1].get("close"))
+                        if last_close > 0:
+                            change_suffix = _format_realtime_change_for_log(rt_price, last_close)
+                            diff_pct = abs(rt_price - last_close) / last_close * 100.0
+                            if diff_pct > 15.0:
+                                logger.warning(
+                                    f"⚠️ [{tkr}] 실시간 가격({price_str})이 직전 종가({last_close:,.2f}) 대비 비정상적 변동({diff_pct:.2f}%)을 보입니다. 데이터 오염 가능성이 있으니 확인이 필요합니다."
+                                )
+                                # 극단적인 오차(예: 25% 이상)인 경우 실시간 데이터 무시 처리 고려 가능
+                                if diff_pct > 25.0:
+                                    logger.error(f"❌ [{tkr}] 변동폭이 너무 커서 실시간 데이터를 무시합니다.")
+                                    continue
                     # 캐시 데이터와 오늘 데이터 병합
                     cached_df = pd.concat([cached_df, today_row])
                     cached_df = cached_df[~cached_df.index.duplicated(keep="last")]
                     cached_df.sort_index(inplace=True)
                     cache_end = cached_df.index.max().normalize()
-                    logger.info(f"[실시간] {tkr} 오늘 데이터를 실시간 가격({price_str})으로 보완")
+                    logger.info(f"[실시간] {tkr} 오늘 데이터를 실시간 가격({price_str})으로 보완{change_suffix}")
 
             # [User Request] 장 개시 전이거나 실시간 데이터가 없는 경우 마지막 종가로 패딩
             if is_today and cache_end < required_end:
                 last_p = _safe_float(cached_df.iloc[-1]["Close"])
                 if last_p is not None and last_p > 0:
-                    # 가격 포맷팅 (로그용)
-                    if country_lower == "us":
-                        last_p_str = f"${last_p:,.2f}"
-                    elif country_lower == "au":
-                        last_p_str = f"A${last_p:,.2f}"
-                    else:
-                        last_p_str = f"{last_p:,.0f}"
+                    last_p_str = _format_realtime_price_for_log(last_p, country_lower)
 
                     padding_row = pd.DataFrame(
                         {"Open": [last_p], "High": [last_p], "Low": [last_p], "Close": [last_p], "Volume": [0]},
@@ -1158,6 +1267,8 @@ def fetch_ohlcv_for_tickers(
                             index=[pd.to_datetime(today)],
                         )
                         if cached_df is not None and not cached_df.empty:
+                            last_close = _safe_float(cached_df.iloc[-1].get("Close") or cached_df.iloc[-1].get("close"))
+                            change_suffix = _format_realtime_change_for_log(rt_price, last_close)
                             effective_start = max(ticker_start, cached_df.index.min().normalize())
                             sliced = cached_df.loc[cached_df.index >= effective_start].copy()
                             merged = pd.concat([sliced, today_row])
@@ -1172,7 +1283,7 @@ def fetch_ohlcv_for_tickers(
 
                             prefetched_data[key] = merged
                             logger.info(
-                                f"[실시간보완] {tkr} 기존 데이터에 실시간 가격({rt_price:,.0f}) 추가 (캐시 범위: {len(sliced)}일)"
+                                f"[실시간보완] {tkr} 기존 데이터에 실시간 가격({_format_realtime_price_for_log(rt_price, country)}) 추가{change_suffix} (캐시 범위: {len(sliced)}일)"
                             )
                         else:
                             # 캐시가 전혀 없는 경우 오늘의 실시간 데이터만으로는 MIN_TRADING_DAYS를 충족할 수 없음
@@ -1203,7 +1314,9 @@ def fetch_ohlcv_for_tickers(
                             index=[today],
                         )
                         prefetched_data[key] = today_row
-                        logger.info(f"[실시간] {tkr} 데이터를 실시간 가격({rt_price:,.0f})으로 생성")
+                        logger.info(
+                            f"[실시간] {tkr} 데이터를 실시간 가격({_format_realtime_price_for_log(rt_price, country)})으로 생성"
+                        )
                         continue
                 missing.append(tkr)
                 continue
@@ -1506,12 +1619,24 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
                 "nowVal": float(price),
             }
 
-            # 일간 변동률 (%)
+            prev_close = quote.get("prevClose")
+            if prev_close is not None:
+                try:
+                    entry["prevClose"] = float(prev_close)
+                except (TypeError, ValueError):
+                    pass
+
             pct_change = quote.get("pctChange")
             if pct_change is not None:
                 try:
+                    entry["pctChange"] = float(pct_change)
                     entry["changeRate"] = float(pct_change)
                 except (TypeError, ValueError):
+                    pass
+            elif entry.get("prevClose"):
+                try:
+                    entry["changeRate"] = ((entry["nowVal"] / entry["prevClose"]) - 1.0) * 100.0
+                except Exception:
                     pass
 
             # OHLCV 데이터
@@ -1539,7 +1664,13 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
                 snapshot[ticker_res] = entry_res
 
     if snapshot:
+        global _AU_QUOTEAPI_SNAPSHOT_CACHE, _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT
+        _AU_QUOTEAPI_SNAPSHOT_CACHE = snapshot
+        _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT = pd.Timestamp.now()
         logger.info(f"[AU] QuoteAPI에서 {len(snapshot)}개 종목의 실시간 가격을 조회했습니다.")
+    else:
+        _AU_QUOTEAPI_SNAPSHOT_CACHE = {}
+        _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT = None
 
     return snapshot
 
@@ -1549,10 +1680,10 @@ _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT: pd.Timestamp | None = None
 
 
 def fetch_us_yfinance_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """yfinance를 사용하여 미국 ETF의 실시간(또는 최근 장중) 가격 정보를 조회합니다."""
+    """yfinance를 사용하여 해외 ETF의 실시간(또는 최근 장중) 가격 정보를 조회합니다."""
 
     if not yf:
-        logger.debug("yfinance 라이브러리가 없어 미국 파이낸스 조회를 건너뜁니다.")
+        logger.debug("yfinance 라이브러리가 없어 해외 파이낸스 조회를 건너뜁니다.")
         return {}
 
     normalized_tickers = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
@@ -1563,7 +1694,8 @@ def fetch_us_yfinance_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
 
     try:
         # 최근 5일치 데이터를 받아와서 전일 종가와 현재가를 모두 가져옵니다.
-        df = yf.download(normalized_tickers, period="5d", progress=False, auto_adjust=True)
+        with _silence_yfinance_output():
+            df = yf.download(normalized_tickers, period="5d", progress=False, auto_adjust=True)
 
         if df.empty:
             return {}
@@ -1619,7 +1751,7 @@ def fetch_us_yfinance_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
                 logger.debug(f"[US] {tk} 실시간 데이터 처리 중 오류: {tk_err}")
 
     except Exception as exc:
-        logger.warning(f"미국 ETF 실시간 조회 실패: {exc}")
+        logger.warning(f"해외 ETF 실시간 조회 실패: {exc}")
 
     return snapshot
 
