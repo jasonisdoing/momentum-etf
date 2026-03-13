@@ -4,6 +4,7 @@
   "rank": {
     "country": "au",
     "months": 12,
-    "ma_type": "HMA"
+    "ma_type": "DEMA",
+    "_ma_tpe": "HMA는 '정찰병(빠른 감지)', DEMA는 '본진(추세 유지)'"
   }
 }
