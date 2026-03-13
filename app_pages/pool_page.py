@@ -8,9 +8,10 @@ import pandas as pd
 import streamlit as st
 
 from app_pages.account_page import render_account_deleted_page, render_account_setup_page
+from config import BUCKET_REVERSE_MAPPING
 from utils.pool_rank_storage import fetch_latest_pool_rank
 from utils.recommendations import recommendations_to_dataframe
-from utils.ui import format_relative_time, render_recommendation_table
+from utils.ui import create_loading_status, format_relative_time, render_recommendation_table
 
 try:
     from utils.data_loader import fetch_au_quoteapi_snapshot, fetch_naver_etf_inav_snapshot
@@ -83,7 +84,7 @@ def _load_pool_ranking(pool_id: str) -> tuple[list[dict[str, Any]] | None, str |
     )
 
 
-def _render_ranking_view(pool_id: str) -> None:
+def _render_ranking_view(pool_id: str, selected_bucket: str = "전체") -> None:
     rows, updated_at, country, updated_by = _load_pool_ranking(pool_id)
     if rows is None:
         st.error(updated_at or "랭킹 데이터를 불러오지 못했습니다.")
@@ -146,6 +147,14 @@ def _render_ranking_view(pool_id: str) -> None:
 
     df = recommendations_to_dataframe(country or "kor", rows_for_view)
 
+    bucket_name = str(selected_bucket or "전체").strip()
+    if bucket_name and bucket_name != "전체":
+        bucket_id = BUCKET_REVERSE_MAPPING.get(bucket_name)
+        if bucket_id is None:
+            st.error(f"알 수 없는 버킷입니다: {bucket_name}")
+            return
+        df = df[df["bucket"] == bucket_id].copy()
+
     update_caption = None
     if updated_at:
         updated_rel = format_relative_time(updated_at)
@@ -207,20 +216,29 @@ def _render_pool_manual_actions(pool_id: str) -> None:
             st.error(f"⚠️ 실행 시작 오류: {e}")
 
 
-def render_pool_page(pool_id: str, view_mode: str | None = None) -> None:
+def render_pool_page(pool_id: str, view_mode: str | None = None, selected_bucket: str = "전체", loading=None) -> None:
     mode = view_mode or "1. 랭킹"
+    owns_loading = loading is None
+    loading = loading or create_loading_status()
 
-    if mode == "2. 종목 관리":
-        render_account_setup_page(pool_id)
-        return
+    try:
+        if mode == "2. 종목 관리":
+            loading.update(f"{pool_id.upper()} 종목 관리 화면 준비")
+            render_account_setup_page(pool_id)
+            return
 
-    if mode == "3. 삭제된 종목":
-        render_account_deleted_page(pool_id)
-        return
+        if mode == "3. 삭제된 종목":
+            loading.update(f"{pool_id.upper()} 삭제 종목 화면 준비")
+            render_account_deleted_page(pool_id)
+            return
 
-    _render_ranking_view(pool_id)
-    st.divider()
-    _render_pool_manual_actions(pool_id)
+        loading.update(f"{pool_id.upper()} 랭킹 데이터 조회")
+        _render_ranking_view(pool_id, selected_bucket=selected_bucket)
+        st.divider()
+        _render_pool_manual_actions(pool_id)
+    finally:
+        if owns_loading:
+            loading.clear()
 
 
 __all__ = ["render_pool_page"]

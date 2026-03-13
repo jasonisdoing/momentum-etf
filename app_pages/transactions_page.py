@@ -3,6 +3,8 @@ import io
 import pandas as pd
 import streamlit as st
 
+from utils.ui import create_loading_status
+
 
 def _last_business_day() -> str:
     """Return the most recent business day as YYYY-MM-DD."""
@@ -22,6 +24,7 @@ def _normalize_ticker(ticker: str) -> str:
 def render_transaction_management_page(active_tab: str | None = None):
     from utils.account_registry import load_account_configs
 
+    loading = create_loading_status()
     configs = load_account_configs()
     account_map = {c["name"]: c["account_id"] for c in configs}
     account_id_to_country = {c["account_id"]: c["country_code"] for c in configs}
@@ -47,22 +50,32 @@ def render_transaction_management_page(active_tab: str | None = None):
             active_tab = st.session_state.transaction_tab_selector
 
     # --- Tab Logic ---
-    if active_tab == "📊 잔고 CRUD":
-        _render_manage_tab(account_map, account_id_to_country)
-    elif active_tab == "📥 벌크 입력":
-        _render_bulk_tab(account_map, account_id_to_country)
-    elif active_tab == "💵 원금/현금":
-        _render_cash_tab(account_map)
-    elif active_tab == "📸 스냅샷":
-        _render_snapshot_tab(account_map)
+    try:
+        if active_tab == "📊 잔고 CRUD":
+            loading.update("거래 관리 잔고 데이터 조회")
+            _render_manage_tab(account_map, account_id_to_country, loading)
+        elif active_tab == "📥 벌크 입력":
+            loading.update("벌크 입력 화면 준비")
+            _render_bulk_tab(account_map, account_id_to_country)
+        elif active_tab == "💵 원금/현금":
+            loading.update("원금 및 현금 데이터 조회")
+            _render_cash_tab(account_map)
+        elif active_tab == "📸 스냅샷":
+            loading.update("스냅샷 화면 준비")
+            _render_snapshot_tab(account_map)
+    finally:
+        loading.clear()
 
 
-def _render_manage_tab(account_map, account_id_to_country):
+def _render_manage_tab(account_map, account_id_to_country, loading=None):
     from utils.portfolio_io import load_portfolio_master
 
     # Load ALL master data
     all_master_holdings = []
-    for acc_name, acc_id in account_map.items():
+    account_items = list(account_map.items())
+    for idx, (acc_name, acc_id) in enumerate(account_items):
+        if loading is not None:
+            loading.update(f"{acc_name} ({idx + 1}/{len(account_items)})")
         m_data = load_portfolio_master(acc_id)
         if m_data and m_data.get("holdings"):
             for h in m_data["holdings"]:

@@ -10,6 +10,7 @@ import streamlit_authenticator as stauth
 
 from app_pages.account_page import render_account_page
 from app_pages.pool_page import render_pool_page
+from config import BUCKET_MAPPING
 from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
@@ -18,7 +19,7 @@ from utils.formatters import format_price
 from utils.identifier_guard import ensure_account_pool_id_separation
 from utils.pool_registry import load_pool_configs
 from utils.report import format_kr_money
-from utils.ui import load_account_recommendations, render_recommendation_table
+from utils.ui import create_loading_status, load_account_recommendations, render_recommendation_table
 
 
 def _to_plain_dict(value):
@@ -78,7 +79,11 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
     url_path = f"{account_slug}-{view_slug}"
 
     def _render(account_key: str = account_id) -> None:
-        render_account_page(account_key, view_mode=view_mode)
+        loading = create_loading_status()
+        try:
+            render_account_page(account_key, view_mode=view_mode, loading=loading)
+        finally:
+            loading.clear()
 
     return page_cls(
         _render,
@@ -104,68 +109,74 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
         account_options.append((account_id, label))
 
     def _render() -> None:
-        if view_mode == "0. 요약":
-            summary_frames: list[pd.DataFrame] = []
-            load_errors: list[str] = []
+        loading = create_loading_status()
+        try:
+            if view_mode == "0. 요약":
+                summary_frames: list[pd.DataFrame] = []
+                load_errors: list[str] = []
 
-            for acc in accounts:
-                account_id = acc["account_id"]
-                account_name = acc.get("name") or account_id.upper()
-                df, error_message, _ = load_account_recommendations(account_id)
+                for acc in accounts:
+                    account_id = acc["account_id"]
+                    account_name = acc.get("name") or account_id.upper()
+                    df, error_message, _ = load_account_recommendations(account_id)
 
-                if df is None:
-                    load_errors.append(f"{account_name}: {error_message or '추천 데이터를 불러오지 못했습니다.'}")
-                    continue
+                    if df is None:
+                        load_errors.append(f"{account_name}: {error_message or '추천 데이터를 불러오지 못했습니다.'}")
+                        continue
 
-                if df.empty:
-                    continue
+                    if df.empty:
+                        continue
 
-                merged_df = df.copy()
-                merged_df.insert(0, "계좌", account_name)
-                summary_frames.append(merged_df)
+                    merged_df = df.copy()
+                    merged_df.insert(0, "계좌", account_name)
+                    summary_frames.append(merged_df)
 
-            if load_errors:
-                st.warning("\n".join(load_errors))
+                if load_errors:
+                    st.warning("\n".join(load_errors))
 
-            if not summary_frames:
-                st.info("표시할 계좌 추천 결과가 없습니다.")
+                if not summary_frames:
+                    st.info("표시할 계좌 추천 결과가 없습니다.")
+                    return
+
+                summary_df = pd.concat(summary_frames, ignore_index=True)
+                visible_columns = ["계좌", *[col for col in summary_df.columns if col != "계좌"]]
+                render_recommendation_table(
+                    summary_df,
+                    country_code=None,
+                    grouped_by_bucket=False,
+                    visible_columns=visible_columns,
+                    height=900,
+                )
                 return
 
-            summary_df = pd.concat(summary_frames, ignore_index=True)
-            visible_columns = ["계좌", *[col for col in summary_df.columns if col != "계좌"]]
-            render_recommendation_table(
-                summary_df,
-                country_code=None,
-                grouped_by_bucket=False,
-                visible_columns=visible_columns,
-                height=900,
+            if not account_options:
+                st.error("선택 가능한 계좌가 없습니다.")
+                return
+
+            option_ids = [account_id for account_id, _ in account_options]
+            option_label_map = {account_id: label for account_id, label in account_options}
+
+            query_account = st.query_params.get("account")
+            current_id = (
+                query_account if query_account in option_label_map else st.session_state.get("selected_account_id")
             )
-            return
+            if current_id not in option_label_map:
+                current_id = option_ids[0]
+                st.session_state["selected_account_id"] = current_id
+                st.query_params["account"] = current_id
 
-        if not account_options:
-            st.error("선택 가능한 계좌가 없습니다.")
-            return
-
-        option_ids = [account_id for account_id, _ in account_options]
-        option_label_map = {account_id: label for account_id, label in account_options}
-
-        query_account = st.query_params.get("account")
-        current_id = query_account if query_account in option_label_map else st.session_state.get("selected_account_id")
-        if current_id not in option_label_map:
-            current_id = option_ids[0]
-            st.session_state["selected_account_id"] = current_id
-            st.query_params["account"] = current_id
-
-        selected_id = st.selectbox(
-            "계좌 선택",
-            options=option_ids,
-            index=option_ids.index(current_id),
-            format_func=lambda account_id: option_label_map.get(account_id, account_id),
-            key=f"account_selector_{view_slug}",
-        )
-        st.session_state["selected_account_id"] = selected_id
-        st.query_params["account"] = selected_id
-        render_account_page(selected_id, view_mode=view_mode)
+            selected_id = st.selectbox(
+                "계좌 선택",
+                options=option_ids,
+                index=option_ids.index(current_id),
+                format_func=lambda account_id: option_label_map.get(account_id, account_id),
+                key=f"account_selector_{view_slug}",
+            )
+            st.session_state["selected_account_id"] = selected_id
+            st.query_params["account"] = selected_id
+            render_account_page(selected_id, view_mode=view_mode, loading=loading)
+        finally:
+            loading.clear()
 
     return page_cls(
         _render,
@@ -189,30 +200,67 @@ def _build_unified_pool_page(page_cls: Callable[..., object], pools: list[dict[s
         pool_options.append((pool_id, pool_name))
 
     def _render() -> None:
-        if not pool_options:
-            st.error("선택 가능한 종목풀이 없습니다.")
-            return
+        loading = create_loading_status()
+        try:
+            if not pool_options:
+                st.error("선택 가능한 종목풀이 없습니다.")
+                return
 
-        option_ids = [pool_id for pool_id, _ in pool_options]
-        option_label_map = {pool_id: label for pool_id, label in pool_options}
+            option_ids = [pool_id for pool_id, _ in pool_options]
+            option_label_map = {pool_id: label for pool_id, label in pool_options}
 
-        query_pool = st.query_params.get("pool")
-        current_id = query_pool if query_pool in option_label_map else st.session_state.get("selected_pool_id")
-        if current_id not in option_label_map:
-            current_id = option_ids[0]
-            st.session_state["selected_pool_id"] = current_id
-            st.query_params["pool"] = current_id
+            query_pool = st.query_params.get("pool")
+            current_id = query_pool if query_pool in option_label_map else st.session_state.get("selected_pool_id")
+            if current_id not in option_label_map:
+                current_id = option_ids[0]
+                st.session_state["selected_pool_id"] = current_id
+                st.query_params["pool"] = current_id
 
-        selected_id = st.selectbox(
-            "종목풀 선택",
-            options=option_ids,
-            index=option_ids.index(current_id),
-            format_func=lambda pool_id: option_label_map.get(pool_id, pool_id),
-            key=f"pool_selector_{view_slug}",
-        )
-        st.session_state["selected_pool_id"] = selected_id
-        st.query_params["pool"] = selected_id
-        render_pool_page(selected_id, view_mode=view_mode)
+            selected_bucket = "전체"
+            if clean_view == "랭킹":
+                bucket_options = ["전체", *BUCKET_MAPPING.values()]
+                query_bucket = st.query_params.get("bucket")
+                current_bucket = (
+                    query_bucket
+                    if isinstance(query_bucket, str) and query_bucket in bucket_options
+                    else st.session_state.get("selected_pool_bucket")
+                )
+                if current_bucket not in bucket_options:
+                    current_bucket = "전체"
+                    st.session_state["selected_pool_bucket"] = current_bucket
+                    st.query_params["bucket"] = current_bucket
+
+                pool_col, bucket_col = st.columns(2)
+                with pool_col:
+                    selected_id = st.selectbox(
+                        "종목풀 선택",
+                        options=option_ids,
+                        index=option_ids.index(current_id),
+                        format_func=lambda pool_id: option_label_map.get(pool_id, pool_id),
+                        key=f"pool_selector_{view_slug}",
+                    )
+                with bucket_col:
+                    selected_bucket = st.selectbox(
+                        "버킷 선택",
+                        options=bucket_options,
+                        index=bucket_options.index(current_bucket),
+                        key=f"pool_bucket_selector_{view_slug}",
+                    )
+                st.session_state["selected_pool_bucket"] = selected_bucket
+                st.query_params["bucket"] = selected_bucket
+            else:
+                selected_id = st.selectbox(
+                    "종목풀 선택",
+                    options=option_ids,
+                    index=option_ids.index(current_id),
+                    format_func=lambda pool_id: option_label_map.get(pool_id, pool_id),
+                    key=f"pool_selector_{view_slug}",
+                )
+            st.session_state["selected_pool_id"] = selected_id
+            st.query_params["pool"] = selected_id
+            render_pool_page(selected_id, view_mode=view_mode, selected_bucket=selected_bucket, loading=loading)
+        finally:
+            loading.clear()
 
     return page_cls(
         _render,
