@@ -2,17 +2,19 @@
     "icon": "🇰🇷",
     "name": "연금 계좌",
     "country_code": "kor",
-    "pool": ["us"],
+    "pool": [
+        "us"
+    ],
     "currency": "KRW",
     "initial_capital_krw": "40000000",
     "show_hold": true,
     "strategy": {
-        "TUNE_DATE": "2026-03-11 08:47",
-        "TUNE_CAGR": 50.400698,
-        "TUNE_MDD": -10.469878,
+        "TUNE_DATE": "2026-03-13 09:57",
+        "TUNE_CAGR": 41.95693,
+        "TUNE_MDD": -13.64431,
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": "WEEKLY"
+        "REBALANCE_MODE": "MONTHLY"
     },
     "benchmark": {
         "ticker": "379810",

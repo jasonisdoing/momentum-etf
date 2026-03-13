@@ -2,14 +2,16 @@
     "icon": "🇦🇺",
     "name": "호주 계좌",
     "country_code": "au",
-    "pool": ["aus"],
+    "pool": [
+        "aus"
+    ],
     "currency": "aud",
     "initial_capital_krw": "100000000",
     "show_hold": true,
     "strategy": {
-        "TUNE_DATE": "2026-03-11 08:47",
-        "TUNE_CAGR": 35.606154,
-        "TUNE_MDD": -11.723952,
+        "TUNE_DATE": "2026-03-13 09:58",
+        "TUNE_CAGR": 33.498393,
+        "TUNE_MDD": -9.90032,
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
         "REBALANCE_MODE": "MONTHLY"

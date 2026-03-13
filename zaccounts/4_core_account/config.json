@@ -2,17 +2,20 @@
     "icon": "💼",
     "name": "장기보유 계좌",
     "country_code": "kor",
-    "pool": ["kor", "us"],
+    "pool": [
+        "kor",
+        "us"
+    ],
     "currency": "KRW",
     "initial_capital_krw": "40000000",
     "show_hold": true,
     "strategy": {
-        "TUNE_DATE": "2026-03-11 11:45",
-        "TUNE_CAGR": 24.326653,
-        "TUNE_MDD": -5.466885,
+        "TUNE_DATE": "2026-03-13 09:58",
+        "TUNE_CAGR": 35.510885,
+        "TUNE_MDD": -7.336169,
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": "QUARTERLY"
+        "REBALANCE_MODE": "MONTHLY"
     },
     "benchmark": {
         "ticker": "379810",
