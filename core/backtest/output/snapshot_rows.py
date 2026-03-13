@@ -17,6 +17,7 @@ class SnapshotBuildState:
         self.holding_days_map: dict[str, int] = {}
         self.prev_rows_cache: dict[str, pd.Series | None] = {}
         self.prev_pending_actions_map: dict[str, str] = {}
+        self.prev_pending_reasons_map: dict[str, str] = {}
         self.prev_effective_shares_map: dict[str, float] = {}
         self.prev_effective_avg_cost_map: dict[str, float] = {}
 
@@ -32,13 +33,19 @@ def _display_from_pending_action(pending_action: str) -> str | None:
     return None
 
 
-def resolve_display_decision(prev_pending_action: str, current_decision: str, current_pending_action: str) -> str:
+def resolve_display_decision(
+    prev_pending_action: str,
+    prev_pending_reason: str,
+    current_decision: str,
+    current_pending_action: str,
+) -> str:
     prev_pending_norm = str(prev_pending_action or "").upper()
+    prev_pending_reason_norm = str(prev_pending_reason or "").strip()
     curr_norm = str(current_decision or "").upper()
     signal_decision = _display_from_pending_action(current_pending_action)
     if prev_pending_norm == "BUY_REPLACE" and curr_norm == "HOLD":
         return "BUY_REPLACE"
-    if prev_pending_norm == "BUY" and curr_norm == "HOLD":
+    if prev_pending_norm == "BUY" and curr_norm == "HOLD" and prev_pending_reason_norm != "비중 조정":
         return "BUY"
     if prev_pending_norm == "SELL_REPLACE" and curr_norm == "WAIT":
         return "SELL_REPLACE"
@@ -92,7 +99,14 @@ def build_snapshot_rows(
         raw_decision = str(row.get("decision", "")).upper()
         pending_action = str(row.get("pending_action", "") or "").upper()
         prev_pending_action = state.prev_pending_actions_map.get(ticker_key, "")
-        display_decision = resolve_display_decision(prev_pending_action, raw_decision, pending_action)
+        prev_pending_reason = state.prev_pending_reasons_map.get(ticker_key, "")
+        pending_reason = str(row.get("pending_reason", "") or "")
+        display_decision = resolve_display_decision(
+            prev_pending_action,
+            prev_pending_reason,
+            raw_decision,
+            pending_action,
+        )
         score = row.get("score")
         note = str(row.get("note", "") or "")
         is_pending_tomorrow = bool(pending_action)
@@ -220,6 +234,7 @@ def build_snapshot_rows(
         }
         entries.append(snapshot_row)
         state.prev_pending_actions_map[ticker_key] = pending_action
+        state.prev_pending_reasons_map[ticker_key] = pending_reason
         state.prev_effective_shares_map[ticker_key] = shares
         state.prev_effective_avg_cost_map[ticker_key] = avg_cost
 
