@@ -17,6 +17,24 @@ from utils.stock_list_io import get_etfs
 logger = get_app_logger()
 
 
+class LoadingStatus:
+    """화면 상단에 공통 로딩 안내를 표시합니다."""
+
+    def __init__(self) -> None:
+        self._placeholder = st.empty()
+
+    def update(self, message: str) -> None:
+        self._placeholder.info(f"⏳ 로딩 중... {message}")
+
+    def clear(self) -> None:
+        self._placeholder.empty()
+
+
+def create_loading_status() -> LoadingStatus:
+    """공통 로딩 안내 핸들러를 생성합니다."""
+    return LoadingStatus()
+
+
 def inject_global_css() -> None:
     """전역 CSS를 주입합니다. main()에서만 호출하세요."""
     st.markdown(
@@ -626,4 +644,5 @@ __all__ = [
     "render_recommendation_table",
     "format_relative_time",
     "_resolve_row_colors",
+    "create_loading_status",
 ]

@@ -25,7 +25,12 @@ from utils.stock_list_io import (
     update_stock,
 )
 from utils.stock_meta_updater import fetch_stock_info
-from utils.ui import format_relative_time, load_account_recommendations, render_recommendation_table
+from utils.ui import (
+    create_loading_status,
+    format_relative_time,
+    load_account_recommendations,
+    render_recommendation_table,
+)
 
 try:
     from streamlit import fragment
@@ -778,8 +783,10 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
         st.session_state[selected_tickers_key] = selected_now
 
 
-def render_account_page(account_id: str, view_mode: str | None = None) -> None:
+def render_account_page(account_id: str, view_mode: str | None = None, loading=None) -> None:
     """주어진 계정 설정을 기반으로 계정 페이지를 렌더링합니다 (탭 포함)."""
+    owns_loading = loading is None
+    loading = loading or create_loading_status()
 
     # 버튼 스타일링 (특정 영역의 버튼만 색상 적용)
     # 탭 이동 시에도 항상 적용되도록 메인 함수 최상단에 배치
@@ -808,151 +815,161 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
     )
 
     try:
-        account_settings = get_account_settings(account_id)
-    except AccountSettingsError as exc:
-        st.error(f"설정을 불러오지 못했습니다: {exc}")
-        st.stop()
+        loading.update(f"{account_id.upper()} 설정 조회")
+        try:
+            account_settings = get_account_settings(account_id)
+        except AccountSettingsError as exc:
+            st.error(f"설정을 불러오지 못했습니다: {exc}")
+            st.stop()
 
-    country_code = _normalize_code(account_settings.get("country_code"), account_id)
+        country_code = _normalize_code(account_settings.get("country_code"), account_id)
 
-    # 추천 데이터 로드 (탭 밖에서 한 번만)
-    df, updated_at, loaded_country_code = load_account_recommendations(account_id)
-    country_code = loaded_country_code or country_code
+        loading.update(f"{account_id.upper()} 추천 데이터 조회")
+        df, updated_at, loaded_country_code = load_account_recommendations(account_id)
+        country_code = loaded_country_code or country_code
 
-    if view_mode is None:
-        view_mode = st.segmented_control(
-            "뷰",
-            ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"],
-            default="1. 추천 결과",
-            key=f"view_{account_id}",
-            label_visibility="collapsed",
-        )
-
-    if view_mode == "2. 종목 관리":
-        _render_stocks_meta_table(account_id)
-    elif view_mode == "3. 삭제된 종목":
-        _render_deleted_stocks_tab(account_id)
-    else:  # "1. 추천 결과" (Default)
-        if df is None:
-            st.error(
-                updated_at
-                or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
+        if view_mode is None:
+            view_mode = st.segmented_control(
+                "뷰",
+                ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"],
+                default="1. 추천 결과",
+                key=f"view_{account_id}",
+                label_visibility="collapsed",
             )
-        else:
-            if df.empty:
-                st.info("표시할 추천 종목이 없습니다.")
-            else:
-                render_recommendation_table(
-                    df,
-                    country_code=country_code,
-                    grouped_by_bucket=False,
-                    # customize_columns={"#": ("버킷", 120)} # This will be implemented in utils/ui.py
+
+        if view_mode == "2. 종목 관리":
+            loading.update(f"{account_id.upper()} 종목 관리 테이블 준비")
+            _render_stocks_meta_table(account_id)
+        elif view_mode == "3. 삭제된 종목":
+            loading.update(f"{account_id.upper()} 삭제 종목 테이블 준비")
+            _render_deleted_stocks_tab(account_id)
+        else:  # "1. 추천 결과" (Default)
+            if df is None:
+                st.error(
+                    updated_at
+                    or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
                 )
-
-    # --- 공통: 업데이트 시간, 설정, 푸터 (보유종목/종목추세 탭에서만 표시) ---
-    if view_mode in ("1. 추천 결과", "2. 종목 추세") and updated_at:
-        if "," in updated_at:
-            parts = updated_at.split(",", 1)
-            date_part = parts[0].strip()
-            user_part = parts[1].strip()
-            updated_at_rel = format_relative_time(date_part)
-            updated_at_display = f"{date_part}{updated_at_rel}, {user_part}"
-        else:
-            updated_at_rel = format_relative_time(updated_at)
-            updated_at_display = f"{updated_at}{updated_at_rel}"
-
-        if country_code in ("kor", "kr"):
-            from datetime import datetime
-
-            now = datetime.now()
-            now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-            now_rel = format_relative_time(now)
-
-            st.caption(f"추천 데이터 업데이트: {updated_at_display}  \n가격 데이터 업데이트: {now_str}{now_rel}, Naver")
-        else:
-            st.caption(f"데이터 업데이트: {updated_at_display}")
-
-        with st.expander("설정", expanded=True):
-            strategy_cfg = account_settings.get("strategy", {}) or {}
-            cagr = None
-            mdd = None
-            backtested_date = None
-            strategy_tuning: dict[str, Any] = {}
-            if isinstance(strategy_cfg, dict):
-                cagr = strategy_cfg.get("TUNE_CAGR")
-                mdd = strategy_cfg.get("TUNE_MDD")
-                backtested_date = strategy_cfg.get("TUNE_DATE")
-                strategy_tuning = resolve_strategy_params(strategy_cfg)
-
-                params_to_show = {}
-                if strategy_tuning.get("MA_MONTH"):
-                    params_to_show["MA개월"] = strategy_tuning.get("MA_MONTH")
-
-                from config import OPTIMIZATION_METRIC
-
-                params_to_show.update(
-                    {
-                        "MA타입": strategy_tuning.get("MA_TYPE"),
-                        "리밸런스 주기": strategy_tuning.get("REBALANCE_MODE", "TWICE_A_MONTH"),
-                        "최적화 지표": OPTIMIZATION_METRIC,
-                    }
-                )
-
-                param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
             else:
-                param_strs = []
-
-            caption_parts: list[str] = []
-            if param_strs:
-                param_display = ", ".join(param_strs)
-                caption_parts.append(f"설정: [{param_display}]")
-            else:
-                caption_parts.append("설정: N/A")
-
-            # 슬리피지 정보 추가
-            from config import BACKTEST_SLIPPAGE
-
-            slippage_config = BACKTEST_SLIPPAGE.get(country_code, {})
-            buy_slip = slippage_config.get("buy_pct")
-            sell_slip = slippage_config.get("sell_pct")
-            if buy_slip is not None and sell_slip is not None:
-                if buy_slip == sell_slip:
-                    caption_parts.append(f"슬리피지: ±{buy_slip}%")
+                if df.empty:
+                    st.info("표시할 추천 종목이 없습니다.")
                 else:
-                    caption_parts.append(f"슬리피지: 매수+{buy_slip}%/매도-{sell_slip}%")
+                    loading.update(f"{account_id.upper()} 추천 테이블 준비")
+                    render_recommendation_table(
+                        df,
+                        country_code=country_code,
+                        grouped_by_bucket=False,
+                        # customize_columns={"#": ("버킷", 120)} # This will be implemented in utils/ui.py
+                    )
 
-            try:
-                from core.backtest.portfolio import get_hold_states
-
-                hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
-                if df is not None:
-                    current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-                    target_topn = strategy_tuning.get("TOPN") if isinstance(strategy_tuning, dict) else None
-                    if target_topn:
-                        caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
-            except Exception:
-                pass
-
-            # 성과 지표 (CAGR, MDD) 및 백테스트 일자 추가
-            if cagr is not None:
-                caption_parts.append(f"**CAGR: {float(cagr):.2f}%**")
-            if mdd is not None:
-                caption_parts.append(f"**MDD: {float(mdd):.2f}%**")
-            if backtested_date:
-                caption_parts.append(f"**백테스트: {backtested_date}**")
-
-            caption_text = ", ".join(caption_parts)
-            if caption_text:
-                st.caption(caption_text)
+        # --- 공통: 업데이트 시간, 설정, 푸터 (보유종목/종목추세 탭에서만 표시) ---
+        if view_mode in ("1. 추천 결과", "2. 종목 추세") and updated_at:
+            if "," in updated_at:
+                parts = updated_at.split(",", 1)
+                date_part = parts[0].strip()
+                user_part = parts[1].strip()
+                updated_at_rel = format_relative_time(date_part)
+                updated_at_display = f"{date_part}{updated_at_rel}, {user_part}"
             else:
-                st.caption("설정 정보를 찾을 수 없습니다.")
-    elif view_mode in ("1. 보유 종목", "2. 종목 추세"):
-        st.caption("데이터를 찾을 수 없습니다.")
+                updated_at_rel = format_relative_time(updated_at)
+                updated_at_display = f"{updated_at}{updated_at_rel}"
 
-    # 수동 액션 실행 (추천 결과 탭에서만 가장 하단에 표시)
-    if view_mode == "1. 추천 결과":
-        st.divider()
-        _render_manual_actions(account_id)
+            if country_code in ("kor", "kr"):
+                from datetime import datetime
+
+                now = datetime.now()
+                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                now_rel = format_relative_time(now)
+
+                st.caption(
+                    f"추천 데이터 업데이트: {updated_at_display}  \n가격 데이터 업데이트: {now_str}{now_rel}, Naver"
+                )
+            else:
+                st.caption(f"데이터 업데이트: {updated_at_display}")
+
+            with st.expander("설정", expanded=True):
+                strategy_cfg = account_settings.get("strategy", {}) or {}
+                cagr = None
+                mdd = None
+                backtested_date = None
+                strategy_tuning: dict[str, Any] = {}
+                if isinstance(strategy_cfg, dict):
+                    cagr = strategy_cfg.get("TUNE_CAGR")
+                    mdd = strategy_cfg.get("TUNE_MDD")
+                    backtested_date = strategy_cfg.get("TUNE_DATE")
+                    strategy_tuning = resolve_strategy_params(strategy_cfg)
+
+                    params_to_show = {}
+                    if strategy_tuning.get("MA_MONTH"):
+                        params_to_show["MA개월"] = strategy_tuning.get("MA_MONTH")
+
+                    from config import OPTIMIZATION_METRIC
+
+                    params_to_show.update(
+                        {
+                            "MA타입": strategy_tuning.get("MA_TYPE"),
+                            "리밸런스 주기": strategy_tuning.get("REBALANCE_MODE", "TWICE_A_MONTH"),
+                            "최적화 지표": OPTIMIZATION_METRIC,
+                        }
+                    )
+
+                    param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
+                else:
+                    param_strs = []
+
+                caption_parts: list[str] = []
+                if param_strs:
+                    param_display = ", ".join(param_strs)
+                    caption_parts.append(f"설정: [{param_display}]")
+                else:
+                    caption_parts.append("설정: N/A")
+
+                # 슬리피지 정보 추가
+                from config import BACKTEST_SLIPPAGE
+
+                slippage_config = BACKTEST_SLIPPAGE.get(country_code, {})
+                buy_slip = slippage_config.get("buy_pct")
+                sell_slip = slippage_config.get("sell_pct")
+                if buy_slip is not None and sell_slip is not None:
+                    if buy_slip == sell_slip:
+                        caption_parts.append(f"슬리피지: ±{buy_slip}%")
+                    else:
+                        caption_parts.append(f"슬리피지: 매수+{buy_slip}%/매도-{sell_slip}%")
+
+                try:
+                    from core.backtest.portfolio import get_hold_states
+
+                    hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
+                    if df is not None:
+                        current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
+                        target_topn = strategy_tuning.get("TOPN") if isinstance(strategy_tuning, dict) else None
+                        if target_topn:
+                            caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
+                except Exception:
+                    pass
+
+                # 성과 지표 (CAGR, MDD) 및 백테스트 일자 추가
+                if cagr is not None:
+                    caption_parts.append(f"**CAGR: {float(cagr):.2f}%**")
+                if mdd is not None:
+                    caption_parts.append(f"**MDD: {float(mdd):.2f}%**")
+                if backtested_date:
+                    caption_parts.append(f"**백테스트: {backtested_date}**")
+
+                caption_text = ", ".join(caption_parts)
+                if caption_text:
+                    st.caption(caption_text)
+                else:
+                    st.caption("설정 정보를 찾을 수 없습니다.")
+        elif view_mode in ("1. 보유 종목", "2. 종목 추세"):
+            st.caption("데이터를 찾을 수 없습니다.")
+
+        # 수동 액션 실행 (추천 결과 탭에서만 가장 하단에 표시)
+        if view_mode == "1. 추천 결과":
+            st.divider()
+            _render_manual_actions(account_id)
+    finally:
+        if owns_loading:
+            loading.clear()
 
 
 def render_account_setup_page(account_id: str) -> None:
