@@ -18,7 +18,7 @@ from utils.formatters import format_price
 from utils.identifier_guard import ensure_account_pool_id_separation
 from utils.pool_registry import load_pool_configs
 from utils.report import format_kr_money
-from utils.ui import render_recommendation_table
+from utils.ui import load_account_recommendations, render_recommendation_table
 
 
 def _to_plain_dict(value):
@@ -89,11 +89,11 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
 
 
 def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[dict[str, Any]], view_mode: str):
-    url_mapping = {"추천 결과": "result", "종목 관리": "setup", "삭제된 종목": "deleted"}
+    url_mapping = {"요약": "account", "추천 결과": "result", "종목 관리": "setup", "삭제된 종목": "deleted"}
     clean_view = view_mode.split(".")[-1].strip()
     english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
     view_slug = _slugify_path(english_view)
-    url_path = f"account-{view_slug}"
+    url_path = "account" if clean_view == "요약" else f"account-{view_slug}"
 
     account_options: list[tuple[str, str]] = []
     for acc in accounts:
@@ -104,6 +104,44 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
         account_options.append((account_id, label))
 
     def _render() -> None:
+        if view_mode == "0. 요약":
+            summary_frames: list[pd.DataFrame] = []
+            load_errors: list[str] = []
+
+            for acc in accounts:
+                account_id = acc["account_id"]
+                account_name = acc.get("name") or account_id.upper()
+                df, error_message, _ = load_account_recommendations(account_id)
+
+                if df is None:
+                    load_errors.append(f"{account_name}: {error_message or '추천 데이터를 불러오지 못했습니다.'}")
+                    continue
+
+                if df.empty:
+                    continue
+
+                merged_df = df.copy()
+                merged_df.insert(0, "계좌", account_name)
+                summary_frames.append(merged_df)
+
+            if load_errors:
+                st.warning("\n".join(load_errors))
+
+            if not summary_frames:
+                st.info("표시할 계좌 추천 결과가 없습니다.")
+                return
+
+            summary_df = pd.concat(summary_frames, ignore_index=True)
+            visible_columns = ["계좌", *[col for col in summary_df.columns if col != "계좌"]]
+            render_recommendation_table(
+                summary_df,
+                country_code=None,
+                grouped_by_bucket=False,
+                visible_columns=visible_columns,
+                height=900,
+            )
+            return
+
         if not account_options:
             st.error("선택 가능한 계좌가 없습니다.")
             return
@@ -852,7 +890,7 @@ def main() -> None:
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
 
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
-    view_modes = ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]
+    view_modes = ["0. 요약", "1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]
     pages["계좌"] = [_build_unified_account_page(page_cls, accounts, view_mode) for view_mode in view_modes]
 
     # 통합 종목풀 그룹 (풀 선택형 단일 URL)
