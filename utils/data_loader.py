@@ -1030,6 +1030,19 @@ def repair_recent_trading_day_gaps(
         latest_trading_day.strftime("%Y-%m-%d"),
         country_code,
     )
+    listing_date_str = get_listing_date(country_code, ticker_key)
+    listing_ts = None
+    if listing_date_str:
+        try:
+            listing_ts = pd.to_datetime(listing_date_str).normalize()
+        except Exception:
+            listing_ts = None
+    if listing_ts is not None:
+        # 상장 전 거래일은 실제 누락이 아니므로 보강 대상에서 제외합니다.
+        expected_days = [day for day in expected_days if pd.Timestamp(day).normalize() >= listing_ts]
+    if _should_skip_today_range(country_code, latest_trading_day):
+        # 개장 전에는 당일 일봉이 아직 집계되지 않을 수 있으므로 보강 대상에서 제외합니다.
+        expected_days = [day for day in expected_days if pd.Timestamp(day).normalize() != latest_trading_day]
     if not expected_days:
         return []
 
