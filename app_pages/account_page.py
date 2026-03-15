@@ -94,8 +94,9 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
     if not etfs:
         return pd.DataFrame()
 
-    # 최신 추천 스냅샷의 계산 비중을 표시합니다.
+    # 최신 추천 스냅샷의 현재 비중/타겟 비중을 표시합니다.
     weight_map: dict[str, float] = {}
+    target_weight_map: dict[str, float] = {}
     if use_weight:
         try:
             from utils.recommendation_storage import fetch_latest_recommendations
@@ -106,8 +107,11 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
                 for rec in recs:
                     ticker = str(rec.get("ticker") or "").strip().upper()
                     weight = rec.get("weight")
+                    target_weight = rec.get("target_weight")
                     if ticker and weight is not None:
                         weight_map[ticker] = float(weight) * 100.0
+                    if ticker and target_weight is not None:
+                        target_weight_map[ticker] = float(target_weight) * 100.0
         except Exception:
             pass
 
@@ -134,6 +138,7 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
         if use_weight:
             ticker_upper = str(etf.get("ticker") or "").strip().upper()
             row["비중"] = weight_map.get(ticker_upper)
+            row["타겟비중"] = target_weight_map.get(ticker_upper)
         rows.append(row)
     df = pd.DataFrame(rows)
     if not df.empty and "1주(%)" in df.columns:
@@ -159,11 +164,16 @@ def _render_stocks_meta_table(account_id: str) -> None:
         st.caption(f"총 {len(df)}개 종목 (Source: MongoDB)")
         if use_weight:
             weight_series = pd.to_numeric(df.get("비중"), errors="coerce").dropna()
-            if weight_series.empty:
-                st.caption("최신 추천 스냅샷이 없으면 비중이 비어 있을 수 있습니다.")
+            target_weight_series = pd.to_numeric(df.get("타겟비중"), errors="coerce").dropna()
+            if weight_series.empty and target_weight_series.empty:
+                st.caption("최신 추천 스냅샷이 없으면 비중과 타겟비중이 비어 있을 수 있습니다.")
             else:
-                total_weight = float(weight_series.sum())
-                st.caption(f"표시 비중 합계: {total_weight:.2f}%")
+                caption_parts: list[str] = []
+                if not weight_series.empty:
+                    caption_parts.append(f"표시 비중 합계: {float(weight_series.sum()):.2f}%")
+                if not target_weight_series.empty:
+                    caption_parts.append(f"표시 타겟비중 합계: {float(target_weight_series.sum()):.2f}%")
+                st.caption(" | ".join(caption_parts))
 
         def _color_pct(val: float | str) -> str:
             if val is None or pd.isna(val):
@@ -283,6 +293,13 @@ def _render_stocks_meta_table(account_id: str) -> None:
             min_value=0.0,
             max_value=100.0,
         ),
+        "타겟비중": st.column_config.ProgressColumn(
+            "타겟비중",
+            width="small",
+            format="%.0f%%",
+            min_value=0.0,
+            max_value=100.0,
+        ),
         "추가일자": st.column_config.TextColumn("추가일자", width=90),
         "상장일": st.column_config.TextColumn("상장일", width=80),
         "주간거래량": st.column_config.NumberColumn("주간거래량", width=80, format="localized"),
@@ -300,6 +317,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "티커",
         "종목명",
         "비중",
+        "타겟비중",
         "상장일",
         "주간거래량",
         "1주(%)",

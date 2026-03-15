@@ -376,9 +376,34 @@ def get_strategy_rules(account_id: str):
     """계정별 전략 설정을 `StrategyRules` 객체로 반환합니다."""
 
     from core.strategy.rules import StrategyRules
+    from utils.pool_registry import get_pool_dir
 
     tuning, _ = get_account_strategy_sections(account_id)
-    return StrategyRules.from_mapping(tuning)
+    normalized_tuning = dict(tuning)
+
+    if normalized_tuning.get("MA_MONTH") is None and normalized_tuning.get("ma_month") is None:
+        try:
+            settings = get_account_settings(account_id)
+            pool_ids = settings.get("pool") or []
+            if pool_ids:
+                pool_dir = get_pool_dir(str(pool_ids[0]))
+                pool_config = _load_json(pool_dir / "config.json")
+                rank_cfg = pool_config.get("rank") or {}
+                if isinstance(rank_cfg, dict):
+                    months = rank_cfg.get("months")
+                    ma_type = rank_cfg.get("ma_type")
+                    if months is not None:
+                        normalized_tuning["MA_MONTH"] = months
+                    if (
+                        ma_type
+                        and normalized_tuning.get("MA_TYPE") is None
+                        and normalized_tuning.get("ma_type") is None
+                    ):
+                        normalized_tuning["MA_TYPE"] = ma_type
+        except Exception:
+            pass
+
+    return StrategyRules.from_mapping(normalized_tuning)
 
 
 # ---------------------------------------------------------------------------

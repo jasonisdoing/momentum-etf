@@ -9,12 +9,13 @@ from typing import Any
 
 import pandas as pd
 
-from config import BACKTEST_SLIPPAGE
+from config import BACKTEST_SLIPPAGE, REBALANCE_BUFFER, WEIGHT_MAX, WEIGHT_MIN
 from core.backtest.filtering import select_candidates
 from core.backtest.price import calculate_trade_price
 from core.strategy.evaluator import StrategyEvaluator
 from core.strategy.labeler import compute_net_trade_note
 from core.strategy.metrics import process_ticker_data
+from core.strategy.weight_allocator import calculate_score_weights, should_rebalance
 from utils.logger import get_app_logger
 from utils.report import format_money
 from utils.settings_loader import get_country_precision
@@ -395,23 +396,10 @@ def _execute_new_buys(
             break
 
         # 스코어 비례 비중 기반 매수 예산 계산
-        from config import WEIGHT_MAX, WEIGHT_MIN
-        from core.strategy.weight_allocator import calculate_score_weights
-
-        # 매수 후보 + 기존 보유 종목 포함하여 목표비중 계산
-        all_scores_for_buy: dict[str, float] = {}
-        for t, state in position_state.items():
-            if state["shares"] > 0:
-                all_scores_for_buy[t] = score_today.get(t, 0.0)
-        # 현재 매수 대상도 포함
-        all_scores_for_buy[ticker_to_buy] = score_today.get(ticker_to_buy, 0.0)
-        for _, t, _, _ in buyable_candidates:
-            all_scores_for_buy[t] = score_today.get(t, 0.0)
-
         buy_weights = calculate_score_weights(
-            all_scores_for_buy,
-            min_weight=WEIGHT_MIN,
-            max_weight=WEIGHT_MAX,
+            score_today,
+            min_weight=float(WEIGHT_MIN) / 100.0,
+            max_weight=float(WEIGHT_MAX) / 100.0,
         )
         total_equity = cash + current_holdings_value
         target_budget = total_equity * buy_weights.get(ticker_to_buy, 1.0 / top_n)
@@ -1187,17 +1175,14 @@ def run_portfolio_backtest(
 
         if selected:
             # 스코어 비례 비중으로 초기 배분
-            from config import WEIGHT_MAX, WEIGHT_MIN
-            from core.strategy.weight_allocator import calculate_score_weights
-
             bootstrap_scores = {}
             for t in selected:
                 s0 = metrics_by_ticker[t]["ma_score_values"][0]
                 bootstrap_scores[t] = float(s0) if not pd.isna(s0) else 0.0
             bootstrap_weights = calculate_score_weights(
                 bootstrap_scores,
-                min_weight=WEIGHT_MIN,
-                max_weight=WEIGHT_MAX,
+                min_weight=float(WEIGHT_MIN) / 100.0,
+                max_weight=float(WEIGHT_MAX) / 100.0,
             )
 
             remaining_cash = float(cash)
@@ -1278,6 +1263,12 @@ def run_portfolio_backtest(
 
             today_prices[ticker] = price_float
 
+        target_weights_today = calculate_score_weights(
+            score_today,
+            min_weight=float(WEIGHT_MIN) / 100.0,
+            max_weight=float(WEIGHT_MAX) / 100.0,
+        )
+
         # 현재 총 보유 자산 가치를 계산합니다.
         current_holdings_value = 0
         for held_ticker, held_state in position_state.items():
@@ -1329,6 +1320,7 @@ def run_portfolio_backtest(
                     "signal1": ma_value if not pd.isna(ma_value) else None,
                     "signal2": None,
                     "score": score_value if not pd.isna(score_value) else None,
+                    "target_weight": target_weights_today.get(ticker),
                     "filter": filter_value,
                 }
             else:
@@ -1357,6 +1349,7 @@ def run_portfolio_backtest(
                     "signal1": ma_value if not pd.isna(ma_value) else None,
                     "signal2": None,
                     "score": score_value if not pd.isna(score_value) else None,
+                    "target_weight": target_weights_today.get(ticker),
                     "filter": filter_value,
                 }
 
@@ -1688,65 +1681,7 @@ def run_portfolio_backtest(
                         # 가격 정보가 유효하지 않으면 교체하지 않고 다음 대기 종목으로 넘어감
                         continue  # 다음 buy_ranked_candidate로 넘어감
 
-            # 4. 점수 음수 종목 매도
-            for held_ticker, held_position in position_state.items():
-                if held_position["shares"] > 0:
-                    if not _can_sell_with_cooldown(held_position, i, cooldown_days):
-                        remaining = _remaining_sell_cooldown_days(held_position, i, cooldown_days)
-                        if remaining > 0:
-                            _set_cooldown_note_if_empty(
-                                daily_records_by_ticker,
-                                held_ticker,
-                                dt,
-                                f"[예정] 쿨다운 - {remaining}일 후 매도 가능",
-                            )
-                        continue
-                    held_score = score_today.get(held_ticker, float("nan"))
-                    if not pd.isna(held_score) and held_score < 0:
-                        sell_price = today_prices.get(held_ticker)
-                        if pd.notna(sell_price) and sell_price > 0:
-                            qty = _floor_quantity(float(held_position["shares"]), qty_precision)
-                            if qty <= 0:
-                                continue
-                            sell_amount = qty * sell_price
-                            avg_cost = held_position["avg_cost"]
-                            hold_ret = (sell_price / avg_cost - 1.0) * 100.0 if avg_cost > 0 else 0.0
-                            trade_profit = (sell_price - avg_cost) * qty if avg_cost > 0 else 0.0
-
-                            sell_trades_today_map.setdefault(held_ticker, []).append(
-                                {"shares": float(qty), "price": float(sell_price)}
-                            )
-
-                            cash += sell_amount
-                            current_holdings_value = max(0.0, current_holdings_value - sell_amount)
-                            remaining_shares = _floor_quantity(float(held_position["shares"]) - qty, qty_precision)
-                            held_position["shares"] = remaining_shares
-                            held_position["last_sell_index"] = i
-                            if remaining_shares <= 0:
-                                held_position["avg_cost"] = 0.0
-
-                            if (
-                                daily_records_by_ticker.get(held_ticker)
-                                and daily_records_by_ticker[held_ticker][-1]["date"] == dt
-                            ):
-                                daily_records_by_ticker[held_ticker][-1].update(
-                                    {
-                                        "decision": "HOLD",
-                                        "trade_amount": sell_amount,
-                                        "trade_shares": qty,
-                                        "trade_profit": trade_profit,
-                                        "trade_pl_pct": hold_ret,
-                                        "shares": remaining_shares,
-                                        "pv": remaining_shares * sell_price,
-                                        "avg_cost": held_position["avg_cost"],
-                                        "note": "점수 음수 매도",
-                                        "pending_action": "SELL",
-                                        "execute_on": next_dt,
-                                        "pending_reason": "점수 음수",
-                                    }
-                                )
-
-            # 5. 매수하지 못한 후보에 사유 기록
+            # 4. 매수하지 못한 후보에 사유 기록
             # 오늘 매수 또는 교체매수된 종목 목록을 만듭니다.
             bought_tickers_today = {
                 ticker_symbol
@@ -1784,20 +1719,11 @@ def run_portfolio_backtest(
                         total_rebalance_equity += held_state["shares"] * price_h
 
             # 스코어 비례 목표 비중 계산
-            from config import REBALANCE_BUFFER, WEIGHT_MAX, WEIGHT_MIN
-            from core.strategy.weight_allocator import calculate_score_weights, should_rebalance
-
-            # 보유 종목의 스코어로 목표 비중 산출
-            held_scores_for_rebalance: dict[str, float] = {}
-            for held_ticker, held_state in position_state.items():
-                if held_state["shares"] > 0:
-                    held_scores_for_rebalance[held_ticker] = score_today.get(held_ticker, 0.0)
-
-            if held_scores_for_rebalance:
+            if score_today:
                 rebalance_target_weights = calculate_score_weights(
-                    held_scores_for_rebalance,
-                    min_weight=WEIGHT_MIN,
-                    max_weight=WEIGHT_MAX,
+                    score_today,
+                    min_weight=float(WEIGHT_MIN) / 100.0,
+                    max_weight=float(WEIGHT_MAX) / 100.0,
                 )
 
                 # 현재 비중 계산
@@ -1809,9 +1735,13 @@ def run_portfolio_backtest(
                             current_weights[t] = (s["shares"] * p) / total_rebalance_equity
 
                 # 버퍼 체크: 비중 차이가 버퍼 이내인 종목은 매매 유보
-                rebalance_needed = should_rebalance(current_weights, rebalance_target_weights, REBALANCE_BUFFER)
+                rebalance_needed = should_rebalance(
+                    current_weights,
+                    rebalance_target_weights,
+                    float(REBALANCE_BUFFER) / 100.0,
+                )
 
-            if held_scores_for_rebalance:
+            if score_today:
                 # 4-1. Trim (비중 축소)
                 for ticker, state in position_state.items():
                     if state["shares"] > 0:
@@ -1937,21 +1867,13 @@ def run_portfolio_backtest(
             total_equity = cash + current_holdings_value
 
             # 스코어 비례 목표 비중 계산 (Trim과 동일한 비중 사용)
-            from config import REBALANCE_BUFFER, WEIGHT_MAX, WEIGHT_MIN
-            from core.strategy.weight_allocator import calculate_score_weights, should_rebalance
-
-            held_scores_for_topup: dict[str, float] = {}
-            for t, s in position_state.items():
-                if s["shares"] > 0:
-                    held_scores_for_topup[t] = score_today.get(t, 0.0)
-
             topup_target_weights: dict[str, float] = {}
             topup_rebalance_needed: dict[str, bool] = {}
-            if held_scores_for_topup:
+            if score_today:
                 topup_target_weights = calculate_score_weights(
-                    held_scores_for_topup,
-                    min_weight=WEIGHT_MIN,
-                    max_weight=WEIGHT_MAX,
+                    score_today,
+                    min_weight=float(WEIGHT_MIN) / 100.0,
+                    max_weight=float(WEIGHT_MAX) / 100.0,
                 )
                 current_weights_topup: dict[str, float] = {}
                 for t, s in position_state.items():
@@ -1959,7 +1881,11 @@ def run_portfolio_backtest(
                         p = today_prices.get(t, 0.0)
                         if pd.notna(p) and p > 0:
                             current_weights_topup[t] = (s["shares"] * p) / total_equity if total_equity > 0 else 0.0
-                topup_rebalance_needed = should_rebalance(current_weights_topup, topup_target_weights, REBALANCE_BUFFER)
+                topup_rebalance_needed = should_rebalance(
+                    current_weights_topup,
+                    topup_target_weights,
+                    float(REBALANCE_BUFFER) / 100.0,
+                )
 
             # 보유 종목 중 목표비중 미만인 종목 찾기 (단, 오늘 신규 매수한 종목 제외)
             underweight_tickers = []

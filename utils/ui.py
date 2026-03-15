@@ -465,6 +465,13 @@ def render_recommendation_table(
             min_value=0.0,
             max_value=100.0,
         ),
+        "타겟비중": st.column_config.ProgressColumn(
+            "타겟비중",
+            width="small",
+            format="%.0f%%",
+            min_value=0.0,
+            max_value=100.0,
+        ),
         "티커": st.column_config.TextColumn("티커", width=60),
         "종목명": st.column_config.TextColumn("종목명", width=250),
         "수량": st.column_config.NumberColumn("수량", width="small", format="localized"),

@@ -19,7 +19,6 @@ from config import BUCKET_MAPPING as BUCKET_NAMES
 from config import TRADING_DAYS_PER_MONTH
 from core.backtest.output.snapshot_rows import advance_snapshot_state, build_snapshot_rows, create_snapshot_build_state
 from core.backtest.price import calculate_trade_price
-from core.strategy.metrics import process_ticker_data
 
 DEFAULT_BUCKET = 1
 
@@ -189,7 +188,7 @@ def extract_recommendations_from_backtest(
         avg_cost = _safe_float(snapshot_row.get("avg_cost"))
         score = _safe_float(snapshot_row.get("score"))
         rsi_score = _safe_float(snapshot_row.get("rsi_score"))
-        decision = str(snapshot_row.get("display_decision", "")).upper() or "WAIT"
+        decision = str(snapshot_row.get("display_decision", "")).upper() or "HOLD"
         note = str(snapshot_row.get("message", "") or "")
         holding_days = int(snapshot_row.get("holding_days", 0) or 0)
         daily_pct = _safe_float(snapshot_row.get("daily_pct"), 0.0) or 0.0
@@ -224,8 +223,8 @@ def extract_recommendations_from_backtest(
         # phrase (note 사용)
         phrase = note
 
-        # 상태 결정
-        state = decision
+        # 추천은 마지막 거래일 스냅샷을 형식만 바꿔 보여줍니다.
+        state = "HOLD"
 
         # 수익률 및 드로우다운 계산
         df_up_to_end = df[df.index <= end_date]
@@ -267,46 +266,6 @@ def extract_recommendations_from_backtest(
             # 추세 데이터 (최근 60일)
             trend_prices = historical_prices.iloc[-60:].tolist()
 
-        # [Display Metrics] 추천/랭킹 일관성을 위해 MA 점수, RSI, 지속일을 가격 원본에서 보강
-        source_frame = None
-        if price_frames:
-            source_frame = price_frames.get(ticker_key)
-            if source_frame is None:
-                source_frame = price_frames.get(ticker)
-        if isinstance(source_frame, pd.DataFrame) and not source_frame.empty:
-            source_upto_end = source_frame[source_frame.index <= end_date]
-            if not source_upto_end.empty:
-                computed_daily_pct = _compute_latest_daily_pct(source_frame, end_date)
-                if computed_daily_pct is not None and str(country_code or "").strip().lower() != "au":
-                    daily_pct = computed_daily_pct
-                try:
-                    metrics = process_ticker_data(
-                        ticker=ticker_key,
-                        df=source_upto_end,
-                        ma_days=max(1, int(ma_days)),
-                        ma_type=str(ma_type or "HMA").upper(),
-                        enable_data_sufficiency_check=False,
-                    )
-                except Exception:
-                    metrics = None
-                if metrics:
-                    score_series = metrics.get("ma_score")
-                    if isinstance(score_series, pd.Series) and not score_series.empty:
-                        computed_score = _safe_float(score_series.iloc[-1])
-                        if computed_score is not None:
-                            score = computed_score
-                    close_series = metrics.get("close")
-                    if isinstance(close_series, pd.Series) and not close_series.empty:
-                        computed_rsi = _calc_rsi(close_series, period=14)
-                        if computed_rsi is not None:
-                            rsi_score = computed_rsi
-                    streak_series = metrics.get("buy_signal_days")
-                    if isinstance(streak_series, pd.Series) and not streak_series.empty:
-                        computed_streak = int(_safe_float(streak_series.iloc[-1], 0) or 0)
-                        if holding_days > 0 and computed_streak > holding_days:
-                            computed_streak = holding_days
-                        streak = max(0, computed_streak)
-
         recommendations.append(
             {
                 "ticker": ticker_key,
@@ -318,6 +277,8 @@ def extract_recommendations_from_backtest(
                 "nav_price": nav_price,
                 "shares": shares,
                 "avg_cost": avg_cost,
+                "weight": (_safe_float(snapshot_row.get("current_weight")) or 0.0) / 100.0,
+                "target_weight": (_safe_float(snapshot_row.get("target_weight")) or 0.0) / 100.0,
                 "score": score,
                 "rsi_score": rsi_score,
                 "streak": streak,
@@ -607,31 +568,6 @@ def _enrich_with_nav_data(
     return recommendations
 
 
-def _enrich_with_weights(
-    recommendations: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """최종 편입 대상 전체의 스코어 비례 비중을 각 추천 항목에 첨부합니다."""
-    from config import WEIGHT_MAX, WEIGHT_MIN
-    from core.strategy.weight_allocator import calculate_score_weights
-
-    if not recommendations:
-        return recommendations
-
-    # 계좌 종목 전체를 기준으로 비중을 계산합니다.
-    target_scores = {r["ticker"]: _safe_float(r.get("score"), 0.0) or 0.0 for r in recommendations}
-    weights = calculate_score_weights(
-        target_scores,
-        min_weight=WEIGHT_MIN,
-        max_weight=WEIGHT_MAX,
-    )
-
-    for rec in recommendations:
-        ticker = rec.get("ticker", "")
-        rec["weight"] = weights.get(ticker) if ticker in weights else None
-
-    return recommendations
-
-
 # ---------------------------------------------------------------------------
 # 추천 리포트 생성 (백테스트 실행 포함)
 # ---------------------------------------------------------------------------
@@ -825,30 +761,9 @@ def generate_recommendation_report(
         base_date=end_date,
     )
 
-    # [Rank Assignment] 최종적으로 보유/대기 순위 부여 (정렬 포함)
-    weighted: list[dict[str, Any]] = []
-    for etf in etf_universe:
-        if not isinstance(etf, dict):
-            continue
-        ticker = str(etf.get("ticker") or "").strip().upper()
-        if not ticker:
-            continue
-        weight_raw = etf.get("weight")
-        if weight_raw is None:
-            continue
-        try:
-            weight_val = float(weight_raw)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"비중이 숫자가 아닙니다: {ticker}") from exc
-        if weight_val > 0:
-            weighted.append(etf)
-    if not weighted:
-        raise ValueError("종목 리스트의 weight 설정이 필요합니다.")
-    topn = len(weighted)
+    # [Rank Assignment] 마지막 거래일 스냅샷을 그대로 정렬합니다.
+    topn = len([etf for etf in etf_universe if isinstance(etf, dict) and str(etf.get("ticker") or "").strip()])
     recommendations = _assign_final_ranks(recommendations, bucket_topn=topn)
-
-    # 스코어 비례 비중 계산
-    _enrich_with_weights(recommendations)
 
     return RecommendationReport(
         account_id=account_id,
@@ -943,8 +858,8 @@ def dump_recommendation_log(
     nav_mode = country_lower in {"kr", "kor"}
     show_deviation = country_lower in {"kr", "kor"}
 
-    # headers: #, 버킷, 티커, 종목명, 상태, 보유일, 비중, 일간(%), 평가(%), 현재가
-    headers = ["#", "버킷", "티커", "종목명", "상태", "보유일", "비중", "일간(%)", "평가(%)", "현재가"]
+    # headers: #, 버킷, 티커, 종목명, 상태, 보유일, 비중, 타겟비중, 일간(%), 평가(%), 현재가
+    headers = ["#", "버킷", "티커", "종목명", "상태", "보유일", "비중", "타겟비중", "일간(%)", "평가(%)", "현재가"]
     # [User Request] 현재가 - 괴리율 - Nav
     if show_deviation:
         headers.append("괴리율")
@@ -956,7 +871,7 @@ def dump_recommendation_log(
     headers.extend(["점수", "RSI", "지속", "문구"])
 
     # aligns ( headers 수와 일치해야 함 )
-    aligns = ["left", "left", "left", "left", "left", "center", "right", "right", "right", "right"]
+    aligns = ["left", "left", "left", "left", "left", "center", "right", "right", "right", "right", "right"]
     if show_deviation:
         aligns.append("right")
     if nav_mode:
@@ -1001,6 +916,7 @@ def dump_recommendation_log(
             state,
             format_trading_days(0 if is_pending_tomorrow else holding_days),
             f"{item.get('weight', 0) * 100:.0f}%" if item.get("weight") is not None else "-",
+            f"{item.get('target_weight', 0) * 100:.0f}%" if item.get("target_weight") is not None else "-",
             format_pct_change(daily_pct),
             "-" if is_pending_tomorrow else (format_pct_change(evaluation_pct) if evaluation_pct != 0 else "-"),
             format_price(price, country_code),
