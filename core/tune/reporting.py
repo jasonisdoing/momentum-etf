@@ -96,15 +96,11 @@ def _render_tuning_table(
             "전략",
             "MA개월",
             "MA타입",
-            "TOPN",
-            "쿨다운",
             "리밸런스",
             "CAGR(%)",
             "MDD(%)",
         ]
         aligns = [
-            "center",
-            "right",
             "center",
             "right",
             "center",
@@ -131,24 +127,11 @@ def _render_tuning_table(
         ma_val = row.get("ma_month") or row.get("ma_days")
         strategy_val = row.get("strategy", "RANK")
         ma_type_val = row.get("ma_type", "SMA")
-        topn_val = row.get("bucket_topn")
-
         rebal_mode_val = row.get("rebalance_mode")
         if not rebal_mode_val and "tuning" in row:
             rebal_mode_val = row["tuning"].get("REBALANCE_MODE")
         if not rebal_mode_val:
             rebal_mode_val = "-"
-
-        cooldown_val = row.get("cooldown")
-        if cooldown_val is None and "tuning" in row:
-            cooldown_val = row["tuning"].get("COOLDOWN")
-        if cooldown_val is None:
-            cooldown_display = "-"
-        else:
-            try:
-                cooldown_display = str(int(cooldown_val))
-            except (TypeError, ValueError):
-                cooldown_display = "-"
 
         if hr_mode:
             row_data = [
@@ -166,8 +149,6 @@ def _render_tuning_table(
                 str(strategy_val) if strategy_val else "RANK",
                 str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
                 str(ma_type_val) if ma_type_val else "SMA",
-                str(int(topn_val)) if isinstance(topn_val, (int, float)) and math.isfinite(float(topn_val)) else "-",
-                cooldown_display,
                 str(rebal_mode_val),
                 _format_table_float(row.get("cagr")),
                 _format_table_float(row.get("mdd")),

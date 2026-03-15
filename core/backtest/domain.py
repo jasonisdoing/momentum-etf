@@ -1,62 +1,12 @@
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 
 @dataclass
-class BacktestConfig:
-    stocks: list[dict]
-    start_date: pd.Timestamp
-    end_date: pd.Timestamp
-    initial_capital: float
-    country_code: str
-    top_n: int
-    ma_days: int
-    ma_type: str
-    bucket_map: dict[str, int]
-    bucket_topn: int
-    rebalance_mode: str
-    quiet: bool
-
-
-@dataclass
-class MarketData:
-    """Aligned market data for all tickers."""
-
-    union_index: pd.DatetimeIndex
-    # Ticker -> Field -> Array
-    # Fields: close, open, high, low, ma, score, buy_signal
-    # access: dates[i], prices[ticker][i]
-    close_prices: dict[str, np.ndarray]
-    open_prices: dict[str, np.ndarray]
-    ma_values: dict[str, np.ndarray]
-    scores: dict[str, np.ndarray]
-    buy_signals: dict[str, np.ndarray]
-    available_mask: dict[str, np.ndarray]
-
-    # Original DataFrames for debugging/details
-    raw_frames: dict[str, pd.DataFrame]
-
-
-@dataclass
-class PortfolioState:
-    cash: float
-    positions: dict[str, dict]  # ticker -> {shares, avg_cost, buy_block_until, sell_block_until}
-    daily_records: dict[str, list[dict]]
-    trades: list[dict]  # Flat list of all trades? Or per ticker?
-
-    def get_shares(self, ticker: str) -> float:
-        return self.positions.get(ticker, {}).get("shares", 0.0)
-
-    def get_avg_cost(self, ticker: str) -> float:
-        return self.positions.get(ticker, {}).get("avg_cost", 0.0)
-
-
-@dataclass
 class AccountBacktestResult:
-    """Result container mainly for compatibility and comprehensive reporting."""
+    """계정 백테스트 결과 컨테이너."""
 
     account_id: str
     country_code: str
@@ -65,8 +15,7 @@ class AccountBacktestResult:
     initial_capital: float
     initial_capital_krw: float
     currency: str
-    bucket_topn: int
-    holdings_limit: int
+    universe_count: int
     summary: dict[str, Any]
     portfolio_timeseries: pd.DataFrame
     ticker_timeseries: dict[str, pd.DataFrame]
@@ -91,8 +40,7 @@ class AccountBacktestResult:
             "initial_capital": float(self.initial_capital),
             "initial_capital_krw": float(self.initial_capital_krw),
             "currency": self.currency,
-            "bucket_topn": self.bucket_topn,
-            "holdings_limit": self.holdings_limit,
+            "universe_count": self.universe_count,
             "summary": self.summary,
             "portfolio_timeseries": df.to_dict(orient="records"),
             "ticker_meta": self.ticker_meta,

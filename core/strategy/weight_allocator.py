@@ -76,65 +76,63 @@ def _apply_guardrails(
     raw_weights: dict[str, float],
     min_weight: float,
     max_weight: float,
-    max_iterations: int = 10,
 ) -> dict[str, float]:
     """MIN/MAX 가드레일을 적용하고 합계를 1.0으로 정규화합니다.
 
-    한쪽에서 잘라낸 잔여분을 다른 종목에 비례 배분하는 과정을
-    수렴할 때까지 반복합니다.
+    기본적으로는 모든 종목에 최소 비중을 먼저 할당한 뒤,
+    남는 비중만 점수 비례로 추가 배분합니다.
+    상한에 도달한 종목은 제외하고 반복 배분하여 합계 1.0을 맞춥니다.
     """
-    weights = dict(raw_weights)
+    tickers = list(raw_weights.keys())
+    weights = {ticker: float(min_weight) for ticker in tickers}
+    remaining = 1.0 - (len(tickers) * min_weight)
+    if remaining <= 1e-12:
+        return weights
 
-    for _ in range(max_iterations):
-        clamped_tickers: set[str] = set()
-        clamped_total = 0.0
+    capacity = {ticker: float(max_weight - min_weight) for ticker in tickers}
+    active = {ticker for ticker, cap in capacity.items() if cap > 1e-12}
+    extras = {ticker: max(float(raw_weights.get(ticker, 0.0)) - min_weight, 0.0) for ticker in tickers}
 
-        # 상한/하한 초과 종목 식별 및 클램핑
-        for ticker, w in weights.items():
-            if w <= min_weight:
-                weights[ticker] = min_weight
-                clamped_tickers.add(ticker)
-                clamped_total += min_weight
-            elif w >= max_weight:
-                weights[ticker] = max_weight
-                clamped_tickers.add(ticker)
-                clamped_total += max_weight
+    while remaining > 1e-12 and active:
+        active_total = sum(extras[ticker] for ticker in active)
+        if active_total <= 1e-12:
+            equal_share = remaining / len(active)
+            progressed = False
+            for ticker in list(active):
+                addable = min(equal_share, capacity[ticker])
+                if addable > 0:
+                    weights[ticker] += addable
+                    capacity[ticker] -= addable
+                    remaining -= addable
+                    progressed = True
+                if capacity[ticker] <= 1e-12:
+                    active.remove(ticker)
+            if not progressed:
+                break
+            continue
 
-        # 클램핑되지 않은 종목들
-        free_tickers = [t for t in weights if t not in clamped_tickers]
-
-        if not free_tickers:
-            # 모든 종목이 클램핑됨 → 마지막 종목에 잔여분 보정
+        progressed = False
+        for ticker in list(active):
+            desired = remaining * (extras[ticker] / active_total)
+            addable = min(desired, capacity[ticker])
+            if addable > 0:
+                weights[ticker] += addable
+                capacity[ticker] -= addable
+                remaining -= addable
+                progressed = True
+            if capacity[ticker] <= 1e-12:
+                active.remove(ticker)
+        if not progressed:
             break
 
-        # 남은 비중을 자유 종목에 비례 배분
-        remaining = 1.0 - clamped_total
-        if remaining <= 0:
-            # 클램핑된 값의 합계만으로 1.0 초과 → 균등 배분 fallback
-            equal = 1.0 / len(weights)
-            return {t: equal for t in weights}
-
-        free_total = sum(weights[t] for t in free_tickers)
-        if free_total <= 0:
-            # 자유 종목 비중 합이 0 → 균등 배분
-            per_free = remaining / len(free_tickers)
-            for t in free_tickers:
-                weights[t] = per_free
-        else:
-            scale = remaining / free_total
-            for t in free_tickers:
-                weights[t] *= scale
-
-        # 수렴 확인: 모든 종목이 범위 내인지 체크
-        all_within = all(min_weight - 1e-9 <= weights[t] <= max_weight + 1e-9 for t in weights)
-        if all_within:
-            break
-
-    # 최종 정규화 (부동소수점 오차 보정)
     total = sum(weights.values())
-    if total > 0 and abs(total - 1.0) > 1e-9:
-        for t in weights:
-            weights[t] /= total
+    if abs(total - 1.0) > 1e-9:
+        deficit = 1.0 - total
+        candidates = [ticker for ticker in tickers if weights[ticker] < max_weight - 1e-12]
+        if candidates and deficit > 0:
+            per_ticker = deficit / len(candidates)
+            for ticker in candidates:
+                weights[ticker] += min(per_ticker, max_weight - weights[ticker])
 
     return weights
 

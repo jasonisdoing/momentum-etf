@@ -137,7 +137,7 @@ def main() -> None:
         country_code=result.country_code,
         backtest_start_date=str(backtest_start_date_str),
         initial_capital_krw=result.initial_capital_krw,
-        bucket_topn=result.bucket_topn,
+        universe_count=result.universe_count,
         ticker_summaries=getattr(result, "ticker_summaries", []),
         core_start_dt=result.start_date,
     )

@@ -9,12 +9,12 @@
     "initial_capital_krw": "50000000",
     "show_hold": true,
     "strategy": {
-        "TUNE_DATE": "2026-03-13 09:57",
-        "TUNE_CAGR": 119.204006,
-        "TUNE_MDD": -16.876804,
+        "TUNE_DATE": "2026-03-15 13:20",
+        "TUNE_CAGR": 139.227459,
+        "TUNE_MDD": -19.506595,
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": "MONTHLY"
+        "REBALANCE_MODE": "TWICE_A_MONTH"
     },
     "benchmark": {
         "ticker": "069500",

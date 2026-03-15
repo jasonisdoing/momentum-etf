@@ -11,6 +11,7 @@ import pandas as pd
 
 from config import TRADING_DAYS_PER_MONTH
 from core.backtest.analysis.summaries import build_bucket_summaries
+from core.backtest.domain import AccountBacktestResult
 from core.backtest.engine import run_portfolio_backtest
 from core.strategy.rules import StrategyRules
 from utils.account_registry import get_common_file_settings
@@ -25,6 +26,8 @@ from utils.settings_loader import (
 )
 from utils.stock_list_io import get_etfs
 
+logger = get_app_logger()
+
 
 @dataclass
 class InitialCapitalInfo:
@@ -36,56 +39,31 @@ class InitialCapitalInfo:
 
 
 @dataclass
-class AccountBacktestResult:
-    """계정 기반 백테스트 결과."""
+class StrategyRuntimeContext:
+    """백테스트 실행에 필요한 전략/설정 묶음입니다."""
 
-    account_id: str
+    strategy_rules: StrategyRules
+    strategy_settings: dict[str, Any]
+    precision_settings: Mapping[str, Any]
+    common_settings: Mapping[str, Any]
+
+
+@dataclass
+class BacktestPreparedContext:
+    """엔진 실행 직전까지 준비된 백테스트 입력값입니다."""
+
+    account_settings: Mapping[str, Any]
     country_code: str
+    strategy_context: StrategyRuntimeContext
     start_date: pd.Timestamp
     end_date: pd.Timestamp
-    initial_capital: float
-    initial_capital_krw: float
-    currency: str
-    bucket_topn: int
-    holdings_limit: int
-    summary: dict[str, Any]
-    portfolio_timeseries: pd.DataFrame
-    ticker_timeseries: dict[str, pd.DataFrame]
+    backtest_start_date_str: str
+    capital_info: InitialCapitalInfo
+    etf_universe: list[dict[str, Any]]
     ticker_meta: dict[str, dict[str, Any]]
-    evaluated_records: dict[str, dict[str, Any]]
-    monthly_returns: pd.Series
-    monthly_cum_returns: pd.Series
-    yearly_returns: pd.Series
-    ticker_summaries: list[dict[str, Any]]
-    settings_snapshot: dict[str, Any]
-    backtest_start_date: str
-    missing_tickers: list[str]
-
-    def to_dict(self) -> dict[str, Any]:
-        df = self.portfolio_timeseries.copy()
-        df.index = df.index.astype(str)
-        return {
-            "account_id": self.account_id,
-            "country_code": self.country_code,
-            "start_date": self.start_date.strftime("%Y-%m-%d"),
-            "end_date": self.end_date.strftime("%Y-%m-%d"),
-            "initial_capital": float(self.initial_capital),
-            "initial_capital_krw": float(self.initial_capital_krw),
-            "currency": self.currency,
-            "bucket_topn": self.bucket_topn,
-            "holdings_limit": self.holdings_limit,
-            "summary": self.summary,
-            "portfolio_timeseries": df.to_dict(orient="records"),
-            "ticker_meta": self.ticker_meta,
-            "evaluated_records": self.evaluated_records,
-            "monthly_returns": self.monthly_returns.to_dict(),
-            "monthly_cum_returns": self.monthly_cum_returns.to_dict(),
-            "yearly_returns": self.yearly_returns.to_dict(),
-            "ticker_summaries": self.ticker_summaries,
-            "settings_snapshot": self.settings_snapshot,
-            "backtest_start_date": self.backtest_start_date,
-            "missing_tickers": self.missing_tickers,
-        }
+    universe_count: int
+    backtest_kwargs: dict[str, Any]
+    calendar_arg: list[pd.Timestamp]
 
 
 def run_account_backtest(
@@ -117,180 +95,65 @@ def run_account_backtest(
     if not account_id:
         raise AccountSettingsError("계정 ID를 지정해야 합니다.")
 
-    # 튜닝 최적화: 모든 데이터가 프리패치되어 있으면 설정 로드 건너뛰기
-    is_tuning_fast_path = (
-        quiet
-        and prefetched_data is not None
-        and prefetched_etf_universe is not None
-        and prefetched_metrics is not None
-        and trading_calendar is not None
-        and strategy_override is not None
+    is_tuning_fast_path = _is_tuning_fast_path(
+        quiet=quiet,
+        prefetched_data=prefetched_data,
+        prefetched_etf_universe=prefetched_etf_universe,
+        prefetched_metrics=prefetched_metrics,
+        trading_calendar=trading_calendar,
+        strategy_override=strategy_override,
     )
 
     if not is_tuning_fast_path:
         _log(f"[백테스트] {account_id.upper()} 백테스트를 시작합니다...")
         _log("[백테스트] 설정을 로드하는 중...")
 
-    account_settings = get_account_settings(account_id)
-    country_code = (account_settings.get("country_code") or account_id).strip().lower() or "kor"
-
-    if is_tuning_fast_path:
-        # 튜닝 고속 경로: 최소한의 설정만 로드
-        strategy_rules = strategy_override
-        strategy_settings = dict(resolve_strategy_params(account_settings.get("strategy", {})))
-        precision_settings = get_account_precision(account_id)
-        common_settings = {}
-    else:
-        base_strategy_rules = get_strategy_rules(account_id)
-        strategy_rules = StrategyRules.from_mapping(base_strategy_rules.to_dict())
-        precision_settings = get_account_precision(account_id)
-        account_settings_data = get_account_settings(account_id)
-        strategy_source = account_settings_data.get("strategy", {})
-        strategy_settings = dict(resolve_strategy_params(strategy_source))
-        common_settings = get_common_file_settings()
-
-    strategy_overrides_extra = override_settings.get("strategy_overrides")
-    if isinstance(strategy_overrides_extra, Mapping):
-        strategy_settings.update({str(k): v for k, v in strategy_overrides_extra.items()})
-
-    if strategy_override is not None:
-        strategy_rules = StrategyRules.from_values(
-            ma_days=strategy_override.ma_days,
-            topn=strategy_override.topn,
-            ma_type=strategy_override.ma_type,
-            rebalance_mode=strategy_override.rebalance_mode,
-            cooldown=strategy_override.cooldown_days,
-            target_weights=strategy_override.target_weights,
-            enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
-        )
-        strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
-        strategy_settings["MA_TYPE"] = strategy_rules.ma_type
-        strategy_settings["TOPN"] = strategy_rules.topn
-        strategy_settings["MA_TYPE"] = strategy_rules.ma_type
-
-    backtest_start_date_str = _resolve_backtest_start_date(None, override_settings, account_settings)
-    end_date = _resolve_end_date(country_code, override_settings)
-    start_date = pd.to_datetime(backtest_start_date_str)
-
-    capital_info = _resolve_initial_capital(
-        initial_capital,
-        override_settings,
-        account_settings,
-        precision_settings,
-        start_date=start_date,
-        prefetched_fx_series=prefetched_fx_series,
-    )
-    initial_capital_value = capital_info.local
-
-    if not is_tuning_fast_path:
-        _log(f"[백테스트] {account_id.upper()} 계정({country_code.upper()}) ETF 목록을 로드하는 중...")
-    excluded_upper: set[str] = set()
-    if excluded_tickers:
-        excluded_upper = {
-            str(ticker).strip().upper()
-            for ticker in excluded_tickers
-            if isinstance(ticker, str) and str(ticker).strip()
-        }
-
-    if prefetched_etf_universe is not None:
-        etf_universe = [dict(stock) for stock in prefetched_etf_universe if isinstance(stock, Mapping)]
-        if not is_tuning_fast_path:
-            _log(f"[백테스트] 사전 추려진 ETF 대표군 {len(etf_universe)}개를 재사용합니다.")
-    else:
-        etf_universe = get_etfs(account_id)
-    if not etf_universe:
-        raise AccountSettingsError(f"계정 '{account_id}'에 대한 종목 설정(stocks.json)을 찾을 수 없습니다.")
-
-    if excluded_upper:
-        before_count = len(etf_universe)
-        etf_universe = [
-            stock for stock in etf_universe if str(stock.get("ticker", "")).strip().upper() not in excluded_upper
-        ]
-        removed = before_count - len(etf_universe)
-        if removed > 0 and not is_tuning_fast_path:
-            _log(f"[백테스트] 데이터 부족으로 제외된 {removed}개 종목을 유니버스에서 제거합니다.")
-    if not etf_universe:
-        raise RuntimeError("백테스트에 사용할 유효한 종목이 없습니다.")
-
-    if not is_tuning_fast_path:
-        _log(f"[백테스트] {len(etf_universe)}개의 ETF를 찾았습니다.")
-
-    ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
-    ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금"}
-
-    topn = len(etf_universe)
-    bucket_topn = topn  # backward-compatible field naming for reports/result schema
-    if not is_tuning_fast_path:
-        _log(f"[백테스트] 포트폴리오 TOPN: {topn}")
-
-    if not is_tuning_fast_path:
-        _log("[백테스트] 백테스트 파라미터를 구성하는 중...")
-    backtest_kwargs = _build_backtest_kwargs(
-        strategy_rules=strategy_rules,
-        strategy_settings=strategy_settings,
+    prepared = _prepare_backtest_context(
+        account_id=account_id,
+        initial_capital=initial_capital,
+        override_settings=override_settings,
+        strategy_override=strategy_override,
+        prefetched_etf_universe=prefetched_etf_universe,
         prefetched_data=prefetched_data,
         prefetched_metrics=prefetched_metrics,
+        trading_calendar=trading_calendar,
+        prefetched_fx_series=prefetched_fx_series,
+        excluded_tickers=excluded_tickers,
+        is_tuning_fast_path=is_tuning_fast_path,
         quiet=quiet,
+        log_func=_log,
     )
-
-    date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
-
-    display_currency = (capital_info.currency or "KRW").upper()
+    initial_capital_value = prepared.capital_info.local
+    display_currency = (prepared.capital_info.currency or "KRW").upper()
+    date_range = [prepared.start_date.strftime("%Y-%m-%d"), prepared.end_date.strftime("%Y-%m-%d")]
 
     if not is_tuning_fast_path:
         if display_currency != "KRW":
             _log(
-                f"[백테스트] {account_id.upper()}({country_code.upper()}) 백테스트 실행 | "
+                f"[백테스트] {account_id.upper()}({prepared.country_code.upper()}) 백테스트 실행 | "
                 f"기간: {date_range[0]}~{date_range[1]} | 초기 자본: {initial_capital_value:,.0f} {display_currency}"
-                f" (약 {capital_info.krw:,.0f} KRW)"
+                f" (약 {prepared.capital_info.krw:,.0f} KRW)"
             )
         else:
             _log(
-                f"[백테스트] {account_id.upper()}({country_code.upper()}) 백테스트 실행 | "
+                f"[백테스트] {account_id.upper()}({prepared.country_code.upper()}) 백테스트 실행 | "
                 f"기간: {date_range[0]}~{date_range[1]} | 초기 자본: {initial_capital_value:,.0f}"
             )
 
         _log("[백테스트] 포트폴리오 백테스트 실행 중...")
     runtime_missing_tickers: set[str] = set()
 
-    if trading_calendar:
-        calendar_arg: list[pd.Timestamp] | None = []
-        for raw in trading_calendar:
-            try:
-                dt = pd.Timestamp(raw)
-            except Exception:
-                continue
-            if pd.isna(dt):
-                continue
-            if start_date <= dt <= end_date:
-                calendar_arg.append(dt.normalize())
-        if not calendar_arg:
-            calendar_arg = None
-    else:
-        try:
-            # 리밸런싱 로직은 주/월 단위 전환이 일어나는지 확인하기 위해 다음 거래일을 참조해야 하므로,
-            # 달력 범위에 30일을 추가하여 넉넉하게 거래일을 제공합니다.
-            future_end_date = (pd.to_datetime(date_range[1]) + pd.DateOffset(days=30)).strftime("%Y-%m-%d")
-        except Exception:
-            future_end_date = date_range[1]
-
-        calendar_arg = get_trading_days(date_range[0], future_end_date, country_code)
-        if not calendar_arg:
-            raise RuntimeError(
-                f"{account_id.upper()} 기간 {date_range[0]}~{future_end_date}의 거래일 정보를 로드하지 못했습니다."
-            )
-
     ticker_timeseries = (
         run_portfolio_backtest(
-            stocks=etf_universe,
+            stocks=prepared.etf_universe,
             initial_capital=initial_capital_value,
-            core_start_date=start_date,
-            top_n=topn,
+            core_start_date=prepared.start_date,
+            top_n=prepared.universe_count,
             date_range=date_range,
-            country=country_code,
+            country=prepared.country_code,
             missing_ticker_sink=runtime_missing_tickers,
-            **backtest_kwargs,
-            trading_calendar=calendar_arg,
+            **prepared.backtest_kwargs,
+            trading_calendar=prepared.calendar_arg,
         )
         or {}
     )
@@ -302,7 +165,7 @@ def run_account_backtest(
     portfolio_df = _build_portfolio_timeseries(
         ticker_timeseries,
         initial_capital_value,
-        topn,
+        prepared.universe_count,
     )
 
     (
@@ -312,34 +175,33 @@ def run_account_backtest(
         yearly_returns,
     ) = _build_summary(
         portfolio_df,
-        country_code=country_code,
-        start_date=start_date,
-        end_date=end_date,
+        country_code=prepared.country_code,
+        start_date=prepared.start_date,
+        end_date=prepared.end_date,
         initial_capital=initial_capital_value,
-        initial_capital_krw=capital_info.krw,
+        initial_capital_krw=prepared.capital_info.krw,
         currency=display_currency,
-        bucket_topn=bucket_topn,
-        holdings_limit=topn,
-        account_settings=account_settings,
+        universe_count=prepared.universe_count,
+        account_settings=prepared.account_settings,
         prefetched_data=prefetched_data,
         ticker_timeseries=ticker_timeseries,
-        ticker_meta=ticker_meta,
+        ticker_meta=prepared.ticker_meta,
     )
 
-    evaluated_records = _compute_evaluated_records(ticker_timeseries, start_date)
+    evaluated_records = _compute_evaluated_records(ticker_timeseries, prepared.start_date)
 
     ticker_summaries = _build_ticker_summaries(
         ticker_timeseries,
-        ticker_meta,
+        prepared.ticker_meta,
     )
 
     _log("[백테스트] 설정 스냅샷을 생성하는 중...")
     settings_snapshot = _build_settings_snapshot(
         account_id=account_id,
-        country_code=country_code,
-        strategy_rules=strategy_rules,
-        common_settings=common_settings,
-        strategy_settings=strategy_settings,
+        country_code=prepared.country_code,
+        strategy_rules=prepared.strategy_context.strategy_rules,
+        common_settings=prepared.strategy_context.common_settings,
+        strategy_settings=prepared.strategy_context.strategy_settings,
         initial_capital=initial_capital_value,
     )
 
@@ -352,26 +214,261 @@ def run_account_backtest(
 
     return AccountBacktestResult(
         account_id=account_id,
-        country_code=country_code,
-        start_date=start_date,
-        end_date=end_date,
+        country_code=prepared.country_code,
+        start_date=prepared.start_date,
+        end_date=prepared.end_date,
         initial_capital=initial_capital_value,
-        initial_capital_krw=capital_info.krw,
+        initial_capital_krw=prepared.capital_info.krw,
         currency=display_currency,
-        bucket_topn=bucket_topn,
-        holdings_limit=topn,
+        universe_count=prepared.universe_count,
         summary=summary,
         portfolio_timeseries=portfolio_df,
         ticker_timeseries=ticker_timeseries,
-        ticker_meta=ticker_meta,
+        ticker_meta=prepared.ticker_meta,
         evaluated_records=evaluated_records,
         monthly_returns=monthly_returns,
         monthly_cum_returns=monthly_cum_returns,
         yearly_returns=yearly_returns,
         ticker_summaries=ticker_summaries,
         settings_snapshot=settings_snapshot,
-        backtest_start_date=backtest_start_date_str,
+        backtest_start_date=prepared.backtest_start_date_str,
         missing_tickers=missing_sorted,
+    )
+
+
+def _is_tuning_fast_path(
+    *,
+    quiet: bool,
+    prefetched_data: Mapping[str, pd.DataFrame] | None,
+    prefetched_etf_universe: Sequence[Mapping[str, Any]] | None,
+    prefetched_metrics: Mapping[str, dict[str, Any]] | None,
+    trading_calendar: Sequence[pd.Timestamp] | None,
+    strategy_override: StrategyRules | None,
+) -> bool:
+    """튜닝 고속 경로 여부를 판정합니다."""
+
+    return (
+        quiet
+        and prefetched_data is not None
+        and prefetched_etf_universe is not None
+        and prefetched_metrics is not None
+        and trading_calendar is not None
+        and strategy_override is not None
+    )
+
+
+def _resolve_strategy_runtime_context(
+    *,
+    account_id: str,
+    account_settings: Mapping[str, Any],
+    override_settings: Mapping[str, Any],
+    strategy_override: StrategyRules | None,
+    is_tuning_fast_path: bool,
+) -> StrategyRuntimeContext:
+    """전략 규칙과 파생 설정을 하나의 묶음으로 정리합니다."""
+
+    if is_tuning_fast_path:
+        strategy_rules = strategy_override
+        strategy_settings = dict(resolve_strategy_params(account_settings.get("strategy", {})))
+        precision_settings = get_account_precision(account_id)
+        common_settings: Mapping[str, Any] = {}
+    else:
+        base_strategy_rules = get_strategy_rules(account_id)
+        strategy_rules = StrategyRules.from_mapping(base_strategy_rules.to_dict())
+        precision_settings = get_account_precision(account_id)
+        strategy_source = account_settings.get("strategy", {})
+        strategy_settings = dict(resolve_strategy_params(strategy_source))
+        common_settings = get_common_file_settings()
+
+    strategy_overrides_extra = override_settings.get("strategy_overrides")
+    if isinstance(strategy_overrides_extra, Mapping):
+        strategy_settings.update({str(k): v for k, v in strategy_overrides_extra.items()})
+
+    if strategy_override is not None:
+        strategy_rules = StrategyRules.from_values(
+            ma_days=strategy_override.ma_days,
+            ma_type=strategy_override.ma_type,
+            rebalance_mode=strategy_override.rebalance_mode,
+            target_weights=strategy_override.target_weights,
+            enable_data_sufficiency_check=strategy_override.enable_data_sufficiency_check,
+        )
+        strategy_settings["MA_MONTH"] = strategy_rules.ma_days // TRADING_DAYS_PER_MONTH
+        strategy_settings["MA_TYPE"] = strategy_rules.ma_type
+
+    return StrategyRuntimeContext(
+        strategy_rules=strategy_rules,
+        strategy_settings=strategy_settings,
+        precision_settings=precision_settings,
+        common_settings=common_settings,
+    )
+
+
+def _load_backtest_universe(
+    *,
+    account_id: str,
+    prefetched_etf_universe: Sequence[Mapping[str, Any]] | None,
+    excluded_tickers: Collection[str] | None,
+    is_tuning_fast_path: bool,
+    log_func,
+) -> list[dict[str, Any]]:
+    """백테스트 대상 유니버스를 로드하고 제외 종목을 반영합니다."""
+
+    if not is_tuning_fast_path:
+        log_func(f"[백테스트] {account_id.upper()} 계정 ETF 목록을 로드하는 중...")
+
+    excluded_upper: set[str] = set()
+    if excluded_tickers:
+        excluded_upper = {
+            str(ticker).strip().upper()
+            for ticker in excluded_tickers
+            if isinstance(ticker, str) and str(ticker).strip()
+        }
+
+    if prefetched_etf_universe is not None:
+        etf_universe = [dict(stock) for stock in prefetched_etf_universe if isinstance(stock, Mapping)]
+        if not is_tuning_fast_path:
+            log_func(f"[백테스트] 사전 추려진 ETF 대표군 {len(etf_universe)}개를 재사용합니다.")
+    else:
+        etf_universe = get_etfs(account_id)
+
+    if not etf_universe:
+        raise AccountSettingsError(f"계정 '{account_id}'에 대한 종목 설정(stocks.json)을 찾을 수 없습니다.")
+
+    if excluded_upper:
+        before_count = len(etf_universe)
+        etf_universe = [
+            stock for stock in etf_universe if str(stock.get("ticker", "")).strip().upper() not in excluded_upper
+        ]
+        removed = before_count - len(etf_universe)
+        if removed > 0 and not is_tuning_fast_path:
+            log_func(f"[백테스트] 데이터 부족으로 제외된 {removed}개 종목을 유니버스에서 제거합니다.")
+
+    if not etf_universe:
+        raise RuntimeError("백테스트에 사용할 유효한 종목이 없습니다.")
+
+    if not is_tuning_fast_path:
+        log_func(f"[백테스트] {len(etf_universe)}개의 ETF를 찾았습니다.")
+
+    return etf_universe
+
+
+def _resolve_trading_calendar_arg(
+    *,
+    trading_calendar: Sequence[pd.Timestamp] | None,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    country_code: str,
+    account_id: str,
+) -> list[pd.Timestamp]:
+    """엔진에 전달할 거래일 달력을 준비합니다."""
+
+    future_end_date = end_date + pd.DateOffset(days=30)
+
+    if trading_calendar:
+        calendar_arg: list[pd.Timestamp] = []
+        for raw in trading_calendar:
+            try:
+                dt = pd.Timestamp(raw)
+            except Exception:
+                continue
+            if pd.isna(dt):
+                continue
+            if start_date <= dt <= future_end_date:
+                calendar_arg.append(dt.normalize())
+        if calendar_arg:
+            return calendar_arg
+
+    future_end_date_str = future_end_date.strftime("%Y-%m-%d")
+    calendar_arg = get_trading_days(
+        start_date.strftime("%Y-%m-%d"),
+        future_end_date_str,
+        country_code,
+    )
+    if not calendar_arg:
+        raise RuntimeError(
+            f"{account_id.upper()} 기간 {start_date.strftime('%Y-%m-%d')}~{future_end_date_str}의 거래일 정보를 로드하지 못했습니다."
+        )
+    return list(calendar_arg)
+
+
+def _prepare_backtest_context(
+    *,
+    account_id: str,
+    initial_capital: float | None,
+    override_settings: Mapping[str, Any],
+    strategy_override: StrategyRules | None,
+    prefetched_etf_universe: Sequence[Mapping[str, Any]] | None,
+    prefetched_data: Mapping[str, pd.DataFrame] | None,
+    prefetched_metrics: Mapping[str, dict[str, Any]] | None,
+    trading_calendar: Sequence[pd.Timestamp] | None,
+    prefetched_fx_series: pd.Series | None,
+    excluded_tickers: Collection[str] | None,
+    is_tuning_fast_path: bool,
+    quiet: bool,
+    log_func,
+) -> BacktestPreparedContext:
+    """백테스트 실행 전에 필요한 입력값을 한 번에 준비합니다."""
+
+    account_settings = get_account_settings(account_id)
+    country_code = (account_settings.get("country_code") or account_id).strip().lower() or "kor"
+    strategy_context = _resolve_strategy_runtime_context(
+        account_id=account_id,
+        account_settings=account_settings,
+        override_settings=override_settings,
+        strategy_override=strategy_override,
+        is_tuning_fast_path=is_tuning_fast_path,
+    )
+    backtest_start_date_str = _resolve_backtest_start_date(None, override_settings, account_settings)
+    start_date = pd.to_datetime(backtest_start_date_str)
+    end_date = _resolve_end_date(country_code, override_settings)
+    capital_info = _resolve_initial_capital(
+        initial_capital,
+        override_settings,
+        account_settings,
+        strategy_context.precision_settings,
+        start_date=start_date,
+        prefetched_fx_series=prefetched_fx_series,
+    )
+    etf_universe = _load_backtest_universe(
+        account_id=account_id,
+        prefetched_etf_universe=prefetched_etf_universe,
+        excluded_tickers=excluded_tickers,
+        is_tuning_fast_path=is_tuning_fast_path,
+        log_func=log_func,
+    )
+    ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
+    ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금"}
+    universe_count = len(etf_universe)
+    if not is_tuning_fast_path:
+        log_func(f"[백테스트] 계좌 전체 종목 수: {universe_count}")
+        log_func("[백테스트] 백테스트 파라미터를 구성하는 중...")
+    backtest_kwargs = _build_backtest_kwargs(
+        strategy_rules=strategy_context.strategy_rules,
+        strategy_settings=strategy_context.strategy_settings,
+        prefetched_data=prefetched_data,
+        prefetched_metrics=prefetched_metrics,
+        quiet=quiet,
+    )
+    calendar_arg = _resolve_trading_calendar_arg(
+        trading_calendar=trading_calendar,
+        start_date=start_date,
+        end_date=end_date,
+        country_code=country_code,
+        account_id=account_id,
+    )
+    return BacktestPreparedContext(
+        account_settings=account_settings,
+        country_code=country_code,
+        strategy_context=strategy_context,
+        start_date=start_date,
+        end_date=end_date,
+        backtest_start_date_str=backtest_start_date_str,
+        capital_info=capital_info,
+        etf_universe=etf_universe,
+        ticker_meta=ticker_meta,
+        universe_count=universe_count,
+        backtest_kwargs=backtest_kwargs,
+        calendar_arg=calendar_arg,
     )
 
 
@@ -504,7 +601,6 @@ def _build_backtest_kwargs(
         "ma_days": strategy_rules.ma_days,
         "ma_type": strategy_rules.ma_type,
         "rebalance_mode": strategy_rules.rebalance_mode,
-        "cooldown": strategy_rules.cooldown_days,
         "quiet": quiet,
         "enable_data_sufficiency_check": strategy_rules.enable_data_sufficiency_check,
     }
@@ -516,7 +612,7 @@ def _build_backtest_kwargs(
 def _build_portfolio_timeseries(
     ticker_timeseries: Mapping[str, pd.DataFrame],
     initial_capital: float,
-    bucket_topn: int,
+    universe_count: int,
 ) -> pd.DataFrame:
     # DataFrame만 필터링 (메타데이터 문자열 제외)
     dataframes = [ts for ts in ticker_timeseries.values() if isinstance(ts, pd.DataFrame) and not ts.empty]
@@ -665,7 +761,7 @@ def _build_portfolio_timeseries(
                 "cumulative_return_pct": cumulative_return_pct,
                 "evaluation_profit_loss": eval_profit_loss,
                 "evaluation_return_pct": eval_return_pct,
-                "bucket_topn": bucket_topn,
+                "universe_count": universe_count,
             }
         )
 
@@ -683,8 +779,7 @@ def _build_summary(
     initial_capital: float,
     initial_capital_krw: float,
     currency: str,
-    bucket_topn: int,
-    holdings_limit: int,
+    universe_count: int,
     account_settings: Mapping[str, Any],
     prefetched_data: Mapping[str, pd.DataFrame] | None = None,
     ticker_timeseries: dict[str, pd.DataFrame] | None = None,
@@ -936,7 +1031,7 @@ def _build_summary(
             for dt, value in weekly_values.items():
                 # 해당 날짜의 보유종목 수 가져오기
                 held_count = 0
-                max_topn = holdings_limit
+                current_universe_count = universe_count
                 actual_date = dt
 
                 # 해당 날짜가 portfolio_df에 없으면 가장 가까운 이전 날짜 찾기
@@ -968,7 +1063,7 @@ def _build_summary(
                         "week_end": date_display,
                         "value": float(value),
                         "held_count": held_count,
-                        "max_topn": max_topn,
+                        "universe_count": current_universe_count,
                         "weekly_return_pct": float(weekly_return_pct.loc[dt]),
                         "cumulative_return_pct": float(weekly_cum_pct.loc[dt]),
                         "benchmark_name": benchmark_weekly_name or None,
@@ -1105,20 +1200,13 @@ def _build_ticker_summaries(
 
         df_sorted = df.sort_index()
         if "decision" in df_sorted.columns or "pending_action" in df_sorted.columns:
-            decision_col = (
-                df_sorted["decision"].astype(str).str.upper()
-                if "decision" in df_sorted.columns
-                else pd.Series("", index=df_sorted.index, dtype=object)
-            )
             pending_col = (
                 df_sorted["pending_action"].astype(str).str.upper()
                 if "pending_action" in df_sorted.columns
                 else pd.Series("", index=df_sorted.index, dtype=object)
             )
             trade_shares_col = pd.to_numeric(df_sorted.get("trade_shares", 0.0), errors="coerce").fillna(0.0)
-            trades_mask = (
-                (decision_col == "SELL") | (decision_col == "SELL_REPLACE") | pending_col.str.startswith("SELL")
-            ) & (trade_shares_col > 0)
+            trades_mask = pending_col.str.startswith("SELL") & (trade_shares_col > 0)
         else:
             trades_mask = pd.Series(False, index=df_sorted.index)
 

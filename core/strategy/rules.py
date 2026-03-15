@@ -29,10 +29,8 @@ class StrategyRules:
 
     strategy: str
     ma_days: int
-    bucket_topn: int
     ma_type: str
     rebalance_mode: str
-    cooldown_days: int
     enable_data_sufficiency_check: bool
     target_weights: dict[str, float] | None = None
 
@@ -43,12 +41,8 @@ class StrategyRules:
         strategy: Any = "PORTFOLIO",
         ma_days: Any = None,
         ma_month: Any = None,
-        topn: Any = None,
-        bucket_topn: Any = None,
         ma_type: Any = None,
         rebalance_mode: Any = None,
-        cooldown: Any = None,
-        cooldown_days: Any = None,
         target_weights: Any = None,
         enable_data_sufficiency_check: Any = False,
     ) -> StrategyRules:
@@ -93,28 +87,11 @@ class StrategyRules:
         if resolved_ma_days is None or resolved_ma_days < 1:
             raise ValueError("MA 기간은 1 이상의 정수여야 합니다.")
 
-        resolved_cooldown: int
-        try:
-            resolved_cooldown = int(cooldown if cooldown is not None else cooldown_days)
-        except (TypeError, ValueError):
-            resolved_cooldown = 1
-        if resolved_cooldown < 1:
-            raise ValueError("COOLDOWN은 1 이상의 정수여야 합니다.")
-
-        try:
-            resolved_topn = int(topn if topn is not None else bucket_topn)
-            if resolved_topn < 1:
-                raise ValueError
-        except (TypeError, ValueError):
-            resolved_topn = len(normalized_weights) if normalized_weights else 1
-
         return cls(
             strategy=strategy_str,
             ma_days=resolved_ma_days,
-            bucket_topn=resolved_topn,
             ma_type=final_ma_type,
             rebalance_mode=final_rebalance_mode,
-            cooldown_days=resolved_cooldown,
             enable_data_sufficiency_check=data_sufficiency_check,
             target_weights=normalized_weights,
         )
@@ -133,10 +110,8 @@ class StrategyRules:
             strategy=_resolve("STRATEGY", "strategy"),
             ma_month=_resolve("MA_MONTH", "ma_month"),
             ma_days=_resolve("ma_days"),
-            topn=_resolve("TOPN", "topn"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
             rebalance_mode=_resolve("REBALANCE_MODE", "rebalance_mode"),
-            cooldown=_resolve("COOLDOWN", "cooldown", "cooldown_days"),
             target_weights=_resolve("TARGET_WEIGHTS", "target_weights"),
             enable_data_sufficiency_check=_resolve("ENABLE_DATA_SUFFICIENCY_CHECK", "enable_data_sufficiency_check"),
         )
@@ -145,22 +120,14 @@ class StrategyRules:
         d = {
             "strategy": self.strategy,
             "ma_days": self.ma_days,
-            "topn": self.bucket_topn,
-            "bucket_topn": self.bucket_topn,
             "ma_type": self.ma_type,
             "rebalance_mode": self.rebalance_mode,
-            "cooldown_days": self.cooldown_days,
-            "cooldown": self.cooldown_days,
             "enable_data_sufficiency_check": self.enable_data_sufficiency_check,
         }
         if self.target_weights:
             d["target_weights"] = dict(self.target_weights)
             d["TARGET_WEIGHTS"] = dict(self.target_weights)
         return d
-
-    @property
-    def topn(self) -> int:
-        return int(self.bucket_topn)
 
 
 __all__ = [
