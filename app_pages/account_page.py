@@ -88,33 +88,14 @@ def _is_pool_target(target_id: str) -> bool:
         return False
 
 
-def _to_weight_pct(weight: Any) -> float | None:
-    if weight is None:
-        return None
-    try:
-        value = float(weight)
-    except (TypeError, ValueError):
-        return None
-    if value <= 0:
-        return None
-    if value <= 1.0:
-        return value * 100.0
-    return value
-
-
-# ---------------------------------------------------------------------------
-# 스타일 및 설정
-# ---------------------------------------------------------------------------
-
-
 def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.DataFrame:
     """stocks.json 메타정보를 DataFrame으로 반환."""
     etfs = get_etfs(account_id)
     if not etfs:
         return pd.DataFrame()
 
-    # 보유 종목의 타겟비중 계산 (스코어 비례)
-    target_weight_map: dict[str, float] = {}
+    # 최신 추천 스냅샷의 계산 비중을 표시합니다.
+    weight_map: dict[str, float] = {}
     if use_weight:
         try:
             from utils.recommendation_storage import fetch_latest_recommendations
@@ -124,9 +105,9 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
                 recs = snapshot.get("recommendations") or []
                 for rec in recs:
                     ticker = str(rec.get("ticker") or "").strip().upper()
-                    tw = rec.get("target_weight")
-                    if ticker and tw is not None:
-                        target_weight_map[ticker] = float(tw) * 100.0
+                    weight = rec.get("weight")
+                    if ticker and weight is not None:
+                        weight_map[ticker] = float(weight) * 100.0
         except Exception:
             pass
 
@@ -151,9 +132,8 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
             "12달(%)": etf.get("12_month_earn_rate"),
         }
         if use_weight:
-            row["비중(%)"] = _to_weight_pct(etf.get("weight"))
             ticker_upper = str(etf.get("ticker") or "").strip().upper()
-            row["타겟비중"] = target_weight_map.get(ticker_upper)
+            row["비중"] = weight_map.get(ticker_upper)
         rows.append(row)
     df = pd.DataFrame(rows)
     if not df.empty and "1주(%)" in df.columns:
@@ -178,15 +158,12 @@ def _render_stocks_meta_table(account_id: str) -> None:
     else:
         st.caption(f"총 {len(df)}개 종목 (Source: MongoDB)")
         if use_weight:
-            weight_series = pd.to_numeric(df.get("비중(%)"), errors="coerce")
-            if weight_series.isna().any():
-                st.warning("비중이 비어 있거나 숫자가 아닌 종목이 있습니다.")
+            weight_series = pd.to_numeric(df.get("비중"), errors="coerce").dropna()
+            if weight_series.empty:
+                st.caption("최신 추천 스냅샷이 없으면 비중이 비어 있을 수 있습니다.")
             else:
                 total_weight = float(weight_series.sum())
-                if abs(total_weight - 100.0) > 1e-2:
-                    st.warning(f"비중 합계가 100%가 아닙니다. 현재: {total_weight:.2f}%")
-                else:
-                    st.caption("비중 합계: 100.00%")
+                st.caption(f"표시 비중 합계: {total_weight:.2f}%")
 
         def _color_pct(val: float | str) -> str:
             if val is None or pd.isna(val):
@@ -232,33 +209,15 @@ def _render_stocks_meta_table(account_id: str) -> None:
     def open_edit_dialog(ticker: str, current_bucket_name: str, name: str):
         st.write(f"**{name}** ({ticker})")
         st.caption(f"현재 버킷: {current_bucket_name}")
-        current_row = df_edit[df_edit["티커"] == ticker]
-        current_weight_pct = None
-        if use_weight and not current_row.empty:
-            current_weight_pct = current_row.iloc[0].get("비중(%)")
-            current_weight_pct = float(current_weight_pct) if pd.notna(current_weight_pct) else 0.0
 
         st.subheader("버킷 변경")
         new_bucket_name = st.selectbox(
             "버킷 변경", options=BUCKET_OPTIONS, index=BUCKET_OPTIONS.index(current_bucket_name)
         )
-        new_weight_pct = None
-        if use_weight:
-            st.subheader("비중 변경")
-            new_weight_pct = st.number_input(
-                "비중(%)",
-                min_value=0,
-                max_value=100,
-                step=1,
-                value=int(round(float(current_weight_pct or 0.0))),
-                format="%d",
-            )
 
         if st.button("💾 변경사항 저장", type="primary", width="stretch"):
             new_bucket_int = BUCKET_REVERSE_MAPPING.get(new_bucket_name, 1)
             update_fields: dict[str, Any] = {"bucket": new_bucket_int}
-            if use_weight:
-                update_fields["weight"] = int(new_weight_pct or 0)
             if update_stock(account_id, ticker, **update_fields):
                 st.toast(f"✅ {ticker} 버킷 변경 완료")
                 st.rerun()
@@ -317,7 +276,13 @@ def _render_stocks_meta_table(account_id: str) -> None:
         ),
         "티커": st.column_config.TextColumn("티커", width=55),
         "종목명": st.column_config.TextColumn("종목명", width=300),
-        "비중(%)": st.column_config.NumberColumn("비중(%)", width="small", format="%.0f"),
+        "비중": st.column_config.ProgressColumn(
+            "비중",
+            width="small",
+            format="%.0f%%",
+            min_value=0.0,
+            max_value=100.0,
+        ),
         "추가일자": st.column_config.TextColumn("추가일자", width=90),
         "상장일": st.column_config.TextColumn("상장일", width=80),
         "주간거래량": st.column_config.NumberColumn("주간거래량", width=80, format="localized"),
@@ -327,13 +292,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
         "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
         "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
-        "타겟비중": st.column_config.ProgressColumn(
-            "타겟비중",
-            width="small",
-            format="%.0f%%",
-            min_value=0.0,
-            max_value=100.0,
-        ),
     }
 
     column_order = [
@@ -341,8 +299,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "버킷",
         "티커",
         "종목명",
-        "비중(%)",
-        "타겟비중",
+        "비중",
         "상장일",
         "주간거래량",
         "1주(%)",
@@ -487,17 +444,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
                     "버킷 선택", options=BUCKET_OPTIONS, index=0, key=f"sb_bucket_add_{account_id}"
                 )
                 bucket_int = BUCKET_REVERSE_MAPPING.get(selected_bucket_name, 1)
-                weight_for_add = None
-                if use_weight:
-                    weight_for_add = st.number_input(
-                        "비중(%)",
-                        min_value=0,
-                        max_value=100,
-                        step=1,
-                        value=0,
-                        format="%d",
-                        key=f"nb_weight_add_{account_id}",
-                    )
 
                 # 추가 버튼 (녹색 primary)
                 if st.button("➕ 추가하기", type="primary", width="stretch", key=f"btn_confirm_add_{account_id}"):
@@ -505,8 +451,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
                         "listing_date": search_result.get("listing_date"),
                         "bucket": bucket_int,
                     }
-                    if use_weight:
-                        extra_fields["weight"] = int(weight_for_add or 0)
                     success = add_stock(
                         account_id,
                         ticker_res,
