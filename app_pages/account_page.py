@@ -113,6 +113,23 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
     if not etfs:
         return pd.DataFrame()
 
+    # 보유 종목의 타겟비중 계산 (스코어 비례)
+    target_weight_map: dict[str, float] = {}
+    if use_weight:
+        try:
+            from utils.recommendation_storage import fetch_latest_recommendations
+
+            snapshot = fetch_latest_recommendations(account_id)
+            if snapshot:
+                recs = snapshot.get("recommendations") or []
+                for rec in recs:
+                    ticker = str(rec.get("ticker") or "").strip().upper()
+                    tw = rec.get("target_weight")
+                    if ticker and tw is not None:
+                        target_weight_map[ticker] = float(tw) * 100.0
+        except Exception:
+            pass
+
     rows: list[dict[str, Any]] = []
     for idx, etf in enumerate(etfs, 1):
         bucket_val = etf.get("bucket", 1)
@@ -135,6 +152,8 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
         }
         if use_weight:
             row["비중(%)"] = _to_weight_pct(etf.get("weight"))
+            ticker_upper = str(etf.get("ticker") or "").strip().upper()
+            row["타겟비중"] = target_weight_map.get(ticker_upper)
         rows.append(row)
     df = pd.DataFrame(rows)
     if not df.empty and "1주(%)" in df.columns:
@@ -308,6 +327,13 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
         "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
         "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
+        "타겟비중": st.column_config.ProgressColumn(
+            "타겟비중",
+            width="small",
+            format="%.0f%%",
+            min_value=0.0,
+            max_value=100.0,
+        ),
     }
 
     column_order = [
@@ -316,6 +342,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "티커",
         "종목명",
         "비중(%)",
+        "타겟비중",
         "상장일",
         "주간거래량",
         "1주(%)",

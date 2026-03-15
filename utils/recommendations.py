@@ -18,11 +18,12 @@ _BASE_DISPLAY_COLUMNS = [
     "버킷",
     "티커",
     "종목명",
-    "비중(%)",
     "상태",
+    "보유일",
+    "비중",
+    "타겟비중",
     "일간(%)",
     "평가(%)",
-    "보유일",
     "현재가",
     "1주(%)",
     "2주(%)",
@@ -158,15 +159,28 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         bucket_name = bucket_names.get(bucket_id, f"{bucket_id}. 기타")
         weight_val = row.get("weight")
 
+        # 비중 계산 (현재비중: weight 필드 또는 current_weight, 타겟비중: target_weight)
+        current_weight_val = row.get("current_weight")
+        if current_weight_val is not None:
+            current_weight_pct = float(current_weight_val) * 100.0
+        elif weight_val is not None:
+            current_weight_pct = float(weight_val)
+        else:
+            current_weight_pct = None
+
+        target_weight_val = row.get("target_weight")
+        target_weight_pct = float(target_weight_val) * 100.0 if target_weight_val is not None else None
+
         display_rows.append(
             {
                 "#": rank if rank is not None else "-",
                 "버킷": bucket_name,
-                "비중(%)": weight_val,
                 "티커": ticker,
                 "종목명": name,
                 "상태": state,
                 "보유일": format_trading_days(holding_days),
+                "비중": current_weight_pct,
+                "타겟비중": target_weight_pct,
                 "일간(%)": daily_pct,
                 "평가(%)": evaluation_pct,
                 price_label: price_display,
