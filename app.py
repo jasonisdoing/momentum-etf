@@ -686,7 +686,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
 
                 rates = _get_app_exchange_rates()
 
-                st.subheader("적용 환율")
+                st.subheader("환율")
 
                 # Update time calculation
                 update_time = rates["updated_at"]

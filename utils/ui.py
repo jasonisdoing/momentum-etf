@@ -479,14 +479,14 @@ def render_recommendation_table(
         "비중": st.column_config.ProgressColumn(
             "비중",
             width="small",
-            format="%.1f%%",
+            format="%.0f%%",
             min_value=0.0,
             max_value=100.0,
         ),
-        "비중(%)": st.column_config.ProgressColumn(
-            "비중(%)",
+        "타겟비중": st.column_config.ProgressColumn(
+            "타겟비중",
             width="small",
-            format="%.0f",
+            format="%.0f%%",
             min_value=0.0,
             max_value=100.0,
         ),

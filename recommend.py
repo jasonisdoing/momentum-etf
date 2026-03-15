@@ -607,6 +607,48 @@ def _enrich_with_nav_data(
     return recommendations
 
 
+def _enrich_with_target_weights(
+    recommendations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """보유 종목의 스코어 비례 목표비중과 현재비중을 각 추천 항목에 첨부합니다."""
+    from config import WEIGHT_MAX, WEIGHT_MIN
+    from core.strategy.weight_allocator import calculate_score_weights
+
+    # 보유 종목만 필터
+    held_items = [r for r in recommendations if (_safe_float(r.get("shares"), 0.0) or 0.0) > 0]
+    if not held_items:
+        return recommendations
+
+    # 보유 종목의 스코어로 목표비중 계산
+    held_scores = {r["ticker"]: _safe_float(r.get("score"), 0.0) or 0.0 for r in held_items}
+    target_weights = calculate_score_weights(
+        held_scores,
+        min_weight=WEIGHT_MIN,
+        max_weight=WEIGHT_MAX,
+    )
+
+    # 현재비중 계산 (평가금액 기반)
+    total_value = 0.0
+    for r in held_items:
+        shares = _safe_float(r.get("shares"), 0.0) or 0.0
+        price = _safe_float(r.get("price"), 0.0) or 0.0
+        total_value += shares * price
+
+    for rec in recommendations:
+        ticker = rec.get("ticker", "")
+        shares = _safe_float(rec.get("shares"), 0.0) or 0.0
+        price = _safe_float(rec.get("price"), 0.0) or 0.0
+
+        if shares > 0 and total_value > 0:
+            rec["current_weight"] = (shares * price) / total_value
+            rec["target_weight"] = target_weights.get(ticker, 0.0)
+        else:
+            rec["current_weight"] = 0.0
+            rec["target_weight"] = target_weights.get(ticker, 0.0) if ticker in target_weights else None
+
+    return recommendations
+
+
 # ---------------------------------------------------------------------------
 # 추천 리포트 생성 (백테스트 실행 포함)
 # ---------------------------------------------------------------------------
@@ -822,6 +864,9 @@ def generate_recommendation_report(
     topn = len(weighted)
     recommendations = _assign_final_ranks(recommendations, bucket_topn=topn)
 
+    # 스코어 비례 목표비중 계산 및 현재비중 첨부
+    _enrich_with_target_weights(recommendations)
+
     return RecommendationReport(
         account_id=account_id,
         country_code=country_code,
@@ -915,8 +960,8 @@ def dump_recommendation_log(
     nav_mode = country_lower in {"kr", "kor"}
     show_deviation = country_lower in {"kr", "kor"}
 
-    # headers: #, 버킷, 티커, 종목명, 상태, 보유일, 일간(%), 평가(%), 현재가
-    headers = ["#", "버킷", "티커", "종목명", "상태", "보유일", "일간(%)", "평가(%)", "현재가"]
+    # headers: #, 버킷, 티커, 종목명, 상태, 보유일, 비중, 타겟비중, 일간(%), 평가(%), 현재가
+    headers = ["#", "버킷", "티커", "종목명", "상태", "보유일", "비중", "타겟비중", "일간(%)", "평가(%)", "현재가"]
     # [User Request] 현재가 - 괴리율 - Nav
     if show_deviation:
         headers.append("괴리율")
@@ -928,7 +973,7 @@ def dump_recommendation_log(
     headers.extend(["점수", "RSI", "지속", "문구"])
 
     # aligns ( headers 수와 일치해야 함 )
-    aligns = ["left", "left", "left", "left", "left", "center", "right", "right", "right"]
+    aligns = ["left", "left", "left", "left", "left", "center", "right", "right", "right", "right", "right"]
     if show_deviation:
         aligns.append("right")
     if nav_mode:
@@ -972,6 +1017,8 @@ def dump_recommendation_log(
             name,
             state,
             format_trading_days(0 if is_pending_tomorrow else holding_days),
+            f"{item.get('current_weight', 0) * 100:.0f}%" if item.get("current_weight") else "-",
+            f"{item.get('target_weight', 0) * 100:.0f}%" if item.get("target_weight") else "-",
             format_pct_change(daily_pct),
             "-" if is_pending_tomorrow else (format_pct_change(evaluation_pct) if evaluation_pct != 0 else "-"),
             format_price(price, country_code),
