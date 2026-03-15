@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from config import TRADING_DAYS_PER_MONTH
+
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -50,7 +52,7 @@ class StrategyRules:
         target_weights: Any = None,
         enable_data_sufficiency_check: Any = False,
     ) -> StrategyRules:
-        strategy_str = "PORTFOLIO"
+        strategy_str = str(strategy or "PORTFOLIO").strip().upper() or "PORTFOLIO"
         normalized_weights: dict[str, float] | None = None
         if target_weights is not None:
             if not isinstance(target_weights, Mapping):
@@ -75,7 +77,30 @@ class StrategyRules:
                 raise ValueError("TARGET_WEIGHTS의 합계는 1.0이어야 합니다.")
 
         final_rebalance_mode = str(rebalance_mode).upper() if rebalance_mode else "TWICE_A_MONTH"
+        final_ma_type = str(ma_type).upper() if ma_type else "SMA"
         data_sufficiency_check = _coerce_bool(enable_data_sufficiency_check, default=False)
+        resolved_ma_days: int | None = None
+        if ma_days is not None:
+            try:
+                resolved_ma_days = int(ma_days)
+            except (TypeError, ValueError):
+                raise ValueError("ma_days는 정수여야 합니다.")
+        elif ma_month is not None:
+            try:
+                resolved_ma_days = int(ma_month) * int(TRADING_DAYS_PER_MONTH)
+            except (TypeError, ValueError):
+                raise ValueError("MA_MONTH는 정수여야 합니다.")
+        if resolved_ma_days is None or resolved_ma_days < 1:
+            raise ValueError("MA 기간은 1 이상의 정수여야 합니다.")
+
+        resolved_cooldown: int
+        try:
+            resolved_cooldown = int(cooldown if cooldown is not None else cooldown_days)
+        except (TypeError, ValueError):
+            resolved_cooldown = 1
+        if resolved_cooldown < 1:
+            raise ValueError("COOLDOWN은 1 이상의 정수여야 합니다.")
+
         try:
             resolved_topn = int(topn if topn is not None else bucket_topn)
             if resolved_topn < 1:
@@ -85,11 +110,11 @@ class StrategyRules:
 
         return cls(
             strategy=strategy_str,
-            ma_days=1,
+            ma_days=resolved_ma_days,
             bucket_topn=resolved_topn,
-            ma_type="SMA",
+            ma_type=final_ma_type,
             rebalance_mode=final_rebalance_mode,
-            cooldown_days=1,
+            cooldown_days=resolved_cooldown,
             enable_data_sufficiency_check=data_sufficiency_check,
             target_weights=normalized_weights,
         )

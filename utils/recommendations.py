@@ -21,6 +21,7 @@ _BASE_DISPLAY_COLUMNS = [
     "상태",
     "보유일",
     "비중",
+    "타겟비중",
     "일간(%)",
     "평가(%)",
     "현재가",
@@ -157,8 +158,10 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
         bucket_id = row.get("bucket", 1)
         bucket_name = bucket_names.get(bucket_id, f"{bucket_id}. 기타")
         weight_val = row.get("weight")
+        target_weight_val = row.get("target_weight")
 
         weight_pct = float(weight_val) * 100.0 if weight_val is not None else None
+        target_weight_pct = float(target_weight_val) * 100.0 if target_weight_val is not None else None
 
         display_rows.append(
             {
@@ -169,6 +172,7 @@ def recommendations_to_dataframe(country: str, rows: Iterable[dict[str, Any]]) -
                 "상태": state,
                 "보유일": format_trading_days(holding_days),
                 "비중": weight_pct,
+                "타겟비중": target_weight_pct,
                 "일간(%)": daily_pct,
                 "평가(%)": evaluation_pct,
                 price_label: price_display,
