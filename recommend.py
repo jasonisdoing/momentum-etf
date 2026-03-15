@@ -18,7 +18,6 @@ import pandas as pd
 from config import BUCKET_MAPPING as BUCKET_NAMES
 from config import TRADING_DAYS_PER_MONTH
 from core.backtest.output.snapshot_rows import advance_snapshot_state, build_snapshot_rows, create_snapshot_build_state
-from core.backtest.price import calculate_trade_price
 
 DEFAULT_BUCKET = 1
 
@@ -223,8 +222,8 @@ def extract_recommendations_from_backtest(
         # phrase (note 사용)
         phrase = note
 
-        # 추천은 마지막 거래일 스냅샷을 형식만 바꿔 보여줍니다.
-        state = "HOLD"
+        # 추천은 마지막 거래일 스냅샷의 상태를 그대로 따릅니다.
+        state = "BUY" if decision == "BUY" else "HOLD"
 
         # 수익률 및 드로우다운 계산
         df_up_to_end = df[df.index <= end_date]
@@ -309,14 +308,10 @@ def extract_recommendations_from_backtest(
 
 def _assign_final_ranks(
     recommendations: list[dict[str, Any]],
-    bucket_topn: int = 2,
 ) -> list[dict[str, Any]]:
     """백테스트 리포트와 동일한 정렬 및 보유/대기 순위를 부여합니다."""
 
-    # 1. 정렬 그룹 할당 (daily_report.py와 동일)
-    # 0: CASH (현금은 여기서는 제외됨)
-    # 1: 내일 보유할 최종 타겟 10종목 (HOLD, BUY, BUY_REPLACE)
-    # 2: 제외/대기 대상 (WAIT, SELL, SELL_REPLACE)
+    # 추천은 마지막 스냅샷을 그대로 정렬해 보여줍니다.
     for rec in recommendations:
         shares = _safe_float(rec.get("shares"), 0.0) or 0.0
         is_current_holding = shares > 0
@@ -346,15 +341,10 @@ def _assign_final_ranks(
 
     # 3. 순위 부여
     held_idx = 1
-    wait_idx = 1
     for i, rec in enumerate(recommendations, 1):
         rec["rank_order"] = i  # 전체 정렬 순서 보존
-        if rec.get("_sort_group") == 1:
-            rec["rank"] = f"보유 {held_idx}"
-            held_idx += 1
-        else:
-            rec["rank"] = f"대기 {wait_idx}"
-            wait_idx += 1
+        rec["rank"] = f"보유 {held_idx}"
+        held_idx += 1
 
     return recommendations
 
@@ -386,128 +376,6 @@ def _calc_rsi(close_series: pd.Series, period: int = 14) -> float:
         return max(0.0, min(100.0, float(val)))
     except Exception:
         return 0.0
-
-
-def _resolve_price_column(frame: pd.DataFrame, candidates: tuple[str, ...]) -> pd.Series | None:
-    for candidate in candidates:
-        if candidate in frame.columns:
-            series = frame[candidate]
-            if isinstance(series, pd.DataFrame):
-                series = series.iloc[:, 0]
-            return pd.to_numeric(series, errors="coerce")
-    return None
-
-
-def _adjust_current_holding_metrics(
-    df: pd.DataFrame,
-    price_frame: pd.DataFrame | None,
-    *,
-    target_date: pd.Timestamp,
-    raw_holding_days: int,
-    avg_cost: float | None,
-    country_code: str,
-) -> tuple[int, float | None]:
-    """다음날 시가 체결 규칙에 맞춰 현재 보유의 보유일/진입가를 보정합니다."""
-
-    if raw_holding_days <= 0 or df.empty:
-        return raw_holding_days, avg_cost
-
-    df_up_to_date = df[df.index <= target_date]
-    if df_up_to_date.empty:
-        return raw_holding_days, avg_cost
-
-    holding_dates: list[pd.Timestamp] = []
-    for idx in reversed(df_up_to_date.index):
-        row = df_up_to_date.loc[idx]
-        shares = _safe_float(row.get("shares"), 0)
-        if shares and shares > 0:
-            holding_dates.append(pd.Timestamp(idx))
-        else:
-            break
-
-    if not holding_dates:
-        return raw_holding_days, avg_cost
-
-    holding_dates.reverse()
-    entry_signal_dt = holding_dates[0]
-    entry_row = df_up_to_date.loc[entry_signal_dt]
-    entry_decision = str(entry_row.get("decision", "") or "").upper()
-    if entry_decision not in {"BUY", "BUY_REPLACE"}:
-        return raw_holding_days, avg_cost
-
-    adjusted_days = max(raw_holding_days - 1, 0)
-    if price_frame is None or price_frame.empty:
-        return adjusted_days, avg_cost
-
-    price_history = price_frame.sort_index().copy()
-    try:
-        price_history.index = pd.to_datetime(price_history.index).normalize()
-    except Exception:
-        return adjusted_days, avg_cost
-
-    if entry_signal_dt not in price_history.index:
-        return adjusted_days, avg_cost
-
-    open_series = _resolve_price_column(price_history, ("Open", "open"))
-    close_series = _resolve_price_column(price_history, ("Close", "close", "unadjusted_close"))
-    if open_series is None or close_series is None:
-        return adjusted_days, avg_cost
-
-    loc = price_history.index.get_loc(entry_signal_dt)
-    trade_idx = int(loc.stop) - 1 if isinstance(loc, slice) else int(loc)
-    if trade_idx + 1 > len(price_history.index) - 1:
-        return adjusted_days, avg_cost
-
-    adjusted_avg_cost = calculate_trade_price(
-        trade_idx,
-        len(price_history.index),
-        open_series.to_numpy(),
-        close_series.to_numpy(),
-        country_code,
-        is_buy=True,
-    )
-    return adjusted_days, adjusted_avg_cost
-
-
-def _calculate_holding_days(df: pd.DataFrame, target_date: pd.Timestamp) -> int:
-    """보유일 계산: target_date까지 연속으로 shares > 0인 날짜 수."""
-    if df.empty:
-        return 0
-
-    # target_date 이전 데이터만 (포함)
-    df_up_to_date = df[df.index <= target_date]
-    if df_up_to_date.empty:
-        return 0
-
-    # 역순으로 보유일 계산
-    days = 0
-    for idx in reversed(df_up_to_date.index):
-        row = df_up_to_date.loc[idx]
-        shares = _safe_float(row.get("shares"), 0)
-        if shares and shares > 0:
-            days += 1
-        else:
-            break
-
-    return days
-
-
-def _decision_to_state(decision: str, shares: float) -> str:
-    """decision 값을 state로 변환합니다."""
-    decision_upper = str(decision).upper()
-
-    # [User Request] 교체매수/매도는 별도 상태로 표시
-    if decision_upper in (
-        "BUY",
-        "SELL",
-        "BUY_REPLACE",
-        "SELL_REPLACE",
-    ):
-        return decision_upper
-    elif shares and shares > 0:
-        return "HOLD"
-    else:
-        return "WAIT"
 
 
 def _enrich_with_nav_data(
@@ -571,68 +439,6 @@ def _enrich_with_nav_data(
 # ---------------------------------------------------------------------------
 # 추천 리포트 생성 (백테스트 실행 포함)
 # ---------------------------------------------------------------------------
-
-
-def _apply_bucket_selection(
-    recommendations: list[dict[str, Any]],
-    ticker_meta: dict[str, dict[str, Any]],
-    target_count: int = 1,
-) -> list[dict[str, Any]]:
-    """5-Bucket 전략 적용: 각 버킷별로 점수 상위 N개 선정 (Relative Momentum)."""
-
-    # 1. 버킷별 그룹화
-    buckets: dict[int, list[dict[str, Any]]] = {i: [] for i in range(1, 6)}
-
-    for rec in recommendations:
-        ticker = rec.get("ticker", "")
-        meta = ticker_meta.get(ticker, {})
-        # 메타에 없으면 기본값(1)
-        bucket_idx = meta.get("bucket", DEFAULT_BUCKET)
-
-        # 안전장치: 1~5 범위를 벗어나면 1로
-        if bucket_idx not in buckets:
-            bucket_idx = DEFAULT_BUCKET
-
-        rec["bucket"] = bucket_idx
-        rec["bucket_name"] = BUCKET_NAMES.get(bucket_idx, "Unknown")
-        buckets[bucket_idx].append(rec)
-
-    # 2. 각 버킷별 선정 로직
-    final_list = []
-
-    for b_idx in sorted(buckets.keys()):
-        group = buckets[b_idx]
-
-        # 점수 내림차순 정렬 (Relative Momentum)
-        # 점수가 None이면 최하위(-inf)로 취급
-        group.sort(key=lambda x: (x.get("score") if x.get("score") is not None else float("-inf")), reverse=True)
-
-        # Top N 선정
-        # 가용 종목이 target보다 적으면 전수 선정
-        selected_count = 0
-
-        for i, rec in enumerate(group):
-            is_selected = i < target_count
-
-            # 상태/랭크 업데이트
-            if is_selected:
-                selected_count += 1
-                # [Logic Change] 엔진의 decision/state를 오버라이드
-                # 이미 보유중이면 HOLD, 아니면 BUY
-                current_shares = rec.get("shares", 0)
-                if current_shares > 0:
-                    rec["decision"] = "HOLD"
-                    rec["state"] = "HOLD"
-                else:
-                    rec["decision"] = "BUY"
-                    rec["state"] = "BUY"
-            else:
-                rec["decision"] = "WAIT"
-                rec["state"] = "WAIT"
-
-        final_list.extend(group)
-
-    return final_list
 
 
 def generate_recommendation_report(
@@ -762,8 +568,7 @@ def generate_recommendation_report(
     )
 
     # [Rank Assignment] 마지막 거래일 스냅샷을 그대로 정렬합니다.
-    topn = len([etf for etf in etf_universe if isinstance(etf, dict) and str(etf.get("ticker") or "").strip()])
-    recommendations = _assign_final_ranks(recommendations, bucket_topn=topn)
+    recommendations = _assign_final_ranks(recommendations)
 
     return RecommendationReport(
         account_id=account_id,
@@ -806,8 +611,8 @@ def print_result_summary(
 
     if state_summary:
         logger.info("상태 요약: %s", state_summary)
-    buy_count = sum(1 for item in items if item.get("state") == "BUY")
-    logger.info("매수 추천: %d개, 대기: %d개", buy_count, len(items) - buy_count)
+    rebalance_count = sum(1 for item in items if str(item.get("phrase") or "").strip())
+    logger.info("비중조절 예정 문구: %d개", rebalance_count)
     logger.info("결과가 성공적으로 생성되었습니다. (총 %d개 항목)", len(items))
 
 

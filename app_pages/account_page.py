@@ -552,7 +552,7 @@ def _get_active_holdings(df: pd.DataFrame) -> pd.DataFrame:
     try:
         from core.backtest.portfolio import get_hold_states
 
-        hold_states = get_hold_states() | {"BUY", "BUY_REPLACE", "WAIT"}
+        hold_states = get_hold_states()
         return df[df["상태"].isin(hold_states)].copy()
     except Exception:
         return df
@@ -927,12 +927,10 @@ def render_account_page(account_id: str, view_mode: str | None = None, loading=N
                 try:
                     from core.backtest.portfolio import get_hold_states
 
-                    hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
+                    hold_states = get_hold_states()
                     if df is not None:
                         current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-                        target_topn = strategy_tuning.get("TOPN") if isinstance(strategy_tuning, dict) else None
-                        if target_topn:
-                            caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
+                        caption_parts.append(f"보유종목 수 {current_holdings}")
                 except Exception:
                     pass
 
