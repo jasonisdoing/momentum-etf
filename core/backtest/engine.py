@@ -1028,21 +1028,6 @@ def run_portfolio_backtest(
 
     validate_bucket_topn(top_n)
 
-    return _run_weight_backtest(
-        stocks=stocks,
-        initial_capital=initial_capital,
-        core_start_date=core_start_date,
-        country=country,
-        prefetched_data=prefetched_data,
-        trading_calendar=trading_calendar,
-        rebalance_mode=rebalance_mode,
-        target_weights=target_weights,
-        quiet=quiet,
-        progress_callback=progress_callback,
-        missing_ticker_sink=missing_ticker_sink,
-        qty_precision=qty_precision,
-    )
-
     ticker_name_map: dict[str, str] = {}
     for stock in stocks:
         if not isinstance(stock, Mapping):

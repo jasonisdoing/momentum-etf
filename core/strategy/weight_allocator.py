@@ -38,11 +38,20 @@ def calculate_score_weights(
         raise ValueError("비중 계산에 필요한 종목 점수가 없습니다.")
 
     # 가드레일 유효성 검사
-    if min_weight * n > 1.0:
-        # min_weight이 너무 크면 균등 배분으로 자동 조정
-        min_weight = 1.0 / n
+    if min_weight <= 0:
+        raise ValueError("최소 비중은 0보다 커야 합니다.")
+    if max_weight <= 0:
+        raise ValueError("최대 비중은 0보다 커야 합니다.")
     if max_weight < min_weight:
-        max_weight = min_weight
+        raise ValueError("최대 비중은 최소 비중보다 크거나 같아야 합니다.")
+    if min_weight * n > 1.0:
+        raise ValueError(
+            f"최소 비중 {min_weight:.2%}는 종목 수 {n}개와 양립할 수 없습니다. 설정을 낮추거나 종목 수를 줄이세요."
+        )
+    if max_weight * n < 1.0:
+        raise ValueError(
+            f"최대 비중 {max_weight:.2%}는 종목 수 {n}개를 합쳐도 100%를 채울 수 없습니다. 설정을 높이세요."
+        )
 
     # 1단계: 음수 점수는 0으로 치환
     clamped: dict[str, float] = {ticker: max(score, 0.0) for ticker, score in scores.items()}
