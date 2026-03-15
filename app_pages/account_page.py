@@ -235,14 +235,12 @@ def _render_stocks_meta_table(account_id: str) -> None:
         st.divider()
         st.subheader("🗑️ 종목 삭제")
         delete_reason = st.text_input(
-            "삭제 사유 (필수)", placeholder="삭제 이유를 입력하세요", key=f"edit_del_reason_{ticker}"
+            "삭제 사유 (선택)", placeholder="필요하면 삭제 이유를 입력하세요", key=f"edit_del_reason_{ticker}"
         )
 
         # type="secondary" 속성을 부여하여 CSS 선택자가 적용되도록 함
         if st.button("🗑️ 삭제 실행", type="secondary", width="stretch"):
-            if not delete_reason or not delete_reason.strip():
-                st.error("삭제 사유를 입력해야 합니다.")
-            elif remove_stock(account_id, ticker, reason=delete_reason.strip()):
+            if remove_stock(account_id, ticker, reason=delete_reason.strip()):
                 st.toast(f"✅ {ticker} 삭제 완료")
                 st.rerun()
 
