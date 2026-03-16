@@ -1,6 +1,6 @@
 """스코어 비례 비중 계산 모듈.
 
-모멘텀 점수에 비례해 종목별 목표 비중을 산출하고,
+점수에 비례해 대상별 목표 비중을 산출하고,
 가드레일(MIN/MAX)과 리밸런싱 버퍼를 적용합니다.
 """
 
@@ -20,15 +20,15 @@ def calculate_score_weights(
     3. MIN/MAX 가드레일 적용 후 정규화(합계=1.0)
 
     Args:
-        scores: {ticker: 모멘텀 점수} 딕셔너리
-        min_weight: 종목당 최소 비중
-        max_weight: 종목당 최대 비중
+        scores: {대상 ID: 점수} 딕셔너리
+        min_weight: 대상당 최소 비중
+        max_weight: 대상당 최대 비중
 
     Returns:
-        {ticker: 목표 비중} 딕셔너리, 합계 1.0
+        {대상 ID: 목표 비중} 딕셔너리, 합계 1.0
 
     Raises:
-        ValueError: 유효한 종목이 없는 경우
+        ValueError: 유효한 대상이 없는 경우
     """
     if not scores:
         raise ValueError("비중 계산에 필요한 종목 점수가 없습니다.")
@@ -46,11 +46,11 @@ def calculate_score_weights(
         raise ValueError("최대 비중은 최소 비중보다 크거나 같아야 합니다.")
     if min_weight * n > 1.0:
         raise ValueError(
-            f"최소 비중 {min_weight:.2%}는 종목 수 {n}개와 양립할 수 없습니다. 설정을 낮추거나 종목 수를 줄이세요."
+            f"최소 비중 {min_weight:.2%}는 대상 수 {n}개와 양립할 수 없습니다. 설정을 낮추거나 대상 수를 줄이세요."
         )
     if max_weight * n < 1.0:
         raise ValueError(
-            f"최대 비중 {max_weight:.2%}는 종목 수 {n}개를 합쳐도 100%를 채울 수 없습니다. 설정을 높이세요."
+            f"최대 비중 {max_weight:.2%}는 대상 수 {n}개를 합쳐도 100%를 채울 수 없습니다. 설정을 높이세요."
         )
 
     # 1단계: 음수 점수는 0으로 치환
