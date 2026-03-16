@@ -210,10 +210,10 @@ def main():
         for b in bucket_cols:
             b_val = combined_df.loc[combined_df["버킷"] == b, "평가금액(KRW)"].sum()
             b_pct = (b_val / total_assets * 100) if total_assets > 0 else 0.0
-            comp_details.append(f"• {b}: {b_pct:.1f}% ({format_korean_currency(b_val)})")
+            comp_details.append(f"• {b}: {b_pct:.1f}%")
 
         cash_pct = (global_cash / total_assets * 100) if total_assets > 0 else 0.0
-        comp_details.append(f"• 6. 현금: {cash_pct:.1f}% ({format_korean_currency(global_cash)})")
+        comp_details.append(f"• 6. 현금: {cash_pct:.1f}%")
 
         send_slack_message_v2("\n".join(comp_details), thread_ts=main_ts)
 
