@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import BACKTEST_SLIPPAGE, REBALANCE_BUFFER, WEIGHT_MAX, WEIGHT_MIN
+from config import BACKTEST_SLIPPAGE, BUCKET_WEIGHT_MAX, BUCKET_WEIGHT_MIN, REBALANCE_BUFFER
 from core.backtest.price import calculate_trade_price
 from core.strategy.metrics import process_ticker_data
 from core.strategy.weight_allocator import calculate_score_weights, should_rebalance
@@ -291,9 +291,71 @@ def _prepare_metric_arrays(
         ticker_metrics["buy_signal_values"] = buy_signal_series.to_numpy()
 
 
+def _build_bucket_mapping(stocks: Sequence[Mapping[str, Any]]) -> tuple[dict[str, int], dict[int, list[str]]]:
+    """종목 메타에서 티커별 버킷 매핑과 버킷별 구성 종목을 준비합니다."""
+
+    ticker_to_bucket: dict[str, int] = {}
+    bucket_members: dict[int, list[str]] = {}
+    for stock in stocks:
+        ticker = str(stock.get("ticker") or "").strip()
+        if not ticker:
+            raise ValueError("버킷 매핑을 만들 수 없는 빈 ticker가 있습니다.")
+        if "bucket" not in stock:
+            raise ValueError(f"{ticker} 종목에 bucket 설정이 없습니다.")
+        bucket_raw = stock.get("bucket")
+        try:
+            bucket_id = int(bucket_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{ticker} 종목의 bucket 값이 올바르지 않습니다: {bucket_raw}") from exc
+        ticker_to_bucket[ticker] = bucket_id
+        bucket_members.setdefault(bucket_id, []).append(ticker)
+    return ticker_to_bucket, bucket_members
+
+
+def _calculate_bucket_equal_weights(
+    scores: Mapping[str, float],
+    *,
+    ticker_to_bucket: Mapping[str, int],
+    bucket_members: Mapping[int, Sequence[str]],
+) -> dict[str, float]:
+    """버킷 가드레일을 적용한 뒤 버킷 내부를 균등 분배합니다."""
+
+    if not scores:
+        raise ValueError("비중 계산에 필요한 종목 점수가 없습니다.")
+
+    if not bucket_members:
+        raise ValueError("버킷 구성 정보가 없습니다.")
+
+    bucket_scores: dict[int, float] = {bucket_id: 0.0 for bucket_id in bucket_members}
+
+    for ticker, score in scores.items():
+        if ticker not in ticker_to_bucket:
+            raise ValueError(f"{ticker} 종목의 버킷 정보를 찾을 수 없습니다.")
+        bucket_id = ticker_to_bucket[ticker]
+        bucket_scores[bucket_id] = bucket_scores.get(bucket_id, 0.0) + max(float(score), 0.0)
+
+    bucket_weights = calculate_score_weights(
+        {str(bucket_id): score for bucket_id, score in bucket_scores.items()},
+        min_weight=float(BUCKET_WEIGHT_MIN) / 100.0,
+        max_weight=float(BUCKET_WEIGHT_MAX) / 100.0,
+    )
+
+    target_weights: dict[str, float] = {}
+    for bucket_id, members in bucket_members.items():
+        if not members:
+            raise ValueError(f"버킷 {bucket_id}에 배분할 종목이 없습니다.")
+        per_ticker_weight = bucket_weights[str(bucket_id)] / len(members)
+        for ticker in members:
+            target_weights[ticker] = per_ticker_weight
+
+    return target_weights
+
+
 def _initialize_bootstrap_positions(
     *,
     metrics_by_ticker: Mapping[str, dict[str, Any]],
+    ticker_to_bucket: Mapping[str, int],
+    bucket_members: Mapping[int, Sequence[str]],
     cash: float,
     country_code: str,
     qty_precision: int,
@@ -325,10 +387,10 @@ def _initialize_bootstrap_positions(
         score0 = metrics_by_ticker[ticker]["ma_score_values"][0]
         bootstrap_scores[ticker] = float(score0) if not pd.isna(score0) else 0.0
 
-    bootstrap_weights = calculate_score_weights(
+    bootstrap_weights = _calculate_bucket_equal_weights(
         bootstrap_scores,
-        min_weight=float(WEIGHT_MIN) / 100.0,
-        max_weight=float(WEIGHT_MAX) / 100.0,
+        ticker_to_bucket=ticker_to_bucket,
+        bucket_members=bucket_members,
     )
 
     remaining_cash = float(cash)
@@ -420,6 +482,7 @@ def run_portfolio_backtest(
         missing_ticker_sink=missing_ticker_sink,
         quiet=quiet,
     )
+    ticker_to_bucket, bucket_members = _build_bucket_mapping(stocks)
 
     union_index = _build_union_index(
         metrics_by_ticker=metrics_by_ticker,
@@ -460,6 +523,8 @@ def run_portfolio_backtest(
 
     position_state, cash, bootstrap_initialized = _initialize_bootstrap_positions(
         metrics_by_ticker=metrics_by_ticker,
+        ticker_to_bucket=ticker_to_bucket,
+        bucket_members=bucket_members,
         cash=cash,
         country_code=country_code,
         qty_precision=qty_precision,
@@ -511,10 +576,10 @@ def run_portfolio_backtest(
 
         target_weights_today = {ticker: 0.0 for ticker in metrics_by_ticker}
         if eligible_scores_today:
-            computed_weights = calculate_score_weights(
+            computed_weights = _calculate_bucket_equal_weights(
                 eligible_scores_today,
-                min_weight=float(WEIGHT_MIN) / 100.0,
-                max_weight=float(WEIGHT_MAX) / 100.0,
+                ticker_to_bucket=ticker_to_bucket,
+                bucket_members=bucket_members,
             )
             target_weights_today.update(computed_weights)
 
@@ -613,10 +678,10 @@ def run_portfolio_backtest(
 
             # 스코어 비례 목표 비중 계산
             if eligible_scores_today:
-                rebalance_target_weights = calculate_score_weights(
+                rebalance_target_weights = _calculate_bucket_equal_weights(
                     eligible_scores_today,
-                    min_weight=float(WEIGHT_MIN) / 100.0,
-                    max_weight=float(WEIGHT_MAX) / 100.0,
+                    ticker_to_bucket=ticker_to_bucket,
+                    bucket_members=bucket_members,
                 )
 
                 # 현재 비중 계산
@@ -720,10 +785,10 @@ def run_portfolio_backtest(
             topup_target_weights: dict[str, float] = {}
             topup_rebalance_needed: dict[str, bool] = {}
             if eligible_scores_today:
-                topup_target_weights = calculate_score_weights(
+                topup_target_weights = _calculate_bucket_equal_weights(
                     eligible_scores_today,
-                    min_weight=float(WEIGHT_MIN) / 100.0,
-                    max_weight=float(WEIGHT_MAX) / 100.0,
+                    ticker_to_bucket=ticker_to_bucket,
+                    bucket_members=bucket_members,
                 )
                 current_weights_topup: dict[str, float] = {}
                 for t, s in position_state.items():

@@ -51,7 +51,7 @@ python recommend.py core_account
 *   `SLACK_CHANNEL_ID`: 알림을 받을 슬랙 채널 ID
 
 ### 계좌 설정 (`zaccounts/<order>_<account_id>/config.json`)
-계좌는 등록된 전체 종목을 상시 보유하고, 점수에 비례해 `weight`를 동적으로 계산하는 방식으로 동작합니다. 종목별 수동 `weight` 입력은 사용하지 않습니다.
+계좌는 등록된 전체 종목을 상시 보유하고, 버킷별 상승 점수 합계에 비례해 버킷 `weight`를 동적으로 계산하는 방식으로 동작합니다. 계산된 버킷 비중은 버킷 내부 종목 수 `N`으로 균등 분배하며, 종목별 수동 `weight` 입력은 사용하지 않습니다.
 
 ```json
 {
