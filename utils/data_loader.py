@@ -1037,9 +1037,13 @@ def repair_recent_trading_day_gaps(
             listing_ts = pd.to_datetime(listing_date_str).normalize()
         except Exception:
             listing_ts = None
+    cache_start_ts = pd.Timestamp(cached_df.index.min()).normalize()
+    lower_bound_ts = cache_start_ts
     if listing_ts is not None:
-        # 상장 전 거래일은 실제 누락이 아니므로 보강 대상에서 제외합니다.
-        expected_days = [day for day in expected_days if pd.Timestamp(day).normalize() >= listing_ts]
+        lower_bound_ts = max(lower_bound_ts, listing_ts)
+
+    # 상장 전 거래일이나 이미 확보된 첫 거래일 이전 구간은 실제 누락이 아니므로 제외합니다.
+    expected_days = [day for day in expected_days if pd.Timestamp(day).normalize() >= lower_bound_ts]
     if _should_skip_today_range(country_code, latest_trading_day):
         # 개장 전에는 당일 일봉이 아직 집계되지 않을 수 있으므로 보강 대상에서 제외합니다.
         expected_days = [day for day in expected_days if pd.Timestamp(day).normalize() != latest_trading_day]
