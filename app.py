@@ -934,7 +934,13 @@ def main() -> None:
     ]
 
     # 계좌 관리 그룹
-    transaction_tabs = ["📊 잔고 CRUD", "📥 벌크 입력", "💵 원금/현금", "📸 스냅샷"]
+    transaction_tabs = [
+        "📊 잔고 CRUD",
+        "📥 벌크 입력",
+        "💵 원금/현금",
+        "📸 스냅샷",
+        "📈 그래프",
+    ]
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
 
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
