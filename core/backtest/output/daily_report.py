@@ -33,6 +33,7 @@ def _build_daily_table_rows(
     holding_days_map: dict[str, int],
     prev_rows_cache: dict[str, pd.Series | None],
     prev_pending_actions_map: dict[str, str],
+    prev_pending_reasons_map: dict[str, str],
     prev_effective_shares_map: dict[str, float],
     prev_effective_avg_cost_map: dict[str, float],
     price_overrides: dict[str, float] | None = None,
@@ -42,6 +43,7 @@ def _build_daily_table_rows(
     snapshot_state.holding_days_map = holding_days_map
     snapshot_state.prev_rows_cache = prev_rows_cache
     snapshot_state.prev_pending_actions_map = prev_pending_actions_map
+    snapshot_state.prev_pending_reasons_map = prev_pending_reasons_map
     snapshot_state.prev_effective_shares_map = prev_effective_shares_map
     snapshot_state.prev_effective_avg_cost_map = prev_effective_avg_cost_map
 
@@ -71,13 +73,14 @@ def _build_daily_table_rows(
             snapshot_row["name"],
             snapshot_row["display_decision"],
             format_trading_days(int(snapshot_row["holding_days"])),
-            "1" if is_cash else (price_formatter(price) if _is_finite_number(price) else "-"),
+            f"{float(snapshot_row['current_weight']):.1f}%",
+            f"{float(snapshot_row['target_weight']):.1f}%" if _is_finite_number(snapshot_row["target_weight"]) else "-",
             f"{float(snapshot_row['daily_pct']):+.1f}%",
             "-" if snapshot_row["evaluation_pct"] is None else f"{float(snapshot_row['evaluation_pct']):+.1f}%",
+            "1" if is_cash else (price_formatter(price) if _is_finite_number(price) else "-"),
             "1" if is_cash else _format_quantity(shares, qty_precision),
             money_formatter(0.0 if is_cash and abs(pv) < 0.01 else pv),
             "-" if evaluation_profit is None else money_formatter(float(evaluation_profit)),
-            f"{float(snapshot_row['weight']):.1f}%",
             f"{float(score):.1f}" if _is_finite_number(score) else "-",
             str(snapshot_row["message"] or ""),
         ]
@@ -107,13 +110,14 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "종목명",
         "상태",
         "보유일",
-        "현재가",
+        "비중",
+        "타겟비중",
         "일간(%)",
         "평가(%)",
+        "현재가",
         "수량",
         "금액",
         "평가손익",
-        "비중",
         "점수",
         "문구",
     ]
@@ -124,13 +128,14 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
         "left",  # 종목명
         "center",  # 상태
         "right",  # 보유일
-        "right",  # 현재가
+        "right",  # 비중
+        "right",  # 타겟비중
         "right",  # 일간(%)
         "right",  # 평가(%)
+        "right",  # 현재가
         "right",  # 수량
         "right",  # 금액
         "right",  # 평가손익
-        "right",  # 비중
         "right",  # 점수
         "left",  # 문구
     ]
@@ -195,7 +200,7 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
             "cum_profit_loss": header_values["c_pl"],
             "cum_return_pct": cum_ret,
             "held_count": held_count,
-            "bucket_topn": int(result.holdings_limit),
+            "universe_count": int(result.universe_count),
         }
 
         prefix = f"{_format_date_kor(target_date)} |"
@@ -215,6 +220,7 @@ def _generate_daily_report_lines(result: AccountBacktestResult, account_settings
             holding_days_map=snapshot_state.holding_days_map,
             prev_rows_cache=snapshot_state.prev_rows_cache,
             prev_pending_actions_map=snapshot_state.prev_pending_actions_map,
+            prev_pending_reasons_map=snapshot_state.prev_pending_reasons_map,
             prev_effective_shares_map=snapshot_state.prev_effective_shares_map,
             prev_effective_avg_cost_map=snapshot_state.prev_effective_avg_cost_map,
         )

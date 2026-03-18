@@ -240,11 +240,11 @@ def load_cached_frames_bulk_with_fallback(account_id: str, tickers: Iterable[str
 def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
     """캐시 DataFrame을 저장합니다. CACHE_START_DATE 이전 데이터는 제외합니다."""
     if df is None or df.empty:
-        return
+        raise ValueError("저장할 캐시 데이터가 비어 있습니다.")
 
     collection = _get_collection(account_id)
     if collection is None:
-        return
+        raise RuntimeError(f"캐시 컬렉션을 열 수 없습니다: {account_id}")
 
     df_to_save = df.copy()
     df_to_save.sort_index(inplace=True)
@@ -256,18 +256,24 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
         df_to_save = df_to_save[df_to_save.index >= cache_start]
 
     if df_to_save.empty:
-        return
+        raise ValueError("CACHE_START_DATE 적용 후 저장할 캐시 데이터가 비어 있습니다.")
+
+    ticker_norm = (ticker or "").strip().upper()
+
+    buf = io.BytesIO()
+    try:
+        df_to_save.to_parquet(buf, engine="pyarrow", compression="snappy")
+    except Exception as exc:
+        raise RuntimeError(f"캐시 직렬화 실패 ({ticker_norm})") from exc
+
+    payload = Binary(buf.getvalue())
 
     try:
-        buf = io.BytesIO()
-        df_to_save.to_parquet(buf, engine="pyarrow", compression="snappy")
-        payload = Binary(buf.getvalue())
-
-        collection.update_one(
-            {"ticker": (ticker or "").strip().upper()},
+        result = collection.update_one(
+            {"ticker": ticker_norm},
             {
                 "$set": {
-                    "ticker": (ticker or "").strip().upper(),
+                    "ticker": ticker_norm,
                     "data": payload,
                     "updated_at": datetime.utcnow(),
                     "row_count": int(df_to_save.shape[0]),
@@ -276,8 +282,22 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
             },
             upsert=True,
         )
-    except Exception:
-        return
+    except Exception as exc:
+        raise RuntimeError(f"캐시 저장 실패 ({ticker_norm})") from exc
+
+    if not result.acknowledged:
+        raise RuntimeError(f"캐시 저장이 확인되지 않았습니다 ({ticker_norm})")
+
+    saved_doc = collection.find_one({"ticker": ticker_norm}, {"_id": 0, "row_count": 1})
+    if not saved_doc:
+        raise RuntimeError(f"저장 후 캐시 문서를 찾을 수 없습니다 ({ticker_norm})")
+
+    saved_count = int(saved_doc.get("row_count") or 0)
+    expected_count = int(df_to_save.shape[0])
+    if saved_count != expected_count:
+        raise RuntimeError(
+            f"저장된 캐시 행 수가 다릅니다 ({ticker_norm}): expected={expected_count}, actual={saved_count}"
+        )
 
 
 def delete_cached_frame(account_id: str, ticker: str) -> None:

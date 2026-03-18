@@ -20,8 +20,9 @@ from utils.data_loader import (
 )
 from utils.formatters import format_pct_change, format_price, format_price_deviation
 from utils.pool_registry import POOL_ROOT, get_pool_dir
+from utils.portfolio_io import load_all_account_holding_tickers
 from utils.report import render_table_eaw
-from utils.stock_list_io import get_etfs
+from utils.stock_list_io import ensure_stock_meta_readable, get_etfs
 
 RESULTS_ROOT = POOL_ROOT
 
@@ -121,6 +122,7 @@ def run_pool_ranking(pool_id: str, config: RankConfig) -> RankRunResult:
     if not pool_norm:
         raise ValueError("pool_id is required")
 
+    ensure_stock_meta_readable()
     universe = get_etfs(pool_norm)
     if not universe:
         raise ValueError(f"pool_id='{pool_norm}' 종목이 비어있습니다.")
@@ -241,7 +243,7 @@ def run_pool_ranking(pool_id: str, config: RankConfig) -> RankRunResult:
         row["rank"] = rank
 
     # 한국 종목풀은 NAV/괴리율을 실시간으로 보강
-    if (config.country or "").strip().lower() in {"kor", "kr"}:
+    if (config.country or "").strip().lower() == "kor":
         tickers_for_nav = [row.get("ticker") for row in sliced_rows if row.get("ticker")]
         nav_snapshot = fetch_naver_etf_inav_snapshot(tickers_for_nav)
         for row in sliced_rows:
@@ -316,6 +318,7 @@ def save_rank_result(result: RankRunResult) -> RankOutputPaths:
     lines.append("")
     lines.append("=== 랭킹 목록 ===")
     lines.append("")
+    held_tickers = load_all_account_holding_tickers()
 
     headers = ["버킷", "티커", "종목명", "일간(%)", "현재가"]
     aligns = ["left", "left", "left", "right", "right"]
@@ -325,8 +328,10 @@ def save_rank_result(result: RankRunResult) -> RankOutputPaths:
     if nav_mode:
         headers.append("Nav")
         aligns.append("right")
-    headers.extend(["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비", "점수", "RSI", "지속"])
-    aligns.extend(["right", "right", "right", "right", "right", "right", "right", "right", "right", "right"])
+    headers.extend(
+        ["1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비", "점수", "RSI", "지속", "보유"]
+    )
+    aligns.extend(["right", "right", "right", "right", "right", "right", "right", "right", "right", "right", "left"])
 
     table_rows: list[list[str]] = []
     for row in result.rows:
@@ -354,6 +359,7 @@ def save_rank_result(result: RankRunResult) -> RankOutputPaths:
                 f"{float(row.get('score', 0.0)):.1f}",
                 f"{float(row.get('rsi_score', 0.0)):.1f}",
                 f"{int(row.get('streak', 0))}일" if int(row.get("streak", 0)) > 0 else "-",
+                "보유" if str(row.get("ticker") or "").strip().upper() in held_tickers else "",
             ]
         )
         table_rows.append(data_row)

@@ -204,6 +204,10 @@ def get_account_settings(account_id: str) -> dict[str, Any]:
 
     if not settings.get("country_code"):
         raise AccountSettingsError(f"'{path}' 설정 파일에 필수 항목 'country_code'가 누락되었습니다.")
+    country_code = str(settings.get("country_code") or "").strip().lower()
+    if country_code not in {"kor", "au"}:
+        raise AccountSettingsError(f"'{path}' 설정 파일의 country_code는 kor 또는 au만 허용합니다: {country_code}")
+    settings["country_code"] = country_code
     settings["pool"] = _normalize_pool_ids(settings.get("pool"), context=str(path))
 
     return settings
@@ -316,21 +320,14 @@ def get_account_precision(account_id: str) -> dict[str, Any]:
 
     settings = get_account_settings(account_id)
     country_code = (settings.get("country_code") or account_id).strip().lower()
-    if country_code in ("us", "usa"):
-        return {
-            "currency": "USD",
-            "qty_precision": 0,
-            "price_precision": 2,
-        }
-
-    if country_code in ("au", "aus"):
+    if country_code == "au":
         return {
             "currency": "AUD",
             "qty_precision": 0,
             "price_precision": 2,
         }
 
-    if country_code not in ("kor", "kr"):
+    if country_code != "kor":
         raise AccountSettingsError(f"지원하지 않는 국가 코드입니다: {country_code}")
 
     return {
@@ -376,9 +373,34 @@ def get_strategy_rules(account_id: str):
     """계정별 전략 설정을 `StrategyRules` 객체로 반환합니다."""
 
     from core.strategy.rules import StrategyRules
+    from utils.pool_registry import get_pool_dir
 
     tuning, _ = get_account_strategy_sections(account_id)
-    return StrategyRules.from_mapping(tuning)
+    normalized_tuning = dict(tuning)
+
+    if normalized_tuning.get("MA_MONTH") is None and normalized_tuning.get("ma_month") is None:
+        try:
+            settings = get_account_settings(account_id)
+            pool_ids = settings.get("pool") or []
+            if pool_ids:
+                pool_dir = get_pool_dir(str(pool_ids[0]))
+                pool_config = _load_json(pool_dir / "config.json")
+                rank_cfg = pool_config.get("rank") or {}
+                if isinstance(rank_cfg, dict):
+                    months = rank_cfg.get("months")
+                    ma_type = rank_cfg.get("ma_type")
+                    if months is not None:
+                        normalized_tuning["MA_MONTH"] = months
+                    if (
+                        ma_type
+                        and normalized_tuning.get("MA_TYPE") is None
+                        and normalized_tuning.get("ma_type") is None
+                    ):
+                        normalized_tuning["MA_TYPE"] = ma_type
+        except Exception:
+            pass
+
+    return StrategyRules.from_mapping(normalized_tuning)
 
 
 # ---------------------------------------------------------------------------
@@ -406,19 +428,13 @@ def get_country_strategy(country: str) -> dict[str, Any]:  # pragma: no cover
 
 def get_country_precision(country: str) -> dict[str, Any]:  # pragma: no cover
     country_code = (country or "").strip().lower()
-    if country_code in ("us", "usa"):
-        return {
-            "currency": "USD",
-            "qty_precision": 0,
-            "price_precision": 2,
-        }
-    if country_code in ("au", "aus"):
+    if country_code == "au":
         return {
             "currency": "AUD",
             "qty_precision": 0,
             "price_precision": 2,
         }
-    if country_code in ("kor", "kr"):
+    if country_code == "kor":
         return {
             "currency": "KRW",
             "qty_precision": 0,

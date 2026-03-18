@@ -12,9 +12,26 @@ from utils.logger import get_app_logger
 from utils.recommendation_storage import fetch_latest_recommendations
 from utils.recommendations import recommendations_to_dataframe
 from utils.settings_loader import get_account_settings
-from utils.stock_list_io import get_etfs
 
 logger = get_app_logger()
+
+
+class LoadingStatus:
+    """화면 상단에 공통 로딩 안내를 표시합니다."""
+
+    def __init__(self) -> None:
+        self._placeholder = st.empty()
+
+    def update(self, message: str) -> None:
+        self._placeholder.info(f"⏳ 로딩 중... {message}")
+
+    def clear(self) -> None:
+        self._placeholder.empty()
+
+
+def create_loading_status() -> LoadingStatus:
+    """공통 로딩 안내 핸들러를 생성합니다."""
+    return LoadingStatus()
 
 
 def inject_global_css() -> None:
@@ -90,25 +107,8 @@ def load_account_recommendations(
 
     rows = snapshot.get("recommendations") or []
 
-    # 추천 스냅샷 기준이 아닌 종목 관리의 비중(weight)을 표시용으로 주입
-    try:
-        account_stocks = get_etfs(account_norm)
-    except Exception:
-        account_stocks = []
-    weight_map = {
-        str(item.get("ticker") or "").strip().upper(): item.get("weight")
-        for item in account_stocks
-        if isinstance(item, dict) and str(item.get("ticker") or "").strip()
-    }
-    for row in rows:
-        ticker = str(row.get("ticker") or "").strip().upper()
-        if not ticker:
-            continue
-        if ticker in weight_map:
-            row["weight"] = weight_map.get(ticker)
-
     # [KOR] 실시간 데이터 오버레이 (NAVER API)
-    if country_code in ("kor", "kr"):
+    if country_code == "kor":
         try:
             from utils.data_loader import fetch_naver_etf_inav_snapshot
 
@@ -282,6 +282,8 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     def _color_row(row: pd.Series) -> list[str]:
         state = str(row.get("상태", "")).upper()
         color = row_colors.get(state)
+        if not color and str(row.get("보유", "")).strip() == "보유":
+            color = row_colors.get("HOLD")
         if color:
             return [f"background-color: {color}"] * len(row)
         return [""] * len(row)
@@ -449,7 +451,7 @@ def render_recommendation_table(
 
     price_label = "현재가"
     country_lower = (country_code or "").strip().lower()
-    show_deviation = country_lower in {"kr", "kor"}
+    show_deviation = country_lower in {"kr", "kor"} or "괴리율" in df.columns
 
     # 공통 컬럼 설정
     column_config_map: dict[str, st.column_config.BaseColumn] = {
@@ -461,14 +463,14 @@ def render_recommendation_table(
         "비중": st.column_config.ProgressColumn(
             "비중",
             width="small",
-            format="%.1f%%",
+            format="%.0f%%",
             min_value=0.0,
             max_value=100.0,
         ),
-        "비중(%)": st.column_config.ProgressColumn(
-            "비중(%)",
+        "타겟비중": st.column_config.ProgressColumn(
+            "타겟비중",
             width="small",
-            format="%.0f",
+            format="%.0f%%",
             min_value=0.0,
             max_value=100.0,
         ),
@@ -501,6 +503,7 @@ def render_recommendation_table(
         "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
         "문구": st.column_config.TextColumn("문구", width="large"),
+        "보유": st.column_config.TextColumn("보유", width=60),
     }
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")
@@ -626,4 +629,5 @@ __all__ = [
     "render_recommendation_table",
     "format_relative_time",
     "_resolve_row_colors",
+    "create_loading_status",
 ]

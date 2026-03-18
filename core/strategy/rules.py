@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from config import TRADING_DAYS_PER_MONTH
+
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -27,10 +29,8 @@ class StrategyRules:
 
     strategy: str
     ma_days: int
-    bucket_topn: int
     ma_type: str
     rebalance_mode: str
-    cooldown_days: int
     enable_data_sufficiency_check: bool
     target_weights: dict[str, float] | None = None
 
@@ -41,16 +41,12 @@ class StrategyRules:
         strategy: Any = "PORTFOLIO",
         ma_days: Any = None,
         ma_month: Any = None,
-        topn: Any = None,
-        bucket_topn: Any = None,
         ma_type: Any = None,
         rebalance_mode: Any = None,
-        cooldown: Any = None,
-        cooldown_days: Any = None,
         target_weights: Any = None,
         enable_data_sufficiency_check: Any = False,
     ) -> StrategyRules:
-        strategy_str = "PORTFOLIO"
+        strategy_str = str(strategy or "PORTFOLIO").strip().upper() or "PORTFOLIO"
         normalized_weights: dict[str, float] | None = None
         if target_weights is not None:
             if not isinstance(target_weights, Mapping):
@@ -75,21 +71,27 @@ class StrategyRules:
                 raise ValueError("TARGET_WEIGHTS의 합계는 1.0이어야 합니다.")
 
         final_rebalance_mode = str(rebalance_mode).upper() if rebalance_mode else "TWICE_A_MONTH"
+        final_ma_type = str(ma_type).upper() if ma_type else "SMA"
         data_sufficiency_check = _coerce_bool(enable_data_sufficiency_check, default=False)
-        try:
-            resolved_topn = int(topn if topn is not None else bucket_topn)
-            if resolved_topn < 1:
-                raise ValueError
-        except (TypeError, ValueError):
-            resolved_topn = len(normalized_weights) if normalized_weights else 1
+        resolved_ma_days: int | None = None
+        if ma_days is not None:
+            try:
+                resolved_ma_days = int(ma_days)
+            except (TypeError, ValueError):
+                raise ValueError("ma_days는 정수여야 합니다.")
+        elif ma_month is not None:
+            try:
+                resolved_ma_days = int(ma_month) * int(TRADING_DAYS_PER_MONTH)
+            except (TypeError, ValueError):
+                raise ValueError("MA_MONTH는 정수여야 합니다.")
+        if resolved_ma_days is None or resolved_ma_days < 1:
+            raise ValueError("MA 기간은 1 이상의 정수여야 합니다.")
 
         return cls(
             strategy=strategy_str,
-            ma_days=1,
-            bucket_topn=resolved_topn,
-            ma_type="SMA",
+            ma_days=resolved_ma_days,
+            ma_type=final_ma_type,
             rebalance_mode=final_rebalance_mode,
-            cooldown_days=1,
             enable_data_sufficiency_check=data_sufficiency_check,
             target_weights=normalized_weights,
         )
@@ -108,10 +110,8 @@ class StrategyRules:
             strategy=_resolve("STRATEGY", "strategy"),
             ma_month=_resolve("MA_MONTH", "ma_month"),
             ma_days=_resolve("ma_days"),
-            topn=_resolve("TOPN", "topn"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
             rebalance_mode=_resolve("REBALANCE_MODE", "rebalance_mode"),
-            cooldown=_resolve("COOLDOWN", "cooldown", "cooldown_days"),
             target_weights=_resolve("TARGET_WEIGHTS", "target_weights"),
             enable_data_sufficiency_check=_resolve("ENABLE_DATA_SUFFICIENCY_CHECK", "enable_data_sufficiency_check"),
         )
@@ -120,22 +120,14 @@ class StrategyRules:
         d = {
             "strategy": self.strategy,
             "ma_days": self.ma_days,
-            "topn": self.bucket_topn,
-            "bucket_topn": self.bucket_topn,
             "ma_type": self.ma_type,
             "rebalance_mode": self.rebalance_mode,
-            "cooldown_days": self.cooldown_days,
-            "cooldown": self.cooldown_days,
             "enable_data_sufficiency_check": self.enable_data_sufficiency_check,
         }
         if self.target_weights:
             d["target_weights"] = dict(self.target_weights)
             d["TARGET_WEIGHTS"] = dict(self.target_weights)
         return d
-
-    @property
-    def topn(self) -> int:
-        return int(self.bucket_topn)
 
 
 __all__ = [

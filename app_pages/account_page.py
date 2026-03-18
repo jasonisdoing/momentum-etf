@@ -25,7 +25,12 @@ from utils.stock_list_io import (
     update_stock,
 )
 from utils.stock_meta_updater import fetch_stock_info
-from utils.ui import format_relative_time, load_account_recommendations, render_recommendation_table
+from utils.ui import (
+    create_loading_status,
+    format_relative_time,
+    load_account_recommendations,
+    render_recommendation_table,
+)
 
 try:
     from streamlit import fragment
@@ -83,30 +88,32 @@ def _is_pool_target(target_id: str) -> bool:
         return False
 
 
-def _to_weight_pct(weight: Any) -> float | None:
-    if weight is None:
-        return None
-    try:
-        value = float(weight)
-    except (TypeError, ValueError):
-        return None
-    if value <= 0:
-        return None
-    if value <= 1.0:
-        return value * 100.0
-    return value
-
-
-# ---------------------------------------------------------------------------
-# 스타일 및 설정
-# ---------------------------------------------------------------------------
-
-
 def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.DataFrame:
     """stocks.json 메타정보를 DataFrame으로 반환."""
     etfs = get_etfs(account_id)
     if not etfs:
         return pd.DataFrame()
+
+    # 최신 추천 스냅샷의 현재 비중/타겟 비중을 표시합니다.
+    weight_map: dict[str, float] = {}
+    target_weight_map: dict[str, float] = {}
+    if use_weight:
+        try:
+            from utils.recommendation_storage import fetch_latest_recommendations
+
+            snapshot = fetch_latest_recommendations(account_id)
+            if snapshot:
+                recs = snapshot.get("recommendations") or []
+                for rec in recs:
+                    ticker = str(rec.get("ticker") or "").strip().upper()
+                    weight = rec.get("weight")
+                    target_weight = rec.get("target_weight")
+                    if ticker and weight is not None:
+                        weight_map[ticker] = float(weight) * 100.0
+                    if ticker and target_weight is not None:
+                        target_weight_map[ticker] = float(target_weight) * 100.0
+        except Exception:
+            pass
 
     rows: list[dict[str, Any]] = []
     for idx, etf in enumerate(etfs, 1):
@@ -129,7 +136,9 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
             "12달(%)": etf.get("12_month_earn_rate"),
         }
         if use_weight:
-            row["비중(%)"] = _to_weight_pct(etf.get("weight"))
+            ticker_upper = str(etf.get("ticker") or "").strip().upper()
+            row["비중"] = weight_map.get(ticker_upper)
+            row["타겟비중"] = target_weight_map.get(ticker_upper)
         rows.append(row)
     df = pd.DataFrame(rows)
     if not df.empty and "1주(%)" in df.columns:
@@ -154,15 +163,17 @@ def _render_stocks_meta_table(account_id: str) -> None:
     else:
         st.caption(f"총 {len(df)}개 종목 (Source: MongoDB)")
         if use_weight:
-            weight_series = pd.to_numeric(df.get("비중(%)"), errors="coerce")
-            if weight_series.isna().any():
-                st.warning("비중이 비어 있거나 숫자가 아닌 종목이 있습니다.")
+            weight_series = pd.to_numeric(df.get("비중"), errors="coerce").dropna()
+            target_weight_series = pd.to_numeric(df.get("타겟비중"), errors="coerce").dropna()
+            if weight_series.empty and target_weight_series.empty:
+                st.caption("최신 추천 스냅샷이 없으면 비중과 타겟비중이 비어 있을 수 있습니다.")
             else:
-                total_weight = float(weight_series.sum())
-                if abs(total_weight - 100.0) > 1e-2:
-                    st.warning(f"비중 합계가 100%가 아닙니다. 현재: {total_weight:.2f}%")
-                else:
-                    st.caption("비중 합계: 100.00%")
+                caption_parts: list[str] = []
+                if not weight_series.empty:
+                    caption_parts.append(f"표시 비중 합계: {float(weight_series.sum()):.2f}%")
+                if not target_weight_series.empty:
+                    caption_parts.append(f"표시 타겟비중 합계: {float(target_weight_series.sum()):.2f}%")
+                st.caption(" | ".join(caption_parts))
 
         def _color_pct(val: float | str) -> str:
             if val is None or pd.isna(val):
@@ -208,33 +219,15 @@ def _render_stocks_meta_table(account_id: str) -> None:
     def open_edit_dialog(ticker: str, current_bucket_name: str, name: str):
         st.write(f"**{name}** ({ticker})")
         st.caption(f"현재 버킷: {current_bucket_name}")
-        current_row = df_edit[df_edit["티커"] == ticker]
-        current_weight_pct = None
-        if use_weight and not current_row.empty:
-            current_weight_pct = current_row.iloc[0].get("비중(%)")
-            current_weight_pct = float(current_weight_pct) if pd.notna(current_weight_pct) else 0.0
 
         st.subheader("버킷 변경")
         new_bucket_name = st.selectbox(
             "버킷 변경", options=BUCKET_OPTIONS, index=BUCKET_OPTIONS.index(current_bucket_name)
         )
-        new_weight_pct = None
-        if use_weight:
-            st.subheader("비중 변경")
-            new_weight_pct = st.number_input(
-                "비중(%)",
-                min_value=0,
-                max_value=100,
-                step=1,
-                value=int(round(float(current_weight_pct or 0.0))),
-                format="%d",
-            )
 
         if st.button("💾 변경사항 저장", type="primary", width="stretch"):
             new_bucket_int = BUCKET_REVERSE_MAPPING.get(new_bucket_name, 1)
             update_fields: dict[str, Any] = {"bucket": new_bucket_int}
-            if use_weight:
-                update_fields["weight"] = int(new_weight_pct or 0)
             if update_stock(account_id, ticker, **update_fields):
                 st.toast(f"✅ {ticker} 버킷 변경 완료")
                 st.rerun()
@@ -242,14 +235,12 @@ def _render_stocks_meta_table(account_id: str) -> None:
         st.divider()
         st.subheader("🗑️ 종목 삭제")
         delete_reason = st.text_input(
-            "삭제 사유 (필수)", placeholder="삭제 이유를 입력하세요", key=f"edit_del_reason_{ticker}"
+            "삭제 사유 (선택)", placeholder="필요하면 삭제 이유를 입력하세요", key=f"edit_del_reason_{ticker}"
         )
 
         # type="secondary" 속성을 부여하여 CSS 선택자가 적용되도록 함
         if st.button("🗑️ 삭제 실행", type="secondary", width="stretch"):
-            if not delete_reason or not delete_reason.strip():
-                st.error("삭제 사유를 입력해야 합니다.")
-            elif remove_stock(account_id, ticker, reason=delete_reason.strip()):
+            if remove_stock(account_id, ticker, reason=delete_reason.strip()):
                 st.toast(f"✅ {ticker} 삭제 완료")
                 st.rerun()
 
@@ -293,7 +284,20 @@ def _render_stocks_meta_table(account_id: str) -> None:
         ),
         "티커": st.column_config.TextColumn("티커", width=55),
         "종목명": st.column_config.TextColumn("종목명", width=300),
-        "비중(%)": st.column_config.NumberColumn("비중(%)", width="small", format="%.0f"),
+        "비중": st.column_config.ProgressColumn(
+            "비중",
+            width="small",
+            format="%.0f%%",
+            min_value=0.0,
+            max_value=100.0,
+        ),
+        "타겟비중": st.column_config.ProgressColumn(
+            "타겟비중",
+            width="small",
+            format="%.0f%%",
+            min_value=0.0,
+            max_value=100.0,
+        ),
         "추가일자": st.column_config.TextColumn("추가일자", width=90),
         "상장일": st.column_config.TextColumn("상장일", width=80),
         "주간거래량": st.column_config.NumberColumn("주간거래량", width=80, format="localized"),
@@ -310,7 +314,8 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "버킷",
         "티커",
         "종목명",
-        "비중(%)",
+        "비중",
+        "타겟비중",
         "상장일",
         "주간거래량",
         "1주(%)",
@@ -401,9 +406,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         # 국가별 플레이스홀더 설정
         if country_code == "kor":
             placeholder_text = "예: 005930"
-        elif country_code in ["us", "usa"]:
-            placeholder_text = "예: SPY"
-        elif country_code in ["au", "aus"]:
+        elif country_code == "au":
             placeholder_text = "예: VAS"
         else:
             placeholder_text = "예: Ticker"
@@ -455,17 +458,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
                     "버킷 선택", options=BUCKET_OPTIONS, index=0, key=f"sb_bucket_add_{account_id}"
                 )
                 bucket_int = BUCKET_REVERSE_MAPPING.get(selected_bucket_name, 1)
-                weight_for_add = None
-                if use_weight:
-                    weight_for_add = st.number_input(
-                        "비중(%)",
-                        min_value=0,
-                        max_value=100,
-                        step=1,
-                        value=0,
-                        format="%d",
-                        key=f"nb_weight_add_{account_id}",
-                    )
 
                 # 추가 버튼 (녹색 primary)
                 if st.button("➕ 추가하기", type="primary", width="stretch", key=f"btn_confirm_add_{account_id}"):
@@ -473,8 +465,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
                         "listing_date": search_result.get("listing_date"),
                         "bucket": bucket_int,
                     }
-                    if use_weight:
-                        extra_fields["weight"] = int(weight_for_add or 0)
                     success = add_stock(
                         account_id,
                         ticker_res,
@@ -558,7 +548,7 @@ def _get_active_holdings(df: pd.DataFrame) -> pd.DataFrame:
     try:
         from core.backtest.portfolio import get_hold_states
 
-        hold_states = get_hold_states() | {"BUY", "BUY_REPLACE", "WAIT"}
+        hold_states = get_hold_states()
         return df[df["상태"].isin(hold_states)].copy()
     except Exception:
         return df
@@ -778,8 +768,10 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
         st.session_state[selected_tickers_key] = selected_now
 
 
-def render_account_page(account_id: str, view_mode: str | None = None) -> None:
+def render_account_page(account_id: str, view_mode: str | None = None, loading=None) -> None:
     """주어진 계정 설정을 기반으로 계정 페이지를 렌더링합니다 (탭 포함)."""
+    owns_loading = loading is None
+    loading = loading or create_loading_status()
 
     # 버튼 스타일링 (특정 영역의 버튼만 색상 적용)
     # 탭 이동 시에도 항상 적용되도록 메인 함수 최상단에 배치
@@ -808,151 +800,159 @@ def render_account_page(account_id: str, view_mode: str | None = None) -> None:
     )
 
     try:
-        account_settings = get_account_settings(account_id)
-    except AccountSettingsError as exc:
-        st.error(f"설정을 불러오지 못했습니다: {exc}")
-        st.stop()
+        loading.update(f"{account_id.upper()} 설정 조회")
+        try:
+            account_settings = get_account_settings(account_id)
+        except AccountSettingsError as exc:
+            st.error(f"설정을 불러오지 못했습니다: {exc}")
+            st.stop()
 
-    country_code = _normalize_code(account_settings.get("country_code"), account_id)
+        country_code = _normalize_code(account_settings.get("country_code"), account_id)
 
-    # 추천 데이터 로드 (탭 밖에서 한 번만)
-    df, updated_at, loaded_country_code = load_account_recommendations(account_id)
-    country_code = loaded_country_code or country_code
+        loading.update(f"{account_id.upper()} 추천 데이터 조회")
+        df, updated_at, loaded_country_code = load_account_recommendations(account_id)
+        country_code = loaded_country_code or country_code
 
-    if view_mode is None:
-        view_mode = st.segmented_control(
-            "뷰",
-            ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"],
-            default="1. 추천 결과",
-            key=f"view_{account_id}",
-            label_visibility="collapsed",
-        )
-
-    if view_mode == "2. 종목 관리":
-        _render_stocks_meta_table(account_id)
-    elif view_mode == "3. 삭제된 종목":
-        _render_deleted_stocks_tab(account_id)
-    else:  # "1. 추천 결과" (Default)
-        if df is None:
-            st.error(
-                updated_at
-                or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
+        if view_mode is None:
+            view_mode = st.segmented_control(
+                "뷰",
+                ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"],
+                default="1. 추천 결과",
+                key=f"view_{account_id}",
+                label_visibility="collapsed",
             )
-        else:
-            if df.empty:
-                st.info("표시할 추천 종목이 없습니다.")
-            else:
-                render_recommendation_table(
-                    df,
-                    country_code=country_code,
-                    grouped_by_bucket=False,
-                    # customize_columns={"#": ("버킷", 120)} # This will be implemented in utils/ui.py
+
+        if view_mode == "2. 종목 관리":
+            loading.update(f"{account_id.upper()} 종목 관리 테이블 준비")
+            _render_stocks_meta_table(account_id)
+        elif view_mode == "3. 삭제된 종목":
+            loading.update(f"{account_id.upper()} 삭제 종목 테이블 준비")
+            _render_deleted_stocks_tab(account_id)
+        else:  # "1. 추천 결과" (Default)
+            if df is None:
+                st.error(
+                    updated_at
+                    or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
                 )
-
-    # --- 공통: 업데이트 시간, 설정, 푸터 (보유종목/종목추세 탭에서만 표시) ---
-    if view_mode in ("1. 추천 결과", "2. 종목 추세") and updated_at:
-        if "," in updated_at:
-            parts = updated_at.split(",", 1)
-            date_part = parts[0].strip()
-            user_part = parts[1].strip()
-            updated_at_rel = format_relative_time(date_part)
-            updated_at_display = f"{date_part}{updated_at_rel}, {user_part}"
-        else:
-            updated_at_rel = format_relative_time(updated_at)
-            updated_at_display = f"{updated_at}{updated_at_rel}"
-
-        if country_code in ("kor", "kr"):
-            from datetime import datetime
-
-            now = datetime.now()
-            now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-            now_rel = format_relative_time(now)
-
-            st.caption(f"추천 데이터 업데이트: {updated_at_display}  \n가격 데이터 업데이트: {now_str}{now_rel}, Naver")
-        else:
-            st.caption(f"데이터 업데이트: {updated_at_display}")
-
-        with st.expander("설정", expanded=True):
-            strategy_cfg = account_settings.get("strategy", {}) or {}
-            cagr = None
-            mdd = None
-            backtested_date = None
-            strategy_tuning: dict[str, Any] = {}
-            if isinstance(strategy_cfg, dict):
-                cagr = strategy_cfg.get("TUNE_CAGR")
-                mdd = strategy_cfg.get("TUNE_MDD")
-                backtested_date = strategy_cfg.get("TUNE_DATE")
-                strategy_tuning = resolve_strategy_params(strategy_cfg)
-
-                params_to_show = {}
-                if strategy_tuning.get("MA_MONTH"):
-                    params_to_show["MA개월"] = strategy_tuning.get("MA_MONTH")
-
-                from config import OPTIMIZATION_METRIC
-
-                params_to_show.update(
-                    {
-                        "MA타입": strategy_tuning.get("MA_TYPE"),
-                        "리밸런스 주기": strategy_tuning.get("REBALANCE_MODE", "TWICE_A_MONTH"),
-                        "최적화 지표": OPTIMIZATION_METRIC,
-                    }
-                )
-
-                param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
             else:
-                param_strs = []
-
-            caption_parts: list[str] = []
-            if param_strs:
-                param_display = ", ".join(param_strs)
-                caption_parts.append(f"설정: [{param_display}]")
-            else:
-                caption_parts.append("설정: N/A")
-
-            # 슬리피지 정보 추가
-            from config import BACKTEST_SLIPPAGE
-
-            slippage_config = BACKTEST_SLIPPAGE.get(country_code, {})
-            buy_slip = slippage_config.get("buy_pct")
-            sell_slip = slippage_config.get("sell_pct")
-            if buy_slip is not None and sell_slip is not None:
-                if buy_slip == sell_slip:
-                    caption_parts.append(f"슬리피지: ±{buy_slip}%")
+                if df.empty:
+                    st.info("표시할 추천 종목이 없습니다.")
                 else:
-                    caption_parts.append(f"슬리피지: 매수+{buy_slip}%/매도-{sell_slip}%")
+                    loading.update(f"{account_id.upper()} 추천 테이블 준비")
+                    render_recommendation_table(
+                        df,
+                        country_code=country_code,
+                        grouped_by_bucket=False,
+                        # customize_columns={"#": ("버킷", 120)} # This will be implemented in utils/ui.py
+                    )
 
-            try:
-                from core.backtest.portfolio import get_hold_states
-
-                hold_states = get_hold_states() | {"BUY", "BUY_REPLACE"}
-                if df is not None:
-                    current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-                    target_topn = strategy_tuning.get("TOPN") if isinstance(strategy_tuning, dict) else None
-                    if target_topn:
-                        caption_parts.append(f"보유종목 수 {current_holdings}/{target_topn}")
-            except Exception:
-                pass
-
-            # 성과 지표 (CAGR, MDD) 및 백테스트 일자 추가
-            if cagr is not None:
-                caption_parts.append(f"**CAGR: {float(cagr):.2f}%**")
-            if mdd is not None:
-                caption_parts.append(f"**MDD: {float(mdd):.2f}%**")
-            if backtested_date:
-                caption_parts.append(f"**백테스트: {backtested_date}**")
-
-            caption_text = ", ".join(caption_parts)
-            if caption_text:
-                st.caption(caption_text)
+        # --- 공통: 업데이트 시간, 설정, 푸터 (보유종목/종목추세 탭에서만 표시) ---
+        if view_mode in ("1. 추천 결과", "2. 종목 추세") and updated_at:
+            if "," in updated_at:
+                parts = updated_at.split(",", 1)
+                date_part = parts[0].strip()
+                user_part = parts[1].strip()
+                updated_at_rel = format_relative_time(date_part)
+                updated_at_display = f"{date_part}{updated_at_rel}, {user_part}"
             else:
-                st.caption("설정 정보를 찾을 수 없습니다.")
-    elif view_mode in ("1. 보유 종목", "2. 종목 추세"):
-        st.caption("데이터를 찾을 수 없습니다.")
+                updated_at_rel = format_relative_time(updated_at)
+                updated_at_display = f"{updated_at}{updated_at_rel}"
 
-    # 수동 액션 실행 (추천 결과 탭에서만 가장 하단에 표시)
-    if view_mode == "1. 추천 결과":
-        st.divider()
-        _render_manual_actions(account_id)
+            if country_code == "kor":
+                from datetime import datetime
+
+                now = datetime.now()
+                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                now_rel = format_relative_time(now)
+
+                st.caption(
+                    f"추천 데이터 업데이트: {updated_at_display}  \n가격 데이터 업데이트: {now_str}{now_rel}, Naver"
+                )
+            else:
+                st.caption(f"데이터 업데이트: {updated_at_display}")
+
+            with st.expander("설정", expanded=True):
+                strategy_cfg = account_settings.get("strategy", {}) or {}
+                cagr = None
+                mdd = None
+                backtested_date = None
+                strategy_tuning: dict[str, Any] = {}
+                if isinstance(strategy_cfg, dict):
+                    cagr = strategy_cfg.get("TUNE_CAGR")
+                    mdd = strategy_cfg.get("TUNE_MDD")
+                    backtested_date = strategy_cfg.get("TUNE_DATE")
+                    strategy_tuning = resolve_strategy_params(strategy_cfg)
+
+                    params_to_show = {}
+                    if strategy_tuning.get("MA_MONTH"):
+                        params_to_show["MA개월"] = strategy_tuning.get("MA_MONTH")
+
+                    from config import OPTIMIZATION_METRIC
+
+                    params_to_show.update(
+                        {
+                            "MA타입": strategy_tuning.get("MA_TYPE"),
+                            "리밸런스 주기": strategy_tuning.get("REBALANCE_MODE", "TWICE_A_MONTH"),
+                            "최적화 지표": OPTIMIZATION_METRIC,
+                        }
+                    )
+
+                    param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
+                else:
+                    param_strs = []
+
+                caption_parts: list[str] = []
+                if param_strs:
+                    param_display = ", ".join(param_strs)
+                    caption_parts.append(f"설정: [{param_display}]")
+                else:
+                    caption_parts.append("설정: N/A")
+
+                # 슬리피지 정보 추가
+                from config import BACKTEST_SLIPPAGE
+
+                slippage_config = BACKTEST_SLIPPAGE.get(country_code, {})
+                buy_slip = slippage_config.get("buy_pct")
+                sell_slip = slippage_config.get("sell_pct")
+                if buy_slip is not None and sell_slip is not None:
+                    if buy_slip == sell_slip:
+                        caption_parts.append(f"슬리피지: ±{buy_slip}%")
+                    else:
+                        caption_parts.append(f"슬리피지: 매수+{buy_slip}%/매도-{sell_slip}%")
+
+                try:
+                    from core.backtest.portfolio import get_hold_states
+
+                    hold_states = get_hold_states()
+                    if df is not None:
+                        current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
+                        caption_parts.append(f"보유종목 수 {current_holdings}")
+                except Exception:
+                    pass
+
+                # 성과 지표 (CAGR, MDD) 및 백테스트 일자 추가
+                if cagr is not None:
+                    caption_parts.append(f"**CAGR: {float(cagr):.2f}%**")
+                if mdd is not None:
+                    caption_parts.append(f"**MDD: {float(mdd):.2f}%**")
+                if backtested_date:
+                    caption_parts.append(f"**백테스트: {backtested_date}**")
+
+                caption_text = ", ".join(caption_parts)
+                if caption_text:
+                    st.caption(caption_text)
+                else:
+                    st.caption("설정 정보를 찾을 수 없습니다.")
+        elif view_mode in ("1. 보유 종목", "2. 종목 추세"):
+            st.caption("데이터를 찾을 수 없습니다.")
+
+        # 수동 액션 실행 (추천 결과 탭에서만 가장 하단에 표시)
+        if view_mode == "1. 추천 결과":
+            st.divider()
+            _render_manual_actions(account_id)
+    finally:
+        if owns_loading:
+            loading.clear()
 
 
 def render_account_setup_page(account_id: str) -> None:

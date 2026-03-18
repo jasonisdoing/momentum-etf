@@ -124,6 +124,12 @@ def main() -> int:
         logger.error("먼저 가격 캐시를 업데이트한 뒤 다시 실행하세요.")
         logger.error("예시: python scripts/update_price_cache.py %s", pool_id)
         return 2
+    except RuntimeError as exc:
+        logger.error("%s", exc)
+        return 3
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return 1
     print_result_summary(result)
 
     outputs = save_rank_result(result)

@@ -279,7 +279,7 @@ def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
     logger = get_app_logger()
 
     try:
-        if country_norm in ("kor", "kr"):
+        if country_norm == "kor":
             # 1. Pykrx로 이름 조회 시도 (가장 빠름)
             try:
                 name = fetch_pykrx_name(ticker)
@@ -314,7 +314,7 @@ def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
             except Exception:
                 pass
 
-        elif country_norm in ("us", "au", "usa"):
+        elif country_norm in ("us", "au"):
             yf_ticker = ticker
             # Strip exchange prefix (e.g., "ASX:VGS" → "VGS")
             if ":" in yf_ticker:

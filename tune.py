@@ -13,37 +13,32 @@ from utils.logger import get_app_logger
 # =========================================================
 # 계좌별 성격 맞춤형 설정
 # =========================================================
-
+# ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
 ACCOUNT_TUNING_CONFIG = {
     "kor_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["TWICE_A_MONTH"],
     },
     "isa_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["TWICE_A_MONTH"],
     },
     "pension_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
-    },
-    "kor_save_account": {
-        "TUNE_MONTHS": 4,
-        "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["TWICE_A_MONTH"],
     },
     "core_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": ["WEEKLY", "TWICE_A_MONTH", "MONTHLY", "QUARTERLY"],
+        "REBALANCE_MODE": ["TWICE_A_MONTH"],
     },
     "aus_account": {
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": ["MONTHLY"],
+        "REBALANCE_MODE": ["TWICE_A_MONTH"],
     },
 }
 

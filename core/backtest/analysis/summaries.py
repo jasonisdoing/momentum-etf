@@ -9,11 +9,6 @@ def _build_sell_trade_mask(df: pd.DataFrame) -> pd.Series:
     if df.empty:
         return pd.Series(False, index=df.index)
 
-    decision_col = (
-        df["decision"].astype(str).str.upper()
-        if "decision" in df.columns
-        else pd.Series("", index=df.index, dtype=object)
-    )
     pending_col = (
         df["pending_action"].astype(str).str.upper()
         if "pending_action" in df.columns
@@ -21,9 +16,7 @@ def _build_sell_trade_mask(df: pd.DataFrame) -> pd.Series:
     )
     trade_shares_col = pd.to_numeric(df.get("trade_shares", 0.0), errors="coerce").fillna(0.0)
 
-    return ((decision_col == "SELL") | (decision_col == "SELL_REPLACE") | pending_col.str.startswith("SELL")) & (
-        trade_shares_col > 0
-    )
+    return pending_col.str.startswith("SELL") & (trade_shares_col > 0)
 
 
 def extract_evaluated_records(ticker_timeseries: dict[str, pd.DataFrame]) -> dict[str, dict[str, Any]]:
@@ -41,7 +34,7 @@ def extract_evaluated_records(ticker_timeseries: dict[str, pd.DataFrame]) -> dic
 
 
 def calculate_weekly_summary(
-    portfolio_df: pd.DataFrame, initial_capital: float, holdings_limit: int
+    portfolio_df: pd.DataFrame, initial_capital: float, universe_count: int
 ) -> list[dict[str, Any]]:
     """Calculates weekly performance summary."""
     if portfolio_df.empty:
@@ -83,7 +76,7 @@ def calculate_weekly_summary(
                 "week_end": week_end_label,
                 "value": float(value),
                 "held_count": held_count,
-                "max_topn": holdings_limit,
+                "universe_count": universe_count,
                 "weekly_return_pct": float(weekly_return_pct.loc[dt] if dt in weekly_return_pct.index else 0.0),
                 "cumulative_return_pct": float(weekly_cum_pct.loc[dt] if dt in weekly_cum_pct.index else 0.0),
             }

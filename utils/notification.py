@@ -127,18 +127,18 @@ def compose_recommendation_slack_message(
     summary_data = getattr(report, "summary_data", None)
 
     held_count: int | None = None
-    holdings_limit: int | None = None
+    universe_count: int | None = None
     if isinstance(summary_data, dict):
         held_raw = summary_data.get("held_count")
-        limit_raw = summary_data.get("holdings_limit") or summary_data.get("bucket_topn")
+        limit_raw = summary_data.get("universe_count")
         try:
             held_count = int(held_raw) if held_raw is not None else None
         except (TypeError, ValueError):
             held_count = None
         try:
-            holdings_limit = int(limit_raw) if limit_raw is not None else None
+            universe_count = int(limit_raw) if limit_raw is not None else None
         except (TypeError, ValueError):
-            holdings_limit = None
+            universe_count = None
 
     state_counter: Counter[str] = Counter()
     if isinstance(decision_config, dict):
@@ -165,34 +165,32 @@ def compose_recommendation_slack_message(
     headline = f"{account_label} 추천 정보가 갱신되었습니다. ({base_date_str})"
     app_prefix = f"[{APP_LABEL}] " if APP_LABEL else ""
 
-    def _format_hold_ratio(held: int | None, topn: int | None) -> str:
+    def _format_hold_ratio(held: int | None, limit: int | None) -> str:
         held_str = str(held) if held is not None else "?"
-        topn_str = str(topn) if topn is not None else "?"
-        return f"{held_str}/{topn_str}"
+        limit_str = str(limit) if limit is not None else "?"
+        return f"{held_str}/{limit_str}"
 
     if held_count is None:
         # 현재 물리적으로 보유 중인 종목 수 (매도 예정 포함)
         from core.backtest.portfolio import count_current_holdings
 
         held_count = count_current_holdings(recommendations)
-    if holdings_limit is None:
+    if universe_count is None:
         strategy_params = (
             resolve_strategy_params((account_settings or {}).get("strategy", {})) if account_settings else {}
         )
-        topn_val = strategy_params.get("TOPN")
 
         topn_candidates = [
-            getattr(report, "holdings_limit", None),
-            getattr(report, "bucket_topn", None),  # Legacy / individual bucket
-            (account_settings or {}).get("holdings_limit"),
-            topn_val,
+            getattr(report, "universe_count", None),
+            (account_settings or {}).get("universe_count"),
+            strategy_params.get("UNIVERSE_COUNT"),
         ]
         for candidate in topn_candidates:
             try:
-                holdings_limit = int(candidate)
+                universe_count = int(candidate)
                 break
             except (TypeError, ValueError, AttributeError):
-                holdings_limit = None
+                universe_count = None
 
     mobile_account = account_norm or (account_id or "").strip()
     mobile_url = f"https://etf.dojason.com/{mobile_account}" if mobile_account else "https://etf.dojason.com"
@@ -420,8 +418,7 @@ def build_summary_line_from_summary_data(
 
     if include_hold:
         held_count = summary_data.get("held_count")
-        # holdings_limit을 우선 사용하고 없으면 bucket_topn(레거시) 사용
-        limit = summary_data.get("holdings_limit") or summary_data.get("bucket_topn")
+        limit = summary_data.get("universe_count")
         if held_count is not None and limit is not None:
             try:
                 parts.append(f"보유종목: {int(held_count)}/{int(limit)}")
