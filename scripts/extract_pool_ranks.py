@@ -25,7 +25,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("pool_id", help="종목군 ID (예: kor_kr, kor_us, us, aus)")
     parser.add_argument("--country", required=True, help="국가 코드 (kor/us/au)")
     parser.add_argument("--months", type=int, default=12, help="RANK MA 개월 수")
-    parser.add_argument("--ma-type", default="HMA", help="이동평균 타입 (SMA/EMA/HMA...)")
+    parser.add_argument("--ma-type", default="HMA", help="이동평균 타입 (SMA/EMA/WMA/DEMA/TEMA/HMA/ALMA)")
     parser.add_argument("--top", type=int, default=20, help="출력 개수")
     parser.add_argument("--allow-remote-fetch", action="store_true", help="캐시 누락 시 원격 조회 허용")
     return parser

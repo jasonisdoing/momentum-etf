@@ -34,7 +34,7 @@ def process_ticker_data(
         df: 가격 데이터프레임
         ma_days: 이동평균 기간
         precomputed_entry: 미리 계산된 캐시 데이터 (옵션)
-        ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA)
+        ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA, ALMA)
         enable_data_sufficiency_check: 데이터 충분성 검사 활성화 여부
     Returns:
         Dict: 계산된 지표들 또는 None (처리 실패 시)
