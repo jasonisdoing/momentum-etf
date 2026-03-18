@@ -2,6 +2,9 @@
 
 이 문서는 Momentum ETF 시스템의 설치, 설정, 실행 방법을 설명합니다.
 
+현재 이 시스템은 한국 상장 ETF와 호주 ETF를 운용 대상으로 사용합니다.
+계좌 설정의 `country_code`는 `kor` 또는 `au`만 허용합니다.
+
 ## 1. 설치 및 실행
 
 ### 필수 요구사항
@@ -15,7 +18,7 @@
 ```bash
 python rank.py kor
 python rank.py us
-python rank.py aus
+python rank.py au
 ```
 
 **2. 튜닝 (계좌 리밸런싱 파라미터 탐색)**
@@ -40,7 +43,7 @@ python recommend.py core_account
 ```
 
 현재 운영 식별자:
-* 종목풀: `kor`, `us`, `aus`
+* 종목풀: `kor`, `us`, `au`
 * 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
 
 ## 2. 설정 가이드
@@ -52,9 +55,11 @@ python recommend.py core_account
 
 ### 계좌 설정 (`zaccounts/<order>_<account_id>/config.json`)
 계좌는 등록된 전체 종목을 상시 보유하고, 활성 버킷 수 기준으로 버킷 `weight`를 균등 계산하는 방식으로 동작합니다. 계산된 버킷 비중은 버킷 내부 종목 수 `N`으로 다시 균등 분배하며, 종목별 수동 `weight` 입력은 사용하지 않습니다.
+계좌 `country_code`는 현재 `kor` 또는 `au`만 사용합니다.
 
 ```json
 {
+  "country_code": "kor",
   "strategy": {
     "TUNE_MONTHS": 12,
     "OPTIMIZATION_METRIC": "CAGR",
@@ -79,6 +84,7 @@ python recommend.py core_account
 ```
 
 > 참고: 계좌 추천/백테스트는 종목풀 랭킹을 자동 병합하지 않습니다. 랭킹 결과를 보고 사용자가 계좌 종목을 직접 교체하면, 시스템은 그 종목 집합을 기준으로 균등 비중만 다시 계산합니다.
+> 참고: `us` 종목풀은 "미국 시장 추종 ETF를 담은 한국 상장 ETF"를 위한 분류이며, 별도 미국 계좌 `country_code`를 뜻하지 않습니다.
 
 ## 3. 대시보드 및 계좌 관리
 

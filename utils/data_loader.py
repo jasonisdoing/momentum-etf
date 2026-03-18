@@ -1940,7 +1940,7 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> float | None:
         return None
 
     country_code = (country or "").strip().lower() or "kor"
-    if country_code not in {"kor", "kr"}:
+    if country_code != "kor":
         logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
         return None
 

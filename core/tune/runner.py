@@ -378,7 +378,7 @@ def _resolve_tuning_search_context(
     except ValueError:
         ma_max = 20
 
-    multiplier = 2.0 if country_code in ("us", "usa") else 1.5
+    multiplier = 1.5
     warmup_days = int(max(ma_max, 20) * multiplier)
     max_safe_warmup = 2500
     if warmup_days > max_safe_warmup:
@@ -863,22 +863,7 @@ def _execute_tuning(
     encountered_missing: set[str] = set()
     best_cagr_so_far = float("-inf")
 
-    # US 계정인 경우 환율 데이터 prefetch (모든 워커가 공유)
     fx_series: pd.Series | None = None
-    country_code = account_norm.strip().lower()
-    if country_code in {"us"}:
-        try:
-            from utils.data_loader import get_exchange_rate_series
-
-            fx_series = get_exchange_rate_series(date_range[0], date_range[1])
-            if fx_series is not None and not fx_series.empty:
-                logger.info(
-                    "[튜닝] %s 환율 데이터 prefetch 완료 (%d일)",
-                    account_norm.upper(),
-                    len(fx_series),
-                )
-        except Exception as exc:
-            logger.warning("[튜닝] %s 환율 데이터 로드 실패, fallback 사용: %s", account_norm.upper(), exc)
 
     payloads = [
         (

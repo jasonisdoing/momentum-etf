@@ -204,6 +204,10 @@ def get_account_settings(account_id: str) -> dict[str, Any]:
 
     if not settings.get("country_code"):
         raise AccountSettingsError(f"'{path}' 설정 파일에 필수 항목 'country_code'가 누락되었습니다.")
+    country_code = str(settings.get("country_code") or "").strip().lower()
+    if country_code not in {"kor", "au"}:
+        raise AccountSettingsError(f"'{path}' 설정 파일의 country_code는 kor 또는 au만 허용합니다: {country_code}")
+    settings["country_code"] = country_code
     settings["pool"] = _normalize_pool_ids(settings.get("pool"), context=str(path))
 
     return settings
@@ -316,21 +320,14 @@ def get_account_precision(account_id: str) -> dict[str, Any]:
 
     settings = get_account_settings(account_id)
     country_code = (settings.get("country_code") or account_id).strip().lower()
-    if country_code in ("us", "usa"):
-        return {
-            "currency": "USD",
-            "qty_precision": 0,
-            "price_precision": 2,
-        }
-
-    if country_code in ("au", "aus"):
+    if country_code == "au":
         return {
             "currency": "AUD",
             "qty_precision": 0,
             "price_precision": 2,
         }
 
-    if country_code not in ("kor", "kr"):
+    if country_code != "kor":
         raise AccountSettingsError(f"지원하지 않는 국가 코드입니다: {country_code}")
 
     return {
@@ -431,19 +428,13 @@ def get_country_strategy(country: str) -> dict[str, Any]:  # pragma: no cover
 
 def get_country_precision(country: str) -> dict[str, Any]:  # pragma: no cover
     country_code = (country or "").strip().lower()
-    if country_code in ("us", "usa"):
-        return {
-            "currency": "USD",
-            "qty_precision": 0,
-            "price_precision": 2,
-        }
-    if country_code in ("au", "aus"):
+    if country_code == "au":
         return {
             "currency": "AUD",
             "qty_precision": 0,
             "price_precision": 2,
         }
-    if country_code in ("kor", "kr"):
+    if country_code == "kor":
         return {
             "currency": "KRW",
             "qty_precision": 0,

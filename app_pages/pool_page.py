@@ -99,7 +99,7 @@ def _render_ranking_view(pool_id: str, selected_bucket: str = "전체") -> None:
     price_source = "Local Cache"
 
     # 추천 화면과 동일하게 한국 종목은 렌더링 시점에 Naver 실시간값으로 오버레이한다.
-    if country_norm in ("kor", "kr") and fetch_naver_etf_inav_snapshot is not None:
+    if country_norm == "kor" and fetch_naver_etf_inav_snapshot is not None:
         try:
             tickers = [r.get("ticker") for r in rows_for_view if r.get("ticker")]
             realtime_data = fetch_naver_etf_inav_snapshot(tickers)
@@ -162,7 +162,7 @@ def _render_ranking_view(pool_id: str, selected_bucket: str = "전체") -> None:
         if updated_by:
             updated_display = f"{updated_display}, {updated_by}"
 
-        if country_norm in ("kor", "kr", "au"):
+        if country_norm in ("kor", "au"):
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             now_rel = format_relative_time(now_str)
             now_display = f"{now_str}{now_rel}" if now_rel else now_str
