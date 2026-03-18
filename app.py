@@ -33,6 +33,18 @@ def _to_plain_dict(value):
 format_korean_currency = format_kr_money
 
 
+def _format_signed_percent(value: float) -> str:
+    return f"{value:+.2f}%"
+
+
+def _get_change_marker(value: float) -> str:
+    if value > 0:
+        return " 🔺"
+    if value < 0:
+        return " 📉"
+    return ""
+
+
 def _slugify_path(value: str) -> str:
     raw = str(value or "").strip().lower()
     slug = re.sub(r"[^a-z0-9_-]+", "-", raw)
@@ -283,6 +295,7 @@ def _build_system_page(page_cls: Callable[..., object]):
 
 def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None = None):
     def _render_home_page() -> None:
+        from app_pages.weekly_data_page import sync_active_week_summary
         from utils.portfolio_io import (
             get_latest_daily_snapshot,
             load_portfolio_master,
@@ -304,6 +317,14 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
         total_valuation = 0.0
         total_stock_profit = 0.0
         total_stock_profit_pct = 0.0
+        latest_weekly_summary: dict[str, Any] | None = None
+
+        if initial_subtab == "📊 대시보드":
+            try:
+                latest_weekly_summary = sync_active_week_summary()
+            except RuntimeError as exc:
+                st.error(f"주별 데이터 자동 집계 실패: {exc}")
+                st.stop()
 
         # 데이터 로딩 (첫 로딩 시 환율/가격 조회로 시간이 걸릴 수 있음)
         visible_accounts = [a for a in accounts if a.get("settings", {}).get("show_hold", True)]
@@ -585,11 +606,11 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
         current_subtab = initial_subtab
         if current_subtab is None:
             if "home_active_subtab" not in st.session_state:
-                st.session_state.home_active_subtab = "📊 요약"
+                st.session_state.home_active_subtab = "📊 대시보드"
 
             current_subtab = st.segmented_control(
                 "홈 메뉴",
-                options=["📊 요약", "📋 상세"],
+                options=["📊 대시보드", "📋 상세"],
                 default=st.session_state.home_active_subtab,
                 key="home_subtab_selector",
                 label_visibility="collapsed",
@@ -599,7 +620,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             else:
                 current_subtab = st.session_state.home_active_subtab
 
-        if current_subtab == "📊 요약":
+        if current_subtab == "📊 대시보드":
             if total_assets > 0 or total_purchase > 0:
                 # 섹션 간 간격 최소화를 위한 전역 CSS
                 st.markdown(
@@ -633,20 +654,24 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 )
 
                 st.subheader("총 자산 요약")
-                c1, c2, c3, c4, c5 = st.columns(5)
-                c1.metric(label="총 자산 (주식+현금)", value=format_korean_currency(total_assets))
-                c2.metric(label="총 투자 원금", value=format_korean_currency(total_principal))
-                c3.metric(
-                    label="전일 대비",
-                    value=format_korean_currency(global_change),
-                    delta=f"{global_change_pct:+.2f}%",
-                )
-                c4.metric(
-                    label="총 평가손익",
-                    value=format_korean_currency(total_net_profit),
-                    delta=f"{total_net_profit_pct:,.2f}%",
-                )
-                c5.metric(label="총 현금 보유량", value=format_korean_currency(total_cash))
+                cash_weight_pct = (total_cash / total_assets) * 100 if total_assets > 0 else 0.0
+                weekly_profit = float((latest_weekly_summary or {}).get("weekly_profit", 0.0) or 0.0)
+                weekly_return_pct = float((latest_weekly_summary or {}).get("weekly_return_pct", 0.0) or 0.0)
+                cumulative_profit = float((latest_weekly_summary or {}).get("cumulative_profit", 0.0) or 0.0)
+                cumulative_return_pct = float((latest_weekly_summary or {}).get("cumulative_return_pct", 0.0) or 0.0)
+
+                summary_lines = [
+                    f"💰 총 자산: {format_korean_currency(total_assets)}",
+                    f"🏛️ 투자 원금: {format_korean_currency(total_principal)}",
+                    f"💵 현금 잔고: {format_korean_currency(total_cash)} ({cash_weight_pct:.1f}%)",
+                    f"📅 금일 손익: {format_korean_currency(global_change)} ({_format_signed_percent(global_change_pct)})"
+                    f"{_get_change_marker(global_change)}",
+                    f"🗓️ 금주 손익: {format_korean_currency(weekly_profit)} ({_format_signed_percent(weekly_return_pct)})"
+                    f"{_get_change_marker(weekly_profit)}",
+                    f"🏁 누적 손익: {format_korean_currency(cumulative_profit)} "
+                    f"({_format_signed_percent(cumulative_return_pct)}){_get_change_marker(cumulative_profit)}",
+                ]
+                st.markdown("  \n".join(summary_lines))
 
                 # Display Exchange Rates
                 import datetime
@@ -917,24 +942,26 @@ def main() -> None:
 
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
     from app_pages.transactions_page import build_transaction_page
+    from app_pages.weekly_data_page import build_weekly_data_page
 
     pages = {}
 
-    # 보유종목 그룹
-    pages["보유종목"] = [
+    # 요약 그룹
+    pages["요약"] = [
         page_cls(
-            _build_home_page(accounts, initial_subtab="📊 요약"),
-            title="📊 요약",
+            _build_home_page(accounts, initial_subtab="📊 대시보드"),
+            title="대시보드",
             icon="🏠",
-            url_path="home_summary",
+            url_path="summary_dashboard",
             default=True,
         ),
         page_cls(
             _build_home_page(accounts, initial_subtab="📋 상세"),
-            title="📋 상세",
+            title="상세",
             icon="📋",
-            url_path="home_details",
+            url_path="summary_details",
         ),
+        build_weekly_data_page(page_cls, title="주별", url_path="summary_weekly"),
     ]
 
     # 계좌 관리 그룹
@@ -945,11 +972,6 @@ def main() -> None:
         "📸 스냅샷",
     ]
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
-
-    # 데이터 그룹
-    from app_pages.weekly_data_page import build_weekly_data_page
-
-    pages["데이터"] = [build_weekly_data_page(page_cls)]
 
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
     view_modes = ["0. 요약", "1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]

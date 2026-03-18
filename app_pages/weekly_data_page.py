@@ -402,6 +402,19 @@ def _load_weekly_docs() -> list[dict]:
     return _apply_running_total_principal(docs)
 
 
+def sync_active_week_summary() -> dict:
+    """활성 주차 행을 최신 실시간 합계로 집계한 뒤 계산 컬럼이 반영된 문서를 반환한다."""
+    _ensure_active_week_row()
+    _ensure_historical_exchange_rates()
+    active_week_date = _aggregate_live_summary_into_active_week()
+
+    for doc in _load_weekly_docs():
+        if str(doc.get("week_date", "")) == active_week_date:
+            return doc
+
+    raise RuntimeError(f"활성 주차({active_week_date}) 데이터를 찾지 못했습니다.")
+
+
 def _aggregate_live_summary_into_active_week() -> str:
     """홈 화면과 같은 실시간 합계를 활성 주차 1행에 반영한다."""
     from utils.account_registry import load_account_configs
@@ -764,11 +777,11 @@ def _render_weekly_table():
             _edit_weekly_modal(docs[selected_idx])
 
 
-def build_weekly_data_page(page_cls):
+def build_weekly_data_page(page_cls, *, title: str = "주별", url_path: str = "transactions_weekly"):
     """주별 페이지 빌드 헬퍼."""
     return page_cls(
         render_weekly_data_page,
-        title="주별",
+        title=title,
         icon="📅",
-        url_path="transactions_weekly",
+        url_path=url_path,
     )

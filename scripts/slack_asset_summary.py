@@ -59,9 +59,9 @@ INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 
 def get_trend_emoji(val):
     if val > 0:
-        return "🔺"
+        return ":small_red_triangle:"
     elif val < 0:
-        return "🔹"
+        return ":chart_with_downwards_trend:"
     return ""
 
 
