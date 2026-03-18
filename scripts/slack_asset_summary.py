@@ -80,6 +80,7 @@ def main():
     account_summaries = []
     global_principal = 0.0
     global_cash = 0.0
+    total_purchase = 0.0
 
     logger.info("Aggregating data from %d accounts...", len(accounts))
 
@@ -138,6 +139,7 @@ def main():
                     "cash": acc_cash,
                 }
             )
+            total_purchase += acc_purchase
 
     if not account_summaries:
         logger.warning("No data found to report.")
@@ -190,12 +192,13 @@ def main():
 
         emoji = get_trend_emoji(acc["net_profit"])
         change_emoji = get_trend_emoji(acc_change)
+        acc_cash_pct = (acc["cash"] / acc["total_assets"] * 100) if acc["total_assets"] > 0 else 0.0
         line = (
             f"• *{acc['name']}*\n"
             f"  - 자산: {format_korean_currency(acc['total_assets'])} (원금: {format_korean_currency(acc['principal'])})\n"
-            f"  - 수익: {emoji} {acc['net_profit_pct']:+.2f}% ({format_korean_currency(acc['net_profit'])})\n"
-            f"  - 변동: {change_emoji} {acc_change_pct:+.2f}% ({format_korean_currency(acc_change)})\n"
-            f"  - 현금: {format_korean_currency(acc['cash'])}"
+            f"  - 누적수익: {emoji} {acc['net_profit_pct']:+.2f}% ({format_korean_currency(acc['net_profit'])})\n"
+            f"  - 금일변동: {change_emoji} {acc_change_pct:+.2f}% ({format_korean_currency(acc_change)})\n"
+            f"  - 현금: {format_korean_currency(acc['cash'])} ({acc_cash_pct:.1f}%)"
         )
         acc_details.append(line)
 
@@ -220,9 +223,18 @@ def main():
     # 4. Save Snapshots for next time (Consolidated)
     # Save individual accounts first, then TOTAL (which updates the same document for today)
     for acc in account_summaries:
-        save_daily_snapshot(acc["account_id"], acc["total_assets"], acc["principal"], acc["cash"], acc["valuation"])
+        save_daily_snapshot(
+            acc["account_id"],
+            acc["total_assets"],
+            acc["principal"],
+            acc["cash"],
+            acc["valuation"],
+            acc.get("valuation", 0.0) - acc.get("stock_profit", 0.0),
+        )
 
-    save_daily_snapshot("TOTAL", total_assets, global_principal, global_cash, total_assets - global_cash)
+    save_daily_snapshot(
+        "TOTAL", total_assets, global_principal, global_cash, total_assets - global_cash, total_purchase
+    )
 
     logger.info("Slack asset summary sent successfully.")
 
