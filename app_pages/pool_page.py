@@ -10,6 +10,7 @@ import streamlit as st
 from app_pages.account_page import render_account_deleted_page, render_account_setup_page
 from config import BUCKET_REVERSE_MAPPING
 from utils.pool_rank_storage import fetch_latest_pool_rank
+from utils.portfolio_io import load_all_account_holding_tickers
 from utils.recommendations import recommendations_to_dataframe
 from utils.ui import create_loading_status, format_relative_time, render_recommendation_table
 
@@ -84,6 +85,14 @@ def _load_pool_ranking(pool_id: str) -> tuple[list[dict[str, Any]] | None, str |
     )
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_account_holding_tickers() -> tuple[set[str], str | None]:
+    try:
+        return load_all_account_holding_tickers(), None
+    except Exception as exc:
+        return set(), f"보유 종목 조회 실패: {exc}"
+
+
 def _render_ranking_view(pool_id: str, selected_bucket: str = "전체") -> None:
     rows, updated_at, country, updated_by = _load_pool_ranking(pool_id)
     if rows is None:
@@ -146,6 +155,12 @@ def _render_ranking_view(pool_id: str, selected_bucket: str = "전체") -> None:
             pass
 
     df = recommendations_to_dataframe(country or "kor", rows_for_view)
+    held_tickers, holdings_error = _load_account_holding_tickers()
+    df["보유"] = ""
+    if holdings_error:
+        st.warning(f"보유 종목 표시를 불러오지 못했습니다: {holdings_error}")
+    else:
+        df["보유"] = df["티커"].apply(lambda value: "보유" if str(value or "").strip().upper() in held_tickers else "")
 
     bucket_name = str(selected_bucket or "전체").strip()
     if bucket_name and bucket_name != "전체":
@@ -192,6 +207,7 @@ def _render_ranking_view(pool_id: str, selected_bucket: str = "전체") -> None:
         "RSI",
         "지속",
         "추세(3달)",
+        "보유",
     ]
     render_recommendation_table(
         df=df,
