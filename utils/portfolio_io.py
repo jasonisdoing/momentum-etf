@@ -11,6 +11,24 @@ from utils.settings_loader import get_account_settings
 logger = get_app_logger()
 
 
+def load_all_account_holding_tickers() -> set[str]:
+    """전체 계좌의 실보유 티커 집합을 반환한다."""
+    from utils.settings_loader import list_available_accounts
+
+    held_tickers: set[str] = set()
+    for account_id in list_available_accounts():
+        snapshot = load_portfolio_master(account_id)
+        if not snapshot:
+            continue
+
+        for holding in snapshot.get("holdings", []):
+            ticker = str(holding.get("ticker") or "").strip().upper()
+            if ticker:
+                held_tickers.add(ticker)
+
+    return held_tickers
+
+
 def _apply_kor_realtime_overlay_to_holdings(df_holdings: pd.DataFrame) -> pd.DataFrame:
     """한국 종목 보유 테이블에 실시간 현재가/NAV/괴리율을 덮어쓴다."""
     tickers = [

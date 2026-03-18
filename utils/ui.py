@@ -282,6 +282,8 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     def _color_row(row: pd.Series) -> list[str]:
         state = str(row.get("상태", "")).upper()
         color = row_colors.get(state)
+        if not color and str(row.get("보유", "")).strip() == "보유":
+            color = row_colors.get("HOLD")
         if color:
             return [f"background-color: {color}"] * len(row)
         return [""] * len(row)
@@ -501,6 +503,7 @@ def render_recommendation_table(
         "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
         "문구": st.column_config.TextColumn("문구", width="large"),
+        "보유": st.column_config.TextColumn("보유", width=60),
     }
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")
