@@ -562,7 +562,9 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
         else:
             styled_summary_df = None
 
-        if "cache_warnings" in st.session_state and st.session_state.cache_warnings:
+        has_cache_warnings = "cache_warnings" in st.session_state and bool(st.session_state.cache_warnings)
+
+        if has_cache_warnings:
             # {account_id: {ticker_set}}
             warning_msg = "⚠️ **다음 계좌에서 일부 종목의 가격 데이터를 불러오지 못했습니다:**\n\n"
 
@@ -579,8 +581,6 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 "현재가가 0원으로 표시될 수 있습니다. 해결을 위해 백그라운드 스크립트(`python scripts/update_price_cache.py`)를 "
                 "실행하여 가격 정보를 갱신해 주시기 바랍니다."
             )
-            # 한 번 보여준 후 다음 렌더링을 위해 초기화
-            st.session_state.cache_warnings = {}
 
         current_subtab = initial_subtab
         if current_subtab is None:
@@ -781,6 +781,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                         type="primary",
                         use_container_width=True,
                         key="btn_global_slack_summary",
+                        disabled=has_cache_warnings,
                     ):
                         try:
                             import subprocess
@@ -789,6 +790,8 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                             st.success("✅ 전체 자산 요약 알림 전송을 시작했습니다. (배경에서 처리가 완료됩니다)")
                         except Exception as e:
                             st.error(f"⚠️ 전송 시작 오류: {e}")
+                    if has_cache_warnings:
+                        st.caption("가격 캐시 누락이 해결되기 전에는 전체 자산 요약 알림을 전송할 수 없습니다.")
             else:
                 st.info("평가금액 및 매입금액 데이터가 없어 요약을 표시할 수 없습니다.")
 

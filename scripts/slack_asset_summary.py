@@ -20,6 +20,7 @@ from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
 from utils.notification import send_slack_message_v2
 from utils.portfolio_io import (
+    MissingPriceCacheError,
     get_latest_daily_snapshot,
     load_portfolio_master,
     load_real_holdings_with_recommendations,
@@ -122,6 +123,15 @@ def _load_latest_weekly_metrics():
     return latest_metrics
 
 
+def _build_missing_cache_alert(account_id: str, tickers: list[str]) -> str:
+    ticker_text = ", ".join(tickers)
+    return (
+        f"⚠️ 자산 요약 발송 중단 ({account_id})\n"
+        f"가격 캐시가 없는 보유 종목: {ticker_text}\n"
+        f"`python scripts/update_price_cache.py {account_id}` 실행 후 다시 시도하세요."
+    )
+
+
 def main():
     load_env_if_present()
 
@@ -155,7 +165,12 @@ def main():
         try:
             # We need to mock streamlit session_state/secrets for some utils if they depend on it
             # But load_real_holdings_with_recommendations might work if handled carefully
-            df = load_real_holdings_with_recommendations(account_id)
+            df = load_real_holdings_with_recommendations(account_id, strict_price_cache=True)
+        except MissingPriceCacheError as e:
+            alert_msg = _build_missing_cache_alert(account_id, e.tickers)
+            logger.error(alert_msg)
+            send_slack_message_v2(alert_msg)
+            sys.exit(1)
         except Exception as e:
             error_msg = f"❌ 자산 요약 생성 중 치명적 에러 발생 ({account_id} 계좌):\n```{e}```\n\n잘못된 자산 리포트가 발송되는 것을 방지하기 위해 오늘 알림을 중단합니다."
             logger.error(error_msg)
