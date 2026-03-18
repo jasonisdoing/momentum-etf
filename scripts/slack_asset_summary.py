@@ -16,6 +16,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.account_registry import load_account_configs
+from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
 from utils.notification import send_slack_message_v2
 from utils.portfolio_io import (
@@ -50,6 +51,9 @@ logger = logging.getLogger(__name__)
 
 
 format_korean_currency = format_kr_money
+WEEKLY_COLLECTION = "weekly_fund_data"
+INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
+INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 
 
 def get_trend_emoji(val):
@@ -60,12 +64,62 @@ def get_trend_emoji(val):
     return ""
 
 
-def get_chart_emoji(val):
-    if val > 0:
-        return "📈"
-    elif val < 0:
-        return "📉"
-    return "📊"
+def _to_int(value):
+    return int(value or 0)
+
+
+def _calculate_total_expense(doc):
+    return (
+        _to_int(doc.get("withdrawal_personal", 0))
+        + _to_int(doc.get("withdrawal_mom", 0))
+        + _to_int(doc.get("nh_principal_interest", 0))
+    )
+
+
+def _load_latest_weekly_metrics():
+    """주별 데이터 테이블과 동일한 정의로 최신 주간 손익 지표를 계산한다."""
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결 실패로 주별 데이터를 조회할 수 없습니다.")
+
+    docs = list(db[WEEKLY_COLLECTION].find().sort("week_date", 1))
+    if not docs:
+        raise RuntimeError("weekly_fund_data 데이터가 없어 주간 손익을 계산할 수 없습니다.")
+
+    running_total_principal = INITIAL_TOTAL_PRINCIPAL_VALUE
+    running_total_expense = 0
+    previous_cumulative_profit = 0
+    latest_metrics = None
+
+    for doc in docs:
+        week_date = str(doc.get("week_date") or "").strip()
+        if not week_date:
+            raise RuntimeError("weekly_fund_data에 week_date가 비어 있는 행이 있습니다.")
+
+        if week_date <= INITIAL_TOTAL_PRINCIPAL_DATE:
+            total_principal = INITIAL_TOTAL_PRINCIPAL_VALUE
+        else:
+            running_total_principal += _to_int(doc.get("deposit_withdrawal", 0))
+            total_principal = running_total_principal
+
+        running_total_expense += _calculate_total_expense(doc)
+        total_assets = _to_int(doc.get("total_assets", 0))
+        cumulative_profit = total_assets - total_principal - running_total_expense
+        weekly_profit = cumulative_profit - previous_cumulative_profit
+
+        latest_metrics = {
+            "week_date": week_date,
+            "weekly_profit": weekly_profit,
+            "weekly_return_pct": (weekly_profit / total_principal * 100) if total_principal else 0.0,
+            "cumulative_profit": cumulative_profit,
+            "cumulative_return_pct": (cumulative_profit / total_principal * 100) if total_principal else 0.0,
+        }
+        previous_cumulative_profit = cumulative_profit
+
+    if latest_metrics is None:
+        raise RuntimeError("주간 손익 계산 결과를 만들지 못했습니다.")
+
+    return latest_metrics
 
 
 def main():
@@ -147,8 +201,6 @@ def main():
 
     # Global Calculations
     total_assets = sum(acc["total_assets"] for acc in account_summaries)
-    total_net_profit = total_assets - global_principal
-    total_net_profit_pct = (total_net_profit / global_principal * 100) if global_principal > 0 else 0.0
 
     # Fetch previous snapshots
     prev_global = get_latest_daily_snapshot("TOTAL", before_today=True)
@@ -160,6 +212,9 @@ def main():
             global_change = total_assets - prev_total
             global_change_pct = (global_change / prev_total) * 100
 
+    weekly_metrics = _load_latest_weekly_metrics()
+    cash_pct = (global_cash / total_assets * 100) if total_assets > 0 else 0.0
+
     # 1. Compose Main Message (Total Summary)
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     main_text = (
@@ -167,9 +222,10 @@ def main():
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 *총 자산*: *{format_korean_currency(total_assets)}*\n"
         f"🏛️ *투자 원금*: {format_korean_currency(global_principal)}\n"
-        f"💵 *현금 잔고*: {format_korean_currency(global_cash)}\n"
-        f"{get_chart_emoji(global_change)} *전일 대비*: {format_korean_currency(global_change)} ({global_change_pct:+.2f}%) {get_trend_emoji(global_change)}\n"
-        f"{get_chart_emoji(total_net_profit)} *총 평가손익*: *{format_korean_currency(total_net_profit)} ({total_net_profit_pct:+.2f}%)*\n"
+        f"💵 *현금 잔고*: {format_korean_currency(global_cash)} ({cash_pct:.1f}%)\n"
+        f"📆 *금일 손익*: {format_korean_currency(global_change)} ({global_change_pct:+.2f}%) {get_trend_emoji(global_change)}\n"
+        f"🗓️ *금주 손익*: {format_korean_currency(weekly_metrics['weekly_profit'])} ({weekly_metrics['weekly_return_pct']:+.2f}%) {get_trend_emoji(weekly_metrics['weekly_profit'])}\n"
+        f"🏁 *누적 손익*: *{format_korean_currency(weekly_metrics['cumulative_profit'])} ({weekly_metrics['cumulative_return_pct']:+.2f}%)* {get_trend_emoji(weekly_metrics['cumulative_profit'])}\n"
     )
 
     main_ts = send_slack_message_v2(main_text)
