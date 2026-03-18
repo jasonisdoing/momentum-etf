@@ -11,6 +11,16 @@ from utils.settings_loader import get_account_settings
 logger = get_app_logger()
 
 
+class MissingPriceCacheError(RuntimeError):
+    """보유 종목의 가격 캐시가 누락된 경우 발생한다."""
+
+    def __init__(self, account_id: str, tickers: list[str]):
+        self.account_id = str(account_id or "").strip()
+        self.tickers = sorted({str(ticker or "").strip().upper() for ticker in tickers if str(ticker or "").strip()})
+        joined = ", ".join(self.tickers)
+        super().__init__(f"[{self.account_id}] 가격 캐시 누락: {joined}")
+
+
 def load_all_account_holding_tickers() -> set[str]:
     """전체 계좌의 실보유 티커 집합을 반환한다."""
     from utils.settings_loader import list_available_accounts
@@ -69,7 +79,9 @@ def _apply_kor_realtime_overlay_to_holdings(df_holdings: pd.DataFrame) -> pd.Dat
     return overlaid
 
 
-def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | None:
+def load_real_holdings_with_recommendations(
+    account_id: str, *, strict_price_cache: bool = False
+) -> pd.DataFrame | None:
     """
     Load the actual portfolio holdings from portfolio_master (live)
     and calculate display metrics directly from cached price data.
@@ -122,6 +134,7 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
 
     tickers = df_holdings["ticker"].tolist()
     cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
+    missing_price_tickers: set[str] = set()
 
     import streamlit as st
 
@@ -138,6 +151,7 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         if df_cached is None or df_cached.empty:
             msg = f"가격 캐시에 '{ticker}'가 없습니다. 캐시 업데이트를 실행하세요."
             logger.warning(msg)
+            missing_price_tickers.add(ticker)
             # Add to session_state so the UI can display it
             try:
                 if account_id not in st.session_state.cache_warnings:
@@ -274,6 +288,9 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         }
 
     df_holdings["현재가"] = df_holdings.apply(_get_current_price, axis=1)
+    if strict_price_cache and missing_price_tickers:
+        raise MissingPriceCacheError(account_id, sorted(missing_price_tickers))
+
     try:
         account_settings = get_account_settings(account_id)
         account_country = str(account_settings.get("country_code") or "").strip().lower()
