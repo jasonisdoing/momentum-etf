@@ -25,7 +25,7 @@ def print_backtest_summary(
     country_code: str,
     backtest_start_date: str,
     initial_capital_krw: float,
-    bucket_topn: int,
+    universe_count: int,
     ticker_summaries: list[dict[str, Any]],
     core_start_dt: pd.Timestamp,
     emit_to_logger: bool = True,
@@ -68,16 +68,14 @@ def print_backtest_summary(
     ma_month = merged_strategy.get("MA_MONTH")
     momentum_label = f"{ma_month}개월" if ma_month is not None else "N/A"
 
-    # 전체 종목 수 한도 표시
-    holdings_limit = summary.get("holdings_limit") or bucket_topn
+    universe_count = summary.get("universe_count") or universe_count
     try:
-        holdings_limit = int(holdings_limit)
+        universe_count = int(universe_count)
     except (TypeError, ValueError):
-        holdings_limit = bucket_topn
+        universe_count = 0
 
     used_settings = {
-        "포트폴리오 종목 수 (TOPN)": bucket_topn,
-        "전체 종목 수 한도 (Total Limit)": holdings_limit,
+        "계좌 전체 종목 수": universe_count,
         "모멘텀 스코어 MA 기간": momentum_label,
     }
 
@@ -98,13 +96,13 @@ def print_backtest_summary(
             week_label = item.get("week_end") or "-"
             value = item.get("value")
             held_count = item.get("held_count", 0)
-            max_topn = item.get("max_topn", 0)
+            current_universe_count = item.get("universe_count", 0)
             weekly_ret = item.get("weekly_return_pct")
             cum_ret = item.get("cumulative_return_pct")
             bench_weekly_ret = item.get("benchmark_weekly_return_pct")
             bench_cum_ret = item.get("benchmark_cumulative_return_pct")
             value_display = money_formatter(value) if _is_finite_number(value) else "-"
-            holdings_display = f"{held_count}/{max_topn}" if max_topn > 0 else "-"
+            holdings_display = f"{held_count}/{current_universe_count}" if current_universe_count > 0 else "-"
             table_rows.append(
                 [
                     week_label,

@@ -11,7 +11,77 @@ from utils.settings_loader import get_account_settings
 logger = get_app_logger()
 
 
-def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | None:
+class MissingPriceCacheError(RuntimeError):
+    """보유 종목의 가격 캐시가 누락된 경우 발생한다."""
+
+    def __init__(self, account_id: str, tickers: list[str]):
+        self.account_id = str(account_id or "").strip()
+        self.tickers = sorted({str(ticker or "").strip().upper() for ticker in tickers if str(ticker or "").strip()})
+        joined = ", ".join(self.tickers)
+        super().__init__(f"[{self.account_id}] 가격 캐시 누락: {joined}")
+
+
+def load_all_account_holding_tickers() -> set[str]:
+    """전체 계좌의 실보유 티커 집합을 반환한다."""
+    from utils.settings_loader import list_available_accounts
+
+    held_tickers: set[str] = set()
+    for account_id in list_available_accounts():
+        snapshot = load_portfolio_master(account_id)
+        if not snapshot:
+            continue
+
+        for holding in snapshot.get("holdings", []):
+            ticker = str(holding.get("ticker") or "").strip().upper()
+            if ticker:
+                held_tickers.add(ticker)
+
+    return held_tickers
+
+
+def _apply_kor_realtime_overlay_to_holdings(df_holdings: pd.DataFrame) -> pd.DataFrame:
+    """한국 종목 보유 테이블에 실시간 현재가/NAV/괴리율을 덮어쓴다."""
+    tickers = [
+        str(ticker or "").strip().upper() for ticker in df_holdings.get("ticker", []) if str(ticker or "").strip()
+    ]
+    if not tickers:
+        return df_holdings
+
+    try:
+        from utils.data_loader import fetch_naver_etf_inav_snapshot
+
+        realtime_data = fetch_naver_etf_inav_snapshot(tickers)
+    except Exception as exc:
+        logger.warning("보유 종목 실시간 오버레이 실패: %s", exc)
+        return df_holdings
+
+    if not realtime_data:
+        return df_holdings
+
+    overlaid = df_holdings.copy()
+    overlaid["Nav"] = overlaid.get("Nav")
+    overlaid["괴리율"] = overlaid.get("괴리율")
+
+    for idx, row in overlaid.iterrows():
+        ticker = str(row.get("ticker") or "").strip().upper()
+        rt = realtime_data.get(ticker)
+        if not rt:
+            continue
+        if rt.get("nowVal") is not None:
+            overlaid.at[idx, "현재가"] = float(rt["nowVal"])
+        if rt.get("changeRate") is not None:
+            overlaid.at[idx, "일간(%)"] = float(rt["changeRate"])
+        if rt.get("nav") is not None:
+            overlaid.at[idx, "Nav"] = float(rt["nav"])
+        if rt.get("deviation") is not None:
+            overlaid.at[idx, "괴리율"] = float(rt["deviation"])
+
+    return overlaid
+
+
+def load_real_holdings_with_recommendations(
+    account_id: str, *, strict_price_cache: bool = False
+) -> pd.DataFrame | None:
     """
     Load the actual portfolio holdings from portfolio_master (live)
     and calculate display metrics directly from cached price data.
@@ -64,6 +134,7 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
 
     tickers = df_holdings["ticker"].tolist()
     cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
+    missing_price_tickers: set[str] = set()
 
     import streamlit as st
 
@@ -80,6 +151,7 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         if df_cached is None or df_cached.empty:
             msg = f"가격 캐시에 '{ticker}'가 없습니다. 캐시 업데이트를 실행하세요."
             logger.warning(msg)
+            missing_price_tickers.add(ticker)
             # Add to session_state so the UI can display it
             try:
                 if account_id not in st.session_state.cache_warnings:
@@ -216,6 +288,17 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         }
 
     df_holdings["현재가"] = df_holdings.apply(_get_current_price, axis=1)
+    if strict_price_cache and missing_price_tickers:
+        raise MissingPriceCacheError(account_id, sorted(missing_price_tickers))
+
+    try:
+        account_settings = get_account_settings(account_id)
+        account_country = str(account_settings.get("country_code") or "").strip().lower()
+    except Exception:
+        account_country = ""
+    if account_country == "kor":
+        df_holdings = _apply_kor_realtime_overlay_to_holdings(df_holdings)
+
     multiplier = df_holdings["currency"].apply(_get_multiplier)
     df_holdings["매입금액(KRW)"] = (df_holdings["quantity"] * df_holdings["average_buy_price"] * multiplier).astype(
         float
@@ -426,6 +509,7 @@ def save_daily_snapshot(
     total_principal: float,
     cash_balance: float,
     valuation_krw: float,
+    purchase_amount: float | None = None,
 ) -> bool:
     """
     Save a daily snapshot.
@@ -448,6 +532,7 @@ def save_daily_snapshot(
                 "total_principal": 0.0,
                 "cash_balance": 0.0,
                 "valuation_krw": 0.0,
+                "purchase_amount": 0.0,
                 "accounts": [],
                 "updated_at": datetime.datetime.now(),
             }
@@ -457,6 +542,8 @@ def save_daily_snapshot(
             doc["total_principal"] = float(total_principal)
             doc["cash_balance"] = float(cash_balance)
             doc["valuation_krw"] = float(valuation_krw)
+            if purchase_amount is not None:
+                doc["purchase_amount"] = float(purchase_amount)
         else:
             accounts = doc.get("accounts", [])
             found = False
@@ -466,6 +553,8 @@ def save_daily_snapshot(
                     acc["total_principal"] = float(total_principal)
                     acc["cash_balance"] = float(cash_balance)
                     acc["valuation_krw"] = float(valuation_krw)
+                    if purchase_amount is not None:
+                        acc["purchase_amount"] = float(purchase_amount)
                     found = True
                     break
             if not found:
@@ -476,6 +565,7 @@ def save_daily_snapshot(
                         "total_principal": float(total_principal),
                         "cash_balance": float(cash_balance),
                         "valuation_krw": float(valuation_krw),
+                        "purchase_amount": float(purchase_amount or 0.0),
                     }
                 )
             doc["accounts"] = accounts

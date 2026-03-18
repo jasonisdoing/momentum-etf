@@ -22,7 +22,7 @@ from utils.account_registry import get_account_settings, load_account_configs
 from utils.data_loader import get_trading_days
 from utils.env import load_env_if_present
 from utils.notification import send_slack_message_v2
-from utils.portfolio_io import load_portfolio_master, load_real_holdings_with_recommendations
+from utils.portfolio_io import MissingPriceCacheError, load_portfolio_master, load_real_holdings_with_recommendations
 from utils.report import format_kr_money
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -55,6 +55,15 @@ def get_profit_emoji(val):
     return ""
 
 
+def _build_missing_cache_alert(account_id: str, tickers: list[str]) -> str:
+    ticker_text = ", ".join(tickers)
+    return (
+        f"⚠️ 포트폴리오 알림 발송 중단 ({account_id})\n"
+        f"가격 캐시가 없는 보유 종목: {ticker_text}\n"
+        f"`python scripts/update_price_cache.py {account_id}` 실행 후 다시 시도하세요."
+    )
+
+
 def process_account(account_id):
     """Processes portfolio data for a single account and returns a Slack message payload."""
     logger.info(f"Processing account: {account_id}")
@@ -64,7 +73,12 @@ def process_account(account_id):
 
     # 1. Load Real Holdings
     try:
-        df = load_real_holdings_with_recommendations(account_id)
+        df = load_real_holdings_with_recommendations(account_id, strict_price_cache=True)
+    except MissingPriceCacheError as e:
+        alert_msg = _build_missing_cache_alert(account_id, e.tickers)
+        logger.error(alert_msg)
+        send_slack_message_v2(alert_msg)
+        return None
     except Exception as e:
         logger.error(f"Error loading holdings for {account_id}: {e}")
         return None

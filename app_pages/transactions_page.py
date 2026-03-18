@@ -3,6 +3,8 @@ import io
 import pandas as pd
 import streamlit as st
 
+from utils.ui import create_loading_status
+
 
 def _last_business_day() -> str:
     """Return the most recent business day as YYYY-MM-DD."""
@@ -19,9 +21,226 @@ def _normalize_ticker(ticker: str) -> str:
     return t
 
 
+def _build_snapshot_history_frame(snapshots: list[dict]) -> pd.DataFrame:
+    rows = []
+    for snapshot in snapshots:
+        total_assets = float(snapshot.get("total_assets", 0) or 0.0)
+        cash_balance = float(snapshot.get("cash_balance", 0) or 0.0)
+        valuation_krw = float(snapshot.get("valuation_krw", 0) or 0.0)
+        total_principal = float(snapshot.get("total_principal", 0) or 0.0)
+        cash_ratio = (cash_balance / total_assets) if total_assets > 0 else 0.0
+        invested_ratio = (valuation_krw / total_assets) if total_assets > 0 else 0.0
+        rows.append(
+            {
+                "snapshot_date": str(snapshot.get("snapshot_date", "")),
+                "total_assets": total_assets,
+                "total_principal": total_principal,
+                "cash_balance": cash_balance,
+                "valuation_krw": valuation_krw,
+                "cash_ratio": cash_ratio,
+                "invested_ratio": invested_ratio,
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows).sort_values("snapshot_date").reset_index(drop=True)
+
+
+def _build_snapshot_account_history_frame(snapshots: list[dict], account_map: dict[str, str]) -> pd.DataFrame:
+    account_id_to_name = {account_id: account_name for account_name, account_id in account_map.items()}
+    rows = []
+    for snapshot in snapshots:
+        snapshot_date = str(snapshot.get("snapshot_date", ""))
+        for account in snapshot.get("accounts", []):
+            account_id = str(account.get("account_id", ""))
+            rows.append(
+                {
+                    "snapshot_date": snapshot_date,
+                    "account_name": account_id_to_name.get(account_id, account_id),
+                    "total_assets": float(account.get("total_assets", 0) or 0.0),
+                    "cash_balance": float(account.get("cash_balance", 0) or 0.0),
+                    "valuation_krw": float(account.get("valuation_krw", 0) or 0.0),
+                }
+            )
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows).sort_values(["snapshot_date", "account_name"]).reset_index(drop=True)
+
+
+def _build_selected_snapshot_account_frame(selected_snap: dict | None, account_map: dict[str, str]) -> pd.DataFrame:
+    if not selected_snap:
+        return pd.DataFrame()
+
+    account_id_to_name = {account_id: account_name for account_name, account_id in account_map.items()}
+    rows = []
+    for account in selected_snap.get("accounts", []):
+        account_id = str(account.get("account_id", ""))
+        total_assets = float(account.get("total_assets", 0) or 0.0)
+        cash_balance = float(account.get("cash_balance", 0) or 0.0)
+        valuation_krw = float(account.get("valuation_krw", 0) or 0.0)
+        cash_ratio = (cash_balance / total_assets) if total_assets > 0 else 0.0
+        rows.append(
+            {
+                "account_name": account_id_to_name.get(account_id, account_id),
+                "total_assets": total_assets,
+                "cash_balance": cash_balance,
+                "valuation_krw": valuation_krw,
+                "cash_ratio": cash_ratio,
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows).sort_values("total_assets", ascending=False).reset_index(drop=True)
+
+
+def _format_krw(value: float) -> str:
+    return f"{value:,.0f}원"
+
+
+def _format_pct(value: float) -> str:
+    return f"{value * 100:.1f}%"
+
+
+def _render_snapshot_total_assets_chart(snapshots: list[dict]) -> None:
+    history_df = _build_snapshot_history_frame(snapshots)
+    if history_df.empty:
+        st.write("저장된 스냅샷이 없습니다.")
+        return
+
+    latest_row = history_df.iloc[-1]
+    prev_row = history_df.iloc[-2] if len(history_df) > 1 else None
+    delta_assets = None if prev_row is None else _format_krw(latest_row["total_assets"] - prev_row["total_assets"])
+    delta_principal = (
+        None if prev_row is None else _format_krw(latest_row["total_principal"] - prev_row["total_principal"])
+    )
+    delta_valuation = None if prev_row is None else _format_krw(latest_row["valuation_krw"] - prev_row["valuation_krw"])
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("최신 총 자산", _format_krw(latest_row["total_assets"]), delta=delta_assets)
+    c2.metric("최신 원금", _format_krw(latest_row["total_principal"]), delta=delta_principal)
+    c3.metric("최신 평가액", _format_krw(latest_row["valuation_krw"]), delta=delta_valuation)
+
+    asset_chart_df = history_df.set_index("snapshot_date")[["total_assets", "total_principal", "valuation_krw"]].rename(
+        columns={
+            "total_assets": "총 자산",
+            "total_principal": "원금",
+            "valuation_krw": "평가액",
+        }
+    )
+    st.line_chart(asset_chart_df, height=320)
+
+
+def _render_snapshot_cash_ratio_chart(snapshots: list[dict]) -> None:
+    history_df = _build_snapshot_history_frame(snapshots)
+    if history_df.empty:
+        st.write("저장된 스냅샷이 없습니다.")
+        return
+
+    latest_row = history_df.iloc[-1]
+    c1, c2 = st.columns(2)
+    c1.metric("최신 현금 비중", _format_pct(latest_row["cash_ratio"]))
+    c2.metric("최신 투자 비중", _format_pct(latest_row["invested_ratio"]))
+
+    ratio_chart_df = history_df.set_index("snapshot_date")[["cash_ratio", "invested_ratio"]].rename(
+        columns={"cash_ratio": "현금 비중", "invested_ratio": "투자 비중"}
+    )
+    st.line_chart(ratio_chart_df, height=320)
+
+    cash_chart_df = history_df.set_index("snapshot_date")[["cash_balance"]].rename(
+        columns={"cash_balance": "현금 잔고"}
+    )
+    st.bar_chart(cash_chart_df, height=220)
+
+
+def _render_snapshot_account_history_chart(snapshots: list[dict], account_map: dict[str, str]) -> None:
+    account_history_df = _build_snapshot_account_history_frame(snapshots, account_map)
+    if account_history_df.empty:
+        st.write("계좌별 스냅샷 데이터가 아직 없습니다.")
+        return
+
+    account_chart_df = account_history_df.pivot_table(
+        index="snapshot_date",
+        columns="account_name",
+        values="total_assets",
+        aggfunc="sum",
+    ).sort_index()
+    st.line_chart(account_chart_df, height=340)
+
+    latest_accounts = account_history_df[
+        account_history_df["snapshot_date"] == account_history_df["snapshot_date"].max()
+    ][["account_name", "total_assets", "cash_balance", "valuation_krw"]]
+    latest_accounts = latest_accounts.rename(
+        columns={
+            "account_name": "계좌",
+            "total_assets": "총 자산",
+            "cash_balance": "현금",
+            "valuation_krw": "평가액",
+        }
+    )
+    st.dataframe(latest_accounts, width="stretch", hide_index=True)
+
+
+def _render_selected_snapshot_composition(selected_snap: dict | None, account_map: dict[str, str]) -> None:
+    selected_account_df = _build_selected_snapshot_account_frame(selected_snap, account_map)
+    st.markdown("#### 🧩 선택일 구성")
+    if selected_snap is None:
+        st.info("위 스냅샷 표에서 행을 하나 선택하면 해당 날짜 기준 계좌 구성을 볼 수 있습니다.")
+        return
+    if selected_account_df.empty:
+        st.info("선택한 스냅샷에 계좌 상세 데이터가 없습니다.")
+        return
+
+    st.caption(f"기준일: {selected_snap['snapshot_date']}")
+    selected_chart_df = selected_account_df.set_index("account_name")[
+        ["total_assets", "cash_balance", "valuation_krw"]
+    ].rename(
+        columns={
+            "total_assets": "총 자산",
+            "cash_balance": "현금",
+            "valuation_krw": "평가액",
+        }
+    )
+    st.bar_chart(selected_chart_df, height=340)
+
+    display_df = selected_account_df.rename(
+        columns={
+            "account_name": "계좌",
+            "total_assets": "총 자산",
+            "cash_balance": "현금",
+            "valuation_krw": "평가액",
+            "cash_ratio": "현금 비중",
+        }
+    )
+    st.dataframe(display_df, width="stretch", hide_index=True)
+
+
+def _render_transactions_chart_page(account_map: dict[str, str]) -> None:
+    from utils.portfolio_io import list_daily_snapshots
+
+    st.subheader("📈 스냅샷 차트")
+    snapshots = list_daily_snapshots()
+    tabs = st.tabs(["전체 자산", "현금 비중", "계좌 추이"])
+
+    with tabs[0]:
+        _render_snapshot_total_assets_chart(snapshots)
+
+    with tabs[1]:
+        _render_snapshot_cash_ratio_chart(snapshots)
+
+    with tabs[2]:
+        _render_snapshot_account_history_chart(snapshots, account_map)
+
+
 def render_transaction_management_page(active_tab: str | None = None):
     from utils.account_registry import load_account_configs
 
+    loading = create_loading_status()
     configs = load_account_configs()
     account_map = {c["name"]: c["account_id"] for c in configs}
     account_id_to_country = {c["account_id"]: c["country_code"] for c in configs}
@@ -47,22 +266,35 @@ def render_transaction_management_page(active_tab: str | None = None):
             active_tab = st.session_state.transaction_tab_selector
 
     # --- Tab Logic ---
-    if active_tab == "📊 잔고 CRUD":
-        _render_manage_tab(account_map, account_id_to_country)
-    elif active_tab == "📥 벌크 입력":
-        _render_bulk_tab(account_map, account_id_to_country)
-    elif active_tab == "💵 원금/현금":
-        _render_cash_tab(account_map)
-    elif active_tab == "📸 스냅샷":
-        _render_snapshot_tab(account_map)
+    try:
+        if active_tab == "📊 잔고 CRUD":
+            loading.update("거래 관리 잔고 데이터 조회")
+            _render_manage_tab(account_map, account_id_to_country, loading)
+        elif active_tab == "📥 벌크 입력":
+            loading.update("벌크 입력 화면 준비")
+            _render_bulk_tab(account_map, account_id_to_country)
+        elif active_tab == "💵 원금/현금":
+            loading.update("원금 및 현금 데이터 조회")
+            _render_cash_tab(account_map)
+        elif active_tab == "📸 스냅샷":
+            loading.update("스냅샷 화면 준비")
+            _render_snapshot_tab(account_map)
+        elif active_tab == "📈 그래프":
+            loading.update("스냅샷 차트 화면 준비")
+            _render_transactions_chart_page(account_map)
+    finally:
+        loading.clear()
 
 
-def _render_manage_tab(account_map, account_id_to_country):
+def _render_manage_tab(account_map, account_id_to_country, loading=None):
     from utils.portfolio_io import load_portfolio_master
 
     # Load ALL master data
     all_master_holdings = []
-    for acc_name, acc_id in account_map.items():
+    account_items = list(account_map.items())
+    for idx, (acc_name, acc_id) in enumerate(account_items):
+        if loading is not None:
+            loading.update(f"{acc_name} ({idx + 1}/{len(account_items)})")
         m_data = load_portfolio_master(acc_id)
         if m_data and m_data.get("holdings"):
             for h in m_data["holdings"]:
@@ -388,6 +620,15 @@ def _render_snapshot_tab(account_map):
 
     st.subheader("📸 일간 자산 스냅샷 관리")
     snapshots = list_daily_snapshots()
+    selected_snap = None
+    selection = None
+    if snapshots:
+        selection = st.session_state.get("snapshot_table")
+        if selection and selection.selection and selection.selection.rows:
+            selected_idx = selection.selection.rows[0]
+            if selected_idx < len(snapshots):
+                selected_snap = snapshots[selected_idx]
+
     if not snapshots:
         st.write("저장된 스냅샷이 없습니다.")
     else:
@@ -413,8 +654,6 @@ def _render_snapshot_tab(account_map):
             selection_mode="single-row",
             key="snapshot_table",
         )
-
-        selection = st.session_state.get("snapshot_table")
         if selection and selection.selection and selection.selection.rows:
             selected_idx = selection.selection.rows[0]
             if selected_idx < len(snapshots):
@@ -449,6 +688,9 @@ def _render_snapshot_tab(account_map):
                         }
                     )
                 st.dataframe(pd.DataFrame(acc_details), width="stretch", hide_index=True)
+
+        st.divider()
+        _render_selected_snapshot_composition(selected_snap, account_map)
 
 
 @st.dialog("➕ 신규 종목 추가")
@@ -554,6 +796,7 @@ def build_transaction_page(page_cls, active_tab: str | None = None):
         "📥 벌크 입력": "transactions_import",
         "💵 원금/현금": "transactions_cash",
         "📸 스냅샷": "transactions_snapshot",
+        "📈 그래프": "transactions_chart",
     }
     url_path = slug_map.get(active_tab, "transactions")
     return page_cls(

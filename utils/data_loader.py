@@ -1030,6 +1030,23 @@ def repair_recent_trading_day_gaps(
         latest_trading_day.strftime("%Y-%m-%d"),
         country_code,
     )
+    listing_date_str = get_listing_date(country_code, ticker_key)
+    listing_ts = None
+    if listing_date_str:
+        try:
+            listing_ts = pd.to_datetime(listing_date_str).normalize()
+        except Exception:
+            listing_ts = None
+    cache_start_ts = pd.Timestamp(cached_df.index.min()).normalize()
+    lower_bound_ts = cache_start_ts
+    if listing_ts is not None:
+        lower_bound_ts = max(lower_bound_ts, listing_ts)
+
+    # 상장 전 거래일이나 이미 확보된 첫 거래일 이전 구간은 실제 누락이 아니므로 제외합니다.
+    expected_days = [day for day in expected_days if pd.Timestamp(day).normalize() >= lower_bound_ts]
+    if _should_skip_today_range(country_code, latest_trading_day):
+        # 개장 전에는 당일 일봉이 아직 집계되지 않을 수 있으므로 보강 대상에서 제외합니다.
+        expected_days = [day for day in expected_days if pd.Timestamp(day).normalize() != latest_trading_day]
     if not expected_days:
         return []
 
@@ -1923,7 +1940,7 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> float | None:
         return None
 
     country_code = (country or "").strip().lower() or "kor"
-    if country_code not in {"kor", "kr"}:
+    if country_code != "kor":
         logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
         return None
 

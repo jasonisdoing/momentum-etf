@@ -16,9 +16,11 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.account_registry import load_account_configs
+from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
 from utils.notification import send_slack_message_v2
 from utils.portfolio_io import (
+    MissingPriceCacheError,
     get_latest_daily_snapshot,
     load_portfolio_master,
     load_real_holdings_with_recommendations,
@@ -50,22 +52,84 @@ logger = logging.getLogger(__name__)
 
 
 format_korean_currency = format_kr_money
+WEEKLY_COLLECTION = "weekly_fund_data"
+INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
+INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 
 
 def get_trend_emoji(val):
     if val > 0:
-        return "🔺"
+        return ":small_red_triangle:"
     elif val < 0:
-        return "🔹"
+        return ":chart_with_downwards_trend:"
     return ""
 
 
-def get_chart_emoji(val):
-    if val > 0:
-        return "📈"
-    elif val < 0:
-        return "📉"
-    return "📊"
+def _to_int(value):
+    return int(value or 0)
+
+
+def _calculate_total_expense(doc):
+    return (
+        _to_int(doc.get("withdrawal_personal", 0))
+        + _to_int(doc.get("withdrawal_mom", 0))
+        + _to_int(doc.get("nh_principal_interest", 0))
+    )
+
+
+def _load_latest_weekly_metrics():
+    """주별 데이터 테이블과 동일한 정의로 최신 주간 손익 지표를 계산한다."""
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결 실패로 주별 데이터를 조회할 수 없습니다.")
+
+    docs = list(db[WEEKLY_COLLECTION].find().sort("week_date", 1))
+    if not docs:
+        raise RuntimeError("weekly_fund_data 데이터가 없어 주간 손익을 계산할 수 없습니다.")
+
+    running_total_principal = INITIAL_TOTAL_PRINCIPAL_VALUE
+    running_total_expense = 0
+    previous_cumulative_profit = 0
+    latest_metrics = None
+
+    for doc in docs:
+        week_date = str(doc.get("week_date") or "").strip()
+        if not week_date:
+            raise RuntimeError("weekly_fund_data에 week_date가 비어 있는 행이 있습니다.")
+
+        if week_date <= INITIAL_TOTAL_PRINCIPAL_DATE:
+            total_principal = INITIAL_TOTAL_PRINCIPAL_VALUE
+        else:
+            running_total_principal += _to_int(doc.get("deposit_withdrawal", 0))
+            total_principal = running_total_principal
+
+        running_total_expense += _calculate_total_expense(doc)
+        total_assets = _to_int(doc.get("total_assets", 0))
+        cumulative_profit = total_assets - total_principal - running_total_expense
+        weekly_profit = cumulative_profit - previous_cumulative_profit
+
+        latest_metrics = {
+            "week_date": week_date,
+            "weekly_profit": weekly_profit,
+            "weekly_return_pct": (weekly_profit / total_principal * 100) if total_principal else 0.0,
+            "cumulative_profit": cumulative_profit,
+            "cumulative_return_pct": (cumulative_profit / total_principal * 100) if total_principal else 0.0,
+        }
+        previous_cumulative_profit = cumulative_profit
+
+    if latest_metrics is None:
+        raise RuntimeError("주간 손익 계산 결과를 만들지 못했습니다.")
+
+    return latest_metrics
+
+
+def _build_missing_cache_alert(account_id: str, tickers: list[str]) -> str:
+    ticker_text = ", ".join(tickers)
+    return (
+        f"⚠️ 자산 요약 발송 중단 ({account_id})\n"
+        f"가격 캐시가 없는 보유 종목: {ticker_text}\n"
+        f"`python scripts/update_price_cache.py {account_id}` 실행 후 다시 시도하세요."
+    )
 
 
 def main():
@@ -80,6 +144,7 @@ def main():
     account_summaries = []
     global_principal = 0.0
     global_cash = 0.0
+    total_purchase = 0.0
 
     logger.info("Aggregating data from %d accounts...", len(accounts))
 
@@ -100,7 +165,12 @@ def main():
         try:
             # We need to mock streamlit session_state/secrets for some utils if they depend on it
             # But load_real_holdings_with_recommendations might work if handled carefully
-            df = load_real_holdings_with_recommendations(account_id)
+            df = load_real_holdings_with_recommendations(account_id, strict_price_cache=True)
+        except MissingPriceCacheError as e:
+            alert_msg = _build_missing_cache_alert(account_id, e.tickers)
+            logger.error(alert_msg)
+            send_slack_message_v2(alert_msg)
+            sys.exit(1)
         except Exception as e:
             error_msg = f"❌ 자산 요약 생성 중 치명적 에러 발생 ({account_id} 계좌):\n```{e}```\n\n잘못된 자산 리포트가 발송되는 것을 방지하기 위해 오늘 알림을 중단합니다."
             logger.error(error_msg)
@@ -138,6 +208,7 @@ def main():
                     "cash": acc_cash,
                 }
             )
+            total_purchase += acc_purchase
 
     if not account_summaries:
         logger.warning("No data found to report.")
@@ -145,8 +216,6 @@ def main():
 
     # Global Calculations
     total_assets = sum(acc["total_assets"] for acc in account_summaries)
-    total_net_profit = total_assets - global_principal
-    total_net_profit_pct = (total_net_profit / global_principal * 100) if global_principal > 0 else 0.0
 
     # Fetch previous snapshots
     prev_global = get_latest_daily_snapshot("TOTAL", before_today=True)
@@ -158,6 +227,9 @@ def main():
             global_change = total_assets - prev_total
             global_change_pct = (global_change / prev_total) * 100
 
+    weekly_metrics = _load_latest_weekly_metrics()
+    cash_pct = (global_cash / total_assets * 100) if total_assets > 0 else 0.0
+
     # 1. Compose Main Message (Total Summary)
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     main_text = (
@@ -165,9 +237,10 @@ def main():
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 *총 자산*: *{format_korean_currency(total_assets)}*\n"
         f"🏛️ *투자 원금*: {format_korean_currency(global_principal)}\n"
-        f"💵 *현금 잔고*: {format_korean_currency(global_cash)}\n"
-        f"{get_chart_emoji(global_change)} *전일 대비*: {format_korean_currency(global_change)} ({global_change_pct:+.2f}%) {get_trend_emoji(global_change)}\n"
-        f"{get_chart_emoji(total_net_profit)} *총 평가손익*: *{format_korean_currency(total_net_profit)} ({total_net_profit_pct:+.2f}%)*\n"
+        f"💵 *현금 잔고*: {format_korean_currency(global_cash)} ({cash_pct:.1f}%)\n"
+        f"📆 *금일 손익*: {format_korean_currency(global_change)} ({global_change_pct:+.2f}%) {get_trend_emoji(global_change)}\n"
+        f"🗓️ *금주 손익*: {format_korean_currency(weekly_metrics['weekly_profit'])} ({weekly_metrics['weekly_return_pct']:+.2f}%) {get_trend_emoji(weekly_metrics['weekly_profit'])}\n"
+        f"🏁 *누적 손익*: *{format_korean_currency(weekly_metrics['cumulative_profit'])} ({weekly_metrics['cumulative_return_pct']:+.2f}%)* {get_trend_emoji(weekly_metrics['cumulative_profit'])}\n"
     )
 
     main_ts = send_slack_message_v2(main_text)
@@ -190,12 +263,13 @@ def main():
 
         emoji = get_trend_emoji(acc["net_profit"])
         change_emoji = get_trend_emoji(acc_change)
+        acc_cash_pct = (acc["cash"] / acc["total_assets"] * 100) if acc["total_assets"] > 0 else 0.0
         line = (
             f"• *{acc['name']}*\n"
             f"  - 자산: {format_korean_currency(acc['total_assets'])} (원금: {format_korean_currency(acc['principal'])})\n"
-            f"  - 수익: {emoji} {acc['net_profit_pct']:+.2f}% ({format_korean_currency(acc['net_profit'])})\n"
-            f"  - 변동: {change_emoji} {acc_change_pct:+.2f}% ({format_korean_currency(acc_change)})\n"
-            f"  - 현금: {format_korean_currency(acc['cash'])}"
+            f"  - 누적수익: {emoji} {acc['net_profit_pct']:+.2f}% ({format_korean_currency(acc['net_profit'])})\n"
+            f"  - 금일변동: {change_emoji} {acc_change_pct:+.2f}% ({format_korean_currency(acc_change)})\n"
+            f"  - 현금: {format_korean_currency(acc['cash'])} ({acc_cash_pct:.1f}%)"
         )
         acc_details.append(line)
 
@@ -210,19 +284,28 @@ def main():
         for b in bucket_cols:
             b_val = combined_df.loc[combined_df["버킷"] == b, "평가금액(KRW)"].sum()
             b_pct = (b_val / total_assets * 100) if total_assets > 0 else 0.0
-            comp_details.append(f"• {b}: {b_pct:.1f}% ({format_korean_currency(b_val)})")
+            comp_details.append(f"• {b}: {b_pct:.1f}%")
 
         cash_pct = (global_cash / total_assets * 100) if total_assets > 0 else 0.0
-        comp_details.append(f"• 6. 현금: {cash_pct:.1f}% ({format_korean_currency(global_cash)})")
+        comp_details.append(f"• 6. 현금: {cash_pct:.1f}%")
 
         send_slack_message_v2("\n".join(comp_details), thread_ts=main_ts)
 
     # 4. Save Snapshots for next time (Consolidated)
     # Save individual accounts first, then TOTAL (which updates the same document for today)
     for acc in account_summaries:
-        save_daily_snapshot(acc["account_id"], acc["total_assets"], acc["principal"], acc["cash"], acc["valuation"])
+        save_daily_snapshot(
+            acc["account_id"],
+            acc["total_assets"],
+            acc["principal"],
+            acc["cash"],
+            acc["valuation"],
+            acc.get("valuation", 0.0) - acc.get("stock_profit", 0.0),
+        )
 
-    save_daily_snapshot("TOTAL", total_assets, global_principal, global_cash, total_assets - global_cash)
+    save_daily_snapshot(
+        "TOTAL", total_assets, global_principal, global_cash, total_assets - global_cash, total_purchase
+    )
 
     logger.info("Slack asset summary sent successfully.")
 

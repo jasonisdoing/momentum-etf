@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -17,8 +18,10 @@ class SnapshotBuildState:
         self.holding_days_map: dict[str, int] = {}
         self.prev_rows_cache: dict[str, pd.Series | None] = {}
         self.prev_pending_actions_map: dict[str, str] = {}
+        self.prev_pending_reasons_map: dict[str, str] = {}
         self.prev_effective_shares_map: dict[str, float] = {}
         self.prev_effective_avg_cost_map: dict[str, float] = {}
+        self.prev_messages_map: dict[str, str] = {}
 
 
 def create_snapshot_build_state() -> SnapshotBuildState:
@@ -32,19 +35,21 @@ def _display_from_pending_action(pending_action: str) -> str | None:
     return None
 
 
-def resolve_display_decision(prev_pending_action: str, current_decision: str, current_pending_action: str) -> str:
-    prev_pending_norm = str(prev_pending_action or "").upper()
+def resolve_display_decision(
+    prev_pending_action: str,
+    prev_pending_reason: str,
+    current_decision: str,
+    current_pending_action: str,
+    is_first_holding_day: bool,
+    is_unavailable_without_position: bool,
+) -> str:
+    if is_unavailable_without_position:
+        return "-"
+    if is_first_holding_day:
+        return "BUY"
     curr_norm = str(current_decision or "").upper()
     signal_decision = _display_from_pending_action(current_pending_action)
-    if prev_pending_norm == "BUY_REPLACE" and curr_norm == "HOLD":
-        return "BUY_REPLACE"
-    if prev_pending_norm == "BUY" and curr_norm == "HOLD":
-        return "BUY"
-    if prev_pending_norm == "SELL_REPLACE" and curr_norm == "WAIT":
-        return "SELL_REPLACE"
-    if prev_pending_norm == "SELL" and curr_norm == "WAIT":
-        return "SELL"
-    return signal_decision or curr_norm
+    return signal_decision or curr_norm or "HOLD"
 
 
 def _iter_tickers_order(ticker_timeseries: dict[str, pd.DataFrame]) -> list[str]:
@@ -60,6 +65,74 @@ def _iter_tickers_order(ticker_timeseries: dict[str, pd.DataFrame]) -> list[str]
     return tickers_order
 
 
+def _normalize_note_text(note: str) -> str:
+    text = str(note or "").strip()
+    if not text:
+        return ""
+    return re.sub(r"(\d+)일 후", r"\1거래일 후", text)
+
+
+def _count_trading_days_until(
+    portfolio_index: pd.Index,
+    target_date: pd.Timestamp,
+    execute_on: Any,
+) -> int:
+    if execute_on is None:
+        return 0
+    try:
+        execute_ts = pd.Timestamp(execute_on)
+    except Exception:
+        return 0
+    if pd.isna(execute_ts):
+        return 0
+
+    current_norm = pd.Timestamp(target_date).normalize()
+    execute_norm = execute_ts.normalize()
+    if execute_norm <= current_norm:
+        return 0
+
+    trading_days = [pd.Timestamp(day).normalize() for day in portfolio_index]
+    return sum(1 for day in trading_days if current_norm < day <= execute_norm)
+
+
+def _format_weight_change(current_weight: float, target_weight: float | None) -> str:
+    current_display = f"{float(current_weight):.1f}%"
+    if target_weight is None or not _is_finite_number(target_weight):
+        return current_display
+    return f"{current_display} => {float(target_weight):.1f}%"
+
+
+def _format_pending_message(
+    *,
+    pending_action: str,
+    pending_reason: str,
+    note: str,
+    current_weight: float,
+    target_weight: float | None,
+    target_name: str,
+    days_until_execution: int,
+) -> str:
+    days_text = f"{max(int(days_until_execution), 1)}거래일 후 "
+
+    if pending_reason == "비중 조정":
+        return f"[예정] {days_text}비중조절 - {_format_weight_change(current_weight, target_weight)}"
+
+    return _normalize_note_text(note)
+
+
+def _format_executed_message(
+    *,
+    prev_pending_action: str,
+    prev_message: str,
+) -> str:
+    message = str(prev_message or "").strip()
+    if not message:
+        return ""
+    if not prev_pending_action:
+        return ""
+    return re.sub(r"^\[예정\]\s*\d+거래일 후\s*", "", message)
+
+
 def build_snapshot_rows(
     *,
     result: AccountBacktestResult,
@@ -68,7 +141,6 @@ def build_snapshot_rows(
     total_cash: float,
     state: SnapshotBuildState,
     price_overrides: dict[str, float] | None = None,
-    bucket_topn: int | None = None,
 ) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
 
@@ -92,8 +164,10 @@ def build_snapshot_rows(
         raw_decision = str(row.get("decision", "")).upper()
         pending_action = str(row.get("pending_action", "") or "").upper()
         prev_pending_action = state.prev_pending_actions_map.get(ticker_key, "")
-        display_decision = resolve_display_decision(prev_pending_action, raw_decision, pending_action)
+        prev_pending_reason = state.prev_pending_reasons_map.get(ticker_key, "")
+        pending_reason = str(row.get("pending_reason", "") or "")
         score = row.get("score")
+        target_weight = row.get("target_weight")
         note = str(row.get("note", "") or "")
         is_pending_tomorrow = bool(pending_action)
         is_cash = ticker_key == "CASH"
@@ -136,7 +210,7 @@ def build_snapshot_rows(
 
         pv_safe = pv if _is_finite_number(pv) else 0.0
         total_value_safe = total_value if _is_finite_number(total_value) and total_value > 0 else 0.0
-        weight = (pv_safe / total_value_safe * 100.0) if total_value_safe > 0 else 0.0
+        current_weight = (pv_safe / total_value_safe * 100.0) if total_value_safe > 0 else 0.0
 
         if ticker_key not in state.buy_date_map:
             state.buy_date_map[ticker_key] = None
@@ -161,6 +235,19 @@ def build_snapshot_rows(
             state.buy_date_map[ticker_key] = None
             state.holding_days_map[ticker_key] = 0
 
+        is_first_holding_day = (not is_cash) and state.holding_days_map.get(ticker_key, 0) == 1 and shares > 0
+        is_unavailable_without_position = (
+            (not is_cash) and shares <= 0 and price <= 0 and str(note or "").strip() == "데이터 없음"
+        )
+        display_decision = resolve_display_decision(
+            prev_pending_action,
+            prev_pending_reason,
+            raw_decision,
+            pending_action,
+            is_first_holding_day,
+            is_unavailable_without_position,
+        )
+
         display_avg_cost = None
         if not is_cash and _is_finite_number(avg_cost) and avg_cost > 0:
             display_avg_cost = avg_cost
@@ -182,9 +269,32 @@ def build_snapshot_rows(
 
         if is_cash and total_value_safe > 0:
             cash_ratio = (total_cash / total_value_safe) if _is_finite_number(total_cash) else 0.0
-            weight = cash_ratio * 100.0
+            current_weight = cash_ratio * 100.0
 
-        message = note or DECISION_MESSAGES.get(display_decision, "")
+        days_until_execution = _count_trading_days_until(
+            result.portfolio_timeseries.index,
+            target_date,
+            row.get("execute_on"),
+        )
+        message = ""
+        if pending_action:
+            message = _format_pending_message(
+                pending_action=pending_action,
+                pending_reason=pending_reason,
+                note=note,
+                current_weight=current_weight,
+                target_weight=float(target_weight) * 100.0 if _is_finite_number(target_weight) else None,
+                target_name=name,
+                days_until_execution=days_until_execution,
+            )
+        elif prev_pending_action and not is_cash:
+            message = _format_executed_message(
+                prev_pending_action=prev_pending_action,
+                prev_message=state.prev_messages_map.get(ticker_key, ""),
+            )
+
+        if not message:
+            message = _normalize_note_text(note) or DECISION_MESSAGES.get(display_decision, "")
 
         is_current_holding = (not is_cash) and shares > 0
 
@@ -199,7 +309,7 @@ def build_snapshot_rows(
             "bucket": bucket_id,
             "bucket_display": bucket_display,
             "name": name,
-            "display_decision": "N/A" if is_cash else (display_decision or "-"),
+            "display_decision": "N/A" if is_cash else display_decision,
             "raw_decision": raw_decision or "-",
             "holding_days": state.holding_days_map.get(ticker_key, 0),
             "price": price,
@@ -209,7 +319,9 @@ def build_snapshot_rows(
             "shares": shares,
             "pv": pv,
             "evaluation_profit": evaluation_profit if display_avg_cost is not None else None,
-            "weight": weight,
+            "weight": current_weight,
+            "current_weight": current_weight,
+            "target_weight": float(target_weight) * 100.0 if _is_finite_number(target_weight) else None,
             "score": float(score) if _is_finite_number(score) else None,
             "message": message,
             "is_cash": is_cash,
@@ -220,38 +332,10 @@ def build_snapshot_rows(
         }
         entries.append(snapshot_row)
         state.prev_pending_actions_map[ticker_key] = pending_action
+        state.prev_pending_reasons_map[ticker_key] = pending_reason
         state.prev_effective_shares_map[ticker_key] = shares
         state.prev_effective_avg_cost_map[ticker_key] = avg_cost
-
-    effective_bucket_topn = bucket_topn
-    if effective_bucket_topn is None:
-        try:
-            effective_bucket_topn = int(getattr(result, "bucket_topn", 0) or 0)
-        except (TypeError, ValueError):
-            effective_bucket_topn = 0
-
-    if effective_bucket_topn and effective_bucket_topn > 0:
-        bucket_counts: dict[int | str, int] = {}
-        ranked_entries = sorted(
-            entries,
-            key=lambda row: (
-                0 if row.get("is_current_holding") else 1,
-                (int(row.get("bucket")) if row.get("bucket") is not None else 99),
-                -(float(row.get("score")) if _is_finite_number(row.get("score")) else float("-inf")),
-                str(row.get("ticker", "")),
-            ),
-        )
-
-        for row in ranked_entries:
-            if row.get("is_cash"):
-                row["_is_bucket_top"] = False
-                continue
-            b_idx = row.get("bucket") if row.get("bucket") is not None else 99
-            bucket_counts[b_idx] = bucket_counts.get(b_idx, 0) + 1
-            row["_is_bucket_top"] = bucket_counts[b_idx] <= effective_bucket_topn
-    else:
-        for row in entries:
-            row["_is_bucket_top"] = False
+        state.prev_messages_map[ticker_key] = message
 
     def _final_sort_key(row: dict[str, Any]) -> tuple[int, int, float, str]:
         # 백테스트 일별 표는 CASH 고정, 그 다음 보유 여부 -> 버킷 -> 점수 내림차순 정렬
