@@ -740,20 +740,21 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                     full_html = f'<div style="overflow-x: auto;">{table_html.replace("<table ", "<table class='summary-table' ")}</div>'
                     st.html(full_html)
 
-                # 왼쪽 50%만 사용하기 위한 컬럼 생성
-                left_col, _ = st.columns([1, 1])
+                section_col_a, section_col_b = st.columns(2)
 
-                with left_col:
+                with section_col_a:
                     st.subheader("포트폴리오 구성 비중")
                     table_weight_html = styled_weight_df.to_html()
                     full_weight_html = f'<div style="overflow-x: auto;">{table_weight_html.replace("<table ", "<table class='summary-table' ")}</div>'
                     st.html(full_weight_html)
 
-                    st.subheader("통계용")
+                with section_col_b:
+                    st.subheader("자산 비중")
                     table_stat_html = styled_stat_df.to_html()
                     full_stat_html = f'<div style="overflow-x: auto;">{table_stat_html.replace("<table ", "<table class='summary-table' ")}</div>'
                     st.html(full_stat_html)
 
+                with section_col_a:
                     # 버튼 스타일링 (기존 코드 유지)
                     st.markdown(
                         """
