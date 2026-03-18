@@ -261,7 +261,7 @@ def load_real_holdings_with_recommendations(account_id: str) -> pd.DataFrame | N
         account_country = str(account_settings.get("country_code") or "").strip().lower()
     except Exception:
         account_country = ""
-    if account_country in {"kor", "kr"}:
+    if account_country == "kor":
         df_holdings = _apply_kor_realtime_overlay_to_holdings(df_holdings)
 
     multiplier = df_holdings["currency"].apply(_get_multiplier)

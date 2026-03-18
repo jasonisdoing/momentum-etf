@@ -108,7 +108,7 @@ def load_account_recommendations(
     rows = snapshot.get("recommendations") or []
 
     # [KOR] 실시간 데이터 오버레이 (NAVER API)
-    if country_code in ("kor", "kr"):
+    if country_code == "kor":
         try:
             from utils.data_loader import fetch_naver_etf_inav_snapshot
 

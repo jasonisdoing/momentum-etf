@@ -74,6 +74,8 @@
 }
 ```
 
+계좌 설정의 `country_code`는 현재 `kor` 또는 `au`만 허용합니다. `us`는 종목풀 `rank.country`에서만 사용합니다.
+
 검증 원칙(현재 운영):
 
 * 계좌: `strategy.REBALANCE_MODE` 필수

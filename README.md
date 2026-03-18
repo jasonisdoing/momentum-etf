@@ -69,7 +69,7 @@ pip install -r requirements.txt
 ```bash
 python rank.py kor
 python rank.py us
-python rank.py aus
+python rank.py au
 ```
 
 **2. 튜닝 (계좌 리밸런싱 파라미터 탐색 및 자동 적용)**
@@ -91,7 +91,7 @@ python recommend.py core_account
 ```
 
 현재 기본 식별자는 다음과 같습니다.
-* 종목풀: `kor`, `us`, `aus`
+* 종목풀: `kor`, `us`, `au`
 * 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
 
 ## ⚠️ 면책 조항 (Disclaimer)

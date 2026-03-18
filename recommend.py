@@ -556,7 +556,7 @@ def generate_recommendation_report(
     )
 
     # 한국 종목의 경우 Nav와 괴리율을 네이버 API에서 가져옴
-    if country_code in ("kor", "kr"):
+    if country_code == "kor":
         recommendations = _enrich_with_nav_data(recommendations, universe_tickers)
 
     # 전체 기간 데이터(prefetched_map)를 이용하여 기간별 수익률(6m, 12m 등) 재계산/보강

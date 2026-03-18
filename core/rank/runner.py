@@ -242,7 +242,7 @@ def run_pool_ranking(pool_id: str, config: RankConfig) -> RankRunResult:
         row["rank"] = rank
 
     # 한국 종목풀은 NAV/괴리율을 실시간으로 보강
-    if (config.country or "").strip().lower() in {"kor", "kr"}:
+    if (config.country or "").strip().lower() == "kor":
         tickers_for_nav = [row.get("ticker") for row in sliced_rows if row.get("ticker")]
         nav_snapshot = fetch_naver_etf_inav_snapshot(tickers_for_nav)
         for row in sliced_rows:

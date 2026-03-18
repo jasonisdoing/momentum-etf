@@ -406,9 +406,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
         # 국가별 플레이스홀더 설정
         if country_code == "kor":
             placeholder_text = "예: 005930"
-        elif country_code in ["us", "usa"]:
-            placeholder_text = "예: SPY"
-        elif country_code in ["au", "aus"]:
+        elif country_code == "au":
             placeholder_text = "예: VAS"
         else:
             placeholder_text = "예: Ticker"
@@ -860,7 +858,7 @@ def render_account_page(account_id: str, view_mode: str | None = None, loading=N
                 updated_at_rel = format_relative_time(updated_at)
                 updated_at_display = f"{updated_at}{updated_at_rel}"
 
-            if country_code in ("kor", "kr"):
+            if country_code == "kor":
                 from datetime import datetime
 
                 now = datetime.now()
