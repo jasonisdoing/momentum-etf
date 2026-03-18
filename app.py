@@ -939,9 +939,13 @@ def main() -> None:
         "📥 벌크 입력",
         "💵 원금/현금",
         "📸 스냅샷",
-        "📈 그래프",
     ]
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
+
+    # 데이터 그룹
+    from app_pages.weekly_data_page import build_weekly_data_page
+
+    pages["데이터"] = [build_weekly_data_page(page_cls)]
 
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
     view_modes = ["0. 요약", "1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]

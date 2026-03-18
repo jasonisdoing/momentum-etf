@@ -474,6 +474,7 @@ def save_daily_snapshot(
     total_principal: float,
     cash_balance: float,
     valuation_krw: float,
+    purchase_amount: float | None = None,
 ) -> bool:
     """
     Save a daily snapshot.
@@ -496,6 +497,7 @@ def save_daily_snapshot(
                 "total_principal": 0.0,
                 "cash_balance": 0.0,
                 "valuation_krw": 0.0,
+                "purchase_amount": 0.0,
                 "accounts": [],
                 "updated_at": datetime.datetime.now(),
             }
@@ -505,6 +507,8 @@ def save_daily_snapshot(
             doc["total_principal"] = float(total_principal)
             doc["cash_balance"] = float(cash_balance)
             doc["valuation_krw"] = float(valuation_krw)
+            if purchase_amount is not None:
+                doc["purchase_amount"] = float(purchase_amount)
         else:
             accounts = doc.get("accounts", [])
             found = False
@@ -514,6 +518,8 @@ def save_daily_snapshot(
                     acc["total_principal"] = float(total_principal)
                     acc["cash_balance"] = float(cash_balance)
                     acc["valuation_krw"] = float(valuation_krw)
+                    if purchase_amount is not None:
+                        acc["purchase_amount"] = float(purchase_amount)
                     found = True
                     break
             if not found:
@@ -524,6 +530,7 @@ def save_daily_snapshot(
                         "total_principal": float(total_principal),
                         "cash_balance": float(cash_balance),
                         "valuation_krw": float(valuation_krw),
+                        "purchase_amount": float(purchase_amount or 0.0),
                     }
                 )
             doc["accounts"] = accounts
