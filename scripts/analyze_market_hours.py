@@ -100,7 +100,11 @@ def get_yfinance_5min_stats(code, name, country="kor", period="1mo"):
     best_buy = time_stats.sort_values(by="Pct_Change_From_Open").iloc[0]
     best_sell = time_stats.sort_values(by="Pct_Change_From_Open", ascending=False).iloc[0]
 
-    res_str = f" - {code}\t{name:<15} - 최적 매수 시간: {best_buy['Time']}, 최적 매도 시간: {best_sell['Time']}"
+    res_str = (
+        f" - {code}\t{name:<15} - "
+        f"최적 매수 시간: {best_buy['Time']} (평균 {best_buy['Pct_Change_From_Open']:+.3f}%), "
+        f"최적 매도 시간: {best_sell['Time']} (평균 {best_sell['Pct_Change_From_Open']:+.3f}%)"
+    )
     return res_str, time_stats
 
 
