@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -55,6 +56,7 @@ format_korean_currency = format_kr_money
 WEEKLY_COLLECTION = "weekly_fund_data"
 INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
 INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
+KST = ZoneInfo("Asia/Seoul")
 
 
 def get_trend_emoji(val):
@@ -231,7 +233,7 @@ def main():
     cash_pct = (global_cash / total_assets * 100) if total_assets > 0 else 0.0
 
     # 1. Compose Main Message (Total Summary)
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     main_text = (
         f"*📊 총 자산 요약 ({now_str})*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"

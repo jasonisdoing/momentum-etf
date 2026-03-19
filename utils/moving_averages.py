@@ -1,10 +1,13 @@
 """
 이동평균 계산 유틸리티 함수
-- SMA, EMA, WMA, DEMA, TEMA, HMA 지원
+- SMA, EMA, WMA, DEMA, TEMA, HMA, ALMA 지원
 """
 
 import numpy as np
 import pandas as pd
+
+ALMA_OFFSET = 0.85
+ALMA_SIGMA = 6.0
 
 
 def calculate_sma(prices: pd.Series, period: int) -> pd.Series:
@@ -60,25 +63,6 @@ def calculate_wma(prices: pd.Series, period: int) -> pd.Series:
     return prices.rolling(window=period, min_periods=1).apply(weighted_mean, raw=True)
 
 
-def calculate_dema(prices: pd.Series, period: int) -> pd.Series:
-    """
-    Double Exponential Moving Average (이중 지수 이동평균)
-
-    EMA의 EMA를 사용하여 지연(lag)을 감소시킵니다.
-    DEMA = 2 * EMA - EMA(EMA)
-
-    Args:
-        prices: 가격 시리즈
-        period: 이동평균 기간
-
-    Returns:
-        DEMA 시리즈
-    """
-    ema1 = prices.ewm(span=period, adjust=False).mean()
-    ema2 = ema1.ewm(span=period, adjust=False).mean()
-    return 2 * ema1 - ema2
-
-
 def calculate_tema(prices: pd.Series, period: int) -> pd.Series:
     """
     Triple Exponential Moving Average (삼중 지수 이동평균)
@@ -97,6 +81,25 @@ def calculate_tema(prices: pd.Series, period: int) -> pd.Series:
     ema2 = ema1.ewm(span=period, adjust=False).mean()
     ema3 = ema2.ewm(span=period, adjust=False).mean()
     return 3 * ema1 - 3 * ema2 + ema3
+
+
+def calculate_dema(prices: pd.Series, period: int) -> pd.Series:
+    """
+    Double Exponential Moving Average (이중 지수 이동평균)
+
+    EMA의 EMA를 사용하여 지연(lag)을 감소시킵니다.
+    DEMA = 2 * EMA - EMA(EMA)
+
+    Args:
+        prices: 가격 시리즈
+        period: 이동평균 기간
+
+    Returns:
+        DEMA 시리즈
+    """
+    ema1 = prices.ewm(span=period, adjust=False).mean()
+    ema2 = ema1.ewm(span=period, adjust=False).mean()
+    return 2 * ema1 - ema2
 
 
 def calculate_hma(prices: pd.Series, period: int) -> pd.Series:
@@ -123,6 +126,49 @@ def calculate_hma(prices: pd.Series, period: int) -> pd.Series:
     return calculate_wma(raw_hma, sqrt_period)
 
 
+def calculate_alma(
+    prices: pd.Series,
+    period: int,
+) -> pd.Series:
+    """
+    Arnaud Legoux Moving Average (아르노 르구 이동평균)
+
+    가우시안 가중치를 사용해 노이즈를 줄이면서도 반응성을 유지합니다.
+
+    Args:
+        prices: 가격 시리즈
+        period: 이동평균 기간
+        offset: 가중치 중심 위치
+        sigma: 가우시안 분포 폭 제어값
+
+    Returns:
+        ALMA 시리즈
+    """
+
+    if period <= 0:
+        raise ValueError(f"이동평균 기간은 1 이상이어야 합니다: {period}")
+
+    m = ALMA_OFFSET * (period - 1)
+    s = period / ALMA_SIGMA
+    weights = np.exp(-((np.arange(period) - m) ** 2) / (2 * s * s))
+    weights = weights / weights.sum()
+    values = prices.to_numpy(dtype=float, copy=False)
+    result = np.empty(len(values), dtype=float)
+
+    # 초반 구간은 현재 min_periods=1 동작을 유지하기 위해 짧은 커널로 다시 정규화합니다.
+    prefix_length = min(period - 1, len(values))
+    for idx in range(prefix_length):
+        window_weights = weights[-(idx + 1) :]
+        normalized_weights = window_weights / window_weights.sum()
+        result[idx] = np.dot(values[: idx + 1], normalized_weights)
+
+    if len(values) >= period:
+        valid_result = np.convolve(values, weights[::-1], mode="valid")
+        result[period - 1 :] = valid_result
+
+    return pd.Series(result, index=prices.index, dtype=float)
+
+
 def calculate_moving_average(
     prices: pd.Series,
     period: int,
@@ -134,7 +180,7 @@ def calculate_moving_average(
     Args:
         prices: 가격 시리즈
         period: 이동평균 기간
-        ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA)
+        ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA, ALMA)
 
     Returns:
         계산된 이동평균 시리즈
@@ -161,8 +207,10 @@ def calculate_moving_average(
         return calculate_tema(prices, period)
     elif ma_type_upper == "HMA":
         return calculate_hma(prices, period)
+    elif ma_type_upper == "ALMA":
+        return calculate_alma(prices, period)
     else:
-        raise ValueError(f"지원하지 않는 MA 타입입니다: {ma_type}. 지원 타입: SMA, EMA, WMA, DEMA, TEMA, HMA")
+        raise ValueError(f"지원하지 않는 MA 타입입니다: {ma_type}. 지원 타입: SMA, EMA, WMA, DEMA, TEMA, HMA, ALMA")
 
 
 __all__ = [
@@ -173,4 +221,5 @@ __all__ = [
     "calculate_dema",
     "calculate_tema",
     "calculate_hma",
+    "calculate_alma",
 ]

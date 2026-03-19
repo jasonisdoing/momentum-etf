@@ -1,5 +1,6 @@
 import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from bson import ObjectId
@@ -9,6 +10,12 @@ from utils.logger import get_app_logger
 from utils.settings_loader import get_account_settings
 
 logger = get_app_logger()
+KST = ZoneInfo("Asia/Seoul")
+
+
+def _now_kst() -> datetime.datetime:
+    """KST 기준 현재 시각을 반환한다."""
+    return datetime.datetime.now(KST)
 
 
 class MissingPriceCacheError(RuntimeError):
@@ -468,7 +475,7 @@ def save_portfolio_master(
                     h["quantity"] = int(math.floor(float(h.get("quantity", 0.0))))
 
                 acc["holdings"] = holdings
-                acc["updated_at"] = datetime.datetime.now()
+                acc["updated_at"] = _now_kst()
                 found = True
                 break
 
@@ -484,7 +491,7 @@ def save_portfolio_master(
                 "total_principal": float(total_principal or 0.0),
                 "cash_balance": float(cash_balance or 0.0),
                 "holdings": holdings,
-                "updated_at": datetime.datetime.now(),
+                "updated_at": _now_kst(),
             }
             if cash_balance_native is not None:
                 new_acc["cash_balance_native"] = float(cash_balance_native)
@@ -520,7 +527,7 @@ def save_daily_snapshot(
     if db is None:
         return False
 
-    snapshot_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    snapshot_date = _now_kst().strftime("%Y-%m-%d")
 
     try:
         # Find existing snapshot for today
@@ -534,7 +541,7 @@ def save_daily_snapshot(
                 "valuation_krw": 0.0,
                 "purchase_amount": 0.0,
                 "accounts": [],
-                "updated_at": datetime.datetime.now(),
+                "updated_at": _now_kst(),
             }
 
         if account_id == "TOTAL":
@@ -570,7 +577,7 @@ def save_daily_snapshot(
                 )
             doc["accounts"] = accounts
 
-        doc["updated_at"] = datetime.datetime.now()
+        doc["updated_at"] = _now_kst()
 
         db.daily_snapshots.update_one({"snapshot_date": snapshot_date}, {"$set": doc}, upsert=True)
         return True
@@ -587,7 +594,7 @@ def get_latest_daily_snapshot(account_id: str, before_today: bool = True) -> dic
 
     query = {}
     if before_today:
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        today_str = _now_kst().strftime("%Y-%m-%d")
         query["snapshot_date"] = {"$lt": today_str}
 
     try:
