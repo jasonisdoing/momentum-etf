@@ -41,8 +41,7 @@ EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "ETN"
 INCLUDE_KEYWORDS = []
 # 최소 거래량 (0이면 필터링 안 함)
 # MIN_VOLUME = 100000
-# MIN_VOLUME = 500000
-MIN_VOLUME = 500000
+MIN_VOLUME = 100000
 
 
 def fetch_naver_etf_data(min_change_pct: float) -> pd.DataFrame | None:
