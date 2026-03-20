@@ -363,6 +363,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             acc_total_assets = acc_valuation + acc_cash
             acc_net_profit = acc_total_assets - acc_principal
             acc_net_profit_pct = (acc_net_profit / acc_principal) * 100 if acc_principal > 0 else 0.0
+            acc_cash_ratio = (acc_cash / acc_total_assets) * 100 if acc_total_assets > 0 else 0.0
 
             # 하나라도 데이터가 있는 경우에만 요약에 추가 (또는 모든 계좌 표시)
             if acc_principal > 0 or acc_cash > 0 or acc_valuation > 0:
@@ -377,6 +378,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                         "평가 금액": acc_valuation,
                         "평가 손익": acc_stock_profit,
                         "평가 수익률": acc_stock_profit_pct,
+                        "현금 비중": acc_cash_ratio,
                         "현금": acc_cash,
                     }
                 )
@@ -398,6 +400,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             total_stock_profit = sum(acc["평가 손익"] for acc in account_summaries)
             total_stock_profit_pct = (total_stock_profit / total_purchase) * 100 if total_purchase > 0 else 0.0
             total_cash = sum(acc["현금"] for acc in account_summaries)
+            total_cash_ratio = (total_cash / total_assets) * 100 if total_assets > 0 else 0.0
 
             # Fetch previous snapshot for change calculation
             prev_global = get_latest_daily_snapshot("TOTAL", before_today=True)
@@ -420,6 +423,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                     "평가 금액": total_valuation,
                     "평가 손익": total_stock_profit,
                     "평가 수익률": total_stock_profit_pct,
+                    "현금 비중": total_cash_ratio,
                     "현금": total_cash,
                 }
             )
@@ -538,6 +542,8 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             def format_value(val, row_name):
                 if not isinstance(val, (int, float)):
                     return val
+                if row_name == "현금 비중":
+                    return f"{val:.1f}%"
                 if "수익률" in row_name:
                     return f"{val:+.2f}%"
                 return f"{val:,.0f}원"
@@ -572,7 +578,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                                         s += " color: #e06666; font-weight: bold;"
                                     elif val < 0:
                                         s += " color: #3d85c6; font-weight: bold;"
-                            elif metric_name == "계좌 수익률" or metric_name == "현금":
+                            elif metric_name in {"계좌 수익률", "현금 비중", "현금"}:
                                 s += " font-weight: bold;"
                         style_df.at[i, col] = s
                 return style_df
