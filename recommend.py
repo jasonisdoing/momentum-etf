@@ -309,9 +309,9 @@ def extract_recommendations_from_backtest(
 def _assign_final_ranks(
     recommendations: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """백테스트 리포트와 동일한 정렬 및 보유/대기 순위를 부여합니다."""
+    """추천 결과에 표시할 최종 정렬 순서와 순번을 부여합니다."""
 
-    # 추천은 마지막 스냅샷을 그대로 정렬해 보여줍니다.
+    # 추천 표시는 버킷 -> 점수 내림차순 -> 티커 순서로 고정합니다.
     for rec in recommendations:
         shares = _safe_float(rec.get("shares"), 0.0) or 0.0
         is_current_holding = shares > 0
@@ -322,16 +322,14 @@ def _assign_final_ranks(
         else:
             rec["_sort_group"] = 2
 
-    # 2. 정렬 로직 적용 (보유 여부 -> 버킷 -> 점수)
+    # 2. 정렬 로직 적용 (버킷 -> 점수 내림차순 -> 티커)
     def _sort_key(x):
-        holding_priority = 0 if x.get("_is_current_holding") else 1
         bucket_val = x.get("bucket")
         try:
             bucket_priority = int(bucket_val) if bucket_val is not None else 99
         except (TypeError, ValueError):
             bucket_priority = 99
         return (
-            holding_priority,
             bucket_priority,
             -(x.get("score") if x.get("score") is not None else float("-inf")),
             x.get("ticker", ""),
