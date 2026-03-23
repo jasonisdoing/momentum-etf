@@ -42,9 +42,12 @@ def resolve_display_decision(
     current_pending_action: str,
     is_first_holding_day: bool,
     is_unavailable_without_position: bool,
+    has_current_holding: bool,
 ) -> str:
     if is_unavailable_without_position:
         return "-"
+    if not has_current_holding:
+        return "WAIT"
     if is_first_holding_day:
         return "BUY"
     curr_norm = str(current_decision or "").upper()
@@ -158,6 +161,7 @@ def build_snapshot_rows(
             price = float(price_overrides[ticker_key])
 
         raw_shares = float(row.get("shares")) if pd.notna(row.get("shares")) else 0.0
+        raw_shares = max(0.0, raw_shares)
         avg_cost = float(row.get("avg_cost")) if pd.notna(row.get("avg_cost")) else 0.0
         traded_shares = float(row.get("trade_shares")) if pd.notna(row.get("trade_shares")) else 0.0
 
@@ -181,17 +185,17 @@ def build_snapshot_rows(
                 else:
                     avg_cost = 0.0
             elif pending_action.startswith("SELL"):
-                reconstructed_shares = raw_shares + max(0.0, traded_shares)
+                reconstructed_shares = max(0.0, raw_shares + max(0.0, traded_shares))
                 shares = (
                     reconstructed_shares
                     if reconstructed_shares > 0
-                    else state.prev_effective_shares_map.get(ticker_key, raw_shares)
+                    else max(0.0, state.prev_effective_shares_map.get(ticker_key, raw_shares))
                 )
                 avg_cost = state.prev_effective_avg_cost_map.get(ticker_key, avg_cost)
             else:
-                shares = raw_shares
+                shares = max(0.0, raw_shares)
         else:
-            shares = raw_shares
+            shares = max(0.0, raw_shares)
         pv = price * shares
 
         if is_cash:
@@ -235,6 +239,7 @@ def build_snapshot_rows(
             state.buy_date_map[ticker_key] = None
             state.holding_days_map[ticker_key] = 0
 
+        has_current_holding = (not is_cash) and shares > 0
         is_first_holding_day = (not is_cash) and state.holding_days_map.get(ticker_key, 0) == 1 and shares > 0
         is_unavailable_without_position = (
             (not is_cash) and shares <= 0 and price <= 0 and str(note or "").strip() == "데이터 없음"
@@ -246,6 +251,7 @@ def build_snapshot_rows(
             pending_action,
             is_first_holding_day,
             is_unavailable_without_position,
+            has_current_holding,
         )
 
         display_avg_cost = None
@@ -296,7 +302,7 @@ def build_snapshot_rows(
         if not message:
             message = _normalize_note_text(note) or DECISION_MESSAGES.get(display_decision, "")
 
-        is_current_holding = (not is_cash) and shares > 0
+        is_current_holding = has_current_holding
 
         sort_group = 2
         if is_cash:
@@ -337,19 +343,19 @@ def build_snapshot_rows(
         state.prev_effective_avg_cost_map[ticker_key] = avg_cost
         state.prev_messages_map[ticker_key] = message
 
-    def _final_sort_key(row: dict[str, Any]) -> tuple[int, int, float, str]:
-        # 백테스트 일별 표는 CASH 고정, 그 다음 보유 여부 -> 버킷 -> 점수 내림차순 정렬
+    def _final_sort_key(row: dict[str, Any]) -> tuple[int, int, int, float, str]:
+        # 백테스트 일별 표는 CASH 고정입니다.
+        # 그 다음은 보유 여부 -> 점수 내림차순으로만 정렬합니다.
+        # 아직 가격 데이터가 없어 점수가 없는 종목은 항상 맨 아래로 보냅니다.
         if row.get("is_cash"):
-            return (-1, 0, 0.0, "CASH")
+            return (-1, 0, 0, 0.0, "CASH")
 
-        holding_priority = 0 if row.get("is_current_holding") else 1
-        bucket_val = row.get("bucket")
-        try:
-            bucket_priority = int(bucket_val) if bucket_val is not None else 99
-        except (TypeError, ValueError):
-            bucket_priority = 99
-        score_val = float(row.get("score")) if _is_finite_number(row.get("score")) else float("-inf")
-        return (0, holding_priority, bucket_priority, -score_val, str(row.get("ticker", "")))
+        has_score = _is_finite_number(row.get("score"))
+        missing_score_priority = 1 if not has_score else 0
+        score_val = float(row.get("score")) if has_score else float("-inf")
+        is_current_holding = bool(row.get("is_current_holding"))
+        holding_priority = 0 if is_current_holding else 1 + missing_score_priority
+        return (0, holding_priority, 0, -score_val, str(row.get("ticker", "")))
 
     entries.sort(key=_final_sort_key)
 

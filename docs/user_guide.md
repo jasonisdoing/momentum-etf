@@ -13,38 +13,29 @@
 
 ### 실행 명령어
 
-**1. 종목풀 랭킹 생성**
-종목풀에서 모멘텀 랭킹을 생성합니다.
-```bash
-python rank.py kor
-python rank.py tax
-python rank.py au
-```
-
-**2. 튜닝 (계좌 리밸런싱 파라미터 탐색)**
+**1. 튜닝 (계좌 리밸런싱 파라미터 탐색)**
 최적의 리밸런싱 파라미터를 찾기 위해 튜닝을 수행합니다. 완료 후 계좌 설정이 **자동으로 업데이트**됩니다.
 ```bash
 python tune.py kor_account
 python tune.py core_account
 ```
 
-**3. 백테스트 실행**
+**2. 백테스트 실행**
 과거 데이터를 바탕으로 전략의 성과를 시뮬레이션합니다.
 ```bash
 python backtest.py kor_account
 python backtest.py core_account
 ```
 
-**4. 추천 실행 (매일 아침)**
+**3. 추천 실행 (매일 아침)**
 백테스트 마지막 거래일 스냅샷을 기반으로 현재 시점의 비중 조절 결과를 생성하고 Slack으로 알림을 보냅니다.
 ```bash
 python recommend.py kor_account
 python recommend.py core_account
 ```
 
-현재 운영 식별자:
-* 종목풀: `kor`, `tax`, `au`
-* 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
+현재 운영 계좌:
+* `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
 
 ## 2. 설정 가이드
 
@@ -68,23 +59,7 @@ python recommend.py core_account
 }
 ```
 
-### 종목풀 설정 (`zpools/<order>_<pool_id>/config.json`)
-종목풀은 랭킹 계산 파라미터를 관리합니다.
-
-```json
-{
-  "name": "국내상장 국내 ETF",
-  "desc": "국내상장 국내 ETF 종목풀",
-  "rank": {
-    "country": "kor",
-    "months": 12,
-    "ma_type": "HMA"
-  }
-}
-```
-
-> 참고: 계좌 추천/백테스트는 종목풀 랭킹을 자동 병합하지 않습니다. 랭킹 결과를 보고 사용자가 계좌 종목을 직접 교체하면, 시스템은 그 종목 집합을 기준으로 균등 비중만 다시 계산합니다.
-> 참고: `tax` 종목풀은 절세 계좌용 ETF 분류이며, 계좌 `country_code`와는 별개인 운영 식별자입니다.
+계좌별 종목은 MongoDB `stock_meta` 컬렉션에서 직접 관리합니다.
 
 ## 3. 대시보드 및 계좌 관리
 

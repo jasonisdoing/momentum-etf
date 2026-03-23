@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 BACKTEST_STATUS_LIST = {
+    "WAIT": {
+        "display_name": "",
+        "order": 5,
+        "is_recommendation": False,
+        "show_slack": False,
+        "background": "#eeeeee",
+    },
     "HOLD": {
         "display_name": "",
         "order": 10,

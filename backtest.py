@@ -15,7 +15,12 @@ from utils.account_registry import (
     get_strategy_rules,
     list_available_accounts,
 )
-from utils.data_loader import MissingPriceDataError, get_latest_trading_day, prepare_price_data
+from utils.data_loader import (
+    MissingPriceDataError,
+    format_missing_price_data_guidance,
+    get_latest_trading_day,
+    prepare_price_data,
+)
 from utils.logger import get_app_logger
 from utils.settings_loader import load_common_settings, resolve_strategy_params
 from utils.stock_list_io import get_etfs
@@ -101,21 +106,26 @@ def main() -> None:
         prefetch_start = cache_seed_dt
     date_range_prefetch = [prefetch_start.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
 
-    prefetched_map, missing = prepare_price_data(
-        tickers=tickers,
-        country=country_code,
-        start_date=date_range_prefetch[0],
-        end_date=date_range_prefetch[1],
-        warmup_days=0,
-        account_id=account_id,
-    )
-    if missing:
-        raise MissingPriceDataError(
+    try:
+        prefetched_map, missing = prepare_price_data(
+            tickers=tickers,
             country=country_code,
             start_date=date_range_prefetch[0],
             end_date=date_range_prefetch[1],
-            tickers=missing,
+            warmup_days=0,
+            account_id=account_id,
         )
+        if missing:
+            raise MissingPriceDataError(
+                country=country_code,
+                start_date=date_range_prefetch[0],
+                end_date=date_range_prefetch[1],
+                tickers=missing,
+            )
+    except MissingPriceDataError as exc:
+        for line in format_missing_price_data_guidance(exc, target_id=account_id):
+            logger.error(line)
+        raise SystemExit(1)
 
     print_run_header(account_id, date_str=None)
 
@@ -161,9 +171,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except MissingPriceDataError as exc:
-        logger = get_app_logger()
-        logger.error(str(exc))
-        raise SystemExit(1)
+    main()

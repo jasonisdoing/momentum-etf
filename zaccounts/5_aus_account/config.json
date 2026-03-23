@@ -2,19 +2,19 @@
     "icon": "🇦🇺",
     "name": "호주 계좌",
     "country_code": "au",
-    "pool": [
-        "aus"
-    ],
     "currency": "aud",
     "initial_capital_krw": "100000000",
     "show_hold": true,
     "strategy": {
-        "TUNE_DATE": "2026-03-15 13:20",
-        "TUNE_CAGR": 23.94478,
-        "TUNE_MDD": -9.637893,
+        "TUNE_DATE": "2026-03-23 22:30",
+        "TUNE_CAGR": 4.010434,
+        "TUNE_MDD": -14.422241,
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": "TWICE_A_MONTH"
+        "TOPN": 5,
+        "REBALANCE_MODE": "TWICE_A_MONTH",
+        "MY_TYPE": "ALMA",
+        "MY_MONTHS": 3
     },
     "benchmark": {
         "ticker": "A200",

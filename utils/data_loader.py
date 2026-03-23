@@ -211,6 +211,26 @@ class MissingPriceDataError(RuntimeError):
         super().__init__(message)
 
 
+def format_missing_price_data_guidance(
+    exc: MissingPriceDataError,
+    *,
+    target_id: str | None = None,
+) -> list[str]:
+    """가격 캐시 누락 시 사용자에게 보여줄 공통 안내 문구를 생성합니다."""
+    country = str(getattr(exc, "country", "") or "").strip().lower()
+    tickers = list(getattr(exc, "tickers", []) or [])
+    country_label = country.upper() if country else "UNKNOWN"
+    cache_target = str(target_id or "").strip().lower() or country or "<account_id>"
+
+    lines = [
+        f"[{country_label}] 가격 캐시가 없는 티커 {len(tickers)}개",
+    ]
+    if tickers:
+        lines.append(f"누락 티커: {', '.join(tickers)}")
+    lines.append(f"다음을 실행해서 캐시를 업데이트 해주세요. python scripts/update_price_cache.py {cache_target}")
+    return lines
+
+
 def _get_cache_start_dt() -> pd.Timestamp | None:
     """config.py에서 캐시 시작 날짜를 로드합니다."""
     try:
@@ -268,6 +288,16 @@ def _now_with_zone(tz_name: str) -> datetime:
     except Exception:
         pass
     return datetime.now()
+
+
+def _today_in_korea() -> pd.Timestamp:
+    """한국 기준 오늘 날짜를 반환합니다."""
+    try:
+        if ZoneInfo is not None:
+            return pd.Timestamp(datetime.now(ZoneInfo("Asia/Seoul")).date())
+    except Exception:
+        pass
+    return pd.Timestamp.now().normalize()
 
 
 def _build_market_open_info() -> dict[str, tuple[str, time]]:
@@ -470,34 +500,9 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
     """
     country_code = (country or "").strip().lower()
 
-    end_dt = pd.Timestamp.now()
-
-    tz_info = MARKET_OPEN_INFO.get(country_code)
-    if tz_info is not None:
-        tz_name, open_time = tz_info
-        try:
-            local_now = _now_with_zone(tz_name)
-            candidate_date = local_now.date()
-
-            end_dt = pd.Timestamp(candidate_date)
-        except Exception:
-            # 타임존 처리 실패 시 안전하게 폴백
-            pass
-    elif country_code == "kor":
-        # 한국 시장: 타임존 정보를 사용하도록 통합
-        try:
-            from datetime import datetime
-
-            import pytz
-
-            tz = pytz.timezone("Asia/Seoul")
-            local_now = datetime.now(tz)
-            end_dt = pd.Timestamp(local_now.date())
-        except Exception:
-            end_dt = end_dt.normalize()
-    else:
-        # 타임존 정보를 모르면 현재 날짜 기준으로 처리
-        end_dt = end_dt.normalize()
+    # 최신 거래일 판단의 기준 날짜는 모든 시장 공통으로 한국 날짜를 사용합니다.
+    # 이렇게 해야 AU 시장처럼 현지 날짜가 먼저 넘어가더라도 "내일 거래일"이 잡히지 않습니다.
+    end_dt = _today_in_korea()
 
     # 최근 10일간의 거래일을 한 번에 조회 (효율성 개선)
     start_date = (end_dt - pd.DateOffset(days=10)).strftime("%Y-%m-%d")

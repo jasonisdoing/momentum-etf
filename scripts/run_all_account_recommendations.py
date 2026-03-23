@@ -10,7 +10,6 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT_DIR))
 
 from utils.env import load_env_if_present
-from utils.identifier_guard import ensure_account_pool_id_separation
 from utils.logger import get_app_logger
 from utils.settings_loader import list_available_accounts
 
@@ -19,7 +18,6 @@ logger = get_app_logger()
 
 def main() -> int:
     load_env_if_present()
-    ensure_account_pool_id_separation()
 
     account_ids = list_available_accounts()
     if not account_ids:

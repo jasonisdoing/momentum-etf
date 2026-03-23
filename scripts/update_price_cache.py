@@ -25,9 +25,7 @@ from utils.cache_utils import (
 )
 from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_recent_trading_day_gaps
 from utils.env import load_env_if_present
-from utils.identifier_guard import ensure_account_pool_id_separation
 from utils.logger import get_app_logger
-from utils.pool_registry import get_pool_country_code, list_available_pools
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import get_account_settings, list_available_accounts, load_common_settings
 from utils.stock_list_io import get_all_etfs_including_deleted
@@ -75,7 +73,7 @@ def refresh_cache_for_target(
     start_date: str | None,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ):
-    """지정된 계정/종목풀(target_id)에 대한 가격 데이터 캐시를 새로 고칩니다."""
+    """지정된 계정(target_id)에 대한 가격 데이터 캐시를 새로 고칩니다."""
     logger = get_app_logger()
     target_norm = (target_id or "").strip().lower()
 
@@ -83,8 +81,6 @@ def refresh_cache_for_target(
         if target_norm in list_available_accounts():
             settings = get_account_settings(target_norm)
             country_code = settings.get("country_code", "kor").lower()
-        elif target_norm in list_available_pools():
-            country_code = get_pool_country_code(target_norm, default="kor")
         else:
             country_code = "kor"
     except Exception:
@@ -350,11 +346,6 @@ def main():
     """CLI 진입점"""
     logger = get_app_logger()
     load_env_if_present()
-    try:
-        ensure_account_pool_id_separation()
-    except Exception as exc:
-        logger.error("%s", exc)
-        return
 
     parser = _build_parser()
     args = parser.parse_args()
@@ -364,17 +355,14 @@ def main():
 
     targets_to_update: list[str] = []
     available_accounts = list_available_accounts()
-    available_pools = list_available_pools()
-    available_targets = sorted({*available_accounts, *available_pools})
 
     if not target:
-        # Update all accounts + pools
-        targets_to_update = available_targets
+        targets_to_update = available_accounts
     else:
-        if target in available_targets:
+        if target in available_accounts:
             targets_to_update = [target]
         else:
-            logger.error(f"Target '{target}' is not a valid ID (account/pool).")
+            logger.error(f"Target '{target}' is not a valid account ID.")
             return
 
     if not targets_to_update:

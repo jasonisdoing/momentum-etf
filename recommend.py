@@ -16,7 +16,6 @@ from typing import Any
 import pandas as pd
 
 from config import BUCKET_MAPPING as BUCKET_NAMES
-from config import TRADING_DAYS_PER_MONTH
 from core.backtest.output.snapshot_rows import advance_snapshot_state, build_snapshot_rows, create_snapshot_build_state
 
 DEFAULT_BUCKET = 1
@@ -29,6 +28,7 @@ from utils.account_registry import (
 )
 from utils.data_loader import (
     MissingPriceDataError,
+    format_missing_price_data_guidance,
     get_cached_au_etf_snapshot_entry,
     get_latest_trading_day,
     get_trading_days,
@@ -155,24 +155,23 @@ def extract_recommendations_from_backtest(
         )
         advance_snapshot_state(result=result, target_date=current_date, state=snapshot_state)
 
-    snapshot_by_ticker = {str(row.get("ticker", "")).upper(): row for row in snapshot_rows}
     recommendations: list[dict[str, Any]] = []
 
-    for ticker, df in ticker_timeseries.items():
-        ticker_key = str(ticker).upper()
+    for snapshot_row in snapshot_rows:
+        ticker_key = str(snapshot_row.get("ticker", "")).upper()
         if ticker_key == "CASH" or ticker_key.startswith("_"):
             continue
 
+        df = ticker_timeseries.get(ticker_key)
+        if df is None:
+            df = ticker_timeseries.get(ticker_key.lower())
         if not isinstance(df, pd.DataFrame) or df.empty:
             continue
 
-        snapshot_row = snapshot_by_ticker.get(ticker_key)
-        if snapshot_row is None:
-            continue
         last_row = df.loc[end_date] if end_date in df.index else df.iloc[-1]
 
         # 메타 정보
-        meta = merged_meta.get(ticker_key, merged_meta.get(ticker, {}))
+        meta = merged_meta.get(ticker_key, merged_meta.get(ticker_key.lower(), {}))
         name = meta.get("name", ticker_key)
 
         # [UPDATE] stock_note가 있으면 이름에 병합 (예: 종목명(노트내용))
@@ -187,7 +186,7 @@ def extract_recommendations_from_backtest(
         avg_cost = _safe_float(snapshot_row.get("avg_cost"))
         score = _safe_float(snapshot_row.get("score"))
         rsi_score = _safe_float(snapshot_row.get("rsi_score"))
-        decision = str(snapshot_row.get("display_decision", "")).upper() or "HOLD"
+        decision = str(snapshot_row.get("display_decision", "")).upper() or "WAIT"
         note = str(snapshot_row.get("message", "") or "")
         holding_days = int(snapshot_row.get("holding_days", 0) or 0)
         daily_pct = _safe_float(snapshot_row.get("daily_pct"), 0.0) or 0.0
@@ -223,7 +222,12 @@ def extract_recommendations_from_backtest(
         phrase = note
 
         # 추천은 마지막 거래일 스냅샷의 상태를 그대로 따릅니다.
-        state = "BUY" if decision == "BUY" else "HOLD"
+        if decision == "BUY":
+            state = "BUY"
+        elif shares > 0:
+            state = "HOLD"
+        else:
+            state = "WAIT"
 
         # 수익률 및 드로우다운 계산
         df_up_to_end = df[df.index <= end_date]
@@ -300,6 +304,7 @@ def extract_recommendations_from_backtest(
                 "bucket_name": BUCKET_NAMES.get(
                     snapshot_row.get("bucket", meta.get("bucket", DEFAULT_BUCKET)), "Unknown"
                 ),
+                "snapshot_row_index": int(snapshot_row.get("row_index", 0) or 0),
             }
         )
 
@@ -310,39 +315,18 @@ def _assign_final_ranks(
     recommendations: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """추천 결과에 표시할 최종 정렬 순서와 순번을 부여합니다."""
-
-    # 추천 표시는 버킷 -> 점수 내림차순 -> 티커 순서로 고정합니다.
-    for rec in recommendations:
-        shares = _safe_float(rec.get("shares"), 0.0) or 0.0
-        is_current_holding = shares > 0
-        rec["_is_current_holding"] = is_current_holding
-
-        if is_current_holding:
-            rec["_sort_group"] = 1
-        else:
-            rec["_sort_group"] = 2
-
-    # 2. 정렬 로직 적용 (버킷 -> 점수 내림차순 -> 티커)
-    def _sort_key(x):
-        bucket_val = x.get("bucket")
-        try:
-            bucket_priority = int(bucket_val) if bucket_val is not None else 99
-        except (TypeError, ValueError):
-            bucket_priority = 99
-        return (
-            bucket_priority,
-            -(x.get("score") if x.get("score") is not None else float("-inf")),
-            x.get("ticker", ""),
+    # 추천은 백테스트 마지막 거래일 스냅샷의 순서를 그대로 따릅니다.
+    recommendations.sort(
+        key=lambda rec: (
+            int(rec.get("snapshot_row_index", 0) or 0),
+            str(rec.get("ticker", "")),
         )
+    )
 
-    recommendations.sort(key=_sort_key)
-
-    # 3. 순위 부여
-    held_idx = 1
     for i, rec in enumerate(recommendations, 1):
-        rec["rank_order"] = i  # 전체 정렬 순서 보존
-        rec["rank"] = f"보유 {held_idx}"
-        held_idx += 1
+        snapshot_row_index = int(rec.get("snapshot_row_index", 0) or 0)
+        rec["rank_order"] = snapshot_row_index if snapshot_row_index > 0 else i
+        rec["rank"] = str(rec["rank_order"])
 
     return recommendations
 
@@ -453,16 +437,12 @@ def generate_recommendation_report(
     if backtest_last_months is None:
         raise ValueError("strategy.TUNE_MONTHS 설정이 누락되었습니다.")
     try:
-        ma_month = int(strategy_cfg.get("MA_MONTH", 12))
-    except Exception:
-        ma_month = 12
-    ma_type = str(strategy_cfg.get("MA_TYPE", "HMA") or "HMA").upper()
-
-    try:
         months_back = int(backtest_last_months)
-        start_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
-    except Exception:
-        start_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=12)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"strategy.TUNE_MONTHS는 정수여야 합니다: {backtest_last_months}") from exc
+    if months_back < 1:
+        raise ValueError(f"strategy.TUNE_MONTHS는 1 이상이어야 합니다: {months_back}")
+    start_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=months_back)
 
     # 종료일 결정
     if date_str:
@@ -478,6 +458,7 @@ def generate_recommendation_report(
     # 전략 규칙 로드
     strategy_rules = get_strategy_rules(account_id)
     warmup_days = strategy_rules.ma_days
+    ma_type = strategy_rules.ma_type
 
     # 종목 로드 (한 번만)
     etf_universe = get_etfs(account_id)
@@ -549,7 +530,7 @@ def generate_recommendation_report(
         ticker_meta=universe_meta,
         price_frames=dict(prefetched_map),
         country_code=country_code,
-        ma_days=max(1, int(ma_month) * TRADING_DAYS_PER_MONTH),
+        ma_days=strategy_rules.ma_days,
         ma_type=ma_type,
     )
 
@@ -809,9 +790,8 @@ def run_recommendation_generation_v2(
     try:
         report = generate_recommendation_report(account_id=account_id, date_str=date_str)
     except MissingPriceDataError as exc:
-        logger.error("❌ 가격 데이터 부족으로 인해 추천을 생성할 수 없습니다.")
-        logger.error(f"대상 티커: {', '.join(exc.tickers)}")
-        logger.error("💡 '캐시 업데이트(update_price_cache.py)'를 먼저 실행하여 데이터를 확보해 주세요.")
+        for line in format_missing_price_data_guidance(exc, target_id=account_id):
+            logger.error(line)
         return False
 
     if not report.recommendations:
