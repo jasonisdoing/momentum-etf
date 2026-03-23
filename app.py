@@ -14,8 +14,9 @@ from utils.account_registry import (
     load_account_configs,
 )
 from utils.formatters import format_price
+from utils.rankings import ALLOWED_MA_TYPES, get_account_rank_defaults, get_rank_months_max
 from utils.report import format_kr_money
-from utils.ui import create_loading_status, load_account_recommendations, render_recommendation_table
+from utils.ui import create_loading_status, render_recommendation_table
 
 
 def _to_plain_dict(value):
@@ -78,7 +79,7 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
     icon = account.get("icon") or get_icon_fallback(account.get("country_code", ""))
 
     title = view_mode if view_mode else account["name"]
-    url_mapping = {"추천 결과": "result", "종목 관리": "setup", "삭제된 종목": "deleted"}
+    url_mapping = {"순위": "rank", "종목 관리": "setup", "삭제된 종목": "deleted"}
 
     clean_view = view_mode.split(".")[-1].strip() if view_mode else "main"
     english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
@@ -101,12 +102,18 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
     )
 
 
-def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[dict[str, Any]], view_mode: str):
-    url_mapping = {"요약": "account", "추천 결과": "result", "종목 관리": "setup", "삭제된 종목": "deleted"}
+def _build_unified_account_page(
+    page_cls: Callable[..., object],
+    accounts: list[dict[str, Any]],
+    view_mode: str,
+    *,
+    default: bool = False,
+):
+    url_mapping = {"순위": "rank", "종목 관리": "setup", "삭제된 종목": "deleted"}
     clean_view = view_mode.split(".")[-1].strip()
     english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
     view_slug = _slugify_path(english_view)
-    url_path = "account" if clean_view == "요약" else f"account-{view_slug}"
+    url_path = "rank" if clean_view == "순위" else f"account-{view_slug}"
 
     account_options: list[tuple[str, str]] = []
     for acc in accounts:
@@ -119,44 +126,6 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
     def _render() -> None:
         loading = create_loading_status()
         try:
-            if view_mode == "0. 요약":
-                summary_frames: list[pd.DataFrame] = []
-                load_errors: list[str] = []
-
-                for acc in accounts:
-                    account_id = acc["account_id"]
-                    account_name = acc.get("name") or account_id.upper()
-                    df, error_message, _ = load_account_recommendations(account_id)
-
-                    if df is None:
-                        load_errors.append(f"{account_name}: {error_message or '추천 데이터를 불러오지 못했습니다.'}")
-                        continue
-
-                    if df.empty:
-                        continue
-
-                    merged_df = df.copy()
-                    merged_df.insert(0, "계좌", account_name)
-                    summary_frames.append(merged_df)
-
-                if load_errors:
-                    st.warning("\n".join(load_errors))
-
-                if not summary_frames:
-                    st.info("표시할 계좌 추천 결과가 없습니다.")
-                    return
-
-                summary_df = pd.concat(summary_frames, ignore_index=True)
-                visible_columns = ["계좌", *[col for col in summary_df.columns if col != "계좌"]]
-                render_recommendation_table(
-                    summary_df,
-                    country_code=None,
-                    grouped_by_bucket=False,
-                    visible_columns=visible_columns,
-                    height=900,
-                )
-                return
-
             if not account_options:
                 st.error("선택 가능한 계좌가 없습니다.")
                 return
@@ -173,16 +142,53 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
                 st.session_state["selected_account_id"] = current_id
                 st.query_params["account"] = current_id
 
-            selected_id = st.selectbox(
-                "계좌 선택",
-                options=option_ids,
-                index=option_ids.index(current_id),
-                format_func=lambda account_id: option_label_map.get(account_id, account_id),
-                key=f"account_selector_{view_slug}",
-            )
+            if clean_view == "순위":
+                default_ma_type, default_ma_months = get_account_rank_defaults(current_id)
+                max_months = get_rank_months_max()
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    selected_id = st.selectbox(
+                        "계좌 선택",
+                        options=option_ids,
+                        index=option_ids.index(current_id),
+                        format_func=lambda account_id: option_label_map.get(account_id, account_id),
+                        key=f"account_selector_{view_slug}",
+                    )
+                selected_default_type = default_ma_type
+                selected_default_months = min(max(default_ma_months, 1), max_months)
+                with c2:
+                    selected_ma_type = st.selectbox(
+                        "MA_TYPE",
+                        options=ALLOWED_MA_TYPES,
+                        index=ALLOWED_MA_TYPES.index(selected_default_type),
+                        key=f"rank_selector_type_{current_id}",
+                    )
+                with c3:
+                    selected_ma_months = st.selectbox(
+                        "MA_MONTHS",
+                        options=list(range(1, max_months + 1)),
+                        index=selected_default_months - 1,
+                        key=f"rank_selector_months_{current_id}",
+                    )
+            else:
+                selected_id = st.selectbox(
+                    "계좌 선택",
+                    options=option_ids,
+                    index=option_ids.index(current_id),
+                    format_func=lambda account_id: option_label_map.get(account_id, account_id),
+                    key=f"account_selector_{view_slug}",
+                )
             st.session_state["selected_account_id"] = selected_id
             st.query_params["account"] = selected_id
-            render_account_page(selected_id, view_mode=view_mode, loading=loading)
+            if clean_view == "순위":
+                render_account_page(
+                    selected_id,
+                    view_mode=view_mode,
+                    loading=loading,
+                    rank_params={"ma_type": selected_ma_type, "ma_months": selected_ma_months},
+                )
+            else:
+                render_account_page(selected_id, view_mode=view_mode, loading=loading)
         finally:
             loading.clear()
 
@@ -191,6 +197,7 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
         title=view_mode,
         icon="💼",
         url_path=url_path,
+        default=default,
     )
 
 
@@ -858,27 +865,8 @@ def main() -> None:
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
     from app_pages.etf_market_page import build_etf_market_page
     from app_pages.transactions_page import build_transaction_page
-    from app_pages.weekly_data_page import build_weekly_data_page
 
     pages = {}
-
-    # 요약 그룹
-    pages["요약"] = [
-        page_cls(
-            _build_home_page(accounts, initial_subtab="📊 대시보드"),
-            title="대시보드",
-            icon="🏠",
-            url_path="summary_dashboard",
-            default=True,
-        ),
-        page_cls(
-            _build_home_page(accounts, initial_subtab="📋 상세"),
-            title="상세",
-            icon="📋",
-            url_path="summary_details",
-        ),
-        build_weekly_data_page(page_cls, title="주별", url_path="summary_weekly"),
-    ]
 
     # 계좌 관리 그룹
     transaction_tabs = [
@@ -890,8 +878,11 @@ def main() -> None:
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
 
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
-    view_modes = ["0. 요약", "1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]
-    pages["계좌"] = [_build_unified_account_page(page_cls, accounts, view_mode) for view_mode in view_modes]
+    view_modes = ["1. 순위", "2. 종목 관리", "3. 삭제된 종목"]
+    pages["계좌"] = [
+        _build_unified_account_page(page_cls, accounts, view_mode, default=(idx == 0))
+        for idx, view_mode in enumerate(view_modes)
+    ]
     pages["ETF 마켓"] = [build_etf_market_page(page_cls)]
     pages["시스템 정보"] = [_build_system_page(page_cls)]
 

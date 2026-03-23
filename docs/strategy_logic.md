@@ -7,6 +7,7 @@
 * 추천(`recommend.py`)과 백테스트(`backtest.py`)는 동일 백테스트 엔진(`core/backtest`)을 사용합니다.
 * 매매 판단은 당일 종가 기준으로 계산하고, 체결은 다음 거래일 가격 규칙(슬리피지 포함)으로 시뮬레이션합니다.
 * 리밸런싱은 `REBALANCE_MODE` 규칙을 따르며, 엔진은 종목 교체를 수행하지 않습니다.
+* 최신 거래일 판단의 기준 날짜는 모든 시장 공통으로 한국 날짜를 사용합니다.
 * 필수 설정이 누락되면 fallback 없이 명시적 에러로 중단됩니다.
 
 ## 2. 계좌 리밸런싱 로직
@@ -30,18 +31,22 @@
 
 ### 상태 및 문구 규칙
 
-* 상태는 `BUY`, `HOLD`만 사용합니다.
+* 상태는 `BUY`, `HOLD`, `WAIT`를 사용합니다.
 * `BUY`는 백테스트 시작 첫 편입일 또는 상장 후 첫 편입일에만 표시합니다.
-* 비중 확대/축소는 상태를 바꾸지 않고 `HOLD`를 유지하며, 문구에만 예정/실행 비중조절을 표시합니다.
+* `HOLD`는 현재 실제 보유 중인 종목입니다.
+* `WAIT`는 현재 비보유이지만 계좌 유니버스에 포함된 종목입니다.
+* 비중 확대/축소는 상태를 바꾸지 않고 문구에만 예정/실행 비중조절을 표시합니다.
+* 리밸런싱 예정일 전에 `target_weight > 0`인 `WAIT` 종목도 `0.0% => 목표 비중` 형태의 예정 문구를 표시할 수 있습니다.
 
 ### 검증 규칙
 
-* 산출된 `weight` 합계는 1.0이어야 함
+* 산출된 `target_weight` 합계는 1.0 이하여야 함
+* 점수 0 이상 종목 수가 `TOPN`보다 적으면 부족한 슬롯 비중은 현금으로 유지함
 * 수동 종목 비중 입력은 사용하지 않음
 
 ## 3. 튜닝 로직
 
-* 계좌 튜닝: `REBALANCE_MODE` 중심으로 탐색
+* 계좌 튜닝: `MA_MONTHS`, `MA_TYPE`, `TOPN`, `REBALANCE_MODE`를 중심으로 탐색
 * 최적 결과는 계좌 `config.json`의 `strategy`에 반영됩니다.
-  * 예: `strategy.REBALANCE_MODE`, `strategy.TUNE_MONTHS`
-* `MA_MONTH`, `MA_TYPE`, `TOPN`, `REBALANCE_MODE`는 계좌 설정에서 직접 관리합니다.
+  * 예: `strategy.MA_MONTHS`, `strategy.MA_TYPE`, `strategy.TOPN`, `strategy.REBALANCE_MODE`
+* `MA_MONTHS`, `MA_TYPE`, `TOPN`, `REBALANCE_MODE`는 계좌 설정에서 직접 관리합니다.

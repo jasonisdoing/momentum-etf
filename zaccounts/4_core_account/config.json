@@ -3,21 +3,6 @@
     "name": "장기보유 계좌",
     "country_code": "kor",
     "currency": "KRW",
-    "initial_capital_krw": "40000000",
-    "show_hold": true,
-    "strategy": {
-        "TUNE_DATE": "2026-03-23 22:39",
-        "TUNE_CAGR": 28.579967,
-        "TUNE_MDD": -7.504824,
-        "TUNE_MONTHS": 12,
-        "OPTIMIZATION_METRIC": "CAGR",
-        "TOPN": 4,
-        "REBALANCE_MODE": "TWICE_A_MONTH",
-        "MY_TYPE": "ALMA",
-        "MY_MONTHS": 3
-    },
-    "benchmark": {
-        "ticker": "379810",
-        "name": "KODEX 미국나스닥100"
-    }
+    "MA_TYPE": "ALMA",
+    "MA_MONTHS": 6
 }

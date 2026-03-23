@@ -248,6 +248,13 @@ def get_account_strategy_sections(
     settings = get_account_settings(account_id)
     strategy = settings.get("strategy")
     if not isinstance(strategy, dict):
+        top_level_rank = {}
+        if settings.get("MA_TYPE") is not None:
+            top_level_rank["MA_TYPE"] = settings.get("MA_TYPE")
+        if settings.get("MA_MONTHS") is not None:
+            top_level_rank["MA_MONTHS"] = settings.get("MA_MONTHS")
+        if top_level_rank:
+            return top_level_rank, {}
         raise AccountSettingsError(f"'{account_id}' 설정에서 'strategy' 항목이 누락되었거나 잘못되었습니다.")
 
     if "tuning" in strategy or "static" in strategy:
@@ -337,16 +344,42 @@ def get_strategy_rules(account_id: str):
     normalized_tuning = dict(tuning)
 
     if normalized_tuning.get("MA_MONTH") is None and normalized_tuning.get("ma_month") is None:
-        months = normalized_tuning.get("MY_MONTHS")
+        months = normalized_tuning.get("MA_MONTHS")
         if months is not None:
             normalized_tuning["MA_MONTH"] = months
 
     if normalized_tuning.get("MA_TYPE") is None and normalized_tuning.get("ma_type") is None:
-        ma_type = normalized_tuning.get("MY_TYPE")
+        ma_type = normalized_tuning.get("MA_TYPE")
         if ma_type:
             normalized_tuning["MA_TYPE"] = ma_type
 
     return StrategyRules.from_mapping(normalized_tuning)
+
+
+def get_account_rank_settings(account_id: str) -> dict[str, Any]:
+    """계좌의 순위 계산용 설정을 반환합니다."""
+
+    settings = get_account_settings(account_id)
+    result: dict[str, Any] = {}
+
+    if settings.get("MA_TYPE") is not None:
+        result["MA_TYPE"] = settings.get("MA_TYPE")
+    if settings.get("MA_MONTHS") is not None:
+        result["MA_MONTHS"] = settings.get("MA_MONTHS")
+
+    strategy_cfg = settings.get("strategy")
+    if isinstance(strategy_cfg, dict):
+        if result.get("MA_TYPE") is None and strategy_cfg.get("MA_TYPE") is not None:
+            result["MA_TYPE"] = strategy_cfg.get("MA_TYPE")
+        if result.get("MA_MONTHS") is None and strategy_cfg.get("MA_MONTHS") is not None:
+            result["MA_MONTHS"] = strategy_cfg.get("MA_MONTHS")
+
+    if result.get("MA_TYPE") is None:
+        raise AccountSettingsError(f"'{account_id}' 설정에 필수 항목 'MA_TYPE'가 누락되었습니다.")
+    if result.get("MA_MONTHS") is None:
+        raise AccountSettingsError(f"'{account_id}' 설정에 필수 항목 'MA_MONTHS'가 누락되었습니다.")
+
+    return result
 
 
 # ---------------------------------------------------------------------------

@@ -157,7 +157,8 @@ def _format_display_money(value: object) -> str:
 def _get_live_exchange_rate() -> float:
     """현재 시점의 USD/KRW 환율을 반환한다."""
     now = pd.Timestamp(_get_now_kst()).tz_localize(None)
-    series = get_exchange_rate_series(now - pd.Timedelta(days=5), now)
+    # 주별 화면의 환율은 보조 지표이므로, 단기 누락이 있어도 부분 캐시를 우선 사용합니다.
+    series = get_exchange_rate_series(now - pd.Timedelta(days=5), now, allow_partial=True)
     if series.empty:
         return 0.0
     return float(series.iloc[-1])
@@ -189,6 +190,7 @@ def _ensure_historical_exchange_rates() -> None:
     rate_series = get_exchange_rate_series(
         pd.Timestamp(start_date) - pd.Timedelta(days=7),
         pd.Timestamp(end_date),
+        allow_partial=True,
     )
     if rate_series.empty:
         return

@@ -629,6 +629,7 @@ def _fetch_ohlcv_with_cache(
     account_id: str | None = None,
     force_refresh: bool = False,
     update_listing_meta: bool = False,
+    allow_partial: bool = False,
 ) -> pd.DataFrame | None:
     country_code = (country or "").strip().lower()
 
@@ -794,7 +795,12 @@ def _fetch_ohlcv_with_cache(
     if combined_df is None or combined_df.empty:
         return None
 
-    if unfilled_ranges:
+    if unfilled_ranges and allow_partial:
+        ranges_text = ", ".join(
+            f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}" for start, end in unfilled_ranges
+        )
+        logger.warning("%s의 가격 데이터 일부 누락 구간을 남긴 채 부분 캐시를 사용합니다: %s", ticker, ranges_text)
+    elif unfilled_ranges:
         ranges_text = ", ".join(
             f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}" for start, end in unfilled_ranges
         )
@@ -2050,6 +2056,8 @@ def get_exchange_rate_series(
     start_date: str | pd.Timestamp,
     end_date: str | pd.Timestamp,
     symbol: str = "KRW=X",
+    *,
+    allow_partial: bool = False,
 ) -> pd.Series:
     """
     환율 (USD/KRW, AUD/KRW 등) 시계열 데이터를 반환합니다.
@@ -2071,6 +2079,7 @@ def get_exchange_rate_series(
         e_dt,
         account_id=cache_dir_name,
         force_refresh=False,
+        allow_partial=allow_partial,
     )
 
     if df is None or df.empty:
