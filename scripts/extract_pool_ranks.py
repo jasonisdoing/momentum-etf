@@ -22,7 +22,7 @@ from utils.stock_list_io import get_etfs
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="RANK 종목군 순위 추출")
-    parser.add_argument("pool_id", help="종목군 ID (예: kor_kr, kor_us, us, aus)")
+    parser.add_argument("pool_id", help="종목군 ID (예: kor_kr, kor_us, tax, aus)")
     parser.add_argument("--country", required=True, help="국가 코드 (kor/us/au)")
     parser.add_argument("--months", type=int, default=12, help="RANK MA 개월 수")
     parser.add_argument("--ma-type", default="HMA", help="이동평균 타입 (SMA/EMA/WMA/DEMA/TEMA/HMA/ALMA)")

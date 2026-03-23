@@ -38,6 +38,10 @@ AU_QUOTEAPI_HEADERS = {
     "Origin": "https://www.marketindex.com.au",
 }
 
+# KIS 종목정보파일 다운로드 URL
+KIS_KOSPI_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip"
+KIS_KOSDAQ_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip"
+
 
 # 통합 시장 거래 시간표
 from datetime import time

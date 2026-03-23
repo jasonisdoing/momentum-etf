@@ -947,6 +947,7 @@ def main() -> None:
     )
 
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
+    from app_pages.etf_market_page import build_etf_market_page
     from app_pages.transactions_page import build_transaction_page
     from app_pages.weekly_data_page import build_weekly_data_page
 
@@ -986,6 +987,7 @@ def main() -> None:
     # 통합 종목풀 그룹 (풀 선택형 단일 URL)
     pool_view_modes = ["1. 랭킹", "2. 종목 관리", "3. 삭제된 종목"]
     pages["종목풀"] = [_build_unified_pool_page(page_cls, pools, view_mode) for view_mode in pool_view_modes]
+    pages["ETF 마켓"] = [build_etf_market_page(page_cls)]
     pages["시스템 정보"] = [_build_system_page(page_cls)]
 
     # 네비게이션 객체 생성 (사이드바 방식)

@@ -17,7 +17,7 @@
 종목풀에서 모멘텀 랭킹을 생성합니다.
 ```bash
 python rank.py kor
-python rank.py us
+python rank.py tax
 python rank.py au
 ```
 
@@ -43,7 +43,7 @@ python recommend.py core_account
 ```
 
 현재 운영 식별자:
-* 종목풀: `kor`, `us`, `au`
+* 종목풀: `kor`, `tax`, `au`
 * 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
 
 ## 2. 설정 가이드
@@ -84,7 +84,7 @@ python recommend.py core_account
 ```
 
 > 참고: 계좌 추천/백테스트는 종목풀 랭킹을 자동 병합하지 않습니다. 랭킹 결과를 보고 사용자가 계좌 종목을 직접 교체하면, 시스템은 그 종목 집합을 기준으로 균등 비중만 다시 계산합니다.
-> 참고: `us` 종목풀은 "미국 시장 추종 ETF를 담은 한국 상장 ETF"를 위한 분류이며, 별도 미국 계좌 `country_code`를 뜻하지 않습니다.
+> 참고: `tax` 종목풀은 절세 계좌용 ETF 분류이며, 계좌 `country_code`와는 별개인 운영 식별자입니다.
 
 ## 3. 대시보드 및 계좌 관리
 

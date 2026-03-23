@@ -12,6 +12,7 @@ import yfinance as yf
 
 from utils.data_loader import fetch_pykrx_name
 from utils.identifier_guard import ensure_account_pool_id_separation
+from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
 from utils.pool_registry import get_pool_country_code, list_available_pools
 from utils.settings_loader import get_account_settings, list_available_accounts
@@ -221,6 +222,12 @@ def update_stock_metadata(account_id: str | None = None):
     else:
         # 기본 실행은 모든 계정 + 모든 종목풀을 순회
         accounts_to_update = all_targets.copy()
+        try:
+            logger.info("KIS 국내 ETF 마스터 캐시 갱신을 시작합니다.")
+            refreshed_count = refresh_kis_domestic_etf_master_cache()
+            logger.info("KIS 국내 ETF 마스터 캐시 갱신 완료: %d건", refreshed_count)
+        except Exception as exc:
+            logger.error("KIS 국내 ETF 마스터 캐시 갱신 실패: %s", exc)
 
     logger.info(f"메타데이터 업데이트 대상 계정: {accounts_to_update}")
 

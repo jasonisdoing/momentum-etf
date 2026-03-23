@@ -2,7 +2,7 @@
 
 사용법:
     python scripts/check_similar_tickers.py kor_kr
-    python scripts/check_similar_tickers.py us --threshold 0.90 --days 120
+    python scripts/check_similar_tickers.py tax --threshold 0.90 --days 120
 """
 
 from __future__ import annotations

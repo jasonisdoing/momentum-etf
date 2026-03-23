@@ -3,7 +3,7 @@
     "name": "ISA 계좌",
     "country_code": "kor",
     "pool": [
-        "us"
+        "tax"
     ],
     "currency": "KRW",
     "initial_capital_krw": "40000000",

@@ -68,7 +68,7 @@ pip install -r requirements.txt
 **1. 종목풀 랭킹 생성**
 ```bash
 python rank.py kor
-python rank.py us
+python rank.py tax
 python rank.py au
 ```
 
@@ -91,7 +91,7 @@ python recommend.py core_account
 ```
 
 현재 기본 식별자는 다음과 같습니다.
-* 종목풀: `kor`, `us`, `au`
+* 종목풀: `kor`, `tax`, `au`
 * 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
 
 ## ⚠️ 면책 조항 (Disclaimer)
