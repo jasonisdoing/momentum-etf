@@ -10,11 +10,9 @@
 
 ## 🚀 소개 (Introduction)
 
-**Momentum ETF**는 계좌/종목풀 설정을 기반으로 동작하는 **ETF 포트폴리오 자동화/분석 시스템**입니다.
+**Momentum ETF**는 계좌 설정을 기반으로 동작하는 **ETF 포트폴리오 자동화/분석 시스템**입니다.
 현재 운영 모델은 다음과 같습니다.
-* 계좌(`zaccounts/*`): 등록된 전체 종목을 상시 보유하고 점수 비례 비중 조절로 운용
-* 종목풀(`zpools/*`): `rank.py`로 모멘텀 랭킹 산출
-* 계좌 편입 종목: 종목풀 랭킹 결과를 참고해 수동/반자동으로 반영
+* 계좌(`zaccounts/*`): 등록된 전체 종목을 직접 관리하고 비중 조절로 운용
 
 감정이나 직관에 의존하는 투자를 지양하고, **이동평균(MA)**과 **RSI** 등 기술적 지표를 활용하여 **"현재 계좌 종목의 상대 점수에 따라 비중을 조절하는"** 데이터 기반의 의사결정을 지원합니다.
 
@@ -24,7 +22,6 @@
 *   **🧪 검증된 전략 (Backtesting & Tuning)**: 과거 데이터를 기반으로 전략의 유효성을 검증하고, 시장 상황에 맞는 최적의 파라미터를 자동으로 탐색합니다.
 *   **🛡️ 데이터 안정성 (Robust Caching)**: **Apache Parquet** 포맷을 캐시 엔진으로 도입하여 라이브러리 버전 mismatch로부터 자유롭고 안정적인 데이터 로딩을 보장합니다.
 *   **☁️ 클라우드 자동화 (CI/CD Automation)**: **GitHub Actions**를 통해 정해진 시간에 자동으로 추천 및 캐시 갱신 작업을 수행합니다.
-*   **📋 종목풀 랭킹 시스템 (Pool Ranking)**: 계좌 운용과 별도로 종목풀 랭킹을 생성해 편입 종목 검토 자료를 제공합니다.
 
 ## 📊 성과 (Performance)
 *최근 12개월 백테스트 결과 (2024.12.03 기준, 10개 포트폴리오 계좌)*
@@ -39,7 +36,7 @@
 
 *   **[프로젝트 개요 (Project Overview)](docs/project_overview.md)**: 프로젝트의 철학, 상세 기능, 시스템 구조
 *   **[사용자 가이드 (User Guide)](docs/user_guide.md)**: 설치, 설정, 실행 방법, 결과 해석
-*   **[전략 로직 (Strategy Logic)](docs/strategy_logic.md)**: 종목풀 랭킹 산정, 계좌 리밸런싱, 비중 조절 규칙 상세
+*   **[전략 로직 (Strategy Logic)](docs/strategy_logic.md)**: 계좌 리밸런싱, 비중 조절 규칙 상세
 *   **[개발자 가이드 (Developer Guide)](docs/developer_guide.md)**: 시스템 아키텍처, 데이터 파이프라인, 정합성 원칙
 
 ## ⚡️ 빠른 시작 (Quick Start)
@@ -65,33 +62,25 @@ pip install -r requirements.txt
 
 ### 3. 실행
 
-**1. 종목풀 랭킹 생성**
-```bash
-python rank.py kor
-python rank.py tax
-python rank.py au
-```
-
-**2. 튜닝 (계좌 리밸런싱 파라미터 탐색 및 자동 적용)**
+**1. 튜닝 (계좌 리밸런싱 파라미터 탐색 및 자동 적용)**
 ```bash
 python tune.py kor_account
 python tune.py core_account
 ```
 
-**3. 백테스트 (성과 검증)**
+**2. 백테스트 (성과 검증)**
 ```bash
 python backtest.py kor_account
 python backtest.py core_account
 ```
 
-**4. 추천 (비중 조절 가이드 생성)**
+**3. 추천 (비중 조절 가이드 생성)**
 ```bash
 python recommend.py kor_account
 python recommend.py core_account
 ```
 
-현재 기본 식별자는 다음과 같습니다.
-* 종목풀: `kor`, `tax`, `au`
+현재 기본 계좌 식별자는 다음과 같습니다.
 * 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
 
 ## ⚠️ 면책 조항 (Disclaimer)

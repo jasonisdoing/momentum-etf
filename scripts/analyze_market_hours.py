@@ -14,7 +14,7 @@ from utils.notification import send_slack_message_v2
 
 # 사용자 계좌, 종목 정보 로드 모듈
 from utils.settings_loader import get_account_order, get_account_settings, list_available_accounts
-from utils.stock_list_io import get_all_etfs, get_etfs
+from utils.stock_list_io import get_etfs
 
 # 환경 변수 로드
 load_dotenv()
@@ -136,21 +136,18 @@ if __name__ == "__main__":
 
     all_time_stats = {"kor": {}, "au": {}}
     account_outputs = []
-    # 통계용 국가별 정보 (계차, 종목풀 아이디)
-    meta_info = {"kor": {"accounts": set(), "pools": set()}, "au": {"accounts": set(), "pools": set()}}
+    # 통계용 국가별 정보
+    meta_info = {"kor": {"accounts": set()}, "au": {"accounts": set()}}
 
     # 다운로드 중복 방지 캐시: {code: (res_str, stats_df)}
     cached_stats = {}
 
-    # 1. 모든 계좌에서 국가별 풀 정보를 먼저 수집
+    # 1. 모든 계좌에서 국가별 정보를 먼저 수집
     for order, acc_id in account_list:
         settings = get_account_settings(acc_id)
         country = settings.get("country_code", "").lower()
         if country in ["kor", "au"]:
             meta_info[country]["accounts"].add(acc_id)
-            for p in settings.get("pool", []):
-                meta_info[country]["pools"].add(p)
-
             # 계좌별 출력물 생성 (기존 로직 유지)
             acc_name = settings.get("name", acc_id)
             lines = [f"{order}. {acc_name}"]
@@ -175,22 +172,7 @@ if __name__ == "__main__":
             lines.append("")
             account_outputs.append("\n".join(lines))
 
-    # 2. 추가적으로 풀(Pool)에 있는 전체 종목들을 통계에 포함 (DB 직접 조회)
-    collector.print(" - 종목풀(DB) 전체 데이터 수집 중...")
-    for country in ["kor", "au"]:
-        for pool_id in meta_info[country]["pools"]:
-            # get_all_etfs(pool_id)를 사용하여 해당 풀의 전체 종목 리스트 획득
-            pool_etfs = get_all_etfs(pool_id)
-            for etf in pool_etfs:
-                code = etf.get("ticker", "")
-                name = etf.get("name", "Pool Item")
-                if code and code not in cached_stats:
-                    res_str, stats_df = get_yfinance_5min_stats(code=code, name=name, country=country, period="1mo")
-                    cached_stats[code] = (res_str, stats_df)
-                    if stats_df is not None:
-                        all_time_stats[country][code] = stats_df
-
-    # 3. 종합 통계 산출 및 최상단 출력
+    # 2. 종합 통계 산출 및 최상단 출력
     header_lines = []
     header_separator = "=" * 60
     header_lines.append(header_separator)
@@ -205,9 +187,7 @@ if __name__ == "__main__":
 
             n_stocks = len(stats_dict)
             n_accs = len(meta_info[c_code]["accounts"])
-            n_pools = len(meta_info[c_code]["pools"])
-
-            header_lines.append(f"🏆 [{c_name} 평균] 총 {n_stocks}개 종목 평균({n_accs}개 계좌, {n_pools}개 종목풀)")
+            header_lines.append(f"🏆 [{c_name} 평균] 총 {n_stocks}개 종목 평균({n_accs}개 계좌)")
             header_lines.append(
                 f"👉 전체 최적 매수 시간 : {global_best_buy['Time']} (평균 {global_best_buy['Pct_Change_From_Open']:+.3f}%)"
             )
@@ -219,11 +199,11 @@ if __name__ == "__main__":
     for hl in header_lines:
         collector.print(hl)
 
-    # 4. 개별 계좌/종목 결과 출력
+    # 3. 개별 계좌/종목 결과 출력
     for out in account_outputs:
         collector.print(out)
 
-    # 5. 슬랙 전송 (옵션)
+    # 4. 슬랙 전송 (옵션)
     if args.slack:
         full_text = collector.get_full_text()
         # 마크다운 코드 블록으로 감싸서 가독성 확보

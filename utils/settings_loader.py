@@ -83,39 +83,6 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def _normalize_pool_ids(raw_value: Any, *, context: str) -> list[str]:
-    """계좌 설정의 pool 값을 정규화하고 검증합니다."""
-
-    if not isinstance(raw_value, list):
-        raise AccountSettingsError(f"{context}의 'pool'은 문자열이 아니라 리스트여야 합니다.")
-    if not raw_value:
-        raise AccountSettingsError(f"{context}의 'pool'은 최소 1개 이상의 종목풀 ID를 가져야 합니다.")
-
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for value in raw_value:
-        pool_id = str(value or "").strip().lower()
-        if not pool_id:
-            raise AccountSettingsError(f"{context}의 'pool' 목록에는 빈 값이 올 수 없습니다.")
-        if pool_id in seen:
-            continue
-        seen.add(pool_id)
-        normalized.append(pool_id)
-
-    if not normalized:
-        raise AccountSettingsError(f"{context}의 'pool'에서 유효한 종목풀 ID를 찾지 못했습니다.")
-
-    from utils.pool_registry import list_available_pools
-
-    available_pools = set(list_available_pools())
-    invalid_pools = [pool_id for pool_id in normalized if pool_id not in available_pools]
-    if invalid_pools:
-        invalid_text = ", ".join(invalid_pools)
-        raise AccountSettingsError(f"{context}의 'pool'에 존재하지 않는 종목풀이 포함되어 있습니다: {invalid_text}")
-
-    return normalized
-
-
 def get_tune_month_configs(account_id: str = None) -> list[dict[str, Any]]:
     """튜닝용 시작일 설정을 반환합니다.
 
@@ -208,16 +175,8 @@ def get_account_settings(account_id: str) -> dict[str, Any]:
     if country_code not in {"kor", "au"}:
         raise AccountSettingsError(f"'{path}' 설정 파일의 country_code는 kor 또는 au만 허용합니다: {country_code}")
     settings["country_code"] = country_code
-    settings["pool"] = _normalize_pool_ids(settings.get("pool"), context=str(path))
 
     return settings
-
-
-def get_account_pool_ids(account_id: str) -> list[str]:
-    """계좌에 연결된 종목풀 ID 목록을 반환합니다."""
-
-    settings = get_account_settings(account_id)
-    return list(settings["pool"])
 
 
 def _split_strategy_sections(
@@ -373,32 +332,19 @@ def get_strategy_rules(account_id: str):
     """계정별 전략 설정을 `StrategyRules` 객체로 반환합니다."""
 
     from core.strategy.rules import StrategyRules
-    from utils.pool_registry import get_pool_dir
 
     tuning, _ = get_account_strategy_sections(account_id)
     normalized_tuning = dict(tuning)
 
     if normalized_tuning.get("MA_MONTH") is None and normalized_tuning.get("ma_month") is None:
-        try:
-            settings = get_account_settings(account_id)
-            pool_ids = settings.get("pool") or []
-            if pool_ids:
-                pool_dir = get_pool_dir(str(pool_ids[0]))
-                pool_config = _load_json(pool_dir / "config.json")
-                rank_cfg = pool_config.get("rank") or {}
-                if isinstance(rank_cfg, dict):
-                    months = rank_cfg.get("months")
-                    ma_type = rank_cfg.get("ma_type")
-                    if months is not None:
-                        normalized_tuning["MA_MONTH"] = months
-                    if (
-                        ma_type
-                        and normalized_tuning.get("MA_TYPE") is None
-                        and normalized_tuning.get("ma_type") is None
-                    ):
-                        normalized_tuning["MA_TYPE"] = ma_type
-        except Exception:
-            pass
+        months = normalized_tuning.get("MY_MONTHS")
+        if months is not None:
+            normalized_tuning["MA_MONTH"] = months
+
+    if normalized_tuning.get("MA_TYPE") is None and normalized_tuning.get("ma_type") is None:
+        ma_type = normalized_tuning.get("MY_TYPE")
+        if ma_type:
+            normalized_tuning["MA_TYPE"] = ma_type
 
     return StrategyRules.from_mapping(normalized_tuning)
 

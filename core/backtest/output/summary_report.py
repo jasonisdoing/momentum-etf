@@ -66,17 +66,32 @@ def print_backtest_summary(
         section_counter += 1
 
     ma_month = merged_strategy.get("MA_MONTH")
-    momentum_label = f"{ma_month}개월" if ma_month is not None else "N/A"
+    momentum_month_label = f"{ma_month}개월" if ma_month is not None else "N/A"
+    ma_type = merged_strategy.get("MA_TYPE")
+    momentum_type_label = str(ma_type).upper() if ma_type is not None else "N/A"
+    rebalance_mode = merged_strategy.get("REBALANCE_MODE")
+    rebalance_mode_label = str(rebalance_mode).upper() if rebalance_mode is not None else "N/A"
+    top_n = merged_strategy.get("TOPN")
+    top_n_label = str(top_n) if top_n is not None else "N/A"
 
-    universe_count = summary.get("universe_count") or universe_count
+    max_holdable_count = summary.get("universe_count")
+    account_universe_count = summary.get("pool_universe_count") or universe_count
     try:
-        universe_count = int(universe_count)
+        max_holdable_count = int(max_holdable_count) if max_holdable_count is not None else 0
     except (TypeError, ValueError):
-        universe_count = 0
+        max_holdable_count = 0
+    try:
+        account_universe_count = int(account_universe_count)
+    except (TypeError, ValueError):
+        account_universe_count = 0
 
     used_settings = {
-        "계좌 전체 종목 수": universe_count,
-        "모멘텀 스코어 MA 기간": momentum_label,
+        "계좌 전체 종목 수": account_universe_count,
+        "마지막 거래일 기준 최대 편입 가능 종목 수": max_holdable_count,
+        "전체 상위 편입 종목 수(TOPN)": top_n_label,
+        "리밸런싱 모드": rebalance_mode_label,
+        "모멘텀 스코어 MA 타입": momentum_type_label,
+        "모멘텀 스코어 MA 기간": momentum_month_label,
     }
 
     add_section_heading("주별 성과 요약")

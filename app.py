@@ -9,15 +9,11 @@ import streamlit as st
 import streamlit_authenticator as stauth
 
 from app_pages.account_page import render_account_page
-from app_pages.pool_page import render_pool_page
-from config import BUCKET_MAPPING
 from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
 )
 from utils.formatters import format_price
-from utils.identifier_guard import ensure_account_pool_id_separation
-from utils.pool_registry import load_pool_configs
 from utils.report import format_kr_money
 from utils.ui import create_loading_status, load_account_recommendations, render_recommendation_table
 
@@ -194,90 +190,6 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
         _render,
         title=view_mode,
         icon="💼",
-        url_path=url_path,
-    )
-
-
-def _build_unified_pool_page(page_cls: Callable[..., object], pools: list[dict[str, str]], view_mode: str):
-    url_mapping = {"랭킹": "rank", "종목 관리": "setup", "삭제된 종목": "deleted"}
-    clean_view = view_mode.split(".")[-1].strip()
-    english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
-    view_slug = _slugify_path(english_view)
-    url_path = f"pool-{view_slug}"
-
-    pool_options: list[tuple[str, str]] = []
-    for pool in pools:
-        pool_id = pool["pool_id"]
-        pool_name = pool.get("name") or pool_id.upper()
-        pool_options.append((pool_id, pool_name))
-
-    def _render() -> None:
-        loading = create_loading_status()
-        try:
-            if not pool_options:
-                st.error("선택 가능한 종목풀이 없습니다.")
-                return
-
-            option_ids = [pool_id for pool_id, _ in pool_options]
-            option_label_map = {pool_id: label for pool_id, label in pool_options}
-
-            query_pool = st.query_params.get("pool")
-            current_id = query_pool if query_pool in option_label_map else st.session_state.get("selected_pool_id")
-            if current_id not in option_label_map:
-                current_id = option_ids[0]
-                st.session_state["selected_pool_id"] = current_id
-                st.query_params["pool"] = current_id
-
-            selected_bucket = "전체"
-            if clean_view == "랭킹":
-                bucket_options = ["전체", *BUCKET_MAPPING.values()]
-                query_bucket = st.query_params.get("bucket")
-                current_bucket = (
-                    query_bucket
-                    if isinstance(query_bucket, str) and query_bucket in bucket_options
-                    else st.session_state.get("selected_pool_bucket")
-                )
-                if current_bucket not in bucket_options:
-                    current_bucket = "전체"
-                    st.session_state["selected_pool_bucket"] = current_bucket
-                    st.query_params["bucket"] = current_bucket
-
-                pool_col, bucket_col = st.columns(2)
-                with pool_col:
-                    selected_id = st.selectbox(
-                        "종목풀 선택",
-                        options=option_ids,
-                        index=option_ids.index(current_id),
-                        format_func=lambda pool_id: option_label_map.get(pool_id, pool_id),
-                        key=f"pool_selector_{view_slug}",
-                    )
-                with bucket_col:
-                    selected_bucket = st.selectbox(
-                        "버킷 선택",
-                        options=bucket_options,
-                        index=bucket_options.index(current_bucket),
-                        key=f"pool_bucket_selector_{view_slug}",
-                    )
-                st.session_state["selected_pool_bucket"] = selected_bucket
-                st.query_params["bucket"] = selected_bucket
-            else:
-                selected_id = st.selectbox(
-                    "종목풀 선택",
-                    options=option_ids,
-                    index=option_ids.index(current_id),
-                    format_func=lambda pool_id: option_label_map.get(pool_id, pool_id),
-                    key=f"pool_selector_{view_slug}",
-                )
-            st.session_state["selected_pool_id"] = selected_id
-            st.query_params["pool"] = selected_id
-            render_pool_page(selected_id, view_mode=view_mode, selected_bucket=selected_bucket, loading=loading)
-        finally:
-            loading.clear()
-
-    return page_cls(
-        _render,
-        title=view_mode,
-        icon="🧩",
         url_path=url_path,
     )
 
@@ -907,7 +819,6 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
 
 
 def main() -> None:
-    ensure_account_pool_id_separation()
     navigation = getattr(st, "navigation", None)
     page_cls = getattr(st, "Page", None)
     if navigation is None or page_cls is None:
@@ -920,8 +831,6 @@ def main() -> None:
         st.stop()
 
     default_icon = "📈"
-    pools = load_pool_configs()
-
     st.set_page_config(
         page_title="Momentum ETF",
         page_icon=default_icon,
@@ -983,10 +892,6 @@ def main() -> None:
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
     view_modes = ["0. 요약", "1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]
     pages["계좌"] = [_build_unified_account_page(page_cls, accounts, view_mode) for view_mode in view_modes]
-
-    # 통합 종목풀 그룹 (풀 선택형 단일 URL)
-    pool_view_modes = ["1. 랭킹", "2. 종목 관리", "3. 삭제된 종목"]
-    pages["종목풀"] = [_build_unified_pool_page(page_cls, pools, view_mode) for view_mode in pool_view_modes]
     pages["ETF 마켓"] = [build_etf_market_page(page_cls)]
     pages["시스템 정보"] = [_build_system_page(page_cls)]
 

@@ -93,6 +93,9 @@ def evaluate_single_combo(
         override_settings = {
             "start_date": date_range[0],
             "end_date": date_range[1],
+            "strategy_overrides": {
+                "TOPN": int(topn_int),
+            },
         }
 
         # 백테스트 실행
@@ -114,7 +117,7 @@ def evaluate_single_combo(
             "failure",
             {
                 "ma_month" if is_ma_month else "ma_days": ma_int,
-                "universe_count": topn_int,
+                "top_n": topn_int,
                 "error": str(exc),
             },
             [],
@@ -126,7 +129,7 @@ def evaluate_single_combo(
 
     entry = {
         "ma_month" if is_ma_month else "ma_days": ma_int,
-        "universe_count": topn_int,
+        "top_n": topn_int,
         "ma_type": ma_type_str,
         "rebalance_mode": rebalance_mode_str,
         "cagr": _round_float(_safe_float(summary.get("cagr"), 0.0)),

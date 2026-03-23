@@ -11,6 +11,7 @@ def get_hold_states() -> set[str]:
         보유 상태 문자열 집합
     """
     return {
+        "BUY",
         "HOLD",
     }
 

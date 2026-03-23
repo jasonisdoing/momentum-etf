@@ -10,7 +10,11 @@ from typing import Any
 import pandas as pd
 
 from config import TRADING_DAYS_PER_MONTH
-from core.backtest.analysis.summaries import build_bucket_summaries
+from core.backtest.analysis.summaries import (
+    build_bucket_summaries,
+    calculate_realized_trade_stats,
+    calculate_ticker_profit_components,
+)
 from core.backtest.domain import AccountBacktestResult
 from core.backtest.engine import run_portfolio_backtest
 from core.strategy.rules import StrategyRules
@@ -62,6 +66,7 @@ class BacktestPreparedContext:
     etf_universe: list[dict[str, Any]]
     ticker_meta: dict[str, dict[str, Any]]
     universe_count: int
+    top_n: int
     backtest_kwargs: dict[str, Any]
     calendar_arg: list[pd.Timestamp]
 
@@ -148,7 +153,7 @@ def run_account_backtest(
             stocks=prepared.etf_universe,
             initial_capital=initial_capital_value,
             core_start_date=prepared.start_date,
-            top_n=prepared.universe_count,
+            top_n=prepared.top_n,
             date_range=date_range,
             country=prepared.country_code,
             missing_ticker_sink=runtime_missing_tickers,
@@ -166,6 +171,8 @@ def run_account_backtest(
         ticker_timeseries,
         initial_capital_value,
         prepared.universe_count,
+        prepared.ticker_meta,
+        prepared.top_n,
     )
 
     (
@@ -332,7 +339,7 @@ def _load_backtest_universe(
         etf_universe = get_etfs(account_id)
 
     if not etf_universe:
-        raise AccountSettingsError(f"계정 '{account_id}'에 대한 종목 설정(stocks.json)을 찾을 수 없습니다.")
+        raise AccountSettingsError(f"계정 '{account_id}'에 대한 종목 설정을 찾을 수 없습니다.")
 
     if excluded_upper:
         before_count = len(etf_universe)
@@ -439,8 +446,18 @@ def _prepare_backtest_context(
     ticker_meta = {str(item.get("ticker", "")).upper(): dict(item) for item in etf_universe}
     ticker_meta["CASH"] = {"ticker": "CASH", "name": "현금"}
     universe_count = len(etf_universe)
+    top_n_raw = strategy_context.strategy_settings.get("TOPN")
+    if top_n_raw is None:
+        raise ValueError("strategy.TOPN 설정이 필요합니다. 계정 설정의 strategy.TOPN 값을 확인하세요.")
+    try:
+        top_n = int(top_n_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"strategy.TOPN은 정수여야 합니다: {top_n_raw}") from exc
+    if top_n < 1:
+        raise ValueError(f"strategy.TOPN은 1 이상이어야 합니다: {top_n}")
     if not is_tuning_fast_path:
         log_func(f"[백테스트] 계좌 전체 종목 수: {universe_count}")
+        log_func(f"[백테스트] 전체 상위 편입 종목 수(TOPN): {top_n}")
         log_func("[백테스트] 백테스트 파라미터를 구성하는 중...")
     backtest_kwargs = _build_backtest_kwargs(
         strategy_rules=strategy_context.strategy_rules,
@@ -467,6 +484,7 @@ def _prepare_backtest_context(
         etf_universe=etf_universe,
         ticker_meta=ticker_meta,
         universe_count=universe_count,
+        top_n=top_n,
         backtest_kwargs=backtest_kwargs,
         calendar_arg=calendar_arg,
     )
@@ -613,6 +631,8 @@ def _build_portfolio_timeseries(
     ticker_timeseries: Mapping[str, pd.DataFrame],
     initial_capital: float,
     universe_count: int,
+    ticker_meta: Mapping[str, dict[str, Any]],
+    top_n: int,
 ) -> pd.DataFrame:
     # DataFrame만 필터링 (메타데이터 문자열 제외)
     dataframes = [ts for ts in ticker_timeseries.values() if isinstance(ts, pd.DataFrame) and not ts.empty]
@@ -639,7 +659,6 @@ def _build_portfolio_timeseries(
         total_cost = 0.0
         held_count = 0
         cash_value = 0.0
-
         for ticker, ts in ticker_timeseries.items():
             # DataFrame만 처리 (메타데이터 문자열 제외)
             if not isinstance(ts, pd.DataFrame):
@@ -684,6 +703,7 @@ def _build_portfolio_timeseries(
 
             price = float(price_val) if pd.notna(price_val) else 0.0
             raw_shares = float(shares_val) if pd.notna(shares_val) else 0.0
+            raw_shares = max(0.0, raw_shares)
             raw_avg_cost = float(avg_cost_val) if pd.notna(avg_cost_val) else 0.0
             traded_shares = float(trade_shares_val) if pd.notna(trade_shares_val) else 0.0
 
@@ -700,18 +720,18 @@ def _build_portfolio_timeseries(
                     else:
                         avg_cost = 0.0
                 elif pending_action.startswith("SELL"):
-                    reconstructed_shares = raw_shares + max(0.0, traded_shares)
+                    reconstructed_shares = max(0.0, raw_shares + max(0.0, traded_shares))
                     shares = (
                         reconstructed_shares
                         if reconstructed_shares > 0
-                        else prev_effective_shares.get(ticker, raw_shares)
+                        else max(0.0, prev_effective_shares.get(ticker, raw_shares))
                     )
                     avg_cost = prev_effective_avg_cost.get(ticker, raw_avg_cost)
                 else:
-                    shares = raw_shares
+                    shares = max(0.0, raw_shares)
                     avg_cost = raw_avg_cost
             else:
-                shares = raw_shares
+                shares = max(0.0, raw_shares)
                 avg_cost = raw_avg_cost
 
             effective_pv = price * shares
@@ -745,6 +765,7 @@ def _build_portfolio_timeseries(
             prev_total_value = total_value
 
         cumulative_return_pct = ((total_value / initial_capital) - 1.0) * 100.0 if initial_capital > 0 else 0.0
+        max_holdable_count = int(top_n)
 
         eval_profit_loss = total_holdings - total_cost if total_cost > 0 else 0.0
         eval_return_pct = (total_holdings / total_cost - 1.0) * 100.0 if total_cost > 0 else 0.0
@@ -761,7 +782,8 @@ def _build_portfolio_timeseries(
                 "cumulative_return_pct": cumulative_return_pct,
                 "evaluation_profit_loss": eval_profit_loss,
                 "evaluation_return_pct": eval_return_pct,
-                "universe_count": universe_count,
+                "universe_count": max_holdable_count,
+                "pool_universe_count": universe_count,
             }
         )
 
@@ -1031,7 +1053,7 @@ def _build_summary(
             for dt, value in weekly_values.items():
                 # 해당 날짜의 보유종목 수 가져오기
                 held_count = 0
-                current_universe_count = universe_count
+                current_universe_count = 0
                 actual_date = dt
 
                 # 해당 날짜가 portfolio_df에 없으면 가장 가까운 이전 날짜 찾기
@@ -1045,9 +1067,19 @@ def _build_summary(
                             if pd.notna(portfolio_df.loc[actual_date, "held_count"])
                             else 0
                         )
+                        current_universe_count = (
+                            int(portfolio_df.loc[actual_date, "universe_count"])
+                            if pd.notna(portfolio_df.loc[actual_date, "universe_count"])
+                            else 0
+                        )
                 else:
                     held_count = (
                         int(portfolio_df.loc[dt, "held_count"]) if pd.notna(portfolio_df.loc[dt, "held_count"]) else 0
+                    )
+                    current_universe_count = (
+                        int(portfolio_df.loc[dt, "universe_count"])
+                        if pd.notna(portfolio_df.loc[dt, "universe_count"])
+                        else 0
                     )
 
                 # 날짜 포맷: 금요일이 아니면 요일 표시
@@ -1120,6 +1152,8 @@ def _build_summary(
         "period_return": float(final_row["cumulative_return_pct"]),
         "evaluation_return_pct": float(final_row["evaluation_return_pct"]),
         "held_count": int(final_row["held_count"]),
+        "universe_count": int(final_row.get("universe_count", 0) or 0),
+        "pool_universe_count": int(final_row.get("pool_universe_count", universe_count) or universe_count),
         "turnover": total_turnover,
         "cagr": cagr * 100,
         "mdd": mdd_pct,
@@ -1199,32 +1233,12 @@ def _build_ticker_summaries(
             continue
 
         df_sorted = df.sort_index()
-        if "decision" in df_sorted.columns or "pending_action" in df_sorted.columns:
-            pending_col = (
-                df_sorted["pending_action"].astype(str).str.upper()
-                if "pending_action" in df_sorted.columns
-                else pd.Series("", index=df_sorted.index, dtype=object)
-            )
-            trade_shares_col = pd.to_numeric(df_sorted.get("trade_shares", 0.0), errors="coerce").fillna(0.0)
-            trades_mask = pending_col.str.startswith("SELL") & (trade_shares_col > 0)
-        else:
-            trades_mask = pd.Series(False, index=df_sorted.index)
-
-        trades = df_sorted[trades_mask] if trades_mask.any() else pd.DataFrame()
-        realized_profit = float(trades.get("trade_profit", pd.Series(dtype=float)).sum()) if not trades.empty else 0.0
-        total_trades = int(len(trades)) if not trades.empty else 0
-        winning_trades = int((trades.get("trade_profit", pd.Series(dtype=float)) > 0).sum()) if not trades.empty else 0
-
-        last_row = df_sorted.iloc[-1]
-        final_shares = float(last_row.get("shares", 0.0))
-        final_price = float(last_row.get("price", 0.0))
-        avg_cost = float(last_row.get("avg_cost", 0.0))
-
-        unrealized_profit = 0.0
-        if final_shares > 0 and avg_cost > 0:
-            unrealized_profit = (final_price - avg_cost) * final_shares
-
-        total_contribution = realized_profit + unrealized_profit
+        _, total_trades, winning_trades = calculate_realized_trade_stats(df_sorted)
+        profit_components = calculate_ticker_profit_components(df_sorted)
+        realized_profit = float(profit_components["realized_profit"])
+        unrealized_profit = float(profit_components["unrealized_profit"])
+        total_contribution = float(profit_components["total_contribution"])
+        final_shares = float(df_sorted.iloc[-1].get("shares", 0.0))
 
         period_return_pct = 0.0
         listing_date: str | None = None

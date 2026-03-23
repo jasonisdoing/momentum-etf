@@ -312,38 +312,39 @@ def _build_bucket_mapping(stocks: Sequence[Mapping[str, Any]]) -> tuple[dict[str
     return ticker_to_bucket, bucket_members
 
 
-def _calculate_equal_bucket_weights(
-    tickers: Sequence[str],
+def _calculate_dynamic_bucket_weights(
     *,
     bucket_members: Mapping[int, Sequence[str]],
+    score_today: Mapping[str, float] | None = None,
+    top_n: int = 1,
 ) -> dict[str, float]:
-    """버킷과 버킷 내부 종목을 모두 균등 분배합니다."""
-
-    if not tickers:
-        raise ValueError("비중 계산에 필요한 종목이 없습니다.")
+    """점수 0 이상인 전체 유니버스 상위 N개 종목에 동일 비중으로 분배합니다."""
 
     if not bucket_members:
         raise ValueError("버킷 구성 정보가 없습니다.")
 
-    selected_tickers = {ticker for ticker in tickers}
-    active_bucket_members: dict[int, list[str]] = {}
-    for bucket_id, members in bucket_members.items():
-        active_members = [ticker for ticker in members if ticker in selected_tickers]
-        if active_members:
-            active_bucket_members[bucket_id] = active_members
-
-    bucket_count = len(active_bucket_members)
-    if bucket_count <= 0:
-        raise ValueError("비중 계산에 필요한 활성 버킷이 없습니다.")
-
     target_weights: dict[str, float] = {}
-    per_bucket_weight = 1.0 / bucket_count
-    for bucket_id, members in active_bucket_members.items():
+    scores = score_today or {}
+    valid_candidates: list[tuple[float, str]] = []
+    for members in bucket_members.values():
         if not members:
-            raise ValueError(f"버킷 {bucket_id}에 배분할 종목이 없습니다.")
-        per_ticker_weight = per_bucket_weight / len(members)
+            continue
         for ticker in members:
-            target_weights[ticker] = per_ticker_weight
+            if ticker not in scores:
+                continue
+            score = scores[ticker]
+            if score >= 0:
+                valid_candidates.append((score, ticker))
+
+    valid_candidates.sort(reverse=True, key=lambda x: x[0])
+    selected = [ticker for _, ticker in valid_candidates[:top_n]]
+    if not selected:
+        return target_weights
+
+    # 양수 종목이 TOPN보다 적으면 남는 슬롯 비중은 현금으로 유지합니다.
+    per_ticker_weight = 1.0 / float(top_n)
+    for ticker in selected:
+        target_weights[ticker] = per_ticker_weight
 
     return target_weights
 
@@ -355,6 +356,7 @@ def _initialize_bootstrap_positions(
     cash: float,
     country_code: str,
     qty_precision: int,
+    top_n: int,
 ) -> tuple[dict[str, dict[str, float]], float, bool]:
     """첫 거래일 기준으로 전체 유니버스를 초기 편입합니다."""
 
@@ -378,16 +380,23 @@ def _initialize_bootstrap_positions(
     if not selected:
         return position_state, cash, False
 
-    bootstrap_weights = _calculate_equal_bucket_weights(
-        selected,
+    # 첫날 점수 맵 구성 (초기 매수 대상 산출용)
+    score0_map = {}
+    for ticker, ticker_metrics in metrics_by_ticker.items():
+        score0 = ticker_metrics["ma_score_values"][0]
+        score0_map[ticker] = float(score0) if pd.notna(score0) else 0.0
+
+    bootstrap_weights = _calculate_dynamic_bucket_weights(
         bucket_members=bucket_members,
+        score_today=score0_map,
+        top_n=top_n,
     )
 
     remaining_cash = float(cash)
     bootstrap_initialized = False
-    for ticker in selected:
-        if remaining_cash <= 0:
-            break
+    for ticker, weight in bootstrap_weights.items():
+        if remaining_cash <= 0 or weight <= 0:
+            continue
         ticker_metrics = metrics_by_ticker[ticker]
         buy_price = _calculate_bootstrap_buy_price(
             open_values=ticker_metrics["open_values"],
@@ -396,7 +405,7 @@ def _initialize_bootstrap_positions(
         )
         if buy_price <= 0:
             continue
-        budget = float(cash) * bootstrap_weights.get(ticker, 1.0 / len(selected))
+        budget = float(cash) * weight
         budget = min(budget, remaining_cash)
         qty = _floor_quantity(budget / buy_price, qty_precision) if buy_price > 0 else 0.0
         trade_amount = qty * buy_price
@@ -423,7 +432,6 @@ def run_portfolio_backtest(
     trading_calendar: Sequence[pd.Timestamp] | None = None,
     ma_days: int = 20,
     ma_type: str = "SMA",
-    strategy: str = "PORTFOLIO",
     rebalance_mode: str = "TWICE_A_MONTH",
     target_weights: Mapping[str, float] | None = None,
     quiet: bool = False,
@@ -438,7 +446,7 @@ def run_portfolio_backtest(
         stocks: 백테스트할 종목 목록
         initial_capital: 초기 자본금
         core_start_date: 백테스트 시작일
-        top_n: 계좌 전체 종목 수
+        top_n: 버킷별 편입 종목 수
         date_range: 백테스트 기간 [시작일, 종료일]
         country: 시장 국가 코드 (예: kor)
         prefetched_data: 미리 로드된 가격 데이터
@@ -517,6 +525,7 @@ def run_portfolio_backtest(
         cash=cash,
         country_code=country_code,
         qty_precision=qty_precision,
+        top_n=top_n,
     )
 
     # 이전 리밸런싱 인덱스 추적 변수는 제거함
@@ -565,9 +574,10 @@ def run_portfolio_backtest(
 
         target_weights_today = {ticker: 0.0 for ticker in metrics_by_ticker}
         if eligible_scores_today:
-            computed_weights = _calculate_equal_bucket_weights(
-                list(eligible_scores_today.keys()),
+            computed_weights = _calculate_dynamic_bucket_weights(
                 bucket_members=bucket_members,
+                score_today=score_today,
+                top_n=top_n,
             )
             target_weights_today.update(computed_weights)
 
@@ -664,100 +674,102 @@ def run_portfolio_backtest(
                     if pd.notna(price_h) and price_h > 0:
                         total_rebalance_equity += held_state["shares"] * price_h
 
-            # 균등 분배 목표 비중 계산
+            # 동적 비중 목표 계산 (Trim/Top-up 공용)
+            rebalance_target_weights = {}
             if eligible_scores_today:
-                rebalance_target_weights = _calculate_equal_bucket_weights(
-                    list(eligible_scores_today.keys()),
+                rebalance_target_weights = _calculate_dynamic_bucket_weights(
                     bucket_members=bucket_members,
+                    score_today=score_today,
+                    top_n=top_n,
                 )
+            # 현재 비중 계산
+            current_weights: dict[str, float] = {}
+            for t, s in position_state.items():
+                if s["shares"] > 0:
+                    p = today_prices.get(t, 0.0)
+                    if pd.notna(p) and p > 0:
+                        current_weights[t] = (s["shares"] * p) / total_rebalance_equity
 
-                # 현재 비중 계산
-                current_weights: dict[str, float] = {}
-                for t, s in position_state.items():
-                    if s["shares"] > 0:
-                        p = today_prices.get(t, 0.0)
-                        if pd.notna(p) and p > 0:
-                            current_weights[t] = (s["shares"] * p) / total_rebalance_equity
+            # 버퍼 체크: 비중 차이가 버퍼 이내인 종목은 매매 유보
+            rebalance_needed = should_rebalance(
+                current_weights,
+                rebalance_target_weights,
+                float(REBALANCE_BUFFER) / 100.0,
+            )
+            for ticker, state in position_state.items():
+                if state["shares"] <= 0:
+                    continue
+                if rebalance_target_weights.get(ticker, 0.0) <= 0.0:
+                    rebalance_needed[ticker] = True
 
-                # 버퍼 체크: 비중 차이가 버퍼 이내인 종목은 매매 유보
-                rebalance_needed = should_rebalance(
-                    current_weights,
-                    rebalance_target_weights,
-                    float(REBALANCE_BUFFER) / 100.0,
-                )
+            # 4-1. Trim (비중 축소)
+            for ticker, state in position_state.items():
+                if state["shares"] > 0:
+                    price = today_prices.get(ticker)
+                    if pd.isna(price) or price <= 0:
+                        continue
 
-            if eligible_scores_today:
-                # 4-1. Trim (비중 축소)
-                for ticker, state in position_state.items():
-                    if state["shares"] > 0:
-                        price = today_prices.get(ticker)
-                        if pd.isna(price) or price <= 0:
+                    # 버퍼 이내면 매매 유보
+                    if not rebalance_needed.get(ticker, False):
+                        continue
+
+                    current_val = state["shares"] * price
+                    target_weight_for_ticker = rebalance_target_weights.get(ticker, 0.0)
+                    target_val_for_ticker = total_rebalance_equity * target_weight_for_ticker
+                    if current_val > target_val_for_ticker:
+                        excess_val = current_val - target_val_for_ticker
+
+                        # 다음날 시초가 + 슬리피지로 매도 가격 계산 (실제 거래 가격)
+                        sell_price = calculate_trade_price(
+                            i,
+                            total_days,
+                            metrics_by_ticker[ticker]["open_values"],
+                            metrics_by_ticker[ticker]["close_values"],
+                            country_code,
+                            is_buy=False,
+                        )
+                        if sell_price <= 0:
                             continue
 
-                        # 버퍼 이내면 매매 유보
-                        if not rebalance_needed.get(ticker, False):
-                            continue
-
-                        current_val = state["shares"] * price
-                        target_weight_for_ticker = rebalance_target_weights.get(ticker, 1.0 / top_n)
-                        target_val_for_ticker = total_rebalance_equity * target_weight_for_ticker
-                        if current_val > target_val_for_ticker:
-                            excess_val = current_val - target_val_for_ticker
-
-                            # 다음날 시초가 + 슬리피지로 매도 가격 계산 (실제 거래 가격)
-                            sell_price = calculate_trade_price(
-                                i,
-                                total_days,
-                                metrics_by_ticker[ticker]["open_values"],
-                                metrics_by_ticker[ticker]["close_values"],
-                                country_code,
-                                is_buy=False,
-                            )
-                            if sell_price <= 0:
-                                continue
-
+                        if target_weight_for_ticker <= 0.0:
+                            sell_qty = float(state["shares"])
+                        else:
                             sell_qty = _floor_quantity(excess_val / sell_price, qty_precision)
-                            # 최소 1주 이상 매도 가능할 때
-                            if sell_qty > 0:
-                                sell_amount = sell_qty * sell_price
+                        # 최소 1주 이상 매도 가능할 때
+                        if sell_qty > 0:
+                            sell_amount = sell_qty * sell_price
 
-                                # 상태 업데이트
-                                cash += sell_amount
-                                state["shares"] -= sell_qty
+                            # 상태 업데이트
+                            cash += sell_amount
+                            state["shares"] -= sell_qty
 
-                                current_weight_pct = (
-                                    (current_val / total_rebalance_equity) * 100.0
-                                    if total_rebalance_equity > 0
-                                    else 0.0
-                                )
-                                target_weight_pct = target_weight_for_ticker * 100.0
-                                trim_note = (
-                                    f"[예정] 1거래일 후 비중조절 - "
-                                    f"{current_weight_pct:.1f}% => {target_weight_pct:.1f}%"
-                                )
+                            current_weight_pct = (
+                                (current_val / total_rebalance_equity) * 100.0 if total_rebalance_equity > 0 else 0.0
+                            )
+                            target_weight_pct = target_weight_for_ticker * 100.0
+                            trim_note = (
+                                f"[예정] 1거래일 후 비중조절 - {current_weight_pct:.1f}% => {target_weight_pct:.1f}%"
+                            )
 
-                                if (
-                                    daily_records_by_ticker[ticker]
-                                    and daily_records_by_ticker[ticker][-1]["date"] == dt
-                                ):
-                                    row = daily_records_by_ticker[ticker][-1]
-                                    existing_note = row.get("note", "")
-                                    # 리밸런스 비중 축소는 부분 조정이므로 상태는 변경하지 않습니다.
-                                    row["note"] = f"{trim_note} | {existing_note}" if existing_note else trim_note
-                                    row["shares"] = state["shares"]
-                                    row["pv"] = state["shares"] * price
-                                    row["pending_action"] = "SELL_REBALANCE"
-                                    row["execute_on"] = next_dt
-                                    row["pending_reason"] = "비중 조정"
-                                    # 만약 이미 거래 기록이 있다면 금액 합산, 없다면 추가
-                                    if "trade_amount" in row and row["trade_amount"]:
-                                        row["trade_amount"] += sell_amount
-                                    else:
-                                        row["trade_amount"] = sell_amount
-                                    if "trade_shares" in row and row["trade_shares"]:
-                                        row["trade_shares"] += sell_qty
-                                    else:
-                                        row["trade_shares"] = sell_qty
+                            if daily_records_by_ticker[ticker] and daily_records_by_ticker[ticker][-1]["date"] == dt:
+                                row = daily_records_by_ticker[ticker][-1]
+                                existing_note = row.get("note", "")
+                                # 리밸런스 비중 축소는 부분 조정이므로 상태는 변경하지 않습니다.
+                                row["note"] = f"{trim_note} | {existing_note}" if existing_note else trim_note
+                                row["shares"] = state["shares"]
+                                row["pv"] = state["shares"] * price
+                                row["pending_action"] = "SELL_REBALANCE"
+                                row["execute_on"] = next_dt
+                                row["pending_reason"] = "비중 조정"
+                                # 만약 이미 거래 기록이 있다면 금액 합산, 없다면 추가
+                                if "trade_amount" in row and row["trade_amount"]:
+                                    row["trade_amount"] += sell_amount
+                                else:
+                                    row["trade_amount"] = sell_amount
+                                if "trade_shares" in row and row["trade_shares"]:
+                                    row["trade_shares"] += sell_qty
+                                else:
+                                    row["trade_shares"] = sell_qty
 
             # 4-2. Top-up (비중 확대)는 당일 전체에 적용되는 `PHASE 3` 추가매수 로직에서
             # 남은 현금을 모두 사용해 부족한 종목들을 채우므로 여기서 별도 진행하지 않아도 되나,
@@ -766,15 +778,24 @@ def run_portfolio_backtest(
         # --- PHASE 3: 추가 매수 (남은 현금으로 부족한 종목 채우기) ---
         # 비중 조절용 추가 매수는 is_rebalance_day 일 때만 동작하게 합니다.
         if is_rebalance_day and cash > 0:
+            current_holdings_value = 0.0
+            for held_ticker, held_state in position_state.items():
+                if held_state.get("shares", 0) <= 0:
+                    continue
+                price_h = today_prices.get(held_ticker)
+                if pd.notna(price_h) and price_h > 0:
+                    current_holdings_value += held_state["shares"] * price_h
+
             total_equity = cash + current_holdings_value
 
-            # 균등 분배 목표 비중 계산 (Trim과 동일한 비중 사용)
+            # 동적 비중 분배 목표 비중 계산 (Trim과 동일한 비중 사용)
             topup_target_weights: dict[str, float] = {}
             topup_rebalance_needed: dict[str, bool] = {}
             if eligible_scores_today:
-                topup_target_weights = _calculate_equal_bucket_weights(
-                    list(eligible_scores_today.keys()),
+                topup_target_weights = _calculate_dynamic_bucket_weights(
                     bucket_members=bucket_members,
+                    score_today=score_today,
+                    top_n=top_n,
                 )
                 current_weights_topup: dict[str, float] = {}
                 for t, s in position_state.items():

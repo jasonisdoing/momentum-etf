@@ -1,6 +1,4 @@
-"""
-종목 파일(zsettings/<account>/stocks.json)에 메타데이터(상장일, 주간 평균 거래량/거래대금)를 업데이트합니다.
-"""
+"""계좌 종목 메타데이터를 업데이트합니다."""
 
 import time
 import xml.etree.ElementTree as ET
@@ -11,10 +9,8 @@ import requests
 import yfinance as yf
 
 from utils.data_loader import fetch_pykrx_name
-from utils.identifier_guard import ensure_account_pool_id_separation
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
-from utils.pool_registry import get_pool_country_code, list_available_pools
 from utils.settings_loader import get_account_settings, list_available_accounts
 
 
@@ -113,8 +109,6 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
         if account_norm in list_available_accounts():
             settings = get_account_settings(account_norm)
             country_code = settings.get("country_code", "kor").lower()
-        elif account_norm in list_available_pools():
-            country_code = get_pool_country_code(account_norm, default="kor")
         else:
             logger.error(f"대상 ID '{account_norm}'를 찾을 수 없습니다.")
             return
@@ -202,26 +196,21 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
 def update_stock_metadata(account_id: str | None = None):
     """
     모든 계정 또는 특정 계정의 종목 메타데이터를 업데이트합니다.
-    account_id가 None이면 모든 계정 + 모든 종목풀을 업데이트합니다.
     """
     logger = get_app_logger()
-    ensure_account_pool_id_separation()
 
     accounts_to_update = []
     available_accounts = list_available_accounts()
-    available_pools = list_available_pools()
-    all_targets = sorted({*available_accounts, *available_pools})
 
     if account_id:
         norm_id = account_id.strip().lower()
-        if norm_id in all_targets:
+        if norm_id in available_accounts:
             accounts_to_update.append(norm_id)
         else:
             logger.error(f"대상 ID '{account_id}'를 찾을 수 없습니다.")
             return
     else:
-        # 기본 실행은 모든 계정 + 모든 종목풀을 순회
-        accounts_to_update = all_targets.copy()
+        accounts_to_update = available_accounts.copy()
         try:
             logger.info("KIS 국내 ETF 마스터 캐시 갱신을 시작합니다.")
             refreshed_count = refresh_kis_domestic_etf_master_cache()

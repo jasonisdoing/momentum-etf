@@ -27,7 +27,6 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
 class StrategyRules:
     """Momentum 전략에서 공통으로 사용하는 핵심 파라미터."""
 
-    strategy: str
     ma_days: int
     ma_type: str
     rebalance_mode: str
@@ -38,7 +37,6 @@ class StrategyRules:
     def from_values(
         cls,
         *,
-        strategy: Any = "PORTFOLIO",
         ma_days: Any = None,
         ma_month: Any = None,
         ma_type: Any = None,
@@ -46,7 +44,6 @@ class StrategyRules:
         target_weights: Any = None,
         enable_data_sufficiency_check: Any = False,
     ) -> StrategyRules:
-        strategy_str = str(strategy or "PORTFOLIO").strip().upper() or "PORTFOLIO"
         normalized_weights: dict[str, float] | None = None
         if target_weights is not None:
             if not isinstance(target_weights, Mapping):
@@ -88,7 +85,6 @@ class StrategyRules:
             raise ValueError("MA 기간은 1 이상의 정수여야 합니다.")
 
         return cls(
-            strategy=strategy_str,
             ma_days=resolved_ma_days,
             ma_type=final_ma_type,
             rebalance_mode=final_rebalance_mode,
@@ -107,7 +103,6 @@ class StrategyRules:
             return None
 
         return cls.from_values(
-            strategy=_resolve("STRATEGY", "strategy"),
             ma_month=_resolve("MA_MONTH", "ma_month"),
             ma_days=_resolve("ma_days"),
             ma_type=_resolve("MA_TYPE", "ma_type"),
@@ -118,7 +113,6 @@ class StrategyRules:
 
     def to_dict(self) -> dict[str, Any]:
         d = {
-            "strategy": self.strategy,
             "ma_days": self.ma_days,
             "ma_type": self.ma_type,
             "rebalance_mode": self.rebalance_mode,

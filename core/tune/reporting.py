@@ -80,20 +80,23 @@ def _render_tuning_table(
 ) -> list[str]:
     if hr_mode:
         headers = [
-            "전략",
+            "MA개월",
+            "MA타입",
+            "TOPN",
             "리밸런스",
             "CAGR(%)",
             "MDD(%)",
         ]
         aligns = [
+            "right",
             "center",
+            "right",
             "center",
             "right",
             "right",
         ]
     else:
         headers = [
-            "전략",
             "MA개월",
             "MA타입",
             "리밸런스",
@@ -101,7 +104,6 @@ def _render_tuning_table(
             "MDD(%)",
         ]
         aligns = [
-            "center",
             "right",
             "center",
             "center",
@@ -125,7 +127,7 @@ def _render_tuning_table(
     table_rows = []
     for row in rows[:MAX_TABLE_ROWS]:
         ma_val = row.get("ma_month") or row.get("ma_days")
-        strategy_val = row.get("strategy", "RANK")
+        top_n_val = row.get("top_n")
         ma_type_val = row.get("ma_type", "SMA")
         rebal_mode_val = row.get("rebalance_mode")
         if not rebal_mode_val and "tuning" in row:
@@ -135,7 +137,9 @@ def _render_tuning_table(
 
         if hr_mode:
             row_data = [
-                str(strategy_val) if strategy_val else "PORTFOLIO",
+                str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
+                str(ma_type_val) if ma_type_val else "SMA",
+                str(int(top_n_val)) if isinstance(top_n_val, (int, float)) and math.isfinite(float(top_n_val)) else "-",
                 str(rebal_mode_val),
                 _format_table_float(row.get("cagr")),
                 _format_table_float(row.get("mdd")),
@@ -146,7 +150,6 @@ def _render_tuning_table(
             ]
         else:
             row_data = [
-                str(strategy_val) if strategy_val else "RANK",
                 str(int(ma_val)) if isinstance(ma_val, (int, float)) and math.isfinite(float(ma_val)) else "-",
                 str(ma_type_val) if ma_type_val else "SMA",
                 str(rebal_mode_val),

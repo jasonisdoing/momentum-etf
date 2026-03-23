@@ -1,16 +1,13 @@
-"""종목 메타데이터를 MongoDB stock_meta 컬렉션에서 읽고 쓰는 유틸리티."""
+"""계좌 종목 메타데이터를 MongoDB stock_meta 컬렉션에서 읽고 쓰는 유틸리티."""
 
 from __future__ import annotations
 
-import json
-import os
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
 
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
-from utils.settings_loader import get_account_dir
 
 logger = get_app_logger()
 
@@ -145,12 +142,6 @@ def get_etfs(account_id: str, include_extra_tickers: Iterable[str] | None = None
         new_item["ticker"] = ticker
         new_item["type"] = "etf"
         all_etfs.append(new_item)
-
-    # logger.info(
-    #     "[%s] 전체 ETF 유니버스 로딩: %d개 종목",
-    #     account_norm.upper(),
-    #     len(all_etfs),
-    # )
 
     return all_etfs
 
@@ -624,30 +615,3 @@ def set_listing_date(country: str, ticker: str, listing_date: str) -> None:
 
     if updated_any:
         _LISTING_CACHE[(country_norm, ticker_norm)] = listing_date
-
-
-# ---------------------------------------------------------------------------
-# 파일 기반 레거시 헬퍼 (마이그레이션용)
-# ---------------------------------------------------------------------------
-
-
-def _get_data_dir() -> str:
-    """zaccounts 디렉토리 절대경로를 반환한다."""
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(project_root, "zaccounts")
-
-
-def load_stocks_from_file(account_id: str) -> list[dict]:
-    """stocks.json 파일에서 종목 데이터를 로드한다 (마이그레이션 전용)."""
-    account_norm = (account_id or "").strip().lower()
-    file_path = str(get_account_dir(account_norm) / "stocks.json")
-    if not os.path.exists(file_path):
-        return []
-    try:
-        with open(file_path, encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                return data
-    except Exception as exc:
-        logger.error("stocks.json 로드 실패 (%s): %s", file_path, exc)
-    return []

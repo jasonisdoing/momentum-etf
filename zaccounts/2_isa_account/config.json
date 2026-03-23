@@ -2,9 +2,6 @@
     "icon": "🇰🇷",
     "name": "ISA 계좌",
     "country_code": "kor",
-    "pool": [
-        "tax"
-    ],
     "currency": "KRW",
     "initial_capital_krw": "40000000",
     "show_hold": true,
@@ -14,7 +11,10 @@
         "TUNE_MDD": -14.335928,
         "TUNE_MONTHS": 12,
         "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": "TWICE_A_MONTH"
+        "TOPN": 1,
+        "REBALANCE_MODE": "TWICE_A_MONTH",
+        "MY_TYPE": "ALMA",
+        "MY_MONTHS": 6
     },
     "benchmark": {
         "ticker": "379810",
