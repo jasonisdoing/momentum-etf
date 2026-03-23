@@ -7,11 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from config import BUCKET_CONFIG, BUCKET_MAPPING
-from core.strategy.constants import BACKTEST_STATUS_LIST
 from utils.logger import get_app_logger
-from utils.recommendation_storage import fetch_latest_recommendations
-from utils.recommendations import recommendations_to_dataframe
-from utils.settings_loader import get_account_settings
 
 logger = get_app_logger()
 
@@ -77,108 +73,6 @@ def inject_global_css() -> None:
     )
 
 
-@st.cache_data(ttl=30, show_spinner=False)
-def load_account_recommendations(
-    account_id: str,
-) -> tuple[pd.DataFrame | None, str | None, str]:
-    account_norm = (account_id or "").strip().lower()
-    if not account_norm:
-        return None, "계정 ID가 필요합니다.", ""
-
-    try:
-        account_settings = get_account_settings(account_norm)
-    except Exception as exc:  # pragma: no cover - Streamlit 오류 메시지 전용
-        return None, f"계정 설정을 불러오지 못했습니다: {exc}", ""
-
-    country_code = (account_settings.get("country_code") or account_norm).strip().lower()
-
-    try:
-        snapshot = fetch_latest_recommendations(account_norm)
-    except Exception as exc:
-        return None, f"추천 스냅샷을 불러오지 못했습니다: {exc}", country_code
-
-    if snapshot is None:
-        message = (
-            "추천 스냅샷을 찾을 수 없습니다. CLI에서 "
-            f"`python recommend.py {account_norm}` 명령으로 데이터를 생성해 주세요."
-        )
-        logger.warning("추천 스냅샷을 찾을 수 없습니다 (account=%s)", account_norm)
-        return None, message, country_code
-
-    rows = snapshot.get("recommendations") or []
-
-    # [KOR] 실시간 데이터 오버레이 (NAVER API)
-    if country_code == "kor":
-        try:
-            from utils.data_loader import fetch_naver_etf_inav_snapshot
-
-            tickers = [r.get("ticker") for r in rows if r.get("ticker")]
-            realtime_data = fetch_naver_etf_inav_snapshot(tickers)
-
-            if realtime_data:
-                for row in rows:
-                    ticker = str(row.get("ticker") or "").strip().upper()
-                    if ticker in realtime_data:
-                        rt = realtime_data[ticker]
-                        # 1. 현재가
-                        if "nowVal" in rt:
-                            row["price"] = rt["nowVal"]
-                        # 2. 일간 등락률
-                        if "changeRate" in rt:
-                            row["daily_pct"] = rt["changeRate"]
-                        # 3. NAV
-                        if "nav" in rt:
-                            row["nav_price"] = rt["nav"]
-                        # 4. 괴리율
-                        if "deviation" in rt:
-                            row["price_deviation"] = rt["deviation"]
-                        # 5. 종목명 (선택)
-                        if "itemname" in rt:
-                            new_name = rt["itemname"]
-                            stock_note = row.get("stock_note")
-                            if stock_note:
-                                new_name = f"{new_name}({stock_note})"
-                            row["name"] = new_name
-                        # 6. 3개월 수익률 (선택)
-                        if "threeMonthEarnRate" in rt:
-                            row["return_3m"] = rt["threeMonthEarnRate"]
-        except Exception as e:
-            logger.warning(f"실시간 데이터 오버레이 실패: {e}")
-
-    try:
-        df = recommendations_to_dataframe(country_code, rows)
-    except Exception as exc:
-        return None, f"추천 데이터를 변환하는 중 오류가 발생했습니다: {exc}", country_code
-
-    updated_dt = snapshot.get("updated_at") or snapshot.get("created_at")
-    updated_by = snapshot.get("updated_by", "")
-
-    if isinstance(updated_dt, datetime):
-        ts = pd.Timestamp(updated_dt)
-        if ts.tzinfo is None or ts.tzinfo.utcoffset(ts) is None:
-            ts = ts.tz_localize("UTC").tz_convert("Asia/Seoul")
-        else:
-            ts = ts.tz_convert("Asia/Seoul")
-        updated_at = ts.strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        try:
-            parsed = pd.to_datetime(updated_dt)
-            if parsed.tzinfo is None or parsed.tzinfo.utcoffset(parsed) is None:
-                parsed = parsed.tz_localize("UTC").tz_convert("Asia/Seoul")
-            else:
-                parsed = parsed.tz_convert("Asia/Seoul")
-            updated_at = parsed.strftime("%Y-%m-%d %H:%M:%S")
-        except Exception:
-            updated_at = str(updated_dt) if updated_dt else None
-
-    # updated_by 정보를 updated_at에 추가
-    if updated_at and updated_by:
-        updated_at = f"{updated_at}, {updated_by}"
-
-    loaded_country_code = snapshot.get("country_code") or country_code
-    return df, updated_at, str(loaded_country_code or country_code)
-
-
 TABLE_VISIBLE_ROWS = 26  # 헤더 1줄 + 내용 15줄
 TABLE_ROW_HEIGHT = 36
 TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT
@@ -193,17 +87,6 @@ DEFAULT_COMPACT_COLUMNS_BASE = [
     "현재가",
     "문구",
 ]
-
-
-def _load_account_ui_settings(account_id: str) -> tuple[str, str]:
-    try:
-        settings = get_account_settings(account_id)
-        name = "Momentum ETF"
-        icon = settings.get("icon") or ""
-    except Exception:
-        name = "Momentum ETF"
-        icon = ""
-    return name, icon
 
 
 def format_relative_time(dt_input: datetime | pd.Timestamp | str | None) -> str:
@@ -264,29 +147,15 @@ def format_relative_time(dt_input: datetime | pd.Timestamp | str | None) -> str:
         return ""
 
 
-def _resolve_row_colors(country_code: str) -> dict[str, str]:
-    country_code = (country_code or "").strip().lower()
-    # 기본값: DECISION_CONFIG의 background를 기반으로 구성
-    base_colors = {
-        key.upper(): cfg.get("background")
-        for key, cfg in BACKTEST_STATUS_LIST.items()
-        if isinstance(cfg, dict) and cfg.get("background")
-    }
-
-    return base_colors
-
-
 def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.formats.style.Styler:
-    row_colors = _resolve_row_colors(country_code)
+    _ = country_code
+    holding_color = "#d9ead3"
     non_positive_score_color = "#e0e0e0"
 
     def _color_row(row: pd.Series) -> list[str]:
-        state = str(row.get("상태", "")).upper()
-        color = row_colors.get(state)
         is_holding = str(row.get("보유", "")).strip() == "보유"
-        if not color and is_holding:
-            color = row_colors.get("HOLD")
-        if not color and not is_holding:
+        color = holding_color if is_holding else None
+        if color is None:
             score = row.get("점수")
             try:
                 if score is not None and not pd.isna(score) and float(score) <= 0:
@@ -375,6 +244,9 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     # 괴리율 별도 적용 (볼드 포함)
     if "괴리율" in df.columns:
         styled = styled.map(_deviation_style, subset=["괴리율"])
+
+    if "점수" in df.columns:
+        styled = styled.map(lambda _: "font-weight: bold;", subset=["점수"])
 
     # 가격 컬럼 포맷팅
     def _safe_format(fmt: str):
@@ -645,9 +517,7 @@ def _render_single_table(
 
 
 __all__ = [
-    "load_account_recommendations",
     "render_recommendation_table",
     "format_relative_time",
-    "_resolve_row_colors",
     "create_loading_status",
 ]
