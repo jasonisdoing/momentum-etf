@@ -214,9 +214,12 @@ def refresh_cache_for_target(
             for i, etf in enumerate(target_items, 1):
                 ticker = str(etf.get("ticker") or "").strip().upper()
                 name = etf.get("name") or "-"
+                started_at = time.perf_counter()
 
                 if progress_callback:
                     progress_callback(i, total_tickers, f"{name}({ticker})")
+
+                logger.info(" -> 가격 캐시 처리 시작: %d/%d - %s(%s)", i, total_tickers, name, ticker)
 
                 try:
                     range_start = start_date or "1990-01-01"
@@ -230,24 +233,38 @@ def refresh_cache_for_target(
                     if unresolved_days:
                         unresolved_text = ", ".join(day.strftime("%Y-%m-%d") for day in unresolved_days)
                         logger.warning(
-                            " -> 가격 캐시 갱신 중: %d/%d - %s(%s) - 최근 거래일 누락 유지: %s",
+                            " -> 가격 캐시 갱신 완료: %d/%d - %s(%s) - 최근 거래일 누락 유지: %s | 소요 %.1fs",
                             i,
                             total_tickers,
                             name,
                             ticker,
                             unresolved_text,
+                            time.perf_counter() - started_at,
                         )
                     else:
-                        logger.info(" -> 가격 캐시 갱신 중: %d/%d - %s(%s)", i, total_tickers, name, ticker)
+                        logger.info(
+                            " -> 가격 캐시 갱신 완료: %d/%d - %s(%s) | 소요 %.1fs",
+                            i,
+                            total_tickers,
+                            name,
+                            ticker,
+                            time.perf_counter() - started_at,
+                        )
                 except PykrxDataUnavailableError as e:
                     failed_tickers.append(ticker)
                     if _is_today_unavailable_warning(e):
-                        logger.warning("%s 당일 데이터 미집계: %s", ticker, e)
+                        logger.warning(
+                            "%s 당일 데이터 미집계: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
+                        )
                     else:
-                        logger.error("%s 데이터 처리 중 오류 발생: %s", ticker, e)
+                        logger.error(
+                            "%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
+                        )
                 except Exception as e:
                     failed_tickers.append(ticker)
-                    logger.error("%s 데이터 처리 중 오류 발생: %s", ticker, e)
+                    logger.error(
+                        "%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
+                    )
 
             if failed_tickers:
                 preview = ", ".join(failed_tickers[:10])
