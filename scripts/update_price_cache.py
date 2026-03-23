@@ -33,7 +33,7 @@ from utils.settings_loader import get_account_settings, list_available_accounts,
 from utils.stock_list_io import get_all_etfs_including_deleted
 
 FETCH_RETRY_ATTEMPTS = 3
-FETCH_RETRY_DELAY_SECONDS = 5.0
+FETCH_RETRY_DELAY_SECONDS = 2.0
 
 
 def _determine_start_date() -> str:
