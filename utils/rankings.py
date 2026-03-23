@@ -7,6 +7,7 @@ import pandas as pd
 from config import BUCKET_MAPPING, CACHE_START_DATE, MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
 from core.strategy.metrics import process_ticker_data
 from utils.cache_utils import load_cached_frames_bulk_with_fallback
+from utils.data_loader import fetch_au_quoteapi_snapshot, fetch_naver_etf_inav_snapshot
 from utils.portfolio_io import load_real_holdings_table
 from utils.settings_loader import AccountSettingsError, get_account_settings
 from utils.stock_list_io import get_etfs
@@ -144,13 +145,56 @@ def _extract_price_metrics(cached_df: pd.DataFrame | None) -> dict[str, Any]:
     }
 
 
+def _load_realtime_snapshot(country_code: str, tickers: list[str]) -> dict[str, dict[str, float]]:
+    """국가별 실시간 현재가/등락률 스냅샷을 로드합니다."""
+    country = str(country_code or "").strip().lower()
+    if not tickers:
+        return {}
+    if country == "kor":
+        return fetch_naver_etf_inav_snapshot(tickers)
+    if country == "au":
+        return fetch_au_quoteapi_snapshot(tickers)
+    return {}
+
+
+def _apply_realtime_overlay(
+    price_metrics: dict[str, Any],
+    realtime_entry: dict[str, float] | None,
+) -> dict[str, Any]:
+    """실시간 현재가/일간 등락률이 있으면 캐시 값을 덮어씁니다."""
+    if not isinstance(realtime_entry, dict) or not realtime_entry:
+        return price_metrics
+
+    updated = dict(price_metrics)
+
+    now_val = realtime_entry.get("nowVal")
+    if now_val is not None:
+        try:
+            updated["현재가"] = float(now_val)
+        except (TypeError, ValueError):
+            pass
+
+    change_rate = realtime_entry.get("changeRate")
+    if change_rate is not None:
+        try:
+            updated["일간(%)"] = float(change_rate)
+        except (TypeError, ValueError):
+            pass
+
+    return updated
+
+
 def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> pd.DataFrame:
+    settings = get_account_settings(account_id)
+    country_code = str(settings.get("country_code") or "").strip().lower()
+
     etfs = get_etfs(account_id)
     if not etfs:
         return pd.DataFrame()
 
     tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if str(item.get("ticker") or "").strip()]
     cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
+    realtime_snapshot = _load_realtime_snapshot(country_code, tickers)
 
     held_tickers: set[str] = set()
     holdings_df = load_real_holdings_table(account_id)
@@ -169,6 +213,7 @@ def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> 
 
         cached_df = cached_frames.get(ticker)
         price_metrics = _extract_price_metrics(cached_df)
+        price_metrics = _apply_realtime_overlay(price_metrics, realtime_snapshot.get(ticker))
         score_value = None
         streak_value: int | None = None
 

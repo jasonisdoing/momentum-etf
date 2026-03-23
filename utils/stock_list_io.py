@@ -108,7 +108,6 @@ def _load_account_stocks_raw(account_id: str) -> list[dict]:
 # 공개 API — 읽기
 # ---------------------------------------------------------------------------
 
-# 하위 호환용 import
 from utils.settings_loader import get_account_settings, list_available_accounts  # noqa: E402
 
 

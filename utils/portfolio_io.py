@@ -382,7 +382,7 @@ def load_real_holdings_table(account_id: str, *, strict_price_cache: bool = Fals
     for col in metrics_df.columns:
         df_holdings[col] = metrics_df[col]
 
-    df_holdings["상태"] = "HOLD"
+    df_holdings["상태"] = "보유"
     return df_holdings
 
 
@@ -398,7 +398,7 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
 
     for acc in doc["accounts"]:
         if acc["account_id"] == account_id:
-            # Flatten for backward compatibility in functions that expect account-level dict
+            # 계좌 단위 딕셔너리 형태로 정규화
             base_principal = acc.get("total_principal", 0.0)
             base_cash = acc.get("cash_balance", 0.0)
             cash_balance_native = acc.get("cash_balance_native")

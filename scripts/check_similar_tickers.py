@@ -228,10 +228,10 @@ def print_report(
 
             if abs(corr) >= 0.95:
                 emoji = "🔴"
-                action_msg = "👉 (제거 추천)"
+                action_msg = "👉 (중복 후보)"
             else:
                 emoji = "🟡"
-                action_msg = "👉 (제거 고려)"
+                action_msg = "👉 (검토 필요)"
 
             print(f"  └─ {emoji} {corr:.4f} {member.ticker} ({member.name})")
             print(f"          수익률: {member.return_pct:+.1f}% | 거래량: {member.avg_volume:,.0f}")
@@ -241,8 +241,8 @@ def print_report(
     print(f"{'=' * 70}")
     print("  💡 '유사 그룹'은 서로 상관관계가 높은 종목들의 묶음입니다.")
     print("  각 그룹 내에서 [대장] 종목의 성과가 가장 좋습니다.")
-    print("  🔴 0.95 이상: 매우 유사함 -> 교체 강력 추천")
-    print("  🟡 0.90 ~ 0.95: 유사함 -> 교체 고려")
+    print("  🔴 0.95 이상: 매우 유사함 -> 중복 후보")
+    print("  🟡 0.90 ~ 0.95: 유사함 -> 검토 필요")
     print()
 
 

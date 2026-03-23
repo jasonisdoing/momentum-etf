@@ -1,7 +1,7 @@
 """비중 관련 보조 유틸리티 모듈.
 
-현재 계좌 비중 계산은 엔진에서 버킷/종목 균등 분배로 처리하고,
-이 모듈은 리밸런싱 버퍼 판정과 보조 계산 함수를 제공합니다.
+현재 순위 화면에서는 직접 사용하지 않지만,
+실보유 자산 보조 계산에 재사용할 수 있는 공통 함수를 둡니다.
 """
 
 from __future__ import annotations
@@ -13,9 +13,7 @@ def calculate_score_weights(
     min_weight: float = 0.10,
     max_weight: float = 0.30,
 ) -> dict[str, float]:
-    """점수 기반 비중 계산을 위한 레거시 보조 함수입니다.
-
-    현재 계좌 엔진의 기본 비중 계산에는 사용하지 않습니다.
+    """점수 기반 비중 계산용 보조 함수입니다.
 
     1. 음수 점수는 0으로 치환
     2. 점수 비례로 비중 산출
@@ -144,17 +142,17 @@ def should_rebalance(
     target_weights: dict[str, float],
     buffer: float = 0.02,
 ) -> dict[str, bool]:
-    """종목별로 리밸런싱이 필요한지 판단합니다.
+    """종목별 비중 차이가 버퍼를 넘는지 판단합니다.
 
     |현재비중 - 목표비중| > buffer 인 종목만 True를 반환합니다.
 
     Args:
         current_weights: {ticker: 현재 비중}
         target_weights: {ticker: 목표 비중}
-        buffer: 리밸런싱 버퍼 (기본 2%)
+        buffer: 비중 차이 허용 버퍼 (기본 2%)
 
     Returns:
-        {ticker: 리밸런싱 필요 여부}
+        {ticker: 비중 조정 필요 여부}
     """
     result: dict[str, bool] = {}
     all_tickers = set(current_weights) | set(target_weights)
