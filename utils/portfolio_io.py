@@ -86,9 +86,7 @@ def _apply_kor_realtime_overlay_to_holdings(df_holdings: pd.DataFrame) -> pd.Dat
     return overlaid
 
 
-def load_real_holdings_with_recommendations(
-    account_id: str, *, strict_price_cache: bool = False
-) -> pd.DataFrame | None:
+def load_real_holdings_table(account_id: str, *, strict_price_cache: bool = False) -> pd.DataFrame | None:
     """
     Load the actual portfolio holdings from portfolio_master (live)
     and calculate display metrics directly from cached price data.

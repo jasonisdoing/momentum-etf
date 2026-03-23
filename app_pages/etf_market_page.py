@@ -9,7 +9,7 @@ import streamlit as st
 
 from utils.data_loader import fetch_naver_etf_inav_snapshot
 from utils.kis_market import load_cached_kis_domestic_etf_master
-from utils.ui import render_recommendation_table
+from utils.ui import render_rank_table
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -113,7 +113,7 @@ def render_etf_market_page() -> None:
         "전일거래량(주)",
         "시가총액(억)",
     ]
-    render_recommendation_table(
+    render_rank_table(
         df=filtered,
         country_code="kor",
         grouped_by_bucket=False,

@@ -24,7 +24,7 @@ from utils.portfolio_io import (
     MissingPriceCacheError,
     get_latest_daily_snapshot,
     load_portfolio_master,
-    load_real_holdings_with_recommendations,
+    load_real_holdings_table,
     save_daily_snapshot,
 )
 from utils.report import format_kr_money
@@ -166,8 +166,7 @@ def main():
         # Load holdings
         try:
             # We need to mock streamlit session_state/secrets for some utils if they depend on it
-            # But load_real_holdings_with_recommendations might work if handled carefully
-            df = load_real_holdings_with_recommendations(account_id, strict_price_cache=True)
+            df = load_real_holdings_table(account_id, strict_price_cache=True)
         except MissingPriceCacheError as e:
             alert_msg = _build_missing_cache_alert(account_id, e.tickers)
             logger.error(alert_msg)

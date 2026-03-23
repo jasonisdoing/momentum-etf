@@ -16,7 +16,7 @@ from utils.account_registry import (
 from utils.formatters import format_price
 from utils.rankings import ALLOWED_MA_TYPES, get_account_rank_defaults, get_rank_months_max
 from utils.report import format_kr_money
-from utils.ui import create_loading_status, render_recommendation_table
+from utils.ui import create_loading_status, render_rank_table
 
 
 def _to_plain_dict(value):
@@ -218,7 +218,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
         from utils.portfolio_io import (
             get_latest_daily_snapshot,
             load_portfolio_master,
-            load_real_holdings_with_recommendations,
+            load_real_holdings_table,
         )
 
         all_holdings = []
@@ -259,7 +259,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 global_principal += m_data.get("total_principal", 0.0)
                 global_cash += m_data.get("cash_balance", 0.0)
 
-            df = load_real_holdings_with_recommendations(account_id)
+            df = load_real_holdings_table(account_id)
 
             if df is not None and not df.empty:
                 df.insert(0, "계좌", account_name)
@@ -790,7 +790,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                     )
             combined_df = combined_df.rename(columns=krw_column_renames)
 
-            # render_recommendation_table 호출 (컬럼 순서 제어를 위해 visible_columns 명시)
+            # render_rank_table 호출 (컬럼 순서 제어를 위해 visible_columns 명시)
             visible_cols = [
                 "계좌",
                 "환종",
@@ -819,7 +819,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             ]
             # Warnings moved to the top of the tabs
 
-            render_recommendation_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols, height=900)
+            render_rank_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols, height=900)
             st.caption("비중은 총자산에서 차지하는 비중입니다.")
 
     return _render_home_page
@@ -865,8 +865,27 @@ def main() -> None:
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
     from app_pages.etf_market_page import build_etf_market_page
     from app_pages.transactions_page import build_transaction_page
+    from app_pages.weekly_data_page import build_weekly_data_page
 
     pages = {}
+
+    # 요약 그룹
+    pages["요약"] = [
+        page_cls(
+            _build_home_page(accounts, initial_subtab="📊 대시보드"),
+            title="대시보드",
+            icon="🏠",
+            url_path="summary_dashboard",
+            default=True,
+        ),
+        page_cls(
+            _build_home_page(accounts, initial_subtab="📋 상세"),
+            title="상세",
+            icon="📋",
+            url_path="summary_details",
+        ),
+        build_weekly_data_page(page_cls, title="주별", url_path="summary_weekly"),
+    ]
 
     # 계좌 관리 그룹
     transaction_tabs = [
@@ -880,7 +899,7 @@ def main() -> None:
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
     view_modes = ["1. 순위", "2. 종목 관리", "3. 삭제된 종목"]
     pages["계좌"] = [
-        _build_unified_account_page(page_cls, accounts, view_mode, default=(idx == 0))
+        _build_unified_account_page(page_cls, accounts, view_mode, default=False)
         for idx, view_mode in enumerate(view_modes)
     ]
     pages["ETF 마켓"] = [build_etf_market_page(page_cls)]

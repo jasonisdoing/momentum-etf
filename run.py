@@ -7,8 +7,7 @@ MomentumEtf 프로젝트의 웹 애플리케이션 실행 파일입니다.
 [사용법]
 python run.py 또는 streamlit run Main.py
 
-추천/백테스트/튜닝 등의 CLI 작업은 각 전용 스크립트를 사용하세요.
-(예: python recommend.py kor, python backtest.py kor, python tune.py kor)
+웹 화면에서 계좌별 순위를 확인하고, 종목 관리 및 삭제된 종목 복원을 수행합니다.
 """
 
 import os

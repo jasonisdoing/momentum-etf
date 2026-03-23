@@ -324,7 +324,7 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     return styled
 
 
-def render_recommendation_table(
+def render_rank_table(
     df: pd.DataFrame,
     country_code: str | None = None,
     visible_columns: list[str] | None = None,
@@ -418,12 +418,8 @@ def render_recommendation_table(
 
     # [Aggregation] 전체를 하나로 표시 (로그와 포맷 일원화)
     if not grouped_by_bucket:
-        # recommend.py에서 이미 rank_order로 정렬되어 있으므로 그대로 사용하되,
-        # 혹시 모르니 보장함 (단, rank_order가 없는 구시작 데이터 고려)
+        # 화면에서 전달된 순서를 그대로 사용한다.
         df_sorted = df.copy()
-
-        # [User Request] # 컬럼과 버킷 컬럼을 모두 사용 (추천 로그와 동일하게)
-        # utils/recommendations.py에서 이미 #과 버킷 컬럼이 생성됨
 
         # 컬럼 구성 설정
         if visible_columns is None:
@@ -456,7 +452,7 @@ def render_recommendation_table(
         st.write("")  # 간격
 
     if not has_data:
-        st.info("표시할 추천 종목이 없습니다.")
+        st.info("표시할 종목이 없습니다.")
 
 
 def _render_single_table(
@@ -517,7 +513,7 @@ def _render_single_table(
 
 
 __all__ = [
-    "render_recommendation_table",
+    "render_rank_table",
     "format_relative_time",
     "create_loading_status",
 ]
