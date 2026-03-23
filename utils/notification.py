@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-from collections import Counter
 from typing import Any
 
 import requests
@@ -23,10 +22,9 @@ except ImportError:  # pragma: no cover - 선택적 의존성 처리
     croniter = None
     pytz = None
 
-from utils.account_registry import get_account_settings
-from utils.logger import APP_LABEL, get_app_logger
+from utils.logger import get_app_logger
 from utils.report import format_kr_money
-from utils.settings_loader import get_slack_channel, resolve_strategy_params
+from utils.settings_loader import get_slack_channel
 
 _LAST_ERROR: str | None = None
 logger = get_app_logger()
@@ -90,250 +88,7 @@ def strip_html_tags(value: str) -> str:
         return value
 
 
-def compose_recommendation_slack_message(
-    account_id: str,
-    report: Any,
-    *,
-    duration: float,
-) -> dict[str, Any]:
-    """Compose Slack text and Block Kit payload for recommendation updates."""
-
-    account_norm = (account_id or "").strip().lower()
-    account_settings: dict[str, Any] | None = None
-    try:
-        account_settings = get_account_settings(account_norm)
-    except Exception:
-        account_settings = None
-
-    account_label = (
-        str((account_settings or {}).get("name"))
-        if account_settings and (account_settings or {}).get("name")
-        else account_norm.upper()
-    )
-
-    base_date = getattr(report, "base_date", None)
-    if hasattr(base_date, "strftime"):
-        try:
-            base_date_str = base_date.strftime("%Y-%m-%d")
-        except Exception:
-            base_date_str = str(base_date)
-    elif base_date is not None:
-        base_date_str = str(base_date)
-    else:
-        base_date_str = "N/A"
-
-    recommendations = list(getattr(report, "recommendations", []) or [])
-    decision_config = getattr(report, "decision_config", {}) or {}
-    summary_data = getattr(report, "summary_data", None)
-
-    held_count: int | None = None
-    universe_count: int | None = None
-    if isinstance(summary_data, dict):
-        held_raw = summary_data.get("held_count")
-        limit_raw = summary_data.get("universe_count")
-        try:
-            held_count = int(held_raw) if held_raw is not None else None
-        except (TypeError, ValueError):
-            held_count = None
-        try:
-            universe_count = int(limit_raw) if limit_raw is not None else None
-        except (TypeError, ValueError):
-            universe_count = None
-
-    state_counter: Counter[str] = Counter()
-    if isinstance(decision_config, dict):
-        for item in recommendations:
-            state = str(item.get("state") or "").upper()
-            cfg = decision_config.get(state)
-            if cfg and cfg.get("is_recommendation"):
-                state_counter[state] += 1
-
-    def _state_order(state: str) -> int:
-        cfg = decision_config.get(state)
-        if isinstance(cfg, dict):
-            try:
-                return int(cfg.get("order", 99))
-            except (TypeError, ValueError):
-                return 99
-        return 99
-
-    ordered_states = [
-        (state, count)
-        for state, count in sorted(state_counter.items(), key=lambda pair: (_state_order(pair[0]), pair[0]))
-    ]
-
-    headline = f"{account_label} 추천 정보가 갱신되었습니다. ({base_date_str})"
-    app_prefix = f"[{APP_LABEL}] " if APP_LABEL else ""
-
-    def _format_hold_ratio(held: int | None, limit: int | None) -> str:
-        held_str = str(held) if held is not None else "?"
-        limit_str = str(limit) if limit is not None else "?"
-        return f"{held_str}/{limit_str}"
-
-    if held_count is None:
-        # 현재 물리적으로 보유 중인 종목 수 (매도 예정 포함)
-        from core.backtest.portfolio import count_current_holdings
-
-        held_count = count_current_holdings(recommendations)
-    if universe_count is None:
-        strategy_params = (
-            resolve_strategy_params((account_settings or {}).get("strategy", {})) if account_settings else {}
-        )
-
-        topn_candidates = [
-            getattr(report, "universe_count", None),
-            (account_settings or {}).get("universe_count"),
-            strategy_params.get("UNIVERSE_COUNT"),
-        ]
-        for candidate in topn_candidates:
-            try:
-                universe_count = int(candidate)
-                break
-            except (TypeError, ValueError, AttributeError):
-                universe_count = None
-
-    mobile_account = account_norm or (account_id or "").strip()
-    mobile_url = f"https://etf.dojason.com/{mobile_account}" if mobile_account else "https://etf.dojason.com"
-
-    lines = [
-        app_prefix + headline,
-        f"생성시간: {duration:.1f}초",
-        f"모바일: {mobile_url}",
-    ]
-    if ordered_states:
-        lines.extend([f"{state}: {count}개" for state, count in ordered_states])
-    fallback_text = "\n".join(lines)
-
-    blocks: list[dict[str, Any]] = [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": f"[{APP_LABEL}] {account_label}",
-                "emoji": True,
-            },
-        }
-    ]
-
-    fields: list[dict[str, str]] = [
-        {"type": "mrkdwn", "text": f"*기준일*: {base_date_str}"},
-        {"type": "mrkdwn", "text": f"*소요시간*: {duration:.1f}초"},
-    ]
-
-    if ordered_states:
-        state_lines = [f"{state}: {count}개" for state, count in ordered_states]
-        fields.append({"type": "mrkdwn", "text": "*상태 요약*:\n" + "\n".join(state_lines)})
-
-    blocks.append({"type": "section", "fields": fields})
-
-    hold_items = [item for item in recommendations if str(item.get("state") or "").upper() == "HOLD"]
-    if hold_items:
-        bucket_names = {
-            1: "1. 모멘텀",
-            2: "2. 혁신기술",
-            3: "3. 시장지수",
-            4: "4. 배당방어",
-            5: "5. 대체헷지",
-        }
-        hold_lines = []
-        bucket_groups = {}
-        for item in hold_items:
-            bucket_id = item.get("bucket", 1)
-            try:
-                bucket_id_int = int(bucket_id)
-            except (TypeError, ValueError):
-                bucket_id_int = 1
-            bucket_name = bucket_names.get(bucket_id_int, f"{bucket_id}. 기타")
-            ticker = item.get("ticker", "-")
-            name = item.get("name", "-")
-
-            daily_pct = item.get("daily_pct")
-
-            if daily_pct is None:
-                daily_pct_str = "-"
-            else:
-                try:
-                    pct_val = float(daily_pct)
-
-                    if pct_val > 0:
-                        trend = ":chart_with_upwards_trend:"
-                    elif pct_val < 0:
-                        trend = ":chart_with_downwards_trend:"
-                    else:
-                        trend = ""
-
-                    daily_pct_str = f"{trend} *{pct_val:+.2f}%*"
-
-                    if pct_val >= 3.0:
-                        daily_pct_str += " :tada:"
-                    elif pct_val <= -3.0:
-                        daily_pct_str += " :sob:"
-                except (TypeError, ValueError):
-                    daily_pct_str = str(daily_pct)
-
-            if bucket_name not in bucket_groups:
-                bucket_groups[bucket_name] = []
-            bucket_groups[bucket_name].append(f"*{ticker}* - {name} {daily_pct_str}")
-
-        for bucket_name, lines in sorted(bucket_groups.items()):
-            hold_lines.append(f"*{bucket_name}*")
-            hold_lines.extend(lines)
-
-        # Calculate sum and avg
-        total_pct = 0.0
-        valid_items_count = 0
-        for item in hold_items:
-            daily_pct = item.get("daily_pct")
-            if daily_pct is not None:
-                try:
-                    total_pct += float(daily_pct)
-                    valid_items_count += 1
-                except (TypeError, ValueError):
-                    pass
-
-        avg_pct_str = ""
-        if valid_items_count > 0:
-            avg_pct = total_pct / valid_items_count
-            try:
-                if avg_pct > 0:
-                    trend = ":chart_with_upwards_trend:"
-                elif avg_pct < 0:
-                    trend = ":large_blue_circle:"
-                else:
-                    trend = ":chart_with_upwards_trend:"
-
-                avg_pct_str = f"{trend} *{avg_pct:+.2f}%*"
-
-                if avg_pct >= 3.0:
-                    avg_pct_str += " :tada:"
-                elif avg_pct <= -3.0:
-                    avg_pct_str += " :sob:"
-            except (TypeError, ValueError):
-                pass
-
-            hold_lines.append("")
-            hold_lines.append(
-                f"모든 {valid_items_count} 종목이 같은 비중으로 있다고 가정하면 합계 수익률은 {avg_pct_str} 입니다."
-            )
-
-        blocks.append(
-            {"type": "section", "text": {"type": "mrkdwn", "text": "*보유 종목 (HOLD)*\n" + "\n".join(hold_lines)}}
-        )
-
-    context_elements: list[dict[str, str]] = []
-    if ordered_states:
-        context_elements.append({"type": "mrkdwn", "text": "<!channel> 알림"})
-        fallback_text = "<!channel>\n" + fallback_text
-
-    if context_elements:
-        blocks.append({"type": "context", "elements": context_elements})
-
-    payload: dict[str, Any] = {"text": fallback_text, "blocks": blocks}
-
-    return payload
-
-
-def send_recommendation_slack_notification(
+def _send_slack_message_via_bot(
     payload: dict[str, Any] | str,
     thread_ts: str | None = None,
 ) -> str | None:
@@ -397,7 +152,7 @@ def send_slack_message_v2(
     범용 슬랙 메시지 전송 함수 (WebClient 기반).
     메시지의 ts(timestamp)를 반환합니다.
     """
-    return send_recommendation_slack_notification({"text": text, "blocks": blocks}, thread_ts=thread_ts)
+    return _send_slack_message_via_bot({"text": text, "blocks": blocks}, thread_ts=thread_ts)
 
 
 def _format_shares_for_country(quantity: Any) -> str:
@@ -514,12 +269,10 @@ def _format_return_with_amount(
 
 
 __all__ = [
-    "compose_recommendation_slack_message",
     "build_summary_line_from_summary_data",
     "build_summary_line_from_header",
     "get_last_error",
     "send_slack_message",
-    "send_recommendation_slack_notification",
     "send_slack_message_v2",
     "strip_html_tags",
 ]

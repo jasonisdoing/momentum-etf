@@ -420,7 +420,7 @@ def sync_active_week_summary() -> dict:
 def _aggregate_live_summary_into_active_week() -> str:
     """홈 화면과 같은 실시간 합계를 활성 주차 1행에 반영한다."""
     from utils.account_registry import load_account_configs
-    from utils.portfolio_io import load_portfolio_master, load_real_holdings_with_recommendations
+    from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
 
     db = get_db_connection()
     if db is None:
@@ -451,7 +451,7 @@ def _aggregate_live_summary_into_active_week() -> str:
         cash_balance = float(master_data.get("cash_balance", 0.0) if master_data else 0.0)
         total_cash += cash_balance
 
-        holdings_df = load_real_holdings_with_recommendations(account_id)
+        holdings_df = load_real_holdings_table(account_id)
         if holdings_df is None or holdings_df.empty:
             account_purchase = 0.0
             account_valuation = 0.0

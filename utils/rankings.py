@@ -7,7 +7,7 @@ import pandas as pd
 from config import BUCKET_MAPPING, CACHE_START_DATE, MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
 from core.strategy.metrics import process_ticker_data
 from utils.cache_utils import load_cached_frames_bulk_with_fallback
-from utils.portfolio_io import load_real_holdings_with_recommendations
+from utils.portfolio_io import load_real_holdings_table
 from utils.settings_loader import AccountSettingsError, get_account_settings
 from utils.stock_list_io import get_etfs
 
@@ -153,7 +153,7 @@ def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> 
     cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
 
     held_tickers: set[str] = set()
-    holdings_df = load_real_holdings_with_recommendations(account_id)
+    holdings_df = load_real_holdings_table(account_id)
     if holdings_df is not None and not holdings_df.empty and "티커" in holdings_df.columns:
         held_tickers = {
             str(ticker).strip().upper() for ticker in holdings_df["티커"].tolist() if str(ticker or "").strip()

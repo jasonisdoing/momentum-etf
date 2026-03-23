@@ -3,6 +3,6 @@
     "name": "ISA 계좌",
     "country_code": "kor",
     "currency": "KRW",
-    "MY_TYPE": "ALMA",
-    "MY_MONTHS": 6
+    "MA_TYPE": "ALMA",
+    "MA_MONTHS": 6
 }

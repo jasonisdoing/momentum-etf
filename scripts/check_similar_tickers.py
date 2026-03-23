@@ -20,7 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.account_registry import get_account_settings
 from utils.data_loader import get_latest_trading_day, prepare_price_data
-from utils.settings_loader import get_strategy_rules, list_available_accounts
+from utils.rankings import get_account_rank_defaults
+from utils.settings_loader import list_available_accounts
 from utils.stock_list_io import get_etfs
 
 
@@ -40,8 +41,7 @@ def load_market_data(
     if not country_code:
         raise ValueError(f"계좌 '{account_id}'의 country_code가 비어 있습니다.")
 
-    strategy_rules = get_strategy_rules(account_id)
-    ma_month = max(1, int(strategy_rules.ma_days // 20))
+    _, ma_month = get_account_rank_defaults(account_id)
 
     # 1개월 = 20거래일 기준
     lookback_days = int(ma_month * 20)

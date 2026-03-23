@@ -27,7 +27,7 @@ from utils.stock_list_io import (
 from utils.stock_meta_updater import fetch_stock_info
 from utils.ui import (
     create_loading_status,
-    render_recommendation_table,
+    render_rank_table,
 )
 
 try:
@@ -486,7 +486,7 @@ def _render_rank_tab(
         "RSI",
         "지속",
     ]
-    render_recommendation_table(
+    render_rank_table(
         df,
         country_code=country_code,
         grouped_by_bucket=False,
