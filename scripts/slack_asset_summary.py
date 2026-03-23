@@ -293,7 +293,15 @@ def main():
 
         send_slack_message_v2("\n".join(comp_details), thread_ts=main_ts)
 
-    # 4. Save Snapshots for next time (Consolidated)
+    # 4. Compose Account Cash Ratio (Thread)
+    cash_ratio_details = ["*💵 계좌별 현금 비율*"]
+    for acc in account_summaries:
+        acc_cash_pct = (acc["cash"] / acc["total_assets"] * 100) if acc["total_assets"] > 0 else 0.0
+        cash_ratio_details.append(f"• {acc['name']}: {acc_cash_pct:.1f}%")
+
+    send_slack_message_v2("\n".join(cash_ratio_details), thread_ts=main_ts)
+
+    # 5. Save Snapshots for next time (Consolidated)
     # Save individual accounts first, then TOTAL (which updates the same document for today)
     for acc in account_summaries:
         save_daily_snapshot(
