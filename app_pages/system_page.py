@@ -40,12 +40,6 @@ def render_system_page() -> None:
             "실행 명령": "python scripts/update_price_cache.py",
         },
         {
-            "작업": "계좌 추천 생성",
-            "대상": "모든 계좌",
-            "자동 주기": "수동 실행",
-            "실행 명령": "python scripts/run_all_account_recommendations.py",
-        },
-        {
             "작업": "전체 자산 요약 알림",
             "대상": "전체 계좌 요약",
             "자동 주기": "매일 11:00, 18:00, 23:00, 06:00 KST",
@@ -70,14 +64,6 @@ def render_system_page() -> None:
             _run_background(
                 ["python", "scripts/update_price_cache.py"],
                 "✅ 전체 가격 캐시 업데이트를 시작했습니다.",
-            )
-
-    _, row2_col2 = st.columns(2)
-    with row2_col2:
-        if st.button("모든 계좌 추천 생성", type="primary", width="stretch", key="btn_system_rec_all"):
-            _run_background(
-                ["python", "scripts/run_all_account_recommendations.py"],
-                "✅ 전체 계좌 추천 생성을 시작했습니다.",
             )
 
     if st.button("전체 자산 요약 알림 전송", width="stretch", key="btn_system_asset_summary"):
