@@ -4,7 +4,7 @@
     "country_code": "kor",
     "pool": [
         "kor",
-        "us"
+        "tax"
     ],
     "currency": "KRW",
     "initial_capital_krw": "40000000",
