@@ -278,14 +278,23 @@ def _resolve_row_colors(country_code: str) -> dict[str, str]:
 
 def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.formats.style.Styler:
     row_colors = _resolve_row_colors(country_code)
+    non_positive_score_color = "#e0e0e0"
 
     def _color_row(row: pd.Series) -> list[str]:
         state = str(row.get("상태", "")).upper()
         color = row_colors.get(state)
-        if not color and str(row.get("보유", "")).strip() == "보유":
+        is_holding = str(row.get("보유", "")).strip() == "보유"
+        if not color and is_holding:
             color = row_colors.get("HOLD")
+        if not color and not is_holding:
+            score = row.get("점수")
+            try:
+                if score is not None and not pd.isna(score) and float(score) <= 0:
+                    color = non_positive_score_color
+            except (TypeError, ValueError):
+                pass
         if color:
-            return [f"background-color: {color}"] * len(row)
+            return [f"background-color: {color};"] * len(row)
         return [""] * len(row)
 
     def _style_bucket(val: Any) -> str:

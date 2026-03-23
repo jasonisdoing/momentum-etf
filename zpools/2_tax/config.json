@@ -3,7 +3,7 @@
   "desc": "절세계좌용 종목풀",
   "rank": {
     "country": "kor",
-    "months": 6,
+    "months": 3,
     "ma_type": "ALMA",
     "ma_type_options": {
       "HMA": {
