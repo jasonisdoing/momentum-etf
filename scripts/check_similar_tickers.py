@@ -1,13 +1,14 @@
-"""계좌 내 종목 간 가격 상관관계 분석 스크립트.
+"""종목풀 내 종목 간 가격 상관관계 분석 스크립트.
 
 사용법:
-    python scripts/check_similar_tickers.py kor_kr
-    python scripts/check_similar_tickers.py tax --threshold 0.90 --days 120
+    python scripts/check_similar_tickers.py kor
+    python scripts/check_similar_tickers.py tax --threshold 0.90
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -18,8 +19,8 @@ import pandas as pd
 # 프로젝트 루트를 sys.path에 추가
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.account_registry import get_account_settings, list_available_accounts
 from utils.data_loader import get_latest_trading_day, prepare_price_data
+from utils.pool_registry import PoolSettingsError, get_pool_dir, list_available_pools
 from utils.stock_list_io import get_etfs
 
 
@@ -31,20 +32,15 @@ class StockStats(NamedTuple):
 
 
 def load_market_data(
-    account_id: str,
+    pool_id: str,
 ) -> tuple[pd.DataFrame, dict[str, StockStats], int, int, list[str], list[str]]:
-    """계좌의 전체 종목 종가 데이터와 통계를 로드합니다."""
-    account_settings = get_account_settings(account_id)
-    country_code = (account_settings.get("country_code") or account_id).strip().lower()
-
-    # 전략 설정에서 MA_MONTH 가져오기 (없으면 기본값 6개월)
-    strategy_cfg = account_settings.get("strategy", {})
-    ma_month = strategy_cfg.get("MA_MONTH", 6)
+    """종목풀의 전체 종목 종가 데이터와 통계를 로드합니다."""
+    country_code, ma_month = load_pool_rank_settings(pool_id)
 
     # 1개월 = 20거래일 기준
     lookback_days = int(ma_month * 20)
 
-    etfs = get_etfs(account_id)
+    etfs = get_etfs(pool_id)
     tickers = sorted({str(etf["ticker"]).strip().upper() for etf in etfs if etf.get("ticker")})
     ticker_names = {
         str(etf["ticker"]).strip().upper(): etf.get("name", str(etf["ticker"])) for etf in etfs if etf.get("ticker")
@@ -62,7 +58,7 @@ def load_market_data(
         start_date=start_date.strftime("%Y-%m-%d"),
         end_date=end_date.strftime("%Y-%m-%d"),
         warmup_days=30,  # 웜업 충분히 확보
-        account_id=account_id,
+        account_id=pool_id,
     )
 
     close_dict: dict[str, pd.Series] = {}
@@ -114,12 +110,44 @@ def load_market_data(
         )
 
     if not close_dict:
-        print(f"[오류] {account_id}: 유효한 가격 데이터가 없습니다.")
+        print(f"[오류] {pool_id}: 유효한 가격 데이터가 없습니다.")
         sys.exit(1)
 
     prices_df = pd.DataFrame(close_dict)
     prices_df = prices_df.dropna(how="all")
     return prices_df, stats_dict, lookback_days, ma_month, missing_tickers, short_tickers
+
+
+def load_pool_rank_settings(pool_id: str) -> tuple[str, int]:
+    """종목풀 config.json에서 분석에 필요한 rank 설정을 읽습니다."""
+    pool_dir = get_pool_dir(pool_id)
+    config_path = pool_dir / "config.json"
+    try:
+        config_data = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise PoolSettingsError(f"종목풀 설정을 읽을 수 없습니다: {config_path}") from exc
+
+    if not isinstance(config_data, dict):
+        raise PoolSettingsError(f"종목풀 설정 루트는 객체여야 합니다: {config_path}")
+
+    rank_cfg = config_data.get("rank")
+    if not isinstance(rank_cfg, dict):
+        raise PoolSettingsError(f"종목풀 '{pool_id}'의 rank 설정이 없습니다.")
+
+    country_code = str(rank_cfg.get("country") or "").strip().lower()
+    if not country_code:
+        raise PoolSettingsError(f"종목풀 '{pool_id}'의 rank.country가 비어 있습니다.")
+
+    months_raw = rank_cfg.get("months")
+    try:
+        ma_month = int(months_raw)
+    except (TypeError, ValueError) as exc:
+        raise PoolSettingsError(f"종목풀 '{pool_id}'의 rank.months가 올바른 정수가 아닙니다: {months_raw}") from exc
+
+    if ma_month <= 0:
+        raise PoolSettingsError(f"종목풀 '{pool_id}'의 rank.months는 1 이상이어야 합니다: {ma_month}")
+
+    return country_code, ma_month
 
 
 def build_similarity_groups(
@@ -203,7 +231,7 @@ def build_similarity_groups(
 
 
 def print_report(
-    account_id: str,
+    pool_id: str,
     groups: list[tuple[str, list[tuple[str, float]]]],
     stats: dict[str, StockStats],
     threshold: float,
@@ -214,7 +242,7 @@ def print_report(
     """상관관계 및 수익률 비교 리포트를 출력합니다."""
     print()
     print(f"{'=' * 70}")
-    print(f"  📊 상관관계 유사 그룹 분석: {account_id.upper()}")
+    print(f"  📊 상관관계 유사 그룹 분석: {pool_id.upper()}")
     print(f"  분석 기간: 최근 {ma_month}개월 ({lookback_days} 거래일) | 대상 종목: {total_tickers}개")
     print(f"  기준: 상관계수 ≥ {threshold}")
     print(f"{'=' * 70}")
@@ -258,13 +286,13 @@ def print_report(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="계좌 내 종목 간 가격 상관관계 그룹 분석",
+        description="종목풀 내 종목 간 가격 상관관계 그룹 분석",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "account",
-        choices=list_available_accounts(),
-        help="분석할 계좌 ID",
+        "pool",
+        choices=list_available_pools(),
+        help="분석할 종목풀 ID",
     )
     parser.add_argument(
         "--threshold",
@@ -279,18 +307,18 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    account_id = args.account.lower()
+    pool_id = args.pool.lower()
     threshold = args.threshold
 
-    print(f"\n[{account_id.upper()}] 가격 데이터 로딩 중...")
-    prices_df, stats, lookback_days, ma_month, missing, short = load_market_data(account_id)
+    print(f"\n[{pool_id.upper()}] 가격 데이터 로딩 중...")
+    prices_df, stats, lookback_days, ma_month, missing, short = load_market_data(pool_id)
 
     if missing:
         print(f"\n[오류] 데이터가 없는 {len(missing)}개 종목이 발견되었습니다:")
         for s in missing:
             print(f"  - {s}")
         print("\n모든 종목의 데이터가 필요합니다. 캐시를 갱신해주세요.")
-        print(f"실행: python scripts/update_price_cache.py {account_id}")
+        print(f"실행: python scripts/update_price_cache.py {pool_id}")
         sys.exit(1)
 
     if short:
@@ -299,11 +327,11 @@ def main() -> None:
             print(f"  - {s}")
         print()
 
-    print(f"[{account_id.upper()}] 유사 그룹 분석 중... ({len(prices_df.columns)}개 종목)")
+    print(f"[{pool_id.upper()}] 유사 그룹 분석 중... ({len(prices_df.columns)}개 종목)")
     groups = build_similarity_groups(prices_df, stats, threshold=threshold)
 
     print_report(
-        account_id=account_id,
+        pool_id=pool_id,
         groups=groups,
         stats=stats,
         threshold=threshold,
