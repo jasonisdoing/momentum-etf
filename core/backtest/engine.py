@@ -945,24 +945,27 @@ def run_portfolio_backtest(
                         continue
 
                     shares_now = float(row.get("shares", 0.0) or 0.0)
-                    if shares_now <= 0:
-                        continue
-
                     target_weight = target_weights_today.get(ticker)
                     if target_weight is None:
                         continue
 
-                    held_price = row.get("price")
-                    held_price_float = float(held_price) if pd.notna(held_price) else 0.0
-                    if held_price_float <= 0:
-                        held_price_float = float(last_prices.get(ticker, 0.0) or 0.0)
-                    if held_price_float <= 0:
-                        continue
+                    if shares_now > 0:
+                        held_price = row.get("price")
+                        held_price_float = float(held_price) if pd.notna(held_price) else 0.0
+                        if held_price_float <= 0:
+                            held_price_float = float(last_prices.get(ticker, 0.0) or 0.0)
+                        if held_price_float <= 0:
+                            continue
 
-                    current_value = shares_now * held_price_float
-                    current_weight = current_value / total_equity_for_note
-                    if abs(current_weight - target_weight) <= float(REBALANCE_BUFFER) / 100.0:
-                        continue
+                        current_value = shares_now * held_price_float
+                        current_weight = current_value / total_equity_for_note
+                        if abs(current_weight - target_weight) <= float(REBALANCE_BUFFER) / 100.0:
+                            continue
+                    else:
+                        # 현재 비보유인데 다음 리밸런싱에서 편입될 종목도 예정 문구를 표시합니다.
+                        if target_weight <= 0:
+                            continue
+                        current_weight = 0.0
 
                     existing_note = str(row.get("note") or "").strip()
                     if existing_note:

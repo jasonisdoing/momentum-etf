@@ -3,21 +3,6 @@
     "name": "연금 계좌",
     "country_code": "kor",
     "currency": "KRW",
-    "initial_capital_krw": "40000000",
-    "show_hold": true,
-    "strategy": {
-        "TUNE_DATE": "2026-03-23 22:30",
-        "TUNE_CAGR": 38.763483,
-        "TUNE_MDD": -22.076101,
-        "TUNE_MONTHS": 12,
-        "OPTIMIZATION_METRIC": "CAGR",
-        "TOPN": 4,
-        "REBALANCE_MODE": "TWICE_A_MONTH",
-        "MY_TYPE": "ALMA",
-        "MY_MONTHS": 3
-    },
-    "benchmark": {
-        "ticker": "379810",
-        "name": "KODEX 미국나스닥100"
-    }
+    "MA_TYPE": "ALMA",
+    "MA_MONTHS": 6
 }

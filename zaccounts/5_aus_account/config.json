@@ -3,21 +3,6 @@
     "name": "호주 계좌",
     "country_code": "au",
     "currency": "aud",
-    "initial_capital_krw": "100000000",
-    "show_hold": true,
-    "strategy": {
-        "TUNE_DATE": "2026-03-23 22:30",
-        "TUNE_CAGR": 4.010434,
-        "TUNE_MDD": -14.422241,
-        "TUNE_MONTHS": 12,
-        "OPTIMIZATION_METRIC": "CAGR",
-        "TOPN": 5,
-        "REBALANCE_MODE": "TWICE_A_MONTH",
-        "MY_TYPE": "ALMA",
-        "MY_MONTHS": 3
-    },
-    "benchmark": {
-        "ticker": "A200",
-        "name": "BetaShares Australia 200 ETF"
-    }
+    "MA_TYPE": "ALMA",
+    "MA_MONTHS": 6
 }

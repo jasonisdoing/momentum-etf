@@ -268,7 +268,7 @@ def _resolve_tuning_search_context(
     ma_values: list[int] = []
     strategy_rules = get_strategy_rules(account_norm)
 
-    ma_month_raw = _pick("MY_MONTHS")
+    ma_month_raw = _pick("MA_MONTHS")
     if ma_month_raw is None:
         ma_month_raw = _pick("MA_MONTH")
     if isinstance(ma_month_raw, (list, tuple)):
@@ -284,15 +284,15 @@ def _resolve_tuning_search_context(
         try:
             normalized_ma_month = int(ma_month_raw)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"[튜닝] '{account_id}' 계정의 'MY_MONTHS'는 정수 또는 정수 리스트여야 합니다.") from exc
+            raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_MONTHS'는 정수 또는 정수 리스트여야 합니다.") from exc
         ma_month_values = [normalized_ma_month] if normalized_ma_month >= 1 else []
     else:
         ma_month_values = [max(1, int(strategy_rules.ma_days // TRADING_DAYS_PER_MONTH))]
     ma_month_values = list(dict.fromkeys(ma_month_values))
     if not ma_month_values:
-        raise ValueError(f"[튜닝] '{account_id}' 계정의 'MY_MONTHS' 설정이 비어 있거나 유효하지 않습니다.")
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_MONTHS' 설정이 비어 있거나 유효하지 않습니다.")
 
-    ma_type_raw = _pick("MY_TYPE")
+    ma_type_raw = _pick("MA_TYPE")
     if ma_type_raw is None:
         ma_type_raw = _pick("MA_TYPE")
     if isinstance(ma_type_raw, (list, tuple)):
@@ -303,7 +303,7 @@ def _resolve_tuning_search_context(
         ma_type_values = [str(strategy_rules.ma_type).upper()]
     ma_type_values = list(dict.fromkeys(ma_type_values))
     if not ma_type_values:
-        raise ValueError(f"[튜닝] '{account_id}' 계정의 'MY_TYPE' 설정이 비어 있거나 유효하지 않습니다.")
+        raise ValueError(f"[튜닝] '{account_id}' 계정의 'MA_TYPE' 설정이 비어 있거나 유효하지 않습니다.")
 
     etf_universe = get_etfs(account_norm)
     if not etf_universe:
@@ -668,19 +668,19 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
     weighted_mdd = entry.get("weighted_expected_MDD")
     backtested_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # 표준 저장 포맷: strategy: {TUNE_*, OPTIMIZATION_METRIC, TOPN, REBALANCE_MODE, MY_TYPE, MY_MONTHS}
+    # 표준 저장 포맷: strategy: {TUNE_*, OPTIMIZATION_METRIC, TOPN, REBALANCE_MODE, MA_TYPE, MA_MONTHS}
     top_n = strategy_data.get("TOPN")
     if top_n is None and isinstance(strategy_data.get("COMMON"), dict):
         top_n = (strategy_data.get("COMMON") or {}).get("TOPN")
     rebalance_mode = strategy_data.get("REBALANCE_MODE")
     if rebalance_mode is None and isinstance(strategy_data.get("COMMON"), dict):
         rebalance_mode = (strategy_data.get("COMMON") or {}).get("REBALANCE_MODE")
-    my_type = strategy_data.get("MY_TYPE")
+    my_type = strategy_data.get("MA_TYPE")
     if my_type is None and isinstance(strategy_data.get("COMMON"), dict):
-        my_type = (strategy_data.get("COMMON") or {}).get("MY_TYPE")
-    my_months = strategy_data.get("MY_MONTHS")
+        my_type = (strategy_data.get("COMMON") or {}).get("MA_TYPE")
+    my_months = strategy_data.get("MA_MONTHS")
     if my_months is None and isinstance(strategy_data.get("COMMON"), dict):
-        my_months = (strategy_data.get("COMMON") or {}).get("MY_MONTHS")
+        my_months = (strategy_data.get("COMMON") or {}).get("MA_MONTHS")
 
     for key, value in result_params.items():
         if value is None:
@@ -724,8 +724,8 @@ def _apply_tuning_to_strategy_file(account_id: str, entry: dict[str, Any]) -> No
         "OPTIMIZATION_METRIC": strategy_data.get("OPTIMIZATION_METRIC") or result_params.get("OPTIMIZATION_METRIC"),
         "TOPN": top_n,
         "REBALANCE_MODE": rebalance_mode,
-        "MY_TYPE": my_type,
-        "MY_MONTHS": my_months,
+        "MA_TYPE": my_type,
+        "MA_MONTHS": my_months,
     }
 
     settings_data["strategy"] = strategy_out
@@ -1437,9 +1437,9 @@ def _compose_tuning_report(
                 ma_min, ma_max = min(ma_month_range), max(ma_month_range)
                 lines.append(f"|   MA_RANGE: {ma_min}~{ma_max}")
             if ma_month_range:
-                lines.append(f"|   MY_MONTHS: {', '.join(str(int(v)) for v in ma_month_range)}")
+                lines.append(f"|   MA_MONTHS: {', '.join(str(int(v)) for v in ma_month_range)}")
             if ma_type_range:
-                lines.append(f"|   MY_TYPE: {', '.join(ma_type_range)}")
+                lines.append(f"|   MA_TYPE: {', '.join(ma_type_range)}")
             if top_n_range:
                 lines.append(f"|   TOPN: {', '.join(str(int(v)) for v in top_n_range)}")
             rebalance_range = search_space.get("REBALANCE_MODE", [])

@@ -177,13 +177,18 @@ def load_real_holdings_with_recommendations(
         today_dt = datetime.datetime.today()
 
         # USD/KRW
-        usd_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt)
+        usd_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt, allow_partial=True)
         if usd_krw_series.empty:
             raise RuntimeError("USD/KRW 환율 데이터를 가져오지 못했습니다.")
         rates["USD"] = float(usd_krw_series.iloc[-1])
 
         # AUD/KRW
-        aud_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt, symbol="AUDKRW=X")
+        aud_krw_series = get_exchange_rate_series(
+            today_dt - pd.Timedelta(days=5),
+            today_dt,
+            symbol="AUDKRW=X",
+            allow_partial=True,
+        )
         if aud_krw_series.empty:
             raise RuntimeError("AUD/KRW 환율 데이터를 가져오지 못했습니다.")
         rates["AUD"] = float(aud_krw_series.iloc[-1])
