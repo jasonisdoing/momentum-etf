@@ -12,6 +12,7 @@ from config import (
     BUCKET_OPTIONS,
     BUCKET_REVERSE_MAPPING,
 )
+from utils.account_notes import load_account_note, save_account_note
 from utils.data_loader import fetch_ohlcv
 from utils.rankings import build_account_rankings, get_account_rank_defaults, get_rank_months_max
 from utils.settings_loader import AccountSettingsError, get_account_settings
@@ -723,6 +724,54 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
         st.session_state[selected_tickers_key] = selected_now
 
 
+def _render_account_note_tab(account_id: str) -> None:
+    """계좌별 메모장을 렌더링합니다."""
+    note_key = f"account_note_content_{account_id}"
+    loaded_key = f"account_note_loaded_{account_id}"
+    updated_key = f"account_note_updated_{account_id}"
+
+    if not st.session_state.get(loaded_key):
+        try:
+            note_doc = load_account_note(account_id)
+        except Exception as exc:
+            st.error(f"메모를 불러오지 못했습니다: {exc}")
+            return
+        st.session_state[note_key] = str((note_doc or {}).get("content") or "")
+        st.session_state[updated_key] = (note_doc or {}).get("updated_at")
+        st.session_state[loaded_key] = True
+
+    st.text_area(
+        "메모",
+        key=note_key,
+        height=500,
+        label_visibility="collapsed",
+        placeholder="이 계좌에 대한 메모를 자유롭게 입력하세요.",
+    )
+
+    updated_at = st.session_state.get(updated_key)
+    if updated_at is not None:
+        ts = pd.Timestamp(updated_at)
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("Asia/Seoul").tz_localize(None)
+        ampm = "오전" if ts.hour < 12 else "오후"
+        hour12 = ts.hour % 12 or 12
+        absolute_text = f"{ts.year}년 {ts.month}월 {ts.day}일 {ampm} {hour12}:{ts.minute:02d}분"
+        relative_text = format_relative_time(ts)
+        message = f"마지막 저장: {absolute_text}"
+        if relative_text:
+            message = f"{message} {relative_text}"
+        st.caption(message)
+
+    if st.button("메모 저장", key=f"btn_save_note_{account_id}", type="primary", width="stretch"):
+        try:
+            saved_at = save_account_note(account_id, st.session_state.get(note_key, ""))
+        except Exception as exc:
+            st.error(f"메모를 저장하지 못했습니다: {exc}")
+            return
+        st.session_state[updated_key] = saved_at
+        st.success("메모를 저장했습니다.")
+
+
 def render_account_page(
     account_id: str,
     view_mode: str | None = None,
@@ -773,7 +822,7 @@ def render_account_page(
         if view_mode is None:
             view_mode = st.segmented_control(
                 "뷰",
-                ["1. 순위", "2. 종목 관리", "3. 삭제된 종목"],
+                ["1. 순위", "2. 종목 관리", "3. 삭제된 종목", "4. 메모"],
                 default="1. 순위",
                 key=f"view_{account_id}",
                 label_visibility="collapsed",
@@ -785,6 +834,9 @@ def render_account_page(
         elif view_mode == "3. 삭제된 종목":
             loading.update(f"{account_id.upper()} 삭제 종목 테이블 준비")
             _render_deleted_stocks_tab(account_id)
+        elif view_mode == "4. 메모":
+            loading.update(f"{account_id.upper()} 메모 준비")
+            _render_account_note_tab(account_id)
         else:  # "1. 순위" (Default)
             loading.update(f"{account_id.upper()} 순위 테이블 준비")
             rank_params = rank_params or {}
@@ -809,8 +861,14 @@ def render_account_deleted_page(account_id: str) -> None:
     _render_deleted_stocks_tab(account_id)
 
 
+def render_account_note_page(account_id: str) -> None:
+    """계좌 메모 뷰를 렌더링한다."""
+    _render_account_note_tab(account_id)
+
+
 __all__ = [
     "render_account_page",
     "render_account_setup_page",
     "render_account_deleted_page",
+    "render_account_note_page",
 ]

@@ -79,7 +79,7 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
     icon = account.get("icon") or get_icon_fallback(account.get("country_code", ""))
 
     title = view_mode if view_mode else account["name"]
-    url_mapping = {"순위": "rank", "종목 관리": "setup", "삭제된 종목": "deleted"}
+    url_mapping = {"순위": "rank", "종목 관리": "setup", "삭제된 종목": "deleted", "메모": "memo"}
 
     clean_view = view_mode.split(".")[-1].strip() if view_mode else "main"
     english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
@@ -897,7 +897,7 @@ def main() -> None:
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
 
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
-    view_modes = ["1. 순위", "2. 종목 관리", "3. 삭제된 종목"]
+    view_modes = ["1. 순위", "2. 종목 관리", "3. 삭제된 종목", "4. 메모"]
     pages["계좌"] = [
         _build_unified_account_page(page_cls, accounts, view_mode, default=False)
         for idx, view_mode in enumerate(view_modes)
