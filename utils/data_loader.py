@@ -860,8 +860,8 @@ def _fetch_ohlcv_core(
 
     country_code = (country or "").strip().lower()
 
-    # 인덱스(^) 또는 해외 주식의 경우 yfinance 사용
-    if ticker.startswith("^") or country_code in ("us", "au"):
+    # 인덱스(^) 또는 호주 주식의 경우 yfinance 사용
+    if ticker.startswith("^") or country_code == "au":
         if existing_df is not None and not existing_df.empty:
             fallback = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
             if not fallback.empty:
@@ -1129,7 +1129,7 @@ def fetch_ohlcv_for_tickers(
 
     # 실시간 데이터 가져오기 (거래일 + 장 시작 이후에만)
     realtime_data = {}
-    supports_realtime = country_lower in ("kor", "au", "us")
+    supports_realtime = country_lower in ("kor", "au")
 
     if is_today and supports_realtime:
         # 거래일 여부 확인 (target_today 기준)
@@ -1179,8 +1179,6 @@ def fetch_ohlcv_for_tickers(
                         realtime_data.update(stock_data)
                 elif country_lower == "au":
                     realtime_data = fetch_au_quoteapi_snapshot(tickers)
-                elif country_lower == "us":
-                    realtime_data = fetch_us_yfinance_snapshot(tickers)
             except Exception as e:
                 logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
 
@@ -1705,83 +1703,6 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
 
 _AU_QUOTEAPI_SNAPSHOT_CACHE: dict[str, dict[str, float]] = {}
 _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT: pd.Timestamp | None = None
-
-
-def fetch_us_yfinance_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """yfinance를 사용하여 해외 ETF의 실시간(또는 최근 장중) 가격 정보를 조회합니다."""
-
-    if not yf:
-        logger.debug("yfinance 라이브러리가 없어 해외 파이낸스 조회를 건너뜁니다.")
-        return {}
-
-    normalized_tickers = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
-    if not normalized_tickers:
-        return {}
-
-    snapshot: dict[str, dict[str, float]] = {}
-
-    try:
-        # 최근 5일치 데이터를 받아와서 전일 종가와 현재가를 모두 가져옵니다.
-        with _silence_yfinance_output():
-            df = yf.download(normalized_tickers, period="5d", progress=False, auto_adjust=True)
-
-        if df.empty:
-            return {}
-
-        import pandas as pd
-
-        is_multi = isinstance(df.columns, pd.MultiIndex)
-        idx_ticker_level = (
-            1
-            if is_multi and "Ticker" in getattr(df.columns, "names", []) and df.columns.names.index("Ticker") == 1
-            else 0
-        )
-
-        for tk in normalized_tickers:
-            try:
-                if is_multi:
-                    try:
-                        tk_df = df.xs(tk, level=idx_ticker_level, axis=1)
-                    except KeyError:
-                        continue
-                else:
-                    tk_df = df
-                # NaN 제거 후 유효한 종가 데이터만 추출
-                if "Close" not in tk_df:
-                    continue
-                valid_closes = tk_df["Close"].dropna()
-                if len(valid_closes) < 2:
-                    continue
-
-                latest_row = tk_df.loc[valid_closes.index[-1]]
-
-                now_val = float(valid_closes.iloc[-1])
-                prev_close = float(valid_closes.iloc[-2])
-
-                change_rate = ((now_val / prev_close) - 1.0) * 100.0 if prev_close else 0.0
-
-                entry = {
-                    "nowVal": now_val,
-                    "changeRate": change_rate,
-                }
-
-                if "Open" in latest_row and not pd.isna(latest_row["Open"]):
-                    entry["open"] = float(latest_row["Open"])
-                if "High" in latest_row and not pd.isna(latest_row["High"]):
-                    entry["high"] = float(latest_row["High"])
-                if "Low" in latest_row and not pd.isna(latest_row["Low"]):
-                    entry["low"] = float(latest_row["Low"])
-                if "Volume" in latest_row and not pd.isna(latest_row["Volume"]):
-                    entry["volume"] = float(latest_row["Volume"])
-
-                snapshot[tk] = entry
-            except Exception as tk_err:
-                logger.debug(f"[US] {tk} 실시간 데이터 처리 중 오류: {tk_err}")
-
-    except Exception as exc:
-        logger.warning(f"해외 ETF 실시간 조회 실패: {exc}")
-
-    return snapshot
 
 
 def prime_au_etf_realtime_snapshot(tickers: Sequence[str]) -> None:
