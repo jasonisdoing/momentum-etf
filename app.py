@@ -215,7 +215,8 @@ def _build_system_page(page_cls: Callable[..., object]):
 
 def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None = None):
     def _render_home_page() -> None:
-        from app_pages.weekly_data_page import sync_active_week_summary
+        from app_pages.weekly_data_page import sync_active_week_summary_from_snapshot
+        from services.price_service import get_realtime_snapshot
         from utils.portfolio_io import (
             get_latest_daily_snapshot,
             load_portfolio_master,
@@ -237,39 +238,76 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
         total_valuation = 0.0
         total_stock_profit = 0.0
         total_stock_profit_pct = 0.0
+        total_profit_count = 0
+        total_loss_count = 0
         latest_weekly_summary: dict[str, Any] | None = None
-
-        if initial_subtab == "📊 대시보드":
-            try:
-                latest_weekly_summary = sync_active_week_summary()
-            except RuntimeError as exc:
-                st.error(f"주별 데이터 자동 집계 실패: {exc}")
-                st.stop()
+        is_dashboard_page = initial_subtab == "📊 대시보드"
+        is_detail_page = initial_subtab == "📋 상세"
+        bucket_totals = {
+            "1. 모멘텀": 0.0,
+            "2. 혁신기술": 0.0,
+            "3. 시장지수": 0.0,
+            "4. 배당방어": 0.0,
+            "5. 대체헷지": 0.0,
+        }
 
         # 데이터 로딩 (첫 로딩 시 환율/가격 조회로 시간이 걸릴 수 있음)
         visible_accounts = [a for a in accounts if a.get("settings", {}).get("show_hold", True)]
         loading_placeholder = st.empty()
+        dashboard_progress_placeholder = st.empty() if is_dashboard_page else None
+        account_master_map: dict[str, dict[str, Any] | None] = {}
+        kor_holding_tickers: set[str] = set()
+
+        loading_placeholder.info("⏳ 로딩 중... 공통 데이터 준비")
+        for account in visible_accounts:
+            account_id = account["account_id"]
+            master_data = load_portfolio_master(account_id)
+            account_master_map[account_id] = master_data
+
+            country_code = str(account.get("country_code") or "").strip().lower()
+            if country_code != "kor" or not master_data:
+                continue
+
+            holdings = master_data.get("holdings", [])
+            if not isinstance(holdings, list):
+                continue
+            for holding in holdings:
+                ticker = str((holding or {}).get("ticker") or "").strip().upper()
+                if ticker:
+                    kor_holding_tickers.add(ticker)
+
+        shared_exchange_rates = get_exchange_rates()
+        shared_kor_realtime_snapshot = (
+            get_realtime_snapshot("kor", sorted(kor_holding_tickers)) if kor_holding_tickers else {}
+        )
+
         for idx, account in enumerate(visible_accounts):
             account_id = account["account_id"]
             account_name = account.get("name") or account_id.upper()
             loading_placeholder.info(f"⏳ 로딩 중... {account_name} ({idx + 1}/{len(visible_accounts)})")
 
             # 원금 및 현금 로드
-            m_data = load_portfolio_master(account_id)
+            m_data = account_master_map.get(account_id)
             if m_data:
                 global_principal += m_data.get("total_principal", 0.0)
                 global_cash += m_data.get("cash_balance", 0.0)
 
-            df = load_real_holdings_table(account_id)
+            df = load_real_holdings_table(
+                account_id,
+                preloaded_exchange_rates=shared_exchange_rates,
+                preloaded_kor_realtime_snapshot=shared_kor_realtime_snapshot,
+            )
 
             if df is not None and not df.empty:
-                df.insert(0, "계좌", account_name)
-                all_holdings.append(df)
+                if is_detail_page:
+                    df.insert(0, "계좌", account_name)
+                    all_holdings.append(df)
                 acc_valuation = df["평가금액(KRW)"].sum()
                 acc_purchase = df["매입금액(KRW)"].sum()
-
-                # Capture the rates from the DataFrame's first row (which we know are correct because they were just calculated)
-                # Alternatively, we can just load it once outside the loop.
+                total_profit_count += int((df["평가손익(KRW)"] >= 0).sum())
+                total_loss_count += int((df["평가손익(KRW)"] < 0).sum())
+                for bucket_name in bucket_totals:
+                    bucket_totals[bucket_name] += float(df.loc[df["버킷"] == bucket_name, "평가금액(KRW)"].sum())
             else:
                 acc_valuation = 0.0
                 acc_purchase = 0.0
@@ -302,9 +340,30 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                         "현금": acc_cash,
                     }
                 )
+
+            if dashboard_progress_placeholder is not None:
+                running_total_assets = sum(item["총 자산"] for item in account_summaries)
+                running_total_principal = sum(item["총 원금"] for item in account_summaries)
+                running_total_cash = sum(item["현금"] for item in account_summaries)
+                dashboard_progress_placeholder.markdown(
+                    "\n".join(
+                        [
+                            "### 집계 중",
+                            f"- 진행 계좌: {idx + 1}/{len(visible_accounts)}",
+                            f"- 임시 총 자산: {format_korean_currency(running_total_assets)}",
+                            f"- 임시 투자 원금: {format_korean_currency(running_total_principal)}",
+                            f"- 임시 현금 잔고: {format_korean_currency(running_total_cash)}",
+                        ]
+                    )
+                )
         loading_placeholder.empty()
 
-        if not all_holdings and not account_summaries:
+        if dashboard_progress_placeholder is not None:
+            dashboard_progress_placeholder.empty()
+
+        if (is_detail_page and not all_holdings and not account_summaries) or (
+            not is_detail_page and not account_summaries
+        ):
             st.info("현재 모든 계좌를 통틀어 보유 중인 종목이나 자산 정보가 없습니다.")
             return
 
@@ -348,7 +407,25 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 }
             )
 
-        combined_df = pd.concat(all_holdings, ignore_index=True) if all_holdings else pd.DataFrame()
+        if initial_subtab == "📊 대시보드":
+            try:
+                loading_placeholder.info("⏳ 로딩 중... 주별 요약 갱신")
+                latest_weekly_summary = sync_active_week_summary_from_snapshot(
+                    total_assets=total_assets,
+                    total_purchase=total_purchase,
+                    total_valuation=total_valuation,
+                    total_cash=total_cash,
+                    bucket_totals=bucket_totals,
+                    total_profit_count=total_profit_count,
+                    total_loss_count=total_loss_count,
+                )
+                loading_placeholder.empty()
+            except RuntimeError as exc:
+                loading_placeholder.empty()
+                st.error(f"주별 데이터 자동 집계 실패: {exc}")
+                st.stop()
+
+        combined_df = pd.concat(all_holdings, ignore_index=True) if is_detail_page and all_holdings else pd.DataFrame()
 
         weight_df = None
 
@@ -379,16 +456,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
         styled_stat_df = stat_df.style.apply(get_stat_styles, axis=None).hide(axis="index")
 
         # 2. 포트폴리오 비중 테이블 데이터 생성
-        bucket_cols = ["1. 모멘텀", "2. 혁신기술", "3. 시장지수", "4. 배당방어", "5. 대체헷지"]
-        bucket_totals = {}
-        for col in bucket_cols:
-            if not combined_df.empty and "버킷" in combined_df.columns:
-                val = combined_df.loc[combined_df["버킷"] == col, "평가금액(KRW)"].sum()
-            else:
-                val = 0.0
-            bucket_totals[col] = val
-
-        bucket_totals["6. 현금"] = global_cash
+        bucket_totals["6. 현금"] = total_cash
 
         if total_assets > 0:
             weight_row = {}

@@ -47,7 +47,10 @@ def load_all_account_holding_tickers() -> set[str]:
     return held_tickers
 
 
-def _apply_kor_realtime_overlay_to_holdings(df_holdings: pd.DataFrame) -> pd.DataFrame:
+def _apply_kor_realtime_overlay_to_holdings(
+    df_holdings: pd.DataFrame,
+    realtime_data: dict[str, dict[str, float]] | None = None,
+) -> pd.DataFrame:
     """한국 종목 보유 테이블에 실시간 현재가/NAV/괴리율을 덮어쓴다."""
     tickers = [
         str(ticker or "").strip().upper() for ticker in df_holdings.get("ticker", []) if str(ticker or "").strip()
@@ -55,11 +58,12 @@ def _apply_kor_realtime_overlay_to_holdings(df_holdings: pd.DataFrame) -> pd.Dat
     if not tickers:
         return df_holdings
 
-    try:
-        realtime_data = get_realtime_snapshot("kor", tickers)
-    except Exception as exc:
-        logger.warning("보유 종목 실시간 오버레이 실패: %s", exc)
-        return df_holdings
+    if realtime_data is None:
+        try:
+            realtime_data = get_realtime_snapshot("kor", tickers)
+        except Exception as exc:
+            logger.warning("보유 종목 실시간 오버레이 실패: %s", exc)
+            return df_holdings
 
     if not realtime_data:
         return df_holdings
@@ -85,7 +89,13 @@ def _apply_kor_realtime_overlay_to_holdings(df_holdings: pd.DataFrame) -> pd.Dat
     return overlaid
 
 
-def load_real_holdings_table(account_id: str, *, strict_price_cache: bool = False) -> pd.DataFrame | None:
+def load_real_holdings_table(
+    account_id: str,
+    *,
+    strict_price_cache: bool = False,
+    preloaded_exchange_rates: dict[str, Any] | None = None,
+    preloaded_kor_realtime_snapshot: dict[str, dict[str, float]] | None = None,
+) -> pd.DataFrame | None:
     """
     Load the actual portfolio holdings from portfolio_master (live)
     and calculate display metrics directly from cached price data.
@@ -165,7 +175,7 @@ def load_real_holdings_table(account_id: str, *, strict_price_cache: bool = Fals
             return 0.0
         return float(df_cached["Close"].iloc[-1])
 
-    rates = get_exchange_rates()
+    rates = preloaded_exchange_rates if preloaded_exchange_rates is not None else get_exchange_rates()
     usd_krw = float((rates.get("USD") or {}).get("rate"))
     aud_krw = float((rates.get("AUD") or {}).get("rate"))
 
@@ -279,7 +289,10 @@ def load_real_holdings_table(account_id: str, *, strict_price_cache: bool = Fals
     except Exception:
         account_country = ""
     if account_country == "kor":
-        df_holdings = _apply_kor_realtime_overlay_to_holdings(df_holdings)
+        df_holdings = _apply_kor_realtime_overlay_to_holdings(
+            df_holdings,
+            realtime_data=preloaded_kor_realtime_snapshot,
+        )
 
     multiplier = df_holdings["currency"].apply(_get_multiplier)
     df_holdings["매입금액(KRW)"] = (df_holdings["quantity"] * df_holdings["average_buy_price"] * multiplier).astype(
