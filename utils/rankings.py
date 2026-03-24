@@ -7,13 +7,15 @@ import pandas as pd
 
 from config import BUCKET_MAPPING, CACHE_START_DATE, MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
 from core.strategy.metrics import process_ticker_data
+from services.price_service import get_realtime_snapshot
 from utils.cache_utils import load_cached_frames_bulk_with_fallback, load_cached_updated_at_bulk_with_fallback
-from utils.data_loader import fetch_au_quoteapi_snapshot, fetch_naver_etf_inav_snapshot
-from utils.portfolio_io import load_real_holdings_table
+from utils.logger import get_app_logger
+from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import AccountSettingsError, get_account_settings
 from utils.stock_list_io import get_etfs
 
 ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
+logger = get_app_logger()
 
 
 def _calculate_rsi(close_series: pd.Series, period: int = 14) -> float | None:
@@ -86,9 +88,10 @@ def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
     return None
 
 
-def _extract_price_metrics(cached_df: pd.DataFrame | None) -> dict[str, Any]:
+def _extract_price_metrics_from_close_series(close_series: pd.Series | None) -> dict[str, Any]:
     empty_result = {
         "현재가": None,
+        "괴리율": None,
         "일간(%)": None,
         "1주(%)": None,
         "2주(%)": None,
@@ -100,25 +103,21 @@ def _extract_price_metrics(cached_df: pd.DataFrame | None) -> dict[str, Any]:
         "추세(3달)": [],
         "RSI": None,
     }
-    if cached_df is None or cached_df.empty:
+    if close_series is None:
         return empty_result
 
-    close_col = "Close" if "Close" in cached_df.columns else "close"
-    if close_col not in cached_df.columns:
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
         return empty_result
 
-    close_series = pd.to_numeric(cached_df[close_col], errors="coerce").dropna()
-    if close_series.empty:
-        return empty_result
-
-    current_price = float(close_series.iloc[-1])
+    current_price = float(series.iloc[-1])
     daily_pct = None
-    if len(close_series) > 1:
-        prev_close = float(close_series.iloc[-2])
+    if len(series) > 1:
+        prev_close = float(series.iloc[-2])
         if prev_close > 0:
             daily_pct = ((current_price / prev_close) - 1.0) * 100.0
 
-    max_price = float(close_series.max()) if not close_series.empty else 0.0
+    max_price = float(series.max()) if not series.empty else 0.0
     drawdown = None
     if max_price > 0:
         drawdown = (current_price / max_price - 1.0) * 100.0
@@ -126,28 +125,28 @@ def _extract_price_metrics(cached_df: pd.DataFrame | None) -> dict[str, Any]:
     return {
         "현재가": current_price,
         "일간(%)": daily_pct,
-        "1주(%)": _calc_period_return(close_series, 5),
-        "2주(%)": _calc_period_return(close_series, 10),
-        "1달(%)": _calc_period_return(close_series, 20),
-        "3달(%)": _calc_period_return(close_series, 60),
-        "6달(%)": _calc_period_return(close_series, 126),
-        "12달(%)": _calc_period_return(close_series, 252),
+        "1주(%)": _calc_period_return(series, 5),
+        "2주(%)": _calc_period_return(series, 10),
+        "1달(%)": _calc_period_return(series, 20),
+        "3달(%)": _calc_period_return(series, 60),
+        "6달(%)": _calc_period_return(series, 126),
+        "12달(%)": _calc_period_return(series, 252),
         "고점대비": drawdown,
-        "추세(3달)": close_series.iloc[-60:].astype(float).tolist(),
-        "RSI": _calculate_rsi(close_series),
+        "추세(3달)": series.iloc[-60:].astype(float).tolist(),
+        "RSI": _calculate_rsi(series),
     }
 
 
 def _load_realtime_snapshot(country_code: str, tickers: list[str]) -> dict[str, dict[str, float]]:
     """국가별 실시간 현재가/등락률 스냅샷을 로드합니다."""
-    country = str(country_code or "").strip().lower()
     if not tickers:
         return {}
-    if country == "kor":
-        return fetch_naver_etf_inav_snapshot(tickers)
-    if country == "au":
-        return fetch_au_quoteapi_snapshot(tickers)
-    return {}
+
+    try:
+        return get_realtime_snapshot(country_code, tickers)
+    except Exception as exc:
+        logger.warning("순위용 실시간 스냅샷 조회 실패: %s", exc)
+        return {}
 
 
 def _apply_realtime_overlay(
@@ -174,81 +173,72 @@ def _apply_realtime_overlay(
         except (TypeError, ValueError):
             pass
 
+    deviation = realtime_entry.get("deviation")
+    if deviation is not None:
+        try:
+            updated["괴리율"] = float(deviation)
+        except (TypeError, ValueError):
+            pass
+
     return updated
 
 
-def _apply_realtime_to_frame(
+def _build_effective_close_series(
     cached_df: pd.DataFrame | None,
     realtime_entry: dict[str, float] | None,
-) -> pd.DataFrame | None:
-    """실시간 가격을 마지막 종가에 반영한 임시 시계열을 생성합니다."""
+) -> pd.Series | None:
+    """실시간 가격을 반영한 종가 시리즈를 생성합니다."""
     if cached_df is None or cached_df.empty:
-        return cached_df
+        return None
     if not isinstance(realtime_entry, dict) or not realtime_entry:
-        return cached_df
+        return _extract_close_series(cached_df)
 
     now_val = realtime_entry.get("nowVal")
     if now_val is None:
-        return cached_df
+        return _extract_close_series(cached_df)
 
     try:
         realtime_price = float(now_val)
     except (TypeError, ValueError):
-        return cached_df
+        return _extract_close_series(cached_df)
 
-    close_col = "Close" if "Close" in cached_df.columns else "close" if "close" in cached_df.columns else None
-    if close_col is None:
-        return cached_df
+    close_series = _extract_close_series(cached_df)
+    if close_series is None or close_series.empty:
+        return close_series
 
-    adjusted_df = cached_df.copy()
-    if adjusted_df.index.empty:
-        return adjusted_df
-
+    adjusted = close_series.copy()
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    last_index = pd.Timestamp(adjusted_df.index[-1])
+    last_index = pd.Timestamp(adjusted.index[-1])
     if last_index.tzinfo is not None:
         last_index = last_index.tz_localize(None)
     last_index = last_index.normalize()
 
-    target_index = today if last_index < today else adjusted_df.index[-1]
-
-    if target_index not in adjusted_df.index:
-        new_row = {col: pd.NA for col in adjusted_df.columns}
-        if "Open" in adjusted_df.columns:
-            new_row["Open"] = realtime_price
-        if "High" in adjusted_df.columns:
-            new_row["High"] = realtime_price
-        if "Low" in adjusted_df.columns:
-            new_row["Low"] = realtime_price
-        new_row[close_col] = realtime_price
-        if "Volume" in adjusted_df.columns:
-            new_row["Volume"] = 0.0
-        adjusted_df.loc[target_index] = new_row
+    if last_index < today:
+        adjusted.loc[today] = realtime_price
     else:
-        adjusted_df.at[target_index, close_col] = realtime_price
-        if "High" in adjusted_df.columns:
-            try:
-                existing_high = adjusted_df.at[target_index, "High"]
-                existing_high_val = float(existing_high) if pd.notna(existing_high) else realtime_price
-                adjusted_df.at[target_index, "High"] = max(existing_high_val, realtime_price)
-            except (TypeError, ValueError):
-                adjusted_df.at[target_index, "High"] = realtime_price
-        if "Low" in adjusted_df.columns:
-            try:
-                existing_low = adjusted_df.at[target_index, "Low"]
-                existing_low_val = float(existing_low) if pd.notna(existing_low) else realtime_price
-                adjusted_df.at[target_index, "Low"] = min(existing_low_val, realtime_price)
-            except (TypeError, ValueError):
-                adjusted_df.at[target_index, "Low"] = realtime_price
+        adjusted.iloc[-1] = realtime_price
+    return adjusted.sort_index()
 
-    return adjusted_df.sort_index()
+
+def _extract_close_series(cached_df: pd.DataFrame | None) -> pd.Series | None:
+    if cached_df is None or cached_df.empty:
+        return None
+
+    close_col = "Close" if "Close" in cached_df.columns else "close" if "close" in cached_df.columns else None
+    if close_col is None:
+        return None
+
+    close_series = pd.to_numeric(cached_df[close_col], errors="coerce").dropna()
+    if close_series.empty:
+        return None
+    return close_series.astype(float)
 
 
 def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFrame:
     normalized = df.copy()
 
     price_digits = 2 if str(country_code or "").strip().lower() == "au" else 0
-    percent_columns = ["일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
+    percent_columns = ["괴리율", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
     one_decimal_columns = ["점수", "RSI"]
 
     def _round_if_present(column: str, digits: int) -> None:
@@ -289,7 +279,6 @@ def build_account_rankings(
 
     tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if str(item.get("ticker") or "").strip()]
     cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
-    cache_updated_map = load_cached_updated_at_bulk_with_fallback(account_id, tickers)
     realtime_snapshot = (
         realtime_snapshot_override
         if realtime_snapshot_override is not None
@@ -300,10 +289,12 @@ def build_account_rankings(
     if held_tickers_override is not None:
         held_tickers = {str(ticker).strip().upper() for ticker in held_tickers_override if str(ticker or "").strip()}
     else:
-        holdings_df = load_real_holdings_table(account_id)
-        if holdings_df is not None and not holdings_df.empty and "티커" in holdings_df.columns:
+        portfolio_master = load_portfolio_master(account_id)
+        if portfolio_master:
             held_tickers = {
-                str(ticker).strip().upper() for ticker in holdings_df["티커"].tolist() if str(ticker or "").strip()
+                str(holding.get("ticker") or "").strip().upper()
+                for holding in portfolio_master.get("holdings", [])
+                if str(holding.get("ticker") or "").strip()
             }
 
     ma_days = int(ma_months) * int(TRADING_DAYS_PER_MONTH)
@@ -316,17 +307,18 @@ def build_account_rankings(
 
         cached_df = cached_frames.get(ticker)
         realtime_entry = realtime_snapshot.get(ticker)
-        effective_df = _apply_realtime_to_frame(cached_df, realtime_entry)
-        price_metrics = _extract_price_metrics(effective_df)
+        effective_close_series = _build_effective_close_series(cached_df, realtime_entry)
+        price_metrics = _extract_price_metrics_from_close_series(effective_close_series)
         price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
         score_value = None
         streak_value: int | None = None
 
-        if effective_df is not None and not effective_df.empty:
+        if effective_close_series is not None and not effective_close_series.empty:
             processed = process_ticker_data(
                 ticker,
-                effective_df,
+                cached_df,
                 ma_days=ma_days,
+                precomputed_entry={"close": effective_close_series, "open": effective_close_series},
                 ma_type=ma_type,
                 enable_data_sufficiency_check=False,
             )
@@ -341,7 +333,7 @@ def build_account_rankings(
                     streak_raw = streak_series.iloc[-1]
                     if pd.notna(streak_raw):
                         streak_value = int(streak_raw)
-        elif effective_df is not None and len(effective_df.index) >= MIN_TRADING_DAYS:
+        elif effective_close_series is not None and len(effective_close_series.index) >= MIN_TRADING_DAYS:
             pass
 
         rows.append(
@@ -366,8 +358,10 @@ def build_account_rankings(
     realtime_active = bool(realtime_snapshot)
     if realtime_active:
         data_updated_at = datetime.now()
-    elif cache_updated_map:
-        data_updated_at = max(cache_updated_map.values())
+    else:
+        cache_updated_map = load_cached_updated_at_bulk_with_fallback(account_id, tickers)
+        if cache_updated_map:
+            data_updated_at = max(cache_updated_map.values())
 
     def _sort_key(row: pd.Series) -> tuple[int, float, str]:
         score = row.get("점수")

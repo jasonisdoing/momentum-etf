@@ -6,18 +6,32 @@
 
 ### 모듈 구조
 *   `core/strategy/`: 지표/점수/비중 계산 공용 전략 유틸
+*   `services/`:
+    *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시
+    *   `reference_data_service.py`: KIS ETF 마스터, 종목 메타데이터, 상장일 조회
 *   `utils/rankings.py`: 순위 테이블 계산 전용 유틸
 *   `scripts/`: 데이터 수집, 캐시 갱신 등 유틸리티 스크립트
 *   `utils/`:
     *   `cache_utils.py`: **Parquet 기반 캐시 I/O** 및 직렬화 관리
+    *   `data_loader.py`: OHLCV 수집/보완 및 원천 fetch 함수
     *   `ui.py`: Streamlit 커스텀 컴포넌트 및 스타일링
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 
 ### 데이터 파이프라인 및 캐싱
 1.  **데이터 수집**: `pykrx`, `yfinance` 등을 통해 원천 데이터 수집.
 2.  **Parquet 캐싱**: 수집된 데이터는 `utils/cache_utils.py`를 통해 **Apache Parquet** 포맷으로 MongoDB에 저장됩니다. (기존 Pickle 방식의 버전 충돌 문제를 해결)
-3.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 점수를 계산.
-4.  **순위 생성**: `utils/rankings.py`가 종목별 점수, RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
+3.  **서비스 오케스트레이션**:
+    *   `services/price_service.py`가 실시간 가격/환율과 TTL 캐시를 관리합니다.
+    *   `services/reference_data_service.py`가 KIS ETF 목록과 메타데이터 조회를 관리합니다.
+4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 점수를 계산.
+5.  **순위 생성**: `utils/rankings.py`가 종목별 점수, RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
+
+### 서비스 사용 원칙
+
+1.  실시간 가격/환율 조회는 `services/price_service.py`를 먼저 사용합니다.
+2.  KIS ETF 마스터, 종목 메타데이터, 상장일 조회는 `services/reference_data_service.py`를 먼저 사용합니다.
+3.  화면 계층과 일반 유틸은 외부 데이터 소스를 직접 호출하지 않고, 가능하면 `services/` 계층을 통해 접근합니다.
+4.  `utils/data_loader.py`는 원천 fetch 함수와 OHLCV 보완 로직을 포함하지만, 신규 호출부를 작성할 때는 직접 진입점으로 우선 사용하지 않습니다.
 
 ## 2. 순위 화면 정합성 원칙
 
@@ -30,6 +44,8 @@
 | `app_pages/account_page.py` | 계좌별 순위/종목 관리/삭제 종목/메모 화면 |
 | `utils/rankings.py` | 순위 계산과 정렬 |
 | `core/strategy/metrics.py` | 이동평균 점수 및 지속일 계산 |
+| `services/price_service.py` | 실시간 가격/환율 조회의 공식 진입점 |
+| `services/reference_data_service.py` | ETF 마스터/메타데이터/상장일 조회의 공식 진입점 |
 | `utils/account_notes.py` | 계좌 메모 저장/조회 |
 
 ### 핵심 일관성 체크리스트
@@ -71,6 +87,8 @@
 코드를 수정할 때는 다음 절차를 따르세요.
 
 1.  **로직 수정**: `utils/rankings.py`, `core/strategy/metrics.py`, `app_pages/account_page.py`, `utils/ui.py`를 우선 확인
+    *   가격/환율 문제면 `services/price_service.py`를 함께 확인
+    *   KIS ETF 목록/메타데이터/상장일 문제면 `services/reference_data_service.py`를 함께 확인
 2.  **검증**:
     *   순위 화면에서 `MA_TYPE`, `MA_MONTHS` 변경 시 즉시 테이블이 갱신되는지 확인
     *   실제 보유 종목이 녹색 행으로 표시되는지 확인

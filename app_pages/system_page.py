@@ -7,8 +7,8 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from services.price_service import get_realtime_snapshot
 from utils.account_registry import load_account_configs
-from utils.data_loader import fetch_naver_etf_inav_snapshot
 from utils.db_manager import get_db_connection
 from utils.rankings import build_account_rankings, get_account_rank_defaults
 from utils.stock_list_io import get_etfs
@@ -48,7 +48,7 @@ def _collect_kor_realtime_snapshot(
 
     status_placeholder.info(f"실시간 시세 조회 중: 한국 ETF {len(kor_tickers)}개")
     try:
-        snapshot = fetch_naver_etf_inav_snapshot(sorted(kor_tickers))
+        snapshot = get_realtime_snapshot("kor", sorted(kor_tickers))
     except Exception as exc:
         warnings_list.append(f"네이버 실시간 조회 실패로 캐시 기준으로 진행했습니다: {exc}")
         return {}

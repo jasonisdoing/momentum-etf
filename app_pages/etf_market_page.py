@@ -7,17 +7,17 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from utils.data_loader import fetch_naver_etf_inav_snapshot
-from utils.kis_market import load_cached_kis_domestic_etf_master
+from services.price_service import get_realtime_snapshot
+from services.reference_data_service import get_kor_etf_master
 from utils.ui import render_rank_table
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _load_market_table() -> tuple[pd.DataFrame, datetime | None]:
-    """캐시된 KIS 국내 ETF 마스터와 네이버 실시간 스냅샷을 결합합니다."""
-    df, updated_at = load_cached_kis_domestic_etf_master()
+    """캐시된 KIS 국내 ETF 마스터와 실시간 스냅샷을 결합합니다."""
+    df, updated_at = get_kor_etf_master()
     tickers = [str(value).strip().upper() for value in df["티커"].tolist() if str(value).strip()]
-    snapshot = fetch_naver_etf_inav_snapshot(tickers)
+    snapshot = get_realtime_snapshot("kor", tickers)
 
     result = df.copy()
     result["일간(%)"] = result["티커"].map(
@@ -60,7 +60,7 @@ def render_etf_market_page() -> None:
         if st.button("새로고침", width="stretch"):
             _load_market_table.clear()
     with info_col:
-        st.caption("기본 마스터는 KIS 일일 캐시, 실시간 시세는 네이버 스냅샷에서 조회합니다.")
+        st.caption("기본 마스터는 KIS 일일 캐시, 실시간 시세는 가격 서비스에서 조회합니다.")
 
     with st.spinner("KIS 국내 ETF 목록을 불러오는 중..."):
         try:
