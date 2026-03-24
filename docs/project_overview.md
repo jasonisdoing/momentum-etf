@@ -23,7 +23,7 @@
 *   **🛡️ 데이터 안정성 (Robust Caching)**: **Apache Parquet** 포맷을 도입하여 Numpy 버전 충돌 없는 안정적인 가격 데이터 캐싱을 구현했습니다.
 *   **💻 직관적인 대시보드 (Modern UI)**:
     *   **1. 순위**: 개별 종목의 점수, 현재가, 일간 수익률, RSI, 추세 차트를 확인합니다.
-    *   **2. 종목 관리 / 3. 삭제된 종목**: 계좌 종목 유니버스를 직접 관리합니다.
+    *   **2. 종목 관리 / 3. 삭제된 종목 / 4. 메모**: 계좌 종목 유니버스와 메모를 직접 관리합니다.
 
 ## 4. 시스템 구조 요약
 
@@ -31,7 +31,7 @@
 
 1.  **순위 계산 유틸 (`utils/rankings.py`)**: 계좌 종목, 가격 캐시, 실제 보유 상태를 합쳐 순위 테이블용 데이터를 만듭니다.
 2.  **화면 계층 (`app.py`, `app_pages/`)**: 계좌 선택, `MA_TYPE`, `MA_MONTHS`를 받아 순위/종목 관리 화면을 렌더링합니다.
-3.  **데이터 계층 (`utils/cache_utils.py`, `utils/data_loader.py`, `utils/stock_list_io.py`)**: 가격 캐시, 종목 메타, 실제 보유 데이터를 읽습니다.
+3.  **데이터 계층 (`utils/cache_utils.py`, `utils/data_loader.py`, `utils/stock_list_io.py`, `utils/account_notes.py`)**: 가격 캐시, 종목 메타, 실제 보유 데이터와 계좌 메모를 읽습니다.
 
 ## 5. 사용 시 유의사항
 

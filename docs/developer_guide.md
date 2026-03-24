@@ -27,9 +27,10 @@
 | 파일/경로 | 역할 |
 |-----------------|------|
 | `app.py` | `/rank` 라우트와 상단 선택 컨트롤 렌더링 |
-| `app_pages/account_page.py` | 계좌별 순위/종목 관리/삭제 종목 화면 |
+| `app_pages/account_page.py` | 계좌별 순위/종목 관리/삭제 종목/메모 화면 |
 | `utils/rankings.py` | 순위 계산과 정렬 |
 | `core/strategy/metrics.py` | 이동평균 점수 및 지속일 계산 |
+| `utils/account_notes.py` | 계좌 메모 저장/조회 |
 
 ### 핵심 일관성 체크리스트
 
